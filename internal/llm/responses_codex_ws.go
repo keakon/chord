@@ -86,25 +86,37 @@ func parseCodexWebSocketErrorJSON(msg []byte) (*APIError, http.Header) {
 	return apiErr, h
 }
 
-// codexWSResponseCreate is the flat JSON envelope sent as the first WebSocket text frame
-// (aligned with codex-rs / ChatGPT Codex Responses WebSocket).
+// codexWSResponseCreate is the flat JSON envelope sent as the first WebSocket
+// text frame. It reuses the same Responses request fields as HTTP; the Codex
+// preset difference here is the WebSocket transport and incremental state, not
+// a different base request shape.
 type codexWSResponseCreate struct {
-	Type               string               `json:"type"`
-	Model              string               `json:"model"`
-	Instructions       *string              `json:"instructions,omitempty"`
-	Input              []responsesInputItem `json:"input"`
-	Tools              []responsesTool      `json:"tools,omitempty"`
-	ToolChoice         string               `json:"tool_choice,omitempty"`
-	ParallelToolCalls  *bool                `json:"parallel_tool_calls,omitempty"`
-	Store              bool                 `json:"store,omitempty"`
-	Generate           *bool                `json:"generate,omitempty"`
-	Stream             bool                 `json:"stream"`
-	Include            []any                `json:"include,omitempty"`
-	PromptCacheKey     string               `json:"prompt_cache_key,omitempty"`
-	PreviousResponseID string               `json:"previous_response_id,omitempty"`
-	MaxOutputTokens    int                  `json:"max_output_tokens,omitempty"`
-	Reasoning          *reasoningConfig     `json:"reasoning,omitempty"`
-	Text               *textConfig          `json:"text,omitempty"`
+	Type              string               `json:"type"`
+	Model             string               `json:"model"`
+	Instructions      *string              `json:"instructions,omitempty"`
+	Input             []responsesInputItem `json:"input"`
+	Tools             []responsesTool      `json:"tools"`
+	ToolChoice        string               `json:"tool_choice"`
+	ParallelToolCalls bool                 `json:"parallel_tool_calls"`
+	Store             bool                 `json:"store"`
+	Generate          *bool                `json:"generate,omitempty"`
+	Stream            bool                 `json:"stream"`
+	// Responses clients always send include as an array; encrypted reasoning is
+	// requested only when the request carries a reasoning block.
+	Include            []string          `json:"include"`
+	PromptCacheKey     string            `json:"prompt_cache_key,omitempty"`
+	PreviousResponseID string            `json:"previous_response_id,omitempty"`
+	Reasoning          *reasoningConfig  `json:"reasoning,omitempty"`
+	Text               *textConfig       `json:"text,omitempty"`
+	ClientMetadata     map[string]string `json:"client_metadata,omitempty"`
+}
+
+func (e codexWSResponseCreate) MarshalJSON() ([]byte, error) {
+	type alias codexWSResponseCreate
+	e.Input = normalizeResponsesInput(e.Input)
+	e.Tools = normalizeResponsesTools(e.Tools)
+	e.Include = normalizeResponsesInclude(e.Include)
+	return json.Marshal(alias(e))
 }
 
 func responsesHTTPSBaseToWSS(httpsBase string) (string, error) {
@@ -173,7 +185,7 @@ func newResponsesWebsocketDialer(proxyURL string) (*websocket.Dialer, error) {
 func applyCodexWebSocketHeaders(h http.Header, provider *ProviderConfig, apiKey, sessionID string) {
 	h.Set("Authorization", "Bearer "+apiKey)
 	h.Set(headerOpenAIBeta, codexResponsesWebsocketsBeta)
-	h.Set(headerUserAgent, openAICodexUserAgent())
+	setProviderLLMUserAgent(h, provider)
 	h.Set("originator", openAICodexOriginator)
 	h.Set(headerSessionID, sessionID)
 	h.Set("x-client-request-id", sessionID)
@@ -665,22 +677,21 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 	if newConnection && !opts.SkipPrewarm {
 		generate := false
 		prewarmEnv := codexWSResponseCreate{
-			Type:            "response.create",
-			Model:           req.Model,
-			Instructions:    req.Instructions,
-			Input:           fullInput,
-			Tools:           req.Tools,
-			ToolChoice:      "auto",
-			Generate:        &generate,
-			Stream:          true,
-			Include:         []any{},
-			PromptCacheKey:  r.codexWSPromptCacheKey,
-			MaxOutputTokens: req.MaxOutputTokens,
-			Reasoning:       req.Reasoning,
-			Text:            req.Text,
-		}
-		if req.ParallelToolCalls != nil {
-			prewarmEnv.ParallelToolCalls = new(*req.ParallelToolCalls)
+			Type:              "response.create",
+			Model:             req.Model,
+			Instructions:      req.Instructions,
+			Input:             fullInput,
+			Tools:             req.Tools,
+			ToolChoice:        "auto",
+			ParallelToolCalls: req.ParallelToolCalls,
+			Store:             req.Store,
+			Generate:          &generate,
+			Stream:            true,
+			Include:           req.Include,
+			PromptCacheKey:    r.codexWSPromptCacheKey,
+			Reasoning:         req.Reasoning,
+			Text:              req.Text,
+			ClientMetadata:    req.ClientMetadata,
 		}
 		prewarmResp, prewarmOutputItems, prewarmErr := r.codexWSExecuteRequestLocked(
 			ctx, apiKey, model, prewarmEnv, nil, false, start, false,
@@ -716,16 +727,15 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		Input:              wireInput,
 		Tools:              req.Tools,
 		ToolChoice:         req.ToolChoice,
+		ParallelToolCalls:  req.ParallelToolCalls,
+		Store:              req.Store,
 		Stream:             true,
-		Include:            []any{},
+		Include:            req.Include,
 		PromptCacheKey:     r.codexWSPromptCacheKey,
 		PreviousResponseID: prevID,
-		MaxOutputTokens:    req.MaxOutputTokens,
 		Reasoning:          req.Reasoning,
 		Text:               req.Text,
-	}
-	if req.ParallelToolCalls != nil {
-		env.ParallelToolCalls = new(*req.ParallelToolCalls)
+		ClientMetadata:     req.ClientMetadata,
 	}
 	// reusingConn is always true here: if we just dialed+prewarmed, the WS
 	// connection is already established; if we reused an existing connection,

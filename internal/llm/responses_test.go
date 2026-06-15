@@ -195,6 +195,11 @@ func TestConvertMessagesToResponses_DoesNotReplayReasoningWithoutProvenance(t *t
 }
 
 func TestConvertToolsToResponses(t *testing.T) {
+	empty := convertToolsToResponses(nil)
+	if empty == nil || len(empty) != 0 {
+		t.Fatalf("convertToolsToResponses(nil) = %#v, want non-nil empty slice", empty)
+	}
+
 	tools := []message.ToolDefinition{
 		{
 			Name:        "Read",
@@ -1008,6 +1013,13 @@ func TestResponsesRequestSignatureIgnoresInputButTracksNonInputFields(t *testing
 	if responsesRequestSignature(reqA) != responsesRequestSignature(reqB) {
 		t.Fatal("signature should ignore input differences")
 	}
+	reqB.ClientMetadata = map[string]string{
+		responsesClientMetadataTurnID:       "turn-2",
+		responsesClientMetadataTurnMetadata: `{"turn_id":"turn-2","turn_started_at_unix_ms":2}`,
+	}
+	if responsesRequestSignature(reqA) != responsesRequestSignature(reqB) {
+		t.Fatal("signature should ignore request-scoped client metadata differences")
+	}
 	reqB.Tools = []responsesTool{{Type: "function", Name: "Shell"}}
 	if responsesRequestSignature(reqA) == responsesRequestSignature(reqB) {
 		t.Fatal("signature should change when non-input fields change")
@@ -1115,6 +1127,302 @@ func TestResponsesProvider_NoPreviousIDOnFirstRound(t *testing.T) {
 	}
 }
 
+func TestResponsesProvider_SendsIncludeToolChoiceAndReasoning(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	// Generic Responses provider (no preset): these fields are part of Chord's
+	// Responses wire shape and are not limited to preset:codex.
+	providerCfg := NewProviderConfig("generic", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/v1/responses",
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+
+	// Summary-only reasoning (no effort) must still produce a reasoning block.
+	tuning := RequestTuning{OpenAI: OpenAITuning{ReasoningSummary: "auto"}}
+	_, err := r.CompleteStream(
+		context.Background(), "test-key", "gpt-5.5", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 0, tuning,
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+
+	inc, ok := gotBody["include"].([]any)
+	if !ok || len(inc) != 1 || inc[0] != responsesEncryptedReasoningInclude {
+		t.Fatalf("include = %#v, want [%q]", gotBody["include"], responsesEncryptedReasoningInclude)
+	}
+	if got := gotBody["tool_choice"]; got != "auto" {
+		t.Fatalf("tool_choice = %#v, want auto", got)
+	}
+	reasoning, ok := gotBody["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatalf("reasoning = %#v, want object with summary", gotBody["reasoning"])
+	}
+	if got := reasoning["summary"]; got != "auto" {
+		t.Fatalf("reasoning.summary = %#v, want auto", got)
+	}
+	if _, hasEffort := reasoning["effort"]; hasEffort {
+		t.Fatalf("reasoning.effort should be omitted when no effort configured, got %#v", reasoning["effort"])
+	}
+}
+
+func TestResponsesProvider_IncludeAlwaysSerialized(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	// No preset, no reasoning: include is still serialized, but encrypted
+	// reasoning content is only requested when a reasoning block is present.
+	providerCfg := NewProviderConfig("generic", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/v1/responses",
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+
+	_, err := r.CompleteStream(
+		context.Background(), "test-key", "gpt-5.5", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 0, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+
+	inc, ok := gotBody["include"].([]any)
+	if !ok {
+		t.Fatalf("include = %#v, want explicit empty array", gotBody["include"])
+	}
+	if len(inc) != 0 {
+		t.Fatalf("include = %#v, want []", inc)
+	}
+	if got := gotBody["tool_choice"]; got != "auto" {
+		t.Fatalf("tool_choice = %#v, want auto", got)
+	}
+	if got := gotBody["parallel_tool_calls"]; got != false {
+		t.Fatalf("parallel_tool_calls = %#v, want false", got)
+	}
+	if got := gotBody["store"]; got != false {
+		t.Fatalf("store = %#v, want false", got)
+	}
+	tools, ok := gotBody["tools"].([]any)
+	if !ok || len(tools) != 0 {
+		t.Fatalf("tools = %#v, want []", gotBody["tools"])
+	}
+}
+
+func TestResponsesProvider_ProviderStoreOverridesDefault(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	storeTrue := true
+	providerCfg := NewProviderConfig("generic", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/v1/responses",
+		Store:  &storeTrue,
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+
+	_, err := r.CompleteStream(
+		context.Background(), "test-key", "gpt-5.5", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 0, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if got := gotBody["store"]; got != true {
+		t.Fatalf("store = %#v, want true", got)
+	}
+}
+
+func TestResponsesProvider_ModelStoreOverridesProviderStore(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	providerStore := true
+	modelStore := false
+	providerCfg := NewProviderConfig("generic", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/v1/responses",
+		Store:  &providerStore,
+		Models: map[string]config.ModelConfig{
+			"gpt-5.5": {Store: &modelStore},
+		},
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+
+	_, err := r.CompleteStream(
+		context.Background(), "test-key", "gpt-5.5", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 0, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if got := gotBody["store"]; got != false {
+		t.Fatalf("store = %#v, want false from model override", got)
+	}
+}
+
+func TestResponsesRequestAlwaysSerializesIncludeArray(t *testing.T) {
+	body, err := json.Marshal(responsesRequest{Model: "gpt-5.5"})
+	if err != nil {
+		t.Fatalf("marshal responses request: %v", err)
+	}
+	if !bytes.Contains(body, []byte(`"include":[]`)) {
+		t.Fatalf("nil include not serialized as []: %s", body)
+	}
+	if !bytes.Contains(body, []byte(`"input":[]`)) {
+		t.Fatalf("nil input not serialized as []: %s", body)
+	}
+	if !bytes.Contains(body, []byte(`"tools":[]`)) {
+		t.Fatalf("nil tools not serialized as []: %s", body)
+	}
+}
+
+func TestResponsesProvider_ResponsesWireHeaders(t *testing.T) {
+	var gotHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	providerCfg := NewProviderConfig("codex", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Preset: config.ProviderPresetCodex,
+		APIURL: server.URL + "/v1/responses",
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+
+	_, err := r.CompleteStream(
+		context.Background(), "test-key", "gpt-5.5", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 0, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+
+	if got := gotHeaders.Get("originator"); got != "codex_cli_rs" {
+		t.Errorf("originator = %q, want codex_cli_rs", got)
+	}
+	if got := gotHeaders.Get("User-Agent"); got != defaultLLMUserAgent() {
+		t.Errorf("User-Agent = %q, want %q", got, defaultLLMUserAgent())
+	}
+	if got := gotHeaders.Get("OpenAI-Beta"); got != "responses=experimental" {
+		t.Errorf("OpenAI-Beta = %q, want responses=experimental", got)
+	}
+}
+
+func TestResponsesProvider_GenericResponsesUsesResponsesWireHeaders(t *testing.T) {
+	var gotHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	// Generic Responses provider (no preset) still uses the shared Responses
+	// header surface; preset:codex only changes runtime capabilities such as
+	// OAuth/WebSocket/rate-limit handling.
+	providerCfg := NewProviderConfig("generic", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/v1/responses",
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+
+	_, err := r.CompleteStream(
+		context.Background(), "test-key", "gpt-5.5", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 0, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+
+	if got := gotHeaders.Get("originator"); got != "codex_cli_rs" {
+		t.Errorf("originator = %q, want codex_cli_rs", got)
+	}
+	if got := gotHeaders.Get("User-Agent"); got != defaultLLMUserAgent() {
+		t.Errorf("User-Agent = %q, want %q", got, defaultLLMUserAgent())
+	}
+	if got := gotHeaders.Get("OpenAI-Beta"); got != "responses=experimental" {
+		t.Errorf("OpenAI-Beta = %q, want responses=experimental", got)
+	}
+}
+
+func TestResponsesProvider_ProviderUserAgentOverridesResponsesDefault(t *testing.T) {
+	var gotHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	providerCfg := NewProviderConfig("generic", config.ProviderConfig{
+		Type:      config.ProviderTypeResponses,
+		APIURL:    server.URL + "/v1/responses",
+		UserAgent: "ProviderUA/1.0",
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+
+	_, err := r.CompleteStream(
+		context.Background(), "test-key", "gpt-5.5", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 0, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+
+	if got := gotHeaders.Get("User-Agent"); got != "ProviderUA/1.0" {
+		t.Errorf("User-Agent = %q, want ProviderUA/1.0", got)
+	}
+	if got := gotHeaders.Get("originator"); got != "codex_cli_rs" {
+		t.Errorf("originator = %q, want codex_cli_rs", got)
+	}
+}
+
 func TestResponsesProvider_SendsSessionHeadersAndPromptCacheKey(t *testing.T) {
 	var gotBody map[string]any
 	var gotHeader http.Header
@@ -1151,6 +1459,58 @@ func TestResponsesProvider_SendsSessionHeadersAndPromptCacheKey(t *testing.T) {
 	}
 	if got := gotHeader.Get("session-id"); got != "session-123" {
 		t.Fatalf("session-id = %q, want session-123", got)
+	}
+	if got := gotHeader.Get("thread-id"); got != "session-123" {
+		t.Fatalf("thread-id = %q, want session-123", got)
+	}
+	if got := gotHeader.Get("x-client-request-id"); got != "session-123" {
+		t.Fatalf("x-client-request-id = %q, want session-123", got)
+	}
+	if got := gotHeader.Get(responsesClientMetadataWindowID); got != "session-123:0" {
+		t.Fatalf("x-codex-window-id = %q, want session-123:0", got)
+	}
+	metadata, ok := gotBody["client_metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("client_metadata = %#v, want object", gotBody["client_metadata"])
+	}
+	if got := metadata[responsesClientMetadataSessionID]; got != "session-123" {
+		t.Fatalf("client_metadata session_id = %#v, want session-123", got)
+	}
+	if got := metadata[responsesClientMetadataThreadID]; got != "session-123" {
+		t.Fatalf("client_metadata thread_id = %#v, want session-123", got)
+	}
+	if got := metadata[responsesClientMetadataWindowID]; got != "session-123:0" {
+		t.Fatalf("client_metadata window_id = %#v, want session-123:0", got)
+	}
+	installationID, ok := metadata[responsesClientMetadataInstallationID].(string)
+	if !ok || installationID == "" {
+		t.Fatalf("client_metadata installation id = %#v, want non-empty string", metadata[responsesClientMetadataInstallationID])
+	}
+	if got := gotHeader.Get(responsesClientMetadataInstallationID); got != installationID {
+		t.Fatalf("x-codex-installation-id = %q, want %q", got, installationID)
+	}
+	turnMetadataRaw, ok := metadata[responsesClientMetadataTurnMetadata].(string)
+	if !ok || turnMetadataRaw == "" {
+		t.Fatalf("client_metadata turn metadata = %#v, want non-empty string", metadata[responsesClientMetadataTurnMetadata])
+	}
+	if got := gotHeader.Get(responsesClientMetadataTurnMetadata); got != turnMetadataRaw {
+		t.Fatalf("x-codex-turn-metadata = %q, want %q", got, turnMetadataRaw)
+	}
+	var turnMetadata map[string]any
+	if err := json.Unmarshal([]byte(turnMetadataRaw), &turnMetadata); err != nil {
+		t.Fatalf("turn metadata is not valid JSON: %v", err)
+	}
+	if got := turnMetadata["session_id"]; got != "session-123" {
+		t.Fatalf("turn metadata session_id = %#v, want session-123", got)
+	}
+	if got := turnMetadata["installation_id"]; got != installationID {
+		t.Fatalf("turn metadata installation_id = %#v, want %q", got, installationID)
+	}
+	if got := turnMetadata["request_kind"]; got != "turn" {
+		t.Fatalf("turn metadata request_kind = %#v, want turn", got)
+	}
+	if got := turnMetadata["sandbox"]; got != "none" {
+		t.Fatalf("turn metadata sandbox = %#v, want none", got)
 	}
 }
 

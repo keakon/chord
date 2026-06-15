@@ -12,7 +12,7 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-func TestResponsesProvider_OpenAIOAuthHTTPIgnoresConfiguredStoreTrue(t *testing.T) {
+func TestResponsesProvider_OpenAIOAuthHTTPSendsConfiguredStoreTrue(t *testing.T) {
 	trueVal := true
 	var gotBody map[string]any
 
@@ -47,10 +47,8 @@ func TestResponsesProvider_OpenAIOAuthHTTPIgnoresConfiguredStoreTrue(t *testing.
 		t.Fatalf("CompleteStream returned error: %v", err)
 	}
 
-	if store, ok := gotBody["store"]; ok {
-		if b, ok := store.(bool); !ok || b {
-			t.Fatalf("expected store to be omitted or false, got %#v", store)
-		}
+	if store, ok := gotBody["store"].(bool); !ok || !store {
+		t.Fatalf("expected store=true from explicit config, got %#v", gotBody["store"])
 	}
 }
 

@@ -153,17 +153,17 @@ func responsesToolOutput(msg message.Message) any {
 // convertToolsToResponses converts tool definitions to Responses API format.
 // Tools are expected to be in a stable order from Registry.ListDefinitions().
 func convertToolsToResponses(tools []message.ToolDefinition) []responsesTool {
+	result := make([]responsesTool, 0, len(tools))
 	if len(tools) == 0 {
-		return nil
+		return result
 	}
 
-	result := make([]responsesTool, len(tools))
-	for i, t := range tools {
-		result[i] = responsesTool{
+	for _, t := range tools {
+		result = append(result, responsesTool{
 			Type:       "function",
 			Name:       t.Name,
 			Parameters: t.InputSchema,
-		}
+		})
 	}
 	return result
 }

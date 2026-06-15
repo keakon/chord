@@ -3,23 +3,84 @@ package llm
 import (
 	"bytes"
 	"context"
-
-	"github.com/keakon/golog"
-	"github.com/keakon/golog/log"
-
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/keakon/chord/internal/logtest"
+	"github.com/gorilla/websocket"
+	"github.com/keakon/golog"
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/logtest"
 	"github.com/keakon/chord/internal/message"
-
-	"github.com/gorilla/websocket"
 )
+
+func TestCodexWSResponseCreateAlwaysSerializesIncludeArray(t *testing.T) {
+	// Codex's ResponseCreateWsRequest.include has no skip_serializing, so the field
+	// must always be present as a JSON array on the wire (empty or populated).
+	nilInclude := codexWSResponseCreate{Type: "response.create", Model: "gpt-5.5"}
+	nilJSON, err := json.Marshal(nilInclude)
+	if err != nil {
+		t.Fatalf("marshal nil include: %v", err)
+	}
+	if !bytes.Contains(nilJSON, []byte(`"include":[]`)) {
+		t.Fatalf("nil include not serialized as []: %s", nilJSON)
+	}
+	if !bytes.Contains(nilJSON, []byte(`"input":[]`)) {
+		t.Fatalf("nil input not serialized as []: %s", nilJSON)
+	}
+	if !bytes.Contains(nilJSON, []byte(`"tools":[]`)) {
+		t.Fatalf("nil tools not serialized as []: %s", nilJSON)
+	}
+
+	empty := codexWSResponseCreate{Type: "response.create", Model: "gpt-5.5", Include: []string{}}
+	emptyJSON, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatalf("marshal empty: %v", err)
+	}
+	if !bytes.Contains(emptyJSON, []byte(`"include":[]`)) {
+		t.Fatalf("empty include not serialized as []: %s", emptyJSON)
+	}
+
+	withReasoning := codexWSResponseCreate{Type: "response.create", Model: "gpt-5.5", Include: []string{"reasoning.encrypted_content"}}
+	rJSON, err := json.Marshal(withReasoning)
+	if err != nil {
+		t.Fatalf("marshal with reasoning: %v", err)
+	}
+	if !bytes.Contains(rJSON, []byte(`"include":["reasoning.encrypted_content"]`)) {
+		t.Fatalf("include not serialized with encrypted content: %s", rJSON)
+	}
+
+	withStore := codexWSResponseCreate{Type: "response.create", Model: "gpt-5.5", Store: true}
+	storeJSON, err := json.Marshal(withStore)
+	if err != nil {
+		t.Fatalf("marshal with store: %v", err)
+	}
+	if !bytes.Contains(storeJSON, []byte(`"store":true`)) {
+		t.Fatalf("store=true not serialized: %s", storeJSON)
+	}
+
+	withMetadata := codexWSResponseCreate{
+		Type:  "response.create",
+		Model: "sample/test-model",
+		ClientMetadata: map[string]string{
+			responsesClientMetadataInstallationID: "installation-123",
+			responsesClientMetadataWindowID:       "session-123:0",
+		},
+	}
+	metadataJSON, err := json.Marshal(withMetadata)
+	if err != nil {
+		t.Fatalf("marshal with client metadata: %v", err)
+	}
+	if !bytes.Contains(metadataJSON, []byte(`"client_metadata":{"x-codex-installation-id":"installation-123","x-codex-window-id":"session-123:0"}`)) {
+		t.Fatalf("client_metadata not serialized: %s", metadataJSON)
+	}
+}
 
 func TestResetCodexWebSocketChainClearsState(t *testing.T) {
 	r := &ResponsesProvider{}
@@ -246,6 +307,177 @@ func TestParseCodexWebSocketErrorJSON401(t *testing.T) {
 	apiErr, h := parseCodexWebSocketErrorJSON(msg)
 	if apiErr == nil || apiErr.StatusCode != 401 || len(h) != 0 {
 		t.Fatalf("apiErr=%v h=%v", apiErr, h)
+	}
+}
+
+type codexWSCaptureServer struct {
+	server *httptest.Server
+
+	mu          sync.Mutex
+	requests    []map[string]any
+	responseIDs []string
+}
+
+func newCodexWSCaptureServer(t *testing.T, responseIDs []string) *codexWSCaptureServer {
+	t.Helper()
+
+	c := &codexWSCaptureServer{responseIDs: append([]string(nil), responseIDs...)}
+	upgrader := websocket.Upgrader{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var body map[string]any
+			if err := json.Unmarshal(msg, &body); err != nil {
+				return
+			}
+			c.mu.Lock()
+			idx := len(c.requests)
+			c.requests = append(c.requests, body)
+			respID := ""
+			if idx < len(c.responseIDs) {
+				respID = c.responseIDs[idx]
+			}
+			c.mu.Unlock()
+
+			completed := map[string]any{
+				"type": "response.completed",
+				"response": map[string]any{
+					"status": "completed",
+					"output": []any{},
+					"usage": map[string]any{
+						"input_tokens":  5,
+						"output_tokens": 2,
+					},
+				},
+			}
+			if respID != "" {
+				completed["response"].(map[string]any)["id"] = respID
+			}
+			payload, err := json.Marshal(completed)
+			if err != nil {
+				return
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+				return
+			}
+		}
+	})
+	c.server = httptest.NewServer(mux)
+	return c
+}
+
+func (c *codexWSCaptureServer) Close() {
+	c.server.Close()
+}
+
+func (c *codexWSCaptureServer) ResponsesURL() string {
+	return c.server.URL + "/v1/responses"
+}
+
+func (c *codexWSCaptureServer) Requests() []map[string]any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]map[string]any(nil), c.requests...)
+}
+
+func testCodexWSResponsesRequest(model string, input []responsesInputItem) *responsesRequest {
+	return &responsesRequest{
+		Model:             model,
+		Input:             input,
+		ToolChoice:        "auto",
+		ParallelToolCalls: true,
+		Store:             false,
+		Stream:            true,
+		Include:           []string{},
+	}
+}
+
+func assertCodexWSFullInputWithoutPreviousResponseID(t *testing.T, body map[string]any, wantLen int) {
+	t.Helper()
+	if _, ok := body["previous_response_id"]; ok {
+		t.Fatalf("previous_response_id = %v, want absent", body["previous_response_id"])
+	}
+	input, ok := body["input"].([]any)
+	if !ok {
+		t.Fatalf("input = %#v, want array", body["input"])
+	}
+	if len(input) != wantLen {
+		t.Fatalf("input len = %d, want full len %d", len(input), wantLen)
+	}
+}
+
+func TestCompleteStreamCodexWebSocketMissingResponseIDRequiresFullFollowUp(t *testing.T) {
+	srv := newCodexWSCaptureServer(t, []string{"", "resp-2"})
+	defer srv.Close()
+
+	r := &ResponsesProvider{sessionID: "session-123"}
+	input1 := []responsesInputItem{{Type: "message", Role: "user", Content: "hello"}}
+	input2 := []responsesInputItem{
+		{Type: "message", Role: "user", Content: "hello"},
+		{Type: "message", Role: "user", Content: "follow up"},
+	}
+	req := testCodexWSResponsesRequest("sample/test-model", input1)
+
+	if _, _, err := r.completeStreamCodexWebSocket(context.Background(), srv.ResponsesURL(), "key-1", "sample/test-model", req, input1, nil, time.Now(), codexWSCompleteOptions{SkipPrewarm: true}); err != nil {
+		t.Fatalf("first completeStreamCodexWebSocket: %v", err)
+	}
+	req.Input = input2
+	if _, _, err := r.completeStreamCodexWebSocket(context.Background(), srv.ResponsesURL(), "key-1", "sample/test-model", req, input2, nil, time.Now(), codexWSCompleteOptions{SkipPrewarm: true}); err != nil {
+		t.Fatalf("second completeStreamCodexWebSocket: %v", err)
+	}
+
+	requests := srv.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("captured %d requests, want 2", len(requests))
+	}
+	assertCodexWSFullInputWithoutPreviousResponseID(t, requests[1], len(input2))
+}
+
+func TestCompleteStreamCodexWebSocketKeyOrModelChangeRequiresFullRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		secondKey   string
+		secondModel string
+	}{
+		{name: "key change", secondKey: "key-2", secondModel: "sample/test-model"},
+		{name: "model change", secondKey: "key-1", secondModel: "sample/other-model"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newCodexWSCaptureServer(t, []string{"resp-1", "resp-2"})
+			defer srv.Close()
+
+			r := &ResponsesProvider{sessionID: "session-123"}
+			input1 := []responsesInputItem{{Type: "message", Role: "user", Content: "hello"}}
+			input2 := []responsesInputItem{
+				{Type: "message", Role: "user", Content: "hello"},
+				{Type: "message", Role: "user", Content: "follow up"},
+			}
+			req := testCodexWSResponsesRequest("sample/test-model", input1)
+
+			if _, _, err := r.completeStreamCodexWebSocket(context.Background(), srv.ResponsesURL(), "key-1", "sample/test-model", req, input1, nil, time.Now(), codexWSCompleteOptions{SkipPrewarm: true}); err != nil {
+				t.Fatalf("first completeStreamCodexWebSocket: %v", err)
+			}
+			req.Model = tc.secondModel
+			req.Input = input2
+			if _, _, err := r.completeStreamCodexWebSocket(context.Background(), srv.ResponsesURL(), tc.secondKey, tc.secondModel, req, input2, nil, time.Now(), codexWSCompleteOptions{SkipPrewarm: true}); err != nil {
+				t.Fatalf("second completeStreamCodexWebSocket: %v", err)
+			}
+
+			requests := srv.Requests()
+			if len(requests) != 2 {
+				t.Fatalf("captured %d requests, want 2", len(requests))
+			}
+			assertCodexWSFullInputWithoutPreviousResponseID(t, requests[1], len(input2))
+		})
 	}
 }
 

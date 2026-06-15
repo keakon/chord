@@ -29,6 +29,25 @@ type responsesCompactResponse struct {
 	Output []responsesCompactOutputItem `json:"output"`
 }
 
+type responsesCompactRequest struct {
+	Model             string               `json:"model"`
+	Input             []responsesInputItem `json:"input"`
+	Instructions      string               `json:"instructions,omitempty"`
+	Tools             []responsesTool      `json:"tools"`
+	ParallelToolCalls bool                 `json:"parallel_tool_calls"`
+	Reasoning         *reasoningConfig     `json:"reasoning,omitempty"`
+	ServiceTier       string               `json:"service_tier,omitempty"`
+	PromptCacheKey    string               `json:"prompt_cache_key,omitempty"`
+	Text              *textConfig          `json:"text,omitempty"`
+}
+
+func (r responsesCompactRequest) MarshalJSON() ([]byte, error) {
+	type alias responsesCompactRequest
+	r.Input = normalizeResponsesInput(r.Input)
+	r.Tools = normalizeResponsesTools(r.Tools)
+	return json.Marshal(alias(r))
+}
+
 func resolveResponsesCompactURL(apiURL string) (string, error) {
 	apiURL = strings.TrimSpace(apiURL)
 	if apiURL == "" {
@@ -90,25 +109,42 @@ func (r *ResponsesProvider) Compact(
 	if len(apiInput) == 0 {
 		return nil, fmt.Errorf("responses compact requires at least one input item")
 	}
-	reqBody := responsesRequest{
+	reqBody := responsesCompactRequest{
 		Model: model,
 		Input: apiInput,
 		Tools: convertToolsToResponses(tools),
 	}
 	if ot.ParallelToolCalls != nil {
-		reqBody.ParallelToolCalls = new(*ot.ParallelToolCalls)
+		reqBody.ParallelToolCalls = *ot.ParallelToolCalls
 	}
 	if strings.TrimSpace(systemPrompt) != "" {
-		reqBody.Instructions = &systemPrompt
+		reqBody.Instructions = systemPrompt
 	}
-	if ot.ReasoningEffort != "" {
-		reqBody.Reasoning = &reasoningConfig{Effort: ot.ReasoningEffort, Summary: ot.ReasoningSummary}
+	if ot.ServiceTier != "" {
+		reqBody.ServiceTier = ot.ServiceTier
+	}
+	if r.sessionID != "" {
+		reqBody.PromptCacheKey = r.sessionID
+	}
+	// Match Codex: the compact endpoint reuses build_responses_request, which emits
+	// reasoning whenever effort or summary is configured (effort may be omitted).
+	effectiveReasoningEffort := ot.ReasoningEffort
+	if normalized, changed := normalizeResponsesReasoningEffort(ot.ReasoningEffort); changed {
+		if normalized == "" {
+			log.Warnf("omitting unsupported reasoning effort for Responses compact request requested=%v", ot.ReasoningEffort)
+		} else {
+			log.Warnf("normalizing reasoning effort for Responses compact request requested=%v effective=%v", ot.ReasoningEffort, normalized)
+		}
+		effectiveReasoningEffort = normalized
+	}
+	if effectiveReasoningEffort != "" || ot.ReasoningSummary != "" {
+		reqBody.Reasoning = &reasoningConfig{Effort: effectiveReasoningEffort, Summary: ot.ReasoningSummary}
 	}
 	if ot.TextVerbosity != "" {
 		reqBody.Text = &textConfig{Verbosity: ot.TextVerbosity}
 	}
 	if maxTokens > 0 {
-		reqBody.MaxOutputTokens = maxTokens
+		log.Debugf("omitting max_output_tokens for Responses compact request requested=%v", maxTokens)
 	}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -120,7 +156,7 @@ func (r *ResponsesProvider) Compact(
 		return nil, fmt.Errorf("create compact request: %w", err)
 	}
 	req.Header.Set(headerContentType, headerValueApplicationJSON)
-	applyOpenAIOAuthHeaders(req, r.provider, apiKey)
+	applyOpenAIOAuthHeaders(req, r.provider, apiKey, false)
 
 	// Apply request body compression if configured
 	req, _ = compressRequestBody(req, bodyBytes, r.provider.CompressEnabled())

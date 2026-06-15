@@ -90,7 +90,9 @@ Read model limits in this order:
 
 Chord's `gpt-5.5` examples use `context=400000`, `input=272000`, `output=128000`. Provider docs sometimes call this setup split limits; see [Glossary](./glossary.md).
 
-For `type: responses`, Chord follows the Responses request shape used by Codex: the stable system prompt is sent in the top-level `instructions` field, while conversation messages remain typed `input` items such as `{"type":"message","role":"user",...}`. This keeps compatible gateways from receiving a system-role message in `input`.
+For `type: responses`, Chord uses one stable Responses wire shape for every provider. The stable system prompt is sent in the top-level `instructions` field, while conversation messages remain typed `input` items such as `{"type":"message","role":"user",...}`. Requests also explicitly send `tool_choice`, `parallel_tool_calls`, `store`, `stream`, and an `include` array. `store` defaults to `false`, and explicit provider/model `store` config overrides that default. `include` is empty unless the request carries a reasoning block, in which case it contains `reasoning.encrypted_content`. Responses requests omit `max_output_tokens`. Streaming Responses model requests include the SSE headers (`Accept: text/event-stream`, `OpenAI-Beta: responses=experimental`, `originator`, and `User-Agent`). The default User-Agent remains `chord/<version>` unless provider-level `user_agent` overrides it. Several relay endpoints validate this shape before forwarding requests, so these fields are not limited to `preset: codex`.
+
+The `store` field controls whether the Responses backend keeps this request and response server-side. Chord sends the full input on every request and never relies on `previous_response_id` to continue a conversation over HTTP, so the default `false` keeps requests self-contained and is the right choice for nearly every setup. Set `store: true` (at the provider level, or model level to override a provider default) only when a Responses-compatible backend or relay explicitly requires or benefits from server-side retention. Know the trade-offs before enabling it: the backend retains your request and response data, and the official Codex OAuth endpoint rejects `store: true` with a terminal `HTTP 400` (`Store must be set to false`) that fails the request without retrying, so do not set `store: true` on a `preset: codex` provider.
 
 ### OpenAI Codex preset
 
@@ -305,7 +307,7 @@ Loop mode still follows the configured `key_rotation` / `key_order`. For Codex l
 
 Only providers with `preset: codex` are treated as OAuth providers.
 
-For Codex providers, prefer configuring only `preset: codex` plus model settings. Do not manually override preset-managed fields such as `api_url`, `token_url`, `client_id`, `type`, `store`, `responses_websocket`, or `supported_service_tiers` unless you are deliberately testing transport internals. The preset selects the official OAuth transport, Responses endpoint, WebSocket/cache defaults, and service-tier capability. Use `supported_service_tiers` when you need an explicit tier matrix.
+For Codex providers, prefer configuring only `preset: codex` plus model settings. Do not manually override preset-managed fields such as `api_url`, `token_url`, `client_id`, `type`, `store`, `responses_websocket`, or `supported_service_tiers` unless you are deliberately testing transport internals. The preset selects the official OAuth transport, Responses endpoint, WebSocket/cache defaults, quota polling, smart key ordering, and service-tier capability. It does not define a separate HTTP request body or force a Codex User-Agent: non-Codex `type: responses` providers use the same Responses wire shape described above, and all providers default to `User-Agent: chord/<version>`. Use `supported_service_tiers` when you need an explicit tier matrix.
 
 Codex OAuth account selection is controlled by `key_rotation` / `key_order` in [Provider key selection](#provider-key-selection). Codex defaults to `key_order: smart`, which considers quota snapshots, soft cooldown, and reset timing when choosing an account.
 
@@ -654,7 +656,7 @@ When enabled, Chord gzip-compresses the request body only if compression reduces
 the payload size; otherwise it sends the request uncompressed. Leave this unset
 unless your provider or gateway benefits from compressed request bodies.
 
-Provider/model HTTP requests identify the client with `User-Agent: chord/<version>` by default. Set provider-level `user_agent` only when a provider or gateway requires a specific value. This setting affects only normal model HTTP requests for that provider:
+Provider/model requests identify the client with `User-Agent: chord/<version>` by default. Set provider-level `user_agent` only when a provider or gateway requires a specific value:
 
 ```yaml
 providers:
@@ -662,11 +664,22 @@ providers:
     user_agent: RequiredGatewayClient/1.0
 ```
 
-This setting affects only normal model HTTP requests for that provider. WebFetch uses its own `web_fetch.user_agent`; Codex OAuth, usage polling, and WebSocket requests keep Chord's protocol-specific User-Agent.
+This setting also applies to Responses HTTP requests, Codex OAuth requests, Codex usage polling, and Responses WebSocket handshakes for that provider. WebFetch uses its own `web_fetch.user_agent`.
+
+To send a Codex-style User-Agent, set the captured Codex value explicitly and keep it updated when the Codex client version or terminal changes:
+
+```yaml
+providers:
+  codex:
+    preset: codex
+    user_agent: "codex-tui/0.139.0 (Mac OS 15.3.2; arm64) ghostty/1.3.1 (codex-tui; 0.139.0)"
+```
 
 ## Output token cap
 
 Use `max_output_tokens` to set a global cap on requested output tokens. The effective request limit is still clamped by each model's `limit.output` and available total context (`limit.context` when known), so runtime uses the smallest applicable value.
+
+Responses providers keep the stable Responses wire shape and do not send a `max_output_tokens` field on the HTTP or WebSocket request. The value can still affect Chord-side budgeting and compatibility checks, but it is not serialized into Responses requests.
 
 `limit.input` is separate: use it only for models whose providers publish an extra input cap beyond the total context window. Lowering `max_output_tokens` can reduce cost and long-response failure risk, but it does **not** increase a provider's input allowance or replace `limit.input`.
 

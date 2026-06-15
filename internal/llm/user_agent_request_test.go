@@ -105,13 +105,3 @@ func TestResponsesCompleteStreamSetsProviderUserAgent(t *testing.T) {
 		t.Fatalf("User-Agent = %q, want ProviderUA/1.0", gotUserAgent)
 	}
 }
-
-func TestOpenAICodexUserAgentIncludesChordAndCodexIdentity(t *testing.T) {
-	got := openAICodexUserAgent()
-	if want := defaultLLMUserAgent() + " (" + openAICodexOriginator + ";"; len(got) < len(want) || got[:len(want)] != want {
-		t.Fatalf("openAICodexUserAgent = %q, want prefix %q", got, want)
-	}
-	if got == "Go-http-client/1.1" {
-		t.Fatalf("openAICodexUserAgent used default Go UA")
-	}
-}

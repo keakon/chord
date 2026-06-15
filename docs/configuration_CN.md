@@ -85,7 +85,9 @@ providers:
 
 `gpt-5.5` 示例使用 `context=400000`、`input=272000`、`output=128000`。provider 文档里有时会把这类配置叫作 split limits；见 [术语表](./glossary_CN.md)。
 
-对 `type: responses`，Chord 使用与 Codex 一致的 Responses 请求形态：稳定 system prompt 会放在顶层 `instructions` 字段；对话消息仍保留为 typed `input` item，例如 `{"type":"message","role":"user",...}`。这样兼容网关不会在 `input` 里收到 system-role message。
+对 `type: responses`，Chord 对所有 provider 使用同一套稳定的 Responses 请求形态：稳定 system prompt 放在顶层 `instructions` 字段；对话消息仍保留为 typed `input` item，例如 `{"type":"message","role":"user",...}`。请求还会显式发送 `tool_choice`、`parallel_tool_calls`、`store`、`stream` 和 `include` 数组；`store` 默认是 `false`，显式 provider / model 配置会覆盖这个默认值。没有 reasoning 块时 `include` 为空，有 reasoning 块时才包含 `reasoning.encrypted_content`。Responses 请求不会序列化 `max_output_tokens`。流式 Responses 模型请求会带上 SSE 请求头（`Accept: text/event-stream`、`OpenAI-Beta: responses=experimental`、`originator` 和 `User-Agent`）。默认 User-Agent 仍是 `chord/<version>`，除非 provider 级 `user_agent` 显式覆盖。有些中转站会先校验这套形态再转发请求，所以这些字段不是 `preset: codex` 专属。
+
+`store` 字段控制 Responses 后端要不要在服务端保留这次请求和响应。Chord 每次都发送完整输入，HTTP 请求也不靠 `previous_response_id` 接续上下文，所以默认 `false` 让请求自包含，几乎所有场景都该保持默认。只有当 Responses 兼容后端或中转站明确要求、或确实能从服务端留存获益时，才设 `store: true`（在 provider 级配置，或用 model 级覆盖 provider 默认）。开启前要清楚代价：后端会保留你的请求和响应数据；而官方 Codex OAuth 端点会直接拒绝 `store: true`，返回终态的 `HTTP 400`（`Store must be set to false`），请求会直接失败、不重试，所以 `preset: codex` 的 provider 不要设 `store: true`。
 
 ### OpenAI Codex preset
 
@@ -300,7 +302,7 @@ Chord 支持多个 API key / OAuth 账号时的两层选择策略：`key_rotatio
 
 当前仅配置了 `preset: codex` 的 provider 支持 OAuth。
 
-对 Codex provider，建议只写 `preset: codex` 和模型配置，不要手动覆盖 `api_url`、`token_url`、`client_id`、`type`、`store`、`responses_websocket` 或 `supported_service_tiers` 等由 preset 管理的字段。Codex preset 会自动选择官方 OAuth transport、Responses endpoint、WebSocket / cache 相关默认值和 service-tier 能力。需要显式 tier 矩阵时使用 `supported_service_tiers`。
+对 Codex provider，建议只写 `preset: codex` 和模型配置，不要手动覆盖 `api_url`、`token_url`、`client_id`、`type`、`store`、`responses_websocket` 或 `supported_service_tiers` 等由 preset 管理的字段。Codex preset 会自动选择官方 OAuth transport、Responses endpoint、WebSocket / cache 默认值、额度轮询、smart key 排序和 service-tier 能力。它不定义另一套 HTTP 请求体，也不会强制伪装成 Codex User-Agent；非 Codex 的 `type: responses` provider 也使用上面那套 Responses 请求形态，所有 provider 默认仍发送 `User-Agent: chord/<version>`。需要显式 tier 矩阵时使用 `supported_service_tiers`。
 
 Codex OAuth 账号的选择由 [Provider key 选择](#provider-key-选择) 中的 `key_rotation` / `key_order` 控制。Codex 默认使用 `key_order: smart`，会结合额度快照、soft cooldown 和 reset 时间选择更合适的账号。
 
@@ -617,7 +619,7 @@ providers:
 
 启用后，Chord 仅在 gzip 能减小体积时才发送压缩请求。除非你的 provider 或网关明确受益于请求体压缩，否则无需配置。
 
-Provider / 模型 HTTP 请求默认用 `User-Agent: chord/<version>` 标识客户端。仅当某个 provider 或网关要求特定值时，才配置 provider 级 `user_agent`。该配置只影响对应 provider 的普通模型 HTTP 请求：
+Provider / 模型请求默认用 `User-Agent: chord/<version>` 标识客户端。仅当某个 provider 或网关要求特定值时，才配置 provider 级 `user_agent`：
 
 ```yaml
 providers:
@@ -625,11 +627,22 @@ providers:
     user_agent: RequiredGatewayClient/1.0
 ```
 
-该配置只影响对应 provider 的普通模型 HTTP 请求。WebFetch 使用独立的 `web_fetch.user_agent`；Codex OAuth、用量轮询和 WebSocket 请求继续使用 Chord 的协议专用 User-Agent。
+该配置也会影响对应 provider 的 Responses HTTP 请求、Codex OAuth 请求、Codex 用量轮询，以及 Responses WebSocket 握手。WebFetch 使用独立的 `web_fetch.user_agent`。
+
+需要发送 Codex 风格 User-Agent 时，显式写入你抓到的 Codex 值，并在 Codex 客户端版本或终端环境变化后同步更新：
+
+```yaml
+providers:
+  codex:
+    preset: codex
+    user_agent: "codex-tui/0.139.0 (Mac OS 15.3.2; arm64) ghostty/1.3.1 (codex-tui; 0.139.0)"
+```
 
 ## 输出 token 上限
 
 `max_output_tokens` 设置全局输出 token 请求上限。实际请求上限仍受各模型 `limit.output` 和可用总上下文（已知时为 `limit.context`）限制，因此运行时会取适用限制中的最小值。
+
+Responses provider 会保持稳定的 Responses 请求形态，HTTP 和 WebSocket 请求都不会发送 `max_output_tokens` 字段。这个值仍可影响 Chord 侧预算和兼容性检查，但不会序列化进 Responses 请求。
 
 `limit.input` 是另一回事：只有当模型除了总上下文窗口外，还额外存在输入上限时才需要配置。降低 `max_output_tokens` 有助于控制成本、降低超长输出失败风险，但**不会**提升 provider 的输入上限，也不能替代 `limit.input`。
 

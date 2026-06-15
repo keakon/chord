@@ -58,8 +58,9 @@ func responsesInputPrefixSignature(items []responsesInputItem, n int) string {
 }
 
 // responsesRequestSignature returns a stable signature for incremental
-// compatibility checks. It intentionally excludes input and previous_response_id
-// so callers can compare whether non-input request properties stayed the same.
+// compatibility checks. It intentionally excludes input, previous_response_id,
+// and per-turn client_metadata so callers can compare whether reusable request
+// properties stayed the same.
 func responsesRequestSignature(req *responsesRequest) string {
 	if req == nil {
 		return ""
@@ -67,6 +68,7 @@ func responsesRequestSignature(req *responsesRequest) string {
 	cpy := *req
 	cpy.Input = nil
 	cpy.PreviousResponseID = ""
+	cpy.ClientMetadata = nil
 	b, err := json.Marshal(cpy)
 	if err != nil {
 		return ""

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -102,17 +103,26 @@ type responsesRequest struct {
 	Model              string               `json:"model"`
 	Instructions       *string              `json:"instructions,omitempty"`
 	Input              []responsesInputItem `json:"input"`
-	Tools              []responsesTool      `json:"tools,omitempty"`
-	ToolChoice         string               `json:"tool_choice,omitempty"`
-	ParallelToolCalls  *bool                `json:"parallel_tool_calls,omitempty"`
+	Tools              []responsesTool      `json:"tools"`
+	ToolChoice         string               `json:"tool_choice"`
+	ParallelToolCalls  bool                 `json:"parallel_tool_calls"`
 	ServiceTier        string               `json:"service_tier,omitempty"`
-	MaxOutputTokens    int                  `json:"max_output_tokens,omitempty"`
 	Reasoning          *reasoningConfig     `json:"reasoning,omitempty"`
 	Text               *textConfig          `json:"text,omitempty"`
 	PreviousResponseID string               `json:"previous_response_id,omitempty"`
-	Store              *bool                `json:"store,omitempty"`
+	Store              bool                 `json:"store"`
 	Stream             bool                 `json:"stream"`
+	Include            []string             `json:"include"`
 	PromptCacheKey     string               `json:"prompt_cache_key,omitempty"`
+	ClientMetadata     map[string]string    `json:"client_metadata,omitempty"`
+}
+
+func (r responsesRequest) MarshalJSON() ([]byte, error) {
+	type alias responsesRequest
+	r.Input = normalizeResponsesInput(r.Input)
+	r.Tools = normalizeResponsesTools(r.Tools)
+	r.Include = normalizeResponsesInclude(r.Include)
+	return json.Marshal(alias(r))
 }
 
 // responsesInputItem represents an item in the Responses API input array.
@@ -153,6 +163,118 @@ type reasoningConfig struct {
 
 type textConfig struct {
 	Verbosity string `json:"verbosity,omitempty"` // "low"|"medium"|"high"
+}
+
+const responsesEncryptedReasoningInclude = "reasoning.encrypted_content"
+
+const (
+	responsesClientMetadataInstallationID = "x-codex-installation-id"
+	responsesClientMetadataSessionID      = "session_id"
+	responsesClientMetadataThreadID       = "thread_id"
+	responsesClientMetadataTurnID         = "turn_id"
+	responsesClientMetadataTurnMetadata   = "x-codex-turn-metadata"
+	responsesClientMetadataWindowID       = "x-codex-window-id"
+)
+
+func responsesIncludeForReasoning(reasoning *reasoningConfig) []string {
+	if reasoning == nil {
+		return []string{}
+	}
+	return []string{responsesEncryptedReasoningInclude}
+}
+
+func normalizeResponsesInput(input []responsesInputItem) []responsesInputItem {
+	if input == nil {
+		return []responsesInputItem{}
+	}
+	return input
+}
+
+func normalizeResponsesTools(tools []responsesTool) []responsesTool {
+	if tools == nil {
+		return []responsesTool{}
+	}
+	return tools
+}
+
+func normalizeResponsesInclude(include []string) []string {
+	if include == nil {
+		return []string{}
+	}
+	return include
+}
+
+func responsesConfiguredStore(provider *ProviderConfig, model string) bool {
+	var modelStore *bool
+	if provider != nil {
+		if m, ok := provider.GetModel(model); ok {
+			modelStore = m.Store
+		}
+	}
+	var providerStore *bool
+	if provider != nil {
+		providerStore = provider.StoreConfig()
+	}
+	return config.EffectiveStore(providerStore, modelStore)
+}
+
+type responsesTurnMetadataPayload struct {
+	InstallationID         string `json:"installation_id,omitempty"`
+	SessionID              string `json:"session_id,omitempty"`
+	ThreadID               string `json:"thread_id,omitempty"`
+	ThreadSource           string `json:"thread_source,omitempty"`
+	TurnID                 string `json:"turn_id,omitempty"`
+	WindowID               string `json:"window_id,omitempty"`
+	Sandbox                string `json:"sandbox,omitempty"`
+	RequestKind            string `json:"request_kind,omitempty"`
+	TurnStartedAtUnixMilli int64  `json:"turn_started_at_unix_ms,omitempty"`
+}
+
+func responsesWindowID(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	return sessionID + ":0"
+}
+
+func responsesInstallationID(sessionID string) string {
+	sum := sha256.Sum256([]byte("chord-responses-installation:" + strings.TrimSpace(sessionID)))
+	sum[6] = (sum[6] & 0x0f) | 0x40
+	sum[8] = (sum[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
+}
+
+func responsesClientMetadata(sessionID string, startedAt time.Time) map[string]string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+	windowID := responsesWindowID(sessionID)
+	turnID := newOpenAIOAuthSessionID()
+	installationID := responsesInstallationID(sessionID)
+	metadata := map[string]string{
+		responsesClientMetadataInstallationID: installationID,
+		responsesClientMetadataSessionID:      sessionID,
+		responsesClientMetadataThreadID:       sessionID,
+		responsesClientMetadataTurnID:         turnID,
+		responsesClientMetadataWindowID:       windowID,
+	}
+	turnMetadata := responsesTurnMetadataPayload{
+		InstallationID:         installationID,
+		SessionID:              sessionID,
+		ThreadID:               sessionID,
+		ThreadSource:           "user",
+		TurnID:                 turnID,
+		WindowID:               windowID,
+		Sandbox:                "none",
+		RequestKind:            "turn",
+		TurnStartedAtUnixMilli: startedAt.UnixMilli(),
+	}
+	if data, err := json.Marshal(turnMetadata); err == nil {
+		metadata[responsesClientMetadataTurnMetadata] = string(data)
+	}
+	return metadata
 }
 
 func (r *ResponsesProvider) CompleteStream(
@@ -199,38 +321,22 @@ func (r *ResponsesProvider) CompleteStream(
 	// Convert tools.
 	apiTools := convertToolsToResponses(tools)
 
-	// Determine effective store setting.
-	var modelStore *bool
-	if r.provider != nil {
-		if m, ok := r.provider.GetModel(model); ok {
-			modelStore = m.Store
-		}
-	}
-	var providerStore *bool
-	if r.provider != nil {
-		providerStore = r.provider.StoreConfig()
-	}
-	effectiveStore := config.EffectiveStore(providerStore, modelStore)
-	// HTTP previous_response_id reuse is intentionally disabled for current Codex
-	// behavior; store remains relevant only for non-OAuth Responses-compatible
-	// backends that support server-side retention.
-	// Official ChatGPT/Codex OAuth Responses API returns 400 if store is true.
-	// Apply suppression at provider level too: even non-OAuth keys on a Codex OAuth
-	// transport provider must not send store=true.
-	if (useOpenAIOAuth || (r.provider != nil && r.provider.IsCodexOAuthTransport())) && effectiveStore {
-		log.Warnf("responses: Codex OAuth transport requires store=false on wire; ignoring store config model=%v", model)
-		effectiveStore = false
-	}
-
-	// HTTP path is full-input only for current Codex OAuth transport behavior.
-	// We do not send previous_response_id here; connection-scoped reuse belongs to WebSocket.
+	// HTTP path is full-input only. We do not send previous_response_id here;
+	// connection-scoped reuse belongs to the Codex WebSocket transport.
 	fullInput := apiInput
+	requestStartedAt := time.Now()
 
-	// Build request body.
+	// Keep the Responses HTTP request shape aligned with codex-rs for every
+	// Responses provider, not only preset:codex. Some relay endpoints validate
+	// these fields as the Responses client contract and reject narrower OpenAI
+	// samples that omit them.
 	reqBody := responsesRequest{
-		Model:  model,
-		Tools:  apiTools,
-		Stream: true,
+		Model:      model,
+		Tools:      apiTools,
+		ToolChoice: "auto",
+		Store:      responsesConfiguredStore(r.provider, model),
+		Stream:     true,
+		Include:    []string{},
 	}
 	if ot.ToolChoice != "" {
 		reqBody.ToolChoice = ot.ToolChoice
@@ -238,19 +344,12 @@ func (r *ResponsesProvider) CompleteStream(
 	reqBody.Input = fullInput
 	if r.sessionID != "" {
 		reqBody.PromptCacheKey = r.sessionID
+		reqBody.ClientMetadata = responsesClientMetadata(r.sessionID, requestStartedAt)
 	}
 	if ot.ServiceTier != "" {
 		reqBody.ServiceTier = ot.ServiceTier
 	}
-	if effectiveStore {
-		v := true
-		reqBody.Store = &v
-	} else if useOpenAIOAuth || (r.provider != nil && r.provider.IsCodexOAuthTransport()) {
-		// Codex OAuth HTTP endpoint treats absent store field as true; send explicit false.
-		v := false
-		reqBody.Store = &v
-	}
-	log.Debugf("responses: full model=%v store=%v input_len=%v", model, effectiveStore, len(fullInput))
+	log.Debugf("responses: full model=%v store=%v input_len=%v", model, reqBody.Store, len(fullInput))
 	// Set instructions separately from input messages, matching Codex's Responses
 	// request shape and avoiding system-role input items on compatible backends.
 	if systemPrompt != "" {
@@ -258,37 +357,32 @@ func (r *ResponsesProvider) CompleteStream(
 		reqBody.Instructions = &instructions
 	}
 	if ot.ParallelToolCalls != nil {
-		reqBody.ParallelToolCalls = new(*ot.ParallelToolCalls)
+		reqBody.ParallelToolCalls = *ot.ParallelToolCalls
 	}
 
 	effectiveReasoningEffort := ot.ReasoningEffort
-	effectiveMaxTokens := maxTokens
-	useCodexTransport := r.provider != nil && r.provider.IsCodexOAuthTransport()
-	if useOpenAIOAuth || useCodexTransport {
-		if normalized, changed := normalizeOpenAIOAuthReasoningEffort(ot.ReasoningEffort); changed {
-			if normalized == "" {
-				log.Warnf("omitting unsupported reasoning effort for Codex transport requested=%v", ot.ReasoningEffort)
-			} else {
-				log.Warnf("normalizing reasoning effort for Codex transport requested=%v effective=%v", ot.ReasoningEffort, normalized)
-			}
-			effectiveReasoningEffort = normalized
+	if normalized, changed := normalizeResponsesReasoningEffort(ot.ReasoningEffort); changed {
+		if normalized == "" {
+			log.Warnf("omitting unsupported reasoning effort for Responses request requested=%v", ot.ReasoningEffort)
+		} else {
+			log.Warnf("normalizing reasoning effort for Responses request requested=%v effective=%v", ot.ReasoningEffort, normalized)
 		}
-		if effectiveMaxTokens > 0 {
-			log.Debugf("omitting max_output_tokens for Codex transport requested=%v", effectiveMaxTokens)
-			effectiveMaxTokens = 0
-		}
+		effectiveReasoningEffort = normalized
+	}
+	if maxTokens > 0 {
+		log.Debugf("omitting max_output_tokens for Responses request requested=%v", maxTokens)
 	}
 
-	if effectiveReasoningEffort != "" {
+	// Responses reasoning is emitted whenever effort or summary is configured. Codex's
+	// request builder emits the block for any reasoning-capable model even when effort
+	// is empty (effort omitted, summary carried), so gating on effort alone dropped it.
+	if effectiveReasoningEffort != "" || ot.ReasoningSummary != "" {
 		reqBody.Reasoning = &reasoningConfig{Effort: effectiveReasoningEffort, Summary: ot.ReasoningSummary}
 	}
 	if ot.TextVerbosity != "" {
 		reqBody.Text = &textConfig{Verbosity: ot.TextVerbosity}
 	}
-
-	if effectiveMaxTokens > 0 {
-		reqBody.MaxOutputTokens = effectiveMaxTokens
-	}
+	reqBody.Include = responsesIncludeForReasoning(reqBody.Reasoning)
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -296,9 +390,9 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 	dumpRequestBody := append([]byte(nil), bodyBytes...)
 
-	log.Debugf("responses request model=%v max_output_tokens=%v messages=%v tools=%v reasoning_effort=%v reasoning_summary=%v request_bytes=%v", model, effectiveMaxTokens, len(messages), len(tools), effectiveReasoningEffort, ot.ReasoningSummary, len(bodyBytes))
+	log.Debugf("responses request model=%v max_output_tokens=%v messages=%v tools=%v reasoning_effort=%v reasoning_summary=%v request_bytes=%v", model, 0, len(messages), len(tools), effectiveReasoningEffort, ot.ReasoningSummary, len(bodyBytes))
 
-	start := time.Now()
+	start := requestStartedAt
 	if useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() {
 		wsComplete := r.codexWSCompleteFn
 		if wsComplete == nil {
@@ -374,7 +468,7 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 
 	r.lastTransportUsed.Store("http")
-	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, model, apiKey, useOpenAIOAuth, traceCB)
+	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, model, apiKey, useOpenAIOAuth, reqBody.ClientMetadata, traceCB)
 
 	// HTTP full-input path: no previous_response_id retry/rollback handling required.
 
@@ -441,6 +535,7 @@ func (r *ResponsesProvider) sendAndParse(
 	model string,
 	apiKey string,
 	useOpenAIOAuth bool,
+	clientMetadata map[string]string,
 	cb StreamCallback,
 ) (*message.Response, int, error) {
 	if err := ctx.Err(); err != nil {
@@ -456,13 +551,13 @@ func (r *ResponsesProvider) sendAndParse(
 
 	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	if useOpenAIOAuth {
-		applyOpenAIOAuthHeaders(req, r.provider, apiKey)
+		applyOpenAIOAuthHeaders(req, r.provider, apiKey, true)
 	} else {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
-		req.Header.Set(headerOpenAIBeta, "responses=v1")
-		setProviderLLMUserAgent(req.Header, r.provider)
+		applyResponsesStreamingHeaders(req.Header, r.provider)
 	}
 	applySessionIDHeaders(req.Header, r.sessionID)
+	applyResponsesMetadataHeaders(req.Header, clientMetadata)
 
 	// Apply request body compression if configured
 	req, _ = compressRequestBody(req, bodyBytes, r.provider.CompressEnabled())

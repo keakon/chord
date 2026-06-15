@@ -6,6 +6,10 @@
 
 ### 改进
 
+- Responses API 请求现在对每个 `type: responses` provider 都使用同一套 Responses 请求形态，显式发送 `tool_choice`、`parallel_tool_calls`、`store`、`stream`、`include` 数组，并在有 session id 时发送 Codex 兼容的 `client_metadata`。`store` 仍默认 `false`，但显式 provider / model 配置现在会生效。只有请求里带 reasoning 块时才会请求 encrypted reasoning content。会校验这套请求形态的中转站不再返回 `invalid codex request` 拒绝请求。
+- 推理块现在在 `effort` 或 `summary` 任一配置时即会发送（此前仅 `effort` 触发），修复了仅配 summary 的推理配置被静默丢弃的 bug。
+- Responses HTTP 请求现在都会在授权头之外发送同一套 SSE 请求头（`originator`、`Accept`、`OpenAI-Beta: responses=experimental`），不再取决于是否配置了 `preset: codex`；User-Agent 继续默认使用 `chord/<version>`，并尊重 provider 级 `user_agent` 覆盖。
+- WebSocket Responses 传输现在从请求体传播 `include` 数组，而非硬编码空数组。
 - JSON 热路径处理更快，包括 LLM 流解析、MCP JSON-RPC 编解码、会话导入 JSONL 解析和 `auth.state.json` 加载。
 - 本地文件工具读取已有文本文件时现在优先使用 UTF-8 或带 BOM 的 Unicode，并保留对 GB18030、Big5、Shift-JIS 等常见地区性编码的受限支持。无法明确识别或不受支持的编码仍会快速失败；`web_fetch` 仍会按 HTTP 响应声明的 charset 解码。
 - `read` 现在返回不带行号 gutter、也不额外缩进的原始文件文本，复制片段用于 patch hunk 或缩进敏感格式时更安全。

@@ -6,6 +6,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Responses API requests now use the same Responses wire shape for every `type: responses` provider, explicitly sending `tool_choice`, `parallel_tool_calls`, `store`, `stream`, `include`, and Codex-compatible `client_metadata` when a session id is available. `store` still defaults to `false`, but explicit provider/model config is now honored. Encrypted reasoning content is requested only when the request carries a reasoning block. Relay endpoints that validate this request shape no longer reject Chord with `invalid codex request`.
+- Reasoning is now sent when either `effort` or `summary` is configured (previously only `effort` triggered it), fixing a bug where summary-only reasoning configs were silently dropped.
+- Responses HTTP requests now send the same SSE headers (`originator`, `Accept`, `OpenAI-Beta: responses=experimental`) alongside the authorization header, independent of `preset: codex`, while keeping the normal `User-Agent: chord/<version>` default and honoring provider-level `user_agent` overrides.
+- WebSocket Responses transport now propagates the `include` array from the request body instead of sending a hardcoded empty array.
 - JSON processing is faster on hot paths including LLM stream parsing, MCP JSON-RPC encoding/decoding, session import JSONL parsing, and `auth.state.json` loading.
 - Local file tools now prefer UTF-8 or BOM-marked Unicode when reading existing text files and retain constrained support for common regional encodings including GB18030, Big5, and Shift-JIS. Ambiguous or unsupported encodings still fail fast; `web_fetch` continues to honor declared HTTP response charsets.
 - `read` now returns raw file text without line-number gutters or extra indentation, making copied snippets safe for patch hunks and indentation-sensitive formats.

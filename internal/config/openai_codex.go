@@ -68,9 +68,8 @@ func NormalizeOpenAICodexProvider(
 		)
 	}
 
-	// Official ChatGPT/Codex OAuth Responses API rejects store=true (400:
-	// "Store must be set to false"). Leave Store unset so EffectiveStore is false;
-	// ResponsesProvider still forces store=false on the wire for OAuth keys.
+	// Leave Store unset so Responses requests default to store=false while
+	// preserving any explicit provider/model override.
 
 	return normalized, resolution, nil
 }

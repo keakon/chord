@@ -34,7 +34,7 @@ type OpenAITuning struct {
 	ReasoningEffort   string // "low"|"medium"|"high"|"xhigh" ("" = disabled)
 	ReasoningSummary  string // "auto"|"concise"|"detailed" ("" = disabled)
 	TextVerbosity     string // "low"|"medium"|"high" ("" = disabled)
-	ParallelToolCalls *bool  // nil = omit from request; non-nil = send explicit Responses API hint
+	ParallelToolCalls *bool  // nil = Responses request default false; non-nil = explicit override
 	ToolChoice        string // ""|"auto"|"required"
 }
 
@@ -135,7 +135,7 @@ type ProviderConfig struct {
 	limiter                    *rate.Limiter // optional rate limiter (nil = no rate limiting)
 	models                     map[string]config.ModelConfig
 	compat                     *config.ProviderCompatConfig // provider-level compat defaults
-	store                      *bool                        // provider-level store setting for Responses API
+	store                      *bool                        // provider-level Responses storage preference; nil defaults to false
 	officialAPI                *bool                        // nil = infer from known official endpoints
 	supportedServiceTiers      []config.ServiceTier         // provider-level default non-standard service tiers
 	preset                     string                       // trimmed config preset (e.g. "codex")

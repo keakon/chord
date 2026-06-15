@@ -219,7 +219,7 @@ type ProviderConfig struct {
 	TokenURL              string                 `json:"token_url,omitempty" yaml:"token_url,omitempty"`                             // OAuth2 token endpoint for refresh_token grant
 	ClientID              string                 `json:"client_id,omitempty" yaml:"client_id,omitempty"`                             // OAuth2 client_id (required by some providers, e.g. openai: app_EMoamEEZ73f0CkXaXp7hrann)
 	Preset                string                 `json:"preset,omitempty" yaml:"preset,omitempty"`                                   // e.g. "codex" for the official ChatGPT/Codex OAuth transport
-	Store                 *bool                  `json:"store,omitempty" yaml:"store,omitempty"`                                     // whether to enable server-side storage for Responses API (enables previous_response_id reuse)
+	Store                 *bool                  `json:"store,omitempty" yaml:"store,omitempty"`                                     // provider-level Responses storage preference; nil defaults to false
 	ResponsesWebsocket    *bool                  `json:"responses_websocket,omitempty" yaml:"responses_websocket,omitempty"`         // whether to prefer Responses WebSocket transport; nil = preset default (codex:true, others:false)
 	RateLimit             int                    `json:"rate_limit" yaml:"rate_limit"`                                               // requests per minute (0 = no limit)
 	UserAgent             string                 `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`                           // optional User-Agent override for provider/model HTTP requests
@@ -247,11 +247,11 @@ type ModelConfig struct {
 	Thinking              *ThinkingConfig         `json:"thinking,omitempty" yaml:"thinking,omitempty"`
 	Reasoning             *ReasoningConfig        `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
 	Text                  *TextConfig             `json:"text,omitempty" yaml:"text,omitempty"`
-	ParallelToolCalls     *bool                   `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = omit from request; non-nil = send explicit Responses API hint
+	ParallelToolCalls     *bool                   `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = Responses request default false; non-nil = explicit override
 	PromptCache           *PromptCacheConfig      `json:"prompt_cache,omitempty" yaml:"prompt_cache,omitempty"`
 	Compat                *ModelCompatConfig      `json:"compat,omitempty" yaml:"compat,omitempty"`
 	Cost                  *ModelCost              `json:"cost,omitempty" yaml:"cost,omitempty"`
-	Store                 *bool                   `json:"store,omitempty" yaml:"store,omitempty"` // model-level override for server-side storage; takes priority over provider-level Store
+	Store                 *bool                   `json:"store,omitempty" yaml:"store,omitempty"` // model-level Responses storage preference; nil inherits provider/default false
 	Variants              map[string]ModelVariant `json:"variants,omitempty" yaml:"variants,omitempty"`
 }
 
@@ -264,7 +264,7 @@ func EffectiveResponsesWebsocket(preset string, providerValue *bool) bool {
 	return strings.EqualFold(strings.TrimSpace(preset), ProviderPresetCodex)
 }
 
-// EffectiveStore returns whether server-side storage should be enabled.
+// EffectiveStore resolves the configured Responses storage preference.
 // Model-level setting takes priority over provider-level; both nil defaults to false.
 func EffectiveStore(providerStore, modelStore *bool) bool {
 	if modelStore != nil {
@@ -548,7 +548,7 @@ type ModelVariant struct {
 	Thinking          *ThinkingConfig    `json:"thinking,omitempty" yaml:"thinking,omitempty"`
 	Reasoning         *ReasoningConfig   `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
 	Text              *TextConfig        `json:"text,omitempty" yaml:"text,omitempty"`
-	ParallelToolCalls *bool              `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = inherit model default/omit; non-nil = override request hint
+	ParallelToolCalls *bool              `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = inherit model default; non-nil = override Responses request hint
 	PromptCache       *PromptCacheConfig `json:"prompt_cache,omitempty" yaml:"prompt_cache,omitempty"`
 }
 

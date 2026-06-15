@@ -57,7 +57,7 @@ func TestEffectiveStore(t *testing.T) {
 }
 
 func TestNormalizeOpenAICodexProvider_StoreDefault(t *testing.T) {
-	// preset: codex does not default store to true (official OAuth API requires false on wire).
+	// preset: codex does not default store to true; explicit config still wins.
 	cfg := ProviderConfig{Preset: ProviderPresetCodex}
 	got, _, err := NormalizeOpenAICodexProvider(cfg, false)
 	if err != nil {
@@ -67,7 +67,7 @@ func TestNormalizeOpenAICodexProvider_StoreDefault(t *testing.T) {
 		t.Fatalf("preset codex: want Store unset (nil), got %v", got.Store)
 	}
 
-	// explicit true is preserved for config round-trip; ResponsesProvider overrides for OAuth keys.
+	// explicit true is preserved and reaches the Responses request body.
 	cfg1 := ProviderConfig{Type: ProviderTypeResponses, Preset: ProviderPresetCodex, Store: new(true)}
 	got1, _, err := NormalizeOpenAICodexProvider(cfg1, false)
 	if err != nil {

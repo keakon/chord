@@ -55,21 +55,6 @@ func newOpenAITestOAuthProvider(t *testing.T, apiURL string) (*ProviderConfig, s
 	return provider, accessToken
 }
 
-func newOpenAITestCodexPresetProvider(t *testing.T, apiURL string) (*ProviderConfig, string) {
-	t.Helper()
-
-	responsesWSOff := false
-	apiKey := "test-api-key"
-	provider := NewProviderConfig("openai", config.ProviderConfig{
-		Type:               config.ProviderTypeResponses,
-		Preset:             config.ProviderPresetCodex,
-		APIURL:             apiURL,
-		Models:             map[string]config.ModelConfig{},
-		ResponsesWebsocket: &responsesWSOff,
-	}, []string{apiKey})
-	return provider, apiKey
-}
-
 func TestResolveOpenAIOAuthAPIURL(t *testing.T) {
 	tests := []struct {
 		name string
@@ -176,6 +161,9 @@ func TestResponsesProvider_OpenAIOAuthUsesCodexHeadersAndBody(t *testing.T) {
 	if gotHeaders.Get("originator") != openAICodexOriginator {
 		t.Fatalf("unexpected originator header: %q", gotHeaders.Get("originator"))
 	}
+	if gotHeaders.Get(headerUserAgent) != defaultLLMUserAgent() {
+		t.Fatalf("unexpected User-Agent header: %q", gotHeaders.Get(headerUserAgent))
+	}
 	if gotHeaders.Get("session_id") == "" {
 		t.Fatal("expected session_id header to be set")
 	}
@@ -186,14 +174,18 @@ func TestResponsesProvider_OpenAIOAuthUsesCodexHeadersAndBody(t *testing.T) {
 	if gotBody["instructions"] != "system prompt" {
 		t.Fatalf("expected instructions=system prompt, got %#v", gotBody["instructions"])
 	}
-	// store is controlled by provider/model config, but official OAuth HTTP forces
-	// store=false on the wire; this test only verifies delegation shape.
-	_ = gotBody["store"]
+	if gotBody["store"] != false {
+		t.Fatalf("expected explicit store=false, got %#v", gotBody["store"])
+	}
 	if _, ok := gotBody["max_output_tokens"]; ok {
 		t.Fatalf("did not expect max_output_tokens in OAuth responses request: %#v", gotBody["max_output_tokens"])
 	}
-	if _, ok := gotBody["parallel_tool_calls"]; ok {
-		t.Fatalf("did not expect parallel_tool_calls when unset, got %#v", gotBody["parallel_tool_calls"])
+	if gotBody["parallel_tool_calls"] != false {
+		t.Fatalf("expected explicit parallel_tool_calls=false, got %#v", gotBody["parallel_tool_calls"])
+	}
+	inc, ok := gotBody["include"].([]any)
+	if !ok || len(inc) != 1 || inc[0] != "reasoning.encrypted_content" {
+		t.Fatalf("include = %#v, want [\"reasoning.encrypted_content\"]", gotBody["include"])
 	}
 	if _, ok := gotBody["messages"]; ok {
 		t.Fatalf("did not expect chat-completions messages field in OAuth responses request: %#v", gotBody["messages"])
@@ -225,7 +217,44 @@ func TestResponsesProvider_OpenAIOAuthUsesCodexHeadersAndBody(t *testing.T) {
 	}
 }
 
-func TestResponsesProvider_CodexPresetWithoutOAuthOmitsMaxOutputTokens(t *testing.T) {
+func TestResponsesProvider_OpenAIOAuthHonorsProviderUserAgent(t *testing.T) {
+	var gotHeaders http.Header
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider, accessToken := newOpenAITestOAuthProvider(t, server.URL+"/v1/responses")
+	provider.userAgent = "ProviderUA/1.0"
+	r := &ResponsesProvider{provider: provider, client: server.Client()}
+
+	_, err := r.CompleteStream(
+		context.Background(),
+		accessToken,
+		"gpt-5.5",
+		"system prompt",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil,
+		128,
+		RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+
+	if got := gotHeaders.Get(headerUserAgent); got != "ProviderUA/1.0" {
+		t.Fatalf("User-Agent = %q, want ProviderUA/1.0", got)
+	}
+	if got := gotHeaders.Get("originator"); got != openAICodexOriginator {
+		t.Fatalf("originator = %q, want %q", got, openAICodexOriginator)
+	}
+}
+
+func TestResponsesProvider_ResponsesWireOmitsMaxOutputTokens(t *testing.T) {
 	var gotBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +270,11 @@ func TestResponsesProvider_CodexPresetWithoutOAuthOmitsMaxOutputTokens(t *testin
 	}))
 	defer server.Close()
 
-	provider, apiKey := newOpenAITestCodexPresetProvider(t, server.URL+"/v1/responses")
+	provider := NewProviderConfig("generic", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/v1/responses",
+	}, []string{"test-key"})
+	apiKey := "test-key"
 	r := &ResponsesProvider{provider: provider, client: server.Client()}
 
 	_, err := r.CompleteStream(
@@ -259,14 +292,14 @@ func TestResponsesProvider_CodexPresetWithoutOAuthOmitsMaxOutputTokens(t *testin
 		t.Fatalf("CompleteStream returned error: %v", err)
 	}
 	if _, ok := gotBody["max_output_tokens"]; ok {
-		t.Fatalf("did not expect max_output_tokens in preset codex responses request: %#v", gotBody["max_output_tokens"])
+		t.Fatalf("did not expect max_output_tokens in responses request: %#v", gotBody["max_output_tokens"])
 	}
 	if gotBody["instructions"] != "system prompt" {
 		t.Fatalf("expected instructions=system prompt, got %#v", gotBody["instructions"])
 	}
 	store, ok := gotBody["store"].(bool)
 	if !ok || store {
-		t.Fatalf("expected explicit store=false for preset codex request, got %#v", gotBody["store"])
+		t.Fatalf("expected explicit store=false for responses request, got %#v", gotBody["store"])
 	}
 	if _, ok := gotBody["reasoning"].(map[string]any); !ok {
 		t.Fatalf("expected reasoning object, got %#v", gotBody["reasoning"])
@@ -408,9 +441,11 @@ func TestResponsesProvider_OpenAIOAuthSendsParallelToolCallsWhenConfigured(t *te
 func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]any
+	var gotHeaders http.Header
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		gotHeaders = r.Header.Clone()
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
@@ -442,6 +477,18 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 	if gotPath != "/v1/responses/compact" {
 		t.Fatalf("compact request path = %q, want /v1/responses/compact", gotPath)
 	}
+	if got := gotHeaders.Get("Accept"); got != "" {
+		t.Fatalf("compact request Accept = %q, want empty for unary JSON endpoint", got)
+	}
+	if got := gotHeaders.Get("originator"); got != openAICodexOriginator {
+		t.Fatalf("compact request originator = %q, want %q", got, openAICodexOriginator)
+	}
+	if got := gotHeaders.Get(headerOpenAIBeta); got != openAICodexBetaHeader {
+		t.Fatalf("compact request %s = %q, want %q", headerOpenAIBeta, got, openAICodexBetaHeader)
+	}
+	if gotHeaders.Get(headerSessionID) == "" {
+		t.Fatal("expected compact request session_id header to be set")
+	}
 	if resp == nil || !strings.Contains(resp.Content, "## Goal") {
 		t.Fatalf("compact response = %#v, want extracted summary text", resp)
 	}
@@ -450,5 +497,13 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 	}
 	if _, ok := gotBody["input"]; !ok {
 		t.Fatalf("expected compact request to include input, got %#v", gotBody)
+	}
+	if gotBody["parallel_tool_calls"] != false {
+		t.Fatalf("expected compact request parallel_tool_calls=false, got %#v", gotBody["parallel_tool_calls"])
+	}
+	for _, key := range []string{"tool_choice", "stream", "include", "store", "max_output_tokens"} {
+		if _, ok := gotBody[key]; ok {
+			t.Fatalf("compact request unexpectedly included %s: %#v", key, gotBody[key])
+		}
 	}
 }
