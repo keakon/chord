@@ -18,7 +18,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/keakon/bubbles/v2 v2.1.0-fork.1
 	github.com/keakon/bubbletea/v2 v2.0.7-fork.1
-	github.com/keakon/golog v0.3.0
+	github.com/keakon/golog v0.4.1
 	github.com/keakon/ultraviolet v0.0.1-fork.1
 	github.com/keakon/x/powernap v0.1.5-fork
 	github.com/mackee/go-readability v0.3.1
