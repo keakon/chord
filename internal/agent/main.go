@@ -1627,15 +1627,12 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	}
 
 	if len(reallyCancelled) > 0 {
-		persistedResults := a.persistInterruptedToolResults(reallyCancelled, status, context.Canceled)
+		declared, undeclared := splitPendingCallsByDeclaredTools(a.ctxMgr, reallyCancelled)
+		persistedResults := a.persistInterruptedToolResults(declared, status, context.Canceled)
 		if persistedResults > 0 {
 			log.Infof("persisted interrupted tool-call results after cancellation turn_id=%v interrupted=%v completed=%v", evt.TurnID, persistedResults, completedCount)
 		}
-		if payload.MarkToolCallsFailed {
-			emitFailedToolResults(a.emitToTUI, reallyCancelled, context.Canceled)
-		} else {
-			emitCancelledToolResults(a.emitToTUI, reallyCancelled)
-		}
+		emitInterruptedToolResultsOrDiscards(a.emitToTUI, declared, undeclared, status, context.Canceled, "not_in_context")
 	} else if completedCount > 0 {
 		log.Infof("preserved completed tool results after cancellation turn_id=%v completed=%v", evt.TurnID, completedCount)
 	}
@@ -1712,12 +1709,13 @@ func (a *MainAgent) handleAgentError(evt Event) {
 	// LLM review).
 	log.Errorf("SubAgent error error=%v source=%v", err, evt.SourceID)
 
-	var emitCalls, persistCalls []PendingToolCall
+	var emitCalls, persistCalls, discardCalls []PendingToolCall
 	a.mu.RLock()
 	sub := a.subAgents[evt.SourceID]
 	a.mu.RUnlock()
 	if sub != nil {
 		emitCalls, persistCalls = sub.drainPendingToolFailureSets(err)
+		emitCalls, discardCalls = splitPendingCallsByDeclaredTools(sub.ctxMgr, emitCalls)
 	}
 	if len(persistCalls) > 0 && sub != nil {
 		persistedResults := sub.persistInterruptedToolResults(persistCalls, ToolResultStatusError, err)
@@ -1727,6 +1725,10 @@ func (a *MainAgent) handleAgentError(evt Event) {
 	}
 	if len(emitCalls) > 0 {
 		emitFailedToolResults(a.emitToTUI, emitCalls, err)
+		a.emitActivity(evt.SourceID, ActivityIdle, "")
+	}
+	if len(discardCalls) > 0 {
+		emitToolCallDiscards(a.emitToTUI, discardCalls, "not_in_context")
 		a.emitActivity(evt.SourceID, ActivityIdle, "")
 	}
 

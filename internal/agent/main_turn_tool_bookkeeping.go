@@ -651,8 +651,8 @@ func (a *MainAgent) clearToolTraceForCalls(calls []PendingToolCall) {
 }
 
 // discardSpeculativeStreamToolsAndClearToolTrace drains speculative streaming tool
-// cards (tool_use_start/delta/end) and emits cancelled results so the UI doesn't
-// keep "pending" cards forever. It also clears any associated tool-latency traces.
+// cards (tool_use_start/delta/end) that did not enter finalized context and asks
+// the UI to remove them. It also clears any associated tool-latency traces.
 func (a *MainAgent) discardSpeculativeStreamToolsAndClearToolTrace(t *Turn, reason string) {
 	if a == nil || t == nil {
 		return
@@ -666,7 +666,7 @@ func (a *MainAgent) discardSpeculativeStreamToolsAndClearToolTrace(t *Turn, reas
 	}
 	spec := t.drainStreamingToolCalls()
 	if len(spec) > 0 {
-		emitCancelledToolResults(a.emitToTUI, spec)
+		emitToolCallDiscards(a.emitToTUI, spec, reason)
 		a.clearToolTraceForCalls(spec)
 	}
 }

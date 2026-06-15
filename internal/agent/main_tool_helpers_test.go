@@ -99,7 +99,7 @@ func TestFinalizeStreamingToolCardsEmitsDiscardReasonForStartedSpeculativeCall(t
 	}
 }
 
-func TestFinalizeStreamingToolCardsSkipsValidCallsAndMarksDeferredInvalid(t *testing.T) {
+func TestFinalizeStreamingToolCardsSkipsValidCallsAndDiscardsDeferredInvalid(t *testing.T) {
 	turn := &Turn{}
 	turn.recordStreamingToolCall(PendingToolCall{CallID: "valid", Name: tools.NameRead, ArgsJSON: `{"path":"README.md"}`})
 	turn.recordStreamingToolCall(PendingToolCall{CallID: "deferred", Name: tools.NameRead, ArgsJSON: `{"path":"docs"}`})
@@ -112,14 +112,11 @@ func TestFinalizeStreamingToolCardsSkipsValidCallsAndMarksDeferredInvalid(t *tes
 	if len(events) != 1 {
 		t.Fatalf("events len = %d, want only deferred invalid event", len(events))
 	}
-	ev, ok := events[0].(ToolResultEvent)
+	ev, ok := events[0].(ToolCallDiscardEvent)
 	if !ok {
-		t.Fatalf("event = %#v, want ToolResultEvent", events[0])
+		t.Fatalf("event = %#v, want ToolCallDiscardEvent", events[0])
 	}
-	if ev.CallID != "deferred" || ev.Status != ToolResultStatusError {
-		t.Fatalf("tool result event = %#v", ev)
-	}
-	if !strings.Contains(ev.Result, "not executed") || !strings.Contains(ev.Result, "reason=deferred") {
-		t.Fatalf("deferred result = %q", ev.Result)
+	if ev.ID != "deferred" || ev.Name != tools.NameRead || ev.Reason != "deferred" {
+		t.Fatalf("discard event = %#v", ev)
 	}
 }

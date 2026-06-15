@@ -136,30 +136,28 @@ func TestHandleAgentErrorFailsPendingToolCalls(t *testing.T) {
 
 	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
 
-	var toolResults []ToolResultEvent
+	var discards []ToolCallDiscardEvent
 	var idleCount int
 	for {
 		select {
 		case evt := <-a.outputCh:
 			switch e := evt.(type) {
+			case ToolCallDiscardEvent:
+				if e.ID != "tool-1" {
+					t.Fatalf("unexpected call id %q", e.ID)
+				}
+				discards = append(discards, e)
 			case ToolResultEvent:
-				if e.CallID != "tool-1" {
-					t.Fatalf("unexpected call id %q", e.CallID)
+				if e.CallID == "tool-1" {
+					t.Fatalf("unexpected ToolResultEvent for undeclared tool: %#v", e)
 				}
-				if e.Status != ToolResultStatusError {
-					t.Fatalf("status = %q, want %q", e.Status, ToolResultStatusError)
-				}
-				if e.Result == "" {
-					t.Fatal("expected failure message")
-				}
-				toolResults = append(toolResults, e)
 			case IdleEvent:
 				idleCount++
 				if idleCount != 1 {
 					t.Fatalf("IdleEvent count = %d, want 1", idleCount)
 				}
-				if len(toolResults) != 1 {
-					t.Fatalf("tool result count = %d, want 1", len(toolResults))
+				if len(discards) != 1 {
+					t.Fatalf("discard count = %d, want 1", len(discards))
 				}
 				if a.turn != nil {
 					t.Fatal("expected main agent turn cleared after terminal error")
@@ -504,6 +502,7 @@ func TestSubAgentDrainPendingToolFailureSets(t *testing.T) {
 func TestSubAgentCancelDoesNotEmitTerminalResultForCompletedToolCalls(t *testing.T) {
 	parent := newTestMainAgent(t, t.TempDir())
 	s := newPersistenceTestSubAgent(parent, "agent-1")
+	s.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tool-running", Name: "read", Args: json.RawMessage(`{"path":"running"}`)}}})
 	s.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-done", Name: "read", ArgsJSON: `{"path":"done"}`, AgentID: s.instanceID})
 	s.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-running", Name: "read", ArgsJSON: `{"path":"running"}`, AgentID: s.instanceID})
 	s.turn.PendingToolCalls.Store(2)
@@ -547,7 +546,7 @@ func TestEmitFailedToolResultsMarksErrorStatus(t *testing.T) {
 	}
 }
 
-func TestDiscardSpeculativeStreamToolsEmitsCancelledResult(t *testing.T) {
+func TestDiscardSpeculativeStreamToolsEmitsDiscardEvent(t *testing.T) {
 	var events []AgentEvent
 	turn := &Turn{}
 	turn.recordStreamingToolCall(PendingToolCall{CallID: "tool-spec-1", Name: "read", ArgsJSON: `{"path":"internal/llm/provider.go"}`})
@@ -555,20 +554,20 @@ func TestDiscardSpeculativeStreamToolsEmitsCancelledResult(t *testing.T) {
 	emit := func(evt AgentEvent) {
 		events = append(events, evt)
 	}
-	emitCancelledToolResults(emit, turn.drainStreamingToolCalls())
+	emitToolCallDiscards(emit, turn.drainStreamingToolCalls(), "not_in_context")
 
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want 1", len(events))
 	}
-	result, ok := events[0].(ToolResultEvent)
+	discard, ok := events[0].(ToolCallDiscardEvent)
 	if !ok {
-		t.Fatalf("event type = %T, want ToolResultEvent", events[0])
+		t.Fatalf("event type = %T, want ToolCallDiscardEvent", events[0])
 	}
-	if result.CallID != "tool-spec-1" {
-		t.Fatalf("call_id = %q, want tool-spec-1", result.CallID)
+	if discard.ID != "tool-spec-1" {
+		t.Fatalf("call_id = %q, want tool-spec-1", discard.ID)
 	}
-	if result.Status != ToolResultStatusCancelled {
-		t.Fatalf("status = %q, want %q", result.Status, ToolResultStatusCancelled)
+	if discard.Reason != "not_in_context" {
+		t.Fatalf("reason = %q, want not_in_context", discard.Reason)
 	}
 	if remaining := turn.drainStreamingToolCalls(); len(remaining) != 0 {
 		t.Fatalf("streaming tool calls not drained, got %d", len(remaining))

@@ -54,16 +54,12 @@ func (s *SubAgent) interruptCurrentTurnWithStatus(status ToolResultStatus, cause
 	merged := mergePendingToolCalls(cancelledExec, cancelledStream)
 	merged = s.turn.filterCompletedToolCalls(merged)
 
-	persistedResults := s.persistInterruptedToolResults(merged, status, cause)
+	declared, undeclared := splitPendingCallsByDeclaredTools(s.ctxMgr, merged)
+	persistedResults := s.persistInterruptedToolResults(declared, status, cause)
 	if persistedResults > 0 {
 		log.Infof("SubAgent: persisted interrupted tool-call results after interrupt agent=%v turn_id=%v count=%v status=%v", s.instanceID, s.turn.ID, persistedResults, status)
 	}
-	switch status {
-	case ToolResultStatusError:
-		emitFailedToolResults(s.parent.emitToTUI, merged, cause)
-	default:
-		emitCancelledToolResults(s.parent.emitToTUI, merged)
-	}
+	emitInterruptedToolResultsOrDiscards(s.parent.emitToTUI, declared, undeclared, status, cause, "not_in_context")
 	s.parent.emitActivity(s.instanceID, ActivityIdle, "")
 	log.Infof("SubAgent current turn interrupted agent=%v turn_id=%v pending_tools=%v closed_tools=%v status=%v", s.instanceID, s.turn.ID, pending, len(merged), status)
 	return true

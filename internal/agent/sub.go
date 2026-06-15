@@ -673,11 +673,12 @@ func (s *SubAgent) newTurn() *Turn {
 		merged := mergePendingToolCalls(cancelledExec, cancelledStream)
 		merged = s.turn.filterCompletedToolCalls(merged)
 		if len(merged) > 0 {
-			persistedResults := s.persistInterruptedToolResults(merged, ToolResultStatusCancelled, context.Canceled)
+			declared, undeclared := splitPendingCallsByDeclaredTools(s.ctxMgr, merged)
+			persistedResults := s.persistInterruptedToolResults(declared, ToolResultStatusCancelled, context.Canceled)
 			if persistedResults > 0 {
 				log.Infof("SubAgent: persisted interrupted tool-call results before starting new turn agent=%v count=%v", s.instanceID, persistedResults)
 			}
-			emitCancelledToolResults(s.parent.emitToTUI, merged)
+			emitInterruptedToolResultsOrDiscards(s.parent.emitToTUI, declared, undeclared, ToolResultStatusCancelled, context.Canceled, "not_in_context")
 			s.parent.emitActivity(s.instanceID, ActivityIdle, "")
 		}
 		s.turn.PendingToolCalls.Store(0)

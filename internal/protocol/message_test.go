@@ -172,6 +172,7 @@ func TestAllEventPayloads(t *testing.T) {
 		{TypeStreamRollback, StreamRollbackPayload{Reason: "retry", AgentID: ""}},
 		{TypeToolCallStart, ToolCallStartPayload{CallID: "c1", Name: "Read", ArgsJSON: `{}`, AgentID: ""}},
 		{TypeToolCallUpdate, ToolCallUpdatePayload{CallID: "c1", Name: "Read", ArgsJSON: `{"path":"README.md"}`, ArgsStreamingDone: true, AgentID: "agent-1"}},
+		{TypeToolCallDiscard, ToolCallDiscardPayload{CallID: "c1", Name: "Read", Reason: "not_in_context", AgentID: "agent-1"}},
 		{TypeDoneCompletion, DoneCompletionPayload{CallID: "c1", Report: "done", Reason: "complete", Status: string(agent.ToolResultStatusSuccess), AgentID: "", Mode: "normal"}},
 		{TypeError, ErrorPayload{Message: "boom", AgentID: ""}},
 		{TypeIdle, nil},
@@ -231,6 +232,7 @@ func TestFromAgentEvent_AllTypes(t *testing.T) {
 		{"StreamRollback", agent.StreamRollbackEvent{Reason: "retry", AgentID: ""}, TypeStreamRollback},
 		{"ToolCallStart", agent.ToolCallStartEvent{ID: "c1", Name: "Shell", ArgsJSON: `{}`, AgentID: ""}, TypeToolCallStart},
 		{"ToolCallUpdate", agent.ToolCallUpdateEvent{ID: "c1", Name: "Shell", ArgsJSON: `{"command":"pwd"}`, ArgsStreamingDone: true, AgentID: ""}, TypeToolCallUpdate},
+		{"ToolCallDiscard", agent.ToolCallDiscardEvent{ID: "c1", Name: "Shell", Reason: "not_in_context", AgentID: ""}, TypeToolCallDiscard},
 		{"ToolCallExecution", agent.ToolCallExecutionEvent{ID: "c1", Name: "Shell", ArgsJSON: `{}`, State: agent.ToolCallExecutionStateQueued, AgentID: ""}, TypeToolCallExecution},
 		{"Error", agent.ErrorEvent{Err: errors.New("oops"), AgentID: "a2"}, TypeError},
 		{"ErrorNil", agent.ErrorEvent{Err: nil, AgentID: ""}, TypeError},
@@ -317,6 +319,36 @@ func TestFromAgentEvent_ToolCallUpdatePayload(t *testing.T) {
 	}
 	if !ev.ArgsStreamingDone {
 		t.Fatal("expected ArgsStreamingDone after round-trip")
+	}
+}
+
+func TestFromAgentEvent_ToolCallDiscardPayload(t *testing.T) {
+	env, err := FromAgentEvent(agent.ToolCallDiscardEvent{
+		ID:      "c1",
+		Name:    "Shell",
+		Reason:  "not_in_context",
+		AgentID: "a2",
+	}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := ParsePayload[ToolCallDiscardPayload](env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.CallID != "c1" || p.Name != "Shell" || p.Reason != "not_in_context" || p.AgentID != "a2" {
+		t.Fatalf("payload mismatch: %+v", p)
+	}
+	got, err := ToAgentEvent(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, ok := got.(agent.ToolCallDiscardEvent)
+	if !ok {
+		t.Fatalf("unexpected event type %T", got)
+	}
+	if ev.ID != "c1" || ev.Reason != "not_in_context" || ev.AgentID != "a2" {
+		t.Fatalf("event mismatch: %+v", ev)
 	}
 }
 

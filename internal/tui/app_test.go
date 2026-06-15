@@ -3590,6 +3590,33 @@ func TestStreamRollbackPreservesCancelledSpeculativeWriteToolCard(t *testing.T) 
 	}
 }
 
+func TestToolCallDiscardEventRemovesSpeculativeToolCard(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-discard-1",
+		Name:     "read",
+		AgentID:  "",
+		ArgsJSON: `{"path":"README.md"}`,
+	}})
+	if _, ok := m.viewport.FindBlockByToolID("call-discard-1"); !ok {
+		t.Fatal("expected speculative tool block after ToolCallStartEvent")
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallDiscardEvent{
+		ID:      "call-discard-1",
+		Name:    "read",
+		AgentID: "",
+		Reason:  "not_in_context",
+	}})
+	if _, ok := m.viewport.FindBlockByToolID("call-discard-1"); ok {
+		t.Fatal("expected speculative tool block to be removed after ToolCallDiscardEvent")
+	}
+	if got := len(m.viewport.visibleBlocks()); got != 0 {
+		t.Fatalf("len(visibleBlocks()) = %d, want 0", got)
+	}
+}
+
 func TestTaskToolResultErrorClearsPendingPlaceholder(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 

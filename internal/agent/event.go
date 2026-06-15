@@ -272,6 +272,17 @@ type ToolCallUpdateEvent struct {
 
 func (ToolCallUpdateEvent) agentEvent() {}
 
+// ToolCallDiscardEvent asks the UI to remove a speculative tool card that did
+// not become part of the finalized assistant tool_calls/request context.
+type ToolCallDiscardEvent struct {
+	ID      string
+	Name    string
+	AgentID string // originating agent ("" = main agent)
+	Reason  string
+}
+
+func (ToolCallDiscardEvent) agentEvent() {}
+
 // ToolCallExecutionState is the live execution phase of a visible tool card.
 type ToolCallExecutionState string
 

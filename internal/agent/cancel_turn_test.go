@@ -137,6 +137,12 @@ func TestCancelCurrentTurnDoesNotCancelCompletedToolCalls(t *testing.T) {
 		t.Fatal("expected active turn")
 	}
 	turnID := a.turn.ID
+	a.ctxMgr.Append(message.Message{Role: "assistant", ToolCalls: []message.ToolCall{
+		{ID: "tool-done-1", Name: "read", Args: []byte(`{"path":"README.md"}`)},
+		{ID: "tool-running-2", Name: "read", Args: []byte(`{"path":"README.md"}`)},
+		{ID: "tool-done-3", Name: "read", Args: []byte(`{"path":"README.md"}`)},
+		{ID: "tool-queued-4", Name: "read", Args: []byte(`{"path":"README.md"}`)},
+	}})
 	for _, callID := range []string{"tool-done-1", "tool-running-2", "tool-done-3", "tool-queued-4"} {
 		a.turn.recordPendingToolCall(PendingToolCall{CallID: callID, Name: "read", ArgsJSON: `{"path":"README.md"}`})
 		a.turn.recordStreamingToolCall(PendingToolCall{CallID: callID, Name: "read", ArgsJSON: `{"path":"README.md"}`})
@@ -184,7 +190,7 @@ func TestCancelCurrentTurnDoesNotCancelCompletedToolCalls(t *testing.T) {
 	}
 }
 
-func TestCancelCurrentTurnClosesSpeculativeToolCardWithoutPersistingToolMessage(t *testing.T) {
+func TestCancelCurrentTurnDiscardsSpeculativeToolCardWithoutPersistingToolMessage(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -227,22 +233,21 @@ func TestCancelCurrentTurnClosesSpeculativeToolCardWithoutPersistingToolMessage(
 	}
 
 	events := drainAgentEvents(a.Events())
-	var sawCancelled bool
+	var sawDiscard bool
 	for _, evt := range events {
-		if res, ok := evt.(ToolResultEvent); ok {
-			if res.CallID == "stream-write-1" {
-				sawCancelled = true
-				if res.Status != ToolResultStatusCancelled {
-					t.Fatalf("ToolResultEvent status = %q, want %q", res.Status, ToolResultStatusCancelled)
-				}
-				if res.Result != "Cancelled" {
-					t.Fatalf("ToolResultEvent result = %q, want Cancelled", res.Result)
-				}
+		switch ev := evt.(type) {
+		case ToolCallDiscardEvent:
+			if ev.ID == "stream-write-1" {
+				sawDiscard = true
+			}
+		case ToolResultEvent:
+			if ev.CallID == "stream-write-1" {
+				t.Fatalf("unexpected ToolResultEvent for discarded speculative call: %#v", ev)
 			}
 		}
 	}
-	if !sawCancelled {
-		t.Fatal("expected speculative Write tool card to be closed with cancelled result")
+	if !sawDiscard {
+		t.Fatal("expected speculative Write tool card to be discarded")
 	}
 }
 

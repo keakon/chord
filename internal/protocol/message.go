@@ -59,6 +59,8 @@ const (
 	TypeToolCallStart = "tool_call_start"
 	// TypeToolCallUpdate refreshes arguments for an already-started tool invocation.
 	TypeToolCallUpdate = "tool_call_update"
+	// TypeToolCallDiscard removes a speculative tool card that did not enter context.
+	TypeToolCallDiscard = "tool_call_discard"
 	// TypeToolCallExecution updates the live execution phase of a tool card.
 	TypeToolCallExecution = "tool_call_execution"
 	// TypeDoneCompletion carries a non-loop Done tool completion report.
@@ -187,6 +189,14 @@ type ToolCallUpdatePayload struct {
 	ArgsJSON          string `json:"args_json"`
 	ArgsStreamingDone bool   `json:"args_streaming_done,omitempty"`
 	AgentID           string `json:"agent_id"`
+}
+
+// ToolCallDiscardPayload is the payload for TypeToolCallDiscard.
+type ToolCallDiscardPayload struct {
+	CallID  string `json:"call_id"`
+	Name    string `json:"name,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	AgentID string `json:"agent_id"`
 }
 
 // ToolCallExecutionPayload is the payload for TypeToolCallExecution.

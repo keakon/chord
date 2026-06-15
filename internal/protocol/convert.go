@@ -77,6 +77,14 @@ func FromAgentEvent(ev agent.AgentEvent, seq uint64) (*Envelope, error) {
 			AgentID:           e.AgentID,
 		})
 
+	case agent.ToolCallDiscardEvent:
+		env, err = NewEnvelope(TypeToolCallDiscard, ToolCallDiscardPayload{
+			CallID:  e.ID,
+			Name:    e.Name,
+			Reason:  e.Reason,
+			AgentID: e.AgentID,
+		})
+
 	case agent.ToolCallExecutionEvent:
 		env, err = NewEnvelope(TypeToolCallExecution, ToolCallExecutionPayload{
 			CallID:   e.ID,
@@ -341,6 +349,12 @@ func ToAgentEvent(env *Envelope) (agent.AgentEvent, error) {
 			return nil, err
 		}
 		return agent.ToolCallUpdateEvent{ID: p.CallID, Name: p.Name, ArgsJSON: p.ArgsJSON, ArgsStreamingDone: p.ArgsStreamingDone, AgentID: p.AgentID}, nil
+	case TypeToolCallDiscard:
+		p, err := ParsePayload[ToolCallDiscardPayload](env)
+		if err != nil {
+			return nil, err
+		}
+		return agent.ToolCallDiscardEvent{ID: p.CallID, Name: p.Name, Reason: p.Reason, AgentID: p.AgentID}, nil
 	case TypeToolCallExecution:
 		p, err := ParsePayload[ToolCallExecutionPayload](env)
 		if err != nil {

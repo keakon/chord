@@ -15,7 +15,8 @@ import (
 )
 
 // failPendingToolCalls cancels all pending and streaming tool calls for a turn
-// after a terminal error, emitting cancelled results to TUI.
+// after a terminal error. Calls absent from finalized assistant tool_calls are
+// discarded from TUI instead of being shown as real cancelled/error results.
 func (a *MainAgent) failPendingToolCalls(turn *Turn, err error) {
 	if turn == nil {
 		return
@@ -63,11 +64,16 @@ func (a *MainAgent) failPendingToolCalls(turn *Turn, err error) {
 	log.Warnf("failing pending tool calls after terminal turn error turn_id=%v pending_tools=%v failed_tools=%v completed_tools=%v error=%v", turn.ID, pending, len(reallyFailed), completedCount, err)
 
 	if len(reallyFailed) > 0 {
-		persistedResults := a.persistInterruptedToolResults(reallyFailed, ToolResultStatusError, err)
+		declared, undeclared := splitPendingCallsByDeclaredTools(a.ctxMgr, reallyFailed)
+		if len(undeclared) > 0 {
+			log.Warnf("discarding synthetic tool failures for call_ids absent from assistant history dropped=%v", len(undeclared))
+			emitToolCallDiscards(a.emitToTUI, undeclared, "not_in_context")
+		}
+		persistedResults := a.persistInterruptedToolResults(declared, ToolResultStatusError, err)
 		if persistedResults > 0 {
 			log.Infof("persisted failed tool-call results after terminal turn error turn_id=%v count=%v", turn.ID, persistedResults)
 		}
-		emitFailedToolResults(a.emitToTUI, reallyFailed, err)
+		emitFailedToolResults(a.emitToTUI, declared, err)
 	}
 }
 
@@ -76,19 +82,22 @@ func (a *MainAgent) failPendingToolCalls(turn *Turn, err error) {
 // orphan tool rows after stream failures that never produced a matching
 // assistant tool_calls entry.
 func filterPendingCallsForDeclaredTools(m *ctxmgr.Manager, calls []PendingToolCall) []PendingToolCall {
+	declared, _ := splitPendingCallsByDeclaredTools(m, calls)
+	return declared
+}
+
+func splitPendingCallsByDeclaredTools(m *ctxmgr.Manager, calls []PendingToolCall) (declared, undeclared []PendingToolCall) {
 	if m == nil || len(calls) == 0 {
-		return calls
+		return calls, nil
 	}
-	out := make([]PendingToolCall, 0, len(calls))
 	for _, c := range calls {
 		if m.AnyAssistantDeclaresToolCallID(c.CallID) {
-			out = append(out, c)
+			declared = append(declared, c)
+		} else {
+			undeclared = append(undeclared, c)
 		}
 	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return declared, undeclared
 }
 
 func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, status ToolResultStatus, cause error) int {

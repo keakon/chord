@@ -300,6 +300,14 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			m.updateViewportBlock(block)
 		}
 		return true, effects
+	case agent.ToolCallDiscardEvent:
+		delete(m.toolArgRenderState, evt.ID)
+		block, ok := m.findToolBlockByToolID(evt.ID)
+		if !ok {
+			return false, effects
+		}
+		m.removeViewportBlockByID(block.ID)
+		return true, effects
 	case agent.ToolCallExecutionEvent:
 		evt.Name = tools.NormalizeName(evt.Name)
 		delete(m.toolArgRenderState, evt.ID)
