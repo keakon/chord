@@ -562,7 +562,7 @@ func toolCallMarkdownContent(b *Block) string {
 	if toolNameKey(toolName) == tools.NameDone {
 		return convformat.DoneToolCallMarkdown(b.DoneReport, b.ResultContent)
 	}
-	if toolNameKey(toolName) == tools.NameEdit {
+	if toolNameKey(toolName) == tools.NameEdit || toolNameKey(toolName) == tools.NamePatch {
 		return editToolCallMarkdownContent(b)
 	}
 

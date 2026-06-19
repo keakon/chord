@@ -10,6 +10,16 @@ import (
 	"time"
 )
 
+func TestDeleteToolPathsDescriptionWarnsAgainstGuessing(t *testing.T) {
+	props := (DeleteTool{}).Parameters()["properties"].(map[string]any)
+	desc := props["paths"].(map[string]any)["description"].(string)
+	for _, want := range []string{"verified files or symlinks", "Do not guess paths for destructive operations"} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("paths description missing %q: %q", want, desc)
+		}
+	}
+}
+
 func TestDeleteToolDeletesFileAndInvalidatesCaches(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "remove.txt")

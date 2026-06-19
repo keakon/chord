@@ -223,10 +223,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			// Debug: log the raw reasoning content for troubleshooting
 			if payload.ReasoningContent != "" {
 				reasoningLen := len(payload.ReasoningContent)
-				preview := payload.ReasoningContent
-				if reasoningLen > 500 {
-					preview = payload.ReasoningContent[:500] + "...(truncated)"
-				}
+				preview := llm.TruncateStringRunes(payload.ReasoningContent, 500, "...(truncated)")
 				log.Debugf("unparseable reasoning content reasoning_len=%v reasoning_preview=%v", reasoningLen, preview)
 			}
 			a.emitToTUI(InfoEvent{
@@ -463,7 +460,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 						if err == nil {
 							effectiveCall := tc
 							effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
-							diff = agentdiff.GenerateToolDiff(effectiveCall, execResult.PreContent, execResult.PreFilePath)
+							diff = agentdiff.GenerateToolDiff(effectiveCall, execResult.PreContent, execResult.PreFilePath, execResult.PreExisted)
 						}
 						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turnID, Duration: time.Since(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone()}})
 					}(effective)
@@ -521,7 +518,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 			if err == nil {
 				effectiveCall := tc
 				effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
-				diff = agentdiff.GenerateToolDiff(effectiveCall, execResult.PreContent, execResult.PreFilePath)
+				diff = agentdiff.GenerateToolDiff(effectiveCall, execResult.PreContent, execResult.PreFilePath, execResult.PreExisted)
 			}
 			if err != nil && batch.AbortSiblingsOnError {
 				if batchCancel != nil {

@@ -86,10 +86,40 @@ func ParsePermission(node *yaml.Node) Ruleset {
 // Both permission (tool name) and pattern (argument) support glob wildcards (* and ?).
 // Returns ActionDeny if no rule matches.
 func (rs Ruleset) Evaluate(permission, pattern string) Action {
+	return rs.evaluateWithEditPatchFallback(permission, pattern)
+}
+
+// getEditPatchCounterpart returns the counterpart tool name for edit/patch,
+// or empty string if the tool is not edit/patch.
+func getEditPatchCounterpart(toolName string) string {
+	switch toolName {
+	case toolname.Edit:
+		return toolname.Patch
+	case toolname.Patch:
+		return toolname.Edit
+	default:
+		return ""
+	}
+}
+
+// evaluateWithEditPatchFallback checks the requested permission and falls back to
+// its edit/patch counterpart. An explicit same-tool rule wins; otherwise the
+// counterpart's edit-family rule is inherited before wildcard rules are used.
+func (rs Ruleset) evaluateWithEditPatchFallback(permission, pattern string) Action {
+	normPerm := toolname.Normalize(permission)
+	counterpart := getEditPatchCounterpart(normPerm)
+
+	if counterpart != "" {
+		if match, ok := rs.lastSpecificEditPatchToolMatch(normPerm, counterpart, pattern); ok {
+			return match.Action
+		}
+	}
+
 	if match := rs.LastEvaluatedMatch(permission, pattern); match.Found {
 		return match.Rule.Action
 	}
-	return ActionDeny // default deny if no rule matches
+
+	return ActionDeny
 }
 
 // IsDisabled returns true if the tool is completely unavailable (deny with wildcard pattern).
@@ -97,6 +127,14 @@ func (rs Ruleset) Evaluate(permission, pattern string) Action {
 // Scans in reverse to find the last rule matching the tool name.
 func (rs Ruleset) IsDisabled(toolName string) bool {
 	toolName = toolname.Normalize(toolName)
+	counterpart := getEditPatchCounterpart(toolName)
+
+	if counterpart != "" {
+		if match, ok := rs.lastSpecificEditPatchToolRule(toolName, counterpart); ok {
+			return match.Pattern == "*" && match.Action == ActionDeny
+		}
+	}
+
 	for i := len(rs) - 1; i >= 0; i-- {
 		r := rs[i]
 		if globMatch(toolName, toolname.Normalize(r.Permission)) {
@@ -104,6 +142,48 @@ func (rs Ruleset) IsDisabled(toolName string) bool {
 		}
 	}
 	return false
+}
+
+func (rs Ruleset) lastSpecificEditPatchToolRule(toolName, counterpart string) (Rule, bool) {
+	var counterpartMatch Rule
+	counterpartFound := false
+
+	for i := len(rs) - 1; i >= 0; i-- {
+		r := rs[i]
+		normRulePerm := toolname.Normalize(r.Permission)
+		if normRulePerm == "*" {
+			continue
+		}
+		if normRulePerm == toolName || globMatch(toolName, normRulePerm) {
+			return r, true
+		}
+		if !counterpartFound && (normRulePerm == counterpart || globMatch(counterpart, normRulePerm)) {
+			counterpartMatch = r
+			counterpartFound = true
+		}
+	}
+	return counterpartMatch, counterpartFound
+}
+
+func (rs Ruleset) lastSpecificEditPatchToolMatch(toolName, counterpart, pattern string) (Rule, bool) {
+	var counterpartMatch Rule
+	counterpartFound := false
+
+	for i := len(rs) - 1; i >= 0; i-- {
+		r := rs[i]
+		normRulePerm := toolname.Normalize(r.Permission)
+		if normRulePerm == "*" {
+			continue
+		}
+		if (normRulePerm == toolName || globMatch(toolName, normRulePerm)) && globMatch(pattern, r.Pattern) {
+			return r, true
+		}
+		if !counterpartFound && (normRulePerm == counterpart || globMatch(counterpart, normRulePerm)) && globMatch(pattern, r.Pattern) {
+			counterpartMatch = r
+			counterpartFound = true
+		}
+	}
+	return counterpartMatch, counterpartFound
 }
 
 // Merge concatenates rulesets. Later rulesets override earlier ones (findLast semantics).

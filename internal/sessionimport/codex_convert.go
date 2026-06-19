@@ -1007,12 +1007,12 @@ func validateImportedCodexMessages(msgs []message.Message, report *ImportReport)
 var codexToolMapping = map[string]string{
 	"exec_command": tools.NameShell,
 	"shell":        tools.NameShell,
-	"apply_patch":  tools.NameEdit,
+	"apply_patch":  tools.NamePatch,
 	"read_file":    tools.NameRead,
 	"file_read":    tools.NameRead,
 	"write_file":   tools.NameWrite,
 	"file_write":   tools.NameWrite,
-	"edit_file":    tools.NameEdit,
+	"edit_file":    tools.NamePatch,
 	"delete_file":  tools.NameDelete,
 	"file_delete":  tools.NameDelete,
 	"remove_file":  tools.NameDelete,
@@ -1044,7 +1044,9 @@ func codexNormalizeToolArgs(codexName string, chordName string, rawArgs json.Raw
 	}
 
 	switch chordName {
-	case tools.NameEdit:
+	case tools.NamePatch, tools.NameEdit:
+		// Imported Codex edit_file/apply_patch records are normalized as Chord patch-style
+		// calls to preserve historical session replay; replace-edit sessions use their own schema.
 		if strings.EqualFold(codexName, "edit_file") {
 			return codexNormalizeEditFileArgs(args)
 		}

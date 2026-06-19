@@ -76,6 +76,10 @@ func resolveToolPath(path string) (string, error) {
 	return filepath.Clean(expanded), nil
 }
 
+func ResolveToolPath(path string) (string, error) {
+	return resolveToolPath(path)
+}
+
 func resolveToolPathAbs(path string) (string, error) {
 	resolved, err := resolveToolPath(path)
 	if err != nil {

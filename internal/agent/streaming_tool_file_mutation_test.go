@@ -124,7 +124,7 @@ func TestSpeculativeEditDiscardRestoresExistingFile(t *testing.T) {
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
 
 	// Baseline Read so Edit satisfies the read-before-patch precondition.
 	readArgs := json.RawMessage(`{"path":` + mustJSONString(t, path) + `}`)
@@ -134,7 +134,7 @@ func TestSpeculativeEditDiscardRestoresExistingFile(t *testing.T) {
 
 	ctx := t.Context()
 	exec := NewStreamingToolExecutor(7, ctx, nil, a.executeToolCallSpeculative)
-	call := message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
+	call := message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
 	if !exec.Start(call) {
 		t.Fatal("Start returned false")
 	}
@@ -153,7 +153,7 @@ func TestSpeculativeEditDiscardWhileExecutingRestoresExistingFile(t *testing.T) 
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
 
 	// Baseline Read so Edit satisfies the read-before-patch precondition.
 	readArgs := json.RawMessage(`{"path":` + mustJSONString(t, path) + `}`)
@@ -176,7 +176,7 @@ func TestSpeculativeEditDiscardWhileExecutingRestoresExistingFile(t *testing.T) 
 		}
 		return result, err
 	})
-	call := message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
+	call := message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
 	if !exec.Start(call) {
 		t.Fatal("Start returned false")
 	}

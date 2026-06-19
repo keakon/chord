@@ -178,7 +178,7 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 			continue
 		}
 		for _, tc := range msg.ToolCalls {
-			if tc.Name != tools.NameWrite && tc.Name != tools.NameEdit {
+			if tc.Name != tools.NameWrite && tc.Name != tools.NameEdit && tc.Name != tools.NamePatch {
 				continue
 			}
 			paths := extractTranscriptToolPaths(tc.Args)

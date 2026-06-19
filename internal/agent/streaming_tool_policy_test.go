@@ -72,7 +72,7 @@ func TestSpeculativeExecutionPolicyBashReadOnlySubset(t *testing.T) {
 func TestSpeculativeExecutionPolicyRejectsMutationTools(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(tools.WriteTool{})
-	registry.Register(tools.EditTool{})
+	registry.Register(tools.PatchTool{})
 	registry.Register(tools.DeleteTool{})
 
 	cases := []struct {
@@ -80,7 +80,7 @@ func TestSpeculativeExecutionPolicyRejectsMutationTools(t *testing.T) {
 		args string
 	}{
 		{tools.NameWrite, `{"path":"x.txt","content":"x"}`},
-		{tools.NameEdit, `{"path":"x.txt","patch":"@@\n-old\n+new\n"}`},
+		{tools.NamePatch, `{"path":"x.txt","patch":"@@\n-old\n+new\n"}`},
 		{tools.NameDelete, `{"paths":["x.txt"],"reason":"cleanup"}`},
 	}
 	for _, tc := range cases {

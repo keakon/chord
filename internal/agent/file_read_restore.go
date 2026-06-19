@@ -162,7 +162,7 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 				}
 				candidates[key] = restoreReadCandidate{path: key, hash: hash, durable: durable}
 
-			case tools.NameEdit:
+			case tools.NameEdit, tools.NamePatch:
 				path, key, ok := restoreSinglePathAndKey(args, call.name)
 				if !ok {
 					result.skipInvalidPath()
@@ -269,7 +269,7 @@ func (a *MainAgent) restoreMainTrackedFileState(messages []message.Message) rest
 
 func isTrackedRestoreTool(name string) bool {
 	switch strings.TrimSpace(name) {
-	case tools.NameRead, tools.NameEdit, tools.NameWrite, tools.NameDelete:
+	case tools.NameRead, tools.NameEdit, tools.NamePatch, tools.NameWrite, tools.NameDelete:
 		return true
 	default:
 		return false
@@ -305,7 +305,7 @@ func restoreEffectiveArgs(msg message.Message, call restoreToolCall) (json.RawMe
 
 func restoreSinglePathAndKey(args json.RawMessage, toolName string) (string, string, bool) {
 	path, ok := parseRestoreSinglePath(args)
-	if !ok && toolName == tools.NameEdit {
+	if !ok && (toolName == tools.NameEdit || toolName == tools.NamePatch) {
 		path = tools.ExtractEditPathFromArgsInDir(args, os.Getenv("CHORD_PROJECT_ROOT"))
 		ok = path != ""
 	}

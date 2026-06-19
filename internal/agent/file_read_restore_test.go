@@ -177,6 +177,32 @@ func TestRestoreTrackedFileStateReadThenEditUsesPostWriteHash(t *testing.T) {
 	mustExecuteEdit(t, a, path, "after", "final")
 }
 
+func TestRestoreTrackedFileStateReadThenPatchUsesPostWriteHash(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "demo.txt")
+	readHash := sha256String("before")
+	postHash := sha256String("after")
+	writeTestFile(t, path, "after")
+
+	a := newRestoreEditTestAgent(t, projectRoot)
+	msgs := append(restoreReadMessages(t, "read-1", path, readHash, nil),
+		restoreAssistantCall(t, "patch-1", tools.NamePatch, map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"}, nil),
+		message.Message{
+			Role:       "tool",
+			ToolCallID: "patch-1",
+			ToolStatus: string(ToolResultStatusSuccess),
+			Content:    "Updated " + path,
+			FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: path, SHA256: postHash, Exists: true}}},
+		},
+	)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, msgs)
+	if result.RestoredUsable != 1 || result.RestoredStale != 0 {
+		t.Fatalf("restore result = %+v, want post-write hash usable", result)
+	}
+
+	mustExecuteEdit(t, a, path, "after", "final")
+}
+
 func TestActivateLoadedSessionRebuildsFileTrackerFromLoadedMessages(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
@@ -393,7 +419,7 @@ func newRestoreEditTestAgent(t *testing.T, projectRoot string) *MainAgent {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWD) })
 	a := newTestMainAgent(t, projectRoot)
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
 	a.fileTrack = filelock.NewFileTracker()
 	return a
 }
@@ -425,7 +451,7 @@ func restoreAssistantCall(t *testing.T, callID, name string, args map[string]any
 func executeEdit(t *testing.T, a *MainAgent, path, oldString, newString string) error {
 	t.Helper()
 	args := mustJSONRaw(t, map[string]any{"path": filepath.Base(path), "patch": "@@\n-" + oldString + "\n+" + newString + "\n"})
-	_, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-test", Name: tools.NameEdit, Args: args})
+	_, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-test", Name: tools.NamePatch, Args: args})
 	return err
 }
 

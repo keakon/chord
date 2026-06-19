@@ -74,7 +74,8 @@ func extractToolArgumentInDir(toolName string, args []byte, projectRoot string) 
 		if err := json.Unmarshal(args, &parsed); err == nil && parsed.Command != "" {
 			return parsed.Command
 		}
-	case tools.NameEdit:
+	case tools.NameEdit, tools.NamePatch:
+		// Both edit and patch tools use path extraction
 		if path := tools.ExtractEditPathFromArgsInDir(args, projectRoot); path != "" {
 			return path
 		}

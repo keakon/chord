@@ -32,7 +32,7 @@ func TestWriteToolMarksTouchedFile(t *testing.T) {
 	}
 }
 
-func TestEditToolMarksTouchedFileWithBaseDir(t *testing.T) {
+func TestPatchToolMarksTouchedFileWithBaseDir(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "patched.txt")
 	if _, err := (WriteTool{}).Execute(context.Background(), mustJSON(t, map[string]any{"path": path, "content": "before\n"})); err != nil {
@@ -43,7 +43,7 @@ func TestEditToolMarksTouchedFileWithBaseDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	if _, err := (EditTool{LSP: mgr, BaseDir: dir}).Execute(context.Background(), args); err != nil {
+	if _, err := (PatchTool{LSP: mgr, BaseDir: dir}).Execute(context.Background(), args); err != nil {
 		t.Fatalf("EditTool.Execute: %v", err)
 	}
 	want := []string{path}

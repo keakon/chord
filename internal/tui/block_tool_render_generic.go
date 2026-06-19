@@ -234,7 +234,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	if b.ToolName == tools.NameWrite {
 		return b.renderWriteCall(width, spinnerFrame)
 	}
-	if b.ToolName == tools.NameEdit {
+	if b.ToolName == tools.NameEdit || b.ToolName == tools.NamePatch {
 		return b.renderFileDiffCall(width, spinnerFrame)
 	}
 	if b.ToolName == tools.NameRead {
@@ -261,28 +261,23 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 
 	keys, vals := b.toolArgsParsed()
 	paramSummary, mainPart, grayPart, _, _, _, _ := b.toolHeaderMeta()
+	if mainPart != "" || grayPart != "" {
+		metrics = newWideHeaderToolCardMetrics(width)
+		blockStyle = metrics.blockStyle
+		toolCardBg = metrics.toolCardBg
+		cardWidth = metrics.cardWidth
+		contentWidth = metrics.contentWidth
+	}
 	if paramSummary == "" {
 		paramSummary = extractToolParamsWithParsed(keys, vals, cardWidth-16)
 	} else if runewidth.StringWidth(paramSummary) > cardWidth-16 {
 		paramSummary = runewidth.Truncate(paramSummary, cardWidth-16, "…")
 	}
-	if mainPart != "" || grayPart != "" {
-		if maxMain := cardWidth - 16 - runewidth.StringWidth(grayPart) - 1; maxMain > 0 && runewidth.StringWidth(mainPart) > maxMain {
-			mainPart = runewidth.Truncate(mainPart, maxMain, "…")
-		}
-	}
 	var result []string
 	if b.Collapsed {
 		prefix := b.renderToolPrefix(spinnerFrame)
 		headerLine := renderToolHeaderLine(prefix, b.ToolName)
-		if mainPart != "" || grayPart != "" {
-			headerLine += " " + sanitizeToolDisplayText(mainPart)
-			if grayPart != "" {
-				headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
-			}
-		} else if paramSummary != "" {
-			headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(paramSummary))
-		}
+		headerLine = appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary, cardWidth-4)
 		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 		result = append(result, headerLine)
 
@@ -309,13 +304,8 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 		prefix := b.renderToolPrefix(spinnerFrame)
 		showParamSummary := (mainPart != "" || grayPart != "" || paramSummary != "") && (paramSummary != "" || mainPart != "" || grayPart != "")
 		headerLine := renderToolHeaderLine(prefix, b.ToolName)
-		if mainPart != "" || grayPart != "" {
-			headerLine += " " + sanitizeToolDisplayText(mainPart)
-			if grayPart != "" {
-				headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
-			}
-		} else if showParamSummary && paramSummary != "" {
-			headerLine += " " + DimStyle.Render(sanitizeToolDisplayText(paramSummary))
+		if showParamSummary {
+			headerLine = appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary, cardWidth-4)
 		}
 		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 		if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
@@ -572,7 +562,7 @@ func (b *Block) compactToolResultForceExpandedForRenderWidth(width int) bool {
 }
 
 func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) []string {
-	metrics := newToolCardMetrics(width)
+	metrics := newWideHeaderToolCardMetrics(width)
 	blockStyle := metrics.blockStyle
 	toolCardBg := metrics.toolCardBg
 	cardWidth := metrics.cardWidth
@@ -595,15 +585,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	result := make([]string, 0, 16)
 	prefix := b.renderToolPrefixForExpanded(spinnerFrame, expanded)
 	toolHeaderLine := renderToolHeaderLine(prefix, b.ToolName)
-	if mainPart != "" || grayPart != "" {
-		if maxMain := contentWidth - 20 - runewidth.StringWidth(grayPart) - 1; maxMain > 0 && runewidth.StringWidth(mainPart) > maxMain {
-			mainPart = runewidth.Truncate(mainPart, maxMain, "…")
-		}
-		toolHeaderLine += " " + sanitizeToolDisplayText(mainPart)
-		if grayPart != "" {
-			toolHeaderLine += " " + DimStyle.Render(sanitizeToolDisplayText(grayPart))
-		}
-	}
+	toolHeaderLine = appendToolHeaderSummary(toolHeaderLine, mainPart, grayPart, "", cardWidth-4)
 	toolHeaderLine = buildToolHeaderLine(toolHeaderLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, isActive)
 	result = append(result, toolHeaderLine)
 
@@ -763,9 +745,6 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 		if b.ToolQueuedByExecutionEvent {
 			return queuedToolGlyph
 		}
-		if spinnerFrame != "" {
-			return renderAnimatedToolPrefixGlyph(spinnerFrame)
-		}
 		return pendingToolGlyph
 	}
 	if b.ToolName == tools.NameDelegate {
@@ -817,6 +796,102 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 		return "▸"
 	}
 	return "▾"
+}
+
+func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string, maxWidth int) string {
+	baseWidth := runewidth.StringWidth(stripANSI(headerLine))
+	if baseWidth >= maxWidth {
+		return runewidth.Truncate(headerLine, maxWidth, "…")
+	}
+	budget := maxWidth - baseWidth - 1
+	if budget <= 0 {
+		return headerLine
+	}
+
+	mainPart = sanitizeToolDisplayText(mainPart)
+	grayPart = sanitizeToolDisplayText(grayPart)
+	paramSummary = sanitizeToolDisplayText(paramSummary)
+	if mainPart == "" && grayPart == "" {
+		if paramSummary == "" {
+			return headerLine
+		}
+		return headerLine + " " + DimStyle.Render(truncateToolHeaderTail(paramSummary, budget))
+	}
+	if mainPart == "" {
+		return headerLine + " " + DimStyle.Render(truncateToolHeaderMiddle(grayPart, budget))
+	}
+
+	mainWidth := runewidth.StringWidth(mainPart)
+	grayWidth := runewidth.StringWidth(grayPart)
+	if grayPart == "" || mainWidth >= budget {
+		return headerLine + " " + truncateToolHeaderTail(mainPart, budget)
+	}
+
+	remaining := budget - mainWidth - 1
+	if remaining < 5 {
+		return headerLine + " " + mainPart
+	}
+	if grayWidth > remaining {
+		grayPart = truncateToolHeaderMiddle(grayPart, remaining)
+	}
+	return headerLine + " " + mainPart + " " + DimStyle.Render(grayPart)
+}
+
+func truncateToolHeaderTail(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= maxWidth {
+		return s
+	}
+	if maxWidth == 1 {
+		return "…"
+	}
+	return runewidth.Truncate(s, maxWidth, "…")
+}
+
+func truncateToolHeaderMiddle(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= maxWidth {
+		return s
+	}
+	if maxWidth <= 1 {
+		return "…"
+	}
+	if strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")") {
+		if maxWidth <= 3 {
+			return truncateToolHeaderTail(s, maxWidth)
+		}
+		inner := strings.TrimSuffix(strings.TrimPrefix(s, "("), ")")
+		return "(" + truncateToolHeaderMiddle(inner, maxWidth-2) + ")"
+	}
+	if maxWidth <= 3 {
+		return truncateToolHeaderTail(s, maxWidth)
+	}
+	leftWidth := (maxWidth - 1) / 2
+	rightWidth := maxWidth - 1 - leftWidth
+	return tuiCut(s, 0, leftWidth) + "…" + tuiCutRight(s, rightWidth)
+}
+
+func tuiCutRight(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= maxWidth {
+		return s
+	}
+	runes := []rune(s)
+	width := 0
+	for i := len(runes) - 1; i >= 0; i-- {
+		w := runewidth.RuneWidth(runes[i])
+		if width+w > maxWidth {
+			return string(runes[i+1:])
+		}
+		width += w
+	}
+	return s
 }
 
 func (b *Block) renderToolResult(width int) []string {

@@ -10,7 +10,7 @@ import (
 )
 
 func liveToolDisplayArgs(toolName, argsJSON, result string) string {
-	if toolName == tools.NameEdit {
+	if toolName == tools.NameEdit || toolName == tools.NamePatch {
 		path := tools.ExtractEditPathFromArgs([]byte(argsJSON))
 		if path == "" {
 			return ""
@@ -79,7 +79,7 @@ func shouldRefreshGitStatusAfterToolResult(evt agent.ToolResultEvent) bool {
 		return false
 	}
 	switch evt.Name {
-	case tools.NameWrite, tools.NameEdit, tools.NameDelete:
+	case tools.NameWrite, tools.NameEdit, tools.NamePatch, tools.NameDelete:
 		return true
 	case tools.NameShell:
 		var args struct {
@@ -189,7 +189,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 }
 
 func editedFilePathFromToolResult(evt agent.ToolResultEvent) string {
-	if evt.Name == tools.NameEdit {
+	if evt.Name == tools.NameEdit || evt.Name == tools.NamePatch {
 		return tools.ExtractEditPathFromArgs(json.RawMessage(evt.ArgsJSON))
 	}
 	var args struct {

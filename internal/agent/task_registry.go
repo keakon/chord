@@ -665,12 +665,13 @@ func (a *MainAgent) taskInfosForCompaction() []SubAgentInfo {
 		}
 		selectedRef := ""
 		runningRef := ""
-		if sub.llmClient != nil {
-			selectedRef = sub.llmClient.PrimaryModelRef()
-			if v := sub.llmClient.ActiveVariant(); v != "" {
+		client, modelName := sub.llmSnapshot()
+		if client != nil {
+			selectedRef = client.PrimaryModelRef()
+			if v := client.ActiveVariant(); v != "" {
 				selectedRef += "@" + v
 			}
-			runningRef = formatModelRefForNotification(sub.llmClient.RunningModelRef(), selectedRef, sub.llmClient.ActiveVariant())
+			runningRef = formatModelRefForNotification(client.RunningModelRef(), selectedRef, client.ActiveVariant())
 		}
 		state := sub.State()
 		summary := sub.LastSummary()
@@ -680,7 +681,7 @@ func (a *MainAgent) taskInfosForCompaction() []SubAgentInfo {
 			TaskID:           sub.taskID,
 			AgentDefName:     sub.agentDefName,
 			TaskDesc:         sub.taskDesc,
-			ModelName:        sub.modelName,
+			ModelName:        modelName,
 			SelectedRef:      selectedRef,
 			RunningRef:       runningRef,
 			State:            string(state),

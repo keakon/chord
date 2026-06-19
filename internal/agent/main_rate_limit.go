@@ -75,15 +75,15 @@ func (a *MainAgent) mainRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot {
 // sidebar MODEL/Keys and Codex rate-limit snapshot selection.
 func (a *MainAgent) tuiFocusedLLMAndRef() (client *llm.Client, ref string) {
 	if sub := a.validFocusedSubAgent(); sub != nil {
-		if sub.llmClient == nil {
+		client, _ = sub.llmSnapshot()
+		if client == nil {
 			return nil, ""
 		}
-		c := sub.llmClient
-		ref = strings.TrimSpace(c.RunningModelRef())
+		ref = strings.TrimSpace(client.RunningModelRef())
 		if ref == "" {
-			ref = strings.TrimSpace(c.PrimaryModelRef())
+			ref = strings.TrimSpace(client.PrimaryModelRef())
 		}
-		return c, ref
+		return client, ref
 	}
 	a.llmMu.RLock()
 	client = a.llmClient

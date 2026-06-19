@@ -53,6 +53,7 @@ permission:
 
 大多数工具都按上面的 `allow` / `ask` / `deny` 字面含义执行，但少数编排工具有意带有额外联动，使权限设置与 Chord 能安全运行的工作流保持一致：
 
+- `edit` 和 `patch` 属于同一个文件编辑工具族，只是面向模型暴露的编辑格式不同。当另一个编辑器没有同名显式规则时，一个编辑器的规则会作用到另一个编辑器。这也包括 `deny`：`*: allow` 后面配置 `edit: deny` 会同时禁用 `edit` 和 `patch`，因为 `patch` 继承了编辑工具族的拒绝规则。如果需要两个格式有不同行为，请同时配置 `edit` 和 `patch`。例如 `edit: allow` 加 `patch: deny` 会禁用 `patch` 但保留 `edit`，GPT/o 系列模型会退回使用 `edit`；反过来，`patch: allow` 加 `edit: deny` 会让默认偏好 `edit` 的非 GPT 模型退回使用 `patch`。
 - `handoff` 和 `done` 会被当作控制 gate。设为 `deny` 会隐藏或禁用对应工作流；设为 `allow` 或 `ask` 都会让工作流可用，真正交接 / 完成时 Chord 仍可能显示本地确认（例如 loop 的 `done` 确认）。也就是说，`ask` 不是这两个工具的“更强工作流模式”，它主要表示工具保持可见 / 可用，同时保留 Chord 内建确认 gate。这个取舍可以避免模型看到一个可用控制工具却最终无法完成，同时仍防止静默切换角色或过早退出 loop。
 - `delegate` 控制的是一组委派工作流。如果 `delegate` 为 `deny`，Chord 也会禁用通过 `cancel` 取消 SubAgent、从 SubAgent 中隐藏嵌套的 `delegate` / `cancel`，并把 SubAgent 的 `notify` 限制为只通知自己的 owner，而不是任意指定目标。原因是取消或定向通知其他委派任务本身属于管理 delegated workstreams；如果禁用了 `delegate` 却允许这些片段，会形成一个不完整但仍可干扰委派工作的控制面。
 - 因此 `cancel` 依赖 `delegate`：即使配置了 `cancel: allow`，只要 `delegate` 被禁用，`cancel` 仍会被拒绝。若希望某个角色能取消委派工作，需要同时启用 `delegate` 和 `cancel`。

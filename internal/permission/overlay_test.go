@@ -126,6 +126,7 @@ func TestOverlay_DirectLookupsMatchMergedRuleset(t *testing.T) {
 	o.SetBase(Ruleset{
 		{Permission: "Shell", Pattern: "*", Action: ActionAsk},
 		{Permission: "Read", Pattern: "*", Action: ActionAllow},
+		{Permission: "Edit", Pattern: "*", Action: ActionDeny},
 	})
 	if err := o.AddPersistentRule("builder", Rule{Permission: "Shell", Pattern: "git *", Action: ActionAllow}, ScopeUserGlobal, "user.yaml"); err != nil {
 		t.Fatalf("AddPersistentRule user-global failed: %v", err)
@@ -144,6 +145,7 @@ func TestOverlay_DirectLookupsMatchMergedRuleset(t *testing.T) {
 		{"Shell", "git status"},
 		{"Read", "README.md"},
 		{"Write", "README.md"},
+		{"Patch", "README.md"},
 	}
 	merged := o.MergedRuleset()
 	for _, q := range queries {
@@ -159,6 +161,65 @@ func TestOverlay_DirectLookupsMatchMergedRuleset(t *testing.T) {
 	}
 	if got, want := o.IsDisabled("Shell"), merged.IsDisabled("Shell"); got != want {
 		t.Fatalf("IsDisabled(Shell) = %v, want merged %v", got, want)
+	}
+	if got, want := o.IsDisabled("Patch"), merged.IsDisabled("Patch"); got != want {
+		t.Fatalf("IsDisabled(Patch) = %v, want merged %v", got, want)
+	}
+}
+
+func TestOverlay_MergedRulesetReturnsCopy(t *testing.T) {
+	o := NewOverlay()
+	o.SetActiveRole("builder")
+	o.SetBase(Ruleset{{Permission: "Shell", Pattern: "*", Action: ActionAsk}})
+	o.AddSessionRule("builder", Rule{Permission: "Shell", Pattern: "git *", Action: ActionAllow})
+
+	merged := o.MergedRuleset()
+	if got := len(merged); got != 2 {
+		t.Fatalf("merged len = %d, want 2", got)
+	}
+	merged[1] = Rule{Permission: "Shell", Pattern: "git *", Action: ActionDeny}
+
+	if got := o.Evaluate("Shell", "git status"); got != ActionAllow {
+		t.Fatalf("Evaluate after mutating returned merged ruleset = %s, want %s", got, ActionAllow)
+	}
+	mergedAgain := o.MergedRuleset()
+	if got := mergedAgain[1].Action; got != ActionAllow {
+		t.Fatalf("merged ruleset action after external mutation = %s, want %s", got, ActionAllow)
+	}
+}
+
+func TestOverlay_MergedRulesetCacheInvalidatesOnStateChanges(t *testing.T) {
+	o := NewOverlay()
+	o.SetActiveRole("builder")
+	o.SetBase(Ruleset{{Permission: "Shell", Pattern: "*", Action: ActionAsk}})
+
+	if got := o.Evaluate("Shell", "git status"); got != ActionAsk {
+		t.Fatalf("initial Evaluate = %s, want %s", got, ActionAsk)
+	}
+	o.AddSessionRule("builder", Rule{Permission: "Shell", Pattern: "git *", Action: ActionAllow})
+	if got := o.Evaluate("Shell", "git status"); got != ActionAllow {
+		t.Fatalf("Evaluate after AddSessionRule = %s, want %s", got, ActionAllow)
+	}
+	o.SetActiveRole("planner")
+	if got := o.Evaluate("Shell", "git status"); got != ActionAsk {
+		t.Fatalf("Evaluate after role switch = %s, want %s", got, ActionAsk)
+	}
+	o.SetActiveRole("builder")
+	if !o.RemoveSessionRule(0) {
+		t.Fatal("RemoveSessionRule = false, want true")
+	}
+	if got := o.Evaluate("Shell", "git status"); got != ActionAsk {
+		t.Fatalf("Evaluate after RemoveSessionRule = %s, want %s", got, ActionAsk)
+	}
+	o.AddSessionRule("builder", Rule{Permission: "Shell", Pattern: "git status", Action: ActionAllow})
+	if got := o.Evaluate("Shell", "git status"); got != ActionAllow {
+		t.Fatalf("Evaluate after second AddSessionRule = %s, want %s", got, ActionAllow)
+	}
+	if err := o.RemoveAddedRule(1); err != nil {
+		t.Fatalf("RemoveAddedRule failed: %v", err)
+	}
+	if got := o.Evaluate("Shell", "git status"); got != ActionAsk {
+		t.Fatalf("Evaluate after RemoveAddedRule session removal = %s, want %s", got, ActionAsk)
 	}
 }
 

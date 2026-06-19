@@ -84,10 +84,11 @@ func TestShouldQueueLSPDiagnosticOverlay_RequiresRelevantChangedDiagnostics(t *t
 
 func TestLSPDiagnosticOverlay_IsInjectedAsOneShotOverlay(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.tools.Register(tools.EditTool{})
+	a.modelName = "gpt-4" // Ensure PatchTool is visible
+	a.tools.Register(tools.PatchTool{})
 	a.globalConfig = &config.Config{LSP: config.LSPConfig{"gopls": {Command: "gopls"}}}
 	payload := &ToolResultPayload{
-		Name:       tools.NameEdit,
+		Name:       tools.NamePatch,
 		ArgsJSON:   `{"path":"pkg/foo.go"}`,
 		FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "/repo/pkg/foo.go", Exists: true}}},
 		LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 2, Warnings: 1}},
@@ -123,8 +124,9 @@ func TestLSPDiagnosticOverlay_IsInjectedAsOneShotOverlay(t *testing.T) {
 
 func TestLSPDiagnosticOverlay_MultipleQueuedResultsStillProduceSingleGenericReminder(t *testing.T) {
 	a := newReadyTestMainAgent(t)
+	a.modelName = "gpt-4" // Ensure PatchTool is visible
 	a.tools.Register(tools.WriteTool{})
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.PatchTool{})
 	a.globalConfig = &config.Config{LSP: config.LSPConfig{"gopls": {Command: "gopls"}}}
 	first := &ToolResultPayload{
 		Name:       tools.NameWrite,
@@ -133,7 +135,7 @@ func TestLSPDiagnosticOverlay_MultipleQueuedResultsStillProduceSingleGenericRemi
 		LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}},
 	}
 	second := &ToolResultPayload{
-		Name:       tools.NameEdit,
+		Name:       tools.NamePatch,
 		ArgsJSON:   `{"path":"pkg/bar.go"}`,
 		FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "/repo/pkg/bar.go", Exists: true}}},
 		LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 0, Warnings: 2}},

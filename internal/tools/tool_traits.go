@@ -8,6 +8,7 @@ const (
 	NameRead         = toolname.Read
 	NameWrite        = toolname.Write
 	NameEdit         = toolname.Edit
+	NamePatch        = toolname.Patch
 	NameDelete       = toolname.Delete
 	NameGrep         = toolname.Grep
 	NameGlob         = toolname.Glob
@@ -48,7 +49,7 @@ func IsReadLike(name string) bool {
 // IsFileMutation reports whether the tool mutates files in the workspace.
 func IsFileMutation(name string) bool {
 	switch NormalizeName(name) {
-	case NameWrite, NameEdit, NameDelete:
+	case NameWrite, NameEdit, NamePatch, NameDelete:
 		return true
 	default:
 		return false

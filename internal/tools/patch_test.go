@@ -9,58 +9,186 @@ import (
 	"testing"
 )
 
-func TestEditParserAcceptsSingleUpdate(t *testing.T) {
-	parsed, err := ParseEdit("a/b.txt", "@@\n-old\n+new\n")
+func TestPatchToolReportsPlanningProgressWithReporter(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\nthree\nfour\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "@@\n one\n-two\n+TWO\n@@\n three\n-four\n+FOUR\n"
+	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
+
+	recorder := &progressRecorder{}
+	ctx := WithToolProgressReporter(context.Background(), recorder)
+	if _, err := (PatchTool{BaseDir: dir}).Execute(ctx, args); err != nil {
+		t.Fatalf("PatchTool.Execute: %v", err)
+	}
+
+	if len(recorder.snapshots) == 0 {
+		t.Fatal("expected progress snapshots")
+	}
+	var gotPlanning bool
+	for _, snap := range recorder.snapshots {
+		if strings.Contains(snap.Text, "matching hunk 2/2") {
+			gotPlanning = true
+			break
+		}
+	}
+	if !gotPlanning {
+		t.Fatalf("progress snapshots = %#v, want planning progress for second hunk", recorder.snapshots)
+	}
+	got, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("ParseEdit: %v", err)
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != "one\nTWO\nthree\nFOUR\n" {
+		t.Fatalf("file = %q", got)
+	}
+}
+
+func TestPatchParserAcceptsSingleUpdate(t *testing.T) {
+	parsed, err := ParsePatch("a/b.txt", "@@\n-old\n+new\n")
+	if err != nil {
+		t.Fatalf("ParsePatch: %v", err)
 	}
 	if parsed.Path != filepath.Join("a", "b.txt") || len(parsed.Hunks) != 1 {
 		t.Fatalf("parsed = %+v", parsed)
 	}
 }
 
-func TestEditParserRejectsUnsupportedOperations(t *testing.T) {
-	for _, patch := range []string{
-		"*** Add File: a.txt\n+new\n",
-		"*** Delete File: a.txt\n",
-		"*** Move to: b.txt\n",
-		"*** Update File: b.txt\n@@\n-a\n+b\n",
-		"@@\n-a\n+b\n*** Update File: b.txt\n@@\n-c\n+d\n",
-	} {
-		_, err := ParseEdit("a.txt", patch)
-		if err == nil || !strings.Contains(err.Error(), "No files were modified") {
-			t.Fatalf("ParseEdit(%q) err = %v", patch, err)
-		}
+func TestPatchParserRejectsUnsupportedOperations(t *testing.T) {
+	tests := []struct {
+		name       string
+		patch      string
+		wantSubstr []string
+		notSubstr  []string
+	}{
+		{
+			name:  "add file",
+			patch: "*** Add File: a.txt\n+new\n",
+			wantSubstr: []string{
+				"*** Add File: a.txt",
+				"Use write to create files.",
+				"No files were modified",
+			},
+			notSubstr: []string{"Use delete to remove whole files."},
+		},
+		{
+			name:  "delete file",
+			patch: "*** Delete File: a.txt\n",
+			wantSubstr: []string{
+				"*** Delete File: a.txt",
+				"Use delete to remove whole files.",
+				"No files were modified",
+			},
+			notSubstr: []string{"Use write to create files."},
+		},
+		{
+			name:  "move file",
+			patch: "*** Move to: b.txt\n",
+			wantSubstr: []string{
+				"*** Move to: b.txt",
+				"Use separate read/write/delete steps for rename or move workflows.",
+				"No files were modified",
+			},
+		},
+		{
+			name:  "update different file",
+			patch: "*** Update File: b.txt\n@@\n-a\n+b\n",
+			wantSubstr: []string{
+				"*** Update File: b.txt",
+				"Split multi-file update patches into separate patch calls, one file per call.",
+				"No files were modified",
+			},
+			notSubstr: []string{"Use delete to remove whole files.", "Use write to create files."},
+		},
+		{
+			name:  "update second file after hunk",
+			patch: "@@\n-a\n+b\n*** Update File: b.txt\n@@\n-c\n+d\n",
+			wantSubstr: []string{
+				"*** Update File: b.txt",
+				"Split multi-file update patches into separate patch calls, one file per call.",
+				"No files were modified",
+			},
+			notSubstr: []string{"Use delete to remove whole files.", "Use write to create files."},
+		},
+		{
+			name:  "update plus delete",
+			patch: "*** Update File: b.txt\n@@\n-a\n+b\n*** Delete File: old.txt\n",
+			wantSubstr: []string{
+				"unsupported patch operations:",
+				"*** Update File: b.txt",
+				"*** Delete File: old.txt",
+				"Mixed apply_patch-style operations were detected.",
+				"Split multi-file update patches into separate patch calls, one file per call.",
+				"Use delete to remove whole files.",
+				"No files were modified",
+			},
+			notSubstr: []string{"Use write to create files."},
+		},
+		{
+			name:  "add plus move",
+			patch: "*** Add File: new.txt\n+new\n*** Move to: renamed.txt\n",
+			wantSubstr: []string{
+				"unsupported patch operations:",
+				"*** Add File: new.txt",
+				"*** Move to: renamed.txt",
+				"Mixed apply_patch-style operations were detected.",
+				"Use write to create files.",
+				"Use separate read/write/delete steps for rename or move workflows.",
+				"No files were modified",
+			},
+			notSubstr: []string{"Use delete to remove whole files.", "Split multi-file update patches into separate patch calls, one file per call."},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParsePatch("a.txt", tt.patch)
+			if err == nil {
+				t.Fatalf("ParsePatch(%q) unexpectedly succeeded", tt.patch)
+			}
+			for _, want := range tt.wantSubstr {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("ParsePatch(%q) err = %q, want substring %q", tt.patch, err.Error(), want)
+				}
+			}
+			for _, notWant := range tt.notSubstr {
+				if strings.Contains(err.Error(), notWant) {
+					t.Fatalf("ParsePatch(%q) err = %q, should not mention %q", tt.patch, err.Error(), notWant)
+				}
+			}
+		})
 	}
 }
 
-func TestEditParserStripsEnvelopeMarkers(t *testing.T) {
+func TestPatchParserStripsEnvelopeMarkers(t *testing.T) {
 	patch := "*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch\n"
-	parsed, err := ParseEdit("a.txt", patch)
+	parsed, err := ParsePatch("a.txt", patch)
 	if err != nil {
-		t.Fatalf("ParseEdit: %v", err)
+		t.Fatalf("ParsePatch: %v", err)
 	}
 	if len(parsed.Hunks) != 1 || len(parsed.Hunks[0].Lines) != 2 {
 		t.Fatalf("parsed = %+v", parsed)
 	}
 }
 
-func TestEditParserStripsTrailingEndPatch(t *testing.T) {
+func TestPatchParserStripsTrailingEndPatch(t *testing.T) {
 	patch := "@@\n-old\n+new\n*** End Patch"
-	parsed, err := ParseEdit("a.txt", patch)
+	parsed, err := ParsePatch("a.txt", patch)
 	if err != nil {
-		t.Fatalf("ParseEdit: %v", err)
+		t.Fatalf("ParsePatch: %v", err)
 	}
 	if len(parsed.Hunks) != 1 || parsed.Hunks[0].Lines[1].Text != "new" {
 		t.Fatalf("parsed = %+v", parsed)
 	}
 }
 
-func TestEditParserKeepsEnvelopeLikeHunkContext(t *testing.T) {
+func TestPatchParserKeepsEnvelopeLikeHunkContext(t *testing.T) {
 	patch := "@@\n *** Begin Patch\n-old\n+new\n *** End Patch\n*** End Patch"
-	parsed, err := ParseEdit("a.txt", patch)
+	parsed, err := ParsePatch("a.txt", patch)
 	if err != nil {
-		t.Fatalf("ParseEdit: %v", err)
+		t.Fatalf("ParsePatch: %v", err)
 	}
 	if len(parsed.Hunks) != 1 || len(parsed.Hunks[0].Lines) != 4 {
 		t.Fatalf("parsed = %+v", parsed)
@@ -70,10 +198,10 @@ func TestEditParserKeepsEnvelopeLikeHunkContext(t *testing.T) {
 	}
 }
 
-func TestEditParserTreatsBlankLinesAsContext(t *testing.T) {
-	parsed, err := ParseEdit("a.txt", "@@\n a\n\n-b\n+B\n")
+func TestPatchParserTreatsBlankLinesAsContext(t *testing.T) {
+	parsed, err := ParsePatch("a.txt", "@@\n a\n\n-b\n+B\n")
 	if err != nil {
-		t.Fatalf("ParseEdit: %v", err)
+		t.Fatalf("ParsePatch: %v", err)
 	}
 	if len(parsed.Hunks) != 1 || len(parsed.Hunks[0].Lines) != 4 {
 		t.Fatalf("parsed = %+v", parsed)
@@ -83,7 +211,7 @@ func TestEditParserTreatsBlankLinesAsContext(t *testing.T) {
 	}
 }
 
-func TestEditToolMatchesBlankContextLine(t *testing.T) {
+func TestPatchToolMatchesBlankContextLine(t *testing.T) {
 	dir := t.TempDir()
 	oldWD, _ := os.Getwd()
 	if err := os.Chdir(dir); err != nil {
@@ -96,8 +224,8 @@ func TestEditToolMatchesBlankContextLine(t *testing.T) {
 	// The blank line between "a" and "-b" is a bare empty context line.
 	patch := "@@\n a\n\n-b\n+B\n"
 	args, _ := json.Marshal(map[string]string{"path": "blank.txt", "patch": patch})
-	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
-		t.Fatalf("EditTool.Execute: %v", err)
+	if _, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("PatchTool.Execute: %v", err)
 	}
 	got, _ := os.ReadFile("blank.txt")
 	if string(got) != "a\n\nB\n" {
@@ -105,23 +233,54 @@ func TestEditToolMatchesBlankContextLine(t *testing.T) {
 	}
 }
 
-func TestEditParserRejectsInvalidPaths(t *testing.T) {
+func TestReplaceEditToolUsesBaseDirForRelativePath(t *testing.T) {
+	dir := t.TempDir()
+	otherDir := t.TempDir()
+	path := filepath.Join(dir, "demo.txt")
+	if err := os.WriteFile(path, []byte("before\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "demo.txt"), []byte("wrong\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldWD, _ := os.Getwd()
+	if err := os.Chdir(otherDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
+	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "old_string": "before", "new_string": "after"})
+	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("EditTool.Execute: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "after\n" {
+		t.Fatalf("base dir file = %q", got)
+	}
+	otherGot, _ := os.ReadFile(filepath.Join(otherDir, "demo.txt"))
+	if string(otherGot) != "wrong\n" {
+		t.Fatalf("cwd file was modified: %q", otherGot)
+	}
+}
+
+func TestPatchParserRejectsInvalidPaths(t *testing.T) {
 	for _, path := range []string{"", "."} {
-		if _, err := ParseEdit(path, "@@\n-a\n+b\n"); err == nil {
-			t.Fatalf("ParseEdit accepted invalid path %q", path)
+		if _, err := ParsePatch(path, "@@\n-a\n+b\n"); err == nil {
+			t.Fatalf("ParsePatch accepted invalid path %q", path)
 		}
 	}
 }
 
-func TestEditParserAcceptsExternalPathForms(t *testing.T) {
+func TestPatchParserAcceptsExternalPathForms(t *testing.T) {
 	for _, path := range []string{filepath.Join("..", "a.txt"), filepath.Join("a", "..", "..", "b.txt"), filepath.Join(string(filepath.Separator), "tmp", "a.txt"), "~/a.txt"} {
-		if _, err := ParseEdit(path, "@@\n-a\n+b\n"); err != nil {
-			t.Fatalf("ParseEdit rejected external path form %q: %v", path, err)
+		if _, err := ParsePatch(path, "@@\n-a\n+b\n"); err != nil {
+			t.Fatalf("ParsePatch rejected external path form %q: %v", path, err)
 		}
 	}
 }
 
-func TestEditToolReplacesInsertsAndDeletes(t *testing.T) {
+func TestPatchToolReplacesInsertsAndDeletes(t *testing.T) {
 	dir := t.TempDir()
 	oldWD, _ := os.Getwd()
 	if err := os.Chdir(dir); err != nil {
@@ -133,9 +292,9 @@ func TestEditToolReplacesInsertsAndDeletes(t *testing.T) {
 	}
 	patch := "@@\n one\n-two\n+TWO\n three\n@@\n three\n+four\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
-	out, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	out, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args)
 	if err != nil {
-		t.Fatalf("EditTool.Execute: %v", err)
+		t.Fatalf("PatchTool.Execute: %v", err)
 	}
 	got, _ := os.ReadFile("demo.txt")
 	if string(got) != "one\nTWO\nthree\nfour\n" {
@@ -146,7 +305,7 @@ func TestEditToolReplacesInsertsAndDeletes(t *testing.T) {
 	}
 }
 
-func TestEditToolIgnoresUnifiedDiffLineRangeHeader(t *testing.T) {
+func TestPatchToolIgnoresUnifiedDiffLineRangeHeader(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "demo.txt")
 	if err := os.WriteFile(path, []byte("one\ntwo\nthree\n"), 0644); err != nil {
@@ -154,8 +313,8 @@ func TestEditToolIgnoresUnifiedDiffLineRangeHeader(t *testing.T) {
 	}
 	patch := "@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
-	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
-		t.Fatalf("EditTool.Execute: %v", err)
+	if _, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("PatchTool.Execute: %v", err)
 	}
 	got, _ := os.ReadFile(path)
 	if string(got) != "one\nTWO\nthree\n" {
@@ -163,27 +322,27 @@ func TestEditToolIgnoresUnifiedDiffLineRangeHeader(t *testing.T) {
 	}
 }
 
-func TestEditParserPreservesUnifiedDiffSectionHeader(t *testing.T) {
-	parsed, err := ParseEdit("demo.go", "@@ -3,3 +3,4 @@ func second() {\n \tprintln(\"x\")\n+\tprintln(\"y\")\n }\n")
+func TestPatchParserPreservesUnifiedDiffSectionHeader(t *testing.T) {
+	parsed, err := ParsePatch("demo.go", "@@ -3,3 +3,4 @@ func second() {\n \tprintln(\"x\")\n+\tprintln(\"y\")\n }\n")
 	if err != nil {
-		t.Fatalf("ParseEdit: %v", err)
+		t.Fatalf("ParsePatch: %v", err)
 	}
 	if len(parsed.Hunks) != 1 || parsed.Hunks[0].Header != "func second() {" {
 		t.Fatalf("parsed = %+v", parsed)
 	}
 }
 
-func TestEditParserPreservesUnifiedDiffSectionWhitespace(t *testing.T) {
-	parsed, err := ParseEdit("demo.go", "@@ -3,3 +3,4 @@     func  second() {\n \tprintln(\"x\")\n+\tprintln(\"y\")\n }\n")
+func TestPatchParserPreservesUnifiedDiffSectionWhitespace(t *testing.T) {
+	parsed, err := ParsePatch("demo.go", "@@ -3,3 +3,4 @@     func  second() {\n \tprintln(\"x\")\n+\tprintln(\"y\")\n }\n")
 	if err != nil {
-		t.Fatalf("ParseEdit: %v", err)
+		t.Fatalf("ParsePatch: %v", err)
 	}
 	if len(parsed.Hunks) != 1 || parsed.Hunks[0].Header != "    func  second() {" {
 		t.Fatalf("header = %q", parsed.Hunks[0].Header)
 	}
 }
 
-func TestEditToolUsesUnifiedDiffSectionHeaderAsAnchor(t *testing.T) {
+func TestPatchToolUsesUnifiedDiffSectionHeaderAsAnchor(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "demo.go")
 	content := "package demo\n\nfunc first() {\n\tprintln(\"x\")\n}\n\nfunc second() {\n\tprintln(\"x\")\n}\n"
@@ -192,8 +351,8 @@ func TestEditToolUsesUnifiedDiffSectionHeaderAsAnchor(t *testing.T) {
 	}
 	patch := "@@ -6,3 +6,4 @@ func second() {\n \tprintln(\"x\")\n+\tprintln(\"y\")\n }\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.go", "patch": patch})
-	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
-		t.Fatalf("EditTool.Execute: %v", err)
+	if _, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("PatchTool.Execute: %v", err)
 	}
 	got, _ := os.ReadFile(path)
 	want := "package demo\n\nfunc first() {\n\tprintln(\"x\")\n}\n\nfunc second() {\n\tprintln(\"x\")\n\tprintln(\"y\")\n}\n"
@@ -202,7 +361,7 @@ func TestEditToolUsesUnifiedDiffSectionHeaderAsAnchor(t *testing.T) {
 	}
 }
 
-func TestEditToolUsesIndentedUnifiedDiffSectionHeaderAsAnchor(t *testing.T) {
+func TestPatchToolUsesIndentedUnifiedDiffSectionHeaderAsAnchor(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "demo.py")
 	content := "def first():\n    value = 1\n\ndef second():\n    value = 1\n"
@@ -211,8 +370,8 @@ func TestEditToolUsesIndentedUnifiedDiffSectionHeaderAsAnchor(t *testing.T) {
 	}
 	patch := "@@ -3,2 +3,3 @@     def second():\n     value = 1\n+    value = 2\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.py", "patch": patch})
-	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
-		t.Fatalf("EditTool.Execute: %v", err)
+	if _, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("PatchTool.Execute: %v", err)
 	}
 	got, _ := os.ReadFile(path)
 	want := "def first():\n    value = 1\n\ndef second():\n    value = 1\n    value = 2\n"
@@ -221,7 +380,7 @@ func TestEditToolUsesIndentedUnifiedDiffSectionHeaderAsAnchor(t *testing.T) {
 	}
 }
 
-func TestEditToolSupportsMultipleUnifiedDiffRangeHeaders(t *testing.T) {
+func TestPatchToolSupportsMultipleUnifiedDiffRangeHeaders(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "demo.txt")
 	if err := os.WriteFile(path, []byte("one\ntwo\nthree\nfour\n"), 0644); err != nil {
@@ -229,8 +388,8 @@ func TestEditToolSupportsMultipleUnifiedDiffRangeHeaders(t *testing.T) {
 	}
 	patch := "@@ -1,2 +1,2 @@\n one\n-two\n+TWO\n@@ -3,2 +3,3 @@\n three\n four\n+five\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
-	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
-		t.Fatalf("EditTool.Execute: %v", err)
+	if _, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("PatchTool.Execute: %v", err)
 	}
 	got, _ := os.ReadFile(path)
 	if string(got) != "one\nTWO\nthree\nfour\nfive\n" {
@@ -238,19 +397,44 @@ func TestEditToolSupportsMultipleUnifiedDiffRangeHeaders(t *testing.T) {
 	}
 }
 
-func TestEditToolPatchDescriptionEmphasizesPreferredFormat(t *testing.T) {
-	params := (EditTool{}).Parameters()
+func TestPatchToolPatchDescriptionEmphasizesPreferredFormat(t *testing.T) {
+	params := (PatchTool{}).Parameters()
 	props := params["properties"].(map[string]any)
 	patch := props["patch"].(map[string]any)
 	desc := patch["description"].(string)
-	for _, want := range []string{"Use direct @@ or @@ <verified header>", "Do not rely on unified diff line numbers or apply_patch wrappers", "Example:"} {
+	for _, want := range []string{"Patch hunk text for the single JSON path above.", "Use direct @@ or @@ <verified header>", "Do not rely on unified diff line numbers or apply_patch wrappers", "Do not include changes for multiple files.", "Example:"} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description missing %q: %q", want, desc)
 		}
 	}
 }
 
-func TestEditToolSupportsParentDirectoryPath(t *testing.T) {
+func TestPatchToolDescriptionExplainsSingleFileSubset(t *testing.T) {
+	desc := (PatchTool{}).Description()
+	for _, want := range []string{
+		"This is a single-file patch tool, not a general apply_patch executor",
+		"the patch text must modify only the JSON path above",
+		"it must not include changes for multiple files",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("description missing %q: %q", want, desc)
+		}
+	}
+}
+
+func TestPatchToolPathDescriptionWarnsAgainstGuessing(t *testing.T) {
+	params := (PatchTool{}).Parameters()
+	props := params["properties"].(map[string]any)
+	path := props["path"].(map[string]any)
+	desc := path["description"].(string)
+	for _, want := range []string{"verified existing file", "Do not guess paths"} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("path description missing %q: %q", want, desc)
+		}
+	}
+}
+
+func TestPatchToolSupportsParentDirectoryPath(t *testing.T) {
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "repo")
 	if err := os.Mkdir(dir, 0755); err != nil {
@@ -262,9 +446,9 @@ func TestEditToolSupportsParentDirectoryPath(t *testing.T) {
 	}
 	patch := "@@\n-old\n+new\n"
 	args, _ := json.Marshal(map[string]string{"path": "../outside.txt", "patch": patch})
-	out, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	out, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args)
 	if err != nil {
-		t.Fatalf("EditTool.Execute: %v", err)
+		t.Fatalf("PatchTool.Execute: %v", err)
 	}
 	got, _ := os.ReadFile(target)
 	if string(got) != "new\n" {
@@ -275,7 +459,7 @@ func TestEditToolSupportsParentDirectoryPath(t *testing.T) {
 	}
 }
 
-func TestEditToolUsesHunkHeaderAsAnchor(t *testing.T) {
+func TestPatchToolUsesHunkHeaderAsAnchor(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "demo.go")
 	content := "package demo\n\nfunc first() {\n\tprintln(\"x\")\n}\n\nfunc second() {\n\tprintln(\"x\")\n}\n"
@@ -284,8 +468,8 @@ func TestEditToolUsesHunkHeaderAsAnchor(t *testing.T) {
 	}
 	patch := "@@ func second() {\n \tprintln(\"x\")\n+\tprintln(\"y\")\n }\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.go", "patch": patch})
-	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
-		t.Fatalf("EditTool.Execute: %v", err)
+	if _, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("PatchTool.Execute: %v", err)
 	}
 	got, _ := os.ReadFile(path)
 	want := "package demo\n\nfunc first() {\n\tprintln(\"x\")\n}\n\nfunc second() {\n\tprintln(\"x\")\n\tprintln(\"y\")\n}\n"
@@ -294,10 +478,10 @@ func TestEditToolUsesHunkHeaderAsAnchor(t *testing.T) {
 	}
 }
 
-func TestEditAmbiguousWeakContextAppliesFirstMatch(t *testing.T) {
-	got, err := applyParsedPatch("func a() {\n}\n\nfunc b() {\n}\n", parsedEdit{
+func TestPatchAmbiguousWeakContextAppliesFirstMatch(t *testing.T) {
+	got, err := applyParsedPatch("func a() {\n}\n\nfunc b() {\n}\n", parsedPatch{
 		Path: "demo.go",
-		Hunks: []editHunk{{Lines: []editLine{
+		Hunks: []patchHunk{{Lines: []patchLine{
 			{Kind: ' ', Text: "}"},
 			{Kind: '+', Text: ""},
 			{Kind: '+', Text: "func c() {"},
@@ -312,7 +496,7 @@ func TestEditAmbiguousWeakContextAppliesFirstMatch(t *testing.T) {
 	}
 }
 
-func TestEditToolDiagnosesMissingHunkLineNumbers(t *testing.T) {
+func TestPatchToolDiagnosesMissingHunkLineNumbers(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "demo.txt")
 	if err := os.WriteFile(path, []byte("alpha\nbeta\n"), 0644); err != nil {
@@ -320,13 +504,13 @@ func TestEditToolDiagnosesMissingHunkLineNumbers(t *testing.T) {
 	}
 	patch := "@@\n 1\talpha\n-2\tbeta\n+gamma\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
-	_, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	_, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args)
 	if err == nil || !strings.Contains(err.Error(), "tool-added read metadata, copied line numbers, or a tab separator") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestEditToolDiagnosesMissingHunkReadResultHeader(t *testing.T) {
+func TestPatchToolDiagnosesMissingHunkReadResultHeader(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "demo.txt")
 	if err := os.WriteFile(path, []byte("alpha\nbeta\n"), 0644); err != nil {
@@ -334,13 +518,13 @@ func TestEditToolDiagnosesMissingHunkReadResultHeader(t *testing.T) {
 	}
 	patch := "@@\n READ_RESULT lines=1-2 total=2\n-alpha\n+gamma\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
-	_, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	_, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args)
 	if err == nil || !strings.Contains(err.Error(), "remove the READ_RESULT line") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestEditToolDiagnosesMissingHunkWhitespace(t *testing.T) {
+func TestPatchToolDiagnosesMissingHunkWhitespace(t *testing.T) {
 	got := diagnoseMissingHunk([]string{"\treturn nil"}, []string{"return nil"}, 0)
 	if !strings.Contains(got, "exact indentation") {
 		t.Fatalf("diagnosis = %q", got)
@@ -386,7 +570,7 @@ func TestNearestLineDiagnosticStaysSilentForDissimilarLines(t *testing.T) {
 	}
 }
 
-func TestEditToolDiagnosesMissingHunkStaleText(t *testing.T) {
+func TestPatchToolDiagnosesMissingHunkStaleText(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "demo.txt")
 	if err := os.WriteFile(path, []byte("alpha\nbeta\n"), 0644); err != nil {
@@ -394,13 +578,13 @@ func TestEditToolDiagnosesMissingHunkStaleText(t *testing.T) {
 	}
 	patch := "@@\n-gamma\n+delta\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
-	_, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	_, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args)
 	if err == nil || !strings.Contains(err.Error(), "not found in the current file") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestEditToolDiagnosesMissingHunkHeaderAnchor(t *testing.T) {
+func TestPatchToolDiagnosesMissingHunkHeaderAnchor(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "demo_test.go")
 	if err := os.WriteFile(path, []byte("package demo\n\nfunc TestActual(t *testing.T) {\n}\n"), 0644); err != nil {
@@ -408,13 +592,13 @@ func TestEditToolDiagnosesMissingHunkHeaderAnchor(t *testing.T) {
 	}
 	patch := "@@ func TestImagined(t *testing.T) {\n }\n+// added\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo_test.go", "patch": patch})
-	_, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	_, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args)
 	if err == nil || !strings.Contains(err.Error(), "@@ header anchor \"TestImagined\"") || !strings.Contains(err.Error(), "was not found") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestEditToolWhitespaceAndUnicodeTolerance(t *testing.T) {
+func TestPatchToolWhitespaceAndUnicodeTolerance(t *testing.T) {
 	dir := t.TempDir()
 	oldWD, _ := os.Getwd()
 	if err := os.Chdir(dir); err != nil {
@@ -426,8 +610,8 @@ func TestEditToolWhitespaceAndUnicodeTolerance(t *testing.T) {
 	}
 	patch := "@@\n alpha\n-quote \"x\"\n+quote \"y\"\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
-	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
-		t.Fatalf("EditTool.Execute: %v", err)
+	if _, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("PatchTool.Execute: %v", err)
 	}
 	got, _ := os.ReadFile("demo.txt")
 	if string(got) != "alpha   \nquote \"y\"\n" {
@@ -435,7 +619,7 @@ func TestEditToolWhitespaceAndUnicodeTolerance(t *testing.T) {
 	}
 }
 
-func TestEditToolPreservesCRLF(t *testing.T) {
+func TestPatchToolPreservesCRLF(t *testing.T) {
 	dir := t.TempDir()
 	oldWD, _ := os.Getwd()
 	if err := os.Chdir(dir); err != nil {
@@ -447,8 +631,8 @@ func TestEditToolPreservesCRLF(t *testing.T) {
 	}
 	patch := "@@\n-one\n+ONE\n two\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
-	if _, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
-		t.Fatalf("EditTool.Execute: %v", err)
+	if _, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("PatchTool.Execute: %v", err)
 	}
 	got, _ := os.ReadFile("demo.txt")
 	if string(got) != "ONE\r\ntwo\r\n" {
@@ -456,7 +640,7 @@ func TestEditToolPreservesCRLF(t *testing.T) {
 	}
 }
 
-func TestEditToolAmbiguousHunkAppliesFirstMatchWithNote(t *testing.T) {
+func TestPatchToolAmbiguousHunkAppliesFirstMatchWithNote(t *testing.T) {
 	dir := t.TempDir()
 	oldWD, _ := os.Getwd()
 	if err := os.Chdir(dir); err != nil {
@@ -468,9 +652,9 @@ func TestEditToolAmbiguousHunkAppliesFirstMatchWithNote(t *testing.T) {
 	}
 	patch := "@@\n-same\n+changed\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
-	out, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	out, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args)
 	if err != nil {
-		t.Fatalf("EditTool.Execute: %v", err)
+		t.Fatalf("PatchTool.Execute: %v", err)
 	}
 	got, _ := os.ReadFile("demo.txt")
 	if string(got) != "changed\nsame\n" {
@@ -484,7 +668,75 @@ func TestEditToolAmbiguousHunkAppliesFirstMatchWithNote(t *testing.T) {
 	}
 }
 
-func TestEditToolErrorIncludesPatchExcerptForHunkMatchFailures(t *testing.T) {
+func TestPatchToolSoftAnchorIgnoresEarlierMatchesBeforeSearchStart(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWD)
+
+	content := strings.Join([]string{
+		"func first() {",
+		"    fmt.Println(\"same\")",
+		"    fmt.Println(\"keep\")",
+		"}",
+		"",
+		"func second() {",
+		"    fmt.Println(\"same\")",
+		"    fmt.Println(\"keep\")",
+		"}",
+		"",
+	}, "\n")
+	if err := os.WriteFile("demo.go", []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	patch := strings.Join([]string{
+		"@@ func first() {",
+		"     fmt.Println(\"same\")",
+		"     fmt.Println(\"keep\")",
+		" }",
+		"+// first done",
+		"@@ missing header",
+		"     fmt.Println(\"same\")",
+		"-    fmt.Println(\"keep\")",
+		"+    fmt.Println(\"second keep\")",
+		" }",
+	}, "\n") + "\n"
+
+	args, _ := json.Marshal(map[string]string{"path": "demo.go", "patch": patch})
+	out, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("PatchTool.Execute: %v\noutput=%s", err, out)
+	}
+
+	got, err := os.ReadFile("demo.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Join([]string{
+		"func first() {",
+		"    fmt.Println(\"same\")",
+		"    fmt.Println(\"keep\")",
+		"}",
+		"// first done",
+		"",
+		"func second() {",
+		"    fmt.Println(\"same\")",
+		"    fmt.Println(\"second keep\")",
+		"}",
+		"",
+	}, "\n")
+	if string(got) != want {
+		t.Fatalf("file = %q, want %q", string(got), want)
+	}
+	if strings.Contains(out, "ambiguous") {
+		t.Fatalf("output should not report ambiguity after earlier matches are skipped, got %q", out)
+	}
+}
+
+func TestPatchToolErrorIncludesPatchExcerptForHunkMatchFailures(t *testing.T) {
 	dir := t.TempDir()
 	oldWD, _ := os.Getwd()
 	if err := os.Chdir(dir); err != nil {
@@ -496,7 +748,7 @@ func TestEditToolErrorIncludesPatchExcerptForHunkMatchFailures(t *testing.T) {
 	}
 	patch := "@@\n-missing\n+new\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
-	out, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	out, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args)
 	if err == nil || !strings.Contains(err.Error(), "hunk not found") {
 		t.Fatalf("err = %v", err)
 	}
@@ -507,7 +759,7 @@ func TestEditToolErrorIncludesPatchExcerptForHunkMatchFailures(t *testing.T) {
 	}
 }
 
-func TestEditToolConcurrencyPolicyUsesPatchPath(t *testing.T) {
+func TestPatchToolConcurrencyPolicyUsesPatchPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "demo.txt")
 	if err := os.WriteFile(path, []byte("old\n"), 0644); err != nil {
@@ -516,7 +768,7 @@ func TestEditToolConcurrencyPolicyUsesPatchPath(t *testing.T) {
 	patch := "@@\n-old\n+new\n"
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
 
-	policy := (EditTool{BaseDir: dir}).ConcurrencyPolicy(args)
+	policy := (PatchTool{BaseDir: dir}).ConcurrencyPolicy(args)
 	if policy.Mode != ConcurrencyModeWrite || policy.Resource != "file:demo.txt" {
 		t.Fatalf("policy = %+v, want write file:demo.txt", policy)
 	}
@@ -616,6 +868,23 @@ func TestLongestContiguousRun(t *testing.T) {
 			start:     0,
 			wantLen:   0, wantLine: -1,
 		},
+		{
+			// The fast 500-line window ends between the two matching lines. The
+			// fallback full scan should still recover the true 2-line run.
+			fileLines: func() []string {
+				lines := make([]string, 0, 501)
+				for i := 0; i < 499; i++ {
+					lines = append(lines, "x")
+				}
+				lines = append(lines, "a")
+				lines = append(lines, "b")
+				return lines
+			}(),
+			oldSeq:   []string{"a", "b"},
+			start:    0,
+			wantLen:  2,
+			wantLine: 499,
+		},
 	}
 	for _, tt := range tests {
 		runLen, fileLine := longestContiguousRun(tt.fileLines, tt.oldSeq, tt.start)
@@ -623,6 +892,25 @@ func TestLongestContiguousRun(t *testing.T) {
 			t.Errorf("longestContiguousRun(%v, %v, %d) = (%d, %d), want (%d, %d)",
 				tt.fileLines, tt.oldSeq, tt.start, runLen, fileLine, tt.wantLen, tt.wantLine)
 		}
+	}
+}
+
+func TestNearestLineDiagnosticReportsIncompleteWindow(t *testing.T) {
+	fileLines := make([]string, 0, 120)
+	for i := 0; i < 105; i++ {
+		fileLines = append(fileLines, "filler")
+	}
+	fileLines = append(fileLines, "prefix MISMATCH suffix")
+	for i := len(fileLines); i < 120; i++ {
+		fileLines = append(fileLines, "tail")
+	}
+
+	hint, complete := nearestLineDiagnostic(fileLines, []string{"prefix match suffix"}, 0, 100)
+	if hint != "" {
+		t.Fatalf("hint = %q, want empty because the best match is outside the fast window", hint)
+	}
+	if complete {
+		t.Fatal("complete = true, want false for truncated fast window")
 	}
 }
 

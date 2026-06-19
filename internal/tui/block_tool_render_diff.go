@@ -246,12 +246,12 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			shownLines++
 		}
 	}
-	if b.ToolName == tools.NameEdit && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() && !toolShouldHideSuccessfulFileOpResult(b) {
+	if (b.ToolName == tools.NameEdit || b.ToolName == tools.NamePatch) && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() && !toolShouldHideSuccessfulFileOpResult(b) {
 		result = append(result, ToolResultExpandedStyle.Render("  ↳ Diagnostics:"))
 		result = append(result, renderLSPDiagnosticsLines(editSuccessDiagnosticsContent(b.ResultContent), "    ", cardWidth-4)...)
 	}
 	if b.toolResultIsError() && b.ResultContent != "" {
-		if b.ToolName == tools.NameEdit {
+		if b.ToolName == tools.NameEdit || b.ToolName == tools.NamePatch {
 			result = appendEditPatchPreview(result, b.editPatchArgsJSON(), cardWidth-4)
 		}
 		result = append(result, ErrorStyle.Render("  ↳ Error:"))
@@ -325,7 +325,7 @@ func editPatchPreviewLines(patch string) []string {
 }
 
 func (b *Block) diffToolFilePath() string {
-	if b.ToolName == tools.NameEdit {
+	if b.ToolName == tools.NameEdit || b.ToolName == tools.NamePatch {
 		path := tools.ExtractEditPathFromArgs(json.RawMessage(b.Content))
 		if path == "" {
 			var parsed struct {

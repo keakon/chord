@@ -28,7 +28,7 @@ func TestSubAgent_ConsecutiveEditesWithWrappedArgsDoNotTriggerStaleReadInFinaliz
 
 	parent := newTestMainAgent(t, projectRoot)
 	parent.tools.Register(tools.ReadTool{})
-	parent.tools.Register(tools.EditTool{})
+	parent.tools.Register(tools.PatchTool{BaseDir: projectRoot})
 
 	sub := newControllableTestSubAgent(t, parent, "task-1")
 
@@ -51,7 +51,7 @@ func TestSubAgent_ConsecutiveEditesWithWrappedArgsDoNotTriggerStaleReadInFinaliz
 	if err != nil {
 		t.Fatalf("Marshal wrapped patch1 args: %v", err)
 	}
-	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: wrapped1}, false); err != nil {
+	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: wrapped1}, false); err != nil {
 		t.Fatalf("Edit-1 failed: %v", err)
 	}
 
@@ -64,7 +64,7 @@ func TestSubAgent_ConsecutiveEditesWithWrappedArgsDoNotTriggerStaleReadInFinaliz
 	if err != nil {
 		t.Fatalf("Marshal wrapped patch2 args: %v", err)
 	}
-	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "patch-2", Name: tools.NameEdit, Args: wrapped2}, false); err != nil {
+	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "patch-2", Name: tools.NamePatch, Args: wrapped2}, false); err != nil {
 		t.Fatalf("Edit-2 failed: %v", err)
 	}
 
@@ -95,7 +95,7 @@ func TestSubAgent_ConsecutiveEditsTreatEquivalentRelativeAndAbsolutePathsAsSameF
 
 	parent := newTestMainAgent(t, projectRoot)
 	parent.tools.Register(tools.ReadTool{})
-	parent.tools.Register(tools.EditTool{})
+	parent.tools.Register(tools.PatchTool{BaseDir: projectRoot})
 	sub := newControllableTestSubAgent(t, parent, "task-1")
 
 	readArgs, err := json.Marshal(map[string]any{"path": "./demo.txt"})
@@ -110,7 +110,7 @@ func TestSubAgent_ConsecutiveEditsTreatEquivalentRelativeAndAbsolutePathsAsSameF
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs}, false); err != nil {
+	if _, err := sub.executeToolCallWithHook(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: patchArgs}, false); err != nil {
 		t.Fatalf("Edit failed: %v", err)
 	}
 }

@@ -27,8 +27,8 @@ func TestLspToolDescriptionGuidesRoutingWithoutHover(t *testing.T) {
 	desc := (LspTool{}).Description()
 	for _, want := range []string{
 		"Use this tool first for definition, references, and implementation at a known file position.",
-		"Prefer it over grep/glob once the file path and cursor position are known",
-		"Use grep/glob only to discover candidate files or positions when the location is not known yet.",
+		"Prefer it over text or file search once the file path and cursor position are known",
+		"Use available discovery tools only to discover candidate files or positions when the location is not known yet.",
 		"Use 1-based line and character from the raw file content",
 		"count tabs in the source line as a single character",
 		"prefer the start of the target identifier",
@@ -39,6 +39,12 @@ func TestLspToolDescriptionGuidesRoutingWithoutHover(t *testing.T) {
 	}
 	if strings.Contains(desc, "hover") {
 		t.Fatalf("Description() should not mention hover: %q", desc)
+	}
+}
+
+func TestLspToolIsAvailableRequiresManager(t *testing.T) {
+	if (LspTool{}).IsAvailable() {
+		t.Fatal("LspTool without manager should not be available")
 	}
 }
 
@@ -53,6 +59,16 @@ func TestLspToolCharacterParameterExplainsRawSourceCounting(t *testing.T) {
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("character description missing %q: %q", want, desc)
+		}
+	}
+}
+
+func TestLspToolPathDescriptionWarnsAgainstGuessing(t *testing.T) {
+	props := (LspTool{}).Parameters()["properties"].(map[string]any)
+	desc := props["path"].(map[string]any)["description"].(string)
+	for _, want := range []string{"verified file", "Do not guess paths"} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("path description missing %q: %q", want, desc)
 		}
 	}
 }

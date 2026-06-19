@@ -304,7 +304,7 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 	if ctx.Age >= ctx.Policy.ConfirmAgeTurns && isConfirmationOutput(ctx.Content) {
 		return requestReductionConfirm
 	}
-	if ctx.Age >= 1 && (ctx.ToolName == tools.NameEdit || ctx.ToolName == tools.NameWrite) && strings.Contains(ctx.Content, "Diagnostics:") {
+	if ctx.Age >= 1 && (ctx.ToolName == tools.NameEdit || ctx.ToolName == tools.NamePatch || ctx.ToolName == tools.NameWrite) && strings.Contains(ctx.Content, "Diagnostics:") {
 		return requestReductionDiagnostics
 	}
 	if ctx.Age >= ctx.Policy.ShellSuccessAgeTurns && len(ctx.Content) > ctx.Policy.ShellSuccessBytes && ctx.ToolName == tools.NameShell {
@@ -471,7 +471,7 @@ func looksLikeStructuredJSON(content string) bool {
 }
 
 func looksLikeBuildLikeLog(ctx requestReductionContext) bool {
-	if ctx.ToolName != tools.NameShell && ctx.ToolName != tools.NameEdit && ctx.ToolName != tools.NameWrite {
+	if ctx.ToolName != tools.NameShell && ctx.ToolName != tools.NameEdit && ctx.ToolName != tools.NamePatch && ctx.ToolName != tools.NameWrite {
 		return false
 	}
 	content := strings.TrimSpace(ctx.Content)

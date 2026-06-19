@@ -10,7 +10,8 @@ For how `allow` / `ask` / `deny` are evaluated — including the special couplin
 | --- | --- |
 | `read` | Read a local file into context. |
 | `write` | Create a file or intentionally replace a whole file. |
-| `edit` | Apply a patch (hunk text) to one existing file. |
+| `edit` | Replace exact text in one existing file. |
+| `patch` | Apply unified diff hunks to one existing file. |
 | `delete` | Remove whole files. |
 | `view_image` | Load a local PNG/JPEG into context; available only when the active model pool's first model supports image input. Uses the same local-path permission handling as `read`. |
 

@@ -23,7 +23,7 @@ func RebuildTouchedPathsFromMessages(msgs []message.Message) []string {
 		}
 		for _, tc := range msg.ToolCalls {
 			name := tools.NormalizeName(tc.Name)
-			if name != tools.NameWrite && name != tools.NameEdit && name != tools.NameDelete {
+			if name != tools.NameWrite && name != tools.NameEdit && name != tools.NamePatch && name != tools.NameDelete {
 				continue
 			}
 			paths := extractHookFilePaths(tc.Args, os.Getenv("CHORD_PROJECT_ROOT"))
@@ -46,7 +46,7 @@ func RebuildTouchedPathsFromMessages(msgs []message.Message) []string {
 			continue
 		}
 		switch info.name {
-		case tools.NameWrite, tools.NameEdit:
+		case tools.NameWrite, tools.NameEdit, tools.NamePatch:
 			for _, path := range info.paths {
 				paths[path] = struct{}{}
 			}

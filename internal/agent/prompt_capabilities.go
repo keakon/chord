@@ -38,29 +38,63 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 		return ""
 	}
 
-	lines := make([]string, 0, 9)
+	discoveryTools := visiblePathDiscoveryTools(visible)
+	lines := make([]string, 0, 12)
 	lines = append(lines, "- Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.")
 	if hasVisibleTool(visible, tools.NameRead) {
-		lines = append(lines, "- Use "+toolPromptName(tools.NameRead)+" for file contents.")
+		lines = append(lines, "- Use "+toolPromptName(tools.NameRead)+" for file contents when the target path is already known or has been verified.")
 	}
-	if hasVisibleTool(visible, tools.NameEdit) {
-		lines = append(lines, "- Use "+toolPromptName(tools.NameEdit)+" to modify the contents of one existing file.")
-		lines = append(lines, "- For "+toolPromptName(tools.NameEdit)+", keep hunks small and include unique unchanged context; in repeated blocks such as tests or fixtures, include the enclosing function, test, or case name.")
+	// Check for either edit tool (patch or edit/replace)
+	editToolName := visibleEditToolName(visible)
+	if editToolName != "" {
+		lines = append(lines, "- Use "+toolPromptName(editToolName)+" to modify the contents of one existing file with a verified path.")
+		switch editToolName {
+		case tools.NamePatch:
+			lines = append(lines, "- For "+toolPromptName(editToolName)+", keep hunks small and include unique unchanged context; in repeated blocks such as tests or fixtures, include the enclosing function, test, or case name.")
+		case tools.NameEdit:
+			lines = append(lines, "- For "+toolPromptName(editToolName)+", use exact old_string/new_string replacements. Match the file's raw text exactly, including whitespace and newlines; prefer the smallest unique block and set replace_all only when every occurrence should change.")
+		}
 	}
 	if hasVisibleTool(visible, tools.NameWrite) {
 		lines = append(lines, "- Use "+toolPromptName(tools.NameWrite)+" for whole-file writes.")
 	}
-	if hasVisibleTool(visible, tools.NameEdit) && hasVisibleTool(visible, tools.NameWrite) {
-		lines = append(lines, "- Do not use "+toolPromptName(tools.NameWrite)+" for local edits to existing files; use "+toolPromptName(tools.NameEdit)+" instead.")
+	if editToolName != "" && hasVisibleTool(visible, tools.NameWrite) {
+		lines = append(lines, "- Do not use "+toolPromptName(tools.NameWrite)+" for local edits to existing files; use "+toolPromptName(editToolName)+" instead.")
 	}
 	if hasVisibleTool(visible, tools.NameDelete) {
-		lines = append(lines, "- Use "+toolPromptName(tools.NameDelete)+" to remove files.")
+		lines = append(lines, "- Use "+toolPromptName(tools.NameDelete)+" to remove files with verified paths.")
 	}
 	if hasVisibleTool(visible, tools.NameWrite) && hasVisibleTool(visible, tools.NameDelete) {
 		lines = append(lines, "- Choose file tools by final state: use "+toolPromptName(tools.NameWrite)+" directly when a path should still exist afterward with new full contents, and use "+toolPromptName(tools.NameDelete)+" only when the path should no longer exist.")
 		lines = append(lines, "- Do not "+toolPromptName(tools.NameDelete)+" a path just to recreate it with "+toolPromptName(tools.NameWrite)+"; that adds unnecessary risk and tool churn.")
 	}
 
+	if len(discoveryTools) > 0 {
+		lines = append(lines, "- Use "+strings.Join(discoveryTools, " / ")+" for discovery and navigation.")
+		if pathTools := visibleExistingPathTools(visible); len(pathTools) > 0 {
+			lines = append(lines, "- If you are unsure of the exact target path for "+strings.Join(pathTools, " / ")+
+				", use "+strings.Join(discoveryTools, " / ")+" to find or verify it before calling the path tool; do not guess plausible-looking paths.")
+		}
+	}
+	if hasVisibleTool(visible, tools.NameSkill) {
+		lines = append(lines, "- Use "+toolPromptName(tools.NameSkill)+" to load additional skill instructions on demand when one of the available skills clearly matches the task.")
+	}
+	if hasVisibleTool(visible, tools.NameShell) {
+		lines = append(lines,
+			"- Use "+toolPromptName(tools.NameShell)+" mainly for tests, builds, git, and system commands.",
+			"- For native filesystem operations with no dedicated built-in tool, "+toolPromptName(tools.NameShell)+" is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
+		)
+	}
+	if len(discoveryTools) > 0 || hasVisibleTool(visible, tools.NameRead) {
+		lines = append(lines, "- Run independent reads/searches in parallel; run dependent operations sequentially.")
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "## Tool Selection\n" + strings.Join(lines, "\n")
+}
+
+func visiblePathDiscoveryTools(visible map[string]struct{}) []string {
 	discoveryTools := make([]string, 0, 3)
 	if hasVisibleTool(visible, tools.NameGlob) {
 		discoveryTools = append(discoveryTools, toolPromptName(tools.NameGlob))
@@ -71,26 +105,22 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 	if hasVisibleTool(visible, tools.NameLsp) {
 		discoveryTools = append(discoveryTools, toolPromptName(tools.NameLsp))
 	}
-	if len(discoveryTools) > 0 {
-		lines = append(lines, "- Use "+strings.Join(discoveryTools, " / ")+" for discovery and navigation.")
+	return discoveryTools
+}
+
+func visibleExistingPathTools(visible map[string]struct{}) []string {
+	pathTools := make([]string, 0, 3)
+	if hasVisibleTool(visible, tools.NameRead) {
+		pathTools = append(pathTools, toolPromptName(tools.NameRead))
 	}
-	if hasVisibleTool(visible, tools.NameSkill) {
-		lines = append(lines, "- Use "+toolPromptName(tools.NameSkill)+" to load additional skill instructions on demand when one of the available skills clearly matches the task.")
+	// Include whichever edit tool is visible
+	if editTool := visibleEditToolName(visible); editTool != "" {
+		pathTools = append(pathTools, toolPromptName(editTool))
 	}
-	if hasVisibleTool(visible, tools.NameShell) {
-		lines = append(lines,
-			"- Use "+toolPromptName(tools.NameShell)+" mainly for tests, builds, git, and system commands.",
-			"- For native filesystem operations with no dedicated built-in tool, "+toolPromptName(tools.NameShell)+" is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
-		)
-		lines = append(lines, "- Do not use "+toolPromptName(tools.NameShell)+" to run edit.")
+	if hasVisibleTool(visible, tools.NameDelete) {
+		pathTools = append(pathTools, toolPromptName(tools.NameDelete))
 	}
-	if len(discoveryTools) > 0 || hasVisibleTool(visible, tools.NameRead) {
-		lines = append(lines, "- Run independent reads/searches in parallel; run dependent operations sequentially.")
-	}
-	if len(lines) == 0 {
-		return ""
-	}
-	return "## Tool Selection\n" + strings.Join(lines, "\n")
+	return pathTools
 }
 
 func fileInspectionConstraintsPromptBlock(visible map[string]struct{}, ruleset permission.Ruleset, audience capabilityPromptAudience) string {
@@ -129,10 +159,10 @@ func fileModificationConstraintsPromptBlock(visible map[string]struct{}, ruleset
 		return ""
 	}
 
-	hasEdit := hasVisibleTool(visible, tools.NameEdit)
+	hasEdit := hasVisibleTool(visible, tools.NameEdit) || hasVisibleTool(visible, tools.NamePatch)
 	hasWrite := hasVisibleTool(visible, tools.NameWrite)
 	hasDelete := hasVisibleTool(visible, tools.NameDelete)
-	if hasEdit && hasWrite && hasDelete && !hasScopedFilePermissions(ruleset) {
+	if hasEdit && hasWrite && hasDelete && !hasScopedFilePermissions(visible, ruleset) {
 		return ""
 	}
 
@@ -198,12 +228,27 @@ func hasScopedInspectionPermissions(ruleset permission.Ruleset) bool {
 	return false
 }
 
-func hasScopedFilePermissions(ruleset permission.Ruleset) bool {
+func hasScopedFilePermissions(visible map[string]struct{}, ruleset permission.Ruleset) bool {
 	if len(ruleset) == 0 {
 		return false
 	}
 
-	for _, permName := range []string{tools.NameWrite, tools.NameEdit, tools.NameDelete} {
+	// Only check scoped permissions for tools that are actually visible
+	visibleFileTools := []string{}
+	if hasVisibleTool(visible, tools.NameWrite) {
+		visibleFileTools = append(visibleFileTools, tools.NameWrite)
+	}
+	if hasVisibleTool(visible, tools.NameEdit) {
+		visibleFileTools = append(visibleFileTools, tools.NameEdit)
+	}
+	if hasVisibleTool(visible, tools.NamePatch) {
+		visibleFileTools = append(visibleFileTools, tools.NamePatch)
+	}
+	if hasVisibleTool(visible, tools.NameDelete) {
+		visibleFileTools = append(visibleFileTools, tools.NameDelete)
+	}
+
+	for _, permName := range visibleFileTools {
 		if toolHasScopedRestriction(ruleset, permName) {
 			return true
 		}
@@ -219,12 +264,21 @@ func toolHasScopedRestriction(ruleset permission.Ruleset, toolName string) bool 
 	if globalAction != permission.ActionDeny {
 		return false
 	}
+	toolNames := []string{toolName}
+	switch toolName {
+	case tools.NameEdit:
+		toolNames = append(toolNames, tools.NamePatch)
+	case tools.NamePatch:
+		toolNames = append(toolNames, tools.NameEdit)
+	}
 	for _, rule := range ruleset {
-		if rule.Permission != toolName || rule.Pattern == "*" {
+		if rule.Pattern == "*" {
 			continue
 		}
-		if rule.Action == permission.ActionAllow || rule.Action == permission.ActionAsk {
-			return true
+		for _, candidate := range toolNames {
+			if rule.Permission == candidate && (rule.Action == permission.ActionAllow || rule.Action == permission.ActionAsk) {
+				return true
+			}
 		}
 	}
 	return false
@@ -246,6 +300,18 @@ func lastToolWideRule(ruleset permission.Ruleset, toolName string) (permission.A
 func hasVisibleTool(visible map[string]struct{}, name string) bool {
 	_, ok := visible[name]
 	return ok
+}
+
+// visibleEditToolName returns the visible edit-family tool name (patch preferred
+// over edit), or "" when neither is visible.
+func visibleEditToolName(visible map[string]struct{}) string {
+	if hasVisibleTool(visible, tools.NamePatch) {
+		return tools.NamePatch
+	}
+	if hasVisibleTool(visible, tools.NameEdit) {
+		return tools.NameEdit
+	}
+	return ""
 }
 
 func inspectionLimitationEscalation(visible map[string]struct{}, audience capabilityPromptAudience, limited bool) string {

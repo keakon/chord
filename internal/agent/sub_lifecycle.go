@@ -197,7 +197,10 @@ func (s *SubAgent) GetContextMessageCount() int {
 }
 
 func (s *SubAgent) GetContextBytes() int {
-	return s.ctxMgr.ContextPayloadBytes() + toolDefinitionBytes(s.frozenToolDefs)
+	s.llmMu.RLock()
+	toolDefs := append([]message.ToolDefinition(nil), s.frozenToolDefs...)
+	s.llmMu.RUnlock()
+	return s.ctxMgr.ContextPayloadBytes() + toolDefinitionBytes(toolDefs)
 }
 
 func (s *SubAgent) GetContextReductionStats() ContextReductionStats {

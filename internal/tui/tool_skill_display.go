@@ -176,6 +176,14 @@ func toolDisplayResultContent(b *Block) string {
 	if toolShouldHideSuccessfulFileOpResult(b) {
 		return ""
 	}
+	// For write tool, hide the simple "Successfully wrote X lines, Y bytes" message
+	// as the content preview is already shown in the card
+	if tools.NormalizeName(b.ToolName) == tools.NameWrite {
+		lines := strings.Split(strings.TrimSpace(result), "\n")
+		if len(lines) == 1 && strings.HasPrefix(lines[0], "Successfully wrote ") {
+			return ""
+		}
+	}
 	return result
 }
 
@@ -184,7 +192,7 @@ func toolShouldHideSuccessfulFileOpResult(b *Block) bool {
 		return false
 	}
 	switch tools.NormalizeName(b.ToolName) {
-	case tools.NameEdit:
+	case tools.NameEdit, tools.NamePatch:
 		return !toolResultContainsLSPDiagnostics(b.ResultContent)
 	default:
 		return false
@@ -223,7 +231,7 @@ func toolSuccessfulFileOpSummary(b *Block) string {
 		return ""
 	}
 	switch tools.NormalizeName(b.ToolName) {
-	case tools.NameEdit:
+	case tools.NameEdit, tools.NamePatch:
 		path := b.displayToolPath(tools.ExtractEditPathFromArgs([]byte(b.Content)))
 		if path == "" {
 			path = b.displayToolPath(firstPathFromToolResult(b.ResultContent))

@@ -830,7 +830,7 @@ func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocks(t *testing.T) {
 	content := "Replaced 1 occurrence\n\nDiagnostics:\nUsed Ruff quick diagnostics because this Python file exceeds the configured threshold.\n[E] 10:1 [F821] Undefined name `x`\n[E] 11:1 another diagnostic"
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"a.py","patch":"@@\n-x\n+y\n"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NamePatch, Args: json.RawMessage(`{"path":"a.py","patch":"@@\n-x\n+y\n"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: content},
 		{Role: "user", Content: "u2"},
 		{Role: "user", Content: "u3"},
@@ -850,7 +850,7 @@ func TestPrepareMessagesForLLM_DiagnosticsCompactionPreservesToolDiff(t *testing
 	content := "Replaced 1 occurrence\n\nDiagnostics:\n[E] 10:1 [F821] Undefined name `x`\n[E] 11:1 another diagnostic"
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"a.py","patch":"@@\n-x\n+y\n"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NamePatch, Args: json.RawMessage(`{"path":"a.py","patch":"@@\n-x\n+y\n"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: content, ToolDiff: "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"},
 		{Role: "user", Content: "u2"},
 		{Role: "user", Content: "u3"},
@@ -870,7 +870,7 @@ func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocksPrefersActionableLi
 	content := "Replaced 1 occurrence\n\nDiagnostics:\nDiagnostics status: backend=LSP, new=1, resolved=0, current=1 errors, 0 warnings (best effort).\n[E] 10:1 [F821] Undefined name `x`"
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"a.py","patch":"@@\n-x\n+y\n"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NamePatch, Args: json.RawMessage(`{"path":"a.py","patch":"@@\n-x\n+y\n"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: content},
 		{Role: "user", Content: "u2"},
 		{Role: "user", Content: "u3"},
@@ -1042,7 +1042,7 @@ func TestPrepareMessagesForLLM_ReusesStableReductionSurfaceForSmallLowPressureIn
 	}
 
 	second := append(append([]message.Message(nil), msgs...),
-		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NamePatch, Args: json.RawMessage(`{"path":"a.go"}`)}}},
 		message.Message{Role: "tool", ToolCallID: "tc2", Content: "Replaced 1 occurrence\n\nDiagnostics:\n" + strings.Repeat("[E] 1:1 small diagnostic\n", 40)},
 		message.Message{Role: "assistant", Content: "ack2"},
 		message.Message{Role: "user", Content: "u4"},

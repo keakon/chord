@@ -6,6 +6,7 @@ const (
 	Read         = "read"
 	Write        = "write"
 	Edit         = "edit"
+	Patch        = "patch"
 	Delete       = "delete"
 	Grep         = "grep"
 	Glob         = "glob"

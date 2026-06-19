@@ -117,11 +117,14 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	if len(data) == 1 {
 		byteLabel = "byte"
 	}
+	reportToolProgress(ctx, ToolProgressSnapshot{
+		Text: fmt.Sprintf("writing %d %s", len(data), byteLabel),
+	})
 	invalidatePathCache(resolvedPath)
 	if err := writeFileNoFollow(resolvedPath, data, 0644); err != nil {
 		return "", fmt.Errorf("writing file: %w", err)
 	}
-	warmDecodedFileCacheAsync(resolvedPath, data, decodedText{Text: content, Encoding: utf8Encoding})
+	warmDecodedFileCache(resolvedPath, data, decodedText{Text: content, Encoding: utf8Encoding})
 
 	out := fmt.Sprintf("Successfully wrote %d %s, %d %s", lineCount, lineLabel, len(data), byteLabel)
 	if t.LSP != nil {

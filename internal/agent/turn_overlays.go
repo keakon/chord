@@ -127,7 +127,7 @@ func shouldQueueLSPDiagnosticOverlay(history []message.Message, payload *ToolRes
 	if payload == nil {
 		return false
 	}
-	if payload.Name != tools.NameEdit && payload.Name != tools.NameWrite {
+	if payload.Name != tools.NameEdit && payload.Name != tools.NamePatch && payload.Name != tools.NameWrite {
 		return false
 	}
 	if len(payload.LSPReviews) == 0 || !hasNonZeroLSPReviews(payload.LSPReviews) {

@@ -205,7 +205,7 @@ func readPreWriteBytes(path string) ([]byte, bool, error) {
 
 func isTrackedFileMutationTool(name string) bool {
 	switch name {
-	case tools.NameEdit, tools.NameWrite, tools.NameDelete:
+	case tools.NameEdit, tools.NamePatch, tools.NameWrite, tools.NameDelete:
 		return true
 	default:
 		return false

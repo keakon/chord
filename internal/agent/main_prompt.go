@@ -29,7 +29,7 @@ func (a *MainAgent) buildSystemPrompt() string {
 
 	venvLine := ""
 	if venvPath != "" {
-		venvLine = fmt.Sprintf("\n  Python virtual environment: %s\n  When running Python commands, prefer the interpreter from this virtual environment.", venvPath)
+		venvLine = fmt.Sprintf("\n  Python virtual environment: %s\n  When running Python commands, prefer the interpreter from this virtual environment.", displayPathFromWorkDir(workDir, venvPath))
 	}
 
 	var parts []string
@@ -86,7 +86,8 @@ func agentsMDReminderFramingPromptBlock(agentsMD string) string {
 		return ""
 	}
 	return strings.TrimSpace(`## Workspace Instructions
-- This workspace provides AGENTS.md repository instructions in a <system-reminder> block before the user's first message.
+- This workspace injects the complete applicable AGENTS.md contents into the LLM request as an internal <system-reminder> user-role message before the first real user message. This meta message may not appear in the visible transcript.
+- Applicable AGENTS.md contents are discovered by walking from the current working directory up to the project root, then injected in project-root-to-current-working-directory order. Each loaded section is labeled with its path relative to the current working directory.
 - Treat AGENTS.md instructions inside that <system-reminder> block as durable workspace context and follow them unless they conflict with higher-priority system, developer, or user instructions.
 - Do not ignore or override those AGENTS.md instructions just because they appear in a user-context block; they are system-provided workspace context, not ordinary user content.`)
 }
@@ -148,8 +149,13 @@ func (a *MainAgent) lspDiagnosticPromptBlock() string {
 	if !a.shouldInjectLSPDiagnosticPrompt() {
 		return ""
 	}
+	visible := a.mainLLMVisibleToolNames()
+	editToolName := visibleEditToolName(visible)
+	if editToolName == "" {
+		editToolName = tools.NameEdit
+	}
 	return strings.TrimSpace(`## LSP diagnostic follow-up
-	- When LSP diagnostics are available after your ` + toolPromptName(tools.NameEdit) + ` or ` + toolPromptName(tools.NameWrite) + ` changes, treat new blocking diagnostics in files you directly modified as regressions and fix them before finishing unless the user explicitly asked for a partial/WIP result
+	- When LSP diagnostics are available after your ` + toolPromptName(editToolName) + ` or ` + toolPromptName(tools.NameWrite) + ` changes, treat new blocking diagnostics in files you directly modified as regressions and fix them before finishing unless the user explicitly asked for a partial/WIP result
 - If your current-session edits introduce non-blocking diagnostics in files you directly modified, prefer low-risk cleanup when it is small and clear; do not expand scope to unrelated historical diagnostics in untouched files unless they directly block the requested task`)
 }
 
@@ -158,7 +164,7 @@ func (a *MainAgent) shouldInjectLSPDiagnosticPrompt() bool {
 	if len(visible) == 0 {
 		return false
 	}
-	if _, ok := visible[tools.NameEdit]; !ok {
+	if visibleEditToolName(visible) == "" {
 		if _, ok := visible[tools.NameWrite]; !ok {
 			return false
 		}
@@ -334,16 +340,18 @@ func loadAgentsMDWithWorkDir(projectRoot, workDir string) string {
 	if err != nil {
 		return ""
 	}
+	displayBase := absRoot
 
 	// Collect candidate directories: projectRoot plus all subdirs on the path
 	// to workDir (if workDir is under projectRoot).
 	dirs := []string{absRoot}
 	if workDir != "" {
 		absWork, werr := filepath.Abs(workDir)
-		if werr == nil && strings.HasPrefix(absWork, absRoot+string(filepath.Separator)) {
-			// Walk from absRoot down to absWork, collecting intermediate dirs.
-			rel, rerr := filepath.Rel(absRoot, absWork)
-			if rerr == nil {
+		if werr == nil {
+			rel, ok := relativePathWithin(absRoot, absWork)
+			if ok && rel != "." {
+				displayBase = absWork
+				// Walk from absRoot down to absWork, collecting intermediate dirs.
 				parts := strings.Split(rel, string(filepath.Separator))
 				for i := 1; i <= len(parts); i++ {
 					dirs = append(dirs, filepath.Join(absRoot, filepath.Join(parts[:i]...)))
@@ -364,10 +372,41 @@ func loadAgentsMDWithWorkDir(projectRoot, workDir string) string {
 		}
 		if c := strings.TrimSpace(string(data)); c != "" {
 			log.Debugf("loaded AGENTS.md path=%v size=%v", path, len(c))
-			sections = append(sections, c)
+			rel := displayPathFromWorkDir(displayBase, path)
+			if rel == "" {
+				rel = "AGENTS.md"
+			}
+			sections = append(sections, fmt.Sprintf("## %s\n\n%s", rel, c))
 		}
 	}
 	return strings.Join(sections, "\n\n")
+}
+
+func displayPathFromWorkDir(workDir, path string) string {
+	if path == "" {
+		return ""
+	}
+	if workDir == "" {
+		return filepath.ToSlash(path)
+	}
+	absWork, werr := filepath.Abs(workDir)
+	absPath, perr := filepath.Abs(path)
+	if werr != nil || perr != nil {
+		return filepath.ToSlash(path)
+	}
+	rel, rerr := filepath.Rel(absWork, absPath)
+	if rerr != nil || rel == "" {
+		return filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(rel)
+}
+
+func relativePathWithin(root, path string) (string, bool) {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", false
+	}
+	return rel, true
 }
 
 func (a *MainAgent) mainLLMVisibleToolNames() map[string]struct{} {
@@ -488,11 +527,11 @@ func findGitHead(workDir string) (gitRoot, headPath string) {
 	}
 }
 
-// detectVenvPath searches for a Python virtual environment directory under the
-// given working directory. It checks for .venv, venv, and env directories (in
-// that order) and returns the absolute path of the first one that exists and
-// contains a pyvenv.cfg file. Returns "" if no virtual environment is found.
-func detectVenvPath(workDir string) string {
+// detectVenvPath searches for a Python virtual environment directory from the
+// given working directory upward. At each level it checks for .venv, venv, and
+// env directories (in that order) and returns the absolute path of the first one
+// that exists and contains a pyvenv.cfg file. Returns "" if none is found.
+func detectVenvPath(workDir, projectRoot string) string {
 	if workDir == "" {
 		return ""
 	}
@@ -500,18 +539,37 @@ func detectVenvPath(workDir string) string {
 	if err != nil {
 		return ""
 	}
-	for _, name := range []string{".venv", "venv", "env"} {
-		candidate := filepath.Join(absDir, name)
-		info, err := os.Stat(candidate)
-		if err != nil || !info.IsDir() {
-			continue
+	absRoot := ""
+	if projectRoot != "" {
+		if root, rerr := filepath.Abs(projectRoot); rerr == nil {
+			absRoot = root
 		}
-		// Verify it is a real virtual environment by checking for pyvenv.cfg.
-		cfgPath := filepath.Join(candidate, "pyvenv.cfg")
-		if _, err := os.Stat(cfgPath); err != nil {
-			continue
+	}
+	if absRoot != "" {
+		if _, ok := relativePathWithin(absRoot, absDir); !ok {
+			absRoot = absDir
 		}
-		return candidate
+	}
+	for dir := absDir; ; dir = filepath.Dir(dir) {
+		for _, name := range []string{".venv", "venv", "env"} {
+			candidate := filepath.Join(dir, name)
+			info, err := os.Stat(candidate)
+			if err != nil || !info.IsDir() {
+				continue
+			}
+			cfgPath := filepath.Join(candidate, "pyvenv.cfg")
+			if _, err := os.Stat(cfgPath); err != nil {
+				continue
+			}
+			return candidate
+		}
+		if absRoot != "" && dir == absRoot {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
 	}
 	return ""
 }

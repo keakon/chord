@@ -127,8 +127,28 @@ func TestRenderConfirmSummaryShowsWriteFilePathAndPreview(t *testing.T) {
 	}
 }
 
-func TestBuildConfirmSummaryShowsStructuredEditFields(t *testing.T) {
-	summary := buildConfirmSummary(tools.NameEdit, `{"path":"docs/README.md","patch":"@@\n-old\n+new\n"}`, nil, nil)
+func TestBuildConfirmSummaryShowsStructuredPatchFields(t *testing.T) {
+	summary := buildConfirmSummary(tools.NamePatch, `{"path":"docs/README.md","patch":"@@\n-old\n+new\n"}`, nil, nil)
+
+	if summary.Action != "Patch file" {
+		t.Fatalf("patch action = %q, want structured Patch action", summary.Action)
+	}
+	if summary.Risk != confirmRiskMedium {
+		t.Fatalf("patch risk = %v, want %v", summary.Risk, confirmRiskMedium)
+	}
+	if !slices.Contains(summary.Warnings, "Patches existing file content") {
+		t.Fatalf("patch warnings = %v, want patch warning", summary.Warnings)
+	}
+	if !confirmSummaryHasField(summary, "File") {
+		t.Fatalf("patch summary fields = %+v, want File field", summary.Fields)
+	}
+	if !confirmSummaryHasField(summary, "Patch preview") {
+		t.Fatalf("patch summary fields = %+v, want Patch preview field", summary.Fields)
+	}
+}
+
+func TestBuildConfirmSummaryShowsStructuredReplaceEditFields(t *testing.T) {
+	summary := buildConfirmSummary(tools.NameEdit, `{"path":"docs/README.md","old_string":"old line","new_string":"new line","replace_all":true}`, nil, nil)
 
 	if summary.Action != "Replace text in file" {
 		t.Fatalf("edit action = %q, want structured Edit action", summary.Action)
@@ -136,14 +156,13 @@ func TestBuildConfirmSummaryShowsStructuredEditFields(t *testing.T) {
 	if summary.Risk != confirmRiskMedium {
 		t.Fatalf("edit risk = %v, want %v", summary.Risk, confirmRiskMedium)
 	}
-	if !slices.Contains(summary.Warnings, "Patches existing file content") {
-		t.Fatalf("edit warnings = %v, want patch warning", summary.Warnings)
+	if !slices.Contains(summary.Warnings, "Replaces existing file text") {
+		t.Fatalf("edit warnings = %v, want replace warning", summary.Warnings)
 	}
-	if !confirmSummaryHasField(summary, "File") {
-		t.Fatalf("edit summary fields = %+v, want File field", summary.Fields)
-	}
-	if !confirmSummaryHasField(summary, "Patch preview") {
-		t.Fatalf("edit summary fields = %+v, want Patch preview field", summary.Fields)
+	for _, label := range []string{"File", "Old text", "New text", "Replace all"} {
+		if !confirmSummaryHasField(summary, label) {
+			t.Fatalf("edit summary fields = %+v, want %s field", summary.Fields, label)
+		}
 	}
 }
 

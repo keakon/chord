@@ -150,7 +150,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 					if err == nil {
 						effectiveCall := tc
 						effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
-						diff = agentdiff.GenerateToolDiff(effectiveCall, execResult.PreContent, execResult.PreFilePath)
+						diff = agentdiff.GenerateToolDiff(effectiveCall, execResult.PreContent, execResult.PreFilePath, execResult.PreExisted)
 					}
 					if err != nil && batch.AbortSiblingsOnError {
 						if batchCancel != nil {
@@ -214,7 +214,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 			if err == nil {
 				effectiveCall := tc
 				effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
-				diff = agentdiff.GenerateToolDiff(effectiveCall, execResult.PreContent, execResult.PreFilePath)
+				diff = agentdiff.GenerateToolDiff(effectiveCall, execResult.PreContent, execResult.PreFilePath, execResult.PreExisted)
 			}
 			if err != nil && batch.AbortSiblingsOnError {
 				if batchCancel != nil {

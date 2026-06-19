@@ -219,6 +219,210 @@ task: allow
 	}
 }
 
+func TestEvaluate_EditPatchFallback(t *testing.T) {
+	tests := []struct {
+		name    string
+		ruleset Ruleset
+		perm    string
+		pattern string
+		want    Action
+	}{
+		{
+			name: "edit denied, patch not configured should inherit deny despite wildcard allow",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionAllow},
+				{Permission: "edit", Pattern: "*", Action: ActionDeny},
+			},
+			perm:    "patch",
+			pattern: "file.txt",
+			want:    ActionDeny,
+		},
+		{
+			name: "patch denied, edit not configured should inherit deny despite wildcard allow",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionAllow},
+				{Permission: "patch", Pattern: "*", Action: ActionDeny},
+			},
+			perm:    "edit",
+			pattern: "file.txt",
+			want:    ActionDeny,
+		},
+		{
+			name: "edit denied then patch allowed keeps patch allowed",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "edit", Pattern: "*", Action: ActionDeny},
+				{Permission: "patch", Pattern: "*", Action: ActionAllow},
+			},
+			perm:    "patch",
+			pattern: "file.txt",
+			want:    ActionAllow,
+		},
+		{
+			name: "edit denied then patch allowed keeps edit denied",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "edit", Pattern: "*", Action: ActionDeny},
+				{Permission: "patch", Pattern: "*", Action: ActionAllow},
+			},
+			perm:    "edit",
+			pattern: "file.txt",
+			want:    ActionDeny,
+		},
+		{
+			name: "patch denied then edit allowed keeps edit allowed",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "patch", Pattern: "*", Action: ActionDeny},
+				{Permission: "edit", Pattern: "*", Action: ActionAllow},
+			},
+			perm:    "edit",
+			pattern: "file.txt",
+			want:    ActionAllow,
+		},
+		{
+			name: "patch denied then edit allowed keeps patch denied",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "patch", Pattern: "*", Action: ActionDeny},
+				{Permission: "edit", Pattern: "*", Action: ActionAllow},
+			},
+			perm:    "patch",
+			pattern: "file.txt",
+			want:    ActionDeny,
+		},
+		{
+			name: "edit allowed, patch not configured should fallback to allow",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "edit", Pattern: "*", Action: ActionAllow},
+			},
+			perm:    "patch",
+			pattern: "file.txt",
+			want:    ActionAllow,
+		},
+		{
+			name: "patch ask, edit not configured should fallback to ask",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "patch", Pattern: "*", Action: ActionAsk},
+			},
+			perm:    "edit",
+			pattern: "file.txt",
+			want:    ActionAsk,
+		},
+		{
+			name: "edit allowed for specific pattern, patch should inherit",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "edit", Pattern: "src/*.go", Action: ActionAllow},
+			},
+			perm:    "patch",
+			pattern: "src/main.go",
+			want:    ActionAllow,
+		},
+		{
+			name: "patch has specific rule, should not fallback to edit",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "edit", Pattern: "*", Action: ActionAllow},
+				{Permission: "patch", Pattern: "*", Action: ActionDeny},
+			},
+			perm:    "patch",
+			pattern: "file.txt",
+			want:    ActionDeny,
+		},
+		{
+			name: "neither edit nor patch configured, default deny",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "read", Pattern: "*", Action: ActionAllow},
+			},
+			perm:    "edit",
+			pattern: "file.txt",
+			want:    ActionDeny,
+		},
+		{
+			name: "edit allowed, later wildcard deny should not override edit-family fallback",
+			ruleset: Ruleset{
+				{Permission: "edit", Pattern: "*", Action: ActionAllow},
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+			},
+			perm:    "patch",
+			pattern: "file.txt",
+			want:    ActionAllow,
+		},
+		{
+			name: "wildcard deny then patch allow lets edit inherit patch allow",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "patch", Pattern: "*", Action: ActionAllow},
+			},
+			perm:    "edit",
+			pattern: "file.txt",
+			want:    ActionAllow,
+		},
+		{
+			name: "wildcard allow then patch deny makes edit inherit patch deny",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionAllow},
+				{Permission: "patch", Pattern: "*", Action: ActionDeny},
+			},
+			perm:    "edit",
+			pattern: "file.txt",
+			want:    ActionDeny,
+		},
+		{
+			name: "wildcard allow, later edit deny should respect last-match for edit",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionAllow},
+				{Permission: "edit", Pattern: "*.go", Action: ActionDeny},
+			},
+			perm:    "edit",
+			pattern: "main.go",
+			want:    ActionDeny,
+		},
+		{
+			name: "wildcard allow, later edit deny makes patch inherit edit deny",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionAllow},
+				{Permission: "edit", Pattern: "*.go", Action: ActionDeny},
+			},
+			perm:    "patch",
+			pattern: "main.go",
+			want:    ActionDeny,
+		},
+		{
+			name: "edit ask then patch deny keeps edit ask",
+			ruleset: Ruleset{
+				{Permission: "edit", Pattern: "*", Action: ActionAsk},
+				{Permission: "patch", Pattern: "*", Action: ActionDeny},
+			},
+			perm:    "edit",
+			pattern: "file.txt",
+			want:    ActionAsk,
+		},
+		{
+			name: "patch denied without edit or wildcard keeps edit denied by default",
+			ruleset: Ruleset{
+				{Permission: "patch", Pattern: "*", Action: ActionDeny},
+			},
+			perm:    "edit",
+			pattern: "file.txt",
+			want:    ActionDeny,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.ruleset.Evaluate(tt.perm, tt.pattern)
+			if got != tt.want {
+				t.Errorf("Evaluate(%q, %q) = %s, want %s", tt.perm, tt.pattern, got, tt.want)
+			}
+		})
+	}
+}
+
 // ---------- IsDisabled tests ----------
 
 func TestIsDisabled(t *testing.T) {
@@ -243,6 +447,126 @@ func TestIsDisabled(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("IsDisabled(%q) = %v; want %v", tt.tool, got, tt.want)
 		}
+	}
+}
+
+func TestIsDisabled_EditPatchFallback(t *testing.T) {
+	tests := []struct {
+		name    string
+		ruleset Ruleset
+		tool    string
+		want    bool
+	}{
+		{
+			name: "edit disabled explicitly, patch inherits edit disabled",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionAllow},
+				{Permission: "edit", Pattern: "*", Action: ActionDeny},
+			},
+			tool: "patch",
+			want: true,
+		},
+		{
+			name: "patch disabled explicitly, edit inherits patch disabled",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionAllow},
+				{Permission: "patch", Pattern: "*", Action: ActionDeny},
+			},
+			tool: "edit",
+			want: true,
+		},
+		{
+			name: "edit disabled then patch allowed keeps patch enabled",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "edit", Pattern: "*", Action: ActionDeny},
+				{Permission: "patch", Pattern: "*", Action: ActionAllow},
+			},
+			tool: "patch",
+			want: false,
+		},
+		{
+			name: "edit disabled then patch allowed keeps edit disabled",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "edit", Pattern: "*", Action: ActionDeny},
+				{Permission: "patch", Pattern: "*", Action: ActionAllow},
+			},
+			tool: "edit",
+			want: true,
+		},
+		{
+			name: "patch disabled then edit allowed keeps edit enabled",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "patch", Pattern: "*", Action: ActionDeny},
+				{Permission: "edit", Pattern: "*", Action: ActionAllow},
+			},
+			tool: "edit",
+			want: false,
+		},
+		{
+			name: "patch disabled then edit allowed keeps patch disabled",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "patch", Pattern: "*", Action: ActionDeny},
+				{Permission: "edit", Pattern: "*", Action: ActionAllow},
+			},
+			tool: "patch",
+			want: true,
+		},
+		{
+			name: "neither edit nor patch configured, should fallback to wildcard",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+			},
+			tool: "edit",
+			want: true,
+		},
+		{
+			name: "wildcard deny then patch allow lets edit inherit patch enabled",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "patch", Pattern: "*", Action: ActionAllow},
+			},
+			tool: "edit",
+			want: false,
+		},
+		{
+			name: "wildcard allow then patch deny makes edit inherit patch disabled",
+			ruleset: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionAllow},
+				{Permission: "patch", Pattern: "*", Action: ActionDeny},
+			},
+			tool: "edit",
+			want: true,
+		},
+		{
+			name: "edit ask then patch deny keeps edit enabled",
+			ruleset: Ruleset{
+				{Permission: "edit", Pattern: "*", Action: ActionAsk},
+				{Permission: "patch", Pattern: "*", Action: ActionDeny},
+			},
+			tool: "edit",
+			want: false,
+		},
+		{
+			name: "patch disabled without edit or wildcard hides edit via fallback",
+			ruleset: Ruleset{
+				{Permission: "patch", Pattern: "*", Action: ActionDeny},
+			},
+			tool: "edit",
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.ruleset.IsDisabled(tt.tool)
+			if got != tt.want {
+				t.Errorf("IsDisabled(%q) = %v, want %v", tt.tool, got, tt.want)
+			}
+		})
 	}
 }
 

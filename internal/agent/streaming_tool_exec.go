@@ -330,7 +330,7 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 	if entry.err == nil {
 		effective := call
 		effective.Args = json.RawMessage(entry.result.EffectiveArgsJSON)
-		diff = agentdiff.GenerateToolDiff(effective, entry.result.PreContent, entry.result.PreFilePath)
+		diff = agentdiff.GenerateToolDiff(effective, entry.result.PreContent, entry.result.PreFilePath, entry.result.PreExisted)
 	}
 	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Images: entry.result.Images, Error: entry.err, TurnID: e.turnID, Duration: entry.completedAt.Sub(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...), FileState: entry.result.FileState.Clone(), speculativeHooks: entry.result.speculativeHooks}, true, false
 }
@@ -454,7 +454,7 @@ func (e *StreamingToolExecutor) DrainCompletedResults() map[string]*ToolResultPa
 		if entry.err == nil && entry.result.EffectiveArgsJSON != "" {
 			effective := entry.call
 			effective.Args = json.RawMessage(entry.result.EffectiveArgsJSON)
-			diff = agentdiff.GenerateToolDiff(effective, entry.result.PreContent, entry.result.PreFilePath)
+			diff = agentdiff.GenerateToolDiff(effective, entry.result.PreContent, entry.result.PreFilePath, entry.result.PreExisted)
 		}
 
 		payload := &ToolResultPayload{
@@ -508,7 +508,7 @@ func (e *StreamingToolExecutor) speculativeMutationBarrierLocked(call message.To
 
 func isFileMutationTool(name string) bool {
 	switch name {
-	case tools.NameWrite, tools.NameEdit, tools.NameDelete:
+	case tools.NameWrite, tools.NameEdit, tools.NamePatch, tools.NameDelete:
 		return true
 	default:
 		return false
@@ -521,7 +521,7 @@ func speculativeConflictKeys(call message.ToolCall, projectRoot string) []string
 		if path, ok := singlePathToolPath(call.Args); ok {
 			return []string{"file:" + path}
 		}
-	case tools.NameEdit:
+	case tools.NameEdit, tools.NamePatch:
 		if path := tools.ExtractEditPathFromArgsInDir(call.Args, projectRoot); path != "" {
 			return []string{"file:" + path}
 		}

@@ -496,7 +496,7 @@ func TestConvertCodexRollout_EditToolConvertsToEdit(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3", len(msgs))
 	}
-	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "edit" {
+	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "patch" {
 		t.Fatalf("msg1=%+v", msgs[1])
 	}
 	var args map[string]any
@@ -528,11 +528,11 @@ func TestConvertCodexRollout_ApplyPatchCustomToolConvertsToEdit(t *testing.T) {
 		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
 	}
 	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || strings.TrimSpace(msgs[1].Content) != "" {
-		t.Fatalf("apply_patch not restored as Edit tool card: %+v", msgs[1])
+		t.Fatalf("apply_patch not restored as Patch tool card: %+v", msgs[1])
 	}
 	call := msgs[1].ToolCalls[0]
-	if call.Name != "edit" || call.ID != "call_patch" {
-		t.Fatalf("tool call=%+v, want edit call_patch", call)
+	if call.Name != "patch" || call.ID != "call_patch" {
+		t.Fatalf("tool call=%+v, want patch call_patch", call)
 	}
 	var args map[string]any
 	if err := json.Unmarshal(call.Args, &args); err != nil {

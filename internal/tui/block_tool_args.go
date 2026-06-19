@@ -180,6 +180,20 @@ func paramStringList(raw string) []string {
 	return out
 }
 
+func nonCurrentDirToolPaths(raw string) []string {
+	paths := paramStringList(raw)
+	if len(paths) == 0 {
+		return nil
+	}
+	out := paths[:0]
+	for _, path := range paths {
+		if path != "." {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
 func formatStringListParam(values []string) string {
 	if len(values) == 0 {
 		return ""
@@ -240,7 +254,22 @@ func displayToolDir(path, workingDir string) string {
 	if path == "." {
 		return path
 	}
-	return displayToolPath(path, workingDir)
+	if workingDir == "" {
+		return path
+	}
+	rel, err := filepath.Rel(workingDir, path)
+	if err != nil {
+		return path
+	}
+	rel = filepath.Clean(rel)
+	if rel == "." || rel == "" {
+		return "."
+	}
+	up := ".." + string(os.PathSeparator)
+	if rel == ".." || strings.HasPrefix(rel, up) {
+		return path
+	}
+	return rel
 }
 
 func (b *Block) displayToolPath(path string) string {
@@ -270,7 +299,7 @@ func cloneToolValsWithDisplayDirs(b *Block, vals map[string]string) map[string]s
 		switch b.ToolName {
 		case tools.NameGrep, tools.NameGlob, tools.NameLsp:
 			cloned["path"] = b.displayToolDir(path)
-		case tools.NameRead, tools.NameViewImage, tools.NameWrite, tools.NameEdit, tools.NameDelete:
+		case tools.NameRead, tools.NameViewImage, tools.NameWrite, tools.NameEdit, tools.NamePatch, tools.NameDelete:
 			cloned["path"] = b.displayToolPath(path)
 		}
 	}
@@ -315,7 +344,7 @@ func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[st
 			return "", ""
 		}
 		var opts []string
-		if paths := paramStringList(vals["paths"]); len(paths) > 0 && !(len(paths) == 1 && paths[0] == ".") {
+		if paths := nonCurrentDirToolPaths(vals["paths"]); len(paths) > 0 {
 			opts = append(opts, "paths="+formatStringListParam(paths))
 		}
 		if includes := paramStringList(vals["includes"]); len(includes) > 0 {
@@ -502,7 +531,7 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 			return ""
 		}
 		var opts []string
-		if paths := paramStringList(vals["paths"]); len(paths) > 0 && !(len(paths) == 1 && paths[0] == ".") {
+		if paths := nonCurrentDirToolPaths(vals["paths"]); len(paths) > 0 {
 			opts = append(opts, "paths="+formatStringListParam(paths))
 		}
 		if includes := paramStringList(vals["includes"]); len(includes) > 0 {

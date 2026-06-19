@@ -46,6 +46,16 @@ func TestReadToolDescriptionExplainsRawOutputForEdits(t *testing.T) {
 	}
 }
 
+func TestReadToolPathDescriptionWarnsAgainstGuessing(t *testing.T) {
+	props := (ReadTool{}).Parameters()["properties"].(map[string]any)
+	desc := props["path"].(map[string]any)["description"].(string)
+	for _, want := range []string{"existing file", "Do not guess paths", "verify uncertain paths before reading"} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("path description missing %q: %q", want, desc)
+		}
+	}
+}
+
 func readTestHeaderAndBody(t *testing.T, out string) (string, string) {
 	t.Helper()
 	header, body, ok := strings.Cut(out, "\n")

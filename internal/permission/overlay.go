@@ -17,8 +17,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/keakon/chord/internal/toolname"
 )
 
 // RuleScope represents where a permission rule is persisted.
@@ -76,13 +74,23 @@ type Overlay struct {
 	// base rules from active role config
 	base Ruleset
 
+	// mergedCache stores the current merged ruleset for hot-path lookups. It is
+	// invalidated on any state change and rebuilt lazily under lock.
+	mergedCache Ruleset
+	mergedDirty bool
+
 	// addedRules tracks rules added this session (for /rules undo)
 	addedRules []AddedRule
 }
 
 // NewOverlay creates a new overlay manager.
 func NewOverlay() *Overlay {
-	return &Overlay{sessionByRole: make(map[string]Ruleset)}
+	return &Overlay{sessionByRole: make(map[string]Ruleset), mergedDirty: true}
+}
+
+func (o *Overlay) invalidateMergedLocked() {
+	o.mergedCache = nil
+	o.mergedDirty = true
 }
 
 // SetActiveRole updates the role whose session overlay participates in merged evaluation.
@@ -93,6 +101,7 @@ func (o *Overlay) SetActiveRole(role string) {
 	if o.sessionByRole == nil {
 		o.sessionByRole = make(map[string]Ruleset)
 	}
+	o.invalidateMergedLocked()
 }
 
 // SetBase sets the base rules from the active role config.
@@ -100,6 +109,7 @@ func (o *Overlay) SetBase(rules Ruleset) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.base = rules
+	o.invalidateMergedLocked()
 }
 
 // SetProjectPath sets the path for project-scoped persistent overlay.
@@ -119,15 +129,36 @@ func (o *Overlay) SetUserGlobalPath(path string) {
 // MergedRuleset returns the full ruleset with all layers merged.
 // Later rules override earlier ones (last-match-wins).
 func (o *Overlay) MergedRuleset() Ruleset {
+	merged := o.mergedRuleset()
+	out := make(Ruleset, len(merged))
+	copy(out, merged)
+	return out
+}
+
+func (o *Overlay) mergedRuleset() Ruleset {
 	o.mu.RLock()
-	defer o.mu.RUnlock()
+	if !o.mergedDirty {
+		merged := o.mergedCache
+		o.mu.RUnlock()
+		return merged
+	}
+	o.mu.RUnlock()
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	return o.mergedRulesetLocked()
 }
 
 func (o *Overlay) mergedRulesetLocked() Ruleset {
+	if !o.mergedDirty {
+		return o.mergedCache
+	}
 	// Merge order: base → user-global → project → session
 	// last-match-wins means session has highest priority
-	return Merge(o.base, o.userGlobal, o.project, o.activeSessionLocked())
+	merged := Merge(o.base, o.userGlobal, o.project, o.activeSessionLocked())
+	o.mergedCache = merged
+	o.mergedDirty = false
+	return merged
 }
 
 func (o *Overlay) activeSessionLocked() Ruleset {
@@ -140,30 +171,12 @@ func (o *Overlay) activeSessionLocked() Ruleset {
 
 // Evaluate resolves the action using overlay layers with last-match-wins semantics.
 func (o *Overlay) Evaluate(permission, pattern string) Action {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	for _, rs := range o.rulesetsHighToLowLocked() {
-		if result := rs.LastMatch(permission, pattern); result.Found {
-			return result.Rule.Action
-		}
-	}
-	return ActionDeny
+	return o.mergedRuleset().Evaluate(permission, pattern)
 }
 
 // IsDisabled checks if a tool is completely unavailable.
 func (o *Overlay) IsDisabled(toolName string) bool {
-	toolName = toolname.Normalize(toolName)
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	for _, rs := range o.rulesetsHighToLowLocked() {
-		for i := len(rs) - 1; i >= 0; i-- {
-			r := rs[i]
-			if globMatch(toolName, toolname.Normalize(r.Permission)) {
-				return r.Pattern == "*" && r.Action == ActionDeny
-			}
-		}
-	}
-	return false
+	return o.mergedRuleset().IsDisabled(toolName)
 }
 
 // LastMatch finds the last matching rule.
@@ -211,6 +224,7 @@ func (o *Overlay) AddSessionRule(role string, r Rule) {
 	}
 	rs = append(rs, r)
 	o.sessionByRole[role] = rs
+	o.invalidateMergedLocked()
 	o.addedRules = append(o.addedRules, AddedRule{
 		Role:    role,
 		Rule:    r,
@@ -238,6 +252,7 @@ func (o *Overlay) AddPersistentRule(role string, r Rule, scope RuleScope, path s
 		return nil
 	}
 	*target = append(*target, r)
+	o.invalidateMergedLocked()
 	o.addedRules = append(o.addedRules, AddedRule{
 		Role:    role,
 		Rule:    r,
@@ -278,6 +293,7 @@ func (o *Overlay) RemoveSessionRule(index int) bool {
 	} else {
 		o.sessionByRole[role] = rs
 	}
+	o.invalidateMergedLocked()
 	return true
 }
 
@@ -308,10 +324,12 @@ func (o *Overlay) RemoveAddedRule(index int) error {
 		return nil
 	case ScopeProject:
 		o.project = removeLastMatchingRule(o.project, added.Rule)
+		o.invalidateMergedLocked()
 		o.addedRules = append(o.addedRules[:index], o.addedRules[index+1:]...)
 		return nil
 	case ScopeUserGlobal:
 		o.userGlobal = removeLastMatchingRule(o.userGlobal, added.Rule)
+		o.invalidateMergedLocked()
 		o.addedRules = append(o.addedRules[:index], o.addedRules[index+1:]...)
 		return nil
 	default:
@@ -328,6 +346,7 @@ func (o *Overlay) removeSessionRuleLocked(role string, target Rule) {
 	} else {
 		o.sessionByRole[role] = rs
 	}
+	o.invalidateMergedLocked()
 }
 
 func removeLastMatchingRule(rs Ruleset, target Rule) Ruleset {

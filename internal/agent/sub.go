@@ -264,12 +264,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 			if cfg.Ruleset.IsDisabled(t.Name()) {
 				continue
 			}
-			if ap, ok := t.(tools.EditTool); ok && ap.BaseDir == "" {
-				ap.BaseDir = cfg.WorkDir
-				subTools.Register(ap)
-				continue
-			}
-			subTools.Register(t)
+			subTools.Register(subAgentToolWithBaseDir(t, cfg.WorkDir))
 		}
 	}
 
@@ -360,7 +355,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	s.cachedSessionReminderContent = buildSessionContextReminder(s.agentsMD, time.Now())
 	s.frozenToolDefs = append(
 		[]message.ToolDefinition(nil),
-		llmToolDefinitionsFromVisibleTools(visibleLLMTools(s.tools, s.ruleset, isSubAgentInternalTool))...,
+		llmToolDefinitionsFromVisibleTools(s.filteredVisibleToolsForModel(s.modelName))...,
 	)
 
 	return s
@@ -404,13 +399,15 @@ func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimi
 	if s == nil || client == nil {
 		return
 	}
-	prompt := s.buildSystemPrompt()
-	client.SetSystemPrompt(prompt)
+	toolDefs := llmToolDefinitionsFromVisibleTools(s.filteredVisibleToolsForModel(modelName))
 	s.llmMu.Lock()
 	oldClient := s.llmClient
 	s.llmClient = client
 	s.modelName = modelName
+	s.frozenToolDefs = append([]message.ToolDefinition(nil), toolDefs...)
 	s.llmMu.Unlock()
+	prompt := s.buildSystemPrompt()
+	client.SetSystemPrompt(prompt)
 	if oldClient != nil && oldClient != client {
 		oldClient.InvalidateRouting("model_client_swapped")
 	}
@@ -443,6 +440,23 @@ func (s *SubAgent) thinkingToolcallCompat() *config.ThinkingToolcallCompatConfig
 	return client.ThinkingToolcallCompat()
 }
 
+func subAgentToolWithBaseDir(t tools.Tool, workDir string) tools.Tool {
+	switch tt := t.(type) {
+	case tools.PatchTool:
+		if tt.BaseDir == "" {
+			tt.BaseDir = workDir
+		}
+		return tt
+	case tools.EditTool:
+		if tt.BaseDir == "" {
+			tt.BaseDir = workDir
+		}
+		return tt
+	default:
+		return t
+	}
+}
+
 // ---------------------------------------------------------------------------
 // LLM interaction
 // ---------------------------------------------------------------------------
@@ -453,10 +467,11 @@ func (s *SubAgent) thinkingToolcallCompat() *config.ThinkingToolcallCompatConfig
 // mirror MainAgent.callLLM so that SubAgent calls are observable by user
 // hooks and visible in cost analytics.
 func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
-	toolDefs := s.frozenToolDefs
+	s.llmMu.RLock()
+	toolDefs := append([]message.ToolDefinition(nil), s.frozenToolDefs...)
+	s.llmMu.RUnlock()
 	if toolDefs == nil {
-		visibleTools := visibleLLMTools(s.tools, s.ruleset, isSubAgentInternalTool)
-		toolDefs = llmToolDefinitionsFromVisibleTools(visibleTools)
+		toolDefs = llmToolDefinitionsFromVisibleTools(s.filteredVisibleTools())
 	}
 	if !s.sessionReminderInjected {
 		out := injectMetaUserReminder(messages, s.cachedSessionReminderContent)
@@ -748,8 +763,17 @@ func (s *SubAgent) sendEvent(evt Event) {
 
 // ---------------------------------------------------------------------------
 func (s *SubAgent) visibleToolNames() map[string]struct{} {
+	return toolNamesFromVisibleTools(s.filteredVisibleTools())
+}
+
+func (s *SubAgent) filteredVisibleTools() []tools.Tool {
+	_, modelName := s.llmSnapshot()
+	return s.filteredVisibleToolsForModel(modelName)
+}
+
+func (s *SubAgent) filteredVisibleToolsForModel(modelName string) []tools.Tool {
 	visibleTools := visibleLLMTools(s.tools, s.ruleset, isSubAgentInternalTool)
-	return toolNamesFromVisibleTools(visibleTools)
+	return filterEditToolsByModel(visibleTools, modelName, s.ruleset)
 }
 
 func (s *SubAgent) hasVisibleTool(name string) bool {
@@ -813,7 +837,7 @@ func (s *SubAgent) buildSystemPrompt() string {
 	// Dynamic environment information (no git status for sub-agents).
 	venvLine := ""
 	if s.venvPath != "" {
-		venvLine = fmt.Sprintf("\n  Python virtual environment: %s\n  When running Python commands, prefer the interpreter from this virtual environment.", s.venvPath)
+		venvLine = fmt.Sprintf("\n  Python virtual environment: %s\n  When running Python commands, prefer the interpreter from this virtual environment.", displayPathFromWorkDir(s.workDir, s.venvPath))
 	}
 	parts = append(parts, fmt.Sprintf(`<env>
   Working directory: %s
@@ -839,8 +863,7 @@ func (s *SubAgent) buildSystemPrompt() string {
 }
 
 func (s *SubAgent) capabilityPromptBlock() string {
-	visibleTools := visibleLLMTools(s.tools, s.ruleset, isSubAgentInternalTool)
-	visible := toolNamesFromVisibleTools(visibleTools)
+	visible := toolNamesFromVisibleTools(s.filteredVisibleTools())
 	return buildDynamicCapabilityPromptBlock(visible, s.ruleset, capabilityPromptAudienceSub)
 }
 

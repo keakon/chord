@@ -33,10 +33,14 @@ func (a *MainAgent) ProviderModelRef() string {
 // (focused SubAgent if any, else MainAgent). It may differ from
 // ProviderModelRef() while fallback is in effect on that agent's client.
 func (a *MainAgent) RunningModelRef() string {
-	if sub := a.validFocusedSubAgent(); sub != nil && sub.llmClient != nil {
-		ref := strings.TrimSpace(sub.llmClient.RunningModelRef())
+	if sub := a.validFocusedSubAgent(); sub != nil {
+		client, _ := sub.llmSnapshot()
+		if client == nil {
+			return ""
+		}
+		ref := strings.TrimSpace(client.RunningModelRef())
 		if ref == "" {
-			ref = strings.TrimSpace(sub.llmClient.PrimaryModelRef())
+			ref = strings.TrimSpace(client.PrimaryModelRef())
 		}
 		return ref
 	}
@@ -51,13 +55,17 @@ func (a *MainAgent) RunningModelRef() string {
 // NextRequestModelRef returns the provider/model ref the focused agent will use
 // to start its next LLM request.
 func (a *MainAgent) NextRequestModelRef() string {
-	if sub := a.validFocusedSubAgent(); sub != nil && sub.llmClient != nil {
-		ref := strings.TrimSpace(sub.llmClient.NextRequestModelRef())
+	if sub := a.validFocusedSubAgent(); sub != nil {
+		client, _ := sub.llmSnapshot()
+		if client == nil {
+			return ""
+		}
+		ref := strings.TrimSpace(client.NextRequestModelRef())
 		if ref == "" {
-			ref = strings.TrimSpace(sub.llmClient.RunningModelRef())
+			ref = strings.TrimSpace(client.RunningModelRef())
 		}
 		if ref == "" {
-			ref = strings.TrimSpace(sub.llmClient.PrimaryModelRef())
+			ref = strings.TrimSpace(client.PrimaryModelRef())
 		}
 		return ref
 	}
@@ -80,8 +88,12 @@ func (a *MainAgent) NextRequestModelRef() string {
 // RunningVariant returns the active variant name for the running model
 // (focused SubAgent if any, else MainAgent), or empty string if none.
 func (a *MainAgent) RunningVariant() string {
-	if sub := a.validFocusedSubAgent(); sub != nil && sub.llmClient != nil {
-		return sub.llmClient.ActiveVariant()
+	if sub := a.validFocusedSubAgent(); sub != nil {
+		client, _ := sub.llmSnapshot()
+		if client == nil {
+			return ""
+		}
+		return client.ActiveVariant()
 	}
 	a.llmMu.RLock()
 	defer a.llmMu.RUnlock()
@@ -520,9 +532,10 @@ func (a *MainAgent) switchActiveSubAgentsForPoolIfNeeded(agentName string, cfg *
 	}
 	a.mu.RUnlock()
 	for _, sub := range targets {
+		client, _ := sub.llmSnapshot()
 		current := ""
-		if sub.llmClient != nil {
-			current = sub.llmClient.PrimaryModelRef()
+		if client != nil {
+			current = client.PrimaryModelRef()
 		}
 		if modelRefInPool(current, refs, cfg) {
 			a.modelPoolPolicy.SetLastPicked(agentName, pool, current)

@@ -87,15 +87,15 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		defer releaseWrite()
 	}
 	staleWrite := writeStatus.ExternalChanged || (deleteLocks != nil && deleteLocks.stale)
-	if tc.Name == tools.NameEdit {
-		plan, err := agentdiff.CaptureEditPlan(tc, p.projectRoot)
+	if tc.Name == tools.NamePatch {
+		plan, err := agentdiff.CapturePatchPlan(agentCtx, tc, p.projectRoot)
 		if err != nil {
 			return execResult, err
 		}
 		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = plan.Path, plan.Before, true
-		agentCtx = tools.ContextWithEditPlan(agentCtx, plan)
+		agentCtx = tools.ContextWithPatchPlan(agentCtx, plan)
 	} else {
-		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc)
+		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc, p.projectRoot)
 	}
 
 	backupOutcome := p.backupRiskyPreWriteState(tc, trackedFilePath, staleWrite, execResult.PreContent, execResult.PreExisted, deleteLocks)
@@ -103,7 +103,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	result, err := p.registry.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
 	execResult.Images = imageSink.Drain()
 	if err != nil {
-		if staleWrite && tc.Name == tools.NameEdit {
+		if staleWrite && (tc.Name == tools.NameEdit || tc.Name == tools.NamePatch) {
 			err = wrapStaleEditError(err)
 		}
 		if result != "" {
@@ -136,16 +136,16 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	agentCtx := buildToolExecContext(ctx, tc, p.agentID, p.taskID, p.sessionDir, p.eventSender, p.emit)
 	imageSink := &tools.ImageCollector{}
 	agentCtx = tools.WithImageSink(agentCtx, imageSink)
-	if tc.Name == tools.NameEdit {
-		plan, err := agentdiff.CaptureEditPlan(tc, p.projectRoot)
+	if tc.Name == tools.NamePatch {
+		plan, err := agentdiff.CapturePatchPlan(agentCtx, tc, p.projectRoot)
 		if err != nil {
 			rollbackSpeculativeToolHooks(execResult)
 			return execResult, err
 		}
 		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = plan.Path, plan.Before, true
-		agentCtx = tools.ContextWithEditPlan(agentCtx, plan)
+		agentCtx = tools.ContextWithPatchPlan(agentCtx, plan)
 	} else {
-		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc)
+		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc, p.projectRoot)
 	}
 	artifactKey := toolCallArtifactKey(tc)
 	staleWrite := hooks != nil && hooks.stale
@@ -155,7 +155,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	execResult.Images = imageSink.Drain()
 	if err != nil {
 		rollbackSpeculativeToolHooks(execResult)
-		if staleWrite && tc.Name == tools.NameEdit {
+		if staleWrite && (tc.Name == tools.NameEdit || tc.Name == tools.NamePatch) {
 			err = wrapStaleEditError(err)
 		}
 		if result != "" {
@@ -314,7 +314,7 @@ func (p toolExecutionPipeline) applySuccessfulFileState(execResult *ToolExecutio
 		}
 		return
 	}
-	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) && trackedFilePath != "" {
+	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit || tc.Name == tools.NamePatch) && trackedFilePath != "" {
 		execResult.FileState = buildWriteFileState(trackedFilePath)
 		if p.fileTrack != nil {
 			if hash := firstWriteHashForPath(execResult.FileState, trackedFilePath); hash != "" {
@@ -366,7 +366,7 @@ func (p toolExecutionPipeline) prepareTrackedToolFileAccess(tc message.ToolCall)
 			return "", nil, fmt.Errorf("file conflict: %w", err)
 		}
 		return "", locks, nil
-	case tools.NameEdit:
+	case tools.NameEdit, tools.NamePatch:
 		return tools.ExtractEditPathFromArgsInDir(tc.Args, p.projectRoot), nil, nil
 	case tools.NameRead, tools.NameWrite:
 		return toolPathFromArgs(tc.Args), nil, nil
@@ -377,7 +377,7 @@ func (p toolExecutionPipeline) prepareTrackedToolFileAccess(tc message.ToolCall)
 
 func acquireTrackedWriteLock(track *filelock.FileTracker, agentID, path, toolName string) (func(), filelock.WriteStatus, error) {
 	var status filelock.WriteStatus
-	if track == nil || path == "" || (toolName != tools.NameWrite && toolName != tools.NameEdit) {
+	if track == nil || path == "" || (toolName != tools.NameWrite && toolName != tools.NameEdit && toolName != tools.NamePatch) {
 		return nil, status, nil
 	}
 	currentHash := computeFileHash(path)
@@ -397,7 +397,7 @@ func (p toolExecutionPipeline) backupRiskyPreWriteState(tc message.ToolCall, tra
 		return fileBackupOutcome{}
 	}
 	switch tc.Name {
-	case tools.NameEdit:
+	case tools.NameEdit, tools.NamePatch:
 		if !stale || !preExisted || preContent == "" || trackedPath == "" {
 			return fileBackupOutcome{}
 		}
@@ -478,7 +478,7 @@ func applySpeculativeFileState(execResult *ToolExecutionResult, registry *tools.
 		if path := toolPathFromArgs(tc.Args); path != "" {
 			execResult.FileState = buildReadFileState(path)
 		}
-	case tools.NameEdit:
+	case tools.NameEdit, tools.NamePatch:
 		if path := tools.ExtractEditPathFromArgsInDir(tc.Args, projectRoot); path != "" {
 			execResult.FileState = buildWriteFileState(path)
 		}
@@ -489,7 +489,7 @@ func applySpeculativeFileState(execResult *ToolExecutionResult, registry *tools.
 	case tools.NameDelete:
 		execResult.FileState = buildDeleteFileStateFromResult(result)
 	}
-	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit) && execResult.PreFilePath != "" {
+	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit || tc.Name == tools.NamePatch) && execResult.PreFilePath != "" {
 		execResult.LSPReviews = speculativeWriteToolLSPReviews(registry, tc.Name, execResult.PreFilePath)
 	}
 }

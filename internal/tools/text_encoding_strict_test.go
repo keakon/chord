@@ -92,3 +92,41 @@ func TestReadDecodedTextFileCachesRegionalEncodingButGoPathRechecks(t *testing.T
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestWarmDecodedFileCacheDoesNotCreateStalePathMapping(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.txt")
+	oldText := "before"
+	newText := "extern"
+	if len(oldText) != len(newText) {
+		t.Fatal("test texts must have identical length to exercise stale path-cache risk")
+	}
+	if err := os.WriteFile(path, []byte(oldText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := ReadDecodedTextFile(path)
+	if err != nil {
+		t.Fatalf("ReadDecodedTextFile(initial) error = %v", err)
+	}
+	if decoded.Text != oldText {
+		t.Fatalf("initial decoded text = %q, want %q", decoded.Text, oldText)
+	}
+
+	warmDecodedFileCache(path, []byte(oldText), decodedText{Text: oldText, Encoding: utf8Encoding})
+	if err := os.WriteFile(path, []byte(newText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	decoded, err = ReadDecodedTextFile(path)
+	if err != nil {
+		t.Fatalf("ReadDecodedTextFile(after external write) error = %v", err)
+	}
+	if decoded.Text != newText {
+		t.Fatalf("decoded text after external write = %q, want %q", decoded.Text, newText)
+	}
+	if entry, ok := getPathCache(path); ok {
+		if entry.Hash == cacheKeyForBytes([]byte(oldText)) {
+			t.Fatal("path cache should not retain stale hash for external content")
+		}
+	}
+}

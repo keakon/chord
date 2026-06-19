@@ -59,7 +59,15 @@ func newToolCardMetrics(width int) toolCardMetrics {
 	return newToolCardMetricsWithContentCap(width, maxTextWidth)
 }
 
+func newWideHeaderToolCardMetrics(width int) toolCardMetrics {
+	return newToolCardMetricsForHeaderWidth(width, maxTextWidth, true)
+}
+
 func newToolCardMetricsWithContentCap(width, contentCap int) toolCardMetrics {
+	return newToolCardMetricsForHeaderWidth(width, contentCap, false)
+}
+
+func newToolCardMetricsForHeaderWidth(width, contentCap int, wideHeader bool) toolCardMetrics {
 	blockStyle := ToolBlockStyle
 	boxWidth := width - blockStyle.GetHorizontalMargins()
 	if boxWidth < 10 {
@@ -69,9 +77,11 @@ func newToolCardMetricsWithContentCap(width, contentCap int) toolCardMetrics {
 	if cardWidth < 10 {
 		cardWidth = 10
 	}
-	// Keep the card surface aligned with the prose cards' right edge on very
-	// wide viewports instead of stretching empty background past the text cap.
-	cardWidth = clampCardInnerWidth(cardWidth, blockStyle, contentCap)
+	if !wideHeader {
+		// Keep the card surface aligned with the prose cards' right edge on very
+		// wide viewports instead of stretching empty background past the text cap.
+		cardWidth = clampCardInnerWidth(cardWidth, blockStyle, contentCap)
+	}
 	contentWidth := min(cardWidth-4, contentCap)
 	if contentWidth < 10 {
 		contentWidth = 10
@@ -97,7 +107,7 @@ const pendingToolGlyph = "⧗"
 
 func toolUsesCompactDetailToggle(toolName string) bool {
 	switch toolName {
-	case tools.NameWrite, tools.NameEdit, tools.NameRead, tools.NameTodoWrite, tools.NameQuestion, tools.NameDelegate:
+	case tools.NameWrite, tools.NameEdit, tools.NamePatch, tools.NameRead, tools.NameTodoWrite, tools.NameQuestion, tools.NameDelegate:
 		return false
 	}
 	return true

@@ -12,6 +12,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/lsp"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/skill"
@@ -27,8 +28,22 @@ func TestLoadAgentsMDWithWorkDir_RootOnly(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "AGENTS.md"), "root instructions")
 
 	got := loadAgentsMDWithWorkDir(dir, "")
-	if got != "root instructions" {
+	want := "## AGENTS.md\n\nroot instructions"
+	if got != want {
 		t.Fatalf("expected root instructions, got %q", got)
+	}
+	if strings.Contains(got, dir) {
+		t.Fatalf("AGENTS.md reminder should avoid absolute paths, got %q", got)
+	}
+}
+
+func TestLoadAgentsMDWithWorkDir_WorkDirIsRootUsesPlainAgentsPath(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "AGENTS.md"), "root")
+
+	got := loadAgentsMDWithWorkDir(root, root)
+	if got != "## AGENTS.md\n\nroot" {
+		t.Fatalf("expected root-relative AGENTS.md title when workDir is root, got %q", got)
 	}
 }
 
@@ -43,9 +58,16 @@ func TestLoadAgentsMDWithWorkDir_Hierarchical(t *testing.T) {
 	writeFile(t, filepath.Join(sub, "AGENTS.md"), "deep")
 
 	got := loadAgentsMDWithWorkDir(root, sub)
-	parts := strings.Split(got, "\n\n")
-	if len(parts) != 3 || parts[0] != "root" || parts[1] != "mid" || parts[2] != "deep" {
+	want := strings.Join([]string{
+		"## ../../AGENTS.md\n\nroot",
+		"## ../AGENTS.md\n\nmid",
+		"## AGENTS.md\n\ndeep",
+	}, "\n\n")
+	if got != want {
 		t.Fatalf("unexpected layers: %q", got)
+	}
+	if strings.Contains(got, root) {
+		t.Fatalf("AGENTS.md reminder should avoid absolute paths, got %q", got)
 	}
 }
 
@@ -57,7 +79,7 @@ func TestLoadAgentsMDWithWorkDir_WorkDirNotUnderRoot(t *testing.T) {
 
 	// workDir not under projectRoot — should only read root
 	got := loadAgentsMDWithWorkDir(root, other)
-	if got != "root" {
+	if got != "## AGENTS.md\n\nroot" {
 		t.Fatalf("expected only root, got %q", got)
 	}
 }
@@ -72,7 +94,7 @@ func TestLoadAgentsMDWithWorkDir_MissingFiles(t *testing.T) {
 	writeFile(t, filepath.Join(root, "AGENTS.md"), "root")
 
 	got := loadAgentsMDWithWorkDir(root, sub)
-	if got != "root" {
+	if got != "## ../../AGENTS.md\n\nroot" {
 		t.Fatalf("expected only root, got %q", got)
 	}
 }
@@ -126,6 +148,24 @@ todo_write: allow
 	}
 	if strings.Contains(got, "distinct active delegated workstreams") {
 		t.Fatalf("todoWorkflowPromptBlock() unexpectedly included Delegate-specific multi in_progress guidance without Delegate workflow: %q", got)
+	}
+}
+
+func TestToolSelectionPromptBlock_UsesEditSpecificGuidance(t *testing.T) {
+	editPrompt := toolSelectionPromptBlock(map[string]struct{}{tools.NameEdit: {}})
+	if !strings.Contains(editPrompt, "exact old_string/new_string replacements") {
+		t.Fatalf("edit prompt missing exact replacement guidance: %q", editPrompt)
+	}
+	if strings.Contains(editPrompt, "keep hunks small") {
+		t.Fatalf("edit prompt should not use patch hunk guidance: %q", editPrompt)
+	}
+
+	patchPrompt := toolSelectionPromptBlock(map[string]struct{}{tools.NamePatch: {}})
+	if !strings.Contains(patchPrompt, "keep hunks small") {
+		t.Fatalf("patch prompt missing hunk guidance: %q", patchPrompt)
+	}
+	if strings.Contains(patchPrompt, "old_string/new_string") {
+		t.Fatalf("patch prompt should not use replace-edit guidance: %q", patchPrompt)
 	}
 }
 
@@ -756,6 +796,35 @@ func TestMainLLMToolDefinitionsIncludeSkillToolListing(t *testing.T) {
 	}
 }
 
+func TestMainLLMToolDefinitionsHideSkillToolWithoutAvailableSkills(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry()}
+	a.tools.Register(tools.NewSkillTool(a))
+
+	defs := a.mainLLMToolDefinitions()
+	if len(defs) != 0 {
+		t.Fatalf("mainLLMToolDefinitions() count = %d, want 0", len(defs))
+	}
+}
+
+func TestMainAgentAvailableSkillsPromptBlockListsVisibleSkills(t *testing.T) {
+	a := &MainAgent{}
+	a.loadedSkills = []*skill.Meta{{Name: "go-expert", Description: "Go language development expert", Location: "/tmp/go-expert/SKILL.md", RootDir: "/tmp/go-expert"}}
+
+	got := a.availableSkillsPromptBlock()
+	for _, want := range []string{"## Available Skills", "call `skill` before proceeding", "go-expert", "Go language development expert"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("availableSkillsPromptBlock() missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestMainAgentAvailableSkillsPromptBlockEmptyWithoutSkills(t *testing.T) {
+	a := &MainAgent{}
+	if got := a.availableSkillsPromptBlock(); got != "" {
+		t.Fatalf("availableSkillsPromptBlock() = %q, want empty", got)
+	}
+}
+
 func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.NewShellTool("bash"))
@@ -773,7 +842,7 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 		t.Fatalf("unexpected LSP hint without Lsp tool: %q", defs[0].Description)
 	}
 
-	a.tools.Register(tools.LspTool{})
+	a.tools.Register(tools.LspTool{LSP: lsp.NewManager(&config.Config{}, t.TempDir(), nil)})
 	a.tools.Register(tools.GrepTool{})
 	a.tools.Register(tools.GlobTool{})
 	a.tools.Register(tools.ReadTool{})
@@ -818,7 +887,7 @@ read: allow
 func TestMainAgentCapabilityPromptBlock_UsesVisibleToolsOnly(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.PatchTool{})
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.DeleteTool{})
 	a.tools.Register(tools.GrepTool{})
@@ -837,8 +906,9 @@ shell: allow
 	for _, want := range []string{
 		"## Tool Selection",
 		"Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.",
-		"Use `read` for file contents.",
+		"Use `read` for file contents when the target path is already known or has been verified.",
 		"Use `glob` / `grep` for discovery and navigation.",
+		"If you are unsure of the exact target path for `read`, use `glob` / `grep` to find or verify it before calling the path tool; do not guess plausible-looking paths.",
 		"Use `shell` mainly for tests, builds, git, and system commands.",
 		"## File Inspection Constraints",
 		"File inspection and code-navigation capabilities may be limited in this role.",
@@ -853,9 +923,121 @@ shell: allow
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
 		}
 	}
-	for _, unwanted := range []string{"Use `edit`", "Use `write`"} {
+	for _, unwanted := range []string{"Use `edit`", "Use `write`", "`lsp`"} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() unexpectedly contains %q in %q", unwanted, got)
+		}
+	}
+}
+
+func TestMainAgentCapabilityPromptBlock_PathVerificationMentionsOnlyVisibleDiscoveryTools(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry()}
+	a.tools.Register(tools.ReadTool{})
+	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.DeleteTool{})
+	a.tools.Register(tools.GrepTool{})
+	a.tools.Register(tools.GlobTool{})
+	a.tools.Register(tools.LspTool{})
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": deny
+read: allow
+edit: allow
+delete: allow
+grep: allow
+lsp: allow
+`)}
+	a.rebuildRuleset()
+
+	got := a.mainAgentCapabilityPromptBlock()
+	for _, want := range []string{
+		"Use `grep` for discovery and navigation.",
+		"If you are unsure of the exact target path for `read` / `edit` / `delete`, use `grep` to find or verify it before calling the path tool; do not guess plausible-looking paths.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
+		}
+	}
+	for _, unwanted := range []string{"`glob`", "`lsp`"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("mainAgentCapabilityPromptBlock() unexpectedly mentions unavailable %q in %q", unwanted, got)
+		}
+	}
+
+	a = &MainAgent{tools: tools.NewRegistry()}
+	a.tools.Register(tools.ReadTool{})
+	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.DeleteTool{})
+	a.tools.Register(tools.GrepTool{})
+	a.tools.Register(tools.GlobTool{})
+	a.tools.Register(tools.LspTool{LSP: lsp.NewManager(&config.Config{}, t.TempDir(), nil)})
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": deny
+read: allow
+edit: allow
+delete: allow
+grep: allow
+lsp: allow
+`)}
+	a.rebuildRuleset()
+
+	got = a.mainAgentCapabilityPromptBlock()
+	if !strings.Contains(got, "Use `grep` / `lsp` for discovery and navigation.") {
+		t.Fatalf("mainAgentCapabilityPromptBlock() should include configured LSP discovery guidance, got %q", got)
+	}
+}
+
+func TestMainAgentCapabilityPromptBlock_OmitsPathDiscoveryGuidanceWithoutDiscoveryTools(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry(), modelName: "gpt-4"} // Set GPT model to use patch tool
+	a.tools.Register(tools.ReadTool{})
+	a.tools.Register(tools.PatchTool{})
+	a.tools.Register(tools.DeleteTool{})
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": deny
+read: allow
+patch: allow
+delete: allow
+`)}
+	a.rebuildRuleset()
+
+	got := a.mainAgentCapabilityPromptBlock()
+	for _, want := range []string{
+		"Use `read` for file contents when the target path is already known or has been verified.",
+		"Use `patch` to modify the contents of one existing file with a verified path.",
+		"Use `delete` to remove files with verified paths.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
+		}
+	}
+	for _, unwanted := range []string{"for discovery and navigation", "to find or verify it before calling the path tool", "`glob`", "`grep`", "`lsp`"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("mainAgentCapabilityPromptBlock() unexpectedly contains %q in %q", unwanted, got)
+		}
+	}
+}
+
+func TestMainAgentCapabilityPromptBlock_OmitsEditGuidanceWhenEditDenied(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry(), modelName: "claude-opus-4"} // Claude model uses edit tool
+	a.tools.Register(tools.ReadTool{})
+	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.WriteTool{})
+	a.tools.Register(tools.DeleteTool{})
+	a.tools.Register(tools.NewShellTool("bash"))
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": allow
+edit: deny
+`)}
+	a.rebuildRuleset()
+
+	got := a.mainAgentCapabilityPromptBlock()
+	for _, unwanted := range []string{"Use `edit`", "`edit`"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("mainAgentCapabilityPromptBlock() unexpectedly mentions edit when denied: %q in %q", unwanted, got)
+		}
+	}
+	for _, want := range []string{"Use `read`", "Use `write`", "Use `delete`", "Use `shell`"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("mainAgentCapabilityPromptBlock() missing visible tool %q in %q", want, got)
 		}
 	}
 }
@@ -887,7 +1069,7 @@ func TestMainAgentCapabilityPromptBlock_ShowsInspectionConstraintsWhenInspection
 	a.tools.Register(tools.ReadTool{})
 	a.tools.Register(tools.GrepTool{})
 	a.tools.Register(tools.GlobTool{})
-	a.tools.Register(tools.LspTool{})
+	a.tools.Register(tools.LspTool{LSP: lsp.NewManager(&config.Config{}, t.TempDir(), nil)})
 	a.tools.Register(tools.NewShellTool("bash"))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
@@ -950,7 +1132,7 @@ question: deny
 func TestMainAgentCapabilityPromptBlock_ShowsLimitedFileScope(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.PatchTool{})
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.DeleteTool{})
 	a.tools.Register(tools.NewShellTool("bash"))
@@ -990,7 +1172,7 @@ func TestMainAgentCapabilityPromptBlock_OnlyTightenedPathsDoesNotImplyScopedWrit
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": allow
 shell: allow
-Edit:
+edit:
   "*": allow
   "internal/tui/*": ask
 Write:
@@ -1062,7 +1244,7 @@ shell: allow
 	if customRoleIdx > toolSelectionIdx {
 		t.Fatalf("buildSystemPrompt() should append dynamic capabilities after custom role body, got %q", got)
 	}
-	if !strings.Contains(got, "Use `read` for file contents.") || !strings.Contains(got, "Use `shell` mainly for tests, builds, git, and system commands.") || !strings.Contains(got, "Prefer the smallest safe number of tool calls.") {
+	if !strings.Contains(got, "Use `read` for file contents when the target path is already known or has been verified.") || !strings.Contains(got, "Use `shell` mainly for tests, builds, git, and system commands.") || !strings.Contains(got, "Prefer the smallest safe number of tool calls.") {
 		t.Fatalf("buildSystemPrompt() missing visible-tool guidance: %q", got)
 	}
 }
@@ -1086,7 +1268,7 @@ shell: allow
 	}
 
 	got := s.buildSystemPrompt()
-	for _, want := range []string{subAgentIdentityPrompt, sharedAgentValuesPrompt, "## Guidelines", "## SubAgent Coordination", "## SubAgent Task Closure", "## Custom SubAgent Role", "## Tool Selection", "Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.", "Use `read` for file contents.", "## Your Task"} {
+	for _, want := range []string{subAgentIdentityPrompt, sharedAgentValuesPrompt, "## Guidelines", "## SubAgent Coordination", "## SubAgent Task Closure", "## Custom SubAgent Role", "## Tool Selection", "Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.", "Use `read` for file contents when the target path is already known or has been verified.", "## Your Task"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("buildSystemPrompt() missing %q in %q", want, got)
 		}
@@ -1170,7 +1352,7 @@ notify: allow
 func TestMainAndSubCapabilityPromptBlocksUseAudienceSpecificEscalation(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(tools.ReadTool{})
-	reg.Register(tools.EditTool{})
+	reg.Register(tools.PatchTool{})
 	reg.Register(tools.NewShellTool("bash"))
 	reg.Register(tools.NewQuestionTool(nil))
 	permNode := parsePermissionNode(t, `
@@ -1401,7 +1583,6 @@ func TestInjectGitStatusIntoFirstUserMessage_InjectsOnlyOnce(t *testing.T) {
 
 func TestGitStatusInjectedReset(t *testing.T) {
 	a := &MainAgent{}
-	a.cachedGitStatus = "Git branch: main"
 	a.gitStatusInjected.Store(true)
 
 	// Simulate session reset
@@ -1433,9 +1614,73 @@ func TestDetectVenvPath_FindsVenvUnderWorkDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := detectVenvPath(tmp)
+	got := detectVenvPath(tmp, tmp)
 	if got != venvDir {
 		t.Fatalf("detectVenvPath(%q) = %q, want %q", tmp, got, venvDir)
+	}
+}
+
+func TestDetectVenvPath_WalksUpToParentVenv(t *testing.T) {
+	root := t.TempDir()
+	workDir := filepath.Join(root, "internal", "agent")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	venvDir := filepath.Join(root, ".venv")
+	if err := os.MkdirAll(venvDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(venvDir, "pyvenv.cfg"), []byte("home = /usr/bin\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := detectVenvPath(workDir, root)
+	if got != venvDir {
+		t.Fatalf("detectVenvPath(%q) = %q, want parent venv %q", workDir, got, venvDir)
+	}
+}
+
+func TestDetectVenvPath_ReturnsSingleNearestVenvWithinProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	workDir := filepath.Join(root, "internal", "agent")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rootVenv := filepath.Join(root, ".venv")
+	nearestVenv := filepath.Join(root, "internal", "venv")
+	for _, dir := range []string{rootVenv, nearestVenv} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "pyvenv.cfg"), []byte("home = /usr/bin\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := detectVenvPath(workDir, root)
+	if got != nearestVenv {
+		t.Fatalf("detectVenvPath(%q) = %q, want nearest single venv %q", workDir, got, nearestVenv)
+	}
+}
+
+func TestDetectVenvPath_DoesNotWalkAboveProjectRoot(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "project")
+	workDir := filepath.Join(root, "internal", "agent")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parentVenv := filepath.Join(parent, ".venv")
+	if err := os.MkdirAll(parentVenv, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parentVenv, "pyvenv.cfg"), []byte("home = /usr/bin\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := detectVenvPath(workDir, root)
+	if got != "" {
+		t.Fatalf("detectVenvPath(%q) = %q, want empty when venv is above project root", workDir, got)
 	}
 }
 
@@ -1451,7 +1696,7 @@ func TestDetectVenvPath_PrefersDotVenv(t *testing.T) {
 		}
 	}
 
-	got := detectVenvPath(tmp)
+	got := detectVenvPath(tmp, tmp)
 	want := filepath.Join(tmp, ".venv")
 	if got != want {
 		t.Fatalf("detectVenvPath(%q) = %q, want %q (.venv takes precedence)", tmp, got, want)
@@ -1461,7 +1706,7 @@ func TestDetectVenvPath_PrefersDotVenv(t *testing.T) {
 func TestDetectVenvPath_ReturnsEmptyWhenNoVenv(t *testing.T) {
 	tmp := t.TempDir()
 
-	got := detectVenvPath(tmp)
+	got := detectVenvPath(tmp, tmp)
 	if got != "" {
 		t.Fatalf("detectVenvPath(%q) = %q, want empty string", tmp, got)
 	}
@@ -1474,14 +1719,14 @@ func TestDetectVenvPath_ReturnsEmptyWhenDirMissingPyvenvCfg(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := detectVenvPath(tmp)
+	got := detectVenvPath(tmp, tmp)
 	if got != "" {
 		t.Fatalf("detectVenvPath(%q) = %q, want empty string (no pyvenv.cfg)", tmp, got)
 	}
 }
 
 func TestDetectVenvPath_ReturnsEmptyForEmptyWorkDir(t *testing.T) {
-	got := detectVenvPath("")
+	got := detectVenvPath("", "")
 	if got != "" {
 		t.Fatalf("detectVenvPath(\"\") = %q, want empty string", got)
 	}
@@ -1498,7 +1743,7 @@ func TestDetectVenvPath_FindsVenvNotEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := detectVenvPath(tmp)
+	got := detectVenvPath(tmp, tmp)
 	if got != venvDir {
 		t.Fatalf("detectVenvPath(%q) = %q, want %q", tmp, got, venvDir)
 	}
@@ -1513,7 +1758,10 @@ func TestBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPresent(t 
 		t.Fatalf("buildSystemPrompt() missing AGENTS.md workspace framing when AGENTS.md is present, got:\n%s", got)
 	}
 	for _, want := range []string{
-		"AGENTS.md repository instructions in a <system-reminder> block before the user's first message",
+		"complete applicable AGENTS.md contents into the LLM request as an internal <system-reminder> user-role message before the first real user message",
+		"may not appear in the visible transcript",
+		"discovered by walking from the current working directory up to the project root",
+		"Each loaded section is labeled with its path relative to the current working directory",
 		"Treat AGENTS.md instructions inside that <system-reminder> block as durable workspace context",
 		"they are system-provided workspace context, not ordinary user content",
 	} {
@@ -1538,7 +1786,10 @@ func TestSubAgentBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPr
 	got := s.buildSystemPrompt()
 	for _, want := range []string{
 		"## Workspace Instructions",
-		"AGENTS.md repository instructions in a <system-reminder> block before the user's first message",
+		"complete applicable AGENTS.md contents into the LLM request as an internal <system-reminder> user-role message before the first real user message",
+		"may not appear in the visible transcript",
+		"discovered by walking from the current working directory up to the project root",
+		"Each loaded section is labeled with its path relative to the current working directory",
 		"Treat AGENTS.md instructions inside that <system-reminder> block as durable workspace context",
 	} {
 		if !strings.Contains(got, want) {
@@ -1557,12 +1808,18 @@ func TestSubAgentBuildSystemPrompt_OmitsAgentsMDReminderFramingWhenAgentsMDAbsen
 }
 
 func TestBuildSystemPrompt_IncludesVenvWhenDetected(t *testing.T) {
-	a := &MainAgent{tools: tools.NewRegistry()}
-	a.cachedVenvPath = "/tmp/project/.venv"
+	root := t.TempDir()
+	workDir := filepath.Join(root, "internal", "agent")
+	venvPath := filepath.Join(root, ".venv")
+	a := &MainAgent{tools: tools.NewRegistry(), cachedWorkDir: workDir}
+	a.cachedVenvPath = venvPath
 
 	got := a.buildSystemPrompt()
-	if !strings.Contains(got, "Python virtual environment: /tmp/project/.venv") {
+	if !strings.Contains(got, "Python virtual environment: ../../.venv") {
 		t.Fatalf("buildSystemPrompt() missing venv line when venvPath is set, got:\n%s", got)
+	}
+	if strings.Contains(got, venvPath) {
+		t.Fatalf("buildSystemPrompt() should use a path relative to the working directory, got:\n%s", got)
 	}
 }
 
@@ -1577,10 +1834,13 @@ func TestBuildSystemPrompt_OmitsVenvWhenAbsent(t *testing.T) {
 
 func TestSubAgentBuildSystemPrompt_IncludesVenv(t *testing.T) {
 	reg := tools.NewRegistry()
+	root := t.TempDir()
+	workDir := filepath.Join(root, "internal", "agent")
+	venvPath := filepath.Join(root, ".venv")
 	s := &SubAgent{
 		tools:    reg,
-		workDir:  "/tmp/project",
-		venvPath: "/tmp/project/.venv",
+		workDir:  workDir,
+		venvPath: venvPath,
 		taskDesc: "Run tests",
 	}
 
@@ -1588,8 +1848,11 @@ func TestSubAgentBuildSystemPrompt_IncludesVenv(t *testing.T) {
 	if !strings.Contains(got, "Platform: "+runtime.GOOS+"/"+runtime.GOARCH) {
 		t.Fatalf("SubAgent buildSystemPrompt() missing full platform, got:\n%s", got)
 	}
-	if !strings.Contains(got, "Python virtual environment: /tmp/project/.venv") {
+	if !strings.Contains(got, "Python virtual environment: ../../.venv") {
 		t.Fatalf("SubAgent buildSystemPrompt() missing venv line when venvPath is set, got:\n%s", got)
+	}
+	if strings.Contains(got, venvPath) {
+		t.Fatalf("SubAgent buildSystemPrompt() should use a path relative to the working directory, got:\n%s", got)
 	}
 }
 

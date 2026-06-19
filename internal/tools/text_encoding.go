@@ -161,17 +161,9 @@ func invalidatePathCache(path string) {
 	pathDetectionCache.Remove(key)
 }
 
-func warmDecodedFileCacheAsync(path string, encodedBytes []byte, decoded decodedText) {
+func warmDecodedFileCache(path string, encodedBytes []byte, decoded decodedText) {
 	invalidatePathCache(path)
-	go func() {
-		hash := cacheKeyForBytes(encodedBytes)
-		cacheSuccess(hash, decoded)
-		info, err := os.Stat(path)
-		if err != nil {
-			return
-		}
-		setPathCache(path, pathCacheEntry{Size: info.Size(), ModTime: info.ModTime().UnixNano(), Hash: hash})
-	}()
+	cacheSuccess(cacheKeyForBytes(encodedBytes), decoded)
 }
 
 // ReadDecodedTextFile reads and decodes a text file, reusing the two-level cache.
@@ -331,25 +323,11 @@ func cacheDecoded(hash [32]byte, decoded decodedText, err error) {
 	cacheSuccess(hash, decoded)
 }
 
-// DecodeTextBytesForAgent exposes file decoding for agent-side diff helpers.
-func DecodeTextBytesForAgent(data []byte) (string, error) {
-	decoded, err := decodeTextBytes(data, "")
-	if err != nil {
-		return "", err
-	}
-	return decoded.Text, nil
-}
-
 func decodeToolStringArg(raw string) (string, error) {
 	if !utf8.ValidString(raw) {
 		return "", fmt.Errorf("tool argument is not valid UTF-8")
 	}
 	return raw, nil
-}
-
-// DecodeToolStringArgForAgent exposes tool-argument decoding for agent-side helpers.
-func DecodeToolStringArgForAgent(raw string) (string, error) {
-	return decodeToolStringArg(raw)
 }
 
 func detectBOMEncoding(data []byte) (textEncoding, bool) {

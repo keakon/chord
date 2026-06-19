@@ -24,12 +24,14 @@ type lspArgs struct {
 
 func (t LspTool) Name() string { return NameLsp }
 
+func (t LspTool) IsAvailable() bool { return t.LSP != nil }
+
 func (LspTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 	return normalizeConcurrencyPolicy(NameLsp, fileToolConcurrencyPolicy(args, true))
 }
 
 func (t LspTool) Description() string {
-	base := "Semantic code navigation via LSP. Use this tool first for definition, references, and implementation at a known file position. Prefer it over grep/glob once the file path and cursor position are known and the file type has LSP coverage. Use grep/glob only to discover candidate files or positions when the location is not known yet. Put the cursor on the identifier itself, not file start or whitespace. If references fails because no identifier is found, re-read the file and retry on the symbol name. Use 1-based line and character from the raw file content; count tabs in the source line as a single character, and prefer the start of the target identifier."
+	base := "Semantic code navigation via LSP. Use this tool first for definition, references, and implementation at a known file position. Prefer it over text or file search once the file path and cursor position are known and the file type has LSP coverage. Use available discovery tools only to discover candidate files or positions when the location is not known yet. Put the cursor on the identifier itself, not file start or whitespace. If references fails because no identifier is found, inspect the file and retry on the symbol name. Use 1-based line and character from the raw file content; count tabs in the source line as a single character, and prefer the start of the target identifier."
 	if t.LSP == nil {
 		return base
 	}
@@ -59,7 +61,7 @@ func (t LspTool) Parameters() map[string]any {
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to the file. Supports ~ for the current user's home directory.",
+				"description": "Absolute or relative path to the verified file. Supports ~ for the current user's home directory. Do not guess paths.",
 			},
 			"line": map[string]any{
 				"type":        "integer",

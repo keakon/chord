@@ -108,8 +108,10 @@ func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowe
 	switch toolNameKey(toolName) {
 	case tools.NameShell:
 		buildBashConfirmSummary(&summary, parsed)
+	case tools.NamePatch:
+		buildPatchConfirmSummary(&summary, parsed)
 	case tools.NameEdit:
-		buildEditConfirmSummary(&summary, parsed)
+		buildReplaceEditConfirmSummary(&summary, parsed)
 	case tools.NameWrite:
 		buildWriteConfirmSummary(&summary, parsed)
 	case tools.NameDelete:
@@ -159,6 +161,8 @@ func confirmActionText(toolName string) string {
 		return "Start background process"
 	case tools.NameSpawnStop:
 		return "Stop background process"
+	case tools.NamePatch:
+		return "Patch file"
 	case tools.NameEdit:
 		return "Replace text in file"
 	case tools.NameWrite:
@@ -189,7 +193,7 @@ func confirmRiskForTool(toolName string) confirmRiskLevel {
 	switch toolNameKey(toolName) {
 	case tools.NameShell, tools.NameSpawn, tools.NameSpawnStop:
 		return confirmRiskHigh
-	case tools.NameEdit, tools.NameWrite, tools.NameDelete:
+	case tools.NameEdit, tools.NamePatch, tools.NameWrite, tools.NameDelete:
 		return confirmRiskMedium
 	case tools.NameRead, tools.NameViewImage, tools.NameGrep, tools.NameGlob, tools.NameLsp, tools.NameWebFetch:
 		return confirmRiskLow
@@ -238,23 +242,57 @@ func buildBashConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 	appendUnhandledConfirmFields(summary, parsed, handled)
 }
 
-func buildEditConfirmSummary(summary *confirmSummary, parsed map[string]any) {
+func buildPatchConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 	handled := map[string]bool{}
 	summary.Warnings = append(summary.Warnings, "Patches existing file content")
 
+	filePath, _ := confirmString(parsed, "path")
+	handled["path"] = true
 	patchText, _ := confirmString(parsed, "patch")
 	handled["patch"] = true
-	filePath := ""
-	if patchText != "" {
-		args, _ := json.Marshal(map[string]any{"patch": patchText})
-		filePath = tools.ExtractEditPathFromArgs(args)
-	}
 	if filePath == "" {
-		filePath = "(unspecified)"
+		if patchText != "" {
+			args, _ := json.Marshal(map[string]any{"patch": patchText})
+			filePath = tools.ExtractEditPathFromArgs(args)
+		}
+		if filePath == "" {
+			filePath = "(unspecified)"
+		}
 	}
 	appendConfirmField(&summary.Fields, newConfirmField("File", filePath, true))
 	if patchText != "" {
 		appendConfirmField(&summary.Fields, newConfirmPreviewField("Patch preview", patchText, true, 4, 10))
+	}
+
+	appendUnhandledConfirmFields(summary, parsed, handled)
+}
+
+func buildReplaceEditConfirmSummary(summary *confirmSummary, parsed map[string]any) {
+	handled := map[string]bool{}
+	summary.Warnings = append(summary.Warnings, "Replaces existing file text")
+
+	filePath, _ := confirmString(parsed, "path")
+	handled["path"] = true
+	if filePath == "" {
+		filePath = "(unspecified)"
+	}
+	appendConfirmField(&summary.Fields, newConfirmField("File", filePath, true))
+
+	oldText, oldOK := confirmString(parsed, "old_string")
+	handled["old_string"] = true
+	if oldOK {
+		appendConfirmField(&summary.Fields, newConfirmPreviewField("Old text", oldText, true, 3, 8))
+	}
+
+	newText, newOK := confirmString(parsed, "new_string")
+	handled["new_string"] = true
+	if newOK {
+		appendConfirmField(&summary.Fields, newConfirmPreviewField("New text", newText, true, 3, 8))
+	}
+
+	if replaceAll, ok := confirmBool(parsed, "replace_all"); ok {
+		handled["replace_all"] = true
+		appendConfirmField(&summary.Fields, newConfirmField("Replace all", confirmYesNo(replaceAll), true))
 	}
 
 	appendUnhandledConfirmFields(summary, parsed, handled)

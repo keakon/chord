@@ -27,13 +27,13 @@ func TestMainAgent_EditAllowsWrappedArgsWithoutPriorSnapshot(t *testing.T) {
 	}
 
 	a := newTestMainAgent(t, projectRoot)
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
 
 	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	_, err = a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs})
+	_, err = a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: patchArgs})
 	if err != nil {
 		t.Fatalf("Edit without prior Read failed: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestMainAgent_ConsecutiveEditsTreatEquivalentRelativeAndAbsolutePathsAsSame
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
 
 	readArgs, err := json.Marshal(map[string]any{"path": "./demo.txt"})
 	if err != nil {
@@ -78,7 +78,7 @@ func TestMainAgent_ConsecutiveEditsTreatEquivalentRelativeAndAbsolutePathsAsSame
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	if _, err := a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs}); err != nil {
+	if _, err := a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: patchArgs}); err != nil {
 		t.Fatalf("Edit failed: %v", err)
 	}
 }
@@ -92,7 +92,7 @@ func TestMainAgent_ConsecutiveEditesWithWrappedArgsDoNotTriggerStaleRead(t *test
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
 
 	readArgs, err := json.Marshal(map[string]any{"path": path})
 	if err != nil {
@@ -111,7 +111,7 @@ func TestMainAgent_ConsecutiveEditesWithWrappedArgsDoNotTriggerStaleRead(t *test
 	if err != nil {
 		t.Fatalf("Marshal wrapped patch1 args: %v", err)
 	}
-	if _, err := a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: wrapped1}); err != nil {
+	if _, err := a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: wrapped1}); err != nil {
 		t.Fatalf("Edit-1 failed: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestMainAgent_ConsecutiveEditesWithWrappedArgsDoNotTriggerStaleRead(t *test
 	if err != nil {
 		t.Fatalf("Marshal wrapped patch2 args: %v", err)
 	}
-	if _, err := a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-2", Name: tools.NameEdit, Args: wrapped2}); err != nil {
+	if _, err := a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-2", Name: tools.NamePatch, Args: wrapped2}); err != nil {
 		t.Fatalf("Edit-2 failed: %v", err)
 	}
 
@@ -146,7 +146,7 @@ func TestMainAgent_EditReportsDiskDriftWithRereadGuidance(t *testing.T) {
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
 
 	readArgs, err := json.Marshal(map[string]any{"path": path})
 	if err != nil {
@@ -164,7 +164,7 @@ func TestMainAgent_EditReportsDiskDriftWithRereadGuidance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	_, err = a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NameEdit, Args: patchArgs})
+	_, err = a.executeToolCall(a.parentCtx, message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: patchArgs})
 	if err == nil {
 		t.Fatal("expected stale-read/disk-drift error")
 	}
