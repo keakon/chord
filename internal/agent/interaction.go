@@ -2,11 +2,8 @@ package agent
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"time"
-
-	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/tools"
@@ -28,14 +25,15 @@ func (a *MainAgent) AwaitConfirmWithRuleContext(ctx context.Context, toolName, a
 }
 
 func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string, timeout time.Duration, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string, forceDenyReason bool, summary ...string) (ConfirmResponse, error) {
-	a.confirmFlowMu.Lock()
-	defer a.confirmFlowMu.Unlock()
+	a.interaction.beginConfirmFlow()
+	defer a.interaction.endConfirmFlow()
 
 	a.toolWg.Add(1)
 	defer a.toolWg.Done()
 
 	requestID := makeRequestID()
-	ch := make(chan ConfirmResponse, 1)
+	ch := a.interaction.registerConfirm(requestID)
+	defer a.interaction.unregisterConfirm(requestID)
 
 	a.fireHookBackground(ctx, hook.OnWaitConfirm, a.currentTurnID(), map[string]any{
 		hook.DataKeyToolName:    toolName,
@@ -46,15 +44,6 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 		"needs_approval_rules":  append([]string(nil), needsApprovalRules...),
 		"already_allowed_rules": append([]string(nil), alreadyAllowedRules...),
 	})
-
-	a.confirmMapMu.Lock()
-	a.confirmCh[requestID] = ch
-	a.confirmMapMu.Unlock()
-	defer func() {
-		a.confirmMapMu.Lock()
-		delete(a.confirmCh, requestID)
-		a.confirmMapMu.Unlock()
-	}()
 
 	summaryVal := ""
 	if len(summary) > 0 {
@@ -76,38 +65,14 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 		return ConfirmResponse{}, err
 	}
 
-	if timeout <= 0 {
-		select {
-		case resp := <-ch:
-			return resp, nil
-		case <-ctx.Done():
-			return ConfirmResponse{}, ctx.Err()
-		case <-a.stoppingCh:
-			return ConfirmResponse{}, ErrAgentShutdown
-		}
-	}
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	select {
-	case resp := <-ch:
-		return resp, nil
-	case <-timer.C:
-		log.Warnf("tool confirmation timed out, auto-denying tool=%v timeout=%v", toolName, timeout)
-		return ConfirmResponse{Approved: false}, nil
-	case <-ctx.Done():
-		return ConfirmResponse{}, ctx.Err()
-	case <-a.stoppingCh:
-		return ConfirmResponse{}, ErrAgentShutdown
-	}
+	return a.interaction.awaitConfirm(ctx, ch, timeout, toolName)
 }
 
 // AskQuestions emits question request events one at a time, waits for each
 // answer, and returns the collected responses in tool-compatible form.
 func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.QuestionItem, timeout time.Duration) ([]tools.QuestionAnswer, error) {
-	a.questionFlowMu.Lock()
-	defer a.questionFlowMu.Unlock()
+	a.interaction.beginQuestionFlow()
+	defer a.interaction.endQuestionFlow()
 
 	a.toolWg.Add(1)
 	defer a.toolWg.Done()
@@ -115,11 +80,7 @@ func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.Question
 	answers := make([]tools.QuestionAnswer, 0, len(questions))
 	for _, q := range questions {
 		requestID := makeRequestID()
-		ch := make(chan QuestionResponse, 1)
-
-		a.questionMapMu.Lock()
-		a.questionCh[requestID] = ch
-		a.questionMapMu.Unlock()
+		ch := a.interaction.registerQuestion(requestID)
 
 		options := make([]string, len(q.Options))
 		optionDetails := make([]string, len(q.Options))
@@ -154,16 +115,12 @@ func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.Question
 			RequestID:     requestID,
 			Timeout:       timeout,
 		}); err != nil {
-			a.questionMapMu.Lock()
-			delete(a.questionCh, requestID)
-			a.questionMapMu.Unlock()
+			a.interaction.unregisterQuestion(requestID)
 			return nil, err
 		}
 
-		resp, err := a.awaitQuestionResponse(ctx, ch, timeout)
-		a.questionMapMu.Lock()
-		delete(a.questionCh, requestID)
-		a.questionMapMu.Unlock()
+		resp, err := a.interaction.awaitQuestion(ctx, ch, timeout)
+		a.interaction.unregisterQuestion(requestID)
 		if err != nil {
 			return nil, err
 		}
@@ -178,40 +135,4 @@ func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.Question
 	}
 
 	return answers, nil
-}
-
-func (a *MainAgent) awaitQuestionResponse(ctx context.Context, ch <-chan QuestionResponse, timeout time.Duration) (QuestionResponse, error) {
-	if timeout <= 0 {
-		select {
-		case resp := <-ch:
-			return resp, nil
-		case <-ctx.Done():
-			return QuestionResponse{}, ctx.Err()
-		case <-a.stoppingCh:
-			return QuestionResponse{}, ErrAgentShutdown
-		}
-	}
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	select {
-	case resp := <-ch:
-		return resp, nil
-	case <-timer.C:
-		return QuestionResponse{}, fmt.Errorf("question timed out after %s", timeout)
-	case <-ctx.Done():
-		return QuestionResponse{}, ctx.Err()
-	case <-a.stoppingCh:
-		return QuestionResponse{}, ErrAgentShutdown
-	}
-}
-
-func makeRequestID() string {
-	var buf [16]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		log.Warnf("request ID generation failed, using fallback err=%v", err)
-		return fmt.Sprintf("req-%d", time.Now().UnixNano())
-	}
-	return fmt.Sprintf("%x", buf[:])
 }

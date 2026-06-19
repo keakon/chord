@@ -382,13 +382,10 @@ type MainAgent struct {
 	// Run waits on outputWg before closing outputCh.
 	outputWg sync.WaitGroup
 
-	// Confirm/Question interaction: requestID → response channel.
-	confirmFlowMu  sync.Mutex
-	confirmMapMu   sync.Mutex
-	confirmCh      map[string]chan ConfirmResponse
-	questionFlowMu sync.Mutex
-	questionMapMu  sync.Mutex
-	questionCh     map[string]chan QuestionResponse
+	// Confirm/Question interaction: owns the requestID→response-channel
+	// plumbing for the single-modal confirm and question flows. Wired in
+	// NewMainAgent once stoppingCh exists.
+	interaction *interactionBroker
 
 	// Plan execution workflow state.
 	projectRoot            string
@@ -660,8 +657,6 @@ func NewMainAgent(
 		mcpClientInfo:            mcpClientInfo,
 		done:                     make(chan struct{}),
 		stoppingCh:               make(chan struct{}),
-		confirmCh:                make(map[string]chan ConfirmResponse),
-		questionCh:               make(map[string]chan QuestionResponse),
 		evidenceCandidateSet:     make(map[string]struct{}),
 		projectRoot:              projectRoot,
 		subAgents:                make(map[string]*SubAgent),
@@ -684,6 +679,7 @@ func NewMainAgent(
 		mcpReadyMu:               sync.Mutex{},
 		mcpReady:                 make(chan struct{}),
 	}
+	a.interaction = newInteractionBroker(a.stoppingCh)
 	a.refreshSessionSummary()
 
 	// Fetch git status asynchronously; callLLM will wait for it before the

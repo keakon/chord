@@ -9,8 +9,8 @@ import (
 )
 
 // ResolveConfirm sends the user's confirmation response back to the waiting
-// ConfirmFunc goroutine via the requestID→channel map. Only acquires
-// confirmMapMu (never confirmFlowMu) to avoid deadlock.
+// ConfirmFunc goroutine via the broker's requestID→channel map. The resolve
+// path acquires only the map lock (never a flow lock) to avoid deadlock.
 func (a *MainAgent) ResolveConfirm(action, finalArgsJSON, editSummary, denyReason, requestID string) {
 	a.ResolveConfirmWithRuleIntent(action, finalArgsJSON, editSummary, denyReason, requestID, nil)
 }
@@ -18,41 +18,25 @@ func (a *MainAgent) ResolveConfirm(action, finalArgsJSON, editSummary, denyReaso
 // ResolveConfirmWithRuleIntent sends the confirmation response with an optional
 // rule intent for adding a permission overlay rule.
 func (a *MainAgent) ResolveConfirmWithRuleIntent(action, finalArgsJSON, editSummary, denyReason, requestID string, ruleIntent *ConfirmRuleIntent) {
-	a.confirmMapMu.Lock()
-	ch, ok := a.confirmCh[requestID]
-	a.confirmMapMu.Unlock()
-	if ok {
-		var copiedRuleIntent *ConfirmRuleIntent
-		if ruleIntent != nil {
-			intentCopy := *ruleIntent
-			copiedRuleIntent = &intentCopy
-		}
-		select {
-		case ch <- ConfirmResponse{
-			Approved:      action == "allow",
-			FinalArgsJSON: finalArgsJSON,
-			EditSummary:   editSummary,
-			DenyReason:    denyReason,
-			RuleIntent:    copiedRuleIntent,
-		}:
-		default:
-		}
+	var copiedRuleIntent *ConfirmRuleIntent
+	if ruleIntent != nil {
+		intentCopy := *ruleIntent
+		copiedRuleIntent = &intentCopy
 	}
+	a.interaction.resolveConfirm(requestID, ConfirmResponse{
+		Approved:      action == "allow",
+		FinalArgsJSON: finalArgsJSON,
+		EditSummary:   editSummary,
+		DenyReason:    denyReason,
+		RuleIntent:    copiedRuleIntent,
+	})
 }
 
 // ResolveQuestion sends the user's question response back to the waiting
-// QuestionFunc goroutine via the requestID→channel map. Only acquires
-// questionMapMu (never questionFlowMu) to avoid deadlock.
+// QuestionFunc goroutine via the broker's requestID→channel map. The resolve
+// path acquires only the map lock (never a flow lock) to avoid deadlock.
 func (a *MainAgent) ResolveQuestion(answers []string, cancelled bool, requestID string) {
-	a.questionMapMu.Lock()
-	ch, ok := a.questionCh[requestID]
-	a.questionMapMu.Unlock()
-	if ok {
-		select {
-		case ch <- QuestionResponse{Answers: answers, Cancelled: cancelled}:
-		default:
-		}
-	}
+	a.interaction.resolveQuestion(requestID, QuestionResponse{Answers: answers, Cancelled: cancelled})
 }
 
 // ClearPendingInteractions removes requestID mappings for any in-flight
@@ -60,13 +44,7 @@ func (a *MainAgent) ResolveQuestion(answers []string, cancelled bool, requestID 
 // waiters are expected to exit via ctx cancellation or stoppingCh during
 // shutdown.
 func (a *MainAgent) ClearPendingInteractions() {
-	a.confirmMapMu.Lock()
-	clear(a.confirmCh)
-	a.confirmMapMu.Unlock()
-
-	a.questionMapMu.Lock()
-	clear(a.questionCh)
-	a.questionMapMu.Unlock()
+	a.interaction.clearPending()
 }
 
 // AgentContextUsage holds input-context stats for one agent (main or sub) for sidebar display.
