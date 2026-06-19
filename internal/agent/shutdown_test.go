@@ -116,7 +116,7 @@ func TestShutdownUsesSharedBudgetAcrossStages(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	eng := &shutdownHookEngine{}
 	a.hookEngine = eng
-	if a.persistCh == nil {
+	if a.persist.ch == nil {
 		t.Fatal("expected persist channel")
 	}
 

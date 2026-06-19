@@ -1190,7 +1190,7 @@ func newTestMainAgentForRestore(t *testing.T, projectRoot, sessionDir string) *M
 	a.startPersistLoop()
 	t.Cleanup(func() {
 		a.closePersistLoop()
-		<-a.persistDone
+		<-a.persist.done
 		a.cancel()
 		if a.recovery != nil {
 			a.recovery.Close()

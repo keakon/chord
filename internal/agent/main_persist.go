@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"sync"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -8,36 +9,79 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-func (a *MainAgent) startPersistLoop() {
-	a.persistLoopOnce.Do(func() {
-		go a.runPersistLoop()
+// persistencePump owns the ordered async-persistence channel and its drain
+// goroutine's lifecycle. It was carved out of MainAgent, where the channel, the
+// done signal, and the two sync.Once guards were four loose fields. The pump
+// only knows how to enqueue and drain entries; the per-entry work (recovery
+// writes, barriers) is supplied by the caller via start's handler, and
+// MainAgent-specific concerns (shutdown gating, tool-trace timing) stay on
+// MainAgent.
+type persistencePump struct {
+	ch        chan persistEntry
+	done      chan struct{}
+	closeOnce sync.Once
+	loopOnce  sync.Once
+}
+
+func newPersistencePump(buffer int) *persistencePump {
+	return &persistencePump{
+		ch:   make(chan persistEntry, buffer),
+		done: make(chan struct{}),
+	}
+}
+
+// start launches the drain loop exactly once. handle is invoked for each entry
+// in arrival order; done is closed when the channel is closed and drained.
+func (p *persistencePump) start(handle func(persistEntry)) {
+	p.loopOnce.Do(func() {
+		go func() {
+			defer close(p.done)
+			for entry := range p.ch {
+				handle(entry)
+			}
+		}()
 	})
 }
 
-func (a *MainAgent) closePersistLoop() {
-	a.persistCloseOnce.Do(func() {
-		if a.persistCh != nil {
-			close(a.persistCh)
+// close closes the channel exactly once so the drain loop can finish.
+func (p *persistencePump) close() {
+	p.closeOnce.Do(func() {
+		if p.ch != nil {
+			close(p.ch)
 		}
 	})
 }
 
-// runPersistLoop reads persistence requests from persistCh and writes them
-// in order to the JSONL file. It runs in its own goroutine started by Run.
-// When persistCh is closed, it drains remaining entries and exits.
-func (a *MainAgent) runPersistLoop() {
-	defer close(a.persistDone)
-	for entry := range a.persistCh {
+// enqueue sends entry, returning false if the pump is unusable (nil channel) or
+// stopping fired before the send completed.
+func (p *persistencePump) enqueue(entry persistEntry, stopping <-chan struct{}) bool {
+	if p == nil || p.ch == nil {
+		return false
+	}
+	select {
+	case p.ch <- entry:
+		return true
+	case <-stopping:
+		return false
+	}
+}
+
+func (a *MainAgent) startPersistLoop() {
+	a.persist.start(func(entry persistEntry) {
 		if entry.barrier != nil {
 			close(entry.barrier)
-			continue
+			return
 		}
 		if entry.recovery != nil {
 			if err := entry.recovery.PersistMessage(entry.agentID, entry.msg); err != nil {
 				log.Warnf("failed to persist message agent_id=%v error=%v", entry.agentID, err)
 			}
 		}
-	}
+	})
+}
+
+func (a *MainAgent) closePersistLoop() {
+	a.persist.close()
 }
 
 // persistAsync sends a persistence request to the ordered channel.
@@ -47,14 +91,9 @@ func (a *MainAgent) persistAsync(agentID string, msg message.Message) {
 	if a.shuttingDown.Load() {
 		return
 	}
-	if a.persistCh == nil {
-		return
-	}
 	start := time.Now()
-	select {
-	case a.persistCh <- persistEntry{agentID: agentID, msg: msg, recovery: a.recovery}:
-	case <-a.stoppingCh:
-		// Agent is shutting down; don't block indefinitely.
+	if !a.persist.enqueue(persistEntry{agentID: agentID, msg: msg, recovery: a.recovery}, a.stoppingCh) {
+		return
 	}
 	blocked := time.Since(start)
 	if blocked <= 50*time.Millisecond {
@@ -82,13 +121,11 @@ func (a *MainAgent) persistAsync(agentID string, msg message.Message) {
 // have been written to disk. It is used before rewriting session files during
 // context compaction or session switches.
 func (a *MainAgent) flushPersist() {
-	if a.persistCh == nil || a.shuttingDown.Load() {
+	if a.shuttingDown.Load() {
 		return
 	}
 	barrier := make(chan struct{})
-	select {
-	case a.persistCh <- persistEntry{barrier: barrier}:
-	case <-a.stoppingCh:
+	if !a.persist.enqueue(persistEntry{barrier: barrier}, a.stoppingCh) {
 		return
 	}
 	<-barrier

@@ -502,9 +502,7 @@ type MainAgent struct {
 	// waiting for the event loop and persist goroutine if Run was never called.
 	started atomic.Bool
 
-	persistCloseOnce sync.Once
-	persistLoopOnce  sync.Once
-	compactionWg     sync.WaitGroup
+	compactionWg sync.WaitGroup
 
 	// LLM client factory for creating SubAgent LLM clients. Set via
 	// SetLLMFactory after construction. If nil, CreateSubAgent returns
@@ -543,9 +541,8 @@ type MainAgent struct {
 	lspSessionResetFn func()
 	lspSessionLoadFn  func([]message.Message)
 
-	// Async persistence channel for ordered JSONL writes.
-	persistCh   chan persistEntry
-	persistDone chan struct{} // closed when persist loop exits
+	// Async persistence pump for ordered JSONL writes.
+	persist *persistencePump
 
 	// Cached startup values reused in buildSystemPrompt to avoid repeated syscalls/subprocesses.
 	cachedWorkDir     string
@@ -665,8 +662,7 @@ func NewMainAgent(
 		ownedSubAgentMailboxes: make(map[string][]SubAgentMailboxMessage),
 		subAgentUrgentCounts:   make(map[string]int),
 		recovery:               recovery.NewRecoveryManager(sessionDir),
-		persistCh:              make(chan persistEntry, 256),
-		persistDone:            make(chan struct{}),
+		persist:                newPersistencePump(256),
 		cachedWorkDir:          workDir,
 		gitStatusReady:         gitStatusReady,
 		agentsMDReady:          make(chan struct{}),
@@ -1038,11 +1034,11 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	// Close the persistence channel and wait for the loop to drain.
 	// The persist loop may be started outside Run (tests), so don't gate the wait
 	// on the main event loop start flag.
-	if a.persistCh != nil {
+	if a.persist.ch != nil {
 		a.closePersistLoop()
 		if wait := remaining(); wait > 0 {
 			select {
-			case <-a.persistDone:
+			case <-a.persist.done:
 			case <-time.After(wait):
 				log.Warn("persist loop did not drain within shutdown budget, continuing")
 			}
