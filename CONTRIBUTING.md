@@ -132,6 +132,16 @@ npm install        # first time only
 npm run dev        # http://localhost:4321/chord/
 ```
 
+To run the docs workflow link check locally, install `lychee` and use the same
+scan set as GitHub Actions:
+
+```bash
+brew install lychee  # macOS, first time only
+lychee --no-progress --cache --max-cache-age 30d --max-concurrency 16 --accept 200,206,429 docs/ README.md README_CN.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
+```
+
+`make docs-check` verifies docs consistency; it does not run the `lychee` link checker.
+
 `npm run dev` runs the sync script first, so any edits under `docs/` show up after a refresh. Do **not** edit files under `website/src/content/docs/{en,zh}/` directly — they are gitignored and regenerated on every build.
 
 When you add a new top-level page under `docs/`, also list it in:

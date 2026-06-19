@@ -273,5 +273,5 @@ A: Not currently enabled. It's a potential future enhancement after validation i
 ## See Also
 
 - [Tool Reference](./tools.md) – All available tools
-- [Permission System](./permissions.md) – How file access control works
-- [LSP Integration](./lsp.md) – Symbol-aware operations
+- [Permission System](./permissions-and-safety.md) – How file access control works
+- [LSP Integration](./tools.md) – Symbol-aware operations
