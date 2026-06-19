@@ -397,19 +397,18 @@ type MainAgent struct {
 	activeConfig *config.AgentConfig            // currently active role (nil = no role set yet; defaults to builder)
 	agentConfigs map[string]*config.AgentConfig // pre-loaded: built-in → global → project (highest priority)
 
-	// Multi-agent orchestration fields.
-	mu                       sync.RWMutex                  // protects subAgents/taskRecords for cross-goroutine access
-	subAgents                map[string]*SubAgent          // instanceID → live SubAgent
-	taskRecords              map[string]*DurableTaskRecord // taskID → durable task record
-	sem                      chan struct{}                 // bounded concurrency semaphore (cap = 10)
-	fileTrack                *filelock.FileTracker         // file write conflict detection
-	fileBackups              *fileBackupManager            // session-scoped risky write backups
-	recovery                 *recovery.RecoveryManager     // session persistence and crash recovery
-	sessionLock              *recovery.SessionLock         // cross-process exclusive ownership of sessionDir
-	sessionArtifactsDirFn    func() string                 // active session artifacts directory for exports / dumps
-	sessionTargetChangedFn   func(string)                  // notified after active sessionDir changes
-	focusedAgent             atomic.Pointer[SubAgent]      // currently focused SubAgent (nil = main)
-	nudgeCounts              map[string]int                // agentID → idle nudge count
+	// Multi-agent orchestration. subs owns the live sub-agent maps and the
+	// RWMutex that guards them (formerly inline MainAgent fields mu/subAgents/
+	// taskRecords/nudgeCounts/subAgentStateEnteredTurn).
+	subs                     subAgentRegistry
+	sem                      chan struct{}             // bounded concurrency semaphore (cap = 10)
+	fileTrack                *filelock.FileTracker     // file write conflict detection
+	fileBackups              *fileBackupManager        // session-scoped risky write backups
+	recovery                 *recovery.RecoveryManager // session persistence and crash recovery
+	sessionLock              *recovery.SessionLock     // cross-process exclusive ownership of sessionDir
+	sessionArtifactsDirFn    func() string             // active session artifacts directory for exports / dumps
+	sessionTargetChangedFn   func(string)              // notified after active sessionDir changes
+	focusedAgent             atomic.Pointer[SubAgent]  // currently focused SubAgent (nil = main)
 	subAgentInbox            subAgentInbox
 	ownedSubAgentMailboxes   map[string][]SubAgentMailboxMessage // owner agentID -> descendant mailbox waiting for owner-local delivery
 	pendingSubAgentMailboxes []*SubAgentMailboxMessage
@@ -419,7 +418,6 @@ type MainAgent struct {
 	subAgentMailboxSeq       atomic.Uint64
 	subAgentInboxSummaryMu   sync.RWMutex
 	subAgentUrgentCounts     map[string]int
-	subAgentStateEnteredTurn map[string]uint64
 	explicitUserTurnCount    uint64
 
 	// mcpServerCache maps server name → mcpServerEntry, ensuring each MCP
@@ -637,47 +635,44 @@ func NewMainAgent(
 	gitStatusReady := make(chan struct{})
 
 	a := &MainAgent{
-		parentCtx:                parentCtx,
-		cancel:                   cancel,
-		llmClient:                llmClient,
-		ctxMgr:                   ctxMgr,
-		tools:                    toolRegistry,
-		hookEngine:               hookEngine,
-		usageTracker:             analytics.NewUsageTracker(),
-		usageLedger:              analytics.NewUsageLedger(sessionDir, projectRoot),
-		invokedSkills:            make(map[string]*skill.Meta),
-		globalConfig:             globalCfg,
-		projectConfig:            projectCfg,
-		eventCh:                  make(chan Event, 256),
-		outputCh:                 make(chan AgentEvent, 512),
-		sessionDir:               sessionDir,
-		modelName:                modelName,
-		runningModelRef:          modelName,
-		instanceID:               NextInstanceID(identity.MainAgentID),
-		mcpClientInfo:            mcpClientInfo,
-		done:                     make(chan struct{}),
-		stoppingCh:               make(chan struct{}),
-		evidenceCandidateSet:     make(map[string]struct{}),
-		projectRoot:              projectRoot,
-		subAgents:                make(map[string]*SubAgent),
-		taskRecords:              make(map[string]*DurableTaskRecord),
-		sem:                      make(chan struct{}, 10),
-		fileTrack:                filelock.NewFileTracker(),
-		fileBackups:              newFileBackupManager(sessionDir),
-		nudgeCounts:              make(map[string]int),
-		subAgentInbox:            newSubAgentInbox(),
-		ownedSubAgentMailboxes:   make(map[string][]SubAgentMailboxMessage),
-		subAgentUrgentCounts:     make(map[string]int),
-		subAgentStateEnteredTurn: make(map[string]uint64),
-		recovery:                 recovery.NewRecoveryManager(sessionDir),
-		persistCh:                make(chan persistEntry, 256),
-		persistDone:              make(chan struct{}),
-		cachedWorkDir:            workDir,
-		gitStatusReady:           gitStatusReady,
-		agentsMDReady:            make(chan struct{}),
-		skillsReady:              make(chan struct{}),
-		mcpReadyMu:               sync.Mutex{},
-		mcpReady:                 make(chan struct{}),
+		parentCtx:              parentCtx,
+		cancel:                 cancel,
+		llmClient:              llmClient,
+		ctxMgr:                 ctxMgr,
+		tools:                  toolRegistry,
+		hookEngine:             hookEngine,
+		usageTracker:           analytics.NewUsageTracker(),
+		usageLedger:            analytics.NewUsageLedger(sessionDir, projectRoot),
+		invokedSkills:          make(map[string]*skill.Meta),
+		globalConfig:           globalCfg,
+		projectConfig:          projectCfg,
+		eventCh:                make(chan Event, 256),
+		outputCh:               make(chan AgentEvent, 512),
+		sessionDir:             sessionDir,
+		modelName:              modelName,
+		runningModelRef:        modelName,
+		instanceID:             NextInstanceID(identity.MainAgentID),
+		mcpClientInfo:          mcpClientInfo,
+		done:                   make(chan struct{}),
+		stoppingCh:             make(chan struct{}),
+		evidenceCandidateSet:   make(map[string]struct{}),
+		projectRoot:            projectRoot,
+		subs:                   newSubAgentRegistry(),
+		sem:                    make(chan struct{}, 10),
+		fileTrack:              filelock.NewFileTracker(),
+		fileBackups:            newFileBackupManager(sessionDir),
+		subAgentInbox:          newSubAgentInbox(),
+		ownedSubAgentMailboxes: make(map[string][]SubAgentMailboxMessage),
+		subAgentUrgentCounts:   make(map[string]int),
+		recovery:               recovery.NewRecoveryManager(sessionDir),
+		persistCh:              make(chan persistEntry, 256),
+		persistDone:            make(chan struct{}),
+		cachedWorkDir:          workDir,
+		gitStatusReady:         gitStatusReady,
+		agentsMDReady:          make(chan struct{}),
+		skillsReady:            make(chan struct{}),
+		mcpReadyMu:             sync.Mutex{},
+		mcpReady:               make(chan struct{}),
 	}
 	a.interaction = newInteractionBroker(a.stoppingCh)
 	a.refreshSessionSummary()
@@ -1118,12 +1113,12 @@ func (a *MainAgent) cancelActiveWork() {
 	}
 	a.turnMu.Unlock()
 
-	a.mu.RLock()
-	for _, sub := range a.subAgents {
+	a.subs.mu.RLock()
+	for _, sub := range a.subs.subAgents {
 		tools.StopAllSpawnedForAgent(sub.instanceID, "terminated on client exit")
 		sub.cancel()
 	}
-	a.mu.RUnlock()
+	a.subs.mu.RUnlock()
 
 	if stoppedBackground := tools.StopAllSpawnedForShutdown(); stoppedBackground > 0 {
 		log.Infof("terminated background objects for shutdown count=%v instance=%v", stoppedBackground, a.instanceID)
@@ -1707,9 +1702,9 @@ func (a *MainAgent) handleAgentError(evt Event) {
 	log.Errorf("SubAgent error error=%v source=%v", err, evt.SourceID)
 
 	var emitCalls, persistCalls, discardCalls []PendingToolCall
-	a.mu.RLock()
-	sub := a.subAgents[evt.SourceID]
-	a.mu.RUnlock()
+	a.subs.mu.RLock()
+	sub := a.subs.subAgents[evt.SourceID]
+	a.subs.mu.RUnlock()
 	if sub != nil {
 		emitCalls, persistCalls = sub.drainPendingToolFailureSets(err)
 		emitCalls, discardCalls = splitPendingCallsByDeclaredTools(sub.ctxMgr, emitCalls)

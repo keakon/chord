@@ -145,21 +145,21 @@ func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.C
 }
 
 func (a *MainAgent) abandonSubAgentsForSessionSwitch() int {
-	a.mu.Lock()
-	if len(a.subAgents) == 0 {
-		a.mu.Unlock()
+	a.subs.mu.Lock()
+	if len(a.subs.subAgents) == 0 {
+		a.subs.mu.Unlock()
 		return 0
 	}
 
-	ids := make([]string, 0, len(a.subAgents))
-	subs := make([]*SubAgent, 0, len(a.subAgents))
-	for id, sub := range a.subAgents {
+	ids := make([]string, 0, len(a.subs.subAgents))
+	subs := make([]*SubAgent, 0, len(a.subs.subAgents))
+	for id, sub := range a.subs.subAgents {
 		ids = append(ids, id)
 		subs = append(subs, sub)
-		delete(a.subAgents, id)
-		delete(a.nudgeCounts, id)
+		delete(a.subs.subAgents, id)
+		delete(a.subs.nudgeCounts, id)
 	}
-	a.mu.Unlock()
+	a.subs.mu.Unlock()
 
 	for i, id := range ids {
 		if subs[i] != nil {
@@ -225,7 +225,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.setTaskRecords(nil)
 	a.gitStatusInjected.Store(false)
 	a.explicitUserTurnCount = 0
-	a.subAgentStateEnteredTurn = make(map[string]uint64)
+	a.subs.stateEnteredTurn = make(map[string]uint64)
 }
 
 func (a *MainAgent) installSessionTarget(sessionDir string) {

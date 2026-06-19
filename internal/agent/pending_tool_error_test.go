@@ -227,9 +227,9 @@ func TestCancelCurrentTurnRoutesToFocusedSubAgentAndPersistsFailedToolResult(t *
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	sub := newPersistenceTestSubAgent(a, "agent-1")
-	a.mu.Lock()
-	a.subAgents[sub.instanceID] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.mu.Unlock()
 	a.SwitchFocus(sub.instanceID)
 
 	assistant := message.Message{
@@ -287,9 +287,9 @@ func TestHandleAgentErrorPersistsFailedSubAgentPendingToolCalls(t *testing.T) {
 	}
 	sub.turn.PendingToolCalls.Store(1)
 	sub.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-sub-error", Name: "web_fetch", ArgsJSON: `{"url":"https://missing.example"}`, AgentID: sub.instanceID})
-	a.mu.Lock()
-	a.subAgents[sub.instanceID] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.mu.Unlock()
 
 	a.handleAgentError(Event{Type: EventAgentError, SourceID: sub.instanceID, TurnID: sub.turn.ID, Payload: context.DeadlineExceeded})
 

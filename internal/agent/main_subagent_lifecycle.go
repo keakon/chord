@@ -18,14 +18,14 @@ func (a *MainAgent) noteSubAgentStateTransition(sub *SubAgent, state SubAgentSta
 	if a == nil || sub == nil {
 		return
 	}
-	if a.subAgentStateEnteredTurn == nil {
-		a.subAgentStateEnteredTurn = make(map[string]uint64)
+	if a.subs.stateEnteredTurn == nil {
+		a.subs.stateEnteredTurn = make(map[string]uint64)
 	}
 	switch state {
 	case SubAgentStateRunning:
-		delete(a.subAgentStateEnteredTurn, sub.instanceID)
+		delete(a.subs.stateEnteredTurn, sub.instanceID)
 	case SubAgentStateWaitingMain, SubAgentStateWaitingDescendant, SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled:
-		a.subAgentStateEnteredTurn[sub.instanceID] = a.explicitUserTurnCount
+		a.subs.stateEnteredTurn[sub.instanceID] = a.explicitUserTurnCount
 	}
 }
 
@@ -34,12 +34,7 @@ func (a *MainAgent) closeSubAgent(agentID string) {
 	if agentID == "" {
 		return
 	}
-	a.mu.Lock()
-	sub := a.subAgents[agentID]
-	delete(a.subAgents, agentID)
-	delete(a.nudgeCounts, agentID)
-	delete(a.subAgentStateEnteredTurn, agentID)
-	a.mu.Unlock()
+	sub := a.subs.remove(agentID)
 	if sub == nil {
 		return
 	}
@@ -126,17 +121,17 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 }
 
 func (a *MainAgent) sweepSubAgentLifecycle() {
-	if len(a.subAgents) == 0 {
+	if a.subs.count() == 0 {
 		return
 	}
 	var toClose []string
 	changed := false
-	for _, sub := range a.subAgents {
+	for _, sub := range a.subs.subAgents {
 		if sub == nil {
 			continue
 		}
 		state := sub.State()
-		enteredTurn := a.subAgentStateEnteredTurn[sub.instanceID]
+		enteredTurn := a.subs.stateEnteredTurn[sub.instanceID]
 		switch state {
 		case SubAgentStateWaitingMain:
 			if a.explicitUserTurnCount >= enteredTurn+waitingMainExpiryUserTurns {

@@ -357,9 +357,9 @@ func TestRestoreSessionAtStartupRestoresSubAgentInterruptedToolResults(t *testin
 		t.Fatalf("RestoreSessionAtStartup: %v", err)
 	}
 
-	a.mu.RLock()
-	sub := a.subAgents["agent-1"]
-	a.mu.RUnlock()
+	a.subs.mu.RLock()
+	sub := a.subs.subAgents["agent-1"]
+	a.subs.mu.RUnlock()
 	if sub == nil {
 		t.Fatal("expected restored sub-agent agent-1")
 	}

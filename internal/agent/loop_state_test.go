@@ -978,9 +978,9 @@ func TestNextLoopAssessmentFromAssistantRequiresNoActiveSubAgentsBeforeCompleted
 		recovery:   a.recovery,
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
-	a.mu.Lock()
-	a.subAgents["agent-1"] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents["agent-1"] = sub
+	a.subs.mu.Unlock()
 
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{
 		Role:    "assistant",
@@ -2151,9 +2151,9 @@ func TestLoopAnchorIncludesSubAgentRequirementWhenActiveSubAgents(t *testing.T) 
 		recovery:   a.recovery,
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
-	a.mu.Lock()
-	a.subAgents["agent-1"] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents["agent-1"] = sub
+	a.subs.mu.Unlock()
 	a.sendLoopAnchorFromCommand("finish current task")
 	msgs := a.ctxMgr.Snapshot()
 	var found *message.Message
@@ -2200,9 +2200,9 @@ func TestLoopContinuationIncludesSubAgentRequirementWhenActiveSubAgents(t *testi
 		recovery:   a.recovery,
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
-	a.mu.Lock()
-	a.subAgents["agent-1"] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents["agent-1"] = sub
+	a.subs.mu.Unlock()
 	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionContinue, Reasons: []string{"subagents_active", "target_active"}})
 	if note == nil {
 		t.Fatal("expected continuation note")
@@ -2295,9 +2295,9 @@ func TestLoopExitRejectionToolResultUsesHumanReadableReasons(t *testing.T) {
 		recovery:   a.recovery,
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
-	a.mu.Lock()
-	a.subAgents["agent-1"] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents["agent-1"] = sub
+	a.subs.mu.Unlock()
 
 	got := a.loopExitRejectionToolResult()
 	for _, want := range []string{
@@ -2344,9 +2344,9 @@ func TestLoopContinuationSubAgentStuckInstruction(t *testing.T) {
 		recovery:   a.recovery,
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
-	a.mu.Lock()
-	a.subAgents["agent-1"] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents["agent-1"] = sub
+	a.subs.mu.Unlock()
 	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionContinue, Reasons: []string{"subagents_active", "target_active"}})
 	if note == nil {
 		t.Fatal("expected continuation note")
@@ -2372,9 +2372,9 @@ func TestCurrentLoopContinuationReasonsUsesHasActiveSubAgents(t *testing.T) {
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	sub.setState(SubAgentStateCompleted, "")
-	a.mu.Lock()
-	a.subAgents["agent-1"] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents["agent-1"] = sub
+	a.subs.mu.Unlock()
 	reasons := a.currentLoopContinuationReasons()
 	for _, r := range reasons {
 		if r == "subagents_active" {

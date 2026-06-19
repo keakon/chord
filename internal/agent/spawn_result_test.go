@@ -233,9 +233,9 @@ func TestHandleBackgroundObjectFinishedRoutesToOwnerSubAgentOnly(t *testing.T) {
 		ctxAppendCh: make(chan message.Message, 1),
 		continueCh:  make(chan continueMsg, 1),
 	}
-	a.mu.Lock()
-	a.subAgents[sub.instanceID] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.mu.Unlock()
 
 	payload := &tools.SpawnFinishedPayload{
 		BackgroundID: "job-7",

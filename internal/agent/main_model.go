@@ -367,14 +367,14 @@ func (a *MainAgent) notifyMainRoutingChanged(reason string) {
 }
 
 func (a *MainAgent) notifySubAgentRoutingChanged(agentName, reason string) {
-	a.mu.RLock()
+	a.subs.mu.RLock()
 	var targets []*SubAgent
-	for _, sub := range a.subAgents {
+	for _, sub := range a.subs.subAgents {
 		if sub != nil && sub.agentDefName == agentName {
 			targets = append(targets, sub)
 		}
 	}
-	a.mu.RUnlock()
+	a.subs.mu.RUnlock()
 	for _, sub := range targets {
 		sub.llmMu.RLock()
 		client := sub.llmClient
@@ -523,14 +523,14 @@ func (a *MainAgent) switchActiveSubAgentsForPoolIfNeeded(agentName string, cfg *
 	if len(refs) == 0 {
 		return nil
 	}
-	a.mu.RLock()
+	a.subs.mu.RLock()
 	var targets []*SubAgent
-	for _, sub := range a.subAgents {
+	for _, sub := range a.subs.subAgents {
 		if sub != nil && sub.agentDefName == agentName {
 			targets = append(targets, sub)
 		}
 	}
-	a.mu.RUnlock()
+	a.subs.mu.RUnlock()
 	for _, sub := range targets {
 		client, _ := sub.llmSnapshot()
 		current := ""

@@ -14,9 +14,9 @@ func (a *MainAgent) subAgentByTaskID(taskID string) *SubAgent {
 	if taskID == "" {
 		return nil
 	}
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	for _, sub := range a.subAgents {
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
+	for _, sub := range a.subs.subAgents {
 		if sub != nil && strings.TrimSpace(sub.taskID) == taskID {
 			return sub
 		}
@@ -378,9 +378,7 @@ func (a *MainAgent) rehydrateCompletedTask(record *DurableTaskRecord) (*SubAgent
 		cancel()
 		return nil, "", err
 	}
-	a.mu.Lock()
-	a.subAgents[instanceID] = sub
-	a.mu.Unlock()
+	a.subs.add(sub)
 	a.persistSubAgentMeta(sub)
 	a.syncTaskRecordFromSub(sub, "")
 	go sub.runLoop()

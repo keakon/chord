@@ -1247,9 +1247,9 @@ func TestRunningModelRefAndKeyStatsFollowFocusedSubAgent(t *testing.T) {
 			PendingToolMeta: make(map[string]PendingToolCall),
 		},
 	}
-	a.mu.Lock()
-	a.subAgents["sub-1"] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents["sub-1"] = sub
+	a.subs.mu.Unlock()
 	a.focusedAgent.Store(sub)
 
 	if got := a.RunningModelRef(); got != "subp/subm" {
@@ -1444,9 +1444,9 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 		recovery:   a.recovery,
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
-	a.mu.Lock()
-	a.subAgents[sub.instanceID] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.mu.Unlock()
 
 	a.EnableLoopMode("execute the active plan")
 	a.loopState.markProgress()
@@ -1471,9 +1471,9 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 
 	// Once the worker is no longer active, the assistant still needs to end the
 	// round normally; runtime completion is handled through the actual Done tool result path.
-	a.mu.Lock()
-	delete(a.subAgents, sub.instanceID)
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, sub.instanceID)
+	a.subs.mu.Unlock()
 
 	a.loopState.markProgress()
 	a.loopState.markProgress()

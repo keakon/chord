@@ -7,10 +7,10 @@ import (
 )
 
 func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
-	a.mu.RLock()
-	subs := make([]*SubAgent, 0, len(a.subAgents)+1)
-	seen := make(map[string]struct{}, len(a.subAgents)+1)
-	for _, sub := range a.subAgents {
+	a.subs.mu.RLock()
+	subs := make([]*SubAgent, 0, len(a.subs.subAgents)+1)
+	seen := make(map[string]struct{}, len(a.subs.subAgents)+1)
+	for _, sub := range a.subs.subAgents {
 		if sub != nil {
 			subs = append(subs, sub)
 			if sub.instanceID != "" {
@@ -18,7 +18,7 @@ func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
 			}
 		}
 	}
-	a.mu.RUnlock()
+	a.subs.mu.RUnlock()
 	if focused := a.validFocusedSubAgent(); focused != nil {
 		if _, ok := seen[focused.instanceID]; !ok {
 			subs = append(subs, focused)

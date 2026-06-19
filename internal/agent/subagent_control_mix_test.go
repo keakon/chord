@@ -185,15 +185,15 @@ func TestSubAgentCompleteWithOutstandingJoinChildEntersWaitingDescendant(t *test
 	sub.instanceID = "worker-parent"
 	sub.semHeld = true
 	parent.sem <- struct{}{}
-	parent.mu.Lock()
-	delete(parent.subAgents, "worker-1")
-	parent.subAgents[sub.instanceID] = sub
-	parent.taskRecords[sub.taskID] = &DurableTaskRecord{
+	parent.subs.mu.Lock()
+	delete(parent.subs.subAgents, "worker-1")
+	parent.subs.subAgents[sub.instanceID] = sub
+	parent.subs.taskRecords[sub.taskID] = &DurableTaskRecord{
 		TaskID:           sub.taskID,
 		LatestInstanceID: sub.instanceID,
 		State:            string(SubAgentStateRunning),
 	}
-	parent.taskRecords["adhoc-child"] = &DurableTaskRecord{
+	parent.subs.taskRecords["adhoc-child"] = &DurableTaskRecord{
 		TaskID:           "adhoc-child",
 		OwnerAgentID:     sub.instanceID,
 		OwnerTaskID:      sub.taskID,
@@ -201,7 +201,7 @@ func TestSubAgentCompleteWithOutstandingJoinChildEntersWaitingDescendant(t *test
 		State:            string(SubAgentStateRunning),
 		LatestInstanceID: "worker-child",
 	}
-	parent.mu.Unlock()
+	parent.subs.mu.Unlock()
 
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,

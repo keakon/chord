@@ -53,15 +53,15 @@ func (a *MainAgent) buildCoordinationSnapshotOverlay() string {
 	}
 	a.updateSubAgentStallMarkers()
 
-	a.mu.RLock()
-	records := make([]*DurableTaskRecord, 0, len(a.taskRecords))
-	for _, rec := range a.taskRecords {
+	a.subs.mu.RLock()
+	records := make([]*DurableTaskRecord, 0, len(a.subs.taskRecords))
+	for _, rec := range a.subs.taskRecords {
 		if clone := cloneDurableTaskRecord(rec); clone != nil && isRelevantCoordinationTask(clone, a.explicitUserTurnCount) {
 			records = append(records, clone)
 		}
 	}
 	currentTurn := a.explicitUserTurnCount
-	a.mu.RUnlock()
+	a.subs.mu.RUnlock()
 	if len(records) == 0 {
 		return ""
 	}
@@ -196,14 +196,14 @@ func (a *MainAgent) updateSubAgentStallMarkers() {
 		return
 	}
 	now := time.Now()
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for taskID, rec := range a.taskRecords {
+	a.subs.mu.Lock()
+	defer a.subs.mu.Unlock()
+	for taskID, rec := range a.subs.taskRecords {
 		if rec == nil {
 			continue
 		}
 		reason := ""
-		if sub := a.subAgents[rec.LatestInstanceID]; sub != nil {
+		if sub := a.subs.subAgents[rec.LatestInstanceID]; sub != nil {
 			state := sub.State()
 			switch state {
 			case SubAgentStateWaitingMain:
@@ -222,7 +222,7 @@ func (a *MainAgent) updateSubAgentStallMarkers() {
 			next := cloneDurableTaskRecord(rec)
 			next.SuspectedStallReason = reason
 			next.UpdatedAt = now
-			a.taskRecords[taskID] = next
+			a.subs.taskRecords[taskID] = next
 		}
 	}
 }

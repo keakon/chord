@@ -795,9 +795,9 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 			sub.setLastArtifact(state.LastArtifact)
 		}
 
-		a.mu.Lock()
-		a.subAgents[state.InstanceID] = sub
-		a.mu.Unlock()
+		a.subs.mu.Lock()
+		a.subs.subAgents[state.InstanceID] = sub
+		a.subs.mu.Unlock()
 		a.drainOwnedSubAgentMailboxes(state.InstanceID)
 		a.persistSubAgentMeta(sub)
 		a.syncTaskRecordFromSub(sub, "")

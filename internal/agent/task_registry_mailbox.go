@@ -14,11 +14,11 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 		return
 	}
 	now := time.Now()
-	a.mu.Lock()
-	if a.taskRecords == nil {
-		a.taskRecords = make(map[string]*DurableTaskRecord)
+	a.subs.mu.Lock()
+	if a.subs.taskRecords == nil {
+		a.subs.taskRecords = make(map[string]*DurableTaskRecord)
 	}
-	rec := cloneDurableTaskRecord(a.taskRecords[taskID])
+	rec := cloneDurableTaskRecord(a.subs.taskRecords[taskID])
 	if rec == nil {
 		rec = &DurableTaskRecord{TaskID: taskID, CreatedAt: now, CreatedTurn: a.explicitUserTurnCount}
 	}
@@ -60,7 +60,7 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 	}
 	rec.LastUpdatedTurn = a.explicitUserTurnCount
 	rec.UpdatedAt = now
-	a.taskRecords[taskID] = rec
-	a.mu.Unlock()
+	a.subs.taskRecords[taskID] = rec
+	a.subs.mu.Unlock()
 	a.persistTaskRegistry()
 }

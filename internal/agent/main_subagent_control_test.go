@@ -31,9 +31,9 @@ func newControllableTestSubAgent(t *testing.T, parent *MainAgent, taskID string)
 		SessionDir:   parent.sessionDir,
 		ModelName:    "test-model",
 	})
-	parent.mu.Lock()
-	parent.subAgents[sub.instanceID] = sub
-	parent.mu.Unlock()
+	parent.subs.mu.Lock()
+	parent.subs.subAgents[sub.instanceID] = sub
+	parent.subs.mu.Unlock()
 	parent.syncTaskRecordFromSub(sub, "")
 	return sub
 }
@@ -415,17 +415,17 @@ func TestTakeOutstandingMailboxForSubPreservesSiblingCompletedMailboxes(t *testi
 	a := newTestMainAgent(t, t.TempDir())
 	subA := newControllableTestSubAgent(t, a, "task-a")
 	subA.instanceID = "worker-a"
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[subA.instanceID] = subA
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[subA.instanceID] = subA
+	a.subs.mu.Unlock()
 
 	subB := newControllableTestSubAgent(t, a, "task-b")
 	subB.instanceID = "worker-b"
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[subB.instanceID] = subB
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[subB.instanceID] = subB
+	a.subs.mu.Unlock()
 
 	a.activeSubAgentMailboxes = []*SubAgentMailboxMessage{
 		{MessageID: "a-1", AgentID: "worker-a", TaskID: "task-a", Kind: SubAgentMailboxKindCompleted, Priority: SubAgentMailboxPriorityUrgent, Summary: "done a"},
@@ -727,10 +727,10 @@ func TestCancelSubAgentCancelsDirectDescendantsRecursively(t *testing.T) {
 	parent.instanceID = "worker-parent"
 	parent.depth = 1
 	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 3}
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[parent.instanceID] = parent
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[parent.instanceID] = parent
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(parent, "")
 
 	child := newControllableTestSubAgent(t, a, "adhoc-child")
@@ -739,10 +739,10 @@ func TestCancelSubAgentCancelsDirectDescendantsRecursively(t *testing.T) {
 	child.ownerTaskID = parent.taskID
 	child.depth = 2
 	child.joinToOwner = true
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[child.instanceID] = child
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[child.instanceID] = child
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(child, "")
 
 	grand := newControllableTestSubAgent(t, a, "adhoc-grand")
@@ -751,10 +751,10 @@ func TestCancelSubAgentCancelsDirectDescendantsRecursively(t *testing.T) {
 	grand.ownerTaskID = child.taskID
 	grand.depth = 3
 	grand.joinToOwner = true
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[grand.instanceID] = grand
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[grand.instanceID] = grand
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(grand, "")
 
 	if _, err := a.CancelSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), child.taskID, "stop subtree"); err != nil {
@@ -775,10 +775,10 @@ func TestOwnedCompletedMailboxReactivatesWaitingDescendantParent(t *testing.T) {
 	parent.instanceID = "worker-parent"
 	parent.setState(SubAgentStateWaitingDescendant, "waiting for child")
 	parent.setPendingCompleteIntent(&AgentResult{Summary: "final summary"})
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[parent.instanceID] = parent
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[parent.instanceID] = parent
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(parent, "")
 
 	child := newControllableTestSubAgent(t, a, "adhoc-child")
@@ -790,10 +790,10 @@ func TestOwnedCompletedMailboxReactivatesWaitingDescendantParent(t *testing.T) {
 	child.setState(SubAgentStateCompleted, "child done")
 	child.semHeld = true
 	a.sem <- struct{}{}
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[child.instanceID] = child
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[child.instanceID] = child
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(child, "")
 
 	ok := a.routeOwnedSubAgentMailbox(SubAgentMailboxMessage{
@@ -857,10 +857,10 @@ func TestOwnerRoutedMailboxIsAckedConsumed(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.instanceID = "worker-parent"
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[parent.instanceID] = parent
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[parent.instanceID] = parent
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(parent, "")
 
 	childMsg := SubAgentMailboxMessage{
@@ -911,10 +911,10 @@ func TestOwnerRoutedWakeBypassesSemaphoreWhenOwnerMustResume(t *testing.T) {
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.instanceID = "worker-parent"
 	parent.setState(SubAgentStateWaitingDescendant, "waiting for child")
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[parent.instanceID] = parent
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[parent.instanceID] = parent
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(parent, "")
 	for i := 0; i < cap(a.sem); i++ {
 		a.sem <- struct{}{}
@@ -960,10 +960,10 @@ func TestCloseSubAgentReleasesWakeBypassWithoutDrainingSemaphore(t *testing.T) {
 	parent.semHeld = true
 	parent.semBypassed = true
 	parent.instanceID = "worker-parent"
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[parent.instanceID] = parent
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[parent.instanceID] = parent
+	a.subs.mu.Unlock()
 	for i := 0; i < cap(a.sem); i++ {
 		a.sem <- struct{}{}
 	}
@@ -979,10 +979,10 @@ func TestCloseSubAgentRemovesOwnedPendingMailboxState(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.instanceID = "worker-parent"
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[parent.instanceID] = parent
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[parent.instanceID] = parent
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(parent, "")
 
 	a.enqueueOwnedSubAgentMailbox(SubAgentMailboxMessage{
@@ -1010,10 +1010,10 @@ func TestOwnedMailboxNotifyDoesNotInflateUrgentCount(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.instanceID = "worker-parent"
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[parent.instanceID] = parent
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[parent.instanceID] = parent
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(parent, "")
 
 	a.enqueueOwnedSubAgentMailbox(SubAgentMailboxMessage{
@@ -1038,10 +1038,10 @@ func TestOwnerReactivationSavesFreshSnapshot(t *testing.T) {
 	parent.instanceID = "worker-parent"
 	parent.setState(SubAgentStateWaitingDescendant, "waiting for child")
 	parent.setPendingCompleteIntent(&AgentResult{Summary: "final summary"})
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[parent.instanceID] = parent
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[parent.instanceID] = parent
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(parent, "")
 
 	child := newControllableTestSubAgent(t, a, "adhoc-child")
@@ -1053,10 +1053,10 @@ func TestOwnerReactivationSavesFreshSnapshot(t *testing.T) {
 	child.setState(SubAgentStateCompleted, "child done")
 	child.semHeld = true
 	a.sem <- struct{}{}
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[child.instanceID] = child
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[child.instanceID] = child
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(child, "")
 
 	ok := a.routeOwnedSubAgentMailbox(SubAgentMailboxMessage{
@@ -1104,10 +1104,10 @@ func TestCallerTaskIDAllowsRehydratedParentToControlChild(t *testing.T) {
 	parent.instanceID = "worker-parent-1"
 	parent.depth = 1
 	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[parent.instanceID] = parent
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[parent.instanceID] = parent
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(parent, "")
 
 	child := newControllableTestSubAgent(t, a, "adhoc-child")
@@ -1116,20 +1116,20 @@ func TestCallerTaskIDAllowsRehydratedParentToControlChild(t *testing.T) {
 	child.ownerTaskID = parent.taskID
 	child.depth = 2
 	child.joinToOwner = true
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[child.instanceID] = child
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[child.instanceID] = child
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(child, "")
 
 	parent2 := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent2.instanceID = "worker-parent-2"
 	parent2.depth = 1
 	parent2.delegation = parent.delegation
-	a.mu.Lock()
-	delete(a.subAgents, parent.instanceID)
-	a.subAgents[parent2.instanceID] = parent2
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, parent.instanceID)
+	a.subs.subAgents[parent2.instanceID] = parent2
+	a.subs.mu.Unlock()
 	a.syncTaskRecordFromSub(parent2, "")
 
 	handle, err := a.NotifySubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent2.instanceID), parent2.taskID), child.taskID, "continue from rehydrated parent", "follow_up")

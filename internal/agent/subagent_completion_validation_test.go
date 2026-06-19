@@ -23,15 +23,15 @@ func TestCompleteRejectsBlankSummaryInIntercept(t *testing.T) {
 
 func TestDeferredCompletionRetainsStructuredEnvelope(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)
-	parent.mu.Lock()
-	parent.taskRecords["child-1"] = &DurableTaskRecord{
+	parent.subs.mu.Lock()
+	parent.subs.taskRecords["child-1"] = &DurableTaskRecord{
 		TaskID:           "child-1",
 		OwnerTaskID:      sub.taskID,
 		JoinToOwner:      true,
 		State:            string(SubAgentStateRunning),
 		LatestInstanceID: "worker-child",
 	}
-	parent.mu.Unlock()
+	parent.subs.mu.Unlock()
 
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
@@ -64,15 +64,15 @@ func TestCoordinationSnapshotDoesNotDeadlockOnWaitingDescendant(t *testing.T) {
 	sub.instanceID = "worker-parent"
 	sub.setState(SubAgentStateWaitingDescendant, "waiting for child")
 	sub.runtimeState.stateChangedAt = time.Now().Add(-coordinationSnapshotStallAfter - time.Minute)
-	a.mu.Lock()
-	delete(a.subAgents, "worker-1")
-	a.subAgents[sub.instanceID] = sub
-	a.taskRecords[sub.taskID] = &DurableTaskRecord{
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.taskRecords[sub.taskID] = &DurableTaskRecord{
 		TaskID:           sub.taskID,
 		LatestInstanceID: sub.instanceID,
 		State:            string(SubAgentStateWaitingDescendant),
 	}
-	a.mu.Unlock()
+	a.subs.mu.Unlock()
 	done := make(chan string, 1)
 	go func() {
 		done <- a.buildCoordinationSnapshotOverlay()

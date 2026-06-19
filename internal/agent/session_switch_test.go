@@ -37,9 +37,9 @@ func TestPrepareSessionSwitchTerminatesBackgroundObjects(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sub := &SubAgent{instanceID: "agent-1", parentCtx: ctx, cancel: cancel}
-	a.mu.Lock()
-	a.subAgents[sub.instanceID] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.mu.Unlock()
 	if _, err := tools.ExecuteSpawnForTest(tools.WithAgentID(context.Background(), sub.instanceID), "job", "sleep 5", "Sub background object", new(5)); err != nil {
 		t.Fatalf("start sub background: %v", err)
 	}
@@ -309,9 +309,9 @@ func TestStaleFocusedAgentFallsBackToMainForUserInput(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-10")
 	a.focusedAgent.Store(sub)
-	a.mu.Lock()
-	delete(a.subAgents, sub.instanceID)
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, sub.instanceID)
+	a.subs.mu.Unlock()
 
 	a.SendUserMessage("route to main")
 
@@ -331,9 +331,9 @@ func TestStaleFocusedAgentFallsBackToMainViews(t *testing.T) {
 	sub := newControllableTestSubAgent(t, a, "adhoc-11")
 	sub.ctxMgr.Append(message.Message{Role: "user", Content: "sub-msg"})
 	a.focusedAgent.Store(sub)
-	a.mu.Lock()
-	delete(a.subAgents, sub.instanceID)
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, sub.instanceID)
+	a.subs.mu.Unlock()
 
 	msgs := a.GetMessages()
 	if len(msgs) != 1 || msgs[0].Content != "main-msg" {
@@ -356,9 +356,9 @@ func TestHandleAgentDoneDoesNotAppendPseudoUserMessage(t *testing.T) {
 	sub.setState(SubAgentStateRunning, "")
 	sub.semHeld = true
 	a.sem <- struct{}{}
-	a.mu.Lock()
-	a.subAgents[sub.instanceID] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.mu.Unlock()
 
 	a.newTurn()
 	a.handleAgentDone(Event{
@@ -763,10 +763,10 @@ func TestHandleNewSessionCommandStartsFreshSessionAndIgnoresLateSubAgent(t *test
 			cancelled = true
 		},
 	}
-	a.mu.Lock()
-	a.subAgents[sub.instanceID] = sub
-	a.nudgeCounts[sub.instanceID] = 1
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.nudgeCounts[sub.instanceID] = 1
+	a.subs.mu.Unlock()
 	a.focusedAgent.Store(sub)
 	a.sem <- struct{}{}
 

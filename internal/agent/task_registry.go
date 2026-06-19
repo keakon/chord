@@ -311,9 +311,9 @@ func (a *MainAgent) findDuplicateOrConflictingTask(ownerAgentID, ownerTaskID, ag
 		semanticTaskKey = semanticTaskKeyFallback(planTaskRef)
 	}
 	expectedWriteScope = expectedWriteScope.Normalized()
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	for _, rec := range a.taskRecords {
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
+	for _, rec := range a.subs.taskRecords {
 		if rec == nil {
 			continue
 		}
@@ -348,17 +348,17 @@ func (a *MainAgent) taskRecordByTaskID(taskID string) *DurableTaskRecord {
 	if taskID == "" {
 		return nil
 	}
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return cloneDurableTaskRecord(a.taskRecords[taskID])
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
+	return cloneDurableTaskRecord(a.subs.taskRecords[taskID])
 }
 
 func (a *MainAgent) setTaskRecords(records map[string]*DurableTaskRecord) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.taskRecords = cloneDurableTaskRecordMap(records)
-	if a.taskRecords == nil {
-		a.taskRecords = make(map[string]*DurableTaskRecord)
+	a.subs.mu.Lock()
+	defer a.subs.mu.Unlock()
+	a.subs.taskRecords = cloneDurableTaskRecordMap(records)
+	if a.subs.taskRecords == nil {
+		a.subs.taskRecords = make(map[string]*DurableTaskRecord)
 	}
 }
 
@@ -366,10 +366,10 @@ func (a *MainAgent) persistTaskRegistry() {
 	if a == nil {
 		return
 	}
-	a.mu.RLock()
-	records := cloneDurableTaskRecordMap(a.taskRecords)
+	a.subs.mu.RLock()
+	records := cloneDurableTaskRecordMap(a.subs.taskRecords)
 	sessionDir := a.sessionDir
-	a.mu.RUnlock()
+	a.subs.mu.RUnlock()
 	if err := persistDurableTaskRecords(sessionDir, records); err != nil {
 		log.Warnf("failed to persist durable task registry session=%v error=%v", sessionDir, err)
 	}
@@ -390,11 +390,11 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	lastArtifact := sub.LastArtifact()
 	now := time.Now()
 
-	a.mu.Lock()
-	if a.taskRecords == nil {
-		a.taskRecords = make(map[string]*DurableTaskRecord)
+	a.subs.mu.Lock()
+	if a.subs.taskRecords == nil {
+		a.subs.taskRecords = make(map[string]*DurableTaskRecord)
 	}
-	rec := cloneDurableTaskRecord(a.taskRecords[taskID])
+	rec := cloneDurableTaskRecord(a.subs.taskRecords[taskID])
 	if rec == nil {
 		rec = &DurableTaskRecord{
 			TaskID:      taskID,
@@ -432,8 +432,8 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	} else if state == SubAgentStateRunning || state == SubAgentStateWaitingMain || state == SubAgentStateIdle {
 		rec.ClosedReason = ""
 	}
-	a.taskRecords[taskID] = rec
-	a.mu.Unlock()
+	a.subs.taskRecords[taskID] = rec
+	a.subs.mu.Unlock()
 
 	a.persistTaskRegistry()
 }
@@ -656,10 +656,10 @@ func loadTaskHistoryMessages(rm *recovery.RecoveryManager, rec *DurableTaskRecor
 }
 
 func (a *MainAgent) taskInfosForCompaction() []SubAgentInfo {
-	a.mu.RLock()
-	liveInfos := make([]SubAgentInfo, 0, len(a.subAgents))
-	seenTaskIDs := make(map[string]struct{}, len(a.subAgents))
-	for _, sub := range a.subAgents {
+	a.subs.mu.RLock()
+	liveInfos := make([]SubAgentInfo, 0, len(a.subs.subAgents))
+	seenTaskIDs := make(map[string]struct{}, len(a.subs.subAgents))
+	for _, sub := range a.subs.subAgents {
 		if sub == nil {
 			continue
 		}
@@ -694,8 +694,8 @@ func (a *MainAgent) taskInfosForCompaction() []SubAgentInfo {
 			seenTaskIDs[taskID] = struct{}{}
 		}
 	}
-	records := cloneDurableTaskRecordMap(a.taskRecords)
-	a.mu.RUnlock()
+	records := cloneDurableTaskRecordMap(a.subs.taskRecords)
+	a.subs.mu.RUnlock()
 
 	var historical []SubAgentInfo
 	for taskID, rec := range records {

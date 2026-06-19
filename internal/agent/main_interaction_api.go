@@ -58,11 +58,11 @@ type AgentContextUsage struct {
 // GetSubAgents returns information about all active SubAgents for TUI sidebar
 // display. Safe to call from any goroutine.
 func (a *MainAgent) GetSubAgents() []SubAgentInfo {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
 
-	infos := make([]SubAgentInfo, 0, len(a.subAgents))
-	for _, sub := range a.subAgents {
+	infos := make([]SubAgentInfo, 0, len(a.subs.subAgents))
+	for _, sub := range a.subs.subAgents {
 		selectedRef := ""
 		runningRef := ""
 		client, modelName := sub.llmSnapshot()

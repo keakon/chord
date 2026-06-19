@@ -1598,9 +1598,9 @@ func focusTestSubAgent(t *testing.T, a *MainAgent, instanceID, providerName, pre
 		recovery:   a.recovery,
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
-	a.mu.Lock()
-	a.subAgents[instanceID] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents[instanceID] = sub
+	a.subs.mu.Unlock()
 	a.focusedAgent.Store(sub)
 }
 

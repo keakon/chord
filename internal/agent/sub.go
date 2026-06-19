@@ -743,7 +743,7 @@ func (s *SubAgent) resetIdleTimer() {
 		s.idleTimer.Stop()
 		s.idleTimer = nil
 	}
-	// idleNudges is in MainAgent.nudgeCounts; reset via dedicated event.
+	// idleNudges is in MainAgent.subs.nudgeCounts; reset via dedicated event.
 	s.parent.sendEvent(Event{
 		Type:     EventResetNudge,
 		SourceID: s.instanceID,

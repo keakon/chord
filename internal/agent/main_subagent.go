@@ -76,7 +76,7 @@ func effectiveDirectActiveChildLimit(cfg config.DelegationConfig) int {
 
 func (a *MainAgent) directActiveChildCountLocked(ownerAgentID, ownerTaskID string) int {
 	count := 0
-	for _, rec := range a.taskRecords {
+	for _, rec := range a.subs.taskRecords {
 		if rec == nil {
 			continue
 		}
@@ -99,7 +99,7 @@ func (a *MainAgent) outstandingJoinChildTaskIDsLocked(taskID string) []string {
 		return nil
 	}
 	var out []string
-	for _, rec := range a.taskRecords {
+	for _, rec := range a.subs.taskRecords {
 		if rec == nil || !rec.JoinToOwner {
 			continue
 		}
@@ -120,8 +120,8 @@ func (a *MainAgent) outstandingJoinChildTaskIDs(taskID string) []string {
 	if taskID == "" {
 		return nil
 	}
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
 	return a.outstandingJoinChildTaskIDsLocked(taskID)
 }
 
@@ -130,10 +130,10 @@ func (a *MainAgent) directChildTaskIDs(taskID string) []string {
 	if taskID == "" {
 		return nil
 	}
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
 	var out []string
-	for _, rec := range a.taskRecords {
+	for _, rec := range a.subs.taskRecords {
 		if rec == nil {
 			continue
 		}
@@ -192,9 +192,9 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		return
 	}
 
-	a.mu.RLock()
-	sub := a.subAgents[evt.SourceID]
-	a.mu.RUnlock()
+	a.subs.mu.RLock()
+	sub := a.subs.subAgents[evt.SourceID]
+	a.subs.mu.RUnlock()
 	if sub == nil {
 		log.Warnf("handleAgentDone: unknown SubAgent source=%v", evt.SourceID)
 		return
@@ -247,14 +247,14 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 }
 
 func (a *MainAgent) handleAgentIdle(evt Event) {
-	a.mu.RLock()
-	sub := a.subAgents[evt.SourceID]
-	a.mu.RUnlock()
+	a.subs.mu.RLock()
+	sub := a.subs.subAgents[evt.SourceID]
+	a.subs.mu.RUnlock()
 	if sub == nil {
 		return
 	}
-	a.nudgeCounts[evt.SourceID]++
-	n := a.nudgeCounts[evt.SourceID]
+	a.subs.nudgeCounts[evt.SourceID]++
+	n := a.subs.nudgeCounts[evt.SourceID]
 	if n > maxIdleNudges {
 		timeout, _ := evt.Payload.(time.Duration)
 		a.sendEvent(Event{Type: EventAgentError, SourceID: evt.SourceID, Payload: fmt.Errorf("SubAgent idle after %d nudges (timeout=%v each)", n, timeout)})
@@ -350,8 +350,8 @@ func (a *MainAgent) handleAgentLog(evt Event) {
 }
 
 func (a *MainAgent) handleResetNudge(evt Event) {
-	if _, ok := a.nudgeCounts[evt.SourceID]; ok {
-		a.nudgeCounts[evt.SourceID] = 0
+	if _, ok := a.subs.nudgeCounts[evt.SourceID]; ok {
+		a.subs.nudgeCounts[evt.SourceID] = 0
 	}
 }
 
@@ -388,9 +388,9 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 		a.beginMainLLMAfterPreparation(turnCtx, turnID, "main")
 		return
 	}
-	a.mu.RLock()
-	sub := a.subAgents[payload.AgentID]
-	a.mu.RUnlock()
+	a.subs.mu.RLock()
+	sub := a.subs.subAgents[payload.AgentID]
+	a.subs.mu.RUnlock()
 	if sub == nil {
 		log.Warnf("handleSpawnFinished: owner subagent not found agent_id=%v background_id=%v", payload.AgentID, backgroundID)
 		a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: payload.AgentID, Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
@@ -453,9 +453,9 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	if err != nil {
 		return tools.TaskHandle{}, err
 	}
-	a.mu.RLock()
+	a.subs.mu.RLock()
 	count := a.directActiveChildCountLocked(caller.AgentID, caller.TaskID)
-	a.mu.RUnlock()
+	a.subs.mu.RUnlock()
 	maxChildren := effectiveDirectActiveChildLimit(caller.Delegation)
 	if count >= maxChildren {
 		return tools.TaskHandle{
@@ -550,9 +550,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		ModelName:     a.ModelName(),
 	})
 	sub.semHeld = true
-	a.mu.Lock()
-	a.subAgents[instanceID] = sub
-	a.mu.Unlock()
+	a.subs.add(sub)
 	a.persistSubAgentMeta(sub)
 	a.syncTaskRecordFromSub(sub, "")
 	go sub.runLoop()
@@ -571,9 +569,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 }
 
 func (a *MainAgent) subAgentByID(agentID string) *SubAgent {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.subAgents[agentID]
+	return a.subs.subAgent(agentID)
 }
 
 func taskIDForSub(sub *SubAgent) string {
@@ -673,9 +669,9 @@ func (a *MainAgent) validFocusedSubAgent() *SubAgent {
 	if sub == nil {
 		return nil
 	}
-	a.mu.RLock()
-	current, exists := a.subAgents[sub.instanceID]
-	a.mu.RUnlock()
+	a.subs.mu.RLock()
+	current, exists := a.subs.subAgents[sub.instanceID]
+	a.subs.mu.RUnlock()
 	if exists && current == sub {
 		return sub
 	}
@@ -689,9 +685,9 @@ func (a *MainAgent) SwitchFocus(agentID string) {
 		a.focusedAgent.Store(nil)
 		return
 	}
-	a.mu.RLock()
-	sub := a.subAgents[agentID]
-	a.mu.RUnlock()
+	a.subs.mu.RLock()
+	sub := a.subs.subAgents[agentID]
+	a.subs.mu.RUnlock()
 	if sub != nil {
 		a.focusedAgent.Store(sub)
 		return
@@ -701,9 +697,9 @@ func (a *MainAgent) SwitchFocus(agentID string) {
 
 func (a *MainAgent) GetAllAgentsContextUsage() []AgentContextUsage {
 	out := []AgentContextUsage{{AgentID: "main", ContextCurrent: a.ctxMgr.LastTotalContextTokens(), ContextLimit: a.ctxMgr.GetUsableInputBudget(), ContextMessageCount: a.ctxMgr.MessageCount()}}
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	for id, sub := range a.subAgents {
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
+	for id, sub := range a.subs.subAgents {
 		cur, limit := sub.GetContextStats()
 		out = append(out, AgentContextUsage{AgentID: id, ContextCurrent: cur, ContextLimit: limit, ContextMessageCount: sub.GetContextMessageCount()})
 	}

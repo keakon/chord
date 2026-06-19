@@ -11,9 +11,9 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 	todoStates := snapshotTodos(a.todoItems)
 	a.todoMu.RUnlock()
 
-	a.mu.RLock()
-	agents := make([]recovery.AgentSnapshot, 0, len(a.subAgents))
-	for _, sub := range a.subAgents {
+	a.subs.mu.RLock()
+	agents := make([]recovery.AgentSnapshot, 0, len(a.subs.subAgents))
+	for _, sub := range a.subs.subAgents {
 		state := sub.State()
 		summary := sub.LastSummary()
 		pendingComplete := sub.PendingCompleteIntent()
@@ -36,7 +36,7 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 		}
 		agents = append(agents, snap)
 	}
-	a.mu.RUnlock()
+	a.subs.mu.RUnlock()
 
 	modelPoolCurrentModelPool, modelPoolAgentOverrides := a.snapshotModelPoolState()
 	usageSnap := a.usageTracker.SessionStats()

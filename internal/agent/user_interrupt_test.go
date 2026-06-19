@@ -116,9 +116,9 @@ func TestCancelCurrentTurnInterruptsRunningSubAgents(t *testing.T) {
 		ArgsJSON: `{"url":"https://slow.example"}`,
 		AgentID:  sub.instanceID,
 	})
-	a.mu.Lock()
-	a.subAgents[sub.instanceID] = sub
-	a.mu.Unlock()
+	a.subs.mu.Lock()
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.mu.Unlock()
 
 	if cancelled := a.CancelCurrentTurn(); !cancelled {
 		t.Fatal("CancelCurrentTurn() = false, want true")

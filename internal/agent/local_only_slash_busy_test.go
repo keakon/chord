@@ -272,7 +272,7 @@ func TestInFlightModelPoolSwitchRestoresOnlyFailedDeferredSelections(t *testing.
 		parentCtx:    subCtx,
 		cancel:       subCancel,
 	}
-	a.subAgents[sub.instanceID] = sub
+	a.subs.subAgents[sub.instanceID] = sub
 
 	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
 		if providerModel == "provider/model-c" {

@@ -44,15 +44,7 @@ func (a *MainAgent) syncSubAgentServiceTier(tier config.ServiceTier) {
 	if a == nil {
 		return
 	}
-	a.mu.RLock()
-	targets := make([]*SubAgent, 0, len(a.subAgents))
-	for _, sub := range a.subAgents {
-		if sub != nil {
-			targets = append(targets, sub)
-		}
-	}
-	a.mu.RUnlock()
-	for _, sub := range targets {
+	for _, sub := range a.subs.snapshotSubAgents() {
 		sub.setServiceTier(tier)
 	}
 }

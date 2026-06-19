@@ -230,7 +230,7 @@ func TestReadArtifactToolRejectsPathEscapeAndReadsSessionArtifact(t *testing.T) 
 func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.explicitUserTurnCount = 5
-	a.taskRecords["task-1"] = &DurableTaskRecord{
+	a.subs.taskRecords["task-1"] = &DurableTaskRecord{
 		TaskID:             "task-1",
 		AgentDefName:       "explorer",
 		State:              string(SubAgentStateCompleted),
@@ -267,7 +267,7 @@ func TestCoordinationSnapshotMarksRunningWorkerStallButNotWaitingMain(t *testing
 		LastSummary:      "needs decision",
 		LastUpdatedTurn:  a.explicitUserTurnCount,
 	}
-	a.taskRecords[waiting.TaskID] = waiting
+	a.subs.taskRecords[waiting.TaskID] = waiting
 
 	block := a.buildCoordinationSnapshotOverlay()
 	if !strings.Contains(block, "task_id: task-running") || !strings.Contains(block, "suspected_stall: running with no recent state/progress update") {
