@@ -334,41 +334,62 @@ func renderEvidenceArtifact(items []evidenceItem) message.Message {
 	return message.Message{Role: "user", Content: renderEvidenceArtifactContent(items)}
 }
 
-func (a *MainAgent) clearEvidenceCandidates() {
-	a.evidenceCandidates = nil
-	if a.evidenceCandidateSet == nil {
-		a.evidenceCandidateSet = make(map[string]struct{})
-		return
-	}
-	for key := range a.evidenceCandidateSet {
-		delete(a.evidenceCandidateSet, key)
-	}
+// maxEvidenceCandidates bounds the runtime evidence candidate list.
+const maxEvidenceCandidates = 48
+
+// evidenceCandidateTracker is a bounded, de-duplicated list of runtime evidence
+// items accumulated for durable compaction. It is owned by the event-loop
+// goroutine, so it carries no lock. Previously two loose MainAgent fields
+// (evidenceCandidates + evidenceCandidateSet).
+type evidenceCandidateTracker struct {
+	items []evidenceItem
+	seen  map[string]struct{}
 }
 
-func (a *MainAgent) addEvidenceCandidate(item evidenceItem) {
+func (t *evidenceCandidateTracker) reset() {
+	t.items = nil
+	if t.seen == nil {
+		t.seen = make(map[string]struct{})
+		return
+	}
+	clear(t.seen)
+}
+
+func (t *evidenceCandidateTracker) add(item evidenceItem) {
 	if strings.TrimSpace(item.Excerpt) == "" {
 		return
 	}
-	if a.evidenceCandidateSet == nil {
-		a.evidenceCandidateSet = make(map[string]struct{})
+	if t.seen == nil {
+		t.seen = make(map[string]struct{})
 	}
 	key := item.Key
 	if key == "" {
 		key = string(item.Kind) + "\x00" + item.Excerpt
 		item.Key = key
 	}
-	if _, ok := a.evidenceCandidateSet[key]; ok {
+	if _, ok := t.seen[key]; ok {
 		return
 	}
-	a.evidenceCandidateSet[key] = struct{}{}
-	a.evidenceCandidates = append(a.evidenceCandidates, item)
-	if len(a.evidenceCandidates) > 48 {
-		drop := len(a.evidenceCandidates) - 48
+	t.seen[key] = struct{}{}
+	t.items = append(t.items, item)
+	if len(t.items) > maxEvidenceCandidates {
+		drop := len(t.items) - maxEvidenceCandidates
 		for i := range drop {
-			delete(a.evidenceCandidateSet, a.evidenceCandidates[i].Key)
+			delete(t.seen, t.items[i].Key)
 		}
-		a.evidenceCandidates = append([]evidenceItem(nil), a.evidenceCandidates[drop:]...)
+		t.items = append([]evidenceItem(nil), t.items[drop:]...)
 	}
+}
+
+func (t *evidenceCandidateTracker) len() int                 { return len(t.items) }
+func (t *evidenceCandidateTracker) snapshot() []evidenceItem { return t.items }
+
+func (a *MainAgent) clearEvidenceCandidates() {
+	a.evidence.reset()
+}
+
+func (a *MainAgent) addEvidenceCandidate(item evidenceItem) {
+	a.evidence.add(item)
 }
 
 func evidenceItemsFromCandidates(candidates []evidenceItem, contextLimit int) []evidenceItem {
@@ -577,7 +598,7 @@ func selectEvidenceItems(messages []message.Message, contextLimit int) []evidenc
 }
 
 func (a *MainAgent) evidenceItemsForCompaction(_ []message.Message, contextLimit int) []evidenceItem {
-	return evidenceItemsFromCandidates(a.evidenceCandidates, contextLimit)
+	return evidenceItemsFromCandidates(a.evidence.snapshot(), contextLimit)
 }
 
 func isToolErrorContent(content string) bool {

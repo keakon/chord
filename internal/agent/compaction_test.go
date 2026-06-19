@@ -3189,7 +3189,7 @@ func TestRecordEvidenceFromMessageCapturesToolErrorAndDiff(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.recordEvidenceFromMessage(message.Message{Role: "tool", Content: "go test failed\n\nError: exit code 1", ToolDiff: "+ changed\n- old"})
-	if got := len(a.evidenceCandidates); got != 2 {
+	if got := a.evidence.len(); got != 2 {
 		t.Fatalf("len(evidenceCandidates) = %d, want 2", got)
 	}
 }
@@ -3202,11 +3202,11 @@ func TestRecordEvidenceFromMessageCapturesToolStatusErrorWithoutErrorPrefix(t *t
 		Content:    "patch makes no changes. No files were modified",
 		ToolStatus: string(ToolResultStatusError),
 	})
-	if got := len(a.evidenceCandidates); got != 1 {
+	if got := a.evidence.len(); got != 1 {
 		t.Fatalf("len(evidenceCandidates) = %d, want 1", got)
 	}
-	if a.evidenceCandidates[0].Kind != evidenceToolError {
-		t.Fatalf("evidence kind = %q, want %q", a.evidenceCandidates[0].Kind, evidenceToolError)
+	if a.evidence.snapshot()[0].Kind != evidenceToolError {
+		t.Fatalf("evidence kind = %q, want %q", a.evidence.snapshot()[0].Kind, evidenceToolError)
 	}
 }
 
@@ -3379,11 +3379,11 @@ func TestRecordEvidenceFromMessageCapturesToolRejectionReasonAsRequest(t *testin
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.recordEvidenceFromMessage(message.Message{Role: "tool", Content: `Error: tool "Write" rejected by user: 改成只分析，不要写文件`})
-	if got := len(a.evidenceCandidates); got != 2 {
+	if got := a.evidence.len(); got != 2 {
 		t.Fatalf("len(evidenceCandidates) = %d, want request plus error evidence", got)
 	}
-	if a.evidenceCandidates[0].Kind != evidenceUserRequest || !strings.Contains(a.evidenceCandidates[0].Excerpt, "只分析") {
-		t.Fatalf("first candidate = %+v, want user request from rejection reason", a.evidenceCandidates[0])
+	if a.evidence.snapshot()[0].Kind != evidenceUserRequest || !strings.Contains(a.evidence.snapshot()[0].Excerpt, "只分析") {
+		t.Fatalf("first candidate = %+v, want user request from rejection reason", a.evidence.snapshot()[0])
 	}
 }
 
@@ -3391,11 +3391,11 @@ func TestRecordEvidenceFromMessageCapturesDoneRejected(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.recordEvidenceFromMessage(message.Message{Role: "tool", Content: "Done rejected: 分析应该怎么保留正确的工作目标"})
-	if got := len(a.evidenceCandidates); got != 1 {
+	if got := a.evidence.len(); got != 1 {
 		t.Fatalf("len(evidenceCandidates) = %d, want 1", got)
 	}
-	if a.evidenceCandidates[0].Kind != evidenceDoneRejected {
-		t.Fatalf("candidate kind = %q, want %q", a.evidenceCandidates[0].Kind, evidenceDoneRejected)
+	if a.evidence.snapshot()[0].Kind != evidenceDoneRejected {
+		t.Fatalf("candidate kind = %q, want %q", a.evidence.snapshot()[0].Kind, evidenceDoneRejected)
 	}
 }
 

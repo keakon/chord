@@ -305,8 +305,7 @@ type MainAgent struct {
 	autoCompactFailureState autoCompactionFailureState
 
 	// Runtime evidence candidates accumulated incrementally for durable compaction.
-	evidenceCandidates   []evidenceItem
-	evidenceCandidateSet map[string]struct{}
+	evidence evidenceCandidateTracker
 
 	// loopReductionMu protects request-shape snapshots, reduction stats, and
 	// loopState fields that may be read by callLLM on a worker goroutine while
@@ -652,7 +651,7 @@ func NewMainAgent(
 		mcpClientInfo:          mcpClientInfo,
 		done:                   make(chan struct{}),
 		stoppingCh:             make(chan struct{}),
-		evidenceCandidateSet:   make(map[string]struct{}),
+		evidence:               evidenceCandidateTracker{seen: make(map[string]struct{})},
 		projectRoot:            projectRoot,
 		subs:                   newSubAgentRegistry(),
 		sem:                    make(chan struct{}, 10),
@@ -1189,21 +1188,21 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 				"runtime user message",
 				compactTextSnippet(text, 600),
 			)
-			item.Sequence = len(a.evidenceCandidates) + 1
+			item.Sequence = a.evidence.len() + 1
 			a.addEvidenceCandidate(item)
 		case isPlainUserRequestForCompaction(text):
 			item := buildLatestUserRequestEvidence("runtime user message", text)
-			item.Sequence = len(a.evidenceCandidates) + 1
+			item.Sequence = a.evidence.len() + 1
 			a.addEvidenceCandidate(item)
 		}
 	case message.RoleTool:
 		if reason, ok := extractDoneRejectedReason(text); ok {
 			item := buildDoneRejectedEvidence("runtime tool result", reason)
-			item.Sequence = len(a.evidenceCandidates) + 1
+			item.Sequence = a.evidence.len() + 1
 			a.addEvidenceCandidate(item)
 		} else if reason, ok := extractToolRejectedByUserReason(text); ok && isPlainUserRequestForCompaction(reason) {
 			item := buildLatestUserRequestEvidence("runtime tool rejection reason", reason)
-			item.Sequence = len(a.evidenceCandidates) + 1
+			item.Sequence = a.evidence.len() + 1
 			a.addEvidenceCandidate(item)
 		}
 		if isToolResultErrorMessage(msg) {
