@@ -3,9 +3,11 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -338,7 +340,11 @@ func (b *Block) diffToolFilePath() string {
 		if path == "" {
 			return ""
 		}
-		if rel, err := filepath.Rel(".", path); err == nil && rel != "" && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
+		// ExtractEditPathFromArgs resolves to an absolute path. Shorten it to a
+		// cwd-relative form so a long absolute prefix (deep tree, long $HOME,
+		// worktree) does not push the file name out of the width-clipped header.
+		// The caller additionally relativizes against displayWorkingDir.
+		if rel := relToProcessWorkingDir(path); rel != "" {
 			return rel
 		}
 		return path
@@ -350,4 +356,36 @@ func (b *Block) diffToolFilePath() string {
 		return ""
 	}
 	return strings.TrimSpace(parsed.Path)
+}
+
+// processWorkingDir caches os.Getwd so per-render path shortening does not pay a
+// syscall on every diff block.
+var processWorkingDir = sync.OnceValue(func() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return wd
+})
+
+// relToProcessWorkingDir returns path made relative to the process working
+// directory, or "" if it cannot be cleanly relativized (different root, escapes
+// upward via "..", or already a usable relative path is not produced).
+func relToProcessWorkingDir(path string) string {
+	if !filepath.IsAbs(path) {
+		return path
+	}
+	wd := processWorkingDir()
+	if wd == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(wd, path)
+	if err != nil {
+		return ""
+	}
+	rel = filepath.Clean(rel)
+	if rel == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return ""
+	}
+	return rel
 }

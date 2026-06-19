@@ -570,3 +570,55 @@ func TestRenderHighlightedSnippetLineOmitsSummaryWhenTooNarrow(t *testing.T) {
 		t.Fatalf("expected hidden cluster summary to be omitted when width is too narrow, got %q", plain)
 	}
 }
+
+// TestEditDiffHeaderPathIsCwdRelative guards against regressing to an absolute
+// edit path in the diff header. ExtractEditPathFromArgs resolves to an absolute
+// path; diffToolFilePath must shorten it to a cwd-relative form so a long
+// absolute prefix (deep tree, long $HOME, git worktree) cannot push the file
+// name out of the width-clipped header.
+func TestEditDiffHeaderPathIsCwdRelative(t *testing.T) {
+	args, _ := json.Marshal(map[string]string{"path": "src/demo.go", "patch": "@@\n-old\n+new\n"})
+	block := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: tools.NameEdit,
+		Content:  string(args),
+	}
+
+	got := block.diffToolFilePath()
+	if filepath.IsAbs(got) {
+		t.Fatalf("diffToolFilePath returned absolute path %q, want cwd-relative", got)
+	}
+	if got != "src/demo.go" {
+		t.Fatalf("diffToolFilePath = %q, want %q", got, "src/demo.go")
+	}
+
+	// The rendered header keeps the file name even at a width far smaller than
+	// the absolute path length.
+	block.ResultDone = true
+	block.ResultStatus = agent.ToolResultStatusSuccess
+	block.Diff = "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n"
+	plain := stripANSI(strings.Join(block.Render(60, ""), "\n"))
+	if !strings.Contains(plain, "demo.go") {
+		t.Fatalf("expected file name to survive header truncation, got:\n%s", plain)
+	}
+}
+
+// TestRelToProcessWorkingDir covers the helper directly: absolute paths under
+// cwd become relative; paths outside it or already relative are left for the
+// caller to handle.
+func TestRelToProcessWorkingDir(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if got := relToProcessWorkingDir(filepath.Join(wd, "a", "b.go")); got != filepath.Join("a", "b.go") {
+		t.Fatalf("under-cwd abs path = %q, want %q", got, filepath.Join("a", "b.go"))
+	}
+	if got := relToProcessWorkingDir("a/b.go"); got != "a/b.go" {
+		t.Fatalf("relative path = %q, want unchanged", got)
+	}
+	if got := relToProcessWorkingDir(filepath.Dir(wd)); got != "" {
+		t.Fatalf("parent of cwd = %q, want \"\" (escapes upward)", got)
+	}
+}
