@@ -566,7 +566,7 @@ func (a *MainAgent) compactionModelRef() string {
 	return client.PrimaryModelRef()
 }
 
-func (a *MainAgent) newCompactionClient(ref string) (*llm.Client, int, error) {
+func (a *MainAgent) newCompactionClient(_ string) (*llm.Client, int, error) {
 	refs, configured, err := a.configuredCompactionModelRefs()
 	if err != nil {
 		return nil, 0, err

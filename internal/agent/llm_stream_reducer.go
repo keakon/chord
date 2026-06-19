@@ -79,6 +79,19 @@ func (r *streamContentReducer) Finish() {
 	r.flushTextDelta()
 }
 
+func (r *streamContentReducer) Rollback() {
+	if r == nil {
+		return
+	}
+	r.textAccum.Reset()
+	r.textLastEmit = time.Time{}
+	r.thinkingAccum.Reset()
+	r.thinkingFull.Reset()
+	r.thinkingActive = false
+	r.thinkingLastEmit = time.Time{}
+	r.responseTextStarted = false
+}
+
 func (r *streamContentReducer) handleText(text string) {
 	if r.closeThinkingOnText {
 		r.closeThinkingBlock()
@@ -217,6 +230,7 @@ type llmStreamReducer struct {
 	onKeyConfirmed   func(*message.StatusDelta)
 	onRetryError     func(error, string, string, string)
 	onError          func(text string)
+	onRollback       func()
 }
 
 func (r *llmStreamReducer) Handle(delta message.StreamDelta) {
@@ -225,6 +239,14 @@ func (r *llmStreamReducer) Handle(delta message.StreamDelta) {
 	}
 	if delta.Progress != nil && r.onProgress != nil {
 		r.onProgress(delta.Progress)
+	}
+	if delta.Type == message.StreamDeltaRollback {
+		r.content.Rollback()
+		if r.onRollback != nil {
+			r.onRollback()
+		}
+		r.tool.Handle(delta)
+		return
 	}
 	if r.tool.Handle(delta) {
 		return

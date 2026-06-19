@@ -312,7 +312,7 @@ func (a *MainAgent) currentLoopContinuationReasons(extra ...string) []string {
 	return a.currentLoopContinuationReasonsForContent("", extra...)
 }
 
-func (a *MainAgent) currentLoopContinuationReasonsForContent(content string, extra ...string) []string {
+func (a *MainAgent) currentLoopContinuationReasonsForContent(_ string, extra ...string) []string {
 	reasons := make([]string, 0, 6)
 	seen := map[string]struct{}{}
 	add := func(reason string) {
@@ -384,7 +384,7 @@ func (a *MainAgent) activeSubAgentContinuationLines() []string {
 	return lines
 }
 
-func loopContinuationTitle(action LoopAssessmentAction) string {
+func loopContinuationTitle(_ LoopAssessmentAction) string {
 	return "LOOP CONTINUE"
 }
 

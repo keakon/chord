@@ -67,7 +67,7 @@ func (a *MainAgent) setYoloMode(enabled bool) {
 	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("YOLO mode %s", state), Level: "info"})
 }
 
-func (a *MainAgent) handleYoloCommand(command string, busy bool) {
+func (a *MainAgent) handleYoloCommand(command string, _ bool) {
 	fields := strings.Fields(command)
 	if len(fields) == 1 {
 		a.setYoloMode(!a.YoloEnabled())

@@ -389,6 +389,10 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		},
 		drainPartialTextOnRollback: true,
 	}
+	streamReducer.onRollback = func() {
+		a.cancelStreamingThinkingTranslations(streamingThinkingMessageIndex)
+		streamingThinkingBlockIndex = 0
+	}
 	streamReducer.emitActivity = func(activity ActivityType, detail string) {
 		a.emitActivity("main", activity, detail)
 	}

@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 func (b *Block) appendStreamingContent(delta string) {
@@ -231,6 +232,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			m.thinkingBlockAppended = false
 			m.thinkingStartTime = time.Time{}
 		}
+		m.removeRolledBackThinkingBlocks(evt.AgentID)
 		if m.currentAssistantBlock != nil && matchAgent(m.currentAssistantBlock.AgentID) {
 			if m.assistantBlockAppended {
 				m.removeViewportBlockByID(m.currentAssistantBlock.ID)
@@ -264,6 +266,9 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 						continue
 					}
 				}
+				if evt.OriginalHash != "" && recovery.ThinkingTranslationOriginalHash(b.Content) != evt.OriginalHash {
+					continue
+				}
 				if len(b.ThinkingTranslations) <= evt.BlockIndex {
 					translations := make([]ThinkingTranslationView, evt.BlockIndex+1)
 					copy(translations, b.ThinkingTranslations)
@@ -282,5 +287,32 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		return true, effects
 	default:
 		return false, effects
+	}
+}
+
+func (m *Model) removeRolledBackThinkingBlocks(agentID string) {
+	if m == nil || m.viewport == nil {
+		return
+	}
+	pendingMsgIndex := m.thinkingStreamMsgIndex
+	if agentID == "" {
+		currentMsgIndex := m.currentMainAssistantMsgIndex()
+		if pendingMsgIndex < 0 && currentMsgIndex >= 0 {
+			pendingMsgIndex = currentMsgIndex
+		}
+	}
+	for i := len(m.viewport.blocks) - 1; i >= 0; i-- {
+		b := m.viewport.blocks[i]
+		if b == nil || b.Type != BlockThinking || b.Streaming || b.AgentID != agentID {
+			continue
+		}
+		if agentID == "" && pendingMsgIndex >= 0 && b.MsgIndex != pendingMsgIndex {
+			continue
+		}
+		m.removeViewportBlockByID(b.ID)
+	}
+	if agentID == "" {
+		m.thinkingStreamMsgIndex = pendingMsgIndex
+		m.thinkingStreamBlockIndex = 0
 	}
 }

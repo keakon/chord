@@ -23,6 +23,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/convformat"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -2293,8 +2294,8 @@ func TestToolCallUpdateEventArgsStreamingDoneMarksQueuedBeforeExecution(t *testi
 		t.Fatalf("expected speculative queued state (not execution queued)")
 	}
 	joined := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
-	if !strings.Contains(joined, "▖ todo_write") {
-		t.Fatalf("expected speculative queued TodoWrite to keep spinner indicator; got:\n%s", joined)
+	if !strings.Contains(joined, "⧗ todo_write") {
+		t.Fatalf("expected speculative queued TodoWrite to render a static pending indicator; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "Queued") {
 		t.Fatalf("did not expect queued header badge for speculative queued TodoWrite; got:\n%s", joined)
@@ -2332,8 +2333,8 @@ func TestTodoWriteQueuedCardDoesNotAnimateWithGlobalSpinner(t *testing.T) {
 
 	joinedA := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
 	joinedB := stripANSI(strings.Join(block.Render(96, "▘"), "\n"))
-	if joinedA == joinedB {
-		t.Fatalf("expected speculative queued todo card to animate with global spinner\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
+	if joinedA != joinedB {
+		t.Fatalf("expected speculative queued todo card to avoid global spinner animation\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
 	}
 	if strings.Contains(joinedA, "Queued") || strings.Contains(joinedB, "Queued") {
 		t.Fatalf("did not expect execution-queue badge on speculative queued todo card\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
@@ -2569,8 +2570,8 @@ func TestToolCallUpdateEventArgsStreamingDoneCreatesQueuedNonAnimatingToolBlock(
 	}
 	joinedA := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
 	joinedB := stripANSI(strings.Join(block.Render(96, "▘"), "\n"))
-	if joinedA == joinedB {
-		t.Fatalf("expected queued block created from final arg update to animate with global spinner\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
+	if joinedA != joinedB {
+		t.Fatalf("expected queued block created from final arg update to avoid global spinner animation\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
 	}
 	if strings.Contains(joinedA, "Queued") || strings.Contains(joinedB, "Queued") {
 		t.Fatalf("did not expect execution-queue badge on queued block created from final arg update\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
@@ -3688,6 +3689,38 @@ func TestStreamRollbackRemovesCurrentAssistantAndThinkingBlocks(t *testing.T) {
 	}
 	if got := len(m.viewport.visibleBlocks()); got != 0 {
 		t.Fatalf("len(visibleBlocks()) = %d, want 0 after rollback", got)
+	}
+}
+
+func TestStreamRollbackRemovesSettledStreamingThinkingBlock(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "failed thought", AgentID: ""}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{AgentID: ""}})
+	if m.currentThinkingBlock != nil {
+		t.Fatal("expected currentThinkingBlock detached after thinking end")
+	}
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("len(visibleBlocks()) = %d, want 1 before rollback", len(blocks))
+	}
+	if blocks[0].Type != BlockThinking || blocks[0].Streaming {
+		t.Fatalf("block = %#v, want settled thinking block", blocks[0])
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamRollbackEvent{AgentID: ""}})
+	if got := len(m.viewport.visibleBlocks()); got != 0 {
+		t.Fatalf("len(visibleBlocks()) = %d, want 0 after rollback", got)
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "retry thought", AgentID: ""}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{AgentID: ""}})
+	blocks = m.viewport.visibleBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("len(visibleBlocks()) = %d, want 1 after retry", len(blocks))
+	}
+	if blocks[0].ThinkingBlockIndex != 0 {
+		t.Fatalf("ThinkingBlockIndex = %d, want retry to restart at 0", blocks[0].ThinkingBlockIndex)
 	}
 }
 
@@ -8462,6 +8495,34 @@ func TestThinkingTranslatedEventDoesNotFallbackToNearestThinkingBlock(t *testing
 
 	if len(block.ThinkingTranslations) != 0 {
 		t.Fatalf("translation should not apply on mismatched message id, got %#v", block.ThinkingTranslations)
+	}
+}
+
+func TestThinkingTranslatedEventRequiresMatchingOriginalHash(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	block := &Block{ID: 1, Type: BlockThinking, Content: "retry thought", MsgIndex: 7, ThinkingBlockIndex: 0}
+	m.viewport.AppendBlock(block)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingTranslatedEvent{
+		MessageID:    "msgidx:7",
+		BlockIndex:   0,
+		Translated:   "stale",
+		TargetLang:   "zh-Hans",
+		OriginalHash: recovery.ThinkingTranslationOriginalHash("failed thought"),
+	}})
+	if len(block.ThinkingTranslations) != 0 {
+		t.Fatalf("translation should not apply on mismatched original hash, got %#v", block.ThinkingTranslations)
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingTranslatedEvent{
+		MessageID:    "msgidx:7",
+		BlockIndex:   0,
+		Translated:   "重试",
+		TargetLang:   "zh-Hans",
+		OriginalHash: recovery.ThinkingTranslationOriginalHash("retry thought"),
+	}})
+	if got := strings.TrimSpace(block.ThinkingTranslations[0].Content); got != "重试" {
+		t.Fatalf("translated content = %q, want 重试", got)
 	}
 }
 

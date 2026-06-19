@@ -34,7 +34,7 @@ func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
 	return cancelled
 }
 
-func (s *SubAgent) interruptCurrentTurnWithStatus(status ToolResultStatus, cause error, resetResponses bool) bool {
+func (s *SubAgent) interruptCurrentTurnWithStatus(status ToolResultStatus, cause error, _ bool) bool {
 	if s == nil || s.turn == nil {
 		return false
 	}

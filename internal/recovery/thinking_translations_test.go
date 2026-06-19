@@ -137,3 +137,42 @@ func TestThinkingTranslationsSlotIgnoresTargetLangChange(t *testing.T) {
 		t.Fatalf("entries len = %d, want 1 — slot must ignore target_lang", len(entries))
 	}
 }
+
+func TestDeleteThinkingTranslationsForMessage(t *testing.T) {
+	dir := t.TempDir()
+	entries := []ThinkingTranslationEntry{
+		{
+			MessageID:    "msgidx:1",
+			BlockIndex:   0,
+			TargetLang:   "zh-Hans",
+			OriginalHash: ThinkingTranslationOriginalHash("thinking 1"),
+			Translated:   "思考 1",
+		},
+		{
+			MessageID:    "msgidx:2",
+			BlockIndex:   0,
+			TargetLang:   "zh-Hans",
+			OriginalHash: ThinkingTranslationOriginalHash("thinking 2"),
+			Translated:   "思考 2",
+		},
+	}
+	for _, entry := range entries {
+		if err := SaveThinkingTranslation(dir, entry); err != nil {
+			t.Fatalf("SaveThinkingTranslation: %v", err)
+		}
+	}
+
+	if err := DeleteThinkingTranslationsForMessage(dir, "msgidx:1"); err != nil {
+		t.Fatalf("DeleteThinkingTranslationsForMessage: %v", err)
+	}
+	loaded, err := LoadThinkingTranslations(dir)
+	if err != nil {
+		t.Fatalf("LoadThinkingTranslations: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("entries len = %d, want 1", len(loaded))
+	}
+	if loaded[0].MessageID != "msgidx:2" || loaded[0].Translated != "思考 2" {
+		t.Fatalf("remaining entry = %#v, want msgidx:2", loaded[0])
+	}
+}

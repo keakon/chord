@@ -73,6 +73,64 @@ func TestStreamContentReducerSubAgentKeepsImmediateThinkingDeltaAndFinalText(t *
 	}
 }
 
+func TestStreamContentReducerRollbackDropsBufferedTextBeforeFinish(t *testing.T) {
+	var events []AgentEvent
+	reducer := streamContentReducer{
+		emit:              func(evt AgentEvent) { events = append(events, evt) },
+		textFlushInterval: time.Hour,
+	}
+
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaText, Text: "first"})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaText, Text: " buffered"})
+	reducer.Rollback()
+	reducer.Finish()
+
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want only first immediate text before rollback: %#v", len(events), events)
+	}
+	if got, ok := events[0].(StreamTextEvent); !ok || got.Text != "first" {
+		t.Fatalf("events[0] = %#v, want first text", events[0])
+	}
+}
+
+func TestLLMStreamReducerRollbackResetsContentBeforeFinish(t *testing.T) {
+	var events []AgentEvent
+	closed := 0
+	rollbacks := 0
+	reducer := &llmStreamReducer{}
+	reducer.content = streamContentReducer{
+		emit:                  func(evt AgentEvent) { events = append(events, evt) },
+		emitThinkingStarted:   true,
+		closeThinkingOnFinish: true,
+		thinkingCommitMode:    streamContentCommitEmpty,
+		onThinkingBlockClosed: func(string, string) { closed++ },
+		textFlushInterval:     time.Hour,
+		thinkingFlushInterval: time.Hour,
+	}
+	reducer.tool = streamToolDeltaReducer{emit: func(evt AgentEvent) { events = append(events, evt) }}
+	reducer.onRollback = func() { rollbacks++ }
+
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaThinking, Text: "failed thought"})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaRollback, Rollback: &message.RollbackDelta{Reason: "interrupted"}})
+	reducer.Finish()
+
+	if rollbacks != 1 {
+		t.Fatalf("rollbacks = %d, want 1", rollbacks)
+	}
+	if closed != 0 {
+		t.Fatalf("closed callbacks = %d, want 0 after rollback", closed)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events len = %d, want ThinkingStartedEvent + StreamRollbackEvent: %#v", len(events), events)
+	}
+	if _, ok := events[0].(ThinkingStartedEvent); !ok {
+		t.Fatalf("events[0] = %T, want ThinkingStartedEvent", events[0])
+	}
+	if rollback, ok := events[1].(StreamRollbackEvent); !ok || rollback.Reason != "interrupted" {
+		t.Fatalf("events[1] = %#v, want rollback event", events[1])
+	}
+}
+
 func TestMainLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	retryErr := errors.New("rate limited")

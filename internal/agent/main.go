@@ -330,6 +330,7 @@ type MainAgent struct {
 	thinkingTranslateMu          sync.Mutex
 	thinkingTranslateSvc         *thinkingtranslate.Service
 	thinkingTranslateSeen        map[string]struct{}
+	thinkingTranslateActive      map[string]*thinkingTranslationJob
 	thinkingTranslateTurnHandled map[uint64]struct{}
 
 	sessionDir          string
@@ -693,7 +694,7 @@ func NewMainAgent(
 	}()
 
 	// Detect Python virtual environment synchronously (just os.Stat, cheap).
-	a.cachedVenvPath = detectVenvPath(workDir)
+	a.cachedVenvPath = detectVenvPath(workDir, projectRoot)
 
 	// Build and install the system prompt (git status may still be in flight;
 	// it will be refreshed once ready via waitGitStatus before the first call).

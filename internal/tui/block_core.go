@@ -75,7 +75,7 @@ func (b *Block) toolExecutionIsRunning() bool {
 	if b == nil || b.ResultDone {
 		return false
 	}
-	return b.ToolExecutionState == "" || b.ToolExecutionState == agent.ToolCallExecutionStateRunning
+	return b.ToolExecutionState == agent.ToolCallExecutionStateRunning
 }
 
 func (b *Block) toolExecutionIsQueued() bool {
