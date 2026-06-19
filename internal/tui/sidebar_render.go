@@ -260,6 +260,8 @@ func (s Sidebar) buildLines(innerWidth int) []string {
 			if statStr != "" {
 				statW = lipgloss.Width(statStr)
 			}
+			// Reserve the 2-space indent, plus the separator and stats width only
+			// when stats are present. Prioritize complete stats over long filenames.
 			nameW := innerWidth - 2
 			if statStr != "" {
 				nameW -= statW + 1

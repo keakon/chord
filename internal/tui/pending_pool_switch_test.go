@@ -108,7 +108,7 @@ func TestBusyPoolSwitchSubmitsImmediatelyToAgent(t *testing.T) {
 func TestBusyPoolSwitchShowsPoolTransitionOnly(t *testing.T) {
 	m, backend := newPoolSwitchModel()
 	backend.mainModelPoolNames = []string{"slow", "fast"}
-	backend.poolNamesByFocus = map[string][]string{"": []string{"slow", "fast"}}
+	backend.poolNamesByFocus = map[string][]string{"": {"slow", "fast"}}
 	backend.mainModelPool = "slow"
 	backend.currentPoolByFocus = map[string]string{"": "slow"}
 	backend.providerModelRef = "fast-provider/gpt-5.5"
@@ -140,7 +140,7 @@ func TestBusyPoolSwitchShowsPoolTransitionOnly(t *testing.T) {
 func TestBusyPoolSwitchClearsTransitionWhenFallbackReachesTargetPool(t *testing.T) {
 	m, backend := newPoolSwitchModel()
 	backend.mainModelPoolNames = []string{"slow", "fast"}
-	backend.poolNamesByFocus = map[string][]string{"": []string{"slow", "fast"}}
+	backend.poolNamesByFocus = map[string][]string{"": {"slow", "fast"}}
 	backend.mainModelPool = "slow"
 	backend.currentPoolByFocus = map[string]string{"": "slow"}
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
@@ -211,7 +211,7 @@ func TestBusyPoolSwitchBackToOriginBeforeRunningModelMovesClearsTransition(t *te
 func TestIdlePoolSwitchDoesNotShowPoolTransition(t *testing.T) {
 	m, backend := newPoolSwitchModel()
 	backend.mainModelPoolNames = []string{"slow", "fast"}
-	backend.poolNamesByFocus = map[string][]string{"": []string{"slow", "fast"}}
+	backend.poolNamesByFocus = map[string][]string{"": {"slow", "fast"}}
 	backend.mainModelPool = "slow"
 	backend.currentPoolByFocus = map[string]string{"": "slow"}
 	backend.providerModelRef = "fast-provider/gpt-5.5"

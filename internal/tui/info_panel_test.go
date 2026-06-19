@@ -775,13 +775,62 @@ func TestRenderInfoPanelUsageStandardWidthShowsCostOnSeparateLine(t *testing.T) 
 		}
 	}
 	if summaryIdx < 0 {
-		t.Fatalf("usage lines = %#v, want token summary %q", usageLines, wantSummary)
+		t.Fatalf("usage section should contain summary line %q; got %#v", wantSummary, usageLines)
 	}
 	if costIdx < 0 {
-		t.Fatalf("usage lines = %#v, want separate cost line %q", usageLines, wantCost)
+		t.Fatalf("usage section should contain cost line %q; got %#v", wantCost, usageLines)
 	}
-	if costIdx <= summaryIdx {
-		t.Fatalf("usage lines = %#v, want cost line after token summary", usageLines)
+	if costIdx != summaryIdx+1 {
+		t.Fatalf("cost line should be immediately after summary; got summary=%d cost=%d", summaryIdx, costIdx)
+	}
+}
+
+func TestRenderInfoPanelUsageShowsReasoningTokensSeparately(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.usage = analytics.SessionStats{
+		InputTokens:     1_200_000,
+		OutputTokens:    45_000,
+		ReasoningTokens: 350_000,
+		EstimatedCost:   0.8765,
+	}
+
+	m := NewModel(backend)
+	usageLines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(40, 20)), "USAGE")
+
+	// Should have: TOKENS, summary line, Think line, cost line
+	wantSummary := "↑ 1.2M  ↓ 45.0k"
+	wantThinking := "Think    350.0k"
+	wantCost := "$ 0.8765"
+
+	summaryIdx := -1
+	thinkingIdx := -1
+	costIdx := -1
+	for i, line := range usageLines {
+		if line == wantSummary {
+			summaryIdx = i
+		}
+		if line == wantThinking {
+			thinkingIdx = i
+		}
+		if line == wantCost {
+			costIdx = i
+		}
+	}
+
+	if summaryIdx < 0 {
+		t.Fatalf("usage section should contain summary line %q; got %#v", wantSummary, usageLines)
+	}
+	if thinkingIdx < 0 {
+		t.Fatalf("usage section should contain thinking line %q; got %#v", wantThinking, usageLines)
+	}
+	if costIdx < 0 {
+		t.Fatalf("usage section should contain cost line %q; got %#v", wantCost, usageLines)
+	}
+	if thinkingIdx != summaryIdx+1 {
+		t.Fatalf("thinking line should be immediately after summary; got summary=%d thinking=%d", summaryIdx, thinkingIdx)
+	}
+	if costIdx != thinkingIdx+1 {
+		t.Fatalf("cost line should be immediately after thinking; got thinking=%d cost=%d", thinkingIdx, costIdx)
 	}
 }
 

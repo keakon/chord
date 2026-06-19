@@ -514,7 +514,8 @@ func renderRichMarkdownContentWithCodeFenceTheme(content string, width int, hl *
 
 	for _, seg := range segments {
 		if seg.code {
-			segLines, _, _ := renderCodeFence(seg, content, min(width, maxTextWidth), 0, hl, theme)
+			// Use 2-space continuation indent so long lines wrap instead of overflowing
+			segLines, _, _ := renderCodeFence(seg, content, min(width, maxTextWidth), 2, hl, theme)
 			appendSegment(segLines)
 			continue
 		}

@@ -1042,6 +1042,59 @@ func TestAtMentionFileRefsPrefersFullCandidateBeforeProseDelimiterFallback(t *te
 	}
 }
 
+func TestAtMentionFileRefsPunctuationBoundaries(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "notes.md"), "content")
+
+	// Various punctuation marks should all be recognized as valid boundaries
+	cases := []string{
+		"path: @notes.md",       // ASCII colon
+		"文件：@notes.md",          // Full-width colon
+		"另见、@notes.md",          // Full-width comma
+		"详情。@notes.md",          // Full-width period
+		"see, @notes.md",        // ASCII comma
+		"note. @notes.md",       // ASCII period
+		"ref; @notes.md",        // ASCII semicolon
+		"(@notes.md)",           // Parentheses
+		"[@notes.md]",           // Brackets
+		"{@notes.md}",           // Braces
+		"\"@notes.md\"",         // Quotes
+		"'@notes.md'",           // Single quotes
+		"\u201c@notes.md\u201d", // Full-width quotes (as escaped runes)
+		"see @notes.md",         // Space (existing)
+		"\n@notes.md",           // Newline (existing)
+		"\t@notes.md",           // Tab (existing)
+	}
+	for _, text := range cases {
+		got := atMentionFileRefs([]string{text}, wd)
+		want := []string{"notes.md"}
+		if !slices.Equal(got, want) {
+			t.Errorf("atMentionFileRefs(%q) = %#v, want %#v", text, got, want)
+		}
+	}
+}
+
+func TestAtMentionFileRefsRejectsIdentifierPrefix(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "something.txt"), "content")
+	mustWriteFile(t, filepath.Join(wd, "file.md"), "content")
+
+	// @mentions that are part of identifiers should be rejected
+	// even when files with those names exist
+	cases := []string{
+		"user@something.txt",   // email-like
+		"package@file.md",      // version-like
+		"my_var@something.txt", // identifier with underscore
+		"func123@file.md",      // identifier with digits
+	}
+	for _, text := range cases {
+		got := atMentionFileRefs([]string{text}, wd)
+		if len(got) > 0 {
+			t.Errorf("atMentionFileRefs(%q) = %#v, want empty (should reject identifier prefix)", text, got)
+		}
+	}
+}
+
 func TestAtMentionFileRefsSkipsRemovedComposerReference(t *testing.T) {
 	wd := t.TempDir()
 	mustWriteFile(t, filepath.Join(wd, "keep.txt"), "keep")

@@ -190,7 +190,9 @@ func hasAtMentionBoundaryBefore(text string, start int) bool {
 	if r == utf8.RuneError {
 		return false
 	}
-	return unicode.IsSpace(r) || strings.ContainsRune("([<{\"'“‘", r)
+	// Only reject @mentions that are clearly part of an identifier (email, package@version, decorator, etc.)
+	// All other characters (punctuation, whitespace, symbols) are treated as valid boundaries.
+	return !(unicode.IsLetter(r) || unicode.IsNumber(r) || r == '_')
 }
 
 func atMentionCandidateExists(candidate, workingDir string, tried map[string]bool) bool {

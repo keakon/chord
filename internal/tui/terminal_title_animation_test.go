@@ -51,6 +51,43 @@ func TestRequestProgressStartsTerminalTitleTicker(t *testing.T) {
 	}
 }
 
+func TestBackgroundRequestProgressDoesNotRestartTerminalTitleTicker(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+	m.terminalTitleBase = "Background request progress"
+
+	first := m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{
+		AgentID: "main",
+		Bytes:   128 * 1024,
+		Events:  42,
+	}})
+	if first == nil {
+		t.Fatal("initial request progress should schedule animation work")
+	}
+	if !m.terminalTitleTickRunning {
+		t.Fatal("initial request progress should start terminal title ticker")
+	}
+	if got := m.terminalTitleTickGeneration; got != 1 {
+		t.Fatalf("ticker generation after start = %d, want 1", got)
+	}
+
+	second := m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{
+		AgentID: "main",
+		Bytes:   256 * 1024,
+		Events:  84,
+	}})
+	if second == nil {
+		t.Fatal("follow-up request progress should still be handled")
+	}
+	if got := m.terminalTitleTickGeneration; got != 1 {
+		t.Fatalf("ticker generation after repeated progress = %d, want 1", got)
+	}
+	if got := m.terminalTitleTickerDelay; got != backgroundTitleSpinnerCadence {
+		t.Fatalf("ticker delay = %s, want %s", got, backgroundTitleSpinnerCadence)
+	}
+}
+
 func TestHandleBlurMsgKeepsBackgroundActiveTitleTickerForBusyAgent(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateForeground
@@ -58,12 +95,21 @@ func TestHandleBlurMsgKeepsBackgroundActiveTitleTickerForBusyAgent(t *testing.T)
 	m.terminalTitleBase = "background busy"
 	m.animRunning = true
 	m.terminalTitleTickRunning = true
+	m.terminalTitleTickGeneration = 3
+	m.terminalTitleTickerMode = terminalTitleModeSpinner
+	m.terminalTitleTickerDelay = titleSpinnerCadence
 
 	if cmd := m.handleBlurMsg(); cmd != nil {
 		_ = cmd()
 	}
 	if !m.terminalTitleTickRunning {
 		t.Fatal("background-active blur should keep title ticker running at low cadence")
+	}
+	if got := m.terminalTitleTickGeneration; got != 5 {
+		t.Fatalf("ticker generation after blur = %d, want 5 after restart", got)
+	}
+	if got := m.terminalTitleTickerDelay; got != backgroundTitleSpinnerCadence {
+		t.Fatalf("ticker delay after blur = %s, want %s", got, backgroundTitleSpinnerCadence)
 	}
 }
 

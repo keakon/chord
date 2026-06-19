@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -264,6 +265,7 @@ func (s *Sidebar) AddFileDelete(agentID, filePath string) {
 
 func (s *Sidebar) addFileChange(agentID, filePath string, added, removed int, deleted bool) {
 	agentID = normalizeSidebarAgentID(agentID)
+	filePath = filepath.Clean(filePath)
 	for i := range s.agents {
 		if s.agents[i].ID != agentID {
 			continue

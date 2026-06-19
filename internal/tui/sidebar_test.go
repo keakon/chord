@@ -244,3 +244,47 @@ func TestSidebarCompletedStatusUsesDoneSemantics(t *testing.T) {
 		t.Fatalf("sidebar should render completed as done semantics, got:\n%s", stripANSI(joined))
 	}
 }
+
+func TestSidebarNormalizesFilePathsForDuplicateDetection(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update(nil, "main", "builder")
+
+	// Add the same file with different path representations
+	sidebar.AddFileEdit("main", "test.go", 5, 2)
+	sidebar.AddFileEdit("main", "./test.go", 3, 1)
+	sidebar.AddFileEdit("main", "./././test.go", 2, 0)
+
+	edits := sidebar.agents[0].EditedFiles
+	if got := len(edits); got != 1 {
+		t.Fatalf("edited files = %d, want 1 (paths should be normalized and merged)", got)
+	}
+	if edits[0].Path != "test.go" {
+		t.Fatalf("normalized path = %q, want %q", edits[0].Path, "test.go")
+	}
+	// Stats should be accumulated
+	if edits[0].Added != 10 || edits[0].Removed != 3 {
+		t.Fatalf("accumulated diff stats = +%d -%d, want +10 -3", edits[0].Added, edits[0].Removed)
+	}
+}
+
+func TestSidebarNormalizesDeletePathToMatchEditPath(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update(nil, "main", "builder")
+
+	// Edit with one path form
+	sidebar.AddFileEdit("main", "./src/main.go", 5, 2)
+	// Delete with a different but equivalent path form
+	sidebar.AddFileDelete("main", "src/main.go")
+
+	edits := sidebar.agents[0].EditedFiles
+	if got := len(edits); got != 1 {
+		t.Fatalf("edited files = %d, want 1 (paths should be normalized)", got)
+	}
+	if !edits[0].Deleted {
+		t.Fatalf("deleted flag = false, want true")
+	}
+	// Stats from edit should be preserved
+	if edits[0].Added != 5 || edits[0].Removed != 2 {
+		t.Fatalf("diff stats = +%d -%d, want +5 -2", edits[0].Added, edits[0].Removed)
+	}
+}

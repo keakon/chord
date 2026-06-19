@@ -36,6 +36,11 @@ const (
 // terminalTitleTickMsg is sent when the terminal title ticker fires.
 type terminalTitleTickMsg struct{ generation uint64 }
 
+type terminalTitleDesiredState struct {
+	mode        terminalTitleMode
+	tickerDelay time.Duration
+}
+
 // deriveTerminalTitle extracts a short title from the first user message.
 // It collapses whitespace, strips control characters, and truncates to a
 // sensible length for tab bars.
@@ -129,92 +134,65 @@ func normalizeTitleAgentID(agentID string) string {
 	return agentID
 }
 
-func (m *Model) currentTitleMode() terminalTitleMode {
+func (m *Model) deriveTerminalTitleState() terminalTitleDesiredState {
 	if m == nil {
-		return terminalTitleModeStatic
+		return terminalTitleDesiredState{mode: terminalTitleModeStatic}
 	}
 	if m.terminalTitleNeedsUserResponse() {
-		return terminalTitleModeRequest
+		state := terminalTitleDesiredState{mode: terminalTitleModeRequest}
+		if m.displayState != stateForeground && !m.terminalTitleRequestSeen {
+			state.tickerDelay = backgroundActiveCadence.titleTickerDelay
+		}
+		return state
 	}
 	if m.terminalTitleBackgroundCompletedAgentID != "" {
-		return terminalTitleModeCompletion
+		return terminalTitleDesiredState{mode: terminalTitleModeCompletion}
 	}
 	if m.hasActiveAnimation() {
-		return terminalTitleModeSpinner
+		return terminalTitleDesiredState{mode: terminalTitleModeSpinner, tickerDelay: m.currentCadence().titleTickerDelay}
 	}
-	return terminalTitleModeStatic
+	return terminalTitleDesiredState{mode: terminalTitleModeStatic}
+}
+
+func (m *Model) currentTitleMode() terminalTitleMode {
+	return m.deriveTerminalTitleState().mode
+}
+
+func (m *Model) currentTitleTickerDelay() time.Duration {
+	return m.deriveTerminalTitleState().tickerDelay
 }
 
 func (m *Model) syncTerminalTitleState() tea.Cmd {
 	if m == nil {
 		return nil
 	}
-	switch m.currentTitleMode() {
-	case terminalTitleModeSpinner:
-		return m.syncTerminalTitleTickerWithCadence()
-	case terminalTitleModeRequest:
-		if m.currentTitleTickerDelay() <= 0 {
-			m.stopTerminalTitleTicker()
-			m.setTerminalTitle(terminalTitleModeRequest)
-			return nil
-		}
-		if !m.terminalTitleTickRunning {
-			return m.startTerminalTitleTicker()
-		}
-		m.setTerminalTitle(terminalTitleModeRequest)
-		return nil
-	case terminalTitleModeCompletion:
-		m.stopTerminalTitleTicker()
-		m.setTerminalTitle(terminalTitleModeCompletion)
-		return nil
-	default:
-		m.stopTerminalTitleTicker()
-		m.setTerminalTitle(terminalTitleModeStatic)
-		return nil
-	}
+	return m.reconcileTerminalTitleState(m.deriveTerminalTitleState())
 }
 
-func (m *Model) currentTitleTickerDelay() time.Duration {
-	if m == nil {
-		return 0
-	}
-	if m.terminalTitleNeedsUserResponse() {
-		if m.displayState == stateForeground || m.terminalTitleRequestSeen {
-			return 0
-		}
-		return backgroundActiveCadence.titleTickerDelay
-	}
-	return m.currentCadence().titleTickerDelay
-}
-
-func (m *Model) syncTerminalTitleTickerWithCadence() tea.Cmd {
+func (m *Model) reconcileTerminalTitleState(desired terminalTitleDesiredState) tea.Cmd {
 	if m == nil {
 		return nil
 	}
-	if m.terminalTitleNeedsUserResponse() {
-		return nil
-	}
-	delay := m.currentTitleTickerDelay()
-	if delay <= 0 || !m.hasActiveAnimation() || m.currentTitleMode() != terminalTitleModeSpinner {
+	if desired.tickerDelay <= 0 {
 		m.stopTerminalTitleTicker()
+		m.setTerminalTitle(desired.mode)
 		return nil
 	}
-	// Always bounce the ticker through stop+start rather than early-returning
-	// when it happens to already be running. The previous behaviour silently
-	// skipped a restart after activity toggled through a non-animated state
-	// (e.g. Compacting) and back, leaving the terminal title frozen on a
-	// static frame because the in-flight tick command had been stale-gated by
-	// the generation counter bump in stopTerminalTitleTicker. Stop+start is
-	// cheap (two OSC writes) and guarantees the next tick chain is live.
+	if m.terminalTitleTickRunning && m.terminalTitleTickerMode == desired.mode && m.terminalTitleTickerDelay == desired.tickerDelay {
+		m.setTerminalTitle(desired.mode)
+		return nil
+	}
+	// Bounce the ticker only when the effective title animation configuration
+	// changes. This keeps lifecycle decisions local to a single reconcile step,
+	// so call sites only need to signal that title state may have changed.
 	m.stopTerminalTitleTicker()
-	return m.startTerminalTitleTicker()
+	return m.startTerminalTitleTicker(desired)
 }
 
 // startTerminalTitleTicker begins the independent title spinner ticker.
 // Returns a tea.Cmd that should be batched into the Update return.
-func (m *Model) startTerminalTitleTicker() tea.Cmd {
-	delay := m.currentTitleTickerDelay()
-	if delay <= 0 {
+func (m *Model) startTerminalTitleTicker(desired terminalTitleDesiredState) tea.Cmd {
+	if desired.tickerDelay <= 0 {
 		m.stopTerminalTitleTicker()
 		return nil
 	}
@@ -223,21 +201,27 @@ func (m *Model) startTerminalTitleTicker() tea.Cmd {
 	}
 	m.terminalTitleTickRunning = true
 	m.terminalTitleTickGeneration++
+	m.terminalTitleTickerMode = desired.mode
+	m.terminalTitleTickerDelay = desired.tickerDelay
 	gen := m.terminalTitleTickGeneration
 	m.terminalTitleRequestBlinkOff = false
 	// Write initial title frame immediately.
-	m.setTerminalTitle(m.currentTitleMode())
+	m.setTerminalTitle(desired.mode)
 	// Return the first tick command.
-	return terminalTitleTickCmd(gen, delay)
+	return terminalTitleTickCmd(gen, desired.tickerDelay)
 }
 
 // stopTerminalTitleTicker stops the title spinner and writes a final static title.
 func (m *Model) stopTerminalTitleTicker() {
 	if !m.terminalTitleTickRunning {
+		m.terminalTitleTickerMode = terminalTitleModeStatic
+		m.terminalTitleTickerDelay = 0
 		return
 	}
 	m.terminalTitleTickRunning = false
 	m.terminalTitleTickGeneration++
+	m.terminalTitleTickerMode = terminalTitleModeStatic
+	m.terminalTitleTickerDelay = 0
 	m.terminalTitleRequestBlinkOff = false
 	m.setTerminalTitle(m.currentTitleMode())
 }

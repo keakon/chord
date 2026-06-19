@@ -272,10 +272,14 @@ func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"write cmd/demo/main.go", "Successfully wrote 12 lines", "1  package main", "10  \\tfmt.Println", "2 more lines", "[space] toggle expand/collapse"} {
+	for _, want := range []string{"write cmd/demo/main.go", "1  package main", "10  \\tfmt.Println", "2 more lines", "[space] toggle expand/collapse"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected collapsed Write preview to contain %q; got:\n%s", want, plain)
 		}
+	}
+	// The "Successfully wrote X lines" message should be hidden as the content preview is sufficient
+	if strings.Contains(plain, "Successfully wrote 12 lines") {
+		t.Fatalf("expected collapsed Write preview to hide 'Successfully wrote' message; got:\n%s", plain)
 	}
 	if strings.Contains(plain, "11  \\tfmt.Println") || strings.Contains(plain, "12  }") {
 		t.Fatalf("expected collapsed Write preview to hide lines after 10; got:\n%s", plain)
@@ -1672,6 +1676,60 @@ func TestGrepHeaderShowsRelativeSearchPathInsideWorkingDir(t *testing.T) {
 	}
 	if strings.Contains(joined, abs) {
 		t.Fatalf("did not expect grep header to show absolute path; got:\n%s", joined)
+	}
+}
+
+func TestGrepHeaderHidesCurrentWorkingDirPath(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          "grep",
+		Content:           fmt.Sprintf(`{"pattern":"TODO","paths":[%q],"includes":["*.go"]}`, wd),
+		ResultDone:        true,
+		displayWorkingDir: wd,
+	}
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "grep TODO (includes=*.go)") {
+		t.Fatalf("expected grep header to hide current working directory path; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "paths=") || strings.Contains(joined, wd) {
+		t.Fatalf("did not expect grep header to show current working directory path; got:\n%s", joined)
+	}
+}
+
+func TestGrepHeaderPrefersPatternAndElidesOptions(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	pattern := `OverlayEvaluate|Evaluate\(|IsDisabled\(|MergedRuleset\(`
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          "grep",
+		Content:           fmt.Sprintf(`{"pattern":%q,"paths":[%q],"includes":["internal/permission/*.go","internal/agent/*.go"]}`, pattern, wd),
+		ResultDone:        true,
+		displayWorkingDir: wd,
+	}
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, pattern) {
+		t.Fatalf("expected grep header to keep full pattern before options; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "paths=") || strings.Contains(joined, wd) {
+		t.Fatalf("did not expect grep header to show current working directory path; got:\n%s", joined)
+	}
+}
+
+func TestGenericToolCardHeaderCanUseWideViewport(t *testing.T) {
+	pattern := strings.Repeat("a", maxTextWidth+20)
+	block := &Block{
+		ID:         1,
+		Type:       BlockToolCall,
+		ToolName:   "grep",
+		Content:    fmt.Sprintf(`{"pattern":%q}`, pattern),
+		ResultDone: true,
+	}
+	joined := stripANSI(strings.Join(block.Render(maxTextWidth+100, ""), "\n"))
+	if !strings.Contains(joined, strings.Repeat("a", maxTextWidth+20)) {
+		t.Fatalf("expected grep header to use wide viewport beyond text cap; got:\n%s", joined)
 	}
 }
 

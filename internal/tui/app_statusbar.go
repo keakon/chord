@@ -425,7 +425,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	snap := inputs.Snapshot
 	statusActivity := inputs.StatusActivity
 	usage := snap.tokenUsage
-	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%f|%d|%d|%t|%d|%d|%d|%d|%t",
+	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%d|%f|%d|%d|%t|%d|%d|%d|%d|%t",
 		inputs.Width,
 		inputs.Height,
 		m.mode,
@@ -454,6 +454,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		inputs.LocalShellPending,
 		usage.InputTokens,
 		usage.OutputTokens,
+		usage.ReasoningTokens,
 		snap.cost,
 		snap.contextCurrent,
 		snap.contextLimit,

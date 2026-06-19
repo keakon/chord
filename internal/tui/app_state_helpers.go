@@ -34,6 +34,8 @@ type renderRuntimeState struct {
 	statusBarTickScheduled           bool
 	terminalTitleTickRunning         bool
 	terminalTitleTickGeneration      uint64
+	terminalTitleTickerMode          terminalTitleMode
+	terminalTitleTickerDelay         time.Duration
 	terminalTitleRequestBlinkOff     bool
 	terminalTitleRequestSeen         bool
 	startupDeferredTranscript        *startupDeferredTranscriptState

@@ -33,12 +33,12 @@ func (m *Model) handleTerminalTitleTick(msg terminalTitleTickMsg) tea.Cmd {
 	if !m.terminalTitleTickRunning || msg.generation != m.terminalTitleTickGeneration {
 		return nil
 	}
-	delay := m.currentTitleTickerDelay()
-	if delay <= 0 {
+	desired := m.deriveTerminalTitleState()
+	if desired.tickerDelay <= 0 {
 		m.stopTerminalTitleTicker()
 		return nil
 	}
-	switch m.currentTitleMode() {
+	switch desired.mode {
 	case terminalTitleModeSpinner:
 		m.setTerminalTitle(terminalTitleModeSpinner)
 	case terminalTitleModeRequest:
@@ -48,7 +48,7 @@ func (m *Model) handleTerminalTitleTick(msg terminalTitleTickMsg) tea.Cmd {
 		m.stopTerminalTitleTicker()
 		return nil
 	}
-	return terminalTitleTickCmd(m.terminalTitleTickGeneration, delay)
+	return terminalTitleTickCmd(m.terminalTitleTickGeneration, desired.tickerDelay)
 }
 
 func (m *Model) handleAnimTick(msg animTickMsg) tea.Cmd {
