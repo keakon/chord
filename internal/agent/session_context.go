@@ -24,7 +24,7 @@ func buildSessionContextReminder(agentsMD string, now time.Time) string {
 
 	var sb strings.Builder
 	if hasAgentsMD {
-		sb.WriteString("<system-reminder>\nThe following repository instructions are from AGENTS.md. Read and follow them as durable workspace guidance unless they conflict with higher-priority system, developer, or user instructions.\n\n")
+		sb.WriteString("<system-reminder>\nThe following repository instructions are the complete applicable AGENTS.md contents for this workspace session. They were discovered by walking from the current working directory up to the project root, then injected in project-root-to-current-working-directory order. Each loaded section is labeled with its path relative to the current working directory. This is an internal meta message injected before the first real user message and may not appear in the visible transcript. Read and follow these instructions as durable workspace guidance unless they conflict with higher-priority system, developer, or user instructions.\n\n")
 	} else {
 		sb.WriteString("<system-reminder>\nAs you answer the user's questions, you can use the following context:\n")
 	}
@@ -40,7 +40,7 @@ func buildSessionContextReminder(agentsMD string, now time.Time) string {
 		fmt.Fprintf(&sb, "Today's date is %s.\n", now.Format("2006-01-02"))
 	}
 	if hasAgentsMD {
-		sb.WriteString("\n      IMPORTANT: The AGENTS.md instructions above are durable workspace guidance. Use supplemental context such as the current date only when relevant to the task.\n</system-reminder>")
+		sb.WriteString("\n      IMPORTANT: The AGENTS.md instructions above are durable workspace guidance and system-provided workspace context, not ordinary user content. Use supplemental context such as the current date only when relevant to the task.\n</system-reminder>")
 	} else {
 		sb.WriteString("\n      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>")
 	}

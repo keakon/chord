@@ -39,8 +39,17 @@ func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
 	if got == "" {
 		t.Fatal("expected non-empty reminder")
 	}
-	if !strings.Contains(got, "repository instructions are from AGENTS.md") {
+	if !strings.Contains(got, "complete applicable AGENTS.md contents") {
 		t.Errorf("missing AGENTS.md source line: %q", got)
+	}
+	if !strings.Contains(got, "walking from the current working directory up to the project root") || !strings.Contains(got, "project-root-to-current-working-directory order") {
+		t.Errorf("missing AGENTS.md loading scope: %q", got)
+	}
+	if !strings.Contains(got, "Each loaded section is labeled with its path relative to the current working directory") {
+		t.Errorf("missing AGENTS.md section path labeling: %q", got)
+	}
+	if !strings.Contains(got, "internal meta message injected before the first real user message") || !strings.Contains(got, "may not appear in the visible transcript") {
+		t.Errorf("missing internal injection visibility boundary: %q", got)
 	}
 	if !strings.Contains(got, "\n\nproject rules body\n") {
 		t.Errorf("missing AGENTS.md body without extra section title: %q", got)
@@ -54,7 +63,7 @@ func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
 	if strings.Contains(got, "may or may not be relevant") {
 		t.Errorf("AGENTS.md reminder should not weaken repository instructions as optional context: %q", got)
 	}
-	if !strings.Contains(got, "The AGENTS.md instructions above are durable workspace guidance") {
+	if !strings.Contains(got, "The AGENTS.md instructions above are durable workspace guidance and system-provided workspace context, not ordinary user content") {
 		t.Errorf("missing AGENTS.md durability reminder: %q", got)
 	}
 }
@@ -85,8 +94,11 @@ func TestCallLLMInjectsAgentsMDReminderIntoFirstProviderRequest(t *testing.T) {
 	if len(seen) < 2 {
 		t.Fatalf("provider messages = %#v, want reminder plus user message", seen)
 	}
-	if seen[0].Role != "user" || !strings.Contains(seen[0].Content, "The following repository instructions are from AGENTS.md") || !strings.Contains(seen[0].Content, "# Repo Rules") {
+	if seen[0].Role != "user" || !strings.Contains(seen[0].Content, "The following repository instructions are the complete applicable AGENTS.md contents") || !strings.Contains(seen[0].Content, "# Repo Rules") {
 		t.Fatalf("first provider message missing AGENTS.md reminder: %#v", seen[0])
+	}
+	if !strings.Contains(seen[0].Content, "may not appear in the visible transcript") {
+		t.Fatalf("first provider message should explain transcript visibility boundary: %#v", seen[0])
 	}
 	if got := seen[1].Content; !strings.Contains(got, "analyze hardcoded behavior") {
 		t.Fatalf("actual user message = %q, want original content preserved after reminder", got)
