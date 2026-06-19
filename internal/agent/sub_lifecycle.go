@@ -74,43 +74,20 @@ func (s *SubAgent) drainPendingToolFailureSets(err error) (emit []PendingToolCal
 }
 
 func (s *SubAgent) persistInterruptedToolResults(calls []PendingToolCall, status ToolResultStatus, cause error) int {
-	if len(calls) == 0 {
-		return 0
-	}
-	orig := len(calls)
-	calls = filterPendingCallsForDeclaredTools(s.ctxMgr, calls)
-	if len(calls) < orig {
-		log.Warnf("SubAgent: skipping synthetic tool persistence for call_ids absent from assistant history agent=%v dropped=%v", s.instanceID, orig-len(calls))
-	}
-	if len(calls) == 0 {
-		return 0
-	}
-	msgText := toolCallFailureMessage(cause)
-	if status == ToolResultStatusCancelled {
-		msgText = "Cancelled"
-	}
-
-	persisted := 0
-	for _, call := range calls {
-		toolMsg := message.Message{
-			Role:       "tool",
-			ToolCallID: call.CallID,
-			Content:    msgText,
-			ToolStatus: string(status),
-			Audit:      call.Audit.Clone(),
-		}
-		s.ctxMgr.Append(toolMsg)
-		if s.recovery != nil {
-			if err := s.recovery.PersistMessage(s.instanceID, toolMsg); err != nil {
-				log.Warnf("SubAgent: failed to persist interrupted tool result agent=%v call_id=%v error=%v", s.instanceID, call.CallID, err)
-			} else {
-				persisted++
+	return persistInterruptedToolResultsInto(s.ctxMgr, calls, status, cause,
+		func(dropped int) {
+			log.Warnf("SubAgent: skipping synthetic tool persistence for call_ids absent from assistant history agent=%v dropped=%v", s.instanceID, dropped)
+		},
+		func(toolMsg message.Message) bool {
+			if s.recovery != nil {
+				if err := s.recovery.PersistMessage(s.instanceID, toolMsg); err != nil {
+					log.Warnf("SubAgent: failed to persist interrupted tool result agent=%v call_id=%v error=%v", s.instanceID, toolMsg.ToolCallID, err)
+					return false
+				}
 			}
-			continue
-		}
-		persisted++
-	}
-	return persisted
+			return true
+		},
+	)
 }
 
 // CancelCurrentTurn cancels the SubAgent's active turn and persists synthetic

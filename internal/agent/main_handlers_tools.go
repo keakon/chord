@@ -100,14 +100,30 @@ func splitPendingCallsByDeclaredTools(m *ctxmgr.Manager, calls []PendingToolCall
 	return declared, undeclared
 }
 
-func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, status ToolResultStatus, cause error) int {
+// persistInterruptedToolResultsInto is the shared core behind both
+// MainAgent.persistInterruptedToolResults and its SubAgent counterpart. It
+// appends a synthetic terminal tool message for the declared subset of calls to
+// ctxMgr and durably writes each via persist, returning the number counted as
+// persisted (persist reports per-message whether it should count). logSkip is
+// invoked once with the number of calls dropped for being absent from the
+// assistant history. Keeping this logic in one place means the subtle bits
+// (declared-only filtering, Cancelled vs failure text, Audit cloning) cannot
+// drift between the two agent kinds.
+func persistInterruptedToolResultsInto(
+	ctxMgr *ctxmgr.Manager,
+	calls []PendingToolCall,
+	status ToolResultStatus,
+	cause error,
+	logSkip func(dropped int),
+	persist func(message.Message) bool,
+) int {
 	if len(calls) == 0 {
 		return 0
 	}
 	orig := len(calls)
-	calls = filterPendingCallsForDeclaredTools(a.ctxMgr, calls)
-	if len(calls) < orig {
-		log.Warnf("skipping synthetic tool persistence for call_ids absent from assistant history dropped=%v", orig-len(calls))
+	calls = filterPendingCallsForDeclaredTools(ctxMgr, calls)
+	if len(calls) < orig && logSkip != nil {
+		logSkip(orig - len(calls))
 	}
 	if len(calls) == 0 {
 		return 0
@@ -126,13 +142,26 @@ func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, statu
 			ToolStatus: string(status),
 			Audit:      call.Audit.Clone(),
 		}
-		a.ctxMgr.Append(toolMsg)
-		if a.recovery != nil {
-			a.persistAsync(identity.MainAgentID, toolMsg)
+		ctxMgr.Append(toolMsg)
+		if persist(toolMsg) {
+			persisted++
 		}
-		persisted++
 	}
 	return persisted
+}
+
+func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, status ToolResultStatus, cause error) int {
+	return persistInterruptedToolResultsInto(a.ctxMgr, calls, status, cause,
+		func(dropped int) {
+			log.Warnf("skipping synthetic tool persistence for call_ids absent from assistant history dropped=%v", dropped)
+		},
+		func(toolMsg message.Message) bool {
+			if a.recovery != nil {
+				a.persistAsync(identity.MainAgentID, toolMsg)
+			}
+			return true
+		},
+	)
 }
 
 func todoWriteArgsAllDone(argsJSON string) bool {
