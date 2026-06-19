@@ -72,7 +72,7 @@ curl -I https://api.openai.com/v1
 
 对于按官方 API 语义工作的 provider 端点，HTTP 400 通常表示请求本身无效，Chord 会停止而不是反复重试同一个错误请求。这类 provider 请设置 `official_api: true`。如果是聚合或代理网关，并希望 Chord 把未知 400 视为可能可恢复的网关错误，请设置 `official_api: false` 或不配置该字段。`preset: codex` 的 provider 会自动按官方 API 处理。
 
-对于非官方 OpenAI-compatible 网关，Chord 会把未知 HTTP 400 视为可能来自坏掉的上游 channel 或被包装的 provider 错误。当前 key 会进入最多 1 分钟的短冷却，然后 Chord 可以尝试其它 key、model 或下一轮重试。已知的请求形状错误，例如缺少参数或非法 assistant message 形状，仍会立即停止。
+对于非官方 OpenAI-compatible 网关，Chord 不会仅凭 HTTP 400 就认定请求本身有问题。很多网关会把上游过载、限流或 provider 失败统一包装成 400，因此非官方 400 默认会被视为可重试：当前 key 会进入最多 1 分钟的短冷却，然后 Chord 可以尝试其它 key、model 或下一轮重试。只有明确的请求形状错误信号，例如结构化的 `invalid_request` / `invalid_parameter` 代码，或“缺少必需参数”这类清晰文案，才会立即停止。
 
 如果连接建立超时，或在超时前没有收到首 token，Chord 会把当前 key 标记为 recovering，使下一次重试优先选择其它健康 key。
 

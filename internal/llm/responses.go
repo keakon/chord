@@ -360,15 +360,11 @@ func (r *ResponsesProvider) CompleteStream(
 		reqBody.ParallelToolCalls = *ot.ParallelToolCalls
 	}
 
-	effectiveReasoningEffort := ot.ReasoningEffort
-	if normalized, changed := normalizeResponsesReasoningEffort(ot.ReasoningEffort); changed {
-		if normalized == "" {
-			log.Warnf("omitting unsupported reasoning effort for Responses request requested=%v", ot.ReasoningEffort)
-		} else {
-			log.Warnf("normalizing reasoning effort for Responses request requested=%v effective=%v", ot.ReasoningEffort, normalized)
-		}
-		effectiveReasoningEffort = normalized
-	}
+	// The official Codex backend only accepts low/medium/high/xhigh; other
+	// Responses-compatible gateways (e.g. GLM-5.2 relays) support a wider set
+	// including max/minimal/none, which must pass through verbatim.
+	firstPartyCodex := useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport()
+	effectiveReasoningEffort, _ := resolveResponsesReasoningEffort(ot.ReasoningEffort, firstPartyCodex)
 	if maxTokens > 0 {
 		log.Debugf("omitting max_output_tokens for Responses request requested=%v", maxTokens)
 	}

@@ -3696,6 +3696,70 @@ func TestClientCompleteStopsAfterModelIncompatible400WithoutFallback(t *testing.
 	}
 }
 
+func TestClientCompleteRetriesCompatibleOverloaded400(t *testing.T) {
+	primaryCfg := testCompatibleResponsesProviderConfigWithKeys("gateway", "gpt-test", []string{"k1", "k2"})
+	disableRetryDelayForTest(primaryCfg)
+	impl := &scriptedProvider{calls: []scriptedCall{
+		{err: &APIError{StatusCode: 400, Message: "Our servers are currently overloaded. Please try again later."}},
+		{resp: &message.Response{Content: "ok after retry"}},
+	}}
+
+	c := NewClient(primaryCfg, impl, "gpt-test", 4096, "sys")
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.Content != "ok after retry" {
+		t.Fatalf("response = %#v, want ok after retry", resp)
+	}
+	if impl.CallCount() != 2 {
+		t.Fatalf("provider calls = %d, want 2", impl.CallCount())
+	}
+}
+
+func TestClientCompleteRetriesCompatibleOverloaded400BeforeFallbackModel(t *testing.T) {
+	primaryCfg := testCompatibleResponsesProviderConfigWithKeys("gateway", "gpt-test", []string{"k1", "k2"})
+	fallbackCfg := testProviderConfig("fallback", "fallback-model")
+	disableRetryDelayForTest(primaryCfg)
+
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 400, Message: "Our servers are currently overloaded. Please try again later."}},
+		{resp: &message.Response{Content: "ok after second key"}},
+	}
+	fallbackImpl := &recordingProvider{}
+	fallbackImpl.calls = []scriptedCall{{resp: &message.Response{Content: "fallback should not run"}}}
+
+	client := NewClient(primaryCfg, primaryImpl, "gpt-test", 4096, "sys")
+	client.SetFallbackModels([]FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "fallback-model",
+		MaxTokens:      4096,
+		ContextLimit:   128000,
+	}})
+
+	resp, err := client.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.Content != "ok after second key" {
+		t.Fatalf("response = %#v, want ok after second key", resp)
+	}
+	if primaryImpl.CallCount() != 2 {
+		t.Fatalf("primary provider calls = %d, want 2", primaryImpl.CallCount())
+	}
+	if fallbackImpl.CallCount() != 0 {
+		t.Fatalf("fallback provider calls = %d, want 0", fallbackImpl.CallCount())
+	}
+	if got := len(primaryImpl.apiKeys); got != 2 {
+		t.Fatalf("primary api key call count = %d, want 2", got)
+	}
+	if primaryImpl.apiKeys[0] != "k1" || primaryImpl.apiKeys[1] != "k2" {
+		t.Fatalf("primary apiKeys = %#v, want [k1 k2]", primaryImpl.apiKeys)
+	}
+}
+
 func TestClientCompleteStreamStopsAfterModelIncompatible400WhenFallbackPoolExhausted(t *testing.T) {
 	primaryCfg := testProviderConfig("primary-prov", "primary-model")
 	fallbackCfg := testProviderConfig("fallback-prov", "fallback-model")

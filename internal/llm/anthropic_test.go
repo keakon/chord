@@ -14,28 +14,77 @@ import (
 	toolpkg "github.com/keakon/chord/internal/tools"
 )
 
-func TestAnthropicBetaHeaderMergesCompatAndThinking(t *testing.T) {
-	got := anthropicBetaHeader(AnthropicTuning{ThinkingType: "enabled", ThinkingBudget: 1024}, &config.AnthropicTransportCompatConfig{
-		ExtraBeta: []string{
-			"beta-a",
-			"interleaved-thinking-2025-05-14",
-			" beta-b ",
-			"",
-			"beta-a",
-		},
-	})
-	want := "interleaved-thinking-2025-05-14,beta-a,beta-b"
+func TestAnthropicBetaHeaderDefaultAndThinking(t *testing.T) {
+	got := anthropicBetaHeader(AnthropicTuning{ThinkingType: "enabled", ThinkingBudget: 1024}, 200000)
+	want := "claude-code-20250219,interleaved-thinking-2025-05-14"
 	if got != want {
 		t.Fatalf("anthropicBetaHeader() = %q, want %q", got, want)
 	}
 }
 
+func TestStableAnthropicMetadataUserIDPayload_JSONShape(t *testing.T) {
+	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{}, nil)
+	payload := stableAnthropicMetadataUserIDPayload(provider)
+	if payload == "" {
+		t.Fatal("stableAnthropicMetadataUserIDPayload() = empty, want JSON payload")
+	}
+	var got struct {
+		DeviceID    string `json:"device_id"`
+		AccountUUID string `json:"account_uuid"`
+		SessionID   string `json:"session_id"`
+	}
+	if err := json.Unmarshal([]byte(payload), &got); err != nil {
+		t.Fatalf("payload is not valid JSON: %v", err)
+	}
+	if got.DeviceID == "" {
+		t.Fatal("device_id = empty, want stable routing value")
+	}
+	if got.SessionID == "" {
+		t.Fatal("session_id = empty, want stable routing value")
+	}
+	if got.AccountUUID != "" {
+		t.Fatalf("account_uuid = %q, want empty string", got.AccountUUID)
+	}
+}
+
 func TestAnthropicBetaHeaderAdaptiveDoesNotInjectInterleaved(t *testing.T) {
-	got := anthropicBetaHeader(AnthropicTuning{ThinkingType: "adaptive"}, &config.AnthropicTransportCompatConfig{
-		ExtraBeta: []string{"beta-a"},
-	})
-	if got != "beta-a" {
-		t.Fatalf("anthropicBetaHeader() = %q, want beta-a", got)
+	got := anthropicBetaHeader(AnthropicTuning{ThinkingType: "adaptive"}, 200000)
+	want := "claude-code-20250219"
+	if got != want {
+		t.Fatalf("anthropicBetaHeader() = %q, want %q", got, want)
+	}
+}
+
+func TestAnthropicBetaHeaderEffortOnlyWhenConfigured(t *testing.T) {
+	if got := anthropicBetaHeader(AnthropicTuning{}, 200000); strings.Contains(got, "effort-2025-11-24") {
+		t.Fatalf("anthropicBetaHeader() = %q, should not inject effort without a configured level", got)
+	}
+	got := anthropicBetaHeader(AnthropicTuning{ThinkingType: "adaptive", ThinkingEffort: "high"}, 200000)
+	if !strings.Contains(got, "effort-2025-11-24") {
+		t.Fatalf("anthropicBetaHeader() = %q, want effort beta when ThinkingEffort is set", got)
+	}
+}
+
+func TestAnthropicBetaHeaderDoesNotDefaultStructuredOutputs(t *testing.T) {
+	got := anthropicBetaHeader(AnthropicTuning{}, 200000)
+	if strings.Contains(got, "structured-outputs-2025-12-15") {
+		t.Fatalf("anthropicBetaHeader() = %q, should not inject structured outputs without output_format", got)
+	}
+}
+
+func TestAnthropicBetaHeaderContext1MOnlyForMillionTokenModels(t *testing.T) {
+	// Below the 1M window: no context-1m beta.
+	if got := anthropicBetaHeader(AnthropicTuning{}, 200000); strings.Contains(got, "context-1m-2025-08-07") {
+		t.Fatalf("anthropicBetaHeader(200K) = %q, should not inject context-1m", got)
+	}
+	// Exactly 1M: opt in.
+	got := anthropicBetaHeader(AnthropicTuning{}, 1000000)
+	if !strings.Contains(got, "context-1m-2025-08-07") {
+		t.Fatalf("anthropicBetaHeader(1M) = %q, want context-1m", got)
+	}
+	// Unknown/zero limit: stay conservative and omit it.
+	if got := anthropicBetaHeader(AnthropicTuning{}, 0); strings.Contains(got, "context-1m-2025-08-07") {
+		t.Fatalf("anthropicBetaHeader(0) = %q, should not inject context-1m", got)
 	}
 }
 
@@ -149,7 +198,7 @@ func TestConvertToolsWithCache_PreservesInputOrderAndCachesLast(t *testing.T) {
 	}
 }
 
-func TestAnthropicCompleteStreamAppliesTransportCompat(t *testing.T) {
+func TestAnthropicCompleteStreamAppliesDefaultTransportHeaders(t *testing.T) {
 	t.Setenv("CHORD_CONFIG_HOME", "/tmp/chord-config")
 	t.Setenv("USER", "tester")
 
@@ -175,13 +224,6 @@ func TestAnthropicCompleteStreamAppliesTransportCompat(t *testing.T) {
 		Type:      config.ProviderTypeMessages,
 		APIURL:    srv.URL,
 		UserAgent: "ProviderUA/1.0",
-		Compat: &config.ProviderCompatConfig{
-			AnthropicTransport: &config.AnthropicTransportCompatConfig{
-				SystemPrefix:   "[proxy-prefix]\n",
-				ExtraBeta:      []string{"beta-a", "interleaved-thinking-2025-05-14", "beta-b"},
-				MetadataUserID: true,
-			},
-		},
 	}, []string{"test-key"})
 
 	anthropicProvider, err := NewAnthropicProvider(provider, "")
@@ -204,7 +246,7 @@ func TestAnthropicCompleteStreamAppliesTransportCompat(t *testing.T) {
 		t.Fatal("expected forced server error")
 	}
 
-	if got := captured.Header.Get("anthropic-beta"); got != "interleaved-thinking-2025-05-14,beta-a,beta-b" {
+	if got := captured.Header.Get("anthropic-beta"); got != "claude-code-20250219,interleaved-thinking-2025-05-14" {
 		t.Fatalf("anthropic-beta = %q", got)
 	}
 	if got := captured.Header.Get("User-Agent"); got != "ProviderUA/1.0" {
@@ -216,7 +258,7 @@ func TestAnthropicCompleteStreamAppliesTransportCompat(t *testing.T) {
 	if len(captured.Body.System) != 1 {
 		t.Fatalf("expected 1 system block, got %d", len(captured.Body.System))
 	}
-	if got := captured.Body.System[0].Text; got != "[proxy-prefix]\nbase system prompt" {
+	if got := captured.Body.System[0].Text; got != "base system prompt" {
 		t.Fatalf("system block text = %q", got)
 	}
 }
@@ -269,8 +311,8 @@ func TestAnthropicCompleteStreamEncodesAdaptiveThinkingAndAutoCache(t *testing.T
 		t.Fatal("expected forced server error")
 	}
 
-	if got := captured.Header.Get("anthropic-beta"); got != "" {
-		t.Fatalf("anthropic-beta = %q, want empty in adaptive mode", got)
+	if got := captured.Header.Get("anthropic-beta"); got != "claude-code-20250219,effort-2025-11-24" {
+		t.Fatalf("anthropic-beta = %q, want default Claude Code betas in adaptive mode", got)
 	}
 	if captured.Body.Thinking == nil || captured.Body.Thinking.Type != "adaptive" || captured.Body.Thinking.Display != "omitted" || captured.Body.Thinking.BudgetTokens != 0 {
 		t.Fatalf("thinking = %#v, want adaptive omitted without budget", captured.Body.Thinking)
@@ -471,7 +513,10 @@ func TestAnthropicCompleteStreamSetsDefaultUserAgent(t *testing.T) {
 	}
 }
 
-func TestAnthropicCompleteStreamSetsProviderUserAgentWithoutTransportCompat(t *testing.T) {
+func TestAnthropicCompleteStreamSetsProviderUserAgentAndDefaultMetadata(t *testing.T) {
+	t.Setenv("CHORD_CONFIG_HOME", "/tmp/chord-config")
+	t.Setenv("USER", "tester")
+
 	type capturedRequest struct {
 		Header http.Header
 		Body   anthropicRequest
@@ -516,17 +561,117 @@ func TestAnthropicCompleteStreamSetsProviderUserAgentWithoutTransportCompat(t *t
 		t.Fatal("expected forced server error")
 	}
 
-	if got := captured.Header.Get("anthropic-beta"); got != "" {
-		t.Fatalf("anthropic-beta = %q, want empty", got)
+	if got := captured.Header.Get("anthropic-beta"); got != "claude-code-20250219" {
+		t.Fatalf("anthropic-beta = %q, want default Claude Code betas", got)
 	}
 	if got := captured.Header.Get("User-Agent"); got != "ProviderUA/1.0" {
 		t.Fatalf("User-Agent = %q, want ProviderUA/1.0", got)
 	}
-	if captured.Body.Metadata != nil {
-		t.Fatalf("expected metadata to be omitted, got %#v", captured.Body.Metadata)
+	if captured.Body.Metadata == nil || captured.Body.Metadata.UserID == "" {
+		t.Fatalf("expected metadata.user_id to be present by default, got %#v", captured.Body.Metadata)
+	}
+	// Now always returns JSON format
+	if !strings.HasPrefix(captured.Body.Metadata.UserID, `{"device_id":"chord_`) {
+		t.Fatalf("metadata.user_id = %q, want JSON format with chord_ device_id", captured.Body.Metadata.UserID)
 	}
 	if len(captured.Body.System) != 1 || captured.Body.System[0].Text != "base system prompt" {
 		t.Fatalf("unexpected system block: %#v", captured.Body.System)
+	}
+}
+
+func TestAnthropicCompleteStreamInjectsContext1MForMillionTokenModel(t *testing.T) {
+	t.Setenv("CHORD_CONFIG_HOME", "/tmp/chord-config")
+	t.Setenv("USER", "tester")
+
+	var captured http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r.Header.Clone()
+		defer r.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"forced test error"}}`))
+	}))
+	defer srv.Close()
+
+	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{
+		Type:   config.ProviderTypeMessages,
+		APIURL: srv.URL,
+		Models: map[string]config.ModelConfig{
+			"claude-sonnet-1m": {Limit: config.ModelLimit{Context: 1000000}},
+			"claude-sonnet-2h": {Limit: config.ModelLimit{Context: 200000}},
+		},
+	}, []string{"test-key"})
+
+	anthropicProvider, err := NewAnthropicProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewAnthropicProvider: %v", err)
+	}
+
+	send := func(model string) string {
+		_, _ = anthropicProvider.CompleteStream(
+			context.Background(),
+			"test-key",
+			model,
+			"sys",
+			[]message.Message{{Role: "user", Content: "hello"}},
+			nil,
+			2048,
+			RequestTuning{},
+			func(message.StreamDelta) {},
+		)
+		return captured.Get("anthropic-beta")
+	}
+
+	if got := send("claude-sonnet-1m"); !strings.Contains(got, "context-1m-2025-08-07") {
+		t.Fatalf("1M model anthropic-beta = %q, want context-1m present", got)
+	}
+	if got := send("claude-sonnet-2h"); strings.Contains(got, "context-1m-2025-08-07") {
+		t.Fatalf("200K model anthropic-beta = %q, want context-1m absent", got)
+	}
+}
+
+func TestAnthropicCompleteStreamDefaultsMetadata(t *testing.T) {
+	t.Setenv("CHORD_CONFIG_HOME", "/tmp/chord-config")
+	t.Setenv("USER", "tester")
+
+	var captured anthropicRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"forced test error"}}`))
+	}))
+	defer srv.Close()
+
+	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{
+		Type:   config.ProviderTypeMessages,
+		APIURL: srv.URL,
+	}, []string{"test-key"})
+
+	anthropicProvider, err := NewAnthropicProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewAnthropicProvider: %v", err)
+	}
+
+	_, err = anthropicProvider.CompleteStream(
+		context.Background(),
+		"test-key",
+		"claude-sonnet",
+		"base system prompt",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil,
+		2048,
+		RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+	if captured.Metadata == nil || captured.Metadata.UserID == "" {
+		t.Fatalf("expected metadata.user_id to be present by default, got %#v", captured.Metadata)
 	}
 }
 
@@ -797,9 +942,8 @@ func TestStableAnthropicMetadataUserID(t *testing.T) {
 	t.Setenv("USER", "tester")
 
 	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{Type: config.ProviderTypeMessages}, nil)
-	compat := &config.AnthropicTransportCompatConfig{MetadataUserID: true}
-	got1 := stableAnthropicMetadataUserID(provider, compat)
-	got2 := stableAnthropicMetadataUserID(provider, compat)
+	got1 := stableAnthropicMetadataUserIDPayload(provider)
+	got2 := stableAnthropicMetadataUserIDPayload(provider)
 
 	if got1 == "" {
 		t.Fatal("expected stable metadata user id")
@@ -807,8 +951,12 @@ func TestStableAnthropicMetadataUserID(t *testing.T) {
 	if got1 != got2 {
 		t.Fatalf("expected stable metadata user id, got %q and %q", got1, got2)
 	}
-	if !strings.HasPrefix(got1, "chord_") {
-		t.Fatalf("expected chord_ prefix, got %q", got1)
+	// Always returns JSON format (implicitly enabled like preset: codex)
+	if !strings.HasPrefix(got1, `{"device_id":"chord_`) {
+		t.Fatalf("expected JSON format with chord_ device_id, got %q", got1)
+	}
+	if !strings.Contains(got1, `"session_id":"`) {
+		t.Fatalf("expected session_id field, got %q", got1)
 	}
 }
 
@@ -867,4 +1015,59 @@ func reflectDeepEqualAnthropicThinking(a, b *anthropicThinking) bool {
 		return a == b
 	}
 	return a.Type == b.Type && a.BudgetTokens == b.BudgetTokens && a.Display == b.Display
+}
+
+func TestParseSSEStreamParsesThinkingTokens(t *testing.T) {
+	stream := strings.Join([]string{
+		"event: message_start",
+		"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"claude\",\"usage\":{\"input_tokens\":100,\"output_tokens\":0}}}",
+		"",
+		"event: content_block_start",
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\"}}",
+		"",
+		"event: content_block_delta",
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Let me think...\"}}",
+		"",
+		"event: content_block_stop",
+		"data: {\"type\":\"content_block_stop\",\"index\":0}",
+		"",
+		"event: content_block_start",
+		"data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}",
+		"",
+		"event: content_block_delta",
+		"data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Answer\"}}",
+		"",
+		"event: content_block_stop",
+		"data: {\"type\":\"content_block_stop\",\"index\":1}",
+		"",
+		"event: message_delta",
+		"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":50,\"thinking_tokens\":377}}",
+		"",
+		"event: message_stop",
+		"data: {\"type\":\"message_stop\"}",
+		"",
+	}, "\n")
+
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseSSEStream: %v", err)
+	}
+	if resp == nil || resp.Usage == nil {
+		t.Fatalf("resp/usage = %#v, want non-nil", resp)
+	}
+	if got := resp.Usage.InputTokens; got != 100 {
+		t.Fatalf("InputTokens = %d, want 100", got)
+	}
+	if got := resp.Usage.OutputTokens; got != 50 {
+		t.Fatalf("OutputTokens = %d, want 50", got)
+	}
+	if got := resp.Usage.ReasoningTokens; got != 377 {
+		t.Fatalf("ReasoningTokens = %d, want 377", got)
+	}
+	if len(resp.ThinkingBlocks) != 1 {
+		t.Fatalf("len(ThinkingBlocks) = %d, want 1", len(resp.ThinkingBlocks))
+	}
+	if resp.ThinkingBlocks[0].Thinking != "Let me think..." {
+		t.Fatalf("ThinkingBlocks[0].Thinking = %q, want %q", resp.ThinkingBlocks[0].Thinking, "Let me think...")
+	}
 }

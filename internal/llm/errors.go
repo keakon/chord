@@ -339,9 +339,10 @@ func shouldFallback(err error) bool {
 	case 403:
 		return true // Key permission denied → try fallback model
 	case 400:
-		// A 400 can be request-shape/provider-protocol specific. Another
-		// configured model may accept the same conversation history, so advance
-		// through the model pool instead of stopping at the first candidate.
+		// Provider-aware official-vs-compatible handling happens in the retry
+		// loop. At the pure status-code layer, keep 400 fallback-eligible so
+		// explicit request-shape/provider-protocol errors can still advance to
+		// another configured model when appropriate.
 		return true
 	default:
 		return apiErr.StatusCode >= 500 // Other 5xx → fallback
@@ -490,6 +491,9 @@ func isRetriable(err error) bool {
 	}
 
 	// Request/parameter errors: never retry (wrong body, missing param, etc.).
+	// HTTP 400 provider-specific official-vs-compatible handling is enforced by
+	// the caller, because APIError alone does not know which transport semantics
+	// the provider promises.
 	if isRequestOrParamError(apiErr) {
 		return false
 	}
@@ -523,20 +527,21 @@ func isConcurrentRequestLimit429(err error) bool {
 }
 
 // isRequestOrParamError reports request/parameter failures that are not useful
-// to retry with another key. Classification is anchored on the 400 status: a
-// 400 is treated as a request/parameter error by default, since the request
-// shape is the most likely cause and rotating keys or models will keep failing
-// identically. 400s that are actually other error types — quota/usage
-// exhaustion, concurrency/capacity limits, oversize context, or the Codex WS
-// chain-state mismatch — are carved out so they keep their own retry/cooldown
-// handling. For non-400 statuses, only explicit structured request/parameter
-// code/type signals classify; request-shaped free text alone stays retriable.
+// to retry with another key. For non-official/compatible APIs, HTTP 400 is not
+// trusted as a request-shape signal by itself because many gateways collapse
+// upstream overload/rate-limit/provider failures into 400. Therefore a 400 only
+// classifies here when there is an explicit request/parameter signal in the
+// structured code/type fields or in a small set of strong free-text markers.
+// Official APIs keep their stricter "400 is terminal" behavior in the caller's
+// provider-aware checks. For non-400 statuses, only explicit structured
+// request/parameter code/type signals classify; request-shaped free text alone
+// stays retriable.
 func isRequestOrParamError(apiErr *APIError) bool {
 	if apiErr == nil {
 		return false
 	}
 	if apiErr.StatusCode == 400 {
-		return !is400OtherError(apiErr)
+		return hasExplicitRequestOrParamSignal(apiErr)
 	}
 	return apiErrorSignalContains(apiErr,
 		"invalid_request",
@@ -546,29 +551,46 @@ func isRequestOrParamError(apiErr *APIError) bool {
 	)
 }
 
-// is400OtherError reports whether a 400 actually represents a non-request-shape
-// error with dedicated handling elsewhere: a transient state the gateway asked
-// to retry (Retry-After), quota/usage exhaustion, oversize context, a Codex WS
-// chain-state mismatch, or a concurrency/capacity limit. These must not
-// collapse into a terminal parameter error.
-func is400OtherError(apiErr *APIError) bool {
-	// A Retry-After hint means the gateway is explicitly asking to retry: a
-	// transient capacity/availability state, not a request-shape error.
-	if apiErr.RetryAfter > 0 {
-		return true
+func hasExplicitRequestOrParamSignal(apiErr *APIError) bool {
+	if apiErr == nil {
+		return false
 	}
 	if confirmedCodexUsageLimitError(apiErr) ||
 		classifyContextLengthExceeded(apiErr) ||
 		isCodexWSChainStateMismatch(apiErr) {
+		return false
+	}
+	if apiErrorSignalContains(apiErr,
+		"invalid_request",
+		"invalid_parameter",
+		"invalid_argument",
+		"missing_required_parameter",
+	) {
 		return true
 	}
-	// Concurrency / capacity limits some gateways report as 400 without a
-	// Retry-After are still transient, not request-shape errors.
+	// Keep the text markers intentionally narrow. Compatible gateways often wrap
+	// transient upstream/provider failures as HTTP 400, so broad text matching
+	// would recreate the original false-terminal problem.
 	return apiErrMessageContainsAny(apiErr,
-		"concurrent",
-		"concurrency",
-		"please retry later",
-		"too many requests",
+		"missing required parameter",
+		"unsupported parameter",
+		"unknown field",
+		"invalid parameter",
+		"invalid argument",
+	)
+}
+
+func hasTerminalNonRetriable400Signal(apiErr *APIError) bool {
+	if hasExplicitRequestOrParamSignal(apiErr) {
+		return true
+	}
+	return apiErrMessageContainsAny(apiErr,
+		"invalid assistant message",
+		"invalid tool schema",
+		"reasoning_content",
+		"content[].thinking",
+		"must be set to true",
+		"must be set to false",
 	)
 }
 
@@ -577,10 +599,11 @@ func is400OtherError(apiErr *APIError) bool {
 // entries) is exhausted, rather than continuing full retry rounds forever.
 //
 // HTTP 400 is treated as terminal for official APIs (where the request shape
-// is the source of truth) and for request/parameter/model-incompatible
-// gateway responses (where retrying will keep failing the same way). Other
-// non-official 400s — typically transient gateway states such as concurrency
-// limits — remain retryable across pool passes.
+// is the source of truth) and for explicit request/parameter/model-
+// incompatible gateway responses (where retrying will keep failing the same
+// way). Other non-official 400s remain retryable across pool passes because
+// compatible gateways often mis-map upstream overload/rate-limit/provider
+// failures to 400.
 func isTerminalModelPoolFailureForProvider(provider *ProviderConfig, err error) bool {
 	if IsContextLengthExceeded(err) {
 		return true
@@ -592,5 +615,5 @@ func isTerminalModelPoolFailureForProvider(provider *ProviderConfig, err error) 
 	if apiErr.StatusCode != 400 {
 		return false
 	}
-	return providerUsesOfficialAPI(provider) || isRequestOrParamError(apiErr)
+	return providerUsesOfficialAPI(provider) || hasTerminalNonRetriable400Signal(apiErr)
 }

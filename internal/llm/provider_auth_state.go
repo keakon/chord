@@ -159,6 +159,10 @@ func (p *ProviderConfig) clearPolledRateLimitForCredLocked(credIdx int) {
 }
 
 func (p *ProviderConfig) maybeReloadAuthStateLocked() bool {
+	return p.maybeReloadAuthStateLockedWithDigestCheck(false)
+}
+
+func (p *ProviderConfig) maybeReloadAuthStateLockedWithDigestCheck(forceDigestCheck bool) bool {
 	if strings.TrimSpace(p.authStatePath) == "" {
 		return false
 	}
@@ -178,7 +182,7 @@ func (p *ProviderConfig) maybeReloadAuthStateLocked() bool {
 		p.applyAuthStateLocked(p.authState, true)
 		return true
 	}
-	if p.authStateDigest != "" && !p.authStateMTime.IsZero() && p.authStateMTime.Equal(mtime) && p.authStateSize == size {
+	if !forceDigestCheck && p.authStateDigest != "" && !p.authStateMTime.IsZero() && p.authStateMTime.Equal(mtime) && p.authStateSize == size {
 		return false
 	}
 	state, loadedMTime, loadedSize, digest, err := loadAuthStateSnapshot(p.authStatePath)
@@ -244,7 +248,7 @@ func codexCreditsSnapshotEquivalent(a, b *ratelimit.CreditsSnapshot) bool {
 func (p *ProviderConfig) reloadAuthStateFromMonitor() {
 	p.mu.Lock()
 	before := p.currentPolledRateLimitSnapshotLocked()
-	changed := p.maybeReloadAuthStateLocked()
+	changed := p.maybeReloadAuthStateLockedWithDigestCheck(true)
 	after := p.currentPolledRateLimitSnapshotLocked()
 	currentChanged := changed && !codexPolledSnapshotEquivalent(before, after)
 	cb := p.onPolledUpdate

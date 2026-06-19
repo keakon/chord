@@ -627,10 +627,7 @@ func parseGeminiHTTPErrorFromBytes(statusCode int, header http.Header, body []by
 		apiErr.Type = errResp.Error.Status
 		return apiErr
 	}
-	msg := string(body)
-	if len(msg) > 200 {
-		msg = msg[:200] + "..."
-	}
+	msg := TruncateStringRunes(string(body), 200, "...")
 	apiErr.Message = msg
 	return apiErr
 }

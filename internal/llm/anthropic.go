@@ -179,10 +179,6 @@ func (a *AnthropicProvider) CompleteStream(
 	if err != nil {
 		return nil, fmt.Errorf("validate anthropic tuning: %w", err)
 	}
-	transportCompat := a.provider.AnthropicTransportCompat()
-	if transportCompat != nil && transportCompat.SystemPrefix != "" {
-		systemPrompt = transportCompat.SystemPrefix + systemPrompt
-	}
 
 	// Build system content blocks.
 	systemBlocks := buildSystemBlocks(systemPrompt)
@@ -232,8 +228,8 @@ func (a *AnthropicProvider) CompleteStream(
 	if at.ServiceTier != "" {
 		reqBody.Speed = at.ServiceTier
 	}
-	if userID := stableAnthropicMetadataUserID(a.provider, transportCompat); userID != "" {
-		reqBody.Metadata = &anthropicMetadata{UserID: userID}
+	if userIDPayload := stableAnthropicMetadataUserIDPayload(a.provider); userIDPayload != "" {
+		reqBody.Metadata = &anthropicMetadata{UserID: userIDPayload}
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -253,8 +249,9 @@ func (a *AnthropicProvider) CompleteStream(
 	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("x-app", "cli")
 
-	if betaHeader := anthropicBetaHeader(at, transportCompat); betaHeader != "" {
+	if betaHeader := anthropicBetaHeader(at, a.effectiveContextTokens(model)); betaHeader != "" {
 		req.Header.Set("anthropic-beta", betaHeader)
 	}
 	setProviderLLMUserAgent(req.Header, a.provider)
@@ -384,10 +381,7 @@ func parseHTTPErrorFromBytes(statusCode int, header http.Header, body []byte) *A
 		apiErr.Type = errResp.Error.Type
 	} else {
 		// Fallback: use raw body (truncated).
-		msg := string(body)
-		if len(msg) > 200 {
-			msg = msg[:200] + "..."
-		}
+		msg := TruncateStringRunes(string(body), 200, "...")
 		apiErr.Message = msg
 	}
 
@@ -463,13 +457,56 @@ func validateAnthropicTuning(tuning AnthropicTuning) (AnthropicTuning, error) {
 	return tuning, nil
 }
 
-func anthropicBetaHeader(tuning AnthropicTuning, compat *config.AnthropicTransportCompatConfig) string {
+// effectiveContextTokens reports the model's declared context window in tokens,
+// preferring the configured input budget and falling back to the total context
+// limit. It returns 0 when the model is unknown or no limit is declared.
+func (a *AnthropicProvider) effectiveContextTokens(model string) int {
+	if a.provider == nil {
+		return 0
+	}
+	m, ok := a.provider.GetModel(model)
+	if !ok {
+		return 0
+	}
+	if m.Limit.Input > 0 {
+		return m.Limit.Input
+	}
+	return m.Limit.Context
+}
+
+// anthropicBetaHeader builds the anthropic-beta header value. effectiveContext
+// is the model's effective context window (input budget if declared, else total
+// context) in tokens; context-1m is only injected for models the caller declares
+// as having a 1M-token window, because that beta actually opts the request into
+// 1M context behavior on the official API (tier gated, distinct pricing above
+// 200K, and an error on unsupported models) rather than being a no-op.
+func anthropicBetaHeader(tuning AnthropicTuning, effectiveContext int) string {
 	var betas []string
+
+	// claude-code-20250219 is the Claude Code agentic client identifier the
+	// official Anthropic API recognizes; sending it improves cache/routing
+	// affinity. The anthropic-beta header is server-validated (the official API
+	// rejects unknown or inapplicable values with HTTP 400), so every other flag
+	// below is emitted only when it actually applies to the model or tuning.
+	betas = append(betas, "claude-code-20250219")
+
+	// context-1m-2025-08-07 is a real, enforced beta on the official Anthropic
+	// API (tier-4 gated, 2x/1.5x long-context pricing above 200K, and an error
+	// on models that lack 1M support). Only opt in for models the caller
+	// declares as having a 1M-token window.
+	if effectiveContext >= 1000000 {
+		betas = append(betas, "context-1m-2025-08-07")
+	}
+
 	if effectiveAnthropicThinkingType(tuning) == "enabled" && tuning.ThinkingBudget > 0 {
 		betas = append(betas, "interleaved-thinking-2025-05-14")
 	}
-	if compat != nil && len(compat.ExtraBeta) > 0 {
-		betas = append(betas, compat.ExtraBeta...)
+	// effort-2025-11-24 only takes effect paired with output_config.effort, so
+	// send it only when an effort level is configured (see
+	// buildAnthropicOutputConfig). Sending it bare can 400 on models that do not
+	// support effort.
+	if tuning.ThinkingEffort != "" {
+		betas = append(betas, "effort-2025-11-24")
 	}
 	if tuning.ServiceTier == "fast" {
 		betas = append(betas, "fast-mode-2026-02-01")
@@ -494,8 +531,8 @@ func anthropicBetaHeader(tuning AnthropicTuning, compat *config.AnthropicTranspo
 	return strings.Join(merged, ",")
 }
 
-func stableAnthropicMetadataUserID(provider *ProviderConfig, compat *config.AnthropicTransportCompatConfig) string {
-	if compat == nil || !compat.MetadataUserID || provider == nil {
+func stableAnthropicMetadataUserIDPayload(provider *ProviderConfig) string {
+	if provider == nil {
 		return ""
 	}
 
@@ -514,18 +551,37 @@ func stableAnthropicMetadataUserID(provider *ProviderConfig, compat *config.Anth
 		}
 	}
 
+	// Add hostname for better request routing to same backend instance
+	hostname, _ := os.Hostname()
+
 	raw := strings.Join([]string{
 		"chord-anthropic-user",
 		provider.Name(),
 		configHome,
 		username,
+		hostname,
 	}, "|")
 	if raw == "" {
 		return ""
 	}
 
 	sum := sha256.Sum256([]byte(raw))
-	return "chord_" + hex.EncodeToString(sum[:8])
+	deviceID := "chord_" + hex.EncodeToString(sum[:8])
+
+	// Claude Code-compatible proxies expect a stable session_id-shaped routing key.
+	sessionRaw := strings.Join([]string{
+		"chord-session",
+		provider.Name(),
+		configHome,
+		username,
+		hostname,
+	}, "|")
+	sessionSum := sha256.Sum256([]byte(sessionRaw))
+	sessionID := hex.EncodeToString(sessionSum[:16])
+
+	// Always return JSON format for better cache routing with third-party proxies.
+	// Official Anthropic API accepts this value in metadata.user_id.
+	return fmt.Sprintf(`{"device_id":"%s","account_uuid":"","session_id":"%s"}`, deviceID, sessionID)
 }
 
 // convertMessages converts internal Message slices to Anthropic API format.

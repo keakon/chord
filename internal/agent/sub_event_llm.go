@@ -120,10 +120,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			// Debug: log the raw reasoning content for troubleshooting
 			if resp.ReasoningContent != "" {
 				reasoningLen := len(resp.ReasoningContent)
-				preview := resp.ReasoningContent
-				if reasoningLen > 500 {
-					preview = resp.ReasoningContent[:500] + "...(truncated)"
-				}
+				preview := llm.TruncateStringRunes(resp.ReasoningContent, 500, "...(truncated)")
 				log.Debugf("SubAgent: unparseable reasoning content agent=%v reasoning_len=%v reasoning_preview=%v", s.instanceID, reasoningLen, preview)
 			}
 			s.sendEvent(Event{

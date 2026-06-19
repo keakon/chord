@@ -414,16 +414,7 @@ type ModelCompatConfig struct {
 // behavior compat belongs under ModelCompatConfig; transport-layer compat lives
 // here so the schema reflects the runtime semantics.
 type ProviderCompatConfig struct {
-	ThinkingToolcall   *ThinkingToolcallCompatConfig   `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
-	AnthropicTransport *AnthropicTransportCompatConfig `json:"anthropic_transport,omitempty" yaml:"anthropic_transport,omitempty"`
-}
-
-// AnthropicTransportCompatConfig holds Anthropic transport/request tweaks for
-// third-party proxies that expect Claude Code-like request metadata.
-type AnthropicTransportCompatConfig struct {
-	SystemPrefix   string   `json:"system_prefix,omitempty" yaml:"system_prefix,omitempty"`
-	ExtraBeta      []string `json:"extra_beta,omitempty" yaml:"extra_beta,omitempty"`
-	MetadataUserID bool     `json:"metadata_user_id,omitempty" yaml:"metadata_user_id,omitempty"`
+	ThinkingToolcall *ThinkingToolcallCompatConfig `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
 }
 
 // ThinkingToolcallCompatConfig controls compatibility handling for providers

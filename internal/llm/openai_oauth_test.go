@@ -507,3 +507,139 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveResponsesReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name            string
+		effort          string
+		firstPartyCodex bool
+		wantEffort      string
+		wantDropped     bool
+	}{
+		// Empty effort is never carried, regardless of transport.
+		{name: "empty passthrough", effort: "", firstPartyCodex: false, wantEffort: "", wantDropped: false},
+		{name: "empty codex", effort: "", firstPartyCodex: true, wantEffort: "", wantDropped: false},
+		// Casing/whitespace normalization applies on every transport.
+		{name: "trim passthrough", effort: "  High ", firstPartyCodex: false, wantEffort: "high", wantDropped: false},
+		{name: "trim codex", effort: "  High ", firstPartyCodex: true, wantEffort: "high", wantDropped: false},
+		{name: "upper codex xhigh", effort: "XHIGH", firstPartyCodex: true, wantEffort: "xhigh", wantDropped: false},
+		// Codex whitelist values pass through on both transports.
+		{name: "xhigh passthrough", effort: "xhigh", firstPartyCodex: false, wantEffort: "xhigh", wantDropped: false},
+		{name: "xhigh codex", effort: "xhigh", firstPartyCodex: true, wantEffort: "xhigh", wantDropped: false},
+		// GLM-5.2 effort levels pass through on non-Codex gateways.
+		{name: "max passthrough", effort: "max", firstPartyCodex: false, wantEffort: "max", wantDropped: false},
+		{name: "minimal passthrough", effort: "minimal", firstPartyCodex: false, wantEffort: "minimal", wantDropped: false},
+		{name: "none passthrough", effort: "none", firstPartyCodex: false, wantEffort: "none", wantDropped: false},
+		{name: "Max trimmed passthrough", effort: "Max", firstPartyCodex: false, wantEffort: "max", wantDropped: false},
+		// Codex backend drops values outside its whitelist rather than sending them.
+		{name: "max codex dropped", effort: "max", firstPartyCodex: true, wantEffort: "", wantDropped: true},
+		{name: "minimal codex dropped", effort: "minimal", firstPartyCodex: true, wantEffort: "", wantDropped: true},
+		{name: "none codex dropped", effort: "none", firstPartyCodex: true, wantEffort: "", wantDropped: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotEffort, gotDropped := resolveResponsesReasoningEffort(tt.effort, tt.firstPartyCodex)
+			if gotEffort != tt.wantEffort {
+				t.Fatalf("effort = %q, want %q", gotEffort, tt.wantEffort)
+			}
+			if gotDropped != tt.wantDropped {
+				t.Fatalf("dropped = %v, want %v", gotDropped, tt.wantDropped)
+			}
+		})
+	}
+}
+
+func TestResponsesProvider_NonCodexPassesThroughGLMReasoningEffortMax(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if err := json.Unmarshal(data, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewProviderConfig("glm-relay", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/v1/responses",
+	}, []string{"test-key"})
+	apiKey := "test-key"
+	r := &ResponsesProvider{provider: provider, client: server.Client()}
+
+	if _, err := r.CompleteStream(
+		context.Background(),
+		apiKey,
+		"glm-5.2",
+		"system prompt",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil,
+		0,
+		RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "max"}},
+		func(message.StreamDelta) {},
+	); err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+
+	reasoning, ok := gotBody["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected reasoning object, got %#v", gotBody["reasoning"])
+	}
+	if reasoning["effort"] != "max" {
+		t.Fatalf("expected reasoning.effort=max to pass through, got %#v", reasoning["effort"])
+	}
+	if provider.IsCodexOAuthTransport() {
+		t.Fatalf("generic responses provider must not report as Codex transport")
+	}
+}
+
+func TestResponsesProvider_CodexDropsUnsupportedReasoningEffortMax(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if err := json.Unmarshal(data, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider, accessToken := newOpenAITestOAuthProvider(t, server.URL+"/v1/responses")
+	r := &ResponsesProvider{provider: provider, client: server.Client()}
+	if !provider.IsCodexOAuthTransport() {
+		t.Fatalf("expected Codex OAuth transport for preset codex provider")
+	}
+
+	if _, err := r.CompleteStream(
+		context.Background(),
+		accessToken,
+		"gpt-5.5",
+		"system prompt",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil,
+		0,
+		RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "max"}},
+		func(message.StreamDelta) {},
+	); err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+
+	// max must not reach the Codex backend. With effort dropped to "" and no
+	// summary configured, the reasoning block is omitted entirely (matching the
+	// prior behaviour), so reasoning is either absent or carries no effort.
+	if reasoning, ok := gotBody["reasoning"].(map[string]any); ok {
+		if effort, _ := reasoning["effort"].(string); effort == "max" {
+			t.Fatalf("expected max effort dropped for Codex backend, got reasoning=%#v", reasoning)
+		}
+	}
+}

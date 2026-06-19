@@ -29,8 +29,13 @@ func cloneLongLivedLLMString(s string) string {
 // --- SSE JSON structures for Anthropic streaming ---
 
 type sseUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	// ThinkingTokens captures a thinking_tokens usage field reported by some
+	// Anthropic-compatible providers. The official Anthropic Messages API does
+	// not return it (thinking is billed within output_tokens), so for official
+	// requests this stays 0 and is ignored under adoptOnlyNonZero.
+	ThinkingTokens           int `json:"thinking_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	CacheDeletedInputTokens  int `json:"cache_deleted_input_tokens"`
@@ -122,6 +127,9 @@ type contentBlock struct {
 func applyAnthropicSSEUsage(dst *message.TokenUsage, usage sseUsage, adoptOnlyNonZero bool) {
 	if !adoptOnlyNonZero || usage.OutputTokens > 0 {
 		dst.OutputTokens = usage.OutputTokens
+	}
+	if !adoptOnlyNonZero || usage.ThinkingTokens > 0 {
+		dst.ReasoningTokens = usage.ThinkingTokens
 	}
 	if !adoptOnlyNonZero || usage.CacheReadInputTokens > 0 {
 		dst.CacheReadTokens = usage.CacheReadInputTokens

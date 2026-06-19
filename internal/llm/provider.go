@@ -322,23 +322,6 @@ func (p *ProviderConfig) ThinkingToolcallCompat(modelID string) *config.Thinking
 	return merged
 }
 
-// AnthropicTransportCompat returns a copy of the provider-level Anthropic
-// transport compatibility config. Model-level overrides are intentionally not
-// supported for transport semantics.
-func (p *ProviderConfig) AnthropicTransportCompat() *config.AnthropicTransportCompatConfig {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.compat == nil || p.compat.AnthropicTransport == nil {
-		return nil
-	}
-	cfg := *p.compat.AnthropicTransport
-	if len(cfg.ExtraBeta) > 0 {
-		cfg.ExtraBeta = append([]string(nil), cfg.ExtraBeta...)
-	}
-	return &cfg
-}
-
 // GetRetryDelay returns the delay before the next retry round.
 // Backoff is deterministic: 1s, 2s, 4s, 8s, 16s, 32s, then 60s for later rounds.
 func (p *ProviderConfig) GetRetryDelay(attempt int) time.Duration {

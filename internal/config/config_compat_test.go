@@ -106,49 +106,6 @@ providers:
 	}
 }
 
-func TestConfigYAML_ProviderCompatAnthropicTransport(t *testing.T) {
-	const raw = `
-providers:
-  anthropic-main:
-    type: "messages"
-    compat:
-      anthropic_transport:
-        system_prefix: "[prefixed]\n"
-        extra_beta:
-          - beta-a
-          - beta-b
-        metadata_user_id: true
-    models:
-      claude-sonnet:
-        limit:
-          context: 200000
-          output: 8192
-`
-
-	var cfg Config
-	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
-		t.Fatalf("yaml unmarshal failed: %v", err)
-	}
-
-	provider, ok := cfg.Providers["anthropic-main"]
-	if !ok {
-		t.Fatal("provider anthropic-main not found")
-	}
-	if provider.Compat == nil || provider.Compat.AnthropicTransport == nil {
-		t.Fatal("expected provider compat.anthropic_transport to be present")
-	}
-	transport := provider.Compat.AnthropicTransport
-	if transport.SystemPrefix != "[prefixed]\n" {
-		t.Fatalf("unexpected system_prefix: %q", transport.SystemPrefix)
-	}
-	if len(transport.ExtraBeta) != 2 || transport.ExtraBeta[0] != "beta-a" || transport.ExtraBeta[1] != "beta-b" {
-		t.Fatalf("unexpected extra_beta: %#v", transport.ExtraBeta)
-	}
-	if !transport.MetadataUserID {
-		t.Fatal("expected metadata_user_id=true")
-	}
-}
-
 func TestConfigYAML_ModelTextVerbosity(t *testing.T) {
 	const raw = `
 providers:

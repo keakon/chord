@@ -611,10 +611,7 @@ func parseOpenAIHTTPErrorFromBytes(statusCode int, header http.Header, body []by
 			apiErr.Code = detailResp.Code
 			apiErr.Type = detailResp.Type
 		} else {
-			msg := string(body)
-			if len(msg) > 200 {
-				msg = msg[:200] + "..."
-			}
+			msg := TruncateStringRunes(string(body), 200, "...")
 			apiErr.Message = msg
 		}
 	}

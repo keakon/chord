@@ -128,15 +128,9 @@ func (r *ResponsesProvider) Compact(
 	}
 	// Match Codex: the compact endpoint reuses build_responses_request, which emits
 	// reasoning whenever effort or summary is configured (effort may be omitted).
-	effectiveReasoningEffort := ot.ReasoningEffort
-	if normalized, changed := normalizeResponsesReasoningEffort(ot.ReasoningEffort); changed {
-		if normalized == "" {
-			log.Warnf("omitting unsupported reasoning effort for Responses compact request requested=%v", ot.ReasoningEffort)
-		} else {
-			log.Warnf("normalizing reasoning effort for Responses compact request requested=%v effective=%v", ot.ReasoningEffort, normalized)
-		}
-		effectiveReasoningEffort = normalized
-	}
+	// Compact is restricted to the official Codex backend (see entry guard), so
+	// drop effort values outside its low/medium/high/xhigh set there.
+	effectiveReasoningEffort, _ := resolveResponsesReasoningEffort(ot.ReasoningEffort, true)
 	if effectiveReasoningEffort != "" || ot.ReasoningSummary != "" {
 		reqBody.Reasoning = &reasoningConfig{Effort: effectiveReasoningEffort, Summary: ot.ReasoningSummary}
 	}

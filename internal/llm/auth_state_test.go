@@ -239,6 +239,73 @@ func TestAuthStateMonitorReloadClearsSnapshotWhenStateFileRemoved(t *testing.T) 
 	}
 }
 
+func TestAuthStateMonitorReloadDetectsSameStatContentChange(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountUserID: "user-1__acc-1", AccountID: "acc-1"}}}}
+	var authMu sync.Mutex
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+	}, "")
+	defer p.Close()
+
+	updated := make(chan struct{}, 2)
+	p.mu.Lock()
+	p.lastSelectedSlot = 0
+	p.mu.Unlock()
+	p.SetOnPolledRateLimitUpdated(func() {
+		select {
+		case updated <- struct{}{}:
+		default:
+		}
+	})
+
+	upsertUsedPct := func(usedPct int) {
+		t.Helper()
+		if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
+			record.Status = config.OAuthStatusNormal
+			record.UpdatedAt = 1000
+			record.CodexPrimaryUsedPct = float64(usedPct)
+			record.CodexPrimaryWindowMin = 300
+			return true, nil
+		}); err != nil {
+			t.Fatalf("UpsertOAuthStateRecord(%d): %v", usedPct, err)
+		}
+	}
+
+	upsertUsedPct(55)
+	p.reloadAuthStateFromMonitor()
+	select {
+	case <-updated:
+	default:
+		t.Fatal("expected initial polled update callback after auth.state reload")
+	}
+	p.mu.Lock()
+	cachedMTime := p.authStateMTime
+	cachedSize := p.authStateSize
+	p.mu.Unlock()
+
+	upsertUsedPct(56)
+	if err := os.Chtimes(statePath, cachedMTime, cachedMTime); err != nil {
+		t.Fatalf("Chtimes(auth.state): %v", err)
+	}
+	if info, err := os.Stat(statePath); err != nil {
+		t.Fatalf("Stat(auth.state): %v", err)
+	} else if info.Size() != cachedSize || !info.ModTime().Equal(cachedMTime) {
+		t.Fatalf("auth.state stat = (%v, %v), want (%v, %v)", info.ModTime(), info.Size(), cachedMTime, cachedSize)
+	}
+
+	p.reloadAuthStateFromMonitor()
+	select {
+	case <-updated:
+	default:
+		t.Fatal("expected polled update callback after same-stat auth.state content change")
+	}
+	if got := p.CurrentPolledRateLimitSnapshot(); got == nil || got.Primary == nil || got.Primary.UsedPct != 56 {
+		t.Fatalf("expected same-stat reloaded snapshot used pct 56, got %#v", got)
+	}
+}
+
 func TestAuthStateMonitorReloadIgnoresNonCurrentSnapshot(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.json")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a", "key-b"})

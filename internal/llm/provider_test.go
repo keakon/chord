@@ -1326,39 +1326,6 @@ func TestProviderConfig_ThinkingToolcallCompat_ModelOverride(t *testing.T) {
 	}
 }
 
-func TestProviderConfig_AnthropicTransportCompat(t *testing.T) {
-	cfg := config.ProviderConfig{
-		Type: config.ProviderTypeMessages,
-		Compat: &config.ProviderCompatConfig{
-			AnthropicTransport: &config.AnthropicTransportCompatConfig{
-				SystemPrefix:   "prefix\n",
-				ExtraBeta:      []string{"beta-a", "beta-b"},
-				MetadataUserID: true,
-			},
-		},
-	}
-	p := NewProviderConfig("anthropic-main", cfg, []string{"k"})
-	got := p.AnthropicTransportCompat()
-	if got == nil {
-		t.Fatal("expected anthropic transport compat config")
-	}
-	if got.SystemPrefix != "prefix\n" {
-		t.Fatalf("unexpected system_prefix: %q", got.SystemPrefix)
-	}
-	if len(got.ExtraBeta) != 2 || got.ExtraBeta[0] != "beta-a" || got.ExtraBeta[1] != "beta-b" {
-		t.Fatalf("unexpected extra_beta: %#v", got.ExtraBeta)
-	}
-	if !got.MetadataUserID {
-		t.Fatal("expected metadata_user_id=true")
-	}
-
-	got.ExtraBeta[0] = "mutated"
-	again := p.AnthropicTransportCompat()
-	if again.ExtraBeta[0] != "beta-a" {
-		t.Fatal("AnthropicTransportCompat should return a defensive copy")
-	}
-}
-
 // --- Key Rotation: on_failure ---
 
 // TestSelectKey_OnFailure_NoCooldown verifies that repeated calls with on_failure

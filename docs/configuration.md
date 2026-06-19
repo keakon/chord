@@ -92,6 +92,10 @@ Chord's `gpt-5.5` examples use `context=400000`, `input=272000`, `output=128000`
 
 For `type: responses`, Chord uses one stable Responses wire shape for every provider. The stable system prompt is sent in the top-level `instructions` field, while conversation messages remain typed `input` items such as `{"type":"message","role":"user",...}`. Requests also explicitly send `tool_choice`, `parallel_tool_calls`, `store`, `stream`, and an `include` array. `store` defaults to `false`, and explicit provider/model `store` config overrides that default. `include` is empty unless the request carries a reasoning block, in which case it contains `reasoning.encrypted_content`. Responses requests omit `max_output_tokens`. Streaming Responses model requests include the SSE headers (`Accept: text/event-stream`, `OpenAI-Beta: responses=experimental`, `originator`, and `User-Agent`). The default User-Agent remains `chord/<version>` unless provider-level `user_agent` overrides it. Several relay endpoints validate this shape before forwarding requests, so these fields are not limited to `preset: codex`.
 
+For `type: messages`, Chord likewise sends a stable Anthropic Messages wire shape tuned for official Anthropic and compatible gateways. Messages requests always include Claude Code-style client hints such as `x-app: cli`, the default Claude Code beta feature list, and JSON-formatted `metadata.user_id` with stable anonymous routing fields. These fields are internal transport details, not user-configurable compatibility switches; they improve gateway compatibility and cache affinity while remaining accepted by the official Anthropic API. Provider-level `user_agent` remains configurable because gateways may require a specific client/version string.
+
+The one beta that is sent conditionally is `context-1m-2025-08-07` (1M context window). Unlike the other default betas, this one is enforced by the official Anthropic API: it is gated, switches to long-context pricing above 200K tokens, and errors on models that lack 1M support. Chord therefore opts in only when the model's declared window reaches 1M tokens (`limit.input` if set, otherwise `limit.context` >= 1000000), mirroring how Claude Code only sends it for models flagged as 1M-capable. Models with a smaller declared window never receive this header.
+
 The `store` field controls whether the Responses backend keeps this request and response server-side. Chord sends the full input on every request and never relies on `previous_response_id` to continue a conversation over HTTP, so the default `false` keeps requests self-contained and is the right choice for nearly every setup. Set `store: true` (at the provider level, or model level to override a provider default) only when a Responses-compatible backend or relay explicitly requires or benefits from server-side retention. Know the trade-offs before enabling it: the backend retains your request and response data, and the official Codex OAuth endpoint rejects `store: true` with a terminal `HTTP 400` (`Store must be set to false`) that fails the request without retrying, so do not set `store: true` on a `preset: codex` provider.
 
 ### OpenAI Codex preset
@@ -504,30 +508,35 @@ model_templates:
     modalities:
       input: [text, image, pdf]
 
-  claude-1m: &claude-1m
+  # Claude base config (1M context, PDF support)
+  claude-base: &claude-base
     limit:
       context: 1000000
-      output: 128000
-    thinking:
-      type: adaptive
-      effort: medium
-      display: summarized
-    variants:
-      high:
-        thinking:
-          type: adaptive
-          effort: high
-          display: summarized
-      xhigh:
-        thinking:
-          type: adaptive
-          effort: xhigh
-          display: summarized
+      output: 65536
     modalities:
       input: [text, image, pdf]
 
+  # Claude adaptive thinking variants (variants only set effort, inheriting type and display from base)
+  claude-adaptive-variants: &claude-adaptive-variants
+    high:
+      thinking:
+        effort: high
+    xhigh:
+      thinking:
+        effort: xhigh
+
+  # Claude adaptive thinking template (4.6+ all versions)
+  claude-adaptive: &claude-adaptive
+    <<: *claude-base
+    thinking:
+      type: adaptive
+      display: summarized  # Common config: all variants inherit this
+    variants: *claude-adaptive-variants
+
   claude-opus: &claude-opus
-    <<: *claude-1m
+    <<: *claude-adaptive
+    limit:
+      output: 128000  # Opus supports longer output
     cost:
       input: 5
       output: 25
@@ -550,9 +559,8 @@ model_templates:
         fast: 2
 
   claude-sonnet: &claude-sonnet
-    <<: *claude-1m
+    <<: *claude-adaptive
     limit:
-      context: 1000000
       output: 64000
     cost:
       input: 3
@@ -604,7 +612,7 @@ Model fields used in the example:
 - `limit.output`: model maximum output token capacity. Runtime requests are also
   capped by `max_output_tokens`, so the effective request uses the smaller value.
 - `reasoning`: OpenAI / OpenAI-compatible reasoning options.
-  - `reasoning.effort` controls how much reasoning depth/budget Chord asks for. Chord currently passes `low`, `medium`, `high`, or `xhigh`; leave it unset to omit the field and use the provider/model default. `medium` is a good starting point for everyday coding, while `high` / `xhigh` trade more latency and token use for harder planning, debugging, or synthesis tasks.
+  - `reasoning.effort` controls how much reasoning depth/budget Chord asks for. After case/whitespace normalization, Chord passes the value through verbatim, so any provider-supported level (including GLM's `max` / `minimal` / `none`) reaches the upstream unchanged; leave it unset to omit the field and use the provider/model default. For the official Codex (`preset: codex`) Responses backend only, Chord drops values outside its supported set (`low` / `medium` / `high` / `xhigh`) with a warn. `medium` is a good starting point for everyday coding, while `high` / `xhigh` trade more latency and token use for harder planning, debugging, or synthesis tasks.
   - For `type: chat-completions`, Chord sends `reasoning.effort` as top-level `reasoning_effort` and uses `max_completion_tokens`.
   - For `type: responses`, Chord sends `reasoning.effort` and `reasoning.summary` inside the `reasoning` object.
   - `reasoning.summary` controls whether Chord explicitly asks for a readable reasoning summary in Responses output. Chord currently accepts `auto`, `concise`, or `detailed`; leave it unset to omit the field, which means Chord does not explicitly request a summary and the provider/model decides its default behavior.
@@ -1246,9 +1254,11 @@ providers as cache/routing affinity metadata: OpenAI Responses requests include
 `X-Session-Id` and `session-id` headers when a session id is available. These
 fields are not user-configurable; they follow the active Chord session and are
 cleared or changed on session switch/resume. Anthropic prompt caching is driven
-by `cache_control` blocks, and its optional `metadata.user_id` remains a stable
-anonymous user/provider id rather than a per-session id. For Anthropic models,
-you can request an hourly cache TTL with `prompt_cache.ttl: 1h`:
+by `cache_control` blocks, and Chord also sends JSON-formatted
+`metadata.user_id` automatically with a stable anonymous `device_id` plus a
+stable routing `session_id` derived from local/provider identity. These
+Anthropic metadata fields are not user-configurable. For Anthropic models, you
+can request an hourly cache TTL with `prompt_cache.ttl: 1h`:
 
 ```yaml
 providers:
@@ -1284,7 +1294,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `limit.input`     | int    | Separate input cap when a provider publishes one. Chord uses it to compact or retry before the prompt is too large.               |
 | `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |
 | `context.compaction.reserved` | int | Optional input-budget headroom reserved before `compaction.threshold` is applied. Useful for tokenizer drift, tool overhead, and safer overflow recovery. |
-| `reasoning`       | object | OpenAI reasoning options. Chord-supported subfields are `reasoning.effort` (`low` / `medium` / `high` / `xhigh`; unset = omit and use provider/model default) and, for Responses, `reasoning.summary` (`auto` / `concise` / `detailed`; unset = omit / no explicit summary request). Recommended summary value when you want readable summaries: `auto`. |
+| `reasoning`       | object | OpenAI reasoning options. `reasoning.effort` is normalized and passed through verbatim, so any provider-supported level (e.g. GLM `max` / `minimal` / `none`) reaches the upstream unchanged; the official Codex Responses backend additionally restricts to `low` / `medium` / `high` / `xhigh` (unset = omit and use provider/model default). For Responses, `reasoning.summary` (`auto` / `concise` / `detailed`; unset = omit / no explicit summary request). Recommended summary value when you want readable summaries: `auto`. |
 | `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
 | `variants`        | map    | Named parameter presets. Reference with `provider/model@variant`.                                                      |

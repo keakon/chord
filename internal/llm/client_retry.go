@@ -529,8 +529,24 @@ func (c *Client) completeStreamTarget(
 			retriable := isRetriable(err)
 			var apiErrPtr *APIError
 			if errors.As(err, &apiErrPtr) && apiErrPtr != nil {
-				if apiErrPtr.StatusCode == 401 || apiErrPtr.StatusCode == 403 || (apiErrPtr.StatusCode == 400 && !providerUsesOfficialAPI(t.provider) && !isRequestOrParamError(apiErrPtr)) {
+				if apiErrPtr.StatusCode == 401 || apiErrPtr.StatusCode == 403 {
 					retriable = true
+				}
+				if apiErrPtr.StatusCode == 400 {
+					// Check for protocol/model incompatibility errors first.
+					// These should trigger immediate fallback, not key rotation.
+					if hasTerminalNonRetriable400Signal(apiErrPtr) {
+						retriable = false
+						if fallbackEligible && fallbackEnabled && len(fallbackModels) > 0 {
+							log.Errorf("model incompatible 400, trying fallback provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+							emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
+							modelDone = true
+							break
+						}
+						return result, lastInputTokens, err
+					}
+					// For compatible gateways, other 400s are retriable (may be overload).
+					retriable = !providerUsesOfficialAPI(t.provider)
 				}
 			}
 			if !retriable && isTimeoutLikeError(err) {
@@ -541,13 +557,16 @@ func (c *Client) completeStreamTarget(
 
 			if !retriable {
 				log.Errorf("non-retriable LLM error provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+				// Use the narrower request/parameter check here: the broader terminal
+				// 400 handling above already routes model/protocol incompatibility to
+				// fallback when available, while official API 400s still stop directly.
+				if apiErrPtr != nil && apiErrPtr.StatusCode == 400 && (providerUsesOfficialAPI(t.provider) || isRequestOrParamError(apiErrPtr)) {
+					return result, lastInputTokens, err
+				}
 				if fallbackEligible && fallbackEnabled && len(fallbackModels) > 0 {
 					emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
 					modelDone = true
 					break
-				}
-				if apiErrPtr != nil && apiErrPtr.StatusCode == 400 && (providerUsesOfficialAPI(t.provider) || isRequestOrParamError(apiErrPtr)) {
-					return result, lastInputTokens, err
 				}
 				emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
 				modelDone = true

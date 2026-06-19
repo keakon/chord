@@ -27,7 +27,7 @@ func TestIsRetriable5xxRotatesKeysBeforeFallback(t *testing.T) {
 func TestIsRetriable4xxNotRetriableExceptAuth(t *testing.T) {
 	t.Parallel()
 	if isRetriable(&APIError{StatusCode: 400, Message: "bad"}) {
-		t.Fatal("400 should not be retriable")
+		t.Fatal("400 should not be retriable at the status-only classification layer")
 	}
 	if isRetriable(&APIError{StatusCode: 413, Message: "too large"}) {
 		t.Fatal("413 should not be retriable")
@@ -159,7 +159,7 @@ func TestShouldFallback400CodexRequiresStreaming(t *testing.T) {
 
 func TestShouldFallback400RequestShapeError(t *testing.T) {
 	t.Parallel()
-	err := &APIError{StatusCode: 400, Message: "invalid_request_error: missing required parameter: input"}
+	err := &APIError{StatusCode: 400, Code: "invalid_request_error", Message: "missing required parameter: input"}
 	if !shouldFallback(err) {
 		t.Fatal("request-shape 400 should be fallback-eligible for another model")
 	}
@@ -222,6 +222,15 @@ func TestTerminalModelPoolFailureForProviderKeepsCompatible400Retryable(t *testi
 	}
 }
 
+func TestTerminalModelPoolFailureForProviderOfficial400StillStops(t *testing.T) {
+	t.Parallel()
+	official := NewProviderConfig("official", config.ProviderConfig{OfficialAPI: new(true)}, nil)
+	err := &APIError{StatusCode: 400, Message: "Our servers are currently overloaded. Please try again later."}
+	if !isTerminalModelPoolFailureForProvider(official, err) {
+		t.Fatal("official API 400 should remain terminal even if the message looks transient")
+	}
+}
+
 func TestIsAccountDeactivatedMessageFallback(t *testing.T) {
 	t.Parallel()
 	// Structured code/type signals.
@@ -279,20 +288,23 @@ func TestIsAccountInvalidatedMessageFallback(t *testing.T) {
 	}
 }
 
-func TestIsRequestOrParamError400DefaultsToParamError(t *testing.T) {
+func TestIsRequestOrParamError400RequiresExplicitSignal(t *testing.T) {
 	t.Parallel()
-	// A bare 400 with no transient/quota/context signal is a request/parameter
-	// error: rotating keys or models will keep failing identically.
-	if !isRequestOrParamError(&APIError{StatusCode: 400, Message: "bad"}) {
-		t.Fatal("bare 400 should classify as a request/parameter error")
+	// Non-official bare 400s are not trusted as request-shape failures by
+	// default because compatible gateways often wrap transient upstream errors.
+	if isRequestOrParamError(&APIError{StatusCode: 400, Message: "bad"}) {
+		t.Fatal("bare 400 should not classify as a request/parameter error")
 	}
-	// A Retry-After hint marks a transient state, not a request-shape error.
-	if isRequestOrParamError(&APIError{StatusCode: 400, Message: "upstream temporarily busy", RetryAfter: time.Millisecond}) {
-		t.Fatal("400 with Retry-After should be transient, not a param error")
+	// Transient overloaded 400s from compatible gateways must stay retryable.
+	if isRequestOrParamError(&APIError{StatusCode: 400, Message: "Our servers are currently overloaded. Please try again later."}) {
+		t.Fatal("overloaded 400 should stay non-param and retryable on compatible gateways")
 	}
-	// Quota/concurrency carve-outs stay non-param.
-	if isRequestOrParamError(&APIError{StatusCode: 400, Message: "Concurrency limit exceeded, please retry later"}) {
-		t.Fatal("concurrency 400 should be transient, not a param error")
+	// Explicit structured and strong text signals still classify.
+	if !isRequestOrParamError(&APIError{StatusCode: 400, Code: "invalid_request_error", Message: "bad field"}) {
+		t.Fatal("structured invalid_request 400 should classify as a param error")
+	}
+	if !isRequestOrParamError(&APIError{StatusCode: 400, Message: "missing required parameter: input"}) {
+		t.Fatal("explicit missing-parameter text should classify as a param error")
 	}
 	// Non-400 request-shaped free text alone must not classify (stays retriable).
 	if isRequestOrParamError(&APIError{StatusCode: 500, Message: "invalid_request_error: bad field"}) {
