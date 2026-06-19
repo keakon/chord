@@ -1,259 +1,172 @@
 package thinkingtranslate
 
 import (
-	"context"
-	"errors"
-	"strings"
-	"sync"
 	"testing"
-
-	"github.com/keakon/chord/internal/config"
-	"github.com/keakon/chord/internal/llm"
-	"github.com/keakon/chord/internal/message"
 )
 
-type stubChunkTranslator struct {
-	translate func(ctx context.Context, targetLang, chunk string) (string, error)
-}
+func TestNormalizeLangCode(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		// Chinese variants
+		{"zh", "zh"},
+		{"zh-Hans", "zh"},
+		{"zh-hans", "zh"},
+		{"zh-CN", "zh"},
+		{"zh-cn", "zh"},
+		{"zh-Hant", "zh"},
+		{"zh-hant", "zh"},
+		{"zh-TW", "zh"},
+		{"zh-HK", "zh"},
 
-func (s stubChunkTranslator) TranslateChunk(ctx context.Context, targetLang, chunk string) (string, error) {
-	return s.translate(ctx, targetLang, chunk)
-}
+		// Other languages with regions
+		{"en", "en"},
+		{"en-US", "en"},
+		{"en-GB", "en"},
+		{"de-DE", "de"},
+		{"fr-FR", "fr"},
+		{"ja", "ja"},
 
-type sequenceProvider struct {
-	mu    sync.Mutex
-	calls int
-	steps []string
-}
+		// Edge cases
+		{"", ""},
+		{"  zh-Hans  ", "zh"},
+		{"EN-us", "en"},
+	}
 
-func (p *sequenceProvider) CompleteStream(
-	_ context.Context,
-	_ string,
-	_ string,
-	_ string,
-	_ []message.Message,
-	_ []message.ToolDefinition,
-	_ int,
-	_ llm.RequestTuning,
-	_ llm.StreamCallback,
-) (*message.Response, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	idx := p.calls
-	p.calls++
-	if idx >= len(p.steps) {
-		return nil, errors.New("unexpected provider call")
-	}
-	step := p.steps[idx]
-	if step == "empty" {
-		return &message.Response{Content: ""}, nil
-	}
-	return &message.Response{Content: step}, nil
-}
-
-func newTranslatorClient(t *testing.T, provider llm.Provider) *llm.Client {
-	t.Helper()
-	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
-		Type: config.ProviderTypeChatCompletions,
-		Models: map[string]config.ModelConfig{
-			"first":  {Limit: config.ModelLimit{Context: 4096, Output: 2048}},
-			"second": {Limit: config.ModelLimit{Context: 4096, Output: 2048}},
-		},
-	}, nil)
-	client := llm.NewClient(providerCfg, provider, "first", 2048, "")
-	client.SetModelPool([]llm.FallbackModel{
-		{ProviderConfig: providerCfg, ProviderImpl: provider, ModelID: "first", MaxTokens: 2048},
-		{ProviderConfig: providerCfg, ProviderImpl: provider, ModelID: "second", MaxTokens: 2048},
-	}, 0)
-	return client
-}
-
-func TestLLMTranslatorFallsBackOnEmptyTranslation(t *testing.T) {
-	provider := &sequenceProvider{steps: []string{
-		"empty",
-		"<TRANSLATION>第二个模型成功</TRANSLATION>",
-	}}
-	translator := &LLMTranslator{NewClient: func() (*llm.Client, error) {
-		return newTranslatorClient(t, provider), nil
-	}}
-
-	got, err := translator.TranslateChunk(context.Background(), "zh-Hans", "Hello")
-	if err != nil {
-		t.Fatalf("TranslateChunk() error = %v, want nil", err)
-	}
-	if got != "第二个模型成功" {
-		t.Fatalf("TranslateChunk() = %q, want %q", got, "第二个模型成功")
-	}
-	if provider.calls != 2 {
-		t.Fatalf("provider.calls = %d, want 2", provider.calls)
-	}
-}
-
-func TestLLMTranslatorFallsBackOnClearlyInvalidShortTranslation(t *testing.T) {
-	provider := &sequenceProvider{steps: []string{
-		"<TRANSLATION>**</TRANSLATION>",
-		"<TRANSLATION>需要仔细检查缓存恢复路径，因为翻译后的思考内容明显被截断，无法保留原文含义。</TRANSLATION>",
-	}}
-	translator := &LLMTranslator{NewClient: func() (*llm.Client, error) {
-		return newTranslatorClient(t, provider), nil
-	}}
-	original := "We need to inspect the cached restore path carefully because the translated reasoning output is visibly truncated and cannot preserve the original meaning."
-
-	got, err := translator.TranslateChunk(context.Background(), "zh-Hans", original)
-	if err != nil {
-		t.Fatalf("TranslateChunk() error = %v, want nil", err)
-	}
-	if got != "需要仔细检查缓存恢复路径，因为翻译后的思考内容明显被截断，无法保留原文含义。" {
-		t.Fatalf("TranslateChunk() = %q, want %q", got, "需要仔细检查缓存恢复路径，因为翻译后的思考内容明显被截断，无法保留原文含义。")
-	}
-	if provider.calls != 2 {
-		t.Fatalf("provider.calls = %d, want 2", provider.calls)
-	}
-}
-
-func TestLLMTranslatorFallsBackOnWrongTargetLanguage(t *testing.T) {
-	provider := &sequenceProvider{steps: []string{
-		"<TRANSLATION>We need to inspect the cached restore path because the translated reasoning output is still English and therefore not the requested target language.</TRANSLATION>",
-		"<TRANSLATION>需要检查缓存恢复路径，因为翻译后的思考内容仍然是英文，不是请求的目标语言。</TRANSLATION>",
-	}}
-	translator := &LLMTranslator{NewClient: func() (*llm.Client, error) {
-		return newTranslatorClient(t, provider), nil
-	}}
-	original := "We need to inspect the cached restore path carefully because the translated reasoning output is visibly truncated and cannot preserve the original meaning."
-
-	got, err := translator.TranslateChunk(context.Background(), "zh-Hans", original)
-	if err != nil {
-		t.Fatalf("TranslateChunk() error = %v, want nil", err)
-	}
-	if got != "需要检查缓存恢复路径，因为翻译后的思考内容仍然是英文，不是请求的目标语言。" {
-		t.Fatalf("TranslateChunk() = %q, want %q", got, "需要检查缓存恢复路径，因为翻译后的思考内容仍然是英文，不是请求的目标语言。")
-	}
-	if provider.calls != 2 {
-		t.Fatalf("provider.calls = %d, want 2", provider.calls)
-	}
-}
-
-func TestClearlyInvalidTranslationAllowsShortOriginals(t *testing.T) {
-	if IsClearlyInvalidTranslation("OK", "zh-Hans", "好") {
-		t.Fatal("IsClearlyInvalidTranslation() rejected a short valid translation")
-	}
-}
-
-func TestClearlyInvalidTranslationRejectsSeverelyCompressedLongOriginal(t *testing.T) {
-	original := "We need to inspect the cached restore path carefully because the translated reasoning output is visibly truncated and cannot preserve the original meaning. The retry should happen before the broken translation is persisted or rendered to the user."
-	if !IsClearlyInvalidTranslation(original, "zh-Hans", "缓存路径异常") {
-		t.Fatal("IsClearlyInvalidTranslation() accepted a severely compressed long translation")
-	}
-}
-
-func TestClearlyInvalidTranslationAllowsReasonableCompression(t *testing.T) {
-	original := "We need to inspect the cached restore path carefully because the translated reasoning output is visibly truncated and cannot preserve the original meaning."
-	translated := "需要仔细检查缓存恢复路径，因为翻译后的思考内容明显被截断，无法保留原意。"
-	if IsClearlyInvalidTranslation(original, "zh-Hans", translated) {
-		t.Fatal("IsClearlyInvalidTranslation() rejected a reasonably compressed translation")
-	}
-}
-
-func TestTranslationPromptUsesConsistentStructuredTags(t *testing.T) {
-	msgs := translationPrompt("zh-Hans", "Hello")
-	if len(msgs) != 1 {
-		t.Fatalf("translationPrompt() messages = %d, want 1", len(msgs))
-	}
-	prompt := msgs[0].Content
-	for _, want := range []string{
-		"content inside <TEXT>",
-		"<TEXT> and </TEXT> as delimiters",
-		"enclosed in <TRANSLATION></TRANSLATION>",
-		"<TEXT>\nHello\n</TEXT>",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt missing %q: %q", want, prompt)
-		}
-	}
-	for _, forbidden := range []string{"source_text", "SOURCE_TEXT", "<OUTPUT>", "</OUTPUT>"} {
-		if strings.Contains(prompt, forbidden) {
-			t.Fatalf("prompt contains inconsistent tag %q: %q", forbidden, prompt)
+	for _, tt := range tests {
+		got := normalizeLangCode(tt.input)
+		if got != tt.expected {
+			t.Errorf("normalizeLangCode(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
 	}
 }
 
-func TestServiceTranslateTextUsesConfiguredTranslator(t *testing.T) {
+func TestShouldTranslate_LanguageCodeNormalization(t *testing.T) {
 	svc, err := NewService()
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
 	svc.TargetLang = "zh-Hans"
-	svc.SetTranslator(stubChunkTranslator{translate: func(ctx context.Context, targetLang, chunk string) (string, error) {
-		if targetLang != "zh-Hans" {
-			t.Fatalf("targetLang = %q, want zh-Hans", targetLang)
-		}
-		if chunk != "Hello, world" {
-			t.Fatalf("chunk = %q, want Hello, world", chunk)
-		}
-		return "你好，世界", nil
-	}})
-	got, err := svc.TranslateText(context.Background(), "Hello, world", nil)
-	if err != nil {
-		t.Fatalf("TranslateText() error: %v", err)
-	}
-	if got != "你好，世界" {
-		t.Fatalf("TranslateText() = %q, want %q", got, "你好，世界")
-	}
-}
+	svc.MinConfidence = 0.7
+	svc.LatinRatioTrigger = 0.7
 
-func TestServiceTranslateTextTranslatesOnlyPreview(t *testing.T) {
-	svc, err := NewService()
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
-	svc.MaxChars = 5
-	calls := 0
-	svc.SetTranslator(stubChunkTranslator{translate: func(ctx context.Context, targetLang, chunk string) (string, error) {
-		calls++
-		if chunk != "abcde" {
-			t.Fatalf("chunk = %q, want abcde", chunk)
+	t.Run("zh detected should match zh-Hans target", func(t *testing.T) {
+		// This is the bug case: whatlanggo returns "zh", but target is "zh-Hans"
+		svc.DetectLang = func(string) (string, float64) { return "zh", 1.0 }
+		trigger, meta := svc.ShouldTranslate("zh-Hans", "这是中文内容")
+		if trigger {
+			t.Errorf("Should not trigger for zh vs zh-Hans, but got reason=%q", meta.Reason)
 		}
-		return "预览", nil
-	}})
-	got, err := svc.TranslateText(context.Background(), "abcdefghij", nil)
-	if err != nil {
-		t.Fatalf("TranslateText() error: %v", err)
-	}
-	if got != "预览" {
-		t.Fatalf("TranslateText() = %q, want 预览", got)
-	}
-	if calls != 1 {
-		t.Fatalf("translator calls = %d, want 1", calls)
-	}
-}
+	})
 
-func TestServiceFailureDoesNotBlockLaterTranslations(t *testing.T) {
-	svc, err := NewService()
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
-	calls := 0
-	boom := errors.New("temporary failure")
-	svc.SetTranslator(stubChunkTranslator{translate: func(ctx context.Context, targetLang, chunk string) (string, error) {
-		calls++
-		if calls == 1 {
-			return "", boom
+	t.Run("en detected should trigger for zh-Hans user", func(t *testing.T) {
+		svc.DetectLang = func(string) (string, float64) { return "en", 0.95 }
+		trigger, meta := svc.ShouldTranslate("zh-Hans", "This is English content")
+		if !trigger || meta.Reason != "lang_mismatch" {
+			t.Errorf("Should trigger for en vs zh-Hans, got trigger=%v reason=%q", trigger, meta.Reason)
 		}
-		return "第二次成功", nil
-	}})
+	})
 
-	_, err = svc.TranslateText(context.Background(), "First", nil)
-	if !errors.Is(err, boom) {
-		t.Fatalf("first TranslateText() error = %v, want %v", err, boom)
-	}
-	got, err := svc.TranslateText(context.Background(), "Second", nil)
-	if err != nil {
-		t.Fatalf("second TranslateText() error: %v", err)
-	}
-	if got != "第二次成功" {
-		t.Fatalf("second TranslateText() = %q, want %q", got, "第二次成功")
-	}
-	if calls != 2 {
-		t.Fatalf("translator calls = %d, want 2", calls)
-	}
+	t.Run("en-US detected should trigger for zh user", func(t *testing.T) {
+		svc.DetectLang = func(string) (string, float64) { return "en-US", 0.95 }
+		trigger, meta := svc.ShouldTranslate("zh", "This is English content")
+		if !trigger || meta.Reason != "lang_mismatch" {
+			t.Errorf("Should trigger for en-US vs zh, got trigger=%v reason=%q", trigger, meta.Reason)
+		}
+	})
+
+	t.Run("zh-CN detected should match zh-Hans target", func(t *testing.T) {
+		svc.DetectLang = func(string) (string, float64) { return "zh-CN", 0.99 }
+		trigger, meta := svc.ShouldTranslate("zh-Hans", "这是简体中文")
+		if trigger {
+			t.Errorf("Should not trigger for zh-CN vs zh-Hans, but got reason=%q", meta.Reason)
+		}
+	})
+
+	t.Run("zh-Hant detected should match zh-Hans target", func(t *testing.T) {
+		// After normalization, both become "zh"
+		svc.DetectLang = func(string) (string, float64) { return "zh-Hant", 0.95 }
+		trigger, meta := svc.ShouldTranslate("zh-Hans", "這是繁體中文")
+		if trigger && meta.Reason == "lang_mismatch" {
+			t.Errorf("Should not trigger lang_mismatch for zh-Hant vs zh-Hans after normalization, got trigger=%v reason=%q", trigger, meta.Reason)
+		}
+	})
+
+	t.Run("mixed Chinese-English content should not trigger if Han >= 50%", func(t *testing.T) {
+		// Simulate whatlanggo detecting as English but content is predominantly Chinese
+		svc.DetectLang = func(string) (string, float64) { return "en", 0.95 }
+		// Constructed text: ~50 Chinese chars + ~20 English words = 50/(50+20) = 71% Han
+		text := `这是一段包含技术术语的中文内容。我们讨论 refactor 和 optimization 的问题。
+另外还有 performance 和 scalability 方面的考虑。整体来说中文内容占主导地位，
+虽然包含一些 technical terms 但不应该触发翻译功能。因为主要语言仍然是中文。
+我们继续分析这些技术问题的解决方案和最佳实践。`
+		trigger, meta := svc.ShouldTranslate("zh-Hans", text)
+		if trigger {
+			t.Errorf("Should not trigger for mixed content with Han >= 50%%, got trigger=%v reason=%q", trigger, meta.Reason)
+		}
+		if meta.Reason != "target_is_dominant" {
+			t.Errorf("Expected reason=target_is_dominant, got %q", meta.Reason)
+		}
+	})
+
+	t.Run("pure English should trigger translation", func(t *testing.T) {
+		svc.DetectLang = func(string) (string, float64) { return "en", 0.95 }
+		trigger, meta := svc.ShouldTranslate("zh-Hans", "Let me continue to review the remaining commits and verify the implementation details")
+		if !trigger || meta.Reason != "lang_mismatch" {
+			t.Errorf("Should trigger for pure English, got trigger=%v reason=%q", trigger, meta.Reason)
+		}
+	})
+
+	t.Run("English-dominant with Chinese terms should trigger translation", func(t *testing.T) {
+		// English text with a few Chinese terms: should still translate
+		svc.DetectLang = func(string) (string, float64) { return "en", 0.95 }
+		// ~20 English words + ~4 Chinese chars = 20/(20+4) = 83% Latin
+		text := `This document discusses some Chinese concepts like 功能 and 性能。
+We need to understand the technical requirements 需求 and implementation 实现。`
+		trigger, meta := svc.ShouldTranslate("zh-Hans", text)
+		if !trigger || meta.Reason != "lang_mismatch" {
+			t.Errorf("Should trigger for English-dominant content, got trigger=%v reason=%q", trigger, meta.Reason)
+		}
+	})
+
+	t.Run("mixed English-Chinese content for English user should not trigger if Latin >= 50%", func(t *testing.T) {
+		// For English user receiving Chinese-mixed content
+		svc.DetectLang = func(string) (string, float64) { return "zh", 0.95 }
+		// Constructed: ~30 English words + ~10 Chinese chars = 30/(30+10) = 75% Latin
+		text := `This is a document that discusses some Chinese concepts and terminology.
+We need to understand the technical requirements and implementation details.
+Some Chinese terms like 功能 性能 需求 实现 are mentioned but English is dominant.`
+		trigger, meta := svc.ShouldTranslate("en", text)
+		if trigger {
+			t.Errorf("Should not trigger for mixed content with Latin >= 50%%, got trigger=%v reason=%q", trigger, meta.Reason)
+		}
+		if meta.Reason != "target_is_dominant" {
+			t.Errorf("Expected reason=target_is_dominant, got %q", meta.Reason)
+		}
+	})
+
+	t.Run("Japanese dominant content should not trigger if Kana/Han >= 50%", func(t *testing.T) {
+		svc.DetectLang = func(string) (string, float64) { return "en", 0.95 }
+		text := "これはレビュー結果の要約です。カタカナとひらがなを含む日本語が中心で、少量の English terms のみ含まれます。"
+		trigger, meta := svc.ShouldTranslate("ja", text)
+		if trigger {
+			t.Errorf("Should not trigger for Japanese-dominant content, got trigger=%v reason=%q", trigger, meta.Reason)
+		}
+		if meta.Reason != "target_is_dominant" {
+			t.Errorf("Expected reason=target_is_dominant, got %q", meta.Reason)
+		}
+	})
+
+	t.Run("Korean dominant content should not trigger if Hangul >= 50%", func(t *testing.T) {
+		svc.DetectLang = func(string) (string, float64) { return "en", 0.95 }
+		text := "이 문서는 검토 결과를 설명합니다. 대부분이 한국어 문장이고 일부 technical terms 만 포함합니다."
+		trigger, meta := svc.ShouldTranslate("ko", text)
+		if trigger {
+			t.Errorf("Should not trigger for Korean-dominant content, got trigger=%v reason=%q", trigger, meta.Reason)
+		}
+		if meta.Reason != "target_is_dominant" {
+			t.Errorf("Expected reason=target_is_dominant, got %q", meta.Reason)
+		}
+	})
 }

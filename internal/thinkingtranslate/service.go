@@ -56,14 +56,29 @@ func (s *Service) ShouldTranslate(userLang string, original string) (trigger boo
 	if userLang == "" {
 		userLang = stringsTrimLower(s.TargetLang)
 	}
-	latin, _ := scriptRatios(original)
+	latin, han, kana, hangul := scriptRatiosDetailed(original)
 	meta.LatinRatio = latin
 
 	if s.DetectLang != nil {
 		lang, conf := s.DetectLang(original)
 		meta.DetectedLang = stringsTrimLower(lang)
 		meta.Confidence = conf
-		if meta.DetectedLang != "" && userLang != "" && meta.DetectedLang != userLang && conf >= s.MinConfidence {
+
+		// Normalize language codes for comparison to avoid false mismatches
+		// (e.g., "zh" vs "zh-Hans", "en" vs "en-US")
+		normalizedDetected := normalizeLangCode(meta.DetectedLang)
+		normalizedUser := normalizeLangCode(userLang)
+
+		if normalizedDetected != "" && normalizedUser != "" && normalizedDetected != normalizedUser && conf >= s.MinConfidence {
+			// Check target language content ratio: if target language is the dominant
+			// language (>= 50%), this is likely a misdetection and doesn't need translation.
+			// Use target-language-specific script ratios so Japanese/Korean are not
+			// incorrectly judged by Han-only coverage.
+			targetLangRatio := getTargetLanguageRatio(userLang, latin, han, kana, hangul)
+			if targetLangRatio >= 0.50 {
+				meta.Reason = "target_is_dominant"
+				return false, meta
+			}
 			meta.Reason = "lang_mismatch"
 			return true, meta
 		}
@@ -114,6 +129,42 @@ func stringsTrimLower(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.ToLower(s)
 	return s
+}
+
+// normalizeLangCode normalizes language codes for comparison by removing
+// region/script suffixes (e.g., zh-Hans -> zh, en-US -> en, de-DE -> de).
+func normalizeLangCode(lang string) string {
+	lang = stringsTrimLower(lang)
+	if lang == "" {
+		return ""
+	}
+
+	// Strip region/script suffixes (e.g., zh-Hans -> zh, en-US -> en)
+	if idx := strings.IndexAny(lang, "-_"); idx > 0 {
+		return lang[:idx]
+	}
+
+	return lang
+}
+
+// getTargetLanguageRatio returns the content ratio for the target language.
+// For Chinese, it returns Han ratio; for Japanese, Han+Kana ratio; for Korean,
+// Hangul ratio; for Latin-based languages, Latin word ratio.
+func getTargetLanguageRatio(userLang string, latinRatio, hanRatio, kanaRatio, hangulRatio float64) float64 {
+	normalized := normalizeLangCode(userLang)
+
+	if normalized == "zh" {
+		return hanRatio
+	}
+	if normalized == "ja" {
+		return hanRatio + kanaRatio
+	}
+	if normalized == "ko" {
+		return hangulRatio
+	}
+
+	// Most other languages use Latin script
+	return latinRatio
 }
 
 func translationPrompt(targetLang, source string) []message.Message {
