@@ -83,6 +83,8 @@ func (t LspTool) Parameters() map[string]any {
 
 func (t LspTool) IsReadOnly() bool { return true }
 
+func (LspTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
+
 func (t LspTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	if t.LSP == nil {
 		return "", fmt.Errorf("LSP not configured")

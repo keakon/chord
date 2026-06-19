@@ -43,85 +43,35 @@ const (
 // tools may run together; everything else becomes a serialization boundary.
 func ConcurrencyClassForTool(registry *Registry, toolName string, args json.RawMessage) ToolConcurrencyClass {
 	name := strings.TrimSpace(toolName)
-	if name == "" {
-		return ToolConcurrencyClassExclusive
-	}
-	if registry == nil {
+	if name == "" || registry == nil {
 		return ToolConcurrencyClassExclusive
 	}
 	tool, ok := registry.Get(name)
 	if !ok {
 		return ToolConcurrencyClassExclusive
 	}
-	policy := PolicyForTool(registry, name, args)
-	policy = normalizeConcurrencyPolicy(name, policy)
-	if policy.Mode == ConcurrencyModeExclusive && !isReadOnlyConcurrencySafeTool(name, args) {
-		return ToolConcurrencyClassExclusive
-	}
-	if isReadOnlyConcurrencySafeTool(name, args) {
+	// A tool that declares this invocation safe to batch alongside other
+	// read-only calls wins outright. This is stronger than IsReadOnly: a tool
+	// can be read-only yet still require exclusive scheduling.
+	if toolConcurrencySafeReadOnly(tool, args) {
 		return ToolConcurrencyClassReadOnly
+	}
+	policy := normalizeConcurrencyPolicy(name, PolicyForTool(registry, name, args))
+	if policy.Mode == ConcurrencyModeExclusive {
+		return ToolConcurrencyClassExclusive
 	}
 	if !tool.IsReadOnly() {
 		return ToolConcurrencyClassMutating
 	}
-	if policy.Mode == ConcurrencyModeExclusive {
-		return ToolConcurrencyClassExclusive
-	}
 	return ToolConcurrencyClassExclusive
 }
 
-func isReadOnlyConcurrencySafeTool(toolName string, args json.RawMessage) bool {
-	switch strings.TrimSpace(toolName) {
-	case NameRead, NameViewImage, NameGrep, NameGlob, NameLsp, NameWebFetch, NameReadArtifact, NameSkill, NameSpawnStatus:
-		return true
-	case NameShell:
-		return shellReadOnlyCommandAllowed(args)
-	default:
-		return false
-	}
-}
-
-func shellReadOnlyCommandAllowed(args json.RawMessage) bool {
-	var parsed struct {
-		Command string `json:"command"`
-	}
-	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
-		return false
-	}
-	command := strings.TrimSpace(parsed.Command)
-	if command == "" || containsShellMetachar(command) {
-		return false
-	}
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return false
-	}
-	switch fields[0] {
-	case "pwd", "ls", "cat", "which":
-		return true
-	case "git":
-		if len(fields) < 2 {
-			return false
-		}
-		switch fields[1] {
-		case "status", "log", "diff", "show", "branch", "rev-parse":
-			return true
-		default:
-			return false
-		}
-	default:
-		return false
-	}
-}
-
-func containsShellMetachar(command string) bool {
-	for _, r := range command {
-		switch r {
-		case '|', '&', ';', '>', '<', '$', '`', '\\', '(', ')', '*', '?', '[', ']', '{', '}', '\n', '\r':
-			return true
-		}
-	}
-	return false
+// toolConcurrencySafeReadOnly reports whether the tool opts into read-only
+// batching for this specific invocation. Tools that do not implement
+// ConcurrencySafeReadOnlyTool are never auto-batched.
+func toolConcurrencySafeReadOnly(tool Tool, args json.RawMessage) bool {
+	safe, ok := tool.(ConcurrencySafeReadOnlyTool)
+	return ok && safe.ConcurrencySafeReadOnly(args)
 }
 
 func pathContainsResourcePath(basePath, targetPath string) bool {
@@ -148,6 +98,17 @@ func pathContainsResourcePath(basePath, targetPath string) bool {
 type ConcurrencyAwareTool interface {
 	Tool
 	ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy
+}
+
+// ConcurrencySafeReadOnlyTool is implemented by tools whose invocation is safe
+// to run in parallel within a batch of consecutive read-only calls. It is
+// stronger than IsReadOnly (a tool can be read-only yet require exclusive
+// scheduling) and lets each tool own this decision instead of a central
+// allowlist. The arg-aware signature lets tools like Shell admit only specific
+// read-only commands.
+type ConcurrencySafeReadOnlyTool interface {
+	Tool
+	ConcurrencySafeReadOnly(args json.RawMessage) bool
 }
 
 // DescriptiveTool can tailor its model-facing description using the current

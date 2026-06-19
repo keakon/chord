@@ -90,6 +90,8 @@ func (GlobTool) Parameters() map[string]any {
 
 func (GlobTool) IsReadOnly() bool { return true }
 
+func (GlobTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
+
 // legacyArgAliases maps deprecated singular field names to the current plural
 // schema fields so legacy-shaped calls validate without exposing the old names
 // in Parameters().

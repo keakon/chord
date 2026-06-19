@@ -332,6 +332,8 @@ func (ReadArtifactTool) Parameters() map[string]any {
 
 func (ReadArtifactTool) IsReadOnly() bool { return true }
 
+func (ReadArtifactTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
+
 func (ReadArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var args readArtifactArgs
 	if err := json.Unmarshal(raw, &args); err != nil {

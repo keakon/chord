@@ -212,6 +212,8 @@ func (WebFetchTool) Parameters() map[string]any {
 
 func (WebFetchTool) IsReadOnly() bool { return true }
 
+func (WebFetchTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
+
 func (t WebFetchTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()

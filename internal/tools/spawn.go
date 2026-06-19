@@ -185,6 +185,8 @@ func (SpawnStatusTool) Parameters() map[string]any {
 
 func (SpawnStatusTool) IsReadOnly() bool { return true }
 
+func (SpawnStatusTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
+
 func (SpawnStatusTool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	var a spawnStatusArgs
 	if err := json.Unmarshal(raw, &a); err != nil {

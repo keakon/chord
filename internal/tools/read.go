@@ -69,6 +69,8 @@ const MaxReadOutputTokens = 20_000
 
 func (ReadTool) IsReadOnly() bool { return true }
 
+func (ReadTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
+
 func splitReadToolLines(content string) []string {
 	if content == "" {
 		return nil

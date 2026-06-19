@@ -153,6 +153,8 @@ func (SkillTool) Parameters() map[string]any {
 
 func (SkillTool) IsReadOnly() bool { return true }
 
+func (SkillTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
+
 func substituteSkillPlaceholders(content, rootDir, args string) string {
 	content = strings.ReplaceAll(content, "${CHORD_SKILL_DIR}", rootDir)
 	content = strings.ReplaceAll(content, "${CHORD_SKILL_ARGS}", args)

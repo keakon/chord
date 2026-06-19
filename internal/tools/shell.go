@@ -148,6 +148,56 @@ func (ShellTool) ConcurrencyPolicy(_ json.RawMessage) ConcurrencyPolicy {
 	}
 }
 
+// ConcurrencySafeReadOnly admits a narrow allowlist of side-effect-free shell
+// commands (no metacharacters) so they can batch alongside other read-only
+// tools. Everything else falls back to the exclusive ConcurrencyPolicy.
+func (ShellTool) ConcurrencySafeReadOnly(args json.RawMessage) bool {
+	return shellReadOnlyCommandAllowed(args)
+}
+
+func shellReadOnlyCommandAllowed(args json.RawMessage) bool {
+	var parsed struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
+		return false
+	}
+	command := strings.TrimSpace(parsed.Command)
+	if command == "" || containsShellMetachar(command) {
+		return false
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return false
+	}
+	switch fields[0] {
+	case "pwd", "ls", "cat", "which":
+		return true
+	case "git":
+		if len(fields) < 2 {
+			return false
+		}
+		switch fields[1] {
+		case "status", "log", "diff", "show", "branch", "rev-parse":
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+}
+
+func containsShellMetachar(command string) bool {
+	for _, r := range command {
+		switch r {
+		case '|', '&', ';', '>', '<', '$', '`', '\\', '(', ')', '*', '?', '[', ']', '{', '}', '\n', '\r':
+			return true
+		}
+	}
+	return false
+}
+
 func (t ShellTool) Description() string {
 	return shellToolDescription(nil, t.shellType)
 }
