@@ -70,6 +70,11 @@ func TestDetectInteractiveShellCommandAllowsNonInteractiveCommands(t *testing.T)
 		"GIT_SEQUENCE_EDITOR='sed -i s/pick/fixup/' git rebase -i HEAD~2",
 		"printf 'y\nn\n' | git add -p",
 		"printf 'y\nn\n' | git checkout -p",
+		"man git-config 2>/dev/null | grep -A5 \"core.hooksPath\" | head -10 || git config --help 2>&1 | grep -A5 \"hooksPath\" | head -10",
+		"man git | grep -i clone",
+		"man ls | head -20",
+		"less file.txt | cat",
+		"more README.md | grep pattern",
 	}
 	for _, command := range cases {
 		t.Run(command, func(t *testing.T) {

@@ -34,7 +34,7 @@ func TestRebuildInvokedSkillsFromMessagesRestoresOnlySuccessfulSkills(t *testing
 }
 
 func TestSetSkillsHydratesRestoredInvokedSkillMetadata(t *testing.T) {
-	a := &MainAgent{invokedSkills: map[string]*skill.Meta{"go-expert": &skill.Meta{Name: "go-expert", Invoked: true}}}
+	a := &MainAgent{invokedSkills: map[string]*skill.Meta{"go-expert": {Name: "go-expert", Invoked: true}}}
 	a.SetSkills([]*skill.Meta{{Name: "go-expert", Description: "Go language development expert"}})
 
 	got := a.InvokedSkills()

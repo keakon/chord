@@ -75,10 +75,47 @@ func TestSpawnRejectsInteractiveCommandBeforeExecution(t *testing.T) {
 
 func TestSpawnToolUsesDetectedShellDescription(t *testing.T) {
 	desc := NewSpawnTool("posix").Description()
-	for _, want := range []string{"same detected shell environment", "non-interactive", "obvious interactive commands are rejected"} {
+	for _, want := range []string{
+		"real asynchronous execution is needed",
+		"Do not use spawn as a replacement for foreground shell",
+		"ordinary tests/builds/checks",
+		"commands you will simply wait for, use shell instead",
+		"same detected shell environment",
+		"non-interactive",
+		"obvious interactive commands are rejected",
+		"Completion results are delivered automatically",
+		"re-enter the conversation asynchronously",
+	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description %q should mention %q", desc, want)
 		}
+	}
+}
+
+func TestSpawnParametersWarnAgainstForegroundReplacement(t *testing.T) {
+	params := SpawnTool{}.Parameters()
+	props, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties has unexpected type %T", params["properties"])
+	}
+	commandProp, ok := props["command"].(map[string]any)
+	if !ok {
+		t.Fatalf("command has unexpected type %T", props["command"])
+	}
+	commandDesc, _ := commandProp["description"].(string)
+	for _, want := range []string{"asynchronous execution", "use shell for ordinary commands", "output you need immediately"} {
+		if !strings.Contains(commandDesc, want) {
+			t.Fatalf("command description missing %q in %q", want, commandDesc)
+		}
+	}
+
+	descriptionProp, ok := props["description"].(map[string]any)
+	if !ok {
+		t.Fatalf("description has unexpected type %T", props["description"])
+	}
+	descriptionDesc, _ := descriptionProp["description"].(string)
+	if !strings.Contains(descriptionDesc, "why it needs to run asynchronously") {
+		t.Fatalf("description field guidance missing async rationale in %q", descriptionDesc)
 	}
 }
 

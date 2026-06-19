@@ -37,14 +37,14 @@ func DetectInteractiveShellCommand(command string) *InteractiveCommandFinding {
 	}
 	commands := splitShellCommandTokensWithContext(tokens)
 	for _, cmd := range commands {
-		if finding := detectInteractiveCommandTokens(cmd.tokens, cmd.hasPipelineInput); finding != nil {
+		if finding := detectInteractiveCommandTokens(cmd.tokens, cmd.hasPipelineInput, cmd.hasPipelineOutput); finding != nil {
 			return finding
 		}
 	}
 	return nil
 }
 
-func detectInteractiveCommandTokens(tokens []string, hasPipelineInput bool) *InteractiveCommandFinding {
+func detectInteractiveCommandTokens(tokens []string, hasPipelineInput bool, hasPipelineOutput bool) *InteractiveCommandFinding {
 	if len(tokens) == 0 {
 		return nil
 	}
@@ -64,23 +64,27 @@ func detectInteractiveCommandTokens(tokens []string, hasPipelineInput bool) *Int
 	}
 
 	if isFullScreenCommand(name) {
-		return interactiveFinding(name, fmt.Sprintf("`%s` requires an interactive terminal UI", name), "Run this manually in a terminal, or use a non-interactive alternative such as cat/grep/sed where appropriate.")
+		// Allow man/less/more when output is piped
+		if (name == "man" || name == "less" || name == "more") && hasPipelineOutput {
+			return nil
+		}
+		return interactiveFinding(name, fmt.Sprintf("`%s` requires an interactive terminal UI", name), fullScreenCommandHint(name))
 	}
 
 	switch name {
 	case "stty":
-		return interactiveFinding("stty", "stty requires a terminal", "Run terminal configuration commands manually in a real terminal.")
+		return interactiveFinding("stty", "stty requires a terminal", "Use explicit terminal capability values, or avoid terminal-dependent queries in Shell/Spawn.")
 	case "tput":
-		return interactiveFinding("tput", "tput requires a terminal", "Use explicit terminal capability values in a real terminal, or avoid terminal-dependent queries in Shell/Spawn.")
+		return interactiveFinding("tput", "tput requires a terminal", "Use explicit terminal capability values, or avoid terminal-dependent queries in Shell/Spawn.")
 	case "sudo":
 		if hasOption(tokens[1:], "-n", "") || hasOption(tokens[1:], "--non-interactive", "") {
 			return nil
 		}
-		return interactiveFinding("sudo", "`sudo` may prompt for a password", "Use `sudo -n` for non-interactive failure, configure passwordless automation, or run this manually in a terminal.")
+		return interactiveFinding("sudo", "`sudo` may prompt for a password", "Use `sudo -n` for non-interactive failure, or configure passwordless sudo.")
 	case "ssh":
 		return detectInteractiveSSH(tokens)
 	case "sftp", "ftp", "telnet", "su", "passwd":
-		return interactiveFinding(name, fmt.Sprintf("`%s` may require login, password, or terminal interaction", name), "Run this manually in a terminal or use a non-interactive authentication method.")
+		return interactiveFinding(name, fmt.Sprintf("`%s` may require login, password, or terminal interaction", name), "Use a non-interactive authentication method where available.")
 	case "git":
 		return detectInteractiveGit(tokens, env, hasPipelineInput)
 	case "docker", "podman":
@@ -89,15 +93,15 @@ func detectInteractiveCommandTokens(tokens []string, hasPipelineInput bool) *Int
 		return detectInteractiveKubectl(tokens)
 	case "gh":
 		if len(tokens) >= 3 && tokens[1] == "auth" && tokens[2] == "login" && !hasOption(tokens[3:], "", "--with-token") {
-			return interactiveFinding("gh auth login", "`gh auth login` starts an authentication wizard", "Run it manually in a terminal, or provide authentication non-interactively via environment/token configuration.")
+			return interactiveFinding("gh auth login", "`gh auth login` starts an authentication wizard", "Provide authentication non-interactively via environment/token configuration (e.g., `gh auth login --with-token < token.txt`).")
 		}
 	case "gcloud":
 		if len(tokens) >= 3 && tokens[1] == "auth" && tokens[2] == "login" {
-			return interactiveFinding("gcloud auth login", "`gcloud auth login` starts an authentication wizard", "Run it manually in a terminal or use non-interactive service-account authentication.")
+			return interactiveFinding("gcloud auth login", "`gcloud auth login` starts an authentication wizard", "Use non-interactive service-account authentication.")
 		}
 	case "az":
 		if len(tokens) >= 2 && tokens[1] == "login" && !hasOption(tokens[2:], "", "--service-principal") {
-			return interactiveFinding("az login", "`az login` starts an authentication wizard", "Run it manually in a terminal or use a non-interactive service-principal/device-code flow outside Shell/Spawn.")
+			return interactiveFinding("az login", "`az login` starts an authentication wizard", "Use a non-interactive service-principal flow.")
 		}
 	case "aws":
 		if len(tokens) == 2 && tokens[1] == "configure" {
@@ -109,7 +113,7 @@ func detectInteractiveCommandTokens(tokens []string, hasPipelineInput bool) *Int
 
 func detectInteractiveSSH(tokens []string) *InteractiveCommandFinding {
 	if hasOption(tokens[1:], "-t", "") {
-		return interactiveFinding("ssh -t", "`ssh -t` allocates a TTY", "Remove TTY allocation for non-interactive execution, or run the command manually in a terminal.")
+		return interactiveFinding("ssh -t", "`ssh -t` allocates a TTY", "Remove TTY allocation for non-interactive execution.")
 	}
 	hostIndex := -1
 	for i := 1; i < len(tokens); i++ {
@@ -131,7 +135,7 @@ func detectInteractiveSSH(tokens []string) *InteractiveCommandFinding {
 		break
 	}
 	if hostIndex >= 0 && hostIndex == len(tokens)-1 {
-		return interactiveFinding("ssh", "`ssh` without a remote command starts an interactive login session", "Run it manually in a terminal, or provide a remote command and non-interactive authentication/options.")
+		return interactiveFinding("ssh", "`ssh` without a remote command starts an interactive login session", "Provide a remote command and non-interactive authentication/options.")
 	}
 	return nil
 }
@@ -150,7 +154,7 @@ func detectInteractiveGit(tokens []string, env map[string]string, hasPipelineInp
 	switch sub {
 	case "commit":
 		if hasOption(args, "-p", "--patch") || hasOption(args, "", "--interactive") {
-			return interactiveFinding("git commit --patch", "`git commit --patch` is an interactive patch workflow", "Run it manually in a terminal or commit explicit pathspecs/options non-interactively.")
+			return interactiveFinding("git commit --patch", "`git commit --patch` is an interactive patch workflow", "Commit explicit pathspecs/options non-interactively.")
 		}
 		if !gitCommitAvoidsEditor(args) {
 			return interactiveFinding("git commit", "`git commit` without an explicit message or no-edit/reuse-message option opens an editor", "Use `git commit -m <message>`, `git commit -F <file>`, `git commit --amend --no-edit`, or `git commit -C <commit>`.")
@@ -160,25 +164,25 @@ func detectInteractiveGit(tokens []string, env map[string]string, hasPipelineInp
 			if gitEditorAvoidsPrompt(env) {
 				return nil
 			}
-			return interactiveFinding("git rebase -i", "`git rebase -i` requires an editor", "Run it manually in a terminal, or use non-interactive git commands.")
+			return interactiveFinding("git rebase -i", "`git rebase -i` requires an editor", "Use `git rebase --exec` (without `-i`) for non-interactive rebase, or set GIT_SEQUENCE_EDITOR in the same command: `GIT_SEQUENCE_EDITOR=: git rebase -i` or `GIT_SEQUENCE_EDITOR='sed ...' git rebase -i`. Note: `export VAR=... && command` is not recognized by the pre-execution check.")
 		}
 	case "add", "checkout", "restore", "reset":
 		if hasOption(args, "-p", "--patch") && !hasPipelineInput {
-			return interactiveFinding("git "+sub+" -p", fmt.Sprintf("`git %s -p` is an interactive patch workflow", sub), "Run it manually in a terminal or use non-interactive pathspecs/options.")
+			return interactiveFinding("git "+sub+" -p", fmt.Sprintf("`git %s -p` is an interactive patch workflow", sub), "Use non-interactive pathspecs/options, or pipe responses via stdin.")
 		}
 		if sub == "add" && hasOption(args, "-i", "--interactive") {
-			return interactiveFinding("git add -i", "`git add -i` is interactive", "Run it manually in a terminal or use non-interactive pathspecs/options.")
+			return interactiveFinding("git add -i", "`git add -i` is interactive", "Use non-interactive pathspecs/options.")
 		}
 	case "stash":
 		if gitStashPatchIsInteractive(args) && !hasPipelineInput {
-			return interactiveFinding("git stash -p", "`git stash -p` is an interactive patch workflow", "Run it manually in a terminal or use non-interactive pathspecs/options.")
+			return interactiveFinding("git stash -p", "`git stash -p` is an interactive patch workflow", "Use non-interactive pathspecs/options, or pipe responses via stdin.")
 		}
 	case "clean":
 		if hasOption(args, "-i", "--interactive") {
-			return interactiveFinding("git clean -i", "`git clean -i` is interactive", "Run it manually in a terminal or use explicit non-interactive clean options.")
+			return interactiveFinding("git clean -i", "`git clean -i` is interactive", "Use explicit non-interactive clean options (e.g., `git clean -f`).")
 		}
 	case "difftool", "mergetool":
-		return interactiveFinding("git "+sub, fmt.Sprintf("`git %s` launches an interactive tool", sub), "Run it manually in a terminal or use plain git diff/merge commands.")
+		return interactiveFinding("git "+sub, fmt.Sprintf("`git %s` launches an interactive tool", sub), "Use plain git diff/merge commands.")
 	}
 	return nil
 }
@@ -209,10 +213,10 @@ func detectInteractiveContainerCommand(name string, tokens []string) *Interactiv
 	switch sub {
 	case "exec", "run", "start":
 		if hasTTYOptionBeforeContainerCommand(args) {
-			return interactiveFinding(name+" "+sub+" -t", fmt.Sprintf("`%s %s -t` allocates a TTY", name, sub), "Remove -t/--tty for non-interactive execution, or run the command manually in a terminal.")
+			return interactiveFinding(name+" "+sub+" -t", fmt.Sprintf("`%s %s -t` allocates a TTY", name, sub), "Remove -t/--tty for non-interactive execution.")
 		}
 	case "login":
-		return interactiveFinding(name+" login", fmt.Sprintf("`%s login` may prompt for credentials", name), "Use non-interactive credential input such as --password-stdin where supported, or run it manually in a terminal.")
+		return interactiveFinding(name+" login", fmt.Sprintf("`%s login` may prompt for credentials", name), "Use non-interactive credential input such as --password-stdin where supported.")
 	}
 	return nil
 }
@@ -223,7 +227,7 @@ func detectInteractiveKubectl(tokens []string) *InteractiveCommandFinding {
 		return nil
 	}
 	if (sub == "exec" || sub == "run" || sub == "attach") && hasTTYOption(args) {
-		return interactiveFinding("kubectl "+sub+" -t", fmt.Sprintf("`kubectl %s -t` allocates a TTY", sub), "Remove -t/--tty for non-interactive execution, or run the command manually in a terminal.")
+		return interactiveFinding("kubectl "+sub+" -t", fmt.Sprintf("`kubectl %s -t` allocates a TTY", sub), "Remove -t/--tty for non-interactive execution.")
 	}
 	return nil
 }
@@ -337,6 +341,13 @@ func isFullScreenCommand(name string) bool {
 	}
 }
 
+func fullScreenCommandHint(name string) string {
+	if name == "man" || name == "less" || name == "more" {
+		return "Pipe output through grep/head/tail (e.g., `man git-config | grep -A5 hooksPath`), or use --help flags where available."
+	}
+	return "Use cat/grep/sed for text processing, or --help flags where available."
+}
+
 func commandBase(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -407,7 +418,7 @@ func shellCommandAvoidsPrompt(value string) bool {
 	}
 	commands := splitShellCommandTokensWithContext(tokens)
 	for _, cmd := range commands {
-		if detectInteractiveCommandTokens(cmd.tokens, cmd.hasPipelineInput) != nil {
+		if detectInteractiveCommandTokens(cmd.tokens, cmd.hasPipelineInput, cmd.hasPipelineOutput) != nil {
 			return false
 		}
 	}
@@ -500,8 +511,9 @@ func hasOption(args []string, short, long string) bool {
 }
 
 type shellCommandTokens struct {
-	tokens           []string
-	hasPipelineInput bool
+	tokens            []string
+	hasPipelineInput  bool
+	hasPipelineOutput bool
 }
 
 func splitShellCommandTokens(tokens []string) [][]string {
@@ -526,35 +538,50 @@ func splitShellCommandTokensWithContext(tokens []string) []shellCommandTokens {
 		switch tok {
 		case "|":
 			if len(current) > 0 {
-				commands = append(commands, shellCommandTokens{tokens: current, hasPipelineInput: hasPipelineInput})
+				commands = append(commands, shellCommandTokens{
+					tokens:            current,
+					hasPipelineInput:  hasPipelineInput,
+					hasPipelineOutput: true,
+				})
 				current = nil
 			}
 			hasPipelineInput = true
 		case "&&", "||", ";", "&", "(", ")":
 			if len(current) > 0 {
-				commands = append(commands, shellCommandTokens{tokens: current, hasPipelineInput: hasPipelineInput})
+				commands = append(commands, shellCommandTokens{
+					tokens:            current,
+					hasPipelineInput:  hasPipelineInput,
+					hasPipelineOutput: false,
+				})
 				current = nil
 			}
 			hasPipelineInput = false
-		case "<", ">", ">>", "2>", "2>>", "&>", "&>>", "<<<", "<<":
-			if len(current) > 0 {
-				commands = append(commands, shellCommandTokens{tokens: current, hasPipelineInput: hasPipelineInput})
-			}
-			current = nil
+		case "<", "<<", "<<<":
+			// stdin redirection feeds input into the command, so treat it as
+			// pipeline input (e.g. `git add -p < responses` is non-interactive).
+			hasPipelineInput = true
+			skipNext = true
+		case ">", ">>", "2>", "2>>", "&>", "&>>":
+			// Output redirections don't end the command; just skip the target.
 			skipNext = true
 		default:
 			if isRedirectionToken(tok) {
-				if len(current) > 0 {
-					commands = append(commands, shellCommandTokens{tokens: current, hasPipelineInput: hasPipelineInput})
+				// Skip glued redirection tokens like "2>/dev/null" without ending the
+				// command; a glued stdin redirection ("<file", "<<<word") still feeds input.
+				if strings.HasPrefix(tok, "<") {
+					hasPipelineInput = true
 				}
-				current = nil
 				continue
 			}
 			current = append(current, tok)
 		}
 	}
 	if len(current) > 0 {
-		commands = append(commands, shellCommandTokens{tokens: current, hasPipelineInput: hasPipelineInput})
+		commands = append(commands, shellCommandTokens{
+			tokens:            current,
+			hasPipelineInput:  hasPipelineInput,
+			hasPipelineOutput: false,
+		})
 	}
 	return commands
 }

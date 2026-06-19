@@ -206,7 +206,7 @@ func loadAuthYAMLDocument(path string) (*authYAMLDocument, error) {
 		return nil, fmt.Errorf("auth config root must be a YAML document")
 	}
 	if len(root.Content) == 0 {
-		root.Content = []*yaml.Node{&yaml.Node{Kind: yaml.MappingNode}}
+		root.Content = []*yaml.Node{{Kind: yaml.MappingNode}}
 	} else if root.Content[0] == nil {
 		root.Content[0] = &yaml.Node{Kind: yaml.MappingNode}
 	} else if root.Content[0].Kind != yaml.MappingNode {
@@ -220,7 +220,7 @@ func newEmptyAuthYAMLDocument() *authYAMLDocument {
 		root: yaml.Node{
 			Kind: yaml.DocumentNode,
 			Content: []*yaml.Node{
-				&yaml.Node{Kind: yaml.MappingNode},
+				{Kind: yaml.MappingNode},
 			},
 		},
 	}
@@ -261,7 +261,7 @@ func (d *authYAMLDocument) rootMapping() *yaml.Node {
 		d.root = yaml.Node{Kind: yaml.DocumentNode}
 	}
 	if len(d.root.Content) == 0 || d.root.Content[0] == nil {
-		d.root.Content = []*yaml.Node{&yaml.Node{Kind: yaml.MappingNode}}
+		d.root.Content = []*yaml.Node{{Kind: yaml.MappingNode}}
 	}
 	if d.root.Content[0].Kind != yaml.MappingNode {
 		d.root.Content[0] = &yaml.Node{Kind: yaml.MappingNode}

@@ -97,12 +97,16 @@ func BuildSkillListing(entries []SkillListingEntry, header string) string {
 func buildSkillListing(list []*skill.Meta) string {
 	entries := make([]SkillListingEntry, 0, len(list))
 	for _, sk := range list {
-		if sk == nil || !sk.Discovered {
+		if !isListableSkill(sk) {
 			continue
 		}
 		entries = append(entries, SkillListingEntry{Name: sk.Name, Desc: sk.Description})
 	}
 	return BuildSkillListing(entries, "\n\n## Available Skills\n")
+}
+
+func isListableSkill(sk *skill.Meta) bool {
+	return sk != nil && sk.Discovered && strings.TrimSpace(sk.Name) != ""
 }
 
 func (t SkillTool) DescriptionForTools(_ map[string]struct{}) string {
@@ -156,7 +160,15 @@ func substituteSkillPlaceholders(content, rootDir, args string) string {
 }
 
 func (t SkillTool) IsAvailable() bool {
-	return t.provider != nil
+	if t.provider == nil {
+		return false
+	}
+	for _, sk := range t.provider.ListSkills() {
+		if isListableSkill(sk) {
+			return true
+		}
+	}
+	return false
 }
 
 func (t SkillTool) Execute(_ context.Context, raw json.RawMessage) (string, error) {

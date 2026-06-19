@@ -31,6 +31,27 @@ func (s skillProviderStub) InvokedSkills() []*skill.Meta {
 
 func (s skillProviderStub) MarkSkillInvoked(meta *skill.Meta) {}
 
+func TestSkillToolIsAvailableRequiresListableSkills(t *testing.T) {
+	tests := []struct {
+		name string
+		tool *SkillTool
+		want bool
+	}{
+		{name: "no provider", tool: NewSkillTool(nil), want: false},
+		{name: "empty list", tool: NewSkillTool(skillProviderStub{}), want: false},
+		{name: "undiscovered skill", tool: NewSkillTool(skillProviderStub{list: []*skill.Meta{{Name: "hidden", Discovered: false}}}), want: false},
+		{name: "empty name", tool: NewSkillTool(skillProviderStub{list: []*skill.Meta{{Name: " ", Discovered: true}}}), want: false},
+		{name: "visible skill", tool: NewSkillTool(skillProviderStub{list: []*skill.Meta{{Name: "go-expert", Discovered: true}}}), want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.tool.IsAvailable(); got != tt.want {
+				t.Fatalf("IsAvailable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSkillToolDescriptionForToolsListsAvailableSkills(t *testing.T) {
 	tool := NewSkillTool(skillProviderStub{
 		list: []*skill.Meta{{Name: "go-expert", Description: "Go language development expert", Discovered: true}},

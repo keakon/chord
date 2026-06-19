@@ -44,12 +44,12 @@ func (SpawnTool) DescriptionForTools(visible map[string]struct{}) string {
 
 func spawnToolDescription(_ map[string]struct{}) string {
 	return "Start a background process that runs independently of the current turn.\n" +
-		"Only use spawn for processes with real background lifecycle needs — not as a way to parallelize ordinary commands.\n" +
-		"Appropriate: dev servers, file watchers, long-running benchmarks, batch pipelines the user explicitly wants in background.\n" +
+		"Use spawn only when real asynchronous execution is needed: long-running services, commands that should keep running while you perform other useful work, or a small number of independent long-running checks that intentionally run in parallel.\n" +
+		"Do not use spawn as a replacement for foreground shell. For ordinary tests/builds/checks, short commands, commands whose output is needed immediately, or commands you will simply wait for, use shell instead.\n" +
+		"Appropriate: dev servers, file watchers, long-running benchmarks, and batch pipelines the user explicitly wants in background.\n" +
 		"It uses the same detected shell environment as the foreground shell tool.\n" +
 		"It is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution. Use a real terminal for commands that require user input.\n" +
-		"Use foreground shell for commands whose stdout/stderr you need in this turn.\n" +
-		"You will NOT receive live stdout/stderr directly from this tool. Job completion results are delivered automatically when the process exits and may include a truncated relevant output snippet on failure. Services may expose a diagnostic log_file path that you can inspect with foreground shell when needed.\n" +
+		"You will NOT receive live stdout/stderr directly from this tool. Completion results are delivered automatically when the process exits and may re-enter the conversation asynchronously with a truncated relevant output snippet on failure. Services may expose a diagnostic log_file path that you can inspect with foreground shell when needed.\n" +
 		"Set timeout for tasks that should terminate after a duration. Omit timeout for services that should run indefinitely."
 }
 
@@ -59,11 +59,11 @@ func (SpawnTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"command": map[string]any{
 				"type":        "string",
-				"description": "The shell command to run in background.",
+				"description": "The shell command to run in the background only when asynchronous execution is needed; use shell for ordinary commands you will wait for or whose output you need immediately.",
 			},
 			"description": map[string]any{
 				"type":        "string",
-				"description": "What this background process does (required).",
+				"description": "What this background process does and why it needs to run asynchronously (required).",
 			},
 			"timeout": map[string]any{
 				"type":        "integer",
