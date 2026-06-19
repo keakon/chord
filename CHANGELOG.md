@@ -3,11 +3,44 @@
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
 ## Unreleased
+### Changed
+
+- **Edit tools architecture**: Introduced dual editing tools optimized for different model training backgrounds
+  - Renamed unified diff tool from `edit` to `patch` (@@-style hunks for GPT/o-series models)
+  - Added new `edit` tool using old_string/new_string format (for Claude/Qwen/DeepSeek/other models)
+  - System automatically selects appropriate tool based on active model's training background
+- Permission rules for `edit` and `patch` now share one edit-tool family: a rule for one format applies to the counterpart when the counterpart has no explicit same-tool rule. This includes `deny`, so `*: allow` plus `edit: deny` disables both editors; configure both names (for example `edit: allow, patch: deny`) when one model-facing format should be disabled while the other remains available.
+
+### Fixed
+
+- Tool call card headers now prioritize the main argument and can use wider viewports for the one-line summary, while secondary parenthesized parameters are shortened first. `grep` search paths that equal the current working directory are hidden, and child directories are displayed relative to the workspace.
+- Streaming retries and rollbacks now clear partial thinking content and pending thinking translations, preventing stale thinking text from remaining in the TUI or recovered session state after a failed stream.
+- Thinking translation language detection improvements:
+  - Normalize language codes before comparison (e.g., `zh` vs `zh-Hans`, `en` vs `en-US`) to prevent false language mismatches
+  - Switch from letter-based to semantic-unit-based ratio calculation (Latin words vs Han characters) for fairer weight distribution
+  - Skip translation when target language is dominant (≥ 50%), preventing incorrect translation of mixed-language content where the user's language is actually the primary language despite misdetection
+- Anthropic-compatible providers that report a `thinking_tokens` usage field now have it parsed into reasoning-token usage and shown in the TUI info panel as a separate `Think` line, alongside existing input/output and cache usage figures. (The official Anthropic API does not report this field; thinking is counted within `output_tokens`.)
+- Sidebar file change tracking now normalizes file paths before comparing them, preventing duplicate entries when the same file is referenced with different path representations (e.g., `file.go` vs `./file.go`)
+- Patch tool now uses soft anchor fallback for @@ headers without specific identifiers, reducing false failures when header format is imprecise
+- Patch tool now detects and rejects patches containing only context lines (no +/- changes) with actionable error messages
+- System prompt and tool schema descriptions now dynamically adapt to visible tools, preventing references to unavailable tools
+- LSP tool visibility now correctly requires a configured LSP manager instance
+- Sidebar file statistics now prioritize showing complete +/- counts over long filenames, preventing truncation of change metrics
+- Write tool operations now properly tracked in file change summaries with accurate line counts for new files and overwrites
+- Model matching for edit/patch tool selection now uses strict pattern matching to prevent false positives (e.g., `o10` or `gptx` models incorrectly using patch tool)
+- Permission fallback between edit and patch tools now correctly handles wildcard rules and explicit per-format overrides, so disabling `patch` while explicitly allowing `edit` lets GPT/o-series models fall back to `edit` instead of losing all edit capability.
+- Speculative file mutation tracking now correctly extracts paths from both patch and edit tool arguments, fixing file tracking for ReplaceEditTool
+- Interactive command detection now correctly allows piped commands (e.g., `man git | grep`) and provides command-specific non-interactive alternatives instead of generic terminal suggestions
+- `write` now reports execution progress while writing file contents, matching other local file mutation tools more closely during longer writes.
+- **Patch tool performance**: Optimized from ~30s to milliseconds for large files by applying normalization fallbacks lazily, stopping hunk matching as soon as uniqueness/ambiguity is known, bounding expensive diagnostic scans before falling back only when needed, and adding fast diagnostic paths. Provides ~600x speedup in failure scenarios on 3000+ line files.
+- Code blocks in tool cards (Done reports, confirmations, etc.) now wrap long lines with continuation indent instead of overflowing the card boundary, fixing display issues with CSV data and long shell commands
 
 ### Improvements
 
 - Responses API requests now use the same Responses wire shape for every `type: responses` provider, explicitly sending `tool_choice`, `parallel_tool_calls`, `store`, `stream`, `include`, and Codex-compatible `client_metadata` when a session id is available. `store` still defaults to `false`, but explicit provider/model config is now honored. Encrypted reasoning content is requested only when the request carries a reasoning block. Relay endpoints that validate this request shape no longer reject Chord with `invalid codex request`.
+- Anthropic Messages requests now always send Claude Code-style client hints, including `x-app: cli`, the default Claude Code beta feature list, and JSON-formatted `metadata.user_id` for cache/routing affinity. These transport details are implicit like the Responses/Codex wire shape; the previous `compat.anthropic_transport` provider setting is no longer read or needed. Upgrade note: this setting existed in released versions including `v0.6.3`, so remove any `providers.<name>.compat.anthropic_transport` entries from existing configs when upgrading. Provider-level `user_agent` remains configurable for gateways that require a specific client/version string. The `context-1m-2025-08-07` beta is the exception: because the official API enforces it (tier-gated, long-context pricing above 200K, and an error on unsupported models), Chord opts in only when the model's declared window reaches 1M tokens (`limit.input` if set, otherwise `limit.context` >= 1000000), matching how Claude Code only sends it for 1M-capable models.
 - Reasoning is now sent when either `effort` or `summary` is configured (previously only `effort` triggered it), fixing a bug where summary-only reasoning configs were silently dropped.
+- Responses-compatible providers outside the official Codex backend now pass `reasoning.effort` through after normalization, allowing provider-specific values such as GLM `max`, `minimal`, or `none`; Codex still keeps its restricted effort set.
 - Responses HTTP requests now send the same SSE headers (`originator`, `Accept`, `OpenAI-Beta: responses=experimental`) alongside the authorization header, independent of `preset: codex`, while keeping the normal `User-Agent: chord/<version>` default and honoring provider-level `user_agent` overrides.
 - WebSocket Responses transport now propagates the `include` array from the request body instead of sending a hardcoded empty array.
 - JSON processing is faster on hot paths including LLM stream parsing, MCP JSON-RPC encoding/decoding, session import JSONL parsing, and `auth.state.json` loading.
@@ -17,10 +50,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - `grep` now accepts `paths` and `includes` arrays for multi-root searches and path glob filters, `glob` now accepts a `patterns` array, and invalid `grep` regex patterns automatically fall back to literal-text search with a visible result note. `glob` permission checks also evaluate every requested pattern so a later deny/ask rule cannot be bypassed by an earlier allowed pattern.
 - `grep` now reports per-path failures as result notes and returns partial results when only some search paths fail, instead of failing the whole call; it errors only when every requested path fails.
 - `chord import` now always converts recognizable external tool calls to structured Chord tool cards when their arguments can be normalized. The previously released `--tool-mode` flag was removed because it no longer changes import behavior.
-- `edit` no longer requires a prior `read` or system-resolved `@file` mention before applying a patch. Previously observed files are still tracked as snapshots so external changes can warn and create backups before risky writes.
-- Failed `edit` hunks now point out a near-miss file line and the first differing column when the mismatch is only a small long-line drift, making stale single-line prompts, URLs, and doc strings easier to recover.
-- Failed `edit` hunks whose old lines do not form one contiguous block now explain why: how many hunk lines still exist in the file, or the longest adjacent matching run and its starting line. When the file changed on disk after it was last read, the error also notes the hunk may be based on stale content.
-- TUI content viewers now copy the raw viewed content when using copy-all shortcuts, failed `edit` tool-card copy uses the full raw patch when the visible card content was trimmed, and restored inline image/PDF attachments use filename labels in the composer without adding duplicate text parts to model messages.
+- `edit` and `patch` no longer require a prior `read` or system-resolved `@file` mention before modifying a file. The tool prompts still recommend inspecting the target area first when the exact text or hunk context has not been verified; previously observed files remain tracked as snapshots so external changes can warn and create backups before risky writes.
+- Failed patch hunks now point out a near-miss file line and the first differing column when the mismatch is only a small long-line drift, making stale single-line prompts, URLs, and doc strings easier to recover.
+- Failed patch hunks whose old lines do not form one contiguous block now explain why: how many hunk lines still exist in the file, or the longest adjacent matching run and its starting line. When the file changed on disk after it was last read, the error also notes the hunk may be based on stale content.
+- TUI content viewers now copy the raw viewed content when using copy-all shortcuts, failed `patch` tool-card copy uses the full raw patch when the visible card content was trimmed, and restored inline image/PDF attachments use filename labels in the composer without adding duplicate text parts to model messages.
 - TUI assistant cards now end their background surface at the wrapped-text cap on wide viewports, reducing unnecessary card-width background fill on large terminals.
 - Natural-language prose (user/assistant messages, thinking, status cards) now wraps at up to 160 columns on wide terminals, while code blocks, diffs, and tool cards keep the 120-column cap that suits column-aligned content.
 - TUI palette contrast is improved with widened card-surface greyscale steps and adjusted secondary foreground colors, making tool cards and assistant messages easier to distinguish.
@@ -47,7 +80,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - All provider HTTP clients now bound the initial response-header wait to about 25 seconds (down from 60s) and the connection dial timeout to 15 seconds (down from 60s); healthy streams remain governed by the stream-idle timeout, and auxiliary model-pool calls keep their longer overall request timeout without stretching the header wait.
 - Streaming assistant cards whose content is only a placeholder (dots or an ellipsis) are no longer added to the conversation; the placeholder is replaced once real content arrives, and placeholder-only blocks are discarded instead of rendering as empty cards.
 - Tool failures whose result text already equals the error text are now returned once instead of appending a duplicate `Error:` block; evidence collection and request-level context reduction now also classify tool errors by the structured tool-result status, so such results are still treated as errors without the `Error:` prefix.
-- AGENTS.md workspace instructions are now framed as durable repository guidance for both main and sub-agents, avoiding weaker optional-context wording in provider requests.
+- AGENTS.md workspace instructions are now injected with explicit scope and visibility framing for both main and sub-agents: Chord loads the complete applicable AGENTS.md contents from the project root through the current working directory, sends them as an internal `<system-reminder>` before the first real user message, and treats them as durable workspace guidance rather than optional context.
 - Forked TUI messages now preserve inline image and PDF attachments after session restore and fork events, without being cleared by a deferred transcript rebuild.
 - Gemini tool schemas now strip Chord-only coercion markers before sending function declarations to the provider.
 - Shell permission fallback checks now keep compound-command review semantics when exposing matched rule suggestions, so narrow allow rules do not auto-approve unparsed compound commands.
@@ -57,7 +90,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - The TUI info panel changed-files section now prioritizes full `+N -N` line-change stats over long filenames, matching the narrow sidebar behavior.
 - The TUI info panel now scrolls independently with the mouse wheel or touchpad when the pointer is over it, so long changed-file or status sections are no longer clipped by the input area.
 - Collapsed Shell tool cards that were rejected now show the expand hint before the rejection reason, so the hint is no longer pushed below the result text.
-- Successful `edit` tool cards now show LSP diagnostics when an applied patch leaves errors, while hiding routine success boilerplate.
+- Successful `edit`/`patch` tool cards now show LSP diagnostics when a file edit leaves errors, while hiding routine success boilerplate.
 - Narrow TUI sidebars now prioritize changed-file `+N -N` stats over long filenames, keeping file change counts visible.
 - Editing forked TUI messages now preserves inline image attachments even when the visible prompt text is edited before resubmission.
 - Provider-reported usage now remains authoritative for automatic compaction: request-level local token estimates no longer clear an already-triggered usage-driven compaction request.
@@ -67,7 +100,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Assistant Markdown tables in the TUI can use wider cards on large terminals, reducing vertical wrapping in wide review tables.
 - TUI message rendering now escapes raw control characters before drawing cards, avoiding background color artifacts when pasted or model-generated text contains bytes such as `\x01`.
 - Switching model pool while a request is in flight now takes effect at the next request boundary instead of disrupting the in-flight request; the status bar and info panel show the model the next request will use.
-- Failed `edit` tool cards now show the attempted patch before the error text, making the failed hunk easier to inspect before reading the diagnostic.
+- Failed `patch` tool cards now show the attempted patch before the error text, making the failed hunk easier to inspect before reading the diagnostic.
 - Focused-agent submissions now include `@file` mention content parts instead of sending plain text only.
 - OAuth keys are now permanently removed from selection when the provider reports account or workspace deactivation, including deactivation responses surfaced as HTTP 402 errors.
 - Resuming sessions after `view_image` no longer shows tool-returned images as user-authored messages.
@@ -136,7 +169,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Breaking Changes
 
 - **Permissions:** remembered permission rules now save into agent config files — project rules in `<project>/.chord/agents/<role>.yaml`, global rules in `<config-home>/agents/<role>.yaml` — instead of a separate permissions overlay. Rules previously written to `.chord/permissions/<role>.yaml` are no longer loaded; move any you still need. The built-in planner now allows `write`/`edit` only under `.chord/plans/*` by default.
-- **Config:** the HTTP `User-Agent` override moved to a provider-level `user_agent`; the old Anthropic transport field was removed. Requests now default to `User-Agent: chord/<version>` unless overridden.
+- **Config:** the HTTP `User-Agent` override moved to a provider-level `user_agent`. Requests now default to `User-Agent: chord/<version>` unless overridden.
 - **Config:** removed the unused `context.reduction.model_pool` and `maintenance.size_check_interval_hours` settings. Context reduction stays deterministic and does not call a model; use `context.compaction.model_pool` for LLM-backed compaction.
 - **Config:** removed the `supports_fast` model field — migrate models to `supported_service_tiers: [fast]` (or omit it for preset/provider defaults).
 - **Compatibility:** removed remaining pre-1.0 fallbacks — Codex import accepts only the current rollout schema, `--config` is no longer an alias for `--config-home`, and headless model switching accepts only `set_current_model_pool`.

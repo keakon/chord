@@ -4,10 +4,38 @@
 
 ## 未发布
 
+### 变更
+
+- **编辑工具架构**：新增面向不同模型训练背景优化的双编辑工具
+  - 原统一 diff 工具从 `edit` 重命名为 `patch`，使用适合 GPT/o 系列模型的 `@@` hunk 格式
+  - 新增使用 `old_string`/`new_string` 格式的 `edit` 工具，适合 Claude、Qwen、DeepSeek 及其他模型
+  - 系统会根据当前模型训练背景自动选择合适的编辑工具
+- `edit` 与 `patch` 权限规则现在共享同一个编辑工具族：当另一个格式没有同名显式规则时，一个格式的规则会作用到另一个格式。这也包括 `deny`，因此 `*: allow` 加 `edit: deny` 会禁用两个编辑器；如果需要禁用某个面向模型的格式但保留另一个，请同时配置两个名字（例如 `edit: allow, patch: deny`）。
+
+### 修复
+
+- 工具调用卡片 header 现在会优先展示主参数，单行摘要可利用更宽视口；括号内的次要参数会优先缩短。`grep` 的搜索路径等于当前工作目录时会隐藏，子目录会以相对工作区的路径显示。
+- 流式请求重试或回滚时，现在会清理部分生成的 thinking 内容和待处理的 thinking 翻译，避免失败流之后在 TUI 或恢复的会话状态中残留过期 thinking 文本。
+- 思考翻译语言检测改进：
+  - 比较前规范化语言代码（如 `zh` vs `zh-Hans`、`en` vs `en-US`），避免因格式差异导致的误判
+  - 从基于字母计数改为基于语义单元计数（拉丁单词 vs 汉字），使权重分配更公平
+  - 当目标语言占主导地位（≥ 50%）时跳过翻译，避免因误检测而翻译用户语言实际为主要语言的混合内容
+- 对于会上报 `thinking_tokens` 用量字段的 Anthropic 兼容 provider，现在会将其解析为 reasoning token 用量，并在 TUI 信息面板中以单独的 `Think` 行展示，与现有的输入/输出和缓存用量并列显示。（官方 Anthropic API 不返回该字段，thinking 计入 `output_tokens`。）
+- 侧边栏文件变更追踪现在会在比较前规范化文件路径，避免同一文件以不同路径表示（如 `file.go` vs `./file.go`）时出现重复条目
+- Patch 工具现在会对缺少具体标识符的 `@@` header 使用软锚点回退，减少 header 格式不精确导致的误失败
+- Patch 工具现在会检测并拒绝只包含上下文行、没有 `+`/`-` 变更的 patch，并给出可操作的错误信息
+- System prompt 与工具 schema 描述现在会根据可见工具动态适配，避免引用不可用工具
+- LSP 工具可见性现在会正确要求已配置 LSP manager 实例
+- `write` 现在会在写入文件内容时报告执行进度，使较长写入过程与其他本地文件变更工具的反馈更一致。
+- **Patch 工具性能**：大文件处理性能从约 30 秒优化到毫秒级，通过延迟应用规范化回退、在 hunk 匹配已能判断唯一/歧义时立即停止、先限制昂贵诊断扫描窗口并仅在必要时回退到全量扫描，以及添加快速诊断路径实现。在 3000+ 行文件的失败场景下提供约 600 倍性能提升。
+- 工具卡片（Done 报告、确认提示等）中的代码块现在会对长行进行换行并带续行缩进，而非溢出卡片边界，修复了 CSV 数据和长 shell 命令的显示问题
+
 ### 改进
 
 - Responses API 请求现在对每个 `type: responses` provider 都使用同一套 Responses 请求形态，显式发送 `tool_choice`、`parallel_tool_calls`、`store`、`stream`、`include` 数组，并在有 session id 时发送 Codex 兼容的 `client_metadata`。`store` 仍默认 `false`，但显式 provider / model 配置现在会生效。只有请求里带 reasoning 块时才会请求 encrypted reasoning content。会校验这套请求形态的中转站不再返回 `invalid codex request` 拒绝请求。
+- Anthropic Messages 请求现在始终发送 Claude Code 风格的客户端提示，包括 `x-app: cli`、默认 Claude Code beta feature 列表，以及用于缓存 / 路由亲和的 JSON 格式 `metadata.user_id`。这些传输细节像 Responses / Codex 请求形态一样隐式启用；旧的 provider 配置项 `compat.anthropic_transport` 不再读取，也不再需要。升级提示：该配置项在已发布版本中（包括 `v0.6.3`）已经存在，因此升级时应从现有配置中移除 `providers.<name>.compat.anthropic_transport`。provider 级 `user_agent` 仍可配置，便于需要特定客户端 / 版本字符串的网关使用。其中 `context-1m-2025-08-07` 是例外：由于官方 API 会真实执行它（受权限门槛限制、超过 200K 切换长上下文计价、对不支持的模型直接报错），Chord 只在模型声明窗口达到 1M token 时才注入（优先 `limit.input`，否则 `limit.context` >= 1000000），与 Claude Code 仅对 1M 能力模型发送的做法一致。
 - 推理块现在在 `effort` 或 `summary` 任一配置时即会发送（此前仅 `effort` 触发），修复了仅配 summary 的推理配置被静默丢弃的 bug。
+- 非官方 Codex 的 Responses 兼容 provider 现在会在规范化后透传 `reasoning.effort`，允许 GLM 等 provider 使用 `max`、`minimal`、`none` 等自定义取值；官方 Codex 后端仍保留受限取值集合。
 - Responses HTTP 请求现在都会在授权头之外发送同一套 SSE 请求头（`originator`、`Accept`、`OpenAI-Beta: responses=experimental`），不再取决于是否配置了 `preset: codex`；User-Agent 继续默认使用 `chord/<version>`，并尊重 provider 级 `user_agent` 覆盖。
 - WebSocket Responses 传输现在从请求体传播 `include` 数组，而非硬编码空数组。
 - JSON 热路径处理更快，包括 LLM 流解析、MCP JSON-RPC 编解码、会话导入 JSONL 解析和 `auth.state.json` 加载。
@@ -17,10 +45,10 @@
 - `grep` 现在接受 `paths` 与 `includes` 数组，用于多根目录搜索和路径 glob 过滤；`glob` 现在接受 `patterns` 数组；当 `grep` 正则表达式无效时，会自动降级为字面量文本搜索并在结果中明确提示。`glob` 权限检查也会评估每一个请求的 pattern，避免后续 deny/ask 规则被前面已允许的 pattern 绕过。
 - `grep` 在部分搜索路径失败时，现在会把每个失败路径作为结果备注返回部分结果，而不是整个调用失败；只有所有请求路径都失败时才报错。
 - `chord import` 现在会在参数能标准化时始终把可识别的外部工具调用转换为结构化 Chord 工具卡。此前发布过的 `--tool-mode` flag 已移除，因为它不再改变导入行为。
-- `edit` 现在不再要求先通过 `read` 或系统解析的 `@file` mention 观察文件再应用 patch；已观察过的文件仍会作为 snapshot 跟踪，因此外部变更仍会触发风险提示并在必要时创建备份。
-- 当 `edit` 的 hunk 应用失败但与文件中的某一长行只存在很小差异时，现在会指出最接近的文件行号和首个差异列，便于恢复过期的单行 prompt、URL 或文档字符串。
-- 当 `edit` hunk 的旧行无法在文件中构成连续块时，错误信息现在会解释原因：文件中还存在多少 hunk 行，或最长相邻匹配段及其起始行号；如果文件在上次读取后在磁盘上发生过变化，错误中还会提示 hunk 可能基于过期内容。
-- TUI 内容查看器现在会在全量复制快捷键下复制原始查看内容；失败的 `edit` 工具卡片复制会在可见卡片内容被裁剪时使用完整 raw patch；恢复 inline 图片/PDF 附件时，输入框会使用文件名标签显示附件，但不会向模型消息额外添加重复文本 part。
+- `edit` 和 `patch` 现在不再要求先通过 `read` 或系统解析的 `@file` mention 观察文件再修改文件；工具提示仍会在精确文本或 hunk 上下文尚未验证时建议先检查目标区域。已观察过的文件仍会作为 snapshot 跟踪，因此外部变更仍会触发风险提示并在必要时创建备份。
+- 当 patch hunk 应用失败但与文件中的某一长行只存在很小差异时，现在会指出最接近的文件行号和首个差异列，便于恢复过期的单行 prompt、URL 或文档字符串。
+- 当 patch hunk 的旧行无法在文件中构成连续块时，错误信息现在会解释原因：文件中还存在多少 hunk 行，或最长相邻匹配段及其起始行号；如果文件在上次读取后在磁盘上发生过变化，错误中还会提示 hunk 可能基于过期内容。
+- TUI 内容查看器现在会在全量复制快捷键下复制原始查看内容；失败的 `patch` 工具卡片复制会在可见卡片内容被裁剪时使用完整 raw patch；恢复 inline 图片/PDF 附件时，输入框会使用文件名标签显示附件，但不会向模型消息额外添加重复文本 part。
 - TUI 助手卡片现在在宽视口下会以文本内容宽度为背景终点，不再沿卡片宽度拉伸背景填充。
 - 自然语言文本（用户/助手消息、thinking、状态卡片）在宽终端上的换行上限现在放宽到 160 列；代码块、diff 和工具卡片仍保持适合等宽对齐内容的 120 列上限。
 - TUI 调色板对比度提升，卡片表面灰阶步长加宽、次要前景色调整，工具卡与助手消息区分更清晰。
@@ -47,7 +75,7 @@
 - 所有 provider 的 HTTP client 现在会把初始响应头等待限制在约 25 秒（原为 60 秒），并把连接 dial 超时限制在 15 秒（原为 60 秒）；健康流仍由流式空闲超时管理，辅助模型池调用保留较长的总请求超时，但不会拉长响应头等待。
 - 流式 assistant 卡片在内容仅为占位符（点号或省略号）时不再加入会话；真实内容到达后会替换占位符，仅含占位符的块会被丢弃而不是渲染成空卡片。
 - 工具失败结果文本与错误文本相同时，现在只返回一次而不再追加重复的 `Error:` 块；证据收集与请求级上下文缩减现在也会根据结构化的工具结果状态识别工具错误，因此没有 `Error:` 前缀的此类结果仍会按错误处理。
-- AGENTS.md 工作区指令现在会在 main agent 与 sub-agent 中明确作为持久仓库指导传给模型，避免 provider 请求中使用较弱的可选上下文措辞。
+- AGENTS.md 工作区指令现在会在 main agent 与 sub-agent 中带明确范围和可见性说明注入：Chord 会从项目根目录到当前工作目录加载适用的完整 AGENTS.md 内容，作为内部 `<system-reminder>` 放在第一条真实用户消息之前，并将其视为持久工作区指导，而不是可选上下文。
 - Fork 编辑后的 TUI 消息现在在会话恢复与 fork 事件后仍会保留 inline 图片/PDF 附件，不会被延后执行的 transcript 重建清除。
 - Gemini 工具 schema 现在会在发送 function declaration 前剥离 Chord 内部使用的 coercion 标记。
 - Shell 权限回退检查现在在展示命中规则建议时仍保留复合命令复审语义，避免窄 allow 规则自动放行未解析的复合命令。
@@ -57,7 +85,7 @@
 - TUI 信息面板的 changed-files 区域现在会优先完整显示 `+N -N` 行数统计，而不是让长文件名挤掉改动数量，与较窄侧边栏的行为一致。
 - TUI 信息面板现在会在鼠标指针位于其上方时响应鼠标滚轮或触摸板独立滚动，较长的 changed files 或状态区块不再被输入区截断。
 - 被拒绝的折叠 Shell 工具卡片现在会把展开提示显示在拒绝原因之前，提示不再被挤到结果文本下方。
-- 成功的 `edit` 工具卡片现在会在 patch 应用后仍存在 LSP 诊断时显示 `↳ Diagnostics:`，同时隐藏常规成功样板文本。
+- 成功的 `edit`/`patch` 工具卡片现在会在文件编辑后仍存在 LSP 诊断时显示 `↳ Diagnostics:`，同时隐藏常规成功样板文本。
 - TUI 侧边栏较窄时现在会优先保留 changed-file 的 `+N -N` 统计，而不是让长文件名挤掉改动数量。
 - 编辑 forked TUI 消息后重新提交时，现在会保留 inline 图片附件，即使可见 prompt 文本已被修改。
 - 自动压缩现在以 provider 返回的 usage 为权威依据：请求级本地 token 估算不再清除已经由 usage 触发的压缩请求。
@@ -67,7 +95,7 @@
 - TUI 中的助手 Markdown 表格现在可在大终端上使用更宽的卡片宽度，减少较宽 review 表格的纵向换行。
 - TUI 消息渲染现在会在绘制卡片前转义原始控制字符，避免粘贴内容或模型输出包含 `\x01` 等字节时出现背景色异常。
 - 请求进行中切换 model pool 现在会在下一次请求边界生效，不再打断正在进行的请求；状态栏与信息面板会显示下一次请求将使用的模型。
-- 失败的 `edit` 工具卡片现在会先显示本次尝试的 patch，再显示错误文本，便于在阅读诊断前先检查失败 hunk。
+- 失败的 `patch` 工具卡片现在会先显示本次尝试的 patch，再显示错误文本，便于在阅读诊断前先检查失败 hunk。
 - 向聚焦 agent 提交消息时，现在会附带 `@file` 引用的文件内容 parts，不再只发送纯文本。
 - 当 provider 报告账号或 workspace 已停用时，OAuth key 现在会从选择中永久移除，包括以 HTTP 402 返回的停用错误。
 - `view_image` 后恢复会话时，工具返回的图片不再显示成用户手动发送的消息。
@@ -136,7 +164,7 @@
 ### 重大变更
 
 - **权限：** 记住的权限规则现在直接写入 agent 配置文件——project 规则写入 `<project>/.chord/agents/<role>.yaml`，global 规则写入 `<config-home>/agents/<role>.yaml`——不再使用单独的 permissions overlay。先前写在 `.chord/permissions/<role>.yaml` 的规则不再被加载，如仍需要请手动迁移。内置 planner 现在默认只允许在 `.chord/plans/*` 下执行 `write`/`edit`。
-- **配置：** HTTP `User-Agent` 覆盖移到 provider 级 `user_agent`，旧的 Anthropic transport 字段已移除。请求默认使用 `User-Agent: chord/<version>`，除非显式覆盖。
+- **配置：** HTTP `User-Agent` 覆盖移到 provider 级 `user_agent`。请求默认使用 `User-Agent: chord/<version>`，除非显式覆盖。
 - **配置：** 移除未使用的 `context.reduction.model_pool` 和 `maintenance.size_check_interval_hours`。上下文剪裁保持确定性、不调用模型；需要 LLM 参与的压缩请用 `context.compaction.model_pool`。
 - **配置：** 移除模型字段 `supports_fast`——请迁移为 `supported_service_tiers: [fast]`（或省略以使用 preset/provider 默认值）。
 - **兼容性：** 移除剩余的 pre-1.0 兼容路径——Codex 导入只接受当前 rollout schema，`--config` 不再是 `--config-home` 的别名，headless 模型切换只接受 `set_current_model_pool`。
