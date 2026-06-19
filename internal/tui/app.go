@@ -88,7 +88,7 @@ const codexActiveRateLimitPollInterval = time.Minute
 type toastTickMsg struct{ generation uint64 }
 
 // clearPendingQuitMsg is sent after pendingQuitWindow (2s) to auto-clear the
-// "press again to quit" hint. The generation field must match Model.pendingQuitGen
+// "press again to quit" hint. The generation field must match Model.quit.gen
 // for the message to take effect, preventing stale timers from clearing newer
 // pending quit state after the user pressed esc or another key.
 type clearPendingQuitMsg struct{ generation uint64 }
@@ -218,9 +218,7 @@ type Model struct {
 	lastImagePasteSource string
 
 	// Exit confirmation: first q or Ctrl+C sets these; second same key within 2s quits.
-	pendingQuitAt  time.Time
-	pendingQuitBy  string // "q" or "ctrl+c"; only the same key counts as second press
-	pendingQuitGen uint64 // generation for clearPendingQuitMsg to ignore stale timers
+	quit quitState
 
 	composerRuntimeState
 
@@ -950,7 +948,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleProjectUsageLoaded(msg)
 
 	case clearPendingQuitMsg:
-		if msg.generation == m.pendingQuitGen {
+		if msg.generation == m.quit.gen {
 			m.clearPendingQuit()
 		}
 		return m, nil

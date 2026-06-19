@@ -8,6 +8,15 @@ import (
 	"github.com/keakon/chord/internal/agent"
 )
 
+// quitState tracks the two-press exit confirmation: the first q or Ctrl+C sets
+// it, and a second press of the same key within pendingQuitWindow quits.
+// Previously three loose Model fields (pendingQuitAt/By/Gen).
+type quitState struct {
+	at  time.Time // when the first press happened
+	by  string    // "q" or "ctrl+c"; only the same key counts as the second press
+	gen uint64    // generation so clearPendingQuitMsg ignores stale timers
+}
+
 type activityRuntimeState struct {
 	activities          map[string]agent.AgentActivityEvent
 	activityStartTime   map[string]time.Time

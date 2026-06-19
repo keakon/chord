@@ -163,20 +163,20 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 	case keyMatches(key, m.keyMap.Quit):
 		now := time.Now()
 		// Exit only on second consecutive q (not q then Ctrl+C).
-		if m.pendingQuitBy == "q" && !m.pendingQuitAt.IsZero() && now.Sub(m.pendingQuitAt) < pendingQuitWindow {
+		if m.quit.by == "q" && !m.quit.at.IsZero() && now.Sub(m.quit.at) < pendingQuitWindow {
 			m.clearPendingQuit()
 			m.quitting = true
 			return tea.Quit
 		}
 		// Other key (e.g. had pressed Ctrl+C first): cancel wait, do not start new one.
-		if m.pendingQuitBy == "ctrl+c" {
+		if m.quit.by == "ctrl+c" {
 			m.clearPendingQuit()
 			return nil
 		}
-		m.pendingQuitAt = now
-		m.pendingQuitBy = "q"
-		m.pendingQuitGen++
-		return clearPendingQuitTick(m.pendingQuitGen)
+		m.quit.at = now
+		m.quit.by = "q"
+		m.quit.gen++
+		return clearPendingQuitTick(m.quit.gen)
 
 	case keyMatches(key, m.keyMap.HelpToggle):
 		return m.openHelp()

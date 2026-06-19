@@ -91,7 +91,7 @@ func pendingQuitFingerprintAt(pendingQuitBy string, pendingQuitAt, now time.Time
 }
 
 func (m *Model) pendingQuitFingerprint(now time.Time) string {
-	return pendingQuitFingerprintAt(m.pendingQuitBy, m.pendingQuitAt, now)
+	return pendingQuitFingerprintAt(m.quit.by, m.quit.at, now)
 }
 
 type statusBarAgentSnapshot struct {
@@ -503,9 +503,9 @@ func (m *Model) renderStatusBar() string {
 	m.resetStatusBarCopyRegions()
 
 	// Exit confirmation hint: "press same key again to quit"
-	if m.pendingQuitBy != "" && !m.pendingQuitAt.IsZero() && time.Since(m.pendingQuitAt) < pendingQuitWindow {
+	if m.quit.by != "" && !m.quit.at.IsZero() && time.Since(m.quit.at) < pendingQuitWindow {
 		hint := "Press q again to quit"
-		if m.pendingQuitBy == "ctrl+c" {
+		if m.quit.by == "ctrl+c" {
 			hint = "Press Ctrl+C again to quit"
 		}
 		quitHint = hint

@@ -68,12 +68,12 @@ func clearPendingQuitTick(gen uint64) tea.Cmd {
 // intentionally left unchanged so each new clearPendingQuitTick uses a
 // strictly newer generation and stale timers can never match again.
 func (m *Model) clearPendingQuit() {
-	m.pendingQuitAt = time.Time{}
-	m.pendingQuitBy = ""
+	m.quit.at = time.Time{}
+	m.quit.by = ""
 }
 
 func (m *Model) clearPendingQuitForKey(msg tea.KeyMsg) {
-	if m.pendingQuitBy == "" || m.pendingQuitAt.IsZero() {
+	if m.quit.by == "" || m.quit.at.IsZero() {
 		return
 	}
 	m.clearPendingQuit()
@@ -121,21 +121,21 @@ func (m *Model) handleCtrlC() tea.Cmd {
 	if m.mode == ModeErrorPanel {
 		return m.closeErrorPanel()
 	}
-	if m.pendingQuitBy == "ctrl+c" && !m.pendingQuitAt.IsZero() && now.Sub(m.pendingQuitAt) < pendingQuitWindow {
+	if m.quit.by == "ctrl+c" && !m.quit.at.IsZero() && now.Sub(m.quit.at) < pendingQuitWindow {
 		m.clearPendingQuit()
 		m.quitting = true
 		return tea.Quit
 	}
-	if m.pendingQuitBy == "q" {
+	if m.quit.by == "q" {
 		m.clearPendingQuit()
 		return nil
 	}
 	// Ctrl+C no longer cancels busy agent or compaction.
 	// ESC is the dedicated cancel key. Ctrl+C only initiates quit.
-	m.pendingQuitAt = now
-	m.pendingQuitBy = "ctrl+c"
-	m.pendingQuitGen++
-	return clearPendingQuitTick(m.pendingQuitGen)
+	m.quit.at = now
+	m.quit.by = "ctrl+c"
+	m.quit.gen++
+	return clearPendingQuitTick(m.quit.gen)
 }
 
 func (m *Model) handleSearchKey(msg tea.KeyMsg) tea.Cmd {

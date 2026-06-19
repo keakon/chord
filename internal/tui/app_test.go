@@ -6734,13 +6734,13 @@ func TestHandleCtrlCCancelSessionSelectRestoresInsertIME(t *testing.T) {
 
 func TestCtrlCHintClearsOnNonCtrlCKeyAcrossModes(t *testing.T) {
 	m := NewModel(nil)
-	m.pendingQuitAt = time.Now()
-	m.pendingQuitBy = "ctrl+c"
+	m.quit.at = time.Now()
+	m.quit.by = "ctrl+c"
 
 	_, _ = m.Update(tea.KeyPressMsg(tea.Key{Text: "x", Code: 'x'}))
 
-	if !m.pendingQuitAt.IsZero() || m.pendingQuitBy != "" {
-		t.Fatalf("pending quit = (%v, %q), want cleared", m.pendingQuitAt, m.pendingQuitBy)
+	if !m.quit.at.IsZero() || m.quit.by != "" {
+		t.Fatalf("pending quit = (%v, %q), want cleared", m.quit.at, m.quit.by)
 	}
 }
 
@@ -6752,23 +6752,23 @@ func TestPendingQuitTimerDoesNotClearNewerState(t *testing.T) {
 
 	// First ctrl+c sets pending quit with gen=1.
 	_ = m.handleCtrlC()
-	if m.pendingQuitGen != 1 {
-		t.Fatalf("pendingQuitGen = %d, want 1", m.pendingQuitGen)
+	if m.quit.gen != 1 {
+		t.Fatalf("pendingQuitGen = %d, want 1", m.quit.gen)
 	}
-	if m.pendingQuitBy != "ctrl+c" {
-		t.Fatalf("pendingQuitBy = %q, want ctrl+c", m.pendingQuitBy)
+	if m.quit.by != "ctrl+c" {
+		t.Fatalf("pendingQuitBy = %q, want ctrl+c", m.quit.by)
 	}
 
 	// Clear the state, but keep generation monotonic.
 	m.clearPendingQuit()
-	if m.pendingQuitGen != 1 {
-		t.Fatalf("pendingQuitGen = %d after clear, want 1", m.pendingQuitGen)
+	if m.quit.gen != 1 {
+		t.Fatalf("pendingQuitGen = %d after clear, want 1", m.quit.gen)
 	}
 
 	// Second ctrl+c must allocate a newer generation.
 	_ = m.handleCtrlC()
-	if m.pendingQuitGen != 2 {
-		t.Fatalf("pendingQuitGen = %d, want 2", m.pendingQuitGen)
+	if m.quit.gen != 2 {
+		t.Fatalf("pendingQuitGen = %d, want 2", m.quit.gen)
 	}
 
 	// Now simulate the old timer from the first attempt (gen=1) firing.
@@ -6777,8 +6777,8 @@ func TestPendingQuitTimerDoesNotClearNewerState(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("Update(clearPendingQuitMsg{generation: 1}) returned non-nil cmd")
 	}
-	if m.pendingQuitBy != "ctrl+c" {
-		t.Fatalf("stale timer cleared pending quit; pendingQuitBy = %q, want ctrl+c", m.pendingQuitBy)
+	if m.quit.by != "ctrl+c" {
+		t.Fatalf("stale timer cleared pending quit; pendingQuitBy = %q, want ctrl+c", m.quit.by)
 	}
 
 	// But a matching generation should clear it.
@@ -6786,8 +6786,8 @@ func TestPendingQuitTimerDoesNotClearNewerState(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("Update(clearPendingQuitMsg{generation: 2}) returned non-nil cmd")
 	}
-	if m.pendingQuitBy != "" {
-		t.Fatalf("matching timer did not clear pending quit; pendingQuitBy = %q", m.pendingQuitBy)
+	if m.quit.by != "" {
+		t.Fatalf("matching timer did not clear pending quit; pendingQuitBy = %q", m.quit.by)
 	}
 }
 
@@ -6798,35 +6798,35 @@ func TestPendingQuitTimerGenerationForQ(t *testing.T) {
 
 	// First q sets pending quit with gen=1.
 	_, _ = m.Update(tea.KeyPressMsg(tea.Key{Text: "q", Code: 'q'}))
-	if m.pendingQuitGen != 1 {
-		t.Fatalf("pendingQuitGen = %d, want 1", m.pendingQuitGen)
+	if m.quit.gen != 1 {
+		t.Fatalf("pendingQuitGen = %d, want 1", m.quit.gen)
 	}
-	if m.pendingQuitBy != "q" {
-		t.Fatalf("pendingQuitBy = %q, want q", m.pendingQuitBy)
+	if m.quit.by != "q" {
+		t.Fatalf("pendingQuitBy = %q, want q", m.quit.by)
 	}
 
 	// Clear the state, but keep generation monotonic.
 	m.clearPendingQuit()
-	if m.pendingQuitGen != 1 {
-		t.Fatalf("pendingQuitGen = %d after clear, want 1", m.pendingQuitGen)
+	if m.quit.gen != 1 {
+		t.Fatalf("pendingQuitGen = %d after clear, want 1", m.quit.gen)
 	}
 
 	// Second q sets pending quit with gen=2.
 	_, _ = m.Update(tea.KeyPressMsg(tea.Key{Text: "q", Code: 'q'}))
-	if m.pendingQuitGen != 2 {
-		t.Fatalf("pendingQuitGen = %d, want 2", m.pendingQuitGen)
+	if m.quit.gen != 2 {
+		t.Fatalf("pendingQuitGen = %d, want 2", m.quit.gen)
 	}
 
 	// Stale timer from the first attempt (gen=1) should not clear.
 	_, _ = m.Update(clearPendingQuitMsg{generation: 1})
-	if m.pendingQuitBy != "q" {
-		t.Fatalf("stale timer cleared pending quit; pendingQuitBy = %q, want q", m.pendingQuitBy)
+	if m.quit.by != "q" {
+		t.Fatalf("stale timer cleared pending quit; pendingQuitBy = %q, want q", m.quit.by)
 	}
 
 	// Matching timer should clear.
 	_, _ = m.Update(clearPendingQuitMsg{generation: 2})
-	if m.pendingQuitBy != "" {
-		t.Fatalf("matching timer did not clear pending quit; pendingQuitBy = %q", m.pendingQuitBy)
+	if m.quit.by != "" {
+		t.Fatalf("matching timer did not clear pending quit; pendingQuitBy = %q", m.quit.by)
 	}
 }
 
@@ -6864,8 +6864,8 @@ func TestViewRefreshesStatusBarForCtrlCHintWhileToastActive(t *testing.T) {
 		t.Fatalf("initial View() unexpectedly contains quit hint: %q", initial)
 	}
 
-	m.pendingQuitAt = time.Now()
-	m.pendingQuitBy = "ctrl+c"
+	m.quit.at = time.Now()
+	m.quit.by = "ctrl+c"
 
 	updated := stripANSI(m.View().Content)
 	if !strings.Contains(updated, "Press Ctrl+C again to quit") {
@@ -6884,8 +6884,8 @@ func TestViewRefreshesStatusBarForTransientStateChanges(t *testing.T) {
 		{
 			name: "pending quit q hint",
 			mutate: func(m *Model, backend *sessionControlAgent) {
-				m.pendingQuitAt = time.Now()
-				m.pendingQuitBy = "q"
+				m.quit.at = time.Now()
+				m.quit.by = "q"
 			},
 			want: "Press q again to quit",
 		},
