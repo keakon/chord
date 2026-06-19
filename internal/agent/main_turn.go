@@ -334,12 +334,10 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 	}
 
 	if len(reallyInterrupted) > 0 {
-		declared, undeclared := splitPendingCallsByDeclaredTools(a.ctxMgr, reallyInterrupted)
-		persistedResults := a.persistInterruptedToolResults(declared, ToolResultStatusError, context.Canceled)
+		persistedResults := finalizeInterruptedToolCalls(a.ctxMgr, a.emitToTUI, a.persistInterruptedToolResults, reallyInterrupted, ToolResultStatusError, context.Canceled)
 		if persistedResults > 0 {
 			log.Infof("persisted interrupted tool-call results before starting replacement turn turn_id=%v interrupted=%v completed=%v pending_tools=%v", turn.ID, persistedResults, completedCount, pending)
 		}
-		emitInterruptedToolResultsOrDiscards(a.emitToTUI, declared, undeclared, ToolResultStatusError, context.Canceled, "not_in_context")
 	} else if completedCount > 0 {
 		log.Infof("preserved completed tool results before starting replacement turn turn_id=%v completed=%v pending_tools=%v", turn.ID, completedCount, pending)
 	}

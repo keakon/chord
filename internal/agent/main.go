@@ -1614,12 +1614,10 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	}
 
 	if len(reallyCancelled) > 0 {
-		declared, undeclared := splitPendingCallsByDeclaredTools(a.ctxMgr, reallyCancelled)
-		persistedResults := a.persistInterruptedToolResults(declared, status, context.Canceled)
+		persistedResults := finalizeInterruptedToolCalls(a.ctxMgr, a.emitToTUI, a.persistInterruptedToolResults, reallyCancelled, status, context.Canceled)
 		if persistedResults > 0 {
 			log.Infof("persisted interrupted tool-call results after cancellation turn_id=%v interrupted=%v completed=%v", evt.TurnID, persistedResults, completedCount)
 		}
-		emitInterruptedToolResultsOrDiscards(a.emitToTUI, declared, undeclared, status, context.Canceled, "not_in_context")
 	} else if completedCount > 0 {
 		log.Infof("preserved completed tool results after cancellation turn_id=%v completed=%v", evt.TurnID, completedCount)
 	}

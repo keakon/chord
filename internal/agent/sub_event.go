@@ -73,12 +73,10 @@ func (s *SubAgent) runLoop() {
 				merged := mergePendingToolCalls(cancelledExec, cancelledStream)
 				merged = s.turn.filterCompletedToolCalls(merged)
 				if len(merged) > 0 {
-					declared, undeclared := splitPendingCallsByDeclaredTools(s.ctxMgr, merged)
-					persistedResults := s.persistInterruptedToolResults(declared, ToolResultStatusCancelled, context.Canceled)
+					persistedResults := finalizeInterruptedToolCalls(s.ctxMgr, s.parent.emitToTUI, s.persistInterruptedToolResults, merged, ToolResultStatusCancelled, context.Canceled)
 					if persistedResults > 0 {
 						log.Debugf("SubAgent: persisted interrupted tool-call results during shutdown agent=%v count=%v", s.instanceID, persistedResults)
 					}
-					emitInterruptedToolResultsOrDiscards(s.parent.emitToTUI, declared, undeclared, ToolResultStatusCancelled, context.Canceled, "not_in_context")
 					s.parent.emitActivity(s.instanceID, ActivityIdle, "")
 				}
 			}

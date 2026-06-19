@@ -100,6 +100,31 @@ func splitPendingCallsByDeclaredTools(m *ctxmgr.Manager, calls []PendingToolCall
 	return declared, undeclared
 }
 
+// finalizeInterruptedToolCalls is the shared tail of every turn cancel / fail /
+// replacement / shutdown path on both MainAgent and SubAgent. It splits calls
+// into the declared subset (present in assistant history) and the rest,
+// persists synthetic terminal results for the declared ones via persist, and
+// emits-or-discards the matching UI events. It returns the number persisted so
+// the caller can log it with its own site-specific fields.
+//
+// Keeping split → persist → emit together in one place guarantees persistence
+// and the UI always agree on the same declared/undeclared partition; previously
+// this trio was open-coded at six call sites, each one place a future edit could
+// update persistence without updating the UI (or vice versa).
+func finalizeInterruptedToolCalls(
+	ctxMgr *ctxmgr.Manager,
+	emit func(AgentEvent),
+	persist func(calls []PendingToolCall, status ToolResultStatus, cause error) int,
+	calls []PendingToolCall,
+	status ToolResultStatus,
+	cause error,
+) int {
+	declared, undeclared := splitPendingCallsByDeclaredTools(ctxMgr, calls)
+	persisted := persist(declared, status, cause)
+	emitInterruptedToolResultsOrDiscards(emit, declared, undeclared, status, cause, "not_in_context")
+	return persisted
+}
+
 // persistInterruptedToolResultsInto is the shared core behind both
 // MainAgent.persistInterruptedToolResults and its SubAgent counterpart. It
 // appends a synthetic terminal tool message for the declared subset of calls to

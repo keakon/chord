@@ -29,12 +29,10 @@ func (s *SubAgent) cancelCurrentTurnFromLoop() {
 	merged := turn.snapshotPendingToolCalls()
 	merged = turn.filterCompletedToolCalls(merged)
 	turn.PendingToolMeta = nil
-	declared, undeclared := splitPendingCallsByDeclaredTools(s.ctxMgr, merged)
-	persistedResults := s.persistInterruptedToolResults(declared, ToolResultStatusCancelled, context.Canceled)
+	persistedResults := finalizeInterruptedToolCalls(s.ctxMgr, s.parent.emitToTUI, s.persistInterruptedToolResults, merged, ToolResultStatusCancelled, context.Canceled)
 	if persistedResults > 0 {
 		log.Infof("SubAgent: persisted interrupted tool-call results after cancellation agent=%v turn_id=%v count=%v", s.instanceID, turn.ID, persistedResults)
 	}
-	emitInterruptedToolResultsOrDiscards(s.parent.emitToTUI, declared, undeclared, ToolResultStatusCancelled, context.Canceled, "not_in_context")
 	s.parent.emitActivity(s.instanceID, ActivityIdle, "")
 	log.Infof("SubAgent current turn cancelled by user agent=%v turn_id=%v pending_tools=%v cancelled_tools=%v", s.instanceID, turn.ID, pending, len(merged))
 }
