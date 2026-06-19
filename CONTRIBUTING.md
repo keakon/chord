@@ -21,13 +21,26 @@ go install honnef.co/go/tools/cmd/staticcheck@latest
 go build ./...
 ```
 
-Enable commit hooks once:
+## Git Hooks Setup (Required)
+
+After cloning the repository, enable commit hooks:
 
 ```bash
 ./scripts/setup-git-hooks.sh
 ```
 
-This installs `.githooks/pre-commit`, which runs `goimports` and `gofmt` on staged `.go` files before each commit.
+This configures `core.hooksPath` to use `.githooks/` and ensures:
+
+- `pre-commit` automatically runs `goimports` and `gofmt` on staged `.go` files
+- `pre-push` runs `fmt-check`, `vet`, `staticcheck`, and tests before pushing
+
+Verify the setup:
+
+```bash
+git config --get core.hooksPath  # should output: .githooks
+```
+
+**Why is this required?** Without proper hook configuration, code formatting won't be automatically applied, leading to CI failures and inconsistent formatting across commits.
 
 ## Run
 
