@@ -178,13 +178,7 @@ type Model struct {
 	completedExpectedAgentClose bool
 	theme                       Theme
 	keyMap                      KeyMap
-	imeSwitchTarget             string // when set, use im-select <target> and save/restore previous IM
-	imeBeforeNormal             string // saved current IM before switching to English; restored when entering Insert
-	imeMu                       *sync.Mutex
-	imeSeq                      uint64
-	imeApplying                 bool
-	imePending                  bool
-	imePendingTarget            string
+	ime                         imeState
 
 	// Normal-mode Vim chord state
 	chord               chordState
@@ -500,7 +494,7 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		useFocusResizeFreeze: detectFocusResizeFreezeFromEnv(),
 		theme:                theme,
 		keyMap:               DefaultKeyMap(),
-		imeMu:                &sync.Mutex{},
+		ime:                  imeState{mu: &sync.Mutex{}},
 		confirmCh:            make(chan ConfirmRequest, 1),
 		confirmResultCh:      make(chan ConfirmResult, 1),
 		questionCh:           make(chan QuestionRequest, 1),
@@ -725,20 +719,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !modeNeedsEnglishIME(m.mode) || !m.imeSwitchAllowed() {
 			return m, nil
 		}
-		m.imeMu.Lock()
-		stale := msg.seq != m.imeSeq
-		hasPending := m.imePending && strings.TrimSpace(m.imePendingTarget) != ""
-		pendingTarget := m.imePendingTarget
-		m.imeMu.Unlock()
+		m.ime.mu.Lock()
+		stale := msg.seq != m.ime.seq
+		hasPending := m.ime.pending && strings.TrimSpace(m.ime.pendingTarget) != ""
+		pendingTarget := m.ime.pendingTarget
+		m.ime.mu.Unlock()
 		if stale {
 			if hasPending {
 				m.queueIMEApply(pendingTarget)
 			}
 			return m, nil
 		}
-		m.imeBeforeNormal = msg.current
-		if m.imeSwitchTarget != "" {
-			m.queueIMEApply(m.imeSwitchTarget)
+		m.ime.beforeNormal = msg.current
+		if m.ime.switchTarget != "" {
+			m.queueIMEApply(m.ime.switchTarget)
 		}
 		return m, nil
 

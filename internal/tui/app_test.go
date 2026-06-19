@@ -6452,9 +6452,9 @@ func TestStatusBarUsesVisiblePendingTerminalStartByFocusedAgentView(t *testing.T
 // ---------------------------------------------------------------------------
 
 func preventIMEApplyInTests(m *Model) {
-	m.imeMu.Lock()
-	m.imeApplying = true
-	m.imeMu.Unlock()
+	m.ime.mu.Lock()
+	m.ime.applying = true
+	m.ime.mu.Unlock()
 }
 
 // TestIMESwitchIfTransitionOnlyTriggersForNormalModes verifies that
@@ -6522,7 +6522,7 @@ func TestGetIMECurrentCmdReturnsEmptyOnQueryError(t *testing.T) {
 
 func TestIMESwitchIfTransitionOnlyTriggersForNormalModes(t *testing.T) {
 	m := NewModel(nil)
-	m.imeSwitchTarget = "com.apple.keylayout.ABC"
+	m.ime.switchTarget = "com.apple.keylayout.ABC"
 	m.terminalAppFocused = true
 
 	cases := []struct {
@@ -6551,7 +6551,7 @@ func TestIMESwitchIfTransitionOnlyTriggersForNormalModes(t *testing.T) {
 
 func TestIMESwitchIfTransitionSkippedWhenBackgrounded(t *testing.T) {
 	m := NewModel(nil)
-	m.imeSwitchTarget = "com.apple.keylayout.ABC"
+	m.ime.switchTarget = "com.apple.keylayout.ABC"
 	m.terminalAppFocused = false
 
 	if cmd := m.runIMESwitchIfTransition(ModeInsert, ModeNormal); cmd != nil {
@@ -6564,15 +6564,15 @@ func TestIMESwitchIfTransitionSkippedWhenBackgrounded(t *testing.T) {
 // imeBeforeNormal must NOT be updated and IME must NOT be switched.
 func TestIMECurrentMsgIgnoredInInsertMode(t *testing.T) {
 	m := NewModel(nil)
-	m.imeSwitchTarget = "com.apple.keylayout.ABC"
+	m.ime.switchTarget = "com.apple.keylayout.ABC"
 	m.mode = ModeInsert // user already back in Insert before msg arrived
-	m.imeBeforeNormal = "zh-orig"
+	m.ime.beforeNormal = "zh-orig"
 
 	updated, _ := m.Update(imeCurrentMsg{seq: 0, current: "zh-new"})
 	model := updated.(*Model)
 
-	if model.imeBeforeNormal != "zh-orig" {
-		t.Fatalf("imeBeforeNormal changed to %q in Insert mode, want zh-orig", model.imeBeforeNormal)
+	if model.ime.beforeNormal != "zh-orig" {
+		t.Fatalf("imeBeforeNormal changed to %q in Insert mode, want zh-orig", model.ime.beforeNormal)
 	}
 }
 
@@ -6581,31 +6581,31 @@ func TestIMECurrentMsgIgnoredInInsertMode(t *testing.T) {
 // side-effect we don't assert on, but state must be updated).
 func TestIMECurrentMsgSavesAndSwitchesInNormalMode(t *testing.T) {
 	m := NewModel(nil)
-	m.imeSwitchTarget = "com.apple.keylayout.ABC"
+	m.ime.switchTarget = "com.apple.keylayout.ABC"
 	m.mode = ModeNormal
-	m.imeBeforeNormal = ""
+	m.ime.beforeNormal = ""
 
 	updated, _ := m.Update(imeCurrentMsg{seq: 0, current: "zh"})
 	model := updated.(*Model)
 
-	if model.imeBeforeNormal != "zh" {
-		t.Fatalf("imeBeforeNormal = %q, want \"zh\"", model.imeBeforeNormal)
+	if model.ime.beforeNormal != "zh" {
+		t.Fatalf("imeBeforeNormal = %q, want \"zh\"", model.ime.beforeNormal)
 	}
 }
 
 func TestSwitchModeWithIMERestoresWhenEnteringInsert(t *testing.T) {
 	m := NewModel(nil)
 	m.mode = ModeNormal
-	m.imeBeforeNormal = "zh-orig"
+	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 
 	m.switchModeWithIME(ModeInsert)
 
-	if m.imeBeforeNormal != "" {
-		t.Fatalf("imeBeforeNormal = %q after switchModeWithIME(Insert), want empty", m.imeBeforeNormal)
+	if m.ime.beforeNormal != "" {
+		t.Fatalf("imeBeforeNormal = %q after switchModeWithIME(Insert), want empty", m.ime.beforeNormal)
 	}
-	if !m.imePending || m.imePendingTarget != "zh-orig" {
-		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.imePending, m.imePendingTarget)
+	if !m.ime.pending || m.ime.pendingTarget != "zh-orig" {
+		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.ime.pending, m.ime.pendingTarget)
 	}
 }
 
@@ -6616,7 +6616,7 @@ func TestHandleNormalKeyEnterInsertClearsActiveSearchSession(t *testing.T) {
 	m.search.State.Query = "grep"
 	m.search.State.Matches = []MatchPosition{{BlockIndex: 0}}
 	m.search.State.Current = 0
-	m.imeBeforeNormal = "zh-orig"
+	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 
 	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "i"}))
@@ -6632,7 +6632,7 @@ func TestHandleNormalKeyEnterInsertClearsActiveSearchSession(t *testing.T) {
 func TestHandleNormalKeyEnterInsertQueuesIMERestore(t *testing.T) {
 	m := NewModel(nil)
 	m.mode = ModeNormal
-	m.imeBeforeNormal = "zh-orig"
+	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 
 	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "i"}))
@@ -6640,8 +6640,8 @@ func TestHandleNormalKeyEnterInsertQueuesIMERestore(t *testing.T) {
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert", m.mode)
 	}
-	if !m.imePending || m.imePendingTarget != "zh-orig" {
-		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.imePending, m.imePendingTarget)
+	if !m.ime.pending || m.ime.pendingTarget != "zh-orig" {
+		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.ime.pending, m.ime.pendingTarget)
 	}
 }
 
@@ -6702,7 +6702,7 @@ func TestRenderStatusBarDoesNotUseSyntheticConnectingForOtherAgentDraft(t *testi
 func TestLoadQueuedDraftIntoComposerQueuesIMERestore(t *testing.T) {
 	m := NewModel(nil)
 	m.mode = ModeNormal
-	m.imeBeforeNormal = "zh-orig"
+	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 	draft := queuedDraft{Content: "hello"}
 
@@ -6711,8 +6711,8 @@ func TestLoadQueuedDraftIntoComposerQueuesIMERestore(t *testing.T) {
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert", m.mode)
 	}
-	if !m.imePending || m.imePendingTarget != "zh-orig" {
-		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.imePending, m.imePendingTarget)
+	if !m.ime.pending || m.ime.pendingTarget != "zh-orig" {
+		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.ime.pending, m.ime.pendingTarget)
 	}
 }
 
@@ -6720,15 +6720,15 @@ func TestHandleCtrlCCancelSessionSelectRestoresInsertIME(t *testing.T) {
 	m := NewModel(nil)
 	m.mode = ModeSessionSelect
 	m.sessionSelect.prevMode = ModeInsert
-	m.imeBeforeNormal = "zh-orig"
+	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 
 	_ = m.handleCtrlC()
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert", m.mode)
 	}
-	if !m.imePending || m.imePendingTarget != "zh-orig" {
-		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.imePending, m.imePendingTarget)
+	if !m.ime.pending || m.ime.pendingTarget != "zh-orig" {
+		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.ime.pending, m.ime.pendingTarget)
 	}
 }
 
@@ -6964,7 +6964,7 @@ func TestResolveConfirmRestoresInsertModeWithIMERestore(t *testing.T) {
 		request:  &ConfirmRequest{ToolName: tools.NameEdit},
 		prevMode: ModeInsert,
 	}
-	m.imeBeforeNormal = "zh-orig"
+	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 
 	cmd := m.resolveConfirm(ConfirmResult{Action: ConfirmDeny})
@@ -6974,8 +6974,8 @@ func TestResolveConfirmRestoresInsertModeWithIMERestore(t *testing.T) {
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert", m.mode)
 	}
-	if !m.imePending || m.imePendingTarget != "zh-orig" {
-		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.imePending, m.imePendingTarget)
+	if !m.ime.pending || m.ime.pendingTarget != "zh-orig" {
+		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.ime.pending, m.ime.pendingTarget)
 	}
 }
 
@@ -6986,7 +6986,7 @@ func TestResolveQuestionRestoresInsertModeWithIMERestore(t *testing.T) {
 		request:  &QuestionRequest{Questions: []tools.QuestionItem{{Header: "name", Question: "who?"}}},
 		prevMode: ModeInsert,
 	}
-	m.imeBeforeNormal = "zh-orig"
+	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 
 	cmd := m.resolveQuestion(QuestionResult{Err: errors.New("cancelled")})
@@ -6996,8 +6996,8 @@ func TestResolveQuestionRestoresInsertModeWithIMERestore(t *testing.T) {
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert", m.mode)
 	}
-	if !m.imePending || m.imePendingTarget != "zh-orig" {
-		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.imePending, m.imePendingTarget)
+	if !m.ime.pending || m.ime.pendingTarget != "zh-orig" {
+		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.ime.pending, m.ime.pendingTarget)
 	}
 }
 
@@ -7306,7 +7306,7 @@ func TestOpenHelpClearsActiveSearchSession(t *testing.T) {
 func TestConfirmRequestMsgSwitchesIMEWhenEnteringConfirm(t *testing.T) {
 	m := NewModel(nil)
 	m.mode = ModeInsert
-	m.imeSwitchTarget = "com.apple.keylayout.ABC"
+	m.ime.switchTarget = "com.apple.keylayout.ABC"
 
 	updated, cmd := m.Update(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameEdit}})
 	model, ok := updated.(*Model)
@@ -7324,7 +7324,7 @@ func TestConfirmRequestMsgSwitchesIMEWhenEnteringConfirm(t *testing.T) {
 func TestQuestionRequestMsgSwitchesIMEWhenEnteringQuestion(t *testing.T) {
 	m := NewModel(nil)
 	m.mode = ModeInsert
-	m.imeSwitchTarget = "com.apple.keylayout.ABC"
+	m.ime.switchTarget = "com.apple.keylayout.ABC"
 
 	updated, cmd := m.Update(questionRequestMsg{request: QuestionRequest{Questions: []tools.QuestionItem{{Header: "name", Question: "who?", Options: []tools.QuestionOption{{Label: "alice"}}}}}})
 	model, ok := updated.(*Model)
@@ -7354,7 +7354,7 @@ func TestFocusMsgReappliesEnglishIMEForConfirmAndQuestionModes(t *testing.T) {
 			m := NewModel(nil)
 			m.SetFocusResizeFreezeEnabled(false)
 			m.mode = tc.mode
-			m.imeSwitchTarget = "com.apple.keylayout.ABC"
+			m.ime.switchTarget = "com.apple.keylayout.ABC"
 			m.terminalAppFocused = false
 			preventIMEApplyInTests(&m)
 
@@ -7366,8 +7366,8 @@ func TestFocusMsgReappliesEnglishIMEForConfirmAndQuestionModes(t *testing.T) {
 			if !model.terminalAppFocused {
 				t.Fatal("FocusMsg should mark terminal app focused")
 			}
-			if !model.imePending || model.imePendingTarget != "com.apple.keylayout.ABC" {
-				t.Fatalf("pending IME apply = (%v, %q), want (true, com.apple.keylayout.ABC)", model.imePending, model.imePendingTarget)
+			if !model.ime.pending || model.ime.pendingTarget != "com.apple.keylayout.ABC" {
+				t.Fatalf("pending IME apply = (%v, %q), want (true, com.apple.keylayout.ABC)", model.ime.pending, model.ime.pendingTarget)
 			}
 			if cmd != nil {
 				t.Fatalf("FocusMsg with freeze disabled should not schedule command, got %#v", cmd)
@@ -7378,19 +7378,19 @@ func TestFocusMsgReappliesEnglishIMEForConfirmAndQuestionModes(t *testing.T) {
 
 func TestIMECurrentMsgIgnoredWhenBackgrounded(t *testing.T) {
 	m := NewModel(nil)
-	m.imeSwitchTarget = "com.apple.keylayout.ABC"
+	m.ime.switchTarget = "com.apple.keylayout.ABC"
 	m.mode = ModeNormal
 	m.terminalAppFocused = false
-	m.imeBeforeNormal = "zh-orig"
+	m.ime.beforeNormal = "zh-orig"
 
 	updated, _ := m.Update(imeCurrentMsg{seq: 0, current: "zh-new"})
 	model := updated.(*Model)
 
-	if model.imeBeforeNormal != "zh-orig" {
-		t.Fatalf("imeBeforeNormal changed to %q while backgrounded, want zh-orig", model.imeBeforeNormal)
+	if model.ime.beforeNormal != "zh-orig" {
+		t.Fatalf("imeBeforeNormal changed to %q while backgrounded, want zh-orig", model.ime.beforeNormal)
 	}
-	if model.imePending {
-		t.Fatalf("background imeCurrentMsg should not queue apply, got pending target %q", model.imePendingTarget)
+	if model.ime.pending {
+		t.Fatalf("background imeCurrentMsg should not queue apply, got pending target %q", model.ime.pendingTarget)
 	}
 }
 
@@ -7399,13 +7399,13 @@ func TestIMECurrentMsgIgnoredWhenBackgrounded(t *testing.T) {
 // so a stale imeCurrentMsg that arrives later cannot re-clobber Insert-mode IME.
 func TestIMERestoreClearsBeforeNormal(t *testing.T) {
 	m := NewModel(nil)
-	m.imeSwitchTarget = "com.apple.keylayout.ABC"
-	m.imeBeforeNormal = "zh"
+	m.ime.switchTarget = "com.apple.keylayout.ABC"
+	m.ime.beforeNormal = "zh"
 
 	m.runIMERestoreIfNeeded()
 
-	if m.imeBeforeNormal != "" {
-		t.Fatalf("imeBeforeNormal = %q after restore, want empty", m.imeBeforeNormal)
+	if m.ime.beforeNormal != "" {
+		t.Fatalf("imeBeforeNormal = %q after restore, want empty", m.ime.beforeNormal)
 	}
 }
 
@@ -7413,13 +7413,13 @@ func TestIMERestoreClearsBeforeNormal(t *testing.T) {
 // when imeBeforeNormal is empty (first Insert entry, nothing to restore).
 func TestIMERestoreNoopWhenEmpty(t *testing.T) {
 	m := NewModel(nil)
-	m.imeBeforeNormal = ""
+	m.ime.beforeNormal = ""
 
 	// Should not panic and imeBeforeNormal stays empty.
 	m.runIMERestoreIfNeeded()
 
-	if m.imeBeforeNormal != "" {
-		t.Fatalf("imeBeforeNormal = %q, want empty", m.imeBeforeNormal)
+	if m.ime.beforeNormal != "" {
+		t.Fatalf("imeBeforeNormal = %q, want empty", m.ime.beforeNormal)
 	}
 }
 

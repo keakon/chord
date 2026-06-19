@@ -4,14 +4,30 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 
 	tea "github.com/keakon/bubbletea/v2"
 )
 
+// imeState groups the input-method-switching subsystem state, previously seven
+// loose Model fields. It drives im-select target switching (to an English
+// layout for Normal-style modes) and restores the prior IM when re-entering
+// Insert. mu is a pointer because the Bubble Tea Model is copied by value during
+// Update; the pointer keeps every copy sharing one lock for the apply queue.
+type imeState struct {
+	switchTarget  string      // im-select target (e.g. com.apple.keylayout.ABC); "" disables switching
+	beforeNormal  string      // saved IM before switching to English; restored when entering Insert
+	mu            *sync.Mutex // guards the apply queue fields below and seq
+	seq           uint64      // generation counter for getIMECurrentCmd staleness checks
+	applying      bool        // true while the apply-loop goroutine is running
+	pending       bool        // true when an apply is queued
+	pendingTarget string      // the queued apply target
+}
+
 // SetIMESwitchTarget sets the im-select target (e.g. com.apple.keylayout.ABC). When set,
 // we get current IM before switching and restore it when entering Insert.
 func (m *Model) SetIMESwitchTarget(target string) {
-	m.imeSwitchTarget = target
+	m.ime.switchTarget = target
 }
 
 // imeCurrentMsg is sent after getting current IM (im-select with no args); we then switch to target and save for restore.
@@ -46,10 +62,10 @@ func imSelectBinary() string {
 
 // getIMECurrentCmd returns a Cmd that runs im-select (no args) and sends the current IM key as imeCurrentMsg.
 func (m *Model) getIMECurrentCmd() tea.Cmd {
-	m.imeMu.Lock()
-	m.imeSeq++
-	seq := m.imeSeq
-	m.imeMu.Unlock()
+	m.ime.mu.Lock()
+	m.ime.seq++
+	seq := m.ime.seq
+	m.ime.mu.Unlock()
 	return func() tea.Msg {
 		current, err := imeQueryCurrent()
 		if err != nil {
@@ -61,22 +77,22 @@ func (m *Model) getIMECurrentCmd() tea.Cmd {
 
 func (m *Model) queueIMEApplyLocked(target string) {
 	if strings.TrimSpace(target) == "" {
-		m.imePending = false
-		m.imePendingTarget = ""
+		m.ime.pending = false
+		m.ime.pendingTarget = ""
 		return
 	}
-	m.imePending = true
-	m.imePendingTarget = target
-	if m.imeApplying {
+	m.ime.pending = true
+	m.ime.pendingTarget = target
+	if m.ime.applying {
 		return
 	}
-	m.imeApplying = true
+	m.ime.applying = true
 	go m.runIMEApplyLoop()
 }
 
 func (m *Model) queueIMEApply(target string) {
-	m.imeMu.Lock()
-	defer m.imeMu.Unlock()
+	m.ime.mu.Lock()
+	defer m.ime.mu.Unlock()
 	m.queueIMEApplyLocked(target)
 }
 
@@ -94,10 +110,10 @@ func (m *Model) imeSwitchAllowed() bool {
 }
 
 func (m *Model) reapplyIMEForCurrentModeOnFocus() {
-	if !m.imeSwitchAllowed() || !modeNeedsEnglishIME(m.mode) || m.imeSwitchTarget == "" {
+	if !m.imeSwitchAllowed() || !modeNeedsEnglishIME(m.mode) || m.ime.switchTarget == "" {
 		return
 	}
-	m.queueIMEApply(m.imeSwitchTarget)
+	m.queueIMEApply(m.ime.switchTarget)
 }
 
 func (m *Model) switchModeWithIME(to Mode) tea.Cmd {
@@ -126,18 +142,18 @@ func (m *Model) restoreModeWithIME(prev Mode) tea.Cmd {
 
 func (m *Model) runIMEApplyLoop() {
 	for {
-		m.imeMu.Lock()
-		if !m.imePending || strings.TrimSpace(m.imePendingTarget) == "" {
-			m.imePending = false
-			m.imePendingTarget = ""
-			m.imeApplying = false
-			m.imeMu.Unlock()
+		m.ime.mu.Lock()
+		if !m.ime.pending || strings.TrimSpace(m.ime.pendingTarget) == "" {
+			m.ime.pending = false
+			m.ime.pendingTarget = ""
+			m.ime.applying = false
+			m.ime.mu.Unlock()
 			return
 		}
-		target := m.imePendingTarget
-		m.imePending = false
-		m.imePendingTarget = ""
-		m.imeMu.Unlock()
+		target := m.ime.pendingTarget
+		m.ime.pending = false
+		m.ime.pendingTarget = ""
+		m.ime.mu.Unlock()
 
 		_ = imeApplyTarget(target)
 	}
@@ -150,22 +166,22 @@ func (m *Model) runIMESwitchIfTransition(from, to Mode) tea.Cmd {
 	if !modeNeedsEnglishIME(to) {
 		return nil
 	}
-	if from == to || m.imeSwitchTarget == "" || !m.imeSwitchAllowed() {
+	if from == to || m.ime.switchTarget == "" || !m.imeSwitchAllowed() {
 		return nil
 	}
 	if from == ModeInsert {
 		return m.getIMECurrentCmd()
 	}
-	m.queueIMEApply(m.imeSwitchTarget)
+	m.queueIMEApply(m.ime.switchTarget)
 	return nil
 }
 
 // runIMERestoreIfNeeded restores the saved input method when entering Insert (uses same im-select binary as switch).
 func (m *Model) runIMERestoreIfNeeded() {
-	if m.imeBeforeNormal == "" {
+	if m.ime.beforeNormal == "" {
 		return
 	}
-	target := m.imeBeforeNormal
-	m.imeBeforeNormal = "" // clear so rapid re-entry doesn't double-restore or use a stale value
+	target := m.ime.beforeNormal
+	m.ime.beforeNormal = "" // clear so rapid re-entry doesn't double-restore or use a stale value
 	m.queueIMEApply(target)
 }

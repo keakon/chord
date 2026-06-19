@@ -311,7 +311,7 @@ func TestResolveQuestionRestoresInsertModeWithTextareaState(t *testing.T) {
 		prevMode: ModeInsert,
 		input:    newQuestionTextarea(80),
 	}
-	m.imeBeforeNormal = "zh-orig"
+	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 
 	cmd := m.resolveQuestion(QuestionResult{Err: errors.New("cancelled")})
@@ -321,8 +321,8 @@ func TestResolveQuestionRestoresInsertModeWithTextareaState(t *testing.T) {
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert", m.mode)
 	}
-	if !m.imePending || m.imePendingTarget != "zh-orig" {
-		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.imePending, m.imePendingTarget)
+	if !m.ime.pending || m.ime.pendingTarget != "zh-orig" {
+		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.ime.pending, m.ime.pendingTarget)
 	}
 }
 
