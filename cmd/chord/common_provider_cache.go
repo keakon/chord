@@ -170,38 +170,9 @@ func (c *providerCache) getOrCreateImpl(provName string, cfg config.ProviderConf
 	}
 	effectiveProxy := llm.ResolveEffectiveProxy(normalizedCfg.Proxy, globalProxy)
 
-	var impl llm.Provider
-	providerType := normalizedCfg.Type
-
-	switch providerType {
-	case config.ProviderTypeChatCompletions:
-		p, pErr := llm.NewOpenAIProvider(providerCfg, effectiveProxy)
-		if pErr != nil {
-			return nil, fmt.Errorf("create %s provider for %q: %w", config.ProviderTypeChatCompletions, provName, pErr)
-		}
-		impl = p
-	case config.ProviderTypeGenerateContent:
-		p, pErr := llm.NewGeminiProvider(providerCfg, effectiveProxy)
-		if pErr != nil {
-			return nil, fmt.Errorf("create %s provider for %q: %w", config.ProviderTypeGenerateContent, provName, pErr)
-		}
-		impl = p
-	case config.ProviderTypeResponses:
-		p, pErr := llm.NewResponsesProvider(providerCfg, effectiveProxy)
-		if pErr != nil {
-			return nil, fmt.Errorf("create %s provider for %q: %w", config.ProviderTypeResponses, provName, pErr)
-		}
-		impl = p
-	case config.ProviderTypeMessages:
-		p, pErr := llm.NewAnthropicProvider(providerCfg, effectiveProxy)
-		if pErr != nil {
-			return nil, fmt.Errorf("create %s provider for %q: %w", config.ProviderTypeMessages, provName, pErr)
-		}
-		impl = p
-	default:
-		return nil, fmt.Errorf("unsupported provider type %q for %q (allowed: %s, %s, %s, %s)",
-			providerType, provName,
-			config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses, config.ProviderTypeGenerateContent)
+	impl, err := llm.NewProviderImpl(providerCfg, effectiveProxy)
+	if err != nil {
+		return nil, fmt.Errorf("create %s provider for %q: %w", normalizedCfg.Type, provName, err)
 	}
 	if c.dumpWriter != nil {
 		llm.SetProviderDumpWriter(impl, c.dumpWriter)

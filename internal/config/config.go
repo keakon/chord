@@ -214,23 +214,26 @@ const (
 
 // ProviderConfig specifies an LLM provider and its available models.
 type ProviderConfig struct {
-	Type                  string                 `json:"type" yaml:"type"`                                                           // "chat-completions" | "messages" | "responses"
-	APIURL                string                 `json:"api_url" yaml:"api_url"`                                                     // complete API URL (e.g., "https://api.openai.com/v1/chat/completions")
-	TokenURL              string                 `json:"token_url,omitempty" yaml:"token_url,omitempty"`                             // OAuth2 token endpoint for refresh_token grant
-	ClientID              string                 `json:"client_id,omitempty" yaml:"client_id,omitempty"`                             // OAuth2 client_id (required by some providers, e.g. openai: app_EMoamEEZ73f0CkXaXp7hrann)
-	Preset                string                 `json:"preset,omitempty" yaml:"preset,omitempty"`                                   // e.g. "codex" for the official ChatGPT/Codex OAuth transport
-	Store                 *bool                  `json:"store,omitempty" yaml:"store,omitempty"`                                     // provider-level Responses storage preference; nil defaults to false
-	ResponsesWebsocket    *bool                  `json:"responses_websocket,omitempty" yaml:"responses_websocket,omitempty"`         // whether to prefer Responses WebSocket transport; nil = preset default (codex:true, others:false)
-	RateLimit             int                    `json:"rate_limit" yaml:"rate_limit"`                                               // requests per minute (0 = no limit)
-	UserAgent             string                 `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`                           // optional User-Agent override for provider/model HTTP requests
-	Proxy                 *string                `json:"proxy,omitempty" yaml:"proxy,omitempty"`                                     // per-provider proxy URL; nil = inherit global, non-nil (incl. "") = override
-	Compat                *ProviderCompatConfig  `json:"compat,omitempty" yaml:"compat,omitempty"`                                   // provider-level compat defaults (model-level can override model compat only)
-	OfficialAPI           *bool                  `json:"official_api,omitempty" yaml:"official_api,omitempty"`                       // true for direct official provider endpoints; false for aggregating/proxy gateways
-	SupportedServiceTiers []ServiceTier          `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"` // provider-level default non-standard tiers; model-level can override
-	Models                map[string]ModelConfig `json:"models" yaml:"models"`
-	KeyRotation           string                 `json:"key_rotation" yaml:"key_rotation"`             // "on_failure" (default) | "per_request"
-	KeyOrder              string                 `json:"key_order" yaml:"key_order"`                   // "sequential" (default, non-Codex) | "random" | "smart" (default for preset: codex)
-	Compress              bool                   `json:"compress,omitempty" yaml:"compress,omitempty"` // enable gzip request compression for this provider
+	Type                      string                 `json:"type" yaml:"type"`                                                                   // "chat-completions" | "messages" | "responses"
+	APIURL                    string                 `json:"api_url" yaml:"api_url"`                                                             // complete API URL (e.g., "https://api.openai.com/v1/chat/completions")
+	TokenURL                  string                 `json:"token_url,omitempty" yaml:"token_url,omitempty"`                                     // OAuth2 token endpoint for refresh_token grant
+	ClientID                  string                 `json:"client_id,omitempty" yaml:"client_id,omitempty"`                                     // OAuth2 client_id (required by some providers, e.g. openai: app_EMoamEEZ73f0CkXaXp7hrann)
+	Preset                    string                 `json:"preset,omitempty" yaml:"preset,omitempty"`                                           // e.g. "codex" for the official ChatGPT/Codex OAuth transport
+	Store                     *bool                  `json:"store,omitempty" yaml:"store,omitempty"`                                             // provider-level Responses storage preference; nil defaults to false
+	ResponsesWebsocket        *bool                  `json:"responses_websocket,omitempty" yaml:"responses_websocket,omitempty"`                 // whether to prefer Responses WebSocket transport; nil = preset default (codex:true, others:false)
+	RequestTimeout            int                    `json:"request_timeout,omitempty" yaml:"request_timeout,omitempty"`                         // total provider HTTP request timeout in seconds (0 = no total timeout)
+	StreamIdleTimeout         int                    `json:"stream_idle_timeout,omitempty" yaml:"stream_idle_timeout,omitempty"`                 // per-stream idle timeout in seconds (0 = built-in defaults)
+	WebSocketHandshakeTimeout int                    `json:"websocket_handshake_timeout,omitempty" yaml:"websocket_handshake_timeout,omitempty"` // Responses WebSocket handshake timeout in seconds (0 = built-in default)
+	RateLimit                 int                    `json:"rate_limit" yaml:"rate_limit"`                                                       // requests per minute (0 = no limit)
+	UserAgent                 string                 `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`                                   // optional User-Agent override for provider/model HTTP requests
+	Proxy                     *string                `json:"proxy,omitempty" yaml:"proxy,omitempty"`                                             // per-provider proxy URL; nil = inherit global, non-nil (incl. "") = override
+	Compat                    *ProviderCompatConfig  `json:"compat,omitempty" yaml:"compat,omitempty"`                                           // provider-level compat defaults (model-level can override model compat only)
+	OfficialAPI               *bool                  `json:"official_api,omitempty" yaml:"official_api,omitempty"`                               // true for direct official provider endpoints; false for aggregating/proxy gateways
+	SupportedServiceTiers     []ServiceTier          `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"`         // provider-level default non-standard tiers; model-level can override
+	Models                    map[string]ModelConfig `json:"models" yaml:"models"`
+	KeyRotation               string                 `json:"key_rotation" yaml:"key_rotation"`             // "on_failure" (default) | "per_request"
+	KeyOrder                  string                 `json:"key_order" yaml:"key_order"`                   // "sequential" (default, non-Codex) | "random" | "smart" (default for preset: codex)
+	Compress                  bool                   `json:"compress,omitempty" yaml:"compress,omitempty"` // enable gzip request compression for this provider
 }
 
 // ModelModalities declares which input modalities a model supports.

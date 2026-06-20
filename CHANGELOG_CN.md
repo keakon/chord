@@ -38,6 +38,7 @@
 - 非官方 Codex 的 Responses 兼容 provider 现在会在规范化后透传 `reasoning.effort`，允许 GLM 等 provider 使用 `max`、`minimal`、`none` 等自定义取值；官方 Codex 后端仍保留受限取值集合。
 - Responses HTTP 请求现在都会在授权头之外发送同一套 SSE 请求头（`originator`、`Accept`、`OpenAI-Beta: responses=experimental`），不再取决于是否配置了 `preset: codex`；User-Agent 继续默认使用 `chord/<version>`，并尊重 provider 级 `user_agent` 覆盖。
 - WebSocket Responses 传输现在从请求体传播 `include` 数组，而非硬编码空数组。
+- Provider 级超时配置现在支持通过 `request_timeout`、`stream_idle_timeout` 和 `websocket_handshake_timeout` 分别覆盖单个 provider 的 HTTP 请求总超时、流式空闲超时和 Responses WebSocket 握手超时。
 - JSON 热路径处理更快，包括 LLM 流解析、MCP JSON-RPC 编解码、会话导入 JSONL 解析和 `auth.state.json` 加载。
 - 本地文件工具读取已有文本文件时现在优先使用 UTF-8 或带 BOM 的 Unicode，并保留对 GB18030、Big5、Shift-JIS 等常见地区性编码的受限支持。无法明确识别或不受支持的编码仍会快速失败；`web_fetch` 仍会按 HTTP 响应声明的 charset 解码。
 - `read` 现在返回不带行号 gutter、也不额外缩进的原始文件文本，复制片段用于 patch hunk 或缩进敏感格式时更安全。

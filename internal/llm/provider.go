@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"strings"
 	"sync"
@@ -140,6 +141,9 @@ type ProviderConfig struct {
 	supportedServiceTiers      []config.ServiceTier         // provider-level default non-standard service tiers
 	preset                     string                       // trimmed config preset (e.g. "codex")
 	responsesWebsocket         *bool                        // provider-level Responses WebSocket preference; nil = preset default
+	requestTimeout             time.Duration                // total provider HTTP request timeout; 0 means no total timeout
+	streamIdleTimeout          time.Duration                // provider-level stream idle timeout; 0 means parser defaults
+	websocketHandshakeTimeout  time.Duration                // provider-level Responses WebSocket handshake timeout; 0 means default
 	keyRotation                string                       // "on_failure" (default) | "per_request"
 	keyOrder                   string                       // "sequential" (default, non-Codex) | "random" | "smart" (Codex)
 	retryDelayBase             time.Duration                // test hook; <0 disables retry backoff
@@ -229,6 +233,9 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		supportedServiceTiers:      append([]config.ServiceTier(nil), cfg.SupportedServiceTiers...),
 		preset:                     strings.TrimSpace(cfg.Preset),
 		responsesWebsocket:         cfg.ResponsesWebsocket,
+		requestTimeout:             durationFromPositiveSecondsClamped(int64(cfg.RequestTimeout), 0),
+		streamIdleTimeout:          durationFromPositiveSecondsClamped(int64(cfg.StreamIdleTimeout), 0),
+		websocketHandshakeTimeout:  durationFromPositiveSecondsClamped(int64(cfg.WebSocketHandshakeTimeout), 0),
 		keyRotation:                keyRotation,
 		keyOrder:                   keyOrder,
 		stickyIdx:                  stickyIdx,
@@ -240,6 +247,30 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		polledRateLimitAttemptedAt: polledRateLimitAttemptedAt,
 		polledRateLimitSucceededAt: polledRateLimitSucceededAt,
 		polledRateLimitInFlight:    polledRateLimitInFlight,
+	}
+}
+
+// NewProviderImpl creates a provider implementation using the provider's
+// configured transport settings and the supplied effective proxy URL.
+func NewProviderImpl(providerCfg *ProviderConfig, proxyURL string) (Provider, error) {
+	if providerCfg == nil {
+		return nil, fmt.Errorf("provider config is nil")
+	}
+	client, err := NewHTTPClientWithProxy(proxyURL, providerCfg.RequestTimeout())
+	if err != nil {
+		return nil, fmt.Errorf("create HTTP client for %s provider: %w", providerCfg.Type(), err)
+	}
+	switch providerCfg.Type() {
+	case config.ProviderTypeChatCompletions:
+		return NewOpenAIProviderWithClient(providerCfg, client, proxyURL)
+	case config.ProviderTypeResponses:
+		return NewResponsesProviderWithClient(providerCfg, client, proxyURL)
+	case config.ProviderTypeMessages:
+		return NewAnthropicProviderWithClient(providerCfg, client, proxyURL)
+	case config.ProviderTypeGenerateContent:
+		return NewGeminiProviderWithClient(providerCfg, client, proxyURL)
+	default:
+		return nil, fmt.Errorf("unsupported provider type %q", providerCfg.Type())
 	}
 }
 
@@ -378,6 +409,21 @@ func (p *ProviderConfig) Name() string {
 // Type returns the provider type.
 func (p *ProviderConfig) Type() string {
 	return p.typeName
+}
+
+// RequestTimeout returns the total HTTP request timeout configured for this provider.
+func (p *ProviderConfig) RequestTimeout() time.Duration {
+	return p.requestTimeout
+}
+
+// StreamIdleTimeout returns the provider-level stream idle timeout override.
+func (p *ProviderConfig) StreamIdleTimeout() time.Duration {
+	return p.streamIdleTimeout
+}
+
+// WebSocketHandshakeTimeout returns the provider-level Responses WebSocket handshake timeout override.
+func (p *ProviderConfig) WebSocketHandshakeTimeout() time.Duration {
+	return p.websocketHandshakeTimeout
 }
 
 // APIURL returns the provider's complete API URL.

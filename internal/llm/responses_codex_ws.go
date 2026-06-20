@@ -23,7 +23,10 @@ import (
 
 const codexResponsesWebsocketsBeta = "responses_websockets=2026-02-06"
 
-const codexWSIdleTimeout = 90 * time.Second
+const (
+	codexWSIdleTimeout      = 90 * time.Second
+	codexWSHandshakeTimeout = 45 * time.Second
+)
 
 var errCodexWSInvalidEventJSON = errors.New("codex ws invalid event json")
 
@@ -135,10 +138,13 @@ func responsesHTTPSBaseToWSS(httpsBase string) (string, error) {
 	return parsed.String(), nil
 }
 
-func newResponsesWebsocketDialer(proxyURL string) (*websocket.Dialer, error) {
+func newResponsesWebsocketDialer(proxyURL string, handshakeTimeout time.Duration) (*websocket.Dialer, error) {
 	proxyURL = strings.TrimSpace(proxyURL)
+	if handshakeTimeout <= 0 {
+		handshakeTimeout = codexWSHandshakeTimeout
+	}
 	d := &websocket.Dialer{
-		HandshakeTimeout: 45 * time.Second,
+		HandshakeTimeout: handshakeTimeout,
 	}
 	switch {
 	case proxyURL == "":
@@ -578,7 +584,13 @@ func (r *ResponsesProvider) codexWSReadMessageWithIdleTimeoutLocked(streamCtx co
 		resultCh <- readResult{msg: msg, err: err}
 	}()
 
-	timer := time.NewTimer(codexWSIdleTimeout)
+	idleTimeout := codexWSIdleTimeout
+	if r.provider != nil {
+		if d := r.provider.StreamIdleTimeout(); d > 0 {
+			idleTimeout = d
+		}
+	}
+	timer := time.NewTimer(idleTimeout)
 	defer timer.Stop()
 
 	select {
@@ -586,7 +598,7 @@ func (r *ResponsesProvider) codexWSReadMessageWithIdleTimeoutLocked(streamCtx co
 		return nil, streamCtx.Err()
 	case <-timer.C:
 		_ = r.codexWSConn.SetReadDeadline(time.Now())
-		return nil, fmt.Errorf("idle timeout waiting for websocket message")
+		return nil, fmt.Errorf("idle timeout waiting for websocket message: no data from model for %s", idleTimeout)
 	case result := <-resultCh:
 		return result.msg, result.err
 	}
@@ -616,7 +628,11 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 	if err != nil {
 		return nil, false, err
 	}
-	dialer, err := newResponsesWebsocketDialer(r.dialProxyURL)
+	var handshakeTimeout time.Duration
+	if r.provider != nil {
+		handshakeTimeout = r.provider.WebSocketHandshakeTimeout()
+	}
+	dialer, err := newResponsesWebsocketDialer(r.dialProxyURL, handshakeTimeout)
 	if err != nil {
 		return nil, false, err
 	}

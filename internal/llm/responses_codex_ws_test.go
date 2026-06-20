@@ -100,6 +100,48 @@ func TestResetCodexWebSocketChainClearsState(t *testing.T) {
 	}
 }
 
+func TestNewResponsesWebsocketDialerUsesConfiguredHandshakeTimeout(t *testing.T) {
+	dialer, err := newResponsesWebsocketDialer("direct", 12*time.Second)
+	if err != nil {
+		t.Fatalf("newResponsesWebsocketDialer: %v", err)
+	}
+	if dialer.HandshakeTimeout != 12*time.Second {
+		t.Fatalf("HandshakeTimeout = %v, want 12s", dialer.HandshakeTimeout)
+	}
+}
+
+func TestCodexWSReadMessageUsesProviderIdleTimeout(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		time.Sleep(2 * time.Second)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	wsConn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer wsConn.Close()
+
+	provider := NewProviderConfig("test", config.ProviderConfig{
+		Type:              config.ProviderTypeResponses,
+		StreamIdleTimeout: 1,
+	}, nil)
+	r := &ResponsesProvider{provider: provider, codexWSConn: wsConn}
+	_, err = r.codexWSReadMessageWithIdleTimeoutLocked(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no data from model for 1s") {
+		t.Fatalf("codexWSReadMessageWithIdleTimeoutLocked err = %v, want 1s idle timeout", err)
+	}
+}
+
 func TestResetCodexWebSocketChainLogsChainResetWithoutConnectionClosed(t *testing.T) {
 	var buf bytes.Buffer
 	logger := logtest.NewLogger(&buf, golog.DebugLevel)

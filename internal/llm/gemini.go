@@ -41,7 +41,7 @@ func NewGeminiProvider(provider *ProviderConfig, proxyURL string) (*GeminiProvid
 	if err := validateGeminiAPIURL(provider.APIURL()); err != nil {
 		return nil, err
 	}
-	client, err := NewHTTPClientWithProxy(proxyURL, 0)
+	client, err := NewHTTPClientWithProxy(proxyURL, providerRequestTimeout(provider))
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client for gemini provider: %w", err)
 	}
@@ -272,7 +272,7 @@ func (g *GeminiProvider) CompleteStream(
 	if g.dumpWriter != nil {
 		collector = NewSSECollector()
 	}
-	cr := NewChunkTimeoutReader(httpResp.Body, DefaultChunkTimeout, streamCancel)
+	cr := NewProviderChunkTimeoutReader(httpResp.Body, g.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
 	resp, parseErr := parseGeminiSSEStream(cr, traceCB, collector)
 

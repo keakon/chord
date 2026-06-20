@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/keakon/chord/internal/config"
 )
 
 // TestChunkTimeoutReaderTimerResetsOnEachDataRead verifies that the per-chunk timer
@@ -52,6 +55,24 @@ func TestChunkTimeoutReaderTimerResetsOnEachDataRead(t *testing.T) {
 	}
 	if len(readData) == 0 {
 		t.Fatal("no data read")
+	}
+}
+
+func TestProviderChunkTimeoutReaderUsesFixedProviderIdleTimeout(t *testing.T) {
+	p := NewProviderConfig("test", config.ProviderConfig{
+		Type:              config.ProviderTypeResponses,
+		StreamIdleTimeout: 3,
+	}, nil)
+	cancel := func() {}
+	cr := NewProviderChunkTimeoutReader(strings.NewReader("data"), p, DefaultChunkTimeout, cancel)
+	defer cr.Stop()
+
+	if cr.timeout != 3*time.Second {
+		t.Fatalf("initial timeout = %v, want 3s", cr.timeout)
+	}
+	cr.SetChunkTimeout(SlowPhaseChunkTimeout)
+	if cr.timeout != 3*time.Second {
+		t.Fatalf("slow phase timeout = %v, want fixed provider timeout 3s", cr.timeout)
 	}
 }
 

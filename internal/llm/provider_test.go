@@ -32,6 +32,42 @@ func newTestProviderConfig(keys []string) *ProviderConfig {
 	return NewProviderConfig("test", cfg, keys)
 }
 
+func TestProviderConfigTimeoutSettings(t *testing.T) {
+	p := NewProviderConfig("test", config.ProviderConfig{
+		Type:                      config.ProviderTypeResponses,
+		RequestTimeout:            180,
+		StreamIdleTimeout:         90,
+		WebSocketHandshakeTimeout: 45,
+	}, nil)
+	if got := p.RequestTimeout(); got != 180*time.Second {
+		t.Fatalf("RequestTimeout() = %v, want 180s", got)
+	}
+	if got := p.StreamIdleTimeout(); got != 90*time.Second {
+		t.Fatalf("StreamIdleTimeout() = %v, want 90s", got)
+	}
+	if got := p.WebSocketHandshakeTimeout(); got != 45*time.Second {
+		t.Fatalf("WebSocketHandshakeTimeout() = %v, want 45s", got)
+	}
+}
+
+func TestNewProviderImplAppliesRequestTimeout(t *testing.T) {
+	p := NewProviderConfig("test", config.ProviderConfig{
+		Type:           config.ProviderTypeResponses,
+		RequestTimeout: 180,
+	}, nil)
+	impl, err := NewProviderImpl(p, "")
+	if err != nil {
+		t.Fatalf("NewProviderImpl: %v", err)
+	}
+	r, ok := impl.(*ResponsesProvider)
+	if !ok {
+		t.Fatalf("impl = %T, want *ResponsesProvider", impl)
+	}
+	if r.client == nil || r.client.Timeout != 180*time.Second {
+		t.Fatalf("responses HTTP timeout = %v, want 180s", r.client.Timeout)
+	}
+}
+
 func TestMutateCredentialInMemoryUsesIndexToDisambiguateDuplicateAccountID(t *testing.T) {
 	auth := config.AuthConfig{
 		"openai": {

@@ -683,6 +683,24 @@ providers:
     user_agent: "codex-tui/0.139.0 (Mac OS 15.3.2; arm64) ghostty/1.3.1 (codex-tui; 0.139.0)"
 ```
 
+## Provider timeouts
+
+Provider-level timeout settings are optional and use seconds. Unset or `0` keeps the built-in defaults.
+
+```yaml
+providers:
+  codex:
+    request_timeout: 180
+    stream_idle_timeout: 90
+    websocket_handshake_timeout: 45
+```
+
+- `request_timeout`: total HTTP request timeout for that provider. It applies to HTTP/SSE model requests; `0` means no total request timeout.
+- `stream_idle_timeout`: maximum idle time between streamed model data. When set, it overrides both the normal SSE idle timeout and slow-phase idle timeout for that provider, and it also applies to Codex Responses WebSocket reads.
+- `websocket_handshake_timeout`: Responses WebSocket handshake timeout for providers using that transport, mainly `preset: codex` with `responses_websocket` enabled.
+
+These settings are provider-scoped, so project-level `.chord/config.yaml` can override them for one provider without changing other providers. They do not change fixed low-level connection defaults such as dial, TLS handshake, or HTTP response-header timeouts.
+
 ## Output token cap
 
 Use `max_output_tokens` to set a global cap on requested output tokens. The effective request limit is still clamped by each model's `limit.output` and available total context (`limit.context` when known), so runtime uses the smallest applicable value.
@@ -1283,6 +1301,9 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `key_rotation` | string | `on_failure` (default) / `per_request`. Controls when a credential / API key is reselected.                                                            |
 | `key_order`    | string | `sequential` (non-Codex default) / `random` / `smart` (Codex only). Controls how Chord chooses among selectable keys.                                   |
 | `compress`     | bool   | gzip request bodies when compression saves bytes. Off by default.                                                                                       |
+| `request_timeout` | int | Total HTTP request timeout in seconds for this provider. `0` / omitted means no total request timeout. |
+| `stream_idle_timeout` | int | Stream idle timeout in seconds for this provider. `0` / omitted uses built-in SSE/WebSocket idle defaults. |
+| `websocket_handshake_timeout` | int | Responses WebSocket handshake timeout in seconds. `0` / omitted uses the built-in default. |
 | `supported_service_tiers` | list | Provider-level default accepted non-standard tiers for its models, e.g. `[fast, slow]` or `[fast]`. Model entries can override it. |
 | `models`       | map    | Map of model id → [model config](#model-field-reference).                                                                                               |
 

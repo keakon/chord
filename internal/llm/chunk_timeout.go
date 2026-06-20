@@ -65,6 +65,7 @@ type ChunkTimeoutReader struct {
 	mu       sync.Mutex
 	timer    *time.Timer
 	timeout  time.Duration
+	fixed    time.Duration
 	timedOut atomic.Bool
 
 	lastReadBytes       int
@@ -87,6 +88,20 @@ func NewChunkTimeoutReader(r io.Reader, initialTimeout time.Duration, cancel fun
 	}
 	cr.timer = time.AfterFunc(initialTimeout, cr.fireTimeout)
 	return cr
+}
+
+// NewProviderChunkTimeoutReader wraps r with the provider-level stream idle
+// timeout when configured; otherwise it uses initialTimeout and allows parsers
+// to switch to their built-in slow-phase timeout.
+func NewProviderChunkTimeoutReader(r io.Reader, provider *ProviderConfig, initialTimeout time.Duration, cancel func()) *ChunkTimeoutReader {
+	if provider != nil {
+		if d := provider.StreamIdleTimeout(); d > 0 {
+			cr := NewChunkTimeoutReader(r, d, cancel)
+			cr.fixed = d
+			return cr
+		}
+	}
+	return NewChunkTimeoutReader(r, initialTimeout, cancel)
 }
 
 func (cr *ChunkTimeoutReader) fireTimeout() {
@@ -142,6 +157,9 @@ func (cr *ChunkTimeoutReader) Read(p []byte) (int, error) {
 // SetChunkTimeout updates the current timeout and immediately resets the timer.
 func (cr *ChunkTimeoutReader) SetChunkTimeout(d time.Duration) {
 	cr.mu.Lock()
+	if cr.fixed > 0 {
+		d = cr.fixed
+	}
 	cr.timeout = d
 	cr.timer.Reset(d)
 	cr.mu.Unlock()

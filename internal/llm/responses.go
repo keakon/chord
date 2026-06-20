@@ -66,7 +66,7 @@ func NewResponsesProviderWithClient(provider *ProviderConfig, client *http.Clien
 
 // NewResponsesProvider creates a new ResponsesProvider.
 func NewResponsesProvider(provider *ProviderConfig, proxyURL string) (*ResponsesProvider, error) {
-	client, err := NewHTTPClientWithProxy(proxyURL, 0)
+	client, err := NewHTTPClientWithProxy(proxyURL, providerRequestTimeout(provider))
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client for responses provider: %w", err)
 	}
@@ -652,7 +652,7 @@ func (r *ResponsesProvider) sendAndParse(
 	if r.dumpWriter != nil {
 		collector = NewSSECollector()
 	}
-	cr := NewChunkTimeoutReader(httpResp.Body, DefaultChunkTimeout, streamCancel)
+	cr := NewProviderChunkTimeoutReader(httpResp.Body, r.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
 	resp, parseErr := parseResponsesSSE(cr, cb, collector)
 	if parseErr != nil {

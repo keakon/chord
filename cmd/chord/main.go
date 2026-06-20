@@ -567,39 +567,10 @@ func resolveModelRef(
 		return provCfg, impl, resolvedModelID, mc.Limit.Output, mc.Limit.Context, nil
 	}
 
-	// Provider type already normalized during config load
-	providerType := normalizedProviderCfg.Type
 	effectiveProxy := llm.ResolveEffectiveProxy(normalizedProviderCfg.Proxy, globalProxy)
-
-	switch providerType {
-	case config.ProviderTypeChatCompletions:
-		p, pErr := llm.NewOpenAIProvider(provCfg, effectiveProxy)
-		if pErr != nil {
-			return nil, nil, "", 0, 0, fmt.Errorf("create %s provider for %q: %w", config.ProviderTypeChatCompletions, ref, pErr)
-		}
-		impl = p
-	case config.ProviderTypeMessages:
-		p, pErr := llm.NewAnthropicProvider(provCfg, effectiveProxy)
-		if pErr != nil {
-			return nil, nil, "", 0, 0, fmt.Errorf("create %s provider for %q: %w", config.ProviderTypeMessages, ref, pErr)
-		}
-		impl = p
-	case config.ProviderTypeResponses:
-		p, pErr := llm.NewResponsesProvider(provCfg, effectiveProxy)
-		if pErr != nil {
-			return nil, nil, "", 0, 0, fmt.Errorf("create %s provider for %q: %w", config.ProviderTypeResponses, ref, pErr)
-		}
-		impl = p
-	case config.ProviderTypeGenerateContent:
-		p, pErr := llm.NewGeminiProvider(provCfg, effectiveProxy)
-		if pErr != nil {
-			return nil, nil, "", 0, 0, fmt.Errorf("create %s provider for %q: %w", config.ProviderTypeGenerateContent, ref, pErr)
-		}
-		impl = p
-	default:
-		return nil, nil, "", 0, 0, fmt.Errorf("unsupported provider type %q for %q (allowed: %s, %s, %s, %s)",
-			normalizedProviderCfg.Type, ref,
-			config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses, config.ProviderTypeGenerateContent)
+	impl, err = llm.NewProviderImpl(provCfg, effectiveProxy)
+	if err != nil {
+		return nil, nil, "", 0, 0, fmt.Errorf("create %s provider for %q: %w", normalizedProviderCfg.Type, ref, err)
 	}
 
 	return provCfg, impl, resolvedModelID, mc.Limit.Output, mc.Limit.Context, nil
