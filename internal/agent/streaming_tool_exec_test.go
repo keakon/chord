@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -51,6 +52,20 @@ func TestStreamingToolExecutorArgsDriftInvalidates(t *testing.T) {
 	}
 	if ok || payload != nil {
 		t.Fatalf("payload=%#v ok=%v, want no cached result", payload, ok)
+	}
+}
+
+func TestSpeculativeConflictKeysNormalizesToolName(t *testing.T) {
+	expectedPath, err := filepath.Abs("demo.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := speculativeConflictKeys(message.ToolCall{
+		Name: " write ",
+		Args: json.RawMessage(`{"path":"demo.txt","content":"x"}`),
+	}, "")
+	if len(keys) != 1 || keys[0] != "file:"+expectedPath {
+		t.Fatalf("speculativeConflictKeys() = %v, want [file:%s]", keys, expectedPath)
 	}
 }
 

@@ -410,7 +410,7 @@ func wrapTrackedWriteError(err error) error {
 }
 
 func (p toolExecutionPipeline) backupRiskyPreWriteState(tc message.ToolCall, trackedPath string, stale bool, preContent string, preExisted bool, deleteLocks *deleteLockSet) fileBackupOutcome {
-	if p.fileBackups == nil || !isTrackedFileMutationTool(tc.Name) {
+	if p.fileBackups == nil || !tools.IsFileMutation(tc.Name) {
 		return fileBackupOutcome{}
 	}
 	switch tc.Name {

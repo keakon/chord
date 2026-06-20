@@ -97,6 +97,7 @@ func (e *StreamingToolExecutor) Start(call message.ToolCall) bool {
 	if e == nil || call.ID == "" || e.ctx == nil || e.execute == nil {
 		return false
 	}
+	call.Name = tools.NormalizeName(call.Name)
 	entry := &streamingToolEntry{call: call, argsHash: canonicalArgsHash(call.Args), conflictKeys: speculativeConflictKeys(call, e.projectRoot), state: streamingToolQueued, done: make(chan struct{})}
 	e.mu.Lock()
 	if _, exists := e.entries[call.ID]; exists {
@@ -492,31 +493,22 @@ func (e *StreamingToolExecutor) releaseConflictKeysLocked(entry *streamingToolEn
 }
 
 func (e *StreamingToolExecutor) speculativeMutationBarrierLocked(call message.ToolCall) string {
-	if e == nil || isFileMutationTool(call.Name) {
+	if e == nil || tools.IsFileMutation(call.Name) {
 		return ""
 	}
 	for _, entry := range e.entries {
 		if entry == nil || len(entry.conflictKeys) == 0 {
 			continue
 		}
-		if isFileMutationTool(entry.call.Name) {
+		if tools.IsFileMutation(entry.call.Name) {
 			return entry.call.ID
 		}
 	}
 	return ""
 }
 
-func isFileMutationTool(name string) bool {
-	switch name {
-	case tools.NameWrite, tools.NameEdit, tools.NamePatch, tools.NameDelete:
-		return true
-	default:
-		return false
-	}
-}
-
 func speculativeConflictKeys(call message.ToolCall, projectRoot string) []string {
-	switch call.Name {
+	switch tools.NormalizeName(call.Name) {
 	case tools.NameWrite:
 		if path, ok := singlePathToolPath(call.Args); ok {
 			return []string{"file:" + path}

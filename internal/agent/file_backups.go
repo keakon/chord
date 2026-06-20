@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-
-	"github.com/keakon/chord/internal/tools"
 )
 
 const (
@@ -191,13 +189,4 @@ func readPreWriteBytes(path string) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	return data, true, nil
-}
-
-func isTrackedFileMutationTool(name string) bool {
-	switch name {
-	case tools.NameEdit, tools.NamePatch, tools.NameWrite, tools.NameDelete:
-		return true
-	default:
-		return false
-	}
 }

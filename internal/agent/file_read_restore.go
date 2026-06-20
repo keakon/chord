@@ -118,7 +118,7 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 			for _, tc := range msg.ToolCalls {
 				id := strings.TrimSpace(tc.ID)
 				name := strings.TrimSpace(tc.Name)
-				if id == "" || !isTrackedRestoreTool(name) {
+				if id == "" || !tools.IsFileStateTool(name) {
 					continue
 				}
 				calls[id] = restoreToolCall{name: name, args: append(json.RawMessage(nil), tc.Args...)}
@@ -265,15 +265,6 @@ func (a *MainAgent) restoreMainTrackedFileState(messages []message.Message) rest
 		result.SkippedMissingDurableState,
 	)
 	return result
-}
-
-func isTrackedRestoreTool(name string) bool {
-	switch strings.TrimSpace(name) {
-	case tools.NameRead, tools.NameEdit, tools.NamePatch, tools.NameWrite, tools.NameDelete:
-		return true
-	default:
-		return false
-	}
 }
 
 func isNativeChordProvenance(prov *message.MessageProvenance) bool {

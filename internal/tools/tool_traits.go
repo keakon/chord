@@ -56,6 +56,16 @@ func IsFileMutation(name string) bool {
 	}
 }
 
+// IsFileStateTool reports whether the tool can emit tracked file state metadata.
+func IsFileStateTool(name string) bool {
+	switch NormalizeName(name) {
+	case NameRead, NameWrite, NameEdit, NamePatch, NameDelete:
+		return true
+	default:
+		return false
+	}
+}
+
 // ShouldExpandResult reports whether TUI should expand the tool result by default.
 func ShouldExpandResult(name string) bool {
 	name = NormalizeName(name)
