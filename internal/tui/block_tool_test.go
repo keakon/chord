@@ -2545,6 +2545,35 @@ func TestReadCallRendersSingleBlankLineWithoutPanic(t *testing.T) {
 	}
 }
 
+func TestReadCallWideHeaderPreservesOffsetWithLongPath(t *testing.T) {
+	longPath := "/fictional/workspace/generated/reports/very/deeply/nested/directories/synthetic-review-fixture-00000000000000000001.txt"
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "read",
+		Content:       fmt.Sprintf(`{"path":%q,"limit":160,"offset":430}`, longPath),
+		ResultDone:    true,
+		ResultContent: "line 431\nline 432",
+	}
+
+	plain := stripANSI(strings.Join(block.renderReadCall(180, ""), "\n"))
+	if !strings.Contains(plain, "(limit=160, offset=430)") {
+		t.Fatalf("expected read header to preserve full limit/offset params, got:\n%s", plain)
+	}
+}
+
+func TestReadHeaderUsesEllipsisWhenPathDoesNotFit(t *testing.T) {
+	longPath := "/fictional/workspace/generated/reports/very/deeply/nested/directories/synthetic-review-fixture-00000000000000000001.txt"
+	header := stripANSI(renderReadHeaderLine("✓", "read", longPath, 160, 430, 80))
+
+	if !strings.Contains(header, "…") {
+		t.Fatalf("expected read header to use ellipsis for long path, got %q", header)
+	}
+	if !strings.Contains(header, "(limit=160, offset=430)") {
+		t.Fatalf("expected read header to preserve params while truncating path, got %q", header)
+	}
+}
+
 func TestReadCallEscapesANSIRichDumpContent(t *testing.T) {
 	block := &Block{
 		ID:         1,
