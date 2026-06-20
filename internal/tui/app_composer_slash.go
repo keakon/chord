@@ -52,31 +52,12 @@ func fileRefsFromParts(parts []message.ContentPart) []string {
 		if p.Type != message.ContentPartText {
 			continue
 		}
-		// Match <file path="..."> or <file path='...'>
-		rest := p.Text
-		for {
-			start := strings.Index(rest, "<file path=")
-			if start < 0 {
-				break
+		for _, path := range message.FileRefPaths(p.Text) {
+			if path == "" || seen[path] {
+				continue
 			}
-			rest = rest[start+len("<file path="):]
-			if len(rest) == 0 {
-				break
-			}
-			quote := rest[0]
-			if quote != '"' && quote != '\'' {
-				break
-			}
-			end := strings.IndexByte(rest[1:], quote)
-			if end < 0 {
-				break
-			}
-			path := rest[1 : end+1]
-			rest = rest[end+2:]
-			if path != "" && !seen[path] {
-				seen[path] = true
-				refs = append(refs, path)
-			}
+			seen[path] = true
+			refs = append(refs, path)
 		}
 	}
 	return refs

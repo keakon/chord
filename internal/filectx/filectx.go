@@ -108,7 +108,7 @@ func BuildFilePartsWithOptions(paths []string, resolvePath func(string) string, 
 		}
 		result.Parts = append(result.Parts, message.ContentPart{
 			Type: message.ContentPartText,
-			Text: fmt.Sprintf("<file path=%q>\n%s\n</file>", path, body),
+			Text: fmt.Sprintf("%s%q>\n%s\n</file>", message.FileRefOpenTag, path, body),
 		})
 		result.LoadedFiles++
 		result.TotalBytes += len(data)

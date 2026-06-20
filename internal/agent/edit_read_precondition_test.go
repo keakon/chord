@@ -201,10 +201,13 @@ func TestMainAgent_FileMentionTracksSnapshotForStaleBackup(t *testing.T) {
 }
 
 func TestFileRefPathFromContentUnescapesQuotedPath(t *testing.T) {
-	got := fileRefPathFromContent(`<file path="dir/has\"quote&amp;space.txt">` + "\nbody\n</file>")
+	got, ok := message.FirstFileRefPath(`<file path="dir/has\"quote&amp;space.txt">` + "\nbody\n</file>")
+	if !ok {
+		t.Fatal("expected file ref")
+	}
 	want := `dir/has"quote&space.txt`
 	if got != want {
-		t.Fatalf("fileRefPathFromContent() = %q, want %q", got, want)
+		t.Fatalf("FirstFileRefPath() = %q, want %q", got, want)
 	}
 }
 

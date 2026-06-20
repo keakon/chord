@@ -307,30 +307,12 @@ func extractUserFileRefPaths(msg message.Message) []string {
 	var refs []string
 	seen := make(map[string]bool)
 	addFromText := func(text string) {
-		rest := text
-		for {
-			start := strings.Index(rest, "<file path=")
-			if start < 0 {
-				return
+		for _, path := range message.FileRefPaths(text) {
+			if path == "" || seen[path] {
+				continue
 			}
-			rest = rest[start+len("<file path="):]
-			if len(rest) == 0 {
-				return
-			}
-			quote := rest[0]
-			if quote != '"' && quote != '\'' {
-				return
-			}
-			end := strings.IndexByte(rest[1:], quote)
-			if end < 0 {
-				return
-			}
-			path := rest[1 : end+1]
-			rest = rest[end+2:]
-			if path != "" && !seen[path] {
-				seen[path] = true
-				refs = append(refs, path)
-			}
+			seen[path] = true
+			refs = append(refs, path)
 		}
 	}
 	for _, part := range msg.Parts {
