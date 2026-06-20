@@ -555,8 +555,9 @@ type MainAgent struct {
 	// the Delegate tool, excluding the currently active role. Rebuilt when role filters change.
 	cachedSubAgents []*config.AgentConfig
 
-	// cachedSessionReminderContent is the <system-reminder> meta user message content
-	// carrying AGENTS.md + currentDate. Built once ensureSessionBuilt completes.
+	// cachedSessionReminderContent is the meta user message content carrying
+	// AGENTS.md (under "# AGENTS.md instructions" / <INSTRUCTIONS>) +
+	// currentDate. Built once ensureSessionBuilt completes.
 	// Injected before the first user message only once per session-head, then
 	// suppressed until resetSessionBuildState. Not persisted to ctxMgr or jsonl.
 	cachedSessionReminderContent atomic.Pointer[string]

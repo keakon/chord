@@ -22,8 +22,8 @@ func TestBuildSessionContextReminder_OnlyDate(t *testing.T) {
 	if got == "" {
 		t.Fatal("expected non-empty reminder")
 	}
-	if !strings.Contains(got, "<system-reminder>") {
-		t.Errorf("missing <system-reminder> marker: %q", got)
+	if !strings.Contains(got, "# currentDate") {
+		t.Errorf("missing currentDate section: %q", got)
 	}
 	if !strings.Contains(got, "Today's date is 2026-04-17") {
 		t.Errorf("missing date line: %q", got)
@@ -39,7 +39,13 @@ func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
 	if got == "" {
 		t.Fatal("expected non-empty reminder")
 	}
-	if !strings.Contains(got, "complete applicable AGENTS.md contents") {
+	if !strings.HasPrefix(got, "# AGENTS.md instructions\n") {
+		t.Errorf("AGENTS.md block must declare its identity on the first line: %q", got)
+	}
+	if !strings.Contains(got, "<INSTRUCTIONS>") || !strings.Contains(got, "</INSTRUCTIONS>") {
+		t.Errorf("missing <INSTRUCTIONS> bounding markers: %q", got)
+	}
+	if !strings.Contains(got, "complete applicable AGENTS.md content for this workspace session") {
 		t.Errorf("missing AGENTS.md source line: %q", got)
 	}
 	if !strings.Contains(got, "walking from the current working directory up to the project root") || !strings.Contains(got, "project-root-to-current-working-directory order") {
@@ -48,23 +54,20 @@ func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
 	if !strings.Contains(got, "Each loaded section is labeled with its path relative to the current working directory") {
 		t.Errorf("missing AGENTS.md section path labeling: %q", got)
 	}
-	if !strings.Contains(got, "internal meta message injected before the first real user message") || !strings.Contains(got, "may not appear in the visible transcript") {
+	if !strings.Contains(got, "internal workspace guidance injected before the first real user message") || !strings.Contains(got, "may not appear in the visible transcript") {
 		t.Errorf("missing internal injection visibility boundary: %q", got)
 	}
-	if !strings.Contains(got, "\n\nproject rules body\n") {
-		t.Errorf("missing AGENTS.md body without extra section title: %q", got)
+	if !strings.Contains(got, "<INSTRUCTIONS>\n") || !strings.Contains(got, "\nproject rules body\n") || !strings.Contains(got, "project rules body\n</INSTRUCTIONS>") {
+		t.Errorf("AGENTS.md body must be bounded inside <INSTRUCTIONS>: %q", got)
 	}
 	if !strings.Contains(got, "# currentDate") {
 		t.Errorf("missing currentDate section: %q", got)
 	}
-	if !strings.Contains(got, "IMPORTANT:") {
-		t.Errorf("missing disclaimer: %q", got)
+	if !strings.Contains(got, "durable workspace context and system-provided guidance, not ordinary user content") {
+		t.Errorf("missing durability reminder: %q", got)
 	}
 	if strings.Contains(got, "may or may not be relevant") {
 		t.Errorf("AGENTS.md reminder should not weaken repository instructions as optional context: %q", got)
-	}
-	if !strings.Contains(got, "The AGENTS.md instructions above are durable workspace guidance and system-provided workspace context, not ordinary user content") {
-		t.Errorf("missing AGENTS.md durability reminder: %q", got)
 	}
 }
 
@@ -94,7 +97,7 @@ func TestCallLLMInjectsAgentsMDReminderIntoFirstProviderRequest(t *testing.T) {
 	if len(seen) < 2 {
 		t.Fatalf("provider messages = %#v, want reminder plus user message", seen)
 	}
-	if seen[0].Role != "user" || !strings.Contains(seen[0].Content, "The following repository instructions are the complete applicable AGENTS.md contents") || !strings.Contains(seen[0].Content, "# Repo Rules") {
+	if seen[0].Role != "user" || !strings.Contains(seen[0].Content, "# AGENTS.md instructions") || !strings.Contains(seen[0].Content, "<INSTRUCTIONS>") || !strings.Contains(seen[0].Content, "# Repo Rules") {
 		t.Fatalf("first provider message missing AGENTS.md reminder: %#v", seen[0])
 	}
 	if !strings.Contains(seen[0].Content, "may not appear in the visible transcript") {

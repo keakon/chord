@@ -149,8 +149,9 @@ type SubAgent struct {
 	modelName    string
 	customPrompt string // from agent YAML body; replaces built-in role instructions if non-empty
 
-	// cachedSessionReminderContent is the <system-reminder> meta user message content
-	// carrying AGENTS.md + currentDate. Built once at construction, injected
+	// cachedSessionReminderContent is the meta user message content carrying
+	// AGENTS.md (under "# AGENTS.md instructions" / <INSTRUCTIONS>) +
+	// currentDate. Built once at construction, injected
 	// once per SubAgent lifetime (session-head for SubAgent == construction).
 	// Not persisted. Mirrors MainAgent.
 	cachedSessionReminderContent string
@@ -849,7 +850,8 @@ func (s *SubAgent) buildSystemPrompt() string {
 	if block := agentsMDReminderFramingPromptBlock(s.agentsMD); block != "" {
 		parts = append(parts, block)
 	}
-	// AGENTS.md is delivered as a <system-reminder> meta user message via
+	// AGENTS.md is delivered as a meta user message under a
+	// "# AGENTS.md instructions" / <INSTRUCTIONS> self-identifying block via
 	// cachedSessionReminder (mirrors MainAgent). It does not belong in the
 	// stable system prompt.
 

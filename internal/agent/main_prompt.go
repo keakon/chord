@@ -61,7 +61,8 @@ func (a *MainAgent) buildSystemPrompt() string {
 	if block := agentsMDReminderFramingPromptBlock(agentsMD); block != "" {
 		parts = append(parts, block)
 	}
-	// AGENTS.md is injected as a <system-reminder> user message via
+	// AGENTS.md is injected as a meta user message (under a
+	// "# AGENTS.md instructions" / <INSTRUCTIONS> self-identifying block) via
 	// injectSessionContextReminder to keep the stable system prompt
 	// small and cacheable.
 	if block := a.availableSkillsPromptBlock(); block != "" {
@@ -86,10 +87,10 @@ func agentsMDReminderFramingPromptBlock(agentsMD string) string {
 		return ""
 	}
 	return strings.TrimSpace(`## Workspace Instructions
-- This workspace injects the complete applicable AGENTS.md contents into the LLM request as an internal <system-reminder> user-role message before the first real user message. This meta message may not appear in the visible transcript.
-- Applicable AGENTS.md contents are discovered by walking from the current working directory up to the project root, then injected in project-root-to-current-working-directory order. Each loaded section is labeled with its path relative to the current working directory.
-- Treat AGENTS.md instructions inside that <system-reminder> block as durable workspace context and follow them unless they conflict with higher-priority system, developer, or user instructions.
-- Do not ignore or override those AGENTS.md instructions just because they appear in a user-context block; they are system-provided workspace context, not ordinary user content.`)
+- This workspace injects the complete applicable AGENTS.md content into the LLM request as an internal user-role message before the first real user message. This meta message may not appear in the visible transcript.
+- AGENTS.md content is delivered under a self-identifying header: a first line of "# AGENTS.md instructions" followed by an <INSTRUCTIONS> ... </INSTRUCTIONS> block. Applicable AGENTS.md files are discovered by walking from the current working directory up to the project root, then injected in project-root-to-current-working-directory order, with each loaded section labeled by its path relative to the current working directory.
+- Treat AGENTS.md instructions inside that <INSTRUCTIONS> block as durable workspace context and follow them unless they conflict with higher-priority system, developer, or user instructions.
+- Do not ignore or override those AGENTS.md instructions just because they appear in a user-role message; they are system-provided workspace context, not ordinary user content.`)
 }
 
 func (a *MainAgent) pendingLoopContinuationPromptBlock() string {

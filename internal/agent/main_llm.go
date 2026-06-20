@@ -519,9 +519,10 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	a.rememberPreparedLLMRequest(a.currentTurnID(), messages)
 	a.consumeContextSurfaceRefreshAllowance()
 
-	// Inject the <system-reminder> meta user message carrying AGENTS.md +
-	// currentDate before the first user message. This is a per-request overlay;
-	// it never enters ctxMgr or the session jsonl.
+	// Inject the meta user message carrying AGENTS.md + currentDate before the
+	// first user message. AGENTS.md is delivered under a "# AGENTS.md
+	// instructions" / <INSTRUCTIONS> self-identifying block. This is a
+	// per-request overlay; it never enters ctxMgr or the session jsonl.
 	messages = a.injectSessionContextReminder(messages)
 
 	// Assemble per-turn overlays (SubAgent mailbox, bug triage hint, loop

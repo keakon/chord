@@ -24,27 +24,21 @@ func buildSessionContextReminder(agentsMD string, now time.Time) string {
 
 	var sb strings.Builder
 	if hasAgentsMD {
-		sb.WriteString("<system-reminder>\nThe following repository instructions are the complete applicable AGENTS.md contents for this workspace session. They were discovered by walking from the current working directory up to the project root, then injected in project-root-to-current-working-directory order. Each loaded section is labeled with its path relative to the current working directory. This is an internal meta message injected before the first real user message and may not appear in the visible transcript. Read and follow these instructions as durable workspace guidance unless they conflict with higher-priority system, developer, or user instructions.\n\n")
-	} else {
-		sb.WriteString("<system-reminder>\nAs you answer the user's questions, you can use the following context:\n")
-	}
-	if hasAgentsMD {
+		// AGENTS.md gets a self-identifying block: the "# AGENTS.md instructions"
+		// header declares its identity on the first line, and <INSTRUCTIONS> markers
+		// bound it so the model (and history filtering) can recognize it without
+		// reading the whole preamble. Modeled on codex's contextual user fragment.
+		sb.WriteString("# AGENTS.md instructions\n")
+		sb.WriteString("<INSTRUCTIONS>\n")
+		sb.WriteString("The following is the complete applicable AGENTS.md content for this workspace session. It was discovered by walking from the current working directory up to the project root, then injected in project-root-to-current-working-directory order. Each loaded section is labeled with its path relative to the current working directory. This is internal workspace guidance injected before the first real user message and may not appear in the visible transcript. These instructions are durable workspace context and system-provided guidance, not ordinary user content. Follow them unless they conflict with higher-priority system, developer, or user instructions.\n\n")
 		sb.WriteString(agentsMD)
-		sb.WriteString("\n")
+		sb.WriteString("\n</INSTRUCTIONS>\n")
 	}
 	if hasDate {
-		if hasAgentsMD {
-			sb.WriteString("\n")
-		}
-		sb.WriteString("# currentDate\n")
+		sb.WriteString("\n# currentDate\n")
 		fmt.Fprintf(&sb, "Today's date is %s.\n", now.Format("2006-01-02"))
 	}
-	if hasAgentsMD {
-		sb.WriteString("\n      IMPORTANT: The AGENTS.md instructions above are durable workspace guidance and system-provided workspace context, not ordinary user content. Use supplemental context such as the current date only when relevant to the task.\n</system-reminder>")
-	} else {
-		sb.WriteString("\n      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>")
-	}
-	return sb.String()
+	return strings.TrimSpace(sb.String())
 }
 
 // refreshSessionContextReminder captures a snapshot of the current AGENTS.md
