@@ -182,16 +182,6 @@ func appendBackupNotes(result string, stale bool, stalePaths int, outcome fileBa
 	return result + "\n" + strings.Join(notes, "\n")
 }
 
-func staleWritePathCount(trackedFilePath string, deleteLocks *deleteLockSet) int {
-	if deleteLocks != nil {
-		return len(deleteLocks.paths)
-	}
-	if strings.TrimSpace(trackedFilePath) != "" {
-		return 1
-	}
-	return 0
-}
-
 func readPreWriteBytes(path string) ([]byte, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -193,6 +193,16 @@ func speculativeStaleWritePathCount(toolName, trackedPath string, hooks *specula
 	return 0
 }
 
+func staleWritePathCount(trackedFilePath string, deleteLocks *deleteLockSet) int {
+	if deleteLocks != nil {
+		return len(deleteLocks.paths)
+	}
+	if strings.TrimSpace(trackedFilePath) != "" {
+		return 1
+	}
+	return 0
+}
+
 func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.ToolCall, execResult *ToolExecutionResult) error {
 	if p.bypassPermission != nil && p.bypassPermission(tc.Name) {
 		return nil
@@ -390,6 +400,13 @@ func acquireTrackedWriteLock(track *filelock.FileTracker, agentID, path, toolNam
 		newHash := computeFileHash(path)
 		track.ReleaseWrite(path, agentID, newHash)
 	}, status, nil
+}
+
+func wrapTrackedWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("file conflict: %w", err)
 }
 
 func (p toolExecutionPipeline) backupRiskyPreWriteState(tc message.ToolCall, trackedPath string, stale bool, preContent string, preExisted bool, deleteLocks *deleteLockSet) fileBackupOutcome {

@@ -2,12 +2,9 @@ package agent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,19 +121,6 @@ func extractToolArgumentInDir(toolName string, args []byte, projectRoot string) 
 		}
 	}
 	return "*"
-}
-
-func computeFileHash(path string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return ""
-	}
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 func normalizeAgentFilePath(raw string) string {

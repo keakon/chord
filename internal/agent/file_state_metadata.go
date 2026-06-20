@@ -1,11 +1,28 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
+
+func computeFileHash(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
 
 func buildReadFileState(path string) *message.ToolFileState {
 	state := trackedExistingFileState(path)

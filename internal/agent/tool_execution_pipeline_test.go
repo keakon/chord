@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
@@ -25,6 +28,144 @@ func TestWrapStaleEditError(t *testing.T) {
 	}
 	if !strings.Contains(msg, "file changed on disk") {
 		t.Fatalf("wrapped error missing stale-content note, got %q", msg)
+	}
+}
+
+func TestToolExecutionPipelineWriteUpdatesFileStateAndTracker(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "notes.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+
+	tracker := filelock.NewFileTracker()
+	tracker.TrackSnapshot(path, "agent-1", computeFileHash(path))
+	registry := tools.NewRegistry()
+	registry.Register(tools.WriteTool{})
+	pipeline := toolExecutionPipeline{
+		agentID:     "agent-1",
+		registry:    registry,
+		fileTrack:   tracker,
+		fileBackups: newFileBackupManager(filepath.Join(projectRoot, ".chord", "sessions", "test")),
+		projectRoot: projectRoot,
+	}
+	call := message.ToolCall{
+		ID:   "write-1",
+		Name: tools.NameWrite,
+		Args: json.RawMessage(`{"path":"` + path + `","content":"new\n"}`),
+	}
+
+	result, err := pipeline.execute(context.Background(), call, false)
+	if err != nil {
+		t.Fatalf("execute write: %v", err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "new\n" {
+		t.Fatalf("file content = %q, %v; want new\\n", got, err)
+	}
+	if result.FileState == nil || len(result.FileState.Writes) != 1 {
+		t.Fatalf("FileState = %#v, want one write", result.FileState)
+	}
+	writeState := result.FileState.Writes[0]
+	if writeState.Path != path || !writeState.Exists || writeState.SHA256 == "" {
+		t.Fatalf("write state = %#v, want existing hashed path %q", writeState, path)
+	}
+	wantHash := computeFileHash(path)
+	if writeState.SHA256 != wantHash {
+		t.Fatalf("write hash = %q, want current disk hash %q", writeState.SHA256, wantHash)
+	}
+
+	status, err := tracker.AcquireWriteStatus(path, "agent-1", wantHash)
+	if err != nil {
+		t.Fatalf("AcquireWriteStatus after pipeline release: %v", err)
+	}
+	defer tracker.AbortWrite(path, "agent-1")
+	if status.ExternalChanged {
+		t.Fatal("tracker still reports external change after successful pipeline write")
+	}
+}
+
+func TestToolExecutionPipelineStaleWriteBacksUpCurrentFile(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := filepath.Join(projectRoot, ".chord", "sessions", "test")
+	path := filepath.Join(projectRoot, "notes.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+
+	tracker := filelock.NewFileTracker()
+	tracker.TrackSnapshot(path, "agent-1", computeFileHash(path))
+	if err := os.WriteFile(path, []byte("external\n"), 0o644); err != nil {
+		t.Fatalf("write external change: %v", err)
+	}
+	registry := tools.NewRegistry()
+	registry.Register(tools.WriteTool{})
+	pipeline := toolExecutionPipeline{
+		agentID:     "agent-1",
+		registry:    registry,
+		fileTrack:   tracker,
+		fileBackups: newFileBackupManager(sessionDir),
+		projectRoot: projectRoot,
+	}
+	call := message.ToolCall{
+		ID:   "write-1",
+		Name: tools.NameWrite,
+		Args: json.RawMessage(`{"path":"` + path + `","content":"new\n"}`),
+	}
+
+	result, err := pipeline.execute(context.Background(), call, false)
+	if err != nil {
+		t.Fatalf("execute write: %v", err)
+	}
+	for _, want := range []string{"Warning: the file changed on disk", "Backup saved to:"} {
+		if !strings.Contains(result.Result, want) {
+			t.Fatalf("result = %q, want substring %q", result.Result, want)
+		}
+	}
+	backups, err := filepath.Glob(filepath.Join(sessionDir, "backups", "*", "*"))
+	if err != nil {
+		t.Fatalf("glob backups: %v", err)
+	}
+	if len(backups) != 1 {
+		t.Fatalf("backups = %#v, want one backup", backups)
+	}
+	if got, err := os.ReadFile(backups[0]); err != nil || string(got) != "external\n" {
+		t.Fatalf("backup content = %q, %v; want external\\n", got, err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "new\n" {
+		t.Fatalf("file content = %q, %v; want new\\n", got, err)
+	}
+}
+
+func TestToolExecutionPipelineWriteConflictIsWrappedAndDoesNotExecute(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "notes.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+
+	tracker := filelock.NewFileTracker()
+	if err := tracker.AcquireWrite(path, "other-agent", computeFileHash(path)); err != nil {
+		t.Fatalf("seed conflicting write lock: %v", err)
+	}
+	defer tracker.AbortWrite(path, "other-agent")
+	registry := tools.NewRegistry()
+	registry.Register(tools.WriteTool{})
+	pipeline := toolExecutionPipeline{agentID: "agent-1", registry: registry, fileTrack: tracker, projectRoot: projectRoot}
+	call := message.ToolCall{
+		ID:   "write-1",
+		Name: tools.NameWrite,
+		Args: json.RawMessage(`{"path":"` + path + `","content":"new\n"}`),
+	}
+
+	_, err := pipeline.execute(context.Background(), call, false)
+	if err == nil {
+		t.Fatal("execute write succeeded, want conflict error")
+	}
+	if !strings.Contains(err.Error(), "file conflict:") || !strings.Contains(err.Error(), "being written by other-agent") {
+		t.Fatalf("err = %q, want wrapped file conflict", err.Error())
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "old\n" {
+		t.Fatalf("file content after conflict = %q, %v; want old\\n", got, err)
 	}
 }
 
