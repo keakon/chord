@@ -30,7 +30,7 @@ func buildSessionContextReminder(agentsMD string, now time.Time) string {
 		// reading the whole preamble. Modeled on codex's contextual user fragment.
 		sb.WriteString("# AGENTS.md instructions\n")
 		sb.WriteString("<INSTRUCTIONS>\n")
-		sb.WriteString("The following is the complete applicable AGENTS.md content for this workspace session. It was discovered by walking from the current working directory up to the project root, then injected in project-root-to-current-working-directory order. Each loaded section is labeled with its path relative to the current working directory. This is internal workspace guidance injected before the first real user message and may not appear in the visible transcript. These instructions are durable workspace context and system-provided guidance, not ordinary user content. Follow them unless they conflict with higher-priority system, developer, or user instructions.\n\n")
+		sb.WriteString("Each applicable AGENTS.md is already loaded here before the first visible user message, in root-to-current order and with its path labeled. Use those loaded sections as scoped workspace instructions, then inspect only task-relevant project files needed to understand, modify, or verify the requested work.\n\n")
 		sb.WriteString(agentsMD)
 		sb.WriteString("\n</INSTRUCTIONS>\n")
 	}

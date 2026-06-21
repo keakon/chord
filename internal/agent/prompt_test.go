@@ -1758,13 +1758,10 @@ func TestBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPresent(t 
 		t.Fatalf("buildSystemPrompt() missing AGENTS.md workspace framing when AGENTS.md is present, got:\n%s", got)
 	}
 	for _, want := range []string{
-		"complete applicable AGENTS.md content into the LLM request as an internal user-role message before the first real user message",
-		"may not appear in the visible transcript",
-		"discovered by walking from the current working directory up to the project root",
-		"with each loaded section labeled by its path relative to the current working directory",
-		"a first line of \"# AGENTS.md instructions\" followed by an <INSTRUCTIONS> ... </INSTRUCTIONS> block",
-		"Treat AGENTS.md instructions inside that <INSTRUCTIONS> block as durable workspace context",
-		"they are system-provided workspace context, not ordinary user content",
+		"Each applicable AGENTS.md is already loaded in context before the first visible user message",
+		"in root-to-current order and with its path labeled",
+		"Use those loaded sections as scoped workspace instructions",
+		"inspect only task-relevant project files needed to understand, modify, or verify the requested work",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("buildSystemPrompt() missing AGENTS.md framing %q, got:\n%s", want, got)
@@ -1787,12 +1784,10 @@ func TestSubAgentBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPr
 	got := s.buildSystemPrompt()
 	for _, want := range []string{
 		"## Workspace Instructions",
-		"complete applicable AGENTS.md content into the LLM request as an internal user-role message before the first real user message",
-		"may not appear in the visible transcript",
-		"discovered by walking from the current working directory up to the project root",
-		"with each loaded section labeled by its path relative to the current working directory",
-		"a first line of \"# AGENTS.md instructions\" followed by an <INSTRUCTIONS> ... </INSTRUCTIONS> block",
-		"Treat AGENTS.md instructions inside that <INSTRUCTIONS> block as durable workspace context",
+		"Each applicable AGENTS.md is already loaded in context before the first visible user message",
+		"in root-to-current order and with its path labeled",
+		"Use those loaded sections as scoped workspace instructions",
+		"inspect only task-relevant project files needed to understand, modify, or verify the requested work",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("SubAgent buildSystemPrompt() missing AGENTS.md framing %q, got:\n%s", want, got)

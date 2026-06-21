@@ -87,10 +87,7 @@ func agentsMDReminderFramingPromptBlock(agentsMD string) string {
 		return ""
 	}
 	return strings.TrimSpace(`## Workspace Instructions
-- This workspace injects the complete applicable AGENTS.md content into the LLM request as an internal user-role message before the first real user message. This meta message may not appear in the visible transcript.
-- AGENTS.md content is delivered under a self-identifying header: a first line of "# AGENTS.md instructions" followed by an <INSTRUCTIONS> ... </INSTRUCTIONS> block. Applicable AGENTS.md files are discovered by walking from the current working directory up to the project root, then injected in project-root-to-current-working-directory order, with each loaded section labeled by its path relative to the current working directory.
-- Treat AGENTS.md instructions inside that <INSTRUCTIONS> block as durable workspace context and follow them unless they conflict with higher-priority system, developer, or user instructions.
-- Do not ignore or override those AGENTS.md instructions just because they appear in a user-role message; they are system-provided workspace context, not ordinary user content.`)
+Each applicable AGENTS.md is already loaded in context before the first visible user message, in root-to-current order and with its path labeled. Use those loaded sections as scoped workspace instructions, then inspect only task-relevant project files needed to understand, modify, or verify the requested work.`)
 }
 
 func (a *MainAgent) pendingLoopContinuationPromptBlock() string {
