@@ -519,3 +519,64 @@ func TestGrepIncludesBraceAlternationViaDoublestar(t *testing.T) {
 		t.Fatalf("brace include filter should exclude .go, got:\n%s", out)
 	}
 }
+
+// TestGrepExactIncludeFastPathHitsNestedFile verifies that when includes is a
+// plain relative file path, grep reads the file directly under the search root
+// instead of relying on the recursive walker. The sibling must not be scanned.
+func TestGrepExactIncludeFastPathHitsNestedFile(t *testing.T) {
+	dir := t.TempDir()
+	nested := filepath.Join(dir, "src", "deep")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(nested, "target.go")
+	if err := os.WriteFile(target, []byte("needle here\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A decoy with the same basename but different parent must NOT be reached
+	// when the include names the relative path src/deep/target.go.
+	decoyDir := filepath.Join(dir, "other")
+	if err := os.MkdirAll(decoyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(decoyDir, "target.go"), []byte("needle decoy\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, _ := json.Marshal(map[string]any{
+		"pattern":  "needle",
+		"paths":    []string{dir},
+		"includes": []string{"src/deep/target.go"},
+	})
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "src/deep/target.go") {
+		t.Fatalf("expected fast-path match on nested target, got:\n%s", out)
+	}
+	if strings.Contains(out, "decoy") {
+		t.Fatalf("fast path must only read the named relative file, got:\n%s", out)
+	}
+}
+
+// TestGrepExactIncludeFastPathSkipsMissingFile keeps the fast path when one of
+// several exact includes is absent, without erroring the whole call.
+func TestGrepExactIncludeFastPathSkipsMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "there.txt"), []byte("hit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"pattern":  "hit",
+		"paths":    []string{dir},
+		"includes": []string{"there.txt", "missing.txt"},
+	})
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "there.txt") {
+		t.Fatalf("expected match on present file, got:\n%s", out)
+	}
+}

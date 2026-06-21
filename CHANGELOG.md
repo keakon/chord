@@ -116,6 +116,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Context reduction now uses typed summaries for large tool results, preserving key information
 - Unload idle LSP/MCP resources to reduce memory footprint
 - Improved `edit` patch tolerance and cleaner TUI tool result display
+- `grep` and `glob` now avoid walking the entire search root when the caller already knows the exact file path: a plain relative filename in `grep` `includes` or in `glob` `patterns` is resolved directly under the search path and read or statted without a recursive traversal. When a search still scans a very large root (for example the system temp directory, the home directory, or `/`) and matches very few candidate files, it aborts early with a recoverable error that advises passing the full file path as the search path or narrowing the search path, instead of hanging for minutes. The tool descriptions also clarify that path/name filters apply during traversal and do not avoid walking the search root.
 
 ### Features
 

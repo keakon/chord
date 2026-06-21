@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -62,6 +64,7 @@ func (GlobTool) Description() string {
 	return "Find files by path using glob syntax. Supports ** for recursive directory matching relative to path." +
 		" patterns are path globs, not regular expressions and not file-contents searches." +
 		" Pass patterns as a JSON array (e.g. patterns: [\"**/*.go\"] or patterns: [\"src/**/*.ts\", \"test/**/*.ts\"]); a single bare string is tolerated but a single-element array is preferred." +
+		" If the exact relative file path is known, pass it as the pattern (e.g. patterns: [\"src/main.go\"]) instead of using ** from a very broad path like /, /tmp, or the home directory." +
 		" Best for discovering candidate files by path or extension before using read, grep, or lsp."
 }
 
@@ -119,24 +122,105 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 		return "", fmt.Errorf("resolve path: %w", err)
 	}
 
-	fsys := os.DirFS(resolvedBaseDir)
-	matches := make([]string, 0)
-	seenMatches := make(map[string]struct{})
-	for _, pattern := range patterns {
-		patternMatches, err := doublestar.Glob(fsys, pattern)
-		if err != nil {
-			return "", fmt.Errorf("glob error: %w (patterns use glob syntax like **/*.go, not regex syntax)", err)
-		}
-		for _, match := range patternMatches {
-			if _, ok := seenMatches[match]; ok {
+	// Fast path: when all patterns are relative paths without glob metacharacters
+	// (e.g. "architecture-review-20260621-064007.html"), stat them directly under
+	// the base directory instead of walking it. This avoids scanning huge roots
+	// (like the system temp directory) when the caller already knows the path.
+	if exactFiles, ok := resolveExactIncludeFiles(resolvedBaseDir, patterns); ok {
+		directMatches := make([]string, 0, len(exactFiles))
+		for _, file := range exactFiles {
+			info, statErr := os.Stat(file)
+			if statErr != nil || info.IsDir() {
 				continue
 			}
-			seenMatches[match] = struct{}{}
-			matches = append(matches, match)
+			rel, relErr := filepath.Rel(resolvedBaseDir, file)
+			if relErr != nil {
+				rel = file
+			}
+			directMatches = append(directMatches, filepath.ToSlash(rel))
 		}
+		filtered, truncated := filterGlobMatches(resolvedBaseDir, directMatches)
+		return formatGlobResult(a, resolvedBaseDir, patterns, len(directMatches), filtered, truncated, startedAt)
+	}
+
+	matches, err := globWalkMatches(resolvedBaseDir, patterns)
+	if err != nil {
+		return "", err
 	}
 
 	// Filter out excluded directory entries and .gitignore matches.
+	filtered, truncated := filterGlobMatches(resolvedBaseDir, matches)
+	return formatGlobResult(a, resolvedBaseDir, patterns, len(matches), filtered, truncated, startedAt)
+}
+
+func globWalkMatches(resolvedBaseDir string, patterns []string) ([]string, error) {
+	if err := validateGlobPatterns(patterns); err != nil {
+		return nil, err
+	}
+	seenMatches := make(map[string]struct{})
+	matches := make([]string, 0)
+	guard := newBroadSearchGuard("Glob", resolvedBaseDir, "patterns", patterns)
+	err := fs.WalkDir(os.DirFS(resolvedBaseDir), ".", func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		guard.visit()
+		if guard.shouldAbort() {
+			return errGuardAbort
+		}
+		if d.IsDir() && path != "." && skipDirNames[d.Name()] {
+			return fs.SkipDir
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel := filepath.ToSlash(path)
+		matched, err := matchAnyGlobPattern(rel, patterns)
+		if err != nil {
+			return fmt.Errorf("glob error: %w (patterns use glob syntax like **/*.go, not regex syntax)", err)
+		}
+		if !matched {
+			return nil
+		}
+		guard.candidate()
+		if _, ok := seenMatches[rel]; ok {
+			return nil
+		}
+		seenMatches[rel] = struct{}{}
+		matches = append(matches, rel)
+		return nil
+	})
+	if err == nil {
+		return matches, nil
+	}
+	if err == errGuardAbort {
+		return nil, guard.abortError()
+	}
+	return nil, err
+}
+
+func validateGlobPatterns(patterns []string) error {
+	for _, pattern := range patterns {
+		if !doublestar.ValidatePattern(pattern) {
+			return fmt.Errorf("glob error: bad pattern (patterns use glob syntax like **/*.go, not regex syntax)")
+		}
+	}
+	return nil
+}
+
+func matchAnyGlobPattern(path string, patterns []string) (bool, error) {
+	for _, pattern := range patterns {
+		matched, err := doublestar.PathMatch(pattern, path)
+		if err != nil || matched {
+			return matched, err
+		}
+	}
+	return false, nil
+}
+
+// filterGlobMatches drops excluded directories and .gitignore matches, and
+// caps the result by both count and output bytes.
+func filterGlobMatches(resolvedBaseDir string, matches []string) ([]string, bool) {
 	ignore := newGitIgnoreMatcher(resolvedBaseDir)
 	filtered := make([]string, 0, len(matches))
 	outputBytes := 0
@@ -153,9 +237,6 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 			}
 		}
 		matchBytes := len(m)
-		if len(filtered) > 0 {
-			matchBytes++
-		}
 		if len(filtered) > 0 && outputBytes+matchBytes > maxGlobOutputBytes {
 			truncated = true
 			break
@@ -167,9 +248,14 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 			break
 		}
 	}
+	return filtered, truncated
+}
 
+// formatGlobResult renders the filtered matches with coerce notes and the
+// truncation hint, and records slow-search telemetry.
+func formatGlobResult(a globArgs, resolvedBaseDir string, patterns []string, candidateCount int, filtered []string, truncated bool, startedAt time.Time) (string, error) {
 	if len(filtered) == 0 {
-		logSlowSearch("Glob", resolvedBaseDir, strings.Join(patterns, ","), "", startedAt, "candidate_count", len(matches), 0, truncated)
+		logSlowSearch("Glob", resolvedBaseDir, strings.Join(patterns, ","), "", startedAt, "candidate_count", candidateCount, 0, truncated)
 		return prependNotes(globCoerceNotes(a), "No files matched the pattern."), nil
 	}
 
@@ -178,7 +264,7 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 	if truncated || len(filtered) == maxGlobResults || len(result) >= maxGlobOutputBytes {
 		result += fmt.Sprintf("\n\n(showing first %d results within %d KiB; refine pattern/path to narrow results)", len(filtered), maxGlobOutputBytes/1024)
 	}
-	logSlowSearch("Glob", resolvedBaseDir, strings.Join(patterns, ","), "", startedAt, "candidate_count", len(matches), len(filtered), truncated)
+	logSlowSearch("Glob", resolvedBaseDir, strings.Join(patterns, ","), "", startedAt, "candidate_count", candidateCount, len(filtered), truncated)
 	return result, nil
 }
 

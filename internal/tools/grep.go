@@ -83,6 +83,7 @@ func (GrepTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 func (GrepTool) Description() string {
 	return "Search file contents using a regular expression. If pattern is not valid regex, it is safely searched as literal text and the result reports that fallback." +
 		" Use paths for one or more files/directories (JSON array, e.g. paths: [\"internal\", \"cmd\"]), and includes for optional path globs such as **/*.go (JSON array, e.g. includes: [\"**/*.go\"])." +
+		" If the exact file path is known, pass the full file path in paths instead of searching its parent directory with the filename in includes; includes filters files during traversal and does not avoid walking the search path." +
 		" Single bare strings are tolerated for paths/includes but arrays are preferred." +
 		" Returns matching lines with file paths and line numbers." +
 		" Best for discovering candidate files, symbols, or text matches when the exact location is not known yet." +
@@ -306,14 +307,57 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 		return fileMatches, joinedLinesBytes(fileMatches), 1, truncated, nil
 	}
 
+	// Fast path: when includes contains a relative path with no glob metacharacters
+	// (e.g. "architecture-review-20260621-064007.html" or "src/main.go"), try the
+	// exact file under the search root before recursively walking it. This avoids
+	// walking huge roots (like the system temp directory) when the caller already
+	// knows the relative path.
+	if exactFiles, ok := resolveExactIncludeFiles(resolvedSearchPath, includes); ok {
+		var matches []string
+		var outputBytes int
+		var scannedFiles int64
+		truncated := false
+		for _, file := range exactFiles {
+			remainingMatches := maxMatches - len(matches)
+			remainingBytes := maxBytes - outputBytes
+			if remainingMatches <= 0 || remainingBytes <= 0 {
+				truncated = true
+				break
+			}
+			info, err := os.Stat(file)
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			if IsBinaryExtension(filepath.Base(file)) {
+				continue
+			}
+			fileMatches, _, err := searchFile(file, re, remainingMatches, remainingBytes)
+			if err != nil {
+				return nil, 0, 0, false, err
+			}
+			matches = append(matches, fileMatches...)
+			outputBytes = joinedLinesBytes(matches)
+			scannedFiles++
+		}
+		if scannedFiles > 0 {
+			reportToolProgress(ctx, ToolProgressSnapshot{Label: "files", Current: scannedFiles})
+		}
+		return matches, outputBytes, scannedFiles, truncated, nil
+	}
+
 	var matches []string
 	var outputBytes int
 	var scannedFiles int64
 	truncated := false
 	ignore := newGitIgnoreMatcher(resolvedSearchPath)
+	guard := newBroadSearchGuard("Grep", resolvedSearchPath, "includes", includes)
 	err := filepath.WalkDir(resolvedSearchPath, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
+		}
+		guard.visit()
+		if guard.shouldAbort() {
+			return errGuardAbort
 		}
 		if d.IsDir() && skipDirNames[d.Name()] {
 			return filepath.SkipDir
@@ -342,6 +386,7 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 		if !d.Type().IsRegular() || IsBinaryExtension(d.Name()) {
 			return nil
 		}
+		guard.candidate()
 		remainingMatches := maxMatches - len(matches)
 		remainingBytes := maxBytes - outputBytes
 		if remainingMatches <= 0 || remainingBytes <= 0 {
@@ -364,7 +409,12 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 		}
 		return nil
 	})
-	if err != nil && !errors.Is(err, errMaxGrepMatchesReached) {
+	switch {
+	case err == nil:
+	case errors.Is(err, errMaxGrepMatchesReached):
+	case errors.Is(err, errGuardAbort):
+		return nil, 0, scannedFiles, truncated, guard.abortError()
+	default:
 		return nil, 0, scannedFiles, truncated, fmt.Errorf("walking directory: %w", err)
 	}
 	if scannedFiles > 0 {

@@ -72,3 +72,25 @@ func TestLogSlowSearchSupportsToolSpecificCountField(t *testing.T) {
 		t.Fatalf("did not expect scanned_files in glob log, got %q", got)
 	}
 }
+
+func TestFormatGlobResultLogsUnfilteredCandidateCount(t *testing.T) {
+	var buf bytes.Buffer
+	logger := logtest.NewLogger(&buf, golog.DebugLevel)
+	log.SetDefaultLogger(logger)
+	defer log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel))
+
+	_, err := formatGlobResult(globArgs{}, ".", []string{"**/*.go"}, 3, []string{"visible.go"}, false, time.Now().Add(-slowSearchWarnThreshold-time.Millisecond))
+	if err != nil {
+		t.Fatalf("formatGlobResult: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"tool=Glob",
+		"candidate_count=3",
+		"match_count=1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected log to contain %q, got %q", want, got)
+		}
+	}
+}
