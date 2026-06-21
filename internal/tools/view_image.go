@@ -64,6 +64,8 @@ func (*ViewImageTool) IsReadOnly() bool { return true }
 
 func (*ViewImageTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 
+func (*ViewImageTool) CanRenderBeforeToolUseEnd(json.RawMessage) bool { return true }
+
 // IsAvailable hides ViewImage unless the owning agent can safely expose it.
 func (t *ViewImageTool) IsAvailable() bool {
 	return t.capability != nil && t.capability.SupportsViewImageTool()

@@ -1599,10 +1599,9 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	completedCount := 0
 	for _, call := range a.turn.filterCompletedToolCalls(payload.Calls) {
 		if result, ok := completedResults[call.CallID]; ok {
-			// Tool completed execution: persist and emit immediately so the
-			// result survives cancellation/restart and can be reused on resume.
-			a.appendCompletedInterruptedToolResult(result)
-			completedCount++
+			if a.handleCompletedInterruptedToolResult(call, result, "not_in_context") {
+				completedCount++
+			}
 		} else {
 			// Tool was truly cancelled
 			reallyCancelled = append(reallyCancelled, call)

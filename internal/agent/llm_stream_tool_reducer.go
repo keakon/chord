@@ -48,7 +48,7 @@ func (r streamToolDeltaReducer) handleToolUseStart(delta message.StreamDelta) {
 	if r.promoteStreamingActivity != nil {
 		r.promoteStreamingActivity("tool_use_start")
 	}
-	if delta.ToolCall == nil || r.emit == nil {
+	if delta.ToolCall == nil {
 		return
 	}
 	name := tools.NormalizeName(delta.ToolCall.Name)
@@ -60,12 +60,15 @@ func (r streamToolDeltaReducer) handleToolUseStart(delta message.StreamDelta) {
 			AgentID:  r.agentID,
 		})
 	}
-	r.emit(ToolCallStartEvent{
-		ID:       delta.ToolCall.ID,
-		Name:     name,
-		ArgsJSON: delta.ToolCall.Input,
-		AgentID:  r.agentID,
-	})
+	if r.emit != nil {
+		r.emit(ToolCallStartEvent{
+			ID:       delta.ToolCall.ID,
+			Name:     name,
+			ArgsJSON: delta.ToolCall.Input,
+			AgentID:  r.agentID,
+		})
+	}
+	r.maybeStartEarlySpeculativeTool(delta.ToolCall.ID)
 }
 
 func (r streamToolDeltaReducer) handleToolUseDelta(delta message.StreamDelta) {
@@ -77,15 +80,56 @@ func (r streamToolDeltaReducer) handleToolUseDelta(delta message.StreamDelta) {
 	}
 	name := tools.NormalizeName(delta.ToolCall.Name)
 	accumulated := r.turn.appendStreamingToolCallInput(delta.ToolCall.ID, name, delta.ToolCall.Input, r.agentID)
-	if accumulated == "" || r.emit == nil {
+	if accumulated == "" {
 		return
 	}
-	r.emit(ToolCallUpdateEvent{
-		ID:       delta.ToolCall.ID,
-		Name:     name,
-		ArgsJSON: accumulated,
-		AgentID:  r.agentID,
-	})
+	if r.emit != nil {
+		r.emit(ToolCallUpdateEvent{
+			ID:       delta.ToolCall.ID,
+			Name:     name,
+			ArgsJSON: accumulated,
+			AgentID:  r.agentID,
+		})
+	}
+	r.maybeStartEarlySpeculativeTool(delta.ToolCall.ID)
+}
+
+func (r streamToolDeltaReducer) maybeStartEarlySpeculativeTool(callID string) {
+	if r.turn == nil || r.turn.streamingToolExec == nil || callID == "" {
+		return
+	}
+	call, ok := r.turn.getStreamingToolCall(callID)
+	if !ok {
+		return
+	}
+	callName := tools.NormalizeName(call.Name)
+	if callName == "" || call.ArgsJSON == "" {
+		return
+	}
+	if r.registry == nil {
+		return
+	}
+	tool, ok := r.registry.Get(callName)
+	if !ok {
+		return
+	}
+	early, ok := tool.(tools.EarlyRenderableReadOnlyTool)
+	if !ok || !early.CanRenderBeforeToolUseEnd(json.RawMessage(call.ArgsJSON)) {
+		return
+	}
+	if err := tools.ValidateToolArgs(tool, json.RawMessage(call.ArgsJSON)); err != nil {
+		return
+	}
+	ruleset := permission.Ruleset(nil)
+	if r.ruleset != nil {
+		ruleset = r.ruleset()
+	}
+	decision := evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(call.ArgsJSON), r.turn.streamingToolCallsBefore(callID))
+	logSpeculativeExecutionDecision(callID, callName, decision)
+	if !decision.Allowed {
+		return
+	}
+	r.turn.streamingToolExec.Start(message.ToolCall{ID: callID, Name: callName, Args: json.RawMessage(call.ArgsJSON)})
 }
 
 func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {

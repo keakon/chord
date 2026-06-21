@@ -323,10 +323,9 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 	completedCount := 0
 	for _, call := range merged {
 		if payload, ok := completedResults[call.CallID]; ok {
-			// Tool completed execution: persist and emit immediately so the
-			// result survives turn replacement and can be reused on resume.
-			a.appendCompletedInterruptedToolResult(payload)
-			completedCount++
+			if a.handleCompletedInterruptedToolResult(call, payload, "not_in_context") {
+				completedCount++
+			}
 		} else {
 			// Tool was truly interrupted - mark as failed
 			reallyInterrupted = append(reallyInterrupted, call)

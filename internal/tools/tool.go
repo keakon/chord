@@ -111,6 +111,16 @@ type ConcurrencySafeReadOnlyTool interface {
 	ConcurrencySafeReadOnly(args json.RawMessage) bool
 }
 
+// EarlyRenderableReadOnlyTool is implemented by local read-only tools whose
+// fully-formed streamed arguments are safe to execute and show before the
+// provider emits tool_use_end. This is intentionally narrower than
+// ConcurrencySafeReadOnlyTool: network reads and other externally visible reads
+// may be concurrency-safe but should still wait for provider confirmation.
+type EarlyRenderableReadOnlyTool interface {
+	Tool
+	CanRenderBeforeToolUseEnd(args json.RawMessage) bool
+}
+
 // DescriptiveTool can tailor its model-facing description using the current
 // registry surface. The registry passes the visible tool names that will be
 // exposed to the model in the current session/role.

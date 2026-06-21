@@ -51,10 +51,9 @@ func (a *MainAgent) failPendingToolCalls(turn *Turn, err error) {
 	completedCount := 0
 	for _, call := range merged {
 		if payload, ok := completedResults[call.CallID]; ok {
-			// Tool completed execution: persist and emit immediately so the
-			// result survives terminal turn failure and can be reused on resume.
-			a.appendCompletedInterruptedToolResult(payload)
-			completedCount++
+			if a.handleCompletedInterruptedToolResult(call, payload, "not_in_context") {
+				completedCount++
+			}
 		} else {
 			// Tool truly failed
 			reallyFailed = append(reallyFailed, call)
@@ -98,6 +97,23 @@ func splitPendingCallsByDeclaredTools(m *ctxmgr.Manager, calls []PendingToolCall
 		}
 	}
 	return declared, undeclared
+}
+
+func (a *MainAgent) handleCompletedInterruptedToolResult(call PendingToolCall, payload *ToolResultPayload, discardReason string) bool {
+	if a == nil || payload == nil {
+		return false
+	}
+	if a.ctxMgr != nil && !a.ctxMgr.AnyAssistantDeclaresToolCallID(call.CallID) {
+		if strings.TrimSpace(discardReason) == "" {
+			discardReason = "not_in_context"
+		}
+		emitToolCallDiscards(a.emitToTUI, []PendingToolCall{call}, discardReason)
+		return false
+	}
+	// Tool completed execution: persist and emit immediately so the result
+	// survives terminal turn failure/interruption and can be reused on resume.
+	a.appendCompletedInterruptedToolResult(payload)
+	return true
 }
 
 // finalizeInterruptedToolCalls is the shared tail of every turn cancel / fail /

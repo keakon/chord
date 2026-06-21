@@ -170,6 +170,62 @@ func TestHandleAgentErrorFailsPendingToolCalls(t *testing.T) {
 	}
 }
 
+func TestHandleAgentErrorDiscardsCompletedSpeculativeToolWithoutAssistantDeclaration(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	a.newTurn()
+	call := PendingToolCall{CallID: "spec-read-orphan", Name: tools.NameRead, ArgsJSON: `{"path":"README.md"}`}
+	a.turn.recordStreamingToolCall(call)
+	a.turn.streamingToolExec = NewStreamingToolExecutor(a.turn.ID, context.Background(), nil, func(context.Context, message.ToolCall) (ToolExecutionResult, error) {
+		return ToolExecutionResult{EffectiveArgsJSON: call.ArgsJSON, Result: "     1\thello"}, nil
+	})
+	a.turn.streamingToolExec.Start(message.ToolCall{ID: call.CallID, Name: call.Name, Args: json.RawMessage(call.ArgsJSON)})
+	time.Sleep(50 * time.Millisecond)
+
+	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
+	a.flushPersist()
+
+	for _, msg := range a.GetMessages() {
+		if msg.Role == "tool" && msg.ToolCallID == call.CallID {
+			t.Fatalf("unexpected persisted orphan tool message: %#v", msg)
+		}
+	}
+	restored, err := a.recovery.LoadMessages("main")
+	if err != nil {
+		t.Fatalf("LoadMessages(main): %v", err)
+	}
+	for _, msg := range restored {
+		if msg.Role == "tool" && msg.ToolCallID == call.CallID {
+			t.Fatalf("unexpected restored orphan tool message: %#v", msg)
+		}
+	}
+
+	var sawDiscard bool
+	for {
+		select {
+		case evt := <-a.outputCh:
+			switch ev := evt.(type) {
+			case ToolCallDiscardEvent:
+				if ev.ID == call.CallID {
+					sawDiscard = true
+				}
+			case ToolResultEvent:
+				if ev.CallID == call.CallID {
+					t.Fatalf("unexpected ToolResultEvent for orphan completed speculative call: %#v", ev)
+				}
+			case IdleEvent:
+				if !sawDiscard {
+					t.Fatal("expected orphan completed speculative tool card to be discarded")
+				}
+				return
+			}
+		default:
+			t.Fatal("expected discard and idle events")
+		}
+	}
+}
+
 func TestHandleAgentErrorPersistsFailedPendingToolCalls(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
