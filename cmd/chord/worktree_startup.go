@@ -188,12 +188,13 @@ func worktreeMetaForInfo(info *worktree.Info) *recovery.SessionMeta {
 }
 
 // SessionLocation describes where a session id was resolved to. Exactly
-// one of Worktree / MainRepoRoot is non-empty. Callers should chdir to
-// Worktree.Path (when set) or MainRepoRoot before resuming so initApp's
-// ProjectKey computation matches the session's storage location.
+// one of Worktree / MainRepoRoot / ProjectRoot is non-empty. Callers should
+// chdir to the resolved path before resuming so initApp's ProjectKey
+// computation matches the session's storage location.
 type SessionLocation struct {
 	Worktree     *worktree.Info
 	MainRepoRoot string
+	ProjectRoot  string
 }
 
 // resolveSessionWorktree returns the location of the session with the
@@ -204,6 +205,7 @@ type SessionLocation struct {
 // Returns:
 //   - (loc, nil) where loc.Worktree != nil    → session belongs to a chord-managed worktree
 //   - (loc, nil) where loc.MainRepoRoot != "" → session belongs to the main repo
+//   - (loc, nil) where loc.ProjectRoot != ""  → session belongs to the current non-git project
 //   - (nil, err)                              → not found or error to abort startup
 func resolveSessionWorktree(ctx context.Context, sid string) (*SessionLocation, error) {
 	sid = strings.TrimSpace(sid)
@@ -220,6 +222,9 @@ func resolveSessionWorktree(ctx context.Context, sid string) (*SessionLocation, 
 	}
 	mainRoot, err := worktree.GitMainRoot(ctx, cwd)
 	if err != nil {
+		if errors.Is(err, worktree.ErrNotGitRepository) {
+			return resolveSessionInCurrentProject(pl, cwd, sid)
+		}
 		return nil, fmt.Errorf("resolve git main root: %w", err)
 	}
 	repoID := worktree.RepoIDFor(mainRoot)
@@ -257,6 +262,17 @@ func resolveSessionWorktree(ctx context.Context, sid string) (*SessionLocation, 
 		return &SessionLocation{MainRepoRoot: mainRoot}, nil
 	}
 	return nil, fmt.Errorf("session %q not found in this repo's chord-managed worktrees", sid)
+}
+
+func resolveSessionInCurrentProject(pl *config.PathLocator, projectRoot, sid string) (*SessionLocation, error) {
+	projectPL, err := pl.LocateProject(projectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("locate current project: %w", err)
+	}
+	if sessionExistsInProject(pl, projectPL.ProjectKey, sid) {
+		return &SessionLocation{ProjectRoot: projectPL.ProjectRoot}, nil
+	}
+	return nil, fmt.Errorf("session %q not found in current project", sid)
 }
 
 // sessionExistsInProject reports whether <stateDir>/sessions/<key>/<sid>/main.jsonl

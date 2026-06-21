@@ -42,6 +42,11 @@ func newResumeCmd() *cobra.Command {
 					return fmt.Errorf("chdir to main repo %q: %w", loc.MainRepoRoot, err)
 				}
 				fmt.Fprintf(os.Stderr, "Resuming session %s in main repository (%s)\n", sid, loc.MainRepoRoot)
+			case loc.ProjectRoot != "":
+				if err := os.Chdir(loc.ProjectRoot); err != nil {
+					return fmt.Errorf("chdir to project %q: %w", loc.ProjectRoot, err)
+				}
+				fmt.Fprintf(os.Stderr, "Resuming session %s in project (%s)\n", sid, loc.ProjectRoot)
 			default:
 				return fmt.Errorf("session %q location could not be determined", sid)
 			}

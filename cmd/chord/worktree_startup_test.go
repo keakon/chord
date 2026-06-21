@@ -275,6 +275,55 @@ func TestResolveSessionWorktree_NotFound(t *testing.T) {
 	}
 }
 
+func TestResolveSessionWorktree_NonGitProject(t *testing.T) {
+	withTestStateDir(t)
+	project := t.TempDir()
+	chdirForTest(t, project)
+
+	pl, err := startupPathLocator()
+	if err != nil {
+		t.Fatalf("startupPathLocator: %v", err)
+	}
+	projectPL, err := pl.LocateProject(project)
+	if err != nil {
+		t.Fatalf("LocateProject: %v", err)
+	}
+	sid := "01HXNONGITSESSION01"
+	writeTestSessionMain(t, projectPL.ProjectSessionsDir, sid, `{"role":"user","content":"hi"}`+"\n")
+
+	loc, err := resolveSessionWorktree(context.Background(), sid)
+	if err != nil {
+		t.Fatalf("resolveSessionWorktree: %v", err)
+	}
+	if loc == nil || loc.ProjectRoot == "" || loc.Worktree != nil || loc.MainRepoRoot != "" {
+		t.Fatalf("expected non-git ProjectRoot resolution, got %+v", loc)
+	}
+	canonicalProject, err := config.CanonicalProjectRoot(project)
+	if err != nil {
+		t.Fatalf("canonical project: %v", err)
+	}
+	if loc.ProjectRoot != canonicalProject {
+		t.Errorf("ProjectRoot mismatch: got %s, want %s", loc.ProjectRoot, canonicalProject)
+	}
+}
+
+func TestResolveSessionWorktree_NonGitProjectNotFound(t *testing.T) {
+	withTestStateDir(t)
+	project := t.TempDir()
+	chdirForTest(t, project)
+
+	_, err := resolveSessionWorktree(context.Background(), "01HXNONGITNOSUCH01")
+	if err == nil {
+		t.Fatal("expected not-found error")
+	}
+	if strings.Contains(err.Error(), "resolve git main root") || strings.Contains(err.Error(), "not a git repository") {
+		t.Fatalf("non-git project should fall back to current project lookup, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "not found in current project") {
+		t.Fatalf("expected current-project not-found error, got %v", err)
+	}
+}
+
 // TestResolveSessionWorktree_FromInsideWorktree verifies that running
 // `chord resume <main-sid>` from inside a worktree directory still
 // reports MainRepoRoot so the resume command can chdir back to the main

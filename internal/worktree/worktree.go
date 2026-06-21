@@ -18,6 +18,9 @@ import (
 // chord-managed worktrees.
 const DefaultBranchPrefix = "chord/"
 
+// ErrNotGitRepository reports that a path is not inside a git repository.
+var ErrNotGitRepository = errors.New("not a git repository")
+
 // NormalizeBranchPrefix returns a usable branch prefix for the worktree
 // machinery: empty input falls back to DefaultBranchPrefix; otherwise
 // the input is trimmed, validated for git-branch safety, and a trailing
@@ -383,7 +386,7 @@ func GitMainRoot(ctx context.Context, dir string) (string, error) {
 	}
 	common, err := runGitText(ctx, dir, "rev-parse", "--git-common-dir")
 	if err != nil {
-		return "", fmt.Errorf("not a git repository: %s", dir)
+		return "", fmt.Errorf("%w: %s", ErrNotGitRepository, dir)
 	}
 	commonAbs, err := absClean(common, dir)
 	if err != nil {
