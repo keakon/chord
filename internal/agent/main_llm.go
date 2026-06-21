@@ -488,11 +488,12 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 // forwarded to the TUI in real-time via emitToTUI. Token usage is recorded in
 // the context manager.
 func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*message.Response, error) {
-	// Build the session's stable tool/system surface before the first real request.
-	if err := a.ensureSessionBuilt(ctx); err != nil {
+	if err := a.ensureMainModelPolicy(); err != nil {
 		return nil, err
 	}
-	if err := a.ensureMainModelPolicy(); err != nil {
+	// Build the session's stable tool/system surface after applying any pending
+	// model policy so edit/patch visibility is based on the model that will run.
+	if err := a.ensureSessionBuilt(ctx); err != nil {
 		return nil, err
 	}
 	messages = a.prepareMessagesForLLM(messages)

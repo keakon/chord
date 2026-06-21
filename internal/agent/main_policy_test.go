@@ -16,6 +16,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -27,6 +28,7 @@ type stubProvider struct {
 
 type captureMessagesProvider struct {
 	messages []message.Message
+	tools    []message.ToolDefinition
 }
 
 func (p *captureMessagesProvider) CompleteStream(
@@ -35,12 +37,13 @@ func (p *captureMessagesProvider) CompleteStream(
 	_ string,
 	_ string,
 	messages []message.Message,
-	_ []message.ToolDefinition,
+	toolDefs []message.ToolDefinition,
 	_ int,
 	_ llm.RequestTuning,
 	_ llm.StreamCallback,
 ) (*message.Response, error) {
 	p.messages = append([]message.Message(nil), messages...)
+	p.tools = append([]message.ToolDefinition(nil), toolDefs...)
 	return &message.Response{Content: "ok", StopReason: "stop"}, nil
 }
 
@@ -776,6 +779,140 @@ func TestSwitchModelPropagatesCurrentSessionIDToNewClient(t *testing.T) {
 	}
 	if got := providerImpl.sessionID; got != "test" {
 		t.Fatalf("provider sessionID = %q, want test", got)
+	}
+}
+
+func TestSwitchModelRefreshesMainEditPatchToolDefinitions(t *testing.T) {
+	tests := []struct {
+		name            string
+		initialModel    string
+		initialWantTool string
+		targetRef       string
+		targetModel     string
+		targetWantTool  string
+	}{
+		{
+			name:            "gpt to claude",
+			initialModel:    "gpt-4",
+			initialWantTool: tools.NamePatch,
+			targetRef:       "sample/claude-sonnet-4",
+			targetModel:     "claude-sonnet-4",
+			targetWantTool:  tools.NameEdit,
+		},
+		{
+			name:            "claude to gpt",
+			initialModel:    "claude-sonnet-4",
+			initialWantTool: tools.NameEdit,
+			targetRef:       "sample/gpt-4",
+			targetModel:     "gpt-4",
+			targetWantTool:  tools.NamePatch,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			projectRoot := t.TempDir()
+			a := newTestMainAgent(t, projectRoot)
+			a.markAgentsMDReady()
+			a.MarkSkillsReady()
+			a.markMCPReady()
+			a.tools.Register(tools.PatchTool{})
+			a.tools.Register(tools.EditTool{})
+			a.ruleset = permission.Ruleset{
+				{Permission: tools.NamePatch, Pattern: "*", Action: permission.ActionAllow},
+				{Permission: tools.NameEdit, Pattern: "*", Action: permission.ActionAllow},
+			}
+			a.llmMu.Lock()
+			a.modelName = tt.initialModel
+			a.llmMu.Unlock()
+
+			if err := a.ensureSessionBuilt(context.Background()); err != nil {
+				t.Fatalf("initial ensureSessionBuilt: %v", err)
+			}
+			assertOnlyEditPatchTool(t, a.mainLLMToolDefinitions(), tt.initialWantTool)
+
+			providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"test-key"})
+			client := llm.NewClient(providerCfg, stubProvider{}, tt.targetModel, 2048, "")
+			a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+				if providerModel != tt.targetRef {
+					t.Fatalf("providerModel = %q, want %s", providerModel, tt.targetRef)
+				}
+				return client, tt.targetModel, 16384, nil
+			})
+
+			if err := a.SwitchModel(tt.targetRef); err != nil {
+				t.Fatalf("SwitchModel: %v", err)
+			}
+			if !a.surfaceDirty.Load() {
+				t.Fatal("model switch should mark tool surface dirty")
+			}
+			if err := a.ensureSessionBuilt(context.Background()); err != nil {
+				t.Fatalf("ensureSessionBuilt after switch: %v", err)
+			}
+			assertOnlyEditPatchTool(t, a.mainLLMToolDefinitions(), tt.targetWantTool)
+		})
+	}
+}
+
+func TestLazyMainModelPolicyRefreshesEditPatchToolsBeforeRequest(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.tools.Register(tools.PatchTool{})
+	a.tools.Register(tools.EditTool{})
+	a.ruleset = permission.Ruleset{
+		{Permission: tools.NamePatch, Pattern: "*", Action: permission.ActionAllow},
+		{Permission: tools.NameEdit, Pattern: "*", Action: permission.ActionAllow},
+	}
+	a.llmMu.Lock()
+	a.modelName = "gpt-4"
+	a.providerModelRef = "sample/gpt-4"
+	a.runningModelRef = "sample/gpt-4"
+	a.llmMu.Unlock()
+
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("initial ensureSessionBuilt: %v", err)
+	}
+	if !hasToolDefinition(a.mainLLMToolDefinitions(), tools.NamePatch) || hasToolDefinition(a.mainLLMToolDefinitions(), tools.NameEdit) {
+		t.Fatalf("initial tool definitions = %v, want patch only", toolDefinitionNames(a.mainLLMToolDefinitions()))
+	}
+
+	provider := &captureMessagesProvider{}
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"test-key"})
+	client := llm.NewClient(providerCfg, provider, "claude-sonnet-4", 2048, "")
+	a.SetProviderModelRef("sample/claude-sonnet-4")
+	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+		if providerModel != "sample/claude-sonnet-4" {
+			t.Fatalf("providerModel = %q, want sample/claude-sonnet-4", providerModel)
+		}
+		return client, "claude-sonnet-4", 16384, nil
+	})
+
+	if _, err := a.callLLM(context.Background(), []message.Message{{Role: message.RoleUser, Content: "hi"}}); err != nil {
+		t.Fatalf("callLLM: %v", err)
+	}
+	if hasToolDefinition(provider.tools, tools.NamePatch) || !hasToolDefinition(provider.tools, tools.NameEdit) {
+		t.Fatalf("request tool definitions = %v, want edit only", toolDefinitionNames(provider.tools))
+	}
+}
+
+func assertOnlyEditPatchTool(t *testing.T, defs []message.ToolDefinition, want string) {
+	t.Helper()
+	hasPatch := hasToolDefinition(defs, tools.NamePatch)
+	hasEdit := hasToolDefinition(defs, tools.NameEdit)
+	switch want {
+	case tools.NamePatch:
+		if !hasPatch || hasEdit {
+			t.Fatalf("tool definitions = %v, want patch only", toolDefinitionNames(defs))
+		}
+	case tools.NameEdit:
+		if hasPatch || !hasEdit {
+			t.Fatalf("tool definitions = %v, want edit only", toolDefinitionNames(defs))
+		}
+	default:
+		t.Fatalf("unsupported wanted edit tool %q", want)
 	}
 }
 
