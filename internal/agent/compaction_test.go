@@ -375,6 +375,135 @@ func TestPrepareMessagesForLLM_WrapUpGraceReusesPreviouslyReducedPrefix(t *testi
 	}
 }
 
+func TestPrepareMessagesForLLM_SkipsStableReuseWhenProvenanceDiffers(t *testing.T) {
+	a := &MainAgent{parentCtx: context.Background(), projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ReadLikeAgeTurns:     1,
+		ReadLikeOutputBytes:  1,
+		StaleAgeTurns:        99,
+		StaleOutputBytes:     1,
+		MinToolResultsPrune:  1,
+		ShellSuccessAgeTurns: 99,
+		ShellSuccessBytes:    1,
+		HighPressureUsage:    2,
+	}}}}
+	a.newTurn()
+	a.providerModelRef = "test/model"
+	a.lastLLMRequestModelRef = "test/model"
+	a.llmModelRunLength = 1
+	largeReadOutput := strings.Repeat("large read output ", 100)
+	previous := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}, Provenance: &message.MessageProvenance{Source: "chord", WireFamily: "anthropic"}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeReadOutput, Provenance: &message.MessageProvenance{Source: "chord", WireFamily: "anthropic"}},
+	}
+	_ = a.prepareMessagesForLLM(previous)
+
+	a.beginContextReductionWrapUpGrace()
+	current := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}, Provenance: &message.MessageProvenance{Source: "import:claude", WireFamily: "anthropic", Imported: true}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeReadOutput, Provenance: &message.MessageProvenance{Source: "import:claude", WireFamily: "anthropic", Imported: true}},
+	}
+	prepared := a.prepareMessagesForLLM(current)
+	if got := prepared[1].Provenance; got == nil || got.Source != "import:claude" || !got.Imported {
+		t.Fatalf("provenance mismatch should preserve current assistant provenance, got %#v", got)
+	}
+	if got := prepared[2].Provenance; got == nil || got.Source != "import:claude" || !got.Imported {
+		t.Fatalf("provenance mismatch should preserve current tool provenance, got %#v", got)
+	}
+	if stats := a.GetContextReductionStats(); stats.ReusedStable {
+		t.Fatalf("stats = %+v, provenance mismatch should not reuse stable prefix", stats)
+	}
+}
+
+func TestPrepareMessagesForLLM_SkipsIncompatibleStableReuse(t *testing.T) {
+	a := &MainAgent{parentCtx: context.Background(), projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ReadLikeAgeTurns:     1,
+		ReadLikeOutputBytes:  1,
+		StaleAgeTurns:        99,
+		StaleOutputBytes:     1,
+		MinToolResultsPrune:  1,
+		ShellSuccessAgeTurns: 99,
+		ShellSuccessBytes:    1,
+		HighPressureUsage:    2,
+	}}}}
+	a.newTurn()
+	a.providerModelRef = "test/model"
+	a.lastLLMRequestModelRef = "test/model"
+	a.llmModelRunLength = 1
+	previous := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("large read output ", 100)},
+	}
+	_ = a.prepareMessagesForLLM(previous)
+
+	a.beginContextReductionWrapUpGrace()
+	current := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameTodoWrite, Args: json.RawMessage(`{"todos":[]}`)}}},
+		{Role: "tool", ToolCallID: "tc2", Content: "todos updated"},
+		{Role: "assistant", Content: "done"},
+	}
+	prepared := a.prepareMessagesForLLM(current)
+	foundToolResult := false
+	for _, msg := range prepared {
+		if msg.Role == message.RoleTool && msg.ToolCallID == "tc2" {
+			foundToolResult = true
+		}
+	}
+	if !foundToolResult {
+		t.Fatalf("incompatible stable prefix reuse dropped current tool result: %#v", prepared)
+	}
+	if _, dropped := message.RepairOrphanToolResults(prepared); dropped != 0 {
+		t.Fatalf("prepared request still contains orphan tool results dropped=%d messages=%#v", dropped, prepared)
+	}
+	if stats := a.GetContextReductionStats(); stats.ReusedStable {
+		t.Fatalf("stats = %+v, incompatible stable prefix should not be reused", stats)
+	}
+}
+
+func TestPrepareMessagesForLLM_SkipsStableReuseWhenToolCallIDIsReusedForDifferentCall(t *testing.T) {
+	a := &MainAgent{parentCtx: context.Background(), projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ReadLikeAgeTurns:     1,
+		ReadLikeOutputBytes:  1,
+		StaleAgeTurns:        99,
+		StaleOutputBytes:     1,
+		MinToolResultsPrune:  1,
+		ShellSuccessAgeTurns: 99,
+		ShellSuccessBytes:    1,
+		HighPressureUsage:    2,
+	}}}}
+	a.newTurn()
+	a.providerModelRef = "test/model"
+	a.lastLLMRequestModelRef = "test/model"
+	a.llmModelRunLength = 1
+	previous := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("large read output ", 100)},
+	}
+	_ = a.prepareMessagesForLLM(previous)
+
+	a.beginContextReductionWrapUpGrace()
+	current := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameTodoWrite, Args: json.RawMessage(`{"todos":[]}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: "todos updated"},
+		{Role: "assistant", Content: "done"},
+	}
+	prepared := a.prepareMessagesForLLM(current)
+	if prepared[1].ToolCalls[0].Name != tools.NameTodoWrite || prepared[2].Content != "todos updated" {
+		t.Fatalf("incompatible stable prefix reuse replaced current tool chain: %#v", prepared)
+	}
+	if _, dropped := message.RepairOrphanToolResults(prepared); dropped != 0 {
+		t.Fatalf("prepared request still contains orphan tool results dropped=%d messages=%#v", dropped, prepared)
+	}
+	if stats := a.GetContextReductionStats(); stats.ReusedStable {
+		t.Fatalf("stats = %+v, reused tool_call_id with different call should not reuse stable prefix", stats)
+	}
+}
+
 func TestPrepareMessagesForLLM_WrapUpGraceDoesNotProtectAfterModelSwitch(t *testing.T) {
 	a := &MainAgent{parentCtx: context.Background(), projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		ReadLikeAgeTurns:     1,
@@ -1636,7 +1765,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	if firstStats.Messages != 1 || firstStats.Bytes == 0 {
 		t.Fatalf("expected initial reduction stats, got %+v", firstStats)
 	}
-	a.rememberPreparedLLMRequest(a.currentTurnID(), firstPrepared)
+	a.rememberPreparedLLMRequest(a.currentTurnID(), msgs, firstPrepared)
 	a.rateLimitSnaps["codex"].Secondary.UsedPct = 100
 	a.EnableLoopMode("finish current task")
 	a.freezeLoopReductionPrefixForCurrentTurn()
@@ -1703,7 +1832,7 @@ func TestPrepareMessagesForLLM_LowQuotaCodexReusesFrozenReductionPrefixWithoutLo
 	if !strings.Contains(firstPrepared[2].Content, "Older "+tools.NameShell+" output omitted") {
 		t.Fatalf("expected initial request to prune old shell output, got %q", firstPrepared[2].Content)
 	}
-	a.rememberPreparedLLMRequest(a.currentTurnID(), firstPrepared)
+	a.rememberPreparedLLMRequest(a.currentTurnID(), msgs, firstPrepared)
 
 	a.rateLimitSnaps["codex"].Secondary.UsedPct = 100
 	continuationMsgs := append(append([]message.Message(nil), msgs...),
@@ -1735,7 +1864,7 @@ func TestSetIdleAndDrainPendingKeepsVisibleContextReductionStats(t *testing.T) {
 	a.newTurn()
 	want := ContextReductionStats{Messages: 2, Bytes: 2048, TokensBefore: 1000, TokensAfter: 700, TokensSaved: 300}
 	a.setContextReductionStats(want)
-	a.rememberPreparedLLMRequest(a.currentTurnID(), []message.Message{{Role: "user", Content: "u"}})
+	a.rememberPreparedLLMRequest(a.currentTurnID(), []message.Message{{Role: "user", Content: "u"}}, []message.Message{{Role: "user", Content: "u"}})
 
 	a.setIdleAndDrainPending()
 

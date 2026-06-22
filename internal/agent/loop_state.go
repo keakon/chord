@@ -61,6 +61,10 @@ type loopRuntimeState struct {
 	// reuse this prefix shape so old messages do not flip from pruned to unpruned,
 	// while later messages are left unpruned until the surface can refresh.
 	FrozenReductionPrefix []message.Message
+	// FrozenReductionShape is the original request shape for FrozenReductionPrefix.
+	// It lets reuse reject stale prefixes when the apparent prefix length still
+	// matches but tool-call chains or other model-visible fields changed.
+	FrozenReductionShape []stableReductionMessageShape
 	// FrozenReductionStats is the request-level reduction effect of the frozen
 	// prefix. It remains stable while the low-quota surface freeze is active because
 	// later messages are appended unreduced.
@@ -117,6 +121,7 @@ func (s *loopRuntimeState) disable() {
 	s.RepeatedToolCallStreak = nil
 	s.DeferContinuationPromptUntilDone = false
 	s.FrozenReductionPrefix = nil
+	s.FrozenReductionShape = nil
 	s.FrozenReductionStats = ContextReductionStats{}
 	s.Enabled = false
 }

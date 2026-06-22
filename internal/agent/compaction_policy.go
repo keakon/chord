@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"sort"
 	"strings"
@@ -76,21 +78,23 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		usage := policy.contextUsage(estimatedTokens, inputBudget)
 		if modelSnapshot.ProjectedModelRunLength > 1 && !a.hasQueuedUserInputForRecovery() && (policy.HighPressureUsage <= 0 || usage < policy.HighPressureUsage) && a.consumeContextReductionWrapUpGrace(a.currentTurnID()) {
 			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && len(previous.Messages) > 0 && len(prepared) >= len(previous.Messages) {
-				reused := reuseStableReductionPrefix(previous.Messages, prepared)
-				stats := highLevelContextReductionStats(prepared, reused)
-				if len(stats.ByToolAndRule) == 0 {
-					stats.ByToolAndRule = previous.Stats.ByToolAndRule
+				reused, compatible := reuseStableReductionPrefix(previous, prepared, prepared)
+				if compatible {
+					stats := highLevelContextReductionStats(prepared, reused)
+					if len(stats.ByToolAndRule) == 0 {
+						stats.ByToolAndRule = previous.Stats.ByToolAndRule
+					}
+					stats.Protected = true
+					stats.ProtectReason = contextProtectReasonWrapUpGrace
+					stats.ReusedStable = true
+					stats.fillModelContinuity(modelSnapshot)
+					a.setCurrentRequestSurface(&stats, reused)
+					a.setContextReductionStats(stats)
+					if rememberPrepared {
+						a.rememberPreparedLLMRequest(a.currentTurnID(), messages, reused)
+					}
+					return reused
 				}
-				stats.Protected = true
-				stats.ProtectReason = contextProtectReasonWrapUpGrace
-				stats.ReusedStable = true
-				stats.fillModelContinuity(modelSnapshot)
-				a.setCurrentRequestSurface(&stats, reused)
-				a.setContextReductionStats(stats)
-				if rememberPrepared {
-					a.rememberPreparedLLMRequest(a.currentTurnID(), reused)
-				}
-				return reused
 			}
 			stats := ContextReductionStats{TokensBefore: estimatedTokens, TokensAfter: estimatedTokens, Protected: true}
 			stats.ProtectReason = contextProtectReasonWrapUpGrace
@@ -98,7 +102,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			a.setCurrentRequestSurface(&stats, prepared)
 			a.setContextReductionStats(stats)
 			if rememberPrepared {
-				a.rememberPreparedLLMRequest(a.currentTurnID(), prepared)
+				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, prepared)
 			}
 			return prepared
 		}
@@ -110,15 +114,15 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			a.setCurrentRequestSurface(&stats, prepared)
 			a.setContextReductionStats(stats)
 			if rememberPrepared {
-				a.rememberPreparedLLMRequest(a.currentTurnID(), prepared)
+				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, prepared)
 			}
 			return prepared
 		}
 	}
 	if a != nil {
-		loopEnabled, frozenPrefix, frozenStats := a.contextSurfaceReductionSnapshot()
+		loopEnabled, frozen := a.contextSurfaceReductionSnapshot()
 		if loopEnabled {
-			return a.applyLoopFrozenReductionPrefix(prepared, frozenPrefix, frozenStats)
+			return a.applyLoopFrozenReductionPrefix(prepared, frozen)
 		}
 	}
 	if a != nil {
@@ -127,7 +131,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 				a.fillReductionModelContinuity(&stats)
 				a.setCurrentRequestSurface(&stats, reused)
 				a.setContextReductionStats(stats)
-				a.rememberPreparedLLMRequest(a.currentTurnID(), reused)
+				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, reused)
 				return reused
 			}
 		}
@@ -208,18 +212,24 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 				stats.ReuseReason = reuseReason
 				stats.SavedDelta = savedDelta
 				if reuseReason == contextReuseReasonBelowIncrementalMin {
-					prepared = reuseStableReductionPrefix(previous.Messages, prepared)
-					reusedStats := highLevelContextReductionStats(messages, prepared)
-					stats.Messages = reusedStats.Messages
-					stats.Bytes = reusedStats.Bytes
-					stats.TokensBefore = reusedStats.TokensBefore
-					stats.TokensAfter = reusedStats.TokensAfter
-					stats.TokensSaved = reusedStats.TokensSaved
-					stats.ByToolAndRule = reusedStats.ByToolAndRule
-					stats.ReusedStable = true
-					a.setCurrentRequestSurface(&stats, prepared)
-					if len(stats.ByToolAndRule) == 0 {
-						stats.ByToolAndRule = previous.Stats.ByToolAndRule
+					reused, compatible := reuseStableReductionPrefix(previous, prepared, messages)
+					if !compatible {
+						stats.ReuseReason = ""
+						stats.SavedDelta = 0
+					} else {
+						prepared = reused
+						reusedStats := highLevelContextReductionStats(messages, prepared)
+						stats.Messages = reusedStats.Messages
+						stats.Bytes = reusedStats.Bytes
+						stats.TokensBefore = reusedStats.TokensBefore
+						stats.TokensAfter = reusedStats.TokensAfter
+						stats.TokensSaved = reusedStats.TokensSaved
+						stats.ByToolAndRule = reusedStats.ByToolAndRule
+						stats.ReusedStable = true
+						a.setCurrentRequestSurface(&stats, prepared)
+						if len(stats.ByToolAndRule) == 0 {
+							stats.ByToolAndRule = previous.Stats.ByToolAndRule
+						}
 					}
 				}
 			}
@@ -227,7 +237,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		a.fillReductionModelContinuity(&stats)
 		a.setContextReductionStats(stats)
 		if rememberPrepared {
-			a.rememberPreparedLLMRequest(a.currentTurnID(), prepared)
+			a.rememberPreparedLLMRequest(a.currentTurnID(), messages, prepared)
 		}
 	}
 	return prepared
@@ -317,20 +327,63 @@ func (a *MainAgent) resetLLMModelRun() {
 	a.llmModelRunLength = 0
 }
 
-func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, messages []message.Message) {
+func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, original, prepared []message.Message) {
 	if a == nil || turnID == 0 {
 		return
 	}
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
 	a.lastPreparedLLMTurnID = turnID
-	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(messages)
+	a.lastPreparedLLMRequestShape = stableReductionMessageShapes(original)
+	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(prepared)
+	a.lastPreparedReductionStats = a.contextReductionStats
+}
+
+func (a *MainAgent) updatePreparedLLMRequestSurface(turnID uint64, prepared []message.Message) {
+	if a == nil || turnID == 0 {
+		return
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	if a.lastPreparedLLMTurnID != turnID || len(a.lastPreparedLLMRequestShape) != len(prepared) {
+		a.lastPreparedLLMRequestShape = stableReductionMessageShapes(prepared)
+	}
+	a.lastPreparedLLMTurnID = turnID
+	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(prepared)
 	a.lastPreparedReductionStats = a.contextReductionStats
 }
 
 type stableReductionSurface struct {
 	Messages []message.Message
+	Shape    []stableReductionMessageShape
 	Stats    ContextReductionStats
+}
+
+type stableReductionMessageShape struct {
+	Role                message.Role
+	ContentHash         [sha256.Size]byte
+	PartsHash           [sha256.Size]byte
+	ThinkingHash        [sha256.Size]byte
+	ReasoningHash       [sha256.Size]byte
+	ToolCallsHash       [sha256.Size]byte
+	ToolCallID          string
+	ToolDiffHash        [sha256.Size]byte
+	ToolDiffAdded       int
+	ToolDiffRemoved     int
+	ToolStatus          string
+	Provenance          stableReductionProvenanceShape
+	IsCompactionSummary bool
+	Kind                string
+}
+
+type stableReductionProvenanceShape struct {
+	Source     string
+	ProviderID string
+	ModelID    string
+	Variant    string
+	ModelRef   string
+	WireFamily string
+	Imported   bool
 }
 
 func (a *MainAgent) stableReductionSurfaceCandidate(turnID uint64) (stableReductionSurface, bool) {
@@ -344,22 +397,187 @@ func (a *MainAgent) stableReductionSurfaceCandidate(turnID uint64) (stableReduct
 	}
 	return stableReductionSurface{
 		Messages: cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix),
+		Shape:    append([]stableReductionMessageShape(nil), a.lastPreparedLLMRequestShape...),
 		Stats:    a.lastPreparedReductionStats,
 	}, true
 }
 
-func reuseStableReductionPrefix(previous, current []message.Message) []message.Message {
-	if len(previous) == 0 {
-		return current
+func reuseStableReductionPrefix(previous stableReductionSurface, current, shapeSource []message.Message) ([]message.Message, bool) {
+	previousMessages := previous.Messages
+	if len(previousMessages) == 0 {
+		return current, true
 	}
-	if len(current) < len(previous) {
-		return current
+	if len(current) < len(previousMessages) || len(shapeSource) < len(previousMessages) || !stableReductionShapesCompatible(previous.Shape, shapeSource[:len(previousMessages)]) {
+		return current, false
 	}
 	out := cloneMessageSliceForRequestShape(current)
-	for i := range previous {
-		out[i] = cloneMessageForRequestShape(previous[i])
+	for i := range previousMessages {
+		out[i] = cloneMessageForRequestShape(previousMessages[i])
 	}
-	return out
+	if stableReductionReuseWouldCreateOrphans(current, out) {
+		return current, false
+	}
+	return out, true
+}
+
+func stableReductionShapesCompatible(previous []stableReductionMessageShape, current []message.Message) bool {
+	if len(previous) != len(current) {
+		return false
+	}
+	currentShape := stableReductionMessageShapes(current)
+	for i := range previous {
+		if previous[i] != currentShape[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func stableReductionMessageShapes(messages []message.Message) []stableReductionMessageShape {
+	if len(messages) == 0 {
+		return nil
+	}
+	shapes := make([]stableReductionMessageShape, len(messages))
+	for i, msg := range messages {
+		shapes[i] = stableReductionMessageShape{
+			Role:                msg.Role,
+			ContentHash:         stableReductionHashString(msg.Content),
+			PartsHash:           stableReductionContentPartsHash(msg.Parts),
+			ThinkingHash:        stableReductionThinkingBlocksHash(msg.ThinkingBlocks),
+			ReasoningHash:       stableReductionHashString(msg.ReasoningContent),
+			ToolCallsHash:       stableReductionToolCallsHash(msg.ToolCalls),
+			ToolCallID:          msg.ToolCallID,
+			ToolDiffHash:        stableReductionHashString(msg.ToolDiff),
+			ToolDiffAdded:       msg.ToolDiffAdded,
+			ToolDiffRemoved:     msg.ToolDiffRemoved,
+			ToolStatus:          msg.ToolStatus,
+			Provenance:          stableReductionProvenanceShapeFor(msg.Provenance),
+			IsCompactionSummary: msg.IsCompactionSummary,
+			Kind:                msg.Kind,
+		}
+	}
+	return shapes
+}
+
+func stableReductionProvenanceShapeFor(provenance *message.MessageProvenance) stableReductionProvenanceShape {
+	if provenance == nil {
+		return stableReductionProvenanceShape{}
+	}
+	return stableReductionProvenanceShape{
+		Source:     provenance.Source,
+		ProviderID: provenance.ProviderID,
+		ModelID:    provenance.ModelID,
+		Variant:    provenance.Variant,
+		ModelRef:   provenance.ModelRef,
+		WireFamily: provenance.WireFamily,
+		Imported:   provenance.Imported,
+	}
+}
+
+func stableReductionHashString(value string) [sha256.Size]byte {
+	return sha256.Sum256([]byte(value))
+}
+
+func stableReductionContentPartsHash(parts []message.ContentPart) [sha256.Size]byte {
+	h := sha256.New()
+	stableReductionWriteInt(h, len(parts))
+	for _, part := range parts {
+		stableReductionWriteString(h, string(part.Type))
+		stableReductionWriteString(h, part.Text)
+		stableReductionWriteString(h, part.DisplayText)
+		stableReductionWriteString(h, part.InlineToken)
+		stableReductionWriteString(h, part.MimeType)
+		stableReductionWriteBytes(h, part.Data)
+		stableReductionWriteString(h, part.ImagePath)
+		stableReductionWriteString(h, part.FileName)
+	}
+	return stableReductionHashBytes(h.Sum(nil))
+}
+
+func stableReductionThinkingBlocksHash(blocks []message.ThinkingBlock) [sha256.Size]byte {
+	h := sha256.New()
+	stableReductionWriteInt(h, len(blocks))
+	for _, block := range blocks {
+		stableReductionWriteString(h, block.Thinking)
+		stableReductionWriteString(h, block.Signature)
+	}
+	return stableReductionHashBytes(h.Sum(nil))
+}
+
+func stableReductionToolCallsHash(calls []message.ToolCall) [sha256.Size]byte {
+	h := sha256.New()
+	stableReductionWriteInt(h, len(calls))
+	for _, call := range calls {
+		stableReductionWriteString(h, call.ID)
+		stableReductionWriteString(h, call.Name)
+		stableReductionWriteBytes(h, call.Args)
+	}
+	return stableReductionHashBytes(h.Sum(nil))
+}
+
+func stableReductionHashBytes(value []byte) [sha256.Size]byte {
+	return sha256.Sum256(value)
+}
+
+func stableReductionWriteString(h interface{ Write([]byte) (int, error) }, value string) {
+	stableReductionWriteBytes(h, []byte(value))
+}
+
+func stableReductionWriteBytes(h interface{ Write([]byte) (int, error) }, value []byte) {
+	stableReductionWriteInt(h, len(value))
+	_, _ = h.Write(value)
+}
+
+func stableReductionWriteInt(h interface{ Write([]byte) (int, error) }, value int) {
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], uint64(value))
+	_, _ = h.Write(buf[:])
+}
+
+func stableReductionReuseWouldCreateOrphans(current, reused []message.Message) bool {
+	_, currentDropped := message.RepairOrphanToolResults(current)
+	_, reusedDropped := message.RepairOrphanToolResults(reused)
+	if reusedDropped > currentDropped {
+		return true
+	}
+	currentSupported := supportedToolResultIDs(current)
+	reusedSupported := supportedToolResultIDs(reused)
+	for id := range currentSupported {
+		if _, ok := reusedSupported[id]; !ok {
+			return true
+		}
+	}
+	return false
+}
+
+func supportedToolResultIDs(messages []message.Message) map[string]struct{} {
+	supported := make(map[string]struct{})
+	for i, msg := range messages {
+		if msg.Role != message.RoleTool || msg.ToolCallID == "" {
+			continue
+		}
+		if toolResultSupportedByNearestAssistant(messages, i) {
+			supported[msg.ToolCallID] = struct{}{}
+		}
+	}
+	return supported
+}
+
+func toolResultSupportedByNearestAssistant(messages []message.Message, toolIdx int) bool {
+	id := messages[toolIdx].ToolCallID
+	for i := toolIdx - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != message.RoleAssistant || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		for _, call := range msg.ToolCalls {
+			if call.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }
 
 func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []message.Message, policy contextReductionPolicy, inputBudget int) ([]message.Message, ContextReductionStats, bool) {
@@ -379,7 +597,10 @@ func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []mess
 	if tailTokens >= policy.MinIncrementalTokens {
 		return nil, ContextReductionStats{}, false
 	}
-	reused := reuseStableReductionPrefix(previous.Messages, messages)
+	reused, compatible := reuseStableReductionPrefix(previous, messages, messages)
+	if !compatible {
+		return nil, ContextReductionStats{}, false
+	}
 	stats := highLevelContextReductionStats(messages, reused)
 	a.setCurrentRequestSurface(&stats, reused)
 	if len(stats.ByToolAndRule) == 0 {
@@ -528,8 +749,10 @@ func (a *MainAgent) clearLoopReductionCache(clearVisibleStats bool) {
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
 	a.loopState.FrozenReductionPrefix = nil
+	a.loopState.FrozenReductionShape = nil
 	a.loopState.FrozenReductionStats = ContextReductionStats{}
 	a.lastPreparedLLMTurnID = 0
+	a.lastPreparedLLMRequestShape = nil
 	a.lastPreparedLLMRequestPrefix = nil
 	a.lastPreparedReductionStats = ContextReductionStats{}
 	a.wrapUpGraceTurnID = 0
@@ -634,30 +857,37 @@ func (a *MainAgent) freezeLoopReductionPrefixForCurrentTurn() {
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
 	if a.lastPreparedLLMTurnID != turnID || len(a.lastPreparedLLMRequestPrefix) == 0 {
+		a.lastPreparedLLMRequestShape = nil
 		a.lastPreparedLLMRequestPrefix = nil
 		a.lastPreparedReductionStats = ContextReductionStats{}
 		return
 	}
+	a.loopState.FrozenReductionShape = append([]stableReductionMessageShape(nil), a.lastPreparedLLMRequestShape...)
 	a.loopState.FrozenReductionPrefix = cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix)
 	a.loopState.FrozenReductionStats = a.lastPreparedReductionStats
 	a.contextReductionStats = a.lastPreparedReductionStats
 }
 
-func (a *MainAgent) contextSurfaceReductionSnapshot() (enabled bool, frozenPrefix []message.Message, frozenStats ContextReductionStats) {
+func (a *MainAgent) contextSurfaceReductionSnapshot() (enabled bool, frozen stableReductionSurface) {
 	if a == nil {
-		return false, nil, ContextReductionStats{}
+		return false, stableReductionSurface{}
 	}
 	if !a.shouldFreezeLLMContextSurface() {
-		return false, nil, ContextReductionStats{}
+		return false, stableReductionSurface{}
 	}
 	turnID := a.currentTurnID()
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
 	if len(a.loopState.FrozenReductionPrefix) == 0 && turnID != 0 && a.lastPreparedLLMTurnID == turnID {
+		a.loopState.FrozenReductionShape = append([]stableReductionMessageShape(nil), a.lastPreparedLLMRequestShape...)
 		a.loopState.FrozenReductionPrefix = cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix)
 		a.loopState.FrozenReductionStats = a.lastPreparedReductionStats
 	}
-	return true, cloneMessageSliceForRequestShape(a.loopState.FrozenReductionPrefix), a.loopState.FrozenReductionStats
+	return true, stableReductionSurface{
+		Messages: cloneMessageSliceForRequestShape(a.loopState.FrozenReductionPrefix),
+		Shape:    append([]stableReductionMessageShape(nil), a.loopState.FrozenReductionShape...),
+		Stats:    a.loopState.FrozenReductionStats,
+	}
 }
 
 func (a *MainAgent) allowContextSurfaceRefreshAtUserBoundary() {
@@ -713,26 +943,30 @@ func codexQuotaRemainingUnderTenPercent(snap *ratelimit.KeyRateLimitSnapshot) bo
 	return false
 }
 
-func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message, prefix []message.Message, stats ContextReductionStats) []message.Message {
+func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message, frozen stableReductionSurface) []message.Message {
 	if a == nil {
 		return prepared
 	}
-	if len(prefix) == 0 {
+	if len(frozen.Messages) == 0 {
 		stats := ContextReductionStats{}
 		a.setCurrentRequestSurface(&stats, prepared)
 		a.setContextReductionStats(stats)
 		return prepared
 	}
 	original := cloneMessageSliceForRequestShape(prepared)
-	limit := min(len(prefix), len(prepared))
-	for i := range limit {
-		prepared[i] = cloneMessageForRequestShape(prefix[i])
+	reused, compatible := reuseStableReductionPrefix(frozen, prepared, prepared)
+	if !compatible {
+		stats := ContextReductionStats{}
+		a.setCurrentRequestSurface(&stats, prepared)
+		a.setContextReductionStats(stats)
+		return prepared
 	}
+	prepared = reused
 	updatedStats := highLevelContextReductionStats(original, prepared)
 	if len(updatedStats.ByToolAndRule) == 0 {
-		updatedStats.ByToolAndRule = stats.ByToolAndRule
+		updatedStats.ByToolAndRule = frozen.Stats.ByToolAndRule
 	}
-	updatedStats.Protected = stats.Protected
+	updatedStats.Protected = frozen.Stats.Protected
 	updatedStats.ReusedStable = true
 	a.setCurrentRequestSurface(&updatedStats, prepared)
 	a.setContextReductionStats(updatedStats)

@@ -312,6 +312,7 @@ type MainAgent struct {
 	// the event loop handles a busy /loop command.
 	loopReductionMu              sync.Mutex
 	lastPreparedLLMTurnID        uint64
+	lastPreparedLLMRequestShape  []stableReductionMessageShape
 	lastPreparedLLMRequestPrefix []message.Message
 	lastPreparedReductionStats   ContextReductionStats
 	wrapUpGraceTurnID            uint64

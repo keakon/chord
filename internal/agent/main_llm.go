@@ -517,7 +517,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	// On the first LLM call, prepend git status to the first user message so
 	// the model has repository context without polluting the stable system prompt.
 	a.injectGitStatusIntoFirstUserMessage(messages)
-	a.rememberPreparedLLMRequest(a.currentTurnID(), messages)
+	a.updatePreparedLLMRequestSurface(a.currentTurnID(), messages)
 	a.consumeContextSurfaceRefreshAllowance()
 
 	// Inject the meta user message carrying AGENTS.md + currentDate before the

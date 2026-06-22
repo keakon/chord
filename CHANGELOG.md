@@ -14,6 +14,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Fixed
 
 - LSP resource shutdown no longer logs normal stderr pipe closure as an error when idle language-server processes are unloaded.
+- Request-level context reduction now skips stale stable-prefix reuse when it would break the current tool-call/tool-result chain, preventing orphan tool results and strict provider 400 errors.
 - Tool call card headers now prioritize the main argument and can use wider viewports for the one-line summary, while secondary parenthesized parameters are shortened first. `grep` search paths that equal the current working directory are hidden, and child directories are displayed relative to the workspace.
 - Streaming retries and rollbacks now clear partial thinking content and pending thinking translations, preventing stale thinking text from remaining in the TUI or recovered session state after a failed stream.
 - Thinking translation language detection improvements:
