@@ -228,6 +228,19 @@ func truncateReadContentToBudget(contentLines []string, startLine, totalLines in
 	return buildReadContent(header, nil)
 }
 
+func readOffsetPastEndError(offset, totalLines int, limit *int) error {
+	effectiveLimit := MaxOutputLines
+	if limit != nil && *limit > 0 {
+		effectiveLimit = *limit
+	}
+	if totalLines == 0 {
+		return fmt.Errorf("offset %d exceeds file length (0 lines); suggested_offset=0 (EOF; file is empty)", offset)
+	}
+	tailOffset := max(totalLines-effectiveLimit, 0)
+	lastLines := totalLines - tailOffset
+	return fmt.Errorf("offset %d exceeds file length (%d lines); suggested_offset=%d reads the last %d lines with limit=%d; eof_offset=%d is valid but returns no lines", offset, totalLines, tailOffset, lastLines, effectiveLimit, totalLines)
+}
+
 func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -242,7 +255,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	resolvedPath, info, err := resolveExistingToolPath(a.Path, PathTargetRegularFile, "read")
 	if err != nil {
 		if strings.Contains(err.Error(), "path not found") {
-			return "", fmt.Errorf("file not found: %s", a.Path)
+			return "", fileNotFoundErrorWithPathSuggestions(a.Path, PathTargetRegularFile)
 		}
 		return "", err
 	}
@@ -275,7 +288,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		// read) and stays valid; offset strictly past the last line means the
 		// caller has the wrong idea of the file size, so surface it as an error.
 		if offset > totalLines {
-			return "", fmt.Errorf("offset %d exceeds file length (%d lines)", offset, totalLines)
+			return "", readOffsetPastEndError(offset, totalLines, a.Limit)
 		}
 	}
 

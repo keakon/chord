@@ -151,8 +151,44 @@ func TestReadToolExecuteErrorsWhenOffsetPastEndOfFile(t *testing.T) {
 	// expectation is wrong); offset == totalLines is covered elsewhere as valid.
 	raw := json.RawMessage(fmt.Sprintf(`{"path":%q,"offset":10,"limit":5}`, path))
 	_, err := (ReadTool{}).Execute(context.Background(), raw)
-	if err == nil || !strings.Contains(err.Error(), "exceeds file length") {
-		t.Fatalf("ReadTool.Execute err = %v, want offset-exceeds-length error", err)
+	if err == nil {
+		t.Fatal("ReadTool.Execute err = nil, want offset-exceeds-length error")
+	}
+	for _, want := range []string{
+		"offset 10 exceeds file length (3 lines)",
+		"suggested_offset=0 reads the last 3 lines with limit=5",
+		"eof_offset=3 is valid but returns no lines",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ReadTool.Execute err = %v, want substring %q", err, want)
+		}
+	}
+}
+
+func TestReadToolExecuteOffsetPastEndSuggestionUsesDefaultLimit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	var content strings.Builder
+	for i := 0; i < MaxOutputLines+3; i++ {
+		fmt.Fprintf(&content, "line %d\n", i+1)
+	}
+	if err := os.WriteFile(path, []byte(content.String()), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	raw := json.RawMessage(fmt.Sprintf(`{"path":%q,"offset":99999}`, path))
+	_, err := (ReadTool{}).Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("ReadTool.Execute err = nil, want offset-exceeds-length error")
+	}
+	for _, want := range []string{
+		fmt.Sprintf("offset 99999 exceeds file length (%d lines)", MaxOutputLines+3),
+		"suggested_offset=3 reads the last 2000 lines with limit=2000",
+		fmt.Sprintf("eof_offset=%d is valid but returns no lines", MaxOutputLines+3),
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ReadTool.Execute err = %v, want substring %q", err, want)
+		}
 	}
 }
 
