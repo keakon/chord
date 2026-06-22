@@ -106,7 +106,7 @@ func (m *Manager) logLSPServiceNote(path, msg string) {
 	if msg == "" {
 		return
 	}
-	log.Warnf("lsp: non-actionable service note suppressed path=%v detail=%v", path, msg)
+	log.Debugf("lsp: non-actionable service note suppressed path=%v detail=%v", path, msg)
 }
 
 func (m *Manager) anyServerMatchesPath(path string) bool {

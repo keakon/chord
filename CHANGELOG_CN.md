@@ -16,6 +16,7 @@
 
 - 卸载空闲 language server 进程时，LSP 资源关闭不再把正常的 stderr 管道关闭记录成错误。
 - 请求级上下文剪裁现在会在旧的 stable prefix 复用会破坏当前 tool_call/tool_result 链时跳过复用，避免产生孤儿 tool result 和严格 provider 的 400 错误。
+- 重试日志和 LSP service-note 日志现在会区分可操作失败与中间 fallback / 已抑制的非操作性提示，减少正常成功流程中的误导性运行时噪声。
 - 工具调用卡片 header 现在会优先展示主参数，单行摘要可利用更宽视口；括号内的次要参数会优先缩短。`grep` 的搜索路径等于当前工作目录时会隐藏，子目录会以相对工作区的路径显示。
 - 流式请求重试或回滚时，现在会清理部分生成的 thinking 内容和待处理的 thinking 翻译，避免失败流之后在 TUI 或恢复的会话状态中残留过期 thinking 文本。
 - 思考翻译语言检测改进：

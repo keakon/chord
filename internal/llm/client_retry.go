@@ -538,7 +538,7 @@ func (c *Client) completeStreamTarget(
 					if hasTerminalNonRetriable400Signal(apiErrPtr) {
 						retriable = false
 						if fallbackEligible && fallbackEnabled && len(fallbackModels) > 0 {
-							log.Errorf("model incompatible 400, trying fallback provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+							log.Warnf("model incompatible 400, trying fallback provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
 							emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
 							modelDone = true
 							break
@@ -556,7 +556,7 @@ func (c *Client) completeStreamTarget(
 			}
 
 			if !retriable {
-				log.Errorf("non-retriable LLM error provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+				log.Warnf("non-key-retriable LLM error provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
 				// Use the narrower request/parameter check here: the broader terminal
 				// 400 handling above already routes model/protocol incompatibility to
 				// fallback when available, while official API 400s still stop directly.

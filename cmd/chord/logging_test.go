@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -298,6 +301,41 @@ func TestRedirectProcessStderrWritesStructuredInstanceTaggedLines(t *testing.T) 
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("log = %q, want %q", text, want)
+		}
+	}
+}
+
+func TestChordCodeUsesGologForLogging(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	for _, dir := range []string{"cmd", "internal"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || filepath.Ext(path) != ".go" {
+				return nil
+			}
+			fileSet := token.NewFileSet()
+			parsed, err := parser.ParseFile(fileSet, path, nil, parser.ImportsOnly)
+			if err != nil {
+				return err
+			}
+			for _, imported := range parsed.Imports {
+				for _, disallowed := range []string{`"log/slog"`, `"log"`} {
+					if imported.Path.Value == disallowed {
+						rel, _ := filepath.Rel(root, path)
+						t.Fatalf("%s imports disallowed logging package %s", rel, disallowed)
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", dir, err)
 		}
 	}
 }
