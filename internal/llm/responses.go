@@ -66,7 +66,7 @@ func NewResponsesProviderWithClient(provider *ProviderConfig, client *http.Clien
 
 // NewResponsesProvider creates a new ResponsesProvider.
 func NewResponsesProvider(provider *ProviderConfig, proxyURL string) (*ResponsesProvider, error) {
-	client, err := NewHTTPClientWithProxy(proxyURL, providerRequestTimeout(provider))
+	client, err := NewStreamingHTTPClientWithProxy(proxyURL, providerResponseHeaderTimeout(provider))
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client for responses provider: %w", err)
 	}

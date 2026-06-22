@@ -130,14 +130,14 @@ func rebuildClientWithTotalTimeout(client *llm.Client, totalTimeout time.Duratio
 	if client == nil {
 		return nil, nil
 	}
+	if totalTimeout <= 0 {
+		return client, nil
+	}
 	providerCfg := client.ProviderConfig()
 	if providerCfg == nil {
 		return nil, nil
 	}
 	proxyURL := providerCfg.EffectiveProxyURL()
-	if totalTimeout <= 0 {
-		totalTimeout = providerCfg.RequestTimeout()
-	}
 	httpClient, err := llm.NewHTTPClientWithProxy(proxyURL, totalTimeout)
 	if err != nil {
 		return nil, err

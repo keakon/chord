@@ -37,13 +37,76 @@ func TestMergeProjectConfigNormalizesContextReductionTrue(t *testing.T) {
 	}
 }
 
+func TestLoadConfigParsesResponseHeaderTimeout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeTestFile(t, path, `providers:
+  openai:
+    type: responses
+    response_header_timeout: 180
+`)
+
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if got := cfg.Providers["openai"].ResponseHeaderTimeout; got != 180 {
+		t.Fatalf("response_header_timeout = %d, want 180", got)
+	}
+}
+
+func TestLoadConfigResponseHeaderTimeoutAllowsExplicitZero(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeTestFile(t, path, `providers:
+  openai:
+    type: responses
+    response_header_timeout: 0
+`)
+
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	provider := cfg.Providers["openai"]
+	if got := provider.ResponseHeaderTimeout; got != 0 {
+		t.Fatalf("response_header_timeout = %d, want explicit 0", got)
+	}
+}
+
+func TestMergeProjectConfigResponseHeaderTimeoutZeroOverridesGlobal(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	writeTestFile(t, globalPath, `providers:
+  openai:
+    type: responses
+    response_header_timeout: 180
+`)
+	globalCfg, err := LoadConfigFromPath(globalPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath(global): %v", err)
+	}
+
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, `providers:
+  openai:
+    response_header_timeout: 0
+`)
+
+	_, mergedCfg, err := MergeProjectConfig(globalCfg, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	provider := mergedCfg.Providers["openai"]
+	if got := provider.ResponseHeaderTimeout; got != 0 {
+		t.Fatalf("response_header_timeout = %d, want explicit project override 0", got)
+	}
+}
+
 func TestMergeProjectConfigMergesProjectScopedKeysAndIgnoresGlobalOnlyKeys(t *testing.T) {
 	globalPath := filepath.Join(t.TempDir(), "global.yaml")
 	writeTestFile(t, globalPath, `providers:
   global:
     type: responses
     api_url: https://global.example/v1/responses
-    request_timeout: 120
+    response_header_timeout: 120
     stream_idle_timeout: 60
     websocket_handshake_timeout: 30
     models:
@@ -94,7 +157,7 @@ stream_retry_rounds: 0
           context: 4096
           output: 512
   global:
-    request_timeout: 180
+    response_header_timeout: 180
     stream_idle_timeout: 90
     websocket_handshake_timeout: 45
     models:
@@ -220,8 +283,8 @@ keymap:
 	if got := mergedCfg.Providers["global"].Models["gpt-global"].Limit.Output; got != 2048 {
 		t.Fatalf("merged provider override output = %d, want 2048", got)
 	}
-	if got := mergedCfg.Providers["global"].RequestTimeout; got != 180 {
-		t.Fatalf("merged provider request_timeout = %d, want 180", got)
+	if got := mergedCfg.Providers["global"].ResponseHeaderTimeout; got != 180 {
+		t.Fatalf("merged provider response_header_timeout = %d, want 180", got)
 	}
 	if got := mergedCfg.Providers["global"].StreamIdleTimeout; got != 90 {
 		t.Fatalf("merged provider stream_idle_timeout = %d, want 90", got)

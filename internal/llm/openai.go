@@ -50,7 +50,7 @@ func NewOpenAIProviderWithClient(provider *ProviderConfig, client *http.Client, 
 // NewOpenAIProvider creates a new OpenAIProvider wrapping the given ProviderConfig.
 // proxyURL configures an HTTP/HTTPS/SOCKS5 proxy; empty string means no proxy (direct connect).
 func NewOpenAIProvider(provider *ProviderConfig, proxyURL string) (*OpenAIProvider, error) {
-	client, err := NewHTTPClientWithProxy(proxyURL, providerRequestTimeout(provider))
+	client, err := NewStreamingHTTPClientWithProxy(proxyURL, providerResponseHeaderTimeout(provider))
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client for openai provider: %w", err)
 	}

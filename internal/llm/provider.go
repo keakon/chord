@@ -141,7 +141,7 @@ type ProviderConfig struct {
 	supportedServiceTiers      []config.ServiceTier         // provider-level default non-standard service tiers
 	preset                     string                       // trimmed config preset (e.g. "codex")
 	responsesWebsocket         *bool                        // provider-level Responses WebSocket preference; nil = preset default
-	requestTimeout             time.Duration                // total provider HTTP request timeout; 0 means no total timeout
+	responseHeaderTimeout      time.Duration                // provider HTTP response-header timeout; 0 means built-in default
 	streamIdleTimeout          time.Duration                // provider-level stream idle timeout; 0 means parser defaults
 	websocketHandshakeTimeout  time.Duration                // provider-level Responses WebSocket handshake timeout; 0 means default
 	keyRotation                string                       // "on_failure" (default) | "per_request"
@@ -233,7 +233,7 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		supportedServiceTiers:      append([]config.ServiceTier(nil), cfg.SupportedServiceTiers...),
 		preset:                     strings.TrimSpace(cfg.Preset),
 		responsesWebsocket:         cfg.ResponsesWebsocket,
-		requestTimeout:             durationFromPositiveSecondsClamped(int64(cfg.RequestTimeout), 0),
+		responseHeaderTimeout:      durationFromPositiveSecondsClamped(int64(cfg.ResponseHeaderTimeout), 0),
 		streamIdleTimeout:          durationFromPositiveSecondsClamped(int64(cfg.StreamIdleTimeout), 0),
 		websocketHandshakeTimeout:  durationFromPositiveSecondsClamped(int64(cfg.WebSocketHandshakeTimeout), 0),
 		keyRotation:                keyRotation,
@@ -256,7 +256,7 @@ func NewProviderImpl(providerCfg *ProviderConfig, proxyURL string) (Provider, er
 	if providerCfg == nil {
 		return nil, fmt.Errorf("provider config is nil")
 	}
-	client, err := NewHTTPClientWithProxy(proxyURL, providerCfg.RequestTimeout())
+	client, err := NewStreamingHTTPClientWithProxy(proxyURL, providerCfg.ResponseHeaderTimeout())
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client for %s provider: %w", providerCfg.Type(), err)
 	}
@@ -411,9 +411,9 @@ func (p *ProviderConfig) Type() string {
 	return p.typeName
 }
 
-// RequestTimeout returns the total HTTP request timeout configured for this provider.
-func (p *ProviderConfig) RequestTimeout() time.Duration {
-	return p.requestTimeout
+// ResponseHeaderTimeout returns the initial HTTP response-header timeout configured for this provider.
+func (p *ProviderConfig) ResponseHeaderTimeout() time.Duration {
+	return p.responseHeaderTimeout
 }
 
 // StreamIdleTimeout returns the provider-level stream idle timeout override.

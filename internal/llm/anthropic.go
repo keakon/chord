@@ -39,7 +39,7 @@ func NewAnthropicProviderWithClient(provider *ProviderConfig, client *http.Clien
 // NewAnthropicProvider creates a new AnthropicProvider wrapping the given ProviderConfig.
 // proxyURL configures an HTTP/HTTPS/SOCKS5 proxy; empty string means no proxy (direct connect).
 func NewAnthropicProvider(provider *ProviderConfig, proxyURL string) (*AnthropicProvider, error) {
-	client, err := NewHTTPClientWithProxy(proxyURL, providerRequestTimeout(provider))
+	client, err := NewStreamingHTTPClientWithProxy(proxyURL, providerResponseHeaderTimeout(provider))
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client for anthropic provider: %w", err)
 	}

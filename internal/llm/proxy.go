@@ -77,11 +77,18 @@ func NewHTTPClientWithProxy(proxyURL string, totalTimeout time.Duration) (*http.
 	return NewHTTPClientWithProxyAndHeaderTimeout(proxyURL, totalTimeout, defaultHTTPResponseHeaderTimeout)
 }
 
-func providerRequestTimeout(provider *ProviderConfig) time.Duration {
+func NewStreamingHTTPClientWithProxy(proxyURL string, responseHeaderTimeout time.Duration) (*http.Client, error) {
+	if responseHeaderTimeout <= 0 {
+		responseHeaderTimeout = defaultHTTPResponseHeaderTimeout
+	}
+	return NewHTTPClientWithProxyAndHeaderTimeout(proxyURL, 0, responseHeaderTimeout)
+}
+
+func providerResponseHeaderTimeout(provider *ProviderConfig) time.Duration {
 	if provider == nil {
 		return 0
 	}
-	return provider.RequestTimeout()
+	return provider.ResponseHeaderTimeout()
 }
 
 // ProxyScheme returns the scheme of proxyURL ("http", "https", "socks5") or "" if none.

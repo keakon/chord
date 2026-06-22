@@ -41,7 +41,7 @@
 - 非官方 Codex 的 Responses 兼容 provider 现在会在规范化后透传 `reasoning.effort`，允许 GLM 等 provider 使用 `max`、`minimal`、`none` 等自定义取值；官方 Codex 后端仍保留受限取值集合。
 - Responses HTTP 请求现在都会在授权头之外发送同一套 SSE 请求头（`originator`、`Accept`、`OpenAI-Beta: responses=experimental`），不再取决于是否配置了 `preset: codex`；User-Agent 继续默认使用 `chord/<version>`，并尊重 provider 级 `user_agent` 覆盖。
 - WebSocket Responses 传输现在从请求体传播 `include` 数组，而非硬编码空数组。
-- Provider 级超时配置现在支持通过 `request_timeout`、`stream_idle_timeout` 和 `websocket_handshake_timeout` 分别覆盖单个 provider 的 HTTP 请求总超时、流式空闲超时和 Responses WebSocket 握手超时。
+- Provider 级超时配置现在支持通过 `response_header_timeout`、`stream_idle_timeout` 和 `websocket_handshake_timeout` 分别覆盖单个 provider 的初始 HTTP 响应头超时、流式空闲超时和 Responses WebSocket 握手超时。
 - JSON 热路径处理更快，包括 LLM 流解析、MCP JSON-RPC 编解码、会话导入 JSONL 解析和 `auth.state.json` 加载。
 - 本地文件工具读取已有文本文件时现在优先使用 UTF-8 或带 BOM 的 Unicode，并保留对 GB18030、Big5、Shift-JIS 等常见地区性编码的受限支持。无法明确识别或不受支持的编码仍会快速失败；`web_fetch` 仍会按 HTTP 响应声明的 charset 解码。
 - `read` 现在返回不带行号 gutter、也不额外缩进的原始文件文本，复制片段用于 patch hunk 或缩进敏感格式时更安全。
@@ -76,7 +76,7 @@
 - 兼容网关返回临时性 HTTP 400 且没有 `Retry-After` 时，现在使用 1 秒的短探测冷却；纯 all-keys-cooling 等待会显示 `cooling` 而不是 `retrying`。配置了 `stream_retry_rounds` 时，all-keys-cooling 重试轮也会受该上限约束，与已记录的重试上限语义一致。
 - 压缩续跑和长度恢复使用的请求级 tuning override 现在会与模型/variant 默认值合并，而不是整体替换，避免这些恢复路径之后的 OpenAI Responses 请求丢掉已配置的 `reasoning`/`text` 字段，同时保留 Anthropic/Gemini 的 thinking 与缓存默认值。
 - 环境变量 `CHORD_API_BASE` 现在会作为 `--api-base` 的回退真正生效；两者同时设置时仍以 CLI flag 为准。
-- 所有 provider 的 HTTP client 现在会把初始响应头等待限制在约 25 秒（原为 60 秒），并把连接 dial 超时限制在 15 秒（原为 60 秒）；健康流仍由流式空闲超时管理，辅助模型池调用保留较长的总请求超时，但不会拉长响应头等待。
+- Provider 的流式 HTTP client 现在不再用总请求计时器截断健康流：`response_header_timeout` 控制初始响应头等待，`stream_idle_timeout` 控制流式 chunk 之间的空闲等待。辅助非流式调用不再把响应头设置复用为总请求超时。
 - 流式 assistant 卡片在内容仅为占位符（点号或省略号）时不再加入会话；真实内容到达后会替换占位符，仅含占位符的块会被丢弃而不是渲染成空卡片。
 - 工具失败结果文本与错误文本相同时，现在只返回一次而不再追加重复的 `Error:` 块；证据收集与请求级上下文缩减现在也会根据结构化的工具结果状态识别工具错误，因此没有 `Error:` 前缀的此类结果仍会按错误处理。
 - AGENTS.md 工作区指令现在会在 main agent 与 sub-agent 中带明确范围和可见性说明注入：Chord 会从项目根目录到当前工作目录加载适用的完整 AGENTS.md 内容，作为内部 user-role meta message 放在第一条真实用户消息之前，并以 `# AGENTS.md instructions` 为头部、用 `<INSTRUCTIONS> ... </INSTRUCTIONS>` 块包裹，使其被视为持久工作区指导，而不是可选上下文。

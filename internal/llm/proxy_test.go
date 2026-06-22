@@ -28,3 +28,20 @@ func TestNewHTTPClientWithProxyUsesDocumentedTimeouts(t *testing.T) {
 		t.Fatal("transport.DialContext = nil, want configured dialer")
 	}
 }
+
+func TestNewStreamingHTTPClientWithProxyDisablesTotalTimeout(t *testing.T) {
+	client, err := NewStreamingHTTPClientWithProxy("", 45*time.Second)
+	if err != nil {
+		t.Fatalf("NewStreamingHTTPClientWithProxy returned error: %v", err)
+	}
+	if client.Timeout != 0 {
+		t.Fatalf("client.Timeout = %v, want 0", client.Timeout)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("client.Transport = %T, want *http.Transport", client.Transport)
+	}
+	if transport.ResponseHeaderTimeout != 45*time.Second {
+		t.Fatalf("ResponseHeaderTimeout = %v, want 45s", transport.ResponseHeaderTimeout)
+	}
+}

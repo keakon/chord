@@ -35,12 +35,12 @@ func newTestProviderConfig(keys []string) *ProviderConfig {
 func TestProviderConfigTimeoutSettings(t *testing.T) {
 	p := NewProviderConfig("test", config.ProviderConfig{
 		Type:                      config.ProviderTypeResponses,
-		RequestTimeout:            180,
+		ResponseHeaderTimeout:     180,
 		StreamIdleTimeout:         90,
 		WebSocketHandshakeTimeout: 45,
 	}, nil)
-	if got := p.RequestTimeout(); got != 180*time.Second {
-		t.Fatalf("RequestTimeout() = %v, want 180s", got)
+	if got := p.ResponseHeaderTimeout(); got != 180*time.Second {
+		t.Fatalf("ResponseHeaderTimeout() = %v, want 180s", got)
 	}
 	if got := p.StreamIdleTimeout(); got != 90*time.Second {
 		t.Fatalf("StreamIdleTimeout() = %v, want 90s", got)
@@ -50,10 +50,10 @@ func TestProviderConfigTimeoutSettings(t *testing.T) {
 	}
 }
 
-func TestNewProviderImplAppliesRequestTimeout(t *testing.T) {
+func TestNewProviderImplAppliesResponseHeaderTimeout(t *testing.T) {
 	p := NewProviderConfig("test", config.ProviderConfig{
-		Type:           config.ProviderTypeResponses,
-		RequestTimeout: 180,
+		Type:                  config.ProviderTypeResponses,
+		ResponseHeaderTimeout: 180,
 	}, nil)
 	impl, err := NewProviderImpl(p, "")
 	if err != nil {
@@ -63,8 +63,18 @@ func TestNewProviderImplAppliesRequestTimeout(t *testing.T) {
 	if !ok {
 		t.Fatalf("impl = %T, want *ResponsesProvider", impl)
 	}
-	if r.client == nil || r.client.Timeout != 180*time.Second {
-		t.Fatalf("responses HTTP timeout = %v, want 180s", r.client.Timeout)
+	if r.client == nil {
+		t.Fatal("responses HTTP client is nil")
+	}
+	if r.client.Timeout != 0 {
+		t.Fatalf("responses HTTP total timeout = %v, want 0 for streaming", r.client.Timeout)
+	}
+	transport, ok := r.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("responses HTTP transport = %T, want *http.Transport", r.client.Transport)
+	}
+	if transport.ResponseHeaderTimeout != 180*time.Second {
+		t.Fatalf("responses response header timeout = %v, want 180s", transport.ResponseHeaderTimeout)
 	}
 }
 

@@ -41,7 +41,7 @@ func NewGeminiProvider(provider *ProviderConfig, proxyURL string) (*GeminiProvid
 	if err := validateGeminiAPIURL(provider.APIURL()); err != nil {
 		return nil, err
 	}
-	client, err := NewHTTPClientWithProxy(proxyURL, providerRequestTimeout(provider))
+	client, err := NewStreamingHTTPClientWithProxy(proxyURL, providerResponseHeaderTimeout(provider))
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client for gemini provider: %w", err)
 	}

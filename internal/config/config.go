@@ -221,7 +221,7 @@ type ProviderConfig struct {
 	Preset                    string                 `json:"preset,omitempty" yaml:"preset,omitempty"`                                           // e.g. "codex" for the official ChatGPT/Codex OAuth transport
 	Store                     *bool                  `json:"store,omitempty" yaml:"store,omitempty"`                                             // provider-level Responses storage preference; nil defaults to false
 	ResponsesWebsocket        *bool                  `json:"responses_websocket,omitempty" yaml:"responses_websocket,omitempty"`                 // whether to prefer Responses WebSocket transport; nil = preset default (codex:true, others:false)
-	RequestTimeout            int                    `json:"request_timeout,omitempty" yaml:"request_timeout,omitempty"`                         // total provider HTTP request timeout in seconds (0 = no total timeout)
+	ResponseHeaderTimeout     int                    `json:"response_header_timeout,omitempty" yaml:"response_header_timeout,omitempty"`         // initial provider HTTP response-header timeout in seconds (0 = built-in default)
 	StreamIdleTimeout         int                    `json:"stream_idle_timeout,omitempty" yaml:"stream_idle_timeout,omitempty"`                 // per-stream idle timeout in seconds (0 = built-in defaults)
 	WebSocketHandshakeTimeout int                    `json:"websocket_handshake_timeout,omitempty" yaml:"websocket_handshake_timeout,omitempty"` // Responses WebSocket handshake timeout in seconds (0 = built-in default)
 	RateLimit                 int                    `json:"rate_limit" yaml:"rate_limit"`                                                       // requests per minute (0 = no limit)
@@ -876,7 +876,8 @@ func normalizeConfigShorthands(path string, data []byte) ([]byte, error) {
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
-	if normalizeContextReductionShorthand(raw) {
+	changed := normalizeContextReductionShorthand(raw)
+	if changed {
 		out, err := yaml.Marshal(raw)
 		if err != nil {
 			return nil, fmt.Errorf("marshal normalized config %s: %w", path, err)
