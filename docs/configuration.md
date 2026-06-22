@@ -53,18 +53,21 @@ providers:
           input: [text, image]
 ```
 
-### OpenAI Chat Completions
+### BigModel Chat Completions (Coding Plan)
+
+Chord's `api_url` is the complete request URL. For the BigModel Coding Plan
+OpenAI-compatible endpoint, append `/chat/completions` to the Coding Plan base.
 
 ```yaml
 providers:
   bigmodel:
     type: chat-completions
-    api_url: https://open.bigmodel.cn/api/paas/v4/chat/completions
+    api_url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
     models:
-      glm-5.1:
+      glm-5.2:
         limit:
-          context: 200000
-          output: 131072
+          context: 1000000
+          output: 64000
 ```
 
 ### OpenAI Responses
@@ -624,6 +627,46 @@ Model fields used in the example:
   asks Claude to return summarized thinking blocks for Chord to show (only
   valid for `type: enabled` or `adaptive`; rejected under `disabled`); variants
   can override `thinking.effort` and `thinking.display`.
+
+  For GLM-5.2, keep OpenAI-compatible and Anthropic-compatible templates
+  separate. Use the OpenAI template for `type: chat-completions` (or
+  `type: responses` only when your gateway explicitly provides a Responses
+  endpoint), and use the Anthropic template for `type: messages`. Chord maps
+  `reasoning.effort` to OpenAI-compatible request fields and `thinking.effort`
+  to Messages `output_config.effort`. Declare the 1M context window with
+  `limit.context: 1000000`; keep the model key as `glm-5.2`.
+
+  ```yaml
+  model_templates:
+    "glm-5.2-openai": &glm-5_2_openai
+      limit:
+        context: 1000000
+        output: 64000
+      reasoning:
+        effort: max
+
+    "glm-5.2-anthropic": &glm-5_2_anthropic
+      limit:
+        context: 1000000
+        output: 64000
+      thinking:
+        type: adaptive
+        effort: max
+
+  providers:
+    bigmodel_coding:
+      type: chat-completions
+      api_url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
+      models:
+        glm-5.2: *glm-5_2_openai
+
+    bigmodel_anthropic:
+      type: messages
+      api_url: https://open.bigmodel.cn/api/anthropic/v1/messages
+      models:
+        glm-5.2: *glm-5_2_anthropic
+  ```
+
 - `variants`: named model parameter presets. Use a model ref like
   `openai/gpt-5.5@high` or `anthropic/claude-opus-4.8@xhigh` to select one.
 - `cost`: estimated pricing in USD per 1M tokens. `input`, `output`, `cache_read`, `cache_write`, and `cache_write_1h` are all optional, but supplying them lets Chord estimate usage cost in the UI and `/usage` output. `cache_write` is the default prompt-cache write price, typically the 5-minute TTL price for Anthropic; `cache_write_1h` is used when a provider reports or is configured to request 1-hour cache writes. When a matching cache-write price is omitted, Chord estimates cache-write tokens at the effective `input` price.
@@ -1317,7 +1360,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `context.compaction.reserved` | int | Optional input-budget headroom reserved before `compaction.threshold` is applied. Useful for tokenizer drift, tool overhead, and safer overflow recovery. |
 | `reasoning`       | object | OpenAI reasoning options. `reasoning.effort` is normalized and passed through verbatim, so any provider-supported level (e.g. GLM `max` / `minimal` / `none`) reaches the upstream unchanged; the official Codex Responses backend additionally restricts to `low` / `medium` / `high` / `xhigh` (unset = omit and use provider/model default). For Responses, `reasoning.summary` (`auto` / `concise` / `detailed`; unset = omit / no explicit summary request). Recommended summary value when you want readable summaries: `auto`. |
 | `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
-| `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
+| `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `thinking.effort` is sent as `output_config.effort` for Messages requests; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
 | `variants`        | map    | Named parameter presets. Reference with `provider/model@variant`.                                                      |
 | `modalities.input`| array  | Subset of `text` / `image` / `pdf`. Defaults to `[text, image]`.                                                       |
 | `supported_service_tiers` | list | Provider-level default or model-level override for accepted non-standard tiers, e.g. `[fast, slow]` or `[fast]`. Omit to use preset defaults. |
