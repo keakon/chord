@@ -20,7 +20,7 @@ require (
 	github.com/keakon/bubbletea/v2 v2.0.7-fork.1
 	github.com/keakon/golog v0.4.1
 	github.com/keakon/ultraviolet v0.0.1-fork.1
-	github.com/keakon/x/powernap v0.1.5-fork
+	github.com/keakon/x/powernap v0.1.5-fork.1
 	github.com/mackee/go-readability v0.3.1
 	github.com/mattn/go-runewidth v0.0.24
 	github.com/muesli/cancelreader v0.2.2
