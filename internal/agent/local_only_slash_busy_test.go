@@ -570,15 +570,25 @@ func TestHandleModelsCommandIdleClearsTurn(t *testing.T) {
 
 func TestHandleUserMessageMCPWhileBusyRunsImmediately(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	controlStarted := make(chan struct{})
+	releaseControl := make(chan struct{})
 	a.SetMCPControlFunc(func(context.Context, MCPControlRequest) (MCPControlResult, error) {
+		close(controlStarted)
+		<-releaseControl
 		return MCPControlResult{}, nil
 	})
+	t.Cleanup(func() { close(releaseControl) })
 	a.newTurn()
 	turn := a.turn
 	drainAgentEvents(a.Events())
 
 	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/mcp enable exa"})
 	dispatchPendingEvents(t, a)
+	select {
+	case <-controlStarted:
+	case <-time.After(time.Second):
+		t.Fatal("busy /mcp command did not invoke MCP control")
+	}
 
 	if got := a.PendingUserMessageCount(); got != 0 {
 		t.Fatalf("PendingUserMessageCount = %d, want 0", got)
