@@ -707,6 +707,9 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 
 		// [DONE] signals end of stream.
 		if bytes.Equal(data, []byte("[DONE]")) {
+			if cb != nil {
+				cb(message.StreamDelta{Event: &message.StreamEventDelta{Type: "openai.done"}})
+			}
 			if inThinking && cb != nil {
 				cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
 				inThinking = false
@@ -730,6 +733,9 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		var chunk openAIStreamChunk
 		if err := sonicjson.ConfigDefault.Unmarshal(data, &chunk); err != nil {
 			return nil, fmt.Errorf("parse stream chunk: %w", err)
+		}
+		if cb != nil {
+			cb(message.StreamDelta{Event: &message.StreamEventDelta{Type: "openai.chunk"}})
 		}
 
 		// Process choices.

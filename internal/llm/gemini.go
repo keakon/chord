@@ -500,6 +500,9 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		if err := sonicjson.ConfigDefault.Unmarshal(data, &chunk); err != nil {
 			return nil, fmt.Errorf("parse Gemini stream chunk: %w", err)
 		}
+		if cb != nil {
+			cb(message.StreamDelta{Event: &message.StreamEventDelta{Type: "gemini.chunk"}})
+		}
 
 		for _, candidate := range chunk.Candidates {
 			for _, part := range candidate.Content.Parts {

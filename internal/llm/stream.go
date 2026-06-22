@@ -202,6 +202,9 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				progressBytes += int64(len(line) + 1)
 				progressEvents++
 				cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: progressBytes, Events: progressEvents}})
+				if eventType != "" {
+					cb(message.StreamDelta{Event: &message.StreamEventDelta{Type: "anthropic." + eventType}})
+				}
 			}
 
 			// Record raw SSE data for dump if collector is present.

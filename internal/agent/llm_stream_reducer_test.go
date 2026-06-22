@@ -131,6 +131,25 @@ func TestLLMStreamReducerRollbackResetsContentBeforeFinish(t *testing.T) {
 	}
 }
 
+func TestLLMStreamReducerIgnoresTraceOnlyEventDelta(t *testing.T) {
+	var events []AgentEvent
+	var progress []*message.StreamProgressDelta
+	activity := 0
+	reducer := &llmStreamReducer{
+		emitActivity: func(ActivityType, string) { activity++ },
+		onProgress:   func(p *message.StreamProgressDelta) { progress = append(progress, p) },
+	}
+	reducer.content = streamContentReducer{emit: func(evt AgentEvent) { events = append(events, evt) }}
+	reducer.tool = streamToolDeltaReducer{emit: func(evt AgentEvent) { events = append(events, evt) }}
+
+	reducer.Handle(message.StreamDelta{Event: &message.StreamEventDelta{Type: "response.output_text.delta"}})
+	reducer.Finish()
+
+	if len(events) != 0 || len(progress) != 0 || activity != 0 {
+		t.Fatalf("trace-only event produced visible effects: events=%#v progress=%#v activity=%d", events, progress, activity)
+	}
+}
+
 func TestMainLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	retryErr := errors.New("rate limited")

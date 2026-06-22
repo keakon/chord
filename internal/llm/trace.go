@@ -28,6 +28,17 @@ type LLMTraceRecord struct {
 	Statuses           []string           `json:"statuses,omitempty"`
 	ProgressBytes      int64              `json:"progress_bytes,omitempty"`
 	ProgressEvents     int64              `json:"progress_events,omitempty"`
+	FirstEventMS       int64              `json:"first_event_ms,omitempty"`
+	FirstSemanticMS    int64              `json:"first_semantic_event_ms,omitempty"`
+	FirstVisibleTextMS int64              `json:"first_visible_text_ms,omitempty"`
+	FirstToolArgsMS    int64              `json:"first_tool_args_ms,omitempty"`
+	LastEventType      string             `json:"last_event_type,omitempty"`
+	MaxEventGapMS      int64              `json:"max_event_gap_ms,omitempty"`
+	MaxSemanticGapMS   int64              `json:"max_semantic_event_gap_ms,omitempty"`
+	CompletedWaitMS    int64              `json:"completed_wait_ms,omitempty"`
+	WaitingCompletedMS int64              `json:"waiting_completed_ms,omitempty"`
+	TimeoutSource      string             `json:"timeout_source,omitempty"`
+	UsageMissing       bool               `json:"usage_missing,omitempty"`
 	TextChunks         int                `json:"text_chunks,omitempty"`
 	TextChars          int                `json:"text_chars,omitempty"`
 	ThinkingChars      int                `json:"thinking_chars,omitempty"`
@@ -105,12 +116,17 @@ func (w *TraceWriter) Write(rec *LLMTraceRecord) error {
 }
 
 type llmTraceCollector struct {
-	cb           StreamCallback
-	record       LLMTraceRecord
-	statusesSeen map[string]bool
-	tools        map[string]*toolTraceState
-	toolOrder    []string
-	nextAnonTool int
+	cb             StreamCallback
+	record         LLMTraceRecord
+	startedAt      time.Time
+	statusesSeen   map[string]bool
+	tools          map[string]*toolTraceState
+	toolOrder      []string
+	nextAnonTool   int
+	lastEventAt    time.Time
+	lastSemanticAt time.Time
+	lastDoneAt     time.Time
+	sawCompleted   bool
 }
 
 type toolTraceState struct {
@@ -119,13 +135,15 @@ type toolTraceState struct {
 }
 
 func newLLMTraceCollector(provider, model string, cb StreamCallback) *llmTraceCollector {
+	now := time.Now()
 	return &llmTraceCollector{
 		cb: cb,
 		record: LLMTraceRecord{
-			Timestamp: time.Now().Format(time.RFC3339Nano),
+			Timestamp: now.Format(time.RFC3339Nano),
 			Provider:  strings.TrimSpace(provider),
 			Model:     strings.TrimSpace(model),
 		},
+		startedAt:    now,
 		statusesSeen: make(map[string]bool),
 		tools:        make(map[string]*toolTraceState),
 	}
@@ -146,10 +164,26 @@ func (c *llmTraceCollector) Callback(delta message.StreamDelta) {
 		c.record.ProgressBytes = delta.Progress.Bytes
 		c.record.ProgressEvents = delta.Progress.Events
 	}
+	if delta.Event != nil {
+		c.observeEvent(delta.Event.Type)
+		// Event deltas are trace-only diagnostics with no business payload; this
+		// collector is their sole consumer. Stop here instead of forwarding an
+		// inert delta through the entire downstream reducer chain on every SSE
+		// chunk. Guard on the other fields so a future delta that piggybacks a
+		// real payload onto Event is still delivered.
+		if delta.Type == "" && delta.Status == nil && delta.Progress == nil &&
+			delta.ToolCall == nil && delta.RateLimit == nil && delta.Rollback == nil &&
+			delta.Err == nil {
+			return
+		}
+	}
 	switch delta.Type {
 	case message.StreamDeltaText:
 		c.record.TextChunks++
 		c.record.TextChars += len(delta.Text)
+		if c.record.FirstVisibleTextMS == 0 {
+			c.record.FirstVisibleTextMS = time.Since(c.startedAt).Milliseconds()
+		}
 	case message.StreamDeltaThinking:
 		c.record.ThinkingChars += len(delta.Text)
 	case message.StreamDeltaToolUseStart:
@@ -159,6 +193,9 @@ func (c *llmTraceCollector) Callback(delta message.StreamDelta) {
 		state := c.toolState(delta.ToolCall)
 		state.trace.Started = true
 		state.trace.DeltaCount++
+		if c.record.FirstToolArgsMS == 0 {
+			c.record.FirstToolArgsMS = time.Since(c.startedAt).Milliseconds()
+		}
 		c.addToolInputBytes(state, delta.ToolCall)
 	case message.StreamDeltaToolUseEnd:
 		state := c.toolState(delta.ToolCall)
@@ -179,8 +216,12 @@ func (c *llmTraceCollector) Finish(httpStatus int, transport string, resp *messa
 	c.record.Transport = strings.TrimSpace(transport)
 	if err != nil {
 		c.record.Error = err.Error()
+		c.record.TimeoutSource = classifyTraceTimeoutSource(err)
 	}
 	if resp != nil {
+		if resp.Usage == nil {
+			c.record.UsageMissing = true
+		}
 		c.record.StopReason = strings.TrimSpace(resp.StopReason)
 		c.record.FinalContentChars = len(resp.Content)
 		c.record.FinalThinkingChars = len(resp.ReasoningContent)
@@ -199,6 +240,9 @@ func (c *llmTraceCollector) Finish(httpStatus int, transport string, resp *messa
 			}
 		}
 	}
+	if !c.lastDoneAt.IsZero() && !c.sawCompleted {
+		c.record.WaitingCompletedMS = time.Since(c.lastDoneAt).Milliseconds()
+	}
 	c.record.ToolCalls = make([]LLMTraceToolCall, 0, len(c.toolOrder))
 	for _, key := range c.toolOrder {
 		state := c.tools[key]
@@ -208,6 +252,83 @@ func (c *llmTraceCollector) Finish(httpStatus int, transport string, resp *messa
 		c.record.ToolCalls = append(c.record.ToolCalls, state.trace)
 	}
 	return &c.record
+}
+
+func (c *llmTraceCollector) observeEvent(eventType string) {
+	eventType = strings.TrimSpace(eventType)
+	if c == nil || eventType == "" {
+		return
+	}
+	now := time.Now()
+	if c.record.FirstEventMS == 0 {
+		c.record.FirstEventMS = time.Since(c.startedAt).Milliseconds()
+	}
+	if !c.lastEventAt.IsZero() {
+		if gap := now.Sub(c.lastEventAt).Milliseconds(); gap > c.record.MaxEventGapMS {
+			c.record.MaxEventGapMS = gap
+		}
+	}
+	c.lastEventAt = now
+	c.record.LastEventType = eventType
+
+	if isSemanticTraceEvent(eventType) {
+		if c.record.FirstSemanticMS == 0 {
+			c.record.FirstSemanticMS = time.Since(c.startedAt).Milliseconds()
+		}
+		if !c.lastSemanticAt.IsZero() {
+			if gap := now.Sub(c.lastSemanticAt).Milliseconds(); gap > c.record.MaxSemanticGapMS {
+				c.record.MaxSemanticGapMS = gap
+			}
+		}
+		c.lastSemanticAt = now
+	}
+
+	if isTraceCompletionWaitStart(eventType) {
+		c.lastDoneAt = now
+	}
+	if eventType == "response.completed" {
+		c.sawCompleted = true
+		if !c.lastDoneAt.IsZero() {
+			c.record.CompletedWaitMS = now.Sub(c.lastDoneAt).Milliseconds()
+		}
+	}
+}
+
+func isSemanticTraceEvent(eventType string) bool {
+	switch eventType {
+	case "response.created", "response.in_progress", "response.queued":
+		return false
+	default:
+		return true
+	}
+}
+
+func isTraceCompletionWaitStart(eventType string) bool {
+	switch eventType {
+	case "response.output_text.done", "response.function_call_arguments.done", "response.output_item.done":
+		return true
+	default:
+		return false
+	}
+}
+
+func classifyTraceTimeoutSource(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "chunk read timeout"):
+		return "chunk_idle_timeout"
+	case strings.Contains(msg, "client.timeout") || strings.Contains(msg, "context deadline exceeded"):
+		return "total_or_context_timeout"
+	case strings.Contains(msg, "context canceled"):
+		return "context_canceled"
+	case strings.Contains(msg, "unexpected eof") || strings.Contains(msg, "incomplete sse stream") || strings.Contains(msg, "upstream connection closed"):
+		return "upstream_eof"
+	default:
+		return ""
+	}
 }
 
 func (c *llmTraceCollector) toolState(tc *message.ToolCallDelta) *toolTraceState {

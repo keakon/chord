@@ -176,6 +176,7 @@ type StreamDelta struct {
 	Model     string                          // for Type="retry_error": model ID
 	KeySuffix string                          // for Type="retry_error": last 4 chars of the key (safe for logs)
 	Progress  *StreamProgressDelta            // optional cumulative/request progress hint for status bar or transport diagnostics
+	Event     *StreamEventDelta               // optional low-level provider stream event diagnostics
 }
 
 const (
@@ -212,6 +213,12 @@ type StatusDelta struct {
 type StreamProgressDelta struct {
 	Bytes  int64 // cumulative response bytes received so far; provider may include response headers
 	Events int64 // cumulative stream event/data count received so far
+}
+
+// StreamEventDelta reports a parsed low-level provider stream event for trace
+// diagnostics. Consumers that render user-visible output should ignore it.
+type StreamEventDelta struct {
+	Type string // provider event type, e.g. "response.output_text.delta"
 }
 
 // ToolCallDelta represents incremental tool call data during streaming.

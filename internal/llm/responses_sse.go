@@ -216,6 +216,9 @@ func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, colle
 			logResponsesSSEDecodeFailure(reader, dataChunkIndex, "(parse_event)", data, err)
 			return nil, nil, false, fmt.Errorf("parse event: %w", err)
 		}
+		if cb != nil && eventType != "" {
+			cb(message.StreamDelta{Event: &message.StreamEventDelta{Type: eventType}})
+		}
 
 		state := responsesEventState{
 			resp:           &resp,
