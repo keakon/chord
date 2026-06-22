@@ -15,6 +15,10 @@ const (
 	// SlowPhaseChunkTimeout is used for phases known to stall longer between
 	// chunks, such as thinking/reasoning or large tool argument generation.
 	SlowPhaseChunkTimeout = 90 * time.Second
+	// TerminalDrainChunkTimeout is used after the provider has already reported
+	// terminal or recoverable content state and the parser is only waiting for
+	// protocol trailers such as usage, [DONE], or response.completed.
+	TerminalDrainChunkTimeout = 1 * time.Second
 )
 
 // ChunkTimeoutError is a net.Error-compatible error returned when no SSE chunk
@@ -33,6 +37,7 @@ func (e *ChunkTimeoutError) Temporary() bool { return true }
 // per-chunk timeout when entering or leaving a slow phase (thinking / tool_use).
 type chunkPhaser interface {
 	SetChunkTimeout(d time.Duration)
+	SetTerminalDrainTimeout(d time.Duration)
 }
 
 type chunkTimeoutSnapshot struct {
@@ -92,7 +97,9 @@ func NewChunkTimeoutReader(r io.Reader, initialTimeout time.Duration, cancel fun
 
 // NewProviderChunkTimeoutReader wraps r with the provider-level stream idle
 // timeout when configured; otherwise it uses initialTimeout and allows parsers
-// to switch to their built-in slow-phase timeout.
+// to switch to their built-in slow-phase timeout. Terminal drain may still
+// shorten a provider-level timeout so completed content is not held hostage by
+// optional protocol trailers.
 func NewProviderChunkTimeoutReader(r io.Reader, provider *ProviderConfig, initialTimeout time.Duration, cancel func()) *ChunkTimeoutReader {
 	if provider != nil {
 		if d := provider.StreamIdleTimeout(); d > 0 {
@@ -158,6 +165,19 @@ func (cr *ChunkTimeoutReader) Read(p []byte) (int, error) {
 func (cr *ChunkTimeoutReader) SetChunkTimeout(d time.Duration) {
 	cr.mu.Lock()
 	if cr.fixed > 0 {
+		d = cr.fixed
+	}
+	cr.timeout = d
+	cr.timer.Reset(d)
+	cr.mu.Unlock()
+}
+
+// SetTerminalDrainTimeout updates the current timeout for terminal drain.
+// Provider-level stream_idle_timeout can still shorten the drain, but must not
+// force terminal trailers to wait longer than the parser's terminal budget.
+func (cr *ChunkTimeoutReader) SetTerminalDrainTimeout(d time.Duration) {
+	cr.mu.Lock()
+	if cr.fixed > 0 && cr.fixed < d {
 		d = cr.fixed
 	}
 	cr.timeout = d

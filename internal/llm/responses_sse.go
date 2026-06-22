@@ -3,6 +3,7 @@ package llm
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -141,6 +142,39 @@ type responsesEventEnvelope struct {
 	Data json.RawMessage `json:"data"`
 }
 
+var responsesTerminalSSEEvents = map[string]struct{}{
+	"response.completed":  {},
+	"response.incomplete": {},
+	"response.failed":     {},
+	"error":               {},
+}
+
+type responsesPartialCompletionState struct {
+	textDone        bool
+	openOutputItems map[int]struct{}
+}
+
+func (s *responsesPartialCompletionState) markOutputItemAdded(index int) {
+	if s == nil {
+		return
+	}
+	if s.openOutputItems == nil {
+		s.openOutputItems = make(map[int]struct{})
+	}
+	s.openOutputItems[index] = struct{}{}
+}
+
+func (s *responsesPartialCompletionState) markOutputItemDone(index int) {
+	if s == nil || s.openOutputItems == nil {
+		return
+	}
+	delete(s.openOutputItems, index)
+}
+
+func (s responsesPartialCompletionState) outputItemsComplete() bool {
+	return len(s.openOutputItems) == 0
+}
+
 // parseResponsesSSE reads a Responses API SSE stream and calls cb for each delta.
 // Supports both combined format (data line has {"type":"...","data":...}) and
 // standard SSE (event type on "event:" line, payload on "data:" line).
@@ -166,12 +200,14 @@ func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, colle
 		sawDataLine    bool
 		lastEventType  string // for standard SSE: event type from preceding "event:" line
 		outputItems    []responsesInputItem
+		partial        responsesPartialCompletionState
 		dataChunkIndex int
 		eventDataParts [][]byte
 		progressBytes  int64
 		progressEvents int64
 		providerErr    error
 	)
+	partial.openOutputItems = make(map[int]struct{})
 	dataChunkIndex = -1
 	flushContent := func() {
 		if content.Len() == 0 {
@@ -195,12 +231,14 @@ func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, colle
 		if bytes.Equal(data, []byte("[DONE]")) {
 			finalizeResponsesToolCalls(toolCalls, &resp, cb, truncated)
 			flushContent()
+			if resp.Content != "" {
+				partial.textDone = true
+			}
+			if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, false); ok {
+				return partialResp, partialItems, true, nil
+			}
 			outputItems = responsesFinalizeIncrementalOutputItems(outputItems, &resp)
 			return &resp, outputItems, true, nil
-		}
-		if readErr != nil && !errors.Is(readErr, io.EOF) {
-			logResponsesSSETruncatedEvent(reader, dataChunkIndex, eventTypeHint, data, readErr)
-			return nil, nil, false, fmt.Errorf("truncated SSE event %q: %w", eventTypeHint, readErr)
 		}
 		if len(data) == 0 {
 			return nil, nil, false, nil
@@ -227,11 +265,16 @@ func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, colle
 			finalizedCalls: finalizedCalls,
 			truncated:      &truncated,
 			outputItems:    &outputItems,
+			partial:        &partial,
 			cb:             cb,
 			phaser:         phaser,
 		}
 		outResp, outItems, done, err := processResponsesEventPayload(state, eventType, eventData, flushContent)
 		if err != nil {
+			if readErr != nil && !errors.Is(readErr, io.EOF) {
+				logResponsesSSETruncatedEvent(reader, dataChunkIndex, eventTypeHint, data, readErr)
+				return nil, nil, false, fmt.Errorf("truncated SSE event %q: %w", eventTypeHint, readErr)
+			}
 			providerErr = err
 		}
 		return outResp, outItems, done, err
@@ -271,12 +314,27 @@ func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, colle
 				if collector != nil {
 					collector.Add(string(data))
 				}
+				if sseDataLineTerminatesEvent(data, lastEventType, responsesTerminalSSEEvents) {
+					outResp, outItems, done, err := flushEvent(nil)
+					if err != nil {
+						return nil, nil, err
+					}
+					if done {
+						return outResp, outItems, nil
+					}
+				}
 			}
 		}
 		if readErr != nil {
 			if len(eventDataParts) > 0 {
 				outResp, outItems, done, err := flushEvent(readErr)
 				if err != nil {
+					flushContent()
+					if canRecoverPartialResponsesAfterReadError(err, &resp) {
+						if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, true); ok {
+							return partialResp, partialItems, nil
+						}
+					}
 					return nil, nil, err
 				}
 				if done {
@@ -285,6 +343,12 @@ func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, colle
 			}
 			if errors.Is(readErr, io.EOF) {
 				break
+			}
+			flushContent()
+			if canRecoverPartialResponsesAfterReadError(readErr, &resp) {
+				if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, true); ok {
+					return partialResp, partialItems, nil
+				}
 			}
 			return nil, nil, fmt.Errorf("reading SSE stream: %w", readErr)
 		}
@@ -296,8 +360,78 @@ func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, colle
 	if providerErr != nil {
 		return nil, nil, providerErr
 	}
+	flushContent()
+	if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, false); ok {
+		return partialResp, partialItems, nil
+	}
 
 	return nil, nil, fmt.Errorf("incomplete SSE stream: stream closed before response.completed")
+}
+
+func canRecoverPartialResponsesAfterError(err error) bool {
+	if err == nil {
+		return true
+	}
+	if _, ok := errors.AsType[*APIError](err); ok {
+		return false
+	}
+	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+}
+
+func canRecoverPartialResponsesAfterReadError(err error, resp *message.Response) bool {
+	if !canRecoverPartialResponsesAfterError(err) {
+		return false
+	}
+	var timeoutErr *ChunkTimeoutError
+	if errors.As(err, &timeoutErr) && (resp == nil || len(resp.ToolCalls) == 0) {
+		return false
+	}
+	return true
+}
+
+func finishPartialResponsesResponse(resp *message.Response, outputItems *[]responsesInputItem, partial responsesPartialCompletionState, requireCompleteOutput bool) (*message.Response, []responsesInputItem, bool) {
+	if resp == nil {
+		return nil, nil, false
+	}
+	hasToolCalls := len(resp.ToolCalls) > 0
+	if !partialResponsesRecoverable(hasToolCalls, partial, requireCompleteOutput) {
+		return nil, nil, false
+	}
+	if resp.Content == "" && len(resp.ToolCalls) == 0 {
+		return nil, nil, false
+	}
+	if resp.StopReason == "" {
+		if hasToolCalls {
+			resp.StopReason = "tool_calls"
+		} else if partial.textDone {
+			resp.StopReason = "stop"
+		} else {
+			resp.StopReason = "interrupted"
+		}
+	}
+	items := responsesFinalizeIncrementalOutputItems(*outputItems, resp)
+	*outputItems = items
+	return resp, items, true
+}
+
+func partialResponsesRecoverable(hasToolCalls bool, partial responsesPartialCompletionState, requireCompleteOutput bool) bool {
+	if requireCompleteOutput && !partial.outputItemsComplete() {
+		return false
+	}
+	if requireCompleteOutput && !hasToolCalls && !partial.textDone {
+		return false
+	}
+	return true
+}
+
+func finishPartialResponsesResponseWouldSucceed(resp *message.Response, partial responsesPartialCompletionState, requireCompleteOutput bool) bool {
+	if resp == nil {
+		return false
+	}
+	// Only tool-call partials may shorten the trailer wait. A Responses stream can
+	// legitimately emit assistant text, pause, and then emit tool calls; treating
+	// text-only output_item.done as terminal would truncate those later tools.
+	return len(resp.ToolCalls) > 0 && partialResponsesRecoverable(true, partial, requireCompleteOutput)
 }
 
 type responsesEventState struct {
@@ -307,6 +441,7 @@ type responsesEventState struct {
 	finalizedCalls map[string]bool
 	truncated      *bool
 	outputItems    *[]responsesInputItem
+	partial        *responsesPartialCompletionState
 	cb             StreamCallback
 	phaser         chunkPhaser
 }
@@ -326,6 +461,9 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		addedIdx := added.OutputIndex
 		if addedIdx == 0 {
 			addedIdx = added.Index
+		}
+		if state.partial != nil {
+			state.partial.markOutputItemAdded(addedIdx)
 		}
 		switch added.Item.Type {
 		case "function_call":
@@ -360,6 +498,12 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			state.cb(message.StreamDelta{Type: message.StreamDeltaText, Text: delta.Delta})
 		}
 		state.content.WriteString(delta.Delta)
+		return nil, nil, false, nil
+
+	case "response.output_text.done":
+		if state.partial != nil {
+			state.partial.textDone = true
+		}
 		return nil, nil, false, nil
 
 	case "response.function_call_arguments.delta":
@@ -417,15 +561,37 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			log.Debugf("responses: skip unparseable output_item.done err=%v", err)
 			return nil, nil, false, nil
 		}
-		if done.Item.Type == "function_call" {
+		doneIdx := done.OutputIndex
+		if doneIdx == 0 {
+			doneIdx = done.Index
+		}
+		switch done.Item.Type {
+		case "function_call":
 			if state.phaser != nil {
 				state.phaser.SetChunkTimeout(DefaultChunkTimeout)
 			}
-			doneIdx := done.OutputIndex
-			if doneIdx == 0 {
-				doneIdx = done.Index
-			}
 			finalizeOneResponsesToolCall(state.toolCalls, doneIdx, state.resp, state.cb, *state.truncated, done.Item.Arguments, state.finalizedCalls)
+		case "message":
+			if state.partial != nil {
+				state.partial.textDone = true
+			}
+		}
+		// Mark the item done for every type that was opened by output_item.added
+		// (reasoning, function_call, message, ...). markOutputItemAdded fires for
+		// all types, so omitting any type here — notably "reasoning", which gpt-5
+		// reasoning models always emit — leaves openOutputItems non-empty forever.
+		// That stale entry makes outputItemsComplete() permanently false, which
+		// (a) prevents the short terminal drain from arming after the last tool
+		// call (the stream then waits a full DefaultChunkTimeout for the trailing
+		// response.completed) and (b) blocks partial recovery when that trailing
+		// event is truncated, discarding already-complete tool calls and forcing
+		// a full retry. delete is idempotent, so re-marking function_call/message
+		// here is harmless.
+		if state.partial != nil {
+			state.partial.markOutputItemDone(doneIdx)
+		}
+		if state.phaser != nil && state.partial != nil && finishPartialResponsesResponseWouldSucceed(state.resp, *state.partial, true) {
+			state.phaser.SetTerminalDrainTimeout(TerminalDrainChunkTimeout)
 		}
 		return nil, nil, false, nil
 

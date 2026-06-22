@@ -486,6 +486,46 @@ func buildSSEStream(dataLines []string) *bytes.Reader {
 	return bytes.NewReader([]byte(b.String()))
 }
 
+type errorAfterReader struct {
+	payload []byte
+	err     error
+	done    bool
+}
+
+func (r *errorAfterReader) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, r.err
+	}
+	r.done = true
+	return copy(p, r.payload), nil
+}
+
+type blockingAfterPayloadReader struct {
+	payload []byte
+	done    bool
+}
+
+func (r *blockingAfterPayloadReader) Read(p []byte) (int, error) {
+	if !r.done {
+		r.done = true
+		return copy(p, r.payload), nil
+	}
+	select {}
+}
+
+type chunkTimeoutAfterPayloadReader struct {
+	payload []byte
+	done    bool
+}
+
+func (r *chunkTimeoutAfterPayloadReader) Read(p []byte) (int, error) {
+	if !r.done {
+		r.done = true
+		return copy(p, r.payload), nil
+	}
+	return 0, &ChunkTimeoutError{d: TerminalDrainChunkTimeout}
+}
+
 func TestParseResponsesSSEEmitsProgressDeltas(t *testing.T) {
 	stream := buildSSEStream([]string{
 		`{"type":"response.completed","response":{"id":"resp-test","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`,
@@ -712,7 +752,7 @@ func TestParseResponsesSSE_MidLineTimeoutReturnsTruncatedEvent(t *testing.T) {
 	}
 }
 
-func TestParseResponsesSSE_EarlyCloseBeforeCompletedReturnsError(t *testing.T) {
+func TestParseResponsesSSE_EarlyCloseAfterTextDeltaReturnsInterruptedPartialResponse(t *testing.T) {
 	raw := strings.Join([]string{
 		"event: response.output_item.added",
 		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","status":"in_progress"}}`,
@@ -720,9 +760,295 @@ func TestParseResponsesSSE_EarlyCloseBeforeCompletedReturnsError(t *testing.T) {
 		"event: response.output_text.delta",
 		`data: {"type":"response.output_text.delta","content_index":0,"delta":"partial","item_id":"msg_1","logprobs":[],"output_index":0}`,
 		"",
+		"",
+	}, "\n")
+
+	resp, err := parseResponsesSSE(bytes.NewReader([]byte(raw)), nil, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if resp.Content != "partial" || resp.StopReason != "interrupted" || resp.Usage != nil {
+		t.Fatalf("partial response = content %q stop %q usage %#v, want partial/interrupted/nil usage", resp.Content, resp.StopReason, resp.Usage)
+	}
+}
+
+func TestParseResponsesSSE_EarlyCloseAfterTextDoneReturnsCompletedPartialResponse(t *testing.T) {
+	raw := strings.Join([]string{
+		"event: response.output_item.added",
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","status":"in_progress"}}`,
+		"",
+		"event: response.output_text.delta",
+		`data: {"type":"response.output_text.delta","content_index":0,"delta":"complete","item_id":"msg_1","logprobs":[],"output_index":0}`,
+		"",
+		"event: response.output_item.done",
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_1","status":"completed"}}`,
+		"",
+	}, "\n")
+
+	resp, err := parseResponsesSSE(bytes.NewReader([]byte(raw)), nil, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if resp.Content != "complete" || resp.StopReason != "stop" || resp.Usage != nil {
+		t.Fatalf("partial response = content %q stop %q usage %#v, want complete/stop/nil usage", resp.Content, resp.StopReason, resp.Usage)
+	}
+}
+
+func TestParseResponsesSSE_ReadErrorAfterTextDeltaReturnsError(t *testing.T) {
+	raw := strings.Join([]string{
+		"event: response.output_item.added",
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","status":"in_progress"}}`,
+		"",
+		"event: response.output_text.delta",
+		`data: {"type":"response.output_text.delta","content_index":0,"delta":"partial","item_id":"msg_1","logprobs":[],"output_index":0}`,
+		"",
+		"",
+	}, "\n")
+	reader := &errorAfterReader{payload: []byte(raw), err: errors.New("network reset")}
+
+	_, err := parseResponsesSSE(reader, nil, nil)
+	if err == nil {
+		t.Fatal("parseResponsesSSE err = nil, want read error")
+	}
+	if !strings.Contains(err.Error(), "reading SSE stream") || !strings.Contains(err.Error(), "network reset") {
+		t.Fatalf("parseResponsesSSE err = %v, want network reset read error", err)
+	}
+}
+
+func TestParseResponsesSSE_ReadErrorAfterTextDoneReturnsCompletedPartialResponse(t *testing.T) {
+	raw := strings.Join([]string{
+		"event: response.output_item.added",
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","status":"in_progress"}}`,
+		"",
+		"event: response.output_text.delta",
+		`data: {"type":"response.output_text.delta","content_index":0,"delta":"complete","item_id":"msg_1","logprobs":[],"output_index":0}`,
+		"",
+		"event: response.output_item.done",
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_1","status":"completed"}}`,
+		"",
+		"",
+	}, "\n")
+	reader := &errorAfterReader{payload: []byte(raw), err: errors.New("network reset")}
+
+	resp, err := parseResponsesSSE(reader, nil, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if resp.Content != "complete" || resp.StopReason != "stop" || resp.Usage != nil {
+		t.Fatalf("partial response = content %q stop %q usage %#v, want complete/stop/nil usage", resp.Content, resp.StopReason, resp.Usage)
+	}
+}
+
+func TestParseResponsesSSE_EarlyCloseBeforeCompletedWithNoOutputReturnsError(t *testing.T) {
+	raw := strings.Join([]string{
+		"event: response.created",
+		`data: {"type":"response.created","response":{"status":"in_progress"}}`,
+		"",
 	}, "\n")
 
 	_, err := parseResponsesSSE(bytes.NewReader([]byte(raw)), nil, nil)
+	if err == nil {
+		t.Fatal("parseResponsesSSE err = nil, want incomplete stream error")
+	}
+	if !strings.Contains(err.Error(), "stream closed before response.completed") {
+		t.Fatalf("parseResponsesSSE err = %v, want stream closed before response.completed", err)
+	}
+}
+
+func TestParseResponsesSSE_EarlyCloseAfterToolDoneReturnsRecoveredToolCall(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"shell"}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\"echo recovered\"}"}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"shell","status":"completed"}}`,
+	})
+
+	resp, err := parseResponsesSSE(stream, nil, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if resp.StopReason != "tool_calls" {
+		t.Fatalf("StopReason = %q, want tool_calls", resp.StopReason)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("got %d tool calls, want 1", len(resp.ToolCalls))
+	}
+	var args map[string]any
+	if err := json.Unmarshal(resp.ToolCalls[0].Args, &args); err != nil {
+		t.Fatalf("tool args invalid: %v", err)
+	}
+	if args["command"] != "echo recovered" {
+		t.Fatalf("args[command] = %v, want echo recovered", args["command"])
+	}
+	if resp.Usage != nil {
+		t.Fatalf("Usage = %#v, want nil", resp.Usage)
+	}
+}
+
+func TestParseResponsesSSE_ChunkTimeoutAfterAllOutputItemsDoneReturnsRecoveredToolCalls(t *testing.T) {
+	raw := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"shell"}}`,
+		`data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\"echo one\"}"}`,
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"shell","status":"completed"}}`,
+		`data: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"item_2","call_id":"call_2","name":"grep"}}`,
+		`data: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"pattern\":\"TODO\",\"path\":\"internal\"}"}`,
+		`data: {"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"item_2","call_id":"call_2","name":"grep","status":"completed"}}`,
+	}, "\n\n") + "\n\n"
+	reader := &chunkTimeoutAfterPayloadReader{payload: []byte(raw)}
+
+	resp, err := parseResponsesSSE(reader, nil, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if resp.StopReason != "tool_calls" {
+		t.Fatalf("StopReason = %q, want tool_calls", resp.StopReason)
+	}
+	if len(resp.ToolCalls) != 2 {
+		t.Fatalf("got %d tool calls, want 2: %+v", len(resp.ToolCalls), resp.ToolCalls)
+	}
+	if resp.ToolCalls[0].Name != "shell" || resp.ToolCalls[1].Name != "grep" {
+		t.Fatalf("tool calls = %+v", resp.ToolCalls)
+	}
+	if resp.Usage != nil {
+		t.Fatalf("Usage = %#v, want nil when response.completed is missing", resp.Usage)
+	}
+}
+
+// TestParseResponsesSSE_ChunkTimeoutWithReasoningItemRecoversToolCalls guards a
+// regression where a reasoning output item left openOutputItems non-empty: the
+// done branch only marked function_call/message items done, so the reasoning
+// entry from output_item.added persisted, outputItemsComplete() stayed false,
+// and partial recovery after a truncated response.completed discarded the
+// already-complete tool call. gpt-5 reasoning models always emit such an item,
+// so this is the real-world shape of the 60s "truncated response.completed"
+// stalls. It must recover the tool call rather than failing.
+func TestParseResponsesSSE_ChunkTimeoutWithReasoningItemRecoversToolCalls(t *testing.T) {
+	raw := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1"}}`,
+		`data: {"type":"response.reasoning_summary_text.delta","delta":"thinking"}`,
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1"}}`,
+		`data: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"shell"}}`,
+		`data: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"command\":\"echo recovered\"}"}`,
+		`data: {"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"shell","status":"completed"}}`,
+	}, "\n\n") + "\n\n"
+	reader := &chunkTimeoutAfterPayloadReader{payload: []byte(raw)}
+
+	resp, err := parseResponsesSSE(reader, nil, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if resp.StopReason != "tool_calls" {
+		t.Fatalf("StopReason = %q, want tool_calls", resp.StopReason)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("got %d tool calls, want 1: %+v", len(resp.ToolCalls), resp.ToolCalls)
+	}
+	if resp.ToolCalls[0].Name != "shell" {
+		t.Fatalf("tool call = %+v, want shell", resp.ToolCalls[0])
+	}
+	var args map[string]any
+	if err := json.Unmarshal(resp.ToolCalls[0].Args, &args); err != nil {
+		t.Fatalf("tool args invalid: %v", err)
+	}
+	if args["command"] != "echo recovered" {
+		t.Fatalf("args[command] = %v, want echo recovered", args["command"])
+	}
+}
+
+// recordingPhaser records the timeout transitions a parser requests so tests
+// can assert the terminal drain was armed.
+type recordingPhaser struct {
+	lastChunk time.Duration
+	lastDrain time.Duration
+	drainSet  bool
+}
+
+func (p *recordingPhaser) SetChunkTimeout(d time.Duration) { p.lastChunk = d }
+func (p *recordingPhaser) SetTerminalDrainTimeout(d time.Duration) {
+	p.lastDrain = d
+	p.drainSet = true
+}
+
+// TestResponsesOutputItemDone_ReasoningArmsTerminalDrain verifies that once all
+// output items (reasoning + the final tool call) are done, the parser shortens
+// the per-chunk timeout to the terminal drain budget instead of waiting a full
+// DefaultChunkTimeout for the trailing response.completed. The reasoning item
+// must not keep the drain from arming.
+func TestResponsesOutputItemDone_ReasoningArmsTerminalDrain(t *testing.T) {
+	phaser := &recordingPhaser{}
+	state := responsesEventState{
+		resp:           &message.Response{},
+		content:        &strings.Builder{},
+		toolCalls:      make(map[int]*responsesToolAccumulator),
+		finalizedCalls: make(map[string]bool),
+		truncated:      new(bool),
+		outputItems:    &[]responsesInputItem{},
+		partial:        &responsesPartialCompletionState{openOutputItems: make(map[int]struct{})},
+		phaser:         phaser,
+	}
+	flush := func() {}
+
+	events := []struct{ eventType, data string }{
+		{"response.output_item.added", `{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1"}}`},
+		{"response.output_item.done", `{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1"}}`},
+		{"response.output_item.added", `{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"shell"}}`},
+		{"response.function_call_arguments.delta", `{"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"command\":\"echo hi\"}"}`},
+		{"response.output_item.done", `{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"shell","status":"completed"}}`},
+	}
+	for _, ev := range events {
+		if _, _, _, err := processResponsesEventPayload(state, ev.eventType, []byte(ev.data), flush); err != nil {
+			t.Fatalf("processResponsesEventPayload(%s): %v", ev.eventType, err)
+		}
+	}
+
+	if !phaser.drainSet {
+		t.Fatal("terminal drain timeout was never armed; reasoning item likely left openOutputItems non-empty")
+	}
+	if phaser.lastDrain != TerminalDrainChunkTimeout {
+		t.Fatalf("drain timeout = %v, want %v", phaser.lastDrain, TerminalDrainChunkTimeout)
+	}
+}
+
+func TestParseResponsesSSE_ChunkTimeoutBeforeOutputItemDoneStillFails(t *testing.T) {
+	raw := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"shell"}}`,
+		`data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\"echo unsafe\"}"}`,
+	}, "\n\n") + "\n\n"
+	reader := &chunkTimeoutAfterPayloadReader{payload: []byte(raw)}
+
+	_, err := parseResponsesSSE(reader, nil, nil)
+	if err == nil {
+		t.Fatal("parseResponsesSSE err = nil, want timeout/incomplete error")
+	}
+	if !strings.Contains(err.Error(), "reading SSE stream") {
+		t.Fatalf("parseResponsesSSE err = %v, want reading SSE stream error", err)
+	}
+}
+
+func TestParseResponsesSSE_ChunkTimeoutAfterTextOnlyDoneStillFails(t *testing.T) {
+	raw := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","status":"in_progress"}}`,
+		`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"I will run checks next."}`,
+		`data: {"type":"response.output_text.done","output_index":0,"content_index":0,"text":"I will run checks next."}`,
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_1","status":"completed"}}`,
+	}, "\n\n") + "\n\n"
+	reader := &chunkTimeoutAfterPayloadReader{payload: []byte(raw)}
+
+	_, err := parseResponsesSSE(reader, nil, nil)
+	if err == nil {
+		t.Fatal("parseResponsesSSE err = nil, want timeout/incomplete error")
+	}
+	if !strings.Contains(err.Error(), "reading SSE stream") {
+		t.Fatalf("parseResponsesSSE err = %v, want reading SSE stream error", err)
+	}
+}
+
+func TestParseResponsesSSE_EarlyCloseBeforeToolDoneReturnsError(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"shell"}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\"echo unsafe\"}"}`,
+	})
+
+	_, err := parseResponsesSSE(stream, nil, nil)
 	if err == nil {
 		t.Fatal("parseResponsesSSE err = nil, want incomplete stream error")
 	}
@@ -948,6 +1274,52 @@ func TestParseResponsesSSE_ExtractsProviderResponseID(t *testing.T) {
 	}
 	if resp.ProviderResponseID != "resp-abc123" {
 		t.Errorf("ProviderResponseID = %q, want resp-abc123", resp.ProviderResponseID)
+	}
+}
+
+func TestParseResponsesSSE_ReturnsOnTerminalDataLineWithoutBlankDelimiter(t *testing.T) {
+	reader := &blockingAfterPayloadReader{payload: []byte(`data: {"type":"response.completed","response":{"id":"resp-no-blank","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}` + "\n")}
+	done := make(chan struct{})
+	var resp *message.Response
+	var err error
+	go func() {
+		resp, err = parseResponsesSSE(reader, nil, nil)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("parseResponsesSSE did not return after terminal response.completed data line")
+	}
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if resp == nil || resp.ProviderResponseID != "resp-no-blank" || resp.StopReason != "stop" {
+		t.Fatalf("response = %#v, want resp-no-blank stop", resp)
+	}
+}
+
+func TestParseResponsesSSE_ReturnsOnStandardTerminalEventWithoutBlankDelimiter(t *testing.T) {
+	reader := &blockingAfterPayloadReader{payload: []byte("event: response.completed\n" + `data: {"response":{"id":"resp-standard-no-blank","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}` + "\n")}
+	done := make(chan struct{})
+	var resp *message.Response
+	var err error
+	go func() {
+		resp, err = parseResponsesSSE(reader, nil, nil)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("parseResponsesSSE did not return after standard terminal response.completed data line")
+	}
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if resp == nil || resp.ProviderResponseID != "resp-standard-no-blank" || resp.StopReason != "stop" {
+		t.Fatalf("response = %#v, want resp-standard-no-blank stop", resp)
 	}
 }
 
