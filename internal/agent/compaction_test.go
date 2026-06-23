@@ -252,7 +252,7 @@ func TestPrepareMessagesForLLM_PrunesOldReadLikeOutput(t *testing.T) {
 	}
 }
 
-func TestPrepareMessagesForLLM_WrapUpGraceSkipsOneDestructiveReduction(t *testing.T) {
+func TestPrepareMessagesForLLM_WrapUpGracePrunesWhenSavingsAreWorthIt(t *testing.T) {
 	a := &MainAgent{parentCtx: context.Background(), projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		ReadLikeAgeTurns:     1,
 		ReadLikeOutputBytes:  1,
@@ -262,6 +262,7 @@ func TestPrepareMessagesForLLM_WrapUpGraceSkipsOneDestructiveReduction(t *testin
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
 		HighPressureUsage:    2,
+		MinIncrementalTokens: 64,
 	}}}}
 	a.newTurn()
 	a.providerModelRef = "test/model"
@@ -276,17 +277,56 @@ func TestPrepareMessagesForLLM_WrapUpGraceSkipsOneDestructiveReduction(t *testin
 
 	a.beginContextReductionWrapUpGrace()
 	prepared := a.prepareMessagesForLLM(msgs)
-	if prepared[2].Content != msgs[2].Content {
-		t.Fatalf("wrap-up grace should preserve read output for one request, got %q", prepared[2].Content)
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated for this request") {
+		t.Fatalf("wrap-up grace should still prune worthwhile savings, got %q", prepared[2].Content)
 	}
 	stats := a.GetContextReductionStats()
-	if !stats.Protected || stats.ProtectReason != contextProtectReasonWrapUpGrace {
-		t.Fatalf("stats protected/reason = %v/%q, want wrap-up grace", stats.Protected, stats.ProtectReason)
+	if stats.Protected || stats.Messages == 0 || stats.TokensSaved < 64 {
+		t.Fatalf("stats = %+v, want unprotected worthwhile reduction", stats)
 	}
 
 	prepared = a.prepareMessagesForLLM(msgs)
 	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated for this request") {
-		t.Fatalf("wrap-up grace should be consumed after one request, got %q", prepared[2].Content)
+		t.Fatalf("wrap-up grace should have been consumed after one request, got %q", prepared[2].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_WrapUpGraceSkipsLowValueReduction(t *testing.T) {
+	a := &MainAgent{parentCtx: context.Background(), projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ReadLikeAgeTurns:     1,
+		ReadLikeOutputBytes:  1,
+		StaleAgeTurns:        99,
+		StaleOutputBytes:     1,
+		MinToolResultsPrune:  1,
+		ShellSuccessAgeTurns: 99,
+		ShellSuccessBytes:    1,
+		HighPressureUsage:    2,
+		MinIncrementalTokens: 4096,
+	}}}}
+	a.newTurn()
+	a.providerModelRef = "test/model"
+	a.lastLLMRequestModelRef = "test/model"
+	a.llmModelRunLength = 1
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("small read output ", 20)},
+		{Role: "user", Content: "u2"},
+	}
+
+	a.beginContextReductionWrapUpGrace()
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content != msgs[2].Content {
+		t.Fatalf("wrap-up grace should preserve low-value reduction, got %q", prepared[2].Content)
+	}
+	stats := a.GetContextReductionStats()
+	if !stats.Protected || stats.ProtectReason != contextProtectReasonWrapUpGrace || stats.ReusedStable {
+		t.Fatalf("stats = %+v, want protected low-value no-op", stats)
+	}
+
+	prepared = a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated for this request") {
+		t.Fatalf("wrap-up grace should be consumed after one low-value skip, got %q", prepared[2].Content)
 	}
 }
 
@@ -807,14 +847,12 @@ func TestActivateLoadedSessionRefreshesVisibleContextReductionStats(t *testing.T
 	}
 }
 
-func TestPrepareMessagesForLLM_ProtectsWarmPromptCacheSurface(t *testing.T) {
+func TestPrepareMessagesForLLM_DoesNotProtectWarmPromptCacheSurfaceOnSameModelRun(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		ShellSuccessAgeTurns: 1,
 		ShellSuccessBytes:    10,
-		CacheAwareMinUsage:   0.75,
-		WarmupMessageLimit:   32,
 	}}}
 	a.providerModelRef = "test/model"
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
@@ -837,12 +875,12 @@ func TestPrepareMessagesForLLM_ProtectsWarmPromptCacheSurface(t *testing.T) {
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if prepared[2].Content != largeOutput {
-		t.Fatalf("expected warm low-usage prompt surface to remain intact, got %q", prepared[2].Content)
+	if prepared[2].Content == largeOutput {
+		t.Fatal("same-model prompt cache warmup should not protect an otherwise reducible tool output")
 	}
 	stats := a.GetContextReductionStats()
-	if !stats.Protected || stats.Messages != 0 || stats.Bytes != 0 || stats.TokensBefore != stats.TokensAfter {
-		t.Fatalf("context reduction stats = %+v, want protected no-op stats", stats)
+	if stats.Protected || stats.Messages == 0 || stats.Bytes == 0 || stats.TokensBefore <= stats.TokensAfter {
+		t.Fatalf("context reduction stats = %+v, want unprotected reduction", stats)
 	}
 	if stats.ModelRunLength != 3 {
 		t.Fatalf("model run length = %d, want 3", stats.ModelRunLength)
@@ -855,8 +893,6 @@ func TestPrepareMessagesForLLM_DoesNotProtectWarmPromptCacheSurfaceBeforeThirdSa
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		ShellSuccessAgeTurns: 1,
 		ShellSuccessBytes:    10,
-		CacheAwareMinUsage:   0.75,
-		WarmupMessageLimit:   32,
 	}}}
 	a.providerModelRef = "test/model"
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
@@ -896,8 +932,6 @@ func TestPrepareMessagesForLLM_DoesNotProtectWarmPromptCacheSurfaceAfterModelSwi
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		ShellSuccessAgeTurns: 1,
 		ShellSuccessBytes:    10,
-		CacheAwareMinUsage:   0.75,
-		WarmupMessageLimit:   32,
 	}}}
 	a.providerModelRef = "test/model-b"
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
@@ -1050,8 +1084,6 @@ func TestCallLLMLogsPreparedReductionStatsWhenFocusedSubAgentExists(t *testing.T
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		ShellSuccessAgeTurns: 1,
 		ShellSuccessBytes:    10,
-		CacheAwareMinUsage:   0.75,
-		WarmupMessageLimit:   1,
 	}}}
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
 		Type: config.ProviderTypeMessages,

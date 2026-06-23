@@ -32,15 +32,10 @@ type ContextReductionStats struct {
 }
 
 const (
-	// Cache protection starts on the projected third same-model request: the
-	// first two successful requests give provider prompt caches time to be
-	// written and become reliably hittable.
-	contextReductionCacheProtectMinModelRunLength = 3
-	contextReductionWrapUpGraceRequests           = 1
+	contextReductionWrapUpGraceRequests = 1
 
-	contextProtectReasonNone           = ""
-	contextProtectReasonWarmupLowUsage = "warmup_low_usage"
-	contextProtectReasonWrapUpGrace    = "wrap_up_grace"
+	contextProtectReasonNone        = ""
+	contextProtectReasonWrapUpGrace = "wrap_up_grace"
 
 	contextReuseReasonNone                = ""
 	contextReuseReasonBelowIncrementalMin = "below_incremental_min"
@@ -67,8 +62,6 @@ type contextReductionPolicy struct {
 	StaleOutputBytes        int
 	WrapUpGraceRequests     int
 	MinToolResultsPrune     int
-	CacheAwareMinUsage      float64
-	WarmupMessageLimit      int
 	MinIncrementalTokens    int
 	HighPressureUsage       float64
 	ForcePruneUsage         float64
@@ -87,8 +80,6 @@ func defaultContextReductionPolicy() contextReductionPolicy {
 		StaleOutputBytes:        compactStaleOutputBytes,
 		WrapUpGraceRequests:     contextReductionWrapUpGraceRequests,
 		MinToolResultsPrune:     compactMinToolResultsPrune,
-		CacheAwareMinUsage:      0.75,
-		WarmupMessageLimit:      32,
 		MinIncrementalTokens:    4096,
 		HighPressureUsage:       0.80,
 		ForcePruneUsage:         0.90,
@@ -143,12 +134,6 @@ func (p *contextReductionPolicy) applyConfig(cfg config.ContextReductionConfig) 
 	if cfg.MinToolResultsPrune > 0 {
 		p.MinToolResultsPrune = cfg.MinToolResultsPrune
 	}
-	if cfg.CacheAwareMinUsage > 0 {
-		p.CacheAwareMinUsage = cfg.CacheAwareMinUsage
-	}
-	if cfg.WarmupMessageLimit > 0 {
-		p.WarmupMessageLimit = cfg.WarmupMessageLimit
-	}
 	if cfg.MinIncrementalTokens > 0 {
 		p.MinIncrementalTokens = cfg.MinIncrementalTokens
 	}
@@ -158,30 +143,6 @@ func (p *contextReductionPolicy) applyConfig(cfg config.ContextReductionConfig) 
 	if cfg.ForcePruneUsage > 0 {
 		p.ForcePruneUsage = cfg.ForcePruneUsage
 	}
-}
-
-func (p contextReductionPolicy) protectCachedContextReason(messageCount, estimatedTokens, inputBudget int) string {
-	if inputBudget <= 0 || p.CacheAwareMinUsage <= 0 || p.WarmupMessageLimit <= 0 {
-		return contextProtectReasonNone
-	}
-	if messageCount > p.WarmupMessageLimit {
-		return contextProtectReasonNone
-	}
-	if float64(estimatedTokens)/float64(inputBudget) < p.CacheAwareMinUsage {
-		return contextProtectReasonWarmupLowUsage
-	}
-	return contextProtectReasonNone
-}
-
-func (p contextReductionPolicy) shouldProtectCachedContextForModelRun(messageCount, estimatedTokens, inputBudget, modelRunLength int) (bool, string) {
-	reason := p.protectCachedContextReason(messageCount, estimatedTokens, inputBudget)
-	if reason == contextProtectReasonNone {
-		return false, reason
-	}
-	if modelRunLength < contextReductionCacheProtectMinModelRunLength {
-		return false, reason
-	}
-	return true, reason
 }
 
 func (p contextReductionPolicy) contextUsage(estimatedTokens, inputBudget int) float64 {

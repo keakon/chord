@@ -63,8 +63,8 @@
 - 权限确认的规则建议现在会为复合 Shell 命令列出命中的 ask 规则，规则选择器也会预先勾选每一条命中的 ask 规则，让一次批准即可保存所有阻塞规则。
 - `question` 现在容忍用单个问题对象代替文档中要求的 `questions` 数组，与 `grep`、`glob` 的标量转单元素列表容错保持一致。
 - 请求级上下文剪裁现在会保护近期高风险工具输出，例如 diff、失败断言、stack trace、权限/安全错误，避免它们仅因很长的单轮工具链推进了 effective age 就被剪裁。默认 `context.reduction.read_like_age_turns` 也基于近期会话统计从 1 上调到 2，让刚读取的文件上下文以较低的观测 token 成本多保留一个 effective turn。
-- 上下文剪裁现在会等到同一模型连续第 3 次请求时才保护 prompt cache surface；切换模型会重置这个连续计数，因此新模型的前两次请求在压力下仍可剪裁已缓存上下文。
-- 当所有 TODO 完成后，上下文剪裁现在会给下一次 main-model 请求一个单请求收尾宽限窗口，避免最终回复前临时剪裁打破已有 prompt cache；模型切换或高压上下文会跳过该宽限。可通过 `context.reduction.wrap_up_grace_requests` 配置。
+- 上下文剪裁现在不会再把未剪裁的 prompt-cache surface 当作保护路径复用：每次 main-model 请求前仍会执行正常的请求级剪裁，低压力下的稳定前缀复用也只会复用已经产生剪裁收益的前缀。
+- 当所有 TODO 完成后，上下文剪裁现在会给下一次 main-model 请求一个单请求收尾宽限窗口。默认 `context.reduction.wrap_up_grace_requests: 1` 只在同一模型仍然活跃、没有排队的用户输入、上下文未处于高压、且新估算收益低于 `min_incremental_saved_tokens` 时避免低价值的最终 prompt surface 抖动；如果已有已剪裁前缀，收尾请求会复用该已剪裁前缀，而不是恢复原始工具输出。
 - 上下文剪裁现在默认只保留更短的成功 shell 输出片段，减少上下文压力下保留的低信号终端输出。
 - Codex OAuth 运行时状态现在用用户在工作区内的组合键（`account_user_id`）识别账号，不再只按 account/workspace ID 区分，避免多个用户共享同一工作区时 quota/status 更新互相覆盖。只含 refresh 的凭据在首次成功刷新后会从临时 `refresh_sha256:<digest>` state key 迁移；OAuth access token 现在需要能解析出 account 与 user/account-user claim。
 - Codex OAuth 运行时状态现在改用 `auth.state.json`，不再使用已发布版本中的 `auth.state.yaml`；已有运行时缓存可由 warm-up/轮询重新生成，但 YAML 文件中的 quota/reset/账号状态缓存不会自动迁移。

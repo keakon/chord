@@ -71,13 +71,18 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	copy(prepared, messages)
 	policy := a.contextReductionPolicy()
 	inputBudget := 0
+	wrapUpGraceActive := false
+	wrapUpGraceLowPressure := false
+	var modelSnapshot llmModelContinuitySnapshot
 	if a != nil {
 		inputBudget = a.contextReductionInputBudget()
 		estimatedTokens := ctxmgr.EstimateMessagesTokens(prepared)
-		modelSnapshot := a.llmModelContinuitySnapshot()
+		modelSnapshot = a.llmModelContinuitySnapshot()
 		usage := policy.contextUsage(estimatedTokens, inputBudget)
-		if modelSnapshot.ProjectedModelRunLength > 1 && !a.hasQueuedUserInputForRecovery() && (policy.HighPressureUsage <= 0 || usage < policy.HighPressureUsage) && a.consumeContextReductionWrapUpGrace(a.currentTurnID()) {
-			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && len(previous.Messages) > 0 && len(prepared) >= len(previous.Messages) {
+		wrapUpGraceLowPressure = policy.HighPressureUsage <= 0 || usage < policy.HighPressureUsage
+		if modelSnapshot.ProjectedModelRunLength > 1 && !a.hasQueuedUserInputForRecovery() && wrapUpGraceLowPressure && a.consumeContextReductionWrapUpGrace(a.currentTurnID()) {
+			wrapUpGraceActive = true
+			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && hasReductionSavings(previous.Stats) && len(previous.Messages) > 0 && len(prepared) >= len(previous.Messages) {
 				reused, compatible := reuseStableReductionPrefix(previous, prepared, prepared)
 				if compatible {
 					stats := highLevelContextReductionStats(prepared, reused)
@@ -96,27 +101,6 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					return reused
 				}
 			}
-			stats := ContextReductionStats{TokensBefore: estimatedTokens, TokensAfter: estimatedTokens, Protected: true}
-			stats.ProtectReason = contextProtectReasonWrapUpGrace
-			stats.fillModelContinuity(modelSnapshot)
-			a.setCurrentRequestSurface(&stats, prepared)
-			a.setContextReductionStats(stats)
-			if rememberPrepared {
-				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, prepared)
-			}
-			return prepared
-		}
-		protect, protectReason := policy.shouldProtectCachedContextForModelRun(len(prepared), estimatedTokens, inputBudget, modelSnapshot.ProjectedModelRunLength)
-		if protect {
-			stats := ContextReductionStats{TokensBefore: estimatedTokens, TokensAfter: estimatedTokens, Protected: true}
-			stats.ProtectReason = protectReason
-			stats.fillModelContinuity(modelSnapshot)
-			a.setCurrentRequestSurface(&stats, prepared)
-			a.setContextReductionStats(stats)
-			if rememberPrepared {
-				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, prepared)
-			}
-			return prepared
 		}
 	}
 	if a != nil {
@@ -205,6 +189,17 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		a.setCurrentRequestSurface(&stats, prepared)
 		if stats.TokensSaved == 0 && stats.TokensBefore > stats.TokensAfter {
 			stats.TokensSaved = stats.TokensBefore - stats.TokensAfter
+		}
+		if wrapUpGraceActive && wrapUpGraceLowPressure && stats.TokensSaved < policy.MinIncrementalTokens {
+			preserved := ContextReductionStats{TokensBefore: stats.TokensBefore, TokensAfter: stats.TokensBefore, Protected: true}
+			preserved.ProtectReason = contextProtectReasonWrapUpGrace
+			preserved.fillModelContinuity(modelSnapshot)
+			a.setCurrentRequestSurface(&preserved, messages)
+			a.setContextReductionStats(preserved)
+			if rememberPrepared {
+				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, messages)
+			}
+			return messages
 		}
 		if rememberPrepared {
 			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok {
@@ -585,6 +580,9 @@ func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []mess
 	if !ok || len(previous.Messages) == 0 || len(messages) < len(previous.Messages) {
 		return nil, ContextReductionStats{}, false
 	}
+	if !hasReductionSavings(previous.Stats) {
+		return nil, ContextReductionStats{}, false
+	}
 	currentTokens := ctxmgr.EstimateMessagesTokens(messages)
 	usage := policy.contextUsage(currentTokens, inputBudget)
 	if policy.ForcePruneUsage > 0 && usage >= policy.ForcePruneUsage {
@@ -610,6 +608,10 @@ func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []mess
 	stats.ReuseReason = contextReuseReasonBelowIncrementalMin
 	stats.SavedDelta = tailTokens
 	return reused, stats, true
+}
+
+func hasReductionSavings(stats ContextReductionStats) bool {
+	return stats.TokensSaved > 0 || stats.Bytes > 0 || stats.Messages > 0
 }
 
 func highLevelContextReductionStats(original, reduced []message.Message) ContextReductionStats {

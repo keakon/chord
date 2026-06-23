@@ -742,8 +742,6 @@ type ContextReductionConfig struct {
 	StaleOutputBytes        int     `json:"stale_output_bytes,omitempty" yaml:"stale_output_bytes,omitempty"`
 	WrapUpGraceRequests     int     `json:"wrap_up_grace_requests,omitempty" yaml:"wrap_up_grace_requests,omitempty"`
 	MinToolResultsPrune     int     `json:"min_tool_results_prune,omitempty" yaml:"min_tool_results_prune,omitempty"`
-	CacheAwareMinUsage      float64 `json:"cache_aware_min_usage,omitempty" yaml:"cache_aware_min_usage,omitempty"`
-	WarmupMessageLimit      int     `json:"warmup_message_limit,omitempty" yaml:"warmup_message_limit,omitempty"`
 	MinIncrementalTokens    int     `json:"min_incremental_saved_tokens,omitempty" yaml:"min_incremental_saved_tokens,omitempty"`
 	HighPressureUsage       float64 `json:"high_pressure_usage,omitempty" yaml:"high_pressure_usage,omitempty"`
 	ForcePruneUsage         float64 `json:"force_prune_usage,omitempty" yaml:"force_prune_usage,omitempty"`
@@ -775,8 +773,6 @@ func DefaultConfig() *Config {
 				StaleOutputBytes:        1500,
 				WrapUpGraceRequests:     1,
 				MinToolResultsPrune:     8,
-				CacheAwareMinUsage:      0.75,
-				WarmupMessageLimit:      32,
 				MinIncrementalTokens:    4096,
 				HighPressureUsage:       0.80,
 				ForcePruneUsage:         0.90,

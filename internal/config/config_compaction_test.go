@@ -32,8 +32,6 @@ func TestDefaultConfigContextReductionThresholds(t *testing.T) {
 		StaleOutputBytes:        1500,
 		WrapUpGraceRequests:     1,
 		MinToolResultsPrune:     8,
-		CacheAwareMinUsage:      0.75,
-		WarmupMessageLimit:      32,
 		MinIncrementalTokens:    4096,
 		HighPressureUsage:       0.80,
 		ForcePruneUsage:         0.90,

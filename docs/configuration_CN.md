@@ -991,8 +991,6 @@ context:
     stale_output_bytes: 1500
     wrap_up_grace_requests: 1
     min_tool_results_prune: 8
-    cache_aware_min_usage: 0.75
-    warmup_message_limit: 32
     min_incremental_saved_tokens: 4096
     high_pressure_usage: 0.80
     force_prune_usage: 0.90
@@ -1002,9 +1000,9 @@ context:
 
 这些参数的默认策略：
 
-- 短会话且上下文压力低时不急着剪裁：当消息数不超过 `warmup_message_limit`，且估算输入低于可用输入预算 `cache_aware_min_usage` 时，保护 prompt cache 热身和近期证据。
-- 当 `todo_write` 把所有 TODO 标为 completed/cancelled 后，Chord 会把下一次 main-model 请求视为收尾请求。默认 `wrap_up_grace_requests: 1` 会在同模型且非高压上下文时跳过破坏性的新增剪裁，避免最终回复前临时打破已有 prompt cache。用户新提问、模型切换或上下文高压力会恢复正常剪裁。
-- 较老消息冻结复用：同一 turn 内形成稳定剪裁 surface 后，低压力下只估算新增尾部；如果新增尾部低于 `min_incremental_saved_tokens`，复用上一次已剪裁前缀，只追加当前尾部消息，避免每轮重新扫描历史并减少 prompt surface 抖动。
+- Chord 会在每次 main-model 请求前执行轻量请求级剪裁；普通 prompt-cache 热身不会保护本来可剪裁的工具输出。
+- 当 `todo_write` 把所有 TODO 标为 completed/cancelled 后，Chord 会把下一次 main-model 请求视为收尾请求。默认 `wrap_up_grace_requests: 1` 只会在同模型、没有排队用户输入、上下文非高压、且重新估算的节省低于 `min_incremental_saved_tokens` 时，避免低收益的最终 prompt surface 抖动。如果已有稳定的已剪裁前缀，收尾请求会复用该已剪裁前缀，而不是把旧工具输出恢复成原文。用户新提问、模型切换、上下文高压力或可观节省会恢复正常剪裁。
+- 较老消息冻结复用：同一 turn 内形成稳定的**已剪裁** surface 后，低压力下只估算新增尾部；如果新增尾部低于 `min_incremental_saved_tokens`，复用上一次已剪裁前缀，只追加当前尾部消息，避免每轮重新扫描历史并减少 prompt surface 抖动。未剪裁前缀不会被用来绕过剪裁。
 - 高压力立即剪裁：估算输入达到 `high_pressure_usage` 后不再套用小增量 hysteresis；达到 `force_prune_usage` 后优先控制上下文体积。
 - 近期高风险工具输出会优先按真实 user-turn age 保护，再进入普通 age/bytes 剪裁。默认 `high_risk_protect_age_turns: 4` 会把 diff/patch、失败日志、stack trace、权限/安全输出和当前工作集关键证据完整保留约 4 个用户轮次。这是主要的成本/正确性权衡旋钮：调低能让更早轮次的高风险输出提前进入保守摘要，而当前用户轮刚产生、模型正要继续使用的高风险输出始终完整保留。
 - 成功 shell 输出在变旧且超过 `shell_success_bytes` 后按低风险噪音处理；失败、stack trace、diff 和 warning 密集的构建日志不会走这个成功输出省略路径，而是由高风险保护或结构化日志摘要处理。

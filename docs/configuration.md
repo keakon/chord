@@ -1108,8 +1108,6 @@ context:
     stale_output_bytes: 1500
     wrap_up_grace_requests: 1
     min_tool_results_prune: 8
-    cache_aware_min_usage: 0.75
-    warmup_message_limit: 32
     min_incremental_saved_tokens: 4096
     high_pressure_usage: 0.80
     force_prune_usage: 0.90
@@ -1120,9 +1118,9 @@ Unset or non-positive threshold fields use these defaults. Project-level
 
 Default behavior:
 
-- Short, low-pressure conversations are not pruned eagerly: when message count is at or below `warmup_message_limit` and estimated input is below `cache_aware_min_usage` of the usable input budget, Chord protects prompt-cache warmup and recent evidence.
-- When `todo_write` marks every TODO as completed or cancelled, Chord treats the next main-model request as a wrap-up request. The default `wrap_up_grace_requests: 1` skips destructive new reduction for that one request when the same model is still active and the context is not under high pressure, avoiding a last-minute prompt-cache break before the final answer. New user input, model changes, or high-pressure context sizing resume normal reduction.
-- Older messages freeze after a stable reduction surface forms: under low pressure, Chord estimates only the new tail. If that tail is below `min_incremental_saved_tokens`, it reuses the previously reduced prefix and appends the current tail, avoiding repeated historical scans and prompt-surface churn.
+- Chord runs lightweight request-level reduction before each main-model request; normal prompt-cache warmup does not protect otherwise reducible tool output.
+- When `todo_write` marks every TODO as completed or cancelled, Chord treats the next main-model request as a wrap-up request. The default `wrap_up_grace_requests: 1` avoids low-value last-minute prompt-surface churn only when the same model is still active, no user input is queued, the context is not under high pressure, and the newly estimated savings are below `min_incremental_saved_tokens`. If a previous reduced prefix exists, wrap-up reuses that reduced prefix instead of restoring old raw tool output. New user input, model changes, high-pressure context sizing, or worthwhile savings resume normal reduction.
+- Older messages freeze after a stable **reduced** surface forms: under low pressure, Chord estimates only the new tail. If that tail is below `min_incremental_saved_tokens`, it reuses the previously reduced prefix and appends the current tail, avoiding repeated historical scans and prompt-surface churn. Unreduced prefixes are not reused to bypass reduction.
 - High pressure prunes immediately: `high_pressure_usage` disables small-increment hysteresis, and `force_prune_usage` prioritizes keeping the context size under control.
 - Recent high-risk tool outputs are protected by real user-turn age before normal age/byte pruning. The default `high_risk_protect_age_turns: 4` preserves diff/patches, failures, stack traces, permission/security output, and other active evidence for about four user turns. This is the main cost/correctness trade-off knob: lowering it saves tokens by allowing older high-risk evidence to summarize earlier, while current-turn high-risk output always remains intact.
 - Successful shell output is treated as low risk once it is old enough and larger than `shell_success_bytes`. Failures, stack traces, diffs, and warning-heavy build logs are routed through high-risk or structured-log handling instead of this success-output omission path.
