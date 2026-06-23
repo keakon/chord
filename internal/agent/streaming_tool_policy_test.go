@@ -98,7 +98,6 @@ func TestSpeculativeExecutionPolicyRejectsHighRiskNonRollbackTools(t *testing.T)
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewShellTool("bash"))
 	registry.Register(tools.NewQuestionTool(nil))
-	registry.Register(tools.NewTodoWriteTool(nil))
 
 	cases := []struct {
 		name string
@@ -106,13 +105,24 @@ func TestSpeculativeExecutionPolicyRejectsHighRiskNonRollbackTools(t *testing.T)
 	}{
 		{tools.NameShell, `{"command":"go test ./..."}`},
 		{tools.NameQuestion, `{"questions":[{"header":"H","question":"Q?"}]}`},
-		{tools.NameTodoWrite, `{"todos":[]}`},
 	}
 	for _, tc := range cases {
 		decision := evaluateSpeculativeExecutionPolicyWithPrefix(registry, nil, tc.name, json.RawMessage(tc.args), nil)
 		if decision.Allowed {
 			t.Fatalf("%s allowed for speculative execution, want reject", tc.name)
 		}
+	}
+}
+
+func TestSpeculativeExecutionPolicyAllowsTodoWriteCommitOnPromote(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewTodoWriteTool(nil))
+	decision := evaluateSpeculativeExecutionPolicyWithPrefix(registry, nil, tools.NameTodoWrite, json.RawMessage(`{"todos":[{"id":"1","content":"Plan","status":"pending"}]}`), nil)
+	if !decision.Allowed {
+		t.Fatalf("TodoWrite rejected for speculative preview: %s", decision.Reason)
+	}
+	if decision.Reason != "commit_on_promote_internal_state" {
+		t.Fatalf("reason = %q, want commit_on_promote_internal_state", decision.Reason)
 	}
 }
 

@@ -426,7 +426,9 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 					payload.Audit = execResult.Audit
 				}
 				// Commit missing post-exec side effects for reused speculative results before persisting.
-				a.commitPromotedToolSideEffects(effective, payload)
+				if err := a.commitPromotedToolSideEffects(effective, payload); err != nil {
+					payload.Error = fmt.Errorf("commit promoted tool side effects: %w", err)
+				}
 				a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: payload})
 				continue
 			} else if drift {

@@ -112,7 +112,9 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				FileState:        payload.FileState.Clone(),
 				speculativeHooks: payload.speculativeHooks,
 			}
-			s.commitPromotedToolSideEffects(effective, tr)
+			if err := s.commitPromotedToolSideEffects(effective, tr); err != nil {
+				tr.Error = fmt.Errorf("commit promoted tool side effects: %w", err)
+			}
 			select {
 			case s.toolCh <- tr:
 			case <-s.parentCtx.Done():

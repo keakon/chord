@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -19,7 +20,7 @@ import (
 )
 
 type speculativeToolHooks struct {
-	commit       func()
+	commit       func() error
 	rollback     func() error
 	captureAfter func()
 	stale        bool
@@ -45,7 +46,7 @@ type speculativeFileMutation struct {
 	rolledBack bool
 }
 
-func prepareSpeculativeToolCall(tc message.ToolCall, track *filelock.FileTracker, agentID, projectRoot string) (*speculativeToolHooks, error) {
+func prepareSpeculativeToolCall(tc message.ToolCall, registry *tools.Registry, track *filelock.FileTracker, agentID, projectRoot string) (*speculativeToolHooks, error) {
 	switch strings.TrimSpace(tc.Name) {
 	case tools.NameWrite:
 		path, ok := singlePathToolPath(tc.Args)
@@ -77,6 +78,26 @@ func prepareSpeculativeToolCall(tc message.ToolCall, track *filelock.FileTracker
 			return nil, err
 		}
 		return mutation.hooks(), nil
+	case tools.NameTodoWrite:
+		if registry == nil {
+			return nil, fmt.Errorf("tool registry not available")
+		}
+		tool, ok := registry.Get(tools.NameTodoWrite)
+		if !ok {
+			return nil, fmt.Errorf("tool not found: %s", tools.NameTodoWrite)
+		}
+		todoTool, ok := tool.(*tools.TodoWriteTool)
+		if !ok {
+			return nil, fmt.Errorf("tool %q is not a TodoWriteTool", tools.NameTodoWrite)
+		}
+		if _, err := todoTool.ParseTodos(llm.UnwrapToolArgs(tc.Args)); err != nil {
+			return nil, err
+		}
+		commitArgs := append(json.RawMessage(nil), llm.UnwrapToolArgs(tc.Args)...)
+		return &speculativeToolHooks{commit: func() error {
+			_, err := todoTool.Execute(context.Background(), commitArgs)
+			return err
+		}}, nil
 	default:
 		return nil, nil
 	}
@@ -209,7 +230,10 @@ func (m *speculativeFileMutation) hooks() *speculativeToolHooks {
 		return nil
 	}
 	return &speculativeToolHooks{
-		commit: func() { m.Commit() },
+		commit: func() error {
+			m.Commit()
+			return nil
+		},
 		rollback: func() error {
 			return m.Rollback()
 		},

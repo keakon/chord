@@ -47,12 +47,21 @@ func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, rule
 
 	class := tools.ConcurrencyClassForTool(registry, toolName, args)
 	if class != tools.ToolConcurrencyClassReadOnly {
+		if toolName == tools.NameTodoWrite {
+			if registry == nil {
+				return rejectSpeculativeExecution("unknown_tool")
+			}
+			if blocking, ok := firstBlockingPriorSpeculativeCall(registry, ruleset, priorCalls); ok {
+				return rejectSpeculativeExecution("prior_pending_non_read_only:" + blocking)
+			}
+			return speculativeExecutionDecision{Allowed: true, Reason: "commit_on_promote_internal_state"}
+		}
 		switch toolName {
 		case tools.NameSpawn, tools.NameSpawnStop:
 			return rejectSpeculativeExecution("process_side_effect")
 		case tools.NameQuestion:
 			return rejectSpeculativeExecution("interactive_tool")
-		case tools.NameTodoWrite, tools.NameDelegate, tools.NameNotify, tools.NameHandoff, tools.NameEscalate, tools.NameCancel, tools.NameComplete, tools.NameSaveArtifact:
+		case tools.NameDelegate, tools.NameNotify, tools.NameHandoff, tools.NameEscalate, tools.NameCancel, tools.NameComplete, tools.NameSaveArtifact:
 			return rejectSpeculativeExecution("stateful_or_control_tool")
 		case tools.NameWrite, tools.NameEdit, tools.NamePatch, tools.NameDelete:
 			return rejectSpeculativeExecution("mutation_tool")

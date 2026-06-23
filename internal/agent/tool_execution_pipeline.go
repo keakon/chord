@@ -139,13 +139,16 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	if err := validateToolArgsAgainstSchema(p.registry, tc.Name, tc.Args); err != nil {
 		return execResult, err
 	}
-	hooks, err := prepareSpeculativeToolCall(tc, p.fileTrack, p.agentID, p.projectRoot)
+	hooks, err := prepareSpeculativeToolCall(tc, p.registry, p.fileTrack, p.agentID, p.projectRoot)
 	if err != nil {
 		return execResult, err
 	}
 	execResult.speculativeHooks = hooks
 
 	agentCtx := buildToolExecContext(ctx, tc, p.agentID, p.taskID, p.sessionDir, p.eventSender, p.emit)
+	if tc.Name == tools.NameTodoWrite {
+		agentCtx = tools.WithTodoWriteSpeculativePreview(agentCtx)
+	}
 	imageSink := &tools.ImageCollector{}
 	agentCtx = tools.WithImageSink(agentCtx, imageSink)
 	if tc.Name == tools.NamePatch {

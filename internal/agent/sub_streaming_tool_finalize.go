@@ -6,17 +6,20 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-func (s *SubAgent) commitPromotedToolSideEffects(tc message.ToolCall, result *toolResult) {
+func (s *SubAgent) commitPromotedToolSideEffects(tc message.ToolCall, result *toolResult) error {
 	if s == nil || result == nil || result.Error != nil {
-		return
+		return nil
 	}
 	if result.speculativeHooks != nil && result.speculativeHooks.commit != nil {
-		result.speculativeHooks.commit()
+		if err := result.speculativeHooks.commit(); err != nil {
+			return err
+		}
 	}
 	if s.parent == nil {
-		return
+		return nil
 	}
 	commitPromotedReadToolSideEffects(s.parent.fileTrack, s.instanceID, tc.Name, result.ArgsJSON, result.FileState)
+	return nil
 }
 
 func (s *SubAgent) executeToolCallWithHook(ctx context.Context, tc message.ToolCall, fireHook bool) (ToolExecutionResult, error) {

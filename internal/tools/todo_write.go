@@ -7,6 +7,20 @@ import (
 	"strings"
 )
 
+type todoWriteSpeculativePreviewKey struct{}
+
+// WithTodoWriteSpeculativePreview makes TodoWrite validate and render its result
+// without committing the replacement list to the backing TodoStore. Finalized
+// promotion is responsible for committing the same parsed todo list.
+func WithTodoWriteSpeculativePreview(ctx context.Context) context.Context {
+	return context.WithValue(ctx, todoWriteSpeculativePreviewKey{}, true)
+}
+
+func todoWriteSpeculativePreviewFromContext(ctx context.Context) bool {
+	v, _ := ctx.Value(todoWriteSpeculativePreviewKey{}).(bool)
+	return v
+}
+
 // TodoItem represents a single item in the todo list.
 type TodoItem struct {
 	ID         string `json:"id"`
@@ -135,14 +149,32 @@ func (t *TodoWriteTool) validateInProgressItems(todos []TodoItem, inProgress int
 	return nil
 }
 
-func (t *TodoWriteTool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
+func (t *TodoWriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+	todos, err := t.ParseTodos(raw)
+	if err != nil {
+		return "", err
+	}
+	if !todoWriteSpeculativePreviewFromContext(ctx) {
+		if t.store == nil {
+			return "", fmt.Errorf("todo storage not available (no TodoStore configured)")
+		}
+
+		if err := t.store.UpdateTodos(todos); err != nil {
+			return "", fmt.Errorf("failed to update todos: %w", err)
+		}
+	}
+	return RenderTodoMarkdown(todos), nil
+}
+
+// ParseTodos decodes and validates TodoWrite arguments without updating the store.
+func (t *TodoWriteTool) ParseTodos(raw json.RawMessage) ([]TodoItem, error) {
 	var a todoWriteArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+		return nil, fmt.Errorf("invalid arguments: %w", err)
 	}
 
 	if len(a.Todos) == 0 {
-		return "", fmt.Errorf(
+		return nil, fmt.Errorf(
 			"TodoWrite: todos must contain at least one item; an empty list is invalid. " +
 				"Provide id, content, and status for each task, or omit TodoWrite when no task list is needed",
 		)
@@ -154,39 +186,34 @@ func (t *TodoWriteTool) Execute(_ context.Context, raw json.RawMessage) (string,
 	for i := range a.Todos {
 		item := &a.Todos[i]
 		if item.ID == "" {
-			return "", fmt.Errorf("todos[%d]: id is required", i)
+			return nil, fmt.Errorf("todos[%d]: id is required", i)
 		}
 		if seen[item.ID] {
-			return "", fmt.Errorf("todos[%d]: duplicate id %q", i, item.ID)
+			return nil, fmt.Errorf("todos[%d]: duplicate id %q", i, item.ID)
 		}
 		seen[item.ID] = true
 
 		if item.Content == "" {
-			return "", fmt.Errorf("todos[%d]: content is required", i)
+			return nil, fmt.Errorf("todos[%d]: content is required", i)
 		}
 		if !validStatuses[item.Status] {
-			return "", fmt.Errorf("todos[%d]: invalid status %q (must be pending, in_progress, completed, or cancelled)", i, item.Status)
+			return nil, fmt.Errorf("todos[%d]: invalid status %q (must be pending, in_progress, completed, or cancelled)", i, item.Status)
 		}
 		if item.Status == "in_progress" {
 			inProgress++
 		}
 	}
 	if err := t.validateInProgressItems(a.Todos, inProgress); err != nil {
-		return "", err
+		return nil, err
 	}
+	return append([]TodoItem(nil), a.Todos...), nil
+}
 
-	if t.store == nil {
-		return "", fmt.Errorf("todo storage not available (no TodoStore configured)")
-	}
-
-	if err := t.store.UpdateTodos(a.Todos); err != nil {
-		return "", fmt.Errorf("failed to update todos: %w", err)
-	}
-
-	// Return the full todo list in markdown checklist format so the model
-	// always has an accurate view of the current state.
+// RenderTodoMarkdown returns the full todo list in markdown checklist format so
+// the model always has an accurate view of the current state.
+func RenderTodoMarkdown(todos []TodoItem) string {
 	var sb strings.Builder
-	for _, item := range a.Todos {
+	for _, item := range todos {
 		var check string
 		switch item.Status {
 		case "completed":
@@ -205,5 +232,5 @@ func (t *TodoWriteTool) Execute(_ context.Context, raw json.RawMessage) (string,
 			fmt.Fprintf(&sb, "- [%s] %s. %s\n", check, item.ID, item.Content)
 		}
 	}
-	return sb.String(), nil
+	return sb.String()
 }

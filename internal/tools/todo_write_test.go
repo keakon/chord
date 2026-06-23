@@ -68,6 +68,22 @@ func TestTodoWriteExecuteMinimal(t *testing.T) {
 	}
 }
 
+func TestTodoWriteSpeculativePreviewDoesNotUpdateStore(t *testing.T) {
+	store := &memTodoStore{}
+	tool := NewTodoWriteTool(store)
+	raw := []byte(`{"todos":[{"id":"1","content":"A","status":"pending"}]}`)
+	out, err := tool.Execute(WithTodoWriteSpeculativePreview(context.Background()), raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "1. A") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if len(store.items) != 0 {
+		t.Fatalf("store should not be updated during speculative preview, got %+v", store.items)
+	}
+}
+
 func TestTodoWriteExecuteRejectsMultipleInProgressWithoutPolicy(t *testing.T) {
 	store := &memTodoStore{}
 	tool := NewTodoWriteTool(store)

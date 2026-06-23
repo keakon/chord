@@ -14,6 +14,19 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+type streamingTodoStore struct {
+	items []tools.TodoItem
+}
+
+func (s *streamingTodoStore) UpdateTodos(todos []tools.TodoItem) error {
+	s.items = append([]tools.TodoItem(nil), todos...)
+	return nil
+}
+
+func (s *streamingTodoStore) GetTodos() []tools.TodoItem {
+	return append([]tools.TodoItem(nil), s.items...)
+}
+
 func TestSpeculativeExecutionRejectsInvisibleEditFamilyToolBeforeFileMutation(t *testing.T) {
 	projectRoot := t.TempDir()
 	targetPath := filepath.Join(projectRoot, "target.txt")
@@ -47,6 +60,7 @@ func TestSpeculativeExecutionRejectsInvisibleEditFamilyToolBeforeFileMutation(t 
 		t.Fatalf("file changed after rejected speculative patch = %q", got)
 	}
 }
+
 func TestStreamingToolExecutorPromotesCompletedResult(t *testing.T) {
 	ctx := t.Context()
 	var calls atomic.Int32
@@ -189,5 +203,82 @@ func TestStreamingToolExecutorDiscardSuppressesVisibleResult(t *testing.T) {
 		default:
 			return
 		}
+	}
+}
+
+func TestStreamingTodoWritePromoteCommitsAfterPreview(t *testing.T) {
+	store := &streamingTodoStore{}
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewTodoWriteTool(store))
+	pipeline := toolExecutionPipeline{registry: registry}
+	call := message.ToolCall{ID: "todo-1", Name: tools.NameTodoWrite, Args: json.RawMessage(`{"todos":[{"id":"1","content":"Plan","status":"pending"}]}`)}
+	exec := NewStreamingToolExecutor(7, t.Context(), nil, pipeline.executeSpeculative)
+
+	if !exec.Start(call) {
+		t.Fatal("Start returned false")
+	}
+	payload, ok, drift := exec.Promote(call)
+	if drift {
+		t.Fatal("Promote reported drift")
+	}
+	if !ok || payload == nil {
+		t.Fatal("Promote did not return cached payload")
+	}
+	if len(store.GetTodos()) != 0 {
+		t.Fatalf("speculative preview committed before promote hook: %+v", store.GetTodos())
+	}
+	if payload.Error != nil {
+		t.Fatalf("payload error before commit: %v", payload.Error)
+	}
+	if payload.speculativeHooks == nil || payload.speculativeHooks.commit == nil {
+		t.Fatal("missing TodoWrite commit hook")
+	}
+	if err := payload.speculativeHooks.commit(); err != nil {
+		t.Fatal(err)
+	}
+	todos := store.GetTodos()
+	if len(todos) != 1 || todos[0].Content != "Plan" {
+		t.Fatalf("todos after commit = %+v", todos)
+	}
+}
+
+func TestStreamingTodoWriteArgsDriftDoesNotCommitPreview(t *testing.T) {
+	store := &streamingTodoStore{}
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewTodoWriteTool(store))
+	pipeline := toolExecutionPipeline{registry: registry}
+	exec := NewStreamingToolExecutor(7, t.Context(), nil, pipeline.executeSpeculative)
+	started := message.ToolCall{ID: "todo-1", Name: tools.NameTodoWrite, Args: json.RawMessage(`{"todos":[{"id":"1","content":"Old","status":"pending"}]}`)}
+	finalized := message.ToolCall{ID: "todo-1", Name: tools.NameTodoWrite, Args: json.RawMessage(`{"todos":[{"id":"1","content":"New","status":"pending"}]}`)}
+
+	if !exec.Start(started) {
+		t.Fatal("Start returned false")
+	}
+	payload, ok, drift := exec.Promote(finalized)
+	if !drift {
+		t.Fatal("Promote did not report drift")
+	}
+	if ok || payload != nil {
+		t.Fatalf("payload=%#v ok=%v, want no cached result", payload, ok)
+	}
+	if len(store.GetTodos()) != 0 {
+		t.Fatalf("drifted speculative TodoWrite should not commit, got %+v", store.GetTodos())
+	}
+}
+
+func TestStreamingTodoWriteDiscardDoesNotCommitPreview(t *testing.T) {
+	store := &streamingTodoStore{}
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewTodoWriteTool(store))
+	pipeline := toolExecutionPipeline{registry: registry}
+	exec := NewStreamingToolExecutor(7, t.Context(), nil, pipeline.executeSpeculative)
+	call := message.ToolCall{ID: "todo-1", Name: tools.NameTodoWrite, Args: json.RawMessage(`{"todos":[{"id":"1","content":"Plan","status":"pending"}]}`)}
+
+	if !exec.Start(call) {
+		t.Fatal("Start returned false")
+	}
+	exec.DiscardAll("rollback")
+	if len(store.GetTodos()) != 0 {
+		t.Fatalf("discarded speculative TodoWrite should not commit, got %+v", store.GetTodos())
 	}
 }
