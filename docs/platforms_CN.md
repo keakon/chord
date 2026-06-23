@@ -82,6 +82,7 @@ Chord 目前对这些差异采用保守处理：
 常见情况：
 
 - **macOS + iTerm2 / WezTerm / Ghostty**：通常可以直接粘图
+- **macOS + cmux**：剪贴板图片请使用 `Ctrl+V`。`Cmd+V` 可能会被 cmux 截获并转换为临时文件路径粘贴进终端，表现为该路径出现在 Chord 图片占位符后面。
 - **Linux Wayland / X11**：取决于终端实现；有些终端对剪贴板图片只能粘普通文本
 - **Windows Terminal**：核心文本粘贴没问题；图片更依赖终端/系统链路
 - **tmux 内部**：图片字节通常透不过来

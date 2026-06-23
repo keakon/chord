@@ -82,6 +82,7 @@ Inline image attachments are capped at 5 per composer message. Literal placehold
 Common cases:
 
 - **macOS + iTerm2 / WezTerm / Ghostty**: usually paste images directly
+- **macOS + cmux**: use `Ctrl+V` for clipboard images. `Cmd+V` may be intercepted by cmux and converted into a pasted temporary file path, which can appear after Chord's image placeholder.
 - **Linux Wayland / X11**: terminal-dependent; some terminals only paste plain text for clipboard images
 - **Windows Terminal**: text paste is fine; image behavior depends more on the terminal / host chain
 - **Inside tmux**: raw image bytes often do not pass through

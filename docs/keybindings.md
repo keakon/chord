@@ -126,6 +126,8 @@ keymap:
 
 Custom key bindings only work when your terminal emulator, OS, and any multiplexer such as tmux forward that key sequence to Chord. Prefer plain printable keys in Normal mode or simple `ctrl+letter` combinations that do not already have strong terminal meanings.
 
+`Cmd+V` on macOS is often handled by the terminal or wrapper before Chord can see it. Chord treats `Cmd+V` as smart paste only when it is forwarded as `super+v` or as a paste event without extra text. In cmux, image-only `Cmd+V` may be handled by the cmux/Ghostty paste layer by saving the clipboard image to a temporary file and pasting that file path. Chord's `keymap` cannot override terminal-supplied paste text; use `Ctrl+V` for clipboard image paste in cmux.
+
 Avoid these as default/custom bindings unless you have tested them in your exact terminal setup:
 
 - `alt+letter` / Option combinations on macOS: terminals such as Ghostty may use Option for text input, menu shortcuts, or app-level bindings, so combinations like `alt+f` may never reach Chord.
