@@ -473,16 +473,15 @@ func (r *ResponsesProvider) CompleteStream(
 }
 
 func apiErrorStatusCode(err error) int {
-	var apiErr *APIError
-	if errors.As(err, &apiErr) && apiErr != nil {
+	if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr != nil {
 		return apiErr.StatusCode
 	}
 	return 0
 }
 
 func shouldStopCodexWSHTTPFallback(err error) bool {
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr == nil {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr == nil {
 		return false
 	}
 
@@ -512,8 +511,8 @@ func shouldStopCodexWSHTTPFallback(err error) bool {
 // and re-sending the full input over the same WebSocket; if that also fails,
 // the input itself is malformed and HTTP would fail identically.
 func isCodexWSChainStateMismatch(err error) bool {
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr == nil {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr == nil {
 		return false
 	}
 	if apiErr.StatusCode != http.StatusBadRequest {
@@ -656,8 +655,7 @@ func (r *ResponsesProvider) sendAndParse(
 	defer cr.Stop()
 	resp, parseErr := parseResponsesSSE(cr, cb, collector)
 	if parseErr != nil {
-		var timeoutErr *ChunkTimeoutError
-		if errors.As(parseErr, &timeoutErr) {
+		if _, ok := errors.AsType[*ChunkTimeoutError](parseErr); ok {
 			snap := cr.chunkTimeoutSnapshot()
 			attrs := []any{
 				"model", model,

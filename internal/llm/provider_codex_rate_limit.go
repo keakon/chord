@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sort"
 	"time"
@@ -515,8 +516,8 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 }
 
 func (p *ProviderConfig) handleCodexWarmupAuthFailure(key string, err error) bool {
-	var apiErr *APIError
-	if !isAPIError(err, &apiErr) {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
 		return false
 	}
 	if apiErr.StatusCode != http.StatusUnauthorized && apiErr.StatusCode != http.StatusForbidden {

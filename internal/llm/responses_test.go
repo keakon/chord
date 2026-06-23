@@ -1066,8 +1066,8 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 		if err == nil {
 			t.Fatal("parseResponsesSSE err = nil, want APIError")
 		}
-		var apiErr *APIError
-		if !errors.As(err, &apiErr) {
+		apiErr, ok := errors.AsType[*APIError](err)
+		if !ok {
 			t.Fatalf("err = %T %v, want *APIError", err, err)
 		}
 		if apiErr.StatusCode != 400 || apiErr.Code != "context_length_exceeded" {
@@ -1088,8 +1088,8 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 		if err == nil {
 			t.Fatal("parseResponsesSSE err = nil, want APIError")
 		}
-		var apiErr *APIError
-		if !errors.As(err, &apiErr) {
+		apiErr, ok := errors.AsType[*APIError](err)
+		if !ok {
 			t.Fatalf("err = %T %v, want *APIError", err, err)
 		}
 		if strings.Contains(err.Error(), "incomplete SSE stream") {

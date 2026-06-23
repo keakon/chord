@@ -47,8 +47,7 @@ func agentErrorMessage(err error) string {
 	if err == nil {
 		return ""
 	}
-	var apiErr *llm.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*llm.APIError](err); ok {
 		if msg := strings.TrimSpace(apiErr.Message); msg != "" {
 			return msg
 		}
@@ -74,8 +73,7 @@ func (m *Model) recordAgentError(agentID string, err error, provider, model, key
 		KeySuffix: keySuffix,
 		Retry:     retry,
 	}
-	var apiErr *llm.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*llm.APIError](err); ok {
 		rec.StatusCode = apiErr.StatusCode
 		rec.ErrorCode = apiErr.Code
 		rec.ErrorType = apiErr.Type

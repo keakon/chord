@@ -231,8 +231,7 @@ func codexWSParseFailureReason(err error) string {
 	if err == nil {
 		return "parse_failed"
 	}
-	var apiErr *APIError
-	if errors.As(err, &apiErr) && apiErr != nil {
+	if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr != nil {
 		if apiErr.StatusCode > 0 {
 			return fmt.Sprintf("api_error_%d", apiErr.StatusCode)
 		}

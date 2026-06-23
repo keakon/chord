@@ -1115,8 +1115,7 @@ func TestMarkKeyCooldown401OAuthNoRefresherPersistsDeactivatedKey(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected NoUsableKeysError after disabling only OAuth key")
 	}
-	var noUsable *NoUsableKeysError
-	if !errors.As(err, &noUsable) {
+	if _, ok := errors.AsType[*NoUsableKeysError](err); !ok {
 		t.Fatalf("expected NoUsableKeysError, got %T: %v", err, err)
 	}
 }
@@ -1498,8 +1497,7 @@ func TestMarkKeyCooldown403OAuthNoRefresherPersistsDeactivatedKey(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected NoUsableKeysError after disabling only OAuth key")
 	}
-	var noUsable *NoUsableKeysError
-	if !errors.As(err, &noUsable) {
+	if _, ok := errors.AsType[*NoUsableKeysError](err); !ok {
 		t.Fatalf("expected NoUsableKeysError, got %T: %v", err, err)
 	}
 }
@@ -2009,8 +2007,7 @@ func TestClientCompleteStreamConfiguredRetryRoundsHardCapsAllKeysCooling(t *test
 	if err == nil {
 		t.Fatal("expected configured retry cap to stop all-keys-cooling retries")
 	}
-	var coolingErr *AllKeysCoolingError
-	if !errors.As(err, &coolingErr) {
+	if _, ok := errors.AsType[*AllKeysCoolingError](err); !ok {
 		t.Fatalf("CompleteStream err = %v, want AllKeysCoolingError", err)
 	}
 	if resp != nil {
@@ -2677,8 +2674,7 @@ func TestClientCompleteStreamDeactivatedOnlyOAuthKeyReturnsNoUsableKeys(t *testi
 	if err == nil {
 		t.Fatal("expected NoUsableKeysError")
 	}
-	var noUsable *NoUsableKeysError
-	if !errors.As(err, &noUsable) {
+	if _, ok := errors.AsType[*NoUsableKeysError](err); !ok {
 		t.Fatalf("expected NoUsableKeysError, got %T: %v", err, err)
 	}
 	if len(impl.apiKeys) != 0 {
@@ -3651,8 +3647,7 @@ func TestClientCompleteStopsAfterAnthropicThinkingReplay400WithoutExtraRounds(t 
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.StatusCode != 400 {
 		t.Fatalf("err = %v, want APIError 400", err)
 	}
 	if impl.calls != 1 {
@@ -3669,8 +3664,7 @@ func TestClientCompleteStopsAfterPermanentRequestShape400WithoutExtraRounds(t *t
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.StatusCode != 400 {
 		t.Fatalf("err = %v, want APIError 400", err)
 	}
 	if impl.calls != 1 {
@@ -3687,8 +3681,7 @@ func TestClientCompleteStopsAfterModelIncompatible400WithoutFallback(t *testing.
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.StatusCode != 400 {
 		t.Fatalf("err = %v, want APIError 400", err)
 	}
 	if impl.calls != 1 {
@@ -3779,8 +3772,7 @@ func TestClientCompleteStreamStopsAfterModelIncompatible400WhenFallbackPoolExhau
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.StatusCode != 400 {
 		t.Fatalf("err = %v, want APIError 400", err)
 	}
 	if primaryImpl.calls != 1 {

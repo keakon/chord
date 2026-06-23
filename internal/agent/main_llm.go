@@ -48,8 +48,8 @@ func shouldEmitRequestProgress(now, lastEmitAt time.Time, bytes, events, lastByt
 // IsContextLengthExceededPendingCompaction reports whether err is a
 // context-length-exceeded error that should be suspended pending compaction.
 func IsContextLengthExceededPendingCompaction(err error) bool {
-	var e *contextLengthExceededPendingCompactionError
-	return errors.As(err, &e)
+	_, ok := errors.AsType[*contextLengthExceededPendingCompactionError](err)
+	return ok
 }
 
 // modelNameFromRef extracts the model name from a provider/model reference.

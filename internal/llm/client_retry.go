@@ -528,8 +528,8 @@ func (c *Client) completeStreamTarget(
 			}
 
 			retriable := isRetriable(err)
-			var apiErrPtr *APIError
-			if errors.As(err, &apiErrPtr) && apiErrPtr != nil {
+			apiErrPtr, ok := errors.AsType[*APIError](err)
+			if ok && apiErrPtr != nil {
 				if apiErrPtr.StatusCode == 401 || apiErrPtr.StatusCode == 403 {
 					retriable = true
 				}

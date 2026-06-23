@@ -149,8 +149,7 @@ func runRuffDiagnostics(ctx context.Context, path string, pyCfg config.PythonDia
 	if runCtx.Err() != nil {
 		return nil, runCtx.Err()
 	}
-	var exitErr *exec.ExitError
-	if err != nil && !errors.As(err, &exitErr) {
+	if _, ok := errors.AsType[*exec.ExitError](err); err != nil && !ok {
 		return nil, err
 	}
 	return parseRuffDiagnostics(out)

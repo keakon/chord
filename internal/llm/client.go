@@ -124,8 +124,8 @@ func (e *RoutingInvalidatedError) Error() string {
 // IsRoutingInvalidated reports whether err means the request should abandon the
 // current retry/fallback plan and start a fresh request using the latest routing.
 func IsRoutingInvalidated(err error) bool {
-	var target *RoutingInvalidatedError
-	return errors.As(err, &target)
+	_, ok := errors.AsType[*RoutingInvalidatedError](err)
+	return ok
 }
 
 // InvalidateRouting marks the current retry/fallback plan stale for all future
@@ -456,13 +456,13 @@ func (c *Client) SetTerminalAPIStatusCodes(statusCodes ...int) {
 }
 
 func (c *Client) isTerminalAPIStatusError(err error) bool {
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr == nil {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr == nil {
 		return false
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	_, ok := c.terminalAPIStatusCodes[apiErr.StatusCode]
+	_, ok = c.terminalAPIStatusCodes[apiErr.StatusCode]
 	return ok
 }
 

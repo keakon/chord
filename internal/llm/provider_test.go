@@ -123,8 +123,7 @@ func TestSelectKey_DeactivatedOnlyOAuthKeysReturnsNoUsableKeys(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected NoUsableKeysError, got nil")
 	}
-	var noUsable *NoUsableKeysError
-	if !errors.As(err, &noUsable) {
+	if _, ok := errors.AsType[*NoUsableKeysError](err); !ok {
 		t.Fatalf("expected NoUsableKeysError, got %T: %v", err, err)
 	}
 }
@@ -780,8 +779,8 @@ func TestSelectKey_AllKeysCooldown(t *testing.T) {
 		t.Fatal("expected error when all keys are cooling")
 	}
 
-	var cooling *AllKeysCoolingError
-	if !errors.As(err, &cooling) {
+	cooling, ok := errors.AsType[*AllKeysCoolingError](err)
+	if !ok {
 		t.Fatalf("expected AllKeysCoolingError, got %T: %v", err, err)
 	}
 
@@ -1441,8 +1440,7 @@ func TestSelectKey_OnFailure_AllCooldown(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected AllKeysCoolingError, got nil")
 	}
-	var coolErr *AllKeysCoolingError
-	if !errors.As(err, &coolErr) {
+	if _, ok := errors.AsType[*AllKeysCoolingError](err); !ok {
 		t.Errorf("expected *AllKeysCoolingError, got %T: %v", err, err)
 	}
 }

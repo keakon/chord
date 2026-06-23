@@ -144,8 +144,7 @@ func AcquireSessionLock(sessionDir string) (*SessionLock, error) {
 	case errors.Is(readErr, os.ErrNotExist):
 		// No metadata yet — acceptable while we hold the guard lock.
 	default:
-		var corruptErr *sessionLockParseError
-		if errors.As(readErr, &corruptErr) {
+		if corruptErr, ok := errors.AsType[*sessionLockParseError](readErr); ok {
 			return nil, &SessionLockCorruptError{SessionDir: sessionDir, Err: corruptErr.Err}
 		}
 		return nil, fmt.Errorf("read session lock: %w", readErr)
@@ -173,8 +172,7 @@ func (l *SessionLock) Release() error {
 	existing, err := readLockFile(l.path)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			var corruptErr *sessionLockParseError
-			if !errors.As(err, &corruptErr) {
+			if _, ok := errors.AsType[*sessionLockParseError](err); !ok {
 				firstErr = fmt.Errorf("read session lock for release: %w", err)
 			}
 		}
@@ -268,8 +266,7 @@ func sessionDirLockedByLiveOwner(sessionPath string) (bool, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		}
-		var parseErr *sessionLockParseError
-		if errors.As(err, &parseErr) {
+		if parseErr, ok := errors.AsType[*sessionLockParseError](err); ok {
 			return false, &SessionLockCorruptError{SessionDir: sessionPath, Err: parseErr.Err}
 		}
 		return false, err

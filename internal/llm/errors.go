@@ -240,13 +240,12 @@ func (e *ContextLengthExceededError) Error() string {
 // that matches provider-specific error codes/messages; ordinary 400 errors
 // must NOT be classified as oversize to avoid infinite retry loops.
 func IsContextLengthExceeded(err error) bool {
-	var ctxErr *ContextLengthExceededError
-	if errors.As(err, &ctxErr) {
+	if _, ok := errors.AsType[*ContextLengthExceededError](err); ok {
 		return true
 	}
 	// Also check APIError for provider-specific signals
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr == nil {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr == nil {
 		return false
 	}
 	return classifyContextLengthExceeded(apiErr)
@@ -287,32 +286,27 @@ func shouldFallback(err error) bool {
 	}
 
 	// NoUsableKeysError: configured credentials exist but every key is permanently disabled.
-	var noUsable *NoUsableKeysError
-	if errors.As(err, &noUsable) {
+	if _, ok := errors.AsType[*NoUsableKeysError](err); ok {
 		return true
 	}
 
 	// AllKeysCoolingError: all keys for the current provider are cooling → fallback.
-	var cooling *AllKeysCoolingError
-	if errors.As(err, &cooling) {
+	if _, ok := errors.AsType[*AllKeysCoolingError](err); ok {
 		return true
 	}
 
 	// EmptyTruncationError: model produced nothing despite a length stop → fallback.
-	var emptyTrunc *EmptyTruncationError
-	if errors.As(err, &emptyTrunc) {
+	if _, ok := errors.AsType[*EmptyTruncationError](err); ok {
 		return true
 	}
 	// EmptyResponseError: completed stream but semantically empty output → fallback.
-	var emptyResp *EmptyResponseError
-	if errors.As(err, &emptyResp) {
+	if _, ok := errors.AsType[*EmptyResponseError](err); ok {
 		return true
 	}
 
 	// Network timeouts: always eligible to try another model. Exact routing
 	// order (skip-provider vs same-key visible retry) is decided in client.go.
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
+	if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
 		return true
 	}
 	if isProviderUnreachable(err) {
@@ -320,8 +314,8 @@ func shouldFallback(err error) bool {
 	}
 
 	// Classify by HTTP status code.
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
 		return false
 	}
 
@@ -354,8 +348,7 @@ func shouldFallback(err error) bool {
 // the entire provider host is unreachable. All models on that provider should
 // be skipped.
 func isProviderUnreachable(err error) bool {
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
+	if opErr, ok := errors.AsType[*net.OpError](err); ok {
 		return opErr.Op == "dial" || opErr.Op == "connect"
 	}
 	return false
@@ -385,8 +378,7 @@ func isTimeoutLikeError(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
+	if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
 		return true
 	}
 	return errorChainContainsAll(err, "timeout")
@@ -415,8 +407,8 @@ func skipRemainingModelsOnProvider(err error) bool {
 	if isConnectionEstablishmentTimeout(err) {
 		return true
 	}
-	var noUsable *NoUsableKeysError
-	return errors.As(err, &noUsable)
+	_, ok := errors.AsType[*NoUsableKeysError](err)
+	return ok
 }
 
 const (
@@ -428,8 +420,7 @@ const (
 )
 
 func providerSkipReason(err error) string {
-	var noUsable *NoUsableKeysError
-	if errors.As(err, &noUsable) {
+	if _, ok := errors.AsType[*NoUsableKeysError](err); ok {
 		return providerSkipReasonNoUsableKeys
 	}
 	if isConnectionEstablishmentTimeout(err) {
@@ -472,13 +463,12 @@ func isRetriable(err error) bool {
 		return false
 	}
 	// Other network errors (connection reset, EOF, etc.) are retriable with a different key.
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
+	if _, ok := errors.AsType[*net.OpError](err); ok {
 		return true
 	}
 
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
 		return true // Unknown errors default to retriable.
 	}
 
@@ -518,8 +508,8 @@ func isRetriable(err error) bool {
 // These errors are transient capacity gates and should continue round retries
 // beyond the ordinary default-attempt cap.
 func isConcurrentRequestLimit429(err error) bool {
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr == nil || apiErr.StatusCode != 429 {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr == nil || apiErr.StatusCode != 429 {
 		return false
 	}
 	return apiErrMessageContainsAny(apiErr, "too many concurrent requests", "concurrent requests for this model") ||
@@ -608,8 +598,8 @@ func isTerminalModelPoolFailureForProvider(provider *ProviderConfig, err error) 
 	if IsContextLengthExceeded(err) {
 		return true
 	}
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr == nil {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr == nil {
 		return false
 	}
 	if apiErr.StatusCode != 400 {

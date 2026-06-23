@@ -397,8 +397,8 @@ func (e *OAuthRefreshError) Error() string {
 // IsRefreshTokenInvalid reports whether the refresh failed because the refresh
 // token itself is no longer usable and the credential should be marked expired.
 func IsRefreshTokenInvalid(err error) bool {
-	var refreshErr *OAuthRefreshError
-	if !errors.As(err, &refreshErr) {
+	refreshErr, ok := errors.AsType[*OAuthRefreshError](err)
+	if !ok {
 		return false
 	}
 	code := strings.ToLower(strings.TrimSpace(refreshErr.Code))
@@ -420,8 +420,8 @@ func IsRefreshTokenInvalid(err error) bool {
 // credential has no refresh token. This is recoverability information, not an
 // immediate credential-invalid signal while the access token is still usable.
 func IsMissingRefreshToken(err error) bool {
-	var refreshErr *OAuthRefreshError
-	return errors.As(err, &refreshErr) && refreshErr.Code == "missing_refresh_token"
+	refreshErr, ok := errors.AsType[*OAuthRefreshError](err)
+	return ok && refreshErr.Code == "missing_refresh_token"
 }
 
 // IsOAuthCredentialUnrecoverableAfterAccessExpiry reports whether an OAuth

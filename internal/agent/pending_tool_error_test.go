@@ -432,8 +432,8 @@ func TestMainExecuteToolCallSameAgentWriteIsSerialized(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected same-agent concurrent write conflict")
 	}
-	var ce *filelock.ConflictError
-	if !errors.As(err, &ce) {
+	_, ok := errors.AsType[*filelock.ConflictError](err)
+	if !ok {
 		t.Fatalf("expected ConflictError, got %T: %v", err, err)
 	}
 

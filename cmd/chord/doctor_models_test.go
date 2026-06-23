@@ -268,8 +268,7 @@ func TestDoctorModelsCommandRejectsExplicitZeroRetry(t *testing.T) {
 	cmd.SetErr(&out)
 	cmd.SetArgs([]string{"models", "--retry", "0"})
 	err := cmd.Execute()
-	var exitErr cliExitError
-	if !errors.As(err, &exitErr) || exitErr.code != 2 || !strings.Contains(err.Error(), "--retry must be greater than zero") {
+	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 2 || !strings.Contains(err.Error(), "--retry must be greater than zero") {
 		t.Fatalf("doctor models --retry 0 err = %v, want exit 2 retry validation", err)
 	}
 }
@@ -305,8 +304,7 @@ func TestRunDoctorModelsNoProvidersReturnsConfigError(t *testing.T) {
 
 	var out bytes.Buffer
 	err := runDoctorModels(t.Context(), doctorModelsOptions{Timeout: time.Second, JSON: true, Out: &out})
-	var exitErr cliExitError
-	if !errors.As(err, &exitErr) || exitErr.code != 2 {
+	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 2 {
 		t.Fatalf("runDoctorModels err = %v, want exit 2\noutput: %s", err, out.String())
 	}
 	var report doctorModelsReport
@@ -369,8 +367,7 @@ func TestRunDoctorModelsJSONAppliesVariantTuning(t *testing.T) {
 	var out bytes.Buffer
 	err := runDoctorModels(t.Context(), doctorModelsOptions{ModelRef: "local/gpt@high", Timeout: 5 * time.Second, JSON: true, Out: &out})
 	if err != nil {
-		var exitErr cliExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[cliExitError](err); ok {
 			t.Fatalf("runDoctorModels exit %d: %v\noutput: %s", exitErr.code, exitErr.err, out.String())
 		}
 		t.Fatalf("runDoctorModels: %v\noutput: %s", err, out.String())
@@ -572,8 +569,7 @@ func TestRunDoctorModelsAllModelsTestsEveryConfiguredModel(t *testing.T) {
 
 	var out bytes.Buffer
 	err := runDoctorModels(t.Context(), doctorModelsOptions{Provider: "local", AllModels: true, Timeout: 5 * time.Second, JSON: true, Out: &out})
-	var exitErr cliExitError
-	if !errors.As(err, &exitErr) || exitErr.code != 1 {
+	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 1 {
 		t.Fatalf("runDoctorModels err = %v, want exit 1\noutput: %s", err, out.String())
 	}
 	var report doctorModelsReport
@@ -635,8 +631,7 @@ func TestRunDoctorModelsPoolTestsEachRefIndependently(t *testing.T) {
 
 	var out bytes.Buffer
 	err := runDoctorModels(t.Context(), doctorModelsOptions{Pool: "audit", Timeout: 5 * time.Second, JSON: true, Out: &out})
-	var exitErr cliExitError
-	if !errors.As(err, &exitErr) || exitErr.code != 1 {
+	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 1 {
 		t.Fatalf("runDoctorModels err = %v, want exit 1\noutput: %s", err, out.String())
 	}
 	var report doctorModelsReport
@@ -673,8 +668,7 @@ func TestRunDoctorModelsCanceledReturnsExit130(t *testing.T) {
 
 	var out bytes.Buffer
 	err := runDoctorModels(ctx, doctorModelsOptions{ModelRef: "local/gpt", Timeout: 5 * time.Second, JSON: true, Out: &out})
-	var exitErr cliExitError
-	if !errors.As(err, &exitErr) || exitErr.code != 130 {
+	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 130 {
 		t.Fatalf("runDoctorModels err = %v, want exit 130\noutput: %s", err, out.String())
 	}
 	var report doctorModelsReport
@@ -714,8 +708,7 @@ func TestRunDoctorModelsDoesNotRetryAuthOrClientErrors(t *testing.T) {
 
 			var out bytes.Buffer
 			err := runDoctorModels(t.Context(), doctorModelsOptions{ModelRef: "local/gpt", Timeout: 5 * time.Second, Retry: 3, JSON: true, Out: &out})
-			var exitErr cliExitError
-			if !errors.As(err, &exitErr) || exitErr.code != 1 {
+			if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 1 {
 				t.Fatalf("runDoctorModels err = %v, want exit 1\noutput: %s", err, out.String())
 			}
 			if requests.Load() != 1 {
@@ -791,8 +784,7 @@ func TestRunDoctorModelsCanceledSkipsRemainingTargets(t *testing.T) {
 
 	var out bytes.Buffer
 	err := runDoctorModels(ctx, doctorModelsOptions{Provider: "local", AllModels: true, Timeout: 5 * time.Second, JSON: true, Out: &out})
-	var exitErr cliExitError
-	if !errors.As(err, &exitErr) || exitErr.code != 130 {
+	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 130 {
 		t.Fatalf("runDoctorModels err = %v, want exit 130\noutput: %s", err, out.String())
 	}
 	var report doctorModelsReport
@@ -949,8 +941,7 @@ func TestRunDoctorModelsUsesOnlyCurrentWorkingDirectoryProjectConfig(t *testing.
 
 	out.Reset()
 	err := runDoctorModels(t.Context(), doctorModelsOptions{Pool: "root", Timeout: 5 * time.Second, JSON: true, Out: &out})
-	var exitErr cliExitError
-	if !errors.As(err, &exitErr) || exitErr.code != 2 {
+	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 2 {
 		t.Fatalf("runDoctorModels root pool err = %v, want exit 2\noutput: %s", err, out.String())
 	}
 	var rootReport doctorModelsReport
@@ -1006,8 +997,7 @@ func TestRunDoctorModelsUnsupportedProviderTypeIsConfigError(t *testing.T) {
 
 	var out bytes.Buffer
 	err := runDoctorModels(t.Context(), doctorModelsOptions{Provider: "broken", Timeout: time.Second, JSON: true, Out: &out})
-	var exitErr cliExitError
-	if !errors.As(err, &exitErr) || exitErr.code != 2 {
+	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 2 {
 		t.Fatalf("runDoctorModels err = %v, want exit 2\noutput: %s", err, out.String())
 	}
 	var report doctorModelsReport

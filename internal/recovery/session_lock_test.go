@@ -52,8 +52,8 @@ func TestSessionLockHelpers(t *testing.T) {
 	}
 
 	lockedErr := currentSessionLockedError(dir, lockPath)
-	var locked *SessionLockedError
-	if !errors.As(lockedErr, &locked) || locked.OwnerID != "owner" || locked.Hostname != "host" {
+	locked, ok := errors.AsType[*SessionLockedError](lockedErr)
+	if !ok || locked.OwnerID != "owner" || locked.Hostname != "host" {
 		t.Fatalf("currentSessionLockedError = %#v", lockedErr)
 	}
 	if !errors.Is((&SessionLockCorruptError{SessionDir: dir, Err: os.ErrInvalid}), os.ErrInvalid) {
@@ -114,8 +114,7 @@ func TestAcquireSessionLock_AlreadyHeld(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error on second acquire of live-process lock")
 	}
-	var locked *SessionLockedError
-	if !errors.As(err, &locked) {
+	if _, ok := errors.AsType[*SessionLockedError](err); !ok {
 		t.Fatalf("expected SessionLockedError, got %T: %v", err, err)
 	}
 }
@@ -148,8 +147,7 @@ func TestAcquireSessionLock_CorruptLockFileReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for corrupt lock file")
 	}
-	var corruptErr *SessionLockCorruptError
-	if !errors.As(err, &corruptErr) {
+	if _, ok := errors.AsType[*SessionLockCorruptError](err); !ok {
 		t.Fatalf("expected SessionLockCorruptError, got %T: %v", err, err)
 	}
 }
@@ -262,8 +260,7 @@ func TestAcquireSessionLock_GuardLockWithoutMetadataStillBlocks(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected guard lock to block second acquire even without metadata file")
 	}
-	var locked *SessionLockedError
-	if !errors.As(err, &locked) {
+	if _, ok := errors.AsType[*SessionLockedError](err); !ok {
 		t.Fatalf("expected SessionLockedError, got %T: %v", err, err)
 	}
 }

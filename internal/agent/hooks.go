@@ -312,16 +312,13 @@ func classifyAgentError(err error) string {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return "agent"
 	}
-	var apiErr *llm.APIError
-	if errors.As(err, &apiErr) {
+	if _, ok := errors.AsType[*llm.APIError](err); ok {
 		return "llm"
 	}
-	var cooling *llm.AllKeysCoolingError
-	if errors.As(err, &cooling) {
+	if _, ok := errors.AsType[*llm.AllKeysCoolingError](err); ok {
 		return "llm"
 	}
-	var noUsable *llm.NoUsableKeysError
-	if errors.As(err, &noUsable) {
+	if _, ok := errors.AsType[*llm.NoUsableKeysError](err); ok {
 		return "llm"
 	}
 	if llm.IsContextLengthExceeded(err) {

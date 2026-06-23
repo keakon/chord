@@ -80,8 +80,7 @@ func (e cliExitError) Error() string {
 func (e cliExitError) Unwrap() error { return e.err }
 
 func cliExitCode(err error) int {
-	var exitErr cliExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[cliExitError](err); ok {
 		return exitErr.code
 	}
 	if errors.Is(err, context.Canceled) {
@@ -94,8 +93,7 @@ func shouldPrintCLIError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var exitErr cliExitError
-	if errors.As(err, &exitErr) && exitErr.code == 130 {
+	if exitErr, ok := errors.AsType[cliExitError](err); ok && exitErr.code == 130 {
 		return false
 	}
 	if errors.Is(err, context.Canceled) {

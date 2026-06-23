@@ -624,8 +624,7 @@ func TestRefreshOAuthToken_EmptyRefreshTokenDoesNotCallEndpoint(t *testing.T) {
 	defer server.Close()
 
 	_, err := RefreshOAuthToken(context.Background(), server.Client(), server.URL, "client-123", &OAuthCredential{Access: "old-access"})
-	var refreshErr *OAuthRefreshError
-	if !errors.As(err, &refreshErr) || refreshErr.Code != "missing_refresh_token" {
+	if refreshErr, ok := errors.AsType[*OAuthRefreshError](err); !ok || refreshErr.Code != "missing_refresh_token" {
 		t.Fatalf("RefreshOAuthToken err = %v, want missing_refresh_token error", err)
 	}
 	if IsRefreshTokenInvalid(err) {

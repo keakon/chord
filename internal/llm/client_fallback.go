@@ -169,8 +169,8 @@ func applyCodexQuotaOrCooldown(provider *ProviderConfig, key string, apiErr *API
 // token; if refresh succeeds no cooldown is applied and refreshedKey contains
 // the new access token now stored in the credential slot.
 func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, err error) markKeyCooldownResult {
-	var apiErr *APIError
-	if !isAPIError(err, &apiErr) {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
 		return markKeyCooldownResult{}
 	}
 	if provider != nil && provider.usesPresetCodexRateLimitCooldown() && confirmedCodexUsageLimitError(apiErr) {
@@ -292,9 +292,4 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 	default:
 		return markKeyCooldownResult{}
 	}
-}
-
-// isAPIError extracts an APIError from err, returning true if found.
-func isAPIError(err error, target **APIError) bool {
-	return errors.As(err, target)
 }

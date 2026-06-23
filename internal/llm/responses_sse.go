@@ -382,8 +382,7 @@ func canRecoverPartialResponsesAfterReadError(err error, resp *message.Response)
 	if !canRecoverPartialResponsesAfterError(err) {
 		return false
 	}
-	var timeoutErr *ChunkTimeoutError
-	if errors.As(err, &timeoutErr) && (resp == nil || len(resp.ToolCalls) == 0) {
+	if _, ok := errors.AsType[*ChunkTimeoutError](err); ok && (resp == nil || len(resp.ToolCalls) == 0) {
 		return false
 	}
 	return true

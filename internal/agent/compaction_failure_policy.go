@@ -136,23 +136,19 @@ func classifyCompactionFailure(err error) compactionFailureClass {
 		return compactionFailureTransient
 	}
 
-	var cooling *llm.AllKeysCoolingError
-	if errors.As(err, &cooling) {
+	if _, ok := errors.AsType[*llm.AllKeysCoolingError](err); ok {
 		return compactionFailureTransient
 	}
 
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
+	if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
 		return compactionFailureTransient
 	}
 
-	var opErr *net.OpError
-	if errors.As(err, &opErr) && (opErr.Op == "dial" || opErr.Op == "connect") {
+	if opErr, ok := errors.AsType[*net.OpError](err); ok && (opErr.Op == "dial" || opErr.Op == "connect") {
 		return compactionFailureTransient
 	}
 
-	var apiErr *llm.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*llm.APIError](err); ok {
 		switch apiErr.StatusCode {
 		case 429, 529:
 			return compactionFailureTransient

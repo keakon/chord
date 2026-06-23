@@ -73,8 +73,8 @@ func TestAcquireWrite_WriteWriteConflict(t *testing.T) {
 		t.Fatal("expected write-write conflict error")
 	}
 
-	var ce *ConflictError
-	if !errors.As(err, &ce) {
+	ce, ok := errors.AsType[*ConflictError](err)
+	if !ok {
 		t.Fatalf("expected ConflictError, got %T: %v", err, err)
 	}
 	if filepath.Base(ce.Path) != "main.go" {
@@ -98,8 +98,8 @@ func TestAcquireWrite_SameAgentConcurrentWriteConflict(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected same-agent concurrent write conflict")
 	}
-	var ce *ConflictError
-	if !errors.As(err, &ce) {
+	ce, ok := errors.AsType[*ConflictError](err)
+	if !ok {
 		t.Fatalf("expected ConflictError, got %T: %v", err, err)
 	}
 	if ce.ModifiedBy != "agent-1" {

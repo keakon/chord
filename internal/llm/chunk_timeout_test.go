@@ -183,8 +183,7 @@ func TestChunkTimeoutReaderTimerResetViaBufioScanner(t *testing.T) {
 		lines = append(lines, scanner.Text())
 	}
 	if err := scanner.Err(); err != nil {
-		var timeoutErr *ChunkTimeoutError
-		if errors.As(err, &timeoutErr) {
+		if _, ok := errors.AsType[*ChunkTimeoutError](err); ok {
 			t.Fatalf("chunk timeout fired unexpectedly (cancelled=%v); timer should reset on each data read; got %v", cancelled, err)
 		}
 		t.Fatalf("scanner error: %v", err)
@@ -235,8 +234,7 @@ func TestChunkTimeoutReaderSnapshotCapturesPartialTimeoutRead(t *testing.T) {
 	if n == 0 {
 		t.Fatal("expected partial bytes to be returned before timeout surfaced")
 	}
-	var timeoutErr *ChunkTimeoutError
-	if !errors.As(err, &timeoutErr) {
+	if _, ok := errors.AsType[*ChunkTimeoutError](err); !ok {
 		t.Fatalf("err = %v, want ChunkTimeoutError", err)
 	}
 

@@ -64,8 +64,7 @@ func TestDeleteSessionByIDRejectsLockedSession(t *testing.T) {
 	defer func() { _ = lock.Release() }()
 
 	err = DeleteSessionByID(sessionsDir, filepath.Join(sessionsDir, "2000"), "1000")
-	var lockedErr *SessionLockedError
-	if !errors.As(err, &lockedErr) {
+	if _, ok := errors.AsType[*SessionLockedError](err); !ok {
 		t.Fatalf("DeleteSessionByID(locked) err = %T %v, want SessionLockedError", err, err)
 	}
 }

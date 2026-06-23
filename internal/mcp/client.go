@@ -759,8 +759,7 @@ func extractHTTPStatusFromError(err error) (int, bool) {
 	if err == nil {
 		return 0, false
 	}
-	var rpcErr *JSONRPCError
-	if errors.As(err, &rpcErr) && rpcErr != nil {
+	if rpcErr, ok := errors.AsType[*JSONRPCError](err); ok && rpcErr != nil {
 		return rpcErr.Code, true
 	}
 	msg := strings.ToLower(err.Error())
