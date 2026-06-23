@@ -73,7 +73,16 @@ func (m *Model) handleAnimTick(msg animTickMsg) tea.Cmd {
 		if n := len(activeToolSpinnerSegments); n > 0 {
 			m.activitySpinnerFrameIndex = (m.activitySpinnerFrameIndex + 1) % n
 		}
-		return tea.Batch(animTickCmd(m.animTickGeneration, animTickSourceVisual, cadence.visualAnimDelay), m.scheduleStreamFlush(0))
+		// Only schedule a stream flush when there's streaming content to sync.
+		// During tool/shell execution (spinner-only, no streaming block), the
+		// spinner frame is already advanced and will be rendered by this tick's
+		// own View() call. Scheduling an extra forced flush just re-renders an
+		// identical transcript frame — pure CPU waste on every terminal.
+		var flushCmd tea.Cmd
+		if m.currentAssistantBlock != nil || m.currentThinkingBlock != nil {
+			flushCmd = m.scheduleStreamFlush(0)
+		}
+		return tea.Batch(animTickCmd(m.animTickGeneration, animTickSourceVisual, cadence.visualAnimDelay), flushCmd)
 	}
 
 	// Visual animation disabled or no active animation.
