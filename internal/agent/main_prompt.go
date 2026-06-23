@@ -147,7 +147,7 @@ func (a *MainAgent) lspDiagnosticPromptBlock() string {
 	if !a.shouldInjectLSPDiagnosticPrompt() {
 		return ""
 	}
-	visible := a.mainLLMVisibleToolNames()
+	visible := a.mainVisibleLLMToolNames()
 	editToolName := visibleEditToolName(visible)
 	if editToolName == "" {
 		editToolName = tools.NameEdit
@@ -158,7 +158,7 @@ func (a *MainAgent) lspDiagnosticPromptBlock() string {
 }
 
 func (a *MainAgent) shouldInjectLSPDiagnosticPrompt() bool {
-	visible := a.mainLLMVisibleToolNames()
+	visible := a.mainVisibleLLMToolNames()
 	if len(visible) == 0 {
 		return false
 	}
@@ -407,6 +407,10 @@ func relativePathWithin(root, path string) (string, bool) {
 	return rel, true
 }
 
+// mainLLMVisibleToolNames returns the tool names of the frozen tool surface
+// (i.e. the tools the model was actually told it can call this turn). Callers
+// that need the live, model-appropriate tool set for prompt rendering should use
+// mainVisibleLLMToolNames instead.
 func (a *MainAgent) mainLLMVisibleToolNames() map[string]struct{} {
 	if a.tools == nil {
 		return nil
@@ -417,6 +421,15 @@ func (a *MainAgent) mainLLMVisibleToolNames() map[string]struct{} {
 		visible[def.Name] = struct{}{}
 	}
 	return visible
+}
+
+// mainVisibleLLMToolNames returns the names of the live, model-appropriate
+// visible tool set (the same source used to build the tool declarations and the
+// capability prompt). Prompt blocks that name a specific tool must derive it
+// from this set so the rendered prompt never references a tool that the current
+// model is not allowed to use.
+func (a *MainAgent) mainVisibleLLMToolNames() map[string]struct{} {
+	return toolNamesFromVisibleTools(a.mainVisibleLLMTools())
 }
 
 func (a *MainAgent) availableSkillsPromptBlock() string {

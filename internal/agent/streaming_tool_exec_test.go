@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,6 +14,39 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+func TestSpeculativeExecutionRejectsInvisibleEditFamilyToolBeforeFileMutation(t *testing.T) {
+	projectRoot := t.TempDir()
+	targetPath := filepath.Join(projectRoot, "target.txt")
+	if err := os.WriteFile(targetPath, []byte("old line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := tools.NewRegistry()
+	registry.Register(tools.PatchTool{BaseDir: projectRoot})
+	registry.Register(tools.EditTool{BaseDir: projectRoot})
+	pipeline := toolExecutionPipeline{
+		registry:    registry,
+		projectRoot: projectRoot,
+		visibleToolNames: func() map[string]struct{} {
+			return map[string]struct{}{tools.NameEdit: {}}
+		},
+	}
+
+	call := message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: json.RawMessage(`{"path":"` + targetPath + `","patch":"@@\n-old line\n+new line\n"}`)}
+	_, err := pipeline.executeSpeculative(t.Context(), call)
+	if err == nil {
+		t.Fatal("executeSpeculative patch on edit-only surface succeeded; want rejection")
+	}
+	if !strings.Contains(err.Error(), "not available for the current model") || !strings.Contains(err.Error(), tools.NameEdit) {
+		t.Fatalf("err = %q, want hidden tool error mentioning edit alternative", err.Error())
+	}
+	got, readErr := os.ReadFile(targetPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != "old line\n" {
+		t.Fatalf("file changed after rejected speculative patch = %q", got)
+	}
+}
 func TestStreamingToolExecutorPromotesCompletedResult(t *testing.T) {
 	ctx := t.Context()
 	var calls atomic.Int32

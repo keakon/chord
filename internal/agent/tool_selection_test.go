@@ -1,8 +1,13 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -464,5 +469,62 @@ func TestFilterEditToolsByModel_ExplicitPatchAllowBeatsEditDeny(t *testing.T) {
 	}
 	if got := ruleset.Evaluate("edit", "file.txt"); got != permission.ActionDeny {
 		t.Fatalf("edit explicit deny should remain in effect, got %s", got)
+	}
+}
+
+// TestExecuteToolCall_RejectsInvisibleEditFamilyTool is a regression test for a
+// bug where a model that was only told about the "edit" tool could still execute
+// "patch" (learned from conversation history) because the execution pipeline
+// consulted the global registry instead of the model-appropriate visible set.
+// The invisible sibling must be rejected with a hint pointing to the visible
+// counterpart. The visible tool must still execute normally.
+func TestExecuteToolCall_RejectsInvisibleEditFamilyTool(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	targetPath := projectRoot + "/target.txt"
+	writeFile(t, targetPath, "old line\n")
+	a.tools.Register(tools.PatchTool{})
+	a.tools.Register(tools.EditTool{})
+	// Allow both edit-family tools at the permission layer so the only thing
+	// hiding patch is the per-model edit-tool selection (model preference), not
+	// a permission deny.
+	a.ruleset = permission.Ruleset{
+		{Permission: tools.NamePatch, Pattern: "*", Action: permission.ActionAllow},
+		{Permission: tools.NameEdit, Pattern: "*", Action: permission.ActionAllow},
+	}
+	// A non-OpenAI edit-only model: live visible set contains edit, not patch.
+	a.llmMu.Lock()
+	a.modelName = "claude-opus-4"
+	a.llmMu.Unlock()
+
+	// Calling the invisible "patch" must be rejected and point to "edit".
+	patchCall := message.ToolCall{
+		ID:   "patch-1",
+		Name: tools.NamePatch,
+		Args: json.RawMessage(`{"path":"` + targetPath + `","patch":"@@\n-old line\n+new line\n"}`),
+	}
+	_, err := a.executeToolCallWithHook(context.Background(), patchCall, false)
+	if err == nil {
+		t.Fatal("execute patch on edit-only model succeeded; want rejection of invisible tool")
+	}
+	if !strings.Contains(err.Error(), "not available for the current model") || !strings.Contains(err.Error(), tools.NameEdit) {
+		t.Fatalf("patch rejection err = %q; want error mentioning unavailability and the edit alternative", err.Error())
+	}
+	// The file must be untouched by the rejected call.
+	if got, err := os.ReadFile(targetPath); err != nil || string(got) != "old line\n" {
+		t.Fatalf("file changed after rejected patch call = %q; want old line", got)
+	}
+
+	// The visible "edit" tool must still work normally.
+	editCall := message.ToolCall{
+		ID:   "edit-1",
+		Name: tools.NameEdit,
+		Args: json.RawMessage(`{"path":"` + targetPath + `","old_string":"old line","new_string":"new line"}`),
+	}
+	if _, err := a.executeToolCallWithHook(context.Background(), editCall, false); err != nil {
+		t.Fatalf("execute edit on edit-only model failed: %v", err)
 	}
 }

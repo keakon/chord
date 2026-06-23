@@ -160,6 +160,7 @@ func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string
 	if oldClient != nil && oldClient != newClient {
 		oldClient.InvalidateRouting("model_client_swapped")
 	}
+	a.clearFrozenToolSurface()
 	a.markRuntimeSurfaceDirty()
 	a.noteContextSurfaceIdentityChanged()
 	if newClient != nil {

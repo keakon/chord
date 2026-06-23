@@ -846,6 +846,7 @@ func TestSwitchModelRefreshesMainEditPatchToolDefinitions(t *testing.T) {
 			if !a.surfaceDirty.Load() {
 				t.Fatal("model switch should mark tool surface dirty")
 			}
+			assertOnlyEditPatchTool(t, a.mainLLMToolDefinitions(), tt.targetWantTool)
 			if err := a.ensureSessionBuilt(context.Background()); err != nil {
 				t.Fatalf("ensureSessionBuilt after switch: %v", err)
 			}

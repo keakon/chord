@@ -53,5 +53,6 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 				s.turn.updatePendingToolCall(call)
 			}
 		},
+		visibleToolNames: s.visibleToolNames,
 	}
 }

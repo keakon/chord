@@ -71,6 +71,7 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		bypassPermission: func(name string) bool {
 			return a.YoloEnabled() && !yoloProtectedPermissionTool(name)
 		},
+		visibleToolNames: a.mainVisibleLLMToolNames,
 	}
 }
 

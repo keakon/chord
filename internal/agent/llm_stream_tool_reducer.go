@@ -14,6 +14,7 @@ type streamToolDeltaReducer struct {
 	turn                         *Turn
 	registry                     *tools.Registry
 	ruleset                      func() permission.Ruleset
+	visibleToolNames             func() map[string]struct{}
 	emit                         func(AgentEvent)
 	flushBeforeTool              func()
 	promoteStreamingActivity     func(source string)
@@ -125,6 +126,9 @@ func (r streamToolDeltaReducer) maybeStartEarlySpeculativeTool(callID string) {
 		ruleset = r.ruleset()
 	}
 	decision := evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(call.ArgsJSON), r.turn.streamingToolCallsBefore(callID))
+	if decision.Allowed {
+		decision = r.checkVisibleSpeculativeTool(callName)
+	}
 	logSpeculativeExecutionDecision(callID, callName, decision)
 	if !decision.Allowed {
 		return
@@ -150,6 +154,9 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 		ruleset = r.ruleset()
 	}
 	decision := evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(argsJSON), r.turn.streamingToolCallsBefore(callID))
+	if decision.Allowed {
+		decision = r.checkVisibleSpeculativeTool(callName)
+	}
 	logSpeculativeExecutionDecision(callID, callName, decision)
 	if decision.Allowed && r.turn.streamingToolExec != nil {
 		r.turn.streamingToolExec.Start(message.ToolCall{ID: callID, Name: callName, Args: json.RawMessage(argsJSON)})
@@ -166,6 +173,17 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 			AgentID:           r.agentID,
 		})
 	}
+}
+
+func (r streamToolDeltaReducer) checkVisibleSpeculativeTool(name string) speculativeExecutionDecision {
+	if r.visibleToolNames == nil {
+		return speculativeExecutionDecision{Allowed: true}
+	}
+	err := (toolExecutionPipeline{visibleToolNames: r.visibleToolNames}).checkVisible(name)
+	if err == nil {
+		return speculativeExecutionDecision{Allowed: true}
+	}
+	return rejectSpeculativeExecution("hidden_tool:" + tools.NormalizeName(name))
 }
 
 func (r streamToolDeltaReducer) handleRollback(delta message.StreamDelta) {

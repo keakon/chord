@@ -45,6 +45,7 @@ type toolExecutionPipeline struct {
 	updatePending                 func(PendingToolCall)
 	reservedToolError             func(string) error
 	bypassPermission              func(string) bool
+	visibleToolNames              func() map[string]struct{}
 }
 
 func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall, fireHook bool) (ToolExecutionResult, error) {
@@ -52,6 +53,12 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
 	if p.reservedToolError != nil {
 		if err := p.reservedToolError(tc.Name); err != nil {
+			return execResult, err
+		}
+	}
+
+	if p.visibleToolNames != nil {
+		if err := p.checkVisible(tc.Name); err != nil {
 			return execResult, err
 		}
 	}
@@ -124,6 +131,11 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
 	tc.Name = tools.NormalizeName(tc.Name)
 	execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
+	if p.visibleToolNames != nil {
+		if err := p.checkVisible(tc.Name); err != nil {
+			return execResult, err
+		}
+	}
 	if err := validateToolArgsAgainstSchema(p.registry, tc.Name, tc.Args); err != nil {
 		return execResult, err
 	}
@@ -201,6 +213,37 @@ func staleWritePathCount(trackedFilePath string, deleteLocks *deleteLockSet) int
 		return 1
 	}
 	return 0
+}
+
+// checkVisible rejects tool calls for edit-family tools (patch ↔ edit) that are
+// not in the current model-appropriate visible set. This enforces the per-model
+// edit tool filter at execution time so a model cannot circumvent the declared
+// tool surface by calling the sibling tool name from conversation history.
+// Tools outside the edit family are governed by the existing permission/registry
+// flow and do not need a secondary visibility gate.
+func (p toolExecutionPipeline) checkVisible(name string) error {
+	visible := p.visibleToolNames()
+	if visible == nil {
+		return nil
+	}
+	n := tools.NormalizeName(name)
+	if n != tools.NamePatch && n != tools.NameEdit {
+		return nil
+	}
+	if _, ok := visible[n]; ok {
+		return nil
+	}
+	switch n {
+	case tools.NamePatch:
+		if _, ok := visible[tools.NameEdit]; ok {
+			return fmt.Errorf("tool %q is not available for the current model. Use %q instead (the %q file-modification tool)", tools.NamePatch, tools.NameEdit, tools.NameEdit)
+		}
+	case tools.NameEdit:
+		if _, ok := visible[tools.NamePatch]; ok {
+			return fmt.Errorf("tool %q is not available for the current model. Use %q instead (the %q file-modification tool)", tools.NameEdit, tools.NamePatch, tools.NamePatch)
+		}
+	}
+	return fmt.Errorf("tool %q is not available for the current model", name)
 }
 
 func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.ToolCall, execResult *ToolExecutionResult) error {

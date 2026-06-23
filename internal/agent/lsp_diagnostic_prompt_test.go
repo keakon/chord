@@ -203,3 +203,36 @@ func TestLSPDiagnosticOverlay_IsDroppedWhenCurrentRoleNoLongerQualifies(t *testi
 		}
 	})
 }
+
+// TestLSPDiagnosticPrompt_UsesLiveVisibleEditToolNameNotFrozenSnapshot is a
+// regression test for a bug where the LSP diagnostic prompt block referenced
+// the edit tool from a stale frozen tool surface (which could contain "patch"
+// left over from a prior model) even after switching to a model that should
+// only see "edit". The rendered prompt must always name the edit tool that the
+// current model is actually allowed to use.
+func TestLSPDiagnosticPrompt_UsesLiveVisibleEditToolNameNotFrozenSnapshot(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.tools.Register(tools.PatchTool{})
+	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.WriteTool{})
+	a.globalConfig = &config.Config{LSP: config.LSPConfig{"gopls": {Command: "gopls"}}}
+
+	// Simulate a stale frozen surface captured while a patch-capable model was
+	// active: it contains patch but not edit. This used to poison the LSP block.
+	stale := []message.ToolDefinition{{Name: tools.NamePatch}, {Name: tools.NameWrite}}
+	a.freezeToolSurfaceFromDefinitions(stale)
+
+	// Switch to a non-OpenAI/edit-only model: the live visible set must contain
+	// edit (and not patch), and the LSP block must reference "edit", not "patch".
+	a.modelName = "claude-opus-4"
+	got := a.buildSystemPrompt()
+	if !strings.Contains(got, "## LSP diagnostic follow-up") {
+		t.Fatalf("expected LSP diagnostic block in prompt: %q", got)
+	}
+	if strings.Contains(got, "`patch`") {
+		t.Fatalf("LSP diagnostic block referenced patch (stale frozen surface leaked): %q", got)
+	}
+	if !strings.Contains(got, "`edit`") {
+		t.Fatalf("LSP diagnostic block did not reference edit for an edit-only model: %q", got)
+	}
+}

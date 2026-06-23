@@ -27,6 +27,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Patch tool now uses soft anchor fallback for @@ headers without specific identifiers, reducing false failures when header format is imprecise
 - Patch tool now detects and rejects patches containing only context lines (no +/- changes) with actionable error messages
 - System prompt and tool schema descriptions now dynamically adapt to visible tools, preventing references to unavailable tools
+- Edit/patch tool visibility is now enforced at execution time, so a model that only sees `edit` cannot execute a hidden `patch` call learned from earlier conversation history; LSP diagnostic guidance also uses the live model-appropriate edit tool name.
 - LSP tool visibility now correctly requires a configured LSP manager instance
 - Sidebar file statistics now prioritize showing complete +/- counts over long filenames, preventing truncation of change metrics
 - Write tool operations now properly tracked in file change summaries with accurate line counts for new files and overwrites
