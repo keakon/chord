@@ -396,6 +396,7 @@ func (c *Client) completeStreamTarget(
 	var apiKey string
 	var resp *message.Response
 	var err error
+	var tracker *visibleStreamTracker
 	modelDone := false
 	for keyAttempt := 0; keyAttempt < keyCount; keyAttempt++ {
 		if err := abortIfCancelled(); err != nil {
@@ -448,7 +449,7 @@ func (c *Client) completeStreamTarget(
 		if t.isFallback && status != nil {
 			attemptReason = status.FallbackReason
 		}
-		tracker := newStreamAttemptTracker(cb, t, apiKey, modelRef, attemptReason, keyAttempt, keyCount)
+		tracker = newStreamAttemptTracker(cb, t, apiKey, modelRef, attemptReason, keyAttempt, keyCount)
 
 		result.hadRequestAttempt = true
 		resp, err = t.impl.CompleteStream(
@@ -620,6 +621,8 @@ func (c *Client) completeStreamTarget(
 			log.Warnf("model returned empty response, trying next key provider=%v model=%v key_suffix=%v stop_reason=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), resp.StopReason)
 			result.setLastErr(t.provider, emptyErr)
 			t.provider.MarkRecovering(apiKey)
+			tracker.EmitRollback(emptyErr.Error())
+			emitRetryError(cb, emptyErr, t.provider.Name(), t.modelID, keySuffix(apiKey))
 			if cb != nil {
 				emitStreamStatus(cb, "retrying_key", "next")
 			}
