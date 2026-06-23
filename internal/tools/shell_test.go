@@ -138,6 +138,7 @@ func TestBashDescriptionIncludesToolSpecificHintsOnlyWhenVisible(t *testing.T) {
 		"For explicit file deletions, prefer `delete`; use shell removal only when shell semantics are actually required, such as directory trees or batch cleanup.",
 		"Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable.",
 		"If this turn needs the command's stdout/stderr, use this tool.",
+		"For long one-shot commands whose result is needed before continuing, use shell with an explicit timeout rather than spawn.",
 		"Only set timeout when you need a value other than the default 30s.",
 	} {
 		if !strings.Contains(withoutHelpers, want) {

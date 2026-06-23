@@ -249,6 +249,7 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 		"Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable.",
 		"This tool is exclusively for foreground execution — all background process management uses the spawn tool.",
 		"If this turn needs the command's stdout/stderr, use this tool.",
+		"For long one-shot commands whose result is needed before continuing, use shell with an explicit timeout rather than spawn.",
 		"Only set timeout when you need a value other than the default 30s.",
 	)
 	if _, ok := visible[NameSpawn]; ok {
