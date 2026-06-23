@@ -155,9 +155,22 @@ type thinkingStreamSettledCache struct {
 }
 
 const (
-	streamCardKindAssistant uint8 = 1
-	streamCardKindThinking  uint8 = 2
+	streamCardKindAssistant    uint8 = 1
+	streamCardKindThinking     uint8 = 2
+	cardRailWidth                    = 1
+	thinkingContentIndentWidth       = 2
 )
+
+func thinkingMarkdownContentWidth(innerWidth int) int {
+	contentWidth := innerWidth - thinkingContentIndentWidth - ThinkingCardStyle.GetPaddingRight() - cardRailWidth
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
+	if contentWidth > maxProseWidth {
+		contentWidth = maxProseWidth
+	}
+	return contentWidth
+}
 
 // streamCardHeadKey identifies the inputs that affect the card-wrapped output
 // of a streaming card's stable head. When any component changes the cached
@@ -749,13 +762,16 @@ func (b *Block) renderAssistant(width int) []string {
 	if hasThinking {
 		tStyle := ThinkingCardStyle
 		// Focus is indicated by the rail; the card surface stays the same.
-		// renderThinkingParts with the same innerWidth
-		tLines := b.renderThinkingParts(innerWidth)
+		thinkingInnerWidth := innerWidth - tStyle.GetHorizontalPadding() + style.GetHorizontalPadding()
+		if thinkingInnerWidth < 10 {
+			thinkingInnerWidth = 10
+		}
+		tLines := b.renderThinkingParts(thinkingInnerWidth)
 		if len(tLines) > 0 {
 			// Re-insert card background after inner ANSI resets.
 			thinkBg := currentTheme.ThinkingCardBg
 			tLines = preserveCardBg(tLines, thinkBg)
-			out = append(out, renderPrewrappedCard(tStyle, innerWidth, tLines, thinkBg, railANSISeq("thinking", b.Focused))...)
+			out = append(out, renderPrewrappedCard(tStyle, thinkingInnerWidth, tLines, thinkBg, railANSISeq("thinking", b.Focused))...)
 			out = append(out, "") // margin between blocks
 		}
 	}
@@ -1144,13 +1160,7 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 		return nil
 	}
 	innerWidth = clampCardInnerWidth(innerWidth, ThinkingCardStyle, maxProseWidth)
-	contentWidth := innerWidth - 2
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
-	if contentWidth > maxProseWidth {
-		contentWidth = maxProseWidth
-	}
+	contentWidth := thinkingMarkdownContentWidth(innerWidth)
 	// Build a single slice: header, gap, then for each part both title and content lines.
 	// Previously rawLines (titles) and tempLines (content) were merged by rawLines = tempLines,
 	// which dropped the title lines; now we append everything to one slice.
@@ -1201,13 +1211,7 @@ func (b *Block) renderThinking(width int) []string {
 		innerWidth = 10
 	}
 	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
-	contentWidth := innerWidth - 2
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
-	if contentWidth > maxProseWidth {
-		contentWidth = maxProseWidth
-	}
+	contentWidth := thinkingMarkdownContentWidth(innerWidth)
 	content := removeTrailingCursorGlyph(b.Content)
 	// preprocessThinkingMarkdown runs inside renderThinkingMarkdownPart; do not
 	// also run it here — the regex scan is O(content) and this renders on every

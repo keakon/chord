@@ -692,7 +692,7 @@ func TestExtractSelectionTextAssistantCodeBlockSkipsDisplayOnlyContinuationInden
 		EndLine:      codeLineIdx[1],
 		EndCol:       999,
 	})
-	want := "func TestCancelCurrentTurnRoutesToFocusedSubAgentAndP\nersistsCancelledToolResult(t *testing.T) {}"
+	want := "func TestCancelCurrentTurnRoutesToFocusedSubAgentAnd\nPersistsCancelledToolResult(t *testing.T) {}"
 	if got != want {
 		t.Fatalf("ExtractSelectionText assistant code\n got %q\nwant %q", got, want)
 	}

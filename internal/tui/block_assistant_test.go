@@ -632,7 +632,7 @@ func TestRenderAssistantCodeBlockWrappedContinuationIndented(t *testing.T) {
 	}
 	got := strings.TrimSpace(codeLines[1])
 	got = strings.TrimLeft(got, "│ ")
-	if !strings.HasPrefix(got, "sistsCancelledToolResult") && !strings.HasPrefix(got, "ersistsCancelledToolResult") {
+	if !strings.HasPrefix(got, "PersistsCancelledToolResult") && !strings.HasPrefix(got, "sistsCancelledToolResult") && !strings.HasPrefix(got, "ersistsCancelledToolResult") {
 		t.Fatalf("continuation content got %q", got)
 	}
 }
@@ -742,7 +742,8 @@ func TestRenderAssistantInlineMarkdownKeepsCardBackgroundOnTrailingPadding(t *te
 
 	assistantBg := colorOfTheme(currentTheme.AssistantCardBg)
 	trailingSpaces := 0
-	for i := contentEndCol + 1; i < len(cells); i++ {
+	cardEnd := len(cells) - AssistantCardStyle.GetMarginRight()
+	for i := contentEndCol + 1; i < cardEnd; i++ {
 		cell := cells[i]
 		if cell.IsZero() || cell.Content != " " {
 			continue
@@ -1090,5 +1091,78 @@ func TestStreamingCardHeadCacheMatchesColdRender(t *testing.T) {
 				t.Fatalf("warm streaming render diverged from cold render\nwarm lines=%d cold lines=%d", len(got), len(want))
 			}
 		})
+	}
+}
+
+func TestRenderAssistantThinkingPartsStayWithinViewportWidth(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:            2,
+		Type:          BlockAssistant,
+		ThinkingParts: []string{strings.Repeat("thinking content ", 20)},
+		Content:       "done",
+	}
+
+	const width = 80
+	viewport := NewViewport(width, 20)
+	viewport.AppendBlock(block)
+	for i, line := range strings.Split(viewport.Render("", nil, -1, 0, ""), "\n") {
+		if got := ansi.StringWidth(stripANSI(line)); got > width {
+			t.Fatalf("rendered line %d width = %d, want <= %d; line=%q", i, got, width, stripANSI(line))
+		}
+	}
+}
+
+func TestRenderThinkingLongLinesKeepRightPadding(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:      261,
+		Type:    BlockThinking,
+		Content: strings.Repeat("x", 200),
+	}
+
+	const width = 80
+	viewport := NewViewport(width, 20)
+	viewport.AppendBlock(block)
+	var target string
+	for _, line := range strings.Split(viewport.Render("", nil, -1, 0, ""), "\n") {
+		if strings.Contains(stripANSI(line), "xxx") {
+			target = line
+			break
+		}
+	}
+	if target == "" {
+		t.Fatalf("failed to locate thinking content line")
+	}
+
+	buf := newScreenBuffer(width, 1)
+	uv.NewStyledString(target).Draw(buf, buf.Bounds())
+	cells := buf.Line(0)
+	lastContent := -1
+	for i, cell := range cells {
+		if cell.IsZero() || cell.Content == " " || cell.Content == "│" {
+			continue
+		}
+		lastContent = i
+	}
+	if lastContent < 0 {
+		t.Fatalf("failed to locate non-space thinking content in %q", stripANSI(target))
+	}
+
+	thinkingBg := colorOfTheme(currentTheme.ThinkingCardBg)
+	checked := 0
+	wantPadding := 2 + ThinkingCardStyle.GetPaddingRight()
+	for i := lastContent + 1; i < len(cells) && checked < wantPadding; i++ {
+		cell := cells[i]
+		if cell.IsZero() || cell.Content != " " {
+			continue
+		}
+		checked++
+		if !colorsEqual(cell.Style.Bg, thinkingBg) {
+			t.Fatalf("right padding cell at col %d background = %v, want thinking bg %v", i, cell.Style.Bg, thinkingBg)
+		}
+	}
+	if checked < wantPadding {
+		t.Fatalf("right padding spaces after content = %d, want at least %d; line=%q", checked, wantPadding, stripANSI(target))
 	}
 }

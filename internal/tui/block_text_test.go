@@ -542,7 +542,9 @@ func TestFocusedAssistantCardKeepsBaseBackground(t *testing.T) {
 	}
 	baseBg := lipgloss.Color(currentTheme.AssistantCardBg)
 	var checked int
-	for _, cell := range cells {
+	cardEnd := len(cells) - AssistantCardStyle.GetMarginRight()
+	for i := 0; i < cardEnd; i++ {
+		cell := cells[i]
 		if cell.IsZero() || cell.Content != " " {
 			continue
 		}

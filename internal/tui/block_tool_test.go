@@ -600,7 +600,8 @@ func TestToolResultWrappedContinuationKeepsCardBackgroundOnTrailingPadding(t *te
 
 	toolBg := colorOfTheme(currentTheme.ToolCallBg)
 	trailingSpaces := 0
-	for i := contentEndCol + 1; i < len(cells); i++ {
+	cardEnd := len(cells) - ToolBlockStyle.GetMarginRight()
+	for i := contentEndCol + 1; i < cardEnd; i++ {
 		cell := cells[i]
 		if cell.IsZero() || cell.Content != " " {
 			continue
@@ -1387,7 +1388,8 @@ func TestExpandedBashErrorKeepsToolCardBackgroundAcrossWrappedErrorBody(t *testi
 
 	toolBg := colorOfTheme(currentTheme.ToolCallBg)
 	checked := 0
-	for i := contentEndCol + 1; i < len(cells); i++ {
+	cardEnd := len(cells) - ToolBlockStyle.GetMarginRight()
+	for i := contentEndCol + 1; i < cardEnd; i++ {
 		cell := cells[i]
 		if cell.IsZero() || cell.Content != " " {
 			continue

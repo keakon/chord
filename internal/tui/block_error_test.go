@@ -71,7 +71,8 @@ func TestRenderErrorCardMessageLineKeepsBackgroundOnTrailingPadding(t *testing.T
 
 	errorBg := colorOfTheme(currentTheme.ErrorCardBg)
 	trailingSpaces := 0
-	for i := msgEndCol + 1; i < len(cells); i++ {
+	cardEnd := len(cells) - ErrorCardStyle.GetMarginRight()
+	for i := msgEndCol + 1; i < cardEnd; i++ {
 		cell := cells[i]
 		if cell.IsZero() || cell.Content != " " {
 			continue

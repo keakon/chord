@@ -78,9 +78,8 @@ func applyBlockStyles(t Theme) {
 		Bold(true).
 		Foreground(lipgloss.Color(t.ToolCallFg))
 
-	// Tool cards share the transcript card's vertical padding and outer margin
-	// so consecutive same-color tool calls remain visually distinct; only the
-	// right padding is wider to protect status badges and trailing content.
+	// Tool cards share the transcript card's padding and outer margin so
+	// consecutive same-color tool calls remain visually distinct.
 	ToolBlockStyle = baseCardStyle.
 		PaddingRight(2).
 		Background(lipgloss.Color(t.ToolCallBg))
@@ -163,7 +162,7 @@ func applyBlockStyles(t Theme) {
 
 func transcriptCardStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
-		Padding(1, 1).
+		Padding(1, 2, 1, 1).
 		MarginLeft(1).
 		MarginBottom(1)
 }

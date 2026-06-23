@@ -11,11 +11,14 @@ func TestTranscriptCardStylesShareBaseSpacing(t *testing.T) {
 
 	base := transcriptCardStyle()
 	baseTop, baseRight, baseBottom, baseLeft := base.GetPadding()
-	if baseTop != 1 || baseRight != 1 || baseBottom != 1 || baseLeft != 1 {
-		t.Fatalf("base transcript card padding = (%d,%d,%d,%d), want (1,1,1,1)", baseTop, baseRight, baseBottom, baseLeft)
+	if baseTop != 1 || baseRight != 2 || baseBottom != 1 || baseLeft != 1 {
+		t.Fatalf("base transcript card padding = (%d,%d,%d,%d), want (1,2,1,1)", baseTop, baseRight, baseBottom, baseLeft)
 	}
 	if got := base.GetMarginLeft(); got != 1 {
 		t.Fatalf("base transcript card left margin = %d, want 1", got)
+	}
+	if got := base.GetMarginRight(); got != 0 {
+		t.Fatalf("base transcript card right margin = %d, want 0", got)
 	}
 	if got := base.GetMarginBottom(); got != 1 {
 		t.Fatalf("base transcript card bottom margin = %d, want 1", got)
@@ -27,12 +30,12 @@ func TestTranscriptCardStylesShareBaseSpacing(t *testing.T) {
 		wantPadding  [4]int
 		wantLeftEdge int
 	}{
-		{name: "user", style: UserCardStyle, wantPadding: [4]int{1, 1, 1, 1}, wantLeftEdge: 2},
-		{name: "assistant", style: AssistantCardStyle, wantPadding: [4]int{1, 1, 1, 1}, wantLeftEdge: 2},
-		{name: "compaction summary", style: CompactionSummaryCardStyle, wantPadding: [4]int{1, 1, 1, 1}, wantLeftEdge: 2},
-		{name: "error", style: ErrorCardStyle, wantPadding: [4]int{1, 1, 1, 1}, wantLeftEdge: 2},
+		{name: "user", style: UserCardStyle, wantPadding: [4]int{1, 2, 1, 1}, wantLeftEdge: 2},
+		{name: "assistant", style: AssistantCardStyle, wantPadding: [4]int{1, 2, 1, 1}, wantLeftEdge: 2},
+		{name: "compaction summary", style: CompactionSummaryCardStyle, wantPadding: [4]int{1, 2, 1, 1}, wantLeftEdge: 2},
+		{name: "error", style: ErrorCardStyle, wantPadding: [4]int{1, 2, 1, 1}, wantLeftEdge: 2},
 		{name: "tool", style: ToolBlockStyle, wantPadding: [4]int{1, 2, 1, 1}, wantLeftEdge: 2},
-		{name: "thinking", style: ThinkingCardStyle, wantPadding: [4]int{1, 1, 1, 2}, wantLeftEdge: 3},
+		{name: "thinking", style: ThinkingCardStyle, wantPadding: [4]int{1, 2, 1, 2}, wantLeftEdge: 3},
 	}
 	for _, tt := range tests {
 		top, right, bottom, left := tt.style.GetPadding()
@@ -42,6 +45,9 @@ func TestTranscriptCardStylesShareBaseSpacing(t *testing.T) {
 		}
 		if got := tt.style.GetMarginLeft(); got != base.GetMarginLeft() {
 			t.Fatalf("%s left margin = %d, want shared base margin %d", tt.name, got, base.GetMarginLeft())
+		}
+		if got := tt.style.GetMarginRight(); got != base.GetMarginRight() {
+			t.Fatalf("%s right margin = %d, want shared base margin %d", tt.name, got, base.GetMarginRight())
 		}
 		if got := tt.style.GetMarginBottom(); got != base.GetMarginBottom() {
 			t.Fatalf("%s bottom margin = %d, want shared base margin %d", tt.name, got, base.GetMarginBottom())
