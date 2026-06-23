@@ -575,16 +575,6 @@ func (m *Model) renderStatusBar() string {
 		)
 		leftWidth = lipgloss.Width(leftSide)
 	}
-	if inputs.NextEscHint != "" {
-		leftSide = lipgloss.JoinHorizontal(
-			lipgloss.Center,
-			leftSide,
-			DimStyle.Render("  ·  "),
-			DimStyle.Render("esc ⇢ "+inputs.NextEscHint),
-		)
-		leftWidth = lipgloss.Width(leftSide)
-	}
-
 	// Content width: leave margins so the closing paren of elapsed "(Ns)" / "(NmNs)" is not covered by scrollbar.
 	effectiveWidth := m.width - statusBarLeftMargin - statusBarRightMargin
 	if effectiveWidth < 0 {
@@ -595,6 +585,17 @@ func (m *Model) renderStatusBar() string {
 	sessionValue := sessionID
 	activityText, activityWidth := m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)
 	rightSide, rightStart, rightWidth := m.renderStatusBarRightSide(effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue)
+	if inputs.NextEscHint != "" && statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth, inputs.NextEscHint) {
+		leftSide = lipgloss.JoinHorizontal(
+			lipgloss.Center,
+			leftSide,
+			DimStyle.Render("  ·  "),
+			DimStyle.Render("esc ⇢ "+inputs.NextEscHint),
+		)
+		leftWidth = lipgloss.Width(leftSide)
+		activityText, activityWidth = m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)
+		rightSide, rightStart, rightWidth = m.renderStatusBarRightSide(effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue)
+	}
 	separatorWidth := lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
 	if activityWidth == 0 && leftWidth <= rightStart {
 		if m.statusPath.display != "" {
@@ -637,6 +638,39 @@ func (m *Model) renderStatusBar() string {
 	statusLine := renderStatusBarPlacedLine(leftSide, leftWidth, rightStart, rightSide, activityText, activityWidth, effectiveWidth)
 	padded := strings.Repeat(" ", statusBarLeftMargin) + statusLine + strings.Repeat(" ", statusBarRightMargin)
 	return StatusBarStyle.Width(m.width).Render(padded)
+}
+
+func statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth int, hint string) bool {
+	escWidth := lipgloss.Width(DimStyle.Render("  ·  ")) + lipgloss.Width(DimStyle.Render("esc ⇢ "+hint))
+	leftWithEsc := leftWidth + escWidth
+	if activityWidth == 0 {
+		return leftWithEsc <= rightStart
+	}
+	activityStart, activityEnd := statusBarActivitySpan(leftWidth, rightStart, activityWidth, effectiveWidth)
+	return leftWithEsc <= activityStart && rightStart >= activityEnd
+}
+
+func statusBarActivitySpan(leftWidth, rightStart, activityWidth, effectiveWidth int) (int, int) {
+	if effectiveWidth <= 0 || activityWidth <= 0 {
+		return 0, 0
+	}
+	activityStart := (effectiveWidth - activityWidth) / 2
+	minStart := leftWidth + 2
+	maxStart := rightStart - activityWidth - 2
+	if maxStart < minStart {
+		maxStart = minStart
+	}
+	if activityStart < minStart {
+		activityStart = minStart
+	}
+	if activityStart > maxStart {
+		activityStart = maxStart
+	}
+	if activityStart < 0 {
+		activityStart = 0
+	}
+	activityEnd := min(activityStart+activityWidth, effectiveWidth)
+	return activityStart, activityEnd
 }
 
 func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWidth, leftWidth int) (string, int) {
@@ -817,22 +851,7 @@ func renderStatusBarPlacedLine(leftSide string, leftWidth, rightStart int, right
 	activityStart := 0
 	activityEnd := 0
 	if activityText != "" {
-		activityStart = (effectiveWidth - activityWidth) / 2
-		minStart := leftWidth + 2
-		maxStart := rightStart - activityWidth - 2
-		if maxStart < minStart {
-			maxStart = minStart
-		}
-		if activityStart < minStart {
-			activityStart = minStart
-		}
-		if activityStart > maxStart {
-			activityStart = maxStart
-		}
-		if activityStart < 0 {
-			activityStart = 0
-		}
-		activityEnd = min(activityStart+activityWidth, effectiveWidth)
+		activityStart, activityEnd = statusBarActivitySpan(leftWidth, rightStart, activityWidth, effectiveWidth)
 	}
 
 	leftWidth = min(leftWidth, effectiveWidth)

@@ -164,6 +164,20 @@ func TestRenderStatusBarShowsBusyEscHint(t *testing.T) {
 	}
 }
 
+func TestRenderStatusBarHidesEscHintFirstWhenNarrow(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeNormal
+	m.workingDir = "/tmp/" + strings.Repeat("very-long-directory-name/", 8) + "project"
+	m.activities["main"] = agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityConnecting}
+	rendered := stripANSI(m.renderStatusBar())
+	if strings.Contains(rendered, "esc ⇢ cancel turn") {
+		t.Fatalf("status bar = %q, did not want narrow esc hint", rendered)
+	}
+	if !strings.Contains(rendered, "↓ 0 B") {
+		t.Fatalf("status bar = %q, want activity text preserved", rendered)
+	}
+}
+
 func TestRenderStatusBarShowsSearchModeEscHint(t *testing.T) {
 	m := NewModelWithSize(nil, 160, 24)
 	m.mode = ModeSearch
