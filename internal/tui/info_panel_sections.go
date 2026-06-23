@@ -559,6 +559,11 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 			if availName > 0 {
 				availName--
 			}
+			// Keep a spare trailing cell after the stats so the final digit does not
+			// land on the panel edge and get clipped by the screen compositor.
+			if availName > 0 {
+				availName--
+			}
 		}
 		nameStyle := InfoPanelDim
 		if fe.Deleted {

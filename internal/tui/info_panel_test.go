@@ -1111,6 +1111,25 @@ func TestRenderInfoPanelEditedFilesPrioritizesStatsWhenNarrow(t *testing.T) {
 	}
 }
 
+func TestRenderInfoPanelEditedFilesStatsDoNotTouchRightEdge(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	m.sidebar.Update(nil, "main", "builder")
+	m.sidebar.AddFileEdit("main", "/tmp/long_fixture_filename_for_stats.go", 12, 34)
+
+	block := stripANSI(m.buildInfoPanelFilesBlock(30))
+	lines := strings.Split(block, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("CHANGED FILES block should include a file row, got %q", block)
+	}
+	if !strings.Contains(lines[1], "+12 -34") {
+		t.Fatalf("CHANGED FILES row should keep full stats, got %q", lines[1])
+	}
+	if !strings.HasSuffix(lines[1], "+12 -34 ") {
+		t.Fatalf("CHANGED FILES stats should leave a trailing safety cell, got %q", lines[1])
+	}
+}
+
 func TestRenderInfoPanelChangedFilesDeletedFileUsesStrikethroughWithoutStats(t *testing.T) {
 	backend := newInfoPanelAgent()
 	m := NewModel(backend)
