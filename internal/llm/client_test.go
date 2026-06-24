@@ -541,6 +541,58 @@ func testProviderConfigWithKeys(name, model string, keys []string) *ProviderConf
 	}, keys)
 }
 
+func TestClientNoteRunningModelRefUpdatesInFlightRunningRef(t *testing.T) {
+	cfg := testProviderConfig("provider", "primary")
+	c := NewClient(cfg, &scriptedProvider{}, "primary", 128000, "")
+
+	c.NoteRunningModelRef("fallback-provider/fallback-model")
+
+	if got := c.RunningModelRef(); got != "fallback-provider/fallback-model" {
+		t.Fatalf("RunningModelRef() = %q, want fallback-provider/fallback-model", got)
+	}
+	st := c.LastCallStatus()
+	if st.SelectedModelRef != "provider/primary" {
+		t.Fatalf("SelectedModelRef = %q, want provider/primary", st.SelectedModelRef)
+	}
+	if st.RunningModelRef != "fallback-provider/fallback-model" {
+		t.Fatalf("RunningModelRef status = %q, want fallback-provider/fallback-model", st.RunningModelRef)
+	}
+}
+
+func TestClientNoteRunningModelRefRefreshesLimitsWhenRunningRefChanges(t *testing.T) {
+	primaryCfg := testProviderConfig("primary", "model-a")
+	fallbackACfg := NewProviderConfig("fallback-a", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model-b": {Limit: config.ModelLimit{Context: 200000, Input: 150000, Output: 32000}},
+		},
+	}, []string{"key-a"})
+	fallbackBCfg := NewProviderConfig("fallback-b", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model-c": {Limit: config.ModelLimit{Context: 400000, Input: 272000, Output: 128000}},
+		},
+	}, []string{"key-b"})
+	c := NewClient(primaryCfg, &scriptedProvider{}, "model-a", 4096, "")
+	c.SetModelPool([]FallbackModel{
+		{ProviderConfig: primaryCfg, ProviderImpl: &scriptedProvider{}, ModelID: "model-a", MaxTokens: 4096, ContextLimit: 128000, InputLimit: 128000},
+		{ProviderConfig: fallbackACfg, ProviderImpl: &scriptedProvider{}, ModelID: "model-b", MaxTokens: 4096, ContextLimit: 200000, InputLimit: 150000},
+		{ProviderConfig: fallbackBCfg, ProviderImpl: &scriptedProvider{}, ModelID: "model-c", MaxTokens: 4096, ContextLimit: 400000, InputLimit: 272000},
+	}, 0)
+
+	c.NoteRunningModelRef("fallback-a/model-b")
+	st := c.LastCallStatus()
+	if st.RunningContextLimit != 200000 || st.RunningInputLimit != 150000 {
+		t.Fatalf("first running limits = %d/%d, want 200000/150000", st.RunningContextLimit, st.RunningInputLimit)
+	}
+
+	c.NoteRunningModelRef("fallback-b/model-c")
+	st = c.LastCallStatus()
+	if st.RunningContextLimit != 400000 || st.RunningInputLimit != 272000 {
+		t.Fatalf("second running limits = %d/%d, want 400000/272000", st.RunningContextLimit, st.RunningInputLimit)
+	}
+}
+
 func testOfficialOpenAIProviderConfigWithKeys(name, model string, keys []string) *ProviderConfig {
 	return NewProviderConfig(name, config.ProviderConfig{
 		Type:        config.ProviderTypeResponses,
@@ -758,6 +810,7 @@ func TestClient_ModelPoolNoUsableKeysDoesNotStopRetryRounds(t *testing.T) {
 
 	disabledCfg.MarkInvalidated("disabled-key")
 	primaryCfg.retryDelayBase = -1
+	var statuses []message.StatusDelta
 
 	resp, err := callCompleteStreamWithRetryForTest(
 		&Client{},
@@ -770,7 +823,11 @@ func TestClient_ModelPoolNoUsableKeysDoesNotStopRetryRounds(t *testing.T) {
 		"",
 		[]message.Message{{Role: "user", Content: "hi"}},
 		nil,
-		nil,
+		func(delta message.StreamDelta) {
+			if delta.Type == message.StreamDeltaStatus && delta.Status != nil {
+				statuses = append(statuses, *delta.Status)
+			}
+		},
 		true,
 		[]FallbackModel{{
 			ProviderConfig: fallbackCfg,
@@ -802,6 +859,16 @@ func TestClient_ModelPoolNoUsableKeysDoesNotStopRetryRounds(t *testing.T) {
 	}
 	if got := len(disabledImpl.apiKeys); got != 0 {
 		t.Fatalf("disabled provider should not be called, got %d calls", got)
+	}
+	foundRetryStartRef := false
+	for _, st := range statuses {
+		if st.Type == "retrying" && st.Detail == "round 2" && st.ModelRef == "linux/gpt-5.5" {
+			foundRetryStartRef = true
+			break
+		}
+	}
+	if !foundRetryStartRef {
+		t.Fatalf("missing round retry status with start model ref; statuses=%#v", statuses)
 	}
 }
 

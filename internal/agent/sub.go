@@ -611,6 +611,25 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 
 func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity func(string), scrubThinkingMarkers bool) *llmStreamReducer {
 	streamReducer := &llmStreamReducer{}
+	updateRunningModelRef := func(status *message.StatusDelta) {
+		if status == nil {
+			return
+		}
+		runningRef := strings.TrimSpace(status.ModelRef)
+		if runningRef == "" {
+			return
+		}
+		client, _ := s.llmSnapshot()
+		if client == nil {
+			return
+		}
+		prev := strings.TrimSpace(client.RunningModelRef())
+		client.NoteRunningModelRef(runningRef)
+		if runningRef == prev {
+			return
+		}
+		s.parent.emitToTUI(RunningModelChangedEvent{AgentID: s.instanceID, ProviderModelRef: client.PrimaryModelRef(), RunningModelRef: runningRef})
+	}
 	streamReducer.content = streamContentReducer{
 		agentID:               s.instanceID,
 		emit:                  s.parent.emitToTUI,
@@ -638,6 +657,8 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		s.parent.emitActivity(s.instanceID, activity, detail)
 	}
 	streamReducer.promoteStreamingActivity = promoteStreamingActivity
+	streamReducer.beforeStatus = updateRunningModelRef
+	streamReducer.onKeyConfirmed = updateRunningModelRef
 	streamReducer.onRetryError = func(err error, provider, model, keySuffix string) {
 		s.parent.emitToTUI(ErrorEvent{
 			Err:      err,

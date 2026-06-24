@@ -16,7 +16,11 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		if m.agent != nil && m.runningModelEventMatchesFocus(evt) && strings.TrimSpace(m.pendingPoolSwitch.to) == strings.TrimSpace(m.agent.CurrentPoolName()) {
 			m.pendingPoolSwitch = pendingPoolSwitchState{}
 		}
-		effects.refreshSidebar = true
+		refreshSidebar := true
+		if strings.TrimSpace(evt.AgentID) != "" {
+			refreshSidebar = !m.sidebar.UpdateSubAgentModelRefs(evt.AgentID, evt.ProviderModelRef, evt.RunningModelRef)
+		}
+		effects.refreshSidebar = refreshSidebar
 		effects.invalidateUsage = true
 		return true, effects
 	case agent.ModelSelectEvent:

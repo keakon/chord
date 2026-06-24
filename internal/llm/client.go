@@ -552,6 +552,29 @@ func (c *Client) RunningModelRef() string {
 	return st.SelectedModelRef
 }
 
+// NoteRunningModelRef records the model ref currently attempted by an in-flight
+// streaming request. It lets status surfaces reflect fallback routing before the
+// request completes and LastCallStatus is replaced by the final call status.
+func (c *Client) NoteRunningModelRef(ref string) {
+	ref = strings.TrimSpace(ref)
+	if c == nil || ref == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	prevRef := strings.TrimSpace(c.lastCallStatus.RunningModelRef)
+	c.lastCallStatus.RunningModelRef = ref
+	if c.lastCallStatus.SelectedModelRef == "" {
+		c.lastCallStatus.SelectedModelRef = providerModelRef(c.provider, c.modelID)
+	}
+	if ref != prevRef || c.lastCallStatus.RunningContextLimit <= 0 {
+		c.lastCallStatus.RunningContextLimit = c.contextLimitForModelRefLocked(ref)
+	}
+	if ref != prevRef || c.lastCallStatus.RunningInputLimit <= 0 {
+		c.lastCallStatus.RunningInputLimit = c.inputLimitForModelRefLocked(ref)
+	}
+}
+
 // ServiceTier returns the configured runtime request tier for this client.
 func (c *Client) ServiceTier() config.ServiceTier {
 	c.mu.RLock()

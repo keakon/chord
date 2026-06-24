@@ -5078,6 +5078,35 @@ func TestSidebarSubAgentModelRefs(t *testing.T) {
 	}
 }
 
+func TestRunningModelChangedEventUpdatesSubAgentSidebarBeforeSnapshot(t *testing.T) {
+	backend := &sessionControlAgent{
+		events: make(chan agent.AgentEvent, 1),
+		subAgents: []agent.SubAgentInfo{{
+			InstanceID:   "agent-1",
+			AgentDefName: "reviewer",
+			TaskDesc:     "check code",
+			SelectedRef:  "worker/primary",
+			RunningRef:   "worker/primary",
+		}},
+	}
+	m := NewModel(backend)
+	m.refreshSidebar()
+
+	m.handleAgentEvent(agentEventMsg{event: agent.RunningModelChangedEvent{
+		AgentID:          "agent-1",
+		ProviderModelRef: "worker/primary",
+		RunningModelRef:  "worker/fallback",
+	}})
+
+	selected, running, ok := m.sidebar.SubAgentModelRefs("agent-1")
+	if !ok {
+		t.Fatal("expected sidebar model refs for agent-1")
+	}
+	if selected != "worker/primary" || running != "worker/fallback" {
+		t.Fatalf("sidebar refs = %q/%q, want worker/primary/worker/fallback", selected, running)
+	}
+}
+
 // Narrow status bar model pill matches InfoPanel MODEL: AgentForTUI.RunningModelRef() only
 // (not sidebar-cached sub refs), so it follows backend focus the same way as the right panel.
 func TestNarrowStatusBarModelUsesRunningModelRefNotSidebarCache(t *testing.T) {

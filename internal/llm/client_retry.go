@@ -703,6 +703,10 @@ func (c *Client) completeStreamWithRetry(
 		}
 		// Apply backoff delay only between full retry rounds.
 		if round > 0 {
+			startDisplayRef := providerModelRef(startProvider, startModelID)
+			if variantForStart != "" {
+				startDisplayRef += "@" + variantForStart
+			}
 			waitingForCooling := isAllKeysCoolingError(lastErr) && pendingRoundWait > 0
 			delay := roundRetryDelay(startProvider.GetRetryDelay(retryCount), pendingRoundWait)
 			if waitingForCooling {
@@ -712,7 +716,7 @@ func (c *Client) completeStreamWithRetry(
 					if err := abortIfCancelled(); err != nil {
 						return nil, err
 					}
-					emitStreamStatus(cb, "cooling", delay.Round(time.Second).String())
+					emitStreamStatusDelta(cb, message.StatusDelta{Type: "cooling", Detail: delay.Round(time.Second).String(), ModelRef: startDisplayRef})
 				}
 			} else {
 				log.Infof("retrying LLM request round attempt=%v retry_count=%v delay=%v error=%v", round+1, retryCount, delay, lastErr)
@@ -724,8 +728,9 @@ func (c *Client) completeStreamWithRetry(
 					cb(message.StreamDelta{
 						Type: "status",
 						Status: &message.StatusDelta{
-							Type:   "retrying",
-							Detail: detail,
+							Type:     "retrying",
+							Detail:   detail,
+							ModelRef: startDisplayRef,
 						},
 					})
 				}

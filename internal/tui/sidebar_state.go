@@ -238,6 +238,30 @@ func (s *Sidebar) SubAgentModelRefs(agentID string) (selected, running string, o
 	return "", "", false
 }
 
+// UpdateSubAgentModelRefs updates cached provider/running model refs for a
+// visible or completed SubAgent row. It is used by streaming fallback events,
+// which can arrive before GetSubAgents returns an updated final snapshot.
+func (s *Sidebar) UpdateSubAgentModelRefs(agentID, selected, running string) bool {
+	if agentID == "" || agentID == "main" {
+		return false
+	}
+	selected = strings.TrimSpace(selected)
+	running = strings.TrimSpace(running)
+	for i := range s.agents {
+		if s.agents[i].ID != agentID {
+			continue
+		}
+		if selected != "" {
+			s.agents[i].SelectedRef = selected
+		}
+		if running != "" {
+			s.agents[i].RunningRef = running
+		}
+		return true
+	}
+	return false
+}
+
 // SubAgentLabels returns cached display fields for a SubAgent sidebar row (including
 // completed agents). ok is false if agentID is not a known sub entry.
 func (s *Sidebar) SubAgentLabels(agentID string) (agentDefName, taskDesc string, ok bool) {
