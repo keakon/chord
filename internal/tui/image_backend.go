@@ -176,30 +176,6 @@ func detectTerminalImageCapabilitiesFromProcessEnv() TerminalImageCapabilities {
 	return detectTerminalImageCapabilitiesFromMap(env)
 }
 
-func detectFocusResizeFreezeFromEnv() bool {
-	env := make(map[string]string, len(os.Environ()))
-	for _, kv := range os.Environ() {
-		key, value, ok := strings.Cut(kv, "=")
-		if !ok {
-			continue
-		}
-		env[key] = value
-	}
-	return detectFocusResizeFreezeFromMap(env)
-}
-
-func detectFocusResizeFreezeFromMap(env map[string]string) bool {
-	if env == nil {
-		return false
-	}
-	if strings.TrimSpace(env["CMUX_SOCKET_PATH"]) != "" || strings.TrimSpace(env["CMUX_SOCKET"]) != "" {
-		return true
-	}
-	term := strings.TrimSpace(env["TERM"])
-	termProgram := strings.TrimSpace(env["TERM_PROGRAM"])
-	return term == "xterm-ghostty" || strings.EqualFold(termProgram, "ghostty") || strings.EqualFold(termProgram, "iTerm.app")
-}
-
 func mapFromEnvMsg(msg tea.EnvMsg) map[string]string {
 	env := make(map[string]string, len(msg))
 	for _, kv := range msg {

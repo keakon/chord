@@ -93,14 +93,6 @@ type toastTickMsg struct{ generation uint64 }
 // pending quit state after the user pressed esc or another key.
 type clearPendingQuitMsg struct{ generation uint64 }
 
-type imageProtocolTickMsg struct {
-	generation int
-	reason     string
-}
-type postHostRedrawFallbackMsg struct {
-	generation uint64
-	reason     string
-}
 type streamFlushTickMsg struct{ generation uint64 }
 type scrollFlushTickMsg struct{ generation uint64 }
 
@@ -318,6 +310,7 @@ type Model struct {
 	terminalNotificationProtocol terminalNotificationProtocol
 
 	visibilityState
+	cadenceProfiles cadenceProfiles
 	startupRestoreState
 	infoPanelCollapsedSections map[infoPanelSectionID]bool
 	infoPanelHitBoxes          []infoPanelSectionHitBox
@@ -329,7 +322,7 @@ type Model struct {
 	// Layered drawing layout.
 	layout tuiLayout
 	// renderFrameGeneration increments for every drawFrame call. Diagnostics use
-	// it to correlate captured buffers with host redraw/replay events.
+	// it to correlate captured buffers with rendered frames.
 	renderFrameGeneration uint64
 	// renderFrameDiag caches the last recorded render-frame diagnostic signature
 	// so drawFrame records a new diagnostic only when a separator-relevant input
@@ -354,16 +347,6 @@ type Model struct {
 	pendingResizeH int
 	resizeVersion  int
 
-	// Some terminals/multiplexers emit transient resize values while a tab is
-	// unfocused or regaining focus. For cmux specifically, keeping the last stable
-	// size visible until focus settles avoids left-jumps caused by transient
-	// shrunken sizes during tab switches.
-	focusResizeFrozen     bool
-	focusResizeGeneration int
-	stableWidth           int
-	stableHeight          int
-	useFocusResizeFreeze  bool
-
 	runtimeCacheMgr          runtimeCacheManager
 	runtimeCacheHandle       runtimeCacheSessionHandle
 	runtimeCacheSession      string
@@ -379,19 +362,7 @@ type Model struct {
 	lastImageProtocolAt      time.Time
 	lastImageProtocolReason  string
 	lastImageProtocolSummary string
-	hostRedrawGeneration     uint64
-	// hostRedrawFrameNonce selects the active no-op replay suffix used after a
-	// host-side ClearScreen/focus recovery redraw. The suffix is intentionally not
-	// consumed by View(): Bubble Tea only flushes on its renderer ticker, so several
-	// View() calls can happen before the frame that actually reaches the terminal.
-	hostRedrawFrameNonce  uint64
-	lastHostRedrawAt      time.Time
-	lastHostRedrawReason  string
-	backgroundDirty       bool
-	backgroundDirtyReason string
-	backgroundDirtyAt     time.Time
-	backgroundDirtyCount  int
-	screenBuf             uv.ScreenBuffer
+	screenBuf                uv.ScreenBuffer
 	// screenBlankLine caches one EmptyCell-filled row matching the current
 	// screen buffer width, so Draw can clear the reused buffer with row copies
 	// instead of per-cell loops.
@@ -414,8 +385,7 @@ type Model struct {
 
 	errorPanel errorPanelState
 
-	pendingPostHostRedrawFallback map[string]uint64
-	pendingLocalStatusCards       []localStatusCard
+	pendingLocalStatusCards []localStatusCard
 }
 
 type localStatusCard struct {
@@ -481,22 +451,19 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		height = 24
 	}
 	m := Model{
-		agent:                a,
-		viewport:             NewViewport(width, height),
-		input:                NewInput(),
-		mode:                 ModeInsert,
-		width:                width,
-		height:               height,
-		stableWidth:          width,
-		stableHeight:         height,
-		useFocusResizeFreeze: detectFocusResizeFreezeFromEnv(),
-		theme:                theme,
-		keyMap:               DefaultKeyMap(),
-		ime:                  imeState{mu: &sync.Mutex{}},
-		confirmCh:            make(chan ConfirmRequest, 1),
-		confirmResultCh:      make(chan ConfirmResult, 1),
-		questionCh:           make(chan QuestionRequest, 1),
-		sidebar:              NewSidebar(theme),
+		agent:           a,
+		viewport:        NewViewport(width, height),
+		input:           NewInput(),
+		mode:            ModeInsert,
+		width:           width,
+		height:          height,
+		theme:           theme,
+		keyMap:          DefaultKeyMap(),
+		ime:             imeState{mu: &sync.Mutex{}},
+		confirmCh:       make(chan ConfirmRequest, 1),
+		confirmResultCh: make(chan ConfirmResult, 1),
+		questionCh:      make(chan QuestionRequest, 1),
+		sidebar:         NewSidebar(theme),
 		composerRuntimeState: composerRuntimeState{
 			agentComposerStates: make(map[string]agentComposerState),
 		},
@@ -529,10 +496,10 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 			displayState:     stateForeground,
 			lastForegroundAt: time.Now(),
 		},
-		infoPanelCollapsedSections:    make(map[infoPanelSectionID]bool),
-		pendingPostHostRedrawFallback: make(map[string]uint64),
-		runtimeCacheMgr:               newRuntimeCacheManager(),
-		renderCacheState:              renderCacheState{statusBarAgentSnapshotDirty: true},
+		cadenceProfiles:            defaultCadenceProfiles(),
+		infoPanelCollapsedSections: make(map[infoPanelSectionID]bool),
+		runtimeCacheMgr:            newRuntimeCacheManager(),
+		renderCacheState:           renderCacheState{statusBarAgentSnapshotDirty: true},
 	}
 	m.viewport.SetWorkingDir(wd)
 	if a != nil {
@@ -675,8 +642,6 @@ func scrollFlushTick(generation uint64, delay time.Duration) tea.Cmd {
 // or after a tab switch).
 type applyResizeMsg struct{ version int }
 
-type focusResizeSettleMsg struct{ generation int }
-
 // Update is the central message dispatcher.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.ensureViewportCallbacks()
@@ -740,7 +705,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		setCurrentTerminalImageCapabilities(caps)
 		m.imageCaps = caps
 		m.terminalNotificationProtocol = detectTerminalNotificationProtocolFromMap(env)
-		m.useFocusResizeFreeze = detectFocusResizeFreezeFromMap(env)
+		m.cadenceProfiles = detectCadenceProfilesFromMap(env)
 		return m, m.imageProtocolCmd()
 
 	// -- attachment loaded ----------------------------------------------
@@ -823,9 +788,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.FocusMsg:
 		return m, m.handleFocusUpdate()
-
-	case focusResizeSettleMsg:
-		return m, m.handleFocusResizeSettle(msg)
 
 	case tea.WindowSizeMsg:
 		return m, m.handleWindowSizeUpdate(msg)
@@ -952,18 +914,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.clearPendingQuit()
 		}
 		return m, nil
-
-	case imageProtocolTickMsg:
-		return m, m.handleImageProtocolTick(msg)
-
-	case hostRedrawSettleMsg:
-		return m, m.handleHostRedrawSettle(msg)
-
-	case postFocusSettleRedrawMsg:
-		return m, m.handlePostFocusSettleRedraw(msg)
-
-	case postHostRedrawFallbackMsg:
-		return m, m.handlePostHostRedrawFallback(msg)
 
 	// -- confirmation request from agent ---------------------------------
 	case confirmRequestMsg:

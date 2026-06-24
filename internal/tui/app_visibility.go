@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"strings"
 	"time"
 
@@ -24,6 +25,10 @@ type cadenceProfile struct {
 	// the screen. Lower values = smoother streaming but more CPU.
 	contentFlushDelay time.Duration
 
+	// scrollFlushDelay controls how quickly accumulated wheel deltas are flushed.
+	// Lower values = smoother scrolling but more terminal frames.
+	scrollFlushDelay time.Duration
+
 	// visualAnimDelay controls the visual animation tick (separator glow,
 	// spinner frames). 0 means visual animation is disabled.
 	visualAnimDelay time.Duration
@@ -35,11 +40,6 @@ type cadenceProfile struct {
 	// housekeepingDelay controls the low-frequency background anim tick used for
 	// stale detection, chord timeout, and other maintenance.
 	housekeepingDelay time.Duration
-
-	// hostRedrawAllowed controls whether hostRedrawForStreamingCmd may
-	// actually issue redraw requests. When false, streaming still advances
-	// the internal state but no clear-screen cycle is triggered.
-	hostRedrawAllowed bool
 
 	// aggressiveHotBudget, when true, signals that idle sweep should
 	// shrink the viewport hot budget.
@@ -57,15 +57,18 @@ const (
 	titleSpinnerCadence                 = 500 * time.Millisecond // terminal title spinner tick (foreground)
 	backgroundTitleSpinnerCadence       = time.Second            // blurred tab title still animates, but at half the wakeup rate
 	backgroundIdleAnimTickCadence       = 5 * time.Second
+	lowCadenceContentFlushDelay         = 500 * time.Millisecond
+	lowCadenceScrollFlushDelay          = 100 * time.Millisecond
+	lowCadenceTitleTickerDelay          = 2 * time.Second
 )
 
 var (
 	foregroundCadence = cadenceProfile{
 		contentFlushDelay:   foregroundContentFlushCadence,
+		scrollFlushDelay:    foregroundScrollFlushCadence,
 		visualAnimDelay:     visualSpinnerCadence,
 		titleTickerDelay:    titleSpinnerCadence,
 		housekeepingDelay:   backgroundHousekeepingDelay,
-		hostRedrawAllowed:   true,
 		aggressiveHotBudget: false,
 	}
 
@@ -73,12 +76,12 @@ var (
 	// Keep state moving, but substantially reduce terminal output.
 	backgroundActiveCadence = cadenceProfile{
 		contentFlushDelay: backgroundActiveContentFlushCadence,
+		scrollFlushDelay:  foregroundScrollFlushCadence,
 		// Background-active work still needs stale detection/progress housekeeping,
 		// but visual spinner frames are invisible while the terminal is blurred.
 		visualAnimDelay:     backgroundActiveVisualAnimCadence,
 		titleTickerDelay:    backgroundTitleSpinnerCadence,
 		housekeepingDelay:   backgroundHousekeepingDelay,
-		hostRedrawAllowed:   false,
 		aggressiveHotBudget: false,
 	}
 
@@ -86,24 +89,98 @@ var (
 	// Skip unnecessary visual work entirely and keep only housekeeping alive.
 	backgroundIdleCadence = cadenceProfile{
 		contentFlushDelay:   0,
+		scrollFlushDelay:    foregroundScrollFlushCadence,
 		visualAnimDelay:     0,
 		titleTickerDelay:    0,
 		housekeepingDelay:   backgroundHousekeepingDelay,
-		hostRedrawAllowed:   false,
 		aggressiveHotBudget: true,
 	}
 )
 
+type cadenceProfiles struct {
+	foreground       cadenceProfile
+	backgroundActive cadenceProfile
+	backgroundIdle   cadenceProfile
+}
+
+func defaultCadenceProfiles() cadenceProfiles {
+	return cadenceProfiles{
+		foreground:       foregroundCadence,
+		backgroundActive: backgroundActiveCadence,
+		backgroundIdle:   backgroundIdleCadence,
+	}
+}
+
+func lowCadenceProfiles() cadenceProfiles {
+	p := defaultCadenceProfiles()
+	p.foreground.contentFlushDelay = lowCadenceContentFlushDelay
+	p.foreground.scrollFlushDelay = lowCadenceScrollFlushDelay
+	p.foreground.visualAnimDelay = 0
+	p.foreground.titleTickerDelay = lowCadenceTitleTickerDelay
+	return p
+}
+
+func detectCadenceProfilesFromEnv() cadenceProfiles {
+	env := make(map[string]string, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		key, value, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		env[key] = value
+	}
+	return detectCadenceProfilesFromMap(env)
+}
+
+func detectCadenceProfilesFromMap(env map[string]string) cadenceProfiles {
+	if strings.TrimSpace(env["CMUX_SOCKET_PATH"]) != "" || strings.TrimSpace(env["CMUX_SOCKET"]) != "" {
+		return lowCadenceProfiles()
+	}
+	return defaultCadenceProfiles()
+}
+
+func (p cadenceProfiles) withDefaults() cadenceProfiles {
+	d := defaultCadenceProfiles()
+	if p.foreground == (cadenceProfile{}) {
+		p.foreground = d.foreground
+	}
+	if p.backgroundActive == (cadenceProfile{}) {
+		p.backgroundActive = d.backgroundActive
+	}
+	if p.backgroundIdle == (cadenceProfile{}) {
+		p.backgroundIdle = d.backgroundIdle
+	}
+	return p
+}
+
 // currentCadence returns the appropriate cadenceProfile based on the model's
 // current display state and busy status.
 func (m *Model) currentCadence() cadenceProfile {
+	profiles := m.cadenceProfiles.withDefaults()
 	if m.displayState == stateForeground {
-		return foregroundCadence
+		return profiles.foreground
 	}
 	if m.focusedAgentBusyForIdleSweep() {
-		return backgroundActiveCadence
+		return profiles.backgroundActive
 	}
-	return backgroundIdleCadence
+	return profiles.backgroundIdle
+}
+
+func (m *Model) scrollFlushDelay() time.Duration {
+	if m == nil {
+		return foregroundScrollFlushCadence
+	}
+	if delay := m.currentCadence().scrollFlushDelay; delay > 0 {
+		return delay
+	}
+	return foregroundScrollFlushCadence
+}
+
+func (m *Model) ApplyCadenceProfileFromEnv() {
+	if m == nil {
+		return
+	}
+	m.cadenceProfiles = detectCadenceProfilesFromEnv()
 }
 
 func (m *Model) handleBlurMsg() tea.Cmd {
@@ -123,47 +200,6 @@ func (m *Model) handleBlurMsg() tea.Cmd {
 		return tea.Batch(titleCmd, idleCmd, gitCmd)
 	}
 	return nil
-}
-
-func (m *Model) markBackgroundDirty(reason string) {
-	if m == nil || m.displayState != stateBackground {
-		return
-	}
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		reason = "unspecified"
-	}
-	m.backgroundDirty = true
-	m.backgroundDirtyReason = reason
-	m.backgroundDirtyAt = time.Now()
-	m.backgroundDirtyCount++
-	m.recordTUIDiagnostic("background-dirty", "reason=%s count=%d layout_main=%dx%d input_h=%d viewport=%dx%d", reason, m.backgroundDirtyCount, m.layout.main.Dx(), m.layout.main.Dy(), m.inputAreaHeight(), debugViewportWidth(m.viewport), debugViewportHeight(m.viewport))
-}
-
-func (m *Model) consumeBackgroundDirtyFocusRedraw(stage string, now time.Time) tea.Cmd {
-	return m.consumeBackgroundDirtyFocusRedrawWithOptions(stage, now, true)
-}
-
-func (m *Model) consumeBackgroundDirtyFocusRedrawWithOptions(stage string, now time.Time, issueHostRedraw bool) tea.Cmd {
-	if m == nil || !m.backgroundDirty {
-		return nil
-	}
-	dirtyReason := m.backgroundDirtyReason
-	dirtyCount := m.backgroundDirtyCount
-	dirtyAt := m.backgroundDirtyAt
-	sinceDirty := time.Duration(0)
-	if !dirtyAt.IsZero() {
-		sinceDirty = now.Sub(dirtyAt)
-	}
-	m.recordTUIDiagnostic("background-dirty-focus-redraw", "stage=%s reason=%s count=%d since_dirty=%s freeze=%t issue_host_redraw=%t", stage, dirtyReason, dirtyCount, sinceDirty.Truncate(time.Millisecond), m.focusResizeFrozen, issueHostRedraw)
-	m.backgroundDirty = false
-	m.backgroundDirtyReason = ""
-	m.backgroundDirtyAt = time.Time{}
-	m.backgroundDirtyCount = 0
-	if !issueHostRedraw {
-		return nil
-	}
-	return m.hostRedrawCmd("background-dirty-focus")
 }
 
 // handleFocusMsg records a terminal focus event and transitions the model back
@@ -205,20 +241,7 @@ func (m *Model) handleFocusMsg() tea.Cmd {
 		m.viewport.RestoreHotBudget()
 	}
 
-	// During focus recovery with freeze enabled, defer the strong host redraw to
-	// focus-settle so cmux/libghostty tab-restore jitter doesn't stack an extra
-	// ClearScreen+RequestWindowSize cycle on top of the later settle redraw.
-	if !m.useFocusResizeFreeze {
-		cmds = append(cmds, m.hostRedrawForStreamingCmd("focus-restore"))
-	}
-	if !m.useFocusResizeFreeze && !(m.mode == ModeImageViewer && m.imageViewer.Open) {
-		cmds = append(cmds, m.imageProtocolCmdWithReason("focus-restore"))
-	}
-	if m.backgroundDirty && !m.focusResizeFrozen {
-		cmds = append(cmds, m.consumeBackgroundDirtyFocusRedraw("focus", now))
-	} else if m.backgroundDirty {
-		m.recordTUIDiagnostic("background-dirty-focus-defer", "reason=%s count=%d frozen=%t", m.backgroundDirtyReason, m.backgroundDirtyCount, m.focusResizeFrozen)
-	}
+	cmds = append(cmds, m.imageProtocolCmdWithReason("focus-restore"))
 
 	return tea.Batch(cmds...)
 }

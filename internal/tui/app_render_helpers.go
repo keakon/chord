@@ -87,7 +87,7 @@ func (m *Model) recalcViewportSizeForToastBoundary() tea.Cmd {
 		return nil
 	}
 	m.recordTUIDiagnostic("toast-boundary", "viewport=%dx%d->%dx%d active=%t queue=%d", oldW, oldH, m.viewport.width, m.viewport.height, m.activeToast != nil, len(m.toastQueue))
-	return m.hostRedrawForContentBoundaryCmd("toast-boundary")
+	return nil
 }
 
 // enqueueToastWithCategory enqueues a toast. Same-category toasts in the queue are merged

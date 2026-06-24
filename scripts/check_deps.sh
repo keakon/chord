@@ -78,7 +78,7 @@ allowed_pseudo = {
 }
 allowed_forks = {
     "github.com/keakon/bubbles/v2": "Bubbles fork rebased to github.com/keakon/bubbletea/v2 so component tea.Msg/Cmd types match Chord's Bubble Tea fork.",
-    "github.com/keakon/bubbletea/v2": "Bubble Tea fork used until WithoutScrollRegionOptimization is available upstream; Chord disables DECSTBM scroll-region optimization to avoid stale terminal rows.",
+    "github.com/keakon/bubbletea/v2": "Bubble Tea fork used for renderer control while Chord disables terminal hard-scroll optimization to avoid stale terminal rows.",
     "github.com/keakon/ultraviolet": "Ultraviolet fork used for lower-cost cached screen rendering after disabling scroll optimization.",
     "github.com/keakon/x/powernap": "LSP integration fork used until the required protocol/transport changes are available upstream.",
 }

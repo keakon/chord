@@ -145,9 +145,6 @@ type viewCacheState struct {
 	streamRenderDeferNext              bool
 	cachedFullView                     tea.View
 	cachedFullViewValid                bool
-	cachedReplayBase                   string
-	cachedReplayNonce                  uint64
-	cachedReplayContent                string
 	renderFreezeActive                 bool
 	renderFreezeReason                 string
 	renderFreezeEnteredAt              time.Time

@@ -290,8 +290,6 @@ func assertNewlineDeltaUsesCoalescedFlushAfterInitialBoundary(t *testing.T, m *M
 	m.streamRenderForceView = false
 	m.streamRenderDeferred = true
 	m.streamRenderDeferNext = true
-	m.lastHostRedrawAt = time.Now()
-
 	cmd = send("\nsecond")
 	if cmd == nil {
 		t.Fatalf("newline %s should schedule coalesced flush", label)

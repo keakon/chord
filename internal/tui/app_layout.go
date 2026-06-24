@@ -55,10 +55,6 @@ func (m *Model) updateRightPanelVisible() {
 }
 
 func (m *Model) recalcViewportSize() {
-	oldW, oldH := 0, 0
-	if m != nil && m.viewport != nil {
-		oldW, oldH = m.viewport.width, m.viewport.height
-	}
 	vpHeight := m.height
 	vpHeight -= m.inputAreaHeight()
 	// Status bar always has its own row.
@@ -85,9 +81,6 @@ func (m *Model) recalcViewportSize() {
 		vpWidth = minViewportWidth
 	}
 	m.viewport.SetSize(vpWidth, vpHeight)
-	if oldW != vpWidth || oldH != vpHeight {
-		m.markBackgroundDirty("viewport-layout")
-	}
 }
 
 // generateLayout computes layout rectangles for layered drawing.

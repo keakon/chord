@@ -82,9 +82,11 @@ These are standard variables Chord inspects; you typically never set them yourse
 | `TERM_PROGRAM`          | Identify the terminal emulator (iTerm2, WezTerm, Ghostty, …) for image and notification protocol selection |
 | `TERM_PROGRAM_VERSION`  | Used together with `TERM_PROGRAM`                                                             |
 | `TMUX`                  | Detect that Chord is running inside tmux                                                      |
-| `CMUX_SOCKET` / `CMUX_SOCKET_PATH` | Detect that Chord is running inside cmux; influences the image protocol pipeline      |
+| `CMUX_SOCKET` / `CMUX_SOCKET_PATH` | Detect that Chord is running inside cmux; influences the image protocol pipeline and TUI refresh cadence |
 | `NO_COLOR`              | When set to any non-empty value, disables ANSI color in startup log output to stderr           |
 | `USER` / `USERNAME`     | Used in some diagnostic output                                                                |
+
+Chord disables terminal hard-scroll optimizations for all terminal hosts because those scroll sequences can leave stale rows in Chord's sticky transcript layout. When cmux is detected, Chord also uses a more conservative TUI profile because cmux/libghostty embedding can spend significantly more CPU processing frequent small terminal updates than Ghostty.app. This is automatic and has no user-facing setting: cmux gets lower stream/scroll refresh cadence and no foreground-only visual animation ticks, while terminal title animation remains enabled so background tabs still show activity.
 
 ## Terminal capability overrides (images)
 

@@ -399,12 +399,13 @@ func (m *Model) shouldRefreshToolArgRender(callID, argsJSON string, now time.Tim
 	if currentBytes <= state.lastBytes {
 		return false
 	}
-	delay := m.currentCadence().visualAnimDelay
+	cadence := m.currentCadence()
+	delay := cadence.visualAnimDelay
 	if delay <= 0 {
-		delay = foregroundCadence.visualAnimDelay
-		if delay <= 0 {
-			delay = 200 * time.Millisecond
-		}
+		delay = cadence.contentFlushDelay
+	}
+	if delay <= 0 {
+		return false
 	}
 	return now.Sub(state.lastAt) >= delay
 }

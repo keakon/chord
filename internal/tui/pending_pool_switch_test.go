@@ -68,10 +68,6 @@ func newPoolSwitchModel() (*Model, *poolSwitchBackend) {
 	}
 	m := NewModel(backend)
 	m.mode = ModeNormal
-	// Make tests deterministic across environments.
-	// sendDraft may return nil when the focus-resize-freeze workaround is disabled
-	// (it batches only image-protocol and host-redraw commands, both optional).
-	m.SetFocusResizeFreezeEnabled(true)
 	return &m, backend
 }
 
@@ -357,12 +353,9 @@ func TestPoolSwitchErrorReportsResultWithoutBlockingDraft(t *testing.T) {
 	}
 
 	d := queuedDraft{Content: "test", QueuedAt: time.Now()}
-	draftCmd := m.sendDraft(d)
+	_ = m.sendDraft(d)
 	if len(backend.sentMessages) != 1 {
 		t.Fatalf("message should still be sent despite pool switch error, got %d messages", len(backend.sentMessages))
-	}
-	if draftCmd == nil {
-		t.Fatal("sendDraft should still return command batch")
 	}
 }
 

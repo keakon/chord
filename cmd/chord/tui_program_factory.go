@@ -101,6 +101,7 @@ func (f tuiProgramFactory) build(ac *AppContext) (tuiProgramPlan, error) {
 		model = tui.NewModelWithSize(ac.MainAgent, initialWidth, initialHeight)
 	}
 	tuiModel := model
+	tuiModel.ApplyCadenceProfileFromEnv()
 	if ac != nil {
 		tuiModel.SetInstanceID(ac.InstanceID)
 	}
@@ -130,10 +131,9 @@ func (f tuiProgramFactory) build(ac *AppContext) (tuiProgramPlan, error) {
 
 	opts = append(opts, tea.WithWindowSize(initialWidth, initialHeight))
 	// Chord renders streaming transcript updates near sticky separators and side
-	// panels; DECSTBM hardware scroll regions have left stale rows behind on some
-	// terminals (notably libghostty after focus restore). Keep safe hard-scroll
-	// optimizations enabled, but avoid scroll-region state. See
-	// docs/troubleshooting.md "Repeated separator lines / stale border artifacts".
-	opts = append(opts, tea.WithoutScrollRegionOptimization())
+	// panels. Terminal hard-scroll optimizations can leave stale rows in that
+	// layout across terminal hosts, so disable them globally and let the renderer
+	// redraw changed lines instead.
+	opts = append(opts, tea.WithoutScrollOptimization())
 	return tuiProgramPlan{model: tuiModel, runner: f.newProgram(&tuiModel, opts...), initialWidth: initialWidth, initialHeight: initialHeight}, nil
 }

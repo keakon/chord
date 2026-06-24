@@ -290,11 +290,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	frameRender := ""
 	if scratch.RenderBuffer != nil {
 		screenRender = strings.ReplaceAll(scratch.Render(), "\r\n", "\n")
-		if m.useFocusResizeFreeze {
-			frameRender = strings.ReplaceAll(renderScreenBufferFullFrame(scratch, m.hostSafeFullFrameWidth(), height), "\r\n", "\n")
-		} else {
-			frameRender = screenRender
-		}
+		frameRender = screenRender
 	}
 
 	safe := func(s string) string {
@@ -321,14 +317,11 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	fmt.Fprintf(&sb, "right_panel_visible: %t\n", m.rightPanelVisible)
 	fmt.Fprintf(&sb, "terminal_focused: %t\n", m.terminalAppFocused)
 	fmt.Fprintf(&sb, "render_frame_generation: %d\n", m.renderFrameGeneration)
-	fmt.Fprintf(&sb, "focus_resize_frozen: %t\n", m.focusResizeFrozen)
 	fmt.Fprintf(&sb, "last_foreground_at: %s\n", debugTimeString(m.lastForegroundAt))
 	fmt.Fprintf(&sb, "last_background_at: %s\n", debugTimeString(m.lastBackgroundAt))
-	fmt.Fprintf(&sb, "background_dirty: %t reason=%q at=%s count=%d\n", m.backgroundDirty, safe(m.backgroundDirtyReason), debugTimeString(m.backgroundDirtyAt), m.backgroundDirtyCount)
 	fmt.Fprintf(&sb, "background_idle_since: %s\n", debugTimeString(m.backgroundIdleSince))
 	fmt.Fprintf(&sb, "last_sweep_at: %s\n", debugTimeString(m.lastSweepAt))
 	fmt.Fprintf(&sb, "idle_sweep_generation: %d scheduled=%t\n", m.idleSweepGeneration, m.idleSweepScheduled)
-	fmt.Fprintf(&sb, "stable_size: %dx%d\n", m.stableWidth, m.stableHeight)
 	fmt.Fprintf(&sb, "pending_resize: %dx%d version=%d\n", m.pendingResizeW, m.pendingResizeH, m.resizeVersion)
 	fmt.Fprintf(&sb, "stream_flush_generation: %d scheduled=%t\n", m.streamFlushGeneration, m.streamFlushScheduled)
 	fmt.Fprintf(&sb, "startup_restore_pending: %t\n", m.startupRestorePending)
@@ -344,10 +337,6 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	fmt.Fprintf(&sb, "last_image_protocol_at: %s\n", debugTimeString(m.lastImageProtocolAt))
 	fmt.Fprintf(&sb, "last_image_protocol_reason: %q\n", safe(m.lastImageProtocolReason))
 	fmt.Fprintf(&sb, "last_image_protocol_summary: %q\n", safe(m.lastImageProtocolSummary))
-	fmt.Fprintf(&sb, "last_host_redraw: %s\n", safe(m.hostRedrawSummary()))
-	fmt.Fprintf(&sb, "host_redraw_generation: %d replay_nonce=%d replay_suffix_len=%d\n", m.hostRedrawGeneration, m.hostRedrawFrameNonce, len(m.hostRedrawReplaySuffix()))
-	fmt.Fprintf(&sb, "host_full_frame: enabled=%t safe_width=%d raw_width=%d height=%d\n", m.useFocusResizeFreeze, m.hostSafeFullFrameWidth(), m.width, m.height)
-	fmt.Fprintf(&sb, "pending_post_host_redraw_fallbacks: %d\n", len(m.pendingPostHostRedrawFallback))
 	fmt.Fprintf(&sb, "kitty_image_cache_len: %d\n", len(m.kittyImageCache))
 	fmt.Fprintf(&sb, "kitty_placement_cache_len: %d\n", len(m.kittyPlacementCache))
 	fmt.Fprintf(&sb, "cached_main_key: %q\n", safe(m.cachedMainKey))

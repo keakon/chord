@@ -27,11 +27,15 @@ func (m *Model) Draw(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 // changes, so identical consecutive frames cost no diagnostic formatting on the
 // per-frame render path.
 type renderFrameDiagSignature struct {
-	w, h          int
-	safeWidth     int
-	hostRedrawGen uint64
-	fullFrame     bool
-	layout        tuiLayout
+	w, h   int
+	layout tuiLayout
+}
+
+func debugViewportOffset(v *Viewport) int {
+	if v == nil {
+		return -1
+	}
+	return v.offset
 }
 
 func (m *Model) drawFrame(scr uv.Screen, area image.Rectangle) *tea.Cursor {
@@ -40,23 +44,17 @@ func (m *Model) drawFrame(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 	layout := m.generateLayout(w, h)
 	m.layout = layout
 	if sig := (renderFrameDiagSignature{
-		w:             w,
-		h:             h,
-		safeWidth:     m.hostSafeFullFrameWidth(),
-		hostRedrawGen: m.hostRedrawGeneration,
-		fullFrame:     m.useFocusResizeFreeze,
-		layout:        layout,
+		w:      w,
+		h:      h,
+		layout: layout,
 	}); !m.renderFrameDiagRecorded || sig != m.renderFrameDiag {
 		m.renderFrameDiag = sig
 		m.renderFrameDiagRecorded = true
 		m.recordTUIDiagnostic(
 			"render-frame",
-			"size=%dx%d safe_width=%d host_redraw_generation=%d full_frame=%t layout_main=%s layout_input=%s layout_status=%s separators=%s frame=%d",
+			"size=%dx%d layout_main=%s layout_input=%s layout_status=%s separators=%s frame=%d",
 			w,
 			h,
-			sig.safeWidth,
-			m.hostRedrawGeneration,
-			m.useFocusResizeFreeze,
 			debugRectString(layout.main),
 			debugRectString(layout.input),
 			debugRectString(layout.status),
@@ -434,12 +432,12 @@ func (m *Model) View() tea.View {
 	if m.shouldFreezeRender() {
 		v := m.cachedFrozenView
 		v.WindowTitle = m.terminalTitleView
-		return m.applyHostRedrawReplaySuffix(v)
+		return v
 	}
 	if m.shouldDeferStreamRender() {
 		v := m.cachedFullView
 		v.WindowTitle = m.terminalTitleView
-		return m.applyHostRedrawReplaySuffix(v)
+		return v
 	}
 
 	var v tea.View
@@ -459,23 +457,7 @@ func (m *Model) View() tea.View {
 	canvas := m.screenBuf
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
 
-	if m.useFocusResizeFreeze {
-		// Ghostty/cmux can leave stale cells behind when Ultraviolet trims trailing
-		// spaces from a row during string rendering. Avoid injecting terminal
-		// control sequences into View content; instead, serialize the already-drawn
-		// screen buffer as a full frame so Bubble Tea/UV recreate the exact cells,
-		// including trailing spaces, on every row.
-		//
-		// Keep one safety column unrendered on this host-recovery path. The
-		// diagnostics bundles show the physical rightmost column is almost always a
-		// blank gutter cell, but emitting a completely full-width frame still drives
-		// UV's fullscreen renderer through its phantom-wrap path on every touched
-		// row. Ghostty is especially prone to displaying stale/misaligned cells
-		// after focus restore when those right-edge wraps race with ClearScreen.
-		v.Content = renderScreenBufferFullFrame(canvas, m.hostSafeFullFrameWidth(), m.height)
-	} else {
-		v.Content = canvas.Render()
-	}
+	v.Content = canvas.Render()
 	v.WindowTitle = m.terminalTitleView
 	m.cachedFullView = v
 	m.cachedFullViewValid = true
@@ -486,145 +468,7 @@ func (m *Model) View() tea.View {
 	m.streamRenderForceView = false
 	m.streamRenderDeferred = m.streamRenderDeferNext
 	m.streamRenderDeferNext = false
-	return m.applyHostRedrawReplaySuffix(v)
-}
-
-const ansiNoopSGR = "\x1b[m"
-const ansiNoopSGRAlt = "\x1b[0m"
-
-// applyHostRedrawReplaySuffix keeps host-redraw frames byte-distinct without
-// changing visible cells. The suffix is intentionally applied at return time and
-// not stored in cached views, so cached/deferred paths do not accumulate duplicate
-// no-op sequences.
-func (m *Model) applyHostRedrawReplaySuffix(v tea.View) tea.View {
-	suffix := m.hostRedrawReplaySuffix()
-	if suffix == "" {
-		return v
-	}
-	if m.cachedReplayNonce == m.hostRedrawFrameNonce && m.cachedReplayBase == v.Content {
-		v.Content = m.cachedReplayContent
-		return v
-	}
-	base := v.Content
-	v.Content += suffix
-	m.cachedReplayNonce = m.hostRedrawFrameNonce
-	m.cachedReplayBase = base
-	m.cachedReplayContent = v.Content
 	return v
-}
-
-func (m *Model) hostRedrawReplaySuffix() string {
-	if m == nil || m.hostRedrawFrameNonce == 0 {
-		return ""
-	}
-	// Alternate no-op SGR spellings so consecutive host redraw generations still
-	// differ byte-for-byte even when the logical UI frame is unchanged.
-	if m.hostRedrawFrameNonce%2 == 0 {
-		return ansiNoopSGRAlt
-	}
-	return ansiNoopSGR
-}
-
-func (m *Model) hostSafeFullFrameWidth() int {
-	if m == nil {
-		return 0
-	}
-	width := m.width
-	if width <= 1 {
-		return width
-	}
-	if m.useFocusResizeFreeze {
-		return max(1, width-2)
-	}
-	return width
-}
-
-func renderScreenBufferFullFrame(scr uv.ScreenBuffer, width, height int) string {
-	if width <= 0 || height <= 0 {
-		return ""
-	}
-
-	var b strings.Builder
-	// Lower-bound estimate: one byte per cell plus newlines. Styled cells may
-	// emit more bytes, but this avoids many tiny reallocations.
-	b.Grow(width*height + max(0, height-1))
-
-	var pen uv.Style
-	var link uv.Link
-	for y := range height {
-		line := scr.Line(y)
-		renderFullFrameLine(&b, line, width, &pen, &link)
-		if y < height-1 {
-			b.WriteByte('\n')
-		}
-	}
-
-	if !link.IsZero() {
-		b.WriteString(ansi.ResetHyperlink())
-	}
-	if !pen.IsZero() {
-		b.WriteString(ansi.ResetStyle)
-	}
-
-	return b.String()
-}
-
-func renderFullFrameLine(b *strings.Builder, line uv.Line, width int, pen *uv.Style, link *uv.Link) {
-nextCell:
-	for x := 0; x < width; {
-		var cell uv.Cell
-		if x < len(line) {
-			cell = line[x]
-		}
-		if cell.IsZero() {
-			if x < len(line) {
-				for start := x - 1; start >= 0; start-- {
-					prev := line[start]
-					if prev.IsZero() {
-						continue
-					}
-					if prev.Width > 1 && x < start+prev.Width {
-						x++
-						continue nextCell
-					}
-					break
-				}
-			}
-			cell = uv.EmptyCell
-		}
-
-		if cell.Style.IsZero() {
-			if !pen.IsZero() {
-				b.WriteString(ansi.ResetStyle)
-				*pen = uv.Style{}
-			}
-		} else if !cell.Style.Equal(pen) {
-			b.WriteString(cell.Style.Diff(pen))
-			*pen = cell.Style
-		}
-
-		if !cell.Link.Equal(link) {
-			if !link.IsZero() {
-				b.WriteString(ansi.ResetHyperlink())
-			}
-			if !cell.Link.IsZero() {
-				b.WriteString(ansi.SetHyperlink(cell.Link.URL, cell.Link.Params))
-			}
-			*link = cell.Link
-		}
-
-		content := cell.Content
-		if content == "" {
-			content = " "
-		}
-		b.WriteString(content)
-
-		w := cell.Width
-		if w <= 0 {
-			w = 1
-		}
-		x += w
-	}
 }
 
 // ensureScreenBuffer reuses the existing UV screen buffer across View() calls.

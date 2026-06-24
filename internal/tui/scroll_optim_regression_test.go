@@ -1,21 +1,26 @@
 package tui
 
 // These tests pin down the byte-level behavior of Ultraviolet's renderer in
-// the two scroll configurations that matter for the Ghostty DECSTBM
-// carve-out. They model a chord-shaped frame (sticky transcript above a
-// fixed separator/input/status block) and assert that:
+// the scroll configurations that matter for Chord's sticky transcript layout.
+// They model a chord-shaped frame (sticky transcript above a fixed
+// separator/input/status block) and assert that:
 //
 //   - With scroll optimization on (the upstream default), streaming a one-line
 //     scroll emits a DECSTBM region scroll. This is the baseline behavior that
 //     leaves stale rows behind on libghostty during post-focus-restore.
 //
-//   - With scroll-region optimization off (the WithoutScrollRegionOptimization
-//     path used by Chord's TUI), the same scroll can keep safe hard-scroll
-//     optimizations while emitting no DECSTBM region setup.
+//   - With all scroll optimization off (the path used by Chord's TUI), the same
+//     scroll emits no terminal hard-scroll sequences while still avoiding a full
+//     separator repaint.
+//
+//   - With only scroll-region optimization off (the previous Chord workaround),
+//     the renderer emits no DECSTBM region setup while keeping other hard-scroll
+//     optimizations. This remains a useful comparison point for future renderer
+//     upgrades.
 //
 // If a future Bubble Tea / Ultraviolet upgrade silently changes these
-// guarantees, the Ghostty separator-artifact fix may regress, and these tests
-// surface that regression directly.
+// guarantees, Chord's stale-row avoidance may regress, and these tests surface
+// that regression directly.
 
 import (
 	"bytes"

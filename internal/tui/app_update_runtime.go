@@ -119,13 +119,9 @@ func (m *Model) handleStreamFlushTick(msg streamFlushTickMsg) tea.Cmd {
 	}
 	m.exitRenderFreeze()
 	m.setStreamRenderInvalidation(streamRenderInvalidateForce)
-	// Do NOT issue ClearScreen during streaming. On cmux/libghostty,
-	// rapid ClearScreen (~250ms) creates a race between "clear" and
-	// "repaint" that leaves ghost cells (e.g. a second separator line).
-	// Bubble Tea's incremental renderer already updates every changed
-	// cell without clearing, which is both faster and ghost-free.
-	// ClearScreen is still used for focus-settle and scroll-flush
-	// (infrequent, user-triggered) where it works correctly.
+	// Do NOT issue ClearScreen during streaming. Bubble Tea's incremental renderer
+	// already updates every changed cell, and terminal hard-scroll optimizations
+	// are disabled at program construction to avoid stale rows.
 	return nil
 }
 
@@ -241,67 +237,4 @@ func (m *Model) handleModelSwitchResult(msg modelSwitchResultMsg) tea.Cmd {
 		m.markBlockSettled(block)
 	}
 	return nil
-}
-
-func (m *Model) handleImageProtocolTick(msg imageProtocolTickMsg) tea.Cmd {
-	if msg.generation != m.focusResizeGeneration {
-		m.recordTUIDiagnostic("image-protocol-skip", "reason=%s generation=%d current_generation=%d", strings.TrimSpace(msg.reason), msg.generation, m.focusResizeGeneration)
-		return nil
-	}
-	m.recordTUIDiagnostic("image-protocol-replay", "reason=%s generation=%d visible_inline=%t mode=%s", strings.TrimSpace(msg.reason), msg.generation, m.viewport != nil && m.viewport.HasVisibleInlineImage(), debugModeString(m.mode))
-	return m.imageProtocolCmdWithReason(msg.reason)
-}
-
-func (m *Model) handleHostRedrawSettle(msg hostRedrawSettleMsg) tea.Cmd {
-	m.recordTUIDiagnostic("host-redraw-settle", "reason=%s frozen=%t mode=%s", strings.TrimSpace(msg.reason), m.focusResizeFrozen, debugModeString(m.mode))
-	if m.focusResizeFrozen {
-		m.recordTUIDiagnostic("host-redraw-skip", "reason=%s settle_while_frozen=true", strings.TrimSpace(msg.reason))
-		return nil
-	}
-	if m.suppressPeriodicViewerHostRedraw(msg.reason) {
-		m.recordTUIDiagnostic("host-redraw-skip", "reason=%s settle_viewer_open=true periodic=true", strings.TrimSpace(msg.reason))
-		return nil
-	}
-	return m.imageProtocolCmdWithReason("host-redraw:" + strings.TrimSpace(msg.reason))
-}
-
-func (m *Model) handlePostFocusSettleRedraw(msg postFocusSettleRedrawMsg) tea.Cmd {
-	if msg.generation != m.focusResizeGeneration {
-		kind := "post-focus-settle-redraw-skip"
-		if msg.fallback {
-			kind = "post-focus-settle-fallback-skip"
-		}
-		m.recordTUIDiagnostic(kind, "generation=%d current=%d", msg.generation, m.focusResizeGeneration)
-		return nil
-	}
-	if msg.fallback {
-		bypassMinInterval := false
-		if !m.lastForegroundAt.IsZero() && m.lastHostRedrawAt.After(m.lastForegroundAt) {
-			if hostRedrawSuppressesPostFocusFallback(m.lastHostRedrawReason) {
-				m.recordTUIDiagnostic("post-focus-settle-fallback-skip", "generation=%d host_redraw_after_focus=%s reason=%s", msg.generation, m.lastHostRedrawAt.Format(time.RFC3339Nano), strings.TrimSpace(m.lastHostRedrawReason))
-				return nil
-			}
-			bypassMinInterval = true
-		}
-		m.recordTUIDiagnostic("post-focus-settle-fallback", "generation=%d mode=%s", msg.generation, debugModeString(m.mode))
-		return m.hostRedrawCmdWithOptions("post-focus-settle-fallback", bypassMinInterval)
-	}
-	m.recordTUIDiagnostic("post-focus-settle-redraw", "generation=%d mode=%s", msg.generation, debugModeString(m.mode))
-	return m.hostRedrawCmdWithOptions("post-focus-settle-redraw", true)
-}
-
-func (m *Model) handlePostHostRedrawFallback(msg postHostRedrawFallbackMsg) tea.Cmd {
-	reason := strings.TrimSpace(msg.reason)
-	defer m.clearPostHostRedrawFallback(reason, msg.generation)
-	if msg.generation != m.hostRedrawGeneration {
-		m.recordTUIDiagnostic("post-host-redraw-fallback-skip", "reason=%s generation=%d current=%d", reason, msg.generation, m.hostRedrawGeneration)
-		return nil
-	}
-	policy := hostRedrawPolicyForReason(reason)
-	if policy.postHostFallbackReason == "" {
-		m.recordTUIDiagnostic("post-host-redraw-fallback-skip", "reason=%s generation=%d unsupported=true", reason, msg.generation)
-		return nil
-	}
-	m.recordTUIDiagnostic("post-host-redraw-fallback", "reason=%s generation=%d mode=%s", reason, msg.generation, debugModeString(m.mode))
-	return m.hostRedrawCmd(policy.postHostFallbackReason)
 }

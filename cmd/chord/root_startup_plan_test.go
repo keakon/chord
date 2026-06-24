@@ -185,7 +185,20 @@ func programDisableScrollRegionOptim(t *testing.T, p *tea.Program) bool {
 	return field.Bool()
 }
 
-func TestTUIProgramFactoryDisablesScrollRegionOptimization(t *testing.T) {
+func programDisableScrollOptim(t *testing.T, p *tea.Program) bool {
+	t.Helper()
+	field := reflect.ValueOf(p).Elem().FieldByName("disableScrollOptim")
+	if !field.IsValid() || field.Kind() != reflect.Bool {
+		t.Fatal("tea.Program no longer exposes a disableScrollOptim bool field")
+	}
+	return field.Bool()
+}
+
+func TestTUIProgramFactoryDisablesScrollOptimization(t *testing.T) {
+	t.Setenv("CMUX_SOCKET", "")
+	t.Setenv("CMUX_SOCKET_PATH", "")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("TERM_PROGRAM", "")
 	stdin, err := os.Open(os.DevNull)
 	if err != nil {
 		t.Fatalf("open devnull: %v", err)
@@ -216,8 +229,93 @@ func TestTUIProgramFactoryDisablesScrollRegionOptimization(t *testing.T) {
 	if programDisableScrollRegionOptim(t, tea.NewProgram(optionProbeModel{})) {
 		t.Fatal("default Bubble Tea program unexpectedly disables scroll-region optimization")
 	}
-	if !programDisableScrollRegionOptim(t, tea.NewProgram(optionProbeModel{}, captured...)) {
-		t.Fatal("factory options did not include WithoutScrollRegionOptimization")
+	program := tea.NewProgram(optionProbeModel{}, captured...)
+	if !programDisableScrollOptim(t, program) {
+		t.Fatal("factory options did not include WithoutScrollOptimization")
+	}
+	if programDisableScrollRegionOptim(t, program) {
+		t.Fatal("factory options should use full scroll optimization carve-out, not only region carve-out")
+	}
+}
+
+func TestTUIProgramFactoryDisablesAllScrollOptimizationInsideCmux(t *testing.T) {
+	t.Setenv("CMUX_SOCKET", "/tmp/cmux.sock")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("TERM_PROGRAM", "")
+	stdin, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("open devnull: %v", err)
+	}
+	defer stdin.Close()
+	stdout, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("open devnull: %v", err)
+	}
+	defer stdout.Close()
+	var captured []tea.ProgramOption
+	factory := tuiProgramFactory{
+		stdin:      stdin,
+		stdout:     stdout,
+		isTerminal: func(uintptr) bool { return false },
+		openTTY: func() (*os.File, *os.File, error) {
+			return stdin, stdout, nil
+		},
+		newProgram: func(_ tea.Model, opts ...tea.ProgramOption) tuiProgramRunner {
+			captured = append([]tea.ProgramOption(nil), opts...)
+			return &fakeTUIRunner{}
+		},
+	}
+	if _, err := factory.build(&AppContext{}); err != nil {
+		t.Fatalf("factory.build: %v", err)
+	}
+
+	program := tea.NewProgram(optionProbeModel{}, captured...)
+	if !programDisableScrollOptim(t, program) {
+		t.Fatal("cmux factory options did not include WithoutScrollOptimization")
+	}
+	if programDisableScrollRegionOptim(t, program) {
+		t.Fatal("cmux factory options should use full scroll optimization carve-out, not only region carve-out")
+	}
+}
+
+func TestTUIProgramFactoryDisablesAllScrollOptimizationInsideGhostty(t *testing.T) {
+	t.Setenv("CMUX_SOCKET", "")
+	t.Setenv("CMUX_SOCKET_PATH", "")
+	t.Setenv("TERM", "xterm-ghostty")
+	t.Setenv("TERM_PROGRAM", "ghostty")
+	stdin, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("open devnull: %v", err)
+	}
+	defer stdin.Close()
+	stdout, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("open devnull: %v", err)
+	}
+	defer stdout.Close()
+	var captured []tea.ProgramOption
+	factory := tuiProgramFactory{
+		stdin:      stdin,
+		stdout:     stdout,
+		isTerminal: func(uintptr) bool { return false },
+		openTTY: func() (*os.File, *os.File, error) {
+			return stdin, stdout, nil
+		},
+		newProgram: func(_ tea.Model, opts ...tea.ProgramOption) tuiProgramRunner {
+			captured = append([]tea.ProgramOption(nil), opts...)
+			return &fakeTUIRunner{}
+		},
+	}
+	if _, err := factory.build(&AppContext{}); err != nil {
+		t.Fatalf("factory.build: %v", err)
+	}
+
+	program := tea.NewProgram(optionProbeModel{}, captured...)
+	if !programDisableScrollOptim(t, program) {
+		t.Fatal("ghostty factory options did not include WithoutScrollOptimization")
+	}
+	if programDisableScrollRegionOptim(t, program) {
+		t.Fatal("ghostty factory options should use full scroll optimization carve-out, not only region carve-out")
 	}
 }
 

@@ -141,7 +141,7 @@ func (m *Model) deriveTerminalTitleState() terminalTitleDesiredState {
 	if m.terminalTitleNeedsUserResponse() {
 		state := terminalTitleDesiredState{mode: terminalTitleModeRequest}
 		if m.displayState != stateForeground && !m.terminalTitleRequestSeen {
-			state.tickerDelay = backgroundActiveCadence.titleTickerDelay
+			state.tickerDelay = m.cadenceProfiles.withDefaults().backgroundActive.titleTickerDelay
 		}
 		return state
 	}

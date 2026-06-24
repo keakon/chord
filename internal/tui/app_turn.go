@@ -153,10 +153,7 @@ func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
 		}
 	}
 	m.syncVisibleMainUserBlockMsgIndexes()
-	return tea.Batch(
-		m.imageProtocolCmd(),
-		m.hostRedrawForContentBoundaryCmd("live-append"),
-	)
+	return m.imageProtocolCmd()
 }
 
 func (m *Model) drainQueuedDrafts() tea.Cmd {

@@ -103,7 +103,6 @@ func TestConsumeScrollFlushCoalescesUntilConsumed(t *testing.T) {
 	}
 	m.pendingScrollDelta = 6
 	m.viewport = nil
-	m.SetFocusResizeFreezeEnabled(false)
 	if cmd := m.consumeScrollFlush(scrollFlushTickMsg{generation: gen}); cmd != nil {
 		t.Fatal("consumeScrollFlush without viewport should not emit redraw cmd")
 	}
@@ -118,44 +117,8 @@ func TestConsumeScrollFlushCoalescesUntilConsumed(t *testing.T) {
 	}
 }
 
-func TestHostRedrawCmdDisabledWithoutFreezeWorkaround(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 24)
-	m.SetFocusResizeFreezeEnabled(false)
-	if cmd := m.hostRedrawCmd("scroll-flush"); cmd != nil {
-		t.Fatal("hostRedrawCmd should be disabled when freeze workaround is off")
-	}
-	if m.lastHostRedrawReason != "" {
-		t.Fatalf("lastHostRedrawReason = %q, want empty", m.lastHostRedrawReason)
-	}
-}
-
-func TestHostRedrawCmdRequiresNotFrozen(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 24)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.focusResizeFrozen = true
-	if cmd := m.hostRedrawCmd("scroll-flush"); cmd != nil {
-		t.Fatal("hostRedrawCmd should skip while focus resize freeze is active")
-	}
-	if m.lastHostRedrawReason != "" {
-		t.Fatalf("lastHostRedrawReason = %q, want empty", m.lastHostRedrawReason)
-	}
-}
-
-func TestHostRedrawCmdThrottlesRepeatedRequests(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 24)
-	m.SetFocusResizeFreezeEnabled(true)
-	first := m.hostRedrawCmd("scroll-flush")
-	if first == nil {
-		t.Fatal("first hostRedrawCmd should emit redraw command")
-	}
-	if second := m.hostRedrawCmd("stream-flush"); second != nil {
-		t.Fatal("second hostRedrawCmd inside throttle window should be coalesced")
-	}
-}
-
-func TestConsumeScrollFlushAddsHostRedrawForFreezeWorkaround(t *testing.T) {
+func TestConsumeScrollFlushMovesViewportWithoutFollowUpCommand(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 24)
-	m.SetFocusResizeFreezeEnabled(true)
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: strings.Repeat("hello\n", 80)})
 	m.width = 40
 	m.viewport.width = 40
@@ -166,55 +129,29 @@ func TestConsumeScrollFlushAddsHostRedrawForFreezeWorkaround(t *testing.T) {
 	m.scrollFlushScheduled = true
 	m.scrollFlushGeneration = 1
 	cmd := m.consumeScrollFlush(scrollFlushTickMsg{generation: 1})
-	if cmd == nil {
-		t.Fatal("consumeScrollFlush should emit redraw command when viewport moved")
+	if cmd != nil {
+		t.Fatal("consumeScrollFlush should not emit a follow-up command when viewport moved")
 	}
 	if m.viewport.offset == 0 {
 		t.Fatal("expected consumeScrollFlush to move viewport down")
 	}
-	if m.lastHostRedrawReason != "scroll-flush" {
-		t.Fatalf("lastHostRedrawReason = %q, want scroll-flush", m.lastHostRedrawReason)
-	}
 }
 
-func TestStreamBoundaryFlushTriggersContentBoundaryRedrawForFreezeWorkaround(t *testing.T) {
+func TestStreamBoundaryFlushSchedulesStreamFlush(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
-	m.SetFocusResizeFreezeEnabled(true)
 
 	cmd := m.requestStreamBoundaryFlush()
 	if cmd == nil {
-		t.Fatal("stream boundary flush should schedule commands")
-	}
-	if m.lastHostRedrawReason != "content-boundary" {
-		t.Fatalf("lastHostRedrawReason = %q, want content-boundary", m.lastHostRedrawReason)
+		t.Fatal("stream boundary flush should schedule stream flush")
 	}
 }
 
-func TestContentBoundaryRedrawThrottlesAgainstRecentHostRedraw(t *testing.T) {
+func TestSendDraftDoesNotNeedFollowUpCommandWithoutInlineImages(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.lastHostRedrawAt = time.Now().Add(-m.contentBoundaryHostRedrawMinInterval() / 2)
-	m.lastHostRedrawReason = "scroll-flush"
-	m.lastForegroundAt = time.Time{}
-
-	if cmd := m.hostRedrawForContentBoundaryCmd("content-boundary"); cmd != nil {
-		t.Fatal("content boundary redraw should be throttled after a recent host redraw when not in the post-focus window")
-	}
-	if m.lastHostRedrawReason != "scroll-flush" {
-		t.Fatalf("lastHostRedrawReason = %q, want scroll-flush", m.lastHostRedrawReason)
-	}
-}
-
-func TestSendDraftTriggersLiveAppendRedrawForFreezeWorkaround(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 24)
-	m.SetFocusResizeFreezeEnabled(true)
 
 	cmd := m.sendDraft(queuedDraft{Content: "hello", QueuedAt: time.Now()})
-	if cmd == nil {
-		t.Fatal("sendDraft should schedule live append redraw command")
-	}
-	if m.lastHostRedrawReason != "live-append" {
-		t.Fatalf("lastHostRedrawReason = %q, want live-append", m.lastHostRedrawReason)
+	if cmd != nil {
+		t.Fatal("sendDraft should not schedule a follow-up command without inline images")
 	}
 }
 
@@ -364,7 +301,7 @@ func TestTUIDiagnosticCoalescesConsecutiveIdenticalEvents(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.recordTUIDiagnostic("focus", "gained=true")
 	for range 200 {
-		m.recordTUIDiagnostic("host-redraw-skip", "reason=stream-flush disallowed=true")
+		m.recordTUIDiagnostic("stream-flush", "deferred=true")
 	}
 	m.recordTUIDiagnostic("focus-settle", "generation=1")
 
@@ -376,8 +313,8 @@ func TestTUIDiagnosticCoalescesConsecutiveIdenticalEvents(t *testing.T) {
 		t.Fatalf("events[0].Kind = %q, want focus", events[0].Kind)
 	}
 	skip := events[1]
-	if skip.Kind != "host-redraw-skip" {
-		t.Fatalf("events[1].Kind = %q, want host-redraw-skip", skip.Kind)
+	if skip.Kind != "stream-flush" {
+		t.Fatalf("events[1].Kind = %q, want stream-flush", skip.Kind)
 	}
 	if skip.RepeatCount != 199 {
 		t.Fatalf("events[1].RepeatCount = %d, want 199", skip.RepeatCount)
@@ -395,9 +332,9 @@ func TestTUIDiagnosticCoalescesConsecutiveIdenticalEvents(t *testing.T) {
 
 func TestTUIDiagnosticCoalesceDoesNotMergeDifferentDetail(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
-	m.recordTUIDiagnostic("host-redraw-skip", "reason=stream-flush")
-	m.recordTUIDiagnostic("host-redraw-skip", "reason=scroll-flush")
-	m.recordTUIDiagnostic("host-redraw-skip", "reason=stream-flush")
+	m.recordTUIDiagnostic("stream-flush", "reason=stream")
+	m.recordTUIDiagnostic("stream-flush", "reason=scroll")
+	m.recordTUIDiagnostic("stream-flush", "reason=stream")
 
 	events := m.snapshotTUIDiagnosticEvents()
 	if len(events) != 3 {
@@ -411,7 +348,7 @@ func TestTUIDiagnosticCoalescesToolCallUpdateLengthChanges(t *testing.T) {
 	for i := range maxTUIDiagnosticEvents + 10 {
 		m.recordTUIDiagnostic("tool-call-update", "tool=TodoWrite id=call-1 block=79 len=%d->%d", i, i+1)
 	}
-	m.recordTUIDiagnostic("host-redraw", "reason=scroll-flush")
+	m.recordTUIDiagnostic("scroll-flush", "reason=wheel")
 
 	events := m.snapshotTUIDiagnosticEvents()
 	if len(events) != 3 {
@@ -430,8 +367,8 @@ func TestTUIDiagnosticCoalescesToolCallUpdateLengthChanges(t *testing.T) {
 	if !strings.Contains(update.Detail, "len=137->138") {
 		t.Fatalf("events[1].Detail = %q, want latest length", update.Detail)
 	}
-	if events[2].Kind != "host-redraw" {
-		t.Fatalf("events[2].Kind = %q, want host-redraw", events[2].Kind)
+	if events[2].Kind != "scroll-flush" {
+		t.Fatalf("events[2].Kind = %q, want scroll-flush", events[2].Kind)
 	}
 }
 
@@ -463,9 +400,6 @@ func TestBuildTUIDiagnosticDumpIncludesKeySections(t *testing.T) {
 		"something happened",
 		"hello",
 		"last_image_protocol_reason",
-		"last_host_redraw",
-		"host_redraw_generation",
-		"replay_nonce",
 		"kitty_placement_cache_len",
 		"display_state",
 		"background_idle_since",
@@ -525,10 +459,8 @@ func TestSlashCompletionNoLongerOffersDiagnosticsCommand(t *testing.T) {
 	}
 }
 
-func TestDiagnosticsBundleSuccessTriggersStatusCardAndRedraw(t *testing.T) {
+func TestDiagnosticsBundleSuccessTriggersStatusCardAndToast(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
-	m.SetFocusResizeFreezeEnabled(true)
-
 	updated, cmd := m.Update(diagnosticsBundleMsg{path: "/tmp/chord-diagnostics.zip"})
 	model, ok := updated.(*Model)
 	if !ok {
@@ -536,9 +468,6 @@ func TestDiagnosticsBundleSuccessTriggersStatusCardAndRedraw(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("successful diagnostics export should schedule toast command")
-	}
-	if model.lastHostRedrawReason == "diagnostics-bundle" {
-		t.Fatalf("diagnostics export should not force host redraw; got %q", model.lastHostRedrawReason)
 	}
 	blocks := model.viewport.visibleBlocks()
 	if len(blocks) == 0 {
@@ -3929,88 +3858,8 @@ func TestWindowSizeMsgHeightGrowthWidthShrinkAppliesHeightImmediately(t *testing
 	}
 }
 
-func TestBlurMsgRestoresStableTerminalSizeAndFreezesResize(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.width = 90
-	m.height = 30
-	m.pendingResizeW = 90
-	m.pendingResizeH = 30
-
-	updated, cmd := m.Update(tea.BlurMsg{})
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if !model.focusResizeFrozen {
-		t.Fatal("BlurMsg should start resize freeze")
-	}
-	if model.width != 120 || model.height != 40 {
-		t.Fatalf("BlurMsg should restore stable size 120x40, got %dx%d", model.width, model.height)
-	}
-	if cmd == nil {
-		t.Fatal("BlurMsg should schedule idle sweep command")
-	}
-
-	updated, cmd = model.Update(tea.WindowSizeMsg{Width: 80, Height: 25})
-	model, ok = updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if model.width != 120 || model.height != 40 {
-		t.Fatalf("frozen blur resize should keep stable size 120x40, got %dx%d", model.width, model.height)
-	}
-	if model.pendingResizeW != 80 || model.pendingResizeH != 25 {
-		t.Fatalf("pending resize = %dx%d, want 80x25 during freeze", model.pendingResizeW, model.pendingResizeH)
-	}
-	if cmd != nil {
-		t.Fatalf("WindowSizeMsg during blur freeze should not schedule command, got %#v", cmd)
-	}
-}
-
-func TestFocusMsgFreezesResizeUntilSettle(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.width = 95
-	m.height = 32
-
-	updated, cmd := m.Update(tea.FocusMsg{})
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if !model.focusResizeFrozen {
-		t.Fatal("FocusMsg should start resize freeze")
-	}
-	if model.focusResizeGeneration != 1 {
-		t.Fatalf("focusResizeGeneration = %d, want 1", model.focusResizeGeneration)
-	}
-	if model.width != 120 || model.height != 40 {
-		t.Fatalf("FocusMsg should restore stable size 120x40, got %dx%d", model.width, model.height)
-	}
-	if cmd == nil {
-		t.Fatal("FocusMsg should schedule settle tick")
-	}
-
-	updated, cmd = model.Update(tea.WindowSizeMsg{Width: 150, Height: 35})
-	model, ok = updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if model.width != 120 || model.height != 40 {
-		t.Fatalf("frozen resize should keep stable size 120x40, got %dx%d", model.width, model.height)
-	}
-	if model.pendingResizeW != 150 || model.pendingResizeH != 35 {
-		t.Fatalf("pending resize = %dx%d, want 150x35 during freeze", model.pendingResizeW, model.pendingResizeH)
-	}
-	if cmd != nil {
-		t.Fatalf("WindowSizeMsg during freeze should not schedule immediate command, got %#v", cmd)
-	}
-}
-
 func TestFocusMsgWhenImageViewerOpenMarksViewerForRetransmitAndClearsViewerCache(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
-	m.SetFocusResizeFreezeEnabled(false)
 	m.mode = ModeImageViewer
 	m.imageViewer = imageViewerState{Open: true, ImageID: 123, NeedsRetransmit: false}
 	m.imageCaps = TerminalImageCapabilities{Backend: ImageBackendKitty, SupportsFullscreen: true}
@@ -4019,7 +3868,7 @@ func TestFocusMsgWhenImageViewerOpenMarksViewerForRetransmitAndClearsViewerCache
 	m.kittyImageCache[999] = struct{}{}
 	m.kittyPlacementCache[999] = struct{}{}
 
-	updated, cmd := m.Update(tea.FocusMsg{})
+	updated, _ := m.Update(tea.FocusMsg{})
 	model, ok := updated.(*Model)
 	if !ok {
 		t.Fatalf("Update returned %T, want *Model", updated)
@@ -4039,14 +3888,10 @@ func TestFocusMsgWhenImageViewerOpenMarksViewerForRetransmitAndClearsViewerCache
 	if _, ok := model.kittyPlacementCache[999]; !ok {
 		t.Fatal("FocusMsg should not clear unrelated kitty placement cache entries")
 	}
-	if cmd == nil {
-		t.Fatal("FocusMsg should schedule deferred replay command when viewer is open")
-	}
 }
 
 func TestFocusMsgWhenKittyImageViewerSchedulesDeferredReplay(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
-	m.SetFocusResizeFreezeEnabled(false)
 	pngData := makeTestPNG(t)
 	block := &Block{
 		ID:         42,
@@ -4074,23 +3919,19 @@ func TestFocusMsgWhenKittyImageViewerSchedulesDeferredReplay(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("FocusMsg should schedule kitty image viewer replay when viewer is renderable")
 	}
-	if !model.imageViewer.NeedsRetransmit {
-		t.Fatal("FocusMsg should keep viewer retransmit pending until deferred replay runs")
+	if model.imageViewer.NeedsRetransmit {
+		t.Fatal("FocusMsg should replay renderable kitty viewer immediately")
 	}
-	if model.lastImageProtocolReason != "" {
-		t.Fatalf("lastImageProtocolReason = %q, want empty before deferred replay", model.lastImageProtocolReason)
-	}
-	if model.focusResizeGeneration != 1 {
-		t.Fatalf("focusResizeGeneration = %d, want 1", model.focusResizeGeneration)
+	if model.lastImageProtocolReason != "focus-restore" {
+		t.Fatalf("lastImageProtocolReason = %q, want focus-restore", model.lastImageProtocolReason)
 	}
 	if got := cmd(); got == nil {
-		t.Fatal("FocusMsg deferred replay command should emit a message")
+		t.Fatal("FocusMsg replay command should emit a message")
 	}
 }
 
 func TestFocusMsgWhenVisibleInlineImagesReplayEvenWithoutFreeze(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
-	m.SetFocusResizeFreezeEnabled(false)
 	m.imageCaps = TerminalImageCapabilities{Backend: ImageBackendITerm2, SupportsInline: true}
 	m.viewport.height = 8
 	m.viewport.AppendBlock(&Block{
@@ -4118,64 +3959,7 @@ func TestFocusMsgWhenVisibleInlineImagesReplayEvenWithoutFreeze(t *testing.T) {
 	}
 }
 
-func TestImageProtocolTickReplaysKittyViewerAfterFocusRestore(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 24)
-	m.SetFocusResizeFreezeEnabled(false)
-	pngData := makeTestPNG(t)
-	block := &Block{
-		ID:         52,
-		Type:       BlockUser,
-		ImageCount: 1,
-		ImageParts: []BlockImagePart{{FileName: "image.png", MimeType: "image/png", Data: pngData}},
-	}
-	m.viewport.AppendBlock(block)
-	m.focusedBlockID = block.ID
-	m.imageCaps = TerminalImageCapabilities{Backend: ImageBackendKitty, SupportsFullscreen: true}
-	m.kittyMetrics = kittyTerminalMetrics{CellWidthPx: 8, CellHeightPx: 16, WindowWidthPx: 640, WindowHeightPx: 384, Valid: true}
-	m.layout = m.generateLayout(m.width, m.height)
-	m.openImageViewer(block.ID, 0)
-	m.imageViewer.NeedsRetransmit = true
-	m.focusResizeGeneration = 1
-
-	updated, cmd := m.Update(imageProtocolTickMsg{generation: 1, reason: "focus-restore:image-viewer"})
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if cmd == nil {
-		t.Fatal("imageProtocolTickMsg should replay kitty image viewer")
-	}
-	if model.imageViewer.NeedsRetransmit {
-		t.Fatal("successful deferred replay should consume kitty viewer retransmit flag")
-	}
-	if model.lastImageProtocolReason != "focus-restore:image-viewer" {
-		t.Fatalf("lastImageProtocolReason = %q, want focus-restore:image-viewer", model.lastImageProtocolReason)
-	}
-}
-
-func TestFocusResizeSettleRequestsWindowSize(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.focusResizeFrozen = true
-	m.focusResizeGeneration = 2
-
-	updated, cmd := m.Update(focusResizeSettleMsg{generation: 2})
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if model.focusResizeFrozen {
-		t.Fatal("settle tick should end resize freeze")
-	}
-	if cmd == nil {
-		t.Fatal("settle tick should request current window size")
-	}
-	if got := cmd(); got == nil {
-		t.Fatal("settle command should emit a sequence message")
-	}
-}
-
-func TestHostRedrawSettleTriggersImageProtocolReplay(t *testing.T) {
+func TestFocusRestoreTriggersImageProtocolReplay(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
 	m.imageCaps = TerminalImageCapabilities{Backend: ImageBackendITerm2, SupportsInline: true}
 	m.viewport.height = 8
@@ -4189,280 +3973,16 @@ func TestHostRedrawSettleTriggersImageProtocolReplay(t *testing.T) {
 	m.viewport.offset = 0
 	m.layout = m.generateLayout(m.width, m.height)
 
-	updated, cmd := m.Update(hostRedrawSettleMsg{reason: "stream-flush"})
+	updated, cmd := m.Update(tea.FocusMsg{})
 	model, ok := updated.(*Model)
 	if !ok {
 		t.Fatalf("Update returned %T, want *Model", updated)
 	}
 	if cmd == nil {
-		t.Fatal("host redraw settle should replay image protocol")
+		t.Fatal("focus restore should replay image protocol")
 	}
-	if !strings.Contains(model.lastImageProtocolReason, "host-redraw:stream-flush") {
-		t.Fatalf("lastImageProtocolReason = %q, want host-redraw:stream-flush", model.lastImageProtocolReason)
-	}
-}
-
-func TestHostRedrawSettleSkipsPeriodicViewerReplay(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.mode = ModeImageViewer
-	m.imageViewer = imageViewerState{Open: true}
-	m.lastImageProtocolReason = "existing"
-
-	updated, cmd := m.Update(hostRedrawSettleMsg{reason: "stream-flush"})
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if cmd != nil {
-		t.Fatalf("periodic viewer settle should not schedule command, got %#v", cmd)
-	}
-	if model.lastImageProtocolReason != "existing" {
-		t.Fatalf("lastImageProtocolReason = %q, want existing", model.lastImageProtocolReason)
-	}
-}
-
-func TestHostRedrawSettleRecordsReasonEvenWhenReplaySkipped(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.imageCaps = TerminalImageCapabilities{Backend: ImageBackendITerm2, SupportsInline: true}
-
-	updated, cmd := m.Update(hostRedrawSettleMsg{reason: "stream-flush"})
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if cmd != nil {
-		t.Fatalf("host redraw settle without visible inline image should not schedule command, got %#v", cmd)
-	}
-	if model.lastImageProtocolReason != "host-redraw:stream-flush" {
-		t.Fatalf("lastImageProtocolReason = %q, want host-redraw:stream-flush", model.lastImageProtocolReason)
-	}
-	if !strings.Contains(model.lastImageProtocolSummary, "visible_inline=false") {
-		t.Fatalf("lastImageProtocolSummary = %q, want visible_inline=false", model.lastImageProtocolSummary)
-	}
-}
-
-func TestHostRedrawSettleSkipsWhileResizeFrozen(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.focusResizeFrozen = true
-	updated, cmd := m.Update(hostRedrawSettleMsg{reason: "scroll-flush"})
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if !model.focusResizeFrozen {
-		t.Fatal("host redraw settle should not clear resize freeze")
-	}
-	if cmd != nil {
-		t.Fatalf("host redraw settle during freeze should not schedule command, got %#v", cmd)
-	}
-	if model.lastImageProtocolReason != "" {
-		t.Fatalf("host redraw settle during freeze should not replay image protocol, got %q", model.lastImageProtocolReason)
-	}
-}
-
-func TestFocusResizeSettleSchedulesInlineReplayOutsideViewer(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.focusResizeFrozen = true
-	m.focusResizeGeneration = 2
-	m.mode = ModeInsert
-
-	updated, cmd := m.Update(focusResizeSettleMsg{generation: 2})
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if model.focusResizeFrozen {
-		t.Fatal("settle tick should end resize freeze")
-	}
-	if cmd == nil {
-		t.Fatal("settle tick outside viewer should schedule replay sequence")
-	}
-	if got := cmd(); got == nil {
-		t.Fatal("inline replay settle sequence should emit a message")
-	}
-	if model.lastImageProtocolReason != "" {
-		t.Fatalf("focus settle should not execute replay synchronously, got reason %q", model.lastImageProtocolReason)
-	}
-}
-
-func TestFocusResizeSettleWhenImageViewerOpenSchedulesViewerRedraw(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.mode = ModeImageViewer
-	m.imageViewer = imageViewerState{Open: true}
-	m.focusResizeFrozen = true
-	m.focusResizeGeneration = 2
-
-	updated, cmd := m.Update(focusResizeSettleMsg{generation: 2})
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if model.focusResizeFrozen {
-		t.Fatal("settle tick should end resize freeze")
-	}
-	if cmd == nil {
-		t.Fatal("settle tick with open image viewer should schedule redraw sequence")
-	}
-	if got := cmd(); got == nil {
-		t.Fatal("viewer settle sequence should emit a message")
-	}
-}
-
-func TestFocusResizeSettleIgnoresStaleGeneration(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.focusResizeFrozen = true
-	m.focusResizeGeneration = 3
-
-	updated, cmd := m.Update(focusResizeSettleMsg{generation: 2})
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if !model.focusResizeFrozen {
-		t.Fatal("stale settle tick should not end resize freeze")
-	}
-	if cmd != nil {
-		t.Fatalf("stale settle tick should not schedule command, got %#v", cmd)
-	}
-}
-
-func TestFocusSettleMarksReplayGenerationForForcedReplay(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.focusResizeFrozen = true
-	m.focusResizeGeneration = 11
-
-	before := m.hostRedrawFrameNonce
-	cmd := m.handleFocusResizeSettle(focusResizeSettleMsg{generation: 11})
-	if cmd == nil {
-		t.Fatal("focus-settle should schedule redraw commands")
-	}
-	if m.hostRedrawFrameNonce != before+1 {
-		t.Fatalf("hostRedrawFrameNonce = %d, want %d", m.hostRedrawFrameNonce, before+1)
-	}
-}
-
-func TestHostRedrawCmdMarksReplayGenerationForForcedReplay(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.lastHostRedrawAt = time.Now().Add(-time.Second)
-
-	before := m.hostRedrawFrameNonce
-	cmd := m.hostRedrawCmd("scroll-flush")
-	if cmd == nil {
-		t.Fatal("host redraw should schedule command")
-	}
-	if m.hostRedrawFrameNonce != before+1 {
-		t.Fatalf("hostRedrawFrameNonce = %d, want %d", m.hostRedrawFrameNonce, before+1)
-	}
-}
-
-func TestViewKeepsFreshRawFrameMarkerDurableAfterHostRedraw(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 8)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.mode = ModeNormal
-	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "alpha"})
-
-	initialRaw := m.View().Content
-	initialPlain := stripANSI(initialRaw)
-
-	m.lastHostRedrawAt = time.Now().Add(-time.Second)
-	if cmd := m.hostRedrawCmd("scroll-flush"); cmd == nil {
-		t.Fatal("host redraw should schedule command")
-	}
-
-	replayedRaw := m.View().Content
-	replayedPlain := stripANSI(replayedRaw)
-	if replayedPlain != initialPlain {
-		t.Fatalf("visual content changed after forced replay:\ninitial=%q\nreplayed=%q", initialPlain, replayedPlain)
-	}
-	if replayedRaw == initialRaw {
-		t.Fatalf("raw content should differ after forced replay to bypass Bubble Tea viewEquals; raw=%q", replayedRaw)
-	}
-	if !strings.HasSuffix(replayedRaw, ansiNoopSGR) {
-		t.Fatalf("replayed raw content should end with %q, got %q", ansiNoopSGR, replayedRaw)
-	}
-
-	againRaw := m.View().Content
-	againPlain := stripANSI(againRaw)
-	if againPlain != initialPlain {
-		t.Fatalf("visual content changed on subsequent frame:\ninitial=%q\nagain=%q", initialPlain, againPlain)
-	}
-	if !strings.HasSuffix(againRaw, ansiNoopSGR) {
-		t.Fatalf("forced replay marker should remain durable until the next redraw generation, got %q", againRaw)
-	}
-
-	m.lastHostRedrawAt = time.Now().Add(-time.Second)
-	if cmd := m.hostRedrawCmd("scroll-flush"); cmd == nil {
-		t.Fatal("second host redraw should schedule command")
-	}
-	nextRaw := m.View().Content
-	nextPlain := stripANSI(nextRaw)
-	if nextPlain != initialPlain {
-		t.Fatalf("visual content changed after second forced replay:\ninitial=%q\nnext=%q", initialPlain, nextPlain)
-	}
-	if !strings.HasSuffix(nextRaw, ansiNoopSGRAlt) {
-		t.Fatalf("second replay raw content should end with %q, got %q", ansiNoopSGRAlt, nextRaw)
-	}
-	if nextRaw == againRaw {
-		t.Fatal("new host redraw generation should use a distinct no-op suffix to bypass viewEquals")
-	}
-}
-
-func TestPostFocusSettleRedrawTriggersStrongHostRedraw(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.focusResizeGeneration = 5
-	m.lastHostRedrawAt = time.Now().Add(-time.Second)
-
-	cmd := m.handlePostFocusSettleRedraw(postFocusSettleRedrawMsg{generation: 5})
-	if cmd == nil {
-		t.Fatal("matching generation should schedule host redraw")
-	}
-	if m.lastHostRedrawReason != "post-focus-settle-redraw" {
-		t.Fatalf("lastHostRedrawReason = %q, want post-focus-settle-redraw", m.lastHostRedrawReason)
-	}
-
-	cmds := m.hostRedrawSequence("post-focus-settle-redraw")
-	if len(cmds) != 3 {
-		t.Fatalf("post-focus-settle-redraw cmd count = %d, want 3", len(cmds))
-	}
-	if !containsCmd(cmds, tea.ClearScreen) {
-		t.Fatal("post-focus-settle-redraw should include ClearScreen")
-	}
-	if !containsCmd(cmds, tea.RequestWindowSize) {
-		t.Fatal("post-focus-settle-redraw should include RequestWindowSize")
-	}
-}
-
-func TestPostFocusSettleRedrawSkipsStaleGeneration(t *testing.T) {
-	m := NewModelWithSize(nil, 120, 40)
-	m.focusResizeGeneration = 5
-
-	_, cmd := m.Update(postFocusSettleRedrawMsg{generation: 3})
-	if cmd != nil {
-		t.Fatalf("stale generation should not issue command, got %#v", cmd)
-	}
-}
-
-func TestDetectFocusResizeFreezeFromMap(t *testing.T) {
-	if !detectFocusResizeFreezeFromMap(map[string]string{"CMUX_SOCKET_PATH": "/tmp/cmux-debug.sock"}) {
-		t.Fatal("CMUX_SOCKET_PATH should enable focus resize freeze workaround")
-	}
-	if !detectFocusResizeFreezeFromMap(map[string]string{"CMUX_SOCKET": "/tmp/cmux-debug.sock"}) {
-		t.Fatal("CMUX_SOCKET should enable focus resize freeze workaround")
-	}
-	if !detectFocusResizeFreezeFromMap(map[string]string{"TERM_PROGRAM": "ghostty"}) {
-		t.Fatal("ghostty should enable focus resize freeze workaround")
-	}
-	if !detectFocusResizeFreezeFromMap(map[string]string{"TERM": "xterm-ghostty"}) {
-		t.Fatal("xterm-ghostty should enable focus resize freeze workaround")
-	}
-	if !detectFocusResizeFreezeFromMap(map[string]string{"TERM_PROGRAM": "iTerm.app"}) {
-		t.Fatal("iTerm2 should enable focus resize freeze workaround")
+	if !strings.Contains(model.lastImageProtocolReason, "focus-restore") {
+		t.Fatalf("lastImageProtocolReason = %q, want focus-restore", model.lastImageProtocolReason)
 	}
 }
 
@@ -7352,7 +6872,6 @@ func TestFocusMsgReappliesEnglishIMEForConfirmAndQuestionModes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := NewModel(nil)
-			m.SetFocusResizeFreezeEnabled(false)
 			m.mode = tc.mode
 			m.ime.switchTarget = "com.apple.keylayout.ABC"
 			m.terminalAppFocused = false
@@ -7370,7 +6889,7 @@ func TestFocusMsgReappliesEnglishIMEForConfirmAndQuestionModes(t *testing.T) {
 				t.Fatalf("pending IME apply = (%v, %q), want (true, com.apple.keylayout.ABC)", model.ime.pending, model.ime.pendingTarget)
 			}
 			if cmd != nil {
-				t.Fatalf("FocusMsg with freeze disabled should not schedule command, got %#v", cmd)
+				t.Fatalf("FocusMsg should not schedule command without an IME apply, got %#v", cmd)
 			}
 		})
 	}

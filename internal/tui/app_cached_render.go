@@ -119,7 +119,6 @@ func (m *Model) markStreamRenderDirty() {
 	if m == nil {
 		return
 	}
-	m.markBackgroundDirty("stream-render")
 	m.setStreamRenderInvalidation(streamRenderInvalidateDefer)
 }
 
@@ -129,18 +128,12 @@ func (m *Model) requestStreamBoundaryFlush() tea.Cmd {
 	}
 	m.exitRenderFreeze()
 	m.setStreamRenderInvalidation(streamRenderInvalidateForce)
-	return tea.Batch(
-		m.scheduleStreamFlush(m.streamBoundaryFlushDelay()),
-		m.hostRedrawForContentBoundaryCmd("content-boundary"),
-	)
+	return m.scheduleStreamFlush(m.streamBoundaryFlushDelay())
 }
 
 func (m *Model) streamBoundaryFlushDelay() time.Duration {
 	if m == nil {
 		return 0
-	}
-	if m.displayState == stateForeground {
-		return foregroundBoundaryFlushCadence
 	}
 	if delay := m.currentCadence().contentFlushDelay; delay > 0 {
 		return delay
@@ -303,14 +296,6 @@ func (cache *cachedRenderable) renderScratchBuffer(width int) uv.ScreenBuffer {
 	return cache.scratch
 }
 
-func (m *Model) SetFocusResizeFreezeEnabled(enabled bool) {
-	m.useFocusResizeFreeze = enabled
-	if !enabled {
-		m.lastHostRedrawAt = time.Time{}
-		m.lastHostRedrawReason = ""
-	}
-}
-
 func (m *Model) queuedDraftsFingerprint(width, maxLines int) string {
 	drafts := m.visibleQueuedDrafts()
 	if len(drafts) == 0 || width <= 0 || maxLines <= 0 {
@@ -429,11 +414,7 @@ func (m *Model) consumeScrollFlush(msg scrollFlushTickMsg) tea.Cmd {
 	delta := m.pendingScrollDelta
 	m.pendingScrollDelta = 0
 	m.applyWheelScrollDelta(delta)
-	var extra []tea.Cmd
-	if m.viewport != nil && m.viewport.offset != prevOffset {
-		extra = append(extra, m.hostRedrawCmd("scroll-flush"))
-	}
-	return m.refreshInlineImagesIfViewportMoved(prevOffset, extra...)
+	return m.refreshInlineImagesIfViewportMoved(prevOffset)
 }
 
 func (m *Model) applyWheelScrollDelta(delta int) {

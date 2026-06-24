@@ -201,7 +201,7 @@ If the TUI occasionally shows stale rows, horizontal line artifacts, or partiall
 - if the screen is already corrupted, lightly resizing the terminal or switching away and back again can force a full redraw
 - if it still reproduces, capture a diagnostics bundle and a screenshot together
 
-If you see corruption right after focus restore while the UI is streaming output, treat it as a host redraw/replay issue and capture a diagnostics bundle plus a screenshot.
+If you see corruption right after focus restore while the UI is streaming output, capture a diagnostics bundle plus a screenshot so maintainers can compare Chord's rendered frame with the terminal's visible output.
 
 Note: fragments like `;250m pyright` during a corruption episode are usually not LSP text but the tail of a truncated ANSI/OSC control sequence.
 
@@ -218,7 +218,7 @@ Two quick local observations also help narrow it down:
 - If the extra line disappears when the terminal is made one or two columns narrower, mention that — it points at right-edge wrap behavior.
 - If the artifact appears right after image preview, paste image, or diagnostics export, mention that too.
 
-Chord already avoids terminal scroll-region optimizations that some terminals mishandle around focus restore, so most of these reports come down to terminal-specific redraw behavior; the screenshot-plus-bundle pair is what makes them diagnosable.
+Chord disables terminal hard-scroll optimizations because those sequences can leave stale rows in Chord's sticky transcript layout, so most remaining reports come down to terminal-specific redraw behavior; the screenshot-plus-bundle pair is what makes them diagnosable.
 
 ## Bottom transcript rows are unreachable in long sessions
 

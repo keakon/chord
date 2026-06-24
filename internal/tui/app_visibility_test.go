@@ -10,20 +10,6 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestHandleFocusMsgSkipsImmediateHostRedrawWhenFreezeEnabled(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 24)
-	m.useFocusResizeFreeze = true
-	m.displayState = stateBackground
-
-	if cmd := m.handleFocusMsg(); cmd != nil {
-		_ = cmd()
-	}
-
-	if !m.lastHostRedrawAt.IsZero() {
-		t.Fatal("focus restore should not issue immediate host redraw when freeze is enabled")
-	}
-}
-
 func TestCurrentCadenceReturnsForegroundWhenFocused(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateForeground
@@ -38,11 +24,108 @@ func TestCurrentCadenceReturnsForegroundWhenFocused(t *testing.T) {
 	if c.titleTickerDelay != titleSpinnerCadence {
 		t.Fatalf("foreground titleTickerDelay = %v, want %v", c.titleTickerDelay, titleSpinnerCadence)
 	}
-	if !c.hostRedrawAllowed {
-		t.Fatal("foreground should allow host redraw")
+	if c.scrollFlushDelay != foregroundScrollFlushCadence {
+		t.Fatalf("foreground scrollFlushDelay = %v, want %v", c.scrollFlushDelay, foregroundScrollFlushCadence)
 	}
 	if c.aggressiveHotBudget {
 		t.Fatal("foreground should not use aggressive hot budget")
+	}
+}
+
+func TestCadenceProfilesDetectLowForCmux(t *testing.T) {
+	profiles := detectCadenceProfilesFromMap(map[string]string{"CMUX_SOCKET": "/tmp/cmux.sock"})
+	c := profiles.foreground
+	if c.contentFlushDelay != lowCadenceContentFlushDelay {
+		t.Fatalf("low contentFlushDelay = %v, want %v", c.contentFlushDelay, lowCadenceContentFlushDelay)
+	}
+	if c.scrollFlushDelay != lowCadenceScrollFlushDelay {
+		t.Fatalf("low scrollFlushDelay = %v, want %v", c.scrollFlushDelay, lowCadenceScrollFlushDelay)
+	}
+	if c.visualAnimDelay != 0 {
+		t.Fatalf("low visualAnimDelay = %v, want 0", c.visualAnimDelay)
+	}
+	if c.titleTickerDelay != lowCadenceTitleTickerDelay {
+		t.Fatalf("low titleTickerDelay = %v, want %v", c.titleTickerDelay, lowCadenceTitleTickerDelay)
+	}
+}
+
+func TestEnvMsgAppliesCmuxCadenceProfile(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	updated, _ := m.Update(tea.EnvMsg{"CMUX_SOCKET=/tmp/cmux.sock"})
+	model, ok := updated.(*Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want *Model", updated)
+	}
+	model.displayState = stateForeground
+	c := model.currentCadence()
+	if c.contentFlushDelay != lowCadenceContentFlushDelay {
+		t.Fatalf("EnvMsg cmux contentFlushDelay = %v, want %v", c.contentFlushDelay, lowCadenceContentFlushDelay)
+	}
+	if c.scrollFlushDelay != lowCadenceScrollFlushDelay {
+		t.Fatalf("EnvMsg cmux scrollFlushDelay = %v, want %v", c.scrollFlushDelay, lowCadenceScrollFlushDelay)
+	}
+	if c.visualAnimDelay != 0 {
+		t.Fatalf("EnvMsg cmux visualAnimDelay = %v, want 0", c.visualAnimDelay)
+	}
+}
+
+func TestMouseWheelUsesCadenceScrollFlushDelay(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.cadenceProfiles = lowCadenceProfiles()
+	m.displayState = stateForeground
+
+	cmd := m.handleMouseWheel(tea.Mouse{Button: tea.MouseWheelDown})
+	if cmd == nil {
+		t.Fatal("mouse wheel should schedule a scroll flush")
+	}
+	if m.pendingScrollDelta != mouseWheelScrollStep {
+		t.Fatalf("pendingScrollDelta = %d, want %d", m.pendingScrollDelta, mouseWheelScrollStep)
+	}
+	if got, want := m.scrollFlushDelay(), lowCadenceScrollFlushDelay; got != want {
+		t.Fatalf("scrollFlushDelay = %v, want %v", got, want)
+	}
+	if second := m.handleMouseWheel(tea.Mouse{Button: tea.MouseWheelDown}); second != nil {
+		t.Fatal("second wheel event before flush should be coalesced")
+	}
+	if m.pendingScrollDelta != 2*mouseWheelScrollStep {
+		t.Fatalf("pendingScrollDelta after coalescing = %d, want %d", m.pendingScrollDelta, 2*mouseWheelScrollStep)
+	}
+}
+
+func TestCmuxCadenceStopsVisualAnimationButKeepsTitleTicker(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.cadenceProfiles = lowCadenceProfiles()
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
+
+	cmd := m.startActiveAnimation()
+	if cmd == nil {
+		t.Fatal("startActiveAnimation should still return title/housekeeping command")
+	}
+	if m.animRunning {
+		t.Fatal("cmux cadence should not run visual animation ticks")
+	}
+	if m.activitySpinnerFrameIndex != 0 {
+		t.Fatalf("activitySpinnerFrameIndex = %d, want 0", m.activitySpinnerFrameIndex)
+	}
+	if !m.terminalTitleTickRunning {
+		t.Fatal("cmux cadence should keep terminal title ticker active")
+	}
+	if m.terminalTitleTickerDelay != lowCadenceTitleTickerDelay {
+		t.Fatalf("terminalTitleTickerDelay = %v, want %v", m.terminalTitleTickerDelay, lowCadenceTitleTickerDelay)
+	}
+}
+
+func TestCmuxCadenceThrottlesToolArgRenderingByContentCadence(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.cadenceProfiles = lowCadenceProfiles()
+	now := time.Now()
+	m.recordToolArgRender("call-1", `{"cmd":"echo"}`, now)
+
+	if m.shouldRefreshToolArgRender("call-1", `{"cmd":"echo hi"}`, now.Add(499*time.Millisecond)) {
+		t.Fatal("cmux cadence should not render tool args before content cadence elapses")
+	}
+	if !m.shouldRefreshToolArgRender("call-1", `{"cmd":"echo hi"}`, now.Add(500*time.Millisecond)) {
+		t.Fatal("cmux cadence should render tool args after content cadence elapses")
 	}
 }
 
@@ -62,9 +145,6 @@ func TestCurrentCadenceReturnsBackgroundActiveWhenBusy(t *testing.T) {
 	}
 	if c.titleTickerDelay != backgroundTitleSpinnerCadence {
 		t.Fatalf("background-active titleTickerDelay = %v, want %v", c.titleTickerDelay, backgroundTitleSpinnerCadence)
-	}
-	if c.hostRedrawAllowed {
-		t.Fatal("background-active should not allow host redraw")
 	}
 	if c.aggressiveHotBudget {
 		t.Fatal("background-active should not use aggressive hot budget")
@@ -177,9 +257,6 @@ func TestCurrentCadenceReturnsBackgroundIdleWhenNotBusy(t *testing.T) {
 	if c.titleTickerDelay != 0 {
 		t.Fatalf("background-idle titleTickerDelay = %v, want 0", c.titleTickerDelay)
 	}
-	if c.hostRedrawAllowed {
-		t.Fatal("background-idle should not allow host redraw")
-	}
 	if !c.aggressiveHotBudget {
 		t.Fatal("background-idle should use aggressive hot budget")
 	}
@@ -248,50 +325,6 @@ func TestScheduleStreamFlushUsesCadenceDelay(t *testing.T) {
 
 	if cmd := m.scheduleStreamFlush(0); cmd != nil {
 		t.Fatal("background-idle should not schedule stream flush when no explicit delay is requested")
-	}
-}
-
-func TestHostRedrawForStreamingSkipsInBackground(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 24)
-	m.SetFocusResizeFreezeEnabled(true)
-
-	// Foreground: should allow redraw.
-	m.displayState = stateForeground
-	m.currentAssistantBlock = &Block{ID: 1, Type: BlockAssistant, Streaming: true}
-	cmd := m.hostRedrawForStreamingCmd("test")
-	if cmd == nil {
-		t.Fatal("foreground streaming should allow host redraw")
-	}
-
-	// Background-idle: should skip redraw.
-	m.displayState = stateBackground
-	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
-	cmd = m.hostRedrawForStreamingCmd("test")
-	if cmd != nil {
-		t.Fatal("background-idle should skip host redraw")
-	}
-
-	// Background-active: should also skip.
-	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
-	cmd = m.hostRedrawForStreamingCmd("test")
-	if cmd != nil {
-		t.Fatal("background-active should skip host redraw")
-	}
-}
-
-func TestHostRedrawForStreamingSkipsPeriodicViewerRedraw(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 24)
-	m.SetFocusResizeFreezeEnabled(true)
-	m.displayState = stateForeground
-	m.mode = ModeImageViewer
-	m.imageViewer = imageViewerState{Open: true}
-	m.currentAssistantBlock = &Block{ID: 1, Type: BlockAssistant, Streaming: true}
-
-	if cmd := m.hostRedrawForStreamingCmd("stream-flush"); cmd != nil {
-		t.Fatal("image viewer should suppress periodic stream-flush redraws")
-	}
-	if cmd := m.hostRedrawForStreamingCmd("scroll-flush"); cmd != nil {
-		t.Fatal("image viewer should suppress scroll-flush redraws")
 	}
 }
 
