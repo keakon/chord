@@ -785,6 +785,123 @@ func TestParseSSEStreamAggregatesAnthropicCacheUsage(t *testing.T) {
 	}
 }
 
+func TestParseSSEStreamSkipsToolUseWithEmptyName(t *testing.T) {
+	stream := strings.Join([]string{
+		"event: content_block_start",
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_empty\",\"name\":\"\"}}",
+		"",
+		"event: content_block_delta",
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}",
+		"",
+		"event: content_block_stop",
+		"data: {\"type\":\"content_block_stop\",\"index\":0}",
+		"",
+		"event: content_block_start",
+		"data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_read\",\"name\":\"read\"}}",
+		"",
+		"event: content_block_delta",
+		"data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}",
+		"",
+		"event: content_block_stop",
+		"data: {\"type\":\"content_block_stop\",\"index\":1}",
+		"",
+		"event: message_delta",
+		"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}",
+		"",
+		"event: message_stop",
+		"data: {\"type\":\"message_stop\"}",
+		"",
+	}, "\n")
+
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseSSEStream: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %#v, want one valid call", resp.ToolCalls)
+	}
+	if resp.ToolCalls[0].ID != "toolu_read" || resp.ToolCalls[0].Name != "read" {
+		t.Fatalf("tool call = %#v, want read", resp.ToolCalls[0])
+	}
+}
+
+func TestParseSSEStreamDoesNotEmitStartOrDeltaForEmptyNameToolUse(t *testing.T) {
+	stream := strings.Join([]string{
+		"event: content_block_start",
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_empty\",\"name\":\"\"}}",
+		"",
+		"event: content_block_delta",
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}",
+		"",
+		"event: content_block_stop",
+		"data: {\"type\":\"content_block_stop\",\"index\":0}",
+		"",
+		"event: content_block_start",
+		"data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_read\",\"name\":\"read\"}}",
+		"",
+		"event: content_block_delta",
+		"data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}",
+		"",
+		"event: content_block_stop",
+		"data: {\"type\":\"content_block_stop\",\"index\":1}",
+		"",
+		"event: message_stop",
+		"data: {\"type\":\"message_stop\"}",
+		"",
+	}, "\n")
+
+	var starts, deltas, ends []message.ToolCallDelta
+	_, err := parseSSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
+		if delta.ToolCall == nil {
+			return
+		}
+		switch delta.Type {
+		case message.StreamDeltaToolUseStart:
+			starts = append(starts, *delta.ToolCall)
+		case message.StreamDeltaToolUseDelta:
+			deltas = append(deltas, *delta.ToolCall)
+		case message.StreamDeltaToolUseEnd:
+			ends = append(ends, *delta.ToolCall)
+		}
+	}, nil)
+	if err != nil {
+		t.Fatalf("parseSSEStream: %v", err)
+	}
+	// The empty-name block must emit no start/delta/end; only the valid read tool does.
+	if len(starts) != 1 || starts[0].Name != "read" {
+		t.Fatalf("tool_use_start callbacks = %+v, want one read start", starts)
+	}
+	if len(ends) != 1 || ends[0].Name != "read" {
+		t.Fatalf("tool_use_end callbacks = %+v, want one read end", ends)
+	}
+	for _, d := range deltas {
+		if d.Name != "read" {
+			t.Fatalf("tool_use_delta callback for non-read tool: %+v", d)
+		}
+	}
+}
+
+func TestParseSSEStreamDoesNotEmitToolEndForMalformedEOFToolUse(t *testing.T) {
+	stream := strings.Join([]string{
+		"event: content_block_start",
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_empty\",\"name\":\"\"}}",
+		"",
+		"event: content_block_delta",
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}",
+		"",
+	}, "\n")
+
+	var toolEnds int
+	_, _ = parseSSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaToolUseEnd {
+			toolEnds++
+		}
+	}, nil)
+	if toolEnds != 0 {
+		t.Fatalf("tool_use_end callbacks = %d, want 0", toolEnds)
+	}
+}
+
 // TestParseSSEStreamAdoptsMessageDeltaInputUsage covers Anthropic-compatible
 // gateways (e.g. ModelGate) that report input/cache usage only in message_delta
 // and send input_tokens=0 in message_start.

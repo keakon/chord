@@ -3,6 +3,8 @@ package llm
 import (
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/message"
 )
 
 func TestParseOpenAISSEStream_ThinkingToolcallMarkerHit(t *testing.T) {
@@ -86,5 +88,68 @@ func TestParseOpenAISSEStream_NormalToolCallsWithoutReasoning_LeavesReasoningCon
 	}
 	if resp.ToolCalls[0].Name != "Read" {
 		t.Fatalf("expected tool call name Read, got %q", resp.ToolCalls[0].Name)
+	}
+}
+
+func TestParseOpenAISSEStream_DoesNotEmitToolCallbacksForMalformedToolCall(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"glm","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":""}}]}}]}`,
+		`data: {"id":"chatcmpl-test","model":"glm","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"command\":\"pwd\"}"}}]}}]}`,
+		`data: {"id":"chatcmpl-test","model":"glm","choices":[{"index":0,"finish_reason":"tool_calls"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	var callbacks []string
+	resp, err := parseOpenAISSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaToolUseStart || delta.Type == message.StreamDeltaToolUseDelta || delta.Type == message.StreamDeltaToolUseEnd {
+			callbacks = append(callbacks, delta.Type)
+		}
+	}, nil)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if len(resp.ToolCalls) != 0 {
+		t.Fatalf("tool calls = %#v, want malformed call discarded", resp.ToolCalls)
+	}
+	if len(callbacks) != 0 {
+		t.Fatalf("tool callbacks = %#v, want none for malformed call", callbacks)
+	}
+}
+
+func TestParseOpenAISSEStream_EmitsPairedCallbacksForValidToolCall(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"Read"}}]}}]}`,
+		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"README.md\"}"}}]}}]}`,
+		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"finish_reason":"tool_calls"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	var events []string
+	resp, err := parseOpenAISSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
+		if delta.ToolCall != nil {
+			events = append(events, delta.Type+":"+delta.ToolCall.ID+":"+delta.ToolCall.Name)
+		}
+	}, nil)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+	}
+	if resp == nil || len(resp.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %#v, want one valid call", resp)
+	}
+	if string(resp.ToolCalls[0].Args) != `{"path":"README.md"}` {
+		t.Fatalf("tool args = %s, want README path", resp.ToolCalls[0].Args)
+	}
+	wantEvents := []string{
+		"tool_use_start:call_1:Read",
+		"tool_use_delta:call_1:Read",
+		"tool_use_end:call_1:Read",
+	}
+	if strings.Join(events, "|") != strings.Join(wantEvents, "|") {
+		t.Fatalf("tool callbacks = %#v, want %#v", events, wantEvents)
 	}
 }

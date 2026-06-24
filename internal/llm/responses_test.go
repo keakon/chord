@@ -286,14 +286,15 @@ func TestApplyResponsesCompletionPayload(t *testing.T) {
 
 func TestRecoverResponsesToolCallsFromOutput(t *testing.T) {
 	var resp message.Response
-	var starts []string
+	var events []string
 	recoverResponsesToolCallsFromOutput(&resp, []responsesOutputEntry{
 		{Type: "message", ID: "m1"},
 		{Type: "function_call", ID: "fc-1", CallID: "call-1", Name: "Shell", Arguments: `{"command":"echo hi"}`},
+		{Type: "function_call", ID: "fc-empty-name", Arguments: `{"command":"echo skipped"}`},
 		{Type: "function_call", ID: "fc-2", Name: "Read", Arguments: `{"path":"a.go"}`},
 	}, func(delta message.StreamDelta) {
-		if delta.Type == "tool_use_start" && delta.ToolCall != nil {
-			starts = append(starts, delta.ToolCall.ID+":"+delta.ToolCall.Name)
+		if delta.ToolCall != nil {
+			events = append(events, delta.Type+":"+delta.ToolCall.ID+":"+delta.ToolCall.Name)
 		}
 	})
 	if len(resp.ToolCalls) != 2 {
@@ -305,8 +306,14 @@ func TestRecoverResponsesToolCallsFromOutput(t *testing.T) {
 	if resp.ToolCalls[1].ID != "fc-2" || resp.ToolCalls[1].Name != "Read" {
 		t.Fatalf("second tool call = %#v", resp.ToolCalls[1])
 	}
-	if len(starts) != 2 || starts[0] != "call-1:Shell" || starts[1] != "fc-2:Read" {
-		t.Fatalf("tool_use_start callbacks = %#v", starts)
+	wantEvents := []string{
+		"tool_use_start:call-1:Shell",
+		"tool_use_end:call-1:Shell",
+		"tool_use_start:fc-2:Read",
+		"tool_use_end:fc-2:Read",
+	}
+	if !reflect.DeepEqual(events, wantEvents) {
+		t.Fatalf("tool callbacks = %#v, want %#v", events, wantEvents)
 	}
 }
 
@@ -1146,6 +1153,164 @@ func TestParseResponsesSSE_DuplicateToolCallFromProxy(t *testing.T) {
 	}
 	if args["command"] != "echo hi" {
 		t.Errorf("args[command] = %v, want \"echo hi\"", args["command"])
+	}
+}
+
+func TestParseResponsesSSE_DuplicateAddedWithEmptyNameKeepsToolName(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":2,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"shell"}}`,
+		`{"type":"response.output_item.added","output_index":2,"item":{"type":"function_call","id":"fc_1","name":""}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":2,"item_id":"fc_1","delta":"{\"command\":\"git status --short\"}"}`,
+		`{"type":"response.function_call_arguments.done","output_index":2,"item_id":"fc_1","arguments":"{\"command\":\"git status --short\"}"}`,
+		`{"type":"response.output_item.done","output_index":2,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"shell","arguments":"{\"command\":\"git status --short\"}","status":"completed"}}`,
+		`{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call"}],"usage":{"input_tokens":100,"output_tokens":50}}}`,
+	})
+
+	var starts []message.ToolCallDelta
+	var updates []message.ToolCallDelta
+	cb := func(delta message.StreamDelta) {
+		if delta.ToolCall == nil {
+			return
+		}
+		switch delta.Type {
+		case message.StreamDeltaToolUseStart:
+			starts = append(starts, *delta.ToolCall)
+		case message.StreamDeltaToolUseEnd:
+			updates = append(updates, *delta.ToolCall)
+		}
+	}
+
+	resp, err := parseResponsesSSE(stream, cb, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("got %d tool calls, want 1: %+v", len(resp.ToolCalls), resp.ToolCalls)
+	}
+	tc := resp.ToolCalls[0]
+	if tc.ID != "call_abc" || tc.Name != tools.NameShell {
+		t.Fatalf("tool call id=%q name=%q, want call_abc %s", tc.ID, tc.Name, tools.NameShell)
+	}
+	var args map[string]any
+	if err := json.Unmarshal(tc.Args, &args); err != nil {
+		t.Fatalf("tool args not valid JSON: %v", err)
+	}
+	if args["command"] != "git status --short" {
+		t.Fatalf("args[command] = %v, want git status --short", args["command"])
+	}
+	if len(starts) != 1 || starts[0].ID != "call_abc" || starts[0].Name != tools.NameShell {
+		t.Fatalf("tool_use_start callbacks = %+v, want one shell start", starts)
+	}
+	if len(updates) != 1 || updates[0].ID != "call_abc" || updates[0].Name != tools.NameShell {
+		t.Fatalf("tool_use_end callbacks = %+v, want one shell end", updates)
+	}
+}
+
+func TestParseResponsesSSE_FirstAddedMalformedEmitsNoToolCallbacks(t *testing.T) {
+	// First (and only) output_item.added for this call is malformed: empty name and
+	// no id/call_id. It must emit no start/delta/end, and the call must be discarded.
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","name":""}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\"pwd\"}"}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","name":"","arguments":"{\"command\":\"pwd\"}","status":"completed"}}`,
+		`{"type":"response.completed","response":{"status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+	})
+
+	var starts, deltas, ends int
+	resp, err := parseResponsesSSE(stream, func(delta message.StreamDelta) {
+		if delta.ToolCall == nil {
+			return
+		}
+		switch delta.Type {
+		case message.StreamDeltaToolUseStart:
+			starts++
+		case message.StreamDeltaToolUseDelta:
+			deltas++
+		case message.StreamDeltaToolUseEnd:
+			ends++
+		}
+	}, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if starts != 0 || deltas != 0 || ends != 0 {
+		t.Fatalf("malformed first added emitted callbacks: starts=%d deltas=%d ends=%d, want 0/0/0", starts, deltas, ends)
+	}
+	if len(resp.ToolCalls) != 0 {
+		t.Fatalf("tool calls = %+v, want malformed call discarded", resp.ToolCalls)
+	}
+}
+
+func TestParseResponsesSSE_LateNameEmitsPairedToolCallbacks(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","name":""}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_1","delta":"{\"command\":\"pwd\"}"}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"shell","arguments":"{\"command\":\"pwd\"}","status":"completed"}}`,
+		"[DONE]",
+	})
+
+	var events []string
+	var toolDeltas []message.ToolCallDelta
+	resp, err := parseResponsesSSE(stream, func(delta message.StreamDelta) {
+		if delta.ToolCall == nil {
+			return
+		}
+		events = append(events, delta.Type)
+		toolDeltas = append(toolDeltas, *delta.ToolCall)
+	}, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if len(events) != 2 || events[0] != message.StreamDeltaToolUseStart || events[1] != message.StreamDeltaToolUseEnd {
+		t.Fatalf("tool callback events = %+v, want paired start/end only", events)
+	}
+	for _, delta := range toolDeltas {
+		if delta.ID != "fc_1" || delta.Name != tools.NameShell {
+			t.Fatalf("tool callback = %+v, want stable fc_1 shell", delta)
+		}
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ID != "call_abc" || resp.ToolCalls[0].Name != tools.NameShell {
+		t.Fatalf("final tool calls = %+v, want provider call_id call_abc", resp.ToolCalls)
+	}
+}
+
+func TestParseResponsesSSE_StartEndUseStableStreamIDWhenDoneAddsCallID(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","name":"shell"}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_1","delta":"{\"command\":\"pwd\"}"}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"shell","arguments":"{\"command\":\"pwd\"}","status":"completed"}}`,
+		"[DONE]",
+	})
+
+	var starts []message.ToolCallDelta
+	var deltas []message.ToolCallDelta
+	var ends []message.ToolCallDelta
+	resp, err := parseResponsesSSE(stream, func(delta message.StreamDelta) {
+		if delta.ToolCall == nil {
+			return
+		}
+		switch delta.Type {
+		case message.StreamDeltaToolUseStart:
+			starts = append(starts, *delta.ToolCall)
+		case message.StreamDeltaToolUseDelta:
+			deltas = append(deltas, *delta.ToolCall)
+		case message.StreamDeltaToolUseEnd:
+			ends = append(ends, *delta.ToolCall)
+		}
+	}, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if len(starts) != 1 || len(deltas) != 1 || len(ends) != 1 {
+		t.Fatalf("starts=%+v deltas=%+v ends=%+v", starts, deltas, ends)
+	}
+	for _, delta := range []message.ToolCallDelta{starts[0], deltas[0], ends[0]} {
+		if delta.ID != "fc_1" || delta.Name != tools.NameShell {
+			t.Fatalf("stream callback = %+v, want stable fc_1 shell", delta)
+		}
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ID != "call_abc" || resp.ToolCalls[0].Name != tools.NameShell {
+		t.Fatalf("final tool calls = %+v, want provider call_id call_abc", resp.ToolCalls)
 	}
 }
 

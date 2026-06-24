@@ -235,7 +235,11 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				case "tool_use":
 					block.toolID = ev.ContentBlock.ID
 					block.toolName = ev.ContentBlock.Name
-					if cb != nil {
+					// Only emit start when id/name are present. content_block_stop and
+					// the EOF fallback discard tool calls with empty id/name without
+					// emitting ToolUseEnd, so emitting start here would leave an orphan
+					// start the reducer/TUI never closes.
+					if cb != nil && block.toolID != "" && block.toolName != "" {
 						cb(message.StreamDelta{
 							Type: message.StreamDeltaToolUseStart,
 							ToolCall: &message.ToolCallDelta{
@@ -275,7 +279,9 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					}
 				case "input_json_delta":
 					block.toolInput.WriteString(ev.Delta.PartialJSON)
-					if cb != nil {
+					// Suppress delta for blocks with empty id/name; their start was
+					// never emitted and the call will be discarded at stop/EOF.
+					if cb != nil && block.toolID != "" && block.toolName != "" {
 						cb(message.StreamDelta{
 							Type: message.StreamDeltaToolUseDelta,
 							ToolCall: &message.ToolCallDelta{
@@ -320,6 +326,10 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 						resp.Content += text
 					}
 				case "tool_use":
+					if block.toolID == "" || block.toolName == "" {
+						log.Warnf("discarding Anthropic tool call with empty id or name tool=%v id=%v", block.toolName, block.toolID)
+						break
+					}
 					tc := message.ToolCall{
 						ID:   cloneLongLivedLLMString(block.toolID),
 						Name: cloneLongLivedLLMString(block.toolName),
@@ -425,9 +435,12 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				resp.Content += text
 			}
 		case "tool_use":
+			emitToolEnd := false
 			if truncated {
 				// Output was truncated; tool call arguments are incomplete.
 				log.Warnf("discarding truncated Anthropic tool call tool=%v id=%v partial_input=%v", block.toolName, block.toolID, block.toolInput.String())
+			} else if block.toolID == "" || block.toolName == "" {
+				log.Warnf("discarding Anthropic tool call with empty id or name tool=%v id=%v", block.toolName, block.toolID)
 			} else {
 				args := json.RawMessage(block.toolInput.String())
 				if len(args) == 0 {
@@ -443,8 +456,9 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					Name: cloneLongLivedLLMString(block.toolName),
 					Args: args,
 				})
+				emitToolEnd = true
 			}
-			if cb != nil {
+			if emitToolEnd && cb != nil {
 				cb(message.StreamDelta{
 					Type: message.StreamDeltaToolUseEnd,
 					ToolCall: &message.ToolCallDelta{

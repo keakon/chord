@@ -62,6 +62,9 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 			return execResult, err
 		}
 	}
+	if err := p.validateKnownTool(tc.Name); err != nil {
+		return execResult, err
+	}
 
 	if err := p.applyPermission(ctx, &tc, &execResult); err != nil {
 		return execResult, err
@@ -135,6 +138,9 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 		if err := p.checkVisible(tc.Name); err != nil {
 			return execResult, err
 		}
+	}
+	if err := p.validateKnownTool(tc.Name); err != nil {
+		return execResult, err
 	}
 	if err := validateToolArgsAgainstSchema(p.registry, tc.Name, tc.Args); err != nil {
 		return execResult, err
@@ -247,6 +253,23 @@ func (p toolExecutionPipeline) checkVisible(name string) error {
 		}
 	}
 	return fmt.Errorf("tool %q is not available for the current model", name)
+}
+
+func (p toolExecutionPipeline) validateKnownTool(name string) error {
+	name = tools.NormalizeName(name)
+	if name == "" {
+		return fmt.Errorf("malformed tool call: missing tool name")
+	}
+	if p.isInternalTool != nil && p.isInternalTool(name) {
+		return nil
+	}
+	if p.registry == nil {
+		return nil
+	}
+	if _, ok := p.registry.Get(name); !ok {
+		return fmt.Errorf("tool not found: %s", name)
+	}
+	return nil
 }
 
 func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.ToolCall, execResult *ToolExecutionResult) error {

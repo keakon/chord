@@ -132,9 +132,89 @@ type responseIncomplete struct {
 
 // responsesToolAccumulator tracks an in-progress tool call during streaming.
 type responsesToolAccumulator struct {
-	id   string
-	name string
-	args strings.Builder
+	id                 string
+	itemID             string
+	streamID           string
+	name               string
+	args               strings.Builder
+	streamStartEmitted bool
+}
+
+func (a *responsesToolAccumulator) mergeMetadata(item responsesStreamItem) {
+	if a == nil {
+		return
+	}
+	if item.ID != "" && a.itemID == "" {
+		a.itemID = item.ID
+	}
+	if a.streamID == "" {
+		if item.CallID != "" {
+			a.streamID = item.CallID
+		} else if item.ID != "" {
+			a.streamID = item.ID
+		}
+	}
+	if item.CallID != "" {
+		a.id = item.CallID
+	} else if a.id == "" && item.ID != "" {
+		a.id = item.ID
+	}
+	if item.Name != "" {
+		a.name = item.Name
+	}
+}
+
+func responsesToolCallID(item responsesStreamItem) string {
+	if item.CallID != "" {
+		return item.CallID
+	}
+	return item.ID
+}
+
+func responsesToolCallAlreadyFinalized(finalizedCalls map[string]bool, item responsesStreamItem) bool {
+	if finalizedCalls == nil {
+		return false
+	}
+	if id := responsesToolCallID(item); id != "" && finalizedCalls[id] {
+		return true
+	}
+	return item.ID != "" && finalizedCalls[item.ID]
+}
+
+func markResponsesToolCallFinalized(finalizedCalls map[string]bool, acc *responsesToolAccumulator) {
+	if finalizedCalls == nil || acc == nil {
+		return
+	}
+	if acc.id != "" {
+		finalizedCalls[acc.id] = true
+	}
+	if acc.itemID != "" {
+		finalizedCalls[acc.itemID] = true
+	}
+}
+
+func responsesToolStreamID(acc *responsesToolAccumulator) string {
+	if acc == nil {
+		return ""
+	}
+	if acc.streamID != "" {
+		return acc.streamID
+	}
+	return acc.id
+}
+
+func maybeEmitResponsesToolStart(acc *responsesToolAccumulator, cb StreamCallback) {
+	if cb == nil || acc == nil || acc.streamStartEmitted || responsesToolStreamID(acc) == "" || acc.name == "" {
+		return
+	}
+	cb(message.StreamDelta{
+		Type: message.StreamDeltaToolUseStart,
+		ToolCall: &message.ToolCallDelta{
+			ID:   responsesToolStreamID(acc),
+			Name: acc.name,
+		},
+	})
+	acc.streamStartEmitted = true
 }
 
 type responsesEventEnvelope struct {
@@ -229,7 +309,7 @@ func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, colle
 
 		// [DONE] signals end of stream even if the trailing blank line is missing.
 		if bytes.Equal(data, []byte("[DONE]")) {
-			finalizeResponsesToolCalls(toolCalls, &resp, cb, truncated)
+			finalizeResponsesToolCalls(toolCalls, &resp, cb, truncated, finalizedCalls)
 			flushContent()
 			if resp.Content != "" {
 				partial.textDone = true
@@ -469,18 +549,18 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			if state.phaser != nil {
 				state.phaser.SetChunkTimeout(SlowPhaseChunkTimeout)
 			}
-			toolCallID := added.Item.CallID
-			if toolCallID == "" {
-				toolCallID = added.Item.ID
-			}
-			if state.finalizedCalls[toolCallID] {
+			toolCallID := responsesToolCallID(added.Item)
+			if responsesToolCallAlreadyFinalized(state.finalizedCalls, added.Item) {
 				log.Debugf("responses: skip duplicate function_call (already finalized) tool=%v call_id=%v output_index=%v", added.Item.Name, toolCallID, addedIdx)
 				return nil, nil, false, nil
 			}
-			state.toolCalls[addedIdx] = &responsesToolAccumulator{id: toolCallID, name: added.Item.Name}
-			if state.cb != nil {
-				state.cb(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: toolCallID, Name: added.Item.Name}})
+			acc, exists := state.toolCalls[addedIdx]
+			if !exists {
+				acc = &responsesToolAccumulator{}
+				state.toolCalls[addedIdx] = acc
 			}
+			acc.mergeMetadata(added.Item)
+			maybeEmitResponsesToolStart(acc, state.cb)
 		case "reasoning":
 			if state.phaser != nil {
 				state.phaser.SetChunkTimeout(SlowPhaseChunkTimeout)
@@ -517,10 +597,13 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		acc, exists := state.toolCalls[deltaIdx]
 		if exists && delta.Delta != "" {
 			acc.args.WriteString(delta.Delta)
-			if state.cb != nil && acc.args.Len() > 0 {
+			// Stream callbacks must remain paired: deltas are emitted only after
+			// a start has been emitted for the same accumulator. Args still
+			// accumulate so finalize can make the discard decision.
+			if state.cb != nil && acc.streamStartEmitted && acc.args.Len() > 0 {
 				argsStr := acc.args.String()
 				if argsStr != "{}" {
-					state.cb(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: acc.id, Name: acc.name, Input: argsStr}})
+					state.cb(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: responsesToolStreamID(acc), Name: acc.name, Input: argsStr}})
 				}
 			}
 		}
@@ -569,6 +652,10 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			if state.phaser != nil {
 				state.phaser.SetChunkTimeout(DefaultChunkTimeout)
 			}
+			if acc, exists := state.toolCalls[doneIdx]; exists {
+				acc.mergeMetadata(done.Item)
+				maybeEmitResponsesToolStart(acc, state.cb)
+			}
 			finalizeOneResponsesToolCall(state.toolCalls, doneIdx, state.resp, state.cb, *state.truncated, done.Item.Arguments, state.finalizedCalls)
 		case "message":
 			if state.partial != nil {
@@ -609,7 +696,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		respObj := completed.Response
 		applyResponsesCompletionPayload(state.resp, respObj, state.truncated)
 		*state.outputItems = responsesOutputToInputItems(respObj.Output)
-		finalizeResponsesToolCalls(state.toolCalls, state.resp, state.cb, *state.truncated)
+		finalizeResponsesToolCalls(state.toolCalls, state.resp, state.cb, *state.truncated, state.finalizedCalls)
 		if state.resp.StopReason == "tool_calls" && len(state.resp.ToolCalls) == 0 {
 			recoverResponsesToolCallsFromOutput(state.resp, respObj.Output, state.cb)
 		}
@@ -629,7 +716,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			state.resp.StopReason = "length"
 			*state.truncated = true
 		}
-		finalizeResponsesToolCalls(state.toolCalls, state.resp, state.cb, *state.truncated)
+		finalizeResponsesToolCalls(state.toolCalls, state.resp, state.cb, *state.truncated, state.finalizedCalls)
 		flushContent()
 		*state.outputItems = responsesFinalizeIncrementalOutputItems(*state.outputItems, state.resp)
 		return state.resp, *state.outputItems, true, nil

@@ -49,6 +49,10 @@ func recoverResponsesToolCallsFromOutput(resp *message.Response, output []respon
 		if callID == "" {
 			callID = out.ID
 		}
+		if callID == "" || out.Name == "" {
+			log.Warnf("responses: skip malformed recovered tool call tool=%v call_id=%v id=%v", out.Name, callID, out.ID)
+			continue
+		}
 		args := json.RawMessage(out.Arguments)
 		if len(args) == 0 {
 			args = json.RawMessage("{}")
@@ -63,6 +67,13 @@ func recoverResponsesToolCallsFromOutput(resp *message.Response, output []respon
 		if cb != nil {
 			cb(message.StreamDelta{
 				Type: message.StreamDeltaToolUseStart,
+				ToolCall: &message.ToolCallDelta{
+					ID:   callID,
+					Name: out.Name,
+				},
+			})
+			cb(message.StreamDelta{
+				Type: message.StreamDeltaToolUseEnd,
 				ToolCall: &message.ToolCallDelta{
 					ID:   callID,
 					Name: out.Name,
@@ -94,6 +105,11 @@ func finalizeOneResponsesToolCall(
 		delete(toolCalls, idx)
 		return
 	}
+	if acc.id == "" || acc.name == "" {
+		log.Warnf("discarding malformed tool call in responses API tool=%v id=%v item_id=%v args=%v", acc.name, acc.id, acc.itemID, acc.args.String())
+		delete(toolCalls, idx)
+		return
+	}
 	args := json.RawMessage(acc.args.String())
 	if len(doneArguments) > 0 {
 		args = doneArguments
@@ -111,19 +127,17 @@ func finalizeOneResponsesToolCall(
 		Name: cloneLongLivedLLMString(acc.name),
 		Args: args,
 	})
-	if cb != nil {
+	if cb != nil && acc.streamStartEmitted {
 		cb(message.StreamDelta{
 			Type: message.StreamDeltaToolUseEnd,
 			ToolCall: &message.ToolCallDelta{
-				ID:   acc.id,
+				ID:   responsesToolStreamID(acc),
 				Name: acc.name,
 			},
 		})
 	}
-	// Track finalized call_id to skip duplicate events from proxies.
-	if finalizedCalls != nil {
-		finalizedCalls[acc.id] = true
-	}
+	// Track finalized identifiers to skip duplicate events from proxies.
+	markResponsesToolCallFinalized(finalizedCalls, acc)
 	delete(toolCalls, idx)
 }
 
@@ -133,6 +147,7 @@ func finalizeResponsesToolCalls(
 	resp *message.Response,
 	cb StreamCallback,
 	truncated bool,
+	finalizedCalls map[string]bool,
 ) {
 	if len(toolCalls) == 0 {
 		return
@@ -155,6 +170,11 @@ func finalizeResponsesToolCalls(
 
 	for _, idx := range indices {
 		acc := toolCalls[idx]
+		if acc.id == "" || acc.name == "" {
+			log.Warnf("discarding malformed tool call in responses API tool=%v id=%v item_id=%v args=%v", acc.name, acc.id, acc.itemID, acc.args.String())
+			delete(toolCalls, idx)
+			continue
+		}
 		args := json.RawMessage(acc.args.String())
 		if len(args) == 0 {
 			args = json.RawMessage("{}")
@@ -175,11 +195,12 @@ func finalizeResponsesToolCalls(
 			Name: cloneLongLivedLLMString(acc.name),
 			Args: args,
 		})
-		if cb != nil {
+		markResponsesToolCallFinalized(finalizedCalls, acc)
+		if cb != nil && acc.streamStartEmitted {
 			cb(message.StreamDelta{
 				Type: message.StreamDeltaToolUseEnd,
 				ToolCall: &message.ToolCallDelta{
-					ID:   acc.id,
+					ID:   responsesToolStreamID(acc),
 					Name: acc.name,
 				},
 			})

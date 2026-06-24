@@ -531,11 +531,16 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 					idx := nextToolIndex
 					nextToolIndex++
 					id := fmt.Sprintf("gemini_%d", idx)
+					name := part.FunctionCall.Name
+					if name == "" {
+						log.Warnf("discarding Gemini tool call with empty id or name tool=%v id=%v", name, id)
+						continue
+					}
 					args := part.FunctionCall.Args
 					if len(args) == 0 {
 						args = json.RawMessage("{}")
 					}
-					acc := &openAIToolAccumulator{id: id, name: part.FunctionCall.Name}
+					acc := &openAIToolAccumulator{id: id, name: name}
 					acc.args.Write(args)
 					toolCalls[idx] = acc
 					if cb != nil {
@@ -598,6 +603,11 @@ func finalizeGeminiToolCalls(toolCalls map[int]*openAIToolAccumulator, resp *mes
 	sort.Ints(indices)
 	for _, idx := range indices {
 		acc := toolCalls[idx]
+		if acc.id == "" || acc.name == "" {
+			log.Warnf("discarding Gemini tool call with empty id or name tool=%v id=%v", acc.name, acc.id)
+			delete(toolCalls, idx)
+			continue
+		}
 		args := json.RawMessage(acc.args.String())
 		if len(args) == 0 {
 			args = json.RawMessage("{}")

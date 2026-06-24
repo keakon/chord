@@ -15,6 +15,7 @@
 ### 修复
 
 - 卸载空闲 language server 进程时，LSP 资源关闭不再把正常的 stderr 管道关闭记录成错误。
+- 工具调用解析现在会在 Responses 兼容网关发送重复的部分 function-call 事件时保留已有的有效工具元数据；当网关延迟补充 `call_id` 时，流式工具调用回调会保持稳定 ID；从 Responses 完成输出中恢复的工具调用会发出成对回调；Anthropic/Gemini/OpenAI 兼容/Responses 中缺少 ID 或名称的异常工具调用会被丢弃，且不会发出孤立的流式开始、增量或完成回调；缺失或未知工具也会按无效调用报告，而不再误报为权限策略拒绝。
 - 请求级上下文剪裁现在会在旧的 stable prefix 复用会破坏当前 tool_call/tool_result 链时跳过复用，避免产生孤儿 tool result 和严格 provider 的 400 错误。
 - 重试日志和 LSP service-note 日志现在会区分可操作失败与中间 fallback / 已抑制的非操作性提示，减少正常成功流程中的误导性运行时噪声。
 - 工具调用卡片 header 现在会优先展示主参数，单行摘要可利用更宽视口；括号内的次要参数会优先缩短。`grep` 的搜索路径等于当前工作目录时会隐藏，子目录会以相对工作区的路径显示。

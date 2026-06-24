@@ -138,6 +138,32 @@ func TestParseGeminiSSEStream(t *testing.T) {
 	}
 }
 
+func TestParseGeminiSSEStreamSkipsFunctionCallWithEmptyName(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"","args":{"q":"x"}}}]}}, {"content":{"role":"model","parts":[{"functionCall":{"name":"lookup","args":{"q":"y"}}}]}}, {"finishReason":"STOP"}]}`,
+		``,
+	}, "\n")
+
+	var starts []message.ToolCallDelta
+	resp, err := parseGeminiSSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaToolUseStart && delta.ToolCall != nil {
+			starts = append(starts, *delta.ToolCall)
+		}
+	}, nil)
+	if err != nil {
+		t.Fatalf("parseGeminiSSEStream() error = %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %#v, want one valid call", resp.ToolCalls)
+	}
+	if resp.ToolCalls[0].Name != "lookup" || string(resp.ToolCalls[0].Args) != `{"q":"y"}` {
+		t.Fatalf("tool call = %#v, want lookup", resp.ToolCalls[0])
+	}
+	if len(starts) != 1 || starts[0].Name != "lookup" {
+		t.Fatalf("tool_use_start callbacks = %+v, want only lookup", starts)
+	}
+}
+
 func TestGeminiCompleteStreamEncodesToolChoice(t *testing.T) {
 	var captured geminiRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

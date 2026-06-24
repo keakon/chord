@@ -354,6 +354,39 @@ func TestMainAndSubToolExecutionPipelineConsistentPermissionDecisions(t *testing
 	}
 }
 
+func TestToolExecutionPipelineRejectsMalformedOrUnknownToolBeforePermission(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(requiredValueTool{})
+	pipeline := toolExecutionPipeline{
+		registry: registry,
+		currentRuleset: func() permission.Ruleset {
+			return permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionDeny}}
+		},
+	}
+
+	tests := []struct {
+		name        string
+		toolName    string
+		wantErrText string
+	}{
+		{name: "missing name", toolName: "", wantErrText: "malformed tool call: missing tool name"},
+		{name: "whitespace name", toolName: "  ", wantErrText: "malformed tool call: missing tool name"},
+		{name: "unknown tool", toolName: "missing_tool", wantErrText: "tool not found: missing_tool"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := pipeline.execute(context.Background(), message.ToolCall{ID: "call-1", Name: tc.toolName, Args: json.RawMessage(`{}`)}, false)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErrText) {
+				t.Fatalf("err = %v, want containing %q", err, tc.wantErrText)
+			}
+			if strings.Contains(err.Error(), "permission policy") {
+				t.Fatalf("err = %v, should not be classified as permission denial", err)
+			}
+		})
+	}
+}
+
 func TestMainAndSubToolExecutionPipelineConsistentHookHandling(t *testing.T) {
 	tests := []struct {
 		name        string

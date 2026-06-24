@@ -623,9 +623,24 @@ func parseOpenAIHTTPErrorFromBytes(statusCode int, header http.Header, body []by
 // subsequent chunks carry argument fragments, and finish_reason arrives in a
 // separate final chunk with no tool_calls in the delta.
 type openAIToolAccumulator struct {
-	id   string
-	name string
-	args strings.Builder
+	id                 string
+	name               string
+	args               strings.Builder
+	streamStartEmitted bool
+}
+
+func maybeEmitOpenAIToolStart(acc *openAIToolAccumulator, cb StreamCallback) {
+	if cb == nil || acc == nil || acc.streamStartEmitted || acc.id == "" || acc.name == "" {
+		return
+	}
+	cb(message.StreamDelta{
+		Type: message.StreamDeltaToolUseStart,
+		ToolCall: &message.ToolCallDelta{
+			ID:   acc.id,
+			Name: acc.name,
+		},
+	})
+	acc.streamStartEmitted = true
 }
 
 var thinkingToolcallFunctionPattern = regexp.MustCompile(`functions\.[A-Za-z_][A-Za-z0-9_]*:`)
@@ -819,15 +834,7 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 						name: tc.Function.Name,
 					}
 					toolCalls[tc.Index] = acc
-					if cb != nil {
-						cb(message.StreamDelta{
-							Type: message.StreamDeltaToolUseStart,
-							ToolCall: &message.ToolCallDelta{
-								ID:   tc.ID,
-								Name: tc.Function.Name,
-							},
-						})
-					}
+					maybeEmitOpenAIToolStart(acc, cb)
 				}
 				// Subsequent chunks carry argument fragments.
 				//
@@ -845,7 +852,8 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 						// Fallback: some proxies send raw JSON instead of a string.
 						acc.args.Write(tc.Function.Arguments)
 					}
-					if cb != nil {
+					maybeEmitOpenAIToolStart(acc, cb)
+					if cb != nil && acc.streamStartEmitted {
 						cb(message.StreamDelta{
 							Type: message.StreamDeltaToolUseDelta,
 							ToolCall: &message.ToolCallDelta{
