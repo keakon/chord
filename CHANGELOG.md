@@ -14,6 +14,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Fixed
 
 - LSP resource shutdown no longer logs normal stderr pipe closure as an error when idle language-server processes are unloaded.
+- Successful or skipped context compaction now clears stale pre-compaction request-size token samples before saving recovery state, preventing missing or failed post-compaction usage reports from immediately triggering a second tiny automatic compaction.
 - Tool-call parsing now preserves valid tool metadata when Responses-compatible gateways emit duplicate partial function-call events, keeps streaming tool-call callbacks on a stable ID when gateways fill `call_id` late, pairs recovered Responses tool-call callbacks, drops malformed Anthropic/Gemini/OpenAI-compatible/Responses tool calls with missing IDs or names without emitting orphan stream start, delta, or completion callbacks, and reports missing or unknown tools as invalid calls instead of misleading permission-policy denials.
 - Request-level context reduction now skips stale stable-prefix reuse when it would break the current tool-call/tool-result chain, preventing orphan tool results and strict provider 400 errors.
 - Retry and LSP service-note logs now distinguish actionable failures from intermediate fallback or suppressed non-actionable notes, reducing misleading runtime noise during successful operation.

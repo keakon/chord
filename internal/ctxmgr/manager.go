@@ -335,6 +335,17 @@ func (m *Manager) SetLastInputTokens(n int) {
 	m.lastInputTokens = n
 }
 
+// ClearLastTokenUsage clears the latest request-size usage sample without
+// changing cumulative token stats. Call this after durable context rewrites so
+// stale pre-rewrite usage cannot drive another automatic compaction before the
+// next LLM call reports fresh usage.
+func (m *Manager) ClearLastTokenUsage() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastInputTokens = 0
+	m.lastTotalContextTokens = 0
+}
+
 // EstimateTotalTokens returns a rough token count for the current message list.
 // Uses the same heuristic as CompressForTarget (~3 chars per token). Available as
 // a restore-time fallback when callers need an approximate prompt burden before the

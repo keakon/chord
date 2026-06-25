@@ -270,6 +270,7 @@ func (a *MainAgent) fireBeforeCompressHook(snapshot []message.Message, manual bo
 // using ReplacePrefixAtomic to preserve tail messages added during compaction.
 func (a *MainAgent) applyCompactionDraft(d *compactionDraft) error {
 	if d == nil || d.Skip {
+		a.ctxMgr.ClearLastTokenUsage()
 		a.clearUsageDrivenAutoCompactRequest()
 		a.resetAutoCompactionFailureState()
 		if d != nil && d.InfoMessage != "" && d.Manual {
@@ -321,6 +322,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	if a.llmClient != nil {
 		a.llmClient.InvalidateRouting("context_compacted")
 	}
+	a.ctxMgr.ClearLastTokenUsage()
 	a.saveRecoverySnapshot()
 	a.clearUsageDrivenAutoCompactRequest()
 	a.resetAutoCompactionFailureState()

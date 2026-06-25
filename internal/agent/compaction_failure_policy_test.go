@@ -101,6 +101,8 @@ func TestAutomaticCompactionIgnoresPromptSizeWithoutUsageSignal(t *testing.T) {
 func TestUsageDrivenBreakerResetsAfterSuccessfulCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(2000, 1200, 200, 0.8)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 1000, CacheWriteTokens: 100})
 	a.autoCompactRequested.Store(true)
 	a.autoCompactFailureState = autoCompactionFailureState{
 		ConsecutiveFailures: usageDrivenCompactionFailureThreshold,
@@ -127,11 +129,27 @@ func TestUsageDrivenBreakerResetsAfterSuccessfulCompaction(t *testing.T) {
 	if got := a.autoCompactFailureState; got != (autoCompactionFailureState{}) {
 		t.Fatalf("autoCompactFailureState = %+v, want zero value", got)
 	}
+	if got := a.ctxMgr.LastInputTokens(); got != 0 {
+		t.Fatalf("LastInputTokens = %d, want 0 after successful compaction", got)
+	}
+	if got := a.ctxMgr.LastTotalContextTokens(); got != 0 {
+		t.Fatalf("LastTotalContextTokens = %d, want 0 after successful compaction", got)
+	}
+	a.autoCompactRequested.Store(true)
+	a.maybeRunAutoCompaction()
+	if a.IsCompactionRunning() {
+		t.Fatal("stale pre-compaction usage should not schedule another auto compaction")
+	}
+	if a.autoCompactRequested.Load() {
+		t.Fatal("stale auto compact request should be cleared after token usage reset")
+	}
 }
 
 func TestUsageDrivenBreakerResetsAfterSkipCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(2000, 1200, 200, 0.8)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 1000, CacheWriteTokens: 100})
 	a.autoCompactRequested.Store(true)
 	a.autoCompactFailureState = autoCompactionFailureState{
 		ConsecutiveFailures: usageDrivenCompactionFailureThreshold,
@@ -148,6 +166,20 @@ func TestUsageDrivenBreakerResetsAfterSkipCompaction(t *testing.T) {
 	}
 	if got := a.autoCompactFailureState; got != (autoCompactionFailureState{}) {
 		t.Fatalf("autoCompactFailureState = %+v, want zero value", got)
+	}
+	if got := a.ctxMgr.LastInputTokens(); got != 0 {
+		t.Fatalf("LastInputTokens = %d, want 0 after skipped compaction", got)
+	}
+	if got := a.ctxMgr.LastTotalContextTokens(); got != 0 {
+		t.Fatalf("LastTotalContextTokens = %d, want 0 after skipped compaction", got)
+	}
+	a.autoCompactRequested.Store(true)
+	a.maybeRunAutoCompaction()
+	if a.IsCompactionRunning() {
+		t.Fatal("stale pre-compaction usage should not schedule another auto compaction after skip")
+	}
+	if a.autoCompactRequested.Load() {
+		t.Fatal("stale auto compact request should be cleared after skipped compaction")
 	}
 }
 

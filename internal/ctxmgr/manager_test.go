@@ -228,6 +228,28 @@ func TestUpdateFromUsageTracksTrueContextBurden(t *testing.T) {
 	}
 }
 
+func TestClearLastTokenUsagePreservesCumulativeStats(t *testing.T) {
+	m := NewManager(1000, 0)
+	m.UpdateFromUsage(message.TokenUsage{
+		InputTokens:      100,
+		OutputTokens:     40,
+		CacheWriteTokens: 20,
+	})
+
+	m.ClearLastTokenUsage()
+
+	if got := m.LastInputTokens(); got != 0 {
+		t.Fatalf("LastInputTokens() = %d, want 0", got)
+	}
+	if got := m.LastTotalContextTokens(); got != 0 {
+		t.Fatalf("LastTotalContextTokens() = %d, want 0", got)
+	}
+	stats := m.GetStats()
+	if stats.InputTokens != 100 || stats.OutputTokens != 40 || stats.CacheWriteTokens != 20 {
+		t.Fatalf("GetStats() = %+v, want cumulative usage preserved", stats)
+	}
+}
+
 func TestEstimateMessagesTokensCountsToolCallsAndThinking(t *testing.T) {
 	msgs := []message.Message{
 		{
