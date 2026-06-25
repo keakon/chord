@@ -29,6 +29,8 @@ type ContextReductionStats struct {
 	ModelChanged    bool
 	ModelRunLength  int
 	ByToolAndRule   map[string]ContextReductionBucket
+	SkippedByReason map[string]int
+	OverCompression map[string]int
 }
 
 const (
@@ -49,6 +51,14 @@ type ContextReductionBucket struct {
 	Bytes       int
 	TokensSaved int
 }
+
+const (
+	contextReductionSkipRecentHighRisk = "recent_high_risk"
+	contextReductionSkipLargeUnreduced = "large_but_unreduced"
+
+	contextReductionOverCompressionReread   = "reread_after_reduction"
+	contextReductionOverCompressionResearch = "research_after_reduction"
+)
 
 type contextReductionPolicy struct {
 	ConfirmAgeTurns         int
@@ -170,7 +180,12 @@ func (p contextReductionPolicy) reuseStableReductionSurfaceReason(stats, previou
 	return contextReuseReasonNone, delta
 }
 
-var readResultRangeRe = regexp.MustCompile(`^READ_RESULT\b.*\blines=(\d+)-(\d+)\b.*\btotal=(\d+)\b`)
+var (
+	readResultRangeRe    = regexp.MustCompile(`^READ_RESULT\b.*\blines=(\d+)-(\d+)\b.*\btotal=(\d+)\b`)
+	numberedSourceLineRe = regexp.MustCompile(`^\s*\d+\s+(?:\S|$)`)
+	pathListLikelyFileRe = regexp.MustCompile(`(?:^|/)[^/\s]+\.[A-Za-z0-9_+.-]+$`)
+	diffHunkHeaderLineRe = regexp.MustCompile(`^@@@?\s+-\d+(?:,\d+)?(?:\s+-\d+(?:,\d+)?)*\s+\+\d+(?:,\d+)?\s+@@@?`)
+)
 
 func reduceDiagnosticsToolOutput(content string) (string, bool) {
 	idx := strings.Index(content, "\n\nDiagnostics:\n")
@@ -234,6 +249,7 @@ const (
 	requestReductionDiagnostics requestReductionClass = "diagnostics"
 	requestReductionReadLike    requestReductionClass = "read_like"
 	requestReductionSearch      requestReductionClass = "search_result"
+	requestReductionNumberedSrc requestReductionClass = "numbered_source"
 	requestReductionJSON        requestReductionClass = "json_blob"
 	requestReductionLongLog     requestReductionClass = "long_log"
 	requestReductionShellOK     requestReductionClass = "shell_success"
@@ -269,8 +285,14 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		return requestReductionDiagnostics
 	}
 	if ctx.Age >= ctx.Policy.ShellSuccessAgeTurns && len(ctx.Content) > ctx.Policy.ShellSuccessBytes && ctx.ToolName == tools.NameShell {
+		if looksLikeSearchResult(ctx) {
+			return requestReductionSearch
+		}
 		if looksLikeStructuredJSON(ctx.Content) {
 			return requestReductionJSON
+		}
+		if looksLikeNumberedSourceOutput(ctx.Content) {
+			return requestReductionNumberedSrc
 		}
 		if looksLikeBuildLikeLog(ctx) {
 			return requestReductionLongLog
@@ -285,6 +307,8 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 			return requestReductionJSON
 		case contextReductionIsReadLike(ctx.ToolName):
 			return requestReductionReadLike
+		case looksLikeNumberedSourceOutput(ctx.Content):
+			return requestReductionNumberedSrc
 		case looksLikeBuildLikeLog(ctx):
 			return requestReductionLongLog
 		}
@@ -296,6 +320,9 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		if looksLikeStructuredJSON(ctx.Content) {
 			return requestReductionJSON
 		}
+		if looksLikeNumberedSourceOutput(ctx.Content) {
+			return requestReductionNumberedSrc
+		}
 		if looksLikeBuildLikeLog(ctx) {
 			return requestReductionLongLog
 		}
@@ -304,15 +331,14 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 	return requestReductionNone
 }
 
-func isHighRiskToolOutput(ctx requestReductionContext) bool {
-	if strings.TrimSpace(ctx.Content) == "" {
-		return false
-	}
-	if looksLikeDiffOrPatch(ctx.Content) {
-		return true
-	}
-	content := strings.ToLower(highRiskScanPrefix(ctx.Content))
-	for _, marker := range []string{
+// Marker keyword sets shared by the context-reduction heuristics. They are kept
+// as distinct package-level slices (rather than one merged list) because each
+// caller scans for a deliberately different signal; centralizing them here keeps
+// the variants visible side by side so a future edit is less likely to miss one.
+var (
+	// highRiskMarkers flag tool output that must be protected from reduction
+	// while still recent (stack traces, auth failures, assertion mismatches).
+	highRiskMarkers = []string{
 		"traceback",
 		"panic:",
 		"exception",
@@ -327,10 +353,84 @@ func isHighRiskToolOutput(ctx requestReductionContext) bool {
 		"assert failed",
 		"npm err!",
 		"fatal:",
-	} {
-		if strings.Contains(content, marker) {
+	}
+	// buildLogMarkers classify build/test/lint output as a long log worth
+	// signal-based summarization rather than blanket omission.
+	buildLogMarkers = []string{
+		"error",
+		"warning",
+		"failed",
+		"failure",
+		"panic:",
+		"traceback",
+		"exception",
+		"diagnostics:",
+	}
+	// logLineMarkers select representative lines to preserve from a long log.
+	logLineMarkers = []string{
+		"error",
+		"warning",
+		"failed",
+		"panic:",
+		"traceback",
+		"exception",
+	}
+	// importantLineMarkers select lines to preserve when summarizing an error
+	// output, covering both failure and auth/timeout signals.
+	importantLineMarkers = []string{
+		"error",
+		"warning",
+		"failed",
+		"failure",
+		"panic:",
+		"traceback",
+		"exception",
+		"fatal:",
+		"expected",
+		"actual",
+		"assert",
+		"permission",
+		"denied",
+		"unauthorized",
+		"forbidden",
+		"timeout",
+	}
+)
+
+func containsAnyMarker(lower string, markers []string) bool {
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
 			return true
 		}
+	}
+	return false
+}
+
+func forEachLine(content string, visit func(string) bool) {
+	for len(content) > 0 {
+		line := content
+		if idx := strings.IndexByte(content, '\n'); idx >= 0 {
+			line = content[:idx]
+			content = content[idx+1:]
+		} else {
+			content = ""
+		}
+		if !visit(line) {
+			return
+		}
+	}
+}
+
+func isHighRiskToolOutput(ctx requestReductionContext) bool {
+	if strings.TrimSpace(ctx.Content) == "" {
+		return false
+	}
+	if looksLikeDiffOrPatch(ctx.Content) {
+		return true
+	}
+	content := strings.ToLower(highRiskScanPrefix(ctx.Content))
+	if containsAnyMarker(content, highRiskMarkers) {
+		return true
 	}
 	if ctx.ToolName == tools.NameShell && strings.Contains(content, "failed") {
 		return true
@@ -362,9 +462,9 @@ func looksLikeDiffOrPatch(content string) bool {
 		}
 		trimmed := strings.TrimSpace(line)
 		switch {
-		case strings.HasPrefix(trimmed, "diff --git "), strings.HasPrefix(trimmed, "--- "), strings.HasPrefix(trimmed, "+++ "):
+		case strings.HasPrefix(trimmed, "diff --git "), strings.HasPrefix(trimmed, "diff --combined "), strings.HasPrefix(trimmed, "diff --cc "), strings.HasPrefix(trimmed, "--- "), strings.HasPrefix(trimmed, "+++ "):
 			seenHeader = true
-		case seenHeader && strings.HasPrefix(trimmed, "@@"):
+		case seenHeader && diffHunkHeaderLineRe.MatchString(trimmed):
 			return true
 		case strings.HasPrefix(trimmed, "*** Begin Patch"), strings.HasPrefix(trimmed, "*** Update File:"), strings.HasPrefix(trimmed, "*** Add File:"), strings.HasPrefix(trimmed, "*** Delete File:"):
 			return true
@@ -378,7 +478,7 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 	case requestReductionRepeated:
 		return fmt.Sprintf("[Repeated %s output omitted; an identical call appears later.]", toolNameOrUnknown(ctx.ToolName)), "repeated", true
 	case requestReductionToolError:
-		return "[Older tool error omitted]", "error", true
+		return reduceToolErrorOutputSummary(ctx), "error", true
 	case requestReductionConfirm:
 		return "[Confirmed]", "confirmation", true
 	case requestReductionDiagnostics:
@@ -390,6 +490,8 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 		return reduceReadLikeOutputSummary(ctx.ToolName, ctx.Meta.Args, ctx.Content), "read_like", true
 	case requestReductionSearch:
 		return reduceSearchLikeOutputSummary(ctx), "search_result", true
+	case requestReductionNumberedSrc:
+		return reduceNumberedSourceOutputSummary(ctx), "numbered_source", true
 	case requestReductionJSON:
 		if compacted, ok := reduceJSONBlobSummary(ctx); ok {
 			return compacted, "json_blob", true
@@ -400,10 +502,61 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 	case requestReductionShellOK:
 		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", tools.NameShell), "shell_success", true
 	case requestReductionGeneric:
-		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
+		return reduceGenericStaleOutputSummary(ctx), "stale", true
 	default:
 		return "", "", false
 	}
+}
+
+func reduceToolErrorOutputSummary(ctx requestReductionContext) string {
+	lines := summarizeImportantLines(ctx.Content, 6)
+	if len(lines) == 0 {
+		lines = summarizeHeadTailLines(ctx.Content, 4)
+	}
+	if len(lines) == 0 {
+		lines = []string{"- (no preserved error details)"}
+	}
+	return fmt.Sprintf("[Older %s error summarized for this request to save context; bytes=%d lines=%d]\n%s", toolNameOrUnknown(ctx.ToolName), len(ctx.Content), countMeaningfulLines(ctx.Content), strings.Join(lines, "\n"))
+}
+
+// reduceGenericStaleOutputSummary routes a stale tool output to the best
+// content-shaped summary before falling back to a head/tail excerpt. It is a
+// defensive router keyed on content, not on the tool name, so the same arms
+// stay valid no matter which caller reaches it. Some arms (e.g. numbered
+// source) are not reachable from the current classify path because that path
+// already screens the same shape, but they are kept so the router behaves
+// correctly if a future caller routes here without that pre-screen.
+func reduceGenericStaleOutputSummary(ctx requestReductionContext) string {
+	toolName := toolNameOrUnknown(ctx.ToolName)
+	switch {
+	case looksLikeSearchResultContent(ctx.Content):
+		lines := summarizeSearchResultLines(ctx.Content, 4)
+		if len(lines) == 0 {
+			break
+		}
+		return fmt.Sprintf("[Older %s output summarized as search-like content for this request; matches=%d]\n%s", toolName, countMeaningfulLines(ctx.Content), strings.Join(lines, "\n"))
+	case looksLikeNumberedSourceOutput(ctx.Content):
+		return reduceNumberedSourceOutputSummary(ctx)
+	case looksLikePathListOutput(ctx.Content):
+		lines := summarizeHeadTailLines(ctx.Content, 6)
+		if len(lines) == 0 {
+			break
+		}
+		return fmt.Sprintf("[Older %s path-list output summarized for this request; paths=%d bytes=%d]\n%s", toolName, countMeaningfulLines(ctx.Content), len(ctx.Content), strings.Join(lines, "\n"))
+	}
+	lines := summarizeHeadTailLines(ctx.Content, 4)
+	if len(lines) == 0 {
+		lines = []string{"- (no preserved excerpt)"}
+	}
+	return fmt.Sprintf("[Older %s output summarized for this request to save context; bytes=%d lines=%d]\n%s", toolName, len(ctx.Content), countMeaningfulLines(ctx.Content), strings.Join(lines, "\n"))
+}
+
+func reduceNumberedSourceOutputSummary(ctx requestReductionContext) string {
+	lines := summarizeHeadTailLines(ctx.Content, 6)
+	if len(lines) == 0 {
+		lines = []string{"- (no preserved source excerpt)"}
+	}
+	return fmt.Sprintf("[Older %s output summarized as numbered source for this request; lines=%d bytes=%d]\n%s", toolNameOrUnknown(ctx.ToolName), countMeaningfulLines(ctx.Content), len(ctx.Content), strings.Join(lines, "\n"))
 }
 
 func looksLikeSearchResult(ctx requestReductionContext) bool {
@@ -419,8 +572,82 @@ func looksLikeSearchResult(ctx requestReductionContext) bool {
 		}
 		return strings.TrimSpace(parsed.Operation) == "references"
 	default:
-		return false
+		return looksLikeSearchResultContent(ctx.Content)
 	}
+}
+
+func looksLikeSearchResultContent(content string) bool {
+	matches := 0
+	checked := 0
+	forEachLine(content, func(line string) bool {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			return true
+		}
+		checked++
+		if _, _, _, ok := parseSearchResultLine(trimmed); ok {
+			matches++
+		}
+		if matches >= 2 {
+			return false
+		}
+		if checked >= 24 {
+			return false
+		}
+		return true
+	})
+	return matches >= 2
+}
+
+func parseSearchResultLine(line string) (path, lineNo, snippet string, ok bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.ContainsAny(trimmed[:1], ":\t\n\r ") {
+		return "", "", "", false
+	}
+	for i := 1; i < len(trimmed)-2; i++ {
+		if trimmed[i] != ':' || !isASCIIDigit(trimmed[i+1]) {
+			continue
+		}
+		j := i + 2
+		for j < len(trimmed) && isASCIIDigit(trimmed[j]) {
+			j++
+		}
+		if j >= len(trimmed) || trimmed[j] != ':' {
+			continue
+		}
+		path = strings.TrimSpace(trimmed[:i])
+		lineNo = strings.TrimSpace(trimmed[i+1 : j])
+		snippet = strings.TrimSpace(trimmed[j+1:])
+		return path, lineNo, snippet, path != "" && lineNo != "" && snippet != ""
+	}
+	return "", "", "", false
+}
+
+func isASCIIDigit(b byte) bool {
+	return b >= '0' && b <= '9'
+}
+
+func looksLikeNumberedSourceOutput(content string) bool {
+	matches := 0
+	checked := 0
+	forEachLine(content, func(line string) bool {
+		trimmed := strings.TrimRight(line, "\r")
+		if strings.TrimSpace(trimmed) == "" {
+			return true
+		}
+		checked++
+		if numberedSourceLineRe.MatchString(trimmed) {
+			matches++
+		}
+		if matches >= 4 {
+			return false
+		}
+		if checked >= 16 {
+			return false
+		}
+		return true
+	})
+	return matches >= 4
 }
 
 func looksLikeStructuredJSON(content string) bool {
@@ -439,32 +666,28 @@ func looksLikeBuildLikeLog(ctx requestReductionContext) bool {
 	if content == "" {
 		return false
 	}
-	for _, line := range strings.Split(content, "\n") {
+	found := false
+	forEachLine(content, func(line string) bool {
 		lower := strings.ToLower(strings.TrimSpace(line))
 		if lower == "" {
-			continue
+			return true
 		}
-		if strings.Contains(lower, "error") ||
-			strings.Contains(lower, "warning") ||
-			strings.Contains(lower, "failed") ||
-			strings.Contains(lower, "failure") ||
-			strings.Contains(lower, "panic:") ||
-			strings.Contains(lower, "traceback") ||
-			strings.Contains(lower, "exception") ||
-			strings.Contains(lower, "diagnostics:") ||
+		if containsAnyMarker(lower, buildLogMarkers) ||
 			strings.HasPrefix(lower, "fail ") ||
 			strings.HasPrefix(lower, "--- fail") ||
 			strings.HasPrefix(lower, "build failed") ||
 			strings.HasPrefix(lower, "lint failed") {
-			return true
+			found = true
+			return false
 		}
-	}
-	return false
+		return true
+	})
+	return found
 }
 
 func reduceSearchLikeOutputSummary(ctx requestReductionContext) string {
 	toolName := toolNameOrUnknown(ctx.ToolName)
-	snippetLines := summarizeRepresentativeLines(ctx.Content, 4)
+	snippetLines := summarizeSearchResultLines(ctx.Content, 6)
 	if len(snippetLines) == 0 {
 		snippetLines = []string{"- (no preserved matches)"}
 	}
@@ -517,6 +740,60 @@ func reduceSearchList(values []string, fallback string) string {
 	return strings.Join(parts, ",")
 }
 
+type searchSummaryGroup struct {
+	Path    string
+	Matches []string
+}
+
+func summarizeSearchResultLines(content string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	groups := make([]searchSummaryGroup, 0)
+	groupByPath := make(map[string]int)
+	fallback := make([]string, 0, limit)
+	forEachLine(content, func(line string) bool {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			return true
+		}
+		path, lineNo, snippet, ok := parseSearchResultLine(trimmed)
+		if !ok {
+			if len(fallback) < limit {
+				fallback = append(fallback, "- "+strings.ReplaceAll(compactTextSnippet(trimmed, 180), "\n", " "))
+			}
+			return true
+		}
+		idx, ok := groupByPath[path]
+		if !ok {
+			idx = len(groups)
+			groupByPath[path] = idx
+			groups = append(groups, searchSummaryGroup{Path: path})
+		}
+		if len(groups[idx].Matches) < 2 {
+			groups[idx].Matches = append(groups[idx].Matches, fmt.Sprintf("%s: %s", lineNo, compactTextSnippet(snippet, 140)))
+		}
+		return true
+	})
+	if len(groups) == 0 {
+		return fallback
+	}
+	out := make([]string, 0, limit)
+	for _, group := range groups {
+		if len(group.Matches) == 0 {
+			continue
+		}
+		out = append(out, fmt.Sprintf("- %s: %s", group.Path, strings.Join(group.Matches, "; ")))
+		if len(out) >= limit {
+			break
+		}
+	}
+	if omitted := len(groups) - len(out); omitted > 0 && len(out) > 0 {
+		out[len(out)-1] += fmt.Sprintf("; ... (+%d files)", omitted)
+	}
+	return out
+}
+
 func reduceJSONBlobSummary(ctx requestReductionContext) (string, bool) {
 	var decoded any
 	if err := json.Unmarshal([]byte(ctx.Content), &decoded); err != nil {
@@ -559,7 +836,7 @@ func summarizeJSONArrayItems(items []any, limit int) []string {
 
 func reduceLongLogOutputSummary(ctx requestReductionContext) string {
 	counts := summarizeLogSignalCounts(ctx.Content)
-	lines := summarizeRepresentativeLogLines(ctx.Content, 4)
+	lines := summarizeRepresentativeLogLines(ctx.Content, 6)
 	if len(lines) == 0 {
 		lines = []string{"- (no preserved log lines)"}
 	}
@@ -574,10 +851,10 @@ type logSignalCounts struct {
 
 func summarizeLogSignalCounts(content string) logSignalCounts {
 	var out logSignalCounts
-	for _, line := range strings.Split(content, "\n") {
+	forEachLine(content, func(line string) bool {
 		lower := strings.ToLower(strings.TrimSpace(line))
 		if lower == "" {
-			continue
+			return true
 		}
 		if strings.Contains(lower, "error") || strings.Contains(lower, "panic:") || strings.Contains(lower, "exception") || strings.Contains(lower, "traceback") {
 			out.Errors++
@@ -588,63 +865,143 @@ func summarizeLogSignalCounts(content string) logSignalCounts {
 		if strings.Contains(lower, "failed") || strings.Contains(lower, "failure") {
 			out.Failures++
 		}
-	}
+		return true
+	})
 	return out
 }
 
-func summarizeRepresentativeLogLines(content string, limit int) []string {
+// summarizeLinesMatching collects up to limit de-duplicated lines for which
+// keep reports true, each rendered as a single-line bullet. It backs the
+// log-line and error-line summaries, which differ only in their predicate.
+func summarizeLinesMatching(content string, limit int, keep func(trimmed string) bool) []string {
 	if limit <= 0 {
 		return nil
 	}
 	out := make([]string, 0, limit)
 	seen := make(map[string]struct{})
-	for _, line := range strings.Split(content, "\n") {
+	forEachLine(content, func(line string) bool {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		lower := strings.ToLower(trimmed)
-		if !strings.Contains(lower, "error") && !strings.Contains(lower, "warning") && !strings.Contains(lower, "failed") && !strings.Contains(lower, "panic:") && !strings.Contains(lower, "traceback") && !strings.Contains(lower, "exception") {
-			continue
+		if trimmed == "" || !keep(trimmed) {
+			return true
 		}
 		lineKey := compactTextSnippet(trimmed, 220)
 		if _, ok := seen[lineKey]; ok {
-			continue
+			return true
 		}
 		seen[lineKey] = struct{}{}
 		out = append(out, "- "+strings.ReplaceAll(lineKey, "\n", " "))
-		if len(out) >= limit {
-			break
+		return len(out) < limit
+	})
+	return out
+}
+
+func summarizeRepresentativeLogLines(content string, limit int) []string {
+	return summarizeLinesMatching(content, limit, func(trimmed string) bool {
+		return containsAnyMarker(strings.ToLower(trimmed), logLineMarkers)
+	})
+}
+
+func summarizeImportantLines(content string, limit int) []string {
+	return summarizeLinesMatching(content, limit, isImportantSummaryLine)
+}
+
+func isImportantSummaryLine(line string) bool {
+	if containsAnyMarker(strings.ToLower(strings.TrimSpace(line)), importantLineMarkers) {
+		return true
+	}
+	_, _, _, ok := parseSearchResultLine(line)
+	return ok
+}
+
+func summarizeHeadTailLines(content string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	head := limit / 2
+	tail := limit - head
+	headLines := make([]string, 0, head)
+	tailLines := make([]string, 0, tail)
+	meaningful := 0
+	forEachLine(content, func(line string) bool {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			return true
 		}
+		meaningful++
+		if len(headLines) < head {
+			headLines = append(headLines, trimmed)
+			return true
+		}
+		if tail > 0 {
+			if len(tailLines) < tail {
+				tailLines = append(tailLines, trimmed)
+			} else {
+				copy(tailLines, tailLines[1:])
+				tailLines[tail-1] = trimmed
+			}
+		}
+		return true
+	})
+	if meaningful == 0 {
+		return nil
+	}
+	if meaningful <= limit {
+		out := make([]string, 0, meaningful)
+		for _, line := range headLines {
+			out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, 180), "\n", " "))
+		}
+		for _, line := range tailLines {
+			out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, 180), "\n", " "))
+		}
+		return out
+	}
+	out := make([]string, 0, limit+1)
+	for _, line := range headLines {
+		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, 180), "\n", " "))
+	}
+	omitted := meaningful - limit
+	noun := "lines"
+	if omitted == 1 {
+		noun = "line"
+	}
+	out = append(out, fmt.Sprintf("- ... (%d %s omitted) ...", omitted, noun))
+	for _, line := range tailLines {
+		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, 180), "\n", " "))
 	}
 	return out
 }
 
-func summarizeRepresentativeLines(content string, limit int) []string {
-	if limit <= 0 {
-		return nil
-	}
-	out := make([]string, 0, limit)
-	for _, line := range strings.Split(content, "\n") {
+func looksLikePathListOutput(content string) bool {
+	matches := 0
+	checked := 0
+	forEachLine(content, func(line string) bool {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
-			continue
+			return true
 		}
-		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(trimmed, 180), "\n", " "))
-		if len(out) >= limit {
-			break
+		checked++
+		if pathListLikelyFileRe.MatchString(trimmed) {
+			matches++
 		}
-	}
-	return out
+		if matches >= 5 {
+			return false
+		}
+		if checked >= 24 {
+			return false
+		}
+		return true
+	})
+	return matches >= 5
 }
 
 func countMeaningfulLines(content string) int {
 	count := 0
-	for _, line := range strings.Split(content, "\n") {
+	forEachLine(content, func(line string) bool {
 		if strings.TrimSpace(line) != "" {
 			count++
 		}
-	}
+		return true
+	})
 	return count
 }
 

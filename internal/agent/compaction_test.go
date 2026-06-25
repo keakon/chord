@@ -112,7 +112,9 @@ func contextReductionStatsEqual(a, b ContextReductionStats) bool {
 		a.TokensSaved != b.TokensSaved ||
 		a.Protected != b.Protected ||
 		a.ReusedStable != b.ReusedStable ||
-		len(a.ByToolAndRule) != len(b.ByToolAndRule) {
+		len(a.ByToolAndRule) != len(b.ByToolAndRule) ||
+		len(a.SkippedByReason) != len(b.SkippedByReason) ||
+		len(a.OverCompression) != len(b.OverCompression) {
 		return false
 	}
 	for key, av := range a.ByToolAndRule {
@@ -120,7 +122,43 @@ func contextReductionStatsEqual(a, b ContextReductionStats) bool {
 			return false
 		}
 	}
+	for key, av := range a.SkippedByReason {
+		if bv, ok := b.SkippedByReason[key]; !ok || bv != av {
+			return false
+		}
+	}
+	for key, av := range a.OverCompression {
+		if bv, ok := b.OverCompression[key]; !ok || bv != av {
+			return false
+		}
+	}
 	return true
+}
+
+func TestSummarizeHeadTailLinesKeepsBoundedHeadAndTail(t *testing.T) {
+	got := summarizeHeadTailLines(strings.Join([]string{
+		"line 1",
+		"line 2",
+		"line 3",
+		"line 4",
+		"line 5",
+	}, "\n"), 4)
+	want := []string{
+		"- line 1",
+		"- line 2",
+		"- ... (1 line omitted) ...",
+		"- line 4",
+		"- line 5",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("summarizeHeadTailLines() = %#v, want %#v", got, want)
+	}
+
+	got = summarizeHeadTailLines("line 1\n\nline 2", 4)
+	want = []string{"- line 1", "- line 2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("summarizeHeadTailLines() without omission = %#v, want %#v", got, want)
+	}
 }
 
 func (p *countingSummaryOnlyProvider) CompleteStream(
@@ -226,8 +264,8 @@ func TestPrepareMessagesForLLM_PrunesRepeatedAndErrorOutputs(t *testing.T) {
 	if !strings.Contains(prepared[2].Content, "Repeated "+tools.NameRead+" output omitted") {
 		t.Fatalf("expected repeated tool output to be pruned, got %q", prepared[2].Content)
 	}
-	if prepared[8].Content != "[Older tool error omitted]" {
-		t.Fatalf("expected old error output to be pruned, got %q", prepared[8].Content)
+	if !strings.Contains(prepared[8].Content, "Older shell error summarized") || !strings.Contains(prepared[8].Content, "Error: command failed") {
+		t.Fatalf("expected old error output to be summarized, got %q", prepared[8].Content)
 	}
 }
 
@@ -1274,9 +1312,97 @@ func TestPrepareMessagesForLLM_SearchReducerBeatsGenericStaleFallback(t *testing
 	if !strings.Contains(prepared[2].Content, `pattern="prepareMessagesForLLM"`) {
 		t.Fatalf("expected grep pattern in summary, got %q", prepared[2].Content)
 	}
+	if !strings.Contains(prepared[2].Content, "internal/agent/compaction_policy.go:") || !strings.Contains(prepared[2].Content, "internal/agent/compaction_test.go:") {
+		t.Fatalf("expected search summary grouped across files, got %q", prepared[2].Content)
+	}
 	stats := a.GetContextReductionStats()
 	if stats.Messages == 0 || stats.Bytes == 0 {
 		t.Fatalf("expected search summary to save bytes, stats=%+v", stats)
+	}
+}
+
+func TestPrepareMessagesForLLM_ShellSearchOutputUsesSearchSummary(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			MinToolResultsPrune:  1,
+			ReadLikeAgeTurns:     9,
+			ReadLikeOutputBytes:  1 << 20,
+			StaleAgeTurns:        9,
+			StaleOutputBytes:     1 << 20,
+			ShellSuccessAgeTurns: 1,
+			ShellSuccessBytes:    80,
+			MinIncrementalTokens: 1,
+			HighPressureUsage:    1.0,
+		}},
+	}
+	content := strings.Join([]string{
+		"a.go:10:func alpha() {}",
+		"b.go:20:func beta() {}",
+		"c.go:30:func gamma() {}",
+	}, "\n") + "\n" + strings.Repeat("b.go:99:func repeated() {}\n", 40)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"rg 'func '"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Older shell results summarized") {
+		t.Fatalf("expected shell grep-like output to use search summary, got %q", prepared[2].Content)
+	}
+	if !strings.Contains(prepared[2].Content, "a.go:") || !strings.Contains(prepared[2].Content, "b.go:") {
+		t.Fatalf("expected grouped search summary, got %q", prepared[2].Content)
+	}
+	stats := a.GetContextReductionStats()
+	if stats.ByToolAndRule[tools.NameShell+"/search_result"].Messages != 1 {
+		t.Fatalf("expected shell/search_result stats, got %+v", stats.ByToolAndRule)
+	}
+}
+
+func TestPrepareMessagesForLLM_ShellSearchOutputParsesWindowsAbsolutePaths(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			MinToolResultsPrune:  1,
+			ReadLikeAgeTurns:     9,
+			ReadLikeOutputBytes:  1 << 20,
+			StaleAgeTurns:        9,
+			StaleOutputBytes:     1 << 20,
+			ShellSuccessAgeTurns: 1,
+			ShellSuccessBytes:    80,
+			MinIncrementalTokens: 1,
+			HighPressureUsage:    1.0,
+		}},
+	}
+	content := strings.Join([]string{
+		`C:\repo\a.go:10:func alpha() {}`,
+		`C:\repo\b.go:20:func beta() {}`,
+		`D:/work/c.go:30:func gamma() {}`,
+	}, "\n") + "\n" + strings.Repeat(`C:\repo\b.go:99:func repeated() {}`+"\n", 40)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"rg 'func ' C:\\repo"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	got := prepared[2].Content
+	if !strings.Contains(got, "Older shell results summarized") {
+		t.Fatalf("expected Windows shell search output to use search summary, got %q", got)
+	}
+	if !strings.Contains(got, `C:\repo\a.go:`) || !strings.Contains(got, `D:/work/c.go:`) {
+		t.Fatalf("expected Windows paths grouped in search summary, got %q", got)
+	}
+	stats := a.GetContextReductionStats()
+	if stats.ByToolAndRule[tools.NameShell+"/search_result"].Messages != 1 {
+		t.Fatalf("expected shell/search_result stats, got %+v", stats.ByToolAndRule)
 	}
 }
 
@@ -1409,6 +1535,163 @@ func TestPrepareMessagesForLLM_LongLogReducerBeatsShellSuccessMarker(t *testing.
 	stats := a.GetContextReductionStats()
 	if stats.Messages == 0 || stats.Bytes == 0 {
 		t.Fatalf("expected long-log summary to save bytes, stats=%+v", stats)
+	}
+}
+
+func TestPrepareMessagesForLLM_OlderToolErrorKeepsImportantDetails(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			ErrorAgeTurns:           1,
+			HighRiskProtectAgeTurns: 1,
+			MinIncrementalTokens:    1,
+			HighPressureUsage:       1.0,
+		}},
+	}
+	content := strings.Join([]string{
+		"running test",
+		"--- FAIL: TestImportant (0.00s)",
+		"main_test.go:12: expected: 1",
+		"main_test.go:13: actual: 2",
+		"FAIL",
+	}, "\n") + "\n" + strings.Repeat("irrelevant failure padding\n", 80)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content, ToolStatus: "error"},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	got := prepared[2].Content
+	if !strings.Contains(got, "error summarized") || !strings.Contains(got, "expected: 1") || !strings.Contains(got, "actual: 2") {
+		t.Fatalf("expected older error summary to preserve assertion details, got %q", got)
+	}
+	if got == "[Older tool error omitted]" {
+		t.Fatalf("older error should not be fully omitted")
+	}
+}
+
+func TestPrepareMessagesForLLM_GenericStaleKeepsHeadTailExcerpt(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			MinToolResultsPrune:  1,
+			ReadLikeAgeTurns:     9,
+			ReadLikeOutputBytes:  1 << 20,
+			StaleAgeTurns:        1,
+			StaleOutputBytes:     40,
+			ShellSuccessAgeTurns: 9,
+			ShellSuccessBytes:    1 << 20,
+			MinIncrementalTokens: 1,
+			HighPressureUsage:    1.0,
+		}},
+	}
+	content := "first important line\n" + strings.Repeat("middle filler\n", 80) + "last important line\n"
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: "custom_tool", Args: json.RawMessage(`{"query":"x"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	got := prepared[2].Content
+	if !strings.Contains(got, "output summarized") || !strings.Contains(got, "first important line") || !strings.Contains(got, "last important line") {
+		t.Fatalf("expected generic stale summary with head/tail excerpt, got %q", got)
+	}
+}
+
+func TestPrepareMessagesForLLM_ShellNumberedSourceKeepsExcerpt(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			MinToolResultsPrune:  1,
+			ReadLikeAgeTurns:     9,
+			ReadLikeOutputBytes:  1 << 20,
+			StaleAgeTurns:        9,
+			StaleOutputBytes:     1 << 20,
+			ShellSuccessAgeTurns: 1,
+			ShellSuccessBytes:    80,
+			MinIncrementalTokens: 1,
+			HighPressureUsage:    1.0,
+		}},
+	}
+	content := strings.Join([]string{
+		"1 package main",
+		"2",
+		"3 func main() {",
+		"4 \tfmt.Println(computeValue())",
+		"5 }",
+	}, "\n") + "\n" + strings.Repeat("6 // filler line to force reduction\n", 60)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"nl -ba main.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: content},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	got := prepared[2].Content
+	if !strings.Contains(got, "Older shell output summarized as numbered source") || !strings.Contains(got, "1 package main") || !strings.Contains(got, "3 func main() {") {
+		t.Fatalf("expected shell numbered source summary to keep source excerpt, got %q", got)
+	}
+	if got == "[Older "+tools.NameShell+" output omitted from this request to save context.]" {
+		t.Fatalf("numbered source should not fall back to shell success omission")
+	}
+	stats := a.GetContextReductionStats()
+	if stats.ByToolAndRule[tools.NameShell+"/numbered_source"].Messages != 1 {
+		t.Fatalf("expected shell/numbered_source stats, got %+v", stats.ByToolAndRule)
+	}
+}
+
+func TestPrepareMessagesForLLM_RecordsSkipAndOverCompressionStats(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			HighRiskProtectAgeTurns: 4,
+			ReadLikeAgeTurns:        1,
+			ReadLikeOutputBytes:     80,
+			StaleAgeTurns:           9,
+			StaleOutputBytes:        80,
+			ShellSuccessAgeTurns:    9,
+			ShellSuccessBytes:       1 << 20,
+			MinIncrementalTokens:    1,
+			HighPressureUsage:       1.0,
+		}},
+	}
+	readContent := "READ_RESULT lines=1-120 total=120\n" + strings.Repeat("line content for read result\n", 120)
+	freshHighRisk := "panic: boom\n" + strings.Repeat("stack frame\n", 40)
+	largeFreshUnmatched := strings.Repeat("fresh unmatched output\n", 20)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: readContent},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc2", Content: readContent},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc3", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
+		{Role: "tool", ToolCallID: "tc3", Content: freshHighRisk},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc4", Name: tools.NameShell, Args: json.RawMessage(`{"command":"printf lots"}`)}}},
+		{Role: "tool", ToolCallID: "tc4", Content: largeFreshUnmatched},
+	}
+
+	a.prepareMessagesForLLM(msgs)
+	stats := a.GetContextReductionStats()
+	if stats.OverCompression[contextReductionOverCompressionReread] == 0 {
+		t.Fatalf("expected reread over-compression signal, stats=%+v", stats)
+	}
+	if stats.SkippedByReason[contextReductionSkipRecentHighRisk] == 0 {
+		t.Fatalf("expected recent high-risk skip reason, stats=%+v", stats)
+	}
+	if stats.SkippedByReason[contextReductionSkipLargeUnreduced] == 0 {
+		t.Fatalf("expected large-but-unreduced skip reason, stats=%+v", stats)
 	}
 }
 
@@ -1830,6 +2113,90 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	afterLoopPrepared := a.prepareMessagesForLLM(loopMsgs)
 	if !strings.Contains(afterLoopPrepared[7].Content, "Older "+tools.NameShell+" output omitted") {
 		t.Fatalf("after loop exits, ordinary pruning should resume for loop-period messages, got %q", afterLoopPrepared[7].Content)
+	}
+}
+
+func TestContextReductionStatsSnapshotsCloneMaps(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	turnID := a.currentTurnID()
+	preparedMessages := []message.Message{{Role: "user", Content: "u"}}
+
+	preparedStats := ContextReductionStats{
+		Messages:        1,
+		Bytes:           10,
+		ByToolAndRule:   map[string]ContextReductionBucket{tools.NameShell + "/stale": {Messages: 1, Bytes: 10}},
+		SkippedByReason: map[string]int{contextReductionSkipRecentHighRisk: 1},
+		OverCompression: map[string]int{contextReductionOverCompressionResearch: 1},
+	}
+	a.setContextReductionStats(preparedStats)
+	a.updatePreparedLLMRequestSurface(turnID, preparedMessages)
+
+	a.loopReductionMu.Lock()
+	a.contextReductionStats.ByToolAndRule[tools.NameShell+"/stale"] = ContextReductionBucket{Messages: 99, Bytes: 99}
+	a.contextReductionStats.SkippedByReason[contextReductionSkipRecentHighRisk] = 99
+	a.contextReductionStats.OverCompression[contextReductionOverCompressionResearch] = 99
+	a.loopReductionMu.Unlock()
+	if got := a.preparedContextReductionStatsForTurn(turnID); !contextReductionStatsEqual(got, preparedStats) {
+		t.Fatalf("prepared stats snapshot = %+v, want independent clone %+v", got, preparedStats)
+	}
+
+	frozenStats := ContextReductionStats{
+		Messages:        2,
+		Bytes:           20,
+		ByToolAndRule:   map[string]ContextReductionBucket{tools.NameRead + "/read_like": {Messages: 2, Bytes: 20}},
+		SkippedByReason: map[string]int{contextReductionSkipLargeUnreduced: 2},
+		OverCompression: map[string]int{contextReductionOverCompressionReread: 2},
+	}
+	a.loopReductionMu.Lock()
+	a.lastPreparedLLMTurnID = turnID
+	a.lastPreparedLLMRequestShape = stableReductionMessageShapes(preparedMessages)
+	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(preparedMessages)
+	a.lastPreparedReductionStats = cloneContextReductionStats(frozenStats)
+	a.loopReductionMu.Unlock()
+	a.freezeLoopReductionPrefixForCurrentTurn()
+
+	a.loopReductionMu.Lock()
+	a.lastPreparedReductionStats.ByToolAndRule[tools.NameRead+"/read_like"] = ContextReductionBucket{Messages: 99, Bytes: 99}
+	a.lastPreparedReductionStats.SkippedByReason[contextReductionSkipLargeUnreduced] = 99
+	a.lastPreparedReductionStats.OverCompression[contextReductionOverCompressionReread] = 99
+	frozenBeforeMutation := cloneContextReductionStats(a.loopState.FrozenReductionStats)
+	a.loopState.FrozenReductionStats.ByToolAndRule[tools.NameRead+"/read_like"] = ContextReductionBucket{Messages: 77, Bytes: 77}
+	a.loopState.FrozenReductionStats.SkippedByReason[contextReductionSkipLargeUnreduced] = 77
+	a.loopState.FrozenReductionStats.OverCompression[contextReductionOverCompressionReread] = 77
+	currentAfterFrozenMutation := cloneContextReductionStats(a.contextReductionStats)
+	a.loopReductionMu.Unlock()
+	if !contextReductionStatsEqual(frozenBeforeMutation, frozenStats) {
+		t.Fatalf("frozen stats snapshot = %+v, want independent clone %+v", frozenBeforeMutation, frozenStats)
+	}
+	if !contextReductionStatsEqual(currentAfterFrozenMutation, frozenStats) {
+		t.Fatalf("current stats after frozen mutation = %+v, want independent clone %+v", currentAfterFrozenMutation, frozenStats)
+	}
+
+	a.projectConfig = &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}}
+	a.providerModelRef = "codex/gpt-5.5"
+	a.llmMu.Lock()
+	a.runningModelRef = "codex/gpt-5.5"
+	a.llmMu.Unlock()
+	a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
+		Secondary: &ratelimit.RateLimitWindow{UsedPct: 100},
+	}}
+	enabled, snapshot := a.contextSurfaceReductionSnapshot()
+	if !enabled {
+		t.Fatal("contextSurfaceReductionSnapshot() disabled, want enabled under low Codex quota")
+	}
+	snapshot.Stats.ByToolAndRule[tools.NameRead+"/read_like"] = ContextReductionBucket{Messages: 55, Bytes: 55}
+	snapshot.Stats.SkippedByReason[contextReductionSkipLargeUnreduced] = 55
+	snapshot.Stats.OverCompression[contextReductionOverCompressionReread] = 55
+	a.loopReductionMu.Lock()
+	internalFrozen := cloneContextReductionStats(a.loopState.FrozenReductionStats)
+	a.loopReductionMu.Unlock()
+	mutatedFrozenStats := cloneContextReductionStats(frozenStats)
+	mutatedFrozenStats.ByToolAndRule[tools.NameRead+"/read_like"] = ContextReductionBucket{Messages: 77, Bytes: 77}
+	mutatedFrozenStats.SkippedByReason[contextReductionSkipLargeUnreduced] = 77
+	mutatedFrozenStats.OverCompression[contextReductionOverCompressionReread] = 77
+	if !contextReductionStatsEqual(internalFrozen, mutatedFrozenStats) {
+		t.Fatalf("surface snapshot stats aliased internal frozen stats: got %+v, want %+v", internalFrozen, mutatedFrozenStats)
 	}
 }
 

@@ -69,6 +69,7 @@
 - 上下文剪裁现在不会再把未剪裁的 prompt-cache surface 当作保护路径复用：每次 main-model 请求前仍会执行正常的请求级剪裁，低压力下的稳定前缀复用也只会复用已经产生剪裁收益的前缀。
 - 当所有 TODO 完成后，上下文剪裁现在会给下一次 main-model 请求一个单请求收尾宽限窗口。默认 `context.reduction.wrap_up_grace_requests: 1` 只在同一模型仍然活跃、没有排队的用户输入、上下文未处于高压、且新估算收益低于 `min_incremental_saved_tokens` 时避免低价值的最终 prompt surface 抖动；如果已有已剪裁前缀，收尾请求会复用该已剪裁前缀，而不是恢复原始工具输出。
 - 上下文剪裁现在默认只保留更短的成功 shell 输出片段，减少上下文压力下保留的低信号终端输出。
+- 请求级上下文剪裁现在会为较旧工具输出生成更安全、更有用的摘要：过期错误会保留关键失败 / 断言 / 鉴权行而不是只留下省略标记，泛化 stale 输出会保留头尾片段或在检测到 search/source/path-list 形态时路由到对应摘要，shell 输出会先按内容路由再决定是否走成功输出省略，搜索摘要会按文件分组，debug 剪裁统计也会包含聚合的跳过原因和可能过度剪裁信号，便于后续离线调参。
 - Codex OAuth 运行时状态现在用用户在工作区内的组合键（`account_user_id`）识别账号，不再只按 account/workspace ID 区分，避免多个用户共享同一工作区时 quota/status 更新互相覆盖。只含 refresh 的凭据在首次成功刷新后会从临时 `refresh_sha256:<digest>` state key 迁移；OAuth access token 现在需要能解析出 account 与 user/account-user claim。
 - Codex OAuth 运行时状态现在改用 `auth.state.json`，不再使用已发布版本中的 `auth.state.yaml`；已有运行时缓存可由 warm-up/轮询重新生成，但 YAML 文件中的 quota/reset/账号状态缓存不会自动迁移。
 - `chord auth refresh <provider>` 现在可以刷新某个 provider 下所有带 refresh token 的 Codex OAuth 凭据，逐账号报告成功 / 失败 / 跳过状态，并保留 rate-limit reset 提示。
