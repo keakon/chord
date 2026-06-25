@@ -22,6 +22,21 @@ func TestAnthropicBetaHeaderDefaultAndThinking(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesMarksInterruptedAssistant(t *testing.T) {
+	got := convertMessages([]message.Message{{Role: "assistant", Content: "partial", StopReason: "interrupted"}})
+	if len(got) != 1 || got[0].Role != "assistant" {
+		t.Fatalf("convertMessages() = %#v", got)
+	}
+	blocks, ok := got[0].Content.([]anthropicContent)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("convertMessages() = %#v", got)
+	}
+	text := blocks[0].Text
+	if !strings.Contains(text, "partial") || !strings.Contains(text, "interrupted before completion") {
+		t.Fatalf("interrupted assistant text = %q", text)
+	}
+}
+
 func TestStableAnthropicMetadataUserIDPayload_JSONShape(t *testing.T) {
 	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{}, nil)
 	payload := stableAnthropicMetadataUserIDPayload(provider)
@@ -980,7 +995,7 @@ func TestParseSSEStreamMessageDeltaZeroUsageDoesNotClobberStartUsage(t *testing.
 	}
 }
 
-func TestParseSSEStreamRejectsIncompleteStreamWithoutMessageStop(t *testing.T) {
+func TestParseSSEStreamKeepsInterruptedTextWithoutMessageStop(t *testing.T) {
 	stream := strings.Join([]string{
 		"event: message_start",
 		"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"claude\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}",
@@ -995,10 +1010,56 @@ func TestParseSSEStreamRejectsIncompleteStreamWithoutMessageStop(t *testing.T) {
 
 	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
 	if err == nil {
-		t.Fatalf("parseSSEStream returned resp=%#v, want incomplete stream error", resp)
+		if resp == nil || resp.Content != "hello" || resp.StopReason != "interrupted" {
+			t.Fatalf("resp = %#v, want interrupted partial text", resp)
+		}
+		return
 	}
-	if !strings.Contains(err.Error(), "without message_stop") {
-		t.Fatalf("error = %v, want message_stop error", err)
+	t.Fatalf("parseSSEStream returned error: %v", err)
+}
+
+func TestParseSSEStreamInterruptedTextDropsPartialToolAndThinking(t *testing.T) {
+	stream := strings.Join([]string{
+		"event: message_start",
+		"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"claude\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}",
+		"",
+		"event: content_block_start",
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}",
+		"",
+		"event: content_block_delta",
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"visible text\"}}",
+		"",
+		"event: content_block_start",
+		"data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}",
+		"",
+		"event: content_block_delta",
+		"data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"partial thought\"}}",
+		"",
+		"event: content_block_start",
+		"data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"Read\",\"input\":{}}}",
+		"",
+	}, "\n")
+
+	var sawToolEnd, sawThinkingEnd bool
+	resp, err := parseSSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
+		switch delta.Type {
+		case message.StreamDeltaToolUseEnd:
+			sawToolEnd = true
+		case message.StreamDeltaThinkingEnd:
+			sawThinkingEnd = true
+		}
+	}, nil)
+	if err != nil {
+		t.Fatalf("parseSSEStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "visible text" || resp.StopReason != "interrupted" {
+		t.Fatalf("resp = %#v, want interrupted partial text", resp)
+	}
+	if len(resp.ToolCalls) != 0 || len(resp.ThinkingBlocks) != 0 || resp.ReasoningContent != "" {
+		t.Fatalf("unsafe partial context retained: tool_calls=%#v thinking=%#v reasoning=%q", resp.ToolCalls, resp.ThinkingBlocks, resp.ReasoningContent)
+	}
+	if sawToolEnd || sawThinkingEnd {
+		t.Fatalf("unexpected completion callback for dropped partial blocks: tool_end=%v thinking_end=%v", sawToolEnd, sawThinkingEnd)
 	}
 }
 

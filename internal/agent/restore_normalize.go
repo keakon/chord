@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/keakon/chord/internal/message"
 )
@@ -30,6 +31,9 @@ func dropTrailingInterruptedAssistants(msgs []message.Message) []message.Message
 	for len(msgs) > 0 {
 		last := msgs[len(msgs)-1]
 		if last.Role != "assistant" || last.StopReason != "interrupted" {
+			break
+		}
+		if strings.TrimSpace(last.Content) != "" && len(last.ToolCalls) == 0 {
 			break
 		}
 		msgs = msgs[:len(msgs)-1]

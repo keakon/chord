@@ -153,3 +153,39 @@ func TestParseOpenAISSEStream_EmitsPairedCallbacksForValidToolCall(t *testing.T)
 		t.Fatalf("tool callbacks = %#v, want %#v", events, wantEvents)
 	}
 }
+
+func TestParseOpenAISSEStream_InterruptedTextWithoutDoneIsNotNormalSuccess(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"delta":{"content":"partial answer"}}]}`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "partial answer" || resp.StopReason != "interrupted" {
+		t.Fatalf("resp = %#v, want interrupted partial text", resp)
+	}
+}
+
+func TestParseOpenAISSEStream_InterruptedTextDropsPartialToolAndReasoning(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"delta":{"reasoning_content":"partial thought"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"delta":{"content":"visible text"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"Read"}}]}}]}`,
+		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":"}}]}}]}`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "visible text" || resp.StopReason != "interrupted" {
+		t.Fatalf("resp = %#v, want interrupted partial text", resp)
+	}
+	if len(resp.ToolCalls) != 0 || resp.ReasoningContent != "" {
+		t.Fatalf("unsafe partial context retained: tool_calls=%#v reasoning=%q", resp.ToolCalls, resp.ReasoningContent)
+	}
+}

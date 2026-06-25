@@ -462,8 +462,8 @@ func canRecoverPartialResponsesAfterReadError(err error, resp *message.Response)
 	if !canRecoverPartialResponsesAfterError(err) {
 		return false
 	}
-	if _, ok := errors.AsType[*ChunkTimeoutError](err); ok && (resp == nil || len(resp.ToolCalls) == 0) {
-		return false
+	if _, ok := errors.AsType[*ChunkTimeoutError](err); ok {
+		return responseHasText(resp) || (resp != nil && len(resp.ToolCalls) > 0)
 	}
 	return true
 }
@@ -473,6 +473,13 @@ func finishPartialResponsesResponse(resp *message.Response, outputItems *[]respo
 		return nil, nil, false
 	}
 	hasToolCalls := len(resp.ToolCalls) > 0
+	if requireCompleteOutput && !hasToolCalls && !partial.textDone {
+		if partialResp := markInterruptedTextResponse(resp); partialResp != nil {
+			items := responsesFinalizeIncrementalOutputItems(*outputItems, partialResp)
+			*outputItems = items
+			return partialResp, items, true
+		}
+	}
 	if !partialResponsesRecoverable(hasToolCalls, partial, requireCompleteOutput) {
 		return nil, nil, false
 	}
@@ -482,8 +489,6 @@ func finishPartialResponsesResponse(resp *message.Response, outputItems *[]respo
 	if resp.StopReason == "" {
 		if hasToolCalls {
 			resp.StopReason = "tool_calls"
-		} else if partial.textDone {
-			resp.StopReason = "stop"
 		} else {
 			resp.StopReason = "interrupted"
 		}

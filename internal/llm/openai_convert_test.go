@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
@@ -95,6 +96,20 @@ func TestConvertMessagesToOpenAI_DoesNotReplayReasoningWithoutProvenance(t *test
 		if m.ReasoningContent != "" {
 			t.Fatalf("unexpected reasoning replay: %#v", m)
 		}
+	}
+}
+
+func TestConvertMessagesToOpenAIMarksInterruptedAssistant(t *testing.T) {
+	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, []message.Message{{Role: "assistant", Content: "partial", StopReason: "interrupted"}})
+	if len(out) != 1 || out[0].Role != "assistant" {
+		t.Fatalf("convertMessagesToOpenAI() = %#v", out)
+	}
+	text, ok := out[0].Content.(string)
+	if !ok {
+		t.Fatalf("assistant content type = %T", out[0].Content)
+	}
+	if !strings.Contains(text, "partial") || !strings.Contains(text, "interrupted before completion") {
+		t.Fatalf("interrupted assistant content = %q", text)
 	}
 }
 

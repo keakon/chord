@@ -416,17 +416,16 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 		// Empty lines are event separators; just continue.
 	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("reading SSE stream: %w", err)
-	}
+	readErr := scanner.Err()
 
-	// If we reach EOF without a message_stop event, finalize any in-progress
-	// content blocks. This can happen if the connection drops or the model
-	// hits max_tokens (stop_reason == "max_tokens").
+	// If we reach EOF without a message_stop event, first collect any in-progress
+	// text blocks. This can happen if the connection drops or the model hits
+	// max_tokens. Incomplete tool/thinking blocks are not replay-safe as normal
+	// assistant history, so interrupted text responses below keep only text and
+	// must not emit completion callbacks for dropped blocks.
 	truncated := resp.StopReason == "max_tokens"
 	for idx, block := range blocks {
-		switch block.blockType {
-		case message.StreamDeltaText:
+		if block.blockType == message.StreamDeltaText {
 			text := block.text.String()
 			if text != "" {
 				if resp.Content != "" {
@@ -434,6 +433,26 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				}
 				resp.Content += text
 			}
+			delete(blocks, idx)
+		}
+	}
+
+	if readErr != nil {
+		if canRecoverPartialResponsesAfterError(readErr) {
+			if partial := markInterruptedTextResponse(&resp); partial != nil {
+				return partial, nil
+			}
+		}
+		return nil, fmt.Errorf("reading SSE stream: %w", readErr)
+	}
+	if !truncated {
+		if partial := markInterruptedTextResponse(&resp); partial != nil {
+			return partial, nil
+		}
+	}
+
+	for idx, block := range blocks {
+		switch block.blockType {
 		case "tool_use":
 			emitToolEnd := false
 			if truncated {

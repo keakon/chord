@@ -485,8 +485,9 @@ func convertMessagesToOpenAI(systemPrompt, targetWireFamily string, msgs []messa
 			}
 			// OpenAI requires content to be null (not empty string) when
 			// tool_calls are present; set it only when there is actual text.
-			if msg.Content != "" {
-				omi.Content = msg.Content
+			contentText := assistantContentForReplay(msg)
+			if contentText != "" {
+				omi.Content = contentText
 			} else if len(msg.ToolCalls) == 0 {
 				// Some OpenAI-compatible APIs reject content:null when there are
 				// no tool calls; use an explicit empty string instead.
@@ -909,6 +910,12 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 	}
 
 	if err := scanner.Err(); err != nil {
+		flushContent()
+		if canRecoverPartialResponsesAfterError(err) {
+			if partial := markInterruptedTextResponse(&resp); partial != nil {
+				return partial, nil
+			}
+		}
 		return nil, fmt.Errorf("reading SSE stream: %w", err)
 	}
 	if !sawDataLine {
@@ -920,13 +927,24 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
 	}
 
-	// Finalize any remaining tool calls if stream ended without [DONE].
-	finalizeToolCalls(toolCalls, &resp, cb, truncated)
+	// If the stream ended before any finish_reason/[DONE] but we already have
+	// plain assistant text, keep that text as an interrupted response instead
+	// of silently treating the transport EOF as a normal success. Pending tool
+	// calls/reasoning are not replay-safe and are dropped by the helper.
 	resp.ThinkingToolcallMarkerHit = thinkingToolcallMarkerHit
 	if reasoningBuf.Len() > 0 {
 		resp.ReasoningContent = reasoningBuf.String()
 	}
 	flushContent()
+	if resp.StopReason == "" {
+		if partial := markInterruptedTextResponse(&resp); partial != nil {
+			return partial, nil
+		}
+	}
+
+	// Finalize any remaining tool calls if stream ended after a semantic finish
+	// chunk but before the transport-level [DONE] marker.
+	finalizeToolCalls(toolCalls, &resp, cb, truncated)
 	return &resp, nil
 }
 

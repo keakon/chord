@@ -674,10 +674,11 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 			}
 
 			// Add text content if present.
-			if msg.Content != "" {
+			contentText := assistantContentForReplay(msg)
+			if contentText != "" {
 				content = append(content, anthropicContent{
 					Type: "text",
-					Text: msg.Content,
+					Text: contentText,
 				})
 			}
 

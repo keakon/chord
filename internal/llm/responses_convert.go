@@ -71,12 +71,12 @@ func convertMessagesToResponses(systemPrompt, targetWireFamily string, msgs []me
 				})
 			}
 			// Output text content.
-			if msg.Content != "" {
+			if contentText := assistantContentForReplay(msg); contentText != "" {
 				result = append(result, responsesInputItem{
 					Type: "message",
 					Role: "assistant",
 					Content: []responsesContentBlock{
-						{Type: "output_text", Text: msg.Content},
+						{Type: "output_text", Text: contentText},
 					},
 				})
 			}
@@ -235,12 +235,12 @@ func responsesResponseToInputItems(resp *message.Response) []responsesInputItem 
 		return nil
 	}
 	items := make([]responsesInputItem, 0, 1+len(resp.ToolCalls))
-	if strings.TrimSpace(resp.Content) != "" {
+	if contentText := assistantContentForReplay(message.Message{Content: resp.Content, StopReason: resp.StopReason}); strings.TrimSpace(contentText) != "" {
 		items = append(items, responsesInputItem{
 			Type: "message",
 			Role: "assistant",
 			Content: []responsesContentBlock{
-				{Type: "output_text", Text: resp.Content},
+				{Type: "output_text", Text: contentText},
 			},
 		})
 	}

@@ -7,10 +7,21 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-func TestNormalizeRestoredMessages_DropsTrailingInterruptedAssistant(t *testing.T) {
+func TestNormalizeRestoredMessages_KeepsTrailingInterruptedTextAssistant(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", Content: "partial", StopReason: "interrupted"},
+	}
+	got := normalizeRestoredMessages(msgs)
+	if len(got) != 2 || got[1].Role != "assistant" || got[1].Content != "partial" || got[1].StopReason != "interrupted" {
+		t.Fatalf("unexpected result: %#v", got)
+	}
+}
+
+func TestNormalizeRestoredMessages_DropsTrailingInterruptedToolAssistant(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", StopReason: "interrupted", ToolCalls: []message.ToolCall{{ID: "call_1", Name: "Read"}}},
 	}
 	got := normalizeRestoredMessages(msgs)
 	if len(got) != 1 || got[0].Role != "user" {

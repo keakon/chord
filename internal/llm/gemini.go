@@ -311,8 +311,8 @@ func convertMessagesToGemini(msgs []message.Message) []geminiContent {
 			i++
 		case "assistant":
 			parts := make([]geminiPart, 0, 1+len(msg.ToolCalls))
-			if msg.Content != "" {
-				parts = append(parts, geminiPart{Text: msg.Content})
+			if contentText := assistantContentForReplay(msg); contentText != "" {
+				parts = append(parts, geminiPart{Text: contentText})
 			}
 			for _, tc := range msg.ToolCalls {
 				if tc.ID == "" || tc.Name == "" {
@@ -566,17 +566,28 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		flushContent()
+		if canRecoverPartialResponsesAfterError(err) {
+			if partial := markInterruptedTextResponse(&resp); partial != nil {
+				return partial, nil
+			}
+		}
 		return nil, fmt.Errorf("reading Gemini SSE stream: %w", err)
 	}
 	if !sawDataLine {
 		return nil, fmt.Errorf("empty SSE stream: no data lines")
 	}
 	finishThinking()
+	flushContent()
+	if resp.StopReason == "" {
+		if partial := markInterruptedTextResponse(&resp); partial != nil {
+			return partial, nil
+		}
+	}
 	finalizeGeminiToolCalls(toolCalls, &resp, cb, false)
 	if reasoning.Len() > 0 {
 		resp.ReasoningContent = reasoning.String()
 	}
-	flushContent()
 	if resp.StopReason == "MAX_TOKENS" && resp.Content == "" && len(resp.ToolCalls) == 0 && resp.ReasoningContent == "" {
 		return &resp, &EmptyTruncationError{}
 	}

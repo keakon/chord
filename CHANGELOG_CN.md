@@ -14,6 +14,7 @@
 
 ### 修复
 
+- 流式响应中断恢复现在覆盖 OpenAI 兼容 Chat Completions，以及 Anthropic、Gemini 与 Responses provider：当流在已有可见助手正文后结束时，Chord 会将正文作为 interrupted 上下文保留；未完成的工具调用、thinking 和 reasoning 仍会丢弃，使下一次请求能继续正文而不会重放不安全的半截结构。
 - 卸载空闲 language server 进程时，LSP 资源关闭不再把正常的 stderr 管道关闭记录成错误。
 - 上下文压缩成功或跳过后，现在会在保存恢复状态前清理压缩前遗留的最近请求 token 样本，避免压缩后的 usage 缺失或请求失败时立即再次触发一次很小的自动压缩。
 - 工具调用解析现在会在 Responses 兼容网关发送重复的部分 function-call 事件时保留已有的有效工具元数据；当网关延迟补充 `call_id` 时，流式工具调用回调会保持稳定 ID；从 Responses 完成输出中恢复的工具调用会发出成对回调；Anthropic/Gemini/OpenAI 兼容/Responses 中缺少 ID 或名称的异常工具调用会被丢弃，且不会发出孤立的流式开始、增量或完成回调；缺失或未知工具也会按无效调用报告，而不再误报为权限策略拒绝。

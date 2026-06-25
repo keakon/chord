@@ -125,6 +125,21 @@ func TestConvertMessagesToResponses_WithImageParts(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesToResponsesMarksInterruptedAssistant(t *testing.T) {
+	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, []message.Message{{Role: "assistant", Content: "partial", StopReason: "interrupted"}})
+	if len(items) != 1 || items[0].Type != "message" || items[0].Role != "assistant" {
+		t.Fatalf("convertMessagesToResponses() = %#v", items)
+	}
+	blocks, ok := items[0].Content.([]responsesContentBlock)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("convertMessagesToResponses() = %#v", items)
+	}
+	text := blocks[0].Text
+	if !strings.Contains(text, "partial") || !strings.Contains(text, "interrupted before completion") {
+		t.Fatalf("interrupted assistant content = %q", text)
+	}
+}
+
 func TestConvertMessagesToResponses_ReplaysReasoningContent(t *testing.T) {
 	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, []message.Message{
 		{Role: "user", Content: "do something"},
@@ -779,7 +794,7 @@ func TestParseResponsesSSE_EarlyCloseAfterTextDeltaReturnsInterruptedPartialResp
 	}
 }
 
-func TestParseResponsesSSE_EarlyCloseAfterTextDoneReturnsCompletedPartialResponse(t *testing.T) {
+func TestParseResponsesSSE_EarlyCloseAfterTextDoneReturnsInterruptedPartialResponse(t *testing.T) {
 	raw := strings.Join([]string{
 		"event: response.output_item.added",
 		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","status":"in_progress"}}`,
@@ -796,12 +811,12 @@ func TestParseResponsesSSE_EarlyCloseAfterTextDoneReturnsCompletedPartialRespons
 	if err != nil {
 		t.Fatalf("parseResponsesSSE: %v", err)
 	}
-	if resp.Content != "complete" || resp.StopReason != "stop" || resp.Usage != nil {
-		t.Fatalf("partial response = content %q stop %q usage %#v, want complete/stop/nil usage", resp.Content, resp.StopReason, resp.Usage)
+	if resp.Content != "complete" || resp.StopReason != "interrupted" || resp.Usage != nil {
+		t.Fatalf("partial response = content %q stop %q usage %#v, want complete/interrupted/nil usage", resp.Content, resp.StopReason, resp.Usage)
 	}
 }
 
-func TestParseResponsesSSE_ReadErrorAfterTextDeltaReturnsError(t *testing.T) {
+func TestParseResponsesSSE_ReadErrorAfterTextDeltaReturnsInterruptedPartialResponse(t *testing.T) {
 	raw := strings.Join([]string{
 		"event: response.output_item.added",
 		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","status":"in_progress"}}`,
@@ -813,16 +828,16 @@ func TestParseResponsesSSE_ReadErrorAfterTextDeltaReturnsError(t *testing.T) {
 	}, "\n")
 	reader := &errorAfterReader{payload: []byte(raw), err: errors.New("network reset")}
 
-	_, err := parseResponsesSSE(reader, nil, nil)
-	if err == nil {
-		t.Fatal("parseResponsesSSE err = nil, want read error")
+	resp, err := parseResponsesSSE(reader, nil, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
 	}
-	if !strings.Contains(err.Error(), "reading SSE stream") || !strings.Contains(err.Error(), "network reset") {
-		t.Fatalf("parseResponsesSSE err = %v, want network reset read error", err)
+	if resp.Content != "partial" || resp.StopReason != "interrupted" || resp.Usage != nil {
+		t.Fatalf("partial response = content %q stop %q usage %#v, want partial/interrupted/nil usage", resp.Content, resp.StopReason, resp.Usage)
 	}
 }
 
-func TestParseResponsesSSE_ReadErrorAfterTextDoneReturnsCompletedPartialResponse(t *testing.T) {
+func TestParseResponsesSSE_ReadErrorAfterTextDoneReturnsInterruptedPartialResponse(t *testing.T) {
 	raw := strings.Join([]string{
 		"event: response.output_item.added",
 		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","status":"in_progress"}}`,
@@ -841,8 +856,8 @@ func TestParseResponsesSSE_ReadErrorAfterTextDoneReturnsCompletedPartialResponse
 	if err != nil {
 		t.Fatalf("parseResponsesSSE: %v", err)
 	}
-	if resp.Content != "complete" || resp.StopReason != "stop" || resp.Usage != nil {
-		t.Fatalf("partial response = content %q stop %q usage %#v, want complete/stop/nil usage", resp.Content, resp.StopReason, resp.Usage)
+	if resp.Content != "complete" || resp.StopReason != "interrupted" || resp.Usage != nil {
+		t.Fatalf("partial response = content %q stop %q usage %#v, want complete/interrupted/nil usage", resp.Content, resp.StopReason, resp.Usage)
 	}
 }
 
@@ -1031,7 +1046,7 @@ func TestParseResponsesSSE_ChunkTimeoutBeforeOutputItemDoneStillFails(t *testing
 	}
 }
 
-func TestParseResponsesSSE_ChunkTimeoutAfterTextOnlyDoneStillFails(t *testing.T) {
+func TestParseResponsesSSE_ChunkTimeoutAfterTextOnlyDoneReturnsInterruptedPartialResponse(t *testing.T) {
 	raw := strings.Join([]string{
 		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","status":"in_progress"}}`,
 		`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"I will run checks next."}`,
@@ -1040,12 +1055,12 @@ func TestParseResponsesSSE_ChunkTimeoutAfterTextOnlyDoneStillFails(t *testing.T)
 	}, "\n\n") + "\n\n"
 	reader := &chunkTimeoutAfterPayloadReader{payload: []byte(raw)}
 
-	_, err := parseResponsesSSE(reader, nil, nil)
-	if err == nil {
-		t.Fatal("parseResponsesSSE err = nil, want timeout/incomplete error")
+	resp, err := parseResponsesSSE(reader, nil, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
 	}
-	if !strings.Contains(err.Error(), "reading SSE stream") {
-		t.Fatalf("parseResponsesSSE err = %v, want reading SSE stream error", err)
+	if resp.Content != "I will run checks next." || resp.StopReason != "interrupted" || resp.Usage != nil {
+		t.Fatalf("partial response = content %q stop %q usage %#v, want text/interrupted/nil usage", resp.Content, resp.StopReason, resp.Usage)
 	}
 }
 

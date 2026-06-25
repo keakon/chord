@@ -50,6 +50,17 @@ func TestConvertMessagesToGemini(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesToGeminiMarksInterruptedAssistant(t *testing.T) {
+	got := convertMessagesToGemini([]message.Message{{Role: "assistant", Content: "partial", StopReason: "interrupted"}})
+	if len(got) != 1 || got[0].Role != "model" || len(got[0].Parts) != 1 {
+		t.Fatalf("convertMessagesToGemini() = %#v", got)
+	}
+	text := got[0].Parts[0].Text
+	if !strings.Contains(text, "partial") || !strings.Contains(text, "interrupted before completion") {
+		t.Fatalf("interrupted assistant text = %q", text)
+	}
+}
+
 func TestConvertToolsToGemini(t *testing.T) {
 	tools := []message.ToolDefinition{{
 		Name:        "search",
@@ -161,6 +172,32 @@ func TestParseGeminiSSEStreamSkipsFunctionCallWithEmptyName(t *testing.T) {
 	}
 	if len(starts) != 1 || starts[0].Name != "lookup" {
 		t.Fatalf("tool_use_start callbacks = %+v, want only lookup", starts)
+	}
+}
+
+func TestParseGeminiSSEStreamInterruptedTextWithoutFinish(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"thought":true,"text":"partial thought"},{"text":"visible text"},{"functionCall":{"name":"lookup","args":{"q":"x"}}}]}}]}`,
+		``,
+	}, "\n")
+
+	var sawToolEnd bool
+	resp, err := parseGeminiSSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaToolUseEnd {
+			sawToolEnd = true
+		}
+	}, nil)
+	if err != nil {
+		t.Fatalf("parseGeminiSSEStream() error = %v", err)
+	}
+	if resp == nil || resp.Content != "visible text" || resp.StopReason != "interrupted" {
+		t.Fatalf("response = %#v, want interrupted partial text", resp)
+	}
+	if len(resp.ToolCalls) != 0 || resp.ReasoningContent != "" {
+		t.Fatalf("unsafe partial context retained: tool_calls=%#v reasoning=%q", resp.ToolCalls, resp.ReasoningContent)
+	}
+	if sawToolEnd {
+		t.Fatal("unexpected ToolUseEnd for interrupted partial Gemini tool call")
 	}
 }
 
