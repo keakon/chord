@@ -2262,7 +2262,8 @@ func TestResponsesProvider_CodexOAuth429EmitsRateLimitDelta(t *testing.T) {
 
 	dumpDir := t.TempDir()
 
-	r := &ResponsesProvider{provider: providerCfg, client: server.Client(), dumpWriter: NewDumpWriter(dumpDir)}
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+	r.SetDumpWriter(NewDumpWriter(dumpDir))
 	var deltas []message.StreamDelta
 	_, err := r.CompleteStream(
 		context.Background(), "oauth-key", "gpt-5", "system",

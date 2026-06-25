@@ -235,15 +235,12 @@ func DumpResponseFromResponse(resp *message.Response) *DumpResponse {
 
 // SetProviderDumpWriter attaches a DumpWriter to a Provider implementation.
 // It silently does nothing if the provider doesn't support dumping (future-proof).
+type providerDumpWriterSetter interface {
+	SetDumpWriter(*DumpWriter)
+}
+
 func SetProviderDumpWriter(p Provider, w *DumpWriter) {
-	switch impl := p.(type) {
-	case *OpenAIProvider:
-		impl.SetDumpWriter(w)
-	case *AnthropicProvider:
-		impl.SetDumpWriter(w)
-	case *GeminiProvider:
-		impl.SetDumpWriter(w)
-	case *ResponsesProvider:
+	if impl, ok := p.(providerDumpWriterSetter); ok {
 		impl.SetDumpWriter(w)
 	}
 }

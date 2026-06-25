@@ -78,6 +78,82 @@ func TestNewProviderImplAppliesResponseHeaderTimeout(t *testing.T) {
 	}
 }
 
+func TestProviderDiagnosticsWritersAreRaceSafe(t *testing.T) {
+	t.Parallel()
+
+	openAI := &OpenAIProvider{responsesProvider: &ResponsesProvider{}}
+	responses := &ResponsesProvider{}
+	anthropic := &AnthropicProvider{}
+	gemini := &GeminiProvider{}
+	providers := []struct {
+		name string
+		p    Provider
+		load func()
+	}{
+		{
+			name: "openai",
+			p:    openAI,
+			load: func() {
+				_ = openAI.dumpWriter.Load()
+				_ = openAI.traceWriter.Load()
+				_ = openAI.responsesProvider.dumpWriter.Load()
+				_ = openAI.responsesProvider.traceWriter.Load()
+			},
+		},
+		{
+			name: "responses",
+			p:    responses,
+			load: func() {
+				_ = responses.dumpWriter.Load()
+				_ = responses.traceWriter.Load()
+			},
+		},
+		{
+			name: "anthropic",
+			p:    anthropic,
+			load: func() {
+				_ = anthropic.dumpWriter.Load()
+				_ = anthropic.traceWriter.Load()
+			},
+		},
+		{
+			name: "gemini",
+			p:    gemini,
+			load: func() {
+				_ = gemini.dumpWriter.Load()
+				_ = gemini.traceWriter.Load()
+			},
+		},
+	}
+
+	for _, tc := range providers {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				<-start
+				for i := 0; i < 10_000; i++ {
+					SetProviderDumpWriter(tc.p, NewDumpWriter("dump"))
+					SetProviderTraceWriter(tc.p, NewTraceWriter("trace.jsonl"))
+				}
+			}()
+			go func() {
+				defer wg.Done()
+				<-start
+				for i := 0; i < 10_000; i++ {
+					tc.load()
+				}
+			}()
+			close(start)
+			wg.Wait()
+		})
+	}
+}
+
 func TestMutateCredentialInMemoryUsesIndexToDisambiguateDuplicateAccountID(t *testing.T) {
 	auth := config.AuthConfig{
 		"openai": {

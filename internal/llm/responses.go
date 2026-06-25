@@ -32,8 +32,8 @@ import (
 type ResponsesProvider struct {
 	provider     *ProviderConfig
 	client       *http.Client
-	dumpWriter   *DumpWriter
-	traceWriter  *TraceWriter
+	dumpWriter   atomic.Pointer[DumpWriter]
+	traceWriter  atomic.Pointer[TraceWriter]
 	proxyScheme  string
 	dialProxyURL string
 	// codexWSCompleteFn is a test seam for the Codex WebSocket path. Production
@@ -79,11 +79,11 @@ func NewResponsesProvider(provider *ProviderConfig, proxyURL string) (*Responses
 }
 
 func (r *ResponsesProvider) SetDumpWriter(w *DumpWriter) {
-	r.dumpWriter = w
+	r.dumpWriter.Store(w)
 }
 
 func (r *ResponsesProvider) SetTraceWriter(w *TraceWriter) {
-	r.traceWriter = w
+	r.traceWriter.Store(w)
 }
 
 func (r *ResponsesProvider) LastTransportUsed() string {
@@ -289,6 +289,8 @@ func (r *ResponsesProvider) CompleteStream(
 	cb StreamCallback,
 ) (*message.Response, error) {
 	ot := tuning.OpenAI
+	dumpWriter := r.dumpWriter.Load()
+	traceWriter := r.traceWriter.Load()
 	traceCollector := newLLMTraceCollector("responses", model, cb)
 	traceCB := traceCollector.Callback
 	useOpenAIOAuth := r.provider != nil && r.provider.isOpenAIOAuthKey(apiKey)
@@ -397,13 +399,13 @@ func (r *ResponsesProvider) CompleteStream(
 		wsResp, wsUsedIncremental, wsErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{})
 		if wsErr == nil {
 			r.lastTransportUsed.Store("websocket")
-			persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, wsResp, nil)
+			persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, wsResp, nil)
 			return wsResp, nil
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			r.resetCodexWebSocketChain("context_cancel")
 			callErr := fmt.Errorf("responses websocket aborted: %w", ctxErr)
-			persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
+			persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
 			return nil, callErr
 		}
 		if isCodexWSChainStateMismatch(wsErr) {
@@ -412,7 +414,7 @@ func (r *ResponsesProvider) CompleteStream(
 			retryResp, retryUsedIncremental, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true})
 			if retryErr == nil {
 				r.lastTransportUsed.Store("websocket")
-				persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, retryResp, nil)
+				persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, retryResp, nil)
 				return retryResp, nil
 			}
 			wsErr = retryErr
@@ -420,14 +422,14 @@ func (r *ResponsesProvider) CompleteStream(
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				r.resetCodexWebSocketChain("context_cancel")
 				callErr := fmt.Errorf("responses websocket aborted: %w", ctxErr)
-				persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
+				persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
 				return nil, callErr
 			}
 		}
 		if shouldStopCodexWSHTTPFallback(wsErr) {
 			log.Warnf("responses: Codex WebSocket returned terminal API error, skipping HTTP fallback error=%v", wsErr)
 			r.resetCodexWebSocketChain("ws_terminal_api_error")
-			persistLLMTrace(r.traceWriter, traceCollector, apiErrorStatusCode(wsErr), "websocket", start, nil, wsErr)
+			persistLLMTrace(traceWriter, traceCollector, apiErrorStatusCode(wsErr), "websocket", start, nil, wsErr)
 			return nil, wsErr
 		}
 		if wsUsedIncremental {
@@ -436,27 +438,27 @@ func (r *ResponsesProvider) CompleteStream(
 			wsResp, _, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true})
 			if retryErr == nil {
 				r.lastTransportUsed.Store("websocket")
-				persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, wsResp, nil)
+				persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, wsResp, nil)
 				return wsResp, nil
 			}
 			wsErr = retryErr
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				r.resetCodexWebSocketChain("context_cancel")
 				callErr := fmt.Errorf("responses websocket aborted: %w", ctxErr)
-				persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
+				persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
 				return nil, callErr
 			}
 			if shouldStopCodexWSHTTPFallback(wsErr) {
 				log.Warnf("responses: Codex WebSocket retry returned terminal API error, skipping HTTP fallback error=%v", wsErr)
 				r.resetCodexWebSocketChain("ws_terminal_api_error")
-				persistLLMTrace(r.traceWriter, traceCollector, apiErrorStatusCode(wsErr), "websocket", start, nil, wsErr)
+				persistLLMTrace(traceWriter, traceCollector, apiErrorStatusCode(wsErr), "websocket", start, nil, wsErr)
 				return nil, wsErr
 			}
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			r.resetCodexWebSocketChain("context_cancel")
 			callErr := fmt.Errorf("responses websocket aborted: %w", ctxErr)
-			persistLLMTrace(r.traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
+			persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
 			return nil, callErr
 		}
 		log.Warnf("responses: Codex WebSocket failed, falling back to HTTP error=%v", wsErr)
@@ -464,11 +466,11 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 
 	r.lastTransportUsed.Store("http")
-	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, model, apiKey, useOpenAIOAuth, reqBody.ClientMetadata, traceCB)
+	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, dumpWriter, model, apiKey, useOpenAIOAuth, reqBody.ClientMetadata, traceCB)
 
 	// HTTP full-input path: no previous_response_id retry/rollback handling required.
 
-	persistLLMTrace(r.traceWriter, traceCollector, httpStatus, "http", start, resp, parseErr)
+	persistLLMTrace(traceWriter, traceCollector, httpStatus, "http", start, resp, parseErr)
 	return resp, parseErr
 }
 
@@ -527,6 +529,7 @@ func (r *ResponsesProvider) sendAndParse(
 	url string,
 	bodyBytes []byte,
 	dumpRequestBody []byte,
+	dumpWriter *DumpWriter,
 	model string,
 	apiKey string,
 	useOpenAIOAuth bool,
@@ -603,8 +606,7 @@ func (r *ResponsesProvider) sendAndParse(
 			}
 		}
 		apiErr := parseOpenAIHTTPErrorFromBytes(httpResp.StatusCode, httpResp.Header, errBody)
-		if r.dumpWriter != nil {
-			dumpWriter := r.dumpWriter
+		if dumpWriter != nil {
 			statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 			bodyCopy := string(append([]byte(nil), errBody...))
 			go func() {
@@ -648,7 +650,7 @@ func (r *ResponsesProvider) sendAndParse(
 
 	// Parse SSE stream.
 	var collector *SSECollector
-	if r.dumpWriter != nil {
+	if dumpWriter != nil {
 		collector = NewSSECollector()
 	}
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, r.provider, DefaultChunkTimeout, streamCancel)
@@ -679,8 +681,7 @@ func (r *ResponsesProvider) sendAndParse(
 	}
 
 	// Write dump asynchronously.
-	if r.dumpWriter != nil {
-		dumpWriter := r.dumpWriter
+	if dumpWriter != nil {
 		statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 		go func() {
 			dump := &LLMDump{

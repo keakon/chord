@@ -357,6 +357,7 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 	if err != nil {
 		return nil, nil, fmt.Errorf("codex ws marshal: %w", err)
 	}
+	dumpWriter := r.dumpWriter.Load()
 
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	defer streamCancel()
@@ -393,8 +394,7 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 	resp, outputItems, parseErr := r.codexWSReadResponseLocked(streamCtx, apiKey, cb, newCodexWSProgressTracker(waitingHeaderBytes))
 	streamCancel()
 
-	if collectDump && r.dumpWriter != nil {
-		dumpWriter := r.dumpWriter
+	if collectDump && dumpWriter != nil {
 		go func() {
 			dump := &LLMDump{
 				Timestamp:   start.Format(time.RFC3339Nano),

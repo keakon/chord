@@ -14,6 +14,7 @@ import (
 	"os/user"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -26,8 +27,8 @@ import (
 type AnthropicProvider struct {
 	provider    *ProviderConfig
 	client      *http.Client
-	dumpWriter  *DumpWriter // optional: when non-nil, each request/response is dumped to disk
-	traceWriter *TraceWriter
+	dumpWriter  atomic.Pointer[DumpWriter] // optional: when non-nil, each request/response is dumped to disk
+	traceWriter atomic.Pointer[TraceWriter]
 	proxyScheme string // "http"/"https"/"socks5" when using proxy, "" otherwise (for request logging)
 }
 
@@ -52,11 +53,11 @@ func NewAnthropicProvider(provider *ProviderConfig, proxyURL string) (*Anthropic
 
 // SetDumpWriter enables LLM request/response dumping for debugging.
 func (a *AnthropicProvider) SetDumpWriter(w *DumpWriter) {
-	a.dumpWriter = w
+	a.dumpWriter.Store(w)
 }
 
 func (a *AnthropicProvider) SetTraceWriter(w *TraceWriter) {
-	a.traceWriter = w
+	a.traceWriter.Store(w)
 }
 
 // --- Anthropic API request/response structures ---
@@ -172,6 +173,8 @@ func (a *AnthropicProvider) CompleteStream(
 	tuning RequestTuning,
 	cb StreamCallback,
 ) (*message.Response, error) {
+	dumpWriter := a.dumpWriter.Load()
+	traceWriter := a.traceWriter.Load()
 	traceCollector := newLLMTraceCollector("anthropic", model, cb)
 	traceCB := traceCollector.Callback
 	at := tuning.Anthropic
@@ -270,7 +273,7 @@ func (a *AnthropicProvider) CompleteStream(
 	httpResp, err := a.client.Do(req)
 	if err != nil {
 		callErr := fmt.Errorf("send request: %w", err)
-		persistLLMTrace(a.traceWriter, traceCollector, 0, "http", start, nil, callErr)
+		persistLLMTrace(traceWriter, traceCollector, 0, "http", start, nil, callErr)
 		return nil, callErr
 	}
 	defer httpResp.Body.Close()
@@ -292,8 +295,7 @@ func (a *AnthropicProvider) CompleteStream(
 		io.Copy(io.Discard, httpResp.Body)
 		apiErr := parseHTTPErrorFromBytes(httpResp.StatusCode, httpResp.Header, errBody)
 		// Dump error response if enabled.
-		if a.dumpWriter != nil {
-			dumpWriter := a.dumpWriter
+		if dumpWriter != nil {
 			statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 			bodyCopy := string(append([]byte(nil), errBody...))
 			go func() {
@@ -313,13 +315,13 @@ func (a *AnthropicProvider) CompleteStream(
 				}
 			}()
 		}
-		persistLLMTrace(a.traceWriter, traceCollector, httpResp.StatusCode, "http", start, nil, apiErr)
+		persistLLMTrace(traceWriter, traceCollector, httpResp.StatusCode, "http", start, nil, apiErr)
 		return nil, apiErr
 	}
 
 	// Parse the SSE stream, collecting chunks for dump if enabled.
 	var collector *SSECollector
-	if a.dumpWriter != nil {
+	if dumpWriter != nil {
 		collector = NewSSECollector()
 	}
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, a.provider, DefaultChunkTimeout, streamCancel)
@@ -327,8 +329,7 @@ func (a *AnthropicProvider) CompleteStream(
 	resp, parseErr := parseSSEStream(cr, traceCB, collector)
 
 	// Write dump asynchronously.
-	if a.dumpWriter != nil {
-		dumpWriter := a.dumpWriter
+	if dumpWriter != nil {
 		statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 		go func() {
 			dump := &LLMDump{
@@ -351,7 +352,7 @@ func (a *AnthropicProvider) CompleteStream(
 		}()
 	}
 
-	persistLLMTrace(a.traceWriter, traceCollector, httpResp.StatusCode, "http", start, resp, parseErr)
+	persistLLMTrace(traceWriter, traceCollector, httpResp.StatusCode, "http", start, resp, parseErr)
 	return resp, parseErr
 }
 

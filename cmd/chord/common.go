@@ -507,9 +507,8 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		traceWriter.SetPath(tracePath)
 	} else {
 		traceWriter = llm.NewTraceWriter(tracePath)
-		ac.ProviderCache.traceWriter = traceWriter
 	}
-	llm.SetProviderTraceWriter(llmProvider, traceWriter)
+	ac.ProviderCache.setTraceWriter(traceWriter)
 
 	// Enable LLM dump when effective log_level is "debug".
 	if debugLoggingEnabled(ac.Cfg, ac.ProjectCfg) {
@@ -520,9 +519,8 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 			dumpWriter.SetDir(dumpDir)
 		} else {
 			dumpWriter = llm.NewDumpWriter(dumpDir)
-			ac.ProviderCache.dumpWriter = dumpWriter
 		}
-		llm.SetProviderDumpWriter(llmProvider, dumpWriter)
+		ac.ProviderCache.setDumpWriter(dumpWriter)
 		log.Debugf("LLM dump enabled dir=%v", dumpDir)
 	}
 
@@ -633,9 +631,11 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		}
 		if ac.ProviderCache != nil && ac.ProviderCache.traceWriter != nil {
 			ac.ProviderCache.traceWriter.SetPath(filepath.Join(sessionDir, "traces", llm.LLMTraceFileName()))
+			ac.ProviderCache.setTraceWriter(ac.ProviderCache.traceWriter)
 		}
 		if debugLoggingEnabled(ac.Cfg, ac.ProjectCfg) && ac.ProviderCache != nil && ac.ProviderCache.dumpWriter != nil {
 			ac.ProviderCache.dumpWriter.SetDir(filepath.Join(sessionDir, "dumps", "llm"))
+			ac.ProviderCache.setDumpWriter(ac.ProviderCache.dumpWriter)
 		}
 		// Refresh skills metadata on session switch (non-blocking).
 		refreshSkills(ac)

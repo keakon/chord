@@ -34,6 +34,7 @@ type providerCache struct {
 	cfg             *config.Config
 	dumpWriter      *llm.DumpWriter
 	traceWriter     *llm.TraceWriter
+	newProviderImpl func(*llm.ProviderConfig, string) (llm.Provider, error)
 	fetchCodexUsage func(context.Context, *llm.ProviderConfig, string, string) ([]*ratelimit.KeyRateLimitSnapshot, error)
 }
 
@@ -170,7 +171,11 @@ func (c *providerCache) getOrCreateImpl(provName string, cfg config.ProviderConf
 	}
 	effectiveProxy := llm.ResolveEffectiveProxy(normalizedCfg.Proxy, globalProxy)
 
-	impl, err := llm.NewProviderImpl(providerCfg, effectiveProxy)
+	newProviderImpl := c.newProviderImpl
+	if newProviderImpl == nil {
+		newProviderImpl = llm.NewProviderImpl
+	}
+	impl, err := newProviderImpl(providerCfg, effectiveProxy)
 	if err != nil {
 		return nil, fmt.Errorf("create %s provider for %q: %w", normalizedCfg.Type, provName, err)
 	}
@@ -182,6 +187,30 @@ func (c *providerCache) getOrCreateImpl(provName string, cfg config.ProviderConf
 	}
 	c.impls[provName] = impl
 	return impl, nil
+}
+
+func (c *providerCache) setTraceWriter(w *llm.TraceWriter) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.traceWriter = w
+	for _, impl := range c.impls {
+		llm.SetProviderTraceWriter(impl, w)
+	}
+}
+
+func (c *providerCache) setDumpWriter(w *llm.DumpWriter) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dumpWriter = w
+	for _, impl := range c.impls {
+		llm.SetProviderDumpWriter(impl, w)
+	}
 }
 
 func (c *providerCache) close() {

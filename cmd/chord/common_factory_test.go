@@ -20,7 +20,10 @@ import (
 )
 
 // stubProviderImpl is a minimal Provider implementation for testing.
-type stubProviderImpl struct{}
+type stubProviderImpl struct {
+	dumpWriter  *llm.DumpWriter
+	traceWriter *llm.TraceWriter
+}
 
 type stubScriptedCall struct {
 	resp *message.Response
@@ -66,6 +69,14 @@ func (p *stubProviderImpl) CompleteStream(
 	return &message.Response{Content: "ok", StopReason: "stop"}, nil
 }
 
+func (p *stubProviderImpl) SetDumpWriter(w *llm.DumpWriter) {
+	p.dumpWriter = w
+}
+
+func (p *stubProviderImpl) SetTraceWriter(w *llm.TraceWriter) {
+	p.traceWriter = w
+}
+
 func TestProviderCacheCodexPollingUsesCacheContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	pollCtxCh := make(chan context.Context, 1)
@@ -109,6 +120,96 @@ func TestProviderCacheCodexPollingUsesCacheContext(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("poll context was not cancelled after cache context cancellation")
+	}
+}
+
+func TestProviderCacheWritersAttachToExistingModelPoolProviders(t *testing.T) {
+	t.Parallel()
+
+	created := make(map[string]*stubProviderImpl)
+	cfg := &config.Config{}
+	auth := config.AuthConfig{
+		"selected": {{APIKey: "selected-key"}},
+		"fallback": {{APIKey: "fallback-key"}},
+		"later":    {{APIKey: "later-key"}},
+	}
+	cache := &providerCache{
+		m:     make(map[string]*llm.ProviderConfig),
+		impls: make(map[string]llm.Provider),
+		auth:  auth,
+		cfg:   cfg,
+		newProviderImpl: func(providerCfg *llm.ProviderConfig, _ string) (llm.Provider, error) {
+			impl := &stubProviderImpl{}
+			created[providerCfg.Name()] = impl
+			return impl, nil
+		},
+	}
+	providerCfg := config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: "https://example.invalid/v1/responses",
+		Models: map[string]config.ModelConfig{
+			"gpt-test": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}
+
+	selectedCfg, err := cache.getOrCreate("selected", providerCfg, []string{"selected-key"})
+	if err != nil {
+		t.Fatalf("get selected provider: %v", err)
+	}
+	selectedImpl, err := cache.getOrCreateImpl("selected", providerCfg, selectedCfg, "gpt-test")
+	if err != nil {
+		t.Fatalf("get selected impl: %v", err)
+	}
+	selectedStub := selectedImpl.(*stubProviderImpl)
+	fallbackCfg, err := cache.getOrCreate("fallback", providerCfg, []string{"fallback-key"})
+	if err != nil {
+		t.Fatalf("get fallback provider: %v", err)
+	}
+	fallbackImpl, err := cache.getOrCreateImpl("fallback", providerCfg, fallbackCfg, "gpt-test")
+	if err != nil {
+		t.Fatalf("get fallback impl: %v", err)
+	}
+	fallbackStub := fallbackImpl.(*stubProviderImpl)
+
+	if selectedStub.traceWriter != nil || fallbackStub.traceWriter != nil {
+		t.Fatal("test setup expected providers to be created before session trace writer")
+	}
+	if selectedStub.dumpWriter != nil || fallbackStub.dumpWriter != nil {
+		t.Fatal("test setup expected providers to be created before session dump writer")
+	}
+
+	traceWriter := llm.NewTraceWriter(filepath.Join(t.TempDir(), "llm-trace.jsonl"))
+	dumpWriter := llm.NewDumpWriter(filepath.Join(t.TempDir(), "dumps", "llm"))
+	cache.setTraceWriter(traceWriter)
+	cache.setDumpWriter(dumpWriter)
+
+	if selectedStub.traceWriter != traceWriter {
+		t.Fatal("selected provider did not receive trace writer")
+	}
+	if fallbackStub.traceWriter != traceWriter {
+		t.Fatal("fallback provider did not receive trace writer")
+	}
+	if selectedStub.dumpWriter != dumpWriter {
+		t.Fatal("selected provider did not receive dump writer")
+	}
+	if fallbackStub.dumpWriter != dumpWriter {
+		t.Fatal("fallback provider did not receive dump writer")
+	}
+
+	laterCfg, err := cache.getOrCreate("later", providerCfg, []string{"later-key"})
+	if err != nil {
+		t.Fatalf("get later provider: %v", err)
+	}
+	laterImpl, err := cache.getOrCreateImpl("later", providerCfg, laterCfg, "gpt-test")
+	if err != nil {
+		t.Fatalf("get later impl: %v", err)
+	}
+	laterStub := laterImpl.(*stubProviderImpl)
+	if laterStub.traceWriter != traceWriter || laterStub.dumpWriter != dumpWriter {
+		t.Fatal("provider created after writer setup did not inherit writers")
+	}
+	if created["selected"] != selectedStub || created["fallback"] != fallbackStub || created["later"] != laterStub {
+		t.Fatal("provider cache did not use injected provider factory for all providers")
 	}
 }
 

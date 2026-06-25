@@ -393,15 +393,12 @@ func persistLLMTrace(writer *TraceWriter, collector *llmTraceCollector, httpStat
 	_ = writer.Write(rec)
 }
 
+type providerTraceWriterSetter interface {
+	SetTraceWriter(*TraceWriter)
+}
+
 func SetProviderTraceWriter(p Provider, w *TraceWriter) {
-	switch impl := p.(type) {
-	case *OpenAIProvider:
-		impl.SetTraceWriter(w)
-	case *AnthropicProvider:
-		impl.SetTraceWriter(w)
-	case *GeminiProvider:
-		impl.SetTraceWriter(w)
-	case *ResponsesProvider:
+	if impl, ok := p.(providerTraceWriterSetter); ok {
 		impl.SetTraceWriter(w)
 	}
 }

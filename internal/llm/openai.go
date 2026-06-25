@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -26,8 +27,8 @@ import (
 type OpenAIProvider struct {
 	provider          *ProviderConfig
 	client            *http.Client
-	dumpWriter        *DumpWriter // optional: when non-nil, each request/response is dumped to disk
-	traceWriter       *TraceWriter
+	dumpWriter        atomic.Pointer[DumpWriter] // optional: when non-nil, each request/response is dumped to disk
+	traceWriter       atomic.Pointer[TraceWriter]
 	proxyScheme       string // "http"/"https"/"socks5" when using proxy, "" otherwise (for request logging)
 	responsesProvider *ResponsesProvider
 	sessionID         string
@@ -69,14 +70,14 @@ func NewOpenAIProvider(provider *ProviderConfig, proxyURL string) (*OpenAIProvid
 
 // SetDumpWriter enables LLM request/response dumping for debugging.
 func (o *OpenAIProvider) SetDumpWriter(w *DumpWriter) {
-	o.dumpWriter = w
+	o.dumpWriter.Store(w)
 	if o.responsesProvider != nil {
 		o.responsesProvider.SetDumpWriter(w)
 	}
 }
 
 func (o *OpenAIProvider) SetTraceWriter(w *TraceWriter) {
-	o.traceWriter = w
+	o.traceWriter.Store(w)
 	if o.responsesProvider != nil {
 		o.responsesProvider.SetTraceWriter(w)
 	}
@@ -238,6 +239,8 @@ func (o *OpenAIProvider) CompleteStream(
 	if o.provider != nil && o.provider.isOpenAIOAuthKey(apiKey) {
 		return o.responsesProvider.CompleteStream(ctx, apiKey, model, systemPrompt, messages, tools, maxTokens, tuning, cb)
 	}
+	dumpWriter := o.dumpWriter.Load()
+	traceWriter := o.traceWriter.Load()
 	traceCollector := newLLMTraceCollector("openai", model, cb)
 	traceCB := traceCollector.Callback
 
@@ -313,7 +316,7 @@ func (o *OpenAIProvider) CompleteStream(
 	httpResp, err := o.client.Do(req)
 	if err != nil {
 		callErr := fmt.Errorf("send request: %w", err)
-		persistLLMTrace(o.traceWriter, traceCollector, 0, "http", start, nil, callErr)
+		persistLLMTrace(traceWriter, traceCollector, 0, "http", start, nil, callErr)
 		return nil, callErr
 	}
 	defer httpResp.Body.Close()
@@ -338,8 +341,7 @@ func (o *OpenAIProvider) CompleteStream(
 		log.Debugf("openai error response status=%v body_len=%v", httpResp.StatusCode, len(errBody))
 		apiErr := parseOpenAIHTTPErrorFromBytes(httpResp.StatusCode, httpResp.Header, errBody)
 		// Dump error response if enabled.
-		if o.dumpWriter != nil {
-			dumpWriter := o.dumpWriter
+		if dumpWriter != nil {
 			statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 			bodyCopy := string(append([]byte(nil), errBody...))
 			go func() {
@@ -359,13 +361,13 @@ func (o *OpenAIProvider) CompleteStream(
 				}
 			}()
 		}
-		persistLLMTrace(o.traceWriter, traceCollector, httpResp.StatusCode, "http", start, nil, apiErr)
+		persistLLMTrace(traceWriter, traceCollector, httpResp.StatusCode, "http", start, nil, apiErr)
 		return nil, apiErr
 	}
 
 	// Parse SSE stream, collecting chunks for dump if enabled.
 	var collector *SSECollector
-	if o.dumpWriter != nil {
+	if dumpWriter != nil {
 		collector = NewSSECollector()
 	}
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, o.provider, DefaultChunkTimeout, streamCancel)
@@ -373,8 +375,7 @@ func (o *OpenAIProvider) CompleteStream(
 	resp, parseErr := parseOpenAISSEStream(cr, traceCB, collector)
 
 	// Write dump asynchronously (whether success or failure).
-	if o.dumpWriter != nil {
-		dumpWriter := o.dumpWriter
+	if dumpWriter != nil {
 		statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 		go func() {
 			dump := &LLMDump{
@@ -397,7 +398,7 @@ func (o *OpenAIProvider) CompleteStream(
 		}()
 	}
 
-	persistLLMTrace(o.traceWriter, traceCollector, httpResp.StatusCode, "http", start, resp, parseErr)
+	persistLLMTrace(traceWriter, traceCollector, httpResp.StatusCode, "http", start, resp, parseErr)
 	return resp, parseErr
 }
 

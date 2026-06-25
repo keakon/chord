@@ -145,6 +145,7 @@ func (r *ResponsesProvider) Compact(
 		return nil, fmt.Errorf("marshal compact request body: %w", err)
 	}
 	dumpRequestBody := append([]byte(nil), bodyBytes...)
+	dumpWriter := r.dumpWriter.Load()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("create compact request: %w", err)
@@ -175,8 +176,7 @@ func (r *ResponsesProvider) Compact(
 		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxHTTPErrorBodyBytes))
 		io.Copy(io.Discard, httpResp.Body) //nolint:errcheck
 		apiErr := parseOpenAIHTTPErrorFromBytes(httpResp.StatusCode, httpResp.Header, errBody)
-		if r.dumpWriter != nil {
-			dumpWriter := r.dumpWriter
+		if dumpWriter != nil {
 			go func() {
 				dump := &LLMDump{
 					Timestamp:   start.Format(time.RFC3339Nano),
@@ -205,8 +205,7 @@ func (r *ResponsesProvider) Compact(
 	if summary == "" {
 		return nil, fmt.Errorf("compact response missing summary text")
 	}
-	if r.dumpWriter != nil {
-		dumpWriter := r.dumpWriter
+	if dumpWriter != nil {
 		go func() {
 			dump := &LLMDump{
 				Timestamp:   start.Format(time.RFC3339Nano),
