@@ -25,6 +25,7 @@ type activityRuntimeState struct {
 	workStartedAt       map[string]time.Time
 	turnBusyStartedAt   map[string]time.Time
 	streamLastDeltaAt   map[string]time.Time
+	runningModelDisplay runningModelDisplayState
 }
 
 type renderCacheState struct {

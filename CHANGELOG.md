@@ -13,6 +13,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixed
 
+- The TUI status bar and info panel now update the displayed model immediately when a fallback/retry attempt switches provider or model, showing the model currently being tried instead of waiting for the first provider that successfully responds.
 - Streaming interruption recovery now covers OpenAI-compatible Chat Completions as well as Anthropic, Gemini, and Responses providers: when a stream ends after visible assistant text, Chord preserves that text as interrupted context while still discarding incomplete tool calls, thinking, and reasoning so the next request can continue without replaying unsafe partial structures.
 - LSP resource shutdown no longer logs normal stderr pipe closure as an error when idle language-server processes are unloaded.
 - Successful or skipped context compaction now clears stale pre-compaction request-size token samples before saving recovery state, preventing missing or failed post-compaction usage reports from immediately triggering a second tiny automatic compaction.

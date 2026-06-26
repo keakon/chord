@@ -119,9 +119,11 @@ func (m *Model) handleAgentEvent(msg agentEventMsg) tea.Cmd {
 	m.agentHadEvent = true
 	if _, ok := msg.event.(agent.IdleEvent); ok {
 		m.pendingPoolSwitch = pendingPoolSwitchState{}
+		m.clearRunningModelDisplay("main")
 	}
 	if evt, ok := msg.event.(agent.AgentActivityEvent); ok && evt.AgentID == m.focusedAgentIDOrMain() && evt.Type == agent.ActivityIdle {
 		m.pendingPoolSwitch = pendingPoolSwitchState{}
+		m.clearRunningModelDisplay(evt.AgentID)
 	}
 	effects := agentEventEffects{}
 

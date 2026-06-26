@@ -14,6 +14,7 @@
 
 ### 修复
 
+- TUI 状态栏和信息面板现在会在 fallback / retry 尝试切换 provider 或模型时立即更新显示的模型，展示当前正在尝试的模型，而不是等到首个成功响应的 provider 后才更新。
 - 流式响应中断恢复现在覆盖 OpenAI 兼容 Chat Completions，以及 Anthropic、Gemini 与 Responses provider：当流在已有可见助手正文后结束时，Chord 会将正文作为 interrupted 上下文保留；未完成的工具调用、thinking 和 reasoning 仍会丢弃，使下一次请求能继续正文而不会重放不安全的半截结构。
 - 卸载空闲 language server 进程时，LSP 资源关闭不再把正常的 stderr 管道关闭记录成错误。
 - 上下文压缩成功或跳过后，现在会在保存恢复状态前清理压缩前遗留的最近请求 token 样本，避免压缩后的 usage 缺失或请求失败时立即再次触发一次很小的自动压缩。

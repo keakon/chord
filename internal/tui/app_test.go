@@ -5132,6 +5132,90 @@ func TestNarrowStatusBarModelUsesRunningModelRefNotSidebarCache(t *testing.T) {
 	}
 }
 
+func TestRunningModelChangedEventOverridesMainModelDisplayImmediately(t *testing.T) {
+	backend := &sessionControlAgent{
+		events:           make(chan agent.AgentEvent, 1),
+		providerModelRef: "sharedchat/gpt-5.5@xhigh",
+		runningModelRef:  "gancaopu/gpt-5.5@xhigh",
+	}
+	m := NewModelWithSize(backend, 220, 24)
+	m.mode = ModeNormal
+	m.rightPanelVisible = false
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback"}
+
+	m.handleAgentEvent(agentEventMsg{event: agent.RunningModelChangedEvent{
+		AgentID:          "main-1",
+		ProviderModelRef: "sharedchat/gpt-5.5@xhigh",
+		RunningModelRef:  "abrdns/gpt-5.5@xhigh",
+	}})
+
+	status := stripANSI(m.renderStatusBar())
+	if !strings.Contains(status, "abrdns/gpt-5.5@xhigh") {
+		t.Fatalf("status bar should show event running model immediately; got %q", status)
+	}
+
+	info := stripANSI(m.renderInfoPanel(40, 20))
+	if !strings.Contains(info, "abrdns/gpt-5.5@xhigh") {
+		t.Fatalf("info panel should show event running model immediately; got %q", info)
+	}
+	if strings.Contains(info, "gancaopu/gpt-5.5@xhigh") {
+		t.Fatalf("info panel should not keep stale backend running model after event; got %q", info)
+	}
+}
+
+func TestInfoPanelFingerprintIncludesTransientRunningModelDisplay(t *testing.T) {
+	backend := &sessionControlAgent{
+		events:           make(chan agent.AgentEvent, 1),
+		providerModelRef: "sharedchat/gpt-5.5@xhigh",
+		runningModelRef:  "gancaopu/gpt-5.5@xhigh",
+	}
+	m := NewModelWithSize(backend, 220, 24)
+	m.mode = ModeNormal
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback"}
+
+	first := stripANSI(m.renderInfoPanel(40, 20))
+	if !strings.Contains(first, "gancaopu/gpt-5.5@xhigh") {
+		t.Fatalf("initial info panel should show backend running model; got %q", first)
+	}
+	cachedOut := m.cachedInfoPanelOut
+
+	m.noteRunningModelDisplay("main-1", "sharedchat/gpt-5.5@xhigh", "abrdns/gpt-5.5@xhigh")
+	second := stripANSI(m.renderInfoPanel(40, 20))
+	if !strings.Contains(second, "abrdns/gpt-5.5@xhigh") {
+		t.Fatalf("info panel should include transient running model in fingerprint; got %q", second)
+	}
+	if strings.Contains(second, "gancaopu/gpt-5.5@xhigh") {
+		t.Fatalf("info panel should not reuse stale cached backend model; got %q", second)
+	}
+	if m.cachedInfoPanelOut == cachedOut {
+		t.Fatal("info panel cache output should refresh when transient running model display changes")
+	}
+}
+
+func TestRunningModelChangedEventDisplayClearsOnIdle(t *testing.T) {
+	backend := &sessionControlAgent{
+		events:           make(chan agent.AgentEvent, 1),
+		providerModelRef: "sharedchat/gpt-5.5@xhigh",
+		runningModelRef:  "gancaopu/gpt-5.5@xhigh",
+	}
+	m := NewModelWithSize(backend, 220, 24)
+	m.mode = ModeNormal
+	m.rightPanelVisible = false
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback"}
+	m.handleAgentEvent(agentEventMsg{event: agent.RunningModelChangedEvent{
+		AgentID:          "main-1",
+		ProviderModelRef: "sharedchat/gpt-5.5@xhigh",
+		RunningModelRef:  "abrdns/gpt-5.5@xhigh",
+	}})
+
+	m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}})
+
+	status := stripANSI(m.renderStatusBar())
+	if strings.Contains(status, "abrdns/gpt-5.5@xhigh") {
+		t.Fatalf("status bar should clear transient event running model on idle; got %q", status)
+	}
+}
+
 func TestStatusBarCurrentAgentLabelMainWithoutAgent(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	if got := m.statusBarCurrentAgentLabel(); got != "main" {

@@ -13,6 +13,9 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 	var effects agentEventEffects
 	switch evt := event.(type) {
 	case agent.RunningModelChangedEvent:
+		if m.runningModelEventMatchesFocus(evt) {
+			m.noteRunningModelDisplay(evt.AgentID, evt.ProviderModelRef, evt.RunningModelRef)
+		}
 		if m.agent != nil && m.runningModelEventMatchesFocus(evt) && strings.TrimSpace(m.pendingPoolSwitch.to) == strings.TrimSpace(m.agent.CurrentPoolName()) {
 			m.pendingPoolSwitch = pendingPoolSwitchState{}
 		}

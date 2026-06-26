@@ -42,9 +42,10 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 
 	// Model ref / variant / key stats
 	keysConfirmed, keysTotal := m.agent.KeyStats()
-	b.WriteString(m.agent.RunningModelRef())
+	runningRef, selectedRef := m.focusedModelRefs()
+	b.WriteString(runningRef)
 	appendSep()
-	b.WriteString(m.agent.ProviderModelRef())
+	b.WriteString(selectedRef)
 	appendSep()
 	b.WriteString(nextRequestModelRefForAgent(m.agent))
 	appendSep()

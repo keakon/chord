@@ -11,6 +11,7 @@ func (m *Model) setFocusedAgent(id string) {
 	prev := m.focusedAgentID
 	if prev != id {
 		m.saveComposerStateForAgent(prev)
+		m.clearRunningModelDisplay("")
 	}
 	m.focusedAgentID = id
 	if prev != id {
