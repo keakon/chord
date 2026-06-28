@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.7.0). Must already exist in the repo."
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,9 +18,25 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
+    # `push` to a v* tag runs on that tag. `workflow_dispatch` runs on main but
+    # we release the explicitly requested tag, so verify it looks like a tag.
+    if: ${{ github.event_name == 'push' || startsWith(inputs.tag, 'v') }}
     steps:
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -36,10 +58,12 @@ jobs:
 
       - name: Build release assets
         shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
 
-          version="${GITHUB_REF_NAME}"
+          version="${RELEASE_TAG}"
           commit="$(git rev-parse --short HEAD)"
           build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           ldflags="-s -w \
@@ -85,9 +109,11 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "${GITHUB_REF_NAME}" dist/* \
-            --title "${GITHUB_REF_NAME}" \
+          gh release create "${RELEASE_TAG}" dist/* \
+            --target "$(git rev-parse HEAD)" \
+            --title "${RELEASE_TAG}" \
             --generate-notes
