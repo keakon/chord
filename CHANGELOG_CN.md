@@ -2,41 +2,23 @@
 
 本项目采用语义化版本风格发布。1.0 之前的版本可能包含不兼容变更。
 
-## 未发布
+## 0.7.0 - 2026-06-28
 
-### 变更
+### 重大变更
 
-- **编辑工具架构**：新增面向不同模型训练背景优化的双编辑工具
-  - 原统一 diff 工具从 `edit` 重命名为 `patch`，使用适合 GPT/o 系列模型的 `@@` hunk 格式
-  - 新增使用 `old_string`/`new_string` 格式的 `edit` 工具，适合 Claude、Qwen、DeepSeek 及其他模型
-  - 系统会根据当前模型训练背景自动选择合适的编辑工具
-- `edit` 与 `patch` 权限规则现在共享同一个编辑工具族：当另一个格式没有同名显式规则时，一个格式的规则会作用到另一个格式。这也包括 `deny`，因此 `*: allow` 加 `edit: deny` 会禁用两个编辑器；如果需要禁用某个面向模型的格式但保留另一个，请同时配置两个名字（例如 `edit: allow, patch: deny`）。
+- **编辑工具名称与格式：** 原先以 `edit` 暴露的 patch hunk 编辑器现在改名为 `patch`；`edit` 现在使用 `old_string`/`new_string` 替换格式。请更新引用旧 `edit` patch hunk 格式的权限规则、hook 过滤器、skill `allowed_tools` 和外部集成。
+- **编辑工具权限回退：** `edit` 与 `patch` 现在共享同一个编辑工具族。当另一个格式没有同名显式规则时，一个格式的规则会作用到另一个格式，包括 `deny`。如果需要禁用某个面向模型的格式但保留另一个，请同时配置两个名字。
+- **Anthropic transport 配置：** `providers.<name>.compat.anthropic_transport` 不再读取。请从现有配置中移除该设置；Anthropic Messages 请求会始终使用下文说明的 Claude Code 风格传输提示。
+- **导入 CLI：** `chord import --tool-mode` 已移除，因为可识别的外部工具调用现在总会转换为结构化 Chord 工具卡。
+- **Codex OAuth 运行时状态：** Codex OAuth 运行时缓存现在使用 `auth.state.json`，不再使用已发布版本中的 `auth.state.yaml`。已有 quota/reset/账号状态缓存可通过 warm-up/轮询重新生成，但 YAML 缓存不会自动迁移。
 
-### 修复
+### 亮点
 
-- TUI 状态栏和信息面板现在会在 fallback / retry 尝试切换 provider 或模型时立即更新显示的模型，展示当前正在尝试的模型，而不是等到首个成功响应的 provider 后才更新。
-- 流式响应中断恢复现在覆盖 OpenAI 兼容 Chat Completions，以及 Anthropic、Gemini 与 Responses provider：当流在已有可见助手正文后结束时，Chord 会将正文作为 interrupted 上下文保留；未完成的工具调用、thinking 和 reasoning 仍会丢弃，使下一次请求能继续正文而不会重放不安全的半截结构。
-- 卸载空闲 language server 进程时，LSP 资源关闭不再把正常的 stderr 管道关闭记录成错误。
-- 上下文压缩成功或跳过后，现在会在保存恢复状态前清理压缩前遗留的最近请求 token 样本，避免压缩后的 usage 缺失或请求失败时立即再次触发一次很小的自动压缩。
-- 工具调用解析现在会在 Responses 兼容网关发送重复的部分 function-call 事件时保留已有的有效工具元数据；当网关延迟补充 `call_id` 时，流式工具调用回调会保持稳定 ID；从 Responses 完成输出中恢复的工具调用会发出成对回调；Anthropic/Gemini/OpenAI 兼容/Responses 中缺少 ID 或名称的异常工具调用会被丢弃，且不会发出孤立的流式开始、增量或完成回调；缺失或未知工具也会按无效调用报告，而不再误报为权限策略拒绝。
-- 请求级上下文剪裁现在会在旧的 stable prefix 复用会破坏当前 tool_call/tool_result 链时跳过复用，避免产生孤儿 tool result 和严格 provider 的 400 错误。
-- 重试日志和 LSP service-note 日志现在会区分可操作失败与中间 fallback / 已抑制的非操作性提示，减少正常成功流程中的误导性运行时噪声。
-- 工具调用卡片 header 现在会优先展示主参数，单行摘要可利用更宽视口；括号内的次要参数会优先缩短。`grep` 的搜索路径等于当前工作目录时会隐藏，子目录会以相对工作区的路径显示。
-- 流式请求重试或回滚时，现在会清理部分生成的 thinking 内容和待处理的 thinking 翻译，避免失败流之后在 TUI 或恢复的会话状态中残留过期 thinking 文本。
-- 思考翻译语言检测改进：
-  - 比较前规范化语言代码（如 `zh` vs `zh-Hans`、`en` vs `en-US`），避免因格式差异导致的误判
-  - 从基于字母计数改为基于语义单元计数（拉丁单词 vs 汉字），使权重分配更公平
-  - 当目标语言占主导地位（≥ 50%）时跳过翻译，避免因误检测而翻译用户语言实际为主要语言的混合内容
-- 对于会上报 `thinking_tokens` 用量字段的 Anthropic 兼容 provider，现在会将其解析为 reasoning token 用量，并在 TUI 信息面板中以单独的 `Think` 行展示，与现有的输入/输出和缓存用量并列显示。（官方 Anthropic API 不返回该字段，thinking 计入 `output_tokens`。）
-- 侧边栏文件变更追踪现在会在比较前规范化文件路径，避免同一文件以不同路径表示（如 `file.go` vs `./file.go`）时出现重复条目
-- Patch 工具现在会对缺少具体标识符的 `@@` header 使用软锚点回退，减少 header 格式不精确导致的误失败
-- Patch 工具现在会检测并拒绝只包含上下文行、没有 `+`/`-` 变更的 patch，并给出可操作的错误信息
-- System prompt 与工具 schema 描述现在会根据可见工具动态适配，避免引用不可用工具
-- 现在会在执行阶段强制执行 `edit` / `patch` 工具可见性，因此只看到 `edit` 的模型不能执行从早先对话历史中学到的隐藏 `patch` 调用；LSP 诊断提示也会使用当前模型实时适用的编辑工具名。
-- LSP 工具可见性现在会正确要求已配置 LSP manager 实例
-- `write` 现在会在写入文件内容时报告执行进度，使较长写入过程与其他本地文件变更工具的反馈更一致。
-- **Patch 工具性能**：大文件处理性能从约 30 秒优化到毫秒级，通过延迟应用规范化回退、在 hunk 匹配已能判断唯一/歧义时立即停止、先限制昂贵诊断扫描窗口并仅在必要时回退到全量扫描，以及添加快速诊断路径实现。在 3000+ 行文件的失败场景下提供约 600 倍性能提升。
-- 工具卡片（Done 报告、确认提示等）中的代码块现在会对长行进行换行并带续行缩进，而非溢出卡片边界，修复了 CSV 数据和长 shell 命令的显示问题
+- 按模型族暴露更贴近训练背景的编辑工具：GPT/o 系列使用 `patch` 的 `@@` hunk，Claude/Qwen/DeepSeek 风格模型使用 `edit` 的 old/new 替换。
+- Responses、Anthropic Messages、Codex OAuth、流式超时、错误分类和 fallback 状态展示等 provider 传输与重试行为整体对齐。
+- 请求级上下文剪裁更安全、更有用：更强保护近期高风险输出，并为较旧工具结果生成更好的类型化摘要。
+- TUI 渲染、状态展示、错误诊断、变更文件统计、fallback 模型显示和宽终端卡片布局获得多项可靠性与性能打磨。
+- 工具链更稳健：`read` 返回原始内容，`grep`/`glob` 支持多根搜索，`patch` 更快且失败诊断更清晰，`question` 容忍单对象输入，图片工具结果会附着在工具卡上。
 
 ### 改进
 
@@ -78,6 +60,35 @@
 
 ### 修复
 
+- TUI 状态栏和信息面板现在会在 fallback / retry 尝试切换 provider 或模型时立即更新显示的模型，展示当前正在尝试的模型，而不是等到首个成功响应的 provider 后才更新。
+- 流式响应中断恢复现在覆盖 OpenAI 兼容 Chat Completions，以及 Anthropic、Gemini 与 Responses provider：当流在已有可见助手正文后结束时，Chord 会将正文作为 interrupted 上下文保留；未完成的工具调用、thinking 和 reasoning 仍会丢弃，使下一次请求能继续正文而不会重放不安全的半截结构。
+- 卸载空闲 language server 进程时，LSP 资源关闭不再把正常的 stderr 管道关闭记录成错误。
+- 上下文压缩成功或跳过后，现在会在保存恢复状态前清理压缩前遗留的最近请求 token 样本，避免压缩后的 usage 缺失或请求失败时立即再次触发一次很小的自动压缩。
+- 工具调用解析现在会在 Responses 兼容网关发送重复的部分 function-call 事件时保留已有的有效工具元数据；当网关延迟补充 `call_id` 时，流式工具调用回调会保持稳定 ID；从 Responses 完成输出中恢复的工具调用会发出成对回调；Anthropic/Gemini/OpenAI 兼容/Responses 中缺少 ID 或名称的异常工具调用会被丢弃，且不会发出孤立的流式开始、增量或完成回调；缺失或未知工具也会按无效调用报告，而不再误报为权限策略拒绝。
+- 请求级上下文剪裁现在会在旧的 stable prefix 复用会破坏当前 tool_call/tool_result 链时跳过复用，避免产生孤儿 tool result 和严格 provider 的 400 错误。
+- 重试日志和 LSP service-note 日志现在会区分可操作失败与中间 fallback / 已抑制的非操作性提示，减少正常成功流程中的误导性运行时噪声。
+- 工具调用卡片 header 现在会优先展示主参数，单行摘要可利用更宽视口；括号内的次要参数会优先缩短。`grep` 的搜索路径等于当前工作目录时会隐藏，子目录会以相对工作区的路径显示。
+- 流式请求重试或回滚时，现在会清理部分生成的 thinking 内容和待处理的 thinking 翻译，避免失败流之后在 TUI 或恢复的会话状态中残留过期 thinking 文本。
+- 思考翻译语言检测改进：
+  - 比较前规范化语言代码（如 `zh` vs `zh-Hans`、`en` vs `en-US`），避免因格式差异导致的误判
+  - 从基于字母计数改为基于语义单元计数（拉丁单词 vs 汉字），使权重分配更公平
+  - 当目标语言占主导地位（≥ 50%）时跳过翻译，避免因误检测而翻译用户语言实际为主要语言的混合内容
+- 对于会上报 `thinking_tokens` 用量字段的 Anthropic 兼容 provider，现在会将其解析为 reasoning token 用量，并在 TUI 信息面板中以单独的 `Think` 行展示，与现有的输入/输出和缓存用量并列显示。（官方 Anthropic API 不返回该字段，thinking 计入 `output_tokens`。）
+- 侧边栏文件变更追踪现在会在比较前规范化文件路径，避免同一文件以不同路径表示（如 `file.go` vs `./file.go`）时出现重复条目
+- 侧边栏文件统计现在会优先完整显示 `+N -N` 行数统计，防止改动数量信息被长文件名截断
+- `write` 工具操作现在会在文件变更摘要中正确追踪，包含新文件和覆盖写入的准确行数统计
+- edit/patch 工具选择的模型匹配现在使用严格模式匹配，防止误判（例如 `o10` 或 `gptx` 模型错误地使用 patch 工具）
+- edit 和 patch 之间的权限回退现在正确处理通配规则和显式的单格式覆盖，因此禁用 `patch` 但显式允许 `edit` 时，GPT/o 系列模型可以回退到 `edit` 而不是失去所有编辑能力
+- 推测性文件变更追踪现在能同时从 patch 和 edit 工具参数中正确提取路径，修复了 ReplaceEditTool 的文件追踪问题
+- 交互式命令检测现在能正确允许管道命令（如 `man git | grep`），并提供针对具体命令的非交互式替代方案，而不是给出通用的终端建议
+- Patch 工具现在会对缺少具体标识符的 `@@` header 使用软锚点回退，减少 header 格式不精确导致的误失败
+- Patch 工具现在会检测并拒绝只包含上下文行、没有 `+`/`-` 变更的 patch，并给出可操作的错误信息
+- System prompt 与工具 schema 描述现在会根据可见工具动态适配，避免引用不可用工具
+- 现在会在执行阶段强制执行 `edit` / `patch` 工具可见性，因此只看到 `edit` 的模型不能执行从早先对话历史中学到的隐藏 `patch` 调用；LSP 诊断提示也会使用当前模型实时适用的编辑工具名。
+- LSP 工具可见性现在会正确要求已配置 LSP manager 实例
+- `write` 现在会在写入文件内容时报告执行进度，使较长写入过程与其他本地文件变更工具的反馈更一致。
+- Patch 工具性能：大文件处理性能从约 30 秒优化到毫秒级，通过延迟应用规范化回退、在 hunk 匹配已能判断唯一/歧义时立即停止、先限制昂贵诊断扫描窗口并仅在必要时回退到全量扫描，以及添加快速诊断路径实现。在 3000+ 行文件的失败场景下提供约 600 倍性能提升。
+- 工具卡片（Done 报告、确认提示等）中的代码块现在会对长行进行换行并带续行缩进，而非溢出卡片边界，修复了 CSV 数据和长 shell 命令的显示问题
 - Provider 错误分类现在优先使用结构化的 `code`/`type` 信号（包括错误体内嵌套的 JSON），而非纯文本匹配；对于不提供结构化字段的网关仍保留消息文本回退。未识别的 HTTP 400 现在按终态请求/参数错误处理，不再跨 key 和模型重试；而配额、上下文超限、并发限制、Codex WebSocket 链路状态不匹配以及带 `Retry-After` 的 400 仍保留各自的重试/冷却处理。
 - 兼容网关返回临时性 HTTP 400 且没有 `Retry-After` 时，现在使用 1 秒的短探测冷却；纯 all-keys-cooling 等待会显示 `cooling` 而不是 `retrying`。配置了 `stream_retry_rounds` 时，all-keys-cooling 重试轮也会受该上限约束，与已记录的重试上限语义一致。
 - 压缩续跑和长度恢复使用的请求级 tuning override 现在会与模型/variant 默认值合并，而不是整体替换，避免这些恢复路径之后的 OpenAI Responses 请求丢掉已配置的 `reasoning`/`text` 字段，同时保留 Anthropic/Gemini 的 thinking 与缓存默认值。

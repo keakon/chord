@@ -316,7 +316,7 @@ Import an external agent session into a resumable Chord session. Currently suppo
 
 For Claude Code imports, Chord reconstructs the best-effort **main non-sidechain conversation** instead of blindly importing the newest raw leaf. Compact boundaries are used for reconstruction, not rendered as visible transcript messages. Sidechain/sub-agent entries are excluded from the main imported session by default; when detected, CLI output reports the skipped count and `import-report.json` records Claude-specific diagnostics, including sidechain agent IDs when present.
 
-Recognizable imported tool calls are always converted to the closest current Chord tool card when their arguments can be normalized, including file mutations as `edit`, `write`, or `delete`. Only records without a usable mapping (no Chord mapping, missing call id, or un-normalizable arguments) remain visible as readable fallback messages instead of raw JSON. Converted imported tools do not restore Chord FileTracker snapshots; re-run `read` when you need fresh file context or stale-change warnings before editing imported files.
+Recognizable imported tool calls are always converted to the closest current Chord tool card when their arguments can be normalized, including file mutations as `edit`, `patch`, `write`, or `delete`. Only records without a usable mapping (no Chord mapping, missing call id, or un-normalizable arguments) remain visible as readable fallback messages instead of raw JSON. Converted imported tools do not restore Chord FileTracker snapshots; re-run `read` when you need fresh file context or stale-change warnings before editing imported files.
 
 ### Flags
 

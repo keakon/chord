@@ -229,19 +229,19 @@ If the last transcript rows appear clipped, the final card seems to touch the in
 
 ## A file-edit tool warns that the file changed since it was observed
 
-This warning comes from Chord's in-process file tracking. It means the current file no longer matches the last content hash recorded for this agent. Chord no longer rejects every stale file edit: `edit` still validates hunks against the current file contents, while `write` and `delete` back up risky non-empty pre-write contents before continuing.
+This warning comes from Chord's in-process file tracking. It means the current file no longer matches the last content hash recorded for this agent. Chord no longer rejects every stale file edit: `edit` matches old/new text against the current file contents, `patch` validates hunks against the current file contents, while `write` and `delete` back up risky non-empty pre-write contents before continuing.
 
 Common causes:
 
-- the file was modified by another process (editor/formatter) between `read` and `edit`;
+- the file was modified by another process (editor/formatter) between `read` and `edit`/`patch`;
 - a speculative tool run was discarded/rolled back and the finalized call raced it;
 - the provider sent tool arguments as a JSON string (wrapped arguments). Chord unwraps tool arguments consistently; if a wrapped path is not tracked correctly, capture logs and the session JSONL.
 
 If a backup was created, the tool result includes its path under the current session directory. Empty files and non-risky continuous agent-owned edits do not create backups. Backups are capped at 10 per path, 200 per session, 10 MiB per file, and 50 MiB per session; if a required backup would exceed those limits or otherwise fail, the edit can still proceed but the tool result says no backup was created and why. Backups are removed when the session directory is deleted.
 
-## Edit reports `hunk not found` or `matched multiple locations`
+## Patch reports `hunk not found` or `matched multiple locations`
 
-`edit` matches hunks line-by-line and applies the first match after the current search position. It can tolerate common whitespace and Unicode punctuation differences, but repeated blocks still need enough nearby context to make the intended location clear.
+`patch` matches hunks line-by-line and applies the first match after the current search position. It can tolerate common whitespace and Unicode punctuation differences, but repeated blocks still need enough nearby context to make the intended location clear.
 
 If you see this:
 
@@ -249,7 +249,7 @@ If you see this:
 - if the success output says a hunk `matched multiple locations`, use the candidate line numbers in the note to `read` around the intended occurrence and add nearby unchanged lines to the `@@` hunk before retrying future related edits;
 - if the error says the hunk was not found, re-copy the target block from the latest `read` output and make sure context/removal lines match the current indentation; if the hunk came from old numbered output, remove any copied line-number prefix first;
 - split a broad patch into smaller single-file patches or smaller hunks;
-- do not run external `apply_patch` through `shell`; use Chord's native `edit` tool so permissions, stale tracking, diffs, LSP, and rollback stay connected.
+- do not run external `apply_patch` through `shell`; use Chord's native `patch` tool so permissions, stale tracking, diffs, LSP, and rollback stay connected.
 
 ## Performance issues
 

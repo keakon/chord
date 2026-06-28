@@ -80,18 +80,17 @@ The error panel keeps the most recent 80 errors in a ring buffer (newest first).
 
 To shorten the wait during a provider's finalize phase, Chord executes a small safe subset of tools *speculatively* while the model response is still streaming, as soon as a tool call's arguments are complete. This is always on and not configurable.
 
-- Eligible: `read`, `grep`, `glob`, rollback-safe file mutations (`write`, `edit`, `delete`), and a conservative read-only `shell` subset (single command, no pipes/redirects/`&&`/`;`): `pwd`, `ls`, `cat`, `which`, and `git status|log|diff|show|branch|rev-parse`.
-- Not eligible: non-read-only `shell`, interactive/control tools, or any call whose permission action is `ask`.
-- Speculative file mutations are real on-disk writes/deletes, but Chord captures pre-state first and rolls them back if finalize discards the call. Conflicting speculative mutations on the same path within a turn are skipped for the finalized path, and read-like speculation is skipped while any unpromoted speculative mutation exists in the turn, so it never observes uncommitted state.
-- Speculative results may show early in the UI, but they are only appended to the conversation context after finalize validation. Calls discarded at finalize are rolled back and their cards are marked as discarded speculative execution that is not part of the conversation context.
+- Eligible: read-only `read`, `grep`, and `glob`; a conservative read-only `shell` subset (single command, no pipes/redirects/`&&`/`;`): `pwd`, `ls`, `cat`, `which`, and `git status|log|diff|show|branch|rev-parse`; and `todo_write` as a preview that commits only after finalize.
+- Not eligible: file mutation tools (`write`, `edit`, `patch`, `delete`), non-read-only `shell`, interactive/control tools, or any call whose permission action is `ask`.
+- Speculative results may show early in the UI, but they are only appended to the conversation context after finalize validation. Calls discarded at finalize are removed or marked as discarded speculative execution and are not part of the conversation context.
 
-### How `edit` applies patches
+### How `patch` applies hunks
 
-`edit` takes the target file as a structured `path` argument; its `patch` argument carries hunk text (`@@` headers, leading-space context lines, `-` removed, `+` added). Stray Codex `apply_patch` envelope lines (`*** Begin Patch` / `*** End Patch`, and a leading `*** Update File:` matching `path`) are stripped; add/delete/move, multi-file patches, and mismatched update paths are rejected.
+`patch` takes the target file as a structured `path` argument; its `patch` argument carries hunk text (`@@` headers, leading-space context lines, `-` removed, `+` added). Stray Codex `apply_patch` envelope lines (`*** Begin Patch` / `*** End Patch`, and a leading `*** Update File:` matching `path`) are stripped; add/delete/move, multi-file patches, and mismatched update paths are rejected.
 
 Matching is Codex-style and ordered: each hunk (and any attached `@@` function/class/test header) matches the first occurrence after the current search position. When a hunk matches multiple candidates, Chord applies the first and reports the matched line plus other candidate lines so the model can re-read if needed. A hunk with no context/removal lines fails because there is no insertion point.
 
-While arguments stream, the `edit` card follows `write`-style path display: no path until Chord parses the structured `path`, then the path appears in the card header.
+While arguments stream, the `patch` card follows `write`-style path display: no path until Chord parses the structured `path`, then the path appears in the card header. The separate `edit` tool uses `old_string` / `new_string` exact replacement; see [Edit tools](./edit-tools.md) for model selection, examples, and permission behavior.
 
 ## File mentions (`@path`)
 
@@ -152,7 +151,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 Notes:
 
-- **Tools**: Chord always converts recognizable external tool calls to the closest current Chord tool card when their arguments can be normalized: `read`, `shell`, `grep`, `glob`, `edit`, `write`, and `delete` are used for matching Codex, Claude Code, and OpenCode records. Only unknown, malformed, or unsupported source records (no Chord mapping, missing call id, or un-normalizable arguments) remain visible as readable fallback cards instead of being dropped. Imported provenance is retained internally, so these converted cards are transcript/history only and do not restore Chord FileTracker snapshots; re-run `read` when you need fresh file context or stale-change warnings before editing imported files.
+- **Tools**: Chord always converts recognizable external tool calls to the closest current Chord tool card when their arguments can be normalized: `read`, `shell`, `grep`, `glob`, `edit`, `patch`, `write`, and `delete` are used for matching Codex, Claude Code, and OpenCode records. Only unknown, malformed, or unsupported source records (no Chord mapping, missing call id, or un-normalizable arguments) remain visible as readable fallback cards instead of being dropped. Imported provenance is retained internally, so these converted cards are transcript/history only and do not restore Chord FileTracker snapshots; re-run `read` when you need fresh file context or stale-change warnings before editing imported files.
 - **Reasoning**: Chord only imports Anthropic signed thinking as `thinking_blocks`. Non-signed reasoning is dropped by default (`--reasoning strict`); use `--reasoning visible` to include it as plain text.
 - **Claude main-session reconstruction**: Claude imports rebuild the best-effort main non-sidechain conversation span instead of simply choosing the latest raw leaf. Compact boundaries participate in reconstruction, but are not rendered as ordinary transcript messages.
 - **Claude sidechains**: sidechain / sub-agent transcript entries are excluded from the main imported session by default. When present, CLI output reports the skipped count, and `import-report.json` records Claude-specific diagnostics plus sidechain agent IDs when available.

@@ -8,6 +8,9 @@ export default defineConfig({
   site: 'https://keakon.github.io',
   base: '/chord',
   trailingSlash: 'always',
+  legacy: {
+    collections: false,
+  },
   integrations: [
     starlight({
       title: 'Chord',

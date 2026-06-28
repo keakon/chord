@@ -220,7 +220,7 @@ Chord 会禁用终端硬滚动优化，因为这些序列可能在 Chord 的 sti
 
 ## 文件编辑工具提示文件在观察后发生变化
 
-这个警告来自 Chord 进程内的文件跟踪：当前文件已经不再匹配本 agent 上次记录的内容哈希。Chord 不再因为每一次 stale 文件编辑直接拒绝；`edit` 仍会基于当前文件内容验证 hunk，`write` 和 `delete` 会在继续前备份有风险的非空写前内容。
+这个警告来自 Chord 进程内的文件跟踪：当前文件已经不再匹配本 agent 上次记录的内容哈希。Chord 不再因为每一次 stale 文件编辑直接拒绝；`edit` 会基于当前文件内容做 old/new 匹配，`patch` 会基于当前文件内容验证 hunk，`write` 和 `delete` 会在继续前备份有风险的非空写前内容。
 
 常见原因：
 
@@ -230,9 +230,9 @@ Chord 会禁用终端硬滚动优化，因为这些序列可能在 Chord 的 sti
 
 如果创建了备份，工具结果会包含当前会话目录下的备份路径。空文件和无风险的连续 agent-owned 编辑不会创建备份。备份上限为每 path 10 个、每 session 200 个、单文件 10 MiB、每 session 总计 50 MiB；如果必须备份但超过这些上限或因其他原因失败，编辑仍可继续，但工具结果会说明未创建备份及原因。会话目录被删除时，备份也会随之清理。
 
-## Edit 报 `hunk not found` 或 `matched multiple locations`
+## Patch 报 `hunk not found` 或 `matched multiple locations`
 
-`edit` 按行匹配 hunk，并应用当前搜索位置之后的第一个匹配。它可以容忍常见空白和 Unicode 标点差异，但重复块仍需要足够的邻近上下文，让目标位置明确。
+`patch` 按行匹配 hunk，并应用当前搜索位置之后的第一个匹配。它可以容忍常见空白和 Unicode 标点差异，但重复块仍需要足够的邻近上下文，让目标位置明确。
 
 看到这个错误时：
 
@@ -240,7 +240,7 @@ Chord 会禁用终端硬滚动优化，因为这些序列可能在 Chord 的 sti
 - 如果成功输出提示某个 hunk `matched multiple locations`，使用 note 中的候选行号去 `read` 目标位置附近，并在后续相关编辑的 `@@` hunk 中加入附近未变化的唯一上下文行；
 - 如果错误提示找不到 hunk，从最新 `read` 输出中重新复制目标块，并确认 context/removal 行缩进与当前文件一致；如果 hunk 来自旧的带编号输出，先移除复制进来的行号前缀；
 - 把过大的 patch 拆成更小的单文件 patch 或更小的 hunk；
-- 不要通过 `shell` 执行外部 `apply_patch`；请使用 Chord 原生 `edit`，这样权限、stale tracking、diff、LSP 和 rollback 才会保持接入。
+- 不要通过 `shell` 执行外部 `apply_patch`；请使用 Chord 原生 `patch`，这样权限、stale tracking、diff、LSP 和 rollback 才会保持接入。
 
 ## 性能问题
 

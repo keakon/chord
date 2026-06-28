@@ -104,7 +104,7 @@ Chord without the TUI. `chord headless` exposes a stdio JSONL control plane suit
 
 ## Speculative execution (early tool execution)
 
-Chord may execute a small safe subset of tool calls *while the model response is still streaming* (as soon as tool arguments are complete) to reduce the "finalize gap". Speculative file mutations are real on-disk writes that get rolled back if the finalize discards the call. Always enabled; not user-configurable. See [Usage — Tool execution details](./usage.md#tool-execution-details).
+Chord may execute a small safe subset of tool calls *while the model response is still streaming* (as soon as tool arguments are complete) to reduce the "finalize gap". Eligible calls are read-only tools plus `todo_write` preview; file mutations are not speculatively executed. Always enabled; not user-configurable. See [Usage — Tool execution details](./usage.md#tool-execution-details).
 
 ## Project key
 
