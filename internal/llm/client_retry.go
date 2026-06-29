@@ -317,6 +317,27 @@ type streamTargetAttemptResult struct {
 	skipProvider        bool
 }
 
+type streamRoundAttemptSummary struct {
+	attemptedTargets             int
+	contextLengthExceededTargets int
+	lastContextLengthErr         error
+}
+
+func (s *streamRoundAttemptSummary) record(result streamTargetAttemptResult) {
+	if s == nil || !result.hadRequestAttempt {
+		return
+	}
+	s.attemptedTargets++
+	if IsContextLengthExceeded(result.lastErr) {
+		s.contextLengthExceededTargets++
+		s.lastContextLengthErr = result.lastErr
+	}
+}
+
+func (s streamRoundAttemptSummary) allAttemptedTargetsContextLengthExceeded() bool {
+	return s.attemptedTargets > 0 && s.contextLengthExceededTargets == s.attemptedTargets && s.lastContextLengthErr != nil
+}
+
 func (r *streamTargetAttemptResult) setLastErr(provider *ProviderConfig, err error) {
 	r.lastErr = err
 	if err == nil {
@@ -753,6 +774,7 @@ func (c *Client) completeStreamWithRetry(
 		// a full-round retry cannot make progress without external state changes.
 		roundHadRequestAttempt := false
 		roundHadUsableReply := false
+		roundAttemptSummary := streamRoundAttemptSummary{}
 
 		// Define the list of models to try in this round.
 		// Models are tried in order: current cursor-start entry first, then the
@@ -814,6 +836,7 @@ func (c *Client) completeStreamWithRetry(
 				lastErr = targetResult.lastErr
 				lastErrProvider = targetResult.lastErrProvider
 				pendingRoundWait = mergePendingRoundWait(pendingRoundWait, targetResult.pendingRoundWait)
+				roundAttemptSummary.record(targetResult)
 				if targetResult.hadRequestAttempt {
 					roundHadRequestAttempt = true
 				}
@@ -832,7 +855,7 @@ func (c *Client) completeStreamWithRetry(
 		if fallbackEnabled && status != nil && status.FallbackTriggered {
 			status.FallbackExhausted = true
 		}
-		if IsContextLengthExceeded(lastErr) {
+		if roundAttemptSummary.allAttemptedTargetsContextLengthExceeded() {
 			if len(targets) > 1 {
 				log.Infof("context length exceeded after model pool exhausted; returning for compaction recovery provider=%v model=%v input_tokens_est=%v", startProvider.Name(), startModelID, estimateRequestInputTokens(systemPrompt, messages, tools))
 			}
@@ -841,7 +864,7 @@ func (c *Client) completeStreamWithRetry(
 				Detail: "pool exhausted; compacting context",
 				Reason: "context_length_exceeded",
 			})
-			return nil, lastErr
+			return nil, &AllAttemptedCandidatesContextLengthExceededError{Inner: roundAttemptSummary.lastContextLengthErr}
 		}
 		if _, ok := errors.AsType[*NoUsableKeysError](lastErr); ok {
 			if !roundHadRequestAttempt && len(targets) <= 1 {

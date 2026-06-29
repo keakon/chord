@@ -978,10 +978,13 @@ compaction threshold, compaction steps in for a deep compression pass. Most
 users only need to care about compaction settings; reduction defaults are
 already tuned for common usage patterns.
 
-Automatic compaction is driven by provider-reported input usage. Request-level
-reduction may make the current prompt smaller, but local estimates from that
-reduced prompt do not cancel a compaction request that was already triggered by
-provider usage.
+Automatic compaction is primarily driven by provider-reported input usage.
+Request-level reduction may make the current prompt smaller, but local estimates
+from that reduced prompt do not cancel a compaction request that was already
+triggered by provider usage. If a provider or gateway later stops reporting
+usage (or reports `input_tokens: 0`), Chord can use the last trusted non-zero
+usage sample and current context-contributing message bytes as a conservative
+fallback signal for the same automatic threshold.
 
 ### Context compaction
 
@@ -1026,6 +1029,14 @@ Provider usage is the authority for this automatic trigger. Chord does not use
 local token estimates from request-level reduction to clear an already-triggered
 automatic compaction request, because those estimates can diverge from provider
 accounting for multimodal inputs, tool schemas, and gateway-specific framing.
+There is one fallback for missing usage: after Chord receives a trusted non-zero
+`input_tokens` sample, it records the context-contributing message byte size for
+that sample, including content plus replayed tool-call arguments, thinking
+blocks, and reasoning text. If later responses omit usage or report zero while
+those bytes have grown, Chord estimates `input_tokens` by scaling that sample by
+the byte ratio and can trigger automatic compaction when the estimate reaches
+`threshold`. This byte-calibrated estimate is only an early compaction signal;
+it is not used for billing or as an exact context-window measurement.
 
 **Reserved headroom example**:
 
@@ -1048,6 +1059,12 @@ working, shows progress in the background compaction status slot, and applies
 at the next safe continuation/idle barrier rather than interrupting the active
 turn immediately. You can also use `/compact --no` to temporarily disable
 subsequent automatic compaction for the current session.
+
+If every attempted candidate model rejects a request with a context-length error
+and automatic compaction is enabled, Chord starts an oversize-recovery compaction
+and retries after it applies. If automatic compaction is disabled (`threshold: 0`
+or `/compact --no`), Chord stops the turn and reports a clear error instead of
+continuing to retry the same oversized prompt.
 
 When a provider publishes both a total context window and a separate input cap,
 use all three fields when you know them:

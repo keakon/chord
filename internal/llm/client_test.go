@@ -2191,6 +2191,44 @@ func TestClientContextLengthExceededStopsAfterPoolExhaustedWithoutNextRound(t *t
 	if !IsContextLengthExceeded(err) {
 		t.Fatalf("err = %v, want context length exceeded", err)
 	}
+	if !IsAllAttemptedCandidatesContextLengthExceeded(err) {
+		t.Fatalf("err = %v, want all-attempted-candidates context length exceeded", err)
+	}
+	if got := primaryImpl.CallCount(); got != 1 {
+		t.Fatalf("primary calls = %d, want 1", got)
+	}
+	if got := fallbackImpl.CallCount(); got != 1 {
+		t.Fatalf("fallback calls = %d, want 1", got)
+	}
+}
+
+func TestClientMixedFallbackErrorsDoNotReportAllAttemptedCandidatesContextLengthExceeded(t *testing.T) {
+	primaryCfg := testProviderConfig("primary-prov", "primary-model")
+	fallbackCfg := testProviderConfig("fallback-prov", "fallback-model")
+
+	primaryImpl := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 402, Message: "quota exhausted"}}}}
+	fallbackImpl := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "prompt is too long"}}}}
+
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	c.SetFallbackModels([]FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "fallback-model",
+		MaxTokens:      4096,
+		ContextLimit:   128000,
+		InputLimit:     128000,
+	}})
+
+	_, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err == nil {
+		t.Fatal("CompleteStream err = nil, want final fallback context-length error")
+	}
+	if !IsContextLengthExceeded(err) {
+		t.Fatalf("err = %v, want context length exceeded from final fallback", err)
+	}
+	if IsAllAttemptedCandidatesContextLengthExceeded(err) {
+		t.Fatalf("err = %v, did not expect all-attempted-candidates context length exceeded after mixed errors", err)
+	}
 	if got := primaryImpl.CallCount(); got != 1 {
 		t.Fatalf("primary calls = %d, want 1", got)
 	}

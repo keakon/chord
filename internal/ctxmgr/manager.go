@@ -14,16 +14,20 @@ import (
 // Manager holds the conversation state: system prompt, message history,
 // token stats, and compression settings.
 type Manager struct {
-	mu                     sync.RWMutex
-	systemPrompt           message.Message
-	systemPromptBytes      int
-	messages               []message.Message
-	payloadBytes           int
-	lastInputTokens        int // prompt size only (for compaction thresholds and input-budget displays)
-	lastTotalContextTokens int // true input-side context burden (input + cache_write) for recovery/diagnostics
-	maxTokens              int
-	inputBudget            int
-	inputBudgetReserved    int
+	mu                       sync.RWMutex
+	systemPrompt             message.Message
+	systemPromptBytes        int
+	systemPromptContextBytes int
+	messages                 []message.Message
+	payloadBytes             int
+	contextBytes             int
+	lastInputTokens          int // prompt size only (for compaction thresholds and input-budget displays)
+	lastTotalContextTokens   int // true input-side context burden (input + cache_write) for recovery/diagnostics
+	calibrationInputTokens   int
+	calibrationContextBytes  int
+	maxTokens                int
+	inputBudget              int
+	inputBudgetReserved      int
 
 	threshold float64 // fraction of usable input budget that triggers compaction; <= 0 disables automatic compaction
 
@@ -64,6 +68,7 @@ func (m *Manager) SetSystemPrompt(msg message.Message) {
 	defer m.mu.Unlock()
 	m.systemPrompt = msg
 	m.systemPromptBytes = MessagePayloadBytes([]message.Message{msg})
+	m.systemPromptContextBytes = messageContextBytes([]message.Message{msg})
 }
 
 // SystemPrompt returns the current system prompt.
@@ -150,6 +155,7 @@ func (m *Manager) Append(msg message.Message) {
 	defer m.mu.Unlock()
 	m.messages = append(m.messages, msg)
 	m.payloadBytes += MessagePayloadBytes([]message.Message{msg})
+	m.contextBytes += messageContextBytes([]message.Message{msg})
 }
 
 // DropLastMessage removes the last message from the conversation history.
@@ -159,6 +165,7 @@ func (m *Manager) DropLastMessage() {
 	defer m.mu.Unlock()
 	if n := len(m.messages); n > 0 {
 		m.payloadBytes -= MessagePayloadBytes(m.messages[n-1:])
+		m.contextBytes -= messageContextBytes(m.messages[n-1:])
 		m.messages = m.messages[:n-1]
 	}
 }
@@ -178,6 +185,7 @@ func (m *Manager) DropLastMessages(n int) {
 		n = len(m.messages)
 	}
 	m.payloadBytes -= MessagePayloadBytes(m.messages[len(m.messages)-n:])
+	m.contextBytes -= messageContextBytes(m.messages[len(m.messages)-n:])
 	m.messages = m.messages[:len(m.messages)-n]
 }
 
@@ -210,6 +218,9 @@ func (m *Manager) RestoreMessages(msgs []message.Message) {
 	copy(replaced, repaired)
 	m.messages = replaced
 	m.payloadBytes = MessagePayloadBytes(replaced)
+	m.contextBytes = messageContextBytes(replaced)
+	m.calibrationInputTokens = 0
+	m.calibrationContextBytes = 0
 	if len(repaired) == 0 {
 		m.lastInputTokens = 0
 		m.lastTotalContextTokens = 0
@@ -227,6 +238,9 @@ func (m *Manager) RepairOrphanToolMessagesInPlace() int {
 	}
 	m.messages = repaired
 	m.payloadBytes = MessagePayloadBytes(repaired)
+	m.contextBytes = messageContextBytes(repaired)
+	m.calibrationInputTokens = 0
+	m.calibrationContextBytes = 0
 	if len(repaired) == 0 {
 		m.lastInputTokens = 0
 		m.lastTotalContextTokens = 0
@@ -287,6 +301,13 @@ func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 	m.stats.ReasoningTokens += usage.ReasoningTokens
 	m.lastInputTokens = usage.InputTokens
 	m.lastTotalContextTokens = usage.InputTokens + usage.CacheWriteTokens
+	if usage.InputTokens > 0 {
+		contextBytes := m.systemPromptContextBytes + m.contextBytes
+		if contextBytes > 0 {
+			m.calibrationInputTokens = usage.InputTokens
+			m.calibrationContextBytes = contextBytes
+		}
+	}
 	m.mu.Unlock()
 }
 
@@ -344,6 +365,8 @@ func (m *Manager) ClearLastTokenUsage() {
 	defer m.mu.Unlock()
 	m.lastInputTokens = 0
 	m.lastTotalContextTokens = 0
+	m.calibrationInputTokens = 0
+	m.calibrationContextBytes = 0
 }
 
 // EstimateTotalTokens returns a rough token count for the current message list.
@@ -395,8 +418,23 @@ func MessagePayloadBytes(messages []message.Message) int {
 	return total
 }
 
+func messageContextBytes(messages []message.Message) int {
+	total := MessagePayloadBytes(messages)
+	for _, msg := range messages {
+		total += len(msg.ToolCallID)
+		for _, tc := range msg.ToolCalls {
+			total += len(tc.ID) + len(tc.Name) + len(tc.Args)
+		}
+		for _, tb := range msg.ThinkingBlocks {
+			total += len(tb.Thinking) + len(tb.Signature)
+		}
+		total += len(msg.ReasoningContent)
+	}
+	return total
+}
+
 // EstimateMessagesTokens returns approximate token count for a slice of
-// messages (content/3 + tool/3 + thinking/3, min 1 per msg).
+// messages (content/3 + tool/3 + thinking/reasoning/3, min 1 per msg).
 func EstimateMessagesTokens(messages []message.Message) int {
 	total := 0
 	for _, msg := range messages {
@@ -412,8 +450,9 @@ func EstimateMessageTokens(msg message.Message) int {
 		n += len(tc.Args) / 3
 	}
 	for _, tb := range msg.ThinkingBlocks {
-		n += len(tb.Thinking) / 3
+		n += (len(tb.Thinking) + len(tb.Signature)) / 3
 	}
+	n += len(msg.ReasoningContent) / 3
 	if n < 1 {
 		n = 1
 	}
@@ -421,13 +460,15 @@ func EstimateMessageTokens(msg message.Message) int {
 }
 
 type AutoCompactDecision struct {
-	LastInputTokens   int
-	InputBudget       int
-	ReservedInput     int
-	UsableInputBudget int
-	Threshold         float64
-	ThresholdTokens   int
-	ShouldCompact     bool
+	LastInputTokens      int
+	EstimatedInputTokens int
+	EffectiveInputTokens int
+	InputBudget          int
+	ReservedInput        int
+	UsableInputBudget    int
+	Threshold            float64
+	ThresholdTokens      int
+	ShouldCompact        bool
 }
 
 // AutoCompactDecision returns the current automatic compaction threshold inputs.
@@ -443,15 +484,31 @@ func (m *Manager) AutoCompactDecision() AutoCompactDecision {
 	if m.threshold > 0 && usable > 0 {
 		thresholdTokens = int(m.threshold * float64(usable))
 	}
+	estimatedInputTokens := m.estimatedInputTokensFromPayloadBytesLocked()
+	effectiveInputTokens := max(m.lastInputTokens, estimatedInputTokens)
+	shouldCompact := m.threshold > 0 && usable > 0 && float64(effectiveInputTokens) >= m.threshold*float64(usable)
 	return AutoCompactDecision{
-		LastInputTokens:   m.lastInputTokens,
-		InputBudget:       budget,
-		ReservedInput:     m.inputBudgetReserved,
-		UsableInputBudget: usable,
-		Threshold:         m.threshold,
-		ThresholdTokens:   thresholdTokens,
-		ShouldCompact:     m.threshold > 0 && usable > 0 && float64(m.lastInputTokens) >= m.threshold*float64(usable),
+		LastInputTokens:      m.lastInputTokens,
+		EstimatedInputTokens: estimatedInputTokens,
+		EffectiveInputTokens: effectiveInputTokens,
+		InputBudget:          budget,
+		ReservedInput:        m.inputBudgetReserved,
+		UsableInputBudget:    usable,
+		Threshold:            m.threshold,
+		ThresholdTokens:      thresholdTokens,
+		ShouldCompact:        shouldCompact,
 	}
+}
+
+func (m *Manager) estimatedInputTokensFromPayloadBytesLocked() int {
+	if m.calibrationInputTokens <= 0 || m.calibrationContextBytes <= 0 {
+		return 0
+	}
+	contextBytes := m.systemPromptContextBytes + m.contextBytes
+	if contextBytes <= m.calibrationContextBytes {
+		return 0
+	}
+	return int((int64(m.calibrationInputTokens) * int64(contextBytes)) / int64(m.calibrationContextBytes))
 }
 
 // ShouldAutoCompact reports whether the latest prompt size crossed the
@@ -641,6 +698,7 @@ func (m *Manager) ReplacePrefixAtomic(
 		newMessages = append(newMessages, prefix...)
 		newMessages = append(newMessages, repairedTail...)
 		m.messages = newMessages
+		m.refreshMessageByteStateLocked()
 		return nil
 	}
 
@@ -656,8 +714,16 @@ func (m *Manager) ReplacePrefixAtomic(
 		m.messages = make([]message.Message, len(newMessages))
 		copy(m.messages, newMessages)
 	}
+	m.refreshMessageByteStateLocked()
 
 	return nil
+}
+
+func (m *Manager) refreshMessageByteStateLocked() {
+	m.payloadBytes = MessagePayloadBytes(m.messages)
+	m.contextBytes = messageContextBytes(m.messages)
+	m.calibrationInputTokens = 0
+	m.calibrationContextBytes = 0
 }
 
 // repairOrphanToolResultsInTail removes tool messages from tail that don't have

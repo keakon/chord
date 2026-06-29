@@ -211,6 +211,82 @@ func TestShouldAutoCompactUsesUsableInputBudgetWhenReserved(t *testing.T) {
 	}
 }
 
+func TestShouldAutoCompactUsesPayloadByteCalibrationWhenUsageMissing(t *testing.T) {
+	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 100)}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
+
+	m.Append(message.Message{Role: "tool", Content: strings.Repeat("b", 150)})
+	m.UpdateFromUsage(message.TokenUsage{})
+
+	decision := m.AutoCompactDecision()
+	if got := decision.LastInputTokens; got != 0 {
+		t.Fatalf("LastInputTokens = %d, want 0 for latest zero-usage response", got)
+	}
+	if got := decision.EstimatedInputTokens; got != 1000 {
+		t.Fatalf("EstimatedInputTokens = %d, want 1000", got)
+	}
+	if got := decision.EffectiveInputTokens; got != 1000 {
+		t.Fatalf("EffectiveInputTokens = %d, want 1000", got)
+	}
+	if !decision.ShouldCompact {
+		t.Fatal("expected byte-calibrated estimate to trigger automatic compaction")
+	}
+}
+
+func TestShouldAutoCompactUsesContextByteCalibrationForToolCalls(t *testing.T) {
+	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 100)}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
+
+	m.Append(message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{Args: json.RawMessage(strings.Repeat("b", 150))}}})
+	m.UpdateFromUsage(message.TokenUsage{})
+
+	decision := m.AutoCompactDecision()
+	if got := decision.EstimatedInputTokens; got != 1000 {
+		t.Fatalf("EstimatedInputTokens = %d, want 1000 from tool-call context bytes", got)
+	}
+	if !decision.ShouldCompact {
+		t.Fatal("expected tool-call context bytes to trigger automatic compaction")
+	}
+}
+
+func TestShouldAutoCompactPayloadByteCalibrationHonorsDisabledThreshold(t *testing.T) {
+	m := NewManagerWithInputBudget(1000, 1000, 0, 0)
+	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 100)}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
+	m.Append(message.Message{Role: "tool", Content: strings.Repeat("b", 150)})
+	m.UpdateFromUsage(message.TokenUsage{})
+
+	decision := m.AutoCompactDecision()
+	if got := decision.EstimatedInputTokens; got != 1000 {
+		t.Fatalf("EstimatedInputTokens = %d, want 1000", got)
+	}
+	if decision.ShouldCompact {
+		t.Fatal("expected byte-calibrated estimate not to trigger when automatic compaction is disabled")
+	}
+}
+
+func TestReplacePrefixAtomicClearsPayloadByteCalibration(t *testing.T) {
+	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 250)}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 800})
+
+	err := m.ReplacePrefixAtomic(1, []message.Message{{Role: "assistant", Content: "summary"}}, nil)
+	if err != nil {
+		t.Fatalf("ReplacePrefixAtomic: %v", err)
+	}
+	m.UpdateFromUsage(message.TokenUsage{})
+
+	decision := m.AutoCompactDecision()
+	if got := decision.EstimatedInputTokens; got != 0 {
+		t.Fatalf("EstimatedInputTokens = %d, want 0 after durable history replacement", got)
+	}
+	if decision.ShouldCompact {
+		t.Fatal("expected durable replacement to clear stale byte-calibrated auto-compaction signal")
+	}
+}
+
 func TestUpdateFromUsageTracksTrueContextBurden(t *testing.T) {
 	m := NewManager(1000, 0)
 	m.UpdateFromUsage(message.TokenUsage{
@@ -259,8 +335,9 @@ func TestEstimateMessagesTokensCountsToolCallsAndThinking(t *testing.T) {
 				{ID: "1", Name: "Read", Args: json.RawMessage(`{"path":"README.md"}`)},
 			},
 			ThinkingBlocks: []message.ThinkingBlock{
-				{Thinking: "reasoning"},
+				{Thinking: "reasoning", Signature: "sig"},
 			},
+			ReasoningContent: "hidden reasoning",
 		},
 	}
 

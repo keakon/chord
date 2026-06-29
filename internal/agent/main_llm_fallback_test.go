@@ -69,6 +69,110 @@ func TestCallLLMOversizeStartsCompactionWhenNotRunning(t *testing.T) {
 	}
 }
 
+func TestCallLLMOversizeStopsWhenAutoCompactionDisabled(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.newTurn()
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 16000, 0)
+
+	primaryCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"primary-model": {Limit: config.ModelLimit{Context: 400000, Input: 272000, Output: 4096}},
+		},
+	}, []string{"primary-key"})
+	fallbackCfg := llm.NewProviderConfig("fallback-prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"fallback-model": {Limit: config.ModelLimit{Context: 400000, Input: 272000, Output: 4096}},
+		},
+	}, []string{"fallback-key"})
+	primaryImpl := &blockingStreamProvider{calls: []scriptedStreamCall{{err: &llm.APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"}}}}
+	fallbackImpl := &blockingStreamProvider{calls: []scriptedStreamCall{{err: &llm.APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"}}}}
+
+	client := llm.NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	client.SetFallbackModels([]llm.FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "fallback-model",
+		MaxTokens:      4096,
+		ContextLimit:   400000,
+		InputLimit:     272000,
+	}})
+	a.swapLLMClientWithRef(client, "primary-model", 400000, "primary-prov/primary-model")
+
+	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	if err == nil {
+		t.Fatal("callLLM err = nil, want context-length error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"automatic context compaction is not enabled", "/compact", "reduce the active context"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not contain %q", msg, want)
+		}
+	}
+	if a.IsCompactionRunning() {
+		t.Fatal("did not expect compaction to start when automatic compaction is disabled")
+	}
+	for len(a.Events()) > 0 {
+		if toast, ok := (<-a.Events()).(ToastEvent); ok && strings.Contains(toast.Message, "Fallback chain exhausted") {
+			t.Fatalf("unexpected fallback exhausted toast: %+v", toast)
+		}
+	}
+}
+
+func TestCallLLMMixedFallbackErrorsDoNotStartOversizeCompaction(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reserved: 16000}}}
+	a.newTurn()
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 16000, 0.8)
+
+	primaryCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"primary-model": {Limit: config.ModelLimit{Context: 400000, Input: 272000, Output: 4096}},
+		},
+	}, []string{"primary-key"})
+	fallbackCfg := llm.NewProviderConfig("fallback-prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"fallback-model": {Limit: config.ModelLimit{Context: 400000, Input: 272000, Output: 4096}},
+		},
+	}, []string{"fallback-key"})
+	primaryImpl := &blockingStreamProvider{calls: []scriptedStreamCall{{err: &llm.APIError{StatusCode: 402, Message: "quota exhausted"}}}}
+	fallbackImpl := &blockingStreamProvider{calls: []scriptedStreamCall{{err: &llm.APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"}}}}
+
+	client := llm.NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	client.SetFallbackModels([]llm.FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "fallback-model",
+		MaxTokens:      4096,
+		ContextLimit:   400000,
+		InputLimit:     272000,
+	}})
+	a.swapLLMClientWithRef(client, "primary-model", 400000, "primary-prov/primary-model")
+
+	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	if err == nil {
+		t.Fatal("callLLM err = nil, want mixed fallback error")
+	}
+	if IsContextLengthExceededPendingCompaction(err) {
+		t.Fatalf("err = %v, did not expect pending compaction for mixed fallback errors", err)
+	}
+	if a.IsCompactionRunning() {
+		t.Fatal("did not expect oversize compaction to start for mixed fallback errors")
+	}
+	foundToast := false
+	for len(a.Events()) > 0 {
+		if toast, ok := (<-a.Events()).(ToastEvent); ok && strings.Contains(toast.Message, "Fallback chain exhausted") {
+			foundToast = true
+		}
+	}
+	if !foundToast {
+		t.Fatal("expected ordinary fallback exhausted toast for mixed fallback errors")
+	}
+}
+
 func TestCallLLMShowsFallbackToastOnFirstThinkingToken(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 

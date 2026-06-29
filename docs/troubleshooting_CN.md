@@ -262,6 +262,7 @@ Chord 会禁用终端硬滚动优化，因为这些序列可能在 Chord 的 sti
 2. 检查 TUI 底部栏或信息面板的 `Context` 百分比。它按**可用输入预算**计算，不是按总窗口大小，所以可能比预期的低（详见 [配置 — 上下文压缩](./configuration_CN.md#上下文压缩compaction)）。
 3. 如果设置了 `context.compaction.reserved`，由于会先扣除预留再应用 `threshold`，自动压缩会在更低的绝对 token 数触发；若压缩过于频繁，可检查 reserved 是否设得过大。
 4. `/compact --no` 会临时关闭当前会话的自动压缩；重新启动会话或执行 `/compact` 可恢复。
+5. 如果网关返回缺失 usage 或 0 usage，Chord 会用最近一次可信的非零 usage 样本和当前会进入上下文的消息 bytes 做兜底触发。开启 `log_level: debug` 后，可在自动压缩日志中查看 `estimated_input_tokens` 和 `effective_input_tokens`。
 
 **注意**：loop 模式不会禁用自动压缩；它只会对新增消息禁用请求级上下文剪裁。
 
@@ -288,7 +289,7 @@ Chord 会禁用终端硬滚动优化，因为这些序列可能在 Chord 的 sti
 2. 检查 `context.compaction.threshold` 是否过高导致自动压缩触发偏晚。
 3. 增大 `context.compaction.reserved` 可提前触发压缩，避免请求被拒。
 4. 如果频繁出现，可使用 `/compact` 立即手动压缩，或降低 `threshold` 提前触发自动压缩。
-5. 在 `log_level: debug` 的日志中搜索 `oversize`，确认是否触发了 oversize recovery（压缩后再重试）。
+5. 在 `log_level: debug` 的日志中搜索 `oversize`，确认是否触发了 oversize recovery（压缩后再重试）。如果自动压缩已关闭，Chord 会停止并报告实际尝试过的所有候选模型都超过当前上下文，而不是无限重试。
 
 ## 何时检查日志
 

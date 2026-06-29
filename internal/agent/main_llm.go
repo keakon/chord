@@ -606,7 +606,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		callStatus := llmClient.LastCallStatus()
 		// If the context is oversized, suspend behind an in-flight compaction or
 		// proactively start oversize-driven compaction when auto compact is enabled.
-		if llm.IsContextLengthExceeded(err) {
+		if llm.IsAllAttemptedCandidatesContextLengthExceeded(err) {
 			if a.IsCompactionRunning() {
 				log.Infof("LLM context length exceeded while compaction running; suspending LLM call error=%v", err)
 				return nil, &contextLengthExceededPendingCompactionError{inner: err}
@@ -629,10 +629,11 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 					callStatus.RunningModelRef,
 					map[string]string{"trigger": "oversize_driven"},
 				)
-				a.emitToTUI(InfoEvent{Message: "All candidate models exceeded the current context; compacting context before retry"})
+				a.emitToTUI(InfoEvent{Message: "All attempted candidate models exceeded the current context; compacting context before retry"})
 				log.Infof("LLM context length exceeded; started oversize-driven compaction and suspending LLM call error=%v", err)
 				return nil, &contextLengthExceededPendingCompactionError{inner: err}
 			}
+			return nil, fmt.Errorf("LLM stream failed: all attempted candidate models exceeded the current context and automatic context compaction is not enabled; run /compact, reduce the active context, or enable automatic context compaction: %w", err)
 		}
 		if callStatus.FallbackTriggered && callStatus.FallbackExhausted {
 			a.emitToTUI(ToastEvent{
@@ -689,10 +690,10 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	}
 	decision := a.ctxMgr.AutoCompactDecision()
 	if decision.ShouldCompact {
-		log.Infof("automatic context compaction requested last_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
+		log.Infof("automatic context compaction requested last_input_tokens=%v estimated_input_tokens=%v effective_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.EstimatedInputTokens, decision.EffectiveInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
 		a.autoCompactRequested.Store(true)
 	} else {
-		log.Debugf("automatic context compaction not requested last_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
+		log.Debugf("automatic context compaction not requested last_input_tokens=%v estimated_input_tokens=%v effective_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.EstimatedInputTokens, decision.EffectiveInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
 	}
 
 	a.recordUsage("main", "main", a.currentAgentName(), "chat", selectedRef, callStatus.RunningModelRef, turnID, resp.Usage, callStatus.ServiceTier)

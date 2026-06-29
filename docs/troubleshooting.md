@@ -271,6 +271,7 @@ What to check:
 2. Check the `Context` percentage in the TUI footer or info panel. It is based on the **usable input budget**, not the total context window, so it may be lower than expected (see [Configuration — Context compaction](./configuration.md#context-compaction)).
 3. If `context.compaction.reserved` is set, compaction triggers at a lower absolute token count because the reserve is subtracted before applying `threshold`; if compaction is too frequent, check whether reserved is too large.
 4. `/compact --no` temporarily disables automatic compaction for the current session. Restart the session or run `/compact` to re-enable.
+5. If your gateway returns missing or zero usage, Chord uses the last trusted non-zero usage sample plus current context-contributing message bytes as a fallback trigger. With `log_level: debug`, look for `estimated_input_tokens` and `effective_input_tokens` in automatic-compaction logs.
 
 Note: loop mode does not disable automatic compaction. It only disables request-level context reduction for newly added messages.
 
@@ -297,7 +298,7 @@ What to check:
 2. Check if `context.compaction.threshold` is too high, causing automatic compaction to fire too late.
 3. Increase `context.compaction.reserved` to trigger compaction earlier, avoiding rejected requests.
 4. If this happens frequently, use `/compact` to manually compact immediately, or lower `threshold`.
-5. With `log_level: debug`, search the logs for `oversize` to confirm whether oversize recovery (compact then retry) was triggered.
+5. With `log_level: debug`, search the logs for `oversize` to confirm whether oversize recovery (compact then retry) was triggered. If automatic compaction is disabled, Chord stops and reports that all attempted candidate models exceeded the current context instead of retrying indefinitely.
 
 ## When to check logs
 

@@ -235,11 +235,44 @@ func (e *ContextLengthExceededError) Error() string {
 	return fmt.Sprintf("context length exceeded: %s", e.ProviderMessage)
 }
 
+// AllAttemptedCandidatesContextLengthExceededError indicates every provider/model target
+// that was actually attempted in the current model-pool pass rejected the
+// request as oversized. This is the signal callers may use for context
+// compaction recovery; a lone context-length last error after mixed failures is
+// not sufficient.
+type AllAttemptedCandidatesContextLengthExceededError struct {
+	Inner error
+}
+
+func (e *AllAttemptedCandidatesContextLengthExceededError) Error() string {
+	if e == nil || e.Inner == nil {
+		return "all attempted candidate models exceeded the current context"
+	}
+	return fmt.Sprintf("all attempted candidate models exceeded the current context: %v", e.Inner)
+}
+
+func (e *AllAttemptedCandidatesContextLengthExceededError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Inner
+}
+
+// IsAllAttemptedCandidatesContextLengthExceeded reports whether err is the precise
+// model-pool exhaustion signal used for oversize-driven compaction recovery.
+func IsAllAttemptedCandidatesContextLengthExceeded(err error) bool {
+	_, ok := errors.AsType[*AllAttemptedCandidatesContextLengthExceededError](err)
+	return ok
+}
+
 // IsContextLengthExceeded reports whether err indicates the input context
 // exceeds the model's maximum context window. This is a strict classification
 // that matches provider-specific error codes/messages; ordinary 400 errors
 // must NOT be classified as oversize to avoid infinite retry loops.
 func IsContextLengthExceeded(err error) bool {
+	if IsAllAttemptedCandidatesContextLengthExceeded(err) {
+		return true
+	}
 	if _, ok := errors.AsType[*ContextLengthExceededError](err); ok {
 		return true
 	}
