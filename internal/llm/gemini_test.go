@@ -61,6 +61,20 @@ func TestConvertMessagesToGeminiMarksInterruptedAssistant(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesToGeminiSkipsReasoningOnlyAssistant(t *testing.T) {
+	got := convertMessagesToGemini([]message.Message{
+		{Role: "user", Content: "before"},
+		{Role: "assistant", ReasoningContent: "hidden"},
+		{Role: "user", Content: "after"},
+	})
+	if len(got) != 1 {
+		t.Fatalf("convertMessagesToGemini() len = %d, want 1: %#v", len(got), got)
+	}
+	if got[0].Role != "user" || len(got[0].Parts) != 2 || got[0].Parts[0].Text != "before" || got[0].Parts[1].Text != "after" {
+		t.Fatalf("unexpected merged user content after skip: %#v", got)
+	}
+}
+
 func TestConvertToolsToGemini(t *testing.T) {
 	tools := []message.ToolDefinition{{
 		Name:        "search",

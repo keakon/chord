@@ -488,10 +488,6 @@ func convertMessagesToOpenAI(systemPrompt, targetWireFamily string, msgs []messa
 			contentText := assistantContentForReplay(msg)
 			if contentText != "" {
 				omi.Content = contentText
-			} else if len(msg.ToolCalls) == 0 {
-				// Some OpenAI-compatible APIs reject content:null when there are
-				// no tool calls; use an explicit empty string instead.
-				omi.Content = ""
 			}
 			// Convert tool calls.
 			for _, tc := range msg.ToolCalls {
@@ -529,12 +525,9 @@ func convertMessagesToOpenAI(systemPrompt, targetWireFamily string, msgs []messa
 					},
 				})
 			}
-			// If all tool calls were skipped (e.g. all had empty id/name) and
-			// there is no text content either, the assistant message would have
-			// null content and no tool_calls — some APIs (e.g. Qwen) reject
-			// this. Ensure content is at least an empty string.
-			if omi.Content == nil && len(omi.ToolCalls) == 0 {
-				omi.Content = ""
+			if contentText == "" && len(omi.ToolCalls) == 0 {
+				log.Warn("skipping empty/reasoning-only assistant message in OpenAI history")
+				continue
 			}
 			result = append(result, omi)
 

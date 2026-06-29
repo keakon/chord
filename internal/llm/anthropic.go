@@ -624,13 +624,10 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 						blocks = append(blocks, anthropicContent{Type: "text", Text: p.Text})
 					}
 				}
-				result = append(result, anthropicMessage{Role: "user", Content: blocks})
+				result = appendAnthropicUserMessage(result, blocks)
 			} else {
 				// Plain text user message.
-				result = append(result, anthropicMessage{
-					Role:    "user",
-					Content: []anthropicContent{{Type: "text", Text: msg.Content}},
-				})
+				result = appendAnthropicUserMessage(result, []anthropicContent{{Type: "text", Text: msg.Content}})
 			}
 			i++
 
@@ -655,10 +652,7 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 			if len(toolResults) == 0 {
 				continue
 			}
-			result = append(result, anthropicMessage{
-				Role:    "user",
-				Content: toolResults,
-			})
+			result = appendAnthropicUserMessage(result, toolResults)
 
 		case "assistant":
 			var content []anthropicContent
@@ -666,6 +660,10 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 			// Thinking blocks must come before text/tool_use in the assistant message.
 			// Anthropic requires them to be replayed verbatim (including signature).
 			for _, tb := range msg.ThinkingBlocks {
+				if !tb.Replayable() {
+					log.Warnf("skipping unreplayable thinking block in Anthropic history")
+					continue
+				}
 				content = append(content, anthropicContent{
 					Type:      "thinking",
 					Thinking:  tb.Thinking,
@@ -707,12 +705,10 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 				})
 			}
 
-			// Ensure at least one content block.
 			if len(content) == 0 {
-				content = append(content, anthropicContent{
-					Type: "text",
-					Text: "",
-				})
+				log.Warnf("skipping empty assistant message in Anthropic history after normalization")
+				i++
+				continue
 			}
 
 			result = append(result, anthropicMessage{
@@ -728,6 +724,18 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 		}
 	}
 
+	return result
+}
+
+func appendAnthropicUserMessage(result []anthropicMessage, blocks []anthropicContent) []anthropicMessage {
+	if len(result) == 0 || result[len(result)-1].Role != "user" {
+		return append(result, anthropicMessage{Role: "user", Content: blocks})
+	}
+	prevBlocks, ok := result[len(result)-1].Content.([]anthropicContent)
+	if !ok {
+		return append(result, anthropicMessage{Role: "user", Content: blocks})
+	}
+	result[len(result)-1].Content = append(prevBlocks, blocks...)
 	return result
 }
 

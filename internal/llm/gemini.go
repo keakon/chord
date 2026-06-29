@@ -307,7 +307,7 @@ func convertMessagesToGemini(msgs []message.Message) []geminiContent {
 		msg := msgs[i]
 		switch msg.Role {
 		case "user":
-			result = append(result, geminiContent{Role: "user", Parts: geminiUserParts(msg)})
+			result = appendGeminiUserContent(result, geminiUserParts(msg))
 			i++
 		case "assistant":
 			parts := make([]geminiPart, 0, 1+len(msg.ToolCalls))
@@ -328,7 +328,9 @@ func convertMessagesToGemini(msgs []message.Message) []geminiContent {
 				parts = append(parts, geminiPart{FunctionCall: &geminiFunctionCall{Name: tc.Name, Args: args}})
 			}
 			if len(parts) == 0 {
-				parts = append(parts, geminiPart{Text: ""})
+				log.Warn("skipping empty/reasoning-only assistant message in Gemini history")
+				i++
+				continue
 			}
 			result = append(result, geminiContent{Role: "model", Parts: parts})
 			i++
@@ -349,13 +351,21 @@ func convertMessagesToGemini(msgs []message.Message) []geminiContent {
 				i++
 			}
 			if len(parts) > 0 {
-				result = append(result, geminiContent{Role: "user", Parts: parts})
+				result = appendGeminiUserContent(result, parts)
 			}
 		default:
 			log.Warnf("skipping message with unknown role role=%v", msg.Role)
 			i++
 		}
 	}
+	return result
+}
+
+func appendGeminiUserContent(result []geminiContent, parts []geminiPart) []geminiContent {
+	if len(result) == 0 || result[len(result)-1].Role != "user" {
+		return append(result, geminiContent{Role: "user", Parts: parts})
+	}
+	result[len(result)-1].Parts = append(result[len(result)-1].Parts, parts...)
 	return result
 }
 

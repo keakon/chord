@@ -24,6 +24,10 @@ func normalizeRestoredMessages(msgs []message.Message) []message.Message {
 	if len(msgs) == 0 {
 		return msgs
 	}
+	msgs = dropEmptyAssistantMessages(msgs)
+	if len(msgs) == 0 {
+		return msgs
+	}
 	return repairOrphanToolCalls(msgs)
 }
 
@@ -39,6 +43,17 @@ func dropTrailingInterruptedAssistants(msgs []message.Message) []message.Message
 		msgs = msgs[:len(msgs)-1]
 	}
 	return msgs
+}
+
+func dropEmptyAssistantMessages(msgs []message.Message) []message.Message {
+	out := msgs[:0]
+	for _, msg := range msgs {
+		if msg.Role == "assistant" && strings.TrimSpace(msg.Content) == "" && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 && !message.HasReplayableThinkingBlocks(msg.ThinkingBlocks) {
+			continue
+		}
+		out = append(out, msg)
+	}
+	return out
 }
 
 // repairOrphanToolCalls walks the transcript and synthesizes an error tool

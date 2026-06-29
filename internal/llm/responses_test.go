@@ -172,6 +172,44 @@ func TestConvertMessagesToResponses_ReplaysReasoningContent(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesToResponses_SkipsReplayableReasoningOnlyAssistant(t *testing.T) {
+	// A reasoning-only assistant turn (no text, no tool calls) is dropped even
+	// when the target supports reasoning replay: reasoning replay only matters
+	// when attached to a turn that also carries text or tool calls, so a
+	// standalone reasoning turn is dangling and safe to skip. This mirrors the
+	// OpenAI Chat converter, and the modelcompat normalize pass drops it before
+	// this converter runs on the integrated path.
+	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, []message.Message{
+		{Role: "user", Content: "before"},
+		{Role: "assistant", ReasoningContent: "hidden", Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIResponses}},
+		{Role: "user", Content: "after"},
+	})
+	if len(items) != 2 {
+		t.Fatalf("convertMessagesToResponses() len = %d, want 2: %#v", len(items), items)
+	}
+	for _, item := range items {
+		if item.Type == "message" && item.Role == "assistant" {
+			t.Fatalf("replayable reasoning-only assistant was not skipped: %#v", items)
+		}
+	}
+}
+
+func TestConvertMessagesToResponses_SkipsUnreplayableReasoningOnlyAssistant(t *testing.T) {
+	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, []message.Message{
+		{Role: "user", Content: "before"},
+		{Role: "assistant", ReasoningContent: "hidden"},
+		{Role: "user", Content: "after"},
+	})
+	if len(items) != 2 {
+		t.Fatalf("convertMessagesToResponses() len = %d, want 2: %#v", len(items), items)
+	}
+	for _, item := range items {
+		if item.Type == "message" && item.Role == "assistant" {
+			t.Fatalf("unreplayable reasoning-only assistant was not skipped: %#v", items)
+		}
+	}
+}
+
 func TestConvertMessagesToResponses_DoesNotReplayReasoningForNonOpenAITarget(t *testing.T) {
 	items := convertMessagesToResponses("", modelcompat.WireFamilyAnthropic, []message.Message{{
 		Role:             "assistant",

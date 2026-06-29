@@ -60,7 +60,6 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 	allowStructuredTools := opts.StructuredTools && target.SupportsStructuredTools && strings.TrimSpace(target.ToolResultEncoding) != "" && strings.TrimSpace(target.ToolResultEncoding) != ToolResultEncodingNone
 	toolResultsByID := collectToolResults(out)
 	droppedNonImportedToolIDs := make(map[string]bool)
-	droppedNonImportedAssistantIdx := make(map[int]bool)
 
 	for i := range out {
 		msg := &out[i]
@@ -105,7 +104,6 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 					}
 				}
 				msg.ToolCalls = nil
-				droppedNonImportedAssistantIdx[i] = true
 				report.Warnings = append(report.Warnings, "dropped unreplayable non-imported tool calls from request context")
 			}
 		}
@@ -137,20 +135,26 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 	}
 	if len(droppedNonImportedToolIDs) > 0 || !allowStructuredTools {
 		filtered := out[:0]
-		for i, msg := range out {
+		for _, msg := range out {
 			if msg.Role == "" {
 				continue
 			}
 			if msg.Role == message.RoleTool && droppedNonImportedToolIDs[strings.TrimSpace(msg.ToolCallID)] {
 				continue
 			}
-			if droppedNonImportedAssistantIdx[i] && msg.Role == message.RoleAssistant && strings.TrimSpace(msg.Content) == "" && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 && len(msg.ThinkingBlocks) == 0 && strings.TrimSpace(msg.ReasoningContent) == "" {
-				continue
-			}
 			filtered = append(filtered, msg)
 		}
 		out = filtered
 	}
+
+	filtered := out[:0]
+	for _, msg := range out {
+		if msg.Role == message.RoleAssistant && strings.TrimSpace(msg.Content) == "" && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 && !message.HasReplayableThinkingBlocks(msg.ThinkingBlocks) {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	out = filtered
 
 	return compactAdjacentAssistantMessages(out), report
 }

@@ -37,6 +37,21 @@ func (tlsHandshakeTimeoutErr) Error() string   { return "tls: handshake timeout"
 func (tlsHandshakeTimeoutErr) Timeout() bool   { return true }
 func (tlsHandshakeTimeoutErr) Temporary() bool { return false }
 
+func TestResponseHasUsableOutputRequiresReplayableThinking(t *testing.T) {
+	if responseHasUsableOutput(&message.Response{ThinkingBlocks: []message.ThinkingBlock{{Thinking: "analysis"}}}) {
+		t.Fatal("thinking block without signature should not be usable output")
+	}
+	if !responseHasUsableOutput(&message.Response{ThinkingBlocks: []message.ThinkingBlock{{Thinking: "analysis", Signature: "sig"}}}) {
+		t.Fatal("signed thinking block should be usable output")
+	}
+	if !responseHasUsableOutput(&message.Response{Content: "visible"}) {
+		t.Fatal("visible text should be usable output")
+	}
+	if !responseHasUsableOutput(&message.Response{ToolCalls: []message.ToolCall{{ID: "call_1", Name: "read"}}}) {
+		t.Fatal("tool calls should be usable output")
+	}
+}
+
 type scriptedCall struct {
 	resp         *message.Response
 	err          error

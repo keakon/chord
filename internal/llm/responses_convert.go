@@ -59,9 +59,23 @@ func convertMessagesToResponses(systemPrompt, targetWireFamily string, msgs []me
 			})
 
 		case "assistant":
+			contentText := assistantContentForReplay(msg)
+			replayReasoning := wireFamilyAllowsReasoningReplay(targetWireFamily) && messageAllowsReasoningReplay(msg)
+			validToolCalls := make([]message.ToolCall, 0, len(msg.ToolCalls))
+			for _, tc := range msg.ToolCalls {
+				if tc.ID == "" || tc.Name == "" {
+					log.Warnf("skipping function_call with empty id or name in history tool=%v id=%v", tc.Name, tc.ID)
+					continue
+				}
+				validToolCalls = append(validToolCalls, tc)
+			}
+			if contentText == "" && len(validToolCalls) == 0 {
+				log.Warn("skipping empty/reasoning-only assistant message in Responses history")
+				continue
+			}
 			// Replay OpenAI-compatible reasoning/thinking content when present.
 			// Some providers validate chain-of-thought continuity across tool rounds.
-			if wireFamilyAllowsReasoningReplay(targetWireFamily) && messageAllowsReasoningReplay(msg) {
+			if replayReasoning {
 				result = append(result, responsesInputItem{
 					Type: "message",
 					Role: "assistant",
@@ -71,7 +85,7 @@ func convertMessagesToResponses(systemPrompt, targetWireFamily string, msgs []me
 				})
 			}
 			// Output text content.
-			if contentText := assistantContentForReplay(msg); contentText != "" {
+			if contentText != "" {
 				result = append(result, responsesInputItem{
 					Type: "message",
 					Role: "assistant",
@@ -81,14 +95,7 @@ func convertMessagesToResponses(systemPrompt, targetWireFamily string, msgs []me
 				})
 			}
 			// Tool calls become function_call items. API expects arguments as a string.
-			for _, tc := range msg.ToolCalls {
-				// Skip tool calls with empty id or name — malformed responses from
-				// some models (e.g. GLM) that omit these fields cause 400 errors
-				// (Responses API requires a non-empty call_id).
-				if tc.ID == "" || tc.Name == "" {
-					log.Warnf("skipping function_call with empty id or name in history tool=%v id=%v", tc.Name, tc.ID)
-					continue
-				}
+			for _, tc := range validToolCalls {
 				result = append(result, responsesInputItem{
 					Type:      "function_call",
 					Name:      tc.Name,

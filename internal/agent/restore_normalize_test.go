@@ -40,6 +40,19 @@ func TestNormalizeRestoredMessages_KeepsCompletedAssistant(t *testing.T) {
 	}
 }
 
+func TestNormalizeRestoredMessages_DropsEmptyAssistant(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "analysis"}}, StopReason: "max_tokens"},
+		{Role: "assistant", ReasoningContent: "hidden reasoning", StopReason: "max_tokens"},
+		{Role: "user", Content: "continue"},
+	}
+	got := normalizeRestoredMessages(msgs)
+	if len(got) != 2 || got[0].Role != "user" || got[1].Content != "continue" {
+		t.Fatalf("unexpected result: %#v", got)
+	}
+}
+
 func TestNormalizeRestoredMessages_PreservesPairedToolCalls(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "do it"},

@@ -37,6 +37,25 @@ func TestConvertMessagesMarksInterruptedAssistant(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesSkipsEmptyAssistant(t *testing.T) {
+	got := convertMessages([]message.Message{
+		{Role: "user", Content: "before"},
+		{Role: "assistant", StopReason: "max_tokens"},
+		{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "analysis"}}, StopReason: "max_tokens"},
+		{Role: "user", Content: "after"},
+	})
+	if len(got) != 1 {
+		t.Fatalf("convertMessages() len = %d, want 1: %#v", len(got), got)
+	}
+	if got[0].Role != "user" {
+		t.Fatalf("empty assistant message was not skipped: %#v", got)
+	}
+	blocks, ok := got[0].Content.([]anthropicContent)
+	if !ok || len(blocks) != 2 || blocks[0].Text != "before" || blocks[1].Text != "after" {
+		t.Fatalf("adjacent users were not merged after skip: %#v", got[0].Content)
+	}
+}
+
 func TestStableAnthropicMetadataUserIDPayload_JSONShape(t *testing.T) {
 	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{}, nil)
 	payload := stableAnthropicMetadataUserIDPayload(provider)

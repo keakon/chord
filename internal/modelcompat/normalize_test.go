@@ -47,7 +47,7 @@ func TestNormalizeForTarget_DropsReasoningContentForAnthropicTarget(t *testing.T
 		Provenance:       &message.MessageProvenance{WireFamily: WireFamilyOpenAIChat},
 	}}
 	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic, ThinkingReplayEnabled: true}, NormalizeOptions{})
-	if len(out) != 1 || out[0].ReasoningContent != "" {
+	if len(out) != 0 {
 		t.Fatalf("reasoning should be dropped for anthropic target: %+v", out)
 	}
 	if rep.DowngradedReasoning != 1 {
@@ -87,6 +87,37 @@ func TestNormalizeForTarget_DropsThinkingWithoutProvenance(t *testing.T) {
 	}
 	if len(rep.Warnings) == 0 {
 		t.Fatalf("expected warning when dropping thinking without provenance")
+	}
+}
+
+func TestNormalizeForTarget_DropsEmptyAssistantAfterThinkingRemoval(t *testing.T) {
+	msgs := []message.Message{{
+		Role:           message.RoleAssistant,
+		Content:        "",
+		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: ""}},
+		Provenance:     &message.MessageProvenance{Source: "chord", WireFamily: WireFamilyAnthropic},
+	}}
+	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic, ThinkingReplayEnabled: true}, NormalizeOptions{})
+	if len(out) != 0 {
+		t.Fatalf("expected empty output after dropping unreplayable assistant, got %+v", out)
+	}
+	if rep.DroppedThinkingBlocks != 1 {
+		t.Fatalf("DroppedThinkingBlocks=%d, want 1", rep.DroppedThinkingBlocks)
+	}
+}
+
+func TestNormalizeForTarget_DropsReasoningOnlyAssistant(t *testing.T) {
+	msgs := []message.Message{{
+		Role:             message.RoleAssistant,
+		ReasoningContent: "hidden reasoning",
+		Provenance:       &message.MessageProvenance{Source: "chord", WireFamily: WireFamilyOpenAIChat},
+	}}
+	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyOpenAIChat, ToolResultEncoding: ToolResultEncodingOpenAIToolRole, SupportsStructuredTools: true}, NormalizeOptions{StructuredTools: true})
+	if len(out) != 0 {
+		t.Fatalf("expected reasoning-only assistant to be dropped, got %+v", out)
+	}
+	if rep.DowngradedReasoning != 0 {
+		t.Fatalf("DowngradedReasoning=%d, want 0", rep.DowngradedReasoning)
 	}
 }
 

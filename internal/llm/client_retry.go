@@ -138,7 +138,10 @@ func responseHasUsableOutput(resp *message.Response) bool {
 	if resp == nil {
 		return false
 	}
-	return strings.TrimSpace(resp.Content) != "" || len(resp.ToolCalls) > 0 || len(resp.ThinkingBlocks) > 0
+	if strings.TrimSpace(resp.Content) != "" || len(resp.ToolCalls) > 0 {
+		return true
+	}
+	return message.HasReplayableThinkingBlocks(resp.ThinkingBlocks)
 }
 
 type streamRetryTarget struct {

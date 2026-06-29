@@ -2,6 +2,7 @@ package message
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/keakon/chord/internal/ratelimit"
 )
@@ -253,6 +254,23 @@ type TokenUsage struct {
 type ThinkingBlock struct {
 	Thinking  string `json:"thinking"`
 	Signature string `json:"signature"`
+}
+
+// Replayable reports whether the block carries both the thinking text and the
+// signature required to be replayed verbatim to a provider. Blocks missing
+// either field cannot be sent back as assistant history.
+func (b ThinkingBlock) Replayable() bool {
+	return strings.TrimSpace(b.Thinking) != "" && strings.TrimSpace(b.Signature) != ""
+}
+
+// HasReplayableThinkingBlocks reports whether any block in blocks is replayable.
+func HasReplayableThinkingBlocks(blocks []ThinkingBlock) bool {
+	for _, block := range blocks {
+		if block.Replayable() {
+			return true
+		}
+	}
+	return false
 }
 
 // MessageProvenance captures the producer/source metadata of a persisted

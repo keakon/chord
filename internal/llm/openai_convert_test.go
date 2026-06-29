@@ -70,6 +70,22 @@ func TestConvertMessagesToOpenAI_ReplaysReasoningContentForOpenAIChat(t *testing
 	}
 }
 
+func TestConvertMessagesToOpenAI_SkipsReasoningOnlyAssistant(t *testing.T) {
+	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, []message.Message{
+		{Role: "user", Content: "before"},
+		{Role: "assistant", ReasoningContent: "hidden", Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat}},
+		{Role: "user", Content: "after"},
+	})
+	if len(out) != 2 {
+		t.Fatalf("convertMessagesToOpenAI() len = %d, want 2: %#v", len(out), out)
+	}
+	for _, msg := range out {
+		if msg.Role == "assistant" {
+			t.Fatalf("reasoning-only assistant was not skipped: %#v", out)
+		}
+	}
+}
+
 func TestConvertMessagesToOpenAI_DoesNotReplayReasoningForNonOpenAITarget(t *testing.T) {
 	msgs := []message.Message{{
 		Role:             "assistant",
