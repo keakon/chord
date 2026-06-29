@@ -640,13 +640,16 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		thinkingFlushInterval: 0,
 	}
 	streamReducer.tool = streamToolDeltaReducer{
-		agentID:                  s.instanceID,
-		turn:                     turn,
-		registry:                 s.tools,
-		ruleset:                  func() permission.Ruleset { return s.ruleset },
-		visibleToolNames:         s.visibleToolNames,
-		emit:                     s.parent.emitToTUI,
-		flushBeforeTool:          streamReducer.content.flushTextDelta,
+		agentID:          s.instanceID,
+		turn:             turn,
+		registry:         s.tools,
+		ruleset:          func() permission.Ruleset { return s.ruleset },
+		visibleToolNames: s.visibleToolNames,
+		emit:             s.parent.emitToTUI,
+		flushBeforeTool: func() {
+			streamReducer.content.flushThinkingDelta()
+			streamReducer.content.flushTextDelta()
+		},
 		promoteStreamingActivity: promoteStreamingActivity,
 		recordToolUseEnd:         s.parent.recordToolTraceToolUseEnd,
 		discardSpeculativeOnRollback: func(turn *Turn, reason string) {

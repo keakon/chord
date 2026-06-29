@@ -367,13 +367,16 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		thinkingFlushInterval:   defaultStreamThinkingFlushInterval,
 	}
 	streamReducer.tool = streamToolDeltaReducer{
-		agentID:                  "",
-		turn:                     turn,
-		registry:                 a.tools,
-		ruleset:                  a.effectiveRuleset,
-		visibleToolNames:         a.mainVisibleLLMToolNames,
-		emit:                     a.emitToTUI,
-		flushBeforeTool:          streamReducer.content.flushTextDelta,
+		agentID:          "",
+		turn:             turn,
+		registry:         a.tools,
+		ruleset:          a.effectiveRuleset,
+		visibleToolNames: a.mainVisibleLLMToolNames,
+		emit:             a.emitToTUI,
+		flushBeforeTool: func() {
+			streamReducer.content.flushThinkingDelta()
+			streamReducer.content.flushTextDelta()
+		},
 		promoteStreamingActivity: promoteStreamingActivity,
 		recordToolUseEnd:         a.recordToolTraceToolUseEnd,
 		discardSpeculativeOnRollback: func(turn *Turn, reason string) {
