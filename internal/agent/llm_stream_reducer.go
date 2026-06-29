@@ -45,8 +45,6 @@ type streamContentReducer struct {
 	thinkingActive   bool
 	thinkingLastEmit time.Time
 
-	onThinkingBlockClosed func(agentID, text string)
-
 	responseTextStarted bool
 }
 
@@ -208,9 +206,6 @@ func (r *streamContentReducer) closeThinkingBlock() {
 	if r.emit != nil {
 		r.emit(StreamThinkingEvent{Text: finalText, AgentID: r.agentID})
 	}
-	if r.onThinkingBlockClosed != nil && strings.TrimSpace(fullText) != "" {
-		r.onThinkingBlockClosed(r.agentID, fullText)
-	}
 }
 
 type llmStreamReducer struct {
@@ -230,7 +225,6 @@ type llmStreamReducer struct {
 	onKeyConfirmed   func(*message.StatusDelta)
 	onRetryError     func(error, string, string, string)
 	onError          func(text string)
-	onRollback       func()
 }
 
 func (r *llmStreamReducer) Handle(delta message.StreamDelta) {
@@ -242,9 +236,6 @@ func (r *llmStreamReducer) Handle(delta message.StreamDelta) {
 	}
 	if delta.Type == message.StreamDeltaRollback {
 		r.content.Rollback()
-		if r.onRollback != nil {
-			r.onRollback()
-		}
 		r.tool.Handle(delta)
 		return
 	}

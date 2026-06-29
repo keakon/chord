@@ -2,15 +2,12 @@ package agent
 
 import (
 	"context"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
-	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/thinkingtranslate"
 )
 
@@ -166,7 +163,7 @@ func TestCallLLMClosesThinkingBeforeFirstText(t *testing.T) {
 		t.Fatalf("text = %q, want answer", text.Text)
 	}
 }
-func TestCallLLMTranslatesEachStreamingThinkingBlock(t *testing.T) {
+func TestCallLLMDoesNotTranslateStreamingThinkingBlocks(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "hi"})
 	a.newTurn()
@@ -180,16 +177,9 @@ func TestCallLLMTranslatesEachStreamingThinkingBlock(t *testing.T) {
 	}
 	svc.TargetLang = "zh-Hans"
 	svc.ModelPool = "translation"
-	var translatedMu sync.Mutex
-	var translated []string
 	svc.SetTranslator(agentTestChunkTranslator{translate: func(ctx context.Context, targetLang, chunk string) (string, error) {
-		if targetLang != "zh-Hans" {
-			t.Fatalf("targetLang = %q, want zh-Hans", targetLang)
-		}
-		translatedMu.Lock()
-		translated = append(translated, chunk)
-		translatedMu.Unlock()
-		return "翻译:" + chunk, nil
+		t.Fatalf("streaming thinking should not be translated; target=%q chunk=%q", targetLang, chunk)
+		return "", nil
 	}})
 	a.thinkingTranslateSvc = svc
 
@@ -219,17 +209,51 @@ func TestCallLLMTranslatesEachStreamingThinkingBlock(t *testing.T) {
 	}
 	a.outputWg.Wait()
 
-	translatedMu.Lock()
-	translatedCount := len(translated)
-	translatedSet := make(map[string]bool, len(translated))
-	for _, chunk := range translated {
-		translatedSet[chunk] = true
+	for _, evt := range drainAgentEvents(a.Events()) {
+		if translated, ok := evt.(ThinkingTranslatedEvent); ok {
+			t.Fatalf("unexpected ThinkingTranslatedEvent during streaming: %#v", translated)
+		}
 	}
-	translatedMu.Unlock()
-	if translatedCount != 2 {
-		t.Fatalf("translator calls = %d, want 2; chunks=%#v", translatedCount, translated)
+}
+
+func TestMaybeTranslateLatestThinkingAllowsMultipleAssistantMessagesInSameTurn(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.newTurn()
+	if a.turn == nil {
+		t.Fatal("expected active turn")
 	}
-	if !translatedSet["First streaming thought."] || !translatedSet["Second streaming thought."] {
+	turnID := a.turn.ID
+
+	svc, err := thinkingtranslate.NewService()
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	svc.TargetLang = "zh-Hans"
+	svc.ModelPool = "translation"
+	var translated []string
+	svc.SetTranslator(agentTestChunkTranslator{translate: func(ctx context.Context, targetLang, chunk string) (string, error) {
+		if targetLang != "zh-Hans" {
+			t.Fatalf("targetLang = %q, want zh-Hans", targetLang)
+		}
+		translated = append(translated, chunk)
+		return "翻译:" + chunk, nil
+	}})
+	a.thinkingTranslateSvc = svc
+
+	a.ctxMgr.Append(message.Message{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "First durable thought."}}})
+	a.maybeTranslateLatestThinkingAfterIdle(turnID)
+	a.outputWg.Wait()
+
+	a.ctxMgr.Append(message.Message{Role: "tool", ToolCallID: "call-1", Content: "tool result"})
+	a.ctxMgr.Append(message.Message{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "Second durable thought."}}})
+	a.maybeTranslateLatestThinkingAfterIdle(turnID)
+	a.maybeTranslateLatestThinkingAfterIdle(turnID)
+	a.outputWg.Wait()
+
+	if len(translated) != 2 {
+		t.Fatalf("translator calls = %d, want 2; chunks=%#v", len(translated), translated)
+	}
+	if translated[0] != "First durable thought." || translated[1] != "Second durable thought." {
 		t.Fatalf("translated chunks = %#v", translated)
 	}
 
@@ -242,103 +266,11 @@ func TestCallLLMTranslatesEachStreamingThinkingBlock(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("ThinkingTranslatedEvent count = %d, want 2; events=%#v", len(got), got)
 	}
-	byBlock := make(map[int]ThinkingTranslatedEvent, len(got))
-	for _, evt := range got {
-		byBlock[evt.BlockIndex] = evt
+	if got[0].MessageID != "msgidx:0" || got[0].Translated != "翻译:First durable thought." {
+		t.Fatalf("first translation event = %#v", got[0])
 	}
-	for i, want := range []string{"First streaming thought.", "Second streaming thought."} {
-		evt, ok := byBlock[i]
-		if !ok {
-			t.Fatalf("missing ThinkingTranslatedEvent for block %d; events=%#v", i, got)
-		}
-		if evt.MessageID != "msgidx:1" {
-			t.Fatalf("block %d MessageID = %q, want msgidx:1", i, evt.MessageID)
-		}
-		if evt.Translated != "翻译:"+want {
-			t.Fatalf("block %d Translated = %q, want %q", i, evt.Translated, "翻译:"+want)
-		}
-	}
-}
-
-func TestStreamingThinkingTranslationCancelledOnRollback(t *testing.T) {
-	a := newReadyTestMainAgent(t)
-
-	svc, err := thinkingtranslate.NewService()
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
-	svc.TargetLang = "zh-Hans"
-	svc.ModelPool = "translation"
-	firstStarted := make(chan struct{})
-	firstCancelled := make(chan struct{})
-	var firstStartedOnce sync.Once
-	var firstCancelledOnce sync.Once
-	var mu sync.Mutex
-	calls := 0
-	svc.SetTranslator(agentTestChunkTranslator{translate: func(ctx context.Context, targetLang, chunk string) (string, error) {
-		mu.Lock()
-		calls++
-		call := calls
-		mu.Unlock()
-		if call == 1 {
-			firstStartedOnce.Do(func() { close(firstStarted) })
-			<-ctx.Done()
-			firstCancelledOnce.Do(func() { close(firstCancelled) })
-			return "", ctx.Err()
-		}
-		return "翻译:" + chunk, nil
-	}})
-	a.thinkingTranslateSvc = svc
-
-	a.scheduleStreamingThinkingTranslation(1, 0, "Failed streaming thought.")
-	select {
-	case <-firstStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for first translation to start")
-	}
-
-	a.cancelStreamingThinkingTranslations(1)
-	select {
-	case <-firstCancelled:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for rollback to cancel first translation")
-	}
-	a.outputWg.Wait()
-
-	entries, err := recovery.LoadThinkingTranslations(a.sessionDir)
-	if err != nil {
-		t.Fatalf("LoadThinkingTranslations: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("entries len = %d, want no stale rollback translation: %#v", len(entries), entries)
-	}
-	for _, evt := range drainAgentEvents(a.Events()) {
-		if translated, ok := evt.(ThinkingTranslatedEvent); ok {
-			t.Fatalf("unexpected stale ThinkingTranslatedEvent after rollback: %#v", translated)
-		}
-	}
-
-	a.scheduleStreamingThinkingTranslation(1, 0, "Retried streaming thought.")
-	a.outputWg.Wait()
-
-	var got []ThinkingTranslatedEvent
-	for _, evt := range drainAgentEvents(a.Events()) {
-		if translated, ok := evt.(ThinkingTranslatedEvent); ok {
-			got = append(got, translated)
-		}
-	}
-	if len(got) != 1 {
-		t.Fatalf("ThinkingTranslatedEvent count after retry = %d, want 1: %#v", len(got), got)
-	}
-	if got[0].MessageID != "msgidx:1" || got[0].BlockIndex != 0 || got[0].Translated != "翻译:Retried streaming thought." {
-		t.Fatalf("retry translation event = %#v", got[0])
-	}
-	entries, err = recovery.LoadThinkingTranslations(a.sessionDir)
-	if err != nil {
-		t.Fatalf("LoadThinkingTranslations retry: %v", err)
-	}
-	if len(entries) != 1 || entries[0].Translated != "翻译:Retried streaming thought." {
-		t.Fatalf("entries after retry = %#v, want retry translation", entries)
+	if got[1].MessageID != "msgidx:2" || got[1].Translated != "翻译:Second durable thought." {
+		t.Fatalf("second translation event = %#v", got[1])
 	}
 }
 

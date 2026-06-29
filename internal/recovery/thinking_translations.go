@@ -108,45 +108,6 @@ func LoadThinkingTranslations(sessionDir string) ([]ThinkingTranslationEntry, er
 	return entries, nil
 }
 
-// DeleteThinkingTranslationsForMessage removes all durable translations bound
-// to a message ID in the active session directory.
-func DeleteThinkingTranslationsForMessage(sessionDir, messageID string) error {
-	sessionDir = normalizeThinkingTranslationsSessionDir(sessionDir)
-	messageID = strings.TrimSpace(messageID)
-	if sessionDir == "" || messageID == "" {
-		return nil
-	}
-
-	lock := thinkingTranslationsSessionLockFor(sessionDir)
-	lock.mu.Lock()
-	defer lock.mu.Unlock()
-
-	file, err := loadThinkingTranslationsFileLocked(sessionDir)
-	if err != nil {
-		return err
-	}
-	if len(file.Entries) == 0 {
-		return nil
-	}
-	kept := file.Entries[:0]
-	removed := false
-	for _, entry := range file.Entries {
-		if strings.TrimSpace(entry.MessageID) == messageID {
-			removed = true
-			continue
-		}
-		kept = append(kept, entry)
-	}
-	if !removed {
-		return nil
-	}
-	file.Entries = kept
-	if file.Version == 0 {
-		file.Version = 1
-	}
-	return writeThinkingTranslationsFileLocked(sessionDir, file)
-}
-
 func normalizeThinkingTranslationsSessionDir(sessionDir string) string {
 	sessionDir = strings.TrimSpace(sessionDir)
 	if sessionDir == "" {

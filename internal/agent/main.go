@@ -327,11 +327,9 @@ type MainAgent struct {
 	sessionEpoch         uint64
 	nextCompactionPlanID uint64
 
-	thinkingTranslateMu          sync.Mutex
-	thinkingTranslateSvc         *thinkingtranslate.Service
-	thinkingTranslateSeen        map[string]struct{}
-	thinkingTranslateActive      map[string]*thinkingTranslationJob
-	thinkingTranslateTurnHandled map[uint64]struct{}
+	thinkingTranslateMu   sync.Mutex
+	thinkingTranslateSvc  *thinkingtranslate.Service
+	thinkingTranslateSeen map[string]struct{}
 
 	sessionDir          string
 	modelName           string

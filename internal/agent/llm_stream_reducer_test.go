@@ -95,31 +95,21 @@ func TestStreamContentReducerRollbackDropsBufferedTextBeforeFinish(t *testing.T)
 
 func TestLLMStreamReducerRollbackResetsContentBeforeFinish(t *testing.T) {
 	var events []AgentEvent
-	closed := 0
-	rollbacks := 0
 	reducer := &llmStreamReducer{}
 	reducer.content = streamContentReducer{
 		emit:                  func(evt AgentEvent) { events = append(events, evt) },
 		emitThinkingStarted:   true,
 		closeThinkingOnFinish: true,
 		thinkingCommitMode:    streamContentCommitEmpty,
-		onThinkingBlockClosed: func(string, string) { closed++ },
 		textFlushInterval:     time.Hour,
 		thinkingFlushInterval: time.Hour,
 	}
 	reducer.tool = streamToolDeltaReducer{emit: func(evt AgentEvent) { events = append(events, evt) }}
-	reducer.onRollback = func() { rollbacks++ }
 
 	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaThinking, Text: "failed thought"})
 	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaRollback, Rollback: &message.RollbackDelta{Reason: "interrupted"}})
 	reducer.Finish()
 
-	if rollbacks != 1 {
-		t.Fatalf("rollbacks = %d, want 1", rollbacks)
-	}
-	if closed != 0 {
-		t.Fatalf("closed callbacks = %d, want 0 after rollback", closed)
-	}
 	if len(events) != 2 {
 		t.Fatalf("events len = %d, want ThinkingStartedEvent + StreamRollbackEvent: %#v", len(events), events)
 	}

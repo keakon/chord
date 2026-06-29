@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/abadojack/whatlanggo"
@@ -102,18 +101,6 @@ func (a *MainAgent) maybeTranslateLatestThinkingAfterIdle(turnID uint64) {
 		return
 	}
 
-	// Ensure we schedule at most once per turn.
-	a.thinkingTranslateMu.Lock()
-	if a.thinkingTranslateTurnHandled == nil {
-		a.thinkingTranslateTurnHandled = make(map[uint64]struct{})
-	}
-	if _, ok := a.thinkingTranslateTurnHandled[turnID]; ok {
-		a.thinkingTranslateMu.Unlock()
-		return
-	}
-	a.thinkingTranslateTurnHandled[turnID] = struct{}{}
-	a.thinkingTranslateMu.Unlock()
-
 	msgs := a.ctxMgr.Snapshot()
 	if len(msgs) == 0 {
 		return
@@ -130,86 +117,22 @@ func (a *MainAgent) maybeTranslateLatestThinkingAfterIdle(turnID uint64) {
 	}
 }
 
-func (a *MainAgent) scheduleStreamingThinkingTranslation(messageIndex, blockIndex int, original string) {
-	if a == nil || strings.TrimSpace(original) == "" || messageIndex < 0 || blockIndex < 0 {
-		return
-	}
-	svc := a.thinkingTranslationService()
-	if svc == nil {
-		return
-	}
-	messageKey := fmt.Sprintf("msgidx:%d", messageIndex)
-	a.scheduleThinkingTranslationWithOptions(svc, messageKey, svc.TargetLang, thinkingTranslationBlock{BlockIndex: blockIndex, Original: original}, true)
-}
-
-func (a *MainAgent) cancelStreamingThinkingTranslations(messageIndex int) {
-	if a == nil || messageIndex < 0 {
-		return
-	}
-	messageKey := fmt.Sprintf("msgidx:%d", messageIndex)
-	seenPrefix := fmt.Sprintf("%d:%s:", a.sessionEpoch, messageKey)
-	var jobs []*thinkingTranslationJob
-
-	a.thinkingTranslateMu.Lock()
-	for key := range a.thinkingTranslateSeen {
-		if strings.HasPrefix(key, seenPrefix) {
-			delete(a.thinkingTranslateSeen, key)
-		}
-	}
-	for key, job := range a.thinkingTranslateActive {
-		if !strings.HasPrefix(key, seenPrefix) || job == nil || job.cancel == nil {
-			continue
-		}
-		jobs = append(jobs, job)
-		delete(a.thinkingTranslateActive, key)
-	}
-	a.thinkingTranslateMu.Unlock()
-
-	for _, job := range jobs {
-		job.commitMu.Lock()
-		if job.cancel != nil {
-			job.cancel()
-		}
-		job.commitMu.Unlock()
-	}
-	if err := recovery.DeleteThinkingTranslationsForMessage(a.sessionDir, messageKey); err != nil {
-		log.Debugf("thinking translation rollback cleanup failed message=%s err=%v", messageKey, err)
-	}
-}
-
 func (a *MainAgent) resetThinkingTranslationSeen() {
 	if a == nil {
 		return
 	}
 	a.thinkingTranslateMu.Lock()
 	a.thinkingTranslateSeen = nil
-	for _, job := range a.thinkingTranslateActive {
-		if job != nil && job.cancel != nil {
-			job.cancel()
-		}
-	}
-	a.thinkingTranslateActive = nil
-	a.thinkingTranslateTurnHandled = nil
 	a.thinkingTranslateMu.Unlock()
 }
 
 func (a *MainAgent) scheduleThinkingTranslation(svc *thinkingtranslate.Service, messageKey, userLang string, block thinkingTranslationBlock) {
-	a.scheduleThinkingTranslationWithOptions(svc, messageKey, userLang, block, false)
-}
-
-func (a *MainAgent) scheduleThinkingTranslationWithOptions(svc *thinkingtranslate.Service, messageKey, userLang string, block thinkingTranslationBlock, cancelOnRollback bool) {
 	if a == nil || svc == nil || strings.TrimSpace(block.Original) == "" {
 		return
 	}
 	translationCtx := a.parentCtx
 	if translationCtx == nil {
 		translationCtx = context.Background()
-	}
-	var job *thinkingTranslationJob
-	if cancelOnRollback {
-		var cancel context.CancelFunc
-		translationCtx, cancel = context.WithCancel(translationCtx)
-		job = &thinkingTranslationJob{cancel: cancel}
 	}
 	sessionEpoch := a.sessionEpoch
 	seenKey := fmt.Sprintf("%d:%s:%d", sessionEpoch, messageKey, block.BlockIndex)
@@ -219,36 +142,11 @@ func (a *MainAgent) scheduleThinkingTranslationWithOptions(svc *thinkingtranslat
 	}
 	if _, ok := a.thinkingTranslateSeen[seenKey]; ok {
 		a.thinkingTranslateMu.Unlock()
-		if job != nil && job.cancel != nil {
-			job.cancel()
-		}
 		return
 	}
 	a.thinkingTranslateSeen[seenKey] = struct{}{}
-	if job != nil {
-		if a.thinkingTranslateActive == nil {
-			a.thinkingTranslateActive = make(map[string]*thinkingTranslationJob)
-		}
-		a.thinkingTranslateActive[seenKey] = job
-	}
 	a.thinkingTranslateMu.Unlock()
-	a.translateThinkingBlockAsync(translationCtx, sessionEpoch, svc, messageKey, userLang, block, seenKey, job)
-}
-
-type thinkingTranslationJob struct {
-	cancel   context.CancelFunc
-	commitMu sync.Mutex
-}
-
-func (a *MainAgent) finishThinkingTranslationJob(seenKey string, job *thinkingTranslationJob) {
-	if a == nil || job == nil || seenKey == "" {
-		return
-	}
-	a.thinkingTranslateMu.Lock()
-	if a.thinkingTranslateActive[seenKey] == job {
-		delete(a.thinkingTranslateActive, seenKey)
-	}
-	a.thinkingTranslateMu.Unlock()
+	a.translateThinkingBlockAsync(translationCtx, sessionEpoch, svc, messageKey, userLang, block)
 }
 
 type thinkingTranslationBlock struct {
@@ -273,7 +171,7 @@ func extractThinkingTranslationBlocks(msg message.Message) []thinkingTranslation
 	return blocks
 }
 
-func (a *MainAgent) translateThinkingBlockAsync(ctx context.Context, sessionEpoch uint64, svc *thinkingtranslate.Service, messageKey, userLang string, block thinkingTranslationBlock, seenKey string, job *thinkingTranslationJob) {
+func (a *MainAgent) translateThinkingBlockAsync(ctx context.Context, sessionEpoch uint64, svc *thinkingtranslate.Service, messageKey, userLang string, block thinkingTranslationBlock) {
 	if strings.TrimSpace(block.Original) == "" {
 		return
 	}
@@ -283,7 +181,6 @@ func (a *MainAgent) translateThinkingBlockAsync(ctx context.Context, sessionEpoc
 	original := block.Original
 	blockIndex := block.BlockIndex
 	a.outputWg.Go(func() {
-		defer a.finishThinkingTranslationJob(seenKey, job)
 		trigger, meta := svc.ShouldTranslate(userLang, original)
 		if !trigger {
 			log.Debugf("thinking translation skipped message=%s block=%d reason=%s detected=%s confidence=%.2f latin_ratio=%.2f", messageKey, blockIndex, meta.Reason, meta.DetectedLang, meta.Confidence, meta.LatinRatio)
@@ -300,10 +197,6 @@ func (a *MainAgent) translateThinkingBlockAsync(ctx context.Context, sessionEpoc
 		if thinkingtranslate.NormalizeForCompare(out) == thinkingtranslate.NormalizeForCompare(original) {
 			log.Debugf("thinking translation ignored identical output message=%s block=%d pool=%s target=%s duration=%s chunks=%d", messageKey, blockIndex, svc.ModelPool, meta.TargetLang, meta.Duration, meta.Chunks)
 			return
-		}
-		if job != nil {
-			job.commitMu.Lock()
-			defer job.commitMu.Unlock()
 		}
 		if ctx.Err() != nil || a.sessionEpoch != sessionEpoch {
 			log.Debugf("thinking translation dropped stale event message=%s block=%d session_epoch=%d current_session_epoch=%d", messageKey, blockIndex, sessionEpoch, a.sessionEpoch)
