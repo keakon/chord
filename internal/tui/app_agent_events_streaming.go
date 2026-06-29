@@ -20,14 +20,18 @@ func (b *Block) appendStreamingContent(delta string) {
 		b.streamContentBuilder.WriteString(b.Content)
 	}
 	b.streamContentBuilder.WriteString(delta)
-	b.Content = b.streamContentBuilder.String()
 }
 
-func (b *Block) syncStreamingContent() {
+func (b *Block) syncStreamingContent() bool {
 	if b == nil || b.streamContentBuilder == nil {
-		return
+		return false
 	}
-	b.Content = b.streamContentBuilder.String()
+	content := b.streamContentBuilder.String()
+	if b.Content == content {
+		return false
+	}
+	b.Content = content
+	return true
 }
 
 func (b *Block) finishStreamingContent() {
@@ -35,6 +39,17 @@ func (b *Block) finishStreamingContent() {
 	if b != nil {
 		b.streamContentBuilder = nil
 	}
+}
+
+func (m *Model) flushStreamingBlock(block *Block, updateViewport bool) bool {
+	if block == nil || !block.syncStreamingContent() {
+		return false
+	}
+	block.InvalidateCache()
+	if updateViewport && m != nil && m.viewport != nil {
+		m.viewport.UpdateBlock(block.ID)
+	}
+	return true
 }
 
 func visibleAssistantStreamContent(content string) string {
@@ -121,6 +136,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			}
 		}
 		m.currentAssistantBlock.appendStreamingContent(evt.Text)
+		firstVisibleAssistantDelta := !m.assistantBlockAppended && m.currentAssistantBlock.syncStreamingContent()
 		if !m.assistantBlockAppended && !assistantStreamContentIsPlaceholder(m.currentAssistantBlock.Content) {
 			m.appendViewportBlock(m.currentAssistantBlock)
 			m.assistantBlockAppended = true
@@ -128,12 +144,13 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 				effects.addFollowup(m.requestStreamBoundaryFlush())
 			}
 		}
-		m.currentAssistantBlock.InvalidateCache()
-		if m.assistantBlockAppended {
-			m.viewport.InvalidateBlock(m.currentAssistantBlock.ID)
+		if firstVisibleAssistantDelta {
+			m.currentAssistantBlock.InvalidateCache()
+			if m.assistantBlockAppended {
+				m.viewport.InvalidateBlock(m.currentAssistantBlock.ID)
+			}
 		}
-		if m.hasDeferredStartupTranscript() {
-			m.currentAssistantBlock.syncStreamingContent()
+		if firstVisibleAssistantDelta && m.hasDeferredStartupTranscript() {
 			m.syncStartupDeferredTranscriptBlock(m.currentAssistantBlock)
 		}
 		m.exitRenderFreeze()
@@ -156,6 +173,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		}
 		m.ensureStreamingThinkingBlock(evt.AgentID)
 		m.currentThinkingBlock.appendStreamingContent(evt.Text)
+		firstVisibleThinkingDelta := !m.thinkingBlockAppended && m.currentThinkingBlock.syncStreamingContent()
 		if strings.TrimSpace(m.currentThinkingBlock.Content) != "" && !m.thinkingBlockAppended {
 			m.appendViewportBlock(m.currentThinkingBlock)
 			m.thinkingBlockAppended = true
@@ -163,12 +181,13 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 				effects.addFollowup(m.requestStreamBoundaryFlush())
 			}
 		}
-		m.currentThinkingBlock.InvalidateCache()
-		if m.thinkingBlockAppended {
-			m.viewport.InvalidateBlock(m.currentThinkingBlock.ID)
+		if firstVisibleThinkingDelta {
+			m.currentThinkingBlock.InvalidateCache()
+			if m.thinkingBlockAppended {
+				m.viewport.InvalidateBlock(m.currentThinkingBlock.ID)
+			}
 		}
-		if m.hasDeferredStartupTranscript() {
-			m.currentThinkingBlock.syncStreamingContent()
+		if firstVisibleThinkingDelta && m.hasDeferredStartupTranscript() {
 			m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
 		}
 		m.exitRenderFreeze()
@@ -176,9 +195,11 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		effects.addFollowup(m.scheduleStreamFlush(0))
 		return true, effects
 	case agent.StreamThinkingEvent:
+		flushedThinking := false
 		if strings.TrimSpace(evt.Text) != "" {
 			m.ensureStreamingThinkingBlock(evt.AgentID)
 			m.currentThinkingBlock.appendStreamingContent(evt.Text)
+			flushedThinking = m.currentThinkingBlock.syncStreamingContent()
 			if !m.thinkingBlockAppended {
 				m.appendViewportBlock(m.currentThinkingBlock)
 				m.thinkingBlockAppended = true
@@ -186,19 +207,11 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 					effects.addFollowup(m.requestStreamBoundaryFlush())
 				}
 			}
-			m.currentThinkingBlock.InvalidateCache()
-			if m.thinkingBlockAppended {
-				m.viewport.UpdateBlock(m.currentThinkingBlock.ID)
-			}
-			if m.hasDeferredStartupTranscript() {
-				m.currentThinkingBlock.syncStreamingContent()
-				m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
-			}
-			m.exitRenderFreeze()
-			m.markStreamRenderDirty()
-			effects.addFollowup(m.scheduleStreamFlush(0))
 		}
 		if m.currentThinkingBlock != nil {
+			if !flushedThinking {
+				flushedThinking = m.currentThinkingBlock.syncStreamingContent()
+			}
 			m.currentThinkingBlock.Streaming = false
 			if !m.thinkingStartTime.IsZero() {
 				m.currentThinkingBlock.ThinkingDuration = time.Since(m.thinkingStartTime)
@@ -206,8 +219,14 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			}
 			m.currentThinkingBlock.InvalidateCache()
 			if m.thinkingBlockAppended {
+				if flushedThinking {
+					m.viewport.UpdateBlock(m.currentThinkingBlock.ID)
+				}
 				m.markBlockSettled(m.currentThinkingBlock)
 				m.viewport.InvalidateBlock(m.currentThinkingBlock.ID)
+			}
+			if flushedThinking && m.hasDeferredStartupTranscript() {
+				m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
 			}
 			m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 			// Detach the settled block so the next round of thinking starts

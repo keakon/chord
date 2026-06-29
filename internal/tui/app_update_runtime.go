@@ -111,11 +111,11 @@ func (m *Model) handleStreamFlushTick(msg streamFlushTickMsg) tea.Cmd {
 	if !m.consumeStreamFlush(msg) {
 		return nil
 	}
-	if m.currentAssistantBlock != nil {
-		m.currentAssistantBlock.syncStreamingContent()
+	if m.currentAssistantBlock != nil && m.flushStreamingBlock(m.currentAssistantBlock, m.assistantBlockAppended) && m.hasDeferredStartupTranscript() {
+		m.syncStartupDeferredTranscriptBlock(m.currentAssistantBlock)
 	}
-	if m.currentThinkingBlock != nil {
-		m.currentThinkingBlock.syncStreamingContent()
+	if m.currentThinkingBlock != nil && m.flushStreamingBlock(m.currentThinkingBlock, m.thinkingBlockAppended) && m.hasDeferredStartupTranscript() {
+		m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
 	}
 	m.exitRenderFreeze()
 	m.setStreamRenderInvalidation(streamRenderInvalidateForce)

@@ -121,8 +121,11 @@ func TestStreamTextDeltasReuseCachedViewUntilFlush(t *testing.T) {
 	m := newStreamTextRenderedModel(t, "first")
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: " second"}})
-	if m.currentAssistantBlock == nil || m.currentAssistantBlock.Content != "first second" {
-		t.Fatalf("assistant block content = %q, want accumulated stream text before flush", blockContentForTest(m.currentAssistantBlock))
+	if m.currentAssistantBlock == nil || m.currentAssistantBlock.Content != "first" {
+		t.Fatalf("assistant block content = %q, want last flushed stream text before flush", blockContentForTest(m.currentAssistantBlock))
+	}
+	if got := pendingStreamingContentForTest(m.currentAssistantBlock); got != "first second" {
+		t.Fatalf("pending assistant stream content = %q, want accumulated text", got)
 	}
 	deferred := stripANSI(m.View().Content)
 	if strings.Contains(deferred, "second") {
@@ -225,12 +228,15 @@ func TestStreamingAssistantPlaceholderRendersNoCard(t *testing.T) {
 	}
 }
 
-func TestStreamThinkingDeltasAccumulateContentBeforeFlush(t *testing.T) {
+func TestStreamThinkingDeltasStayPendingUntilFlush(t *testing.T) {
 	m := newStreamThinkingRenderedModel(t, "first")
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: " second"}})
-	if m.currentThinkingBlock == nil || m.currentThinkingBlock.Content != "first second" {
-		t.Fatalf("thinking block content = %q, want accumulated thinking text before flush", blockContentForTest(m.currentThinkingBlock))
+	if m.currentThinkingBlock == nil || m.currentThinkingBlock.Content != "first" {
+		t.Fatalf("thinking block content = %q, want last flushed thinking text before flush", blockContentForTest(m.currentThinkingBlock))
+	}
+	if got := pendingStreamingContentForTest(m.currentThinkingBlock); got != "first second" {
+		t.Fatalf("pending thinking stream content = %q, want accumulated text", got)
 	}
 	deferred := stripANSI(m.View().Content)
 	if strings.Contains(deferred, "second") {
@@ -270,6 +276,24 @@ func TestStreamThinkingEventFinalBoundaryKeepsUrgentFlush(t *testing.T) {
 	}
 	if !m.streamRenderForceView || m.streamRenderDeferred || m.streamRenderDeferNext {
 		t.Fatalf("final thinking invalidation = force:%v deferred:%v next:%v, want forced boundary render", m.streamRenderForceView, m.streamRenderDeferred, m.streamRenderDeferNext)
+	}
+}
+
+func TestStreamThinkingEventFlushesPendingDeltaOnEmptyFinalEvent(t *testing.T) {
+	m := newStreamThinkingRenderedModel(t, "first")
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: " second"}})
+	if got := m.currentThinkingBlock.Content; got != "first" {
+		t.Fatalf("thinking content before final event = %q, want last flushed content", got)
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{Text: ""}})
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) == 0 {
+		t.Fatal("expected finalized thinking block to remain visible")
+	}
+	if got := blocks[len(blocks)-1].Content; got != "first second" {
+		t.Fatalf("finalized thinking content = %q, want pending delta flushed", got)
 	}
 }
 
@@ -421,6 +445,13 @@ func blockContentForTest(block *Block) string {
 		return ""
 	}
 	return block.Content
+}
+
+func pendingStreamingContentForTest(block *Block) string {
+	if block == nil || block.streamContentBuilder == nil {
+		return blockContentForTest(block)
+	}
+	return block.streamContentBuilder.String()
 }
 
 func repeatedStreamDeltas(count int, delta string) []string {
