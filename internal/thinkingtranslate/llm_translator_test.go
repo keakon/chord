@@ -139,6 +139,12 @@ func TestClearlyInvalidTranslationAllowsShortOriginals(t *testing.T) {
 	}
 }
 
+func TestClearlyInvalidTranslationRejectsShortSymbolOnlyTranslation(t *testing.T) {
+	if !IsClearlyInvalidTranslation("Short heading", "zh-Hans", "**") {
+		t.Fatal("IsClearlyInvalidTranslation() accepted a symbol-only short translation")
+	}
+}
+
 func TestClearlyInvalidTranslationRejectsSeverelyCompressedLongOriginal(t *testing.T) {
 	original := "The sample explanation describes a translation fallback scenario with enough detail to verify that a very short output has lost important meaning from the source text. The validation should reject the output before it is accepted as a useful translation."
 	if !IsClearlyInvalidTranslation(original, "zh-Hans", "过短的摘要") {
@@ -151,6 +157,22 @@ func TestClearlyInvalidTranslationAllowsReasonableCompression(t *testing.T) {
 	translated := "示例说明描述了翻译备用流程，并保留了原文中的重要含义。"
 	if IsClearlyInvalidTranslation(original, "zh-Hans", translated) {
 		t.Fatal("IsClearlyInvalidTranslation() rejected a reasonably compressed translation")
+	}
+}
+
+func TestClearlyInvalidTranslationRejectsExcessiveWordCountRatio(t *testing.T) {
+	original := "The translator should preserve enough words from the original reasoning to keep the meaning clear for readers."
+	translated := "译文过短"
+	if !IsClearlyInvalidTranslation(original, "zh-Hans", translated) {
+		t.Fatal("IsClearlyInvalidTranslation() accepted an excessive word-count ratio")
+	}
+}
+
+func TestClearlyInvalidTranslationAllowsReasonableWordCountRatio(t *testing.T) {
+	original := "The translator should preserve enough words from the original reasoning to keep the meaning clear for readers."
+	translated := "译文应保留原始推理中的足够信息，让读者能清楚理解其含义。"
+	if IsClearlyInvalidTranslation(original, "zh-Hans", translated) {
+		t.Fatal("IsClearlyInvalidTranslation() rejected a reasonable word-count ratio")
 	}
 }
 
