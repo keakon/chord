@@ -1314,12 +1314,12 @@ func TestNewProviderConfig_CustomURL(t *testing.T) {
 }
 
 func TestNewProviderConfig_OpenAICodexPreset_DefaultURL(t *testing.T) {
-	cfg, _, err := config.NormalizeOpenAICodexProvider(config.ProviderConfig{
+	cfg, _, err := config.NormalizeProviderPreset(config.ProviderConfig{
 		Type:   config.ProviderTypeResponses,
 		Preset: config.ProviderPresetCodex,
-	}, false)
+	})
 	if err != nil {
-		t.Fatalf("NormalizeOpenAICodexProvider: %v", err)
+		t.Fatalf("NormalizeProviderPreset: %v", err)
 	}
 	p := NewProviderConfig("test", cfg, []string{"key"})
 	if p.APIURL() != config.OpenAICodexResponsesURL {

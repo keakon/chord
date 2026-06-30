@@ -129,7 +129,7 @@ func runAuthRefresh(cmd *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("provider %q was not found", providerName)
 	}
-	normalizedCfg, meta, err := config.NormalizeOpenAICodexProvider(providerCfg, false)
+	normalizedCfg, meta, err := config.NormalizeProviderPreset(providerCfg)
 	if err != nil {
 		return fmt.Errorf("provider %q has invalid OAuth config: %w", providerName, err)
 	}
@@ -630,7 +630,7 @@ exchange:
 }
 
 func runAuthLoginDevice(providerName string, providerCfg config.ProviderConfig, globalProxy string, parentCtx context.Context) error {
-	normalizedCfg, meta, err := config.NormalizeOpenAICodexProvider(providerCfg, false)
+	normalizedCfg, meta, err := config.NormalizeProviderPreset(providerCfg)
 	if err != nil {
 		return fmt.Errorf("provider %q has invalid OAuth config: %w", providerName, err)
 	}
@@ -846,7 +846,7 @@ func resolveAuthLoginProvider(
 		return "", config.ProviderConfig{}, "", fmt.Errorf("provider %q was not found; available preset: codex providers: %s", preferred, strings.Join(eligible, ", "))
 	}
 
-	normalizedCfg, meta, err := config.NormalizeOpenAICodexProvider(providerCfg, false)
+	normalizedCfg, meta, err := config.NormalizeProviderPreset(providerCfg)
 	if err != nil {
 		return "", config.ProviderConfig{}, "", fmt.Errorf("provider %q has invalid OAuth config: %w", preferred, err)
 	}

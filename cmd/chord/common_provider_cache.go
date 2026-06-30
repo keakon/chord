@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -39,7 +38,7 @@ type providerCache struct {
 }
 
 func normalizeProviderConfig(provName string, cfg config.ProviderConfig, _ []config.ProviderCredential) (config.ProviderConfig, error) {
-	normalized, _, err := config.NormalizeOpenAICodexProvider(cfg, false)
+	normalized, _, err := config.NormalizeProviderPreset(cfg)
 	if err != nil {
 		return cfg, fmt.Errorf("normalize provider %q: %w", provName, err)
 	}
@@ -47,27 +46,20 @@ func normalizeProviderConfig(provName string, cfg config.ProviderConfig, _ []con
 		return cfg, err
 	}
 
-	// Auto-detect and set type if not configured
+	// Auto-detect type from api_url when preset normalization did not set it.
 	if normalized.Type == "" {
-		// Preset codex takes highest priority
-		if normalized.Preset == "codex" {
+		switch {
+		case config.APIURLPathHasSuffix(normalized.APIURL, "/responses"):
 			normalized.Type = config.ProviderTypeResponses
-		} else {
-			apiURL := normalized.APIURL
-			path := strings.TrimSuffix(apiURL, "/")
-			switch {
-			case strings.HasSuffix(path, "/responses"):
-				normalized.Type = config.ProviderTypeResponses
-			case strings.HasSuffix(path, "/chat/completions"):
-				normalized.Type = config.ProviderTypeChatCompletions
-			case strings.HasSuffix(path, "/messages"):
-				normalized.Type = config.ProviderTypeMessages
-			case strings.HasSuffix(path, "/models"):
-				normalized.Type = config.ProviderTypeGenerateContent
-			default:
-				return cfg, fmt.Errorf("could not auto-detect type for provider %q, please explicitly set 'type' field (allowed: %s, %s, %s, %s)",
-					provName, config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses, config.ProviderTypeGenerateContent)
-			}
+		case config.APIURLPathHasSuffix(normalized.APIURL, "/chat/completions"):
+			normalized.Type = config.ProviderTypeChatCompletions
+		case config.APIURLPathHasSuffix(normalized.APIURL, "/messages"):
+			normalized.Type = config.ProviderTypeMessages
+		case config.APIURLPathHasSuffix(normalized.APIURL, "/models"):
+			normalized.Type = config.ProviderTypeGenerateContent
+		default:
+			return cfg, fmt.Errorf("could not auto-detect type for provider %q, please explicitly set 'type' field (allowed: %s, %s, %s, %s)",
+				provName, config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses, config.ProviderTypeGenerateContent)
 		}
 	}
 
@@ -84,9 +76,8 @@ func normalizeProviderConfig(provName string, cfg config.ProviderConfig, _ []con
 	}
 
 	if normalized.Type == config.ProviderTypeGenerateContent {
-		apiURL := strings.TrimSuffix(strings.TrimSpace(normalized.APIURL), "/")
-		if apiURL == "" || !strings.HasSuffix(apiURL, "/models") {
-			return cfg, fmt.Errorf("provider %q type %q requires api_url ending in /models", provName, config.ProviderTypeGenerateContent)
+		if !config.APIURLPathHasSuffix(normalized.APIURL, "/models") {
+			return cfg, fmt.Errorf("provider %q type %q requires api_url path ending in /models", provName, config.ProviderTypeGenerateContent)
 		}
 	}
 

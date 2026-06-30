@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 
+	"github.com/keakon/chord/internal/config"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -133,15 +135,14 @@ func initialSetupCodexModels() []initialSetupModelDefaults {
 }
 
 func inferProviderTypeFromAPIURL(apiURL string) string {
-	path := strings.TrimSuffix(strings.TrimSpace(apiURL), "/")
 	switch {
-	case strings.HasSuffix(path, "/responses"):
+	case config.APIURLPathHasSuffix(apiURL, "/responses"):
 		return "responses"
-	case strings.HasSuffix(path, "/chat/completions"):
+	case config.APIURLPathHasSuffix(apiURL, "/chat/completions"):
 		return "chat-completions"
-	case strings.HasSuffix(path, "/messages"):
+	case config.APIURLPathHasSuffix(apiURL, "/messages"):
 		return "messages"
-	case strings.HasSuffix(path, "/models"):
+	case config.APIURLPathHasSuffix(apiURL, "/models"):
 		return "generate-content"
 	default:
 		return ""

@@ -205,6 +205,7 @@ const (
 const (
 	OAuthProfileOpenAICodex       = "openai_codex"
 	ProviderPresetCodex           = "codex"
+	ProviderPresetAzure           = "azure"
 	CompactionPresetGeneric       = "generic"
 	CompactionPresetCodex         = "codex"
 	CompactionProfileAuto         = "auto"
@@ -218,7 +219,7 @@ type ProviderConfig struct {
 	APIURL                    string                 `json:"api_url" yaml:"api_url"`                                                             // complete API URL (e.g., "https://api.openai.com/v1/chat/completions")
 	TokenURL                  string                 `json:"token_url,omitempty" yaml:"token_url,omitempty"`                                     // OAuth2 token endpoint for refresh_token grant
 	ClientID                  string                 `json:"client_id,omitempty" yaml:"client_id,omitempty"`                                     // OAuth2 client_id (required by some providers, e.g. openai: app_EMoamEEZ73f0CkXaXp7hrann)
-	Preset                    string                 `json:"preset,omitempty" yaml:"preset,omitempty"`                                           // e.g. "codex" for the official ChatGPT/Codex OAuth transport
+	Preset                    string                 `json:"preset,omitempty" yaml:"preset,omitempty"`                                           // e.g. "codex" for official ChatGPT/Codex OAuth, "azure" for Azure OpenAI Responses
 	Store                     *bool                  `json:"store,omitempty" yaml:"store,omitempty"`                                             // provider-level Responses storage preference; nil defaults to false
 	ResponsesWebsocket        *bool                  `json:"responses_websocket,omitempty" yaml:"responses_websocket,omitempty"`                 // whether to prefer Responses WebSocket transport; nil = preset default (codex:true, others:false)
 	ResponseHeaderTimeout     int                    `json:"response_header_timeout,omitempty" yaml:"response_header_timeout,omitempty"`         // initial provider HTTP response-header timeout in seconds (0 = built-in default)

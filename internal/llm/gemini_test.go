@@ -321,3 +321,17 @@ func TestGeminiStreamURL(t *testing.T) {
 		t.Fatalf("geminiStreamURL() = %q, want %q", got, want)
 	}
 }
+
+func TestGeminiStreamURLPreservesConfiguredQuery(t *testing.T) {
+	got := geminiStreamURL("https://example.invalid/v1beta/models?region=test", "test-model")
+	want := "https://example.invalid/v1beta/models/test-model:streamGenerateContent?alt=sse&region=test"
+	if got != want {
+		t.Fatalf("geminiStreamURL() = %q, want %q", got, want)
+	}
+}
+
+func TestValidateGeminiAPIURLIgnoresQuery(t *testing.T) {
+	if err := validateGeminiAPIURL("https://example.invalid/v1beta/models?region=test"); err != nil {
+		t.Fatalf("validateGeminiAPIURL() error = %v", err)
+	}
+}

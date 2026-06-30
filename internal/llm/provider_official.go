@@ -13,5 +13,6 @@ func providerUsesOfficialAPI(p *ProviderConfig) bool {
 	if p.officialAPI != nil {
 		return *p.officialAPI
 	}
-	return strings.EqualFold(strings.TrimSpace(p.preset), config.ProviderPresetCodex)
+	preset := strings.TrimSpace(p.preset)
+	return strings.EqualFold(preset, config.ProviderPresetCodex) || strings.EqualFold(preset, config.ProviderPresetAzure)
 }

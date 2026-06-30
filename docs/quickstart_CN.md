@@ -40,7 +40,7 @@ codesign --force --sign - /path/to/chord
 
 如果你更希望手写 YAML 而不是使用向导，见[配置与认证](./configuration_CN.md)或可直接复制粘贴的[示例配置库](./examples/index_CN.md)。
 
-对于 API key 配置，向导提供一个通用的 API key provider 路径。它会要求你输入一个以下列后缀结尾的 API URL，并在提示里给出示例：
+对于 API key 配置，向导提供一个通用的 API key provider 路径。它会要求你输入一个 URL path 以下列后缀结尾的 API URL，并在提示里给出示例：
 
 - `/responses` —— OpenAI Responses API / 兼容网关
 - `/messages` —— Anthropic Messages API / 兼容网关

@@ -190,3 +190,24 @@ func TestInferProviderTypeFromAPIURL_GeminiModels(t *testing.T) {
 		t.Fatalf("inferProviderTypeFromAPIURL(gemini trailing slash) = %q", got)
 	}
 }
+
+func TestInferProviderTypeFromAPIURLIgnoresQuery(t *testing.T) {
+	cases := []struct {
+		name   string
+		apiURL string
+		want   string
+	}{
+		{"responses", "https://example.invalid/openai/v1/responses?api-version=v1", "responses"},
+		{"messages", "https://example.invalid/v1/messages?version=preview", "messages"},
+		{"chat completions", "https://example.invalid/v1/chat/completions?source=test", "chat-completions"},
+		{"models", "https://example.invalid/v1beta/models?region=test", "generate-content"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := inferProviderTypeFromAPIURL(tc.apiURL); got != tc.want {
+				t.Fatalf("inferProviderTypeFromAPIURL(%q) = %q, want %q", tc.apiURL, got, tc.want)
+			}
+		})
+	}
+}

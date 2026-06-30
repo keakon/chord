@@ -300,9 +300,7 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 
 	// Validate API URL.
-	// Validate API URL.
-	path := strings.TrimSuffix(url, "/")
-	if !strings.HasSuffix(path, "/responses") {
+	if !config.APIURLPathHasSuffix(url, "/responses") {
 		log.Warnf("ResponsesProvider called with non-Responses API URL model=%v api_url=%v expected=%v", model, url, "*/responses")
 	}
 
@@ -550,6 +548,9 @@ func (r *ResponsesProvider) sendAndParse(
 	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	if useOpenAIOAuth {
 		applyOpenAIOAuthHeaders(req, r.provider, apiKey, true)
+	} else if r.provider != nil && r.provider.IsAzureOpenAITransport() {
+		req.Header.Set("api-key", apiKey)
+		applyAzureResponsesStreamingHeaders(req.Header, r.provider)
 	} else {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 		applyResponsesStreamingHeaders(req.Header, r.provider)

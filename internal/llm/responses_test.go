@@ -18,8 +18,10 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/keakon/golog"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/logtest"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
 	"github.com/keakon/chord/internal/ratelimit"
@@ -1975,6 +1977,109 @@ func TestResponsesProvider_GenericResponsesUsesResponsesWireHeaders(t *testing.T
 	}
 	if got := gotHeaders.Get("OpenAI-Beta"); got != "responses=experimental" {
 		t.Errorf("OpenAI-Beta = %q, want responses=experimental", got)
+	}
+}
+
+func TestResponsesProvider_AzurePresetUsesAPIKeyHeaderAndStore(t *testing.T) {
+	var gotHeaders http.Header
+	var gotBody map[string]any
+	var logs bytes.Buffer
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	logtest.WithDefault(logtest.NewLogger(&logs, golog.DebugLevel), func() {
+		cfg, _, err := config.NormalizeProviderPreset(config.ProviderConfig{
+			Preset: config.ProviderPresetAzure,
+			APIURL: server.URL + "/openai/v1/responses?api-version=preview",
+		})
+		if err != nil {
+			t.Fatalf("NormalizeProviderPreset: %v", err)
+		}
+		providerCfg := NewProviderConfig("azure", cfg, []string{"test-key"})
+		r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+
+		_, err = r.CompleteStream(
+			context.Background(), "test-key", "gpt-5.5", "",
+			[]message.Message{{Role: "user", Content: "hello"}},
+			nil, 0, RequestTuning{},
+			func(message.StreamDelta) {},
+		)
+		if err != nil {
+			t.Fatalf("CompleteStream: %v", err)
+		}
+	})
+
+	if got := gotHeaders.Get("api-key"); got != "test-key" {
+		t.Fatalf("api-key header = %q, want test-key", got)
+	}
+	if got := gotHeaders.Get("Authorization"); got != "" {
+		t.Fatalf("Authorization header = %q, want empty", got)
+	}
+	if got := gotHeaders.Get("Accept"); got != "text/event-stream" {
+		t.Fatalf("Accept header = %q, want text/event-stream", got)
+	}
+	if got := gotHeaders.Get("User-Agent"); got != defaultLLMUserAgent() {
+		t.Fatalf("User-Agent = %q, want %q", got, defaultLLMUserAgent())
+	}
+	if got := gotHeaders.Get("OpenAI-Beta"); got != "" {
+		t.Fatalf("OpenAI-Beta header = %q, want empty for Azure", got)
+	}
+	if got := gotHeaders.Get("originator"); got != "" {
+		t.Fatalf("originator header = %q, want empty for Azure", got)
+	}
+	if got := gotBody["store"]; got != true {
+		t.Fatalf("store = %#v, want true", got)
+	}
+	if strings.Contains(logs.String(), "non-Responses API URL") {
+		t.Fatalf("unexpected non-Responses URL warning: %s", logs.String())
+	}
+}
+
+func TestResponsesProvider_AzurePresetUserAgentOverride(t *testing.T) {
+	var gotHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	cfg, _, err := config.NormalizeProviderPreset(config.ProviderConfig{
+		Preset:    config.ProviderPresetAzure,
+		APIURL:    server.URL + "/openai/v1/responses",
+		UserAgent: "AzureUA/1.0",
+	})
+	if err != nil {
+		t.Fatalf("NormalizeProviderPreset: %v", err)
+	}
+	providerCfg := NewProviderConfig("azure", cfg, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+
+	_, err = r.CompleteStream(
+		context.Background(), "test-key", "gpt-5.5", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 0, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+
+	if got := gotHeaders.Get("User-Agent"); got != "AzureUA/1.0" {
+		t.Fatalf("User-Agent = %q, want AzureUA/1.0", got)
+	}
+	if got := gotHeaders.Get("OpenAI-Beta"); got != "" {
+		t.Fatalf("OpenAI-Beta header = %q, want empty for Azure", got)
+	}
+	if got := gotHeaders.Get("originator"); got != "" {
+		t.Fatalf("originator header = %q, want empty for Azure", got)
 	}
 }
 

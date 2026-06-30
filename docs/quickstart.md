@@ -40,7 +40,7 @@ If stdin is redirected but Chord can still get a controlling TTY, the wizard use
 
 If you prefer to write YAML manually instead of using the wizard, see [Configuration & Auth](./configuration.md) or the copy-paste-ready [Examples](./examples/index.md).
 
-For API-key setup, the wizard provides one API-key provider path. It asks for an API URL ending in one of these suffixes, with examples in the prompt:
+For API-key setup, the wizard provides one API-key provider path. It asks for an API URL whose path ends in one of these suffixes, with examples in the prompt:
 
 - `/responses` — OpenAI Responses API / compatible gateways
 - `/messages` — Anthropic Messages API / compatible gateways

@@ -153,7 +153,7 @@ func resolveProviderOAuthSettings(
 	cfg config.ProviderConfig,
 	_ []config.ProviderCredential,
 ) (tokenURL, clientID string, ok bool, err error) {
-	normalized, meta, normalizeErr := config.NormalizeOpenAICodexProvider(cfg, false)
+	normalized, meta, normalizeErr := config.NormalizeProviderPreset(cfg)
 	if normalizeErr != nil {
 		return "", "", false, normalizeErr
 	}

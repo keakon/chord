@@ -93,13 +93,13 @@ Read model limits in this order:
 
 Chord's `gpt-5.5` examples use `context=400000`, `input=272000`, `output=128000`. Provider docs sometimes call this setup split limits; see [Glossary](./glossary.md).
 
-For `type: responses`, Chord uses one stable Responses wire shape for every provider. The stable system prompt is sent in the top-level `instructions` field, while conversation messages remain typed `input` items such as `{"type":"message","role":"user",...}`. Requests also explicitly send `tool_choice`, `parallel_tool_calls`, `store`, `stream`, and an `include` array. `store` defaults to `false`, and explicit provider/model `store` config overrides that default. `include` is empty unless the request carries a reasoning block, in which case it contains `reasoning.encrypted_content`. Responses requests omit `max_output_tokens`. Streaming Responses model requests include the SSE headers (`Accept: text/event-stream`, `OpenAI-Beta: responses=experimental`, `originator`, and `User-Agent`). The default User-Agent remains `chord/<version>` unless provider-level `user_agent` overrides it. Several relay endpoints validate this shape before forwarding requests, so these fields are not limited to `preset: codex`.
+For `type: responses`, Chord uses one stable Responses wire shape for every provider. The stable system prompt is sent in the top-level `instructions` field, while conversation messages remain typed `input` items such as `{"type":"message","role":"user",...}`. Requests also explicitly send `tool_choice`, `parallel_tool_calls`, `store`, `stream`, and an `include` array. `store` defaults to `false` except for `preset: azure`, and explicit provider/model `store` config overrides the default. `include` is empty unless the request carries a reasoning block, in which case it contains `reasoning.encrypted_content`. Responses requests omit `max_output_tokens`. Streaming Responses model requests include `Accept: text/event-stream` and `User-Agent`. Non-Azure Responses requests also include the Codex-compatible `OpenAI-Beta: responses=experimental` and `originator` headers because several relay endpoints validate that shape before forwarding requests. The default User-Agent remains `chord/<version>` unless provider-level `user_agent` overrides it.
 
 For `type: messages`, Chord likewise sends a stable Anthropic Messages wire shape tuned for official Anthropic and compatible gateways. Messages requests always include Claude Code-style client hints such as `x-app: cli`, the default Claude Code beta feature list, and JSON-formatted `metadata.user_id` with stable anonymous routing fields. These fields are internal transport details, not user-configurable compatibility switches; they improve gateway compatibility and cache affinity while remaining accepted by the official Anthropic API. Provider-level `user_agent` remains configurable because gateways may require a specific client/version string.
 
 The one beta that is sent conditionally is `context-1m-2025-08-07` (1M context window). Unlike the other default betas, this one is enforced by the official Anthropic API: it is gated, switches to long-context pricing above 200K tokens, and errors on models that lack 1M support. Chord therefore opts in only when the model's declared window reaches 1M tokens (`limit.input` if set, otherwise `limit.context` >= 1000000), mirroring how Claude Code only sends it for models flagged as 1M-capable. Models with a smaller declared window never receive this header.
 
-The `store` field controls whether the Responses backend keeps this request and response server-side. Chord sends the full input on every request and never relies on `previous_response_id` to continue a conversation over HTTP, so the default `false` keeps requests self-contained and is the right choice for nearly every setup. Set `store: true` (at the provider level, or model level to override a provider default) only when a Responses-compatible backend or relay explicitly requires or benefits from server-side retention. Know the trade-offs before enabling it: the backend retains your request and response data, and the official Codex OAuth endpoint rejects `store: true` with a terminal `HTTP 400` (`Store must be set to false`) that fails the request without retrying, so do not set `store: true` on a `preset: codex` provider.
+The `store` field controls whether the Responses backend keeps this request and response server-side. Chord sends the full input on every request and never relies on `previous_response_id` to continue a conversation over HTTP, so the normal default `false` keeps requests self-contained and is the right choice for nearly every non-Azure setup. `preset: azure` defaults `store` to `true` because Azure OpenAI's Responses endpoint is stateful in the same way as OpenAI's persisted Responses API. Set `store: true` manually (at the provider level, or model level to override a provider default) only when a Responses-compatible backend or relay explicitly requires or benefits from server-side retention. Know the trade-offs before enabling it: the backend retains your request and response data, and the official Codex OAuth endpoint rejects `store: true` with a terminal `HTTP 400` (`Store must be set to false`) that fails the request without retrying, so do not set `store: true` on a `preset: codex` provider.
 
 ### OpenAI Codex preset
 
@@ -114,6 +114,32 @@ providers:
           context: 400000
           input: 272000
           output: 128000
+```
+
+### Azure OpenAI Responses preset
+
+Use `preset: azure` for Azure OpenAI Responses endpoints. The preset is explicit: Chord does not auto-detect Azure from the endpoint URL. It sets `type: responses`, defaults `store: true`, treats the endpoint as an official API for 400 handling, disables Codex WebSocket/OAuth behavior, sends the configured credential as the Azure `api-key` header instead of `Authorization: Bearer`, and omits Codex compatibility headers such as `OpenAI-Beta` and `originator`.
+
+Azure's v1 Responses endpoint can use `/openai/v1/responses` directly; add `api-version` only when you need to pin or opt into a specific version such as `preview`:
+
+```yaml
+providers:
+  azure:
+    preset: azure
+    api_url: https://YOUR-RESOURCE.openai.azure.com/openai/v1/responses
+    models:
+      gpt-5.5:
+        limit:
+          context: 400000
+          input: 272000
+          output: 128000
+```
+
+Store the Azure API key under the same provider name in `auth.yaml`:
+
+```yaml
+azure:
+  - $AZURE_OPENAI_API_KEY
 ```
 
 ### Google Gemini
@@ -131,7 +157,7 @@ providers:
           input: [text, image, pdf]
 ```
 
-For Gemini, set `api_url` to the `/models` base path. Chord detects `type: generate-content` from the `/models` suffix, so `type` can be omitted. Do not include the model name or `:streamGenerateContent?alt=sse`; Chord appends `/{model}:streamGenerateContent?alt=sse` automatically. The model map key, such as `gemini-3.5-flash`, is the model ID sent to Gemini.
+For Gemini, set `api_url` to the `/models` base path. Chord detects `type: generate-content` from the URL path's `/models` suffix, so `type` can be omitted. Do not include the model name or `:streamGenerateContent?alt=sse`; Chord appends `/{model}:streamGenerateContent?alt=sse` automatically. The model map key, such as `gemini-3.5-flash`, is the model ID sent to Gemini.
 
 Gemini thinking options use the same unified `thinking` object as other providers (no separate `gemini_thinking` key):
 
@@ -176,10 +202,11 @@ providers:
 If `type` is omitted, Chord auto-detects it from provider config:
 
 - `preset: codex` → `responses`
-- `api_url` ending in `/responses` → `responses`
-- `api_url` ending in `/chat/completions` → `chat-completions`
-- `api_url` ending in `/messages` → `messages`
-- `api_url` ending in `/models` → `generate-content`
+- `preset: azure` → `responses`
+- `api_url` path ending in `/responses` → `responses`
+- `api_url` path ending in `/chat/completions` → `chat-completions`
+- `api_url` path ending in `/messages` → `messages`
+- `api_url` path ending in `/models` → `generate-content`
 
 If none of these rules match, set `type` explicitly.
 
@@ -1359,9 +1386,9 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | Field          | Type   | Description                                                                                                                                              |
 | -------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `type`         | string | `messages` / `chat-completions` / `responses` / `generate-content`. Auto-detected from `api_url` or `preset` when omitted.                              |
-| `api_url`      | string | Endpoint URL. For Gemini, the `/models` base path; Chord appends `/{model}:streamGenerateContent?alt=sse`.                                              |
-| `preset`       | string | Currently `codex` (OpenAI Codex / ChatGPT OAuth).                                                                                                        |
-| `official_api` | bool   | Treat this endpoint as an official provider API where HTTP 400 usually means an invalid request and should not be retried as a transient gateway error. `preset: codex` is official by default; omit or set `false` for aggregating/proxy gateways. |
+| `api_url`      | string | Endpoint URL. Chord detects provider type from the URL path, ignoring query strings and fragments. For Gemini, the `/models` base path; Chord appends `/{model}:streamGenerateContent?alt=sse`. For Azure Responses, `?api-version=...` is optional and can be used to pin a specific API version. |
+| `preset`       | string | `codex` (OpenAI Codex / ChatGPT OAuth) or `azure` (Azure OpenAI Responses with `api-key` auth).                                                           |
+| `official_api` | bool   | Treat this endpoint as an official provider API where HTTP 400 usually means an invalid request and should not be retried as a transient gateway error. `preset: codex` and `preset: azure` are official by default; omit or set `false` for aggregating/proxy gateways. |
 | `key_rotation` | string | `on_failure` (default) / `per_request`. Controls when a credential / API key is reselected.                                                            |
 | `key_order`    | string | `sequential` (non-Codex default) / `random` / `smart` (Codex only). Controls how Chord chooses among selectable keys.                                   |
 | `compress`     | bool   | gzip request bodies when compression saves bytes. Off by default.                                                                                       |

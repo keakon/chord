@@ -308,6 +308,13 @@ func (p *ProviderConfig) IsCodexOAuthTransport() bool {
 	return p.oauthProfile == config.OAuthProfileOpenAICodex
 }
 
+// IsAzureOpenAITransport reports whether this provider uses the Azure OpenAI Responses wire profile.
+func (p *ProviderConfig) IsAzureOpenAITransport() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return strings.EqualFold(strings.TrimSpace(p.preset), config.ProviderPresetAzure)
+}
+
 func (p *ProviderConfig) Preset() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()

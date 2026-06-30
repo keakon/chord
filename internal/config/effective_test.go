@@ -15,6 +15,9 @@ func TestConfigEffectiveHelpers(t *testing.T) {
 	if !EffectiveResponsesWebsocket("other", &truePtr) {
 		t.Fatal("provider override true should enable websocket")
 	}
+	if EffectiveResponsesWebsocket(ProviderPresetAzure, nil) {
+		t.Fatal("azure preset should default websocket off")
+	}
 
 	if !EffectiveStore(&falsePtr, &truePtr) {
 		t.Fatal("model Store should override provider Store")

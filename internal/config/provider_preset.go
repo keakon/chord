@@ -6,36 +6,48 @@ import (
 )
 
 const (
-	OpenAICodexSourcePreset = "preset"
+	CodexTransportSourcePreset = "preset"
 )
 
-// OpenAICodexResolution describes whether a provider should use the official
+// CodexTransportResolution describes whether a provider should use the official
 // ChatGPT/Codex OAuth transport and how that decision was reached.
-type OpenAICodexResolution struct {
+type CodexTransportResolution struct {
 	Enabled bool
 	Strict  bool
 	Source  string
 }
 
-// NormalizeOpenAICodexProvider applies the Codex transport defaults and returns
-// transport metadata for a provider configuration.
+// NormalizeProviderPreset applies known provider preset defaults and returns
+// Codex transport metadata for a provider configuration.
 //
 // Current runtime behavior is intentionally strict: only providers with
-// preset: codex are treated as OpenAI ChatGPT/Codex OAuth transport.
-func NormalizeOpenAICodexProvider(
-	cfg ProviderConfig,
-	hasOAuthCredential bool,
-) (ProviderConfig, OpenAICodexResolution, error) {
+// preset: codex are treated as OpenAI ChatGPT/Codex OAuth transport. Azure
+// support is explicit via preset: azure; endpoint URLs are not auto-detected.
+func NormalizeProviderPreset(cfg ProviderConfig) (ProviderConfig, CodexTransportResolution, error) {
 	normalized := cfg
-	resolution := OpenAICodexResolution{}
+	resolution := CodexTransportResolution{}
 
 	preset := strings.TrimSpace(strings.ToLower(cfg.Preset))
-	if preset != "" && preset != ProviderPresetCodex {
+	if preset != "" && preset != ProviderPresetCodex && preset != ProviderPresetAzure {
 		return cfg, resolution, fmt.Errorf("unsupported provider preset %q", cfg.Preset)
 	}
+	if preset != "" {
+		normalized.Preset = preset
+	}
 	// Only validate type if it's explicitly set.
-	if preset == ProviderPresetCodex && cfg.Type != "" && cfg.Type != ProviderTypeResponses {
+	if (preset == ProviderPresetCodex || preset == ProviderPresetAzure) && cfg.Type != "" && cfg.Type != ProviderTypeResponses {
 		return cfg, resolution, fmt.Errorf("preset %q requires provider.type to be %q", cfg.Preset, ProviderTypeResponses)
+	}
+	if preset == ProviderPresetAzure {
+		if !APIURLPathHasSuffix(normalized.APIURL, "/responses") {
+			return cfg, resolution, fmt.Errorf("preset=%s requires api_url path ending in /responses", ProviderPresetAzure)
+		}
+		normalized.Type = ProviderTypeResponses
+		if normalized.Store == nil {
+			store := true
+			normalized.Store = &store
+		}
+		return normalized, resolution, nil
 	}
 	if preset != ProviderPresetCodex {
 		return normalized, resolution, nil
@@ -43,7 +55,7 @@ func NormalizeOpenAICodexProvider(
 
 	resolution.Enabled = true
 	resolution.Strict = true
-	resolution.Source = OpenAICodexSourcePreset
+	resolution.Source = CodexTransportSourcePreset
 
 	if normalized.TokenURL == "" {
 		normalized.TokenURL = OpenAIOAuthTokenURL

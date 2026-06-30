@@ -156,7 +156,7 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 	default:
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "config.yaml stores provider, model, proxy, and local behavior settings. auth.yaml stores API keys separately.")
-		fmt.Fprintln(out, "Set API URL to an endpoint ending in one of these suffixes:")
+		fmt.Fprintln(out, "Set API URL to an endpoint whose path ends in one of these suffixes:")
 		fmt.Fprintln(out, "  - /responses         OpenAI Responses API and compatible gateways (example: https://api.openai.com/v1/responses)")
 		fmt.Fprintln(out, "  - /messages          Anthropic Messages API and compatible gateways (example: https://api.anthropic.com/v1/messages)")
 		fmt.Fprintln(out, "  - /chat/completions  OpenAI Chat Completions compatible gateways (example: https://gateway.example.com/v1/chat/completions)")
@@ -417,7 +417,7 @@ func resolveSetupCodexProvider(providerName string, globalProxy string) (config.
 		proxy := strings.TrimSpace(globalProxy)
 		providerCfg.Proxy = &proxy
 	}
-	normalized, meta, err := config.NormalizeOpenAICodexProvider(providerCfg, false)
+	normalized, meta, err := config.NormalizeProviderPreset(providerCfg)
 	if err != nil {
 		return config.ProviderConfig{}, "", fmt.Errorf("provider %q has invalid OAuth config: %w", providerName, err)
 	}

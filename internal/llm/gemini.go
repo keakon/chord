@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -50,9 +52,8 @@ func NewGeminiProvider(provider *ProviderConfig, proxyURL string) (*GeminiProvid
 }
 
 func validateGeminiAPIURL(apiURL string) error {
-	trimmed := strings.TrimSuffix(strings.TrimSpace(apiURL), "/")
-	if trimmed == "" || !strings.HasSuffix(trimmed, "/models") {
-		return fmt.Errorf("gemini provider requires api_url ending in /models")
+	if !config.APIURLPathHasSuffix(apiURL, "/models") {
+		return fmt.Errorf("gemini provider requires api_url path ending in /models")
 	}
 	return nil
 }
@@ -295,9 +296,22 @@ func (g *GeminiProvider) CompleteStream(
 }
 
 func geminiStreamURL(apiURL, model string) string {
-	base := strings.TrimRight(apiURL, "/")
+	apiURL = strings.TrimSpace(apiURL)
 	model = strings.TrimLeft(model, "/")
-	return base + "/" + model + ":streamGenerateContent?alt=sse"
+	if parsed, err := url.Parse(apiURL); err == nil && parsed.Path != "" {
+		parsed.Path = strings.TrimRight(parsed.Path, "/") + "/" + model + ":streamGenerateContent"
+		query := parsed.Query()
+		query.Set("alt", "sse")
+		parsed.RawQuery = query.Encode()
+		parsed.Fragment = ""
+		return parsed.String()
+	}
+	base := strings.TrimRight(apiURL, "/")
+	separator := "?"
+	if strings.Contains(base, "?") {
+		separator = "&"
+	}
+	return base + "/" + model + ":streamGenerateContent" + separator + "alt=sse"
 }
 
 func convertMessagesToGemini(msgs []message.Message) []geminiContent {

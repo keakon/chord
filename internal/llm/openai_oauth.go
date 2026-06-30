@@ -87,6 +87,11 @@ func applyResponsesStreamingHeaders(h http.Header, provider *ProviderConfig) {
 	h.Set("Accept", "text/event-stream")
 }
 
+func applyAzureResponsesStreamingHeaders(h http.Header, provider *ProviderConfig) {
+	setProviderLLMUserAgent(h, provider)
+	h.Set("Accept", "text/event-stream")
+}
+
 // applyOpenAIOAuthHeaders sets the full set of headers for Codex requests using
 // an OAuth session key. Callers choose whether the request is streaming so the
 // unary compact endpoint does not inherit the SSE Accept header.
