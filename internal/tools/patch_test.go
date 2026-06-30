@@ -56,6 +56,60 @@ func TestPatchParserAcceptsSingleUpdate(t *testing.T) {
 	}
 }
 
+func TestPatchParserExplainsMissingContextMarkerWithoutLosingIndentation(t *testing.T) {
+	_, err := ParsePatch("a.py", "@@\ndef target():\n-    old\n+    new\n")
+	if err == nil {
+		t.Fatal("ParsePatch unexpectedly succeeded")
+	}
+	for _, want := range []string{
+		"every non-empty hunk line must start with a patch marker",
+		"context marker space is separate from source indentation",
+		"unchanged source line is `    value` with four leading spaces",
+		"write it in the hunk as `     value`",
+		"original four indentation spaces",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %q, want substring %q", err.Error(), want)
+		}
+	}
+}
+
+func TestPatchParserRejectsContextOnlyAnchorHunk(t *testing.T) {
+	tests := []struct {
+		name     string
+		patch    string
+		wantHunk string
+	}{
+		{
+			name:     "first hunk",
+			patch:    "@@\n section header\n@@\n old\n-old value\n+new value\n",
+			wantHunk: "hunk 1 only contains unchanged context lines",
+		},
+		{
+			name:     "second hunk",
+			patch:    "@@\n-old value\n+new value\n@@\n section header\n",
+			wantHunk: "hunk 2 only contains unchanged context lines",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParsePatch("a.txt", tt.patch)
+			if err == nil {
+				t.Fatal("ParsePatch unexpectedly succeeded")
+			}
+			for _, want := range []string{
+				tt.wantHunk,
+				"Do not use a separate @@ hunk only as an anchor",
+				"same hunk that has +/- changes",
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("err = %q, want substring %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
 func TestPatchParserRejectsUnsupportedOperations(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -402,7 +456,7 @@ func TestPatchToolPatchDescriptionEmphasizesPreferredFormat(t *testing.T) {
 	props := params["properties"].(map[string]any)
 	patch := props["patch"].(map[string]any)
 	desc := patch["description"].(string)
-	for _, want := range []string{"Patch hunk text for the single JSON path above.", "Use direct @@ or @@ <verified header>", "Do not rely on unified diff line numbers or apply_patch wrappers", "Do not include changes for multiple files.", "Example:"} {
+	for _, want := range []string{"Patch hunk text for the single JSON path above.", "Use direct @@ or @@ <verified header>", "Do not rely on unified diff line numbers or apply_patch wrappers", "Do not include changes for multiple files.", "Split unrelated or distant edits into separate patch calls.", "Example:"} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description missing %q: %q", want, desc)
 		}
@@ -411,10 +465,14 @@ func TestPatchToolPatchDescriptionEmphasizesPreferredFormat(t *testing.T) {
 
 func TestPatchToolDescriptionExplainsSingleFileSubset(t *testing.T) {
 	desc := (PatchTool{}).Description()
+	if len(desc) > 500 {
+		t.Fatalf("description is too long: %d chars", len(desc))
+	}
 	for _, want := range []string{
+		"Edit one existing file with direct @@ patch hunks.",
 		"This is a single-file patch tool, not a general apply_patch executor",
 		"the patch text must modify only the JSON path above",
-		"it must not include changes for multiple files",
+		"Do not use shell to run apply_patch.",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description missing %q: %q", want, desc)

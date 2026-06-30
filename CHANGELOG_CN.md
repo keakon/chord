@@ -2,6 +2,25 @@
 
 本项目采用语义化版本风格发布。1.0 之前的版本可能包含不兼容变更。
 
+## 未发布
+
+### 新功能
+
+- 新增 Azure OpenAI Responses provider 的 `preset: azure`，包括 Azure `api-key` 鉴权、兼容 Azure Responses 的请求头 / 默认 `store: true`、official API 400 处理、初始化模板支持，以及 `/openai/v1/responses` 配置示例文档。Provider 类型自动检测现在也会按 URL path 后缀判断并忽略 query / fragment，因此带 `?api-version=...` 的 endpoint 能被正确识别。
+
+### 改进
+
+- 改进长 agent 循环中的 prompt cache 稳定性：动态环境信息现在放入 session-context reminder 而不是 system prompt；请求级增量剪裁会冻结已剪裁前缀；Anthropic 显式 cache breakpoint 可以落在冻结的已剪裁前缀边界上。
+- Thinking 翻译现在会更严格校验模型输出，拒绝纯符号或过度压缩的译文；并改为在 assistant thinking 持久化后再翻译，而不是流式过程中翻译，避免 rollback / retry 路径留下过期翻译。
+- TUI 流式渲染现在减少 assistant / thinking 增量的逐 token 缓存失效，降低长流式响应期间的重绘开销。
+
+### 修复
+
+- 自动压缩现在有 usage 缺失兜底：在收到可信的非零 provider usage 后，如果后续响应缺少 usage 或返回 0，Chord 会按当前会进入上下文的消息 bytes 相对校准样本的比例估算输入 token，使长会话仍能在撞到 provider 上限前压缩。如果实际尝试过的所有候选模型都返回 `context_length_exceeded` 且自动压缩已关闭，Chord 现在会停止并给出可操作错误，而不是退回到泛化的 fallback exhausted。
+- 恢复会话或跨 provider 回放历史时，现在会跳过空的或不可回放的 reasoning-only assistant 消息，避免旧 reasoning / thinking 内容导致 provider API 拒绝请求。
+- TUI 流式输出现在会在工具调用卡片出现前先 flush 已缓冲的 thinking 增量，避免 provider 交错发送 thinking 与 tool-use 事件时生成多余的 thinking 卡片。
+- Patch 工具现在会拒绝多 hunk patch 中只作为锚点的纯上下文 hunk，并在缺少上下文行 marker 空格时解释它与源码缩进的区别，减少模型生成 patch 的可避免失败。
+
 ## 0.7.0 - 2026-06-28
 
 ### 重大变更
@@ -63,7 +82,6 @@
 - TUI 状态栏和信息面板现在会在 fallback / retry 尝试切换 provider 或模型时立即更新显示的模型，展示当前正在尝试的模型，而不是等到首个成功响应的 provider 后才更新。
 - 流式响应中断恢复现在覆盖 OpenAI 兼容 Chat Completions，以及 Anthropic、Gemini 与 Responses provider：当流在已有可见助手正文后结束时，Chord 会将正文作为 interrupted 上下文保留；未完成的工具调用、thinking 和 reasoning 仍会丢弃，使下一次请求能继续正文而不会重放不安全的半截结构。
 - 卸载空闲 language server 进程时，LSP 资源关闭不再把正常的 stderr 管道关闭记录成错误。
-- 自动压缩现在有 usage 缺失兜底：在收到可信的非零 provider usage 后，如果后续响应缺少 usage 或返回 0，Chord 会按当前会进入上下文的消息 bytes 相对校准样本的比例估算输入 token，使长会话仍能在撞到 provider 上限前压缩。如果实际尝试过的所有候选模型都返回 `context_length_exceeded` 且自动压缩已关闭，Chord 现在会停止并给出可操作错误，而不是退回到泛化的 fallback exhausted。
 - 上下文压缩成功或跳过后，现在会在保存恢复状态前清理压缩前遗留的最近请求 token 样本，避免压缩后的 usage 缺失或请求失败时立即再次触发一次很小的自动压缩。
 - 工具调用解析现在会在 Responses 兼容网关发送重复的部分 function-call 事件时保留已有的有效工具元数据；当网关延迟补充 `call_id` 时，流式工具调用回调会保持稳定 ID；从 Responses 完成输出中恢复的工具调用会发出成对回调；Anthropic/Gemini/OpenAI 兼容/Responses 中缺少 ID 或名称的异常工具调用会被丢弃，且不会发出孤立的流式开始、增量或完成回调；缺失或未知工具也会按无效调用报告，而不再误报为权限策略拒绝。
 - 请求级上下文剪裁现在会在旧的 stable prefix 复用会破坏当前 tool_call/tool_result 链时跳过复用，避免产生孤儿 tool result 和严格 provider 的 400 错误。

@@ -2,6 +2,25 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
+## Unreleased
+
+### Features
+
+- Added `preset: azure` for Azure OpenAI Responses providers, including Azure `api-key` authentication, Azure-compatible Responses headers/default `store: true`, official-API 400 handling, setup-template support, and docs/examples for `/openai/v1/responses`. Provider type auto-detection now also uses the URL path suffix while ignoring query strings and fragments, so endpoints with `?api-version=...` are detected correctly.
+
+### Improvements
+
+- Improved prompt-cache stability for long agent loops: dynamic environment data now lives in the session-context reminder instead of the system prompt, already-reduced request prefixes are frozen across incremental reduction, and Anthropic explicit cache breakpoints can target the frozen reduced-prefix boundary.
+- Thinking translation now validates model output more strictly, rejecting symbol-only or excessively compressed translations, and runs after assistant thinking is durably recorded instead of during streaming so rollback/retry paths do not leave stale translated thinking.
+- TUI streaming renders assistant/thinking deltas with less per-token cache invalidation, reducing redraw work during long streamed responses.
+
+### Fixes
+
+- Automatic compaction now has a usage-missing fallback: after a trusted non-zero provider usage sample, Chord scales that sample by current context-contributing message bytes when later responses omit usage or report zero, so long sessions can still compact before hitting the provider limit. If every attempted candidate model reports `context_length_exceeded` while automatic compaction is disabled, Chord now stops with an actionable error instead of falling through to generic fallback exhaustion.
+- Restored or cross-provider histories now skip empty or unreplayable reasoning-only assistant messages, preventing provider API rejections when replaying prior reasoning/thinking content.
+- TUI streaming now flushes buffered thinking deltas before tool-call cards, preventing spurious extra thinking cards when providers interleave thinking and tool-use events.
+- Patch tool now rejects context-only anchor hunks inside multi-hunk patches and explains missing context-line marker spaces without confusing them with source indentation, reducing avoidable model-generated patch failures.
+
 ## 0.7.0 - 2026-06-28
 
 ### Breaking Changes
@@ -63,7 +82,6 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - The TUI status bar and info panel now update the displayed model immediately when a fallback/retry attempt switches provider or model, showing the model currently being tried instead of waiting for the first provider that successfully responds.
 - Streaming interruption recovery now covers OpenAI-compatible Chat Completions as well as Anthropic, Gemini, and Responses providers: when a stream ends after visible assistant text, Chord preserves that text as interrupted context while still discarding incomplete tool calls, thinking, and reasoning so the next request can continue without replaying unsafe partial structures.
 - LSP resource shutdown no longer logs normal stderr pipe closure as an error when idle language-server processes are unloaded.
-- Automatic compaction now has a usage-missing fallback: after a trusted non-zero provider usage sample, Chord scales that sample by current context-contributing message bytes when later responses omit usage or report zero, so long sessions can still compact before hitting the provider limit. If every attempted candidate model reports `context_length_exceeded` while automatic compaction is disabled, Chord now stops with an actionable error instead of falling through to generic fallback exhaustion.
 - Successful or skipped context compaction now clears stale pre-compaction request-size token samples before saving recovery state, preventing missing or failed post-compaction usage reports from immediately triggering a second tiny automatic compaction.
 - Tool-call parsing now preserves valid tool metadata when Responses-compatible gateways emit duplicate partial function-call events, keeps streaming tool-call callbacks on a stable ID when gateways fill `call_id` late, pairs recovered Responses tool-call callbacks, drops malformed Anthropic/Gemini/OpenAI-compatible/Responses tool calls with missing IDs or names without emitting orphan stream start, delta, or completion callbacks, and reports missing or unknown tools as invalid calls instead of misleading permission-policy denials.
 - Request-level context reduction now skips stale stable-prefix reuse when it would break the current tool-call/tool-result chain, preventing orphan tool results and strict provider 400 errors.
