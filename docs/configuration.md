@@ -1333,8 +1333,14 @@ cleared or changed on session switch/resume. Anthropic prompt caching is driven
 by `cache_control` blocks, and Chord also sends JSON-formatted
 `metadata.user_id` automatically with a stable anonymous `device_id` plus a
 stable routing `session_id` derived from local/provider identity. These
-Anthropic metadata fields are not user-configurable. For Anthropic models, you
-can request an hourly cache TTL with `prompt_cache.ttl: 1h`:
+Anthropic metadata fields are not user-configurable. In `explicit` mode (the
+default for Anthropic models), Chord places up to four `cache_control`
+breakpoints by priority: the last system block, the frozen reduced-prefix
+boundary (when incremental reduction has frozen a stable prefix), the last
+user message, and the last assistant message — so long agent loops reuse the
+frozen historical surface instead of re-writing the moving tail each turn.
+For Anthropic models, you can request an hourly cache TTL with
+`prompt_cache.ttl: 1h`:
 
 ```yaml
 providers:

@@ -1139,7 +1139,7 @@ chord doctor models --pool thinking
 
 ### Provider 字段参考
 
-Chord 会把当前 Chord session id 自动传给 OpenAI 系 provider，作为缓存 / 路由亲和元数据：OpenAI Responses 请求会包含 `prompt_cache_key`，OpenAI Chat Completions / Responses HTTP 请求会在有 session id 时包含 `X-Session-Id` 和 `session-id` header。这些字段不能手动配置，会随当前 Chord session 自动切换 / 恢复。Anthropic prompt caching 由 `cache_control` block 驱动；Chord 还会自动发送 JSON 格式的 `metadata.user_id`，其中包含稳定匿名的 `device_id`，以及由本地 / provider 身份派生出的稳定路由 `session_id`。这些 Anthropic metadata 字段不能手动配置。对于 Anthropic 模型，你可以用 `prompt_cache.ttl: 1h` 请求按小时缓存：
+Chord 会把当前 Chord session id 自动传给 OpenAI 系 provider，作为缓存 / 路由亲和元数据：OpenAI Responses 请求会包含 `prompt_cache_key`，OpenAI Chat Completions / Responses HTTP 请求会在有 session id 时包含 `X-Session-Id` 和 `session-id` header。这些字段不能手动配置，会随当前 Chord session 自动切换 / 恢复。Anthropic prompt caching 由 `cache_control` block 驱动；Chord 还会自动发送 JSON 格式的 `metadata.user_id`，其中包含稳定匿名的 `device_id`，以及由本地 / provider 身份派生出的稳定路由 `session_id`。这些 Anthropic metadata 字段不能手动配置。在 `explicit` 模式（Anthropic 模型默认）下，Chord 按优先级放置最多 4 个 `cache_control` 断点：最后一个 system block、冻结的已剪裁前缀边界（当渐进式剪裁已冻结稳定前缀时）、最后一条 user 消息、最后一条 assistant 消息——使长 agent loop 能复用冻结的历史前缀，而不是每轮重新写入移动的尾部。对于 Anthropic 模型，你可以用 `prompt_cache.ttl: 1h` 请求按小时缓存：
 
 ```yaml
 providers:

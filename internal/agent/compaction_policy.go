@@ -60,6 +60,9 @@ func (a *MainAgent) refreshVisibleContextReductionStats(messages []message.Messa
 }
 
 func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message, rememberPrepared bool) []message.Message {
+	if a != nil && rememberPrepared {
+		a.setPreparedStablePrefixLen(0)
+	}
 	if len(messages) == 0 {
 		if a != nil {
 			a.setContextReductionStats(ContextReductionStats{})
@@ -96,6 +99,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					a.setCurrentRequestSurface(&stats, reused)
 					a.setContextReductionStats(stats)
 					if rememberPrepared {
+						a.setPreparedStablePrefixLen(len(previous.Messages))
 						a.rememberPreparedLLMRequest(a.currentTurnID(), messages, reused)
 					}
 					return reused
@@ -115,6 +119,9 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 				a.fillReductionModelContinuity(&stats)
 				a.setCurrentRequestSurface(&stats, reused)
 				a.setContextReductionStats(stats)
+				if n, ok := a.stableReductionSurfacePrefixLen(a.currentTurnID()); ok {
+					a.setPreparedStablePrefixLen(n)
+				}
 				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, reused)
 				return reused
 			}
@@ -247,6 +254,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 						stats.SavedDelta = 0
 					} else {
 						prepared = reused
+						a.setPreparedStablePrefixLen(len(previous.Messages))
 						reusedStats := highLevelContextReductionStats(messages, prepared)
 						stats.Messages = reusedStats.Messages
 						stats.Bytes = reusedStats.Bytes
@@ -366,6 +374,44 @@ func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, original, prepared
 	a.lastPreparedLLMRequestShape = stableReductionMessageShapes(original)
 	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(prepared)
 	a.lastPreparedReductionStats = cloneContextReductionStats(a.contextReductionStats)
+}
+
+func (a *MainAgent) setPreparedStablePrefixLen(n int) {
+	if a == nil {
+		return
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	a.lastPreparedStablePrefixLen = n
+}
+
+// stableReductionSurfacePrefixLen returns the previous turn's stable reduced
+// prefix length for use as an Anthropic prompt-cache boundary hint. It reflects
+// the frozen surface reused by the current request, not the full prepared list.
+func (a *MainAgent) stableReductionSurfacePrefixLen(turnID uint64) (int, bool) {
+	if a == nil || turnID == 0 {
+		return 0, false
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	if a.lastPreparedLLMTurnID != turnID || len(a.lastPreparedLLMRequestPrefix) == 0 {
+		return 0, false
+	}
+	return len(a.lastPreparedLLMRequestPrefix), true
+}
+
+// consumePreparedStablePrefixLen returns and clears the stable reduced prefix
+// length recorded during message preparation. The LLM layer consumes it as a
+// one-shot cache-placement hint before subsequent turn bookkeeping overwrites it.
+func (a *MainAgent) consumePreparedStablePrefixLen() int {
+	if a == nil {
+		return 0
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	n := a.lastPreparedStablePrefixLen
+	a.lastPreparedStablePrefixLen = 0
+	return n
 }
 
 func (a *MainAgent) updatePreparedLLMRequestSurface(turnID uint64, prepared []message.Message) {
@@ -1044,6 +1090,7 @@ func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message, f
 	updatedStats.ReusedStable = true
 	a.setCurrentRequestSurface(&updatedStats, prepared)
 	a.setContextReductionStats(updatedStats)
+	a.setPreparedStablePrefixLen(len(frozen.Messages))
 	return prepared
 }
 

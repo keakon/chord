@@ -3266,6 +3266,46 @@ func TestModelPoolStickyCursorKeepsSuccessfulModel(t *testing.T) {
 	}
 }
 
+func TestSupportsAnthropicPromptCacheUsesCursorFallbackTarget(t *testing.T) {
+	primaryCfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"gpt": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"primary-key"})
+	fallbackCfg := NewProviderConfig("anthropic", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"claude": {Limit: config.ModelLimit{Context: 200000, Output: 8192}},
+		},
+	}, []string{"fallback-key"})
+
+	c := NewClient(primaryCfg, &scriptedProvider{}, "gpt", 4096, "sys")
+	c.SetFallbackModels([]FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   &scriptedProvider{},
+		ModelID:        "claude",
+		MaxTokens:      8192,
+		ContextLimit:   200000,
+	}})
+	c.mu.Lock()
+	c.poolCursor = 1
+	c.mu.Unlock()
+
+	if next := c.NextRequestModelRef(); next != "anthropic/claude" {
+		t.Fatalf("NextRequestModelRef = %q, want anthropic/claude", next)
+	}
+	if !c.SupportsAnthropicPromptCache(c.NextRequestModelRef()) {
+		t.Fatal("expected Anthropic fallback cursor target to support prompt-cache boundary hints")
+	}
+	if !c.SupportsAnthropicPromptCache("") {
+		t.Fatal("expected empty ref to use the Anthropic cursor target")
+	}
+	if c.SupportsAnthropicPromptCache("openai/gpt") {
+		t.Fatal("primary OpenAI target should not support Anthropic prompt-cache boundary hints")
+	}
+}
+
 func TestModelPoolStickyCursorPreservesPinnedFallbackVariant(t *testing.T) {
 	primaryCfg := testProviderConfig("primary-prov", "primary-model")
 	fallbackCfg := NewProviderConfig("qt", config.ProviderConfig{

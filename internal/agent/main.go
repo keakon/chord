@@ -315,6 +315,7 @@ type MainAgent struct {
 	lastPreparedLLMRequestShape  []stableReductionMessageShape
 	lastPreparedLLMRequestPrefix []message.Message
 	lastPreparedReductionStats   ContextReductionStats
+	lastPreparedStablePrefixLen  int
 	wrapUpGraceTurnID            uint64
 	wrapUpGraceRemaining         int
 	contextReductionStats        ContextReductionStats

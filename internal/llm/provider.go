@@ -24,9 +24,21 @@ type AnthropicTuning struct {
 	PromptCacheMode string // ""|"off"|"auto"|"explicit"
 	PromptCacheTTL  string // ""|"1h"
 	CacheTools      bool
+	CacheBoundary   AnthropicCacheBoundary
 	ServiceTier     string // ""|"fast" (Anthropic first-party service tier)
 	ToolChoice      string // ""|"auto"|"required" (required maps to Anthropic any)
 	Temperature     *float64
+}
+
+// AnthropicCacheBoundary carries request-local prompt-cache placement hints.
+// MessageIndex is zero-based in the original message list supplied to the
+// provider and marks the stable reduced prefix's last source message. Providers
+// that normalize or merge messages resolve it against their final wire shape.
+// It is intentionally transient tuning, not persisted conversation state.
+type AnthropicCacheBoundary struct {
+	MessageIndex int
+	BlockIndex   int
+	Valid        bool
 }
 
 // OpenAITuning holds OpenAI-specific request tuning parameters.

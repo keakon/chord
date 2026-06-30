@@ -4077,3 +4077,80 @@ func TestRewriteSessionAfterCompactionPreservesOriginalFirstUserMessage(t *testi
 		t.Error("FirstUserMessageIsCompactionSummary = false, want true after compaction")
 	}
 }
+
+func TestApplyAnthropicCacheBoundaryHintCountsMetaPrefix(t *testing.T) {
+	newAnthropicAgent := func(t *testing.T) (*MainAgent, *recordingLoopTuningProvider) {
+		t.Helper()
+		a := newTestMainAgent(t, t.TempDir())
+		provider := &recordingLoopTuningProvider{}
+		providerCfg := llm.NewProviderConfig("anthropic", config.ProviderConfig{
+			Type: config.ProviderTypeMessages,
+			Models: map[string]config.ModelConfig{
+				"claude": {Limit: config.ModelLimit{Context: 200000, Output: 8192}},
+			},
+		}, []string{"test-key"})
+		a.llmClient = llm.NewClient(providerCfg, provider, "claude", 8192, "sys")
+		a.providerModelRef = "anthropic/claude"
+		a.llmMu.Lock()
+		a.runningModelRef = "anthropic/claude"
+		a.llmMu.Unlock()
+		return a, provider
+	}
+
+	readBoundary := func(t *testing.T, a *MainAgent, provider *recordingLoopTuningProvider) llm.AnthropicCacheBoundary {
+		t.Helper()
+		if _, err := a.llmClient.CompleteStream(context.Background(), nil, nil, nil); err != nil {
+			t.Fatalf("CompleteStream: %v", err)
+		}
+		provider.mu.Lock()
+		defer provider.mu.Unlock()
+		if len(provider.tunes) != 1 {
+			t.Fatalf("len(tunes) = %d, want 1", len(provider.tunes))
+		}
+		return provider.tunes[0].Anthropic.CacheBoundary
+	}
+
+	t.Run("meta prefix shifts boundary", func(t *testing.T) {
+		a, provider := newAnthropicAgent(t)
+		// stableLen=4 stable-prefix messages, plus 1 reminder + 2 overlay meta
+		// messages prepended before the first user message.
+		a.applyAnthropicCacheBoundaryHint(4, 3)
+		got := readBoundary(t, a, provider)
+		if !got.Valid {
+			t.Fatal("expected a valid cache boundary on an Anthropic explicit-cache client")
+		}
+		if got.MessageIndex != 4-1+3 {
+			t.Fatalf("boundary index = %d, want %d (stableLen-1+metaPrefixCount)", got.MessageIndex, 4-1+3)
+		}
+	})
+
+	t.Run("zero meta prefix keeps boundary at stable tail", func(t *testing.T) {
+		a, provider := newAnthropicAgent(t)
+		a.applyAnthropicCacheBoundaryHint(4, 0)
+		got := readBoundary(t, a, provider)
+		if got.MessageIndex != 3 {
+			t.Fatalf("boundary index = %d, want 3 (stableLen-1) when no meta prefix", got.MessageIndex)
+		}
+	})
+
+	t.Run("ignored for non-anthropic provider", func(t *testing.T) {
+		a := newTestMainAgent(t, t.TempDir())
+		provider := &recordingLoopTuningProvider{}
+		providerCfg := llm.NewProviderConfig("openai", config.ProviderConfig{
+			Type: config.ProviderTypeChatCompletions,
+			Models: map[string]config.ModelConfig{
+				"gpt": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+			},
+		}, []string{"test-key"})
+		a.llmClient = llm.NewClient(providerCfg, provider, "gpt", 4096, "sys")
+		a.providerModelRef = "openai/gpt"
+		a.llmMu.Lock()
+		a.runningModelRef = "openai/gpt"
+		a.llmMu.Unlock()
+		a.applyAnthropicCacheBoundaryHint(4, 3)
+		got := readBoundary(t, a, provider)
+		if got.Valid {
+			t.Fatalf("expected no cache boundary for a non-Anthropic provider, got %+v", got)
+		}
+	})
+}

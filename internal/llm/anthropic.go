@@ -187,7 +187,8 @@ func (a *AnthropicProvider) CompleteStream(
 	systemBlocks := buildSystemBlocks(systemPrompt)
 
 	// Convert internal messages to Anthropic API format.
-	apiMessages := convertMessages(messages)
+	apiMessages, messageMap := convertMessagesWithMap(messages)
+	at.CacheBoundary = resolveAnthropicCacheBoundary(at.CacheBoundary, messageMap)
 
 	// Convert tool definitions with optional cache markers.
 	apiTools := convertToolsWithCache(tools, at)
@@ -589,11 +590,24 @@ func stableAnthropicMetadataUserIDPayload(provider *ProviderConfig) string {
 // Adjacent tool results (Role="tool") are merged into a single user message
 // with multiple tool_result content blocks.
 func convertMessages(msgs []message.Message) []anthropicMessage {
+	result, _ := convertMessagesWithMap(msgs)
+	return result
+}
+
+type anthropicMessageMapEntry struct {
+	MessageIndex int
+	BlockIndex   int
+	Valid        bool
+}
+
+func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthropicMessageMapEntry) {
 	var result []anthropicMessage
+	messageMap := make([]anthropicMessageMapEntry, len(msgs))
 
 	i := 0
 	for i < len(msgs) {
 		msg := msgs[i]
+		sourceIndex := i
 
 		switch msg.Role {
 		case "user":
@@ -624,17 +638,19 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 						blocks = append(blocks, anthropicContent{Type: "text", Text: p.Text})
 					}
 				}
-				result = appendAnthropicUserMessage(result, blocks)
+				result, messageMap[sourceIndex] = appendAnthropicUserMessage(result, blocks)
 			} else {
 				// Plain text user message.
-				result = appendAnthropicUserMessage(result, []anthropicContent{{Type: "text", Text: msg.Content}})
+				result, messageMap[sourceIndex] = appendAnthropicUserMessage(result, []anthropicContent{{Type: "text", Text: msg.Content}})
 			}
 			i++
 
 		case "tool":
 			// Collect adjacent tool results into a single user message.
 			var toolResults []anthropicContent
+			var toolSourceIndices []int
 			for i < len(msgs) && msgs[i].Role == "tool" {
+				sourceIndex := i
 				// Skip tool results with empty id — they correspond to malformed
 				// tool calls (e.g. from GLM) that were also skipped above.
 				if msgs[i].ToolCallID == "" {
@@ -642,17 +658,26 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 					i++
 					continue
 				}
+				blockIndex := len(toolResults)
 				toolResults = append(toolResults, anthropicContent{
 					Type:      "tool_result",
 					ToolUseID: msgs[i].ToolCallID,
 					Content:   anthropicToolResultContent(msgs[i]),
 				})
+				messageMap[sourceIndex] = anthropicMessageMapEntry{BlockIndex: blockIndex, Valid: true}
+				toolSourceIndices = append(toolSourceIndices, sourceIndex)
 				i++
 			}
 			if len(toolResults) == 0 {
 				continue
 			}
-			result = appendAnthropicUserMessage(result, toolResults)
+			var appended anthropicMessageMapEntry
+			result, appended = appendAnthropicUserMessage(result, toolResults)
+			baseBlock := appended.BlockIndex - len(toolResults) + 1
+			for _, sourceIndex := range toolSourceIndices {
+				messageMap[sourceIndex].MessageIndex = appended.MessageIndex
+				messageMap[sourceIndex].BlockIndex += baseBlock
+			}
 
 		case "assistant":
 			var content []anthropicContent
@@ -715,6 +740,7 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 				Role:    "assistant",
 				Content: content,
 			})
+			messageMap[sourceIndex] = anthropicMessageMapEntry{MessageIndex: len(result) - 1, BlockIndex: len(content) - 1, Valid: true}
 			i++
 
 		default:
@@ -724,19 +750,33 @@ func convertMessages(msgs []message.Message) []anthropicMessage {
 		}
 	}
 
-	return result
+	return result, messageMap
 }
 
-func appendAnthropicUserMessage(result []anthropicMessage, blocks []anthropicContent) []anthropicMessage {
+func appendAnthropicUserMessage(result []anthropicMessage, blocks []anthropicContent) ([]anthropicMessage, anthropicMessageMapEntry) {
 	if len(result) == 0 || result[len(result)-1].Role != "user" {
-		return append(result, anthropicMessage{Role: "user", Content: blocks})
+		result = append(result, anthropicMessage{Role: "user", Content: blocks})
+		return result, anthropicMessageMapEntry{MessageIndex: len(result) - 1, BlockIndex: len(blocks) - 1, Valid: len(blocks) > 0}
 	}
 	prevBlocks, ok := result[len(result)-1].Content.([]anthropicContent)
 	if !ok {
-		return append(result, anthropicMessage{Role: "user", Content: blocks})
+		result = append(result, anthropicMessage{Role: "user", Content: blocks})
+		return result, anthropicMessageMapEntry{MessageIndex: len(result) - 1, BlockIndex: len(blocks) - 1, Valid: len(blocks) > 0}
 	}
+	start := len(prevBlocks)
 	result[len(result)-1].Content = append(prevBlocks, blocks...)
-	return result
+	return result, anthropicMessageMapEntry{MessageIndex: len(result) - 1, BlockIndex: start + len(blocks) - 1, Valid: len(blocks) > 0}
+}
+
+func resolveAnthropicCacheBoundary(boundary AnthropicCacheBoundary, messageMap []anthropicMessageMapEntry) AnthropicCacheBoundary {
+	if !boundary.Valid || boundary.MessageIndex < 0 || boundary.MessageIndex >= len(messageMap) {
+		return AnthropicCacheBoundary{}
+	}
+	entry := messageMap[boundary.MessageIndex]
+	if !entry.Valid {
+		return AnthropicCacheBoundary{}
+	}
+	return AnthropicCacheBoundary{MessageIndex: entry.MessageIndex, BlockIndex: entry.BlockIndex, Valid: true}
 }
 
 func anthropicToolResultContent(msg message.Message) any {
@@ -777,60 +817,89 @@ func anthropicToolResultContent(msg message.Message) any {
 	return blocks
 }
 
-// applyCacheBreakpoints applies the 4-breakpoint cache_control strategy:
-// 1. system[0]: first system block
-// 2. system[-1]: last system block (if different from first)
-// 3. Last user message's last content block
-// 4. Last assistant message's last non-thinking content block
-func applyCacheBreakpoints(system []anthropicContent, messages []anthropicMessage) {
-	ephemeral := &anthropicCacheCtrl{Type: "ephemeral"}
-
-	// Breakpoint 1: system[0]
-	if len(system) > 0 {
-		system[0].CacheControl = ephemeral
+// applyCacheBreakpoints applies up to four Anthropic cache_control breakpoints.
+// Existing tool breakpoints count toward the Anthropic limit. The stable
+// reduced-prefix boundary is prioritized over the weaker tail assistant marker
+// so long tool loops can reuse the frozen historical surface.
+func applyCacheBreakpoints(system []anthropicContent, messages []anthropicMessage, boundary AnthropicCacheBoundary, existing int) {
+	remaining := 4 - existing
+	if remaining <= 0 {
+		return
 	}
 
-	// Breakpoint 2: system[-1] (only if different from system[0])
-	if len(system) > 1 {
-		system[len(system)-1].CacheControl = ephemeral
+	markSystem := func(i int) bool {
+		if remaining <= 0 || i < 0 || i >= len(system) || system[i].CacheControl != nil {
+			return false
+		}
+		system[i].CacheControl = &anthropicCacheCtrl{Type: "ephemeral"}
+		remaining--
+		return true
 	}
-
-	// Find last user and last assistant messages.
-	lastUserIdx := -1
-	lastAssistantIdx := -1
-	for i := len(messages) - 1; i >= 0; i-- {
-		if lastUserIdx < 0 && messages[i].Role == "user" {
-			lastUserIdx = i
+	markMessageBlock := func(i, preferredBlock int, skipThinking bool) bool {
+		if remaining <= 0 || i < 0 || i >= len(messages) {
+			return false
 		}
-		if lastAssistantIdx < 0 && messages[i].Role == "assistant" {
-			lastAssistantIdx = i
+		blocks, ok := messages[i].Content.([]anthropicContent)
+		if !ok || len(blocks) == 0 {
+			return false
 		}
-		if lastUserIdx >= 0 && lastAssistantIdx >= 0 {
-			break
-		}
-	}
-
-	// Breakpoint 3: last user message's last content block.
-	if lastUserIdx >= 0 {
-		if blocks, ok := messages[lastUserIdx].Content.([]anthropicContent); ok && len(blocks) > 0 {
-			blocks[len(blocks)-1].CacheControl = ephemeral
-			messages[lastUserIdx].Content = blocks
-		}
-	}
-
-	// Breakpoint 4: last assistant message's last non-thinking content block.
-	if lastAssistantIdx >= 0 {
-		if blocks, ok := messages[lastAssistantIdx].Content.([]anthropicContent); ok && len(blocks) > 0 {
-			// Find the last non-thinking block.
-			for j := len(blocks) - 1; j >= 0; j-- {
-				if blocks[j].Type != "thinking" {
-					blocks[j].CacheControl = ephemeral
-					break
-				}
+		start := len(blocks) - 1
+		if preferredBlock >= 0 {
+			if preferredBlock >= len(blocks) {
+				return false
 			}
-			messages[lastAssistantIdx].Content = blocks
+			start = preferredBlock
+		}
+		for j := start; j >= 0; j-- {
+			if skipThinking && blocks[j].Type == "thinking" {
+				if preferredBlock >= 0 {
+					return false
+				}
+				continue
+			}
+			if blocks[j].CacheControl != nil {
+				return false
+			}
+			blocks[j].CacheControl = &anthropicCacheCtrl{Type: "ephemeral"}
+			messages[i].Content = blocks
+			remaining--
+			return true
+		}
+		return false
+	}
+
+	markSystem(len(system) - 1)
+	if boundary.Valid {
+		markMessageBlock(boundary.MessageIndex, boundary.BlockIndex, true)
+	}
+	if i := lastAnthropicMessageIndex(messages, "user"); i >= 0 {
+		markMessageBlock(i, -1, false)
+	}
+	if i := lastAnthropicMessageIndex(messages, "assistant"); i >= 0 {
+		markMessageBlock(i, -1, true)
+	}
+	if len(system) > 1 {
+		markSystem(0)
+	}
+}
+
+func lastAnthropicMessageIndex(messages []anthropicMessage, role string) int {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == role {
+			return i
 		}
 	}
+	return -1
+}
+
+func countAnthropicToolCacheBreakpoints(tools []anthropicTool) int {
+	count := 0
+	for _, tool := range tools {
+		if tool.CacheControl != nil {
+			count++
+		}
+	}
+	return count
 }
 
 // convertToolsWithCache converts tool definitions; marks the last tool with a
@@ -870,7 +939,7 @@ func applyPromptCaching(at AnthropicTuning, req *anthropicRequest) error {
 	case "auto":
 		req.CacheControl = &anthropicCacheCtrl{Type: "ephemeral", TTL: at.PromptCacheTTL}
 	case "explicit":
-		applyCacheBreakpoints(req.System, req.Messages)
+		applyCacheBreakpoints(req.System, req.Messages, at.CacheBoundary, countAnthropicToolCacheBreakpoints(req.Tools))
 	}
 	return nil
 }

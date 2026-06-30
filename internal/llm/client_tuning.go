@@ -210,6 +210,9 @@ func mergeRequestTuning(base, tuning RequestTuning) RequestTuning {
 	if tuning.Anthropic.CacheTools {
 		base.Anthropic.CacheTools = true
 	}
+	if tuning.Anthropic.CacheBoundary.Valid {
+		base.Anthropic.CacheBoundary = tuning.Anthropic.CacheBoundary
+	}
 	if tuning.Anthropic.ServiceTier != "" {
 		base.Anthropic.ServiceTier = tuning.Anthropic.ServiceTier
 	}

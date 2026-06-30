@@ -515,12 +515,27 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	// first user message. AGENTS.md is delivered under a "# AGENTS.md
 	// instructions" / <INSTRUCTIONS> self-identifying block. This is a
 	// per-request overlay; it never enters ctxMgr or the session jsonl.
+	beforeReminder := len(messages)
 	messages = a.injectSessionContextReminder(messages)
+	metaPrefixCount := len(messages) - beforeReminder
 
 	// Assemble per-turn overlays (SubAgent mailbox, bug triage hint, loop
 	// continuation) and prepend them before the first user message. Overlays
 	// never modify the stable system prompt.
-	messages = injectTurnOverlays(messages, a.buildTurnOverlayMessages())
+	if overlays := a.buildTurnOverlayMessages(); len(overlays) > 0 {
+		metaPrefixCount += len(overlays)
+		messages = injectTurnOverlays(messages, overlays)
+	}
+
+	// Propagate the stable reduced-prefix boundary as a one-shot Anthropic
+	// prompt-cache hint. The boundary index is computed against the prepared
+	// surface before the session-context reminder and turn overlays were
+	// inserted, so the count of all meta messages prepended before the first
+	// user message is added back to map it onto the source message list supplied
+	// to the provider. Anthropic resolves that source index after message merging.
+	if stableLen := a.consumePreparedStablePrefixLen(); stableLen > 0 {
+		a.applyAnthropicCacheBoundaryHint(stableLen, metaPrefixCount)
+	}
 
 	// Emit early activity event so the TUI shows "connecting" immediately,
 	// before the HTTP request starts.

@@ -174,6 +174,186 @@ func TestApplyPromptCachingAutoSetsTopLevelCacheControl(t *testing.T) {
 	}
 }
 
+func countCacheControls(messages []anthropicMessage) int {
+	total := 0
+	for _, msg := range messages {
+		blocks, ok := msg.Content.([]anthropicContent)
+		if !ok {
+			continue
+		}
+		for _, b := range blocks {
+			if b.CacheControl != nil {
+				total++
+			}
+		}
+	}
+	return total
+}
+
+func cacheControlRoles(messages []anthropicMessage) []int {
+	var idxs []int
+	for i, msg := range messages {
+		blocks, ok := msg.Content.([]anthropicContent)
+		if !ok {
+			continue
+		}
+		for _, b := range blocks {
+			if b.CacheControl != nil {
+				idxs = append(idxs, i)
+				break
+			}
+		}
+	}
+	return idxs
+}
+
+func cacheControlBlockTexts(messages []anthropicMessage) []string {
+	var texts []string
+	for _, msg := range messages {
+		blocks, ok := msg.Content.([]anthropicContent)
+		if !ok {
+			continue
+		}
+		for _, b := range blocks {
+			if b.CacheControl != nil {
+				texts = append(texts, b.Text)
+			}
+		}
+	}
+	return texts
+}
+
+func TestResolveAnthropicCacheBoundaryAfterUserMessageMerging(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "user", Content: "session reminder"},
+		{Role: "user", Content: "turn overlay"},
+		{Role: "user", Content: "stable-prefix-end"},
+		{Role: "assistant", Content: "old assistant"},
+		{Role: "user", Content: "last user"},
+	}
+	apiMessages, messageMap := convertMessagesWithMap(msgs)
+	boundary := resolveAnthropicCacheBoundary(AnthropicCacheBoundary{MessageIndex: 2, Valid: true}, messageMap)
+	if !boundary.Valid || boundary.MessageIndex != 0 || boundary.BlockIndex != 2 {
+		t.Fatalf("resolved boundary = %+v, want message 0 block 2", boundary)
+	}
+
+	system := []anthropicContent{{Type: "text", Text: "system"}}
+	applyCacheBreakpoints(system, apiMessages, boundary, 0)
+	texts := cacheControlBlockTexts(apiMessages)
+	if len(texts) == 0 || texts[0] != "stable-prefix-end" {
+		t.Fatalf("cache_control texts = %#v, want boundary block first", texts)
+	}
+}
+
+func TestResolveAnthropicCacheBoundaryAfterToolResultMerging(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "assistant", Content: "call", ToolCalls: []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}}},
+		{Role: "tool", ToolCallID: "call-1", Content: "first tool"},
+		{Role: "tool", ToolCallID: "call-2", Content: "stable tool"},
+		{Role: "assistant", Content: "done"},
+	}
+	_, messageMap := convertMessagesWithMap(msgs)
+	boundary := resolveAnthropicCacheBoundary(AnthropicCacheBoundary{MessageIndex: 2, Valid: true}, messageMap)
+	if !boundary.Valid || boundary.MessageIndex != 1 || boundary.BlockIndex != 1 {
+		t.Fatalf("resolved tool boundary = %+v, want message 1 block 1", boundary)
+	}
+}
+
+func TestApplyCacheBreakpointsPrioritizesStablePrefixBoundary(t *testing.T) {
+	system := []anthropicContent{{Type: "text", Text: "system"}}
+	messages := []anthropicMessage{
+		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "frozen-prefix-end"}}},
+		{Role: "assistant", Content: []anthropicContent{{Type: "text", Text: "old-assistant"}}},
+		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "older-tail-user"}}},
+		{Role: "assistant", Content: []anthropicContent{{Type: "text", Text: "last-assistant"}}},
+		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "last-user"}}},
+	}
+
+	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{MessageIndex: 0, Valid: true}, 0)
+
+	if system[len(system)-1].CacheControl == nil {
+		t.Fatalf("expected system[-1] cache_control")
+	}
+	idxs := cacheControlRoles(messages)
+	// Boundary (index 0), last user (index 4), and last assistant (index 3) are
+	// the three message breakpoints, replacing the older tail user marker.
+	want := map[int]bool{0: true, 3: true, 4: true}
+	for _, i := range idxs {
+		if !want[i] {
+			t.Fatalf("unexpected cache_control at message %d (have %v)", i, idxs)
+		}
+	}
+	if len(idxs) != len(want) {
+		t.Fatalf("expected %d message breakpoints, got %d (%v)", len(want), len(idxs), idxs)
+	}
+	if total := 1 + countCacheControls(messages); total != 4 {
+		t.Fatalf("expected 4 total breakpoints, got %d", total)
+	}
+}
+
+func TestApplyCacheBreakpointsFallsBackToTailWhenNoBoundary(t *testing.T) {
+	system := []anthropicContent{{Type: "text", Text: "system"}}
+	messages := []anthropicMessage{
+		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "u1"}}},
+		{Role: "assistant", Content: []anthropicContent{{Type: "text", Text: "a1"}}},
+		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "last-user"}}},
+		{Role: "assistant", Content: []anthropicContent{{Type: "text", Text: "last-assistant"}}},
+	}
+
+	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{}, 0)
+
+	if system[len(system)-1].CacheControl == nil {
+		t.Fatalf("expected system[-1] cache_control")
+	}
+	idxs := cacheControlRoles(messages)
+	want := map[int]bool{2: true, 3: true}
+	for _, i := range idxs {
+		if !want[i] {
+			t.Fatalf("unexpected cache_control at message %d (have %v)", i, idxs)
+		}
+	}
+	if len(idxs) != len(want) {
+		t.Fatalf("expected last user + last assistant breakpoints, got %v", idxs)
+	}
+}
+
+func TestApplyCacheBreakpointsRespectsFourBreakpointLimitWithCachedTools(t *testing.T) {
+	system := []anthropicContent{{Type: "text", Text: "system"}}
+	messages := []anthropicMessage{
+		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "boundary"}}},
+		{Role: "assistant", Content: []anthropicContent{{Type: "text", Text: "assistant"}}},
+		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "last-user"}}},
+		{Role: "assistant", Content: []anthropicContent{{Type: "text", Text: "last-assistant"}}},
+	}
+
+	// One tool breakpoint already placed; only three message/system slots remain.
+	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{MessageIndex: 0, Valid: true}, 1)
+
+	total := 0
+	if system[len(system)-1].CacheControl != nil {
+		total++
+	}
+	total += countCacheControls(messages)
+	if total != 3 {
+		t.Fatalf("expected 3 remaining breakpoints after one tool breakpoint, got %d", total)
+	}
+}
+
+func TestApplyCacheBreakpointsSkipsAlreadyMarkedBlocks(t *testing.T) {
+	system := []anthropicContent{{Type: "text", Text: "system", CacheControl: &anthropicCacheCtrl{Type: "ephemeral"}}}
+	messages := []anthropicMessage{
+		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "boundary", CacheControl: &anthropicCacheCtrl{Type: "ephemeral"}}}},
+		{Role: "assistant", Content: []anthropicContent{{Type: "text", Text: "last-assistant"}}},
+		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "last-user"}}},
+	}
+
+	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{MessageIndex: 0, Valid: true}, 0)
+
+	if got := countCacheControls(messages); got != 3 {
+		t.Fatalf("expected 3 marked message blocks (boundary reused + assistant + user), got %d", got)
+	}
+}
+
 func TestConvertToolsWithCacheMarksLastToolInExplicitMode(t *testing.T) {
 	tools := []message.ToolDefinition{
 		{Name: "a", Description: "A", InputSchema: map[string]any{"type": "object"}},

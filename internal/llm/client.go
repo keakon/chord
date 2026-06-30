@@ -345,6 +345,27 @@ func (c *Client) Variant() string {
 	return c.activeVariant
 }
 
+// SupportsAnthropicPromptCache reports whether modelRef (or the next cursor-head
+// target when modelRef is empty) uses the Anthropic Messages transport with
+// explicit prompt-cache mode. The agent layer uses it to gate one-shot
+// cache-boundary hints that only the Anthropic renderer consumes.
+func (c *Client) SupportsAnthropicPromptCache(modelRef string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	target, ok := c.modelPoolTargetForRefLocked(modelRef)
+	if !ok || target.ProviderImpl == nil || providerWireFamily(target.ProviderConfig) != modelcompat.WireFamilyAnthropic {
+		return false
+	}
+	if _, ok := target.ProviderConfig.GetModel(target.ModelID); !ok {
+		return false
+	}
+	tuning := tuningForPoolTarget(target)
+	return tuning.Anthropic.PromptCacheMode == "explicit"
+}
+
 // PrimaryModelEntry returns the current cursor-head entry as a reusable fallback-model
 // descriptor. Callers can use it to assemble a separate model pool while
 // preserving provider implementations and model limits.
@@ -406,6 +427,35 @@ func (c *Client) NextRequestModelRef() string {
 		return ""
 	}
 	return modelRefWithVariant(pool[cursor])
+}
+
+// modelPoolTargetForRefLocked returns the requested model-pool target, or the
+// current cursor-head target when ref is empty. Caller must hold c.mu.
+func (c *Client) modelPoolTargetForRefLocked(ref string) (FallbackModel, bool) {
+	pool := c.modelPoolLocked()
+	if len(pool) == 0 {
+		return FallbackModel{}, false
+	}
+	normalized := strings.TrimSpace(ref)
+	if normalized == "" {
+		cursor := c.poolCursor
+		if cursor < 0 || cursor >= len(pool) {
+			cursor = 0
+		}
+		return pool[cursor], true
+	}
+	base, _ := config.ParseModelRef(normalized)
+	for _, target := range pool {
+		targetRef := modelRefWithVariant(target)
+		if targetRef == normalized {
+			return target, true
+		}
+		targetBase, _ := config.ParseModelRef(targetRef)
+		if base != "" && targetBase == base {
+			return target, true
+		}
+	}
+	return FallbackModel{}, false
 }
 
 // SetOutputTokenMax sets the global output token cap (Layer 1). If n is 0,
