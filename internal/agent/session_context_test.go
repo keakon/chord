@@ -3,7 +3,6 @@ package agent
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
@@ -11,22 +10,27 @@ import (
 )
 
 func TestBuildSessionContextReminder_Empty(t *testing.T) {
-	if got := buildSessionContextReminder("", time.Time{}); got != "" {
+	if got := buildSessionContextReminder(SessionEnvSnapshot{}, ""); got != "" {
 		t.Fatalf("expected empty for empty inputs, got %q", got)
 	}
 }
 
 func TestBuildSessionContextReminder_OnlyDate(t *testing.T) {
-	now := time.Date(2026, 4, 17, 0, 0, 0, 0, time.UTC)
-	got := buildSessionContextReminder("", now)
+	got := buildSessionContextReminder(SessionEnvSnapshot{Date: "Apr 17 2026"}, "")
 	if got == "" {
 		t.Fatal("expected non-empty reminder")
 	}
-	if !strings.Contains(got, "# currentDate") {
-		t.Errorf("missing currentDate section: %q", got)
+	if !strings.Contains(got, "<env>") {
+		t.Errorf("missing env block when Date set: %q", got)
 	}
-	if !strings.Contains(got, "Today's date is 2026-04-17") {
-		t.Errorf("missing date line: %q", got)
+	if !strings.Contains(got, "Today's date: Apr 17 2026") {
+		t.Errorf("missing env date line: %q", got)
+	}
+	if strings.Contains(got, "# currentDate") {
+		t.Errorf("should not duplicate currentDate when env date is present: %q", got)
+	}
+	if strings.Contains(got, "Today's date is 2026-04-17") {
+		t.Errorf("should not duplicate ISO date when env date is present: %q", got)
 	}
 	if strings.Contains(got, "AGENTS.md") {
 		t.Errorf("should not mention AGENTS.md when AGENTS.md empty: %q", got)
@@ -34,8 +38,7 @@ func TestBuildSessionContextReminder_OnlyDate(t *testing.T) {
 }
 
 func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
-	now := time.Date(2026, 4, 17, 0, 0, 0, 0, time.UTC)
-	got := buildSessionContextReminder("project rules body", now)
+	got := buildSessionContextReminder(SessionEnvSnapshot{Date: "Apr 17 2026"}, "project rules body")
 	if got == "" {
 		t.Fatal("expected non-empty reminder")
 	}
@@ -60,8 +63,8 @@ func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
 	if !strings.Contains(got, "<INSTRUCTIONS>\n") || !strings.Contains(got, "\nproject rules body\n") || !strings.Contains(got, "project rules body\n</INSTRUCTIONS>") {
 		t.Errorf("AGENTS.md body must be bounded inside <INSTRUCTIONS>: %q", got)
 	}
-	if !strings.Contains(got, "# currentDate") {
-		t.Errorf("missing currentDate section: %q", got)
+	if strings.Contains(got, "# currentDate") || strings.Contains(got, "Today's date is") {
+		t.Errorf("should not render duplicate currentDate section: %q", got)
 	}
 	if strings.Contains(got, "may or may not be relevant") {
 		t.Errorf("AGENTS.md reminder should not weaken repository instructions as optional context: %q", got)

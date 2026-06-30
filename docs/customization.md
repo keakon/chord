@@ -10,6 +10,8 @@ At session start, Chord discovers applicable `AGENTS.md` files by walking from t
 
 Chord also discovers one Python virtual environment for the session by walking from the current working directory upward to the project root and checking `.venv`, `venv`, then `env` at each level. When the first valid environment is found, the prompt shows its path relative to the current working directory and asks agents to prefer that interpreter for Python commands.
 
+The system prompt is fully static: it contains identity, guidelines, and capabilities but no dynamic fields. Working directory, platform, current date, and the detected virtual environment path are delivered via the same session-context meta user message that carries AGENTS.md content — injected before the first real user message, not embedded in the cached system prefix. This keeps the system prompt identical across sessions, days, and working directories, maximizing prefix-cache reuse. The session-context meta message is re-injected after context compaction so the environment is never lost.
+
 ## Agents
 
 You can override or add role definitions:

@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -1804,32 +1803,56 @@ func TestSubAgentBuildSystemPrompt_OmitsAgentsMDReminderFramingWhenAgentsMDAbsen
 	}
 }
 
-func TestBuildSystemPrompt_IncludesVenvWhenDetected(t *testing.T) {
+func TestBuildSystemPrompt_OmitsDynamicEnvFromSystemPrompt(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry(), cachedWorkDir: "/tmp/project", cachedVenvPath: "/tmp/project/.venv"}
+
+	got := a.buildSystemPrompt()
+	for _, want := range []string{
+		"<env>",
+		"Working directory:",
+		"Today's date:",
+		"Python virtual environment:",
+	} {
+		if strings.Contains(got, want) {
+			t.Fatalf("buildSystemPrompt() should not contain dynamic env %q (now in reminder), got:\n%s", want, got)
+		}
+	}
+}
+
+func TestSessionEnvSnapshot_RendersVenvRelativeToWorkDir(t *testing.T) {
 	root := t.TempDir()
 	workDir := filepath.Join(root, "internal", "agent")
 	venvPath := filepath.Join(root, ".venv")
 	a := &MainAgent{tools: tools.NewRegistry(), cachedWorkDir: workDir}
 	a.cachedVenvPath = venvPath
 
-	got := a.buildSystemPrompt()
-	if !strings.Contains(got, "Python virtual environment: ../../.venv") {
-		t.Fatalf("buildSystemPrompt() missing venv line when venvPath is set, got:\n%s", got)
+	env := a.sessionEnvSnapshot()
+	block := env.renderEnvBlock()
+	if !strings.Contains(block, "Python virtual environment: ../../.venv") {
+		t.Fatalf("env block missing relative venv line, got:\n%s", block)
 	}
-	if strings.Contains(got, venvPath) {
-		t.Fatalf("buildSystemPrompt() should use a path relative to the working directory, got:\n%s", got)
+	if strings.Contains(block, venvPath) {
+		t.Fatalf("env block should use a path relative to the working directory, got:\n%s", block)
 	}
-}
-
-func TestBuildSystemPrompt_OmitsVenvWhenAbsent(t *testing.T) {
-	a := &MainAgent{tools: tools.NewRegistry()}
-
-	got := a.buildSystemPrompt()
-	if strings.Contains(got, "Python virtual environment") {
-		t.Fatalf("buildSystemPrompt() unexpectedly included venv line when venvPath is empty, got:\n%s", got)
+	if !strings.Contains(block, "Platform: ") {
+		t.Fatalf("env block missing platform, got:\n%s", block)
+	}
+	if !strings.Contains(block, "Today's date: ") {
+		t.Fatalf("env block missing date, got:\n%s", block)
 	}
 }
 
-func TestSubAgentBuildSystemPrompt_IncludesVenv(t *testing.T) {
+func TestSessionEnvSnapshot_OmitsVenvWhenAbsent(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry(), cachedWorkDir: "/tmp/project"}
+
+	env := a.sessionEnvSnapshot()
+	block := env.renderEnvBlock()
+	if strings.Contains(block, "Python virtual environment") {
+		t.Fatalf("env block should omit venv when venvPath is empty, got:\n%s", block)
+	}
+}
+
+func TestSubAgentBuildSystemPrompt_OmitsDynamicEnv(t *testing.T) {
 	reg := tools.NewRegistry()
 	root := t.TempDir()
 	workDir := filepath.Join(root, "internal", "agent")
@@ -1842,14 +1865,15 @@ func TestSubAgentBuildSystemPrompt_IncludesVenv(t *testing.T) {
 	}
 
 	got := s.buildSystemPrompt()
-	if !strings.Contains(got, "Platform: "+runtime.GOOS+"/"+runtime.GOARCH) {
-		t.Fatalf("SubAgent buildSystemPrompt() missing full platform, got:\n%s", got)
-	}
-	if !strings.Contains(got, "Python virtual environment: ../../.venv") {
-		t.Fatalf("SubAgent buildSystemPrompt() missing venv line when venvPath is set, got:\n%s", got)
-	}
-	if strings.Contains(got, venvPath) {
-		t.Fatalf("SubAgent buildSystemPrompt() should use a path relative to the working directory, got:\n%s", got)
+	for _, want := range []string{
+		"<env>",
+		"Working directory:",
+		"Today's date:",
+		"Python virtual environment:",
+	} {
+		if strings.Contains(got, want) {
+			t.Fatalf("SubAgent buildSystemPrompt() should not contain dynamic env %q (now in reminder), got:\n%s", want, got)
+		}
 	}
 }
 

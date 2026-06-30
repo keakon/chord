@@ -2,23 +2,63 @@ package agent
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/keakon/chord/internal/message"
 )
 
+// SessionEnvSnapshot carries the session-stable environment fields previously
+// rendered inside the system prompt's <env> block. Moving them into the
+// session-context reminder (injected before the first user message) keeps the
+// system prompt fully static across sessions, days, and working directories,
+// which is the prefix prompt caching depends on.
+type SessionEnvSnapshot struct {
+	WorkDir  string
+	Platform string
+	VenvRel  string
+	Date     string
+}
+
+// hasEnv reports whether the snapshot carries any environment field.
+func (e SessionEnvSnapshot) hasEnv() bool {
+	return e.WorkDir != "" || e.Platform != "" || e.VenvRel != "" || e.Date != ""
+}
+
+// renderEnvBlock renders the <env> block using the same format the system
+// prompt previously embedded, so the model sees identical information before
+// the first user message instead of inside the cached system prefix.
+func (e SessionEnvSnapshot) renderEnvBlock() string {
+	if !e.hasEnv() {
+		return ""
+	}
+	workDir := e.WorkDir
+	if workDir == "" {
+		workDir = "unknown"
+	}
+	venvLine := ""
+	if e.VenvRel != "" {
+		venvLine = fmt.Sprintf("\n  Python virtual environment: %s\n  When running Python commands, prefer the interpreter from this virtual environment.", e.VenvRel)
+	}
+	return fmt.Sprintf(`<env>
+  Working directory: %s
+  Platform: %s
+  Today's date: %s%s
+</env>`, workDir, e.Platform, e.Date, venvLine)
+}
+
 // buildSessionContextReminder constructs a meta user message that carries
-// session-level context (AGENTS.md, current date) to the model without
+// session-level context (environment and AGENTS.md) to the model without
 // polluting the stable system prompt or being persisted to ctxMgr/jsonl.
 //
-// Callers should treat an empty result as "no reminder to inject". When
-// agentsMD is empty and now is the zero value, the reminder is skipped.
-func buildSessionContextReminder(agentsMD string, now time.Time) string {
+// Callers should treat an empty result as "no reminder to inject". When the
+// environment snapshot and agentsMD are both empty, the reminder is skipped.
+func buildSessionContextReminder(env SessionEnvSnapshot, agentsMD string) string {
 	agentsMD = strings.TrimSpace(agentsMD)
 	hasAgentsMD := agentsMD != ""
-	hasDate := !now.IsZero()
-	if !hasAgentsMD && !hasDate {
+	hasEnvField := env.hasEnv()
+	if !hasAgentsMD && !hasEnvField {
 		return ""
 	}
 
@@ -34,21 +74,42 @@ func buildSessionContextReminder(agentsMD string, now time.Time) string {
 		sb.WriteString(agentsMD)
 		sb.WriteString("\n</INSTRUCTIONS>\n")
 	}
-	if hasDate {
-		sb.WriteString("\n# currentDate\n")
-		fmt.Fprintf(&sb, "Today's date is %s.\n", now.Format("2006-01-02"))
+	if envBlock := env.renderEnvBlock(); envBlock != "" {
+		if sb.Len() > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(envBlock)
+		sb.WriteByte('\n')
 	}
 	return strings.TrimSpace(sb.String())
 }
 
-// refreshSessionContextReminder captures a snapshot of the current AGENTS.md
-// content and date into the per-agent cached reminder. It is called from
-// ensureSessionBuilt once all session surfaces are ready, and again after a
-// session-head reset (e.g. /new, /resume, plan execution session, role switch with
-// clearHistory=true).
+// sessionEnvSnapshot captures the session-stable environment fields for the
+// session-context reminder. The date uses the same "Mon Jan 2 2006" format the
+// system prompt previously embedded.
+func (a *MainAgent) sessionEnvSnapshot() SessionEnvSnapshot {
+	workDir, _, _, venvPath := a.promptMetaSnapshot()
+	venvRel := ""
+	if venvPath != "" && workDir != "" {
+		venvRel = displayPathFromWorkDir(workDir, venvPath)
+	}
+	return SessionEnvSnapshot{
+		WorkDir:  workDir,
+		Platform: runtime.GOOS + "/" + runtime.GOARCH,
+		VenvRel:  venvRel,
+		Date:     time.Now().Format("Mon Jan 2 2006"),
+	}
+}
+
+// refreshSessionContextReminder captures a snapshot of the current environment,
+// AGENTS.md content, and date into the per-agent cached reminder. It is called
+// from ensureSessionBuilt once all session surfaces are ready, and again after
+// a session-head reset (e.g. /new, /resume, plan execution session, role switch
+// with clearHistory=true).
 func (a *MainAgent) refreshSessionContextReminder() {
+	env := a.sessionEnvSnapshot()
 	agentsMD := a.cachedAgentsMDSnapshot()
-	content := buildSessionContextReminder(agentsMD, time.Now())
+	content := buildSessionContextReminder(env, agentsMD)
 	if content == "" {
 		a.cachedSessionReminderContent.Store(nil)
 		return

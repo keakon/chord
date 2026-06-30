@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"time"
 
 	"github.com/keakon/golog/log"
 
@@ -16,30 +14,20 @@ import (
 )
 
 // buildSystemPrompt constructs the default system prompt that is injected at
-// the start of every conversation. It includes dynamic environment info, git
-// repository status, project-level instructions from AGENTS.md, and any loaded
-// skill content.
+// the start of every conversation. It is fully static: identity, guidelines,
+// capabilities, and cache-stable reminder framing live here. Dynamic
+// environment fields (working directory, platform, date, venv) are delivered
+// via the session-context reminder before the first user message to keep this
+// prefix cache-stable.
 func (a *MainAgent) buildSystemPrompt() string {
-	workDir, _, agentsMD, venvPath := a.promptMetaSnapshot()
-	if workDir == "" {
-		workDir = "unknown"
-	}
-	platform := runtime.GOOS + "/" + runtime.GOARCH
-	date := time.Now().Format("Mon Jan 2 2006")
-
-	venvLine := ""
-	if venvPath != "" {
-		venvLine = fmt.Sprintf("\n  Python virtual environment: %s\n  When running Python commands, prefer the interpreter from this virtual environment.", displayPathFromWorkDir(workDir, venvPath))
-	}
+	_, _, agentsMD, _ := a.promptMetaSnapshot()
 
 	var parts []string
 	parts = append(parts, mainAgentIdentityPrompt)
 	parts = append(parts, sharedAgentValuesPrompt)
-	parts = append(parts, fmt.Sprintf(`<env>
-  Working directory: %s
-  Platform: %s
-  Today's date: %s%s
-</env>`, workDir, platform, date, venvLine))
+	// Dynamic environment info (working directory, platform, date, venv) is
+	// injected via the session-context reminder before the first user message to
+	// keep the system prompt fully static and maximize prefix cache reuse.
 	parts = append(parts, sharedCodingGuidelinesPrompt)
 	if block := a.lspDiagnosticPromptBlock(); block != "" {
 		parts = append(parts, block)

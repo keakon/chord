@@ -511,7 +511,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	a.updatePreparedLLMRequestSurface(a.currentTurnID(), messages)
 	a.consumeContextSurfaceRefreshAllowance()
 
-	// Inject the meta user message carrying AGENTS.md + currentDate before the
+	// Inject the meta user message carrying environment + AGENTS.md before the
 	// first user message. AGENTS.md is delivered under a "# AGENTS.md
 	// instructions" / <INSTRUCTIONS> self-identifying block. This is a
 	// per-request overlay; it never enters ctxMgr or the session jsonl.

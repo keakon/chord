@@ -150,8 +150,8 @@ type SubAgent struct {
 	customPrompt string // from agent YAML body; replaces built-in role instructions if non-empty
 
 	// cachedSessionReminderContent is the meta user message content carrying
-	// AGENTS.md (under "# AGENTS.md instructions" / <INSTRUCTIONS>) +
-	// currentDate. Built once at construction, injected
+	// environment + AGENTS.md (under "# AGENTS.md instructions" /
+	// <INSTRUCTIONS>). Built once at construction, injected
 	// once per SubAgent lifetime (session-head for SubAgent == construction).
 	// Not persisted. Mirrors MainAgent.
 	cachedSessionReminderContent string
@@ -351,9 +351,19 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		Content: prompt,
 	})
 
-	// Capture session-level context (AGENTS.md + currentDate) as a meta user
-	// message and freeze the tool surface. Mirrors MainAgent.
-	s.cachedSessionReminderContent = buildSessionContextReminder(s.agentsMD, time.Now())
+	// Capture session-level context (environment + AGENTS.md) as
+	// a meta user message and freeze the tool surface. Mirrors MainAgent.
+	venvRel := ""
+	if s.venvPath != "" && s.workDir != "" {
+		venvRel = displayPathFromWorkDir(s.workDir, s.venvPath)
+	}
+	env := SessionEnvSnapshot{
+		WorkDir:  s.workDir,
+		Platform: runtime.GOOS + "/" + runtime.GOARCH,
+		VenvRel:  venvRel,
+		Date:     time.Now().Format("Mon Jan 2 2006"),
+	}
+	s.cachedSessionReminderContent = buildSessionContextReminder(env, s.agentsMD)
 	s.frozenToolDefs = append(
 		[]message.ToolDefinition(nil),
 		llmToolDefinitionsFromVisibleTools(s.filteredVisibleToolsForModel(s.modelName))...,
@@ -858,16 +868,10 @@ func (s *SubAgent) buildSystemPrompt() string {
 		parts = append(parts, block)
 	}
 
-	// Dynamic environment information (no git status for sub-agents).
-	venvLine := ""
-	if s.venvPath != "" {
-		venvLine = fmt.Sprintf("\n  Python virtual environment: %s\n  When running Python commands, prefer the interpreter from this virtual environment.", displayPathFromWorkDir(s.workDir, s.venvPath))
-	}
-	parts = append(parts, fmt.Sprintf(`<env>
-  Working directory: %s
-  Platform: %s
-  Today's date: %s%s
-</env>`, s.workDir, runtime.GOOS+"/"+runtime.GOARCH, time.Now().Format("Mon Jan 2 2006"), venvLine))
+	// Dynamic environment info (working directory, platform, date, venv) is
+	// injected via the SubAgent's session-context reminder before the first
+	// user message (mirrors MainAgent) to keep this system prompt static and
+	// prefix-cacheable.
 
 	// Task description (core difference from MainAgent).
 	parts = append(parts, fmt.Sprintf("## Your Task\n\n%s\n\n%s", s.taskDesc, s.taskCompletionInstruction()))
