@@ -55,6 +55,7 @@ type ContextReductionBucket struct {
 const (
 	contextReductionSkipRecentHighRisk = "recent_high_risk"
 	contextReductionSkipLargeUnreduced = "large_but_unreduced"
+	contextReductionSkipFrozenReduced  = "frozen_reduced"
 
 	contextReductionOverCompressionReread   = "reread_after_reduction"
 	contextReductionOverCompressionResearch = "research_after_reduction"

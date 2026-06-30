@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -310,18 +311,20 @@ type MainAgent struct {
 	// loopReductionMu protects request-shape snapshots, reduction stats, and
 	// loopState fields that may be read by callLLM on a worker goroutine while
 	// the event loop handles a busy /loop command.
-	loopReductionMu              sync.Mutex
-	lastPreparedLLMTurnID        uint64
-	lastPreparedLLMRequestShape  []stableReductionMessageShape
-	lastPreparedLLMRequestPrefix []message.Message
-	lastPreparedReductionStats   ContextReductionStats
-	lastPreparedStablePrefixLen  int
-	wrapUpGraceTurnID            uint64
-	wrapUpGraceRemaining         int
-	contextReductionStats        ContextReductionStats
-	contextSurfaceRefreshAllowed atomic.Bool
-	lastLLMRequestModelRef       string
-	llmModelRunLength            int
+	loopReductionMu               sync.Mutex
+	lastPreparedLLMTurnID         uint64
+	lastPreparedLLMRequestShape   []stableReductionMessageShape
+	lastPreparedLLMRequestPrefix  []message.Message
+	lastPreparedLLMReducedIndices []bool
+	lastPreparedReductionStats    ContextReductionStats
+	lastPreparedLLMToolDefHash    [sha256.Size]byte
+	lastPreparedStablePrefixLen   int
+	wrapUpGraceTurnID             uint64
+	wrapUpGraceRemaining          int
+	contextReductionStats         ContextReductionStats
+	contextSurfaceRefreshAllowed  atomic.Bool
+	lastLLMRequestModelRef        string
+	llmModelRunLength             int
 
 	// Async durable compaction (pre-request gate): defer inbound events until commit.
 	compactionState      compactionState

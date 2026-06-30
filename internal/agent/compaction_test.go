@@ -4154,3 +4154,313 @@ func TestApplyAnthropicCacheBoundaryHintCountsMetaPrefix(t *testing.T) {
 		}
 	})
 }
+
+// TestPrepareMessagesForLLM_IncrementalFreezesAlreadyReducedPrefix verifies the
+// 3-part incremental reduction model: already-reduced tool results in the prefix
+// are frozen (their marker content is preserved verbatim), while not-yet-reduced
+// prefix messages and the new tail are re-examined. This keeps the frozen prefix
+// cache-stable across turns within an agent loop.
+func TestPrepareMessagesForLLM_IncrementalFreezesAlreadyReducedPrefix(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			ReadLikeAgeTurns:     1,
+			ReadLikeOutputBytes:  80,
+			ShellSuccessAgeTurns: 9,
+			ShellSuccessBytes:    1 << 20,
+			MinIncrementalTokens: 1, // disable hysteresis reuse; force full scan each time
+		}},
+		Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}},
+	}
+	a.providerModelRef = "codex/gpt-5.5"
+	providerCfg := llm.NewProviderConfig("codex", config.ProviderConfig{
+		Preset: config.ProviderPresetCodex,
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"gpt-5.5": {Limit: config.ModelLimit{Context: 65536, Output: 4096}}},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, stubProvider{}, "gpt-5.5", 4096, "")
+	a.llmMu.Lock()
+	a.runningModelRef = "codex/gpt-5.5"
+	a.llmMu.Unlock()
+	a.newTurn()
+
+	// First request: two large read outputs that will be reduced.
+	largeRead1 := strings.Repeat("line from file A\n", 100)
+	largeRead2 := strings.Repeat("line from file B\n", 100)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeRead1},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc2", Content: largeRead2},
+		{Role: "user", Content: "u3"},
+	}
+	firstPrepared := a.prepareMessagesForLLM(msgs)
+	// Both tool results should be reduced (read-like, age >= 1, > 80 bytes).
+	if firstPrepared[2].Content == largeRead1 {
+		t.Fatalf("expected tc1 to be reduced, got original content")
+	}
+	if firstPrepared[5].Content == largeRead2 {
+		t.Fatalf("expected tc2 to be reduced, got original content")
+	}
+	firstMarker1 := firstPrepared[2].Content
+	firstMarker2 := firstPrepared[5].Content
+
+	// Second request: add a new tail with another large read.
+	// The prefix (msgs) hasn't changed, so incremental reduction should freeze
+	// the already-reduced tc1 and tc2 markers verbatim.
+	second := append(append([]message.Message(nil), msgs...),
+		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc3", Name: tools.NameRead, Args: json.RawMessage(`{"path":"c.go"}`)}}},
+		message.Message{Role: "tool", ToolCallID: "tc3", Content: strings.Repeat("line from file C\n", 100)},
+		message.Message{Role: "user", Content: "u4"},
+	)
+	secondPrepared := a.prepareMessagesForLLM(second)
+
+	// Frozen prefix markers must be identical (cache-stable).
+	if secondPrepared[2].Content != firstMarker1 {
+		t.Fatalf("frozen prefix tc1 marker changed:\n got %q\n want %q", secondPrepared[2].Content, firstMarker1)
+	}
+	if secondPrepared[5].Content != firstMarker2 {
+		t.Fatalf("frozen prefix tc2 marker changed:\n got %q\n want %q", secondPrepared[5].Content, firstMarker2)
+	}
+	// New tail tc3 should be reduced (it's a new large read).
+	if secondPrepared[8].Content == "line from file C\n"+strings.Repeat("line from file C\n", 99) {
+		t.Fatalf("expected new tail tc3 to be reduced, got original content")
+	}
+	// Verify the frozen_reduced skip was recorded.
+	stats := a.GetContextReductionStats()
+	if stats.SkippedByReason[contextReductionSkipFrozenReduced] < 2 {
+		t.Fatalf("expected at least 2 frozen_reduced skips, got %d (stats=%+v)", stats.SkippedByReason[contextReductionSkipFrozenReduced], stats)
+	}
+}
+
+// TestPrepareMessagesForLLM_IncrementalReExaminesNotYetReducedPrefix verifies that
+// a tool result in the prefix that was NOT reduced in the first pass (because its
+// age was below the threshold) gets re-examined and reduced in the second pass
+// when its age crosses the threshold. This is the user's "part 2" of the 3-part model.
+func TestPrepareMessagesForLLM_IncrementalReExaminesNotYetReducedPrefix(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			ReadLikeAgeTurns:     2, // need 2 user turns before reduction
+			ReadLikeOutputBytes:  80,
+			MinIncrementalTokens: 1, // force full scan each time
+		}},
+		Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}},
+	}
+	a.providerModelRef = "codex/gpt-5.5"
+	providerCfg := llm.NewProviderConfig("codex", config.ProviderConfig{
+		Preset: config.ProviderPresetCodex,
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"gpt-5.5": {Limit: config.ModelLimit{Context: 65536, Output: 4096}}},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, stubProvider{}, "gpt-5.5", 4096, "")
+	a.llmMu.Lock()
+	a.runningModelRef = "codex/gpt-5.5"
+	a.llmMu.Unlock()
+	a.newTurn()
+
+	largeRead := strings.Repeat("line from file\n", 100)
+	// First request: tc1 is age 0 (same user turn), so NOT reduced.
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeRead},
+	}
+	firstPrepared := a.prepareMessagesForLLM(msgs)
+	if firstPrepared[2].Content != largeRead {
+		t.Fatalf("tc1 should NOT be reduced at age 0, got %q", firstPrepared[2].Content)
+	}
+
+	// Second request: add a new user turn. tc1 is now age 1 (still < 2), not reduced.
+	second := append(append([]message.Message(nil), msgs...),
+		message.Message{Role: "user", Content: "u2"},
+	)
+	secondPrepared := a.prepareMessagesForLLM(second)
+	if secondPrepared[2].Content != largeRead {
+		t.Fatalf("tc1 should NOT be reduced at age 1, got %q", secondPrepared[2].Content)
+	}
+
+	// Third request: another user turn. tc1 is now age 2, should be reduced.
+	third := append(append([]message.Message(nil), second...),
+		message.Message{Role: "user", Content: "u3"},
+	)
+	thirdPrepared := a.prepareMessagesForLLM(third)
+	if thirdPrepared[2].Content == largeRead {
+		t.Fatalf("tc1 should be reduced at age 2, got original content")
+	}
+	reducedMarker := thirdPrepared[2].Content
+
+	// Fourth request: the now-reduced tc1 should be frozen.
+	fourth := append(append([]message.Message(nil), third...),
+		message.Message{Role: "user", Content: "u4"},
+	)
+	fourthPrepared := a.prepareMessagesForLLM(fourth)
+	if fourthPrepared[2].Content != reducedMarker {
+		t.Fatalf("reduced tc1 should be frozen (stable marker), got %q want %q", fourthPrepared[2].Content, reducedMarker)
+	}
+}
+
+// TestPrepareMessagesForLLM_IncrementalDisabledOnToolDefChange verifies that when
+// the tool-definition surface changes, the frozen prefix is invalidated and a full
+// re-reduction occurs (the user's "tool update → full re-reduction" requirement).
+func TestPrepareMessagesForLLM_IncrementalDisabledOnToolDefChange(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			ReadLikeAgeTurns:     1,
+			ReadLikeOutputBytes:  80,
+			MinIncrementalTokens: 1,
+		}},
+		Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}},
+	}
+	a.providerModelRef = "codex/gpt-5.5"
+	providerCfg := llm.NewProviderConfig("codex", config.ProviderConfig{
+		Preset: config.ProviderPresetCodex,
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"gpt-5.5": {Limit: config.ModelLimit{Context: 65536, Output: 4096}}},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, stubProvider{}, "gpt-5.5", 4096, "")
+	a.llmMu.Lock()
+	a.runningModelRef = "codex/gpt-5.5"
+	a.llmMu.Unlock()
+	a.newTurn()
+
+	largeRead := strings.Repeat("line from file\n", 100)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeRead},
+		{Role: "user", Content: "u2"},
+	}
+	firstPrepared := a.prepareMessagesForLLM(msgs)
+	if firstPrepared[2].Content == largeRead {
+		t.Fatalf("expected tc1 to be reduced in first pass")
+	}
+	firstMarker := firstPrepared[2].Content
+
+	// Simulate a tool-definition change by installing a different frozen tool surface.
+	// This changes the toolDefHash, invalidating the incremental path.
+	a.frozenToolDefs.Store(&[]message.ToolDefinition{
+		{Name: "new_tool", Description: "A different tool surface"},
+	})
+
+	second := append(append([]message.Message(nil), msgs...),
+		message.Message{Role: "user", Content: "u3"},
+	)
+	secondPrepared := a.prepareMessagesForLLM(second)
+	// With tool defs changed, incremental is disabled. The full scan re-reduces tc1.
+	// The marker should still be a reduction marker (re-reduced from original),
+	// and the frozen_reduced skip should NOT be recorded for this message.
+	if secondPrepared[2].Content == largeRead {
+		t.Fatalf("expected tc1 to still be reduced after tool change (full re-reduction)")
+	}
+	// The marker may differ because it's re-reduced from original, not frozen.
+	// The key check: no frozen_reduced skips (incremental was disabled).
+	stats := a.GetContextReductionStats()
+	if stats.SkippedByReason[contextReductionSkipFrozenReduced] > 0 {
+		t.Fatalf("expected no frozen_reduced skips when tool defs changed, got %d", stats.SkippedByReason[contextReductionSkipFrozenReduced])
+	}
+	_ = firstMarker // marker may or may not be identical after re-reduction
+}
+
+func TestToolDefinitionsHashDistinguishesInputSchema(t *testing.T) {
+	base := []message.ToolDefinition{{
+		Name:        "shell",
+		Description: "Run a command",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"command": map[string]any{"type": "string"},
+			},
+		},
+	}}
+	same := []message.ToolDefinition{{
+		Name:        "shell",
+		Description: "Run a command",
+		InputSchema: map[string]any{
+			"properties": map[string]any{
+				"command": map[string]any{"type": "string"},
+			},
+			"type": "object",
+		},
+	}}
+	changedSchema := []message.ToolDefinition{{
+		Name:        "shell",
+		Description: "Run a command",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"command": map[string]any{"type": "string"},
+				"timeout": map[string]any{"type": "integer"},
+			},
+		},
+	}}
+
+	if toolDefinitionsHash(base) != toolDefinitionsHash(same) {
+		t.Fatal("toolDefinitionsHash() differs for schemas equal up to map key order")
+	}
+	if toolDefinitionsHash(base) == toolDefinitionsHash(changedSchema) {
+		t.Fatal("toolDefinitionsHash() collides when only InputSchema changed")
+	}
+}
+
+func TestPrepareMessagesForLLM_IncrementalDisabledOnInputSchemaChange(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			ReadLikeAgeTurns:     1,
+			ReadLikeOutputBytes:  80,
+			MinIncrementalTokens: 1,
+		}},
+		Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}},
+	}
+	a.providerModelRef = "codex/gpt-5.5"
+	providerCfg := llm.NewProviderConfig("codex", config.ProviderConfig{
+		Preset: config.ProviderPresetCodex,
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"gpt-5.5": {Limit: config.ModelLimit{Context: 65536, Output: 4096}}},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, stubProvider{}, "gpt-5.5", 4096, "")
+	a.llmMu.Lock()
+	a.runningModelRef = "codex/gpt-5.5"
+	a.llmMu.Unlock()
+	a.newTurn()
+
+	a.frozenToolDefs.Store(&[]message.ToolDefinition{
+		{Name: tools.NameRead, Description: "Read a file", InputSchema: map[string]any{"type": "object"}},
+	})
+
+	largeRead := strings.Repeat("line from file\n", 100)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeRead},
+		{Role: "user", Content: "u2"},
+	}
+	if firstPrepared := a.prepareMessagesForLLM(msgs); firstPrepared[2].Content == largeRead {
+		t.Fatalf("expected tc1 to be reduced in first pass")
+	}
+
+	// Change only the InputSchema; name and description are unchanged. The
+	// incremental frozen-prefix path must be invalidated by the hash.
+	a.frozenToolDefs.Store(&[]message.ToolDefinition{
+		{Name: tools.NameRead, Description: "Read a file", InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"limit": map[string]any{"type": "integer"}},
+		}},
+	})
+
+	second := append(append([]message.Message(nil), msgs...),
+		message.Message{Role: "user", Content: "u3"},
+	)
+	secondPrepared := a.prepareMessagesForLLM(second)
+	if secondPrepared[2].Content == largeRead {
+		t.Fatalf("expected tc1 to still be reduced after schema change (full re-reduction)")
+	}
+	stats := a.GetContextReductionStats()
+	if stats.SkippedByReason[contextReductionSkipFrozenReduced] > 0 {
+		t.Fatalf("expected no frozen_reduced skips when input schema changed, got %d", stats.SkippedByReason[contextReductionSkipFrozenReduced])
+	}
+}

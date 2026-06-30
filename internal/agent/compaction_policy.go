@@ -3,6 +3,7 @@ package agent
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -128,6 +129,19 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 	}
 	stats := ContextReductionStats{TokensBefore: ctxmgr.EstimateMessagesTokens(prepared)}
+
+	// Incremental reduction: freeze already-reduced tool results from the
+	// previous stable surface so their marker content stays cache-stable.
+	// Only the not-yet-reduced prefix and the new tail are re-examined.
+	// Tool-definition changes invalidate the frozen surface (full re-reduction).
+	frozenPrefix, frozenReducedIndices, frozenBoundary, incrementalEnabled := a.incrementalReductionSurface(prepared, policy)
+	if incrementalEnabled && frozenBoundary > 0 {
+		for i := 0; i < frozenBoundary; i++ {
+			if frozenReducedIndices != nil && i < len(frozenReducedIndices) && frozenReducedIndices[i] {
+				prepared[i] = cloneMessageForRequestShape(frozenPrefix[i])
+			}
+		}
+	}
 	noteReduction := func(toolName, rule, original, reduced string) {
 		saved := len(original) - len(reduced)
 		if saved <= 0 {
@@ -181,6 +195,13 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 
 	for i := range prepared {
 		if prepared[i].Role != message.RoleTool {
+			continue
+		}
+		// Skip already-reduced frozen prefix messages: their content is a stable
+		// marker copied from the previous surface. Re-reducing could produce a
+		// different marker (e.g. repeated-call detection) and break cache reuse.
+		if incrementalEnabled && frozenReducedIndices != nil && i < len(frozenReducedIndices) && frozenReducedIndices[i] {
+			noteSkip(contextReductionSkipFrozenReduced)
 			continue
 		}
 		original := prepared[i].Content
@@ -368,11 +389,15 @@ func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, original, prepared
 	if a == nil || turnID == 0 {
 		return
 	}
+	reducedIndices := computeReducedToolResultIndices(original, prepared)
+	toolDefHash := a.computeToolDefinitionHash()
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
 	a.lastPreparedLLMTurnID = turnID
 	a.lastPreparedLLMRequestShape = stableReductionMessageShapes(original)
 	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(prepared)
+	a.lastPreparedLLMReducedIndices = reducedIndices
+	a.lastPreparedLLMToolDefHash = toolDefHash
 	a.lastPreparedReductionStats = cloneContextReductionStats(a.contextReductionStats)
 }
 
@@ -383,6 +408,53 @@ func (a *MainAgent) setPreparedStablePrefixLen(n int) {
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
 	a.lastPreparedStablePrefixLen = n
+}
+
+// computeReducedToolResultIndices reports which tool-result positions had
+// their content changed by reduction. Used to freeze already-reduced messages
+// in incremental reduction so their marker content stays cache-stable.
+func computeReducedToolResultIndices(original, prepared []message.Message) []bool {
+	n := len(prepared)
+	if n == 0 {
+		return nil
+	}
+	reduced := make([]bool, n)
+	for i := 0; i < n && i < len(original); i++ {
+		if prepared[i].Role != message.RoleTool {
+			continue
+		}
+		if prepared[i].Content != original[i].Content || prepared[i].ToolDiff != original[i].ToolDiff {
+			reduced[i] = true
+		}
+	}
+	return reduced
+}
+
+// computeToolDefinitionHash returns a stable hash of the frozen tool surface.
+// A mismatch between turns invalidates the frozen prefix because tool changes
+// alter the cacheable prefix and may require re-evaluating earlier tool results.
+func (a *MainAgent) computeToolDefinitionHash() [sha256.Size]byte {
+	return toolDefinitionsHash(a.mainLLMToolDefinitions())
+}
+
+// toolDefinitionsHash returns a stable hash of a tool surface. Name,
+// description, and input schema all contribute because any of them changes the
+// cacheable tool surface even when the others are unchanged. encoding/json
+// marshals map keys in sorted order, so equal schemas hash to the same bytes
+// across turns.
+func toolDefinitionsHash(defs []message.ToolDefinition) [sha256.Size]byte {
+	h := sha256.New()
+	stableReductionWriteInt(h, len(defs))
+	for _, def := range defs {
+		stableReductionWriteString(h, def.Name)
+		stableReductionWriteString(h, def.Description)
+		schema, err := json.Marshal(def.InputSchema)
+		if err != nil {
+			schema = nil
+		}
+		stableReductionWriteBytes(h, schema)
+	}
+	return stableReductionHashBytes(h.Sum(nil))
 }
 
 // stableReductionSurfacePrefixLen returns the previous turn's stable reduced
@@ -414,6 +486,45 @@ func (a *MainAgent) consumePreparedStablePrefixLen() int {
 	return n
 }
 
+// incrementalReductionSurface returns the previous stable surface's frozen
+// prefix, the per-message "was reduced" flags, the frozen boundary length, and
+// whether incremental reduction is enabled for this request. When enabled,
+// already-reduced tool results in the prefix are frozen (copied verbatim from
+// the previous surface) and skipped during the reduction scan; only
+// not-yet-reduced prefix messages and the new tail are re-examined.
+//
+// Incremental reduction is disabled when:
+//   - there is no previous stable surface for this turn;
+//   - the prefix shapes are incompatible (history changed underneath us);
+//   - the tool-definition surface changed (cache prefix invalidated);
+//   - context pressure is at or above ForcePruneUsage (size control wins).
+func (a *MainAgent) incrementalReductionSurface(prepared []message.Message, policy contextReductionPolicy) (frozenPrefix []message.Message, reducedIndices []bool, boundary int, enabled bool) {
+	if a == nil {
+		return nil, nil, 0, false
+	}
+	previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID())
+	if !ok || len(previous.Messages) == 0 || len(prepared) < len(previous.Messages) {
+		return nil, nil, 0, false
+	}
+	// Tool-definition change invalidates the entire frozen surface.
+	if previous.ToolDefHash != a.computeToolDefinitionHash() {
+		return nil, nil, 0, false
+	}
+	// High pressure: re-reduce everything to keep context size under control.
+	estimatedTokens := ctxmgr.EstimateMessagesTokens(prepared)
+	inputBudget := a.contextReductionInputBudget()
+	usage := policy.contextUsage(estimatedTokens, inputBudget)
+	if policy.ForcePruneUsage > 0 && usage >= policy.ForcePruneUsage {
+		return nil, nil, 0, false
+	}
+	// Shape compatibility ensures the prefix messages have not changed since
+	// the previous surface was recorded (same ContentHash, Role, ToolCalls, etc).
+	if !stableReductionShapesCompatible(previous.Shape[:len(previous.Messages)], prepared[:len(previous.Messages)]) {
+		return nil, nil, 0, false
+	}
+	return previous.Messages, previous.ReducedIndices, len(previous.Messages), true
+}
+
 func (a *MainAgent) updatePreparedLLMRequestSurface(turnID uint64, prepared []message.Message) {
 	if a == nil || turnID == 0 {
 		return
@@ -429,9 +540,11 @@ func (a *MainAgent) updatePreparedLLMRequestSurface(turnID uint64, prepared []me
 }
 
 type stableReductionSurface struct {
-	Messages []message.Message
-	Shape    []stableReductionMessageShape
-	Stats    ContextReductionStats
+	Messages       []message.Message
+	Shape          []stableReductionMessageShape
+	Stats          ContextReductionStats
+	ReducedIndices []bool
+	ToolDefHash    [sha256.Size]byte
 }
 
 type stableReductionMessageShape struct {
@@ -471,9 +584,11 @@ func (a *MainAgent) stableReductionSurfaceCandidate(turnID uint64) (stableReduct
 		return stableReductionSurface{}, false
 	}
 	return stableReductionSurface{
-		Messages: cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix),
-		Shape:    append([]stableReductionMessageShape(nil), a.lastPreparedLLMRequestShape...),
-		Stats:    cloneContextReductionStats(a.lastPreparedReductionStats),
+		Messages:       cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix),
+		Shape:          append([]stableReductionMessageShape(nil), a.lastPreparedLLMRequestShape...),
+		Stats:          cloneContextReductionStats(a.lastPreparedReductionStats),
+		ReducedIndices: append([]bool(nil), a.lastPreparedLLMReducedIndices...),
+		ToolDefHash:    a.lastPreparedLLMToolDefHash,
 	}, true
 }
 
@@ -872,6 +987,8 @@ func (a *MainAgent) clearLoopReductionCache(clearVisibleStats bool) {
 	a.lastPreparedLLMTurnID = 0
 	a.lastPreparedLLMRequestShape = nil
 	a.lastPreparedLLMRequestPrefix = nil
+	a.lastPreparedLLMReducedIndices = nil
+	a.lastPreparedLLMToolDefHash = [sha256.Size]byte{}
 	a.lastPreparedReductionStats = ContextReductionStats{}
 	a.wrapUpGraceTurnID = 0
 	a.wrapUpGraceRemaining = 0
@@ -979,6 +1096,8 @@ func (a *MainAgent) freezeLoopReductionPrefixForCurrentTurn() {
 	if a.lastPreparedLLMTurnID != turnID || len(a.lastPreparedLLMRequestPrefix) == 0 {
 		a.lastPreparedLLMRequestShape = nil
 		a.lastPreparedLLMRequestPrefix = nil
+		a.lastPreparedLLMReducedIndices = nil
+		a.lastPreparedLLMToolDefHash = [sha256.Size]byte{}
 		a.lastPreparedReductionStats = ContextReductionStats{}
 		return
 	}
