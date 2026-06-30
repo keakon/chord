@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"charm.land/glamour/v2"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tui/markdownutil"
@@ -127,6 +130,64 @@ func TestRenderCompactionSummaryKeepsNestedFenceInsideMarkdownExample(t *testing
 	}
 	if !strings.Contains(joinedPlain, "after inner") {
 		t.Fatalf("expected trailing inner text to remain inside summary code block, got %q", joinedPlain)
+	}
+}
+
+func TestRenderMarkdownContentRecoversFromRendererPanic(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	resetMarkdownRenderer()
+	originalRender := renderMarkdownWithGlamour
+	renderMarkdownWithGlamour = func(_ *glamour.TermRenderer, _ string) (string, error) {
+		panic("boom")
+	}
+	t.Cleanup(func() {
+		renderMarkdownWithGlamour = originalRender
+		resetMarkdownRenderer()
+	})
+
+	lines := renderMarkdownContent("## Summary\n\nbody", 40)
+	joined := stripANSI(strings.Join(lines, "\n"))
+	if !strings.Contains(joined, "Summary") || !strings.Contains(joined, "body") {
+		t.Fatalf("expected plain markdown fallback content, got %q", joined)
+	}
+
+	renderMarkdownWithGlamour = func(_ *glamour.TermRenderer, _ string) (string, error) {
+		return "ok", nil
+	}
+	lines = renderMarkdownContent("ok", 40)
+	if joined = stripANSI(strings.Join(lines, "\n")); joined != "ok" {
+		t.Fatalf("renderer did not recover after panic fallback, got %q", joined)
+	}
+}
+
+func TestRenderMarkdownContentFallsBackOnRendererError(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	resetMarkdownRenderer()
+	originalRender := renderMarkdownWithGlamour
+	renderMarkdownWithGlamour = func(_ *glamour.TermRenderer, _ string) (string, error) {
+		return "", errors.New("render failed")
+	}
+	t.Cleanup(func() {
+		renderMarkdownWithGlamour = originalRender
+		resetMarkdownRenderer()
+	})
+
+	lines := renderMarkdownContent("## Summary\n\nbody", 40)
+	joined := stripANSI(strings.Join(lines, "\n"))
+	if !strings.Contains(joined, "Summary") || !strings.Contains(joined, "body") {
+		t.Fatalf("expected plain markdown fallback content, got %q", joined)
+	}
+}
+
+func TestBlockRenderRecoversFromRenderPanic(t *testing.T) {
+	block := &Block{Type: BlockAssistant, Content: "original content"}
+	lines := blockRenderPanicFallback(block, 40, "boom")
+	joined := stripANSI(strings.Join(lines, "\n"))
+	if !strings.Contains(joined, "render error: boom") {
+		t.Fatalf("expected render error label, got %q", joined)
+	}
+	if !strings.Contains(joined, "original content") {
+		t.Fatalf("expected original content fallback, got %q", joined)
 	}
 }
 

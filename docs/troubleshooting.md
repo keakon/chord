@@ -194,6 +194,38 @@ If a tool card, local shell result, question dialog, or confirmation summary sho
 
 Chord displays ANSI-rich external text literally inside these UI surfaces instead of re-executing embedded terminal escape/control sequences. This includes bare carriage-return progress/control text, preventing diagnostic dumps and other raw terminal output from corrupting surrounding card rendering while still letting you inspect the original sequences. Generic tool results are also treated as plain text even when they contain Markdown-looking headings, lists, tables, or code fences; this avoids accidental reformatting of logs, diffs, JSON/YAML, and fetched pages.
 
+## Output-triggered TUI render panic / process killed
+
+If the outer launcher only shows:
+
+```text
+Error: program was killed: program experienced a panic
+```
+
+and the session must be resumed with `--resume`, first inspect the end of `~/.local/state/chord/logs/chord.log` for the Go panic stack. `main.jsonl` usually does not contain this panic text because the failure happened in the TUI render path, not as a persisted conversation message.
+
+If the stack contains these frames, treat it as a TUI markdown/ANSI rendering issue first instead of blaming the model or the last tool result directly:
+
+```text
+github.com/charmbracelet/x/ansi.(*Parser).Advance
+charm.land/lipgloss/v2.(*WrapWriter).Write
+charm.land/glamour/v2/ansi.(*HeadingElement).Finish
+github.com/keakon/chord/internal/tui.renderMarkdownContent
+```
+
+This class of failure can occur while rendering markdown for assistant blocks, tool reports, the content viewer, or compaction summaries. The known upstream fixed versions are:
+
+- `charm.land/glamour/v2 >= v2.0.1`
+- `charm.land/lipgloss/v2 >= v2.0.4`
+
+When checking dumps, note:
+
+- If the last shell/tool result before the crash was already written to `main.jsonl`, that tool output was usually not lost.
+- If Chord was waiting on an LLM SSE stream at the time of the crash, the corresponding `dumps/llm/*.json` may contain only `request_body`, partial `sse_chunks`, and `reading SSE stream: context canceled`. That means the LLM response was dumped only up to the interruption, with no complete final text.
+- `context canceled` is usually a consequence of process shutdown, not necessarily the root cause.
+
+The stable fix strategy is to upgrade the upstream renderer dependencies for known root causes while keeping `recover` / fallback boundaries around TUI rendering. Model output, tool output, and historical session content are untrusted inputs: render helpers must be best-effort, degrading to plain text when needed rather than letting a panic escape into the Bubble Tea main loop and kill the whole process.
+
 ## Screen corruption after switching tabs or refocusing the terminal
 
 If the TUI occasionally shows stale rows, horizontal line artifacts, or partially broken tool cards right after switching tabs or returning focus to the terminal window:

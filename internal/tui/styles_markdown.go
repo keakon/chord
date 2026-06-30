@@ -15,6 +15,9 @@ import (
 var (
 	glamourContentRenderer      *glamour.TermRenderer
 	glamourContentRendererWidth int
+	renderMarkdownWithGlamour   = func(renderer *glamour.TermRenderer, content string) (string, error) {
+		return renderer.Render(content)
+	}
 )
 
 func resetMarkdownRenderer() {
@@ -88,12 +91,18 @@ func contentMarkdownStyleConfig() ansi.StyleConfig {
 
 // renderMarkdownContent renders settled markdown with transparent block-level
 // backgrounds; fenced code is handled separately in assistant code paths.
-func renderMarkdownContent(content string, width int) []string {
+func renderMarkdownContent(content string, width int) (lines []string) {
 	if width <= 0 {
 		width = 80
 	}
 	content = sanitizeDisplayText(content)
 	content = markdownutil.RepairForDisplay(content)
+	defer func() {
+		if recover() != nil {
+			resetMarkdownRenderer()
+			lines = wrapText(content, width)
+		}
+	}()
 	if glamourContentRenderer == nil || glamourContentRendererWidth != width {
 		r, err := glamour.NewTermRenderer(
 			glamour.WithStyles(contentMarkdownStyleConfig()),
@@ -106,7 +115,7 @@ func renderMarkdownContent(content string, width int) []string {
 		glamourContentRenderer = r
 		glamourContentRendererWidth = width
 	}
-	out, err := glamourContentRenderer.Render(content)
+	out, err := renderMarkdownWithGlamour(glamourContentRenderer, content)
 	if err != nil {
 		return wrapText(content, width)
 	}

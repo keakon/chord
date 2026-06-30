@@ -185,6 +185,38 @@ diagnostics:
 
 Chord 会在这些界面中按字面显示含 ANSI 的外部文本，不再次执行其中嵌入的终端 escape/control sequence；这也包括裸 `\r` 进度刷新文本。这样既能查看原始序列内容，也不会让诊断 dump 或其他原始终端输出污染周围卡片的渲染。普通工具结果即使包含看起来像 Markdown 的标题、列表、表格或代码块，也会按纯文本处理，避免日志、diff、JSON/YAML 或抓取页面被意外重新排版。
 
+## 输出触发 TUI 渲染 panic / 进程被 killed
+
+如果外层只显示：
+
+```text
+Error: program was killed: program experienced a panic
+```
+
+并且当前会话需要重新 `--resume` 才能继续，先查看 `~/.local/state/chord/logs/chord.log` 末尾的 Go panic 栈。`main.jsonl` 通常不会保存这句 panic，因为它发生在 TUI 渲染层，而不是作为会话消息写入。
+
+如果栈里出现以下路径，优先按 TUI markdown/ANSI 渲染问题处理，不要直接归因到模型或工具本身：
+
+```text
+github.com/charmbracelet/x/ansi.(*Parser).Advance
+charm.land/lipgloss/v2.(*WrapWriter).Write
+charm.land/glamour/v2/ansi.(*HeadingElement).Finish
+github.com/keakon/chord/internal/tui.renderMarkdownContent
+```
+
+这类问题可能发生在 assistant、tool report、content viewer 或 compaction summary 渲染 markdown 时。已知上游修复版本是：
+
+- `charm.land/glamour/v2 >= v2.0.1`
+- `charm.land/lipgloss/v2 >= v2.0.4`
+
+排查 dump 时注意：
+
+- 如果崩溃前最后一个 shell/tool 结果已经写入 `main.jsonl`，通常说明该工具输出没有丢。
+- 如果崩溃时正在等待 LLM SSE 流，`dumps/llm/*.json` 里可能只有 `request_body`、部分 `sse_chunks` 和 `reading SSE stream: context canceled`，表示该次 LLM 响应只 dump 到中途，没有完整 final text。
+- `context canceled` 多数是进程关闭后的结果，不一定是根因。
+
+稳定处理原则：Chord 应先升级上游 renderer 依赖修复已知根因，同时在 TUI 渲染边界保留 `recover` / fallback。面对模型输出、工具输出和历史 session 内容这类不可信输入，渲染 helper 必须 best-effort：宁可降级为纯文本，也不能让 panic 穿透到 Bubble Tea 主循环并杀掉整个进程。
+
 ## 切换 tab 或重新获焦后画面错乱
 
 切换 tab、切回终端窗口或重新获得焦点后，TUI 偶发出现旧行残留、横线伪影或工具卡片局部错位：

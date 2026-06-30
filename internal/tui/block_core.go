@@ -123,11 +123,19 @@ func blockLabelWithID(label string, id int) string {
 }
 
 // Render produces the styled lines for this block, word-wrapped to width.
-func (b *Block) Render(width int, spinnerFrame string) []string {
+func (b *Block) Render(width int, spinnerFrame string) (lines []string) {
+	if b == nil {
+		return wrapText("[render error: nil block]", width)
+	}
 	_ = b.ensureMaterialized()
 	if width <= 0 {
 		width = 80
 	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			lines = blockRenderPanicFallback(b, width, recovered)
+		}
+	}()
 	switch b.Type {
 	case BlockUser:
 		return b.renderUser(width, spinnerFrame)
@@ -150,6 +158,27 @@ func (b *Block) Render(width int, spinnerFrame string) []string {
 	default:
 		return wrapText(b.Content, width)
 	}
+}
+
+func blockRenderPanicFallback(b *Block, width int, recovered any) []string {
+	if width <= 0 {
+		width = 80
+	}
+	label := fmt.Sprintf("[render error: %v]", recovered)
+	if b == nil {
+		return wrapText(label, width)
+	}
+	content := b.Content
+	if strings.TrimSpace(content) == "" && b.ResultContent != "" {
+		content = b.ResultContent
+	}
+	content = sanitizeDisplayText(content)
+	if strings.TrimSpace(content) == "" {
+		return wrapText(label, width)
+	}
+	lines := wrapText(label, width)
+	lines = append(lines, wrapText(content, width)...)
+	return lines
 }
 
 // LineCount returns how many terminal lines this block occupies.
