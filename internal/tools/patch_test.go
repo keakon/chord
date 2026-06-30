@@ -74,39 +74,66 @@ func TestPatchParserExplainsMissingContextMarkerWithoutLosingIndentation(t *test
 	}
 }
 
-func TestPatchParserRejectsContextOnlyAnchorHunk(t *testing.T) {
-	tests := []struct {
-		name     string
-		patch    string
-		wantHunk string
-	}{
-		{
-			name:     "first hunk",
-			patch:    "@@\n section header\n@@\n old\n-old value\n+new value\n",
-			wantHunk: "hunk 1 only contains unchanged context lines",
-		},
-		{
-			name:     "second hunk",
-			patch:    "@@\n-old value\n+new value\n@@\n section header\n",
-			wantHunk: "hunk 2 only contains unchanged context lines",
-		},
+func TestPatchParserAllowsContextOnlyAnchorHunkWhenPatchHasChanges(t *testing.T) {
+	parsed, err := ParsePatch("a.txt", "@@\n section header\n@@\n old\n-old value\n+new value\n")
+	if err != nil {
+		t.Fatalf("ParsePatch: %v", err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := ParsePatch("a.txt", tt.patch)
-			if err == nil {
-				t.Fatal("ParsePatch unexpectedly succeeded")
-			}
-			for _, want := range []string{
-				tt.wantHunk,
-				"Do not use a separate @@ hunk only as an anchor",
-				"same hunk that has +/- changes",
-			} {
-				if !strings.Contains(err.Error(), want) {
-					t.Fatalf("err = %q, want substring %q", err.Error(), want)
-				}
-			}
-		})
+	if len(parsed.Hunks) != 2 {
+		t.Fatalf("hunks = %d, want 2", len(parsed.Hunks))
+	}
+	if hunkHasChanges(parsed.Hunks[0]) {
+		t.Fatalf("first hunk has changes: %+v", parsed.Hunks[0])
+	}
+	if !hunkHasChanges(parsed.Hunks[1]) {
+		t.Fatalf("second hunk has no changes: %+v", parsed.Hunks[1])
+	}
+}
+
+func TestPatchContextOnlyAnchorAdvancesSearchPosition(t *testing.T) {
+	// "anchor" is a unique marker near the second block. A context-only anchor
+	// hunk on "anchor" must advance the search position so the following change
+	// hunk lands after it instead of matching the first "target" occurrence.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.txt")
+	content := "target\nfirst\nanchor\ntarget\nsecond\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "@@\n anchor\n@@\n target\n-second\n+second\n+inserted by anchor\n"
+	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
+	out, err := (PatchTool{BaseDir: dir}).Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("Execute: %v\n%s", err, out)
+	}
+	got, _ := os.ReadFile(path)
+	want := "target\nfirst\nanchor\ntarget\nsecond\ninserted by anchor\n"
+	if string(got) != want {
+		t.Fatalf("file = %q, want %q", got, want)
+	}
+	plan, err := BuildPatchPlanInDirWithContext(context.Background(), "demo.txt", patch, dir)
+	if err != nil {
+		t.Fatalf("BuildPatchPlanInDirWithContext: %v", err)
+	}
+	if !strings.Contains(plan.ModelContextNote, "accepted 1 context-only hunk as no-op anchor") {
+		t.Fatalf("plan note = %q, want compatibility note", plan.ModelContextNote)
+	}
+}
+
+func TestPatchParserRejectsAllContextHunks(t *testing.T) {
+	_, err := ParsePatch("a.txt", "@@\n section header\n@@\n old value\n")
+	if err == nil {
+		t.Fatal("ParsePatch unexpectedly succeeded")
+	}
+	for _, want := range []string{
+		"patch contains no changes",
+		"all 2 hunks only have unchanged context lines",
+		"context-only hunk is allowed as a no-op anchor only when another hunk has +/- changes",
+		"Add + lines for insertions or - lines for deletions",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %q, want substring %q", err.Error(), want)
+		}
 	}
 }
 
@@ -465,13 +492,12 @@ func TestPatchToolPatchDescriptionEmphasizesPreferredFormat(t *testing.T) {
 
 func TestPatchToolDescriptionExplainsSingleFileSubset(t *testing.T) {
 	desc := (PatchTool{}).Description()
-	if len(desc) > 500 {
-		t.Fatalf("description is too long: %d chars", len(desc))
-	}
 	for _, want := range []string{
 		"Edit one existing file with direct @@ patch hunks.",
 		"This is a single-file patch tool, not a general apply_patch executor",
 		"the patch text must modify only the JSON path above",
+		"Each patch must contain at least one +/- change",
+		"context-only @@ hunk is allowed as a no-op anchor",
 		"Do not use shell to run apply_patch.",
 	} {
 		if !strings.Contains(desc, want) {

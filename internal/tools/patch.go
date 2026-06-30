@@ -51,12 +51,13 @@ type editArgs struct {
 }
 
 type PatchPlan struct {
-	Path    string
-	Before  string
-	After   string
-	Diff    string
-	Added   int
-	Removed int
+	Path             string
+	Before           string
+	After            string
+	Diff             string
+	Added            int
+	Removed          int
+	ModelContextNote string
 }
 
 type patchPlanContextKey struct{}
@@ -100,7 +101,7 @@ func (PatchTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (t PatchTool) Description() string {
-	return "Edit one existing file with direct @@ patch hunks. Input is JSON {\"path\":\"...\",\"patch\":\"...\"}. This is a single-file patch tool, not a general apply_patch executor; the patch text must modify only the JSON path above. Use " + toolname.Write + " to create or replace whole files and " + toolname.Delete + " to remove whole files. Do not use " + toolname.Shell + " to run apply_patch."
+	return "Edit one existing file with direct @@ patch hunks. Input is JSON {\"path\":\"...\",\"patch\":\"...\"}. This is a single-file patch tool, not a general apply_patch executor; the patch text must modify only the JSON path above. Each patch must contain at least one +/- change; a context-only @@ hunk is allowed as a no-op anchor when another hunk has +/- changes. Context lines use one marker space before the exact source line, preserving source indentation. Use " + toolname.Write + " to create or replace whole files and " + toolname.Delete + " to remove whole files. Do not use " + toolname.Shell + " to run apply_patch."
 }
 
 func (t PatchTool) Parameters() map[string]any {
@@ -113,7 +114,7 @@ func (t PatchTool) Parameters() map[string]any {
 			},
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Patch hunk text for the single JSON path above. Use direct @@ or @@ <verified header> hunk lines. Every non-empty hunk line needs a patch marker prefix: one space for unchanged/context lines, - for removed lines, and + for added lines. The context marker space is not part of the file; keep the source line's own indentation after it. For example, if the unchanged source line is `    value` with four leading spaces, write it in the hunk as `     value`: one context marker space plus the original four indentation spaces. Do not rely on unified diff line numbers or apply_patch wrappers; use verified headers and nearby context for positioning instead. Do not include changes for multiple files. Keep hunks small and include enough nearby context for the intended location. Split unrelated or distant edits into separate patch calls. You may put a function/class/test header after @@, such as @@ func TestName(t *testing.T) {, to anchor that hunk, but only after verifying that exact header exists in the current file with available inspection tools; do not guess or approximate anchors, and do not use a separate earlier @@ hunk only as an anchor or context-only hunk. If an edit fails, diagnose the error first, re-inspect stale text or anchors before retrying, and do not retry the same hunk unchanged. Example:\n@@ func target() {\n old line\n-old value\n+new value\n }",
+				"description": "Patch hunk text for the single JSON path above. Use direct @@ or @@ <verified header> hunk lines. Every non-empty hunk line needs a patch marker prefix: one space for unchanged/context lines, - for removed lines, and + for added lines. The context marker space is not part of the file; keep the source line's own indentation after it. For example, if the unchanged source line is `    value` with four leading spaces, write it in the hunk as `     value`: one context marker space plus the original four indentation spaces. Do not rely on unified diff line numbers or apply_patch wrappers; use verified headers and nearby context for positioning instead. Do not include changes for multiple files. Each patch must contain at least one +/- change. A hunk with only unchanged context lines is allowed as a no-op anchor: it must match the current file and advances the search position for later hunks, but it does not modify the file. Prefer putting nearby context and +/- changes in the same hunk when practical. For pure insertions, put nearby context and + lines in the same hunk when they are contiguous, for example:\n@@\n existing line before insertion\n+inserted line\n existing line after insertion\nOr use a no-op anchor hunk before a later insertion point when the anchor and insertion context are not contiguous:\n@@\n def target():\n@@\n existing line before insertion\n+inserted line\nSplit unrelated or distant edits into separate patch calls. You may put a function/class/test header after @@, such as @@ func TestName(t *testing.T) {, to anchor that hunk, but only after verifying that exact header exists in the current file with available inspection tools; do not guess or approximate anchors. If an edit fails, diagnose the error first, re-inspect stale text or anchors before retrying, and do not retry the same hunk unchanged. Example:\n@@ func target() {\n old line\n-old value\n+new value\n }",
 			},
 		},
 		"required":             []string{"path", "patch"},
@@ -284,7 +285,7 @@ func buildPatchPlanWithContext(ctx context.Context, path, patchText, baseDir str
 		return PatchPlan{}, err
 	}
 	diff := GenerateUnifiedDiffSummary(decodedFile.Text, after, parsed.Path)
-	return PatchPlan{Path: resolvedPath, Before: decodedFile.Text, After: after, Diff: diff.Text, Added: diff.Added, Removed: diff.Removed}, nil
+	return PatchPlan{Path: resolvedPath, Before: decodedFile.Text, After: after, Diff: diff.Text, Added: diff.Added, Removed: diff.Removed, ModelContextNote: patchCompatibilityNote(parsed)}, nil
 }
 
 func formatFileSize(size int64) string {
@@ -351,19 +352,24 @@ func ParsePatch(path, patchText string) (parsedPatch, error) {
 	}
 	// Check if patch has any actual changes (+ or - lines)
 	hasChanges := false
-	for i, h := range parsed.Hunks {
-		if !hunkHasChanges(h) {
-			if len(parsed.Hunks) > 1 {
-				return parsedPatch{}, fmt.Errorf("invalid patch: hunk %d only contains unchanged context lines. Do not use a separate @@ hunk only as an anchor; put the verified header or surrounding context in the same hunk that has +/- changes. No files were modified", i+1)
-			}
-			continue
+	for _, h := range parsed.Hunks {
+		if hunkHasChanges(h) {
+			hasChanges = true
+			break
 		}
-		hasChanges = true
 	}
 	if !hasChanges {
-		return parsedPatch{}, fmt.Errorf("patch only contains unchanged context lines (space prefix), missing +/- modification lines. Use - prefix for deletions and + prefix for additions. No files were modified")
+		return parsedPatch{}, noPatchChangesError(parsed.Hunks)
 	}
 	return parsed, nil
+}
+
+func noPatchChangesError(hunks []patchHunk) error {
+	hunkWord := "hunk"
+	if len(hunks) != 1 {
+		hunkWord = "hunks"
+	}
+	return fmt.Errorf("patch contains no changes: all %d %s only have unchanged context lines. A context-only hunk is allowed as a no-op anchor only when another hunk has +/- changes; it must match the current file and advances the search position for later hunks, but it does not modify the file. Add + lines for insertions or - lines for deletions. No files were modified", len(hunks), hunkWord)
 }
 
 func invalidPatchLineError(line string) error {
@@ -377,6 +383,23 @@ func hunkHasChanges(h patchHunk) bool {
 		}
 	}
 	return false
+}
+
+func patchCompatibilityNote(p parsedPatch) string {
+	anchors := 0
+	for _, h := range p.Hunks {
+		if !hunkHasChanges(h) {
+			anchors++
+		}
+	}
+	if anchors == 0 {
+		return ""
+	}
+	hunkWord := "hunk"
+	if anchors != 1 {
+		hunkWord = "hunks"
+	}
+	return fmt.Sprintf("Patch compatibility note: accepted %d context-only %s as no-op anchor(s). Such hunks must match the current file and only advance the search position for later hunks; they do not modify the file. Prefer putting nearby context and +/- changes in the same hunk when practical.", anchors, hunkWord)
 }
 
 func appendUnsupportedPatchLine(lines []string, line string) []string {
@@ -732,7 +755,14 @@ func applyParsedPatchWithContext(ctx context.Context, content string, patch pars
 		replaced = append(replaced, newSeq...)
 		replaced = append(replaced, fileLines[match+len(oldSeq):]...)
 		fileLines = replaced
-		searchStart = match + len(newSeq) - trailingContextLineCount(hunk)
+		if hunkHasChanges(hunk) {
+			searchStart = match + len(newSeq) - trailingContextLineCount(hunk)
+		} else {
+			// A context-only hunk is a no-op anchor: it does not modify the file,
+			// but it advances the search position past the matched context so the
+			// next hunk lands after this anchor instead of an earlier occurrence.
+			searchStart = match + len(oldSeq)
+		}
 		if searchStart < 0 {
 			searchStart = 0
 		}

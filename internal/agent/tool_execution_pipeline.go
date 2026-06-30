@@ -103,6 +103,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 			return execResult, err
 		}
 		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = plan.Path, plan.Before, true
+		execResult.ModelContextNote = plan.ModelContextNote
 		agentCtx = tools.ContextWithPatchPlan(agentCtx, plan)
 	} else {
 		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc, p.projectRoot)
@@ -164,6 +165,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 			return execResult, err
 		}
 		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = plan.Path, plan.Before, true
+		execResult.ModelContextNote = plan.ModelContextNote
 		agentCtx = tools.ContextWithPatchPlan(agentCtx, plan)
 	} else {
 		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc, p.projectRoot)

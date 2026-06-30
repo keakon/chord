@@ -490,6 +490,32 @@ func TestComposeToolResultTextsDeduplicatesMatchingResultAndError(t *testing.T) 
 	}
 }
 
+func TestAppendModelContextNoteKeepsDisplayClean(t *testing.T) {
+	const raw = "Applied patch to demo.txt (+1 -0)"
+	display, contextResult, _, _ := composeToolResultTexts(raw, nil)
+	const note = "Patch compatibility note: accepted 1 context-only hunk as no-op anchor."
+	contextWithNote := appendModelContextNote(contextResult, note)
+
+	if display != raw {
+		t.Fatalf("display = %q, want raw result without note", display)
+	}
+	if strings.Contains(display, note) {
+		t.Fatalf("display must not contain compatibility note, got %q", display)
+	}
+	if !strings.Contains(contextWithNote, raw) || !strings.Contains(contextWithNote, note) {
+		t.Fatalf("context = %q, want both raw result and note", contextWithNote)
+	}
+	if !strings.HasPrefix(contextWithNote, raw) {
+		t.Fatalf("context should start with raw result, got %q", contextWithNote)
+	}
+	if appendModelContextNote(contextResult, "") != contextResult {
+		t.Fatalf("empty note should be a no-op")
+	}
+	if appendModelContextNote("", note) != note {
+		t.Fatalf("empty context should return note only")
+	}
+}
+
 func TestWrapToolRejectedByUserDisplaysWithoutSentinelDuplication(t *testing.T) {
 	err := wrapToolRejectedByUser("Write", "")
 	if !errors.Is(err, errToolRejectedByUser) {

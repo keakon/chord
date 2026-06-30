@@ -19,7 +19,7 @@
 - 自动压缩现在有 usage 缺失兜底：在收到可信的非零 provider usage 后，如果后续响应缺少 usage 或返回 0，Chord 会按当前会进入上下文的消息 bytes 相对校准样本的比例估算输入 token，使长会话仍能在撞到 provider 上限前压缩。如果实际尝试过的所有候选模型都返回 `context_length_exceeded` 且自动压缩已关闭，Chord 现在会停止并给出可操作错误，而不是退回到泛化的 fallback exhausted。
 - 恢复会话或跨 provider 回放历史时，现在会跳过空的或不可回放的 reasoning-only assistant 消息，避免旧 reasoning / thinking 内容导致 provider API 拒绝请求。
 - TUI 流式输出现在会在工具调用卡片出现前先 flush 已缓冲的 thinking 增量，避免 provider 交错发送 thinking 与 tool-use 事件时生成多余的 thinking 卡片。
-- Patch 工具现在会拒绝多 hunk patch 中只作为锚点的纯上下文 hunk，并在缺少上下文行 marker 空格时解释它与源码缩进的区别，减少模型生成 patch 的可避免失败。
+- Patch 工具现在兼容模型常见的 `@@` 纯锚点写法：当一个 hunk 只含未修改的上下文行、而整个 patch 至少有一处 `+`/`-` 修改时，该 hunk 被接受为 no-op 锚点——它匹配当前文件并推进后续 hunk 的搜索位置，但不修改文件。兼容提示只会追加到模型可见的工具结果上下文（不展示到 TUI），让模型以更低的失败重试成本学到推荐的单 hunk 写法。工具描述与错误信息现在明确区分上下文 marker 空格与源码缩进，并给出纯插入示例。整 patch 只含上下文行时仍会被拒绝，并给出可操作信息。
 
 ## 0.7.0 - 2026-06-28
 

@@ -129,6 +129,7 @@ type toolCallStageTrace struct {
 
 type ToolExecutionResult struct {
 	Result            string
+	ModelContextNote  string
 	Images            []message.ContentPart // image/binary parts produced by the tool (ViewImage, MCP image results)
 	EffectiveArgsJSON string
 	Audit             *message.ToolArgsAudit

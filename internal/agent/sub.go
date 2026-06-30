@@ -42,6 +42,7 @@ type toolResult struct {
 	ArgsJSON         string // original args JSON string for malformed detection
 	Audit            *message.ToolArgsAudit
 	Result           string
+	ModelContextNote string                // appended only to persisted/model-visible tool context, not TUI display
 	Images           []message.ContentPart // image parts to inject into model context after the batch completes
 	Error            error
 	TurnID           uint64

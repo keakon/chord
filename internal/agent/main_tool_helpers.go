@@ -372,6 +372,20 @@ func deduplicateMatchingToolError(rawResult, errorText string) (string, bool) {
 	return "", false
 }
 
+// appendModelContextNote appends a tool-generated note only to the persisted
+// model-visible contextResult, not to the displayResult shown in the TUI.
+func appendModelContextNote(contextResult, note string) string {
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return contextResult
+	}
+	contextResult = strings.TrimRight(contextResult, "\n")
+	if contextResult == "" {
+		return note
+	}
+	return contextResult + "\n\n" + note
+}
+
 func applyToolArgsAuditToContextResult(content string, _ *message.ToolArgsAudit) string {
 	return content
 }
