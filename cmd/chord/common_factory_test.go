@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +58,20 @@ func (p *stubScriptedProvider) CompleteStream(
 
 func resolveProviderConfigForTest(provName string, cfg config.ProviderConfig, auth config.AuthConfig) *llm.ProviderConfig {
 	return llm.NewProviderConfig(provName, cfg, config.ExtractAPIKeys(auth[provName]))
+}
+
+func TestProviderCacheRejectsInvalidAuthScheme(t *testing.T) {
+	cache := &providerCache{}
+	_, err := cache.getOrCreate("custom", config.ProviderConfig{
+		Type:       config.ProviderTypeResponses,
+		AuthScheme: "basic",
+	}, []string{"test-key"})
+	if err == nil {
+		t.Fatal("getOrCreate err = nil, want invalid auth_scheme error")
+	}
+	if !strings.Contains(err.Error(), "unsupported auth_scheme") {
+		t.Fatalf("getOrCreate err = %v, want unsupported auth_scheme", err)
+	}
 }
 
 func (p *stubProviderImpl) CompleteStream(

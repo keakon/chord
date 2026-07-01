@@ -154,6 +154,45 @@ func TestProviderDiagnosticsWritersAreRaceSafe(t *testing.T) {
 	}
 }
 
+// TestProviderAuthSchemeConcurrentReadIsRaceSafe guards the lock-free
+// AuthScheme accessor: authScheme is set once in NewProviderConfig and never
+// mutated, so it is read without p.mu. Run under -race to confirm concurrent
+// reads (and reads racing with other locked accessors) stay clean.
+func TestProviderAuthSchemeConcurrentReadIsRaceSafe(t *testing.T) {
+	t.Parallel()
+
+	p := NewProviderConfig("custom", config.ProviderConfig{
+		Type:       config.ProviderTypeMessages,
+		APIURL:     "https://example.invalid/v1/messages",
+		AuthScheme: config.AuthSchemeBearer,
+	}, []string{"test-key"})
+	if got := p.AuthScheme(); got != config.AuthSchemeBearer {
+		t.Fatalf("AuthScheme() = %q, want %q", got, config.AuthSchemeBearer)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	const readers = 8
+	wg.Add(readers)
+	for i := 0; i < readers; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 10_000; j++ {
+				if got := p.AuthScheme(); got != config.AuthSchemeBearer {
+					t.Errorf("AuthScheme() = %q, want %q", got, config.AuthSchemeBearer)
+					return
+				}
+				// Read a lock-taking accessor in the same loop so the race
+				// detector also observes the lock-free read alongside a locked one.
+				_ = p.Preset()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+}
+
 func TestMutateCredentialInMemoryUsesIndexToDisambiguateDuplicateAccountID(t *testing.T) {
 	auth := config.AuthConfig{
 		"openai": {

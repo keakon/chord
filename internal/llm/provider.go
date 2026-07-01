@@ -144,6 +144,7 @@ type ProviderConfig struct {
 	typeName                   string
 	apiURL                     string
 	oauthProfile               string
+	authScheme                 string // resolved request auth scheme; set once at construction, then read-only
 	keyStates                  []*KeyState
 	limiter                    *rate.Limiter // optional rate limiter (nil = no rate limiting)
 	models                     map[string]config.ModelConfig
@@ -236,6 +237,7 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		name:                       name,
 		typeName:                   cfg.Type,
 		apiURL:                     apiURL,
+		authScheme:                 config.EffectiveAuthScheme(cfg.Preset, cfg.Type, apiURL, cfg.AuthScheme),
 		oauthProfile:               oauthProfile,
 		keyStates:                  keyStates,
 		models:                     models,
@@ -313,6 +315,12 @@ func (p *ProviderConfig) IsAzureOpenAITransport() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return strings.EqualFold(strings.TrimSpace(p.preset), config.ProviderPresetAzure)
+}
+
+// AuthScheme returns the resolved request auth scheme. The field is set once in
+// NewProviderConfig and never mutated, so no lock is taken (see Name/Type/APIURL).
+func (p *ProviderConfig) AuthScheme() string {
+	return p.authScheme
 }
 
 func (p *ProviderConfig) Preset() string {

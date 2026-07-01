@@ -97,6 +97,21 @@ For `type: responses`, Chord uses one stable Responses wire shape for every prov
 
 For `type: messages`, Chord likewise sends a stable Anthropic Messages wire shape tuned for official Anthropic and compatible gateways. Messages requests always include Claude Code-style client hints such as `x-app: cli`, the default Claude Code beta feature list, and JSON-formatted `metadata.user_id` with stable anonymous routing fields. These fields are internal transport details, not user-configurable compatibility switches; they improve gateway compatibility and cache affinity while remaining accepted by the official Anthropic API. Provider-level `user_agent` remains configurable because gateways may require a specific client/version string.
 
+Provider auth headers are inferred separately from `type`, but can be overridden with `auth_scheme` when a compatible endpoint expects a different credential header:
+
+- `type: messages` → default `auth_scheme: anthropic-api-key` (`x-api-key`)
+- `type: responses` → default `auth_scheme: bearer` (`Authorization: Bearer`)
+- `type: chat-completions` → default `auth_scheme: bearer`
+- `preset: azure` → default `auth_scheme: api-key` (`api-key`)
+
+Supported `auth_scheme` values are:
+
+- `anthropic-api-key`
+- `bearer`
+- `api-key`
+
+Use an explicit override only when the endpoint's auth requirements differ from Chord's transport default. For example, a provider may expose an Anthropic-compatible `/messages` path but require `Authorization: Bearer` instead of `x-api-key`. In that case, keep the same `type` and set only `auth_scheme: bearer`.
+
 The one beta that is sent conditionally is `context-1m-2025-08-07` (1M context window). Unlike the other default betas, this one is enforced by the official Anthropic API: it is gated, switches to long-context pricing above 200K tokens, and errors on models that lack 1M support. Chord therefore opts in only when the model's declared window reaches 1M tokens (`limit.input` if set, otherwise `limit.context` >= 1000000), mirroring how Claude Code only sends it for models flagged as 1M-capable. Models with a smaller declared window never receive this header.
 
 The `store` field controls whether the Responses backend keeps this request and response server-side. Chord sends the full input on every request and never relies on `previous_response_id` to continue a conversation over HTTP, so the normal default `false` keeps requests self-contained and is the right choice for nearly every non-Azure setup. `preset: azure` defaults `store` to `true` because Azure OpenAI's Responses endpoint is stateful in the same way as OpenAI's persisted Responses API. Set `store: true` manually (at the provider level, or model level to override a provider default) only when a Responses-compatible backend or relay explicitly requires or benefits from server-side retention. Know the trade-offs before enabling it: the backend retains your request and response data, and the official Codex OAuth endpoint rejects `store: true` with a terminal `HTTP 400` (`Store must be set to false`) that fails the request without retrying, so do not set `store: true` on a `preset: codex` provider.

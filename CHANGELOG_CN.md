@@ -7,6 +7,7 @@
 ### 新功能
 
 - 新增 Azure OpenAI Responses provider 的 `preset: azure`，包括 Azure `api-key` 鉴权、兼容 Azure Responses 的请求头 / 默认 `store: true`、official API 400 处理、初始化模板支持，以及 `/openai/v1/responses` 配置示例文档。Provider 类型自动检测现在也会按 URL path 后缀判断并忽略 query / fragment，因此带 `?api-version=...` 的 endpoint 能被正确识别。
+- 新增 provider 级 `auth_scheme`，让兼容 endpoint 可以把凭据 header 与请求传输类型分开覆盖；支持 `anthropic-api-key`、`bearer` 和 `api-key`。
 
 ### 改进
 

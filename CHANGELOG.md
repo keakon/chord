@@ -7,6 +7,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Features
 
 - Added `preset: azure` for Azure OpenAI Responses providers, including Azure `api-key` authentication, Azure-compatible Responses headers/default `store: true`, official-API 400 handling, setup-template support, and docs/examples for `/openai/v1/responses`. Provider type auto-detection now also uses the URL path suffix while ignoring query strings and fragments, so endpoints with `?api-version=...` are detected correctly.
+- Added provider-level `auth_scheme` so compatible endpoints can override the credential header independently from the request transport, supporting `anthropic-api-key`, `bearer`, and `api-key`.
 
 ### Improvements
 

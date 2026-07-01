@@ -26,6 +26,11 @@ type CodexTransportResolution struct {
 func NormalizeProviderPreset(cfg ProviderConfig) (ProviderConfig, CodexTransportResolution, error) {
 	normalized := cfg
 	resolution := CodexTransportResolution{}
+	if authScheme, err := NormalizeAuthScheme(cfg.AuthScheme); err != nil {
+		return cfg, resolution, err
+	} else {
+		normalized.AuthScheme = authScheme
+	}
 
 	preset := strings.TrimSpace(strings.ToLower(cfg.Preset))
 	if preset != "" && preset != ProviderPresetCodex && preset != ProviderPresetAzure {

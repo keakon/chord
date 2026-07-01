@@ -298,7 +298,7 @@ func (o *OpenAIProvider) CompleteStream(
 	}
 
 	req.Header.Set(headerContentType, headerValueApplicationJSON)
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	applyProviderAuthHeader(req.Header, o.provider.AuthScheme(), apiKey)
 	setProviderLLMUserAgent(req.Header, o.provider)
 	applySessionIDHeaders(req.Header, o.sessionID)
 

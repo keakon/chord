@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/config"
 )
 
 const (
@@ -92,11 +94,22 @@ func applyAzureResponsesStreamingHeaders(h http.Header, provider *ProviderConfig
 	h.Set("Accept", "text/event-stream")
 }
 
+func applyProviderAuthHeader(h http.Header, scheme, apiKey string) {
+	switch scheme {
+	case config.AuthSchemeAnthropicAPIKey:
+		h.Set("x-api-key", apiKey)
+	case config.AuthSchemeAPIKey:
+		h.Set("api-key", apiKey)
+	default:
+		h.Set("Authorization", "Bearer "+apiKey)
+	}
+}
+
 // applyOpenAIOAuthHeaders sets the full set of headers for Codex requests using
 // an OAuth session key. Callers choose whether the request is streaming so the
 // unary compact endpoint does not inherit the SSE Accept header.
 func applyOpenAIOAuthHeaders(req *http.Request, provider *ProviderConfig, apiKey string, streaming bool) {
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	applyProviderAuthHeader(req.Header, config.AuthSchemeBearer, apiKey)
 	if streaming {
 		applyResponsesStreamingHeaders(req.Header, provider)
 	} else {

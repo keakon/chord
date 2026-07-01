@@ -91,6 +91,21 @@ providers:
 
 对 `type: messages`，Chord 同样会为官方 Anthropic 与兼容网关发送一套稳定的 Anthropic Messages 请求形态。Messages 请求始终包含 Claude Code 风格的客户端提示，例如 `x-app: cli`、默认 Claude Code beta feature 列表，以及 JSON 格式的 `metadata.user_id`（含稳定匿名路由字段）。这些字段属于内部传输细节，不是用户可配置的兼容开关；它们用于提升网关兼容性与缓存亲和性，同时会被官方 Anthropic API 接受。Provider 级 `user_agent` 仍可配置，因为部分网关可能要求特定客户端/版本字符串。
 
+Provider 的认证头会与 `type` 分开推断；如果某个兼容 endpoint 要求不同的凭据 header，也可以用 `auth_scheme` 手动覆盖：
+
+- `type: messages` → 默认 `auth_scheme: anthropic-api-key`（发送 `x-api-key`）
+- `type: responses` → 默认 `auth_scheme: bearer`（发送 `Authorization: Bearer`）
+- `type: chat-completions` → 默认 `auth_scheme: bearer`
+- `preset: azure` → 默认 `auth_scheme: api-key`（发送 `api-key`）
+
+支持的 `auth_scheme` 取值有：
+
+- `anthropic-api-key`
+- `bearer`
+- `api-key`
+
+只有当 endpoint 的认证要求和 Chord 默认传输策略不一致时，才需要显式覆盖。例如，有些 `/messages` 兼容接口虽然走 Anthropic 风格的请求体，却要求 `Authorization: Bearer`，而不是 `x-api-key`。这时保留原有 `type`，只设置 `auth_scheme: bearer` 即可。
+
 唯一按条件发送的 beta 是 `context-1m-2025-08-07`（1M 上下文窗口）。和其它默认 beta 不同，这个会被官方 Anthropic API 真实执行：它受权限门槛限制、超过 200K token 会切换到长上下文计价、对不支持 1M 的模型还会直接报错。因此 Chord 只在模型声明的窗口达到 1M token 时才注入（优先 `limit.input`，否则 `limit.context` >= 1000000），与 Claude Code 仅对标记为 1M 能力的模型发送该 header 的思路一致。声明窗口更小的模型永远不会收到这个 header。
 
 `store` 字段控制 Responses 后端要不要在服务端保留这次请求和响应。Chord 每次都发送完整输入，HTTP 请求也不靠 `previous_response_id` 接续上下文，所以普通默认值 `false` 会让请求自包含，几乎所有非 Azure 场景都该保持默认。`preset: azure` 会默认设为 `true`，因为 Azure OpenAI Responses endpoint 与 OpenAI 持久化 Responses API 一样按有状态语义工作。只有当 Responses 兼容后端或中转站明确要求、或确实能从服务端留存获益时，才手动设 `store: true`（在 provider 级配置，或用 model 级覆盖 provider 默认）。开启前要清楚代价：后端会保留你的请求和响应数据；而官方 Codex OAuth 端点会直接拒绝 `store: true`，返回终态的 `HTTP 400`（`Store must be set to false`），请求会直接失败、不重试，所以 `preset: codex` 的 provider 不要设 `store: true`。

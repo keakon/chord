@@ -19,6 +19,12 @@ const (
 	ProviderTypeGenerateContent       = "generate-content"
 )
 
+const (
+	AuthSchemeAnthropicAPIKey = "anthropic-api-key"
+	AuthSchemeBearer          = "bearer"
+	AuthSchemeAPIKey          = "api-key"
+)
+
 // Config is the top-level configuration for the chord agent.
 type Config struct {
 	Providers      map[string]ProviderConfig `json:"providers" yaml:"providers"`                         // LLM providers
@@ -227,6 +233,7 @@ type ProviderConfig struct {
 	WebSocketHandshakeTimeout int                    `json:"websocket_handshake_timeout,omitempty" yaml:"websocket_handshake_timeout,omitempty"` // Responses WebSocket handshake timeout in seconds (0 = built-in default)
 	RateLimit                 int                    `json:"rate_limit" yaml:"rate_limit"`                                                       // requests per minute (0 = no limit)
 	UserAgent                 string                 `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`                                   // optional User-Agent override for provider/model HTTP requests
+	AuthScheme                string                 `json:"auth_scheme,omitempty" yaml:"auth_scheme,omitempty"`                                 // optional auth scheme override for request header selection
 	Proxy                     *string                `json:"proxy,omitempty" yaml:"proxy,omitempty"`                                             // per-provider proxy URL; nil = inherit global, non-nil (incl. "") = override
 	Compat                    *ProviderCompatConfig  `json:"compat,omitempty" yaml:"compat,omitempty"`                                           // provider-level compat defaults (model-level can override model compat only)
 	OfficialAPI               *bool                  `json:"official_api,omitempty" yaml:"official_api,omitempty"`                               // true for direct official provider endpoints; false for aggregating/proxy gateways
@@ -278,6 +285,46 @@ func EffectiveStore(providerStore, modelStore *bool) bool {
 		return *providerStore
 	}
 	return false
+}
+
+// NormalizeAuthScheme trims, lowercases, and validates a provider auth scheme.
+// Empty input stays empty to allow later default inference.
+func NormalizeAuthScheme(raw string) (string, error) {
+	scheme := strings.TrimSpace(strings.ToLower(raw))
+	switch scheme {
+	case "":
+		return "", nil
+	case AuthSchemeAnthropicAPIKey, AuthSchemeBearer, AuthSchemeAPIKey:
+		return scheme, nil
+	default:
+		return "", fmt.Errorf("unsupported auth_scheme %q", raw)
+	}
+}
+
+// EffectiveAuthScheme resolves the request authentication scheme for a provider.
+// An explicit provider auth_scheme override wins; otherwise transport defaults
+// are inferred from preset/type/url shape.
+func EffectiveAuthScheme(preset, providerType, apiURL, authScheme string) string {
+	if normalized, err := NormalizeAuthScheme(authScheme); err == nil && normalized != "" {
+		return normalized
+	}
+	if strings.EqualFold(strings.TrimSpace(preset), ProviderPresetAzure) {
+		return AuthSchemeAPIKey
+	}
+	providerType = strings.TrimSpace(strings.ToLower(providerType))
+	switch providerType {
+	case ProviderTypeMessages:
+		return AuthSchemeAnthropicAPIKey
+	case ProviderTypeResponses, ProviderTypeChatCompletions:
+		return AuthSchemeBearer
+	}
+	if APIURLPathHasSuffix(apiURL, "/messages") {
+		return AuthSchemeAnthropicAPIKey
+	}
+	if APIURLPathHasSuffix(apiURL, "/responses") || APIURLPathHasSuffix(apiURL, "/chat/completions") {
+		return AuthSchemeBearer
+	}
+	return ""
 }
 
 // SplitProviderModelRef splits a model reference base into provider and model parts.

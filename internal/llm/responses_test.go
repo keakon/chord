@@ -2083,6 +2083,49 @@ func TestResponsesProvider_AzurePresetUserAgentOverride(t *testing.T) {
 	}
 }
 
+func TestResponsesProvider_AuthSchemeAPIKeyOverrideUsesAPIKeyHeader(t *testing.T) {
+	var gotHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	providerCfg := NewProviderConfig("custom", config.ProviderConfig{
+		Type:       config.ProviderTypeResponses,
+		APIURL:     server.URL + "/v1/responses",
+		AuthScheme: config.AuthSchemeAPIKey,
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+
+	_, err := r.CompleteStream(
+		context.Background(), "test-key", "gpt-test", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 0, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if got := gotHeaders.Get("api-key"); got != "test-key" {
+		t.Fatalf("api-key header = %q, want test-key", got)
+	}
+	if got := gotHeaders.Get("Authorization"); got != "" {
+		t.Fatalf("Authorization header = %q, want empty", got)
+	}
+	if got := gotHeaders.Get("Accept"); got != "text/event-stream" {
+		t.Fatalf("Accept header = %q, want text/event-stream", got)
+	}
+	if got := gotHeaders.Get("OpenAI-Beta"); got != openAICodexBetaHeader {
+		t.Fatalf("OpenAI-Beta header = %q, want %q for non-Azure override", got, openAICodexBetaHeader)
+	}
+	if got := gotHeaders.Get("originator"); got != openAICodexOriginator {
+		t.Fatalf("originator header = %q, want %q for non-Azure override", got, openAICodexOriginator)
+	}
+}
+
 func TestResponsesProvider_ProviderUserAgentOverridesResponsesDefault(t *testing.T) {
 	var gotHeaders http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2244,6 +2287,47 @@ func TestOpenAIProvider_SendsSessionHeadersOnChatCompletions(t *testing.T) {
 	}
 	if got := gotHeader.Get("session-id"); got != "session-456" {
 		t.Fatalf("session-id = %q, want session-456", got)
+	}
+}
+
+func TestOpenAIProvider_AuthSchemeAPIKeyOverrideUsesAPIKeyHeader(t *testing.T) {
+	var gotHeader http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Clone()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	providerCfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type:       config.ProviderTypeChatCompletions,
+		APIURL:     server.URL + "/v1/chat/completions",
+		AuthScheme: config.AuthSchemeAPIKey,
+	}, []string{"test-key"})
+	o, err := NewOpenAIProviderWithClient(providerCfg, server.Client(), "")
+	if err != nil {
+		t.Fatalf("NewOpenAIProviderWithClient: %v", err)
+	}
+
+	_, err = o.CompleteStream(
+		context.Background(), "test-key", "gpt-4", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 128, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if got := gotHeader.Get("api-key"); got != "test-key" {
+		t.Fatalf("api-key header = %q, want test-key", got)
+	}
+	if got := gotHeader.Get("Authorization"); got != "" {
+		t.Fatalf("Authorization header = %q, want empty", got)
+	}
+	if got := gotHeader.Get("User-Agent"); got != defaultLLMUserAgent() {
+		t.Fatalf("User-Agent = %q, want %q", got, defaultLLMUserAgent())
 	}
 }
 

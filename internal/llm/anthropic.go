@@ -251,7 +251,7 @@ func (a *AnthropicProvider) CompleteStream(
 	}
 
 	req.Header.Set(headerContentType, headerValueApplicationJSON)
-	req.Header.Set("x-api-key", apiKey)
+	applyProviderAuthHeader(req.Header, a.provider.AuthScheme(), apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("x-app", "cli")
 

@@ -90,6 +90,64 @@ func TestEffectiveStore(t *testing.T) {
 	}
 }
 
+func TestNormalizeAuthScheme(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{name: "empty", in: "", want: ""},
+		{name: "trim bearer", in: " Bearer ", want: AuthSchemeBearer},
+		{name: "anthropic", in: "anthropic-api-key", want: AuthSchemeAnthropicAPIKey},
+		{name: "api-key", in: "api-key", want: AuthSchemeAPIKey},
+		{name: "invalid", in: "basic", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NormalizeAuthScheme(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("NormalizeAuthScheme() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NormalizeAuthScheme() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("NormalizeAuthScheme(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEffectiveAuthScheme(t *testing.T) {
+	tests := []struct {
+		name         string
+		preset       string
+		providerType string
+		apiURL       string
+		authScheme   string
+		want         string
+	}{
+		{name: "messages default", providerType: ProviderTypeMessages, apiURL: "https://example.invalid/v1/messages", want: AuthSchemeAnthropicAPIKey},
+		{name: "responses default", providerType: ProviderTypeResponses, apiURL: "https://example.invalid/v1/responses", want: AuthSchemeBearer},
+		{name: "chat completions default", providerType: ProviderTypeChatCompletions, apiURL: "https://example.invalid/v1/chat/completions", want: AuthSchemeBearer},
+		{name: "azure preset default", preset: ProviderPresetAzure, providerType: ProviderTypeResponses, apiURL: "https://example.invalid/openai/v1/responses", want: AuthSchemeAPIKey},
+		{name: "explicit override wins", preset: ProviderPresetAzure, providerType: ProviderTypeMessages, apiURL: "https://example.invalid/v1/messages", authScheme: AuthSchemeBearer, want: AuthSchemeBearer},
+		{name: "infer from url messages", apiURL: "https://example.invalid/v1/messages", want: AuthSchemeAnthropicAPIKey},
+		{name: "infer from url responses", apiURL: "https://example.invalid/v1/responses", want: AuthSchemeBearer},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := EffectiveAuthScheme(tc.preset, tc.providerType, tc.apiURL, tc.authScheme); got != tc.want {
+				t.Fatalf("EffectiveAuthScheme(...) = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeProviderPreset_StoreDefault(t *testing.T) {
 	// preset: codex does not default store to true; explicit config still wins.
 	cfg := ProviderConfig{Preset: ProviderPresetCodex}
@@ -148,6 +206,9 @@ func TestNormalizeProviderPreset_AzurePresetDefaults(t *testing.T) {
 	}
 	if got.Store == nil || *got.Store != true {
 		t.Fatalf("azure preset Store = %v, want true", got.Store)
+	}
+	if got.AuthScheme != "" {
+		t.Fatalf("azure preset AuthScheme = %q, want empty explicit override", got.AuthScheme)
 	}
 }
 
@@ -240,5 +301,12 @@ func TestNormalizeProviderPreset_WithoutPresetDisabled(t *testing.T) {
 				t.Fatalf("expected config unchanged, got %#v want %#v", got, tc.cfg)
 			}
 		})
+	}
+}
+
+func TestNormalizeProviderPreset_RejectsInvalidAuthScheme(t *testing.T) {
+	_, _, err := NormalizeProviderPreset(ProviderConfig{AuthScheme: "basic"})
+	if err == nil {
+		t.Fatal("expected invalid auth_scheme to be rejected")
 	}
 }

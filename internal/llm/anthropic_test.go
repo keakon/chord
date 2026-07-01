@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -78,6 +79,115 @@ func TestStableAnthropicMetadataUserIDPayload_JSONShape(t *testing.T) {
 	}
 	if got.AccountUUID != "" {
 		t.Fatalf("account_uuid = %q, want empty string", got.AccountUUID)
+	}
+}
+
+func TestAnthropicProvider_DefaultMessagesAuthUsesXAPIKey(t *testing.T) {
+	var gotHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, strings.Join([]string{
+			"event: message_start",
+			"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"claude\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}",
+			"",
+			"event: content_block_start",
+			"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"hello\"}}",
+			"",
+			"event: content_block_delta",
+			"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}",
+			"",
+			"event: content_block_stop",
+			"data: {\"type\":\"content_block_stop\",\"index\":0}",
+			"",
+			"event: message_delta",
+			"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}",
+			"",
+			"event: message_stop",
+			"data: {\"type\":\"message_stop\"}",
+			"",
+		}, "\n"))
+	}))
+	defer server.Close()
+
+	providerCfg := NewProviderConfig("anthropic", config.ProviderConfig{
+		Type:   config.ProviderTypeMessages,
+		APIURL: server.URL + "/v1/messages",
+	}, []string{"test-key"})
+	provider := &AnthropicProvider{provider: providerCfg, client: server.Client()}
+
+	_, err := provider.CompleteStream(
+		context.Background(), "test-key", "claude-test", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 0, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if got := gotHeaders.Get("x-api-key"); got != "test-key" {
+		t.Fatalf("x-api-key = %q, want test-key", got)
+	}
+	if got := gotHeaders.Get("Authorization"); got != "" {
+		t.Fatalf("Authorization = %q, want empty", got)
+	}
+	if got := gotHeaders.Get("anthropic-version"); got != "2023-06-01" {
+		t.Fatalf("anthropic-version = %q, want 2023-06-01", got)
+	}
+}
+
+func TestAnthropicProvider_AuthSchemeBearerUsesAuthorizationHeader(t *testing.T) {
+	var gotHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, strings.Join([]string{
+			"event: message_start",
+			"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"claude\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}",
+			"",
+			"event: content_block_start",
+			"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"hello\"}}",
+			"",
+			"event: content_block_delta",
+			"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}",
+			"",
+			"event: content_block_stop",
+			"data: {\"type\":\"content_block_stop\",\"index\":0}",
+			"",
+			"event: message_delta",
+			"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}",
+			"",
+			"event: message_stop",
+			"data: {\"type\":\"message_stop\"}",
+			"",
+		}, "\n"))
+	}))
+	defer server.Close()
+
+	providerCfg := NewProviderConfig("sensenova", config.ProviderConfig{
+		Type:       config.ProviderTypeMessages,
+		APIURL:     server.URL + "/v1/messages",
+		AuthScheme: config.AuthSchemeBearer,
+	}, []string{"test-key"})
+	provider := &AnthropicProvider{provider: providerCfg, client: server.Client()}
+
+	_, err := provider.CompleteStream(
+		context.Background(), "test-key", "glm-5.2", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 0, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if got := gotHeaders.Get("Authorization"); got != "Bearer test-key" {
+		t.Fatalf("Authorization = %q, want Bearer test-key", got)
+	}
+	if got := gotHeaders.Get("x-api-key"); got != "" {
+		t.Fatalf("x-api-key = %q, want empty", got)
+	}
+	if got := gotHeaders.Get("anthropic-version"); got != "2023-06-01" {
+		t.Fatalf("anthropic-version = %q, want 2023-06-01", got)
 	}
 }
 
