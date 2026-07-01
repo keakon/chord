@@ -274,7 +274,7 @@ func trimAutomationBody(body string, maxLines int, maxBytes int) string {
 		body = strings.Join(lines, "\n")
 	}
 	if len(body) > maxBytes {
-		body = body[:maxBytes]
+		body = llm.TruncateStringBytes(body, maxBytes)
 		body = strings.TrimRight(body, "\n") + "\n... (truncated)"
 	}
 	return strings.TrimSpace(body)

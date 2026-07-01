@@ -237,8 +237,5 @@ func shortCompactionFailureReason(err error) string {
 		reason = strings.TrimSpace(line)
 	}
 	const maxReasonLen = 160
-	if len(reason) <= maxReasonLen {
-		return reason
-	}
-	return strings.TrimSpace(reason[:maxReasonLen-3]) + "..."
+	return strings.TrimSpace(llm.TruncateStringRunes(reason, maxReasonLen-3, "..."))
 }

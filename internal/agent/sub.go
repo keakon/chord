@@ -930,13 +930,10 @@ func (s *SubAgent) delegationPromptBlock() string {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// truncateString returns the first n characters of s, appending "..." if
-// truncated.
+// truncateString returns the first n runes of s, appending "..." if
+// truncated. It never splits a multi-byte UTF-8 rune.
 func truncateString(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
+	return llm.TruncateStringRunes(s, n, "...")
 }
 
 // ---------------------------------------------------------------------------

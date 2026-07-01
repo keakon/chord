@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/skill"
 )
@@ -124,6 +125,21 @@ func TestSkillToolDescriptionTruncatesLongDescription(t *testing.T) {
 	}
 	if !strings.Contains(desc, strings.Repeat("A", 157)+"...") {
 		t.Fatalf("expected truncated description ending with ..., got:\n%s", desc)
+	}
+}
+
+func TestTruncateSkillDescPreservesUTF8AtByteBoundary(t *testing.T) {
+	// Place a 3-byte rune ("厂" = e5 8e 82) straddling the 157-byte back-off
+	// point so a naive byte slice would emit a half-encoded rune.
+	for _, pad := range []int{155, 156, 157, 158} {
+		desc := strings.Repeat("A", pad) + "厂" + strings.Repeat("B", 50)
+		got := TruncateSkillDesc(desc)
+		if !utf8.ValidString(got) {
+			t.Fatalf("pad=%d: TruncateSkillDesc returned invalid UTF-8: %q", pad, got)
+		}
+		if !strings.HasSuffix(got, "...") {
+			t.Fatalf("pad=%d: expected truncated suffix, got %q", pad, got)
+		}
 	}
 }
 

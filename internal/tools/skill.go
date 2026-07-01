@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/skill"
 )
@@ -49,11 +50,17 @@ const (
 )
 
 // TruncateSkillDesc truncates a skill description to fit the per-entry budget.
+// The budget is expressed in bytes, so back off to a UTF-8 rune boundary to
+// avoid emitting a half-encoded multi-byte character.
 func TruncateSkillDesc(desc string) string {
 	if len(desc) <= SkillListingMaxDescPerEntry {
 		return desc
 	}
-	return desc[:SkillListingMaxDescPerEntry-3] + "..."
+	end := SkillListingMaxDescPerEntry - 3
+	for end > 0 && !utf8.RuneStart(desc[end]) {
+		end--
+	}
+	return desc[:end] + "..."
 }
 
 // SkillListingEntry is a lightweight name+description pair used by the shared

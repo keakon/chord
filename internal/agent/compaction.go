@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -178,18 +179,16 @@ func compactTextSnippet(s string, maxChars int) string {
 	if s == "" || maxChars <= 0 {
 		return ""
 	}
-	if len(s) <= maxChars {
-		return s
-	}
 	keepHead := maxChars * 2 / 3
 	if keepHead < 1 {
 		keepHead = maxChars
 	}
-	keepTail := max(maxChars-keepHead-len("\n...\n"), 0)
+	sep := "\n...\n"
+	keepTail := max(maxChars-keepHead-len([]rune(sep)), 0)
 	if keepTail == 0 {
-		return strings.TrimSpace(s[:keepHead])
+		return strings.TrimSpace(llm.TruncateStringRunes(s, keepHead, ""))
 	}
-	return strings.TrimSpace(s[:keepHead]) + "\n...\n" + strings.TrimSpace(s[len(s)-keepTail:])
+	return strings.TrimSpace(llm.TruncateStringHeadTail(s, keepHead, keepTail, sep))
 }
 
 func evidencePriority(kind evidenceKind) int {
