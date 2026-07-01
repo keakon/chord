@@ -93,7 +93,7 @@ func (t *ViewImageTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	resolvedPath, _, err := resolveExistingToolPath(a.Path, PathTargetRegularFile, "read")
 	if err != nil {
 		if strings.Contains(err.Error(), "path not found") {
-			return "", fmt.Errorf("file not found: %s", a.Path)
+			return "", fileNotFoundErrorWithPathSuggestions(a.Path, PathTargetRegularFile)
 		}
 		return "", err
 	}

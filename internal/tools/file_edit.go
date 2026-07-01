@@ -20,7 +20,7 @@ func readFileForEdit(path, displayPath, binaryAction string) (fileEditRead, erro
 	decodedFile, data, err := ReadAndDecodeTextFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fileEditRead{}, fmt.Errorf("file not found: %s", displayPath)
+			return fileEditRead{}, fileNotFoundErrorWithPathSuggestions(displayPath, PathTargetRegularFile)
 		}
 		if errors.Is(err, ErrBinaryFile) {
 			return fileEditRead{}, fmt.Errorf("cannot %s binary file: %s", binaryAction, displayPath)

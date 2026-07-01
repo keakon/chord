@@ -33,6 +33,90 @@ func TestReadToolFileNotFoundSuggestsSiblingPath(t *testing.T) {
 	}
 }
 
+func TestReadToolFileNotFoundSuggestsWhitespaceRepair(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(home, "alpha", "file.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	raw := json.RawMessage(`{"path":"~/ alpha/file.txt"}`)
+	_, err := (ReadTool{}).Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("ReadTool.Execute err = nil, want file-not-found error with whitespace repair suggestion")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "Did you mean") {
+		t.Fatalf("error missing \"Did you mean\": %s", msg)
+	}
+	if !strings.Contains(msg, filepath.ToSlash(filepath.Join("~", "alpha", "file.txt"))) {
+		t.Fatalf("error missing home-relative repaired suggestion: %s", msg)
+	}
+}
+
+func TestSuggestWhitespacePathRepairHandlesVariousSpacePositions(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(home, "alpha", "beta", "file.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	want := filepath.ToSlash(filepath.Join("~", "alpha", "beta", "file.txt"))
+	cases := []string{
+		"~/ alpha/beta/file.txt", // space right after ~/
+		"~ /alpha/beta/file.txt", // space between ~ and separator
+		"~/alpha /beta/file.txt", // space before a separator
+		"~/alpha/ beta/file.txt", // space after a separator
+		"~/alp ha/beta/file.txt", // space inside a token
+	}
+	for _, broken := range cases {
+		got, ok := suggestWhitespacePathRepair(broken, PathTargetRegularFile)
+		if !ok {
+			t.Errorf("%q: want repair, got none", broken)
+			continue
+		}
+		if got != want {
+			t.Errorf("%q: got %q, want %q", broken, got, want)
+		}
+	}
+}
+
+func TestSuggestWhitespacePathRepairNoMatchWhenRepairedAbsent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// No space and no file: nothing to repair.
+	if _, ok := suggestWhitespacePathRepair("~/alpha/beta/file.txt", PathTargetRegularFile); ok {
+		t.Fatal("want no repair for path without spaces")
+	}
+	// Space present but the de-spaced path does not exist either: no false match.
+	if got, ok := suggestWhitespacePathRepair("~/alp ha/beta/file.txt", PathTargetRegularFile); ok {
+		t.Fatalf("want no repair when repaired path is absent, got %q", got)
+	}
+	// A legitimately spaced path that exists as typed is never reached by repair
+	// (read succeeds), but if the spaced form is absent and the de-spaced form is
+	// also absent, repair must stay silent rather than inventing a path.
+	legit := filepath.Join(home, "with space", "file.txt")
+	if err := os.MkdirAll(filepath.Dir(legit), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(legit, []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	// Removing the space from the legitimate component yields a non-existent path.
+	if got, ok := suggestWhitespacePathRepair("~/withspace/file.txt", PathTargetRegularFile); ok {
+		t.Fatalf("want no repair to non-existent de-spaced path, got %q", got)
+	}
+}
+
 func TestReadToolFileNotFoundDisplaysCurrentDirectoryRelativePaths(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -216,6 +300,30 @@ func TestPathSuggestionsOmitLowConfidenceCandidates(t *testing.T) {
 	}
 }
 
+func TestPathSuggestionsRejectDistantSimilarBasename(t *testing.T) {
+	dir := t.TempDir()
+	// A distant file whose stem matches but extension differs, with no shared
+	// trailing parent segment: this is the home-wide walk noise pattern.
+	farDir := filepath.Join(dir, "x", "y", "z")
+	if err := os.MkdirAll(farDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(farDir, "data.bak"), []byte("data\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	got := suggestExistingToolPathsWithOptions(filepath.Join(dir, "a", "b", "data.txt"), PathTargetRegularFile, pathSuggestionOptions{
+		Timeout:        time.Second,
+		MaxVisited:     100,
+		MaxCandidates:  100,
+		MaxSuggestions: 3,
+		MinScore:       pathSuggestionMinScore,
+	})
+	if len(got) != 0 {
+		t.Fatalf("suggestExistingToolPathsWithOptions() = %#v, want no distant basename-only suggestions", got)
+	}
+}
+
 func TestPathSuggestionsRespectCandidateLimit(t *testing.T) {
 	dir := t.TempDir()
 	for i := 0; i < 5; i++ {
@@ -233,5 +341,61 @@ func TestPathSuggestionsRespectCandidateLimit(t *testing.T) {
 	})
 	if len(got) != 2 {
 		t.Fatalf("suggestExistingToolPathsWithOptions() len = %d, want 2; got %#v", len(got), got)
+	}
+}
+
+func TestEditToolFileNotFoundSuggestsWhitespaceRepair(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(home, "alpha", "file.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	args, _ := json.Marshal(map[string]any{"path": "~/ alpha/file.txt", "old_string": "a", "new_string": "b"})
+	_, err := (EditTool{}).Execute(context.Background(), args)
+	if err == nil {
+		t.Fatal("EditTool.Execute err = nil, want file-not-found with whitespace repair suggestion")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "Did you mean") {
+		t.Fatalf("error missing \"Did you mean\": %s", msg)
+	}
+	if !strings.Contains(msg, filepath.ToSlash(filepath.Join("~", "alpha", "file.txt"))) {
+		t.Fatalf("error missing home-relative repaired suggestion: %s", msg)
+	}
+}
+
+func TestPatchPlanFileNotFoundSuggestsWhitespaceRepair(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(home, "alpha", "file.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Minimal patch text: a single hunk. The target file does not exist as typed
+	// (a misplaced space), so planning must fail with a repair suggestion rather
+	// than a bare not-found.
+	patchText := "@@\n content\n+changed\n"
+	_, err := BuildPatchPlanInDirWithContext(context.Background(), "~/ alpha/file.txt", patchText, "")
+	if err == nil {
+		t.Fatal("BuildPatchPlanInDirWithContext err = nil, want file-not-found with whitespace repair suggestion")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "Did you mean") {
+		t.Fatalf("error missing \"Did you mean\": %s", msg)
+	}
+	if !strings.Contains(msg, "Use write to create files") {
+		t.Fatalf("error missing patch guidance: %s", msg)
+	}
+	if !strings.Contains(msg, filepath.ToSlash(filepath.Join("~", "alpha", "file.txt"))) {
+		t.Fatalf("error missing home-relative repaired suggestion: %s", msg)
 	}
 }

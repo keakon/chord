@@ -14,6 +14,7 @@
 - 改进长 agent 循环中的 prompt cache 稳定性：动态环境信息现在放入 session-context reminder 而不是 system prompt；请求级增量剪裁会冻结已剪裁前缀；Anthropic 显式 cache breakpoint 可以落在冻结的已剪裁前缀边界上。
 - Thinking 翻译现在会更严格校验模型输出，拒绝纯符号或过度压缩的译文；并改为在 assistant thinking 持久化后再翻译，而不是流式过程中翻译，避免 rollback / retry 路径留下过期翻译。
 - TUI 流式渲染现在减少 assistant / thinking 增量的逐 token 缓存失效，降低长流式响应期间的重绘开销。
+- 文件工具现在提供更完整的 not-found 路径建议，包括对常见模型生成路径的空白修复提示，并把同一套建议流程覆盖到 `read`、`view_image`、`edit` 和 `patch`；`patch` 仍会保留使用 `write` 创建文件的提示。
 
 ### 修复
 

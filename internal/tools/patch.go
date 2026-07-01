@@ -249,7 +249,8 @@ func buildPatchPlanWithContext(ctx context.Context, path, patchText, baseDir str
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return PatchPlan{}, fmt.Errorf("file not found: %s. patch only updates one existing file. Use write to create files. No files were modified", parsed.Path)
+			base := fmt.Sprintf("file not found: %s. patch only updates one existing file. Use write to create files. No files were modified", parsed.Path)
+			return PatchPlan{}, withPathSuggestions(base, parsed.Path, PathTargetRegularFile)
 		}
 		return PatchPlan{}, fmt.Errorf("accessing path: %w. No files were modified", err)
 	}

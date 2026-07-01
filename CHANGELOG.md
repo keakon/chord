@@ -14,6 +14,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Improved prompt-cache stability for long agent loops: dynamic environment data now lives in the session-context reminder instead of the system prompt, already-reduced request prefixes are frozen across incremental reduction, and Anthropic explicit cache breakpoints can target the frozen reduced-prefix boundary.
 - Thinking translation now validates model output more strictly, rejecting symbol-only or excessively compressed translations, and runs after assistant thinking is durably recorded instead of during streaming so rollback/retry paths do not leave stale translated thinking.
 - TUI streaming renders assistant/thinking deltas with less per-token cache invalidation, reducing redraw work during long streamed responses.
+- File tools now offer broader not-found path suggestions, including whitespace-repair hints for common model-generated paths and the same suggestion flow for `read`, `view_image`, `edit`, and `patch` while preserving patch's create-file guidance.
 
 ### Fixes
 

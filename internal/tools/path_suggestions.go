@@ -47,12 +47,20 @@ func defaultPathSuggestionOptions() pathSuggestionOptions {
 
 func fileNotFoundErrorWithPathSuggestions(path string, kind PathTargetKind) error {
 	msg := fmt.Sprintf("file not found: %s", formatToolPathInCurrentDirectory(path, path))
+	return withPathSuggestions(msg, path, kind)
+}
+
+// withPathSuggestions returns baseMsg, optionally followed by a "Did you mean:"
+// block when existing-path suggestions are found for path. It lets callers that
+// need a custom base message (e.g. patch's "use write to create files" guidance)
+// still reuse the same suggestion discovery.
+func withPathSuggestions(baseMsg, path string, kind PathTargetKind) error {
 	suggestions := suggestExistingToolPaths(path, kind)
 	if len(suggestions) == 0 {
-		return errors.New(msg)
+		return errors.New(baseMsg)
 	}
 	var b strings.Builder
-	b.WriteString(msg)
+	b.WriteString(baseMsg)
 	b.WriteString("\nDid you mean:")
 	for _, s := range suggestions {
 		b.WriteString("\n- ")
@@ -88,6 +96,9 @@ func suggestExistingToolPathsWithOptions(path string, kind PathTargetKind, opts 
 	resolved, err := resolveToolPath(path)
 	if err != nil {
 		return nil
+	}
+	if repaired, ok := suggestWhitespacePathRepair(path, kind); ok {
+		return []string{repaired}
 	}
 	deadline := time.Now().Add(opts.Timeout)
 	candidateSet := make(map[string]struct{})
@@ -178,6 +189,55 @@ func suggestExistingToolPathsWithOptions(path string, kind PathTargetKind, opts 
 			break
 		}
 	}
+	return out
+}
+
+func suggestWhitespacePathRepair(path string, kind PathTargetKind) (string, bool) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" || !strings.Contains(trimmed, " ") {
+		return "", false
+	}
+	for _, repaired := range whitespaceRepairCandidates(trimmed) {
+		resolved, err := resolveToolPath(repaired)
+		if err != nil {
+			continue
+		}
+		if info, statErr := os.Stat(resolved); statErr == nil && pathSuggestionMatchesKind(info, kind) {
+			return formatSuggestedPath(path, resolved), true
+		}
+	}
+	return "", false
+}
+
+// whitespaceRepairCandidates returns paths derived from path by removing spaces.
+// It removes one space at a time first (preserving legitimate spaces elsewhere,
+// e.g. a real "my folder" component) and only collapses all spaces as a last
+// resort, so a single misplaced space does not erase an intentional one. Only
+// candidates that stat to an existing path are used by the caller, so removing
+// a space from a legitimate spaced path simply yields no match.
+func whitespaceRepairCandidates(path string) []string {
+	spaceAt := make([]int, 0, strings.Count(path, " "))
+	for i := 0; i < len(path); i++ {
+		if path[i] == ' ' {
+			spaceAt = append(spaceAt, i)
+		}
+	}
+	if len(spaceAt) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(spaceAt)+1)
+	out := make([]string, 0, len(spaceAt)+1)
+	add := func(s string) {
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, i := range spaceAt {
+		add(path[:i] + path[i+1:])
+	}
+	add(strings.ReplaceAll(path, " ", ""))
 	return out
 }
 
@@ -288,6 +348,9 @@ func formatSuggestedPath(requested, candidate string) string {
 	if displayPath, ok := toolPathInCurrentDirectory(candidate); ok {
 		return displayPath
 	}
+	if rel, ok := pathRelativeToHome(candidate); ok {
+		return rel
+	}
 	trimmed := strings.TrimSpace(requested)
 	if filepath.IsAbs(trimmed) {
 		return candidate
@@ -301,6 +364,30 @@ func formatSuggestedPath(requested, candidate string) string {
 		return candidate
 	}
 	return rel
+}
+
+// pathRelativeToHome renders candidate as ~/... when it lives under the user's
+// home directory, so suggestions for home files stay short and match the form
+// the model originally typed instead of a long absolute path.
+func pathRelativeToHome(path string) (string, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "", false
+	}
+	cleanedHome, homeErr := filepath.EvalSymlinks(home)
+	if homeErr != nil {
+		cleanedHome = home
+	}
+	cleanedPath, pathErr := filepath.EvalSymlinks(path)
+	if pathErr != nil {
+		cleanedPath = path
+	}
+	cleanedHome = filepath.Clean(cleanedHome)
+	cleanedPath = filepath.Clean(cleanedPath)
+	if cleanedHome == "" || !strings.HasPrefix(cleanedPath, cleanedHome+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.Join("~", strings.TrimPrefix(cleanedPath, cleanedHome+string(filepath.Separator))), true
 }
 
 func formatToolPathInCurrentDirectory(path, fallback string) string {
@@ -397,8 +484,21 @@ func scorePathSuggestion(target, candidate string) int {
 
 	targetParts := pathSuggestionParts(targetClean)
 	candidateParts := pathSuggestionParts(candidateClean)
-	score += commonSuffixParts(targetParts, candidateParts) * 15
-	score += commonPrefixParts(targetParts, candidateParts) * 3
+	sharedPrefix := commonPrefixParts(targetParts, candidateParts)
+	sharedSuffix := commonSuffixParts(targetParts, candidateParts)
+	// When the parent directory chains share no trailing segment, a mere
+	// basename similarity is not enough: home-wide walks would otherwise
+	// surface unrelated same-stem files (e.g. a distant config.yml for a
+	// missing config.yaml). Require an exact basename match in that case.
+	if sharedSuffix == 0 && len(targetParts) > 1 && len(candidateParts) > 1 {
+		targetParent := targetParts[:len(targetParts)-1]
+		candidateParent := candidateParts[:len(candidateParts)-1]
+		if commonSuffixParts(targetParent, candidateParent) == 0 && candidateBase != targetBase {
+			return -1
+		}
+	}
+	score += sharedSuffix * 15
+	score += sharedPrefix * 3
 	score -= absInt(len(candidateParts)-len(targetParts)) * 2
 	return score
 }
