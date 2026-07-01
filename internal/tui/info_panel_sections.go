@@ -72,7 +72,7 @@ func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 			selectedRef = nextRef
 		}
 	}
-	modelDisplay := formatModelRefForRequestState(runningRef, selectedRef, m.agent.RunningVariant(), lineW, busy)
+	modelDisplay := formatModelRefForRequestState(runningRef, selectedRef, m.agent.RunningVariant(), lineW)
 	modelShown := modelDisplay
 	modelLines := []string{
 		InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("MODEL")),

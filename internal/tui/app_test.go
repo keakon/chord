@@ -1052,18 +1052,39 @@ func TestRenderInfoPanelShowsRunningModelWhileBusy(t *testing.T) {
 	}
 }
 
-func TestRenderInfoPanelShowsSelectedModelWhileIdle(t *testing.T) {
+func TestRenderInfoPanelShowsRunningModelWhileIdle(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.providerModelRef = "openai/gpt-5.5"
 	backend.runningModelRef = "openai/gpt-5.4"
 	m := NewModelWithSize(backend, 100, 24)
 
 	plain := stripANSI(m.renderInfoPanel(80, 20))
-	if !strings.Contains(plain, "openai/gpt-5.5") {
-		t.Fatalf("info panel = %q, want selected model", plain)
+	if !strings.Contains(plain, "openai/gpt-5.4") {
+		t.Fatalf("info panel = %q, want running model", plain)
 	}
-	if strings.Contains(plain, "openai/gpt-5.4") || strings.Contains(plain, "->") {
-		t.Fatalf("info panel = %q, should not show running model transition while idle", plain)
+	if strings.Contains(plain, "openai/gpt-5.5") {
+		t.Fatalf("info panel = %q, should not revert to selected model while idle", plain)
+	}
+}
+
+func TestRenderStatusBarShowsRunningModelWhileIdle(t *testing.T) {
+	events := make(chan agent.AgentEvent, 1)
+	backend := &sessionControlAgent{
+		events:           events,
+		providerModelRef: "prov/selected-model",
+		runningModelRef:  "prov/running-fallback",
+	}
+	m := NewModelWithSize(backend, 220, 24)
+	m.mode = ModeNormal
+	m.rightPanelVisible = false
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
+
+	plain := stripANSI(m.renderStatusBar())
+	if !strings.Contains(plain, "prov/running-fallback") {
+		t.Fatalf("status bar = %q, want running model", plain)
+	}
+	if strings.Contains(plain, "prov/selected-model") {
+		t.Fatalf("status bar = %q, should not revert to selected model while idle", plain)
 	}
 }
 
@@ -5300,11 +5321,8 @@ func TestHandleSwitchAgentRefreshesInfoPanelModelWithoutEvent(t *testing.T) {
 		t.Fatalf("backend focused = %q, want agent-1", got)
 	}
 	after := stripANSI(m.renderInfoPanel(40, 20))
-	if !strings.Contains(after, "worker/review") {
-		t.Fatalf("info panel after agent switch = %q, want worker/review", after)
-	}
-	if strings.Contains(after, "worker/review@high") {
-		t.Fatalf("info panel after idle agent switch should show selected model without running variant: %q", after)
+	if !strings.Contains(after, "worker/review@high") {
+		t.Fatalf("info panel after agent switch = %q, want worker/review@high", after)
 	}
 	if strings.Contains(after, "main/huge") {
 		t.Fatalf("info panel after agent switch should not keep stale main model: %q", after)

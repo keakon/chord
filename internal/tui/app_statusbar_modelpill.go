@@ -54,7 +54,7 @@ func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSna
 	} else {
 		modelStr := "unknown"
 		if modelRef != "" || selectedRef != "" {
-			modelStr = formatModelRefForRequestState(modelRef, selectedRef, modelVariant, modelSlotMax, snap.busy)
+			modelStr = formatModelRefForRequestState(modelRef, selectedRef, modelVariant, modelSlotMax)
 		}
 		modelPill = PillStyle.Render("◇ " + modelStr)
 		m.cachedModelPillRef = modelRef

@@ -581,3 +581,74 @@ func TestCallLLMNoFallbackExhaustedToastOnCancel(t *testing.T) {
 		}
 	}
 }
+
+func TestCallLLMFailedFallbackPersistsLastRunningModel(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.SetProviderModelRef("primary-prov/primary-model")
+
+	primaryCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"primary-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"primary-key"})
+	fallbackCfg := llm.NewProviderConfig("fallback-prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"fallback-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"fallback-key"})
+
+	primaryImpl := &blockingStreamProvider{calls: []scriptedStreamCall{{
+		err: &llm.APIError{StatusCode: 429, Message: "rate limited"},
+	}}}
+	fallbackImpl := &blockingStreamProvider{calls: []scriptedStreamCall{{
+		err: &llm.APIError{StatusCode: 429, Message: "fallback rate limited"},
+	}}}
+
+	client := llm.NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	client.SetStreamRetryRounds(1)
+	client.SetFallbackModels([]llm.FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "fallback-model",
+		MaxTokens:      4096,
+		ContextLimit:   128000,
+	}})
+	a.swapLLMClientWithRef(client, "primary-model", 128000, "primary-prov/primary-model")
+
+	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	if err == nil {
+		t.Fatal("callLLM err = nil, want fallback failure")
+	}
+	if got := a.RunningModelRef(); got != "fallback-prov/fallback-model" {
+		t.Fatalf("RunningModelRef() after failed fallback = %q, want fallback-prov/fallback-model", got)
+	}
+
+	var sawRunningModelChange bool
+	var sawExhaustedToast bool
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		select {
+		case evt := <-a.Events():
+			switch e := evt.(type) {
+			case RunningModelChangedEvent:
+				if e.ProviderModelRef == "primary-prov/primary-model" && e.RunningModelRef == "fallback-prov/fallback-model" {
+					sawRunningModelChange = true
+				}
+			case ToastEvent:
+				if strings.Contains(e.Message, "Fallback chain exhausted") {
+					sawExhaustedToast = true
+				}
+			}
+		case <-deadline:
+			if !sawRunningModelChange {
+				t.Fatal("missing RunningModelChangedEvent for failed fallback")
+			}
+			if !sawExhaustedToast {
+				t.Fatal("missing fallback exhausted toast for failed fallback")
+			}
+			return
+		}
+	}
+}

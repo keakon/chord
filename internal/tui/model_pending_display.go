@@ -6,12 +6,10 @@ import (
 	"github.com/keakon/chord/internal/tui/modelref"
 )
 
-func formatModelRefForRequestState(runningRef, selectedRef, activeVariant string, maxLen int, busy bool) string {
-	if busy {
-		runningRef = strings.TrimSpace(runningRef)
-		if runningRef != "" {
-			return modelref.FormatRunningModelRefForDisplay(runningRef, selectedRef, activeVariant, maxLen)
-		}
+func formatModelRefForRequestState(runningRef, selectedRef, activeVariant string, maxLen int) string {
+	runningRef = strings.TrimSpace(runningRef)
+	if runningRef != "" {
+		return modelref.FormatRunningModelRefForDisplay(runningRef, selectedRef, activeVariant, maxLen)
 	}
 	selectedRef = strings.TrimSpace(selectedRef)
 	if selectedRef != "" {
