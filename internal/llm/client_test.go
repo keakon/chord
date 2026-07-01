@@ -115,6 +115,13 @@ type recordingProvider struct {
 	maxTokens []int
 }
 
+type rejectBinaryPartsProvider struct {
+	mu      sync.Mutex
+	count   int
+	lastMsg []message.Message
+	resp    *message.Response
+}
+
 type constantErrProvider struct {
 	err   error
 	calls int
@@ -282,23 +289,34 @@ func TestPrimarySupportsViewImageToolUsesFirstPoolModel(t *testing.T) {
 	if client.PrimarySupportsViewImageTool() {
 		t.Fatal("PrimarySupportsViewImageTool() = true, want false when first model-pool entry is OpenAI Chat")
 	}
+
+	textOnlyCfg := NewProviderConfig("text-only", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{
+			"text": {},
+		},
+	}, []string{"key"})
+	client.SetModelPool([]FallbackModel{{ProviderConfig: textOnlyCfg, ProviderImpl: &scriptedProvider{}, ModelID: "text", MaxTokens: 1024}}, 0)
+	if client.PrimarySupportsViewImageTool() {
+		t.Fatal("PrimarySupportsViewImageTool() = true, want false when primary model defaults to text-only input")
+	}
 }
 
-func TestCompleteStreamSkipsChatFallbackForImageToolResultHistory(t *testing.T) {
+func TestCompleteStreamDropsUnsupportedImageToolResultPartsForFallback(t *testing.T) {
 	responsesCfg := NewProviderConfig("responses", config.ProviderConfig{
 		Type: config.ProviderTypeResponses,
 		Models: map[string]config.ModelConfig{
 			"vision": {Modalities: &config.ModelModalities{Input: []string{"text", "image"}}},
 		},
 	}, []string{"key"})
-	chatCfg := NewProviderConfig("chat", config.ProviderConfig{
-		Type: config.ProviderTypeChatCompletions,
+	textCfg := NewProviderConfig("text", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
 		Models: map[string]config.ModelConfig{
-			"vision": {Modalities: &config.ModelModalities{Input: []string{"text", "image"}}},
+			"text": {Modalities: &config.ModelModalities{Input: []string{"text"}}},
 		},
 	}, []string{"key"})
 	startProvider := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 502, Message: "bad gateway"}}}}
-	chatProvider := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "should not run"}}}}
+	textProvider := &rejectBinaryPartsProvider{resp: &message.Response{Content: "fallback ok"}}
 	client := NewClient(responsesCfg, startProvider, "vision", 1024, "")
 	messages := []message.Message{{
 		Role:       "tool",
@@ -323,25 +341,47 @@ func TestCompleteStreamSkipsChatFallbackForImageToolResultHistory(t *testing.T) 
 		nil,
 		nil,
 		true,
-		[]FallbackModel{{ProviderConfig: chatCfg, ProviderImpl: chatProvider, ModelID: "vision", MaxTokens: 1024}},
+		[]FallbackModel{{ProviderConfig: textCfg, ProviderImpl: textProvider, ModelID: "text", MaxTokens: 1024}},
 		1,
 		&CallStatus{},
 	)
-	if err == nil || !strings.Contains(err.Error(), "lacks required input support or uses the Chat API") {
-		t.Fatalf("CompleteStream error = %v, want image tool-result replay error", err)
+	if err != nil {
+		t.Fatalf("CompleteStream error = %v, want nil", err)
 	}
-	if got := chatProvider.CallCount(); got != 0 {
-		t.Fatalf("chat fallback calls = %d, want 0", got)
+	if got := textProvider.CallCount(); got != 1 {
+		t.Fatalf("text fallback calls = %d, want 1", got)
 	}
+	replayed := textProvider.LastMessages()
+	if len(replayed) != 1 || len(replayed[0].Parts) != 1 || replayed[0].Parts[0].Type != message.ContentPartText {
+		t.Fatalf("fallback messages = %#v, want text-only tool result", replayed)
+	}
+}
 
+func TestCompleteStreamDropsUnsupportedUserImagePartsForFallback(t *testing.T) {
+	responsesCfg := NewProviderConfig("responses", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{
+			"vision": {Modalities: &config.ModelModalities{Input: []string{"text", "image"}}},
+		},
+	}, []string{"key"})
 	textCfg := NewProviderConfig("text", config.ProviderConfig{
 		Type: config.ProviderTypeResponses,
 		Models: map[string]config.ModelConfig{
 			"text": {Modalities: &config.ModelModalities{Input: []string{"text"}}},
 		},
 	}, []string{"key"})
-	textProvider := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "should not run"}}}}
-	_, err = callCompleteStreamWithRetryForTest(
+	startProvider := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 502, Message: "bad gateway"}}}}
+	textProvider := &rejectBinaryPartsProvider{resp: &message.Response{Content: "fallback ok"}}
+	client := NewClient(responsesCfg, startProvider, "vision", 1024, "")
+	messages := []message.Message{{
+		Role: "user",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "what is in this image?"},
+			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+		},
+	}}
+
+	_, err := callCompleteStreamWithRetryForTest(
 		client,
 		context.Background(),
 		responsesCfg,
@@ -358,15 +398,70 @@ func TestCompleteStreamSkipsChatFallbackForImageToolResultHistory(t *testing.T) 
 		1,
 		&CallStatus{},
 	)
-	if err == nil || !strings.Contains(err.Error(), "lacks required input support or uses the Chat API") {
-		t.Fatalf("CompleteStream text fallback error = %v, want image input replay error", err)
+	if err != nil {
+		t.Fatalf("CompleteStream error = %v, want nil", err)
 	}
-	if got := textProvider.CallCount(); got != 0 {
-		t.Fatalf("text fallback calls = %d, want 0", got)
+	if got := textProvider.CallCount(); got != 1 {
+		t.Fatalf("text fallback calls = %d, want 1", got)
+	}
+	replayed := textProvider.LastMessages()
+	if len(replayed) != 1 || len(replayed[0].Parts) != 1 || replayed[0].Parts[0].Type != message.ContentPartText {
+		t.Fatalf("fallback messages = %#v, want text-only user message", replayed)
 	}
 }
 
-func TestCompleteStreamSkipsImageOnlyFallbackForPDFToolResultHistory(t *testing.T) {
+func TestCompleteStreamDropsUnsupportedBinaryPartsForFallbackWithMissingModelConfig(t *testing.T) {
+	responsesCfg := NewProviderConfig("responses", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{
+			"vision": {Modalities: &config.ModelModalities{Input: []string{"text", "image"}}},
+		},
+	}, []string{"key"})
+	unknownModelCfg := NewProviderConfig("unknown-model", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{},
+	}, []string{"key"})
+	startProvider := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 502, Message: "bad gateway"}}}}
+	textProvider := &rejectBinaryPartsProvider{resp: &message.Response{Content: "fallback ok"}}
+	client := NewClient(responsesCfg, startProvider, "vision", 1024, "")
+	messages := []message.Message{{
+		Role: "user",
+		Parts: []message.ContentPart{
+			{Type: message.ContentPartText, Text: "what is in this image?"},
+			{Type: message.ContentPartImage, MimeType: "image/png", Data: []byte("png")},
+		},
+	}}
+
+	_, err := callCompleteStreamWithRetryForTest(
+		client,
+		context.Background(),
+		responsesCfg,
+		startProvider,
+		"vision",
+		1024,
+		RequestTuning{},
+		"",
+		messages,
+		nil,
+		nil,
+		true,
+		[]FallbackModel{{ProviderConfig: unknownModelCfg, ProviderImpl: textProvider, ModelID: "not-configured", MaxTokens: 1024}},
+		1,
+		&CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream error = %v, want nil", err)
+	}
+	if got := textProvider.CallCount(); got != 1 {
+		t.Fatalf("fallback calls = %d, want 1", got)
+	}
+	replayed := textProvider.LastMessages()
+	if len(replayed) != 1 || len(replayed[0].Parts) != 1 || replayed[0].Parts[0].Type != message.ContentPartText {
+		t.Fatalf("fallback messages = %#v, want text-only user message for missing model config", replayed)
+	}
+}
+
+func TestCompleteStreamDropsUnsupportedPDFToolResultPartsForFallback(t *testing.T) {
 	responsesCfg := NewProviderConfig("responses", config.ProviderConfig{
 		Type: config.ProviderTypeResponses,
 		Models: map[string]config.ModelConfig{
@@ -380,7 +475,7 @@ func TestCompleteStreamSkipsImageOnlyFallbackForPDFToolResultHistory(t *testing.
 		},
 	}, []string{"key"})
 	startProvider := &scriptedProvider{calls: []scriptedCall{{err: &APIError{StatusCode: 502, Message: "bad gateway"}}}}
-	imageOnlyProvider := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "should not run"}}}}
+	imageOnlyProvider := &rejectBinaryPartsProvider{resp: &message.Response{Content: "fallback ok"}}
 	client := NewClient(responsesCfg, startProvider, "document", 1024, "")
 	messages := []message.Message{{
 		Role:       "tool",
@@ -409,11 +504,15 @@ func TestCompleteStreamSkipsImageOnlyFallbackForPDFToolResultHistory(t *testing.
 		1,
 		&CallStatus{},
 	)
-	if err == nil || !strings.Contains(err.Error(), "tool-returned pdf data") || !strings.Contains(err.Error(), "lacks required input support or uses the Chat API") {
-		t.Fatalf("CompleteStream error = %v, want pdf replay capability error", err)
+	if err != nil {
+		t.Fatalf("CompleteStream error = %v, want nil", err)
 	}
-	if got := imageOnlyProvider.CallCount(); got != 0 {
-		t.Fatalf("image-only fallback calls = %d, want 0", got)
+	if got := imageOnlyProvider.CallCount(); got != 1 {
+		t.Fatalf("image-only fallback calls = %d, want 1", got)
+	}
+	replayed := imageOnlyProvider.LastMessages()
+	if len(replayed) != 1 || len(replayed[0].Parts) != 1 || replayed[0].Parts[0].Type != message.ContentPartText {
+		t.Fatalf("fallback messages = %#v, want text-only tool result", replayed)
 	}
 }
 
@@ -536,6 +635,82 @@ func (p *recordingProvider) CompleteStream(
 	p.maxTokens = append(p.maxTokens, maxTokens)
 	p.mu.Unlock()
 	return p.scriptedProvider.CompleteStream(ctx, apiKey, model, systemPrompt, messages, tools, maxTokens, tuning, cb)
+}
+
+func (p *rejectBinaryPartsProvider) CompleteStream(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ string,
+	messages []message.Message,
+	_ []message.ToolDefinition,
+	_ int,
+	_ RequestTuning,
+	_ StreamCallback,
+) (*message.Response, error) {
+	p.mu.Lock()
+	p.count++
+	p.lastMsg = cloneMessagesForTest(messages)
+	p.mu.Unlock()
+	for _, msg := range messages {
+		for _, part := range msg.Parts {
+			if part.Type == message.ContentPartImage || part.Type == message.ContentPartPDF {
+				return nil, &APIError{StatusCode: 400, Message: "unexpected binary part in request"}
+			}
+		}
+	}
+	if p.resp != nil {
+		return p.resp, nil
+	}
+	return &message.Response{Content: "ok"}, nil
+}
+
+func (p *rejectBinaryPartsProvider) CallCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.count
+}
+
+func (p *rejectBinaryPartsProvider) LastMessages() []message.Message {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return cloneMessagesForTest(p.lastMsg)
+}
+
+func cloneMessagesForTest(in []message.Message) []message.Message {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]message.Message, len(in))
+	for i, msg := range in {
+		out[i] = msg
+		if len(msg.Parts) > 0 {
+			out[i].Parts = make([]message.ContentPart, len(msg.Parts))
+			for j, part := range msg.Parts {
+				out[i].Parts[j] = part
+				if len(part.Data) > 0 {
+					out[i].Parts[j].Data = append([]byte(nil), part.Data...)
+				}
+			}
+		}
+		if len(msg.ToolCalls) > 0 {
+			out[i].ToolCalls = make([]message.ToolCall, len(msg.ToolCalls))
+			for j, tc := range msg.ToolCalls {
+				out[i].ToolCalls[j] = tc
+				if len(tc.Args) > 0 {
+					out[i].ToolCalls[j].Args = append(json.RawMessage(nil), tc.Args...)
+				}
+			}
+		}
+		if len(msg.ThinkingBlocks) > 0 {
+			out[i].ThinkingBlocks = append([]message.ThinkingBlock(nil), msg.ThinkingBlocks...)
+		}
+		if msg.Provenance != nil {
+			cp := *msg.Provenance
+			out[i].Provenance = &cp
+		}
+	}
+	return out
 }
 
 func testProviderConfig(name, model string) *ProviderConfig {

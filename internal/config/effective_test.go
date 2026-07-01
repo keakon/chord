@@ -60,7 +60,7 @@ func TestModelConfigEffectiveAccessors(t *testing.T) {
 		t.Fatalf("SupportsInput with explicit modalities unexpected")
 	}
 	defaultModalities := ModelConfig{}
-	if !defaultModalities.SupportsInput("text") || !defaultModalities.SupportsInput("image") || defaultModalities.SupportsInput("pdf") {
+	if !defaultModalities.SupportsInput("text") || defaultModalities.SupportsInput("image") || defaultModalities.SupportsInput("pdf") {
 		t.Fatalf("SupportsInput defaults unexpected")
 	}
 	if m.EffectiveTextVerbosity() != "high" || m.EffectiveThinkingType() != "adaptive" || m.EffectiveThinkingEffort() != "medium" || m.EffectiveThinkingDisplay() != "summary" || m.EffectivePromptCacheMode() != "auto" {

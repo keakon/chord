@@ -19,42 +19,8 @@ func filterUnsupportedBinaryPartsForModel(messages []message.Message, capability
 	if capability == nil {
 		return messages, unsupportedPartCounts{}
 	}
-	supportsImage := capability.SupportsInput("image")
-	supportsPDF := capability.SupportsInput("pdf")
-	if supportsImage && supportsPDF {
-		return messages, unsupportedPartCounts{}
-	}
-
-	out := make([]message.Message, 0, len(messages))
-	var counts unsupportedPartCounts
-	for _, msg := range messages {
-		if len(msg.Parts) == 0 {
-			out = append(out, msg)
-			continue
-		}
-		filtered := make([]message.ContentPart, 0, len(msg.Parts))
-		for _, part := range msg.Parts {
-			switch part.Type {
-			case "image":
-				if !supportsImage {
-					counts.Images++
-					continue
-				}
-			case "pdf":
-				if !supportsPDF {
-					counts.PDFs++
-					continue
-				}
-			}
-			filtered = append(filtered, part)
-		}
-		if len(filtered) == 0 && msg.Content == "" {
-			continue
-		}
-		msg.Parts = filtered
-		out = append(out, msg)
-	}
-	return out, counts
+	filtered, counts := message.FilterUnsupportedBinaryParts(messages, capability.SupportsInput("image"), capability.SupportsInput("pdf"))
+	return filtered, unsupportedPartCounts{Images: counts.Images, PDFs: counts.PDFs}
 }
 
 func (c unsupportedPartCounts) any() bool {

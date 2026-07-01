@@ -4,6 +4,10 @@
 
 ## 未发布
 
+### 重大变更
+
+- **模型输入 modality 默认值：** `modalities.input` 未设置时现在默认仅支持文本，而不再是之前的 `[text, image]`。支持图像或 PDF 的模型现在必须显式声明 `modalities.input: [text, image]`（支持 PDF 再加 `pdf`）；依赖隐式 image 默认值的配置会在发送前丢弃图像附件。请更新此前省略了 `modalities.input` 的 vision 模型条目。
+
 ### 新功能
 
 - 新增 Azure OpenAI Responses provider 的 `preset: azure`，包括 Azure `api-key` 鉴权、兼容 Azure Responses 的请求头 / 默认 `store: true`、official API 400 处理、初始化模板支持，以及 `/openai/v1/responses` 配置示例文档。Provider 类型自动检测现在也会按 URL path 后缀判断并忽略 query / fragment，因此带 `?api-version=...` 的 endpoint 能被正确识别。
@@ -23,6 +27,7 @@
 - TUI 流式输出现在会在工具调用卡片出现前先 flush 已缓冲的 thinking 增量，避免 provider 交错发送 thinking 与 tool-use 事件时生成多余的 thinking 卡片。
 - Patch 工具现在兼容模型常见的 `@@` 纯锚点写法：当一个 hunk 只含未修改的上下文行、而整个 patch 至少有一处 `+`/`-` 修改时，该 hunk 被接受为 no-op 锚点——它匹配当前文件并推进后续 hunk 的搜索位置，但不修改文件。兼容提示只会追加到模型可见的工具结果上下文（不展示到 TUI），让模型以更低的失败重试成本学到推荐的单 hunk 写法。工具描述与错误信息现在明确区分上下文 marker 空格与源码缩进，并给出纯插入示例。整 patch 只含上下文行时仍会被拒绝，并给出可操作信息。
 - 压缩、hook、subagent prompt 和 skill 列表使用的文本截断路径现在会保留 UTF-8 rune 边界，避免中文、日文或 emoji 内容被截断时破坏历史文件或模型可见文本。
+- fallback 或回放目标无法接收 image/PDF 时，Chord 现在会在发送前丢弃不支持的二进制 part，而不是让整个请求失败或把目标模型无法处理的附件继续转发出去。
 
 ## 0.7.0 - 2026-06-28
 
@@ -78,7 +83,7 @@
 - Codex OAuth 运行时状态现在用用户在工作区内的组合键（`account_user_id`）识别账号，不再只按 account/workspace ID 区分，避免多个用户共享同一工作区时 quota/status 更新互相覆盖。只含 refresh 的凭据在首次成功刷新后会从临时 `refresh_sha256:<digest>` state key 迁移；OAuth access token 现在需要能解析出 account 与 user/account-user claim。
 - Codex OAuth 运行时状态现在改用 `auth.state.json`，不再使用已发布版本中的 `auth.state.yaml`；已有运行时缓存可由 warm-up/轮询重新生成，但 YAML 文件中的 quota/reset/账号状态缓存不会自动迁移。
 - `chord auth refresh <provider>` 现在可以刷新某个 provider 下所有带 refresh token 的 Codex OAuth 凭据，逐账号报告成功 / 失败 / 跳过状态，并保留 rate-limit reset 提示。
-- `view_image` 等工具返回的图片现在会保留在对应的工具结果上，在 TUI 的工具结果卡片中显示为可打开的缩略图，并会对支持该能力的 API 通过 provider 原生的多模态 tool/function result 格式发送。`view_image` 只会在权限允许、有效 model pool 的第一个模型支持 image 输入且该模型不是 OpenAI Chat Completions 时可见；会话已包含图片/PDF 工具结果后，Chord 会跳过不支持所需 image/PDF 输入或使用 Chat Completions 的 fallback 候选。
+- `view_image` 等工具返回的图片现在会保留在对应的工具结果上，在 TUI 的工具结果卡片中显示为可打开的缩略图，并会对支持该能力的 API 通过 provider 原生的多模态 tool/function result 格式发送。`view_image` 只会在权限允许、有效 model pool 的第一个模型支持 image 输入且该模型不是 OpenAI Chat Completions 时可见；后续回放或 fallback 目标不支持 image/PDF 输入时，Chord 会在发送前丢弃不支持的二进制 part，而不是把目标模型无法处理的附件继续转发出去。
 
 ### 修复
 

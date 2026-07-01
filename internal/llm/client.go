@@ -757,13 +757,15 @@ func (c *Client) ThinkingToolcallCompat() *config.ThinkingToolcallCompatConfig {
 }
 
 // SupportsInput reports whether the current model accepts the given input modality.
+// When the model config is unavailable, defaults to text-only so unconfigured or
+// unknown models never receive binary parts they cannot process.
 func (c *Client) SupportsInput(modality string) bool {
 	if c == nil || c.provider == nil {
-		return modality == "text" || modality == "image"
+		return modality == "text"
 	}
 	m, ok := c.provider.GetModel(c.modelID)
 	if !ok {
-		return modality == "text" || modality == "image"
+		return modality == "text"
 	}
 	return m.SupportsInput(modality)
 }
@@ -812,38 +814,6 @@ func fallbackModelCanReplayToolResultModalities(model FallbackModel, modalities 
 	default:
 		return true
 	}
-}
-
-func streamTargetCanReplayToolResultModalities(target streamRetryTarget, modalities []string) bool {
-	return fallbackModelCanReplayToolResultModalities(FallbackModel{
-		ProviderConfig: target.provider,
-		ModelID:        target.modelID,
-	}, modalities)
-}
-
-func requiredToolResultModalities(messages []message.Message) []string {
-	var needsImage, needsPDF bool
-	for _, msg := range messages {
-		if msg.Role != "tool" {
-			continue
-		}
-		for _, part := range msg.Parts {
-			switch part.Type {
-			case "image":
-				needsImage = true
-			case "pdf":
-				needsPDF = true
-			}
-		}
-	}
-	modalities := make([]string, 0, 2)
-	if needsImage {
-		modalities = append(modalities, "image")
-	}
-	if needsPDF {
-		modalities = append(modalities, "pdf")
-	}
-	return modalities
 }
 
 // CompleteStream sends a streaming completion request with automatic retries.
@@ -1110,6 +1080,7 @@ func normalizeMessagesForPoolTarget(msgs []message.Message, target FallbackModel
 	if target.ProviderConfig == nil {
 		return msgs, modelcompat.NormalizeReport{}
 	}
+	msgs = filterUnsupportedBinaryPartsForTarget(msgs, target)
 	modelRef := providerModelRef(target.ProviderConfig, target.ModelID)
 	variant := validVariantForModel(target.ProviderConfig, target.ModelID, target.Variant)
 	if variant != "" {
@@ -1126,6 +1097,27 @@ func normalizeMessagesForPoolTarget(msgs []message.Message, target FallbackModel
 		SupportsStructuredTools: supportsStructuredTools(target.ProviderConfig),
 	}
 	return modelcompat.NormalizeForTarget(msgs, tm, modelcompat.NormalizeOptions{StructuredTools: true})
+}
+
+// filterUnsupportedBinaryPartsForTarget drops image/PDF parts the resolved
+// per-pool target cannot accept. The agent layer already filters against the
+// primary client (and surfaces a user toast), but that pass only knows the
+// primary model; fallback targets can differ in modality support, so this
+// per-target pass is required. For the primary target it is a no-op: the shared
+// helper returns the original slice unchanged when nothing needs dropping.
+func filterUnsupportedBinaryPartsForTarget(msgs []message.Message, target FallbackModel) []message.Message {
+	if target.ProviderConfig == nil {
+		return msgs
+	}
+	supportsImage := false
+	supportsPDF := false
+	m, ok := target.ProviderConfig.GetModel(target.ModelID)
+	if ok {
+		supportsImage = m.SupportsInput("image")
+		supportsPDF = m.SupportsInput("pdf")
+	}
+	filtered, _ := message.FilterUnsupportedBinaryParts(msgs, supportsImage, supportsPDF)
+	return filtered
 }
 
 func providerWireFamily(provider *ProviderConfig) string {

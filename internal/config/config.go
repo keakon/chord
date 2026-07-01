@@ -411,10 +411,12 @@ func ResolveConfiguredModelRef(providers map[string]ProviderConfig, rawRef strin
 }
 
 // SupportsInput reports whether the model accepts the given input modality.
-// When Modalities is unset, defaults to ["text", "image"].
+// When Modalities is unset, defaults to ["text"] only: image/pdf support must be
+// declared explicitly so unconfigured models never receive binary parts they
+// cannot process.
 func (m *ModelConfig) SupportsInput(modality string) bool {
 	if m.Modalities == nil {
-		return modality == "text" || modality == "image"
+		return modality == "text"
 	}
 	return slices.Contains(m.Modalities.Input, modality)
 }
