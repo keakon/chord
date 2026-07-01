@@ -558,6 +558,7 @@ model_templates:
   claude-opus: &claude-opus
     <<: *claude-adaptive
     limit:
+      context: 1000000  # merge key 是浅合并：需重新声明 context，否则会被丢弃
       output: 128000  # Opus 支持更长输出
     cost:
       input: 5
@@ -583,6 +584,7 @@ model_templates:
   claude-sonnet: &claude-sonnet
     <<: *claude-adaptive
     limit:
+      context: 1000000  # merge key 是浅合并：需重新声明 context，否则会被丢弃
       output: 64000
     cost:
       input: 3
@@ -592,7 +594,7 @@ model_templates:
       cache_write_1h: 6
 
   claude-fable: &claude-fable
-    <<: *claude-1m
+    <<: *claude-base
     cost:
       input: 10
       output: 50

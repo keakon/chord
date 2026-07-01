@@ -581,6 +581,7 @@ model_templates:
   claude-opus: &claude-opus
     <<: *claude-adaptive
     limit:
+      context: 1000000  # merge keys are shallow: re-declare context so it is not dropped
       output: 128000  # Opus supports longer output
     cost:
       input: 5
@@ -606,6 +607,7 @@ model_templates:
   claude-sonnet: &claude-sonnet
     <<: *claude-adaptive
     limit:
+      context: 1000000  # merge keys are shallow: re-declare context so it is not dropped
       output: 64000
     cost:
       input: 3
@@ -615,7 +617,7 @@ model_templates:
       cache_write_1h: 6
 
   claude-fable: &claude-fable
-    <<: *claude-1m
+    <<: *claude-base
     cost:
       input: 10
       output: 50
