@@ -380,6 +380,40 @@ func (p *ProviderConfig) ThinkingToolcallCompat(modelID string) *config.Thinking
 	return merged
 }
 
+// ReasoningContinuityCompat resolves reasoning-continuity compatibility config
+// for the given model. Provider-level compat acts as defaults, model-level
+// compat overrides provider-level fields when present.
+func (p *ProviderConfig) ReasoningContinuityCompat(modelID string) *config.ReasoningContinuityCompatConfig {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var providerCfg *config.ReasoningContinuityCompatConfig
+	if p.compat != nil {
+		providerCfg = p.compat.ReasoningContinuity
+	}
+
+	var modelCfg *config.ReasoningContinuityCompatConfig
+	if m, ok := p.models[modelID]; ok && m.Compat != nil {
+		modelCfg = m.Compat.ReasoningContinuity
+	}
+
+	if providerCfg == nil && modelCfg == nil {
+		return nil
+	}
+
+	merged := &config.ReasoningContinuityCompatConfig{}
+
+	if providerCfg != nil {
+		merged.Mode = providerCfg.Mode
+	}
+
+	if modelCfg != nil && strings.TrimSpace(modelCfg.Mode) != "" {
+		merged.Mode = modelCfg.Mode
+	}
+
+	return merged
+}
+
 // GetRetryDelay returns the delay before the next retry round.
 // Backoff is deterministic: 1s, 2s, 4s, 8s, 16s, 32s, then 60s for later rounds.
 func (p *ProviderConfig) GetRetryDelay(attempt int) time.Duration {

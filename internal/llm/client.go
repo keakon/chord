@@ -1092,7 +1092,7 @@ func normalizeMessagesForPoolTarget(msgs []message.Message, target FallbackModel
 		Variant:                 variant,
 		ModelRef:                modelRef,
 		WireFamily:              providerWireFamily(target.ProviderConfig),
-		ThinkingReplayEnabled:   thinkingReplayEnabled(target.ProviderConfig, target.ModelID, tuning),
+		ReasoningContinuityMode: reasoningContinuityMode(target.ProviderConfig, target.ModelID, tuning),
 		ToolResultEncoding:      toolResultEncoding(target.ProviderConfig),
 		SupportsStructuredTools: supportsStructuredTools(target.ProviderConfig),
 	}
@@ -1160,22 +1160,45 @@ func supportsStructuredTools(provider *ProviderConfig) bool {
 	}
 }
 
-func thinkingReplayEnabled(provider *ProviderConfig, modelID string, tuning RequestTuning) bool {
-	if providerWireFamily(provider) != modelcompat.WireFamilyAnthropic {
-		return false
-	}
-	if tuning.Anthropic.ThinkingType == "enabled" || tuning.Anthropic.ThinkingType == "adaptive" {
-		return true
-	}
+func reasoningContinuityMode(provider *ProviderConfig, modelID string, tuning RequestTuning) string {
 	if provider == nil {
-		return false
+		return modelcompat.ReasoningContinuityNone
 	}
-	m, ok := provider.GetModel(modelID)
-	if !ok {
-		return false
+	wireFamily := providerWireFamily(provider)
+	if wireFamily == modelcompat.WireFamilyAnthropic {
+		if tuning.Anthropic.ThinkingType == "enabled" || tuning.Anthropic.ThinkingType == "adaptive" {
+			return modelcompat.ReasoningContinuityAnthropicBlocks
+		}
+		m, ok := provider.GetModel(modelID)
+		if !ok {
+			return modelcompat.ReasoningContinuityNone
+		}
+		typeName := m.EffectiveThinkingType()
+		if typeName == "enabled" || typeName == "adaptive" {
+			return modelcompat.ReasoningContinuityAnthropicBlocks
+		}
+		return modelcompat.ReasoningContinuityNone
 	}
-	typeName := m.EffectiveThinkingType()
-	return typeName == "enabled" || typeName == "adaptive"
+	mode := reasoningContinuityCompatMode(provider, modelID)
+	if mode == modelcompat.ReasoningContinuityOpenAIVisible && wireFamily == modelcompat.WireFamilyOpenAIChat {
+		return mode
+	}
+	return modelcompat.ReasoningContinuityNone
+}
+
+func reasoningContinuityCompatMode(provider *ProviderConfig, modelID string) string {
+	if provider == nil {
+		return modelcompat.ReasoningContinuityNone
+	}
+	compat := provider.ReasoningContinuityCompat(modelID)
+	if compat == nil {
+		return modelcompat.ReasoningContinuityNone
+	}
+	mode := compat.EffectiveMode()
+	if mode == "" {
+		return modelcompat.ReasoningContinuityNone
+	}
+	return mode
 }
 
 func tuningForPoolTarget(t FallbackModel) RequestTuning {

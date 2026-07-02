@@ -95,6 +95,12 @@ If you use a `chat-completions` provider such as DeepSeek and see errors like:
 
 this usually means the provider requires thinking/reasoning content from the previous tool round to be included again in the follow-up request, with a strict assistant message shape. If the same error keeps repeating, keep the corresponding session dump / trace for diagnosis.
 
+For providers/endpoints that explicitly document this requirement (for example,
+GLM Preserved Thinking or similar OpenAI-compatible preserved-thinking
+gateways), enable `compat.reasoning_continuity.mode: openai_visible` on the
+affected model or provider. Chord no longer replays assistant
+`reasoning_content` by default for ordinary `type: chat-completions` models.
+
 ### Codex WebSocket 400 "No tool call found for function call output"
 
 The Codex WebSocket transport sends incremental requests keyed by `previous_response_id`. The server keeps its own view of the conversation under that id, and if our locally constructed input drifts from that view (for example after a request-signature change between turns), the server can reject the next turn with `400 No tool call found for function call output with call_id …` even though the matching `function_call` and `function_call_output` are present together in the input we sent.

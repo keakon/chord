@@ -15,7 +15,7 @@ func TestNormalizeForTarget_PreservesAnthropicThinkingWhenEnabled(t *testing.T) 
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "sig"}},
 		Provenance:     &message.MessageProvenance{Source: "import:claude", WireFamily: WireFamilyAnthropic},
 	}}
-	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic, ThinkingReplayEnabled: true}, NormalizeOptions{})
+	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic, ReasoningContinuityMode: ReasoningContinuityAnthropicBlocks}, NormalizeOptions{})
 	if len(out) != 1 || len(out[0].ThinkingBlocks) != 1 {
 		t.Fatalf("thinking stripped unexpectedly: %+v", out)
 	}
@@ -46,7 +46,7 @@ func TestNormalizeForTarget_DropsReasoningContentForAnthropicTarget(t *testing.T
 		ReasoningContent: "hidden reasoning",
 		Provenance:       &message.MessageProvenance{WireFamily: WireFamilyOpenAIChat},
 	}}
-	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic, ThinkingReplayEnabled: true}, NormalizeOptions{})
+	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic, ReasoningContinuityMode: ReasoningContinuityAnthropicBlocks}, NormalizeOptions{})
 	if len(out) != 0 {
 		t.Fatalf("reasoning should be dropped for anthropic target: %+v", out)
 	}
@@ -78,7 +78,7 @@ func TestNormalizeForTarget_DropsThinkingWithoutProvenance(t *testing.T) {
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "sig"}},
 		Provenance:     nil,
 	}}
-	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic, ThinkingReplayEnabled: true}, NormalizeOptions{})
+	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic, ReasoningContinuityMode: ReasoningContinuityAnthropicBlocks}, NormalizeOptions{})
 	if len(out) != 1 || len(out[0].ThinkingBlocks) != 0 {
 		t.Fatalf("thinking should be dropped without provenance: %+v", out[0])
 	}
@@ -97,7 +97,7 @@ func TestNormalizeForTarget_DropsEmptyAssistantAfterThinkingRemoval(t *testing.T
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: ""}},
 		Provenance:     &message.MessageProvenance{Source: "chord", WireFamily: WireFamilyAnthropic},
 	}}
-	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic, ThinkingReplayEnabled: true}, NormalizeOptions{})
+	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic, ReasoningContinuityMode: ReasoningContinuityAnthropicBlocks}, NormalizeOptions{})
 	if len(out) != 0 {
 		t.Fatalf("expected empty output after dropping unreplayable assistant, got %+v", out)
 	}
@@ -116,8 +116,8 @@ func TestNormalizeForTarget_DropsReasoningOnlyAssistant(t *testing.T) {
 	if len(out) != 0 {
 		t.Fatalf("expected reasoning-only assistant to be dropped, got %+v", out)
 	}
-	if rep.DowngradedReasoning != 0 {
-		t.Fatalf("DowngradedReasoning=%d, want 0", rep.DowngradedReasoning)
+	if rep.DowngradedReasoning != 1 {
+		t.Fatalf("DowngradedReasoning=%d, want 1", rep.DowngradedReasoning)
 	}
 }
 

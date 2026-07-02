@@ -672,6 +672,38 @@ Model fields used in the example:
   valid for `type: enabled` or `adaptive`; rejected under `disabled`); variants
   can override `thinking.effort` and `thinking.display`.
 
+- `compat.reasoning_continuity`: optional protocol-specific reasoning/thinking
+  continuity override for models whose compatible API expects an explicit
+  replay payload.
+  - Default behavior is conservative, so normal GPT / Claude / Gemini setups
+    do **not** need extra config:
+    - `type: responses`: Chord uses the Responses API's native continuity
+      mechanisms where the transport supports them (for example,
+      `previous_response_id` on supported transports). It does **not** replay
+      visible reasoning text into request history.
+    - `type: messages`: when Anthropic thinking is enabled, Chord replays
+      Anthropic thinking/signature blocks needed for the Messages protocol.
+    - `type: chat-completions`: Chord keeps normal visible assistant text and
+      tool history, but does **not** replay assistant `reasoning_content`
+      unless you explicitly enable `compat.reasoning_continuity.mode:
+      openai_visible` for a model/provider that documents this requirement.
+    - `type: generate-content`: Chord uses Gemini's normal request format; it
+      does not add a Chord-specific visible-thinking replay layer.
+  - Use `compat.reasoning_continuity.mode: openai_visible` only for
+    OpenAI-compatible chat-completions models that explicitly document visible
+    `reasoning_content` replay, such as GLM Preserved Thinking.
+  - `openai_visible` is only applied on `type: chat-completions`. It causes
+    Chord to keep assistant `reasoning_content` in request history and to send
+    the provider-specific preserved-thinking request flag when required.
+  - Use `mode: none` on an individual model when a provider-level
+    `openai_visible` default should not apply to that model.
+  - Cross-type switching is conservative by design: when the target protocol
+    cannot represent the source model's continuity payload (for example,
+    `responses -> messages` or `messages -> responses`), Chord keeps normal
+    visible conversation/tool history but drops the incompatible
+    reasoning/thinking continuity payload instead of attempting an unsafe
+    conversion.
+
   For GLM-5.2, keep OpenAI-compatible and Anthropic-compatible templates
   separate. Use the OpenAI template for `type: chat-completions` (or
   `type: responses` only when your gateway explicitly provides a Responses
@@ -688,6 +720,9 @@ Model fields used in the example:
         output: 64000
       reasoning:
         effort: max
+      compat:
+        reasoning_continuity:
+          mode: openai_visible
 
     "glm-5.2-anthropic": &glm-5_2_anthropic
       limit:
@@ -1427,6 +1462,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `reasoning`       | object | OpenAI reasoning options. `reasoning.effort` is normalized and passed through verbatim, so any provider-supported level (e.g. GLM `max` / `minimal` / `none`) reaches the upstream unchanged; the official Codex Responses backend additionally restricts to `low` / `medium` / `high` / `xhigh` (unset = omit and use provider/model default). For Responses, `reasoning.summary` (`auto` / `concise` / `detailed`; unset = omit / no explicit summary request). Recommended summary value when you want readable summaries: `auto`. |
 | `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `thinking.effort` is sent as `output_config.effort` for Messages requests; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
+| `compat.reasoning_continuity.mode` | string | Optional compatibility override for protocol-specific reasoning/thinking continuity. Leave unset for normal GPT / Claude / Gemini behavior; use `openai_visible` only for OpenAI-compatible chat-completions models that explicitly require visible `reasoning_content` replay (for example GLM Preserved Thinking). Use `none` on a model to opt out of a provider-level default. |
 | `variants`        | map    | Named parameter presets. Reference with `provider/model@variant`.                                                      |
 | `modalities.input`| array  | Subset of `text` / `image` / `pdf`. Defaults to `[text]`; declare `image` / `pdf` explicitly when supported.          |
 | `supported_service_tiers` | list | Provider-level default or model-level override for accepted non-standard tiers, e.g. `[fast, slow]` or `[fast]`. Omit to use preset defaults. |

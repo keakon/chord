@@ -154,7 +154,7 @@ func TestConvertMessagesToAnthropic_EmptyToolOutputPreserved(t *testing.T) {
 
 func TestConvertMessagesToOpenAI_WithPDFPart(t *testing.T) {
 	msgs, wantB64 := pdfTestParts()
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, msgs)
+	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
 
 	var userMsg *openAIMessage
 	for i := range out {
@@ -191,7 +191,7 @@ func TestConvertMessagesToOpenAI_WithPDFPart(t *testing.T) {
 
 func TestConvertMessagesToResponses_WithPDFPart(t *testing.T) {
 	msgs, wantB64 := pdfTestParts()
-	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, msgs)
+	items := convertMessagesToResponses("", msgs)
 	if len(items) != 1 {
 		t.Fatalf("convertMessagesToResponses() len = %d, want 1", len(items))
 	}
@@ -218,7 +218,7 @@ func TestConvertMessagesToResponses_WithPDFPart(t *testing.T) {
 }
 
 func TestConvertMessagesToResponses_ToolOutputWithOnlyImageSkipsEmptyTextPart(t *testing.T) {
-	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, []message.Message{{
+	items := convertMessagesToResponses("", []message.Message{{
 		Role:       "tool",
 		ToolCallID: "call_1",
 		Parts: []message.ContentPart{

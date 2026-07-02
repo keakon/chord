@@ -21,6 +21,7 @@ import (
 	sonicjson "github.com/bytedance/sonic"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/modelcompat"
 )
 
 // OpenAIProvider implements streaming completion against the OpenAI Chat Completions API.
@@ -117,6 +118,12 @@ type openAIRequest struct {
 	Temperature         float64              `json:"temperature,omitempty"`
 	ReasoningEffort     string               `json:"reasoning_effort,omitempty"`
 	Verbosity           string               `json:"verbosity,omitempty"`
+	Thinking            *openAIThinking      `json:"thinking,omitempty"`
+}
+
+type openAIThinking struct {
+	Type          string `json:"type,omitempty"`
+	ClearThinking *bool  `json:"clear_thinking,omitempty"`
 }
 
 // openAIMessage is a single message in the OpenAI API format.
@@ -246,7 +253,9 @@ func (o *OpenAIProvider) CompleteStream(
 
 	ot := tuning.OpenAI
 	// Convert messages to OpenAI format.
-	apiMessages := convertMessagesToOpenAI(systemPrompt, providerWireFamily(o.provider), messages)
+	wireFamily := providerWireFamily(o.provider)
+	continuityMode := reasoningContinuityCompatMode(o.provider, model)
+	apiMessages := convertMessagesToOpenAI(systemPrompt, wireFamily, continuityMode, messages)
 
 	// Convert tools.
 	apiTools := convertToolsToOpenAI(tools)
@@ -281,6 +290,10 @@ func (o *OpenAIProvider) CompleteStream(
 
 	if ot.TextVerbosity != "" {
 		reqBody.Verbosity = ot.TextVerbosity
+	}
+	if continuityMode == modelcompat.ReasoningContinuityOpenAIVisible && wireFamily == modelcompat.WireFamilyOpenAIChat {
+		clearThinking := false
+		reqBody.Thinking = &openAIThinking{Type: "enabled", ClearThinking: &clearThinking}
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -425,7 +438,7 @@ func responseHeaderBytes(resp *http.Response) int64 {
 }
 
 // convertMessagesToOpenAI converts internal messages to OpenAI API format.
-func convertMessagesToOpenAI(systemPrompt, targetWireFamily string, msgs []message.Message) []openAIMessage {
+func convertMessagesToOpenAI(systemPrompt, targetWireFamily, continuityMode string, msgs []message.Message) []openAIMessage {
 	var result []openAIMessage
 
 	// Add system prompt as first message.
@@ -475,12 +488,7 @@ func convertMessagesToOpenAI(systemPrompt, targetWireFamily string, msgs []messa
 			omi := openAIMessage{
 				Role: "assistant",
 			}
-			// OpenAI-compatible providers (e.g. DeepSeek/GLM) may require that the
-			// reasoning_content chain is replayed verbatim across tool rounds.
-			// Attach replayed reasoning to the same assistant message instead of
-			// emitting a standalone assistant frame, because some providers reject
-			// assistant messages that contain only reasoning_content.
-			if wireFamilyAllowsReasoningReplay(targetWireFamily) && messageAllowsReasoningReplay(msg) {
+			if targetWireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible && modelcompat.AllowsOpenAIVisibleReasoningReplay(msg) {
 				omi.ReasoningContent = msg.ReasoningContent
 			}
 			// OpenAI requires content to be null (not empty string) when

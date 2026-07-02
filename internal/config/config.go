@@ -460,14 +460,39 @@ func (m *ModelConfig) SupportedServiceTierSet(providerPreset string, providerTie
 // ModelCompatConfig contains provider/model-specific compatibility toggles.
 // All options are opt-in and default to disabled unless explicitly enabled.
 type ModelCompatConfig struct {
-	ThinkingToolcall *ThinkingToolcallCompatConfig `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
+	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
+	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitempty" yaml:"reasoning_continuity,omitempty"`
 }
 
 // ProviderCompatConfig contains provider-level compatibility toggles. Model
 // behavior compat belongs under ModelCompatConfig; transport-layer compat lives
 // here so the schema reflects the runtime semantics.
 type ProviderCompatConfig struct {
-	ThinkingToolcall *ThinkingToolcallCompatConfig `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
+	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
+	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitempty" yaml:"reasoning_continuity,omitempty"`
+}
+
+// ReasoningContinuityCompatConfig controls provider/model-specific replay of
+// protocol-native reasoning/thinking continuity payloads.
+//
+// Supported modes:
+//   - "none": disable replay of provider-specific reasoning continuity state.
+//   - "openai_visible": replay OpenAI-compatible assistant reasoning_content
+//     and enable provider-specific preserved-thinking request flags where
+//     required (for example GLM Preserved Thinking).
+//
+// Other protocols use dedicated runtime handling and default-safe stripping
+// when switching to an incompatible target wire format.
+type ReasoningContinuityCompatConfig struct {
+	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"`
+}
+
+// EffectiveMode returns the configured continuity mode.
+func (c *ReasoningContinuityCompatConfig) EffectiveMode() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.Mode)
 }
 
 // ThinkingToolcallCompatConfig controls compatibility handling for providers

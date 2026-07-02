@@ -7,6 +7,7 @@
 ### 重大变更
 
 - **模型输入 modality 默认值：** `modalities.input` 未设置时现在默认仅支持文本，而不再是之前的 `[text, image]`。支持图像或 PDF 的模型现在必须显式声明 `modalities.input: [text, image]`（支持 PDF 再加 `pdf`）；依赖隐式 image 默认值的配置会在发送前丢弃图像附件。请更新此前省略了 `modalities.input` 的 vision 模型条目。
+- **Reasoning 连续性默认行为：** OpenAI-compatible 的 `type: chat-completions` 模型不再隐式回放 assistant `reasoning_content`。只有当 endpoint 明确要求可见 reasoning 回放时（例如 GLM Preserved Thinking），才配置 `compat.reasoning_continuity.mode: openai_visible`。`type: responses` 目标也不再把历史 reasoning 转成可见 `output_text`；这类目标继续只依赖 Responses 原生的连续性机制。
 
 ### 新功能
 

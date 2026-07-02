@@ -9,7 +9,7 @@ import (
 )
 
 // convertMessagesToResponses converts internal messages to Responses API input format.
-func convertMessagesToResponses(systemPrompt, targetWireFamily string, msgs []message.Message) []responsesInputItem {
+func convertMessagesToResponses(systemPrompt string, msgs []message.Message) []responsesInputItem {
 	// Always return a non-nil slice to ensure JSON marshaling produces [] instead of null.
 	result := make([]responsesInputItem, 0)
 
@@ -60,7 +60,6 @@ func convertMessagesToResponses(systemPrompt, targetWireFamily string, msgs []me
 
 		case "assistant":
 			contentText := assistantContentForReplay(msg)
-			replayReasoning := wireFamilyAllowsReasoningReplay(targetWireFamily) && messageAllowsReasoningReplay(msg)
 			validToolCalls := make([]message.ToolCall, 0, len(msg.ToolCalls))
 			for _, tc := range msg.ToolCalls {
 				if tc.ID == "" || tc.Name == "" {
@@ -72,17 +71,6 @@ func convertMessagesToResponses(systemPrompt, targetWireFamily string, msgs []me
 			if contentText == "" && len(validToolCalls) == 0 {
 				log.Warn("skipping empty/reasoning-only assistant message in Responses history")
 				continue
-			}
-			// Replay OpenAI-compatible reasoning/thinking content when present.
-			// Some providers validate chain-of-thought continuity across tool rounds.
-			if replayReasoning {
-				result = append(result, responsesInputItem{
-					Type: "message",
-					Role: "assistant",
-					Content: []responsesContentBlock{
-						{Type: "output_text", Text: msg.ReasoningContent},
-					},
-				})
 			}
 			// Output text content.
 			if contentText != "" {

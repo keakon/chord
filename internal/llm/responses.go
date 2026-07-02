@@ -308,7 +308,7 @@ func (r *ResponsesProvider) CompleteStream(
 	// sent through the top-level instructions field (matching Codex) instead of as
 	// a system-role input message; some Responses-compatible backends reject typed
 	// system messages in input.
-	apiInput := convertMessagesToResponses("", providerWireFamily(r.provider), messages)
+	apiInput := convertMessagesToResponses("", messages)
 
 	// Validate that we have at least one input item.
 	if len(apiInput) == 0 {

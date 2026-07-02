@@ -64,7 +64,7 @@ func TestNormalizeMessagesForPoolTarget_PreservesAnthropicThinkingWhenConfigured
 	}
 }
 
-func TestNormalizeMessagesForPoolTarget_PreservesOpenAIReasoningForResponsesTarget(t *testing.T) {
+func TestNormalizeMessagesForPoolTarget_DropsOpenAIReasoningForResponsesTarget(t *testing.T) {
 	provider := NewProviderConfig("openai-main", config.ProviderConfig{Type: config.ProviderTypeResponses}, nil)
 	msgs := []message.Message{
 		{
@@ -76,14 +76,14 @@ func TestNormalizeMessagesForPoolTarget_PreservesOpenAIReasoningForResponsesTarg
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "/tmp/project\n"},
 	}
 	out, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "gpt-5"}, RequestTuning{})
-	if len(out) != 2 || out[0].ReasoningContent != "hidden reasoning" || len(out[0].ToolCalls) != 1 {
-		t.Fatalf("reasoning and tool call should survive for responses target: %+v", out)
+	if len(out) != 2 || out[0].ReasoningContent != "" || len(out[0].ToolCalls) != 1 {
+		t.Fatalf("reasoning should be dropped while tool call survives for responses target: %+v", out)
 	}
 	if rep.DowngradedToolCalls != 0 {
 		t.Fatalf("DowngradedToolCalls=%d, want 0", rep.DowngradedToolCalls)
 	}
-	if rep.DowngradedReasoning != 0 {
-		t.Fatalf("DowngradedReasoning=%d, want 0", rep.DowngradedReasoning)
+	if rep.DowngradedReasoning != 1 {
+		t.Fatalf("DowngradedReasoning=%d, want 1", rep.DowngradedReasoning)
 	}
 }
 
@@ -104,6 +104,94 @@ func TestNormalizeMessagesForPoolTarget_DropsOpenAIReasoningWhenSwitchingToAnthr
 	}
 	if out[0].ReasoningContent != "" {
 		t.Fatalf("reasoning should be dropped for anthropic target: %+v", out[0])
+	}
+}
+
+func TestNormalizeMessagesForPoolTarget_PreservesOpenAIVisibleReasoningWhenCompatEnabled(t *testing.T) {
+	provider := NewProviderConfig("glm-main", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"glm-5.2": {
+				Compat: &config.ModelCompatConfig{
+					ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
+				},
+			},
+		},
+	}, nil)
+	msgs := []message.Message{{
+		Role:             message.RoleAssistant,
+		ReasoningContent: "preserved reasoning",
+		ToolCalls:        []message.ToolCall{{ID: "call_1", Name: "Shell", Args: json.RawMessage(`{"command":"pwd"}`)}},
+		Provenance:       &message.MessageProvenance{Source: "chord", ProviderID: "glm-main", WireFamily: modelcompat.WireFamilyOpenAIChat},
+	}, {Role: message.RoleTool, ToolCallID: "call_1", Content: "/tmp/project\n"}}
+	out, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "glm-5.2"}, RequestTuning{})
+	if len(out) != 2 || out[0].ReasoningContent != "preserved reasoning" {
+		t.Fatalf("reasoning should be preserved for openai_visible target: %+v", out)
+	}
+	if rep.DowngradedReasoning != 0 {
+		t.Fatalf("DowngradedReasoning=%d, want 0", rep.DowngradedReasoning)
+	}
+}
+
+func TestNormalizeMessagesForPoolTarget_DropsNonOpenAIChatReasoningWhenOpenAIVisibleCompatEnabled(t *testing.T) {
+	provider := NewProviderConfig("glm-main", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"glm-5.2": {
+				Compat: &config.ModelCompatConfig{
+					ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
+				},
+			},
+		},
+	}, nil)
+
+	tests := []struct {
+		name       string
+		provenance *message.MessageProvenance
+	}{
+		{name: "nil provenance"},
+		{name: "gemini provenance", provenance: &message.MessageProvenance{Source: "chord", ProviderID: "gemini-main", WireFamily: modelcompat.WireFamilyGemini}},
+		{name: "responses provenance", provenance: &message.MessageProvenance{Source: "chord", ProviderID: "openai-main", WireFamily: modelcompat.WireFamilyOpenAIResponses}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msgs := []message.Message{{
+				Role:             message.RoleAssistant,
+				ReasoningContent: "foreign reasoning",
+				ToolCalls:        []message.ToolCall{{ID: "call_1", Name: "Shell", Args: json.RawMessage(`{"command":"pwd"}`)}},
+				Provenance:       tt.provenance,
+			}, {Role: message.RoleTool, ToolCallID: "call_1", Content: "/tmp/project\n"}}
+
+			out, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "glm-5.2"}, RequestTuning{})
+			if len(out) != 2 || out[0].ReasoningContent != "" {
+				t.Fatalf("reasoning should be dropped for non-openai-chat provenance: %+v", out)
+			}
+			if rep.DowngradedReasoning != 1 {
+				t.Fatalf("DowngradedReasoning=%d, want 1", rep.DowngradedReasoning)
+			}
+		})
+	}
+}
+
+func TestNormalizeMessagesForPoolTarget_IgnoresOpenAIVisibleCompatForResponsesTarget(t *testing.T) {
+	sourceMsgs := []message.Message{{
+		Role:             message.RoleAssistant,
+		ReasoningContent: "preserved reasoning",
+		ToolCalls:        []message.ToolCall{{ID: "call_1", Name: "Shell", Args: json.RawMessage(`{"command":"pwd"}`)}},
+		Provenance:       &message.MessageProvenance{Source: "chord", ProviderID: "glm-main", WireFamily: modelcompat.WireFamilyOpenAIChat},
+	}, {Role: message.RoleTool, ToolCallID: "call_1", Content: "/tmp/project\n"}}
+	provider := NewProviderConfig("openai-main", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Compat: &config.ProviderCompatConfig{
+			ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
+		},
+	}, nil)
+	out, rep := normalizeMessagesForPoolTarget(sourceMsgs, FallbackModel{ProviderConfig: provider, ModelID: "gpt-5"}, RequestTuning{})
+	if len(out) != 2 || out[0].ReasoningContent != "" {
+		t.Fatalf("reasoning should be dropped for responses target even when openai_visible is configured: %+v", out)
+	}
+	if rep.DowngradedReasoning != 1 {
+		t.Fatalf("DowngradedReasoning=%d, want 1", rep.DowngradedReasoning)
 	}
 }
 
@@ -171,7 +259,7 @@ func TestNormalizeMessagesForPoolTarget_DropsThinkingForOpenAITarget(t *testing.
 	}
 }
 
-func TestNormalizeMessagesForPoolTarget_ResponsesConversionReplaysReasoningForStructuredToolHistory(t *testing.T) {
+func TestNormalizeMessagesForPoolTarget_ResponsesConversionDoesNotReplayReasoningForStructuredToolHistory(t *testing.T) {
 	provider := NewProviderConfig("openai-main", config.ProviderConfig{Type: config.ProviderTypeResponses}, nil)
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "inspect the repo"},
@@ -188,38 +276,31 @@ func TestNormalizeMessagesForPoolTarget_ResponsesConversionReplaysReasoningForSt
 	if rep.DowngradedToolCalls != 0 {
 		t.Fatalf("DowngradedToolCalls=%d, want 0", rep.DowngradedToolCalls)
 	}
-	if rep.DowngradedReasoning != 0 {
-		t.Fatalf("DowngradedReasoning=%d, want 0", rep.DowngradedReasoning)
+	if rep.DowngradedReasoning != 1 {
+		t.Fatalf("DowngradedReasoning=%d, want 1", rep.DowngradedReasoning)
 	}
 	if len(normalized) != 3 {
 		t.Fatalf("len(normalized)=%d, want 3", len(normalized))
 	}
-	if normalized[1].ReasoningContent != "hidden reasoning" {
-		t.Fatalf("normalized reasoning = %q, want hidden reasoning", normalized[1].ReasoningContent)
+	if normalized[1].ReasoningContent != "" {
+		t.Fatalf("normalized reasoning = %q, want empty", normalized[1].ReasoningContent)
 	}
 	if len(normalized[1].ToolCalls) != 1 {
 		t.Fatalf("expected structured tool call preserved before responses conversion, got %+v", normalized[1].ToolCalls)
 	}
 
-	items := convertMessagesToResponses("", modelcompat.WireFamilyOpenAIResponses, normalized)
-	if len(items) != 4 {
-		t.Fatalf("len(items)=%d, want 4", len(items))
+	items := convertMessagesToResponses("", normalized)
+	if len(items) != 3 {
+		t.Fatalf("len(items)=%d, want 3", len(items))
 	}
 	if items[0].Type != "message" || items[0].Role != string(message.RoleUser) {
 		t.Fatalf("items[0] = %#v, want user message", items[0])
 	}
-	if items[1].Type != "message" || items[1].Role != string(message.RoleAssistant) {
-		t.Fatalf("items[1] = %#v, want assistant reasoning replay message", items[1])
+	if items[1].Type != "function_call" || items[1].CallID != "call_1" || items[1].Name != "Shell" || items[1].Arguments != `{"command":"pwd"}` {
+		t.Fatalf("items[1] = %#v, want structured function_call item", items[1])
 	}
-	blocks, ok := items[1].Content.([]responsesContentBlock)
-	if !ok || len(blocks) != 1 || blocks[0].Type != "output_text" || blocks[0].Text != "hidden reasoning" {
-		t.Fatalf("items[1].Content = %#v, want single output_text reasoning block", items[1].Content)
-	}
-	if items[2].Type != "function_call" || items[2].CallID != "call_1" || items[2].Name != "Shell" || items[2].Arguments != `{"command":"pwd"}` {
-		t.Fatalf("items[2] = %#v, want structured function_call item", items[2])
-	}
-	if items[3].Type != "function_call_output" || items[3].CallID != "call_1" || items[3].Output != "/tmp/project\n" {
-		t.Fatalf("items[3] = %#v, want tool result output", items[3])
+	if items[2].Type != "function_call_output" || items[2].CallID != "call_1" || items[2].Output != "/tmp/project\n" {
+		t.Fatalf("items[2] = %#v, want tool result output", items[2])
 	}
 }
 

@@ -1486,6 +1486,62 @@ func TestProviderConfig_ThinkingToolcallCompat_ModelOverride(t *testing.T) {
 	}
 }
 
+func TestProviderConfig_ReasoningContinuityCompat_ModelOnly(t *testing.T) {
+	cfg := config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"m1": {
+				Compat: &config.ModelCompatConfig{
+					ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
+				},
+			},
+		},
+	}
+	p := NewProviderConfig("test", cfg, []string{"k"})
+	got := p.ReasoningContinuityCompat("m1")
+	if got == nil || got.EffectiveMode() != "openai_visible" {
+		t.Fatalf("expected model compat mode=openai_visible, got %#v", got)
+	}
+}
+
+func TestProviderConfig_ReasoningContinuityCompat_ProviderDefault(t *testing.T) {
+	cfg := config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Compat: &config.ProviderCompatConfig{
+			ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
+		},
+		Models: map[string]config.ModelConfig{
+			"m1": {},
+		},
+	}
+	p := NewProviderConfig("test", cfg, []string{"k"})
+	got := p.ReasoningContinuityCompat("m1")
+	if got == nil || got.EffectiveMode() != "openai_visible" {
+		t.Fatalf("expected provider default mode=openai_visible, got %#v", got)
+	}
+}
+
+func TestProviderConfig_ReasoningContinuityCompat_ModelOverride(t *testing.T) {
+	cfg := config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Compat: &config.ProviderCompatConfig{
+			ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
+		},
+		Models: map[string]config.ModelConfig{
+			"m1": {
+				Compat: &config.ModelCompatConfig{
+					ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "none"},
+				},
+			},
+		},
+	}
+	p := NewProviderConfig("test", cfg, []string{"k"})
+	got := p.ReasoningContinuityCompat("m1")
+	if got == nil || got.EffectiveMode() != "none" {
+		t.Fatalf("expected model override mode=none, got %#v", got)
+	}
+}
+
 // --- Key Rotation: on_failure ---
 
 // TestSelectKey_OnFailure_NoCooldown verifies that repeated calls with on_failure

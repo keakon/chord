@@ -7,6 +7,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Breaking Changes
 
 - **Model input modality default:** `modalities.input` now defaults to text-only when unset, instead of the previous `[text, image]`. Models that accept images or PDFs must now declare `modalities.input: [text, image]` (add `pdf` if supported) explicitly; configs that relied on the implicit image default will have image attachments dropped before the request is sent. Update any vision-capable model entries that previously omitted `modalities.input`.
+- **Reasoning continuity defaults:** OpenAI-compatible `type: chat-completions` models no longer implicitly replay assistant `reasoning_content`. Enable `compat.reasoning_continuity.mode: openai_visible` only for endpoints that explicitly require visible reasoning replay, such as GLM Preserved Thinking. `type: responses` targets also no longer convert historical reasoning into visible `output_text`; they continue to rely only on Responses-native continuity surfaces.
 
 ### Features
 

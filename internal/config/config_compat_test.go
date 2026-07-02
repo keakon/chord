@@ -13,6 +13,13 @@ func TestThinkingToolcallCompatConfig_Defaults(t *testing.T) {
 	}
 }
 
+func TestReasoningContinuityCompatConfig_Defaults(t *testing.T) {
+	var cfg ReasoningContinuityCompatConfig
+	if cfg.EffectiveMode() != "" {
+		t.Fatalf("expected EffectiveMode default empty, got %q", cfg.EffectiveMode())
+	}
+}
+
 func TestConfigYAML_ModelCompatThinkingToolcall(t *testing.T) {
 	const raw = `
 providers:
@@ -79,6 +86,64 @@ providers:
 	}
 	if !provider.Compat.ThinkingToolcall.EnabledValue() {
 		t.Fatal("expected provider compat.thinking_toolcall.enabled=true")
+	}
+}
+
+func TestConfigYAML_ModelCompatReasoningContinuity(t *testing.T) {
+	const raw = `
+providers:
+  glm-main:
+    type: "chat-completions"
+    models:
+      glm-5.2:
+        limit:
+          context: 1000000
+          output: 64000
+        compat:
+          reasoning_continuity:
+            mode: "openai_visible"
+`
+
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("yaml unmarshal failed: %v", err)
+	}
+
+	model := cfg.Providers["glm-main"].Models["glm-5.2"]
+	if model.Compat == nil || model.Compat.ReasoningContinuity == nil {
+		t.Fatal("expected compat.reasoning_continuity to be present")
+	}
+	if got := model.Compat.ReasoningContinuity.EffectiveMode(); got != "openai_visible" {
+		t.Fatalf("EffectiveMode = %q, want openai_visible", got)
+	}
+}
+
+func TestConfigYAML_ProviderCompatReasoningContinuity(t *testing.T) {
+	const raw = `
+providers:
+  glm-main:
+    type: "chat-completions"
+    compat:
+      reasoning_continuity:
+        mode: "openai_visible"
+    models:
+      glm-5.2:
+        limit:
+          context: 1000000
+          output: 64000
+`
+
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("yaml unmarshal failed: %v", err)
+	}
+
+	provider := cfg.Providers["glm-main"]
+	if provider.Compat == nil || provider.Compat.ReasoningContinuity == nil {
+		t.Fatal("expected provider compat.reasoning_continuity to be present")
+	}
+	if got := provider.Compat.ReasoningContinuity.EffectiveMode(); got != "openai_visible" {
+		t.Fatalf("EffectiveMode = %q, want openai_visible", got)
 	}
 }
 

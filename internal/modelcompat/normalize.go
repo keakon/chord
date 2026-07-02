@@ -13,6 +13,10 @@ const (
 	WireFamilyOpenAIResponses = "openai-responses"
 	WireFamilyGemini          = "gemini"
 
+	ReasoningContinuityNone            = "none"
+	ReasoningContinuityAnthropicBlocks = "anthropic_blocks"
+	ReasoningContinuityOpenAIVisible   = "openai_visible"
+
 	ToolResultEncodingNone               = "none"
 	ToolResultEncodingOpenAIToolRole     = "openai_tool_role"
 	ToolResultEncodingAnthropicUserBlock = "anthropic_user_blocks"
@@ -29,14 +33,13 @@ type TargetModel struct {
 	ModelRef   string
 
 	WireFamily              string
-	ThinkingReplayEnabled   bool
+	ReasoningContinuityMode string
 	ToolResultEncoding      string
 	SupportsStructuredTools bool
 }
 
 type NormalizeOptions struct {
-	PreserveVisibleReasoning bool
-	StructuredTools          bool
+	StructuredTools bool
 }
 
 type NormalizeReport struct {
@@ -56,7 +59,7 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 		return out, report
 	}
 
-	allowThinking := strings.TrimSpace(target.WireFamily) == WireFamilyAnthropic && target.ThinkingReplayEnabled
+	allowThinking := reasoningContinuityAllowsAnthropicBlocks(target)
 	allowStructuredTools := opts.StructuredTools && target.SupportsStructuredTools && strings.TrimSpace(target.ToolResultEncoding) != "" && strings.TrimSpace(target.ToolResultEncoding) != ToolResultEncodingNone
 	toolResultsByID := collectToolResults(out)
 	droppedNonImportedToolIDs := make(map[string]bool)
@@ -85,7 +88,7 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 			msg.ThinkingBlocks = kept
 		}
 
-		if !targetAllowsReasoningReplay(target) && strings.TrimSpace(msg.ReasoningContent) != "" {
+		if strings.TrimSpace(msg.ReasoningContent) != "" && (!targetAllowsReasoningReplay(target) || !AllowsOpenAIVisibleReasoningReplay(*msg)) {
 			msg.ReasoningContent = ""
 			report.DowngradedReasoning++
 		}
@@ -160,12 +163,21 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 }
 
 func targetAllowsReasoningReplay(target TargetModel) bool {
-	switch strings.TrimSpace(target.WireFamily) {
-	case WireFamilyOpenAIChat, WireFamilyOpenAIResponses:
-		return true
-	default:
+	return strings.TrimSpace(target.ReasoningContinuityMode) == ReasoningContinuityOpenAIVisible && strings.TrimSpace(target.WireFamily) == WireFamilyOpenAIChat
+}
+
+func reasoningContinuityAllowsAnthropicBlocks(target TargetModel) bool {
+	return strings.TrimSpace(target.WireFamily) == WireFamilyAnthropic && strings.TrimSpace(target.ReasoningContinuityMode) == ReasoningContinuityAnthropicBlocks
+}
+
+// AllowsOpenAIVisibleReasoningReplay reports whether msg carries
+// OpenAI Chat-native visible reasoning state that can be safely replayed as
+// reasoning_content for an OpenAI-compatible chat-completions target.
+func AllowsOpenAIVisibleReasoningReplay(msg message.Message) bool {
+	if strings.TrimSpace(msg.ReasoningContent) == "" || msg.Provenance == nil {
 		return false
 	}
+	return strings.TrimSpace(msg.Provenance.WireFamily) == WireFamilyOpenAIChat
 }
 
 func messageAllowsAnthropicThinkingReplay(msg message.Message) bool {
