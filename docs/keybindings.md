@@ -169,6 +169,7 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `fork_session`             | `["e"]`                          |
 | `directory`                | `["ctrl+t"]`                     |
 | `usage_stats`              | `["$"]`                          |
+| `error_panel`              | `["ctrl+e"]`                     |
 | `search_start`             | `["/"]`                          |
 | `search_next`              | `["n"]`                          |
 | `search_prev`              | `["N"]`                          |

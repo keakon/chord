@@ -1,6 +1,6 @@
 # CLI 参考
 
-Chord 的所有命令、子命令和 flag。
+这里列出 Chord 面向用户的命令、子命令和 flag，也包括二进制通过 Cobra 暴露的 `help` 与 `completion` 辅助命令。
 
 首次使用建议先看 [快速开始](./quickstart_CN.md)。
 
@@ -27,6 +27,8 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord worktree finish <name>`    | 先将目标分支合入真实 worktree，再把结果 squash 回去并删除 worktree |
 | `chord resume <session-id>`       | 按 session id 恢复，自动定位到对应的 worktree                     |
 | `chord import <source> [file]`    | 把外部 agent 会话导入 Chord；可识别工具会在参数能标准化时转换为结构化 Chord 工具卡 |
+| `chord completion <shell>`        | 为 `bash`、`fish`、`powershell` 或 `zsh` 生成 shell completion 脚本 |
+| `chord help [command]`            | 显示命令帮助                                                      |
 
 ## 全局 flag
 
@@ -40,8 +42,12 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `--cache-dir`    | 可重建缓存（runtime caches、临时产物）                                                              | `CHORD_CACHE_DIR`     | 已设 `$XDG_CACHE_HOME` 时取 `$XDG_CACHE_HOME/chord`，否则 `~/.cache/chord`  |
 | `--sessions-dir` | 仅覆盖 sessions 根目录                                                                              | `CHORD_SESSIONS_DIR`  | `<state-dir>/sessions`                                                       |
 | `--logs-dir`     | 仅覆盖 logs 目录                                                                                    | `CHORD_LOGS_DIR`      | `<state-dir>/logs`                                                           |
+| `-h`, `--help`   | 显示当前命令帮助                                                                                    | —                     | false                                                                        |
+| `-v`, `--version`| 打印构建与运行时版本信息后退出                                                                      | —                     | false                                                                        |
 
 完整目录布局见 [目录与路径](./paths_CN.md)。完整环境变量列表见 [环境变量](./environment_CN.md)。
+
+`-v/--version` 只在 root 命令上可用。各子命令都支持 `-h/--help`，并接受上表中的路径 / API 覆盖类全局 flag。
 
 ## `chord`（默认 — TUI）
 
@@ -80,6 +86,8 @@ chord --worktree feat-auth --continue
 ## `chord auth [provider]`
 
 在基础配置完成后再用它登录。该命令用于 `preset: codex` 的 OAuth provider，并把凭据存入 `~/.config/chord/auth.yaml`。Chord 还会把机器维护的共享 OAuth 运行时状态保存在 `~/.config/chord/auth.state.json`，这样额度 / reset 缓存不会频繁改写 `auth.yaml`。不带 provider 名时，Chord 自动选择唯一的 codex provider；多个时会让你选。首次向导也可以在初始化过程中直接完成这条 Codex OAuth 登录链路；`chord auth codex` 仍然适合后续重新登录或补登录。
+
+正常模型请求过程中，如果 OAuth 返回 HTTP 401/403 `token_invalidated`、token revoked、refresh token 过期或账号停用等错误，Chord 会把它视为永久凭据故障。匹配的 OAuth 运行时状态会被标记为已过期、已停用或已失效（优先使用账号 / 用户元数据，其次回退到 refresh token 哈希），该凭据会从可选 key 池中移除，并刷新 TUI 侧边栏的 `Keys` 计数。错误面板的重试记录会显示 OAuth 邮箱 / 账号和短 key 指纹（`fp=...`），因为展示的 key 后缀只是脱敏提示，不保证唯一。需要恢复账号时重新运行 `chord auth` 登录；需要移除不可用残留时运行 `chord auth state clean`。
 
 ### Flag
 
@@ -353,6 +361,27 @@ chord import claude --id <session-id>
 ```
 
 完整的工具/推理策略、转换告警、provider 安全 wire view 见 [使用指南 — 导入外部会话](./usage_CN.md#导入外部会话)。
+
+## `chord completion <shell>`
+
+为 `bash`、`fish`、`powershell` 或 `zsh` 生成 shell completion 脚本。生成后按对应 shell 的常规方式加载即可。
+
+```bash
+chord completion zsh
+chord completion bash
+chord completion fish
+chord completion powershell
+```
+
+## `chord help [command]`
+
+显示命令帮助，效果等同于给对应命令传 `--help`。
+
+```bash
+chord help
+chord help doctor models
+chord doctor models --help
+```
 
 ## 从源码运行
 

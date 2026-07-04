@@ -12,10 +12,11 @@ npm run dev      # http://localhost:4321/chord/
 ```
 
 `npm run dev` (and `npm run build`) automatically run `npm run sync` first,
-which converts the source markdown in `../docs/` into Starlight content
-collections under `src/content/docs/{en,zh}/`. The synced output is
-gitignored — never edit those files directly. Always edit the source under
-`../docs/` and let `sync` regenerate the content collection.
+which converts the source markdown in `../docs/` into Starlight content:
+English pages are written under `src/content/docs/`, and Chinese pages under
+`src/content/docs/zh/`. The synced markdown output is gitignored — never edit
+those files directly. Always edit the source under `../docs/` and let `sync`
+regenerate the content collection.
 
 ## Layout
 
@@ -30,13 +31,11 @@ website/
 │   │   └── docs/
 │   │       ├── index.mdx       # Hand-written English landing page (Hero + CardGrid)
 │   │       ├── zh/
-│   │       │   └── index.mdx   # Hand-written Chinese landing page
-│   │       ├── en/             # SYNCED — do not edit by hand
-│   │       └── zh/             # SYNCED — do not edit by hand
+│   │       │   ├── index.mdx   # Hand-written Chinese landing page
+│   │       │   └── *.md        # SYNCED Chinese docs — do not edit by hand
+│   │       └── *.md            # SYNCED English docs — do not edit by hand
 │   └── styles/
 │       └── custom.css      # Theme tweaks
-└── public/
-    └── screenshots/        # M2: drop screenshots here
 ```
 
 ## Authoring

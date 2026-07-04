@@ -6,7 +6,7 @@
 
 🌐 [English introduction](./README.md)
 
-**让 AI 编码体验从容下来。** 一个轻量、本地优先的终端 Coding Agent——会话再长也不崩、模型组合可热切、脱离电脑时还能远程操控。
+**让 AI 编码体验从容下来。** 一个轻量、本地优先的终端 Coding Agent——会话再长也不崩、模型组合可热切换、脱离电脑时还能远程操控。
 
 - 配套网关：[keakon/chord-gateway](https://github.com/keakon/chord-gateway) —— 把 Chord 接到微信、飞书等聊天平台
 

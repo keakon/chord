@@ -125,6 +125,22 @@ providers:
           output: 128000
 ```
 
+`preset: codex` 可使用 `auth.yaml` 中的 OpenAI / ChatGPT OAuth 凭据。OAuth 条目通常是 mapping：
+
+```yaml
+codex:
+  - refresh: rfr_...
+    access: eyJ...
+    expires: 1774009702606
+    account_id: acc_...      # 可选；workspace/account 账号才一定有
+    account_user_id: u_...__acc_... # 可选；缺失时后台解析/补齐
+    email: user@example.com  # 可选
+```
+
+`account_id` 不是所有 ChatGPT 账号都有。个人 Plus/Pro 账号的 access token 可能只包含 `user_id`，不包含 `chatgpt_account_id`；这类账号现在仍会作为普通 OAuth access token 使用，请求时不会发送 `ChatGPT-Account-ID` header。依赖 workspace/account id 的增强能力（例如 Codex usage / rate limit polling）会跳过这些账号，直到后台解析或配置中提供了 account id。
+
+为支持大量账号池，Chord 启动时不会同步解析每个 OAuth JWT，也不会因为某个 access token 缺 `account_id` 阻塞 provider 初始化。启动路径只读取 `auth.yaml` 中已经显式写出的 metadata；缺失的 `account_user_id`、`account_id`、`email`、`expires` 会在 provider 建立后后台解析并尽量回填。若手动转换 Codex / sub2api / 其他登录结果，建议保留能拿到的 `account_id`、`account_user_id` 和 `email`，但它们不是启动必填项。
+
 ### Azure OpenAI Responses preset
 
 Azure OpenAI Responses endpoint 使用 `preset: azure`。这个 preset 必须显式配置：Chord 不会根据 endpoint URL 自动识别 Azure。它会设置 `type: responses`、默认 `store: true`、把该 endpoint 视作 official API 处理 400、禁用 Codex WebSocket/OAuth 行为，把凭据作为 Azure 要求的 `api-key` 请求头发送，而不是 `Authorization: Bearer`，并省略 `OpenAI-Beta`、`originator` 等 Codex 兼容 header。

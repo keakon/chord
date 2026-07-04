@@ -36,6 +36,17 @@ chord doctor models --model openai/gpt-5.5@high
 chord doctor models --pool thinking
 ```
 
+### OAuth 账号池很大时启动慢
+
+对于 `preset: codex` 的 OpenAI / ChatGPT OAuth provider，`auth.yaml` 里可能有数百或上千个账号。启动路径不会同步解析每个 access token 的 JWT，也不会因为某个 token 缺少 `account_id` 阻塞 provider 初始化：Chord 会先把 access token 加入可用 key pool，然后在后台解析和回填 `account_user_id`、`account_id`、`email`、`expires` 等 metadata。
+
+注意区分两类情况：
+
+- 个人 Plus/Pro 账号可能只有 `user_id`，没有 `chatgpt_account_id`。这类账号仍可用于普通请求，但不会发送 `ChatGPT-Account-ID`，也不会参与依赖 account id 的 Codex usage / rate-limit polling。
+- 若日志显示 `account_user_id mismatch` 或 `account_id mismatch`，说明配置里显式写出的身份和 token 自身能解析出的身份冲突；这类应修正或移除对应 credential。
+
+如果手动转换 Codex/sub2api 导出的账号，建议保留能拿到的 `email`、`account_id`、`account_user_id`，但缺失这些字段不应导致启动失败。需要逐项诊断时再运行 doctor/检查命令，而不是把完整 JWT 扫描放在启动热路径。
+
 ## 429 / quota exhausted
 
 常见原因：key 已达配额上限、provider 限流、并发或高频请求触发了速率限制。

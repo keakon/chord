@@ -43,6 +43,7 @@ export default defineConfig({
             { slug: 'cli', translations: { 'zh-CN': 'CLI' } },
             { slug: 'configuration', translations: { 'zh-CN': '配置与认证' } },
             { slug: 'tools', translations: { 'zh-CN': '内置工具' } },
+            { slug: 'edit-tools', translations: { 'zh-CN': '编辑工具' } },
             { slug: 'keybindings', translations: { 'zh-CN': '快捷键' } },
             { slug: 'paths', translations: { 'zh-CN': '目录与路径' } },
             { slug: 'environment', translations: { 'zh-CN': '环境变量' } },
@@ -57,6 +58,10 @@ export default defineConfig({
             { slug: 'customization', translations: { 'zh-CN': '扩展与定制' } },
             { slug: 'hooks', translations: { 'zh-CN': 'Hooks' } },
             { slug: 'examples', translations: { 'zh-CN': '示例配置库' } },
+            { slug: 'examples-minimal', translations: { 'zh-CN': '最小可用示例' } },
+            { slug: 'examples-codex-workstation', translations: { 'zh-CN': 'Codex + LSP 示例' } },
+            { slug: 'examples-openai-compat', translations: { 'zh-CN': 'OpenAI 兼容网关示例' } },
+            { slug: 'examples-team', translations: { 'zh-CN': '团队仓库示例' } },
           ],
         },
         {

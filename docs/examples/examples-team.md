@@ -149,11 +149,7 @@ chord doctor models --pool thinking
 chord doctor models --pool fast
 ```
 
-From the repository root, also run a dry startup with the project config present:
-
-```bash
-chord --version
-```
+Run these from the repository root so Chord loads both global config and `<repo>/.chord/config.yaml`. They validate the selected model pools using the same provider transport path as normal runtime requests.
 
 ## Common failures
 

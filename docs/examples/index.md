@@ -13,6 +13,10 @@ These examples are organized by **real file layout**, not by stuffing multiple f
 
 These examples are starting points, not rigid templates. For field semantics and the full config surface, see the [Configuration cheatsheet](../configuration.md#configuration-cheatsheet).
 
+## Agent file formats
+
+Agent definitions can be written as `.md`, `.yaml`, or `.yml` files. The examples use `.md` because front matter keeps structured settings near a Markdown prompt body; use YAML files when you prefer a single plain YAML document. Both formats are loaded from the same global and project-level `agents/` directories.
+
 ## Context and output limits
 
 The bundled example configs set `limit.context` and `limit.output` per model; examples include `limit.input` only when the provider publishes a separate input cap. For what each field means — and how Chord derives the input budget when a provider does not publish a separate input cap — see the [Glossary](../glossary.md). For how those limits interact with compaction, see [Configuration — Compaction](../configuration.md#context-compaction).

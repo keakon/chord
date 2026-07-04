@@ -4,13 +4,13 @@
 
 ## 1. 安装
 
-需要 Go 1.26.3+。
+下载预构建二进制不需要安装 Go。用 `go install` 或从源码构建时，需要 Go 1.26.3+。
 
 ```bash
-# 从 GitHub 安装
+# 用 Go 从源码安装
 go install github.com/keakon/chord/cmd/chord@latest
 
-# 或从源码构建
+# 或构建当前 checkout
 go build -o chord ./cmd/chord/
 ```
 

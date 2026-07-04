@@ -169,6 +169,7 @@ action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/
 | `fork_session`             | `["e"]`                           |
 | `directory`                | `["ctrl+t"]`                      |
 | `usage_stats`              | `["$"]`                           |
+| `error_panel`              | `["ctrl+e"]`                      |
 | `search_start`             | `["/"]`                           |
 | `search_next`              | `["n"]`                           |
 | `search_prev`              | `["N"]`                           |

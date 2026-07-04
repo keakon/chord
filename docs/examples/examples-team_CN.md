@@ -149,11 +149,7 @@ chord doctor models --pool thinking
 chord doctor models --pool fast
 ```
 
-在仓库根目录保留项目配置后，也可做一次无副作用启动检查：
-
-```bash
-chord --version
-```
+在仓库根目录执行这些命令，Chord 会同时加载全局配置和 `<repo>/.chord/config.yaml`，并用正常运行时相同的 provider transport 路径验证选中的模型池。
 
 ## 常见失败原因
 

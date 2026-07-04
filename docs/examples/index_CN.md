@@ -13,6 +13,10 @@
 
 这些示例是起点，不是模板生成器。字段含义和完整规则见[配置字段速查表](../configuration_CN.md#配置字段速查表)。
 
+## Agent 文件格式
+
+Agent 定义可以写成 `.md`、`.yaml` 或 `.yml`。示例里使用 `.md`，是为了用 front matter 放结构化设置，再把角色 prompt 写成 Markdown 正文；更喜欢纯 YAML 的话，也可以直接写 YAML 文件。两种格式都放在同一套全局或项目级 `agents/` 目录下。
+
 ## 上下文和输出限制
 
 示例配置会为每个模型设置 `limit.context` 和 `limit.output`；只有 provider 单独公布输入上限时，示例才会写 `limit.input`。各字段的含义，以及 provider 未单独公布输入上限时 Chord 如何推导输入预算，见[术语表](../glossary_CN.md)。这些限制如何与压缩配合，见[配置 — 上下文压缩](../configuration_CN.md#上下文压缩compaction)。

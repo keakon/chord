@@ -131,6 +131,22 @@ providers:
           output: 128000
 ```
 
+`preset: codex` can use OpenAI / ChatGPT OAuth credentials from `auth.yaml`. OAuth entries are mappings:
+
+```yaml
+codex:
+  - refresh: rfr_...
+    access: eyJ...
+    expires: 1774009702606
+    account_id: acc_...              # optional; only workspace/account tokens always have this
+    account_user_id: u_...__acc_...  # optional; parsed/backfilled in the background when missing
+    email: user@example.com          # optional
+```
+
+`account_id` is not present for every ChatGPT account. Personal Plus/Pro access tokens may carry only `user_id` and no `chatgpt_account_id`; Chord still uses those credentials as ordinary OAuth bearer tokens and omits the `ChatGPT-Account-ID` header. Features that require a workspace/account id, such as Codex usage / rate-limit polling, skip those credentials until an account id is provided or parsed later.
+
+For large account pools, Chord does not synchronously parse every OAuth JWT at startup and does not block provider initialization when one access token lacks `account_id`. Startup reads only metadata already present in `auth.yaml`; missing `account_user_id`, `account_id`, `email`, and `expires` are parsed and backfilled in the background after the provider is available. When manually converting Codex / sub2api / other login exports, keep any available `account_id`, `account_user_id`, and `email`, but they are not startup requirements.
+
 ### Azure OpenAI Responses preset
 
 Use `preset: azure` for Azure OpenAI Responses endpoints. The preset is explicit: Chord does not auto-detect Azure from the endpoint URL. It sets `type: responses`, defaults `store: true`, treats the endpoint as an official API for 400 handling, disables Codex WebSocket/OAuth behavior, sends the configured credential as the Azure `api-key` header instead of `Authorization: Bearer`, and omits Codex compatibility headers such as `OpenAI-Beta` and `originator`.

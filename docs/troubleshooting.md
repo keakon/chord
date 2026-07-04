@@ -36,6 +36,17 @@ chord doctor models --model openai/gpt-5.5@high
 chord doctor models --pool thinking
 ```
 
+### Large OAuth account pools start slowly
+
+For `preset: codex` OpenAI / ChatGPT OAuth providers, `auth.yaml` may contain hundreds or thousands of accounts. Startup does not synchronously parse every access-token JWT and does not block provider initialization when one token lacks `account_id`: Chord first adds access tokens to the usable key pool, then parses and backfills `account_user_id`, `account_id`, `email`, and `expires` metadata in the background.
+
+Keep these cases separate:
+
+- Personal Plus/Pro accounts may carry only `user_id` and no `chatgpt_account_id`. They can still be used for ordinary requests, but Chord omits `ChatGPT-Account-ID` and skips account-id-dependent Codex usage / rate-limit polling for them.
+- `account_user_id mismatch` or `account_id mismatch` logs mean metadata explicitly configured in `auth.yaml` conflicts with what the token itself exposes. Fix or remove that credential.
+
+When manually converting Codex/sub2api exports, keep any available `email`, `account_id`, and `account_user_id`, but missing metadata should not make startup fail. Use doctor/inspection commands for deliberate per-account diagnostics instead of putting a full JWT scan on the startup hot path.
+
 ## 429 / quota exhausted
 
 Common causes:

@@ -1,6 +1,6 @@
 # CLI Reference
 
-This page lists every Chord command, subcommand, and flag.
+This page lists Chord's user-facing commands, subcommands, and flags. It also notes the Cobra-provided `help` and `completion` helpers exposed by the binary.
 
 For installation and first-time setup, start with the [Quickstart](./quickstart.md).
 
@@ -27,6 +27,8 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord worktree finish <name>`   | Merge the target branch into the real worktree, squash the result back as one commit, then remove the worktree |
 | `chord resume <session-id>`      | Resume a session by ID, auto-locating its worktree               |
 | `chord import <source> [file]`   | Import an external session into Chord's session store and convert recognizable external tools to current Chord tool cards |
+| `chord completion <shell>`       | Generate shell completion scripts for `bash`, `fish`, `powershell`, or `zsh` |
+| `chord help [command]`           | Show command help                                                |
 
 ## Global flags
 
@@ -40,8 +42,12 @@ These flags are accepted by every command and are merged with environment variab
 | `--cache-dir`    | Rebuildable cache (runtime caches, transient artifacts)                                                          | `CHORD_CACHE_DIR`      | `$XDG_CACHE_HOME/chord` if set, else `~/.cache/chord`                            |
 | `--sessions-dir` | Override the sessions root only                                                                                  | `CHORD_SESSIONS_DIR`   | `<state-dir>/sessions`                                                           |
 | `--logs-dir`     | Override the logs directory only                                                                                 | `CHORD_LOGS_DIR`       | `<state-dir>/logs`                                                               |
+| `-h`, `--help`   | Show help for the current command                                                                                | —                      | false                                                                            |
+| `-v`, `--version`| Print build and runtime version information, then exit                                                           | —                      | false                                                                            |
 
 For the full directory layout, see [Paths](./paths.md). For all environment variables, see [Environment variables](./environment.md).
+
+`-v/--version` is available on the root command. Subcommands expose `-h/--help` and the same path / API override flags shown above.
 
 ## `chord` (default — TUI)
 
@@ -80,6 +86,8 @@ chord --worktree feat-auth --continue
 ## `chord auth [provider]`
 
 Sign in after the base configuration is in place. This command is for `preset: codex` OAuth providers and stores credentials under `~/.config/chord/auth.yaml`. Chord also keeps machine-managed shared OAuth runtime state in `~/.config/chord/auth.state.json` so quota/reset caching does not constantly rewrite `auth.yaml`. Without a provider name, Chord auto-selects the only configured codex provider, or prompts you to choose when multiple are configured. The first-run wizard can complete this same Codex OAuth sign-in flow during setup; `chord auth codex` remains the direct command when you want to sign in again later.
+
+During normal model requests, OAuth responses such as HTTP 401/403 `token_invalidated`, revoked tokens, expired refresh tokens, or deactivated accounts are treated as permanent credential failures. Chord marks the matching OAuth runtime-state entry as expired, deactivated, or invalidated (using account/user metadata first, then refresh-token hash fallback), removes that credential from the selectable key pool, and refreshes the TUI `Keys` count. Retry entries in the error panel include the OAuth email/account and a short key fingerprint (`fp=...`) because the displayed key suffix is only a non-unique safety hint. Use `chord auth` to sign the account in again, or `chord auth state clean` to remove unusable entries.
 
 ### Flags
 
@@ -353,6 +361,27 @@ chord import claude --id <session-id>
 ```
 
 See the [Importing external sessions](./usage.md#importing-external-sessions) section for the full notes on tool/reasoning policy, conversion warnings, and provider-safe wire normalization.
+
+## `chord completion <shell>`
+
+Generate a shell completion script for `bash`, `fish`, `powershell`, or `zsh`. Use the generated script according to your shell's normal completion loading rules.
+
+```bash
+chord completion zsh
+chord completion bash
+chord completion fish
+chord completion powershell
+```
+
+## `chord help [command]`
+
+Show command help. This is equivalent to passing `--help` to the command.
+
+```bash
+chord help
+chord help doctor models
+chord doctor models --help
+```
 
 ## Running from source
 
