@@ -16,6 +16,24 @@ func TestMergeAuthConfigWithStateOverlaysStatus(t *testing.T) {
 	}
 }
 
+func TestMergeAuthConfigWithStateOverlaysStatusByRefreshFallback(t *testing.T) {
+	auth := AuthConfig{"openai": {{OAuth: &OAuthCredential{Access: "access-a", Refresh: "refresh-a", AccountID: "acc-1", Email: "user@example.com"}}}}
+	state := AuthStateFile{"openai": {OAuthRefreshStateKey("refresh-a"): {RefreshSHA256: OAuthRefreshStateKey("refresh-a"), AccountID: "acc-1", Email: "user@example.com", Status: OAuthStatusInvalidated}}}
+	merged := MergeAuthConfigWithState(auth, state)
+	if got := merged["openai"][0].OAuth; got == nil || got.Status != OAuthStatusInvalidated {
+		t.Fatalf("merged oauth = %#v, want invalidated status from refresh auth.state", got)
+	}
+}
+
+func TestMergeAuthConfigWithStateFallsBackToRefreshWhenAccountUserIDRecordMissing(t *testing.T) {
+	auth := AuthConfig{"openai": {{OAuth: &OAuthCredential{Access: "access-a", Refresh: "refresh-a", AccountUserID: "user-1__acc-1", AccountID: "acc-1", Email: "user@example.com"}}}}
+	state := AuthStateFile{"openai": {OAuthRefreshStateKey("refresh-a"): {RefreshSHA256: OAuthRefreshStateKey("refresh-a"), AccountID: "acc-1", Email: "user@example.com", Status: OAuthStatusInvalidated}}}
+	merged := MergeAuthConfigWithState(auth, state)
+	if got := merged["openai"][0].OAuth; got == nil || got.Status != OAuthStatusInvalidated {
+		t.Fatalf("merged oauth = %#v, want invalidated status from refresh auth.state fallback", got)
+	}
+}
+
 func TestParseAuthStateIgnoresUnrecognizedStateKeys(t *testing.T) {
 	state, err := ParseAuthState([]byte(`{
   "openai": {
@@ -75,7 +93,7 @@ func TestAuthStateRoundTripAndFind(t *testing.T) {
 	}
 }
 
-func TestUpsertOAuthStateRecordRequiresAccountUserID(t *testing.T) {
+func TestUpsertOAuthStateRecordAcceptsRefreshFallbackKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.state.json")
 	_, _, _, err := UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai"}, func(record *OAuthStateRecord) (bool, error) {
 		record.Status = OAuthStatusInvalidated
@@ -89,7 +107,14 @@ func TestUpsertOAuthStateRecordRequiresAccountUserID(t *testing.T) {
 		return true, nil
 	})
 	if err == nil {
-		t.Fatal("expected empty state key error without account_user_id or refresh_sha256")
+		t.Fatal("expected empty state key error for account_id-only fallback")
+	}
+	_, _, _, err = UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", Email: "user@example.com"}, func(record *OAuthStateRecord) (bool, error) {
+		record.Status = OAuthStatusInvalidated
+		return true, nil
+	})
+	if err == nil {
+		t.Fatal("expected empty state key error for email-only fallback")
 	}
 	_, _, _, err = UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", RefreshSHA256: OAuthRefreshStateKey("refresh-token")}, func(record *OAuthStateRecord) (bool, error) {
 		record.Status = OAuthStatusInvalidated

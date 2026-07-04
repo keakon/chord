@@ -170,7 +170,7 @@ func TestLoadAuthConfig_IgnoresOAuthStatusInAuthYAML(t *testing.T) {
 	}
 }
 
-func TestLoadAuthConfig_OAuthDerivesAccountIDFromAccessToken(t *testing.T) {
+func TestLoadAuthConfig_OAuthDoesNotDeriveAccountIDFromAccessToken(t *testing.T) {
 	f, err := os.CreateTemp("", "auth-*.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -189,8 +189,8 @@ func TestLoadAuthConfig_OAuthDerivesAccountIDFromAccessToken(t *testing.T) {
 	if len(creds) != 1 || creds[0].OAuth == nil {
 		t.Fatalf("expected one OAuth credential, got %#v", creds)
 	}
-	if creds[0].OAuth.AccountID != "acc-derived" {
-		t.Fatalf("expected derived AccountID=acc-derived, got %q", creds[0].OAuth.AccountID)
+	if creds[0].OAuth.AccountID != "" {
+		t.Fatalf("expected AccountID to remain empty during load, got %q", creds[0].OAuth.AccountID)
 	}
 }
 
@@ -261,6 +261,11 @@ func TestExtractOAuthAccountUserIDFromToken(t *testing.T) {
 			name:  "missing user claim",
 			token: testJWT(`{"chatgpt_account_id":"acc-only"}`),
 			want:  "",
+		},
+		{
+			name:  "user id fallback without account id",
+			token: testJWT(`{"https://api.openai.com/auth":{"user_id":"user-only"}}`),
+			want:  "user-only",
 		},
 		{
 			name:  "invalid token",
@@ -395,23 +400,25 @@ func TestExtractAPIKeys_OAuthDeactivatedStillIncludedForDeferredFiltering(t *tes
 	}
 }
 
-func TestExtractAPIKeys_OAuthWithoutAccountIDSkipped(t *testing.T) {
+func TestExtractAPIKeys_OAuthWithoutAccountIDIncluded(t *testing.T) {
+	access := testJWT(`{"exp":4102444800,"user_id":"user-token"}`)
 	creds := []ProviderCredential{
-		{OAuth: &OAuthCredential{Access: testJWT(`{"exp":4102444800}`), Expires: 9999999999000, Email: "user@example.com"}},
+		{OAuth: &OAuthCredential{Access: access, Expires: 9999999999000, Email: "user@example.com"}},
 	}
 	keys := ExtractAPIKeys(creds)
-	if len(keys) != 0 {
-		t.Fatalf("expected OAuth access token without account_id to be skipped, got %v", keys)
+	if len(keys) != 1 || keys[0] != access {
+		t.Fatalf("expected OAuth access token without account_id to be included, got %v", keys)
 	}
 }
 
-func TestExtractAPIKeys_OAuthMismatchedAccountIDSkipped(t *testing.T) {
+func TestExtractAPIKeys_OAuthMismatchedAccountIDIncludedForRuntimeValidation(t *testing.T) {
+	access := testJWT(`{"chatgpt_account_id":"acc-token","chatgpt_user_id":"user-token"}`)
 	creds := []ProviderCredential{
-		{OAuth: &OAuthCredential{Access: testJWT(`{"chatgpt_account_id":"acc-token","chatgpt_user_id":"user-token"}`), AccountID: "acc-other", Expires: 9999999999000}},
+		{OAuth: &OAuthCredential{Access: access, AccountID: "acc-other", Expires: 9999999999000}},
 	}
 	keys := ExtractAPIKeys(creds)
-	if len(keys) != 0 {
-		t.Fatalf("expected mismatched OAuth access token to be skipped, got %v", keys)
+	if len(keys) != 1 || keys[0] != access {
+		t.Fatalf("expected mismatched OAuth access token to be included for runtime validation, got %v", keys)
 	}
 }
 

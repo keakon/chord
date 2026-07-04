@@ -347,12 +347,15 @@ func (ToolResultEvent) agentEvent() {}
 
 // ErrorEvent carries an error that occurred during the agent loop.
 type ErrorEvent struct {
-	Err      error
-	AgentID  string // originating agent ("" = main agent)
-	Silent   bool   // if true, do not render BlockError in conversation flow (only record to error panel)
-	Provider string // provider name (for Silent retry errors)
-	Model    string // model ID (for Silent retry errors)
-	Key      string // key suffix (for Silent retry errors)
+	Err            error
+	AgentID        string // originating agent ("" = main agent)
+	Silent         bool   // if true, do not render BlockError in conversation flow (only record to error panel)
+	Provider       string // provider name (for Silent retry errors)
+	Model          string // model ID (for Silent retry errors)
+	Key            string // key suffix (for Silent retry errors; not unique)
+	KeyFingerprint string // short stable key hash (for Silent retry errors)
+	AccountID      string // OAuth account ID (for Silent retry errors)
+	Email          string // OAuth account email (for Silent retry errors)
 }
 
 func (ErrorEvent) agentEvent() {}

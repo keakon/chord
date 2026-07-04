@@ -1,11 +1,26 @@
 package main
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 )
+
+func TestOAuthCredentialMapIncludesRefreshStateForAccessCredential(t *testing.T) {
+	access := "e30." + base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"user_id":"user-1","chatgpt_account_id":"acc-1"}}`)) + ".sig"
+	creds := []config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-token", AccountID: "acc-1"}}}
+	m, _, err := oauthCredentialMapWithOptions(creds, false)
+	if err != nil {
+		t.Fatalf("oauthCredentialMapWithOptions: %v", err)
+	}
+	setup := m[llm.OAuthKeySetupSlotKey(0, access)]
+	if setup.RefreshSHA256 != config.OAuthRefreshStateKey("refresh-token") {
+		t.Fatalf("RefreshSHA256 = %q, want refresh token state key", setup.RefreshSHA256)
+	}
+}
 
 func TestNormalizeProviderConfigDetectsGeminiFromModelsPath(t *testing.T) {
 	got, err := normalizeProviderConfig("gemini", config.ProviderConfig{

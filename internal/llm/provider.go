@@ -100,6 +100,8 @@ type KeyState struct {
 
 // OAuthKeySetup mirrors auth.yaml OAuth credential state needed to initialize a key slot.
 type OAuthKeySetup struct {
+	HasKeySlot            bool
+	KeySlot               int
 	CredentialIndex       int
 	AccountUserID         string
 	AccountID             string
@@ -129,6 +131,14 @@ type OAuthKeyInfo struct {
 	CodexSecondaryResetAt int64
 	StateUpdatedAt        int64
 	LastWarmupAt          int64
+}
+
+// OAuthKeySetupSlotKey returns a stable in-memory map key for OAuth setup data
+// that must be matched by credential slot instead of bearer token. Multiple
+// configured credentials may intentionally share the same access token; the
+// slot key keeps their metadata and auth-state indices distinct.
+func OAuthKeySetupSlotKey(slot int, key string) string {
+	return fmt.Sprintf("\x00oauth-slot:%d:%s", slot, key)
 }
 
 // ProviderConfig holds provider-level configuration.

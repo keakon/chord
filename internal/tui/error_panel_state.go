@@ -22,6 +22,9 @@ type agentErrorRecord struct {
 	Provider   string
 	Model      string
 	KeySuffix  string
+	KeyFP      string
+	AccountID  string
+	Email      string
 	Retry      bool // intermediate retry/fallback attempt (vs a final error)
 }
 
@@ -60,7 +63,7 @@ func agentErrorMessage(err error) string {
 // chain when an *llm.APIError is present. retry marks intermediate
 // retry/fallback attempts, which is used to drop a final error that merely
 // repeats the last silently-recorded retry attempt.
-func (m *Model) recordAgentError(agentID string, err error, provider, model, keySuffix string, retry bool) {
+func (m *Model) recordAgentError(agentID string, err error, provider, model, keySuffix, keyFP, accountID, email string, retry bool) {
 	if err == nil {
 		return
 	}
@@ -71,6 +74,9 @@ func (m *Model) recordAgentError(agentID string, err error, provider, model, key
 		Provider:  provider,
 		Model:     model,
 		KeySuffix: keySuffix,
+		KeyFP:     keyFP,
+		AccountID: accountID,
+		Email:     email,
 		Retry:     retry,
 	}
 	if apiErr, ok := errors.AsType[*llm.APIError](err); ok {

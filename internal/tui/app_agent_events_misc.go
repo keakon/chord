@@ -38,7 +38,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		return true, effects
 	case agent.ErrorEvent:
 		if evt.Silent {
-			m.recordAgentError(evt.AgentID, evt.Err, evt.Provider, evt.Model, evt.Key, true)
+			m.recordAgentError(evt.AgentID, evt.Err, evt.Provider, evt.Model, evt.Key, evt.KeyFingerprint, evt.AccountID, evt.Email, true)
 			// Silent retry errors arrive mid-stream while the attempt is being
 			// retried; finalizing the streaming block or exiting render freeze
 			// here would prematurely settle a card that the retry continues.
@@ -48,7 +48,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		// retry attempt and again here as the final error; record the final one
 		// only when it does not merely repeat that last retry record.
 		if !m.finalErrorDuplicatesLastRetry(evt.Err) {
-			m.recordAgentError(evt.AgentID, evt.Err, evt.Provider, evt.Model, evt.Key, false)
+			m.recordAgentError(evt.AgentID, evt.Err, evt.Provider, evt.Model, evt.Key, evt.KeyFingerprint, evt.AccountID, evt.Email, false)
 		}
 		m.clearSessionSwitch()
 		m.finalizeAssistantBlock()

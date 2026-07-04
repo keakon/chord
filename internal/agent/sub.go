@@ -673,14 +673,17 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 	streamReducer.promoteStreamingActivity = promoteStreamingActivity
 	streamReducer.beforeStatus = updateRunningModelRef
 	streamReducer.onKeyConfirmed = updateRunningModelRef
-	streamReducer.onRetryError = func(err error, provider, model, keySuffix string) {
+	streamReducer.onRetryError = func(err error, provider, model, keySuffix, keyFingerprint, accountID, email string) {
 		s.parent.emitToTUI(ErrorEvent{
-			Err:      err,
-			AgentID:  s.instanceID,
-			Silent:   true,
-			Provider: provider,
-			Model:    model,
-			Key:      keySuffix,
+			Err:            err,
+			AgentID:        s.instanceID,
+			Silent:         true,
+			Provider:       provider,
+			Model:          model,
+			Key:            keySuffix,
+			KeyFingerprint: keyFingerprint,
+			AccountID:      accountID,
+			Email:          email,
 		})
 	}
 	streamReducer.onError = func(text string) {

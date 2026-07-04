@@ -82,6 +82,17 @@ func loadAuthStateSnapshot(path string) (config.AuthStateFile, time.Time, int64,
 }
 
 func (p *ProviderConfig) applyAuthStateLocked(state config.AuthStateFile, resetPollTTL bool) {
+	p.applyAuthStateLockedWithOptions(state, resetPollTTL, true)
+}
+
+func (p *ProviderConfig) applyLoadedAuthStateLocked(resetPollTTL bool) {
+	if len(p.authState) == 0 {
+		return
+	}
+	p.applyAuthStateLockedWithOptions(p.authState, resetPollTTL, false)
+}
+
+func (p *ProviderConfig) applyAuthStateLockedWithOptions(state config.AuthStateFile, resetPollTTL bool, clearMissing bool) {
 	for _, ks := range p.keyStates {
 		if ks == nil || ks.OAuthInfo == nil {
 			continue
@@ -92,7 +103,9 @@ func (p *ProviderConfig) applyAuthStateLocked(state config.AuthStateFile, resetP
 		}
 		record, ok := config.FindOAuthStateRecord(state, p.authStateKeyLocked(ks))
 		if !ok {
-			p.clearPolledRateLimitForCredLocked(credIdx)
+			if clearMissing {
+				p.clearPolledRateLimitForCredLocked(credIdx)
+			}
 			continue
 		}
 		if record.AccountUserID != "" {
@@ -121,7 +134,9 @@ func (p *ProviderConfig) applyAuthStateLocked(state config.AuthStateFile, resetP
 		ks.SoftCooldownUntil = time.Time{}
 		snap := codexSnapshotFromOAuthState(p.name, record)
 		if snap == nil {
-			p.clearPolledRateLimitForCredLocked(credIdx)
+			if clearMissing {
+				p.clearPolledRateLimitForCredLocked(credIdx)
+			}
 			continue
 		}
 		if credIdx < 0 {

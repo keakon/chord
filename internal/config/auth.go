@@ -117,7 +117,7 @@ func extractOAuthAccountUserIDFromClaims(claims oauthTokenClaims) string {
 	accountID := extractOAuthAccountIDFromClaims(claims)
 	userID := extractOAuthUserIDFromClaims(claims)
 	if accountID == "" || userID == "" {
-		return ""
+		return userID
 	}
 	return userID + "__" + accountID
 }
@@ -148,6 +148,13 @@ func ExtractOAuthAccountIDFromToken(token string) string {
 
 func ExtractOAuthAccountUserIDFromToken(token string) string {
 	return extractOAuthAccountUserIDFromClaims(extractOAuthClaims(token))
+}
+
+// ExtractOAuthUserIDFromToken extracts the ChatGPT user ID from an OpenAI OAuth
+// JWT without verifying the signature. It is best-effort and returns an empty
+// string when the token is not a JWT or does not carry the expected claims.
+func ExtractOAuthUserIDFromToken(token string) string {
+	return extractOAuthUserIDFromClaims(extractOAuthClaims(token))
 }
 
 // ExtractOAuthEmailFromToken extracts the email claim from an OpenAI OAuth JWT
@@ -215,14 +222,6 @@ func (c *ProviderCredential) UnmarshalYAML(value *yaml.Node) error {
 		if err := value.Decode(&o); err != nil {
 			return err
 		}
-		if o.Access != "" {
-			if o.AccountUserID == "" {
-				o.AccountUserID = ExtractOAuthAccountUserIDFromToken(o.Access)
-			}
-		}
-		if o.AccountID == "" && o.Access != "" {
-			o.AccountID = ExtractOAuthAccountIDFromToken(o.Access)
-		}
 		c.OAuth = &o
 		return nil
 	default:
@@ -234,22 +233,17 @@ func (c *ProviderCredential) UnmarshalYAML(value *yaml.Node) error {
 type AuthConfig map[string][]ProviderCredential
 
 // ExtractAPIKeys extracts all API keys from a credential list.
-// OAuth access tokens are included only when they carry a parseable account_id
-// that matches any configured account_id. Refresh-only OAuth credentials are
-// represented by an empty key slot so they can refresh on first use. Explicit
-// empty strings are included as valid keys.
+// OAuth access tokens are included as bearer keys without parsing their JWTs;
+// metadata compatibility is validated later by the OAuth credential map/runtime
+// paths. Refresh-only OAuth credentials are represented by an empty key slot so
+// they can refresh on first use. Explicit empty strings are included as valid
+// keys.
 func ExtractAPIKeys(creds []ProviderCredential) []string {
 	keys := make([]string, 0, len(creds))
 	for _, c := range creds {
 		if c.OAuth != nil {
 			if c.OAuth.Access != "" {
-				accountID := ExtractOAuthAccountIDFromToken(c.OAuth.Access)
-				if accountID == "" {
-					continue
-				}
-				if c.OAuth.AccountID == "" || c.OAuth.AccountID == accountID {
-					keys = append(keys, c.OAuth.Access)
-				}
+				keys = append(keys, c.OAuth.Access)
 				continue
 			}
 			if c.OAuth.Refresh != "" {
@@ -300,11 +294,15 @@ func findMatchingOAuthStateRecord(state AuthStateFile, provider string, cred *OA
 	if cred == nil {
 		return OAuthStateRecord{}, false
 	}
-	if cred.AccountUserID != "" {
-		return FindOAuthStateRecord(state, OAuthStateKey{Provider: provider, AccountUserID: cred.AccountUserID})
-	}
+	refreshSHA256 := ""
 	if cred.Refresh != "" {
-		return FindOAuthStateRecord(state, OAuthStateKey{Provider: provider, RefreshSHA256: OAuthRefreshStateKey(cred.Refresh)})
+		refreshSHA256 = OAuthRefreshStateKey(cred.Refresh)
+	}
+	if cred.AccountUserID != "" {
+		return FindOAuthStateRecord(state, OAuthStateKey{Provider: provider, AccountUserID: cred.AccountUserID, RefreshSHA256: refreshSHA256})
+	}
+	if refreshSHA256 != "" {
+		return FindOAuthStateRecord(state, OAuthStateKey{Provider: provider, RefreshSHA256: refreshSHA256})
 	}
 	return OAuthStateRecord{}, false
 }
@@ -570,6 +568,9 @@ func mergeOAuthRefreshResponse(cred *OAuthCredential, tr tokenResponse) *OAuthCr
 	accountUserID := extractOAuthAccountUserIDFromClaims(idClaims)
 	if accountUserID == "" {
 		accountUserID = extractOAuthAccountUserIDFromClaims(accessClaims)
+	}
+	if accessUserID := extractOAuthUserIDFromClaims(accessClaims); accountID != "" && accountUserID == accessUserID && accessUserID != "" {
+		accountUserID = accessUserID + "__" + accountID
 	}
 	if accountUserID == "" {
 		accountUserID = cred.AccountUserID

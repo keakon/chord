@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 )
 
 func TestResolvePprofListenAddr(t *testing.T) {
@@ -1121,21 +1122,22 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
 
-func TestPersistOAuthCredential_RequiresAccountID(t *testing.T) {
+func TestPersistOAuthCredential_RequiresAccountUserID(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("CHORD_CONFIG_HOME", configHome)
 
+	// Tokens with only email/sub and no ChatGPT identity should be rejected.
 	_, _, err := persistOAuthCredential(
 		"openai",
-		"header."+base64Payload(`{"email":"user@example.com"}`)+".sig",
+		"header."+base64Payload(`{"email":"user@example.com","sub":"u_xxx"}`)+".sig",
 		"header."+base64Payload(`{"https://api.openai.com/profile":{"email":"user@example.com"}}`)+".sig",
 		"refresh-123",
 		3600,
 	)
 	if err == nil {
-		t.Fatal("expected persistOAuthCredential to reject missing account_id")
+		t.Fatal("expected persistOAuthCredential to reject missing account_user_id")
 	}
-	if !strings.Contains(err.Error(), "missing account_id claim") {
+	if !strings.Contains(err.Error(), "missing account_user_id claims") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -1179,15 +1181,13 @@ anthropic:
 		"# keep provider comment",
 		"access: access-123",
 		"refresh: refresh-123",
+		"account_user_id: user-123__acc-123",
 		"account_id: acc-123",
 		"email: user@example.com",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected auth.yaml to contain %q, got:\n%s", want, text)
 		}
-	}
-	if strings.Contains(text, "account_user_id:") {
-		t.Fatalf("auth.yaml should not persist account_user_id for access credentials, got:\n%s", text)
 	}
 	statePath := filepath.Join(configHome, "auth.state.json")
 	stateData, err := os.ReadFile(statePath)
@@ -1598,14 +1598,76 @@ func TestOAuthCredentialMapBackfillsMetadataFromAccessToken(t *testing.T) {
 	}
 }
 
-func TestOAuthCredentialMapRejectsAccessTokenWithoutAccountID(t *testing.T) {
+func TestOAuthCredentialMapAllowsAccessTokenWithoutAccountID(t *testing.T) {
 	access := testUnsignedJWT(`{"chatgpt_user_id":"user-token","exp":4102444800,"email":"token@example.com"}`)
 	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, Email: "stored@example.com"}}})
-	if err == nil {
-		t.Fatalf("oauthCredentialMap succeeded with map=%#v backfills=%#v, want missing account_id error", got, backfills)
+	if err != nil {
+		t.Fatalf("oauthCredentialMap: %v", err)
 	}
-	if !strings.Contains(err.Error(), "missing account_id") {
-		t.Fatalf("error = %v, want missing account_id", err)
+	setup, ok := got[access]
+	if !ok {
+		t.Fatalf("OAuth map missing access token key: %#v", got)
+	}
+	if setup.AccountID != "" || setup.AccountUserID != "user-token" || setup.Email != "token@example.com" {
+		t.Fatalf("setup metadata = %#v, want user identity without account_id", setup)
+	}
+	if len(backfills) != 1 || backfills[0].AccountUserID != "user-token" || backfills[0].Email != "token@example.com" || backfills[0].Expires != 4102444800000 {
+		t.Fatalf("backfills = %#v, want user identity metadata", backfills)
+	}
+}
+
+func TestOAuthCredentialMapFastDoesNotParseAccessToken(t *testing.T) {
+	access := testUnsignedJWT(`{"chatgpt_user_id":"user-token","chatgpt_account_id":"acct-token","email":"token@example.com"}`)
+	got := oauthCredentialMapFast([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, Expires: 1234}}})
+	setup, ok := got[access]
+	if !ok {
+		t.Fatalf("fast OAuth map missing access token key: %#v", got)
+	}
+	if setup.AccountUserID != "" || setup.AccountID != "" || setup.Email != "" {
+		t.Fatalf("fast setup parsed metadata unexpectedly: %#v", setup)
+	}
+	if setup.Expires != 1234 || setup.CredentialIndex != 0 || setup.Access != access {
+		t.Fatalf("fast setup basic fields = %#v", setup)
+	}
+}
+
+func TestOAuthCredentialMapFastKeepsDuplicateAccessTokenSlots(t *testing.T) {
+	access := "shared-access"
+	got := oauthCredentialMapFast([]config.ProviderCredential{
+		{OAuth: &config.OAuthCredential{Access: access, AccountID: "acct-a", AccountUserID: "user-a__acct-a"}},
+		{OAuth: &config.OAuthCredential{Access: access, AccountID: "acct-b", AccountUserID: "user-b__acct-b"}},
+	})
+	setup0, ok := got[llm.OAuthKeySetupSlotKey(0, access)]
+	if !ok {
+		t.Fatalf("fast OAuth map missing slot 0 key: %#v", got)
+	}
+	setup1, ok := got[llm.OAuthKeySetupSlotKey(1, access)]
+	if !ok {
+		t.Fatalf("fast OAuth map missing slot 1 key: %#v", got)
+	}
+	if setup0.CredentialIndex != 0 || setup0.AccountID != "acct-a" || setup0.AccountUserID != "user-a__acct-a" {
+		t.Fatalf("slot 0 setup = %#v, want first credential metadata", setup0)
+	}
+	if setup1.CredentialIndex != 1 || setup1.AccountID != "acct-b" || setup1.AccountUserID != "user-b__acct-b" {
+		t.Fatalf("slot 1 setup = %#v, want second credential metadata", setup1)
+	}
+}
+
+func TestOAuthCredentialMapUsesConfiguredAccountIDWhenAccessTokenOmitsIt(t *testing.T) {
+	access := testUnsignedJWT(`{"https://api.openai.com/auth":{"user_id":"user-token"},"email":"token@example.com"}`)
+	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, AccountID: "acct-configured"}}})
+	if err != nil {
+		t.Fatalf("oauthCredentialMap: %v", err)
+	}
+	setup, ok := got[access]
+	if !ok {
+		t.Fatalf("OAuth map missing access token key: %#v", got)
+	}
+	if setup.AccountID != "acct-configured" || setup.AccountUserID != "user-token__acct-configured" || setup.Email != "token@example.com" {
+		t.Fatalf("setup metadata = %#v, want configured account identity", setup)
+	}
+	if len(backfills) != 1 || backfills[0].AccountID != "acct-configured" || backfills[0].AccountUserID != "user-token__acct-configured" {
+		t.Fatalf("backfills = %#v, want configured account identity", backfills)
 	}
 }
 
@@ -1617,6 +1679,28 @@ func TestOAuthCredentialMapRejectsMismatchedAccountID(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "does not match configured account_id") {
 		t.Fatalf("error = %v, want mismatch", err)
+	}
+}
+
+func TestOAuthCredentialMapLenientSkipsMismatchedAccountID(t *testing.T) {
+	badAccess := testUnsignedJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-token","chatgpt_user_id":"user-token"}}`)
+	goodAccess := testUnsignedJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-good","chatgpt_user_id":"user-good"}}`)
+	got, backfills, err := oauthCredentialMapWithOptions([]config.ProviderCredential{
+		{OAuth: &config.OAuthCredential{Access: badAccess, AccountID: "acct-other"}},
+		{OAuth: &config.OAuthCredential{Access: goodAccess}},
+	}, false)
+	if err != nil {
+		t.Fatalf("oauthCredentialMapWithOptions lenient: %v", err)
+	}
+	badSetup, ok := got[badAccess]
+	if !ok || badSetup.Status != config.OAuthStatusInvalidated {
+		t.Fatalf("lenient map bad credential = %#v, want invalidated setup", badSetup)
+	}
+	if _, ok := got[goodAccess]; !ok {
+		t.Fatalf("lenient map missing good credential: %#v", got)
+	}
+	if len(backfills) != 1 || backfills[0].AccountID != "acct-good" {
+		t.Fatalf("backfills = %#v, want only good credential", backfills)
 	}
 }
 
@@ -1673,7 +1757,7 @@ func TestOAuthCredentialMapDoesNotBackfillWhenMetadataAlreadyPresent(t *testing.
 
 func TestPersistOAuthMetadataBackfillsUpdatesAuthFileAndMemory(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
-	access := testUnsignedJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-token","chatgpt_user_id":"user-token"},"email":"token@example.com"}`)
+	access := testUnsignedJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-token","chatgpt_user_id":"user-token"},"email":"token@example.com","exp":4102444800}`)
 	auth := config.AuthConfig{
 		"codex": {
 			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-123"}},
@@ -1693,8 +1777,14 @@ func TestPersistOAuthMetadataBackfillsUpdatesAuthFileAndMemory(t *testing.T) {
 	if got := auth["codex"][0].OAuth.AccountID; got != "acct-token" {
 		t.Fatalf("in-memory account_id = %q", got)
 	}
+	if got := auth["codex"][0].OAuth.AccountUserID; got != "user-token__acct-token" {
+		t.Fatalf("in-memory account_user_id = %q", got)
+	}
 	if got := auth["codex"][0].OAuth.Email; got != "token@example.com" {
 		t.Fatalf("in-memory email = %q", got)
+	}
+	if got := auth["codex"][0].OAuth.Expires; got != 4102444800000 {
+		t.Fatalf("in-memory expires = %d", got)
 	}
 	loaded, err := config.LoadAuthConfig(authPath)
 	if err != nil {
@@ -1703,8 +1793,14 @@ func TestPersistOAuthMetadataBackfillsUpdatesAuthFileAndMemory(t *testing.T) {
 	if got := loaded["codex"][0].OAuth.AccountID; got != "acct-token" {
 		t.Fatalf("persisted account_id = %q", got)
 	}
+	if got := loaded["codex"][0].OAuth.AccountUserID; got != "user-token__acct-token" {
+		t.Fatalf("persisted account_user_id = %q", got)
+	}
 	if got := loaded["codex"][0].OAuth.Email; got != "token@example.com" {
 		t.Fatalf("persisted email = %q", got)
+	}
+	if got := loaded["codex"][0].OAuth.Expires; got != 4102444800000 {
+		t.Fatalf("persisted expires = %d", got)
 	}
 	if err := persistOAuthMetadataBackfills(authPath, &auth, &mu, "codex", []oauthMetadataBackfill{{Email: "ignored@example.com"}}); err != nil {
 		t.Fatalf("persistOAuthMetadataBackfills empty account id: %v", err)

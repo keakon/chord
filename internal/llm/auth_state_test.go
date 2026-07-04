@@ -93,7 +93,115 @@ func TestMaybeReloadAuthStateSkipsUnchangedFile(t *testing.T) {
 	}
 }
 
-func TestKeyStatsDoNotReloadAuthState(t *testing.T) {
+func TestUpdateOAuthMetadataReappliesLoadedAuthState(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
+	updatedAt := time.Now().Add(-time.Minute).UnixMilli()
+	resetAt := time.Now().Add(30 * time.Minute).UnixMilli()
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusNormal
+		record.UpdatedAt = updatedAt
+		record.CodexPrimaryUsedPct = 42
+		record.CodexPrimaryWindowMin = 300
+		record.CodexPrimaryResetAt = resetAt
+		return true, nil
+	}); err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli()}}}}
+	var authMu sync.Mutex
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+	}, "")
+	defer p.Close()
+	p.mu.Lock()
+	p.lastSelectedSlot = 0
+	initialSnap := p.polledRateLimitByCredIdx[0]
+	p.mu.Unlock()
+	if initialSnap != nil {
+		t.Fatalf("initial snapshot matched before metadata update: %#v", initialSnap)
+	}
+
+	p.UpdateOAuthMetadata(map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Access: "key-a"},
+	})
+
+	p.mu.Lock()
+	info := p.keyStates[0].OAuthInfo
+	snap := p.polledRateLimitByCredIdx[0]
+	p.mu.Unlock()
+	if info == nil || info.AccountUserID != "user-1__acc-1" || info.AccountID != "acc-1" || info.StateUpdatedAt != updatedAt {
+		t.Fatalf("OAuthInfo after metadata/state update = %#v", info)
+	}
+	if snap == nil || snap.Primary == nil || snap.Primary.UsedPct != 42 || snap.Primary.WindowMinutes != 300 || snap.Primary.ResetsAt.UnixMilli() != resetAt {
+		t.Fatalf("expected auth.state snapshot after metadata update, got %#v", snap)
+	}
+}
+
+func TestUpdateOAuthMetadataReappliesRefreshFallbackAuthState(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
+	refreshSHA := config.OAuthRefreshStateKey("refresh-a")
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", RefreshSHA256: refreshSHA}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.RefreshSHA256 = refreshSHA
+		record.Status = config.OAuthStatusInvalidated
+		record.UpdatedAt = time.Now().UnixMilli()
+		return true, nil
+	}); err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "key-a", Refresh: "refresh-a", Expires: time.Now().Add(time.Hour).UnixMilli()}}}}
+	var authMu sync.Mutex
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &auth, &authMu, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, Access: "key-a", Expires: time.Now().Add(time.Hour).UnixMilli()},
+	}, "")
+	defer p.Close()
+
+	p.UpdateOAuthMetadata(map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Access: "key-a", RefreshSHA256: refreshSHA},
+	})
+
+	p.mu.Lock()
+	info := p.keyStates[0].OAuthInfo
+	invalid := p.keyStates[0].Invalid
+	p.mu.Unlock()
+	if info == nil || info.AccountUserID != "user-1__acc-1" || info.RefreshSHA256 != refreshSHA || info.Status != config.OAuthStatusInvalidated || !invalid {
+		t.Fatalf("OAuthInfo after refresh fallback state update = %#v invalid=%v", info, invalid)
+	}
+	if healthy, total := p.HealthyKeyCount(); healthy != 0 || total != 0 {
+		t.Fatalf("HealthyKeyCount = %d/%d, want 0/0 from refresh fallback auth.state", healthy, total)
+	}
+}
+
+func TestUpdateOAuthMetadataKeepsDuplicateAccessTokenSlotsDistinct(t *testing.T) {
+	access := "shared-access"
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{access, access})
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", nil, nil, map[string]OAuthKeySetup{
+		OAuthKeySetupSlotKey(0, access): {HasKeySlot: true, KeySlot: 0, CredentialIndex: 0, Access: access, Expires: time.Now().Add(time.Hour).UnixMilli()},
+		OAuthKeySetupSlotKey(1, access): {HasKeySlot: true, KeySlot: 1, CredentialIndex: 1, Access: access, Expires: time.Now().Add(time.Hour).UnixMilli()},
+	}, "")
+	defer p.Close()
+
+	p.UpdateOAuthMetadata(map[string]OAuthKeySetup{
+		OAuthKeySetupSlotKey(0, access): {HasKeySlot: true, KeySlot: 0, CredentialIndex: 0, AccountUserID: "user-a__acct-a", AccountID: "acct-a", Access: access},
+		OAuthKeySetupSlotKey(1, access): {HasKeySlot: true, KeySlot: 1, CredentialIndex: 1, AccountUserID: "user-b__acct-b", AccountID: "acct-b", Access: access},
+	})
+
+	p.mu.Lock()
+	info0 := p.keyStates[0].OAuthInfo
+	info1 := p.keyStates[1].OAuthInfo
+	p.mu.Unlock()
+	if info0 == nil || info0.CredentialIndex != 0 || info0.AccountID != "acct-a" || info0.AccountUserID != "user-a__acct-a" {
+		t.Fatalf("slot 0 OAuthInfo = %#v, want first credential metadata", info0)
+	}
+	if info1 == nil || info1.CredentialIndex != 1 || info1.AccountID != "acct-b" || info1.AccountUserID != "user-b__acct-b" {
+		t.Fatalf("slot 1 OAuthInfo = %#v, want second credential metadata", info1)
+	}
+}
+
+func TestKeyStatsReloadAuthState(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.json")
 	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1"}, func(record *config.OAuthStateRecord) (bool, error) {
 		record.Status = config.OAuthStatusNormal
@@ -122,18 +230,49 @@ func TestKeyStatsDoNotReloadAuthState(t *testing.T) {
 		t.Fatalf("UpsertOAuthStateRecord deactivate: %v", err)
 	}
 
-	if healthy, total := p.HealthyKeyCount(); healthy != 1 || total != 1 {
-		t.Fatalf("HealthyKeyCount reloaded auth.state: healthy=%d total=%d, want 1/1", healthy, total)
+	if healthy, total := p.HealthyKeyCount(); healthy != 0 || total != 0 {
+		t.Fatalf("HealthyKeyCount after auth.state change = %d/%d, want 0/0", healthy, total)
+	}
+}
+
+func TestKeyStatsApplyRefreshFallbackAuthState(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
+	refreshSHA := config.OAuthRefreshStateKey("refresh-token")
+	if _, _, _, err := config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", RefreshSHA256: refreshSHA}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.RefreshSHA256 = refreshSHA
+		record.AccountID = "acc-1"
+		record.Email = "user@example.com"
+		record.Status = config.OAuthStatusInvalidated
+		return true, nil
+	}); err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
 	}
 
-	p.mu.Lock()
-	changed := p.maybeReloadAuthStateLocked()
-	p.mu.Unlock()
-	if !changed {
-		t.Fatal("explicit auth.state reload did not observe changed file")
-	}
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountID: "acc-1", Email: "user@example.com", RefreshSHA256: refreshSHA, Expires: time.Now().Add(time.Hour).UnixMilli()},
+	}, "")
+	defer p.Close()
+
 	if healthy, total := p.HealthyKeyCount(); healthy != 0 || total != 0 {
-		t.Fatalf("HealthyKeyCount after explicit reload = %d/%d, want 0/0", healthy, total)
+		t.Fatalf("HealthyKeyCount = %d/%d, want 0/0 from refresh auth.state", healthy, total)
+	}
+}
+
+func TestKeyStatsIgnoreAccountIDOnlyAuthState(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
+	if err := os.WriteFile(statePath, []byte(`{"openai":{"account_id:shared":{"account_id":"shared","status":"invalidated"}}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", statePath, &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{
+		"key-a": {CredentialIndex: 0, AccountID: "shared", Email: "user@example.com", Expires: time.Now().Add(time.Hour).UnixMilli()},
+	}, "")
+	defer p.Close()
+
+	if healthy, total := p.HealthyKeyCount(); healthy != 1 || total != 1 {
+		t.Fatalf("HealthyKeyCount = %d/%d, want 1/1: account_id-only auth.state must not invalidate keys", healthy, total)
 	}
 }
 

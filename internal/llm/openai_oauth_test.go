@@ -26,13 +26,14 @@ func testOAuthJWT(payload string) string {
 func newOpenAITestOAuthProvider(t *testing.T, apiURL string) (*ProviderConfig, string) {
 	t.Helper()
 
-	accessToken := testOAuthJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acc-test"}}`)
+	accessToken := testOAuthJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acc-test","chatgpt_user_id":"user-test"}}`)
 	creds := []config.ProviderCredential{{
 		OAuth: &config.OAuthCredential{
-			Refresh:   "refresh-token",
-			Access:    accessToken,
-			Expires:   time.Now().Add(time.Hour).UnixMilli(),
-			AccountID: "acc-test",
+			Refresh:       "refresh-token",
+			Access:        accessToken,
+			Expires:       time.Now().Add(time.Hour).UnixMilli(),
+			AccountUserID: "user-test__acc-test",
+			AccountID:     "acc-test",
 		},
 	}}
 	responsesWSOff := false
@@ -48,6 +49,7 @@ func newOpenAITestOAuthProvider(t *testing.T, apiURL string) (*ProviderConfig, s
 	provider.SetOAuthRefresher(apiURL, "app_EMoamEEZ73f0CkXaXp7hrann", "", "", &auth, &authMu, map[string]OAuthKeySetup{
 		accessToken: {
 			CredentialIndex: 0,
+			AccountUserID:   "user-test__acc-test",
 			AccountID:       "acc-test",
 			Expires:         creds[0].OAuth.Expires,
 		},

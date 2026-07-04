@@ -1936,6 +1936,79 @@ func TestClientCompleteStreamVisibleInterruptionRetriesSameKey(t *testing.T) {
 	}
 }
 
+func TestClientCompleteStreamVisibleAuthInvalidatedRotatesKey(t *testing.T) {
+	ctx := context.Background()
+	refreshHit := false
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		refreshHit = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"access_token":"new-access-token","refresh_token":"new-refresh-token","expires_in":3600}`)
+	}))
+	defer refreshServer.Close()
+
+	expires := time.Now().Add(time.Hour).UnixMilli()
+	auth := config.AuthConfig{"openai": {
+		{OAuth: &config.OAuthCredential{Access: "oauth-key-1", Refresh: "refresh-1", Expires: expires, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Email: "user@example.com"}},
+		{OAuth: &config.OAuthCredential{Access: "oauth-key-2", Refresh: "refresh-2", Expires: expires, AccountUserID: "user-2__acc-2", AccountID: "acc-2", Email: "other@example.com"}},
+	}}
+	var authMu sync.Mutex
+	providerCfg := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, config.ExtractAPIKeys(auth["openai"]))
+	providerCfg.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{
+		"oauth-key-1": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Email: "user@example.com", Expires: expires},
+		"oauth-key-2": {CredentialIndex: 1, AccountUserID: "user-2__acc-2", AccountID: "acc-2", Email: "other@example.com", Expires: expires},
+	}, "")
+
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{
+		{
+			streams: []message.StreamDelta{{Type: message.StreamDeltaText, Text: "partial"}},
+			err:     &APIError{StatusCode: 401, Code: "token_invalidated", Message: "Your authentication token has been invalidated. Please try signing in again."},
+		},
+		{resp: &message.Response{Content: "ok from second key"}},
+	}
+	c := NewClient(providerCfg, impl, "gpt-test", 4096, "sys")
+
+	var deltas []message.StreamDelta
+	resp, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		deltas = append(deltas, delta)
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "ok from second key" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if refreshHit {
+		t.Fatal("refresh endpoint was called for token_invalidated")
+	}
+	if got := impl.apiKeys; len(got) != 2 || got[0] != "oauth-key-1" || got[1] != "oauth-key-2" {
+		t.Fatalf("api keys = %#v, want [oauth-key-1 oauth-key-2]", got)
+	}
+	if auth["openai"][0].OAuth.Status != config.OAuthStatusInvalidated {
+		t.Fatalf("first OAuth status = %q, want invalidated", auth["openai"][0].OAuth.Status)
+	}
+	healthy, total := providerCfg.HealthyKeyCount()
+	if healthy != 1 || total != 1 {
+		t.Fatalf("HealthyKeyCount = %d/%d, want 1/1 after invalidating first key", healthy, total)
+	}
+	foundInvalidatedDelta := false
+	foundRetryErrorIdentity := false
+	for _, delta := range deltas {
+		if delta.Type == message.StreamDeltaKeyInvalidated && delta.AccountID == "acc-1" && delta.Email == "user@example.com" {
+			foundInvalidatedDelta = true
+		}
+		if delta.Type == message.StreamDeltaRetryError && delta.KeySuffix == keySuffix("oauth-key-1") && delta.KeyFingerprint == keyFingerprint("oauth-key-1") && delta.AccountID == "acc-1" && delta.Email == "user@example.com" {
+			foundRetryErrorIdentity = true
+		}
+	}
+	if !foundInvalidatedDelta {
+		t.Fatalf("expected key_invalidated delta with account metadata, got %#v", deltas)
+	}
+	if !foundRetryErrorIdentity {
+		t.Fatalf("expected retry_error delta with OAuth identity metadata, got %#v", deltas)
+	}
+}
+
 func TestClientCompleteStreamCompatible400CoolsKeyAndRotates(t *testing.T) {
 	cfg := testCompatibleResponsesProviderConfigWithKeys("gateway", "gpt-test", []string{"k1", "k2"})
 	disableRetryDelayForTest(cfg)

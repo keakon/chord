@@ -223,7 +223,7 @@ type llmStreamReducer struct {
 	onKeyInvalidated func(email, accountID string)
 	onKeyExpired     func(email, accountID string)
 	onKeyConfirmed   func(*message.StatusDelta)
-	onRetryError     func(error, string, string, string)
+	onRetryError     func(error, string, string, string, string, string, string)
 	onError          func(text string)
 }
 
@@ -288,7 +288,7 @@ func (r *llmStreamReducer) Handle(delta message.StreamDelta) {
 		}
 	case message.StreamDeltaRetryError:
 		if r.onRetryError != nil {
-			r.onRetryError(delta.Err, delta.Provider, delta.Model, delta.KeySuffix)
+			r.onRetryError(delta.Err, delta.Provider, delta.Model, delta.KeySuffix, delta.KeyFingerprint, delta.AccountID, delta.Email)
 		}
 	case message.StreamDeltaError:
 		if r.onError != nil {

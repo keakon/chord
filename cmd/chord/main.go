@@ -516,10 +516,7 @@ func resolveModelRef(
 					return nil, nil, "", 0, 0, fmt.Errorf("resolve auth state path: %w", statePathErr)
 				}
 				effectiveProxy := llm.ResolveEffectiveProxy(normalizedProviderCfg.Proxy, globalProxy)
-				oauthMap, backfills, oauthErr := oauthCredentialMap(creds)
-				if oauthErr != nil {
-					return nil, nil, "", 0, 0, fmt.Errorf("build OAuth credential map for provider %q: %w", provName, oauthErr)
-				}
+				oauthMap := oauthCredentialMapFast(creds)
 				provCfg.SetOAuthRefresher(
 					tokenURL,
 					clientID,
@@ -530,11 +527,7 @@ func resolveModelRef(
 					oauthMap,
 					effectiveProxy,
 				)
-				if len(backfills) > 0 {
-					if saveErr := persistOAuthMetadataBackfills(authConfigPath, &authCopy, &authMu, provName, backfills); saveErr != nil {
-						log.Warnf("failed to persist backfilled OAuth email/account_id provider=%v error=%v", provName, saveErr)
-					}
-				}
+				startOAuthMetadataBackfill(parentCtx, provCfg, authConfigPath, &authCopy, &authMu, provName, creds)
 				provCfg.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 					ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 					defer cancel()

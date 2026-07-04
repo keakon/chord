@@ -164,20 +164,21 @@ type StreamDelta struct {
 	// key_confirmed may carry Status.ModelRef/Status.Reason to identify the
 	// effective model that produced the first visible token for the current
 	// streaming attempt (used for confirming fallback/key-switch UI toasts).
-	Type      string                          // delta category
-	Text      string                          // for Type="text" or "thinking"
-	ToolCall  *ToolCallDelta                  // for Type="tool_use_*"
-	Status    *StatusDelta                    // for Type="status"
-	RateLimit *ratelimit.KeyRateLimitSnapshot // for Type="rate_limits"
-	Rollback  *RollbackDelta                  // for Type="rollback"
-	AccountID string                          // for Type="key_deactivated"/"key_invalidated"/"key_expired": the OAuth account ID
-	Email     string                          // for Type="key_deactivated"/"key_invalidated"/"key_expired": the OAuth account email, if available
-	Err       error                           // for Type="retry_error": the error from a failed retry attempt
-	Provider  string                          // for Type="retry_error": provider name
-	Model     string                          // for Type="retry_error": model ID
-	KeySuffix string                          // for Type="retry_error": last 4 chars of the key (safe for logs)
-	Progress  *StreamProgressDelta            // optional cumulative/request progress hint for status bar or transport diagnostics
-	Event     *StreamEventDelta               // optional low-level provider stream event diagnostics
+	Type           string                          // delta category
+	Text           string                          // for Type="text" or "thinking"
+	ToolCall       *ToolCallDelta                  // for Type="tool_use_*"
+	Status         *StatusDelta                    // for Type="status"
+	RateLimit      *ratelimit.KeyRateLimitSnapshot // for Type="rate_limits"
+	Rollback       *RollbackDelta                  // for Type="rollback"
+	AccountID      string                          // for Type="key_deactivated"/"key_invalidated"/"key_expired"/"retry_error": the OAuth account ID
+	Email          string                          // for Type="key_deactivated"/"key_invalidated"/"key_expired"/"retry_error": the OAuth account email, if available
+	Err            error                           // for Type="retry_error": the error from a failed retry attempt
+	Provider       string                          // for Type="retry_error": provider name
+	Model          string                          // for Type="retry_error": model ID
+	KeySuffix      string                          // for Type="retry_error": last 4 chars of the key (safe for logs, not unique)
+	KeyFingerprint string                          // for Type="retry_error": short stable hash of the key for distinguishing equal suffixes
+	Progress       *StreamProgressDelta            // optional cumulative/request progress hint for status bar or transport diagnostics
+	Event          *StreamEventDelta               // optional low-level provider stream event diagnostics
 }
 
 const (

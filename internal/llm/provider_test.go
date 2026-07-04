@@ -215,6 +215,103 @@ func TestMutateCredentialInMemoryUsesIndexToDisambiguateDuplicateAccountID(t *te
 	}
 }
 
+func TestPersistCredentialStatusWritesAuthStateWithRefreshFallback(t *testing.T) {
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "access-a", Refresh: "refresh-a", AccountID: "acc-1", Email: "user@example.com"}}}}
+	authMu := &sync.Mutex{}
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
+	r := &OAuthRefresher{providerName: "openai", authConfig: &auth, authConfigMu: authMu, authStatePath: statePath}
+
+	if err := r.persistCredentialStatus(config.OAuthCredentialMatch{AccountID: "acc-1", Email: "user@example.com", RefreshSHA256: config.OAuthRefreshStateKey("refresh-a")}, config.OAuthStatusInvalidated); err != nil {
+		t.Fatalf("persistCredentialStatus: %v", err)
+	}
+	state, err := config.LoadAuthState(statePath)
+	if err != nil {
+		t.Fatalf("LoadAuthState: %v", err)
+	}
+	record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", RefreshSHA256: config.OAuthRefreshStateKey("refresh-a")})
+	if !ok || record.Status != config.OAuthStatusInvalidated || record.Email != "user@example.com" {
+		t.Fatalf("state record = %#v ok=%v, want invalidated refresh record", record, ok)
+	}
+}
+
+func TestPersistCredentialStatusWritesAuthStateWhenAuthConfigMatchFails(t *testing.T) {
+	auth := config.AuthConfig{"openai": {{OAuth: &config.OAuthCredential{Access: "new-access", Refresh: "new-refresh", AccountID: "acc-1", Email: "user@example.com"}}}}
+	authMu := &sync.Mutex{}
+	statePath := filepath.Join(t.TempDir(), "auth.state.json")
+	r := &OAuthRefresher{providerName: "openai", authConfig: &auth, authConfigMu: authMu, authStatePath: statePath}
+	oldRefreshSHA := config.OAuthRefreshStateKey("old-refresh")
+
+	err := r.persistCredentialStatus(config.OAuthCredentialMatch{Access: "old-access", RefreshSHA256: oldRefreshSHA}, config.OAuthStatusInvalidated)
+	if err != nil {
+		t.Fatalf("persistCredentialStatus returned error despite direct auth.state key: %v", err)
+	}
+	state, err := config.LoadAuthState(statePath)
+	if err != nil {
+		t.Fatalf("LoadAuthState: %v", err)
+	}
+	record, ok := config.FindOAuthStateRecord(state, config.OAuthStateKey{Provider: "openai", RefreshSHA256: oldRefreshSHA})
+	if !ok || record.Status != config.OAuthStatusInvalidated {
+		t.Fatalf("state record = %#v ok=%v, want invalidated refresh record", record, ok)
+	}
+	if got := auth["openai"][0].OAuth.Status; got != config.OAuthStatusNormal {
+		t.Fatalf("auth config status = %q, want unchanged when mirror match fails", got)
+	}
+}
+
+func TestMarkInvalidatedInvalidatesDuplicateAccessTokenSlots(t *testing.T) {
+	access := "shared-access"
+	auth := config.AuthConfig{"openai": {
+		{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-a", AccountUserID: "user-a__acct-a", AccountID: "acct-a", Email: "a@example.com"}},
+		{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-b", AccountUserID: "user-b__acct-b", AccountID: "acct-b", Email: "b@example.com"}},
+	}}
+	var authMu sync.Mutex
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{access, access})
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", filepath.Join(t.TempDir(), "auth.state.json"), &auth, &authMu, map[string]OAuthKeySetup{
+		OAuthKeySetupSlotKey(0, access): {HasKeySlot: true, KeySlot: 0, CredentialIndex: 0, Access: access, AccountUserID: "user-a__acct-a", AccountID: "acct-a", Email: "a@example.com"},
+		OAuthKeySetupSlotKey(1, access): {HasKeySlot: true, KeySlot: 1, CredentialIndex: 1, Access: access, AccountUserID: "user-b__acct-b", AccountID: "acct-b", Email: "b@example.com"},
+	}, "")
+	defer p.Close()
+
+	p.MarkInvalidated(access)
+
+	p.mu.Lock()
+	invalid0 := p.keyStates[0].Invalid
+	invalid1 := p.keyStates[1].Invalid
+	status0 := p.keyStates[0].OAuthInfo.Status
+	status1 := p.keyStates[1].OAuthInfo.Status
+	p.mu.Unlock()
+	if !invalid0 || !invalid1 || status0 != config.OAuthStatusInvalidated || status1 != config.OAuthStatusInvalidated {
+		t.Fatalf("duplicate key slot states = invalid %v/%v status %q/%q, want both invalidated", invalid0, invalid1, status0, status1)
+	}
+	if got := auth["openai"][0].OAuth.Status; got != config.OAuthStatusInvalidated {
+		t.Fatalf("first auth status = %q, want invalidated", got)
+	}
+	if got := auth["openai"][1].OAuth.Status; got != config.OAuthStatusInvalidated {
+		t.Fatalf("second auth status = %q, want invalidated", got)
+	}
+}
+
+func TestOAuthInfoForDuplicateAccessTokenClearsConflictingIdentity(t *testing.T) {
+	access := "shared-access"
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{access, access})
+	p.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", nil, nil, map[string]OAuthKeySetup{
+		OAuthKeySetupSlotKey(0, access): {HasKeySlot: true, KeySlot: 0, CredentialIndex: 0, Access: access, AccountUserID: "user-a__acct-a", AccountID: "acct-a", Email: "a@example.com"},
+		OAuthKeySetupSlotKey(1, access): {HasKeySlot: true, KeySlot: 1, CredentialIndex: 1, Access: access, AccountUserID: "user-b__acct-b", AccountID: "acct-b", Email: "b@example.com"},
+	}, "")
+	defer p.Close()
+
+	info := p.oauthInfoForKey(access)
+	if info == nil {
+		t.Fatal("oauthInfoForKey returned nil, want OAuth metadata without conflicting identity")
+	}
+	if info.AccountUserID != "" || info.AccountID != "" || info.Email != "" {
+		t.Fatalf("oauthInfoForKey identity = user %q account %q email %q, want conflicting fields cleared", info.AccountUserID, info.AccountID, info.Email)
+	}
+	if !p.isOpenAIOAuthKey(access) {
+		t.Fatal("duplicate access token should still be recognized as OpenAI OAuth")
+	}
+}
+
 // --- SelectKey / SelectKeyWithContext ---
 
 func TestSelectKey_NoKeys(t *testing.T) {

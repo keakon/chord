@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -258,17 +259,62 @@ func emitStreamStatusDelta(cb StreamCallback, status message.StatusDelta) {
 	cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &status})
 }
 
-func emitRetryError(cb StreamCallback, err error, provider, model, keySuffix string) {
+func keyFingerprint(key string) string {
+	if key == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("%x", sum[:4])
+}
+
+func emitRetryError(cb StreamCallback, err error, provider, model, keySuffix, keyFingerprint, accountID, email string) {
 	if cb == nil || err == nil {
 		return
 	}
 	cb(message.StreamDelta{
-		Type:      message.StreamDeltaRetryError,
-		Err:       err,
-		Provider:  provider,
-		Model:     model,
-		KeySuffix: keySuffix,
+		Type:           message.StreamDeltaRetryError,
+		Err:            err,
+		Provider:       provider,
+		Model:          model,
+		KeySuffix:      keySuffix,
+		KeyFingerprint: keyFingerprint,
+		AccountID:      accountID,
+		Email:          email,
 	})
+}
+
+func emitRetryErrorForKey(cb StreamCallback, err error, provider *ProviderConfig, model, key string) {
+	providerName := ""
+	accountID := ""
+	email := ""
+	if provider != nil {
+		providerName = provider.Name()
+		if info := provider.oauthInfoForKey(key); info != nil {
+			accountID = info.AccountID
+			email = info.Email
+		}
+	}
+	emitRetryError(cb, err, providerName, model, keySuffix(key), keyFingerprint(key), accountID, email)
+}
+
+func emitKeyCooldownDeltas(cb StreamCallback, result markKeyCooldownResult) {
+	if cb == nil {
+		return
+	}
+	if result.expired || result.expiredAccountID != "" || result.expiredEmail != "" {
+		cb(message.StreamDelta{Type: message.StreamDeltaKeyExpired, AccountID: result.expiredAccountID, Email: result.expiredEmail})
+	}
+	if result.deactivated || result.deactivatedAccountID != "" || result.deactivatedEmail != "" {
+		cb(message.StreamDelta{Type: message.StreamDeltaKeyDeactivated, AccountID: result.deactivatedAccountID, Email: result.deactivatedEmail})
+	}
+	if result.invalidated || result.invalidatedAccountID != "" || result.invalidatedEmail != "" {
+		cb(message.StreamDelta{Type: message.StreamDeltaKeyInvalidated, AccountID: result.invalidatedAccountID, Email: result.invalidatedEmail})
+	}
+}
+
+func isAuthAPIStatusError(err error) bool {
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && apiErr != nil && (apiErr.StatusCode == 401 || apiErr.StatusCode == 403)
 }
 
 func newStreamAttemptTracker(cb StreamCallback, target streamRetryTarget, apiKey, modelRef, attemptReason string, keyAttempt, keyCount int) *visibleStreamTracker {
@@ -522,15 +568,7 @@ func (c *Client) completeStreamTarget(
 			if err := abortIfCancelled(); err != nil {
 				return result, lastInputTokens, err
 			}
-			if (cooldownResult.expiredAccountID != "" || cooldownResult.expiredEmail != "") && cb != nil {
-				cb(message.StreamDelta{Type: message.StreamDeltaKeyExpired, AccountID: cooldownResult.expiredAccountID, Email: cooldownResult.expiredEmail})
-			}
-			if (cooldownResult.deactivatedAccountID != "" || cooldownResult.deactivatedEmail != "") && cb != nil {
-				cb(message.StreamDelta{Type: message.StreamDeltaKeyDeactivated, AccountID: cooldownResult.deactivatedAccountID, Email: cooldownResult.deactivatedEmail})
-			}
-			if (cooldownResult.invalidatedAccountID != "" || cooldownResult.invalidatedEmail != "") && cb != nil {
-				cb(message.StreamDelta{Type: message.StreamDeltaKeyInvalidated, AccountID: cooldownResult.invalidatedAccountID, Email: cooldownResult.invalidatedEmail})
-			}
+			emitKeyCooldownDeltas(cb, cooldownResult)
 			if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
 				log.Errorf("terminal API error, giving up provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
 				return result, lastInputTokens, err
@@ -546,7 +584,7 @@ func (c *Client) completeStreamTarget(
 			if IsContextLengthExceeded(err) {
 				result.setLastErr(t.provider, err)
 				oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
-				emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
+				emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
 				modelDone = true
 				break
 			}
@@ -564,7 +602,7 @@ func (c *Client) completeStreamTarget(
 						retriable = false
 						if fallbackEligible && fallbackEnabled && len(fallbackModels) > 0 {
 							log.Warnf("model incompatible 400, trying fallback provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
-							emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
+							emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
 							modelDone = true
 							break
 						}
@@ -589,11 +627,11 @@ func (c *Client) completeStreamTarget(
 					return result, lastInputTokens, err
 				}
 				if fallbackEligible && fallbackEnabled && len(fallbackModels) > 0 {
-					emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
+					emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
 					modelDone = true
 					break
 				}
-				emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
+				emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
 				modelDone = true
 				break
 			}
@@ -603,7 +641,38 @@ func (c *Client) completeStreamTarget(
 			}
 
 			log.Warnf("retriable LLM error, trying next key provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
-			emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
+			emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
+			if cb != nil && keyAttempt+1 < keyCount {
+				if err := abortIfCancelled(); err != nil {
+					return result, lastInputTokens, err
+				}
+				emitStreamStatus(cb, "retrying_key", fmt.Sprintf("%d/%d", keyAttempt+2, keyCount))
+			}
+			continue
+		}
+
+		if isAuthAPIStatusError(err) {
+			cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, result.lastErr)
+			if err := abortIfCancelled(); err != nil {
+				return result, lastInputTokens, err
+			}
+			emitKeyCooldownDeltas(cb, cooldownResult)
+			if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
+				log.Errorf("terminal API error after visible output, giving up provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+				return result, lastInputTokens, err
+			}
+			keyForRotationCooldown := apiKey
+			if cooldownResult.refreshedKey != "" {
+				keyForRotationCooldown = cooldownResult.refreshedKey
+			}
+			if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
+				status.FallbackReason = classifyFallbackReason(err)
+			}
+			if !cooldownResult.cooldownApplied && keyForRotationCooldown != "" {
+				t.provider.MarkRecovering(keyForRotationCooldown)
+			}
+			log.Warnf("auth error after visible output, trying next key provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+			emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
 			if cb != nil && keyAttempt+1 < keyCount {
 				if err := abortIfCancelled(); err != nil {
 					return result, lastInputTokens, err
@@ -624,7 +693,7 @@ func (c *Client) completeStreamTarget(
 			break
 		}
 		log.Warnf("stream interrupted after visible output; retrying current key provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
-		emitRetryError(cb, err, t.provider.Name(), t.modelID, keySuffix(apiKey))
+		emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
 		if cb != nil {
 			if err := abortIfCancelled(); err != nil {
 				return result, lastInputTokens, err
@@ -646,7 +715,7 @@ func (c *Client) completeStreamTarget(
 			result.setLastErr(t.provider, emptyErr)
 			t.provider.MarkRecovering(apiKey)
 			tracker.EmitRollback(emptyErr.Error())
-			emitRetryError(cb, emptyErr, t.provider.Name(), t.modelID, keySuffix(apiKey))
+			emitRetryErrorForKey(cb, emptyErr, t.provider, t.modelID, apiKey)
 			if cb != nil {
 				emitStreamStatus(cb, "retrying_key", "next")
 			}

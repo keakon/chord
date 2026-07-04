@@ -346,21 +346,6 @@ func (r *doctorModelsRuntimeConfig) providerCredentials(provider string) []confi
 	return cloneProviderCredentials(r.Auth[provider])
 }
 
-func cloneProviderCredentials(creds []config.ProviderCredential) []config.ProviderCredential {
-	if len(creds) == 0 {
-		return nil
-	}
-	cloned := make([]config.ProviderCredential, len(creds))
-	for i, cred := range creds {
-		cloned[i] = cred
-		if cred.OAuth != nil {
-			oauth := *cred.OAuth
-			cloned[i].OAuth = &oauth
-		}
-	}
-	return cloned
-}
-
 func orderedModelPoolsFromPath(path string) ([]orderedModelPool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -226,18 +226,22 @@ func validateRefreshedCodexOAuthCredential(oldCred, newCred *config.OAuthCredent
 	if accountID == "" {
 		accountID = config.ExtractOAuthAccountIDFromToken(newCred.Access)
 	}
-	if accountID == "" {
-		return fmt.Errorf("refreshed OAuth credential missing account_id claim")
+	if accountID == "" && oldCred != nil {
+		accountID = strings.TrimSpace(oldCred.AccountID)
 	}
 	accountUserID := strings.TrimSpace(newCred.AccountUserID)
 	if accountUserID == "" {
 		accountUserID = config.ExtractOAuthAccountUserIDFromToken(newCred.Access)
 	}
+	userID := config.ExtractOAuthUserIDFromToken(newCred.Access)
+	if accountID != "" && accountUserID == userID && userID != "" {
+		accountUserID = userID + "__" + accountID
+	}
 	if accountUserID == "" {
 		return fmt.Errorf("refreshed OAuth credential missing account_user_id claims")
 	}
 	if oldCred != nil {
-		if oldCred.AccountID != "" && oldCred.AccountID != accountID {
+		if oldCred.AccountID != "" && accountID != "" && oldCred.AccountID != accountID {
 			return fmt.Errorf("refreshed OAuth account_id %q does not match existing account_id %q", accountID, oldCred.AccountID)
 		}
 		if oldCred.AccountUserID != "" && oldCred.AccountUserID != accountUserID {
@@ -865,12 +869,16 @@ func persistOAuthCredential(providerName, idToken, accessToken, refreshToken str
 	if accountID == "" {
 		accountID = config.ExtractOAuthAccountIDFromToken(accessToken)
 	}
-	if accountID == "" {
-		return nil, "", fmt.Errorf("OAuth response missing account_id claim")
-	}
 	accountUserID := config.ExtractOAuthAccountUserIDFromToken(idToken)
 	if accountUserID == "" {
 		accountUserID = config.ExtractOAuthAccountUserIDFromToken(accessToken)
+	}
+	userID := config.ExtractOAuthUserIDFromToken(accessToken)
+	if userID == "" {
+		userID = config.ExtractOAuthUserIDFromToken(idToken)
+	}
+	if accountID != "" && accountUserID == userID && userID != "" {
+		accountUserID = userID + "__" + accountID
 	}
 	if accountUserID == "" {
 		return nil, "", fmt.Errorf("OAuth response missing account_user_id claims")
@@ -896,9 +904,7 @@ func persistOAuthCredential(providerName, idToken, accessToken, refreshToken str
 		return nil, "", fmt.Errorf("create config home: %w", err)
 	}
 	authPath := filepath.Join(configHome, "auth.yaml")
-	authCred := *cred
-	authCred.AccountUserID = ""
-	if _, err := config.UpsertOAuthCredentialInFile(authPath, providerName, &authCred); err != nil {
+	if _, err := config.UpsertOAuthCredentialInFile(authPath, providerName, cred); err != nil {
 		return nil, "", fmt.Errorf("save auth config: %w", err)
 	}
 	statePath, err := config.AuthStatePath()

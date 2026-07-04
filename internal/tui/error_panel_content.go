@@ -59,6 +59,14 @@ func formatErrorRecordLines(rec agentErrorRecord, width int) []string {
 	if rec.KeySuffix != "" {
 		header += fmt.Sprintf("  key=%s", rec.KeySuffix)
 	}
+	if rec.KeyFP != "" {
+		header += fmt.Sprintf("  fp=%s", rec.KeyFP)
+	}
+	if rec.Email != "" {
+		header += fmt.Sprintf("  email=%s", rec.Email)
+	} else if rec.AccountID != "" {
+		header += fmt.Sprintf("  account=%s", rec.AccountID)
+	}
 	if rec.StatusCode != 0 {
 		header += fmt.Sprintf("  HTTP %d", rec.StatusCode)
 	}

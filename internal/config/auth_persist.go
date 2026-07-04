@@ -20,6 +20,7 @@ import (
 type OAuthCredentialMatch struct {
 	AccountUserID   string
 	AccountID       string
+	Email           string
 	Access          string
 	RefreshSHA256   string
 	CredentialIndex *int
@@ -127,6 +128,69 @@ func UpdateOAuthCredentialInFile(
 		}
 	}
 	return auth, updated, changed, nil
+}
+
+type OAuthCredentialMetadataUpdate struct {
+	Match         OAuthCredentialMatch
+	AccountUserID string
+	AccountID     string
+	Email         string
+	Expires       int64
+}
+
+func UpdateOAuthCredentialMetadataInFile(path, provider string, updates []OAuthCredentialMetadataUpdate) (AuthConfig, int, error) {
+	if len(updates) == 0 {
+		auth, err := LoadAuthConfig(path)
+		return auth, 0, err
+	}
+	changedCount := 0
+	auth, err := mutateAuthYAMLFile(path, func(doc *authYAMLDocument) error {
+		refs, _, err := doc.providerCredentialRefs(provider)
+		if err != nil {
+			return err
+		}
+		for _, update := range updates {
+			if update.AccountUserID == "" && update.AccountID == "" && update.Email == "" && update.Expires == 0 {
+				continue
+			}
+			target := findMatchingOAuthCredentialRef(refs, update.Match)
+			if target == nil || target.credential.OAuth == nil {
+				continue
+			}
+			updated := *target.credential.OAuth
+			dirty := false
+			if updated.AccountUserID == "" && update.AccountUserID != "" {
+				updated.AccountUserID = update.AccountUserID
+				dirty = true
+			}
+			if updated.AccountID == "" && update.AccountID != "" {
+				updated.AccountID = update.AccountID
+				dirty = true
+			}
+			if updated.Email == "" && update.Email != "" {
+				updated.Email = update.Email
+				dirty = true
+			}
+			if updated.Expires == 0 && update.Expires != 0 {
+				updated.Expires = update.Expires
+				dirty = true
+			}
+			if !dirty {
+				continue
+			}
+			if updateOAuthMappingNode(target.node, &updated) {
+				doc.dirty = true
+			}
+			updatedCopy := updated
+			target.credential.OAuth = &updatedCopy
+			changedCount++
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return auth, changedCount, nil
 }
 
 func RemoveOAuthCredentialsInFile(path string, remove func(provider string, cred *OAuthCredential, normalizedIndex int) bool) (AuthConfig, []RemovedOAuthCredentialEntry, error) {
@@ -552,6 +616,18 @@ func findMatchingOAuthCredentialRef(refs []authCredentialNodeRef, match OAuthCre
 			}
 			continue
 		}
+		if match.Email != "" && strings.EqualFold(oauth.Email, match.Email) {
+			if match.Access != "" && oauth.Access == match.Access {
+				return &refs[i]
+			}
+			if match.CredentialIndex != nil && refs[i].normalizedIndex == *match.CredentialIndex {
+				return &refs[i]
+			}
+			if accountIDMatch == nil {
+				accountIDMatch = &refs[i]
+			}
+			continue
+		}
 		if accessMatch == nil && match.Access != "" && oauth.Access == match.Access {
 			accessMatch = &refs[i]
 		}
@@ -591,11 +667,7 @@ func updateOAuthMappingNode(node *yaml.Node, cred *OAuthCredential) bool {
 	changed = setMappingString(node, "refresh", cred.Refresh, true) || changed
 	changed = setMappingString(node, "access", cred.Access, true) || changed
 	changed = setMappingOptionalInt64(node, "expires", cred.Expires) || changed
-	if cred.Access == "" && cred.Refresh != "" {
-		changed = setMappingString(node, "account_user_id", cred.AccountUserID, true) || changed
-	} else {
-		changed = removeMappingKey(node, "account_user_id") || changed
-	}
+	changed = setMappingString(node, "account_user_id", cred.AccountUserID, true) || changed
 	changed = setMappingString(node, "account_id", cred.AccountID, true) || changed
 	changed = setMappingString(node, "email", cred.Email, true) || changed
 	changed = removeMappingKey(node, "status") || changed

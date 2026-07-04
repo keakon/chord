@@ -103,10 +103,13 @@ type markKeyCooldownResult struct {
 	cooldownApplied      bool
 	oauthRefreshed       bool
 	refreshedKey         string
+	expired              bool
 	expiredAccountID     string // non-empty when a codex OAuth refresh token was marked expired
 	expiredEmail         string // email from the expired key's JWT, if available
+	invalidated          bool
 	invalidatedAccountID string // non-empty when a codex OAuth key was invalidated (401/403)
 	invalidatedEmail     string // email from the invalidated key's JWT, if available
+	deactivated          bool
 	deactivatedAccountID string // non-empty when a codex OAuth key was deactivated (401/403)
 	deactivatedEmail     string // email from the deactivated key's JWT, if available
 }
@@ -199,6 +202,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 				provider.MarkDeactivated(key)
 				return markKeyCooldownResult{
 					cooldownApplied:      true,
+					deactivated:          true,
 					deactivatedAccountID: info.AccountID,
 					deactivatedEmail:     info.Email,
 				}
@@ -216,6 +220,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 				provider.MarkInvalidated(key)
 				return markKeyCooldownResult{
 					cooldownApplied:      true,
+					invalidated:          true,
 					invalidatedAccountID: info.AccountID,
 					invalidatedEmail:     info.Email,
 				}
@@ -225,6 +230,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 				provider.MarkDeactivated(key)
 				return markKeyCooldownResult{
 					cooldownApplied:      true,
+					deactivated:          true,
 					deactivatedAccountID: info.AccountID,
 					deactivatedEmail:     info.Email,
 				}
@@ -240,7 +246,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 			info := provider.oauthInfoForKey(key)
 			log.Warnf("OAuth credential unrecoverable after access expiry, permanently removing key key_suffix=%v", keySuffix(key))
 			provider.MarkExpired(key)
-			result := markKeyCooldownResult{cooldownApplied: true}
+			result := markKeyCooldownResult{cooldownApplied: true, expired: true}
 			if info != nil {
 				result.expiredAccountID = info.AccountID
 				result.expiredEmail = info.Email
@@ -257,6 +263,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 				provider.MarkInvalidated(key)
 				return markKeyCooldownResult{
 					cooldownApplied:      true,
+					invalidated:          true,
 					invalidatedAccountID: info.AccountID,
 					invalidatedEmail:     info.Email,
 				}
@@ -266,6 +273,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 				provider.MarkDeactivated(key)
 				return markKeyCooldownResult{
 					cooldownApplied:      true,
+					deactivated:          true,
 					deactivatedAccountID: info.AccountID,
 					deactivatedEmail:     info.Email,
 				}
@@ -279,7 +287,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 			info := provider.oauthInfoForKey(key)
 			log.Warnf("OAuth credential unrecoverable after access expiry, permanently removing key key_suffix=%v", keySuffix(key))
 			provider.MarkExpired(key)
-			result := markKeyCooldownResult{cooldownApplied: true}
+			result := markKeyCooldownResult{cooldownApplied: true, expired: true}
 			if info != nil {
 				result.expiredAccountID = info.AccountID
 				result.expiredEmail = info.Email

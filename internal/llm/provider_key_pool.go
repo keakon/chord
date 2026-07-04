@@ -573,6 +573,7 @@ func (p *ProviderConfig) KeyCount() int {
 func (p *ProviderConfig) AvailableKeyCount() (available, total int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.maybeReloadAuthStateLocked()
 	now := time.Now()
 	for _, ks := range p.keyStates {
 		if ks.Invalid {
@@ -593,6 +594,7 @@ func (p *ProviderConfig) AvailableKeyCount() (available, total int) {
 func (p *ProviderConfig) HealthyKeyCount() (healthy, total int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.maybeReloadAuthStateLocked()
 	now := time.Now()
 	for _, ks := range p.keyStates {
 		if ks.Invalid {

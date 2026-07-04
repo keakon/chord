@@ -16,7 +16,8 @@ import (
 
 // OAuthStateKey identifies a persisted OAuth runtime state entry.
 // AccountUserID is used directly as the user-in-workspace key below the provider.
-// RefreshSHA256 is only used for refresh-only credentials before account_id is known.
+// RefreshSHA256 is used when AccountUserID is not available, or as a fallback
+// when an older refresh-keyed record has not yet been migrated to account_user_id.
 type OAuthStateKey struct {
 	Provider      string
 	AccountUserID string
@@ -51,7 +52,8 @@ func (r OAuthStateRecord) IsValid() bool {
 	return r.Status.IsValid()
 }
 
-// AuthStateFile is the on-disk shared runtime state keyed by provider then account_user_id.
+// AuthStateFile is the on-disk shared runtime state keyed by provider, then
+// account_user_id or refresh_sha256 fallback key.
 type AuthStateFile map[string]map[string]OAuthStateRecord
 
 func AuthStatePath() (string, error) {
@@ -394,10 +396,22 @@ func FindOAuthStateRecord(state AuthStateFile, key OAuthStateKey) (OAuthStateRec
 		return OAuthStateRecord{}, false
 	}
 	record, ok := entries[recordKey]
+	if !ok && strings.TrimSpace(key.AccountUserID) != "" && strings.TrimSpace(key.RefreshSHA256) != "" {
+		record, ok = entries[normalizeOAuthRefreshStateKey(key.RefreshSHA256)]
+	}
 	if ok {
-		record.AccountUserID = strings.TrimSpace(key.AccountUserID)
-		record.AccountID = strings.TrimSpace(key.AccountID)
-		record.RefreshSHA256 = strings.TrimSpace(key.RefreshSHA256)
+		if accountUserID := strings.TrimSpace(key.AccountUserID); accountUserID != "" {
+			record.AccountUserID = accountUserID
+		}
+		if accountID := strings.TrimSpace(key.AccountID); accountID != "" {
+			record.AccountID = accountID
+		}
+		if refreshSHA256 := strings.TrimSpace(key.RefreshSHA256); refreshSHA256 != "" {
+			record.RefreshSHA256 = refreshSHA256
+		}
+		if email := strings.TrimSpace(key.Email); email != "" {
+			record.Email = email
+		}
 	}
 	return record, ok
 }

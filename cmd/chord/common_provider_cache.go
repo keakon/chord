@@ -6,8 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/keakon/golog/log"
-
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/ratelimit"
@@ -113,16 +111,13 @@ func (c *providerCache) getOrCreate(provName string, cfg config.ProviderConfig, 
 			return nil, fmt.Errorf("resolve auth state path: %w", statePathErr)
 		}
 		effectiveProxy := llm.ResolveEffectiveProxy(normalizedCfg.Proxy, globalProxy)
-		oauthMap, backfills, oauthErr := oauthCredentialMap(creds)
-		if oauthErr != nil {
-			return nil, fmt.Errorf("build OAuth credential map for provider %q: %w", provName, oauthErr)
-		}
+		oauthMap := oauthCredentialMapFast(creds)
 		p.SetOAuthRefresher(tokenURL, clientID, c.authPath, authStatePath, &c.auth, &c.authMu, oauthMap, effectiveProxy)
-		if len(backfills) > 0 {
-			if saveErr := persistOAuthMetadataBackfills(c.authPath, &c.auth, &c.authMu, provName, backfills); saveErr != nil {
-				log.Warnf("failed to persist backfilled OAuth email/account_id provider=%v error=%v", provName, saveErr)
-			}
+		backfillCtx := c.ctx
+		if backfillCtx == nil {
+			backfillCtx = context.Background()
 		}
+		startOAuthMetadataBackfill(backfillCtx, p, c.authPath, &c.auth, &c.authMu, provName, creds)
 		p.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 			pollParentCtx := c.ctx
 			if pollParentCtx == nil {
