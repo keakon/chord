@@ -270,6 +270,30 @@ func TestRenderConfirmDialogEditModeShowsMultilineTextareaAndHint(t *testing.T) 
 	}
 }
 
+func TestNewConfirmTextareaUsesSharedDynamicDialogInput(t *testing.T) {
+	ta := newConfirmTextarea(100, 30, "short")
+	if ta.ShowLineNumbers {
+		t.Fatal("confirm textarea should hide line numbers")
+	}
+	if !ta.DynamicHeight {
+		t.Fatal("confirm textarea should use dynamic height")
+	}
+	if ta.MinHeight != confirmEditMinHeight || ta.MaxHeight != confirmEditHeight(30) {
+		t.Fatalf("textarea height bounds = %d..%d, want %d..%d", ta.MinHeight, ta.MaxHeight, confirmEditMinHeight, confirmEditHeight(30))
+	}
+	if ta.Height() != 1 {
+		t.Fatalf("short confirm textarea height = %d, want 1", ta.Height())
+	}
+	ta.SetValue("one\ntwo")
+	if ta.Height() != 2 {
+		t.Fatalf("two-line confirm textarea height = %d, want 2", ta.Height())
+	}
+	keys := strings.Join(ta.KeyMap.InsertNewline.Keys(), ",")
+	if keys != "shift+enter,ctrl+j" {
+		t.Fatalf("newline keys = %q, want shift+enter,ctrl+j", keys)
+	}
+}
+
 func TestHandleConfirmEditKeyUpMovesWithinTextarea(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirm.request = &ConfirmRequest{ToolName: "delete", ArgsJSON: "{\n  \"a\": 1,\n  \"b\": 2\n}"}

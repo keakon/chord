@@ -20,22 +20,7 @@ const (
 )
 
 func newQuestionTextarea(width int) textarea.Model {
-	ta := textarea.New()
-	ta.ShowLineNumbers = false
-	ta.CharLimit = 0
-	ta.SetStyles(newTextareaStyles())
-	ta.SetPromptFunc(2, func(info textarea.PromptInfo) string {
-		if info.LineNumber == 0 {
-			return "> "
-		}
-		return "  "
-	})
-	km := ta.KeyMap
-	km.InsertNewline.SetKeys("shift+enter", "ctrl+j")
-	ta.KeyMap = km
-	ta.SetWidth(questionInputWidth(width) + 2)
-	ta.SetHeight(questionInputHeight)
-	return ta
+	return newDialogTextarea(questionInputWidth(width), 1, questionInputHeight, "")
 }
 
 func questionInputWidth(totalWidth int) int {
@@ -152,7 +137,11 @@ func (m *Model) renderQuestionDialog() string {
 	// Custom text input (shown when focused or when no options)
 	if m.question.custom || len(q.Options) == 0 {
 		inputView := strings.TrimSuffix(m.question.input.View(), "\n")
-		lines = append(lines, strings.Split(inputView, "\n")...)
+		inputLines := strings.Split(inputView, "\n")
+		if len(inputLines) > 0 {
+			inputLines[0] = QuestionSelectedStyle.Render("> ") + inputLines[0]
+		}
+		lines = append(lines, inputLines...)
 	}
 
 	lines = append(lines, "")

@@ -149,8 +149,14 @@ func TestNewQuestionTextareaConfiguresMultilineKeys(t *testing.T) {
 	if ta.ShowLineNumbers {
 		t.Fatal("question textarea should hide line numbers")
 	}
-	if ta.Height() != questionInputHeight {
-		t.Fatalf("textarea height = %d, want %d", ta.Height(), questionInputHeight)
+	if !ta.DynamicHeight {
+		t.Fatal("question textarea should use dynamic height")
+	}
+	if ta.MinHeight != 1 || ta.MaxHeight != questionInputHeight {
+		t.Fatalf("textarea height bounds = %d..%d, want 1..%d", ta.MinHeight, ta.MaxHeight, questionInputHeight)
+	}
+	if ta.Height() != 1 {
+		t.Fatalf("textarea initial height = %d, want 1", ta.Height())
 	}
 	if ta.Width() != questionInputWidth(80) {
 		t.Fatalf("textarea width = %d, want %d", ta.Width(), questionInputWidth(80))
@@ -165,6 +171,39 @@ func TestNewQuestionTextareaConfiguresMultilineKeys(t *testing.T) {
 	}
 	if got := strings.Join(ta.KeyMap.LinePrevious.Keys(), ","); got != "up,ctrl+p" {
 		t.Fatalf("line-previous keys = %q, want up,ctrl+p", got)
+	}
+}
+
+func TestQuestionTextareaSoftWrapDoesNotIndentContinuation(t *testing.T) {
+	ta := newQuestionTextarea(80)
+	ta.SetWidth(10)
+	ta.SetValue("abcdefghijk")
+
+	plain := stripANSI(strings.TrimSuffix(ta.View(), "\n"))
+	lines := strings.Split(plain, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("wrapped line count = %d, want 2\n%s", len(lines), plain)
+	}
+	if strings.HasPrefix(lines[1], " ") {
+		t.Fatalf("wrapped continuation should not be indented, got %q in:\n%s", lines[1], plain)
+	}
+	if got := strings.TrimSpace(lines[1]); got != "k" {
+		t.Fatalf("wrapped continuation text = %q, want k\n%s", got, plain)
+	}
+}
+
+func TestQuestionTextareaShrinksToContentHeight(t *testing.T) {
+	ta := newQuestionTextarea(80)
+	if ta.Height() != 1 {
+		t.Fatalf("empty textarea height = %d, want 1", ta.Height())
+	}
+	ta.SetValue("one\ntwo")
+	if ta.Height() != 2 {
+		t.Fatalf("two-line textarea height = %d, want 2", ta.Height())
+	}
+	ta.SetValue("one\ntwo\nthree\nfour\nfive")
+	if ta.Height() != questionInputHeight {
+		t.Fatalf("long textarea height = %d, want capped at %d", ta.Height(), questionInputHeight)
 	}
 }
 

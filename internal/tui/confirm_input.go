@@ -15,7 +15,7 @@ import (
 const (
 	confirmDialogMaxWidth = 90
 	confirmDialogMaxRatio = 0.8
-	confirmEditMinHeight  = 4
+	confirmEditMinHeight  = 1
 	confirmEditMaxHeight  = 10
 )
 
@@ -90,22 +90,7 @@ func confirmEditHeight(totalHeight int) int {
 }
 
 func newConfirmTextarea(width, height int, value string) textarea.Model {
-	ta := textarea.New()
-	ta.ShowLineNumbers = false
-	ta.CharLimit = 0
-	ta.SetStyles(newTextareaStyles())
-	ta.SetPromptFunc(0, func(textarea.PromptInfo) string {
-		return ""
-	})
-	km := ta.KeyMap
-	km.InsertNewline.SetKeys("shift+enter", "ctrl+j")
-	ta.KeyMap = km
-	ta.SetWidth(confirmDialogInnerWidth(width))
-	ta.SetHeight(confirmEditHeight(height))
-	ta.SetValue(value)
-	ta.CursorEnd()
-	ta.Focus()
-	return ta
+	return newDialogTextarea(confirmDialogInnerWidth(width), confirmEditMinHeight, confirmEditHeight(height), value)
 }
 
 func (m *Model) activeConfirmTextarea() (*textarea.Model, string, bool) {

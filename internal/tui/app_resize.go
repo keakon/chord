@@ -13,19 +13,17 @@ func (m *Model) applyTerminalSize(width, height int, refreshKitty bool) {
 	m.input.SetWidth(m.width - 2)
 	if m.confirm.editing {
 		ei := m.confirm.editInput
-		ei.SetWidth(confirmDialogInnerWidth(m.width))
-		ei.SetHeight(confirmEditHeight(m.height))
+		configureDialogTextarea(&ei, confirmDialogInnerWidth(m.width), confirmEditMinHeight, confirmEditHeight(m.height))
 		m.confirm.editInput = ei
 	}
 	if m.confirm.denyingWithReason {
 		dri := m.confirm.denyReasonInput
-		dri.SetWidth(confirmDialogInnerWidth(m.width))
-		dri.SetHeight(confirmEditHeight(m.height))
+		configureDialogTextarea(&dri, confirmDialogInnerWidth(m.width), confirmEditMinHeight, confirmEditHeight(m.height))
 		m.confirm.denyReasonInput = dri
 	}
 	if m.mode == ModeQuestion {
 		qin := m.question.input
-		qin.SetWidth(questionInputWidth(m.width) + 2)
+		configureDialogTextarea(&qin, questionInputWidth(m.width), 1, questionInputHeight)
 		m.question.input = qin
 	}
 	if m.mode == ModeSearch {
