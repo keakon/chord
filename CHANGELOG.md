@@ -23,6 +23,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Tool-result truncation now preserves recoverability: `question` answers are no longer truncated before being sent to the model, per-line truncation saves the complete tool output under the session `tool-outputs/` directory, `read` keeps line paging as the focused code-reading path, LSP tool positions now use the same Unicode character counting for both input and returned locations, and internally budgeted outputs from `read`, `glob`, and `web_fetch` now include a saved-full-output reference when Chord can produce the complete result.
 - Automatic compaction now has a usage-missing fallback: after a trusted non-zero provider usage sample, Chord scales that sample by current context-contributing message bytes when later responses omit usage or report zero, so long sessions can still compact before hitting the provider limit. If every attempted candidate model reports `context_length_exceeded` while automatic compaction is disabled, Chord now stops with an actionable error instead of falling through to generic fallback exhaustion.
 - Restored or cross-provider histories now skip empty or unreplayable reasoning-only assistant messages, preventing provider API rejections when replaying prior reasoning/thinking content.
 - TUI streaming now flushes buffered thinking deltas before tool-call cards, preventing spurious extra thinking cards when providers interleave thinking and tool-use events.

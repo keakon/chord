@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -355,8 +357,9 @@ func TestWebFetchHTMLIncludesMetadataHeaders(t *testing.T) {
 	mustContain(t, out, "Published-Time: 2026-04-28\n")
 }
 
-func TestWebFetchResultIsHardCappedAtOutputLimit(t *testing.T) {
+func TestWebFetchReturnedBodyIsCappedAndSavesFullOutput(t *testing.T) {
 	big := strings.Repeat("你好", webFetchTextOutputBytes)
+	sessionDir := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, big)
@@ -364,13 +367,29 @@ func TestWebFetchResultIsHardCappedAtOutputLimit(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(webFetchTestConfig(), "")
-	out := executeWebFetchForTest(t, tool, map[string]any{"url": server.URL})
-	if len([]byte(out)) > webFetchTextOutputBytes {
-		t.Fatalf("final output size = %d, want <= %d", len([]byte(out)), webFetchTextOutputBytes)
+	raw, err := json.Marshal(map[string]any{"url": server.URL})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	out, err := tool.Execute(WithSessionDir(context.Background(), sessionDir), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	returnedBytes := parseWebFetchHeaderInt(t, out, "Returned-Body-Bytes")
+	if returnedBytes > webFetchTextOutputBytes {
+		t.Fatalf("returned body bytes = %d, want <= %d", returnedBytes, webFetchTextOutputBytes)
 	}
 	mustContain(t, out, "Truncated: output\n")
 	mustContain(t, out, "Output-Limit: "+strconv.Itoa(webFetchTextOutputBytes)+"\n")
 	mustContain(t, out, "...(output truncated)")
+	artifactPath := filepath.Join(sessionDir, sessionToolOutputsDirName, "web-fetch.log")
+	mustContain(t, out, "Full output saved to "+artifactPath+".")
+	data, err := os.ReadFile(artifactPath)
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	mustContain(t, string(data), "Returned-Body-Bytes: "+strconv.Itoa(len([]byte(big)))+"\n")
+	mustContain(t, string(data), big)
 }
 
 func TestWebFetchInputTruncationForTextResources(t *testing.T) {
@@ -545,6 +564,22 @@ func mustContain(t *testing.T, s, want string) {
 	if !strings.Contains(s, want) {
 		t.Fatalf("expected output to contain %q, got %q", want, s)
 	}
+}
+
+func parseWebFetchHeaderInt(t *testing.T, out, key string) int {
+	t.Helper()
+	prefix := key + ": "
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			value, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, prefix)))
+			if err != nil {
+				t.Fatalf("parse %s header %q: %v", key, line, err)
+			}
+			return value
+		}
+	}
+	t.Fatalf("header %q not found in output %q", key, out)
+	return 0
 }
 
 func mustParseHTMLDoc(t *testing.T, body string) *html.Node {

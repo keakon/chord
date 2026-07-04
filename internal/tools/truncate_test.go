@@ -57,6 +57,17 @@ func TestTruncateOutputReusesStableArtifactPathForSameKey(t *testing.T) {
 	if !strings.Contains(first.Hint, first.SavedPath) {
 		t.Fatalf("hint %q should reference saved path %q", first.Hint, first.SavedPath)
 	}
+	for _, want := range []string{"read with offset/limit for line ranges", "script/parser for huge single-line structured output"} {
+		if !strings.Contains(first.Hint, want) {
+			t.Fatalf("hint %q should contain %q", first.Hint, want)
+		}
+	}
+	if strings.Count(first.Content, "read with offset/limit for line ranges") != 1 {
+		t.Fatalf("truncated content should mention read guidance once, got %q", first.Content)
+	}
+	if !strings.Contains(first.Content, "Use grep to search within the saved output") {
+		t.Fatalf("truncated content should include grep guidance, got %q", first.Content)
+	}
 }
 
 func TestListArtifactFilesReturnsSessionToolOutputs(t *testing.T) {
@@ -259,13 +270,26 @@ func TestTruncateOutputWithOptions(t *testing.T) {
 			opts: TruncateOptions{},
 			check: func(t *testing.T, input string, r TruncateResult) {
 				// Total bytes = 2500 < MaxOutputBytes, lines = 1 ≤ MaxOutputLines
-				// Only per-line truncation applies; overall Truncated stays false.
-				if r.Truncated {
-					t.Error("Truncated should be false (within overall limits)")
+				// Only per-line truncation applies; the full output is still saved.
+				if !r.Truncated {
+					t.Error("Truncated should be true for per-line truncation")
 				}
 				expected := strings.Repeat("a", MaxLineLength) + "..."
 				if r.Content != expected {
 					t.Errorf("Content length = %d, want %d", len(r.Content), len(expected))
+				}
+				if r.SavedPath == "" {
+					t.Fatal("SavedPath should be set")
+				}
+				data, err := os.ReadFile(r.SavedPath)
+				if err != nil {
+					t.Fatalf("failed to read saved file: %v", err)
+				}
+				if string(data) != input {
+					t.Error("saved file should contain original full output")
+				}
+				if !strings.Contains(r.Hint, r.SavedPath) || !strings.Contains(r.ArtifactReference, r.SavedPath) {
+					t.Errorf("truncation metadata should reference saved path, hint=%q ref=%q path=%q", r.Hint, r.ArtifactReference, r.SavedPath)
 				}
 			},
 		},

@@ -32,7 +32,7 @@ func (ReadTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (ReadTool) Description() string {
-	return "Read file contents with optional offset/limit paging, up to 2000 lines. Successful output starts with one READ_RESULT metadata line of the form `READ_RESULT lines=a-b total=N` (1-based inclusive returned range and total file line count), or `READ_RESULT lines=none total=N` when no line was returned (empty file, or an offset exactly at end of file which is the normal end of paging; an offset strictly past the last line is an error); everything after that first line is exact file text without line-number gutters or extra indentation, so copy only the text after READ_RESULT into edit hunks. A read that simply did not reach the end of the file is not truncation. Only when the tool itself drops requested lines to fit the approximate 20k-token read budget does the header add `truncated=budget requested_lines=a-d`, where a-d is the range you originally requested; compare it with the returned lines=a-b and page further with offset/limit. A later context-reduction pass may instead mark an aged read output with `truncated=stale`, keeping only its leading lines (lines=a-b then covers just the kept head) to save tokens; re-read with offset/limit if you need the rest. The header omits encoding for UTF-8 files and reports it only for other encodings. For edit, include a few unchanged source lines around the intended change; if you need more surrounding context, read the intended nearby block before patching. read output normalizes line endings to LF; edit preserves the file's existing line-ending style when writing."
+	return "Read file contents by line for code inspection and edits, with optional offset/limit line paging up to 2000 lines by default. Prefer grep or lsp to locate symbols before reading a small nearby block. Normal output starts with one READ_RESULT metadata line of the form `READ_RESULT lines=a-b total=N` (1-based inclusive returned range and total file line count), or `READ_RESULT lines=none total=N` when no line was returned (empty file, or an offset exactly at end of file which is the normal end of paging; an offset strictly past the last line is an error); everything after that first line is exact file text without line-number gutters or extra indentation, so copy only the text after READ_RESULT into edit hunks. A read that simply did not reach the end of the file is not truncation. Only when the tool itself drops requested lines to fit the approximate 20k-token read budget does the header add `truncated=budget requested_lines=a-d`, where a-d is the range you originally requested; compare it with the returned lines=a-b and page further with offset/limit. If a file or saved output is a huge single line that cannot fit in read output, use grep to locate patterns or a script/parser via shell for structured processing instead of character-range reads. A later context-reduction pass may mark an aged read output with `truncated=stale`, keeping only its leading lines (lines=a-b then covers just the kept head) to save tokens; re-read with offset/limit if you need the rest. The header omits encoding for UTF-8 files and reports it only for other encodings. For edit, include a few unchanged source lines around the intended change; if you need more surrounding context, read the intended nearby block before patching. read output normalizes line endings to LF; edit preserves the file's existing line-ending style when writing."
 }
 
 func (ReadTool) Parameters() map[string]any {
@@ -192,13 +192,13 @@ func buildReadContent(header string, contentLines []string) string {
 	return b.String()
 }
 
-func truncateReadContentToBudget(contentLines []string, startLine, totalLines int, encoding string) string {
+func truncateReadContentToBudget(contentLines []string, startLine, totalLines int, encoding, suffix string) (string, bool) {
 	if len(contentLines) == 0 {
 		line := 0
 		if totalLines > 0 {
 			line = startLine
 		}
-		return buildReadContent(readResultHeader(line, max(line-1, 0), totalLines, 0, encoding, false), nil)
+		return buildReadContent(readResultHeader(line, max(line-1, 0), totalLines, 0, encoding, false), nil) + suffix, false
 	}
 
 	// The caller already narrowed contentLines to the requested offset/limit
@@ -214,7 +214,7 @@ func truncateReadContentToBudget(contentLines []string, startLine, totalLines in
 			header,
 			contentLines[:mid],
 		)
-		if readOutputFitsBudget(candidate) {
+		if readOutputFitsBudget(candidate + suffix) {
 			best = candidate
 			lo = mid + 1
 			continue
@@ -222,10 +222,22 @@ func truncateReadContentToBudget(contentLines []string, startLine, totalLines in
 		hi = mid - 1
 	}
 	if best != "" {
-		return best
+		return best + suffix, true
 	}
 	header := readResultHeader(startLine, max(startLine-1, 0), totalLines, requestedEndLine, encoding, true)
-	return buildReadContent(header, nil)
+	return buildReadContent(header, nil) + suffix, true
+}
+
+func readArtifactReference(contentLines []string, startLine, endLine, totalLines int, encoding, sessionDir string) string {
+	if strings.TrimSpace(sessionDir) == "" {
+		return ""
+	}
+	fullOutput := buildReadContent(readResultHeader(startLine, endLine, totalLines, 0, encoding, false), contentLines)
+	savedPath := saveFullOutput(fullOutput, sessionDir, "read-result")
+	if savedPath == "" {
+		return ""
+	}
+	return "Full output saved to " + savedPath + "."
 }
 
 func readOffsetPastEndError(offset, totalLines int, limit *int) error {
@@ -301,15 +313,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	end := min(offset+limit, totalLines)
 
 	selected := lines[offset:end]
-	contentLines := make([]string, 0, len(selected))
-
-	for _, line := range selected {
-		// Truncate excessively long lines.
-		if len(line) > MaxLineLength {
-			line = line[:MaxLineLength] + "..."
-		}
-		contentLines = append(contentLines, line)
-	}
+	contentLines := selected
 
 	startLine := 0
 	endLine := 0
@@ -322,7 +326,15 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 	content := buildReadContent(readResultHeader(startLine, endLine, totalLines, 0, decoded.Encoding.Name, false), contentLines)
 	if !readOutputFitsBudget(content) {
-		content = truncateReadContentToBudget(contentLines, offset+1, totalLines, decoded.Encoding.Name)
+		suffix := ""
+		if ref := readArtifactReference(contentLines, startLine, endLine, totalLines, decoded.Encoding.Name, SessionDirFromContext(ctx)); ref != "" {
+			suffix = "\n" + ref + "\n"
+		}
+		var budgetTruncated bool
+		content, budgetTruncated = truncateReadContentToBudget(contentLines, offset+1, totalLines, decoded.Encoding.Name, suffix)
+		if !budgetTruncated {
+			content = strings.TrimSuffix(content, suffix)
+		}
 	}
 
 	if t.LSP != nil {

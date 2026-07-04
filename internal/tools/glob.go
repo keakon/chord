@@ -104,7 +104,7 @@ func (GlobTool) legacyArgAliases() map[string]string {
 	return map[string]string{"pattern": "patterns"}
 }
 
-func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
+func (GlobTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	startedAt := time.Now()
 	var a globArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
@@ -123,13 +123,14 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w", err)
 	}
+	captureFullOutput := strings.TrimSpace(SessionDirFromContext(ctx)) != ""
 
 	// Fast path: when all patterns are relative paths without glob metacharacters
 	// (e.g. "architecture-review-20260621-064007.html"), stat them directly under
 	// the base directory instead of walking it. This avoids scanning huge roots
 	// (like the system temp directory) when the caller already knows the path.
 	if exactFiles, ok := resolveExactIncludeFiles(resolvedBaseDir, patterns); ok {
-		directMatches := make([]string, 0, len(exactFiles))
+		acc := newGlobMatchAccumulator(resolvedBaseDir, len(exactFiles), captureFullOutput)
 		for _, file := range exactFiles {
 			info, statErr := os.Stat(file)
 			if statErr != nil || info.IsDir() {
@@ -139,28 +140,24 @@ func (GlobTool) Execute(_ context.Context, raw json.RawMessage) (string, error) 
 			if relErr != nil {
 				rel = file
 			}
-			directMatches = append(directMatches, filepath.ToSlash(rel))
+			acc.addCandidate(filepath.ToSlash(rel))
 		}
-		filtered, truncated := filterGlobMatches(resolvedBaseDir, directMatches)
-		return formatGlobResult(a, resolvedBaseDir, patterns, len(directMatches), filtered, truncated, startedAt)
+		return formatGlobResult(ctx, a, resolvedBaseDir, patterns, acc.result(), startedAt)
 	}
 
-	matches, err := globWalkMatches(resolvedBaseDir, patterns)
+	result, err := globWalkMatches(resolvedBaseDir, patterns, captureFullOutput)
 	if err != nil {
 		return "", err
 	}
-
-	// Filter out excluded directory entries and .gitignore matches.
-	filtered, truncated := filterGlobMatches(resolvedBaseDir, matches)
-	return formatGlobResult(a, resolvedBaseDir, patterns, len(matches), filtered, truncated, startedAt)
+	return formatGlobResult(ctx, a, resolvedBaseDir, patterns, result, startedAt)
 }
 
-func globWalkMatches(resolvedBaseDir string, patterns []string) ([]string, error) {
+func globWalkMatches(resolvedBaseDir string, patterns []string, captureFullOutput bool) (globResult, error) {
 	if err := validateGlobPatterns(patterns); err != nil {
-		return nil, err
+		return globResult{}, err
 	}
 	seenMatches := make(map[string]struct{})
-	matches := make([]string, 0)
+	acc := newGlobMatchAccumulator(resolvedBaseDir, 0, captureFullOutput)
 	guard := newBroadSearchGuard("Glob", resolvedBaseDir, "patterns", patterns)
 	err := fs.WalkDir(os.DirFS(resolvedBaseDir), ".", func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -189,16 +186,16 @@ func globWalkMatches(resolvedBaseDir string, patterns []string) ([]string, error
 			return nil
 		}
 		seenMatches[rel] = struct{}{}
-		matches = append(matches, rel)
+		acc.addCandidate(rel)
 		return nil
 	})
 	if err == nil {
-		return matches, nil
+		return acc.result(), nil
 	}
 	if err == errGuardAbort {
-		return nil, guard.abortError()
+		return globResult{}, guard.abortError()
 	}
-	return nil, err
+	return globResult{}, err
 }
 
 func validateGlobPatterns(patterns []string) error {
@@ -220,54 +217,115 @@ func matchAnyGlobPattern(path string, patterns []string) (bool, error) {
 	return false, nil
 }
 
-// filterGlobMatches drops excluded directories and .gitignore matches, and
-// caps the result by both count and output bytes.
-func filterGlobMatches(resolvedBaseDir string, matches []string) ([]string, bool) {
-	ignore := newGitIgnoreMatcher(resolvedBaseDir)
-	filtered := make([]string, 0, len(matches))
-	outputBytes := 0
-	truncated := false
-	for _, m := range matches {
-		if isExcludedPath(m) {
-			continue
-		}
-		// Skip entries matched by .gitignore.
-		if ignore != nil {
-			isDir := strings.HasSuffix(m, "/")
-			if ignore.Match(m, isDir) {
-				continue
-			}
-		}
-		matchBytes := len(m)
-		if len(filtered) > 0 && outputBytes+matchBytes > maxGlobOutputBytes {
-			truncated = true
-			break
-		}
-		filtered = append(filtered, m)
-		outputBytes += matchBytes
-		if len(filtered) >= maxGlobResults || outputBytes >= maxGlobOutputBytes {
-			truncated = true
-			break
+type globResult struct {
+	filtered       []string
+	fullFiltered   string
+	candidateCount int
+	truncated      bool
+}
+
+type globMatchAccumulator struct {
+	ignore            *gitIgnoreMatcher
+	filtered          []string
+	fullFiltered      strings.Builder
+	outputBytes       int
+	candidateCount    int
+	truncated         bool
+	captureFullOutput bool
+}
+
+func newGlobMatchAccumulator(resolvedBaseDir string, initialCap int, captureFullOutput bool) *globMatchAccumulator {
+	if initialCap > maxGlobResults {
+		initialCap = maxGlobResults
+	}
+	return &globMatchAccumulator{
+		ignore:            newGitIgnoreMatcher(resolvedBaseDir),
+		filtered:          make([]string, 0, initialCap),
+		captureFullOutput: captureFullOutput,
+	}
+}
+
+func (a *globMatchAccumulator) addCandidate(m string) {
+	a.candidateCount++
+	if isExcludedPath(m) {
+		return
+	}
+	if a.ignore != nil {
+		isDir := strings.HasSuffix(m, "/")
+		if a.ignore.Match(m, isDir) {
+			return
 		}
 	}
-	return filtered, truncated
+	matchBytes := len(m)
+	if a.truncated {
+		a.appendFullFiltered(m)
+		return
+	}
+	if len(a.filtered) > 0 && a.outputBytes+matchBytes > maxGlobOutputBytes {
+		a.truncated = true
+		a.initFullFiltered()
+		a.appendFullFiltered(m)
+		return
+	}
+	a.filtered = append(a.filtered, m)
+	a.outputBytes += matchBytes
+	if len(a.filtered) >= maxGlobResults || a.outputBytes >= maxGlobOutputBytes {
+		a.truncated = true
+		a.initFullFiltered()
+	}
+}
+
+func (a *globMatchAccumulator) initFullFiltered() {
+	if !a.captureFullOutput || a.fullFiltered.Len() > 0 {
+		return
+	}
+	for _, m := range a.filtered {
+		a.appendFullFiltered(m)
+	}
+}
+
+func (a *globMatchAccumulator) appendFullFiltered(m string) {
+	if !a.captureFullOutput {
+		return
+	}
+	if a.fullFiltered.Len() > 0 {
+		a.fullFiltered.WriteByte('\n')
+	}
+	a.fullFiltered.WriteString(m)
+}
+
+func (a *globMatchAccumulator) result() globResult {
+	return globResult{
+		filtered:       a.filtered,
+		fullFiltered:   a.fullFiltered.String(),
+		candidateCount: a.candidateCount,
+		truncated:      a.truncated,
+	}
 }
 
 // formatGlobResult renders the filtered matches with coerce notes and the
 // truncation hint, and records slow-search telemetry.
-func formatGlobResult(a globArgs, resolvedBaseDir string, patterns []string, candidateCount int, filtered []string, truncated bool, startedAt time.Time) (string, error) {
-	if len(filtered) == 0 {
-		logSlowSearch("Glob", resolvedBaseDir, strings.Join(patterns, ","), "", startedAt, "candidate_count", candidateCount, 0, truncated)
+func formatGlobResult(ctx context.Context, a globArgs, resolvedBaseDir string, patterns []string, result globResult, startedAt time.Time) (string, error) {
+	if len(result.filtered) == 0 {
+		logSlowSearch("Glob", resolvedBaseDir, strings.Join(patterns, ","), "", startedAt, "candidate_count", result.candidateCount, 0, result.truncated)
 		return prependNotes(globCoerceNotes(a), "No files matched the pattern."), nil
 	}
 
-	result := strings.Join(filtered, "\n")
-	result = prependNotes(globCoerceNotes(a), result)
-	if truncated || len(filtered) == maxGlobResults || len(result) >= maxGlobOutputBytes {
-		result += fmt.Sprintf("\n\n(showing first %d results within %d KiB; refine pattern/path to narrow results)", len(filtered), maxGlobOutputBytes/1024)
+	inlineMatches := strings.Join(result.filtered, "\n")
+	content := prependNotes(globCoerceNotes(a), inlineMatches)
+	if result.truncated || len(result.filtered) == maxGlobResults || len(content) >= maxGlobOutputBytes {
+		fullFiltered := result.fullFiltered
+		if fullFiltered == "" {
+			fullFiltered = inlineMatches
+		}
+		if savedPath := saveFullOutput(fullFiltered, SessionDirFromContext(ctx), "glob-results"); savedPath != "" {
+			content += fmt.Sprintf("\n\n(showing first %d results within %d KiB; full results saved to %s; refine pattern/path to narrow results)", len(result.filtered), maxGlobOutputBytes/1024, savedPath)
+		} else {
+			content += fmt.Sprintf("\n\n(showing first %d results within %d KiB; refine pattern/path to narrow results)", len(result.filtered), maxGlobOutputBytes/1024)
+		}
 	}
-	logSlowSearch("Glob", resolvedBaseDir, strings.Join(patterns, ","), "", startedAt, "candidate_count", candidateCount, len(filtered), truncated)
-	return result, nil
+	logSlowSearch("Glob", resolvedBaseDir, strings.Join(patterns, ","), "", startedAt, "candidate_count", result.candidateCount, len(result.filtered), result.truncated)
+	return content, nil
 }
 
 func globCoerceNotes(a globArgs) []string {

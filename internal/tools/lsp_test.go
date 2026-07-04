@@ -3,8 +3,11 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/lsp"
 )
 
 func TestLspToolParametersIncludeDefinitionAndImplementation(t *testing.T) {
@@ -30,7 +33,9 @@ func TestLspToolDescriptionGuidesRoutingWithoutHover(t *testing.T) {
 		"Prefer it over text or file search once the file path and cursor position are known",
 		"Use available discovery tools only to discover candidate files or positions when the location is not known yet.",
 		"Use 1-based line and character from the raw file content",
-		"count tabs in the source line as a single character",
+		"count Unicode grapheme clusters",
+		"tabs as a single character",
+		"Returned locations use the same line/character counting.",
 		"prefer the start of the target identifier",
 	} {
 		if !strings.Contains(desc, want) {
@@ -55,11 +60,41 @@ func TestLspToolCharacterParameterExplainsRawSourceCounting(t *testing.T) {
 	desc := character["description"].(string)
 	for _, want := range []string{
 		"raw source line",
-		"Count tabs in the source line as a single character",
+		"Unicode grapheme clusters",
+		"Count tabs as a single character",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("character description missing %q: %q", want, desc)
 		}
+	}
+}
+
+func TestLspToolCharacterConversionsUseGraphemeClusters(t *testing.T) {
+	lines := []string{"a🏳️‍🌈\tb"}
+	if got := lspCharacterToUTF16Offset(lines, 0, 1); got != 1 {
+		t.Fatalf("lspCharacterToUTF16Offset after ASCII = %d, want 1", got)
+	}
+	if got := lspCharacterToUTF16Offset(lines, 0, 2); got != 7 {
+		t.Fatalf("lspCharacterToUTF16Offset after emoji grapheme = %d, want 7", got)
+	}
+	if got := lspCharacterToUTF16Offset(lines, 0, 3); got != 8 {
+		t.Fatalf("lspCharacterToUTF16Offset after tab = %d, want 8", got)
+	}
+	if got := utf16OffsetToLspCharacter(lines, 0, 7); got != 2 {
+		t.Fatalf("utf16OffsetToLspCharacter after emoji grapheme = %d, want 2", got)
+	}
+	if got := utf16OffsetToLspCharacter(lines, 0, 8); got != 3 {
+		t.Fatalf("utf16OffsetToLspCharacter after tab = %d, want 3", got)
+	}
+}
+
+func TestFormatLspLocationsConvertsUTF16ColumnsToGraphemeCharacters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unicode.go")
+	lines := []string{"a🏳️‍🌈\tb"}
+	got := formatLspLocations([]lsp.RefLocation{{Path: path, Line: 0, Col: 8}}, map[string][]string{path: lines})
+	want := path + ":1:4"
+	if got != want {
+		t.Fatalf("formatLspLocations = %q, want %q", got, want)
 	}
 }
 

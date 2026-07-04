@@ -27,11 +27,15 @@ func (r *recordingLSPStarter) Start(ctx context.Context, path string) {
 func TestReadToolDescriptionExplainsRawOutputForEdits(t *testing.T) {
 	desc := (ReadTool{}).Description()
 	for _, want := range []string{
-		"Successful output starts with one READ_RESULT metadata line",
+		"Read file contents by line for code inspection and edits",
+		"optional offset/limit line paging",
+		"Prefer grep or lsp to locate symbols before reading a small nearby block",
+		"Normal output starts with one READ_RESULT metadata line",
 		"`READ_RESULT lines=a-b total=N`",
 		"`READ_RESULT lines=none total=N`",
 		"A read that simply did not reach the end of the file is not truncation",
 		"`truncated=budget requested_lines=a-d`",
+		"use grep to locate patterns or a script/parser via shell for structured processing instead of character-range reads",
 		"omits encoding for UTF-8 files",
 		"everything after that first line is exact file text without line-number gutters or extra indentation",
 		"copy only the text after READ_RESULT into edit hunks",
@@ -42,6 +46,22 @@ func TestReadToolDescriptionExplainsRawOutputForEdits(t *testing.T) {
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q: %q", want, desc)
+		}
+	}
+}
+
+func TestReadToolParametersKeepLinePagingFocused(t *testing.T) {
+	props := (ReadTool{}).Parameters()["properties"].(map[string]any)
+	if _, ok := props["char_offset"]; ok {
+		t.Fatalf("read parameters should not expose char_offset for normal code-reading workflow")
+	}
+	if _, ok := props["char_limit"]; ok {
+		t.Fatalf("read parameters should not expose char_limit for normal code-reading workflow")
+	}
+	for _, name := range []string{"offset", "limit"} {
+		desc := props[name].(map[string]any)["description"].(string)
+		if strings.Contains(desc, "char_offset") || strings.Contains(desc, "char_limit") {
+			t.Fatalf("%s description should not mention removed char paging: %q", name, desc)
 		}
 	}
 }
@@ -275,6 +295,7 @@ func TestReadToolWarmupUsesProvidedContextAndAbsolutePath(t *testing.T) {
 
 func TestReadToolExecuteTruncatesOversizedFormattedOutputByTokenBudget(t *testing.T) {
 	dir := t.TempDir()
+	sessionDir := t.TempDir()
 	path := filepath.Join(dir, "large.txt")
 	var content strings.Builder
 	for range 1200 {
@@ -286,7 +307,7 @@ func TestReadToolExecuteTruncatesOversizedFormattedOutputByTokenBudget(t *testin
 	}
 
 	raw := json.RawMessage(`{"path":` + "\"" + path + "\"" + `}`)
-	got, err := (ReadTool{}).Execute(context.Background(), raw)
+	got, err := (ReadTool{}).Execute(WithSessionDir(context.Background(), sessionDir), raw)
 	if err != nil {
 		t.Fatalf("ReadTool.Execute: %v", err)
 	}
@@ -299,6 +320,21 @@ func TestReadToolExecuteTruncatesOversizedFormattedOutputByTokenBudget(t *testin
 	}
 	if !readOutputFitsBudget(got) {
 		t.Fatalf("truncated read output should fit inline budget: bytes=%d tokens=%d", len(got), estimateReadOutputTokens(got))
+	}
+	artifactPath := filepath.Join(sessionDir, sessionToolOutputsDirName, "read-result.log")
+	if !strings.Contains(got, "Full output saved to "+artifactPath+".") {
+		t.Fatalf("read output should mention full artifact %q, got %q", artifactPath, got)
+	}
+	data, err := os.ReadFile(artifactPath)
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	artifactHeader, artifactBody := readTestHeaderAndBody(t, string(data))
+	if strings.Contains(artifactHeader, "truncated") || !strings.Contains(artifactHeader, "lines=1-1200 total=1200") {
+		t.Fatalf("artifact header = %q, want full requested range without truncation", artifactHeader)
+	}
+	if strings.Count(artifactBody, "\n") != 1200 {
+		t.Fatalf("artifact body line count = %d, want 1200", strings.Count(artifactBody, "\n"))
 	}
 }
 

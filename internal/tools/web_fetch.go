@@ -323,7 +323,10 @@ func (t WebFetchTool) Execute(ctx context.Context, raw json.RawMessage) (string,
 		result.ContentQuality = assessPlainTextQuality(extractedBody)
 	}
 
-	formatted, _, _ := finalizeWebFetchResult(result, extractedBody, readState.InputTruncated)
+	formatted, _, outputTruncated := finalizeWebFetchResult(result, extractedBody, readState.InputTruncated)
+	if outputTruncated {
+		formatted = appendWebFetchArtifactReference(formatted, result, extractedBody, readState.InputTruncated, SessionDirFromContext(ctx))
+	}
 	return formatted, nil
 }
 
@@ -1011,6 +1014,21 @@ func finalizeWebFetchResult(meta webFetchResult, extractedBody string, inputTrun
 	meta.ReturnedBodyBytes = len([]byte(body))
 	finalHeader = formatWebFetchHeader(meta)
 	return finalHeader + body, len([]byte(body)), outputTruncated
+}
+
+func appendWebFetchArtifactReference(formatted string, meta webFetchResult, extractedBody string, inputTruncated bool, sessionDir string) string {
+	if strings.TrimSpace(sessionDir) == "" {
+		return formatted
+	}
+	fullMeta := meta
+	fullMeta.Truncated = truncatedStateLabel(inputTruncated, false)
+	fullMeta.ReturnedBodyBytes = len([]byte(extractedBody))
+	fullOutput := formatWebFetchHeader(fullMeta) + extractedBody
+	savedPath := saveFullOutput(fullOutput, sessionDir, "web-fetch")
+	if savedPath == "" {
+		return formatted
+	}
+	return formatted + "\nFull output saved to " + savedPath + "."
 }
 
 func fitBodyToBudget(body string, maxBytes int) (string, bool) {

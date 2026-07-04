@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/keakon/golog"
 	"github.com/keakon/golog/log"
@@ -79,7 +80,11 @@ func TestFormatGlobResultLogsUnfilteredCandidateCount(t *testing.T) {
 	log.SetDefaultLogger(logger)
 	defer log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel))
 
-	_, err := formatGlobResult(globArgs{}, ".", []string{"**/*.go"}, 3, []string{"visible.go"}, false, time.Now().Add(-slowSearchWarnThreshold-time.Millisecond))
+	_, err := formatGlobResult(context.Background(), globArgs{}, ".", []string{"**/*.go"}, globResult{
+		filtered:       []string{"visible.go"},
+		fullFiltered:   "visible.go",
+		candidateCount: 3,
+	}, time.Now().Add(-slowSearchWarnThreshold-time.Millisecond))
 	if err != nil {
 		t.Fatalf("formatGlobResult: %v", err)
 	}

@@ -31,6 +31,35 @@ func TestWrapStaleEditError(t *testing.T) {
 	}
 }
 
+func TestFormatToolExecutionOutputKeepsQuestionResultUntruncated(t *testing.T) {
+	longAnswer := strings.Repeat("长", tools.MaxLineLength+100)
+	result := `[{"header":"你怎么教出来","selected":["` + longAnswer + `"]}]`
+
+	got := formatToolExecutionOutput(result, t.TempDir(), "call-question", tools.NameQuestion, nil, "")
+
+	if got != result {
+		t.Fatalf("question result was changed or truncated: got len=%d want len=%d", len(got), len(result))
+	}
+	if !strings.Contains(got, longAnswer) {
+		t.Fatal("question result lost the long free-text answer")
+	}
+}
+
+func TestFormatToolExecutionOutputStillTruncatesOtherToolLongLines(t *testing.T) {
+	result := strings.Repeat("a", tools.MaxLineLength+100)
+	sessionDir := t.TempDir()
+
+	got := formatToolExecutionOutput(result, sessionDir, "call-other", tools.NameShell, nil, "")
+
+	want := strings.Repeat("a", tools.MaxLineLength) + "..."
+	if !strings.Contains(got, want) {
+		t.Fatalf("non-question result = %q, want truncated output containing %q", got, want)
+	}
+	if !strings.Contains(got, "Full output saved to ") || !strings.Contains(got, filepath.Join(sessionDir, "tool-outputs", "call-other.log")) {
+		t.Fatalf("non-question truncation should include saved artifact guidance, got %q", got)
+	}
+}
+
 func TestToolExecutionPipelineWriteUpdatesFileStateAndTracker(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "notes.txt")

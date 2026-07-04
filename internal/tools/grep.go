@@ -333,13 +333,17 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 			if IsBinaryExtension(filepath.Base(file)) {
 				continue
 			}
-			fileMatches, _, err := searchFile(file, re, remainingMatches, remainingBytes)
+			fileMatches, fileTruncated, err := searchFile(file, re, remainingMatches, remainingBytes)
 			if err != nil {
 				return nil, 0, 0, false, err
 			}
 			matches = append(matches, fileMatches...)
 			outputBytes = joinedLinesBytes(matches)
 			scannedFiles++
+			if fileTruncated {
+				truncated = true
+				break
+			}
 		}
 		if scannedFiles > 0 {
 			reportToolProgress(ctx, ToolProgressSnapshot{Label: "files", Current: scannedFiles})
@@ -479,16 +483,27 @@ func searchFile(path string, re *regexp.Regexp, maxMatches, maxBytes int) ([]str
 		line := scanner.Text()
 		if re.MatchString(line) {
 			display := sanitizeGrepLine(line)
-			// Truncate very long lines in output.
-			if len(display) > MaxLineLength {
-				display = display[:MaxLineLength] + "..."
-			}
 			match := fmt.Sprintf("%s:%d:%s", path, lineNum, display)
 			matchBytes := len(match)
 			if len(matches) > 0 {
 				matchBytes++
 			}
-			if maxBytes > 0 && len(matches) > 0 && outputBytes+matchBytes > maxBytes {
+			if maxBytes > 0 && outputBytes+matchBytes > maxBytes {
+				if len(matches) > 0 {
+					return matches, true, scanner.Err()
+				}
+				prefix := fmt.Sprintf("%s:%d:", path, lineNum)
+				available := maxBytes - len(prefix) - len("...")
+				if available <= 0 {
+					return nil, true, scanner.Err()
+				}
+				match = prefix + truncateStringToValidUTF8Prefix(display, available) + "..."
+				matchBytes = len(match)
+				if matchBytes > maxBytes {
+					return nil, true, scanner.Err()
+				}
+				matches = append(matches, match)
+				outputBytes += matchBytes
 				return matches, true, scanner.Err()
 			}
 			matches = append(matches, match)

@@ -41,7 +41,7 @@ type TruncateOptions struct {
 type TruncateResult struct {
 	// Content is the (possibly truncated) output text.
 	Content string
-	// Truncated is true when the original output exceeded limits.
+	// Truncated is true when the original output exceeded line, byte, or per-line limits.
 	Truncated bool
 	// SavedPath is the file path where the full output was saved, or "" if
 	// it was not truncated or the save failed.
@@ -310,8 +310,24 @@ func TruncateOutputWithOptions(output string, sessionDir string, opts TruncateOp
 
 	if !needsTruncation {
 		lines := strings.Split(output, "\n")
-		truncated := truncateLines(lines)
+		truncated, lineTruncated := truncateLinesWithStatus(lines)
 		content := strings.Join(truncated, "\n")
+		if lineTruncated {
+			savedPath := saveFullOutput(output, sessionDir, opts.ArtifactKey)
+			reference := artifactReference(savedPath)
+			hint := "Output truncated."
+			if reference != "" {
+				hint += " " + reference
+			}
+			return TruncateResult{
+				Content:           content,
+				Truncated:         true,
+				SavedPath:         savedPath,
+				Hint:              hint,
+				Preview:           content,
+				ArtifactReference: reference,
+			}
+		}
 		return TruncateResult{
 			Content: content,
 			Preview: content,
@@ -406,7 +422,7 @@ func applyDirectionTruncation(lines []string, totalLines int, opts TruncateOptio
 func truncationMarker(omitted int, savedPath string) string {
 	if ref := artifactReference(savedPath); ref != "" {
 		return fmt.Sprintf(
-			"\n\n... [%d lines truncated. %s Use grep to search or read with offset/limit to view specific sections.] ...\n",
+			"\n\n... [%d lines truncated. %s Use grep to search within the saved output.] ...\n",
 			omitted, ref,
 		)
 	}
@@ -416,22 +432,29 @@ func truncationMarker(omitted int, savedPath string) string {
 // truncateLines shortens every line that exceeds MaxLineLength UTF-8 bytes,
 // aligned to a code-unit boundary.
 func truncateLines(lines []string) []string {
+	out, _ := truncateLinesWithStatus(lines)
+	return out
+}
+
+func truncateLinesWithStatus(lines []string) ([]string, bool) {
 	out := make([]string, len(lines))
+	truncated := false
 	for i, l := range lines {
 		if len(l) > MaxLineLength {
 			out[i] = truncateStringToValidUTF8Prefix(l, MaxLineLength) + "..."
+			truncated = true
 		} else {
 			out[i] = l
 		}
 	}
-	return out
+	return out, truncated
 }
 
 func artifactReference(savedPath string) string {
 	if strings.TrimSpace(savedPath) == "" {
 		return ""
 	}
-	return fmt.Sprintf("Full output saved to %s.", savedPath)
+	return fmt.Sprintf("Full output saved to %s. Use read with offset/limit for line ranges, or shell with a script/parser for huge single-line structured output.", savedPath)
 }
 
 func sanitizeArtifactKey(key string) string {

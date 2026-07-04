@@ -583,6 +583,9 @@ func applySpeculativeFileState(execResult *ToolExecutionResult, registry *tools.
 }
 
 func formatToolExecutionOutput(result, sessionDir, artifactKey, toolName string, execErr error, guidance string) string {
+	if toolName == tools.NameQuestion {
+		return tools.NormalizeEmptySuccessOutput(toolName, result, execErr)
+	}
 	truncated := tools.TruncateOutputWithOptions(result, sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})
 	content := tools.NormalizeEmptySuccessOutput(toolName, truncated.Content, execErr)
 	return tools.AppendArtifactGuidance(content, truncated, guidance)
