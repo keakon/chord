@@ -1968,6 +1968,60 @@ func TestEditToolCallCopyIncludesPathAndPatchWhenDiffMissing(t *testing.T) {
 	}
 }
 
+func TestReplaceEditToolCallErrorCopyIncludesArgumentsWhenDiffMissing(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		Content:       `{"path":"foo.txt"}`,
+		RawArgs:       `{"path":"foo.txt","old_string":"old line\n","new_string":"new line\n","replace_all":true}`,
+		ResultContent: "old_string not found in file",
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultDone:    true,
+	}
+
+	got := toolCallMarkdownContent(block)
+	for _, want := range []string{
+		"# Tool call: edit",
+		"## Path\n\nfoo.txt",
+		"## Result\n\nold_string not found in file",
+		"## Arguments\n\n```json",
+		`"old_string": "old line\n"`,
+		`"new_string": "new line\n"`,
+		`"replace_all": true`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("copied replace edit block missing %q; got:\n%s", want, got)
+		}
+	}
+}
+
+func TestReplaceEditToolCallErrorRenderIncludesArgumentsWhenDiffMissing(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		Content:       `{"path":"foo.txt"}`,
+		RawArgs:       `{"path":"foo.txt","old_string":"old line\n","new_string":"new line\n"}`,
+		ResultContent: "old_string not found in file",
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultDone:    true,
+	}
+
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	for _, want := range []string{
+		"↳ Arguments:",
+		`"old_string": "old line\n"`,
+		`"new_string": "new line\n"`,
+		"↳ Error:",
+		"old_string not found in file",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered replace edit block missing %q; got:\n%s", want, plain)
+		}
+	}
+}
+
 func TestEditToolCallCopyUsesRawArgsWhenContentTrimmed(t *testing.T) {
 	// On a failed edit, Content is display-trimmed (patch stripped) and the full
 	// patch lives only in RawArgs, mirroring the card render path.

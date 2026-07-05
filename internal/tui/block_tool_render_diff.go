@@ -254,7 +254,11 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	}
 	if b.toolResultIsError() && b.ResultContent != "" {
 		if b.ToolName == tools.NameEdit || b.ToolName == tools.NamePatch {
+			before := len(result)
 			result = appendEditPatchPreview(result, b.editPatchArgsJSON(), cardWidth-4)
+			if len(result) == before {
+				result = appendReplaceEditPreview(result, b.editPatchArgsJSON(), cardWidth-4)
+			}
 		}
 		result = append(result, ErrorStyle.Render("  ↳ Error:"))
 		result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.ResultContent), "    ", cardWidth-4)...)
@@ -278,6 +282,20 @@ func appendEditPatchPreview(result []string, argsJSON string, width int) []strin
 	for _, line := range editPatchPreviewLines(patch) {
 		for _, wrapped := range wrapIndentedText(line, width) {
 			result = append(result, renderEditPatchPreviewLine(wrapped))
+		}
+	}
+	return result
+}
+
+func appendReplaceEditPreview(result []string, argsJSON string, width int) []string {
+	preview := replaceEditPreviewFromArgs(argsJSON)
+	if preview == "" {
+		return result
+	}
+	result = append(result, ToolResultExpandedStyle.Render("  ↳ Arguments:"))
+	for _, line := range editPatchPreviewLines(preview) {
+		for _, wrapped := range wrapIndentedText(line, width) {
+			result = append(result, "    "+DimStyle.Render(wrapped))
 		}
 	}
 	return result
@@ -316,6 +334,29 @@ func editPatchFromArgs(argsJSON string) string {
 		return ""
 	}
 	return strings.TrimSpace(parsed.Patch)
+}
+
+func replaceEditPreviewFromArgs(argsJSON string) string {
+	var parsed struct {
+		OldString  string `json:"old_string"`
+		NewString  string `json:"new_string"`
+		ReplaceAll *bool  `json:"replace_all,omitempty"`
+	}
+	if json.Unmarshal([]byte(argsJSON), &parsed) != nil || parsed.OldString == "" {
+		return ""
+	}
+	preview := map[string]any{
+		"old_string": parsed.OldString,
+		"new_string": parsed.NewString,
+	}
+	if parsed.ReplaceAll != nil {
+		preview["replace_all"] = *parsed.ReplaceAll
+	}
+	formatted, err := json.MarshalIndent(preview, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(formatted)
 }
 
 func editPatchPreviewLines(patch string) []string {

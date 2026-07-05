@@ -583,6 +583,10 @@ func editToolCallMarkdownContent(b *Block) string {
 	}
 	if diff != "" {
 		parts = append(parts, "## Diff\n\n```diff\n"+diff+"\n```")
+	} else if b.toolResultIsError() {
+		if preview := strings.TrimSpace(replaceEditPreviewFromArgs(b.editPatchArgsJSON())); preview != "" {
+			parts = append(parts, "## Arguments\n\n```json\n"+preview+"\n```")
+		}
 	}
 	return strings.Join(parts, "\n\n")
 }
