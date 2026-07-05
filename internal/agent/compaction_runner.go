@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -425,6 +427,18 @@ func (a *MainAgent) summarizeCompactionHead(head []message.Message, relHistoryPa
 	if err == nil {
 		return summary, backendName, modelRef, nil
 	}
+	if !errors.Is(err, errInvalidCompactionSummary) {
+		return "", backendName, modelRef, err
+	}
+	repairPrompt := buildCompactionRepairPrompt(prompt, err)
+	if repairPrompt != "" {
+		log.Debugf("compaction summary validation failed; requesting corrected summary backend=%v error=%v", backendName, err)
+		repairedSummary, repairedModelRef, repairErr := backend.ProduceSummary(client, modelRef, repairPrompt)
+		if repairErr == nil {
+			return repairedSummary, backendName, repairedModelRef, nil
+		}
+		log.Debugf("compaction summary repair failed backend=%v error=%v", backendName, repairErr)
+	}
 	return "", backendName, modelRef, err
 }
 
@@ -462,9 +476,9 @@ func (a *MainAgent) callCompactionEndpoint(client *llm.Client, fallbackModelRef,
 	} else if strings.TrimSpace(selectedRef) != "" {
 		modelRef = selectedRef
 	}
-	summary := strings.TrimSpace(resp.Content)
+	summary := compactionSummaryFromResponseContent(resp.Content)
 	if err := validateCompactionSummary(summary); err != nil {
-		return "", modelRef, err
+		return summary, modelRef, fmt.Errorf("%w: %w", errInvalidCompactionSummary, err)
 	}
 	log.Debugf("compaction endpoint produced summary prompt_bytes=%v response_bytes=%v summary_len=%v", promptBytes, respBytes, len(summary))
 	return summary, modelRef, nil
@@ -522,11 +536,46 @@ func (a *MainAgent) callCompactionSummary(client *llm.Client, fallbackModelRef, 
 	} else if strings.TrimSpace(selectedRef) != "" {
 		modelRef = selectedRef
 	}
-	summary := strings.TrimSpace(resp.Content)
+	summary := compactionSummaryFromResponseContent(resp.Content)
 	if err := validateCompactionSummary(summary); err != nil {
-		return "", modelRef, err
+		return summary, modelRef, fmt.Errorf("%w: %w", errInvalidCompactionSummary, err)
 	}
 	return summary, modelRef, nil
+}
+
+var errInvalidCompactionSummary = errors.New("invalid compaction summary")
+
+var leadingThinkBlockRe = regexp.MustCompile(`(?is)^\s*<think\b[^>]*>.*?</think>\s*`)
+
+func compactionSummaryFromResponseContent(content string) string {
+	summary := strings.TrimSpace(content)
+	for {
+		stripped := strings.TrimSpace(leadingThinkBlockRe.ReplaceAllString(summary, ""))
+		if stripped == summary {
+			return summary
+		}
+		summary = stripped
+	}
+}
+
+func buildCompactionRepairPrompt(originalPrompt string, validationErr error) string {
+	originalPrompt = strings.TrimSpace(originalPrompt)
+	if originalPrompt == "" || validationErr == nil {
+		return ""
+	}
+	return fmt.Sprintf(`Write a valid compaction summary from the original compaction input below.
+
+Requirements:
+- Write only the summary.
+- Keep the same facts; do not invent details.
+- Use exactly the required Markdown headings, in order.
+- Make "Current User Request" identify the latest user request explicitly.
+- Make "Active Objective" and "Next Step" directly serve that latest user request.
+- Do not restart work listed as completed, background, stale, or superseded.
+- Make "Next Step" a concrete action that can be performed immediately.
+
+Original compaction input:
+%s`, originalPrompt)
 }
 
 func (a *MainAgent) configuredCompactionModelRefs() ([]string, bool, error) {

@@ -117,16 +117,21 @@ Then write the final summary using the exact Markdown section headings below, in
 Requirements:
 - Every section must be present.
 - The latest user request is authoritative. Identify it explicitly and prioritize it over older goals.
+- If the latest user request conflicts with older goals, summarize the newer instruction as authoritative and mention superseded older context only when needed.
 - Treat the most recent Done rejected reason as important user feedback/request when it asks for more work, asks a question, changes scope, or corrects the agent.
 - If the user changed topics after previous todos were created, do not treat stale todos as active work.
 - Separate active todos that directly serve the latest user request from historical, completed, or superseded todos.
+- "Active Objective" and "Next Step" must directly serve the latest user request. Do not restart tasks listed under "Completed/background" or "Stale/superseded".
 - Do not let old implementation/debugging goals override a later meta-analysis, clarification request, or explicit correction.
 - Under "Todo State", use these subgroups exactly: "Active/relevant to latest request", "Completed/background", and "Stale/superseded". If a subgroup has no items, write "(none)".
 - Use concise bullet-style prose under each heading.
 - Include concrete files, commands, errors, and decisions when known.
+- If a fact is not supported by the transcript or anchors, write "unknown" or omit it; do not infer unstated implementation details.
+- Summarize tool results as conclusions. Do not copy raw tool protocol fields, large JSON blobs, or irrelevant command output unless they are essential evidence.
+- Under "Next Step", write a concrete next action the next agent can perform immediately; do not use a vague instruction such as "continue working".
 - Under "Files and Evidence", first include the archived history file path from the prompt header, then list the most important repository file paths needed for continuation as standalone bullet lines.
 - The checkpoint wrapper may also list all archived history files for the full session history chain; preserve that distinction and do not imply the current compaction file is the only historical archive.
-- Prefer workspace-relative file paths such as internal/... or docs/... .
+- Prefer workspace-relative file paths when available.
 - Keep each file path on its own bullet line. Do not add inline explanation text on the same line as a file path.
 - Focus on durable continuation context, not narrative recap.
 - Do not duplicate long verbatim excerpts already present in the evidence pack or recent tail anchor.

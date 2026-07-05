@@ -30,6 +30,7 @@ type countingCompactionProvider struct {
 	compactCalls  int
 	invalidations []string
 	response      *message.Response
+	responses     []*message.Response
 	err           error
 }
 
@@ -54,6 +55,9 @@ func (p *countingCompactionProvider) CompleteStream(
 	if p.err != nil {
 		return nil, p.err
 	}
+	if len(p.responses) >= p.calls {
+		return p.responses[p.calls-1], nil
+	}
 	if p.response != nil {
 		return p.response, nil
 	}
@@ -74,6 +78,9 @@ func (p *countingCompactionProvider) Complete(
 	if p.err != nil {
 		return nil, p.err
 	}
+	if len(p.responses) >= p.calls {
+		return p.responses[p.calls-1], nil
+	}
 	if p.response != nil {
 		return p.response, nil
 	}
@@ -93,6 +100,9 @@ func (p *countingCompactionProvider) Compact(
 	p.compactCalls++
 	if p.err != nil {
 		return nil, p.err
+	}
+	if len(p.responses) >= p.compactCalls {
+		return p.responses[p.compactCalls-1], nil
 	}
 	if p.response != nil {
 		return p.response, nil
@@ -204,7 +214,7 @@ func (p *countingSummaryOnlyProvider) Complete(
 
 func validCompactionSummaryForTest(history string) string {
 	return fmt.Sprintf(
-		"## Current User Request\n- continue current task\n\n## Active Objective\n- continue current task\n\n## Background Goals\n- none\n\n## User Constraints\n- none\n\n## Progress\n- progress recorded\n\n## Key Decisions\n- decisions captured\n\n## Files and Evidence\n- Archived history: %s\n- internal/agent/compaction.go\n\n## Todo State\n- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)\n\n## SubAgent State\n- none active\n\n## Open Problems\n- none\n\n## Next Step\n- continue",
+		"## Current User Request\n- continue current task\n\n## Active Objective\n- continue current task\n\n## Background Goals\n- none\n\n## User Constraints\n- none\n\n## Progress\n- progress recorded\n\n## Key Decisions\n- decisions captured\n\n## Files and Evidence\n- Archived history: %s\n- src/current_task.go\n\n## Todo State\n- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)\n\n## SubAgent State\n- none active\n\n## Open Problems\n- none\n\n## Next Step\n- Inspect src/current_task.go and continue the current task.",
 		history,
 	)
 }
@@ -2372,6 +2382,107 @@ func TestValidateCompactionSummaryRejectsWeakOneLiner(t *testing.T) {
 	}
 }
 
+func TestValidateCompactionSummaryRejectsThinkingTags(t *testing.T) {
+	summary := "<think>provider failed to split reasoning</think>\n\n" + validCompactionSummaryForTest("history-1.md")
+	if err := validateCompactionSummary(summary); err == nil {
+		t.Fatal("expected summary with thinking tags to be rejected")
+	}
+}
+
+func TestValidateCompactionSummaryRequiresHeadingLinesInOrder(t *testing.T) {
+	if err := validateCompactionSummary(validCompactionSummaryForTest("history-1.md")); err != nil {
+		t.Fatalf("validCompactionSummaryForTest rejected: %v", err)
+	}
+	outOfOrder := strings.Replace(
+		validCompactionSummaryForTest("history-1.md"),
+		"## Active Objective\n- continue current task\n\n## Background Goals",
+		"## Background Goals\n- none\n\n## Active Objective\n- continue current task",
+		1,
+	)
+	if err := validateCompactionSummary(outOfOrder); err == nil {
+		t.Fatal("expected out-of-order headings to be rejected")
+	}
+	quotedOnly := strings.Replace(validCompactionSummaryForTest("history-1.md"), "## Active Objective", "> ## Active Objective", 1)
+	if err := validateCompactionSummary(quotedOnly); err == nil {
+		t.Fatal("expected non-heading section marker to be rejected")
+	}
+}
+
+func TestValidateCompactionSummaryRejectsVagueNextStep(t *testing.T) {
+	summary := strings.Replace(
+		validCompactionSummaryForTest("history-1.md"),
+		"- Inspect src/current_task.go and continue the current task.",
+		"- continue",
+		1,
+	)
+	if err := validateCompactionSummary(summary); err == nil {
+		t.Fatal("expected vague next step to be rejected")
+	}
+}
+
+func TestValidateCompactionSummaryRejectsCompletedTodoAsActive(t *testing.T) {
+	summary := strings.Replace(
+		validCompactionSummaryForTest("history-1.md"),
+		"- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)",
+		"- Active/relevant to latest request: finish export docs\n- Completed/background: finish export docs\n- Stale/superseded: (none)",
+		1,
+	)
+	if err := validateCompactionSummary(summary); err == nil {
+		t.Fatal("expected completed todo duplicated as active to be rejected")
+	}
+}
+
+func TestValidateCompactionSummaryRejectsStaleTodoAsActive(t *testing.T) {
+	summary := strings.Replace(
+		validCompactionSummaryForTest("history-1.md"),
+		"- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)",
+		"- Active/relevant to latest request: debug old search path\n- Completed/background: (none)\n- Stale/superseded: debug old search path",
+		1,
+	)
+	if err := validateCompactionSummary(summary); err == nil {
+		t.Fatal("expected stale todo duplicated as active to be rejected")
+	}
+}
+
+func TestCompactionSummaryFromResponseContentStripsLeadingThinkBlock(t *testing.T) {
+	summary := validCompactionSummaryForTest("history-1.md")
+	got := compactionSummaryFromResponseContent("\n<think>provider failed to split reasoning</think>\n\n" + summary)
+	if got != summary {
+		t.Fatalf("compactionSummaryFromResponseContent() = %q, want %q", got, summary)
+	}
+}
+
+func TestCompactionSummaryFromResponseContentLeavesInlineThinkForValidation(t *testing.T) {
+	summary := strings.Replace(validCompactionSummaryForTest("history-1.md"), "- continue current task", "- continue <think>bad</think> current task", 1)
+	got := compactionSummaryFromResponseContent(summary)
+	if got != summary {
+		t.Fatalf("inline thinking tag should remain for validation, got %q", got)
+	}
+	if err := validateCompactionSummary(got); err == nil {
+		t.Fatal("expected inline thinking tag to be rejected by validation")
+	}
+}
+
+func TestBuildCompactionRepairPrompt(t *testing.T) {
+	original := "Archived history file: history-1.md\n\nTranscript:\n- user: fix compaction"
+	prompt := buildCompactionRepairPrompt(original, fmt.Errorf("compaction summary next step is too vague"))
+	if strings.Contains(prompt, "compaction summary next step is too vague") {
+		t.Fatalf("repair prompt should not expose validation error:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "previous") || strings.Contains(prompt, "invalid") || strings.Contains(prompt, "retry") {
+		t.Fatalf("repair prompt should not expose retry/failure mechanics:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, original) {
+		t.Fatalf("repair prompt missing original input:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "bad summary") {
+		t.Fatalf("repair prompt should not include previous summary text:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Do not restart work listed as completed") {
+		t.Fatalf("repair prompt missing goal-preservation requirement:\n%s", prompt)
+	}
+}
+
 func TestValidateCompactionSummaryRejectsLegacySections(t *testing.T) {
 	summary := `## Goal
 - Continue work with enough detail to pass the minimum summary length requirement for validation.
@@ -2422,6 +2533,63 @@ func TestBuildStructuredFallbackSummaryIncludesSections(t *testing.T) {
 	}
 	if !strings.Contains(summary, "history-1.md") {
 		t.Fatalf("fallback summary missing archive path:\n%s", summary)
+	}
+}
+
+func TestBuildStructuredFallbackSummaryUsesGoalAnchorWhenRecentTailMissing(t *testing.T) {
+	summary := buildStructuredFallbackSummary(
+		"history-1.md",
+		&compactionInput{RecentTailAnchor: "- (none)", GoalAnchor: "- 分析当前压缩逻辑是否正确"},
+		fmt.Errorf("provider returned invalid summary"),
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	if !strings.Contains(summary, "Latest recoverable user request from durable anchors") {
+		t.Fatalf("fallback summary did not use goal anchor:\n%s", summary)
+	}
+	if !strings.Contains(summary, "- 分析当前压缩逻辑是否正确") {
+		t.Fatalf("fallback summary missing goal anchor:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Choose the immediate next action only from this latest preserved request") {
+		t.Fatalf("fallback next step did not constrain continuation to latest request:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Ignore completed/background and stale/superseded todos") {
+		t.Fatalf("fallback next step did not guard against stale todo restart:\n%s", summary)
+	}
+}
+
+func TestBuildStructuredFallbackSummaryWithoutAnchorDoesNotInventActiveWork(t *testing.T) {
+	summary := buildStructuredFallbackSummary(
+		"history-1.md",
+		&compactionInput{RecentTailAnchor: "- (none)", GoalAnchor: "- Latest user request not confidently recoverable."},
+		fmt.Errorf("model unavailable"),
+		nil,
+		[]tools.TodoItem{
+			{ID: "1", Status: "completed", Content: "ship completed docs update"},
+			{ID: "2", Status: "in_progress", Content: "debug older implementation issue"},
+		},
+		nil,
+		nil,
+	)
+	for _, forbidden := range []string{
+		"Active/relevant to latest request: not relevance-filtered",
+		"Continue from the archived history and preserved evidence",
+		"ship completed docs update\n## SubAgent State",
+	} {
+		if strings.Contains(summary, forbidden) {
+			t.Fatalf("fallback summary contains target-drift pattern %q:\n%s", forbidden, summary)
+		}
+	}
+	if !strings.Contains(summary, "No active objective can be recovered safely") {
+		t.Fatalf("fallback summary should make unrecoverable objective explicit:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Before modifying files or continuing old work") {
+		t.Fatalf("fallback next step should require recovering latest request first:\n%s", summary)
+	}
+	if !strings.Contains(summary, "do not act on completed/background or stale/superseded todos") {
+		t.Fatalf("fallback next step should guard against stale todo restart:\n%s", summary)
 	}
 }
 
@@ -2905,7 +3073,7 @@ func TestBuildCompactionPromptWithKeyFilesIncludesCandidates(t *testing.T) {
 	}
 }
 
-func TestSummarizeCompactionHeadDoesNotRetryWeakSummary(t *testing.T) {
+func TestSummarizeCompactionHeadRetriesInvalidSummaryOnce(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetProviderModelRef("sample/compact-model")
@@ -2918,9 +3086,43 @@ func TestSummarizeCompactionHeadDoesNotRetryWeakSummary(t *testing.T) {
 			},
 		},
 	}, []string{"test-key"})
-	provider := &countingCompactionProvider{
-		response: &message.Response{Content: "too short"},
+	provider := &countingCompactionProvider{responses: []*message.Response{
+		{Content: "too short"},
+		{Content: validCompactionSummaryForTest("history-1.md")},
+	}}
+	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
+	a.llmClient = client
+
+	head := []message.Message{
+		{Role: "user", Content: "Please continue working on the current task."},
+		{Role: "assistant", Content: "I will inspect the current implementation and summarize next steps."},
 	}
+	summary, _, err := summarizeCompactionHeadForTest(a, head, "history-1.md")
+	if err != nil {
+		t.Fatalf("summarizeCompactionHead error: %v", err)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("provider Complete calls = %d, want 2", provider.calls)
+	}
+	if !strings.Contains(summary, "history-1.md") {
+		t.Fatalf("summary should contain archive reference, got:\n%s", summary)
+	}
+}
+
+func TestSummarizeCompactionHeadDoesNotRepairTransportError(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.SetProviderModelRef("sample/compact-model")
+
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: "stub",
+		Models: map[string]config.ModelConfig{
+			"compact-model": {
+				Limit: config.ModelLimit{Context: 16384, Output: 2048},
+			},
+		},
+	}, []string{"test-key"})
+	provider := &countingCompactionProvider{err: fmt.Errorf("network unavailable")}
 	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
 	a.llmClient = client
 
@@ -2930,7 +3132,7 @@ func TestSummarizeCompactionHeadDoesNotRetryWeakSummary(t *testing.T) {
 	}
 	_, _, err := summarizeCompactionHeadForTest(a, head, "history-1.md")
 	if err == nil {
-		t.Fatal("expected weak summary validation error")
+		t.Fatal("expected transport error")
 	}
 	if provider.calls != 1 {
 		t.Fatalf("provider Complete calls = %d, want 1", provider.calls)
@@ -3496,6 +3698,57 @@ func TestExportCompactionHistoryMetaPendingThenApplied(t *testing.T) {
 	}
 	if meta.AppliedAt.IsZero() {
 		t.Fatal("expected AppliedAt to be set")
+	}
+}
+
+func TestCleanupStalePendingCompactions(t *testing.T) {
+	dir := t.TempDir()
+	writeHistory := func(t *testing.T, n int, status string, exportedAt time.Time, withBackup bool) (historyPath, metaPath string) {
+		t.Helper()
+		historyName := fmt.Sprintf("history-%d.md", n)
+		historyPath = filepath.Join(dir, historyName)
+		if err := os.WriteFile(historyPath, []byte("Session Export\n"), 0o644); err != nil {
+			t.Fatalf("write history %d: %v", n, err)
+		}
+		metaPath = compactionHistoryMetaPath(historyPath)
+		meta := compactionHistoryMeta{Version: 1, HistoryFile: historyName, Status: status, ExportedAt: exportedAt}
+		if status == compactionHistoryApplied {
+			meta.AppliedAt = exportedAt.Add(time.Minute)
+		}
+		data, err := json.Marshal(meta)
+		if err != nil {
+			t.Fatalf("marshal meta %d: %v", n, err)
+		}
+		if err := os.WriteFile(metaPath, data, 0o644); err != nil {
+			t.Fatalf("write meta %d: %v", n, err)
+		}
+		if withBackup {
+			backupPath := filepath.Join(dir, fmt.Sprintf("main.pre-compress-%d.jsonl", n))
+			if err := os.WriteFile(backupPath, []byte(`{"role":"user","content":"backup"}`+"\n"), 0o644); err != nil {
+				t.Fatalf("write backup %d: %v", n, err)
+			}
+		}
+		return historyPath, metaPath
+	}
+
+	old := time.Now().Add(-10 * time.Minute)
+	fresh := time.Now()
+	staleHistory, staleMeta := writeHistory(t, 1, compactionHistoryPending, old, false)
+	freshHistory, freshMeta := writeHistory(t, 2, compactionHistoryPending, fresh, false)
+	backupHistory, backupMeta := writeHistory(t, 3, compactionHistoryPending, old, true)
+	appliedHistory, appliedMeta := writeHistory(t, 4, compactionHistoryApplied, old, false)
+
+	cleanupStalePendingCompactions(dir, 5*time.Minute)
+
+	for _, path := range []string{staleHistory, staleMeta} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s exists after stale pending cleanup; err=%v", filepath.Base(path), err)
+		}
+	}
+	for _, path := range []string{freshHistory, freshMeta, backupHistory, backupMeta, appliedHistory, appliedMeta} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("%s should be preserved: %v", filepath.Base(path), err)
+		}
 	}
 }
 

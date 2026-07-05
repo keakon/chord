@@ -529,6 +529,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.sessionEpoch++
 	a.resetThinkingTranslationSeen()
 	a.sessionDir = loaded.SessionPath
+	cleanupStalePendingCompactions(a.sessionDir, 5*time.Minute)
 	a.recovery = recovery.NewRecoveryManager(loaded.SessionPath)
 	a.usageLedger = analytics.NewUsageLedger(loaded.SessionPath, a.projectRoot)
 	summary := cloneSessionSummary(loaded.Summary)
@@ -995,10 +996,6 @@ func (a *MainAgent) RestoreSessionAtStartup() error {
 	a.startupResumeLoadedAt = time.Now()
 	a.stateMu.Unlock()
 	log.Infof("session restored at startup session=%v message_count=%v todo_count=%v", result.SessionPath, result.MessageCount, result.TodoCount)
-	// Clean up orphan compaction files from previous cancelled compactions.
-	// Files with status "pending_apply" older than 5 minutes and no backup are
-	// considered orphaned (the compaction was cancelled but cleanup didn't run).
-	cleanupStalePendingCompactions(a.sessionDir, 5*time.Minute)
 	a.llmClient.SetSessionID(filepath.Base(result.SessionPath))
 	a.emitToTUI(ToastEvent{Message: result.infoMessage(), Level: "info"})
 	return nil
