@@ -330,7 +330,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		fileRefTexts := append([]string{value}, inlinePasteTexts...)
-		fileRefs := atMentionFileRefs(fileRefTexts, m.workingDir)
+		fileRefs := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs(fileRefTexts, m.workingDir), m.workingDir))
 		if m.agent != nil && m.focusedAgentID != "" && len(m.attachments) == 0 && !hasInlinePastes && len(fileRefs) == 0 {
 			m.finalizeTurn()
 			draft := queuedDraft{Content: value, DisplayContent: value, FileRefs: fileRefs, QueuedAt: time.Now()}

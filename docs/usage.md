@@ -100,6 +100,7 @@ Type `@` in the composer at the start of a line or after a space to open file co
 - Once you start typing a root-level filename prefix such as `@A`, Chord also checks the session working directory directly. This allows root files such as `AGENTS.md` to complete even when they were excluded from the cached index by `.gitignore` or local Git excludes.
 - If the query already looks like a path, such as `@docs/`, `@./`, `@~/`, or `@.config/`, Chord switches to direct filesystem completion for that directory instead of staying on the cached index. This path-mode completion can surface ignored paths when you explicitly type toward them.
 - Hidden entries stay hidden by default. To see them, make the query itself explicit, for example `@.`, `@.env`, `@./.`, or `@.config/`.
+- Add a 1-based line suffix to include only part of a text file: `@path:42` injects line 42, and `@path:10-20` injects lines 10 through 20. Completion replaces only the path segment, so a suffix you typed is preserved when accepting a file match. If a real filename contains the numeric colon suffix, such as `note:12`, the filename takes precedence over line-range parsing.
 - Completion is only input assistance. When you send the message, Chord reparses the final `@path` text; if you removed the mention before sending, that file is not attached.
 
 ## Sessions

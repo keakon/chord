@@ -417,6 +417,29 @@ func TestAtMentionPathMatchesPrefersExactFile(t *testing.T) {
 	}
 }
 
+func TestAtMentionPathMatchesLineRangeSuffix(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "docs", "main.go"), "content")
+
+	got := atMentionPathMatches("docs/main.go:12", wd)
+	want := []atMentionOption{{Path: "docs/main.go"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("atMentionPathMatches() = %#v, want %#v", got, want)
+	}
+}
+
+func TestAtMentionPathMatchesPrefersColonFilenameOverLineRangeSuffix(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "docs", "note:12"), "content")
+	mustWriteFile(t, filepath.Join(wd, "docs", "note"), "plain")
+
+	got := atMentionPathMatches("docs/note:12", wd)
+	want := []atMentionOption{{Path: "docs/note:12"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("atMentionPathMatches() = %#v, want %#v", got, want)
+	}
+}
+
 func TestRefreshAtMentionListPrefersExactIndexedMatchOnly(t *testing.T) {
 	m := NewModel(nil)
 	m.atMentionLoaded = true
@@ -427,6 +450,31 @@ func TestRefreshAtMentionListPrefersExactIndexedMatchOnly(t *testing.T) {
 	}
 	m.atMentionOpen = true
 	m.atMentionQuery = "docs/file.md"
+
+	m.refreshAtMentionList()
+
+	if m.atMentionList == nil {
+		t.Fatal("atMentionList = nil, want one exact result")
+	}
+	if got := m.atMentionList.Len(); got != 1 {
+		t.Fatalf("atMentionList.Len() = %d, want 1 exact result", got)
+	}
+	item, ok := m.atMentionList.SelectedItem()
+	if !ok {
+		t.Fatal("SelectedItem() ok = false, want true")
+	}
+	match, _ := item.Value.(atMentionOption)
+	if match.Path != "docs/file.md" || match.IsDir {
+		t.Fatalf("selected match = %+v, want exact docs/file.md file", match)
+	}
+}
+
+func TestRefreshAtMentionListAcceptsLineRangeSuffixForIndexedExactMatch(t *testing.T) {
+	m := NewModel(nil)
+	m.atMentionLoaded = true
+	m.atMentionFiles = []string{"docs/file.md", "docs/file_other.md"}
+	m.atMentionOpen = true
+	m.atMentionQuery = "docs/file.md:12"
 
 	m.refreshAtMentionList()
 
@@ -676,6 +724,33 @@ func TestBuildFileRefPartsTreatsPDFAtMentionAsAttachment(t *testing.T) {
 	}
 	if parts[0].Type != "pdf" || parts[0].MimeType != "application/pdf" || parts[0].FileName != "paper.pdf" {
 		t.Fatalf("attachment part = %+v, want pdf attachment", parts[0])
+	}
+}
+
+func TestBuildFileRefPartsInjectsLineRange(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "main.go"), "one\ntwo\nthree\nfour\n")
+	m := &Model{workingDir: wd}
+
+	parts := m.buildFileRefParts("review @main.go:2-3", []message.ContentPart{{Type: "text", Text: "review @main.go:2-3"}})
+	if len(parts) != 2 {
+		t.Fatalf("parts len = %d, want user text + file ref", len(parts))
+	}
+	got := parts[1].Text
+	if !strings.Contains(got, `<file path="main.go" lines="2-3">`) {
+		t.Fatalf("file ref missing lines attribute: %q", got)
+	}
+	if strings.Contains(got, "one") || strings.Contains(got, "four") || !strings.Contains(got, "two\nthree") {
+		t.Fatalf("file ref has wrong body: %q", got)
+	}
+}
+
+func TestFileRefsFromPartsDisplaysLineRange(t *testing.T) {
+	parts := []message.ContentPart{{Type: "text", Text: `<file path="main.go" lines="2-3">` + "\nbody\n</file>"}}
+	got := fileRefsFromParts(parts)
+	want := []string{"main.go:2-3"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("fileRefsFromParts() = %#v, want %#v", got, want)
 	}
 }
 
@@ -1010,6 +1085,51 @@ func TestAtMentionFileRefsHandlesEscapedSpacesAndDedupes(t *testing.T) {
 	}
 }
 
+func TestAtMentionFileRefsParsesLineRanges(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "main.go"), "content")
+
+	got := atMentionFileRefs([]string{"review @main.go:12 and @main.go:20-25 and @main.go:bad"}, wd)
+	want := []string{"main.go:12", "main.go:20-25", "main.go"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestAtMentionFileRefsOnlyTreatsNumericColonSuffixAsLineRange(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "main.go"), "content")
+
+	got := atMentionFileRefs([]string{"review @main.go:abc"}, wd)
+	want := []string{"main.go"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestAtMentionFileRefsPrefersColonFilenameOverLineRange(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "note:12"), "colon")
+	mustWriteFile(t, filepath.Join(wd, "note"), "plain")
+
+	got := atMentionFileRefs([]string{"review @note:12"}, wd)
+	want := []string{"note:12"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestAtMentionFileRefsDedupesByPathAndLineRange(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "main.go"), "content")
+
+	got := atMentionFileRefs([]string{"@main.go:1 @./main.go:1 @main.go:2 @main.go"}, wd)
+	want := []string{"main.go:1", "main.go:2", "main.go"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+	}
+}
+
 func TestAtMentionFileRefsFallsBackToLongestProseDelimitedPath(t *testing.T) {
 	wd := t.TempDir()
 	mustWriteFile(t, filepath.Join(wd, "AGENTS.md"), "agents")
@@ -1145,6 +1265,58 @@ func TestInsertAtMentionSelectionReturnsDirectoryRefreshCommand(t *testing.T) {
 	}
 	if got := m.atMentionQuery; got != "docs/" {
 		t.Fatalf("atMentionQuery = %q, want %q", got, "docs/")
+	}
+}
+
+func TestInsertAtMentionSelectionPreservesLineRangeSuffix(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "main.go"), "package main")
+	m := NewModel(nil)
+	m.mode = ModeInsert
+	m.workingDir = wd
+	m.input.SetValue("@ma:12")
+	m.input.SetCursorPosition(0, len([]rune("@ma:12")))
+	m.atMentionOpen = true
+	m.atMentionLine = 0
+	m.atMentionTriggerCol = 1
+	m.atMentionQuery = "ma:12"
+	m.atMentionList = NewOverlayList([]OverlayListItem{{
+		Label: "main.go",
+		Value: atMentionOption{Path: "main.go", IsDir: false},
+	}}, 10)
+
+	m.insertAtMentionSelection()
+
+	if got := m.input.Value(); got != "@main.go:12" {
+		t.Fatalf("input value = %q, want @main.go:12", got)
+	}
+	if m.atMentionOpen {
+		t.Fatal("atMentionOpen = true, want false after file selection")
+	}
+}
+
+func TestInsertAtMentionSelectionKeepsColonFilenameReplacement(t *testing.T) {
+	wd := t.TempDir()
+	mustWriteFile(t, filepath.Join(wd, "note"), "plain")
+	mustWriteFile(t, filepath.Join(wd, "note:12"), "colon")
+	m := NewModel(nil)
+	m.mode = ModeInsert
+	m.workingDir = wd
+	m.input.SetValue("@note:12")
+	m.input.SetCursorPosition(0, len([]rune("@note:12")))
+	m.atMentionOpen = true
+	m.atMentionLine = 0
+	m.atMentionTriggerCol = 1
+	m.atMentionQuery = "note:12"
+	m.atMentionList = NewOverlayList([]OverlayListItem{{
+		Label: "note:12",
+		Value: atMentionOption{Path: "note:12", IsDir: false},
+	}}, 10)
+
+	m.insertAtMentionSelection()
+
+	if got := m.input.Value(); got != "@note:12 " {
+		t.Fatalf("input value = %q, want @note:12 with trailing space", got)
 	}
 }
 

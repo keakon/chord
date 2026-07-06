@@ -73,7 +73,7 @@ func (m *Model) unsupportedAttachmentWarning(a Attachment) string {
 }
 
 func (m Model) atMentionAttachmentPreviews() []Attachment {
-	refs := dedupeResolvedFileRefs(atMentionFileRefs([]string{m.input.Value()}, m.workingDir), m.workingDir)
+	refs := dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{m.input.Value()}, m.workingDir), m.workingDir)
 	if len(refs) == 0 {
 		return nil
 	}
@@ -85,7 +85,10 @@ func (m Model) atMentionAttachmentPreviews() []Attachment {
 	}
 	previews := make([]Attachment, 0, len(refs))
 	for _, ref := range refs {
-		resolved := m.resolveFileRefPath(ref)
+		if ref.Lines.IsSet() {
+			continue
+		}
+		resolved := m.resolveFileRefPath(ref.Path)
 		if attachmentKindForPath(resolved) == "" {
 			continue
 		}

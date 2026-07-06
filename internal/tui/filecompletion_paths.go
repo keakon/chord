@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -15,6 +16,7 @@ import (
 )
 
 var atMentionTokenRE = regexp.MustCompile(`@(?:\\.|[^\s@])+`)
+var atMentionLineRangeSuffixRE = regexp.MustCompile(`^(.*):(\d+)(?:-(\d+))?$`)
 
 // Characters that commonly delimit a file reference in prose. They are only
 // trimmed when the full candidate does not resolve to a file.
@@ -31,19 +33,47 @@ type atMentionOption struct {
 	IsDir bool
 }
 
-func dedupeResolvedFileRefs(refs []string, workingDir string) []string {
+type atMentionFileRef struct {
+	Path  string
+	Lines filectx.LineRange
+}
+
+func (r atMentionFileRef) displayPath() string {
+	if r.Lines.IsSet() {
+		return r.Path + ":" + r.Lines.String()
+	}
+	return r.Path
+}
+
+func (r atMentionFileRef) dedupeKey(workingDir string) string {
+	resolved := filepath.Clean(resolveAtMentionFSPath(r.Path, workingDir))
+	return resolved + "\x00" + r.Lines.String()
+}
+
+func dedupeAtMentionFileRefs(refs []atMentionFileRef, workingDir string) []atMentionFileRef {
 	if len(refs) == 0 {
 		return nil
 	}
 	seen := make(map[string]bool, len(refs))
-	out := make([]string, 0, len(refs))
+	out := make([]atMentionFileRef, 0, len(refs))
 	for _, ref := range refs {
-		resolved := filepath.Clean(resolveAtMentionFSPath(ref, workingDir))
-		if seen[resolved] {
+		key := ref.dedupeKey(workingDir)
+		if seen[key] {
 			continue
 		}
-		seen[resolved] = true
+		seen[key] = true
 		out = append(out, ref)
+	}
+	return out
+}
+
+func displayAtMentionFileRefs(refs []atMentionFileRef) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, ref.displayPath())
 	}
 	return out
 }
@@ -64,12 +94,12 @@ func (m *Model) buildFileRefParts(displayText string, composerParts []message.Co
 			texts = append(texts, extra)
 		}
 	}
-	refs := dedupeResolvedFileRefs(atMentionFileRefs(texts, m.workingDir), m.workingDir)
+	refs := dedupeAtMentionFileRefs(atMentionStructuredFileRefs(texts, m.workingDir), m.workingDir)
 	if len(refs) == 0 {
 		return nil
 	}
 	textRefs, attachmentParts := m.splitAtMentionRefs(refs)
-	fileParts := filectx.BuildFileParts(textRefs, m.resolveFileRefPath)
+	fileParts := filectx.BuildFileRefParts(textRefs, m.resolveFileRefPath)
 	if len(fileParts) == 0 && len(attachmentParts) == 0 {
 		return nil
 	}
@@ -85,22 +115,22 @@ func (m *Model) buildFileRefParts(displayText string, composerParts []message.Co
 	return parts
 }
 
-func (m *Model) splitAtMentionRefs(refs []string) ([]string, []message.ContentPart) {
+func (m *Model) splitAtMentionRefs(refs []atMentionFileRef) ([]filectx.FileRef, []message.ContentPart) {
 	if len(refs) == 0 {
 		return nil, nil
 	}
-	textRefs := make([]string, 0, len(refs))
+	textRefs := make([]filectx.FileRef, 0, len(refs))
 	attachments := make([]message.ContentPart, 0, len(refs))
 	for _, ref := range refs {
-		resolved := m.resolveFileRefPath(ref)
+		resolved := m.resolveFileRefPath(ref.Path)
 		kind := attachmentKindForPath(resolved)
-		if kind == "" {
-			textRefs = append(textRefs, ref)
+		if kind == "" || ref.Lines.IsSet() {
+			textRefs = append(textRefs, filectx.FileRef{Path: ref.Path, Lines: ref.Lines})
 			continue
 		}
 		data, mimeType, err := imageutil.ReadAttachmentFile(resolved)
 		if err != nil {
-			textRefs = append(textRefs, ref)
+			textRefs = append(textRefs, filectx.FileRef{Path: ref.Path, Lines: ref.Lines})
 			continue
 		}
 		attachments = append(attachments, message.ContentPart{
@@ -235,16 +265,16 @@ func proseDelimitedAtMentionCandidates(candidate string) []string {
 	return out
 }
 
-func resolveAtMentionCandidate(candidate, workingDir string) (string, bool) {
+func resolveAtMentionCandidateRef(candidate, workingDir string) (atMentionFileRef, bool) {
 	candidate = filepath.ToSlash(unescapeAtMentionPath(candidate))
 	candidate = strings.TrimSpace(candidate)
 	if candidate == "" {
-		return "", false
+		return atMentionFileRef{}, false
 	}
 	tried := map[string]bool{}
 	for trimmed := candidate; trimmed != ""; {
 		if atMentionCandidateExists(trimmed, workingDir, tried) {
-			return trimmed, true
+			return atMentionFileRef{Path: trimmed}, true
 		}
 		next, ok := trimAtMentionCandidate(trimmed)
 		if !ok {
@@ -252,10 +282,16 @@ func resolveAtMentionCandidate(candidate, workingDir string) (string, bool) {
 		}
 		trimmed = next
 	}
+	if ref, ok := parseAtMentionLineRangeRef(candidate, workingDir, tried); ok {
+		return ref, true
+	}
 	for _, delimited := range proseDelimitedAtMentionCandidates(candidate) {
 		for trimmed := delimited; trimmed != ""; {
 			if atMentionCandidateExists(trimmed, workingDir, tried) {
-				return trimmed, true
+				return atMentionFileRef{Path: trimmed}, true
+			}
+			if ref, ok := parseAtMentionLineRangeRef(trimmed, workingDir, tried); ok {
+				return ref, true
 			}
 			next, ok := trimAtMentionCandidate(trimmed)
 			if !ok {
@@ -264,11 +300,38 @@ func resolveAtMentionCandidate(candidate, workingDir string) (string, bool) {
 			trimmed = next
 		}
 	}
-	return "", false
+	return atMentionFileRef{}, false
+}
+
+func parseAtMentionLineRangeRef(candidate, workingDir string, tried map[string]bool) (atMentionFileRef, bool) {
+	matches := atMentionLineRangeSuffixRE.FindStringSubmatch(candidate)
+	if matches == nil {
+		return atMentionFileRef{}, false
+	}
+	path := strings.TrimSpace(matches[1])
+	if path == "" || !atMentionCandidateExists(path, workingDir, tried) {
+		return atMentionFileRef{}, false
+	}
+	start, err := strconv.Atoi(matches[2])
+	if err != nil || start <= 0 {
+		return atMentionFileRef{}, false
+	}
+	end := start
+	if matches[3] != "" {
+		end, err = strconv.Atoi(matches[3])
+		if err != nil || end < start {
+			return atMentionFileRef{}, false
+		}
+	}
+	return atMentionFileRef{Path: path, Lines: filectx.LineRange{Start: start, End: end}}, true
 }
 
 func atMentionFileRefs(texts []string, workingDir string) []string {
-	var refs []string
+	return displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs(texts, workingDir), workingDir))
+}
+
+func atMentionStructuredFileRefs(texts []string, workingDir string) []atMentionFileRef {
+	var refs []atMentionFileRef
 	seen := make(map[string]bool)
 	for _, text := range texts {
 		if text == "" {
@@ -283,15 +346,15 @@ func atMentionFileRefs(texts []string, workingDir string) []string {
 				continue
 			}
 			raw := text[start+1 : end]
-			ref, ok := resolveAtMentionCandidate(raw, workingDir)
+			ref, ok := resolveAtMentionCandidateRef(raw, workingDir)
 			if !ok {
 				continue
 			}
-			resolved := filepath.Clean(resolveAtMentionFSPath(ref, workingDir))
-			if seen[resolved] {
+			key := ref.dedupeKey(workingDir)
+			if seen[key] {
 				continue
 			}
-			seen[resolved] = true
+			seen[key] = true
 			refs = append(refs, ref)
 		}
 	}
@@ -368,8 +431,61 @@ func normalizeAtMentionQuery(query string) string {
 	return filepath.ToSlash(strings.TrimSpace(unescapeAtMentionPath(query)))
 }
 
-func atMentionExactPathMatch(query, workingDir string) (atMentionOption, bool) {
+func normalizeAtMentionQueryForFS(query, workingDir string) string {
 	normalized := normalizeAtMentionQuery(query)
+	if path, ok := splitAtMentionLineRangeSuffix(normalized); ok && !atMentionFSPathExists(normalized, workingDir) {
+		return path
+	}
+	return normalized
+}
+
+func normalizeAtMentionQueryForMatching(query string) string {
+	normalized := normalizeAtMentionQuery(query)
+	if path, ok := splitAtMentionLineRangeSuffix(normalized); ok {
+		return path
+	}
+	return normalized
+}
+
+func atMentionFSPathExists(path, workingDir string) bool {
+	resolved := resolveAtMentionFSPath(path, workingDir)
+	_, err := os.Stat(resolved)
+	return err == nil
+}
+
+func splitAtMentionLineRangeSuffix(query string) (string, bool) {
+	matches := atMentionLineRangeSuffixRE.FindStringSubmatch(query)
+	if matches == nil {
+		return "", false
+	}
+	path := strings.TrimSpace(matches[1])
+	return path, path != ""
+}
+
+func splitRawAtMentionLineRangeSuffix(query string) (path, suffix string, ok bool) {
+	matches := atMentionLineRangeSuffixRE.FindStringSubmatchIndex(query)
+	if matches == nil {
+		return "", "", false
+	}
+	path = strings.TrimSpace(query[matches[2]:matches[3]])
+	if path == "" {
+		return "", "", false
+	}
+	start, err := strconv.Atoi(query[matches[4]:matches[5]])
+	if err != nil || start <= 0 {
+		return "", "", false
+	}
+	if matches[6] >= 0 {
+		end, err := strconv.Atoi(query[matches[6]:matches[7]])
+		if err != nil || end < start {
+			return "", "", false
+		}
+	}
+	return path, query[matches[3]:], true
+}
+
+func atMentionExactPathMatch(query, workingDir string) (atMentionOption, bool) {
+	normalized := normalizeAtMentionQueryForFS(query, workingDir)
 	if normalized == "" || strings.HasSuffix(normalized, "/") {
 		return atMentionOption{}, false
 	}
@@ -392,7 +508,7 @@ func atMentionExactPathMatch(query, workingDir string) (atMentionOption, bool) {
 }
 
 func atMentionExactIndexedMatch(files []string, query string) (atMentionOption, bool) {
-	normalized := normalizeAtMentionQuery(query)
+	normalized := normalizeAtMentionQueryForMatching(query)
 	if normalized == "" {
 		return atMentionOption{}, false
 	}
@@ -451,13 +567,14 @@ func atMentionPathMatches(query, workingDir string) []atMentionOption {
 	if !isPathLikeAtMentionQuery(query) {
 		return nil
 	}
-	if query == ".." {
+	matchQuery := normalizeAtMentionQueryForFS(query, workingDir)
+	if matchQuery == ".." {
 		return []atMentionOption{{Path: "../", IsDir: true}}
 	}
-	if query == "~" {
+	if matchQuery == "~" {
 		return []atMentionOption{{Path: "~/", IsDir: true}}
 	}
-	if query == "." {
+	if matchQuery == "." {
 		entries, err := os.ReadDir(workingDir)
 		if err != nil {
 			return nil
@@ -488,11 +605,11 @@ func atMentionPathMatches(query, workingDir string) []atMentionOption {
 		}
 		return matches
 	}
-	if exact, ok := atMentionExactPathMatch(query, workingDir); ok {
+	if exact, ok := atMentionExactPathMatch(matchQuery, workingDir); ok {
 		return []atMentionOption{exact}
 	}
 
-	dirPart, basePrefix := splitAtMentionPathQuery(query)
+	dirPart, basePrefix := splitAtMentionPathQuery(matchQuery)
 	dirPartFS := unescapeAtMentionPath(dirPart)
 	basePrefixLower := strings.ToLower(unescapeAtMentionPath(basePrefix))
 	searchDir := workingDir
@@ -504,7 +621,7 @@ func atMentionPathMatches(query, workingDir string) []atMentionOption {
 	if searchDir == "" {
 		searchDir = "."
 	}
-	allowHidden := atMentionHiddenSegmentsAllowed(query)
+	allowHidden := atMentionHiddenSegmentsAllowed(matchQuery)
 
 	entries, err := os.ReadDir(searchDir)
 	if err != nil {
@@ -543,7 +660,7 @@ func atMentionPathMatches(query, workingDir string) []atMentionOption {
 }
 
 func atMentionRootPrefixMatches(query, workingDir string) []atMentionOption {
-	normalized := normalizeAtMentionQuery(query)
+	normalized := normalizeAtMentionQueryForFS(query, workingDir)
 	if normalized == "" || isPathLikeAtMentionQuery(normalized) {
 		return nil
 	}
@@ -919,8 +1036,9 @@ func atMentionSortTieBreak(a, b string, query string) int {
 }
 
 func atMentionFuzzyMatches(files []string, query string) []atMentionOption {
-	allowHidden := atMentionHiddenSegmentsAllowed(query)
-	query = strings.ToLower(normalizeAtMentionQuery(query))
+	matchQuery := normalizeAtMentionQueryForMatching(query)
+	allowHidden := atMentionHiddenSegmentsAllowed(matchQuery)
+	query = strings.ToLower(matchQuery)
 	type scored struct {
 		path       string
 		score      int

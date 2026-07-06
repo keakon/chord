@@ -22,6 +22,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - File tools now offer broader not-found path suggestions, including whitespace-repair hints for common model-generated paths and the same suggestion flow for `read`, `view_image`, `edit`, and `patch` while preserving patch's create-file guidance.
 - Native file tools now notify matching LSP servers of workspace file Created/Changed/Deleted events before syncing text documents, so Pyright, TypeScript, gopls, rust-analyzer, and similar servers refresh project/module graphs more promptly and post-tool diagnostics are less likely to show transient unresolved imports for newly created files.
 - Tool path defaults are now anchored to the session working directory instead of implicit process cwd: relative file paths, omitted `shell` / `spawn` workdirs, and omitted `grep` / `glob` roots use the same base that is injected into the model before the first user message and after compaction. Tool cards can display paths relative to that base while raw tool-call arguments remain unchanged for audit/export.
+- TUI file mentions now support 1-based line suffixes such as `@path:42` and `@path:10-20`, injecting only the requested text-file lines while preserving typed line suffixes when accepting completion.
 
 ### Fixes
 

@@ -26,6 +26,43 @@ func TestBuildFilePartsWrapsResolvedFiles(t *testing.T) {
 	}
 }
 
+func TestBuildFileRefPartsIncludesRequestedLineRange(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "a.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\nthree\nfour\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	parts := BuildFileRefParts([]FileRef{{Path: "a.txt", Lines: LineRange{Start: 2, End: 3}}}, func(ref string) string {
+		return filepath.Join(root, ref)
+	})
+	if len(parts) != 1 {
+		t.Fatalf("len(parts) = %d, want 1", len(parts))
+	}
+	got := parts[0].Text
+	if !strings.Contains(got, `<file path="a.txt" lines="2-3">`) {
+		t.Fatalf("wrapped part missing lines attribute: %q", got)
+	}
+	if strings.Contains(got, "one") || strings.Contains(got, "four") || !strings.Contains(got, "two\nthree") {
+		t.Fatalf("wrapped part has wrong body: %q", got)
+	}
+}
+
+func TestBuildFileRefPartsSkipsOutOfRangeLineRef(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "a.txt")
+	if err := os.WriteFile(path, []byte("one\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	parts := BuildFileRefParts([]FileRef{{Path: "a.txt", Lines: LineRange{Start: 2, End: 2}}}, func(ref string) string {
+		return filepath.Join(root, ref)
+	})
+	if len(parts) != 0 {
+		t.Fatalf("len(parts) = %d, want 0", len(parts))
+	}
+}
+
 func TestBuildFilePartsSkipsUnreadableFiles(t *testing.T) {
 	root := t.TempDir()
 	parts := BuildFileParts([]string{"missing.txt"}, func(ref string) string {

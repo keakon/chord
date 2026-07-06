@@ -52,12 +52,19 @@ func fileRefsFromParts(parts []message.ContentPart) []string {
 		if p.Type != message.ContentPartText {
 			continue
 		}
-		for _, path := range message.FileRefPaths(p.Text) {
-			if path == "" || seen[path] {
+		for _, ref := range message.FileRefs(p.Text) {
+			if ref.Path == "" {
 				continue
 			}
-			seen[path] = true
-			refs = append(refs, path)
+			display := ref.Path
+			if ref.Lines != "" {
+				display += ":" + ref.Lines
+			}
+			if seen[display] {
+				continue
+			}
+			seen[display] = true
+			refs = append(refs, display)
 		}
 	}
 	return refs

@@ -104,21 +104,33 @@ func (m *Model) insertAtMentionSelection() tea.Cmd {
 	if m.atMentionTriggerCol < 0 || m.atMentionTriggerCol > len(rowRunes) {
 		return nil
 	}
+	replaceEndCol := cursorCol
+	lineSuffixRuneLen := 0
+	if !selection.IsDir {
+		query := string(rowRunes[m.atMentionTriggerCol:cursorCol])
+		if _, lineSuffix, ok := splitRawAtMentionLineRangeSuffix(query); ok {
+			normalized := normalizeAtMentionQuery(query)
+			if !atMentionFSPathExists(normalized, m.workingDir) {
+				lineSuffixRuneLen = len([]rune(lineSuffix))
+				replaceEndCol -= lineSuffixRuneLen
+			}
+		}
+	}
 	prefix := string(rowRunes[:m.atMentionTriggerCol])
-	suffix := string(rowRunes[cursorCol:])
+	suffix := string(rowRunes[replaceEndCol:])
 	// Replace only the query segment after '@' so the '@' stays in place.
 	replaceText := selection.Path
-	if !selection.IsDir {
+	if !selection.IsDir && lineSuffixRuneLen == 0 {
 		replaceText += " "
 	}
-	cursorTarget := m.atMentionTriggerCol + len([]rune(replaceText))
+	cursorTarget := m.atMentionTriggerCol + len([]rune(replaceText)) + lineSuffixRuneLen
 	lines[line] = prefix + replaceText + suffix
 
 	// Insert without losing inline large-paste placeholders (which carry the raw
 	// pasted content for submission). Using Input.SetValue would clear inlinePastes
 	// and cause the submitted message to contain only the placeholder text.
 	start := runeOffsetFromRowCol(value, line, m.atMentionTriggerCol)
-	end := runeOffsetFromRowCol(value, line, cursorCol)
+	end := runeOffsetFromRowCol(value, line, replaceEndCol)
 	if !m.input.ReplaceRuneRangePreserveInlinePastes(start, end, replaceText) {
 		// Fallback: keep existing behaviour if we cannot safely update ranges.
 		m.input.SetValue(strings.Join(lines, "\n"))

@@ -49,6 +49,29 @@ func TestFirstFileRefPath(t *testing.T) {
 	}
 }
 
+func TestFirstFileRefPathAllowsAdditionalAttributes(t *testing.T) {
+	got, ok := FirstFileRefPath(`<file path="a.txt" lines="2-3">` + "\nbody\n</file>")
+	if !ok {
+		t.Fatal("expected file ref")
+	}
+	if got != "a.txt" {
+		t.Fatalf("got %q, want a.txt", got)
+	}
+}
+
+func TestFileRefsIncludesLineMetadata(t *testing.T) {
+	got := FileRefs(`<file path="a.txt" lines="2-3">` + "\nbody\n</file>" + `<file path='b.txt'>` + "\nB\n</file>")
+	want := []FileRef{{Path: "a.txt", Lines: "2-3"}, {Path: "b.txt"}}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
+
 func TestFileRefPaths(t *testing.T) {
 	text := `<file path="a.txt">` + "\nA\n</file>" +
 		`<file path='b.txt'>` + "\nB\n</file>" +
