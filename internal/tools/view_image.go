@@ -53,7 +53,7 @@ func (*ViewImageTool) Parameters() map[string]any {
 			},
 			"label": map[string]any{
 				"type":        "string",
-				"description": "Optional short label describing the image, echoed back in the confirmation text.",
+				"description": "Optional short label describing the image, echoed back in the confirmation text. Defaults to the image filename.",
 			},
 		},
 		"required":             []string{"path"},

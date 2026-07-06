@@ -111,7 +111,7 @@ func (SaveArtifactTool) Parameters() map[string]any {
 			},
 			"type": map[string]any{
 				"type":        "string",
-				"description": "Artifact type, for example research_report, task_graph, review_report, or verification_log.",
+				"description": "Artifact type, for example research_report, task_graph, review_report, or verification_log. Defaults to handoff_note.",
 			},
 			"description": map[string]any{
 				"type":        "string",

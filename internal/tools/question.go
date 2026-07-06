@@ -108,7 +108,7 @@ func (QuestionTool) Parameters() map[string]any {
 						},
 						"multiple": map[string]any{
 							"type":        "boolean",
-							"description": "Whether multiple selections are allowed (default false)",
+							"description": "Whether multiple selections are allowed. Defaults to false.",
 						},
 					},
 					"required": []string{"question", "header"},

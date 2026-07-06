@@ -46,7 +46,7 @@ func (ReadTool) Parameters() map[string]any {
 			},
 			"offset": map[string]any{
 				"type":        "integer",
-				"description": "0-based line offset to start reading from.",
+				"description": "0-based line offset to start reading from. Defaults to 0.",
 			},
 			"limit": map[string]any{
 				"type":        "integer",

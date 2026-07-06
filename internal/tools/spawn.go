@@ -69,7 +69,7 @@ func (SpawnTool) Parameters() map[string]any {
 			},
 			"timeout": map[string]any{
 				"type":        "integer",
-				"description": "Max runtime in seconds (max 600). Set for tasks that should terminate; omit for long-running services.",
+				"description": "Max runtime in seconds (max 600). Set for tasks that should terminate. Defaults to no timeout when omitted, treating the process as a long-running service.",
 			},
 			"workdir": map[string]any{
 				"type":        "string",
