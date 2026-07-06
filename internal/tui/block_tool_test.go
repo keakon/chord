@@ -74,6 +74,25 @@ func TestNewCodeHighlighterUsesToolStyle(t *testing.T) {
 	}
 }
 
+func TestDisplayToolPathRelativizesHomePathUnderWorkingDir(t *testing.T) {
+	home := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", home); err != nil {
+		t.Fatalf("Setenv HOME: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+
+	workingDir := filepath.Join(home, "Workspace", "repo")
+	absPath := filepath.Join(workingDir, "internal", "tools", "path_resolution.go")
+	input := "~/Workspace/repo/internal/tools/path_resolution.go"
+	if got := displayToolPath(input, workingDir); got != "internal/tools/path_resolution.go" {
+		t.Fatalf("displayToolPath(%q) = %q", input, got)
+	}
+	if got := displayToolPath(absPath, workingDir); got != "internal/tools/path_resolution.go" {
+		t.Fatalf("displayToolPath(abs) = %q", got)
+	}
+}
+
 func TestToolHeaderProgressSuffixSurvivesANSITruncateFallback(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	header := "🔧 \x1b[1mVeryLongToolNameWithArguments\x1b[0m /tmp/very/long/path"

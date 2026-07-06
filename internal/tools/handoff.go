@@ -12,7 +12,9 @@ import (
 // to another agent for execution. Called by the MainAgent in planner role
 // after writing the plan document. The target agent is chosen by the user
 // in the TUI (default: builder).
-type HandoffTool struct{}
+type HandoffTool struct {
+	BaseDir string // session working directory for relative paths; empty keeps process cwd behavior
+}
 
 type handoffArgs struct {
 	PlanPath string `json:"plan_path"`
@@ -33,7 +35,7 @@ func (HandoffTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"plan_path": map[string]any{
 				"type":        "string",
-				"description": "Path to the plan document (e.g. .chord/plans/plan-001.md). Supports ~ for the current user's home directory. The file must exist before calling this tool.",
+				"description": "Path to the plan document (e.g. .chord/plans/plan-001.md). Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. The file must exist before calling this tool.",
 			},
 		},
 		"required":             []string{"plan_path"},
@@ -43,13 +45,13 @@ func (HandoffTool) Parameters() map[string]any {
 
 func (HandoffTool) IsReadOnly() bool { return false }
 
-func (HandoffTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+func (t HandoffTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a handoffArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 	var err error
-	planPath, err := resolveToolPath(a.PlanPath)
+	planPath, err := resolveToolPathInDir(a.PlanPath, t.BaseDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve plan_path: %w", err)
 	}

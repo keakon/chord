@@ -58,6 +58,45 @@ func TestReadToolFileNotFoundSuggestsWhitespaceRepair(t *testing.T) {
 	}
 }
 
+func TestReadToolFileNotFoundSuggestsWhitespaceRepairFromBaseDir(t *testing.T) {
+	base := t.TempDir()
+	other := t.TempDir()
+	target := filepath.Join(base, "src", "main.go")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(other); err != nil {
+		t.Fatalf("Chdir other: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	raw := json.RawMessage(`{"path":"src /main.go"}`)
+	_, err = (ReadTool{BaseDir: base}).Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("ReadTool.Execute err = nil, want file-not-found error with base-dir whitespace repair suggestion")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"file not found: src /main.go",
+		"Did you mean",
+		"- src/main.go",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("ReadTool.Execute err = %v, want substring %q", err, want)
+		}
+	}
+	if strings.Contains(msg, base) || strings.Contains(msg, other) {
+		t.Fatalf("ReadTool.Execute err = %v, want no absolute base/cwd paths", err)
+	}
+}
+
 func TestSuggestWhitespacePathRepairHandlesVariousSpacePositions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -223,6 +262,40 @@ func TestPathSuggestionsFindsTopLevelRelativeTypoFromProjectRoot(t *testing.T) {
 	})
 	if len(got) == 0 || got[0] != filepath.Join("internal", "llm", "responses.go") {
 		t.Fatalf("suggestExistingToolPathsWithOptions() = %#v, want relative internal/llm/responses.go first", got)
+	}
+}
+
+func TestPathSuggestionsFindsRelativeTypoFromBaseDir(t *testing.T) {
+	base := t.TempDir()
+	other := t.TempDir()
+	if err := os.WriteFile(filepath.Join(base, "go.mod"), []byte("module example.test\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile go.mod: %v", err)
+	}
+	goodDir := filepath.Join(base, "internal", "llm")
+	if err := os.MkdirAll(goodDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(goodDir, "responses.go"), []byte("package llm\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile responses.go: %v", err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(other); err != nil {
+		t.Fatalf("Chdir other: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	got := suggestExistingToolPathsWithOptionsInDir("internl/llm/responses.go", base, PathTargetRegularFile, pathSuggestionOptions{
+		Timeout:        time.Second,
+		MaxVisited:     100,
+		MaxCandidates:  100,
+		MaxSuggestions: 3,
+		MinScore:       pathSuggestionMinScore,
+	})
+	if len(got) == 0 || got[0] != "internal/llm/responses.go" {
+		t.Fatalf("suggestExistingToolPathsWithOptionsInDir() = %#v, want relative internal/llm/responses.go first", got)
 	}
 }
 

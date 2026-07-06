@@ -14,7 +14,8 @@ import (
 // WriteTool writes content to a file, creating parent directories as needed.
 // If LSP is set, notifies LSP of the change after a successful write.
 type WriteTool struct {
-	LSP *lsp.Manager // nil when LSP not configured
+	LSP     *lsp.Manager // nil when LSP not configured
+	BaseDir string       // session working directory for relative paths; empty keeps process cwd behavior
 }
 
 type writeArgs struct {
@@ -24,8 +25,8 @@ type writeArgs struct {
 
 func (t WriteTool) Name() string { return NameWrite }
 
-func (WriteTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy(NameWrite, fileToolConcurrencyPolicy(args, false))
+func (t WriteTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	return normalizeConcurrencyPolicy(NameWrite, fileToolConcurrencyPolicyInDir(args, false, t.BaseDir))
 }
 
 func (t WriteTool) Description() string {
@@ -38,7 +39,7 @@ func (t WriteTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to the file to write. Supports ~ for the current user's home directory.",
+				"description": "Absolute or relative path to the file to write. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory.",
 			},
 			"content": map[string]any{
 				"type":        "string",
@@ -89,7 +90,7 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	if a.Path == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	resolvedPath, err := resolveToolPath(a.Path)
+	resolvedPath, err := resolveToolPathInDir(a.Path, t.BaseDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w", err)
 	}
@@ -130,7 +131,7 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 
 	out := fmt.Sprintf("Successfully wrote %d %s, %d %s", lineCount, lineLabel, len(data), byteLabel)
 	if t.LSP != nil {
-		absPath, absErr := resolveToolPathAbs(a.Path)
+		absPath, absErr := resolveToolPathAbsInDir(a.Path, t.BaseDir)
 		if absErr == nil {
 			t.LSP.MarkTouched(absPath)
 			changeType := lsp.WatchedFileCreated

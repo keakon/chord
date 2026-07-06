@@ -341,7 +341,9 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		s.tools.Register(tools.NewSkillTool(s))
 	}
 	if hasViewImageTool && !cfg.Ruleset.IsDisabled(tools.NameViewImage) {
-		s.tools.Register(tools.NewViewImageTool(s))
+		tool := tools.NewViewImageTool(s)
+		tool.BaseDir = cfg.WorkDir
+		s.tools.Register(tool)
 	}
 
 	// Build and install the system prompt.
@@ -453,20 +455,10 @@ func (s *SubAgent) thinkingToolcallCompat() *config.ThinkingToolcallCompatConfig
 }
 
 func subAgentToolWithBaseDir(t tools.Tool, workDir string) tools.Tool {
-	switch tt := t.(type) {
-	case tools.PatchTool:
-		if tt.BaseDir == "" {
-			tt.BaseDir = workDir
-		}
-		return tt
-	case tools.EditTool:
-		if tt.BaseDir == "" {
-			tt.BaseDir = workDir
-		}
-		return tt
-	default:
-		return t
+	if tt, ok := t.(tools.BaseDirTool); ok {
+		return tt.WithBaseDir(workDir)
 	}
+	return t
 }
 
 // ---------------------------------------------------------------------------

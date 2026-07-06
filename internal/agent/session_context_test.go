@@ -37,6 +37,55 @@ func TestBuildSessionContextReminder_OnlyDate(t *testing.T) {
 	}
 }
 
+func TestBuildSessionContextReminder_IncludesSessionWorkingDirectory(t *testing.T) {
+	got := buildSessionContextReminder(SessionEnvSnapshot{WorkDir: "/repo/session", Platform: "test/os", Date: "Apr 17 2026"}, "")
+	if got == "" {
+		t.Fatal("expected non-empty reminder")
+	}
+	for _, want := range []string{
+		"<env>",
+		"Working directory: /repo/session",
+		"Platform: test/os",
+		"Today's date: Apr 17 2026",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("reminder missing %q: %q", want, got)
+		}
+	}
+}
+
+func TestCallLLMInjectsWorkingDirectoryReminderIntoFirstProviderRequest(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.cachedWorkDir = "/repo/session"
+	a.cachedAgentsMD = ""
+	a.refreshSystemPrompt()
+	a.refreshSessionContextReminder()
+
+	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{Content: "ok", StopReason: "stop"}}}}
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "")
+
+	_, err := a.callLLM(t.Context(), []message.Message{{Role: "user", Content: "where am I"}})
+	if err != nil {
+		t.Fatalf("callLLM: %v", err)
+	}
+	seen := provider.seenMessages[0]
+	if len(seen) < 2 {
+		t.Fatalf("provider messages = %#v, want reminder plus user message", seen)
+	}
+	if seen[0].Role != "user" || !strings.Contains(seen[0].Content, "Working directory: /repo/session") {
+		t.Fatalf("first provider message missing working directory reminder: %#v", seen[0])
+	}
+	if !strings.Contains(seen[1].Content, "where am I") {
+		t.Fatalf("actual user message = %q", seen[1].Content)
+	}
+}
+
 func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
 	got := buildSessionContextReminder(SessionEnvSnapshot{Date: "Apr 17 2026"}, "project rules body")
 	if got == "" {

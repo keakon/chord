@@ -39,8 +39,8 @@ type replaceEditArgs struct {
 
 func (EditTool) Name() string { return NameEdit }
 
-func (EditTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy(NameEdit, fileToolConcurrencyPolicy(args, false))
+func (t EditTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	return normalizeConcurrencyPolicy(NameEdit, fileToolConcurrencyPolicyInDir(args, false, t.BaseDir))
 }
 
 func (t EditTool) Description() string {
@@ -53,7 +53,7 @@ func (EditTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to the file to edit. Supports ~ for the current user's home directory.",
+				"description": "Absolute or relative path to the file to edit. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory.",
 			},
 			"old_string": map[string]any{
 				"type":        "string",
@@ -104,7 +104,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 
 	// Read the file.
-	editRead, err := readFileForEdit(resolvedPath, a.Path, "edit")
+	editRead, err := readFileForEdit(resolvedPath, a.Path, t.BaseDir, "edit")
 	if err != nil {
 		return "", err
 	}

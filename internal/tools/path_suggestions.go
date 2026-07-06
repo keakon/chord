@@ -45,17 +45,17 @@ func defaultPathSuggestionOptions() pathSuggestionOptions {
 	}
 }
 
-func fileNotFoundErrorWithPathSuggestions(path string, kind PathTargetKind) error {
-	msg := fmt.Sprintf("file not found: %s", formatToolPathInCurrentDirectory(path, path))
-	return withPathSuggestions(msg, path, kind)
+func fileNotFoundErrorWithPathSuggestionsInDir(path, baseDir string, kind PathTargetKind) error {
+	msg := fmt.Sprintf("file not found: %s", formatToolPathInDir(path, baseDir, path))
+	return withPathSuggestionsInDir(msg, path, baseDir, kind)
 }
 
-// withPathSuggestions returns baseMsg, optionally followed by a "Did you mean:"
+// withPathSuggestionsInDir returns baseMsg, optionally followed by a "Did you mean:"
 // block when existing-path suggestions are found for path. It lets callers that
 // need a custom base message (e.g. patch's "use write to create files" guidance)
 // still reuse the same suggestion discovery.
-func withPathSuggestions(baseMsg, path string, kind PathTargetKind) error {
-	suggestions := suggestExistingToolPaths(path, kind)
+func withPathSuggestionsInDir(baseMsg, path string, baseDir string, kind PathTargetKind) error {
+	suggestions := suggestExistingToolPathsInDir(path, baseDir, kind)
 	if len(suggestions) == 0 {
 		return errors.New(baseMsg)
 	}
@@ -69,11 +69,15 @@ func withPathSuggestions(baseMsg, path string, kind PathTargetKind) error {
 	return errors.New(b.String())
 }
 
-func suggestExistingToolPaths(path string, kind PathTargetKind) []string {
-	return suggestExistingToolPathsWithOptions(path, kind, defaultPathSuggestionOptions())
+func suggestExistingToolPathsInDir(path string, baseDir string, kind PathTargetKind) []string {
+	return suggestExistingToolPathsWithOptionsInDir(path, baseDir, kind, defaultPathSuggestionOptions())
 }
 
 func suggestExistingToolPathsWithOptions(path string, kind PathTargetKind, opts pathSuggestionOptions) []string {
+	return suggestExistingToolPathsWithOptionsInDir(path, "", kind, opts)
+}
+
+func suggestExistingToolPathsWithOptionsInDir(path string, baseDir string, kind PathTargetKind, opts pathSuggestionOptions) []string {
 	if strings.TrimSpace(path) == "" {
 		return nil
 	}
@@ -93,11 +97,11 @@ func suggestExistingToolPathsWithOptions(path string, kind PathTargetKind, opts 
 		opts.MinScore = pathSuggestionMinScore
 	}
 
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathInDir(path, baseDir)
 	if err != nil {
 		return nil
 	}
-	if repaired, ok := suggestWhitespacePathRepair(path, kind); ok {
+	if repaired, ok := suggestWhitespacePathRepairInDir(path, baseDir, kind); ok {
 		return []string{repaired}
 	}
 	deadline := time.Now().Add(opts.Timeout)
@@ -118,7 +122,7 @@ func suggestExistingToolPathsWithOptions(path string, kind PathTargetKind, opts 
 			return
 		}
 		candidateSet[candidate] = struct{}{}
-		candidates = append(candidates, pathSuggestion{Path: formatSuggestedPath(path, candidate), Score: score})
+		candidates = append(candidates, pathSuggestion{Path: formatSuggestedPathInDir(path, candidate, baseDir), Score: score})
 	}
 
 	visited := 0
@@ -193,17 +197,21 @@ func suggestExistingToolPathsWithOptions(path string, kind PathTargetKind, opts 
 }
 
 func suggestWhitespacePathRepair(path string, kind PathTargetKind) (string, bool) {
+	return suggestWhitespacePathRepairInDir(path, "", kind)
+}
+
+func suggestWhitespacePathRepairInDir(path, baseDir string, kind PathTargetKind) (string, bool) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" || !strings.Contains(trimmed, " ") {
 		return "", false
 	}
 	for _, repaired := range whitespaceRepairCandidates(trimmed) {
-		resolved, err := resolveToolPath(repaired)
+		resolved, err := resolveToolPathInDir(repaired, baseDir)
 		if err != nil {
 			continue
 		}
 		if info, statErr := os.Stat(resolved); statErr == nil && pathSuggestionMatchesKind(info, kind) {
-			return formatSuggestedPath(path, resolved), true
+			return formatSuggestedPathInDir(path, resolved, baseDir), true
 		}
 	}
 	return "", false
@@ -344,7 +352,10 @@ func shouldWalkForPathSuggestions(root string) bool {
 	return cleaned != string(filepath.Separator)
 }
 
-func formatSuggestedPath(requested, candidate string) string {
+func formatSuggestedPathInDir(requested, candidate, baseDir string) string {
+	if rel, ok := pathRelativeToBaseDir(candidate, baseDir); ok {
+		return filepath.ToSlash(rel)
+	}
 	if displayPath, ok := toolPathInCurrentDirectory(candidate); ok {
 		return displayPath
 	}
@@ -364,6 +375,39 @@ func formatSuggestedPath(requested, candidate string) string {
 		return candidate
 	}
 	return rel
+}
+
+func formatToolPathInDir(path, baseDir, fallback string) string {
+	if strings.TrimSpace(baseDir) != "" {
+		resolved, err := resolveToolPathInDir(path, baseDir)
+		if err == nil {
+			if rel, ok := pathRelativeToBaseDir(resolved, baseDir); ok {
+				return filepath.ToSlash(rel)
+			}
+		}
+	}
+	return formatToolPathInCurrentDirectory(path, fallback)
+}
+
+func pathRelativeToBaseDir(path, baseDir string) (string, bool) {
+	if strings.TrimSpace(path) == "" || strings.TrimSpace(baseDir) == "" {
+		return "", false
+	}
+	base, err := resolveToolPathAbs(baseDir)
+	if err != nil {
+		return "", false
+	}
+	absPath, err := resolveToolPathAbs(path)
+	if err != nil {
+		return "", false
+	}
+	for _, pair := range [][2]string{{base, absPath}, cleanSymlinkedPathPair(base, absPath)} {
+		rel, ok := relativePathIfWithin(pair[0], pair[1])
+		if ok {
+			return rel, true
+		}
+	}
+	return "", false
 }
 
 // pathRelativeToHome renders candidate as ~/... when it lives under the user's

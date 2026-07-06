@@ -853,8 +853,9 @@ func TestPatchToolConcurrencyPolicyUsesPatchPath(t *testing.T) {
 	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "patch": patch})
 
 	policy := (PatchTool{BaseDir: dir}).ConcurrencyPolicy(args)
-	if policy.Mode != ConcurrencyModeWrite || policy.Resource != "file:demo.txt" {
-		t.Fatalf("policy = %+v, want write file:demo.txt", policy)
+	wantResource := "file:" + path
+	if policy.Mode != ConcurrencyModeWrite || policy.Resource != wantResource {
+		t.Fatalf("policy = %+v, want write %s", policy, wantResource)
 	}
 }
 

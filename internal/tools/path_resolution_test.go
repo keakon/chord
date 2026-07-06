@@ -150,6 +150,79 @@ func TestWriteAndReadToolSupportTildePaths(t *testing.T) {
 	}
 }
 
+func TestFileToolsResolveRelativePathsFromBaseDir(t *testing.T) {
+	base := t.TempDir()
+	other := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(other); err != nil {
+		t.Fatalf("Chdir other: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
+	if _, err := (WriteTool{BaseDir: base}).Execute(context.Background(), mustMarshal(t, map[string]any{
+		"path":    "nested/base.txt",
+		"content": "needle\n",
+	})); err != nil {
+		t.Fatalf("WriteTool.Execute: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "nested", "base.txt")); err != nil {
+		t.Fatalf("expected file under base dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(other, "nested", "base.txt")); !os.IsNotExist(err) {
+		t.Fatalf("relative write should not use process cwd, stat err = %v", err)
+	}
+
+	readOut, err := (ReadTool{BaseDir: base}).Execute(context.Background(), mustMarshal(t, map[string]any{"path": "nested/base.txt"}))
+	if err != nil {
+		t.Fatalf("ReadTool.Execute: %v", err)
+	}
+	if !strings.Contains(readOut, "needle") {
+		t.Fatalf("Read output missing content: %q", readOut)
+	}
+
+	grepOut, err := (GrepTool{BaseDir: base}).Execute(context.Background(), mustMarshal(t, map[string]any{"pattern": "needle"}))
+	if err != nil {
+		t.Fatalf("GrepTool.Execute: %v", err)
+	}
+	if !strings.Contains(grepOut, "nested/base.txt:1:needle") {
+		t.Fatalf("Grep output should use session-relative display path, got %q", grepOut)
+	}
+
+	shellOut, err := (ShellTool{BaseDir: base}).Execute(context.Background(), mustMarshal(t, map[string]any{
+		"command":     "pwd",
+		"description": "print working directory",
+		"timeout":     5,
+	}))
+	if err != nil {
+		t.Fatalf("ShellTool.Execute: %v", err)
+	}
+	gotPwd, err := filepath.EvalSymlinks(strings.TrimSpace(shellOut))
+	if err != nil {
+		t.Fatalf("EvalSymlinks shell pwd: %v", err)
+	}
+	wantPwd, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		t.Fatalf("EvalSymlinks base: %v", err)
+	}
+	if gotPwd != wantPwd {
+		t.Fatalf("shell pwd = %q, want %q", gotPwd, wantPwd)
+	}
+
+	deleteOut, err := (DeleteTool{BaseDir: base}).Execute(context.Background(), mustMarshal(t, map[string]any{
+		"paths":  []string{"nested/base.txt"},
+		"reason": "base dir delete",
+	}))
+	if err != nil {
+		t.Fatalf("DeleteTool.Execute: %v", err)
+	}
+	if !strings.Contains(deleteOut, "nested/base.txt") || strings.Contains(deleteOut, base) {
+		t.Fatalf("Delete output should use session-relative display path, got %q", deleteOut)
+	}
+}
+
 func TestWriteToolRejectsBlockedDevicePath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("device path blacklist is unix-specific")

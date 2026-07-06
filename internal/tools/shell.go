@@ -54,6 +54,7 @@ func (c *cappedWriter) String() string {
 // ShellTool executes shell commands.
 type ShellTool struct {
 	shellType string // "bash", "powershell", "git-bash", or "posix"
+	BaseDir   string // session working directory for relative workdir; empty keeps process cwd behavior
 }
 
 // NewShellTool creates a ShellTool with the detected shell type.
@@ -272,7 +273,7 @@ func (ShellTool) Parameters() map[string]any {
 			},
 			"workdir": map[string]any{
 				"type":        "string",
-				"description": "Working directory for the command. Supports ~ for the current user's home directory. Defaults to current directory.",
+				"description": "Working directory for the command. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Defaults to the session working directory.",
 			},
 			"timeout": map[string]any{
 				"type":        "integer",
@@ -312,11 +313,21 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	binary, args := resolveShellExecution(t.shellType, a.Command)
 	cmd := exec.Command(binary, args...)
 	_, _ = configureCommandProcessGroup(cmd)
+	resolvedWorkdir := strings.TrimSpace(t.BaseDir)
 	if a.Workdir != "" {
-		resolvedWorkdir, err := resolveToolPath(a.Workdir)
+		var err error
+		resolvedWorkdir, err = resolveToolPathInDir(a.Workdir, t.BaseDir)
 		if err != nil {
 			return "", fmt.Errorf("resolve workdir: %w", err)
 		}
+	} else if resolvedWorkdir != "" {
+		var err error
+		resolvedWorkdir, err = resolveToolPath(resolvedWorkdir)
+		if err != nil {
+			return "", fmt.Errorf("resolve workdir: %w", err)
+		}
+	}
+	if resolvedWorkdir != "" {
 		cmd.Dir = resolvedWorkdir
 	}
 	buf := &cappedWriter{maxBytes: maxOutputBytes}

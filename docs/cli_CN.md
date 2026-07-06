@@ -51,7 +51,9 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 
 ## `chord`（默认 — TUI）
 
-在当前目录启动本地 TUI。首次启动时，如果全局 `config.yaml` 缺失且 Chord 能取得控制 TTY，就会先启动一次性的初始化向导，再进入 TUI。向导会写入 `config.yaml`，必要时再写入 `auth.yaml`，如果已有匹配的 `auth.yaml` 凭据则尽量直接复用，也可以在初始化过程中直接完成 Codex OAuth 登录，并在结束时展示实际路径。仅仅 stdin 被重定向并不会禁用向导：只要还能打开控制 TTY，初始化仍会在那里交互。只有没有控制 TTY 时，Chord 才会直接报初始化错误，不会等待输入。`help`、`version` 和非 root 子命令都不会触发这个向导。
+在当前目录启动本地 TUI。该目录会成为 session working directory：相对文件路径、省略的 `shell` / `spawn` workdir，以及省略的 `grep` / `glob` 搜索根都会从这里解析。当 `--worktree` 或 `chord resume` 切换到 Chord 管理的 worktree 时，该 worktree 路径会成为 session working directory；文件工具本身不需要理解 git worktree。Chord 会在第一条用户消息前（以及上下文压缩后）注入这个目录，让模型看到与工具一致的路径基准。面向用户的工具卡片可以为了可读性显示相对该目录的路径，但原始 tool-call 参数和 session 导出会保留模型实际传入的路径，便于审计。
+
+首次启动时，如果全局 `config.yaml` 缺失且 Chord 能取得控制 TTY，就会先启动一次性的初始化向导，再进入 TUI。向导会写入 `config.yaml`，必要时再写入 `auth.yaml`，如果已有匹配的 `auth.yaml` 凭据则尽量直接复用，也可以在初始化过程中直接完成 Codex OAuth 登录，并在结束时展示实际路径。仅仅 stdin 被重定向并不会禁用向导：只要还能打开控制 TTY，初始化仍会在那里交互。只有没有控制 TTY 时，Chord 才会直接报初始化错误，不会等待输入。`help`、`version` 和非 root 子命令都不会触发这个向导。
 
 ### Flag
 

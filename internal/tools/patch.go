@@ -96,8 +96,8 @@ type unsupportedPatchOps struct {
 
 func (t PatchTool) Name() string { return NamePatch }
 
-func (PatchTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy(NamePatch, fileToolConcurrencyPolicy(args, false))
+func (t PatchTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	return normalizeConcurrencyPolicy(NamePatch, fileToolConcurrencyPolicyInDir(args, false, t.BaseDir))
 }
 
 func (t PatchTool) Description() string {
@@ -110,7 +110,7 @@ func (t PatchTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Path to the verified existing file to update. May be absolute or relative and supports ~ for the current user's home directory. Do not guess paths.",
+				"description": "Path to the verified existing file to update. Relative paths resolve from the session working directory. May be absolute or relative and supports ~ for the current user's home directory. Do not guess paths.",
 			},
 			"patch": map[string]any{
 				"type":        "string",
@@ -148,7 +148,7 @@ func (t PatchTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		err = fmt.Errorf("resolve path: %w. No files were modified", err)
 		return formatPatchErrorResult(a.Patch, err), err
 	}
-	editRead, err := readFileForEdit(resolvedPath, plan.Path, "patch")
+	editRead, err := readFileForEdit(resolvedPath, plan.Path, t.BaseDir, "patch")
 	if err != nil {
 		err = fmt.Errorf("%w. No files were modified", err)
 		return formatPatchErrorResult(a.Patch, err), err
@@ -250,7 +250,7 @@ func buildPatchPlanWithContext(ctx context.Context, path, patchText, baseDir str
 	if err != nil {
 		if os.IsNotExist(err) {
 			base := fmt.Sprintf("file not found: %s. patch only updates one existing file. Use write to create files. No files were modified", parsed.Path)
-			return PatchPlan{}, withPathSuggestions(base, parsed.Path, PathTargetRegularFile)
+			return PatchPlan{}, withPathSuggestionsInDir(base, parsed.Path, baseDir, PathTargetRegularFile)
 		}
 		return PatchPlan{}, fmt.Errorf("accessing path: %w. No files were modified", err)
 	}
@@ -661,12 +661,9 @@ func extractLegacyEditEnvelopePath(patchText string) string {
 }
 
 func resolveEditPathForBase(path, baseDir string) (string, error) {
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathInDir(path, baseDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w", err)
-	}
-	if strings.TrimSpace(baseDir) != "" && !filepath.IsAbs(resolved) {
-		resolved = filepath.Join(baseDir, resolved)
 	}
 	return filepath.Clean(resolved), nil
 }

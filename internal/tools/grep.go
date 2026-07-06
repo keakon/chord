@@ -18,7 +18,9 @@ import (
 )
 
 // GrepTool searches file contents using a regex pattern.
-type GrepTool struct{}
+type GrepTool struct {
+	BaseDir string // session working directory for relative paths; empty keeps process cwd behavior
+}
 
 type grepArgs struct {
 	Pattern         string   `json:"pattern"`
@@ -76,13 +78,13 @@ var errMaxGrepMatchesReached = errors.New("max grep matches reached")
 
 func (GrepTool) Name() string { return NameGrep }
 
-func (GrepTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy(NameGrep, pathsToolConcurrencyPolicy(args, "paths"))
+func (t GrepTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	return normalizeConcurrencyPolicy(NameGrep, pathsToolConcurrencyPolicyInDir(args, "paths", t.BaseDir))
 }
 
 func (GrepTool) Description() string {
 	return "Search file contents using a regular expression. If pattern is not valid regex, it is safely searched as literal text and the result reports that fallback." +
-		" Use paths for one or more files/directories (JSON array, e.g. paths: [\"internal\", \"cmd\"]), and includes for optional path globs such as **/*.go (JSON array, e.g. includes: [\"**/*.go\"])." +
+		" Use paths for one or more files/directories (JSON array, e.g. paths: [\"internal\", \"cmd\"]), and includes for optional path globs such as **/*.go (JSON array, e.g. includes: [\"**/*.go\"]). Relative paths resolve from the session working directory." +
 		" If the exact file path is known, pass the full file path in paths instead of searching its parent directory with the filename in includes; includes filters files during traversal and does not avoid walking the search path." +
 		" Single bare strings are tolerated for paths/includes but arrays are preferred." +
 		" Returns matching lines with file paths and line numbers." +
@@ -103,7 +105,7 @@ func (GrepTool) Parameters() map[string]any {
 				"items": map[string]any{
 					"type": "string",
 				},
-				"description":      "One or more files/directories to search (JSON array, e.g. [\"internal\", \"cmd\"]). Supports ~ for the current user's home directory. Defaults to the current directory when omitted.",
+				"description":      "One or more files/directories to search (JSON array, e.g. [\"internal\", \"cmd\"]). Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Defaults to the session working directory when omitted.",
 				"coerceFromString": true,
 			},
 			"includes": map[string]any{
@@ -133,7 +135,7 @@ func (GrepTool) legacyArgAliases() map[string]string {
 	return map[string]string{"path": "paths", "glob": "includes"}
 }
 
-func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	startedAt := time.Now()
 	var a grepArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
@@ -154,19 +156,19 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	var outputBytes int
 	var scannedFiles int64
 	truncated := false
-	paths := grepSearchPaths(a)
+	paths := grepSearchPaths(a, t.BaseDir)
 	includes := grepIncludes(a)
 	searched := make([]string, 0, len(paths))
 
 	var pathErrors []string
 	for _, searchPath := range paths {
-		resolvedSearchPath, info, err := resolveExistingToolPath(searchPath, PathTargetAny, "search")
+		resolvedSearchPath, info, err := resolveExistingToolPathInDir(searchPath, t.BaseDir, PathTargetAny, "search")
 		if err != nil {
-			pathErrors = append(pathErrors, grepPathErrorWithHint(searchPath, err).Error())
+			pathErrors = append(pathErrors, grepPathErrorWithHint(searchPath, t.BaseDir, err).Error())
 			continue
 		}
 		searched = append(searched, resolvedSearchPath)
-		rootMatches, rootBytes, rootScanned, rootTruncated, err := grepSearchRoot(ctx, searchPath, resolvedSearchPath, info, re, includes, maxGrepMatches-len(matches), maxGrepOutputBytes-outputBytes)
+		rootMatches, rootBytes, rootScanned, rootTruncated, err := grepSearchRoot(ctx, searchPath, resolvedSearchPath, info, re, includes, t.BaseDir, maxGrepMatches-len(matches), maxGrepOutputBytes-outputBytes)
 		if err != nil {
 			pathErrors = append(pathErrors, fmt.Sprintf("%s: %v", resolvedSearchPath, err))
 			continue
@@ -219,10 +221,14 @@ func (GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 	return result, nil
 }
 
-func grepSearchPaths(a grepArgs) []string {
+func grepSearchPaths(a grepArgs, baseDir string) []string {
 	paths := normalizeStringList(a.Paths)
 	if len(paths) == 0 {
-		paths = []string{"."}
+		if strings.TrimSpace(baseDir) != "" {
+			paths = []string{baseDir}
+		} else {
+			paths = []string{"."}
+		}
 	}
 	return paths
 }
@@ -290,7 +296,7 @@ func DecodeStringOrList(raw json.RawMessage) ([]string, bool, error) {
 	return []string{single}, true, nil
 }
 
-func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, info os.FileInfo, re *regexp.Regexp, includes []string, maxMatches, maxBytes int) ([]string, int, int64, bool, error) {
+func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, info os.FileInfo, re *regexp.Regexp, includes []string, baseDir string, maxMatches, maxBytes int) ([]string, int, int64, bool, error) {
 	if maxMatches <= 0 || maxBytes <= 0 {
 		return nil, 0, 0, true, nil
 	}
@@ -301,7 +307,9 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 		if IsBinaryExtension(filepath.Base(resolvedSearchPath)) {
 			return nil, 0, 1, false, nil
 		}
-		fileMatches, truncated, err := searchFile(resolvedSearchPath, re, maxMatches, maxBytes)
+		fileMatches, truncated, err := searchFile(resolvedSearchPath, func() string {
+			return displayPathForBaseDir(resolvedSearchPath, baseDir)
+		}, re, maxMatches, maxBytes)
 		if err != nil {
 			return nil, 0, 0, false, err
 		}
@@ -333,7 +341,9 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 			if IsBinaryExtension(filepath.Base(file)) {
 				continue
 			}
-			fileMatches, fileTruncated, err := searchFile(file, re, remainingMatches, remainingBytes)
+			fileMatches, fileTruncated, err := searchFile(file, func() string {
+				return displayPathForBaseDir(file, baseDir)
+			}, re, remainingMatches, remainingBytes)
 			if err != nil {
 				return nil, 0, 0, false, err
 			}
@@ -399,7 +409,9 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 			truncated = true
 			return errMaxGrepMatchesReached
 		}
-		fileMatches, truncatedByBytes, err := searchFile(path, re, remainingMatches, remainingBytes)
+		fileMatches, truncatedByBytes, err := searchFile(path, func() string {
+			return displayPathForBaseDir(path, baseDir)
+		}, re, remainingMatches, remainingBytes)
 		if err != nil {
 			return nil
 		}
@@ -429,7 +441,7 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 	return matches, outputBytes, scannedFiles, truncated, nil
 }
 
-func grepPathErrorWithHint(path string, err error) error {
+func grepPathErrorWithHint(path string, baseDir string, err error) error {
 	if err == nil || !strings.Contains(err.Error(), "path not found:") || !strings.ContainsAny(path, " \t\n\r") {
 		return err
 	}
@@ -438,7 +450,7 @@ func grepPathErrorWithHint(path string, err error) error {
 		return err
 	}
 	for _, part := range parts {
-		resolved, resolveErr := resolveToolPath(part)
+		resolved, resolveErr := resolveToolPathInDir(part, baseDir)
 		if resolveErr != nil {
 			return err
 		}
@@ -452,7 +464,7 @@ func grepPathErrorWithHint(path string, err error) error {
 // searchFile reads a file and returns matching lines in "path:linenum:content" format.
 // Binary files are skipped to avoid producing mojibake / stray terminal control
 // sequences in the tool output.
-func searchFile(path string, re *regexp.Regexp, maxMatches, maxBytes int) ([]string, bool, error) {
+func searchFile(path string, displayPathFunc func() string, re *regexp.Regexp, maxMatches, maxBytes int) ([]string, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, false, err
@@ -477,13 +489,28 @@ func searchFile(path string, re *regexp.Regexp, maxMatches, maxBytes int) ([]str
 	// Increase scanner buffer for long lines.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	lineNum := 0
+	displayPath := ""
+	displayPathResolved := false
+	getDisplayPath := func() string {
+		if !displayPathResolved {
+			if displayPathFunc != nil {
+				displayPath = displayPathFunc()
+			}
+			if strings.TrimSpace(displayPath) == "" {
+				displayPath = path
+			}
+			displayPathResolved = true
+		}
+		return displayPath
+	}
 
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Text()
 		if re.MatchString(line) {
+			displayPath := getDisplayPath()
 			display := sanitizeGrepLine(line)
-			match := fmt.Sprintf("%s:%d:%s", path, lineNum, display)
+			match := fmt.Sprintf("%s:%d:%s", displayPath, lineNum, display)
 			matchBytes := len(match)
 			if len(matches) > 0 {
 				matchBytes++
@@ -492,7 +519,7 @@ func searchFile(path string, re *regexp.Regexp, maxMatches, maxBytes int) ([]str
 				if len(matches) > 0 {
 					return matches, true, scanner.Err()
 				}
-				prefix := fmt.Sprintf("%s:%d:", path, lineNum)
+				prefix := fmt.Sprintf("%s:%d:", displayPath, lineNum)
 				available := maxBytes - len(prefix) - len("...")
 				if available <= 0 {
 					return nil, true, scanner.Err()

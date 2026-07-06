@@ -76,8 +76,27 @@ func resolveToolPath(path string) (string, error) {
 	return filepath.Clean(expanded), nil
 }
 
+func resolveToolPathInDir(path, baseDir string) (string, error) {
+	resolved, err := resolveToolPath(path)
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(resolved) || strings.TrimSpace(baseDir) == "" || strings.TrimSpace(resolved) == "" {
+		return resolved, nil
+	}
+	base, err := expandTildePath(baseDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(filepath.Join(base, resolved)), nil
+}
+
 func ResolveToolPath(path string) (string, error) {
 	return resolveToolPath(path)
+}
+
+func ResolveToolPathInDir(path, baseDir string) (string, error) {
+	return resolveToolPathInDir(path, baseDir)
 }
 
 func resolveToolPathAbs(path string) (string, error) {
@@ -86,6 +105,25 @@ func resolveToolPathAbs(path string) (string, error) {
 		return "", err
 	}
 	return filepath.Abs(resolved)
+}
+
+func resolveToolPathAbsInDir(path, baseDir string) (string, error) {
+	resolved, err := resolveToolPathInDir(path, baseDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(resolved)
+}
+
+func displayPathForBaseDir(path, baseDir string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || strings.TrimSpace(baseDir) == "" {
+		return path
+	}
+	if rel, ok := pathRelativeToBaseDir(path, baseDir); ok {
+		return filepath.ToSlash(rel)
+	}
+	return path
 }
 
 func isBlockedDevicePath(path string) bool {
@@ -142,7 +180,11 @@ func ensureDirectoryPath(path string, info os.FileInfo) error {
 }
 
 func resolveExistingToolPath(path string, kind PathTargetKind, action string) (string, os.FileInfo, error) {
-	resolvedPath, err := resolveToolPath(path)
+	return resolveExistingToolPathInDir(path, "", kind, action)
+}
+
+func resolveExistingToolPathInDir(path, baseDir string, kind PathTargetKind, action string) (string, os.FileInfo, error) {
+	resolvedPath, err := resolveToolPathInDir(path, baseDir)
 	if err != nil {
 		return "", nil, fmt.Errorf("resolve path: %w", err)
 	}

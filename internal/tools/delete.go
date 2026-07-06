@@ -18,7 +18,8 @@ import (
 // If LSP is set, it closes matching documents in language servers and clears
 // touched-file tracking for deleted or already-absent paths.
 type DeleteTool struct {
-	LSP *lsp.Manager // nil when LSP not configured
+	LSP     *lsp.Manager // nil when LSP not configured
+	BaseDir string       // session working directory for relative paths; empty keeps process cwd behavior
 }
 
 // DeleteRequest is the normalized Delete tool input.
@@ -42,10 +43,10 @@ type deleteExecutionResult struct {
 
 func (t DeleteTool) Name() string { return NameDelete }
 
-func (DeleteTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+func (t DeleteTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 	// Delete may target multiple files. Until runtime batching grows native
 	// multi-resource support, keep it conservatively exclusive.
-	return normalizeConcurrencyPolicy(NameDelete, deleteToolConcurrencyPolicy(args))
+	return normalizeConcurrencyPolicy(NameDelete, deleteToolConcurrencyPolicyInDir(args, t.BaseDir))
 }
 
 func (t DeleteTool) Description() string {
@@ -62,7 +63,7 @@ func (t DeleteTool) Parameters() map[string]any {
 					"type": "string",
 				},
 				"minItems":    1,
-				"description": "Absolute or relative paths to verified files or symlinks to delete. Supports ~ for the current user's home directory. Does not delete directories. Do not guess paths for destructive operations.",
+				"description": "Absolute or relative paths to verified files or symlinks to delete. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Does not delete directories. Do not guess paths for destructive operations.",
 			},
 			"reason": map[string]any{
 				"type":        "string",
@@ -79,6 +80,10 @@ func (t DeleteTool) IsReadOnly() bool { return false }
 // DecodeDeleteRequest parses, validates, cleans, de-duplicates, and sorts the
 // Delete tool arguments. Unknown fields are rejected.
 func DecodeDeleteRequest(raw json.RawMessage) (DeleteRequest, error) {
+	return DecodeDeleteRequestInDir(raw, "")
+}
+
+func DecodeDeleteRequestInDir(raw json.RawMessage, baseDir string) (DeleteRequest, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 
@@ -89,7 +94,7 @@ func DecodeDeleteRequest(raw json.RawMessage) (DeleteRequest, error) {
 	if err := dec.Decode(&struct{}{}); err != nil && err != io.EOF {
 		return DeleteRequest{}, fmt.Errorf("invalid arguments: %w", err)
 	}
-	req.Paths = NormalizeDeletePaths(req.Paths)
+	req.Paths = NormalizeDeletePathsInDir(req.Paths, baseDir)
 	if len(req.Paths) == 0 {
 		return DeleteRequest{}, fmt.Errorf("paths is required")
 	}
@@ -103,6 +108,10 @@ func DecodeDeleteRequest(raw json.RawMessage) (DeleteRequest, error) {
 // NormalizeDeletePaths applies trimming, resolveToolPath when possible,
 // de-duplication, and a stable lexical sort. Empty path entries are discarded.
 func NormalizeDeletePaths(paths []string) []string {
+	return NormalizeDeletePathsInDir(paths, "")
+}
+
+func NormalizeDeletePathsInDir(paths []string, baseDir string) []string {
 	if len(paths) == 0 {
 		return nil
 	}
@@ -113,7 +122,7 @@ func NormalizeDeletePaths(paths []string) []string {
 		if path == "" {
 			continue
 		}
-		resolved, err := resolveToolPath(path)
+		resolved, err := resolveToolPathInDir(path, baseDir)
 		if err != nil {
 			resolved = filepath.Clean(path)
 		}
@@ -196,13 +205,13 @@ func ParseDeleteResult(text string) DeleteResultGroups {
 }
 
 func (t DeleteTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
-	req, err := DecodeDeleteRequest(raw)
+	req, err := DecodeDeleteRequestInDir(raw, t.BaseDir)
 	if err != nil {
 		return "", err
 	}
 
 	result, execErr := t.executeDelete(ctx, req)
-	text := formatDeleteResult(result, execErr)
+	text := formatDeleteResult(result, execErr, t.BaseDir)
 	if execErr == nil {
 		return text, nil
 	}
@@ -288,7 +297,7 @@ func (t DeleteTool) clearLSPDeleteState(ctx context.Context, path string, notify
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if absPath, err := resolveToolPathAbs(path); err == nil {
+	if absPath, err := resolveToolPathAbsInDir(path, t.BaseDir); err == nil {
 		t.LSP.UnmarkTouched(absPath)
 		if notifyDeleted {
 			_ = t.LSP.NotifyWatchedFileChanged(ctx, absPath, lsp.WatchedFileDeleted)
@@ -297,7 +306,8 @@ func (t DeleteTool) clearLSPDeleteState(ctx context.Context, path string, notify
 	}
 }
 
-func formatDeleteResult(result deleteExecutionResult, execErr error) string {
+func formatDeleteResult(result deleteExecutionResult, execErr error, baseDir string) string {
+	result = result.withDisplayPaths(baseDir)
 	var sections []string
 	if len(result.Deleted) > 0 {
 		sections = append(sections, formatDeletePathsSection("Deleted", result.Deleted))
@@ -329,6 +339,39 @@ func formatDeleteResult(result deleteExecutionResult, execErr error) string {
 		return headline
 	}
 	return headline + "\n\n" + strings.Join(sections, "\n\n")
+}
+
+func (r deleteExecutionResult) withDisplayPaths(baseDir string) deleteExecutionResult {
+	if strings.TrimSpace(baseDir) == "" {
+		return r
+	}
+	mapPaths := func(paths []string) []string {
+		if len(paths) == 0 {
+			return paths
+		}
+		out := make([]string, len(paths))
+		for i, path := range paths {
+			out[i] = displayPathForBaseDir(path, baseDir)
+		}
+		return out
+	}
+	mapIssues := func(issues []deletePathIssue) []deletePathIssue {
+		if len(issues) == 0 {
+			return issues
+		}
+		out := make([]deletePathIssue, len(issues))
+		for i, issue := range issues {
+			issue.Path = displayPathForBaseDir(issue.Path, baseDir)
+			out[i] = issue
+		}
+		return out
+	}
+	r.Deleted = mapPaths(r.Deleted)
+	r.AlreadyAbsent = mapPaths(r.AlreadyAbsent)
+	r.NotAttempted = mapPaths(r.NotAttempted)
+	r.Blocked = mapIssues(r.Blocked)
+	r.Failed = mapIssues(r.Failed)
+	return r
 }
 
 func formatDeletePathsSection(title string, paths []string) string {

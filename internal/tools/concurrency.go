@@ -122,20 +122,24 @@ func splitConcurrencyResource(resource string) (kind, path string, ok bool) {
 }
 
 func fileToolConcurrencyPolicy(args json.RawMessage, readOnly bool) ConcurrencyPolicy {
+	return fileToolConcurrencyPolicyInDir(args, readOnly, "")
+}
+
+func fileToolConcurrencyPolicyInDir(args json.RawMessage, readOnly bool, baseDir string) ConcurrencyPolicy {
 	var parsed struct {
 		Path string `json:"path"`
 	}
 	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
 		return ConcurrencyPolicy{}
 	}
-	return filePathConcurrencyPolicy(parsed.Path, readOnly)
+	return filePathConcurrencyPolicyInDir(parsed.Path, readOnly, baseDir)
 }
 
-func filePathConcurrencyPolicy(path string, readOnly bool) ConcurrencyPolicy {
+func filePathConcurrencyPolicyInDir(path string, readOnly bool, baseDir string) ConcurrencyPolicy {
 	if strings.TrimSpace(path) == "" {
 		return ConcurrencyPolicy{}
 	}
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathInDir(path, baseDir)
 	if err != nil || resolved == "." || resolved == "" {
 		return ConcurrencyPolicy{}
 	}
@@ -146,14 +150,14 @@ func filePathConcurrencyPolicy(path string, readOnly bool) ConcurrencyPolicy {
 	return ConcurrencyPolicy{Resource: "file:" + resolved, Mode: mode}
 }
 
-func deleteToolConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	if _, err := DecodeDeleteRequest(args); err != nil {
+func deleteToolConcurrencyPolicyInDir(args json.RawMessage, baseDir string) ConcurrencyPolicy {
+	if _, err := DecodeDeleteRequestInDir(args, baseDir); err != nil {
 		return ConcurrencyPolicy{}
 	}
 	return defaultConcurrencyPolicy(NameDelete)
 }
 
-func pathToolConcurrencyPolicy(args json.RawMessage, field string) ConcurrencyPolicy {
+func pathToolConcurrencyPolicyInDir(args json.RawMessage, field string, baseDir string) ConcurrencyPolicy {
 	if strings.TrimSpace(field) == "" {
 		return ConcurrencyPolicy{}
 	}
@@ -173,7 +177,7 @@ func pathToolConcurrencyPolicy(args json.RawMessage, field string) ConcurrencyPo
 	if value == "" {
 		value = "."
 	}
-	resolved, err := resolveToolPath(value)
+	resolved, err := resolveToolPathInDir(value, baseDir)
 	if err != nil {
 		return ConcurrencyPolicy{}
 	}
@@ -183,7 +187,7 @@ func pathToolConcurrencyPolicy(args json.RawMessage, field string) ConcurrencyPo
 	return ConcurrencyPolicy{Resource: "path:" + resolved, Mode: ConcurrencyModeRead}
 }
 
-func pathsToolConcurrencyPolicy(args json.RawMessage, field string) ConcurrencyPolicy {
+func pathsToolConcurrencyPolicyInDir(args json.RawMessage, field string, baseDir string) ConcurrencyPolicy {
 	if strings.TrimSpace(field) == "" {
 		return ConcurrencyPolicy{}
 	}
@@ -193,7 +197,7 @@ func pathsToolConcurrencyPolicy(args json.RawMessage, field string) ConcurrencyP
 	}
 	raw, ok := parsed[field]
 	if !ok {
-		return pathToolConcurrencyPolicy(args, "path")
+		return pathToolConcurrencyPolicyInDir(args, "path", baseDir)
 	}
 	// Mirror the executor's scalar->array coercion so a bare-string path still
 	// gets a precise per-path read policy instead of a workspace-wide one.
@@ -205,7 +209,7 @@ func pathsToolConcurrencyPolicy(args json.RawMessage, field string) ConcurrencyP
 	if value == "" {
 		value = "."
 	}
-	resolved, err := resolveToolPath(value)
+	resolved, err := resolveToolPathInDir(value, baseDir)
 	if err != nil {
 		return ConcurrencyPolicy{}
 	}

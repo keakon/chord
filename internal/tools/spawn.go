@@ -11,6 +11,7 @@ import (
 // SpawnTool starts a background process that runs independently of the current turn.
 type SpawnTool struct {
 	shellType string // "bash", "powershell", "git-bash", or "posix"
+	BaseDir   string // session working directory for relative workdir; empty keeps process cwd behavior
 }
 
 // NewSpawnTool creates a SpawnTool with the detected shell type.
@@ -72,7 +73,7 @@ func (SpawnTool) Parameters() map[string]any {
 			},
 			"workdir": map[string]any{
 				"type":        "string",
-				"description": "Working directory for the command. Supports ~ for the current user's home directory. Defaults to current directory.",
+				"description": "Working directory for the command. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Defaults to the session working directory.",
 			},
 		},
 		"required":             []string{"command", "description"},
@@ -120,10 +121,16 @@ func (t SpawnTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	}
 	exposeLogToModel := kind == spawnKindService
 
-	var resolvedWorkdir string
-	var err error
+	resolvedWorkdir := strings.TrimSpace(t.BaseDir)
 	if strings.TrimSpace(a.Workdir) != "" {
-		resolvedWorkdir, err = resolveToolPath(a.Workdir)
+		var err error
+		resolvedWorkdir, err = resolveToolPathInDir(a.Workdir, t.BaseDir)
+		if err != nil {
+			return "", fmt.Errorf("resolve workdir: %w", err)
+		}
+	} else if resolvedWorkdir != "" {
+		var err error
+		resolvedWorkdir, err = resolveToolPath(resolvedWorkdir)
 		if err != nil {
 			return "", fmt.Errorf("resolve workdir: %w", err)
 		}

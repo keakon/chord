@@ -11,7 +11,8 @@ import (
 
 // ReadTool reads file contents with optional offset/limit paging.
 type ReadTool struct {
-	LSP lspStarter // nil when LSP not configured
+	LSP     lspStarter // nil when LSP not configured
+	BaseDir string     // session working directory for relative paths; empty keeps process cwd behavior
 }
 
 // lspStarter is the minimal interface ReadTool needs from lsp.Manager.
@@ -27,8 +28,8 @@ type readArgs struct {
 
 func (ReadTool) Name() string { return NameRead }
 
-func (ReadTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy(NameRead, fileToolConcurrencyPolicy(args, true))
+func (t ReadTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	return normalizeConcurrencyPolicy(NameRead, fileToolConcurrencyPolicyInDir(args, true, t.BaseDir))
 }
 
 func (ReadTool) Description() string {
@@ -41,7 +42,7 @@ func (ReadTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to an existing file to read. Supports ~ for the current user's home directory. Do not guess paths; verify uncertain paths before reading.",
+				"description": "Absolute or relative path to an existing file to read. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Do not guess paths; verify uncertain paths before reading.",
 			},
 			"offset": map[string]any{
 				"type":        "integer",
@@ -264,10 +265,10 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	if a.Path == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	resolvedPath, info, err := resolveExistingToolPath(a.Path, PathTargetRegularFile, "read")
+	resolvedPath, info, err := resolveExistingToolPathInDir(a.Path, t.BaseDir, PathTargetRegularFile, "read")
 	if err != nil {
 		if strings.Contains(err.Error(), "path not found") {
-			return "", fileNotFoundErrorWithPathSuggestions(a.Path, PathTargetRegularFile)
+			return "", fileNotFoundErrorWithPathSuggestionsInDir(a.Path, t.BaseDir, PathTargetRegularFile)
 		}
 		return "", err
 	}
@@ -338,7 +339,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 
 	if t.LSP != nil {
-		if absPath, absErr := resolveToolPathAbs(a.Path); absErr == nil {
+		if absPath, absErr := resolveToolPathAbsInDir(a.Path, t.BaseDir); absErr == nil {
 			t.LSP.Start(ctx, absPath)
 		}
 	}

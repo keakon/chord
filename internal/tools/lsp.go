@@ -13,7 +13,8 @@ import (
 
 // LspTool exposes LSP code intelligence (definition, find references, implementations) to the agent.
 type LspTool struct {
-	LSP *lsp.Manager // nil when LSP not configured
+	LSP     *lsp.Manager // nil when LSP not configured
+	BaseDir string       // session working directory for relative paths; empty keeps process cwd behavior
 }
 
 type lspArgs struct {
@@ -28,8 +29,8 @@ func (t LspTool) Name() string { return NameLsp }
 
 func (t LspTool) IsAvailable() bool { return t.LSP != nil }
 
-func (LspTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy(NameLsp, fileToolConcurrencyPolicy(args, true))
+func (t LspTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	return normalizeConcurrencyPolicy(NameLsp, fileToolConcurrencyPolicyInDir(args, true, t.BaseDir))
 }
 
 func (t LspTool) Description() string {
@@ -63,7 +64,7 @@ func (t LspTool) Parameters() map[string]any {
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to the verified file. Supports ~ for the current user's home directory. Do not guess paths.",
+				"description": "Absolute or relative path to the verified file. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Do not guess paths.",
 			},
 			"line": map[string]any{
 				"type":        "integer",
@@ -178,7 +179,7 @@ func (t LspTool) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 	if a.Path == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	absPath, err := resolveToolPathAbs(a.Path)
+	absPath, err := resolveToolPathAbsInDir(a.Path, t.BaseDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w", err)
 	}

@@ -130,7 +130,8 @@ func TestGrepToolParameterDescriptionsClarifyPathsAndIncludes(t *testing.T) {
 
 	for _, want := range []string{
 		"One or more files/directories to search",
-		"Defaults to the current directory",
+		"Relative paths resolve from the session working directory",
+		"Defaults to the session working directory",
 	} {
 		if !strings.Contains(pathDesc, want) {
 			t.Fatalf("paths description missing %q: %q", want, pathDesc)
@@ -166,7 +167,9 @@ func TestGlobToolParameterDescriptionsClarifyBasePathAndPatternScope(t *testing.
 
 	for _, want := range []string{
 		"Single base directory to search from",
+		"Relative paths resolve from the session working directory",
 		"Supports ~",
+		"Defaults to the session working directory",
 	} {
 		if !strings.Contains(pathDesc, want) {
 			t.Fatalf("path description missing %q: %q", want, pathDesc)

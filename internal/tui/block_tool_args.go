@@ -224,14 +224,23 @@ func displayToolPath(path, workingDir string) string {
 	if path == "" {
 		return ""
 	}
-	if !filepath.IsAbs(path) {
-		return path
-	}
 	workingDir = strings.TrimSpace(workingDir)
 	if workingDir == "" {
 		return path
 	}
-	rel, err := filepath.Rel(workingDir, path)
+	resolved, err := tools.ResolveToolPathInDir(path, workingDir)
+	if err != nil {
+		return path
+	}
+	absPath, err := filepath.Abs(resolved)
+	if err != nil {
+		return path
+	}
+	absWorkingDir, err := filepath.Abs(workingDir)
+	if err != nil {
+		return path
+	}
+	rel, err := filepath.Rel(absWorkingDir, absPath)
 	if err != nil {
 		return path
 	}
@@ -257,7 +266,19 @@ func displayToolDir(path, workingDir string) string {
 	if workingDir == "" {
 		return path
 	}
-	rel, err := filepath.Rel(workingDir, path)
+	resolved, err := tools.ResolveToolPathInDir(path, workingDir)
+	if err != nil {
+		return path
+	}
+	absPath, err := filepath.Abs(resolved)
+	if err != nil {
+		return path
+	}
+	absWorkingDir, err := filepath.Abs(workingDir)
+	if err != nil {
+		return path
+	}
+	rel, err := filepath.Rel(absWorkingDir, absPath)
 	if err != nil {
 		return path
 	}

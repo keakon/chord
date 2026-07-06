@@ -154,7 +154,7 @@ func TestGrepPathsParameterDescribesMultiplePaths(t *testing.T) {
 	if !ok {
 		t.Fatalf("paths description has type %T, want string", pathProp["description"])
 	}
-	for _, want := range []string{"One or more files/directories to search", "Supports ~", "Defaults to the current directory"} {
+	for _, want := range []string{"One or more files/directories to search", "Relative paths resolve from the session working directory", "Supports ~", "Defaults to the session working directory"} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("paths description %q missing %q", desc, want)
 		}
@@ -351,7 +351,7 @@ func TestGrepFirstLongLineIsBoundedByBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	matches, truncated, err := searchFile(path, regexp.MustCompile("needle"), maxGrepMatches, maxGrepOutputBytes)
+	matches, truncated, err := searchFile(path, func() string { return path }, regexp.MustCompile("needle"), maxGrepMatches, maxGrepOutputBytes)
 	if err != nil {
 		t.Fatalf("searchFile: %v", err)
 	}
@@ -366,6 +366,46 @@ func TestGrepFirstLongLineIsBoundedByBytes(t *testing.T) {
 	}
 	if !strings.Contains(matches[0], "needle") || !strings.HasSuffix(matches[0], "...") {
 		t.Fatalf("truncated match should keep prefix and marker, got %q", matches[0])
+	}
+}
+
+func TestSearchFileComputesDisplayPathLazily(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("alpha\nneedle one\nneedle two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls int
+	matches, truncated, err := searchFile(path, func() string {
+		calls++
+		return "display/notes.txt"
+	}, regexp.MustCompile("missing"), maxGrepMatches, maxGrepOutputBytes)
+	if err != nil {
+		t.Fatalf("searchFile missing: %v", err)
+	}
+	if truncated || len(matches) != 0 {
+		t.Fatalf("missing search returned matches=%v truncated=%v", matches, truncated)
+	}
+	if calls != 0 {
+		t.Fatalf("display path resolver calls for no-match search = %d, want 0", calls)
+	}
+
+	matches, truncated, err = searchFile(path, func() string {
+		calls++
+		return "display/notes.txt"
+	}, regexp.MustCompile("needle"), maxGrepMatches, maxGrepOutputBytes)
+	if err != nil {
+		t.Fatalf("searchFile matching: %v", err)
+	}
+	if truncated || len(matches) != 2 {
+		t.Fatalf("matching search returned matches=%v truncated=%v", matches, truncated)
+	}
+	if calls != 1 {
+		t.Fatalf("display path resolver calls for matching search = %d, want 1", calls)
+	}
+	if !strings.HasPrefix(matches[0], "display/notes.txt:2:") || !strings.HasPrefix(matches[1], "display/notes.txt:3:") {
+		t.Fatalf("matches used wrong display path: %#v", matches)
 	}
 }
 

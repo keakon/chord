@@ -16,11 +16,11 @@ type fileEditRead struct {
 	Info    os.FileInfo
 }
 
-func readFileForEdit(path, displayPath, binaryAction string) (fileEditRead, error) {
+func readFileForEdit(path, displayPath, baseDir, binaryAction string) (fileEditRead, error) {
 	decodedFile, data, err := ReadAndDecodeTextFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fileEditRead{}, fileNotFoundErrorWithPathSuggestions(displayPath, PathTargetRegularFile)
+			return fileEditRead{}, fileNotFoundErrorWithPathSuggestionsInDir(displayPath, baseDir, PathTargetRegularFile)
 		}
 		if errors.Is(err, ErrBinaryFile) {
 			return fileEditRead{}, fmt.Errorf("cannot %s binary file: %s", binaryAction, displayPath)

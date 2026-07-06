@@ -20,6 +20,7 @@ type ViewImageCapability interface {
 // part attached to the surrounding tool result.
 type ViewImageTool struct {
 	capability ViewImageCapability
+	BaseDir    string // session working directory for relative paths; empty keeps process cwd behavior
 }
 
 // NewViewImageTool builds a ViewImageTool. capability gates visibility; a nil
@@ -48,7 +49,7 @@ func (*ViewImageTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to a PNG or JPEG file. Supports ~ for the current user's home directory.",
+				"description": "Absolute or relative path to a PNG or JPEG file. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory.",
 			},
 			"label": map[string]any{
 				"type":        "string",
@@ -90,10 +91,10 @@ func (t *ViewImageTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 		return "", fmt.Errorf("image input is not available in this context")
 	}
 
-	resolvedPath, _, err := resolveExistingToolPath(a.Path, PathTargetRegularFile, "read")
+	resolvedPath, _, err := resolveExistingToolPathInDir(a.Path, t.BaseDir, PathTargetRegularFile, "read")
 	if err != nil {
 		if strings.Contains(err.Error(), "path not found") {
-			return "", fileNotFoundErrorWithPathSuggestions(a.Path, PathTargetRegularFile)
+			return "", fileNotFoundErrorWithPathSuggestionsInDir(a.Path, t.BaseDir, PathTargetRegularFile)
 		}
 		return "", err
 	}

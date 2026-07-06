@@ -14,7 +14,9 @@ import (
 )
 
 // GlobTool finds files matching a glob pattern with support for ** recursive matching.
-type GlobTool struct{}
+type GlobTool struct {
+	BaseDir string // session working directory for relative paths; empty keeps process cwd behavior
+}
 
 type globArgs struct {
 	Patterns        []string `json:"patterns,omitempty"`
@@ -56,8 +58,8 @@ const (
 
 func (GlobTool) Name() string { return NameGlob }
 
-func (GlobTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy(NameGlob, pathToolConcurrencyPolicy(args, "path"))
+func (t GlobTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	return normalizeConcurrencyPolicy(NameGlob, pathToolConcurrencyPolicyInDir(args, "path", t.BaseDir))
 }
 
 func (GlobTool) Description() string {
@@ -83,7 +85,7 @@ func (GlobTool) Parameters() map[string]any {
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Single base directory to search from. Supports ~ for the current user's home directory. Defaults to current directory.",
+				"description": "Single base directory to search from. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Defaults to the session working directory.",
 			},
 		},
 		"required":             []string{"patterns"},
@@ -104,7 +106,7 @@ func (GlobTool) legacyArgAliases() map[string]string {
 	return map[string]string{"pattern": "patterns"}
 }
 
-func (GlobTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+func (t GlobTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	startedAt := time.Now()
 	var a globArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
@@ -115,11 +117,14 @@ func (GlobTool) Execute(ctx context.Context, raw json.RawMessage) (string, error
 		return "", fmt.Errorf("patterns is required")
 	}
 
-	baseDir := a.Path
+	baseDir := strings.TrimSpace(a.Path)
 	if baseDir == "" {
-		baseDir = "."
+		baseDir = strings.TrimSpace(t.BaseDir)
+		if baseDir == "" {
+			baseDir = "."
+		}
 	}
-	resolvedBaseDir, err := resolveToolPath(baseDir)
+	resolvedBaseDir, err := resolveToolPathInDir(baseDir, t.BaseDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w", err)
 	}

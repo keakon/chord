@@ -15,7 +15,7 @@ Most personal development workflows should start with the local TUI.
 
 After startup, the input box is focused by default. Type a message and press `Enter` to send.
 
-Tool-call cards try to keep file paths concise: for file tools such as `read`, `edit`, `write`, and `delete`, paths inside the current working directory are shown as relative paths in the TUI, while paths outside that directory remain absolute.
+Tool-call cards try to keep file paths concise: for file tools such as `read`, `edit`, `write`, and `delete`, paths inside the session working directory are shown as relative paths in the TUI, while paths outside that directory remain absolute.
 
 The sidebar and info panel changed-file lists prioritize showing full `+N -N` line-change stats. When space is tight, filenames are truncated or omitted instead of cutting off the counts.
 
@@ -97,7 +97,7 @@ While arguments stream, the `patch` card follows `write`-style path display: no 
 Type `@` in the composer at the start of a line or after a space to open file completion.
 
 - Bare `@` uses a cached workspace index of text files. That index includes tracked files and untracked non-ignored files, but skips Git-ignored paths, hidden directories, binary extensions, and common noise directories.
-- Once you start typing a root-level filename prefix such as `@A`, Chord also checks the current working directory directly. This allows root files such as `AGENTS.md` to complete even when they were excluded from the cached index by `.gitignore` or local Git excludes.
+- Once you start typing a root-level filename prefix such as `@A`, Chord also checks the session working directory directly. This allows root files such as `AGENTS.md` to complete even when they were excluded from the cached index by `.gitignore` or local Git excludes.
 - If the query already looks like a path, such as `@docs/`, `@./`, `@~/`, or `@.config/`, Chord switches to direct filesystem completion for that directory instead of staying on the cached index. This path-mode completion can surface ignored paths when you explicitly type toward them.
 - Hidden entries stay hidden by default. To see them, make the query itself explicit, for example `@.`, `@.env`, `@./.`, or `@.config/`.
 - Completion is only input assistance. When you send the message, Chord reparses the final `@path` text; if you removed the mention before sending, that file is not attached.

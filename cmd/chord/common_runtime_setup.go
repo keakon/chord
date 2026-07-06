@@ -120,12 +120,12 @@ func ensureRuntimeLSP(ac *AppContext) {
 	}
 
 	ac.LSPManager = lsp.NewManager(ac.Cfg, ac.ProjectRoot, nil)
-	ac.Registry.Register(tools.ReadTool{LSP: ac.LSPManager})
-	ac.Registry.Register(tools.WriteTool{LSP: ac.LSPManager})
+	ac.Registry.Register(tools.ReadTool{LSP: ac.LSPManager, BaseDir: ac.ProjectRoot})
+	ac.Registry.Register(tools.WriteTool{LSP: ac.LSPManager, BaseDir: ac.ProjectRoot})
 	ac.Registry.Register(tools.PatchTool{LSP: ac.LSPManager, BaseDir: ac.ProjectRoot})
 	ac.Registry.Register(tools.EditTool{LSP: ac.LSPManager, BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.DeleteTool{LSP: ac.LSPManager})
-	ac.Registry.Register(tools.LspTool{LSP: ac.LSPManager})
+	ac.Registry.Register(tools.DeleteTool{LSP: ac.LSPManager, BaseDir: ac.ProjectRoot})
+	ac.Registry.Register(tools.LspTool{LSP: ac.LSPManager, BaseDir: ac.ProjectRoot})
 }
 
 func configureRuntimeStateProviders(ac *AppContext) {

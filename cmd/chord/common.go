@@ -534,11 +534,11 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 
 	// Tool registry.
 	ac.Registry = tools.NewRegistry()
-	ac.Registry.Register(tools.ReadTool{})
-	ac.Registry.Register(tools.WriteTool{})
+	ac.Registry.Register(tools.ReadTool{BaseDir: ac.ProjectRoot})
+	ac.Registry.Register(tools.WriteTool{BaseDir: ac.ProjectRoot})
 	ac.Registry.Register(tools.PatchTool{BaseDir: ac.ProjectRoot})
 	ac.Registry.Register(tools.EditTool{BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.DeleteTool{})
+	ac.Registry.Register(tools.DeleteTool{BaseDir: ac.ProjectRoot})
 
 	// Detect shell type and create appropriate ShellTool
 	detectedShell, err := shell.DetectShell()
@@ -547,14 +547,18 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		detectedShell = shell.ShellBash
 	}
 	log.Debugf("detected shell for command execution shell=%v", detectedShell.String())
-	ac.Registry.Register(tools.NewShellTool(detectedShell.String()))
+	shellTool := tools.NewShellTool(detectedShell.String())
+	shellTool.BaseDir = ac.ProjectRoot
+	ac.Registry.Register(shellTool)
 
-	ac.Registry.Register(tools.NewSpawnTool(detectedShell.String()))
+	spawnTool := tools.NewSpawnTool(detectedShell.String())
+	spawnTool.BaseDir = ac.ProjectRoot
+	ac.Registry.Register(spawnTool)
 	ac.Registry.Register(tools.SpawnStatusTool{})
 	ac.Registry.Register(tools.SpawnStopTool{})
-	ac.Registry.Register(tools.GrepTool{})
-	ac.Registry.Register(tools.GlobTool{})
-	ac.Registry.Register(tools.HandoffTool{})
+	ac.Registry.Register(tools.GrepTool{BaseDir: ac.ProjectRoot})
+	ac.Registry.Register(tools.GlobTool{BaseDir: ac.ProjectRoot})
+	ac.Registry.Register(tools.HandoffTool{BaseDir: ac.ProjectRoot})
 	ac.Registry.Register(tools.NewWebFetchTool(cfg.WebFetch, cfg.Proxy))
 
 	// MCP servers.
@@ -653,7 +657,9 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	// configs are loaded, only when subagent-mode agents are available.
 	ac.Registry.Register(tools.NewTodoWriteTool(ac.MainAgent))
 	ac.Registry.Register(tools.NewSkillTool(ac.MainAgent))
-	ac.Registry.Register(tools.NewViewImageTool(ac.MainAgent))
+	viewImageTool := tools.NewViewImageTool(ac.MainAgent)
+	viewImageTool.BaseDir = ac.ProjectRoot
+	ac.Registry.Register(viewImageTool)
 
 	// LLM factory for SubAgents.
 	ac.MainAgent.SetLLMFactory(buildSubAgentLLMFactory(ac, providerCfg, llmProvider, modelID, modelCfg, cfg, auth))
