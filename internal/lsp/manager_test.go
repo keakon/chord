@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/x/powernap/pkg/lsp/protocol"
+
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 )
@@ -41,6 +43,55 @@ func TestClientHandlesFileRejectsOutsideRoot(t *testing.T) {
 	client := &Client{cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
 	if client.HandlesFile(path) {
 		t.Fatal("HandlesFile should reject files outside root")
+	}
+}
+
+func TestNotifyWatchedFileChangedRoutesByFileTypeAcrossLanguages(t *testing.T) {
+	root := t.TempDir()
+	mgr := NewManager(&config.Config{}, root, nil)
+	goFake := &fakePowernapClient{}
+	tsFake := &fakePowernapClient{}
+	mgr.clients["gopls"] = &Client{client: goFake, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
+	mgr.clients["typescript"] = &Client{client: tsFake, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".ts", ".js"}}}
+
+	goPath := filepath.Join(root, "main.go")
+	jsPath := filepath.Join(root, "src", "main.js")
+	if err := mgr.NotifyWatchedFileChanged(context.Background(), goPath, WatchedFileCreated); err != nil {
+		t.Fatalf("NotifyWatchedFileChanged(go) error = %v", err)
+	}
+	if err := mgr.NotifyWatchedFileChanged(context.Background(), jsPath, WatchedFileChanged); err != nil {
+		t.Fatalf("NotifyWatchedFileChanged(js) error = %v", err)
+	}
+
+	if len(goFake.watchedFileEvents) != 1 {
+		t.Fatalf("gopls watched events = %+v, want 1", goFake.watchedFileEvents)
+	}
+	if got := goFake.watchedFileEvents[0].Type; got != protocol.Created {
+		t.Fatalf("gopls event type = %v, want Created", got)
+	}
+	if len(tsFake.watchedFileEvents) != 1 {
+		t.Fatalf("typescript watched events = %+v, want 1", tsFake.watchedFileEvents)
+	}
+	if got := tsFake.watchedFileEvents[0].Type; got != protocol.Changed {
+		t.Fatalf("typescript event type = %v, want Changed", got)
+	}
+}
+
+func TestNotifyWatchedFileChangedSendsDeletedEvent(t *testing.T) {
+	root := t.TempDir()
+	mgr := NewManager(&config.Config{}, root, nil)
+	fake := &fakePowernapClient{}
+	mgr.clients["rust-analyzer"] = &Client{client: fake, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".rs"}}}
+
+	path := filepath.Join(root, "src", "lib.rs")
+	if err := mgr.NotifyWatchedFileChanged(context.Background(), path, WatchedFileDeleted); err != nil {
+		t.Fatalf("NotifyWatchedFileChanged(delete) error = %v", err)
+	}
+	if len(fake.watchedFileEvents) != 1 {
+		t.Fatalf("watched events = %+v, want 1", fake.watchedFileEvents)
+	}
+	if got := fake.watchedFileEvents[0].Type; got != protocol.Deleted {
+		t.Fatalf("event type = %v, want Deleted", got)
 	}
 }
 

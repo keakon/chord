@@ -26,6 +26,7 @@ type fakePowernapClient struct {
 	exits                int
 	kills                int
 	didCloseURIs         []string
+	watchedFileEvents    []protocol.FileEvent
 	registeredHandlers   map[string]powertransport.Handler
 	registeredNotifies   map[string]powertransport.NotificationHandler
 	configNotifications  []any
@@ -62,6 +63,10 @@ func (f *fakePowernapClient) NotifyDidChangeTextDocument(context.Context, string
 }
 func (f *fakePowernapClient) NotifyDidCloseTextDocument(_ context.Context, uri string) error {
 	f.didCloseURIs = append(f.didCloseURIs, uri)
+	return nil
+}
+func (f *fakePowernapClient) NotifyDidChangeWatchedFiles(_ context.Context, changes []protocol.FileEvent) error {
+	f.watchedFileEvents = append(f.watchedFileEvents, changes...)
 	return nil
 }
 func (f *fakePowernapClient) NotifyWorkspaceDidChangeConfiguration(_ context.Context, settings any) error {

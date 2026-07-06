@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/keakon/golog/log"
+	pnprotocol "github.com/keakon/x/powernap/pkg/lsp/protocol"
 
 	"github.com/keakon/chord/internal/config"
 )
@@ -33,16 +34,19 @@ var (
 	afterWriteDidChange = func(m *Manager, ctx context.Context, path string, content string) (map[string]int32, error) {
 		return m.DidChangeVersions(ctx, path, content)
 	}
+	afterWriteNotifyWatchedFileChanged = func(m *Manager, ctx context.Context, path string, changeType pnprotocol.FileChangeType) error {
+		return m.NotifyWatchedFileChanged(ctx, path, changeType)
+	}
 	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool) {
 		return m.AwaitFreshWaiter(ctx, path, ch, req, timeout)
 	}
 )
 
-// AfterWriteToolResult runs the LSP pipeline after Write/Edit succeeds: Start, DidChange,
+// AfterFileWriteToolResult runs the LSP pipeline after Write/Edit succeeds: Start, DidChange,
 // WaitDiagnosticsNotify, logs startup/sync failures, then appends LSP error diagnostics
 // (if any). includeOtherFiles is true for Write. If no LSP is configured for this file
 // type, LSP is not invoked and base is returned as-is.
-func (m *Manager) AfterWriteToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool) string {
+func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, changeType WatchedFileChangeType) string {
 	if m == nil {
 		return base
 	}
@@ -56,7 +60,7 @@ func (m *Manager) AfterWriteToolResult(ctx context.Context, absPath, content, ba
 		if strings.HasPrefix(base, "Replaced ") {
 			ranges = EditRangesForReplacement(content, "", "", false)
 		}
-		return m.afterWritePythonToolResult(ctx, absPath, content, base, includeOtherFiles, ranges)
+		return m.afterWritePythonToolResult(ctx, absPath, content, base, includeOtherFiles, ranges, changeType)
 	}
 	// Unassociated file type: skip LSP entirely (no Start, no note).
 	if !m.anyServerMatchesPath(absPath) {
@@ -81,6 +85,9 @@ func (m *Manager) AfterWriteToolResult(ctx context.Context, absPath, content, ba
 	// Register the waiter BEFORE sending didChange so we cannot miss a fast response.
 	waiterCh := m.PrepareWaiter(absPath)
 	after := time.Now()
+	if err := afterWriteNotifyWatchedFileChanged(m, ctx, absPath, changeType); err != nil {
+		m.logLSPServiceNote(absPath, "Failed to notify language server about workspace file change: "+err.Error())
+	}
 	serverVersions, err := afterWriteDidChange(m, ctx, absPath, content)
 	if err != nil {
 		m.logLSPServiceNote(absPath, "Failed to sync buffer to language server: "+err.Error())

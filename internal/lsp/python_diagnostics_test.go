@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/keakon/x/powernap/pkg/lsp/protocol"
 
 	"github.com/keakon/chord/internal/config"
 )
@@ -215,6 +219,70 @@ func TestAppendRuffDiagnosticsHonorsSmallerConfiguredLimit(t *testing.T) {
 	}
 	if !strings.Contains(out, "1 diagnostics not shown due to output limits; they may still need fixing.") {
 		t.Fatalf("expected configured truncation warning, got %q", out)
+	}
+}
+
+func TestPythonQuickDiagnosticsNotifyReadyLSPClientWithoutSemanticSync(t *testing.T) {
+	origLookPath := lookPath
+	origRun := runCommandContext
+	origStart := afterWriteStart
+	origWait := afterWriteWaitForClient
+	origDidChange := afterWriteDidChange
+	origAwait := afterWriteAwaitWaiter
+	t.Cleanup(func() {
+		lookPath = origLookPath
+		runCommandContext = origRun
+		afterWriteStart = origStart
+		afterWriteWaitForClient = origWait
+		afterWriteDidChange = origDidChange
+		afterWriteAwaitWaiter = origAwait
+	})
+
+	lookPath = func(string) (string, error) { return "/bin/ruff", nil }
+	runCommandContext = func(context.Context, string, ...string) ([]byte, error) {
+		return []byte(`[]`), nil
+	}
+	afterWriteStart = func(_ *Manager, _ context.Context, _ string) {
+		t.Fatal("quick diagnostics should not start semantic LSP clients")
+	}
+	afterWriteWaitForClient = func(_ *Manager, _ context.Context, _ string, _ time.Duration) (*Client, bool) {
+		t.Fatal("quick diagnostics should not wait for semantic LSP clients")
+		return nil, false
+	}
+	afterWriteDidChange = func(_ *Manager, _ context.Context, _ string, _ string) (map[string]int32, error) {
+		t.Fatal("quick diagnostics should not send didChange semantic sync")
+		return nil, nil
+	}
+	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
+		t.Fatal("quick diagnostics should not await semantic diagnostics")
+		return nil, false
+	}
+
+	root := t.TempDir()
+	cfg := &config.Config{
+		Diagnostics: config.DefaultDiagnosticsConfig(),
+		LSP: config.LSPConfig{
+			"pyright": {
+				Command:   "pyright-langserver",
+				FileTypes: []string{".py", ".pyi"},
+			},
+		},
+	}
+	mgr := NewManager(cfg, root, nil)
+	fake := &fakePowernapClient{}
+	mgr.clients["pyright"] = &Client{client: fake, cwd: root, cfg: cfg.LSP["pyright"]}
+	path := filepath.Join(root, "large.py")
+	content := strings.Repeat("x = 1\n", cfg.Diagnostics.Python.LargeFile.LineThreshold+1)
+
+	out := mgr.AfterFileWriteToolResult(context.Background(), path, content, "Successfully wrote file", false, WatchedFileCreated)
+	if !strings.Contains(out, "No Ruff diagnostics found.") {
+		t.Fatalf("expected Ruff diagnostics output, got %q", out)
+	}
+	if len(fake.watchedFileEvents) != 1 {
+		t.Fatalf("watched-file events = %+v, want 1", fake.watchedFileEvents)
+	}
+	if got := fake.watchedFileEvents[0].Type; got != protocol.Created {
+		t.Fatalf("watched-file event type = %v, want Created", got)
 	}
 }
 

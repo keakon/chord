@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/keakon/golog/log"
+	pnprotocol "github.com/keakon/x/powernap/pkg/lsp/protocol"
 
 	"github.com/keakon/chord/internal/config"
 )
 
-func (m *Manager) afterWritePythonToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange) string {
+func (m *Manager) afterWritePythonToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType) string {
 	pyCfg := m.cfg.Diagnostics.Python
 	metrics := measureContent(content)
 	availability := diagnosticBackendAvailability{
@@ -21,15 +22,19 @@ func (m *Manager) afterWritePythonToolResult(ctx context.Context, absPath, conte
 	selection := selectPythonDiagnosticBackend(pyCfg, metrics, availability)
 	switch selection.Backend {
 	case pythonDiagnosticBackendQuick:
-		return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, selection, base, ranges)
+		return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, selection, base, ranges, changeType, true)
 	case pythonDiagnosticBackendSemantic:
-		return m.afterWriteLSPToolResult(ctx, absPath, content, base, includeOtherFiles, ranges)
+		return m.afterWriteLSPToolResult(ctx, absPath, content, base, includeOtherFiles, ranges, changeType)
 	default:
 		return appendPythonDiagnosticsSkipped(base, selection)
 	}
 }
 
-func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange) string {
+func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType) string {
+	return m.afterWriteLSPToolResultWithWatchedNotification(ctx, absPath, content, base, includeOtherFiles, ranges, changeType, true)
+}
+
+func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool) string {
 	// Unassociated file type: skip LSP entirely (no Start, no note).
 	if !m.anyServerMatchesPath(absPath) {
 		return base
@@ -54,6 +59,11 @@ func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content,
 	// Register the waiter BEFORE sending didChange so we cannot miss a fast response.
 	waiterCh := m.PrepareWaiter(absPath)
 	after := time.Now()
+	if notifyWatched {
+		if err := afterWriteNotifyWatchedFileChanged(m, ctx, absPath, changeType); err != nil {
+			m.logLSPServiceNote(absPath, "Failed to notify language server about workspace file change: "+err.Error())
+		}
+	}
 	serverVersions, err := afterWriteDidChange(m, ctx, absPath, content)
 	if err != nil {
 		m.logLSPServiceNote(absPath, "Failed to sync buffer to language server: "+err.Error())
@@ -74,7 +84,7 @@ func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content,
 			if m.pythonQuickBackendAvailable(pyCfg) {
 				fallbackBase := base
 				selection := pythonDiagnosticSelection{Backend: pythonDiagnosticBackendQuick, Reason: "semantic-timeout", SkipFullTypeCheck: true}
-				return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, selection, fallbackBase, ranges)
+				return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, selection, fallbackBase, ranges, changeType, false)
 			}
 		}
 	}
@@ -85,12 +95,20 @@ func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content,
 	return appendDiagnosticChangeSummary(out, baseline, current)
 }
 
-func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, content string, pyCfg config.PythonDiagnosticsConfig, selection pythonDiagnosticSelection, base string, ranges []EditRange) string {
+func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, content string, pyCfg config.PythonDiagnosticsConfig, selection pythonDiagnosticSelection, base string, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool) string {
+	watchedNotified := false
+	if notifyWatched && afterWriteHasReadyClient(m, absPath) {
+		if err := afterWriteNotifyWatchedFileChanged(m, ctx, absPath, changeType); err != nil {
+			m.logLSPServiceNote(absPath, "Failed to notify language server about workspace file change: "+err.Error())
+		} else {
+			watchedNotified = true
+		}
+	}
 	diags, err := runRuffDiagnostics(ctx, absPath, pyCfg)
 	if err != nil {
 		if pyCfg.LargeFile.RunSemanticWhenQuickUnavailable && selection.Reason == "large-file" {
 			fallbackBase := appendRuffDiagnosticsFailure(base, selection, err) + "\nFalling back to Python semantic diagnostics."
-			return m.afterWriteLSPToolResult(ctx, absPath, content, fallbackBase, false, ranges)
+			return m.afterWriteLSPToolResultWithWatchedNotification(ctx, absPath, content, fallbackBase, false, ranges, changeType, !watchedNotified)
 		}
 		return appendRuffDiagnosticsFailure(base, selection, err)
 	}

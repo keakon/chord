@@ -20,6 +20,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Thinking translation now validates model output more strictly, rejecting symbol-only or excessively compressed translations, and runs after assistant thinking is durably recorded instead of during streaming so rollback/retry paths do not leave stale translated thinking.
 - TUI streaming renders assistant/thinking deltas with less per-token cache invalidation, reducing redraw work during long streamed responses.
 - File tools now offer broader not-found path suggestions, including whitespace-repair hints for common model-generated paths and the same suggestion flow for `read`, `view_image`, `edit`, and `patch` while preserving patch's create-file guidance.
+- Native file tools now notify matching LSP servers of workspace file Created/Changed/Deleted events before syncing text documents, so Pyright, TypeScript, gopls, rust-analyzer, and similar servers refresh project/module graphs more promptly and post-tool diagnostics are less likely to show transient unresolved imports for newly created files.
 
 ### Fixes
 

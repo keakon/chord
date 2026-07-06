@@ -32,6 +32,7 @@ type lspProcessClient interface {
 	NotifyDidOpenTextDocument(ctx context.Context, uri string, languageID string, version int, text string) error
 	NotifyDidChangeTextDocument(ctx context.Context, uri string, version int, changes []protocol.TextDocumentContentChangeEvent) error
 	NotifyDidCloseTextDocument(ctx context.Context, uri string) error
+	NotifyDidChangeWatchedFiles(ctx context.Context, changes []protocol.FileEvent) error
 	NotifyWorkspaceDidChangeConfiguration(ctx context.Context, settings any) error
 	RequestHover(ctx context.Context, uri string, position protocol.Position) (*protocol.Hover, error)
 	RequestDefinition(ctx context.Context, uri string, position protocol.Position) (*protocol.Or_Result_textDocument_definition, error)
@@ -407,6 +408,12 @@ func (c *Client) DidChange(ctx context.Context, path string, content string) (in
 		{Value: protocol.TextDocumentContentChangeWholeDocument{Text: content}},
 	}
 	return v, c.client.NotifyDidChangeTextDocument(ctx, uri, int(v), changes)
+}
+
+func (c *Client) NotifyWatchedFileChange(ctx context.Context, path string, changeType protocol.FileChangeType) error {
+	return c.client.NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
+		{URI: protocol.DocumentURI(c.pathToURI(path)), Type: changeType},
+	})
 }
 
 // DidClose sends didClose for the file if it is open, then forgets the local open-file version.

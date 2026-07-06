@@ -144,7 +144,7 @@ Python 还需要注意：
 - 小文件使用 `diagnostics.python.semantic_backend`，通常是 `lsp.pyright`。请确认 `diagnostics.python.semantic_backend.server` 与 `lsp` 下的 server key 一致。
 - 大 Python 文件在 `PATH` 中能找到 `ruff` 时使用 Ruff quick diagnostics。
 - 如果大 Python 文件提示因为 Ruff 不可用而跳过诊断，可以安装 Ruff，或设置 `diagnostics.python.large_file.run_semantic_when_quick_unavailable: true`，强制大文件也运行 Pyright。
-- Ruff quick diagnostics 不更新 LSP 侧边栏，只出现在 `edit`/`write` 工具结果中，并会明确提示完整 Python 语义诊断已跳过。
+- Ruff quick diagnostics 不更新 LSP 侧边栏，只出现在 `edit`、`patch` 或 `write` 工具结果中，并会明确提示完整 Python 语义诊断已跳过。
 
 推荐 Python 配置骨架：
 

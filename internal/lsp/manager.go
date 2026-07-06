@@ -24,6 +24,14 @@ const TypeLSPDiagnostics = "lsp.diagnostics"
 // TypeLSPSidebarStatus is broadcast when LSP server connection state changes (TUI sidebar).
 const TypeLSPSidebarStatus = "lsp.sidebar_status"
 
+type WatchedFileChangeType = pnprotocol.FileChangeType
+
+const (
+	WatchedFileCreated WatchedFileChangeType = pnprotocol.Created
+	WatchedFileChanged WatchedFileChangeType = pnprotocol.Changed
+	WatchedFileDeleted WatchedFileChangeType = pnprotocol.Deleted
+)
+
 // Diagnostic is a single LSP diagnostic (1=Error, 2=Warning, 3=Info, 4=Hint).
 // Same shape as protocol.Diagnostic for wire compatibility.
 type Diagnostic struct {
@@ -564,6 +572,29 @@ func (m *Manager) DidChange(ctx context.Context, path string, content string) {
 func (m *Manager) DidChangeErr(ctx context.Context, path string, content string) error {
 	_, err := m.DidChangeVersions(ctx, path, content)
 	return err
+}
+
+// NotifyWatchedFileChanged sends workspace/didChangeWatchedFiles to all clients
+// that handle path. This keeps language-server project graphs in sync
+// for file create/change/delete events, including newly created modules that are
+// imported by other files.
+func (m *Manager) NotifyWatchedFileChanged(ctx context.Context, path string, changeType pnprotocol.FileChangeType) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	path = normalizeWaiterPath(path)
+	m.clientsMu.RLock()
+	defer m.clientsMu.RUnlock()
+	var first error
+	for _, c := range m.clients {
+		if !c.HandlesFile(path) {
+			continue
+		}
+		if err := c.NotifyWatchedFileChange(ctx, path, changeType); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 // DidChangeVersions sends didChange to all matching clients and returns the

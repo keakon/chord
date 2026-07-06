@@ -13,13 +13,13 @@ import (
 	"github.com/keakon/chord/internal/config"
 )
 
-func TestAfterWriteToolResultCancelledWaitDoesNotAppendWaitNote(t *testing.T) {
+func TestAfterFileWriteToolResultCancelledWaitDoesNotAppendWaitNote(t *testing.T) {
 	mgr, path, client := newAfterWriteTestManager(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	out := mgr.AfterWriteToolResult(ctx, path, "package main", "Successfully wrote 12 bytes", false)
+	out := mgr.AfterFileWriteToolResult(ctx, path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged)
 	if strings.Contains(out, "Failed to sync buffer") {
 		t.Fatalf("sync errors should no longer be appended to tool output: %q", out)
 	}
@@ -33,7 +33,7 @@ func TestAfterWriteToolResultCancelledWaitDoesNotAppendWaitNote(t *testing.T) {
 	_ = client
 }
 
-func TestAfterWriteToolResultAppendsCachedDiagnosticsWithoutWaitNote(t *testing.T) {
+func TestAfterFileWriteToolResultAppendsCachedDiagnosticsWithoutWaitNote(t *testing.T) {
 	mgr, path, client := newAfterWriteTestManager(t)
 	uri := protocol.DocumentURI(client.pathToURI(path))
 	client.diagnostics[uri] = []protocol.Diagnostic{
@@ -51,7 +51,7 @@ func TestAfterWriteToolResultAppendsCachedDiagnosticsWithoutWaitNote(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	out := mgr.AfterWriteToolResult(ctx, path, "package main", "Successfully wrote 12 bytes", false)
+	out := mgr.AfterFileWriteToolResult(ctx, path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged)
 	if !strings.Contains(out, "[E] 1:1 expected package name") {
 		t.Fatalf("cached diagnostics should still be appended: %q", out)
 	}
@@ -63,13 +63,15 @@ func TestAfterWriteToolResultAppendsCachedDiagnosticsWithoutWaitNote(t *testing.
 	}
 }
 
-func TestAfterWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *testing.T) {
+func TestAfterFileWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *testing.T) {
 	mgr, path, _ := newAfterWriteTestManager(t)
 
 	origDidChange := afterWriteDidChange
+	origNotify := afterWriteNotifyWatchedFileChanged
 	origAwait := afterWriteAwaitWaiter
 	t.Cleanup(func() {
 		afterWriteDidChange = origDidChange
+		afterWriteNotifyWatchedFileChanged = origNotify
 		afterWriteAwaitWaiter = origAwait
 	})
 
@@ -77,7 +79,18 @@ func TestAfterWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *testing.
 	cancel()
 
 	var didChangeErr error
+	var notifyErr error
 	var awaitErr error
+	afterWriteNotifyWatchedFileChanged = func(_ *Manager, gotCtx context.Context, gotPath string, changeType protocol.FileChangeType) error {
+		if gotPath != path {
+			t.Fatalf("watched-file path = %q, want %q", gotPath, path)
+		}
+		if changeType != protocol.Changed {
+			t.Fatalf("watched-file change type = %v, want Changed", changeType)
+		}
+		notifyErr = gotCtx.Err()
+		return nil
+	}
 	afterWriteDidChange = func(_ *Manager, gotCtx context.Context, gotPath string, content string) (map[string]int32, error) {
 		if gotPath != path {
 			t.Fatalf("didChange path = %q, want %q", gotPath, path)
@@ -96,19 +109,68 @@ func TestAfterWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *testing.
 		return nil, false
 	}
 
-	out := mgr.AfterWriteToolResult(ctx, path, "package main", "Successfully wrote 12 bytes", false)
+	out := mgr.AfterFileWriteToolResult(ctx, path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged)
 	if out != "Successfully wrote 12 bytes" {
-		t.Fatalf("AfterWriteToolResult output = %q", out)
+		t.Fatalf("AfterFileWriteToolResult output = %q", out)
 	}
 	if didChangeErr != context.Canceled {
 		t.Fatalf("didChange ctx err = %v, want context.Canceled", didChangeErr)
+	}
+	if notifyErr != context.Canceled {
+		t.Fatalf("watched-file ctx err = %v, want context.Canceled", notifyErr)
 	}
 	if awaitErr != context.Canceled {
 		t.Fatalf("await ctx err = %v, want context.Canceled", awaitErr)
 	}
 }
 
-func TestAfterWriteToolResultSkipsDisabledMatchingServer(t *testing.T) {
+func TestAfterFileWriteToolResultNotifiesWatchedFileBeforeDidChange(t *testing.T) {
+	mgr, path, _ := newAfterWriteTestManager(t)
+
+	origNotify := afterWriteNotifyWatchedFileChanged
+	origDidChange := afterWriteDidChange
+	origAwait := afterWriteAwaitWaiter
+	t.Cleanup(func() {
+		afterWriteNotifyWatchedFileChanged = origNotify
+		afterWriteDidChange = origDidChange
+		afterWriteAwaitWaiter = origAwait
+	})
+
+	var order []string
+	afterWriteNotifyWatchedFileChanged = func(_ *Manager, _ context.Context, gotPath string, changeType protocol.FileChangeType) error {
+		if gotPath != path {
+			t.Fatalf("watched-file path = %q, want %q", gotPath, path)
+		}
+		if changeType != protocol.Created {
+			t.Fatalf("watched-file change type = %v, want Created", changeType)
+		}
+		order = append(order, "watched")
+		return nil
+	}
+	afterWriteDidChange = func(_ *Manager, _ context.Context, gotPath string, content string) (map[string]int32, error) {
+		if gotPath != path {
+			t.Fatalf("didChange path = %q, want %q", gotPath, path)
+		}
+		if content != "package main" {
+			t.Fatalf("didChange content = %q, want package main", content)
+		}
+		order = append(order, "didChange")
+		return nil, nil
+	}
+	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
+		return nil, false
+	}
+
+	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileCreated)
+	if out != "Successfully wrote 12 bytes" {
+		t.Fatalf("AfterFileWriteToolResult output = %q", out)
+	}
+	if got := strings.Join(order, ","); got != "watched,didChange" {
+		t.Fatalf("notification order = %q, want watched,didChange", got)
+	}
+}
+
+func TestAfterFileWriteToolResultSkipsDisabledMatchingServer(t *testing.T) {
 	root := t.TempDir()
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{
@@ -124,11 +186,13 @@ func TestAfterWriteToolResultSkipsDisabledMatchingServer(t *testing.T) {
 	origStart := afterWriteStart
 	origWait := afterWriteWaitForClient
 	origDidChange := afterWriteDidChange
+	origNotify := afterWriteNotifyWatchedFileChanged
 	origAwait := afterWriteAwaitWaiter
 	t.Cleanup(func() {
 		afterWriteStart = origStart
 		afterWriteWaitForClient = origWait
 		afterWriteDidChange = origDidChange
+		afterWriteNotifyWatchedFileChanged = origNotify
 		afterWriteAwaitWaiter = origAwait
 	})
 	afterWriteStart = func(_ *Manager, _ context.Context, _ string) {
@@ -142,18 +206,22 @@ func TestAfterWriteToolResultSkipsDisabledMatchingServer(t *testing.T) {
 		t.Fatal("disabled gopls should not receive didChange after write")
 		return nil, nil
 	}
+	afterWriteNotifyWatchedFileChanged = func(_ *Manager, _ context.Context, _ string, _ protocol.FileChangeType) error {
+		t.Fatal("disabled gopls should not receive watched-file notifications after write")
+		return nil
+	}
 	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
 		t.Fatal("disabled gopls diagnostics should not be awaited after write")
 		return nil, false
 	}
 
-	out := mgr.AfterWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false)
+	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged)
 	if out != "Successfully wrote 12 bytes" {
-		t.Fatalf("AfterWriteToolResult output = %q", out)
+		t.Fatalf("AfterFileWriteToolResult output = %q", out)
 	}
 }
 
-func TestAfterWriteToolResultStartsMatchingServerBeforeWaiting(t *testing.T) {
+func TestAfterFileWriteToolResultStartsMatchingServerBeforeWaiting(t *testing.T) {
 	mgr, path, _ := newAfterWriteTestManager(t)
 
 	origStart := afterWriteStart
@@ -177,7 +245,7 @@ func TestAfterWriteToolResultStartsMatchingServerBeforeWaiting(t *testing.T) {
 		return nil, false
 	}
 
-	out := mgr.AfterWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false)
+	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged)
 	if startedPath != path {
 		t.Fatalf("after-write should start matching server for %q, got %q", path, startedPath)
 	}

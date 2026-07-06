@@ -1133,14 +1133,16 @@ context:
 
 ## 工具后诊断
 
-`edit` / `write` 修改文件后，Chord 可以把语言诊断追加到工具结果里，让模型立刻看到编译或 lint 问题。这由 `diagnostics` 配置控制，默认对 Python 启用（LSP 语义后端 + Ruff quick 回退）。设 `diagnostics.enabled: false` 可整体关闭这条流水线。
+`edit`、`patch` 或 `write` 修改文件后，Chord 可以把语言诊断追加到工具结果里，让模型立刻看到编译或 lint 问题。这由 `diagnostics` 配置控制，默认对 Python 启用（LSP 语义后端 + Ruff quick 回退）。设 `diagnostics.enabled: false` 可整体关闭这条流水线。
+
+Chord 的原生文件工具会在同步 `textDocument` 前向匹配的 LSP 服务发送 `workspace/didChangeWatchedFiles` 文件事件：`write` 新建文件发送 Created，覆盖已有文件和 `edit` / `patch` 发送 Changed，`delete` 成功删除文件发送 Deleted。这让 Pyright、TypeScript、gopls、rust-analyzer 等服务更容易及时刷新项目图，减少“新建模块已存在但 import 仍报 unresolved”的暂态误报。诊断仍会在文件工具结果中即时返回，便于模型判断问题是否由本次改动引入；但通过 `shell` 或外部程序创建/删除的文件目前不会由 Chord 的原生文件工具自动上报为文件系统 watcher 事件。
 
 Python 使用两个后端：
 
 - `diagnostics.python.semantic_backend` —— 主 LSP 服务（默认 `pyright`）。其 `server` 字段必须与 `lsp` 下的某个 server key 一致，语言服务器才真正配置生效。
 - `diagnostics.python.quick_backend` —— 一次性回退命令（默认 `ruff check`），用于大文件，或语义后端不可用时。
 
-`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定文件多大时改用 quick backend 而非语义后端；`run_semantic_when_quick_unavailable: true` 会在 quick backend 缺失时，对大文件也强制跑语义后端。Ruff quick diagnostics 不更新 LSP 侧边栏——只出现在 `edit` / `write` 结果中，并提示完整语义诊断已跳过。
+`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定文件多大时改用 quick backend 而非语义后端；`run_semantic_when_quick_unavailable: true` 会在 quick backend 缺失时，对大文件也强制跑语义后端。Ruff quick diagnostics 不更新 LSP 侧边栏——只出现在 `edit`、`patch` 或 `write` 结果中，并提示完整语义诊断已跳过。
 
 推荐 Python 配置骨架：
 
@@ -1191,7 +1193,7 @@ chord doctor models --pool thinking
 | `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为完整 `provider/model[@variant]` ref。见 [模型池](#模型池)。           |
 | `thinking_translation`  | object                | 关闭（`max_chars: 1000`）        | global / project         | 可选的 thinking / reasoning 卡片附加翻译预览。需要 `target_language` 和 `model_pool`；失败只跳过受影响的 thinking block。 |
 | `context`               | object                | 见下文                          | global / project         | `compaction`（上下文压缩）和 `reduction`（上下文剪裁）两项配置。见 [上下文压缩](#上下文压缩compaction) 和 [上下文剪裁](#上下文剪裁reduction)。 |
-| `diagnostics`           | object                | 启用（Python LSP + Ruff 回退）  | global / project         | `edit` / `write` 完成后追加的诊断信息。`diagnostics.python.semantic_backend` 是主 LSP 服务（默认 `pyright`）；`diagnostics.python.quick_backend` 是一次性回退命令（默认 `ruff check`）。`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定大文件何时走 quick backend；`run_semantic_when_quick_unavailable: true` 在 quick backend 不可用时仍强制跑语义诊断。`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加文本的长度和裁剪窗口。诊断按严重级别优先展示（错误/警告优先，仍有名额时再显示 info/hint）。设 `diagnostics.enabled: false` 可整体关闭。 |
+| `diagnostics`           | object                | 启用（Python LSP + Ruff 回退）  | global / project         | `edit`、`patch` 或 `write` 完成后追加的诊断信息。`diagnostics.python.semantic_backend` 是主 LSP 服务（默认 `pyright`）；`diagnostics.python.quick_backend` 是一次性回退命令（默认 `ruff check`）。`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定大文件何时走 quick backend；`run_semantic_when_quick_unavailable: true` 在 quick backend 不可用时仍强制跑语义诊断。`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加文本的长度和裁剪窗口。诊断按严重级别优先展示（错误/警告优先，仍有名额时再显示 info/hint）。设 `diagnostics.enabled: false` 可整体关闭。 |
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
 | `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |

@@ -156,7 +156,7 @@ For Python specifically:
 - Small files use `diagnostics.python.semantic_backend` (usually `lsp.pyright`). Make sure `diagnostics.python.semantic_backend.server` matches the server key under `lsp`.
 - Large Python files use Ruff quick diagnostics when `ruff` is on `PATH`.
 - If a large Python file reports diagnostics skipped because Ruff is unavailable, install Ruff or set `diagnostics.python.large_file.run_semantic_when_quick_unavailable: true` to force Pyright on large files too.
-- Ruff quick diagnostics do not update the LSP sidebar; they appear only in `edit` / `write` tool results and clearly note that full Python semantic diagnostics were skipped.
+- Ruff quick diagnostics do not update the LSP sidebar; they appear only in `edit`, `patch`, or `write` tool results and clearly note that full Python semantic diagnostics were skipped.
 
 Recommended Python skeleton:
 

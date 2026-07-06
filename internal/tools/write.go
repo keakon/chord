@@ -120,6 +120,8 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	reportToolProgress(ctx, ToolProgressSnapshot{
 		Text: fmt.Sprintf("writing %d %s", len(data), byteLabel),
 	})
+	_, statErr := os.Lstat(resolvedPath)
+	existed := statErr == nil
 	invalidatePathCache(resolvedPath)
 	if err := writeFileNoFollow(resolvedPath, data, 0644); err != nil {
 		return "", fmt.Errorf("writing file: %w", err)
@@ -131,7 +133,11 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		absPath, absErr := resolveToolPathAbs(a.Path)
 		if absErr == nil {
 			t.LSP.MarkTouched(absPath)
-			out = t.LSP.AfterWriteToolResult(ctx, absPath, content, out, true)
+			changeType := lsp.WatchedFileCreated
+			if existed {
+				changeType = lsp.WatchedFileChanged
+			}
+			out = t.LSP.AfterFileWriteToolResult(ctx, absPath, content, out, true, changeType)
 		}
 	}
 	return out, nil

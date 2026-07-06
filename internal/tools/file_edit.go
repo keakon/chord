@@ -51,7 +51,7 @@ func writeEncodedEditedFile(ctx context.Context, path string, encodedBytes []byt
 		absPath, absErr := filepath.Abs(path)
 		if absErr == nil {
 			lspMgr.MarkTouched(absPath)
-			out = lspMgr.AfterWriteToolResult(ctx, absPath, newContent, out, false)
+			out = lspMgr.AfterFileWriteToolResult(ctx, absPath, newContent, out, false, lsp.WatchedFileChanged)
 		}
 	}
 	return out, nil

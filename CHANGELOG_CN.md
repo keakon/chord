@@ -20,6 +20,7 @@
 - Thinking 翻译现在会更严格校验模型输出，拒绝纯符号或过度压缩的译文；并改为在 assistant thinking 持久化后再翻译，而不是流式过程中翻译，避免 rollback / retry 路径留下过期翻译。
 - TUI 流式渲染现在减少 assistant / thinking 增量的逐 token 缓存失效，降低长流式响应期间的重绘开销。
 - 文件工具现在提供更完整的 not-found 路径建议，包括对常见模型生成路径的空白修复提示，并把同一套建议流程覆盖到 `read`、`view_image`、`edit` 和 `patch`；`patch` 仍会保留使用 `write` 创建文件的提示。
+- 原生文件工具现在会在同步 text document 前向匹配的 LSP 服务通知 workspace 文件 Created/Changed/Deleted 事件，让 Pyright、TypeScript、gopls、rust-analyzer 等服务更及时刷新项目 / 模块图，降低工具后诊断对新建文件产生暂态 unresolved import 的概率。
 
 ### 修复
 
