@@ -157,6 +157,7 @@ func TestStatusBarFingerprintChangesForEscHintInputs(t *testing.T) {
 func TestRenderStatusBarShowsBusyEscHint(t *testing.T) {
 	m := NewModelWithSize(nil, 160, 24)
 	m.mode = ModeNormal
+	m.workingDir = "/repo"
 	m.activities["main"] = agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityConnecting}
 	rendered := stripANSI(m.renderStatusBar())
 	if !strings.Contains(rendered, "esc ⇢ cancel turn") {
@@ -181,6 +182,7 @@ func TestRenderStatusBarHidesEscHintFirstWhenNarrow(t *testing.T) {
 func TestRenderStatusBarShowsSearchModeEscHint(t *testing.T) {
 	m := NewModelWithSize(nil, 160, 24)
 	m.mode = ModeSearch
+	m.workingDir = "/repo"
 	rendered := stripANSI(m.renderStatusBar())
 	if !strings.Contains(rendered, "esc ⇢ cancel search") {
 		t.Fatalf("status bar = %q, want search-mode esc hint", rendered)
@@ -190,6 +192,7 @@ func TestRenderStatusBarShowsSearchModeEscHint(t *testing.T) {
 func TestRenderStatusBarChordDoesNotDuplicateEscHint(t *testing.T) {
 	m := NewModelWithSize(nil, 160, 24)
 	m.mode = ModeNormal
+	m.workingDir = "/repo"
 	m.chord = chordState{count: 3, op: chordG}
 	rendered := stripANSI(m.renderStatusBar())
 	if !strings.Contains(rendered, "3g") {
