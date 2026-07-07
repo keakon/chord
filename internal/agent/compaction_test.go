@@ -2452,6 +2452,30 @@ func TestCompactionSummaryFromResponseContentStripsLeadingThinkBlock(t *testing.
 	}
 }
 
+func TestCompactionSummaryFromResponseContentStripsLeadingOrphanThinkClose(t *testing.T) {
+	summary := validCompactionSummaryForTest("history-1.md")
+	got := compactionSummaryFromResponseContent("</think>\n\n" + summary)
+	if got != summary {
+		t.Fatalf("compactionSummaryFromResponseContent() = %q, want %q", got, summary)
+	}
+	if err := validateCompactionSummary(got); err != nil {
+		t.Fatalf("stripped summary should validate, got error: %v", err)
+	}
+}
+
+func TestCompactionSummaryFromResponseContentKeepsLeadingUnclosedThink(t *testing.T) {
+	summary := validCompactionSummaryForTest("history-1.md")
+	// A leading <think> without a close is ambiguous: everything after it could
+	// be reasoning, so it is left intact for validation to reject and repair.
+	got := compactionSummaryFromResponseContent("<think>reasoning\n\n" + summary)
+	if !containsThinkingTag(got) {
+		t.Fatalf("leading unclosed think tag should be preserved for validation, got %q", got)
+	}
+	if err := validateCompactionSummary(got); err == nil {
+		t.Fatal("expected leading unclosed think tag to be rejected by validation")
+	}
+}
+
 func TestCompactionSummaryFromResponseContentLeavesInlineThinkForValidation(t *testing.T) {
 	summary := strings.Replace(validCompactionSummaryForTest("history-1.md"), "- continue current task", "- continue <think>bad</think> current task", 1)
 	got := compactionSummaryFromResponseContent(summary)

@@ -545,12 +545,22 @@ func (a *MainAgent) callCompactionSummary(client *llm.Client, fallbackModelRef, 
 
 var errInvalidCompactionSummary = errors.New("invalid compaction summary")
 
-var leadingThinkBlockRe = regexp.MustCompile(`(?is)^\s*<think\b[^>]*>.*?</think>\s*`)
+var (
+	leadingThinkBlockRe = regexp.MustCompile(`(?is)^\s*<think\b[^>]*>.*?</think>\s*`)
+	// Some providers emit reasoning on a separate channel but still leak the
+	// closing </think> into the visible content, leaving an orphan close tag at
+	// the very start. Strip that leading orphan directly instead of forcing a
+	// summary repair retry. Inline tags mid-body are left for validation.
+	leadingOrphanThinkCloseRe = regexp.MustCompile(`(?is)^\s*</think>\s*`)
+)
 
 func compactionSummaryFromResponseContent(content string) string {
 	summary := strings.TrimSpace(content)
 	for {
 		stripped := strings.TrimSpace(leadingThinkBlockRe.ReplaceAllString(summary, ""))
+		if stripped == summary {
+			stripped = strings.TrimSpace(leadingOrphanThinkCloseRe.ReplaceAllString(summary, ""))
+		}
 		if stripped == summary {
 			return summary
 		}
