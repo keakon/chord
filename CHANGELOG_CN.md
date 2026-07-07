@@ -31,6 +31,7 @@
 - 恢复会话或跨 provider 回放历史时，现在会跳过空的或不可回放的 reasoning-only assistant 消息，避免旧 reasoning / thinking 内容导致 provider API 拒绝请求。
 - TUI 流式输出现在会在工具调用卡片出现前先 flush 已缓冲的 thinking 增量，避免 provider 交错发送 thinking 与 tool-use 事件时生成多余的 thinking 卡片。
 - Patch 工具现在兼容模型常见的 `@@` 纯锚点写法：当一个 hunk 只含未修改的上下文行、而整个 patch 至少有一处 `+`/`-` 修改时，该 hunk 被接受为 no-op 锚点——它匹配当前文件并推进后续 hunk 的搜索位置，但不修改文件。兼容提示只会追加到模型可见的工具结果上下文（不展示到 TUI），让模型以更低的失败重试成本学到推荐的单 hunk 写法。工具描述与错误信息现在明确区分上下文 marker 空格与源码缩进，并给出纯插入示例。整 patch 只含上下文行时仍会被拒绝，并给出可操作信息。
+- Patch 工具现在会在严格解析失败后恢复模型生成的畸形尾部 `*** End Patch...` footer，同时保留合法的 hunk 上下文，并继续拒绝其他顶层 `*** ...` 操作。面向模型的格式提示也更短，强调单文件 direct `@@` hunks，而不是 Codex `apply_patch` envelope。
 - 压缩、hook、subagent prompt 和 skill 列表使用的文本截断路径现在会保留 UTF-8 rune 边界，避免中文、日文或 emoji 内容被截断时破坏历史文件或模型可见文本。
 - fallback 或回放目标无法接收 image/PDF 时，Chord 现在会在发送前丢弃不支持的二进制 part，而不是让整个请求失败或把目标模型无法处理的附件继续转发出去。
 

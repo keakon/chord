@@ -265,6 +265,32 @@ func TestPatchParserStripsTrailingEndPatch(t *testing.T) {
 	}
 }
 
+func TestPatchParserRetriesWithoutTrailingMalformedEndPatch(t *testing.T) {
+	for _, trailer := range []string{"*** End Patch?", "*** End Patch_PLACEHOLDER", "*** End Patch whatever"} {
+		t.Run(trailer, func(t *testing.T) {
+			patch := "@@\n-old\n+new\n" + trailer
+			parsed, err := ParsePatch("a.txt", patch)
+			if err != nil {
+				t.Fatalf("ParsePatch: %v", err)
+			}
+			if len(parsed.Hunks) != 1 || parsed.Hunks[0].Lines[1].Text != "new" {
+				t.Fatalf("parsed = %+v", parsed)
+			}
+		})
+	}
+}
+
+func TestPatchParserDoesNotStripNonTrailingMalformedEndPatch(t *testing.T) {
+	patch := "@@\n-old\n+new\n*** End Patch?\n@@\n-a\n+b"
+	_, err := ParsePatch("a.txt", patch)
+	if err == nil {
+		t.Fatalf("ParsePatch unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "unsupported patch operation") || !strings.Contains(err.Error(), "*** End Patch?") {
+		t.Fatalf("ParsePatch err = %q", err.Error())
+	}
+}
+
 func TestPatchParserKeepsEnvelopeLikeHunkContext(t *testing.T) {
 	patch := "@@\n *** Begin Patch\n-old\n+new\n *** End Patch\n*** End Patch"
 	parsed, err := ParsePatch("a.txt", patch)
@@ -275,6 +301,34 @@ func TestPatchParserKeepsEnvelopeLikeHunkContext(t *testing.T) {
 		t.Fatalf("parsed = %+v", parsed)
 	}
 	if parsed.Hunks[0].Lines[0].Text != "*** Begin Patch" || parsed.Hunks[0].Lines[3].Text != "*** End Patch" {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+}
+
+func TestPatchParserKeepsMalformedEndPatchLikeHunkContext(t *testing.T) {
+	patch := "@@\n *** End Patch?\n-old\n+new\n*** End Patch?"
+	parsed, err := ParsePatch("a.txt", patch)
+	if err != nil {
+		t.Fatalf("ParsePatch: %v", err)
+	}
+	if len(parsed.Hunks) != 1 || len(parsed.Hunks[0].Lines) != 3 {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+	if parsed.Hunks[0].Lines[0].Text != "*** End Patch?" {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+}
+
+func TestPatchParserKeepsTrailingMalformedEndPatchWhenStrictParseSucceeds(t *testing.T) {
+	patch := "@@\n-old\n+new\n *** End Patch?"
+	parsed, err := ParsePatch("a.txt", patch)
+	if err != nil {
+		t.Fatalf("ParsePatch: %v", err)
+	}
+	if len(parsed.Hunks) != 1 || len(parsed.Hunks[0].Lines) != 3 {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+	if parsed.Hunks[0].Lines[2].Text != "*** End Patch?" {
 		t.Fatalf("parsed = %+v", parsed)
 	}
 }
@@ -483,7 +537,7 @@ func TestPatchToolPatchDescriptionEmphasizesPreferredFormat(t *testing.T) {
 	props := params["properties"].(map[string]any)
 	patch := props["patch"].(map[string]any)
 	desc := patch["description"].(string)
-	for _, want := range []string{"Patch hunk text for the single JSON path above.", "Use direct @@ or @@ <verified header>", "Do not rely on unified diff line numbers or apply_patch wrappers", "Do not include changes for multiple files.", "Split unrelated or distant edits into separate patch calls.", "Example:"} {
+	for _, want := range []string{"Direct single-file @@ hunks for the JSON path", "not apply_patch format", "Top-level `*** ...` envelope lines are invalid", "Use verified @@ headers and nearby context", "Split unrelated or distant edits into separate patch calls.", "Example:"} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description missing %q: %q", want, desc)
 		}
@@ -493,9 +547,9 @@ func TestPatchToolPatchDescriptionEmphasizesPreferredFormat(t *testing.T) {
 func TestPatchToolDescriptionExplainsSingleFileSubset(t *testing.T) {
 	desc := (PatchTool{}).Description()
 	for _, want := range []string{
-		"Edit one existing file with direct @@ patch hunks.",
-		"This is a single-file patch tool, not a general apply_patch executor",
-		"the patch text must modify only the JSON path above",
+		"Edit one existing file with direct @@ hunks for the JSON path.",
+		"This is not apply_patch format",
+		"top-level *** envelope lines are invalid",
 		"Each patch must contain at least one +/- change",
 		"context-only @@ hunk is allowed as a no-op anchor",
 		"Do not use shell to run apply_patch.",

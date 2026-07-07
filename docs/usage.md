@@ -86,7 +86,7 @@ To shorten the wait during a provider's finalize phase, Chord executes a small s
 
 ### How `patch` applies hunks
 
-`patch` takes the target file as a structured `path` argument; its `patch` argument carries hunk text (`@@` headers, leading-space context lines, `-` removed, `+` added). Stray Codex `apply_patch` envelope lines (`*** Begin Patch` / `*** End Patch`, and a leading `*** Update File:` matching `path`) are stripped; add/delete/move, multi-file patches, and mismatched update paths are rejected.
+`patch` takes the target file as a structured `path` argument; its `patch` argument carries hunk text (`@@` headers, leading-space context lines, `-` removed, `+` added). Stray Codex `apply_patch` envelope lines (`*** Begin Patch` / `*** End Patch`, and a leading `*** Update File:` matching `path`) are stripped. If strict parsing fails, a final top-level malformed `*** End Patch...` footer is also stripped and parsed once more. Add/delete/move, multi-file patches, mismatched update paths, and other top-level `*** ...` operations are rejected.
 
 Matching is Codex-style and ordered: each hunk (and any attached `@@` function/class/test header) matches the first occurrence after the current search position. When a hunk matches multiple candidates, Chord applies the first and reports the matched line plus other candidate lines so the model can re-read if needed. A hunk with no context/removal lines fails because there is no insertion point.
 
