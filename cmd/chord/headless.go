@@ -23,7 +23,6 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
-	"github.com/keakon/chord/internal/protocol"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -48,14 +47,39 @@ type headlessHandoffPayload struct {
 	Agents    []agent.HandoffAgentOption `json:"agents"`
 }
 
+type headlessConfirmPayload struct {
+	ToolName            string   `json:"tool_name"`
+	ArgsJSON            string   `json:"args_json"`
+	RequestID           string   `json:"request_id,omitempty"`
+	TimeoutMS           int64    `json:"timeout_ms,omitempty"`
+	NeedsApproval       []string `json:"needs_approval,omitempty"`
+	AlreadyAllowed      []string `json:"already_allowed,omitempty"`
+	NeedsApprovalRules  []string `json:"needs_approval_rules,omitempty"`
+	AlreadyAllowedRules []string `json:"already_allowed_rules,omitempty"`
+	DoneReport          string   `json:"done_report,omitempty"`
+	DoneReason          string   `json:"done_reason,omitempty"`
+}
+
+type headlessQuestionPayload struct {
+	ToolName      string   `json:"tool_name"`
+	Header        string   `json:"header,omitempty"`
+	Question      string   `json:"question"`
+	Options       []string `json:"options"`
+	OptionDetails []string `json:"option_details,omitempty"`
+	DefaultAnswer string   `json:"default_answer"`
+	Multiple      bool     `json:"multiple,omitempty"`
+	RequestID     string   `json:"request_id,omitempty"`
+	TimeoutMS     int64    `json:"timeout_ms,omitempty"`
+}
+
 // headlessState holds mutex-protected state for the headless protocol.
 type headlessState struct {
 	mu              sync.Mutex
 	busy            bool
 	phase           string
 	phaseDetail     string
-	pendingConfirm  *protocol.ConfirmRequestPayload
-	pendingQuestion *protocol.QuestionRequestPayload
+	pendingConfirm  *headlessConfirmPayload
+	pendingQuestion *headlessQuestionPayload
 	pendingHandoff  *headlessHandoffPayload
 	lastError       string
 	pendingOutcome  string // "completed" / "cancelled" / "error" / ""
@@ -249,26 +273,28 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}})
 		}
 	case agent.ConfirmRequestEvent:
-		doneReason, doneReport := protocol.ParseDoneArgs(e.ArgsJSON)
+		doneReason, doneReport := parseHeadlessDoneArgs(e.ArgsJSON)
 		if strings.TrimSpace(e.DoneReport) != "" {
 			doneReport = strings.TrimSpace(e.DoneReport)
 		}
-		state.pendingConfirm = &protocol.ConfirmRequestPayload{ToolName: e.ToolName, ArgsJSON: e.ArgsJSON, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds(), NeedsApproval: e.NeedsApproval, AlreadyAllowed: e.AlreadyAllowed, DoneReport: doneReport, DoneReason: doneReason}
+		state.pendingConfirm = &headlessConfirmPayload{ToolName: e.ToolName, ArgsJSON: e.ArgsJSON, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds(), NeedsApproval: e.NeedsApproval, AlreadyAllowed: e.AlreadyAllowed, NeedsApprovalRules: e.NeedsApprovalRules, AlreadyAllowedRules: e.AlreadyAllowedRules, DoneReport: doneReport, DoneReason: doneReason}
 		state.updatedAt = time.Now()
 		if state.isSubscribed("confirm_request") {
 			out = append(out, &headlessEnvelope{Type: "confirm_request", Payload: map[string]any{
-				"tool_name":       e.ToolName,
-				"args_json":       e.ArgsJSON,
-				"request_id":      e.RequestID,
-				"timeout_ms":      e.Timeout.Milliseconds(),
-				"needs_approval":  e.NeedsApproval,
-				"already_allowed": e.AlreadyAllowed,
-				"done_report":     doneReport,
-				"done_reason":     doneReason,
+				"tool_name":             e.ToolName,
+				"args_json":             e.ArgsJSON,
+				"request_id":            e.RequestID,
+				"timeout_ms":            e.Timeout.Milliseconds(),
+				"needs_approval":        e.NeedsApproval,
+				"already_allowed":       e.AlreadyAllowed,
+				"needs_approval_rules":  e.NeedsApprovalRules,
+				"already_allowed_rules": e.AlreadyAllowedRules,
+				"done_report":           doneReport,
+				"done_reason":           doneReason,
 			}})
 		}
 	case agent.QuestionRequestEvent:
-		state.pendingQuestion = &protocol.QuestionRequestPayload{ToolName: e.ToolName, Header: e.Header, Question: e.Question, Options: e.Options, OptionDetails: e.OptionDetails, DefaultAnswer: e.DefaultAnswer, Multiple: e.Multiple, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds()}
+		state.pendingQuestion = &headlessQuestionPayload{ToolName: e.ToolName, Header: e.Header, Question: e.Question, Options: e.Options, OptionDetails: e.OptionDetails, DefaultAnswer: e.DefaultAnswer, Multiple: e.Multiple, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds()}
 		state.updatedAt = time.Now()
 		if state.isSubscribed("question_request") {
 			out = append(out, &headlessEnvelope{Type: "question_request", Payload: map[string]any{
@@ -315,7 +341,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 	case agent.ToolResultEvent:
 		state.updatedAt = time.Now()
 		if strings.EqualFold(e.Name, tools.NameDone) && e.AgentID == "" {
-			reason, report := protocol.ParseDoneArgs(e.ArgsJSON)
+			reason, report := parseHeadlessDoneArgs(e.ArgsJSON)
 			if strings.TrimSpace(e.DoneReport) != "" {
 				report = strings.TrimSpace(e.DoneReport)
 			}
@@ -342,6 +368,19 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		return nil
 	}
 	return out
+}
+
+func parseHeadlessDoneArgs(argsJSON string) (reason, report string) {
+	if strings.TrimSpace(argsJSON) == "" {
+		return "", ""
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return "", ""
+	}
+	reason, _ = args["reason"].(string)
+	report, _ = args["report"].(string)
+	return strings.TrimSpace(reason), strings.TrimSpace(report)
 }
 
 // isUnsupportedHeadlessCommand checks if a command is only available in TUI mode.

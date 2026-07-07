@@ -401,9 +401,8 @@ type RequestCycleStartedEvent struct {
 func (RequestCycleStartedEvent) agentEvent() {}
 
 // UsageUpdatedEvent signals that session usage (input/output tokens, cost)
-// was just updated after an LLM round. In C/S mode the server uses this to
-// push context_usage to clients so the sidebar updates during tool-call loops,
-// not only after the turn ends (IdleEvent).
+// was just updated after an LLM round. The TUI uses this to refresh usage
+// displays during tool-call loops, not only after the turn ends (IdleEvent).
 type UsageUpdatedEvent struct{}
 
 func (UsageUpdatedEvent) agentEvent() {}
@@ -523,10 +522,10 @@ func (RoleChangedEvent) agentEvent() {}
 // SessionSelectEvent signals the TUI to open the session picker overlay.
 // Emitted when the user runs /resume with no arguments; the user then
 // chooses a session from the list to restore.
-// Sessions, when non-nil, is the list from the server (C/S mode); the TUI uses
-// it instead of calling ListSessionSummaries() so remote clients get the list.
+// Sessions, when non-nil, is a pre-fetched list supplied by the emitter; the
+// TUI uses it instead of calling ListSessionSummaries().
 type SessionSelectEvent struct {
-	Sessions []SessionSummary // optional: pre-fetched list from server
+	Sessions []SessionSummary // optional: pre-fetched list
 }
 
 func (SessionSelectEvent) agentEvent() {}
@@ -557,14 +556,6 @@ type ForkSessionEvent struct {
 }
 
 func (ForkSessionEvent) agentEvent() {}
-
-// ContextUsageUpdateEvent is emitted by the remote client when it receives
-// a context_usage envelope from the server. It does not carry data; the TUI
-// should re-read GetContextStats/GetUsageStats to refresh the sidebar.
-// Used only in C/S mode so the sidebar updates after Idle.
-type ContextUsageUpdateEvent struct{}
-
-func (ContextUsageUpdateEvent) agentEvent() {}
 
 // EnvStatusUpdateEvent signals that background environment state changed
 // (currently MCP connectivity), so the TUI should re-read state providers.

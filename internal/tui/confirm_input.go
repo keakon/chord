@@ -493,10 +493,10 @@ func (m *Model) handleConfirmEditKey(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
-// resolveConfirm sends the result back via confirmResultCh (in-process) or
-// agent.ResolveConfirm (remote), clears the confirm state, restores the
-// previous mode, and returns a tea.Cmd that re-subscribes to the confirm
-// channel (and optionally re-focuses the input).
+// resolveConfirm sends the result back via confirmResultCh or agent.ResolveConfirm
+// for request-ID based interactions, clears the confirm state, restores the
+// previous mode, and returns a tea.Cmd that re-subscribes to the confirm channel
+// (and optionally re-focuses the input).
 func (m *Model) resolveConfirm(result ConfirmResult) tea.Cmd {
 	if m.confirm.request == nil {
 		return nil
@@ -513,7 +513,7 @@ func (m *Model) resolveConfirm(result ConfirmResult) tea.Cmd {
 				m.addSessionRule(m.confirm.request.ToolName, pattern, result.RuleIntent.Scope)
 			}
 		} else {
-			// Remote mode: never mutate local /rules state (paths/undo must come from backend).
+			// Request-ID path: never mutate local /rules state (paths/undo must come from backend).
 			if _, ok := m.agent.(confirmRuleIntentResolver); !ok {
 				result.RuleIntent = nil
 				pendingToast = "Backend does not support adding rules from confirm"
@@ -522,7 +522,7 @@ func (m *Model) resolveConfirm(result ConfirmResult) tea.Cmd {
 	}
 
 	if m.confirm.requestID != "" {
-		// Remote mode: send response to server via agent.ResolveConfirm.
+		// Request-ID path: resolve through the agent API.
 		actionStr := confirmActionToStr(result.Action)
 		if result.RuleIntent != nil {
 			intent := &agent.ConfirmRuleIntent{

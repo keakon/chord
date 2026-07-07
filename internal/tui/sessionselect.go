@@ -216,8 +216,8 @@ func loadSessionSummaryDetailsCmd(a agent.AgentForTUI, list []agent.SessionSumma
 // Opening the picker
 // ---------------------------------------------------------------------------
 
-// openSessionSelect opens the session picker. If prefill is non-nil (e.g. from server in C/S mode),
-// that list is used; otherwise the list is loaded asynchronously from the agent (local mode).
+// openSessionSelect opens the session picker. If prefill is non-nil, that list
+// is used; otherwise the list is loaded asynchronously from the agent.
 func (m *Model) openSessionSelect(prefill []agent.SessionSummary) tea.Cmd {
 	if m.agent == nil && prefill == nil {
 		return nil

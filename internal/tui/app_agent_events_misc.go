@@ -120,7 +120,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			effects.addFollowup(m.requestStreamBoundaryFlush())
 		}
 		return true, effects
-	case agent.ContextUsageUpdateEvent, agent.UsageUpdatedEvent:
+	case agent.UsageUpdatedEvent:
 		effects.invalidateUsage = true
 		return true, effects
 	case agent.ForkSessionEvent:

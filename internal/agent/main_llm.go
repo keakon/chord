@@ -773,8 +773,8 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		}()
 	}
 
-	// Notify C/S server to push context_usage so sidebar updates after each
-	// LLM round (including tool-call rounds), not only on IdleEvent.
+	// Notify TUI consumers so usage displays update after each LLM round
+	// (including tool-call rounds), not only on IdleEvent.
 	a.emitToTUI(UsageUpdatedEvent{})
 
 	return resp, nil

@@ -279,8 +279,8 @@ func openPathInOS(path string) error {
 }
 
 // addSessionRule tracks a rule in the local /rules overlay list.
-// In local mode this list is refreshed from agent overlay; in remote mode this
-// acts as fallback so /rules can still show picker-added entries.
+// This list is normally refreshed from the agent overlay; when that source is
+// unavailable, it acts as a fallback so /rules can still show picker-added entries.
 func (m *Model) addSessionRule(perm, pattern string, scope permission.RuleScope) {
 	m.addRuleToLocalList(permission.Rule{Permission: perm, Pattern: pattern, Action: permission.ActionAllow}, scope)
 }

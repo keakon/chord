@@ -1,5 +1,5 @@
 // Package agent defines the interface that the TUI uses to interact with
-// either a local MainAgent or a remote agent (client connection).
+// a local MainAgent.
 
 package agent
 
@@ -13,7 +13,7 @@ import (
 )
 
 // MessageSender covers user-message submission, queued drafts, and turn
-// continuation. Implemented by [MainAgent] and remote-client adapters.
+// continuation. Implemented by [MainAgent].
 type MessageSender interface {
 	SendUserMessage(content string)
 	// SendUserMessageWithParts sends a user message that may include images.
@@ -78,8 +78,7 @@ type ModelSelector interface {
 }
 
 // SessionController exposes session lifecycle controls (resume, fork, delete,
-// export). In remote mode some methods may be unavailable until a dedicated
-// protocol/API is defined.
+// export).
 type SessionController interface {
 	ListSessionSummaries() ([]SessionSummary, error)
 	GetSessionSummary() *SessionSummary
@@ -135,8 +134,7 @@ type ServiceTierReporter interface {
 // RoleController exposes role/handoff lifecycle for the active agent.
 type RoleController interface {
 	// SwitchRole requests the agent to switch its active role.
-	// In embedded mode this calls switchRole directly; in C/S mode it sends
-	// TypeSwitchRole to the server. The new role is broadcast as RoleChangedEvent.
+	// The new role is broadcast as RoleChangedEvent.
 	SwitchRole(role string)
 	// AvailableRoles returns the ordered list of role names the user can cycle
 	// through with the Tab key in the main agent view.
@@ -192,10 +190,9 @@ type PlanExecutor interface {
 	ExecutePlan(planPath, agentName string)
 }
 
-// AgentForTUI is the full interface required by the TUI. It is implemented by
-// the local [MainAgent] and by remote client adapters used in C/S mode. New
-// code that consumes only a slice of this surface should target the smaller
-// sub-interfaces (MessageSender, ModelSelector, …) instead.
+// AgentForTUI is the full interface required by the local TUI. New code that
+// consumes only a slice of this surface should target the smaller sub-interfaces
+// (MessageSender, ModelSelector, …) instead.
 type AgentForTUI interface {
 	Events() <-chan AgentEvent
 	GetMessages() []message.Message

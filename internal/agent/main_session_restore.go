@@ -1173,7 +1173,7 @@ func (a *MainAgent) SessionDir() string {
 }
 
 // SessionID returns the unique session identifier for this agent instance.
-// Used by the C/S server to scope event subscriptions. Goroutine-safe.
+// Used to scope session-specific event subscriptions. Goroutine-safe.
 func (a *MainAgent) SessionID() string {
 	return a.instanceID
 }

@@ -16,7 +16,6 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
-	"github.com/keakon/chord/internal/protocol"
 )
 
 // ---------------------------------------------------------------------------
@@ -337,7 +336,7 @@ func TestHeadlessHandoffDenyContinuesFromContext(t *testing.T) {
 
 func TestHeadlessPendingConfirmClearedAfterConfirm(t *testing.T) {
 	state := &headlessState{
-		pendingConfirm: &protocol.ConfirmRequestPayload{
+		pendingConfirm: &headlessConfirmPayload{
 			ToolName:  "Delete",
 			RequestID: "req-1",
 		},
@@ -361,7 +360,7 @@ func TestHeadlessPendingConfirmClearedAfterConfirm(t *testing.T) {
 
 func TestHeadlessConfirmSupportsRuleIntent(t *testing.T) {
 	state := &headlessState{
-		pendingConfirm: &protocol.ConfirmRequestPayload{
+		pendingConfirm: &headlessConfirmPayload{
 			ToolName:  "Shell",
 			RequestID: "req-1",
 		},
@@ -424,7 +423,7 @@ func TestHeadlessConfirmRejectsInvalidRuleScope(t *testing.T) {
 
 func TestHeadlessPendingQuestionClearedAfterQuestion(t *testing.T) {
 	state := &headlessState{
-		pendingQuestion: &protocol.QuestionRequestPayload{
+		pendingQuestion: &headlessQuestionPayload{
 			ToolName:  "Question",
 			RequestID: "req-2",
 		},
@@ -448,7 +447,7 @@ func TestHeadlessPendingQuestionClearedAfterQuestion(t *testing.T) {
 
 func TestHeadlessAutoDenyConfirmOnUserMessage(t *testing.T) {
 	state := &headlessState{
-		pendingConfirm: &protocol.ConfirmRequestPayload{
+		pendingConfirm: &headlessConfirmPayload{
 			ToolName:  "Delete",
 			RequestID: "req-1",
 		},
@@ -483,7 +482,7 @@ func TestHeadlessAutoDenyConfirmOnUserMessage(t *testing.T) {
 
 func TestHeadlessAutoCancelQuestionOnUserMessage(t *testing.T) {
 	state := &headlessState{
-		pendingQuestion: &protocol.QuestionRequestPayload{
+		pendingQuestion: &headlessQuestionPayload{
 			ToolName:  "Question",
 			RequestID: "req-2",
 		},
@@ -553,11 +552,11 @@ func TestHeadlessAutoCancelHandoffOnUserMessage(t *testing.T) {
 }
 func TestHeadlessAutoDenyBothConfirmAndQuestionOnUserMessage(t *testing.T) {
 	state := &headlessState{
-		pendingConfirm: &protocol.ConfirmRequestPayload{
+		pendingConfirm: &headlessConfirmPayload{
 			ToolName:  "Delete",
 			RequestID: "req-1",
 		},
-		pendingQuestion: &protocol.QuestionRequestPayload{
+		pendingQuestion: &headlessQuestionPayload{
 			ToolName:  "Question",
 			RequestID: "req-2",
 		},
@@ -627,11 +626,11 @@ func TestHeadlessNoAutoDenyWhenNoPendingConfirm(t *testing.T) {
 
 func TestHeadlessPendingClearedAfterIdleEvent(t *testing.T) {
 	state := &headlessState{
-		pendingConfirm: &protocol.ConfirmRequestPayload{
+		pendingConfirm: &headlessConfirmPayload{
 			ToolName:  "Delete",
 			RequestID: "req-1",
 		},
-		pendingQuestion: &protocol.QuestionRequestPayload{
+		pendingQuestion: &headlessQuestionPayload{
 			ToolName:  "Question",
 			RequestID: "req-2",
 		},
@@ -1131,12 +1130,14 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 	state := &headlessState{}
 
 	ev := agent.ConfirmRequestEvent{
-		ToolName:       "Shell",
-		ArgsJSON:       `{"command":"rm -rf /"}`,
-		RequestID:      "req-1",
-		Timeout:        30 * time.Second,
-		NeedsApproval:  []string{"a.go", "b/c.txt"},
-		AlreadyAllowed: []string{"d.go"},
+		ToolName:            "Shell",
+		ArgsJSON:            `{"command":"rm -rf /"}`,
+		RequestID:           "req-1",
+		Timeout:             30 * time.Second,
+		NeedsApproval:       []string{"a.go", "b/c.txt"},
+		AlreadyAllowed:      []string{"d.go"},
+		NeedsApprovalRules:  []string{"ask Shell(rm*)"},
+		AlreadyAllowedRules: []string{"allow Shell(ls*)"},
 	}
 
 	envs := filterHeadlessEvent(ev, state)
@@ -1168,6 +1169,12 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 	if payload["timeout_ms"] != float64(30000) {
 		t.Errorf("timeout_ms = %v, want 30000", payload["timeout_ms"])
 	}
+	if got := stringSliceFromAny(t, payload["needs_approval_rules"]); !reflect.DeepEqual(got, ev.NeedsApprovalRules) {
+		t.Errorf("needs_approval_rules = %#v, want %#v", got, ev.NeedsApprovalRules)
+	}
+	if got := stringSliceFromAny(t, payload["already_allowed_rules"]); !reflect.DeepEqual(got, ev.AlreadyAllowedRules) {
+		t.Errorf("already_allowed_rules = %#v, want %#v", got, ev.AlreadyAllowedRules)
+	}
 
 	state.mu.Lock()
 	pc := state.pendingConfirm
@@ -1179,6 +1186,29 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 	if pc.ToolName != "Shell" {
 		t.Errorf("pendingConfirm.ToolName = %q, want Shell", pc.ToolName)
 	}
+	if !reflect.DeepEqual(pc.NeedsApprovalRules, ev.NeedsApprovalRules) {
+		t.Errorf("pendingConfirm.NeedsApprovalRules = %#v, want %#v", pc.NeedsApprovalRules, ev.NeedsApprovalRules)
+	}
+	if !reflect.DeepEqual(pc.AlreadyAllowedRules, ev.AlreadyAllowedRules) {
+		t.Errorf("pendingConfirm.AlreadyAllowedRules = %#v, want %#v", pc.AlreadyAllowedRules, ev.AlreadyAllowedRules)
+	}
+}
+
+func stringSliceFromAny(t *testing.T, v any) []string {
+	t.Helper()
+	raw, ok := v.([]any)
+	if !ok {
+		t.Fatalf("value = %#v (%T), want []any", v, v)
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		s, ok := item.(string)
+		if !ok {
+			t.Fatalf("item = %#v (%T), want string", item, item)
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 func TestHeadlessQuestionRequestEventPayload(t *testing.T) {
@@ -1324,7 +1354,7 @@ func TestHeadlessStatusCommand(t *testing.T) {
 		phase:       "streaming",
 		phaseDetail: "analyzing code",
 		lastOutcome: "completed",
-		pendingConfirm: &protocol.ConfirmRequestPayload{
+		pendingConfirm: &headlessConfirmPayload{
 			ToolName:  "Shell",
 			RequestID: "req-1",
 		},
@@ -1448,7 +1478,7 @@ func TestHeadlessStatusResponseLastOutcome(t *testing.T) {
 
 func TestHeadlessConfirmMismatchedRequestID(t *testing.T) {
 	state := &headlessState{
-		pendingConfirm: &protocol.ConfirmRequestPayload{
+		pendingConfirm: &headlessConfirmPayload{
 			ToolName:  "Delete",
 			RequestID: "req-1",
 		},
@@ -1473,7 +1503,7 @@ func TestHeadlessConfirmMismatchedRequestID(t *testing.T) {
 
 func TestHeadlessQuestionMismatchedRequestID(t *testing.T) {
 	state := &headlessState{
-		pendingQuestion: &protocol.QuestionRequestPayload{
+		pendingQuestion: &headlessQuestionPayload{
 			ToolName:  "Question",
 			RequestID: "req-2",
 		},

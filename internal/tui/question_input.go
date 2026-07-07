@@ -224,15 +224,15 @@ func flattenQuestionAnswers(answers []tools.QuestionAnswer) []string {
 }
 
 // resolveQuestion sends the result back via the request-scoped response channel
-// (in-process) or agent.ResolveQuestion (remote), clears state, restores the
-// previous mode, and re-subscribes to the question channel.
+// or agent.ResolveQuestion for request-ID based interactions, clears state,
+// restores the previous mode, and re-subscribes to the question channel.
 func (m *Model) resolveQuestion(result QuestionResult) tea.Cmd {
 	if m.question.request == nil {
 		return nil
 	}
 
 	if m.question.requestID != "" {
-		// Remote mode: send response to server via agent.ResolveQuestion.
+		// Request-ID path: resolve through the agent API.
 		answers := flattenQuestionAnswers(result.Answers)
 		m.agent.ResolveQuestion(answers, result.Err != nil, m.question.requestID)
 	} else if m.question.responseCh != nil {
