@@ -674,20 +674,26 @@ func TestListSessions_AndSessionInfoForDir(t *testing.T) {
 	if list[0].ID != "2000" || list[1].ID != "1000" {
 		t.Errorf("order: got %q, %q; want 2000, 1000", list[0].ID, list[1].ID)
 	}
-	if list[0].FirstUserMessage != "Second session first message" {
-		t.Errorf("session 2000 FirstUserMessage = %q", list[0].FirstUserMessage)
+	if list[0].FirstUserMessage != "" {
+		t.Errorf("session 2000 FirstUserMessage = %q, want empty before detail load", list[0].FirstUserMessage)
 	}
 	if list[0].ForkedFrom != "1000" {
 		t.Errorf("session 2000 ForkedFrom = %q, want 1000", list[0].ForkedFrom)
 	}
-	if list[1].FirstUserMessage != "First user message in session 1000" {
-		t.Errorf("session 1000 FirstUserMessage = %q", list[1].FirstUserMessage)
+	if list[1].FirstUserMessage != "" {
+		t.Errorf("session 1000 FirstUserMessage = %q, want empty before detail load", list[1].FirstUserMessage)
 	}
-	if list[0].MessageCount != 1 {
-		t.Errorf("session 2000 MessageCount = %d, want 1", list[0].MessageCount)
+	if list[0].MessageCount != UnknownMessageCount {
+		t.Errorf("session 2000 MessageCount = %d, want %d before detail load", list[0].MessageCount, UnknownMessageCount)
 	}
-	if list[1].MessageCount != 2 {
-		t.Errorf("session 1000 MessageCount = %d, want 2", list[1].MessageCount)
+	if list[1].MessageCount != UnknownMessageCount {
+		t.Errorf("session 1000 MessageCount = %d, want %d before detail load", list[1].MessageCount, UnknownMessageCount)
+	}
+	if count, err := CountSessionMessages(s2); err != nil || count != 1 {
+		t.Fatalf("CountSessionMessages(2000) = %d, %v; want 1, nil", count, err)
+	}
+	if count, err := CountSessionMessages(s1); err != nil || count != 2 {
+		t.Fatalf("CountSessionMessages(1000) = %d, %v; want 2, nil", count, err)
 	}
 
 	// Appending invalidates the (size, mtime) cache entry; a second list must
@@ -697,8 +703,11 @@ func TestListSessions_AndSessionInfoForDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions after append: %v", err)
 	}
-	if list[0].MessageCount != 2 {
-		t.Errorf("session 2000 MessageCount after append = %d, want 2", list[0].MessageCount)
+	if list[0].MessageCount != UnknownMessageCount {
+		t.Errorf("session 2000 MessageCount after append = %d, want %d before detail reload", list[0].MessageCount, UnknownMessageCount)
+	}
+	if count, err := CountSessionMessages(s2); err != nil || count != 2 {
+		t.Errorf("CountSessionMessages(2000) after append = %d, %v; want 2, nil", count, err)
 	}
 
 	// Exclude s2

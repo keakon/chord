@@ -109,6 +109,14 @@ func LoadSessionUsageSummary(sessionDir string) (*SessionUsageSummary, error) {
 	return NewUsageLedger(sessionDir, "").Summary()
 }
 
+// LoadCachedSessionUsageSummary loads usage-summary.json without checking
+// usage.jsonl freshness or rebuilding missing/stale summaries. It is intended
+// for high-fanout read-only paths such as session pickers, where scanning every
+// session's usage ledger would make opening the UI scale with total history.
+func LoadCachedSessionUsageSummary(sessionDir string) (*SessionUsageSummary, error) {
+	return readUsageSummaryFile(filepath.Join(sessionDir, "usage-summary.json"))
+}
+
 // SetFirstUserMessage records the first user message preview for future summary writes.
 // It also sets OriginalFirstUserMessage, which is never overwritten by compaction.
 func (l *UsageLedger) SetFirstUserMessage(content string) error {

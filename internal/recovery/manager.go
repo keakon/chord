@@ -456,24 +456,17 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 		if err != nil || info.Size() == 0 {
 			continue
 		}
+		firstUser, firstUserIsCompactionSummary, originalFirstUser, lastUpdatedAt := cachedSessionPreview(sessionPath)
 		lastModTime := info.ModTime()
-		firstUser, _ := firstUserMessageFromFile(mainPath)
-		firstUserIsCompactionSummary := false
-		originalFirstUser := ""
-		if summary, err := analytics.LoadSessionUsageSummary(sessionPath); err == nil && summary != nil {
-			if !summary.LastUpdatedAt.IsZero() && summary.LastUpdatedAt.After(lastModTime) {
-				lastModTime = summary.LastUpdatedAt
-			}
-			if summary.FirstUserMessage != "" {
-				firstUser = summary.FirstUserMessage
-				firstUserIsCompactionSummary = summary.FirstUserMessageIsCompactionSummary
-			}
-			if summary.OriginalFirstUserMessage != "" {
-				originalFirstUser = summary.OriginalFirstUserMessage
-			}
+		if !lastUpdatedAt.IsZero() && lastUpdatedAt.After(lastModTime) {
+			lastModTime = lastUpdatedAt
 		}
 		if originalFirstUser == "" && !firstUserIsCompactionSummary {
 			originalFirstUser = firstUser
+		}
+		messageCount := UnknownMessageCount
+		if count, ok := cachedMessageCount(mainPath, info); ok {
+			messageCount = count
 		}
 		locked, err := sessionDirLockedByLiveOwner(sessionPath)
 		if err != nil {
@@ -488,7 +481,7 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 		list = append(list, SessionInfo{
 			ID:                                  entry.Name(),
 			Path:                                sessionPath,
-			MessageCount:                        countMessages(mainPath, info),
+			MessageCount:                        messageCount,
 			LastModTime:                         lastModTime,
 			FirstUserMessage:                    firstUser,
 			FirstUserMessageIsCompactionSummary: firstUserIsCompactionSummary,
@@ -498,6 +491,19 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 		})
 	}
 	return list, nil
+}
+
+// UnknownMessageCount marks SessionInfo.MessageCount as not yet computed.
+// Session pickers can render this as a placeholder and fill exact counts in a
+// background pass without blocking the initial list on reading every log file.
+const UnknownMessageCount = -1
+
+func cachedSessionPreview(sessionPath string) (firstUser string, firstUserIsCompactionSummary bool, originalFirstUser string, lastUpdatedAt time.Time) {
+	summary, err := analytics.LoadCachedSessionUsageSummary(sessionPath)
+	if err != nil || summary == nil {
+		return "", false, "", time.Time{}
+	}
+	return summary.FirstUserMessage, summary.FirstUserMessageIsCompactionSummary, summary.OriginalFirstUserMessage, summary.LastUpdatedAt
 }
 
 // messageCountCache memoizes per-log newline counts keyed by the file's
@@ -512,12 +518,19 @@ type messageCountEntry struct {
 	count   int
 }
 
-func countMessages(mainPath string, info os.FileInfo) int {
+func cachedMessageCount(mainPath string, info os.FileInfo) (int, bool) {
 	if cached, ok := messageCountCache.Load(mainPath); ok {
 		entry := cached.(messageCountEntry)
 		if entry.size == info.Size() && entry.modTime.Equal(info.ModTime()) {
-			return entry.count
+			return entry.count, true
 		}
+	}
+	return 0, false
+}
+
+func countMessages(mainPath string, info os.FileInfo) int {
+	if count, ok := cachedMessageCount(mainPath, info); ok {
+		return count
 	}
 
 	f, err := os.Open(mainPath)
@@ -541,6 +554,21 @@ func countMessages(mainPath string, info os.FileInfo) int {
 	}
 	messageCountCache.Store(mainPath, messageCountEntry{size: info.Size(), modTime: info.ModTime(), count: count})
 	return count
+}
+
+// CountSessionMessages returns the exact number of messages in a session's
+// main log. It is separated from ListSessions so callers can fill this heavier
+// display field after showing the initial session list.
+func CountSessionMessages(sessionPath string) (int, error) {
+	mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
+	info, err := os.Stat(mainPath)
+	if err != nil {
+		return 0, err
+	}
+	if info.Size() == 0 {
+		return 0, nil
+	}
+	return countMessages(mainPath, info), nil
 }
 
 // firstUserMessageFromFile reads main.jsonl and returns a preview of the first

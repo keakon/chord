@@ -164,6 +164,53 @@ func TestSessionSelectRendersMessageCountColumn(t *testing.T) {
 	}
 }
 
+func TestSessionSelectRendersUnknownMessageCountPlaceholder(t *testing.T) {
+	item := sessionSelectItemFor(agent.SessionSummary{
+		ID:                       "sess-unknown",
+		MessageCount:             -1,
+		OriginalFirstUserMessage: "Pending detail load",
+		LastModTime:              time.Date(2026, 4, 25, 12, 0, 0, 0, time.Local),
+	})
+	if !strings.Contains(item.Label, "    -") {
+		t.Fatalf("unknown message count should render as placeholder, got %q", item.Label)
+	}
+}
+
+func TestHandleSessionSummaryDetailsLoadedUpdatesCurrentPicker(t *testing.T) {
+	m := newSessionSelectTestModel([]agent.SessionSummary{{
+		ID:                       "sess-100",
+		MessageCount:             -1,
+		OriginalFirstUserMessage: "Pending detail load",
+		LastModTime:              time.Date(2026, 4, 25, 12, 0, 0, 0, time.Local),
+	}})
+	m.sessionSelect.loadSeq = 7
+
+	m.handleSessionSummaryDetailsLoaded(sessionSummaryDetailsLoadedMsg{
+		seq: 7,
+		options: []agent.SessionSummary{{
+			ID:                       "sess-100",
+			MessageCount:             42,
+			OriginalFirstUserMessage: "Pending detail load",
+			LastModTime:              time.Date(2026, 4, 25, 12, 0, 0, 0, time.Local),
+		}},
+	})
+
+	if got := m.sessionSelect.options[0].MessageCount; got != 42 {
+		t.Fatalf("MessageCount after detail load = %d, want 42", got)
+	}
+	if item, ok := m.sessionSelect.selector.list.SelectedItem(); !ok || !strings.Contains(item.Label, "42") {
+		t.Fatalf("rendered row after detail load should include exact count, got %q", item.Label)
+	}
+
+	m.handleSessionSummaryDetailsLoaded(sessionSummaryDetailsLoadedMsg{
+		seq:     6,
+		options: []agent.SessionSummary{{ID: "stale", MessageCount: 1}},
+	})
+	if got := m.sessionSelect.options[0].ID; got != "sess-100" {
+		t.Fatalf("stale detail load replaced picker ID with %q", got)
+	}
+}
+
 func TestSessionSelectColumnHeader(t *testing.T) {
 	header := sessionSelectColumnHeader()
 	for _, want := range []string{"Modified", "Msgs", "Preview"} {

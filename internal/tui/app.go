@@ -906,6 +906,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionSummariesLoadedMsg:
 		return m, m.handleSessionSummariesLoaded(msg)
 
+	case sessionSummaryDetailsLoadedMsg:
+		return m, m.handleSessionSummaryDetailsLoaded(msg)
+
 	case projectUsageLoadedMsg:
 		return m, m.handleProjectUsageLoaded(msg)
 

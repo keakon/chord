@@ -19,6 +19,7 @@
 - 改进长 agent 循环中的 prompt cache 稳定性：动态环境信息现在放入 session-context reminder 而不是 system prompt；请求级增量剪裁会冻结已剪裁前缀；Anthropic 显式 cache breakpoint 可以落在冻结的已剪裁前缀边界上。
 - Thinking 翻译现在会更严格校验模型输出，拒绝纯符号或过度压缩的译文；并改为在 assistant thinking 持久化后再翻译，而不是流式过程中翻译，避免 rollback / retry 路径留下过期翻译。
 - TUI 流式渲染现在减少 assistant / thinking 增量的逐 token 缓存失效，降低长流式响应期间的重绘开销。
+- 恢复会话选择器在会话很多的项目中打开更快：首屏先渲染轻量列表并复用已缓存的会话摘要，精确消息数和缺失预览会在后台补齐。
 - 文件工具现在提供更完整的 not-found 路径建议，包括对常见模型生成路径的空白修复提示，并把同一套建议流程覆盖到 `read`、`view_image`、`edit` 和 `patch`；`patch` 仍会保留使用 `write` 创建文件的提示。
 - 原生文件工具现在会在同步 text document 前向匹配的 LSP 服务通知 workspace 文件 Created/Changed/Deleted 事件，让 Pyright、TypeScript、gopls、rust-analyzer 等服务更及时刷新项目 / 模块图，降低工具后诊断对新建文件产生暂态 unresolved import 的概率。
 - 工具路径默认值现在显式锚定到 session working directory，而不是隐式依赖进程 cwd：相对文件路径、省略的 `shell` / `spawn` workdir、以及省略的 `grep` / `glob` 搜索根都会使用与首条用户消息前和上下文压缩后注入给模型的相同路径基准。工具卡片可以显示相对该基准的路径以提高可读性，但原始 tool-call 参数仍保持不变，便于审计和导出。

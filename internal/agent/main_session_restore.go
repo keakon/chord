@@ -1045,6 +1045,8 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 }
 
 // SessionSummary holds display info for one session (current or list entry).
+// MessageCount may be UnknownSessionMessageCount when the resume picker has not
+// loaded full session details yet.
 type SessionSummary struct {
 	ID                                  string
 	MessageCount                        int
@@ -1055,6 +1057,9 @@ type SessionSummary struct {
 	ForkedFrom                          string
 	Locked                              bool
 }
+
+// UnknownSessionMessageCount marks SessionSummary.MessageCount as not yet computed.
+const UnknownSessionMessageCount = recovery.UnknownMessageCount
 
 func (a *MainAgent) GetSessionSummary() *SessionSummary {
 	a.stateMu.RLock()
@@ -1088,6 +1093,36 @@ func (a *MainAgent) ListSessionSummaries() ([]SessionSummary, error) {
 		})
 	}
 	return out, nil
+}
+
+func (a *MainAgent) FillSessionSummaryDetails(list []SessionSummary) []SessionSummary {
+	sessionsDir, err := a.projectSessionsDir()
+	if err != nil || len(list) == 0 {
+		return append([]SessionSummary(nil), list...)
+	}
+	out := append([]SessionSummary(nil), list...)
+	for i := range out {
+		if strings.TrimSpace(out[i].ID) == "" {
+			continue
+		}
+		sessionPath := filepath.Join(sessionsDir, out[i].ID)
+		if out[i].MessageCount < 0 {
+			count, err := recovery.CountSessionMessages(sessionPath)
+			if err == nil {
+				out[i].MessageCount = count
+			}
+		}
+		if out[i].FirstUserMessage == "" {
+			mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
+			if firstUser, err := recovery.FirstUserMessageFromFile(mainPath); err == nil {
+				out[i].FirstUserMessage = firstUser
+				if out[i].OriginalFirstUserMessage == "" {
+					out[i].OriginalFirstUserMessage = firstUser
+				}
+			}
+		}
+	}
+	return out
 }
 
 func (a *MainAgent) DeleteSession(sessionID string) error {

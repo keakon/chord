@@ -25,6 +25,7 @@ type sessionSelectState struct {
 	loading  bool
 	loadErr  string
 	filter   string
+	loadSeq  uint64
 
 	filterFocused bool
 	filteredIdx   []int
@@ -36,6 +37,16 @@ type sessionSelectState struct {
 type sessionSummariesLoadedMsg struct {
 	options []agent.SessionSummary
 	err     error
+	seq     uint64
+}
+
+type sessionSummaryDetailsLoadedMsg struct {
+	options []agent.SessionSummary
+	seq     uint64
+}
+
+type sessionSummaryDetailsLoader interface {
+	FillSessionSummaryDetails([]agent.SessionSummary) []agent.SessionSummary
 }
 
 type sessionSwitchState struct {
@@ -180,13 +191,24 @@ func (m *Model) renderSessionSwitchOverlay(_ image.Rectangle) string {
 	return cardStyle.Render(body)
 }
 
-func loadSessionSummariesCmd(a agent.AgentForTUI) tea.Cmd {
+func loadSessionSummariesCmd(a agent.AgentForTUI, seq uint64) tea.Cmd {
 	if a == nil {
 		return nil
 	}
 	return func() tea.Msg {
 		list, err := a.ListSessionSummaries()
-		return sessionSummariesLoadedMsg{options: list, err: err}
+		return sessionSummariesLoadedMsg{options: list, err: err, seq: seq}
+	}
+}
+
+func loadSessionSummaryDetailsCmd(a agent.AgentForTUI, list []agent.SessionSummary, seq uint64) tea.Cmd {
+	loader, ok := a.(sessionSummaryDetailsLoader)
+	if !ok || len(list) == 0 {
+		return nil
+	}
+	copyList := append([]agent.SessionSummary(nil), list...)
+	return func() tea.Msg {
+		return sessionSummaryDetailsLoadedMsg{options: loader.FillSessionSummaryDetails(copyList), seq: seq}
 	}
 }
 
@@ -200,6 +222,8 @@ func (m *Model) openSessionSelect(prefill []agent.SessionSummary) tea.Cmd {
 	if m.agent == nil && prefill == nil {
 		return nil
 	}
+	m.sessionSelect.loadSeq++
+	seq := m.sessionSelect.loadSeq
 
 	var (
 		list    []agent.SessionSummary
@@ -219,6 +243,7 @@ func (m *Model) openSessionSelect(prefill []agent.SessionSummary) tea.Cmd {
 		options:  list,
 		prevMode: m.mode,
 		loading:  loading,
+		loadSeq:  seq,
 	}
 	m.sessionSelect.selector.list = NewOverlayList(nil, m.sessionSelectMaxVisible())
 	if !loading {
@@ -231,7 +256,9 @@ func (m *Model) openSessionSelect(prefill []agent.SessionSummary) tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	if loading {
-		cmds = append(cmds, loadSessionSummariesCmd(m.agent))
+		cmds = append(cmds, loadSessionSummariesCmd(m.agent, seq))
+	} else if cmd := loadSessionSummaryDetailsCmd(m.agent, list, seq); cmd != nil {
+		cmds = append(cmds, cmd)
 	}
 	if len(cmds) > 0 {
 		return tea.Batch(cmds...)
@@ -402,13 +429,17 @@ func sessionSelectPreviewText(s agent.SessionSummary) string {
 
 func sessionSelectItemFor(s agent.SessionSummary) OverlayListItem {
 	modStr := s.LastModTime.Format("2006-01-02 15:04")
+	countStr := "-"
+	if s.MessageCount >= 0 {
+		countStr = fmt.Sprintf("%d", s.MessageCount)
+	}
 	preview := sessionSelectPreviewText(s)
 	if s.ForkedFrom != "" {
 		preview = fmt.Sprintf("↳ %s · %s", s.ForkedFrom, preview)
 	}
 	return OverlayListItem{
 		ID:    s.ID,
-		Label: fmt.Sprintf("%s  %5d  %s", modStr, s.MessageCount, preview),
+		Label: fmt.Sprintf("%s  %5s  %s", modStr, countStr, preview),
 	}
 }
 

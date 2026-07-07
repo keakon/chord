@@ -6,6 +6,8 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/agent"
 )
 
 func (m *Model) handleReconnected(msg reconnectedMsg) tea.Cmd {
@@ -186,6 +188,9 @@ func (m *Model) handleClipboardWriteResult(msg clipboardWriteResultMsg) tea.Cmd 
 }
 
 func (m *Model) handleSessionSummariesLoaded(msg sessionSummariesLoadedMsg) tea.Cmd {
+	if m.mode != ModeSessionSelect || msg.seq != m.sessionSelect.loadSeq {
+		return nil
+	}
 	m.sessionSelect.loading = false
 	m.sessionSelect.loadErr = ""
 	if msg.err != nil {
@@ -202,6 +207,27 @@ func (m *Model) handleSessionSummariesLoaded(msg sessionSummariesLoadedMsg) tea.
 	}
 	m.sessionSelect.options = msg.options
 	m.sessionSelect.searchCorpus = buildSessionSearchCorpus(msg.options)
+	m.rebuildSessionSelectFilteredView(false)
+	m.recalcViewportSize()
+	return loadSessionSummaryDetailsCmd(m.agent, msg.options, msg.seq)
+}
+
+func (m *Model) handleSessionSummaryDetailsLoaded(msg sessionSummaryDetailsLoadedMsg) tea.Cmd {
+	if m.mode != ModeSessionSelect || msg.seq != m.sessionSelect.loadSeq || len(msg.options) == 0 {
+		return nil
+	}
+	byID := make(map[string]agent.SessionSummary, len(msg.options))
+	for _, option := range msg.options {
+		if strings.TrimSpace(option.ID) != "" {
+			byID[option.ID] = option
+		}
+	}
+	for i, option := range m.sessionSelect.options {
+		if updated, ok := byID[option.ID]; ok {
+			m.sessionSelect.options[i] = updated
+		}
+	}
+	m.sessionSelect.searchCorpus = buildSessionSearchCorpus(m.sessionSelect.options)
 	m.rebuildSessionSelectFilteredView(false)
 	m.recalcViewportSize()
 	return nil
