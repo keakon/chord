@@ -195,6 +195,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	loopWasEnabled := a.loopState.Enabled
 	a.loopState.disable()
 	a.pendingLoopContinuation = nil
+	a.pendingLSPDiagnosticOverlay = ""
 	a.pendingRecoveryPrompt = ""
 	a.pendingAutoContinuePrompt = ""
 	a.pendingAutoContinueReplayPrompt = ""

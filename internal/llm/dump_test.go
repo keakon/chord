@@ -58,6 +58,56 @@ func TestDumpWriterWriteSanitizesFilename(t *testing.T) {
 	if !strings.HasSuffix(entries[0].Name(), "_openai_provider_model-1.json") {
 		t.Fatalf("dump filename = %q, want sanitized model suffix", entries[0].Name())
 	}
+	if !strings.HasPrefix(entries[0].Name(), "0001_") {
+		t.Fatalf("first dump filename = %q, want 0001 prefix", entries[0].Name())
+	}
+}
+
+func TestDumpWriterSetDirResetsSequenceForNewSessionDir(t *testing.T) {
+	firstDir := t.TempDir()
+	secondDir := filepath.Join(t.TempDir(), "dumps", "llm")
+	writer := NewDumpWriter(firstDir)
+
+	if err := writer.Write(&LLMDump{Provider: "openai", Model: "gpt-5.5"}); err != nil {
+		t.Fatalf("Write(firstDir #1) error = %v", err)
+	}
+	if err := writer.Write(&LLMDump{Provider: "openai", Model: "gpt-5.5"}); err != nil {
+		t.Fatalf("Write(firstDir #2) error = %v", err)
+	}
+
+	writer.SetDir(secondDir)
+	if err := writer.Write(&LLMDump{Provider: "openai", Model: "gpt-5.5"}); err != nil {
+		t.Fatalf("Write(secondDir #1) error = %v", err)
+	}
+
+	entries := waitForDumpEntries(t, secondDir, 1)
+	if got := entries[0].Name(); !strings.HasPrefix(got, "0001_") {
+		t.Fatalf("first dump in new dir = %q, want 0001 prefix", got)
+	}
+}
+
+func TestDumpWriterSetDirContinuesExistingSessionSequence(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "0042_20260708_230000_responses_gpt-5.5.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("seed existing dump: %v", err)
+	}
+	writer := NewDumpWriter(dir)
+
+	if err := writer.Write(&LLMDump{Provider: "responses", Model: "gpt-5.5"}); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	entries := waitForDumpEntries(t, dir, 2)
+	var found bool
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "0043_") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected resumed session dump with 0043 prefix, got %#v", dumpEntryNames(entries))
+	}
 }
 
 func TestDumpWriterWritePersistsReadableJSONRequestBody(t *testing.T) {
@@ -282,4 +332,12 @@ func waitForDumpEntries(t *testing.T, dir string, want int) []os.DirEntry {
 	}
 	t.Fatalf("len(entries) = %d, want at least %d", len(entries), want)
 	return entries
+}
+
+func dumpEntryNames(entries []os.DirEntry) []string {
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names
 }

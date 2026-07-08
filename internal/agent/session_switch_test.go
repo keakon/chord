@@ -849,6 +849,21 @@ func TestHandleNewSessionCommandStartsFreshSessionAndIgnoresLateSubAgent(t *test
 	}
 }
 
+func TestHandleNewSessionCommandClearsPendingLSPDiagnosticOverlay(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.pendingLSPDiagnosticOverlay = pendingLSPDiagnosticOverlayText
+
+	a.handleNewSessionCommand()
+
+	if a.pendingLSPDiagnosticOverlay != "" {
+		t.Fatalf("pendingLSPDiagnosticOverlay = %q, want empty after /new", a.pendingLSPDiagnosticOverlay)
+	}
+}
+
 // TestHandleForkSessionCommandFirstUserEmptyPrefix verifies that forking
 // at msgIndex=0 (the first user message) produces a new session with an
 // empty prefix and the forked message loaded as the composer draft.

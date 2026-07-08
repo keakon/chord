@@ -119,6 +119,8 @@ Chord 为当前项目维护持久化会话。
 
 退出时若当前会话可恢复，Chord 会打印对应的恢复命令。
 
+`/new` 会切换到一个全新的 session：历史消息、todo、usage、会话内 LSP 提醒等 session-scoped 运行时状态都会重置；模型/运行时配置（例如当前模型池、service tier、MCP 连接环境）继续沿用当前进程的设置。LLM dump/trace 仍按 session 目录分别保存：同一个 session 在恢复、重启或上下文压缩前后会继续沿用本 session 已有的 dump 序号；新 session 则从自己的 dump 目录起始序号开始。
+
 ### 导入外部会话
 
 Chord 支持把外部 coding agent 的历史会话导入为可恢复的 session。
@@ -199,6 +201,8 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 - `/tier standard|fast|slow`：设置后续模型请求的 service tier（包括尚未开始的后续 retry round）。空的 `/tier` 不是状态查询命令；当前有效 tier 请看侧边栏/状态显示。如果手动输入当前 provider/model 不支持的 tier，Chord 会保持当前 tier 不变并显示错误提示。
 - `/yolo on|off`：临时绕过 MainAgent 工具权限，但仍保留 handoff、delegate、cancel 和 done 权限。Agent 运行中也可以切换 YOLO；执行期权限绕过会立刻影响后续工具调用，而 LLM 可见的工具描述和权限提示会在下一次请求刷新。
 - `/help`：切换内置 cheatsheet 浮层（等同 Normal 模式按 `?`）
+
+其中 `/new` 会创建一个新的 session 并清空当前会话态（例如消息历史、todo、usage、一次性 LSP 诊断提醒等），但不会重置当前进程的模型/运行时配置。LLM dump 与 trace 始终按 session 目录隔离：同一个 session 的 dump 序号在恢复、重启或 `/compact` 压缩后保持连续；切到新 session 后，新目录会使用自己的序号序列。
 
 当当前 provider/model 实际启用了非 standard tier 时，侧边栏/状态区域会正常显示它。如果切换 provider/model 后，之前请求的 tier 不再受支持，信息面板仍会以灰色删除线显示请求的 tier，让它保持可见但明确表示未生效。`Ctrl+R` 会跳过不支持的 tier，只在当前 provider/model 可用的 tier 中循环。`/tier` 的 slash 补全会预测与 `Ctrl+R` 相同的下一个 tier；如果唯一可用 tier 是当前已经生效的 `standard`，补全列表会隐藏 `/tier`。
 

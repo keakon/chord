@@ -119,6 +119,8 @@ Common workflows:
 
 When exiting, if the current session can be resumed, Chord prints the corresponding resume command.
 
+`/new` switches to a fresh session: session-scoped runtime state such as conversation history, todos, usage, and one-shot in-session LSP reminders is reset, while model/runtime preferences (for example the current model pool, service tier, and MCP connection environment) stay with the running process. LLM dumps and traces remain session-directory scoped: the same session keeps its existing dump numbering across resume, restart, and context compaction, while a new session starts its own numbering sequence in its own dump directory.
+
 ### Importing external sessions
 
 Chord can import an external agent session into a resumable Chord session.
@@ -199,6 +201,8 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/tier standard|fast|slow`: set the service tier for subsequent model requests (including later retry rounds that have not started yet). Bare `/tier` is not a status command; use the sidebar/status display for the current effective tier. If you enter a tier that the current provider/model does not support, Chord leaves the current tier unchanged and shows an error.
 - `/yolo on|off`: temporarily bypass main-agent tool permissions while keeping handoff, delegate, cancel, and done permissions enforced. YOLO can be toggled while the agent is running; the execution-time permission bypass applies immediately to later tool calls, while the LLM-visible tool descriptions and permission prompt are refreshed on the next request.
 - `/help`: toggle the in-app cheatsheet overlay (same as pressing `?` in Normal mode)
+
+`/new` creates a fresh session and clears current session state (for example message history, todos, usage, and one-shot LSP diagnostic reminders), but it does not reset model/runtime preferences owned by the running process. LLM dumps and traces are always isolated by session directory: dump numbering stays continuous within the same session across resume, restart, and `/compact`, while switching to a new session starts that new directory's own sequence.
 
 When a non-standard tier is actually active for the current provider/model, the sidebar/status area shows it normally. If a previously requested tier becomes unsupported after switching provider/model, the info panel still shows the requested tier in a dim strikethrough style so it remains visible but clearly ineffective. `Ctrl+R` skips unsupported tiers and cycles only through the tiers available to the current provider/model. Slash completion for `/tier` predicts the same next tier as `Ctrl+R`; when the only available tier is the already-active `standard`, `/tier` is omitted from slash completions.
 

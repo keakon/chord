@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -79,7 +80,9 @@ type DumpWriter struct {
 // NewDumpWriter creates a DumpWriter that writes JSON files to dir.
 // The directory is created lazily on the first Write call.
 func NewDumpWriter(dir string) *DumpWriter {
-	return &DumpWriter{dir: dir}
+	w := &DumpWriter{}
+	w.SetDir(dir)
+	return w
 }
 
 // SetDir updates the target dump directory for subsequent writes.
@@ -88,8 +91,38 @@ func (w *DumpWriter) SetDir(dir string) {
 		return
 	}
 	w.mu.Lock()
-	w.dir = dir
+	w.dir = strings.TrimSpace(dir)
+	w.seq.Store(nextDumpSequenceForDir(w.dir) - 1)
 	w.mu.Unlock()
+}
+
+func nextDumpSequenceForDir(dir string) uint64 {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return 1
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 1
+	}
+	var maxSeq uint64
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		prefix, _, ok := strings.Cut(strings.TrimSpace(entry.Name()), "_")
+		if !ok || prefix == "" {
+			continue
+		}
+		seq, err := strconv.ParseUint(prefix, 10, 64)
+		if err != nil {
+			continue
+		}
+		if seq > maxSeq {
+			maxSeq = seq
+		}
+	}
+	return maxSeq + 1
 }
 
 // Write persists a dump to a JSON file.
@@ -111,9 +144,9 @@ func (w *DumpWriter) Write(dump *LLMDump) error {
 		w.mu.Unlock()
 		return fmt.Errorf("create dump dir: %w", err)
 	}
+	seq := w.seq.Add(1)
 	w.mu.Unlock()
 
-	seq := w.seq.Add(1)
 	ts := time.Now().Format("20060102_150405")
 	filename := fmt.Sprintf(
 		"%04d_%s_%s_%s.json",
