@@ -19,6 +19,26 @@ type oauthMetadataBackfill struct {
 	Expires       int64
 }
 
+func oauthCredentialIdentityFromAccess(cred *config.OAuthCredential) (accountUserID, accountID, accessAccountID string) {
+	if cred == nil || cred.Access == "" {
+		return "", "", ""
+	}
+	accessAccountID = config.ExtractOAuthAccountIDFromToken(cred.Access)
+	accessUserID := config.ExtractOAuthUserIDFromToken(cred.Access)
+	accountID = accessAccountID
+	if accountID == "" {
+		accountID = cred.AccountID
+	}
+	accountUserID = config.ExtractOAuthAccountUserIDFromToken(cred.Access)
+	if accountID != "" && accountUserID == accessUserID && accessUserID != "" {
+		accountUserID = accessUserID + "__" + accountID
+	}
+	if accountUserID == "" && cred.AccountUserID != "" {
+		accountUserID = cred.AccountUserID
+	}
+	return accountUserID, accountID, accessAccountID
+}
+
 func oauthCredentialMapFast(creds []config.ProviderCredential) map[string]llm.OAuthKeySetup {
 	result := make(map[string]llm.OAuthKeySetup)
 	for credIdx, cred := range creds {
@@ -134,21 +154,10 @@ func oauthCredentialMapWithOptions(creds []config.ProviderCredential, strict boo
 		accountUserID := ""
 		accountID := ""
 		email := ""
+		accessAccountID := ""
 		hadExpires := cred.OAuth.Expires != 0
 		if access != "" {
-			accessAccountID := config.ExtractOAuthAccountIDFromToken(access)
-			accessUserID := config.ExtractOAuthUserIDFromToken(access)
-			accountID = accessAccountID
-			if accountID == "" {
-				accountID = cred.OAuth.AccountID
-			}
-			accountUserID = config.ExtractOAuthAccountUserIDFromToken(access)
-			if accountID != "" && accountUserID == accessUserID && accessUserID != "" {
-				accountUserID = accessUserID + "__" + accountID
-			}
-			if accountUserID == "" && cred.OAuth.AccountUserID != "" {
-				accountUserID = cred.OAuth.AccountUserID
-			}
+			accountUserID, accountID, accessAccountID = oauthCredentialIdentityFromAccess(cred.OAuth)
 			if accessAccountID == "" && cred.OAuth.AccountID != "" {
 				log.Debugf("OAuth access token at credential %d is missing account_id claim; using configured account_id", credIdx)
 			} else if accessAccountID == "" {
@@ -194,7 +203,7 @@ func oauthCredentialMapWithOptions(creds []config.ProviderCredential, strict boo
 			email = cred.OAuth.Email
 		}
 		needsBackfill := false
-		if access == "" && cred.OAuth.AccountUserID == "" && accountUserID != "" {
+		if cred.OAuth.AccountUserID == "" && accountUserID != "" {
 			cred.OAuth.AccountUserID = accountUserID
 			needsBackfill = true
 		}

@@ -222,21 +222,13 @@ func validateRefreshedCodexOAuthCredential(oldCred, newCred *config.OAuthCredent
 	if strings.TrimSpace(newCred.Access) == "" {
 		return fmt.Errorf("refreshed OAuth credential missing access token")
 	}
-	accountID := strings.TrimSpace(newCred.AccountID)
-	if accountID == "" {
-		accountID = config.ExtractOAuthAccountIDFromToken(newCred.Access)
+	identityCred := *newCred
+	if strings.TrimSpace(identityCred.AccountID) == "" && oldCred != nil {
+		identityCred.AccountID = strings.TrimSpace(oldCred.AccountID)
 	}
-	if accountID == "" && oldCred != nil {
-		accountID = strings.TrimSpace(oldCred.AccountID)
-	}
-	accountUserID := strings.TrimSpace(newCred.AccountUserID)
-	if accountUserID == "" {
-		accountUserID = config.ExtractOAuthAccountUserIDFromToken(newCred.Access)
-	}
-	userID := config.ExtractOAuthUserIDFromToken(newCred.Access)
-	if accountID != "" && accountUserID == userID && userID != "" {
-		accountUserID = userID + "__" + accountID
-	}
+	accountUserID, accountID, _ := oauthCredentialIdentityFromAccess(&identityCred)
+	accountUserID = strings.TrimSpace(accountUserID)
+	accountID = strings.TrimSpace(accountID)
 	if accountUserID == "" {
 		return fmt.Errorf("refreshed OAuth credential missing account_user_id claims")
 	}
@@ -373,6 +365,7 @@ func newAuthStateCmd() *cobra.Command {
 				return fmt.Errorf("load auth config: %w", err)
 			}
 			entries := listRemovableOAuthStateEntries(state, auth)
+			entriesByProvider := oauthStateEntriesByProvider(entries)
 			_, removedState, err := config.RemoveOAuthStateRecords(statePath, func(provider, stateKey string, record config.OAuthStateRecord) bool {
 				entry := config.RemovedOAuthStateEntryFromRecord(provider, stateKey, record)
 				return oauthStateEntryRemovable(entry, auth)
@@ -389,10 +382,7 @@ func newAuthStateCmd() *cobra.Command {
 				if cred == nil {
 					return false
 				}
-				for _, entry := range entries {
-					if entry.Provider != provider {
-						continue
-					}
+				for _, entry := range entriesByProvider[provider] {
 					if oauthCredentialMatchesStateEntry(cred, entry) {
 						return true
 					}
@@ -446,6 +436,14 @@ func listRemovableOAuthStateEntries(state config.AuthStateFile, auth config.Auth
 	return removed
 }
 
+func oauthStateEntriesByProvider(entries []config.RemovedOAuthStateEntry) map[string][]config.RemovedOAuthStateEntry {
+	byProvider := make(map[string][]config.RemovedOAuthStateEntry)
+	for _, entry := range entries {
+		byProvider[entry.Provider] = append(byProvider[entry.Provider], entry)
+	}
+	return byProvider
+}
+
 func sortOAuthStateEntries(entries []config.RemovedOAuthStateEntry) {
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].Provider != entries[j].Provider {
@@ -471,7 +469,12 @@ func oauthCredentialMatchesStateEntry(cred *config.OAuthCredential, entry config
 	if cred == nil {
 		return false
 	}
-	return (cred.AccountUserID != "" && entry.AccountUserID != "" && cred.AccountUserID == entry.AccountUserID) ||
+	accountUserID := strings.TrimSpace(cred.AccountUserID)
+	if accountUserID == "" && cred.Access != "" {
+		accountUserID, _, _ = oauthCredentialIdentityFromAccess(cred)
+		accountUserID = strings.TrimSpace(accountUserID)
+	}
+	return (accountUserID != "" && entry.AccountUserID != "" && accountUserID == entry.AccountUserID) ||
 		(cred.Refresh != "" && entry.RefreshSHA256 != "" && config.OAuthRefreshStateKey(cred.Refresh) == entry.RefreshSHA256)
 }
 

@@ -752,6 +752,17 @@ func TestRunAuthRefreshRefreshesAllCodexOAuthCredentials(t *testing.T) {
 	}
 }
 
+func TestValidateRefreshedCodexOAuthCredentialUsesExistingAccountID(t *testing.T) {
+	access := testUnsignedJWT(`{"https://api.openai.com/auth":{"user_id":"user-a"},"email":"a-new@example.com"}`)
+	newCred := &config.OAuthCredential{Access: access, Refresh: "refresh-new"}
+	if err := validateRefreshedCodexOAuthCredential(&config.OAuthCredential{AccountID: "acct-a"}, newCred); err != nil {
+		t.Fatalf("validateRefreshedCodexOAuthCredential: %v", err)
+	}
+	if newCred.AccountID != "acct-a" || newCred.AccountUserID != "user-a__acct-a" || newCred.Email != "a-new@example.com" {
+		t.Fatalf("validated credential = %#v, want account_id/account_user_id/email backfilled from old credential and access token", newCred)
+	}
+}
+
 func TestRunAuthRefreshRejectsNonCodexProvider(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("CHORD_CONFIG_HOME", configHome)
@@ -1398,6 +1409,122 @@ func TestAuthStateCleanRemovesCredentialMarkedExpiredAfterMissingRefreshToken(t 
 	}
 }
 
+func TestAuthStateCleanMatchesAccessTokenAccountUserID(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	authPath, err := config.AuthPath()
+	if err != nil {
+		t.Fatalf("AuthPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(authPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll(auth dir): %v", err)
+	}
+	staleAccess := testCodexAccessToken("acc-1", "user-1", "stale@example.com")
+	goodAccess := testCodexAccessToken("acc-2", "user-2", "good@example.com")
+	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+  - access: %q
+    account_id: acc-1
+    email: stale@example.com
+  - access: %q
+    account_id: acc-2
+    email: good@example.com
+`, staleAccess, goodAccess)), 0o600); err != nil {
+		t.Fatalf("WriteFile(auth): %v", err)
+	}
+	statePath, err := config.AuthStatePath()
+	if err != nil {
+		t.Fatalf("AuthStatePath: %v", err)
+	}
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1", Email: "stale@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusInvalidated
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+
+	cmd := newAuthCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"state", "clean"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "Removed 1 invalid OAuth credentials") {
+		t.Fatalf("expected clean to remove one auth credential, got %q", output)
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	if got := len(auth["openai"]); got != 1 {
+		t.Fatalf("remaining openai credentials = %d, want 1", got)
+	}
+	if got := auth["openai"][0].OAuth; got == nil || got.Email != "good@example.com" {
+		t.Fatalf("remaining OAuth credential = %#v, want good@example.com", got)
+	}
+}
+
+func TestAuthStateCleanMatchesAccessTokenUserIDWithConfiguredAccountID(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	authPath, err := config.AuthPath()
+	if err != nil {
+		t.Fatalf("AuthPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(authPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll(auth dir): %v", err)
+	}
+	staleAccess := testUnsignedJWT(`{"https://api.openai.com/auth":{"user_id":"user-1"},"email":"stale@example.com"}`)
+	goodAccess := testUnsignedJWT(`{"https://api.openai.com/auth":{"user_id":"user-2"},"email":"good@example.com"}`)
+	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+  - access: %q
+    account_id: acc-1
+    email: stale@example.com
+  - access: %q
+    account_id: acc-2
+    email: good@example.com
+`, staleAccess, goodAccess)), 0o600); err != nil {
+		t.Fatalf("WriteFile(auth): %v", err)
+	}
+	statePath, err := config.AuthStatePath()
+	if err != nil {
+		t.Fatalf("AuthStatePath: %v", err)
+	}
+	_, _, _, err = config.UpsertOAuthStateRecord(statePath, config.OAuthStateKey{Provider: "openai", AccountUserID: "user-1__acc-1", AccountID: "acc-1", Email: "stale@example.com"}, func(record *config.OAuthStateRecord) (bool, error) {
+		record.Status = config.OAuthStatusInvalidated
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("UpsertOAuthStateRecord: %v", err)
+	}
+
+	cmd := newAuthCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"state", "clean"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "Removed 1 invalid OAuth credentials") {
+		t.Fatalf("expected clean to remove one auth credential, got %q", output)
+	}
+	auth, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatalf("LoadAuthConfig: %v", err)
+	}
+	if got := len(auth["openai"]); got != 1 {
+		t.Fatalf("remaining openai credentials = %d, want 1", got)
+	}
+	if got := auth["openai"][0].OAuth; got == nil || got.Email != "good@example.com" {
+		t.Fatalf("remaining OAuth credential = %#v, want good@example.com", got)
+	}
+}
+
 func TestAuthStateCleanKeepsMatchedRefreshOnlyState(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configHome)
@@ -1557,6 +1684,8 @@ func TestOpenBrowserCommandPlansPerPlatform(t *testing.T) {
 }
 
 func TestOAuthCredentialMatchesStateEntry(t *testing.T) {
+	access := testCodexAccessToken("acct-1", "user-1", "user@example.com")
+	accessWithoutAccountID := testUnsignedJWT(`{"https://api.openai.com/auth":{"user_id":"user-1"},"email":"user@example.com"}`)
 	entry := config.RemovedOAuthStateEntry{AccountUserID: "user-1__acct-1", AccountID: "acct-1", Email: "user@example.com"}
 	tests := []struct {
 		name string
@@ -1565,6 +1694,8 @@ func TestOAuthCredentialMatchesStateEntry(t *testing.T) {
 	}{
 		{name: "nil", cred: nil, want: false},
 		{name: "account user id", cred: &config.OAuthCredential{AccountUserID: "user-1__acct-1", AccountID: "acct-1"}, want: true},
+		{name: "access token account user id", cred: &config.OAuthCredential{Access: access, AccountID: "acct-1", Email: "user@example.com"}, want: true},
+		{name: "access token user id with configured account id", cred: &config.OAuthCredential{Access: accessWithoutAccountID, AccountID: "acct-1", Email: "user@example.com"}, want: true},
 		{name: "email only does not match", cred: &config.OAuthCredential{Email: "user@example.com"}, want: false},
 		{name: "different account with same email does not match", cred: &config.OAuthCredential{AccountUserID: "user-2__acct-2", AccountID: "acct-2", Email: "user@example.com"}, want: false},
 		{name: "empty fields do not match", cred: &config.OAuthCredential{}, want: false},
@@ -1668,6 +1799,24 @@ func TestOAuthCredentialMapUsesConfiguredAccountIDWhenAccessTokenOmitsIt(t *test
 	}
 	if len(backfills) != 1 || backfills[0].AccountID != "acct-configured" || backfills[0].AccountUserID != "user-token__acct-configured" {
 		t.Fatalf("backfills = %#v, want configured account identity", backfills)
+	}
+}
+
+func TestOAuthCredentialMapBackfillsOnlyMissingAccountUserID(t *testing.T) {
+	access := testCodexAccessToken("acct-token", "user-token", "token@example.com")
+	got, backfills, err := oauthCredentialMap([]config.ProviderCredential{{OAuth: &config.OAuthCredential{Access: access, AccountID: "acct-token", Email: "token@example.com", Expires: 4102444800000}}})
+	if err != nil {
+		t.Fatalf("oauthCredentialMap: %v", err)
+	}
+	setup, ok := got[access]
+	if !ok {
+		t.Fatalf("OAuth map missing access token key: %#v", got)
+	}
+	if setup.AccountUserID != "user-token__acct-token" {
+		t.Fatalf("setup account_user_id = %q, want token identity", setup.AccountUserID)
+	}
+	if len(backfills) != 1 || backfills[0].AccountUserID != "user-token__acct-token" {
+		t.Fatalf("backfills = %#v, want missing account_user_id", backfills)
 	}
 }
 
