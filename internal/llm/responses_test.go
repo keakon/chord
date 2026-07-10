@@ -272,8 +272,9 @@ func TestApplyResponsesCompletionPayload(t *testing.T) {
 				InputTokens:  10,
 				OutputTokens: 20,
 				InputTokensDetails: &struct {
-					CachedTokens int `json:"cached_tokens"`
-				}{CachedTokens: 3},
+					CachedTokens     int `json:"cached_tokens"`
+					CacheWriteTokens int `json:"cache_write_tokens"`
+				}{CachedTokens: 3, CacheWriteTokens: 4},
 				OutputTokensDetails: &struct {
 					ReasoningTokens int `json:"reasoning_tokens"`
 				}{ReasoningTokens: 5},
@@ -288,7 +289,7 @@ func TestApplyResponsesCompletionPayload(t *testing.T) {
 		if truncated {
 			t.Fatal("truncated should remain false")
 		}
-		if resp.Usage == nil || resp.Usage.InputTokens != 10 || resp.Usage.OutputTokens != 20 || resp.Usage.CacheReadTokens != 3 || resp.Usage.ReasoningTokens != 5 {
+		if resp.Usage == nil || resp.Usage.InputTokens != 6 || resp.Usage.OutputTokens != 20 || resp.Usage.CacheReadTokens != 3 || resp.Usage.CacheWriteTokens != 4 || resp.Usage.ReasoningTokens != 5 {
 			t.Fatalf("usage = %#v, want populated usage", resp.Usage)
 		}
 	})

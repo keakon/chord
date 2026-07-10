@@ -13,9 +13,14 @@ func applyResponsesCompletionPayload(resp *message.Response, payload responsesCo
 	resp.ProviderResponseID = payload.ID
 	if payload.Usage != nil {
 		u := payload.Usage
+		cacheWriteTokens := 0
+		if u.InputTokensDetails != nil {
+			cacheWriteTokens = u.InputTokensDetails.CacheWriteTokens
+		}
 		resp.Usage = &message.TokenUsage{
-			InputTokens:  u.InputTokens,
-			OutputTokens: u.OutputTokens,
+			InputTokens:      normalizedOpenAIInputTokens(u.InputTokens, cacheWriteTokens),
+			OutputTokens:     u.OutputTokens,
+			CacheWriteTokens: cacheWriteTokens,
 		}
 		if u.InputTokensDetails != nil {
 			resp.Usage.CacheReadTokens = u.InputTokensDetails.CachedTokens

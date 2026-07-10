@@ -211,10 +211,10 @@ func TestParseOpenAISSEStream_AggregatesDeepSeekCacheReadUsage(t *testing.T) {
 	}
 }
 
-func TestParseOpenAISSEStream_AggregatesOpenAICachedTokenDetails(t *testing.T) {
+func TestParseOpenAISSEStream_AggregatesOpenAIPromptTokenDetails(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"content":"Hello"}}]}`,
-		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":2048,"completion_tokens":8,"total_tokens":2056,"prompt_tokens_details":{"cached_tokens":1024}}}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":2048,"completion_tokens":8,"total_tokens":2056,"prompt_tokens_details":{"cached_tokens":1024,"cache_write_tokens":256}}}`,
 		`data: [DONE]`,
 		"",
 	}, "\n")
@@ -226,8 +226,14 @@ func TestParseOpenAISSEStream_AggregatesOpenAICachedTokenDetails(t *testing.T) {
 	if resp == nil || resp.Usage == nil {
 		t.Fatal("expected non-nil response usage")
 	}
+	if got := resp.Usage.InputTokens; got != 1792 {
+		t.Fatalf("InputTokens = %d, want 1792", got)
+	}
 	if got := resp.Usage.CacheReadTokens; got != 1024 {
 		t.Fatalf("CacheReadTokens = %d, want 1024", got)
+	}
+	if got := resp.Usage.CacheWriteTokens; got != 256 {
+		t.Fatalf("CacheWriteTokens = %d, want 256", got)
 	}
 }
 

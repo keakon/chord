@@ -216,7 +216,8 @@ type openAIStreamChunk struct {
 		PromptCacheMissTokens int `json:"prompt_cache_miss_tokens"`
 		CacheReadTokens       int `json:"cache_read_tokens"`
 		PromptTokensDetails   *struct {
-			CachedTokens int `json:"cached_tokens"`
+			CachedTokens     int `json:"cached_tokens"`
+			CacheWriteTokens int `json:"cache_write_tokens"`
 		} `json:"prompt_tokens_details,omitempty"`
 		CompletionTokensDetails *struct {
 			ReasoningTokens int `json:"reasoning_tokens"`
@@ -906,8 +907,13 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 			if cacheReadTokens <= 0 && chunk.Usage.PromptTokensDetails != nil {
 				cacheReadTokens = chunk.Usage.PromptTokensDetails.CachedTokens
 			}
-			resp.Usage.InputTokens = promptTokens
+			cacheWriteTokens := 0
+			if chunk.Usage.PromptTokensDetails != nil {
+				cacheWriteTokens = chunk.Usage.PromptTokensDetails.CacheWriteTokens
+			}
+			resp.Usage.InputTokens = normalizedOpenAIInputTokens(promptTokens, cacheWriteTokens)
 			resp.Usage.CacheReadTokens = cacheReadTokens
+			resp.Usage.CacheWriteTokens = cacheWriteTokens
 			resp.Usage.OutputTokens = chunk.Usage.CompletionTokens
 			if chunk.Usage.CompletionTokensDetails != nil {
 				resp.Usage.ReasoningTokens = chunk.Usage.CompletionTokensDetails.ReasoningTokens
@@ -952,6 +958,13 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 	// chunk but before the transport-level [DONE] marker.
 	finalizeToolCalls(toolCalls, &resp, cb, truncated)
 	return &resp, nil
+}
+
+// OpenAI reports cache writes as a detail bucket within its top-level input
+// count. Chord stores that bucket separately so billing and context accounting
+// can add it exactly once, matching transports that report cache writes apart.
+func normalizedOpenAIInputTokens(inputTokens, cacheWriteTokens int) int {
+	return max(inputTokens-cacheWriteTokens, 0)
 }
 
 // finalizeToolCalls converts all accumulated tool calls into the response and
