@@ -12,7 +12,7 @@ Chord is developed and tested primarily on macOS. Other platforms work to varyin
 | `prevent_sleep` (idle-sleep prevention)             | ✅     | ❌ (no-op)   | ❌ (no-op)      | ❌ (no-op)       |
 | `ime_switch_target` (auto IM switch on mode change) | ✅[^im]| ⚠️[^im-linux]| ✅[^im-win]    | ⚠️[^im-wsl]     |
 | `desktop_notification` (terminal notifications)       | ⚠️[^osc] | ⚠️[^osc] | ⚠️[^osc]    | ⚠️[^osc]      |
-| Clipboard image paste (`Ctrl+V` / `Cmd+V`)          | ✅     | ⚠️[^clip]   | ⚠️[^clip]      | ⚠️[^clip]       |
+| Clipboard image/PDF attachment (`Ctrl+V` / `Alt+V`) | ✅     | ⚠️[^clip]   | ⚠️[^clip]      | ⚠️[^clip]       |
 | Terminal-rendered images (Kitty / iTerm2)           | ⚠️[^img]| ⚠️[^img]  | ⚠️[^img]      | ⚠️[^img]        |
 | LSP — gopls / typescript / rust-analyzer            | ✅[^lsp]| ✅[^lsp]   | ✅[^lsp]      | ✅[^lsp]        |
 | LSP — Pyright with project venv auto-discovery      | ✅[^py-unix] | ✅[^py-unix] | ✅[^py-win] | ✅[^py-unix] (WSL Linux venvs only — see below) |
@@ -24,7 +24,7 @@ Chord is developed and tested primarily on macOS. Other platforms work to varyin
 [^im-win]: Use `im-select.exe` (e.g. from <https://github.com/daipeihust/im-select#-windows>).
 [^im-wsl]: Inside WSL, IM switching usually targets the host (Windows) IM. You typically run `im-select.exe` over interop and may need PATH or wrapper setup.
 [^osc]: Notification support is a terminal capability, not an OS capability. Chord auto-selects a notification escape sequence by terminal (OSC 9 or OSC 777). Some terminals may ignore unsupported sequences; see [Terminal compatibility](#terminal-compatibility) below.
-[^clip]: Clipboard image paste depends on whether the terminal forwards raw image bytes, emits an empty paste event and expects the app to read the system clipboard, or pastes only text. Chord attaches real clipboard image data when available; text remains text.
+[^clip]: `Ctrl+V` / `Alt+V` reads the system clipboard through a native backend. Availability still depends on the local display/clipboard environment; remote SSH sessions usually expose the remote host clipboard, not the terminal client's clipboard. Windows Terminal reserves `Ctrl+V`, so use `Alt+V` there and in WSL sessions hosted by it.
 [^img]: Image rendering currently auto-detects Kitty graphics and iTerm2 inline images (Ghostty uses Kitty; WezTerm uses iTerm2). When the terminal does not support those, image attachments are still sent to the model but are not previewed in the TUI. `tmux` / `zellij` are disabled by default for safety.
 [^lsp]: Requires the relevant language server installed locally (e.g. `gopls`, `typescript-language-server`, `rust-analyzer`). Chord does not bundle them.
 [^py-unix]: On Unix-like systems Chord probes `.venv/bin/python`, `venv/bin/python`, `env/bin/python` under the LSP root.
@@ -68,26 +68,23 @@ In practice:
 
 Inside `tmux` you may need `set -g allow-passthrough on` for notifications to reach the host terminal.
 
-### Clipboard image paste
+### Clipboard image/PDF attachment
 
-`Ctrl+V` (`Cmd+V` on macOS) is a smart paste: it prefers an image attachment, then falls back to text. Different terminals hand clipboard images to applications differently: some forward raw image bytes, some emit an empty paste event and expect the app to read the system clipboard, and some can only paste plain text.
+`Ctrl+V` or `Alt+V` reads an image or PDF from the system clipboard and adds it as an attachment. The read and any image conversion run asynchronously, so the TUI remains responsive; sending is temporarily held until the read finishes. Ordinary terminal paste events, including the usual macOS `Cmd+V`, are text-only and never probe clipboard attachments.
 
-Chord currently handles these cases conservatively:
-
-- **Raw image bytes available**: attach as an image
-- **Anything else**: paste as ordinary text
+Chord uses native clipboard backends rather than `osascript`, `xclip`, or `wl-paste`. Clipboard PNG is preferred, followed by JPEG, WebP, and BMP; BMP/WebP are safely normalized to PNG/JPEG before attachment. If both PDF and image representations are present, PDF takes priority. If no supported attachment is available, Chord shows a warning and does not fall back to text.
 
 Inline image attachments are capped at 5 per composer message. Literal placeholder text like `[image1]` is not special by itself; only Chord-inserted inline placeholders are backed by real attachments.
 
 Common cases:
 
-- **macOS + iTerm2 / WezTerm / Ghostty**: usually paste images directly
-- **macOS + cmux**: use `Ctrl+V` for clipboard images. `Cmd+V` may be intercepted by cmux and converted into a pasted temporary file path, which can appear after Chord's image placeholder.
-- **Linux Wayland / X11**: terminal-dependent; some terminals only paste plain text for clipboard images
-- **Windows Terminal**: text paste is fine; image behavior depends more on the terminal / host chain
-- **Inside tmux**: raw image bytes often do not pass through
+- **macOS + iTerm2 / WezTerm / Ghostty**: use `Ctrl+V` for clipboard attachments and `Cmd+V` for text.
+- **macOS + cmux**: use `Ctrl+V` for clipboard attachments. `Cmd+V` may be intercepted by cmux and converted into pasted temporary-file path text.
+- **Linux Wayland / X11**: `Ctrl+V` uses the local clipboard when the compositor exposes data-control or an X11/XWayland display is available.
+- **Windows Terminal / WSL hosted by it**: use `Alt+V`; Windows Terminal reserves `Ctrl+V` for ordinary text paste by default. WSLg BMP clipboard images are normalized before attachment.
+- **Inside tmux / SSH**: the Chord process reads the clipboard of the machine where it runs, not automatically the terminal client's clipboard.
 
-When clipboard image paste is unavailable, you can still bind `insert_attach_file` and attach images by path from the composer.
+When clipboard attachment access is unavailable, you can still bind `insert_attach_file` and attach images/PDFs by path from the composer.
 
 ### Terminal-rendered images
 

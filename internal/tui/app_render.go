@@ -129,7 +129,7 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 			welcomeHints := []string{
 				DimStyle.Render("Press ? for help · /help for commands"),
 				DimStyle.Render("i: insert  /: search  ctrl+p: model pool  ctrl+t: directory"),
-				DimStyle.Render("enter: send  ctrl+v/cmd+v: paste image or text"),
+				DimStyle.Render("enter: send  ctrl+v/alt+v: attach image/PDF  cmd+v: paste text"),
 			}
 			emptyMessage := DimStyle.Render("No messages yet. Start a conversation!")
 			if m.startupRestorePending {

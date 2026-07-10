@@ -1,13 +1,20 @@
 package tui
 
 import (
+	"bytes"
 	"encoding/base64"
 	"errors"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
+	clipboard "golang.design/x/clipboard"
+	"golang.org/x/image/bmp"
 
 	"github.com/keakon/chord/internal/message"
 )
@@ -27,18 +34,15 @@ func writeTinyPNG(t *testing.T) string {
 	return path
 }
 
-func stubClipboardImageReadError(t *testing.T) {
-	t.Helper()
-	orig := readImageFromClipboard
-	readImageFromClipboard = func() ([]byte, string, error) {
-		return nil, "", errors.New("no image")
-	}
-	t.Cleanup(func() { readImageFromClipboard = orig })
-}
-
 func TestHandleNonKeyInputMsgKeepsImagePathPasteAsText(t *testing.T) {
 	path := writeTinyPNG(t)
-	stubClipboardImageReadError(t)
+	attachmentReads := 0
+	orig := readAttachmentFromClipboard
+	readAttachmentFromClipboard = func() ([]byte, string, error) {
+		attachmentReads++
+		return nil, "", errNoClipboardAttachment
+	}
+	t.Cleanup(func() { readAttachmentFromClipboard = orig })
 	m := NewModelWithSize(nil, 80, 24)
 	m.mode = ModeInsert
 
@@ -52,163 +56,340 @@ func TestHandleNonKeyInputMsgKeepsImagePathPasteAsText(t *testing.T) {
 	if len(m.attachments) != 0 {
 		t.Fatalf("attachments = %d, want 0", len(m.attachments))
 	}
+	if attachmentReads != 0 {
+		t.Fatalf("clipboard attachment reads = %d, want 0", attachmentReads)
+	}
 }
 
-func TestPasteMsgPrefersClipboardImageOverText(t *testing.T) {
-	path := writeTinyPNG(t)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read tiny png: %v", err)
+func TestPasteMsgInsertsTextWithoutReadingClipboardAttachment(t *testing.T) {
+	attachmentReads := 0
+	orig := readAttachmentFromClipboard
+	readAttachmentFromClipboard = func() ([]byte, string, error) {
+		attachmentReads++
+		return []byte("image"), "image/png", nil
 	}
-
-	orig := readImageFromClipboard
-	readImageFromClipboard = func() ([]byte, string, error) {
-		return data, "image/png", nil
-	}
-	t.Cleanup(func() { readImageFromClipboard = orig })
+	t.Cleanup(func() { readAttachmentFromClipboard = orig })
 
 	m := NewModelWithSize(nil, 80, 24)
 	m.mode = ModeInsert
 
 	cmd := m.handleNonKeyInputMsg(tea.PasteMsg{Content: "hello"})
-	if cmd == nil {
-		t.Fatal("expected paste handler to return image-added toast cmd")
+	if cmd != nil {
+		t.Fatalf("paste command = %T, want nil", cmd)
 	}
-	if got := m.input.Value(); got != "[image1.png]hello" {
-		t.Fatalf("input value = %q, want %q", got, "[image1.png]hello")
+	if got := m.input.Value(); got != "hello" {
+		t.Fatalf("input value = %q, want hello", got)
 	}
-	if got := len(m.attachments); got != 1 {
-		t.Fatalf("attachments = %d, want 1", got)
+	if got := len(m.attachments); got != 0 {
+		t.Fatalf("attachments = %d, want 0", got)
 	}
-	if attach := m.attachments[0]; attach.MimeType != "image/png" {
-		t.Fatalf("attachment mime = %q, want image/png", attach.MimeType)
+	if attachmentReads != 0 {
+		t.Fatalf("clipboard attachment reads = %d, want 0", attachmentReads)
 	}
 }
 
-func TestInsertAttachClipboardPrefersClipboardImageOverText(t *testing.T) {
+func TestReadAttachmentFromClipboardFallsBackToBMP(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(1, 1, color.RGBA{R: 200, G: 100, B: 50, A: 255})
+	var encoded bytes.Buffer
+	if err := bmp.Encode(&encoded, img); err != nil {
+		t.Fatal(err)
+	}
+
+	bmpFormat := clipboard.Register("image/bmp")
+	origInit := clipboardInit
+	origFormats := clipboardFormats
+	origRead := clipboardRead
+	clipboardInit = func() error { return nil }
+	clipboardFormats = func() []clipboard.Format { return []clipboard.Format{bmpFormat} }
+	clipboardRead = func(format clipboard.Format) []byte {
+		if format == bmpFormat {
+			return encoded.Bytes()
+		}
+		return nil
+	}
+	t.Cleanup(func() {
+		clipboardInit = origInit
+		clipboardFormats = origFormats
+		clipboardRead = origRead
+	})
+
+	data, mimeType, err := readAttachmentFromClipboardImpl()
+	if err != nil {
+		t.Fatalf("readAttachmentFromClipboardImpl: %v", err)
+	}
+	if mimeType != "image/png" && mimeType != "image/jpeg" {
+		t.Fatalf("mime type = %q, want normalized PNG/JPEG", mimeType)
+	}
+	if _, _, err := image.Decode(bytes.NewReader(data)); err != nil {
+		t.Fatalf("normalized clipboard BMP is not decodable: %v", err)
+	}
+}
+
+func TestReadAttachmentFromClipboardPrefersPNGOverOtherImageMIMEs(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	var pngBuf bytes.Buffer
+	if err := png.Encode(&pngBuf, img); err != nil {
+		t.Fatal(err)
+	}
+	var jpegBuf bytes.Buffer
+	if err := jpeg.Encode(&jpegBuf, img, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	pngFormat := clipboard.Register("image/png")
+	jpegFormat := clipboard.Register("image/jpeg")
+	origInit := clipboardInit
+	origFormats := clipboardFormats
+	origRead := clipboardRead
+	clipboardInit = func() error { return nil }
+	clipboardFormats = func() []clipboard.Format { return []clipboard.Format{jpegFormat, pngFormat} }
+	clipboardRead = func(format clipboard.Format) []byte {
+		switch format {
+		case pngFormat:
+			return pngBuf.Bytes()
+		case jpegFormat:
+			return jpegBuf.Bytes()
+		default:
+			return nil
+		}
+	}
+	t.Cleanup(func() {
+		clipboardInit = origInit
+		clipboardFormats = origFormats
+		clipboardRead = origRead
+	})
+
+	data, mimeType, err := readAttachmentFromClipboardImpl()
+	if err != nil {
+		t.Fatalf("readAttachmentFromClipboardImpl: %v", err)
+	}
+	if len(data) == 0 || (mimeType != "image/png" && mimeType != "image/jpeg") {
+		t.Fatalf("read clipboard PNG = %d bytes, %q", len(data), mimeType)
+	}
+}
+
+func TestReadAttachmentFromClipboardFallsBackWhenFmtImageIsInvalid(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	var jpegBuf bytes.Buffer
+	if err := jpeg.Encode(&jpegBuf, img, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	jpegFormat := clipboard.Register("image/jpeg")
+	origInit := clipboardInit
+	origFormats := clipboardFormats
+	origRead := clipboardRead
+	clipboardInit = func() error { return nil }
+	clipboardFormats = func() []clipboard.Format { return []clipboard.Format{clipboard.FmtImage, jpegFormat} }
+	clipboardRead = func(format clipboard.Format) []byte {
+		if format == clipboard.FmtImage {
+			return []byte("invalid PNG")
+		}
+		if format == jpegFormat {
+			return jpegBuf.Bytes()
+		}
+		return nil
+	}
+	t.Cleanup(func() {
+		clipboardInit = origInit
+		clipboardFormats = origFormats
+		clipboardRead = origRead
+	})
+
+	data, mimeType, err := readAttachmentFromClipboardImpl()
+	if err != nil {
+		t.Fatalf("readAttachmentFromClipboardImpl: %v", err)
+	}
+	if mimeType != "image/jpeg" || !bytes.Equal(data, jpegBuf.Bytes()) {
+		t.Fatalf("clipboard fallback = %d bytes, %q; want original JPEG", len(data), mimeType)
+	}
+}
+
+func TestInsertAttachClipboardSuppressesImmediateTerminalPasteText(t *testing.T) {
+	orig := readAttachmentFromClipboard
+	readAttachmentFromClipboard = func() ([]byte, string, error) {
+		return []byte("image"), "image/png", nil
+	}
+	t.Cleanup(func() { readAttachmentFromClipboard = orig })
+
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeInsert
+	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	if cmd == nil {
+		t.Fatal("expected ctrl+v to start an attachment read")
+	}
+	if pasteCmd := m.handleNonKeyInputMsg(tea.PasteMsg{Content: "duplicate text"}); pasteCmd != nil {
+		t.Fatalf("duplicate terminal paste command = %T, want nil", pasteCmd)
+	}
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("input value = %q, want duplicate text suppressed", got)
+	}
+}
+
+func TestInsertAttachClipboardReadsImageAsynchronously(t *testing.T) {
 	path := writeTinyPNG(t)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read tiny png: %v", err)
 	}
 
-	origImage := readImageFromClipboard
-	readImageFromClipboard = func() ([]byte, string, error) {
+	attachmentReads := 0
+	orig := readAttachmentFromClipboard
+	readAttachmentFromClipboard = func() ([]byte, string, error) {
+		attachmentReads++
 		return data, "image/png", nil
 	}
-	origText := clipboardReadAll
-	clipboardReadAll = func() (string, error) {
-		return "fallback text", nil
-	}
-	t.Cleanup(func() {
-		readImageFromClipboard = origImage
-		clipboardReadAll = origText
-	})
+	t.Cleanup(func() { readAttachmentFromClipboard = orig })
 
-	m := NewModelWithSize(nil, 80, 24)
-	m.mode = ModeInsert
+	model := NewModelWithSize(nil, 80, 24)
+	model.mode = ModeInsert
 
-	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	cmd := model.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
 	if cmd == nil {
-		t.Fatal("expected ctrl+v to return image-added toast cmd")
+		t.Fatal("expected ctrl+v to start an asynchronous attachment read")
 	}
-	if got := m.input.Value(); got != "[image1.png]" {
+	if attachmentReads != 0 {
+		t.Fatalf("clipboard attachment reads before cmd execution = %d, want 0", attachmentReads)
+	}
+	if !model.clipboardAttachmentPending {
+		t.Fatal("clipboard attachment should be pending before cmd completion")
+	}
+	if got := len(model.attachments); got != 0 {
+		t.Fatalf("attachments before cmd completion = %d, want 0", got)
+	}
+
+	updated, _ := model.Update(cmd())
+	model = *updated.(*Model)
+	if attachmentReads != 1 {
+		t.Fatalf("clipboard attachment reads = %d, want 1", attachmentReads)
+	}
+	if model.clipboardAttachmentPending {
+		t.Fatal("clipboard attachment should not remain pending after completion")
+	}
+	if got := model.input.Value(); got != "[image1.png]" {
 		t.Fatalf("input value = %q, want %q", got, "[image1.png]")
 	}
+	if got := len(model.attachments); got != 1 || model.attachments[0].MimeType != "image/png" {
+		t.Fatalf("attachments = %#v, want one PNG", model.attachments)
+	}
+}
+
+func TestAltVStartsClipboardAttachmentRead(t *testing.T) {
+	orig := readAttachmentFromClipboard
+	readAttachmentFromClipboard = func() ([]byte, string, error) {
+		return []byte("image"), "image/png", nil
+	}
+	t.Cleanup(func() { readAttachmentFromClipboard = orig })
+
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeInsert
+	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModAlt}))
+	if cmd == nil || !m.clipboardAttachmentPending {
+		t.Fatal("alt+v should start a pending clipboard attachment read")
+	}
+}
+
+func TestInsertAttachClipboardAddsPDFWithoutInlineImagePlaceholder(t *testing.T) {
+	orig := readAttachmentFromClipboard
+	readAttachmentFromClipboard = func() ([]byte, string, error) {
+		return []byte("%PDF-1.7\n/Encrypt"), "application/pdf", nil
+	}
+	t.Cleanup(func() { readAttachmentFromClipboard = orig })
+
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeInsert
+	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	if cmd == nil {
+		t.Fatal("expected ctrl+v to start PDF clipboard read")
+	}
+	m.Update(cmd())
+
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("input value = %q, want no inline image placeholder", got)
+	}
 	if got := len(m.attachments); got != 1 {
 		t.Fatalf("attachments = %d, want 1", got)
 	}
-	if attach := m.attachments[0]; attach.MimeType != "image/png" {
-		t.Fatalf("attachment mime = %q, want image/png", attach.MimeType)
+	attachment := m.attachments[0]
+	if attachment.FileName != "attachment1.pdf" || attachment.MimeType != "application/pdf" {
+		t.Fatalf("attachment = %#v, want attachment1.pdf PDF", attachment)
+	}
+	if !attachment.Encrypted {
+		t.Fatal("encrypted clipboard PDF should be marked encrypted")
+	}
+	if m.input.HasInlinePastes() {
+		t.Fatal("clipboard PDF should not create an inline image placeholder")
 	}
 }
 
-func TestPasteImageDeduplicatesKeyAndPasteMsg(t *testing.T) {
-	path := writeTinyPNG(t)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read tiny png: %v", err)
-	}
-
-	origImage := readImageFromClipboard
-	readImageFromClipboard = func() ([]byte, string, error) {
-		return data, "image/png", nil
+func TestInsertAttachClipboardReportsNoAttachmentWithoutTextFallback(t *testing.T) {
+	origAttachment := readAttachmentFromClipboard
+	readAttachmentFromClipboard = func() ([]byte, string, error) {
+		return nil, "", errNoClipboardAttachment
 	}
 	origText := clipboardReadAll
+	textReads := 0
 	clipboardReadAll = func() (string, error) {
-		return "fallback text", nil
+		textReads++
+		return "clipboard text", nil
 	}
 	t.Cleanup(func() {
-		readImageFromClipboard = origImage
+		readAttachmentFromClipboard = origAttachment
 		clipboardReadAll = origText
 	})
 
 	m := NewModelWithSize(nil, 80, 24)
 	m.mode = ModeInsert
-
 	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
 	if cmd == nil {
-		t.Fatal("expected ctrl+v to return image-added toast cmd")
+		t.Fatal("expected ctrl+v to start attachment read")
 	}
-	if got := len(m.attachments); got != 1 {
-		t.Fatalf("attachments after ctrl+v = %d, want 1", got)
+	updated, resultCmd := m.Update(cmd())
+	m = *updated.(*Model)
+	if resultCmd == nil {
+		t.Fatal("missing clipboard attachment should return a warning toast command")
 	}
-
-	cmd = m.handleNonKeyInputMsg(tea.PasteMsg{Content: "clipboard text"})
-	if cmd != nil {
-		t.Fatalf("expected deduplicated PasteMsg to return no command, got %T", cmd)
+	if textReads != 0 {
+		t.Fatalf("clipboard text reads = %d, want 0", textReads)
 	}
-	if got := len(m.attachments); got != 1 {
-		t.Fatalf("attachments after duplicate PasteMsg = %d, want 1", got)
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("input value = %q, want empty", got)
 	}
-	if got := m.input.Value(); got != "[image1.png]" {
-		t.Fatalf("input value after duplicate PasteMsg = %q, want %q", got, "[image1.png]")
+	if len(m.attachments) != 0 {
+		t.Fatalf("attachments = %d, want 0", len(m.attachments))
 	}
 }
 
-func TestPasteImageDeduplicatesPasteMsgAndKey(t *testing.T) {
-	path := writeTinyPNG(t)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read tiny png: %v", err)
-	}
-
-	origImage := readImageFromClipboard
-	readImageFromClipboard = func() ([]byte, string, error) {
-		return data, "image/png", nil
+func TestCmdVPastesTextWithoutReadingClipboardAttachment(t *testing.T) {
+	attachmentReads := 0
+	origAttachment := readAttachmentFromClipboard
+	readAttachmentFromClipboard = func() ([]byte, string, error) {
+		attachmentReads++
+		return []byte("image"), "image/png", nil
 	}
 	origText := clipboardReadAll
 	clipboardReadAll = func() (string, error) {
-		return "fallback text", nil
+		return "clipboard text", nil
 	}
 	t.Cleanup(func() {
-		readImageFromClipboard = origImage
+		readAttachmentFromClipboard = origAttachment
 		clipboardReadAll = origText
 	})
 
 	m := NewModelWithSize(nil, 80, 24)
 	m.mode = ModeInsert
-
-	cmd := m.handleNonKeyInputMsg(tea.PasteMsg{Content: "clipboard text"})
+	cmd := m.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModSuper}))
 	if cmd == nil {
-		t.Fatal("expected PasteMsg to return image-added toast cmd")
+		t.Fatal("expected cmd+v to return a text clipboard command")
 	}
-	if got := len(m.attachments); got != 1 {
-		t.Fatalf("attachments after PasteMsg = %d, want 1", got)
+	updated, _ := m.Update(cmd())
+	m = *updated.(*Model)
+	if got := m.input.Value(); got != "clipboard text" {
+		t.Fatalf("input value = %q, want clipboard text", got)
 	}
-	if got := m.input.Value(); got != "[image1.png]clipboard text" {
-		t.Fatalf("input value after PasteMsg = %q, want %q", got, "[image1.png]clipboard text")
-	}
-
-	cmd = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
-	if cmd != nil {
-		t.Fatalf("expected deduplicated ctrl+v to return no command, got %T", cmd)
-	}
-	if got := len(m.attachments); got != 1 {
-		t.Fatalf("attachments after duplicate ctrl+v = %d, want 1", got)
-	}
-	if got := m.input.Value(); got != "[image1.png]clipboard text" {
-		t.Fatalf("input value after duplicate ctrl+v = %q, want %q", got, "[image1.png]clipboard text")
+	if attachmentReads != 0 {
+		t.Fatalf("clipboard attachment reads = %d, want 0", attachmentReads)
 	}
 }
 
@@ -219,23 +400,17 @@ func TestPasteImageSecondPasteAddsOneAttachment(t *testing.T) {
 		t.Fatalf("read tiny png: %v", err)
 	}
 
-	origImage := readImageFromClipboard
-	readImageFromClipboard = func() ([]byte, string, error) {
+	orig := readAttachmentFromClipboard
+	readAttachmentFromClipboard = func() ([]byte, string, error) {
 		return data, "image/jpeg", nil
 	}
-	origText := clipboardReadAll
-	clipboardReadAll = func() (string, error) {
-		return "clipboard text", nil
-	}
-	t.Cleanup(func() {
-		readImageFromClipboard = origImage
-		clipboardReadAll = origText
-	})
+	t.Cleanup(func() { readAttachmentFromClipboard = orig })
 
 	m := NewModelWithSize(nil, 80, 24)
 	m.mode = ModeInsert
 
-	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	m.Update(cmd())
 	if got := len(m.attachments); got != 1 {
 		t.Fatalf("attachments after first ctrl+v = %d, want 1", got)
 	}
@@ -243,7 +418,8 @@ func TestPasteImageSecondPasteAddsOneAttachment(t *testing.T) {
 		t.Fatalf("first attachment name = %q, want image1.jpg", got)
 	}
 
-	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	cmd = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	m.Update(cmd())
 	if got := len(m.attachments); got != 2 {
 		t.Fatalf("attachments after second ctrl+v = %d, want 2", got)
 	}
@@ -262,17 +438,18 @@ func TestPasteImageAfterPDFUsesNextInlineImageOrdinal(t *testing.T) {
 		t.Fatalf("read tiny png: %v", err)
 	}
 
-	origImage := readImageFromClipboard
-	readImageFromClipboard = func() ([]byte, string, error) {
+	orig := readAttachmentFromClipboard
+	readAttachmentFromClipboard = func() ([]byte, string, error) {
 		return data, "image/png", nil
 	}
-	t.Cleanup(func() { readImageFromClipboard = origImage })
+	t.Cleanup(func() { readAttachmentFromClipboard = orig })
 
 	m := NewModelWithSize(nil, 80, 24)
 	m.mode = ModeInsert
 	m.attachments = []Attachment{{FileName: "report.pdf", MimeType: "application/pdf", Data: []byte("pdf")}}
 
-	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	m.Update(cmd())
 	if got := len(m.attachments); got != 2 {
 		t.Fatalf("attachments after ctrl+v = %d, want 2", got)
 	}
@@ -295,38 +472,42 @@ func TestPasteImageAfterPDFUsesNextInlineImageOrdinal(t *testing.T) {
 	}
 }
 
-func TestInsertAttachClipboardThenEnterSendsImageImmediately(t *testing.T) {
+func TestInsertAttachClipboardBlocksSubmitUntilImageReady(t *testing.T) {
 	path := writeTinyPNG(t)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read tiny png: %v", err)
 	}
 
-	origImage := readImageFromClipboard
-	readImageFromClipboard = func() ([]byte, string, error) {
+	orig := readAttachmentFromClipboard
+	readAttachmentFromClipboard = func() ([]byte, string, error) {
 		return data, "image/png", nil
 	}
-	origText := clipboardReadAll
-	clipboardReadAll = func() (string, error) {
-		return "fallback text", nil
-	}
-	t.Cleanup(func() {
-		readImageFromClipboard = origImage
-		clipboardReadAll = origText
-	})
+	t.Cleanup(func() { readAttachmentFromClipboard = orig })
 
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 80, 24)
 	m.mode = ModeInsert
 
-	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
-	if got := len(m.attachments); got != 1 {
-		t.Fatalf("attachments after ctrl+v = %d, want 1", got)
+	readCmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	if readCmd == nil || !m.clipboardAttachmentPending {
+		t.Fatal("ctrl+v should start a pending clipboard attachment read")
 	}
 
+	if cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); cmd == nil {
+		t.Fatal("enter while clipboard attachment is pending should return a toast command")
+	}
+	if got := len(backend.sentMultipart); got != 0 {
+		t.Fatalf("SendUserMessageWithParts() calls while pending = %d, want 0", got)
+	}
+
+	m.Update(readCmd())
+	if got := len(m.attachments); got != 1 {
+		t.Fatalf("attachments after read completion = %d, want 1", got)
+	}
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	if got := len(backend.sentMultipart); got != 1 {
-		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+		t.Fatalf("SendUserMessageWithParts() calls after completion = %d, want 1", got)
 	}
 	parts := backend.sentMultipart[0]
 	if len(parts) != 1 {
@@ -344,8 +525,10 @@ func TestInsertAttachClipboardThenEnterSendsImageImmediately(t *testing.T) {
 }
 
 func TestConfirmCmdVPastesTextEvenWhenClipboardHasImage(t *testing.T) {
-	origImage := readImageFromClipboard
-	readImageFromClipboard = func() ([]byte, string, error) {
+	attachmentReads := 0
+	origAttachment := readAttachmentFromClipboard
+	readAttachmentFromClipboard = func() ([]byte, string, error) {
+		attachmentReads++
 		return []byte{0x89, 'P', 'N', 'G'}, "image/png", nil
 	}
 	origText := clipboardReadAll
@@ -353,7 +536,7 @@ func TestConfirmCmdVPastesTextEvenWhenClipboardHasImage(t *testing.T) {
 		return `{"command":"echo pasted"}`, nil
 	}
 	t.Cleanup(func() {
-		readImageFromClipboard = origImage
+		readAttachmentFromClipboard = origAttachment
 		clipboardReadAll = origText
 	})
 
@@ -380,6 +563,9 @@ func TestConfirmCmdVPastesTextEvenWhenClipboardHasImage(t *testing.T) {
 	}
 	if got := len(model.attachments); got != 0 {
 		t.Fatalf("attachments = %d, want 0", got)
+	}
+	if attachmentReads != 0 {
+		t.Fatalf("clipboard attachment reads = %d, want 0", attachmentReads)
 	}
 }
 

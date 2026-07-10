@@ -23,7 +23,8 @@ TUI 有两种模式：
 | `Ctrl+J`           | 输入换行（终端不传 `Shift+Enter` 时的备选）                                                         |
 | `Up`               | 输入框为空时载入上一条用户消息；非空时历史上翻                                                       |
 | `Down` / `Ctrl+N`  | 历史下翻                                                                                            |
-| `Ctrl+V` / `Cmd+V` | 智能粘贴：剪贴板能提供图片数据时优先粘图；否则按文本粘贴                      |
+| `Ctrl+V` / `Alt+V` | 异步读取系统剪贴板中的图片或 PDF，并作为附件添加；终端占用 `Ctrl+V` 时使用 `Alt+V`     |
+| `Cmd+V` / 普通粘贴 | 只粘贴文本；终端 paste 事件不会探测剪贴板附件                                          |
 | `Ctrl+U`           | 清空输入框和待发送附件                                                                              |
 
 ### Normal 模式 — 退出与元操作
@@ -126,11 +127,11 @@ keymap:
 
 自定义键位只有在终端模拟器、操作系统，以及 tmux 等中间层把该按键序列转发给 Chord 时才会生效。优先选择 Normal 模式下的普通可打印键，或没有强终端语义的简单 `ctrl+字母` 组合。
 
-macOS 上的 `Cmd+V` 经常会先被终端或外层封装处理，Chord 只有在它被转发成 `super+v`，或被转发成不带额外文本的 paste 事件时，才会按智能粘贴处理。在 cmux 中，图片剪贴板的 `Cmd+V` 可能会被 cmux/Ghostty 粘贴层处理为：先把图片保存成临时文件，再把该文件路径粘贴进终端。Chord 的 `keymap` 无法覆盖这类由终端直接提供的粘贴文本；在 cmux 中粘贴剪贴板图片请使用 `Ctrl+V`。
+macOS 上的 `Cmd+V` 经常会先被终端或外层封装处理。Chord 会把转发进来的 `super+v` 和终端 paste 事件都按纯文本处理；如需读取系统剪贴板中的图片或 PDF，请使用 `Ctrl+V` 或 `Alt+V`（`insert_attach_clipboard` action）。Windows Terminal 默认把 `Ctrl+V` 用于文本粘贴，因此 Windows 以及由其承载的 WSL 会话应使用 `Alt+V`。在 cmux 中，图片剪贴板的 `Cmd+V` 仍可能被 cmux/Ghostty 粘贴层转换成临时文件路径；Chord 会把该路径当作普通粘贴文本。
 
 除非你已经在自己的终端环境里验证过，否则不建议把这些组合设为默认/自定义快捷键：
 
-- macOS 上的 `alt+字母` / Option 组合：Ghostty 等终端可能把 Option 用于字符输入、菜单快捷键或应用级 keybind，例如 `alt+f` 可能根本不会传给 Chord。
+- macOS 上的其他 `alt+字母` / Option 组合：Ghostty 等终端可能把 Option 用于字符输入、菜单快捷键或应用级 keybind，请在所用终端中验证自定义组合。`Alt+V` 主要作为 Windows Terminal/WSL 的附件粘贴备用键。
 - `ctrl+i`、`ctrl+m`、`ctrl+[`：传统终端会分别把它们编码成和 `Tab`、`Enter`、`Esc` 相同的输入。
 - `ctrl+s` 和 `ctrl+q`：可能被软件流控截获。
 - `ctrl+c`、`ctrl+z`、`ctrl+\\`：在终端里有中断/挂起等信号语义。
@@ -151,7 +152,7 @@ action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/
 | `insert_newline`           | `["shift+enter", "ctrl+j"]`       |
 | `insert_history_up`        | `["up"]`                           |
 | `insert_history_down`      | `["down", "ctrl+n"]`              |
-| `insert_attach_clipboard`  | `["ctrl+v"]`（`Cmd+V` 在支持的终端里也会按同样的智能粘贴逻辑处理） |
+| `insert_attach_clipboard`  | `["ctrl+v", "alt+v"]`（附加剪贴板图片或 PDF） |
 | `insert_attach_file`       | `[]`                               |
 | `insert_clear_input`       | `["ctrl+u"]`                      |
 | `enter_insert`             | `["i"]`                           |

@@ -1,6 +1,10 @@
 package tui
 
-import tea "github.com/keakon/bubbletea/v2"
+import (
+	"time"
+
+	tea "github.com/keakon/bubbletea/v2"
+)
 
 func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 	if m.interactionSuppressed() {
@@ -22,17 +26,13 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 	if isSuperC(msg) {
 		return m.handleSuperCopy()
 	}
-	// Super+V (cmd+v) – smart paste, same as ctrl+v.
+	// Super+V (cmd+v) is text-only. Clipboard attachments use the explicit
+	// insert_attach_clipboard binding (Ctrl+V by default).
 	if isSuperV(msg) {
 		switch m.mode {
 		case ModeInsert:
-			if m.shouldSuppressDuplicateImagePasteAction("super") {
-				return nil
-			}
-			if cmd := m.tryPasteImageIntoComposer("super", ""); cmd != nil {
-				return cmd
-			}
-			return m.pasteFromClipboard()
+			m.clipboardPasteSuppressUntil = time.Now().Add(150 * time.Millisecond)
+			return pasteTextFromClipboard()
 		case ModeConfirm:
 			if m.confirm.editing || m.confirm.denyingWithReason {
 				return pasteTextFromClipboard()

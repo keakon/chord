@@ -36,13 +36,17 @@ type agentComposerState struct {
 }
 
 type composerRuntimeState struct {
-	queuedDrafts              []queuedDraft
-	agentComposerStates       map[string]agentComposerState
-	editingQueuedDraftID      string
-	inflightDraft             *queuedDraft
-	queueSyncEnabled          bool
-	pauseQueuedDraftDrainOnce bool
-	nextQueuedDraftID         int
+	queuedDrafts                []queuedDraft
+	agentComposerStates         map[string]agentComposerState
+	editingQueuedDraftID        string
+	inflightDraft               *queuedDraft
+	clipboardAttachmentPending  bool
+	clipboardAttachmentAgentID  string
+	clipboardAttachmentSeq      uint64
+	clipboardPasteSuppressUntil time.Time
+	queueSyncEnabled            bool
+	pauseQueuedDraftDrainOnce   bool
+	nextQueuedDraftID           int
 }
 
 func fileRefsFromParts(parts []message.ContentPart) []string {

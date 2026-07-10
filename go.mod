@@ -28,6 +28,7 @@ require (
 	github.com/rivo/uniseg v0.4.7
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
+	golang.design/x/clipboard v0.8.0
 	golang.org/x/net v0.55.0
 	golang.org/x/sys v0.45.0
 	golang.org/x/text v0.37.0
@@ -52,6 +53,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dlclark/regexp2/v2 v2.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
@@ -64,6 +66,10 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark v1.8.2 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
+	golang.design/x/x11 v0.2.0 // indirect
 	golang.org/x/arch v0.27.0 // indirect
+	golang.org/x/exp/shiny v0.0.0-20250606033433-dcc06ee1d476 // indirect
+	golang.org/x/image v0.28.0
+	golang.org/x/mobile v0.0.0-20250606033058-a2a15c67f36f // indirect
 	golang.org/x/sync v0.20.0 // indirect
 )

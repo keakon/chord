@@ -1,89 +1,97 @@
 package tui
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"runtime"
-	"strings"
+
+	clipboard "golang.design/x/clipboard"
 
 	"github.com/keakon/chord/internal/imageutil"
 )
 
-// readImageFromClipboard reads an image from the system clipboard.
-// Returns the raw bytes and MIME type, or an error.
-//
-// It is a variable so unit tests can stub it.
-var readImageFromClipboard = readImageFromClipboardImpl
+var errNoClipboardAttachment = errors.New("no image or PDF found in clipboard")
 
-func readImageFromClipboardImpl() ([]byte, string, error) {
-	switch runtime.GOOS {
-	case "darwin":
-		return clipboardImageDarwin()
-	case "linux":
-		return clipboardImageLinux()
-	default:
-		return nil, "", fmt.Errorf("clipboard image not supported on this platform: %s", runtime.GOOS)
+var (
+	clipboardInit     = clipboard.Init
+	clipboardFormats  = clipboard.Formats
+	clipboardRead     = clipboard.Read
+	clipboardRegister = clipboard.Register
+)
+
+// readAttachmentFromClipboard is a variable so tests can replace the native
+// clipboard boundary without touching global OS clipboard state.
+var readAttachmentFromClipboard = readAttachmentFromClipboardImpl
+
+func readAttachmentFromClipboardImpl() ([]byte, string, error) {
+	if err := clipboardInit(); err != nil {
+		return nil, "", fmt.Errorf("clipboard attachment unavailable: %w", err)
 	}
+
+	formats := clipboardFormats()
+	if clipboardHasMIME(formats, "application/pdf") {
+		pdfFormats := []clipboard.Format{clipboardRegister("application/pdf")}
+		if runtime.GOOS == "darwin" {
+			// AppKit usually advertises PDF data under its native pasteboard UTI,
+			// but some producers use the MIME type verbatim.
+			pdfFormats = append([]clipboard.Format{clipboardRegister("com.adobe.pdf")}, pdfFormats...)
+		}
+		for _, pdfFormat := range pdfFormats {
+			if data := clipboardRead(pdfFormat); len(data) > 0 {
+				if err := imageutil.CheckPDFSize(data); err != nil {
+					return nil, "", err
+				}
+				return data, "application/pdf", nil
+			}
+		}
+	}
+
+	var firstImageErr error
+	if clipboardHasFormat(formats, clipboard.FmtImage) {
+		if data := clipboardRead(clipboard.FmtImage); len(data) > 0 {
+			if normalized, mimeType, err := imageutil.NormalizeClipboardImage(data, "image/png"); err == nil {
+				return normalized, mimeType, nil
+			} else {
+				firstImageErr = err
+			}
+		}
+	}
+
+	for _, mimeType := range []string{"image/png", "image/jpeg", "image/webp", "image/bmp"} {
+		if !clipboardHasMIME(formats, mimeType) {
+			continue
+		}
+		if data := clipboardRead(clipboardRegister(mimeType)); len(data) > 0 {
+			normalized, normalizedMIME, err := imageutil.NormalizeClipboardImage(data, mimeType)
+			if err == nil {
+				return normalized, normalizedMIME, nil
+			}
+			if firstImageErr == nil {
+				firstImageErr = err
+			}
+		}
+	}
+	if firstImageErr != nil {
+		return nil, "", firstImageErr
+	}
+
+	return nil, "", errNoClipboardAttachment
 }
 
-// clipboardImageDarwin reads a PNG image from macOS clipboard using osascript.
-func clipboardImageDarwin() ([]byte, string, error) {
-	// Write clipboard image to a temp file via AppleScript.
-	tmpFile, err := os.CreateTemp("", "chord-clip-*.png")
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to create temp file: %w", err)
+func clipboardHasFormat(formats []clipboard.Format, target clipboard.Format) bool {
+	for _, format := range formats {
+		if format == target {
+			return true
+		}
 	}
-	tmpPath := tmpFile.Name()
-	tmpFile.Close()
-	defer os.Remove(tmpPath)
-
-	script := fmt.Sprintf(`
-set imgFile to open for access POSIX file %q with write permission
-set eof imgFile to 0
-write (the clipboard as «class PNGf») to imgFile
-close access imgFile
-`, tmpPath)
-
-	cmd := exec.Command("osascript", "-e", script)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, "", fmt.Errorf("no image in clipboard (osascript: %s)", strings.TrimSpace(stderr.String()))
-	}
-
-	data, err := os.ReadFile(tmpPath)
-	if err != nil || len(data) == 0 {
-		return nil, "", fmt.Errorf("no image in clipboard")
-	}
-
-	data, mimeType := imageutil.CompressIfPNG(data, "image/png")
-	if err := imageutil.CheckImageSize(data); err != nil {
-		return nil, "", err
-	}
-	return data, mimeType, nil
+	return false
 }
 
-// clipboardImageLinux reads a PNG image from X11/Wayland clipboard.
-func clipboardImageLinux() ([]byte, string, error) {
-	// Try xclip (X11) first.
-	out, err := outputWithoutExternalCommandStderr(exec.Command("xclip", "-selection", "clipboard", "-t", "image/png", "-o"))
-	if err == nil && len(out) > 0 {
-		data, mimeType := imageutil.CompressIfPNG(out, "image/png")
-		if err := imageutil.CheckImageSize(data); err != nil {
-			return nil, "", err
+func clipboardHasMIME(formats []clipboard.Format, mimeType string) bool {
+	for _, format := range formats {
+		if format.MIME() == mimeType {
+			return true
 		}
-		return data, mimeType, nil
 	}
-	// Try wl-paste (Wayland).
-	out, err = outputWithoutExternalCommandStderr(exec.Command("wl-paste", "--type", "image/png"))
-	if err == nil && len(out) > 0 {
-		data, mimeType := imageutil.CompressIfPNG(out, "image/png")
-		if err := imageutil.CheckImageSize(data); err != nil {
-			return nil, "", err
-		}
-		return data, mimeType, nil
-	}
-	return nil, "", fmt.Errorf("no image in clipboard (requires xclip or wl-paste)")
+	return false
 }

@@ -12,7 +12,7 @@ type KeyMap struct {
 	InsertNewline         []string
 	InsertHistoryUp       []string
 	InsertHistoryDown     []string
-	InsertAttachClipboard []string // smart paste: image first, then text
+	InsertAttachClipboard []string // attach image/PDF from the system clipboard
 	InsertAttachFile      []string // pick image from file (optional; default unbound)
 	InsertClearInput      []string // clear input box and attachments
 
@@ -66,7 +66,7 @@ func DefaultKeyMap() KeyMap {
 		InsertNewline:         []string{"shift+enter", "ctrl+j"},
 		InsertHistoryUp:       []string{"up"},
 		InsertHistoryDown:     []string{"down", "ctrl+n"},
-		InsertAttachClipboard: []string{"ctrl+v"},
+		InsertAttachClipboard: []string{"ctrl+v", "alt+v"},
 		InsertAttachFile:      nil,
 		InsertClearInput:      []string{"ctrl+u"},
 

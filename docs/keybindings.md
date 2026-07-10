@@ -23,7 +23,8 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Ctrl+J`           | Insert a newline (alternative when terminal does not deliver `Shift+Enter`)                    |
 | `Up`               | Recall the previous user message into the composer (or move history up if composer non-empty)  |
 | `Down` / `Ctrl+N`  | Move history down                                                                              |
-| `Ctrl+V` / `Cmd+V` | Smart paste: prefer an image attachment when the clipboard exposes image data; otherwise paste text |
+| `Ctrl+V` / `Alt+V` | Attach an image or PDF from the system clipboard asynchronously; `Alt+V` works when the terminal reserves `Ctrl+V` |
+| `Cmd+V` / paste    | Paste text only; terminal paste events never probe clipboard attachments                       |
 | `Ctrl+U`           | Clear the input box and pending attachments                                                    |
 
 ### Normal mode — leaving and meta
@@ -126,11 +127,11 @@ keymap:
 
 Custom key bindings only work when your terminal emulator, OS, and any multiplexer such as tmux forward that key sequence to Chord. Prefer plain printable keys in Normal mode or simple `ctrl+letter` combinations that do not already have strong terminal meanings.
 
-`Cmd+V` on macOS is often handled by the terminal or wrapper before Chord can see it. Chord treats `Cmd+V` as smart paste only when it is forwarded as `super+v` or as a paste event without extra text. In cmux, image-only `Cmd+V` may be handled by the cmux/Ghostty paste layer by saving the clipboard image to a temporary file and pasting that file path. Chord's `keymap` cannot override terminal-supplied paste text; use `Ctrl+V` for clipboard image paste in cmux.
+`Cmd+V` on macOS is often handled by the terminal or wrapper before Chord can see it. Chord treats forwarded `super+v` and terminal paste events as text-only. Use `Ctrl+V` or `Alt+V` (the `insert_attach_clipboard` action) to read an image or PDF from the system clipboard. Windows Terminal reserves `Ctrl+V` for text paste by default, so use `Alt+V` there and in WSL sessions hosted by it. In cmux, image-only `Cmd+V` may still be converted by the cmux/Ghostty paste layer into a temporary file path; Chord treats that path as ordinary pasted text.
 
 Avoid these as default/custom bindings unless you have tested them in your exact terminal setup:
 
-- `alt+letter` / Option combinations on macOS: terminals such as Ghostty may use Option for text input, menu shortcuts, or app-level bindings, so combinations like `alt+f` may never reach Chord.
+- Other `alt+letter` / Option combinations on macOS: terminals such as Ghostty may use Option for text input, menu shortcuts, or app-level bindings, so verify custom combinations in your terminal. `Alt+V` is provided primarily as the Windows Terminal/WSL attachment fallback.
 - `ctrl+i`, `ctrl+m`, and `ctrl+[`: traditional terminals encode these the same as `Tab`, `Enter`, and `Esc`.
 - `ctrl+s` and `ctrl+q`: these can be intercepted by software flow control.
 - `ctrl+c`, `ctrl+z`, and `ctrl+\\`: these have signal/cancel/suspend meanings in terminals.
@@ -151,7 +152,7 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `insert_newline`           | `["shift+enter", "ctrl+j"]`      |
 | `insert_history_up`        | `["up"]`                          |
 | `insert_history_down`      | `["down", "ctrl+n"]`             |
-| `insert_attach_clipboard`  | `["ctrl+v"]` (`Cmd+V` follows the same smart-paste behavior in terminals that forward it) |
+| `insert_attach_clipboard`  | `["ctrl+v", "alt+v"]` (attach a clipboard image or PDF) |
 | `insert_attach_file`       | `[]`                              |
 | `insert_clear_input`       | `["ctrl+u"]`                     |
 | `enter_insert`             | `["i"]`                          |

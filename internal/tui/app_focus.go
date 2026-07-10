@@ -10,6 +10,7 @@ import (
 func (m *Model) setFocusedAgent(id string) {
 	prev := m.focusedAgentID
 	if prev != id {
+		m.cancelClipboardAttachmentPaste()
 		m.saveComposerStateForAgent(prev)
 		m.clearRunningModelDisplay("")
 	}

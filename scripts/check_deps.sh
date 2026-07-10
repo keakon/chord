@@ -75,6 +75,8 @@ allowed_pseudo = {
     "github.com/charmbracelet/ultraviolet": "Charm TUI syntax highlighter API currently pinned before a stable tag.",
     "github.com/charmbracelet/x/exp/slice": "Transitive Charm experimental helper pinned by the current TUI stack.",
     "github.com/xo/terminfo": "Terminal database dependency currently publishes pseudo-version releases.",
+    "golang.org/x/exp/shiny": "Transitive desktop dependency of the native clipboard backend; upstream currently publishes pseudo-version releases.",
+    "golang.org/x/mobile": "Transitive platform dependency of the native clipboard backend; upstream currently publishes pseudo-version releases.",
 }
 allowed_forks = {
     "github.com/keakon/bubbles/v2": "Bubbles fork rebased to github.com/keakon/bubbletea/v2 so component tea.Msg/Cmd types match Chord's Bubble Tea fork.",

@@ -314,55 +314,6 @@ func (m *Model) rollbackPendingInlineImagePlaceholder(raw string) tea.Cmd {
 	return cmd
 }
 
-func (m *Model) shouldSuppressDuplicateImagePasteAction(source string) bool {
-	now := time.Now()
-	if !m.lastImagePasteAt.IsZero() && now.Sub(m.lastImagePasteAt) <= 150*time.Millisecond {
-		return source != "" && m.lastImagePasteSource != "" && source != m.lastImagePasteSource
-	}
-	return false
-}
-
-func (m *Model) shouldHandleImagePaste(source string) bool {
-	return !m.shouldSuppressDuplicateImagePasteAction(source)
-}
-
-func (m *Model) markImagePasteHandled(source string) {
-	m.lastImagePasteAt = time.Now()
-	m.lastImagePasteSource = source
-}
-
-func (m *Model) tryPasteImageIntoComposer(source, pastedText string) tea.Cmd {
-	if !m.shouldHandleImagePaste(source) {
-		return nil
-	}
-	if len(m.attachments) >= maxInlineImageAttachments {
-		return nil
-	}
-	img := m.pasteImageFromClipboard()
-	if img == nil {
-		return nil
-	}
-	m.markImagePasteHandled(source)
-	attach, ok := img.(attachmentReadyMsg)
-	if !ok {
-		return func() tea.Msg { return img }
-	}
-	m.input.ClearSelection()
-	imageOrdinal := m.nextInlineImageOrdinal()
-	placeholderRaw := imagePlaceholder(imageOrdinal)
-	m.input.InsertImagePlaceholderWithDisplay(imageOrdinal, attachmentReferenceText(attach.attachment))
-	var syncCmd tea.Cmd
-	if pastedText != "" {
-		syncCmd = m.insertComposerText(pastedText)
-	} else {
-		m.input.syncHeight()
-		syncCmd = m.syncAtMentionIfOpen()
-		m.recalcViewportSize()
-	}
-	attach.inlineImagePlaceholderRaw = placeholderRaw
-	return tea.Batch(syncCmd, m.handleAttachmentReadyMsg(attach))
-}
-
 func (m *Model) nextInlineImageOrdinal() int {
 	ordinal := 1
 	for _, att := range m.attachments {
@@ -376,19 +327,16 @@ func (m *Model) nextInlineImageOrdinal() int {
 func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
 	switch m.mode {
 	case ModeInsert:
-		// PasteMsg (bracket paste): prefer an image from the system clipboard.
-		// Many terminals either emit an empty PasteMsg for non-text clipboard
-		// content, or paste a textual representation. We do NOT auto-convert
-		// pasted paths/URIs into attachments.
+		// Terminal paste events are text-only. Clipboard attachments use the
+		// explicit insert_attach_clipboard binding (Ctrl+V by default).
 		if pm, ok := msg.(tea.PasteMsg); ok {
-			if m.shouldSuppressDuplicateImagePasteAction("paste") {
+			suppress := time.Now().Before(m.clipboardPasteSuppressUntil)
+			m.clipboardPasteSuppressUntil = time.Time{}
+			if suppress {
 				return nil
 			}
-			if cmd := m.tryPasteImageIntoComposer("paste", pm.Content); cmd != nil {
-				return cmd
-			}
 			if strings.TrimSpace(pm.Content) == "" {
-				return pasteTextFromClipboard()
+				return nil
 			}
 			return m.insertComposerText(pm.Content)
 		}

@@ -203,12 +203,6 @@ type Model struct {
 	// Lifecycle
 	quitting bool
 
-	// Paste de-dup state: some terminals emit both KeyMsg (Ctrl/Cmd+V)
-	// and PasteMsg for the same user action. Keep a short-lived latch so
-	// one clipboard image paste only inserts once.
-	lastImagePasteAt     time.Time
-	lastImagePasteSource string
-
 	// Exit confirmation: first q or Ctrl+C sets these; second same key within 2s quits.
 	quit quitState
 
@@ -723,6 +717,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case attachmentReadyMsg:
 		return m, m.handleAttachmentReadyMsg(msg)
 
+	case clipboardAttachmentReadyMsg:
+		return m, m.handleClipboardAttachmentReady(msg)
+
 	case openImageResultMsg:
 		if msg.err != nil {
 			return m, m.enqueueToast(msg.err.Error(), "warn")
@@ -742,7 +739,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.openImageViewer(msg.blockID, msg.imageIndex)
 		return m, m.imageProtocolCmd()
 
-	// -- clipboard text paste (ctrl+v/cmd+v fallback when no image) --------
+	// -- clipboard text paste ---------------------------------------------
 	case clipboardTextMsg:
 		if m.mode == ModeConfirm && m.confirm.editing {
 			m.confirm.editInput.InsertString(string(msg))

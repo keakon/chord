@@ -85,7 +85,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 				helpBinding(km.InsertNewline, "insert newline"),
 				helpBinding(km.InsertHistoryUp, "previous history"),
 				helpBinding(km.InsertHistoryDown, "next history"),
-				helpBinding(km.InsertAttachClipboard, "paste image or text"),
+				helpBinding(km.InsertAttachClipboard, "attach clipboard image or PDF"),
 				helpBinding(km.InsertClearInput, "clear input"),
 				helpBinding(km.SwitchRole, "switch main agent mode (cycle; main view only)"),
 				helpBinding(km.SwitchAgent, "switch focused agent (cycle)"),

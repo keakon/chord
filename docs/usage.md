@@ -347,7 +347,7 @@ When `delegate` workflow is available and multiple delegated workstreams are gen
 
 Currently supported:
 
-- Paste images from the clipboard
+- Attach images and PDFs from the system clipboard with `Ctrl+V` or `Alt+V`
 - Attach image and PDF files to the currently focused agent's message when the active model supports that input type
 - View images directly in supported terminals; PDFs are sent to the model and shown as file chips in the transcript, but are not previewed inline
 - Edit historical user messages that contain images or PDFs; tail messages reopen in the current session, while earlier messages fork a new session, and path-restored attachments are reloaded when the edited message is sent again
@@ -357,8 +357,9 @@ Currently supported:
 
 Common actions:
 
-- `Ctrl+V` / `Cmd+V` in the main composer: prefer clipboard image input. If an image is found, Chord adds it as an attachment and inserts a placeholder like `[image1]` at the cursor; any pasted text provided by the terminal is inserted after the placeholder. If no image is found, Chord pastes text. After paste completes, the cursor is kept immediately after the inserted placeholder/text.
-- `Ctrl+V` / `Cmd+V` in confirmation-dialog text fields: always paste text, never attach images
+- `Ctrl+V` or `Alt+V` in the main composer: asynchronously read an image or PDF from the system clipboard. PNG/JPEG are accepted directly; BMP/WebP are normalized to PNG/JPEG. Images get an inline placeholder such as `[image1.png]`; PDFs are added as file attachments. Pressing Enter while the read is pending asks you to wait, so an immediate submit cannot lose the attachment. Use `Alt+V` in Windows Terminal and WSL sessions hosted by it.
+- `Cmd+V`, right-click paste, menu paste, and other terminal paste events: paste text only and never inspect clipboard attachments.
+- `Cmd+V` in confirmation-dialog text fields: paste text only.
 - Inline image attachments are capped at 5 per composer message
 - Typing literal placeholder text such as `[image1]` does not attach an image by itself; only Chord-inserted inline image placeholders are attachment-backed
 - `@` file completion includes image/PDF files only when the current model supports that input type. Manually typed image/PDF `@` references are still accepted as attachments; unsupported attachments are ignored at send time with a warning.

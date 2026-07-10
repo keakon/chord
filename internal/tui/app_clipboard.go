@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	tea "github.com/keakon/bubbletea/v2"
@@ -17,6 +18,14 @@ type clipboardWriteResultMsg struct {
 }
 
 type clipboardTextMsg string
+
+type clipboardAttachmentReadyMsg struct {
+	requestID uint64
+	agentID   string
+	data      []byte
+	mimeType  string
+	err       error
+}
 
 var (
 	clipboardReadAll  = clipboard.ReadAll
@@ -76,23 +85,72 @@ func pasteAttachmentFromPath(path string, index int) tea.Msg {
 	return attachmentReadyMsg{attachment: attachment}
 }
 
-func (m *Model) pasteImageFromClipboard() tea.Msg {
-	data, mimeType, err := readImageFromClipboard()
-	if err != nil {
-		return nil
+func (m *Model) pasteAttachmentFromClipboard() tea.Cmd {
+	if m.clipboardAttachmentPending {
+		return m.enqueueToast("Already reading a clipboard attachment", "info")
 	}
-	imageName := fmt.Sprintf("image%d%s", m.nextInlineImageOrdinal(), attachmentExtForMimeType(mimeType))
-	return attachmentReadyMsg{attachment: Attachment{
-		FileName: imageName,
-		MimeType: mimeType,
-		Data:     data,
-	}}
+	if len(m.attachments) >= maxInlineImageAttachments {
+		return m.enqueueToast(fmt.Sprintf("max %d attachments supported", maxInlineImageAttachments), "warn")
+	}
+
+	m.clipboardAttachmentSeq++
+	requestID := m.clipboardAttachmentSeq
+	agentID := m.focusedAgentID
+	m.clipboardAttachmentPending = true
+	m.clipboardAttachmentAgentID = agentID
+	m.clipboardPasteSuppressUntil = time.Now().Add(150 * time.Millisecond)
+	return func() tea.Msg {
+		data, mimeType, err := readAttachmentFromClipboard()
+		return clipboardAttachmentReadyMsg{
+			requestID: requestID,
+			agentID:   agentID,
+			data:      data,
+			mimeType:  mimeType,
+			err:       err,
+		}
+	}
 }
 
-func (m *Model) pasteFromClipboard() tea.Cmd {
-	return func() tea.Msg {
-		return readClipboardTextMsg()
+func (m *Model) cancelClipboardAttachmentPaste() {
+	if !m.clipboardAttachmentPending {
+		return
 	}
+	m.clipboardAttachmentPending = false
+	m.clipboardAttachmentAgentID = ""
+	m.clipboardAttachmentSeq++
+}
+
+func (m *Model) handleClipboardAttachmentReady(msg clipboardAttachmentReadyMsg) tea.Cmd {
+	if !m.clipboardAttachmentPending || msg.requestID != m.clipboardAttachmentSeq {
+		return nil
+	}
+	m.clipboardAttachmentPending = false
+	m.clipboardAttachmentAgentID = ""
+	if msg.agentID != m.focusedAgentID {
+		return m.enqueueToast("Clipboard attachment was not added because the active composer changed", "warn")
+	}
+	if msg.err != nil {
+		return m.enqueueToast(msg.err.Error(), "warn")
+	}
+
+	attachment := Attachment{MimeType: msg.mimeType, Data: msg.data}
+	if msg.mimeType == "application/pdf" {
+		attachment.FileName = fmt.Sprintf("attachment%d.pdf", len(m.attachments)+1)
+		return m.handleAttachmentReadyMsg(attachmentReadyMsg{attachment: attachment})
+	}
+
+	imageOrdinal := m.nextInlineImageOrdinal()
+	attachment.FileName = fmt.Sprintf("image%d%s", imageOrdinal, attachmentExtForMimeType(msg.mimeType))
+	m.input.ClearSelection()
+	placeholderRaw := imagePlaceholder(imageOrdinal)
+	m.input.InsertImagePlaceholderWithDisplay(imageOrdinal, attachmentReferenceText(attachment))
+	m.input.syncHeight()
+	syncCmd := m.syncAtMentionIfOpen()
+	m.recalcViewportSize()
+	return tea.Batch(syncCmd, m.handleAttachmentReadyMsg(attachmentReadyMsg{
+		attachment:                attachment,
+		inlineImagePlaceholderRaw: placeholderRaw,
+	}))
 }
 
 func writeStatusPathClipboardCmd(text string) tea.Cmd {

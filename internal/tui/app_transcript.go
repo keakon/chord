@@ -100,6 +100,7 @@ func (m *Model) rebuildViewportFromMessagesWithReason(reason string) {
 		return
 	}
 	rebuildStarted := time.Now()
+	m.cancelClipboardAttachmentPaste()
 	m.finalizeTurn()
 	preserveAttachments := m.preserveAttachmentsOnNextRebuild
 	m.pendingSessionRestoreRebuild = false
