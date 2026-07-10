@@ -111,6 +111,7 @@ type openAIRequest struct {
 	Messages            []openAIMessage      `json:"messages"`
 	Tools               []openAITool         `json:"tools,omitempty"`
 	ToolChoice          string               `json:"tool_choice,omitempty"`
+	ParallelToolCalls   bool                 `json:"parallel_tool_calls"`
 	MaxTokens           int                  `json:"max_tokens,omitempty"`
 	MaxCompletionTokens int                  `json:"max_completion_tokens,omitempty"`
 	Stream              bool                 `json:"stream"`
@@ -263,10 +264,14 @@ func (o *OpenAIProvider) CompleteStream(
 	// Build request body.
 	url := o.provider.APIURL()
 	reqBody := openAIRequest{
-		Model:    model,
-		Messages: apiMessages,
-		Tools:    apiTools,
-		Stream:   true,
+		Model:             model,
+		Messages:          apiMessages,
+		Tools:             apiTools,
+		ParallelToolCalls: true,
+		Stream:            true,
+	}
+	if ot.ParallelToolCalls != nil {
+		reqBody.ParallelToolCalls = *ot.ParallelToolCalls
 	}
 	if ot.ToolChoice != "" {
 		reqBody.ToolChoice = ot.ToolChoice

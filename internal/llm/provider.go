@@ -47,7 +47,7 @@ type OpenAITuning struct {
 	ReasoningEffort   string // "low"|"medium"|"high"|"xhigh" ("" = disabled)
 	ReasoningSummary  string // "auto"|"concise"|"detailed" ("" = disabled)
 	TextVerbosity     string // "low"|"medium"|"high" ("" = disabled)
-	ParallelToolCalls *bool  // nil = Responses request default false; non-nil = explicit override
+	ParallelToolCalls *bool  // nil = provider request default true; non-nil = explicit override
 	ToolChoice        string // ""|"auto"|"required"
 }
 

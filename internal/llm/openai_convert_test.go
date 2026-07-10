@@ -264,4 +264,7 @@ func TestOpenAICompleteStream_OpenAIVisibleContinuityAddsPreservedThinkingReques
 	if first["reasoning_content"] != "preserved reasoning" {
 		t.Fatalf("reasoning_content = %#v, want preserved reasoning", first["reasoning_content"])
 	}
+	if gotBody["parallel_tool_calls"] != true {
+		t.Fatalf("parallel_tool_calls = %#v, want true", gotBody["parallel_tool_calls"])
+	}
 }

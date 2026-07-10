@@ -331,12 +331,13 @@ func (r *ResponsesProvider) CompleteStream(
 	// these fields as the Responses client contract and reject narrower OpenAI
 	// samples that omit them.
 	reqBody := responsesRequest{
-		Model:      model,
-		Tools:      apiTools,
-		ToolChoice: "auto",
-		Store:      responsesConfiguredStore(r.provider, model),
-		Stream:     true,
-		Include:    []string{},
+		Model:             model,
+		Tools:             apiTools,
+		ToolChoice:        "auto",
+		ParallelToolCalls: true,
+		Store:             responsesConfiguredStore(r.provider, model),
+		Stream:            true,
+		Include:           []string{},
 	}
 	if ot.ToolChoice != "" {
 		reqBody.ToolChoice = ot.ToolChoice

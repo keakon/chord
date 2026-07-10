@@ -110,9 +110,10 @@ func (r *ResponsesProvider) Compact(
 		return nil, fmt.Errorf("responses compact requires at least one input item")
 	}
 	reqBody := responsesCompactRequest{
-		Model: model,
-		Input: apiInput,
-		Tools: convertToolsToResponses(tools),
+		Model:             model,
+		Input:             apiInput,
+		Tools:             convertToolsToResponses(tools),
+		ParallelToolCalls: false,
 	}
 	if ot.ParallelToolCalls != nil {
 		reqBody.ParallelToolCalls = *ot.ParallelToolCalls

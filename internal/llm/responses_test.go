@@ -1787,8 +1787,8 @@ func TestResponsesProvider_IncludeAlwaysSerialized(t *testing.T) {
 	if got := gotBody["tool_choice"]; got != "auto" {
 		t.Fatalf("tool_choice = %#v, want auto", got)
 	}
-	if got := gotBody["parallel_tool_calls"]; got != false {
-		t.Fatalf("parallel_tool_calls = %#v, want false", got)
+	if got := gotBody["parallel_tool_calls"]; got != true {
+		t.Fatalf("parallel_tool_calls = %#v, want true", got)
 	}
 	if got := gotBody["store"]; got != false {
 		t.Fatalf("store = %#v, want false", got)

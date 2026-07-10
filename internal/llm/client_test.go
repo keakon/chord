@@ -4507,14 +4507,14 @@ func TestClientSetVariantMergesPromptCacheOverrides(t *testing.T) {
 
 func TestClientSetVariantOverridesParallelToolCalls(t *testing.T) {
 	cfg := NewProviderConfig("openai", config.ProviderConfig{
-		Type: config.ProviderTypeChatCompletions,
+		Type: config.ProviderTypeResponses,
 		Models: map[string]config.ModelConfig{
 			"gpt-5.5": {
 				Limit:             config.ModelLimit{Context: 400000, Output: 128000},
-				ParallelToolCalls: new(false),
+				ParallelToolCalls: new(true),
 				Variants: map[string]config.ModelVariant{
-					"parallel": {
-						ParallelToolCalls: new(true),
+					"serial": {
+						ParallelToolCalls: new(false),
 					},
 				},
 			},
@@ -4522,13 +4522,13 @@ func TestClientSetVariantOverridesParallelToolCalls(t *testing.T) {
 	}, []string{"k"})
 	c := NewClient(cfg, &scriptedProvider{}, "gpt-5.5", 4096, "sys")
 
-	if c.tuning.OpenAI.ParallelToolCalls == nil || *c.tuning.OpenAI.ParallelToolCalls {
-		t.Fatalf("default parallel_tool_calls = %#v, want false", c.tuning.OpenAI.ParallelToolCalls)
+	if c.tuning.OpenAI.ParallelToolCalls == nil || !*c.tuning.OpenAI.ParallelToolCalls {
+		t.Fatalf("default parallel_tool_calls = %#v, want true", c.tuning.OpenAI.ParallelToolCalls)
 	}
 
-	c.SetVariant("parallel")
-	if c.tuning.OpenAI.ParallelToolCalls == nil || !*c.tuning.OpenAI.ParallelToolCalls {
-		t.Fatalf("after @parallel parallel_tool_calls = %#v, want true", c.tuning.OpenAI.ParallelToolCalls)
+	c.SetVariant("serial")
+	if c.tuning.OpenAI.ParallelToolCalls == nil || *c.tuning.OpenAI.ParallelToolCalls {
+		t.Fatalf("after @serial parallel_tool_calls = %#v, want false", c.tuning.OpenAI.ParallelToolCalls)
 	}
 }
 

@@ -182,8 +182,8 @@ func TestResponsesProvider_OpenAIOAuthUsesCodexHeadersAndBody(t *testing.T) {
 	if _, ok := gotBody["max_output_tokens"]; ok {
 		t.Fatalf("did not expect max_output_tokens in OAuth responses request: %#v", gotBody["max_output_tokens"])
 	}
-	if gotBody["parallel_tool_calls"] != false {
-		t.Fatalf("expected explicit parallel_tool_calls=false, got %#v", gotBody["parallel_tool_calls"])
+	if gotBody["parallel_tool_calls"] != true {
+		t.Fatalf("expected default parallel_tool_calls=true, got %#v", gotBody["parallel_tool_calls"])
 	}
 	inc, ok := gotBody["include"].([]any)
 	if !ok || len(inc) != 1 || inc[0] != "reasoning.encrypted_content" {

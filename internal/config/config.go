@@ -258,7 +258,7 @@ type ModelConfig struct {
 	Thinking              *ThinkingConfig         `json:"thinking,omitempty" yaml:"thinking,omitempty"`
 	Reasoning             *ReasoningConfig        `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
 	Text                  *TextConfig             `json:"text,omitempty" yaml:"text,omitempty"`
-	ParallelToolCalls     *bool                   `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = Responses request default false; non-nil = explicit override
+	ParallelToolCalls     *bool                   `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = provider default true; non-nil = explicit override
 	PromptCache           *PromptCacheConfig      `json:"prompt_cache,omitempty" yaml:"prompt_cache,omitempty"`
 	Compat                *ModelCompatConfig      `json:"compat,omitempty" yaml:"compat,omitempty"`
 	Cost                  *ModelCost              `json:"cost,omitempty" yaml:"cost,omitempty"`
@@ -617,7 +617,7 @@ type ModelVariant struct {
 	Thinking          *ThinkingConfig    `json:"thinking,omitempty" yaml:"thinking,omitempty"`
 	Reasoning         *ReasoningConfig   `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
 	Text              *TextConfig        `json:"text,omitempty" yaml:"text,omitempty"`
-	ParallelToolCalls *bool              `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = inherit model default; non-nil = override Responses request hint
+	ParallelToolCalls *bool              `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = inherit model default; non-nil = override provider request hint
 	PromptCache       *PromptCacheConfig `json:"prompt_cache,omitempty" yaml:"prompt_cache,omitempty"`
 }
 
