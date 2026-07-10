@@ -2,6 +2,20 @@
 
 本项目采用语义化版本风格发布。1.0 之前的版本可能包含不兼容变更。
 
+## Unreleased
+
+### 改进
+
+- OpenAI Responses 与 Chat Completions 请求现在默认启用 `parallel_tool_calls`，允许模型在一次响应中返回相互独立的工具调用；如果后端或工作流要求串行调用，可在 model 或 variant 配置中显式关闭。
+- 上下文剪裁默认值基于近期会话统计重新调参：较旧的 read-like 和成功 shell 输出会在 1 个 effective turn 后摘要化，read-like 与 shell-success byte gate 默认 3000，generic stale 清理 3 个 effective turns 后启动，`min_tool_results_prune` 默认 6，`min_incremental_saved_tokens` 默认 2048。较旧的成功 shell 输出现在会保留输出大小、行数、有代表性的成功信号行和尾部 fallback，而不是压成固定省略标记。
+- `preset: codex` 的 Responses 请求不再维护 Chord 本地的 reasoning-effort 白名单。Chord 现在会规范化后直接透传 `reasoning.effort`，让 `max` 等模型特定取值由上游后端校验，而不会在客户端被静默丢弃。
+- 初始化向导现在会配置 GPT-5.6 Sol/Terra/Luna，并以 `gpt-5.6-sol` 作为 Codex OAuth 初始模型；模型配置速查也补充了 GPT-5.6 和其他常见 provider。
+
+### 修复
+
+- OpenAI Responses 与 Chat Completions 的 usage 现在会把 GPT-5.6 cache-write token 记录到独立桶中，而不会再把它重复计入普通输入，从而保证上下文阈值和费用统计准确。
+- MCP/LSP 集成状态、控制、system prompt 和模型工具定义现在会一致遵守当前角色及实时 `/rules` 权限，包括同一 MCP server 内的部分授权、lazy/manual server 的精确 allow 规则，以及名称相互重叠的 MCP server。
+
 ## 0.7.1 - 2026-07-08
 
 ### 重大变更

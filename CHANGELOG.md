@@ -2,6 +2,20 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
+## Unreleased
+
+### Improvements
+
+- OpenAI Responses and Chat Completions requests now enable `parallel_tool_calls` by default so independent tool calls can be returned together. Model and variant configuration can explicitly disable it when a backend or workflow requires serial calls.
+- Context-reduction defaults were retuned from recent-session statistics: old read-like and successful shell outputs are summarized after 1 effective turn, read-like and shell-success byte gates default to 3000, generic stale cleanup starts after 3 effective turns, `min_tool_results_prune` defaults to 6, and `min_incremental_saved_tokens` defaults to 2048. Older successful shell output now keeps output size, line count, salient success lines, and a tail fallback instead of a fixed omission marker.
+- `preset: codex` Responses requests no longer maintain a Chord-local reasoning-effort whitelist. Chord now normalizes `reasoning.effort` and passes it through so model-specific values such as `max` can be validated by the upstream backend instead of being silently dropped client-side.
+- The setup wizard now configures GPT-5.6 Sol/Terra/Luna and selects `gpt-5.6-sol` as the initial Codex OAuth model; model configuration recipes document GPT-5.6 and other common providers.
+
+### Fixes
+
+- OpenAI Responses and Chat Completions usage now records GPT-5.6 cache-write tokens in a separate bucket without double-counting them as ordinary input, keeping context thresholds and cost analytics accurate.
+- MCP/LSP integration status, controls, system prompts, and model tool definitions now honor active-role and live `/rules` permissions consistently, including partial permissions within one MCP server, exact allows for lazy/manual servers, and overlapping MCP server names.
+
 ## 0.7.1 - 2026-07-08
 
 ### Breaking Changes
