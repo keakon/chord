@@ -186,7 +186,7 @@ func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	// whether all paths errored, not by match count, otherwise a successful but
 	// empty search plus one failed path would be misreported as all-failed.
 	if len(pathErrors) > 0 && len(pathErrors) == len(paths) {
-		return "", fmt.Errorf("all search paths failed: %s", strings.Join(pathErrors, "; "))
+		return "", fmt.Errorf("all search paths failed: %s. The path may be stale or relative to a different working directory. Verify the current working directory or use a discovery tool (glob/grep from the repo root) to locate the target before retrying. Do not guess a similar-looking path", strings.Join(pathErrors, "; "))
 	}
 
 	filter := strings.Join(includes, ",")
@@ -202,6 +202,7 @@ func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		if literalFallback {
 			msg = "No matches found. (pattern was invalid regex; searched as literal text)"
 		}
+		msg += " If the symbol or phrase is expected, try alternate naming, a narrower literal, or broaden the search scope (paths/includes) before assuming absence."
 		return prependNotes(notes, msg), nil
 	}
 

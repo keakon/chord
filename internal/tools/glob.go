@@ -64,6 +64,7 @@ func (t GlobTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 
 func (GlobTool) Description() string {
 	return "Find files by path using glob syntax. Supports ** for recursive directory matching relative to path." +
+		" Returned matches are relative to path, or to the session working directory when path is omitted." +
 		" patterns are path globs, not regular expressions and not file-contents searches." +
 		" Pass patterns as a JSON array (e.g. patterns: [\"**/*.go\"] or patterns: [\"src/**/*.ts\", \"test/**/*.ts\"]); a single bare string is tolerated but a single-element array is preferred." +
 		" If the exact relative file path is known, pass it as the pattern (e.g. patterns: [\"src/main.go\"]) instead of using ** from a very broad path like /, /tmp, or the home directory." +
@@ -80,12 +81,12 @@ func (GlobTool) Parameters() map[string]any {
 					"type": "string",
 				},
 				"minItems":         1,
-				"description":      "Path globs relative to path, as a JSON array (e.g. [\"**/*.go\"] or [\"src/**/*.ts\", \"test/**/*.ts\"]). Supports ** for recursive directory matching. This is glob syntax, not regex and not a file-contents search.",
+				"description":      "Path globs relative to path, as a JSON array (e.g. [\"**/*.go\"] or [\"src/**/*.ts\", \"test/**/*.ts\"]). Supports ** for recursive directory matching. Returned matches are also relative to path. This is glob syntax, not regex and not a file-contents search.",
 				"coerceFromString": true,
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Single base directory to search from. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Defaults to the session working directory.",
+				"description": "Single base directory to search from. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Defaults to the session working directory. Returned matches are relative to this base directory.",
 			},
 		},
 		"required":             []string{"patterns"},

@@ -170,6 +170,7 @@ func TestGlobToolParameterDescriptionsClarifyBasePathAndPatternScope(t *testing.
 		"Relative paths resolve from the session working directory",
 		"Supports ~",
 		"Defaults to the session working directory",
+		"Returned matches are relative to this base directory",
 	} {
 		if !strings.Contains(pathDesc, want) {
 			t.Fatalf("path description missing %q: %q", want, pathDesc)
@@ -177,6 +178,7 @@ func TestGlobToolParameterDescriptionsClarifyBasePathAndPatternScope(t *testing.
 	}
 	for _, want := range []string{
 		"Path globs relative to path",
+		"Returned matches are also relative to path",
 		"src/**/*.ts",
 		"Supports **",
 	} {

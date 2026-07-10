@@ -236,6 +236,9 @@ func TestGrepMixedPathNoMatchReportsPartialNotAllFailed(t *testing.T) {
 	if !strings.Contains(out, "grep: skipped path:") {
 		t.Fatalf("output should note the skipped failing path:\n%s", out)
 	}
+	if !strings.Contains(out, "try alternate naming") {
+		t.Fatalf("output should suggest recovery for no matches:\n%s", out)
+	}
 }
 
 func TestGrepAllPathsFailReturnsAggregateError(t *testing.T) {
@@ -250,6 +253,12 @@ func TestGrepAllPathsFailReturnsAggregateError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "all search paths failed") {
 		t.Fatalf("error = %v, want all-failed aggregate", err)
+	}
+	if !strings.Contains(err.Error(), "Verify the current working directory") {
+		t.Fatalf("error = %v, want recovery guidance for stale paths", err)
+	}
+	if !strings.Contains(err.Error(), "Do not guess a similar-looking path") {
+		t.Fatalf("error = %v, want do-not-guess guidance", err)
 	}
 }
 
