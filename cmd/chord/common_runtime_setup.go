@@ -157,6 +157,12 @@ func configureRuntimeStateProviders(ac *AppContext) {
 	ac.MainAgent.SetMCPStatusFunc(func() []agent.MCPServerDisplay {
 		return mcpServerDisplayList(ac.MCPMgr, ac.RuntimeResources)
 	})
+	ac.MainAgent.SetMCPKnownToolNamesFunc(func(serverName string) []string {
+		if ac.MCPMgr == nil {
+			return nil
+		}
+		return ac.MCPMgr.KnownRegisteredToolNames(serverName)
+	})
 	ac.MainAgent.SetMCPControlFunc(func(ctx context.Context, req agent.MCPControlRequest) (agent.MCPControlResult, error) {
 		return controlRuntimeMCP(ctx, ac, req)
 	})

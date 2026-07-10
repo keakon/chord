@@ -36,6 +36,16 @@ edit: deny
 	if strings.Contains(got, "## LSP diagnostic follow-up") {
 		t.Fatalf("buildSystemPrompt() unexpectedly included LSP diagnostic guidance without Edit/Write permission: %q", got)
 	}
+
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": allow
+lsp: deny
+`)}
+	a.rebuildRuleset()
+	got = a.buildSystemPrompt()
+	if strings.Contains(got, "## LSP diagnostic follow-up") {
+		t.Fatalf("buildSystemPrompt() unexpectedly included LSP diagnostic guidance when lsp is denied: %q", got)
+	}
 }
 
 func TestHasEnabledLSPServers_ProjectOverrideCanDisableGlobalServer(t *testing.T) {

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -51,6 +53,112 @@ func TestSummarizeMCPControlErrorIgnoresCanceledBranches(t *testing.T) {
 	got := summarizeMCPControlError(errors.Join(context.Canceled, fmt.Errorf("other failure")))
 	if got != "other failure" {
 		t.Fatalf("mixed summary = %q, want %q", got, "other failure")
+	}
+}
+
+func TestMCPControlEnableRejectsServerDeniedByActiveRole(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.globalConfig = &config.Config{MCP: config.MCPConfig{
+		"exa": {AllowedTools: []string{"web_search_exa"}},
+	}}
+	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionDeny}}
+	called := false
+	a.SetMCPControlFunc(func(context.Context, MCPControlRequest) (MCPControlResult, error) {
+		called = true
+		return MCPControlResult{}, nil
+	})
+
+	a.handleMCPControlEvent(Event{Payload: MCPControlRequest{Action: MCPControlEnable, Servers: []string{"exa"}}})
+	if called {
+		t.Fatal("MCP control function should not run for a server denied by the active role")
+	}
+	select {
+	case raw := <-a.Events():
+		event, ok := raw.(ErrorEvent)
+		if !ok || !strings.Contains(event.Err.Error(), "denies all tools") {
+			t.Fatalf("event = %#v, want active-role permission rejection", raw)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for active-role permission rejection")
+	}
+}
+
+func TestMCPControlEnableAcceptsExactAllowedLazyServer(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.ruleset = permission.Ruleset{
+		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
+		{Permission: "mcp_exa_search", Pattern: "*", Action: permission.ActionAllow},
+	}
+	called := make(chan MCPControlRequest, 1)
+	a.SetMCPControlFunc(func(_ context.Context, req MCPControlRequest) (MCPControlResult, error) {
+		called <- req
+		return MCPControlResult{}, nil
+	})
+
+	a.handleMCPControlEvent(Event{Payload: MCPControlRequest{Action: MCPControlEnable, Servers: []string{"exa"}}})
+	select {
+	case req := <-called:
+		if len(req.Servers) != 1 || req.Servers[0] != "exa" {
+			t.Fatalf("MCP control request = %#v, want exa", req)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for exact-allowed lazy MCP control")
+	}
+}
+
+func TestMCPControlEnableRejectsShorterOverlappingLazyServer(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.SetMCPStatusFunc(func() []MCPServerDisplay {
+		return []MCPServerDisplay{{Name: "search", Manual: true}, {Name: "search_api", Manual: true}}
+	})
+	a.ruleset = permission.Ruleset{
+		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
+		{Permission: "mcp_search_api_query", Pattern: "*", Action: permission.ActionAllow},
+	}
+	called := false
+	a.SetMCPControlFunc(func(context.Context, MCPControlRequest) (MCPControlResult, error) {
+		called = true
+		return MCPControlResult{}, nil
+	})
+
+	a.handleMCPControlEvent(Event{Payload: MCPControlRequest{Action: MCPControlEnable, Servers: []string{"search"}}})
+	if called {
+		t.Fatal("MCP control function should not run for the overlapping denied server")
+	}
+	select {
+	case raw := <-a.Events():
+		event, ok := raw.(ErrorEvent)
+		if !ok || !strings.Contains(event.Err.Error(), "denies all tools") {
+			t.Fatalf("event = %#v, want active-role permission rejection", raw)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for overlapping server permission rejection")
+	}
+}
+
+func TestMCPControlEnableAcceptsLongerOverlappingLazyServer(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.SetMCPStatusFunc(func() []MCPServerDisplay {
+		return []MCPServerDisplay{{Name: "search", Manual: true}, {Name: "search_api", Manual: true}}
+	})
+	a.ruleset = permission.Ruleset{
+		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
+		{Permission: "mcp_search_api_query", Pattern: "*", Action: permission.ActionAllow},
+	}
+	called := make(chan MCPControlRequest, 1)
+	a.SetMCPControlFunc(func(_ context.Context, req MCPControlRequest) (MCPControlResult, error) {
+		called <- req
+		return MCPControlResult{}, nil
+	})
+
+	a.handleMCPControlEvent(Event{Payload: MCPControlRequest{Action: MCPControlEnable, Servers: []string{"search_api"}}})
+	select {
+	case req := <-called:
+		if len(req.Servers) != 1 || req.Servers[0] != "search_api" {
+			t.Fatalf("MCP control request = %#v, want search_api", req)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for longer overlapping MCP server control")
 	}
 }
 

@@ -75,6 +75,15 @@ func (a *MainAgent) handleMCPControlEvent(evt Event) {
 		log.Errorf("handleMCPControlEvent: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
+	if req.Action == MCPControlEnable {
+		if len(req.Servers) == 0 {
+			req.Servers = a.visibleManualMCPServerNames()
+		}
+		if !a.mcpControlTargetsVisible(req.Servers) {
+			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/mcp enable is unavailable because the active role denies all tools from the selected MCP server")})
+			return
+		}
+	}
 	if a.mcpTransitionActive.Load() {
 		a.emitToTUI(ToastEvent{Message: "MCP change already in progress", Level: "warn"})
 		return
@@ -94,6 +103,36 @@ func (a *MainAgent) handleMCPControlEvent(evt Event) {
 		res, err := a.mcpControlFn(a.parentCtx, req)
 		a.sendEvent(Event{Type: EventMCPControlDone, Payload: mcpControlDonePayload{req: req, result: res, err: err}})
 	}()
+}
+
+func (a *MainAgent) mcpControlTargetsVisible(servers []string) bool {
+	if len(servers) == 0 {
+		return false
+	}
+	serverNames := append([]string(nil), servers...)
+	if a.mcpServerListFn != nil {
+		for _, row := range a.mcpServerListFn() {
+			serverNames = append(serverNames, row.Name)
+		}
+	}
+	visibility := a.mcpVisibilitySnapshot(serverNames)
+	for _, server := range servers {
+		if !visibility.serverVisible(server) {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *MainAgent) visibleManualMCPServerNames() []string {
+	rows := a.MCPServerList()
+	servers := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.Manual {
+			servers = append(servers, row.Name)
+		}
+	}
+	return servers
 }
 
 func summarizeMCPControlError(err error) string {

@@ -96,12 +96,7 @@ func (a *MainAgent) addPermissionRule(rule permission.Rule, scope permission.Rul
 	}
 
 	// Update the merged ruleset
-	a.stateMu.Lock()
-	a.ruleset = a.overlay.MergedRuleset()
-	a.stateMu.Unlock()
-
-	// For SubAgents, sync their overlay too
-	a.syncSubAgentOverlay()
+	a.applyOverlayRulesetChange()
 
 	scopeText := scope.String()
 	switch scope {

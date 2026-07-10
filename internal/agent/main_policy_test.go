@@ -1246,6 +1246,38 @@ func TestSwitchRoleAppliesRoleModelWithoutToast(t *testing.T) {
 	}
 }
 
+func TestSwitchRoleRefreshesPermissionDependentToolSurface(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.tools.Register(tools.ReadTool{})
+	a.tools.Register(tools.GrepTool{})
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"builder":  {Name: "builder", Mode: config.AgentModeMain, Permission: parsePermissionNode(t, "read: allow\ngrep: deny\n")},
+		"reviewer": {Name: "reviewer", Mode: config.AgentModeMain, Permission: parsePermissionNode(t, "read: deny\ngrep: allow\n")},
+	})
+	if ruleset := a.effectiveRuleset(); !ruleset.IsDisabled(tools.NameGrep) || ruleset.IsDisabled(tools.NameRead) {
+		t.Fatalf("builder ruleset = %#v, want read allowed and grep denied", ruleset)
+	}
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("initial ensureSessionBuilt: %v", err)
+	}
+	if !hasToolDefinition(a.mainLLMToolDefinitions(), tools.NameRead) || hasToolDefinition(a.mainLLMToolDefinitions(), tools.NameGrep) {
+		t.Fatalf("initial tool definitions = %v, want read only", toolDefinitionNames(a.mainLLMToolDefinitions()))
+	}
+
+	if err := a.switchRole("reviewer", false); err != nil {
+		t.Fatalf("switchRole: %v", err)
+	}
+	if a.sessionBuilt.Load() || !a.surfaceDirty.Load() {
+		t.Fatalf("role switch surface state: sessionBuilt=%v surfaceDirty=%v", a.sessionBuilt.Load(), a.surfaceDirty.Load())
+	}
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("ensureSessionBuilt after role switch: %v", err)
+	}
+	if hasToolDefinition(a.mainLLMToolDefinitions(), tools.NameRead) || !hasToolDefinition(a.mainLLMToolDefinitions(), tools.NameGrep) {
+		t.Fatalf("reviewer tool definitions = %v, want grep only", toolDefinitionNames(a.mainLLMToolDefinitions()))
+	}
+}
+
 func TestSwitchRoleEmitsRoleChangedEvent(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

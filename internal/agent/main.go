@@ -539,10 +539,11 @@ type MainAgent struct {
 	modelPoolStatePath string
 
 	// LSP/MCP state providers for TUI sidebar display (set via SetLSPStatusFunc / SetMCPStatusFunc).
-	lspServerListFn   func() []LSPServerDisplay
-	mcpServerListFn   func() []MCPServerDisplay
-	lspSessionResetFn func()
-	lspSessionLoadFn  func([]message.Message)
+	lspServerListFn     func() []LSPServerDisplay
+	mcpServerListFn     func() []MCPServerDisplay
+	mcpKnownToolNamesFn func(string) []string
+	lspSessionResetFn   func()
+	lspSessionLoadFn    func([]message.Message)
 
 	// Async persistence pump for ordered JSONL writes.
 	persist *persistencePump
@@ -867,9 +868,6 @@ func (a *MainAgent) buildSubAgentRuleset(agentDef *config.AgentConfig) permissio
 	return ruleset
 }
 
-// switchRole switches the MainAgent's active role configuration.
-// It updates the active config, rebuilds the permission ruleset, rebuilds
-// the system prompt, and clears the conversation history.
 // switchRole changes the MainAgent's active role.
 // If clearHistory is true, the conversation history is wiped (used for
 // Handoff-triggered switches where the new role starts fresh).
@@ -889,8 +887,10 @@ func (a *MainAgent) switchRole(roleName string, clearHistory bool) error {
 	// Rebuild permissions from active agent config.
 	a.rebuildRuleset()
 
-	// Rebuild system prompt with role-specific instructions.
-	a.refreshSystemPrompt()
+	// Prompt and tool visibility depend on the role's permissions. Rebuild them
+	// together at the next request boundary so the model sees one coherent surface.
+	a.markRuntimeSurfaceDirty()
+	a.NotifyEnvStatusUpdated()
 
 	if clearHistory {
 		// Clear conversation history so the new role starts fresh.

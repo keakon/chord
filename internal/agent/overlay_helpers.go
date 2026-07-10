@@ -42,6 +42,15 @@ func (a *MainAgent) initOverlay() {
 	a.syncSubAgentOverlay()
 }
 
+func (a *MainAgent) applyOverlayRulesetChange() {
+	a.stateMu.Lock()
+	a.ruleset = a.overlay.MergedRuleset()
+	a.stateMu.Unlock()
+	a.syncSubAgentOverlay()
+	a.markRuntimeSurfaceDirty()
+	a.NotifyEnvStatusUpdated()
+}
+
 // Overlay returns the overlay for external access (e.g., from TUI).
 func (a *MainAgent) Overlay() *permission.Overlay {
 	return a.overlay
@@ -77,10 +86,7 @@ func (a *MainAgent) RemoveOverlayAddedRule(index int) error {
 	if err := a.overlay.RemoveAddedRule(index); err != nil {
 		return err
 	}
-	a.stateMu.Lock()
-	a.ruleset = a.overlay.MergedRuleset()
-	a.stateMu.Unlock()
-	a.syncSubAgentOverlay()
+	a.applyOverlayRulesetChange()
 	return nil
 }
 

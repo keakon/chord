@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -57,9 +58,7 @@ func (a *MainAgent) buildSystemPrompt() string {
 		parts = append(parts, block)
 	}
 
-	a.mcpServersPromptMu.RLock()
-	mcpBlock := a.mcpServersPrompt
-	a.mcpServersPromptMu.RUnlock()
+	mcpBlock := a.visibleMCPServersPromptBlock()
 	if mcpBlock != "" {
 		parts = append(parts, mcpBlock)
 	}
@@ -68,6 +67,115 @@ func (a *MainAgent) buildSystemPrompt() string {
 	// belong in the stable system prompt.
 
 	return strings.Join(parts, "\n\n")
+}
+
+func (a *MainAgent) visibleMCPServersPromptBlock() string {
+	a.mcpServersPromptMu.RLock()
+	block := a.mcpServersPrompt
+	a.mcpServersPromptMu.RUnlock()
+	if block == "" {
+		return ""
+	}
+	if !strings.HasPrefix(strings.TrimSpace(block), "## MCP ") {
+		return block
+	}
+
+	lines := strings.Split(block, "\n")
+	serverNames := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "- **") {
+			continue
+		}
+		end := strings.Index(trimmed[len("- **"):], "**")
+		if end < 0 {
+			continue
+		}
+		serverNames = append(serverNames, trimmed[len("- **"):len("- **")+end])
+	}
+	visibility := a.mcpVisibilitySnapshot(serverNames)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "- **") {
+			continue
+		}
+		end := strings.Index(trimmed[len("- **"):], "**")
+		if end < 0 {
+			continue
+		}
+		server := trimmed[len("- **") : len("- **")+end]
+		prefix := strings.TrimSuffix(mcp.RegisteredMCPToolName(server, ""), "tool")
+		visibility.knownTools[server] = append(visibility.knownTools[server], mcpPromptToolNames(line, prefix)...)
+	}
+	filtered := make([]string, 0, len(lines))
+	serverRows := 0
+	for i, line := range lines {
+		if i == 0 {
+			filtered = append(filtered, line)
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "- **") {
+			filtered = append(filtered, line)
+			continue
+		}
+		end := strings.Index(trimmed[len("- **"):], "**")
+		if end < 0 {
+			continue
+		}
+		server := trimmed[len("- **") : len("- **")+end]
+		visibleTools := visibility.visibleToolNames(server)
+		if len(visibleTools) == 0 {
+			continue
+		}
+		prefix := strings.TrimSuffix(mcp.RegisteredMCPToolName(server, ""), "tool")
+		visiblePromptTools := filterMCPPromptToolNames(line, prefix, visibleTools)
+		if len(visiblePromptTools) == 0 {
+			continue
+		}
+		filtered = append(filtered, fmt.Sprintf("- **%s** — tools: %s", server, strings.Join(visiblePromptTools, ", ")))
+		serverRows++
+	}
+	if serverRows == 0 {
+		return ""
+	}
+	result := strings.Join(filtered, "\n")
+	if strings.HasSuffix(block, "\n") {
+		result += "\n"
+	}
+	return result
+}
+
+func mcpPromptToolNames(line, prefix string) []string {
+	fields := strings.FieldsFunc(line, func(r rune) bool { return r == ' ' || r == ',' })
+	names := make([]string, 0, len(fields))
+	for _, field := range fields {
+		name := tools.NormalizeName(strings.Trim(field, "`*()[]{};:"))
+		if strings.HasPrefix(name, prefix) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func filterMCPPromptToolNames(line, prefix string, visible []string) []string {
+	allowed := make(map[string]struct{}, len(visible))
+	for _, name := range visible {
+		allowed[tools.NormalizeName(name)] = struct{}{}
+	}
+	filtered := make([]string, 0, len(visible))
+	seen := make(map[string]struct{}, len(visible))
+	for _, name := range mcpPromptToolNames(line, prefix) {
+		if _, ok := allowed[name]; !ok {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		filtered = append(filtered, name)
+	}
+	return filtered
 }
 
 func agentsMDReminderFramingPromptBlock(agentsMD string) string {
@@ -146,6 +254,9 @@ func (a *MainAgent) lspDiagnosticPromptBlock() string {
 }
 
 func (a *MainAgent) shouldInjectLSPDiagnosticPrompt() bool {
+	if ruleset := a.effectiveRuleset(); len(ruleset) > 0 && ruleset.IsDisabled(tools.NameLsp) {
+		return false
+	}
 	visible := a.mainVisibleLLMToolNames()
 	if len(visible) == 0 {
 		return false

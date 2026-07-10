@@ -10,6 +10,13 @@ func (a *MainAgent) handleMCPCommand(content string, busy ...bool) {
 	isBusy := len(busy) > 0 && busy[0]
 	arg := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(content), "/mcp"))
 	if arg == "" {
+		if len(a.MCPServerList()) == 0 {
+			a.emitToTUI(InfoEvent{Message: "No MCP servers available for the active role"})
+			if !isBusy {
+				a.setIdleAndDrainPending()
+			}
+			return
+		}
 		a.emitToTUI(MCPSelectEvent{})
 		if !isBusy {
 			a.setIdleAndDrainPending()
@@ -18,6 +25,13 @@ func (a *MainAgent) handleMCPCommand(content string, busy ...bool) {
 	}
 	fields := strings.Fields(arg)
 	if len(fields) == 0 {
+		if len(a.MCPServerList()) == 0 {
+			a.emitToTUI(InfoEvent{Message: "No MCP servers available for the active role"})
+			if !isBusy {
+				a.setIdleAndDrainPending()
+			}
+			return
+		}
 		a.emitToTUI(MCPSelectEvent{})
 		if !isBusy {
 			a.setIdleAndDrainPending()

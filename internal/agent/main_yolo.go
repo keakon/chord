@@ -59,6 +59,7 @@ func (a *MainAgent) setYoloMode(enabled bool) {
 	}
 	a.yoloEnabled.Store(enabled)
 	a.markRuntimeSurfaceDirty()
+	a.NotifyEnvStatusUpdated()
 	a.emitToTUI(YoloModeChangedEvent{Enabled: enabled})
 	state := "off"
 	if enabled {

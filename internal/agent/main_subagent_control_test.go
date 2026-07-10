@@ -161,6 +161,48 @@ func TestSyncSubAgentOverlayPreservesSubAgentPermissions(t *testing.T) {
 	}
 }
 
+func TestOverlayRuleChangesRefreshRuntimeSurfaces(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.activeConfig = &config.AgentConfig{Name: "builder"}
+	a.initOverlay()
+	a.sessionBuilt.Store(true)
+	a.surfaceDirty.Store(false)
+
+	if err := a.AddOverlayRule(permission.Rule{Permission: tools.NameLsp, Pattern: "*", Action: permission.ActionDeny}, permission.ScopeSession); err != nil {
+		t.Fatalf("AddOverlayRule: %v", err)
+	}
+	if a.sessionBuilt.Load() || !a.surfaceDirty.Load() {
+		t.Fatalf("runtime surface state after add: sessionBuilt=%v surfaceDirty=%v", a.sessionBuilt.Load(), a.surfaceDirty.Load())
+	}
+	waitForEnvStatusUpdateEvent(t, a.Events())
+
+	a.sessionBuilt.Store(true)
+	a.surfaceDirty.Store(false)
+	if err := a.RemoveOverlayAddedRule(0); err != nil {
+		t.Fatalf("RemoveOverlayAddedRule: %v", err)
+	}
+	if a.sessionBuilt.Load() || !a.surfaceDirty.Load() {
+		t.Fatalf("runtime surface state after remove: sessionBuilt=%v surfaceDirty=%v", a.sessionBuilt.Load(), a.surfaceDirty.Load())
+	}
+	waitForEnvStatusUpdateEvent(t, a.Events())
+}
+
+func waitForEnvStatusUpdateEvent(t *testing.T, events <-chan AgentEvent) {
+	t.Helper()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case event := <-events:
+			if _, ok := event.(EnvStatusUpdateEvent); ok {
+				return
+			}
+		case <-timer.C:
+			t.Fatal("timed out waiting for environment refresh")
+		}
+	}
+}
+
 func TestSubAgentRuleIntentRefreshPreservesSubAgentPermissions(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.activeConfig = &config.AgentConfig{Name: "builder"}

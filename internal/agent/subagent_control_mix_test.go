@@ -27,6 +27,13 @@ func (d dummyTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 }
 func (d dummyTool) IsReadOnly() bool { return true }
 
+type dummyMCPTool struct {
+	dummyTool
+	server string
+}
+
+func (d dummyMCPTool) MCPServerName() string { return d.server }
+
 func newMixedBatchTestSubAgent(t *testing.T) (*MainAgent, *SubAgent) {
 	t.Helper()
 	parent := newTestMainAgent(t, t.TempDir())
