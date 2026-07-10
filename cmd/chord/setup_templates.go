@@ -78,7 +78,7 @@ func buildInitialSetupConfigYAML(input initialSetupConfigInput) ([]byte, error) 
 	}
 	modelName := strings.TrimSpace(input.ModelName)
 	if modelName == "" {
-		modelName = "gpt-5.5"
+		modelName = "gpt-5.6"
 	}
 
 	provider := initialSetupProviderYAML{}
@@ -127,6 +127,9 @@ func buildInitialSetupConfigYAML(input initialSetupConfigInput) ([]byte, error) 
 
 func initialSetupCodexModels() []initialSetupModelDefaults {
 	return []initialSetupModelDefaults{
+		{Name: "gpt-5.6-sol", ContextLimit: 1050000, OutputLimit: 128000},
+		{Name: "gpt-5.6-terra", ContextLimit: 1050000, OutputLimit: 128000},
+		{Name: "gpt-5.6-luna", ContextLimit: 1050000, OutputLimit: 128000},
 		{Name: "gpt-5.2", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
 		{Name: "gpt-5.3-codex", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
 		{Name: "gpt-5.4", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
@@ -185,7 +188,7 @@ func initialSetupDefaultsForProviderType(providerType string) initialSetupEndpoi
 			ProviderName: "openai",
 			ProviderType: "chat-completions",
 			APIURL:       "https://gateway.example.com/v1/chat/completions",
-			ModelName:    "gpt-5.5",
+			ModelName:    "gpt-5.6",
 			ContextLimit: 128000,
 			OutputLimit:  32768,
 		}
@@ -214,9 +217,8 @@ func initialSetupDefaultsForProviderType(providerType string) initialSetupEndpoi
 			ProviderName: "openai",
 			ProviderType: "responses",
 			APIURL:       "https://api.openai.com/v1/responses",
-			ModelName:    "gpt-5.5",
-			ContextLimit: 400000,
-			InputLimit:   272000,
+			ModelName:    "gpt-5.6",
+			ContextLimit: 1050000,
 			OutputLimit:  128000,
 		}
 	}

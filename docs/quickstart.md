@@ -47,7 +47,7 @@ For API-key setup, the wizard provides one API-key provider path. It asks for an
 - `/chat/completions` — OpenAI Chat Completions compatible gateways
 - `/models` — Gemini Generate Content base path
 
-Based on that endpoint, Chord recommends a starter provider name and model such as `openai` / `gpt-5.5`, `anthropic` / `claude-opus-4.8`, or `gemini` / `gemini-3.5-flash`.
+Based on that endpoint, Chord recommends a starter provider name and model such as `openai` / `gpt-5.6`, `anthropic` / `claude-opus-4.8`, or `gemini` / `gemini-3.5-flash`.
 
 If your provider requires a proxy, the wizard can also write a proxy URL into `config.yaml`. It shows examples such as `http://127.0.0.1:1080` and `socks5://127.0.0.1:1080`.
 
@@ -57,7 +57,7 @@ If you chose the API-key provider path, verify the configured models with:
 chord doctor models
 ```
 
-If you choose the Codex OAuth path, the wizard completes OAuth sign-in before setup finishes. It creates a `preset: codex` provider and configures these starter models automatically: `gpt-5.2`, `gpt-5.3-codex`, `gpt-5.4`, and `gpt-5.5`.
+If you choose the Codex OAuth path, the wizard completes OAuth sign-in before setup finishes. It creates a `preset: codex` provider, uses `gpt-5.6-sol` as the initial model, and configures GPT-5.6 Terra/Luna plus GPT-5.2–5.5 as fallbacks.
 
 ## 3. Run
 

@@ -47,7 +47,7 @@ codesign --force --sign - /path/to/chord
 - `/chat/completions` —— OpenAI Chat Completions 兼容网关
 - `/models` —— Gemini Generate Content 基础路径
 
-Chord 会根据这个端点推荐起始 provider 名和模型名，例如 `openai` / `gpt-5.5`、`anthropic` / `claude-opus-4.8`、`gemini` / `gemini-3.5-flash`。
+Chord 会根据这个端点推荐起始 provider 名和模型名，例如 `openai` / `gpt-5.6`、`anthropic` / `claude-opus-4.8`、`gemini` / `gemini-3.5-flash`。
 
 如果 provider 需要代理，向导也可以把 proxy URL 写入 `config.yaml`，并给出 `http://127.0.0.1:1080`、`socks5://127.0.0.1:1080` 这类示例。
 
@@ -57,7 +57,7 @@ Chord 会根据这个端点推荐起始 provider 名和模型名，例如 `opena
 chord doctor models
 ```
 
-如果你选择的是 Codex OAuth 路径，向导会在结束前直接完成 OAuth 登录。它会创建一个 `preset: codex` provider，并自动配置这些起始模型：`gpt-5.2`、`gpt-5.3-codex`、`gpt-5.4`、`gpt-5.5`。
+如果你选择的是 Codex OAuth 路径，向导会在结束前直接完成 OAuth 登录。它会创建一个 `preset: codex` provider，以 `gpt-5.6-sol` 作为初始模型，并把 GPT-5.6 Terra/Luna 与 GPT-5.2–5.5 配置为 fallback。
 
 ## 3. 运行
 
