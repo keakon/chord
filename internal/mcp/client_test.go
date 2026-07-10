@@ -452,6 +452,15 @@ func TestDiscoverAllToolsFiltersAllowedTools(t *testing.T) {
 	}
 }
 
+func TestKnownRegisteredToolNamesUsesAllowedToolsBeforeDiscovery(t *testing.T) {
+	mgr := NewPendingManager([]ServerConfig{{Name: "search_api", Manual: true, AllowedTools: []string{"beta", "alpha"}}})
+	got := mgr.KnownRegisteredToolNames("search_api")
+	want := []string{"mcp_search_api_alpha", "mcp_search_api_beta"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("KnownRegisteredToolNames() = %#v, want %#v", got, want)
+	}
+}
+
 func TestDiscoverAllToolsWithoutAllowedToolsKeepsAllTools(t *testing.T) {
 	ft := newFakeTransport()
 	ft.onMethod("initialize", initializeResult{})

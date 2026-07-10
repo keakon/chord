@@ -275,15 +275,22 @@ func (r *Registry) Get(name string) (Tool, bool) {
 
 // ListTools returns all registered tools sorted alphabetically by name.
 func (r *Registry) ListTools() []Tool {
+	out := r.ToolsSnapshot()
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name() < out[j].Name()
+	})
+	return out
+}
+
+// ToolsSnapshot returns all registered tools without imposing display order.
+// Callers that only scan or group tools can avoid the sorting cost of ListTools.
+func (r *Registry) ToolsSnapshot() []Tool {
 	r.mu.RLock()
 	out := make([]Tool, 0, len(r.tools))
 	for _, t := range r.tools {
 		out = append(out, t)
 	}
 	r.mu.RUnlock()
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].Name() < out[j].Name()
-	})
 	return out
 }
 

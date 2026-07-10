@@ -144,6 +144,81 @@ func (rs Ruleset) IsDisabled(toolName string) bool {
 	return false
 }
 
+// DeniesAllWithPrefix reports whether the effective rules prove that every
+// tool name under prefix is disabled. A later narrower allow/ask prevents that
+// conclusion, which keeps undiscovered lazy tool namespaces reachable.
+// Excluded prefixes represent nested namespaces owned by a more specific
+// integration and are ignored when deciding whether this prefix has any
+// reachable names of its own.
+func (rs Ruleset) DeniesAllWithPrefix(prefix string, excludedPrefixes ...string) bool {
+	prefix = toolname.Normalize(prefix)
+	if prefix == "" {
+		return false
+	}
+	excluded := normalizePermissionPrefixes(excludedPrefixes)
+	for i := len(rs) - 1; i >= 0; i-- {
+		r := rs[i]
+		permissionPattern := toolname.Normalize(r.Permission)
+		if permissionPatternCanMatchOwnedPrefix(permissionPattern, prefix, excluded) && r.Action != ActionDeny {
+			return false
+		}
+		if r.Action == ActionDeny && r.Pattern == "*" && permissionPatternCoversPrefix(permissionPattern, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizePermissionPrefixes(prefixes []string) []string {
+	normalized := make([]string, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		if prefix = toolname.Normalize(prefix); prefix != "" {
+			normalized = append(normalized, prefix)
+		}
+	}
+	return normalized
+}
+
+func permissionPatternCanMatchOwnedPrefix(pattern, prefix string, excluded []string) bool {
+	if !permissionPatternCanMatchPrefix(pattern, prefix) {
+		return false
+	}
+	wildcard := strings.IndexAny(pattern, "*?")
+	ownedPrefix := pattern
+	if wildcard >= 0 {
+		ownedPrefix = pattern[:wildcard]
+	}
+	for _, excludedPrefix := range excluded {
+		if strings.HasPrefix(ownedPrefix, excludedPrefix) {
+			return false
+		}
+	}
+	return true
+}
+
+func permissionPatternCanMatchPrefix(pattern, prefix string) bool {
+	if permissionPatternCoversPrefix(pattern, prefix) || (!strings.ContainsAny(pattern, "*?") && strings.HasPrefix(pattern, prefix)) {
+		return true
+	}
+	wildcard := strings.IndexAny(pattern, "*?")
+	if wildcard < 0 {
+		return false
+	}
+	fixedPrefix := pattern[:wildcard]
+	return strings.HasPrefix(prefix, fixedPrefix) || strings.HasPrefix(fixedPrefix, prefix)
+}
+
+func permissionPatternCoversPrefix(pattern, prefix string) bool {
+	if strings.Contains(pattern, "?") {
+		return false
+	}
+	fixed := strings.TrimRight(pattern, "*")
+	if fixed == pattern || strings.Contains(fixed, "*") {
+		return false
+	}
+	return strings.HasPrefix(prefix, fixed)
+}
+
 func (rs Ruleset) lastSpecificEditPatchToolRule(toolName, counterpart string) (Rule, bool) {
 	var counterpartMatch Rule
 	counterpartFound := false

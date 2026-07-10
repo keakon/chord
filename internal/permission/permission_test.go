@@ -450,6 +450,19 @@ func TestIsDisabled(t *testing.T) {
 	}
 }
 
+func TestIsDisabledMCPWildcardRule(t *testing.T) {
+	rs := Ruleset{
+		{Permission: "*", Pattern: "*", Action: ActionDeny},
+		{Permission: "mcp_*", Pattern: "*", Action: ActionAllow},
+	}
+	if rs.IsDisabled("mcp_exa_web_search_exa") {
+		t.Fatal("mcp_* allow should expose mcp_exa_web_search_exa")
+	}
+	if !rs.IsDisabled("lsp") {
+		t.Fatal("mcp_* allow should not expose lsp")
+	}
+}
+
 func TestIsDisabled_EditPatchFallback(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -817,6 +830,76 @@ todo_write: allow
 		if got != tt.want {
 			t.Errorf("Evaluate(%q, %q) = %s; want %s", tt.perm, tt.pattern, got, tt.want)
 		}
+	}
+}
+
+func TestDeniesAllWithPrefix(t *testing.T) {
+	tests := []struct {
+		name     string
+		rules    Ruleset
+		prefix   string
+		excluded []string
+		want     bool
+	}{
+		{
+			name:   "wildcard deny covers prefix",
+			rules:  Ruleset{{Permission: "*", Pattern: "*", Action: ActionDeny}},
+			prefix: "mcp_exa_",
+			want:   true,
+		},
+		{
+			name: "later exact allow keeps lazy namespace visible",
+			rules: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "mcp_exa_search", Pattern: "*", Action: ActionAllow},
+			},
+			prefix: "mcp_exa_",
+			want:   false,
+		},
+		{
+			name: "later prefix allow keeps lazy namespace visible",
+			rules: Ruleset{
+				{Permission: "mcp_*", Pattern: "*", Action: ActionDeny},
+				{Permission: "mcp_exa_*", Pattern: "*", Action: ActionAsk},
+			},
+			prefix: "mcp_exa_",
+			want:   false,
+		},
+		{
+			name: "later wildcard allow can match unknown tool suffix",
+			rules: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "mcp_exa_search_*", Pattern: "*", Action: ActionAllow},
+			},
+			prefix: "mcp_exa_",
+			want:   false,
+		},
+		{
+			name: "earlier allow overridden by later deny",
+			rules: Ruleset{
+				{Permission: "mcp_exa_search", Pattern: "*", Action: ActionAllow},
+				{Permission: "mcp_*", Pattern: "*", Action: ActionDeny},
+			},
+			prefix: "mcp_exa_",
+			want:   true,
+		},
+		{
+			name: "nested exact allow belongs to longer server prefix",
+			rules: Ruleset{
+				{Permission: "*", Pattern: "*", Action: ActionDeny},
+				{Permission: "mcp_search_api_query", Pattern: "*", Action: ActionAllow},
+			},
+			prefix:   "mcp_search_",
+			excluded: []string{"mcp_search_api_"},
+			want:     true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.rules.DeniesAllWithPrefix(tt.prefix, tt.excluded...); got != tt.want {
+				t.Fatalf("DeniesAllWithPrefix(%q) = %v, want %v", tt.prefix, got, tt.want)
+			}
+		})
 	}
 }
 

@@ -27,6 +27,7 @@ var _ tools.Tool = (*MCPTool)(nil)
 func (t *MCPTool) Name() string               { return t.registeredName }
 func (t *MCPTool) Description() string        { return t.description }
 func (t *MCPTool) Parameters() map[string]any { return t.schema }
+func (t *MCPTool) MCPServerName() string      { return t.serverName }
 
 // IsReadOnly returns false (conservative default for external MCP tools).
 func (t *MCPTool) IsReadOnly() bool { return false }

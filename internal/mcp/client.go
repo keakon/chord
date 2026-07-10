@@ -946,6 +946,37 @@ func (m *Manager) CachedToolDefs(serverName string) []MCPToolDef {
 	return out
 }
 
+// KnownRegisteredToolNames returns registered ids known from discovery or an
+// explicit allowed_tools list. It does not connect a lazy/manual server.
+func (m *Manager) KnownRegisteredToolNames(serverName string) []string {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	defs := m.toolDefs[serverName]
+	allowed := m.allowedTools[serverName]
+	if len(defs) == 0 && len(allowed) == 0 {
+		m.mu.RUnlock()
+		return nil
+	}
+	out := make([]string, 0, max(len(defs), len(allowed)))
+	if len(defs) > 0 {
+		for _, def := range defs {
+			if def.Name != "" {
+				out = append(out, RegisteredMCPToolName(serverName, def.Name))
+			}
+		}
+	} else {
+		for name := range allowed {
+			out = append(out, RegisteredMCPToolName(serverName, name))
+		}
+	}
+	m.mu.RUnlock()
+
+	sort.Strings(out)
+	return out
+}
+
 func (m *Manager) setCachedToolDefs(serverName string, defs []MCPToolDef) {
 	if m == nil {
 		return
