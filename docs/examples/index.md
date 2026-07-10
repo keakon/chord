@@ -12,6 +12,7 @@ These examples are organized by **real file layout**, not by stuffing multiple f
 | Team repository | Project-level `.chord/`, hooks, shared commands, multi-agent roles | [Team setup](./examples-team.md) |
 
 These examples are starting points, not rigid templates. For field semantics and the full config surface, see the [Configuration cheatsheet](../configuration.md#configuration-cheatsheet).
+If you already know the provider/model you want and only need a minimal copy-paste snippet, start with [Model configuration recipes](../model-configs.md).
 
 ## Agent file formats
 

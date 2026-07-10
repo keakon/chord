@@ -12,6 +12,7 @@
 | 团队仓库 | 项目级 `.chord/`、hooks、共享命令、多 agent 分工 | [团队方案](./examples-team_CN.md) |
 
 这些示例是起点，不是模板生成器。字段含义和完整规则见[配置字段速查表](../configuration_CN.md#配置字段速查表)。
+如果你已经知道自己要用哪个 provider / model，只想找一段最小可复制配置，优先看[模型配置速查](../model-configs_CN.md)。
 
 ## Agent 文件格式
 

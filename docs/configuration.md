@@ -72,18 +72,58 @@ providers:
 
 ### OpenAI Responses
 
+For provider/model-specific copy-paste snippets (GPT-5.4/5.5/5.6, Claude,
+Gemini, GLM, DeepSeek/OpenAI-compatible), see [Model configuration recipes](./model-configs.md).
+
 ```yaml
 providers:
   openai:
     type: responses
     api_url: https://api.openai.com/v1/responses
     models:
-      gpt-5.5:
+      gpt-5.6:
         limit:
-          context: 400000
-          input: 272000
+          context: 500000
+          input: 372000
           output: 128000
+        reasoning:
+          effort: medium
+          summary: auto
+        variants:
+          low:
+            reasoning:
+              effort: low
+          high:
+            reasoning:
+              effort: high
+          xhigh:
+            reasoning:
+              effort: xhigh
+          max:
+            reasoning:
+              effort: max
+        modalities:
+          input: [text, image]
+
+model_pools:
+  default:
+    - openai/gpt-5.6@high
 ```
+
+Pair this provider with an API key in `~/.config/chord/auth.yaml`:
+
+```yaml
+openai:
+  - "$OPENAI_API_KEY"
+```
+
+- Replace both `gpt-5.6` occurrences with `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna` to pin an explicit model ID.
+- Supported API reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`, and `max`; select a configured variant with a ref such as `openai/gpt-5.6@max`.
+- `reasoning.summary: auto` is optional. Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
+- `preset: codex` providers can also use `max` when the selected model/backend supports it. Whether a given effort level is accepted is model/provider-specific.
+
+Limits and reasoning values were checked against the current Codex model
+catalog and OpenAI's [GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model).
 
 Read model limits in this order:
 
@@ -91,7 +131,8 @@ Read model limits in this order:
 2. `limit.input` is only needed when the provider also lists a separate input cap. Some GPT models work this way; if you omit it, Chord derives the usable input budget from `limit.context` after reserving effective requested output.
 3. `limit.output` is the model's own output capacity. Chord's default requested output cap (`max_output_tokens`) is still `32000`, so real requests use the smaller output limit unless you raise it.
 
-Chord's `gpt-5.5` examples use `context=400000`, `input=272000`, `output=128000`. Provider docs sometimes call this setup split limits; see [Glossary](./glossary.md).
+The current GPT-5.6 Codex allocation is a 500K total window with a 372K input
+cap and a 128K output cap, so configure all three fields explicitly.
 
 For `type: responses`, Chord uses one stable Responses wire shape for every provider. The stable system prompt is sent in the top-level `instructions` field, while conversation messages remain typed `input` items such as `{"type":"message","role":"user",...}`. Requests also explicitly send `tool_choice`, `parallel_tool_calls`, `store`, `stream`, and an `include` array. `parallel_tool_calls` defaults to `true` for both Responses and Chat Completions providers so independent tool calls can be returned together; set `parallel_tool_calls: false` on a model, or override it in a model variant, when a backend or workflow requires serial calls. `store` defaults to `false` except for `preset: azure`, and explicit provider/model `store` config overrides the default. `include` is empty unless the request carries a reasoning block, in which case it contains `reasoning.encrypted_content`. Responses requests omit `max_output_tokens`. Streaming Responses model requests include `Accept: text/event-stream` and `User-Agent`. Non-Azure Responses requests also include the Codex-compatible `OpenAI-Beta: responses=experimental` and `originator` headers because several relay endpoints validate that shape before forwarding requests. The default User-Agent remains `chord/<version>` unless provider-level `user_agent` overrides it.
 
@@ -118,6 +159,9 @@ The `store` field controls whether the Responses backend keeps this request and 
 
 ### OpenAI Codex preset
 
+Codex OAuth uses the same model limit blocks shown in the Responses-compatible
+examples. Only the provider preset and authentication method change.
+
 ```yaml
 providers:
   codex:
@@ -129,7 +173,22 @@ providers:
           context: 400000
           input: 272000
           output: 128000
+      gpt-5.4:
+        limit:
+          context: 1050000
+          input: 950000
+          output: 128000
+      gpt-5.6-sol:
+        limit:
+          context: 500000
+          input: 372000
+          output: 128000
 ```
+
+GPT-5.4 uses `1050000 / 950000 / 128000`. GPT-5.5 uses `400000 / 272000 / 128000`;
+GPT-5.6 Sol, Terra, and Luna use `500000 / 372000 / 128000` (`context / input /
+output`). See [Model configuration recipes](./model-configs.md#codex-oauth-preset)
+for complete examples.
 
 `preset: codex` can use OpenAI / ChatGPT OAuth credentials from `auth.yaml`. OAuth entries are mappings:
 
@@ -493,9 +552,8 @@ model_templates:
     modalities:
       input: [text, image]
 
-  # Anchor names cannot contain dots in Chord's YAML parser: use _ in the
-  # anchor/alias name even when the model key contains dots.
-  gpt-5.2: &gpt-5_2
+  # Keep anchor/alias names free of dots; hyphens are used below.
+  gpt-5.2: &gpt-5-2
     <<: *gpt-400k
     cost:
       input: 1.75
@@ -510,7 +568,7 @@ model_templates:
           output: 28
           cache_read: 0.35
 
-  gpt-5.5: &gpt-5_5
+  gpt-5.5: &gpt-5-5
     <<: *gpt-400k
     cost:
       input: 5
@@ -530,7 +588,7 @@ model_templates:
   gpt-1m: &gpt-1m
     limit:
       context: 1050000
-      input: 922000
+      input: 950000
       output: 128000
     reasoning:
       # Recommended example when you want readable reasoning summaries from
@@ -552,7 +610,7 @@ model_templates:
     modalities:
       input: [text, image]
 
-  gpt-5.4: &gpt-5_4
+  gpt-5.4: &gpt-5-4
     <<: *gpt-1m
     cost:
       input: 2.5
@@ -609,7 +667,7 @@ model_templates:
         fast: 6
     supported_service_tiers: [fast]
 
-  claude-opus-4.8: &claude-opus-4_8
+  claude-opus-4.8: &claude-opus-4-8
     <<: *claude-opus
     cost:
       input: 5
@@ -649,21 +707,21 @@ providers:
     # documenting or overriding a non-preset provider.
     supported_service_tiers: [fast, slow]
     models:
-      gpt-5.2: *gpt-5_2
-      gpt-5.5: *gpt-5_5
+      gpt-5.2: *gpt-5-2
+      gpt-5.5: *gpt-5-5
 
   openai:
     api_url: https://api.openai.com/v1/responses
     supported_service_tiers: [fast, slow]
     models:
-      gpt-5.4: *gpt-5_4
-      gpt-5.5: *gpt-5_5
+      gpt-5.4: *gpt-5-4
+      gpt-5.5: *gpt-5-5
 
   anthropic:
     type: messages
     api_url: https://api.anthropic.com/v1/messages
     models:
-      claude-opus-4.8: *claude-opus-4_8
+      claude-opus-4.8: *claude-opus-4-8
       claude-sonnet-4.6: *claude-sonnet
       claude-fable-5: *claude-fable
 ```
@@ -675,7 +733,7 @@ Model fields used in the example:
 - `limit.output`: model maximum output token capacity. Runtime requests are also
   capped by `max_output_tokens`, so the effective request uses the smaller value.
 - `reasoning`: OpenAI / OpenAI-compatible reasoning options.
-  - `reasoning.effort` controls how much reasoning depth/budget Chord asks for. After case/whitespace normalization, Chord passes the value through verbatim, so any provider-supported level (including GLM's `max` / `minimal` / `none`) reaches the upstream unchanged; leave it unset to omit the field and use the provider/model default. For the official Codex (`preset: codex`) Responses backend only, Chord drops values outside its supported set (`low` / `medium` / `high` / `xhigh`) with a warn. `medium` is a good starting point for everyday coding, while `high` / `xhigh` trade more latency and token use for harder planning, debugging, or synthesis tasks.
+  - `reasoning.effort` controls how much reasoning depth/budget Chord asks for. After case/whitespace normalization, Chord passes the value through verbatim, so any provider-supported level (including GLM's `max` / `minimal` / `none`) reaches the upstream unchanged; leave it unset to omit the field and use the provider/model default. `medium` is a good starting point for everyday coding, while `high` / `xhigh` trade more latency and token use for harder planning, debugging, or synthesis tasks.
   - For `type: chat-completions`, Chord sends `reasoning.effort` as top-level `reasoning_effort` and uses `max_completion_tokens`.
   - For `type: responses`, Chord sends `reasoning.effort` and `reasoning.summary` inside the `reasoning` object.
   - `reasoning.summary` controls whether Chord explicitly asks for a readable reasoning summary in Responses output. Chord currently accepts `auto`, `concise`, or `detailed`; leave it unset to omit the field, which means Chord does not explicitly request a summary and the provider/model decides its default behavior.
@@ -1480,7 +1538,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `limit.input`     | int    | Separate input cap when a provider publishes one. Chord uses it to compact or retry before the prompt is too large.               |
 | `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |
 | `context.compaction.reserved` | int | Optional input-budget headroom reserved before `compaction.threshold` is applied. Useful for tokenizer drift, tool overhead, and safer overflow recovery. |
-| `reasoning`       | object | OpenAI reasoning options. `reasoning.effort` is normalized and passed through verbatim, so any provider-supported level (e.g. GLM `max` / `minimal` / `none`) reaches the upstream unchanged; the official Codex Responses backend additionally restricts to `low` / `medium` / `high` / `xhigh` (unset = omit and use provider/model default). For Responses, `reasoning.summary` (`auto` / `concise` / `detailed`; unset = omit / no explicit summary request). Recommended summary value when you want readable summaries: `auto`. |
+| `reasoning`       | object | OpenAI reasoning options. `reasoning.effort` is normalized and passed through verbatim, so any provider-supported level (e.g. GLM `max` / `minimal` / `none`) reaches the upstream unchanged (unset = omit and use provider/model default). For Responses, `reasoning.summary` (`auto` / `concise` / `detailed`; unset = omit / no explicit summary request). Recommended summary value when you want readable summaries: `auto`. |
 | `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `thinking.effort` is sent as `output_config.effort` for Messages requests; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
 | `compat.reasoning_continuity.mode` | string | Optional compatibility override for protocol-specific reasoning/thinking continuity. Leave unset for normal GPT / Claude / Gemini behavior; use `openai_visible` only for OpenAI-compatible chat-completions models that explicitly require visible `reasoning_content` replay (for example GLM Preserved Thinking). Use `none` on a model to opt out of a provider-level default. |
