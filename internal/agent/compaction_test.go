@@ -702,7 +702,9 @@ func TestPrepareMessagesForLLM_PrunesStaleToolOutputWithinSingleUserTurn(t *test
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if prepared[2].Content != "[Older "+tools.NameShell+" output omitted from this request to save context.]" {
+	if !strings.Contains(prepared[2].Content, "[Older "+tools.NameShell+" success summarized for this request to save context; bytes=") ||
+		!strings.Contains(prepared[2].Content, "lines=") ||
+		!strings.Contains(prepared[2].Content, "- test output line") {
 		t.Fatalf("expected early shell output in same user turn to be pruned, got %q", prepared[2].Content)
 	}
 	if !strings.Contains(prepared[4].Content, "Older "+tools.NameRead+" output truncated for this request to save context; path=\"a.go\"") {
@@ -711,6 +713,103 @@ func TestPrepareMessagesForLLM_PrunesStaleToolOutputWithinSingleUserTurn(t *test
 	lastIndex := len(prepared) - 1
 	if prepared[lastIndex].Content != "short read output" {
 		t.Fatalf("latest tool output should remain intact, got %q", prepared[lastIndex].Content)
+	}
+}
+
+func isShellSuccessSummary(content string) bool {
+	return strings.Contains(content, "[Older "+tools.NameShell+" success summarized for this request to save context;") &&
+		strings.Contains(content, "bytes=") &&
+		strings.Contains(content, "lines=")
+}
+
+func TestPrepareMessagesForLLM_ShellSuccessSummaryPrefersSalientLines(t *testing.T) {
+	a := &MainAgent{}
+	largeOutput := strings.Repeat("updated dependency cache\n", compactBashSuccessBytes) + "\nok github.com/example/project 1.23s\ncoverage: 82.1%\n" + strings.Repeat("tail noise line\n", 20)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	got := prepared[2].Content
+	if !isShellSuccessSummary(got) {
+		t.Fatalf("expected shell success summary, got %q", got)
+	}
+	if !strings.Contains(got, "ok github.com/example/project 1.23s") || !strings.Contains(got, "coverage: 82.1%") {
+		t.Fatalf("expected salient success lines, got %q", got)
+	}
+	if strings.Contains(got, "updated dependency cache") {
+		t.Fatalf("expected strong result lines to take priority over early weak progress lines, got %q", got)
+	}
+	if !strings.Contains(got, "tail noise line") {
+		t.Fatalf("expected one tail fallback line to preserve final status context, got %q", got)
+	}
+}
+
+func TestDefaultContextReductionPolicyMatchesDefaultConfig(t *testing.T) {
+	policy := defaultContextReductionPolicy()
+	cfg := config.DefaultConfig().Context.Reduction
+
+	if policy.ConfirmAgeTurns != cfg.ConfirmAgeTurns ||
+		policy.ErrorAgeTurns != cfg.ErrorAgeTurns ||
+		policy.HighRiskProtectAgeTurns != cfg.HighRiskProtectAgeTurns ||
+		policy.ShellSuccessAgeTurns != cfg.ShellSuccessAgeTurns ||
+		policy.ReadLikeAgeTurns != cfg.ReadLikeAgeTurns ||
+		policy.StaleAgeTurns != cfg.StaleAgeTurns ||
+		policy.ShellSuccessBytes != cfg.ShellSuccessBytes ||
+		policy.ReadLikeOutputBytes != cfg.ReadLikeOutputBytes ||
+		policy.StaleOutputBytes != cfg.StaleOutputBytes ||
+		policy.WrapUpGraceRequests != cfg.WrapUpGraceRequests ||
+		policy.MinToolResultsPrune != cfg.MinToolResultsPrune ||
+		policy.MinIncrementalTokens != cfg.MinIncrementalTokens ||
+		policy.HighPressureUsage != cfg.HighPressureUsage ||
+		policy.ForcePruneUsage != cfg.ForcePruneUsage {
+		t.Fatalf("default context reduction policy = %+v, DefaultConfig reduction = %+v", policy, cfg)
+	}
+}
+
+func isShellSuccessSummaryLine(trimmed string) bool {
+	return isStrongShellSuccessSummaryLine(trimmed) || isWeakShellSuccessSummaryLine(trimmed)
+}
+
+func TestShellSuccessSummaryLineMatcherAvoidsBroadSubstringMatches(t *testing.T) {
+	for _, line := range []string{
+		"book cache warmed",
+		"passive mode enabled",
+		"changedir complete",
+		"successor elected",
+		"unsuccessful attempt",
+	} {
+		if isShellSuccessSummaryLine(line) {
+			t.Fatalf("%q should not be treated as a shell success summary line", line)
+		}
+	}
+	for _, line := range []string{
+		"ok github.com/example/project 1.23s",
+		"PASS ./internal/foo",
+		"coverage: 82.1%",
+		"wrote dist/schema.json",
+		"success: generated assets",
+		"Successfully built abc123",
+		"Successfully installed package",
+	} {
+		if !isShellSuccessSummaryLine(line) {
+			t.Fatalf("%q should be treated as a shell success summary line", line)
+		}
+	}
+}
+
+func TestShellSuccessSummaryDoesNotDuplicateLongFinalSignalLine(t *testing.T) {
+	longOK := "ok github.com/example/project " + strings.Repeat("x", summaryLineSnippetChars+120)
+	got := summarizeShellSuccess("prelude\n"+longOK+"\n", 4).Lines
+	if len(got) != 1 {
+		t.Fatalf("expected long final signal line to appear once, got %d lines: %q", len(got), got)
+	}
+	if !strings.Contains(got[0], "ok github.com/example/project") {
+		t.Fatalf("expected summarized ok line, got %q", got)
 	}
 }
 
@@ -788,7 +887,9 @@ func TestPrepareMessagesForLLM_PrunesRecentLowRiskOutputWithinSingleUserTurn(t *
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if prepared[2].Content != "[Older "+tools.NameShell+" output omitted from this request to save context.]" {
+	if !strings.Contains(prepared[2].Content, "[Older "+tools.NameShell+" success summarized for this request to save context; bytes=") ||
+		!strings.Contains(prepared[2].Content, "lines=") ||
+		!strings.Contains(prepared[2].Content, "- install progress line") {
 		t.Fatalf("expected recent low-risk shell output to use existing effective-age pruning, got %q", prepared[2].Content)
 	}
 }
@@ -1111,7 +1212,9 @@ func TestPrepareMessagesForLLM_PrunesOldSuccessfulBashOutput(t *testing.T) {
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if prepared[2].Content != "[Older "+tools.NameShell+" output omitted from this request to save context.]" {
+	if !strings.Contains(prepared[2].Content, "[Older "+tools.NameShell+" success summarized for this request to save context; bytes=") ||
+		!strings.Contains(prepared[2].Content, "lines=") ||
+		!strings.Contains(prepared[2].Content, "- test output line") {
 		t.Fatalf("expected old successful Shell output to be pruned, got %q", prepared[2].Content)
 	}
 	stats := a.GetContextReductionStats()
@@ -1869,7 +1972,7 @@ func TestPrepareMessagesForLLM_LoopPrunesWhenQuotaAvailableOrNonCodex(t *testing
 		t.Run(tt.name, func(t *testing.T) {
 			tt.agent.loopState.Enabled = true
 			prepared := tt.agent.prepareMessagesForLLM(msgs)
-			if !strings.Contains(prepared[2].Content, "Older "+tools.NameShell+" output omitted") {
+			if !isShellSuccessSummary(prepared[2].Content) {
 				t.Fatalf("loop mode should keep context pruning enabled, got %q", prepared[2].Content)
 			}
 			if msgs[2].Content != largeOutput {
@@ -1966,7 +2069,7 @@ func TestPrepareMessagesForLLM_KeySwitchClearsStaleInlineQuotaFreeze(t *testing.
 	reducer.onKeySwitched()
 
 	freshKeyPrepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(freshKeyPrepared[2].Content, "Older "+tools.NameShell+" output omitted") {
+	if !isShellSuccessSummary(freshKeyPrepared[2].Content) {
 		t.Fatalf("key switch should clear stale inline quota freeze and resume pruning, got %q", freshKeyPrepared[2].Content)
 	}
 	if msgs[2].Content != largeOutput {
@@ -2004,7 +2107,7 @@ func TestPrepareMessagesForLLM_LoopGateIgnoresFocusedSubAgentProvider(t *testing
 		focusTestSubAgent(t, a, "sub-1", "subcodex", config.ProviderPresetCodex)
 
 		prepared := a.prepareMessagesForLLM(msgs)
-		if !strings.Contains(prepared[2].Content, "Older "+tools.NameShell+" output omitted") {
+		if !isShellSuccessSummary(prepared[2].Content) {
 			t.Fatalf("focused subagent quota should not disable main pruning, got %q", prepared[2].Content)
 		}
 	})
@@ -2084,7 +2187,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 
 	firstPrepared := a.prepareMessagesForLLM(msgs)
 	firstStats := a.GetContextReductionStats()
-	if !strings.Contains(firstPrepared[2].Content, "Older "+tools.NameShell+" output omitted") {
+	if !isShellSuccessSummary(firstPrepared[2].Content) {
 		t.Fatalf("expected initial request to prune old shell output, got %q", firstPrepared[2].Content)
 	}
 	if firstStats.Messages != 1 || firstStats.Bytes == 0 {
@@ -2121,7 +2224,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	a.DisableLoopMode()
 	a.rateLimitSnaps["codex"].Secondary.UsedPct = 90
 	afterLoopPrepared := a.prepareMessagesForLLM(loopMsgs)
-	if !strings.Contains(afterLoopPrepared[7].Content, "Older "+tools.NameShell+" output omitted") {
+	if !strings.Contains(afterLoopPrepared[7].Content, "[Older "+tools.NameShell+" success summarized for this request to save context;") {
 		t.Fatalf("after loop exits, ordinary pruning should resume for loop-period messages, got %q", afterLoopPrepared[7].Content)
 	}
 }
@@ -2238,7 +2341,7 @@ func TestPrepareMessagesForLLM_LowQuotaCodexReusesFrozenReductionPrefixWithoutLo
 	a.rateLimitSnaps["codex"].Secondary.UsedPct = 90
 	firstPrepared := a.prepareMessagesForLLM(msgs)
 	firstStats := a.GetContextReductionStats()
-	if !strings.Contains(firstPrepared[2].Content, "Older "+tools.NameShell+" output omitted") {
+	if !isShellSuccessSummary(firstPrepared[2].Content) {
 		t.Fatalf("expected initial request to prune old shell output, got %q", firstPrepared[2].Content)
 	}
 	a.rememberPreparedLLMRequest(a.currentTurnID(), msgs, firstPrepared)
@@ -2313,7 +2416,7 @@ func TestPrepareMessagesForLLM_UserBoundaryRefreshesLowQuotaCodexReduction(t *te
 
 	a.allowContextSurfaceRefreshAtUserBoundary()
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Older "+tools.NameShell+" output omitted") {
+	if !isShellSuccessSummary(prepared[2].Content) {
 		t.Fatalf("user boundary should temporarily allow low-quota codex pruning, got %q", prepared[2].Content)
 	}
 }

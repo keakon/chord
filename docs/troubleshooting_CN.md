@@ -319,7 +319,7 @@ Chord 会禁用终端硬滚动优化，因为这些序列可能在 Chord 的 sti
 
 1. 这是上下文剪裁（Reduction）的正常行为：每次 LLM 请求前，过时的工具输出会被从 prompt 中裁剪，但**不会修改**磁盘上的会话文件。
 2. 如果你经常需要回头参考较早的读取/搜索结果，可调高 `read_like_age_turns` 和 `read_like_output_bytes`。
-3. 如果构建/测试日志很重要，可调高 `shell_success_bytes`。
+3. 成功 shell 输出会保留大小、行数、有代表性的成功信号行（如有）以及尾部 fallback；命令仍可从关联 tool call 获取。如果构建/测试日志仍然很重要，可调高 `shell_success_bytes`。
 4. 如果希望更保守的裁剪行为，整体调高各 `*_age_turns` 和 `*_bytes` 参数。
 
 详见 [配置 — 上下文剪裁](./configuration_CN.md#上下文剪裁reduction)。

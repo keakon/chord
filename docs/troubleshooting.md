@@ -332,7 +332,7 @@ What to check:
 
 1. This is normal behavior for context reduction: stale tool output is trimmed from each LLM request prompt, but **never modifies** session files on disk.
 2. If you frequently need to revisit earlier read/search results, raise `read_like_age_turns` and `read_like_output_bytes`.
-3. If build/test logs are important context, raise `shell_success_bytes`.
+3. Successful shell output is summarized with size, line count, salient success lines when present, and a tail fallback; the command remains available from the associated tool call. If build/test logs are still important context, raise `shell_success_bytes`.
 4. For more conservative trimming behavior, raise all `*_age_turns` and `*_bytes` values.
 
 See [Configuration — Context reduction](./configuration.md#context-reduction).

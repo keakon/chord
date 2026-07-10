@@ -1213,15 +1213,15 @@ context:
     confirm_age_turns: 2
     error_age_turns: 3
     high_risk_protect_age_turns: 4
-    shell_success_age_turns: 2
-    shell_success_bytes: 4000
-    read_like_age_turns: 2
-    read_like_output_bytes: 4000
-    stale_age_turns: 4
+    shell_success_age_turns: 1
+    shell_success_bytes: 3000
+    read_like_age_turns: 1
+    read_like_output_bytes: 3000
+    stale_age_turns: 3
     stale_output_bytes: 1500
     wrap_up_grace_requests: 1
-    min_tool_results_prune: 8
-    min_incremental_saved_tokens: 4096
+    min_tool_results_prune: 6
+    min_incremental_saved_tokens: 2048
     high_pressure_usage: 0.80
     force_prune_usage: 0.90
 ```
@@ -1236,8 +1236,8 @@ Default behavior:
 - Older messages freeze after a stable **reduced** surface forms: under low pressure, Chord estimates only the new tail. If that tail is below `min_incremental_saved_tokens`, it reuses the previously reduced prefix and appends the current tail, avoiding repeated historical scans and prompt-surface churn. Unreduced prefixes are not reused to bypass reduction.
 - High pressure prunes immediately: `high_pressure_usage` disables small-increment hysteresis, and `force_prune_usage` prioritizes keeping the context size under control.
 - Recent high-risk tool outputs are protected by real user-turn age before normal age/byte pruning. The default `high_risk_protect_age_turns: 4` preserves diff/patches, failures, stack traces, permission/security output, and other active evidence for about four user turns. This is the main cost/correctness trade-off knob: lowering it saves tokens by allowing older high-risk evidence to summarize earlier, while current-turn high-risk output always remains intact.
-- Successful shell output is treated as low risk once it is old enough and larger than `shell_success_bytes`. Failures, stack traces, diffs, and warning-heavy build logs are routed through high-risk or structured-log handling instead of this success-output omission path.
-- Large old tool results are age/byte-pruned, but Chord preserves structured hints before falling back to generic omission: `read` keeps path/range metadata, `grep` / `glob` / LSP references keep query scope plus representative hits, JSON output keeps top-level shape/counts, and build/test logs keep key failure or warning lines. Older errors, diagnostics, confirmations, and successful shell output are reduced to compact fixed markers or summaries.
+- Successful shell output is treated as low risk once it is old enough and larger than `shell_success_bytes`. Chord keeps a compact summary with output size, line count, salient success lines when present, and a tail excerpt fallback; the shell command itself remains available from the associated tool call. Recent failures, stack traces, diffs, and warning-heavy build logs are routed through high-risk or structured-log handling before this success-output summary path; older outputs may later be summarized when they are no longer protected by the recent high-risk window.
+- Large old tool results are age/byte-pruned, but Chord preserves structured hints before falling back to generic omission: `read` keeps path/range metadata, `grep` / `glob` / LSP references keep query scope plus representative hits, JSON output keeps top-level shape/counts, successful shell output keeps size/salient-line context, and build/test logs keep key failure or warning lines. Older errors, diagnostics, and confirmations are reduced to compact fixed markers or summaries.
 
 In loop mode, reduction is not applied to newly added messages. If you enable
 `/loop on` while an LLM request is already in flight, Chord freezes and reuses
@@ -1290,11 +1290,11 @@ history.
 |----------|-----------------|---------------|----------------|-----------|
 | Confirm / permission | Tool permission confirmations, user authorizations | `confirm_age_turns` (default 2) | — | Permission decisions become stale quickly |
 | Errors | Failed tool results | `error_age_turns` (default 3) | — | Failure reasons may still be relevant, kept a bit longer |
-| Shell success / logs | Successful commands, build/test/lint logs | `shell_success_age_turns` (default 2) | `shell_success_bytes` (default 4000) | Successful output is usually reproducible; large logs keep key failures/warnings when summarized |
-| Read-like | `read`, file content previews | `read_like_age_turns` (default 2) | `read_like_output_bytes` (default 4000) | File contents can always be re-read; summaries keep path and requested/displayed ranges |
-| Search-like | `grep`, `glob`, LSP references | `read_like_age_turns` (default 2) | `read_like_output_bytes` (default 4000) | Hit lists are reproducible; summaries keep scope, counts, and representative hits |
+| Shell success / logs | Successful commands, build/test/lint logs | `shell_success_age_turns` (default 1) | `shell_success_bytes` (default 3000) | Successful output is usually reproducible; summaries keep size, line count, salient success lines when present, and a tail fallback; the command remains available from the associated tool call; large logs keep key failures/warnings when summarized |
+| Read-like | `read`, file content previews | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 3000) | File contents can always be re-read; summaries keep path and requested/displayed ranges |
+| Search-like | `grep`, `glob`, LSP references | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 3000) | Hit lists are reproducible; summaries keep scope, counts, and representative hits |
 | JSON / structured output | JSON from `shell` or structured tools | category-specific gate, then stale fallback | category-specific size gate | Large structured blobs keep top-level object keys or array counts before generic omission |
-| Other stale results | Tool output not covered above | `stale_age_turns` (default 4) | `stale_output_bytes` (default 1500) | Catch-all fallback; most conservative to avoid losing hard-to-reconstruct data |
+| Other stale results | Tool output not covered above | `stale_age_turns` (default 3) | `stale_output_bytes` (default 1500) | Catch-all fallback; most conservative to avoid losing hard-to-reconstruct data |
 
 How to read the age and size parameters:
 
@@ -1308,10 +1308,13 @@ How to read the age and size parameters:
 - `*_bytes` is the **minimum output size in bytes** for that category to be
   eligible for trimming. Smaller outputs stay intact — short output doesn't
   need reduction.
-- `min_tool_results_prune` (default 8) is a **safety gate**: Chord won't start
-  trimming until the conversation has at least this many tool-result messages,
-  preventing small conversations from being touched prematurely. It does not
-  control how message progress is converted into effective age.
+- `min_tool_results_prune` (default 6) is a **safety gate** for the generic
+  stale-output fallback: once a result is old enough and large enough for that
+  catch-all path, Chord still waits until the conversation has at least this
+  many tool-result messages before applying the generic stale trim. Category-
+  specific paths such as shell-success, read-like, search-like, JSON, and
+  build/log summaries still follow their own age/size rules. This setting does
+  not control how message progress is converted into effective age.
 - `wrap_up_grace_requests` (default 1) protects the next main-model request
   after `todo_write` reports all TODOs completed/cancelled. It is counted in
   LLM requests, not user turns. The grace is skipped when the model changed or

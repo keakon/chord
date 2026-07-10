@@ -91,7 +91,7 @@ func defaultContextReductionPolicy() contextReductionPolicy {
 		StaleOutputBytes:        compactStaleOutputBytes,
 		WrapUpGraceRequests:     contextReductionWrapUpGraceRequests,
 		MinToolResultsPrune:     compactMinToolResultsPrune,
-		MinIncrementalTokens:    4096,
+		MinIncrementalTokens:    compactMinIncrementalTokens,
 		HighPressureUsage:       0.80,
 		ForcePruneUsage:         0.90,
 	}
@@ -396,6 +396,20 @@ var (
 		"forbidden",
 		"timeout",
 	}
+	// shellSuccessWeakLineMarkers select compact evidence from old successful
+	// shell output. These weaker substring signals are considered after stronger
+	// result markers so early progress lines don't crowd out final status.
+	shellSuccessWeakLineMarkers = []string{
+		"generated",
+		"wrote",
+		"written",
+		"created",
+		"updated",
+		"skipped",
+		"deprecated",
+		"summary",
+		"completed",
+	}
 )
 
 func containsAnyMarker(lower string, markers []string) bool {
@@ -501,7 +515,7 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 	case requestReductionLongLog:
 		return reduceLongLogOutputSummary(ctx), "long_log", true
 	case requestReductionShellOK:
-		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", tools.NameShell), "shell_success", true
+		return reduceShellSuccessOutputSummary(ctx), "shell_success", true
 	case requestReductionGeneric:
 		return reduceGenericStaleOutputSummary(ctx), "stale", true
 	default:
@@ -761,7 +775,7 @@ func summarizeSearchResultLines(content string, limit int) []string {
 		path, lineNo, snippet, ok := parseSearchResultLine(trimmed)
 		if !ok {
 			if len(fallback) < limit {
-				fallback = append(fallback, "- "+strings.ReplaceAll(compactTextSnippet(trimmed, 180), "\n", " "))
+				fallback = append(fallback, "- "+strings.ReplaceAll(compactTextSnippet(trimmed, summaryLineSnippetChars), "\n", " "))
 			}
 			return true
 		}
@@ -830,7 +844,7 @@ func summarizeJSONArrayItems(items []any, limit int) []string {
 	out := make([]string, 0, limit)
 	for i := range limit {
 		rendered, _ := json.Marshal(items[i])
-		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(string(rendered), 180), "\n", " "))
+		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(string(rendered), summaryLineSnippetChars), "\n", " "))
 	}
 	return out
 }
@@ -842,6 +856,14 @@ func reduceLongLogOutputSummary(ctx requestReductionContext) string {
 		lines = []string{"- (no preserved log lines)"}
 	}
 	return fmt.Sprintf("[Older %s log summarized for this request to save context; errors=%d warnings=%d failed=%d]\n%s", toolNameOrUnknown(ctx.ToolName), counts.Errors, counts.Warnings, counts.Failures, strings.Join(lines, "\n"))
+}
+
+func reduceShellSuccessOutputSummary(ctx requestReductionContext) string {
+	summary := summarizeShellSuccess(ctx.Content, 4)
+	if len(summary.Lines) == 0 {
+		summary.Lines = []string{"- (no salient output lines preserved)"}
+	}
+	return fmt.Sprintf("[Older %s success summarized for this request to save context; bytes=%d lines=%d]\n%s", tools.NameShell, len(ctx.Content), summary.MeaningfulLines, strings.Join(summary.Lines, "\n"))
 }
 
 type logSignalCounts struct {
@@ -885,7 +907,7 @@ func summarizeLinesMatching(content string, limit int, keep func(trimmed string)
 		if trimmed == "" || !keep(trimmed) {
 			return true
 		}
-		lineKey := compactTextSnippet(trimmed, 220)
+		lineKey := compactTextSnippet(trimmed, summaryLineSnippetChars)
 		if _, ok := seen[lineKey]; ok {
 			return true
 		}
@@ -904,6 +926,115 @@ func summarizeRepresentativeLogLines(content string, limit int) []string {
 
 func summarizeImportantLines(content string, limit int) []string {
 	return summarizeLinesMatching(content, limit, isImportantSummaryLine)
+}
+
+type shellSuccessSummary struct {
+	Lines           []string
+	MeaningfulLines int
+}
+
+func summarizeShellSuccess(content string, limit int) shellSuccessSummary {
+	if limit <= 0 {
+		return shellSuccessSummary{}
+	}
+	weakLimit := max(1, limit-1)
+	tailLimit := min(3, limit)
+	strong := make([]string, 0, limit)
+	weak := make([]string, 0, weakLimit)
+	tail := make([]string, 0, tailLimit)
+	summary := shellSuccessSummary{}
+
+	appendSignal := func(lines []string, line string, lineLimit int) []string {
+		for _, existing := range lines {
+			if existing == line {
+				return lines
+			}
+		}
+		if len(lines) < lineLimit {
+			return append(lines, line)
+		}
+		copy(lines, lines[1:])
+		lines[lineLimit-1] = line
+		return lines
+	}
+	forEachLine(content, func(line string) bool {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			return true
+		}
+		summary.MeaningfulLines++
+		lineKey := compactTextSnippet(trimmed, summaryLineSnippetChars)
+		if isStrongShellSuccessSummaryLine(trimmed) {
+			strong = appendSignal(strong, lineKey, limit)
+		}
+		if isWeakShellSuccessSummaryLine(trimmed) {
+			weak = appendSignal(weak, lineKey, weakLimit)
+		}
+		if len(tail) < tailLimit {
+			tail = append(tail, lineKey)
+		} else {
+			copy(tail, tail[1:])
+			tail[tailLimit-1] = lineKey
+		}
+		return true
+	})
+
+	renderLines := func(lines []string) []string {
+		out := make([]string, 0, len(lines))
+		for _, line := range lines {
+			out = append(out, "- "+strings.ReplaceAll(line, "\n", " "))
+		}
+		return out
+	}
+	appendTailFallback := func(lines []string) []string {
+		if len(lines) >= limit || len(tail) == 0 {
+			return lines
+		}
+		lastTail := "- " + strings.ReplaceAll(tail[len(tail)-1], "\n", " ")
+		for _, line := range lines {
+			if line == lastTail {
+				return lines
+			}
+		}
+		return append(lines, lastTail)
+	}
+
+	if len(strong) > 0 {
+		summary.Lines = appendTailFallback(renderLines(strong))
+		return summary
+	}
+	if len(weak) > 0 {
+		summary.Lines = appendTailFallback(renderLines(weak))
+		return summary
+	}
+	if omitted := summary.MeaningfulLines - len(tail); omitted > 0 {
+		noun := "lines"
+		if omitted == 1 {
+			noun = "line"
+		}
+		summary.Lines = append(summary.Lines, fmt.Sprintf("- ... (%d %s omitted) ...", omitted, noun))
+	}
+	summary.Lines = append(summary.Lines, renderLines(tail)...)
+	return summary
+}
+
+func isStrongShellSuccessSummaryLine(trimmed string) bool {
+	lower := strings.ToLower(strings.TrimSpace(trimmed))
+	if strings.Contains(lower, "coverage") || strings.Contains(lower, "benchmark") {
+		return true
+	}
+	return strings.HasPrefix(lower, "pass ") ||
+		strings.HasPrefix(lower, "pass:") ||
+		strings.HasPrefix(lower, "ok ") ||
+		strings.HasPrefix(lower, "done") ||
+		strings.HasPrefix(lower, "success ") ||
+		strings.HasPrefix(lower, "success:") ||
+		strings.HasPrefix(lower, "successfully ")
+}
+
+func isWeakShellSuccessSummaryLine(trimmed string) bool {
+	lower := strings.ToLower(strings.TrimSpace(trimmed))
+	return containsAnyMarker(lower, shellSuccessWeakLineMarkers)
 }
 
 func isImportantSummaryLine(line string) bool {
@@ -949,16 +1080,16 @@ func summarizeHeadTailLines(content string, limit int) []string {
 	if meaningful <= limit {
 		out := make([]string, 0, meaningful)
 		for _, line := range headLines {
-			out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, 180), "\n", " "))
+			out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, summaryLineSnippetChars), "\n", " "))
 		}
 		for _, line := range tailLines {
-			out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, 180), "\n", " "))
+			out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, summaryLineSnippetChars), "\n", " "))
 		}
 		return out
 	}
 	out := make([]string, 0, limit+1)
 	for _, line := range headLines {
-		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, 180), "\n", " "))
+		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, summaryLineSnippetChars), "\n", " "))
 	}
 	omitted := meaningful - limit
 	noun := "lines"
@@ -967,7 +1098,7 @@ func summarizeHeadTailLines(content string, limit int) []string {
 	}
 	out = append(out, fmt.Sprintf("- ... (%d %s omitted) ...", omitted, noun))
 	for _, line := range tailLines {
-		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, 180), "\n", " "))
+		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, summaryLineSnippetChars), "\n", " "))
 	}
 	return out
 }
