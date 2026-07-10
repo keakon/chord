@@ -75,7 +75,7 @@ func agentsMDReminderFramingPromptBlock(agentsMD string) string {
 		return ""
 	}
 	return strings.TrimSpace(`## Workspace Instructions
-Each applicable AGENTS.md is already loaded in context before the first visible user message, in root-to-current order and with its path labeled. Use those loaded sections as scoped workspace instructions, then inspect only task-relevant project files needed to understand, modify, or verify the requested work.`)
+Each applicable AGENTS.md from the repository root through the current working directory is already loaded in context before the first visible user message, in root-to-current order and with its path labeled. Use those loaded sections as scoped workspace instructions; do not use file, search, or shell tools to rediscover or reread them. Only inspect an additional AGENTS.md when entering a subdirectory or external directory whose instructions were not loaded, then inspect only task-relevant project files needed to understand, modify, or verify the requested work.`)
 }
 
 func (a *MainAgent) pendingLoopContinuationPromptBlock() string {

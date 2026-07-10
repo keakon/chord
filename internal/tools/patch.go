@@ -206,7 +206,7 @@ func formatPatchErrorResult(patch string, err error) string {
 	if patch == "" || !shouldShowPatchExcerpt(msg) {
 		return msg
 	}
-	return "Patch did not match the current file. Re-read the target lines and retry with the current text.\n\nPatch excerpt:\n" + fencedPatchExcerpt(patch) + "\n\nError: " + msg
+	return "Patch did not match the current file. The hunk context may be stale or already changed. Re-read a narrow range around the intended location, then rebuild the hunk from current contents. Do not retry the same hunk unchanged.\n\nPatch excerpt:\n" + fencedPatchExcerpt(patch) + "\n\nError: " + msg
 }
 
 func shouldShowPatchExcerpt(msg string) bool {

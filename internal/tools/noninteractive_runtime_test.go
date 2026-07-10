@@ -82,6 +82,44 @@ func TestShellRuntimeFailureDoesNotRewriteOrdinaryFailure(t *testing.T) {
 	}
 }
 
+func TestShellRuntimeFailureSuggestsFocusedReproductionForTestCommand(t *testing.T) {
+	_, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+		"command": "go test ./definitely-missing-package",
+	}))
+	if err == nil {
+		t.Fatal("expected command failure")
+	}
+	for _, want := range []string{"exit code ", "Test or verification command failed", "focused reproduction", "Do not repeat the same failing command unchanged"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want to contain %q", err.Error(), want)
+		}
+	}
+}
+
+func TestShellRuntimeFailureIgnoresTestCommandTextInComment(t *testing.T) {
+	_, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+		"command": "printf fail >&2; exit 7 # go test ./...",
+	}))
+	if err == nil {
+		t.Fatal("expected command failure")
+	}
+	if err.Error() != "exit code 7" {
+		t.Fatalf("error = %q, want ordinary exit code", err.Error())
+	}
+}
+
+func TestShellRuntimeFailureIgnoresTestCommandTextInArgument(t *testing.T) {
+	_, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+		"command": `printf '%s\n' 'go test ./...' >&2; exit 7`,
+	}))
+	if err == nil {
+		t.Fatal("expected command failure")
+	}
+	if err.Error() != "exit code 7" {
+		t.Fatalf("error = %q, want ordinary exit code", err.Error())
+	}
+}
+
 func TestSpawnRuntimeFailureDiagnosticInCompletionEvent(t *testing.T) {
 	resetSpawnRegistryOnlyForTest(t)
 	sender := &recordingEventSender{ch: make(chan any, 1)}

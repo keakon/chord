@@ -163,6 +163,9 @@ func TestToolSelectionPromptBlock_UsesEditSpecificGuidance(t *testing.T) {
 	if !strings.Contains(patchPrompt, "keep hunks small") {
 		t.Fatalf("patch prompt missing hunk guidance: %q", patchPrompt)
 	}
+	if !strings.Contains(patchPrompt, "re-read the small target range before patching") {
+		t.Fatalf("patch prompt missing stale target re-read guidance: %q", patchPrompt)
+	}
 	if strings.Contains(patchPrompt, "old_string/new_string") {
 		t.Fatalf("patch prompt should not use replace-edit guidance: %q", patchPrompt)
 	}
@@ -317,7 +320,10 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		}
 	}
 	for _, want := range []string{
-		"Validate in layers: start with the most targeted check",
+		"Match final claims to the requested scope and the evidence actually gathered",
+		"For analysis, review, or planning tasks",
+		"When you modify code or claim behavior was fixed or implemented",
+		"choose verification scope by relevance, cost, project convention, and user intent",
 		"Do not narrate every routine action or restate obvious next steps",
 		"Do not over-explain routine actions",
 		"If multiple interpretations exist but one is clearly the best fit",
@@ -331,6 +337,9 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"Remove imports, variables, and functions that your own changes made unused",
 		"Do not remove pre-existing dead code unless asked",
 		"state a brief plan with verifiable success criteria per step",
+		"Prefer incremental verification",
+		"run the smallest relevant test or check first",
+		"When a broad test fails, narrow the reproduction before retrying",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("sharedCodingGuidelinesPrompt missing %q in %q", want, got)
@@ -618,6 +627,7 @@ func TestMainAgentResponseClosurePrompt_RequiresContinueUnlessBlocked(t *testing
 		"Within a normal turn, continue until the current in-scope work package is finished",
 		"A regular assistant response is not the end of the task when in-scope work still remains",
 		"If more in-scope, low-risk work remains, continue instead of stopping with a partial summary or optional offer",
+		"Before declaring implementation work complete, check that final claims are supported by the work performed and evidence gathered",
 		"ask exactly the necessary high-context question instead of pretending the task is complete",
 		"After reporting completion, stop there; do not append routine in-scope follow-up work as an optional invitation",
 	} {
@@ -906,9 +916,13 @@ shell: allow
 		"## Tool Selection",
 		"Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.",
 		"Use `read` for file contents when the target path is already known or has been verified.",
+		"When the user provides complete file contents in a `<file path=...>` reference, treat that content as the working context; do not re-read the same file merely to obtain duplicate contents.",
 		"Use `glob` / `grep` for discovery and navigation.",
+		"When `grep` returns path:line:snippet hits, use those line numbers to read narrow ranges around relevant matches instead of scanning broad file chunks.",
 		"If you are unsure of the exact target path for `read`, use `glob` / `grep` to find or verify it before calling the path tool; do not guess plausible-looking paths.",
 		"Use `shell` mainly for tests, builds, git, and system commands.",
+		"Minimize LLM round trips. When two or more read-only tool calls are independent, issue them in the same response so they can run in parallel",
+		"use serial calls only when a later call depends on an earlier result, the call mutates state, or a command is intentionally high-cost.",
 		"## File Inspection Constraints",
 		"File inspection and code-navigation capabilities may be limited in this role.",
 		"Do not use `shell`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
@@ -1757,9 +1771,11 @@ func TestBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPresent(t 
 		t.Fatalf("buildSystemPrompt() missing AGENTS.md workspace framing when AGENTS.md is present, got:\n%s", got)
 	}
 	for _, want := range []string{
-		"Each applicable AGENTS.md is already loaded in context before the first visible user message",
+		"Each applicable AGENTS.md from the repository root through the current working directory is already loaded in context before the first visible user message",
 		"in root-to-current order and with its path labeled",
 		"Use those loaded sections as scoped workspace instructions",
+		"do not use file, search, or shell tools to rediscover or reread them",
+		"Only inspect an additional AGENTS.md when entering a subdirectory or external directory whose instructions were not loaded",
 		"inspect only task-relevant project files needed to understand, modify, or verify the requested work",
 	} {
 		if !strings.Contains(got, want) {
@@ -1783,9 +1799,11 @@ func TestSubAgentBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPr
 	got := s.buildSystemPrompt()
 	for _, want := range []string{
 		"## Workspace Instructions",
-		"Each applicable AGENTS.md is already loaded in context before the first visible user message",
+		"Each applicable AGENTS.md from the repository root through the current working directory is already loaded in context before the first visible user message",
 		"in root-to-current order and with its path labeled",
 		"Use those loaded sections as scoped workspace instructions",
+		"do not use file, search, or shell tools to rediscover or reread them",
+		"Only inspect an additional AGENTS.md when entering a subdirectory or external directory whose instructions were not loaded",
 		"inspect only task-relevant project files needed to understand, modify, or verify the requested work",
 	} {
 		if !strings.Contains(got, want) {

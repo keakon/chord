@@ -399,6 +399,26 @@ func TestReplaceEditToolUsesBaseDirForRelativePath(t *testing.T) {
 	}
 }
 
+func TestReplaceEditToolOldStringNotFoundSuggestsFreshRead(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.txt")
+	if err := os.WriteFile(path, []byte("current\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	args, _ := json.Marshal(map[string]string{"path": "demo.txt", "old_string": "stale", "new_string": "new"})
+	_, err := (EditTool{BaseDir: dir}).Execute(context.Background(), args)
+	if err == nil {
+		t.Fatal("EditTool.Execute err = nil, want old_string not found")
+	}
+	msg := err.Error()
+	for _, want := range []string{"old_string not found", "Re-read the small target range", "current file contents", "Do not retry the same edit unchanged"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("err = %q, want substring %q", msg, want)
+		}
+	}
+}
+
 func TestPatchParserRejectsInvalidPaths(t *testing.T) {
 	for _, path := range []string{"", "."} {
 		if _, err := ParsePatch(path, "@@\n-a\n+b\n"); err == nil {
@@ -890,7 +910,7 @@ func TestPatchToolErrorIncludesPatchExcerptForHunkMatchFailures(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "hunk not found") {
 		t.Fatalf("err = %v", err)
 	}
-	for _, want := range []string{"hunk not found", "Patch excerpt:", "```diff", "-missing", "+new"} {
+	for _, want := range []string{"hunk not found", "Re-read a narrow range", "Do not retry the same hunk unchanged", "Patch excerpt:", "```diff", "-missing", "+new"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output = %q, want substring %q", out, want)
 		}

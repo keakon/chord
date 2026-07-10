@@ -354,7 +354,7 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 				return output, FormatNonInteractiveRuntimeError(NameShell, a.Command, err, output)
 			}
 			if exitErr, ok := err.(*exec.ExitError); ok {
-				return output, shellExitError(exitErr)
+				return output, shellExitErrorForCommand(a.Command, exitErr)
 			}
 			return output, fmt.Errorf("command error: %w", err)
 		}
@@ -376,14 +376,64 @@ func resolveShellExecution(shellType, command string) (string, []string) {
 	return binary, args
 }
 
-func shellExitError(exitErr *exec.ExitError) error {
+func shellExitErrorForCommand(command string, exitErr *exec.ExitError) error {
 	if exitErr == nil {
 		return fmt.Errorf("command failed")
 	}
 	if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 		return fmt.Errorf("signal: %s", status.Signal())
 	}
-	return fmt.Errorf("exit code %d", exitErr.ExitCode())
+	msg := fmt.Sprintf("exit code %d", exitErr.ExitCode())
+	if isTestOrVerificationCommand(command) {
+		msg += ". Test or verification command failed. Inspect the first relevant failure; before rerunning a broad test, prefer a focused reproduction for the affected package/test. Do not repeat the same failing command unchanged unless there is a clear reason to expect a different result"
+	}
+	return fmt.Errorf("%s", msg)
+}
+
+func isTestOrVerificationCommand(command string) bool {
+	analysis, err := AnalyzeShellCommand(command)
+	if err != nil {
+		return false
+	}
+	for _, subcommand := range analysis.Subcommands {
+		if isTestOrVerificationArgs(subcommand.LiteralArgs) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTestOrVerificationArgs(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	command := strings.ToLower(args[0])
+	arg := func(index int) string {
+		if index >= len(args) {
+			return ""
+		}
+		return strings.ToLower(args[index])
+	}
+	switch command {
+	case "go":
+		return arg(1) == "test" || arg(1) == "vet" || arg(1) == "build"
+	case "cargo":
+		return arg(1) == "test" || arg(1) == "check" || arg(1) == "build"
+	case "npm", "pnpm", "yarn":
+		return arg(1) == "test"
+	case "pytest":
+		return true
+	case "python", "python3":
+		return arg(1) == "-m" && arg(2) == "pytest"
+	case "mvn":
+		return arg(1) == "test"
+	case "gradle", "./gradlew", "gradlew":
+		return arg(1) == "test"
+	case "make":
+		return arg(1) == "test" || arg(1) == "check"
+	default:
+		return false
+	}
 }
 
 // killProcessGroup sends SIGTERM (then SIGKILL) to the process group and

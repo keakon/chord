@@ -97,7 +97,7 @@ func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
 	if !strings.Contains(got, "<INSTRUCTIONS>") || !strings.Contains(got, "</INSTRUCTIONS>") {
 		t.Errorf("missing <INSTRUCTIONS> bounding markers: %q", got)
 	}
-	if !strings.Contains(got, "Each applicable AGENTS.md is already loaded here before the first visible user message") {
+	if !strings.Contains(got, "Each applicable AGENTS.md from the repository root through the current working directory is already loaded here before the first visible user message") {
 		t.Errorf("missing AGENTS.md loaded-state line: %q", got)
 	}
 	if !strings.Contains(got, "root-to-current order") || !strings.Contains(got, "with its path labeled") {
@@ -105,6 +105,12 @@ func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
 	}
 	if !strings.Contains(got, "Use those loaded sections as scoped workspace instructions") {
 		t.Errorf("missing AGENTS.md workspace-instruction guidance: %q", got)
+	}
+	if !strings.Contains(got, "do not use file, search, or shell tools to rediscover or reread them") {
+		t.Errorf("missing AGENTS.md no-reread guidance: %q", got)
+	}
+	if !strings.Contains(got, "Only inspect an additional AGENTS.md when entering a subdirectory or external directory whose instructions were not loaded") {
+		t.Errorf("missing AGENTS.md unloaded-scope guidance: %q", got)
 	}
 	if !strings.Contains(got, "inspect only task-relevant project files needed to understand, modify, or verify the requested work") {
 		t.Errorf("missing task-relevant file inspection guidance: %q", got)
@@ -149,7 +155,9 @@ func TestCallLLMInjectsAgentsMDReminderIntoFirstProviderRequest(t *testing.T) {
 	if seen[0].Role != "user" || !strings.Contains(seen[0].Content, "# AGENTS.md instructions") || !strings.Contains(seen[0].Content, "<INSTRUCTIONS>") || !strings.Contains(seen[0].Content, "# Repo Rules") {
 		t.Fatalf("first provider message missing AGENTS.md reminder: %#v", seen[0])
 	}
-	if !strings.Contains(seen[0].Content, "Each applicable AGENTS.md is already loaded here") || !strings.Contains(seen[0].Content, "inspect only task-relevant project files") {
+	if !strings.Contains(seen[0].Content, "Each applicable AGENTS.md from the repository root through the current working directory is already loaded here") ||
+		!strings.Contains(seen[0].Content, "do not use file, search, or shell tools to rediscover or reread them") ||
+		!strings.Contains(seen[0].Content, "inspect only task-relevant project files") {
 		t.Fatalf("first provider message should explain loaded AGENTS.md state: %#v", seen[0])
 	}
 	if got := seen[1].Content; !strings.Contains(got, "analyze hardcoded behavior") {

@@ -127,7 +127,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		}
 	}
 	if count == 0 {
-		return "", fmt.Errorf("old_string not found in file")
+		return "", fmt.Errorf("old_string not found in file. The target text may be stale or already changed. Re-read the small target range from current file contents, then rebuild old_string using exact text from that fresh read. Do not retry the same edit unchanged")
 	}
 	if count > 1 && !replaceAll {
 		return "", fmt.Errorf("old_string found %d times, provide more context or set replace_all to true", count)

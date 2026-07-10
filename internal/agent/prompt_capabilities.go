@@ -43,6 +43,7 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 	lines = append(lines, "- Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.")
 	if hasVisibleTool(visible, tools.NameRead) {
 		lines = append(lines, "- Use "+toolPromptName(tools.NameRead)+" for file contents when the target path is already known or has been verified.")
+		lines = append(lines, "- When the user provides complete file contents in a "+"`<file path=...>`"+" reference, treat that content as the working context; do not re-read the same file merely to obtain duplicate contents. Re-read only when the supplied content is incomplete, the file may have changed on disk, or the edit workflow requires fresh file state, and then read only the needed range.")
 	}
 	// Check for either edit tool (patch or edit/replace)
 	editToolName := visibleEditToolName(visible)
@@ -51,8 +52,10 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 		switch editToolName {
 		case tools.NamePatch:
 			lines = append(lines, "- For "+toolPromptName(editToolName)+", keep hunks small and include unique unchanged context; in repeated blocks such as tests or fixtures, include the enclosing function, test, or case name.")
+			lines = append(lines, "- If patching a file modified earlier in the turn and the target area is not freshly visible, re-read the small target range before patching.")
 		case tools.NameEdit:
 			lines = append(lines, "- For "+toolPromptName(editToolName)+", use exact old_string/new_string replacements. Match the file's raw text exactly, including whitespace and newlines; prefer the smallest unique block and set replace_all only when every occurrence should change.")
+			lines = append(lines, "- If editing a file modified earlier in the turn and the target area is not freshly visible, re-read the small target range before editing.")
 		}
 	}
 	if hasVisibleTool(visible, tools.NameWrite) {
@@ -71,6 +74,9 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 
 	if len(discoveryTools) > 0 {
 		lines = append(lines, "- Use "+strings.Join(discoveryTools, " / ")+" for discovery and navigation.")
+		if hasVisibleTool(visible, tools.NameGrep) && hasVisibleTool(visible, tools.NameRead) {
+			lines = append(lines, "- When "+toolPromptName(tools.NameGrep)+" returns path:line:snippet hits, use those line numbers to read narrow ranges around relevant matches instead of scanning broad file chunks.")
+		}
 		if pathTools := visibleExistingPathTools(visible); len(pathTools) > 0 {
 			lines = append(lines, "- If you are unsure of the exact target path for "+strings.Join(pathTools, " / ")+
 				", use "+strings.Join(discoveryTools, " / ")+" to find or verify it before calling the path tool; do not guess plausible-looking paths.")
@@ -86,7 +92,7 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 		)
 	}
 	if len(discoveryTools) > 0 || hasVisibleTool(visible, tools.NameRead) {
-		lines = append(lines, "- Run independent reads/searches in parallel; run dependent operations sequentially.")
+		lines = append(lines, "- Minimize LLM round trips. When two or more read-only tool calls are independent, issue them in the same response so they can run in parallel, especially multiple known file/range reads after search results; use serial calls only when a later call depends on an earlier result, the call mutates state, or a command is intentionally high-cost.")
 	}
 	if len(lines) == 0 {
 		return ""

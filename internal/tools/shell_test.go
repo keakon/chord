@@ -97,8 +97,8 @@ func TestShellExitErrorReportsSignal(t *testing.T) {
 	if !ok {
 		t.Fatalf("Run error = %T %v, want *exec.ExitError", err, err)
 	}
-	if got := shellExitError(exitErr).Error(); !strings.Contains(got, "signal:") || !strings.Contains(got, "terminated") {
-		t.Fatalf("shellExitError = %q, want signal termination", got)
+	if got := shellExitErrorForCommand("", exitErr).Error(); !strings.Contains(got, "signal:") || !strings.Contains(got, "terminated") {
+		t.Fatalf("shellExitErrorForCommand = %q, want signal termination", got)
 	}
 }
 

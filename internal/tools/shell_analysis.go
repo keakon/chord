@@ -16,9 +16,10 @@ type ShellAnalysis struct {
 
 // ShellSubcommand is one atomic simple command extracted from a Shell command.
 type ShellSubcommand struct {
-	Source string
-	Kind   string
-	Index  int
+	Source      string
+	LiteralArgs []string
+	Kind        string
+	Index       int
 }
 
 // AnalyzeShellCommand parses a Shell command and extracts simple subcommands in
@@ -52,10 +53,19 @@ func AnalyzeShellCommand(command string) (ShellAnalysis, error) {
 			if source == "" {
 				return true
 			}
+			literalArgs := make([]string, 0, len(n.Args))
+			for _, word := range n.Args {
+				literal := word.Lit()
+				if literal == "" {
+					break
+				}
+				literalArgs = append(literalArgs, literal)
+			}
 			subcommands = append(subcommands, ShellSubcommand{
-				Source: source,
-				Kind:   "simple",
-				Index:  len(subcommands),
+				Source:      source,
+				LiteralArgs: literalArgs,
+				Kind:        "simple",
+				Index:       len(subcommands),
 			})
 		}
 		return true
