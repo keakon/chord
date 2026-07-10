@@ -8,14 +8,11 @@ export default defineConfig({
   site: 'https://keakon.github.io',
   base: '/chord',
   trailingSlash: 'always',
-  legacy: {
-    collections: false,
-  },
   integrations: [
     starlight({
       title: 'Chord',
       description: 'Calm AI coding in your terminal — a lightweight, local-first coding agent.',
-      social: { github: repo },
+      social: [{ icon: 'github', label: 'GitHub', href: repo }],
       defaultLocale: 'root',
       locales: {
         root: { label: 'English', lang: 'en' },
