@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -421,6 +422,103 @@ func (p *ProviderConfig) ReasoningContinuityCompat(modelID string) *config.Reaso
 		merged.Mode = modelCfg.Mode
 	}
 
+	return merged
+}
+
+// RequestOverrides resolves protocol-agnostic request patches for the given
+// model. Provider-level maps act as defaults and model-level keys override them.
+func (p *ProviderConfig) RequestOverrides(modelID string) config.RequestOverridesConfig {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var providerCfg, modelCfg *config.RequestOverridesConfig
+	if p.compat != nil {
+		providerCfg = p.compat.RequestOverrides
+	}
+	if m, ok := p.models[modelID]; ok && m.Compat != nil {
+		modelCfg = m.Compat.RequestOverrides
+	}
+
+	merged := config.RequestOverridesConfig{}
+	for _, cfg := range []*config.RequestOverridesConfig{providerCfg, modelCfg} {
+		if cfg == nil {
+			continue
+		}
+		merged.Body = mergeAnyMaps(merged.Body, cfg.Body)
+		merged.RenameBodyFields = mergeStringPointerMaps(merged.RenameBodyFields, cfg.RenameBodyFields)
+		merged.Headers = mergeHeaderPointerMaps(merged.Headers, cfg.Headers)
+	}
+	return merged
+}
+
+func mergeAnyMaps(base, override map[string]any) map[string]any {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+	merged := make(map[string]any, len(base)+len(override))
+	for key, value := range base {
+		merged[key] = cloneRequestOverrideValue(value)
+	}
+	for key, value := range override {
+		baseNested, baseOK := merged[key].(map[string]any)
+		overrideNested, overrideOK := value.(map[string]any)
+		if baseOK && overrideOK {
+			merged[key] = mergeAnyMaps(baseNested, overrideNested)
+		} else {
+			merged[key] = cloneRequestOverrideValue(value)
+		}
+	}
+	return merged
+}
+
+func cloneRequestOverrideValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		return mergeAnyMaps(nil, value)
+	case []any:
+		cloned := make([]any, len(value))
+		for i, item := range value {
+			cloned[i] = cloneRequestOverrideValue(item)
+		}
+		return cloned
+	default:
+		return value
+	}
+}
+
+func mergeStringPointerMaps(base, override map[string]*string) map[string]*string {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+	merged := make(map[string]*string, len(base)+len(override))
+	for key, value := range base {
+		merged[key] = cloneStringPointer(value)
+	}
+	for key, value := range override {
+		merged[key] = cloneStringPointer(value)
+	}
+	return merged
+}
+
+func cloneStringPointer(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func mergeHeaderPointerMaps(base, override map[string]*string) map[string]*string {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+	merged := make(map[string]*string, len(base)+len(override))
+	for key, value := range base {
+		merged[http.CanonicalHeaderKey(key)] = cloneStringPointer(value)
+	}
+	for key, value := range override {
+		merged[http.CanonicalHeaderKey(key)] = cloneStringPointer(value)
+	}
 	return merged
 }
 

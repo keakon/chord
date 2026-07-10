@@ -384,7 +384,7 @@ model_pools:
 - `api_url` 保持在 `/models` 基础路径即可；Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。
 - `type` 可以省略；Chord 会根据 `/models` 路径自动识别 Gemini。
 
-## GLM / BigModel Coding Plan
+## GLM-5.2 / BigModel Coding Plan
 
 在 `~/.config/chord/auth.yaml` 中配置：
 
@@ -394,17 +394,61 @@ bigmodel:
 ```
 
 ```yaml
+model_templates:
+  glm-5.2-chat: &glm-5-2-chat
+    limit:
+      context: 1000000
+      output: 128000
+    reasoning:
+      effort: max
+    compat:
+      request_overrides:
+        rename_body_fields:
+          max_completion_tokens: max_tokens
+        body:
+          thinking:
+            type: enabled
+            clear_thinking: false
+      reasoning_continuity:
+        mode: openai_visible
+
+  glm-5.2-messages: &glm-5-2-messages
+    limit:
+      context: 1000000
+      output: 128000
+    thinking:
+      type: adaptive
+      effort: max
+    compat:
+      request_overrides:
+        headers:
+          anthropic-beta: null
+
+  glm-5.2-responses: &glm-5-2-responses
+    limit:
+      context: 1000000
+      output: 128000
+    reasoning:
+      effort: max
+
 providers:
   bigmodel:
     type: chat-completions
     api_url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
     models:
-      glm-5.2:
-        limit:
-          context: 1000000
-          output: 64000
-        reasoning:
-          effort: high
+      glm-5.2: *glm-5-2-chat
+
+  bigmodel-messages:
+    type: messages
+    api_url: https://open.bigmodel.cn/api/anthropic/v1/messages
+    models:
+      glm-5.2: *glm-5-2-messages
+
+  glm-responses:
+    type: responses
+    api_url: https://example.com/v1/responses
+    models:
+      glm-5.2: *glm-5-2-responses
 
 model_pools:
   default:
@@ -413,10 +457,15 @@ model_pools:
 
 要点：
 
-- GLM-5.2 的 OpenAI-compatible 和 Anthropic-compatible 模板应分开维护。
-- 这里给的是 `type: chat-completions` 模板；只有你的网关明确暴露了 Responses endpoint 时，才改为 `type: responses`。
+- Chat Completions 需要 `thinking.type: enabled`、`reasoning_effort` 和
+  `max_tokens`。`request_overrides` 添加 GLM 思考字段并重命名动态计算的输出
+  上限字段；`openai_visible` 只负责原样回放 `reasoning_content`。
+- Messages 兼容接口使用 `thinking` 和 `output_config.effort`。除非对应接口
+  明确支持，否则应关闭 Anthropic beta header。
+- GLM 的 `/responses` 由网关自行实现。只有网关明确说明支持 OpenAI
+  Responses 映射时，才单独使用仅含 `reasoning.effort` 的模板。
 
-## DeepSeek / OpenAI-compatible chat-completions
+## DeepSeek-V4-Pro
 
 在 `~/.config/chord/auth.yaml` 中配置：
 
@@ -426,27 +475,77 @@ deepseek:
 ```
 
 ```yaml
+model_templates:
+  deepseek-v4-pro-chat: &deepseek-v4-pro-chat
+    limit:
+      context: 1000000
+      output: 64000
+    reasoning:
+      effort: max
+    compat:
+      request_overrides:
+        rename_body_fields:
+          max_completion_tokens: max_tokens
+        body:
+          thinking:
+            type: enabled
+      reasoning_continuity:
+        mode: openai_visible
+
+  deepseek-v4-pro-messages: &deepseek-v4-pro-messages
+    limit:
+      context: 1000000
+      output: 64000
+    thinking:
+      type: adaptive
+      effort: max
+    compat:
+      request_overrides:
+        headers:
+          anthropic-beta: null
+
+  deepseek-v4-pro-responses: &deepseek-v4-pro-responses
+    limit:
+      context: 1000000
+      output: 64000
+    reasoning:
+      effort: max
+
 providers:
   deepseek:
     type: chat-completions
-    api_url: https://api.deepseek.com/chat/completions
+    api_url: https://api.deepseek.com/v1/chat/completions
     models:
-      deepseek-reasoner:
-        limit:
-          context: 128000
-          output: 8192
-        reasoning:
-          effort: high
+      deepseek-v4-pro: *deepseek-v4-pro-chat
+
+  deepseek-messages:
+    type: messages
+    api_url: https://api.deepseek.com/anthropic/v1/messages
+    models:
+      deepseek-v4-pro: *deepseek-v4-pro-messages
+
+  deepseek-responses:
+    type: responses
+    api_url: https://example.com/v1/responses
+    models:
+      deepseek-v4-pro: *deepseek-v4-pro-responses
 
 model_pools:
   default:
-    - deepseek/deepseek-reasoner
+    - deepseek/deepseek-v4-pro
 ```
 
 要点：
 
-- 对 OpenAI-compatible 网关，请使用该网关 / 账号实际公开的模型 ID 和限制。
-- 一些 thinking 模式的 OpenAI-compatible provider 会要求在工具循环中保留可见 reasoning 连续性。见[常见问题排查 — DeepSeek / OpenAI 兼容 thinking 模式 400](./troubleshooting_CN.md#deepseek--openai-兼容-thinking-模式-400)。
+- DeepSeek Chat thinking 使用 `thinking.type`、顶层 `reasoning_effort` 和
+  `max_tokens`。`request_overrides` 提供请求形状差异；thinking + 工具调用
+  循环中，`openai_visible` 会原样返回 assistant 的 `reasoning_content`。
+- DeepSeek Messages 支持 `output_config.effort`；Chord 从
+  `thinking.effort` 生成该字段。兼容接口应关闭 Anthropic beta header。
+- 第三方 `/responses` 端点由网关自行实现；只有网关明确说明映射方式时，
+  才使用 `reasoning.effort`。
+- 对兼容网关，请使用该网关 / 账号实际公开的模型 ID 和限制。见
+  [常见问题排查 — DeepSeek / OpenAI 兼容 thinking 模式 400](./troubleshooting_CN.md#deepseek--openai-兼容-thinking-模式-400)。
 
 ## 如何验证任意一份配置
 

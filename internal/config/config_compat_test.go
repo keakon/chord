@@ -100,6 +100,15 @@ providers:
           context: 1000000
           output: 64000
         compat:
+          request_overrides:
+            rename_body_fields:
+              max_completion_tokens: "max_tokens"
+            body:
+              thinking:
+                type: "enabled"
+                clear_thinking: false
+            headers:
+              anthropic-beta: null
           reasoning_continuity:
             mode: "openai_visible"
 `
@@ -115,6 +124,22 @@ providers:
 	}
 	if got := model.Compat.ReasoningContinuity.EffectiveMode(); got != "openai_visible" {
 		t.Fatalf("EffectiveMode = %q, want openai_visible", got)
+	}
+	if got := model.Compat.RequestOverrides.RenameBodyFields["max_completion_tokens"]; got == nil || *got != "max_tokens" {
+		t.Fatalf("rename max_completion_tokens = %#v, want max_tokens", got)
+	}
+	thinking, ok := model.Compat.RequestOverrides.Body["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("thinking override = %#v, want object", model.Compat.RequestOverrides.Body["thinking"])
+	}
+	if got := thinking["type"]; got != "enabled" {
+		t.Fatalf("thinking.type = %#v, want enabled", got)
+	}
+	if got := thinking["clear_thinking"]; got != false {
+		t.Fatalf("thinking.clear_thinking = %#v, want false", got)
+	}
+	if got, ok := model.Compat.RequestOverrides.Headers["anthropic-beta"]; !ok || got != nil {
+		t.Fatalf("anthropic-beta override = %#v, %v, want explicit null", got, ok)
 	}
 }
 

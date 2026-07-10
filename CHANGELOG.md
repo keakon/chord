@@ -4,6 +4,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+### Breaking Changes
+
+- Compared with v0.7.1 and earlier, `compat.reasoning_continuity.mode: openai_visible` now only replays assistant `reasoning_content`; it no longer injects GLM-specific `thinking.type` or `clear_thinking` fields. Configure provider-specific request differences with the new protocol-agnostic `compat.request_overrides`: `body` recursively patches JSON (`null` deletes a field), `rename_body_fields` preserves dynamically computed values under another key, and `headers` sets or removes request headers. Existing GLM Preserved Thinking configs should add `thinking: {type: enabled, clear_thinking: false}` under `request_overrides.body`; DeepSeek thinking configs should add `thinking: {type: enabled}` and rename `max_completion_tokens` to `max_tokens` where required.
+
 ### Improvements
 
 - OpenAI Responses and Chat Completions requests now enable `parallel_tool_calls` by default so independent tool calls can be returned together. Model and variant configuration can explicitly disable it when a backend or workflow requires serial calls.

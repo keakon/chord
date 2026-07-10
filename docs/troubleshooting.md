@@ -106,11 +106,14 @@ If you use a `chat-completions` provider such as DeepSeek and see errors like:
 
 this usually means the provider requires thinking/reasoning content from the previous tool round to be included again in the follow-up request, with a strict assistant message shape. If the same error keeps repeating, keep the corresponding session dump / trace for diagnosis.
 
-For providers/endpoints that explicitly document this requirement (for example,
-GLM Preserved Thinking or similar OpenAI-compatible preserved-thinking
-gateways), enable `compat.reasoning_continuity.mode: openai_visible` on the
-affected model or provider. Chord no longer replays assistant
-`reasoning_content` by default for ordinary `type: chat-completions` models.
+Enable `compat.reasoning_continuity.mode: openai_visible` on the affected model
+or provider. This option only replays assistant `reasoning_content`; add any
+provider-specific thinking flags through `compat.request_overrides.body`.
+
+For GLM Preserved Thinking, that body override must include
+`thinking.type: enabled` and `thinking.clear_thinking: false`. For DeepSeek it
+only needs `thinking.type: enabled`. In both cases, replayed
+`reasoning_content` must remain complete, unchanged, and in order.
 
 ### Codex WebSocket 400 "No tool call found for function call output"
 

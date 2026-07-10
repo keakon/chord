@@ -255,6 +255,59 @@ func TestGeminiCompleteStreamEncodesToolChoice(t *testing.T) {
 	}
 }
 
+func TestGeminiCompleteStreamAppliesRequestOverrides(t *testing.T) {
+	var gotBody map[string]any
+	var gotHeaders http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":400,"message":"forced","status":"INVALID_ARGUMENT"}}`))
+	}))
+	defer srv.Close()
+
+	custom := "custom"
+	provider := NewProviderConfig("gemini", config.ProviderConfig{
+		Type:   config.ProviderTypeGenerateContent,
+		APIURL: srv.URL + "/models",
+		Compat: &config.ProviderCompatConfig{RequestOverrides: &config.RequestOverridesConfig{
+			Body: map[string]any{
+				"generationConfig": map[string]any{"responseMimeType": "application/json"},
+			},
+			Headers: map[string]*string{"x-goog-api-key": nil, "x-custom": &custom},
+		}},
+	}, []string{"test-key"})
+	geminiProvider, err := NewGeminiProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewGeminiProvider: %v", err)
+	}
+	_, err = geminiProvider.CompleteStream(context.Background(), "test-key", "gemini-test", "", []message.Message{{Role: "user", Content: "hello"}}, nil, 128, RequestTuning{}, func(message.StreamDelta) {})
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+
+	generationConfig, ok := gotBody["generationConfig"].(map[string]any)
+	if !ok {
+		t.Fatalf("generationConfig = %#v, want object", gotBody["generationConfig"])
+	}
+	if got := generationConfig["maxOutputTokens"]; got != float64(128) {
+		t.Fatalf("generationConfig.maxOutputTokens = %#v, want 128", got)
+	}
+	if got := generationConfig["responseMimeType"]; got != "application/json" {
+		t.Fatalf("generationConfig.responseMimeType = %#v, want application/json", got)
+	}
+	if got := gotHeaders.Get("x-goog-api-key"); got != "" {
+		t.Fatalf("x-goog-api-key = %q, want removed", got)
+	}
+	if got := gotHeaders.Get("x-custom"); got != "custom" {
+		t.Fatalf("x-custom = %q, want custom", got)
+	}
+}
+
 func TestGeminiCompleteStreamSetsDefaultUserAgent(t *testing.T) {
 	var gotUserAgent string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

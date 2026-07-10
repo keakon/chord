@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### 不兼容变更
+
+- 相比 v0.7.1 及更早版本，`compat.reasoning_continuity.mode: openai_visible` 现在只负责回放 assistant `reasoning_content`，不再隐式注入 GLM 专属的 `thinking.type` 或 `clear_thinking` 字段。Provider 请求差异统一通过新的协议无关配置 `compat.request_overrides` 表达：`body` 递归 patch JSON（`null` 删除字段），`rename_body_fields` 将动态计算值保留到另一个字段名，`headers` 设置或删除请求 header。已有 GLM Preserved Thinking 配置需要在 `request_overrides.body` 中加入 `thinking: {type: enabled, clear_thinking: false}`；DeepSeek thinking 配置需要加入 `thinking: {type: enabled}`，并在需要时把 `max_completion_tokens` 重命名为 `max_tokens`。
+
 ### 改进
 
 - OpenAI Responses 与 Chat Completions 请求现在默认启用 `parallel_tool_calls`，允许模型在一次响应中返回相互独立的工具调用；如果后端或工作流要求串行调用，可在 model 或 variant 配置中显式关闭。

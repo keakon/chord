@@ -190,7 +190,7 @@ func TestConvertMessagesToOpenAI_ToolOutputWithImageParts(t *testing.T) {
 	}
 }
 
-func TestOpenAICompleteStream_OpenAIVisibleContinuityAddsPreservedThinkingRequest(t *testing.T) {
+func TestOpenAICompleteStream_GLMPreservedContinuityAddsThinkingAndUsesMaxTokens(t *testing.T) {
 	var gotBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -213,6 +213,11 @@ func TestOpenAICompleteStream_OpenAIVisibleContinuityAddsPreservedThinkingReques
 			"glm-5.2": {
 				Compat: &config.ModelCompatConfig{
 					ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
+					RequestOverrides: &config.RequestOverridesConfig{RenameBodyFields: map[string]*string{
+						"max_completion_tokens": new("max_tokens"),
+					}, Body: map[string]any{
+						"thinking": map[string]any{"type": "enabled", "clear_thinking": false},
+					}},
 				},
 			},
 		},
@@ -236,7 +241,7 @@ func TestOpenAICompleteStream_OpenAIVisibleContinuityAddsPreservedThinkingReques
 		}},
 		nil,
 		128,
-		RequestTuning{},
+		RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "max"}},
 		func(message.StreamDelta) {},
 	)
 	if err != nil {
@@ -266,5 +271,110 @@ func TestOpenAICompleteStream_OpenAIVisibleContinuityAddsPreservedThinkingReques
 	}
 	if gotBody["parallel_tool_calls"] != true {
 		t.Fatalf("parallel_tool_calls = %#v, want true", gotBody["parallel_tool_calls"])
+	}
+	if gotBody["reasoning_effort"] != "max" {
+		t.Fatalf("reasoning_effort = %#v, want max", gotBody["reasoning_effort"])
+	}
+	if gotBody["max_tokens"] != float64(128) {
+		t.Fatalf("max_tokens = %#v, want 128", gotBody["max_tokens"])
+	}
+	if _, ok := gotBody["max_completion_tokens"]; ok {
+		t.Fatalf("max_completion_tokens should be omitted, got %#v", gotBody["max_completion_tokens"])
+	}
+}
+
+func TestOpenAICompleteStream_OpenAIVisibleDoesNotInjectRequestFields(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewProviderConfig("compatible", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		APIURL: server.URL,
+		Models: map[string]config.ModelConfig{
+			"reasoning-model": {Compat: &config.ModelCompatConfig{
+				ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
+			}},
+		},
+	}, []string{"k"})
+	r, err := NewOpenAIProviderWithClient(provider, server.Client(), "")
+	if err != nil {
+		t.Fatalf("NewOpenAIProviderWithClient: %v", err)
+	}
+
+	_, err = r.CompleteStream(context.Background(), "k", "reasoning-model", "", []message.Message{{
+		Role:             message.RoleAssistant,
+		ReasoningContent: "tool reasoning",
+		Provenance:       &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat},
+		ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Read", Args: json.RawMessage(`{"path":"README.md"}`)}},
+	}}, nil, 128, RequestTuning{}, func(message.StreamDelta) {})
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+
+	if _, ok := gotBody["thinking"]; ok {
+		t.Fatalf("thinking should require request_overrides, got %#v", gotBody["thinking"])
+	}
+	messages := gotBody["messages"].([]any)
+	if got := messages[0].(map[string]any)["reasoning_content"]; got != "tool reasoning" {
+		t.Fatalf("reasoning_content = %#v, want tool reasoning", got)
+	}
+}
+
+func TestOpenAICompleteStream_OpenAIVisibleReplayUsesRequestOverrides(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewProviderConfig("deepseek", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		APIURL: server.URL,
+		Models: map[string]config.ModelConfig{
+			"deepseek-v4-pro": {Compat: &config.ModelCompatConfig{
+				ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
+				RequestOverrides: &config.RequestOverridesConfig{Body: map[string]any{
+					"thinking": map[string]any{"type": "enabled"},
+				}},
+			}},
+		},
+	}, []string{"k"})
+	r, err := NewOpenAIProviderWithClient(provider, server.Client(), "")
+	if err != nil {
+		t.Fatalf("NewOpenAIProviderWithClient: %v", err)
+	}
+
+	_, err = r.CompleteStream(context.Background(), "k", "deepseek-v4-pro", "", []message.Message{{
+		Role:             message.RoleAssistant,
+		ReasoningContent: "tool reasoning",
+		Provenance:       &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat},
+		ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Read", Args: json.RawMessage(`{"path":"README.md"}`)}},
+	}}, nil, 128, RequestTuning{}, func(message.StreamDelta) {})
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+
+	thinking := gotBody["thinking"].(map[string]any)
+	if thinking["type"] != "enabled" {
+		t.Fatalf("thinking.type = %#v, want enabled", thinking["type"])
+	}
+	if _, ok := thinking["clear_thinking"]; ok {
+		t.Fatalf("thinking.clear_thinking should be omitted, got %#v", thinking["clear_thinking"])
+	}
+	msgs := gotBody["messages"].([]any)
+	first := msgs[0].(map[string]any)
+	if first["reasoning_content"] != "tool reasoning" {
+		t.Fatalf("reasoning_content = %#v, want tool reasoning", first["reasoning_content"])
 	}
 }

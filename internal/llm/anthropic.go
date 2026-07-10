@@ -240,6 +240,11 @@ func (a *AnthropicProvider) CompleteStream(
 	if err != nil {
 		return nil, fmt.Errorf("marshal request body: %w", err)
 	}
+	overrides := a.provider.RequestOverrides(model)
+	bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
+	if err != nil {
+		return nil, err
+	}
 	dumpRequestBody := append([]byte(nil), bodyBytes...)
 
 	// Build the HTTP request with a derived context for per-chunk timeout enforcement.
@@ -264,6 +269,7 @@ func (a *AnthropicProvider) CompleteStream(
 
 	// Apply request body compression if configured
 	req, _ = compressRequestBody(req, bodyBytes, a.provider.CompressEnabled())
+	applyRequestHeaderOverrides(req.Header, overrides)
 
 	// Send the request.
 	start := time.Now()

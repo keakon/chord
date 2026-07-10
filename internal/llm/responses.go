@@ -384,12 +384,17 @@ func (r *ResponsesProvider) CompleteStream(
 	if err != nil {
 		return nil, fmt.Errorf("marshal request body: %w", err)
 	}
+	overrides := r.provider.RequestOverrides(model)
+	bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
+	if err != nil {
+		return nil, err
+	}
 	dumpRequestBody := append([]byte(nil), bodyBytes...)
 
 	log.Debugf("responses request model=%v max_output_tokens=%v messages=%v tools=%v reasoning_effort=%v reasoning_summary=%v request_bytes=%v", model, 0, len(messages), len(tools), effectiveReasoningEffort, ot.ReasoningSummary, len(bodyBytes))
 
 	start := requestStartedAt
-	if useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() {
+	if useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() && requestOverridesEmpty(overrides) {
 		wsComplete := r.codexWSCompleteFn
 		if wsComplete == nil {
 			wsComplete = r.completeStreamCodexWebSocket
@@ -464,7 +469,7 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 
 	r.lastTransportUsed.Store("http")
-	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, dumpWriter, model, apiKey, useOpenAIOAuth, reqBody.ClientMetadata, traceCB)
+	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, dumpWriter, model, apiKey, useOpenAIOAuth, reqBody.ClientMetadata, overrides, traceCB)
 
 	// HTTP full-input path: no previous_response_id retry/rollback handling required.
 
@@ -532,6 +537,7 @@ func (r *ResponsesProvider) sendAndParse(
 	apiKey string,
 	useOpenAIOAuth bool,
 	clientMetadata map[string]string,
+	overrides config.RequestOverridesConfig,
 	cb StreamCallback,
 ) (*message.Response, int, error) {
 	if err := ctx.Err(); err != nil {
@@ -567,6 +573,7 @@ func (r *ResponsesProvider) sendAndParse(
 
 	// Apply request body compression if configured
 	req, _ = compressRequestBody(req, bodyBytes, r.provider.CompressEnabled())
+	applyRequestHeaderOverrides(req.Header, overrides)
 
 	// Send request.
 	start := time.Now()

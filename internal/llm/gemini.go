@@ -214,6 +214,11 @@ func (g *GeminiProvider) CompleteStream(
 	if err != nil {
 		return nil, fmt.Errorf("marshal request body: %w", err)
 	}
+	overrides := g.provider.RequestOverrides(model)
+	bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
+	if err != nil {
+		return nil, err
+	}
 	dumpRequestBody := append([]byte(nil), bodyBytes...)
 
 	streamCtx, streamCancel := context.WithCancel(ctx)
@@ -227,6 +232,7 @@ func (g *GeminiProvider) CompleteStream(
 	setProviderLLMUserAgent(req.Header, g.provider)
 
 	req, _ = compressRequestBody(req, bodyBytes, g.provider.CompressEnabled())
+	applyRequestHeaderOverrides(req.Header, overrides)
 
 	log.Debugf("gemini request model=%v max_tokens=%v messages=%v tools=%v", model, maxTokens, len(messages), len(tools))
 

@@ -1536,6 +1536,61 @@ func TestProviderConfig_ThinkingToolcallCompat_ModelOnly(t *testing.T) {
 	}
 }
 
+func TestProviderConfig_RequestOverrides_ModelOverridesProvider(t *testing.T) {
+	maxTokens := "max_tokens"
+	providerTrace := "provider"
+	modelTrace := "model"
+	cfg := config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Compat: &config.ProviderCompatConfig{
+			RequestOverrides: &config.RequestOverridesConfig{
+				Body:    map[string]any{"thinking": map[string]any{"type": "enabled"}},
+				Headers: map[string]*string{"x-trace": &providerTrace, "anthropic-beta": nil},
+			},
+		},
+		Models: map[string]config.ModelConfig{
+			"m1": {
+				Compat: &config.ModelCompatConfig{
+					RequestOverrides: &config.RequestOverridesConfig{
+						RenameBodyFields: map[string]*string{"max_completion_tokens": &maxTokens},
+						Headers:          map[string]*string{"x-trace": &modelTrace},
+					},
+				},
+			},
+			"m2": {},
+		},
+	}
+	p := NewProviderConfig("test", cfg, []string{"k"})
+
+	got := p.RequestOverrides("m1")
+	if got.Body["thinking"].(map[string]any)["type"] != "enabled" {
+		t.Fatalf("m1 body = %#v, want provider default", got.Body)
+	}
+	if rename := got.RenameBodyFields["max_completion_tokens"]; rename == nil || *rename != "max_tokens" {
+		t.Fatalf("m1 rename = %#v, want max_tokens", rename)
+	}
+	if header := got.Headers["X-Trace"]; header == nil || *header != "model" {
+		t.Fatalf("m1 x-trace = %#v, want model", header)
+	}
+	if value, ok := got.Headers["Anthropic-Beta"]; !ok || value != nil {
+		t.Fatalf("m1 anthropic-beta = %#v, %v, want provider null", value, ok)
+	}
+
+	got.Body["thinking"].(map[string]any)["type"] = "mutated"
+	*got.RenameBodyFields["max_completion_tokens"] = "mutated"
+	*got.Headers["X-Trace"] = "mutated"
+	again := p.RequestOverrides("m1")
+	if value := again.Body["thinking"].(map[string]any)["type"]; value != "enabled" {
+		t.Fatalf("second body = %#v, want isolated provider config", again.Body)
+	}
+	if value := *again.RenameBodyFields["max_completion_tokens"]; value != "max_tokens" {
+		t.Fatalf("second rename = %q, want max_tokens", value)
+	}
+	if value := *again.Headers["X-Trace"]; value != "model" {
+		t.Fatalf("second x-trace = %q, want model", value)
+	}
+}
+
 func TestProviderConfig_ThinkingToolcallCompat_ProviderDefault(t *testing.T) {
 	cfg := config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,

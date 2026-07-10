@@ -462,6 +462,7 @@ func (m *ModelConfig) SupportedServiceTierSet(providerPreset string, providerTie
 type ModelCompatConfig struct {
 	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
 	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitempty" yaml:"reasoning_continuity,omitempty"`
+	RequestOverrides    *RequestOverridesConfig          `json:"request_overrides,omitempty" yaml:"request_overrides,omitempty"`
 }
 
 // ProviderCompatConfig contains provider-level compatibility toggles. Model
@@ -470,6 +471,17 @@ type ModelCompatConfig struct {
 type ProviderCompatConfig struct {
 	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
 	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitempty" yaml:"reasoning_continuity,omitempty"`
+	RequestOverrides    *RequestOverridesConfig          `json:"request_overrides,omitempty" yaml:"request_overrides,omitempty"`
+}
+
+// RequestOverridesConfig applies protocol-agnostic patches after Chord builds a
+// request. Body values merge recursively; null deletes a field. Renames retain
+// Chord's computed value under a provider-specific field name. Header nulls
+// remove defaults that are unsupported by a compatible endpoint.
+type RequestOverridesConfig struct {
+	Body             map[string]any     `json:"body,omitempty" yaml:"body,omitempty"`
+	RenameBodyFields map[string]*string `json:"rename_body_fields,omitempty" yaml:"rename_body_fields,omitempty"`
+	Headers          map[string]*string `json:"headers,omitempty" yaml:"headers,omitempty"`
 }
 
 // ReasoningContinuityCompatConfig controls provider/model-specific replay of
@@ -478,8 +490,7 @@ type ProviderCompatConfig struct {
 // Supported modes:
 //   - "none": disable replay of provider-specific reasoning continuity state.
 //   - "openai_visible": replay OpenAI-compatible assistant reasoning_content
-//     and enable provider-specific preserved-thinking request flags where
-//     required (for example GLM Preserved Thinking).
+//     without injecting provider-specific request fields.
 //
 // Other protocols use dedicated runtime handling and default-safe stripping
 // when switching to an incompatible target wire format.

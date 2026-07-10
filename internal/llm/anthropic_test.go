@@ -655,6 +655,51 @@ func TestAnthropicCompleteStreamEncodesAdaptiveThinkingAndAutoCache(t *testing.T
 	}
 }
 
+func TestAnthropicCompleteStreamAppliesRequestOverrides(t *testing.T) {
+	var gotHeaders http.Header
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"forced test error"}}`))
+	}))
+	defer srv.Close()
+
+	custom := "custom"
+	provider := NewProviderConfig("compatible", config.ProviderConfig{
+		Type:   config.ProviderTypeMessages,
+		APIURL: srv.URL,
+		Compat: &config.ProviderCompatConfig{RequestOverrides: &config.RequestOverridesConfig{
+			Body:    map[string]any{"output_config": map[string]any{"effort": "max"}},
+			Headers: map[string]*string{"anthropic-beta": nil, "x-custom": &custom},
+		}},
+	}, []string{"test-key"})
+	anthropicProvider, err := NewAnthropicProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewAnthropicProvider: %v", err)
+	}
+	_, err = anthropicProvider.CompleteStream(context.Background(), "test-key", "compatible-model", "", []message.Message{{Role: "user", Content: "hello"}}, nil, 128, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}, func(message.StreamDelta) {})
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+
+	if got := gotHeaders.Get("anthropic-beta"); got != "" {
+		t.Fatalf("anthropic-beta = %q, want removed", got)
+	}
+	if got := gotHeaders.Get("x-custom"); got != "custom" {
+		t.Fatalf("x-custom = %q, want custom", got)
+	}
+	outputConfig, ok := gotBody["output_config"].(map[string]any)
+	if !ok || outputConfig["effort"] != "max" {
+		t.Fatalf("output_config = %#v, want effort=max", gotBody["output_config"])
+	}
+}
+
 func TestAnthropicCompleteStreamEncodesToolChoiceAndTemperature(t *testing.T) {
 	var captured anthropicRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

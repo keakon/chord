@@ -98,7 +98,14 @@ Responses HTTP provider 的初始 `connecting` 阶段也有边界。如果上游
 
 通常说明这个 provider 要求把上一轮工具调用里的 thinking/reasoning 内容按严格的 assistant message 形状一并带回后续请求。如果同一类报错持续重复，请保留对应的 session dump / trace 供排查。
 
-如果对应 provider / endpoint 的官方文档明确要求这样做（例如 GLM Preserved Thinking，或类似的 OpenAI-compatible preserved-thinking 网关），请在受影响的 model 或 provider 上启用 `compat.reasoning_continuity.mode: openai_visible`。对于普通 `type: chat-completions` 模型，Chord 现在默认不再回放 assistant `reasoning_content`。
+请在受影响的 model 或 provider 上启用
+`compat.reasoning_continuity.mode: openai_visible`。该选项只负责回放
+assistant `reasoning_content`；provider 专属思考字段应通过
+`compat.request_overrides.body` 添加。
+
+GLM Preserved Thinking 的 body override 需要包含 `thinking.type: enabled` 和
+`thinking.clear_thinking: false`；DeepSeek 只需要 `thinking.type: enabled`。
+两种情况下，回放的 `reasoning_content` 都必须保持完整、未修改且顺序不变。
 
 ### Codex WebSocket 400 "No tool call found for function call output"
 

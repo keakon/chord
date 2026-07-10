@@ -387,7 +387,7 @@ Notes:
 - Keep `api_url` at the `/models` base path. Chord appends `/{model}:streamGenerateContent?alt=sse` automatically.
 - `type` can be omitted; Chord auto-detects Gemini from the `/models` path.
 
-## GLM / BigModel Coding Plan
+## GLM-5.2 / BigModel Coding Plan
 
 Pair with `~/.config/chord/auth.yaml`:
 
@@ -397,17 +397,61 @@ bigmodel:
 ```
 
 ```yaml
+model_templates:
+  glm-5.2-chat: &glm-5-2-chat
+    limit:
+      context: 1000000
+      output: 128000
+    reasoning:
+      effort: max
+    compat:
+      request_overrides:
+        rename_body_fields:
+          max_completion_tokens: max_tokens
+        body:
+          thinking:
+            type: enabled
+            clear_thinking: false
+      reasoning_continuity:
+        mode: openai_visible
+
+  glm-5.2-messages: &glm-5-2-messages
+    limit:
+      context: 1000000
+      output: 128000
+    thinking:
+      type: adaptive
+      effort: max
+    compat:
+      request_overrides:
+        headers:
+          anthropic-beta: null
+
+  glm-5.2-responses: &glm-5-2-responses
+    limit:
+      context: 1000000
+      output: 128000
+    reasoning:
+      effort: max
+
 providers:
   bigmodel:
     type: chat-completions
     api_url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
     models:
-      glm-5.2:
-        limit:
-          context: 1000000
-          output: 64000
-        reasoning:
-          effort: high
+      glm-5.2: *glm-5-2-chat
+
+  bigmodel-messages:
+    type: messages
+    api_url: https://open.bigmodel.cn/api/anthropic/v1/messages
+    models:
+      glm-5.2: *glm-5-2-messages
+
+  glm-responses:
+    type: responses
+    api_url: https://example.com/v1/responses
+    models:
+      glm-5.2: *glm-5-2-responses
 
 model_pools:
   default:
@@ -416,10 +460,16 @@ model_pools:
 
 Notes:
 
-- For GLM-5.2, keep OpenAI-compatible and Anthropic-compatible templates separate.
-- Use this template for `type: chat-completions` (or `type: responses` only when your gateway explicitly exposes a Responses endpoint).
+- Chat Completions requires `thinking.type: enabled`, `reasoning_effort`, and
+  `max_tokens`. `request_overrides` adds GLM's thinking flags and renames the
+  dynamically calculated output-limit field; `openai_visible` only replays
+  unmodified `reasoning_content`.
+- Messages-compatible endpoints use `thinking` plus `output_config.effort`.
+  Disable Anthropic beta headers unless that endpoint documents support.
+- A GLM `/responses` endpoint is gateway-specific. Use a separate template with
+  `reasoning.effort` only when the gateway documents OpenAI Responses mapping.
 
-## DeepSeek / OpenAI-compatible chat-completions
+## DeepSeek-V4-Pro
 
 Pair with `~/.config/chord/auth.yaml`:
 
@@ -429,27 +479,78 @@ deepseek:
 ```
 
 ```yaml
+model_templates:
+  deepseek-v4-pro-chat: &deepseek-v4-pro-chat
+    limit:
+      context: 1000000
+      output: 64000
+    reasoning:
+      effort: max
+    compat:
+      request_overrides:
+        rename_body_fields:
+          max_completion_tokens: max_tokens
+        body:
+          thinking:
+            type: enabled
+      reasoning_continuity:
+        mode: openai_visible
+
+  deepseek-v4-pro-messages: &deepseek-v4-pro-messages
+    limit:
+      context: 1000000
+      output: 64000
+    thinking:
+      type: adaptive
+      effort: max
+    compat:
+      request_overrides:
+        headers:
+          anthropic-beta: null
+
+  deepseek-v4-pro-responses: &deepseek-v4-pro-responses
+    limit:
+      context: 1000000
+      output: 64000
+    reasoning:
+      effort: max
+
 providers:
   deepseek:
     type: chat-completions
-    api_url: https://api.deepseek.com/chat/completions
+    api_url: https://api.deepseek.com/v1/chat/completions
     models:
-      deepseek-reasoner:
-        limit:
-          context: 128000
-          output: 8192
-        reasoning:
-          effort: high
+      deepseek-v4-pro: *deepseek-v4-pro-chat
+
+  deepseek-messages:
+    type: messages
+    api_url: https://api.deepseek.com/anthropic/v1/messages
+    models:
+      deepseek-v4-pro: *deepseek-v4-pro-messages
+
+  deepseek-responses:
+    type: responses
+    api_url: https://example.com/v1/responses
+    models:
+      deepseek-v4-pro: *deepseek-v4-pro-responses
 
 model_pools:
   default:
-    - deepseek/deepseek-reasoner
+    - deepseek/deepseek-v4-pro
 ```
 
 Notes:
 
-- For OpenAI-compatible gateways, use the exact model ID and limits published by that gateway/account.
-- Some thinking-mode OpenAI-compatible providers require visible reasoning continuity on tool loops. See [Troubleshooting — DeepSeek / OpenAI-compatible thinking-mode 400s](./troubleshooting.md#deepseek--openai-compatible-thinking-mode-400s).
+- DeepSeek Chat thinking uses `thinking.type`, top-level `reasoning_effort`, and
+  `max_tokens`. `request_overrides` supplies the request-shape differences;
+  during thinking + tool-call loops, `openai_visible` returns the assistant's
+  `reasoning_content` unchanged.
+- DeepSeek Messages supports `output_config.effort`; Chord derives it from
+  `thinking.effort`. Disable Anthropic beta headers for the compatible endpoint.
+- Treat third-party `/responses` endpoints as gateway-specific; use
+  `reasoning.effort` only when the gateway documents its mapping.
+- For compatible gateways, use the exact model ID and limits published by that
+  gateway/account. See [Troubleshooting — DeepSeek / OpenAI-compatible thinking-mode 400s](./troubleshooting.md#deepseek--openai-compatible-thinking-mode-400s).
 
 ## Verify any recipe
 

@@ -67,7 +67,19 @@ providers:
       glm-5.2:
         limit:
           context: 1000000
-          output: 64000
+          output: 128000
+        reasoning:
+          effort: max
+        compat:
+          request_overrides:
+            rename_body_fields:
+              max_completion_tokens: max_tokens
+            body:
+              thinking:
+                type: enabled
+                clear_thinking: false
+          reasoning_continuity:
+            mode: openai_visible
 ```
 
 ### OpenAI Responses
@@ -519,318 +531,131 @@ agent directly with `/models --agent <name> <pool>`. For SubAgents, the default 
 is to use the first allowed pool; switching back to that pool restores the default
 behavior.
 
-## Reusing model templates with YAML anchors
+## Reusing protocol templates with YAML anchors
 
-Chord does not have a special `model_templates` schema field. You can still use
-YAML anchors and merge keys to avoid repeating model limits and variants. The
-top-level `model_templates` key below is just an ignored anchor container.
+Chord has no `model_templates` schema field. You can still use YAML anchors and
+merge keys under that top-level container; Chord ignores the container itself
+and reads the expanded model entries under `providers`.
+
+Keep this page focused on protocol semantics. For current model limits, pricing,
+and complete GPT / Claude / Gemini / GLM / DeepSeek snippets, use
+[Model configuration recipes](./model-configs.md).
 
 ```yaml
 model_templates:
-  gpt-400k: &gpt-400k
+  chat-thinking: &chat-thinking
     limit:
-      context: 400000
-      input: 272000
-      output: 128000
+      context: 200000
+      output: 64000
     reasoning:
-      # Recommended example when you want readable reasoning summaries from
-      # OpenAI Responses reasoning models. This is not Chord's implicit default:
-      # leave `summary` unset to omit the field and use provider/model behavior.
-      summary: auto
-    # Optional for OpenAI GPT-5 / Responses API models. Leave unset to use
-    # the provider/model default; set low for shorter visible text output or high
-    # when you explicitly want more detailed visible output.
-    # text:
-    #   verbosity: low
-    variants:
-      high:
-        reasoning:
-          effort: high
-      xhigh:
-        reasoning:
-          effort: xhigh
-    modalities:
-      input: [text, image]
+      effort: high
+    compat:
+      # DeepSeek and GLM Chat APIs document max_tokens, not the OpenAI
+      # reasoning-model default max_completion_tokens.
+      request_overrides:
+        rename_body_fields:
+          max_completion_tokens: max_tokens
+        body:
+          thinking:
+            type: enabled
+      # Replays reasoning_content without injecting request fields.
+      reasoning_continuity:
+        mode: openai_visible
 
-  # Keep anchor/alias names free of dots; hyphens are used below.
-  gpt-5.2: &gpt-5-2
-    <<: *gpt-400k
-    cost:
-      input: 1.75
-      output: 14
-      cache_read: 0.175
-      service_tier_multipliers:
-        fast: 2
-        slow: 0.5
-      input_tiers:
-        - above_input_tokens: 272000
-          input: 3.5
-          output: 28
-          cache_read: 0.35
-
-  gpt-5.5: &gpt-5-5
-    <<: *gpt-400k
-    cost:
-      input: 5
-      output: 30
-      cache_read: 0.5
-      service_tier_multipliers:
-        fast: 2.5
-        slow: 0.5
-      input_tiers:
-        - above_input_tokens: 272000
-          input: 10
-          output: 60
-          cache_read: 1
-    modalities:
-      input: [text, image, pdf]
-
-  gpt-1m: &gpt-1m
+  responses-thinking: &responses-thinking
     limit:
-      context: 1050000
-      input: 950000
-      output: 128000
+      context: 200000
+      output: 64000
     reasoning:
-      # Recommended example when you want readable reasoning summaries from
-      # OpenAI Responses reasoning models. This is not Chord's implicit default:
-      # leave `summary` unset to omit the field and use provider/model behavior.
+      effort: high
       summary: auto
-    # Optional for OpenAI GPT-5 / Responses API models. Leave unset to use
-    # the provider/model default; set low for shorter visible text output or high
-    # when you explicitly want more detailed visible output.
-    # text:
-    #   verbosity: low
-    variants:
-      high:
-        reasoning:
-          effort: high
-      xhigh:
-        reasoning:
-          effort: xhigh
-    modalities:
-      input: [text, image]
 
-  gpt-5.4: &gpt-5-4
-    <<: *gpt-1m
-    cost:
-      input: 2.5
-      output: 15
-      cache_read: 0.25
-      service_tier_multipliers:
-        fast: 2
-        slow: 0.5
-      input_tiers:
-        - above_input_tokens: 272000
-          input: 5
-          output: 30
-          cache_read: 0.5
-    modalities:
-      input: [text, image, pdf]
-
-  # Claude base config (1M context, PDF support)
-  claude-base: &claude-base
+  messages-thinking: &messages-thinking
     limit:
-      context: 1000000
-      output: 65536
-    modalities:
-      input: [text, image, pdf]
-
-  # Claude adaptive thinking variants (variants only set effort, inheriting type and display from base)
-  claude-adaptive-variants: &claude-adaptive-variants
-    high:
-      thinking:
-        effort: high
-    xhigh:
-      thinking:
-        effort: xhigh
-
-  # Claude adaptive thinking template (4.6+ all versions)
-  claude-adaptive: &claude-adaptive
-    <<: *claude-base
+      context: 200000
+      output: 64000
     thinking:
       type: adaptive
-      display: summarized  # Common config: all variants inherit this
-    variants: *claude-adaptive-variants
-
-  claude-opus: &claude-opus
-    <<: *claude-adaptive
-    limit:
-      context: 1000000  # merge keys are shallow: re-declare context so it is not dropped
-      output: 128000  # Opus supports longer output
-    cost:
-      input: 5
-      output: 25
-      cache_read: 0.5
-      cache_write: 6.25
-      cache_write_1h: 10
-      service_tier_multipliers:
-        fast: 6
-    supported_service_tiers: [fast]
-
-  claude-opus-4.8: &claude-opus-4-8
-    <<: *claude-opus
-    cost:
-      input: 5
-      output: 25
-      cache_read: 0.5
-      cache_write: 6.25
-      cache_write_1h: 10
-      service_tier_multipliers:
-        fast: 2
-
-  claude-sonnet: &claude-sonnet
-    <<: *claude-adaptive
-    limit:
-      context: 1000000  # merge keys are shallow: re-declare context so it is not dropped
-      output: 64000
-    cost:
-      input: 3
-      output: 15
-      cache_read: 0.3
-      cache_write: 3.75
-      cache_write_1h: 6
-
-  claude-fable: &claude-fable
-    <<: *claude-base
-    cost:
-      input: 10
-      output: 50
-      cache_read: 1
-      cache_write: 12.5
-      cache_write_1h: 20
+      effort: high
+    compat:
+      # Compatible endpoints should not receive Anthropic beta headers unless
+      # their own documentation opts into them.
+      request_overrides:
+        headers:
+          anthropic-beta: null
 
 providers:
-  codex:
-    preset: codex
-    # Optional: model entries inherit this provider-level default.
-    # Codex preset already defaults to [fast, slow]; set it explicitly when
-    # documenting or overriding a non-preset provider.
-    supported_service_tiers: [fast, slow]
+  chat:
+    type: chat-completions
+    api_url: https://example.com/v1/chat/completions
     models:
-      gpt-5.2: *gpt-5-2
-      gpt-5.5: *gpt-5-5
+      chat-model: *chat-thinking
 
-  openai:
-    api_url: https://api.openai.com/v1/responses
-    supported_service_tiers: [fast, slow]
+  responses:
+    type: responses
+    api_url: https://example.com/v1/responses
     models:
-      gpt-5.4: *gpt-5-4
-      gpt-5.5: *gpt-5-5
+      responses-model: *responses-thinking
 
-  anthropic:
+  messages:
     type: messages
-    api_url: https://api.anthropic.com/v1/messages
+    api_url: https://example.com/v1/messages
     models:
-      claude-opus-4.8: *claude-opus-4-8
-      claude-sonnet-4.6: *claude-sonnet
-      claude-fable-5: *claude-fable
+      messages-model: *messages-thinking
 ```
 
-Model fields used in the example:
+Model field semantics:
 
-- `limit.context`: total request window in tokens when the provider exposes it.
-- `limit.input`: use this only when the provider also publishes a separate input cap. Chord uses it to decide when to compact before the prompt is too large and how to retry after a provider rejects a too-large request. If omitted, Chord derives the input budget from `limit.context` minus the effective requested output (`max_output_tokens`, capped by `limit.output`). It does not by itself reduce requested output tokens; output clamping follows `limit.output`, `max_output_tokens`, and any total-context (`limit.context`) remainder.
-- `limit.output`: model maximum output token capacity. Runtime requests are also
-  capped by `max_output_tokens`, so the effective request uses the smaller value.
-- `reasoning`: OpenAI / OpenAI-compatible reasoning options.
-  - `reasoning.effort` controls how much reasoning depth/budget Chord asks for. After case/whitespace normalization, Chord passes the value through verbatim, so any provider-supported level (including GLM's `max` / `minimal` / `none`) reaches the upstream unchanged; leave it unset to omit the field and use the provider/model default. `medium` is a good starting point for everyday coding, while `high` / `xhigh` trade more latency and token use for harder planning, debugging, or synthesis tasks.
-  - For `type: chat-completions`, Chord sends `reasoning.effort` as top-level `reasoning_effort` and uses `max_completion_tokens`.
-  - For `type: responses`, Chord sends `reasoning.effort` and `reasoning.summary` inside the `reasoning` object.
-  - `reasoning.summary` controls whether Chord explicitly asks for a readable reasoning summary in Responses output. Chord currently accepts `auto`, `concise`, or `detailed`; leave it unset to omit the field, which means Chord does not explicitly request a summary and the provider/model decides its default behavior.
-  - Recommended `reasoning.summary` value: `auto` when you want summaries. It lets the provider choose the best supported detail level, avoids pinning templates to a fixed summarizer, and matches current OpenAI guidance. Use `concise` to reduce UI noise or `detailed` when you deliberately want fuller debugging/evaluation output.
-  - `reasoning.summary` is only meaningful for models that support Responses reasoning summaries. Some upstream clients/catalogs model “summary off” as `none`; in Chord, the equivalent is leaving `reasoning.summary` unset.
-- `text.verbosity`: optional OpenAI text verbosity hint, where supported. Leave it unset in reusable templates unless you intentionally want to override the provider/model default; use `low` for shorter visible text output and `high` for deliberately detailed visible output.
-- `thinking`: Anthropic extended-thinking options. `type: adaptive` lets Chord
-  derive an appropriate thinking budget from `effort`; `display: summarized`
-  asks Claude to return summarized thinking blocks for Chord to show (only
-  valid for `type: enabled` or `adaptive`; rejected under `disabled`); variants
-  can override `thinking.effort` and `thinking.display`.
+- `limit.context`: total request window when the provider publishes one.
+- `limit.input`: independent input cap when published. If omitted, Chord derives
+  the prompt budget from `limit.context` minus the effective requested output.
+- `limit.output`: model output capacity. Runtime requests are also capped by the
+  global `max_output_tokens` setting and remaining total-context space.
+- `reasoning.effort`: reasoning depth/budget. Chord normalizes whitespace and
+  casing, then forwards the value supported by the target provider.
+  - Chat Completions sends top-level `reasoning_effort`.
+  - Responses sends `reasoning.effort` and optional `reasoning.summary`.
+- `reasoning.summary`: optional Responses reasoning summary request. Supported
+  Chord values are `auto`, `concise`, and `detailed`; omit it to let the provider
+  decide whether to return a summary.
+- `thinking`: Messages-compatible extended thinking. `type: adaptive` combines
+  with `thinking.effort`, which Chord sends as `output_config.effort`.
+- `text.verbosity`: optional OpenAI-compatible visible-text verbosity hint.
+- `variants`: named model parameter overrides selected with refs such as
+  `provider/model@high`.
+- `cost`: optional USD-per-million-token estimates. It can include input/output,
+  cache prices, service-tier multipliers, and long-context input tiers.
+- `modalities.input`: supported input kinds: `text`, `image`, and `pdf`.
+- `supported_service_tiers`: accepted non-standard tiers such as `fast` or
+  `slow`; price multipliers are configured separately under `cost`.
 
-- `compat.reasoning_continuity`: optional protocol-specific reasoning/thinking
-  continuity override for models whose compatible API expects an explicit
-  replay payload.
-  - Default behavior is conservative, so normal GPT / Claude / Gemini setups
-    do **not** need extra config:
-    - `type: responses`: Chord uses the Responses API's native continuity
-      mechanisms where the transport supports them (for example,
-      `previous_response_id` on supported transports). It does **not** replay
-      visible reasoning text into request history.
-    - `type: messages`: when Anthropic thinking is enabled, Chord replays
-      Anthropic thinking/signature blocks needed for the Messages protocol.
-    - `type: chat-completions`: Chord keeps normal visible assistant text and
-      tool history, but does **not** replay assistant `reasoning_content`
-      unless you explicitly enable `compat.reasoning_continuity.mode:
-      openai_visible` for a model/provider that documents this requirement.
-    - `type: generate-content`: Chord uses Gemini's normal request format; it
-      does not add a Chord-specific visible-thinking replay layer.
-  - Use `compat.reasoning_continuity.mode: openai_visible` only for
-    OpenAI-compatible chat-completions models that explicitly document visible
-    `reasoning_content` replay, such as GLM Preserved Thinking.
-  - `openai_visible` is only applied on `type: chat-completions`. It causes
-    Chord to keep assistant `reasoning_content` in request history and to send
-    the provider-specific preserved-thinking request flag when required.
-  - Use `mode: none` on an individual model when a provider-level
-    `openai_visible` default should not apply to that model.
-  - Cross-type switching is conservative by design: when the target protocol
-    cannot represent the source model's continuity payload (for example,
-    `responses -> messages` or `messages -> responses`), Chord keeps normal
-    visible conversation/tool history but drops the incompatible
-    reasoning/thinking continuity payload instead of attempting an unsafe
-    conversion.
+Compatibility fields:
 
-  For GLM-5.2, keep OpenAI-compatible and Anthropic-compatible templates
-  separate. Use the OpenAI template for `type: chat-completions` (or
-  `type: responses` only when your gateway explicitly provides a Responses
-  endpoint), and use the Anthropic template for `type: messages`. Chord maps
-  `reasoning.effort` to OpenAI-compatible request fields and `thinking.effort`
-  to Messages `output_config.effort`. Declare the 1M context window with
-  `limit.context: 1000000`; keep the model key as `glm-5.2`.
+- `compat.request_overrides.body`: recursively merges arbitrary JSON into the
+  final protocol request. A `null` value deletes that field.
+- `compat.request_overrides.rename_body_fields`: renames a final request field
+  while preserving Chord's dynamically computed value. Use this for differences
+  such as `max_completion_tokens: max_tokens`.
+- `compat.request_overrides.headers`: sets arbitrary request headers. A `null`
+  value removes a Chord default header, for example `anthropic-beta: null` on a
+  compatible Messages endpoint.
+- `compat.reasoning_continuity.mode`:
+  - `none`: no provider-specific visible reasoning replay.
+  - `openai_visible`: replays unchanged assistant `reasoning_content` during
+    Chat Completions tool loops. It does not inject request fields; configure
+    those with `request_overrides.body`.
+  - Responses and Messages use their protocol-native continuity mechanisms; do
+    not use visible-reasoning replay for those transports.
+- `compat.thinking_toolcall`: enables a provider-specific parser for gateways
+  that encode tool calls inside visible reasoning text. Leave disabled unless
+  the gateway requires that format.
 
-  ```yaml
-  model_templates:
-    "glm-5.2-openai": &glm-5_2_openai
-      limit:
-        context: 1000000
-        output: 64000
-      reasoning:
-        effort: max
-      compat:
-        reasoning_continuity:
-          mode: openai_visible
+Provider-level `compat` values are defaults. A model-level `compat` block can
+override them for one model.
 
-    "glm-5.2-anthropic": &glm-5_2_anthropic
-      limit:
-        context: 1000000
-        output: 64000
-      thinking:
-        type: adaptive
-        effort: max
-
-  providers:
-    bigmodel_coding:
-      type: chat-completions
-      api_url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
-      models:
-        glm-5.2: *glm-5_2_openai
-
-    bigmodel_anthropic:
-      type: messages
-      api_url: https://open.bigmodel.cn/api/anthropic/v1/messages
-      models:
-        glm-5.2: *glm-5_2_anthropic
-  ```
-
-- `variants`: named model parameter presets. Use a model ref like
-  `openai/gpt-5.5@high` or `anthropic/claude-opus-4.8@xhigh` to select one.
-- `cost`: estimated pricing in USD per 1M tokens. `input`, `output`, `cache_read`, `cache_write`, and `cache_write_1h` are all optional, but supplying them lets Chord estimate usage cost in the UI and `/usage` output. `cache_write` is the default prompt-cache write price, typically the 5-minute TTL price for Anthropic; `cache_write_1h` is used when a provider reports or is configured to request 1-hour cache writes. When a matching cache-write price is omitted, Chord estimates cache-write tokens at the effective `input` price.
-  - `cost.service_tier_multipliers`: optional per-tier pricing multipliers applied after the base price or matching `input_tiers` price is selected. Use it for provider service tiers such as OpenAI's priority-style `fast` tier or its flex-style `slow` tier.
-  - `cost.input_tiers`: optional long-context pricing overrides. Each entry uses `above_input_tokens` as a strict threshold; when billable input is greater than that value, Chord uses the highest matching tier's `input`, `output`, `cache_read`, and optional `cache_write` prices before applying any service-tier multiplier.
-- `modalities.input`: supported input modalities. Supported values are `text`, `image`, and `pdf`. When omitted, Chord defaults to `text` only. Declare `image` / `pdf` explicitly for models that truly support them.
-- When a request contains `image` / `pdf` parts that the selected target model does not support, Chord drops those parts before sending the request instead of forwarding unsupported binary input. Tools that depend on image replay (such as `view_image`) are only exposed when the current model/tool surface supports them.
-- `supported_service_tiers`: explicit non-standard service tiers accepted by a provider or model, for example `[fast, slow]` for OpenAI service tiers or `[fast]` for Anthropic speed. Provider-level values act as defaults for all models in that provider; model-level values override provider defaults. If both are omitted, Chord uses preset defaults. Pricing is configured separately with `cost.service_tier_multipliers` for service-tier rates and `cost.input_tiers` for long-context thresholds. `standard` is always available and is not listed in `supported_service_tiers`. Manual switching only selects tiers supported by the current provider/model: `Ctrl+R` cycles through the available set (`standard` plus supported non-standard tiers), and `/tier fast` or `/tier slow` shows an error when the current provider/model does not support that tier. When the active provider/model changes and a previously requested `fast` or `slow` is no longer supported, the info panel still shows the requested `tier: fast` or `tier: slow` in dim strikethrough text so the requested mode remains visible while indicating it is not effective.
-
-Only fields defined by Chord's model schema are used. `modalities.output` is
-not currently interpreted, so it is intentionally omitted from the example.
+Request overrides apply to HTTP transports after Chord has constructed the
+protocol request. Configuring them on a Codex Responses provider disables its
+WebSocket transport for that request so the final JSON patch can be honored.
 
 ## Project-level config
 
@@ -1541,7 +1366,10 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `reasoning`       | object | OpenAI reasoning options. `reasoning.effort` is normalized and passed through verbatim, so any provider-supported level (e.g. GLM `max` / `minimal` / `none`) reaches the upstream unchanged (unset = omit and use provider/model default). For Responses, `reasoning.summary` (`auto` / `concise` / `detailed`; unset = omit / no explicit summary request). Recommended summary value when you want readable summaries: `auto`. |
 | `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `thinking.effort` is sent as `output_config.effort` for Messages requests; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
-| `compat.reasoning_continuity.mode` | string | Optional compatibility override for protocol-specific reasoning/thinking continuity. Leave unset for normal GPT / Claude / Gemini behavior; use `openai_visible` only for OpenAI-compatible chat-completions models that explicitly require visible `reasoning_content` replay (for example GLM Preserved Thinking). Use `none` on a model to opt out of a provider-level default. |
+| `compat.reasoning_continuity.mode` | string | Optional continuity override. Use `openai_visible` only for Chat Completions models that require unchanged assistant `reasoning_content` replay; it does not inject request fields. Use `none` on a model to opt out of a provider-level default. |
+| `compat.request_overrides.body` | object | Recursive JSON patch applied after Chord constructs the protocol request. `null` deletes a field. |
+| `compat.request_overrides.rename_body_fields` | map | Renames final JSON fields while preserving Chord's computed values. A `null` target deletes the source field. |
+| `compat.request_overrides.headers` | map | Sets final request headers. A `null` value removes that header. |
 | `variants`        | map    | Named parameter presets. Reference with `provider/model@variant`.                                                      |
 | `modalities.input`| array  | Subset of `text` / `image` / `pdf`. Defaults to `[text]`; declare `image` / `pdf` explicitly when supported.          |
 | `supported_service_tiers` | list | Provider-level default or model-level override for accepted non-standard tiers, e.g. `[fast, slow]` or `[fast]`. Omit to use preset defaults. |

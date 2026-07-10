@@ -1962,6 +1962,49 @@ func TestResponsesProvider_GenericResponsesUsesResponsesWireHeaders(t *testing.T
 	}
 }
 
+func TestResponsesProvider_AppliesRequestOverrides(t *testing.T) {
+	var gotHeaders http.Header
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	trace := "custom"
+	providerCfg := NewProviderConfig("generic", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/v1/responses",
+		Compat: &config.ProviderCompatConfig{RequestOverrides: &config.RequestOverridesConfig{
+			Body:    map[string]any{"reasoning": map[string]any{"effort": "max"}, "store": nil},
+			Headers: map[string]*string{"OpenAI-Beta": nil, "X-Trace": &trace},
+		}},
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+
+	_, err := r.CompleteStream(context.Background(), "test-key", "glm-5.2", "", []message.Message{{Role: "user", Content: "hello"}}, nil, 0, RequestTuning{}, func(message.StreamDelta) {})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if gotBody["reasoning"].(map[string]any)["effort"] != "max" {
+		t.Fatalf("reasoning = %#v, want effort=max", gotBody["reasoning"])
+	}
+	if _, ok := gotBody["store"]; ok {
+		t.Fatal("store should be deleted by request override")
+	}
+	if got := gotHeaders.Get("OpenAI-Beta"); got != "" {
+		t.Fatalf("OpenAI-Beta = %q, want removed", got)
+	}
+	if got := gotHeaders.Get("X-Trace"); got != "custom" {
+		t.Fatalf("X-Trace = %q, want custom", got)
+	}
+}
+
 func TestResponsesProvider_AzurePresetUsesAPIKeyHeaderAndStore(t *testing.T) {
 	var gotHeaders http.Header
 	var gotBody map[string]any
@@ -2579,6 +2622,55 @@ func TestResponsesProvider_CodexWSUsageLimitSkipsHTTPFallback(t *testing.T) {
 	}
 	if httpCalls != 0 {
 		t.Fatalf("http calls = %d, want 0 after terminal Codex WebSocket error", httpCalls)
+	}
+}
+
+func TestResponsesProvider_RequestOverridesDisableCodexWebSocket(t *testing.T) {
+	var httpCalls int
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpCalls++
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	responsesWSOn := true
+	providerCfg := NewProviderConfig("codex", config.ProviderConfig{
+		Type:               config.ProviderTypeResponses,
+		Preset:             config.ProviderPresetCodex,
+		APIURL:             server.URL + "/v1/responses",
+		ResponsesWebsocket: &responsesWSOn,
+		Compat: &config.ProviderCompatConfig{RequestOverrides: &config.RequestOverridesConfig{
+			Body: map[string]any{"custom": true},
+		}},
+		Models: map[string]config.ModelConfig{"gpt-5": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+	}, []string{"oauth-key"})
+	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
+
+	var wsCalls int
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time, _ codexWSCompleteOptions) (*message.Response, bool, error) {
+		wsCalls++
+		return nil, false, nil
+	}
+
+	_, err := r.CompleteStream(context.Background(), "oauth-key", "gpt-5", "system", []message.Message{{Role: "user", Content: "hello"}}, nil, 128, RequestTuning{}, func(message.StreamDelta) {})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if wsCalls != 0 {
+		t.Fatalf("ws calls = %d, want 0 when request overrides are configured", wsCalls)
+	}
+	if httpCalls != 1 {
+		t.Fatalf("http calls = %d, want 1", httpCalls)
+	}
+	if gotBody["custom"] != true {
+		t.Fatalf("custom = %#v, want true", gotBody["custom"])
 	}
 }
 

@@ -119,12 +119,6 @@ type openAIRequest struct {
 	Temperature         float64              `json:"temperature,omitempty"`
 	ReasoningEffort     string               `json:"reasoning_effort,omitempty"`
 	Verbosity           string               `json:"verbosity,omitempty"`
-	Thinking            *openAIThinking      `json:"thinking,omitempty"`
-}
-
-type openAIThinking struct {
-	Type          string `json:"type,omitempty"`
-	ClearThinking *bool  `json:"clear_thinking,omitempty"`
 }
 
 // openAIMessage is a single message in the OpenAI API format.
@@ -283,10 +277,11 @@ func (o *OpenAIProvider) CompleteStream(
 	reqBody.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
 
 	if ot.ReasoningEffort != "" {
-		// Reasoning models (o1/o3/o4-mini) require max_completion_tokens
-		// instead of max_tokens, and do not support temperature.
 		reqBody.ReasoningEffort = ot.ReasoningEffort
 		if maxTokens > 0 {
+			// OpenAI reasoning models require max_completion_tokens. Compatible
+			// providers can rename this dynamically computed field through
+			// request_overrides.rename_body_fields.
 			reqBody.MaxCompletionTokens = maxTokens
 			reqBody.MaxTokens = 0
 		}
@@ -297,14 +292,14 @@ func (o *OpenAIProvider) CompleteStream(
 	if ot.TextVerbosity != "" {
 		reqBody.Verbosity = ot.TextVerbosity
 	}
-	if continuityMode == modelcompat.ReasoningContinuityOpenAIVisible && wireFamily == modelcompat.WireFamilyOpenAIChat {
-		clearThinking := false
-		reqBody.Thinking = &openAIThinking{Type: "enabled", ClearThinking: &clearThinking}
-	}
-
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request body: %w", err)
+	}
+	overrides := o.provider.RequestOverrides(model)
+	bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
+	if err != nil {
+		return nil, err
 	}
 	dumpRequestBody := append([]byte(nil), bodyBytes...)
 
@@ -323,6 +318,7 @@ func (o *OpenAIProvider) CompleteStream(
 
 	// Apply request body compression if configured
 	req, _ = compressRequestBody(req, bodyBytes, o.provider.CompressEnabled())
+	applyRequestHeaderOverrides(req.Header, overrides)
 
 	log.Debugf("openai request model=%v max_tokens=%v messages=%v tools=%v", model, maxTokens, len(messages), len(tools))
 
