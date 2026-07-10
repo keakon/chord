@@ -19,44 +19,30 @@ const (
 	openAICodexBetaHeader   = "responses=experimental"
 )
 
-// codexResponsesReasoningEffortLevels are the reasoning effort values accepted by
-// the official OpenAI Codex (ChatGPT) Responses backend. Other Responses-compatible
-// gateways (e.g. GLM-5.2 relays) support a wider set including "max"/"minimal"/"none".
-var codexResponsesReasoningEffortLevels = map[string]bool{
-	"low":    true,
-	"medium": true,
-	"high":   true,
-	"xhigh":  true,
-}
-
 // normalizeReasoningEffort normalizes casing/whitespace and reports whether the
 // normalized form differs from the input. It never silently drops a value: an
 // unknown effort is returned as-is so it reaches the upstream gateway verbatim
 // (a 400 from the provider is fail-loud and far more debuggable than a silent omit).
-// Whether an unknown value should be dropped is a transport-specific decision taken
-// by the caller via the returned allowed flag.
+// We intentionally keep this transport-agnostic: provider/model-specific support
+// must be decided by configuration and upstream validation, not by a stale local
+// whitelist in Chord.
 func normalizeReasoningEffort(effort string) (normalized string, changed bool) {
 	normalized = strings.ToLower(strings.TrimSpace(effort))
 	return normalized, normalized != effort
 }
 
-// resolveResponsesReasoningEffort normalizes the effort and, for the official Codex
-// backend only, drops values outside its supported set. For non-Codex Responses
-// gateways any normalized effort is passed through untouched with a warn log so
-// users learn about typos via the provider's own error rather than a silent no-op.
-func resolveResponsesReasoningEffort(effort string, firstPartyCodex bool) (effective string, dropped bool) {
+// resolveResponsesReasoningEffort normalizes the effort and passes it through.
+// Model/provider support is intentionally fail-loud upstream instead of being
+// filtered by a local hard-coded whitelist.
+func resolveResponsesReasoningEffort(effort string) string {
 	normalized, changed := normalizeReasoningEffort(effort)
 	if normalized == "" {
-		return "", false
+		return ""
 	}
-	if !firstPartyCodex || codexResponsesReasoningEffortLevels[normalized] {
-		if changed {
-			log.Warnf("normalizing reasoning effort for Responses request requested=%v effective=%v", effort, normalized)
-		}
-		return normalized, false
+	if changed {
+		log.Warnf("normalizing reasoning effort for Responses request requested=%v effective=%v", effort, normalized)
 	}
-	log.Warnf("omitting unsupported reasoning effort for Codex Responses request requested=%v", effort)
-	return "", true
+	return normalized
 }
 
 func resolveOpenAIOAuthAPIURL(apiURL string) string {

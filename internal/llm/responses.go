@@ -361,11 +361,10 @@ func (r *ResponsesProvider) CompleteStream(
 		reqBody.ParallelToolCalls = *ot.ParallelToolCalls
 	}
 
-	// The official Codex backend only accepts low/medium/high/xhigh; other
-	// Responses-compatible gateways (e.g. GLM-5.2 relays) support a wider set
-	// including max/minimal/none, which must pass through verbatim.
-	firstPartyCodex := useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport()
-	effectiveReasoningEffort, _ := resolveResponsesReasoningEffort(ot.ReasoningEffort, firstPartyCodex)
+	// Reasoning effort is normalized but not locally whitelisted. Transport/model
+	// support should be driven by configured models and upstream validation rather
+	// than a stale Codex-specific allowlist in Chord.
+	effectiveReasoningEffort := resolveResponsesReasoningEffort(ot.ReasoningEffort)
 	if maxTokens > 0 {
 		log.Debugf("omitting max_output_tokens for Responses request requested=%v", maxTokens)
 	}
