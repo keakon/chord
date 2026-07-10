@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/keakon/chord/internal/privatefs"
 )
 
 // ArtifactRef is a typed reference to a runtime-managed artifact.
@@ -168,9 +170,6 @@ func (SaveArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 		artifactType = "handoff_note"
 	}
 	dir := filepath.Join(sessionDir, "artifacts", "subagents", agentID, taskID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
 	abs := filepath.Join(dir, filename)
 	mode := strings.TrimSpace(strings.ToLower(args.Mode))
 	if mode == "" {
@@ -179,7 +178,7 @@ func (SaveArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	var writeErr error
 	switch mode {
 	case "create":
-		f, err := openFileNoFollow(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		f, err := privatefs.OpenFile(sessionDir, abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
 		if err != nil {
 			if os.IsExist(err) {
 				return "", fmt.Errorf("artifact already exists; use mode=append or mode=overwrite to update it")
@@ -192,7 +191,7 @@ func (SaveArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 			writeErr = closeErr
 		}
 	case "append":
-		f, err := openFileNoFollow(abs, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+		f, err := privatefs.OpenFile(sessionDir, abs, os.O_WRONLY|os.O_CREATE|os.O_APPEND)
 		if err != nil {
 			return "", err
 		}
@@ -207,7 +206,7 @@ func (SaveArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 			writeErr = closeErr
 		}
 	case "overwrite":
-		f, err := openFileNoFollow(abs, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+		f, err := privatefs.OpenFile(sessionDir, abs, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
 		if err != nil {
 			return "", err
 		}

@@ -18,6 +18,7 @@
 
 ### 修复
 
+- 新建会话目录及内部持久化产物现在默认仅允许当前用户访问（目录 `0700`、文件 `0600`），避免 transcript、snapshot、SubAgent mailbox、artifact、task 状态和压缩历史默认暴露给同机其他用户。
 - TUI 文本粘贴不再在 Bubble Tea update 热路径中探测剪贴板图片：普通终端 paste 与 `Cmd+V` 只粘贴文本，`Ctrl+V` / `Alt+V` 则通过原生剪贴板后端异步附加图片或 PDF，且不再依赖 `osascript`，从而避免输入框偶发卡住数秒。剪贴板 PNG/JPEG 可直接使用，BMP/WebP 会归一化处理，以兼容 Windows、WSLg 与 Linux。
 - OpenAI Responses 与 Chat Completions 的 usage 现在会把 GPT-5.6 cache-write token 记录到独立桶中，而不会再把它重复计入普通输入，从而保证上下文阈值和费用统计准确。
 - MCP/LSP 集成状态、控制、system prompt 和模型工具定义现在会一致遵守当前角色及实时 `/rules` 权限，包括同一 MCP server 内的部分授权、lazy/manual server 的精确 allow 规则，以及名称相互重叠的 MCP server。

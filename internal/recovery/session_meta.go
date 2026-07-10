@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/keakon/chord/internal/privatefs"
 )
 
 const sessionMetaFile = "session-meta.json"
@@ -75,9 +77,6 @@ func LoadSessionMeta(sessionDir string) (*SessionMeta, error) {
 
 // SaveSessionMeta atomically writes session metadata for sessionDir.
 func SaveSessionMeta(sessionDir string, meta SessionMeta) error {
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		return fmt.Errorf("mkdir session dir for meta: %w", err)
-	}
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return fmt.Errorf("marshal session meta: %w", err)
@@ -85,7 +84,7 @@ func SaveSessionMeta(sessionDir string, meta SessionMeta) error {
 	data = append(data, '\n')
 	path := filepath.Join(sessionDir, sessionMetaFile)
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := privatefs.WriteFile(sessionDir, tmp, data); err != nil {
 		return fmt.Errorf("write session meta tmp: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {

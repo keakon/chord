@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -67,6 +68,34 @@ func TestTruncateOutputReusesStableArtifactPathForSameKey(t *testing.T) {
 	}
 	if !strings.Contains(first.Content, "Use grep to search within the saved output") {
 		t.Fatalf("truncated content should include grep guidance, got %q", first.Content)
+	}
+}
+
+func TestTruncateOutputCreatesPrivateArtifact(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not enforced on Windows")
+	}
+	sessionDir := filepath.Join(t.TempDir(), "session")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := TruncateOutputWithOptions(generateLines(MaxOutputLines+10), sessionDir, TruncateOptions{ArtifactKey: "private"})
+	if result.SavedPath == "" {
+		t.Fatal("SavedPath is empty")
+	}
+	for path, want := range map[string]os.FileMode{
+		sessionDir:                     0o700,
+		filepath.Dir(result.SavedPath): 0o700,
+		result.SavedPath:               0o600,
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Fatalf("mode(%s) = %04o, want %04o", path, got, want)
+		}
 	}
 }
 

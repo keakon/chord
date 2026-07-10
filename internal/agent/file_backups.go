@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/keakon/chord/internal/privatefs"
 )
 
 const (
@@ -74,11 +76,8 @@ func (m *fileBackupManager) Backup(path, toolName string, data []byte) (fileBack
 	m.seq++
 	name := backupFileName(m.seq, key, toolName)
 	dir := filepath.Join(m.sessionDir, "backups", shortPathHash(key))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fileBackupRecord{}, fmt.Errorf("create backup directory: %w", err)
-	}
 	backupPath := filepath.Join(dir, name)
-	if err := os.WriteFile(backupPath, data, 0o600); err != nil {
+	if err := privatefs.WriteFile(m.sessionDir, backupPath, data); err != nil {
 		return fileBackupRecord{}, fmt.Errorf("write backup: %w", err)
 	}
 	m.byPath[key] = append(m.byPath[key], backupPath)

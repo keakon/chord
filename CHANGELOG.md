@@ -18,6 +18,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Newly created session directories and internal persisted artifacts now use owner-only permissions (`0700` for directories and `0600` for files), preventing transcripts, snapshots, subagent mailboxes, artifacts, task state, and compaction history from being exposed to other local users by default.
 - TUI text paste no longer probes clipboard images on the Bubble Tea update path: ordinary terminal paste and `Cmd+V` are text-only, while `Ctrl+V` / `Alt+V` asynchronously attaches images or PDFs through native clipboard backends without `osascript`, preventing intermittent multi-second input freezes. Clipboard PNG/JPEG are supported directly, and BMP/WebP are normalized for Windows, WSLg, and Linux compatibility.
 - OpenAI Responses and Chat Completions usage now records GPT-5.6 cache-write tokens in a separate bucket without double-counting them as ordinary input, keeping context thresholds and cost analytics accurate.
 - MCP/LSP integration status, controls, system prompts, and model tool definitions now honor active-role and live `/rules` permissions consistently, including partial permissions within one MCP server, exact allows for lazy/manual servers, and overlapping MCP server names.

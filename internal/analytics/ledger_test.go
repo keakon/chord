@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -80,6 +81,41 @@ func TestUsageLedgerAppendEventWritesSummary(t *testing.T) {
 	}
 	if onDisk.LastEventID != summary.LastEventID {
 		t.Fatalf("on-disk LastEventID = %q, want %q", onDisk.LastEventID, summary.LastEventID)
+	}
+}
+
+func TestUsageLedgerRestrictsExistingSessionFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not enforced on Windows")
+	}
+	dir := filepath.Join(t.TempDir(), "session")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"usage.jsonl", "usage-summary.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	if err := ledger.AppendEvent(UsageEvent{AgentID: "main"}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	assertAnalyticsMode(t, dir, 0o700)
+	assertAnalyticsMode(t, filepath.Join(dir, "usage.jsonl"), 0o600)
+	assertAnalyticsMode(t, filepath.Join(dir, "usage-summary.json"), 0o600)
+}
+
+func assertAnalyticsMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("mode(%s) = %04o, want %04o", path, got, want)
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/shell"
 )
 
@@ -106,11 +107,8 @@ func (r *SpawnRegistry) start(ctx context.Context, req spawnedProcessStartReques
 	proc.output = outputBuf
 	if req.LogDir != "" {
 		logPath := filepath.Join(req.LogDir, id+".log")
-		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-			r.mu.Unlock()
-			return nil, fmt.Errorf("creating log dir: %w", err)
-		}
-		f, err := openFileNoFollow(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		sessionDir := filepath.Dir(req.LogDir)
+		f, err := privatefs.OpenFile(sessionDir, logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC)
 		if err != nil {
 			r.mu.Unlock()
 			return nil, fmt.Errorf("creating log file: %w", err)

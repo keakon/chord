@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ func TestSessionLockHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeLockFile(lockPath, append(data, '\n')); err != nil {
+	if err := writeLockFile(dir, lockPath, append(data, '\n')); err != nil {
 		t.Fatal(err)
 	}
 	got, err := readLockFile(lockPath)
@@ -100,6 +101,29 @@ func TestAcquireSessionLock_FirstAcquire(t *testing.T) {
 	if info.OwnerID == "" {
 		t.Error("owner_id should not be empty")
 	}
+}
+
+func TestAcquireSessionLockRestrictsExistingFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not enforced on Windows")
+	}
+	dir := filepath.Join(t.TempDir(), "session")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(guardFilePath(dir), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lock, err := AcquireSessionLock(dir)
+	if err != nil {
+		t.Fatalf("AcquireSessionLock: %v", err)
+	}
+	defer func() { _ = lock.Release() }()
+
+	assertMode(t, dir, 0o700)
+	assertMode(t, guardFilePath(dir), 0o600)
+	assertMode(t, lockFilePath(dir), 0o600)
 }
 
 func TestAcquireSessionLock_AlreadyHeld(t *testing.T) {

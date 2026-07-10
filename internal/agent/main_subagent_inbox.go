@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -325,11 +326,8 @@ func (a *MainAgent) persistSubAgentMailboxMessage(msg SubAgentMailboxMessage) {
 		return
 	}
 	dir := filepath.Join(sessionDir, "subagents")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return
-	}
 	path := filepath.Join(dir, "mailbox.jsonl")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := privatefs.OpenFile(sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 	if err != nil {
 		return
 	}

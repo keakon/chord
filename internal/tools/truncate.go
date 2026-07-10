@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/keakon/chord/internal/privatefs"
 )
 
 const (
@@ -503,7 +505,7 @@ func saveFullOutput(output string, sessionDir string, artifactKey string) string
 	if toolOutputsDir == "" {
 		return ""
 	}
-	if err := os.MkdirAll(toolOutputsDir, 0o755); err != nil {
+	if err := privatefs.EnsureDir(sessionDir, toolOutputsDir); err != nil {
 		return ""
 	}
 	filename := deriveArtifactFilename(output, artifactKey)
@@ -520,7 +522,7 @@ func saveFullOutput(output string, sessionDir string, artifactKey string) string
 		p = filepath.Join(toolOutputsDir, fallback)
 	}
 
-	if err := writeArtifactFile(p, output); err != nil {
+	if err := writeArtifactFile(sessionDir, p, output); err != nil {
 		if existing, readErr := os.ReadFile(p); readErr == nil && string(existing) == output {
 			return p
 		}
@@ -529,8 +531,8 @@ func saveFullOutput(output string, sessionDir string, artifactKey string) string
 	return p
 }
 
-func writeArtifactFile(path string, output string) error {
-	f, err := openFileNoFollow(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
+func writeArtifactFile(sessionDir, path string, output string) error {
+	f, err := privatefs.OpenFile(sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_EXCL)
 	if err != nil {
 		return err
 	}

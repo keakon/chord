@@ -6,9 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/keakon/chord/internal/privatefs"
 )
 
 const (
@@ -49,17 +50,14 @@ func allocateSessionID(last string) (id string, nextLast string) {
 	return id, id
 }
 
-func writeJSONAtomic(path string, v any) error {
+func writeJSONAtomic(root, path string, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := privatefs.WriteFile(root, tmp, data); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {

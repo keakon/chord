@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/recovery"
 )
 
@@ -55,7 +56,7 @@ func writeChordSession(projectSessionsDir string, requestedSessionID string, for
 
 	// Write into a temporary sibling directory then atomically rename.
 	tmpDir := filepath.Join(projectSessionsDir, newImportingDirName(sid))
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+	if err := privatefs.EnsureDir(tmpDir, tmpDir); err != nil {
 		return "", "", fmt.Errorf("write session: create temp dir: %w", err)
 	}
 	cleanupTmp := func() {
@@ -77,7 +78,7 @@ func writeChordSession(projectSessionsDir string, requestedSessionID string, for
 	if report.ImportedAt.IsZero() {
 		report.ImportedAt = time.Now().UTC()
 	}
-	if err := writeJSONAtomic(filepath.Join(tmpDir, importReportFileName), report); err != nil {
+	if err := writeJSONAtomic(tmpDir, filepath.Join(tmpDir, importReportFileName), report); err != nil {
 		cleanupTmp()
 		return "", "", fmt.Errorf("write session: write import report: %w", err)
 	}

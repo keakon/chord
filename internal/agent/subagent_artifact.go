@@ -2,9 +2,10 @@ package agent
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/keakon/chord/internal/privatefs"
 )
 
 const (
@@ -69,9 +70,6 @@ func persistSubAgentArtifact(sessionDir, agentID, baseID, artifactType, title, b
 		return "", "", nil
 	}
 	dir := filepath.Join(sessionDir, "artifacts", "subagents", agentID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", "", err
-	}
 	artifactID = fmt.Sprintf("%s-%s", baseID, artifactType)
 	path := filepath.Join(dir, artifactID+".md")
 	var b strings.Builder
@@ -82,7 +80,7 @@ func persistSubAgentArtifact(sessionDir, agentID, baseID, artifactType, title, b
 	}
 	b.WriteString(body)
 	b.WriteString("\n")
-	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+	if err := privatefs.WriteFile(sessionDir, path, []byte(b.String())); err != nil {
 		return "", "", err
 	}
 	return artifactID, sessionRelativePath(sessionDir, path), nil

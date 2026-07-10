@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -137,6 +138,144 @@ func TestPersistAndLoad_Roundtrip(t *testing.T) {
 		if len(got.ToolCalls) != len(want.ToolCalls) {
 			t.Errorf("msg[%d].ToolCalls len = %d, want %d", i, len(got.ToolCalls), len(want.ToolCalls))
 		}
+	}
+}
+
+func TestPersistMessageCreatesPrivateSessionFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not enforced on Windows")
+	}
+	sessionDir := filepath.Join(t.TempDir(), "session")
+	rm := NewRecoveryManager(sessionDir)
+	defer rm.Close()
+
+	if err := rm.PersistMessage("subagent-1", message.Message{Role: "user", Content: "secret"}); err != nil {
+		t.Fatalf("PersistMessage: %v", err)
+	}
+
+	for _, path := range []string{sessionDir, filepath.Join(sessionDir, "agents")} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != 0o700 {
+			t.Fatalf("mode(%s) = %04o, want 0700", path, got)
+		}
+	}
+	logPath := filepath.Join(sessionDir, "agents", "subagent-1.jsonl")
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("stat %s: %v", logPath, err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("mode(%s) = %04o, want 0600", logPath, got)
+	}
+}
+
+func TestPersistMessageRestrictsExistingSessionFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not enforced on Windows")
+	}
+	sessionDir := filepath.Join(t.TempDir(), "session")
+	agentsDir := filepath.Join(sessionDir, "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(agentsDir, "subagent-1.jsonl")
+	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rm := NewRecoveryManager(sessionDir)
+	defer rm.Close()
+	if err := rm.PersistMessage("subagent-1", message.Message{Role: "user", Content: "secret"}); err != nil {
+		t.Fatalf("PersistMessage: %v", err)
+	}
+
+	for _, path := range []string{sessionDir, agentsDir} {
+		assertMode(t, path, 0o700)
+	}
+	assertMode(t, logPath, 0o600)
+}
+
+func TestPersistMessageAfterCloseDoesNotCreateSessionDir(t *testing.T) {
+	sessionDir := filepath.Join(t.TempDir(), "session")
+	rm := NewRecoveryManager(sessionDir)
+	rm.Close()
+
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "secret"}); err != nil {
+		t.Fatalf("PersistMessage after Close: %v", err)
+	}
+	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
+		t.Fatalf("session directory created after Close: %v", err)
+	}
+}
+
+func BenchmarkPersistMessageReusesOpenLog(b *testing.B) {
+	rm := NewRecoveryManager(b.TempDir())
+	b.Cleanup(rm.Close)
+	msg := message.Message{Role: "user", Content: "benchmark"}
+	if err := rm.PersistMessage("main", msg); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if err := rm.PersistMessage("main", msg); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestRewriteLogCreatesPrivateSessionFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not enforced on Windows")
+	}
+	sessionDir := t.TempDir()
+	rm := NewRecoveryManager(sessionDir)
+	defer rm.Close()
+
+	if err := rm.RewriteLog("main", []message.Message{{Role: "user", Content: "secret"}}); err != nil {
+		t.Fatalf("RewriteLog: %v", err)
+	}
+
+	logPath := filepath.Join(sessionDir, "main.jsonl")
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("stat %s: %v", logPath, err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("mode(%s) = %04o, want 0600", logPath, got)
+	}
+}
+
+func TestRewriteLogRestrictsExistingSessionFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not enforced on Windows")
+	}
+	sessionDir := t.TempDir()
+	logPath := filepath.Join(sessionDir, "main.jsonl")
+	if err := os.WriteFile(logPath, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rm := NewRecoveryManager(sessionDir)
+	defer rm.Close()
+	if err := rm.RewriteLog("main", []message.Message{{Role: "user", Content: "secret"}}); err != nil {
+		t.Fatalf("RewriteLog: %v", err)
+	}
+	assertMode(t, logPath, 0o600)
+}
+
+func assertMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("mode(%s) = %04o, want %04o", path, got, want)
 	}
 }
 

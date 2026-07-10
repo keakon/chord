@@ -346,7 +346,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		} else if !os.IsNotExist(err) {
 			log.Warnf("failed to read compaction history meta before apply path=%v error=%v", d.AbsHistoryMetaPath, err)
 		}
-		if err := writeCompactionHistoryMeta(d.AbsHistoryMetaPath, meta); err != nil {
+		if err := writeCompactionHistoryMeta(a.sessionDir, d.AbsHistoryMetaPath, meta); err != nil {
 			log.Warnf("failed to update compaction history meta path=%v error=%v", d.AbsHistoryMetaPath, err)
 		}
 	}

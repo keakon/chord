@@ -14,15 +14,13 @@ import (
 
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/session"
 	"github.com/keakon/chord/internal/tools"
 )
 
 func (a *MainAgent) exportCompactionHistory(messages []message.Message, index int) (absPath string, relPath string, err error) {
-	if err := os.MkdirAll(a.sessionDir, 0o755); err != nil {
-		return "", "", err
-	}
 	absPath = filepath.Join(a.sessionDir, fmt.Sprintf("history-%d.md", index))
 	metadata := map[string]string{
 		session.MetadataKeyModel:       a.ModelName(),
@@ -34,10 +32,10 @@ func (a *MainAgent) exportCompactionHistory(messages []message.Message, index in
 	if err != nil {
 		return "", "", err
 	}
-	if err := session.ExportMarkdownToFile(exported, absPath); err != nil {
+	if err := privatefs.WriteFile(a.sessionDir, absPath, []byte(session.ExportToMarkdown(exported))); err != nil {
 		return "", "", err
 	}
-	if err := writeCompactionHistoryMeta(compactionHistoryMetaPath(absPath), compactionHistoryMeta{
+	if err := writeCompactionHistoryMeta(a.sessionDir, compactionHistoryMetaPath(absPath), compactionHistoryMeta{
 		Version:     1,
 		HistoryFile: filepath.Base(absPath),
 		Status:      compactionHistoryPending,
@@ -69,7 +67,7 @@ func readCompactionHistoryMeta(path string) (compactionHistoryMeta, error) {
 	return meta, nil
 }
 
-func writeCompactionHistoryMeta(path string, meta compactionHistoryMeta) error {
+func writeCompactionHistoryMeta(sessionDir, path string, meta compactionHistoryMeta) error {
 	if meta.Version == 0 {
 		meta.Version = 1
 	}
@@ -80,7 +78,7 @@ func writeCompactionHistoryMeta(path string, meta compactionHistoryMeta) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return privatefs.WriteFile(sessionDir, path, append(data, '\n'))
 }
 
 // getAbsHistoryPathFromDraft extracts absHistoryPath from a draft if available

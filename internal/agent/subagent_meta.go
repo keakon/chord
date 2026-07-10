@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/privatefs"
+
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -50,9 +52,6 @@ func (a *MainAgent) persistSubAgentMeta(sub *SubAgent) {
 	if path == "" {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
-	}
 	state := sub.State()
 	summary := sub.LastSummary()
 	lastMailboxID := sub.LastMailboxID()
@@ -87,7 +86,7 @@ func (a *MainAgent) persistSubAgentMeta(sub *SubAgent) {
 		return
 	}
 	data = append(data, '\n')
-	_ = os.WriteFile(path, data, 0o644)
+	_ = privatefs.WriteFile(a.sessionDir, path, data)
 }
 
 func loadSubAgentMeta(sessionDir, instanceID string) (*subAgentMeta, error) {

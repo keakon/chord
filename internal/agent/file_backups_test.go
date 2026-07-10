@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,39 @@ func TestFileBackupManagerPrunesPerPathInCreationOrder(t *testing.T) {
 		if len(matches) != 0 {
 			t.Fatalf("removed backup sequence %s still exists: %#v", removedSeq, matches)
 		}
+	}
+}
+
+func TestFileBackupManagerRestrictsExistingSessionHierarchy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not enforced on Windows")
+	}
+	dir := filepath.Join(t.TempDir(), "session")
+	backupsDir := filepath.Join(dir, "backups")
+	if err := os.MkdirAll(backupsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := newFileBackupManager(dir)
+	record, err := mgr.Backup("secret.txt", "Edit", []byte("secret"))
+	if err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+
+	for _, path := range []string{dir, backupsDir, filepath.Dir(record.Path)} {
+		assertAgentMode(t, path, 0o700)
+	}
+	assertAgentMode(t, record.Path, 0o600)
+}
+
+func assertAgentMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("mode(%s) = %04o, want %04o", path, got, want)
 	}
 }
 

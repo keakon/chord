@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/keakon/chord/internal/privatefs"
 )
 
 const (
@@ -94,6 +96,9 @@ var sessionGuardProbeMu sync.Mutex
 // exclusion, while session.lock stores readable owner metadata for errors,
 // listings, and safe release.
 func AcquireSessionLock(sessionDir string) (*SessionLock, error) {
+	if err := privatefs.EnsureDir(sessionDir, sessionDir); err != nil {
+		return nil, fmt.Errorf("secure session directory: %w", err)
+	}
 	lockPath := filepath.Join(sessionDir, sessionLockFile)
 	guardPath := filepath.Join(sessionDir, sessionGuardFile)
 	ownerID := newOwnerID()
@@ -110,7 +115,7 @@ func AcquireSessionLock(sessionDir string) (*SessionLock, error) {
 	}
 	data = append(data, '\n')
 
-	guardFile, err := os.OpenFile(guardPath, os.O_CREATE|os.O_RDWR, 0o600)
+	guardFile, err := privatefs.OpenFile(sessionDir, guardPath, os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return nil, fmt.Errorf("open session guard lock: %w", err)
 	}
@@ -150,7 +155,7 @@ func AcquireSessionLock(sessionDir string) (*SessionLock, error) {
 		return nil, fmt.Errorf("read session lock: %w", readErr)
 	}
 
-	if err := writeLockFile(lockPath, data); err != nil {
+	if err := writeLockFile(sessionDir, lockPath, data); err != nil {
 		return nil, err
 	}
 
@@ -208,9 +213,9 @@ func readLockFile(path string) (*sessionLockInfo, error) {
 }
 
 // writeLockFile atomically overwrites the lock file with new content.
-func writeLockFile(lockPath string, data []byte) error {
+func writeLockFile(sessionDir, lockPath string, data []byte) error {
 	tmp := lockPath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := privatefs.WriteFile(sessionDir, tmp, data); err != nil {
 		return fmt.Errorf("write session lock tmp: %w", err)
 	}
 	if err := os.Rename(tmp, lockPath); err != nil {
@@ -243,7 +248,7 @@ func sessionDirLockedByLiveOwner(sessionPath string) (bool, error) {
 	sessionGuardProbeMu.Lock()
 	defer sessionGuardProbeMu.Unlock()
 
-	guardFile, err := os.OpenFile(guardPath, os.O_CREATE|os.O_RDWR, 0o600)
+	guardFile, err := privatefs.OpenFile(sessionPath, guardPath, os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return false, fmt.Errorf("open session guard lock: %w", err)
 	}

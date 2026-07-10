@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/thinkingtranslate"
 )
 
@@ -165,16 +166,13 @@ func loadThinkingTranslationsFileLocked(sessionDir string) (thinkingTranslations
 }
 
 func writeThinkingTranslationsFileLocked(sessionDir string, file thinkingTranslationsFile) error {
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		return fmt.Errorf("create session dir for thinking translations: %w", err)
-	}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal thinking translations: %w", err)
 	}
 	data = append(data, '\n')
 	tmpPath := filepath.Join(sessionDir, fmt.Sprintf(".%s.%d.tmp", thinkingTranslationsFileName, time.Now().UnixNano()))
-	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
+	if err := privatefs.WriteFile(sessionDir, tmpPath, data); err != nil {
 		return fmt.Errorf("write thinking translations temp: %w", err)
 	}
 	if err := os.Rename(tmpPath, thinkingTranslationsPath(sessionDir)); err != nil {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/privatefs"
 )
 
 const maxUsageSummaryFirstUserPreview = 80
@@ -296,13 +297,9 @@ func (l *UsageLedger) AppendEvent(event UsageEvent) error {
 	}
 	data = append(data, '\n')
 
-	if err := os.MkdirAll(l.sessionDir, 0o755); err != nil {
-		return fmt.Errorf("create session dir: %w", err)
-	}
-
 	summary, summaryErr := l.ensureSummaryLocked()
 
-	f, err := os.OpenFile(l.usagePath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := privatefs.OpenFile(l.sessionDir, l.usagePath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 	if err != nil {
 		return fmt.Errorf("open usage ledger: %w", err)
 	}
@@ -521,15 +518,12 @@ func (l *UsageLedger) writeSummaryLocked(summary *SessionUsageSummary) error {
 	if summary == nil {
 		return nil
 	}
-	if err := os.MkdirAll(l.sessionDir, 0o755); err != nil {
-		return fmt.Errorf("create session dir: %w", err)
-	}
 	data, err := json.Marshal(summary)
 	if err != nil {
 		return fmt.Errorf("marshal usage summary: %w", err)
 	}
 	tmpPath := filepath.Join(l.sessionDir, fmt.Sprintf("usage-summary.%d.json.tmp", time.Now().UnixNano()))
-	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
+	if err := privatefs.WriteFile(l.sessionDir, tmpPath, data); err != nil {
 		return fmt.Errorf("write temp usage summary: %w", err)
 	}
 	if err := os.Rename(tmpPath, l.summaryPath()); err != nil {

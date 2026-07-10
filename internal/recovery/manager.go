@@ -20,6 +20,7 @@ import (
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -141,7 +142,7 @@ func NewRecoveryManager(sessionDir string) *RecoveryManager {
 // CreateNewSessionDir creates a new UTC timestamp session directory using
 // YYYYMMDDHHmmSSfff format with collision retries.
 func CreateNewSessionDir(sessionsDir string) (string, error) {
-	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+	if err := privatefs.EnsureDir(sessionsDir, sessionsDir); err != nil {
 		return "", fmt.Errorf("create sessions directory: %w", err)
 	}
 	lastID := ""
@@ -155,7 +156,7 @@ func CreateNewSessionDir(sessionsDir string) (string, error) {
 		}
 		lastID = sid
 		sessionDir := filepath.Join(sessionsDir, sid)
-		if err := os.Mkdir(sessionDir, 0o755); err == nil {
+		if err := os.Mkdir(sessionDir, privatefs.DirMode); err == nil {
 			return sessionDir, nil
 		} else if os.IsExist(err) {
 			continue
@@ -189,10 +190,6 @@ func (r *RecoveryManager) persistBinaryParts(msg message.Message) (message.Messa
 		return msg, nil
 	}
 
-	if err := os.MkdirAll(r.imagesDir(), 0755); err != nil {
-		return msg, fmt.Errorf("create images dir: %w", err)
-	}
-
 	parts := make([]message.ContentPart, len(msg.Parts))
 	copy(parts, msg.Parts)
 	for i, p := range parts {
@@ -214,7 +211,7 @@ func (r *RecoveryManager) persistBinaryParts(msg message.Message) (message.Messa
 		}
 		fileName := fmt.Sprintf("%d-%d%s", time.Now().UnixNano(), i, ext)
 		filePath := filepath.Join(r.imagesDir(), fileName)
-		if err := os.WriteFile(filePath, p.Data, 0600); err != nil {
+		if err := privatefs.WriteFile(r.sessionDir, filePath, p.Data); err != nil {
 			return msg, fmt.Errorf("write attachment file: %w", err)
 		}
 		parts[i].Data = nil
@@ -233,6 +230,13 @@ func (r *RecoveryManager) persistBinaryParts(msg message.Message) (message.Messa
 // only the file path is stored in the JSONL record.
 // After Close is called, PersistMessage is a no-op and returns nil.
 func (r *RecoveryManager) PersistMessage(agentID string, msg message.Message) error {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil
+	}
+	r.mu.Unlock()
+
 	var err error
 	msg, err = r.persistBinaryParts(msg)
 	if err != nil {
@@ -246,7 +250,6 @@ func (r *RecoveryManager) PersistMessage(agentID string, msg message.Message) er
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
 	if r.closed {
 		return nil
 	}
@@ -254,10 +257,7 @@ func (r *RecoveryManager) PersistMessage(agentID string, msg message.Message) er
 	f, ok := r.handles[agentID]
 	if !ok {
 		path := r.messageLogPath(agentID)
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			return err
-		}
-		f, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		f, err = privatefs.OpenFile(r.sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 		if err != nil {
 			return err
 		}
@@ -319,12 +319,8 @@ func (r *RecoveryManager) SaveSnapshot(snap *SessionSnapshot) error {
 		return err
 	}
 
-	if err := os.MkdirAll(r.sessionDir, 0755); err != nil {
-		return err
-	}
-
 	tmpPath := filepath.Join(r.sessionDir, fmt.Sprintf("snapshot.%d.json.tmp", time.Now().UnixNano()))
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+	if err := privatefs.WriteFile(r.sessionDir, tmpPath, data); err != nil {
 		return err
 	}
 	return os.Rename(tmpPath, filepath.Join(r.sessionDir, "snapshot.json"))
@@ -378,7 +374,7 @@ func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) err
 	path := r.messageLogPath(agentID)
 
 	// Truncate by rewriting.
-	f, err := os.Create(path)
+	f, err := privatefs.OpenFile(r.sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC)
 	if err != nil {
 		return fmt.Errorf("rewrite log: create %s: %w", path, err)
 	}
@@ -398,7 +394,7 @@ func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) err
 	f.Close()
 
 	// Re-open in append mode for subsequent PersistMessage calls.
-	af, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0600)
+	af, err := privatefs.OpenFile(r.sessionDir, path, os.O_WRONLY|os.O_APPEND)
 	if err != nil {
 		return fmt.Errorf("rewrite log: reopen: %w", err)
 	}
