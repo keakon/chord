@@ -7,6 +7,16 @@ Chord separates behavior configuration and credentials:
 - `.chord/config.yaml`: project-level overrides
 - `~/.config/chord/agents/` and `.chord/agents/`: agent role definitions
 
+## How to use this page
+
+You do not need to read this page from top to bottom:
+
+- **First setup:** start with [Quickstart](./quickstart.md), then copy a provider from [Model configuration recipes](./model-configs.md).
+- **Credentials and OAuth:** jump to [`auth.yaml`](#authyaml) or [OAuth](#oauth).
+- **Routing and reliability:** use [Model pools](#model-pools-selecting-providermodel), [Provider timeouts](#provider-timeouts), and [Stream retry cap](#stream-retry-cap).
+- **Long sessions:** use [Context management](#context-management-compaction-vs-reduction).
+- **Exact field names:** use the [Configuration cheatsheet](#configuration-cheatsheet).
+
 ## Configuration layers
 
 A practical precedence model is:
@@ -146,9 +156,7 @@ Read model limits in this order:
 The current GPT-5.6 Codex allocation is a 500K total window with a 372K input
 cap and a 128K output cap, so configure all three fields explicitly.
 
-For `type: responses`, Chord uses one stable Responses wire shape for every provider. The stable system prompt is sent in the top-level `instructions` field, while conversation messages remain typed `input` items such as `{"type":"message","role":"user",...}`. Requests also explicitly send `tool_choice`, `parallel_tool_calls`, `store`, `stream`, and an `include` array. `parallel_tool_calls` defaults to `true` for both Responses and Chat Completions providers so independent tool calls can be returned together; set `parallel_tool_calls: false` on a model, or override it in a model variant, when a backend or workflow requires serial calls. `store` defaults to `false` except for `preset: azure`, and explicit provider/model `store` config overrides the default. `include` is empty unless the request carries a reasoning block, in which case it contains `reasoning.encrypted_content`. Responses requests omit `max_output_tokens`. Streaming Responses model requests include `Accept: text/event-stream` and `User-Agent`. Non-Azure Responses requests also include the Codex-compatible `OpenAI-Beta: responses=experimental` and `originator` headers because several relay endpoints validate that shape before forwarding requests. The default User-Agent remains `chord/<version>` unless provider-level `user_agent` overrides it.
-
-For `type: messages`, Chord likewise sends a stable Anthropic Messages wire shape tuned for official Anthropic and compatible gateways. Messages requests always include Claude Code-style client hints such as `x-app: cli`, the default Claude Code beta feature list, and JSON-formatted `metadata.user_id` with stable anonymous routing fields. These fields are internal transport details, not user-configurable compatibility switches; they improve gateway compatibility and cache affinity while remaining accepted by the official Anthropic API. Provider-level `user_agent` remains configurable because gateways may require a specific client/version string.
+`parallel_tool_calls` defaults to `true` for Responses and Chat Completions providers. Set it to `false` on a provider, model, or variant only when the backend or workflow requires serial tool calls. Provider-level `user_agent` is also available for gateways that require a specific client identifier.
 
 Provider auth headers are inferred separately from `type`, but can be overridden with `auth_scheme` when a compatible endpoint expects a different credential header:
 
@@ -165,9 +173,9 @@ Supported `auth_scheme` values are:
 
 Use an explicit override only when the endpoint's auth requirements differ from Chord's transport default. For example, a provider may expose an Anthropic-compatible `/messages` path but require `Authorization: Bearer` instead of `x-api-key`. In that case, keep the same `type` and set only `auth_scheme: bearer`.
 
-The one beta that is sent conditionally is `context-1m-2025-08-07` (1M context window). Unlike the other default betas, this one is enforced by the official Anthropic API: it is gated, switches to long-context pricing above 200K tokens, and errors on models that lack 1M support. Chord therefore opts in only when the model's declared window reaches 1M tokens (`limit.input` if set, otherwise `limit.context` >= 1000000), mirroring how Claude Code only sends it for models flagged as 1M-capable. Models with a smaller declared window never receive this header.
+For Anthropic's gated 1M context beta, Chord opts in only when the model declares a window of at least 1M tokens (`limit.input` when set, otherwise `limit.context`). Models with smaller declared windows do not receive the beta header. The provider may apply different access requirements and pricing above 200K tokens.
 
-The `store` field controls whether the Responses backend keeps this request and response server-side. Chord sends the full input on every request and never relies on `previous_response_id` to continue a conversation over HTTP, so the normal default `false` keeps requests self-contained and is the right choice for nearly every non-Azure setup. `preset: azure` defaults `store` to `true` because Azure OpenAI's Responses endpoint is stateful in the same way as OpenAI's persisted Responses API. Set `store: true` manually (at the provider level, or model level to override a provider default) only when a Responses-compatible backend or relay explicitly requires or benefits from server-side retention. Know the trade-offs before enabling it: the backend retains your request and response data, and the official Codex OAuth endpoint rejects `store: true` with a terminal `HTTP 400` (`Store must be set to false`) that fails the request without retrying, so do not set `store: true` on a `preset: codex` provider.
+`store` controls whether a Responses backend retains requests and responses server-side. It defaults to `false`, except for `preset: azure`. Enable it only when the backend explicitly requires server-side retention and you accept the data-retention trade-off. Do not enable it for `preset: codex`; the official Codex OAuth endpoint rejects `store: true`.
 
 ### OpenAI Codex preset
 

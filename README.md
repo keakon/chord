@@ -14,43 +14,6 @@
   <img src="./docs/assets/screenshot.png" alt="Chord terminal UI screenshot" width="900">
 </p>
 
-## Performance
-
-### Real-world coding task
-
-We benchmarked Chord v0.6.3 against Codex-CLI v0.136.0 on a [real-world database system task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis): implementing durability wait APIs in Pebble. Far from simple CRUD, the task requires understanding commit/WAL sync and concurrency semantics, reasoning across write paths, event listeners, and DB lifecycle subsystems.
-
-| Metric | Chord v0.6.3 | Codex-CLI v0.136.0 | Improvement |
-|--------|--------------|---------------------|-------------|
-| **Time** | **46m21s** | 61m18s | **24% faster** |
-| **LLM calls** | **93** | 118 | **21% fewer** |
-| **Input tokens** | **6.86M** | 18.47M | **63% fewer** |
-| **Output tokens** | **25K** | 74K | **66% fewer** |
-| **Cache read tokens** | **6.55M** | 17.64M | **63% fewer** |
-| **Cost** | **$5.58** | $15.15 | **63% cheaper** |
-
-Notes:
-
-- Both runs used GPT-5.5 (xhigh).
-- Time excludes environment setup and final wrap-up, but includes model interaction, code changes, and test execution.
-- The task's reference solution spans 8 files and 670 changed lines; actual model output may be larger or smaller depending on tests, comments, and implementation choices.
-
-### App startup and memory
-
-We also measured the interactive app shell: time from launch to accepting input, normal exit time, and memory with an empty session and after loading 200 messages.
-
-| App | Startup to input | Normal exit | Empty session memory | 200-message memory |
-|-----|------------------|-------------|----------------------|--------------------|
-| Chord v0.6.3 | **<1s** | **<1s** | **31.6MB** | **~40MB** |
-| Codex-CLI v0.136.0 | **<1s** | ~20s | 35.8MB | ~80MB |
-| Claude Code v2.1.163 | 32s | ~2s | 156.3MB | >300MB |
-
-Notes:
-
-- Codex-CLI waits for shutdown wrap-up and exits after about a 20-second timeout.
-- Claude Code waits on startup and becomes ready for input after about a 30-second timeout.
-- Memory use varies by session content and environment, so these numbers are only estimates for this measured scenario.
-
 ## Why Chord
 
 Start with the core experience you notice immediately:
@@ -120,11 +83,17 @@ GitHub Releases provide prebuilt binaries for supported platforms. On macOS, the
 
 - [Docs home](./docs/index.md)
 - Getting started: [Quickstart](./docs/quickstart.md) · [Usage](./docs/usage.md) · [Glossary](./docs/glossary.md)
-- Reference: [CLI](./docs/cli.md) · [Configuration & Auth](./docs/configuration.md) · [Built-in tools](./docs/tools.md) · [Keybindings](./docs/keybindings.md) · [Paths](./docs/paths.md) · [Environment variables](./docs/environment.md) · [Platform support](./docs/platforms.md) · [Performance](./docs/performance.md)
+- Reference: [CLI](./docs/cli.md) · [Configuration & Auth](./docs/configuration.md) · [Built-in tools](./docs/tools.md) · [Edit tools](./docs/edit-tools.md) · [Keybindings](./docs/keybindings.md) · [Paths](./docs/paths.md) · [Environment variables](./docs/environment.md) · [Platform support](./docs/platforms.md) · [Performance](./docs/performance.md)
 - Going further: [Customization](./docs/customization.md) · [Hooks](./docs/hooks.md) · [Examples](./docs/examples/index.md)
 - Integration: [Headless](./docs/headless.md)
 - Safety: [Permissions & Safety](./docs/permissions-and-safety.md)
 - Troubleshooting: [Troubleshooting](./docs/troubleshooting.md)
+
+## Performance snapshot
+
+In one Chord v0.6.3 run of a [real-world Pebble database task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis), Chord completed the task in 46m21s using 6.86M input tokens and an estimated $5.58. A Codex-CLI v0.136.0 comparison run using the same GPT-5.5 (xhigh) model took 61m18s, 18.47M input tokens, and an estimated $15.15.
+
+This is a single measured scenario, not a general guarantee. Results vary with hardware, environment, session content, model behavior, and implementation choices. See [Performance](./docs/performance.md) for how Chord manages long-session responsiveness and what to collect when investigating slowdowns.
 
 ## Project links
 

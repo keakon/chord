@@ -10,6 +10,7 @@ Start with what works out of the box; move on to customization and advanced work
 
 - **Start quickly**: [Quickstart](./quickstart.md)
 - **Configure models**: [Configuration & Auth](./configuration.md) · [Model configuration recipes](./model-configs.md) · [Examples](./examples/index.md)
+- **Edit files safely**: [Edit tools](./edit-tools.md) · [Permissions & Safety](./permissions-and-safety.md)
 - **Remote control**: [Headless](./headless.md) · [Permissions & Safety](./permissions-and-safety.md)
 - **Long-running tasks**: [Usage — `/loop`](./usage.md#loop--continuous-execution-mode)
 - **Extend and customize**: [Customization](./customization.md) · [Hooks](./hooks.md)
@@ -28,6 +29,7 @@ Start with what works out of the box; move on to customization and advanced work
 - [Configuration & Auth](./configuration.md) — `config.yaml`, `auth.yaml`, providers, model pools, full schema cheatsheet
 - [Model configuration recipes](./model-configs.md) — copy-paste snippets for common provider/model families
 - [Built-in tools](./tools.md) — every tool name, for permission rules and hook filters
+- [Edit tools](./edit-tools.md) — choose between `edit`, `patch`, and `write`; formats, examples, and safety behavior
 - [Keybindings](./keybindings.md) — complete key map and how to customize it
 - [Paths](./paths.md) — config / state / cache / project layout, what is safe to delete
 - [Environment variables](./environment.md) — every `CHORD_*` / `XDG_*` / proxy variable Chord reads

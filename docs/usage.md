@@ -15,15 +15,7 @@ Most personal development workflows should start with the local TUI.
 
 After startup, the input box is focused by default. Type a message and press `Enter` to send.
 
-Tool-call cards try to keep file paths concise: for file tools such as `read`, `edit`, `write`, and `delete`, paths inside the session working directory are shown as relative paths in the TUI, while paths outside that directory remain absolute.
-
-The sidebar and info panel changed-file lists prioritize showing full `+N -N` line-change stats. When space is tight, filenames are truncated or omitted instead of cutting off the counts.
-
-Tool arguments and results are displayed as terminal-safe plain text. Chord escapes embedded ANSI/control sequences from external output instead of executing them as terminal styling, and generic tool results that look like Markdown remain literal output rather than being reformatted as assistant Markdown.
-
-Discovery tools use stable LLM-facing output caps before results enter session history: `grep` returns at most 120 matches and 12 KiB of text; `glob` returns at most 250 paths and 16 KiB of text. These caps are fixed rather than based on the current remaining context window, so the same tool call stays reproducible across model switches and unrelated history growth. The byte caps are the primary guard because context pressure tracks bytes/tokens more closely than line count: using Chord's rough `1 token ~= 3 bytes` estimate, 12 KiB keeps one Grep result around 4k tokens, while 16 KiB keeps one Glob result around 5.3k tokens. The match/path caps are secondary guards against floods of very short lines.
-
-`read` and `write` tool cards show file contents as numbered, syntax-highlighted previews. `edit` cards render unified diffs with syntax highlighting when the file type is known; `.mdx` files fall back to Markdown highlighting, and red/green diff line backgrounds remain visible even for unsupported extensions. Long previews show the first 10 lines by default with a `[space] toggle expand/collapse` hint; focus the card and press `Space`, `Enter`, or `o` to expand or collapse it.
+Tool cards show terminal-safe previews. File paths inside the session working directory are displayed as relative paths; external paths remain absolute. Long file and diff previews start collapsed: focus the card and press `Space`, `Enter`, or `o` to expand or collapse it.
 
 When Chord is running in the background, the terminal title shows a one-shot `✅` completion marker when the focused agent transitions from busy to idle. Focusing the terminal clears the marker; ordinary tab/window focus changes do not re-add it unless new background work later completes.
 
@@ -74,24 +66,6 @@ Navigation:
 
 The error panel keeps the most recent 80 errors in a ring buffer (newest first). Use it to diagnose why a model fallback occurred or which keys are hitting rate limits.
 
-## Tool execution details
-
-### Speculative (early) tool execution
-
-To shorten the wait during a provider's finalize phase, Chord executes a small safe subset of tools *speculatively* while the model response is still streaming, as soon as a tool call's arguments are complete. This is always on and not configurable.
-
-- Eligible: read-only `read`, `grep`, and `glob`; a conservative read-only `shell` subset (single command, no pipes/redirects/`&&`/`;`): `pwd`, `ls`, `cat`, `which`, and `git status|log|diff|show|branch|rev-parse`; and `todo_write` as a preview that commits only after finalize.
-- Not eligible: file mutation tools (`write`, `edit`, `patch`, `delete`), non-read-only `shell`, interactive/control tools, or any call whose permission action is `ask`.
-- Speculative results may show early in the UI, but they are only appended to the conversation context after finalize validation. Calls discarded at finalize are removed or marked as discarded speculative execution and are not part of the conversation context.
-
-### How `patch` applies hunks
-
-`patch` takes the target file as a structured `path` argument; its `patch` argument carries hunk text (`@@` headers, leading-space context lines, `-` removed, `+` added). Stray Codex `apply_patch` envelope lines (`*** Begin Patch` / `*** End Patch`, and a leading `*** Update File:` matching `path`) are stripped. If strict parsing fails, a final top-level malformed `*** End Patch...` footer is also stripped and parsed once more. Add/delete/move, multi-file patches, mismatched update paths, and other top-level `*** ...` operations are rejected.
-
-Matching is Codex-style and ordered: each hunk (and any attached `@@` function/class/test header) matches the first occurrence after the current search position. When a hunk matches multiple candidates, Chord applies the first and reports the matched line plus other candidate lines so the model can re-read if needed. A hunk with no context/removal lines fails because there is no insertion point.
-
-While arguments stream, the `patch` card follows `write`-style path display: no path until Chord parses the structured `path`, then the path appears in the card header. The separate `edit` tool uses `old_string` / `new_string` exact replacement; see [Edit tools](./edit-tools.md) for model selection, examples, and permission behavior.
-
 ## File mentions (`@path`)
 
 Type `@` in the composer at the start of a line or after a space to open file completion.
@@ -119,7 +93,7 @@ Common workflows:
 
 When exiting, if the current session can be resumed, Chord prints the corresponding resume command.
 
-`/new` switches to a fresh session: session-scoped runtime state such as conversation history, todos, usage, and one-shot in-session LSP reminders is reset, while model/runtime preferences (for example the current model pool, service tier, and MCP connection environment) stay with the running process. LLM dumps and traces remain session-directory scoped: the same session keeps its existing dump numbering across resume, restart, and context compaction, while a new session starts its own numbering sequence in its own dump directory.
+`/new` resets session state such as conversation history, todos, and usage. Runtime preferences such as the current model pool, service tier, and MCP state stay active until the process exits.
 
 ### Importing external sessions
 
@@ -154,13 +128,10 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 Notes:
 
-- **Tools**: Chord always converts recognizable external tool calls to the closest current Chord tool card when their arguments can be normalized: `read`, `shell`, `grep`, `glob`, `edit`, `patch`, `write`, and `delete` are used for matching Codex, Claude Code, and OpenCode records. Only unknown, malformed, or unsupported source records (no Chord mapping, missing call id, or un-normalizable arguments) remain visible as readable fallback cards instead of being dropped. Imported provenance is retained internally, so these converted cards are transcript/history only and do not restore Chord FileTracker snapshots; re-run `read` when you need fresh file context or stale-change warnings before editing imported files.
-- **Reasoning**: Chord only imports Anthropic signed thinking as `thinking_blocks`. Non-signed reasoning is dropped by default (`--reasoning strict`); use `--reasoning visible` to include it as plain text.
-- **Claude main-session reconstruction**: Claude imports rebuild the best-effort main non-sidechain conversation span instead of simply choosing the latest raw leaf. Compact boundaries participate in reconstruction, but are not rendered as ordinary transcript messages.
-- **Claude sidechains**: sidechain / sub-agent transcript entries are excluded from the main imported session by default. When present, CLI output reports the skipped count, and `import-report.json` records Claude-specific diagnostics plus sidechain agent IDs when available.
-- **Claude fallback rendering**: visible Claude artifacts without a safe Chord mapping are imported as readable fallback assistant text blocks when possible, rather than raw JSON blobs.
-- The imported session contains an `import-report.json` with conversion warnings and stats.
-- During runtime, Chord normalizes persisted history into a provider-safe wire view per request, so switching providers/models after import does not replay incompatible payloads.
+- Recognized external tool calls become readable Chord tool cards. Unsupported records remain visible as fallback text instead of being silently dropped.
+- Imported tool cards represent history only. Re-run `read` before editing a file when you need current contents and stale-change protection.
+- Signed Anthropic thinking is preserved. Other reasoning is omitted by default; use `--reasoning visible` to import it as plain text.
+- Claude sidechain/sub-agent entries are excluded from the main session. Import warnings, skipped records, and conversion statistics are written to `import-report.json`.
 
 Common flags:
 
@@ -182,7 +153,7 @@ For working on multiple tasks in parallel without crosstalk, Chord can create an
 - `chord headless -d <repo> --worktree feat-auth`: same in headless mode; the `ready` event payload includes the worktree's `name`, `branch`, `path`, and `repo_root`
 - `chord worktree list`: list chord-managed worktrees of the current repository
 - `chord worktree remove <name>`: delete the worktree and its sessions/cache/exports; the branch is preserved by default. Pass `--delete-branch` to delete only-if-merged or `--force` to force-remove a dirty worktree and its branch.
-- `chord worktree finish <name>`: first merge the main-line target branch into the real worktree branch (default target: the main worktree's current branch), then squash the finished worktree state back onto that target branch as one commit, fast-forward the target branch to include it, and finally remove the worktree and delete its branch. Use `--onto <branch>` to pick the target branch, or `--check` to preview whether that target branch can merge cleanly into the worktree in a temporary worktree without mutating the real one. If that merge would hit conflicts, `finish` reports the conflicted files, keeps the target branch unchanged, and leaves the real worktree in that merge so you can resolve it and rerun. If a rebase or merge is already in progress in that worktree, `finish` exits early with an explicit “complete that operation first” hint.
+- `chord worktree finish <name>`: update the worktree from the target branch, squash its result back as one commit, then remove the worktree and branch. Use `--onto <branch>` to choose the target or `--check` for a non-mutating conflict check. On conflict, the target branch stays unchanged and the worktree is left ready for you to resolve the merge and rerun `finish`.
 
 Creating or entering a worktree changes the project Chord runs in. You can do that either with `chord --worktree <name>` or with `chord worktree <name>`. The `worktree` subcommand also owns management operations such as `list`, `remove`, and `finish`.
 
@@ -202,9 +173,7 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/yolo on|off`: temporarily bypass main-agent tool permissions while keeping handoff, delegate, cancel, and done permissions enforced. YOLO can be toggled while the agent is running; the execution-time permission bypass applies immediately to later tool calls, while the LLM-visible tool descriptions and permission prompt are refreshed on the next request.
 - `/help`: toggle the in-app cheatsheet overlay (same as pressing `?` in Normal mode)
 
-`/new` creates a fresh session and clears current session state (for example message history, todos, usage, and one-shot LSP diagnostic reminders), but it does not reset model/runtime preferences owned by the running process. LLM dumps and traces are always isolated by session directory: dump numbering stays continuous within the same session across resume, restart, and `/compact`, while switching to a new session starts that new directory's own sequence.
-
-When a non-standard tier is actually active for the current provider/model, the sidebar/status area shows it normally. If a previously requested tier becomes unsupported after switching provider/model, the info panel still shows the requested tier in a dim strikethrough style so it remains visible but clearly ineffective. `Ctrl+R` skips unsupported tiers and cycles only through the tiers available to the current provider/model. Slash completion for `/tier` predicts the same next tier as `Ctrl+R`; when the only available tier is the already-active `standard`, `/tier` is omitted from slash completions.
+When a non-standard tier is active, the sidebar shows it. If a model switch makes the selected tier unavailable, it appears dimmed and struck through. `Ctrl+R` cycles only through tiers supported by the current provider and model.
 
 The following commands have more interactive detail, expanded below.
 
@@ -289,24 +258,18 @@ The text after `/loop on` is the task target sent to the agent. When omitted, it
 3. **verifying**: running checks (tests, lint, etc.)
 4. **continue or request exit**: if more work remains, the agent keeps going; if it believes the loop can stop, it must request exit through the `done` tool
 
-When `done` is requested before the loop exit conditions are satisfied, Chord rejects that request and automatically makes the agent continue. When the exit conditions are satisfied, Chord shows a local confirmation dialog instead of stopping immediately. The `done` tool must include a non-empty `report` argument containing the final completion report, and that report is what the confirmation dialog shows. While the report argument is still streaming, the Done tool card shows the same live `chars received` progress as other streaming tool arguments; once the argument stream finishes, that temporary progress indicator is hidden. If you confirm exit, loop mode stops and the agent becomes idle; otherwise the loop keeps running.
+When the agent asks to finish, Chord checks the loop exit conditions and shows a local confirmation containing the completion report. Confirm to stop, or reject to keep the loop running. YOLO mode does not bypass this confirmation or the `done` permission.
 
-`done` is deliberately treated as loop control rather than an ordinary permission-bypassable tool. `/loop` is available only when the active MainAgent role can use `done`, and YOLO does not override `done` permissions. This keeps roles that are not allowed to finish/exit from silently taking over loop termination, and it preserves the local confirmation gate that prevents premature completion.
+Loop mode also detects repeated identical tool calls. It interrupts a stalled sequence and, after repeated interceptions, asks whether to stop or continue.
 
-Loop mode also guards against a stalled tool-call loop. If the MainAgent emits the same tool call three times in a row — same tool name and identical arguments — Chord rejects that tool result automatically, injects guidance to stop repeating the unchanged call and continue toward the loop target, and counts it as one loop interception. The check uses a sliding window: if the fourth call is still identical, it is rejected again immediately. Once the loop interception limit is reached, Chord shows the same local confirmation flow so you can decide whether to stop or continue.
-
-Runtime-injected user continuation messages are used only after a terminal assistant turn that ended with an `end_turn` / `stop` / `done`-style stop reason and no tool calls. If the model already returned tool calls in that turn, loop continuation stays inside the tool-call flow: Chord records tool results, updates loop state, and may show loop guidance in the TUI, but it does not append a synthetic user message unless you manually send one.
-
-**Using `/loop` + `done` to get more value from Codex quota:** loop mode does not create extra quota, but it helps spend existing quota on end-to-end progress instead of repeated human re-prompting. In normal mode, the model often stops after one local milestone and waits for your next message; that burns another turn later just to say "continue", rerun checks, or pick up unfinished cleanup. With `/loop`, the agent keeps iterating inside the same task until it either reaches a real stop condition or asks to exit through `done`. The `done` gate matters here: it prevents premature stopping, so the agent is pushed to finish the whole chain — implement → test → fix failures → verify again → summarize — before giving control back.
-
-A good pattern for Codex-heavy work is:
+A good pattern is:
 
 1. turn on loop with a concrete target (`/loop on implement feature X with tests`)
 2. give one complete instruction with success criteria
 3. let the agent continue through edits, test failures, and follow-up fixes
 4. only confirm the final `done` request when the work is actually complete
 
-This usually improves quota efficiency for multi-step coding tasks because fewer turns are wasted on manual nudges like "continue", "run the tests too", or "fix the failing case and try again". Do **not** use `/loop` just to keep the model running aimlessly; if the task is exploratory, ambiguous, or likely to need frequent product decisions, normal mode is often cheaper and easier to control.
+This reduces manual prompts such as “continue” or “run the tests too.” Do **not** use `/loop` just to keep the model running: normal mode is easier to control when the task is exploratory, ambiguous, or likely to need product decisions.
 
 If the task is genuinely blocked, the agent can still report `<blocked>category: reason</blocked>`. You can always press `Esc` to cancel the current iteration.
 
@@ -315,21 +278,6 @@ If the task is genuinely blocked, the agent can still report `<blocked>category:
 **When to use:** multi-step tasks (generate code → write tests → debug → refine), iterative development. Not suitable for: one-shot queries or pure Q&A.
 
 You can also define **custom** slash commands (per project or globally). See [Customization — Custom slash commands](./customization.md#custom-slash-commands).
-
-## YOLO and protected control tools
-
-YOLO is a convenience mode for trusted local work: it bypasses ordinary MainAgent permission checks so tools such as file edits, reads, shell commands, and web requests can run without repeated confirmations. It does **not** bypass permissions for `handoff`, `delegate`, `cancel`, or `done`.
-
-Those four tools are protected because they control agent orchestration rather than just local side effects:
-
-- `handoff` can transfer work/plans between roles, so it changes who is responsible for the task.
-- `delegate` can start or manage delegated workstreams and may run work in parallel.
-- `cancel` can interrupt the active turn.
-- `done` completes a turn or requests loop exit and carries the final report.
-
-Keeping these permissions enforced under YOLO prevents a broad "allow tools" switch from also granting workflow-control powers. In loop mode this matters especially for `done`: loop exit remains gated by the active role's `done` permission, loop exit-condition checks, and local confirmation, so YOLO cannot accidentally let the model terminate a long-running loop early.
-
-Under YOLO, these protected tools still need explicit permissions. A broad default such as `"*": allow` is treated as part of the bypassed ordinary permission surface and does not by itself grant `handoff`, `delegate`, `cancel`, or `done`; configure those tools directly when a role should use them.
 
 ## Multi-agent focus switching
 
@@ -353,7 +301,7 @@ Currently supported:
 - Edit historical user messages that contain images or PDFs; tail messages reopen in the current session, while earlier messages fork a new session, and path-restored attachments are reloaded when the edited message is sent again
 - Let the model use the built-in `view_image` tool to load a local PNG/JPEG into context when the tool is permitted, the first model in the effective model pool supports image input, and that first model does not use the OpenAI Chat Completions API. The tool uses the same local-path permission handling as `read`.
 
-`view_image` availability is decided from the first model in the effective model pool so the tool surface stays stable when fallback routing changes models. For OpenAI models, prefer the Responses API when tools need to return images or files: OpenAI Chat Completions can accept images in user messages, but its `role: "tool"` messages are text-only. Once a conversation contains image/PDF tool results, Chord skips fallback candidates that cannot safely replay them, including models without image input support and OpenAI Chat Completions. Conversations that have not used image/PDF tool results can still fall back to Chat Completions normally. Tool-returned images appear in the TUI as thumbnails on the corresponding tool result card and can be opened from Normal mode like user-attached images.
+`view_image` availability follows the first model in the effective pool. For OpenAI models, use the Responses API when tools need to return images or files; Chat Completions accepts images in user messages but not in tool results. After an image/PDF tool result enters the conversation, Chord skips fallback models that cannot replay it safely.
 
 Common actions:
 
@@ -400,5 +348,6 @@ See [Headless](./headless.md) for details.
 
 - [Configuration & Auth](./configuration.md)
 - [Permissions & Safety](./permissions-and-safety.md)
+- [Edit tools](./edit-tools.md)
 - [Customization](./customization.md)
 - [Troubleshooting](./troubleshooting.md)

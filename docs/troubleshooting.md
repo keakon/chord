@@ -38,14 +38,12 @@ chord doctor models --pool thinking
 
 ### Large OAuth account pools start slowly
 
-For `preset: codex` OpenAI / ChatGPT OAuth providers, `auth.yaml` may contain hundreds or thousands of accounts. Startup does not synchronously parse every access-token JWT and does not block provider initialization when one token lacks `account_id`: Chord first adds access tokens to the usable key pool, then parses and backfills `account_user_id`, `account_id`, `email`, and `expires` metadata in the background.
-
-Keep these cases separate:
+When `auth.yaml` contains hundreds or thousands of OpenAI / ChatGPT OAuth accounts, Chord loads credential metadata in the background. Missing metadata alone should not block startup.
 
 - Personal Plus/Pro accounts may carry only `user_id` and no `chatgpt_account_id`. They can still be used for ordinary requests, but Chord omits `ChatGPT-Account-ID` and skips account-id-dependent Codex usage / rate-limit polling for them.
 - `account_user_id mismatch` or `account_id mismatch` logs mean metadata explicitly configured in `auth.yaml` conflicts with what the token itself exposes. Fix or remove that credential.
 
-When manually converting Codex/sub2api exports, keep any available `email`, `account_id`, and `account_user_id`, but missing metadata should not make startup fail. Use doctor/inspection commands for deliberate per-account diagnostics instead of putting a full JWT scan on the startup hot path.
+When manually converting Codex/sub2api exports, keep any available `email`, `account_id`, and `account_user_id`. Use `chord doctor models` for deliberate account diagnostics.
 
 ## 429 / quota exhausted
 
@@ -89,13 +87,9 @@ curl -I https://api.openai.com/v1
 
 ### OpenAI-compatible 400s and timeouts
 
-For provider endpoints that use official API semantics, HTTP 400 normally means the request is invalid and Chord stops instead of retrying the same bad payload. Set `official_api: true` on those providers. Set `official_api: false` or omit it for aggregating or proxy gateways when you want Chord to treat unknown 400s as potentially recoverable gateway errors. Providers with `preset: codex` are treated as official automatically.
+Set `official_api: true` for endpoints that follow official API error semantics. Chord then treats HTTP 400 as a terminal request error. For aggregating or proxy gateways that may wrap upstream failures as HTTP 400, set `official_api: false` or omit the field so unknown 400s can use the normal retry and fallback path. `preset: codex` providers are treated as official automatically.
 
-For non-official OpenAI-compatible gateways, Chord does not trust HTTP 400 by itself as proof of a bad request. Many gateways collapse upstream overload, rate-limit, or provider failures into 400, so Chord treats non-official 400s as retryable by default: the current key is put into a short cooldown of at most 1 minute, then Chord can try another key, model, or retry round. Only explicit request-shape signals, such as structured `invalid_request` / `invalid_parameter` codes or clear messages like missing required parameters, stop immediately.
-
-If a connection cannot be established or no first token arrives before timeout, Chord marks the current key as recovering so the next retry prefers another healthy key.
-
-For Responses HTTP providers, the initial `connecting` phase is also bounded. If the upstream or gateway never starts the HTTP response, Chord fails that attempt after about 25 seconds instead of waiting indefinitely, allowing the normal retry / fallback path to continue. This limit applies to waiting for response headers; once a healthy stream has started, normal streaming is still governed by stream-idle timeout rather than a fixed total request cap.
+If requests remain in `connecting` and then retry, test the endpoint directly, check proxy settings, and inspect the error panel. Chord applies a connection timeout so one unavailable key or gateway does not wait indefinitely.
 
 ### DeepSeek / OpenAI-compatible thinking-mode 400s
 
@@ -117,11 +111,7 @@ only needs `thinking.type: enabled`. In both cases, replayed
 
 ### Codex WebSocket 400 "No tool call found for function call output"
 
-The Codex WebSocket transport sends incremental requests keyed by `previous_response_id`. The server keeps its own view of the conversation under that id, and if our locally constructed input drifts from that view (for example after a request-signature change between turns), the server can reject the next turn with `400 No tool call found for function call output with call_id …` even though the matching `function_call` and `function_call_output` are present together in the input we sent.
-
-When Chord sees this kind of 400 it now clears the WebSocket chain state (`previous_response_id`, baseline, signature) and immediately retries the same request on the same WebSocket as a full send without `previous_response_id`. That is equivalent to starting a fresh server-side conversation seeded by the local input, and resolves the mismatch in-place without burning an HTTP round trip. The retry is only tried when the original 400 is identified as a chain-state mismatch; if the retry still fails the input itself is malformed and HTTP fallback would fail identically, so the error is returned without further fallback.
-
-Most users do not need to do anything — the recovery is automatic. If you see this error repeating across many turns, capture the trace and the session id so the conversation contents can be examined.
+Chord normally recovers from this WebSocket conversation-state mismatch automatically by retrying with the full local conversation. If the error repeats, export a diagnostics bundle and include the session ID in your report.
 
 ## MCP never becomes ready
 
@@ -187,23 +177,7 @@ If `--continue` or `--resume` does not appear to work as expected:
 - try explicitly using `--resume <session-id>`
 - check whether restore is only slow rather than actually lost
 
-## Session resume / restore behavior notes
-
-For `--continue`, `--resume`, new-session, fork-session, and plan-execution flows:
-
-- make sure the current directory belongs to the same project as the original session
-- prefer `--resume <session-id>` when you need an exact target
-- if model/provider state looks wrong after restore, keep the relevant session logs and traces for diagnosis
-- if you suspect regressions around Codex/OpenAI session boundaries, capture logs from a current build so traces reflect the post-cleanup transport lifecycle
-
-When a session is resumed Chord also repairs structurally broken turns before the transcript is sent to a provider:
-
-- a trailing assistant message with `stop_reason=interrupted` (process killed mid-stream) is dropped, so the next user/system turn drives a fresh assistant reply
-- every assistant `tool_call` whose matching tool result was never persisted gets a synthetic `error` tool message (`ToolStatus=error`) appended in its place, so providers that require strict `function_call ↔ function_call_output` pairing (OpenAI Responses, Anthropic `tool_use`/`tool_result`) accept the input
-
-The repair is structural only — text and `ToolStatus` of already-persisted tool messages are not rewritten. Tool messages whose payload happens to contain words like "denied" or "cancelled" are no longer reinterpreted as failures.
-
-Session resume itself is fully supported. Internal transport cleanup does not affect the ability to continue or resume sessions. If you see unexpected behavior after restore, capture logs from the current build for diagnosis.
+Chord automatically repairs incomplete turns caused by an interrupted process before resuming. If restored model/provider state or conversation order looks wrong, export a diagnostics bundle from a current build and include the session ID.
 
 ## TUI cards show strange colors or broken layout when viewing logs / dumps / shell output
 
@@ -212,7 +186,7 @@ If a tool card, local shell result, question dialog, or confirmation summary sho
 - retry the same `read`, `shell`, `web_fetch`, or local shell action
 - if you still see corruption, save the original file/output and a screenshot together
 
-Chord displays ANSI-rich external text literally inside these UI surfaces instead of re-executing embedded terminal escape/control sequences. This includes bare carriage-return progress/control text, preventing diagnostic dumps and other raw terminal output from corrupting surrounding card rendering while still letting you inspect the original sequences. Generic tool results are also treated as plain text even when they contain Markdown-looking headings, lists, tables, or code fences; this avoids accidental reformatting of logs, diffs, JSON/YAML, and fetched pages.
+Chord displays external tool output as terminal-safe plain text. If the same content consistently breaks layout, attach the original text and a screenshot so the rendering case can be reproduced.
 
 ## Output-triggered TUI render panic / process killed
 
@@ -233,18 +207,13 @@ charm.land/glamour/v2/ansi.(*HeadingElement).Finish
 github.com/keakon/chord/internal/tui.renderMarkdownContent
 ```
 
-This class of failure can occur while rendering markdown for assistant blocks, tool reports, the content viewer, or compaction summaries. The known upstream fixed versions are:
-
-- `charm.land/glamour/v2 >= v2.0.1`
-- `charm.land/lipgloss/v2 >= v2.0.4`
-
 When checking dumps, note:
 
 - If the last shell/tool result before the crash was already written to `main.jsonl`, that tool output was usually not lost.
 - If Chord was waiting on an LLM SSE stream at the time of the crash, the corresponding `dumps/llm/*.json` may contain only `request_body`, partial `sse_chunks`, and `reading SSE stream: context canceled`. That means the LLM response was dumped only up to the interruption, with no complete final text.
 - `context canceled` is usually a consequence of process shutdown, not necessarily the root cause.
 
-The stable fix strategy is to upgrade the upstream renderer dependencies for known root causes while keeping `recover` / fallback boundaries around TUI rendering. Model output, tool output, and historical session content are untrusted inputs: render helpers must be best-effort, degrading to plain text when needed rather than letting a panic escape into the Bubble Tea main loop and kill the whole process.
+Attach the panic stack, diagnostics bundle, terminal name/version, and the content being rendered to the issue report.
 
 ## Screen corruption after switching tabs or refocusing the terminal
 
@@ -270,8 +239,6 @@ Two quick local observations also help narrow it down:
 - If the extra line disappears when the terminal is made one or two columns narrower, mention that — it points at right-edge wrap behavior.
 - If the artifact appears right after image preview, paste image, or diagnostics export, mention that too.
 
-Chord disables terminal hard-scroll optimizations because those sequences can leave stale rows in Chord's sticky transcript layout, so most remaining reports come down to terminal-specific redraw behavior; the screenshot-plus-bundle pair is what makes them diagnosable.
-
 ## Bottom transcript rows are unreachable in long sessions
 
 If the last transcript rows appear clipped, the final card seems to touch the input separator, or scrolling to the bottom still leaves part of the latest conversation hidden:
@@ -281,15 +248,15 @@ If the last transcript rows appear clipped, the final card seems to touch the in
 
 ## A file-edit tool warns that the file changed since it was observed
 
-This warning comes from Chord's in-process file tracking. It means the current file no longer matches the last content hash recorded for this agent. Chord no longer rejects every stale file edit: `edit` matches old/new text against the current file contents, `patch` validates hunks against the current file contents, while `write` and `delete` back up risky non-empty pre-write contents before continuing.
+This warning means the file changed after the agent last read it. Chord validates edits against the current contents; `write` and `delete` may also create a backup before continuing.
 
 Common causes:
 
 - the file was modified by another process (editor/formatter) between `read` and `edit`/`patch`;
-- a speculative tool run was discarded/rolled back and the finalized call raced it;
-- the provider sent tool arguments as a JSON string (wrapped arguments). Chord unwraps tool arguments consistently; if a wrapped path is not tracked correctly, capture logs and the session JSONL.
+- another agent or Chord process changed the file;
+- the file changed during a formatter, generator, or build step.
 
-If a backup was created, the tool result includes its path under the current session directory. Empty files and non-risky continuous agent-owned edits do not create backups. Backups are capped at 10 per path, 200 per session, 10 MiB per file, and 50 MiB per session; if a required backup would exceed those limits or otherwise fail, the edit can still proceed but the tool result says no backup was created and why. Backups are removed when the session directory is deleted.
+Re-run `read` before retrying. If Chord creates a backup, the tool result includes its path under the current session directory. See [Edit tools](./edit-tools.md) for edit and patch matching behavior.
 
 ## Patch reports `hunk not found` or `matched multiple locations`
 
@@ -308,7 +275,6 @@ If you see this:
 If scrolling, streaming output, or large message rendering feels noticeably slow:
 
 - reduce the current session context size (`/compact`, or a new session for unrelated work)
-- streaming assistant/thinking output keeps only stable structure (blank-line-separated paragraphs and closed fences) on the markdown path; long single paragraphs stay on the cheaper plain-text path until they settle
 - compare behavior in different terminals
 
 See [Performance](./performance.md) for how rendering and streaming are optimized and how to capture a CPU profile for a bug report.
@@ -323,7 +289,7 @@ What to check:
 2. Check the `Context` percentage in the TUI footer or info panel. It is based on the **usable input budget**, not the total context window, so it may be lower than expected (see [Configuration — Context compaction](./configuration.md#context-compaction)).
 3. If `context.compaction.reserved` is set, compaction triggers at a lower absolute token count because the reserve is subtracted before applying `threshold`; if compaction is too frequent, check whether reserved is too large.
 4. `/compact --no` temporarily disables automatic compaction for the current session. Restart the session or run `/compact` to re-enable.
-5. If your gateway returns missing or zero usage, Chord uses the last trusted non-zero usage sample plus current context-contributing message bytes as a fallback trigger. With `log_level: debug`, look for `estimated_input_tokens` and `effective_input_tokens` in automatic-compaction logs.
+5. If your gateway returns missing or zero usage, enable `log_level: debug` and look for `estimated_input_tokens` and `effective_input_tokens` in automatic-compaction logs.
 
 Note: loop mode does not disable automatic compaction. It only disables request-level context reduction for newly added messages.
 
@@ -335,7 +301,7 @@ What to check:
 
 1. This is normal behavior for context reduction: stale tool output is trimmed from each LLM request prompt, but **never modifies** session files on disk.
 2. If you frequently need to revisit earlier read/search results, raise `read_like_age_turns` and `read_like_output_bytes`.
-3. Successful shell output is summarized with size, line count, salient success lines when present, and a tail fallback; the command remains available from the associated tool call. If build/test logs are still important context, raise `shell_success_bytes`.
+3. If build/test logs remain important context, raise `shell_success_bytes`.
 4. For more conservative trimming behavior, raise all `*_age_turns` and `*_bytes` values.
 
 See [Configuration — Context reduction](./configuration.md#context-reduction).
@@ -363,8 +329,6 @@ Check logs first when you encounter:
 - incomplete headless integration events
 
 Default logs directory: `${XDG_STATE_HOME:-~/.local/state}/chord/logs/`. The current log file is `chord.log`; rotated files are `chord.log.1` and `chord.log.2`.
-
-Current builds write logs in golog's plain text format, for example `[I 2026-05-02 12:00:00 file:123 pwd=/path/to/workspace pid=1234 sid=20260502015258426] message key=value`. Treat key-value fragments as human-readable text, not as a stable structured logging schema.
 
 Override with `--logs-dir <path>` or `CHORD_LOGS_DIR=<path>`. To reproduce and collect logs quickly:
 
