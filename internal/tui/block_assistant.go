@@ -653,6 +653,9 @@ func (b *Block) streamingContainsMarkdownTable(rawContent string, frontier int) 
 }
 
 func containsMarkdownTable(content string) bool {
+	if !strings.Contains(content, "|") || !strings.Contains(content, "-") || !strings.ContainsAny(content, "\r\n") {
+		return false
+	}
 	for _, seg := range splitAssistantMarkdownSegments(content) {
 		if seg.code {
 			continue
@@ -665,6 +668,9 @@ func containsMarkdownTable(content string) bool {
 }
 
 func containsMarkdownTableInText(content string) bool {
+	if !strings.Contains(content, "|") || !strings.Contains(content, "-") || !strings.ContainsAny(content, "\r\n") {
+		return false
+	}
 	var previous string
 	for _, line := range strings.Split(markdownutil.NormalizeNewlines(content), "\n") {
 		if isMarkdownTableDelimiterLine(line) && isMarkdownTableHeaderLine(previous) {

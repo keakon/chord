@@ -981,12 +981,28 @@ func TestDeferredStartupTranscriptSendDraftExtendsVisibleTailWindow(t *testing.T
 
 	_ = m.sendDraft(queuedDraft{Content: "new user message", QueuedAt: time.Now()})
 	blocks := m.viewport.visibleBlocks()
-	if len(blocks) != before+1 {
-		t.Fatalf("len(visibleBlocks()) after draft = %d, want %d", len(blocks), before+1)
+	if len(blocks) != before {
+		t.Fatalf("len(visibleBlocks()) after draft = %d, want fixed tail window %d", len(blocks), before)
 	}
 	last := blocks[len(blocks)-1]
 	if last.Type != BlockUser || last.Content != "new user message" {
 		t.Fatalf("last visible block = %#v, want appended user block", last)
+	}
+	userBlockID := last.ID
+
+	thinking := &Block{ID: m.nextBlockID, Type: BlockThinking, Content: "next turn thinking"}
+	m.nextBlockID++
+	m.appendViewportBlock(thinking)
+	blocks = m.viewport.visibleBlocks()
+	if len(blocks) != before+1 {
+		t.Fatalf("len(visibleBlocks()) after thinking = %d, want %d", len(blocks), before+1)
+	}
+	if got := m.viewport.GetFocusedBlock(userBlockID); got == nil || got.Type != BlockUser || got.Content != "new user message" {
+		t.Fatalf("user block after thinking append = %#v, want retained user block", got)
+	}
+	last = blocks[len(blocks)-1]
+	if last.ID != thinking.ID || last.Type != BlockThinking {
+		t.Fatalf("last visible block after thinking append = %#v, want thinking block %d", last, thinking.ID)
 	}
 	if state := m.startupDeferredTranscript; state == nil || state.windowEnd != len(state.allBlocks) {
 		t.Fatalf("startupDeferredTranscript after draft = %+v, want windowEnd synced to allBlocks", state)

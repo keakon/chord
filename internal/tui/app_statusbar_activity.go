@@ -150,7 +150,7 @@ func latestVisibleStartWall(v *Viewport) (time.Time, bool) {
 	return lastVisibleBlockStartedWall(v)
 }
 
-func (m Model) latestStatusStartWall(agentID string) (time.Time, bool) {
+func (m *Model) latestStatusStartWall(agentID string) (time.Time, bool) {
 	var latest time.Time
 	if t, ok := latestVisibleStartWall(m.viewport); ok && t.After(latest) {
 		latest = t

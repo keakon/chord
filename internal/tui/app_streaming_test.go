@@ -142,7 +142,7 @@ func TestStreamTextDeltasReuseCachedViewUntilFlush(t *testing.T) {
 func TestStreamTextPlaceholderDoesNotAppendAssistantBlock(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
 
-	for _, text := range []string{"", " \n\t", ".", "..", "...", " … \n"} {
+	for _, text := range []string{"", " \n\t", ".", "..", "...", " … \n", "\x1b[2m...\x1b[0m"} {
 		_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: text}})
 	}
 
@@ -220,7 +220,7 @@ func TestToolCallAfterStreamPlaceholderLeavesNoAssistantCard(t *testing.T) {
 }
 
 func TestStreamingAssistantPlaceholderRendersNoCard(t *testing.T) {
-	for _, content := range []string{"", " \n", ".", "..", "...", " … "} {
+	for _, content := range []string{"", " \n", ".", "..", "...", " … ", "\x1b[2m...\x1b[0m"} {
 		block := &Block{ID: 1, Type: BlockAssistant, Streaming: true, Content: content}
 		if lines := block.Render(120, ""); len(lines) != 0 {
 			t.Fatalf("placeholder %q rendered %d lines, want none", content, len(lines))

@@ -59,7 +59,10 @@ func visibleAssistantStreamContent(content string) string {
 }
 
 func assistantStreamContentIsPlaceholder(content string) bool {
-	content = visibleAssistantStreamContent(content)
+	content = strings.TrimSpace(removeTrailingCursorGlyph(content))
+	if strings.ContainsRune(content, '\x1b') {
+		content = strings.TrimSpace(stripANSI(content))
+	}
 	if content == "" {
 		return true
 	}

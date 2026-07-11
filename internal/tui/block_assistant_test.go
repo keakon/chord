@@ -18,6 +18,28 @@ func stripOSC8(s string) string {
 	return osc8Regex.ReplaceAllString(s, "")
 }
 
+func TestContainsMarkdownTable(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{name: "plain prose", content: "streaming text without table syntax", want: false},
+		{name: "pipe without delimiter", content: "left | right\nplain text", want: false},
+		{name: "delimiter without pipe", content: "heading\n---", want: false},
+		{name: "table", content: "Name | Value\n--- | ---\nA | B", want: true},
+		{name: "fenced code", content: "```md\nName | Value\n--- | ---\n```", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := containsMarkdownTable(tt.content); got != tt.want {
+				t.Fatalf("containsMarkdownTable(%q) = %v, want %v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPreprocessThinkingMarkdown_GluedBoldSection(t *testing.T) {
 	in := "That works properly too.**Planning image rendering**"
 	got := preprocessThinkingMarkdown(in)

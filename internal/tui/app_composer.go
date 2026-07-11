@@ -39,7 +39,7 @@ func (m *Model) nextDraftID() string {
 	return fmt.Sprintf("draft-%d", m.nextQueuedDraftID)
 }
 
-func (m Model) visibleQueuedDrafts() []queuedDraft {
+func (m *Model) visibleQueuedDrafts() []queuedDraft {
 	// queuedDrafts currently represent the local main-agent queue only. When the
 	// user switches to a worker view, the queue must stay isolated to main so the
 	// current agent's composer/queue state is not visually mixed with another's.

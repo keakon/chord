@@ -154,7 +154,7 @@ func (m *Model) startAnimTick() tea.Cmd {
 
 // activityFrame returns a non-empty string when animation is active,
 // used by the viewport as a flag to trigger tool-call block animation.
-func (m Model) activityFrame() string {
+func (m *Model) activityFrame() string {
 	if m.animRunning && len(activeToolSpinnerSegments) > 0 {
 		return activeToolSpinnerSegments[m.activitySpinnerFrameIndex%len(activeToolSpinnerSegments)]
 	}

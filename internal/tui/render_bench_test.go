@@ -432,6 +432,24 @@ func BenchmarkRenderAssistantStreamingLongTextCardCachedWarm(b *testing.B) {
 	}
 }
 
+func BenchmarkContainsMarkdownTablePlainText(b *testing.B) {
+	content := strings.Repeat("Streaming assistant prose without table syntax. ", 200)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_ = containsMarkdownTable(content)
+	}
+}
+
+func BenchmarkContainsMarkdownTable(b *testing.B) {
+	content := strings.Repeat("Introductory prose.\n", 100) + "Name | Value\n--- | ---\nA | B\n"
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_ = containsMarkdownTable(content)
+	}
+}
+
 // BenchmarkRenderAssistantStreamingSettledCardWarm measures the per-flush cost
 // of re-rendering a streaming card whose settled prefix is unchanged. With the
 // settled card-head cache this should stay proportional to the unsettled tail

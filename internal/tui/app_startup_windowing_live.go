@@ -277,7 +277,7 @@ func (m *Model) syncStartupDeferredTranscriptAfterViewportAppend() {
 	forceTailWindow := block.Type == BlockUser
 	if wasShowingTail || forceTailWindow {
 		state.windowEnd = len(state.allBlocks)
-		state.windowStart = max(0, state.windowEnd-len(m.viewport.blocks))
+		state.windowStart = max(0, state.windowEnd-startupTranscriptTailBlocks)
 		if forceTailWindow && !wasShowingTail {
 			windowed := m.startupDeferredWindowBlocks(state, state.windowStart, state.windowEnd)
 			if len(windowed) > 0 {

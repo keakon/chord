@@ -123,7 +123,7 @@ func (m *Model) sessionSwitchStatusText(maxWidth int) string {
 	return textStyle.Render(text)
 }
 
-func (m Model) interactionSuppressed() bool {
+func (m *Model) interactionSuppressed() bool {
 	return m.startupRestorePending || m.sessionSwitch.active()
 }
 
