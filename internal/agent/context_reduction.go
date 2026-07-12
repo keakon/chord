@@ -859,11 +859,124 @@ func reduceLongLogOutputSummary(ctx requestReductionContext) string {
 }
 
 func reduceShellSuccessOutputSummary(ctx requestReductionContext) string {
+	if summary, ok := reduceGoTestSuccessOutputSummary(ctx); ok {
+		return summary
+	}
 	summary := summarizeShellSuccess(ctx.Content, 4)
 	if len(summary.Lines) == 0 {
 		summary.Lines = []string{"- (no salient output lines preserved)"}
 	}
 	return fmt.Sprintf("[Older %s success summarized for this request to save context; bytes=%d lines=%d]\n%s", tools.NameShell, len(ctx.Content), summary.MeaningfulLines, strings.Join(summary.Lines, "\n"))
+}
+
+type goTestSuccessSummary struct {
+	PackagesOK  int
+	Cached      int
+	NoTestFiles int
+	Coverage    int
+	Failed      bool
+	Lines       []string
+}
+
+func reduceGoTestSuccessOutputSummary(ctx requestReductionContext) (string, bool) {
+	if isToolResultErrorStatus(ctx.ToolStatus) || !isDirectGoTestCommand(ctx.Meta.Args) {
+		return "", false
+	}
+	summary := summarizeGoTestSuccess(ctx.Content, 4)
+	if summary.PackagesOK == 0 || summary.Failed {
+		return "", false
+	}
+	if len(summary.Lines) == 0 {
+		summary.Lines = []string{"- (no package result lines preserved)"}
+	}
+	return fmt.Sprintf(
+		"[Older %s go test success summarized for this request to save context; bytes=%d lines=%d packages_ok=%d cached=%d no_test_files=%d coverage_reports=%d]\n%s",
+		tools.NameShell,
+		len(ctx.Content),
+		countMeaningfulLines(ctx.Content),
+		summary.PackagesOK,
+		summary.Cached,
+		summary.NoTestFiles,
+		summary.Coverage,
+		strings.Join(summary.Lines, "\n"),
+	), true
+}
+
+func isDirectGoTestCommand(argsJSON string) bool {
+	var args struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal([]byte(argsJSON), &args) != nil {
+		return false
+	}
+	analysis, err := tools.AnalyzeShellCommand(args.Command)
+	if err != nil || len(analysis.Subcommands) != 1 {
+		return false
+	}
+	literal := analysis.Subcommands[0].LiteralArgs
+	if len(literal) < 2 || literal[0] != "go" || literal[1] != "test" {
+		return false
+	}
+	for _, arg := range literal[2:] {
+		if arg == "-json" || strings.HasPrefix(arg, "-json=") {
+			return false
+		}
+	}
+	return true
+}
+
+func summarizeGoTestSuccess(content string, limit int) goTestSuccessSummary {
+	var summary goTestSuccessSummary
+	if limit <= 0 {
+		return summary
+	}
+	resultLines := make([]string, 0, limit)
+	appendResult := func(line string) {
+		line = compactTextSnippet(line, summaryLineSnippetChars)
+		for _, existing := range resultLines {
+			if existing == line {
+				return
+			}
+		}
+		if len(resultLines) < limit {
+			resultLines = append(resultLines, line)
+			return
+		}
+		copy(resultLines, resultLines[1:])
+		resultLines[len(resultLines)-1] = line
+	}
+	forEachLine(content, func(line string) bool {
+		trimmed := strings.TrimSpace(line)
+		fields := strings.Fields(trimmed)
+		if trimmed == "FAIL" || strings.HasPrefix(trimmed, "FAIL\t") || strings.HasPrefix(trimmed, "--- FAIL:") || strings.HasPrefix(trimmed, "panic:") {
+			summary.Failed = true
+			return true
+		}
+		if len(fields) >= 2 && fields[0] == "ok" {
+			summary.PackagesOK++
+			if strings.Contains(trimmed, "(cached)") {
+				summary.Cached++
+			}
+			if strings.Contains(strings.ToLower(trimmed), "coverage:") {
+				summary.Coverage++
+			}
+			appendResult(trimmed)
+			return true
+		}
+		if len(fields) >= 3 && fields[0] == "?" && strings.Contains(trimmed, "[no test files]") {
+			summary.NoTestFiles++
+			return true
+		}
+		if strings.HasPrefix(strings.ToLower(trimmed), "coverage:") {
+			summary.Coverage++
+			appendResult(trimmed)
+		}
+		return true
+	})
+	for _, line := range resultLines {
+		summary.Lines = append(summary.Lines, "- "+strings.ReplaceAll(line, "\n", " "))
+	}
+	return summary
 }
 
 type logSignalCounts struct {

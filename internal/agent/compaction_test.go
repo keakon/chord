@@ -717,7 +717,8 @@ func TestPrepareMessagesForLLM_PrunesStaleToolOutputWithinSingleUserTurn(t *test
 }
 
 func isShellSuccessSummary(content string) bool {
-	return strings.Contains(content, "[Older "+tools.NameShell+" success summarized for this request to save context;") &&
+	return (strings.Contains(content, "[Older "+tools.NameShell+" success summarized for this request to save context;") ||
+		strings.Contains(content, "[Older "+tools.NameShell+" go test success summarized for this request to save context;")) &&
 		strings.Contains(content, "bytes=") &&
 		strings.Contains(content, "lines=")
 }
@@ -738,14 +739,113 @@ func TestPrepareMessagesForLLM_ShellSuccessSummaryPrefersSalientLines(t *testing
 	if !isShellSuccessSummary(got) {
 		t.Fatalf("expected shell success summary, got %q", got)
 	}
-	if !strings.Contains(got, "ok github.com/example/project 1.23s") || !strings.Contains(got, "coverage: 82.1%") {
+	if !strings.Contains(got, "go test success summarized") ||
+		!strings.Contains(got, "packages_ok=1") ||
+		!strings.Contains(got, "coverage_reports=1") ||
+		!strings.Contains(got, "ok github.com/example/project 1.23s") ||
+		!strings.Contains(got, "coverage: 82.1%") {
 		t.Fatalf("expected salient success lines, got %q", got)
 	}
 	if strings.Contains(got, "updated dependency cache") {
 		t.Fatalf("expected strong result lines to take priority over early weak progress lines, got %q", got)
 	}
-	if !strings.Contains(got, "tail noise line") {
-		t.Fatalf("expected one tail fallback line to preserve final status context, got %q", got)
+	if strings.Contains(got, "tail noise line") {
+		t.Fatalf("expected command-aware summary to omit unrelated tail noise, got %q", got)
+	}
+}
+
+func TestPrepareMessagesForLLM_GoTestSummaryCountsPackagesAndCachedResults(t *testing.T) {
+	a := &MainAgent{}
+	largeOutput := strings.Repeat("compile progress line\n", compactBashSuccessBytes) +
+		"?   \tgithub.com/example/project/cmd\t[no test files]\n" +
+		"ok  \tgithub.com/example/project/internal/a\t(cached)\n" +
+		"ok  \tgithub.com/example/project/internal/b\t1.23s\tcoverage: 84.2% of statements\n"
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	got := prepared[2].Content
+	for _, want := range []string{
+		"go test success summarized",
+		"packages_ok=2",
+		"cached=1",
+		"no_test_files=1",
+		"coverage_reports=1",
+		"github.com/example/project/internal/a",
+		"github.com/example/project/internal/b",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in command-aware go test summary, got %q", want, got)
+		}
+	}
+	if strings.Contains(got, "compile progress line") {
+		t.Fatalf("expected go test summary to omit progress noise, got %q", got)
+	}
+}
+
+func TestPrepareMessagesForLLM_GoTestJSONUsesExistingStructuredFallback(t *testing.T) {
+	a := &MainAgent{}
+	largeOutput := strings.Repeat(`{"Action":"pass","Package":"github.com/example/project"}`+"\n", compactBashSuccessBytes)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test -json ./..."}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	got := a.prepareMessagesForLLM(msgs)[2].Content
+	if strings.Contains(got, "go test success summarized") {
+		t.Fatalf("structured go test output must not use line-oriented command summary, got %q", got)
+	}
+	if !strings.Contains(got, "Older shell output omitted") {
+		t.Fatalf("expected existing structured-output fallback for go test -json, got %q", got)
+	}
+}
+
+func TestPrepareMessagesForLLM_CompoundGoTestUsesGenericShellSummary(t *testing.T) {
+	a := &MainAgent{}
+	largeOutput := strings.Repeat("ok github.com/example/project 1.23s\n", compactBashSuccessBytes)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./... && echo done"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	got := a.prepareMessagesForLLM(msgs)[2].Content
+	if !strings.Contains(got, "[Older "+tools.NameShell+" success summarized") {
+		t.Fatalf("expected generic shell summary for compound command, got %q", got)
+	}
+	if strings.Contains(got, "go test success summarized") {
+		t.Fatalf("compound command must not use direct go test summary, got %q", got)
+	}
+}
+
+func TestReduceGoTestSuccessOutputSummaryRejectsFailedOutput(t *testing.T) {
+	ctx := requestReductionContext{
+		Meta:    toolCallMeta{Args: `{"command":"go test ./..."}`},
+		Content: "ok  \tgithub.com/example/project/internal/a\t(cached)\n--- FAIL: TestBroken (0.00s)\nFAIL\tgithub.com/example/project/internal/b\t0.01s\nFAIL\n",
+	}
+	if got, ok := reduceGoTestSuccessOutputSummary(ctx); ok {
+		t.Fatalf("failed go test output must not use success summary, got %q", got)
+	}
+}
+
+func TestReduceGoTestSuccessOutputSummaryRejectsErrorStatus(t *testing.T) {
+	ctx := requestReductionContext{
+		Meta:       toolCallMeta{Args: `{"command":"go test ./..."}`},
+		Content:    "ok  \tgithub.com/example/project/internal/a\t(cached)\n",
+		ToolStatus: string(ToolResultStatusError),
+	}
+	if got, ok := reduceGoTestSuccessOutputSummary(ctx); ok {
+		t.Fatalf("error-status go test output must not use success summary, got %q", got)
 	}
 }
 
