@@ -31,6 +31,17 @@ func TestTruncateStringHeadTailASCIIWithUnicodeSeparator(t *testing.T) {
 	}
 }
 
+func TestTruncateStringHeadTailASCIIAllocsGuard(t *testing.T) {
+	text := strings.Repeat("source line from tool output\n", 100)
+	allocs := testing.AllocsPerRun(100, func() {
+		_ = TruncateStringHeadTail(text, 500, 500, "\n...\n")
+	})
+	const maxAllocs = 1
+	if allocs > maxAllocs {
+		t.Fatalf("ASCII head-tail truncation allocs = %.0f, want ≤%d", allocs, maxAllocs)
+	}
+}
+
 func TestTruncateStringRunesPreservesUTF8(t *testing.T) {
 	for _, tc := range []struct {
 		name string

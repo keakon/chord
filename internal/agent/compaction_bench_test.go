@@ -57,6 +57,21 @@ func BenchmarkPrepareMessagesForLLMCold(b *testing.B) {
 	}
 }
 
+func TestPrepareMessagesForLLMColdAllocsGuard(t *testing.T) {
+	a := benchmarkContextReductionAgent()
+	messages := benchmarkContextReductionMessages(100)
+	allocs := testing.AllocsPerRun(10, func() {
+		prepared := a.prepareMessagesForLLMWithOptions(messages, false)
+		if len(prepared) != len(messages) {
+			t.Fatalf("prepared messages = %d, want %d", len(prepared), len(messages))
+		}
+	})
+	const maxAllocs = 1700
+	if allocs > maxAllocs {
+		t.Fatalf("cold context reduction allocs = %.0f, want ≤%d", allocs, maxAllocs)
+	}
+}
+
 func BenchmarkPrepareMessagesForLLMStablePrefixReuse(b *testing.B) {
 	for _, toolResults := range []int{100, 1000} {
 		b.Run(fmt.Sprintf("tool_results_%d", toolResults), func(b *testing.B) {

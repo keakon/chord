@@ -7,12 +7,14 @@ on:
     paths:
       - "internal/tui/**"
       - "internal/llm/**"
+      - "internal/session/**"
       - "scripts/bench_tui_regression.sh"
       - ".github/workflows/performance.yml"
   pull_request:
     paths:
       - "internal/tui/**"
       - "internal/llm/**"
+      - "internal/session/**"
       - "scripts/bench_tui_regression.sh"
       - ".github/workflows/performance.yml"
   workflow_dispatch:

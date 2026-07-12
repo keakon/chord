@@ -96,6 +96,22 @@ func BenchmarkSSEParseWithCallbackCumulative(b *testing.B) {
 	benchmarkSSEParseWithCallbackMode(b, false)
 }
 
+func TestOpenAIFixedSSEParseAllocsGuard(t *testing.T) {
+	allocs := testing.AllocsPerRun(50, func() {
+		resp, err := parseOpenAISSEStream(bytes.NewReader(openAICallbackFixedFixture), nil, nil)
+		if err != nil {
+			t.Fatalf("parse fixed OpenAI SSE: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("parse fixed OpenAI SSE returned nil response")
+		}
+	})
+	const maxAllocs = 90
+	if allocs > maxAllocs {
+		t.Fatalf("fixed OpenAI SSE parse allocs = %.0f, want ≤%d", allocs, maxAllocs)
+	}
+}
+
 func BenchmarkSSEParseWithCallbackIncremental(b *testing.B) {
 	benchmarkSSEParseWithCallbackMode(b, true)
 }
