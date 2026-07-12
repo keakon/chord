@@ -60,12 +60,26 @@ func BenchmarkPrepareMessagesForLLMCold(b *testing.B) {
 func TestPrepareMessagesForLLMColdAllocsGuard(t *testing.T) {
 	a := benchmarkContextReductionAgent()
 	messages := benchmarkContextReductionMessages(100)
+	var prepared []message.Message
 	allocs := testing.AllocsPerRun(10, func() {
-		prepared := a.prepareMessagesForLLMWithOptions(messages, false)
+		prepared = a.prepareMessagesForLLMWithOptions(messages, false)
 		if len(prepared) != len(messages) {
 			t.Fatalf("prepared messages = %d, want %d", len(prepared), len(messages))
 		}
 	})
+	if !hasReductionSavings(a.GetContextReductionStats()) {
+		t.Fatal("allocation guard fixture did not produce reduction savings")
+	}
+	reduced := false
+	for _, msg := range prepared {
+		if msg.Role == message.RoleTool && msg.Content != strings.Repeat("line from source file\n", 100) {
+			reduced = true
+			break
+		}
+	}
+	if !reduced {
+		t.Fatal("allocation guard fixture did not reduce any tool result")
+	}
 	const maxAllocs = 1700
 	if allocs > maxAllocs {
 		t.Fatalf("cold context reduction allocs = %.0f, want ≤%d", allocs, maxAllocs)

@@ -8,6 +8,8 @@ on:
       - "internal/tui/**"
       - "internal/llm/**"
       - "internal/session/**"
+      - "internal/recovery/**"
+      - "internal/agent/**"
       - "scripts/bench_tui_regression.sh"
       - ".github/workflows/performance.yml"
   pull_request:
@@ -15,6 +17,8 @@ on:
       - "internal/tui/**"
       - "internal/llm/**"
       - "internal/session/**"
+      - "internal/recovery/**"
+      - "internal/agent/**"
       - "scripts/bench_tui_regression.sh"
       - ".github/workflows/performance.yml"
   workflow_dispatch:

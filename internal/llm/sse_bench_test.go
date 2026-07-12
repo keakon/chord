@@ -97,6 +97,7 @@ func BenchmarkSSEParseWithCallbackCumulative(b *testing.B) {
 }
 
 func TestOpenAIFixedSSEParseAllocsGuard(t *testing.T) {
+	var parsed *message.Response
 	allocs := testing.AllocsPerRun(50, func() {
 		resp, err := parseOpenAISSEStream(bytes.NewReader(openAICallbackFixedFixture), nil, nil)
 		if err != nil {
@@ -105,7 +106,17 @@ func TestOpenAIFixedSSEParseAllocsGuard(t *testing.T) {
 		if resp == nil {
 			t.Fatal("parse fixed OpenAI SSE returned nil response")
 		}
+		parsed = resp
 	})
+	if parsed.Content != "Plan: inspect files" {
+		t.Fatalf("fixed OpenAI SSE content = %q, want %q", parsed.Content, "Plan: inspect files")
+	}
+	if len(parsed.ToolCalls) != 1 || parsed.ToolCalls[0].ID != "call_read" || parsed.ToolCalls[0].Name != "Read" {
+		t.Fatalf("fixed OpenAI SSE tool calls = %+v, want completed Read call", parsed.ToolCalls)
+	}
+	if string(parsed.ToolCalls[0].Args) != `{"path":"README.md","limit":120}` {
+		t.Fatalf("fixed OpenAI SSE tool args = %s", parsed.ToolCalls[0].Args)
+	}
 	const maxAllocs = 90
 	if allocs > maxAllocs {
 		t.Fatalf("fixed OpenAI SSE parse allocs = %.0f, want ≤%d", allocs, maxAllocs)

@@ -4,6 +4,7 @@
 package recovery
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -283,7 +284,14 @@ func (r *RecoveryManager) LoadMessages(agentID string) ([]message.Message, error
 	defer f.Close()
 
 	var messages []message.Message
-	dec := json.NewDecoder(f)
+	readBufferSize := recoveryMinReadBufferSize
+	if info, statErr := f.Stat(); statErr == nil {
+		if count, ok := cachedMessageCount(path, info); ok {
+			messages = make([]message.Message, 0, count)
+		}
+		readBufferSize = min(recoveryMaxReadBufferSize, max(recoveryMinReadBufferSize, int(info.Size())))
+	}
+	dec := json.NewDecoder(bufio.NewReaderSize(f, readBufferSize))
 	for {
 		var msg message.Message
 		if err := dec.Decode(&msg); err != nil {
@@ -418,7 +426,11 @@ type SessionInfo struct {
 }
 
 // maxFirstUserMessagePreview is the max rune count for FirstUserMessage in SessionInfo.
-const maxFirstUserMessagePreview = 80
+const (
+	maxFirstUserMessagePreview = 80
+	recoveryMinReadBufferSize  = 4 * 1024
+	recoveryMaxReadBufferSize  = 64 * 1024
+)
 
 // ListSessions scans the sessions directory and returns SessionInfo for each
 // session that has a non-empty main.jsonl. Results are sorted by directory

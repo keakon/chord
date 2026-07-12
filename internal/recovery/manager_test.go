@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -870,5 +872,49 @@ func TestListSessions_AndSessionInfoForDir(t *testing.T) {
 	}
 	if info := SessionInfoForDir(t.TempDir()); info != nil {
 		t.Error("SessionInfoForDir(empty) should be nil")
+	}
+}
+
+func TestLoadMessagesCountCacheOnlyProvidesCapacityHint(t *testing.T) {
+	rm, dir := newTestManager(t)
+	defer rm.Close()
+	for i := 0; i < 3; i++ {
+		if err := rm.PersistMessage("main", message.Message{Role: message.RoleUser, Content: fmt.Sprintf("message-%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := filepath.Join(dir, identity.MainSessionLogFilename)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageCountCache.Store(path, messageCountEntry{size: info.Size(), modTime: info.ModTime(), count: 1})
+
+	messages, err := rm.LoadMessages("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("messages = %d, want 3", len(messages))
+	}
+}
+
+func TestLoadMessagesSupportsRecordLargerThanReadBuffer(t *testing.T) {
+	rm, _ := newTestManager(t)
+	defer rm.Close()
+	content := strings.Repeat("x", recoveryMaxReadBufferSize*2)
+	if err := rm.PersistMessage("main", message.Message{Role: message.RoleUser, Content: content}); err != nil {
+		t.Fatal(err)
+	}
+
+	messages, err := rm.LoadMessages("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("restored messages = %d, want 1", len(messages))
+	}
+	if messages[0].Content != content {
+		t.Fatalf("restored content length = %d, want %d", len(messages[0].Content), len(content))
 	}
 }

@@ -29,26 +29,28 @@ func benchmarkDeferredStartupModel(b *testing.B, blocks int) *Model {
 }
 
 func BenchmarkDeferredStartupTranscriptJumpOrdinalWindowSwitch(b *testing.B) {
+	m := benchmarkDeferredStartupModel(b, 1500)
+	ordinals := [...]int{900, 300}
+	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		m := func() *Model {
-			b.StopTimer()
-			defer b.StartTimer()
-			return benchmarkDeferredStartupModel(b, 1500)
-		}()
-		m.jumpToVisibleBlockOrdinal(900)
+	for i := 0; b.Loop(); i++ {
+		m.jumpToVisibleBlockOrdinal(ordinals[i%len(ordinals)])
 	}
 }
 
 func BenchmarkDeferredStartupTranscriptJumpTopBottomWindowSwitch(b *testing.B) {
+	m := benchmarkDeferredStartupModel(b, 1500)
+	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		m := func() *Model {
-			b.StopTimer()
-			defer b.StartTimer()
-			return benchmarkDeferredStartupModel(b, 1500)
-		}()
+	for b.Loop() {
 		m.jumpToVisibleBlockOrdinal(1)
 		m.handleNormalKey(modelSelectKey("G"))
+	}
+}
+
+func BenchmarkDeferredStartupModelBuild(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = benchmarkDeferredStartupModel(b, 1500)
 	}
 }

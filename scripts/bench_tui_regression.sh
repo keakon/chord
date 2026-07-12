@@ -21,6 +21,7 @@ FRONTIER_BENCH_PATTERN='^(BenchmarkFindStreamingSettledFrontierAppendSnapshots|B
 SSE_BENCH_PATTERN='^(BenchmarkSSEParseWithCallbackCumulative|BenchmarkSSEParseWithCallbackIncremental|BenchmarkSSEParseWithCollector)$'
 TRUNCATE_BENCH_PATTERN='^BenchmarkTruncateStringHeadTail$'
 SESSION_BENCH_PATTERN='^(BenchmarkImportFromBytesLargeSession|BenchmarkExportedSessionToMessagesLargeSession)$'
+RECOVERY_BENCH_PATTERN='^(BenchmarkLoadMessagesLargeSession.*|BenchmarkLoadMessagesBySize)$'
 
 if [[ "${CHORD_BENCH_FULL:-}" == "1" ]]; then
   BENCH_PATTERN="$FULL_BENCH_PATTERN"
@@ -74,6 +75,13 @@ if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
   session_bench_args+=(-benchtime "${CHORD_BENCH_TIME}")
 fi
 go test ./internal/session "${session_bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
+
+printf '\n==> Running session recovery benchmarks\n'
+recovery_bench_args=(-run '^$' -bench "$RECOVERY_BENCH_PATTERN" -benchmem)
+if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
+  recovery_bench_args+=(-benchtime "${CHORD_BENCH_TIME}")
+fi
+go test ./internal/recovery "${recovery_bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
 
 if [[ $# -eq 2 ]]; then
   if command -v benchstat >/dev/null 2>&1; then
