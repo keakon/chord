@@ -1985,6 +1985,26 @@ func TestParseDisplayedReadRangeSupportsLegacyFooter(t *testing.T) {
 	}
 }
 
+func TestParseDisplayedReadRangeSupportsLegacySingleLineFooter(t *testing.T) {
+	got := parseDisplayedReadRange("source line\n(showing line 7 of 20 total)")
+	if !got.OK || got.Start != 7 || got.End != 7 || got.Total != 20 {
+		t.Fatalf("parseDisplayedReadRange() = %+v, want 7-7/20", got)
+	}
+}
+
+func TestParseDisplayedReadRangePlainContentAllocsGuard(t *testing.T) {
+	content := strings.Repeat("ordinary source line\n", 100)
+	allocs := testing.AllocsPerRun(100, func() {
+		if got := parseDisplayedReadRange(content); got.OK {
+			t.Fatalf("parseDisplayedReadRange() = %+v, want no range", got)
+		}
+	})
+	const maxAllocs = 1
+	if allocs > maxAllocs {
+		t.Fatalf("plain read range parse allocs = %.0f, want ≤%d", allocs, maxAllocs)
+	}
+}
+
 func TestPrepareMessagesForLLM_FreshSpecializedOutputIsNotReduced(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{

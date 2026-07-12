@@ -1290,37 +1290,41 @@ func parseDisplayedReadRange(content string) displayedReadRange {
 	var found displayedReadRange
 	forEachLine(content, func(line string) bool {
 		line = strings.TrimSpace(line)
-		var out displayedReadRange
-		if m := readResultRangeRe.FindStringSubmatch(line); len(m) == 4 {
-			start, startErr := strconv.Atoi(m[1])
-			end, endErr := strconv.Atoi(m[2])
-			total, totalErr := strconv.Atoi(m[3])
-			if startErr == nil && endErr == nil && totalErr == nil {
-				out.Start = start
-				out.End = end
-				out.Total = total
-				out.OK = true
-				found = out
-				return false
+		if strings.HasPrefix(line, "READ_RESULT") {
+			if m := readResultRangeRe.FindStringSubmatch(line); len(m) == 4 {
+				start, startErr := strconv.Atoi(m[1])
+				end, endErr := strconv.Atoi(m[2])
+				total, totalErr := strconv.Atoi(m[3])
+				if startErr == nil && endErr == nil && totalErr == nil {
+					found = displayedReadRange{Start: start, End: end, Total: total, OK: true}
+					return false
+				}
 			}
 		}
 		if !strings.HasPrefix(line, "(showing ") {
 			return true
 		}
-		if n, _ := fmt.Sscanf(line, "(showing lines %d-%d of %d total", &out.Start, &out.End, &out.Total); n == 3 {
-			out.OK = true
-			found = out
-			return false
-		}
-		if n, _ := fmt.Sscanf(line, "(showing line %d of %d total", &out.Start, &out.Total); n == 2 {
-			out.End = out.Start
-			out.OK = true
-			found = out
+		if legacy := parseLegacyDisplayedReadRange(line); legacy.OK {
+			found = legacy
 			return false
 		}
 		return true
 	})
 	return found
+}
+
+func parseLegacyDisplayedReadRange(line string) displayedReadRange {
+	var out displayedReadRange
+	if n, _ := fmt.Sscanf(line, "(showing lines %d-%d of %d total", &out.Start, &out.End, &out.Total); n == 3 {
+		out.OK = true
+		return out
+	}
+	if n, _ := fmt.Sscanf(line, "(showing line %d of %d total", &out.Start, &out.Total); n == 2 {
+		out.End = out.Start
+		out.OK = true
+		return out
+	}
+	return displayedReadRange{}
 }
 
 func reduceReadOutputSummary(argsJSON, content string) string {
