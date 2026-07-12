@@ -18,12 +18,19 @@ func TestDeleteSessionByIDRemovesUnlockedNonCurrentSession(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(targetDir, "images"), 0o755); err != nil {
 		t.Fatalf("mkdir target session: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(targetDir, "main.jsonl"), []byte("{}\n"), 0o600); err != nil {
+	mainPath := filepath.Join(targetDir, "main.jsonl")
+	if err := os.WriteFile(mainPath, []byte("{}\n"), 0o600); err != nil {
 		t.Fatalf("write target main.jsonl: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(targetDir, "images", "a.png"), []byte("img"), 0o600); err != nil {
 		t.Fatalf("write target asset: %v", err)
 	}
+	info, err := os.Stat(mainPath)
+	if err != nil {
+		t.Fatalf("stat target main.jsonl: %v", err)
+	}
+	messageCountCache.Store(mainPath, messageCountEntry{size: info.Size(), modTime: info.ModTime(), count: 1})
+	t.Cleanup(func() { messageCountCache.Delete(mainPath) })
 
 	if err := DeleteSessionByID(sessionsDir, currentDir, "1000"); err != nil {
 		t.Fatalf("DeleteSessionByID: %v", err)
@@ -33,6 +40,9 @@ func TestDeleteSessionByIDRemovesUnlockedNonCurrentSession(t *testing.T) {
 	}
 	if _, err := os.Stat(currentDir); err != nil {
 		t.Fatalf("current session unexpectedly missing: %v", err)
+	}
+	if _, ok := messageCountCache.Load(mainPath); ok {
+		t.Fatal("deleted session message count remains cached")
 	}
 }
 

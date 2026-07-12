@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/keakon/chord/internal/identity"
 )
 
 var ErrDeleteCurrentSession = errors.New("cannot delete current session")
@@ -47,5 +49,6 @@ func DeleteSessionByID(sessionsDir, currentSessionDir, sessionID string) error {
 	if err := os.RemoveAll(targetDir); err != nil {
 		return fmt.Errorf("delete session %q: remove dir: %w", sessionID, err)
 	}
+	messageCountCache.Delete(filepath.Join(targetDir, identity.MainSessionLogFilename))
 	return nil
 }

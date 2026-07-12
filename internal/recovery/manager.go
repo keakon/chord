@@ -504,8 +504,8 @@ func cachedSessionPreview(sessionPath string) (firstUser string, firstUserIsComp
 
 // messageCountCache memoizes per-log newline counts keyed by the file's
 // (size, mtime) identity, so reopening the session picker does not re-read
-// every session's main.jsonl in full. Entries are bounded by the number of
-// session directories on disk.
+// every session's main.jsonl in full. Successful session deletion evicts the
+// corresponding entry.
 var messageCountCache sync.Map // mainPath string -> messageCountEntry
 
 type messageCountEntry struct {
