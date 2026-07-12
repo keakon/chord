@@ -669,7 +669,16 @@ func stableReductionHashString(value string) [sha256.Size]byte {
 	return sha256.Sum256([]byte(value))
 }
 
+var stableReductionEmptySequenceHash = func() [sha256.Size]byte {
+	h := sha256.New()
+	stableReductionWriteInt(h, 0)
+	return stableReductionHashBytes(h.Sum(nil))
+}()
+
 func stableReductionContentPartsHash(parts []message.ContentPart) [sha256.Size]byte {
+	if len(parts) == 0 {
+		return stableReductionEmptySequenceHash
+	}
 	h := sha256.New()
 	stableReductionWriteInt(h, len(parts))
 	for _, part := range parts {
@@ -686,6 +695,9 @@ func stableReductionContentPartsHash(parts []message.ContentPart) [sha256.Size]b
 }
 
 func stableReductionThinkingBlocksHash(blocks []message.ThinkingBlock) [sha256.Size]byte {
+	if len(blocks) == 0 {
+		return stableReductionEmptySequenceHash
+	}
 	h := sha256.New()
 	stableReductionWriteInt(h, len(blocks))
 	for _, block := range blocks {
@@ -696,6 +708,9 @@ func stableReductionThinkingBlocksHash(blocks []message.ThinkingBlock) [sha256.S
 }
 
 func stableReductionToolCallsHash(calls []message.ToolCall) [sha256.Size]byte {
+	if len(calls) == 0 {
+		return stableReductionEmptySequenceHash
+	}
 	h := sha256.New()
 	stableReductionWriteInt(h, len(calls))
 	for _, call := range calls {

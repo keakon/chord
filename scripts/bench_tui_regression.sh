@@ -19,6 +19,7 @@ SMOKE_BENCH_PATTERN='^(BenchmarkRenderAssistantStreamingCard|BenchmarkRenderAssi
 FULL_BENCH_PATTERN='^(BenchmarkRenderAssistantCard|BenchmarkRenderAssistantCardCachedWarm|BenchmarkRenderAssistantStreamingCard|BenchmarkRenderAssistantStreamingTextCard|BenchmarkRenderAssistantStreamingLongTextCard|BenchmarkRenderAssistantStreamingLongTextCardCachedWarm|BenchmarkStreamTextDeltaBurstDeferredView|BenchmarkStreamTextDeltaBurstCadenceFlush|BenchmarkStreamThinkingDeltaBurstDeferredView|BenchmarkToolCallUpdateArgsStreamingCadence|BenchmarkRenderToolCallCard|BenchmarkViewportVisibleWindowBlockIDs|BenchmarkViewportRenderLargeTranscriptAtBottom|BenchmarkViewportRenderLargeTranscriptScrollWindow|BenchmarkApplyWheelScrollDeltaLargeTranscript|BenchmarkDeferredStartupTranscriptJumpOrdinalWindowSwitch|BenchmarkDeferredStartupTranscriptJumpTopBottomWindowSwitch|BenchmarkFindMatchesAtWidth|BenchmarkModelViewCached|BenchmarkRenderStatusBarModelPillCacheHit|BenchmarkRenderStatusBarAgentSnapshotDirty|BenchmarkRenderStatusBarSessionSummaryDirty|BenchmarkRenderConfirmDialogOpen|BenchmarkRenderQuestionDialogOpen|BenchmarkModelViewAtMentionPopupOpen|BenchmarkRenderDirectoryOpen|BenchmarkRenderSessionSelectDialogOpen|BenchmarkRenderUsageStatsDialogOpen|BenchmarkOverlayListRenderCacheHit|BenchmarkOverlayListRenderCacheMiss|BenchmarkOverlayTableRenderCacheHit|BenchmarkOverlayTableRenderCacheMiss)$'
 FRONTIER_BENCH_PATTERN='^(BenchmarkFindStreamingSettledFrontierAppendSnapshots|BenchmarkStreamingFrontierScannerAppendSnapshots)$'
 SSE_BENCH_PATTERN='^(BenchmarkSSEParseWithCallbackCumulative|BenchmarkSSEParseWithCallbackIncremental|BenchmarkSSEParseWithCollector)$'
+TRUNCATE_BENCH_PATTERN='^BenchmarkTruncateStringHeadTail$'
 
 if [[ "${CHORD_BENCH_FULL:-}" == "1" ]]; then
   BENCH_PATTERN="$FULL_BENCH_PATTERN"
@@ -51,6 +52,13 @@ if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
   sse_bench_args+=(-benchtime "${CHORD_BENCH_TIME}")
 fi
 go test ./internal/llm "${sse_bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
+
+printf '\n==> Running text truncation benchmarks\n'
+truncate_bench_args=(-run '^$' -bench "$TRUNCATE_BENCH_PATTERN" -benchmem)
+if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
+  truncate_bench_args+=(-benchtime "${CHORD_BENCH_TIME}")
+fi
+go test ./internal/llm "${truncate_bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
 
 printf '\n==> Running context reduction benchmarks\n'
 context_bench_args=(-run '^$' -bench '^BenchmarkPrepareMessagesForLLM' -benchmem)

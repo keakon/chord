@@ -3,6 +3,8 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -4745,6 +4747,81 @@ func TestPrepareMessagesForLLM_IncrementalFreezesAlreadyReducedPrefix(t *testing
 	stats := a.GetContextReductionStats()
 	if stats.SkippedByReason[contextReductionSkipFrozenReduced] < 2 {
 		t.Fatalf("expected at least 2 frozen_reduced skips, got %d (stats=%+v)", stats.SkippedByReason[contextReductionSkipFrozenReduced], stats)
+	}
+}
+
+func TestStableReductionEmptySequenceHashMatchesHasher(t *testing.T) {
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], 0)
+	inner := sha256.Sum256(length[:])
+	want := sha256.Sum256(inner[:])
+
+	if got := stableReductionContentPartsHash(nil); got != want {
+		t.Fatalf("empty content parts hash = %x, want %x", got, want)
+	}
+	if got := stableReductionThinkingBlocksHash(nil); got != want {
+		t.Fatalf("empty thinking blocks hash = %x, want %x", got, want)
+	}
+	if got := stableReductionToolCallsHash(nil); got != want {
+		t.Fatalf("empty tool calls hash = %x, want %x", got, want)
+	}
+}
+
+func TestStableReductionSequenceHashesMatchStreamingEncoding(t *testing.T) {
+	parts := []message.ContentPart{{
+		Type: message.ContentPartText, Text: "text", DisplayText: "display", InlineToken: "token",
+		MimeType: "text/plain", Data: []byte("data"), ImagePath: "/tmp/image", FileName: "file.txt",
+	}}
+	blocks := []message.ThinkingBlock{{Thinking: "reasoning", Signature: "signature"}}
+	calls := []message.ToolCall{{ID: "call-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"x.go"}`)}}
+
+	assertHash := func(name string, got [sha256.Size]byte, write func(interface{ Write([]byte) (int, error) })) {
+		t.Helper()
+		h := sha256.New()
+		write(h)
+		want := sha256.Sum256(h.Sum(nil))
+		if got != want {
+			t.Fatalf("%s hash = %x, want %x", name, got, want)
+		}
+	}
+	assertHash("content parts", stableReductionContentPartsHash(parts), func(h interface{ Write([]byte) (int, error) }) {
+		stableReductionWriteInt(h, len(parts))
+		for _, part := range parts {
+			stableReductionWriteString(h, string(part.Type))
+			stableReductionWriteString(h, part.Text)
+			stableReductionWriteString(h, part.DisplayText)
+			stableReductionWriteString(h, part.InlineToken)
+			stableReductionWriteString(h, part.MimeType)
+			stableReductionWriteBytes(h, part.Data)
+			stableReductionWriteString(h, part.ImagePath)
+			stableReductionWriteString(h, part.FileName)
+		}
+	})
+	assertHash("thinking blocks", stableReductionThinkingBlocksHash(blocks), func(h interface{ Write([]byte) (int, error) }) {
+		stableReductionWriteInt(h, len(blocks))
+		for _, block := range blocks {
+			stableReductionWriteString(h, block.Thinking)
+			stableReductionWriteString(h, block.Signature)
+		}
+	})
+	assertHash("tool calls", stableReductionToolCallsHash(calls), func(h interface{ Write([]byte) (int, error) }) {
+		stableReductionWriteInt(h, len(calls))
+		for _, call := range calls {
+			stableReductionWriteString(h, call.ID)
+			stableReductionWriteString(h, call.Name)
+			stableReductionWriteBytes(h, call.Args)
+		}
+	})
+}
+
+func TestStableReductionLargeBinaryPartAllocsGuard(t *testing.T) {
+	parts := []message.ContentPart{{Type: message.ContentPartImage, Data: make([]byte, 4<<20)}}
+	allocs := testing.AllocsPerRun(10, func() {
+		_ = stableReductionContentPartsHash(parts)
+	})
+	const maxAllocs = 20
+	if allocs > maxAllocs {
+		t.Fatalf("large binary content-part hash allocs = %.0f, want ≤%d", allocs, maxAllocs)
 	}
 }
 

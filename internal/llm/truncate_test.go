@@ -7,6 +7,30 @@ import (
 	"unicode/utf8"
 )
 
+func BenchmarkTruncateStringHeadTail(b *testing.B) {
+	for _, tc := range []struct {
+		name string
+		text string
+	}{
+		{name: "ascii", text: strings.Repeat("source line from tool output\n", 100)},
+		{name: "unicode", text: strings.Repeat("工具输出内容🙂\n", 300)},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = TruncateStringHeadTail(tc.text, 500, 500, "\n...\n")
+			}
+		})
+	}
+}
+
+func TestTruncateStringHeadTailASCIIWithUnicodeSeparator(t *testing.T) {
+	got := TruncateStringHeadTail("abcdefghij", 3, 2, "…")
+	if got != "abc…ij" {
+		t.Fatalf("TruncateStringHeadTail() = %q, want %q", got, "abc…ij")
+	}
+}
+
 func TestTruncateStringRunesPreservesUTF8(t *testing.T) {
 	for _, tc := range []struct {
 		name string

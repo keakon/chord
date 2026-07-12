@@ -36,8 +36,12 @@ func TruncateStringHeadTail(s string, headRunes, tailRunes int, sep string) stri
 		tailRunes = 0
 	}
 	total := utf8.RuneCountInString(s)
-	if total <= headRunes+tailRunes+utf8.RuneCountInString(sep) {
+	sepRunes := utf8.RuneCountInString(sep)
+	if total <= headRunes+tailRunes+sepRunes {
 		return s
+	}
+	if total == len(s) {
+		return s[:headRunes] + sep + s[len(s)-tailRunes:]
 	}
 	head := TruncateStringFirstRunes(s, headRunes)
 	tail := TruncateStringLastRunes(s, tailRunes)
