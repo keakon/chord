@@ -1972,6 +1972,19 @@ func TestParseDisplayedReadRangeSupportsReadResultHeader(t *testing.T) {
 	}
 }
 
+func TestParseDisplayedReadRangeSupportsLegacyFooter(t *testing.T) {
+	content := strings.Join([]string{
+		"source line 1",
+		"source line 2",
+		"(showing lines 41-42 of 200 total)",
+	}, "\n")
+
+	got := parseDisplayedReadRange(content)
+	if !got.OK || got.Start != 41 || got.End != 42 || got.Total != 200 {
+		t.Fatalf("parseDisplayedReadRange() = %+v, want 41-42/200", got)
+	}
+}
+
 func TestPrepareMessagesForLLM_FreshSpecializedOutputIsNotReduced(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{

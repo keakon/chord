@@ -52,6 +52,13 @@ if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
 fi
 go test ./internal/llm "${sse_bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
 
+printf '\n==> Running context reduction benchmarks\n'
+context_bench_args=(-run '^$' -bench '^BenchmarkPrepareMessagesForLLM' -benchmem)
+if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
+  context_bench_args+=(-benchtime "${CHORD_BENCH_TIME}")
+fi
+go test ./internal/agent "${context_bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
+
 if [[ $# -eq 2 ]]; then
   if command -v benchstat >/dev/null 2>&1; then
     printf '\n==> benchstat comparison\n'

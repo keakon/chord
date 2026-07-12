@@ -1287,7 +1287,8 @@ type displayedReadRange struct {
 }
 
 func parseDisplayedReadRange(content string) displayedReadRange {
-	for _, line := range strings.Split(content, "\n") {
+	var found displayedReadRange
+	forEachLine(content, func(line string) bool {
 		line = strings.TrimSpace(line)
 		var out displayedReadRange
 		if m := readResultRangeRe.FindStringSubmatch(line); len(m) == 4 {
@@ -1299,20 +1300,27 @@ func parseDisplayedReadRange(content string) displayedReadRange {
 				out.End = end
 				out.Total = total
 				out.OK = true
-				return out
+				found = out
+				return false
 			}
+		}
+		if !strings.HasPrefix(line, "(showing ") {
+			return true
 		}
 		if n, _ := fmt.Sscanf(line, "(showing lines %d-%d of %d total", &out.Start, &out.End, &out.Total); n == 3 {
 			out.OK = true
-			return out
+			found = out
+			return false
 		}
 		if n, _ := fmt.Sscanf(line, "(showing line %d of %d total", &out.Start, &out.Total); n == 2 {
 			out.End = out.Start
 			out.OK = true
-			return out
+			found = out
+			return false
 		}
-	}
-	return displayedReadRange{}
+		return true
+	})
+	return found
 }
 
 func reduceReadOutputSummary(argsJSON, content string) string {
