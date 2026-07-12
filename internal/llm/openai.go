@@ -667,7 +667,7 @@ func hasThinkingToolcallMarkers(text string) bool {
 // If collector is non-nil, raw SSE data lines are recorded for debug dumps.
 func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, error) {
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, sseInitialBufferSize), sseMaxTokenSize)
 
 	var (
 		resp      message.Response

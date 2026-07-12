@@ -7,6 +7,27 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+func TestParseOpenAISSEStreamLargeDataLine(t *testing.T) {
+	content := strings.Repeat("x", sseInitialBufferSize*2)
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-large","model":"test","choices":[{"index":0,"delta":{"content":"` + content + `"}}]}`,
+		`data: {"id":"chatcmpl-large","model":"test","choices":[{"index":0,"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("parseOpenAISSEStream returned nil response")
+	}
+	if resp.Content != content {
+		t.Fatalf("large SSE content length = %d, want %d", len(resp.Content), len(content))
+	}
+}
+
 func TestParseOpenAISSEStream_ThinkingToolcallMarkerHit(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"id":"chatcmpl-test","model":"kimi-k2.5","choices":[{"index":0,"delta":{"reasoning_content":"<|tool_calls_section_begin|>"}}]}`,

@@ -479,7 +479,7 @@ func convertSchemaToGemini(schema map[string]any) map[string]any {
 
 func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, error) {
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, sseInitialBufferSize), sseMaxTokenSize)
 	var resp message.Response
 	var content strings.Builder
 	var reasoning strings.Builder

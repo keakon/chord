@@ -65,7 +65,7 @@ var responsesCallbackFixedFixture = []byte(strings.Join([]string{
 	`data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`,
 	`data: [DONE]`,
 	"",
-}, "\n"))
+}, "\n\n"))
 
 var responsesWSCallbackFixedFixture = []byte(strings.Join([]string{
 	`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_ws_1","call_id":"call_ws","name":"Read"}}`,
@@ -76,7 +76,7 @@ var responsesWSCallbackFixedFixture = []byte(strings.Join([]string{
 	`data: {"type":"response.completed","response":{"id":"resp-ws-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`,
 	`data: [DONE]`,
 	"",
-}, "\n"))
+}, "\n\n"))
 
 type fixedSSEBenchFixture struct {
 	provider string
@@ -180,7 +180,17 @@ func BenchmarkSSEParseWithCollector(b *testing.B) {
 	for _, provider := range providers {
 		corpus, ok := corpora[provider]
 		if !ok || len(corpus.Entries) == 0 {
-			continue
+			for _, fixed := range loadFixedCallbackFixtures() {
+				if fixed.provider == provider {
+					corpus = sseBenchCorpus{Provider: provider, Entries: []sseBenchFixture{{
+						Name:      fixed.name,
+						Provider:  provider,
+						Path:      fixed.name,
+						BodyBytes: fixed.body,
+					}}}
+					break
+				}
+			}
 		}
 		fixture := corpus.Entries[0]
 		for _, entry := range corpus.Entries {

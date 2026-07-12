@@ -6,11 +6,13 @@ on:
       - "**"
     paths:
       - "internal/tui/**"
+      - "internal/llm/**"
       - "scripts/bench_tui_regression.sh"
       - ".github/workflows/performance.yml"
   pull_request:
     paths:
       - "internal/tui/**"
+      - "internal/llm/**"
       - "scripts/bench_tui_regression.sh"
       - ".github/workflows/performance.yml"
   workflow_dispatch:
@@ -20,7 +22,7 @@ permissions:
 
 jobs:
   tui-benchmarks:
-    name: TUI benchmark smoke
+    name: Runtime benchmark smoke
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,7 +34,7 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run TUI benchmark smoke
+      - name: Run runtime benchmark smoke
         env:
           CHORD_BENCH_TIME: 250ms
         run: scripts/bench_tui_regression.sh

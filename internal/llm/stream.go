@@ -169,7 +169,7 @@ func anthropicSSECacheWriteUsage(usage sseUsage) (cacheWrite, cacheWrite1h int) 
 func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, error) {
 	scanner := bufio.NewScanner(reader)
 	// Allow lines up to 1MB for large JSON payloads.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, sseInitialBufferSize), sseMaxTokenSize)
 
 	var (
 		eventType      string

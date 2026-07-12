@@ -560,7 +560,8 @@ func BenchmarkViewportRenderLargeTranscriptScrollWindow(b *testing.B) {
 }
 
 // BenchmarkModelViewCached measures repeated View() calls over a stable frame.
-// This guards the new UV parse/draw caches and screen-buffer reuse path.
+// This guards the UV parse/draw caches, screen-buffer reuse, and unchanged-frame
+// ANSI serialization fast path.
 func BenchmarkModelViewCached(b *testing.B) {
 	ApplyTheme(DefaultTheme())
 	m := benchmarkModelForView()
@@ -720,9 +721,25 @@ func TestModelViewCachedAllocsGuard(t *testing.T) {
 	allocs := testing.AllocsPerRun(10, func() {
 		_ = m.View()
 	})
-	const maxAllocs = 900
+	const maxAllocs = 50
 	if allocs > maxAllocs {
 		t.Fatalf("cached View allocs = %.0f, want ≤%d", allocs, maxAllocs)
+	}
+}
+
+func TestModelViewCachedContentInvalidatesOnVisibleChange(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	m := benchmarkModelForView()
+	before := m.View()
+
+	m.viewport.AppendBlock(&Block{Type: BlockAssistant, Content: "new visible response"})
+	after := m.View()
+
+	if after.Content == before.Content {
+		t.Fatal("visible transcript change should invalidate cached frame content")
+	}
+	if !strings.Contains(stripANSI(after.Content), "new visible response") {
+		t.Fatalf("updated frame should contain appended response; got %q", stripANSI(after.Content))
 	}
 }
 

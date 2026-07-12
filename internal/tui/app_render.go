@@ -457,7 +457,12 @@ func (m *Model) View() tea.View {
 	canvas := m.screenBuf
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
 
-	v.Content = canvas.Render()
+	if m.cachedFullViewValid && screenLinesEqual(m.cachedScreenLines, canvas.Lines) {
+		v.Content = m.cachedFullView.Content
+	} else {
+		v.Content = canvas.Render()
+		m.cachedScreenLines = cloneScreenLines(m.cachedScreenLines, canvas.Lines)
+	}
 	v.WindowTitle = m.terminalTitleView
 	m.cachedFullView = v
 	m.cachedFullViewValid = true
@@ -469,6 +474,36 @@ func (m *Model) View() tea.View {
 	m.streamRenderDeferred = m.streamRenderDeferNext
 	m.streamRenderDeferNext = false
 	return v
+}
+
+func screenLinesEqual(cached, current uv.Lines) bool {
+	if len(cached) != len(current) {
+		return false
+	}
+	for y := range current {
+		if len(cached[y]) != len(current[y]) {
+			return false
+		}
+		for x := range current[y] {
+			if !cached[y][x].Equal(&current[y][x]) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func cloneScreenLines(dst, src uv.Lines) uv.Lines {
+	if len(dst) != len(src) {
+		dst = make(uv.Lines, len(src))
+	}
+	for y := range src {
+		if len(dst[y]) != len(src[y]) {
+			dst[y] = make(uv.Line, len(src[y]))
+		}
+		copy(dst[y], src[y])
+	}
+	return dst
 }
 
 // ensureScreenBuffer reuses the existing UV screen buffer across View() calls.

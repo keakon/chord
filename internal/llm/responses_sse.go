@@ -269,7 +269,7 @@ func parseResponsesSSE(reader io.Reader, cb StreamCallback, collector *SSECollec
 // These items are used by the WebSocket incremental baseline chain.
 func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, []responsesInputItem, error) {
 	phaser, _ := reader.(chunkPhaser)
-	br := bufio.NewReaderSize(reader, 64*1024)
+	br := bufio.NewReaderSize(reader, sseInitialBufferSize)
 
 	var (
 		resp           message.Response
@@ -773,7 +773,7 @@ func joinSSEDataParts(parts [][]byte) []byte {
 		return nil
 	}
 	if len(parts) == 1 {
-		return append([]byte(nil), parts[0]...)
+		return parts[0]
 	}
 	total := 0
 	for _, part := range parts {

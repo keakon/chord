@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 )
 
+const (
+	sseInitialBufferSize = 4 * 1024
+	sseMaxTokenSize      = 1024 * 1024
+)
+
 type sseEventTypeEnvelope struct {
 	Type string `json:"type"`
 }

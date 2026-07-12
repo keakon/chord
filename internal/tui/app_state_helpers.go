@@ -4,6 +4,7 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+	uv "github.com/keakon/ultraviolet"
 
 	"github.com/keakon/chord/internal/agent"
 )
@@ -146,6 +147,7 @@ type viewCacheState struct {
 	streamRenderDeferNext              bool
 	cachedFullView                     tea.View
 	cachedFullViewValid                bool
+	cachedScreenLines                  uv.Lines
 	renderFreezeActive                 bool
 	renderFreezeReason                 string
 	renderFreezeEnteredAt              time.Time
