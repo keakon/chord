@@ -1,10 +1,11 @@
 package session
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
+
+	sonicjson "github.com/bytedance/sonic"
 )
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ func ImportFromFile(path string) (*ExportedSession, error) {
 	}
 
 	var session ExportedSession
-	if err := json.Unmarshal(data, &session); err != nil {
+	if err := sonicjson.ConfigStd.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("parse session file %s: %w", path, err)
 	}
 
@@ -46,7 +47,7 @@ func ImportFromFile(path string) (*ExportedSession, error) {
 // parsing.
 func ImportFromBytes(data []byte) (*ExportedSession, error) {
 	var session ExportedSession
-	if err := json.Unmarshal(data, &session); err != nil {
+	if err := sonicjson.ConfigStd.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("parse session data: %w", err)
 	}
 

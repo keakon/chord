@@ -514,7 +514,7 @@ func messagesToBlocks(msgs []message.Message, nextID *int) []*Block {
 }
 
 func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *int, translations map[string]ThinkingTranslationView) []*Block {
-	var blocks []*Block
+	blocks := make([]*Block, 0, len(msgs))
 	toolIDToBlock := make(map[string]*Block)
 
 	for msgIdx, msg := range msgs {
