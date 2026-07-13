@@ -110,6 +110,33 @@ func TestTokenAwareInlineDiffHandlesPathSegmentDeletion(t *testing.T) {
 	}
 }
 
+func TestInlineDiffKeepsGraphemeClustersAtomic(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{name: "skin tone", old: "👍", new: "👍🏽"},
+		{name: "zwj sequence", old: "👨", new: "👨‍👩"},
+		{name: "combining mark", old: "e", new: "e\u0301"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			oldSegs, newSegs := InlineDiff(tt.old, tt.new)
+			if got := concatSegs(oldSegs, "equal", "delete"); got != tt.old {
+				t.Fatalf("old combined text = %q, want %q", got, tt.old)
+			}
+			if got := concatSegs(newSegs, "equal", "insert"); got != tt.new {
+				t.Fatalf("new combined text = %q, want %q", got, tt.new)
+			}
+			for _, seg := range newSegs {
+				if seg.Kind == "equal" {
+					t.Fatalf("new grapheme was split into an equal segment: %#v", newSegs)
+				}
+			}
+		})
+	}
+}
+
 func concatSegKinds(segs []InlineSegment) string {
 	kinds := make([]string, 0, len(segs))
 	for _, s := range segs {

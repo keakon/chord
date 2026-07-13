@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
+
+	"github.com/rivo/uniseg"
 )
 
 // maxDiffOutputLines is the maximum number of diff output lines rendered.
@@ -362,6 +365,18 @@ func isWordTokenRune(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
+func splitGraphemeClusters(s string) []string {
+	if s == "" {
+		return nil
+	}
+	clusters := make([]string, 0, utf8.RuneCountInString(s))
+	graphemes := uniseg.NewGraphemes(s)
+	for graphemes.Next() {
+		clusters = append(clusters, graphemes.Str())
+	}
+	return clusters
+}
+
 func tokenizeInlineDiffLine(s string) []tokenSegment {
 	if s == "" {
 		return nil
@@ -376,7 +391,8 @@ func tokenizeInlineDiffLine(s string) []tokenSegment {
 		tokens = append(tokens, tokenSegment{Text: cur.String(), Kind: curKind})
 		cur.Reset()
 	}
-	for _, r := range s {
+	for _, cluster := range splitGraphemeClusters(s) {
+		r, _ := utf8.DecodeRuneInString(cluster)
 		kind := "punct"
 		switch {
 		case isWordTokenRune(r):
@@ -388,25 +404,17 @@ func tokenizeInlineDiffLine(s string) []tokenSegment {
 			flush()
 		}
 		curKind = kind
-		cur.WriteRune(r)
+		cur.WriteString(cluster)
 	}
 	flush()
 	return tokens
 }
 
 func refineTokenSegments(oldText, newText string) (oldSegs, newSegs []InlineSegment) {
-	oldR := []rune(oldText)
-	newR := []rune(newText)
-	if len(oldR) == 0 && len(newR) == 0 {
+	oldStrs := splitGraphemeClusters(oldText)
+	newStrs := splitGraphemeClusters(newText)
+	if len(oldStrs) == 0 && len(newStrs) == 0 {
 		return nil, nil
-	}
-	oldStrs := make([]string, len(oldR))
-	for i, r := range oldR {
-		oldStrs[i] = string(r)
-	}
-	newStrs := make([]string, len(newR))
-	for i, r := range newR {
-		newStrs[i] = string(r)
 	}
 	ops := lcsEditScript(oldStrs, newStrs)
 	for _, op := range ops {

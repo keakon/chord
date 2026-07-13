@@ -234,6 +234,58 @@ func TestRenderInlineDiffLineKeepsSyntaxHighlighting(t *testing.T) {
 	}
 }
 
+func TestRenderInlineDiffLineKeepsTabIndentedDeletionAligned(t *testing.T) {
+	oldLine := "\tcase tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn, tools.NameLsp:"
+	newLine := "\tcase tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn:"
+	hl := newCodeHighlighter("example.go", "package tui\n\nfunc example() {\n"+oldLine+"\n}\n")
+
+	lines := renderInlineDiffLine(oldLine, newLine, 120, hl)
+	if len(lines) != 1 {
+		t.Fatalf("expected single-line inline diff, got %#v", lines)
+	}
+	wantLine := "-" + expandTabsForDisplay(oldLine, preformattedTabWidth)
+	if got := stripANSI(lines[0]); got != wantLine {
+		t.Fatalf("rendered line = %q, want %q", got, wantLine)
+	}
+	want := DiffDelInlineStyle.Render(", tools.NameLsp")
+	if !strings.Contains(lines[0], want) {
+		t.Fatalf("expected deletion style to cover only %q, got %q", ", tools.NameLsp", lines[0])
+	}
+}
+
+func TestDiffTextWidthMatchesGraphemeRendererWithTabs(t *testing.T) {
+	for _, text := range []string{
+		"界",
+		"👨‍👩‍👧‍👦",
+		"👍🏽",
+		"e\u0301",
+		"\t👨‍👩‍👧‍👦",
+		"a\t👍🏽",
+	} {
+		expanded := expandTabsForDisplay(text, preformattedTabWidth)
+		if got, want := diffTextWidth(text), tuiStringWidth(expanded); got != want {
+			t.Fatalf("diffTextWidth(%q) = %d, want rendered width %d", text, got, want)
+		}
+	}
+}
+
+func TestRenderInlineDiffLineUsesGraphemeWidthLimit(t *testing.T) {
+	prefix := strings.Repeat("👨‍👩‍👧‍👦", 40)
+	oldLine := prefix
+	newLine := prefix + "x"
+	if got := tuiStringWidth(oldLine); got > singleLineDiffColumnsLimit {
+		t.Fatalf("fixture rendered width = %d, want <= %d", got, singleLineDiffColumnsLimit)
+	}
+
+	lines := renderInlineDiffLine(oldLine, newLine, 120, nil)
+	if len(lines) != 1 {
+		t.Fatalf("grapheme-width eligible inline diff = %#v, want one line", lines)
+	}
+	if got := stripANSI(lines[0]); got != "+"+newLine {
+		t.Fatalf("rendered line = %q, want %q", got, "+"+newLine)
+	}
+}
+
 func TestHighlightCodeLinesKeepsMarkdownEOFBlockMarkersStyled(t *testing.T) {
 	hl := newCodeHighlighter("plan.md", "")
 	lines := []string{

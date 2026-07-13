@@ -9,8 +9,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -203,11 +201,11 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 						continue
 					}
 				}
-				code := renderHighlightedSnippetLine(line[1:], []diffSegmentSpan{{StartCol: 0, EndCol: ansi.StringWidth(line[1:])}}, diffWidth-1, hl, diffDelBg)
+				code := renderHighlightedSnippetLine(line[1:], []diffSegmentSpan{{StartCol: 0, EndCol: diffTextWidth(line[1:])}}, diffWidth-1, hl, diffDelBg)
 				rendered = DimStyle.Render(formatLineNum(oldLineNum)) + DiffDelStyle.Render("-") + code
 				oldLineNum++
 			case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
-				code := renderHighlightedSnippetLine(line[1:], []diffSegmentSpan{{StartCol: 0, EndCol: ansi.StringWidth(line[1:])}}, diffWidth-1, hl, diffAddBg)
+				code := renderHighlightedSnippetLine(line[1:], []diffSegmentSpan{{StartCol: 0, EndCol: diffTextWidth(line[1:])}}, diffWidth-1, hl, diffAddBg)
 				rendered = DimStyle.Render(formatLineNum(newLineNum)) + DiffAddStyle.Render("+") + code
 				newLineNum++
 			case strings.HasPrefix(line, "@@"):

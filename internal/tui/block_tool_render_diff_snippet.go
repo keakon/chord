@@ -139,7 +139,7 @@ func renderHighlightedSnippetLine(line string, changeSpans []diffSegmentSpan, di
 	if diffWidth <= 0 {
 		return ""
 	}
-	lineWidth := ansi.StringWidth(line)
+	lineWidth := diffTextWidth(line)
 	if lineWidth <= diffWidth {
 		return hl.highlightLine(line, bgTerm)
 	}

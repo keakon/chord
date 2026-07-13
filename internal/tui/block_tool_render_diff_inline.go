@@ -4,17 +4,35 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/keakon/chord/internal/tools"
 )
+
+func diffTextWidthAtCol(s string, startCol int) int {
+	col := startCol
+	for s != "" {
+		tab := strings.IndexByte(s, '\t')
+		if tab < 0 {
+			col += tuiStringWidth(s)
+			break
+		}
+		col += tuiStringWidth(s[:tab])
+		col += selectionRuneWidthAtCol('\t', col)
+		s = s[tab+1:]
+	}
+	return col - startCol
+}
+
+func diffTextWidth(s string) int {
+	return diffTextWidthAtCol(s, 0)
+}
 
 func buildDiffSegmentSpans(segs []tools.InlineSegment) []diffSegmentSpan {
 	spans := make([]diffSegmentSpan, 0, len(segs))
 	col := 0
 	bytePos := 0
 	for _, seg := range segs {
-		w := ansi.StringWidth(seg.Text)
+		w := diffTextWidthAtCol(seg.Text, col)
 		span := diffSegmentSpan{Text: seg.Text, Kind: seg.Kind, StartCol: col, EndCol: col + w, StartByte: bytePos, EndByte: bytePos + len(seg.Text)}
 		spans = append(spans, span)
 		col += w
@@ -61,7 +79,8 @@ func oneSidedSpanFromLines(oldLine, newLine string) (diffOneSidedSpan, bool) {
 	prefixText := string(lineRunes[:prefix])
 	suffixText := string(lineRunes[len(lineRunes)-suffix:])
 	changeText := string(change)
-	return diffOneSidedSpan{Prefix: prefixText, Change: changeText, Suffix: suffixText, StartCol: ansi.StringWidth(prefixText), EndCol: ansi.StringWidth(prefixText) + ansi.StringWidth(changeText), LineWidth: ansi.StringWidth(string(lineRunes))}, true
+	startCol := diffTextWidth(prefixText)
+	return diffOneSidedSpan{Prefix: prefixText, Change: changeText, Suffix: suffixText, StartCol: startCol, EndCol: startCol + diffTextWidthAtCol(changeText, startCol), LineWidth: diffTextWidth(string(lineRunes))}, true
 }
 
 func wordTokenRanges(s string) []diffByteRange {
@@ -156,7 +175,9 @@ func renderInlineDiffLine(oldLine, newLine string, diffWidth int, hl *codeHighli
 	if len(deleteSpans) > 0 && len(insertSpans) > 0 {
 		return nil
 	}
-	if max(ansi.StringWidth(oldLine), ansi.StringWidth(newLine)) > singleLineDiffColumnsLimit {
+	oldLineWidth := diffTextWidth(oldLine)
+	newLineWidth := diffTextWidth(newLine)
+	if max(oldLineWidth, newLineWidth) > singleLineDiffColumnsLimit {
 		return nil
 	}
 	if len(insertSpans) > 0 && len(deleteSpans) == 0 {
@@ -175,14 +196,14 @@ func renderInlineDiffLine(oldLine, newLine string, diffWidth int, hl *codeHighli
 			return nil
 		}
 		content := buildInlineContentANSI(newSegs, "insert", DiffAddInlineStyle, hl)
-		if ansi.StringWidth(content)+1 <= diffWidth {
+		if selectionStyledTextWidth(content)+1 <= diffWidth {
 			return []string{"+" + content}
 		}
-		windows, _, ok := fitSnippetWindows(ansi.StringWidth(newLine), insertSpans, diffWidth-1, maxInlineSnippetClusters)
+		windows, _, ok := fitSnippetWindows(newLineWidth, insertSpans, diffWidth-1, maxInlineSnippetClusters)
 		if !ok {
 			return nil
 		}
-		return []string{"+" + joinANSISnippetWindows(content, windows, ansi.StringWidth(newLine))}
+		return []string{"+" + joinANSISnippetWindows(content, windows, newLineWidth)}
 	}
 	if len(deleteSpans) > 0 && len(insertSpans) == 0 {
 		if span, ok := oneSidedSpanFromLines(oldLine, newLine); ok {
@@ -200,14 +221,14 @@ func renderInlineDiffLine(oldLine, newLine string, diffWidth int, hl *codeHighli
 			return nil
 		}
 		content := buildInlineContentANSI(oldSegs, "delete", DiffDelInlineStyle, hl)
-		if ansi.StringWidth(content)+1 <= diffWidth {
+		if selectionStyledTextWidth(content)+1 <= diffWidth {
 			return []string{"-" + content}
 		}
-		windows, _, ok := fitSnippetWindows(ansi.StringWidth(oldLine), deleteSpans, diffWidth-1, maxInlineSnippetClusters)
+		windows, _, ok := fitSnippetWindows(oldLineWidth, deleteSpans, diffWidth-1, maxInlineSnippetClusters)
 		if !ok {
 			return nil
 		}
-		return []string{"-" + joinANSISnippetWindows(content, windows, ansi.StringWidth(oldLine))}
+		return []string{"-" + joinANSISnippetWindows(content, windows, oldLineWidth)}
 	}
 	return nil
 }
