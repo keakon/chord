@@ -351,8 +351,10 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	if msgIndex == len(msgs)-1 {
 		if err := a.editTailUserMessageInPlace(prefix, forkMsg); err != nil {
 			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("edit tail user message: %w", err)})
+			a.setIdleAndDrainPending()
+			return
 		}
-		a.setIdleAndDrainPending()
+		a.setIdleForComposerEdit()
 		return
 	}
 
@@ -428,7 +430,7 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 		Message: fmt.Sprintf("Forked session %s from %s with %d prior messages; draft loaded into composer", filepath.Base(newSessionDir), forkedFrom, seededMessages),
 		Level:   "info",
 	})
-	a.setIdleAndDrainPending()
+	a.setIdleForComposerEdit()
 }
 
 func forkMsgParts(msg message.Message) []message.ContentPart {

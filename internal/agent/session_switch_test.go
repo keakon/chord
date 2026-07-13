@@ -1012,3 +1012,23 @@ func TestHandleForkSessionCommandTailUserEditsInPlaceWithoutFork(t *testing.T) {
 	default:
 	}
 }
+
+func TestHandleForkSessionCommandTailEditDoesNotDrainSubAgentInbox(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.ctxMgr.RestoreMessages([]message.Message{{Role: "user", Content: "edit me"}})
+	a.subAgentInbox.normal = append(a.subAgentInbox.normal, SubAgentMailboxMessage{
+		AgentID:   "reviewer-1",
+		MessageID: "mail-1",
+		Kind:      SubAgentMailboxKindCompleted,
+	})
+
+	a.handleForkSessionCommand(0)
+
+	if a.currentTurn() != nil {
+		t.Fatal("tail edit started a new main turn from queued SubAgent mailbox")
+	}
+	if got := len(a.subAgentInbox.normal); got != 1 {
+		t.Fatalf("len(subAgentInbox.normal) = %d, want queued mailbox preserved", got)
+	}
+}

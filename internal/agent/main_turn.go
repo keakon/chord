@@ -495,6 +495,20 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	}
 }
 
+// setIdleForComposerEdit establishes a user-input barrier after a session fork
+// loads a historical message into the composer. Pending drafts and SubAgent
+// mailbox results must remain queued until the user explicitly submits or
+// otherwise leaves the edit flow.
+func (a *MainAgent) setIdleForComposerEdit() {
+	a.turnMu.Lock()
+	a.turn = nil
+	a.turnMu.Unlock()
+	a.allowContextSurfaceRefreshAtUserBoundary()
+	a.clearLoopReductionCache(false)
+	a.setBugTriagePromptActive(false)
+	a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
+}
+
 func latestAssistantReplySummary(msgs []message.Message) string {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role != "assistant" {
