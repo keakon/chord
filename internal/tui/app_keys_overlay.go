@@ -139,7 +139,15 @@ func (m *Model) handleCtrlC() tea.Cmd {
 }
 
 func (m *Model) handleSearchKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
+	key := msg.String()
+	if key == "esc" || ((key == "backspace" || key == "ctrl+h") && m.search.Input.Value() == "") {
+		m.clearActiveSearch()
+		cmd := m.switchModeWithIME(m.search.PrevMode)
+		m.recalcViewportSize()
+		return cmd
+	}
+
+	switch key {
 	case "enter":
 		query := strings.TrimSpace(m.search.Input.Value())
 		prevOffset := m.viewport.offset
@@ -153,11 +161,6 @@ func (m *Model) handleSearchKey(msg tea.KeyMsg) tea.Cmd {
 		cmd := m.switchModeWithIME(ModeNormal)
 		m.recalcViewportSize()
 		return m.refreshInlineImagesIfViewportMoved(prevOffset, cmd)
-	case "esc":
-		m.clearActiveSearch()
-		cmd := m.switchModeWithIME(m.search.PrevMode)
-		m.recalcViewportSize()
-		return cmd
 	default:
 		var cmd tea.Cmd
 		m.search, cmd = m.search.Update(msg)

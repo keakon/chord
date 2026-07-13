@@ -72,6 +72,8 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `n`      | Jump to the next match                                |
 | `N`      | Jump to the previous match                            |
 
+While entering a search, `Enter` confirms it and `Esc` cancels it. `Backspace` edits a non-empty query normally; when the query is already empty, `Backspace` cancels the search like `Esc`. Therefore, deleting the final character keeps search mode active, and one more `Backspace` exits it, matching Vim behavior.
+
 ### Both modes — agents, models, and integrations
 
 | Key          | Action                                                                                                    |

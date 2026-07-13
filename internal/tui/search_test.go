@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/keakon/bubbletea/v2"
+
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -186,5 +188,45 @@ func TestSearchPillStatusShowsAcrossModesWhileSearchSessionActive(t *testing.T) 
 	m.mode = ModeSearch
 	if plain := stripANSI(m.renderStatusBar()); !strings.Contains(plain, "/grep [2/3]") {
 		t.Fatalf("search-mode status bar should show active search session, got %q", plain)
+	}
+}
+
+func TestSearchBackspaceExitsWhenInputIsAlreadyEmpty(t *testing.T) {
+	for _, key := range []tea.Key{
+		{Code: tea.KeyBackspace},
+		{Code: 'h', Mod: tea.ModCtrl},
+	} {
+		m := NewModelWithSize(nil, 120, 24)
+		m.mode = ModeSearch
+		m.search = NewSearchModel(ModeNormal)
+
+		m.handleSearchKey(tea.KeyPressMsg(key))
+
+		if m.mode != ModeNormal {
+			t.Fatalf("key %q left mode = %v, want ModeNormal", tea.KeyPressMsg(key).String(), m.mode)
+		}
+	}
+}
+
+func TestSearchBackspaceDeletesLastCharacterBeforeExiting(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 24)
+	m.mode = ModeSearch
+	m.search = NewSearchModel(ModeNormal)
+	m.search.Input.SetValue("a")
+	backspace := tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace})
+
+	m.handleSearchKey(backspace)
+
+	if got := m.search.Input.Value(); got != "" {
+		t.Fatalf("input after first backspace = %q, want empty", got)
+	}
+	if m.mode != ModeSearch {
+		t.Fatalf("mode after deleting last character = %v, want ModeSearch", m.mode)
+	}
+
+	m.handleSearchKey(backspace)
+
+	if m.mode != ModeNormal {
+		t.Fatalf("mode after backspace on empty input = %v, want ModeNormal", m.mode)
 	}
 }
