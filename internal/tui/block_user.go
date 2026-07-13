@@ -107,7 +107,7 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 
 	var finalLines []string
 	label := "TERMINAL"
-	finalLines = append(finalLines, UserLabelStyle.Render(blockLabelWithID(label, b.ID)))
+	finalLines = append(finalLines, UserLabelStyle.Render(blockLabelWithID(label, b.displayLabelID())))
 	finalLines = append(finalLines, "")
 	finalLines = append(finalLines, bashLines...)
 
@@ -145,7 +145,7 @@ func (b *Block) renderUserPlain(width int) []string {
 	if b.LoopAnchor {
 		label = "USER · LOOP"
 	}
-	finalLines = append(finalLines, UserLabelStyle.Render(blockLabelWithID(label, b.ID)))
+	finalLines = append(finalLines, UserLabelStyle.Render(blockLabelWithID(label, b.displayLabelID())))
 	finalLines = append(finalLines, "")
 	if strings.TrimSpace(b.Content) != "" {
 		for _, l := range renderUserText(b.Content, contentWidth) {

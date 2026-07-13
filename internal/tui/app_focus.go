@@ -27,7 +27,7 @@ func (m *Model) setFocusedAgent(id string) {
 		m.agent.SwitchFocus(id)
 	}
 	if m.viewport != nil {
-		if m.shouldRebuildFocusedViewport(prev, id) {
+		if prev != id && m.agent != nil {
 			m.rebuildFocusedViewport(id, viewportFilter)
 		} else {
 			m.viewport.SetFilter(viewportFilter)
@@ -36,16 +36,6 @@ func (m *Model) setFocusedAgent(id string) {
 	}
 	m.recalcViewportSize()
 	m.invalidateDrawCaches()
-}
-
-func (m *Model) shouldRebuildFocusedViewport(prevID, nextID string) bool {
-	if m == nil || m.viewport == nil || m.agent == nil || prevID == nextID {
-		return false
-	}
-	if m.startupDeferredTranscript != nil {
-		return true
-	}
-	return !m.viewport.HasBlocksForAgent(nextID)
 }
 
 func (m *Model) rebuildFocusedViewport(agentID, viewportFilter string) {
@@ -70,6 +60,7 @@ func (m *Model) rebuildFocusedViewport(agentID, viewportFilter string) {
 	clearBlocksTiming(blocks)
 	assignFocusedViewportBlockIDs(blocks, agentID, &m.nextBlockID)
 	blocks = mergeFocusedViewportLiveBlocks(blocks, currentBlocks, agentID, &m.nextBlockID)
+	m.setTranscriptDisplaySequences(blocks, agentID)
 	m.viewport.SetFilter(viewportFilter)
 	m.viewport.SetWorkingDir(m.workingDir)
 	m.viewport.ReplaceBlocks(blocks)

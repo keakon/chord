@@ -122,6 +122,16 @@ func blockLabelWithID(label string, id int) string {
 	return fmt.Sprintf("%s #%d", label, id+1)
 }
 
+func (b *Block) displayLabelID() int {
+	if b == nil {
+		return -1
+	}
+	if b.DisplaySequence > 0 {
+		return b.DisplaySequence - 1
+	}
+	return b.ID
+}
+
 // Render produces the styled lines for this block, word-wrapped to width.
 func (b *Block) Render(width int, spinnerFrame string) (lines []string) {
 	if b == nil {

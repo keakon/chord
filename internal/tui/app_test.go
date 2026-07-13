@@ -4896,6 +4896,88 @@ func TestHandleNormalKeyEnterOnLinkedTaskSwitchesToWorkerView(t *testing.T) {
 	}
 }
 
+func TestAgentViewRebuildsCompleteHistoryWhenLiveTailAlreadyExists(t *testing.T) {
+	backend := &sessionControlAgent{
+		messagesByFocus: map[string][]message.Message{
+			"": {
+				{Role: "user", Content: "main first"},
+				{Role: "assistant", Content: "main middle"},
+				{Role: "assistant", Content: "main latest"},
+			},
+			"agent-1": {
+				{Role: "user", Content: "worker original task"},
+				{Role: "assistant", Content: "worker earlier result"},
+				{Role: "user", Content: "worker correction"},
+			},
+		},
+	}
+	m := NewModelWithSize(backend, 100, 24)
+	m.appendViewportBlock(&Block{ID: m.nextBlockID, Type: BlockUser, AgentID: "agent-1", Content: "worker correction"})
+	m.nextBlockID++
+
+	m.setFocusedAgent("agent-1")
+
+	workerBlocks := m.viewport.visibleBlocks()
+	if len(workerBlocks) != 3 {
+		t.Fatalf("len(workerBlocks) = %d, want complete three-card worker history", len(workerBlocks))
+	}
+	if workerBlocks[0].Content != "worker original task" || workerBlocks[2].Content != "worker correction" {
+		t.Fatalf("worker history = %#v, want original task through correction", workerBlocks)
+	}
+	workerNext := &Block{ID: m.nextBlockID, Type: BlockAssistant, AgentID: "agent-1", Content: "worker next"}
+	m.nextBlockID++
+	m.appendViewportBlock(workerNext)
+	if workerNext.DisplaySequence != 4 {
+		t.Fatalf("worker next sequence = %d, want 4 after rebuilt history", workerNext.DisplaySequence)
+	}
+
+	// Reproduce a partial main viewport accumulated while the worker was focused.
+	m.viewport.ReplaceBlocks([]*Block{{ID: m.nextBlockID, Type: BlockAssistant, Content: "main latest"}})
+	m.nextBlockID++
+	m.setFocusedAgent("")
+
+	mainBlocks := m.viewport.visibleBlocks()
+	if len(mainBlocks) != 3 {
+		t.Fatalf("len(mainBlocks) = %d, want complete three-card main history", len(mainBlocks))
+	}
+	if mainBlocks[0].Content != "main first" || mainBlocks[2].Content != "main latest" {
+		t.Fatalf("main history = %#v, want first through latest", mainBlocks)
+	}
+	mainNext := &Block{ID: m.nextBlockID, Type: BlockAssistant, Content: "main next"}
+	m.nextBlockID++
+	m.appendViewportBlock(mainNext)
+	if mainNext.DisplaySequence != 4 {
+		t.Fatalf("main next sequence = %d, want 4 after rebuilt history", mainNext.DisplaySequence)
+	}
+}
+
+func TestCardDisplaySequencesAreIndependentPerAgent(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 24)
+	mainFirst := &Block{ID: 189, Type: BlockUser, Content: "main first"}
+	workerFirst := &Block{ID: 190, Type: BlockUser, AgentID: "agent-1", Content: "worker first"}
+	mainSecond := &Block{ID: 191, Type: BlockAssistant, Content: "main second"}
+	workerSecond := &Block{ID: 192, Type: BlockAssistant, AgentID: "agent-1", Content: "worker second"}
+	for _, block := range []*Block{mainFirst, workerFirst, mainSecond, workerSecond} {
+		m.appendViewportBlock(block)
+	}
+
+	if mainFirst.DisplaySequence != 1 || mainSecond.DisplaySequence != 2 {
+		t.Fatalf("main sequences = [%d %d], want [1 2]", mainFirst.DisplaySequence, mainSecond.DisplaySequence)
+	}
+	if workerFirst.DisplaySequence != 1 || workerSecond.DisplaySequence != 2 {
+		t.Fatalf("worker sequences = [%d %d], want [1 2]", workerFirst.DisplaySequence, workerSecond.DisplaySequence)
+	}
+	if got := stripANSI(strings.Join(mainFirst.Render(100, ""), "\n")); !strings.Contains(got, "USER #1") {
+		t.Fatalf("main first label = %q, want USER #1", got)
+	}
+	if got := stripANSI(strings.Join(workerFirst.Render(100, ""), "\n")); !strings.Contains(got, "USER #1") {
+		t.Fatalf("worker first label = %q, want USER #1", got)
+	}
+	if got := stripANSI(strings.Join(workerSecond.Render(100, ""), "\n")); !strings.Contains(got, "ASSISTANT #2") {
+		t.Fatalf("worker second label = %q, want ASSISTANT #2", got)
+	}
+}
+
 func TestSessionRestoredRebuildPrefersVisibleCompactionSummaryOverValidOldFocus(t *testing.T) {
 	backend := &sessionControlAgent{messages: []message.Message{
 		{Role: "user", IsCompactionSummary: true, Content: "[Context Summary]\nsummary\n\n[Context compressed]\nArchived history files:\n- history-1.md"},

@@ -353,7 +353,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 		}
 	}
 
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.ID), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
@@ -409,7 +409,7 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 		}
 	}
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.ID), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 func doneResultIsRejected(result string) bool {
@@ -695,7 +695,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	}
 	result = appendToolElapsedFooter(result, b)
 
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.ID), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 // renderToolPrefix returns a concise status indicator.
@@ -922,7 +922,7 @@ func (b *Block) renderToolResult(width int) []string {
 			body = append(body, renderToolExpandHint(toolHintIndent, more))
 		}
 		b.appendImagePreviewLines(&body, contentWidth, toolCardBg, style.GetPaddingTop(), len(body) > 0)
-		return renderPrewrappedToolCard(style, cardWidth, toolCardTitle("TOOL RESULT", b.ID), body, toolCardBg, railANSISeq("tool", b.Focused))
+		return renderPrewrappedToolCard(style, cardWidth, toolCardTitle("TOOL RESULT", b.displayLabelID()), body, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 	renderHeader := func(s string) string { return ToolResultExpandedStyle.Render(s) }
 	renderBody := func(s string) string { return s }
@@ -940,5 +940,5 @@ func (b *Block) renderToolResult(width int) []string {
 		result = append(result, "    "+renderBody(line))
 	}
 	b.appendImagePreviewLines(&result, contentWidth, toolCardBg, style.GetPaddingTop(), len(result) > 0)
-	return renderPrewrappedToolCard(style, cardWidth, toolCardTitle("TOOL RESULT", b.ID), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return renderPrewrappedToolCard(style, cardWidth, toolCardTitle("TOOL RESULT", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }

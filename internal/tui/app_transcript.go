@@ -123,6 +123,7 @@ func (m *Model) rebuildViewportFromMessagesWithReason(reason string) {
 	m.rebuildSidebarFileEditsFromMessages(msgs)
 	sidebarDuration := time.Since(sidebarStarted)
 	if len(msgs) == 0 {
+		m.setTranscriptDisplaySequences(nil, m.focusedAgentID)
 		m.viewport.sticky = true
 		replaceStarted := time.Now()
 		m.viewport.ReplaceBlocks(nil)
@@ -142,6 +143,7 @@ func (m *Model) rebuildViewportFromMessagesWithReason(reason string) {
 	}
 	clearSettledStarted := time.Now()
 	clearBlocksTiming(blocks)
+	m.setTranscriptDisplaySequences(blocks, m.focusedAgentID)
 	clearSettledDuration := time.Since(clearSettledStarted)
 	blocks = m.maybeWindowStartupTranscript(reason, blocks)
 	m.viewport.sticky = true // show latest messages after restore
@@ -231,7 +233,9 @@ func (m *Model) rebuildBlocksFromAgentMessages() []*Block {
 		return nil
 	}
 	msgs := m.agent.GetMessages()
-	return m.rebuildBlocksFromMessages(msgs)
+	blocks := m.rebuildBlocksFromMessages(msgs)
+	m.setTranscriptDisplaySequences(blocks, m.focusedAgentID)
+	return blocks
 }
 
 func (m *Model) loadThinkingTranslationsForTranscript() map[string]ThinkingTranslationView {

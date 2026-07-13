@@ -33,7 +33,7 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	result = append(result, headerLine)
 
 	if b.Collapsed {
-		return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.ID), result, toolCardBg, railANSISeq("tool", b.Focused))
+		return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 
 	if !b.toolResultIsCancelled() && b.ResultContent != "" {
@@ -78,5 +78,5 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	}
 	result = appendToolElapsedFooter(result, b)
 
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.ID), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }

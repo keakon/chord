@@ -12,14 +12,14 @@ func TestBlockLabelsShowOneBasedSequenceForAllCardTypes(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 
 	blocks := []*Block{
-		{ID: 0, Type: BlockUser, Content: "hello"},
-		{ID: 1, Type: BlockAssistant, Content: "hi"},
-		{ID: 2, Type: BlockThinking, Content: "reasoning"},
-		{ID: 3, Type: BlockToolCall, ToolName: "shell", Content: `{"command":"echo hi"}`},
-		{ID: 4, Type: BlockToolResult, Content: "ok"},
-		{ID: 5, Type: BlockError, Content: "boom"},
-		{ID: 6, Type: BlockStatus, StatusTitle: "STATUS", Content: "body"},
-		{ID: 7, Type: BlockCompactionSummary, Content: "summary"},
+		{ID: 100, DisplaySequence: 1, Type: BlockUser, Content: "hello"},
+		{ID: 101, DisplaySequence: 2, Type: BlockAssistant, Content: "hi"},
+		{ID: 102, DisplaySequence: 3, Type: BlockThinking, Content: "reasoning"},
+		{ID: 103, DisplaySequence: 4, Type: BlockToolCall, ToolName: "shell", Content: `{"command":"echo hi"}`},
+		{ID: 104, DisplaySequence: 5, Type: BlockToolResult, Content: "ok"},
+		{ID: 105, DisplaySequence: 6, Type: BlockError, Content: "boom"},
+		{ID: 106, DisplaySequence: 7, Type: BlockStatus, StatusTitle: "STATUS", Content: "body"},
+		{ID: 107, DisplaySequence: 8, Type: BlockCompactionSummary, Content: "summary"},
 	}
 	want := []string{"USER #1", "ASSISTANT #2", "THINKING #3", "TOOL CALL #4", "TOOL RESULT #5", "ERROR #6", "STATUS #7", "CONTEXT SUMMARY #8"}
 

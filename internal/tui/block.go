@@ -51,17 +51,18 @@ const (
 
 // Block represents a single visual element in the conversation.
 type Block struct {
-	ID        int
-	Type      BlockType
-	Content   string // raw content (args JSON for tool calls, result text for tool results)
-	RawArgs   string // full args JSON for tool calls when Content is display-trimmed
-	Collapsed bool   // for tool blocks, default true
-	ToolName  string // for tool blocks
-	ToolID    string // tool call ID
-	IsError   bool   // for tool results
-	Streaming bool   // true while the block is still receiving deltas
-	Focused   bool   // true when selected by mouse/keyboard
-	AgentID   string // originating agent ID (for future TUI Agent View Isolation)
+	ID              int
+	DisplaySequence int // one-based card number within the originating agent transcript
+	Type            BlockType
+	Content         string // raw content (args JSON for tool calls, result text for tool results)
+	RawArgs         string // full args JSON for tool calls when Content is display-trimmed
+	Collapsed       bool   // for tool blocks, default true
+	ToolName        string // for tool blocks
+	ToolID          string // tool call ID
+	IsError         bool   // for tool results
+	Streaming       bool   // true while the block is still receiving deltas
+	Focused         bool   // true when selected by mouse/keyboard
+	AgentID         string // originating agent ID (for future TUI Agent View Isolation)
 
 	// StartedAt is the wall clock when this block first became a live, visible
 	// card in the current process. Zero after session restore from JSONL (no

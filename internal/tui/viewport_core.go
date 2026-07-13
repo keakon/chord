@@ -174,18 +174,6 @@ func (v *Viewport) AppendBlocks(blocks []*Block) {
 	v.enforceHotBudget()
 }
 
-func (v *Viewport) HasBlocksForAgent(agentID string) bool {
-	if agentID == "main" {
-		agentID = ""
-	}
-	for _, b := range v.blocks {
-		if b.AgentID == agentID {
-			return true
-		}
-	}
-	return false
-}
-
 func (v *Viewport) RemoveLastUserBlock() {
 	for i := len(v.blocks) - 1; i >= 0; i-- {
 		if v.blocks[i].Type == BlockUser {

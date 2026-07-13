@@ -115,7 +115,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ %s (%d lines)", summary, lineCount)))
 			}
 		}
-		return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.ID), result, toolCardBg, railANSISeq("tool", b.Focused))
+		return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 	const diffLineNumWidth = 5
 	diffWidth := cardWidth - 4 - diffLineNumWidth
@@ -270,7 +270,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	}
 	result = appendToolElapsedFooter(result, b)
 
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.ID), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 func appendEditPatchPreview(result []string, argsJSON string, width int) []string {

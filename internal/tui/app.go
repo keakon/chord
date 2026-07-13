@@ -190,6 +190,7 @@ type Model struct {
 	thinkingStreamMsgIndex   int
 	thinkingStreamBlockIndex int
 	nextBlockID              int
+	lastDisplaySequence      map[string]int
 	thinkingStartTime        time.Time // when the current thinking started
 	streamFlushGeneration    uint64
 	streamFlushScheduled     bool
@@ -470,7 +471,8 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 			turnBusyStartedAt:   make(map[string]time.Time),
 			streamLastDeltaAt:   make(map[string]time.Time),
 		},
-		toolArgRenderState: make(map[string]toolArgRenderState),
+		toolArgRenderState:  make(map[string]toolArgRenderState),
+		lastDisplaySequence: make(map[string]int),
 		selectionState: selectionState{
 			focusedBlockID:  -1,
 			zone:            z,
@@ -650,6 +652,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncWorkingDirFromAgent()
 		shouldResetRuntimeCache := m.startupRestorePending || m.sessionSwitch.active()
 		m.startupRestorePending = false
+		if shouldResetRuntimeCache {
+			m.lastDisplaySequence = make(map[string]int)
+		}
 		var (
 			staleErr  error
 			oldStore  *ViewportSpillStore

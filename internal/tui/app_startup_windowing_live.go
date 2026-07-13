@@ -21,8 +21,47 @@ func (m *Model) appendViewportBlock(block *Block) {
 	if m == nil || m.viewport == nil || block == nil {
 		return
 	}
+	m.assignDisplaySequence(block)
 	m.viewport.AppendBlock(block)
 	m.syncStartupDeferredTranscriptAfterViewportAppend()
+}
+
+func displaySequenceAgentKey(agentID string) string {
+	if agentID == "main" {
+		return ""
+	}
+	return agentID
+}
+
+func (m *Model) assignDisplaySequence(block *Block) {
+	if m == nil || block == nil || block.DisplaySequence > 0 {
+		return
+	}
+	if m.lastDisplaySequence == nil {
+		m.lastDisplaySequence = make(map[string]int)
+	}
+	key := displaySequenceAgentKey(block.AgentID)
+	m.lastDisplaySequence[key]++
+	block.DisplaySequence = m.lastDisplaySequence[key]
+}
+
+func (m *Model) setTranscriptDisplaySequences(blocks []*Block, agentID string) {
+	if m == nil {
+		return
+	}
+	if m.lastDisplaySequence == nil {
+		m.lastDisplaySequence = make(map[string]int)
+	}
+	key := displaySequenceAgentKey(agentID)
+	sequence := 0
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+		sequence++
+		block.DisplaySequence = sequence
+	}
+	m.lastDisplaySequence[key] = sequence
 }
 
 func (m *Model) updateViewportBlock(block *Block) {
