@@ -260,6 +260,8 @@ The text after `/loop on` is the task target sent to the agent. When omitted, it
 
 When the agent asks to finish, Chord checks the loop exit conditions and shows a local confirmation containing the completion report. Confirm to stop, or reject to keep the loop running. YOLO mode does not bypass this confirmation or the `done` permission.
 
+The `done` tool remains on the same available tool surface when loop mode is toggled; `/loop` does not dynamically add or remove it. In normal mode, the agent must finish with a regular assistant response unless another explicit runtime or workflow requirement demands a tool-based completion signal. Merely completing the work or having `done` available does not justify calling it. Loop mode uses the current runtime's tool-call requirements and continuation instructions to make `done` the explicit exit request. Running `/loop off` returns subsequent work to normal response behavior and cancels any loop continuation that had not yet been sent to the model.
+
 Loop mode also detects repeated identical tool calls. It interrupts a stalled sequence and, after repeated interceptions, asks whether to stop or continue.
 
 A good pattern is:

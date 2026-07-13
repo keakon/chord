@@ -312,6 +312,7 @@ func (a *MainAgent) EnableLoopMode(target string) {
 func (a *MainAgent) DisableLoopMode() {
 	a.loopReductionMu.Lock()
 	a.loopState.disable()
+	a.pendingLoopContinuation = nil
 	a.loopReductionMu.Unlock()
 	a.emitLoopStateChanged()
 	a.emitToTUI(InfoEvent{Message: "Loop disabled."})

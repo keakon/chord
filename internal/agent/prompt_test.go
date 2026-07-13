@@ -629,6 +629,9 @@ func TestMainAgentResponseClosurePrompt_RequiresContinueUnlessBlocked(t *testing
 		"If more in-scope, low-risk work remains, continue instead of stopping with a partial summary or optional offer",
 		"Before declaring implementation work complete, check that final claims are supported by the work performed and evidence gathered",
 		"ask exactly the necessary high-context question instead of pretending the task is complete",
+		"By default, return that completion report directly in the final assistant response",
+		"Do not call the Done tool merely because work is complete or Done is available",
+		"use it only when the current runtime or workflow explicitly requires a tool-based completion signal",
 		"After reporting completion, stop there; do not append routine in-scope follow-up work as an optional invitation",
 	} {
 		if !strings.Contains(got, want) {

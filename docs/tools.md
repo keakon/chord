@@ -54,7 +54,7 @@ These tools control agent workflows rather than local side effects. YOLO mode do
 
 | Tool | What it does |
 | --- | --- |
-| `done` | Complete a turn or request loop exit with a final report; gated by loop exit conditions and local confirmation. |
+| `done` | Send a final report only when the active runtime or workflow explicitly requires a tool-based completion signal, primarily to request loop exit. Ordinary completion must be returned directly as assistant text; merely finishing the work or having `done` available is not a reason to call it. Loop exits remain gated by exit conditions and local confirmation. |
 | `handoff` | Transfer a plan/work to another role for execution. |
 | `delegate` | Start a delegated SubAgent workstream. Denying it also disables `cancel` and nested delegation for that role. |
 | `cancel` | Cancel a delegated worker; requires `delegate` to be enabled. |

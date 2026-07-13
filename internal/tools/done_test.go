@@ -23,12 +23,42 @@ func TestDoneToolParameters(t *testing.T) {
 	if !strings.Contains(desc, "user's current language") {
 		t.Fatalf("report description missing user language guidance: %q", desc)
 	}
+	for _, want := range []string{
+		"When the runtime explicitly requires this exceptional completion tool",
+		"Otherwise, do not call Done; return the result directly as assistant text",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("report description missing %q: %q", want, desc)
+		}
+	}
+	if strings.HasPrefix(desc, "Required final") {
+		t.Fatalf("report description should not imply every completion requires Done: %q", desc)
+	}
 	required, ok := params["required"].([]string)
 	if !ok {
 		t.Fatalf("required type = %T", params["required"])
 	}
 	if len(required) != 1 || required[0] != "report" {
 		t.Fatalf("required = %v, want [report]", required)
+	}
+}
+
+func TestDoneToolDescriptionUsesRequiredToolFallbackProtocol(t *testing.T) {
+	desc := NewDoneTool().Description()
+	for _, want := range []string{
+		"Unless the current runtime or workflow explicitly requires a tool-based completion signal, DO NOT call this tool",
+		"return the final answer directly as assistant text",
+		"Tool availability, completed work, or this tool's required report argument do not by themselves require a Done call",
+		"no other tool call is necessary or appropriate",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("Done description missing %q: %q", want, desc)
+		}
+	}
+	for _, unwanted := range []string{"In loop mode", "outside loop mode", "user approval"} {
+		if strings.Contains(desc, unwanted) {
+			t.Fatalf("Done description contains mode-dependent guidance %q: %q", unwanted, desc)
+		}
 	}
 }
 

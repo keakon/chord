@@ -1469,6 +1469,7 @@ func TestContinueFromContextDoesNotEnableLoopByDefault(t *testing.T) {
 func TestHandleUserMessageTreatsLoopOffAsBusyControlCommand(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.EnableLoopMode("finish current task")
+	a.pendingLoopContinuation = &LoopContinuationNote{Title: "LOOP CONTINUE", Text: "Call `done` when complete."}
 	a.newTurn()
 
 	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop off"})
@@ -1478,6 +1479,9 @@ func TestHandleUserMessageTreatsLoopOffAsBusyControlCommand(t *testing.T) {
 	}
 	if got := len(a.pendingUserMessages); got != 0 {
 		t.Fatalf("len(pendingUserMessages) = %d, want 0 for busy /loop off", got)
+	}
+	if a.pendingLoopContinuation != nil {
+		t.Fatal("pending loop continuation should be cleared when loop is disabled")
 	}
 	for _, msg := range a.ctxMgr.Snapshot() {
 		if strings.Contains(msg.Content, "/loop off") {

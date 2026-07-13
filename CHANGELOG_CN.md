@@ -18,6 +18,7 @@
 
 ### 修复
 
+- `done` 工具提示现在明确把 assistant 正文作为普通任务完成后的强制默认出口。只有当前 runtime 或工作流明确要求工具化完成信号（例如申请 loop 退出）时，模型才能调用 `done`；其 report schema 也不再暗示每个已完成任务都必须使用该工具。
 - 新建会话目录及内部持久化产物现在默认仅允许当前用户访问（目录 `0700`、文件 `0600`），避免 transcript、snapshot、SubAgent mailbox、artifact、task 状态和压缩历史默认暴露给同机其他用户。
 - TUI 文本粘贴不再在 Bubble Tea update 热路径中探测剪贴板图片：普通终端 paste 与 `Cmd+V` 只粘贴文本，`Ctrl+V` / `Alt+V` 则通过原生剪贴板后端异步附加图片或 PDF，且不再依赖 `osascript`，从而避免输入框偶发卡住数秒。剪贴板 PNG/JPEG 可直接使用，BMP/WebP 会归一化处理，以兼容 Windows、WSLg 与 Linux。
 - OpenAI Responses 与 Chat Completions 的 usage 现在会把 GPT-5.6 cache-write token 记录到独立桶中，而不会再把它重复计入普通输入，从而保证上下文阈值和费用统计准确。
