@@ -23,8 +23,9 @@ const (
 )
 
 const (
-	localShellPayloadPrefix  = "local_shell_payload: "
-	localShellPayloadVersion = 2
+	localShellPayloadPrefix   = "local_shell_payload: "
+	localShellPayloadVersion  = 3
+	legacyShellPayloadVersion = 2
 )
 
 type localShellPayload struct {
@@ -75,8 +76,14 @@ func localShellReadableBody(command, output string, failed bool) string {
 }
 
 // UserShellReadableBody is the human-readable body under "User:" for merged
-// !shell cards used by copy/export/model context.
-func UserShellReadableBody(userLine, cmd, output string, failed bool) string {
+// !shell cards used by copy/export/model context. cmd is the command that
+// actually ran and is the model-relevant value, including when the original
+// input was only a large-paste placeholder.
+func UserShellReadableBody(cmd, output string, failed bool) string {
+	return localShellReadableBody(cmd, output, failed)
+}
+
+func legacyUserShellReadableBody(userLine, cmd, output string, failed bool) string {
 	userLine = strings.TrimSpace(userLine)
 	if userLine == "" {
 		userLine = "!"
@@ -87,7 +94,7 @@ func UserShellReadableBody(userLine, cmd, output string, failed bool) string {
 // UserShellPersistedBody appends a machine-readable payload after the
 // human-readable body so session restore can roundtrip multiline content.
 func UserShellPersistedBody(userLine, cmd, output string, failed bool) string {
-	readable := UserShellReadableBody(userLine, cmd, output, failed)
+	readable := UserShellReadableBody(cmd, output, failed)
 	payloadBytes, _ := json.Marshal(localShellPayload{
 		Version:  localShellPayloadVersion,
 		UserLine: userLine,
@@ -203,21 +210,58 @@ func TryParseUserShellPersistedMessage(content string) (userLine, cmd, output st
 	}
 	lastLine := lines[lastIdx]
 	if !strings.HasPrefix(lastLine, localShellPayloadPrefix) {
-		return "", "", "", false, false
+		return tryParseLegacyUserShellMessage(c)
 	}
 	var payload localShellPayload
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(lastLine, localShellPayloadPrefix)), &payload); err != nil {
 		return "", "", "", false, false
 	}
-	if payload.Version != localShellPayloadVersion {
+	if payload.Version != localShellPayloadVersion && payload.Version != legacyShellPayloadVersion {
 		return "", "", "", false, false
 	}
 	if strings.TrimSpace(payload.UserLine) == "" || payload.UserLine[0] != '!' {
 		return "", "", "", false, false
 	}
 	readable := strings.TrimRight(strings.Join(lines[:lastIdx], "\n"), "\n")
-	if readable != UserShellReadableBody(payload.UserLine, payload.Command, payload.Output, payload.Failed) {
+	expectedReadable := UserShellReadableBody(payload.Command, payload.Output, payload.Failed)
+	if payload.Version == legacyShellPayloadVersion {
+		expectedReadable = legacyUserShellReadableBody(payload.UserLine, payload.Command, payload.Output, payload.Failed)
+	}
+	if readable != expectedReadable {
 		return "", "", "", false, false
 	}
 	return payload.UserLine, payload.Command, payload.Output, payload.Failed, true
+}
+
+func tryParseLegacyUserShellMessage(content string) (userLine, cmd, output string, failed bool, ok bool) {
+	// Records written before the structured payload existed have no provenance
+	// marker. Exact user-authored lookalikes are therefore indistinguishable;
+	// require the original !line and executed command to agree to keep this
+	// compatibility heuristic as narrow as the legacy format permits.
+	const commandSep = "\n\ncommand:\n"
+	const outputSep = "\n\noutput:\n"
+
+	commandIdx := strings.Index(content, commandSep)
+	if commandIdx <= 0 {
+		return "", "", "", false, false
+	}
+	userLine = strings.TrimSpace(content[:commandIdx])
+	if strings.Contains(userLine, "\n") || !strings.HasPrefix(userLine, "!") {
+		return "", "", "", false, false
+	}
+	remainder := content[commandIdx+len(commandSep):]
+	outputIdx := strings.Index(remainder, outputSep)
+	if outputIdx < 0 {
+		return "", "", "", false, false
+	}
+	cmd = remainder[:outputIdx]
+	if strings.TrimSpace(strings.TrimPrefix(userLine, "!")) != strings.TrimSpace(cmd) {
+		return "", "", "", false, false
+	}
+	output = remainder[outputIdx+len(outputSep):]
+	if strings.HasSuffix(output, "\n\nstatus: error") {
+		output = strings.TrimSuffix(output, "\n\nstatus: error")
+		failed = true
+	}
+	return userLine, cmd, output, failed, true
 }

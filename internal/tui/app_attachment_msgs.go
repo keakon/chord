@@ -73,7 +73,7 @@ func shellBangCmd(workDir, userLine, bashLine, agentID string, blockID int) tea.
 
 func localShellContextMessage(userLine, cmd, output string, err error) message.Message {
 	failed := err != nil
-	readable := convformat.UserShellReadableBody(userLine, cmd, output, failed)
+	readable := convformat.UserShellReadableBody(cmd, output, failed)
 	persisted := convformat.UserShellPersistedBody(userLine, cmd, output, failed)
 	return message.Message{
 		Role:    message.RoleUser,
@@ -89,7 +89,7 @@ func userLocalShellCopyBody(b *Block) string {
 	if b.UserLocalShellPending {
 		return b.Content + "\n\n(terminal running…)"
 	}
-	return convformat.UserShellReadableBody(b.Content, b.UserLocalShellCmd, b.UserLocalShellResult, b.UserLocalShellFailed)
+	return convformat.UserShellReadableBody(b.UserLocalShellCmd, b.UserLocalShellResult, b.UserLocalShellFailed)
 }
 
 // pickImageFile reads an image file whose path is currently selected/typed in the input.

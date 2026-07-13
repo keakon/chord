@@ -4408,6 +4408,25 @@ func TestLiveAndRestoredDoneToolShareStableResultFields(t *testing.T) {
 	}
 }
 
+func TestMessagesToBlocksRestoresLegacyLocalShellAsTerminal(t *testing.T) {
+	msg := message.Message{
+		Role:    "user",
+		Content: "User:\n\n!ls pd1-10.csv\n\ncommand:\nls pd1-10.csv\n\noutput:\npd1-10.csv",
+	}
+	nextID := 1
+	blocks := messagesToBlocks([]message.Message{msg}, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	block := blocks[0]
+	if !block.IsUserLocalShell() || block.UserLocalShellCmd != "ls pd1-10.csv" || block.UserLocalShellResult != "pd1-10.csv" {
+		t.Fatalf("restored block = %#v, want local shell block", block)
+	}
+	if got := stripANSI(strings.Join(block.Render(80, ""), "\n")); !strings.Contains(got, "TERMINAL") || strings.Contains(got, "USER") {
+		t.Fatalf("restored render = %q, want TERMINAL and no USER label", got)
+	}
+}
+
 func TestMessagesToBlocksDelegateToolRestoresLinkedAgentMetadata(t *testing.T) {
 	msgs := []message.Message{
 		{
