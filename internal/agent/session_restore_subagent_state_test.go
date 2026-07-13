@@ -307,8 +307,11 @@ func TestRestoreSessionAtStartupUsesSnapshotSubAgentState(t *testing.T) {
 	}
 
 	subagents := a.GetSubAgents()
-	if len(subagents) != 0 {
-		t.Fatalf("len(GetSubAgents()) = %d, want 0 for restored terminal workers", len(subagents))
+	if len(subagents) != 1 {
+		t.Fatalf("len(GetSubAgents()) = %d, want restored terminal worker visible", len(subagents))
+	}
+	if subagents[0].InstanceID != "agent-1" || subagents[0].State != string(SubAgentStateCancelled) {
+		t.Fatalf("GetSubAgents()[0] = %+v, want agent-1 in cancelled state", subagents[0])
 	}
 	record := a.taskRecordByTaskID("adhoc-9")
 	if record == nil {
@@ -319,6 +322,46 @@ func TestRestoreSessionAtStartupUsesSnapshotSubAgentState(t *testing.T) {
 	}
 	if record.LastSummary != "Cancelled by MainAgent" {
 		t.Fatalf("record.LastSummary = %q, want %q", record.LastSummary, "Cancelled by MainAgent")
+	}
+}
+
+func TestCancelledSubAgentSnapshotOverridesPreviouslyRunningStateOnRestore(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "cancelled-sub-state")
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := a.recovery.PersistMessage("main", message.Message{Role: "user", Content: "main work"}); err != nil {
+		t.Fatalf("PersistMessage(main): %v", err)
+	}
+	sub := newControllableTestSubAgent(t, a, "adhoc-7")
+	if err := a.recovery.PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "worker task"}); err != nil {
+		t.Fatalf("PersistMessage(sub): %v", err)
+	}
+	a.saveRecoverySnapshot()
+
+	if cancelled := a.CancelCurrentTurn(); !cancelled {
+		t.Fatal("CancelCurrentTurn() = false, want true")
+	}
+
+	restored := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	restored.SetAgentConfigs(map[string]*config.AgentConfig{
+		"worker": {
+			Name:   "worker",
+			Mode:   "subagent",
+			Models: map[string][]string{"default": {"test/test-model"}},
+		},
+	})
+	restored.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {
+		return newTestLLMClient()
+	})
+	if _, err := restored.restoreSessionState(sessionDir); err != nil {
+		t.Fatalf("restoreSessionState(): %v", err)
+	}
+	restoredSub := restored.subAgentByTaskID("adhoc-7")
+	if restoredSub == nil {
+		t.Fatal("cancelled SubAgent missing after restore")
+	}
+	if got := restoredSub.State(); got != SubAgentStateCancelled {
+		t.Fatalf("restored state = %q, want %q", got, SubAgentStateCancelled)
 	}
 }
 

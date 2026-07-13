@@ -146,3 +146,34 @@ func TestCancelCurrentTurnInterruptsRunningSubAgents(t *testing.T) {
 		t.Fatalf("restored sub tool message = %q, want %q", got, toolCallFailureMessage(context.Canceled))
 	}
 }
+
+func TestCancelCurrentTurnReportsIdleSubAgentCancellationAndSnapshotsState(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-7")
+	sub.setState(SubAgentStateIdle, "restored idle worker")
+	a.saveRecoverySnapshot()
+
+	if cancelled := a.CancelCurrentTurn(); !cancelled {
+		t.Fatal("CancelCurrentTurn() = false after cancelling an idle SubAgent")
+	}
+	if got := sub.State(); got != SubAgentStateCancelled {
+		t.Fatalf("sub.State() = %q, want %q", got, SubAgentStateCancelled)
+	}
+
+	snapshot, err := a.recovery.Recover()
+	if err != nil {
+		t.Fatalf("Recover(): %v", err)
+	}
+	if snapshot == nil {
+		t.Fatal("expected recovery snapshot")
+	}
+	for _, restored := range snapshot.ActiveAgents {
+		if restored.InstanceID == sub.instanceID {
+			if restored.State != string(SubAgentStateCancelled) {
+				t.Fatalf("snapshot state = %q, want %q", restored.State, SubAgentStateCancelled)
+			}
+			return
+		}
+	}
+	t.Fatalf("snapshot missing SubAgent %q: %#v", sub.instanceID, snapshot.ActiveAgents)
+}

@@ -27,9 +27,19 @@ func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
 
 	cancelled := false
 	for _, sub := range subs {
-		if sub.interruptCurrentTurnWithStatus(ToolResultStatusError, context.Canceled, true) {
+		interrupted := sub.interruptCurrentTurnWithStatus(ToolResultStatusError, context.Canceled, true)
+		state := sub.State()
+		if interrupted || state == SubAgentStateRunning || state == SubAgentStateIdle || state == SubAgentStateWaitingMain || state == SubAgentStateWaitingDescendant {
+			sub.setState(SubAgentStateCancelled, "stopped by user")
+			a.noteSubAgentStateTransition(sub, SubAgentStateCancelled)
+			a.persistSubAgentMeta(sub)
+			a.syncTaskRecordFromSub(sub, "")
+			a.emitToTUI(AgentStatusEvent{AgentID: sub.instanceID, Status: string(SubAgentStateCancelled), Message: "Stopped by user"})
 			cancelled = true
 		}
+	}
+	if cancelled {
+		a.saveRecoverySnapshot()
 	}
 	return cancelled
 }

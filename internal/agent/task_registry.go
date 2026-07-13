@@ -202,15 +202,6 @@ func durableTaskResumePolicy(state SubAgentState) string {
 	}
 }
 
-func shouldRestoreLiveSubAgentState(state SubAgentState) bool {
-	switch state {
-	case SubAgentStateRunning, SubAgentStateIdle, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant:
-		return true
-	default:
-		return false
-	}
-}
-
 func (r *DurableTaskRecord) allowsRehydrate() bool {
 	if r == nil {
 		return false
@@ -589,9 +580,6 @@ func filterRestorableSubAgentStates(states []loadedSubAgentState) []loadedSubAge
 		}
 		if restoreState == SubAgentStateRunning {
 			restoreState = SubAgentStateIdle
-		}
-		if !shouldRestoreLiveSubAgentState(restoreState) {
-			continue
 		}
 		state.State = restoreState
 		out = append(out, state)
