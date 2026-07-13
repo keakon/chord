@@ -55,7 +55,18 @@ permission:
 
 - `edit` 和 `patch` 属于同一个文件编辑工具族，只是面向模型暴露的编辑格式不同。当另一个编辑器没有同名显式规则时，一个编辑器的规则会作用到另一个编辑器。这也包括 `deny`：`*: allow` 后面配置 `edit: deny` 会同时禁用 `edit` 和 `patch`，因为 `patch` 继承了编辑工具族的拒绝规则。如果需要两个格式有不同行为，请同时配置 `edit` 和 `patch`。例如 `edit: allow` 加 `patch: deny` 会禁用 `patch` 但保留 `edit`，GPT/o 系列模型会退回使用 `edit`；反过来，`patch: allow` 加 `edit: deny` 会让默认偏好 `edit` 的非 GPT 模型退回使用 `patch`。
 - `handoff` 和 `done` 会被当作控制 gate。设为 `deny` 会隐藏或禁用对应工作流；设为 `allow` 或 `ask` 都会让工作流可用，真正交接 / 完成时 Chord 仍可能显示本地确认（例如 loop 的 `done` 确认）。也就是说，`ask` 不是这两个工具的“更强工作流模式”，它主要表示工具保持可见 / 可用，同时保留 Chord 内建确认 gate。这个取舍可以避免模型看到一个可用控制工具却最终无法完成，同时仍防止静默切换角色或过早退出 loop。
-- `delegate` 控制的是一组委派工作流。如果 `delegate` 为 `deny`，Chord 也会禁用通过 `cancel` 取消 SubAgent、从 SubAgent 中隐藏嵌套的 `delegate` / `cancel`，并把 SubAgent 的 `notify` 限制为只通知自己的 owner，而不是任意指定目标。原因是取消或定向通知其他委派任务本身属于管理 delegated workstreams；如果禁用了 `delegate` 却允许这些片段，会形成一个不完整但仍可干扰委派工作的控制面。
+- `delegate` 会匹配调用参数中的 `agent_type`，因此每个角色都可以只允许委派给指定的 SubAgent 定义。例如，下面按声明顺序先拒绝所有目标，再允许 `reviewer`，并要求委派给 `tester` 前进行确认：
+
+  ```yaml
+  permission:
+    delegate:
+      "*": deny
+      reviewer: allow
+      tester: ask
+  ```
+
+  被拒绝的目标不会出现在 Delegate 工具 schema 或协调 prompt 中；如果所有已配置的 SubAgent 目标都被拒绝，Delegate 会被隐藏。权限规则按“最后匹配优先”生效，因此通配兜底规则应写在具体目标规则之前。
+- `delegate` 也控制一组委派工作流。如果有效的通配 `deny` 将它整体禁用，Chord 还会禁用通过 `cancel` 取消 SubAgent、从 SubAgent 中隐藏嵌套的 `delegate` / `cancel`，并把 SubAgent 的 `notify` 限制为只通知自己的 owner，而不是任意指定目标。原因是取消或定向通知其他委派任务本身属于管理 delegated workstreams；如果禁用委派却允许这些片段，会形成一个不完整但仍可干扰委派工作的控制面。
 - 因此 `cancel` 依赖 `delegate`：即使配置了 `cancel: allow`，只要 `delegate` 被禁用，`cancel` 仍会被拒绝。若希望某个角色能取消委派工作，需要同时启用 `delegate` 和 `cancel`。
 - `question: ask` 会被归一化为 `allow`。`question` 工具本身就是向用户提出结构化问题并等待回答；如果在提问前再加一次权限确认，只会产生重复弹窗，并不能降低最终决策风险。
 - YOLO 不会绕过 `handoff`、`delegate`、`cancel` 或 `done`；即使普通文件 / shell / web 权限被绕过，这些控制工具的权限仍会执行。YOLO 下，宽泛的 `"*": allow` 规则本身不会授予这些受保护工具；如果角色需要使用它们，请分别直接配置对应工具权限。

@@ -788,6 +788,42 @@ todo_write: allow
 	}
 }
 
+func TestPrimaryAgentCoordinationPromptBlock_FiltersDeniedDelegateTargets(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry()}
+	a.agentConfigs = map[string]*config.AgentConfig{
+		"reviewer": {Name: "reviewer", Description: "Review changes", Mode: config.AgentModeSubAgent},
+		"tester":   {Name: "tester", Description: "Run tests", Mode: config.AgentModeSubAgent},
+	}
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": allow
+delegate:
+  "*": deny
+  reviewer: allow
+`)}
+	a.rebuildRuleset()
+	a.rebuildCachedSubAgents()
+	a.tools.Register(tools.NewDelegateTool(a))
+
+	got := a.primaryAgentCoordinationPromptBlock()
+	if !strings.Contains(got, "**reviewer**") {
+		t.Fatalf("expected allowed reviewer in Delegate prompt, got %q", got)
+	}
+	if strings.Contains(got, "**tester**") {
+		t.Fatalf("did not expect denied tester in Delegate prompt, got %q", got)
+	}
+
+	tool, ok := a.tools.Get(tools.NameDelegate)
+	if !ok {
+		t.Fatal("Delegate tool missing")
+	}
+	properties := tool.Parameters()["properties"].(map[string]any)
+	agentType := properties["agent_type"].(map[string]any)
+	enum := agentType["enum"].([]string)
+	if len(enum) != 1 || enum[0] != "reviewer" {
+		t.Fatalf("Delegate agent_type enum = %v, want [reviewer]", enum)
+	}
+}
+
 func TestMainLLMToolDefinitionsIncludeSkillToolListing(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.skillsReady = make(chan struct{})

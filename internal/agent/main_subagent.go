@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -22,7 +23,28 @@ type delegationCaller struct {
 	TaskID     string
 	Depth      int
 	Delegation config.DelegationConfig
+	Ruleset    permission.Ruleset
 	IsMain     bool
+}
+
+type subAgentDelegateCreator struct {
+	parent  *MainAgent
+	ruleset func() permission.Ruleset
+}
+
+func (c subAgentDelegateCreator) CreateSubAgent(ctx context.Context, description, agentType string, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (tools.TaskHandle, error) {
+	return c.parent.CreateSubAgent(ctx, description, agentType, planTaskRef, semanticTaskKey, expectedWriteScope)
+}
+
+func (c subAgentDelegateCreator) AvailableSubAgents() []tools.AgentInfo {
+	if c.parent == nil {
+		return nil
+	}
+	var ruleset permission.Ruleset
+	if c.ruleset != nil {
+		ruleset = c.ruleset()
+	}
+	return c.parent.availableSubAgentInfosForRuleset(ruleset, "")
 }
 
 func (a *MainAgent) delegationCallerFromContext(ctx context.Context) (delegationCaller, error) {
@@ -37,6 +59,7 @@ func (a *MainAgent) delegationCallerFromContext(ctx context.Context) (delegation
 			TaskID:     "",
 			Depth:      0,
 			Delegation: cfg.Delegation,
+			Ruleset:    a.effectiveRuleset(),
 			IsMain:     true,
 		}, nil
 	}
@@ -49,6 +72,7 @@ func (a *MainAgent) delegationCallerFromContext(ctx context.Context) (delegation
 		TaskID:     sub.taskID,
 		Depth:      sub.depth,
 		Delegation: sub.delegation,
+		Ruleset:    append(permission.Ruleset(nil), sub.ruleset...),
 		IsMain:     false,
 	}, nil
 }
@@ -460,6 +484,10 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	if err != nil {
 		return tools.TaskHandle{}, err
 	}
+	agentType = strings.TrimSpace(agentType)
+	if !delegateAgentAvailable(caller.Ruleset, agentType) {
+		return tools.TaskHandle{}, fmt.Errorf("agent type %q is denied by Delegate permission policy", agentType)
+	}
 	a.subs.mu.RLock()
 	count := a.directActiveChildCountLocked(caller.AgentID, caller.TaskID)
 	a.subs.mu.RUnlock()
@@ -638,12 +666,20 @@ func (a *MainAgent) AvailableSubAgents() []tools.AgentInfo {
 	if cfg := a.currentActiveConfig(); cfg != nil {
 		activeName = cfg.Name
 	}
-	agents := a.resolveAvailableAgents()
+	return a.availableSubAgentInfosForRuleset(a.effectiveRuleset(), activeName)
+}
+
+func delegateAgentAvailable(ruleset permission.Ruleset, agentType string) bool {
+	if len(ruleset) == 0 {
+		return true
+	}
+	return ruleset.Evaluate(tools.NameDelegate, strings.TrimSpace(agentType)) != permission.ActionDeny
+}
+
+func (a *MainAgent) availableSubAgentInfosForRuleset(ruleset permission.Ruleset, excludedName string) []tools.AgentInfo {
+	agents := a.availableSubAgentsForRuleset(ruleset, excludedName)
 	infos := make([]tools.AgentInfo, 0, len(agents))
 	for _, ac := range agents {
-		if ac.Name == activeName {
-			continue
-		}
 		infos = append(infos, tools.AgentInfo{
 			Name:             ac.Name,
 			Description:      ac.Description,
@@ -667,9 +703,24 @@ func (a *MainAgent) rebuildCachedSubAgents() {
 }
 
 func (a *MainAgent) availableSubAgentsForPrompt() []*config.AgentConfig {
+	excludedName := ""
+	if cfg := a.currentActiveConfig(); cfg != nil {
+		excludedName = cfg.Name
+	}
+	return a.availableSubAgentsForRuleset(a.effectiveRuleset(), excludedName)
+}
+
+func (a *MainAgent) availableSubAgentsForRuleset(ruleset permission.Ruleset, excludedName string) []*config.AgentConfig {
 	a.cachedSubMu.RLock()
 	defer a.cachedSubMu.RUnlock()
-	return a.cachedSubAgents
+	agents := make([]*config.AgentConfig, 0, len(a.cachedSubAgents))
+	for _, ac := range a.cachedSubAgents {
+		if ac == nil || ac.Name == excludedName || !delegateAgentAvailable(ruleset, ac.Name) {
+			continue
+		}
+		agents = append(agents, ac)
+	}
+	return agents
 }
 
 func (a *MainAgent) validFocusedSubAgent() *SubAgent {

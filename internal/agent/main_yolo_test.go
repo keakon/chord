@@ -37,7 +37,7 @@ func TestYoloRulesetKeepsProtectedRulesAndDropsOthers(t *testing.T) {
 	if got := evaluateToolPermission(filtered, tools.NameHandoff, json.RawMessage(`{"agent":"planner"}`)); got.Action != permission.ActionAllow {
 		t.Fatalf("Handoff action = %v, want allow", got.Action)
 	}
-	if got := evaluateToolPermission(filtered, tools.NameDelegate, json.RawMessage(`{"agent":"builder"}`)); got.Action != permission.ActionAsk {
+	if got := evaluateToolPermission(filtered, tools.NameDelegate, json.RawMessage(`{"agent_type":"builder"}`)); got.Action != permission.ActionAsk {
 		t.Fatalf("Delegate action = %v, want ask", got.Action)
 	}
 	if got := evaluateToolPermission(filtered, tools.NameCancel, json.RawMessage(`{}`)); got.Action != permission.ActionDeny {
@@ -45,6 +45,32 @@ func TestYoloRulesetKeepsProtectedRulesAndDropsOthers(t *testing.T) {
 	}
 	if got := evaluateToolPermission(filtered, tools.NameDone, json.RawMessage(`{"report":"done"}`)); got.Action != permission.ActionAllow {
 		t.Fatalf("Done action = %v, want allow", got.Action)
+	}
+}
+
+func TestEvaluateDelegatePermissionMatchesAgentType(t *testing.T) {
+	ruleset := permission.Ruleset{
+		{Permission: tools.NameDelegate, Pattern: "*", Action: permission.ActionDeny},
+		{Permission: tools.NameDelegate, Pattern: "reviewer", Action: permission.ActionAllow},
+		{Permission: tools.NameDelegate, Pattern: "tester", Action: permission.ActionAsk},
+	}
+
+	for _, tc := range []struct {
+		agentType string
+		want      permission.Action
+	}{
+		{agentType: "reviewer", want: permission.ActionAllow},
+		{agentType: "tester", want: permission.ActionAsk},
+		{agentType: "builder", want: permission.ActionDeny},
+	} {
+		args := json.RawMessage(`{"agent_type":"` + tc.agentType + `"}`)
+		got := evaluateToolPermission(ruleset, tools.NameDelegate, args)
+		if got.Action != tc.want {
+			t.Errorf("Delegate(%q) action = %v, want %v", tc.agentType, got.Action, tc.want)
+		}
+		if got.MatchArgument != tc.agentType {
+			t.Errorf("Delegate(%q) match argument = %q", tc.agentType, got.MatchArgument)
+		}
 	}
 }
 

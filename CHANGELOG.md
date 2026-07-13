@@ -11,6 +11,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- `delegate` permission patterns now match `agent_type` consistently across advertised targets, prompts, execution, nested delegation, and hook-modified arguments.
 - The documentation stack now uses Astro 7 and Starlight 0.41 with updated Vite, devalue, js-yaml, yaml, and related transitive dependencies; duplicate documentation ID warnings from the old Astro content loader are gone, and the production dependency audit no longer reports known vulnerabilities.
 - OpenAI Responses and Chat Completions requests now enable `parallel_tool_calls` by default so independent tool calls can be returned together. Model and variant configuration can explicitly disable it when a backend or workflow requires serial calls.
 - Context-reduction defaults were retuned from recent-session statistics: old read-like and successful shell outputs are summarized after 1 effective turn, read-like and shell-success byte gates default to 3000, generic stale cleanup starts after 3 effective turns, `min_tool_results_prune` defaults to 6, and `min_incremental_saved_tokens` defaults to 2048. Older successful shell output now keeps output size, line count, salient success lines, and a tail fallback instead of a fixed omission marker.

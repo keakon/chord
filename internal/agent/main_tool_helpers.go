@@ -64,6 +64,13 @@ func extractToolArgument(toolName string, args []byte) string {
 func extractToolArgumentInDir(toolName string, args []byte, projectRoot string) string {
 	toolName = tools.NormalizeName(toolName)
 	switch toolName {
+	case tools.NameDelegate:
+		var parsed struct {
+			AgentType string `json:"agent_type"`
+		}
+		if err := json.Unmarshal(args, &parsed); err == nil && strings.TrimSpace(parsed.AgentType) != "" {
+			return strings.TrimSpace(parsed.AgentType)
+		}
 	case tools.NameShell:
 		var parsed struct {
 			Command string `json:"command"`

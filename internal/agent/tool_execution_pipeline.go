@@ -70,8 +70,16 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		return execResult, err
 	}
 	if fireHook {
-		if err := p.applyToolHook(ctx, &tc, &execResult); err != nil {
+		modified, err := p.applyToolHook(ctx, &tc, &execResult)
+		if err != nil {
 			return execResult, err
+		}
+		if modified {
+			if tc.Name == tools.NameDelegate {
+				if err := p.applyPermission(ctx, &tc, &execResult); err != nil {
+					return execResult, err
+				}
+			}
 		}
 	}
 	if err := validateToolCallArguments(p.registry, tc, p.logPrefix, p.agentID); err != nil {
@@ -328,9 +336,9 @@ func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.
 	return nil
 }
 
-func (p toolExecutionPipeline) applyToolHook(ctx context.Context, tc *message.ToolCall, execResult *ToolExecutionResult) error {
+func (p toolExecutionPipeline) applyToolHook(ctx context.Context, tc *message.ToolCall, execResult *ToolExecutionResult) (bool, error) {
 	if p.fireHook == nil {
-		return nil
+		return false, nil
 	}
 	turnID := uint64(0)
 	if p.currentTurnID != nil {
@@ -338,7 +346,7 @@ func (p toolExecutionPipeline) applyToolHook(ctx context.Context, tc *message.To
 	}
 	hookResult, hookErr := p.fireHook(ctx, hook.OnToolCall, turnID, buildToolHookData(*tc, p.projectRoot))
 	if hookErr != nil || hookResult == nil {
-		return nil
+		return false, nil
 	}
 	switch hookResult.Action {
 	case hook.ActionBlock:
@@ -346,27 +354,28 @@ func (p toolExecutionPipeline) applyToolHook(ctx context.Context, tc *message.To
 		if hookResult.Message != "" {
 			msg = hookResult.Message
 		}
-		return fmt.Errorf("tool %q %s", tc.Name, msg)
+		return false, fmt.Errorf("tool %q %s", tc.Name, msg)
 	case hook.ActionModify:
 		modified, ok := hookResult.Data.(map[string]any)
 		if !ok {
-			return nil
+			return false, nil
 		}
 		newArgs, ok := modified["args"]
 		if !ok {
-			return nil
+			return false, nil
 		}
 		raw, err := json.Marshal(newArgs)
 		if err != nil {
-			return nil
+			return false, nil
 		}
 		originalArgs := append(json.RawMessage(nil), tc.Args...)
 		tc.Args = raw
 		execResult.EffectiveArgsJSON = string(tc.Args)
 		execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, originalArgs, tc.Args)
 		p.notePendingToolCall(*tc, execResult)
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
 func (p toolExecutionPipeline) notePendingToolCall(tc message.ToolCall, execResult *ToolExecutionResult) {

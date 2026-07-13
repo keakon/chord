@@ -619,6 +619,26 @@ func TestCreateSubAgentFromSubAgentContextSetsOwnerAndDepth(t *testing.T) {
 	}
 }
 
+func TestCreateSubAgentRejectsTargetDeniedForCaller(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	a.activeConfig.Permission = parsePermissionNode(t, `
+"*": allow
+delegate:
+  "*": deny
+  reviewer: allow
+`)
+	a.rebuildRuleset()
+
+	_, err := a.CreateSubAgent(context.Background(), "child work", "worker", "", "", tools.WriteScope{})
+	if err == nil || !strings.Contains(err.Error(), "denied by Delegate permission policy") {
+		t.Fatalf("CreateSubAgent() err = %v, want Delegate target denial", err)
+	}
+	if got := len(a.sem); got != 0 {
+		t.Fatalf("CreateSubAgent() consumed %d semaphore slots for denied target", got)
+	}
+}
+
 func TestCreateSubAgentReturnsChildLimitReachedForDirectOwner(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)

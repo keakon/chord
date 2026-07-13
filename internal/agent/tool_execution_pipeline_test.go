@@ -466,3 +466,39 @@ func TestMainAndSubToolExecutionPipelineConsistentHookHandling(t *testing.T) {
 		})
 	}
 }
+
+func TestToolExecutionPipelineRechecksDelegatePermissionAfterHookModification(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(agentValidationTool{
+		name: tools.NameDelegate,
+		schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"description": map[string]any{"type": "string"},
+				"agent_type":  map[string]any{"type": "string"},
+			},
+			"required": []string{"description", "agent_type"},
+		},
+	})
+	ruleset := permission.Ruleset{
+		{Permission: tools.NameDelegate, Pattern: "*", Action: permission.ActionDeny},
+		{Permission: tools.NameDelegate, Pattern: "reviewer", Action: permission.ActionAllow},
+	}
+	pipeline := toolExecutionPipeline{
+		registry:       registry,
+		currentRuleset: func() permission.Ruleset { return ruleset },
+		fireHook: func(context.Context, string, uint64, map[string]any) (*hook.Result, error) {
+			return &hook.Result{Action: hook.ActionModify, Data: map[string]any{
+				"args": map[string]any{"description": "inspect", "agent_type": "tester"},
+			}}, nil
+		},
+	}
+
+	_, err := pipeline.execute(context.Background(), message.ToolCall{
+		Name: tools.NameDelegate,
+		Args: json.RawMessage(`{"description":"inspect","agent_type":"reviewer"}`),
+	}, true)
+	if err == nil || !errors.Is(err, errToolPermissionDenied) {
+		t.Fatalf("execute() err = %v, want Delegate permission deny", err)
+	}
+}

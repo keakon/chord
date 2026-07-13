@@ -11,6 +11,7 @@
 
 ### 改进
 
+- `delegate` 权限 pattern 现在会在可用目标、prompt、实际执行、嵌套委派及 hook 修改后的参数中一致匹配 `agent_type`。
 - 文档站构建栈升级到 Astro 7 与 Starlight 0.41，并更新 Vite、devalue、js-yaml、yaml 等传递依赖；旧 Astro content loader 产生的重复文档 ID 告警不再出现，生产依赖审计也不再报告已知漏洞。
 - OpenAI Responses 与 Chat Completions 请求现在默认启用 `parallel_tool_calls`，允许模型在一次响应中返回相互独立的工具调用；如果后端或工作流要求串行调用，可在 model 或 variant 配置中显式关闭。
 - 上下文剪裁默认值基于近期会话统计重新调参：较旧的 read-like 和成功 shell 输出会在 1 个 effective turn 后摘要化，read-like 与 shell-success byte gate 默认 3000，generic stale 清理 3 个 effective turns 后启动，`min_tool_results_prune` 默认 6，`min_incremental_saved_tokens` 默认 2048。较旧的成功 shell 输出现在会保留输出大小、行数、有代表性的成功信号行和尾部 fallback，而不是压成固定省略标记。

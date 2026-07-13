@@ -232,8 +232,18 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	subTools := tools.NewRegistry()
 	hasSkillTool := false
 	hasViewImageTool := false
+	var s *SubAgent
 	delegationEnabled := cfg.Depth < cfg.Delegation.EffectiveMaxDepth()
-	delegateVisible := delegationEnabled && !cfg.Ruleset.IsDisabled(tools.NameDelegate)
+	delegateCreator := subAgentDelegateCreator{
+		parent: cfg.Parent,
+		ruleset: func() permission.Ruleset {
+			if s != nil {
+				return s.ruleset
+			}
+			return cfg.Ruleset
+		},
+	}
+	delegateVisible := delegationEnabled && cfg.Parent != nil && len(delegateCreator.AvailableSubAgents()) > 0
 	notifyVisible := !cfg.Ruleset.IsDisabled(tools.NameNotify)
 
 	// Copy all base tools EXCEPT MainAgent-only tools that never belong in a
@@ -256,7 +266,12 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 			// is constructed, so ViewImage visibility tracks the SubAgent's own
 			// model rather than the MainAgent's.
 			hasViewImageTool = true
-		case tools.NameDelegate, tools.NameCancel:
+		case tools.NameDelegate:
+			if !delegateVisible {
+				continue
+			}
+			subTools.Register(tools.NewDelegateTool(delegateCreator))
+		case tools.NameCancel:
 			if !delegateVisible {
 				continue
 			}
@@ -281,7 +296,6 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	//
 	// The sender is only called from tool Execute methods which run after
 	// runLoop starts, so the pointer is always valid.
-	var s *SubAgent
 	sender := &subAgentEventSender{sub: func() *SubAgent { return s }}
 
 	// Register SubAgent-specific coordination tools. Complete is always
@@ -898,7 +912,7 @@ func (s *SubAgent) delegationPromptBlock() string {
 	if _, ok := s.tools.Get(tools.NameDelegate); !ok {
 		return ""
 	}
-	agents := s.parent.availableSubAgentsForPrompt()
+	agents := s.parent.availableSubAgentsForRuleset(s.ruleset, "")
 	if len(agents) == 0 {
 		return ""
 	}

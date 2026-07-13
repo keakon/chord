@@ -55,7 +55,18 @@ Most tools use the literal `allow` / `ask` / `deny` meaning above, but a few orc
 
 - `edit` and `patch` are one file-editing tool family with two model-facing formats. A rule for one editor applies to the other editor when the other editor has no explicit same-tool rule. This includes `deny`: `*: allow` followed by `edit: deny` disables both `edit` and `patch`, because `patch` inherits the edit-family denial. Configure both names when you want different behavior per format. For example, `edit: allow` plus `patch: deny` disables `patch` but keeps `edit` available, so GPT/o-series models fall back to `edit`; conversely, `patch: allow` plus `edit: deny` keeps `patch` available for non-GPT models that would otherwise prefer `edit`.
 - `handoff` and `done` are treated as control gates. Setting either one to `deny` hides or disables that workflow. Setting it to `allow` or `ask` makes the workflow available; Chord may still show local confirmation at the actual handoff/finish point (for example the loop `done` confirmation). This means `ask` is not a second, stronger workflow mode for these tools: it mainly keeps the tool visible/available while preserving Chord's built-in confirmation gate. The trade-off avoids confusing the model with an available control tool that is later impossible to complete, while still preventing silent role switches or premature loop exits.
-- `delegate` controls the delegation workflow as a group. If `delegate` is `deny`, Chord also disables SubAgent cancellation via `cancel`, hides nested `delegate`/`cancel` from SubAgents, and limits SubAgent `notify` to owner-only follow-up instead of arbitrary target routing. The reason is that cancelling or targeting other delegated tasks is part of managing delegated workstreams; allowing those pieces while denying `delegate` would create a partial control plane that can interfere with work the role is not allowed to orchestrate.
+- `delegate` matches its `agent_type` argument, so a role can restrict delegation to selected SubAgent definitions. For example, the ordered rules below deny every target except `reviewer` and require confirmation before delegating to `tester`:
+
+  ```yaml
+  permission:
+    delegate:
+      "*": deny
+      reviewer: allow
+      tester: ask
+  ```
+
+  Denied targets are omitted from the Delegate tool schema and coordination prompt. If every configured SubAgent target is denied, Delegate is hidden. Permission rules use last-match-wins ordering, so put the wildcard fallback before the specific target rules.
+- `delegate` also controls the delegation workflow as a group. If it is entirely disabled by an effective wildcard `deny`, Chord disables SubAgent cancellation via `cancel`, hides nested `delegate`/`cancel` from SubAgents, and limits SubAgent `notify` to owner-only follow-up instead of arbitrary target routing. The reason is that cancelling or targeting other delegated tasks is part of managing delegated workstreams; allowing those pieces while disabling delegation would create a partial control plane that can interfere with work the role is not allowed to orchestrate.
 - `cancel` therefore depends on `delegate`: even if `cancel: allow` is configured, `cancel` is denied when `delegate` is disabled. To allow a role to cancel delegated work, enable both `delegate` and `cancel`.
 - `question: ask` is normalized to `allow`. The `question` tool already asks the user a structured question and waits for their answer, so adding a separate permission confirmation before asking the question would create a redundant prompt without reducing the risk of the final decision.
 - YOLO does not override `handoff`, `delegate`, `cancel`, or `done`; those control-tool permissions remain enforced even when ordinary file/shell/web permissions are bypassed. Under YOLO, a broad `"*": allow` rule does not grant these protected tools by itself; configure each protected tool directly when the role should use it.
