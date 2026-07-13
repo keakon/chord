@@ -62,6 +62,17 @@ func (a *MainAgent) releaseSubAgentSlot(sub *SubAgent) {
 	sub.semBypassed = false
 }
 
+func (a *MainAgent) markSubAgentReactivated(sub *SubAgent, summary string) {
+	sub.setState(SubAgentStateRunning, summary)
+	a.noteSubAgentStateTransition(sub, SubAgentStateRunning)
+	a.emitActivity(sub.instanceID, ActivityExecuting, "resumed")
+	a.emitToTUI(AgentStatusEvent{
+		AgentID: sub.instanceID,
+		Status:  "running",
+		Message: summary,
+	})
+}
+
 func (a *MainAgent) transferSubAgentSlot(from, to *SubAgent) bool {
 	if from == nil || to == nil || !from.semHeld || to.semHeld {
 		return false
@@ -285,14 +296,7 @@ func (a *MainAgent) deliverMessageToSubAgent(sub *SubAgent, message, kind string
 	}
 
 	if needsResume {
-		sub.setState(SubAgentStateRunning, message)
-		a.noteSubAgentStateTransition(sub, SubAgentStateRunning)
-		a.emitActivity(sub.instanceID, ActivityExecuting, "resumed")
-		a.emitToTUI(AgentStatusEvent{
-			AgentID: sub.instanceID,
-			Status:  "running",
-			Message: message,
-		})
+		a.markSubAgentReactivated(sub, message)
 		sub.InjectUserMessage(payload)
 		status = "resumed"
 		statusMessage = "message delivered and worker resumed"

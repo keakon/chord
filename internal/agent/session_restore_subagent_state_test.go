@@ -55,6 +55,93 @@ func TestRestoreLoadedSubAgentsKeepsCompletedState(t *testing.T) {
 	}
 }
 
+func TestRestoredIdleSubAgentContinueReactivatesWithoutAppendingMessage(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"restorer": {
+			Name:   "restorer",
+			Mode:   "subagent",
+			Models: map[string][]string{"default": {"test/test-model"}},
+		},
+	})
+	provider := &shutdownBlockingProvider{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	t.Cleanup(func() { close(provider.release) })
+	a.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {
+		providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+			Type: config.ProviderTypeMessages,
+			Models: map[string]config.ModelConfig{
+				"test-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+			},
+		}, []string{"test-key"})
+		return llm.NewClient(providerCfg, provider, "test-model", 1024, systemPrompt)
+	})
+
+	count := a.restoreLoadedSubAgents([]loadedSubAgentState{{
+		InstanceID:   "restorer-3",
+		TaskID:       "adhoc-3",
+		AgentDefName: "restorer",
+		TaskDesc:     "Investigate issue",
+		State:        SubAgentStateIdle,
+		LastSummary:  "Restored after shutdown",
+		Messages:     []message.Message{{Role: "user", Content: "Investigate issue"}},
+	}})
+	if count != 1 {
+		t.Fatalf("restoreLoadedSubAgents() = %d, want 1", count)
+	}
+	sub := a.subAgentByID("restorer-3")
+	if sub == nil {
+		t.Fatal("expected restored worker")
+	}
+	a.SwitchFocus(sub.instanceID)
+	before := sub.GetMessages()
+
+	a.ContinueFromContext()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		sub.turnMu.Lock()
+		turnStarted := sub.turn != nil
+		sub.turnMu.Unlock()
+		if turnStarted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for restored SubAgent turn")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := sub.State(); got != SubAgentStateRunning {
+		t.Fatalf("State() = %q, want %q", got, SubAgentStateRunning)
+	}
+	if !sub.semHeld {
+		t.Fatal("restored SubAgent did not acquire a concurrency slot")
+	}
+	after := sub.GetMessages()
+	if len(after) != len(before) {
+		t.Fatalf("message count after ContinueFromContext() = %d, want unchanged %d", len(after), len(before))
+	}
+	for i := range before {
+		if after[i].Role != before[i].Role || after[i].Content != before[i].Content {
+			t.Fatalf("message %d changed after ContinueFromContext(): before=%+v after=%+v", i, before[i], after[i])
+		}
+	}
+	record := a.taskRecordByTaskID(sub.taskID)
+	if record == nil || record.State != string(SubAgentStateRunning) {
+		t.Fatalf("task record after ContinueFromContext() = %#v, want running", record)
+	}
+	meta, err := loadSubAgentMeta(a.sessionDir, sub.instanceID)
+	if err != nil {
+		t.Fatalf("loadSubAgentMeta: %v", err)
+	}
+	if meta.State != string(SubAgentStateRunning) {
+		t.Fatalf("meta.State = %q, want %q", meta.State, SubAgentStateRunning)
+	}
+}
+
 func TestRestoreLoadedSubAgentsRestoresOwnerDepthAndPendingComplete(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

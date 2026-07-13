@@ -290,6 +290,8 @@ Chord supports cooperation between MainAgent and SubAgents.
 
 In a SubAgent view, you can inspect that agent's context and output. Finished SubAgent views are read-only.
 
+After resuming a session, a SubAgent that was interrupted while running is restored as idle rather than pretending its previous process is still active. Focus that SubAgent and submit an empty input to continue from its existing context, just as you would for an idle MainAgent. Chord first reacquires a SubAgent concurrency slot and marks it running, then starts a new turn without appending a synthetic user message. SubAgents waiting for a reply, already completed, failed, or cancelled still require their explicit reply, follow-up, retry, or replacement flow.
+
 When `todo_write` is enabled but no `delegate` workflow is available, the todo list normally keeps a single `in_progress` item that represents the MainAgent's current directly executed focus.
 When `delegate` workflow is available and multiple delegated workstreams are genuinely active, the todo list may contain multiple `in_progress` items, but each one should map clearly to a real live delegated workstream and use a unique `active_form` rather than work that is only planned, blocked on prerequisites, or merely waiting to start.
 

@@ -113,8 +113,21 @@ func (a *MainAgent) GetMessages() []message.Message {
 // appending a new user message. Routes to the focused SubAgent if active.
 func (a *MainAgent) ContinueFromContext() {
 	if sub := a.validFocusedSubAgent(); sub != nil {
-		if sub.State() != SubAgentStateRunning {
-			a.emitToTUI(ToastEvent{Message: fmt.Sprintf("SubAgent %s is %s; continue is disabled", sub.instanceID, sub.State()), Level: "warn", AgentID: sub.instanceID})
+		state := sub.State()
+		switch state {
+		case SubAgentStateRunning:
+		case SubAgentStateIdle:
+			if err := a.acquireSubAgentSlot(sub); err != nil {
+				a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: sub.instanceID})
+				return
+			}
+			a.markSubAgentReactivated(sub, "Resumed from existing context")
+			a.saveRecoverySnapshot()
+			a.persistSubAgentMeta(sub)
+			a.syncTaskRecordFromSub(sub, "")
+			a.drainOwnedSubAgentMailboxes(sub.instanceID)
+		default:
+			a.emitToTUI(ToastEvent{Message: fmt.Sprintf("SubAgent %s is %s; continue is disabled", sub.instanceID, state), Level: "warn", AgentID: sub.instanceID})
 			return
 		}
 		sub.ContinueFromContext()
