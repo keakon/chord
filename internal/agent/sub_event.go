@@ -31,6 +31,11 @@ func (s *SubAgent) runLoop() {
 		if s.tryHandleContinueSignal() {
 			continue
 		}
+		if result, ok := s.dequeuePromotedToolResult(); ok {
+			s.resetIdleTimer()
+			s.handleToolResult(result)
+			continue
+		}
 
 		var idleCh <-chan time.Time
 		if s.idleTimer != nil {
@@ -83,6 +88,16 @@ func (s *SubAgent) runLoop() {
 			return
 		}
 	}
+}
+
+func (s *SubAgent) dequeuePromotedToolResult() (*toolResult, bool) {
+	if s == nil || len(s.promotedToolQueue) == 0 {
+		return nil, false
+	}
+	result := s.promotedToolQueue[0]
+	s.promotedToolQueue[0] = nil
+	s.promotedToolQueue = s.promotedToolQueue[1:]
+	return result, true
 }
 
 func (s *SubAgent) refillInputChannelFromOverflow() {

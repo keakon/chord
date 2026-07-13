@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -196,5 +197,70 @@ func TestSubAgentAcquireExecutionSlotCancelledBatchEmitsToolResult(t *testing.T)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timed out waiting for sub-agent tool result")
+	}
+}
+
+func TestSubAgentPromotedBatchLargerThanToolChannelDoesNotBlockScheduler(t *testing.T) {
+	projectRoot := t.TempDir()
+	parent := newTestMainAgent(t, projectRoot)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	turn := &Turn{ID: 1, Ctx: ctx, Cancel: cancel, PendingToolMeta: make(map[string]PendingToolCall)}
+	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, ctx, parent.emitToTUI, func(_ context.Context, call message.ToolCall) (ToolExecutionResult, error) {
+		return ToolExecutionResult{EffectiveArgsJSON: string(call.Args), Result: call.ID}, nil
+	})
+
+	s := &SubAgent{
+		instanceID: "sub-promoted-batch",
+		parent:     parent,
+		parentCtx:  ctx,
+		turn:       turn,
+		toolCh:     make(chan *toolResult, 8),
+		sessionDir: parent.sessionDir,
+		workDir:    projectRoot,
+	}
+
+	const callCount = 9
+	calls := make([]message.ToolCall, 0, callCount)
+	for i := range callCount {
+		call := message.ToolCall{
+			ID:   fmt.Sprintf("read-%d", i),
+			Name: "read",
+			Args: []byte(fmt.Sprintf(`{"path":"file-%d"}`, i)),
+		}
+		calls = append(calls, call)
+		turn.recordPendingToolCall(PendingToolCall{CallID: call.ID, Name: call.Name, ArgsJSON: string(call.Args), AgentID: s.instanceID})
+		if !turn.streamingToolExec.Start(call) {
+			t.Fatalf("Start(%q) = false, want true", call.ID)
+		}
+	}
+	turn.toolExecutionBatches = []toolExecutionBatch{{Calls: calls}}
+
+	scheduled := make(chan struct{})
+	go func() {
+		s.startNextToolBatch(turn)
+		close(scheduled)
+	}()
+	select {
+	case <-scheduled:
+	case <-time.After(time.Second):
+		t.Fatal("startNextToolBatch blocked while dispatching more promoted results than toolCh capacity")
+	}
+
+	if got := len(s.promotedToolQueue); got != callCount {
+		t.Fatalf("promotedToolQueue length = %d, want %d", got, callCount)
+	}
+	for i := range callCount {
+		result, ok := s.dequeuePromotedToolResult()
+		if !ok {
+			t.Fatalf("dequeuePromotedToolResult() stopped at %d/%d", i, callCount)
+		}
+		if want := fmt.Sprintf("read-%d", i); result.CallID != want {
+			t.Fatalf("dequeued result %d CallID = %q, want %q", i, result.CallID, want)
+		}
+	}
+	if _, ok := s.dequeuePromotedToolResult(); ok {
+		t.Fatal("dequeuePromotedToolResult() returned an extra result")
 	}
 }

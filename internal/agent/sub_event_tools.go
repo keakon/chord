@@ -66,10 +66,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 					msg = hookResult.Message
 				}
 				_, _ = turn.streamingToolExec.DiscardCall(tc.ID, "hook_block")
-				select {
-				case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q %s", tc.Name, msg), TurnID: turn.ID}:
-				case <-s.parentCtx.Done():
-				}
+				s.enqueuePromotedToolResult(&toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q %s", tc.Name, msg), TurnID: turn.ID})
 				continue
 			case hook.ActionModify:
 				if modified, ok := hookResult.Data.(map[string]any); ok {
@@ -115,10 +112,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 			if err := s.commitPromotedToolSideEffects(effective, tr); err != nil {
 				tr.Error = fmt.Errorf("commit promoted tool side effects: %w", err)
 			}
-			select {
-			case s.toolCh <- tr:
-			case <-s.parentCtx.Done():
-			}
+			s.enqueuePromotedToolResult(tr)
 			continue
 		} else if drift {
 			log.Debugf("SubAgent: speculative tool args drift; executing finalized call call_id=%s tool=%s", tc.ID, tc.Name)
@@ -229,6 +223,15 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 			}
 		}(tc)
 	}
+}
+
+// enqueuePromotedToolResult keeps synchronously available results in event-loop
+// order without sending them into the channel consumed by that same loop.
+func (s *SubAgent) enqueuePromotedToolResult(result *toolResult) {
+	if s == nil || result == nil {
+		return
+	}
+	s.promotedToolQueue = append(s.promotedToolQueue, result)
 }
 
 // handleToolResult processes a single tool execution result. When all pending

@@ -121,6 +121,7 @@ type SubAgent struct {
 	inputOverflow     []pendingUserMessage
 	ctxAppendQueueMu  sync.Mutex
 	ctxAppendOverflow []message.Message
+	promotedToolQueue []*toolResult // event-loop-owned FIFO; avoids sending results back into the active loop
 
 	// Idle timeout: starts when LLM returns pure text (no tool_calls).
 	// MainAgent auto-intervenes on timeout.
