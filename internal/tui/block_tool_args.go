@@ -434,6 +434,8 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 		return formatToolHeaderPartsWithParsed("", keys, vals)
 	}
 	switch b.ToolName {
+	case tools.NameLsp:
+		return b.lspToolHeaderParts()
 	case tools.NameDelete:
 		filePaths := parseDeleteHeaderPaths(vals)
 		if len(filePaths) == 0 {
@@ -444,7 +446,7 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 			return b.displayToolPath(filePaths[0]), gray
 		}
 		return fmt.Sprintf("%d files", len(filePaths)), gray
-	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn, tools.NameLsp:
+	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn:
 		return formatToolHeaderPartsWithParsed(b.ToolName, keys, cloneToolValsWithDisplayDirs(b, vals))
 	default:
 		return formatToolHeaderPartsWithParsed(b.ToolName, keys, vals)

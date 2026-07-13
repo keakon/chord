@@ -23,6 +23,8 @@
 | `glob` | 按 glob 模式匹配路径，输出有上限。 |
 | `lsp` | 在指定文件位置做语义化的 definition / references / implementation 查询，需要对应 LSP server 覆盖该文件类型。 |
 
+在 TUI 中，`lsp` 卡片会在头部概括查询动作和位置（例如 `find references internal/agent/main.go:54:17`）。查询完成后会显示位置数量，并在适用时显示涉及的文件数。工作目录内的路径会显示为相对路径，展开详情仍保留每个返回的 `path:line:character` 位置。默认的 `include_declaration=true` 不会显示；引用查询排除声明时会明确标注。
+
 ## 执行
 
 | 工具 | 用途 |

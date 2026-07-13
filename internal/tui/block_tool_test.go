@@ -152,6 +152,123 @@ func TestReadHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 	}
 }
 
+func TestLspCardShowsSemanticHeaderSummaryAndRelativeLocations(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	queryPath := filepath.Join(wd, "internal", "agent", "main_subagent_control.go")
+	firstResult := filepath.Join(wd, "internal", "agent", "main.go")
+	secondResult := filepath.Join(wd, "cmd", "chord", "common.go")
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameLsp,
+		Content:                fmt.Sprintf(`{"character":17,"include_declaration":true,"line":54,"operation":"references","path":%q}`, queryPath),
+		ResultContent:          firstResult + ":250:6\n" + secondResult + ":71:26",
+		ResultDone:             true,
+		ToolCallDetailExpanded: true,
+		displayWorkingDir:      wd,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{
+		"lsp find references",
+		filepath.Join("internal", "agent", "main_subagent_control.go") + ":54:17",
+		"2 references · 2 files",
+		filepath.Join("internal", "agent", "main.go") + ":250:6",
+		filepath.Join("cmd", "chord", "common.go") + ":71:26",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected LSP card to contain %q; got:\n%s", want, joined)
+		}
+	}
+	for _, unwanted := range []string{"character:", "include_declaration:", "operation:", "path:", wd} {
+		if strings.Contains(joined, unwanted) {
+			t.Fatalf("did not expect semantic LSP card to contain %q; got:\n%s", unwanted, joined)
+		}
+	}
+}
+
+func TestLspCardOnlyShowsIncludeDeclarationWhenDisabled(t *testing.T) {
+	tests := []struct {
+		name          string
+		includeArg    string
+		wantExclusion bool
+	}{
+		{name: "default", wantExclusion: false},
+		{name: "included", includeArg: `,"include_declaration":true`, wantExclusion: false},
+		{name: "excluded", includeArg: `,"include_declaration":false`, wantExclusion: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			block := &Block{
+				ID:                     1,
+				Type:                   BlockToolCall,
+				ToolName:               tools.NameLsp,
+				Content:                `{"operation":"references","path":"internal/agent/main.go","line":54,"character":17` + tt.includeArg + `}`,
+				ResultContent:          "internal/agent/main.go:54:17",
+				ResultDone:             true,
+				ToolCallDetailExpanded: false,
+			}
+			joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			if got := strings.Contains(joined, "excluding declaration"); got != tt.wantExclusion {
+				t.Fatalf("excluding declaration visible = %v, want %v; got:\n%s", got, tt.wantExclusion, joined)
+			}
+			if strings.Contains(joined, "include_declaration") {
+				t.Fatalf("did not expect raw include_declaration parameter; got:\n%s", joined)
+			}
+		})
+	}
+}
+
+func TestLspOperationLabel(t *testing.T) {
+	tests := map[string]string{
+		"definition":     "go to definition",
+		"references":     "find references",
+		"implementation": "find implementations",
+	}
+	for operation, want := range tests {
+		if got := lspOperationLabel(operation); got != want {
+			t.Fatalf("lspOperationLabel(%q) = %q, want %q", operation, got, want)
+		}
+	}
+}
+
+func TestLspDisplayLocationParsesPathContainingColon(t *testing.T) {
+	location, ok := parseLspDisplayLocation(`C:\\workspace\\internal\\main.go:12:34`)
+	if !ok {
+		t.Fatal("expected Windows-style LSP location to parse")
+	}
+	if location.Path != `C:\\workspace\\internal\\main.go` || location.Line != 12 || location.Character != 34 {
+		t.Fatalf("parsed location = %#v", location)
+	}
+}
+
+func TestLspDisplayResultKeepsUnrecognizedLines(t *testing.T) {
+	block := &Block{displayWorkingDir: filepath.Join(string(os.PathSeparator), "tmp", "workspace")}
+	result := "server note\ninternal/agent/main.go:12:3"
+	if got := block.lspDisplayResultContent(result); got != result {
+		t.Fatalf("lspDisplayResultContent() = %q, want unrecognized lines preserved in %q", got, result)
+	}
+}
+
+func TestLspNoLocationsUsesSummaryWithoutDuplicateResult(t *testing.T) {
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameLsp,
+		Content:                `{"operation":"implementation","path":"internal/service/store.go","line":28,"character":6}`,
+		ResultContent:          "No implementations found.",
+		ResultDone:             true,
+		ToolCallDetailExpanded: true,
+	}
+	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(joined, "lsp find implementations internal/service/store.go:28:6") {
+		t.Fatalf("expected semantic implementation header; got:\n%s", joined)
+	}
+	if strings.Count(joined, "No implementations found") != 1 {
+		t.Fatalf("expected no-results message exactly once; got:\n%s", joined)
+	}
+}
+
 func TestWriteHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
 	abs := filepath.Join(wd, "demo.txt")

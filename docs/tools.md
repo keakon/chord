@@ -23,6 +23,8 @@ For how `allow` / `ask` / `deny` are evaluated — including the special couplin
 | `glob` | Path matching by glob pattern(s), with output caps. |
 | `lsp` | Semantic definition / references / implementation lookup at a file position, when an LSP server covers the file type. |
 
+In the TUI, an `lsp` card summarizes the operation and query position in its header (for example, `find references internal/agent/main.go:54:17`). Completed queries show the location count and, when applicable, the number of files. Paths inside the working directory are displayed relative to it, while the expandable details retain every returned `path:line:character` location. The default `include_declaration=true` setting is omitted; reference queries explicitly show when declarations are excluded.
+
 ## Execution
 
 | Tool | What it does |

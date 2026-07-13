@@ -539,6 +539,11 @@ func formatToolResultSummaryLine(b *Block) string {
 			return ""
 		}
 		return fmt.Sprintf("%d files", count)
+	case tools.NameLsp:
+		if b.toolResultIsError() {
+			return "LSP query failed"
+		}
+		return lspResultSummary(b.Content, trimmed)
 	case tools.NameCancel:
 		if b.toolResultIsError() {
 			return "Failed"

@@ -437,6 +437,9 @@ func compactToolHiddenResultLines(b *Block, contentWidth int) int {
 		return 0
 	}
 	displayResult := toolExpandedResultContent(b.ToolName, b.ResultContent)
+	if b.ToolName == tools.NameLsp && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+		displayResult = toolDisplayResultContent(b)
+	}
 	if b.ToolName == tools.NameDelete {
 		displayResult = sanitizeToolDisplayText(displayResult)
 		nonEmpty := 0

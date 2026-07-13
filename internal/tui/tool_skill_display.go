@@ -173,6 +173,9 @@ func toolDisplayResultContent(b *Block) string {
 	if b.toolResultIsError() || b.toolResultIsCancelled() {
 		return result
 	}
+	if tools.NormalizeName(b.ToolName) == tools.NameLsp {
+		return b.lspDisplayResultContent(result)
+	}
 	if toolShouldHideSuccessfulFileOpResult(b) {
 		return ""
 	}
