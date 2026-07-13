@@ -4721,6 +4721,7 @@ func TestPrepareMessagesForLLM_IncrementalFreezesAlreadyReducedPrefix(t *testing
 	}
 	firstMarker1 := firstPrepared[2].Content
 	firstMarker2 := firstPrepared[5].Content
+	firstStats := a.GetContextReductionStats()
 
 	// Second request: add a new tail with another large read.
 	// The prefix (msgs) hasn't changed, so incremental reduction should freeze
@@ -4747,6 +4748,23 @@ func TestPrepareMessagesForLLM_IncrementalFreezesAlreadyReducedPrefix(t *testing
 	stats := a.GetContextReductionStats()
 	if stats.SkippedByReason[contextReductionSkipFrozenReduced] < 2 {
 		t.Fatalf("expected at least 2 frozen_reduced skips, got %d (stats=%+v)", stats.SkippedByReason[contextReductionSkipFrozenReduced], stats)
+	}
+	wantSaved := 0
+	wantReducedMessages := 0
+	for i := range second {
+		saved := contextContributorBytes(second[i]) - contextContributorBytes(secondPrepared[i])
+		if saved <= 0 {
+			continue
+		}
+		wantSaved += saved
+		wantReducedMessages++
+	}
+	if stats.Bytes != wantSaved || stats.Messages != wantReducedMessages {
+		t.Fatalf("current request reduction = (%d messages, %d bytes), want (%d messages, %d bytes)", stats.Messages, stats.Bytes, wantReducedMessages, wantSaved)
+	}
+	frozenSaved := len(largeRead1) - len(firstMarker1) + len(largeRead2) - len(firstMarker2)
+	if stats.Bytes <= firstStats.Bytes || stats.Bytes <= frozenSaved {
+		t.Fatalf("current request bytes = %d, want frozen prefix savings %d plus new tail savings (first request %d)", stats.Bytes, frozenSaved, firstStats.Bytes)
 	}
 }
 

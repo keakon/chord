@@ -293,6 +293,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 				}
 			}
 		}
+		stats.setCurrentReductionSavings(messages, prepared)
 		a.fillReductionModelContinuity(&stats)
 		a.setContextReductionStats(stats)
 		if rememberPrepared {
@@ -841,16 +842,22 @@ func highLevelContextReductionStats(original, reduced []message.Message) Context
 	if stats.TokensBefore > stats.TokensAfter {
 		stats.TokensSaved = stats.TokensBefore - stats.TokensAfter
 	}
+	stats.setCurrentReductionSavings(original, reduced)
+	return stats
+}
+
+func (s *ContextReductionStats) setCurrentReductionSavings(original, reduced []message.Message) {
+	s.Messages = 0
+	s.Bytes = 0
 	limit := min(len(original), len(reduced))
 	for i := range limit {
 		saved := contextContributorBytes(original[i]) - contextContributorBytes(reduced[i])
 		if saved <= 0 {
 			continue
 		}
-		stats.Messages++
-		stats.Bytes += saved
+		s.Messages++
+		s.Bytes += saved
 	}
-	return stats
 }
 
 func (s *ContextReductionStats) setCurrentMessageSurface(messages []message.Message) {
