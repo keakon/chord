@@ -328,7 +328,10 @@ func (a *MainAgent) rehydrateCompletedTask(record *DurableTaskRecord) (*SubAgent
 	agentRuleset := a.buildSubAgentRuleset(agentDef)
 	var extraMCPTools []tools.Tool
 	if len(agentDef.MCP) > 0 {
-		extraMCPTools = a.getOrCreateAgentMCP(agentDef.MCP)
+		extraMCPTools, err = a.getOrCreateAgentMCP(agentDef.Name, agentDef.MCP)
+		if err != nil {
+			return nil, "", err
+		}
 	}
 	instanceID := NextInstanceID(agentDef.Name)
 	ctx, cancel := context.WithCancel(a.parentCtx)

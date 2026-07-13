@@ -49,6 +49,40 @@ func TestAgentConfigIsSubAgentAndModelRefHelpers(t *testing.T) {
 	}
 }
 
+func TestValidateAgentMCPRejectsInheritedName(t *testing.T) {
+	agents := map[string]*AgentConfig{
+		"explorer": {
+			Name: "explorer",
+			MCP:  MCPConfig{"exa": {URL: "https://agent.example/mcp"}},
+		},
+	}
+	err := ValidateAgentMCP(agents, MCPConfig{"exa": {URL: "https://project.example/mcp"}})
+	if err == nil || !strings.Contains(err.Error(), `agent "explorer" declares MCP server "exa"`) {
+		t.Fatalf("ValidateAgentMCP error = %v, want inherited-name conflict", err)
+	}
+}
+
+func TestValidateAgentMCPAllowsPrivateNamesAcrossAgents(t *testing.T) {
+	agents := map[string]*AgentConfig{
+		"explorer": {Name: "explorer", MCP: MCPConfig{"search": {URL: "https://exa.example/mcp"}}},
+		"browser":  {Name: "browser", MCP: MCPConfig{"search": {URL: "https://browser.example/mcp"}}},
+	}
+	if err := ValidateAgentMCP(agents, MCPConfig{"shared": {URL: "https://shared.example/mcp"}}); err != nil {
+		t.Fatalf("ValidateAgentMCP: %v", err)
+	}
+}
+
+func TestValidateAgentMCPRejectsManualServer(t *testing.T) {
+	agents := map[string]*AgentConfig{
+		"explorer": {Name: "explorer", MCP: MCPConfig{"search": {URL: "https://exa.example/mcp", Manual: true}}},
+	}
+
+	err := ValidateAgentMCP(agents, nil)
+	if err == nil || !strings.Contains(err.Error(), `agent "explorer" MCP server "search" sets manual: true`) {
+		t.Fatalf("ValidateAgentMCP error = %v, want unsupported manual server", err)
+	}
+}
+
 func TestLoadAgentConfigsSkipsUnsupportedFilesAndMissingDir(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
 	configs, err := LoadAgentConfigs(missing)

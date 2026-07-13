@@ -6,6 +6,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Breaking Changes
 
+- MCP configuration scopes are now explicit: a same-name server in `.chord/config.yaml` atomically replaces the global server definition instead of recursively inheriting individual fields, while agent-level MCP entries are additive, auto-start only. A conflicting agent server name or agent-scoped `manual: true` now fails startup; remove the agent entry to inherit the server, rename it for an agent-private connection, or configure manual servers at the top level.
 - Compared with v0.7.1 and earlier, `compat.reasoning_continuity.mode: openai_visible` now only replays assistant `reasoning_content`; it no longer injects GLM-specific `thinking.type` or `clear_thinking` fields. Configure provider-specific request differences with the new protocol-agnostic `compat.request_overrides`: `body` recursively patches JSON (`null` deletes a field), `rename_body_fields` preserves dynamically computed values under another key, and `headers` sets or removes request headers. Existing GLM Preserved Thinking configs should add `thinking: {type: enabled, clear_thinking: false}` under `request_overrides.body`; DeepSeek thinking configs should add `thinking: {type: enabled}` and rename `max_completion_tokens` to `max_tokens` where required.
 
 ### Improvements

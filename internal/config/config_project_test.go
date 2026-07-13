@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -291,6 +292,41 @@ keymap:
 	}
 	if got := mergedCfg.Providers["global"].WebSocketHandshakeTimeout; got != 45 {
 		t.Fatalf("merged provider websocket_handshake_timeout = %d, want 45", got)
+	}
+}
+
+func TestMergeProjectConfigReplacesSameNameMCPServerAtomically(t *testing.T) {
+	globalCfg := DefaultConfig()
+	globalCfg.MCP = MCPConfig{
+		"exa": {
+			Command:      "global-exa",
+			Args:         []string{"--global"},
+			Env:          []string{"EXA_KEY=global"},
+			AllowedTools: []string{"global_search"},
+			Manual:       true,
+		},
+		"shared": {URL: "https://global.example/mcp"},
+	}
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, `mcp:
+  exa:
+    url: https://project.example/mcp
+    allowed_tools: [project_search]
+`)
+
+	_, mergedCfg, err := MergeProjectConfig(globalCfg, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	exa := mergedCfg.MCP["exa"]
+	if exa.URL != "https://project.example/mcp" || exa.Command != "" || len(exa.Args) != 0 || len(exa.Env) != 0 || exa.Manual {
+		t.Fatalf("merged exa = %#v, want only project connection fields", exa)
+	}
+	if !reflect.DeepEqual(exa.AllowedTools, []string{"project_search"}) {
+		t.Fatalf("merged exa allowed_tools = %#v, want project list", exa.AllowedTools)
+	}
+	if got := mergedCfg.MCP["shared"].URL; got != "https://global.example/mcp" {
+		t.Fatalf("unrelated global MCP URL = %q, want preserved", got)
 	}
 }
 

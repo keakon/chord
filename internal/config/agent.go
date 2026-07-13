@@ -412,6 +412,39 @@ func ResolveAgentConfigs(projectDir, globalDir string) (map[string]*AgentConfig,
 	return merged, nil
 }
 
+// ValidateAgentMCP ensures agent MCP definitions are auto-starting private
+// servers instead of shadowing or depending on top-level runtime controls.
+func ValidateAgentMCP(agents map[string]*AgentConfig, inherited MCPConfig) error {
+	if len(agents) == 0 {
+		return nil
+	}
+	agentNames := make([]string, 0, len(agents))
+	for name := range agents {
+		agentNames = append(agentNames, name)
+	}
+	sort.Strings(agentNames)
+	for _, agentName := range agentNames {
+		agentCfg := agents[agentName]
+		if agentCfg == nil || len(agentCfg.MCP) == 0 {
+			continue
+		}
+		serverNames := make([]string, 0, len(agentCfg.MCP))
+		for serverName := range agentCfg.MCP {
+			serverNames = append(serverNames, serverName)
+		}
+		sort.Strings(serverNames)
+		for _, serverName := range serverNames {
+			if _, exists := inherited[serverName]; exists {
+				return fmt.Errorf("agent %q declares MCP server %q, but that name is already defined by project/global MCP config; remove the agent entry to inherit it or rename the agent server", agentName, serverName)
+			}
+			if agentCfg.MCP[serverName].Manual {
+				return fmt.Errorf("agent %q MCP server %q sets manual: true, but agent-scoped MCP servers cannot be enabled at runtime; remove manual or configure the server in project/global MCP config", agentName, serverName)
+			}
+		}
+	}
+	return nil
+}
+
 // ResolveAgentModelPools resolves agent model pool access using the global
 // model_pools definitions from config.yaml. Agents with model_pools configured
 // are restricted to that ordered list; agents without model_pools are allowed to

@@ -35,6 +35,7 @@ Chord 将行为配置与凭据配置分开管理。
 - `paths.*`、`maintenance.*` 这类仅全局生效的字段，即使写进项目配置也会被忽略；
 - 大多数标量值和对象值会按同一路径直接覆盖全局值；
 - `model_pools` 按 pool 名称合并：项目里同名 pool 会覆盖全局定义；
+- `mcp` 按 server 名称合并：项目里的同名 server 会完整替换全局定义，不会逐字段继承旧的连接、凭据或工具权限；
 - 追加型扩展点会保留全局条目并附加项目条目：当前包括 `skills.paths` 和 `hooks.*` 下各触发点的 hook 列表，它们是 append，不是 replace。
 
 首次在交互式终端里运行 `chord` 且 `config.yaml` 缺失时，Chord 会启动一次性的初始化向导。它会写入最小可用的 `config.yaml`，必要时再写入 `auth.yaml`，如果已有匹配的 `auth.yaml` 凭据则尽量直接复用，并在结束时展示真实解析后的路径。stdin 被重定向本身不等于非交互；只要还能打开控制 TTY，向导仍会使用该 TTY。只有没有控制 TTY 时，它才会直接退出，不会等待输入。
@@ -855,7 +856,7 @@ prompt: |
 - `model_pools`：可选的有序池名列表，用于限制该 agent 可使用的池。池定义位于 `config.yaml` 顶层 `model_pools`；省略时，该 agent 可使用所有顶层池并按池名排序。`openai/gpt-5.5@high` 这类 inline variant 写在池定义中。
 - `variant`：model ref 未写 `@variant` 时的默认 variant。
 - `permission`：该 agent 的逐工具权限策略。权限直接保存在 agent 配置文件中；确认弹窗里选择“记住规则”时，`project` 会更新当前项目的 `.chord/agents/<role>.yaml`，`global` 会更新用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`），不会写入单独的 permissions 文件夹。部分编排工具有特殊语义（`delegate` 也会联动控制委派工作相关能力，如 `cancel`；`handoff` 和 `done` 的 `allow` / `ask` 都表示工作流可用，并由 Chord 自己的确认 gate 控制关键节点）。依赖精细控制工具规则前，请先阅读[权限与安全](./permissions-and-safety_CN.md#特殊权限语义)。
-- `mcp`：作用域限定在该 agent 的 MCP 配置。
+- `mcp`：作用域限定在该 agent 的增量、自动启动 MCP 配置。Agent MCP 不能与最终生效的全局/项目 `mcp` server 重名，否则启动时报错；也不能设置 `manual: true`，因为运行时 MCP 控制只管理顶层 server，如需手动启停请改在项目/全局配置中声明。要继承顶层 server，请删除 agent 中的重复项；要使用独立私有 server，请改名；要为整个项目替换顶层 server，请在 `.chord/config.yaml` 中覆盖。不同 agent 可以使用相同的私有 server 名称而互不共享连接，同一 agent 定义的多个实例则会复用连接。
 - `delegation`：如 `max_children`、`max_depth`、`child_join` 等委派限制。
 - `prompt` / `system_prompt`：纯 YAML agent 文件中的 system prompt。
 

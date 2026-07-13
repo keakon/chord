@@ -6,6 +6,7 @@
 
 ### 不兼容变更
 
+- MCP 配置作用域现在具有明确语义：`.chord/config.yaml` 中的同名 server 会原子替换全局定义，不再逐字段递归继承；Agent 级 MCP 仅允许增量添加并自动启动。Agent server 与顶层重名或设置 `manual: true` 现在都会导致启动失败；要继承请删除 Agent 中的重复项，要使用私有连接请改名，手动启停的 server 则应配置在顶层。
 - 相比 v0.7.1 及更早版本，`compat.reasoning_continuity.mode: openai_visible` 现在只负责回放 assistant `reasoning_content`，不再隐式注入 GLM 专属的 `thinking.type` 或 `clear_thinking` 字段。Provider 请求差异统一通过新的协议无关配置 `compat.request_overrides` 表达：`body` 递归 patch JSON（`null` 删除字段），`rename_body_fields` 将动态计算值保留到另一个字段名，`headers` 设置或删除请求 header。已有 GLM Preserved Thinking 配置需要在 `request_overrides.body` 中加入 `thinking: {type: enabled, clear_thinking: false}`；DeepSeek thinking 配置需要加入 `thinking: {type: enabled}`，并在需要时把 `max_completion_tokens` 重命名为 `max_tokens`。
 
 ### 改进

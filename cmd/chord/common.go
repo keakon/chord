@@ -419,6 +419,9 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 			agentConfigsErr = err
 		}
 	}
+	if agentConfigsErr == nil {
+		agentConfigsErr = config.ValidateAgentMCP(agentConfigs, cfg.MCP)
+	}
 	if agentConfigsErr != nil {
 		ac.cleanup()
 		return nil, fmt.Errorf("load agent configs: %w", agentConfigsErr)

@@ -410,23 +410,30 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: "info", AgentID: payload.AgentID})
 }
 
-// getOrCreateAgentMCP returns extra MCP tools for the servers declared in
-// mcpCfg that are not already cached (including main-agent servers registered
-// as sentinels). Each server is a singleton for the lifetime of MainAgent.
-func (a *MainAgent) getOrCreateAgentMCP(mcpCfg config.MCPConfig) []tools.Tool {
+// getOrCreateAgentMCP returns the private MCP tools declared by one agent
+// definition. Instances of that definition share connections; other agent
+// definitions may use the same local server names independently.
+func (a *MainAgent) getOrCreateAgentMCP(agentName string, mcpCfg config.MCPConfig) ([]tools.Tool, error) {
 	a.mcpServerCacheMu.Lock()
 	defer a.mcpServerCacheMu.Unlock()
 	if a.mcpServerCache == nil {
 		a.mcpServerCache = make(map[string]*mcpServerEntry)
 	}
+	for name := range mcpCfg {
+		if _, inherited := a.mcpServerCache[mainMCPServerCacheKey(name)]; inherited {
+			return nil, fmt.Errorf("agent %q declares MCP server %q, but that name is already defined by project/global MCP config; remove the agent entry to inherit it or rename the agent server", agentName, name)
+		}
+		if mcpCfg[name].Manual {
+			return nil, fmt.Errorf("agent %q MCP server %q sets manual: true, but agent-scoped MCP servers cannot be enabled at runtime; remove manual or configure the server in project/global MCP config", agentName, name)
+		}
+	}
 	connectCtx, connectCancel := context.WithTimeout(a.parentCtx, 30*time.Second)
 	defer connectCancel()
 	var extra []tools.Tool
 	for name, sc := range mcpCfg {
-		if _, ok := a.mcpServerCache[name]; ok {
-			if e := a.mcpServerCache[name]; e.Mgr != nil {
-				extra = append(extra, e.Tools...)
-			}
+		key := agentMCPServerCacheKey(agentName, name)
+		if entry, ok := a.mcpServerCache[key]; ok {
+			extra = append(extra, entry.Tools...)
 			continue
 		}
 		cfg := mcp.ServerConfig{Name: name, Command: sc.Command, Args: sc.Args, Env: sc.Env, URL: sc.URL, AllowedTools: sc.AllowedTools}
@@ -441,11 +448,11 @@ func (a *MainAgent) getOrCreateAgentMCP(mcpCfg config.MCPConfig) []tools.Tool {
 			mgr.Close()
 			continue
 		}
-		a.mcpServerCache[name] = &mcpServerEntry{Mgr: mgr, Tools: discovered}
+		a.mcpServerCache[key] = &mcpServerEntry{Mgr: mgr, Tools: discovered}
 		log.Debugf("subagent MCP server connected server=%v tools=%v", name, len(discovered))
 		extra = append(extra, discovered...)
 	}
-	return extra
+	return extra, nil
 }
 
 func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType string, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (tools.TaskHandle, error) {
@@ -514,7 +521,11 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	agentRuleset := a.buildSubAgentRuleset(agentDef)
 	var extraMCPTools []tools.Tool
 	if len(agentDef.MCP) > 0 {
-		extraMCPTools = a.getOrCreateAgentMCP(agentDef.MCP)
+		extraMCPTools, err = a.getOrCreateAgentMCP(agentDef.Name, agentDef.MCP)
+		if err != nil {
+			<-a.sem
+			return tools.TaskHandle{}, err
+		}
 	}
 	instanceID := NextInstanceID(agentDef.Name)
 	ctx, cancel := context.WithCancel(a.parentCtx)

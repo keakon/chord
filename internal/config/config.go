@@ -1068,6 +1068,13 @@ func mergeProjectConfigMap(dst, src map[string]any, path []string) {
 			dst[key] = appendYAMLSequences(dst[key], raw)
 			continue
 		}
+		// An MCP server definition is a single connection/permission unit.
+		// Mixing fields from global and project layers can combine incompatible
+		// transports or unintentionally inherit credentials and tool access.
+		if len(path) == 1 && path[0] == "mcp" {
+			dst[key] = cloneYAMLValue(raw)
+			continue
+		}
 		if childDst, ok := dst[key].(map[string]any); ok {
 			if childSrc, ok := raw.(map[string]any); ok {
 				mergeProjectConfigMap(childDst, childSrc, append(path, key))

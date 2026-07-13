@@ -33,12 +33,21 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// keyed by server name. Entries whose Mgr is nil are sentinels: the server
-// is already connected as part of the main agent (tools live in a.tools /
-// BaseTools) and SubAgents must not reconnect it.
+// Keyed by MCP scope and server name. Entries whose Mgr is nil are sentinels
+// for servers inherited from top-level config. Agent-private entries are scoped
+// by agent definition so instances of one agent reuse a connection without
+// conflating same-named servers owned by different agents.
 type mcpServerEntry struct {
 	Mgr   *mcp.Manager // nil for main-agent servers (sentinel)
 	Tools []tools.Tool // nil for sentinel entries
+}
+
+func mainMCPServerCacheKey(serverName string) string {
+	return "main\x00" + serverName
+}
+
+func agentMCPServerCacheKey(agentName, serverName string) string {
+	return "agent\x00" + agentName + "\x00" + serverName
 }
 
 // ---------------------------------------------------------------------------
@@ -423,10 +432,9 @@ type MainAgent struct {
 	subAgentUrgentCounts     map[string]int
 	explicitUserTurnCount    uint64
 
-	// mcpServerCache maps server name → mcpServerEntry, ensuring each MCP
-	// server is a singleton for the lifetime of the MainAgent. Main-agent
-	// servers are registered as sentinels (Mgr==nil) so SubAgents never
-	// reconnect them. SubAgent-exclusive servers get their own Manager.
+	// mcpServerCache maps scoped server keys to connections. Main-agent servers
+	// are registered as sentinels (Mgr==nil); SubAgent-exclusive servers are
+	// isolated by agent definition and shared by instances of that definition.
 	mcpServerCacheMu sync.Mutex
 	mcpServerCache   map[string]*mcpServerEntry
 
@@ -786,8 +794,9 @@ func (a *MainAgent) RegisterMainMCPServers(serverNames []string) {
 		a.mcpServerCache = make(map[string]*mcpServerEntry)
 	}
 	for _, name := range serverNames {
-		if _, ok := a.mcpServerCache[name]; !ok {
-			a.mcpServerCache[name] = &mcpServerEntry{} // sentinel: Mgr==nil
+		key := mainMCPServerCacheKey(name)
+		if _, ok := a.mcpServerCache[key]; !ok {
+			a.mcpServerCache[key] = &mcpServerEntry{} // sentinel: Mgr==nil
 		}
 	}
 }

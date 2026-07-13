@@ -736,7 +736,11 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 
 		var extraMCPTools []tools.Tool
 		if len(agentDef.MCP) > 0 {
-			extraMCPTools = a.getOrCreateAgentMCP(agentDef.MCP)
+			extraMCPTools, err = a.getOrCreateAgentMCP(agentDef.Name, agentDef.MCP)
+			if err != nil {
+				log.Warnf("restoreLoadedSubAgents: invalid agent MCP config, skipping id=%v agent_def=%v error=%v", state.InstanceID, agentDef.Name, err)
+				continue
+			}
 		}
 
 		ctx, cancel := context.WithCancel(a.parentCtx)
