@@ -91,6 +91,13 @@ func (s *ViewportSpillStore) Append(block *Block) (*BlockSpillRef, error) {
 	payloadBlock.lineCache = nil
 	payloadBlock.lineCacheWidth = 0
 	payloadBlock.lineCountCache = 0
+	payloadBlock.searchTextLower = ""
+	payloadBlock.searchTextReady = false
+	payloadBlock.searchMatchQueryLower = ""
+	payloadBlock.searchMatchWidth = 0
+	payloadBlock.searchMatchOffset = 0
+	payloadBlock.searchMatchFound = false
+	payloadBlock.searchMatchReady = false
 	payloadBlock.streamTailRaw = ""
 	payloadBlock.streamTailWidth = 0
 	payloadBlock.streamTailLines = nil
@@ -263,6 +270,8 @@ func (b *Block) estimatedHotBytes() int64 {
 	for _, line := range b.mdCache {
 		total += len(line)
 	}
+	total += len(b.searchTextLower)
+	total += len(b.searchMatchQueryLower)
 	for _, line := range b.streamSettledLines {
 		total += len(line)
 	}
@@ -346,6 +355,7 @@ func (v *Viewport) spillBlock(block *Block) bool {
 		return false
 	}
 	block.spillRef = ref
+	block.spillStore = v.spill
 	block.spillCold = true
 	block.Content = ""
 	block.ResultContent = ""
@@ -360,6 +370,13 @@ func (v *Viewport) spillBlock(block *Block) bool {
 	block.lineCache = nil
 	block.lineCacheWidth = 0
 	block.lineCountCache = 0
+	block.searchTextLower = ""
+	block.searchTextReady = false
+	block.searchMatchQueryLower = ""
+	block.searchMatchWidth = 0
+	block.searchMatchOffset = 0
+	block.searchMatchFound = false
+	block.searchMatchReady = false
 	block.viewportCache = nil
 	block.viewportCacheWidth = 0
 	block.codeHL = nil

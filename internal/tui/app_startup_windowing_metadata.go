@@ -13,10 +13,8 @@ func startupDeferredMetaSearchInnerOffset(meta startupDeferredBlockMeta, query s
 		width = 80
 	}
 	lowerQuery := strings.ToLower(query)
-	for i, line := range wrapText(meta.SearchableText, width) {
-		if strings.Contains(line, lowerQuery) {
-			return i
-		}
+	if offset, ok := wrappedSearchMatchLineOffset(meta.SearchableText, lowerQuery, width); ok {
+		return offset
 	}
 	return 0
 }
@@ -114,7 +112,11 @@ func findMatchesInStartupDeferredBlockMeta(meta []startupDeferredBlockMeta, quer
 	matches := make([]MatchPosition, 0)
 	lineOffset := 0
 	for i, blockMeta := range meta {
-		if strings.Contains(blockMeta.SearchableText, lowerQuery) && startupDeferredMetaSearchVisible(blockMeta) {
+		candidate := strings.Contains(blockMeta.SearchableText, lowerQuery)
+		if !candidate && blockMeta.Type == BlockAssistant {
+			candidate = assistantMarkdownMayContainQuery(blockMeta.SearchableText, lowerQuery)
+		}
+		if candidate && startupDeferredMetaSearchVisible(blockMeta) {
 			matches = append(matches, MatchPosition{
 				BlockIndex:  i,
 				BlockID:     blockMeta.BlockID,

@@ -13,6 +13,16 @@ func revealSearchMatchedBlock(block *Block) bool {
 	}
 	changed := false
 	switch block.Type {
+	case BlockUser:
+		if block.UserLocalShellCmd != "" && block.Collapsed {
+			block.Collapsed = false
+			changed = true
+		}
+	case BlockAssistant, BlockThinking:
+		if block.ThinkingCollapsed {
+			block.ThinkingCollapsed = false
+			changed = true
+		}
 	case BlockToolCall:
 		switch block.ToolName {
 		case tools.NameWrite, tools.NameEdit, tools.NamePatch, tools.NameRead, tools.NameDelete:
@@ -62,6 +72,9 @@ func revealSearchMatchedBlock(block *Block) bool {
 	case BlockCompactionSummary:
 		if block.Collapsed {
 			block.Collapsed = false
+			if raw := strings.TrimSpace(block.CompactionSummaryRaw); raw != "" {
+				block.Content = formatCompactionSummaryDisplay(raw, false, block.CompactionPreviewLines)
+			}
 			changed = true
 		}
 	}

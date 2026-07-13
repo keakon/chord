@@ -334,6 +334,11 @@ func (b *Block) InvalidateCache() {
 	b.renderSyntheticPrefixWidthsW = 0
 	b.searchTextLower = ""
 	b.searchTextReady = false
+	b.searchMatchQueryLower = ""
+	b.searchMatchWidth = 0
+	b.searchMatchOffset = 0
+	b.searchMatchFound = false
+	b.searchMatchReady = false
 }
 
 // InvalidateStreamingSettledCache clears the cached rendered markdown for the
@@ -435,47 +440,51 @@ func (b *Block) searchableTextLower() string {
 		return b.searchTextLower
 	}
 	var sb strings.Builder
+	appendText := func(text string) {
+		if strings.TrimSpace(text) == "" {
+			return
+		}
+		if sb.Len() > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(text)
+	}
 	switch b.Type {
 	case BlockToolCall:
-		sb.WriteString(b.ToolName)
-		if b.Content != "" {
-			if sb.Len() > 0 {
-				sb.WriteByte('\n')
-			}
-			sb.WriteString(b.Content)
-		}
-		if b.ResultContent != "" {
-			if sb.Len() > 0 {
-				sb.WriteByte('\n')
-			}
-			sb.WriteString(b.ResultContent)
-		}
+		appendText(b.ToolName)
+		appendText(b.Content)
+		appendText(b.ResultContent)
+		appendText(b.Diff)
+		appendText(b.DoneSummary)
+		appendText(b.DoneReport)
+		appendText(formatToolProgress(b.ToolProgress))
 	case BlockCompactionSummary:
 		raw := strings.TrimSpace(b.CompactionSummaryRaw)
 		if raw != "" {
-			sb.WriteString(raw)
+			appendText(raw)
 		} else {
-			sb.WriteString(b.Content)
+			appendText(b.Content)
 		}
 	default:
-		sb.WriteString(b.Content)
-		for _, img := range b.ImageParts {
-			if strings.TrimSpace(img.FileName) == "" {
-				continue
-			}
-			if sb.Len() > 0 {
-				sb.WriteByte('\n')
-			}
-			sb.WriteString(img.FileName)
+		appendText(b.Content)
+		if b.Type == BlockUser && b.UserLocalShellCmd != "" {
+			appendText(b.UserLocalShellCmd)
+			appendText(b.UserLocalShellResult)
+		}
+		for _, image := range b.ImageParts {
+			appendText(image.FileName)
+		}
+		for _, name := range b.PDFNames {
+			appendText(name)
+		}
+		for _, ref := range b.FileRefs {
+			appendText(ref)
 		}
 		for _, tp := range b.ThinkingParts {
-			if strings.TrimSpace(tp) == "" {
-				continue
-			}
-			if sb.Len() > 0 {
-				sb.WriteByte('\n')
-			}
-			sb.WriteString(tp)
+			appendText(tp)
+		}
+		for _, translation := range b.ThinkingTranslations {
+			appendText(translation.Content)
 		}
 	}
 	b.searchTextLower = strings.ToLower(sb.String())

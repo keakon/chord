@@ -2,7 +2,10 @@ package tui
 
 import (
 	"fmt"
+	"html"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/keakon/bubbles/v2/textinput"
 	tea "github.com/keakon/bubbletea/v2"
@@ -114,9 +117,9 @@ func (sm SearchModel) View(width int) string {
 // FindMatches performs a case-insensitive search across all block content and
 // returns the positions of blocks whose plain-text content contains the query.
 //
-// The search examines the raw Content field of each block (which is the
-// unstyled text the user actually typed or the LLM produced). This avoids
-// false matches on ANSI escape codes from rendered output.
+// The search examines the unstyled source fields that feed each block's
+// visible text. This avoids false matches on ANSI escape codes while covering
+// structured displays such as tool diffs, reports, and attachment labels.
 //
 // Each match includes the absolute LineOffset so the viewport can scroll
 // directly to the match position.
@@ -128,11 +131,8 @@ func approximateSearchMatchInnerOffset(block *Block, query string, width int) in
 		width = 80
 	}
 	lowerQuery := strings.ToLower(query)
-	lines := wrapText(block.searchableTextLower(), width)
-	for i, line := range lines {
-		if strings.Contains(line, lowerQuery) {
-			return i
-		}
+	if offset, ok := wrappedSearchMatchLineOffset(block.searchableTextLower(), lowerQuery, width); ok {
+		return offset
 	}
 	if block.ToolName == tools.NameRead && block.ResultContent != "" {
 		rows, _ := parseReadDisplayLines(block.ResultContent, 1)
@@ -143,6 +143,146 @@ func approximateSearchMatchInnerOffset(block *Block, query string, width int) in
 		}
 	}
 	return 0
+}
+
+func wrappedSearchMatchLineOffset(textLower, queryLower string, width int) (int, bool) {
+	matchStart := strings.Index(textLower, queryLower)
+	if matchStart < 0 {
+		return 0, false
+	}
+	matchEnd := matchStart + len(queryLower)
+	for matchEnd < len(textLower) {
+		r, size := utf8.DecodeRuneInString(textLower[matchEnd:])
+		if unicode.IsSpace(r) {
+			break
+		}
+		matchEnd += size
+	}
+	for i, line := range wrapText(textLower[:matchEnd], width) {
+		if strings.Contains(line, queryLower) {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func assistantMarkdownMayContainQuery(content, queryLower string) bool {
+	if content == "" || queryLower == "" {
+		return false
+	}
+	if assistantMarkdownSourceMayContainQuery(content, queryLower) {
+		return true
+	}
+	if strings.Contains(content, "&") {
+		decoded := html.UnescapeString(content)
+		if decoded != content {
+			return assistantMarkdownSourceMayContainQuery(decoded, queryLower)
+		}
+	}
+	return false
+}
+
+func assistantMarkdownSourceMayContainQuery(content, queryLower string) bool {
+	if isASCII(content) && isASCII(queryLower) {
+		if assistantMarkdownContainsASCII(content, queryLower) {
+			return true
+		}
+		if strings.Contains(content, "](") || strings.Contains(content, "<") {
+			return asciiSubsequenceFold(content, queryLower)
+		}
+		return false
+	}
+	var visibleSyntax strings.Builder
+	visibleSyntax.Grow(len(content))
+	for _, r := range content {
+		if !markdownSearchIgnorableRune(r) {
+			visibleSyntax.WriteRune(unicode.ToLower(r))
+		}
+	}
+	if strings.Contains(visibleSyntax.String(), queryLower) {
+		return true
+	}
+	// Link targets and HTML/comment bodies can disappear entirely when rendered.
+	// A linear subsequence check is a deliberately broad candidate filter; the
+	// rendered-line validation that follows rejects hidden-only false positives.
+	if strings.Contains(content, "](") || strings.Contains(content, "<") {
+		if isASCII(queryLower) {
+			return asciiSubsequenceFold(content, queryLower)
+		}
+	}
+	return false
+}
+
+func assistantMarkdownContainsASCII(content, queryLower string) bool {
+	const stackPrefixLimit = 256
+	var stackPrefix [stackPrefixLimit]int
+	prefix := stackPrefix[:]
+	if len(queryLower) <= len(stackPrefix) {
+		prefix = prefix[:len(queryLower)]
+	} else {
+		prefix = make([]int, len(queryLower))
+	}
+	for i, matched := 1, 0; i < len(queryLower); i++ {
+		for matched > 0 && queryLower[i] != queryLower[matched] {
+			matched = prefix[matched-1]
+		}
+		if queryLower[i] == queryLower[matched] {
+			matched++
+		}
+		prefix[i] = matched
+	}
+	matched := 0
+	for i := 0; i < len(content); i++ {
+		c := content[i]
+		if markdownSearchIgnorableRune(rune(c)) {
+			continue
+		}
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		for matched > 0 && c != queryLower[matched] {
+			matched = prefix[matched-1]
+		}
+		if c == queryLower[matched] {
+			matched++
+			if matched == len(queryLower) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
+func asciiSubsequenceFold(content, queryLower string) bool {
+	matched := 0
+	for i := 0; i < len(content) && matched < len(queryLower); i++ {
+		c := content[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c == queryLower[matched] {
+			matched++
+		}
+	}
+	return matched == len(queryLower)
+}
+
+func markdownSearchIgnorableRune(r rune) bool {
+	switch r {
+	case '*', '_', '~', '`', '[', ']', '(', ')', '#', '>', '!':
+		return true
+	default:
+		return false
+	}
 }
 
 func blockVisibleForSearch(block *Block, width int) bool {
@@ -181,86 +321,106 @@ func searchDiagnosticArtifactExcluded(blockType BlockType, searchableTextLower s
 }
 
 func renderedSearchMatchInnerOffset(block *Block, query string, width int) int {
+	if offset, ok := renderedSearchMatchLineOffset(block, query, width); ok {
+		return offset
+	}
+	return approximateSearchMatchInnerOffset(block, query, width)
+}
+
+func renderedSearchMatchLineOffset(block *Block, query string, width int) (int, bool) {
 	if block == nil || query == "" {
-		return 0
+		return 0, false
 	}
 	if width <= 0 {
 		width = 80
 	}
 	inspect, temporary := block.inspectionBlock()
 	if inspect == nil {
-		return 0
-	}
-	lowerQuery := strings.ToLower(query)
-	lines := inspect.Render(width, "")
-	for i, line := range lines {
-		if strings.Contains(strings.ToLower(stripANSI(line)), lowerQuery) {
-			if temporary {
-				inspect.InvalidateCache()
-			}
-			return i
-		}
+		return 0, false
 	}
 	if temporary {
-		inspect.InvalidateCache()
+		defer inspect.InvalidateCache()
 	}
-	return approximateSearchMatchInnerOffset(inspect, query, width)
+	if offset, ok := inspect.searchMatchLineOffsetInCachedRender(query, width); ok {
+		return offset, true
+	}
+
+	revealed := cloneBlockForDeferredSource(inspect)
+	if !revealSearchMatchedBlock(revealed) {
+		return 0, false
+	}
+	revealed.InvalidateCache()
+	return searchMatchLineOffsetInRenderedLines(revealed.Render(width, ""), query, width)
+}
+
+func (b *Block) searchMatchLineOffsetInCachedRender(query string, width int) (int, bool) {
+	if b == nil || query == "" {
+		return 0, false
+	}
+	if width <= 0 {
+		width = 80
+	}
+	lowerQuery := strings.ToLower(strings.TrimSpace(query))
+	if b.searchMatchReady && b.searchMatchWidth == width && b.searchMatchQueryLower == lowerQuery {
+		return b.searchMatchOffset, b.searchMatchFound
+	}
+	offset, found := searchMatchLineOffsetInRenderedLines(b.RenderRange(width, "", 0, b.LineCount(width)), lowerQuery, width)
+	b.searchMatchQueryLower = lowerQuery
+	b.searchMatchWidth = width
+	b.searchMatchOffset = offset
+	b.searchMatchFound = found
+	b.searchMatchReady = true
+	b.hotBytesMemoValid = false
+	return offset, found
+}
+
+func searchMatchLineOffsetInRenderedLines(lines []string, query string, width int) (int, bool) {
+	for i, line := range lines {
+		line = expandTabsForDisplayANSI(line, preformattedTabWidth)
+		line = truncateLineToDisplayWidth(line, width)
+		if _, _, ok := searchMatchColumnRangeInLine(line, query); ok {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 func searchMatchInnerOffset(block *Block, query string, width int) int {
 	if block == nil {
 		return 0
 	}
+	offset, _ := visibleSearchMatchInnerOffset(block, query, width)
+	return offset
+}
+
+func visibleSearchMatchInnerOffset(block *Block, query string, width int) (int, bool) {
+	if block == nil {
+		return 0, false
+	}
 	switch block.Type {
-	case BlockToolCall, BlockToolResult:
-		return renderedSearchMatchInnerOffset(block, query, width)
+	case BlockUser, BlockAssistant, BlockThinking, BlockToolCall, BlockToolResult, BlockCompactionSummary:
+		return renderedSearchMatchLineOffset(block, query, width)
 	default:
-		return approximateSearchMatchInnerOffset(block, query, width)
+		return approximateSearchMatchInnerOffset(block, query, width), true
 	}
 }
 
 func FindMatches(blocks []*Block, query string) []MatchPosition {
-	if query == "" || len(blocks) == 0 {
-		return nil
-	}
-
-	lowerQuery := strings.ToLower(query)
-	var matches []MatchPosition
-	lineOffset := 0
-
-	for i, block := range blocks {
-		inspect, temporary := block.inspectionBlock()
-		if inspect == nil {
-			continue
-		}
-		blockLineCount := inspect.LineCount(80) // approximate; recalculated when scrolling
-		searchableTextLower := inspect.searchableTextLower()
-		if strings.Contains(searchableTextLower, lowerQuery) && blockVisibleForSearch(inspect, 80) && !searchDiagnosticArtifactExcluded(inspect.Type, searchableTextLower) {
-			matches = append(matches, MatchPosition{
-				BlockIndex:  i,
-				BlockID:     inspect.ID,
-				LineOffset:  lineOffset,
-				InnerOffset: searchMatchInnerOffset(inspect, query, 80),
-				Query:       query,
-			})
-		}
-		if temporary {
-			inspect.InvalidateCache()
-		}
-		lineOffset += blockLineCount
-	}
-
-	return matches
+	return findMatchesAtWidth(blocks, query, 80)
 }
 
 // FindMatchesAtWidth performs FindMatches but uses the given width for accurate
 // line offset calculation. Use this when the viewport width is known.
 func FindMatchesAtWidth(blocks []*Block, query string, width int) []MatchPosition {
-	if query == "" || len(blocks) == 0 {
-		return nil
-	}
 	if width <= 0 {
 		width = 80
+	}
+	return findMatchesAtWidth(blocks, query, width)
+}
+
+func findMatchesAtWidth(blocks []*Block, query string, width int) []MatchPosition {
+	if query == "" || len(blocks) == 0 {
+		return nil
 	}
 
 	lowerQuery := strings.ToLower(query)
@@ -274,14 +434,21 @@ func FindMatchesAtWidth(blocks []*Block, query string, width int) []MatchPositio
 		}
 		blockLineCount := inspect.LineCount(width)
 		searchableTextLower := inspect.searchableTextLower()
-		if strings.Contains(searchableTextLower, lowerQuery) && blockVisibleForSearch(inspect, width) && !searchDiagnosticArtifactExcluded(inspect.Type, searchableTextLower) {
-			matches = append(matches, MatchPosition{
-				BlockIndex:  i,
-				BlockID:     inspect.ID,
-				LineOffset:  lineOffset,
-				InnerOffset: searchMatchInnerOffset(inspect, query, width),
-				Query:       query,
-			})
+		candidate := strings.Contains(searchableTextLower, lowerQuery)
+		if !candidate && inspect.Type == BlockAssistant {
+			candidate = assistantMarkdownMayContainQuery(inspect.Content, lowerQuery)
+		}
+		if candidate && blockVisibleForSearch(inspect, width) && !searchDiagnosticArtifactExcluded(inspect.Type, searchableTextLower) {
+			innerOffset, visible := visibleSearchMatchInnerOffset(inspect, query, width)
+			if visible {
+				matches = append(matches, MatchPosition{
+					BlockIndex:  i,
+					BlockID:     inspect.ID,
+					LineOffset:  lineOffset,
+					InnerOffset: innerOffset,
+					Query:       query,
+				})
+			}
 		}
 		if temporary {
 			inspect.InvalidateCache()

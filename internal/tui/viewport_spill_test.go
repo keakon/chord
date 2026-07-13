@@ -165,6 +165,45 @@ func TestViewportSpillPreservesSearchAndHydration(t *testing.T) {
 	}
 }
 
+func TestViewportSpillDropsSearchCaches(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	v := NewViewport(80, 8)
+	block := &Block{ID: 1, Type: BlockAssistant, Content: "visible **needle** phrase"}
+	v.AppendBlock(block)
+
+	if matches := FindMatchesAtWidth(v.visibleBlocks(), "visible needle", 80); len(matches) != 1 {
+		t.Fatalf("FindMatchesAtWidth() returned %d matches, want 1", len(matches))
+	}
+	if !block.searchMatchReady {
+		t.Fatal("expected rendered-match cache before spill")
+	}
+
+	if !v.spillBlock(block) {
+		t.Fatal("expected spillBlock to succeed")
+	}
+	if block.searchTextReady || block.searchTextLower != "" {
+		t.Fatal("spill left searchable text cache behind")
+	}
+	if block.searchMatchReady || block.searchMatchQueryLower != "" || block.searchMatchWidth != 0 {
+		t.Fatal("spill left rendered-match search cache behind")
+	}
+}
+
+func TestEstimatedHotBytesIncludesSearchCaches(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{Type: BlockAssistant, Content: "visible needle phrase"}
+	block.LineCount(80)
+	withoutSearch := block.estimatedHotBytes()
+
+	if matches := FindMatchesAtWidth([]*Block{block}, "visible needle", 80); len(matches) != 1 {
+		t.Fatalf("FindMatchesAtWidth() returned %d matches, want 1", len(matches))
+	}
+	withSearch := block.estimatedHotBytes()
+	if withSearch <= withoutSearch {
+		t.Fatalf("estimatedHotBytes with search caches = %d, without = %d; expected search caches to contribute", withSearch, withoutSearch)
+	}
+}
+
 func TestViewportSpillHydratePreservesToolDisplayWorkingDir(t *testing.T) {
 	v := NewViewport(80, 6)
 	v.SetWorkingDir(filepath.Join(string(os.PathSeparator), "tmp", "workspace"))

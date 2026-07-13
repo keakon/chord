@@ -18,6 +18,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Transcript search now validates visible rendered text across card types, expands collapsed matches, handles Markdown formatting and HTML entities, and avoids hidden or truncated false matches.
 - Done tool guidance now makes direct assistant text the mandatory default for ordinary completion. The model may call `done` only when the active runtime or workflow explicitly requires a tool-based completion signal, such as a loop exit, and the report schema no longer implies that every finished task requires the tool.
 - Newly created session directories and internal persisted artifacts now use owner-only permissions (`0700` for directories and `0600` for files), preventing transcripts, snapshots, subagent mailboxes, artifacts, task state, and compaction history from being exposed to other local users by default.
 - TUI text paste no longer probes clipboard images on the Bubble Tea update path: ordinary terminal paste and `Cmd+V` are text-only, while `Ctrl+V` / `Alt+V` asynchronously attaches images or PDFs through native clipboard backends without `osascript`, preventing intermittent multi-second input freezes. Clipboard PNG/JPEG are supported directly, and BMP/WebP are normalized for Windows, WSLg, and Linux compatibility.

@@ -17,6 +17,7 @@ Chord is optimized for long interactive sessions: large transcripts, streaming m
 - **View caching** — expensive regions such as the main viewport, info panel, and status bar are cached per frame and re-rendered only when their inputs change.
 - **Scroll batching** — mouse wheel and touchpad deltas are batched and applied on a short cadence; only the visible window of a large transcript stays hot, with off-screen regions kept cold.
 - **Lazy session loading** — resuming a large session loads the current window for interaction first; search, jump, and directory metadata plus older transcript regions hydrate in the background.
+- **Bounded search state** — transcript search caches only the current query's rendered match position instead of retaining rendered copies of every line. Search can inspect spilled cards without leaving their content or derived indexes resident in the hot window.
 
 ## Request and context cost
 

@@ -74,6 +74,10 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 
 While entering a search, `Enter` confirms it and `Esc` cancels it. `Backspace` edits a non-empty query normally; when the query is already empty, `Backspace` cancels the search like `Esc`. Therefore, deleting the final character keeps search mode active, and one more `Backspace` exits it, matching Vim behavior.
 
+Search covers visible textual content across conversation cards, including user and assistant text, original and translated thinking, tool arguments and output, file diffs, completion reports, compaction summaries, local shell output, and visible attachment or file-reference labels. A matching collapsed card is expanded before Chord scrolls to and highlights the text. Search remains card-based: each matching card counts once, and only the current card's first visible occurrence is highlighted. Image pixels are not OCR-searched, and Markdown syntax or hidden link targets that are not rendered as visible text cannot receive a visible highlight.
+
+Search also covers older regions of lazily loaded large sessions. Chord loads a cold card only long enough to verify that the match is actually visible, then keeps the off-screen region cold until navigation needs it.
+
 ### Both modes — agents, models, and integrations
 
 | Key          | Action                                                                                                    |

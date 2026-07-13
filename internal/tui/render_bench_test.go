@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -517,22 +518,82 @@ func BenchmarkViewportVisibleWindowBlockIDs(b *testing.B) {
 	}
 }
 
-// BenchmarkFindMatchesAtWidth ensures search offset computation reuses block
-// line-count caches instead of triggering cold MeasureLineCount renders.
-func BenchmarkFindMatchesAtWidth(b *testing.B) {
-	ApplyTheme(DefaultTheme())
-	blocks := []*Block{
+func benchmarkSearchBlocks() []*Block {
+	return []*Block{
 		benchmarkAssistantBlock(),
 		{ID: 2, Type: BlockAssistant, Content: strings.Repeat("needle ", 80)},
 		{ID: 3, Type: BlockToolCall, ToolName: "read", Content: `{"path":"foo"}`, ResultContent: strings.Repeat("alpha beta gamma\n", 30), ResultDone: true},
 	}
+}
+
+// BenchmarkFindMatchesAtWidthCold measures a first search after render caches
+// have been populated but search-specific indexes have not.
+func BenchmarkFindMatchesAtWidthCold(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	blocks := benchmarkSearchBlocks()
 	for _, block := range blocks {
 		block.LineCount(100)
 	}
+	b.ReportAllocs()
+	for b.Loop() {
+		for _, block := range blocks {
+			block.searchTextLower = ""
+			block.searchTextReady = false
+			block.searchMatchQueryLower = ""
+			block.searchMatchWidth = 0
+			block.searchMatchOffset = 0
+			block.searchMatchFound = false
+			block.searchMatchReady = false
+		}
+		_ = FindMatchesAtWidth(blocks, "needle", 100)
+	}
+}
+
+// BenchmarkFindMatchesAtWidth ensures repeated search offset computation
+// reuses both line-count and search caches.
+func BenchmarkFindMatchesAtWidth(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	blocks := benchmarkSearchBlocks()
+	for _, block := range blocks {
+		block.LineCount(100)
+	}
+	_ = FindMatchesAtWidth(blocks, "needle", 100)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = FindMatchesAtWidth(blocks, "needle", 100)
+	}
+}
+
+func BenchmarkDeferredStartupTranscriptSearchAllMatches(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	for _, blockCount := range []int{1000, 2000, 4000} {
+		b.Run(fmt.Sprintf("blocks=%d", blockCount), func(b *testing.B) {
+			m := NewModelWithSize(nil, 120, 30)
+			blocks := make([]*Block, blockCount)
+			for i := range blocks {
+				blocks[i] = &Block{ID: i + 1, Type: BlockAssistant, Content: "needle"}
+			}
+			m.startupDeferredTranscript = &startupDeferredTranscriptState{
+				allBlocks: blocks,
+				blockMeta: buildStartupDeferredBlockMeta(blocks, m.viewport.width),
+			}
+			_ = m.deferredStartupTranscriptSearch("needle")
+			b.ResetTimer()
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = m.deferredStartupTranscriptSearch("needle")
+			}
+		})
+	}
+}
+
+func BenchmarkAssistantMarkdownSearchLongCommonPrefix(b *testing.B) {
+	content := strings.Repeat("a", 100_000)
+	query := strings.Repeat("a", 1_000) + "b"
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = assistantMarkdownMayContainQuery(content, query)
 	}
 }
 

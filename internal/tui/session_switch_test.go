@@ -799,7 +799,7 @@ func TestDeferredStartupTranscriptSearchSkipsInvisibleThinkingBlocks(t *testing.
 		ToolCalls: []message.ToolCall{{
 			ID:   "call-patch-1",
 			Name: tools.NameEdit,
-			Args: []byte(`{"patch":"*** Begin Patch\n*** Update File: internal/tui/search_test.go\n@@\n-before\n+needle output\n*** End Patch\n"}`),
+			Args: []byte(`{"path":"internal/tui/needle-output.go","patch":"@@\n-before\n+after\n"}`),
 		}},
 	})
 	messages = append(messages, message.Message{Role: "tool", ToolCallID: "call-patch-1", Content: "success"})
@@ -813,7 +813,7 @@ func TestDeferredStartupTranscriptSearchSkipsInvisibleThinkingBlocks(t *testing.
 	}
 
 	m.search = NewSearchModel(ModeNormal)
-	m.executeSearchAgainstCurrentTranscript("needle output")
+	m.executeSearchAgainstCurrentTranscript("needle-output.go")
 	match, ok := m.search.State.CurrentMatch()
 	if !ok {
 		t.Fatal("search should find edit tool content")
@@ -3358,6 +3358,21 @@ func TestDeferredStartupTranscriptMetadataSupportsSearchAndDirectoryAfterSpill(t
 	}
 	if entries[20].Summary == "" || !strings.Contains(entries[20].Summary, "message-020") {
 		t.Fatalf("entries[20].Summary = %q, want summary for message-020", entries[20].Summary)
+	}
+}
+
+func TestDeferredStartupTranscriptSearchesVisibleAssistantMarkdown(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{ID: 1, Type: BlockAssistant, Content: "visible **needle** phrase"}
+	m := NewModelWithSize(nil, 80, 24)
+	m.startupDeferredTranscript = &startupDeferredTranscriptState{
+		allBlocks: []*Block{block},
+		blockMeta: buildStartupDeferredBlockMeta([]*Block{block}, 80),
+	}
+
+	matches := m.deferredStartupTranscriptSearch("visible needle")
+	if len(matches) != 1 || matches[0].BlockID != block.ID {
+		t.Fatalf("deferred search matches = %#v, want one visible Assistant Markdown match", matches)
 	}
 }
 

@@ -269,6 +269,11 @@ type Block struct {
 	renderSyntheticPrefixWidthsW int
 	searchTextLower              string
 	searchTextReady              bool
+	searchMatchQueryLower        string
+	searchMatchWidth             int
+	searchMatchOffset            int
+	searchMatchFound             bool
+	searchMatchReady             bool
 	// hotBytesMemo caches estimatedHotBytes; invalidated whenever render caches
 	// are cleared (InvalidateCache) or repopulated, so the viewport hot-budget
 	// recompute stays O(blocks) instead of O(total cached lines).

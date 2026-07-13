@@ -36,7 +36,19 @@ func (m *Model) deferredStartupTranscriptSearch(query string) []MatchPosition {
 	if state == nil || len(state.blockMeta) == 0 || m.viewport == nil {
 		return nil
 	}
-	return findMatchesInStartupDeferredBlockMeta(state.blockMeta, query, m.viewport.width)
+	candidates := findMatchesInStartupDeferredBlockMeta(state.blockMeta, query, m.viewport.width)
+	matches := candidates[:0]
+	for _, match := range candidates {
+		if match.BlockIndex < 0 || match.BlockIndex >= len(state.allBlocks) {
+			continue
+		}
+		block := state.allBlocks[match.BlockIndex]
+		if innerOffset, ok := visibleSearchMatchInnerOffset(block, query, m.viewport.width); ok {
+			match.InnerOffset = innerOffset
+			matches = append(matches, match)
+		}
+	}
+	return matches
 }
 
 func (m *Model) locateDeferredStartupTranscriptBlock(blockID int, trigger string) bool {
@@ -137,6 +149,7 @@ func (m *Model) executeSearchAgainstCurrentTranscript(query string) {
 	}
 	blocks := m.viewport.visibleBlocks()
 	ExecuteSearch(&m.search.State, blocks, query, m.viewport.width, m.searchAnchorIndexInVisibleBlocks(blocks))
+	m.viewport.markHotBudgetDirty()
 }
 
 func (m *Model) maybeRevealSearchMatchBlock(match MatchPosition) {
@@ -189,6 +202,7 @@ func (m *Model) maybeScrollToSearchMatch(match MatchPosition, trigger string) bo
 			if block != nil {
 				m.viewport.noteBlockLineCountMayChange()
 				m.updateViewportBlock(block)
+				match.InnerOffset = searchMatchInnerOffset(block, match.Query, m.viewport.width)
 			}
 			if block != nil && !blockVisibleForSearch(block, m.viewport.width) {
 				m.recordTUIDiagnostic("search-match-skip", "trigger=%s deferred=true block=%d invisible=true", strings.TrimSpace(trigger), match.BlockID)
@@ -212,6 +226,7 @@ func (m *Model) maybeScrollToSearchMatch(match MatchPosition, trigger string) bo
 		if block != nil {
 			m.viewport.noteBlockLineCountMayChange()
 			m.updateViewportBlock(block)
+			match.InnerOffset = searchMatchInnerOffset(block, match.Query, m.viewport.width)
 		}
 		if block != nil && !blockVisibleForSearch(block, m.viewport.width) {
 			m.recordTUIDiagnostic("search-match-skip", "trigger=%s deferred=false block=%d invisible=true", strings.TrimSpace(trigger), match.BlockID)
