@@ -19,6 +19,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- When the currently viewed subagent finishes, the TUI now returns to the main-agent conversation and merges the completion summary into its Delegate card. Subagents that finish in the background do not steal focus from the view currently being inspected.
 - Restored interactive `!` commands now return as `TERMINAL` cards instead of ordinary user messages, including compatible legacy session records. Their model-visible context records the executed `command` and its `output` once, without repeating the original `!command` input or large-paste placeholder.
 - The TUI `USAGE` block now calculates the `Bytes` reduction percentage by comparing the current request’s unreduced context with the context actually sent. Frozen summaries reused by incremental reduction still count toward the current request’s savings instead of reporting only newly reduced bytes.
 - Retry diagnostics now keep persistent logs free of API key prefixes by recording only a suffix plus a stable one-way fingerprint, while the in-memory TUI error panel uses a separately generated masked label for human identification.

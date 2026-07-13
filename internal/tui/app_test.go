@@ -8078,6 +8078,62 @@ func TestAgentDoneEventRefreshesTaskBlockLastTime(t *testing.T) {
 	}
 }
 
+func TestFocusedAgentDoneEventSwitchesToMainAndUpdatesDelegate(t *testing.T) {
+	backend := &sessionControlAgent{
+		focused: "agent-1",
+		messagesByFocus: map[string][]message.Message{
+			"": {
+				{
+					Role: "assistant",
+					ToolCalls: []message.ToolCall{{
+						ID:   "delegate-1",
+						Name: "delegate",
+						Args: json.RawMessage(`{"description":"review tests","agent_type":"reviewer"}`),
+					}},
+				},
+				{Role: "tool", ToolCallID: "delegate-1", Content: `{"status":"started","task_id":"adhoc-7","agent_id":"agent-1"}`},
+			},
+			"agent-1": {
+				{Role: "assistant", Content: "worker history"},
+			},
+		},
+	}
+	m := NewModelWithSize(backend, 140, 24)
+	m.focusedAgentID = "agent-1"
+	m.sidebar.focusedID = "agent-1"
+	m.viewport.SetFilter("agent-1")
+	m.viewport.ReplaceBlocks([]*Block{{ID: 1, Type: BlockAssistant, AgentID: "agent-1", Content: "worker history"}})
+	m.nextBlockID = 2
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentDoneEvent{
+		AgentID: "agent-1",
+		TaskID:  "adhoc-7",
+		Summary: "done",
+	}})
+
+	if m.focusedAgentID != "" {
+		t.Fatalf("focusedAgentID = %q, want main", m.focusedAgentID)
+	}
+	if backend.focused != "" {
+		t.Fatalf("backend focused = %q, want main", backend.focused)
+	}
+	if m.sidebar.focusedID != "main" {
+		t.Fatalf("sidebar focusedID = %q, want main", m.sidebar.focusedID)
+	}
+	task, ok := m.findBlockByLinkedTask("adhoc-7")
+	if !ok {
+		t.Fatal("expected main Delegate block after focus switched back")
+	}
+	if task.DoneSummary != "done" {
+		t.Fatalf("DoneSummary = %q, want done", task.DoneSummary)
+	}
+	for _, block := range m.viewport.visibleBlocks() {
+		if block.Type == BlockStatus && strings.Contains(block.Content, "[agent-1] completed:") {
+			t.Fatalf("unexpected standalone completion block: %q", block.Content)
+		}
+	}
+}
+
 func TestThinkingDurationFrozenOnStreamThinkingEvent(t *testing.T) {
 	// When StreamThinkingEvent (thinking_end) arrives, ThinkingDuration
 	// should be frozen immediately rather than waiting for

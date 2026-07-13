@@ -19,6 +19,9 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		m.maybeShowBackgroundCompletionTitle(evt.AgentID, prevType, agent.ActivityIdle)
 		m.sidebar.UpdateStatus(evt.AgentID, "done")
 		effects.refreshSidebar = true
+		if m.focusedAgentID == evt.AgentID {
+			m.setFocusedAgent("")
+		}
 		if taskBlock, ok := m.findBlockByLinkedTask(evt.TaskID); ok {
 			m.recordTUIDiagnostic("agent-done", "task=%s agent=%s block=%d summary_len=%d", evt.TaskID, evt.AgentID, taskBlock.ID, len(evt.Summary))
 			taskBlock.LinkedAgentID = evt.AgentID
