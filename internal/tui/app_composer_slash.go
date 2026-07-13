@@ -191,6 +191,7 @@ var slashCommands = []slashCommand{
 	{Cmd: "/resume", Desc: "resume previous session"},
 	{Cmd: "/rules", Desc: "manage permission rules"},
 	{Cmd: "/stats", Desc: "usage statistics"},
+	{Cmd: "/rename", Desc: "set or clear session title"},
 }
 
 // slashCompletionLine formats a single completion row. Custom command scope stays

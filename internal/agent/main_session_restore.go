@@ -1053,6 +1053,7 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 // loaded full session details yet.
 type SessionSummary struct {
 	ID                                  string
+	Title                               string
 	MessageCount                        int
 	LastModTime                         time.Time
 	FirstUserMessage                    string
@@ -1087,6 +1088,7 @@ func (a *MainAgent) ListSessionSummaries() ([]SessionSummary, error) {
 		}
 		out = append(out, SessionSummary{
 			ID:                                  s.ID,
+			Title:                               s.Title,
 			MessageCount:                        s.MessageCount,
 			LastModTime:                         s.LastModTime,
 			FirstUserMessage:                    s.FirstUserMessage,

@@ -547,6 +547,14 @@ type SessionRestoredEvent struct{}
 
 func (SessionRestoredEvent) agentEvent() {}
 
+// SessionTitleChangedEvent signals that the current session's custom title
+// changed, so title-bearing UI surfaces can refresh without rebuilding history.
+type SessionTitleChangedEvent struct {
+	Title string
+}
+
+func (SessionTitleChangedEvent) agentEvent() {}
+
 // ForkSessionEvent is emitted after a fork (ee chord) operation completes.
 // Parts holds the content of the forked message so the TUI can load it
 // into the composer for editing.

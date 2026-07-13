@@ -54,6 +54,13 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		effects.invalidateUsage = true
 		effects.addFollowup(func() tea.Msg { return sessionRestoredRebuildMsg{reason: reason} })
 		return true, effects
+	case agent.SessionTitleChangedEvent:
+		if evt.Title != "" {
+			m.setTerminalTitleFromMessage(evt.Title)
+		} else {
+			m.updateTerminalTitleFromRestoredSession()
+		}
+		return true, effects
 	case agent.ConfirmRequestEvent:
 		if evt.ArgsJSON != "" {
 			if block, ok := m.findLastPendingToolBlockByName(evt.ToolName); ok {

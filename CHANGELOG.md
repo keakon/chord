@@ -11,6 +11,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Sessions can now have a custom display title via `/rename <title>`; `/rename` clears it. The title is shown in the session picker and terminal title while the immutable session ID and on-disk directory remain unchanged.
 - `delegate` permission patterns now match `agent_type` consistently across advertised targets, prompts, execution, nested delegation, and hook-modified arguments.
 - The documentation stack now uses Astro 7 and Starlight 0.41 with updated Vite, devalue, js-yaml, yaml, and related transitive dependencies; duplicate documentation ID warnings from the old Astro content loader are gone, and the production dependency audit no longer reports known vulnerabilities.
 - OpenAI Responses and Chat Completions requests now enable `parallel_tool_calls` by default so independent tool calls can be returned together. Model and variant configuration can explicitly disable it when a backend or workflow requires serial calls.

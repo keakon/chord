@@ -4553,6 +4553,9 @@ func TestCaptureOriginalFirstUserHintPrefersRecoverableMessageOverPollutedSummar
 func TestRewriteSessionAfterCompactionPreservesOriginalFirstUserMessage(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
+	if err := recovery.SaveSessionMeta(a.sessionDir, recovery.SessionMeta{Title: "Custom feature title"}); err != nil {
+		t.Fatalf("SaveSessionMeta: %v", err)
+	}
 
 	// Set up initial first user message via usage ledger
 	if a.usageLedger == nil {
@@ -4590,6 +4593,13 @@ func TestRewriteSessionAfterCompactionPreservesOriginalFirstUserMessage(t *testi
 	}
 	if !summary.FirstUserMessageIsCompactionSummary {
 		t.Error("FirstUserMessageIsCompactionSummary = false, want true after compaction")
+	}
+	meta, err := recovery.LoadSessionMeta(a.sessionDir)
+	if err != nil {
+		t.Fatalf("LoadSessionMeta: %v", err)
+	}
+	if meta == nil || meta.Title != "Custom feature title" {
+		t.Fatalf("session title after compaction = %+v, want unchanged custom title", meta)
 	}
 }
 

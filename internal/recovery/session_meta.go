@@ -17,6 +17,7 @@ const sessionMetaFile = "session-meta.json"
 // transcript itself.
 type SessionMeta struct {
 	ForkedFrom string `json:"forked_from,omitempty"`
+	Title      string `json:"title,omitempty"`
 	// Worktree provenance: identifies the chord-managed git worktree the
 	// session ran in. Empty for sessions in a non-worktree (main) project.
 	// All fields populated together by the worktree startup path.
@@ -44,6 +45,7 @@ type ImportMeta struct {
 // avoid surfacing empty metadata files as non-nil to callers.
 func (m SessionMeta) IsZero() bool {
 	return m.ForkedFrom == "" &&
+		m.Title == "" &&
 		m.RepoID == "" &&
 		m.RepoRoot == "" &&
 		m.WorktreeName == "" &&

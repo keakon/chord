@@ -40,6 +40,23 @@ func TestUpdateTerminalTitleFromRestoredSession_PrefersStoredOriginalWhenPresent
 	}
 }
 
+func TestUpdateTerminalTitleFromRestoredSession_PrefersCustomTitle(t *testing.T) {
+	stub := titleRestoreAgentStub{
+		summary: &agent.SessionSummary{
+			Title:                    "Custom roadmap",
+			OriginalFirstUserMessage: "fix login crash",
+		},
+		messages: []message.Message{
+			{Role: "user", Content: "fallback user request"},
+		},
+	}
+	m := NewModelWithSize(stub, 80, 24)
+	m.updateTerminalTitleFromRestoredSession()
+	if got := m.terminalTitleBase; got != "Custom roadmap" {
+		t.Fatalf("terminalTitleBase = %q, want custom title", got)
+	}
+}
+
 func TestUpdateTerminalTitleFromRestoredSession_AllowsUserTextMatchingCompactionHeader(t *testing.T) {
 	stub := titleRestoreAgentStub{
 		summary: &agent.SessionSummary{

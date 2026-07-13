@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/chord/internal/command"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 func (a *MainAgent) expandSlashCommandForModel(content string, parts []message.ContentPart) (string, []message.ContentPart) {
@@ -207,6 +208,10 @@ func (a *MainAgent) tryHandleSlashCommand(content string) bool {
 	}
 	c := strings.TrimSpace(content)
 	switch {
+	case c == "/rename" || strings.HasPrefix(c, "/rename "):
+		a.handleRenameCommand(strings.TrimSpace(strings.TrimPrefix(c, "/rename")))
+		a.setIdleAndDrainPending()
+		return true
 	case c == "/resume":
 		list, _ := a.ListSessionSummaries()
 		a.emitToTUI(SessionSelectEvent{Sessions: list})
@@ -227,5 +232,29 @@ func (a *MainAgent) tryHandleSlashCommand(content string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func (a *MainAgent) handleRenameCommand(arg string) {
+	sessionDir := a.SessionDir()
+	meta, err := recovery.LoadSessionMeta(sessionDir)
+	if err != nil {
+		a.emitToTUI(ToastEvent{Message: "Failed to load session title: " + err.Error(), Level: "error"})
+		return
+	}
+	if meta == nil {
+		meta = &recovery.SessionMeta{}
+	}
+	meta.Title = arg
+	if err := recovery.SaveSessionMeta(sessionDir, *meta); err != nil {
+		a.emitToTUI(ToastEvent{Message: "Failed to save session title: " + err.Error(), Level: "error"})
+		return
+	}
+	a.refreshSessionSummary()
+	a.emitToTUI(SessionTitleChangedEvent{Title: meta.Title})
+	if meta.Title == "" {
+		a.emitToTUI(ToastEvent{Message: "Session title cleared", Level: "info"})
+	} else {
+		a.emitToTUI(ToastEvent{Message: "Session title set to: " + meta.Title, Level: "info"})
 	}
 }

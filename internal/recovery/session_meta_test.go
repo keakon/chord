@@ -14,6 +14,9 @@ func TestSessionMeta_IsZero(t *testing.T) {
 	if (SessionMeta{ForkedFrom: "x"}).IsZero() {
 		t.Errorf("ForkedFrom only reports zero")
 	}
+	if (SessionMeta{Title: "custom title"}).IsZero() {
+		t.Errorf("Title only reports zero")
+	}
 	if (SessionMeta{WorktreeName: "feat"}).IsZero() {
 		t.Errorf("WorktreeName only reports zero")
 	}
@@ -63,6 +66,20 @@ func TestLoadSessionMeta_ForkedFromOnly(t *testing.T) {
 	}
 	if got == nil || got.ForkedFrom != "abc" {
 		t.Fatalf("ForkedFrom-only round-trip failed: %+v", got)
+	}
+}
+
+func TestLoadSessionMeta_TitleOnly(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveSessionMeta(dir, SessionMeta{Title: "custom title"}); err != nil {
+		t.Fatalf("SaveSessionMeta: %v", err)
+	}
+	got, err := LoadSessionMeta(dir)
+	if err != nil {
+		t.Fatalf("LoadSessionMeta: %v", err)
+	}
+	if got == nil || got.Title != "custom title" {
+		t.Fatalf("Title-only round-trip failed: %+v", got)
 	}
 }
 

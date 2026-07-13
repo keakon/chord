@@ -90,10 +90,13 @@ Common workflows:
 - `chord import <source> [file]`: import an external session into Chord's session store
 - `/new`: create a new session in the TUI
 - `/resume`: pick a historical session in the TUI
+- `/rename <title>`: set the current session's display title; bare `/rename` clears it
 
 When exiting, if the current session can be resumed, Chord prints the corresponding resume command.
 
 `/new` resets session state such as conversation history, todos, and usage. Runtime preferences such as the current model pool, service tier, and MCP state stay active until the process exits.
+
+Custom titles are shown in the session picker and terminal title. They are metadata only: `/rename` does not change the session ID, directory, transcript, or resume command.
 
 ### Importing external sessions
 
@@ -165,6 +168,7 @@ These commands are handled by the local runtime and are not sent to the model as
 
 - `/new`: create a new session
 - `/resume`: resume a session
+- `/rename <title>`: set the current session's display title; bare `/rename` clears it without changing the session ID
 - `/models`: view pool status or switch the current view's model pool (`main` view = current main role; `SubAgent` view = that agent)
 - `/models --agent <name> <pool>`: directly set a named agent's pool
 - `/mcp`: open the MCP server selector; `/mcp status` prints status; `/mcp enable|disable <server>` toggles manual servers. Runtime changes take effect for the next LLM request, not the currently in-flight request.

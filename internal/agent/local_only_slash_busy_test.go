@@ -713,6 +713,8 @@ func TestIsTUILocalOnlySlashCommand(t *testing.T) {
 		{"/tier fast", true},
 		{"/tier slow", true},
 		{"/tier standard", true},
+		{"/rename", true},
+		{"/rename release review", true},
 		{"/compact", true},
 		{"/new", false},
 		{"/loop", false},

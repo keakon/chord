@@ -407,6 +407,9 @@ func (m *Model) sessionSelectMaxVisible() int {
 }
 
 func sessionSummaryPreview(summary agent.SessionSummary) string {
+	if summary.Title != "" {
+		return summary.Title
+	}
 	if summary.OriginalFirstUserMessage != "" {
 		return summary.OriginalFirstUserMessage
 	}

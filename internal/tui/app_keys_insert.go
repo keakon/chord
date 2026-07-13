@@ -295,6 +295,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		if m.agent != nil && len(m.attachments) == 0 && !hasInlinePastes {
 			if trimmed == "/models" || strings.HasPrefix(trimmed, "/models ") ||
 				trimmed == "/export" || strings.HasPrefix(trimmed, "/export ") ||
+				trimmed == "/rename" || strings.HasPrefix(trimmed, "/rename ") ||
 				trimmed == "/tier" || strings.HasPrefix(trimmed, "/tier ") ||
 				trimmed == "/yolo" || strings.HasPrefix(trimmed, "/yolo ") ||
 				trimmed == "/compact" || trimmed == "/loop" || trimmed == "/loop on" || strings.HasPrefix(trimmed, "/loop on ") || trimmed == "/loop off" {

@@ -103,6 +103,7 @@ func buildSessionSummaryForDir(sessionDir string, locked bool) *SessionSummary {
 	}
 	if meta, err := recovery.LoadSessionMeta(sessionDir); err == nil && meta != nil {
 		summary.ForkedFrom = meta.ForkedFrom
+		summary.Title = meta.Title
 	}
 	return summary
 }

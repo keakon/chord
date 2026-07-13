@@ -58,6 +58,14 @@ func newSessionSelectTestModel(options []agent.SessionSummary) Model {
 }
 
 func TestSessionSummaryPreviewUsesCurrentFieldsOnly(t *testing.T) {
+	customTitle := agent.SessionSummary{
+		Title:                    "Custom roadmap",
+		OriginalFirstUserMessage: "original request",
+	}
+	if got := sessionSelectPreviewText(customTitle); got != "Custom roadmap" {
+		t.Fatalf("preview with custom title = %q, want custom title", got)
+	}
+
 	userTypedHeader := agent.SessionSummary{
 		OriginalFirstUserMessage: "[Context Summary]\n## Goal\nuser typed this",
 	}

@@ -90,10 +90,13 @@ Chord 为当前项目维护持久化会话。
 - `chord import <source> [file]`：导入外部会话到 Chord（支持 `opencode`/`codex`/`claude`）
 - `/new`：在 TUI 内创建新会话
 - `/resume`：在 TUI 内选择历史会话
+- `/rename <标题>`：设置当前会话的显示标题；单独执行 `/rename` 会清空标题
 
 退出时若当前会话可恢复，Chord 会打印对应的恢复命令。
 
 `/new` 会重置历史消息、待办事项和用量等会话状态。当前模型池、服务等级和 MCP 状态等运行时偏好会继续生效，直到进程退出。
+
+自定义标题会显示在会话选择器和终端标题中，只属于显示元数据；`/rename` 不会改变 session ID、目录、对话记录或恢复命令。
 
 ### 导入外部会话
 
@@ -165,6 +168,7 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 
 - `/new`：新建会话
 - `/resume`：恢复会话
+- `/rename <标题>`：设置当前会话的显示标题；单独执行 `/rename` 会清空标题，但不会改变 session ID
 - `/models`：查看模型池状态或切换当前视图对象的模型池（main 视图 = 当前主角色；SubAgent 视图 = 该 agent）
 - `/models --agent <name> <pool>`：直接设置指定 agent 的模型池
 - `/mcp`：打开 MCP server 选择器；`/mcp status` 输出状态；`/mcp enable|disable <server>` 可切换手动 server。运行时切换会在下一次 LLM 请求生效，不影响当前正在进行的请求。

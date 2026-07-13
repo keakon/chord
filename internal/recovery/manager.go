@@ -416,6 +416,7 @@ func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) err
 type SessionInfo struct {
 	ID                                  string    // directory name (e.g. Unix millisecond timestamp)
 	Path                                string    // full path to session directory
+	Title                               string    // user-defined title, when set
 	MessageCount                        int       // total messages in main.jsonl
 	LastModTime                         time.Time // last write to main.jsonl
 	FirstUserMessage                    string    // preview of first user message (truncated, newlines replaced)
@@ -481,14 +482,17 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 			return nil, fmt.Errorf("check session lock for %s: %w", entry.Name(), err)
 		}
 		forkedFrom := ""
+		title := ""
 		if meta, err := LoadSessionMeta(sessionPath); err != nil {
 			return nil, fmt.Errorf("load session meta for %s: %w", entry.Name(), err)
 		} else if meta != nil {
 			forkedFrom = meta.ForkedFrom
+			title = meta.Title
 		}
 		list = append(list, SessionInfo{
 			ID:                                  entry.Name(),
 			Path:                                sessionPath,
+			Title:                               title,
 			MessageCount:                        messageCount,
 			LastModTime:                         lastModTime,
 			FirstUserMessage:                    firstUser,

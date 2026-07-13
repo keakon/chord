@@ -551,6 +551,10 @@ func TestHandleForkSessionCommandSeedsPrefixAndRestoresDerivedState(t *testing.T
 	a.ctxMgr.SetLastTotalContextTokens(999)
 	a.usageTracker.RestoreStats(analytics.SessionStats{InputTokens: 42, LLMCalls: 1})
 	oldSessionDir := a.sessionDir
+	if err := recovery.SaveSessionMeta(oldSessionDir, recovery.SessionMeta{Title: "Old custom title"}); err != nil {
+		t.Fatalf("SaveSessionMeta(old): %v", err)
+	}
+	a.refreshSessionSummary()
 
 	a.handleForkSessionCommand(2)
 
@@ -779,6 +783,15 @@ func TestHandleNewSessionCommandStartsFreshSessionAndIgnoresLateSubAgent(t *test
 	}
 	if summary := a.GetSessionSummary(); summary == nil || summary.ID != filepath.Base(a.sessionDir) {
 		t.Fatalf("GetSessionSummary() = %+v, want current session id %q", summary, filepath.Base(a.sessionDir))
+	} else if summary.Title != "" {
+		t.Fatalf("new session inherited custom title %q", summary.Title)
+	}
+	meta, err := recovery.LoadSessionMeta(a.sessionDir)
+	if err != nil {
+		t.Fatalf("LoadSessionMeta(new): %v", err)
+	}
+	if meta != nil && meta.Title != "" {
+		t.Fatalf("new session metadata inherited custom title: %+v", meta)
 	}
 	if got := len(a.GetMessages()); got != 0 {
 		t.Fatalf("len(GetMessages()) = %d, want 0", got)
@@ -1030,5 +1043,53 @@ func TestHandleForkSessionCommandTailEditDoesNotDrainSubAgentInbox(t *testing.T)
 	}
 	if got := len(a.subAgentInbox.normal); got != 1 {
 		t.Fatalf("len(subAgentInbox.normal) = %d, want queued mailbox preserved", got)
+	}
+}
+
+func TestHandleRenameCommandPreservesMetadataAndUpdatesSessionSummary(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	originalID := filepath.Base(a.SessionDir())
+	if err := recovery.SaveSessionMeta(a.SessionDir(), recovery.SessionMeta{ForkedFrom: "parent-session"}); err != nil {
+		t.Fatalf("SaveSessionMeta(): %v", err)
+	}
+
+	a.handleRenameCommand("Release review")
+
+	meta, err := recovery.LoadSessionMeta(a.SessionDir())
+	if err != nil {
+		t.Fatalf("LoadSessionMeta(): %v", err)
+	}
+	if meta == nil || meta.Title != "Release review" || meta.ForkedFrom != "parent-session" {
+		t.Fatalf("metadata after rename = %+v", meta)
+	}
+	if got := filepath.Base(a.SessionDir()); got != originalID {
+		t.Fatalf("session ID after rename = %q, want %q", got, originalID)
+	}
+	if summary := a.GetSessionSummary(); summary == nil || summary.Title != "Release review" || summary.ID != originalID {
+		t.Fatalf("session summary after rename = %+v", summary)
+	}
+
+	event := <-a.Events()
+	changed, ok := event.(SessionTitleChangedEvent)
+	if !ok || changed.Title != "Release review" {
+		t.Fatalf("first event = %#v, want SessionTitleChangedEvent", event)
+	}
+	toast := waitForToastEvent(t, a.Events(), "Session title set to: Release review")
+	if toast.Level != "info" {
+		t.Fatalf("toast level = %q, want info", toast.Level)
+	}
+
+	a.handleRenameCommand("")
+	meta, err = recovery.LoadSessionMeta(a.SessionDir())
+	if err != nil {
+		t.Fatalf("LoadSessionMeta() after clear: %v", err)
+	}
+	if meta == nil || meta.Title != "" || meta.ForkedFrom != "parent-session" {
+		t.Fatalf("metadata after clear = %+v", meta)
+	}
+	event = <-a.Events()
+	changed, ok = event.(SessionTitleChangedEvent)
+	if !ok || changed.Title != "" {
+		t.Fatalf("clear event = %#v, want empty SessionTitleChangedEvent", event)
 	}
 }

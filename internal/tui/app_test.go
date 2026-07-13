@@ -1303,12 +1303,18 @@ func TestSlashCompletionShowsTierCommandMatchingServiceTierShortcut(t *testing.T
 		t.Helper()
 		m := NewModel(backend)
 		matches := m.getSlashCompletions("/t")
-		if want == "" {
-			if len(matches) != 0 {
-				t.Fatalf("matches = %#v, want none", matches)
+		tierMatches := matches[:0]
+		for _, match := range matches {
+			if strings.HasPrefix(match.Cmd, "/tier") {
+				tierMatches = append(tierMatches, match)
 			}
-		} else if len(matches) != 1 || matches[0].Cmd != want {
-			t.Fatalf("matches = %#v, want %s", matches, want)
+		}
+		if want == "" {
+			if len(tierMatches) != 0 {
+				t.Fatalf("tier matches = %#v, want none", tierMatches)
+			}
+		} else if len(tierMatches) != 1 || tierMatches[0].Cmd != want {
+			t.Fatalf("tier matches = %#v, want %s", tierMatches, want)
 		}
 
 		m.mode = ModeInsert
@@ -1347,9 +1353,12 @@ func TestSlashCompletionShowsFastCommandWhenSubAgentFocused(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{}, 100, 30)
 	m.focusedAgentID = "sub-1"
 	matches := m.getSlashCompletions("/t")
-	if len(matches) != 1 || matches[0].Cmd != "/tier fast" {
-		t.Fatalf("matches = %#v, want /tier fast when subagent is focused", matches)
+	for _, match := range matches {
+		if match.Cmd == "/tier fast" {
+			return
+		}
 	}
+	t.Fatalf("matches = %#v, want /tier fast when subagent is focused", matches)
 }
 
 func TestSlashCompletionHidesYoloCommandsWhenSubAgentFocused(t *testing.T) {

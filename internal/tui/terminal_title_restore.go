@@ -2,8 +2,8 @@ package tui
 
 import "github.com/keakon/chord/internal/message"
 
-// updateTerminalTitleFromRestoredSession extracts the first user message from
-// the restored session and updates the terminal title. It is called after
+// updateTerminalTitleFromRestoredSession extracts the custom title or first
+// user message from the restored session and updates the terminal title. It is called after
 // sessionRestoredRebuildMsg.
 //
 // Compaction handling:
@@ -23,6 +23,10 @@ func (m *Model) updateTerminalTitleFromRestoredSession() {
 	// it is user-authored. Do not infer compaction from text content: a real user
 	// may legitimately start a prompt with the compaction header text.
 	if summary := m.agent.GetSessionSummary(); summary != nil {
+		if summary.Title != "" {
+			m.setTerminalTitleFromMessage(summary.Title)
+			return
+		}
 		if summary.OriginalFirstUserMessage != "" {
 			m.setTerminalTitleFromMessage(summary.OriginalFirstUserMessage)
 			return
