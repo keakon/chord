@@ -56,11 +56,8 @@ func formatErrorRecordLines(rec agentErrorRecord, width int) []string {
 	} else if rec.Model != "" {
 		header += fmt.Sprintf("  %s", rec.Model)
 	}
-	if rec.KeySuffix != "" {
-		header += fmt.Sprintf("  key=%s", rec.KeySuffix)
-	}
-	if rec.KeyFP != "" {
-		header += fmt.Sprintf("  fp=%s", rec.KeyFP)
+	if rec.MaskedKey != "" {
+		header += fmt.Sprintf("  key=%s", rec.MaskedKey)
 	}
 	if rec.Email != "" {
 		header += fmt.Sprintf("  email=%s", rec.Email)

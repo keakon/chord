@@ -310,7 +310,7 @@ func (p *ProviderConfig) persistAuthStateForKey(key string, snap *ratelimit.KeyR
 		return !config.EqualOAuthStateRecord(before, *record), nil
 	})
 	if err != nil {
-		log.Warnf("failed to persist auth state provider=%v key_suffix=%v error=%v", p.name, keySuffix(key), err)
+		log.Warnf("failed to persist auth state provider=%v key_id=%v error=%v", p.name, keyLogID(key), err)
 		return
 	}
 	if !changed || updated == nil {

@@ -89,7 +89,7 @@ chord --worktree feat-auth --continue
 
 在基础配置完成后再用它登录。该命令用于 `preset: codex` 的 OAuth provider，并把凭据存入 `~/.config/chord/auth.yaml`。Chord 还会把机器维护的共享 OAuth 运行时状态保存在 `~/.config/chord/auth.state.json`，这样额度 / reset 缓存不会频繁改写 `auth.yaml`。不带 provider 名时，Chord 自动选择唯一的 codex provider；多个时会让你选。首次向导也可以在初始化过程中直接完成这条 Codex OAuth 登录链路；`chord auth codex` 仍然适合后续重新登录或补登录。
 
-正常模型请求过程中，如果 OAuth 返回 HTTP 401/403 `token_invalidated`、token revoked、refresh token 过期或账号停用等错误，Chord 会把它视为永久凭据故障。匹配的 OAuth 运行时状态会被标记为已过期、已停用或已失效（优先使用账号 / 用户元数据，其次回退到 refresh token 哈希），该凭据会从可选 key 池中移除，并刷新 TUI 侧边栏的 `Keys` 计数。错误面板的重试记录会显示 OAuth 邮箱 / 账号和短 key 指纹（`fp=...`），因为展示的 key 后缀只是脱敏提示，不保证唯一。需要恢复账号时重新运行 `chord auth` 登录；需要移除不可用残留时运行 `chord auth state clean`。
+正常模型请求过程中，如果 OAuth 返回 HTTP 401/403 `token_invalidated`、token revoked、refresh token 过期或账号停用等错误，Chord 会把它视为永久凭据故障。匹配的 OAuth 运行时状态会被标记为已过期、已停用或已失效（优先使用账号 / 用户元数据，其次回退到 refresh token 哈希），该凭据会从可选 key 池中移除，并刷新 TUI 侧边栏的 `Keys` 计数。错误面板的重试记录会显示 OAuth 邮箱 / 账号，以及打码后的 `key=...` 标识（展示少量前缀和后缀，便于人工区分）。需要恢复账号时重新运行 `chord auth` 登录；需要移除不可用残留时运行 `chord auth state clean`。
 
 ### Flag
 

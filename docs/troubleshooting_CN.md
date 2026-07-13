@@ -53,7 +53,7 @@ chord doctor models --pool thinking
 
 如果要判断哪些 key 或模型反复限流 / 报错：
 
-- 在 TUI 的 Normal 模式下按 `Ctrl+E` 打开错误面板；这里会记录包含 429 在内的重试错误，并显示 provider、model 和 key 后缀。
+- 在 TUI 的 Normal 模式下按 `Ctrl+E` 打开错误面板；这里会记录包含 429 在内的重试错误，并显示 provider、model 和打码后的 `key=...` 标识。
 - 看错误面板里的模式：如果总是同一个 key 返回 429，通常是这个 key 被限流；如果同一 provider 的多个 key 都返回 503，更可能是 provider 侧异常。
 
 界面说明：

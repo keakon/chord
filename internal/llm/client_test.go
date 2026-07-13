@@ -1997,7 +1997,7 @@ func TestClientCompleteStreamVisibleAuthInvalidatedRotatesKey(t *testing.T) {
 		if delta.Type == message.StreamDeltaKeyInvalidated && delta.AccountID == "acc-1" && delta.Email == "user@example.com" {
 			foundInvalidatedDelta = true
 		}
-		if delta.Type == message.StreamDeltaRetryError && delta.KeySuffix == keySuffix("oauth-key-1") && delta.KeyFingerprint == keyFingerprint("oauth-key-1") && delta.AccountID == "acc-1" && delta.Email == "user@example.com" {
+		if delta.Type == message.StreamDeltaRetryError && delta.MaskedKey == maskedKey("oauth-key-1") && delta.AccountID == "acc-1" && delta.Email == "user@example.com" {
 			foundRetryErrorIdentity = true
 		}
 	}
@@ -2006,6 +2006,45 @@ func TestClientCompleteStreamVisibleAuthInvalidatedRotatesKey(t *testing.T) {
 	}
 	if !foundRetryErrorIdentity {
 		t.Fatalf("expected retry_error delta with OAuth identity metadata, got %#v", deltas)
+	}
+}
+
+func TestMaskedKeyProtectsShortCredentials(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		want string
+	}{
+		{name: "empty", key: "", want: ""},
+		{name: "short", key: "short-key", want: "****"},
+		{name: "below disclosure threshold", key: "1234567890123456789", want: "****"},
+		{name: "at disclosure threshold", key: "12345678901234567890", want: "1234...7890"},
+		{name: "long provider key", key: "sk-example-provider-secret-xyz9", want: "sk-e...xyz9"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := maskedKey(tt.key); got != tt.want {
+				t.Fatalf("maskedKey(%q) = %q, want %q", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestKeyLogIDDoesNotExposeCredentialPrefix(t *testing.T) {
+	key := "sk-example-provider-secret-xyz9"
+	got := keyLogID(key)
+	if strings.Contains(got, "sk-e") || strings.Contains(got, key) {
+		t.Fatalf("keyLogID(%q) exposed credential prefix: %q", key, got)
+	}
+	if !strings.Contains(got, "...xyz9/fp=") {
+		t.Fatalf("keyLogID(%q) = %q, want suffix and fingerprint", key, got)
+	}
+	if got2 := keyLogID(key); got2 != got {
+		t.Fatalf("keyLogID is unstable: %q then %q", got, got2)
+	}
+	if other := keyLogID("other-example-provider-secret-xyz9"); other == got {
+		t.Fatalf("same-suffix credentials share keyLogID %q", got)
 	}
 }
 

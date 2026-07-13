@@ -45,7 +45,7 @@ Each error record shows:
 
 - Timestamp (HH:MM:SS)
 - Provider and model (e.g., `Anthropic/claude-opus-4-8`)
-- API key suffix (e.g., `key=...xyz9`, last 4 characters for safe identification)
+- Masked API key label (e.g., `key=sk-a...xyz9`, showing a short prefix and suffix for safe identification)
 - HTTP status code (when available)
 - Error code and type (when provided by the API)
 - Error message (wrapped to panel width)
@@ -53,7 +53,7 @@ Each error record shows:
 Example error entry:
 
 ```text
-14:25:38  Anthropic/claude-opus-4-8  key=...xyz9  HTTP 503  code=model_not_found
+14:25:38  Anthropic/claude-opus-4-8  key=sk-a...xyz9  HTTP 503  code=model_not_found
   No available channel for model sample/model under group default
 ```
 

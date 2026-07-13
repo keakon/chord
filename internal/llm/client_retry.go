@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +19,7 @@ type visibleStreamTracker struct {
 	visible        bool
 	onVisibleStart func() // called each time a visible streaming attempt begins; may be nil
 	providerModel  string
-	keySuffix      string
+	keyLogID       string
 	keyAttempt     int
 	keyCount       int
 }
@@ -32,7 +31,7 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 	switch delta.Type {
 	case message.StreamDeltaText, message.StreamDeltaThinking, message.StreamDeltaToolUseStart, message.StreamDeltaToolUseDelta, message.StreamDeltaToolUseEnd:
 		if !t.visible {
-			log.Debugf("LLM first visible stream delta delta_type=%v model=%v key_suffix=%v key_attempt=%v key_total=%v", delta.Type, t.providerModel, t.keySuffix, t.keyAttempt, t.keyCount)
+			log.Debugf("LLM first visible stream delta delta_type=%v model=%v key_id=%v key_attempt=%v key_total=%v", delta.Type, t.providerModel, t.keyLogID, t.keyAttempt, t.keyCount)
 			t.visible = true
 			if t.onVisibleStart != nil {
 				t.onVisibleStart()
@@ -44,7 +43,7 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 			if delta.Rollback != nil {
 				reason = delta.Rollback.Reason
 			}
-			log.Debugf("LLM visible stream rollback model=%v key_suffix=%v key_attempt=%v key_total=%v reason=%v", t.providerModel, t.keySuffix, t.keyAttempt, t.keyCount, reason)
+			log.Debugf("LLM visible stream rollback model=%v key_id=%v key_attempt=%v key_total=%v reason=%v", t.providerModel, t.keyLogID, t.keyAttempt, t.keyCount, reason)
 		}
 		t.visible = false
 	}
@@ -259,27 +258,18 @@ func emitStreamStatusDelta(cb StreamCallback, status message.StatusDelta) {
 	cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &status})
 }
 
-func keyFingerprint(key string) string {
-	if key == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(key))
-	return fmt.Sprintf("%x", sum[:4])
-}
-
-func emitRetryError(cb StreamCallback, err error, provider, model, keySuffix, keyFingerprint, accountID, email string) {
+func emitRetryError(cb StreamCallback, err error, provider, model, maskedKey, accountID, email string) {
 	if cb == nil || err == nil {
 		return
 	}
 	cb(message.StreamDelta{
-		Type:           message.StreamDeltaRetryError,
-		Err:            err,
-		Provider:       provider,
-		Model:          model,
-		KeySuffix:      keySuffix,
-		KeyFingerprint: keyFingerprint,
-		AccountID:      accountID,
-		Email:          email,
+		Type:      message.StreamDeltaRetryError,
+		Err:       err,
+		Provider:  provider,
+		Model:     model,
+		MaskedKey: maskedKey,
+		AccountID: accountID,
+		Email:     email,
 	})
 }
 
@@ -294,7 +284,7 @@ func emitRetryErrorForKey(cb StreamCallback, err error, provider *ProviderConfig
 			email = info.Email
 		}
 	}
-	emitRetryError(cb, err, providerName, model, keySuffix(key), keyFingerprint(key), accountID, email)
+	emitRetryError(cb, err, providerName, model, maskedKey(key), accountID, email)
 }
 
 func emitKeyCooldownDeltas(cb StreamCallback, result markKeyCooldownResult) {
@@ -318,16 +308,16 @@ func isAuthAPIStatusError(err error) bool {
 }
 
 func newStreamAttemptTracker(cb StreamCallback, target streamRetryTarget, apiKey, modelRef, attemptReason string, keyAttempt, keyCount int) *visibleStreamTracker {
-	keySuffixValue := keySuffix(apiKey)
+	keyLogIDValue := keyLogID(apiKey)
 	return &visibleStreamTracker{
 		inner:         cb,
 		providerModel: modelRef,
-		keySuffix:     keySuffixValue,
+		keyLogID:      keyLogIDValue,
 		keyAttempt:    keyAttempt + 1,
 		keyCount:      keyCount,
 		onVisibleStart: func() {
 			target.provider.MarkKeySuccess(apiKey)
-			log.Debugf("LLM emitting streaming status after visible output provider=%v model=%v key_suffix=%v key_attempt=%v key_total=%v", target.provider.Name(), modelRef, keySuffixValue, keyAttempt+1, keyCount)
+			log.Debugf("LLM emitting streaming status after visible output provider=%v model=%v key_id=%v key_attempt=%v key_total=%v", target.provider.Name(), modelRef, keyLogIDValue, keyAttempt+1, keyCount)
 			if cb == nil {
 				return
 			}
@@ -513,7 +503,7 @@ func (c *Client) completeStreamTarget(
 			break
 		}
 
-		log.Debugf("LLM request provider=%v model=%v key_suffix=%v max_tokens=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), effectiveMaxTokens)
+		log.Debugf("LLM request provider=%v model=%v key_id=%v max_tokens=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), effectiveMaxTokens)
 		modelRef := t.displayRef()
 		attemptReason := ""
 		if t.isFallback && status != nil {
@@ -570,7 +560,7 @@ func (c *Client) completeStreamTarget(
 			}
 			emitKeyCooldownDeltas(cb, cooldownResult)
 			if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
-				log.Errorf("terminal API error, giving up provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+				log.Errorf("terminal API error, giving up provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
 				return result, lastInputTokens, err
 			}
 			cooldownApplied := cooldownResult.cooldownApplied
@@ -601,7 +591,7 @@ func (c *Client) completeStreamTarget(
 					if hasTerminalNonRetriable400Signal(apiErrPtr) {
 						retriable = false
 						if fallbackEligible && fallbackEnabled && len(fallbackModels) > 0 {
-							log.Warnf("model incompatible 400, trying fallback provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+							log.Warnf("model incompatible 400, trying fallback provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
 							emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
 							modelDone = true
 							break
@@ -614,12 +604,12 @@ func (c *Client) completeStreamTarget(
 			}
 			if !retriable && isTimeoutLikeError(err) {
 				t.provider.MarkRecovering(apiKey)
-				log.Warnf("invisible timeout before visible output; marking current key recovering and skipping remaining provider targets provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+				log.Warnf("invisible timeout before visible output; marking current key recovering and skipping remaining provider targets provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
 				result.skipProvider = true
 			}
 
 			if !retriable {
-				log.Warnf("non-key-retriable LLM error provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+				log.Warnf("non-key-retriable LLM error provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
 				// Use the narrower request/parameter check here: the broader terminal
 				// 400 handling above already routes model/protocol incompatibility to
 				// fallback when available, while official API 400s still stop directly.
@@ -640,7 +630,7 @@ func (c *Client) completeStreamTarget(
 				t.provider.MarkRecovering(keyForRotationCooldown)
 			}
 
-			log.Warnf("retriable LLM error, trying next key provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+			log.Warnf("retriable LLM error, trying next key provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
 			emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
 			if cb != nil && keyAttempt+1 < keyCount {
 				if err := abortIfCancelled(); err != nil {
@@ -658,7 +648,7 @@ func (c *Client) completeStreamTarget(
 			}
 			emitKeyCooldownDeltas(cb, cooldownResult)
 			if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
-				log.Errorf("terminal API error after visible output, giving up provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+				log.Errorf("terminal API error after visible output, giving up provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
 				return result, lastInputTokens, err
 			}
 			keyForRotationCooldown := apiKey
@@ -671,7 +661,7 @@ func (c *Client) completeStreamTarget(
 			if !cooldownResult.cooldownApplied && keyForRotationCooldown != "" {
 				t.provider.MarkRecovering(keyForRotationCooldown)
 			}
-			log.Warnf("auth error after visible output, trying next key provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+			log.Warnf("auth error after visible output, trying next key provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
 			emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
 			if cb != nil && keyAttempt+1 < keyCount {
 				if err := abortIfCancelled(); err != nil {
@@ -686,13 +676,13 @@ func (c *Client) completeStreamTarget(
 			status.FallbackReason = classifyFallbackReason(err)
 		}
 		if IsContextLengthExceeded(err) {
-			log.Warnf("context length exceeded; trying next model provider=%v model=%v key_suffix=%v input_tokens_est=%v context_limit=%v input_limit=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), estimateRequestInputTokens(systemPrompt, targetMessages, tools), t.contextLimit, t.inputLimit, err)
+			log.Warnf("context length exceeded; trying next model provider=%v model=%v key_id=%v input_tokens_est=%v context_limit=%v input_limit=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), estimateRequestInputTokens(systemPrompt, targetMessages, tools), t.contextLimit, t.inputLimit, err)
 			result.setLastErr(t.provider, err)
 			oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
 			modelDone = true
 			break
 		}
-		log.Warnf("stream interrupted after visible output; retrying current key provider=%v model=%v key_suffix=%v error=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), err)
+		log.Warnf("stream interrupted after visible output; retrying current key provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
 		emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
 		if cb != nil {
 			if err := abortIfCancelled(); err != nil {
@@ -711,7 +701,7 @@ func (c *Client) completeStreamTarget(
 			if resp.StopReason == "length" || resp.StopReason == "max_tokens" {
 				emptyErr = &EmptyTruncationError{}
 			}
-			log.Warnf("model returned empty response, trying next key provider=%v model=%v key_suffix=%v stop_reason=%v", t.provider.Name(), t.modelID, keySuffix(apiKey), resp.StopReason)
+			log.Warnf("model returned empty response, trying next key provider=%v model=%v key_id=%v stop_reason=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), resp.StopReason)
 			result.setLastErr(t.provider, emptyErr)
 			t.provider.MarkRecovering(apiKey)
 			tracker.EmitRollback(emptyErr.Error())

@@ -459,17 +459,16 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		// Confirmed toasts must be keyed off the model that actually emitted output.
 		emitConfirmedSwitchToast(confirmedRef, confirmedReason)
 	}
-	streamReducer.onRetryError = func(err error, provider, model, keySuffix, keyFingerprint, accountID, email string) {
+	streamReducer.onRetryError = func(err error, provider, model, maskedKey, accountID, email string) {
 		a.emitToTUI(ErrorEvent{
-			Err:            err,
-			AgentID:        a.instanceID,
-			Silent:         true,
-			Provider:       provider,
-			Model:          model,
-			Key:            keySuffix,
-			KeyFingerprint: keyFingerprint,
-			AccountID:      accountID,
-			Email:          email,
+			Err:       err,
+			AgentID:   a.instanceID,
+			Silent:    true,
+			Provider:  provider,
+			Model:     model,
+			Key:       maskedKey,
+			AccountID: accountID,
+			Email:     email,
 		})
 	}
 	streamReducer.onError = func(text string) {

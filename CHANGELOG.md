@@ -18,6 +18,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Retry diagnostics now keep persistent logs free of API key prefixes by recording only a suffix plus a stable one-way fingerprint, while the in-memory TUI error panel uses a separately generated masked label for human identification.
 - Transcript search now validates visible rendered text across card types, expands collapsed matches, handles Markdown formatting and HTML entities, and avoids hidden or truncated false matches.
 - Done tool guidance now makes direct assistant text the mandatory default for ordinary completion. The model may call `done` only when the active runtime or workflow explicitly requires a tool-based completion signal, such as a loop exit, and the report schema no longer implies that every finished task requires the tool.
 - Newly created session directories and internal persisted artifacts now use owner-only permissions (`0700` for directories and `0600` for files), preventing transcripts, snapshots, subagent mailboxes, artifacts, task state, and compaction history from being exposed to other local users by default.
@@ -103,7 +104,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - TUI palette contrast is improved with widened card-surface greyscale steps and adjusted secondary foreground colors, making tool cards and assistant messages easier to distinguish.
 - Streaming render is more efficient during long model responses, providing smoother text appearance.
 - The resume session picker now shows an aligned `Msgs` column so large and small sessions are easier to distinguish before opening them.
-- The TUI now includes a `Ctrl+E` error panel that records retry and final errors for the active conversation, clearing the list when `/new` starts a fresh conversation. It includes provider, model, key suffix, HTTP status, and structured API code/type fields where available.
+- The TUI now includes a `Ctrl+E` error panel that records retry and final errors for the active conversation, clearing the list when `/new` starts a fresh conversation. It includes provider, model, a masked `key=...` label, HTTP status, and structured API code/type fields where available.
 - Permission confirmation rule suggestions now include the matched ask rules for compound Shell commands, and the rule picker pre-selects every matched ask rule so one approval can save all blocking rules.
 - `question` now tolerates a single question object in place of the documented `questions` array, mirroring the scalar-to-list tolerance used by `grep` and `glob`.
 - Request-level context reduction now protects recent high-risk tool outputs such as diffs, failed assertions, stack traces, and permission/security errors from being pruned solely because a long single-turn tool chain advances effective age. The default `context.reduction.read_like_age_turns` is also raised from 1 to 2 based on recent-session statistics, preserving freshly read file context one effective turn longer at low observed token cost.

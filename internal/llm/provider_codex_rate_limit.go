@@ -523,7 +523,7 @@ func (p *ProviderConfig) handleCodexWarmupAuthFailure(key string, err error) boo
 	if apiErr.StatusCode != http.StatusUnauthorized && apiErr.StatusCode != http.StatusForbidden {
 		return false
 	}
-	log.Debugf("codex usage probe auth failure ignored for key health provider=%v key_suffix=%v status=%v code=%v error=%v", p.name, keySuffix(key), apiErr.StatusCode, apiErr.Code, err)
+	log.Debugf("codex usage probe auth failure ignored for key health provider=%v key_id=%v status=%v code=%v error=%v", p.name, keyLogID(key), apiErr.StatusCode, apiErr.Code, err)
 	return true
 }
 

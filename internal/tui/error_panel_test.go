@@ -14,7 +14,7 @@ import (
 func TestRecordAgentErrorExtractsAPIErrorFields(t *testing.T) {
 	m := NewModel(&sessionControlAgent{})
 	apiErr := &llm.APIError{StatusCode: 429, Code: "rate_limit", Type: "rate_limit_error", Message: "slow down"}
-	m.recordAgentError("", fmt.Errorf("request failed: %w", apiErr), "OpenAI", "gpt-4", "...abc1", "", "", "", false)
+	m.recordAgentError("", fmt.Errorf("request failed: %w", apiErr), "OpenAI", "gpt-4", "open...abc1", "", "", false)
 
 	records := m.snapshotAgentErrors()
 	if len(records) != 1 {
@@ -37,7 +37,7 @@ func TestRecordAgentErrorExtractsAPIErrorFields(t *testing.T) {
 
 func TestRecordAgentErrorPlainError(t *testing.T) {
 	m := NewModel(&sessionControlAgent{})
-	m.recordAgentError("sub-1", fmt.Errorf("connection timeout"), "", "", "", "", "", "", false)
+	m.recordAgentError("sub-1", fmt.Errorf("connection timeout"), "", "", "", "", "", false)
 
 	records := m.snapshotAgentErrors()
 	if len(records) != 1 {
@@ -59,14 +59,13 @@ func TestSilentRetryErrorRecordsPanelWithoutConversationBlock(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{}, 100, 30)
 	apiErr := &llm.APIError{StatusCode: 503, Code: "overloaded", Type: "server_error", Message: "try later"}
 	m.handleMiscAgentEvent(agent.ErrorEvent{
-		Err:            apiErr,
-		Silent:         true,
-		Provider:       "OpenAI",
-		Model:          "gpt-4.1",
-		Key:            "...abc1",
-		KeyFingerprint: "fp123456",
-		AccountID:      "acc-1",
-		Email:          "user@example.com",
+		Err:       apiErr,
+		Silent:    true,
+		Provider:  "OpenAI",
+		Model:     "gpt-4.1",
+		Key:       "open...abc1",
+		AccountID: "acc-1",
+		Email:     "user@example.com",
 	})
 
 	records := m.snapshotAgentErrors()
@@ -74,7 +73,7 @@ func TestSilentRetryErrorRecordsPanelWithoutConversationBlock(t *testing.T) {
 		t.Fatalf("records = %d, want 1", len(records))
 	}
 	rec := records[0]
-	if rec.Provider != "OpenAI" || rec.Model != "gpt-4.1" || rec.KeySuffix != "...abc1" || rec.KeyFP != "fp123456" || rec.Email != "user@example.com" || rec.StatusCode != 503 {
+	if rec.Provider != "OpenAI" || rec.Model != "gpt-4.1" || rec.MaskedKey != "open...abc1" || rec.Email != "user@example.com" || rec.StatusCode != 503 {
 		t.Fatalf("record = %+v, want retry error metadata", rec)
 	}
 	if blocks := m.viewport.visibleBlocks(); len(blocks) != 0 {
@@ -93,7 +92,7 @@ func TestFinalErrorAfterMatchingRetryRecordedOnce(t *testing.T) {
 		Silent:   true,
 		Provider: "OpenAI",
 		Model:    "gpt-4.1",
-		Key:      "...abc1",
+		Key:      "open...abc1",
 	})
 	m.handleMiscAgentEvent(agent.ErrorEvent{Err: apiErr})
 
@@ -102,7 +101,7 @@ func TestFinalErrorAfterMatchingRetryRecordedOnce(t *testing.T) {
 		t.Fatalf("records = %d, want 1 (final error must not duplicate the retry record)", len(records))
 	}
 	// The richer retry record (with provider/model/key) is the one kept.
-	if rec := records[0]; rec.Provider != "OpenAI" || rec.Model != "gpt-4.1" || rec.KeySuffix != "...abc1" {
+	if rec := records[0]; rec.Provider != "OpenAI" || rec.Model != "gpt-4.1" || rec.MaskedKey != "open...abc1" {
 		t.Fatalf("record = %+v, want retry metadata preserved", rec)
 	}
 	// The final error still renders as a conversation block.
@@ -178,7 +177,7 @@ func TestVisibleErrorRecordsPanelAndConversationBlock(t *testing.T) {
 func TestRecordAgentErrorRingBufferEvictsOldest(t *testing.T) {
 	m := NewModel(&sessionControlAgent{})
 	for i := 0; i < maxAgentErrors+5; i++ {
-		m.recordAgentError("", fmt.Errorf("err %d", i), "", "", "", "", "", "", false)
+		m.recordAgentError("", fmt.Errorf("err %d", i), "", "", "", "", "", false)
 	}
 
 	records := m.snapshotAgentErrors()
@@ -196,7 +195,7 @@ func TestRecordAgentErrorRingBufferEvictsOldest(t *testing.T) {
 
 func TestSessionSwitchClearsAgentErrorsForNewAndResumeButForkKeepsThem(t *testing.T) {
 	m := NewModel(&sessionControlAgent{})
-	m.recordAgentError("", fmt.Errorf("first failure"), "", "", "", "", "", "", false)
+	m.recordAgentError("", fmt.Errorf("first failure"), "", "", "", "", "", false)
 
 	m.beginSessionSwitch("fork", "")
 	if records := m.snapshotAgentErrors(); len(records) != 1 {
@@ -208,7 +207,7 @@ func TestSessionSwitchClearsAgentErrorsForNewAndResumeButForkKeepsThem(t *testin
 		t.Fatalf("records after resume = %d, want 0", len(records))
 	}
 
-	m.recordAgentError("", fmt.Errorf("second failure"), "", "", "", "", "", "", false)
+	m.recordAgentError("", fmt.Errorf("second failure"), "", "", "", "", "", false)
 	m.beginSessionSwitch("new", "")
 	if records := m.snapshotAgentErrors(); len(records) != 0 {
 		t.Fatalf("records after new session = %d, want 0", len(records))
@@ -239,13 +238,16 @@ func TestErrorPanelLinesShowStructuredFields(t *testing.T) {
 	m.width = 100
 	m.height = 40
 	apiErr := &llm.APIError{StatusCode: 500, Code: "server_error", Type: "api_error", Message: "upstream exploded"}
-	m.recordAgentError("", apiErr, "provider", "model-1", "...xyz9", "fp987654", "acc-1", "user@example.com", false)
+	m.recordAgentError("", apiErr, "provider", "model-1", "gate...xyz9", "acc-1", "user@example.com", false)
 
 	lines := m.errorPanelLines(m.errorPanelInnerWidth())
 	joined := stripANSI(strings.Join(lines, "\n"))
-	for _, want := range []string{"provider/model-1", "key=...xyz9", "fp=fp987654", "email=user@example.com", "HTTP 500", "code=server_error", "upstream exploded"} {
+	for _, want := range []string{"provider/model-1", "key=gate...xyz9", "email=user@example.com", "HTTP 500", "code=server_error", "upstream exploded"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("error panel lines missing %q\n%s", want, joined)
 		}
+	}
+	if strings.Contains(joined, "fp=") {
+		t.Fatalf("error panel lines should not show fp\n%s", joined)
 	}
 }

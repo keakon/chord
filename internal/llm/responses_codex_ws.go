@@ -518,7 +518,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 			if snap == nil {
 				// Debug-only breadcrumbs: helps distinguish "server didn't send" vs
 				// "client failed to parse" when rate-limit UI looks stale.
-				log.Debugf("responses codex ws: rate_limits event ignored provider=%v key_suffix=%v payload_len=%v", providerName, keySuffix(apiKey), len(msg))
+				log.Debugf("responses codex ws: rate_limits event ignored provider=%v key_id=%v payload_len=%v", providerName, keyLogID(apiKey), len(msg))
 				continue
 			}
 			snap.Provider = providerName
@@ -541,7 +541,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 			if snap.Credits != nil {
 				credits = fmt.Sprintf("has=%v unlimited=%v balance=%q", snap.Credits.HasCredits, snap.Credits.Unlimited, snap.Credits.Balance)
 			}
-			log.Debugf("responses codex ws: rate_limits event provider=%v key_suffix=%v limit_id=%v plan=%v primary={%s} secondary={%s} credits={%s}", providerName, keySuffix(apiKey), snap.LimitID, snap.PlanType, formatWindow(snap.Primary), formatWindow(snap.Secondary), credits)
+			log.Debugf("responses codex ws: rate_limits event provider=%v key_id=%v limit_id=%v plan=%v primary={%s} secondary={%s} credits={%s}", providerName, keyLogID(apiKey), snap.LimitID, snap.PlanType, formatWindow(snap.Primary), formatWindow(snap.Secondary), credits)
 
 			if cb != nil {
 				cb(message.StreamDelta{Type: message.StreamDeltaRateLimits, RateLimit: snap})

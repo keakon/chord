@@ -146,14 +146,13 @@ func TestMainLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
 	reducer := a.newMainLLMStreamReducer(nil, "provider/model-1", "", nil, false, nil)
 
 	reducer.Handle(message.StreamDelta{
-		Type:           message.StreamDeltaRetryError,
-		Err:            retryErr,
-		Provider:       "provider",
-		Model:          "model-1",
-		KeySuffix:      "...abc1",
-		KeyFingerprint: "fp123456",
-		AccountID:      "acc-1",
-		Email:          "user@example.com",
+		Type:      message.StreamDeltaRetryError,
+		Err:       retryErr,
+		Provider:  "provider",
+		Model:     "model-1",
+		MaskedKey: "open...abc1",
+		AccountID: "acc-1",
+		Email:     "user@example.com",
 	})
 
 	select {
@@ -165,7 +164,7 @@ func TestMainLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
 		if errEvt.Err != retryErr || !errEvt.Silent || errEvt.AgentID != a.instanceID {
 			t.Fatalf("error event = %#v, want silent retry error for main agent", errEvt)
 		}
-		if errEvt.Provider != "provider" || errEvt.Model != "model-1" || errEvt.Key != "...abc1" || errEvt.KeyFingerprint != "fp123456" || errEvt.AccountID != "acc-1" || errEvt.Email != "user@example.com" {
+		if errEvt.Provider != "provider" || errEvt.Model != "model-1" || errEvt.Key != "open...abc1" || errEvt.AccountID != "acc-1" || errEvt.Email != "user@example.com" {
 			t.Fatalf("error event metadata = %#v, want retry metadata", errEvt)
 		}
 	default:
@@ -183,14 +182,13 @@ func TestSubLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
 	reducer := sub.newSubLLMStreamReducer(&Turn{ID: 1}, func(string) {}, false)
 
 	reducer.Handle(message.StreamDelta{
-		Type:           message.StreamDeltaRetryError,
-		Err:            retryErr,
-		Provider:       "provider",
-		Model:          "model-1",
-		KeySuffix:      "...abc1",
-		KeyFingerprint: "fp123456",
-		AccountID:      "acc-1",
-		Email:          "user@example.com",
+		Type:      message.StreamDeltaRetryError,
+		Err:       retryErr,
+		Provider:  "provider",
+		Model:     "model-1",
+		MaskedKey: "open...abc1",
+		AccountID: "acc-1",
+		Email:     "user@example.com",
 	})
 
 	select {
@@ -202,7 +200,7 @@ func TestSubLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
 		if errEvt.Err != retryErr || !errEvt.Silent || errEvt.AgentID != sub.instanceID {
 			t.Fatalf("error event = %#v, want silent retry error for subagent", errEvt)
 		}
-		if errEvt.Provider != "provider" || errEvt.Model != "model-1" || errEvt.Key != "...abc1" || errEvt.KeyFingerprint != "fp123456" || errEvt.AccountID != "acc-1" || errEvt.Email != "user@example.com" {
+		if errEvt.Provider != "provider" || errEvt.Model != "model-1" || errEvt.Key != "open...abc1" || errEvt.AccountID != "acc-1" || errEvt.Email != "user@example.com" {
 			t.Fatalf("error event metadata = %#v, want retry metadata", errEvt)
 		}
 	default:

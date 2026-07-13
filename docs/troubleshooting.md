@@ -61,7 +61,7 @@ Recommendations:
 
 To diagnose which keys or models are hitting rate limits or errors:
 
-- Press `Ctrl+E` in the TUI to open the error panel, which shows all retry errors including 429s with the provider, model, and key suffix.
+- Press `Ctrl+E` in the TUI to open the error panel, which shows all retry errors including 429s with the provider, model, and masked `key=...` label.
 - Check the error panel to see the pattern: if one specific key is repeatedly hitting 429, that key is rate-limited; if multiple keys on the same provider fail with 503, the provider itself may be degraded.
 
 UI note:
