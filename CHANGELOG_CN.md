@@ -11,6 +11,7 @@
 
 ### 改进
 
+- Headless 现在会为委派工作流输出可靠的结构化 `agent_started`、`agent_notify` 以及补充元数据后的 `agent_done` 事件；SubAgent 的 `assistant_message` payload 也会携带 task、agent 类型与 parent agent 标识，方便下游标注和路由。
 - 流式 `write`、`edit` 与 `patch` 卡片现在会在 `path` 字段完整到达后立即显示路径，参数继续接收时保留已接收字符数，参数流结束后再切换到完整内容或 diff 预览。
 - 现在可通过 `/rename <标题>` 为会话设置自定义显示标题，执行 `/rename` 可清空标题。标题会显示在会话选择器和终端标题中，不会改变不可变的 session ID 或磁盘目录。
 - `delegate` 权限 pattern 现在会在可用目标、prompt、实际执行、嵌套委派及 hook 修改后的参数中一致匹配 `agent_type`。

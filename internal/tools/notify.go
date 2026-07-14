@@ -37,6 +37,12 @@ type notifyArgs struct {
 	Kind         string `json:"kind,omitempty"`
 }
 
+// AgentNotifyPayload is the structured owner-update payload emitted by Notify.
+type AgentNotifyPayload struct {
+	Message string `json:"message"`
+	Kind    string `json:"kind,omitempty"`
+}
+
 func (NotifyTool) Name() string { return NameNotify }
 
 func (t *NotifyTool) Description() string {
@@ -135,6 +141,6 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 		return "", fmt.Errorf("event sender not available (no EventSender configured)")
 	}
 	agentID := AgentIDFromContext(ctx)
-	t.sender.SendAgentEvent("agent_notify", agentID, a.Message)
+	t.sender.SendAgentEvent("agent_notify", agentID, AgentNotifyPayload{Message: a.Message, Kind: a.Kind})
 	return "Owner coordination chain has been notified. Continue working.", nil
 }

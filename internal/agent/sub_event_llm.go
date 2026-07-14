@@ -154,9 +154,12 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 
 	// Emit finalized assistant message event for control-plane consumers.
 	s.parent.emitToTUI(AssistantMessageEvent{
-		AgentID:   s.instanceID,
-		Text:      resp.Content,
-		ToolCalls: len(sanitizedCalls),
+		AgentID:       s.instanceID,
+		TaskID:        s.taskID,
+		AgentType:     s.agentDefName,
+		ParentAgentID: controlPlaneAgentID(s.ownerAgentID),
+		Text:          resp.Content,
+		ToolCalls:     len(sanitizedCalls),
 	})
 
 	// Persist assistant message (with usage for session resume).

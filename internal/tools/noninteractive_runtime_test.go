@@ -184,9 +184,13 @@ type errExitForTest struct{}
 func (errExitForTest) Error() string { return "exit status 1" }
 
 type recordingEventSender struct {
-	ch chan any
+	ch        chan any
+	eventType string
+	sourceID  string
 }
 
-func (s *recordingEventSender) SendAgentEvent(_ string, _ string, payload any) {
+func (s *recordingEventSender) SendAgentEvent(eventType, sourceID string, payload any) {
+	s.eventType = eventType
+	s.sourceID = sourceID
 	s.ch <- payload
 }

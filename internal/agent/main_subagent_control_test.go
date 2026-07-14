@@ -256,6 +256,18 @@ func TestCreateSubAgentInheritsServiceTier(t *testing.T) {
 	if got := childClient.ServiceTier(); got != config.ServiceTierSlow {
 		t.Fatalf("child service tier = %q, want %q", got, config.ServiceTierSlow)
 	}
+	foundStarted := false
+	for len(a.outputCh) > 0 {
+		if started, ok := (<-a.outputCh).(AgentStartedEvent); ok {
+			if started.AgentID != child.instanceID || started.TaskID != child.taskID || started.AgentType != "worker" || started.ParentAgentID != "main" || started.Description != "child work" {
+				t.Fatalf("started event = %#v", started)
+			}
+			foundStarted = true
+		}
+	}
+	if !foundStarted {
+		t.Fatal("expected AgentStartedEvent")
+	}
 }
 
 func TestHandleTierCommandSyncsExistingSubAgents(t *testing.T) {
@@ -362,6 +374,7 @@ func TestPrepareSubAgentMailboxBatchForTurnContinuationStagesDecisionMailbox(t *
 func TestClosedMainOwnedCompletedMailboxStillQueuesForMain(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-root")
+	sub.agentDefName = "worker"
 	a.newTurn()
 
 	a.handleAgentDone(Event{
@@ -372,6 +385,18 @@ func TestClosedMainOwnedCompletedMailboxStillQueuesForMain(t *testing.T) {
 
 	if got := a.subAgentByID(sub.instanceID); got != nil {
 		t.Fatalf("subAgentByID(%q) = %#v, want nil after close", sub.instanceID, got)
+	}
+	foundDone := false
+	for len(a.outputCh) > 0 {
+		if done, ok := (<-a.outputCh).(AgentDoneEvent); ok {
+			if done.AgentID != sub.instanceID || done.TaskID != sub.taskID || done.AgentType != sub.agentDefName || done.ParentAgentID != "main" || done.Summary != "root task done" {
+				t.Fatalf("done event = %#v", done)
+			}
+			foundDone = true
+		}
+	}
+	if !foundDone {
+		t.Fatal("expected AgentDoneEvent")
 	}
 
 	var evt Event
@@ -511,6 +536,18 @@ func TestSendMessageToWaitingMainWorkerResumesExecution(t *testing.T) {
 	}
 	if handle.Status != "resumed" {
 		t.Fatalf("handle.Status = %q, want resumed", handle.Status)
+	}
+	foundNotify := false
+	for len(a.outputCh) > 0 {
+		if notify, ok := (<-a.outputCh).(AgentNotifyEvent); ok {
+			if notify.AgentID != "main" || notify.TargetAgentID != sub.instanceID || notify.TargetTaskID != sub.taskID || notify.Kind != "reply" || notify.Message != "continue with option B" {
+				t.Fatalf("notify event = %#v", notify)
+			}
+			foundNotify = true
+		}
+	}
+	if !foundNotify {
+		t.Fatal("expected targeted AgentNotifyEvent")
 	}
 	if sub.State() != SubAgentStateRunning {
 		t.Fatalf("sub.State() = %q, want running", sub.State())

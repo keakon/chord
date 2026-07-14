@@ -247,6 +247,28 @@ func (a *MainAgent) sendMessageToSubAgentNow(callerAgentID, callerTaskID, taskID
 		handle.Rehydrated = true
 		handle.Message = "message delivered and task rehydrated"
 	}
+	sourceAgentID := controlPlaneAgentID(callerAgentID)
+	sourceAgentType := ""
+	sourceParentAgentID := ""
+	sourceParentTaskID := ""
+	if callerAgentID != "" {
+		if caller := a.subAgentByID(callerAgentID); caller != nil {
+			sourceAgentType = caller.agentDefName
+			sourceParentAgentID = controlPlaneAgentID(caller.ownerAgentID)
+			sourceParentTaskID = caller.ownerTaskID
+		}
+	}
+	a.emitToTUI(AgentNotifyEvent{
+		AgentID:       sourceAgentID,
+		TaskID:        callerTaskID,
+		AgentType:     sourceAgentType,
+		ParentAgentID: sourceParentAgentID,
+		ParentTaskID:  sourceParentTaskID,
+		TargetAgentID: sub.instanceID,
+		TargetTaskID:  sub.taskID,
+		Kind:          kind,
+		Message:       message,
+	})
 	return handle, nil
 }
 
@@ -388,6 +410,14 @@ func (a *MainAgent) rehydrateCompletedTask(record *DurableTaskRecord) (*SubAgent
 	a.subs.add(sub)
 	a.persistSubAgentMeta(sub)
 	a.syncTaskRecordFromSub(sub, "")
+	a.emitToTUI(AgentStartedEvent{
+		AgentID:       sub.instanceID,
+		TaskID:        sub.taskID,
+		AgentType:     sub.agentDefName,
+		Description:   sub.taskDesc,
+		ParentAgentID: controlPlaneAgentID(sub.ownerAgentID),
+		ParentTaskID:  sub.ownerTaskID,
+	})
 	go sub.runLoop()
 	return sub, strings.TrimSpace(record.LatestInstanceID), nil
 }

@@ -958,9 +958,12 @@ func TestHeadlessAssistantMessageEventFromSubAgent(t *testing.T) {
 	state := &headlessState{}
 
 	ev := agent.AssistantMessageEvent{
-		AgentID:   "sub-1",
-		Text:      "Task done",
-		ToolCalls: 0,
+		AgentID:       "sub-1",
+		TaskID:        "adhoc-1",
+		AgentType:     "reviewer",
+		ParentAgentID: "main",
+		Text:          "Task done",
+		ToolCalls:     0,
 	}
 
 	envs := filterHeadlessEvent(ev, state)
@@ -971,6 +974,39 @@ func TestHeadlessAssistantMessageEventFromSubAgent(t *testing.T) {
 	payload := envs[0].Payload.(map[string]any)
 	if payload["agent_id"] != "sub-1" {
 		t.Errorf("agent_id = %q, want %q", payload["agent_id"], "sub-1")
+	}
+	if payload["task_id"] != "adhoc-1" || payload["agent_type"] != "reviewer" || payload["parent_agent_id"] != "main" {
+		t.Fatalf("subagent metadata = %#v", payload)
+	}
+}
+
+func TestHeadlessSubAgentLifecycleEvents(t *testing.T) {
+	state := &headlessState{}
+	tests := []struct {
+		name       string
+		event      agent.AgentEvent
+		typeName   string
+		messageKey string
+		message    string
+	}{
+		{name: "started", event: agent.AgentStartedEvent{AgentID: "agent-1", TaskID: "adhoc-1", AgentType: "reviewer", ParentAgentID: "main", Description: "Review changes"}, typeName: "agent_started", messageKey: "description", message: "Review changes"},
+		{name: "notify", event: agent.AgentNotifyEvent{AgentID: "agent-1", TaskID: "adhoc-1", AgentType: "reviewer", ParentAgentID: "main", TargetAgentID: "main", Kind: "progress", Message: "Tests pass"}, typeName: "agent_notify", messageKey: "message", message: "Tests pass"},
+		{name: "done", event: agent.AgentDoneEvent{AgentID: "agent-1", TaskID: "adhoc-1", AgentType: "reviewer", ParentAgentID: "main", Summary: "Reviewed"}, typeName: "agent_done", messageKey: "summary", message: "Reviewed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			envs := filterHeadlessEvent(tt.event, state)
+			if len(envs) != 1 || envs[0].Type != tt.typeName {
+				t.Fatalf("envelopes = %#v", envs)
+			}
+			payload := envs[0].Payload.(map[string]string)
+			if payload["agent_id"] != "agent-1" || payload["task_id"] != "adhoc-1" || payload["agent_type"] != "reviewer" || payload["parent_agent_id"] != "main" || payload[tt.messageKey] != tt.message {
+				t.Fatalf("payload = %#v", payload)
+			}
+			if tt.typeName == "agent_notify" && payload["target_agent_id"] != "main" {
+				t.Fatalf("notify payload = %#v", payload)
+			}
+		})
 	}
 }
 

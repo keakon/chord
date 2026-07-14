@@ -13,6 +13,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestRestoreLoadedSubAgentsKeepsCompletedState(t *testing.T) {
@@ -481,7 +482,19 @@ func TestMailboxReplyChainPersistsAcrossResume(t *testing.T) {
 		t.Fatalf("replySummary = %q, want %q", replySummary, "approve approach")
 	}
 
-	a2.handleAgentNotify(Event{SourceID: restored.instanceID, Payload: "continuing with approved plan"})
+	a2.handleAgentNotify(Event{SourceID: restored.instanceID, Payload: tools.AgentNotifyPayload{Message: "continuing with approved plan", Kind: "progress"}})
+	foundNotify := false
+	for len(a2.outputCh) > 0 {
+		if notify, ok := (<-a2.outputCh).(AgentNotifyEvent); ok {
+			if notify.AgentID != restored.instanceID || notify.TaskID != restored.taskID || notify.ParentAgentID != "main" || notify.TargetAgentID != "main" || notify.Kind != "progress" || notify.Message != "continuing with approved plan" {
+				t.Fatalf("notify event = %#v", notify)
+			}
+			foundNotify = true
+		}
+	}
+	if !foundNotify {
+		t.Fatal("expected AgentNotifyEvent")
+	}
 	var evt Event
 	for {
 		evt = <-a2.eventCh

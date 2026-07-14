@@ -11,6 +11,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
@@ -25,6 +26,13 @@ type delegationCaller struct {
 	Delegation config.DelegationConfig
 	Ruleset    permission.Ruleset
 	IsMain     bool
+}
+
+func controlPlaneAgentID(agentID string) string {
+	if strings.TrimSpace(agentID) == "" {
+		return identity.MainAgentID
+	}
+	return strings.TrimSpace(agentID)
 }
 
 type subAgentDelegateCreator struct {
@@ -258,7 +266,14 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		RequiresAck:  false,
 	}})
 
-	a.emitToTUI(AgentDoneEvent{AgentID: evt.SourceID, TaskID: sub.taskID, Summary: result.Summary})
+	a.emitToTUI(AgentDoneEvent{
+		AgentID:       evt.SourceID,
+		TaskID:        sub.taskID,
+		AgentType:     sub.agentDefName,
+		ParentAgentID: controlPlaneAgentID(sub.ownerAgentID),
+		ParentTaskID:  sub.ownerTaskID,
+		Summary:       result.Summary,
+	})
 	a.handleSubAgentCloseRequestedEvent(Event{
 		Type:     EventSubAgentCloseRequested,
 		SourceID: evt.SourceID,
@@ -299,11 +314,18 @@ func (a *MainAgent) handleAgentIdle(evt Event) {
 }
 
 func (a *MainAgent) handleAgentNotify(evt Event) {
-	msg, ok := evt.Payload.(string)
+	payload, ok := evt.Payload.(tools.AgentNotifyPayload)
+	if !ok {
+		if msg, legacyOK := evt.Payload.(string); legacyOK {
+			payload = tools.AgentNotifyPayload{Message: msg}
+			ok = true
+		}
+	}
 	if !ok {
 		log.Errorf("handleAgentNotify: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
+	msg := strings.TrimSpace(payload.Message)
 	sub := a.subAgentByID(evt.SourceID)
 	if sub == nil {
 		log.Debugf("dropping report from abandoned subagent agent_id=%v", evt.SourceID)
@@ -329,6 +351,17 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 		Payload:      msg,
 		RequiresAck:  false,
 	}})
+	a.emitToTUI(AgentNotifyEvent{
+		AgentID:       evt.SourceID,
+		TaskID:        sub.taskID,
+		AgentType:     sub.agentDefName,
+		ParentAgentID: controlPlaneAgentID(sub.ownerAgentID),
+		ParentTaskID:  sub.ownerTaskID,
+		TargetAgentID: controlPlaneAgentID(sub.ownerAgentID),
+		TargetTaskID:  sub.ownerTaskID,
+		Kind:          strings.TrimSpace(payload.Kind),
+		Message:       msg,
+	})
 	a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: "running", Message: msg})
 	log.Debugf("SubAgent report received agent=%v message_len=%v", evt.SourceID, len(msg))
 }
@@ -592,10 +625,18 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	a.subs.add(sub)
 	a.persistSubAgentMeta(sub)
 	a.syncTaskRecordFromSub(sub, "")
+	log.Infof("SubAgent created and started instance=%v task_id=%v agent_def=%v", instanceID, taskID, agentDef.Name)
+	a.emitToTUI(AgentStartedEvent{
+		AgentID:       instanceID,
+		TaskID:        taskID,
+		AgentType:     agentDef.Name,
+		Description:   description,
+		ParentAgentID: controlPlaneAgentID(caller.AgentID),
+		ParentTaskID:  caller.TaskID,
+	})
+	a.emitToTUI(AgentStatusEvent{AgentID: instanceID, Status: "running", Message: fmt.Sprintf("Started task %s: %s", taskID, truncateString(description, 80))})
 	go sub.runLoop()
 	sub.InjectUserMessage(description)
-	log.Infof("SubAgent created and started instance=%v task_id=%v agent_def=%v", instanceID, taskID, agentDef.Name)
-	a.emitToTUI(AgentStatusEvent{AgentID: instanceID, Status: "running", Message: fmt.Sprintf("Started task %s: %s", taskID, truncateString(description, 80))})
 	return tools.TaskHandle{
 		Status:             "started",
 		TaskID:             taskID,

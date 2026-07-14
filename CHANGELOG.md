@@ -11,6 +11,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Headless now exposes reliable structured `agent_started`, `agent_notify`, and enriched `agent_done` events for delegated workstreams. SubAgent `assistant_message` payloads also include task, agent type, and parent-agent identity for downstream labeling and routing.
 - Streaming `write`, `edit`, and `patch` cards now show their path as soon as the path field is complete, keep the received-character count while arguments continue arriving, and switch to their full content or diff preview only when argument streaming finishes.
 - Sessions can now have a custom display title via `/rename <title>`; `/rename` clears it. The title is shown in the session picker and terminal title while the immutable session ID and on-disk directory remain unchanged.
 - `delegate` permission patterns now match `agent_type` consistently across advertised targets, prompts, execution, nested delegation, and hook-modified arguments.

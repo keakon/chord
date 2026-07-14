@@ -166,6 +166,39 @@ func TestEmitToTUIControlEventsWaitForSpaceInsteadOfDropping(t *testing.T) {
 			},
 		},
 		{
+			name:  "AgentStarted",
+			event: AgentStartedEvent{AgentID: "agent-1", TaskID: "adhoc-1"},
+			check: func(t *testing.T, evt AgentEvent) {
+				t.Helper()
+				got, ok := evt.(AgentStartedEvent)
+				if !ok || got.AgentID != "agent-1" || got.TaskID != "adhoc-1" {
+					t.Fatalf("event = %#v, want AgentStartedEvent", evt)
+				}
+			},
+		},
+		{
+			name:  "AgentNotify",
+			event: AgentNotifyEvent{AgentID: "agent-1", Message: "working"},
+			check: func(t *testing.T, evt AgentEvent) {
+				t.Helper()
+				got, ok := evt.(AgentNotifyEvent)
+				if !ok || got.AgentID != "agent-1" || got.Message != "working" {
+					t.Fatalf("event = %#v, want AgentNotifyEvent", evt)
+				}
+			},
+		},
+		{
+			name:  "AgentDone",
+			event: AgentDoneEvent{AgentID: "agent-1", TaskID: "adhoc-1", Summary: "done"},
+			check: func(t *testing.T, evt AgentEvent) {
+				t.Helper()
+				got, ok := evt.(AgentDoneEvent)
+				if !ok || got.AgentID != "agent-1" || got.Summary != "done" {
+					t.Fatalf("event = %#v, want AgentDoneEvent", evt)
+				}
+			},
+		},
+		{
 			name:  "Info",
 			event: InfoEvent{Message: "session exported"},
 			check: func(t *testing.T, evt AgentEvent) {

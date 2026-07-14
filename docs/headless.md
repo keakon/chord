@@ -54,7 +54,7 @@ Response:
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `handoff_request`, `error`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `handoff_request`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`.
 
 ### `status`
 
@@ -202,14 +202,16 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | Type                    | When                                                                                              | Notable payload fields                                                                                       |
 | ----------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `activity`              | Agent enters a new phase                                                                          | `agent_id`, `type` (`connecting`, `streaming`, `compacting`, …), `detail`                                    |
-| `assistant_message`     | A complete assistant message is ready for consumption                                             | `agent_id`, `text`, `tool_calls`                                                                             |
+| `assistant_message`     | A complete assistant message is ready for consumption                                             | `agent_id`, `task_id`, `agent_type`, `parent_agent_id`, `text`, `tool_calls`; delegation fields are empty for main |
 | `idle`                  | Agent is ready to receive input again                                                             | `last_outcome` (`completed` / `cancelled` / `error`)                                                         |
 | `done_completion`      | Done tool completed with a final report outside loop mode                                         | `call_id`, `report`, `reason`, `status`, `agent_id`, `mode`                                                  |
 | `confirm_request`       | A tool needs explicit confirmation                                                                | `request_id`, `tool_name`, `args_json`, `needs_approval`, `already_allowed`, `needs_approval_rules`, `already_allowed_rules`, `timeout_ms` |
 | `question_request`      | The model asked the user a question                                                               | `request_id`, `tool_name`, `question`, `options`, `option_details`, `default_answer`, `multiple`, `timeout_ms` |
 | `handoff_request`       | A planner saved a handoff plan and needs the client to approve or reject execution                 | `request_id`, `plan_path`, `plan_text`, `plan_error`, `agents[]` with `{name, default, model_pools, current_model_pool}` |
 | `local_shell_result`    | Result for a `local_shell` command                                                                | `command`, `output`, `failed`, `error` |
-| `agent_done`            | A SubAgent completed its task                                                                     | `agent_id`, `task_id`, `summary`                                                                             |
+| `agent_started`         | A delegated SubAgent instance started, including rehydrated follow-up instances                    | `agent_id`, `task_id`, `agent_type`, `description`, `parent_agent_id`, `parent_task_id`                      |
+| `agent_notify`          | An agent sent a non-blocking owner or targeted delegated-workstream update                         | `agent_id`, `task_id`, `agent_type`, `parent_agent_id`, `parent_task_id`, `target_agent_id`, `target_task_id`, `kind`, `message` |
+| `agent_done`            | A SubAgent completed its task                                                                     | `agent_id`, `task_id`, `agent_type`, `parent_agent_id`, `parent_task_id`, `summary`                          |
 | `assistant_rollback`    | Discard in-flight streamed assistant output (mostly relevant for streaming UIs)                   | `agent_id`, `reason`                                                                                         |
 | `info`                  | Informational message from the runtime                                                            | `agent_id`, `message`                                                                                        |
 | `toast`                 | Transient notification surfaced to the user in the TUI; safe to ignore in headless                | `agent_id`, `message`, `level` (`info` / `warn` / `error`)                                                   |
@@ -218,7 +220,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 
 If an input line on stdin exceeds the protocol line limit, Chord emits an `error` envelope with `code: "stdin_line_too_long"` and continues reading later lines. Integrations should use `code` for classification when present and keep `message` for human-readable diagnostics.
 
-`assistant_message.text` is empty only in pathological cases — Chord logs a warning when this happens, and gateway integrations should usually skip such messages instead of forwarding empty text downstream.
+`assistant_message.text` may be empty for tool-only rounds (including a SubAgent `Complete` call). Chord logs a warning for observability; gateway integrations should skip the empty message and use `agent_done.summary` as the authoritative SubAgent completion content.
 
 ## Slash compatibility via `send`
 

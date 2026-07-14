@@ -366,9 +366,12 @@ func (ErrorEvent) agentEvent() {}
 // Consumers that need "what the assistant just said" should use this event
 // rather than watching StreamTextEvent deltas or waiting for IdleEvent.
 type AssistantMessageEvent struct {
-	AgentID   string // originating agent ("" = main agent)
-	Text      string // assistant text content (may be empty if only tool calls)
-	ToolCalls int    // number of tool calls in this response
+	AgentID       string // originating agent ("" = main agent)
+	TaskID        string // delegated task ID; empty for the main agent
+	AgentType     string // delegated agent definition name; empty for the main agent
+	ParentAgentID string // owner agent instance ID; empty for the main agent
+	Text          string // assistant text content (may be empty if only tool calls)
+	ToolCalls     int    // number of tool calls in this response
 }
 
 func (AssistantMessageEvent) agentEvent() {}
@@ -445,12 +448,42 @@ type CompactionStatusEvent struct {
 
 func (CompactionStatusEvent) agentEvent() {}
 
+// AgentStartedEvent signals that a delegated SubAgent has started running.
+type AgentStartedEvent struct {
+	AgentID       string
+	TaskID        string
+	AgentType     string
+	Description   string
+	ParentAgentID string
+	ParentTaskID  string
+}
+
+func (AgentStartedEvent) agentEvent() {}
+
+// AgentNotifyEvent carries a non-blocking SubAgent update to its owner.
+type AgentNotifyEvent struct {
+	AgentID       string
+	TaskID        string
+	AgentType     string
+	ParentAgentID string
+	ParentTaskID  string
+	TargetAgentID string
+	TargetTaskID  string
+	Kind          string
+	Message       string
+}
+
+func (AgentNotifyEvent) agentEvent() {}
+
 // AgentDoneEvent signals that a SubAgent has completed its task.
-// Emitted to TUI so it can update the sidebar and optionally switch focus.
+// Emitted to control-plane consumers and TUI so they can update state.
 type AgentDoneEvent struct {
-	AgentID string // instance ID (e.g. "agent-1")
-	TaskID  string // plan task ID (e.g. "3") or ad-hoc ID (e.g. "adhoc-1")
-	Summary string // completion summary from Complete tool
+	AgentID       string // instance ID (e.g. "agent-1")
+	TaskID        string // plan task ID (e.g. "3") or ad-hoc ID (e.g. "adhoc-1")
+	AgentType     string // delegated agent definition name
+	ParentAgentID string // owner agent instance ID
+	ParentTaskID  string // owner delegated task ID; empty when owned by main
+	Summary       string // completion summary from Complete tool
 }
 
 func (AgentDoneEvent) agentEvent() {}

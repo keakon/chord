@@ -135,8 +135,8 @@ func (w *stdoutWriter) run() {
 }
 
 // emit sends a message to the channel. It blocks if the channel is full
-// (stdio is a reliable pipe; confirm_request, question_request, and
-// response events must never be silently dropped).
+// (stdio is a reliable pipe; control requests, SubAgent lifecycle events,
+// and response events must never be silently dropped).
 // Returns false if the context was cancelled before the message could be sent.
 func (w *stdoutWriter) emit(msg any) (ok bool) {
 	defer func() {
@@ -190,6 +190,8 @@ var headlessEventTypes = map[string]bool{
 	"question_request":   true,
 	"handoff_request":    true,
 	"error":              true,
+	"agent_started":      true,
+	"agent_notify":       true,
 	"agent_done":         true,
 	"info":               true,
 	"toast":              true,
@@ -241,9 +243,39 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		}
 		if state.isSubscribed("assistant_message") {
 			out = append(out, &headlessEnvelope{Type: "assistant_message", Payload: map[string]any{
-				"agent_id":   e.AgentID,
-				"text":       e.Text,
-				"tool_calls": e.ToolCalls,
+				"agent_id":        e.AgentID,
+				"task_id":         e.TaskID,
+				"agent_type":      e.AgentType,
+				"parent_agent_id": e.ParentAgentID,
+				"text":            e.Text,
+				"tool_calls":      e.ToolCalls,
+			}})
+		}
+	case agent.AgentStartedEvent:
+		state.updatedAt = time.Now()
+		if state.isSubscribed("agent_started") {
+			out = append(out, &headlessEnvelope{Type: "agent_started", Payload: map[string]string{
+				"agent_id":        e.AgentID,
+				"task_id":         e.TaskID,
+				"agent_type":      e.AgentType,
+				"description":     e.Description,
+				"parent_agent_id": e.ParentAgentID,
+				"parent_task_id":  e.ParentTaskID,
+			}})
+		}
+	case agent.AgentNotifyEvent:
+		state.updatedAt = time.Now()
+		if state.isSubscribed("agent_notify") {
+			out = append(out, &headlessEnvelope{Type: "agent_notify", Payload: map[string]string{
+				"agent_id":        e.AgentID,
+				"task_id":         e.TaskID,
+				"agent_type":      e.AgentType,
+				"parent_agent_id": e.ParentAgentID,
+				"parent_task_id":  e.ParentTaskID,
+				"target_agent_id": e.TargetAgentID,
+				"target_task_id":  e.TargetTaskID,
+				"kind":            e.Kind,
+				"message":         e.Message,
 			}})
 		}
 	case agent.IdleEvent:
@@ -331,8 +363,16 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			out = append(out, &headlessEnvelope{Type: "handoff_request", Payload: payload})
 		}
 	case agent.AgentDoneEvent:
+		state.updatedAt = time.Now()
 		if state.isSubscribed("agent_done") {
-			out = append(out, &headlessEnvelope{Type: "agent_done", Payload: map[string]string{"agent_id": e.AgentID, "task_id": e.TaskID, "summary": e.Summary}})
+			out = append(out, &headlessEnvelope{Type: "agent_done", Payload: map[string]string{
+				"agent_id":        e.AgentID,
+				"task_id":         e.TaskID,
+				"agent_type":      e.AgentType,
+				"parent_agent_id": e.ParentAgentID,
+				"parent_task_id":  e.ParentTaskID,
+				"summary":         e.Summary,
+			}})
 		}
 	case agent.InfoEvent:
 		if state.isSubscribed("info") {
