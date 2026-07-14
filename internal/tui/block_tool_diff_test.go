@@ -72,7 +72,7 @@ func TestEditToolCardRendersDiagnosticsSummaryWithDiff(t *testing.T) {
 }
 
 func TestEditLiveArgsWithoutCompletePathDoNotRenderDot(t *testing.T) {
-	displayArgs := liveToolDisplayArgs(tools.NameEdit, `{"patch":"*** Begin Patch\n*** Update File:`, "")
+	displayArgs := streamingToolDisplayArgs(tools.NameEdit, `{"patch":"*** Begin Patch\n*** Update File:`, "")
 	if displayArgs != "" {
 		t.Fatalf("display args = %q, want empty until path is parsed", displayArgs)
 	}

@@ -2104,6 +2104,27 @@ func TestEditToolCallCopyIncludesPathAndPatchWhenDiffMissing(t *testing.T) {
 	}
 }
 
+func TestPatchToolCallCopyPreservesToolName(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NamePatch,
+		Content:       `{"path":"foo.txt"}`,
+		RawArgs:       `{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`,
+		ResultContent: "Applied patch to foo.txt (+1 -1)",
+		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultDone:    true,
+	}
+
+	got := toolCallMarkdownContent(block)
+	if !strings.Contains(got, "# Tool call: patch") {
+		t.Fatalf("copied Patch block should preserve its tool name; got:\n%s", got)
+	}
+	if strings.Contains(got, "# Tool call: edit") {
+		t.Fatalf("copied Patch block should not be labeled as Edit; got:\n%s", got)
+	}
+}
+
 func TestReplaceEditToolCallErrorCopyIncludesArgumentsWhenDiffMissing(t *testing.T) {
 	block := &Block{
 		ID:            1,

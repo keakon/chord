@@ -9,18 +9,38 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func liveToolDisplayArgs(toolName, argsJSON, result string) string {
+func stableToolDisplayArgs(toolName, argsJSON, result string) string {
 	if toolName == tools.NameEdit || toolName == tools.NamePatch {
 		path := tools.ExtractEditPathFromArgs([]byte(argsJSON))
-		if path == "" {
-			return ""
-		}
-		b, err := json.Marshal(map[string]string{"path": path})
-		if err == nil {
-			return string(b)
-		}
+		return fileToolPathDisplayArgs(path)
 	}
 	return eventToolDisplayArgs(toolName, argsJSON, result)
+}
+
+func streamingToolDisplayArgs(toolName, argsJSON, result string) string {
+	switch toolName {
+	case tools.NameEdit, tools.NamePatch:
+		path := tools.ExtractEditPathFromArgs([]byte(argsJSON))
+		if path == "" {
+			path = streamedFileToolPath(argsJSON)
+		}
+		return fileToolPathDisplayArgs(path)
+	case tools.NameWrite:
+		return fileToolPathDisplayArgs(streamedFileToolPath(argsJSON))
+	default:
+		return eventToolDisplayArgs(toolName, argsJSON, result)
+	}
+}
+
+func fileToolPathDisplayArgs(path string) string {
+	if path == "" {
+		return ""
+	}
+	b, err := json.Marshal(map[string]string{"path": path})
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state agent.ToolCallExecutionState, includeArgProgress bool) (*Block, bool) {
@@ -31,10 +51,14 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 	if block, ok := m.findToolBlockByToolID(id); ok {
 		return block, false
 	}
+	displayArgs := stableToolDisplayArgs(name, argsJSON, "")
+	if includeArgProgress {
+		displayArgs = streamingToolDisplayArgs(name, argsJSON, "")
+	}
 	block := &Block{
 		ID:                 m.nextBlockID,
 		Type:               BlockToolCall,
-		Content:            liveToolDisplayArgs(name, argsJSON, ""),
+		Content:            displayArgs,
 		RawArgs:            argsJSON,
 		ToolName:           name,
 		ToolID:             id,
@@ -138,7 +162,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 			audit:          evt.Audit,
 			diff:           evt.Diff,
 			doneReport:     evt.DoneReport,
-			displayArgs:    liveToolDisplayArgs,
+			displayArgs:    stableToolDisplayArgs,
 			imageParts:     imagePartsFromContentParts(evt.Parts),
 			resetExecution: true,
 		})
@@ -231,6 +255,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			if evt.ArgsStreamingDone {
 				delete(m.toolArgRenderState, evt.ID)
 				if block != nil {
+					block.Content = stableToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
 					block.StartedAt = time.Time{}
 					if block.ToolExecutionState == "" || block.ToolExecutionState == agent.ToolCallExecutionStateRunning {
 						block.ToolExecutionState = agent.ToolCallExecutionStateQueued
@@ -255,7 +280,10 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		updated := false
 		argsStreamingDone := evt.ArgsStreamingDone || (block != nil && !block.StartedAt.IsZero())
-		displayArgs := liveToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
+		displayArgs := streamingToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
+		if argsStreamingDone {
+			displayArgs = stableToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
+		}
 		if evt.ArgsJSON != "" && evt.ArgsJSON != block.RawArgs {
 			block.RawArgs = evt.ArgsJSON
 			updated = true
@@ -327,7 +355,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			return true, effects
 		}
 		updated := false
-		displayArgs := liveToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
+		displayArgs := stableToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
 		if evt.ArgsJSON != "" && evt.ArgsJSON != block.RawArgs {
 			block.RawArgs = evt.ArgsJSON
 			updated = true

@@ -137,6 +137,15 @@ func parseToolArgs(argsJSON string) (keys []string, vals map[string]string) {
 	return
 }
 
+func streamedFileToolPath(argsJSON string) string {
+	_, vals := parseToolArgs(argsJSON)
+	path := strings.TrimSpace(vals["path"])
+	if path == "." {
+		return ""
+	}
+	return path
+}
+
 func formatParamValue(v any) string {
 	if v == nil {
 		return ""

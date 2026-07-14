@@ -563,14 +563,18 @@ func toolCallMarkdownContent(b *Block) string {
 		return convformat.DoneToolCallMarkdown(b.DoneReport, b.ResultContent)
 	}
 	if toolNameKey(toolName) == tools.NameEdit || toolNameKey(toolName) == tools.NamePatch {
-		return editToolCallMarkdownContent(b)
+		return fileDiffToolCallMarkdownContent(b)
 	}
 
 	return convformat.ToolCallMarkdown(b.ToolName, b.Content, toolExpandedResultContent(b.ToolName, b.ResultContent), b.Diff)
 }
 
-func editToolCallMarkdownContent(b *Block) string {
-	parts := []string{"# Tool call: edit"}
+func fileDiffToolCallMarkdownContent(b *Block) string {
+	toolName := toolNameKey(b.ToolName)
+	if toolName != tools.NameEdit && toolName != tools.NamePatch {
+		toolName = tools.NameEdit
+	}
+	parts := []string{"# Tool call: " + toolName}
 	if path := strings.TrimSpace(b.diffToolFilePath()); path != "" {
 		parts = append(parts, "## Path\n\n"+path)
 	}

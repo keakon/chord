@@ -11,6 +11,7 @@
 
 ### 改进
 
+- 流式 `write`、`edit` 与 `patch` 卡片现在会在 `path` 字段完整到达后立即显示路径，参数继续接收时保留已接收字符数，参数流结束后再切换到完整内容或 diff 预览。
 - 现在可通过 `/rename <标题>` 为会话设置自定义显示标题，执行 `/rename` 可清空标题。标题会显示在会话选择器和终端标题中，不会改变不可变的 session ID 或磁盘目录。
 - `delegate` 权限 pattern 现在会在可用目标、prompt、实际执行、嵌套委派及 hook 修改后的参数中一致匹配 `agent_type`。
 - 文档站构建栈升级到 Astro 7 与 Starlight 0.41，并更新 Vite、devalue、js-yaml、yaml 等传递依赖；旧 Astro content loader 产生的重复文档 ID 告警不再出现，生产依赖审计也不再报告已知漏洞。

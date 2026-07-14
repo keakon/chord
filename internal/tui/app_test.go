@@ -2264,6 +2264,29 @@ func TestToolCallUpdateEventArgsStreamingDoneMarksQueuedBeforeExecution(t *testi
 	}
 }
 
+func TestFinalWriteUpdateCreatesFullPreviewWithoutStartEvent(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 12)
+	args := `{"path":"src/demo.go","content":"package main\n"}`
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID:                "call-write-missing-start-1",
+		Name:              tools.NameWrite,
+		AgentID:           "",
+		ArgsJSON:          args,
+		ArgsStreamingDone: true,
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("call-write-missing-start-1")
+	if !ok {
+		t.Fatal("expected Write tool block")
+	}
+	block.Collapsed = false
+	plain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	if !strings.Contains(plain, "package main") {
+		t.Fatalf("expected completed Write content preview after start-event recovery, got:\n%s", plain)
+	}
+}
+
 func TestTodoWriteQueuedCardDoesNotAnimateWithGlobalSpinner(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 
@@ -2638,6 +2661,127 @@ func TestAnyToolShowsReceivedCharCountFromStreamingArgs(t *testing.T) {
 	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if !strings.Contains(joined, "30 chars received") {
 		t.Fatalf("expected generic arg char count progress; got:\n%s", joined)
+	}
+}
+
+func TestWriteStreamingCardShowsPathBeforeContentCompletes(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 12)
+	partial := `{"path":"src/demo.go","content":"package main`
+	complete := `{"path":"src/demo.go","content":"package main\n"}`
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID: "call-write-streaming-path-1", Name: tools.NameWrite, AgentID: "", ArgsJSON: partial,
+	}})
+	block, ok := m.viewport.FindBlockByToolID("call-write-streaming-path-1")
+	if !ok {
+		t.Fatal("expected write tool block")
+	}
+	partialPlain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	if !strings.Contains(partialPlain, "write src/demo.go") {
+		t.Fatalf("expected partial Write card to show path, got:\n%s", partialPlain)
+	}
+	if !strings.Contains(partialPlain, "chars received") {
+		t.Fatalf("expected partial Write card to show received char count, got:\n%s", partialPlain)
+	}
+	if strings.Contains(partialPlain, "package main") {
+		t.Fatalf("did not expect incomplete Write content preview, got:\n%s", partialPlain)
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID: "call-write-streaming-path-1", Name: tools.NameWrite, AgentID: "", ArgsJSON: complete, ArgsStreamingDone: true,
+	}})
+	block.Collapsed = false
+	completePlain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	if !strings.Contains(completePlain, "package main") {
+		t.Fatalf("expected completed Write card to show content preview, got:\n%s", completePlain)
+	}
+}
+
+func TestFileMutationDisplaySurvivesExecutionAndResultEvents(t *testing.T) {
+	tests := []struct {
+		name            string
+		toolName        string
+		partialArgs     string
+		completeArgs    string
+		result          string
+		diff            string
+		wantContent     []string
+		dontWantContent []string
+		wantRendered    string
+	}{
+		{
+			name:         "write content preview",
+			toolName:     tools.NameWrite,
+			partialArgs:  `{"path":"src/demo.go","content":"package main`,
+			completeArgs: `{"path":"src/demo.go","content":"package main\n"}`,
+			result:       "Successfully wrote 1 line, 13 bytes",
+			wantContent:  []string{`"path":"src/demo.go"`, `"content":"package main\n"`},
+			wantRendered: "package main",
+		},
+		{
+			name:            "edit diff",
+			toolName:        tools.NameEdit,
+			partialArgs:     `{"path":"src/demo.go","old_string":"old`,
+			completeArgs:    `{"path":"src/demo.go","old_string":"old","new_string":"new"}`,
+			result:          "Replaced 1 occurrence",
+			diff:            "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n",
+			wantContent:     []string{"src/demo.go"},
+			dontWantContent: []string{"old_string", "new_string"},
+			wantRendered:    "+new",
+		},
+		{
+			name:            "patch diff",
+			toolName:        tools.NamePatch,
+			partialArgs:     `{"path":"src/demo.go","patch":"@@\n-old`,
+			completeArgs:    `{"path":"src/demo.go","patch":"@@\n-old\n+new\n"}`,
+			result:          "Applied patch to src/demo.go (+1 -1)",
+			diff:            "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n",
+			wantContent:     []string{"src/demo.go"},
+			dontWantContent: []string{`"patch"`},
+			wantRendered:    "+new",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewModelWithSize(nil, 100, 12)
+			callID := "call-file-mutation-result-" + tt.toolName
+
+			_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+				ID: callID, Name: tt.toolName, AgentID: "", ArgsJSON: tt.partialArgs,
+			}})
+			_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+				ID: callID, Name: tt.toolName, AgentID: "", ArgsJSON: tt.completeArgs, ArgsStreamingDone: true,
+			}})
+			_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
+				ID: callID, Name: tt.toolName, AgentID: "", ArgsJSON: tt.completeArgs, State: agent.ToolCallExecutionStateRunning,
+			}})
+			_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+				CallID: callID, Name: tt.toolName, ArgsJSON: tt.completeArgs, Result: tt.result, Status: agent.ToolResultStatusSuccess, Diff: tt.diff,
+			}})
+
+			block, ok := m.viewport.FindBlockByToolID(callID)
+			if !ok {
+				t.Fatalf("expected %s tool block", tt.toolName)
+			}
+			if block.RawArgs != tt.completeArgs {
+				t.Fatalf("RawArgs = %q, want complete args %q", block.RawArgs, tt.completeArgs)
+			}
+			for _, want := range tt.wantContent {
+				if !strings.Contains(block.Content, want) {
+					t.Fatalf("Content = %q, want it to contain %q", block.Content, want)
+				}
+			}
+			for _, notWant := range tt.dontWantContent {
+				if strings.Contains(block.Content, notWant) {
+					t.Fatalf("Content = %q, do not want it to contain %q", block.Content, notWant)
+				}
+			}
+			plain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+			if !strings.Contains(plain, tt.wantRendered) {
+				t.Fatalf("expected completed %s display to survive execution and result events, got:\n%s", tt.toolName, plain)
+			}
+		})
 	}
 }
 
@@ -4591,6 +4735,19 @@ func TestMessagesToBlocksRestoredEditWithoutToolDiffHidesSuccessResult(t *testin
 	}
 	if block.Collapsed {
 		t.Fatal("restored Edit should use the same expanded terminal state as live Edit results")
+	}
+	var displayArgs map[string]string
+	if err := json.Unmarshal([]byte(block.Content), &displayArgs); err != nil {
+		t.Fatalf("parse restored Edit Content %q: %v", block.Content, err)
+	}
+	if !strings.HasSuffix(filepath.ToSlash(displayArgs["path"]), "/foo.txt") {
+		t.Fatalf("restored Edit display path = %q, want foo.txt", displayArgs["path"])
+	}
+	if _, ok := displayArgs["patch"]; ok {
+		t.Fatalf("restored Edit Content = %q, want stable path-only display args", block.Content)
+	}
+	if block.RawArgs != `{"path":"foo.txt","patch":"@@\n-old\n+new\n"}` {
+		t.Fatalf("restored Edit RawArgs = %q, want complete tool args", block.RawArgs)
 	}
 
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))

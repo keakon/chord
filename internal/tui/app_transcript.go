@@ -437,7 +437,7 @@ func newTranscriptToolCallBlock(nextID int, tc message.ToolCall) *Block {
 	b := &Block{
 		ID:        nextID,
 		Type:      BlockToolCall,
-		Content:   eventToolDisplayArgs(toolName, argsStr, ""),
+		Content:   stableToolDisplayArgs(toolName, argsStr, ""),
 		RawArgs:   argsStr,
 		ToolName:  toolName,
 		ToolID:    tc.ID,
@@ -642,7 +642,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					audit:          msg.Audit,
 					diff:           msg.ToolDiff,
 					duration:       time.Duration(msg.ToolDurationMs) * time.Millisecond,
-					displayArgs:    eventToolDisplayArgs,
+					displayArgs:    stableToolDisplayArgs,
 					resetExecution: true,
 				})
 			}
