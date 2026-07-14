@@ -179,7 +179,7 @@ func TestSubLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
 		instanceID: "agent-1",
 		parent:     a,
 	}
-	reducer := sub.newSubLLMStreamReducer(&Turn{ID: 1}, func(string) {}, false)
+	reducer := sub.newSubLLMStreamReducer(&Turn{ID: 1}, func(string) {}, false, nil)
 
 	reducer.Handle(message.StreamDelta{
 		Type:      message.StreamDeltaRetryError,
@@ -205,5 +205,33 @@ func TestSubLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
 		}
 	default:
 		t.Fatal("missing retry ErrorEvent")
+	}
+}
+
+func TestSubLLMStreamReducerEmitsRequestProgress(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := &SubAgent{
+		instanceID: "agent-1",
+		parent:     a,
+	}
+	state := &subLLMStreamState{}
+	reducer := sub.newSubLLMStreamReducer(&Turn{ID: 1}, func(string) {}, false, state)
+
+	reducer.Handle(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: 40_934, Events: 95}})
+
+	select {
+	case evt := <-a.outputCh:
+		progress, ok := evt.(RequestProgressEvent)
+		if !ok {
+			t.Fatalf("event = %T, want RequestProgressEvent", evt)
+		}
+		if progress.AgentID != sub.instanceID || progress.Bytes != 40_934 || progress.Events != 95 || progress.Done {
+			t.Fatalf("progress event = %#v, want subagent progress", progress)
+		}
+	default:
+		t.Fatal("missing RequestProgressEvent")
+	}
+	if state.requestProgressBytes != 40_934 || state.requestProgressEvents != 95 {
+		t.Fatalf("progress state = %#v, want bytes=40934 events=95", state)
 	}
 }

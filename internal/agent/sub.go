@@ -560,13 +560,15 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 			s.parent.emitActivity(s.instanceID, ActivityStreaming, "")
 		}
 
-		streamReducer := s.newSubLLMStreamReducer(turn, promoteStreamingActivity, scrubThinkingMarkers)
+		streamState := &subLLMStreamState{}
+		streamReducer := s.newSubLLMStreamReducer(turn, promoteStreamingActivity, scrubThinkingMarkers, streamState)
 
 		callback := streamReducer.Handle
 
 		s.parent.emitActivity(s.instanceID, ActivityConnecting, "")
 		resp, err := llmClient.CompleteStream(turn.Ctx, messages, toolDefs, callback)
 		streamReducer.Finish() // final flush: emit any remaining accumulated text
+		s.parent.emitToTUI(RequestProgressEvent{AgentID: s.instanceID, Bytes: streamState.requestProgressBytes, Events: streamState.requestProgressEvents, Done: true})
 		if turn.Ctx.Err() != nil {
 			return // turn cancelled
 		}
@@ -627,7 +629,15 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 	}()
 }
 
-func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity func(string), scrubThinkingMarkers bool) *llmStreamReducer {
+type subLLMStreamState struct {
+	requestProgressBytes  int64
+	requestProgressEvents int64
+}
+
+func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity func(string), scrubThinkingMarkers bool, state *subLLMStreamState) *llmStreamReducer {
+	if state == nil {
+		state = &subLLMStreamState{}
+	}
 	streamReducer := &llmStreamReducer{}
 	updateRunningModelRef := func(status *message.StatusDelta) {
 		if status == nil {
@@ -678,6 +688,20 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		s.parent.emitActivity(s.instanceID, activity, detail)
 	}
 	streamReducer.promoteStreamingActivity = promoteStreamingActivity
+	var lastProgressEmitAt time.Time
+	var lastProgressEmitBytes int64
+	var lastProgressEmitEvents int64
+	streamReducer.onProgress = func(progress *message.StreamProgressDelta) {
+		state.requestProgressBytes = progress.Bytes
+		state.requestProgressEvents = progress.Events
+		now := time.Now()
+		if shouldEmitRequestProgress(now, lastProgressEmitAt, state.requestProgressBytes, state.requestProgressEvents, lastProgressEmitBytes, lastProgressEmitEvents) {
+			lastProgressEmitAt = now
+			lastProgressEmitBytes = state.requestProgressBytes
+			lastProgressEmitEvents = state.requestProgressEvents
+			s.parent.emitToTUI(RequestProgressEvent{AgentID: s.instanceID, Bytes: state.requestProgressBytes, Events: state.requestProgressEvents})
+		}
+	}
 	streamReducer.beforeStatus = updateRunningModelRef
 	streamReducer.onKeyConfirmed = updateRunningModelRef
 	streamReducer.onRetryError = func(err error, provider, model, maskedKey, accountID, email string) {
