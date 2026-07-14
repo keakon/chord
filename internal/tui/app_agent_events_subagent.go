@@ -13,6 +13,36 @@ import (
 func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
+	case agent.AgentStartedEvent:
+		previousAgentID := strings.TrimSpace(evt.PreviousAgentID)
+		if previousAgentID != "" && previousAgentID != evt.AgentID {
+			if state, ok := m.agentComposerStates[normalizeDraftAgentID(previousAgentID)]; ok {
+				m.agentComposerStates[normalizeDraftAgentID(evt.AgentID)] = state
+				delete(m.agentComposerStates, normalizeDraftAgentID(previousAgentID))
+			}
+			if activity, ok := m.activities[previousAgentID]; ok {
+				activity.AgentID = evt.AgentID
+				m.activities[evt.AgentID] = activity
+				delete(m.activities, previousAgentID)
+			}
+			if changed, ok := m.activityLastChanged[previousAgentID]; ok {
+				m.activityLastChanged[evt.AgentID] = changed
+				delete(m.activityLastChanged, previousAgentID)
+			}
+			for i := range m.queuedDrafts {
+				if m.queuedDrafts[i].AgentID == previousAgentID {
+					m.queuedDrafts[i].AgentID = evt.AgentID
+				}
+			}
+			if m.inflightDraft != nil && m.inflightDraft.AgentID == previousAgentID {
+				m.inflightDraft.AgentID = evt.AgentID
+			}
+			if m.focusedAgentID == previousAgentID {
+				m.setFocusedAgent(evt.AgentID)
+				delete(m.agentComposerStates, normalizeDraftAgentID(previousAgentID))
+			}
+		}
+		return true, effects
 	case agent.AgentDoneEvent:
 		prevType := m.activities[evt.AgentID].Type
 		if m.inflightDraftBelongsToAgent(evt.AgentID) {

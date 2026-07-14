@@ -98,6 +98,7 @@ type SubAgent struct {
 	llmMu              sync.RWMutex
 	llmClient          *llm.Client
 	llmRequestInFlight atomic.Bool
+	lifecycleMu        sync.Mutex      // coordinates parking with external wake-and-deliver operations
 	ctxMgr             *ctxmgr.Manager // own context; automatic compaction disabled
 	tools              *tools.Registry // shared base + SubAgent-specific tools
 	parent             *MainAgent      // reference to parent for event forwarding
@@ -174,6 +175,29 @@ type SubAgent struct {
 	semBypassed bool
 
 	runtimeState subAgentRuntimeState
+}
+
+func (s *SubAgent) persistMessageAsync(msg message.Message, description string, after func()) {
+	if s == nil {
+		return
+	}
+	if s.parent == nil {
+		if s.recovery != nil {
+			if err := s.recovery.PersistMessage(s.instanceID, msg); err != nil {
+				log.Warnf("SubAgent: failed to persist %s agent=%v error=%v", description, s.instanceID, err)
+				return
+			}
+		}
+		if after != nil {
+			after()
+		}
+		return
+	}
+	s.parent.persistAsyncAfter(s.instanceID, msg, func(succeeded bool) {
+		if succeeded && after != nil {
+			after()
+		}
+	})
 }
 
 // maxIdleNudges is the maximum number of idle nudges before escalating to
@@ -480,16 +504,6 @@ func subAgentToolWithBaseDir(t tools.Tool, workDir string) tools.Tool {
 // LLM interaction
 // ---------------------------------------------------------------------------
 
-// asyncCallLLM starts an asynchronous LLM call and sends the result back
-// via llmCh. Streaming deltas are forwarded to the parent's TUI output.
-// Hook firing (on_before_llm_call / on_after_llm_call) and usage tracking
-// mirror MainAgent.callLLM so that SubAgent calls are observable by user
-// hooks and visible in cost analytics.
-func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
-	s.llmRequestInFlight.Store(true)
-	s.asyncCallLLMWithFlightMarked(turn, messages)
-}
-
 func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.Message) {
 	defer func() {
 		if recoverValue := recover(); recoverValue != nil {
@@ -512,10 +526,10 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 	}
 	llmClient, modelName := s.llmSnapshot()
 	if llmClient == nil {
-		s.llmRequestInFlight.Store(false)
 		select {
 		case s.llmCh <- &llmResult{err: fmt.Errorf("SubAgent %s has no LLM client", s.instanceID), turnID: turn.ID}:
 		case <-s.parentCtx.Done():
+			s.llmRequestInFlight.Store(false)
 		}
 		return
 	}
@@ -528,9 +542,15 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 	scrubThinkingMarkers := compatCfg != nil && compatCfg.EnabledValue()
 
 	go func() {
+		resultQueued := false
 		defer func() {
-			s.llmRequestInFlight.Store(false)
-			s.parent.sendEvent(Event{Type: EventSubAgentRequestBoundary, SourceID: s.instanceID})
+			// A queued result still belongs to the active request until runLoop
+			// consumes it. Clearing the gate here would let queued user input
+			// create a newer turn and make the valid result look stale.
+			if !resultQueued {
+				s.llmRequestInFlight.Store(false)
+				s.parent.sendEvent(Event{Type: EventSubAgentRequestBoundary, SourceID: s.instanceID})
+			}
 		}()
 
 		// Hook: on_before_llm_call (mirrors MainAgent.callLLM).
@@ -549,6 +569,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 				}
 				select {
 				case s.llmCh <- &llmResult{err: fmt.Errorf("LLM request %s", msg), turnID: turn.ID}:
+					resultQueued = true
 				case <-s.parentCtx.Done():
 				}
 				return
@@ -624,6 +645,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 					}
 					select {
 					case s.llmCh <- &llmResult{err: fmt.Errorf("LLM response %s", msg), turnID: turn.ID}:
+						resultQueued = true
 					case <-s.parentCtx.Done():
 					}
 					return
@@ -635,6 +657,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 
 		select {
 		case s.llmCh <- &llmResult{resp: resp, err: err, turnID: turn.ID}:
+			resultQueued = true
 		case <-s.parentCtx.Done():
 		}
 	}()

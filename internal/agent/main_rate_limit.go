@@ -74,8 +74,9 @@ func (a *MainAgent) mainRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot {
 // agent currently shown in the TUI (focused SubAgent, else MainAgent). Used by
 // sidebar MODEL/Keys and Codex rate-limit snapshot selection.
 func (a *MainAgent) tuiFocusedLLMAndRef() (client *llm.Client, ref string) {
-	if sub := a.validFocusedSubAgent(); sub != nil {
-		client, _ = sub.llmSnapshot()
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		client, _ = target.sub.llmSnapshot()
 		if client == nil {
 			return nil, ""
 		}
@@ -84,6 +85,9 @@ func (a *MainAgent) tuiFocusedLLMAndRef() (client *llm.Client, ref string) {
 			ref = strings.TrimSpace(client.PrimaryModelRef())
 		}
 		return client, ref
+	}
+	if target.parked {
+		return nil, ""
 	}
 	a.llmMu.RLock()
 	client = a.llmClient

@@ -10,6 +10,7 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
@@ -30,32 +31,91 @@ func (a *MainAgent) GetSidebarUsageStats() analytics.SessionStats {
 	if a.usageTracker == nil {
 		return analytics.SessionStats{}
 	}
-	if sub := a.validFocusedSubAgent(); sub != nil {
-		return a.usageTracker.SessionStatsForAgent(sub.instanceID)
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		return a.usageTracker.SessionStatsForAgent(target.sub.instanceID)
+	}
+	if target.parked {
+		return a.usageStatsForTask(target.task)
 	}
 	return a.usageTracker.SessionStatsForAgent(identity.MainAgentID)
+}
+
+func (a *MainAgent) usageStatsForTask(rec *DurableTaskRecord) analytics.SessionStats {
+	out := analytics.SessionStats{ByModel: make(map[string]*analytics.ModelStats), ByAgent: make(map[string]*analytics.AgentStats)}
+	if rec == nil || a.usageTracker == nil {
+		return out
+	}
+	for _, instanceID := range dedupeTaskInstanceHistory(rec.InstanceHistory) {
+		stats := a.usageTracker.SessionStatsForAgent(instanceID)
+		out.InputTokens += stats.InputTokens
+		out.OutputTokens += stats.OutputTokens
+		out.CacheReadTokens += stats.CacheReadTokens
+		out.CacheWriteTokens += stats.CacheWriteTokens
+		out.ReasoningTokens += stats.ReasoningTokens
+		out.LLMCalls += stats.LLMCalls
+		out.EstimatedCost += stats.EstimatedCost
+		for model, modelStats := range stats.ByModel {
+			if modelStats == nil {
+				continue
+			}
+			agg := out.ByModel[model]
+			if agg == nil {
+				agg = &analytics.ModelStats{}
+				out.ByModel[model] = agg
+			}
+			agg.Calls += modelStats.Calls
+			agg.InputTokens += modelStats.InputTokens
+			agg.OutputTokens += modelStats.OutputTokens
+			agg.CacheReadTokens += modelStats.CacheReadTokens
+			agg.CacheWriteTokens += modelStats.CacheWriteTokens
+			agg.ReasoningTokens += modelStats.ReasoningTokens
+			agg.EstimatedCost += modelStats.EstimatedCost
+		}
+	}
+	return out
 }
 
 // GetContextStats returns current input-context usage and usable input budget for the focused agent.
 // current is the full prompt-side burden from the most recent API call: input tokens plus cache-write tokens.
 func (a *MainAgent) GetContextStats() (current, limit int) {
-	if sub := a.validFocusedSubAgent(); sub != nil {
-		return sub.GetContextStats()
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		return target.sub.GetContextStats()
+	}
+	if target.parked {
+		return 0, 0
 	}
 	return a.ctxMgr.LastTotalContextTokens(), a.ctxMgr.GetUsableInputBudget()
 }
 
 // GetContextMessageCount returns the number of messages in the focused agent's context (for sidebar).
 func (a *MainAgent) GetContextMessageCount() int {
-	if sub := a.validFocusedSubAgent(); sub != nil {
-		return sub.GetContextMessageCount()
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		return target.sub.GetContextMessageCount()
+	}
+	if target.parked {
+		msgs, err := loadTaskHistoryMessages(a.recovery, target.task)
+		if err != nil {
+			return 0
+		}
+		return len(msgs)
 	}
 	return a.ctxMgr.MessageCount()
 }
 
 func (a *MainAgent) GetContextBytes() int {
-	if sub := a.validFocusedSubAgent(); sub != nil {
-		return sub.GetContextBytes()
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		return target.sub.GetContextBytes()
+	}
+	if target.parked {
+		msgs, err := loadTaskHistoryMessages(a.recovery, target.task)
+		if err != nil {
+			return 0
+		}
+		return ctxmgr.MessagePayloadBytes(msgs)
 	}
 	return a.ctxMgr.ContextPayloadBytes() + toolDefinitionBytes(a.mainLLMToolDefinitions())
 }

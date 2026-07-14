@@ -220,9 +220,16 @@ func (a *MainAgent) effectiveSubAgentModels(agentDef *config.AgentConfig) []stri
 }
 
 func (a *MainAgent) focusedAgentConfig() *config.AgentConfig {
-	if sub := a.validFocusedSubAgent(); sub != nil {
+	target := a.focusedAgentSnapshot()
+	agentDefName := ""
+	if target.sub != nil {
+		agentDefName = target.sub.agentDefName
+	} else if target.parked && target.task != nil {
+		agentDefName = target.task.AgentDefName
+	}
+	if agentDefName != "" {
 		a.stateMu.RLock()
-		cfg := a.agentConfigs[sub.agentDefName]
+		cfg := a.agentConfigs[agentDefName]
 		a.stateMu.RUnlock()
 		return cfg
 	}
@@ -274,6 +281,10 @@ func (a *MainAgent) PoolNames() []string {
 }
 
 func (a *MainAgent) SetCurrentModelPool(pool string) error {
+	target := a.focusedAgentSnapshot()
+	if target.parked && target.task != nil {
+		return a.SetAgentModelPool(target.task.AgentDefName, pool)
+	}
 	a.sendEvent(Event{Type: EventModelPoolSwitch, Payload: modelPoolSwitchRequest{Pool: pool}})
 	return nil
 }

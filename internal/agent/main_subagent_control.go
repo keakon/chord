@@ -5,23 +5,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/keakon/chord/internal/tools"
 )
 
 func (a *MainAgent) subAgentByTaskID(taskID string) *SubAgent {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return nil
-	}
-	a.subs.mu.RLock()
-	defer a.subs.mu.RUnlock()
-	for _, sub := range a.subs.subAgents {
-		if sub != nil && strings.TrimSpace(sub.taskID) == taskID {
-			return sub
-		}
-	}
-	return nil
+	return a.subs.subAgentByTaskID(taskID)
 }
 
 func (a *MainAgent) acquireSubAgentSlot(sub *SubAgent) error {
@@ -200,6 +190,10 @@ func (a *MainAgent) canCallerControlTask(callerAgentID, callerTaskID, taskID str
 }
 
 func (a *MainAgent) sendMessageToSubAgentNow(callerAgentID, callerTaskID, taskID, message, kind string) (tools.TaskHandle, error) {
+	return a.sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID, taskID, message, kind, taskResumeByTargetedNotify)
+}
+
+func (a *MainAgent) sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID, taskID, message, kind string, trigger taskResumeTrigger) (tools.TaskHandle, error) {
 	taskID = strings.TrimSpace(taskID)
 	message = strings.TrimSpace(message)
 	kind = strings.TrimSpace(kind)
@@ -217,14 +211,13 @@ func (a *MainAgent) sendMessageToSubAgentNow(callerAgentID, callerTaskID, taskID
 	rehydrated := false
 	previousAgentID := ""
 	if sub == nil {
-		if !record.allowsRehydrate() {
+		if !record.allowsRehydrate(trigger) {
 			return tools.TaskHandle{}, fmt.Errorf("task %s is %s; follow-up is not allowed without a live worker", taskID, strings.TrimSpace(record.State))
 		}
-		sub, previousAgentID, err = a.rehydrateCompletedTask(record)
+		sub, previousAgentID, rehydrated, err = a.getOrRehydrateTask(record)
 		if err != nil {
 			return tools.TaskHandle{}, err
 		}
-		rehydrated = true
 	}
 
 	status, statusMessage, err := a.deliverMessageToSubAgent(sub, message, kind)
@@ -284,6 +277,11 @@ func (a *MainAgent) deliverMessageToSubAgentWithMode(sub *SubAgent, message, kin
 	if sub == nil {
 		return "", "", fmt.Errorf("missing worker")
 	}
+	sub.lifecycleMu.Lock()
+	defer sub.lifecycleMu.Unlock()
+	if !a.subs.withSubAgent(sub.instanceID, func(current *SubAgent) bool { return current == sub }) {
+		return "", "", fmt.Errorf("SubAgent %s is no longer live; retry through task %s", sub.instanceID, sub.taskID)
+	}
 	state := sub.State()
 
 	status := "queued"
@@ -341,20 +339,48 @@ func (a *MainAgent) deliverMessageToSubAgentWithMode(sub *SubAgent, message, kin
 	return status, statusMessage, nil
 }
 
-func (a *MainAgent) rehydrateCompletedTask(record *DurableTaskRecord) (*SubAgent, string, error) {
+func (a *MainAgent) getOrRehydrateTask(record *DurableTaskRecord) (*SubAgent, string, bool, error) {
 	if record == nil {
-		return nil, "", fmt.Errorf("missing task record")
+		return nil, "", false, fmt.Errorf("missing task record")
 	}
+	taskID := strings.TrimSpace(record.TaskID)
+	if taskID == "" {
+		return nil, "", false, fmt.Errorf("missing task ID")
+	}
+	if sub, activation, leader := a.subs.beginTaskActivation(taskID); sub != nil {
+		return sub, "", false, nil
+	} else if !leader {
+		select {
+		case <-activation.done:
+			return activation.sub, activation.previousAgentID, false, activation.err
+		case <-a.parentCtx.Done():
+			return nil, "", false, a.parentCtx.Err()
+		}
+	} else {
+		return a.rehydrateTaskAsActivationLeader(record, activation)
+	}
+}
+
+func (a *MainAgent) rehydrateTask(record *DurableTaskRecord) (*SubAgent, string, error) {
+	sub, previousAgentID, _, err := a.getOrRehydrateTask(record)
+	return sub, previousAgentID, err
+}
+
+func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, activation *subAgentActivation) (sub *SubAgent, previousAgentID string, rehydrated bool, err error) {
+	taskID := strings.TrimSpace(record.TaskID)
+	defer func() {
+		a.subs.completeTaskActivation(taskID, activation, sub, previousAgentID, err)
+	}()
 	agentDef, err := a.resolveAgentDef(record.AgentDefName)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	if a.llmFactory == nil {
-		return nil, "", fmt.Errorf("LLM client factory not configured; call SetLLMFactory before rehydrating SubAgents")
+		return nil, "", false, fmt.Errorf("LLM client factory not configured; call SetLLMFactory before rehydrating SubAgents")
 	}
 	msgs, err := loadTaskHistoryMessages(a.recovery, record)
 	if err != nil {
-		return nil, "", fmt.Errorf("load task history for %s: %w", record.TaskID, err)
+		return nil, "", false, fmt.Errorf("load task history for %s: %w", record.TaskID, err)
 	}
 
 	subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
@@ -364,7 +390,7 @@ func (a *MainAgent) rehydrateCompletedTask(record *DurableTaskRecord) (*SubAgent
 	if len(agentDef.MCP) > 0 {
 		extraMCPTools, err = a.getOrCreateAgentMCP(agentDef.Name, agentDef.MCP)
 		if err != nil {
-			return nil, "", err
+			return nil, "", false, err
 		}
 	}
 	instanceID := NextInstanceID(agentDef.Name)
@@ -373,11 +399,14 @@ func (a *MainAgent) rehydrateCompletedTask(record *DurableTaskRecord) (*SubAgent
 	if workDir == "" {
 		workDir, _ = os.Getwd()
 	}
-	sub := NewSubAgent(SubAgentConfig{
+	sub = NewSubAgent(SubAgentConfig{
 		InstanceID:    instanceID,
 		TaskID:        record.TaskID,
 		AgentDefName:  agentDef.Name,
 		TaskDesc:      record.TaskDesc,
+		PlanTaskRef:   record.PlanTaskRef,
+		SemanticKey:   record.SemanticTaskKey,
+		WriteScope:    record.ExpectedWriteScope,
 		OwnerAgentID:  record.OwnerAgentID,
 		OwnerTaskID:   record.OwnerTaskID,
 		Depth:         record.Depth,
@@ -401,7 +430,14 @@ func (a *MainAgent) rehydrateCompletedTask(record *DurableTaskRecord) (*SubAgent
 		ModelName:     a.ModelName(),
 	})
 	sub.RestoreMessages(msgs)
-	sub.setState(SubAgentStateCompleted, strings.TrimSpace(record.LastSummary))
+	state := SubAgentState(strings.TrimSpace(record.State))
+	if state == "" || state == SubAgentStateRunning {
+		state = SubAgentStateIdle
+	}
+	sub.setState(state, strings.TrimSpace(record.LastSummary))
+	if record.PendingCompletion != nil {
+		sub.setPendingCompleteIntent(&AgentResult{Summary: record.PendingCompletion.Summary, Envelope: record.PendingCompletion})
+	}
 	if record.LastMailboxID != "" {
 		sub.setLastMailboxID(record.LastMailboxID)
 	}
@@ -413,21 +449,38 @@ func (a *MainAgent) rehydrateCompletedTask(record *DurableTaskRecord) (*SubAgent
 	}
 	if err := a.acquireSubAgentSlot(sub); err != nil {
 		cancel()
-		return nil, "", err
+		return nil, "", false, err
 	}
-	a.subs.add(sub)
+	previousAgentID = strings.TrimSpace(record.LatestInstanceID)
+	live, registered := a.subs.registerTaskActivation(taskID, activation, sub)
+	if !registered {
+		a.releaseSubAgentSlot(sub)
+		cancel()
+		if live == nil {
+			return nil, "", false, fmt.Errorf("task %s activation was superseded", taskID)
+		}
+		return live, "", false, nil
+	}
+	a.migrateSubAgentOwnerIdentity(previousAgentID, sub.instanceID)
+	a.focusedTaskMu.RLock()
+	focusedTaskID := a.focusedTaskID
+	a.focusedTaskMu.RUnlock()
+	if focusedTaskID == sub.taskID {
+		a.focusedAgent.Store(sub)
+	}
 	a.persistSubAgentMeta(sub)
 	a.syncTaskRecordFromSub(sub, "")
 	a.emitToTUI(AgentStartedEvent{
-		AgentID:       sub.instanceID,
-		TaskID:        sub.taskID,
-		AgentType:     sub.agentDefName,
-		Description:   sub.taskDesc,
-		ParentAgentID: controlPlaneAgentID(sub.ownerAgentID),
-		ParentTaskID:  sub.ownerTaskID,
+		AgentID:         sub.instanceID,
+		PreviousAgentID: previousAgentID,
+		TaskID:          sub.taskID,
+		AgentType:       sub.agentDefName,
+		Description:     sub.taskDesc,
+		ParentAgentID:   controlPlaneAgentID(sub.ownerAgentID),
+		ParentTaskID:    sub.ownerTaskID,
 	})
 	go sub.runLoop()
-	return sub, strings.TrimSpace(record.LatestInstanceID), nil
+	return sub, previousAgentID, true, nil
 }
 
 func (a *MainAgent) stopSubAgentNow(callerAgentID, callerTaskID, taskID, reason string) (tools.TaskHandle, error) {
@@ -441,6 +494,21 @@ func (a *MainAgent) stopSubAgentNow(callerAgentID, callerTaskID, taskID, reason 
 	}
 	sub := a.subAgentByTaskID(taskID)
 	if sub == nil {
+		record := a.taskRecordByTaskID(taskID)
+		if record != nil && record.RuntimeParked {
+			a.subs.mu.Lock()
+			if rec := a.subs.taskRecords[taskID]; rec != nil {
+				rec.State = string(SubAgentStateCancelled)
+				rec.ResumePolicy = taskResumePolicyExplicitOnly
+				rec.ClosedReason = blankToDefault(reason, "stopped by main agent")
+				rec.LastSummary = rec.ClosedReason
+				rec.UpdatedAt = time.Now()
+			}
+			a.subs.mu.Unlock()
+			a.persistTaskRegistry()
+			a.emitToTUI(AgentStatusEvent{AgentID: record.LatestInstanceID, Status: string(SubAgentStateCancelled), Message: blankToDefault(reason, "Stopped by MainAgent")})
+			return tools.TaskHandle{Status: "cancelled", TaskID: taskID, AgentID: record.LatestInstanceID, Message: "parked worker stopped"}, nil
+		}
 		return tools.TaskHandle{}, fmt.Errorf("unknown task_id %q; cannot stop a missing worker", taskID)
 	}
 
@@ -466,9 +534,6 @@ func (a *MainAgent) stopSubAgentNow(callerAgentID, callerTaskID, taskID, reason 
 		}
 	}
 
-	if focused := a.focusedAgent.Load(); focused != nil && focused.instanceID == sub.instanceID {
-		a.focusedAgent.Store(nil)
-	}
 	// Cancel synchronously for deterministic shutdown and tests.
 	sub.cancelCurrentTurnFromLoop()
 	a.releaseSubAgentSlot(sub)

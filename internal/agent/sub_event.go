@@ -65,6 +65,7 @@ func (s *SubAgent) runLoop() {
 			s.handleContinueSignal(msg)
 
 		case result := <-s.llmCh:
+			s.finishLLMRequest()
 			s.handleLLMResponse(result)
 			if s.canStartUserTurn() {
 				s.refillInputChannelFromOverflow()
@@ -100,6 +101,14 @@ func (s *SubAgent) runLoop() {
 	}
 }
 
+func (s *SubAgent) finishLLMRequest() {
+	if s == nil {
+		return
+	}
+	s.llmRequestInFlight.Store(false)
+	s.parent.sendEvent(Event{Type: EventSubAgentRequestBoundary, SourceID: s.instanceID})
+}
+
 func (s *SubAgent) canStartUserTurn() bool {
 	if s == nil || s.State() != SubAgentStateRunning || s.llmRequestInFlight.Load() {
 		return false
@@ -110,6 +119,30 @@ func (s *SubAgent) canStartUserTurn() bool {
 	s.turnMu.Lock()
 	defer s.turnMu.Unlock()
 	return s.turn.PendingToolCalls.Load() == 0 && s.turn.activeToolBatchCancel == nil
+}
+
+func (s *SubAgent) canPark() bool {
+	if s == nil || s.llmRequestInFlight.Load() {
+		return false
+	}
+	switch s.State() {
+	case SubAgentStateIdle, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant, SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled:
+	default:
+		return false
+	}
+	if len(s.inputCh) > 0 || len(s.ctxAppendCh) > 0 || len(s.llmCh) > 0 || len(s.toolCh) > 0 || len(s.continueCh) > 0 {
+		return false
+	}
+	s.inputQueueMu.Lock()
+	inputOverflow := len(s.inputOverflow)
+	s.inputQueueMu.Unlock()
+	s.ctxAppendQueueMu.Lock()
+	contextOverflow := len(s.ctxAppendOverflow)
+	s.ctxAppendQueueMu.Unlock()
+	if inputOverflow > 0 || contextOverflow > 0 {
+		return false
+	}
+	return true
 }
 
 func (s *SubAgent) dequeuePromotedToolResult() (*toolResult, bool) {

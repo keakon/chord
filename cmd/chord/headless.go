@@ -255,12 +255,13 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		state.updatedAt = time.Now()
 		if state.isSubscribed("agent_started") {
 			out = append(out, &headlessEnvelope{Type: "agent_started", Payload: map[string]string{
-				"agent_id":        e.AgentID,
-				"task_id":         e.TaskID,
-				"agent_type":      e.AgentType,
-				"description":     e.Description,
-				"parent_agent_id": e.ParentAgentID,
-				"parent_task_id":  e.ParentTaskID,
+				"agent_id":          e.AgentID,
+				"previous_agent_id": e.PreviousAgentID,
+				"task_id":           e.TaskID,
+				"agent_type":        e.AgentType,
+				"description":       e.Description,
+				"parent_agent_id":   e.ParentAgentID,
+				"parent_task_id":    e.ParentTaskID,
 			}})
 		}
 	case agent.AgentNotifyEvent:

@@ -48,10 +48,10 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 	switch msg.Kind {
 	case SubAgentMailboxKindCompleted:
 		rec.State = string(SubAgentStateCompleted)
-		rec.ResumePolicy = taskResumePolicyCompletedFollowUpOnly
+		rec.ResumePolicy = taskResumePolicyNotify
 	case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired:
 		rec.State = string(SubAgentStateWaitingMain)
-		rec.ResumePolicy = taskResumePolicyLiveOnly
+		rec.ResumePolicy = taskResumePolicyNotify
 	case SubAgentMailboxKindProgress:
 		if rec.State == "" {
 			rec.State = string(SubAgentStateRunning)
@@ -60,6 +60,9 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 	}
 	rec.LastUpdatedTurn = a.explicitUserTurnCount
 	rec.UpdatedAt = now
+	if live := a.subs.subAgents[rec.LatestInstanceID]; live == nil {
+		rec.RuntimeParked = true
+	}
 	a.subs.taskRecords[taskID] = rec
 	a.subs.mu.Unlock()
 	a.persistTaskRegistry()

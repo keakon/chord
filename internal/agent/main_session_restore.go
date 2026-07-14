@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -54,6 +53,9 @@ type loadedSubAgentState struct {
 	TaskID                  string
 	AgentDefName            string
 	TaskDesc                string
+	PlanTaskRef             string
+	SemanticTaskKey         string
+	ExpectedWriteScope      tools.WriteScope
 	OwnerAgentID            string
 	OwnerTaskID             string
 	Depth                   int
@@ -91,6 +93,15 @@ func (b *restoredSubAgentBuilder) seedFromSnapshot(snap recovery.AgentSnapshot) 
 	if b.state.TaskDesc == "" {
 		b.state.TaskDesc = strings.TrimSpace(snap.TaskDesc)
 	}
+	if b.state.PlanTaskRef == "" {
+		b.state.PlanTaskRef = strings.TrimSpace(snap.PlanTaskRef)
+	}
+	if b.state.SemanticTaskKey == "" {
+		b.state.SemanticTaskKey = strings.TrimSpace(snap.SemanticTaskKey)
+	}
+	if b.state.ExpectedWriteScope.Empty() {
+		b.state.ExpectedWriteScope = snap.ExpectedWriteScope.Normalized()
+	}
 	b.state.State = normalizeSubAgentState(SubAgentState(strings.TrimSpace(snap.State)))
 	b.state.LastSummary = strings.TrimSpace(snap.LastSummary)
 	b.state.OwnerAgentID = strings.TrimSpace(snap.OwnerAgentID)
@@ -118,6 +129,15 @@ func (b *restoredSubAgentBuilder) overlayMeta(meta *subAgentMeta) {
 	}
 	if b.state.TaskID == "" {
 		b.state.TaskID = strings.TrimSpace(meta.TaskID)
+	}
+	if b.state.PlanTaskRef == "" {
+		b.state.PlanTaskRef = strings.TrimSpace(meta.PlanTaskRef)
+	}
+	if b.state.SemanticTaskKey == "" {
+		b.state.SemanticTaskKey = strings.TrimSpace(meta.SemanticTaskKey)
+	}
+	if b.state.ExpectedWriteScope.Empty() {
+		b.state.ExpectedWriteScope = meta.ExpectedWriteScope.Normalized()
 	}
 	if b.state.State == "" {
 		b.state.State = normalizeSubAgentState(SubAgentState(strings.TrimSpace(meta.State)))
@@ -170,6 +190,15 @@ func (b *restoredSubAgentBuilder) overlayTaskRecord(rec *DurableTaskRecord) {
 	if rec == nil {
 		return
 	}
+	if b.state.PlanTaskRef == "" {
+		b.state.PlanTaskRef = rec.PlanTaskRef
+	}
+	if b.state.SemanticTaskKey == "" {
+		b.state.SemanticTaskKey = rec.SemanticTaskKey
+	}
+	if b.state.ExpectedWriteScope.Empty() {
+		b.state.ExpectedWriteScope = rec.ExpectedWriteScope.Normalized()
+	}
 	b.state.JoinToOwner = rec.JoinToOwner
 }
 
@@ -194,7 +223,9 @@ func (b *restoredSubAgentBuilder) normalize() {
 	if b.state.TaskID == "" {
 		b.state.TaskID = "restored"
 	}
-	b.state.State = SubAgentStateIdle
+	if b.state.State == SubAgentStateRunning || b.state.State == "" {
+		b.state.State = SubAgentStateIdle
+	}
 }
 
 func (b *restoredSubAgentBuilder) build() loadedSubAgentState {
@@ -561,9 +592,13 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.subAgentInbox = newSubAgentInbox()
 	a.subAgentMailboxIDsMu.Lock()
 	a.subAgentMailboxIDs = make(map[string]struct{}, len(loaded.MailboxMessages))
+	a.subAgentMailboxConsumed = make(map[string]struct{})
 	for _, msg := range loaded.MailboxMessages {
 		if messageID := strings.TrimSpace(msg.MessageID); messageID != "" {
 			a.subAgentMailboxIDs[messageID] = struct{}{}
+			if msg.Consumed {
+				a.subAgentMailboxConsumed[messageID] = struct{}{}
+			}
 		}
 	}
 	a.subAgentMailboxIDsMu.Unlock()
@@ -734,67 +769,11 @@ func parseSubAgentMailboxMessageSeq(id string) uint64 {
 }
 
 func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
-	if len(states) == 0 || a.recovery == nil || a.llmFactory == nil {
+	if len(states) == 0 {
 		return 0
 	}
-
-	workDir, _ := os.Getwd()
 	restored := 0
 	for _, state := range states {
-		state.State = SubAgentStateIdle
-		agentDefName := state.AgentDefName
-		agentDef, err := a.resolveAgentDef(agentDefName)
-		if err != nil {
-			agentDef, err = a.resolveAgentDef("builder")
-			if err != nil {
-				log.Warnf("restoreLoadedSubAgents: failed to resolve agent def, skipping id=%v agent_def=%v error=%v", state.InstanceID, agentDefName, err)
-				continue
-			}
-		}
-
-		subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
-		a.applyServiceTierToClient(subLLMClient)
-		agentRuleset := a.buildSubAgentRuleset(agentDef)
-
-		var extraMCPTools []tools.Tool
-		if len(agentDef.MCP) > 0 {
-			extraMCPTools, err = a.getOrCreateAgentMCP(agentDef.Name, agentDef.MCP)
-			if err != nil {
-				log.Warnf("restoreLoadedSubAgents: invalid agent MCP config, skipping id=%v agent_def=%v error=%v", state.InstanceID, agentDef.Name, err)
-				continue
-			}
-		}
-
-		ctx, cancel := context.WithCancel(a.parentCtx)
-		sub := NewSubAgent(SubAgentConfig{
-			InstanceID:    state.InstanceID,
-			TaskID:        state.TaskID,
-			AgentDefName:  agentDef.Name,
-			TaskDesc:      state.TaskDesc,
-			OwnerAgentID:  state.OwnerAgentID,
-			OwnerTaskID:   state.OwnerTaskID,
-			Depth:         state.Depth,
-			JoinToOwner:   state.JoinToOwner,
-			Delegation:    agentDef.Delegation,
-			SystemPrompt:  agentDef.SystemPrompt,
-			LLMClient:     subLLMClient,
-			Recovery:      a.recovery,
-			Parent:        a,
-			ParentCtx:     ctx,
-			Cancel:        cancel,
-			BaseTools:     a.tools,
-			ExtraMCPTools: extraMCPTools,
-			Ruleset:       agentRuleset,
-			WorkDir:       workDir,
-			VenvPath:      a.cachedVenvPath,
-			SessionDir:    a.sessionDir,
-			AgentsMD:      a.cachedAgentsMDSnapshot(),
-			Skills:        a.loadedSkillsSnapshot(),
-			ModelName:     a.ModelName(),
-		})
-		if len(state.Messages) > 0 {
-			sub.RestoreMessages(append([]message.Message(nil), state.Messages...))
-		}
 		restoreState := state.State
 		if restoreState == "" {
 			restoreState = SubAgentStateIdle
@@ -803,31 +782,31 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 		if strings.TrimSpace(restoreSummary) == "" {
 			restoreSummary = fmt.Sprintf("Restored agent %s", state.InstanceID)
 		}
-		sub.setState(restoreState, restoreSummary)
-		if state.PendingCompleteIntent {
-			pending := state.PendingComplete
-			if pending == nil && strings.TrimSpace(state.PendingCompleteSummary) != "" {
-				pending = &AgentResult{Summary: state.PendingCompleteSummary, Envelope: unmarshalCompletionEnvelope(state.PendingCompleteEnvelope)}
-			}
-			sub.setPendingCompleteIntent(pending)
-		}
-		a.noteSubAgentStateTransition(sub, restoreState)
-		if strings.TrimSpace(state.LastMailboxID) != "" {
-			sub.setLastMailboxID(state.LastMailboxID)
-		}
-		if strings.TrimSpace(state.LastReplyMessageID) != "" || strings.TrimSpace(state.LastReplySummary) != "" {
-			sub.setReplyThread(state.LastReplyMessageID, state.LastReplyToMailboxID, state.LastReplyKind, state.LastReplySummary)
-		}
-		if strings.TrimSpace(state.LastArtifact.RelPath) != "" || strings.TrimSpace(state.LastArtifact.ID) != "" {
-			sub.setLastArtifact(state.LastArtifact)
-		}
-
 		a.subs.mu.Lock()
-		a.subs.subAgents[state.InstanceID] = sub
+		rec := cloneDurableTaskRecord(a.subs.taskRecords[state.TaskID])
+		if rec == nil {
+			rec = taskRecordFromLoadedState(state)
+		}
+		if rec != nil {
+			rec.State = string(restoreState)
+			rec.ResumePolicy = durableTaskResumePolicy(restoreState)
+			rec.RuntimeParked = true
+			rec.LastSummary = restoreSummary
+			if state.PendingCompleteIntent {
+				pending := state.PendingComplete
+				if pending == nil && strings.TrimSpace(state.PendingCompleteSummary) != "" {
+					pending = &AgentResult{Summary: state.PendingCompleteSummary, Envelope: unmarshalCompletionEnvelope(state.PendingCompleteEnvelope)}
+				}
+				if pending != nil {
+					rec.PendingCompletion = normalizeCompletionEnvelope(&CompletionEnvelope{Summary: pending.Summary})
+					if pending.Envelope != nil {
+						rec.PendingCompletion = normalizeCompletionEnvelope(pending.Envelope)
+					}
+				}
+			}
+			a.subs.taskRecords[state.TaskID] = rec
+		}
 		a.subs.mu.Unlock()
-		a.persistSubAgentMeta(sub)
-		a.syncTaskRecordFromSub(sub, "")
-		go sub.runLoop()
 		restoreStatus := string(restoreState)
 		switch restoreState {
 		case SubAgentStateCompleted:
@@ -842,8 +821,9 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 		})
 		AdvancePastID(state.InstanceID)
 		restored++
-		log.Infof("SubAgent restored instance=%v task_id=%v agent_def=%v messages=%v", state.InstanceID, state.TaskID, agentDef.Name, len(state.Messages))
+		log.Infof("SubAgent restored as parked task instance=%v task_id=%v agent_def=%v messages=%v", state.InstanceID, state.TaskID, state.AgentDefName, len(state.Messages))
 	}
+	a.persistTaskRegistry()
 	return restored
 }
 

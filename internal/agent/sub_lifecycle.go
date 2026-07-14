@@ -15,34 +15,34 @@ import (
 // InjectUserMessage receives user messages directly (non-blocking enqueue).
 // Overflow is preserved in-memory so older messages are not silently dropped.
 // This is safe to call from any goroutine (typically MainAgent's event loop).
-func (s *SubAgent) InjectUserMessage(content string) {
-	s.enqueueUserMessage(pendingUserMessage{Content: content})
+func (s *SubAgent) InjectUserMessage(content string) bool {
+	return s.enqueueUserMessage(pendingUserMessage{Content: content})
 }
 
-func (s *SubAgent) InjectManualUserMessage(content string, drainContextAppends bool) {
-	s.enqueueUserMessage(pendingUserMessage{Content: content, FromUser: true, DrainContextAppends: drainContextAppends})
+func (s *SubAgent) InjectManualUserMessage(content string, drainContextAppends bool) bool {
+	return s.enqueueUserMessage(pendingUserMessage{Content: content, FromUser: true, DrainContextAppends: drainContextAppends})
 }
 
-func (s *SubAgent) InjectUserMessageWithMailboxAck(content, mailboxAckID string) {
-	s.enqueueUserMessage(pendingUserMessage{Content: content, MailboxAckID: strings.TrimSpace(mailboxAckID)})
+func (s *SubAgent) InjectUserMessageWithMailboxAck(content, mailboxAckID string) bool {
+	return s.enqueueUserMessage(pendingUserMessage{Content: content, MailboxAckID: strings.TrimSpace(mailboxAckID)})
 }
 
 // InjectUserMessageWithParts enqueues a multi-part user message for the SubAgent.
-func (s *SubAgent) InjectUserMessageWithParts(parts []message.ContentPart) {
-	s.enqueueUserMessage(pendingUserMessageFromDraft("", parts))
+func (s *SubAgent) InjectUserMessageWithParts(parts []message.ContentPart) bool {
+	return s.enqueueUserMessage(pendingUserMessageFromDraft("", parts))
 }
 
-func (s *SubAgent) InjectManualUserMessageWithParts(parts []message.ContentPart, drainContextAppends bool) {
+func (s *SubAgent) InjectManualUserMessageWithParts(parts []message.ContentPart, drainContextAppends bool) bool {
 	input := pendingUserMessageFromDraft("", parts)
 	input.FromUser = true
 	input.DrainContextAppends = drainContextAppends
-	s.enqueueUserMessage(input)
+	return s.enqueueUserMessage(input)
 }
 
 // QueuePendingUserDraft enqueues a TUI draft with its identity preserved so
 // the transcript can reveal it only when the SubAgent actually consumes it.
-func (s *SubAgent) QueuePendingUserDraft(draftID string, parts []message.ContentPart) {
-	s.enqueueUserMessage(pendingUserMessageFromDraft(draftID, parts))
+func (s *SubAgent) QueuePendingUserDraft(draftID string, parts []message.ContentPart) bool {
+	return s.enqueueUserMessage(pendingUserMessageFromDraft(draftID, parts))
 }
 
 func (s *SubAgent) UpdatePendingUserDraft(draftID string, parts []message.ContentPart) bool {
@@ -97,22 +97,24 @@ drained:
 	return found
 }
 
-func (s *SubAgent) enqueueUserMessage(input pendingUserMessage) {
+func (s *SubAgent) enqueueUserMessage(input pendingUserMessage) bool {
 	if s == nil {
-		return
+		return false
 	}
 	s.inputQueueMu.Lock()
 	defer s.inputQueueMu.Unlock()
 	if len(s.inputOverflow) > 0 {
 		s.inputOverflow = append(s.inputOverflow, input)
-		return
+		return true
 	}
 	select {
 	case s.inputCh <- input:
+		return true
 	case <-s.parentCtx.Done():
-		return
+		return false
 	default:
 		s.inputOverflow = append(s.inputOverflow, input)
+		return true
 	}
 }
 

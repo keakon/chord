@@ -21,9 +21,17 @@ import (
 )
 
 const (
-	taskResumePolicyLiveOnly              = "live_only"
-	taskResumePolicyCompletedFollowUpOnly = "completed_followup_only"
-	taskResumePolicyDisallowed            = "disallowed"
+	taskResumePolicyLiveOnly     = "live_only"
+	taskResumePolicyNotify       = "notify"
+	taskResumePolicyExplicitOnly = "explicit_only"
+)
+
+type taskResumeTrigger string
+
+const (
+	taskResumeByTargetedNotify    taskResumeTrigger = "targeted_notify"
+	taskResumeByDescendantMailbox taskResumeTrigger = "descendant_mailbox"
+	taskResumeByUser              taskResumeTrigger = "user"
 )
 
 type DurableTaskRecord struct {
@@ -49,7 +57,9 @@ type DurableTaskRecord struct {
 	LastReplySummary     string              `json:"last_reply_summary,omitempty"`
 	LastArtifactRefs     []tools.ArtifactRef `json:"last_artifact_refs,omitempty"`
 	LastCompletion       *CompletionEnvelope `json:"last_completion,omitempty"`
+	PendingCompletion    *CompletionEnvelope `json:"pending_completion,omitempty"`
 	SuspectedStallReason string              `json:"suspected_stall_reason,omitempty"`
+	RuntimeParked        bool                `json:"runtime_parked,omitempty"`
 	CreatedTurn          uint64              `json:"created_turn,omitempty"`
 	LastUpdatedTurn      uint64              `json:"last_updated_turn,omitempty"`
 	CreatedAt            time.Time           `json:"created_at"`
@@ -89,6 +99,7 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 	out.LastReplySummary = strings.TrimSpace(out.LastReplySummary)
 	out.LastArtifactRefs = tools.NormalizeArtifactRefs(out.LastArtifactRefs)
 	out.LastCompletion = normalizeCompletionEnvelope(out.LastCompletion)
+	out.PendingCompletion = normalizeCompletionEnvelope(out.PendingCompletion)
 	out.SuspectedStallReason = strings.TrimSpace(out.SuspectedStallReason)
 	out.ClosedReason = strings.TrimSpace(out.ClosedReason)
 	out.InstanceHistory = dedupeTaskInstanceHistory(out.InstanceHistory)
@@ -193,21 +204,31 @@ func persistDurableTaskRecords(sessionDir string, records map[string]*DurableTas
 
 func durableTaskResumePolicy(state SubAgentState) string {
 	switch state {
-	case SubAgentStateCompleted:
-		return taskResumePolicyCompletedFollowUpOnly
+	case SubAgentStateIdle, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant, SubAgentStateCompleted:
+		return taskResumePolicyNotify
 	case SubAgentStateFailed, SubAgentStateCancelled:
-		return taskResumePolicyDisallowed
+		return taskResumePolicyExplicitOnly
 	default:
 		return taskResumePolicyLiveOnly
 	}
 }
 
-func (r *DurableTaskRecord) allowsRehydrate() bool {
+func (r *DurableTaskRecord) allowsRehydrate(trigger taskResumeTrigger) bool {
 	if r == nil {
 		return false
 	}
-	return strings.TrimSpace(r.ResumePolicy) == taskResumePolicyCompletedFollowUpOnly &&
-		strings.TrimSpace(r.State) == string(SubAgentStateCompleted)
+	state := SubAgentState(strings.TrimSpace(r.State))
+	switch trigger {
+	case taskResumeByUser:
+		return state != SubAgentStateRunning
+	case taskResumeByDescendantMailbox:
+		return state == SubAgentStateWaitingDescendant
+	case taskResumeByTargetedNotify:
+		return strings.TrimSpace(r.ResumePolicy) == taskResumePolicyNotify &&
+			(state == SubAgentStateIdle || state == SubAgentStateWaitingMain || state == SubAgentStateWaitingDescendant || state == SubAgentStateCompleted)
+	default:
+		return false
+	}
 }
 
 func semanticTaskKeyFallback(desc string) string {
@@ -312,7 +333,7 @@ func (a *MainAgent) findDuplicateOrConflictingTask(ownerAgentID, ownerTaskID, ag
 		if strings.TrimSpace(rec.AgentDefName) != strings.TrimSpace(agentType) {
 			continue
 		}
-		if !isNonTerminalTaskState(rec.State) && !rec.allowsRehydrate() {
+		if !isNonTerminalTaskState(rec.State) && !rec.allowsRehydrate(taskResumeByTargetedNotify) {
 			continue
 		}
 		duplicate := false
@@ -342,6 +363,21 @@ func (a *MainAgent) taskRecordByTaskID(taskID string) *DurableTaskRecord {
 	return cloneDurableTaskRecord(a.subs.taskRecords[taskID])
 }
 
+func (a *MainAgent) taskRecordByInstanceID(instanceID string) *DurableTaskRecord {
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID == "" {
+		return nil
+	}
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
+	for _, rec := range a.subs.taskRecords {
+		if rec != nil && durableTaskRecordIncludesInstance(rec, instanceID) {
+			return cloneDurableTaskRecord(rec)
+		}
+	}
+	return nil
+}
+
 func (a *MainAgent) setTaskRecords(records map[string]*DurableTaskRecord) {
 	a.subs.mu.Lock()
 	defer a.subs.mu.Unlock()
@@ -355,10 +391,15 @@ func (a *MainAgent) persistTaskRegistry() {
 	if a == nil {
 		return
 	}
+	a.taskRegistryPersistMu.Lock()
+	defer a.taskRegistryPersistMu.Unlock()
 	a.subs.mu.RLock()
 	records := cloneDurableTaskRecordMap(a.subs.taskRecords)
 	sessionDir := a.sessionDir
 	a.subs.mu.RUnlock()
+	if hook := a.taskRegistryPersistHook; hook != nil {
+		hook()
+	}
 	if err := persistDurableTaskRecords(sessionDir, records); err != nil {
 		log.Warnf("failed to persist durable task registry session=%v error=%v", sessionDir, err)
 	}
@@ -393,9 +434,15 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	}
 	rec.AgentDefName = strings.TrimSpace(sub.agentDefName)
 	rec.TaskDesc = strings.TrimSpace(sub.taskDesc)
-	rec.PlanTaskRef = strings.TrimSpace(sub.planTaskRef)
-	rec.SemanticTaskKey = strings.TrimSpace(sub.semanticTaskKey)
-	rec.ExpectedWriteScope = sub.writeScope.Normalized()
+	if planTaskRef := strings.TrimSpace(sub.planTaskRef); planTaskRef != "" || rec.PlanTaskRef == "" {
+		rec.PlanTaskRef = planTaskRef
+	}
+	if semanticTaskKey := strings.TrimSpace(sub.semanticTaskKey); semanticTaskKey != "" || rec.SemanticTaskKey == "" {
+		rec.SemanticTaskKey = semanticTaskKey
+	}
+	if writeScope := sub.writeScope.Normalized(); !writeScope.Empty() || rec.ExpectedWriteScope.Empty() {
+		rec.ExpectedWriteScope = writeScope
+	}
 	rec.OwnerAgentID = strings.TrimSpace(sub.ownerAgentID)
 	rec.OwnerTaskID = strings.TrimSpace(sub.ownerTaskID)
 	rec.Depth = sub.depth
@@ -406,6 +453,14 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	rec.InstanceHistory = append(rec.InstanceHistory, rec.LatestInstanceID)
 	rec.InstanceHistory = dedupeTaskInstanceHistory(rec.InstanceHistory)
 	rec.LastSummary = strings.TrimSpace(summary)
+	if pending := sub.PendingCompleteIntent(); pending != nil {
+		rec.PendingCompletion = normalizeCompletionEnvelope(&CompletionEnvelope{Summary: pending.Summary})
+		if pending.Envelope != nil {
+			rec.PendingCompletion = normalizeCompletionEnvelope(pending.Envelope)
+		}
+	} else {
+		rec.PendingCompletion = nil
+	}
 	rec.LastMailboxID = strings.TrimSpace(lastMailboxID)
 	rec.LastReplyMessageID = strings.TrimSpace(lastReplyMessageID)
 	rec.LastReplyToMailboxID = strings.TrimSpace(lastReplyToMailboxID)
@@ -416,6 +471,7 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	}
 	rec.LastUpdatedTurn = a.explicitUserTurnCount
 	rec.UpdatedAt = now
+	rec.RuntimeParked = false
 	if strings.TrimSpace(closedReason) != "" {
 		rec.ClosedReason = strings.TrimSpace(closedReason)
 	} else if state == SubAgentStateRunning || state == SubAgentStateWaitingMain || state == SubAgentStateIdle {
@@ -436,6 +492,9 @@ func taskRecordFromLoadedState(state loadedSubAgentState) *DurableTaskRecord {
 		TaskID:               taskID,
 		AgentDefName:         strings.TrimSpace(state.AgentDefName),
 		TaskDesc:             strings.TrimSpace(state.TaskDesc),
+		PlanTaskRef:          strings.TrimSpace(state.PlanTaskRef),
+		SemanticTaskKey:      strings.TrimSpace(state.SemanticTaskKey),
+		ExpectedWriteScope:   state.ExpectedWriteScope.Normalized(),
 		OwnerAgentID:         strings.TrimSpace(state.OwnerAgentID),
 		OwnerTaskID:          strings.TrimSpace(state.OwnerTaskID),
 		Depth:                state.Depth,
@@ -478,6 +537,15 @@ func mergeDurableTaskRecords(base map[string]*DurableTaskRecord, extra ...map[st
 				}
 				if next.TaskDesc == "" {
 					next.TaskDesc = prev.TaskDesc
+				}
+				if next.PlanTaskRef == "" {
+					next.PlanTaskRef = prev.PlanTaskRef
+				}
+				if next.SemanticTaskKey == "" {
+					next.SemanticTaskKey = prev.SemanticTaskKey
+				}
+				if next.ExpectedWriteScope.Empty() {
+					next.ExpectedWriteScope = prev.ExpectedWriteScope
 				}
 				if next.OwnerAgentID == "" {
 					next.OwnerAgentID = prev.OwnerAgentID
@@ -524,6 +592,9 @@ func mergeDurableTaskRecords(base map[string]*DurableTaskRecord, extra ...map[st
 				}
 				if next.LastCompletion == nil {
 					next.LastCompletion = prev.LastCompletion
+				}
+				if next.PendingCompletion == nil {
+					next.PendingCompletion = prev.PendingCompletion
 				}
 				if next.SuspectedStallReason == "" {
 					next.SuspectedStallReason = prev.SuspectedStallReason
@@ -639,6 +710,35 @@ func loadTaskHistoryMessages(rm *recovery.RecoveryManager, rec *DurableTaskRecor
 		out = append(out, message.Message{Role: "user", Content: rec.TaskDesc})
 	}
 	return out, nil
+}
+
+func rewriteTaskHistoryMessages(rm *recovery.RecoveryManager, rec *DurableTaskRecord, msgs []message.Message) error {
+	if rm == nil || rec == nil {
+		return nil
+	}
+	historyIDs := dedupeTaskInstanceHistory(rec.InstanceHistory)
+	if len(historyIDs) == 0 && strings.TrimSpace(rec.LatestInstanceID) != "" {
+		historyIDs = []string{strings.TrimSpace(rec.LatestInstanceID)}
+	}
+	if len(historyIDs) == 0 {
+		return nil
+	}
+	remaining := append([]message.Message(nil), msgs...)
+	for i, instanceID := range historyIDs {
+		original, err := rm.LoadMessages(instanceID)
+		if err != nil {
+			return err
+		}
+		count := len(original)
+		if count > len(remaining) || i == len(historyIDs)-1 {
+			count = len(remaining)
+		}
+		if err := rm.RewriteLog(instanceID, remaining[:count]); err != nil {
+			return err
+		}
+		remaining = remaining[count:]
+	}
+	return nil
 }
 
 func (a *MainAgent) taskInfosForCompaction() []SubAgentInfo {

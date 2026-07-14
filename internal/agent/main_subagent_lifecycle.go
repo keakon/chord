@@ -3,6 +3,9 @@ package agent
 import (
 	"os"
 	"strings"
+	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/tools"
 )
@@ -35,6 +38,10 @@ func (a *MainAgent) closeSubAgent(agentID string) {
 	}
 	if focused := a.focusedAgent.Load(); focused != nil && focused.instanceID == agentID {
 		a.focusedAgent.Store(nil)
+		a.setFocusedTaskID("")
+	}
+	if rec := a.focusedDurableTask(); rec != nil && rec.LatestInstanceID == agentID {
+		a.setFocusedTaskID("")
 	}
 	if sub.semHeld {
 		a.releaseSubAgentSlot(sub)
@@ -44,6 +51,77 @@ func (a *MainAgent) closeSubAgent(agentID string) {
 	sub.cancel()
 	a.removeSubAgentMailboxState(agentID)
 	_ = os.Remove(subAgentMetaPath(a.sessionDir, agentID))
+}
+
+// parkSubAgent releases a quiescent worker's hot runtime while preserving its
+// durable task identity, transcript, and mailbox state. A later rehydration
+// receives a new runtime instance ID for the same task ID.
+func (a *MainAgent) parkSubAgent(agentID string) bool {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return false
+	}
+	sub := a.subAgentByID(agentID)
+	if sub == nil {
+		return false
+	}
+	sub.lifecycleMu.Lock()
+	defer sub.lifecycleMu.Unlock()
+	if !sub.canPark() {
+		return false
+	}
+	focused := a.focusedAgent.Load() == sub
+	a.persistSubAgentMeta(sub)
+	a.syncTaskRecordFromSub(sub, "")
+	a.flushPersistUntil(func() {
+		if hook := a.subAgentParkBarrierHook; hook != nil {
+			hook(sub)
+		}
+	})
+	if !sub.canPark() {
+		return false
+	}
+	a.subs.mu.Lock()
+	if current := a.subs.subAgents[agentID]; current != sub || !sub.canPark() {
+		a.subs.mu.Unlock()
+		return false
+	}
+	removed := a.subs.removeLocked(agentID)
+	if rec := a.subs.taskRecords[sub.taskID]; rec != nil {
+		rec.RuntimeParked = true
+		rec.UpdatedAt = time.Now()
+	}
+	a.subs.mu.Unlock()
+	if removed != sub {
+		if removed != nil {
+			a.subs.add(removed)
+		}
+		return false
+	}
+	if sub.semHeld {
+		a.releaseSubAgentSlot(sub)
+	}
+	a.fileTrack.ReleaseAll(agentID)
+	tools.StopAllSpawnedForAgent(agentID, "terminated on subagent park")
+	sub.cancel()
+	if focused {
+		a.focusedAgent.CompareAndSwap(sub, nil)
+		a.setFocusedTaskID(sub.taskID)
+	}
+
+	a.persistTaskRegistry()
+	log.Debugf("parked quiescent subagent agent_id=%v task_id=%v state=%v", agentID, sub.taskID, sub.State())
+	return true
+}
+
+func (a *MainAgent) parkQuiescentSubAgents() int {
+	parked := 0
+	for _, sub := range a.subs.snapshotSubAgents() {
+		if sub != nil && a.parkSubAgent(sub.instanceID) {
+			parked++
+		}
+	}
+	return parked
 }
 
 func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
@@ -116,11 +194,8 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 }
 
 func (a *MainAgent) sweepSubAgentLifecycle() {
-	if a.subs.count() == 0 {
-		return
-	}
 	changed := false
-	for _, sub := range a.subs.subAgents {
+	for _, sub := range a.subs.snapshotSubAgents() {
 		if sub == nil {
 			continue
 		}
@@ -145,7 +220,23 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 			// user-turn GC. Recovery or explicit control actions decide what to do.
 		}
 	}
+	a.subs.mu.Lock()
+	for _, rec := range a.subs.taskRecords {
+		if rec == nil || !rec.RuntimeParked || SubAgentState(rec.State) != SubAgentStateWaitingMain {
+			continue
+		}
+		if a.explicitUserTurnCount >= rec.LastUpdatedTurn+waitingMainExpiryUserTurns {
+			rec.State = string(SubAgentStateCancelled)
+			rec.ResumePolicy = taskResumePolicyExplicitOnly
+			rec.LastSummary = "expired waiting for main reply"
+			rec.ClosedReason = rec.LastSummary
+			rec.UpdatedAt = time.Now()
+			changed = true
+		}
+	}
+	a.subs.mu.Unlock()
 	if changed {
+		a.persistTaskRegistry()
 		a.saveRecoverySnapshot()
 	}
 }

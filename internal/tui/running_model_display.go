@@ -40,6 +40,14 @@ func (m *Model) focusedModelRefs() (runningRef, selectedRef string) {
 	}
 	selectedRef = strings.TrimSpace(m.agent.ProviderModelRef())
 	runningRef = strings.TrimSpace(m.agent.RunningModelRef())
+	if m.focusedAgentID != "" {
+		if selected, running, ok := m.sidebar.SubAgentModelRefs(m.focusedAgentID); ok {
+			selectedRef = strings.TrimSpace(selected)
+			runningRef = strings.TrimSpace(running)
+		} else {
+			selectedRef = runningRef
+		}
+	}
 	if m.isFocusedAgentBusy() && m.runningModelDisplay.agentID == m.focusedAgentIDOrMain() {
 		if ref := strings.TrimSpace(m.runningModelDisplay.providerModelRef); ref != "" {
 			selectedRef = ref

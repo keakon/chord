@@ -103,6 +103,7 @@ func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {
 	}
 	a.fileTrack.ReleaseAll(evt.SourceID)
 	tools.StopAllSpawnedForAgent(evt.SourceID, "terminated on subagent stop")
+	a.parkSubAgent(evt.SourceID)
 }
 
 func firstReplyMessageID(sub *SubAgent) string {

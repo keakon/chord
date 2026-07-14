@@ -46,26 +46,7 @@ func (a *MainAgent) SetSkills(skills []*skill.Meta) {
 }
 
 func (a *MainAgent) visibleSkillsSnapshot() []*skill.Meta {
-	loaded := a.loadedSkillsSnapshot()
-	if len(loaded) == 0 {
-		return nil
-	}
-	ruleset := a.effectiveRuleset()
-	out := make([]*skill.Meta, 0, len(loaded))
-	for _, meta := range loaded {
-		if meta == nil {
-			continue
-		}
-		copyMeta := *meta
-		copyMeta.Discovered = true
-		if len(ruleset) > 0 && ruleset.Evaluate(tools.NameSkill, meta.Name) == permission.ActionDeny {
-			copyMeta.Discovered = false
-		}
-		if copyMeta.Discovered {
-			out = append(out, &copyMeta)
-		}
-	}
-	return out
+	return visibleSkillsForRuleset(a.loadedSkillsSnapshot(), a.effectiveRuleset())
 }
 
 func (a *MainAgent) ListSkills() []*skill.Meta { return a.visibleSkillsSnapshot() }
@@ -74,10 +55,33 @@ func (a *MainAgent) ListSkills() []*skill.Meta { return a.visibleSkillsSnapshot(
 // ListSkills remains scoped to MainAgent so the runtime SkillProvider semantics
 // do not change when the user switches sidebar focus.
 func (a *MainAgent) FocusedSkills() []*skill.Meta {
-	if sub := a.validFocusedSubAgent(); sub != nil {
-		return sub.ListSkills()
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		return target.sub.ListSkills()
+	}
+	if target.parked && target.task != nil {
+		a.stateMu.RLock()
+		cfg := a.agentConfigs[target.task.AgentDefName]
+		a.stateMu.RUnlock()
+		if cfg == nil {
+			return nil
+		}
+		return visibleSkillsForRuleset(a.loadedSkillsSnapshot(), a.buildSubAgentRuleset(cfg))
 	}
 	return a.ListSkills()
+}
+
+func visibleSkillsForRuleset(loaded []*skill.Meta, ruleset permission.Ruleset) []*skill.Meta {
+	out := make([]*skill.Meta, 0, len(loaded))
+	for _, meta := range loaded {
+		if meta == nil || (len(ruleset) > 0 && ruleset.Evaluate(tools.NameSkill, meta.Name) == permission.ActionDeny) {
+			continue
+		}
+		copyMeta := *meta
+		copyMeta.Discovered = true
+		out = append(out, &copyMeta)
+	}
+	return out
 }
 
 func (a *MainAgent) MarkSkillInvoked(meta *skill.Meta) {
@@ -96,6 +100,13 @@ func (a *MainAgent) MarkSkillInvoked(meta *skill.Meta) {
 }
 
 func (a *MainAgent) InvokedSkills() []*skill.Meta {
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		return target.sub.InvokedSkills()
+	}
+	if target.parked {
+		return nil
+	}
 	a.skillsMu.RLock()
 	defer a.skillsMu.RUnlock()
 	if len(a.invokedSkills) == 0 {

@@ -234,7 +234,7 @@ func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) 
 		TaskID:             "task-1",
 		AgentDefName:       "explorer",
 		State:              string(SubAgentStateCompleted),
-		ResumePolicy:       taskResumePolicyCompletedFollowUpOnly,
+		ResumePolicy:       taskResumePolicyNotify,
 		PlanTaskRef:        "P1",
 		SemanticTaskKey:    "coordination-snapshot",
 		LastSummary:        "research complete",

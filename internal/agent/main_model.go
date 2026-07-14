@@ -45,6 +45,9 @@ func (a *MainAgent) RunningModelRef() string {
 		}
 		return ref
 	}
+	if rec := a.focusedDurableTask(); rec != nil {
+		return ""
+	}
 	a.llmMu.RLock()
 	defer a.llmMu.RUnlock()
 	if a.runningModelRef == "" {
@@ -69,6 +72,9 @@ func (a *MainAgent) NextRequestModelRef() string {
 			ref = strings.TrimSpace(client.PrimaryModelRef())
 		}
 		return ref
+	}
+	if rec := a.focusedDurableTask(); rec != nil {
+		return ""
 	}
 	a.llmMu.RLock()
 	client := a.llmClient
@@ -95,6 +101,9 @@ func (a *MainAgent) RunningVariant() string {
 			return ""
 		}
 		return client.ActiveVariant()
+	}
+	if rec := a.focusedDurableTask(); rec != nil {
+		return ""
 	}
 	a.llmMu.RLock()
 	defer a.llmMu.RUnlock()

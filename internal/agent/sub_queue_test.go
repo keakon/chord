@@ -180,6 +180,30 @@ func waitForCapturedSubAgentMessages(t *testing.T, sub *SubAgent, provider *capt
 	}
 }
 
+func TestSubAgentQueuedLLMResultKeepsUserInputBlockedUntilConsumed(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := &SubAgent{
+		instanceID: "agent-1",
+		parent:     a,
+		inputCh:    make(chan pendingUserMessage, 1),
+		turn:       &Turn{ID: 1},
+	}
+	sub.setState(SubAgentStateRunning, "working")
+	sub.inputCh <- pendingUserMessage{Content: "follow up", FromUser: true}
+	sub.llmRequestInFlight.Store(true)
+
+	// The provider goroutine may already have queued its result, but runLoop
+	// must keep the request gate closed until it consumes that result.
+	if sub.canStartUserTurn() {
+		t.Fatal("canStartUserTurn() = true before queued LLM result was consumed")
+	}
+
+	sub.finishLLMRequest()
+	if !sub.canStartUserTurn() {
+		t.Fatal("canStartUserTurn() = false after queued LLM result was consumed")
+	}
+}
+
 func TestSubAgentTerminalStateDefersQueuedUserInputUntilReactivated(t *testing.T) {
 	for _, state := range []SubAgentState{SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled} {
 		t.Run(string(state), func(t *testing.T) {

@@ -357,15 +357,19 @@ func TestRestoreSessionAtStartupRestoresSubAgentInterruptedToolResults(t *testin
 		t.Fatalf("RestoreSessionAtStartup: %v", err)
 	}
 
-	a.subs.mu.RLock()
-	sub := a.subs.subAgents["agent-1"]
-	a.subs.mu.RUnlock()
-	if sub == nil {
-		t.Fatal("expected restored sub-agent agent-1")
+	if sub := a.subAgentByID("agent-1"); sub != nil {
+		t.Fatal("restored sub-agent should remain parked")
 	}
-	msgs := sub.GetMessages()
+	rec := a.taskRecordByInstanceID("agent-1")
+	if rec == nil || !rec.RuntimeParked {
+		t.Fatalf("task record = %#v, want parked restored task", rec)
+	}
+	msgs, err := loadTaskHistoryMessages(a.recovery, rec)
+	if err != nil {
+		t.Fatalf("loadTaskHistoryMessages: %v", err)
+	}
 	if got := len(msgs); got != 2 {
-		t.Fatalf("len(sub.GetMessages()) = %d, want 2", got)
+		t.Fatalf("len(task history) = %d, want 2", got)
 	}
 	if msgs[1].Role != "tool" || !strings.Contains(msgs[1].Content, "Model stopped before completing this tool call") {
 		t.Fatalf("sub tool result message = %#v, want persisted failure result", msgs[1])
@@ -791,11 +795,11 @@ func TestRestoreSessionAtStartupRestoresSubAgentMailboxState(t *testing.T) {
 	if len(subagents) != 1 {
 		t.Fatalf("len(GetSubAgents()) = %d, want 1", len(subagents))
 	}
-	if subagents[0].State != string(SubAgentStateIdle) {
-		t.Fatalf("subagents[0].State = %q, want %q", subagents[0].State, SubAgentStateIdle)
+	if subagents[0].State != string(SubAgentStateCompleted) {
+		t.Fatalf("subagents[0].State = %q, want %q", subagents[0].State, SubAgentStateCompleted)
 	}
-	if subagents[0].LastSummary != "need approval to continue" {
-		t.Fatalf("subagents[0].LastSummary = %q, want %q", subagents[0].LastSummary, "need approval to continue")
+	if subagents[0].LastSummary != "completed after startup restore" {
+		t.Fatalf("subagents[0].LastSummary = %q, want latest completion summary", subagents[0].LastSummary)
 	}
 }
 

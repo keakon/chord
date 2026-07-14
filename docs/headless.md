@@ -209,7 +209,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `question_request`      | The model asked the user a question                                                               | `request_id`, `tool_name`, `question`, `options`, `option_details`, `default_answer`, `multiple`, `timeout_ms` |
 | `handoff_request`       | A planner saved a handoff plan and needs the client to approve or reject execution                 | `request_id`, `plan_path`, `plan_text`, `plan_error`, `agents[]` with `{name, default, model_pools, current_model_pool}` |
 | `local_shell_result`    | Result for a `local_shell` command                                                                | `command`, `output`, `failed`, `error` |
-| `agent_started`         | A delegated SubAgent instance started, including rehydrated follow-up instances                    | `agent_id`, `task_id`, `agent_type`, `description`, `parent_agent_id`, `parent_task_id`                      |
+| `agent_started`         | A delegated SubAgent runtime started, including an on-demand rehydration of a parked task           | `agent_id`, `previous_agent_id` (set for rehydration), `task_id`, `agent_type`, `description`, `parent_agent_id`, `parent_task_id` |
 | `agent_notify`          | An agent sent a non-blocking owner or targeted delegated-workstream update                         | `agent_id`, `task_id`, `agent_type`, `parent_agent_id`, `parent_task_id`, `target_agent_id`, `target_task_id`, `kind`, `message` |
 | `agent_done`            | A SubAgent completed its task                                                                     | `agent_id`, `task_id`, `agent_type`, `parent_agent_id`, `parent_task_id`, `summary`                          |
 | `assistant_rollback`    | Discard in-flight streamed assistant output (mostly relevant for streaming UIs)                   | `agent_id`, `reason`                                                                                         |
@@ -221,6 +221,8 @@ You receive these on stdout. The list below covers what is emitted by default pl
 If an input line on stdin exceeds the protocol line limit, Chord emits an `error` envelope with `code: "stdin_line_too_long"` and continues reading later lines. Integrations should use `code` for classification when present and keep `message` for human-readable diagnostics.
 
 `assistant_message.text` may be empty for tool-only rounds (including a SubAgent `Complete` call). Chord logs a warning for observability; gateway integrations should skip the empty message and use `agent_done.summary` as the authoritative SubAgent completion content.
+
+Quiescent SubAgents may release their live runtime while their task and transcript remain durable. A later authorized targeted notification can rehydrate the task with a new `agent_id`; use stable `task_id` for routing and use `previous_agent_id` on `agent_started` to replace runtime-specific labels.
 
 ## Slash compatibility via `send`
 

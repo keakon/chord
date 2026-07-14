@@ -117,9 +117,16 @@ func TestActivateLoadedSessionKeepsServiceTierForMainAndRestoredSubAgents(t *tes
 	if got := a.ServiceTier(); got != config.ServiceTierFast {
 		t.Fatalf("service tier = %q, want fast after loaded session activation", got)
 	}
-	sub := a.subAgentByTaskID("task-restored")
-	if sub == nil {
-		t.Fatal("expected restored SubAgent")
+	if sub := a.subAgentByTaskID("task-restored"); sub != nil {
+		t.Fatal("restored SubAgent should remain parked before first use")
+	}
+	rec := a.taskRecordByTaskID("task-restored")
+	if rec == nil || !rec.RuntimeParked {
+		t.Fatalf("task record = %#v, want parked restored task", rec)
+	}
+	sub, _, err := a.rehydrateTask(rec)
+	if err != nil {
+		t.Fatalf("rehydrateTask: %v", err)
 	}
 	subClient, _ := sub.llmSnapshot()
 	if subClient == nil {

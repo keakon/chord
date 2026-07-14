@@ -18,6 +18,9 @@ type subAgentMeta struct {
 	TaskID                  string              `json:"task_id"`
 	AgentDefName            string              `json:"agent_def_name,omitempty"`
 	TaskDesc                string              `json:"task_desc,omitempty"`
+	PlanTaskRef             string              `json:"plan_task_ref,omitempty"`
+	SemanticTaskKey         string              `json:"semantic_task_key,omitempty"`
+	ExpectedWriteScope      tools.WriteScope    `json:"expected_write_scope"`
 	OwnerAgentID            string              `json:"owner_agent_id,omitempty"`
 	OwnerTaskID             string              `json:"owner_task_id,omitempty"`
 	Depth                   int                 `json:"depth,omitempty"`
@@ -63,6 +66,9 @@ func (a *MainAgent) persistSubAgentMeta(sub *SubAgent) {
 		TaskID:                sub.taskID,
 		AgentDefName:          sub.agentDefName,
 		TaskDesc:              sub.taskDesc,
+		PlanTaskRef:           sub.planTaskRef,
+		SemanticTaskKey:       sub.semanticTaskKey,
+		ExpectedWriteScope:    sub.writeScope.Normalized(),
 		OwnerAgentID:          sub.ownerAgentID,
 		OwnerTaskID:           sub.ownerTaskID,
 		Depth:                 sub.depth,

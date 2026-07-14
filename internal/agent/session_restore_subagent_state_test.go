@@ -16,7 +16,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestRestoreLoadedSubAgentsNormalizesCompletedStateToIdle(t *testing.T) {
+func TestRestoreLoadedSubAgentsPreservesCompletedTaskState(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -48,8 +48,8 @@ func TestRestoreLoadedSubAgentsNormalizesCompletedStateToIdle(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("len(GetSubAgents()) = %d, want 1", len(got))
 	}
-	if got[0].State != string(SubAgentStateIdle) {
-		t.Fatalf("state = %q, want %q", got[0].State, SubAgentStateIdle)
+	if got[0].State != string(SubAgentStateCompleted) {
+		t.Fatalf("state = %q, want %q", got[0].State, SubAgentStateCompleted)
 	}
 	if got[0].LastSummary != "done summary" {
 		t.Fatalf("LastSummary = %q, want done summary", got[0].LastSummary)
@@ -93,14 +93,17 @@ func TestRestoredCancelledSubAgentContinueReactivatesWithoutAppendingMessage(t *
 	if count != 1 {
 		t.Fatalf("restoreLoadedSubAgents() = %d, want 1", count)
 	}
-	sub := a.subAgentByID("restorer-3")
-	if sub == nil {
-		t.Fatal("expected restored worker")
+	if sub := a.subAgentByID("restorer-3"); sub != nil {
+		t.Fatal("restored worker should remain parked before explicit continue")
 	}
-	a.SwitchFocus(sub.instanceID)
-	before := sub.GetMessages()
+	a.SwitchFocus("restorer-3")
+	before := a.GetMessages()
 
 	a.ContinueFromContext()
+	sub := a.subAgentByTaskID("adhoc-3")
+	if sub == nil {
+		t.Fatal("expected explicit continue to rehydrate worker")
+	}
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -175,22 +178,21 @@ func TestRestoreLoadedSubAgentsRestoresOwnerDepthAndPendingComplete(t *testing.T
 	if count != 1 {
 		t.Fatalf("restoreLoadedSubAgents() = %d, want 1", count)
 	}
-	restored := a.subAgentByID("worker-1")
-	if restored == nil {
-		t.Fatal("expected restored worker")
+	restored := a.taskRecordByTaskID("adhoc-1")
+	if restored == nil || !restored.RuntimeParked {
+		t.Fatalf("task record = %#v, want parked restored task", restored)
 	}
-	if restored.OwnerAgentID() != "worker-parent" {
-		t.Fatalf("OwnerAgentID() = %q, want worker-parent", restored.OwnerAgentID())
+	if restored.OwnerAgentID != "worker-parent" {
+		t.Fatalf("OwnerAgentID = %q, want worker-parent", restored.OwnerAgentID)
 	}
-	if restored.OwnerTaskID() != "adhoc-parent" {
-		t.Fatalf("OwnerTaskID() = %q, want adhoc-parent", restored.OwnerTaskID())
+	if restored.OwnerTaskID != "adhoc-parent" {
+		t.Fatalf("OwnerTaskID = %q, want adhoc-parent", restored.OwnerTaskID)
 	}
-	if restored.Depth() != 2 {
-		t.Fatalf("Depth() = %d, want 2", restored.Depth())
+	if restored.Depth != 2 {
+		t.Fatalf("Depth = %d, want 2", restored.Depth)
 	}
-	pending := restored.PendingCompleteIntent()
-	if pending == nil || pending.Summary != "final summary" {
-		t.Fatalf("PendingCompleteIntent() = %#v, want summary %q", pending, "final summary")
+	if restored.PendingCompletion == nil || restored.PendingCompletion.Summary != "final summary" {
+		t.Fatalf("PendingCompletion = %#v, want summary %q", restored.PendingCompletion, "final summary")
 	}
 }
 
@@ -239,14 +241,10 @@ func TestRestoreLoadedSubAgentsKeepsOwnedMailboxQueuedUntilManualContinue(t *tes
 	if got := len(a.ownedSubAgentMailboxes["worker-parent"]); got != 1 {
 		t.Fatalf("len(ownedSubAgentMailboxes[worker-parent]) after restore = %d, want 1", got)
 	}
-	restored := a.subAgentByID("worker-parent")
-	if restored == nil {
-		t.Fatal("restored parent missing")
+	if restored := a.subAgentByID("worker-parent"); restored != nil {
+		t.Fatal("restored parent should remain parked before manual continue")
 	}
-	if got := restored.State(); got != SubAgentStateIdle {
-		t.Fatalf("restored parent state = %q, want idle", got)
-	}
-	a.SwitchFocus(restored.instanceID)
+	a.SwitchFocus("worker-parent")
 	a.ContinueFromContext()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -356,22 +354,90 @@ func TestRestoreSessionAtStartupUsesSnapshotSubAgentState(t *testing.T) {
 	if len(subagents) != 1 {
 		t.Fatalf("len(GetSubAgents()) = %d, want restored worker visible", len(subagents))
 	}
-	if subagents[0].InstanceID != "agent-1" || subagents[0].State != string(SubAgentStateIdle) {
-		t.Fatalf("GetSubAgents()[0] = %+v, want agent-1 restored idle", subagents[0])
+	if subagents[0].InstanceID != "agent-1" || subagents[0].State != string(SubAgentStateCancelled) {
+		t.Fatalf("GetSubAgents()[0] = %+v, want agent-1 restored cancelled", subagents[0])
 	}
 	record := a.taskRecordByTaskID("adhoc-9")
 	if record == nil {
 		t.Fatal("expected durable task record for cancelled worker")
 	}
-	if record.State != string(SubAgentStateIdle) {
-		t.Fatalf("record.State = %q, want %q", record.State, SubAgentStateIdle)
+	if record.State != string(SubAgentStateCancelled) {
+		t.Fatalf("record.State = %q, want %q", record.State, SubAgentStateCancelled)
 	}
 	if record.LastSummary != "Cancelled by MainAgent" {
 		t.Fatalf("record.LastSummary = %q, want %q", record.LastSummary, "Cancelled by MainAgent")
 	}
 }
 
-func TestCancelledSubAgentSnapshotRestoresAgentIdle(t *testing.T) {
+func TestRestoreSessionRebuildsTaskIdentityFromSnapshot(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "snapshot-task-identity")
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "resume this session"}); err != nil {
+		t.Fatalf("PersistMessage(main): %v", err)
+	}
+	if err := rm.PersistMessage("agent-identity", message.Message{Role: "user", Content: "inspect identity"}); err != nil {
+		t.Fatalf("PersistMessage(agent): %v", err)
+	}
+	wantScope := tools.WriteScope{PathPrefix: []string{"internal/agent"}}
+	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
+		CreatedAt: time.Now(),
+		ActiveAgents: []recovery.AgentSnapshot{{
+			InstanceID:         "agent-identity",
+			TaskID:             "adhoc-identity",
+			AgentDefName:       "restorer",
+			TaskDesc:           "inspect identity",
+			PlanTaskRef:        "plan-item-identity",
+			SemanticTaskKey:    "inspect-identity",
+			ExpectedWriteScope: wantScope,
+			State:              string(SubAgentStateCompleted),
+		}},
+	}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	rm.Close()
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"restorer": {Name: "restorer", Mode: "subagent", Models: map[string][]string{"default": {"test/test-model"}}},
+	})
+	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+	if _, err := a.restoreSessionState(sessionDir); err != nil {
+		t.Fatalf("restoreSessionState: %v", err)
+	}
+	record := a.taskRecordByTaskID("adhoc-identity")
+	if record == nil {
+		t.Fatal("expected durable task record rebuilt from snapshot")
+	}
+	if record.PlanTaskRef != "plan-item-identity" || record.SemanticTaskKey != "inspect-identity" {
+		t.Fatalf("restored identity = (%q, %q), want snapshot values", record.PlanTaskRef, record.SemanticTaskKey)
+	}
+	if len(record.ExpectedWriteScope.PathPrefix) != 1 || record.ExpectedWriteScope.PathPrefix[0] != "internal/agent" {
+		t.Fatalf("restored write scope = %#v, want %#v", record.ExpectedWriteScope, wantScope)
+	}
+}
+
+func TestSubAgentMetaPersistsTaskIdentity(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-meta-identity")
+	sub.planTaskRef = "plan-item-meta"
+	sub.semanticTaskKey = "meta-identity"
+	sub.writeScope = tools.WriteScope{Files: []string{"internal/agent/subagent_meta.go"}}
+	a.persistSubAgentMeta(sub)
+
+	meta, err := loadSubAgentMeta(a.sessionDir, sub.instanceID)
+	if err != nil {
+		t.Fatalf("loadSubAgentMeta: %v", err)
+	}
+	if meta == nil || meta.PlanTaskRef != sub.planTaskRef || meta.SemanticTaskKey != sub.semanticTaskKey {
+		t.Fatalf("persisted meta = %#v, want task identity", meta)
+	}
+	if len(meta.ExpectedWriteScope.Files) != 1 || meta.ExpectedWriteScope.Files[0] != "internal/agent/subagent_meta.go" {
+		t.Fatalf("persisted meta write scope = %#v, want original file scope", meta.ExpectedWriteScope)
+	}
+}
+
+func TestCancelledSubAgentSnapshotRestoresParkedCancelledTask(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "cancelled-sub-state")
 	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
@@ -402,12 +468,12 @@ func TestCancelledSubAgentSnapshotRestoresAgentIdle(t *testing.T) {
 	if _, err := restored.restoreSessionState(sessionDir); err != nil {
 		t.Fatalf("restoreSessionState(): %v", err)
 	}
-	restoredSub := restored.subAgentByTaskID("adhoc-7")
-	if restoredSub == nil {
-		t.Fatal("cancelled SubAgent missing after restore")
+	if restoredSub := restored.subAgentByTaskID("adhoc-7"); restoredSub != nil {
+		t.Fatal("cancelled SubAgent should remain parked after restore")
 	}
-	if got := restoredSub.State(); got != SubAgentStateIdle {
-		t.Fatalf("restored state = %q, want %q", got, SubAgentStateIdle)
+	rec := restored.taskRecordByTaskID("adhoc-7")
+	if rec == nil || !rec.RuntimeParked || rec.State != string(SubAgentStateCancelled) {
+		t.Fatalf("restored task record = %#v, want parked cancelled task", rec)
 	}
 }
 
@@ -509,7 +575,14 @@ func TestMailboxReplyChainPersistsAcrossResume(t *testing.T) {
 		t.Fatalf("restoreSessionState: %v", err)
 	}
 
-	restored := a2.subAgentByID("worker-1")
+	rec := a2.taskRecordByTaskID("adhoc-7")
+	if rec == nil || !rec.RuntimeParked {
+		t.Fatalf("restored task record = %#v, want parked task", rec)
+	}
+	restored, _, err := a2.rehydrateTask(rec)
+	if err != nil {
+		t.Fatalf("rehydrateTask: %v", err)
+	}
 	if restored == nil {
 		t.Fatal("expected restored worker")
 	}
@@ -608,8 +681,8 @@ func TestRestoreSessionCompletedTaskCanRehydrateFollowUp(t *testing.T) {
 	if _, err := a2.restoreSessionState(sessionDir); err != nil {
 		t.Fatalf("restoreSessionState: %v", err)
 	}
-	if got := a2.GetSubAgents(); len(got) != 0 {
-		t.Fatalf("len(GetSubAgents()) = %d, want 0 before rehydrate", len(got))
+	if got := a2.GetSubAgents(); len(got) != 1 || got[0].InstanceID != sub.instanceID || got[0].State != string(SubAgentStateCompleted) {
+		t.Fatalf("GetSubAgents() = %#v, want one visible parked task before rehydrate", got)
 	}
 
 	handle, err := a2.NotifySubAgent(context.Background(), "adhoc-21", "follow up on edge cases", "follow_up")

@@ -449,9 +449,5 @@ func (s *SubAgent) runToolBatchHooks(ctx context.Context, turn *Turn) ([]hook.Au
 func (s *SubAgent) appendHookFeedback(content string) {
 	msg := message.Message{Role: "user", Content: content}
 	s.ctxMgr.Append(msg)
-	go func() {
-		if s.recovery != nil {
-			_ = s.recovery.PersistMessage(s.instanceID, msg)
-		}
-	}()
+	s.persistMessageAsync(msg, "hook feedback", nil)
 }

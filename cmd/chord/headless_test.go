@@ -1004,7 +1004,7 @@ func TestHeadlessSubAgentLifecycleEvents(t *testing.T) {
 		messageKey string
 		message    string
 	}{
-		{name: "started", event: agent.AgentStartedEvent{AgentID: "agent-1", TaskID: "adhoc-1", AgentType: "reviewer", ParentAgentID: "main", Description: "Review changes"}, typeName: "agent_started", messageKey: "description", message: "Review changes"},
+		{name: "started", event: agent.AgentStartedEvent{AgentID: "agent-1", PreviousAgentID: "agent-0", TaskID: "adhoc-1", AgentType: "reviewer", ParentAgentID: "main", Description: "Review changes"}, typeName: "agent_started", messageKey: "description", message: "Review changes"},
 		{name: "notify", event: agent.AgentNotifyEvent{AgentID: "agent-1", TaskID: "adhoc-1", AgentType: "reviewer", ParentAgentID: "main", TargetAgentID: "main", Kind: "progress", Message: "Tests pass"}, typeName: "agent_notify", messageKey: "message", message: "Tests pass"},
 		{name: "done", event: agent.AgentDoneEvent{AgentID: "agent-1", TaskID: "adhoc-1", AgentType: "reviewer", ParentAgentID: "main", Summary: "Reviewed"}, typeName: "agent_done", messageKey: "summary", message: "Reviewed"},
 	}
@@ -1020,6 +1020,9 @@ func TestHeadlessSubAgentLifecycleEvents(t *testing.T) {
 			}
 			if tt.typeName == "agent_notify" && payload["target_agent_id"] != "main" {
 				t.Fatalf("notify payload = %#v", payload)
+			}
+			if tt.typeName == "agent_started" && payload["previous_agent_id"] != "agent-0" {
+				t.Fatalf("started payload = %#v", payload)
 			}
 		})
 	}

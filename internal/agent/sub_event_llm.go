@@ -171,11 +171,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		Provenance:       subAssistantProvenance(s),
 	}
 	persistMsg.Usage = resp.Usage
-	go func() {
-		if err := s.recovery.PersistMessage(s.instanceID, persistMsg); err != nil {
-			log.Warnf("SubAgent: failed to persist assistant message agent=%v error=%v", s.instanceID, err)
-		}
-	}()
+	s.persistMessageAsync(persistMsg, "assistant message", nil)
 
 	// Update token usage (does not auto-compact, but tracks stats).
 	if resp.Usage != nil {
@@ -272,13 +268,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			Content:    resultContent,
 		}
 		s.ctxMgr.Append(toolMsg)
-		if s.recovery != nil {
-			go func(msg message.Message) {
-				if err := s.recovery.PersistMessage(s.instanceID, msg); err != nil {
-					log.Warnf("SubAgent: failed to persist Escalate tool result agent=%v error=%v", s.instanceID, err)
-				}
-			}(toolMsg)
-		}
+		s.persistMessageAsync(toolMsg, "Escalate tool result", nil)
 		s.turn.removeStreamingToolCall(wakeMainCallID)
 		s.parent.emitToTUI(ToolResultEvent{
 			CallID:   wakeMainCallID,

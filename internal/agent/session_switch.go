@@ -123,7 +123,9 @@ func (a *MainAgent) handleNewSessionCommand() {
 
 func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.Context) {
 	oldRecovery := a.recovery
+	a.subs.cancelTaskActivations(fmt.Errorf("task activation cancelled by session switch"))
 	a.focusedAgent.Store(nil)
+	a.setFocusedTaskID("")
 	a.clearSystemPromptOverride()
 	a.newTurn()
 	turnCtx := a.turn.Ctx
@@ -195,6 +197,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.mailboxDeliveryPaused.Store(false)
 	a.subAgentMailboxIDsMu.Lock()
 	a.subAgentMailboxIDs = make(map[string]struct{})
+	a.subAgentMailboxConsumed = make(map[string]struct{})
 	a.subAgentMailboxIDsMu.Unlock()
 	loopWasEnabled := a.loopState.Enabled
 	a.loopState.disable()

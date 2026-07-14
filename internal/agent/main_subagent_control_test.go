@@ -3,10 +3,13 @@ package agent
 import (
 	"context"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
@@ -392,7 +395,7 @@ func TestPrepareSubAgentMailboxBatchForTurnContinuationStagesDecisionMailbox(t *
 	}
 }
 
-func TestRetainedMainOwnedCompletedMailboxStillQueuesForMain(t *testing.T) {
+func TestParkedMainOwnedCompletedMailboxStillQueuesForMain(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-root")
 	sub.agentDefName = "worker"
@@ -404,8 +407,11 @@ func TestRetainedMainOwnedCompletedMailboxStillQueuesForMain(t *testing.T) {
 		Payload:  &AgentResult{Summary: "root task done"},
 	})
 
-	if got := a.subAgentByID(sub.instanceID); got != sub {
-		t.Fatalf("subAgentByID(%q) = %#v, want retained completed worker", sub.instanceID, got)
+	if got := a.subAgentByID(sub.instanceID); got != nil {
+		t.Fatalf("subAgentByID(%q) = %#v, want parked worker", sub.instanceID, got)
+	}
+	if rec := a.taskRecordByTaskID(sub.taskID); rec == nil || !rec.RuntimeParked {
+		t.Fatalf("task record = %#v, want parked durable task", rec)
 	}
 	foundDone := false
 	for len(a.outputCh) > 0 {
@@ -1412,7 +1418,7 @@ func TestSessionSwitchInvalidatesOldTaskID(t *testing.T) {
 	}
 }
 
-func TestCompletedWorkerRemainsAvailableAndPersistsTaskRecord(t *testing.T) {
+func TestCompletedWorkerParksAndPersistsTaskRecord(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-5")
 	a.handleAgentDone(Event{
@@ -1420,8 +1426,8 @@ func TestCompletedWorkerRemainsAvailableAndPersistsTaskRecord(t *testing.T) {
 		Payload:  &AgentResult{Summary: "done"},
 	})
 
-	if got := a.subAgentByID(sub.instanceID); got != sub {
-		t.Fatal("expected completed worker to remain available for manual continue")
+	if got := a.subAgentByID(sub.instanceID); got != nil {
+		t.Fatal("expected completed worker runtime to be parked")
 	}
 	record := a.taskRecordByTaskID(sub.taskID)
 	if record == nil {
@@ -1429,6 +1435,9 @@ func TestCompletedWorkerRemainsAvailableAndPersistsTaskRecord(t *testing.T) {
 	}
 	if record.State != string(SubAgentStateCompleted) {
 		t.Fatalf("record.State = %q, want %q", record.State, SubAgentStateCompleted)
+	}
+	if !record.RuntimeParked {
+		t.Fatal("record.RuntimeParked = false, want true")
 	}
 }
 
@@ -1466,7 +1475,7 @@ func TestCompletedChildReleasesSlotWhileParentWaitsForManualContinue(t *testing.
 	}
 }
 
-func TestSendMessageToCompletedTaskResumesSameWorker(t *testing.T) {
+func TestSendMessageToCompletedTaskRehydratesParkedWorker(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"restorer": {
@@ -1481,6 +1490,9 @@ func TestSendMessageToCompletedTaskResumesSameWorker(t *testing.T) {
 	sub := newControllableTestSubAgent(t, a, "adhoc-13")
 	sub.agentDefName = "restorer"
 	sub.taskDesc = "Investigate issue"
+	sub.planTaskRef = "plan-item-13"
+	sub.semanticTaskKey = "investigate-issue"
+	sub.writeScope = tools.WriteScope{Files: []string{"internal/agent/main_subagent_control.go"}}
 	sub.ctxMgr.Append(message.Message{Role: "user", Content: "Investigate issue"})
 	if err := a.recovery.PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
 		t.Fatalf("PersistMessage(sub): %v", err)
@@ -1495,18 +1507,18 @@ func TestSendMessageToCompletedTaskResumesSameWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NotifySubAgent: %v", err)
 	}
-	if handle.Rehydrated {
-		t.Fatal("completed live worker should resume without rehydration")
+	if !handle.Rehydrated {
+		t.Fatal("completed parked worker should rehydrate")
 	}
-	if handle.PreviousAgentID != "" {
-		t.Fatalf("handle.PreviousAgentID = %q, want empty", handle.PreviousAgentID)
+	if handle.PreviousAgentID != oldInstanceID {
+		t.Fatalf("handle.PreviousAgentID = %q, want %q", handle.PreviousAgentID, oldInstanceID)
 	}
-	if handle.AgentID != oldInstanceID {
-		t.Fatalf("handle.AgentID = %q, want same instance %q", handle.AgentID, oldInstanceID)
+	if handle.AgentID == oldInstanceID {
+		t.Fatalf("handle.AgentID = %q, want a new runtime instance", handle.AgentID)
 	}
 	restored := a.subAgentByTaskID("adhoc-13")
 	if restored == nil {
-		t.Fatal("expected retained live worker")
+		t.Fatal("expected rehydrated live worker")
 	}
 	if restored.instanceID != handle.AgentID {
 		t.Fatalf("restored.instanceID = %q, want %q", restored.instanceID, handle.AgentID)
@@ -1521,8 +1533,98 @@ func TestSendMessageToCompletedTaskResumesSameWorker(t *testing.T) {
 	if record.LatestInstanceID != handle.AgentID {
 		t.Fatalf("record.LatestInstanceID = %q, want %q", record.LatestInstanceID, handle.AgentID)
 	}
-	if len(record.InstanceHistory) != 1 {
-		t.Fatalf("len(record.InstanceHistory) = %d, want 1", len(record.InstanceHistory))
+	if len(record.InstanceHistory) != 2 {
+		t.Fatalf("len(record.InstanceHistory) = %d, want 2", len(record.InstanceHistory))
+	}
+	if record.PlanTaskRef != sub.planTaskRef || record.SemanticTaskKey != sub.semanticTaskKey {
+		t.Fatalf("rehydrated task identity = (%q, %q), want (%q, %q)", record.PlanTaskRef, record.SemanticTaskKey, sub.planTaskRef, sub.semanticTaskKey)
+	}
+	if len(record.ExpectedWriteScope.Files) != 1 || record.ExpectedWriteScope.Files[0] != "internal/agent/main_subagent_control.go" {
+		t.Fatalf("rehydrated write scope = %#v, want original file scope", record.ExpectedWriteScope)
+	}
+}
+
+func TestConcurrentTaskRehydratePublishesOneRuntime(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"restorer": {
+			Name:   "restorer",
+			Mode:   "subagent",
+			Models: map[string][]string{"default": {"test/test-model"}},
+		},
+	})
+	var factoryCalls atomic.Int32
+	factoryStarted := make(chan struct{})
+	releaseFactory := make(chan struct{})
+	a.SetLLMFactory(func(string, []string, string) *llm.Client {
+		if factoryCalls.Add(1) == 1 {
+			close(factoryStarted)
+		}
+		<-releaseFactory
+		return newTestLLMClient()
+	})
+	record := &DurableTaskRecord{
+		TaskID:           "adhoc-concurrent-rehydrate",
+		AgentDefName:     "restorer",
+		TaskDesc:         "resume once",
+		State:            string(SubAgentStateCompleted),
+		ResumePolicy:     taskResumePolicyNotify,
+		LatestInstanceID: "restorer-40",
+		InstanceHistory:  []string{"restorer-40"},
+		RuntimeParked:    true,
+	}
+	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
+
+	type result struct {
+		sub        *SubAgent
+		rehydrated bool
+		err        error
+	}
+	results := make(chan result, 2)
+	var callers sync.WaitGroup
+	for range 2 {
+		callers.Add(1)
+		go func() {
+			defer callers.Done()
+			sub, _, rehydrated, err := a.getOrRehydrateTask(cloneDurableTaskRecord(record))
+			results <- result{sub: sub, rehydrated: rehydrated, err: err}
+		}()
+	}
+	<-factoryStarted
+	time.Sleep(20 * time.Millisecond)
+	if got := factoryCalls.Load(); got != 1 {
+		t.Fatalf("LLM factory calls while activation is in flight = %d, want 1", got)
+	}
+	close(releaseFactory)
+	callers.Wait()
+	close(results)
+
+	var first *SubAgent
+	rehydratedCount := 0
+	for got := range results {
+		if got.err != nil {
+			t.Fatalf("getOrRehydrateTask: %v", got.err)
+		}
+		if first == nil {
+			first = got.sub
+		} else if got.sub != first {
+			t.Fatalf("concurrent callers received different runtimes: %p and %p", first, got.sub)
+		}
+		if got.rehydrated {
+			rehydratedCount++
+		}
+	}
+	if rehydratedCount != 1 {
+		t.Fatalf("rehydrated result count = %d, want one activation leader", rehydratedCount)
+	}
+	live := 0
+	for _, sub := range a.subs.snapshotSubAgents() {
+		if sub.taskID == record.TaskID {
+			live++
+		}
+	}
+	if live != 1 || len(a.sem) != 1 {
+		t.Fatalf("live runtimes = %d, semaphore slots = %d; want 1 and 1", live, len(a.sem))
 	}
 }
 
@@ -1537,11 +1639,277 @@ func TestWaitingMainLifecycleExpiresAfterUserTurns(t *testing.T) {
 	}
 	a.sweepSubAgentLifecycle()
 
-	if got := a.subAgentByID(sub.instanceID); got != sub {
-		t.Fatal("expected expired waiting_main worker to remain available")
+	if got := a.subAgentByID(sub.instanceID); got != nil {
+		t.Fatal("expected expired waiting_main worker to be parked")
 	}
-	if got := sub.State(); got != SubAgentStateCancelled {
-		t.Fatalf("sub.State() = %q, want %q", got, SubAgentStateCancelled)
+	if rec := a.taskRecordByTaskID(sub.taskID); rec == nil || rec.State != string(SubAgentStateCancelled) || !rec.RuntimeParked {
+		t.Fatalf("task record = %#v, want parked cancelled task", rec)
+	}
+}
+
+func TestTargetedNotifyRejectsParkedCancelledTask(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-cancelled-notify")
+	sub.setState(SubAgentStateCancelled, "stopped by user")
+	a.syncTaskRecordFromSub(sub, "stopped by user")
+	if !a.parkSubAgent(sub.instanceID) {
+		t.Fatal("parkSubAgent() = false, want parked cancelled worker")
+	}
+
+	if _, err := a.NotifySubAgent(context.Background(), sub.taskID, "resume", "follow_up"); err == nil {
+		t.Fatal("NotifySubAgent succeeded for cancelled parked task")
+	}
+}
+
+func TestParkedCancelledTaskAllowsExplicitUserResume(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"restorer": {Name: "restorer", Mode: "subagent", Models: map[string][]string{"default": {"test/test-model"}}},
+	})
+	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+	sub := newControllableTestSubAgent(t, a, "adhoc-cancelled-user")
+	sub.agentDefName = "restorer"
+	sub.setState(SubAgentStateCancelled, "stopped by user")
+	a.syncTaskRecordFromSub(sub, "stopped by user")
+	if !a.parkSubAgent(sub.instanceID) {
+		t.Fatal("parkSubAgent() = false, want parked cancelled worker")
+	}
+	a.SwitchFocus(sub.instanceID)
+	a.SendUserMessage("resume explicitly")
+
+	restored := a.subAgentByTaskID(sub.taskID)
+	if restored == nil || restored.State() != SubAgentStateRunning {
+		t.Fatalf("restored worker = %#v, want running", restored)
+	}
+}
+
+func TestDescendantMailboxRoutesThroughRehydratedOwnerAlias(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"worker": {Name: "worker", Mode: "subagent", Models: map[string][]string{"default": {"test/test-model"}}},
+	})
+	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+	owner := newControllableTestSubAgent(t, a, "adhoc-owner-alias")
+	owner.setState(SubAgentStateWaitingDescendant, "waiting")
+	a.syncTaskRecordFromSub(owner, "")
+	oldOwnerID := owner.instanceID
+	if !a.parkSubAgent(oldOwnerID) {
+		t.Fatal("parkSubAgent() = false, want parked owner")
+	}
+	rec := a.taskRecordByTaskID(owner.taskID)
+	rehydrated, _, err := a.rehydrateTask(rec)
+	if err != nil {
+		t.Fatalf("rehydrateTask: %v", err)
+	}
+	rehydrated.setState(SubAgentStateRunning, "resumed")
+
+	msg := SubAgentMailboxMessage{
+		MessageID:    "child-alias-1",
+		AgentID:      "child-1",
+		TaskID:       "adhoc-child-alias",
+		OwnerAgentID: oldOwnerID,
+		OwnerTaskID:  owner.taskID,
+		Kind:         SubAgentMailboxKindProgress,
+		Summary:      "still working",
+	}
+	if !a.routeOwnedSubAgentMailbox(msg) {
+		t.Fatal("routeOwnedSubAgentMailbox() = false for historical owner runtime ID")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		for _, persisted := range rehydrated.ctxMgr.Snapshot() {
+			if strings.Contains(persisted.Content, "still working") {
+				return
+			}
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("rehydrated owner did not append mailbox context")
+}
+
+func TestParkSubAgentWaitsForPendingTranscriptPersistence(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-park-persist")
+	sub.setState(SubAgentStateCompleted, "done")
+	sub.ctxMgr.Append(message.Message{Role: "assistant", Content: "final persisted reply"})
+	sub.persistMessageAsync(message.Message{Role: "assistant", Content: "final persisted reply"}, "test reply", nil)
+	a.syncTaskRecordFromSub(sub, "")
+
+	if !a.parkSubAgent(sub.instanceID) {
+		t.Fatal("parkSubAgent() = false")
+	}
+	rec := a.taskRecordByTaskID(sub.taskID)
+	msgs, err := loadTaskHistoryMessages(a.recovery, rec)
+	if err != nil {
+		t.Fatalf("loadTaskHistoryMessages: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].Content != "final persisted reply" {
+		t.Fatalf("persisted messages = %#v, want final reply", msgs)
+	}
+}
+
+func TestParkedSubAgentRemoveLastMessageDoesNotRewriteMainTranscript(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	mainMsgs := []message.Message{{Role: "user", Content: "keep main"}}
+	a.ctxMgr.RestoreMessages(mainMsgs)
+	if err := a.recovery.RewriteLog("main", mainMsgs); err != nil {
+		t.Fatalf("RewriteLog(main): %v", err)
+	}
+
+	sub := newControllableTestSubAgent(t, a, "adhoc-park-remove")
+	subMsgs := []message.Message{{Role: "user", Content: "worker prompt"}, {Role: "assistant", Content: "remove worker reply"}}
+	sub.ctxMgr.RestoreMessages(subMsgs)
+	if err := a.recovery.RewriteLog(sub.instanceID, subMsgs); err != nil {
+		t.Fatalf("RewriteLog(sub): %v", err)
+	}
+	sub.setState(SubAgentStateCompleted, "done")
+	a.syncTaskRecordFromSub(sub, "")
+	a.SwitchFocus(sub.instanceID)
+	if !a.parkSubAgent(sub.instanceID) {
+		t.Fatal("parkSubAgent() = false")
+	}
+
+	a.RemoveLastMessage()
+
+	gotMain, err := a.recovery.LoadMessages("main")
+	if err != nil {
+		t.Fatalf("LoadMessages(main): %v", err)
+	}
+	if len(gotMain) != 1 || gotMain[0].Content != "keep main" {
+		t.Fatalf("main transcript = %#v, want unchanged", gotMain)
+	}
+	gotWorker := a.GetMessages()
+	if len(gotWorker) != 1 || gotWorker[0].Content != "worker prompt" {
+		t.Fatalf("parked worker transcript = %#v, want last worker message removed", gotWorker)
+	}
+}
+
+func TestParkedSubAgentFocusedStatsAndPoolDoNotFallBackToMain(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.modelPoolPolicy = NewRuntimeModelPoolPolicy()
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"builder": {Name: "builder", Mode: config.AgentModeMain, Models: map[string][]string{"main": {"test/main"}}},
+		"worker":  {Name: "worker", Mode: config.AgentModeSubAgent, Models: map[string][]string{"base": {"test/worker"}, "fast": {"test/worker-fast"}}},
+	})
+	a.activeConfig = a.agentConfigs["builder"]
+	a.usageTracker.RecordForAgent(identity.MainAgentID, "test/main", nil, message.TokenUsage{InputTokens: 100})
+
+	sub := newControllableTestSubAgent(t, a, "adhoc-park-focus")
+	sub.agentDefName = "worker"
+	a.usageTracker.RecordForAgent(sub.instanceID, "test/worker", nil, message.TokenUsage{InputTokens: 7, OutputTokens: 3})
+	sub.setState(SubAgentStateCompleted, "done")
+	a.syncTaskRecordFromSub(sub, "")
+	a.SwitchFocus(sub.instanceID)
+	if !a.parkSubAgent(sub.instanceID) {
+		t.Fatal("parkSubAgent() = false")
+	}
+
+	stats := a.GetSidebarUsageStats()
+	if stats.InputTokens != 7 || stats.OutputTokens != 3 {
+		t.Fatalf("parked usage = %#v, want worker-only stats", stats)
+	}
+	if current, limit := a.GetContextStats(); current != 0 || limit != 0 {
+		t.Fatalf("parked context stats = (%d, %d), want unavailable zeros", current, limit)
+	}
+	if got := a.CurrentPoolName(); got != "base" {
+		t.Fatalf("CurrentPoolName() = %q, want worker base pool", got)
+	}
+	if err := a.SetCurrentModelPool("fast"); err != nil {
+		t.Fatalf("SetCurrentModelPool(fast): %v", err)
+	}
+	a.dispatch(<-a.eventCh)
+	if got, ok := a.AgentOverridePoolName("worker"); !ok || got != "fast" {
+		t.Fatalf("worker pool override = %q, %v; want fast, true", got, ok)
+	}
+	if got := a.modelPoolPolicy.CurrentModelPool(); got != "" {
+		t.Fatalf("main current pool = %q, want unchanged", got)
+	}
+}
+
+func TestParkBarrierConcurrentFocusedInputPreventsParkingAndPreservesMessage(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"worker": {Name: "worker", Mode: config.AgentModeSubAgent, Models: map[string][]string{"default": {"test/test-model"}}},
+	})
+	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+	sub := newControllableTestSubAgent(t, a, "adhoc-park-input-race")
+	sub.setState(SubAgentStateIdle, "idle")
+	a.syncTaskRecordFromSub(sub, "")
+	a.SwitchFocus(sub.instanceID)
+
+	barrierReached := make(chan struct{})
+	releaseBarrier := make(chan struct{})
+	a.subAgentParkBarrierHook = func(*SubAgent) {
+		close(barrierReached)
+		<-releaseBarrier
+	}
+	parked := make(chan bool, 1)
+	go func() { parked <- a.parkSubAgent(sub.instanceID) }()
+	<-barrierReached
+
+	inputDone := make(chan struct{})
+	go func() {
+		a.SendUserMessage("preserve during park")
+		close(inputDone)
+	}()
+	close(releaseBarrier)
+	wasParked := <-parked
+	<-inputDone
+
+	rec := a.taskRecordByTaskID(sub.taskID)
+	if wasParked && (rec == nil || rec.LatestInstanceID == sub.instanceID) {
+		t.Fatalf("task record = %#v, want input delivered through a rehydrated runtime", rec)
+	}
+	live := a.subAgentByTaskID(sub.taskID)
+	if live == nil {
+		t.Fatal("focused input was lost without a live runtime")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		for _, msg := range live.ctxMgr.Snapshot() {
+			if msg.Role == message.RoleUser && strings.Contains(msg.Content, "preserve during park") {
+				return
+			}
+		}
+		if len(live.inputCh)+len(live.inputOverflow) > 0 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("concurrent focused input was neither queued nor appended")
+}
+
+func TestSubAgentPersistencePumpPreservesMessageOrder(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-persist-order")
+	for _, content := range []string{"first", "second", "third"} {
+		sub.persistMessageAsync(message.Message{Role: "user", Content: content}, "ordered test message", nil)
+	}
+	a.flushPersist()
+
+	msgs, err := a.recovery.LoadMessages(sub.instanceID)
+	if err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
+	if len(msgs) != 3 || msgs[0].Content != "first" || msgs[1].Content != "second" || msgs[2].Content != "third" {
+		t.Fatalf("persisted messages = %#v, want enqueue order", msgs)
+	}
+}
+
+func TestPersistencePumpCloseDrainsAcceptedEntriesAndRejectsLaterEnqueues(t *testing.T) {
+	pump := newPersistencePump(1)
+	var got []string
+	pump.start(func(entry persistEntry) { got = append(got, entry.msg.Content) })
+	if !pump.enqueue(persistEntry{msg: message.Message{Content: "accepted"}}, make(chan struct{})) {
+		t.Fatal("initial enqueue rejected")
+	}
+	pump.close()
+	<-pump.done
+	if len(got) != 1 || got[0] != "accepted" {
+		t.Fatalf("drained entries = %#v, want accepted entry", got)
+	}
+	if pump.enqueue(persistEntry{msg: message.Message{Content: "late"}}, make(chan struct{})) {
+		t.Fatal("enqueue succeeded after close")
 	}
 }
 

@@ -41,7 +41,7 @@ func isRelevantCoordinationTask(rec *DurableTaskRecord, currentTurn uint64) bool
 	if strings.TrimSpace(rec.LastMailboxID) != "" && rec.LastUpdatedTurn+coordinationSnapshotRecentTaskTurns >= currentTurn {
 		return true
 	}
-	if strings.TrimSpace(rec.State) == string(SubAgentStateCompleted) && rec.ResumePolicy == taskResumePolicyCompletedFollowUpOnly && rec.LastUpdatedTurn+coordinationSnapshotRecentTaskTurns >= currentTurn {
+	if strings.TrimSpace(rec.State) == string(SubAgentStateCompleted) && rec.ResumePolicy == taskResumePolicyNotify && rec.LastUpdatedTurn+coordinationSnapshotRecentTaskTurns >= currentTurn {
 		return true
 	}
 	return false

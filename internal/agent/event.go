@@ -459,12 +459,13 @@ func (CompactionStatusEvent) agentEvent() {}
 
 // AgentStartedEvent signals that a delegated SubAgent has started running.
 type AgentStartedEvent struct {
-	AgentID       string
-	TaskID        string
-	AgentType     string
-	Description   string
-	ParentAgentID string
-	ParentTaskID  string
+	AgentID         string
+	PreviousAgentID string
+	TaskID          string
+	AgentType       string
+	Description     string
+	ParentAgentID   string
+	ParentTaskID    string
 }
 
 func (AgentStartedEvent) agentEvent() {}

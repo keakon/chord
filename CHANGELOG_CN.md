@@ -11,6 +11,8 @@
 
 ### 改进
 
+- 进入静止状态的 SubAgent 现在会释放事件循环 goroutine、LLM client、context manager 及其他热运行时资源，同时保留 durable task descriptor 与 transcript。聚焦、历史查看和跟进能力不变；用户显式输入、获授权的定向通知或相关 descendant mailbox 事件会按需 rehydrate 新的 runtime 实例。failed / cancelled 任务必须由用户显式重启，模型通知不能自行复活它们。
+- TUI 聚焦已回收的 SubAgent 时仍会显示其任务专属 skills，与聚焦 live worker 的行为一致。
 - Headless 现在会为委派工作流输出可靠的结构化 `agent_started`、`agent_notify` 以及补充元数据后的 `agent_done` 事件；SubAgent 的 `assistant_message` payload 也会携带 task、agent 类型与 parent agent 标识，方便下游标注和路由。
 - 流式 `write`、`edit` 与 `patch` 卡片现在会在 `path` 字段完整到达后立即显示路径，参数继续接收时保留已接收字符数，参数流结束后再切换到完整内容或 diff 预览。
 - 现在可通过 `/rename <标题>` 为会话设置自定义显示标题，执行 `/rename` 可清空标题。标题会显示在会话选择器和终端标题中，不会改变不可变的 session ID 或磁盘目录。
@@ -23,7 +25,10 @@
 
 ### 修复
 
-- 恢复会话时现在会将所有 agent 还原为 idle，并只加载 SubAgent mailbox，不会投递 mailbox 或自动发起请求；恢复的 mailbox 只有在用户明确继续或向所属 MainAgent/SubAgent 提交输入时才会投递，正常运行期间产生的实时 mailbox 仍会正常投递并唤醒所属 agent。completed、failed、cancelled SubAgent 会保留原 transcript 与 agent ID，仍可聚焦并手动继续，composer 也不会隐藏。请求进度和运行模型状态改为按精确 agent 身份记录，因此包括名称以 `main-` 开头的后台 agent 在内，都不会再让当前 agent 错误显示为忙碌。
+- 忙碌 SubAgent 的排队输入现在会等事件循环实际取走已完成的 LLM 响应后才放行，避免新 turn 抢先创建、把有效响应误判为 stale 并丢弃。
+- SubAgent mailbox ack 状态现在每个 session 只加载一次，并随 ack 写入同步更新，不再为每个实时 mailbox 事件重读完整 JSONL 日志。
+- `response_header_timeout` 现在会约束收到响应前的完整阶段，包括连接建立和请求体上传；收到响应头后计时器仍会停止，因此不会变成健康流的总请求超时。
+- 恢复会话时现在会把每个 SubAgent 还原为轻量 parked task，并只加载 mailbox，不会投递 mailbox，也不会创建请求、LLM client 或事件循环 goroutine；恢复的 mailbox 只有在用户明确继续或向所属 MainAgent/SubAgent 提交输入时才会投递，正常运行期间产生的实时 mailbox 仍会正常投递并唤醒所属任务。completed、failed、cancelled 任务会保留原 transcript 与稳定 task ID，仍可聚焦并手动继续；rehydrate 会创建新的 runtime agent ID，并报告 previous ID。composer 仍保持可用，请求进度和运行模型状态则按精确 runtime 身份记录，因此包括名称以 `main-` 开头的后台 agent 在内，都不会再让当前 agent 错误显示为忙碌。
 - `Shift+Tab` 现在始终保留可切换到 main agent 视图的路径。停止但未完成的 SubAgent 会继续留在视图切换序列中；即使当前焦点指向已失效的 SubAgent，也会回到 main，而不会卡在无法操作的视图。
 - 使用 `Esc` 取消 turn 时，如果保留的中断回复高于 viewport，现在会确保该 turn 的用户消息仍然可见；恢复以同类中断 turn 结尾的会话时也会从用户消息处打开，而不是定位到部分回复末尾，正常完成的回复仍保持原有的尾部跟随行为。
 - 当前查看的 SubAgent 在流式接收工具参数时，状态栏现在会正常显示已接收的响应字节数和事件数，不再一直停在 `0 B`。

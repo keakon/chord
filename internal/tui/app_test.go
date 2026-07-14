@@ -5434,9 +5434,9 @@ func TestRunningModelChangedEventUpdatesSubAgentSidebarBeforeSnapshot(t *testing
 	}
 }
 
-// Narrow status bar model pill matches InfoPanel MODEL: AgentForTUI.RunningModelRef() only
-// (not sidebar-cached sub refs), so it follows backend focus the same way as the right panel.
-func TestNarrowStatusBarModelUsesRunningModelRefNotSidebarCache(t *testing.T) {
+// Focused SubAgent model display uses the sidebar's selected/running snapshot
+// instead of leaking the main agent's selected provider reference.
+func TestNarrowStatusBarModelUsesFocusedSubAgentSnapshot(t *testing.T) {
 	events := make(chan agent.AgentEvent, 1)
 	a := &sessionControlAgent{
 		events:           events,
@@ -5451,11 +5451,11 @@ func TestNarrowStatusBarModelUsesRunningModelRefNotSidebarCache(t *testing.T) {
 	}, "worker-1", "builder")
 
 	plain := stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain, "main/huge") {
-		t.Fatalf("status bar should show RunningModelRef %q; got %q", "main/huge", plain)
+	if !strings.Contains(plain, "sample/tiny") {
+		t.Fatalf("status bar should show focused running model %q; got %q", "sample/tiny", plain)
 	}
-	if strings.Contains(plain, "sample/tiny") {
-		t.Fatalf("status bar should not use sidebar-cached sub ref when it differs from RunningModelRef; got %q", plain)
+	if strings.Contains(plain, "main/huge") {
+		t.Fatalf("status bar should not use main selected ref for a focused SubAgent; got %q", plain)
 	}
 }
 
@@ -5705,6 +5705,42 @@ func TestStoppedSubAgentRemainsSwitchableUntilCompletion(t *testing.T) {
 				t.Fatalf("backend.focused = %q, want \"\" (main)", backend.focused)
 			}
 		})
+	}
+}
+
+func TestRehydratedSubAgentMigratesFocusedRuntimeState(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 24)
+	m.focusedAgentID = "agent-old"
+	m.sidebar.focusedID = "agent-old"
+	m.activities["agent-old"] = agent.AgentActivityEvent{AgentID: "agent-old", Type: agent.ActivityIdle}
+	m.activityLastChanged["agent-old"] = time.Now()
+	m.agentComposerStates["agent-old"] = agentComposerState{}
+	m.queuedDrafts = []queuedDraft{{ID: "draft-1", AgentID: "agent-old", Content: "follow up"}}
+	m.inflightDraft = &queuedDraft{ID: "draft-2", AgentID: "agent-old", Content: "sent"}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentStartedEvent{
+		AgentID:         "agent-new",
+		PreviousAgentID: "agent-old",
+		TaskID:          "adhoc-1",
+	}})
+
+	if m.focusedAgentID != "agent-new" || m.sidebar.focusedID != "agent-new" {
+		t.Fatalf("focus = %q/%q, want agent-new", m.focusedAgentID, m.sidebar.focusedID)
+	}
+	if _, ok := m.activities["agent-old"]; ok {
+		t.Fatal("old runtime activity still present")
+	}
+	if got := m.activities["agent-new"].AgentID; got != "agent-new" {
+		t.Fatalf("new runtime activity agent = %q", got)
+	}
+	if _, ok := m.agentComposerStates["agent-old"]; ok {
+		t.Fatal("old runtime composer state still present")
+	}
+	if _, ok := m.agentComposerStates["agent-new"]; !ok {
+		t.Fatal("new runtime composer state missing")
+	}
+	if m.queuedDrafts[0].AgentID != "agent-new" || m.inflightDraft.AgentID != "agent-new" {
+		t.Fatalf("draft runtime IDs = %q/%q, want agent-new", m.queuedDrafts[0].AgentID, m.inflightDraft.AgentID)
 	}
 }
 

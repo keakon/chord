@@ -178,6 +178,16 @@ func (a *MainAgent) appendSubAgentMailboxAck(record SubAgentMailboxAckRecord) {
 	if sessionDir == "" || record.MessageID == "" {
 		return
 	}
+	a.subAgentMailboxIDsMu.Lock()
+	if a.subAgentMailboxConsumed == nil {
+		a.subAgentMailboxConsumed = make(map[string]struct{})
+	}
+	if record.Outcome == "consumed" {
+		a.subAgentMailboxConsumed[record.MessageID] = struct{}{}
+	} else {
+		delete(a.subAgentMailboxConsumed, record.MessageID)
+	}
+	a.subAgentMailboxIDsMu.Unlock()
 	dir := filepath.Join(sessionDir, "subagents")
 	path := filepath.Join(dir, "mailbox-acks.jsonl")
 	f, err := privatefs.OpenFile(sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
@@ -232,15 +242,13 @@ func applyMailboxAcks(msgs []SubAgentMailboxMessage, acks map[string]SubAgentMai
 
 func (a *MainAgent) isSubAgentMailboxConsumed(messageID string) bool {
 	messageID = strings.TrimSpace(messageID)
-	if a == nil || messageID == "" || strings.TrimSpace(a.sessionDir) == "" {
+	if a == nil || messageID == "" {
 		return false
 	}
-	acks, err := loadSubAgentMailboxAcks(a.sessionDir)
-	if err != nil {
-		return false
-	}
-	ack, ok := acks[messageID]
-	return ok && ack.Outcome == "consumed"
+	a.subAgentMailboxIDsMu.Lock()
+	_, ok := a.subAgentMailboxConsumed[messageID]
+	a.subAgentMailboxIDsMu.Unlock()
+	return ok
 }
 
 func truncateMailboxReplySummary(text string) string {

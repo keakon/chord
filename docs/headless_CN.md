@@ -209,7 +209,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `question_request`   | 模型向用户提问                               | `request_id`、`tool_name`、`question`、`options`、`option_details`、`default_answer`、`multiple`、`timeout_ms` |
 | `handoff_request`    | planner 已保存 handoff plan，需要 client 批准或拒绝执行 | `request_id`、`plan_path`、`plan_text`、`plan_error`、`agents[]`，元素包含 `{name, default, model_pools, current_model_pool}` |
 | `local_shell_result` | `local_shell` 命令的执行结果                 | `command`、`output`、`failed`、`error` |
-| `agent_started`      | 某个委托的 SubAgent 实例开始运行（包括 rehydrate 后的跟进实例） | `agent_id`、`task_id`、`agent_type`、`description`、`parent_agent_id`、`parent_task_id` |
+| `agent_started`      | 某个委托的 SubAgent runtime 开始运行（包括 parked task 的按需 rehydrate） | `agent_id`、`previous_agent_id`（rehydrate 时存在）、`task_id`、`agent_type`、`description`、`parent_agent_id`、`parent_task_id` |
 | `agent_notify`       | 某个 agent 向 owner 或指定委派工作流发送非阻塞更新 | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`parent_task_id`、`target_agent_id`、`target_task_id`、`kind`、`message` |
 | `agent_done`         | 某个 SubAgent 完成任务                       | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`parent_task_id`、`summary` |
 | `assistant_rollback` | 丢弃尚未提交的流式 assistant 输出            | `agent_id`、`reason` |
@@ -221,6 +221,8 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 如果 stdin 上的单行输入超过协议行长度限制，Chord 会输出带 `code: "stdin_line_too_long"` 的 `error` envelope，并继续读取后续行。集成方应在存在 `code` 时用它做错误分类，把 `message` 作为面向人的诊断信息。
 
 纯工具调用轮次（包括 SubAgent 调用 `Complete`）的 `assistant_message.text` 可能为空。Chord 会记 warning 便于观测；gateway 集成应跳过空消息，并以 `agent_done.summary` 作为权威的 SubAgent 完成内容。
+
+进入静止状态的 SubAgent 可能释放 live runtime，但 task 与 transcript 会持久保留。后续获授权的定向通知可用新的 `agent_id` rehydrate 该任务；集成方应使用稳定的 `task_id` 路由，并根据 `agent_started.previous_agent_id` 替换 runtime 级标签。
 
 ## 通过 `send` 兼容 slash 命令
 

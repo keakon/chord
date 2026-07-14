@@ -87,17 +87,35 @@ func (a *MainAgent) SendUserMessage(content string) {
 	}
 	// Route to focused SubAgent if one is active.
 	if focused := a.validFocusedSubAgent(); focused != nil {
-		if focused.State() == SubAgentStateRunning {
-			a.mailboxDeliveryPaused.Store(false)
-			focused.InjectManualUserMessage(content, a.drainOwnedSubAgentMailboxes(focused.instanceID))
-			return
-		}
 		kind := "follow_up"
 		if focused.State() == SubAgentStateWaitingMain {
 			kind = "reply"
 		}
 		if _, _, err := a.deliverManualMessageToSubAgent(focused, content, kind); err != nil {
-			a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: focused.instanceID})
+			rec := a.taskRecordByTaskID(focused.taskID)
+			if rec == nil || !rec.RuntimeParked {
+				a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: focused.instanceID})
+				return
+			}
+			sub, _, rehydrateErr := a.rehydrateTask(rec)
+			if rehydrateErr != nil {
+				a.emitToTUI(ToastEvent{Message: rehydrateErr.Error(), Level: "warn", AgentID: focused.instanceID})
+				return
+			}
+			if _, _, retryErr := a.deliverManualMessageToSubAgent(sub, content, kind); retryErr != nil {
+				a.emitToTUI(ToastEvent{Message: retryErr.Error(), Level: "warn", AgentID: sub.instanceID})
+			}
+		}
+		return
+	}
+	if rec := a.focusedDurableTask(); rec != nil && rec.RuntimeParked {
+		sub, _, err := a.rehydrateTask(rec)
+		if err != nil {
+			a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: rec.LatestInstanceID})
+			return
+		}
+		if _, _, err := a.deliverManualMessageToSubAgent(sub, content, "follow_up"); err != nil {
+			a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: sub.instanceID})
 		}
 		return
 	}
@@ -120,11 +138,32 @@ func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
 		return
 	}
 	if focused := a.validFocusedSubAgent(); focused != nil {
-		if !a.reactivateFocusedSubAgentForManualInput(focused) {
+		if !a.withRegisteredSubAgent(focused, func(sub *SubAgent) bool {
+			if !a.reactivateFocusedSubAgentForManualInput(sub) {
+				return false
+			}
+			a.mailboxDeliveryPaused.Store(false)
+			return sub.InjectManualUserMessageWithParts(parts, a.drainOwnedSubAgentMailboxes(sub.instanceID))
+		}) {
+			a.emitToTUI(ToastEvent{Message: "Focused SubAgent is no longer available; retry the message", Level: "warn", AgentID: focused.instanceID})
+		}
+		return
+	}
+	if rec := a.focusedDurableTask(); rec != nil && rec.RuntimeParked {
+		sub, _, err := a.rehydrateTask(rec)
+		if err != nil {
+			a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: rec.LatestInstanceID})
 			return
 		}
-		a.mailboxDeliveryPaused.Store(false)
-		focused.InjectManualUserMessageWithParts(parts, a.drainOwnedSubAgentMailboxes(focused.instanceID))
+		if !a.reactivateFocusedSubAgentForManualInput(sub) {
+			return
+		}
+		if !a.enqueueRegisteredSubAgent(sub, func(current *SubAgent) bool {
+			a.mailboxDeliveryPaused.Store(false)
+			return current.InjectManualUserMessageWithParts(parts, a.drainOwnedSubAgentMailboxes(current.instanceID))
+		}) {
+			a.emitToTUI(ToastEvent{Message: "Rehydrated SubAgent is no longer available; retry the message", Level: "warn", AgentID: sub.instanceID})
+		}
 		return
 	}
 	a.sendEvent(Event{
@@ -140,8 +179,9 @@ func (a *MainAgent) QueuePendingUserDraft(draftID string, parts []message.Conten
 		return false
 	}
 	if focused := a.validFocusedSubAgent(); focused != nil && focused.State() == SubAgentStateRunning {
-		focused.QueuePendingUserDraft(draftID, parts)
-		return true
+		return a.enqueueRegisteredSubAgent(focused, func(sub *SubAgent) bool {
+			return sub.QueuePendingUserDraft(draftID, parts)
+		})
 	}
 	a.sendEvent(Event{
 		Type:    EventPendingDraftUpsert,
@@ -188,8 +228,23 @@ func (a *MainAgent) AppendContextMessage(msg message.Message) {
 	}
 	msg.Role = "user"
 	if focused := a.validFocusedSubAgent(); focused != nil {
-		if !focused.TryEnqueueContextAppend(msg) {
+		if !a.enqueueRegisteredSubAgent(focused, func(sub *SubAgent) bool {
+			return sub.TryEnqueueContextAppend(msg)
+		}) {
 			log.Warnf("subagent context append rejected agent_id=%v state=%v", focused.instanceID, focused.State())
+		}
+		return
+	}
+	if rec := a.focusedDurableTask(); rec != nil && rec.RuntimeParked {
+		sub, _, err := a.rehydrateTask(rec)
+		if err != nil {
+			log.Warnf("parked subagent context append rehydrate failed task_id=%v error=%v", rec.TaskID, err)
+			return
+		}
+		if !a.enqueueRegisteredSubAgent(sub, func(current *SubAgent) bool {
+			return current.TryEnqueueContextAppend(msg)
+		}) {
+			log.Warnf("subagent context append rejected agent_id=%v state=%v", sub.instanceID, sub.State())
 		}
 		return
 	}

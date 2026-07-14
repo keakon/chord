@@ -315,11 +315,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	s.ctxMgr.Append(toolMsg)
 
 	// Persist tool result.
-	go func() {
-		if err := s.recovery.PersistMessage(s.instanceID, toolMsg); err != nil {
-			log.Warnf("SubAgent: failed to persist tool result agent=%v error=%v", s.instanceID, err)
-		}
-	}()
+	s.persistMessageAsync(toolMsg, "tool result", nil)
 
 	s.turn.CompletedToolCalls = append(s.turn.CompletedToolCalls, map[string]any{
 		hook.DataKeyCallID:   result.CallID,

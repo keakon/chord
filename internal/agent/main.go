@@ -416,6 +416,8 @@ type MainAgent struct {
 	// RWMutex that guards them (formerly inline MainAgent fields mu/subAgents/
 	// taskRecords/nudgeCounts/subAgentStateEnteredTurn).
 	subs                     subAgentRegistry
+	taskRegistryPersistMu    sync.Mutex
+	taskRegistryPersistHook  func()                    // test-only barrier after snapshot, before durable write
 	sem                      chan struct{}             // bounded concurrency semaphore (cap = 10)
 	fileTrack                *filelock.FileTracker     // file write conflict detection
 	fileBackups              *fileBackupManager        // session-scoped risky write backups
@@ -424,10 +426,13 @@ type MainAgent struct {
 	sessionArtifactsDirFn    func() string             // active session artifacts directory for exports / dumps
 	sessionTargetChangedFn   func(string)              // notified after active sessionDir changes
 	focusedAgent             atomic.Pointer[SubAgent]  // currently focused SubAgent (nil = main)
+	focusedTaskMu            sync.RWMutex
+	focusedTaskID            string // focused durable task when its runtime is parked
 	subAgentInbox            subAgentInbox
 	ownedSubAgentMailboxes   map[string][]SubAgentMailboxMessage // owner agentID -> descendant mailbox waiting for owner-local delivery
 	subAgentMailboxIDsMu     sync.Mutex
 	subAgentMailboxIDs       map[string]struct{} // session-scoped idempotency keys for persisted and live mailbox events
+	subAgentMailboxConsumed  map[string]struct{} // consumed mailbox IDs loaded once and updated with ack writes
 	mailboxDeliveryPaused    atomic.Bool         // restored sessions wait for explicit user continuation before mailbox delivery
 	pendingSubAgentMailboxes []*SubAgentMailboxMessage
 	activeSubAgentMailboxes  []*SubAgentMailboxMessage
@@ -599,10 +604,11 @@ type MainAgent struct {
 	rateLimitSnaps map[string]*ratelimit.KeyRateLimitSnapshot
 
 	// Activity observer for side-band runtime reactions (e.g. power management).
-	activityObserverMu  sync.RWMutex
-	activityObserver    ActivityObserver
-	busyPreparationMu   sync.RWMutex
-	busyPreparationHook func(context.Context) error
+	activityObserverMu      sync.RWMutex
+	activityObserver        ActivityObserver
+	busyPreparationMu       sync.RWMutex
+	busyPreparationHook     func(context.Context) error
+	subAgentParkBarrierHook func(*SubAgent) // test-only deterministic race barrier
 }
 
 // persistEntry is a queued persistence request for ordered JSONL writes.
@@ -610,7 +616,9 @@ type persistEntry struct {
 	agentID  string
 	msg      message.Message
 	recovery *recovery.RecoveryManager // snapshot of a.recovery at enqueue time
+	after    func(bool)
 	barrier  chan struct{}
+	stop     bool
 }
 
 // ---------------------------------------------------------------------------
@@ -651,46 +659,48 @@ func NewMainAgent(
 	gitStatusReady := make(chan struct{})
 
 	a := &MainAgent{
-		parentCtx:              parentCtx,
-		cancel:                 cancel,
-		llmClient:              llmClient,
-		ctxMgr:                 ctxMgr,
-		tools:                  toolRegistry,
-		hookEngine:             hookEngine,
-		usageTracker:           analytics.NewUsageTracker(),
-		usageLedger:            analytics.NewUsageLedger(sessionDir, projectRoot),
-		invokedSkills:          make(map[string]*skill.Meta),
-		globalConfig:           globalCfg,
-		projectConfig:          projectCfg,
-		eventCh:                make(chan Event, 256),
-		outputCh:               make(chan AgentEvent, 512),
-		sessionDir:             sessionDir,
-		modelName:              modelName,
-		runningModelRef:        modelName,
-		instanceID:             NextInstanceID(identity.MainAgentID),
-		mcpClientInfo:          mcpClientInfo,
-		done:                   make(chan struct{}),
-		stoppingCh:             make(chan struct{}),
-		evidence:               evidenceCandidateTracker{seen: make(map[string]struct{})},
-		projectRoot:            projectRoot,
-		subs:                   newSubAgentRegistry(),
-		sem:                    make(chan struct{}, 10),
-		fileTrack:              filelock.NewFileTracker(),
-		fileBackups:            newFileBackupManager(sessionDir),
-		subAgentInbox:          newSubAgentInbox(),
-		ownedSubAgentMailboxes: make(map[string][]SubAgentMailboxMessage),
-		subAgentMailboxIDs:     make(map[string]struct{}),
-		subAgentUrgentCounts:   make(map[string]int),
-		recovery:               recovery.NewRecoveryManager(sessionDir),
-		persist:                newPersistencePump(256),
-		cachedWorkDir:          workDir,
-		gitStatusReady:         gitStatusReady,
-		agentsMDReady:          make(chan struct{}),
-		skillsReady:            make(chan struct{}),
-		mcpReadyMu:             sync.Mutex{},
-		mcpReady:               make(chan struct{}),
+		parentCtx:               parentCtx,
+		cancel:                  cancel,
+		llmClient:               llmClient,
+		ctxMgr:                  ctxMgr,
+		tools:                   toolRegistry,
+		hookEngine:              hookEngine,
+		usageTracker:            analytics.NewUsageTracker(),
+		usageLedger:             analytics.NewUsageLedger(sessionDir, projectRoot),
+		invokedSkills:           make(map[string]*skill.Meta),
+		globalConfig:            globalCfg,
+		projectConfig:           projectCfg,
+		eventCh:                 make(chan Event, 256),
+		outputCh:                make(chan AgentEvent, 512),
+		sessionDir:              sessionDir,
+		modelName:               modelName,
+		runningModelRef:         modelName,
+		instanceID:              NextInstanceID(identity.MainAgentID),
+		mcpClientInfo:           mcpClientInfo,
+		done:                    make(chan struct{}),
+		stoppingCh:              make(chan struct{}),
+		evidence:                evidenceCandidateTracker{seen: make(map[string]struct{})},
+		projectRoot:             projectRoot,
+		subs:                    newSubAgentRegistry(),
+		sem:                     make(chan struct{}, 10),
+		fileTrack:               filelock.NewFileTracker(),
+		fileBackups:             newFileBackupManager(sessionDir),
+		subAgentInbox:           newSubAgentInbox(),
+		ownedSubAgentMailboxes:  make(map[string][]SubAgentMailboxMessage),
+		subAgentMailboxIDs:      make(map[string]struct{}),
+		subAgentMailboxConsumed: make(map[string]struct{}),
+		subAgentUrgentCounts:    make(map[string]int),
+		recovery:                recovery.NewRecoveryManager(sessionDir),
+		persist:                 newPersistencePump(256),
+		cachedWorkDir:           workDir,
+		gitStatusReady:          gitStatusReady,
+		agentsMDReady:           make(chan struct{}),
+		skillsReady:             make(chan struct{}),
+		mcpReadyMu:              sync.Mutex{},
+		mcpReady:                make(chan struct{}),
 	}
 	a.interaction = newInteractionBroker(a.stoppingCh)
+	a.startPersistLoop()
 	a.refreshSessionSummary()
 
 	// Fetch git status asynchronously; callLLM will wait for it before the
@@ -1010,8 +1020,19 @@ func (a *MainAgent) ProxyInUseForRef(ref string) bool {
 
 // GetTokenUsage returns cumulative token usage statistics.
 func (a *MainAgent) GetTokenUsage() message.TokenUsage {
-	if sub := a.focusedAgent.Load(); sub != nil {
-		return sub.ctxMgr.GetStats()
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		return target.sub.ctxMgr.GetStats()
+	}
+	if target.parked {
+		stats := a.usageStatsForTask(target.task)
+		return message.TokenUsage{
+			InputTokens:      int(stats.InputTokens),
+			OutputTokens:     int(stats.OutputTokens),
+			CacheReadTokens:  int(stats.CacheReadTokens),
+			CacheWriteTokens: int(stats.CacheWriteTokens),
+			ReasoningTokens:  int(stats.ReasoningTokens),
+		}
 	}
 	return a.ctxMgr.GetStats()
 }
@@ -1760,16 +1781,6 @@ func (a *MainAgent) handleAgentError(evt Event) {
 			"source_agent_id": evt.SourceID,
 		},
 	))
-
-	// Auto-switch focus back to Main if user was focused on the failed agent.
-	if focused := a.focusedAgent.Load(); focused != nil && focused.instanceID == evt.SourceID {
-		a.focusedAgent.Store(nil)
-		a.emitToTUI(AgentStatusEvent{
-			AgentID: evt.SourceID,
-			Status:  "error",
-			Message: fmt.Sprintf("SubAgent %s errored; focus switched back to main", evt.SourceID),
-		})
-	}
 
 	sub2 := a.subAgentByID(evt.SourceID)
 	if sub2 != nil {

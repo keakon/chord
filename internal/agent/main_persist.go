@@ -19,6 +19,8 @@ import (
 type persistencePump struct {
 	ch        chan persistEntry
 	done      chan struct{}
+	mu        sync.RWMutex
+	stopped   bool
 	closeOnce sync.Once
 	loopOnce  sync.Once
 }
@@ -31,24 +33,29 @@ func newPersistencePump(buffer int) *persistencePump {
 }
 
 // start launches the drain loop exactly once. handle is invoked for each entry
-// in arrival order; done is closed when the channel is closed and drained.
+// in arrival order; done is closed after a FIFO stop sentinel is consumed.
 func (p *persistencePump) start(handle func(persistEntry)) {
 	p.loopOnce.Do(func() {
 		go func() {
 			defer close(p.done)
 			for entry := range p.ch {
+				if entry.stop {
+					return
+				}
 				handle(entry)
 			}
 		}()
 	})
 }
 
-// close closes the channel exactly once so the drain loop can finish.
+// close stops new enqueues and sends a FIFO stop sentinel without closing ch,
+// avoiding send/close races with producers already inside enqueue.
 func (p *persistencePump) close() {
 	p.closeOnce.Do(func() {
-		if p.ch != nil {
-			close(p.ch)
-		}
+		p.mu.Lock()
+		p.stopped = true
+		p.ch <- persistEntry{stop: true}
+		p.mu.Unlock()
 	})
 }
 
@@ -56,6 +63,11 @@ func (p *persistencePump) close() {
 // stopping fired before the send completed.
 func (p *persistencePump) enqueue(entry persistEntry, stopping <-chan struct{}) bool {
 	if p == nil || p.ch == nil {
+		return false
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.stopped {
 		return false
 	}
 	select {
@@ -72,10 +84,15 @@ func (a *MainAgent) startPersistLoop() {
 			close(entry.barrier)
 			return
 		}
+		succeeded := true
 		if entry.recovery != nil {
 			if err := entry.recovery.PersistMessage(entry.agentID, entry.msg); err != nil {
 				log.Warnf("failed to persist message agent_id=%v error=%v", entry.agentID, err)
+				succeeded = false
 			}
+		}
+		if entry.after != nil {
+			entry.after(succeeded)
 		}
 	})
 }
@@ -88,16 +105,20 @@ func (a *MainAgent) closePersistLoop() {
 // Blocks if the channel is full (preferable to silently dropping
 // persistence data). No-op once Shutdown has closed the channel.
 func (a *MainAgent) persistAsync(agentID string, msg message.Message) {
+	a.persistAsyncAfter(agentID, msg, nil)
+}
+
+func (a *MainAgent) persistAsyncAfter(agentID string, msg message.Message, after func(bool)) bool {
 	if a.shuttingDown.Load() {
-		return
+		return false
 	}
 	start := time.Now()
-	if !a.persist.enqueue(persistEntry{agentID: agentID, msg: msg, recovery: a.recovery}, a.stoppingCh) {
-		return
+	if !a.persist.enqueue(persistEntry{agentID: agentID, msg: msg, recovery: a.recovery, after: after}, a.stoppingCh) {
+		return false
 	}
 	blocked := time.Since(start)
 	if blocked <= 50*time.Millisecond {
-		return
+		return true
 	}
 	callID := ""
 	if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
@@ -115,18 +136,26 @@ func (a *MainAgent) persistAsync(agentID string, msg message.Message) {
 		a.recordToolTracePersistBlock(callID, blocked)
 	}
 	log.Warnf("persistAsync enqueue blocked role=%v tool_call_id=%v blocked_ms=%v", msg.Role, callID, blocked.Milliseconds())
+	return true
 }
 
 // flushPersist blocks until all persistence requests queued before this call
 // have been written to disk. It is used before rewriting session files during
 // context compaction or session switches.
 func (a *MainAgent) flushPersist() {
+	a.flushPersistUntil(nil)
+}
+
+func (a *MainAgent) flushPersistUntil(beforeWait func()) {
 	if a.shuttingDown.Load() {
 		return
 	}
 	barrier := make(chan struct{})
 	if !a.persist.enqueue(persistEntry{barrier: barrier}, a.stoppingCh) {
 		return
+	}
+	if beforeWait != nil {
+		beforeWait()
 	}
 	<-barrier
 }

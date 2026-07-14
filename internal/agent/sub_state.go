@@ -5,8 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/keakon/golog/log"
-
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -96,6 +94,7 @@ func (s *SubAgent) enterWaitingDescendant(reason string) {
 	s.parent.persistSubAgentMeta(s)
 	s.parent.syncTaskRecordFromSub(s, "")
 	s.parent.saveRecoverySnapshot()
+	s.parent.parkSubAgent(s.instanceID)
 }
 
 func (s *SubAgent) appendCompleteToolResult(callID, resultContent string) {
@@ -108,13 +107,7 @@ func (s *SubAgent) appendCompleteToolResult(callID, resultContent string) {
 		Content:    resultContent,
 	}
 	s.ctxMgr.Append(toolMsg)
-	if s.recovery != nil {
-		go func(msg message.Message) {
-			if err := s.recovery.PersistMessage(s.instanceID, msg); err != nil {
-				log.Warnf("SubAgent: failed to persist Complete tool result agent=%v error=%v", s.instanceID, err)
-			}
-		}(toolMsg)
-	}
+	s.persistMessageAsync(toolMsg, "Complete tool result", nil)
 	s.turn.removeStreamingToolCall(callID)
 	s.parent.emitToTUI(ToolResultEvent{
 		CallID:  callID,

@@ -154,6 +154,7 @@ func (a *MainAgent) emitGlobalIdleIfReady() bool {
 		a.globalIdle.Store(false)
 		return false
 	}
+	a.parkQuiescentSubAgents()
 	if !a.globalIdle.CompareAndSwap(false, true) {
 		return false
 	}

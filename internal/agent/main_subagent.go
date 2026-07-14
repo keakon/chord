@@ -238,11 +238,6 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 	})
 	replyMessageID := firstReplyMessageID(sub)
 
-	if focused := a.focusedAgent.Load(); focused != nil && focused.instanceID == evt.SourceID {
-		a.focusedAgent.Store(nil)
-		a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: "done", Message: fmt.Sprintf("SubAgent %s completed; focus switched back to main", evt.SourceID)})
-	}
-
 	if sub.semHeld {
 		a.releaseSubAgentSlot(sub)
 	}
@@ -393,6 +388,7 @@ func (a *MainAgent) handleEscalate(evt Event) {
 		Payload:      reason,
 		RequiresAck:  true,
 	}})
+	a.parkSubAgent(evt.SourceID)
 }
 
 func (a *MainAgent) handleAgentLog(evt Event) {
@@ -777,10 +773,57 @@ func (a *MainAgent) validFocusedSubAgent() *SubAgent {
 	return nil
 }
 
+func (a *MainAgent) enqueueRegisteredSubAgent(sub *SubAgent, enqueue func(*SubAgent) bool) bool {
+	return a.withRegisteredSubAgent(sub, enqueue)
+}
+
+func (a *MainAgent) withRegisteredSubAgent(sub *SubAgent, fn func(*SubAgent) bool) bool {
+	if a == nil || sub == nil || fn == nil {
+		return false
+	}
+	sub.lifecycleMu.Lock()
+	defer sub.lifecycleMu.Unlock()
+	registered := a.subs.withSubAgent(sub.instanceID, func(current *SubAgent) bool { return current == sub })
+	return registered && fn(sub)
+}
+
+func (a *MainAgent) focusedDurableTask() *DurableTaskRecord {
+	if a == nil {
+		return nil
+	}
+	a.focusedTaskMu.RLock()
+	taskID := a.focusedTaskID
+	a.focusedTaskMu.RUnlock()
+	return a.taskRecordByTaskID(taskID)
+}
+
+type focusedAgentSnapshot struct {
+	sub    *SubAgent
+	task   *DurableTaskRecord
+	parked bool
+}
+
+func (a *MainAgent) focusedAgentSnapshot() focusedAgentSnapshot {
+	if sub := a.validFocusedSubAgent(); sub != nil {
+		return focusedAgentSnapshot{sub: sub, task: a.taskRecordByTaskID(sub.taskID)}
+	}
+	if rec := a.focusedDurableTask(); rec != nil && rec.RuntimeParked {
+		return focusedAgentSnapshot{task: rec, parked: true}
+	}
+	return focusedAgentSnapshot{}
+}
+
+func (a *MainAgent) setFocusedTaskID(taskID string) {
+	a.focusedTaskMu.Lock()
+	a.focusedTaskID = strings.TrimSpace(taskID)
+	a.focusedTaskMu.Unlock()
+}
+
 func (a *MainAgent) SwitchFocus(agentID string) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" || agentID == "main" {
 		a.focusedAgent.Store(nil)
+		a.setFocusedTaskID("")
 		return
 	}
 	a.subs.mu.RLock()
@@ -788,9 +831,21 @@ func (a *MainAgent) SwitchFocus(agentID string) {
 	a.subs.mu.RUnlock()
 	if sub != nil {
 		a.focusedAgent.Store(sub)
+		a.setFocusedTaskID(sub.taskID)
 		return
 	}
+	a.subs.mu.RLock()
+	for taskID, rec := range a.subs.taskRecords {
+		if rec != nil && rec.RuntimeParked && strings.TrimSpace(rec.LatestInstanceID) == agentID {
+			a.subs.mu.RUnlock()
+			a.focusedAgent.Store(nil)
+			a.setFocusedTaskID(taskID)
+			return
+		}
+	}
+	a.subs.mu.RUnlock()
 	a.focusedAgent.Store(nil)
+	a.setFocusedTaskID("")
 }
 
 func (a *MainAgent) GetAllAgentsContextUsage() []AgentContextUsage {

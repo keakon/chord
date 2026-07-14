@@ -62,6 +62,21 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 	}
 	owner := a.subAgentByID(ownerAgentID)
 	if owner == nil {
+		rec := a.taskRecordByInstanceID(ownerAgentID)
+		if rec != nil && !rec.RuntimeParked {
+			owner = a.subAgentByTaskID(rec.TaskID)
+		}
+		if owner == nil && msg.Kind != SubAgentMailboxKindProgress {
+			if rec != nil && rec.RuntimeParked && rec.allowsRehydrate(taskResumeByDescendantMailbox) {
+				var err error
+				owner, _, err = a.rehydrateTask(rec)
+				if err != nil {
+					return false
+				}
+			}
+		}
+	}
+	if owner == nil {
 		return false
 	}
 	text := formatSubAgentMailboxInjectionText(&msg)
@@ -145,6 +160,28 @@ func (a *MainAgent) enqueueOwnedSubAgentMailbox(msg SubAgentMailboxMessage) {
 		a.ownedSubAgentMailboxes = make(map[string][]SubAgentMailboxMessage)
 	}
 	a.ownedSubAgentMailboxes[ownerAgentID] = append(a.ownedSubAgentMailboxes[ownerAgentID], msg)
+}
+
+func (a *MainAgent) migrateSubAgentOwnerIdentity(previousAgentID, nextAgentID string) {
+	previousAgentID = strings.TrimSpace(previousAgentID)
+	nextAgentID = strings.TrimSpace(nextAgentID)
+	if previousAgentID == "" || nextAgentID == "" || previousAgentID == nextAgentID {
+		return
+	}
+	if queued := a.ownedSubAgentMailboxes[previousAgentID]; len(queued) > 0 {
+		for i := range queued {
+			queued[i].OwnerAgentID = nextAgentID
+		}
+		a.ownedSubAgentMailboxes[nextAgentID] = append(a.ownedSubAgentMailboxes[nextAgentID], queued...)
+		delete(a.ownedSubAgentMailboxes, previousAgentID)
+	}
+	a.subs.mu.Lock()
+	for _, rec := range a.subs.taskRecords {
+		if rec != nil && strings.TrimSpace(rec.OwnerAgentID) == previousAgentID {
+			rec.OwnerAgentID = nextAgentID
+		}
+	}
+	a.subs.mu.Unlock()
 }
 
 func (a *MainAgent) markSubAgentMailboxSeen(messageID string) bool {
@@ -273,6 +310,15 @@ func (a *MainAgent) shouldAcceptSubAgentMailbox(sourceID string, msg *SubAgentMa
 	}
 	if a.subAgentByID(sourceID) != nil {
 		return true
+	}
+	if msg != nil {
+		if rec := a.taskRecordByTaskID(msg.TaskID); rec != nil && rec.RuntimeParked && durableTaskRecordIncludesInstance(rec, sourceID) {
+			if agentID := strings.TrimSpace(msg.AgentID); agentID != "" && agentID != sourceID {
+				return false
+			}
+			return strings.TrimSpace(rec.OwnerAgentID) == strings.TrimSpace(msg.OwnerAgentID) &&
+				strings.TrimSpace(rec.OwnerTaskID) == strings.TrimSpace(msg.OwnerTaskID)
+		}
 	}
 	if msg == nil || msg.Kind != SubAgentMailboxKindCompleted {
 		return false

@@ -3,8 +3,6 @@ package agent
 import (
 	"strings"
 
-	"github.com/keakon/golog/log"
-
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -38,24 +36,11 @@ func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 		})
 	}
 
-	go func() {
-		if err := s.recovery.PersistMessage(s.instanceID, msg); err != nil {
-			log.Warnf("SubAgent: failed to persist user message agent=%v error=%v", s.instanceID, err)
-			return
-		}
+	s.persistMessageAsync(msg, "user message", func() {
 		if ackID := strings.TrimSpace(input.MailboxAckID); ackID != "" {
 			s.parent.markSubAgentMailboxConsumed(ackID)
 		}
-	}()
-}
-
-func (s *SubAgent) takePendingUserMessages() []pendingUserMessage {
-	if s == nil {
-		return nil
-	}
-	s.inputQueueMu.Lock()
-	defer s.inputQueueMu.Unlock()
-	return s.takePendingUserMessagesLocked()
+	})
 }
 
 func (s *SubAgent) takePendingUserMessagesLocked() []pendingUserMessage {
@@ -161,19 +146,15 @@ func (s *SubAgent) appendContextOnly(msg message.Message) {
 	ackID := strings.TrimSpace(msg.MailboxAckID)
 	msg.Role = "user"
 	s.ctxMgr.Append(msg)
-	go func() {
-		persistMsg := msg
-		if strings.TrimSpace(persistMsg.Content) == "" {
-			persistMsg.Content = message.UserPromptPlainText(msg)
-		}
-		if err := s.recovery.PersistMessage(s.instanceID, persistMsg); err != nil {
-			log.Warnf("SubAgent: failed to persist context-append message agent=%v error=%v", s.instanceID, err)
-			return
-		}
+	persistMsg := msg
+	if strings.TrimSpace(persistMsg.Content) == "" {
+		persistMsg.Content = message.UserPromptPlainText(msg)
+	}
+	s.persistMessageAsync(persistMsg, "context-append message", func() {
 		if ackID != "" {
 			s.parent.markSubAgentMailboxConsumed(ackID)
 		}
-	}()
+	})
 }
 
 func (s *SubAgent) filterUnsupportedParts(content string, parts []message.ContentPart) (string, []message.ContentPart) {

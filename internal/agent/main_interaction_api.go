@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"strings"
+
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // ResolveConfirm sends the user's confirmation response back to the waiting
@@ -53,13 +56,12 @@ type AgentContextUsage struct {
 	ContextMessageCount int
 }
 
-// GetSubAgents returns information about all active SubAgents for TUI sidebar
-// display. Safe to call from any goroutine.
+// GetSubAgents returns live and parked SubAgents for TUI sidebar display.
+// Safe to call from any goroutine.
 func (a *MainAgent) GetSubAgents() []SubAgentInfo {
 	a.subs.mu.RLock()
-	defer a.subs.mu.RUnlock()
-
-	infos := make([]SubAgentInfo, 0, len(a.subs.subAgents))
+	infos := make([]SubAgentInfo, 0, len(a.subs.subAgents)+len(a.subs.taskRecords))
+	seenTasks := make(map[string]struct{}, len(a.subs.subAgents))
 	for _, sub := range a.subs.subAgents {
 		selectedRef := ""
 		runningRef := ""
@@ -88,7 +90,31 @@ func (a *MainAgent) GetSubAgents() []SubAgentInfo {
 			UrgentInboxCount: a.subAgentUrgentInboxCountLocked(sub.instanceID),
 			LastArtifact:     artifact,
 		})
+		seenTasks[sub.taskID] = struct{}{}
 	}
+	for taskID, rec := range a.subs.taskRecords {
+		if rec == nil || !rec.RuntimeParked || strings.TrimSpace(rec.LatestInstanceID) == "" {
+			continue
+		}
+		if _, ok := seenTasks[taskID]; ok {
+			continue
+		}
+		var artifact tools.ArtifactRef
+		if len(rec.LastArtifactRefs) > 0 {
+			artifact = tools.NormalizeArtifactRef(rec.LastArtifactRefs[0])
+		}
+		infos = append(infos, SubAgentInfo{
+			InstanceID:       rec.LatestInstanceID,
+			TaskID:           taskID,
+			AgentDefName:     rec.AgentDefName,
+			TaskDesc:         rec.TaskDesc,
+			State:            rec.State,
+			LastSummary:      rec.LastSummary,
+			UrgentInboxCount: a.subAgentUrgentInboxCountLocked(rec.LatestInstanceID),
+			LastArtifact:     artifact,
+		})
+	}
+	a.subs.mu.RUnlock()
 	return infos
 }
 
@@ -101,8 +127,17 @@ func (a *MainAgent) subAgentUrgentInboxCountLocked(agentID string) int {
 // GetMessages returns a thread-safe snapshot of the focused agent's conversation
 // history. Routes to the focused SubAgent if one is active.
 func (a *MainAgent) GetMessages() []message.Message {
-	if sub := a.validFocusedSubAgent(); sub != nil {
-		return sub.GetMessages()
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		return target.sub.GetMessages()
+	}
+	if target.parked {
+		msgs, err := loadTaskHistoryMessages(a.recovery, target.task)
+		if err != nil {
+			log.Warnf("GetMessages: failed to load parked subagent transcript task_id=%v error=%v", target.task.TaskID, err)
+			return nil
+		}
+		return msgs
 	}
 	return a.ctxMgr.Snapshot()
 }
@@ -129,6 +164,19 @@ func (a *MainAgent) ContinueFromContext() {
 		sub.continueWithContextAppends(a.drainOwnedSubAgentMailboxes(sub.instanceID), restartStoppedTurn)
 		return
 	}
+	if rec := a.focusedDurableTask(); rec != nil && rec.RuntimeParked {
+		sub, _, err := a.rehydrateTask(rec)
+		if err != nil {
+			a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: rec.LatestInstanceID})
+			return
+		}
+		if !a.reactivateFocusedSubAgentForManualInput(sub) {
+			return
+		}
+		a.mailboxDeliveryPaused.Store(false)
+		sub.continueWithContextAppends(a.drainOwnedSubAgentMailboxes(sub.instanceID), true)
+		return
+	}
 	a.mailboxDeliveryPaused.Store(false)
 	a.sendEvent(Event{Type: EventContinue, Payload: manualContinueEvent{}})
 }
@@ -137,8 +185,23 @@ func (a *MainAgent) ContinueFromContext() {
 // persistence log. Routes to the focused SubAgent if active.
 // Only valid when the agent is idle.
 func (a *MainAgent) RemoveLastMessage() {
-	if sub := a.validFocusedSubAgent(); sub != nil {
-		sub.RemoveLastMessage()
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		target.sub.RemoveLastMessage()
+		return
+	}
+	if target.parked {
+		msgs, err := loadTaskHistoryMessages(a.recovery, target.task)
+		if err != nil {
+			log.Warnf("RemoveLastMessage: failed to load parked subagent transcript task_id=%v error=%v", target.task.TaskID, err)
+			return
+		}
+		if len(msgs) == 0 {
+			return
+		}
+		if err := rewriteTaskHistoryMessages(a.recovery, target.task, msgs[:len(msgs)-1]); err != nil {
+			log.Warnf("RemoveLastMessage: failed to rewrite parked subagent transcript task_id=%v error=%v", target.task.TaskID, err)
+		}
 		return
 	}
 	a.turnMu.Lock()
@@ -184,6 +247,9 @@ func (a *MainAgent) FocusedAgentName() string {
 	if sub := a.validFocusedSubAgent(); sub != nil {
 		return sub.agentDefName
 	}
+	if rec := a.focusedDurableTask(); rec != nil {
+		return rec.AgentDefName
+	}
 	return ""
 }
 
@@ -192,6 +258,9 @@ func (a *MainAgent) FocusedAgentName() string {
 func (a *MainAgent) FocusedAgentID() string {
 	if sub := a.validFocusedSubAgent(); sub != nil {
 		return sub.instanceID
+	}
+	if rec := a.focusedDurableTask(); rec != nil {
+		return rec.LatestInstanceID
 	}
 	return ""
 }
