@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -61,7 +62,7 @@ func TestPrepareMessagesForLLMColdAllocsGuard(t *testing.T) {
 	a := benchmarkContextReductionAgent()
 	messages := benchmarkContextReductionMessages(100)
 	var prepared []message.Message
-	allocs := testing.AllocsPerRun(10, func() {
+	allocs := testing.AllocsPerRun(100, func() {
 		prepared = a.prepareMessagesForLLMWithOptions(messages, false)
 		if len(prepared) != len(messages) {
 			t.Fatalf("prepared messages = %d, want %d", len(prepared), len(messages))
@@ -80,10 +81,31 @@ func TestPrepareMessagesForLLMColdAllocsGuard(t *testing.T) {
 	if !reduced {
 		t.Fatal("allocation guard fixture did not reduce any tool result")
 	}
-	const maxAllocs = 1700
-	if allocs > maxAllocs {
-		t.Fatalf("cold context reduction allocs = %.0f, want ≤%d", allocs, maxAllocs)
+	maxAllocs := 1700.0
+	mode := "normal"
+	if testBinaryBuiltWithRace() {
+		// Race instrumentation adds allocations to this path. Keep a separate
+		// budget so normal builds retain the tighter performance guard while
+		// race builds still catch meaningful allocation regressions.
+		maxAllocs = 1750
+		mode = "race"
 	}
+	if allocs > maxAllocs {
+		t.Fatalf("cold context reduction allocs = %.0f, want ≤%.0f (%s build)", allocs, maxAllocs, mode)
+	}
+}
+
+func testBinaryBuiltWithRace() bool {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return false
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "-race" {
+			return setting.Value == "true"
+		}
+	}
+	return false
 }
 
 func BenchmarkPrepareMessagesForLLMStablePrefixReuse(b *testing.B) {
