@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/bytefmt"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/skill"
 )
 
 const (
@@ -470,18 +471,16 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 
 	entries := make([]infoPanelSkillEntry, 0)
 	indexByName := make(map[string]int)
-	if sp, ok := m.agent.(agent.SkillsStateProvider); ok {
-		for _, sk := range sp.ListSkills() {
-			if sk == nil || strings.TrimSpace(sk.Name) == "" {
-				continue
-			}
-			name := strings.TrimSpace(sk.Name)
-			indexByName[name] = len(entries)
-			entries = append(entries, infoPanelSkillEntry{
-				name:        name,
-				description: strings.TrimSpace(sk.Description),
-			})
+	for _, sk := range m.infoPanelSkills() {
+		if sk == nil || strings.TrimSpace(sk.Name) == "" {
+			continue
 		}
+		name := strings.TrimSpace(sk.Name)
+		indexByName[name] = len(entries)
+		entries = append(entries, infoPanelSkillEntry{
+			name:        name,
+			description: strings.TrimSpace(sk.Description),
+		})
 	}
 	for _, sk := range m.agent.InvokedSkills() {
 		if sk == nil || strings.TrimSpace(sk.Name) == "" {
@@ -518,6 +517,16 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 		skillLines = append(skillLines, renderInfoPanelCollapsibleContentLine(lineW, lineStyle.Render(truncateOneLine(label, labelWidth))))
 	}
 	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(skillLines))
+}
+
+func (m *Model) infoPanelSkills() []*skill.Meta {
+	if sp, ok := m.agent.(agent.FocusedSkillsStateProvider); ok {
+		return sp.FocusedSkills()
+	}
+	if sp, ok := m.agent.(agent.SkillsStateProvider); ok {
+		return sp.ListSkills()
+	}
+	return nil
 }
 
 func (m *Model) buildInfoPanelFilesBlock(lineW int) string {

@@ -35,6 +35,7 @@ type infoPanelAgent struct {
 	lspRows             []agent.LSPServerDisplay
 	mcpRows             []agent.MCPServerDisplay
 	availableSkills     []*skill.Meta
+	skillsByFocus       map[string][]*skill.Meta
 	invokedSkills       []*skill.Meta
 	keysConfirmed       int
 	keysTotal           int
@@ -93,6 +94,13 @@ func (a *infoPanelAgent) InvokedSkills() []*skill.Meta {
 
 func (a *infoPanelAgent) ListSkills() []*skill.Meta {
 	return append([]*skill.Meta(nil), a.availableSkills...)
+}
+
+func (a *infoPanelAgent) FocusedSkills() []*skill.Meta {
+	if skills, ok := a.skillsByFocus[a.focused]; ok {
+		return append([]*skill.Meta(nil), skills...)
+	}
+	return a.ListSkills()
 }
 
 func (a *infoPanelAgent) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot {
@@ -320,6 +328,26 @@ func TestRenderInfoPanelShowsInvokedSkills(t *testing.T) {
 	wantAvailable := InfoPanelDim.Render("py-expert")
 	if !strings.Contains(rendered, wantAvailable) {
 		t.Fatalf("available skill should use dim color; want %q in %q", wantAvailable, rendered)
+	}
+}
+
+func TestRenderInfoPanelShowsSkillsForFocusedSubAgent(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.skillsByFocus = map[string][]*skill.Meta{
+		"":        nil,
+		"agent-1": {{Name: "go-expert", Description: "Go language development expert", Discovered: true}},
+	}
+	m := NewModel(backend)
+
+	mainPlain := stripANSI(m.renderInfoPanel(40, 24))
+	if strings.Contains(mainPlain, "SKILLS") {
+		t.Fatalf("main info panel should hide denied skills, got %q", mainPlain)
+	}
+
+	m.setFocusedAgent("agent-1")
+	subPlain := stripANSI(m.renderInfoPanel(40, 24))
+	if !strings.Contains(subPlain, "▼ SKILLS") || !strings.Contains(subPlain, "go-expert") {
+		t.Fatalf("focused subagent info panel should show its skills, got %q", subPlain)
 	}
 }
 

@@ -70,6 +70,16 @@ func (a *MainAgent) visibleSkillsSnapshot() []*skill.Meta {
 
 func (a *MainAgent) ListSkills() []*skill.Meta { return a.visibleSkillsSnapshot() }
 
+// FocusedSkills returns skills visible to the agent currently shown by the TUI.
+// ListSkills remains scoped to MainAgent so the runtime SkillProvider semantics
+// do not change when the user switches sidebar focus.
+func (a *MainAgent) FocusedSkills() []*skill.Meta {
+	if sub := a.validFocusedSubAgent(); sub != nil {
+		return sub.ListSkills()
+	}
+	return a.ListSkills()
+}
+
 func (a *MainAgent) MarkSkillInvoked(meta *skill.Meta) {
 	if meta == nil || strings.TrimSpace(meta.Name) == "" {
 		return

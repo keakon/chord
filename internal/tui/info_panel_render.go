@@ -205,16 +205,14 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	appendSep()
 
 	// Invoked skills
-	if sp, ok := m.agent.(agent.SkillsStateProvider); ok {
-		for _, sk := range sp.ListSkills() {
-			if sk == nil {
-				continue
-			}
-			b.WriteByte('K')
-			b.WriteString(sk.Name)
-			b.WriteString(sk.Description)
-			appendSep()
+	for _, sk := range m.infoPanelSkills() {
+		if sk == nil {
+			continue
 		}
+		b.WriteByte('K')
+		b.WriteString(sk.Name)
+		b.WriteString(sk.Description)
+		appendSep()
 	}
 	for _, sk := range m.agent.InvokedSkills() {
 		b.WriteByte('S')

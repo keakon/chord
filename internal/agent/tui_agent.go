@@ -224,6 +224,12 @@ type SkillsStateProvider interface {
 	ListSkills() []*skill.Meta
 }
 
+// FocusedSkillsStateProvider is implemented by TUI backends that can expose
+// skills for the currently focused agent without changing runtime provider semantics.
+type FocusedSkillsStateProvider interface {
+	FocusedSkills() []*skill.Meta
+}
+
 // LSPServerDisplay is one row in the ENVIRONMENT / LSP sidebar block.
 type LSPServerDisplay struct {
 	Name     string

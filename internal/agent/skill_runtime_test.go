@@ -59,3 +59,29 @@ func TestMainAgentListSkillsFiltersDeniedSkills(t *testing.T) {
 		t.Fatalf("visible skill = %q, want go-expert", got[0].Name)
 	}
 }
+
+func TestMainAgentFocusedSkillsUsesFocusedSubAgentPermissions(t *testing.T) {
+	a := &MainAgent{subs: newSubAgentRegistry()}
+	a.loadedSkills = []*skill.Meta{{Name: "go-expert", Description: "Go language development expert"}}
+	a.ruleset = permission.Ruleset{{Permission: "skill", Pattern: "*", Action: permission.ActionDeny}}
+	sub := &SubAgent{
+		instanceID:   "agent-1",
+		loadedSkills: a.loadedSkillsSnapshot(),
+		ruleset:      permission.Ruleset{{Permission: "skill", Pattern: "*", Action: permission.ActionAllow}},
+	}
+	a.subs.subAgents[sub.instanceID] = sub
+
+	if got := a.ListSkills(); len(got) != 0 {
+		t.Fatalf("main ListSkills() = %#v, want none while skill is denied", got)
+	}
+	a.SwitchFocus(sub.instanceID)
+	got := a.FocusedSkills()
+	if len(got) != 1 || got[0].Name != "go-expert" {
+		t.Fatalf("FocusedSkills() = %#v, want focused subagent skill", got)
+	}
+
+	a.SwitchFocus("main")
+	if got := a.FocusedSkills(); len(got) != 0 {
+		t.Fatalf("FocusedSkills() after returning to main = %#v, want none", got)
+	}
+}
