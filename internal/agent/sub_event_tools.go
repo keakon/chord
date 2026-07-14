@@ -437,6 +437,14 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	// If Complete was co-returned, trigger EventAgentDone now.
 	if s.pendingComplete != nil {
 		complete := s.pendingComplete
+		if pending := s.takePendingUserMessagesForContinuation(); len(pending) > 0 {
+			s.appendCompleteToolResult(s.pendingCompleteCallID, "Completion deferred: received new user input before completion.")
+			s.pendingComplete = nil
+			s.pendingCompleteCallID = ""
+			s.appendPendingUserMessages(pending)
+			s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
+			return
+		}
 		s.appendCompleteToolResult(s.pendingCompleteCallID, complete.Summary)
 		s.pendingComplete = nil
 		s.pendingCompleteCallID = ""
@@ -462,6 +470,5 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	}
 
 	// Normal: continue LLM conversation.
-	messages := s.ctxMgr.Snapshot()
-	s.asyncCallLLM(s.turn, messages)
+	s.continueLLMWithPendingUserMessages()
 }

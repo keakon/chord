@@ -219,9 +219,8 @@ func (s *SubAgent) RemoveLastMessage() {
 // user message. Runs on the SubAgent's event loop goroutine.
 func (s *SubAgent) handleContinue() {
 	s.drainQueuedContextAppendsForContinue()
-	turn := s.newTurn()
-	messages := s.ctxMgr.Snapshot()
-	s.asyncCallLLM(turn, messages)
+	s.newTurn()
+	s.continueLLMWithPendingUserMessages()
 }
 
 func (s *SubAgent) drainQueuedContextAppendsForContinue() {

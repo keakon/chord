@@ -28,7 +28,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			// turn. Mirrors MainAgent.handleAgentError's routing-invalidated path.
 			log.Infof("SubAgent routing invalidated during active turn; restarting request agent=%v turn_id=%v", s.instanceID, result.turnID)
 			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "routing_invalidated")
-			s.asyncCallLLM(s.turn, s.ctxMgr.Snapshot())
+			s.continueLLMWithPendingUserMessages()
 			return
 		}
 		s.sendEvent(Event{
@@ -85,8 +85,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 
 		s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "args_invalid")
 		// Retry without storing the malformed response.
-		messages := s.ctxMgr.Snapshot()
-		s.asyncCallLLM(s.turn, messages)
+		s.continueLLMWithPendingUserMessages()
 		return
 	}
 
@@ -305,6 +304,9 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// analysing, or expressing confusion. Start idle timer.
 	if len(validCalls) == 0 {
 		s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "no_valid_calls")
+		if s.continueLLMIfPendingUserMessages() {
+			return
+		}
 		// Stop any previous idle timer to prevent leaking timers when
 		// consecutive pure-text responses arrive (e.g. multi-turn Q&A).
 		s.resetIdleTimer()
@@ -321,6 +323,12 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				SourceID: s.instanceID,
 				Payload:  wakeMainReason,
 			})
+			return
+		}
+		if pending := s.takePendingUserMessagesForContinuation(); len(pending) > 0 {
+			s.appendCompleteToolResult(taskCompleteCallID, "Completion deferred: received new user input before completion.")
+			s.appendPendingUserMessages(pending)
+			s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
 			return
 		}
 		outstandingChildren := s.parent.outstandingJoinChildTaskIDs(s.taskID)

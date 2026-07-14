@@ -1,9 +1,14 @@
 package agent
 
 import (
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestSubAgentInputOverflowPreservesOrder(t *testing.T) {
@@ -46,6 +51,132 @@ func TestSubAgentBusyTurnDefersQueuedUserInput(t *testing.T) {
 	}
 	if got := len(sub.inputCh); got != 1 {
 		t.Fatalf("queued input count = %d, want 1", got)
+	}
+}
+
+func TestSubAgentContinuationIncludesQueuedUserInputAfterToolResult(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	provider := &captureMessagesProvider{}
+	sub.llmMu.Lock()
+	sub.llmClient = testLLMClientWithProvider(provider)
+	sub.llmMu.Unlock()
+	sub.ctxMgr.Append(message.Message{
+		Role: "assistant",
+		ToolCalls: []message.ToolCall{{
+			ID:   "call-1",
+			Name: "Dummy",
+		}},
+	})
+	sub.turn.PendingToolCalls.Store(1)
+	sub.enqueueUserMessage(pendingUserMessage{DraftID: "draft-1", Content: "use the new constraint", FromUser: true})
+
+	sub.handleToolResult(&toolResult{
+		CallID:   "call-1",
+		Name:     "Dummy",
+		Result:   "tool output",
+		TurnID:   sub.turn.ID,
+		ArgsJSON: `{}`,
+	})
+
+	msgs := sub.ctxMgr.Snapshot()
+	if len(msgs) < 3 {
+		t.Fatalf("messages = %#v, want assistant, tool result, and queued user input", msgs)
+	}
+	toolMsg := msgs[len(msgs)-2]
+	if toolMsg.Role != "tool" || toolMsg.Content != "tool output" {
+		t.Fatalf("penultimate message = %#v, want tool output", toolMsg)
+	}
+	userMsg := msgs[len(msgs)-1]
+	if userMsg.Role != "user" || userMsg.Content != "use the new constraint" {
+		t.Fatalf("last message = %#v, want queued user input", userMsg)
+	}
+	if got := len(sub.inputCh) + len(sub.inputOverflow); got != 0 {
+		t.Fatalf("queued input count = %d, want 0", got)
+	}
+	waitForCapturedSubAgentMessages(t, sub, provider, "use the new constraint")
+
+	for {
+		select {
+		case evt := <-parent.Events():
+			consumed, ok := evt.(PendingDraftConsumedEvent)
+			if ok && consumed.DraftID == "draft-1" && consumed.AgentID == sub.instanceID {
+				return
+			}
+		default:
+			t.Fatal("queued draft was appended without a matching PendingDraftConsumedEvent")
+		}
+	}
+}
+
+func TestSubAgentCompleteWaitsForQueuedUserInput(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	provider := &captureMessagesProvider{}
+	sub.llmMu.Lock()
+	sub.llmClient = testLLMClientWithProvider(provider)
+	sub.llmMu.Unlock()
+	sub.enqueueUserMessage(pendingUserMessage{DraftID: "draft-1", Content: "check one more thing", FromUser: true})
+
+	sub.handleLLMResponse(&llmResult{
+		turnID: sub.turn.ID,
+		resp: &message.Response{ToolCalls: []message.ToolCall{{
+			ID:   "complete-1",
+			Name: tools.NameComplete,
+			Args: []byte(`{"summary":"done"}`),
+		}}},
+	})
+
+	msgs := sub.ctxMgr.Snapshot()
+	if len(msgs) < 3 {
+		t.Fatalf("messages = %#v, want assistant Complete, deferred tool result, and queued user input", msgs)
+	}
+	completeResult := msgs[len(msgs)-2]
+	if completeResult.Role != "tool" || completeResult.ToolCallID != "complete-1" || !strings.Contains(completeResult.Content, "received new user input") {
+		t.Fatalf("completion result = %#v, want deferred Complete result", completeResult)
+	}
+	userMsg := msgs[len(msgs)-1]
+	if userMsg.Role != "user" || userMsg.Content != "check one more thing" {
+		t.Fatalf("last message = %#v, want queued user input", userMsg)
+	}
+	waitForCapturedSubAgentMessages(t, sub, provider, "check one more thing")
+
+	for {
+		select {
+		case evt := <-parent.eventCh:
+			if evt.Type == EventAgentDone {
+				t.Fatal("SubAgent completed before processing queued user input")
+			}
+		default:
+			return
+		}
+	}
+}
+
+func testLLMClientWithProvider(provider llm.Provider) *llm.Client {
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	return llm.NewClient(providerCfg, provider, "test-model", 1024, "")
+}
+
+func waitForCapturedSubAgentMessages(t *testing.T, sub *SubAgent, provider *captureMessagesProvider, wantLastUser string) {
+	t.Helper()
+	select {
+	case result := <-sub.llmCh:
+		if result.err != nil {
+			t.Fatalf("continuation request failed: %v", result.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("provider did not receive continuation containing %q", wantLastUser)
+	}
+	if len(provider.messages) == 0 {
+		t.Fatalf("provider captured no messages for continuation containing %q", wantLastUser)
+	}
+	last := provider.messages[len(provider.messages)-1]
+	if last.Role != "user" || last.Content != wantLastUser {
+		t.Fatalf("last provider message = %#v, want queued user input %q", last, wantLastUser)
 	}
 }
 

@@ -14,6 +14,13 @@ func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 	}
 	turn := s.newTurn()
 	s.llmRequestInFlight.Store(true)
+	s.appendPendingUserMessage(input)
+
+	messages := s.ctxMgr.Snapshot()
+	s.asyncCallLLMWithFlightMarked(turn, messages)
+}
+
+func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 
 	content := pendingUserMessageText(input)
 	msg := message.Message{Role: "user", Content: content}
@@ -40,9 +47,77 @@ func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 			s.parent.markSubAgentMailboxConsumed(ackID)
 		}
 	}()
+}
 
-	messages := s.ctxMgr.Snapshot()
-	s.asyncCallLLMWithFlightMarked(turn, messages)
+func (s *SubAgent) takePendingUserMessages() []pendingUserMessage {
+	if s == nil {
+		return nil
+	}
+	s.inputQueueMu.Lock()
+	defer s.inputQueueMu.Unlock()
+	return s.takePendingUserMessagesLocked()
+}
+
+func (s *SubAgent) takePendingUserMessagesLocked() []pendingUserMessage {
+	pending := make([]pendingUserMessage, 0, len(s.inputCh)+len(s.inputOverflow))
+	for {
+		select {
+		case input := <-s.inputCh:
+			pending = append(pending, input)
+		default:
+			pending = append(pending, s.inputOverflow...)
+			s.inputOverflow = nil
+			return pending
+		}
+	}
+}
+
+func (s *SubAgent) appendPendingUserMessages(pending []pendingUserMessage) {
+	for _, input := range pending {
+		if input.DrainContextAppends {
+			s.drainContextAppendsBeforeTurn()
+		}
+		s.appendPendingUserMessage(input)
+	}
+}
+
+func (s *SubAgent) messagesForLLMContinuation() []message.Message {
+	s.inputQueueMu.Lock()
+	pending := s.takePendingUserMessagesLocked()
+	s.llmRequestInFlight.Store(true)
+	s.inputQueueMu.Unlock()
+	s.appendPendingUserMessages(pending)
+	return s.ctxMgr.Snapshot()
+}
+
+func (s *SubAgent) continueLLMWithPendingUserMessages() {
+	s.asyncCallLLMWithFlightMarked(s.turn, s.messagesForLLMContinuation())
+}
+
+func (s *SubAgent) continueLLMIfPendingUserMessages() bool {
+	s.inputQueueMu.Lock()
+	pending := s.takePendingUserMessagesLocked()
+	if len(pending) == 0 {
+		s.inputQueueMu.Unlock()
+		return false
+	}
+	s.llmRequestInFlight.Store(true)
+	s.inputQueueMu.Unlock()
+
+	s.appendPendingUserMessages(pending)
+	s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
+	return true
+}
+
+func (s *SubAgent) takePendingUserMessagesForContinuation() []pendingUserMessage {
+	s.inputQueueMu.Lock()
+	defer s.inputQueueMu.Unlock()
+
+	pending := s.takePendingUserMessagesLocked()
+	if len(pending) > 0 {
+		s.llmRequestInFlight.Store(true)
+	}
+	return pending
 }
 
 func (s *SubAgent) drainContextAppendsBeforeTurn() {
