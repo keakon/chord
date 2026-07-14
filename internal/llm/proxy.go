@@ -3,10 +3,12 @@ package llm
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -89,6 +91,74 @@ func providerResponseHeaderTimeout(provider *ProviderConfig) time.Duration {
 		return 0
 	}
 	return provider.ResponseHeaderTimeout()
+}
+
+// doRequestUntilHeaders bounds all work before response headers arrive,
+// including connection setup and writing the request body. The watchdog is
+// stopped once Do returns so long-lived streaming response bodies remain valid.
+func doRequestUntilHeaders(client *http.Client, req *http.Request, timeout time.Duration) (*http.Response, error) {
+	if timeout <= 0 {
+		timeout = defaultHTTPResponseHeaderTimeout
+	}
+
+	requestCtx, cancel := context.WithCancel(req.Context())
+	request := req.Clone(requestCtx)
+
+	var mu sync.Mutex
+	done := false
+	timedOut := false
+	timer := time.AfterFunc(timeout, func() {
+		mu.Lock()
+		if !done {
+			timedOut = true
+			cancel()
+		}
+		mu.Unlock()
+	})
+
+	resp, err := client.Do(request)
+	mu.Lock()
+	done = true
+	timer.Stop()
+	requestTimedOut := timedOut
+	mu.Unlock()
+
+	if requestTimedOut {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		cancel()
+		return nil, &preResponseTimeoutError{timeout: timeout}
+	}
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel}
+	return resp, nil
+}
+
+type preResponseTimeoutError struct {
+	timeout time.Duration
+}
+
+func (e *preResponseTimeoutError) Error() string {
+	return fmt.Sprintf("request timed out before response headers after %s", e.timeout)
+}
+
+func (e *preResponseTimeoutError) Unwrap() error { return context.DeadlineExceeded }
+func (e *preResponseTimeoutError) Timeout() bool { return true }
+
+type cancelOnCloseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelOnCloseBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel()
+	return err
 }
 
 // ProxyScheme returns the scheme of proxyURL ("http", "https", "socks5") or "" if none.

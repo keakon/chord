@@ -241,7 +241,7 @@ func (g *GeminiProvider) CompleteStream(
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "gemini", g.proxyScheme)
 	}
 	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
-	httpResp, err := g.client.Do(req)
+	httpResp, err := doRequestUntilHeaders(g.client, req, providerResponseHeaderTimeout(g.provider))
 	if err != nil {
 		callErr := fmt.Errorf("send request: %w", err)
 		persistLLMTrace(traceWriter, traceCollector, 0, "http", start, nil, callErr)

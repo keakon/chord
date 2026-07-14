@@ -328,7 +328,7 @@ func (o *OpenAIProvider) CompleteStream(
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "openai", o.proxyScheme)
 	}
 	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
-	httpResp, err := o.client.Do(req)
+	httpResp, err := doRequestUntilHeaders(o.client, req, providerResponseHeaderTimeout(o.provider))
 	if err != nil {
 		callErr := fmt.Errorf("send request: %w", err)
 		persistLLMTrace(traceWriter, traceCollector, 0, "http", start, nil, callErr)

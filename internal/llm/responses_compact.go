@@ -158,7 +158,7 @@ func (r *ResponsesProvider) Compact(
 	req, _ = compressRequestBody(req, bodyBytes, r.provider.CompressEnabled())
 
 	start := time.Now()
-	httpResp, err := r.client.Do(req)
+	httpResp, err := doRequestUntilHeaders(r.client, req, providerResponseHeaderTimeout(r.provider))
 	if err != nil {
 		return nil, fmt.Errorf("send compact request: %w", err)
 	}

@@ -583,7 +583,7 @@ func (r *ResponsesProvider) sendAndParse(
 	if cb != nil {
 		cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
 	}
-	httpResp, err := r.client.Do(req)
+	httpResp, err := doRequestUntilHeaders(r.client, req, providerResponseHeaderTimeout(r.provider))
 	if err != nil {
 		return nil, 0, fmt.Errorf("send request: %w", err)
 	}

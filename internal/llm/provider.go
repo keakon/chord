@@ -580,7 +580,8 @@ func (p *ProviderConfig) Type() string {
 	return p.typeName
 }
 
-// ResponseHeaderTimeout returns the initial HTTP response-header timeout configured for this provider.
+// ResponseHeaderTimeout returns the timeout from starting an HTTP request until
+// its response headers arrive, including writing the request body.
 func (p *ProviderConfig) ResponseHeaderTimeout() time.Duration {
 	return p.responseHeaderTimeout
 }
