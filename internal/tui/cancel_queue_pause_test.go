@@ -8,6 +8,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 )
 
 func TestIdleAfterCancelKeepsQueuedDraftsPaused(t *testing.T) {
@@ -40,6 +41,42 @@ func TestIdleAfterCancelKeepsQueuedDraftsPaused(t *testing.T) {
 	}
 	if m.pauseQueuedDraftDrainOnce {
 		t.Fatal("pauseQueuedDraftDrainOnce = true after idle, want false")
+	}
+}
+
+func TestIdleAfterCancelRevealsPromptAboveLongInterruptedReply(t *testing.T) {
+	backend := &sessionControlAgent{
+		messages: []message.Message{
+			{Role: message.RoleUser, Content: "keep this prompt visible"},
+			{Role: message.RoleAssistant, Content: strings.Repeat("partial reply line\n", 80), StopReason: "interrupted"},
+		},
+	}
+	m := NewModelWithSize(backend, 80, 20)
+	m.mode = ModeNormal
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+	m.pauseQueuedDraftDrainOnce = true
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, Content: "keep this prompt visible", MsgIndex: 0})
+	m.nextBlockID = 2
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: strings.Repeat("partial reply line\n", 80)}})
+	m.currentAssistantBlock.MsgIndex = 1
+	m.recalcViewportSize()
+	if m.viewport.offset == 0 {
+		t.Fatal("long streaming reply should push the prompt above the viewport before cancel")
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.IdleEvent{}})
+
+	userStart, ok := m.viewport.LineOffsetForBlockID(1)
+	if !ok {
+		t.Fatal("cancelled turn user block not found")
+	}
+	blocks := m.viewport.visibleBlocks()
+	userEnd := userStart + m.viewport.blockSpanAt(blocks, 0, blocks[0])
+	if userEnd <= m.viewport.offset || userStart >= m.viewport.offset+m.viewport.height {
+		t.Fatalf("cancelled turn user block [%d,%d) is outside viewport [%d,%d)", userStart, userEnd, m.viewport.offset, m.viewport.offset+m.viewport.height)
+	}
+	if m.viewport.sticky {
+		t.Fatal("viewport should stop following the reply tail after revealing the cancelled turn prompt")
 	}
 }
 

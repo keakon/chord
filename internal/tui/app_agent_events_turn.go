@@ -14,6 +14,10 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		effects.invalidateUsage = true
 		m.clearSessionSwitch()
 		m.finalizeTurn()
+		cancelledByUser := m.pauseQueuedDraftDrainOnce
+		if cancelledByUser {
+			m.revealTrailingInterruptedTurnUserMessage()
+		}
 		prevMain := m.activities["main"].Type
 		m.markAgentIdle("main")
 		mainLoopBusy := m.agent != nil && m.agent.LoopKeepsMainBusy()
@@ -25,7 +29,7 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		} else {
 			m.maybeShowBackgroundCompletionTitle("main", prevMain, agent.ActivityIdle)
 		}
-		skipDrain := m.pauseQueuedDraftDrainOnce
+		skipDrain := cancelledByUser
 		m.pauseQueuedDraftDrainOnce = false
 		pendingAutoContinue := !skipDrain && (m.queuedDraftsAutoContinue() || (!m.queueSyncEnabled && len(m.queuedDrafts) > 0))
 		m.inflightDraft = nil

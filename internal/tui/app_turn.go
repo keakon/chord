@@ -104,6 +104,56 @@ func (m *Model) finalizeTurn() {
 	m.finalizeAssistantBlock()
 }
 
+// revealTrailingInterruptedTurnUserMessage keeps an explicitly interrupted
+// turn anchored at its prompt when the partial reply is taller than the
+// viewport. The transcript still retains the partial reply below the prompt.
+func (m *Model) revealTrailingInterruptedTurnUserMessage() bool {
+	if m == nil || m.agent == nil || m.viewport == nil {
+		return false
+	}
+	msgs := m.agent.GetMessages()
+	if len(msgs) < 2 {
+		return false
+	}
+	last := msgs[len(msgs)-1]
+	if last.Role != message.RoleAssistant || last.StopReason != "interrupted" {
+		return false
+	}
+
+	userMsgIndex := -1
+	for i := len(msgs) - 2; i >= 0; i-- {
+		if msgs[i].Role == message.RoleUser && !msgs[i].IsCompactionSummary {
+			userMsgIndex = i
+			break
+		}
+	}
+	if userMsgIndex < 0 {
+		return false
+	}
+
+	blocks := m.viewport.visibleBlocks()
+	starts := m.viewport.blockStarts()
+	if len(starts) != len(blocks) {
+		return false
+	}
+	for i, block := range blocks {
+		if block == nil || block.Type != BlockUser || block.MsgIndex != userMsgIndex {
+			continue
+		}
+		start := starts[i]
+		end := start + m.viewport.blockSpanAt(blocks, i, block)
+		viewportEnd := m.viewport.offset + m.viewport.height
+		if end > m.viewport.offset && start < viewportEnd {
+			return false
+		}
+		m.viewport.offset = start
+		m.viewport.clampOffset()
+		m.viewport.sticky = m.viewport.atBottom()
+		return true
+	}
+	return false
+}
+
 func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
 	_, imageCount := queuedDraftTextAndImageCount(draft)
 	msgIndex := -1

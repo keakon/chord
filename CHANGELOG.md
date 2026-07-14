@@ -22,6 +22,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Cancelling a turn with `Esc` now keeps that turn's user prompt visible when the preserved interrupted reply is taller than the viewport. Restoring a session ending in the same state also opens at the prompt instead of the bottom of the partial reply, while completed replies retain the existing tail-follow behavior.
 - Focused SubAgent status bars now report received response bytes and events instead of remaining at `0 B` while tool arguments stream.
 - Restored idle SubAgents can now continue from their existing context after being focused, matching idle MainAgent behavior. Chord reacquires the SubAgent concurrency slot, restores its running state, and starts a new turn without adding a synthetic user message.
 - TUI card numbers are now scoped to the viewed agent, so the main transcript and each SubAgent transcript independently start at `#1`. Switching agent views rebuilds the complete available history—including earlier instances of rehydrated delegated tasks—so older cards remain reachable with page-up, top navigation, search, and the message directory instead of leaving a partial live tail.
