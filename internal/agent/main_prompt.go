@@ -178,12 +178,13 @@ func filterMCPPromptToolNames(line, prefix string, visible []string) []string {
 	return filtered
 }
 
+const agentsMDInstructionRequirement = "Treat these loaded sections as mandatory scoped workspace instructions. You must follow every applicable instruction at all times. Do not use file, search, or shell tools to rediscover or reread them. Only inspect an additional AGENTS.md when entering a subdirectory or external directory whose instructions were not loaded, then inspect only task-relevant project files needed to understand, modify, or verify the requested work."
+
 func agentsMDReminderFramingPromptBlock(agentsMD string) string {
 	if strings.TrimSpace(agentsMD) == "" {
 		return ""
 	}
-	return strings.TrimSpace(`## Workspace Instructions
-Each applicable AGENTS.md from the repository root through the current working directory is already loaded in context before the first visible user message, in root-to-current order and with its path labeled. Use those loaded sections as scoped workspace instructions; do not use file, search, or shell tools to rediscover or reread them. Only inspect an additional AGENTS.md when entering a subdirectory or external directory whose instructions were not loaded, then inspect only task-relevant project files needed to understand, modify, or verify the requested work.`)
+	return "## Workspace Instructions\nEach applicable AGENTS.md from the repository root through the current working directory is already loaded in context before the first visible user message, in root-to-current order and with its path labeled. " + agentsMDInstructionRequirement
 }
 
 func (a *MainAgent) pendingLoopContinuationPromptBlock() string {

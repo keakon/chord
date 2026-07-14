@@ -103,10 +103,13 @@ func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
 	if !strings.Contains(got, "root-to-current order") || !strings.Contains(got, "with its path labeled") {
 		t.Errorf("missing AGENTS.md scoped loading details: %q", got)
 	}
-	if !strings.Contains(got, "Use those loaded sections as scoped workspace instructions") {
-		t.Errorf("missing AGENTS.md workspace-instruction guidance: %q", got)
+	if !strings.Contains(got, "Treat these loaded sections as mandatory scoped workspace instructions") {
+		t.Errorf("missing mandatory AGENTS.md workspace-instruction guidance: %q", got)
 	}
-	if !strings.Contains(got, "do not use file, search, or shell tools to rediscover or reread them") {
+	if !strings.Contains(got, "You must follow every applicable instruction at all times") {
+		t.Errorf("missing must-follow AGENTS.md guidance: %q", got)
+	}
+	if !strings.Contains(got, "Do not use file, search, or shell tools to rediscover or reread them") {
 		t.Errorf("missing AGENTS.md no-reread guidance: %q", got)
 	}
 	if !strings.Contains(got, "Only inspect an additional AGENTS.md when entering a subdirectory or external directory whose instructions were not loaded") {
@@ -156,7 +159,7 @@ func TestCallLLMInjectsAgentsMDReminderIntoFirstProviderRequest(t *testing.T) {
 		t.Fatalf("first provider message missing AGENTS.md reminder: %#v", seen[0])
 	}
 	if !strings.Contains(seen[0].Content, "Each applicable AGENTS.md from the repository root through the current working directory is already loaded here") ||
-		!strings.Contains(seen[0].Content, "do not use file, search, or shell tools to rediscover or reread them") ||
+		!strings.Contains(seen[0].Content, "Do not use file, search, or shell tools to rediscover or reread them") ||
 		!strings.Contains(seen[0].Content, "inspect only task-relevant project files") {
 		t.Fatalf("first provider message should explain loaded AGENTS.md state: %#v", seen[0])
 	}
