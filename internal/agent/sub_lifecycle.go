@@ -28,6 +28,64 @@ func (s *SubAgent) InjectUserMessageWithParts(parts []message.ContentPart) {
 	s.enqueueUserMessage(pendingUserMessageFromDraft("", parts))
 }
 
+// QueuePendingUserDraft enqueues a TUI draft with its identity preserved so
+// the transcript can reveal it only when the SubAgent actually consumes it.
+func (s *SubAgent) QueuePendingUserDraft(draftID string, parts []message.ContentPart) {
+	s.enqueueUserMessage(pendingUserMessageFromDraft(draftID, parts))
+}
+
+func (s *SubAgent) UpdatePendingUserDraft(draftID string, parts []message.ContentPart) bool {
+	updated := pendingUserMessageFromDraft(draftID, parts)
+	return s.mutatePendingUserDraft(draftID, func(_ pendingUserMessage) (pendingUserMessage, bool) {
+		return updated, true
+	})
+}
+
+func (s *SubAgent) RemovePendingUserDraft(draftID string) bool {
+	return s.mutatePendingUserDraft(draftID, func(input pendingUserMessage) (pendingUserMessage, bool) {
+		return input, false
+	})
+}
+
+func (s *SubAgent) mutatePendingUserDraft(draftID string, mutate func(pendingUserMessage) (pendingUserMessage, bool)) bool {
+	if s == nil || strings.TrimSpace(draftID) == "" {
+		return false
+	}
+	s.inputQueueMu.Lock()
+	defer s.inputQueueMu.Unlock()
+
+	queued := make([]pendingUserMessage, 0, len(s.inputCh)+len(s.inputOverflow))
+	for {
+		select {
+		case input := <-s.inputCh:
+			queued = append(queued, input)
+		default:
+			goto drained
+		}
+	}
+
+drained:
+	queued = append(queued, s.inputOverflow...)
+	s.inputOverflow = nil
+	found := false
+	for _, input := range queued {
+		if !found && input.DraftID == draftID {
+			updated, keep := mutate(input)
+			input = updated
+			found = true
+			if !keep {
+				continue
+			}
+		}
+		select {
+		case s.inputCh <- input:
+		default:
+			s.inputOverflow = append(s.inputOverflow, input)
+		}
+	}
+	return found
+}
+
 func (s *SubAgent) enqueueUserMessage(input pendingUserMessage) {
 	if s == nil {
 		return

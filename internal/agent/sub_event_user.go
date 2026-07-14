@@ -10,6 +10,7 @@ import (
 
 func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 	turn := s.newTurn()
+	s.llmRequestInFlight.Store(true)
 
 	content := pendingUserMessageText(input)
 	msg := message.Message{Role: "user", Content: content}
@@ -19,6 +20,13 @@ func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 	msg.Content, msg.Parts = s.filterUnsupportedParts(msg.Content, msg.Parts)
 
 	s.ctxMgr.Append(msg)
+	if input.DraftID != "" {
+		s.parent.emitToTUI(PendingDraftConsumedEvent{
+			DraftID: input.DraftID,
+			Parts:   messagePartsForTUI(msg),
+			AgentID: s.instanceID,
+		})
+	}
 
 	go func() {
 		if err := s.recovery.PersistMessage(s.instanceID, msg); err != nil {
@@ -31,7 +39,7 @@ func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 	}()
 
 	messages := s.ctxMgr.Snapshot()
-	s.asyncCallLLM(turn, messages)
+	s.asyncCallLLMWithFlightMarked(turn, messages)
 }
 
 func (s *SubAgent) TryEnqueueContextAppend(msg message.Message) bool {

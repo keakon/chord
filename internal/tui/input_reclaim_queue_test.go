@@ -487,7 +487,7 @@ func TestHandleInsertKeyStatsOpensLocalPanelWhenBusy(t *testing.T) {
 	}
 }
 
-func TestHandleInsertKeyBusySubAgentSkipsLocalQueue(t *testing.T) {
+func TestHandleInsertKeyBusySubAgentQueuesUntilConsumed(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)
 	m.mode = ModeInsert
@@ -497,15 +497,18 @@ func TestHandleInsertKeyBusySubAgentSkipsLocalQueue(t *testing.T) {
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
-	if got := len(m.queuedDrafts); got != 0 {
-		t.Fatalf("len(queuedDrafts) = %d, want 0", got)
+	if got := len(m.queuedDrafts); got != 1 {
+		t.Fatalf("len(queuedDrafts) = %d, want 1", got)
 	}
-	if got := len(backend.sentMessages); got != 1 {
-		t.Fatalf("SendUserMessage() calls = %d, want 1", got)
+	if got := len(backend.queuedDraftIDs); got != 1 {
+		t.Fatalf("QueuePendingUserDraft() calls = %d, want 1", got)
+	}
+	if got := len(backend.sentMessages); got != 0 {
+		t.Fatalf("SendUserMessage() calls = %d, want 0", got)
 	}
 }
 
-func TestHandleInsertKeyBusySubAgentWithImageSendsPartsImmediately(t *testing.T) {
+func TestHandleInsertKeyBusySubAgentWithImageQueuesParts(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)
 	m.mode = ModeInsert
@@ -516,18 +519,60 @@ func TestHandleInsertKeyBusySubAgentWithImageSendsPartsImmediately(t *testing.T)
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
-	if got := len(m.queuedDrafts); got != 0 {
-		t.Fatalf("len(queuedDrafts) = %d, want 0", got)
+	if got := len(m.queuedDrafts); got != 1 {
+		t.Fatalf("len(queuedDrafts) = %d, want 1", got)
 	}
-	if got := len(backend.sentMultipart); got != 1 {
-		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	if got := len(backend.queuedDraftIDs); got != 1 {
+		t.Fatalf("QueuePendingUserDraft() calls = %d, want 1", got)
 	}
-	parts := backend.sentMultipart[0]
+	if got := len(backend.sentMultipart); got != 0 {
+		t.Fatalf("SendUserMessageWithParts() calls = %d, want 0", got)
+	}
+	parts := m.queuedDrafts[0].contentParts()
 	if len(parts) != 2 {
 		t.Fatalf("sent parts len = %d, want 2", len(parts))
 	}
 	if parts[1].Type != "image" || parts[1].MimeType != "image/png" {
 		t.Fatalf("image part = %#v", parts[1])
+	}
+}
+
+func TestSubAgentPendingDraftConsumedFinalizesAssistantBeforeUserBlock(t *testing.T) {
+	m := NewModel(nil)
+	m.viewport.SetSize(80, 24)
+	m.focusedAgentID = "agent-1"
+	m.viewport.SetFilter("agent-1")
+	assistant := &Block{ID: 1, Type: BlockAssistant, AgentID: "agent-1", Content: "complete reply", Streaming: true}
+	m.currentAssistantBlock = assistant
+	m.viewport.AppendBlock(assistant)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.PendingDraftConsumedEvent{
+		DraftID: "draft-1",
+		Parts:   []message.ContentPart{{Type: message.ContentPartText, Text: "follow up"}},
+		AgentID: "agent-1",
+	}})
+
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 2 {
+		t.Fatalf("visible block count = %d, want 2", len(blocks))
+	}
+	if blocks[0] != assistant || blocks[0].Streaming {
+		t.Fatalf("assistant block = %#v, want settled original block", blocks[0])
+	}
+	if blocks[1].Type != BlockUser || blocks[1].Content != "follow up" || blocks[1].AgentID != "agent-1" {
+		t.Fatalf("user block = %#v", blocks[1])
+	}
+}
+
+func TestSubAgentIdleClearsConsumedInflightDraft(t *testing.T) {
+	m := NewModel(nil)
+	m.inflightDraft = &queuedDraft{ID: "draft-1", AgentID: "agent-1"}
+	m.activities["agent-1"] = agent.AgentActivityEvent{AgentID: "agent-1", Type: agent.ActivityStreaming}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{AgentID: "agent-1", Type: agent.ActivityIdle}})
+
+	if m.inflightDraft != nil {
+		t.Fatalf("inflightDraft = %#v, want nil after subagent idle", m.inflightDraft)
 	}
 }
 

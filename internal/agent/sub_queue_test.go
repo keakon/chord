@@ -32,6 +32,22 @@ func TestSubAgentInputOverflowPreservesOrder(t *testing.T) {
 	}
 }
 
+func TestSubAgentBusyTurnDefersQueuedUserInput(t *testing.T) {
+	sub := &SubAgent{
+		inputCh: make(chan pendingUserMessage, 1),
+		turn:    &Turn{ID: 1},
+	}
+	sub.inputCh <- pendingUserMessage{DraftID: "draft-1", Content: "follow up", FromUser: true}
+	sub.llmRequestInFlight.Store(true)
+
+	if sub.canStartUserTurn() {
+		t.Fatal("canStartUserTurn() = true during an in-flight request")
+	}
+	if got := len(sub.inputCh); got != 1 {
+		t.Fatalf("queued input count = %d, want 1", got)
+	}
+}
+
 func TestSubAgentContextAppendOverflowPreservesOrder(t *testing.T) {
 	ctx := t.Context()
 

@@ -207,11 +207,18 @@ func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
 }
 
 func (m *Model) drainQueuedDrafts() tea.Cmd {
-	if len(m.queuedDrafts) == 0 {
+	agentID := normalizeDraftAgentID(m.focusedAgentID)
+	idx := -1
+	for i, draft := range m.queuedDrafts {
+		if normalizeDraftAgentID(draft.AgentID) == agentID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
 		return nil
 	}
-	draft := m.queuedDrafts[0]
-	m.queuedDrafts = m.queuedDrafts[1:]
+	draft := m.removeQueuedDraftAt(idx)
 	if draft.QueuedAt.IsZero() {
 		draft.QueuedAt = time.Now()
 	}

@@ -15,6 +15,9 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 	switch evt := event.(type) {
 	case agent.AgentDoneEvent:
 		prevType := m.activities[evt.AgentID].Type
+		if m.inflightDraftBelongsToAgent(evt.AgentID) {
+			m.inflightDraft = nil
+		}
 		m.markAgentIdle(evt.AgentID)
 		m.maybeShowBackgroundCompletionTitle(evt.AgentID, prevType, agent.ActivityIdle)
 		m.sidebar.UpdateStatus(evt.AgentID, "done")
@@ -55,6 +58,9 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			switch evt.Status {
 			case "idle", "done", "completed", "error", "cancelled", "waiting_main", "waiting_descendant":
 				prevType := m.activities[evt.AgentID].Type
+				if m.inflightDraftBelongsToAgent(evt.AgentID) {
+					m.inflightDraft = nil
+				}
 				m.markAgentIdle(evt.AgentID)
 				m.maybeShowBackgroundCompletionTitle(evt.AgentID, prevType, agent.ActivityIdle)
 				m.stopActiveAnimationIfIdle()
@@ -138,6 +144,9 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		}
 		effects.addFollowup(m.startActiveAnimation())
 		if evt.Type == agent.ActivityIdle {
+			if m.inflightDraftBelongsToAgent(evt.AgentID) {
+				m.inflightDraft = nil
+			}
 			m.stopActiveAnimationIfIdle()
 			if prev.Type != "" && prev.Type != agent.ActivityIdle {
 				effects.addFollowup(m.scheduleBackgroundHousekeeping())

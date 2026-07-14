@@ -171,6 +171,10 @@ func (a *MainAgent) QueuePendingUserDraft(draftID string, parts []message.Conten
 	if strings.TrimSpace(draftID) == "" || len(parts) == 0 {
 		return false
 	}
+	if focused := a.validFocusedSubAgent(); focused != nil && focused.State() == SubAgentStateRunning {
+		focused.QueuePendingUserDraft(draftID, parts)
+		return true
+	}
 	a.sendEvent(Event{
 		Type:    EventPendingDraftUpsert,
 		Payload: pendingUserMessageFromDraft(draftID, parts),
@@ -183,6 +187,9 @@ func (a *MainAgent) UpdatePendingUserDraft(draftID string, parts []message.Conte
 	if strings.TrimSpace(draftID) == "" || len(parts) == 0 {
 		return false
 	}
+	if focused := a.validFocusedSubAgent(); focused != nil && focused.State() == SubAgentStateRunning {
+		return focused.UpdatePendingUserDraft(draftID, parts)
+	}
 	a.sendEvent(Event{
 		Type:    EventPendingDraftUpsert,
 		Payload: pendingUserMessageFromDraft(draftID, parts),
@@ -194,6 +201,9 @@ func (a *MainAgent) UpdatePendingUserDraft(draftID string, parts []message.Conte
 func (a *MainAgent) RemovePendingUserDraft(draftID string) bool {
 	if strings.TrimSpace(draftID) == "" {
 		return false
+	}
+	if focused := a.validFocusedSubAgent(); focused != nil && focused.State() == SubAgentStateRunning {
+		return focused.RemovePendingUserDraft(draftID)
 	}
 	a.sendEvent(Event{
 		Type:    EventPendingDraftRemove,

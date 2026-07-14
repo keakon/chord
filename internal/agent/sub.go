@@ -486,6 +486,17 @@ func subAgentToolWithBaseDir(t tools.Tool, workDir string) tools.Tool {
 // mirror MainAgent.callLLM so that SubAgent calls are observable by user
 // hooks and visible in cost analytics.
 func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
+	s.llmRequestInFlight.Store(true)
+	s.asyncCallLLMWithFlightMarked(turn, messages)
+}
+
+func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.Message) {
+	defer func() {
+		if recoverValue := recover(); recoverValue != nil {
+			s.llmRequestInFlight.Store(false)
+			panic(recoverValue)
+		}
+	}()
 	s.llmMu.RLock()
 	toolDefs := append([]message.ToolDefinition(nil), s.frozenToolDefs...)
 	s.llmMu.RUnlock()
@@ -501,6 +512,7 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 	}
 	llmClient, modelName := s.llmSnapshot()
 	if llmClient == nil {
+		s.llmRequestInFlight.Store(false)
 		select {
 		case s.llmCh <- &llmResult{err: fmt.Errorf("SubAgent %s has no LLM client", s.instanceID), turnID: turn.ID}:
 		case <-s.parentCtx.Done():
@@ -515,7 +527,6 @@ func (s *SubAgent) asyncCallLLM(turn *Turn, messages []message.Message) {
 	compatCfg := llmClient.ThinkingToolcallCompat()
 	scrubThinkingMarkers := compatCfg != nil && compatCfg.EnabledValue()
 
-	s.llmRequestInFlight.Store(true)
 	go func() {
 		defer func() {
 			s.llmRequestInFlight.Store(false)

@@ -336,10 +336,20 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		fileRefTexts := append([]string{value}, inlinePasteTexts...)
 		fileRefs := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs(fileRefTexts, m.workingDir), m.workingDir))
 		if m.agent != nil && m.focusedAgentID != "" && len(m.attachments) == 0 && !hasInlinePastes && len(fileRefs) == 0 {
-			m.finalizeTurn()
-			draft := queuedDraft{Content: value, DisplayContent: value, FileRefs: fileRefs, QueuedAt: time.Now()}
-			m.editingQueuedDraftID = ""
-			return m.sendDraft(draft)
+			draft := queuedDraft{ID: m.draftIDForSubmit(), Content: value, DisplayContent: value, FileRefs: fileRefs, QueuedAt: time.Now(), AgentID: m.focusedAgentID}
+			if !m.shouldQueueDraft() {
+				m.finalizeTurn()
+				m.editingQueuedDraftID = ""
+				return m.sendDraft(draft)
+			}
+			synced := m.syncQueuedDraft(draft)
+			draft.Mirrored = synced
+			if !synced {
+				m.queueSyncEnabled = false
+			}
+			m.queuedDrafts = append(m.queuedDrafts, draft)
+			m.recalcViewportSize()
+			return nil
 		}
 		draftID := m.draftIDForSubmit()
 		var draft queuedDraft
@@ -372,13 +382,13 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				}
 				parts = interleaveAttachments(parts, loaded)
 			}
-			draft = queuedDraft{ID: draftID, Parts: parts, FileRefs: fileRefs, Content: value, DisplayContent: draftListDisplayText(parts, value), QueuedAt: time.Now()}
+			draft = queuedDraft{ID: draftID, Parts: parts, FileRefs: fileRefs, Content: value, DisplayContent: draftListDisplayText(parts, value), QueuedAt: time.Now(), AgentID: m.focusedAgentID}
 			m.attachments = nil
 			m.recalcViewportSize()
 		} else {
-			draft = queuedDraft{ID: draftID, Content: value, DisplayContent: value, FileRefs: fileRefs, QueuedAt: time.Now()}
+			draft = queuedDraft{ID: draftID, Content: value, DisplayContent: value, FileRefs: fileRefs, QueuedAt: time.Now(), AgentID: m.focusedAgentID}
 		}
-		if m.shouldQueueMainDraft() {
+		if m.shouldQueueDraft() {
 			synced := m.syncQueuedDraft(draft)
 			draft.Mirrored = synced
 			if !synced {

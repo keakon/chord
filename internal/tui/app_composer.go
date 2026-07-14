@@ -21,14 +21,14 @@ func (m Model) focusedActivity() agent.AgentActivityEvent {
 	return m.activities[statusActiveID]
 }
 
-func (m Model) shouldQueueMainDraft() bool {
-	if m.focusedAgentID != "" || m.agent == nil {
+func (m Model) shouldQueueDraft() bool {
+	if m.agent == nil {
 		return false
 	}
 	if m.isAgentBusy() {
 		return true
 	}
-	if m.agent != nil && m.agent.LoopKeepsMainBusy() {
+	if m.focusedAgentID == "" && m.agent.LoopKeepsMainBusy() {
 		return true
 	}
 	return m.focusedActivity().Type == agent.ActivityCompacting
@@ -40,13 +40,14 @@ func (m *Model) nextDraftID() string {
 }
 
 func (m *Model) visibleQueuedDrafts() []queuedDraft {
-	// queuedDrafts currently represent the local main-agent queue only. When the
-	// user switches to a worker view, the queue must stay isolated to main so the
-	// current agent's composer/queue state is not visually mixed with another's.
-	if m.focusedAgentID != "" {
-		return nil
+	agentID := normalizeDraftAgentID(m.focusedAgentID)
+	visible := make([]queuedDraft, 0, len(m.queuedDrafts))
+	for _, draft := range m.queuedDrafts {
+		if normalizeDraftAgentID(draft.AgentID) == agentID {
+			visible = append(visible, draft)
+		}
 	}
-	return m.queuedDrafts
+	return visible
 }
 
 func (m *Model) draftIDForSubmit() string {
@@ -70,6 +71,24 @@ func (m *Model) findQueuedDraftIndex(id string) int {
 	return -1
 }
 
+func (m *Model) queuedDraftIndexForVisibleIndex(visibleIndex int) int {
+	if visibleIndex < 0 {
+		return -1
+	}
+	agentID := normalizeDraftAgentID(m.focusedAgentID)
+	visible := 0
+	for i, draft := range m.queuedDrafts {
+		if normalizeDraftAgentID(draft.AgentID) != agentID {
+			continue
+		}
+		if visible == visibleIndex {
+			return i
+		}
+		visible++
+	}
+	return -1
+}
+
 func (m *Model) removeQueuedDraftAt(idx int) queuedDraft {
 	draft := m.queuedDrafts[idx]
 	m.queuedDrafts = append(m.queuedDrafts[:idx], m.queuedDrafts[idx+1:]...)
@@ -88,8 +107,9 @@ func (m *Model) syncQueuedDraft(draft queuedDraft) bool {
 }
 
 func (m Model) queuedDraftsAutoContinue() bool {
+	agentID := normalizeDraftAgentID(m.focusedAgentID)
 	for _, draft := range m.queuedDrafts {
-		if draft.Mirrored {
+		if draft.Mirrored && normalizeDraftAgentID(draft.AgentID) == agentID {
 			return true
 		}
 	}
@@ -165,7 +185,8 @@ func (m *Model) queuedDraftActionAt(x, y int) (idx int, remove bool, ok bool) {
 		return 0, false, false
 	}
 	idx = y - m.layout.queue.Min.Y
-	if idx < 0 || idx >= len(m.queuedDrafts) {
+	idx = m.queuedDraftIndexForVisibleIndex(idx)
+	if idx < 0 {
 		return 0, false, false
 	}
 	deleteWidth := runewidth.StringWidth(queuedDraftDeleteToken)

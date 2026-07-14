@@ -23,10 +23,12 @@ func (s *SubAgent) runLoop() {
 			s.appendContextOnly(msg)
 			continue
 		}
-		if input, ok := s.tryReceiveUserInput(); ok {
-			s.resetIdleTimer()
-			s.handleUserInput(input)
-			continue
+		if s.canStartUserTurn() {
+			if input, ok := s.tryReceiveUserInput(); ok {
+				s.resetIdleTimer()
+				s.handleUserInput(input)
+				continue
+			}
 		}
 		if s.tryHandleContinueSignal() {
 			continue
@@ -41,9 +43,13 @@ func (s *SubAgent) runLoop() {
 		if s.idleTimer != nil {
 			idleCh = s.idleTimer.C
 		}
+		var inputCh <-chan pendingUserMessage
+		if s.canStartUserTurn() {
+			inputCh = s.inputCh
+		}
 
 		select {
-		case input := <-s.inputCh:
+		case input := <-inputCh:
 			s.resetIdleTimer()
 			s.handleUserInput(input)
 			s.refillInputChannelFromOverflow()
@@ -59,6 +65,9 @@ func (s *SubAgent) runLoop() {
 
 		case result := <-s.llmCh:
 			s.handleLLMResponse(result)
+			if s.canStartUserTurn() {
+				s.refillInputChannelFromOverflow()
+			}
 
 		case result := <-s.toolCh:
 			s.resetIdleTimer()
@@ -88,6 +97,18 @@ func (s *SubAgent) runLoop() {
 			return
 		}
 	}
+}
+
+func (s *SubAgent) canStartUserTurn() bool {
+	if s == nil || s.llmRequestInFlight.Load() {
+		return false
+	}
+	if s.turn == nil || s.idleTimer != nil {
+		return true
+	}
+	s.turnMu.Lock()
+	defer s.turnMu.Unlock()
+	return s.turn.PendingToolCalls.Load() == 0 && s.turn.activeToolBatchCancel == nil
 }
 
 func (s *SubAgent) dequeuePromotedToolResult() (*toolResult, bool) {

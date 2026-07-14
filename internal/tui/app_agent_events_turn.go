@@ -46,7 +46,7 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		m.finalizeTurn()
 		m.markAgentIdle("main")
 		m.stopActiveAnimationIfIdle()
-		pendingAutoContinue := m.queuedDraftsAutoContinue() || (!m.queueSyncEnabled && len(m.queuedDrafts) > 0)
+		pendingAutoContinue := m.queuedDraftsAutoContinue() || (!m.queueSyncEnabled && len(m.visibleQueuedDrafts()) > 0)
 		if !pendingAutoContinue {
 			effects.addFollowup(m.maybeTerminalNotifyCmd(m.idleNotificationText()))
 		}
@@ -60,7 +60,11 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		if m.editingQueuedDraftID == evt.DraftID {
 			m.editingQueuedDraftID = ""
 		}
-		m.finalizeTurn()
+		if evt.AgentID == "" || evt.AgentID == "main" {
+			m.finalizeTurn()
+		} else if m.currentAssistantBlock != nil && m.currentAssistantBlock.AgentID == evt.AgentID {
+			m.finalizeAssistantBlock()
+		}
 		imageCount := 0
 		content := userBlockTextFromParts(draft.contentParts(), draft.Content)
 		_, imageCount = queuedDraftTextAndImageCount(draft)
@@ -69,7 +73,7 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			fileRefs = fileRefsFromParts(evt.Parts)
 		}
 		msgIndex := -1
-		if evt.AgentID == "" && m.agent != nil {
+		if (evt.AgentID == "" || evt.AgentID == "main") && m.agent != nil {
 			msgs := m.agent.GetMessages()
 			for i := len(msgs) - 1; i >= 0; i-- {
 				msg := msgs[i]
