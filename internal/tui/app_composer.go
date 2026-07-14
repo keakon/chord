@@ -18,7 +18,7 @@ func (m Model) focusedActivity() agent.AgentActivityEvent {
 	if statusActiveID == "" {
 		statusActiveID = "main"
 	}
-	return m.activities[statusActiveID]
+	return m.activityForAgent(statusActiveID)
 }
 
 func (m Model) shouldQueueDraft() bool {

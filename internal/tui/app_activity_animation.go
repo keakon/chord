@@ -20,7 +20,8 @@ func activityNeedsVisualAnimation(activity agent.ActivityType) bool {
 }
 
 func (m Model) hasActiveAgentActivity() bool {
-	for _, act := range m.activities {
+	for agentID := range m.activities {
+		act := m.activityForAgent(agentID)
 		if act.Type != "" && act.Type != agent.ActivityIdle {
 			return true
 		}
@@ -35,7 +36,8 @@ func (m Model) hasActiveAnimation() bool {
 	if summary := m.renderRequestProgressSummary(m.focusedAgentIDOrMain()); summary != "" {
 		return true
 	}
-	for _, act := range m.activities {
+	for agentID := range m.activities {
+		act := m.activityForAgent(agentID)
 		if activityNeedsVisualAnimation(act.Type) {
 			return true
 		}
@@ -93,6 +95,7 @@ func (m *Model) markAgentIdle(agentID string) {
 		agentID = "main"
 	}
 	m.activities[agentID] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: agentID}
+	delete(m.requestProgress, agentID)
 	tbk := turnBusyKey(agentID)
 	delete(m.workStartedAt, tbk)
 	delete(m.turnBusyStartedAt, tbk)

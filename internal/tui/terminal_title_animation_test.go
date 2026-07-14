@@ -2,6 +2,7 @@ package tui
 
 import (
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
@@ -357,6 +358,56 @@ func TestAgentStatusEventStopsTerminalTitleTickerForTerminalSubAgentState(t *tes
 	}
 	if m.terminalTitleTickRunning {
 		t.Fatal("terminal subagent status should stop terminal title ticker when no busy agent remains")
+	}
+}
+
+func TestStoppedSubAgentDoesNotShowLateActivityInStatusBar(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.setFocusedAgent("agent-1")
+	m.activities["agent-1"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "agent-1"}
+	m.requestProgress["agent-1"] = requestProgressState{VisibleBytes: 128, VisibleEvents: 2}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentStatusEvent{
+		AgentID: "agent-1",
+		Status:  string(agent.SubAgentStateCancelled),
+	}})
+
+	if _, ok := m.requestProgress["agent-1"]; ok {
+		t.Fatal("terminal subagent status should clear request progress")
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{
+		AgentID: "agent-1",
+		Type:    agent.ActivityExecuting,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{
+		AgentID: "agent-1",
+		Bytes:   256,
+		Events:  3,
+	}})
+
+	if m.isFocusedAgentBusy() {
+		t.Fatal("late activity should not make a stopped focused subagent appear busy")
+	}
+	if m.hasActiveAgentActivity() {
+		t.Fatal("late activity should not keep global agent activity active")
+	}
+	if m.hasActiveAnimation() {
+		t.Fatal("late activity should not keep status or terminal-title animation active")
+	}
+	if delay := m.statusBarNextRefreshDelayAt(time.Now()); delay != 0 {
+		t.Fatalf("stopped subagent status bar refresh delay = %v, want 0", delay)
+	}
+	if got := m.renderRequestProgressSummary("agent-1"); got != "" {
+		t.Fatalf("late request progress summary = %q, want empty", got)
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentStatusEvent{
+		AgentID: "agent-1",
+		Status:  string(agent.SubAgentStateRunning),
+	}})
+	if !m.isFocusedAgentBusy() {
+		t.Fatal("activity should become visible again after the subagent resumes running")
 	}
 }
 

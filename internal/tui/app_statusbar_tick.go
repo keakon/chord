@@ -40,7 +40,7 @@ func (m *Model) statusBarNextRefreshDelayAt(now time.Time) time.Duration {
 	if m.compactionBgStatus.Active {
 		return nextTimeBucketTransition(now, time.Second)
 	}
-	statusActivity := m.activities[m.focusedAgentIDOrMain()]
+	statusActivity := m.activityForAgent(m.focusedAgentIDOrMain())
 	if statusActivity.Type == agent.ActivityCompacting {
 		return nextTimeBucketTransition(now, time.Second)
 	}

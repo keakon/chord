@@ -46,7 +46,7 @@ func (m *Model) cancelBusyAgent() tea.Cmd {
 	// cleared a.turn while LLM retry was still running). Reset visible activity
 	// so the user is not stuck with a "busy" UI that no key can recover.
 	aid := m.focusedAgentIDOrMain()
-	if a, ok := m.activities[aid]; ok && a.Type != agent.ActivityIdle {
+	if a := m.activityForAgent(aid); a.Type != "" && a.Type != agent.ActivityIdle {
 		m.markAgentIdle(aid)
 		m.inflightDraft = nil
 		m.pauseQueuedDraftDrainOnce = true

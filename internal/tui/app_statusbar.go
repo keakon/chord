@@ -46,7 +46,7 @@ func (m *Model) statusBarDynamicCacheKeyAt(now time.Time) string {
 		focused,
 		m.viewport != nil && m.viewport.HasUserLocalShellPending(),
 		m.renderRequestProgressSummary(focused),
-		m.activities[focused].Type == agent.ActivityCompacting,
+		m.activityForAgent(focused).Type == agent.ActivityCompacting,
 		m.isFocusedAgentBusy(),
 		latestStatusStart,
 	)
@@ -155,7 +155,7 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		statusActiveID,
 		localShellPending,
 		m.renderRequestProgressSummary(statusActiveID),
-		m.activities[statusActiveID].Type == agent.ActivityCompacting,
+		m.activityForAgent(statusActiveID).Type == agent.ActivityCompacting,
 		snap.busy,
 		latestStatusStart,
 	)
@@ -172,7 +172,7 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		ModeText:          m.statusBarModeText(),
 		Snapshot:          snap,
 		StatusActiveID:    statusActiveID,
-		StatusActivity:    m.activities[statusActiveID],
+		StatusActivity:    m.activityForAgent(statusActiveID),
 		InfoPanelVisible:  m.rightPanelVisible && m.mode != ModeHelp,
 		SessionSwitchKind: m.sessionSwitch.kind,
 		SessionSwitchID:   m.sessionSwitch.sessionID,

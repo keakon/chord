@@ -10,6 +10,11 @@ import (
 	"github.com/keakon/chord/internal/agent"
 )
 
+const (
+	subAgentStatusDone  = "done"
+	subAgentStatusError = "error"
+)
+
 func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
@@ -50,7 +55,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		}
 		m.markAgentIdle(evt.AgentID)
 		m.maybeShowBackgroundCompletionTitle(evt.AgentID, prevType, agent.ActivityIdle)
-		m.sidebar.UpdateStatus(evt.AgentID, "done")
+		m.sidebar.UpdateStatus(evt.AgentID, subAgentStatusDone)
 		effects.refreshSidebar = true
 		if m.focusedAgentID == evt.AgentID {
 			m.setFocusedAgent("")
@@ -82,26 +87,23 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		return true, effects
 	case agent.AgentStatusEvent:
 		m.sidebar.UpdateStatus(evt.AgentID, evt.Status)
-		if evt.Status == "running" {
+		if evt.Status == string(agent.SubAgentStateRunning) {
 			m.sidebar.ResolvePendingTask()
-		} else {
-			switch evt.Status {
-			case "idle", "done", "completed", "error", "cancelled", "waiting_main", "waiting_descendant":
-				prevType := m.activities[evt.AgentID].Type
-				if m.inflightDraftBelongsToAgent(evt.AgentID) {
-					m.inflightDraft = nil
-				}
-				m.markAgentIdle(evt.AgentID)
-				m.maybeShowBackgroundCompletionTitle(evt.AgentID, prevType, agent.ActivityIdle)
-				m.stopActiveAnimationIfIdle()
-				if prevType != "" && prevType != agent.ActivityIdle {
-					effects.addFollowup(m.scheduleBackgroundHousekeeping())
-				}
+		} else if subAgentStatusSuspendsActivity(evt.Status) {
+			prevType := m.activities[evt.AgentID].Type
+			if m.inflightDraftBelongsToAgent(evt.AgentID) {
+				m.inflightDraft = nil
+			}
+			m.markAgentIdle(evt.AgentID)
+			m.maybeShowBackgroundCompletionTitle(evt.AgentID, prevType, agent.ActivityIdle)
+			m.stopActiveAnimationIfIdle()
+			if prevType != "" && prevType != agent.ActivityIdle {
+				effects.addFollowup(m.scheduleBackgroundHousekeeping())
 			}
 		}
 		effects.refreshSidebar = true
 		m.recalcViewportSize()
-		if evt.Status == "error" && m.focusedAgentID == evt.AgentID {
+		if evt.Status == subAgentStatusError && m.focusedAgentID == evt.AgentID {
 			m.setFocusedAgent("")
 		}
 		return true, effects
@@ -184,6 +186,10 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		}
 		return true, effects
 	case agent.RequestProgressEvent:
+		if status, ok := m.sidebar.FindStatus(evt.AgentID); ok && subAgentStatusSuspendsActivity(status) {
+			delete(m.requestProgress, turnBusyKey(evt.AgentID))
+			return true, effects
+		}
 		agentID := evt.AgentID
 		if agentID == "" || agentID == "main" {
 			agentID = "main"
@@ -260,5 +266,21 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		return true, effects
 	default:
 		return false, effects
+	}
+}
+
+func subAgentStatusSuspendsActivity(status string) bool {
+	switch status {
+	case subAgentStatusDone,
+		subAgentStatusError,
+		string(agent.SubAgentStateIdle),
+		string(agent.SubAgentStateCompleted),
+		string(agent.SubAgentStateFailed),
+		string(agent.SubAgentStateCancelled),
+		string(agent.SubAgentStateWaitingMain),
+		string(agent.SubAgentStateWaitingDescendant):
+		return true
+	default:
+		return false
 	}
 }

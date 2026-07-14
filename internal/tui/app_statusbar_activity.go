@@ -76,6 +76,9 @@ func (m Model) renderRequestProgressSummary(agentID string) string {
 	if agentID == "" {
 		agentID = "main"
 	}
+	if status, ok := m.sidebar.FindStatus(agentID); ok && subAgentStatusSuspendsActivity(status) {
+		return ""
+	}
 	prog, ok := m.requestProgress[agentID]
 	displayBytes := int64(0)
 	displayEvents := int64(0)
@@ -345,6 +348,14 @@ func (m Model) renderActivity(a agent.AgentActivityEvent, maxWidth int) string {
 	return m.renderActivityState(a, maxWidth)
 }
 
+func (m Model) activityForAgent(agentID string) agent.AgentActivityEvent {
+	activity := m.activities[agentID]
+	if status, ok := m.sidebar.FindStatus(agentID); ok && subAgentStatusSuspendsActivity(status) {
+		return agent.AgentActivityEvent{AgentID: agentID, Type: agent.ActivityIdle}
+	}
+	return activity
+}
+
 func (m Model) isFocusedAgentBusy() bool {
 	statusActiveID := m.focusedAgentID
 	if statusActiveID == "" {
@@ -353,7 +364,7 @@ func (m Model) isFocusedAgentBusy() bool {
 	if m.inflightDraftBelongsToAgent(statusActiveID) {
 		return true
 	}
-	statusActivity := m.activities[statusActiveID]
+	statusActivity := m.activityForAgent(statusActiveID)
 	return statusActivity.Type != "" && statusActivity.Type != agent.ActivityIdle
 }
 
