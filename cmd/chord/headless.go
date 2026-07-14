@@ -216,7 +216,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 	switch e := ev.(type) {
 	case agent.AgentActivityEvent:
 		if e.Type == agent.ActivityIdle {
-			return nil // filtered; idle is expressed via IdleEvent
+			return nil // filtered; idle is expressed via GlobalIdleEvent
 		}
 		state.busy = true
 		state.phase = string(e.Type)
@@ -279,6 +279,8 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}})
 		}
 	case agent.IdleEvent:
+		state.updatedAt = time.Now()
+	case agent.GlobalIdleEvent:
 		state.busy = false
 		state.phase = ""
 		state.phaseDetail = ""

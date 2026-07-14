@@ -71,6 +71,7 @@ func (a *MainAgent) Run(ctx context.Context) error {
 // single event-loop goroutine, so handlers do not need to synchronise access to
 // turn state.
 func (a *MainAgent) dispatch(evt Event) {
+	defer a.emitGlobalIdleIfReady()
 	switch evt.Type {
 	case EventUserMessage:
 		a.handleUserMessage(evt)
@@ -148,6 +149,31 @@ func (a *MainAgent) sendEvent(evt Event) {
 	a.eventCh <- evt
 }
 
+func (a *MainAgent) emitGlobalIdleIfReady() bool {
+	if a.currentTurn() != nil || a.loopKeepsMainBusy() || a.hasActiveSubAgentWork() || a.hasQueuedAutomaticWork() {
+		a.globalIdle.Store(false)
+		return false
+	}
+	if !a.globalIdle.CompareAndSwap(false, true) {
+		return false
+	}
+	a.emitInteractiveToTUI(a.parentCtx, GlobalIdleEvent{})
+	a.fireHookBackground(a.parentCtx, hook.OnIdle, a.lastIdleTurnID.Load(), map[string]any{})
+	return true
+}
+
+func (a *MainAgent) hasQueuedAutomaticWork() bool {
+	return len(a.eventCh) > 0 ||
+		len(a.pendingUserMessages) > 0 ||
+		strings.TrimSpace(a.pendingRecoveryPrompt) != "" ||
+		strings.TrimSpace(a.pendingAutoContinuePrompt) != "" ||
+		strings.TrimSpace(a.pendingAutoContinueReplayPrompt) != "" ||
+		a.pendingCompactionResume != nil ||
+		a.hasOutstandingMailboxPressureForRecovery() ||
+		a.IsCompactionRunning() ||
+		a.mcpTransitionActive.Load()
+}
+
 func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 	switch e := evt.(type) {
 	case AgentActivityEvent:
@@ -166,7 +192,7 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 			"event_type", fmt.Sprintf("%T", evt),
 			"tool_id", e.ID,
 		}, true
-	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, AgentDoneEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent:
+	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, AgentDoneEvent, GlobalIdleEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent:
 		return "TUI output channel full, waiting to deliver critical event", []any{
 			"event_type", fmt.Sprintf("%T", evt),
 		}, true

@@ -382,6 +382,13 @@ type IdleEvent struct{}
 
 func (IdleEvent) agentEvent() {}
 
+// GlobalIdleEvent signals that the main agent and all SubAgents have no
+// active work. Unlike IdleEvent, it is safe to use for user-facing completion
+// notifications and external idle protocols.
+type GlobalIdleEvent struct{}
+
+func (GlobalIdleEvent) agentEvent() {}
+
 // PendingDraftConsumedEvent signals that a queued draft was actually appended
 // to the conversation context and is now part of the transcript.
 type PendingDraftConsumedEvent struct {

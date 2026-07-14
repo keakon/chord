@@ -173,6 +173,7 @@ hooks:
 ```
 
 The hook ignores stdout; the side effect is the notification.
+`on_idle` runs only after the main agent, every SubAgent, and all automatic continuation queues are idle.
 
 ### 2. Block destructive shell commands (sync)
 

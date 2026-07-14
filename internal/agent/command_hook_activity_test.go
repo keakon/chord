@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/command"
 	"github.com/keakon/chord/internal/hook"
@@ -14,6 +16,22 @@ type recordingActivityObserver struct {
 	agentID  string
 	activity ActivityType
 	calls    int
+}
+
+type recordingBackgroundHookManager struct {
+	envelopes []hook.Envelope
+}
+
+func (m *recordingBackgroundHookManager) Fire(context.Context, hook.Envelope) (*hook.Result, error) {
+	return &hook.Result{Action: hook.ActionContinue}, nil
+}
+
+func (m *recordingBackgroundHookManager) FireBackground(_ context.Context, env hook.Envelope) {
+	m.envelopes = append(m.envelopes, env)
+}
+
+func (m *recordingBackgroundHookManager) RunAutomation(context.Context, hook.Envelope) ([]hook.AutomationJobResult, error) {
+	return nil, nil
 }
 
 func (r *recordingActivityObserver) OnAgentActivity(agentID string, activity ActivityType) {
@@ -36,6 +54,158 @@ func TestSetActivityObserverAndEmitActivity(t *testing.T) {
 	a.emitActivity("main", ActivityIdle, "done")
 	if obs.calls != 1 {
 		t.Fatalf("observer calls after unregister = %d, want 1", obs.calls)
+	}
+}
+
+func TestEmitGlobalIdleWaitsForRunningSubAgent(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "task-1")
+	sub.setState(SubAgentStateRunning, "working")
+
+	if a.emitGlobalIdleIfReady() {
+		t.Fatal("global idle emitted while SubAgent was running")
+	}
+	select {
+	case evt := <-a.Events():
+		t.Fatalf("unexpected event while SubAgent active: %T", evt)
+	default:
+	}
+
+	sub.setState(SubAgentStateCompleted, "done")
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected global idle after the final running SubAgent completed")
+	}
+	select {
+	case evt := <-a.Events():
+		if _, ok := evt.(GlobalIdleEvent); !ok {
+			t.Fatalf("event = %T, want GlobalIdleEvent", evt)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for GlobalIdleEvent")
+	}
+	if a.emitGlobalIdleIfReady() {
+		t.Fatal("duplicate global idle emitted without intervening work")
+	}
+}
+
+func TestDispatchDoesNotRepeatGlobalIdleWithoutInterveningWork(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected initial global idle")
+	}
+	<-a.Events()
+
+	a.dispatch(Event{Type: EventAgentLog, SourceID: "agent-1", Payload: "late informational event"})
+
+	for len(a.outputCh) > 0 {
+		if _, ok := (<-a.outputCh).(GlobalIdleEvent); ok {
+			t.Fatal("unexpected repeated GlobalIdleEvent without intervening work")
+		}
+	}
+}
+
+func TestNonIdleActivityRearmsGlobalIdle(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected initial global idle")
+	}
+	<-a.Events()
+
+	a.emitActivity("agent-1", ActivityStreaming, "working")
+	a.emitActivity("agent-1", ActivityIdle, "")
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected a new GlobalIdleEvent after intervening SubAgent activity")
+	}
+}
+
+func TestGlobalIdleHookKeepsLastMainTurnID(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	hooks := &recordingBackgroundHookManager{}
+	a.hookEngine = hooks
+	a.newTurn()
+	turnID := a.currentTurnID()
+
+	a.setIdleAndDrainPending()
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected global idle after main turn completed")
+	}
+
+	if len(hooks.envelopes) != 1 {
+		t.Fatalf("background hook count = %d, want 1", len(hooks.envelopes))
+	}
+	env := hooks.envelopes[0]
+	if env.Point != hook.OnIdle || env.TurnID != turnID {
+		t.Fatalf("idle hook envelope = %#v, want point=%q turn_id=%d", env, hook.OnIdle, turnID)
+	}
+}
+
+func TestEmitGlobalIdleWaitsForQueuedAutomaticWork(t *testing.T) {
+	tests := []struct {
+		name  string
+		queue func(*MainAgent)
+	}{
+		{
+			name: "pending user input",
+			queue: func(a *MainAgent) {
+				a.pendingUserMessages = []pendingUserMessage{{Content: "queued follow-up", FromUser: true}}
+			},
+		},
+		{
+			name: "SubAgent mailbox",
+			queue: func(a *MainAgent) {
+				a.subAgentInbox.normal = append(a.subAgentInbox.normal, SubAgentMailboxMessage{MessageID: "mail-1", Kind: SubAgentMailboxKindCompleted})
+			},
+		},
+		{
+			name: "automatic continuation prompt",
+			queue: func(a *MainAgent) {
+				a.pendingAutoContinuePrompt = "continue"
+			},
+		},
+		{
+			name: "internal event",
+			queue: func(a *MainAgent) {
+				a.sendEvent(Event{Type: EventResetNudge})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newTestMainAgent(t, t.TempDir())
+			tt.queue(a)
+			if a.emitGlobalIdleIfReady() {
+				t.Fatal("global idle emitted while automatic work was queued")
+			}
+		})
+	}
+}
+
+func TestCompletedSubAgentMailboxStartsMainTurnBeforeGlobalIdle(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "task-1")
+	sub.setState(SubAgentStateCompleted, "done")
+
+	a.handleSubAgentMailboxEvent(Event{
+		SourceID: sub.instanceID,
+		Payload: &SubAgentMailboxMessage{
+			MessageID: "worker-1-1",
+			AgentID:   sub.instanceID,
+			TaskID:    sub.taskID,
+			Kind:      SubAgentMailboxKindCompleted,
+			Summary:   "done",
+		},
+	})
+
+	if a.currentTurn() == nil {
+		t.Fatal("completed SubAgent mailbox did not start the main summary turn")
+	}
+	select {
+	case evt := <-a.Events():
+		if _, ok := evt.(GlobalIdleEvent); ok {
+			t.Fatal("global idle emitted before the main summary turn")
+		}
+	default:
 	}
 }
 

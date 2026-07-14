@@ -624,7 +624,7 @@ func TestHeadlessNoAutoDenyWhenNoPendingConfirm(t *testing.T) {
 	}
 }
 
-func TestHeadlessPendingClearedAfterIdleEvent(t *testing.T) {
+func TestHeadlessPendingClearedAfterGlobalIdleEvent(t *testing.T) {
 	state := &headlessState{
 		pendingConfirm: &headlessConfirmPayload{
 			ToolName:  "Delete",
@@ -637,7 +637,7 @@ func TestHeadlessPendingClearedAfterIdleEvent(t *testing.T) {
 		lastError: "some error",
 	}
 
-	envs := filterHeadlessEvent(agent.IdleEvent{}, state)
+	envs := filterHeadlessEvent(agent.GlobalIdleEvent{}, state)
 
 	state.mu.Lock()
 	pc := state.pendingConfirm
@@ -646,20 +646,35 @@ func TestHeadlessPendingClearedAfterIdleEvent(t *testing.T) {
 	state.mu.Unlock()
 
 	if pc != nil {
-		t.Errorf("pendingConfirm should be nil after IdleEvent, got %+v", pc)
+		t.Errorf("pendingConfirm should be nil after GlobalIdleEvent, got %+v", pc)
 	}
 	if pq != nil {
-		t.Errorf("pendingQuestion should be nil after IdleEvent, got %+v", pq)
+		t.Errorf("pendingQuestion should be nil after GlobalIdleEvent, got %+v", pq)
 	}
 	if le != "" {
-		t.Errorf("lastError should be empty after IdleEvent, got %q", le)
+		t.Errorf("lastError should be empty after GlobalIdleEvent, got %q", le)
 	}
 	if len(envs) == 0 {
-		t.Fatal("IdleEvent should produce an envelope")
+		t.Fatal("GlobalIdleEvent should produce an envelope")
 	}
 }
 
-func TestHeadlessLastErrorSetAfterErrorClearedAfterIdle(t *testing.T) {
+func TestHeadlessMainIdleKeepsActiveSubAgentPhase(t *testing.T) {
+	state := &headlessState{}
+	filterHeadlessEvent(agent.AgentActivityEvent{AgentID: "agent-1", Type: agent.ActivityStreaming, Detail: "working"}, state)
+	filterHeadlessEvent(agent.IdleEvent{}, state)
+
+	state.mu.Lock()
+	busy := state.busy
+	phase := state.phase
+	detail := state.phaseDetail
+	state.mu.Unlock()
+	if !busy || phase != string(agent.ActivityStreaming) || detail != "working" {
+		t.Fatalf("state after main idle = busy=%v phase=%q detail=%q, want active SubAgent streaming state", busy, phase, detail)
+	}
+}
+
+func TestHeadlessLastErrorSetAfterErrorClearedAfterGlobalIdle(t *testing.T) {
 	state := &headlessState{}
 
 	filterHeadlessEvent(agent.ErrorEvent{Err: errors.New("rate limit exceeded"), AgentID: ""}, state)
@@ -672,14 +687,14 @@ func TestHeadlessLastErrorSetAfterErrorClearedAfterIdle(t *testing.T) {
 		t.Errorf("lastError after ErrorEvent = %q, want %q", le, "rate limit exceeded")
 	}
 
-	filterHeadlessEvent(agent.IdleEvent{}, state)
+	filterHeadlessEvent(agent.GlobalIdleEvent{}, state)
 
 	state.mu.Lock()
 	le = state.lastError
 	state.mu.Unlock()
 
 	if le != "" {
-		t.Errorf("lastError after IdleEvent = %q, want empty", le)
+		t.Errorf("lastError after GlobalIdleEvent = %q, want empty", le)
 	}
 }
 
@@ -853,7 +868,7 @@ func TestHeadlessUnsupportedRemoteCommand(t *testing.T) {
 	}
 }
 
-func TestHeadlessIdleEventLastOutcome(t *testing.T) {
+func TestHeadlessGlobalIdleEventLastOutcome(t *testing.T) {
 	tests := []struct {
 		name            string
 		setupOutcome    string
@@ -888,9 +903,9 @@ func TestHeadlessIdleEventLastOutcome(t *testing.T) {
 				lastOutcome:    tt.setupOutcome,
 			}
 
-			envs := filterHeadlessEvent(agent.IdleEvent{}, state)
+			envs := filterHeadlessEvent(agent.GlobalIdleEvent{}, state)
 			if len(envs) == 0 {
-				t.Fatal("IdleEvent should produce an envelope")
+				t.Fatal("GlobalIdleEvent should produce an envelope")
 			}
 			env := findHeadlessEnvelope(envs, "idle")
 			if env == nil {
@@ -1089,10 +1104,10 @@ func TestHeadlessSubscribeFiltersEvents(t *testing.T) {
 		t.Error("activity event should be filtered when not subscribed")
 	}
 
-	// IdleEvent should pass through
-	envs = filterHeadlessEvent(agent.IdleEvent{}, state)
+	// GlobalIdleEvent should pass through
+	envs = filterHeadlessEvent(agent.GlobalIdleEvent{}, state)
 	if len(envs) == 0 {
-		t.Fatal("IdleEvent should pass through when subscribed")
+		t.Fatal("GlobalIdleEvent should pass through when subscribed")
 	}
 
 	// AssistantMessageEvent should pass through
@@ -1111,7 +1126,7 @@ func TestHeadlessSubscribeAllByDefault(t *testing.T) {
 		t.Error("activity event should pass through by default")
 	}
 
-	envs = filterHeadlessEvent(agent.IdleEvent{}, state)
+	envs = filterHeadlessEvent(agent.GlobalIdleEvent{}, state)
 	if len(envs) == 0 {
 		t.Error("idle event should pass through by default")
 	}
@@ -1150,7 +1165,7 @@ func TestHeadlessSubscribeUnknownOnlyDoesNotFallBackToAll(t *testing.T) {
 	if envs := filterHeadlessEvent(agent.AgentActivityEvent{Type: agent.ActivityStreaming, Detail: "working"}, state); len(envs) != 0 {
 		t.Fatalf("activity envs = %#v, want none for unknown-only subscription", envs)
 	}
-	if envs := filterHeadlessEvent(agent.IdleEvent{}, state); len(envs) != 0 {
+	if envs := filterHeadlessEvent(agent.GlobalIdleEvent{}, state); len(envs) != 0 {
 		t.Fatalf("idle envs = %#v, want none for unknown-only subscription", envs)
 	}
 	if envs := filterHeadlessEvent(agent.AssistantMessageEvent{Text: "hello"}, state); len(envs) != 0 {

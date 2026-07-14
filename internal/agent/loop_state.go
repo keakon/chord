@@ -141,9 +141,11 @@ func (a *MainAgent) markLoopExitDecisionRequired() {
 }
 
 func (a *MainAgent) clearCurrentTurnKeepLoopState() {
+	turnID := a.currentTurnID()
 	a.turnMu.Lock()
 	a.turn = nil
 	a.turnMu.Unlock()
+	a.rememberIdleTurn(turnID)
 	a.setBugTriagePromptActive(false)
 	a.emitActivity("main", ActivityIdle, "")
 	if a.loopState.Enabled {

@@ -280,6 +280,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			log.Debug("LLM response has no tool calls, agent going idle")
 		}
 		if assessment := a.nextLoopAssessmentFromAssistant(assistantMsg); assessment != nil {
+			a.rememberIdleTurn(a.turn.ID)
 			a.turn = nil
 			a.sendEvent(Event{Type: EventLoopAssessment, Payload: assessment})
 			return

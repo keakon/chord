@@ -123,6 +123,17 @@ func (a *MainAgent) hasActiveSubAgents() bool {
 	return false
 }
 
+func (a *MainAgent) hasActiveSubAgentWork() bool {
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
+	for _, sub := range a.subs.subAgents {
+		if sub != nil && sub.State() == SubAgentStateRunning {
+			return true
+		}
+	}
+	return false
+}
+
 func inferLoopBlockerCategory(reason string) string {
 	normalized := strings.ToLower(strings.TrimSpace(reason))
 	switch {

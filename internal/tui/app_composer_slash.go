@@ -13,7 +13,8 @@ import (
 )
 
 // queuedDraft holds a user message submitted while the agent was busy.
-// It is stored locally in the TUI and sent to the agent after IdleEvent.
+// It is stored locally in the TUI and sent to the agent after the main turn's
+// IdleEvent barrier. User-facing idle notifications wait for GlobalIdleEvent.
 type queuedDraft struct {
 	ID             string
 	AgentID        string // "" = main agent; non-empty = focused subagent at submit time

@@ -173,6 +173,7 @@ hooks:
 ```
 
 副作用即通知，stdout 被丢弃。
+只有主 agent、所有 SubAgent 以及自动续跑队列都进入空闲后，才会触发 `on_idle`。
 
 ### 2. 拒绝危险 shell 命令（sync）
 

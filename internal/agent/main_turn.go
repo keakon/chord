@@ -6,7 +6,6 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 )
@@ -354,6 +353,7 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 
 // newTurn cancels any in-flight work and creates a fresh Turn.
 func (a *MainAgent) newTurn() {
+	a.globalIdle.Store(false)
 	a.clearContextReductionWrapUpGrace()
 	a.turnMu.Lock()
 	if a.turn != nil {
@@ -401,6 +401,13 @@ func (a *MainAgent) currentTurnID() uint64 {
 	return turn.ID
 }
 
+func (a *MainAgent) rememberIdleTurn(turnID uint64) {
+	if turnID == 0 {
+		return
+	}
+	a.lastIdleTurnID.Store(turnID)
+}
+
 // setIdleAndDrainPending marks the agent idle (turn = nil), emits IdleEvent, then
 // drains any queued user messages and processes them in one batch (only when the
 // agent was busy and messages were queued). Call this wherever IdleEvent was previously
@@ -413,6 +420,7 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	}
 	a.turn = nil
 	a.turnMu.Unlock()
+	a.rememberIdleTurn(turnID)
 	a.allowContextSurfaceRefreshAtUserBoundary()
 	a.clearLoopReductionCache(false)
 	a.setBugTriagePromptActive(false)
@@ -486,7 +494,6 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	if !handledIdleBarrier {
 		a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
 	}
-	a.fireHookBackground(a.parentCtx, hook.OnIdle, turnID, map[string]any{})
 	if !pausePendingDrain && !handledIdleBarrier {
 		a.drainPendingUserMessages()
 	}
@@ -500,9 +507,14 @@ func (a *MainAgent) setIdleAndDrainPending() {
 // mailbox results must remain queued until the user explicitly submits or
 // otherwise leaves the edit flow.
 func (a *MainAgent) setIdleForComposerEdit() {
+	turnID := uint64(0)
 	a.turnMu.Lock()
+	if a.turn != nil {
+		turnID = a.turn.ID
+	}
 	a.turn = nil
 	a.turnMu.Unlock()
+	a.rememberIdleTurn(turnID)
 	a.allowContextSurfaceRefreshAtUserBoundary()
 	a.clearLoopReductionCache(false)
 	a.setBugTriagePromptActive(false)

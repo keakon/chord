@@ -31,7 +31,6 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		skipDrain := cancelledByUser
 		m.pauseQueuedDraftDrainOnce = false
-		pendingAutoContinue := !skipDrain && (m.queuedDraftsAutoContinue() || (!m.queueSyncEnabled && len(m.queuedDrafts) > 0))
 		m.inflightDraft = nil
 		m.stopActiveAnimationIfIdle()
 		if prevMain != "" && prevMain != agent.ActivityIdle && !mainLoopBusy {
@@ -40,7 +39,15 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		if !skipDrain && !m.queueSyncEnabled {
 			effects.addFollowup(m.drainQueuedDrafts())
 		}
-		if !pendingAutoContinue && !mainLoopBusy {
+		return true, effects
+	case agent.GlobalIdleEvent:
+		effects.invalidateUsage = true
+		m.clearSessionSwitch()
+		m.finalizeTurn()
+		m.markAgentIdle("main")
+		m.stopActiveAnimationIfIdle()
+		pendingAutoContinue := m.queuedDraftsAutoContinue() || (!m.queueSyncEnabled && len(m.queuedDrafts) > 0)
+		if !pendingAutoContinue {
 			effects.addFollowup(m.maybeTerminalNotifyCmd(m.idleNotificationText()))
 		}
 		return true, effects

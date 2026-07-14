@@ -105,7 +105,7 @@ func (rt *Runtime) WaitIdleOrTimeout(timeout time.Duration) bool {
 			if !ok {
 				return true
 			}
-			if _, ok := evt.(agent.IdleEvent); ok {
+			if _, ok := evt.(agent.GlobalIdleEvent); ok {
 				return true
 			}
 		case <-timer.C:

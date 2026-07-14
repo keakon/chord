@@ -352,6 +352,8 @@ type MainAgent struct {
 	previousLLMModelRef string
 	instanceID          string
 	mcpClientInfo       mcp.ClientInfo
+	globalIdle          atomic.Bool
+	lastIdleTurnID      atomic.Uint64
 
 	// turnMu protects the turn pointer for cross-goroutine access.
 	// The event-loop goroutine writes turn in newTurn(); external goroutines

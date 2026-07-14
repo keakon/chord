@@ -180,7 +180,7 @@ func TestOSC9IdleNotificationUsesLastAssistantMessage(t *testing.T) {
 	m.terminalNotificationProtocol = terminalNotificationOSC9
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "model reply content"})
 
-	cmd := m.handleAgentEvent(agentEventMsg{event: agent.IdleEvent{}})
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.GlobalIdleEvent{}})
 	if cmd == nil {
 		t.Fatal("expected idle followup command")
 	}
@@ -199,7 +199,7 @@ func TestOSC9IdleNotificationUsesLastErrorMessage(t *testing.T) {
 	m.terminalNotificationProtocol = terminalNotificationOSC9
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ErrorEvent{Err: errors.New("request interrupted: network error")}})
-	cmd := m.handleAgentEvent(agentEventMsg{event: agent.IdleEvent{}})
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.GlobalIdleEvent{}})
 	if cmd == nil {
 		t.Fatal("expected idle followup command")
 	}
@@ -227,9 +227,9 @@ func TestOSC9LoopTerminalInfoNotification(t *testing.T) {
 		t.Fatalf("activeToast = %+v, want loop completion toast", m.activeToast)
 	}
 	// Loop terminal InfoEvent no longer emits OSC9 directly;
-	// the IdleEvent that follows will emit OSC9 instead.
+	// the GlobalIdleEvent that follows will emit OSC9 instead.
 	if got := buf.String(); got != "" {
-		t.Fatalf("osc sequence = %q, want empty (notification deferred to IdleEvent)", got)
+		t.Fatalf("osc sequence = %q, want empty (notification deferred to GlobalIdleEvent)", got)
 	}
 }
 
@@ -265,6 +265,47 @@ func TestIdleEventDoesNotNotifyWhileLoopStillBusy(t *testing.T) {
 	}
 	if got := m.activities["main"].Type; got != agent.ActivityExecuting {
 		t.Fatalf("main activity = %q, want %q while loop still busy", got, agent.ActivityExecuting)
+	}
+}
+
+func TestIdleEventDoesNotNotifyWhileSubAgentStillActive(t *testing.T) {
+	var buf bytes.Buffer
+	m := NewModelWithSize(nil, 80, 24)
+	m.desktopNotificationsEnabled = true
+	m.terminalAppFocused = false
+	m.oscNotifyOut = &buf
+	m.activities["agent-1"] = agent.AgentActivityEvent{AgentID: "agent-1", Type: agent.ActivityStreaming}
+
+	if cmd := m.handleAgentEvent(agentEventMsg{event: agent.IdleEvent{}}); cmd != nil {
+		_ = cmd()
+	}
+	if got := buf.String(); got != "" {
+		t.Fatalf("osc sequence = %q, want empty before global idle", got)
+	}
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.GlobalIdleEvent{}})
+	if cmd == nil {
+		t.Fatal("expected notification when runtime becomes globally idle")
+	}
+	_ = cmd()
+	if got := buf.String(); got == "" {
+		t.Fatal("expected OSC notification after global idle")
+	}
+}
+
+func TestGlobalIdleEventDoesNotNotifyWithQueuedDraft(t *testing.T) {
+	var buf bytes.Buffer
+	m := NewModelWithSize(nil, 80, 24)
+	m.desktopNotificationsEnabled = true
+	m.terminalAppFocused = false
+	m.oscNotifyOut = &buf
+	m.queuedDrafts = []queuedDraft{{Content: "queued follow-up"}}
+
+	if cmd := m.handleAgentEvent(agentEventMsg{event: agent.GlobalIdleEvent{}}); cmd != nil {
+		_ = cmd()
+	}
+	if got := buf.String(); got != "" {
+		t.Fatalf("osc sequence = %q, want empty while queued draft can auto-continue", got)
 	}
 }
 
