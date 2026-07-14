@@ -233,15 +233,13 @@ func (m *Model) refreshSidebar() {
 }
 
 func (m *Model) handleSwitchAgent() tea.Cmd {
-	allIDs := m.sidebar.AgentIDs()
-	ids := make([]string, 0, len(allIDs))
-	ids = append(ids, allIDs...)
-	if len(ids) <= 1 {
-		return nil
-	}
+	ids := m.sidebar.AgentIDs()
 	current := m.focusedAgentID
 	if current == "" {
 		current = "main"
+	}
+	if len(ids) == 1 && current == "main" {
+		return nil
 	}
 	nextIdx := 0
 	for i, id := range ids {

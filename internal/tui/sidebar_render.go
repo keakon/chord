@@ -19,14 +19,15 @@ func (s *Sidebar) Width() int {
 	return s.width
 }
 
-// AgentIDs returns the ordered list of agent IDs shown in the sidebar.
-// Used by Tab-key cycling logic. Returns nil if only main agent.
+// AgentIDs returns the agent IDs used by Shift+Tab cycling. Main is always
+// first, even before the sidebar has been refreshed.
 func (s *Sidebar) AgentIDs() []string {
-	if len(s.agents) <= 1 {
-		return nil
-	}
-	ids := make([]string, 0, len(s.agents))
+	ids := make([]string, 0, 1+len(s.agents))
+	ids = append(ids, "main")
 	for _, entry := range s.agents {
+		if entry.ID == "main" {
+			continue
+		}
 		ids = append(ids, entry.ID)
 	}
 	return ids

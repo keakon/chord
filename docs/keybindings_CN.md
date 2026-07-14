@@ -83,7 +83,7 @@ TUI 有两种模式：
 | 按键          | 动作                                                                                                            |
 | ------------- | --------------------------------------------------------------------------------------------------------------- |
 | `Tab`         | 循环切换主 agent 的模式（role，显示在状态栏；仅在 main 视图生效）                                             |
-| `Shift+Tab`   | 循环切换当前查看的 agent 视图（主 agent 与所有活跃 SubAgent）                                                |
+| `Shift+Tab`   | 循环切换当前查看的 agent 视图；main 始终可达，停止但未完成的 SubAgent 仍可切换查看                         |
 | `Ctrl+P`      | 在 Insert 和 Normal 两种模式下都打开模型池选择器                                                   |
 | `Ctrl+R`      | 在当前 provider/model 支持的 tier 中循环切换后续模型请求的 service tier；`/tier` slash 补全会预测相同的下一个 tier，没有实际可切换目标时隐藏 |
 | `Ctrl+Y`      | 切换 YOLO 模式；绕过 MainAgent 权限，但不影响 handoff、delegate、cancel 和 done 权限                         |

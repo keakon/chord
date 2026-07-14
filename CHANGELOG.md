@@ -23,6 +23,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- `Shift+Tab` now always keeps the main-agent view reachable. SubAgents that stop without completing remain in the view cycle, and a stale SubAgent focus falls back to main instead of becoming an unresponsive view.
 - Cancelling a turn with `Esc` now keeps that turn's user prompt visible when the preserved interrupted reply is taller than the viewport. Restoring a session ending in the same state also opens at the prompt instead of the bottom of the partial reply, while completed replies retain the existing tail-follow behavior.
 - Focused SubAgent status bars now report received response bytes and events instead of remaining at `0 B` while tool arguments stream.
 - Restored idle SubAgents can now continue from their existing context after being focused, matching idle MainAgent behavior. Chord reacquires the SubAgent concurrency slot, restores its running state, and starts a new turn without adding a synthetic user message.

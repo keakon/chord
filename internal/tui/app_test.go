@@ -5635,6 +5635,79 @@ func TestHandleSwitchAgentRefreshesInfoPanelModelWithoutEvent(t *testing.T) {
 	}
 }
 
+func TestHandleSwitchAgentEscapesVanishedSubAgentToMain(t *testing.T) {
+	backend := &sessionControlAgent{
+		events:           make(chan agent.AgentEvent, 1),
+		currentRole:      "builder",
+		providerModelRef: "main/huge",
+	}
+	m := NewModelWithSize(backend, 100, 24)
+	m.refreshSidebar()
+
+	ids := m.sidebar.AgentIDs()
+	if len(ids) != 1 || ids[0] != "main" {
+		t.Fatalf("AgentIDs() = %v, want [\"main\"]", ids)
+	}
+
+	m.focusedAgentID = "ghost-agent"
+	m.sidebar.focusedID = "ghost-agent"
+
+	m.handleSwitchAgent()
+
+	if m.focusedAgentID != "" {
+		t.Fatalf("focusedAgentID = %q, want \"\" (main)", m.focusedAgentID)
+	}
+	if m.sidebar.focusedID != "" {
+		t.Fatalf("sidebar.focusedID = %q, want \"\" (main)", m.sidebar.focusedID)
+	}
+}
+
+func TestStoppedSubAgentRemainsSwitchableUntilCompletion(t *testing.T) {
+	for _, status := range []string{"waiting_main", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			backend := &sessionControlAgent{
+				events:      make(chan agent.AgentEvent, 1),
+				currentRole: "builder",
+				subAgents: []agent.SubAgentInfo{{
+					InstanceID:   "agent-1",
+					AgentDefName: "reviewer",
+					TaskDesc:     "check code",
+					State:        "running",
+				}},
+			}
+			m := NewModelWithSize(backend, 100, 24)
+			m.refreshSidebar()
+			m.setFocusedAgent("agent-1")
+
+			_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentStatusEvent{
+				AgentID: "agent-1",
+				Status:  status,
+				Message: "stopped without completing",
+			}})
+
+			if m.focusedAgentID != "agent-1" {
+				t.Fatalf("focusedAgentID = %q, want stopped sub-agent to remain focused", m.focusedAgentID)
+			}
+			if got, ok := m.sidebar.FindStatus("agent-1"); !ok || got != status {
+				t.Fatalf("sidebar status = %q, %v; want %s, true", got, ok, status)
+			}
+			ids := m.sidebar.AgentIDs()
+			if len(ids) != 2 || ids[0] != "main" || ids[1] != "agent-1" {
+				t.Fatalf("AgentIDs() = %v, want [main agent-1]", ids)
+			}
+
+			m.handleSwitchAgent()
+
+			if m.focusedAgentID != "" {
+				t.Fatalf("focusedAgentID = %q, want \"\" (main)", m.focusedAgentID)
+			}
+			if backend.focused != "" {
+				t.Fatalf("backend.focused = %q, want \"\" (main)", backend.focused)
+			}
+		})
+	}
+}
+
 func TestRoleChangedEventRefreshesCachedStatusBarViewingLabel(t *testing.T) {
 	backend := &sessionControlAgent{
 		events:         make(chan agent.AgentEvent, 1),

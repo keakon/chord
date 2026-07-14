@@ -83,7 +83,7 @@ Search also covers older regions of lazily loaded large sessions. Chord loads a 
 | Key          | Action                                                                                                    |
 | ------------ | --------------------------------------------------------------------------------------------------------- |
 | `Tab`        | Cycle the main agent mode (role) shown in the status bar (main view only)                                    |
-| `Shift+Tab`  | Cycle the focused agent view (main agent and any active SubAgents)                                          |
+| `Shift+Tab`  | Cycle the focused agent view. Main is always available; stopped-but-incomplete SubAgents remain switchable.   |
 | `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
 | `Ctrl+R`     | Cycle service tier for subsequent model requests, limited to tiers supported by the current provider/model; `/tier` slash completion predicts the same next tier and is hidden when there is no actual switch target |
 | `Ctrl+Y`     | Toggle YOLO mode; bypasses main-agent permissions except handoff, delegate, cancel, and done                 |
