@@ -328,9 +328,16 @@ func (a *MainAgent) deliverMessageToSubAgentWithMode(sub *SubAgent, message, kin
 		statusMessage = "message delivered and worker resumed"
 	}
 	if manual {
-		sub.InjectManualUserMessage(payload, a.drainOwnedSubAgentMailboxes(sub.instanceID))
+		if !sub.InjectManualUserMessage(payload, a.drainOwnedSubAgentMailboxes(sub.instanceID)) {
+			return "", "", fmt.Errorf("SubAgent %s rejected the message during resume", sub.instanceID)
+		}
 	} else {
-		sub.InjectUserMessage(payload)
+		if !sub.InjectUserMessage(payload) {
+			return "", "", fmt.Errorf("SubAgent %s rejected the message during resume", sub.instanceID)
+		}
+	}
+	if needsResume {
+		sub.armStartupWatchdog()
 	}
 
 	a.saveRecoverySnapshot()

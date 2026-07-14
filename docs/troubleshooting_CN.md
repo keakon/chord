@@ -171,6 +171,24 @@ diagnostics:
 
 Chord 会在恢复前自动修复进程中断造成的不完整轮次。如果恢复后的模型 / 服务商状态或对话顺序异常，请使用当前版本导出诊断包，并附上会话 ID。
 
+## 委派的 SubAgent 看似卡住，或 `escalate` 卡片一直执行
+
+当前版本会自动恢复旧会话中可能暴露的两类故障：
+
+- Parked SubAgent 被 rehydrate 后，排队输入会显式唤醒其事件循环。如果 worker 保持 `running` 却没有创建 turn，启动 watchdog 会自动重试一次唤醒。
+- 如果 worker 仍无法启动，或者 provider / 模型重试最终失败，Chord 会把任务标记为 failed、记录 `risk_alert`，并唤醒 owner/MainAgent，由其重试、重新委派或报告 blocker；系统不会伪造成功的 `complete` 结果。
+
+`escalate` 是本地协调事件，不是长时间运行的网络操作。旧版本可能把它的 tool result 落盘在 assistant tool call 之前，导致恢复后一个已经完成的卡片看起来仍是 pending。当前版本会在相邻消息具有相同 `tool_call_id` 时做严格的局部修复；无法匹配的 orphan result 仍会被丢弃。
+
+如果旧版本创建的会话已经卡住：
+
+1. 重新构建或安装当前 Chord，并通过 `--resume <session-id>` 重启；
+2. 重试或定向通知委派任务时使用稳定的 `task_id`，不要使用旧 runtime 的 `agent_id`；
+3. 不要手工编辑 `agents/*.jsonl`、`subagents/tasks.json` 或 mailbox 文件；
+4. 开启 `log_level: debug` 后，在 `chord.log` 中搜索 `startup watchdog retrying wake`、`SubAgent failed` 或 `removed orphan tool messages`。
+
+正常的响应后 watchdog 可能提醒仍存活的 worker 调用 `complete` 或 `escalate`。无法恢复的 worker 则会以 failed 终态关闭并路由回 owner；失败不会被当作成功完成。
+
 ## 查看日志 / dump / shell 输出时，TUI 卡片出现异色、背景泄漏或换行错乱
 
 查看诊断 dump、原始命令输出或其他外部文本时，工具卡片、本地 shell 结果、问题对话框或确认摘要出现异常颜色、背景泄漏或换行错乱：

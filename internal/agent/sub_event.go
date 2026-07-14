@@ -64,6 +64,10 @@ func (s *SubAgent) runLoop() {
 		case msg := <-s.continueCh:
 			s.handleContinueSignal(msg)
 
+		case <-s.wakeCh:
+			// State transitions and queue producers use wakeCh to make this
+			// select rebuild state-gated channels such as inputCh.
+
 		case result := <-s.llmCh:
 			s.finishLLMRequest()
 			s.handleLLMResponse(result)

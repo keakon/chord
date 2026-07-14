@@ -1542,6 +1542,13 @@ func TestSendMessageToCompletedTaskRehydratesParkedWorker(t *testing.T) {
 	if len(record.ExpectedWriteScope.Files) != 1 || record.ExpectedWriteScope.Files[0] != "internal/agent/main_subagent_control.go" {
 		t.Fatalf("rehydrated write scope = %#v, want original file scope", record.ExpectedWriteScope)
 	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && !restored.hasActiveTurn() {
+		time.Sleep(time.Millisecond)
+	}
+	if !restored.hasActiveTurn() {
+		t.Fatal("rehydrated worker did not consume the delivered message and create a turn")
+	}
 }
 
 func TestConcurrentTaskRehydratePublishesOneRuntime(t *testing.T) {
@@ -1625,6 +1632,134 @@ func TestConcurrentTaskRehydratePublishesOneRuntime(t *testing.T) {
 	}
 	if live != 1 || len(a.sem) != 1 {
 		t.Fatalf("live runtimes = %d, semaphore slots = %d; want 1 and 1", live, len(a.sem))
+	}
+}
+
+func TestSubAgentWakeReevaluatesInputAfterRunningTransition(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-wake-transition")
+	sub.setState(SubAgentStateWaitingMain, "waiting")
+	go sub.runLoop()
+	t.Cleanup(sub.cancel)
+
+	// Give runLoop time to enter select with its state-gated input channel
+	// disabled, reproducing the rehydrate ordering that previously lost wakeups.
+	time.Sleep(20 * time.Millisecond)
+	sub.setState(SubAgentStateRunning, "resumed")
+	if !sub.InjectUserMessage("resume this task") {
+		t.Fatal("InjectUserMessage() rejected resumed input")
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		for _, msg := range sub.ctxMgr.Snapshot() {
+			if msg.Role == message.RoleUser && strings.Contains(msg.Content, "resume this task") {
+				return
+			}
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("resumed input remained queued after wake")
+}
+
+func TestSubAgentStartupWatchdogRetriesWakeThenReportsError(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-startup-watchdog")
+	sub.startupTimeout = 10 * time.Millisecond
+	if !sub.InjectUserMessage("queued without a running loop") {
+		t.Fatal("InjectUserMessage() rejected queued input")
+	}
+	sub.armStartupWatchdog()
+
+	select {
+	case evt := <-a.eventCh:
+		if evt.Type != EventAgentError || evt.SourceID != sub.instanceID {
+			t.Fatalf("watchdog event = %#v, want SubAgent agent_error", evt)
+		}
+		err, ok := evt.Payload.(error)
+		if !ok || !strings.Contains(err.Error(), "automatic wake retry") {
+			t.Fatalf("watchdog error = %#v, want automatic wake retry failure", evt.Payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("startup watchdog did not report stalled queued input")
+	}
+}
+
+func TestSubAgentTerminalErrorQueuesRiskAlertAndWakesMain(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-terminal-error")
+
+	a.handleAgentError(Event{Type: EventAgentError, SourceID: sub.instanceID, Payload: context.DeadlineExceeded})
+
+	select {
+	case evt := <-a.eventCh:
+		if evt.Type != EventSubAgentMailbox {
+			t.Fatalf("event = %#v, want SubAgent mailbox", evt)
+		}
+		msg, ok := evt.Payload.(*SubAgentMailboxMessage)
+		if !ok || msg.Kind != SubAgentMailboxKindRiskAlert || msg.Priority != SubAgentMailboxPriorityInterrupt {
+			t.Fatalf("mailbox = %#v, want interrupt risk alert", evt.Payload)
+		}
+		a.dispatch(evt)
+	case <-time.After(time.Second):
+		t.Fatal("terminal SubAgent error did not queue a mailbox")
+	}
+
+	if a.turn == nil {
+		t.Fatal("risk alert mailbox did not wake MainAgent")
+	}
+	if len(a.pendingSubAgentMailboxes) != 1 || a.pendingSubAgentMailboxes[0].Kind != SubAgentMailboxKindRiskAlert {
+		t.Fatalf("pending mailboxes = %#v, want one risk alert", a.pendingSubAgentMailboxes)
+	}
+	if rec := a.taskRecordByTaskID(sub.taskID); rec == nil || rec.State != string(SubAgentStateFailed) {
+		t.Fatalf("task record = %#v, want failed", rec)
+	}
+}
+
+func TestOwnerMailboxQueuesDurablyWhenOwnerParksDuringDelivery(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	owner := newControllableTestSubAgent(t, a, "adhoc-owner-park-mailbox")
+	owner.setState(SubAgentStateWaitingDescendant, "waiting for child")
+	a.releaseSubAgentSlot(owner)
+	a.syncTaskRecordFromSub(owner, "")
+
+	barrierReached := make(chan struct{})
+	releaseBarrier := make(chan struct{})
+	a.subAgentParkBarrierHook = func(sub *SubAgent) {
+		if sub == owner {
+			close(barrierReached)
+			<-releaseBarrier
+		}
+	}
+	parked := make(chan bool, 1)
+	go func() { parked <- a.parkSubAgent(owner.instanceID) }()
+	<-barrierReached
+
+	msg := SubAgentMailboxMessage{
+		MessageID:    "child-risk-1",
+		AgentID:      "child-1",
+		TaskID:       "adhoc-child-risk",
+		OwnerAgentID: owner.instanceID,
+		OwnerTaskID:  owner.taskID,
+		Kind:         SubAgentMailboxKindRiskAlert,
+		Priority:     SubAgentMailboxPriorityInterrupt,
+		Summary:      "child failed",
+		Payload:      "inspect child failure",
+	}
+	enqueued := make(chan struct{})
+	go func() {
+		a.enqueueSubAgentMailbox(msg)
+		close(enqueued)
+	}()
+	close(releaseBarrier)
+	if !<-parked {
+		t.Fatal("parkSubAgent() = false")
+	}
+	<-enqueued
+
+	queued := a.ownedSubAgentMailboxes[owner.instanceID]
+	if len(queued) != 1 || queued[0].MessageID != msg.MessageID {
+		t.Fatalf("durable owner mailbox queue = %#v, want retained risk alert", queued)
 	}
 }
 
@@ -1893,6 +2028,41 @@ func TestSubAgentPersistencePumpPreservesMessageOrder(t *testing.T) {
 	}
 	if len(msgs) != 3 || msgs[0].Content != "first" || msgs[1].Content != "second" || msgs[2].Content != "third" {
 		t.Fatalf("persisted messages = %#v, want enqueue order", msgs)
+	}
+}
+
+func TestSubAgentControlToolPersistenceKeepsResultAfterRestore(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-control-persist")
+	callID := "call-escalate-order"
+	sub.persistMessageAsync(message.Message{
+		Role: "assistant",
+		ToolCalls: []message.ToolCall{{
+			ID:   callID,
+			Name: tools.NameEscalate,
+			Args: []byte(`{"reason":"need owner input"}`),
+		}},
+	}, "assistant control call", nil)
+	sub.persistMessageAsync(message.Message{
+		Role:       "tool",
+		ToolCallID: callID,
+		Content:    "Escalation sent: need owner input",
+	}, "control tool result", nil)
+	a.flushPersist()
+
+	msgs, err := a.recovery.LoadMessages(sub.instanceID)
+	if err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
+	if len(msgs) != 2 || msgs[0].Role != message.RoleAssistant || msgs[1].Role != message.RoleTool {
+		t.Fatalf("persisted control messages = %#v, want assistant then tool", msgs)
+	}
+
+	restored := newControllableTestSubAgent(t, a, "adhoc-control-restore")
+	restored.RestoreMessages(msgs)
+	got := restored.GetMessages()
+	if len(got) != 2 || got[1].ToolCallID != callID {
+		t.Fatalf("restored control messages = %#v, want settled tool result retained", got)
 	}
 }
 

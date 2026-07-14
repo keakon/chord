@@ -98,6 +98,7 @@ type SubAgent struct {
 	llmMu              sync.RWMutex
 	llmClient          *llm.Client
 	llmRequestInFlight atomic.Bool
+	startupWatchdogSeq atomic.Uint64
 	lifecycleMu        sync.Mutex      // coordinates parking with external wake-and-deliver operations
 	ctxMgr             *ctxmgr.Manager // own context; automatic compaction disabled
 	tools              *tools.Registry // shared base + SubAgent-specific tools
@@ -118,6 +119,7 @@ type SubAgent struct {
 	llmCh             chan *llmResult         // cap=1, LLM responses
 	toolCh            chan *toolResult        // cap=8, tool results
 	continueCh        chan continueMsg        // cap=1; signals ContinueFromContext/cancel
+	wakeCh            chan struct{}           // cap=1; forces the loop to re-evaluate state-gated channels
 	inputQueueMu      sync.Mutex
 	inputOverflow     []pendingUserMessage
 	ctxAppendQueueMu  sync.Mutex
@@ -127,8 +129,9 @@ type SubAgent struct {
 
 	// Idle timeout: starts when LLM returns pure text (no tool_calls).
 	// MainAgent auto-intervenes on timeout.
-	idleTimer   *time.Timer
-	idleTimeout time.Duration // default 120s
+	idleTimer      *time.Timer
+	idleTimeout    time.Duration // default 120s
+	startupTimeout time.Duration
 
 	// pendingComplete is set when Complete appears alongside other tool
 	// calls in one LLM response. The other tools execute first; EventAgentDone
@@ -208,41 +211,47 @@ const maxIdleNudges = 3
 // idle after receiving a pure-text LLM response.
 const DefaultIdleTimeout = 120 * time.Second
 
+// DefaultSubAgentStartupTimeout bounds how long a running worker may retain
+// queued input without creating a turn. It catches lost wakeups before the
+// normal post-response idle watchdog can exist.
+const DefaultSubAgentStartupTimeout = 15 * time.Second
+
 // ---------------------------------------------------------------------------
 // Constructor
 // ---------------------------------------------------------------------------
 
 // SubAgentConfig holds the parameters for creating a new SubAgent.
 type SubAgentConfig struct {
-	InstanceID    string
-	TaskID        string
-	AgentDefName  string
-	TaskDesc      string
-	PlanTaskRef   string
-	SemanticKey   string
-	WriteScope    tools.WriteScope
-	OwnerAgentID  string
-	OwnerTaskID   string
-	Depth         int
-	JoinToOwner   bool
-	Delegation    config.DelegationConfig
-	Color         string
-	SystemPrompt  string // custom role instructions from agent YAML body; empty = use built-in
-	LLMClient     *llm.Client
-	Recovery      *recovery.RecoveryManager
-	Parent        *MainAgent
-	ParentCtx     context.Context
-	Cancel        context.CancelFunc
-	BaseTools     *tools.Registry // shared base tool registry (Read, Write, Edit, Shell, Grep, Glob, etc.)
-	ExtraMCPTools []tools.Tool    // agent-specific MCP tools
-	Ruleset       permission.Ruleset
-	WorkDir       string
-	VenvPath      string // absolute path to detected Python virtual environment, or ""
-	SessionDir    string
-	AgentsMD      string
-	Skills        []*skill.Meta
-	ModelName     string
-	IdleTimeout   time.Duration // 0 → DefaultIdleTimeout
+	InstanceID     string
+	TaskID         string
+	AgentDefName   string
+	TaskDesc       string
+	PlanTaskRef    string
+	SemanticKey    string
+	WriteScope     tools.WriteScope
+	OwnerAgentID   string
+	OwnerTaskID    string
+	Depth          int
+	JoinToOwner    bool
+	Delegation     config.DelegationConfig
+	Color          string
+	SystemPrompt   string // custom role instructions from agent YAML body; empty = use built-in
+	LLMClient      *llm.Client
+	Recovery       *recovery.RecoveryManager
+	Parent         *MainAgent
+	ParentCtx      context.Context
+	Cancel         context.CancelFunc
+	BaseTools      *tools.Registry // shared base tool registry (Read, Write, Edit, Shell, Grep, Glob, etc.)
+	ExtraMCPTools  []tools.Tool    // agent-specific MCP tools
+	Ruleset        permission.Ruleset
+	WorkDir        string
+	VenvPath       string // absolute path to detected Python virtual environment, or ""
+	SessionDir     string
+	AgentsMD       string
+	Skills         []*skill.Meta
+	ModelName      string
+	IdleTimeout    time.Duration // 0 → DefaultIdleTimeout
+	StartupTimeout time.Duration // 0 → DefaultSubAgentStartupTimeout
 }
 
 // NewSubAgent creates a fully-initialised SubAgent. The caller must invoke
@@ -250,6 +259,9 @@ type SubAgentConfig struct {
 func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	if cfg.IdleTimeout <= 0 {
 		cfg.IdleTimeout = DefaultIdleTimeout
+	}
+	if cfg.StartupTimeout <= 0 {
+		cfg.StartupTimeout = DefaultSubAgentStartupTimeout
 	}
 
 	// Build SubAgent's tool registry: clone base tools, then replace
@@ -369,11 +381,13 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		modelName:       cfg.ModelName,
 		customPrompt:    cfg.SystemPrompt,
 		idleTimeout:     cfg.IdleTimeout,
+		startupTimeout:  cfg.StartupTimeout,
 		inputCh:         make(chan pendingUserMessage, inputChanCap),
 		ctxAppendCh:     make(chan message.Message, 16),
 		llmCh:           make(chan *llmResult, 1),
 		toolCh:          make(chan *toolResult, 8),
 		continueCh:      make(chan continueMsg, 1),
+		wakeCh:          make(chan struct{}, 1),
 	}
 	s.runtimeState.set(SubAgentStateRunning, "")
 	if hasSkillTool && !cfg.Ruleset.IsDisabled(tools.NameSkill) {

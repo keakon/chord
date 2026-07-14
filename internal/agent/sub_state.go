@@ -124,6 +124,9 @@ func (s *SubAgent) StateChangedAt() time.Time {
 
 func (s *SubAgent) setState(state SubAgentState, summary string) {
 	s.runtimeState.set(state, summary)
+	if state == SubAgentStateRunning {
+		s.signalWake()
+	}
 }
 
 func (s *SubAgent) setLastMailboxID(id string) {

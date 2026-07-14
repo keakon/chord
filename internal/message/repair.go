@@ -1,5 +1,60 @@
 package message
 
+func assistantDeclaresToolCall(msg Message, callID string) bool {
+	if msg.Role != RoleAssistant || callID == "" {
+		return false
+	}
+	for _, tc := range msg.ToolCalls {
+		if tc.ID == callID {
+			return true
+		}
+	}
+	return false
+}
+
+// repairAdjacentOutOfOrderToolResults fixes the durable-write race produced by
+// older runtimes: one or more tool results could be appended immediately before
+// the assistant message that declared them. Only a contiguous block where every
+// result is uniquely justified by that following assistant is moved.
+func repairAdjacentOutOfOrderToolResults(msgs []Message) []Message {
+	if len(msgs) < 2 {
+		return msgs
+	}
+	out := make([]Message, 0, len(msgs))
+	for i := 0; i < len(msgs); {
+		if msgs[i].Role != RoleTool {
+			out = append(out, msgs[i])
+			i++
+			continue
+		}
+		end := i
+		for end < len(msgs) && msgs[end].Role == RoleTool {
+			end++
+		}
+		if end >= len(msgs) || msgs[end].Role != RoleAssistant {
+			out = append(out, msgs[i:end]...)
+			i = end
+			continue
+		}
+		canMove := true
+		for j := i; j < end; j++ {
+			if toolMessageSupportedByHistory(msgs, j) || !assistantDeclaresToolCall(msgs[end], msgs[j].ToolCallID) {
+				canMove = false
+				break
+			}
+		}
+		if !canMove {
+			out = append(out, msgs[i:end]...)
+			i = end
+			continue
+		}
+		out = append(out, msgs[end])
+		out = append(out, msgs[i:end]...)
+		i = end + 1
+	}
+	return out
+}
+
 // toolMessageSupportedByHistory reports whether msgs[i] is a tool message whose
 // ToolCallID appears in the nearest preceding assistant message that declares
 // tool_calls. Used to strip orphan tool results that would break strict APIs
@@ -33,6 +88,7 @@ func RepairOrphanToolResults(msgs []Message) ([]Message, int) {
 	if len(msgs) == 0 {
 		return msgs, 0
 	}
+	msgs = repairAdjacentOutOfOrderToolResults(msgs)
 	out := make([]Message, 0, len(msgs))
 	removed := 0
 	for i := range msgs {

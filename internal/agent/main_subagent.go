@@ -627,7 +627,11 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	})
 	a.emitToTUI(AgentStatusEvent{AgentID: instanceID, Status: "running", Message: fmt.Sprintf("Started task %s: %s", taskID, truncateString(description, 80))})
 	go sub.runLoop()
-	sub.InjectUserMessage(description)
+	if !sub.InjectUserMessage(description) {
+		a.closeSubAgent(sub.instanceID)
+		return tools.TaskHandle{}, fmt.Errorf("SubAgent %s rejected its initial task", sub.instanceID)
+	}
+	sub.armStartupWatchdog()
 	return tools.TaskHandle{
 		Status:             "started",
 		TaskID:             taskID,

@@ -64,6 +64,8 @@ These tools control agent workflows rather than local side effects. YOLO mode do
 | `escalate` | SubAgent-side: request parent-agent intervention without ending the task. |
 | `notify` | Send a non-blocking update to the owner or a specific delegated worker. |
 
+SubAgent failures are not converted into `complete`. After provider/model retries are exhausted, or when a resumed worker cannot start, Chord closes that runtime as failed, records a `risk_alert`, and wakes its owner/MainAgent. A rehydrated runtime may receive a new `agent_id`; coordination should continue through the stable delegated `task_id`.
+
 ## MCP tools
 
 Tools exposed by configured MCP servers are registered as `mcp_<server>_<tool>` (for example `mcp_search_web_search_exa`) and can be referenced in permission rules by that full name. Use `allowed_tools` in the MCP server config to limit which remote tools are registered at all; see [Configuration — MCP](./configuration.md#mcp).

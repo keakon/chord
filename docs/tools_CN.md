@@ -64,6 +64,8 @@
 | `escalate` | SubAgent 侧：请求父 agent 介入，但不结束自己的任务。 |
 | `notify` | 向 owner 或指定的被委派 worker 发送非阻塞通知。 |
 
+SubAgent 失败不会被转换成 `complete`。当 provider / 模型重试耗尽，或恢复后的 worker 无法启动时，Chord 会以 failed 终态关闭该 runtime、记录 `risk_alert`，并唤醒 owner/MainAgent。Rehydrate 后的 runtime 可能获得新的 `agent_id`；后续协调应使用稳定的委派 `task_id`。
+
 ## MCP 工具
 
 已配置 MCP server 暴露的工具会以 `mcp_<server>_<tool>` 形式注册（例如 `mcp_search_web_search_exa`），权限规则按这个完整名称匹配。用 MCP server 配置里的 `allowed_tools` 可以限制注册哪些远程工具，见[配置 — MCP](./configuration_CN.md#mcp)。

@@ -179,6 +179,24 @@ If `--continue` or `--resume` does not appear to work as expected:
 
 Chord automatically repairs incomplete turns caused by an interrupted process before resuming. If restored model/provider state or conversation order looks wrong, export a diagnostics bundle from a current build and include the session ID.
 
+## A delegated SubAgent appears stuck or an `escalate` card keeps running
+
+Current builds automatically recover two failure modes that older sessions could expose:
+
+- When a parked SubAgent is rehydrated, queued input explicitly wakes its event loop. A startup watchdog retries that wake once if the worker stays `running` without creating a turn.
+- If the worker still cannot start, or its provider/model retries end in a terminal error, Chord marks the task failed, records a `risk_alert`, and wakes the owner/MainAgent to retry, reassign, or report the blocker. It does not fabricate a successful `complete` result.
+
+An `escalate` request is a local coordination event, not a long-running network operation. Older runtimes could persist its tool result immediately before the assistant tool call, making a completed card look pending after resume. Current builds repair this narrowly when the adjacent messages have the same `tool_call_id`; unmatched orphan results are still discarded.
+
+If a session created by an older build is already stuck:
+
+1. rebuild or install the current Chord version and restart with `--resume <session-id>`;
+2. use the stable `task_id`, not the previous runtime `agent_id`, when retrying or targeting the delegated task;
+3. do not manually edit `agents/*.jsonl`, `subagents/tasks.json`, or mailbox files;
+4. with `log_level: debug`, inspect `chord.log` for `startup watchdog retrying wake`, `SubAgent failed`, or `removed orphan tool messages`.
+
+The normal post-response watchdog may ask a live worker to call `complete` or `escalate`. A worker that cannot recover is instead closed as failed and routed back to its owner; failure is never treated as successful completion.
+
 ## TUI cards show strange colors or broken layout when viewing logs / dumps / shell output
 
 If a tool card, local shell result, question dialog, or confirmation summary shows unexpected colors, background leaks, or broken wrapping while viewing diagnostic dumps or raw command output:

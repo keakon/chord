@@ -87,6 +87,9 @@ type Turn struct {
 	// callback runs on a separate goroutine from the event loop.
 	partialTextMu sync.Mutex
 	partialText   strings.Builder
+	// SubAgent terminal recovery is intentionally bounded to one additional
+	// request so transport failures or text-only replies cannot spin forever.
+	SubAgentTerminalRecoveryCount int
 	// MalformedCount tracks consecutive LLM rounds where tool calls had
 	// abnormal arguments — either the malformed sentinel (invalid JSON) or
 	// empty "{}" for tools with required parameters (output truncation).
@@ -1784,15 +1787,32 @@ func (a *MainAgent) handleAgentError(evt Event) {
 
 	sub2 := a.subAgentByID(evt.SourceID)
 	if sub2 != nil {
+		errorKind := classifyAgentError(err)
+		failureSummary := fmt.Sprintf("SubAgent failed (%s): %s", errorKind, err.Error())
 		a.handleSubAgentStateChangedEvent(Event{
 			Type:     EventSubAgentStateChanged,
 			SourceID: evt.SourceID,
-			Payload:  &SubAgentStateChangedPayload{State: SubAgentStateFailed, Summary: err.Error()},
+			Payload:  &SubAgentStateChangedPayload{State: SubAgentStateFailed, Summary: failureSummary},
 		})
 		if sub2.semHeld {
 			a.releaseSubAgentSlot(sub2)
 		}
 		a.emitActivity(evt.SourceID, ActivityIdle, "")
+		a.sendEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
+			AgentID:      evt.SourceID,
+			TaskID:       sub2.taskID,
+			OwnerAgentID: sub2.ownerAgentID,
+			OwnerTaskID:  sub2.ownerTaskID,
+			InReplyTo:    firstReplyMessageID(sub2),
+			Kind:         SubAgentMailboxKindRiskAlert,
+			Priority:     SubAgentMailboxPriorityInterrupt,
+			Summary:      failureSummary,
+			Payload: fmt.Sprintf(
+				"SubAgent task terminated without completion.\n- task_id: %s\n- agent_id: %s\n- error_kind: %s\n- error: %s\n- required_action: inspect the failure and retry, reassign, or report the blocker; do not treat the task as completed.",
+				sub2.taskID, evt.SourceID, errorKind, err.Error(),
+			),
+			RequiresAck: false,
+		}})
 		a.handleSubAgentCloseRequestedEvent(Event{
 			Type:     EventSubAgentCloseRequested,
 			SourceID: evt.SourceID,
@@ -1805,8 +1825,6 @@ func (a *MainAgent) handleAgentError(evt Event) {
 	}
 
 	a.emitToTUI(ErrorEvent{Err: fmt.Errorf("SubAgent %s error: %w", evt.SourceID, err)})
-	a.stopLoopAsBlocked(err.Error())
-	a.setIdleAndDrainPending()
 }
 
 // ---------------------------------------------------------------------------

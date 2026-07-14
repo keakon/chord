@@ -436,6 +436,36 @@ func TestRestoreMessagesDropsOrphanToolResults(t *testing.T) {
 	}
 }
 
+func TestRestoreMessagesRepairsAdjacentOutOfOrderToolResult(t *testing.T) {
+	m := NewManager(1000, 0)
+	m.RestoreMessages([]message.Message{
+		{Role: "user", Content: "task"},
+		{Role: "tool", ToolCallID: "esc-1", Content: "Escalation sent"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "esc-1", Name: "escalate", Args: json.RawMessage(`{"reason":"blocked"}`)}}},
+	})
+
+	snap := m.Snapshot()
+	if len(snap) != 3 {
+		t.Fatalf("len(snap) = %d, want 3", len(snap))
+	}
+	if snap[1].Role != message.RoleAssistant || snap[2].Role != message.RoleTool || snap[2].ToolCallID != "esc-1" {
+		t.Fatalf("repaired messages = %#v, want user, assistant call, tool result", snap)
+	}
+}
+
+func TestRestoreMessagesDoesNotReorderUnmatchedFutureToolResult(t *testing.T) {
+	m := NewManager(1000, 0)
+	m.RestoreMessages([]message.Message{
+		{Role: "tool", ToolCallID: "ghost", Content: "orphan"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "other", Name: "read", Args: json.RawMessage(`{}`)}}},
+	})
+
+	snap := m.Snapshot()
+	if len(snap) != 1 || snap[0].Role != message.RoleAssistant {
+		t.Fatalf("repaired messages = %#v, want unmatched orphan dropped", snap)
+	}
+}
+
 func TestRestoreMessagesClearsTrackedTokensWhenRepairEmptiesHistory(t *testing.T) {
 	m := NewManager(1000, 0)
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 123, CacheWriteTokens: 11})

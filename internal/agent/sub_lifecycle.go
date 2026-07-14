@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/keakon/golog/log"
 
@@ -105,17 +107,75 @@ func (s *SubAgent) enqueueUserMessage(input pendingUserMessage) bool {
 	defer s.inputQueueMu.Unlock()
 	if len(s.inputOverflow) > 0 {
 		s.inputOverflow = append(s.inputOverflow, input)
+		s.signalWake()
 		return true
 	}
 	select {
 	case s.inputCh <- input:
+		s.signalWake()
 		return true
 	case <-s.parentCtx.Done():
 		return false
 	default:
 		s.inputOverflow = append(s.inputOverflow, input)
+		s.signalWake()
 		return true
 	}
+}
+
+func (s *SubAgent) signalWake() {
+	if s == nil || s.wakeCh == nil {
+		return
+	}
+	select {
+	case s.wakeCh <- struct{}{}:
+	default:
+	}
+}
+
+func (s *SubAgent) armStartupWatchdog() {
+	if s == nil || s.startupTimeout <= 0 {
+		return
+	}
+	seq := s.startupWatchdogSeq.Add(1)
+	time.AfterFunc(s.startupTimeout, func() { s.checkStartupWatchdog(seq, false) })
+}
+
+func (s *SubAgent) checkStartupWatchdog(seq uint64, wakeRetried bool) {
+	if s.parentCtx.Err() != nil || s.startupWatchdogSeq.Load() != seq || s.State() != SubAgentStateRunning {
+		return
+	}
+	if s.hasActiveTurn() || s.llmRequestInFlight.Load() || !s.hasPendingUserInput() {
+		return
+	}
+	if !wakeRetried {
+		log.Warnf("SubAgent startup watchdog retrying wake agent=%v timeout=%v", s.instanceID, s.startupTimeout)
+		s.signalWake()
+		time.AfterFunc(s.startupTimeout, func() { s.checkStartupWatchdog(seq, true) })
+		return
+	}
+	s.sendEvent(Event{
+		Type:    EventAgentError,
+		Payload: fmt.Errorf("SubAgent startup stalled after automatic wake retry: queued input was not consumed within %s", 2*s.startupTimeout),
+	})
+}
+
+func (s *SubAgent) hasActiveTurn() bool {
+	if s == nil {
+		return false
+	}
+	s.turnMu.Lock()
+	defer s.turnMu.Unlock()
+	return s.turn != nil
+}
+
+func (s *SubAgent) hasPendingUserInput() bool {
+	if s == nil {
+		return false
+	}
+	s.inputQueueMu.Lock()
+	defer s.inputQueueMu.Unlock()
+	return len(s.inputCh) > 0 || len(s.inputOverflow) > 0
 }
 
 // drainPendingToolFailureSets clears speculative stream tools and execution
@@ -150,6 +210,9 @@ func (s *SubAgent) persistInterruptedToolResults(calls []PendingToolCall, status
 			log.Warnf("SubAgent: skipping synthetic tool persistence for call_ids absent from assistant history agent=%v dropped=%v", s.instanceID, dropped)
 		},
 		func(toolMsg message.Message) bool {
+			if s.parent != nil {
+				return s.parent.persistAsyncAfter(s.instanceID, toolMsg, nil)
+			}
 			if s.recovery != nil {
 				if err := s.recovery.PersistMessage(s.instanceID, toolMsg); err != nil {
 					log.Warnf("SubAgent: failed to persist interrupted tool result agent=%v call_id=%v error=%v", s.instanceID, toolMsg.ToolCallID, err)
