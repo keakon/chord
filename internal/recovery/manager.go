@@ -111,6 +111,8 @@ type AgentSnapshot struct {
 	PlanTaskRef             string           `json:"plan_task_ref,omitempty"`
 	SemanticTaskKey         string           `json:"semantic_task_key,omitempty"`
 	ExpectedWriteScope      tools.WriteScope `json:"expected_write_scope"`
+	SelectedModelRef        string           `json:"selected_model_ref,omitempty"`
+	RunningModelRef         string           `json:"running_model_ref,omitempty"`
 	OwnerAgentID            string           `json:"owner_agent_id,omitempty"`
 	OwnerTaskID             string           `json:"owner_task_id,omitempty"`
 	Depth                   int              `json:"depth,omitempty"`

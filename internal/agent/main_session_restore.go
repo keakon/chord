@@ -56,6 +56,8 @@ type loadedSubAgentState struct {
 	PlanTaskRef             string
 	SemanticTaskKey         string
 	ExpectedWriteScope      tools.WriteScope
+	SelectedModelRef        string
+	RunningModelRef         string
 	OwnerAgentID            string
 	OwnerTaskID             string
 	Depth                   int
@@ -102,6 +104,10 @@ func (b *restoredSubAgentBuilder) seedFromSnapshot(snap recovery.AgentSnapshot) 
 	if b.state.ExpectedWriteScope.Empty() {
 		b.state.ExpectedWriteScope = snap.ExpectedWriteScope.Normalized()
 	}
+	if b.state.SelectedModelRef == "" {
+		b.state.SelectedModelRef = strings.TrimSpace(snap.SelectedModelRef)
+	}
+	b.state.RunningModelRef = strings.TrimSpace(snap.RunningModelRef)
 	b.state.State = normalizeSubAgentState(SubAgentState(strings.TrimSpace(snap.State)))
 	b.state.LastSummary = strings.TrimSpace(snap.LastSummary)
 	b.state.OwnerAgentID = strings.TrimSpace(snap.OwnerAgentID)
@@ -138,6 +144,12 @@ func (b *restoredSubAgentBuilder) overlayMeta(meta *subAgentMeta) {
 	}
 	if b.state.ExpectedWriteScope.Empty() {
 		b.state.ExpectedWriteScope = meta.ExpectedWriteScope.Normalized()
+	}
+	if b.state.SelectedModelRef == "" {
+		b.state.SelectedModelRef = strings.TrimSpace(meta.SelectedModelRef)
+	}
+	if b.state.RunningModelRef == "" {
+		b.state.RunningModelRef = strings.TrimSpace(meta.RunningModelRef)
 	}
 	if b.state.State == "" {
 		b.state.State = normalizeSubAgentState(SubAgentState(strings.TrimSpace(meta.State)))
@@ -396,6 +408,22 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 		log.Warnf("failed to load durable task registry session=%v error=%v", sessionPath, taskErr)
 	} else {
 		loaded.TaskRecords = taskRecords
+	}
+	if modelRefs, modelErr := analytics.LoadLatestAgentModelRefs(sessionPath); modelErr != nil {
+		log.Warnf("failed to load subagent model refs from usage ledger session=%v error=%v", sessionPath, modelErr)
+	} else {
+		for _, rec := range loaded.TaskRecords {
+			if rec == nil {
+				continue
+			}
+			refs := modelRefs[strings.TrimSpace(rec.LatestInstanceID)]
+			if rec.SelectedModelRef == "" {
+				rec.SelectedModelRef = refs.Selected
+			}
+			if rec.RunningModelRef == "" {
+				rec.RunningModelRef = refs.Running
+			}
+		}
 	}
 
 	snapshotDuration, subAgentRestoreDuration = a.applySessionSnapshot(loaded, sessionPath, tmpRecovery)

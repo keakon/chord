@@ -807,6 +807,55 @@ type focusedAgentSnapshot struct {
 	parked bool
 }
 
+func (a *MainAgent) focusedConversationTarget() ConversationTarget {
+	if sub := a.validFocusedSubAgent(); sub != nil {
+		return ConversationTarget{AgentID: sub.instanceID, TaskID: sub.taskID}
+	}
+	if rec := a.focusedDurableTask(); rec != nil {
+		return ConversationTarget{AgentID: rec.LatestInstanceID, TaskID: rec.TaskID}
+	}
+	return ConversationTarget{AgentID: identity.MainAgentID}
+}
+
+func (a *MainAgent) resolveConversationTarget(target ConversationTarget) (focusedAgentSnapshot, bool) {
+	agentID := strings.TrimSpace(target.AgentID)
+	taskID := strings.TrimSpace(target.TaskID)
+	if taskID == "" && (agentID == "" || agentID == identity.MainAgentID) {
+		return focusedAgentSnapshot{}, true
+	}
+
+	var rec *DurableTaskRecord
+	if taskID != "" {
+		if agentID != "" && agentID != identity.MainAgentID {
+			if sub := a.subAgentByID(agentID); sub != nil {
+				if strings.TrimSpace(sub.taskID) != taskID {
+					return focusedAgentSnapshot{}, false
+				}
+				return focusedAgentSnapshot{sub: sub, task: a.taskRecordByTaskID(taskID)}, true
+			}
+		}
+		rec = a.taskRecordByTaskID(taskID)
+		if rec == nil || (agentID != "" && agentID != identity.MainAgentID && !durableTaskRecordIncludesInstance(rec, agentID)) {
+			return focusedAgentSnapshot{}, false
+		}
+	} else {
+		if sub := a.subAgentByID(agentID); sub != nil {
+			return focusedAgentSnapshot{sub: sub, task: a.taskRecordByTaskID(sub.taskID)}, true
+		}
+		rec = a.taskRecordByInstanceID(agentID)
+		if rec == nil {
+			return focusedAgentSnapshot{}, false
+		}
+	}
+	if sub := a.subAgentByTaskID(rec.TaskID); sub != nil {
+		return focusedAgentSnapshot{sub: sub, task: rec}, true
+	}
+	if rec.RuntimeParked {
+		return focusedAgentSnapshot{task: rec, parked: true}, true
+	}
+	return focusedAgentSnapshot{}, false
+}
+
 func (a *MainAgent) focusedAgentSnapshot() focusedAgentSnapshot {
 	if sub := a.validFocusedSubAgent(); sub != nil {
 		return focusedAgentSnapshot{sub: sub, task: a.taskRecordByTaskID(sub.taskID)}

@@ -123,6 +123,9 @@ func (m *Model) maybeShowBackgroundCompletionTitle(agentID string, prev agent.Ac
 	if normalizeTitleAgentID(agentID) != m.focusedAgentIDOrMain() {
 		return
 	}
+	if m.hasActiveAgentActivity() {
+		return
+	}
 	m.terminalTitleBackgroundCompletedAgentID = normalizeTitleAgentID(agentID)
 	_ = m.syncTerminalTitleState()
 }
@@ -145,11 +148,11 @@ func (m *Model) deriveTerminalTitleState() terminalTitleDesiredState {
 		}
 		return state
 	}
-	if m.terminalTitleBackgroundCompletedAgentID != "" {
-		return terminalTitleDesiredState{mode: terminalTitleModeCompletion}
-	}
 	if m.hasActiveAnimation() {
 		return terminalTitleDesiredState{mode: terminalTitleModeSpinner, tickerDelay: m.currentCadence().titleTickerDelay}
+	}
+	if m.terminalTitleBackgroundCompletedAgentID != "" {
+		return terminalTitleDesiredState{mode: terminalTitleModeCompletion}
 	}
 	return terminalTitleDesiredState{mode: terminalTitleModeStatic}
 }

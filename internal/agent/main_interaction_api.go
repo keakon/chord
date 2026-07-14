@@ -103,11 +103,14 @@ func (a *MainAgent) GetSubAgents() []SubAgentInfo {
 		if len(rec.LastArtifactRefs) > 0 {
 			artifact = tools.NormalizeArtifactRef(rec.LastArtifactRefs[0])
 		}
+		selectedRef := a.restoredSubAgentModelRef(rec)
 		infos = append(infos, SubAgentInfo{
 			InstanceID:       rec.LatestInstanceID,
 			TaskID:           taskID,
 			AgentDefName:     rec.AgentDefName,
 			TaskDesc:         rec.TaskDesc,
+			SelectedRef:      selectedRef,
+			RunningRef:       restoredRunningModelRef(rec, selectedRef),
 			State:            rec.State,
 			LastSummary:      rec.LastSummary,
 			UrgentInboxCount: a.subAgentUrgentInboxCountLocked(rec.LatestInstanceID),
@@ -116,6 +119,31 @@ func (a *MainAgent) GetSubAgents() []SubAgentInfo {
 	}
 	a.subs.mu.RUnlock()
 	return infos
+}
+
+func (a *MainAgent) restoredSubAgentModelRef(rec *DurableTaskRecord) string {
+	if rec == nil {
+		return ""
+	}
+	if ref := strings.TrimSpace(rec.SelectedModelRef); ref != "" {
+		return ref
+	}
+	a.stateMu.RLock()
+	cfg := a.agentConfigs[strings.TrimSpace(rec.AgentDefName)]
+	a.stateMu.RUnlock()
+	if ref := a.defaultRoleModelRef(cfg); ref != "" {
+		return ref
+	}
+	return strings.TrimSpace(a.ProviderModelRef())
+}
+
+func restoredRunningModelRef(rec *DurableTaskRecord, selected string) string {
+	if rec != nil {
+		if ref := strings.TrimSpace(rec.RunningModelRef); ref != "" {
+			return ref
+		}
+	}
+	return strings.TrimSpace(selected)
 }
 
 func (a *MainAgent) subAgentUrgentInboxCountLocked(agentID string) int {
@@ -127,7 +155,15 @@ func (a *MainAgent) subAgentUrgentInboxCountLocked(agentID string) int {
 // GetMessages returns a thread-safe snapshot of the focused agent's conversation
 // history. Routes to the focused SubAgent if one is active.
 func (a *MainAgent) GetMessages() []message.Message {
-	target := a.focusedAgentSnapshot()
+	return a.GetMessagesForTarget(a.focusedConversationTarget())
+}
+
+// GetMessagesForTarget returns a snapshot for a previously captured target.
+func (a *MainAgent) GetMessagesForTarget(conversation ConversationTarget) []message.Message {
+	target, ok := a.resolveConversationTarget(conversation)
+	if !ok {
+		return nil
+	}
 	if target.sub != nil {
 		return target.sub.GetMessages()
 	}
@@ -145,7 +181,17 @@ func (a *MainAgent) GetMessages() []message.Message {
 // ContinueFromContext re-runs the LLM with the existing context without
 // appending a new user message. Routes to the focused SubAgent if active.
 func (a *MainAgent) ContinueFromContext() {
-	if sub := a.validFocusedSubAgent(); sub != nil {
+	a.ContinueFromContextForTarget(a.focusedConversationTarget())
+}
+
+// ContinueFromContextForTarget re-runs the LLM for a captured conversation.
+func (a *MainAgent) ContinueFromContextForTarget(conversation ConversationTarget) {
+	target, ok := a.resolveConversationTarget(conversation)
+	if !ok {
+		a.emitToTUI(ToastEvent{Message: "Conversation is no longer available; retry the action", Level: "warn", AgentID: conversation.AgentID})
+		return
+	}
+	if sub := target.sub; sub != nil {
 		state := sub.State()
 		restartStoppedTurn := state != SubAgentStateRunning
 		switch state {
@@ -164,7 +210,7 @@ func (a *MainAgent) ContinueFromContext() {
 		sub.continueWithContextAppends(a.drainOwnedSubAgentMailboxes(sub.instanceID), restartStoppedTurn)
 		return
 	}
-	if rec := a.focusedDurableTask(); rec != nil && rec.RuntimeParked {
+	if rec := target.task; target.parked && rec != nil {
 		sub, _, err := a.rehydrateTask(rec)
 		if err != nil {
 			a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: rec.LatestInstanceID})
@@ -185,7 +231,15 @@ func (a *MainAgent) ContinueFromContext() {
 // persistence log. Routes to the focused SubAgent if active.
 // Only valid when the agent is idle.
 func (a *MainAgent) RemoveLastMessage() {
-	target := a.focusedAgentSnapshot()
+	a.RemoveLastMessageForTarget(a.focusedConversationTarget())
+}
+
+// RemoveLastMessageForTarget removes the last message from a captured target.
+func (a *MainAgent) RemoveLastMessageForTarget(conversation ConversationTarget) {
+	target, ok := a.resolveConversationTarget(conversation)
+	if !ok {
+		return
+	}
 	if target.sub != nil {
 		target.sub.RemoveLastMessage()
 		return

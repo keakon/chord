@@ -61,6 +61,7 @@ func (m *Model) rebuildFocusedViewport(agentID, viewportFilter string) {
 	assignFocusedViewportBlockIDs(blocks, agentID, &m.nextBlockID)
 	blocks = mergeFocusedViewportLiveBlocks(blocks, currentBlocks, agentID, &m.nextBlockID)
 	m.setTranscriptDisplaySequences(blocks, agentID)
+	blocks = m.maybeWindowStartupTranscript("focus_switch", blocks)
 	m.viewport.SetFilter(viewportFilter)
 	m.viewport.SetWorkingDir(m.workingDir)
 	m.viewport.ReplaceBlocks(blocks)

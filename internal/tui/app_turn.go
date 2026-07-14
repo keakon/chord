@@ -11,6 +11,19 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+type focusedContinueAction uint8
+
+const (
+	focusedContinueFromContext focusedContinueAction = iota + 1
+	focusedContinueAfterRemovingLast
+	focusedContinueWithDraft
+)
+
+type focusedContinueActionMsg struct {
+	action focusedContinueAction
+	target agent.ConversationTarget
+}
+
 func (m *Model) finalizeAssistantBlock() {
 	if m.currentThinkingBlock != nil {
 		m.currentThinkingBlock.finishStreamingContent()
@@ -154,7 +167,7 @@ func (m *Model) revealTrailingInterruptedTurnUserMessage() bool {
 	return false
 }
 
-func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
+func (m *Model) stageDraft(draft queuedDraft) tea.Cmd {
 	_, imageCount := queuedDraftTextAndImageCount(draft)
 	msgIndex := -1
 	if m.focusedAgentID == "" && m.agent != nil {
@@ -195,6 +208,12 @@ func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
 		}
 		m.setTerminalTitleFromMessage(content)
 	}
+	m.syncVisibleMainUserBlockMsgIndexes()
+	return m.imageProtocolCmd()
+}
+
+func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
+	cmd := m.stageDraft(draft)
 	if m.agent != nil {
 		if len(draft.Parts) > 0 {
 			m.agent.SendUserMessageWithParts(draft.Parts)
@@ -202,8 +221,7 @@ func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
 			m.agent.SendUserMessage(draft.Content)
 		}
 	}
-	m.syncVisibleMainUserBlockMsgIndexes()
-	return m.imageProtocolCmd()
+	return cmd
 }
 
 func (m *Model) drainQueuedDrafts() tea.Cmd {
@@ -322,34 +340,69 @@ func (m *Model) tryContinue() tea.Cmd {
 	if m.agent == nil || m.continueBlocked() {
 		return nil
 	}
-	msgs := m.agent.GetMessages()
+	backend := m.agent
+	focusedAgentID := m.focusedAgentID
+	if m.focusedAgentIDOrMain() != "main" {
+		target := m.focusedConversationTarget(focusedAgentID)
+		targeted, hasTargeted := backend.(agent.TargetedConversationController)
+		return tea.Batch(m.startActiveAnimation(), func() tea.Msg {
+			msgs := backend.GetMessages()
+			if hasTargeted {
+				msgs = targeted.GetMessagesForTarget(target)
+			}
+			if len(msgs) == 0 {
+				return nil
+			}
+			last := msgs[len(msgs)-1]
+			switch last.Role {
+			case message.RoleUser, message.RoleTool:
+				return focusedContinueActionMsg{action: focusedContinueFromContext, target: target}
+			case message.RoleAssistant:
+				if len(last.ToolCalls) > 0 {
+					return focusedContinueActionMsg{action: focusedContinueFromContext, target: target}
+				} else if len(last.ThinkingBlocks) > 0 && strings.TrimSpace(last.Content) == "" {
+					return focusedContinueActionMsg{action: focusedContinueAfterRemovingLast, target: target}
+				} else if last.StopReason == "stop" || last.StopReason == "end_turn" {
+					return focusedContinueActionMsg{action: focusedContinueWithDraft, target: target}
+				} else {
+					return focusedContinueActionMsg{action: focusedContinueFromContext, target: target}
+				}
+			}
+			return nil
+		})
+	}
+	msgs := backend.GetMessages()
 	if len(msgs) == 0 {
 		return nil
 	}
 	last := msgs[len(msgs)-1]
 	switch last.Role {
 	case message.RoleUser, message.RoleTool:
-		m.agent.ContinueFromContext()
-		return m.startActiveAnimation()
+		backend.ContinueFromContext()
 	case message.RoleAssistant:
 		if len(last.ToolCalls) > 0 {
-			m.agent.ContinueFromContext()
-			return m.startActiveAnimation()
+			backend.ContinueFromContext()
+		} else if len(last.ThinkingBlocks) > 0 && strings.TrimSpace(last.Content) == "" {
+			backend.RemoveLastMessage()
+			backend.ContinueFromContext()
+		} else if last.StopReason == "stop" || last.StopReason == "end_turn" {
+			return tea.Batch(m.startActiveAnimation(), m.sendDraft(queuedDraft{Content: "continue"}))
+		} else {
+			backend.ContinueFromContext()
 		}
-		if len(last.ThinkingBlocks) > 0 && strings.TrimSpace(last.Content) == "" {
-			m.agent.RemoveLastMessage()
-			m.agent.ContinueFromContext()
-			return m.startActiveAnimation()
-		}
-		if last.StopReason == "stop" || last.StopReason == "end_turn" {
-			draft := queuedDraft{Content: "continue"}
-			m.finalizeTurn()
-			return tea.Batch(m.startActiveAnimation(), m.sendDraft(draft))
-		}
-		m.agent.ContinueFromContext()
-		return m.startActiveAnimation()
 	}
-	return nil
+	return m.startActiveAnimation()
+}
+
+func (m *Model) focusedConversationTarget(agentID string) agent.ConversationTarget {
+	target := agent.ConversationTarget{AgentID: agentID}
+	for _, sub := range m.agent.GetSubAgents() {
+		if sub.InstanceID == agentID {
+			target.TaskID = sub.TaskID
+			break
+		}
+	}
+	return target
 }
 
 func (m *Model) continueBlocked() bool {

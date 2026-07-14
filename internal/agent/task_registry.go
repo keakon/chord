@@ -48,6 +48,8 @@ type DurableTaskRecord struct {
 	State                string              `json:"state,omitempty"`
 	ResumePolicy         string              `json:"resume_policy,omitempty"`
 	LatestInstanceID     string              `json:"latest_instance_id,omitempty"`
+	SelectedModelRef     string              `json:"selected_model_ref,omitempty"`
+	RunningModelRef      string              `json:"running_model_ref,omitempty"`
 	InstanceHistory      []string            `json:"instance_history,omitempty"`
 	LastSummary          string              `json:"last_summary,omitempty"`
 	LastMailboxID        string              `json:"last_mailbox_id,omitempty"`
@@ -91,6 +93,8 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 	out.State = string(normalizeSubAgentState(SubAgentState(strings.TrimSpace(out.State))))
 	out.ResumePolicy = strings.TrimSpace(out.ResumePolicy)
 	out.LatestInstanceID = strings.TrimSpace(out.LatestInstanceID)
+	out.SelectedModelRef = strings.TrimSpace(out.SelectedModelRef)
+	out.RunningModelRef = strings.TrimSpace(out.RunningModelRef)
 	out.LastSummary = strings.TrimSpace(out.LastSummary)
 	out.LastMailboxID = strings.TrimSpace(out.LastMailboxID)
 	out.LastReplyMessageID = strings.TrimSpace(out.LastReplyMessageID)
@@ -450,6 +454,8 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	rec.JoinToOwner = sub.joinToOwner
 	rec.ResumePolicy = durableTaskResumePolicy(state)
 	rec.LatestInstanceID = strings.TrimSpace(sub.instanceID)
+	rec.SelectedModelRef = subSelectedModelRef(sub)
+	rec.RunningModelRef = subRunningModelRef(sub)
 	rec.InstanceHistory = append(rec.InstanceHistory, rec.LatestInstanceID)
 	rec.InstanceHistory = dedupeTaskInstanceHistory(rec.InstanceHistory)
 	rec.LastSummary = strings.TrimSpace(summary)
@@ -504,6 +510,8 @@ func taskRecordFromLoadedState(state loadedSubAgentState) *DurableTaskRecord {
 		LatestInstanceID:     strings.TrimSpace(state.InstanceID),
 		InstanceHistory:      dedupeTaskInstanceHistory([]string{state.InstanceID}),
 		LastSummary:          strings.TrimSpace(state.LastSummary),
+		SelectedModelRef:     strings.TrimSpace(state.SelectedModelRef),
+		RunningModelRef:      strings.TrimSpace(state.RunningModelRef),
 		LastMailboxID:        strings.TrimSpace(state.LastMailboxID),
 		LastReplyMessageID:   strings.TrimSpace(state.LastReplyMessageID),
 		LastReplyToMailboxID: strings.TrimSpace(state.LastReplyToMailboxID),
@@ -567,6 +575,12 @@ func mergeDurableTaskRecords(base map[string]*DurableTaskRecord, extra ...map[st
 				}
 				if next.LatestInstanceID == "" {
 					next.LatestInstanceID = prev.LatestInstanceID
+				}
+				if next.SelectedModelRef == "" {
+					next.SelectedModelRef = prev.SelectedModelRef
+				}
+				if next.RunningModelRef == "" {
+					next.RunningModelRef = prev.RunningModelRef
 				}
 				next.InstanceHistory = dedupeTaskInstanceHistory(append(prev.InstanceHistory, next.InstanceHistory...))
 				if next.LastSummary == "" {

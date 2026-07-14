@@ -25,6 +25,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Fixed global idle detection after delegation: the terminal title no longer shows completion while any SubAgent is connecting, retrying, streaming, or executing; completion is shown only after all Agents are idle.
+- Fixed TUI unresponsiveness when switching to a SubAgent with a large transcript. Focus switches now reuse bounded transcript windows and initially load only the tail, while small transcripts remain fully visible.
+- Fixed empty MODEL information after resuming and focusing a parked SubAgent. Model refs are now persisted in task, meta, and recovery records; legacy sessions recover them from the usage ledger and fall back to the latest Agent configuration and current model.
+- Fixed TUI hangs when pressing Enter to continue from a parked SubAgent view. Transcript loading, SubAgent rehydration, and continuation requests no longer run synchronously on the TUI update path.
 - Queued input for a busy SubAgent now remains blocked until the event loop has consumed the completed LLM response, preventing a newer turn from making the valid response appear stale and discarding it.
 - SubAgent mailbox acknowledgement state is loaded once per session and updated with ack writes instead of rereading the complete JSONL log for every live mailbox event.
 - `response_header_timeout` now bounds the complete pre-response phase, including connection setup and request-body upload, while still stopping at response headers so healthy streams are not subject to a total request timer.

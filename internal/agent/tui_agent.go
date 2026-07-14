@@ -41,6 +41,24 @@ type MessageSender interface {
 	RemoveLastMessage()
 }
 
+// ConversationTarget identifies one conversation independently of the mutable
+// TUI focus. TaskID keeps a SubAgent target stable when its parked runtime is
+// rehydrated under a new instance ID.
+type ConversationTarget struct {
+	AgentID string
+	TaskID  string
+}
+
+// TargetedConversationController performs deferred TUI actions against the
+// conversation captured when the action was created, not whichever agent is
+// focused when an asynchronous command eventually runs.
+type TargetedConversationController interface {
+	GetMessagesForTarget(target ConversationTarget) []message.Message
+	SendUserMessageToTarget(target ConversationTarget, content string)
+	ContinueFromContextForTarget(target ConversationTarget)
+	RemoveLastMessageForTarget(target ConversationTarget)
+}
+
 // PromptResolver delivers user responses for confirm/question dialogs back to
 // the agent's pending interaction flow.
 type PromptResolver interface {

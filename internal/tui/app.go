@@ -648,6 +648,57 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.input.Focus()
 		return m, cmd
 
+	case focusedContinueActionMsg:
+		if m.agent == nil || m.focusedAgentID != msg.target.AgentID {
+			return m, nil
+		}
+		backend := m.agent
+		targeted, hasTargeted := backend.(agent.TargetedConversationController)
+		switch msg.action {
+		case focusedContinueFromContext:
+			return m, func() tea.Msg {
+				if hasTargeted {
+					targeted.ContinueFromContextForTarget(msg.target)
+				} else {
+					backend.ContinueFromContext()
+				}
+				return nil
+			}
+		case focusedContinueAfterRemovingLast:
+			return m, func() tea.Msg {
+				if hasTargeted {
+					targeted.RemoveLastMessageForTarget(msg.target)
+					targeted.ContinueFromContextForTarget(msg.target)
+				} else {
+					backend.RemoveLastMessage()
+					backend.ContinueFromContext()
+				}
+				return nil
+			}
+		case focusedContinueWithDraft:
+			draft := queuedDraft{Content: "continue", AgentID: msg.target.AgentID}
+			m.finalizeTurn()
+			staged := m.stageDraft(draft)
+			send := func() tea.Msg {
+				if hasTargeted {
+					targeted.SendUserMessageToTarget(msg.target, "continue")
+				} else {
+					backend.SendUserMessage("continue")
+				}
+				return nil
+			}
+			return m, tea.Batch(staged, send)
+		default:
+			return m, func() tea.Msg {
+				if hasTargeted {
+					targeted.ContinueFromContextForTarget(msg.target)
+				} else {
+					backend.ContinueFromContext()
+				}
+				return nil
+			}
+		}
+
 	case sessionRestoredRebuildMsg:
 		m.syncWorkingDirFromAgent()
 		shouldResetRuntimeCache := m.startupRestorePending || m.sessionSwitch.active()

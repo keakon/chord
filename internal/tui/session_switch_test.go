@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -2329,13 +2330,13 @@ func TestDeferredStartupTranscriptWindowSwitchDoesNotResurrectRolledBackAssistan
 	}
 }
 
-func TestFocusedAgentSwitchRebuildsFullTranscriptAfterDeferredStartup(t *testing.T) {
+func TestFocusedAgentSwitchWindowsLargeTranscriptsAfterDeferredStartup(t *testing.T) {
 	mainMessages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
 	for i := range startupTranscriptWindowMinBlocks + 24 {
 		mainMessages = append(mainMessages, message.Message{Role: "assistant", Content: fmt.Sprintf("main-%03d", i)})
 	}
-	subMessages := make([]message.Message, 0, 70)
-	for i := range 70 {
+	subMessages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
+	for i := range startupTranscriptWindowMinBlocks + 24 {
 		subMessages = append(subMessages, message.Message{Role: "assistant", Content: fmt.Sprintf("sub-%03d", i)})
 	}
 	backend := &sessionControlAgent{
@@ -2365,23 +2366,159 @@ func TestFocusedAgentSwitchRebuildsFullTranscriptAfterDeferredStartup(t *testing
 
 	m.setFocusedAgent("agent-1")
 	blocks := m.viewport.visibleBlocks()
-	if len(blocks) != len(subMessages) {
-		t.Fatalf("len(visibleBlocks()) in subagent view = %d, want %d", len(blocks), len(subMessages))
+	if len(blocks) != startupTranscriptTailBlocks {
+		t.Fatalf("len(visibleBlocks()) in subagent view = %d, want %d", len(blocks), startupTranscriptTailBlocks)
 	}
-	if blocks[0].Content != "sub-000" {
-		t.Fatalf("subagent first block = %q, want rebuilt transcript start", blocks[0].Content)
+	wantSubStart := fmt.Sprintf("sub-%03d", len(subMessages)-startupTranscriptTailBlocks)
+	if blocks[0].Content != wantSubStart {
+		t.Fatalf("subagent first block = %q, want windowed transcript tail start %q", blocks[0].Content, wantSubStart)
 	}
-	if m.hasDeferredStartupTranscript() {
-		t.Fatal("focus switch should exit deferred startup transcript mode")
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("large focus switch transcript should remain windowed")
 	}
 
 	m.setFocusedAgent("")
 	blocks = m.viewport.visibleBlocks()
-	if len(blocks) != len(mainMessages) {
-		t.Fatalf("len(visibleBlocks()) after returning to main = %d, want %d", len(blocks), len(mainMessages))
+	if len(blocks) != startupTranscriptTailBlocks {
+		t.Fatalf("len(visibleBlocks()) after returning to main = %d, want %d", len(blocks), startupTranscriptTailBlocks)
 	}
-	if blocks[0].Content != "main-000" {
-		t.Fatalf("main first block = %q, want rebuilt main transcript start", blocks[0].Content)
+	wantMainStart := fmt.Sprintf("main-%03d", len(mainMessages)-startupTranscriptTailBlocks)
+	if blocks[0].Content != wantMainStart {
+		t.Fatalf("main first block = %q, want windowed transcript tail start %q", blocks[0].Content, wantMainStart)
+	}
+}
+
+func TestFocusedAgentSwitchSmallTranscriptRemainsFullyVisible(t *testing.T) {
+	subMessages := make([]message.Message, 0, startupTranscriptWindowMinBlocks-1)
+	for i := range startupTranscriptWindowMinBlocks - 1 {
+		subMessages = append(subMessages, message.Message{Role: "assistant", Content: fmt.Sprintf("sub-%03d", i)})
+	}
+	backend := &sessionControlAgent{messagesByFocus: map[string][]message.Message{"agent-1": subMessages}}
+	m := NewModelWithSize(backend, 120, 24)
+
+	m.setFocusedAgent("agent-1")
+
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != len(subMessages) {
+		t.Fatalf("len(visibleBlocks()) = %d, want full small transcript %d", len(blocks), len(subMessages))
+	}
+	if m.hasDeferredStartupTranscript() {
+		t.Fatal("small focus switch transcript should not be windowed")
+	}
+}
+
+func TestFocusedAgentContinueStagesUserBlockBeforeAsyncSend(t *testing.T) {
+	backend := &sessionControlAgent{
+		focused: "agent-1",
+		messagesByFocus: map[string][]message.Message{
+			"agent-1": {{Role: message.RoleAssistant, Content: "done", StopReason: "stop"}},
+		},
+	}
+	m := NewModelWithSize(backend, 120, 24)
+	m.focusedAgentID = "agent-1"
+	m.viewport.SetFilter("agent-1")
+
+	msgs := runCmdTree(m.tryContinue())
+	var action focusedContinueActionMsg
+	for _, msg := range msgs {
+		if candidate, ok := msg.(focusedContinueActionMsg); ok {
+			action = candidate
+			break
+		}
+	}
+	if action.action == 0 {
+		t.Fatalf("tryContinue messages = %#v, want focused continue action", msgs)
+	}
+	model, next := m.Update(action)
+	updated := model.(*Model)
+
+	blocks := updated.viewport.visibleBlocks()
+	if len(blocks) != 1 || blocks[0].Type != BlockUser || blocks[0].Content != "continue" || blocks[0].AgentID != "agent-1" {
+		t.Fatalf("staged focused continue block = %#v", blocks)
+	}
+	if updated.inflightDraft == nil || updated.inflightDraft.AgentID != "agent-1" || updated.inflightDraft.Content != "continue" {
+		t.Fatalf("inflight focused continue draft = %#v", updated.inflightDraft)
+	}
+	if len(backend.sentMessages) != 0 {
+		t.Fatalf("messages sent before async command = %#v", backend.sentMessages)
+	}
+	runCmdTree(next)
+	if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "continue" {
+		t.Fatalf("async focused continue messages = %#v", backend.sentMessages)
+	}
+}
+
+type targetedConversationAgent struct {
+	sessionControlAgent
+	messagesByTask map[string][]message.Message
+	targetedCalls  []string
+}
+
+func (a *targetedConversationAgent) targetLabel(target agent.ConversationTarget) string {
+	return target.AgentID + "/" + target.TaskID
+}
+
+func (a *targetedConversationAgent) GetMessagesForTarget(target agent.ConversationTarget) []message.Message {
+	a.targetedCalls = append(a.targetedCalls, "read:"+a.targetLabel(target))
+	return append([]message.Message(nil), a.messagesByTask[target.TaskID]...)
+}
+
+func (a *targetedConversationAgent) SendUserMessageToTarget(target agent.ConversationTarget, content string) {
+	a.targetedCalls = append(a.targetedCalls, "send:"+a.targetLabel(target)+":"+content)
+}
+
+func (a *targetedConversationAgent) ContinueFromContextForTarget(target agent.ConversationTarget) {
+	a.targetedCalls = append(a.targetedCalls, "continue:"+a.targetLabel(target))
+}
+
+func (a *targetedConversationAgent) RemoveLastMessageForTarget(target agent.ConversationTarget) {
+	a.targetedCalls = append(a.targetedCalls, "remove:"+a.targetLabel(target))
+}
+
+func TestFocusedContinueActionsKeepCapturedTarget(t *testing.T) {
+	tests := []struct {
+		name     string
+		last     message.Message
+		wantTail []string
+	}{
+		{name: "continue", last: message.Message{Role: message.RoleUser, Content: "work"}, wantTail: []string{"continue:agent-1/task-1"}},
+		{name: "remove and continue", last: message.Message{Role: message.RoleAssistant, ThinkingBlocks: []message.ThinkingBlock{{Thinking: "partial"}}}, wantTail: []string{"remove:agent-1/task-1", "continue:agent-1/task-1"}},
+		{name: "send continue", last: message.Message{Role: message.RoleAssistant, Content: "done", StopReason: "stop"}, wantTail: []string{"send:agent-1/task-1:continue"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backend := &targetedConversationAgent{
+				sessionControlAgent: sessionControlAgent{
+					focused:   "agent-1",
+					subAgents: []agent.SubAgentInfo{{InstanceID: "agent-1", TaskID: "task-1"}},
+				},
+				messagesByTask: map[string][]message.Message{"task-1": {tt.last}},
+			}
+			m := NewModelWithSize(backend, 120, 24)
+			m.focusedAgentID = "agent-1"
+			m.viewport.SetFilter("agent-1")
+
+			var action focusedContinueActionMsg
+			for _, msg := range runCmdTree(m.tryContinue()) {
+				if candidate, ok := msg.(focusedContinueActionMsg); ok {
+					action = candidate
+					break
+				}
+			}
+			if action.action == 0 || action.target.AgentID != "agent-1" || action.target.TaskID != "task-1" {
+				t.Fatalf("captured action = %#v", action)
+			}
+
+			_, cmd := m.Update(action)
+			m.focusedAgentID = ""
+			backend.focused = ""
+			runCmdTree(cmd)
+
+			want := append([]string{"read:agent-1/task-1"}, tt.wantTail...)
+			if !slices.Equal(backend.targetedCalls, want) {
+				t.Fatalf("targeted calls = %#v, want %#v", backend.targetedCalls, want)
+			}
+		})
 	}
 }
 

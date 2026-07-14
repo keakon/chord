@@ -25,6 +25,10 @@
 
 ### 修复
 
+- 修复委托后的全局空闲状态判断：MainAgent 停止而 SubAgent 仍处于连接、重试、流式或执行状态时，终端标题不会提前显示完成标记；只有所有 Agent 都空闲后才显示完成状态。
+- 修复切换到大型 SubAgent transcript 时 TUI 可能因一次性重建并输出完整历史而失去响应的问题。焦点切换现在复用有界 transcript 窗口，首屏只加载尾部内容，小型 transcript 仍完整显示。
+- 修复恢复会话后聚焦 parked SubAgent 时右侧 MODEL 信息为空的问题。模型信息现在持久化到任务、meta 和 recovery snapshot；旧会话优先从 usage ledger 恢复，缺失时按最新 Agent 配置和当前模型回退解析。
+- 修复在 parked SubAgent 视图按 Enter 继续时 TUI 卡住的问题。上下文读取、SubAgent rehydrate 和继续请求不再同步执行在 TUI 更新路径中。
 - 忙碌 SubAgent 的排队输入现在会等事件循环实际取走已完成的 LLM 响应后才放行，避免新 turn 抢先创建、把有效响应误判为 stale 并丢弃。
 - SubAgent mailbox ack 状态现在每个 session 只加载一次，并随 ack 写入同步更新，不再为每个实时 mailbox 事件重读完整 JSONL 日志。
 - `response_header_timeout` 现在会约束收到响应前的完整阶段，包括连接建立和请求体上传；收到响应头后计时器仍会停止，因此不会变成健康流的总请求超时。

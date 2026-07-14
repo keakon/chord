@@ -499,7 +499,9 @@ func TestBackgroundBusyToIdleShowsOneShotCompletionTitle(t *testing.T) {
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	m.terminalTitleTickRunning = true
 
-	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}})
+	if cmd := m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}}); cmd != nil {
+		_ = cmd()
+	}
 
 	if m.terminalTitleBackgroundCompletedAgentID == "" {
 		t.Fatal("background busy→idle should set one-shot completion marker")
@@ -509,6 +511,38 @@ func TestBackgroundBusyToIdleShowsOneShotCompletionTitle(t *testing.T) {
 	}
 	if m.terminalTitleTickRunning {
 		t.Fatal("completion title should stop the spinner ticker")
+	}
+}
+
+func TestMainIdleWhileSubagentBusyKeepsSpinnerTitle(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.focusedAgentID = "main"
+	m.terminalTitleBase = "delegated work"
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+	m.activities["agent-1"] = agent.AgentActivityEvent{Type: agent.ActivityConnecting, AgentID: "agent-1"}
+	m.terminalTitleTickRunning = true
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}})
+
+	if m.terminalTitleBackgroundCompletedAgentID != "" {
+		t.Fatalf("completion marker should not be set while subagent is busy; got %q", m.terminalTitleBackgroundCompletedAgentID)
+	}
+	if got := m.currentTitleMode(); got != terminalTitleModeSpinner {
+		t.Fatalf("title mode = %v, want spinner while subagent is busy", got)
+	}
+}
+
+func TestActiveSubagentOverridesStaleCompletionTitle(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateBackground
+	m.terminalTitleBase = "delegated work"
+	m.terminalTitleBackgroundCompletedAgentID = "main"
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
+	m.activities["agent-1"] = agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "agent-1"}
+
+	if got := m.currentTitleMode(); got != terminalTitleModeSpinner {
+		t.Fatalf("title mode = %v, want spinner to override stale completion while subagent is busy", got)
 	}
 }
 

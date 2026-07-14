@@ -89,7 +89,7 @@ func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 			keysStyle = InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelKeyWarnFg))
 		}
 	}
-	if poolNames := m.agent.PoolNames(); len(poolNames) > 1 {
+	if poolNames := m.agent.PoolNames(); len(poolNames) > 0 {
 		if pool := strings.TrimSpace(m.agent.CurrentPoolName()); pool != "" {
 			pool = m.pendingPoolSwitch.display(pool, m.isFocusedAgentBusy())
 			modelLines = append(modelLines, InfoPanelLineBg.Width(lineW).Render(InfoPanelValue.Render("Pool: "+pool)))

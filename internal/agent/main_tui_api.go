@@ -81,12 +81,22 @@ func (a *MainAgent) executeLocalOnlySlashCommand(content string, _ []message.Con
 // commands bypass SubAgent routing because they belong to the main agent —
 // they're sent to the main event loop unchanged.
 func (a *MainAgent) SendUserMessage(content string) {
+	a.SendUserMessageToTarget(a.focusedConversationTarget(), content)
+}
+
+// SendUserMessageToTarget delivers a message to a previously captured
+// conversation rather than consulting the current TUI focus.
+func (a *MainAgent) SendUserMessageToTarget(conversation ConversationTarget, content string) {
 	if isTUILocalOnlySlashCommand(content) {
 		a.sendEvent(Event{Type: EventUserMessage, Payload: content})
 		return
 	}
-	// Route to focused SubAgent if one is active.
-	if focused := a.validFocusedSubAgent(); focused != nil {
+	target, ok := a.resolveConversationTarget(conversation)
+	if !ok {
+		a.emitToTUI(ToastEvent{Message: "Conversation is no longer available; retry the message", Level: "warn", AgentID: conversation.AgentID})
+		return
+	}
+	if focused := target.sub; focused != nil {
 		kind := "follow_up"
 		if focused.State() == SubAgentStateWaitingMain {
 			kind = "reply"
@@ -108,7 +118,7 @@ func (a *MainAgent) SendUserMessage(content string) {
 		}
 		return
 	}
-	if rec := a.focusedDurableTask(); rec != nil && rec.RuntimeParked {
+	if rec := target.task; target.parked && rec != nil {
 		sub, _, err := a.rehydrateTask(rec)
 		if err != nil {
 			a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: rec.LatestInstanceID})

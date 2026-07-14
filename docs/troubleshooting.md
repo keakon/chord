@@ -183,6 +183,10 @@ Chord automatically repairs incomplete turns caused by an interrupted process be
 
 Current builds automatically recover two failure modes that older sessions could expose:
 
+If MODEL or Pool is empty after resuming and focusing a SubAgent, the current build first uses model refs stored in the task, recovery snapshot, and usage ledger. For legacy records without model data, it resolves the latest Agent configuration, so task or meta files do not need manual editing.
+
+If the TUI becomes unresponsive after switching to a large SubAgent transcript or pressing Enter to continue from a parked SubAgent, the current build uses a bounded transcript window and moves transcript loading, rehydration, and continuation off the TUI update path. If an old build is still stuck, terminate it from another terminal and run `reset` in the original terminal before exporting diagnostics.
+
 - When a parked SubAgent is rehydrated, queued input explicitly wakes its event loop. A startup watchdog retries that wake once if the worker stays `running` without creating a turn.
 - If the worker still cannot start, or its provider/model retries end in a terminal error, Chord marks the task failed, records a `risk_alert`, and wakes the owner/MainAgent to retry, reassign, or report the blocker. It does not fabricate a successful `complete` result.
 

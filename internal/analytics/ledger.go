@@ -44,6 +44,12 @@ type UsageEvent struct {
 	Diagnostic       map[string]string `json:"diagnostic,omitempty"`
 }
 
+// AgentModelRefs is the last known selected and effective model for an agent.
+type AgentModelRefs struct {
+	Selected string
+	Running  string
+}
+
 // UsageAggregate is a rollup used in usage-summary.json.
 type UsageAggregate struct {
 	LLMCalls            int64   `json:"llm_calls"`
@@ -116,6 +122,28 @@ func LoadSessionUsageSummary(sessionDir string) (*SessionUsageSummary, error) {
 // session's usage ledger would make opening the UI scale with total history.
 func LoadCachedSessionUsageSummary(sessionDir string) (*SessionUsageSummary, error) {
 	return readUsageSummaryFile(filepath.Join(sessionDir, "usage-summary.json"))
+}
+
+// LoadLatestAgentModelRefs rebuilds the last known model refs per agent from
+// the append-only usage ledger. It also supports sessions created before model
+// refs were persisted in subagent task records.
+func LoadLatestAgentModelRefs(sessionDir string) (map[string]AgentModelRefs, error) {
+	refs := make(map[string]AgentModelRefs)
+	err := scanUsageEvents(filepath.Join(sessionDir, "usage.jsonl"), func(evt UsageEvent) {
+		agentID := strings.TrimSpace(evt.AgentID)
+		if agentID == "" {
+			return
+		}
+		ref := refs[agentID]
+		if selected := strings.TrimSpace(evt.SelectedModelRef); selected != "" {
+			ref.Selected = selected
+		}
+		if running := strings.TrimSpace(evt.RunningModelRef); running != "" {
+			ref.Running = running
+		}
+		refs[agentID] = ref
+	})
+	return refs, err
 }
 
 // SetFirstUserMessage records the first user message preview for future summary writes.

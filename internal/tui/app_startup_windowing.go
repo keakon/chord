@@ -165,7 +165,7 @@ func (m *Model) applyStartupDeferredTranscriptWindow(start, end int, trigger str
 }
 
 func (m *Model) maybeWindowStartupTranscript(reason string, blocks []*Block) []*Block {
-	if reason != "startup_restored" {
+	if reason != "startup_restored" && reason != "focus_switch" {
 		m.startupDeferredTranscript = nil
 		m.startupDeferredPreheatGeneration++
 		return blocks
@@ -205,7 +205,7 @@ func (m *Model) maybeWindowStartupTranscript(reason string, blocks []*Block) []*
 			block.InvalidateCache()
 		}
 	}
-	log.Debugf("tui startup transcript windowed blocks=%v hidden_blocks=%v window_blocks=%v", len(blocks), hiddenCount, len(windowed))
+	log.Debugf("tui transcript windowed reason=%v blocks=%v hidden_blocks=%v window_blocks=%v", reason, len(blocks), hiddenCount, len(windowed))
 	m.logStartupDeferredTranscriptRetention(state, len(blocks))
 	return windowed
 }

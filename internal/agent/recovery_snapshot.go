@@ -1,10 +1,31 @@
 package agent
 
 import (
+	"strings"
 	"time"
 
 	"github.com/keakon/chord/internal/recovery"
 )
+
+func subSelectedModelRef(sub *SubAgent) string {
+	client, _ := sub.llmSnapshot()
+	if client == nil {
+		return ""
+	}
+	ref := strings.TrimSpace(client.PrimaryModelRef())
+	if variant := strings.TrimSpace(client.ActiveVariant()); variant != "" && ref != "" {
+		ref += "@" + variant
+	}
+	return ref
+}
+
+func subRunningModelRef(sub *SubAgent) string {
+	client, _ := sub.llmSnapshot()
+	if client == nil {
+		return ""
+	}
+	return formatModelRefForNotification(client.RunningModelRef(), subSelectedModelRef(sub), client.ActiveVariant())
+}
 
 func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 	a.todoMu.RLock()
@@ -25,6 +46,8 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 			PlanTaskRef:           sub.planTaskRef,
 			SemanticTaskKey:       sub.semanticTaskKey,
 			ExpectedWriteScope:    sub.writeScope.Normalized(),
+			SelectedModelRef:      subSelectedModelRef(sub),
+			RunningModelRef:       subRunningModelRef(sub),
 			OwnerAgentID:          sub.OwnerAgentID(),
 			OwnerTaskID:           sub.OwnerTaskID(),
 			Depth:                 sub.Depth(),
