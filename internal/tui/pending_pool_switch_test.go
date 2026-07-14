@@ -151,7 +151,7 @@ func TestBusyPoolSwitchClearsTransitionWhenFallbackReachesTargetPool(t *testing.
 	backend.currentPoolByFocus[""] = "fast"
 	backend.mainModelPool = "fast"
 
-	_ = m.handleAgentEvent(agentEventMsg{event: agent.RunningModelChangedEvent{AgentID: "main-1", ProviderModelRef: "fast-provider/gpt-5.5", RunningModelRef: "fast-provider/gpt-5.5"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.RunningModelChangedEvent{AgentID: "main", ProviderModelRef: "fast-provider/gpt-5.5", RunningModelRef: "fast-provider/gpt-5.5"}})
 
 	plain := stripANSI(m.renderInfoPanel(100, 20))
 	if !strings.Contains(plain, "Pool: fast") {

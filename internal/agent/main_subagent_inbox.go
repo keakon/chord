@@ -89,10 +89,7 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 	}
 	switch msg.Kind {
 	case SubAgentMailboxKindProgress:
-		if owner.TryEnqueueContextAppend(message.Message{Role: "user", Content: text, MailboxAckID: msg.MessageID}) {
-			return true
-		}
-		return false
+		return owner.TryEnqueueContextAppend(message.Message{Role: "user", Content: text, MailboxAckID: msg.MessageID})
 	case SubAgentMailboxKindCompleted:
 		remaining := a.outstandingJoinChildTaskIDs(owner.taskID)
 		if owner.State() == SubAgentStateWaitingDescendant && len(remaining) == 0 && msg.AgentID != "" {
@@ -125,15 +122,9 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 				text = pendingText + "\n\n" + text
 				owner.clearPendingCompleteIntent()
 			}
-			if reactivateOwner(text, "Child task completed; resuming", true) {
-				return true
-			}
-			return false
+			return reactivateOwner(text, "Child task completed; resuming", true)
 		}
-		if owner.TryEnqueueContextAppend(message.Message{Role: "user", Content: text, MailboxAckID: msg.MessageID}) {
-			return true
-		}
-		return false
+		return owner.TryEnqueueContextAppend(message.Message{Role: "user", Content: text, MailboxAckID: msg.MessageID})
 	case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired, SubAgentMailboxKindRiskAlert, SubAgentMailboxKindDirectionChange:
 		if owner.State() == SubAgentStateWaitingDescendant {
 			return reactivateOwner(text, "Child task requires parent decision", true)
@@ -141,10 +132,7 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 		owner.InjectUserMessageWithMailboxAck(text, msg.MessageID)
 		return true
 	default:
-		if owner.TryEnqueueContextAppend(message.Message{Role: "user", Content: text, MailboxAckID: msg.MessageID}) {
-			return true
-		}
-		return false
+		return owner.TryEnqueueContextAppend(message.Message{Role: "user", Content: text, MailboxAckID: msg.MessageID})
 	}
 }
 
@@ -159,7 +147,27 @@ func (a *MainAgent) enqueueOwnedSubAgentMailbox(msg SubAgentMailboxMessage) {
 	a.ownedSubAgentMailboxes[ownerAgentID] = append(a.ownedSubAgentMailboxes[ownerAgentID], msg)
 }
 
+func (a *MainAgent) markSubAgentMailboxSeen(messageID string) bool {
+	messageID = strings.TrimSpace(messageID)
+	if a == nil || messageID == "" {
+		return false
+	}
+	a.subAgentMailboxIDsMu.Lock()
+	defer a.subAgentMailboxIDsMu.Unlock()
+	if a.subAgentMailboxIDs == nil {
+		a.subAgentMailboxIDs = make(map[string]struct{})
+	}
+	if _, ok := a.subAgentMailboxIDs[messageID]; ok {
+		return false
+	}
+	a.subAgentMailboxIDs[messageID] = struct{}{}
+	return true
+}
+
 func (a *MainAgent) drainOwnedSubAgentMailboxes(ownerAgentID string) bool {
+	if a.mailboxDeliveryPaused.Load() {
+		return false
+	}
 	ownerAgentID = strings.TrimSpace(ownerAgentID)
 	if ownerAgentID == "" || len(a.ownedSubAgentMailboxes) == 0 {
 		return false
@@ -188,7 +196,7 @@ func (a *MainAgent) drainOwnedSubAgentMailboxes(ownerAgentID string) bool {
 
 func (a *MainAgent) enqueueSubAgentMailbox(msg SubAgentMailboxMessage) {
 	a.prepareSubAgentMailboxMessage(&msg)
-	if a.routeOwnedSubAgentMailbox(msg) {
+	if !a.mailboxDeliveryPaused.Load() && a.routeOwnedSubAgentMailbox(msg) {
 		return
 	}
 	if strings.TrimSpace(msg.OwnerAgentID) != "" {
@@ -293,8 +301,12 @@ func (a *MainAgent) handleSubAgentMailboxEvent(evt Event) {
 	if !a.shouldAcceptSubAgentMailbox(evt.SourceID, msg) {
 		return
 	}
+	messageID := strings.TrimSpace(msg.MessageID)
+	if messageID != "" && (!a.markSubAgentMailboxSeen(messageID) || a.isSubAgentMailboxConsumed(messageID)) {
+		return
+	}
 	a.enqueueSubAgentMailbox(*msg)
-	if msg.Kind != SubAgentMailboxKindProgress {
+	if msg.Kind != SubAgentMailboxKindProgress && !a.mailboxDeliveryPaused.Load() {
 		a.drainSubAgentInbox()
 	}
 }
@@ -353,6 +365,9 @@ func (a *MainAgent) dequeueNextSubAgentMailbox() *SubAgentMailboxMessage {
 }
 
 func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
+	if a.mailboxDeliveryPaused.Load() {
+		return false
+	}
 	msg := a.dequeueNextSubAgentMailbox()
 	if msg == nil {
 		return false
@@ -401,6 +416,9 @@ func (a *MainAgent) prepareSubAgentMailboxBatchForTurnContinuation() bool {
 }
 
 func (a *MainAgent) drainSubAgentInbox() {
+	if a.mailboxDeliveryPaused.Load() {
+		return
+	}
 	if a.turn != nil {
 		return
 	}

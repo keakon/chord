@@ -19,6 +19,10 @@ func (s *SubAgent) InjectUserMessage(content string) {
 	s.enqueueUserMessage(pendingUserMessage{Content: content})
 }
 
+func (s *SubAgent) InjectManualUserMessage(content string, drainContextAppends bool) {
+	s.enqueueUserMessage(pendingUserMessage{Content: content, FromUser: true, DrainContextAppends: drainContextAppends})
+}
+
 func (s *SubAgent) InjectUserMessageWithMailboxAck(content, mailboxAckID string) {
 	s.enqueueUserMessage(pendingUserMessage{Content: content, MailboxAckID: strings.TrimSpace(mailboxAckID)})
 }
@@ -26,6 +30,13 @@ func (s *SubAgent) InjectUserMessageWithMailboxAck(content, mailboxAckID string)
 // InjectUserMessageWithParts enqueues a multi-part user message for the SubAgent.
 func (s *SubAgent) InjectUserMessageWithParts(parts []message.ContentPart) {
 	s.enqueueUserMessage(pendingUserMessageFromDraft("", parts))
+}
+
+func (s *SubAgent) InjectManualUserMessageWithParts(parts []message.ContentPart, drainContextAppends bool) {
+	input := pendingUserMessageFromDraft("", parts)
+	input.FromUser = true
+	input.DrainContextAppends = drainContextAppends
+	s.enqueueUserMessage(input)
 }
 
 // QueuePendingUserDraft enqueues a TUI draft with its identity preserved so
@@ -179,8 +190,12 @@ func (s *SubAgent) RestoreMessages(msgs []message.Message) {
 // ContinueFromContext signals the SubAgent to re-run the LLM with its
 // existing context without appending a new user message. Non-blocking.
 func (s *SubAgent) ContinueFromContext() {
+	s.continueWithContextAppends(false, false)
+}
+
+func (s *SubAgent) continueWithContextAppends(drainContextAppends, restartStoppedTurn bool) {
 	select {
-	case s.continueCh <- continueMsg{}:
+	case s.continueCh <- continueMsg{drainContextAppends: drainContextAppends, restartStoppedTurn: restartStoppedTurn}:
 	default: // already pending
 	}
 }

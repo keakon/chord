@@ -232,12 +232,13 @@ type ModelOption struct {
 // pendingUserMessage holds a single queued user message when the agent is busy.
 // When Parts is non-nil it is a multi-part message (e.g. text + images); otherwise Content is used.
 type pendingUserMessage struct {
-	DraftID      string
-	Content      string
-	Parts        []message.ContentPart
-	FromUser     bool
-	MailboxAckID string
-	CoalesceKey  string
+	DraftID             string
+	Content             string
+	Parts               []message.ContentPart
+	FromUser            bool
+	MailboxAckID        string
+	CoalesceKey         string
+	DrainContextAppends bool
 }
 
 // ---------------------------------------------------------------------------
@@ -425,6 +426,9 @@ type MainAgent struct {
 	focusedAgent             atomic.Pointer[SubAgent]  // currently focused SubAgent (nil = main)
 	subAgentInbox            subAgentInbox
 	ownedSubAgentMailboxes   map[string][]SubAgentMailboxMessage // owner agentID -> descendant mailbox waiting for owner-local delivery
+	subAgentMailboxIDsMu     sync.Mutex
+	subAgentMailboxIDs       map[string]struct{} // session-scoped idempotency keys for persisted and live mailbox events
+	mailboxDeliveryPaused    atomic.Bool         // restored sessions wait for explicit user continuation before mailbox delivery
 	pendingSubAgentMailboxes []*SubAgentMailboxMessage
 	activeSubAgentMailboxes  []*SubAgentMailboxMessage
 	activeSubAgentMailbox    *SubAgentMailboxMessage
@@ -675,6 +679,7 @@ func NewMainAgent(
 		fileBackups:            newFileBackupManager(sessionDir),
 		subAgentInbox:          newSubAgentInbox(),
 		ownedSubAgentMailboxes: make(map[string][]SubAgentMailboxMessage),
+		subAgentMailboxIDs:     make(map[string]struct{}),
 		subAgentUrgentCounts:   make(map[string]int),
 		recovery:               recovery.NewRecoveryManager(sessionDir),
 		persist:                newPersistencePump(256),
@@ -1375,6 +1380,7 @@ func (a *MainAgent) processPendingUserMessagesBeforeLLMInTurn() {
 	}
 	var batch []message.Message
 	var consumed []consumedPendingDraft
+	manualInputConsumed := false
 	for _, p := range pending {
 		content := pendingUserMessageText(p)
 		c := strings.TrimSpace(content)
@@ -1388,11 +1394,15 @@ func (a *MainAgent) processPendingUserMessagesBeforeLLMInTurn() {
 		}
 		batch = append(batch, m)
 		consumed = append(consumed, consumedPendingDraft{draftID: p.DraftID, msg: m})
+		manualInputConsumed = manualInputConsumed || p.FromUser
 	}
 	// Re-queue /resume* and anything that arrived concurrently (should be rare).
 	a.pendingUserMessages = append(deferred, a.pendingUserMessages...)
 	if len(batch) == 0 {
 		return
+	}
+	if manualInputConsumed {
+		a.stageNextSubAgentMailboxBatch()
 	}
 	log.Debugf("injecting pending user messages with tool results count=%v", len(batch))
 	for _, item := range consumed {
@@ -1441,6 +1451,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	if a.handleLocalOnlySlashCommands(content, parts, a.turn != nil) {
 		return
 	}
+	a.mailboxDeliveryPaused.Store(false)
 
 	a.explicitUserTurnCount++
 	a.sweepSubAgentLifecycle()
@@ -1474,6 +1485,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	}
 
 	// Start a new turn and call LLM.
+	a.stageNextSubAgentMailboxBatch()
 	a.newTurn()
 	turnID := a.turn.ID
 	turnCtx := a.turn.Ctx
@@ -1526,6 +1538,8 @@ func (a *MainAgent) handlePendingDraftUpsert(evt Event) {
 		return
 	}
 
+	a.mailboxDeliveryPaused.Store(false)
+	a.stageNextSubAgentMailboxBatch()
 	a.newTurn()
 	turnID := a.turn.ID
 	turnCtx := a.turn.Ctx
@@ -1661,9 +1675,8 @@ func (a *MainAgent) resumeTurnAfterRoutingInvalidation(turnID uint64) bool {
 // also sent so the TUI knows the agent is ready for new input.
 //
 // If SourceID is "main" or empty, this is the MainAgent's own error.
-// If SourceID identifies a SubAgent, the agent is cleaned
-// up: file locks released, focus switched, map entry removed, semaphore freed,
-// and context cancelled.
+// If SourceID identifies a SubAgent, its active resources are released and the
+// failed instance is retained so the user can explicitly continue it later.
 func (a *MainAgent) handleAgentError(evt Event) {
 	err, ok := evt.Payload.(error)
 	if !ok {

@@ -292,11 +292,11 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 - `Tab`：循环切换 main agent 的模式（role，显示在状态栏；仅在 main 视图生效）
 - `Shift+Tab`：在 main agent 与各 sub agent 之间循环切换当前查看的 agent 视图
 
-在 SubAgent 视图中可查看该 agent 的上下文与输出；已结束的 SubAgent 视图只读。
+在 SubAgent 视图中可查看该 agent 的上下文与输出，也可提交新输入。completed、failed、cancelled 只描述上一次执行结果，不会让该视图变成只读。
 
 卡片编号以当前查看的 Agent 为单位：main transcript 和每个 SubAgent transcript 都分别从 `#1` 开始并独立递增。切换 Agent 视图时，Chord 会重建该 Agent 当前可用的完整历史；被 rehydrate 的委派任务也会包含其较早实例的历史，因此可用 `Ctrl+B` / `PgUp`、`gg`、搜索和消息目录继续浏览前序卡片，而不是只看到实时尾部。
 
-恢复会话后，退出前仍在运行的 SubAgent 会恢复为 idle，而不会假装旧进程里的执行仍然存活。此时先聚焦该 SubAgent，再提交空输入，即可像继续 idle MainAgent 一样沿现有上下文继续。Chord 会先重新获取 SubAgent 并发槽并将其切回 running，然后创建新 turn，不会追加虚构的用户消息。正在等待回复、已经完成、失败或取消的 SubAgent 仍需通过各自明确的 reply、follow-up、重试或重建流程继续。
+恢复会话后，所有还原的 agent 都处于 idle，不会假装旧进程里的执行仍然存活。SubAgent 在恢复前的任意状态（包括 waiting、completed、failed、cancelled）都可手动继续：先聚焦该 SubAgent，提交空输入可沿现有上下文继续，提交文字则会创建 follow-up turn。Chord 会先重新获取 SubAgent 并发槽并将其切回 running；空输入不会追加虚构的用户消息。从会话恢复的待处理 mailbox 在 idle 时继续排队，只会在这次明确的手动继续或输入操作中投递；正常运行期间实时产生的 mailbox 事件会立即投递给所属 agent。
 
 当启用 `todo_write` 但没有可用的 `delegate` workflow 时，todo 列表默认只保留一个 `in_progress`，表示 MainAgent 当前直接执行的焦点工作。
 当 `delegate` workflow 可用且确实派出了多个活跃的 delegated workstreams 时，todo 列表可以同时存在多个 `in_progress`，但每一项都应清楚映射到一个真实活跃的委派工作流，并使用唯一的 `active_form`；不要把尚未开始、仅计划中或只是等待条件的事项也标成 `in_progress`。

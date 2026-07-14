@@ -182,23 +182,6 @@ func (m *Model) handleSwitchRole() {
 	m.invalidateDrawCaches()
 }
 
-func (m *Model) isViewingReadOnlySubAgent() bool {
-	if m.focusedAgentID == "" {
-		return false
-	}
-	status, ok := m.sidebar.FindStatus(m.focusedAgentID)
-	if !ok {
-		return false
-	}
-	if status == "error" || status == "cancelled" {
-		return true
-	}
-	if m.agent != nil && m.agent.FocusedAgentID() != m.focusedAgentID {
-		return true
-	}
-	return false
-}
-
 func (m *Model) maybeSwitchToTaskAgent(block *Block) {
 	if block == nil || block.Type != BlockToolCall || block.ToolName != tools.NameDelegate || block.LinkedAgentID == "" {
 		return

@@ -13,6 +13,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -297,7 +298,7 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		a.llmMu.Unlock()
 		if confirmedRef != prev {
 			a.emitToTUI(RunningModelChangedEvent{
-				AgentID:          a.instanceID,
+				AgentID:          identity.MainAgentID,
 				ProviderModelRef: provRef,
 				RunningModelRef:  confirmedRef,
 			})
@@ -399,7 +400,7 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 			lastProgressEmitAt = now
 			lastProgressEmitBytes = state.requestProgressBytes
 			lastProgressEmitEvents = state.requestProgressEvents
-			a.emitToTUI(RequestProgressEvent{AgentID: a.instanceID, Bytes: state.requestProgressBytes, Events: state.requestProgressEvents})
+			a.emitToTUI(RequestProgressEvent{AgentID: identity.MainAgentID, Bytes: state.requestProgressBytes, Events: state.requestProgressEvents})
 		}
 	}
 	streamReducer.beforeStatus = func(status *message.StatusDelta) {
@@ -615,7 +616,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	// while still thinking, close that block before flushing any following
 	// text so the viewport order stays stable.
 	streamReducer.Finish()
-	a.emitToTUI(RequestProgressEvent{AgentID: a.instanceID, Bytes: streamState.requestProgressBytes, Events: streamState.requestProgressEvents, Done: true})
+	a.emitToTUI(RequestProgressEvent{AgentID: identity.MainAgentID, Bytes: streamState.requestProgressBytes, Events: streamState.requestProgressEvents, Done: true})
 	if err != nil {
 		// Skip fallback exhausted toast for context cancellation (user CancelCurrentTurn).
 		// All cancel-path errors use %w wrapping around ctx.Err(), so errors.Is
@@ -686,7 +687,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 
 	if callStatus.RunningModelRef != prevRunningRef {
 		a.emitToTUI(RunningModelChangedEvent{
-			AgentID:          a.instanceID,
+			AgentID:          identity.MainAgentID,
 			ProviderModelRef: selectedRef,
 			RunningModelRef:  callStatus.RunningModelRef,
 		})

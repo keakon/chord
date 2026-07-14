@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"fmt"
-
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
@@ -114,9 +112,10 @@ func (a *MainAgent) GetMessages() []message.Message {
 func (a *MainAgent) ContinueFromContext() {
 	if sub := a.validFocusedSubAgent(); sub != nil {
 		state := sub.State()
+		restartStoppedTurn := state != SubAgentStateRunning
 		switch state {
 		case SubAgentStateRunning:
-		case SubAgentStateIdle:
+		default:
 			if err := a.acquireSubAgentSlot(sub); err != nil {
 				a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: sub.instanceID})
 				return
@@ -125,15 +124,13 @@ func (a *MainAgent) ContinueFromContext() {
 			a.saveRecoverySnapshot()
 			a.persistSubAgentMeta(sub)
 			a.syncTaskRecordFromSub(sub, "")
-			a.drainOwnedSubAgentMailboxes(sub.instanceID)
-		default:
-			a.emitToTUI(ToastEvent{Message: fmt.Sprintf("SubAgent %s is %s; continue is disabled", sub.instanceID, state), Level: "warn", AgentID: sub.instanceID})
-			return
 		}
-		sub.ContinueFromContext()
+		a.mailboxDeliveryPaused.Store(false)
+		sub.continueWithContextAppends(a.drainOwnedSubAgentMailboxes(sub.instanceID), restartStoppedTurn)
 		return
 	}
-	a.sendEvent(Event{Type: EventContinue})
+	a.mailboxDeliveryPaused.Store(false)
+	a.sendEvent(Event{Type: EventContinue, Payload: manualContinueEvent{}})
 }
 
 // RemoveLastMessage removes the last message from context and rewrites the
@@ -161,10 +158,13 @@ func (a *MainAgent) RemoveLastMessage() {
 
 // handleContinueFromContext starts a new turn and calls LLM without appending
 // any new user message.
-func (a *MainAgent) handleContinueFromContext(_ Event) {
+func (a *MainAgent) handleContinueFromContext(evt Event) {
 	if a.turn != nil {
 		log.Debug("handleContinueFromContext: ignored, turn already active")
 		return
+	}
+	if _, manual := evt.Payload.(manualContinueEvent); manual {
+		a.stageNextSubAgentMailboxBatch()
 	}
 	a.applyPendingCompactionResumeOverlaysForContinue()
 	if a.loopState.Enabled {

@@ -4,15 +4,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/keakon/golog/log"
-
 	"github.com/keakon/chord/internal/tools"
 )
 
-const (
-	waitingMainExpiryUserTurns      = uint64(5)
-	failedCancelledGCGraceUserTurns = uint64(1)
-)
+const waitingMainExpiryUserTurns = uint64(5)
 
 func (a *MainAgent) noteSubAgentStateTransition(sub *SubAgent, state SubAgentState) {
 	if a == nil || sub == nil {
@@ -124,7 +119,6 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 	if a.subs.count() == 0 {
 		return
 	}
-	var toClose []string
 	changed := false
 	for _, sub := range a.subs.subAgents {
 		if sub == nil {
@@ -149,29 +143,9 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		case SubAgentStateWaitingDescendant:
 			// Descendant waits are durable coordination state; do not expire via
 			// user-turn GC. Recovery or explicit control actions decide what to do.
-		case SubAgentStateFailed, SubAgentStateCancelled:
-			if a.explicitUserTurnCount >= enteredTurn+failedCancelledGCGraceUserTurns {
-				toClose = append(toClose, sub.instanceID)
-			}
 		}
 	}
-	if len(toClose) == 0 {
-		if changed {
-			a.saveRecoverySnapshot()
-		}
-		return
+	if changed {
+		a.saveRecoverySnapshot()
 	}
-	for _, id := range toClose {
-		log.Debugf("closing subagent via lifecycle GC agent_id=%v user_turn=%v", id, a.explicitUserTurnCount)
-		finalState := SubAgentStateCancelled
-		if sub := a.subAgentByID(id); sub != nil {
-			finalState = sub.State()
-		}
-		a.handleSubAgentCloseRequestedEvent(Event{
-			Type:     EventSubAgentCloseRequested,
-			SourceID: id,
-			Payload:  &SubAgentCloseRequestedPayload{Reason: "closed by lifecycle GC", FinalState: finalState},
-		})
-	}
-	a.saveRecoverySnapshot()
 }

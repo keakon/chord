@@ -102,5 +102,5 @@ func (m *Model) runningModelEventMatchesFocus(evt agent.RunningModelChangedEvent
 	if focused != "main" {
 		return evt.AgentID == focused
 	}
-	return evt.AgentID == "" || evt.AgentID == "main" || strings.HasPrefix(evt.AgentID, "main-")
+	return evt.AgentID == "" || evt.AgentID == "main"
 }

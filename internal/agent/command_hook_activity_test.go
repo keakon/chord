@@ -151,12 +151,6 @@ func TestEmitGlobalIdleWaitsForQueuedAutomaticWork(t *testing.T) {
 			},
 		},
 		{
-			name: "SubAgent mailbox",
-			queue: func(a *MainAgent) {
-				a.subAgentInbox.normal = append(a.subAgentInbox.normal, SubAgentMailboxMessage{MessageID: "mail-1", Kind: SubAgentMailboxKindCompleted})
-			},
-		},
-		{
 			name: "automatic continuation prompt",
 			queue: func(a *MainAgent) {
 				a.pendingAutoContinuePrompt = "continue"
@@ -200,12 +194,14 @@ func TestCompletedSubAgentMailboxStartsMainTurnBeforeGlobalIdle(t *testing.T) {
 	if a.currentTurn() == nil {
 		t.Fatal("completed SubAgent mailbox did not start the main summary turn")
 	}
-	select {
-	case evt := <-a.Events():
-		if _, ok := evt.(GlobalIdleEvent); ok {
-			t.Fatal("global idle emitted before the main summary turn")
-		}
-	default:
+	if got := len(a.pendingSubAgentMailboxes); got != 1 {
+		t.Fatalf("pending completion mailbox count = %d, want 1", got)
+	}
+	if a.pendingSubAgentMailboxes[0] == nil || a.pendingSubAgentMailboxes[0].MessageID != "worker-1-1" {
+		t.Fatalf("pending completion mailbox = %#v, want worker-1-1", a.pendingSubAgentMailboxes[0])
+	}
+	if a.emitGlobalIdleIfReady() {
+		t.Fatal("global idle emitted while the main summary turn was active")
 	}
 }
 

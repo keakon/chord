@@ -9,6 +9,9 @@ import (
 )
 
 func (s *SubAgent) handleUserInput(input pendingUserMessage) {
+	if input.DrainContextAppends {
+		s.drainContextAppendsBeforeTurn()
+	}
 	turn := s.newTurn()
 	s.llmRequestInFlight.Store(true)
 
@@ -40,6 +43,17 @@ func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 
 	messages := s.ctxMgr.Snapshot()
 	s.asyncCallLLMWithFlightMarked(turn, messages)
+}
+
+func (s *SubAgent) drainContextAppendsBeforeTurn() {
+	for {
+		s.refillContextAppendChannelFromOverflow()
+		pending, ok := s.tryReceiveContextAppend()
+		if !ok {
+			return
+		}
+		s.appendContextOnly(pending)
+	}
 }
 
 func (s *SubAgent) TryEnqueueContextAppend(msg message.Message) bool {

@@ -37,7 +37,7 @@ func (a *MainAgent) hasOutstandingMailboxPressureForRecovery() bool {
 	if a == nil {
 		return false
 	}
-	return len(a.pendingSubAgentMailboxes) > 0 || a.activeSubAgentMailbox != nil || len(a.activeSubAgentMailboxes) > 0 || len(a.subAgentInbox.urgent) > 0 || len(a.subAgentInbox.normal) > 0 || len(a.ownedSubAgentMailboxes) > 0
+	return len(a.pendingSubAgentMailboxes) > 0 || a.activeSubAgentMailbox != nil || len(a.activeSubAgentMailboxes) > 0
 }
 
 func (a *MainAgent) chooseCompactionResumeMode(userIntent string) string {

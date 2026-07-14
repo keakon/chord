@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strings"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -218,7 +217,7 @@ func (m *Model) resetTimingStateForSessionRestore() {
 }
 
 func (m *Model) markRequestProgressBaseline(agentID string) {
-	if agentID == "" || agentID == "main" || strings.HasPrefix(agentID, "main-") {
+	if agentID == "" || agentID == "main" {
 		agentID = "main"
 	}
 	state, ok := m.requestProgress[agentID]

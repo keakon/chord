@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 func (a *MainAgent) handleSubAgentStateChangedEvent(evt Event) {
@@ -40,7 +42,6 @@ func (a *MainAgent) handleSubAgentStateChangedEvent(evt Event) {
 		a.loopState.markProgress()
 		a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: string(SubAgentStateCancelled), Message: payload.Summary})
 	}
-	a.drainOwnedSubAgentMailboxes(evt.SourceID)
 }
 
 func (a *MainAgent) handleSubAgentProgressUpdatedEvent(evt Event) {
@@ -97,7 +98,11 @@ func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {
 		status = "error"
 	}
 	a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: status, Message: reason})
-	a.closeSubAgent(evt.SourceID)
+	if sub.semHeld {
+		a.releaseSubAgentSlot(sub)
+	}
+	a.fileTrack.ReleaseAll(evt.SourceID)
+	tools.StopAllSpawnedForAgent(evt.SourceID, "terminated on subagent stop")
 }
 
 func firstReplyMessageID(sub *SubAgent) string {

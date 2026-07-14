@@ -273,25 +273,32 @@ func (a *MainAgent) sendMessageToSubAgentNow(callerAgentID, callerTaskID, taskID
 }
 
 func (a *MainAgent) deliverMessageToSubAgent(sub *SubAgent, message, kind string) (string, string, error) {
+	return a.deliverMessageToSubAgentWithMode(sub, message, kind, false)
+}
+
+func (a *MainAgent) deliverManualMessageToSubAgent(sub *SubAgent, message, kind string) (string, string, error) {
+	return a.deliverMessageToSubAgentWithMode(sub, message, kind, true)
+}
+
+func (a *MainAgent) deliverMessageToSubAgentWithMode(sub *SubAgent, message, kind string, manual bool) (string, string, error) {
 	if sub == nil {
 		return "", "", fmt.Errorf("missing worker")
 	}
 	state := sub.State()
-	switch state {
-	case SubAgentStateFailed, SubAgentStateCancelled:
-		return "", "", fmt.Errorf("SubAgent %s for task %s is %s; follow-up is not allowed", sub.instanceID, sub.taskID, state)
-	}
 
 	status := "queued"
 	statusMessage := "message delivered to running worker"
 	payload := normalizeSubAgentMessage(kind, message)
 	replyKind := normalizeReplyKind(kind)
-	needsResume := state == SubAgentStateWaitingMain || state == SubAgentStateWaitingDescendant || state == SubAgentStateCompleted || state == SubAgentStateIdle
+	needsResume := state != SubAgentStateRunning
 
 	if needsResume {
 		if err := a.acquireSubAgentSlot(sub); err != nil {
 			return "", "", err
 		}
+	}
+	if manual {
+		a.mailboxDeliveryPaused.Store(false)
 	}
 
 	targetMailboxID := strings.TrimSpace(sub.LastMailboxID())
@@ -319,9 +326,11 @@ func (a *MainAgent) deliverMessageToSubAgent(sub *SubAgent, message, kind string
 
 	if needsResume {
 		a.markSubAgentReactivated(sub, message)
-		sub.InjectUserMessage(payload)
 		status = "resumed"
 		statusMessage = "message delivered and worker resumed"
+	}
+	if manual {
+		sub.InjectManualUserMessage(payload, a.drainOwnedSubAgentMailboxes(sub.instanceID))
 	} else {
 		sub.InjectUserMessage(payload)
 	}
@@ -329,7 +338,6 @@ func (a *MainAgent) deliverMessageToSubAgent(sub *SubAgent, message, kind string
 	a.saveRecoverySnapshot()
 	a.persistSubAgentMeta(sub)
 	a.syncTaskRecordFromSub(sub, "")
-	a.drainOwnedSubAgentMailboxes(sub.instanceID)
 	return status, statusMessage, nil
 }
 

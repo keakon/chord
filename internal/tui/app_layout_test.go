@@ -49,6 +49,18 @@ func TestRightPanelHiddenUsesFullWidth(t *testing.T) {
 	}
 }
 
+func TestCancelledSubAgentStillShowsInputArea(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.mode = ModeInsert
+	m.focusedAgentID = "explorer-35"
+	m.sidebar.UpdateStatus("explorer-35", "cancelled")
+
+	layout := m.generateLayout(m.width, m.height)
+	if layout.input.Dy() == 0 {
+		t.Fatal("cancelled SubAgent input area is hidden")
+	}
+}
+
 // TestRightPanelVisibilityHysteresis pins the show/hide threshold behaviour so
 // the flicker-avoiding hysteresis band (116-119) keeps the current state.
 func TestRightPanelVisibilityHysteresis(t *testing.T) {

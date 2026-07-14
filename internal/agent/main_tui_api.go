@@ -1,15 +1,12 @@
 package agent
 
 import (
-	"context"
-	"fmt"
 	"strings"
 
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/tools"
 )
 
 // isTUILocalOnlySlashCommand reports whether content is a local-only slash
@@ -76,23 +73,6 @@ func (a *MainAgent) executeLocalOnlySlashCommand(content string, _ []message.Con
 	}
 }
 
-func (a *MainAgent) focusedSubAgentControlContext(focused *SubAgent) context.Context {
-	if a == nil {
-		return context.Background()
-	}
-	ctx := a.parentCtx
-	if focused == nil {
-		return ctx
-	}
-	if agentID := focused.OwnerAgentID(); agentID != "" {
-		ctx = tools.WithAgentID(ctx, agentID)
-	}
-	if taskID := focused.OwnerTaskID(); taskID != "" {
-		ctx = tools.WithTaskID(ctx, taskID)
-	}
-	return ctx
-}
-
 // SendUserMessage enqueues a user message for processing. It is safe to call
 // from any goroutine (typically the TUI input handler).
 //
@@ -107,31 +87,19 @@ func (a *MainAgent) SendUserMessage(content string) {
 	}
 	// Route to focused SubAgent if one is active.
 	if focused := a.validFocusedSubAgent(); focused != nil {
-		switch focused.State() {
-		case SubAgentStateRunning:
-			focused.InjectUserMessage(content)
-			return
-		case SubAgentStateWaitingMain:
-			taskID := strings.TrimSpace(focused.taskID)
-			if taskID == "" {
-				a.emitToTUI(ToastEvent{Message: fmt.Sprintf("SubAgent %s is %s; direct input is disabled", focused.instanceID, focused.State()), Level: "warn", AgentID: focused.instanceID})
-				return
-			}
-			if _, err := a.NotifySubAgent(a.focusedSubAgentControlContext(focused), taskID, content, "reply"); err != nil {
-				a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: focused.instanceID})
-			}
-			return
-		case SubAgentStateCompleted, SubAgentStateIdle:
-			taskID := strings.TrimSpace(focused.taskID)
-			if taskID == "" {
-				a.emitToTUI(ToastEvent{Message: fmt.Sprintf("SubAgent %s is %s; direct input is disabled", focused.instanceID, focused.State()), Level: "warn", AgentID: focused.instanceID})
-				return
-			}
-			if _, err := a.NotifySubAgent(a.focusedSubAgentControlContext(focused), taskID, content, "follow_up"); err != nil {
-				a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: focused.instanceID})
-			}
+		if focused.State() == SubAgentStateRunning {
+			a.mailboxDeliveryPaused.Store(false)
+			focused.InjectManualUserMessage(content, a.drainOwnedSubAgentMailboxes(focused.instanceID))
 			return
 		}
+		kind := "follow_up"
+		if focused.State() == SubAgentStateWaitingMain {
+			kind = "reply"
+		}
+		if _, _, err := a.deliverManualMessageToSubAgent(focused, content, kind); err != nil {
+			a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: focused.instanceID})
+		}
+		return
 	}
 	a.sendEvent(Event{
 		Type:    EventUserMessage,
@@ -152,11 +120,11 @@ func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
 		return
 	}
 	if focused := a.validFocusedSubAgent(); focused != nil {
-		if focused.State() != SubAgentStateRunning {
-			a.emitToTUI(ToastEvent{Message: fmt.Sprintf("SubAgent %s is %s; direct input is disabled", focused.instanceID, focused.State()), Level: "warn", AgentID: focused.instanceID})
+		if !a.reactivateFocusedSubAgentForManualInput(focused) {
 			return
 		}
-		focused.InjectUserMessageWithParts(parts)
+		a.mailboxDeliveryPaused.Store(false)
+		focused.InjectManualUserMessageWithParts(parts, a.drainOwnedSubAgentMailboxes(focused.instanceID))
 		return
 	}
 	a.sendEvent(Event{
@@ -220,16 +188,27 @@ func (a *MainAgent) AppendContextMessage(msg message.Message) {
 	}
 	msg.Role = "user"
 	if focused := a.validFocusedSubAgent(); focused != nil {
-		if focused.State() != SubAgentStateRunning {
-			a.emitToTUI(ToastEvent{Message: fmt.Sprintf("SubAgent %s is %s; direct input is disabled", focused.instanceID, focused.State()), Level: "warn", AgentID: focused.instanceID})
-			return
-		}
 		if !focused.TryEnqueueContextAppend(msg) {
 			log.Warnf("subagent context append rejected agent_id=%v state=%v", focused.instanceID, focused.State())
 		}
 		return
 	}
 	a.sendEvent(Event{Type: EventAppendContext, Payload: msg})
+}
+
+func (a *MainAgent) reactivateFocusedSubAgentForManualInput(sub *SubAgent) bool {
+	if sub == nil || sub.State() == SubAgentStateRunning {
+		return true
+	}
+	if err := a.acquireSubAgentSlot(sub); err != nil {
+		a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: sub.instanceID})
+		return false
+	}
+	a.markSubAgentReactivated(sub, "Resumed from user input")
+	a.saveRecoverySnapshot()
+	a.persistSubAgentMeta(sub)
+	a.syncTaskRecordFromSub(sub, "")
+	return true
 }
 
 // Events returns a read-only channel of AgentEvents for the TUI to consume.

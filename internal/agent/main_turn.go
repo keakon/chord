@@ -378,7 +378,7 @@ func (a *MainAgent) newTurn() {
 	a.turn.streamingToolExec = NewStreamingToolExecutor(a.turn.ID, ctx, a.emitToTUI, a.executeToolCallSpeculative)
 	a.turn.streamingToolExec.SetProjectRoot(a.projectRoot)
 	a.turn.streamingToolExec.SetTraceCallbacks(a.recordToolTraceSpeculativeStart, a.recordToolTraceFirstVisibleResult, a.recordToolTraceSpeculativeDiscard)
-	a.emitToTUI(RequestCycleStartedEvent{AgentID: a.instanceID, TurnID: a.turn.ID})
+	a.emitToTUI(RequestCycleStartedEvent{AgentID: identity.MainAgentID, TurnID: a.turn.ID})
 	a.turnMu.Unlock()
 	log.Debugf("new turn created turn_id=%v", a.turn.ID)
 }
@@ -494,10 +494,12 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	if !handledIdleBarrier {
 		a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
 	}
+	startedPendingUserTurn := false
 	if !pausePendingDrain && !handledIdleBarrier {
 		a.drainPendingUserMessages()
+		startedPendingUserTurn = a.turn != nil
 	}
-	if a.turn == nil && !skipMailboxDrain {
+	if !pausePendingDrain && !startedPendingUserTurn && a.turn == nil && !skipMailboxDrain {
 		a.drainSubAgentInbox()
 	}
 }
@@ -549,6 +551,7 @@ func (a *MainAgent) drainPendingUserMessages() {
 	}
 	var batch []message.Message
 	var consumed []consumedPendingDraft
+	manualInputConsumed := false
 	for _, p := range pending {
 		content := pendingUserMessageText(p)
 		if a.handleLocalOnlySlashCommands(content, p.Parts, false) {
@@ -563,12 +566,16 @@ func (a *MainAgent) drainPendingUserMessages() {
 		}
 		batch = append(batch, m)
 		consumed = append(consumed, consumedPendingDraft{draftID: p.DraftID, msg: m})
+		manualInputConsumed = manualInputConsumed || p.FromUser
 	}
 	if len(batch) == 0 {
 		return
 	}
 
 	log.Debugf("draining pending user messages count=%v", len(batch))
+	if manualInputConsumed {
+		a.stageNextSubAgentMailboxBatch()
+	}
 	a.newTurn()
 	turnID := a.turn.ID
 	turnCtx := a.turn.Ctx

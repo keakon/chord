@@ -112,7 +112,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		if evt.Type != prev.Type {
 			now := time.Now()
 			normalizedAgentID := evt.AgentID
-			if normalizedAgentID == "" || normalizedAgentID == "main" || strings.HasPrefix(normalizedAgentID, "main-") {
+			if normalizedAgentID == "" || normalizedAgentID == "main" {
 				normalizedAgentID = "main"
 			}
 			if lastChanged, ok := m.activityLastChanged[evt.AgentID]; !ok || now.Sub(lastChanged) >= 100*time.Millisecond {
@@ -155,7 +155,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		return true, effects
 	case agent.RequestProgressEvent:
 		agentID := evt.AgentID
-		if agentID == "" || agentID == "main" || strings.HasPrefix(agentID, "main-") {
+		if agentID == "" || agentID == "main" {
 			agentID = "main"
 		}
 		if !evt.Done {
@@ -180,7 +180,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		return true, effects
 	case agent.RequestCycleStartedEvent:
 		agentID := evt.AgentID
-		if agentID == "" || agentID == "main" || strings.HasPrefix(agentID, "main-") {
+		if agentID == "" || agentID == "main" {
 			agentID = "main"
 		}
 		if agentID == "main" {

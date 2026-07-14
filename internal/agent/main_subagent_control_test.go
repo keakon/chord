@@ -309,16 +309,16 @@ func startMainAgentLoopForTest(t *testing.T, a *MainAgent) context.CancelFunc {
 	return cancel
 }
 
-func TestCompletedMailboxesAreBatchedIntoSingleMainTurn(t *testing.T) {
+func TestManualMainContinueBatchesCompletedMailboxesIntoSingleTurn(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{
 		{MessageID: "a-1", AgentID: "worker-a", TaskID: "task-a", Kind: SubAgentMailboxKindCompleted, Priority: SubAgentMailboxPriorityUrgent, Summary: "done a"},
 		{MessageID: "b-1", AgentID: "worker-b", TaskID: "task-b", Kind: SubAgentMailboxKindCompleted, Priority: SubAgentMailboxPriorityUrgent, Summary: "done b"},
 	}
 
-	a.drainSubAgentInbox()
+	a.handleContinueFromContext(Event{Type: EventContinue, Payload: manualContinueEvent{}})
 	if a.turn == nil {
-		t.Fatal("expected drainSubAgentInbox to start a main turn")
+		t.Fatal("expected manual continue to start a main turn")
 	}
 	if got := len(a.pendingSubAgentMailboxes); got != 2 {
 		t.Fatalf("pending mailbox batch len = %d, want 2", got)
@@ -331,6 +331,30 @@ func TestCompletedMailboxesAreBatchedIntoSingleMainTurn(t *testing.T) {
 	}
 	if got := len(a.subAgentInbox.urgent); got != 0 {
 		t.Fatalf("len(urgent inbox) = %d, want 0 after batching", got)
+	}
+}
+
+func TestManualMainUserMessageStagesMailboxBeforeTurn(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
+		MessageID: "done-1",
+		AgentID:   "worker-a",
+		TaskID:    "task-a",
+		Kind:      SubAgentMailboxKindCompleted,
+		Priority:  SubAgentMailboxPriorityUrgent,
+		Summary:   "done",
+	}}
+
+	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "review the result"})
+
+	if a.turn == nil {
+		t.Fatal("manual user message did not start a main turn")
+	}
+	if got := len(a.pendingSubAgentMailboxes); got != 1 {
+		t.Fatalf("pending mailbox batch len = %d, want 1", got)
+	}
+	if got := len(a.subAgentInbox.urgent); got != 0 {
+		t.Fatalf("urgent inbox len = %d, want 0 after manual input", got)
 	}
 }
 
@@ -363,15 +387,12 @@ func TestPrepareSubAgentMailboxBatchForTurnContinuationStagesDecisionMailbox(t *
 	if a.activeSubAgentMailbox == nil || a.activeSubAgentMailbox.MessageID != "wake-1" {
 		t.Fatalf("activeSubAgentMailbox = %#v, want wake-1", a.activeSubAgentMailbox)
 	}
-	if !a.activeSubAgentMailboxAck {
-		t.Fatal("expected staged mailbox batch to await ack")
-	}
 	if got := len(a.subAgentInbox.urgent); got != 0 {
 		t.Fatalf("len(urgent inbox) = %d, want 0 after staging", got)
 	}
 }
 
-func TestClosedMainOwnedCompletedMailboxStillQueuesForMain(t *testing.T) {
+func TestRetainedMainOwnedCompletedMailboxStillQueuesForMain(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-root")
 	sub.agentDefName = "worker"
@@ -383,8 +404,8 @@ func TestClosedMainOwnedCompletedMailboxStillQueuesForMain(t *testing.T) {
 		Payload:  &AgentResult{Summary: "root task done"},
 	})
 
-	if got := a.subAgentByID(sub.instanceID); got != nil {
-		t.Fatalf("subAgentByID(%q) = %#v, want nil after close", sub.instanceID, got)
+	if got := a.subAgentByID(sub.instanceID); got != sub {
+		t.Fatalf("subAgentByID(%q) = %#v, want retained completed worker", sub.instanceID, got)
 	}
 	foundDone := false
 	for len(a.outputCh) > 0 {
@@ -1391,7 +1412,7 @@ func TestSessionSwitchInvalidatesOldTaskID(t *testing.T) {
 	}
 }
 
-func TestCompletedWorkerClosesImmediatelyAndPersistsTaskRecord(t *testing.T) {
+func TestCompletedWorkerRemainsAvailableAndPersistsTaskRecord(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-5")
 	a.handleAgentDone(Event{
@@ -1399,8 +1420,8 @@ func TestCompletedWorkerClosesImmediatelyAndPersistsTaskRecord(t *testing.T) {
 		Payload:  &AgentResult{Summary: "done"},
 	})
 
-	if got := a.subAgentByID(sub.instanceID); got != nil {
-		t.Fatal("expected completed worker to close immediately")
+	if got := a.subAgentByID(sub.instanceID); got != sub {
+		t.Fatal("expected completed worker to remain available for manual continue")
 	}
 	record := a.taskRecordByTaskID(sub.taskID)
 	if record == nil {
@@ -1411,7 +1432,41 @@ func TestCompletedWorkerClosesImmediatelyAndPersistsTaskRecord(t *testing.T) {
 	}
 }
 
-func TestSendMessageToCompletedTaskRehydratesClosedWorker(t *testing.T) {
+func TestCompletedChildReleasesSlotWhileParentWaitsForManualContinue(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
+	parent.instanceID = "worker-parent"
+	parent.setState(SubAgentStateWaitingDescendant, "waiting for child")
+	parent.semHeld = false
+
+	child := newControllableTestSubAgent(t, a, "adhoc-child")
+	child.instanceID = "worker-child"
+	child.ownerAgentID = parent.instanceID
+	child.ownerTaskID = parent.taskID
+	child.joinToOwner = true
+	child.semHeld = true
+	a.sem <- struct{}{}
+
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[parent.instanceID] = parent
+	a.subs.subAgents[child.instanceID] = child
+	a.subs.mu.Unlock()
+
+	a.handleAgentDone(Event{SourceID: child.instanceID, Payload: &AgentResult{Summary: "done"}})
+
+	if child.semHeld {
+		t.Fatal("completed child still holds a semaphore slot")
+	}
+	if parent.semHeld {
+		t.Fatal("waiting parent acquired a slot before manual continue")
+	}
+	if got := len(a.sem); got != 0 {
+		t.Fatalf("len(a.sem) = %d, want 0 after child completion", got)
+	}
+}
+
+func TestSendMessageToCompletedTaskResumesSameWorker(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"restorer": {
@@ -1440,18 +1495,18 @@ func TestSendMessageToCompletedTaskRehydratesClosedWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NotifySubAgent: %v", err)
 	}
-	if !handle.Rehydrated {
-		t.Fatal("expected rehydrated handle")
+	if handle.Rehydrated {
+		t.Fatal("completed live worker should resume without rehydration")
 	}
-	if handle.PreviousAgentID != oldInstanceID {
-		t.Fatalf("handle.PreviousAgentID = %q, want %q", handle.PreviousAgentID, oldInstanceID)
+	if handle.PreviousAgentID != "" {
+		t.Fatalf("handle.PreviousAgentID = %q, want empty", handle.PreviousAgentID)
 	}
-	if handle.AgentID == oldInstanceID {
-		t.Fatalf("handle.AgentID = %q, want new instance", handle.AgentID)
+	if handle.AgentID != oldInstanceID {
+		t.Fatalf("handle.AgentID = %q, want same instance %q", handle.AgentID, oldInstanceID)
 	}
 	restored := a.subAgentByTaskID("adhoc-13")
 	if restored == nil {
-		t.Fatal("expected rehydrated live worker")
+		t.Fatal("expected retained live worker")
 	}
 	if restored.instanceID != handle.AgentID {
 		t.Fatalf("restored.instanceID = %q, want %q", restored.instanceID, handle.AgentID)
@@ -1466,8 +1521,8 @@ func TestSendMessageToCompletedTaskRehydratesClosedWorker(t *testing.T) {
 	if record.LatestInstanceID != handle.AgentID {
 		t.Fatalf("record.LatestInstanceID = %q, want %q", record.LatestInstanceID, handle.AgentID)
 	}
-	if len(record.InstanceHistory) != 2 {
-		t.Fatalf("len(record.InstanceHistory) = %d, want 2", len(record.InstanceHistory))
+	if len(record.InstanceHistory) != 1 {
+		t.Fatalf("len(record.InstanceHistory) = %d, want 1", len(record.InstanceHistory))
 	}
 }
 
@@ -1482,7 +1537,40 @@ func TestWaitingMainLifecycleExpiresAfterUserTurns(t *testing.T) {
 	}
 	a.sweepSubAgentLifecycle()
 
-	if got := a.subAgentByID(sub.instanceID); got != nil {
-		t.Fatal("expected waiting_main worker to expire and close")
+	if got := a.subAgentByID(sub.instanceID); got != sub {
+		t.Fatal("expected expired waiting_main worker to remain available")
+	}
+	if got := sub.State(); got != SubAgentStateCancelled {
+		t.Fatalf("sub.State() = %q, want %q", got, SubAgentStateCancelled)
+	}
+}
+
+func TestTerminalSubAgentsRemainAvailableAfterLifecycleSweep(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	failed := newControllableTestSubAgent(t, a, "adhoc-failed")
+	failed.instanceID = "worker-failed"
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[failed.instanceID] = failed
+	a.subs.mu.Unlock()
+	failed.setState(SubAgentStateFailed, "request failed")
+	a.noteSubAgentStateTransition(failed, SubAgentStateFailed)
+	cancelled := newControllableTestSubAgent(t, a, "adhoc-cancelled")
+	cancelled.instanceID = "worker-cancelled"
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[cancelled.instanceID] = cancelled
+	a.subs.mu.Unlock()
+	cancelled.setState(SubAgentStateCancelled, "cancelled by user")
+	a.noteSubAgentStateTransition(cancelled, SubAgentStateCancelled)
+
+	a.explicitUserTurnCount += waitingMainExpiryUserTurns + 1
+	a.sweepSubAgentLifecycle()
+
+	if got := a.subAgentByID(failed.instanceID); got != failed {
+		t.Fatal("failed SubAgent was removed by lifecycle sweep")
+	}
+	if got := a.subAgentByID(cancelled.instanceID); got != cancelled {
+		t.Fatal("cancelled SubAgent was removed by lifecycle sweep")
 	}
 }

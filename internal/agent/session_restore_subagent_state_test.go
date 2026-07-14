@@ -16,7 +16,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestRestoreLoadedSubAgentsKeepsCompletedState(t *testing.T) {
+func TestRestoreLoadedSubAgentsNormalizesCompletedStateToIdle(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -48,15 +48,15 @@ func TestRestoreLoadedSubAgentsKeepsCompletedState(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("len(GetSubAgents()) = %d, want 1", len(got))
 	}
-	if got[0].State != string(SubAgentStateCompleted) {
-		t.Fatalf("state = %q, want %q", got[0].State, SubAgentStateCompleted)
+	if got[0].State != string(SubAgentStateIdle) {
+		t.Fatalf("state = %q, want %q", got[0].State, SubAgentStateIdle)
 	}
 	if got[0].LastSummary != "done summary" {
 		t.Fatalf("LastSummary = %q, want done summary", got[0].LastSummary)
 	}
 }
 
-func TestRestoredIdleSubAgentContinueReactivatesWithoutAppendingMessage(t *testing.T) {
+func TestRestoredCancelledSubAgentContinueReactivatesWithoutAppendingMessage(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -86,8 +86,8 @@ func TestRestoredIdleSubAgentContinueReactivatesWithoutAppendingMessage(t *testi
 		TaskID:       "adhoc-3",
 		AgentDefName: "restorer",
 		TaskDesc:     "Investigate issue",
-		State:        SubAgentStateIdle,
-		LastSummary:  "Restored after shutdown",
+		State:        SubAgentStateCancelled,
+		LastSummary:  "Cancelled before shutdown",
 		Messages:     []message.Message{{Role: "user", Content: "Investigate issue"}},
 	}})
 	if count != 1 {
@@ -194,7 +194,7 @@ func TestRestoreLoadedSubAgentsRestoresOwnerDepthAndPendingComplete(t *testing.T
 	}
 }
 
-func TestRestoreLoadedSubAgentsDrainsOwnedMailboxAfterOwnerRestore(t *testing.T) {
+func TestRestoreLoadedSubAgentsKeepsOwnedMailboxQueuedUntilManualContinue(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -236,16 +236,20 @@ func TestRestoreLoadedSubAgentsDrainsOwnedMailboxAfterOwnerRestore(t *testing.T)
 		t.Fatalf("restoreLoadedSubAgents() = %d, want 1", count)
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if got := len(a.ownedSubAgentMailboxes["worker-parent"]); got == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("ownedSubAgentMailboxes[worker-parent] still queued: %#v", a.ownedSubAgentMailboxes["worker-parent"])
-		}
-		time.Sleep(10 * time.Millisecond)
+	if got := len(a.ownedSubAgentMailboxes["worker-parent"]); got != 1 {
+		t.Fatalf("len(ownedSubAgentMailboxes[worker-parent]) after restore = %d, want 1", got)
 	}
+	restored := a.subAgentByID("worker-parent")
+	if restored == nil {
+		t.Fatal("restored parent missing")
+	}
+	if got := restored.State(); got != SubAgentStateIdle {
+		t.Fatalf("restored parent state = %q, want idle", got)
+	}
+	a.SwitchFocus(restored.instanceID)
+	a.ContinueFromContext()
+
+	deadline := time.Now().Add(2 * time.Second)
 
 	var ackErr error
 	var acks map[string]SubAgentMailboxAckRecord
@@ -261,6 +265,47 @@ func TestRestoreLoadedSubAgentsDrainsOwnedMailboxAfterOwnerRestore(t *testing.T)
 			t.Fatalf("ack for %s not recorded: %#v", msg.MessageID, acks[msg.MessageID])
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestRestoredMailboxEventWaitsForManualSubAgentContinue(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-parent")
+	sub.instanceID = "worker-parent"
+	sub.setState(SubAgentStateIdle, "restored parent")
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.mu.Unlock()
+	a.mailboxDeliveryPaused.Store(true)
+
+	a.handleSubAgentMailboxEvent(Event{
+		Type: EventSubAgentMailbox,
+		Payload: &SubAgentMailboxMessage{
+			MessageID:    "worker-child-restore-1",
+			AgentID:      "worker-child",
+			TaskID:       "adhoc-child",
+			OwnerAgentID: sub.instanceID,
+			OwnerTaskID:  sub.taskID,
+			Kind:         SubAgentMailboxKindCompleted,
+			Priority:     SubAgentMailboxPriorityUrgent,
+			Summary:      "child completed after restore",
+		},
+	})
+
+	if got := sub.State(); got != SubAgentStateIdle {
+		t.Fatalf("mailbox event resumed restored parent, state = %q", got)
+	}
+	if got := len(a.ownedSubAgentMailboxes[sub.instanceID]); got != 1 {
+		t.Fatalf("owned mailbox count before manual continue = %d, want 1", got)
+	}
+	a.SwitchFocus(sub.instanceID)
+	a.ContinueFromContext()
+	if a.mailboxDeliveryPaused.Load() {
+		t.Fatal("manual SubAgent continue did not release mailbox delivery barrier")
+	}
+	if got := len(a.ownedSubAgentMailboxes[sub.instanceID]); got != 0 {
+		t.Fatalf("owned mailbox count after manual continue = %d, want 0", got)
 	}
 }
 
@@ -309,24 +354,24 @@ func TestRestoreSessionAtStartupUsesSnapshotSubAgentState(t *testing.T) {
 
 	subagents := a.GetSubAgents()
 	if len(subagents) != 1 {
-		t.Fatalf("len(GetSubAgents()) = %d, want restored terminal worker visible", len(subagents))
+		t.Fatalf("len(GetSubAgents()) = %d, want restored worker visible", len(subagents))
 	}
-	if subagents[0].InstanceID != "agent-1" || subagents[0].State != string(SubAgentStateCancelled) {
-		t.Fatalf("GetSubAgents()[0] = %+v, want agent-1 in cancelled state", subagents[0])
+	if subagents[0].InstanceID != "agent-1" || subagents[0].State != string(SubAgentStateIdle) {
+		t.Fatalf("GetSubAgents()[0] = %+v, want agent-1 restored idle", subagents[0])
 	}
 	record := a.taskRecordByTaskID("adhoc-9")
 	if record == nil {
 		t.Fatal("expected durable task record for cancelled worker")
 	}
-	if record.State != string(SubAgentStateCancelled) {
-		t.Fatalf("record.State = %q, want %q", record.State, SubAgentStateCancelled)
+	if record.State != string(SubAgentStateIdle) {
+		t.Fatalf("record.State = %q, want %q", record.State, SubAgentStateIdle)
 	}
 	if record.LastSummary != "Cancelled by MainAgent" {
 		t.Fatalf("record.LastSummary = %q, want %q", record.LastSummary, "Cancelled by MainAgent")
 	}
 }
 
-func TestCancelledSubAgentSnapshotOverridesPreviouslyRunningStateOnRestore(t *testing.T) {
+func TestCancelledSubAgentSnapshotRestoresAgentIdle(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "cancelled-sub-state")
 	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
@@ -361,8 +406,8 @@ func TestCancelledSubAgentSnapshotOverridesPreviouslyRunningStateOnRestore(t *te
 	if restoredSub == nil {
 		t.Fatal("cancelled SubAgent missing after restore")
 	}
-	if got := restoredSub.State(); got != SubAgentStateCancelled {
-		t.Fatalf("restored state = %q, want %q", got, SubAgentStateCancelled)
+	if got := restoredSub.State(); got != SubAgentStateIdle {
+		t.Fatalf("restored state = %q, want %q", got, SubAgentStateIdle)
 	}
 }
 

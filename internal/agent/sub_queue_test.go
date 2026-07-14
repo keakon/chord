@@ -37,6 +37,7 @@ func TestSubAgentBusyTurnDefersQueuedUserInput(t *testing.T) {
 		inputCh: make(chan pendingUserMessage, 1),
 		turn:    &Turn{ID: 1},
 	}
+	sub.setState(SubAgentStateRunning, "working")
 	sub.inputCh <- pendingUserMessage{DraftID: "draft-1", Content: "follow up", FromUser: true}
 	sub.llmRequestInFlight.Store(true)
 
@@ -45,6 +46,70 @@ func TestSubAgentBusyTurnDefersQueuedUserInput(t *testing.T) {
 	}
 	if got := len(sub.inputCh); got != 1 {
 		t.Fatalf("queued input count = %d, want 1", got)
+	}
+}
+
+func TestSubAgentTerminalStateDefersQueuedUserInputUntilReactivated(t *testing.T) {
+	for _, state := range []SubAgentState{SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled} {
+		t.Run(string(state), func(t *testing.T) {
+			sub := &SubAgent{
+				inputCh: make(chan pendingUserMessage, 1),
+				turn:    &Turn{ID: 1},
+			}
+			sub.setState(state, "stopped")
+			sub.inputCh <- pendingUserMessage{DraftID: "draft-1", Content: "follow up", FromUser: true}
+
+			if sub.canStartUserTurn() {
+				t.Fatalf("canStartUserTurn() = true while state=%q", state)
+			}
+			if got := len(sub.inputCh); got != 1 {
+				t.Fatalf("queued input count = %d, want 1", got)
+			}
+
+			sub.setState(SubAgentStateRunning, "resumed")
+			if !sub.canStartUserTurn() {
+				t.Fatal("canStartUserTurn() = false after explicit reactivation")
+			}
+		})
+	}
+}
+
+func TestSubAgentContinueDoesNotReplaceRunningTurn(t *testing.T) {
+	sub := &SubAgent{
+		turn:       &Turn{ID: 7},
+		continueCh: make(chan continueMsg, 1),
+	}
+	sub.continueCh <- continueMsg{}
+
+	if !sub.tryHandleContinueSignal() {
+		t.Fatal("continue signal was not handled")
+	}
+	if sub.turn == nil || sub.turn.ID != 7 {
+		t.Fatalf("running turn = %#v, want original turn 7", sub.turn)
+	}
+}
+
+func TestSubAgentRestartContinueWaitsForInFlightRequest(t *testing.T) {
+	sub := &SubAgent{
+		turn:       &Turn{ID: 7},
+		continueCh: make(chan continueMsg, 1),
+	}
+	sub.llmRequestInFlight.Store(true)
+	sub.continueCh <- continueMsg{restartStoppedTurn: true, drainContextAppends: true}
+
+	if !sub.tryHandleContinueSignal() {
+		t.Fatal("continue signal was not handled")
+	}
+	if sub.pendingContinue == nil || !sub.pendingContinue.restartStoppedTurn || !sub.pendingContinue.drainContextAppends {
+		t.Fatalf("pendingContinue = %#v, want deferred restart", sub.pendingContinue)
+	}
+	if sub.tryHandlePendingContinue() {
+		t.Fatal("pending restart ran before the in-flight request exited")
+	}
+
+	sub.llmRequestInFlight.Store(false)
+	if sub.pendingContinue == nil {
+		t.Fatal("pending restart was lost when the request exited")
 	}
 }
 

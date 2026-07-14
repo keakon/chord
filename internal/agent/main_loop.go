@@ -169,7 +169,6 @@ func (a *MainAgent) hasQueuedAutomaticWork() bool {
 		strings.TrimSpace(a.pendingAutoContinuePrompt) != "" ||
 		strings.TrimSpace(a.pendingAutoContinueReplayPrompt) != "" ||
 		a.pendingCompactionResume != nil ||
-		a.hasOutstandingMailboxPressureForRecovery() ||
 		a.IsCompactionRunning() ||
 		a.mcpTransitionActive.Load()
 }

@@ -230,6 +230,19 @@ func applyMailboxAcks(msgs []SubAgentMailboxMessage, acks map[string]SubAgentMai
 	return out
 }
 
+func (a *MainAgent) isSubAgentMailboxConsumed(messageID string) bool {
+	messageID = strings.TrimSpace(messageID)
+	if a == nil || messageID == "" || strings.TrimSpace(a.sessionDir) == "" {
+		return false
+	}
+	acks, err := loadSubAgentMailboxAcks(a.sessionDir)
+	if err != nil {
+		return false
+	}
+	ack, ok := acks[messageID]
+	return ok && ack.Outcome == "consumed"
+}
+
 func truncateMailboxReplySummary(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {

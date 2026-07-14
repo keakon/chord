@@ -122,6 +122,7 @@ type SubAgent struct {
 	ctxAppendQueueMu  sync.Mutex
 	ctxAppendOverflow []message.Message
 	promotedToolQueue []*toolResult // event-loop-owned FIFO; avoids sending results back into the active loop
+	pendingContinue   *continueMsg  // event-loop-owned restart deferred until the current LLM request exits
 
 	// Idle timeout: starts when LLM returns pure text (no tool_calls).
 	// MainAgent auto-intervenes on timeout.
@@ -168,9 +169,8 @@ type SubAgent struct {
 	// concurrency semaphore. Set by CreateSubAgent; restored agents do not
 	// hold a slot (they are idle and don't count against the concurrency limit).
 	semHeld bool
-	// semBypassed is true when the worker was reactivated by a wake path
-	// without consuming a semaphore token, to avoid deadlocking parent/owner
-	// coordination. releaseSubAgentSlot must not drain a.sem in this case.
+	// Wake-path reactivation may temporarily bypass the semaphore when all
+	// tokens are held by descendants whose completion must resume this owner.
 	semBypassed bool
 
 	runtimeState subAgentRuntimeState

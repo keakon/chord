@@ -369,8 +369,8 @@ func TestHandleAgentDoneDoesNotAppendPseudoUserMessage(t *testing.T) {
 	if got := len(a.GetMessages()); got != 0 {
 		t.Fatalf("handleAgentDone polluted transcript, len(GetMessages()) = %d", got)
 	}
-	if got := len(a.GetSubAgents()); got != 0 {
-		t.Fatalf("len(GetSubAgents()) = %d, want 0 after immediate close", got)
+	if got := len(a.GetSubAgents()); got != 1 {
+		t.Fatalf("len(GetSubAgents()) = %d, want completed agent retained for manual continue", got)
 	}
 	if sub.State() != SubAgentStateCompleted {
 		t.Fatalf("sub.State() = %q, want %q", sub.State(), SubAgentStateCompleted)

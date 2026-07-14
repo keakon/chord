@@ -192,6 +192,10 @@ func (a *MainAgent) freezeCurrentSession(oldRecovery *recovery.RecoveryManager) 
 }
 
 func (a *MainAgent) resetSessionRuntimeState() {
+	a.mailboxDeliveryPaused.Store(false)
+	a.subAgentMailboxIDsMu.Lock()
+	a.subAgentMailboxIDs = make(map[string]struct{})
+	a.subAgentMailboxIDsMu.Unlock()
 	loopWasEnabled := a.loopState.Enabled
 	a.loopState.disable()
 	a.pendingLoopContinuation = nil

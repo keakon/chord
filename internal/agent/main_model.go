@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 )
 
@@ -245,7 +246,7 @@ func (a *MainAgent) switchModel(providerModel string, showToast bool) error {
 		effectiveRunningRef = selectedRef
 	}
 	a.emitToTUI(RunningModelChangedEvent{
-		AgentID:          a.instanceID,
+		AgentID:          identity.MainAgentID,
 		ProviderModelRef: selectedRef,
 		RunningModelRef:  effectiveRunningRef,
 	})

@@ -53,7 +53,7 @@ func (m *Model) focusedModelRefs() (runningRef, selectedRef string) {
 
 func normalizeRunningModelDisplayAgentID(agentID string) string {
 	agentID = strings.TrimSpace(agentID)
-	if agentID == "" || agentID == "main" || strings.HasPrefix(agentID, "main-") {
+	if agentID == "" || agentID == "main" {
 		return "main"
 	}
 	return agentID

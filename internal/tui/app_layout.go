@@ -27,9 +27,6 @@ const (
 
 // inputAreaHeight returns the height of the input area (separator line + content lines + bottom margin).
 func (m *Model) inputAreaHeight() int {
-	if m.isViewingReadOnlySubAgent() {
-		return 0
-	}
 	switch m.mode {
 	case ModeSearch:
 		return 1 // search bar only
@@ -59,12 +56,10 @@ func (m *Model) recalcViewportSize() {
 	vpHeight -= m.inputAreaHeight()
 	// Status bar always has its own row.
 	vpHeight -= 1
-	if !m.isViewingReadOnlySubAgent() {
-		attachLines := min(len(m.attachments), 5)
-		vpHeight -= attachLines
-		queueLines := min(len(m.visibleQueuedDrafts()), 3)
-		vpHeight -= queueLines
-	}
+	attachLines := min(len(m.attachments), 5)
+	vpHeight -= attachLines
+	queueLines := min(len(m.visibleQueuedDrafts()), 3)
+	vpHeight -= queueLines
 	if m.activeToast != nil {
 		vpHeight--
 	}

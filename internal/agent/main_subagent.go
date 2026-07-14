@@ -243,12 +243,7 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: "done", Message: fmt.Sprintf("SubAgent %s completed; focus switched back to main", evt.SourceID)})
 	}
 
-	owner := a.subAgentByID(sub.ownerAgentID)
-	transferredSlot := false
-	if owner != nil && owner.State() == SubAgentStateWaitingDescendant && len(a.outstandingJoinChildTaskIDs(owner.taskID)) == 0 && sub.semHeld && !owner.semHeld {
-		transferredSlot = a.transferSubAgentSlot(sub, owner)
-	}
-	if sub.semHeld && !transferredSlot {
+	if sub.semHeld {
 		a.releaseSubAgentSlot(sub)
 	}
 	a.emitActivity(evt.SourceID, ActivityIdle, "")

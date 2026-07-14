@@ -128,7 +128,7 @@ func (m *Model) maybeShowBackgroundCompletionTitle(agentID string, prev agent.Ac
 }
 
 func normalizeTitleAgentID(agentID string) string {
-	if agentID == "" || agentID == "main" || strings.HasPrefix(agentID, "main-") {
+	if agentID == "" || agentID == "main" {
 		return "main"
 	}
 	return agentID

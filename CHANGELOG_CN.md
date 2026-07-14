@@ -23,6 +23,7 @@
 
 ### 修复
 
+- 恢复会话时现在会将所有 agent 还原为 idle，并只加载 SubAgent mailbox，不会投递 mailbox 或自动发起请求；恢复的 mailbox 只有在用户明确继续或向所属 MainAgent/SubAgent 提交输入时才会投递，正常运行期间产生的实时 mailbox 仍会正常投递并唤醒所属 agent。completed、failed、cancelled SubAgent 会保留原 transcript 与 agent ID，仍可聚焦并手动继续，composer 也不会隐藏。请求进度和运行模型状态改为按精确 agent 身份记录，因此包括名称以 `main-` 开头的后台 agent 在内，都不会再让当前 agent 错误显示为忙碌。
 - `Shift+Tab` 现在始终保留可切换到 main agent 视图的路径。停止但未完成的 SubAgent 会继续留在视图切换序列中；即使当前焦点指向已失效的 SubAgent，也会回到 main，而不会卡在无法操作的视图。
 - 使用 `Esc` 取消 turn 时，如果保留的中断回复高于 viewport，现在会确保该 turn 的用户消息仍然可见；恢复以同类中断 turn 结尾的会话时也会从用户消息处打开，而不是定位到部分回复末尾，正常完成的回复仍保持原有的尾部跟随行为。
 - 当前查看的 SubAgent 在流式接收工具参数时，状态栏现在会正常显示已接收的响应字节数和事件数，不再一直停在 `0 B`。

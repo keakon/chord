@@ -194,9 +194,7 @@ func (b *restoredSubAgentBuilder) normalize() {
 	if b.state.TaskID == "" {
 		b.state.TaskID = "restored"
 	}
-	if b.state.State == SubAgentStateRunning {
-		b.state.State = SubAgentStateIdle
-	}
+	b.state.State = SubAgentStateIdle
 }
 
 func (b *restoredSubAgentBuilder) build() loadedSubAgentState {
@@ -489,6 +487,11 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	}
 
 	a.ctxMgr.RestoreMessages(append([]message.Message(nil), loaded.Messages...))
+	a.mailboxDeliveryPaused.Store(true)
+	a.pendingSubAgentMailboxes = nil
+	a.activeSubAgentMailboxes = nil
+	a.activeSubAgentMailbox = nil
+	a.activeSubAgentMailboxAck = false
 	restoredMessages := a.ctxMgr.Snapshot()
 	a.resetRuntimeEvidenceFromMessages(restoredMessages)
 	a.fileTrack = filelock.NewFileTracker()
@@ -556,6 +559,14 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		a.sessionTargetChangedFn(loaded.SessionPath)
 	}
 	a.subAgentInbox = newSubAgentInbox()
+	a.subAgentMailboxIDsMu.Lock()
+	a.subAgentMailboxIDs = make(map[string]struct{}, len(loaded.MailboxMessages))
+	for _, msg := range loaded.MailboxMessages {
+		if messageID := strings.TrimSpace(msg.MessageID); messageID != "" {
+			a.subAgentMailboxIDs[messageID] = struct{}{}
+		}
+	}
+	a.subAgentMailboxIDsMu.Unlock()
 	for _, msg := range loaded.MailboxMessages {
 		if msg.Consumed {
 			continue
@@ -573,9 +584,6 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		} else {
 			a.subAgentInbox.normal = append(a.subAgentInbox.normal, msg)
 		}
-	}
-	for agentID := range a.ownedSubAgentMailboxes {
-		a.drainOwnedSubAgentMailboxes(agentID)
 	}
 	a.refreshSubAgentInboxSummary()
 
@@ -648,7 +656,20 @@ func loadSubAgentMailboxMessages(sessionPath string) ([]SubAgentMailboxMessage, 
 	if err != nil {
 		return nil, err
 	}
-	return applyMailboxAcks(out, acks), nil
+	out = applyMailboxAcks(out, acks)
+	seen := make(map[string]struct{}, len(out))
+	deduped := out[:0]
+	for _, msg := range out {
+		messageID := strings.TrimSpace(msg.MessageID)
+		if messageID != "" {
+			if _, ok := seen[messageID]; ok {
+				continue
+			}
+			seen[messageID] = struct{}{}
+		}
+		deduped = append(deduped, msg)
+	}
+	return deduped, nil
 }
 
 func latestMailboxByAgentFromMessages(msgs []SubAgentMailboxMessage) map[string]restoredMailboxAgentState {
@@ -720,6 +741,7 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 	workDir, _ := os.Getwd()
 	restored := 0
 	for _, state := range states {
+		state.State = SubAgentStateIdle
 		agentDefName := state.AgentDefName
 		agentDef, err := a.resolveAgentDef(agentDefName)
 		if err != nil {
@@ -803,7 +825,6 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 		a.subs.mu.Lock()
 		a.subs.subAgents[state.InstanceID] = sub
 		a.subs.mu.Unlock()
-		a.drainOwnedSubAgentMailboxes(state.InstanceID)
 		a.persistSubAgentMeta(sub)
 		a.syncTaskRecordFromSub(sub, "")
 		go sub.runLoop()
@@ -1045,7 +1066,7 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 	a.llmClient.SetSessionID(targetID)
 	a.emitToTUI(SessionRestoredEvent{})
 	a.emitToTUI(ToastEvent{Message: result.infoMessage(), Level: "info"})
-	a.setIdleAndDrainPending()
+	a.setIdleForComposerEdit()
 }
 
 // SessionSummary holds display info for one session (current or list entry).

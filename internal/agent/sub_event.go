@@ -33,6 +33,9 @@ func (s *SubAgent) runLoop() {
 		if s.tryHandleContinueSignal() {
 			continue
 		}
+		if s.tryHandlePendingContinue() {
+			continue
+		}
 		if result, ok := s.dequeuePromotedToolResult(); ok {
 			s.resetIdleTimer()
 			s.handleToolResult(result)
@@ -58,10 +61,8 @@ func (s *SubAgent) runLoop() {
 			s.appendContextOnly(msg)
 			s.refillContextAppendChannelFromOverflow()
 
-		case <-s.continueCh:
-			if s.turn == nil {
-				s.handleContinue()
-			}
+		case msg := <-s.continueCh:
+			s.handleContinueSignal(msg)
 
 		case result := <-s.llmCh:
 			s.handleLLMResponse(result)
@@ -100,7 +101,7 @@ func (s *SubAgent) runLoop() {
 }
 
 func (s *SubAgent) canStartUserTurn() bool {
-	if s == nil || s.llmRequestInFlight.Load() {
+	if s == nil || s.State() != SubAgentStateRunning || s.llmRequestInFlight.Load() {
 		return false
 	}
 	if s.turn == nil || s.idleTimer != nil {
@@ -183,15 +184,44 @@ func (s *SubAgent) tryHandleContinueSignal() bool {
 	}
 	select {
 	case msg := <-s.continueCh:
-		if msg.cancelCurrentTurn {
-			s.cancelCurrentTurnFromLoop()
-			return true
-		}
-		if s.turn == nil {
-			s.handleContinue()
-		}
+		s.handleContinueSignal(msg)
 		return true
 	default:
 		return false
 	}
+}
+
+func (s *SubAgent) handleContinueSignal(msg continueMsg) {
+	if msg.cancelCurrentTurn {
+		s.pendingContinue = nil
+		s.cancelCurrentTurnFromLoop()
+		return
+	}
+	if s.llmRequestInFlight.Load() {
+		if msg.restartStoppedTurn {
+			pending := msg
+			s.pendingContinue = &pending
+		}
+		return
+	}
+	if s.turn == nil || msg.restartStoppedTurn {
+		s.handleContinueMessage(msg)
+	}
+}
+
+func (s *SubAgent) tryHandlePendingContinue() bool {
+	if s.pendingContinue == nil || s.llmRequestInFlight.Load() {
+		return false
+	}
+	msg := *s.pendingContinue
+	s.pendingContinue = nil
+	s.handleContinueMessage(msg)
+	return true
+}
+
+func (s *SubAgent) handleContinueMessage(msg continueMsg) {
+	if msg.drainContextAppends {
+		s.drainContextAppendsBeforeTurn()
+	}
+	s.handleContinue()
 }

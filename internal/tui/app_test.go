@@ -805,14 +805,14 @@ func TestRenderStatusBarShowsZeroByteDownloadForWaitingDownloadStates(t *testing
 	}
 }
 
-func TestRenderStatusBarShowsRequestProgressForMainRuntimeID(t *testing.T) {
+func TestRenderStatusBarKeepsMainPrefixedSubAgentProgressSeparate(t *testing.T) {
 	m := NewModelWithSize(nil, 180, 24)
 	m.mode = ModeNormal
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main-1", Bytes: 128 * 1024, Events: 42}})
 	plain := stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain, "↓ 128 KB · 42 events · 0s") {
-		t.Fatalf("status bar should map main runtime agent id to main progress lane, got %q", plain)
+	if strings.Contains(plain, "↓ 128 KB · 42 events") {
+		t.Fatalf("status bar should not map a main-prefixed subagent to the main progress lane, got %q", plain)
 	}
 }
 
@@ -5471,7 +5471,7 @@ func TestRunningModelChangedEventOverridesMainModelDisplayImmediately(t *testing
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback"}
 
 	m.handleAgentEvent(agentEventMsg{event: agent.RunningModelChangedEvent{
-		AgentID:          "main-1",
+		AgentID:          "main",
 		ProviderModelRef: "sharedchat/gpt-5.5@xhigh",
 		RunningModelRef:  "abrdns/gpt-5.5@xhigh",
 	}})
@@ -5506,7 +5506,7 @@ func TestInfoPanelFingerprintIncludesTransientRunningModelDisplay(t *testing.T) 
 	}
 	cachedOut := m.cachedInfoPanelOut
 
-	m.noteRunningModelDisplay("main-1", "sharedchat/gpt-5.5@xhigh", "abrdns/gpt-5.5@xhigh")
+	m.noteRunningModelDisplay("main", "sharedchat/gpt-5.5@xhigh", "abrdns/gpt-5.5@xhigh")
 	second := stripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(second, "abrdns/gpt-5.5@xhigh") {
 		t.Fatalf("info panel should include transient running model in fingerprint; got %q", second)
@@ -5530,7 +5530,7 @@ func TestRunningModelChangedEventDisplayClearsOnIdle(t *testing.T) {
 	m.rightPanelVisible = false
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback"}
 	m.handleAgentEvent(agentEventMsg{event: agent.RunningModelChangedEvent{
-		AgentID:          "main-1",
+		AgentID:          "main",
 		ProviderModelRef: "sharedchat/gpt-5.5@xhigh",
 		RunningModelRef:  "abrdns/gpt-5.5@xhigh",
 	}})

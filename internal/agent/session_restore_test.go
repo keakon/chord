@@ -762,13 +762,37 @@ func TestRestoreSessionAtStartupRestoresSubAgentMailboxState(t *testing.T) {
 	if err := a.RestoreSessionAtStartup(); err != nil {
 		t.Fatalf("RestoreSessionAtStartup: %v", err)
 	}
+	if a.currentTurn() != nil {
+		t.Fatal("restoring mailbox state started a main turn")
+	}
+	if !a.mailboxDeliveryPaused.Load() {
+		t.Fatal("restoring mailbox state did not pause mailbox delivery")
+	}
+	a.handleSubAgentMailboxEvent(Event{
+		Type:     EventSubAgentMailbox,
+		SourceID: "agent-1",
+		Payload: &SubAgentMailboxMessage{
+			MessageID: "agent-1-2",
+			AgentID:   "agent-1",
+			TaskID:    "restored",
+			Kind:      SubAgentMailboxKindCompleted,
+			Priority:  SubAgentMailboxPriorityUrgent,
+			Summary:   "completed after startup restore",
+		},
+	})
+	if a.currentTurn() != nil {
+		t.Fatal("mailbox event started a main turn before manual continuation")
+	}
+	if got := len(a.subAgentInbox.urgent); got != 2 {
+		t.Fatalf("urgent mailbox count before manual continuation = %d, want 2", got)
+	}
 
 	subagents := a.GetSubAgents()
 	if len(subagents) != 1 {
 		t.Fatalf("len(GetSubAgents()) = %d, want 1", len(subagents))
 	}
-	if subagents[0].State != string(SubAgentStateWaitingMain) {
-		t.Fatalf("subagents[0].State = %q, want %q", subagents[0].State, SubAgentStateWaitingMain)
+	if subagents[0].State != string(SubAgentStateIdle) {
+		t.Fatalf("subagents[0].State = %q, want %q", subagents[0].State, SubAgentStateIdle)
 	}
 	if subagents[0].LastSummary != "need approval to continue" {
 		t.Fatalf("subagents[0].LastSummary = %q, want %q", subagents[0].LastSummary, "need approval to continue")
@@ -788,7 +812,8 @@ func TestRestoreSessionAtStartupSkipsConsumedMailboxMessages(t *testing.T) {
 	if len(a.subAgentInbox.urgent) != 1 {
 		t.Fatalf("len(urgent) = %d, want 1", len(a.subAgentInbox.urgent))
 	}
-	a.drainSubAgentInbox()
+	a.mailboxDeliveryPaused.Store(false)
+	a.handleContinueFromContext(Event{Type: EventContinue, Payload: manualContinueEvent{}})
 	if a.activeSubAgentMailbox == nil {
 		t.Fatal("expected activeSubAgentMailbox after drain")
 	}
@@ -815,6 +840,89 @@ func TestRestoreSessionAtStartupSkipsConsumedMailboxMessages(t *testing.T) {
 	}
 	if len(a2.subAgentInbox.urgent) != 0 {
 		t.Fatalf("len(urgent) after consumed restore = %d, want 0", len(a2.subAgentInbox.urgent))
+	}
+	a2.handleSubAgentMailboxEvent(Event{
+		Type: EventSubAgentMailbox,
+		Payload: &SubAgentMailboxMessage{
+			MessageID:   "agent-1-1",
+			AgentID:     "agent-1",
+			TaskID:      "restored",
+			Kind:        SubAgentMailboxKindDecisionRequired,
+			Priority:    SubAgentMailboxPriorityInterrupt,
+			Summary:     "replayed after restore",
+			RequiresAck: true,
+		},
+	})
+	if len(a2.subAgentInbox.urgent) != 0 {
+		t.Fatalf("consumed replay was queued after restore, urgent=%d", len(a2.subAgentInbox.urgent))
+	}
+}
+
+func TestRestoredMailboxEventDeduplicatesQueuedMessageID(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "mailbox-replay-queued")
+	persistMailboxRestoreSession(t, sessionDir)
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := a.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+	a.handleSubAgentMailboxEvent(Event{
+		Type: EventSubAgentMailbox,
+		Payload: &SubAgentMailboxMessage{
+			MessageID:   "agent-1-1",
+			AgentID:     "agent-1",
+			TaskID:      "restored",
+			Kind:        SubAgentMailboxKindDecisionRequired,
+			Priority:    SubAgentMailboxPriorityInterrupt,
+			Summary:     "duplicate replay before consumption",
+			RequiresAck: true,
+		},
+	})
+	if got := len(a.subAgentInbox.urgent); got != 1 {
+		t.Fatalf("urgent mailbox count after duplicate replay = %d, want 1", got)
+	}
+	msgs, err := loadSubAgentMailboxMessages(sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxMessages: %v", err)
+	}
+	if got := len(msgs); got != 1 {
+		t.Fatalf("persisted mailbox count after duplicate replay = %d, want 1", got)
+	}
+}
+
+func TestRestoreSessionDeduplicatesPersistedMailboxMessageID(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "mailbox-duplicate-disk")
+	persistMailboxRestoreSession(t, sessionDir)
+
+	path := filepath.Join(sessionDir, "subagents", "mailbox.jsonl")
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatalf("OpenFile(mailbox.jsonl): %v", err)
+	}
+	err = json.NewEncoder(f).Encode(SubAgentMailboxMessage{
+		MessageID: "agent-1-1",
+		AgentID:   "agent-1",
+		TaskID:    "restored",
+		Kind:      SubAgentMailboxKindDecisionRequired,
+		Priority:  SubAgentMailboxPriorityInterrupt,
+		Summary:   "duplicate persisted record",
+		CreatedAt: time.Now(),
+	})
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatalf("append duplicate mailbox: %v", err)
+	}
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := a.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+	if got := len(a.subAgentInbox.urgent); got != 1 {
+		t.Fatalf("urgent mailbox count after persisted duplicate restore = %d, want 1", got)
 	}
 }
 

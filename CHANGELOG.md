@@ -23,6 +23,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Resuming a session now restores every agent as idle and reloads SubAgent mailboxes without dispatching them or starting requests. Restored mailboxes are delivered only when the user explicitly continues or submits input to the owning MainAgent/SubAgent; live mailbox events still dispatch normally and wake the owning agent. Completed, failed, and cancelled SubAgents remain focusable and can be continued with the same transcript and agent ID. Their composer stays available, and request progress/model status is now keyed by exact agent identity so background agents—including names beginning with `main-`—cannot make the current agent appear busy.
 - `Shift+Tab` now always keeps the main-agent view reachable. SubAgents that stop without completing remain in the view cycle, and a stale SubAgent focus falls back to main instead of becoming an unresponsive view.
 - Cancelling a turn with `Esc` now keeps that turn's user prompt visible when the preserved interrupted reply is taller than the viewport. Restoring a session ending in the same state also opens at the prompt instead of the bottom of the partial reply, while completed replies retain the existing tail-follow behavior.
 - Focused SubAgent status bars now report received response bytes and events instead of remaining at `0 B` while tool arguments stream.

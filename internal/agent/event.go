@@ -61,6 +61,8 @@ type Event struct {
 	SourceID string // identifies which agent sent the event (e.g. "main", "agent-1")
 }
 
+type manualContinueEvent struct{}
+
 // LLMResponsePayload wraps an LLM response for the internal event bus.
 type LLMResponsePayload struct {
 	Content                   string
