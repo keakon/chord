@@ -11,9 +11,32 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
+
+func TestProviderSupportsRequiredToolChoiceUsesKnownFamiliesOnly(t *testing.T) {
+	tests := []struct {
+		name     string
+		typeName string
+		want     bool
+	}{
+		{name: "chat completions", typeName: config.ProviderTypeChatCompletions, want: true},
+		{name: "responses", typeName: config.ProviderTypeResponses, want: true},
+		{name: "messages", typeName: config.ProviderTypeMessages, want: true},
+		{name: "generate content", typeName: config.ProviderTypeGenerateContent, want: true},
+		{name: "unknown", typeName: "custom-provider", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := llm.NewProviderConfig("test", config.ProviderConfig{Type: tt.typeName}, nil)
+			if got := providerSupportsRequiredToolChoice(provider); got != tt.want {
+				t.Fatalf("providerSupportsRequiredToolChoice(%q) = %v, want %v", tt.typeName, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestNextLoopAssessmentFromAssistantMarksCompletedOnStop(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())

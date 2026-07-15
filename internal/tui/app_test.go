@@ -2924,6 +2924,42 @@ func TestDoneToolArgStreamingDoneClearsReceivedCharCountImmediately(t *testing.T
 	}
 }
 
+func TestProseControlToolsShowAndClearReceivedCharCount(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args string
+	}{
+		{name: tools.NameComplete, args: `{"summary":"A sufficiently long completion summary"}`},
+		{name: tools.NameEscalate, args: `{"reason":"A sufficiently long escalation reason"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModelWithSize(nil, 80, 12)
+			callID := "call-" + tc.name + "-progress"
+
+			_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+				ID: callID, Name: tc.name, AgentID: "agent-1", ArgsJSON: tc.args,
+			}})
+			block, ok := m.viewport.FindBlockByToolID(callID)
+			if !ok {
+				t.Fatal("expected prose control tool block")
+			}
+			if block.ToolProgress == nil || !strings.Contains(block.ToolProgress.Text, "chars received") {
+				t.Fatalf("expected transient char count, got %+v", block.ToolProgress)
+			}
+
+			_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+				ID: callID, Name: tc.name, AgentID: "agent-1", ArgsJSON: tc.args, ArgsStreamingDone: true,
+			}})
+			if block.ToolProgress != nil {
+				t.Fatalf("expected char count cleared after arg streaming, got %+v", block.ToolProgress)
+			}
+			if joined := stripANSI(strings.Join(block.Render(96, "●"), "\n")); strings.Contains(joined, "chars received") {
+				t.Fatalf("expected completed args to hide char count, got:\n%s", joined)
+			}
+		})
+	}
+}
+
 func TestToolDoesNotShowCharCountWhenNoArgsReceived(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 
@@ -8523,10 +8559,14 @@ func TestFocusedAgentDoneEventSwitchesToMainAndUpdatesDelegate(t *testing.T) {
 	if task.DoneSummary != "done" {
 		t.Fatalf("DoneSummary = %q, want done", task.DoneSummary)
 	}
+	foundNotice := false
 	for _, block := range m.viewport.visibleBlocks() {
-		if block.Type == BlockStatus && strings.Contains(block.Content, "[agent-1] completed:") {
-			t.Fatalf("unexpected standalone completion block: %q", block.Content)
+		if block.Type == BlockStatus && block.StatusTitle == "AGENT COMPLETE" && strings.Contains(block.Content, "[agent-1] completed:") {
+			foundNotice = true
 		}
+	}
+	if !foundNotice {
+		t.Fatal("expected owner-visible completion notification card")
 	}
 }
 
@@ -8543,16 +8583,40 @@ func TestRepeatedAgentDoneUpdatesSingleDelegateCard(t *testing.T) {
 		t.Fatalf("DoneSummary = %q, want latest completion", task.DoneSummary)
 	}
 	delegateCards := 0
+	completionCards := 0
 	for _, block := range m.viewport.blocks {
 		if block.Type == BlockToolCall && block.ToolName == tools.NameDelegate && block.LinkedTaskID == "adhoc-7" {
 			delegateCards++
 		}
-		if block.Type == BlockStatus && strings.Contains(block.Content, "completed:") {
-			t.Fatalf("unexpected standalone completion block: %q", block.Content)
+		if block.Type == BlockStatus && block.StatusTitle == "AGENT COMPLETE" && strings.Contains(block.Content, "completed:") {
+			completionCards++
 		}
 	}
 	if delegateCards != 1 {
 		t.Fatalf("delegate card count = %d, want 1", delegateCards)
+	}
+	if completionCards != 2 {
+		t.Fatalf("completion card count = %d, want one owner notification per completion report", completionCards)
+	}
+}
+
+func TestAgentNotifyCreatesCardInTargetView(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentNotifyEvent{
+		AgentID:       "worker-1",
+		TaskID:        "adhoc-1",
+		TargetAgentID: "main",
+		Kind:          "risk_alert",
+		Message:       "worker cannot continue",
+	}})
+
+	blocks := filterBlocksByAgent(m.viewport.blocks, "main")
+	if len(blocks) != 1 {
+		t.Fatalf("main block count = %d, want 1", len(blocks))
+	}
+	block := blocks[0]
+	if block.StatusTitle != "AGENT BLOCKED" || block.AgentID != "" || block.LinkedTaskID != "adhoc-1" || !strings.Contains(block.Content, "worker cannot continue") {
+		t.Fatalf("notify block = %#v", block)
 	}
 }
 

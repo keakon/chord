@@ -26,6 +26,7 @@ type blockingStreamProvider struct {
 	streamedCh   chan struct{}
 	releaseCh    chan struct{}
 	seenMessages [][]message.Message
+	seenTuning   []llm.RequestTuning
 }
 
 func cloneMessages(messages []message.Message) []message.Message {
@@ -45,7 +46,7 @@ func (p *blockingStreamProvider) CompleteStream(
 	messages []message.Message,
 	_ []message.ToolDefinition,
 	_ int,
-	_ llm.RequestTuning,
+	tuning llm.RequestTuning,
 	cb llm.StreamCallback,
 ) (*message.Response, error) {
 	p.mu.Lock()
@@ -56,6 +57,7 @@ func (p *blockingStreamProvider) CompleteStream(
 	next := p.calls[0]
 	p.calls = p.calls[1:]
 	p.seenMessages = append(p.seenMessages, cloneMessages(messages))
+	p.seenTuning = append(p.seenTuning, tuning)
 	p.mu.Unlock()
 
 	if cb != nil {

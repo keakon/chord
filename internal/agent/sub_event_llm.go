@@ -1,8 +1,12 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"strings"
 	"time"
 
@@ -31,12 +35,18 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			s.continueLLMWithPendingUserMessages()
 			return
 		}
+		if s.recoverTerminalResponse("The previous model request was interrupted by a transient transport error. Re-check the task state and finish coordination now. If the task is complete, call Complete with a concise summary. If blocked or parent input is required, call Escalate or Notify instead of stopping after plain text.", result.err) {
+			return
+		}
 		s.sendEvent(Event{
 			Type:    EventAgentError,
 			Payload: result.err,
 		})
 		return
 	}
+	// A successful response contains the authoritative full content. Discard
+	// the streaming accumulator so terminal recovery cannot append it twice.
+	s.turn.drainPartialText()
 
 	resp := result.resp
 
@@ -115,7 +125,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				})
 			}
 		} else {
-			log.Warnf("SubAgent: thinking-toolcall format drift detected; could not parse pseudo tool calls, entering idle wait agent=%v compat_thinking_toolcall_enabled=%v thinking_toolcall_marker_hit=%v", s.instanceID, compatEnabled, resp.ThinkingToolcallMarkerHit)
+			log.Warnf("SubAgent: thinking-toolcall format drift detected; could not parse pseudo tool calls, entering bounded terminal recovery agent=%v compat_thinking_toolcall_enabled=%v thinking_toolcall_marker_hit=%v", s.instanceID, compatEnabled, resp.ThinkingToolcallMarkerHit)
 			// Debug: log the raw reasoning content for troubleshooting
 			if resp.ReasoningContent != "" {
 				reasoningLen := len(resp.ReasoningContent)
@@ -124,12 +134,8 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			}
 			s.sendEvent(Event{
 				Type:    EventAgentLog,
-				Payload: "SubAgent detected provider thinking pseudo tool-call drift but could not parse them; entered idle wait.",
+				Payload: "SubAgent detected provider thinking pseudo tool-call drift but could not parse it; entering bounded terminal recovery.",
 			})
-			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "provider_drift")
-			s.resetIdleTimer()
-			s.idleTimer = time.NewTimer(s.idleTimeout)
-			return
 		}
 	}
 
@@ -290,11 +296,21 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		}
 	}
 
-	// Pure text reply (no valid tool calls at all): LLM may be asking questions,
-	// analysing, or expressing confusion. Start idle timer.
+	// Pure text alone does not finish a delegated task. Give the model one
+	// bounded recovery request to emit an explicit coordination tool.
 	if len(validCalls) == 0 {
 		s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "no_valid_calls")
 		if s.continueLLMIfPendingUserMessages() {
+			return
+		}
+		if s.recoverTerminalResponse("Do not stop after plain text. Finish coordination now: call Complete if the delegated task is done; otherwise call Escalate or Notify with the blocker, question, or progress that the parent must receive.", nil) {
+			return
+		}
+		if s.turn.SubAgentTerminalRecoveryCount > 0 {
+			s.sendEvent(Event{
+				Type:    EventAgentError,
+				Payload: fmt.Errorf("SubAgent stopped without a coordination tool after terminal recovery"),
+			})
 			return
 		}
 		// Stop any previous idle timer to prevent leaking timers when
@@ -401,4 +417,41 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	if len(batches) > 0 {
 		s.startNextToolBatch(turn)
 	}
+}
+
+func (s *SubAgent) recoverTerminalResponse(instruction string, cause error) bool {
+	if s == nil || s.turn == nil || s.turn.SubAgentTerminalRecoveryCount >= 1 {
+		return false
+	}
+	if cause != nil && !isTransientSubAgentTransportError(cause) {
+		return false
+	}
+	if partial := strings.TrimSpace(s.turn.drainPartialText()); partial != "" {
+		msg := message.Message{Role: "assistant", Content: partial, StopReason: "interrupted"}
+		s.ctxMgr.Append(msg)
+		s.persistMessageAsync(msg, "interrupted assistant message", nil)
+	}
+	s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "terminal_recovery")
+	s.turn.SubAgentTerminalRecoveryCount++
+	s.appendPendingUserMessage(pendingUserMessage{Content: instruction})
+	s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
+	return true
+}
+
+func isTransientSubAgentTransportError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	if _, ok := errors.AsType[*net.OpError](err); ok {
+		return true
+	}
+	if apiErr, ok := errors.AsType[*llm.APIError](err); ok && apiErr != nil {
+		return apiErr.StatusCode == 408 || apiErr.StatusCode == 429 || apiErr.StatusCode >= 500
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection reset") || strings.Contains(msg, "broken pipe") ||
+		(strings.Contains(msg, "stream") && strings.Contains(msg, "interrupt"))
 }

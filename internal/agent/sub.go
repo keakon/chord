@@ -550,6 +550,9 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 		}
 		return
 	}
+	if providerSupportsRequiredToolChoice(llmClient.ProviderConfig()) {
+		llmClient.MergeNextRequestTuningOverride(requiredToolChoiceTuning(llm.RequestTuning{}))
+	}
 	if filtered, dropped := filterUnsupportedBinaryPartsForModel(messages, llmClient); dropped.any() {
 		log.Warnf("SubAgent dropping unsupported binary parts before LLM request agent=%v kinds=%s", s.instanceID, dropped.summary())
 		s.parent.emitToTUI(ToastEvent{Level: "warn", Message: "Input dropped (unsupported): " + dropped.summary(), AgentID: s.instanceID})
@@ -712,6 +715,7 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 	streamReducer.content = streamContentReducer{
 		agentID:               s.instanceID,
 		emit:                  s.parent.emitToTUI,
+		appendPartialText:     turn.appendPartialText,
 		scrubThinkingDelta:    false,
 		scrubThinkingFinal:    scrubThinkingMarkers,
 		thinkingCommitMode:    streamContentCommitFullText,

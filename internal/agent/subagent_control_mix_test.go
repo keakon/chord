@@ -158,6 +158,42 @@ func TestSubAgentDefersEscalateUntilRegularToolsComplete(t *testing.T) {
 	}
 }
 
+func TestSubAgentDefersCompleteUntilRegularToolsComplete(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	sub.handleLLMResponse(&llmResult{
+		turnID: 1,
+		resp: &message.Response{
+			ToolCalls: convertCalls([]messageToolCall{
+				mustJSONToolCall(t, "call-1", "complete", map[string]any{"summary": "done"}),
+				mustJSONToolCall(t, "call-2", "Dummy", map[string]any{"value": "x"}),
+			}),
+		},
+	})
+	if sub.pendingComplete == nil || sub.pendingComplete.Summary != "done" {
+		t.Fatalf("pendingComplete = %#v, want deferred completion", sub.pendingComplete)
+	}
+	select {
+	case evt := <-parent.eventCh:
+		t.Fatalf("unexpected event before regular tool completed: %#v", evt)
+	default:
+	}
+	sub.handleToolResult(&toolResult{
+		CallID:   "call-2",
+		Name:     "Dummy",
+		ArgsJSON: `{"value":"x"}`,
+		Result:   "ok",
+		TurnID:   1,
+	})
+	select {
+	case evt := <-parent.eventCh:
+		if evt.Type != EventAgentDone {
+			t.Fatalf("event.Type = %q, want %q", evt.Type, EventAgentDone)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for deferred completion")
+	}
+}
+
 func TestSubAgentEmitsExecutingActivityWhenRegularToolsStart(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.handleLLMResponse(&llmResult{

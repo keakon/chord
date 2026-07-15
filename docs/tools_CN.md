@@ -64,9 +64,19 @@
 | `escalate` | SubAgent 侧：请求父 agent 介入，但不结束自己的任务。 |
 | `notify` | 向 owner 或指定的被委派 worker 发送非阻塞通知。 |
 
+### 长文本控制工具
+
+`done`、`complete` 和 `escalate` 可能携带较长的 Markdown 报告、总结或升级原因。参数仍在流式接收时，TUI 会临时显示 `N chars received`。参数接收完成后，该提示会移除；展开工具卡时，正文会按 Markdown 渲染。
+
+`complete` 还会保留结构化完成信息，例如修改文件、验证命令、限制、风险、后续建议和 artifact 引用。成功的 `escalate` 不会在结果行中重复显示完整 reason。`write` 等源码预览工具，以及 `shell`、`read`、`grep` 等原始输出工具仍使用各自的专用预览，不会把所有输出都当作 Markdown。
+
 `delegate` 只有一个工具结果，即异步启动句柄。后续 `complete` 调用和 mailbox 更新是独立的 runtime 事件；它们按稳定的 `task_id` 更新已有委派任务/卡片，不会生成额外的 `delegate` 工具结果。worker 报告完成后仍可被要求继续，并再次调用 `complete`，但这不会创建新的委派返回值。
 
+每次 `complete` 报告都会在更新已有 `delegate` 卡片的同时，在直接 owner 的视图创建一张可见的 **AGENT COMPLETE** 通知卡。agent 间通知和 worker 终止失败也会在目标视图创建消息卡；终止失败显示为 **AGENT BLOCKED**，并唤醒直接 owner。
+
 需要处理的 agent 消息遵守请求边界：目标 busy 时，Chord 只把消息入队，不打断当前 LLM 请求或工具批次，并在下一次请求中一并处理；目标不在运行但允许恢复时，Chord 会唤醒它处理消息。纯 progress 更新保持低打扰，只追加上下文，不会强制本来空闲的 agent 启动。
+
+对于已知支持该能力的 provider family，SubAgent 请求会沿用 loop 模式，以 `tool_choice=required` 作为尽力而为的输出约束；这仍允许模型先输出说明正文，再调用工具。runtime 仍是可靠性兜底：忽略提示、只返回正文或发生暂时性流中断时，会获得一次有界的后续请求，明确要求调用 `complete`、`escalate` 或 `notify`；中断前已经输出的文本会保留到恢复上下文。如果 worker 仍不能发出协调工具，或再次发生终止错误，Chord 会将其标记为 failed、发送紧急 risk alert 并唤醒 owner，避免委派链静默断开。
 
 SubAgent 失败不会被转换成 `complete`。当 provider / 模型重试耗尽，或恢复后的 worker 无法启动时，Chord 会以 failed 终态关闭该 runtime、记录 `risk_alert`，并唤醒 owner/MainAgent。Rehydrate 后的 runtime 可能获得新的 `agent_id`；后续协调应使用稳定的委派 `task_id`。
 

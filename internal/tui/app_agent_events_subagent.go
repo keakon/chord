@@ -18,6 +18,32 @@ const (
 func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
+	case agent.AgentNotifyEvent:
+		targetAgentID := strings.TrimSpace(evt.TargetAgentID)
+		if targetAgentID == "main" {
+			targetAgentID = ""
+		}
+		if targetAgentID == "" && strings.TrimSpace(evt.ParentAgentID) != "" && strings.TrimSpace(evt.ParentAgentID) != "main" {
+			targetAgentID = strings.TrimSpace(evt.ParentAgentID)
+		}
+		title := "AGENT MESSAGE"
+		if evt.Kind == string(agent.SubAgentMailboxKindRiskAlert) {
+			title = "AGENT BLOCKED"
+		}
+		block := &Block{
+			ID:            m.nextBlockID,
+			Type:          BlockStatus,
+			StatusTitle:   title,
+			Content:       fmt.Sprintf("[%s] %s: %s", evt.AgentID, evt.Kind, evt.Message),
+			AgentID:       targetAgentID,
+			LinkedAgentID: evt.AgentID,
+			LinkedTaskID:  evt.TaskID,
+		}
+		m.nextBlockID++
+		m.appendViewportBlock(block)
+		m.markBlockSettled(block)
+		m.recalcViewportSize()
+		return true, effects
 	case agent.AgentStartedEvent:
 		previousAgentID := strings.TrimSpace(evt.PreviousAgentID)
 		if previousAgentID != "" && previousAgentID != evt.AgentID {
@@ -85,12 +111,23 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			taskBlock.InvalidateCache()
 			m.updateViewportBlock(taskBlock)
 			m.markBlockSettled(taskBlock)
-		} else {
-			block := &Block{ID: m.nextBlockID, Type: BlockStatus, Content: fmt.Sprintf("[%s] completed: %s", evt.AgentID, evt.Summary), AgentID: evt.AgentID}
-			m.nextBlockID++
-			m.appendViewportBlock(block)
-			m.markBlockSettled(block)
 		}
+		ownerAgentID := strings.TrimSpace(evt.ParentAgentID)
+		if ownerAgentID == "main" {
+			ownerAgentID = ""
+		}
+		block := &Block{
+			ID:            m.nextBlockID,
+			Type:          BlockStatus,
+			StatusTitle:   "AGENT COMPLETE",
+			Content:       fmt.Sprintf("[%s] completed: %s", evt.AgentID, evt.Summary),
+			AgentID:       ownerAgentID,
+			LinkedAgentID: evt.AgentID,
+			LinkedTaskID:  evt.TaskID,
+		}
+		m.nextBlockID++
+		m.appendViewportBlock(block)
+		m.markBlockSettled(block)
 		m.stopActiveAnimationIfIdle()
 		if prevType != "" && prevType != agent.ActivityIdle {
 			effects.addFollowup(m.scheduleBackgroundHousekeeping())

@@ -3,12 +3,15 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -56,6 +59,181 @@ func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 	}
 	if len(env.Artifacts) != 1 || env.Artifacts[0].RelPath != "artifacts/subagents/worker-1/report.md" {
 		t.Fatalf("artifacts = %#v", env.Artifacts)
+	}
+}
+
+func TestSubAgentPureTextGetsSingleTerminalRecoveryRequest(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"key"})
+	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{mustJSONToolCall(t, "complete-1", "complete", map[string]any{"summary": "done"})})}}}}
+	sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
+
+	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{Content: "I finished the work."}})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		provider.mu.Lock()
+		seen := append([][]message.Message(nil), provider.seenMessages...)
+		provider.mu.Unlock()
+		if len(seen) == 1 {
+			last := seen[0][len(seen[0])-1]
+			if last.Role != "user" || !strings.Contains(last.Content, "call Complete") {
+				t.Fatalf("terminal recovery message = %#v", last)
+			}
+			if sub.turn.SubAgentTerminalRecoveryCount != 1 {
+				t.Fatalf("terminal recovery count = %d, want 1", sub.turn.SubAgentTerminalRecoveryCount)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("timed out waiting for terminal recovery request")
+}
+
+func TestSubAgentUnparseableThinkingToolcallGetsTerminalRecoveryRequest(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	enabled := true
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Compat: &config.ProviderCompatConfig{
+			ThinkingToolcall: &config.ThinkingToolcallCompatConfig{Enabled: &enabled},
+		},
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"key"})
+	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{mustJSONToolCall(t, "complete-1", "complete", map[string]any{"summary": "done"})})}}}}
+	sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
+
+	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{
+		ReasoningContent:          "<|tool_calls_section_begin|>not a valid pseudo call<|tool_calls_section_end|>",
+		StopReason:                "stop",
+		ThinkingToolcallMarkerHit: true,
+	}})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		provider.mu.Lock()
+		seen := append([][]message.Message(nil), provider.seenMessages...)
+		provider.mu.Unlock()
+		if len(seen) == 1 {
+			last := seen[0][len(seen[0])-1]
+			if last.Role != "user" || !strings.Contains(last.Content, "call Complete") {
+				t.Fatalf("terminal recovery message = %#v", last)
+			}
+			if sub.turn.SubAgentTerminalRecoveryCount != 1 {
+				t.Fatalf("terminal recovery count = %d, want 1", sub.turn.SubAgentTerminalRecoveryCount)
+			}
+			if sub.idleTimer != nil {
+				t.Fatal("unparseable thinking toolcall entered idle wait")
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for terminal recovery request; idleTimer=%v recoveryCount=%d", sub.idleTimer != nil, sub.turn.SubAgentTerminalRecoveryCount)
+}
+
+func TestSubAgentRequestsRequiredToolChoiceWhenProviderSupportsIt(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"key"})
+	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{mustJSONToolCall(t, "complete-1", "complete", map[string]any{"summary": "done"})})}}}}
+	sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
+
+	sub.asyncCallLLMWithFlightMarked(sub.turn, sub.ctxMgr.Snapshot())
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		provider.mu.Lock()
+		seen := append([]llm.RequestTuning(nil), provider.seenTuning...)
+		provider.mu.Unlock()
+		if len(seen) == 1 {
+			if seen[0].OpenAI.ToolChoice != "required" || seen[0].Anthropic.ToolChoice != "required" || seen[0].Gemini.ToolChoice != "required" {
+				t.Fatalf("request tuning = %#v, want required tool choice", seen[0])
+			}
+			if seen[0].OpenAI.ParallelToolCalls != nil {
+				t.Fatalf("parallel tool calls = %#v, want no required-tool override", seen[0].OpenAI.ParallelToolCalls)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("timed out waiting for SubAgent request tuning")
+}
+
+func TestSubAgentInterruptedStreamGetsSingleTerminalRecoveryRequest(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"key"})
+	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{mustJSONToolCall(t, "complete-1", "complete", map[string]any{"summary": "done"})})}}}}
+	sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
+	sub.turn.appendPartialText("partial result")
+
+	sub.handleLLMResponse(&llmResult{turnID: 1, err: io.ErrUnexpectedEOF})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		provider.mu.Lock()
+		seen := append([][]message.Message(nil), provider.seenMessages...)
+		provider.mu.Unlock()
+		if len(seen) == 1 {
+			if len(seen[0]) < 2 || seen[0][0].Role != "assistant" || seen[0][0].Content != "partial result" {
+				t.Fatalf("recovery context = %#v, want interrupted assistant text", seen[0])
+			}
+			last := seen[0][len(seen[0])-1]
+			if last.Role != "user" || !strings.Contains(last.Content, "transient transport error") {
+				t.Fatalf("transport recovery message = %#v", last)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("timed out waiting for interrupted stream recovery request")
+}
+
+func TestSubAgentTerminalRecoveryIsBounded(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	sub.turn.SubAgentTerminalRecoveryCount = 1
+	sub.handleLLMResponse(&llmResult{turnID: 1, err: io.ErrUnexpectedEOF})
+
+	select {
+	case evt := <-parent.eventCh:
+		if evt.Type != EventAgentError || evt.SourceID != sub.instanceID {
+			t.Fatalf("event = %#v, want SubAgent EventAgentError", evt)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for bounded recovery failure")
+	}
+}
+
+func TestSubAgentSecondPureTextFailsForOwnerNotification(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	sub.turn.SubAgentTerminalRecoveryCount = 1
+	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{Content: "still no coordination tool"}})
+
+	select {
+	case evt := <-parent.eventCh:
+		if evt.Type != EventAgentError || evt.SourceID != sub.instanceID {
+			t.Fatalf("event = %#v, want SubAgent EventAgentError", evt)
+		}
+		if err, ok := evt.Payload.(error); !ok || !strings.Contains(err.Error(), "without a coordination tool") {
+			t.Fatalf("error payload = %#v", evt.Payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for text-only terminal failure")
 	}
 }
 

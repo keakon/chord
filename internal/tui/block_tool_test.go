@@ -1056,6 +1056,79 @@ func TestCollapsedCompleteShowsSummaryPreviewInsteadOfFullBody(t *testing.T) {
 	}
 }
 
+func TestExpandedCompleteRendersSummaryMarkdownAndStructuredDetails(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	resetMarkdownRenderer()
+
+	args := `{"summary":"## Result\n\nImplemented **streaming** support.\n\n` + "```go\\nfmt.Println(1)\\n```" + `","files_changed":["internal/tui/block_tool_render_generic.go"],"verification_run":["go test ./internal/tui"]}`
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameComplete,
+		RawArgs:                args,
+		Content:                args,
+		ResultContent:          "Implemented streaming support.",
+		ResultDone:             true,
+		ResultStatus:           agent.ToolResultStatusSuccess,
+		ToolCallDetailExpanded: true,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	for _, want := range []string{"Result", "Implemented streaming support.", "fmt.Println(1)", "Files changed:", "internal/tui/block_tool_render_generic.go", "Verification:", "go test ./internal/tui"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected expanded Complete card to contain %q, got:\n%s", want, joined)
+		}
+	}
+	if strings.Count(joined, "Implemented streaming support.") != 1 {
+		t.Fatalf("expected Complete summary to render once instead of repeating the result, got:\n%s", joined)
+	}
+}
+
+func TestExpandedEscalateRendersReasonMarkdownWithoutRepeatingResult(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	resetMarkdownRenderer()
+
+	args := `{"reason":"## Decision needed\n\nChoose **one** migration strategy."}`
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameEscalate,
+		RawArgs:                args,
+		Content:                args,
+		ResultContent:          "Escalation sent: Choose one migration strategy.",
+		ResultDone:             true,
+		ResultStatus:           agent.ToolResultStatusSuccess,
+		ToolCallDetailExpanded: true,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	for _, want := range []string{"Decision needed", "Choose one migration strategy."} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected expanded Escalate card to contain %q, got:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "Escalation sent:") {
+		t.Fatalf("expected successful Escalate result to stay hidden when reason is present, got:\n%s", joined)
+	}
+}
+
+func TestProseControlCardFallsBackToContentForRestoredArgs(t *testing.T) {
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameComplete,
+		Content:                `{"summary":"Restored **summary**"}`,
+		ResultDone:             true,
+		ResultStatus:           agent.ToolResultStatusSuccess,
+		ToolCallDetailExpanded: true,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(88, ""), "\n"))
+	if !strings.Contains(joined, "Restored summary") {
+		t.Fatalf("expected restored Complete args to render from Content, got:\n%s", joined)
+	}
+}
+
 func TestToolExpandedResultLinesHiddenCountDoesNotDoubleCountFirstHiddenLine(t *testing.T) {
 	lines := make([]string, maxToolCallCompactResultLines+2)
 	for i := range lines {

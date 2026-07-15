@@ -1813,6 +1813,17 @@ func (a *MainAgent) handleAgentError(evt Event) {
 			),
 			RequiresAck: false,
 		}})
+		a.emitToTUI(AgentNotifyEvent{
+			AgentID:       evt.SourceID,
+			TaskID:        sub2.taskID,
+			AgentType:     sub2.agentDefName,
+			ParentAgentID: controlPlaneAgentID(sub2.ownerAgentID),
+			ParentTaskID:  sub2.ownerTaskID,
+			TargetAgentID: controlPlaneAgentID(sub2.ownerAgentID),
+			TargetTaskID:  sub2.ownerTaskID,
+			Kind:          string(SubAgentMailboxKindRiskAlert),
+			Message:       failureSummary,
+		})
 		a.handleSubAgentCloseRequestedEvent(Event{
 			Type:     EventSubAgentCloseRequested,
 			SourceID: evt.SourceID,

@@ -281,7 +281,7 @@ func TestBeginMainLLMAfterPreparationLoopToolChoiceMergesWithExistingOverride(t 
 	}
 	got := provider.tunes[0]
 	if got.OpenAI.ParallelToolCalls == nil || *got.OpenAI.ParallelToolCalls {
-		t.Fatalf("parallel_tool_calls = %#v, want false", got.OpenAI.ParallelToolCalls)
+		t.Fatalf("parallel_tool_calls = %#v, want preserved false", got.OpenAI.ParallelToolCalls)
 	}
 	if got.OpenAI.ToolChoice != "required" {
 		t.Fatalf("tool_choice = %q, want required", got.OpenAI.ToolChoice)
@@ -334,6 +334,9 @@ func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliesToMessagesProvider(t *
 	if got.OpenAI.ToolChoice != "required" {
 		t.Fatalf("openai tool_choice = %q, want required", got.OpenAI.ToolChoice)
 	}
+	if got.OpenAI.ParallelToolCalls != nil {
+		t.Fatalf("parallel_tool_calls = %#v, want no loop override", got.OpenAI.ParallelToolCalls)
+	}
 }
 
 func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliesToGenerateContentProvider(t *testing.T) {
@@ -373,6 +376,9 @@ func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliesToGenerateContentProvi
 	if got.Gemini.ToolChoice != "required" {
 		t.Fatalf("gemini tool_choice = %q, want required", got.Gemini.ToolChoice)
 	}
+	if got.OpenAI.ParallelToolCalls != nil {
+		t.Fatalf("parallel_tool_calls = %#v, want no loop override", got.OpenAI.ParallelToolCalls)
+	}
 }
 
 func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliedWhenCompactionAlreadyRunning(t *testing.T) {
@@ -408,8 +414,8 @@ func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliedWhenCompactionAlreadyR
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
 	got := provider.tunes[0]
-	if got.OpenAI.ParallelToolCalls == nil || *got.OpenAI.ParallelToolCalls {
-		t.Fatalf("parallel_tool_calls = %#v, want false", got.OpenAI.ParallelToolCalls)
+	if got.OpenAI.ParallelToolCalls != nil {
+		t.Fatalf("parallel_tool_calls = %#v, want no loop override", got.OpenAI.ParallelToolCalls)
 	}
 	if got.OpenAI.ToolChoice != "required" {
 		t.Fatalf("tool_choice = %q, want required", got.OpenAI.ToolChoice)

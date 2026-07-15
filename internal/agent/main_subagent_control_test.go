@@ -1752,6 +1752,21 @@ func TestSubAgentTerminalErrorQueuesRiskAlertAndWakesMain(t *testing.T) {
 	if rec := a.taskRecordByTaskID(sub.taskID); rec == nil || rec.State != string(SubAgentStateFailed) {
 		t.Fatalf("task record = %#v, want failed", rec)
 	}
+	foundBlockedNotice := false
+	for {
+		select {
+		case output := <-a.outputCh:
+			notify, ok := output.(AgentNotifyEvent)
+			if ok && notify.AgentID == sub.instanceID && notify.TargetAgentID == "main" && notify.Kind == string(SubAgentMailboxKindRiskAlert) && strings.Contains(notify.Message, "failed") {
+				foundBlockedNotice = true
+			}
+		default:
+			if !foundBlockedNotice {
+				t.Fatal("terminal SubAgent error did not emit owner-visible risk notification")
+			}
+			return
+		}
+	}
 }
 
 func TestOwnerMailboxQueuesDurablyWhenOwnerParksDuringDelivery(t *testing.T) {

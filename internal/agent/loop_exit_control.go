@@ -249,11 +249,7 @@ func (a *MainAgent) autoRejectLoopExitAndContinue(callID, argsJSON, result strin
 	return true
 }
 
-func (a *MainAgent) shouldRequireToolCallInLoop() bool {
-	if a == nil || a.llmClient == nil || !a.loopState.Enabled {
-		return false
-	}
-	provider := a.llmClient.ProviderConfig()
+func providerSupportsRequiredToolChoice(provider *llm.ProviderConfig) bool {
 	if provider == nil {
 		return false
 	}
@@ -271,14 +267,20 @@ func (a *MainAgent) shouldRequireToolCallInLoop() bool {
 	}
 }
 
-func (a *MainAgent) applyLoopToolChoiceRequirement(tuning llm.RequestTuning) llm.RequestTuning {
-	if !a.shouldRequireToolCallInLoop() {
-		return tuning
-	}
-	parallelFalse := false
-	tuning.OpenAI.ParallelToolCalls = &parallelFalse
+func requiredToolChoiceTuning(tuning llm.RequestTuning) llm.RequestTuning {
 	tuning.OpenAI.ToolChoice = "required"
 	tuning.Anthropic.ToolChoice = "required"
 	tuning.Gemini.ToolChoice = "required"
 	return tuning
+}
+
+func (a *MainAgent) shouldRequireToolCallInLoop() bool {
+	return a != nil && a.llmClient != nil && a.loopState.Enabled && providerSupportsRequiredToolChoice(a.llmClient.ProviderConfig())
+}
+
+func (a *MainAgent) applyLoopToolChoiceRequirement(tuning llm.RequestTuning) llm.RequestTuning {
+	if !a.shouldRequireToolCallInLoop() {
+		return tuning
+	}
+	return requiredToolChoiceTuning(tuning)
 }

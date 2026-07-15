@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -243,6 +244,9 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	if b.ToolName == tools.NameQuestion {
 		return b.renderQuestionCall(width, spinnerFrame)
 	}
+	if b.ToolName == tools.NameComplete || b.ToolName == tools.NameEscalate {
+		return b.renderProseControlCall(width, spinnerFrame)
+	}
 	if b.ToolName == tools.NameDelegate {
 		return b.renderTaskCall(width, spinnerFrame)
 	}
@@ -408,6 +412,105 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 			}
 		}
 	}
+	result = appendToolElapsedFooter(result, b)
+	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+}
+
+type proseControlArgs struct {
+	Summary              string              `json:"summary"`
+	Reason               string              `json:"reason"`
+	FilesChanged         []string            `json:"files_changed"`
+	VerificationRun      []string            `json:"verification_run"`
+	RemainingLimitations []string            `json:"remaining_limitations"`
+	KnownRisks           []string            `json:"known_risks"`
+	FollowUpRecommended  []string            `json:"follow_up_recommended"`
+	Artifacts            []tools.ArtifactRef `json:"artifacts"`
+}
+
+func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string {
+	metrics := newDoneToolCardMetrics(width)
+	blockStyle := metrics.blockStyle
+	toolCardBg := metrics.toolCardBg
+	cardWidth := metrics.cardWidth
+	contentWidth := metrics.contentWidth
+
+	prefix := b.renderToolPrefixForExpanded(spinnerFrame, b.ToolCallDetailExpanded)
+	headerLine := renderToolHeaderLine(prefix, b.ToolName)
+	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
+	result := []string{headerLine}
+
+	var args proseControlArgs
+	argsJSON := b.RawArgs
+	if strings.TrimSpace(argsJSON) == "" {
+		argsJSON = b.Content
+	}
+	_ = json.Unmarshal([]byte(argsJSON), &args)
+	prose := strings.TrimSpace(args.Summary)
+	if b.ToolName == tools.NameEscalate {
+		prose = strings.TrimSpace(args.Reason)
+	}
+	argsReady := b.ResultDone || strings.TrimSpace(argsJSON) != ""
+
+	if argsReady && !b.ToolCallDetailExpanded && b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+		appendCollapsedSummaryLines(&result, prose, cardWidth-10, ToolResultStyle)
+		hidden := max(len(renderRichMarkdownContent(prose, contentWidth, &b.richMarkdownHL)), toolCollapsedVisibleLineCount(prose, contentWidth)) - 2
+		if hidden > 0 {
+			result = append(result, renderToolExpandHint(toolHintIndent, hidden))
+		}
+	} else if argsReady && prose != "" {
+		result = append(result, "")
+		for _, line := range renderRichMarkdownContent(prose, contentWidth, &b.richMarkdownHL) {
+			result = append(result, "    "+line)
+		}
+	}
+
+	if b.ToolCallDetailExpanded && b.ToolName == tools.NameComplete {
+		appendList := func(label string, values []string) {
+			if len(values) == 0 {
+				return
+			}
+			result = append(result, "", ToolResultExpandedStyle.Render("  ↳ "+label+":"))
+			for _, value := range values {
+				for i, line := range wrapText(sanitizeToolDisplayText(value), contentWidth-2) {
+					bullet := "  "
+					if i == 0 {
+						bullet = "• "
+					}
+					result = append(result, DimStyle.Render("    "+bullet+line))
+				}
+			}
+		}
+		appendList("Files changed", args.FilesChanged)
+		appendList("Verification", args.VerificationRun)
+		appendList("Remaining limitations", args.RemainingLimitations)
+		appendList("Known risks", args.KnownRisks)
+		appendList("Follow-up recommended", args.FollowUpRecommended)
+		for _, artifact := range args.Artifacts {
+			label := artifact.RelPath
+			if label == "" {
+				label = artifact.Path
+			}
+			if label == "" {
+				label = artifact.ID
+			}
+			if label != "" {
+				result = append(result, DimStyle.Render("    • Artifact: "+sanitizeToolDisplayText(label)))
+			}
+		}
+	}
+
+	if b.ResultDone && (b.toolResultIsError() || b.toolResultIsCancelled()) && strings.TrimSpace(b.ResultContent) != "" {
+		result = append(result, "")
+		label, style := "  ↳ Cancelled:", DimStyle
+		if b.toolResultIsError() {
+			label, style = "  ↳ Error:", ErrorStyle
+		}
+		result = append(result, style.Render(label))
+		for _, line := range wrapText(sanitizeToolDisplayText(toolDisplayResultContent(b)), contentWidth) {
+			result = append(result, style.Render("    "+line))
+		}
+	}
+
 	result = appendToolElapsedFooter(result, b)
 	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
