@@ -20,7 +20,6 @@ body:
         - On the docs site
         - In docs/ markdown on GitHub
         - In README.md / README_CN.md
-        - In .internal-docs/ (maintainer-facing)
         - Other
     validations:
       required: true

@@ -110,8 +110,7 @@ jobs:
       - name: Run lychee
         uses: lycheeverse/lychee-action@v2
         with:
-          # Scan docs and top-level user-facing markdown.
-          # Skip website/ (synced) and .internal-docs/ (separate maintainer subtree).
+          # Scan docs and top-level user-facing markdown; skip the synced website copy.
           args: >-
             --no-progress
             --cache
