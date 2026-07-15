@@ -59,6 +59,8 @@ func renderNumberedToolPreview(opts numberedToolPreviewOptions) []string {
 	var highlightedCodeLines []string
 	codeIndex := 0
 	if len(codeLines) > 0 && opts.highlighter != nil {
+		// The card frame restores ToolCallBg after inner ANSI resets; previews
+		// only need to emit syntax foregrounds here.
 		highlightedCodeLines = highlightCodeLines(ensureCodeHighlighter(opts.highlighter, opts.filePath, opts.sourceSample), codeLines, "")
 	}
 

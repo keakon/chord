@@ -3,6 +3,8 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"image/color"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/charmbracelet/x/ansi"
 	uv "github.com/keakon/ultraviolet"
@@ -52,18 +55,67 @@ func TestNormalizeCodeFenceLanguage(t *testing.T) {
 	}
 }
 
-func TestToolCodeChromaStyleAdjustsCommentContrast(t *testing.T) {
+func TestToolCodeChromaStyleKeepsTokenContrastOnToolBackgrounds(t *testing.T) {
 	style := toolCodeChromaStyle()
 
 	if style == nil {
 		t.Fatal("tool code style should not be nil")
 	}
-	if got := style.Get(chroma.Comment).Colour.String(); got != darkThemeSyntaxCommentColour {
-		t.Fatalf("comment colour = %q, want %q", got, darkThemeSyntaxCommentColour)
+	theme := DefaultTheme()
+	backgrounds := map[string]color.Color{
+		"tool":        lipgloss.Color(theme.ToolCallBg),
+		"diff add":    lipgloss.Color(theme.DiffAddLineBg),
+		"diff delete": lipgloss.Color(theme.DiffDelLineBg),
 	}
-	if got := style.Get(chroma.Keyword).Colour.String(); got == darkThemeSyntaxCommentColour {
-		t.Fatalf("keyword colour should stay distinct from comment override; got %q", got)
+	checkToken := func(tokenType chroma.TokenType) {
+		t.Helper()
+		entry := style.Get(tokenType)
+		if !entry.Colour.IsSet() {
+			return
+		}
+		foreground := color.RGBA{R: entry.Colour.Red(), G: entry.Colour.Green(), B: entry.Colour.Blue(), A: 0xff}
+		for name, background := range backgrounds {
+			if got := contrastRatio(foreground, background); got < 4.5 {
+				t.Errorf("%s foreground %s contrast on %s = %.2f, want >= 4.5", tokenType, entry.Colour.String(), name, got)
+			}
+		}
 	}
+	checkToken(chroma.Error)
+	checked := map[chroma.TokenType]bool{chroma.Error: true}
+	for tokenType := range chroma.StandardTypes {
+		if tokenType <= 0 {
+			continue
+		}
+		checkToken(tokenType)
+		checked[tokenType] = true
+	}
+	for _, tokenType := range style.Types() {
+		if tokenType <= 0 || checked[tokenType] {
+			continue
+		}
+		checkToken(tokenType)
+	}
+}
+
+func contrastRatio(a, b color.Color) float64 {
+	al := relativeLuminance(a)
+	bl := relativeLuminance(b)
+	if al < bl {
+		al, bl = bl, al
+	}
+	return (al + 0.05) / (bl + 0.05)
+}
+
+func relativeLuminance(c color.Color) float64 {
+	r, g, b, _ := c.RGBA()
+	linear := func(v uint32) float64 {
+		n := float64(v) / 0xffff
+		if n <= 0.04045 {
+			return n / 12.92
+		}
+		return math.Pow((n+0.055)/1.055, 2.4)
+	}
+	return 0.2126*linear(r) + 0.7152*linear(g) + 0.0722*linear(b)
 }
 
 func TestNewCodeHighlighterUsesToolStyle(t *testing.T) {
@@ -72,6 +124,113 @@ func TestNewCodeHighlighterUsesToolStyle(t *testing.T) {
 	if got := h.chromaStyle.Get(chroma.CommentSingle).Colour.String(); got != darkThemeSyntaxCommentColour {
 		t.Fatalf("highlighter comment colour = %q, want %q", got, darkThemeSyntaxCommentColour)
 	}
+}
+
+func TestHighlightedFileToolsUseExpectedBackgrounds(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	content := "package main"
+	readArgs, _ := json.Marshal(map[string]any{"path": "main.go", "offset": 15, "limit": 1})
+	writeArgs, _ := json.Marshal(map[string]string{"path": "main.go", "content": content})
+	diffArgs, _ := json.Marshal(map[string]string{"path": "main.go"})
+	diff := "@@ -1,2 +1,2 @@\n package context\n-package old\n+package main\n"
+
+	tests := []struct {
+		name           string
+		block          *Block
+		codeBackground string
+	}{
+		{name: tools.NameRead, block: &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameRead, Content: string(readArgs), ResultContent: content, ResultDone: true}, codeBackground: currentTheme.ToolCallBg},
+		{name: tools.NameWrite, block: &Block{ID: 2, Type: BlockToolCall, ToolName: tools.NameWrite, Content: string(writeArgs), ResultDone: true}, codeBackground: currentTheme.ToolCallBg},
+		{name: tools.NameEdit, block: &Block{ID: 3, Type: BlockToolCall, ToolName: tools.NameEdit, Content: string(diffArgs), Diff: diff, ResultDone: true}, codeBackground: currentTheme.DiffAddLineBg},
+		{name: tools.NamePatch, block: &Block{ID: 4, Type: BlockToolCall, ToolName: tools.NamePatch, Content: string(diffArgs), Diff: diff, ResultDone: true}, codeBackground: currentTheme.DiffAddLineBg},
+	}
+	toolBackground := colorOfTheme(currentTheme.ToolCallBg)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := tt.block.Render(80, "")
+			line := renderedLineContaining(t, lines, content)
+			assertRenderedTextBackground(t, line, "package", colorOfTheme(tt.codeBackground))
+			if tt.name == tools.NameEdit || tt.name == tools.NamePatch {
+				contextLine := renderedLineContaining(t, lines, "package context")
+				assertRenderedTextBackground(t, contextLine, "package", toolBackground)
+			}
+		})
+	}
+}
+
+func TestReadOffsetTOMLFragmentKeepsErrorTokensReadable(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	content := "以下职责只属于主控，不得委托 Agent 自行执行"
+	args, _ := json.Marshal(map[string]any{"path": ".codex/config.toml", "offset": 15, "limit": 1})
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameRead,
+		Content:       string(args),
+		ResultContent: content,
+		ResultDone:    true,
+	}
+
+	line := renderedLineContaining(t, block.Render(100, ""), content)
+	assertRenderedTextForeground(t, line, "职", colorOfTheme(darkThemeSyntaxTextColour))
+	assertRenderedTextBackground(t, line, "职", colorOfTheme(currentTheme.ToolCallBg))
+}
+
+func renderedLineContaining(t *testing.T, lines []string, text string) string {
+	t.Helper()
+	for _, line := range lines {
+		if strings.Contains(stripANSI(line), text) {
+			return line
+		}
+	}
+	t.Fatalf("rendered output does not contain %q:\n%s", text, stripANSI(strings.Join(lines, "\n")))
+	return ""
+}
+
+func assertRenderedTextBackground(t *testing.T, line, text string, want color.Color) {
+	t.Helper()
+	for _, cell := range renderedCellsForText(t, line, text) {
+		if !colorsEqual(cell.Style.Bg, want) {
+			t.Fatalf("cell %q background = %v, want %v", cell.Content, cell.Style.Bg, want)
+		}
+	}
+}
+
+func assertRenderedTextForeground(t *testing.T, line, text string, want color.Color) {
+	t.Helper()
+	for _, cell := range renderedCellsForText(t, line, text) {
+		if !colorsEqual(cell.Style.Fg, want) {
+			t.Fatalf("cell %q foreground = %v, want %v", cell.Content, cell.Style.Fg, want)
+		}
+	}
+}
+
+func renderedCellsForText(t *testing.T, line, text string) []uv.Cell {
+	t.Helper()
+	plain := stripANSI(line)
+	byteStart := strings.Index(plain, text)
+	if byteStart < 0 {
+		t.Fatalf("line does not contain %q: %q", text, plain)
+	}
+	byteEnd := byteStart + len(text)
+	buf := newScreenBuffer(ansi.StringWidth(line), 1)
+	uv.NewStyledString(line).Draw(buf, buf.Bounds())
+	var matched []uv.Cell
+	pos := 0
+	for _, cell := range buf.Line(0) {
+		if cell.Content == "" {
+			continue
+		}
+		next := pos + len(cell.Content)
+		if pos < byteEnd && next > byteStart {
+			matched = append(matched, cell)
+		}
+		pos = next
+	}
+	if len(matched) == 0 {
+		t.Fatalf("no rendered cells found for %q in %q", text, plain)
+	}
+	return matched
 }
 
 func TestDisplayToolPathRelativizesHomePathUnderWorkingDir(t *testing.T) {

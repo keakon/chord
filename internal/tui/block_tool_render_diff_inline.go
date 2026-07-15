@@ -139,6 +139,8 @@ func hasMultiRunWordTokenChange(line string, changeSpans []diffSegmentSpan) bool
 	return false
 }
 
+// Inline helpers leave unchanged segments background-free; the enclosing tool
+// card restores ToolCallBg, while changeStyle supplies the semantic diff bg.
 func buildInlineContentANSI(segs []tools.InlineSegment, changeKind string, changeStyle lipgloss.Style, hl *codeHighlighter) string {
 	var buf strings.Builder
 	for _, seg := range segs {

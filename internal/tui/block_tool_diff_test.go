@@ -42,6 +42,22 @@ func TestEditToolCardRendersHighlightedDiffWithPath(t *testing.T) {
 	}
 }
 
+func TestEditAndPatchToolCardsKeepAddedAndDeletedLineBackgrounds(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	args, _ := json.Marshal(map[string]string{"path": "src/demo.go"})
+	diff := "@@ -1,1 +1,1 @@\n-package old\n+package main\n"
+	for _, toolName := range []string{tools.NameEdit, tools.NamePatch} {
+		t.Run(toolName, func(t *testing.T) {
+			block := &Block{ID: 1, Type: BlockToolCall, ToolName: toolName, Content: string(args), Diff: diff, ResultDone: true}
+			lines := block.Render(80, "")
+			deleted := renderedLineContaining(t, lines, "package old")
+			added := renderedLineContaining(t, lines, "package main")
+			assertRenderedTextBackground(t, deleted, "package", colorOfTheme(currentTheme.DiffDelLineBg))
+			assertRenderedTextBackground(t, added, "package", colorOfTheme(currentTheme.DiffAddLineBg))
+		})
+	}
+}
+
 func TestEditToolCardRendersDiagnosticsSummaryWithDiff(t *testing.T) {
 	block := &Block{
 		ID:           1,
@@ -152,32 +168,35 @@ func TestLexerForFilePathDisablesHighlightForUnknownExtension(t *testing.T) {
 }
 
 func TestLexerForFilePathKeepsBackgroundForUnknownExtension(t *testing.T) {
-	for _, tt := range []struct {
-		name   string
-		bgTerm string
+	ApplyTheme(DefaultTheme())
+	backgrounds := []struct {
+		name  string
+		value string
 	}{
-		{name: "add", bgTerm: diffAddBg},
-		{name: "delete", bgTerm: diffDelBg},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
+		{name: "tool", value: currentTheme.ToolCallBg},
+		{name: "diff add", value: currentTheme.DiffAddLineBg},
+		{name: "diff delete", value: currentTheme.DiffDelLineBg},
+	}
+	for _, background := range backgrounds {
+		t.Run(background.name, func(t *testing.T) {
 			hl := newCodeHighlighter("notes.unknownext", "package tools\n")
-			rendered := hl.highlightLine("package tools", tt.bgTerm)
+			rendered := hl.highlightLine("package tools", background.value)
 			if plain := stripANSI(rendered); plain != "package tools" {
 				t.Fatalf("expected unknown extension background fallback to preserve text, got %q", plain)
 			}
-			wantBg := ansiSeqForColor(lipgloss.Color(tt.bgTerm), false)
+			wantBg := ansiSeqForColor(lipgloss.Color(background.value), false)
 			if wantBg == "" {
-				t.Fatal("expected diff background color to produce ANSI background sequence")
+				t.Fatal("expected background color to produce an ANSI sequence")
 			}
 			if !strings.Contains(rendered, wantBg) {
-				t.Fatalf("expected unknown extension fallback to keep diff background %q, got %q", wantBg, rendered)
+				t.Fatalf("expected unknown extension fallback to keep background %q, got %q", wantBg, rendered)
 			}
-			spaceRendered := hl.highlightLine("    ", tt.bgTerm)
+			spaceRendered := hl.highlightLine("    ", background.value)
 			if plain := stripANSI(spaceRendered); plain != "    " {
 				t.Fatalf("expected whitespace-only fallback to preserve spaces, got %q", plain)
 			}
 			if !strings.Contains(spaceRendered, wantBg) {
-				t.Fatalf("expected whitespace-only fallback to keep diff background %q, got %q", wantBg, spaceRendered)
+				t.Fatalf("expected whitespace-only fallback to keep background %q, got %q", wantBg, spaceRendered)
 			}
 		})
 	}
@@ -222,15 +241,76 @@ func TestRenderInlineDiffLineKeepsSyntaxHighlighting(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected single-line inline diff, got %#v", lines)
 	}
-	keywordSeq := ansiSeqForColor(lipgloss.Color(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String()), true)
-	if keywordSeq == "" {
-		t.Fatal("expected Go keyword colour to produce an ANSI sequence")
-	}
-	if !strings.Contains(lines[0], keywordSeq+"return") {
-		t.Fatalf("expected inline diff to keep Go keyword highlighting, got %q", lines[0])
-	}
 	if !strings.Contains(stripANSI(lines[0]), "+return 10") {
 		t.Fatalf("expected changed line to stay visible, got %q", stripANSI(lines[0]))
+	}
+	keywordColour := colorOfTheme(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String())
+	assertRenderedTextForeground(t, lines[0], "return", keywordColour)
+	assertRenderedTextBackground(t, lines[0], "0", colorOfTheme(currentTheme.DiffAddInlineBg))
+}
+
+func TestEditToolCardKeepsFinalInlineDiffBackgrounds(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	longPrefix := strings.Repeat("prefix", 12)
+	longSuffix := strings.Repeat("suffix", 12)
+	tests := []struct {
+		name              string
+		oldLine           string
+		newLine           string
+		lineText          string
+		unchangedText     string
+		changedText       string
+		changedBackground string
+		wantEllipsis      bool
+	}{
+		{
+			name:              "short insertion",
+			oldLine:           "return 1",
+			newLine:           "return 10",
+			lineText:          "+return 10",
+			unchangedText:     "return",
+			changedText:       "0",
+			changedBackground: currentTheme.DiffAddInlineBg,
+		},
+		{
+			name:              "short deletion",
+			oldLine:           "return 10",
+			newLine:           "return 1",
+			lineText:          "-return 10",
+			unchangedText:     "return",
+			changedText:       "0",
+			changedBackground: currentTheme.DiffDelInlineBg,
+		},
+		{
+			name:              "long insertion window",
+			oldLine:           longPrefix + " value " + longSuffix,
+			newLine:           longPrefix + " valueHTTP " + longSuffix,
+			lineText:          "valueHTTP",
+			unchangedText:     "suffix",
+			changedText:       "HTTP",
+			changedBackground: currentTheme.DiffAddInlineBg,
+			wantEllipsis:      true,
+		},
+	}
+
+	args, _ := json.Marshal(map[string]string{"path": "example.go"})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			block := &Block{
+				ID:         1,
+				Type:       BlockToolCall,
+				ToolName:   tools.NameEdit,
+				Content:    string(args),
+				Diff:       "@@ -1,1 +1,1 @@\n-" + tt.oldLine + "\n+" + tt.newLine + "\n",
+				ResultDone: true,
+			}
+			line := renderedLineContaining(t, block.Render(60, ""), tt.lineText)
+			assertRenderedTextBackground(t, line, tt.unchangedText, colorOfTheme(currentTheme.ToolCallBg))
+			assertRenderedTextBackground(t, line, tt.changedText, colorOfTheme(tt.changedBackground))
+			if tt.wantEllipsis && !strings.Contains(stripANSI(line), "…") {
+				t.Fatalf("expected long inline diff to use a snippet window, got %q", stripANSI(line))
+			}
+		})
 	}
 }
 
@@ -598,7 +678,7 @@ func TestRenderHighlightedSnippetLineShowsHiddenClusterSummary(t *testing.T) {
 		{StartCol: strings.Index(line, "TWO"), EndCol: strings.Index(line, "TWO") + len("TWO")},
 		{StartCol: strings.Index(line, "THREE"), EndCol: strings.Index(line, "THREE") + len("THREE")},
 	}
-	rendered := renderHighlightedSnippetLine(line, spans, 26, hl, diffAddBg)
+	rendered := renderHighlightedSnippetLine(line, spans, 26, hl, currentTheme.ToolCallBg)
 	plain := stripANSI(rendered)
 	if !strings.Contains(plain, "(+1)") {
 		t.Fatalf("expected hidden cluster summary, got %q", plain)
@@ -616,7 +696,7 @@ func TestRenderHighlightedSnippetLineOmitsSummaryWhenTooNarrow(t *testing.T) {
 		{StartCol: strings.Index(line, "TWO"), EndCol: strings.Index(line, "TWO") + len("TWO")},
 		{StartCol: strings.Index(line, "THREE"), EndCol: strings.Index(line, "THREE") + len("THREE")},
 	}
-	rendered := renderHighlightedSnippetLine(line, spans, 12, hl, diffAddBg)
+	rendered := renderHighlightedSnippetLine(line, spans, 12, hl, currentTheme.ToolCallBg)
 	plain := stripANSI(rendered)
 	if strings.Contains(plain, "(+1)") {
 		t.Fatalf("expected hidden cluster summary to be omitted when width is too narrow, got %q", plain)

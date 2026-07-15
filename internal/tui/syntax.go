@@ -16,7 +16,15 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const darkThemeSyntaxCommentColour = "#9aa06b"
+// Tool results often contain partial files, so Chroma Error tokens can mean
+// missing lexer context rather than invalid source. Keep those tokens neutral
+// and lift Monokai's dim colours above the 4.5:1 floor on ToolCallBg.
+const (
+	darkThemeSyntaxTextColour    = "#f8f8f2"
+	darkThemeSyntaxAccentColour  = "#ff9eb5"
+	darkThemeSyntaxLiteralColour = "#dcc6e0"
+	darkThemeSyntaxCommentColour = "#d4d0ab"
+)
 
 // syntaxHighlightExtWhitelist is the conservative set of file extensions we
 // trust for file-based syntax highlighting. For files with a path, we only
@@ -206,21 +214,40 @@ func toolCodeChromaStyle() *chroma.Style {
 		baseStyle = styles.Fallback
 	}
 
-	commentColour := darkThemeSyntaxCommentColour
-
 	builder := baseStyle.Builder()
-	for _, tokenType := range []chroma.TokenType{
-		chroma.Comment,
-		chroma.CommentHashbang,
-		chroma.CommentMultiline,
-		chroma.CommentSingle,
-		chroma.CommentSpecial,
-		chroma.CommentPreproc,
-		chroma.CommentPreprocFile,
+	for _, override := range []struct {
+		tokenTypes []chroma.TokenType
+		colour     string
+	}{
+		{[]chroma.TokenType{chroma.Error}, darkThemeSyntaxTextColour},
+		{[]chroma.TokenType{
+			chroma.KeywordNamespace,
+			chroma.NameTag,
+			chroma.Operator,
+			chroma.GenericDeleted,
+		}, darkThemeSyntaxAccentColour},
+		{[]chroma.TokenType{
+			chroma.Literal,
+			chroma.LiteralStringEscape,
+			chroma.LiteralNumber,
+		}, darkThemeSyntaxLiteralColour},
+		{[]chroma.TokenType{
+			chroma.Comment,
+			chroma.CommentHashbang,
+			chroma.CommentMultiline,
+			chroma.CommentSingle,
+			chroma.CommentSpecial,
+			chroma.CommentPreproc,
+			chroma.CommentPreprocFile,
+			chroma.GenericSubheading,
+		}, darkThemeSyntaxCommentColour},
 	} {
-		entry := builder.Get(tokenType)
-		entry.Colour = chroma.ParseColour(commentColour)
-		builder.AddEntry(tokenType, entry)
+		colour := chroma.ParseColour(override.colour)
+		for _, tokenType := range override.tokenTypes {
+			entry := builder.Get(tokenType)
+			entry.Colour = colour
+			builder.AddEntry(tokenType, entry)
+		}
 	}
 	styled, err := builder.Build()
 	if err != nil {
