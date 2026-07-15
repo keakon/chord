@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo_root=$(git rev-parse --show-toplevel)
+"$repo_root/scripts/check_staged_ignored_files.sh"
+
 if ! command -v gofmt >/dev/null 2>&1; then
   echo "pre-commit: gofmt not found in PATH"
   exit 1

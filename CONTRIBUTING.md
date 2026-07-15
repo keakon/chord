@@ -31,6 +31,7 @@ After cloning the repository, enable commit hooks:
 
 This configures `core.hooksPath` to use `.githooks/` and ensures:
 
+- `pre-commit` rejects staged paths ignored by the staged repository rules
 - `pre-commit` automatically runs `goimports` and `gofmt` on staged `.go` files
 - `pre-push` runs `fmt-check`, `vet`, `staticcheck`, and tests before pushing
 

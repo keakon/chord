@@ -10,6 +10,9 @@ on:
       - "scripts/sync-docs.mjs"
       - "scripts/check_docs_consistency.sh"
       - "scripts/check_docs_examples.sh"
+      - "scripts/check_staged_ignored_files.sh"
+      - "scripts/test_staged_ignored_files.sh"
+      - ".githooks/pre-commit"
       - "README.md"
       - "README_CN.md"
       - "CONTRIBUTING.md"
@@ -24,6 +27,9 @@ on:
       - "scripts/sync-docs.mjs"
       - "scripts/check_docs_consistency.sh"
       - "scripts/check_docs_examples.sh"
+      - "scripts/check_staged_ignored_files.sh"
+      - "scripts/test_staged_ignored_files.sh"
+      - ".githooks/pre-commit"
       - "README.md"
       - "README_CN.md"
       - "CONTRIBUTING.md"
@@ -53,6 +59,11 @@ jobs:
 
       - name: Check docs consistency
         run: ./scripts/check_docs_consistency.sh
+
+      - name: Check staged ignored-file guard
+        run: |
+          bash -n .githooks/pre-commit scripts/check_staged_ignored_files.sh
+          ./scripts/test_staged_ignored_files.sh
 
   examples:
     name: Docs examples
