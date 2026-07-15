@@ -6,10 +6,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/hook"
@@ -39,6 +41,35 @@ func TestFilterRestoredTodosDropsStaleCompactionTodos(t *testing.T) {
 
 	if got := filterRestoredTodosByLatestCompactionSummary(msgs, todos); len(got) != 0 {
 		t.Fatalf("restored todos = %#v, want stale todos dropped", got)
+	}
+}
+
+func TestRestoreUsageEvidenceReusesLedgerScanForAgentModelRefs(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := filepath.Join(projectRoot, "session")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	ledger := analytics.NewUsageLedger(sessionDir, projectRoot)
+	if err := ledger.AppendEvent(analytics.UsageEvent{
+		AgentID:          "worker-1",
+		SelectedModelRef: "provider/selected",
+		RunningModelRef:  "provider/running",
+		UsageRaw:         analytics.UsageSnapshot{InputTokens: 7},
+	}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	loaded := &loadedSessionState{}
+
+	a.restoreUsageEvidence(loaded, sessionDir)
+
+	refs := loaded.AgentModelRefs["worker-1"]
+	if refs.Selected != "provider/selected" || refs.Running != "provider/running" {
+		t.Fatalf("restored model refs = %#v", refs)
+	}
+	if loaded.UsageStats.InputTokens != 7 {
+		t.Fatalf("restored input tokens = %d, want 7", loaded.UsageStats.InputTokens)
 	}
 }
 
@@ -605,6 +636,42 @@ func TestRestoreSessionAtStartupRestoresModelPoolFromSnapshot(t *testing.T) {
 	}
 	if got := a.ProviderModelRef(); got != "exec/strong" {
 		t.Fatalf("ProviderModelRef() after restore = %q, want exec/strong", got)
+	}
+}
+
+func TestFocusedModelStateForParkedSubAgentUsesDurableRefsAndConfigPool(t *testing.T) {
+	a := newTestMainAgentForRestore(t, t.TempDir(), t.TempDir())
+	a.SetModelPoolPolicy(NewRuntimeModelPoolPolicy(), "")
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"builder": {Name: "builder", Mode: config.AgentModeMain, Models: map[string][]string{"default": {"main/model"}}},
+		"explorer": {
+			Name:    "explorer",
+			Mode:    config.AgentModeSubAgent,
+			Models:  map[string][]string{"gpt-5.6-sol": {"anyrouter/gpt-5.6-sol"}},
+			Variant: "high",
+		},
+	})
+	a.subs.mu.Lock()
+	a.subs.taskRecords["adhoc-1"] = &DurableTaskRecord{
+		TaskID:           "adhoc-1",
+		AgentDefName:     "explorer",
+		LatestInstanceID: "explorer-6",
+		RuntimeParked:    true,
+		SelectedModelRef: "muyuan/gpt-5.6-sol@high",
+		RunningModelRef:  "anyrouter/gpt-5.6-sol@high",
+	}
+	a.subs.mu.Unlock()
+	a.SwitchFocus("explorer-6")
+
+	got := a.FocusedModelState()
+	if got.SelectedRef != "muyuan/gpt-5.6-sol@high" || got.RunningRef != "anyrouter/gpt-5.6-sol@high" {
+		t.Fatalf("focused refs = %#v", got)
+	}
+	if got.Variant != "high" {
+		t.Fatalf("variant = %q, want high", got.Variant)
+	}
+	if got.PoolName != "gpt-5.6-sol" || !slices.Equal(got.PoolNames, []string{"gpt-5.6-sol"}) {
+		t.Fatalf("focused pools = %q %#v", got.PoolName, got.PoolNames)
 	}
 }
 

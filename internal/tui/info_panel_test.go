@@ -404,6 +404,19 @@ func TestRenderInfoPanelPoolUsesValueColor(t *testing.T) {
 	}
 }
 
+func TestRenderInfoPanelShowsSingleModelPool(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.providerModelRef = "anyrouter/gpt-5.6-sol@high"
+	backend.poolNamesByFocus = map[string][]string{"": {"gpt-5.6-sol"}}
+	backend.currentPoolByFocus = map[string]string{"": "gpt-5.6-sol"}
+	m := NewModel(backend)
+
+	plain := stripANSI(m.renderInfoPanel(40, 20))
+	if !strings.Contains(plain, "Pool: gpt-5.6-sol") {
+		t.Fatalf("single Pool should remain visible; got %q", plain)
+	}
+}
+
 func TestKeyPoolHealthSeverityThresholds(t *testing.T) {
 	tests := []struct {
 		name    string

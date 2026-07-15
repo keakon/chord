@@ -42,6 +42,15 @@ At runtime, Chord does not preload every skill body into the system prompt. The 
 
 In the TUI, the **SKILLS** panel lists discovered skills. A skill turns green only after the `skill` tool successfully loads it during the session. Failed skill loads do not mark the skill as invoked, and unknown (not-discovered) skills are not shown until they are discovered.
 
+Skill discovery produces a workspace-level catalog, but MainAgent and SubAgents do not share one permission view or invoked state:
+
+- Each Agent filters the catalog through its latest Agent configuration and permission rules to determine which skills are visible and loadable through the `skill` tool.
+- MainAgent and every SubAgent track invoked state independently. Successfully loading a skill in one Agent does not mark that skill as invoked in another Agent.
+- After a parked SubAgent is restored, invoked names are recovered from durable task state and the task's historical transcript, then filtered against the current workspace catalog and latest Agent permissions.
+- An in-flight model request keeps the prompt/tool surface frozen when that request started; the TUI and subsequent `skill` tool resolution use the current catalog and current Agent configuration.
+
+The workspace catalog is therefore safe to reuse, while an Agent's visible list, permission decisions, and invoked state must not reuse MainAgent's computed results.
+
 Minimal structure example:
 
 ```text

@@ -38,6 +38,7 @@ type loadedSessionState struct {
 	ModelPoolCurrentModelPool string
 	ModelPoolAgentOverrides   map[string]string
 	UsageStats                analytics.SessionStats
+	AgentModelRefs            map[string]analytics.AgentModelRefs
 	ContextUsage              message.TokenUsage
 	LastInputTokens           int
 	LastTotalContextTokens    int
@@ -306,10 +307,11 @@ func (a *MainAgent) restoreUsageEvidence(loaded *loadedSessionState, sessionPath
 	}
 	if ledger := analytics.NewUsageLedger(sessionPath, a.projectRoot); ledger != nil {
 		usageStarted := time.Now()
-		if ledgerStats, eventCount, ledgerErr := ledger.BuildSessionStats(); ledgerErr != nil {
+		if ledgerStats, eventCount, modelRefs, ledgerErr := ledger.BuildSessionStatsWithAgentModelRefs(); ledgerErr != nil {
 			log.Warnf("failed to rebuild usage stats from usage ledger session=%v error=%v", sessionPath, ledgerErr)
 		} else if eventCount > 0 {
 			loaded.UsageStats = ledgerStats
+			loaded.AgentModelRefs = modelRefs
 			loaded.ContextUsage = message.TokenUsage{
 				InputTokens:      int(ledgerStats.InputTokens),
 				OutputTokens:     int(ledgerStats.OutputTokens),
@@ -409,9 +411,7 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	} else {
 		loaded.TaskRecords = taskRecords
 	}
-	if modelRefs, modelErr := analytics.LoadLatestAgentModelRefs(sessionPath); modelErr != nil {
-		log.Warnf("failed to load subagent model refs from usage ledger session=%v error=%v", sessionPath, modelErr)
-	} else {
+	if modelRefs := loaded.AgentModelRefs; len(modelRefs) > 0 {
 		for _, rec := range loaded.TaskRecords {
 			if rec == nil {
 				continue
@@ -428,6 +428,14 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 
 	snapshotDuration, subAgentRestoreDuration = a.applySessionSnapshot(loaded, sessionPath, tmpRecovery)
 	loaded.TaskRecords = mergeDurableTaskRecords(loaded.TaskRecords, buildDurableTaskRecordsFromLoadedStates(loaded.SubAgentStates))
+	for _, state := range loaded.SubAgentStates {
+		rec := loaded.TaskRecords[state.TaskID]
+		if rec == nil || len(rec.InvokedSkillNames) > 0 {
+			continue
+		}
+		rec.InvokedSkillNames = append(rec.InvokedSkillNames, invokedSkillNamesFromMessages(state.Messages)...)
+		rec.InvokedSkillNames = normalizeSkillNames(rec.InvokedSkillNames)
+	}
 	loaded.SubAgentStates = filterRestorableSubAgentStates(loaded.SubAgentStates)
 
 	if len(loaded.TodoItems) == 0 {
@@ -494,6 +502,7 @@ func (a *MainAgent) loadRestoredSubAgentStates(sessionPath string, rm *recovery.
 	if len(subIDs) == 0 {
 		subIDs = listSubAgentMetaIDs(sessionPath)
 	}
+	subIDs = canonicalRestoredSubAgentIDs(subIDs, taskRecords)
 	if len(subIDs) == 0 {
 		return nil
 	}
@@ -538,6 +547,46 @@ func (a *MainAgent) loadRestoredSubAgentStates(sessionPath string, rm *recovery.
 		states = append(states, builder.build())
 	}
 	return states
+}
+
+func canonicalRestoredSubAgentIDs(ids []string, taskRecords map[string]*DurableTaskRecord) []string {
+	if len(ids) == 0 || len(taskRecords) == 0 {
+		return ids
+	}
+	historical := make(map[string]string)
+	for _, rec := range taskRecords {
+		if rec == nil {
+			continue
+		}
+		latest := strings.TrimSpace(rec.LatestInstanceID)
+		if latest == "" {
+			continue
+		}
+		historical[latest] = latest
+		for _, id := range rec.InstanceHistory {
+			if id = strings.TrimSpace(id); id != "" && id != latest {
+				historical[id] = latest
+			}
+		}
+	}
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if latest := historical[id]; latest != "" {
+			id = latest
+		}
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRestoreResult {
@@ -868,9 +917,6 @@ func (a *MainAgent) restoreSessionState(sessionPath string) (sessionRestoreResul
 }
 
 func rebuildInvokedSkillsFromMessages(msgs []message.Message, visible []*skill.Meta) []*skill.Meta {
-	if len(msgs) == 0 {
-		return nil
-	}
 	visibleByName := make(map[string]*skill.Meta, len(visible))
 	for _, meta := range visible {
 		if meta == nil || strings.TrimSpace(meta.Name) == "" {
@@ -879,6 +925,27 @@ func rebuildInvokedSkillsFromMessages(msgs []message.Message, visible []*skill.M
 		copyMeta := *meta
 		copyMeta.Discovered = true
 		visibleByName[copyMeta.Name] = &copyMeta
+	}
+	names := invokedSkillNamesFromMessages(msgs)
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]*skill.Meta, 0, len(names))
+	for _, name := range names {
+		if meta, ok := visibleByName[name]; ok {
+			copyMeta := *meta
+			copyMeta.Invoked = true
+			out = append(out, &copyMeta)
+			continue
+		}
+		out = append(out, &skill.Meta{Name: name, Invoked: true})
+	}
+	return out
+}
+
+func invokedSkillNamesFromMessages(msgs []message.Message) []string {
+	if len(msgs) == 0 {
+		return nil
 	}
 	assistantSkillCalls := make(map[string]string)
 	for _, msg := range msgs {
@@ -899,7 +966,7 @@ func rebuildInvokedSkillsFromMessages(msgs []message.Message, visible []*skill.M
 	if len(assistantSkillCalls) == 0 {
 		return nil
 	}
-	invoked := make(map[string]*skill.Meta)
+	invoked := make(map[string]struct{})
 	for _, msg := range msgs {
 		if msg.Role != "tool" || strings.TrimSpace(msg.ToolCallID) == "" {
 			continue
@@ -908,22 +975,16 @@ func rebuildInvokedSkillsFromMessages(msgs []message.Message, visible []*skill.M
 		if !ok || isToolResultErrorMessage(msg) {
 			continue
 		}
-		if meta, ok := visibleByName[name]; ok {
-			copyMeta := *meta
-			copyMeta.Invoked = true
-			invoked[name] = &copyMeta
-			continue
-		}
-		invoked[name] = &skill.Meta{Name: name, Invoked: true}
+		invoked[name] = struct{}{}
 	}
 	if len(invoked) == 0 {
 		return nil
 	}
-	out := make([]*skill.Meta, 0, len(invoked))
-	for _, meta := range invoked {
-		out = append(out, meta)
+	out := make([]string, 0, len(invoked))
+	for name := range invoked {
+		out = append(out, name)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.Strings(out)
 	return out
 }
 

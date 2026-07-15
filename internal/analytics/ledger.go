@@ -124,28 +124,6 @@ func LoadCachedSessionUsageSummary(sessionDir string) (*SessionUsageSummary, err
 	return readUsageSummaryFile(filepath.Join(sessionDir, "usage-summary.json"))
 }
 
-// LoadLatestAgentModelRefs rebuilds the last known model refs per agent from
-// the append-only usage ledger. It also supports sessions created before model
-// refs were persisted in subagent task records.
-func LoadLatestAgentModelRefs(sessionDir string) (map[string]AgentModelRefs, error) {
-	refs := make(map[string]AgentModelRefs)
-	err := scanUsageEvents(filepath.Join(sessionDir, "usage.jsonl"), func(evt UsageEvent) {
-		agentID := strings.TrimSpace(evt.AgentID)
-		if agentID == "" {
-			return
-		}
-		ref := refs[agentID]
-		if selected := strings.TrimSpace(evt.SelectedModelRef); selected != "" {
-			ref.Selected = selected
-		}
-		if running := strings.TrimSpace(evt.RunningModelRef); running != "" {
-			ref.Running = running
-		}
-		refs[agentID] = ref
-	})
-	return refs, err
-}
-
 // SetFirstUserMessage records the first user message preview for future summary writes.
 // It also sets OriginalFirstUserMessage, which is never overwritten by compaction.
 func (l *UsageLedger) SetFirstUserMessage(content string) error {
@@ -249,6 +227,13 @@ func (l *UsageLedger) Summary() (*SessionUsageSummary, error) {
 
 // BuildSessionStats rebuilds runtime SessionStats from usage.jsonl.
 func (l *UsageLedger) BuildSessionStats() (SessionStats, int64, error) {
+	stats, eventCount, _, err := l.BuildSessionStatsWithAgentModelRefs()
+	return stats, eventCount, err
+}
+
+// BuildSessionStatsWithAgentModelRefs rebuilds runtime stats and the latest
+// selected/running model refs per agent in one ledger scan.
+func (l *UsageLedger) BuildSessionStatsWithAgentModelRefs() (SessionStats, int64, map[string]AgentModelRefs, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -257,6 +242,7 @@ func (l *UsageLedger) BuildSessionStats() (SessionStats, int64, error) {
 		ByAgent: make(map[string]*AgentStats),
 	}
 	var eventCount int64
+	refs := make(map[string]AgentModelRefs)
 	err := scanUsageEvents(l.usagePath(), func(evt UsageEvent) {
 		eventCount++
 		raw := evt.UsageRaw
@@ -283,6 +269,14 @@ func (l *UsageLedger) BuildSessionStats() (SessionStats, int64, error) {
 		ms.EstimatedCost += evt.Cost.TotalCost
 
 		agentID := normalizeAgentID(evt.AgentID)
+		ref := refs[agentID]
+		if selected := strings.TrimSpace(evt.SelectedModelRef); selected != "" {
+			ref.Selected = selected
+		}
+		if running := strings.TrimSpace(evt.RunningModelRef); running != "" {
+			ref.Running = running
+		}
+		refs[agentID] = ref
 		as, ok := stats.ByAgent[agentID]
 		if !ok {
 			as = &AgentStats{ByModel: make(map[string]*ModelStats)}
@@ -309,7 +303,7 @@ func (l *UsageLedger) BuildSessionStats() (SessionStats, int64, error) {
 		ams.ReasoningTokens += raw.ReasoningTokens
 		ams.EstimatedCost += evt.Cost.TotalCost
 	})
-	return stats, eventCount, err
+	return stats, eventCount, refs, err
 }
 
 // AppendEvent appends one usage event and refreshes usage-summary.json.

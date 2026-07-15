@@ -388,7 +388,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	if logErr == nil {
 		ac.LogWriter = logWriter
 		logger := newGologLoggerWithContext(logWriter, logLevel, logCtx)
-		if redirect, redirectErr := redirectProcessStderr(logWriter.CurrentFile(), logger); redirectErr != nil {
+		if redirect, redirectErr := redirectProcessStderr(logWriter.CurrentFile()); redirectErr != nil {
 			writeStartupStderrNotice(logPath, redirectErr)
 		} else {
 			ac.StderrRedirect = redirect
@@ -489,7 +489,6 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	if ac.LogWriter != nil {
 		logger := newGologLoggerWithContext(ac.LogWriter, ac.logLevel, ac.logCtx)
 		setDefaultLogger(logger)
-		ac.StderrRedirect.SetLogger(logger)
 	} else {
 		setDefaultLogger(newStderrGologLoggerWithContext(ac.logLevel, ac.logCtx))
 	}
@@ -632,7 +631,6 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		if ac.LogWriter != nil {
 			logger := newGologLoggerWithContext(ac.LogWriter, ac.logLevel, ac.logCtx)
 			setDefaultLogger(logger)
-			ac.StderrRedirect.SetLogger(logger)
 		} else {
 			setDefaultLogger(newStderrGologLoggerWithContext(ac.logLevel, ac.logCtx))
 		}

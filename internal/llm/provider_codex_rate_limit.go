@@ -368,7 +368,7 @@ func (p *ProviderConfig) StartCodexRateLimitPolling(fetchFn func(string, string)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.oauthProfile != config.OAuthProfileOpenAICodex {
+	if p.oauthProfile != config.OAuthProfileOpenAICodex || p.codexPollClosed {
 		return
 	}
 	p.codexPollFetchFn = fetchFn
@@ -376,10 +376,20 @@ func (p *ProviderConfig) StartCodexRateLimitPolling(fetchFn func(string, string)
 
 func (p *ProviderConfig) Close() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.codexPollClosed = true
 	p.codexPollFetchFn = nil
-	p.polledRateLimitInFlight = make(map[int]bool)
+	cancelCodex := p.codexLifecycleCancel
+	monitor := p.authStateMonitor
 	p.stopAuthStateMonitorLocked()
+	p.mu.Unlock()
+	if cancelCodex != nil {
+		cancelCodex()
+	}
+	monitor.wait()
+	p.codexPollWG.Wait()
+	p.mu.Lock()
+	p.polledRateLimitInFlight = make(map[int]bool)
+	p.mu.Unlock()
 }
 
 func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
@@ -391,7 +401,7 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 	}
 
 	p.mu.Lock()
-	if p.oauthProfile != config.OAuthProfileOpenAICodex || p.codexPollFetchFn == nil {
+	if p.oauthProfile != config.OAuthProfileOpenAICodex || p.codexPollFetchFn == nil || p.codexPollClosed {
 		p.mu.Unlock()
 		return false
 	}
@@ -442,9 +452,21 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 	if p.polledRateLimitSucceededAt == nil {
 		p.polledRateLimitSucceededAt = make(map[int]time.Time)
 	}
+	lifecycleCtx := p.codexLifecycleCtx
+	if lifecycleCtx == nil {
+		lifecycleCtx = context.Background()
+	}
+	p.codexPollWG.Add(1)
 	p.mu.Unlock()
 
-	go func(providerName string, candidateIdxs []int, ctx context.Context) {
+	go func(providerName string, candidateIdxs []int, requestCtx, lifecycleCtx context.Context) {
+		defer p.codexPollWG.Done()
+		ctx, cancel := context.WithCancel(requestCtx)
+		stopLifecycleCancel := context.AfterFunc(lifecycleCtx, cancel)
+		defer func() {
+			stopLifecycleCancel()
+			cancel()
+		}()
 		const successTTL = time.Minute
 		const failureBackoff = 30 * time.Second
 		for _, slot := range candidateIdxs {
@@ -510,7 +532,7 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 				}
 			}
 		}
-	}(p.name, candidates, ctx)
+	}(p.name, candidates, ctx, lifecycleCtx)
 
 	return true
 }
@@ -579,9 +601,11 @@ func (p *ProviderConfig) WakeCodexRateLimitPolling() {
 	fetchFn := p.codexPollFetchFn
 	p.polledRateLimitInFlight[credIdx] = true
 	p.polledRateLimitAttemptedAt[credIdx] = now
+	p.codexPollWG.Add(1)
 	p.mu.Unlock()
 
 	go func(providerName string, key string, accountID string, credIdx int, fetchFn func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error)) {
+		defer p.codexPollWG.Done()
 		defer func() {
 			p.mu.Lock()
 			if p.polledRateLimitInFlight != nil {

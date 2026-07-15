@@ -650,11 +650,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case focusedContinueActionMsg:
 		if m.agent == nil || m.focusedAgentID != msg.target.AgentID {
+			m.stopActiveAnimationIfIdle()
 			return m, nil
 		}
 		backend := m.agent
 		targeted, hasTargeted := backend.(agent.TargetedConversationController)
 		switch msg.action {
+		case 0:
+			m.stopActiveAnimationIfIdle()
+			return m, nil
 		case focusedContinueFromContext:
 			return m, func() tea.Msg {
 				if hasTargeted {
@@ -689,14 +693,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(staged, send)
 		default:
-			return m, func() tea.Msg {
-				if hasTargeted {
-					targeted.ContinueFromContextForTarget(msg.target)
-				} else {
-					backend.ContinueFromContext()
-				}
-				return nil
-			}
+			m.stopActiveAnimationIfIdle()
+			return m, nil
 		}
 
 	case sessionRestoredRebuildMsg:

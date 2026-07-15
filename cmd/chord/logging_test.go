@@ -154,7 +154,18 @@ func TestRotatingLogFileRebindsStderrRedirectOnReopen(t *testing.T) {
 	}
 	defer w.Close()
 
-	redirect := &stderrRedirect{active: true, writeFile: w.CurrentFile()}
+	redirect, err := redirectProcessStderr(w.CurrentFile())
+	if err != nil {
+		t.Fatalf("redirectProcessStderr: %v", err)
+	}
+	if redirect == nil {
+		t.Fatal("redirectProcessStderr returned nil")
+	}
+	defer func() {
+		if err := redirect.Restore(); err != nil {
+			t.Errorf("Restore stderr redirect: %v", err)
+		}
+	}()
 	w.SetStderrRedirect(redirect)
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("Remove active log: %v", err)
@@ -287,24 +298,6 @@ func TestWriteStartupStderrNoticeUsesProvidedLogPath(t *testing.T) {
 	}
 }
 
-func TestRedirectProcessStderrWritesStructuredInstanceTaggedLines(t *testing.T) {
-	var buf bytes.Buffer
-	logger := newGologLogger(&buf, golog.DebugLevel)
-	r := &stderrRedirect{logger: logger}
-
-	r.logLine("stderr line one\n")
-
-	text := buf.String()
-	for _, want := range []string{
-		"stderr",
-		"stderr_text=stderr line one",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("log = %q, want %q", text, want)
-		}
-	}
-}
-
 func TestChordCodeUsesGologForLogging(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
@@ -340,26 +333,6 @@ func TestChordCodeUsesGologForLogging(t *testing.T) {
 	}
 }
 
-func TestRedirectProcessStderrUsesUpdatedLogger(t *testing.T) {
-	var buf bytes.Buffer
-	r := &stderrRedirect{logger: newGologLoggerWithContext(&buf, golog.DebugLevel, logContext{PID: 1})}
-
-	r.logLine("before session\n")
-	r.SetLogger(newGologLoggerWithContext(&buf, golog.DebugLevel, logContext{PID: 1, SID: "20260502015258426"}))
-	r.logLine("after session\n")
-
-	text := buf.String()
-	if !strings.Contains(text, "before session") || !strings.Contains(text, "after session") {
-		t.Fatalf("log output = %q, want both stderr lines", text)
-	}
-	if strings.Contains(text, "sid=20260502015258426] stderr stderr_text=before session") {
-		t.Fatalf("pre-session stderr unexpectedly had sid: %q", text)
-	}
-	if !strings.Contains(text, "sid=20260502015258426] stderr stderr_text=after session") {
-		t.Fatalf("updated stderr logger did not include sid: %q", text)
-	}
-}
-
 func TestStderrRedirectRebindNoopsWhenInactive(t *testing.T) {
 	dir := t.TempDir()
 	oldFile, err := os.Create(filepath.Join(dir, "old.log"))
@@ -379,6 +352,60 @@ func TestStderrRedirectRebindNoopsWhenInactive(t *testing.T) {
 	}
 	if r.writeFile != oldFile {
 		t.Fatal("inactive redirect should keep existing write file")
+	}
+}
+
+func TestStderrRedirectWritesDirectlyAndRebinds(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows stderr FD redirection is not implemented")
+	}
+	dir := t.TempDir()
+	first, err := os.Create(filepath.Join(dir, "first.log"))
+	if err != nil {
+		t.Fatalf("Create first log: %v", err)
+	}
+	defer first.Close()
+	second, err := os.Create(filepath.Join(dir, "second.log"))
+	if err != nil {
+		t.Fatalf("Create second log: %v", err)
+	}
+	defer second.Close()
+
+	r, err := redirectProcessStderr(first)
+	if err != nil {
+		t.Fatalf("redirectProcessStderr: %v", err)
+	}
+	if r == nil {
+		t.Fatal("redirectProcessStderr returned nil")
+	}
+	defer func() {
+		if err := r.Restore(); err != nil {
+			t.Errorf("Restore: %v", err)
+		}
+	}()
+	if _, err := os.Stderr.WriteString("first stderr line\n"); err != nil {
+		t.Fatalf("write first stderr line: %v", err)
+	}
+	if err := r.Rebind(second); err != nil {
+		t.Fatalf("Rebind: %v", err)
+	}
+	if _, err := os.Stderr.WriteString("second stderr line\n"); err != nil {
+		t.Fatalf("write second stderr line: %v", err)
+	}
+
+	firstData, err := os.ReadFile(first.Name())
+	if err != nil {
+		t.Fatalf("ReadFile first: %v", err)
+	}
+	secondData, err := os.ReadFile(second.Name())
+	if err != nil {
+		t.Fatalf("ReadFile second: %v", err)
+	}
+	if !strings.Contains(string(firstData), "first stderr line") || strings.Contains(string(firstData), "second stderr line") {
+		t.Fatalf("first log = %q", firstData)
+	}
+	if !strings.Contains(string(secondData), "second stderr line") {
+		t.Fatalf("second log = %q", secondData)
 	}
 }
 

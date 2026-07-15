@@ -38,6 +38,15 @@ Chord 默认从以下目录发现 Skills：
 
 TUI 侧边栏的 **SKILLS** 区块只显示当前已发现的 skills。`skill` 工具成功加载某个 skill 后，该 skill 以绿色显示为已调用；加载失败不会标记，未发现/不存在的 skill 也不显示（直至被发现）。
 
+Skill discovery 的结果是工作区级 catalog，但这不表示 MainAgent 与 SubAgent 共享相同权限或调用状态：
+
+- 每个 Agent 都用自己的最新 Agent 配置和 permission rules 过滤 catalog，决定哪些 skills 可见、可由 `skill` 工具加载；
+- MainAgent 与每个 SubAgent 分别记录 invoked 状态。一个 Agent 成功加载 skill，不会让其他 Agent 的同名 skill 变成“已调用”；
+- parked SubAgent 恢复后，会从 durable task 状态及该任务的历史 transcript 恢复 invoked 名称，再按当前工作区 catalog 和最新 Agent 权限过滤展示；
+- 当前正在进行的模型请求继续使用它开始时冻结的 prompt/tool surface；TUI 和后续 `skill` 工具解析使用当前 catalog 与当前 Agent 配置。
+
+因此，工作区 catalog 可以安全复用，但 Agent 的可见列表、权限判断和 invoked 状态不能直接复用 MainAgent 的结果。
+
 最小结构示例：
 
 ```text

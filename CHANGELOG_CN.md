@@ -29,6 +29,9 @@
 - 修复切换到大型 SubAgent transcript 时 TUI 可能因一次性重建并输出完整历史而失去响应的问题。焦点切换现在复用有界 transcript 窗口，首屏只加载尾部内容，小型 transcript 仍完整显示。
 - 修复恢复会话后聚焦 parked SubAgent 时右侧 MODEL 信息为空的问题。模型信息现在持久化到任务、meta 和 recovery snapshot；旧会话优先从 usage ledger 恢复，缺失时按最新 Agent 配置和当前模型回退解析。
 - 修复在 parked SubAgent 视图按 Enter 继续时 TUI 卡住的问题。上下文读取、SubAgent rehydrate 和继续请求不再同步执行在 TUI 更新路径中。
+- 修复 rehydrate 后 info panel 查询已调用 skills 时的无限递归：MainAgent 的 focused skill 路由不再被 SubAgent 反向调用。Skill discovery 现在作为工作区级 catalog 共享，但每个 Agent 按自己的最新权限动态过滤可见项，并独立记录、恢复 invoked 状态。
+- 进程 stderr 现在直接绑定到当前 rotating log 文件，不再经 Go pipe 回灌 golog；runtime panic/stack overflow 可以完整落盘并正常退出，不会因 fatal 阶段无人消费 pipe 而把崩溃表现成永久卡死。
+- 恢复 SubAgent 时现在以 durable task 为 canonical 单位；同一 task 的历史 runtime instance 只参与 transcript 合并，不再作为多个独立 sidebar Agent 重复显示或参与焦点路由。
 - 忙碌 SubAgent 的排队输入现在会等事件循环实际取走已完成的 LLM 响应后才放行，避免新 turn 抢先创建、把有效响应误判为 stale 并丢弃。
 - SubAgent mailbox ack 状态现在每个 session 只加载一次，并随 ack 写入同步更新，不再为每个实时 mailbox 事件重读完整 JSONL 日志。
 - `response_header_timeout` 现在会约束收到响应前的完整阶段，包括连接建立和请求体上传；收到响应头后计时器仍会停止，因此不会变成健康流的总请求超时。

@@ -67,13 +67,14 @@ func (m *Model) renderInfoPanelServiceTierLine(lineW int) string {
 
 func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 	busy := m.isFocusedAgentBusy()
+	modelState := m.focusedModelState()
 	runningRef, selectedRef := m.focusedModelRefs()
 	if !busy {
 		if nextRef := nextRequestModelRefForAgent(m.agent); strings.TrimSpace(nextRef) != "" {
 			selectedRef = nextRef
 		}
 	}
-	modelDisplay := formatModelRefForRequestState(runningRef, selectedRef, m.agent.RunningVariant(), lineW)
+	modelDisplay := formatModelRefForRequestState(runningRef, selectedRef, modelState.Variant, lineW)
 	modelShown := modelDisplay
 	modelLines := []string{
 		InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("MODEL")),
@@ -89,8 +90,8 @@ func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 			keysStyle = InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelKeyWarnFg))
 		}
 	}
-	if poolNames := m.agent.PoolNames(); len(poolNames) > 0 {
-		if pool := strings.TrimSpace(m.agent.CurrentPoolName()); pool != "" {
+	if len(modelState.PoolNames) > 0 {
+		if pool := strings.TrimSpace(modelState.PoolName); pool != "" {
 			pool = m.pendingPoolSwitch.display(pool, m.isFocusedAgentBusy())
 			modelLines = append(modelLines, InfoPanelLineBg.Width(lineW).Render(InfoPanelValue.Render("Pool: "+pool)))
 		}

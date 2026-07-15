@@ -16,6 +16,7 @@ type authStateMonitor struct {
 	path     string
 	onChange func()
 	stopCh   chan struct{}
+	doneCh   chan struct{}
 	once     sync.Once
 }
 
@@ -28,6 +29,7 @@ func newAuthStateMonitor(path string, onChange func()) *authStateMonitor {
 		path:     path,
 		onChange: onChange,
 		stopCh:   make(chan struct{}),
+		doneCh:   make(chan struct{}),
 	}
 }
 
@@ -45,7 +47,14 @@ func (m *authStateMonitor) stop() {
 	m.once.Do(func() { close(m.stopCh) })
 }
 
+func (m *authStateMonitor) wait() {
+	if m != nil {
+		<-m.doneCh
+	}
+}
+
 func (m *authStateMonitor) run() {
+	defer close(m.doneCh)
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Debugf("auth state fs watcher unavailable path=%v error=%v", m.path, err)

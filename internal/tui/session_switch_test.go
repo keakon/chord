@@ -2522,6 +2522,30 @@ func TestFocusedContinueActionsKeepCapturedTarget(t *testing.T) {
 	}
 }
 
+func TestFocusedAgentContinueWithEmptyTranscriptStopsPrestartedAnimation(t *testing.T) {
+	backend := &sessionControlAgent{focused: "agent-1", messagesByFocus: map[string][]message.Message{"agent-1": nil}}
+	m := NewModelWithSize(backend, 120, 24)
+	m.focusedAgentID = "agent-1"
+	m.activities["agent-1"] = agent.AgentActivityEvent{AgentID: "agent-1", Type: agent.ActivityIdle}
+
+	msgs := runCmdTree(m.tryContinue())
+	var action focusedContinueActionMsg
+	for _, msg := range msgs {
+		if candidate, ok := msg.(focusedContinueActionMsg); ok {
+			action = candidate
+			break
+		}
+	}
+	model, cmd := m.Update(action)
+	updated := model.(*Model)
+	if cmd != nil {
+		t.Fatal("empty focused transcript should not continue")
+	}
+	if updated.animRunning {
+		t.Fatal("empty focused transcript left animation running")
+	}
+}
+
 func TestDeferredStartupTranscriptCountedJumpBuildsTargetWindow(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {

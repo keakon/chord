@@ -60,15 +60,22 @@ func (a *MainAgent) FocusedSkills() []*skill.Meta {
 		return target.sub.ListSkills()
 	}
 	if target.parked && target.task != nil {
-		a.stateMu.RLock()
-		cfg := a.agentConfigs[target.task.AgentDefName]
-		a.stateMu.RUnlock()
-		if cfg == nil {
-			return nil
-		}
-		return visibleSkillsForRuleset(a.loadedSkillsSnapshot(), a.buildSubAgentRuleset(cfg))
+		return a.parkedTaskVisibleSkills(target.task)
 	}
 	return a.ListSkills()
+}
+
+func (a *MainAgent) parkedTaskVisibleSkills(task *DurableTaskRecord) []*skill.Meta {
+	if task == nil {
+		return nil
+	}
+	a.stateMu.RLock()
+	cfg := a.agentConfigs[task.AgentDefName]
+	a.stateMu.RUnlock()
+	if cfg == nil {
+		return nil
+	}
+	return visibleSkillsForRuleset(a.loadedSkillsSnapshot(), a.buildSubAgentRuleset(cfg))
 }
 
 func visibleSkillsForRuleset(loaded []*skill.Meta, ruleset permission.Ruleset) []*skill.Meta {
@@ -104,9 +111,28 @@ func (a *MainAgent) InvokedSkills() []*skill.Meta {
 	if target.sub != nil {
 		return target.sub.InvokedSkills()
 	}
-	if target.parked {
-		return nil
+	if target.parked && target.task != nil {
+		visible := make(map[string]*skill.Meta)
+		for _, meta := range a.parkedTaskVisibleSkills(target.task) {
+			if meta != nil {
+				visible[meta.Name] = meta
+			}
+		}
+		out := make([]*skill.Meta, 0, len(target.task.InvokedSkillNames))
+		for _, name := range target.task.InvokedSkillNames {
+			if meta, ok := visible[name]; ok {
+				copyMeta := *meta
+				copyMeta.Invoked = true
+				out = append(out, &copyMeta)
+			}
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+		return out
 	}
+	return a.invokedSkillsSnapshot()
+}
+
+func (a *MainAgent) invokedSkillsSnapshot() []*skill.Meta {
 	a.skillsMu.RLock()
 	defer a.skillsMu.RUnlock()
 	if len(a.invokedSkills) == 0 {

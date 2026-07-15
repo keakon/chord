@@ -409,3 +409,27 @@ func TestUsageLedgerBuildSessionStatsUsesRunningModelRefs(t *testing.T) {
 		t.Fatal("missing worker-1 per-model entry")
 	}
 }
+
+func TestUsageLedgerBuildSessionStatsReturnsLatestAgentModelRefs(t *testing.T) {
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	for _, evt := range []UsageEvent{
+		{AgentID: "worker-1", SelectedModelRef: "provider/old", RunningModelRef: "provider/old"},
+		{AgentID: "worker-1", SelectedModelRef: "provider/new", RunningModelRef: "provider/fallback"},
+	} {
+		if err := ledger.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent: %v", err)
+		}
+	}
+
+	_, eventCount, refs, err := ledger.BuildSessionStatsWithAgentModelRefs()
+	if err != nil {
+		t.Fatalf("BuildSessionStatsWithAgentModelRefs: %v", err)
+	}
+	if eventCount != 2 {
+		t.Fatalf("eventCount = %d, want 2", eventCount)
+	}
+	if got := refs["worker-1"]; got.Selected != "provider/new" || got.Running != "provider/fallback" {
+		t.Fatalf("latest refs = %#v", got)
+	}
+}

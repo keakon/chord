@@ -574,6 +574,41 @@ func TestWakeCodexRateLimitPollingSkipsFetchAfterAuthStateReload(t *testing.T) {
 	}
 }
 
+func TestProviderCloseWaitsForInFlightCodexPoll(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})
+	p.mu.Lock()
+	p.oauthProfile = config.OAuthProfileOpenAICodex
+	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{AccountID: "acc-1"}
+	p.lastSelectedSlot = 0
+	p.mu.Unlock()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	p.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+		close(started)
+		<-release
+		return nil, nil
+	})
+	p.WakeCodexRateLimitPolling()
+	<-started
+
+	closed := make(chan struct{})
+	go func() {
+		p.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		t.Fatal("Close returned before in-flight poll exited")
+	case <-time.After(10 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not return after in-flight poll exited")
+	}
+}
+
 func TestPersistAuthStateForKeyPreservesDeactivatedStatus(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "auth.state.json")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"key-a"})

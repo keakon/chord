@@ -50,6 +50,7 @@ type DurableTaskRecord struct {
 	LatestInstanceID     string              `json:"latest_instance_id,omitempty"`
 	SelectedModelRef     string              `json:"selected_model_ref,omitempty"`
 	RunningModelRef      string              `json:"running_model_ref,omitempty"`
+	InvokedSkillNames    []string            `json:"invoked_skill_names,omitempty"`
 	InstanceHistory      []string            `json:"instance_history,omitempty"`
 	LastSummary          string              `json:"last_summary,omitempty"`
 	LastMailboxID        string              `json:"last_mailbox_id,omitempty"`
@@ -95,6 +96,7 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 	out.LatestInstanceID = strings.TrimSpace(out.LatestInstanceID)
 	out.SelectedModelRef = strings.TrimSpace(out.SelectedModelRef)
 	out.RunningModelRef = strings.TrimSpace(out.RunningModelRef)
+	out.InvokedSkillNames = normalizeSkillNames(out.InvokedSkillNames)
 	out.LastSummary = strings.TrimSpace(out.LastSummary)
 	out.LastMailboxID = strings.TrimSpace(out.LastMailboxID)
 	out.LastReplyMessageID = strings.TrimSpace(out.LastReplyMessageID)
@@ -108,6 +110,24 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 	out.ClosedReason = strings.TrimSpace(out.ClosedReason)
 	out.InstanceHistory = dedupeTaskInstanceHistory(out.InstanceHistory)
 	return &out
+}
+
+func normalizeSkillNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func dedupeTaskInstanceHistory(ids []string) []string {
@@ -456,6 +476,8 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	rec.LatestInstanceID = strings.TrimSpace(sub.instanceID)
 	rec.SelectedModelRef = subSelectedModelRef(sub)
 	rec.RunningModelRef = subRunningModelRef(sub)
+	rec.InvokedSkillNames = append(rec.InvokedSkillNames, sub.invokedSkillNamesSnapshot()...)
+	rec.InvokedSkillNames = normalizeSkillNames(rec.InvokedSkillNames)
 	rec.InstanceHistory = append(rec.InstanceHistory, rec.LatestInstanceID)
 	rec.InstanceHistory = dedupeTaskInstanceHistory(rec.InstanceHistory)
 	rec.LastSummary = strings.TrimSpace(summary)
@@ -582,6 +604,7 @@ func mergeDurableTaskRecords(base map[string]*DurableTaskRecord, extra ...map[st
 				if next.RunningModelRef == "" {
 					next.RunningModelRef = prev.RunningModelRef
 				}
+				next.InvokedSkillNames = normalizeSkillNames(append(prev.InvokedSkillNames, next.InvokedSkillNames...))
 				next.InstanceHistory = dedupeTaskInstanceHistory(append(prev.InstanceHistory, next.InstanceHistory...))
 				if next.LastSummary == "" {
 					next.LastSummary = prev.LastSummary

@@ -160,6 +160,63 @@ func TestCodexWarmupMarksDeactivatedOAuthCredential(t *testing.T) {
 	}
 }
 
+func TestProviderCloseWaitsForInFlightCodexWarmup(t *testing.T) {
+	usageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"rate_limit":{"primary_window":{"used_percent":20,"reset_after_seconds":3600}}}`)
+	}))
+	defer usageServer.Close()
+
+	p := NewProviderConfig("openai", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: usageServer.URL + "/backend-api/codex/responses",
+		Preset: config.ProviderPresetCodex,
+	}, []string{"key-a", "key-b"})
+	p.mu.Lock()
+	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{CredentialIndex: 0, AccountID: "acc-a"}
+	p.keyStates[1].OAuthInfo = &OAuthKeyInfo{CredentialIndex: 1, AccountID: "acc-b"}
+	p.mu.Unlock()
+	p.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+		return nil, nil
+	})
+
+	warmupBlocked := make(chan struct{})
+	releaseWarmup := make(chan struct{})
+	var blockedOnce sync.Once
+	p.SetOnPolledRateLimitUpdated(func() {
+		blockedOnce.Do(func() {
+			close(warmupBlocked)
+			<-releaseWarmup
+		})
+	})
+	if !p.StartCodexWarmup(t.Context()) {
+		t.Fatal("expected codex warmup to start")
+	}
+	select {
+	case <-warmupBlocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("warmup did not reach the in-flight callback")
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		p.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		close(releaseWarmup)
+		t.Fatal("Close returned before in-flight warmup exited")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseWarmup)
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not return after in-flight warmup exited")
+	}
+}
+
 func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	accessA := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-a","exp":4102444800}`)

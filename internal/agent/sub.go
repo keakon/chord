@@ -148,13 +148,15 @@ type SubAgent struct {
 	// (name, args) calls at the agent layer.
 
 	// System prompt components (set at construction, read-only afterward).
-	workDir      string
-	venvPath     string // absolute path to detected Python virtual environment, or ""
-	sessionDir   string
-	agentsMD     string
-	loadedSkills []*skill.Meta
-	modelName    string
-	customPrompt string // from agent YAML body; replaces built-in role instructions if non-empty
+	workDir       string
+	venvPath      string // absolute path to detected Python virtual environment, or ""
+	sessionDir    string
+	agentsMD      string
+	loadedSkills  []*skill.Meta
+	skillsMu      sync.RWMutex
+	invokedSkills map[string]*skill.Meta
+	modelName     string
+	customPrompt  string // from agent YAML body; replaces built-in role instructions if non-empty
 
 	// cachedSessionReminderContent is the meta user message content carrying
 	// environment + AGENTS.md (under "# AGENTS.md instructions" /
@@ -378,6 +380,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		sessionDir:      cfg.SessionDir,
 		agentsMD:        cfg.AgentsMD,
 		loadedSkills:    cfg.Skills,
+		invokedSkills:   make(map[string]*skill.Meta),
 		modelName:       cfg.ModelName,
 		customPrompt:    cfg.SystemPrompt,
 		idleTimeout:     cfg.IdleTimeout,

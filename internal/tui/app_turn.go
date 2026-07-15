@@ -351,7 +351,7 @@ func (m *Model) tryContinue() tea.Cmd {
 				msgs = targeted.GetMessagesForTarget(target)
 			}
 			if len(msgs) == 0 {
-				return nil
+				return focusedContinueActionMsg{target: target}
 			}
 			last := msgs[len(msgs)-1]
 			switch last.Role {

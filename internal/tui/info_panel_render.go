@@ -42,6 +42,7 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 
 	// Model ref / variant / key stats
 	keysConfirmed, keysTotal := m.agent.KeyStats()
+	modelState := m.focusedModelState()
 	runningRef, selectedRef := m.focusedModelRefs()
 	b.WriteString(runningRef)
 	appendSep()
@@ -53,13 +54,13 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	appendSep()
 	b.WriteString(string(m.effectiveServiceTier()))
 	appendSep()
-	b.WriteString(m.agent.RunningVariant())
+	b.WriteString(modelState.Variant)
 	appendSep()
 	appendBool(m.isFocusedAgentBusy())
 	appendSep()
-	b.WriteString(m.agent.CurrentPoolName())
+	b.WriteString(modelState.PoolName)
 	appendSep()
-	for _, pool := range m.agent.PoolNames() {
+	for _, pool := range modelState.PoolNames {
 		b.WriteString(pool)
 		appendSep()
 	}

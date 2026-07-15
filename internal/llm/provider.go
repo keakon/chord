@@ -181,6 +181,10 @@ type ProviderConfig struct {
 	polledRateLimitInFlight    map[int]bool
 	inlineDisplaySnap          *ratelimit.KeyRateLimitSnapshot
 	codexPollFetchFn           func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error)
+	codexPollWG                sync.WaitGroup
+	codexPollClosed            bool
+	codexLifecycleCtx          context.Context
+	codexLifecycleCancel       context.CancelFunc
 	onPolledUpdate             func() // called after polled snapshot writes a new snapshot
 	effectiveProxyURL          string
 	userAgent                  string
@@ -243,6 +247,7 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 	polledRateLimitAttemptedAt := make(map[int]time.Time)
 	polledRateLimitSucceededAt := make(map[int]time.Time)
 	polledRateLimitInFlight := make(map[int]bool)
+	codexLifecycleCtx, codexLifecycleCancel := context.WithCancel(context.Background())
 
 	return &ProviderConfig{
 		name:                       name,
@@ -272,6 +277,8 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		polledRateLimitAttemptedAt: polledRateLimitAttemptedAt,
 		polledRateLimitSucceededAt: polledRateLimitSucceededAt,
 		polledRateLimitInFlight:    polledRateLimitInFlight,
+		codexLifecycleCtx:          codexLifecycleCtx,
+		codexLifecycleCancel:       codexLifecycleCancel,
 	}
 }
 

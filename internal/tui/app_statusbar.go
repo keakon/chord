@@ -244,6 +244,7 @@ func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 		if summary := m.agent.GetSessionSummary(); summary != nil {
 			snap.sessionID = strings.TrimSpace(summary.ID)
 		}
+		modelState := m.focusedModelState()
 		snap.modelRef, snap.selectedModelRef = m.focusedModelRefs()
 		snap.busy = m.isFocusedAgentBusy()
 		snap.nextModelRef = strings.TrimSpace(nextRequestModelRefForAgent(m.agent))
@@ -251,7 +252,7 @@ func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 			snap.nextModelRef = snap.selectedModelRef
 		}
 		snap.modelRef = modelref.EnsureRefShowsProvider(snap.modelRef, snap.selectedModelRef)
-		snap.modelVariant = m.agent.RunningVariant()
+		snap.modelVariant = modelState.Variant
 		ref := snap.modelRef
 		if !snap.busy {
 			ref = snap.nextModelRef

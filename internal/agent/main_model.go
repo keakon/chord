@@ -56,6 +56,67 @@ func (a *MainAgent) RunningModelRef() string {
 	return a.runningModelRef
 }
 
+// FocusedModelState returns an atomic-by-target model view for the TUI. Values
+// for parked SubAgents come from durable state and current agent configuration;
+// callers do not need separate live/parked fallbacks.
+func (a *MainAgent) FocusedModelState() FocusedModelState {
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		client, _ := target.sub.llmSnapshot()
+		selected, running, variant := "", "", ""
+		if client != nil {
+			selected = strings.TrimSpace(client.PrimaryModelRef())
+			variant = strings.TrimSpace(client.ActiveVariant())
+			if variant != "" && selected != "" {
+				selected += "@" + variant
+			}
+			running = formatModelRefForNotification(client.RunningModelRef(), selected, variant)
+		}
+		pool, pools := a.focusedModelPools(target)
+		return FocusedModelState{SelectedRef: selected, RunningRef: running, Variant: variant, PoolName: pool, PoolNames: pools}
+	}
+	if target.parked && target.task != nil {
+		selected := a.restoredSubAgentModelRef(target.task)
+		running := restoredRunningModelRef(target.task, selected)
+		_, variant := config.ParseModelRef(selected)
+		pool, pools := a.focusedModelPools(target)
+		return FocusedModelState{SelectedRef: selected, RunningRef: running, Variant: variant, PoolName: pool, PoolNames: pools}
+	}
+	a.llmMu.RLock()
+	selected := strings.TrimSpace(a.providerModelRef)
+	running := strings.TrimSpace(a.runningModelRef)
+	variant := ""
+	if a.llmClient != nil {
+		variant = strings.TrimSpace(a.llmClient.ActiveVariant())
+	}
+	a.llmMu.RUnlock()
+	if running == "" {
+		running = selected
+	}
+	pool, pools := a.focusedModelPools(target)
+	return FocusedModelState{SelectedRef: selected, RunningRef: running, Variant: variant, PoolName: pool, PoolNames: pools}
+}
+
+func (a *MainAgent) focusedModelPools(target focusedAgentSnapshot) (string, []string) {
+	if a.modelPoolPolicy == nil {
+		return "", nil
+	}
+	cfg := a.currentActiveConfig()
+	if target.sub != nil {
+		a.stateMu.RLock()
+		cfg = a.agentConfigs[target.sub.agentDefName]
+		a.stateMu.RUnlock()
+	} else if target.parked && target.task != nil {
+		a.stateMu.RLock()
+		cfg = a.agentConfigs[target.task.AgentDefName]
+		a.stateMu.RUnlock()
+	}
+	if cfg == nil {
+		return "", nil
+	}
+	return a.modelPoolPolicy.EffectivePool(cfg.Name, cfg), cfg.PoolNames()
+}
+
 // NextRequestModelRef returns the provider/model ref the focused agent will use
 // to start its next LLM request.
 func (a *MainAgent) NextRequestModelRef() string {

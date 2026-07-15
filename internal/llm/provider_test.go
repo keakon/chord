@@ -526,6 +526,7 @@ func TestSelectKeyRefreshOnlyUnrecoverableFailurePersistsRefreshState(t *testing
 
 	refreshStateKey := config.OAuthRefreshStateKey("refresh-only")
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{""})
+	defer p.Close()
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", authPath, statePath, &auth, &authMu, map[string]OAuthKeySetup{
 		refreshStateKey: {CredentialIndex: 0, RefreshSHA256: refreshStateKey, Status: config.OAuthStatusNormal},
 	}, "")

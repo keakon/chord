@@ -1,6 +1,10 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/keakon/chord/internal/agent"
+)
 
 type runningModelDisplayState struct {
 	agentID          string
@@ -38,9 +42,10 @@ func (m *Model) focusedModelRefs() (runningRef, selectedRef string) {
 	if m == nil || m.agent == nil {
 		return "", ""
 	}
-	selectedRef = strings.TrimSpace(m.agent.ProviderModelRef())
-	runningRef = strings.TrimSpace(m.agent.RunningModelRef())
-	if m.focusedAgentID != "" {
+	state := m.focusedModelState()
+	selectedRef = strings.TrimSpace(state.SelectedRef)
+	runningRef = strings.TrimSpace(state.RunningRef)
+	if m.focusedAgentID != "" && selectedRef == "" && runningRef == "" {
 		if selected, running, ok := m.sidebar.SubAgentModelRefs(m.focusedAgentID); ok {
 			selectedRef = strings.TrimSpace(selected)
 			runningRef = strings.TrimSpace(running)
@@ -57,6 +62,33 @@ func (m *Model) focusedModelRefs() (runningRef, selectedRef string) {
 		}
 	}
 	return runningRef, selectedRef
+}
+
+func (m *Model) focusedModelState() agent.FocusedModelState {
+	if m == nil || m.agent == nil {
+		return agent.FocusedModelState{}
+	}
+	if provider, ok := m.agent.(agent.FocusedModelStateProvider); ok {
+		return provider.FocusedModelState()
+	}
+	if m.focusedAgentID != "" {
+		if selected, running, ok := m.sidebar.SubAgentModelRefs(m.focusedAgentID); ok {
+			return agent.FocusedModelState{
+				SelectedRef: strings.TrimSpace(selected),
+				RunningRef:  strings.TrimSpace(running),
+				Variant:     strings.TrimSpace(m.agent.RunningVariant()),
+				PoolName:    strings.TrimSpace(m.agent.CurrentPoolName()),
+				PoolNames:   m.agent.PoolNames(),
+			}
+		}
+	}
+	return agent.FocusedModelState{
+		SelectedRef: strings.TrimSpace(m.agent.ProviderModelRef()),
+		RunningRef:  strings.TrimSpace(m.agent.RunningModelRef()),
+		Variant:     strings.TrimSpace(m.agent.RunningVariant()),
+		PoolName:    strings.TrimSpace(m.agent.CurrentPoolName()),
+		PoolNames:   m.agent.PoolNames(),
+	}
 }
 
 func normalizeRunningModelDisplayAgentID(agentID string) string {

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -90,5 +91,29 @@ func TestLoadRestoredSubAgentStatesCharacterizationMetaMailboxTaskPriority(t *te
 	}
 	if got.LastMailboxID != "mailbox-123" || got.LastReplyMessageID != "reply-msg" || got.LastArtifact.ID != "artifact-1" {
 		t.Fatalf("meta continuity fields not restored: %#v", got)
+	}
+}
+
+func TestCanonicalRestoredSubAgentIDsKeepsOnlyLatestTaskInstance(t *testing.T) {
+	records := map[string]*DurableTaskRecord{
+		"task-1": {
+			TaskID:           "task-1",
+			LatestInstanceID: "explorer-9",
+			InstanceHistory:  []string{"explorer-4", "explorer-6", "explorer-9"},
+		},
+		"task-2": {
+			TaskID:           "task-2",
+			LatestInstanceID: "reviewer-3",
+			InstanceHistory:  []string{"reviewer-2", "reviewer-3"},
+		},
+	}
+
+	got := canonicalRestoredSubAgentIDs(
+		[]string{"explorer-4", "explorer-6", "explorer-9", "reviewer-2"},
+		records,
+	)
+	want := []string{"explorer-9", "reviewer-3"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("canonical ids = %#v, want %#v", got, want)
 	}
 }

@@ -95,6 +95,7 @@ func (p *stubProviderImpl) SetTraceWriter(w *llm.TraceWriter) {
 func TestProviderCacheCodexPollingUsesCacheContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	pollCtxCh := make(chan context.Context, 1)
+	pollDone := make(chan struct{})
 	access := testOAuthJWTForCommonTest(`{"chatgpt_account_id":"account-1","chatgpt_user_id":"user-1"}`)
 	cache := &providerCache{
 		ctx:      ctx,
@@ -106,11 +107,13 @@ func TestProviderCacheCodexPollingUsesCacheContext(t *testing.T) {
 			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-token", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "account-1"}},
 		}},
 		fetchCodexUsage: func(ctx context.Context, _ *llm.ProviderConfig, _, _ string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+			defer close(pollDone)
 			pollCtxCh <- ctx
 			<-ctx.Done()
 			return nil, ctx.Err()
 		},
 	}
+	defer cache.close()
 
 	prov, err := cache.getOrCreate("codex", config.ProviderConfig{
 		Preset: config.ProviderPresetCodex,
@@ -135,6 +138,11 @@ func TestProviderCacheCodexPollingUsesCacheContext(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("poll context was not cancelled after cache context cancellation")
+	}
+	select {
+	case <-pollDone:
+	case <-time.After(time.Second):
+		t.Fatal("polling goroutine did not exit after cache context cancellation")
 	}
 }
 

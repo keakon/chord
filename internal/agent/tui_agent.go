@@ -95,6 +95,22 @@ type ModelSelector interface {
 	SetAgentModelPool(agentName, pool string) error
 }
 
+// FocusedModelState is one consistent view of the model configuration for the
+// agent currently shown by the TUI, including restored parked SubAgents.
+type FocusedModelState struct {
+	SelectedRef string
+	RunningRef  string
+	Variant     string
+	PoolName    string
+	PoolNames   []string
+}
+
+// FocusedModelStateProvider avoids assembling model state through several
+// independently routed getters that can disagree during session restore.
+type FocusedModelStateProvider interface {
+	FocusedModelState() FocusedModelState
+}
+
 // SessionController exposes session lifecycle controls (resume, fork, delete,
 // export).
 type SessionController interface {

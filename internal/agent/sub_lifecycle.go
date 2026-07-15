@@ -250,6 +250,7 @@ func (s *SubAgent) GetMessages() []message.Message {
 // SubAgent's conversation without replaying LLM calls.
 func (s *SubAgent) RestoreMessages(msgs []message.Message) {
 	s.ctxMgr.RestoreMessages(msgs)
+	s.restoreInvokedSkills(msgs)
 }
 
 // ContinueFromContext signals the SubAgent to re-run the LLM with its
