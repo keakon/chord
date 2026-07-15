@@ -372,6 +372,10 @@ func (m *Model) focusedAgentHasRuntimeActivity() bool {
 	if !ok {
 		return false
 	}
+	return runtimeActivityBusy(a)
+}
+
+func runtimeActivityBusy(a agent.AgentActivityEvent) bool {
 	switch a.Type {
 	case agent.ActivityIdle:
 		return false

@@ -136,3 +136,19 @@ func TestCancelBusyAgentNoOpWhenIdleActivity(t *testing.T) {
 		t.Fatalf("CancelCurrentTurn calls = %d, want 0 on idle UI", backend.cancelCalls)
 	}
 }
+
+func TestCancelBusyAgentCancelsBackgroundOwnerActivity(t *testing.T) {
+	backend := &sessionControlAgent{cancelResult: true}
+	m := NewModel(backend)
+	m.mode = ModeNormal
+	m.focusedAgentID = ""
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
+	m.activities["owner-1"] = agent.AgentActivityEvent{Type: agent.ActivityWaitingToken, AgentID: "owner-1", Detail: "child event"}
+
+	if cmd := m.cancelBusyAgent(); cmd == nil {
+		t.Fatal("cancelBusyAgent returned nil for running background owner")
+	}
+	if backend.cancelCalls != 1 {
+		t.Fatalf("CancelCurrentTurn calls = %d, want 1", backend.cancelCalls)
+	}
+}

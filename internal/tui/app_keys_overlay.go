@@ -33,7 +33,7 @@ func isSuperV(msg tea.KeyMsg) bool {
 }
 
 func (m *Model) cancelBusyAgent() tea.Cmd {
-	if m.agent == nil || !m.isAgentBusy() {
+	if m.agent == nil || (!m.isAgentBusy() && !m.hasBackgroundAgentActivity()) {
 		return nil
 	}
 	if cancelled := m.agent.CancelCurrentTurn(); cancelled {
@@ -54,6 +54,18 @@ func (m *Model) cancelBusyAgent() tea.Cmd {
 		return m.enqueueToast("No active turn to cancel; reset busy indicator", "warn")
 	}
 	return nil
+}
+
+func (m *Model) hasBackgroundAgentActivity() bool {
+	for agentID, activity := range m.activities {
+		if agentID == m.focusedAgentIDOrMain() {
+			continue
+		}
+		if runtimeActivityBusy(activity) {
+			return true
+		}
+	}
+	return false
 }
 
 // clearPendingQuitTick schedules a 2s timer that auto-clears the pending quit
