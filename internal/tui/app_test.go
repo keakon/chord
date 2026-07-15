@@ -8530,6 +8530,32 @@ func TestFocusedAgentDoneEventSwitchesToMainAndUpdatesDelegate(t *testing.T) {
 	}
 }
 
+func TestRepeatedAgentDoneUpdatesSingleDelegateCard(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	task := &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameDelegate, LinkedAgentID: "agent-1", LinkedTaskID: "adhoc-7", ResultDone: true}
+	m.viewport.AppendBlock(task)
+	m.nextBlockID = 2
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentDoneEvent{AgentID: "agent-1", TaskID: "adhoc-7", Summary: "first completion"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentDoneEvent{AgentID: "agent-1", TaskID: "adhoc-7", Summary: "revised completion"}})
+
+	if task.DoneSummary != "revised completion" {
+		t.Fatalf("DoneSummary = %q, want latest completion", task.DoneSummary)
+	}
+	delegateCards := 0
+	for _, block := range m.viewport.blocks {
+		if block.Type == BlockToolCall && block.ToolName == tools.NameDelegate && block.LinkedTaskID == "adhoc-7" {
+			delegateCards++
+		}
+		if block.Type == BlockStatus && strings.Contains(block.Content, "completed:") {
+			t.Fatalf("unexpected standalone completion block: %q", block.Content)
+		}
+	}
+	if delegateCards != 1 {
+		t.Fatalf("delegate card count = %d, want 1", delegateCards)
+	}
+}
+
 func TestThinkingDurationFrozenOnStreamThinkingEvent(t *testing.T) {
 	// When StreamThinkingEvent (thinking_end) arrives, ThinkingDuration
 	// should be frozen immediately rather than waiting for

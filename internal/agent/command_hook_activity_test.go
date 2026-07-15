@@ -175,6 +175,78 @@ func TestEmitGlobalIdleWaitsForQueuedAutomaticWork(t *testing.T) {
 	}
 }
 
+func TestGlobalIdleWaitsForQueuedSubAgentInput(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "task-queued-input")
+	sub.setState(SubAgentStateIdle, "finishing previous request")
+	if !sub.InjectUserMessage("mailbox follow-up") {
+		t.Fatal("InjectUserMessage() = false")
+	}
+
+	if a.emitGlobalIdleIfReady() {
+		t.Fatal("global idle emitted while SubAgent input was queued")
+	}
+	select {
+	case evt := <-a.Events():
+		if _, ok := evt.(GlobalIdleEvent); ok {
+			t.Fatal("unexpected GlobalIdleEvent while SubAgent input was queued")
+		}
+	default:
+	}
+	<-sub.inputCh
+	sub.setState(SubAgentStateCompleted, "done")
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected global idle after queued SubAgent input was drained")
+	}
+}
+
+func TestGlobalIdleDrainsActionableOwnerMailboxBeforeNotifying(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	owner := newControllableTestSubAgent(t, a, "task-owner")
+	owner.setState(SubAgentStateIdle, "finishing previous request")
+	a.enqueueOwnedSubAgentMailbox(SubAgentMailboxMessage{
+		MessageID:    "child-complete-1",
+		AgentID:      "child-1",
+		TaskID:       "task-child",
+		OwnerAgentID: owner.instanceID,
+		OwnerTaskID:  owner.taskID,
+		Kind:         SubAgentMailboxKindCompleted,
+		Priority:     SubAgentMailboxPriorityUrgent,
+		Summary:      "child completed",
+	})
+
+	if a.emitGlobalIdleIfReady() {
+		t.Fatal("global idle emitted instead of resuming mailbox owner")
+	}
+	if owner.State() != SubAgentStateRunning {
+		t.Fatalf("owner.State() = %q, want running", owner.State())
+	}
+	select {
+	case pending := <-owner.inputCh:
+		if text := pendingUserMessageText(pending); !strings.Contains(text, "child completed") {
+			t.Fatalf("queued owner message = %q, want child completion", text)
+		}
+	default:
+		t.Fatal("expected actionable mailbox to queue owner follow-up")
+	}
+	if queued := a.ownedSubAgentMailboxes[owner.instanceID]; len(queued) != 0 {
+		t.Fatalf("owned mailbox queue = %#v, want drained", queued)
+	}
+}
+
+func TestProgressOnlyMailboxDoesNotPreventGlobalIdle(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.subAgentInbox.progress["worker-1"] = SubAgentMailboxMessage{
+		AgentID: "worker-1",
+		Kind:    SubAgentMailboxKindProgress,
+		Summary: "still working",
+	}
+
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("progress-only mailbox should not require an LLM continuation")
+	}
+}
+
 func TestCompletedSubAgentMailboxStartsMainTurnBeforeGlobalIdle(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-1")

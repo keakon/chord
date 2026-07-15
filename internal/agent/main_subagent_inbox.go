@@ -80,36 +80,51 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 		return false
 	}
 	text := formatSubAgentMailboxInjectionText(&msg)
-	reactivateOwner := func(messageText string, statusMsg string, allowWakeBypass bool) bool {
-		return a.withRegisteredSubAgent(owner, func(live *SubAgent) bool {
-			if !live.semHeld {
-				var err error
-				if allowWakeBypass {
-					err = a.acquireWakeReactivationSlot(live)
-				} else {
-					err = a.acquireSubAgentSlot(live)
-				}
-				if err != nil {
-					return false
-				}
+	reactivateLive := func(live *SubAgent, messageText string, statusMsg string, allowWakeBypass bool) bool {
+		if !live.semHeld {
+			var err error
+			if allowWakeBypass {
+				err = a.acquireWakeReactivationSlot(live)
+			} else {
+				err = a.acquireSubAgentSlot(live)
 			}
-			live.setState(SubAgentStateRunning, statusMsg)
-			a.noteSubAgentStateTransition(live, SubAgentStateRunning)
-			a.emitActivity(live.instanceID, ActivityExecuting, "child event")
-			a.emitToTUI(AgentStatusEvent{AgentID: live.instanceID, Status: "running", Message: statusMsg})
-			if !live.InjectUserMessageWithMailboxAck(messageText, msg.MessageID) {
+			if err != nil {
 				return false
 			}
-			live.armStartupWatchdog()
-			a.persistSubAgentMeta(live)
-			a.syncTaskRecordFromSub(live, "")
-			a.saveRecoverySnapshot()
-			return true
+		}
+		live.setState(SubAgentStateRunning, statusMsg)
+		a.noteSubAgentStateTransition(live, SubAgentStateRunning)
+		a.emitActivity(live.instanceID, ActivityExecuting, "child event")
+		a.emitToTUI(AgentStatusEvent{AgentID: live.instanceID, Status: "running", Message: statusMsg})
+		if !live.InjectUserMessageWithMailboxAck(messageText, msg.MessageID) {
+			return false
+		}
+		live.armStartupWatchdog()
+		a.persistSubAgentMeta(live)
+		a.syncTaskRecordFromSub(live, "")
+		a.saveRecoverySnapshot()
+		return true
+	}
+	reactivateOwner := func(messageText string, statusMsg string, allowWakeBypass bool) bool {
+		return a.withRegisteredSubAgent(owner, func(live *SubAgent) bool {
+			return reactivateLive(live, messageText, statusMsg, allowWakeBypass)
 		})
 	}
 	enqueueContext := func(messageText string) bool {
 		return a.withRegisteredSubAgent(owner, func(live *SubAgent) bool {
 			return live.TryEnqueueContextAppend(message.Message{Role: "user", Content: messageText, MailboxAckID: msg.MessageID})
+		})
+	}
+	enqueueForProcessing := func(messageText, statusMsg string) bool {
+		return a.withRegisteredSubAgent(owner, func(live *SubAgent) bool {
+			if live.State() != SubAgentStateRunning {
+				return reactivateLive(live, messageText, statusMsg, false)
+			}
+			if !live.InjectUserMessageWithMailboxAck(messageText, msg.MessageID) {
+				return false
+			}
+			live.armStartupWatchdog()
+			return true
 		})
 	}
 	switch msg.Kind {
@@ -149,20 +164,14 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 			}
 			return reactivateOwner(text, "Child task completed; resuming", true)
 		}
-		return enqueueContext(text)
+		return enqueueForProcessing(text, "Child task completed; resuming")
 	case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired, SubAgentMailboxKindRiskAlert, SubAgentMailboxKindDirectionChange:
 		if owner.State() == SubAgentStateWaitingDescendant {
 			return reactivateOwner(text, "Child task requires parent decision", true)
 		}
-		return a.withRegisteredSubAgent(owner, func(live *SubAgent) bool {
-			if !live.InjectUserMessageWithMailboxAck(text, msg.MessageID) {
-				return false
-			}
-			live.armStartupWatchdog()
-			return true
-		})
+		return enqueueForProcessing(text, "Child task requires parent decision")
 	default:
-		return enqueueContext(text)
+		return enqueueForProcessing(text, "Child task sent an update")
 	}
 }
 

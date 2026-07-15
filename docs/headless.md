@@ -203,7 +203,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | ----------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `activity`              | Agent enters a new phase                                                                          | `agent_id`, `type` (`connecting`, `streaming`, `compacting`, …), `detail`                                    |
 | `assistant_message`     | A complete assistant message is ready for consumption                                             | `agent_id`, `task_id`, `agent_type`, `parent_agent_id`, `text`, `tool_calls`; delegation fields are empty for main |
-| `idle`                  | The main agent and all SubAgents are globally idle and ready for input                             | `last_outcome` (`completed` / `cancelled` / `error`)                                                         |
+| `idle`                  | The main agent and all SubAgents are globally quiescent and ready for input                         | `last_outcome` (`completed` / `cancelled` / `error`)                                                         |
 | `done_completion`      | Done tool completed with a final report outside loop mode                                         | `call_id`, `report`, `reason`, `status`, `agent_id`, `mode`                                                  |
 | `confirm_request`       | A tool needs explicit confirmation                                                                | `request_id`, `tool_name`, `args_json`, `needs_approval`, `already_allowed`, `needs_approval_rules`, `already_allowed_rules`, `timeout_ms` |
 | `question_request`      | The model asked the user a question                                                               | `request_id`, `tool_name`, `question`, `options`, `option_details`, `default_answer`, `multiple`, `timeout_ms` |
@@ -223,6 +223,8 @@ If an input line on stdin exceeds the protocol line limit, Chord emits an `error
 `assistant_message.text` may be empty for tool-only rounds (including a SubAgent `Complete` call). Chord logs a warning for observability; gateway integrations should skip the empty message and use `agent_done.summary` as the authoritative SubAgent completion content.
 
 Quiescent SubAgents may release their live runtime while their task and transcript remain durable. A later authorized targeted notification can rehydrate the task with a new `agent_id`; use stable `task_id` for routing and use `previous_agent_id` on `agent_started` to replace runtime-specific labels.
+
+`idle` is a global quiescence signal, not a per-request completion signal. Chord does not emit it while any agent is running, any internal event or actionable mailbox message is queued, or a SubAgent has input waiting for its next request. A busy target processes queued messages at the next request boundary; a resumable non-running target is woken first. Progress-only mailbox updates are informational and do not by themselves prevent global idle.
 
 ## Slash compatibility via `send`
 

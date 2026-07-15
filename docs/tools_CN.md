@@ -58,11 +58,15 @@
 | --- | --- |
 | `done` | 仅当当前 runtime 或工作流明确要求工具化完成信号时发送最终报告，主要用于申请 loop 退出。普通任务完成后必须直接用 assistant 正文返回结果；仅仅完成工作或发现 `done` 可用，都不是调用理由。Loop 退出仍受退出条件和本地确认门控。 |
 | `handoff` | 把计划/工作移交给另一个角色执行。 |
-| `delegate` | 启动一个委派的 SubAgent 工作流。拒绝它会同时禁用该角色的 `cancel` 和嵌套委派。 |
+| `delegate` | 启动一个委派的 SubAgent 工作流，并立即返回启动句柄（`task_id` / `agent_id`）；不会等待任务完成。拒绝它会同时禁用该角色的 `cancel` 和嵌套委派。 |
 | `cancel` | 取消一个被委派的 worker；前提是 `delegate` 已启用。 |
 | `complete` | SubAgent 侧：携带摘要把当前委派任务标记为完成。 |
 | `escalate` | SubAgent 侧：请求父 agent 介入，但不结束自己的任务。 |
 | `notify` | 向 owner 或指定的被委派 worker 发送非阻塞通知。 |
+
+`delegate` 只有一个工具结果，即异步启动句柄。后续 `complete` 调用和 mailbox 更新是独立的 runtime 事件；它们按稳定的 `task_id` 更新已有委派任务/卡片，不会生成额外的 `delegate` 工具结果。worker 报告完成后仍可被要求继续，并再次调用 `complete`，但这不会创建新的委派返回值。
+
+需要处理的 agent 消息遵守请求边界：目标 busy 时，Chord 只把消息入队，不打断当前 LLM 请求或工具批次，并在下一次请求中一并处理；目标不在运行但允许恢复时，Chord 会唤醒它处理消息。纯 progress 更新保持低打扰，只追加上下文，不会强制本来空闲的 agent 启动。
 
 SubAgent 失败不会被转换成 `complete`。当 provider / 模型重试耗尽，或恢复后的 worker 无法启动时，Chord 会以 failed 终态关闭该 runtime、记录 `risk_alert`，并唤醒 owner/MainAgent。Rehydrate 后的 runtime 可能获得新的 `agent_id`；后续协调应使用稳定的委派 `task_id`。
 

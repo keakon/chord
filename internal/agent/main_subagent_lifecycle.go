@@ -78,6 +78,16 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 			hook(sub)
 		}
 	})
+	if sub.hasPendingUserInput() {
+		switch sub.State() {
+		case SubAgentStateIdle, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant:
+			if err := a.acquireWakeReactivationSlot(sub); err == nil {
+				a.markSubAgentReactivated(sub, "Queued input arrived before parking")
+				sub.armStartupWatchdog()
+			}
+		}
+		return false
+	}
 	if !sub.canPark() {
 		return false
 	}

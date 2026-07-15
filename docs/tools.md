@@ -58,11 +58,15 @@ These tools control agent workflows rather than local side effects. YOLO mode do
 | --- | --- |
 | `done` | Send a final report only when the active runtime or workflow explicitly requires a tool-based completion signal, primarily to request loop exit. Ordinary completion must be returned directly as assistant text; merely finishing the work or having `done` available is not a reason to call it. Loop exits remain gated by exit conditions and local confirmation. |
 | `handoff` | Transfer a plan/work to another role for execution. |
-| `delegate` | Start a delegated SubAgent workstream. Denying it also disables `cancel` and nested delegation for that role. |
+| `delegate` | Start a delegated SubAgent workstream and return its startup handle (`task_id` / `agent_id`) immediately. It does not wait for completion. Denying it also disables `cancel` and nested delegation for that role. |
 | `cancel` | Cancel a delegated worker; requires `delegate` to be enabled. |
 | `complete` | SubAgent-side: mark the current delegated task as complete with a summary. |
 | `escalate` | SubAgent-side: request parent-agent intervention without ending the task. |
 | `notify` | Send a non-blocking update to the owner or a specific delegated worker. |
+
+`delegate` has one tool result: the asynchronous startup handle. Later `complete` calls and mailbox updates are separate runtime events; they update the existing delegated task/card by stable `task_id` and never produce additional `delegate` tool results. A worker may be continued after a completion report and call `complete` again without creating another delegation result.
+
+Actionable agent messages obey request boundaries. If the target is busy, Chord queues the message without interrupting the active LLM request or tool batch and includes it in the next request. If the target is not running but can resume, Chord wakes it to process the message. Progress-only updates remain low-noise context updates and do not force an otherwise idle agent to run.
 
 SubAgent failures are not converted into `complete`. After provider/model retries are exhausted, or when a resumed worker cannot start, Chord closes that runtime as failed, records a `risk_alert`, and wakes its owner/MainAgent. A rehydrated runtime may receive a new `agent_id`; coordination should continue through the stable delegated `task_id`.
 

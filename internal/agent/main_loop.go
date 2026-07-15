@@ -150,6 +150,7 @@ func (a *MainAgent) sendEvent(evt Event) {
 }
 
 func (a *MainAgent) emitGlobalIdleIfReady() bool {
+	a.drainRunnableMailboxWork()
 	if a.currentTurn() != nil || a.loopKeepsMainBusy() || a.hasActiveSubAgentWork() || a.hasQueuedAutomaticWork() {
 		a.globalIdle.Store(false)
 		return false
@@ -163,15 +164,56 @@ func (a *MainAgent) emitGlobalIdleIfReady() bool {
 	return true
 }
 
+func (a *MainAgent) drainRunnableMailboxWork() {
+	if a.mailboxDeliveryPaused.Load() {
+		return
+	}
+	if a.currentTurn() == nil {
+		a.drainSubAgentInbox()
+	}
+	ownerIDs := make([]string, 0, len(a.ownedSubAgentMailboxes))
+	for ownerID, queued := range a.ownedSubAgentMailboxes {
+		for _, msg := range queued {
+			if msg.Kind != SubAgentMailboxKindProgress {
+				ownerIDs = append(ownerIDs, ownerID)
+				break
+			}
+		}
+	}
+	for _, ownerID := range ownerIDs {
+		a.drainOwnedSubAgentMailboxes(ownerID)
+	}
+}
+
 func (a *MainAgent) hasQueuedAutomaticWork() bool {
 	return len(a.eventCh) > 0 ||
 		len(a.pendingUserMessages) > 0 ||
+		a.hasRunnableMailboxWork() ||
 		strings.TrimSpace(a.pendingRecoveryPrompt) != "" ||
 		strings.TrimSpace(a.pendingAutoContinuePrompt) != "" ||
 		strings.TrimSpace(a.pendingAutoContinueReplayPrompt) != "" ||
 		a.pendingCompactionResume != nil ||
 		a.IsCompactionRunning() ||
 		a.mcpTransitionActive.Load()
+}
+
+func (a *MainAgent) hasRunnableMailboxWork() bool {
+	if a.mailboxDeliveryPaused.Load() {
+		return false
+	}
+	if len(a.subAgentInbox.urgent) > 0 || len(a.subAgentInbox.normal) > 0 ||
+		len(a.pendingSubAgentMailboxes) > 0 || len(a.activeSubAgentMailboxes) > 0 ||
+		a.activeSubAgentMailbox != nil {
+		return true
+	}
+	for _, queued := range a.ownedSubAgentMailboxes {
+		for _, msg := range queued {
+			if msg.Kind != SubAgentMailboxKindProgress {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {

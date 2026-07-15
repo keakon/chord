@@ -1032,6 +1032,44 @@ func TestOwnerRoutedMailboxIsAckedConsumed(t *testing.T) {
 	}
 }
 
+func TestBusyOwnerMailboxQueuesForNextRequest(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	owner := newControllableTestSubAgent(t, a, "adhoc-parent-busy")
+	owner.instanceID = "worker-parent-busy"
+	owner.setState(SubAgentStateRunning, "working")
+	owner.llmRequestInFlight.Store(true)
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[owner.instanceID] = owner
+	a.subs.mu.Unlock()
+
+	if !a.routeOwnedSubAgentMailbox(SubAgentMailboxMessage{
+		MessageID:    "worker-child-complete",
+		AgentID:      "worker-child",
+		TaskID:       "adhoc-child",
+		OwnerAgentID: owner.instanceID,
+		OwnerTaskID:  owner.taskID,
+		Kind:         SubAgentMailboxKindCompleted,
+		Priority:     SubAgentMailboxPriorityUrgent,
+		Summary:      "child completed",
+	}) {
+		t.Fatal("routeOwnedSubAgentMailbox() = false")
+	}
+	select {
+	case pending := <-owner.inputCh:
+		if text := pendingUserMessageText(pending); !strings.Contains(text, "child completed") {
+			t.Fatalf("queued owner message = %q, want child completion", text)
+		}
+	default:
+		t.Fatal("expected busy owner mailbox to queue for the next request")
+	}
+	select {
+	case msg := <-owner.ctxAppendCh:
+		t.Fatalf("unexpected context-only mailbox while owner busy: %#v", msg)
+	default:
+	}
+}
+
 func TestOwnerRoutedWakeBypassesSemaphoreWhenOwnerMustResume(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
@@ -2012,6 +2050,38 @@ func TestParkBarrierConcurrentFocusedInputPreventsParkingAndPreservesMessage(t *
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("concurrent focused input was neither queued nor appended")
+}
+
+func TestParkReactivatesWaitingSubAgentWhenInputArrivesBeforeFinalCheck(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-park-waiting-input")
+	sub.setState(SubAgentStateWaitingMain, "waiting")
+	a.releaseSubAgentSlot(sub)
+	a.syncTaskRecordFromSub(sub, "")
+
+	barrierReached := make(chan struct{})
+	releaseBarrier := make(chan struct{})
+	a.subAgentParkBarrierHook = func(*SubAgent) {
+		close(barrierReached)
+		<-releaseBarrier
+	}
+	parked := make(chan bool, 1)
+	go func() { parked <- a.parkSubAgent(sub.instanceID) }()
+	<-barrierReached
+	if !sub.InjectUserMessage("arrived before park") {
+		t.Fatal("InjectUserMessage() = false")
+	}
+	close(releaseBarrier)
+
+	if <-parked {
+		t.Fatal("parkSubAgent() = true with queued input")
+	}
+	if sub.State() != SubAgentStateRunning {
+		t.Fatalf("sub.State() = %q, want running", sub.State())
+	}
+	if !sub.semHeld {
+		t.Fatal("reactivated SubAgent did not reacquire a slot")
+	}
 }
 
 func TestSubAgentPersistencePumpPreservesMessageOrder(t *testing.T) {

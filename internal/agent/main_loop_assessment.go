@@ -127,7 +127,7 @@ func (a *MainAgent) hasActiveSubAgentWork() bool {
 	a.subs.mu.RLock()
 	defer a.subs.mu.RUnlock()
 	for _, sub := range a.subs.subAgents {
-		if sub != nil && sub.State() == SubAgentStateRunning {
+		if sub != nil && (sub.State() == SubAgentStateRunning || sub.hasPendingUserInput()) {
 			return true
 		}
 	}
