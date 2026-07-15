@@ -2086,7 +2086,7 @@ func TestPrepareMessagesForLLM_LoopPrunesWhenQuotaAvailableOrNonCodex(t *testing
 				projectConfig:    &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}},
 				providerModelRef: "codex/gpt-5.5",
 				rateLimitSnaps: map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
-					Primary:   &ratelimit.RateLimitWindow{UsedPct: 90},
+					Primary:   &ratelimit.RateLimitWindow{UsedPct: 89.99},
 					Secondary: &ratelimit.RateLimitWindow{UsedPct: 10},
 				}},
 			},
@@ -2117,7 +2117,7 @@ func TestPrepareMessagesForLLM_LoopPrunesWhenQuotaAvailableOrNonCodex(t *testing
 	}
 }
 
-func TestPrepareMessagesForLLM_DisablesRequestPruningWhenCodexQuotaLow(t *testing.T) {
+func TestPrepareMessagesForLLM_DisablesRequestPruningAtCodexQuotaBoundary(t *testing.T) {
 	largeOutput := strings.Repeat("test output line\n", 500)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
@@ -2129,19 +2129,23 @@ func TestPrepareMessagesForLLM_DisablesRequestPruningWhenCodexQuotaLow(t *testin
 		{Role: "user", Content: "u3"},
 		{Role: "user", Content: "u4"},
 	}
-	a := &MainAgent{
-		projectConfig:    &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}},
-		providerModelRef: "codex/gpt-5.5",
-		rateLimitSnaps: map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
-			Primary: &ratelimit.RateLimitWindow{UsedPct: 100},
-		}},
-	}
-	prepared := a.prepareMessagesForLLM(msgs)
-	if prepared[2].Content != largeOutput {
-		t.Fatalf("low codex quota should preserve full tool output, got %q", prepared[2].Content)
-	}
-	if msgs[2].Content != largeOutput {
-		t.Fatalf("prepareMessagesForLLM mutated original messages in loop mode")
+	for _, usedPct := range []float64{90, 100} {
+		t.Run(fmt.Sprintf("used_%g_percent", usedPct), func(t *testing.T) {
+			a := &MainAgent{
+				projectConfig:    &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}},
+				providerModelRef: "codex/gpt-5.5",
+				rateLimitSnaps: map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
+					Primary: &ratelimit.RateLimitWindow{UsedPct: usedPct},
+				}},
+			}
+			prepared := a.prepareMessagesForLLM(msgs)
+			if prepared[2].Content != largeOutput {
+				t.Fatalf("codex quota at %.2f%% used should preserve full tool output, got %q", usedPct, prepared[2].Content)
+			}
+			if msgs[2].Content != largeOutput {
+				t.Fatalf("prepareMessagesForLLM mutated original messages")
+			}
+		})
 	}
 }
 
@@ -2304,7 +2308,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	a.runningModelRef = "codex/gpt-5.5"
 	a.llmMu.Unlock()
 	a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
-		Secondary: &ratelimit.RateLimitWindow{UsedPct: 90},
+		Secondary: &ratelimit.RateLimitWindow{UsedPct: 89.99},
 	}}
 	a.newTurn()
 	largeOutput := strings.Repeat("test output line\n", 500)
@@ -2357,7 +2361,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	}
 
 	a.DisableLoopMode()
-	a.rateLimitSnaps["codex"].Secondary.UsedPct = 90
+	a.rateLimitSnaps["codex"].Secondary.UsedPct = 89.99
 	afterLoopPrepared := a.prepareMessagesForLLM(loopMsgs)
 	if !strings.Contains(afterLoopPrepared[7].Content, "[Older "+tools.NameShell+" success summarized for this request to save context;") {
 		t.Fatalf("after loop exits, ordinary pruning should resume for loop-period messages, got %q", afterLoopPrepared[7].Content)
@@ -2473,7 +2477,7 @@ func TestPrepareMessagesForLLM_LowQuotaCodexReusesFrozenReductionPrefixWithoutLo
 	}
 
 	// Simulate the last request before the Codex quota snapshot crossed the low-quota threshold.
-	a.rateLimitSnaps["codex"].Secondary.UsedPct = 90
+	a.rateLimitSnaps["codex"].Secondary.UsedPct = 89.99
 	firstPrepared := a.prepareMessagesForLLM(msgs)
 	firstStats := a.GetContextReductionStats()
 	if !isShellSuccessSummary(firstPrepared[2].Content) {

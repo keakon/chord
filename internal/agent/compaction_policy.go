@@ -1186,10 +1186,10 @@ func (a *MainAgent) shouldFreezeLLMContextSurface() bool {
 	if providerName == "" || !a.providerUsesCodexRateLimit(providerName) {
 		return false
 	}
-	return codexQuotaRemainingUnderTenPercent(a.mainRateLimitSnapshot())
+	return codexQuotaRemainingAtMostTenPercent(a.mainRateLimitSnapshot())
 }
 
-func codexQuotaRemainingUnderTenPercent(snap *ratelimit.KeyRateLimitSnapshot) bool {
+func codexQuotaRemainingAtMostTenPercent(snap *ratelimit.KeyRateLimitSnapshot) bool {
 	if snap == nil {
 		return false
 	}
@@ -1198,7 +1198,7 @@ func codexQuotaRemainingUnderTenPercent(snap *ratelimit.KeyRateLimitSnapshot) bo
 			continue
 		}
 		used := window.UsedPercent()
-		if used > 90 {
+		if used >= 90 {
 			return true
 		}
 	}
