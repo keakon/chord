@@ -204,6 +204,36 @@ func TestMessagesToBlocksRendersLoopNoticeAsStatusCard(t *testing.T) {
 	}
 }
 
+func TestMessagesToBlocksRestoresDurableSubAgentMailboxCard(t *testing.T) {
+	content := "<system-reminder>\nSubAgent mailbox update:\n- agent_id: worker-1\n- task_id: task-1\n- kind: completed\n- summary: finished review\n</system-reminder>"
+	msgs := []message.Message{{
+		Role:    "user",
+		Content: content,
+		Kind:    message.KindSubAgentMailbox,
+		Mailbox: &message.MailboxMetadata{
+			MessageID: "worker-1-1",
+			AgentID:   "worker-1",
+			TaskID:    "task-1",
+			Kind:      "completed",
+		},
+	}}
+	nextID := 1
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("block count = %d, want 1", len(blocks))
+	}
+	block := blocks[0]
+	if block.Type != BlockStatus || block.StatusTitle != "AGENT COMPLETE" {
+		t.Fatalf("block = %#v, want AGENT COMPLETE status", block)
+	}
+	if block.Content != content {
+		t.Fatalf("block content = %q, want exact model message %q", block.Content, content)
+	}
+	if block.LinkedAgentID != "worker-1" || block.LinkedTaskID != "task-1" {
+		t.Fatalf("block links = (%q, %q), want worker-1/task-1", block.LinkedAgentID, block.LinkedTaskID)
+	}
+}
+
 func TestAppendLocalStatusCardDefersWhileAssistantStreamIsActive(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	block := &Block{ID: m.nextBlockID, Type: BlockAssistant, Content: "streaming", Streaming: true}

@@ -45,7 +45,7 @@ func containsAnyFold(text string, keys []string) bool {
 func latestUserPromptForBugTriage(messages []message.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
-		if msg.Role != "user" || msg.IsCompactionSummary {
+		if !message.IsUserAuthored(msg) {
 			continue
 		}
 		if text := strings.TrimSpace(message.UserPromptPlainText(msg)); text != "" {

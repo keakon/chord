@@ -27,6 +27,27 @@ func TestUserPromptPlainText_ContentReturnsTrimmedRawContent(t *testing.T) {
 	}
 }
 
+func TestIsUserAuthoredExcludesSyntheticUserRoleMessages(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  Message
+		want bool
+	}{
+		{name: "ordinary user", msg: Message{Role: RoleUser, Content: "request"}, want: true},
+		{name: "assistant", msg: Message{Role: RoleAssistant, Content: "reply"}},
+		{name: "compaction", msg: Message{Role: RoleUser, Content: "summary", IsCompactionSummary: true}},
+		{name: "mailbox", msg: Message{Role: RoleUser, Content: "mailbox", Kind: KindSubAgentMailbox}},
+		{name: "loop notice", msg: Message{Role: RoleUser, Content: "loop", Kind: KindLoopNotice}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsUserAuthored(tt.msg); got != tt.want {
+				t.Fatalf("IsUserAuthored() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsFileRefContent(t *testing.T) {
 	if !IsFileRefContent("<file path=\"p\">\n</file>") {
 		t.Fatal("expected true")

@@ -9,12 +9,10 @@ import (
 
 const pendingLSPDiagnosticOverlayText = "LSP diagnostics changed after one or more recent Edit/Write tool calls. Review the affected tool results' LSPReviews, treat blocking diagnostics in directly modified files as regressions to fix before finishing unless the user explicitly asked for a partial/WIP result, and keep any cleanup small and low-risk without expanding scope to unrelated untouched files."
 
-// buildTurnOverlayMessages assembles per-request meta user messages that
-// deliver transient context — SubAgent mailbox, bug triage hint, loop
-// continuation — without touching the stable system prompt or ctxMgr. Each
-// returned message is wrapped as <system-reminder>...</system-reminder> and
-// prepended to the real user turn by callLLM. None of them are persisted to
-// the session jsonl.
+// buildTurnOverlayMessages assembles meta user messages prepended to the real
+// user turn by callLLM. SubAgent mailbox messages are also appended to ctxMgr
+// and persisted because they are real owner-visible model input. Other runtime
+// hints remain request-scoped overlays.
 func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	var overlays []message.Message
 
@@ -26,18 +24,22 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	}
 
 	if msgs := a.takePendingSubAgentMailboxes(); len(msgs) > 0 {
-		parts := make([]string, 0, len(msgs))
-		for _, m := range msgs {
-			if m == nil {
+		conversation := a.ctxMgr.Snapshot()
+		for _, mailbox := range msgs {
+			if mailbox == nil {
 				continue
 			}
-			parts = append(parts, formatSubAgentMailboxInjectionText(m))
-		}
-		if len(parts) > 0 {
-			overlays = append(overlays, message.Message{
-				Role:    "user",
-				Content: "<system-reminder>\n" + strings.Join(parts, "\n\n---\n\n") + "\n</system-reminder>",
-			})
+			content := strings.TrimSpace(formatSubAgentMailboxInjectionText(mailbox))
+			if content == "" {
+				continue
+			}
+			msg := subAgentMailboxConversationMessage(mailbox, "<system-reminder>\n"+content+"\n</system-reminder>")
+			if !containsSubAgentMailboxMessage(conversation, mailbox.MessageID) {
+				a.ctxMgr.Append(msg)
+				a.persistAsync("main", msg)
+				conversation = append(conversation, msg)
+			}
+			overlays = append(overlays, msg)
 		}
 	}
 
@@ -196,10 +198,10 @@ func sameLSPReviews(a, b []message.LSPReview) bool {
 	return true
 }
 
-// injectTurnOverlays prepends the turn overlays before the first user message
-// (or at the head if no user message exists). Overlays are meta — they are not
-// stored in ctxMgr or persisted. Returns a new slice when overlays are
-// injected, otherwise the original slice unchanged.
+// injectTurnOverlays prepends transient turn overlays before the first user
+// message (or at the head if no user message exists). Durable mailbox messages
+// do not use this path. Returns a new slice when overlays are injected,
+// otherwise the original slice unchanged.
 func injectTurnOverlays(messages []message.Message, overlays []message.Message) []message.Message {
 	if len(overlays) == 0 {
 		return messages
@@ -210,4 +212,35 @@ func injectTurnOverlays(messages []message.Message, overlays []message.Message) 
 	out = append(out, overlays...)
 	out = append(out, messages[insertAt:]...)
 	return out
+}
+
+func applyTurnOverlayMessages(messages, overlays []message.Message) ([]message.Message, int) {
+	transient := make([]message.Message, 0, len(overlays))
+	for _, overlay := range overlays {
+		if overlay.Kind == message.KindSubAgentMailbox {
+			messageID := ""
+			if overlay.Mailbox != nil {
+				messageID = overlay.Mailbox.MessageID
+			}
+			if !containsSubAgentMailboxMessage(messages, messageID) {
+				messages = append(messages, overlay)
+			}
+			continue
+		}
+		transient = append(transient, overlay)
+	}
+	return injectTurnOverlays(messages, transient), len(transient)
+}
+
+func containsSubAgentMailboxMessage(messages []message.Message, messageID string) bool {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return false
+	}
+	for _, msg := range messages {
+		if msg.Kind == message.KindSubAgentMailbox && msg.Mailbox != nil && strings.TrimSpace(msg.Mailbox.MessageID) == messageID {
+			return true
+		}
+	}
+	return false
 }

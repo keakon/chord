@@ -1915,6 +1915,41 @@ func TestDescendantMailboxRoutesThroughRehydratedOwnerAlias(t *testing.T) {
 	t.Fatal("rehydrated owner did not append mailbox context")
 }
 
+func TestOwnedProgressMailboxPersistsDurableMetadata(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	owner := newControllableTestSubAgent(t, a, "adhoc-owner")
+	owner.setState(SubAgentStateRunning, "running")
+	mailbox := SubAgentMailboxMessage{
+		MessageID:    "worker-child-1",
+		AgentID:      "worker-child",
+		TaskID:       "adhoc-child",
+		OwnerAgentID: owner.instanceID,
+		OwnerTaskID:  owner.taskID,
+		Kind:         SubAgentMailboxKindProgress,
+		Summary:      "halfway",
+	}
+	if !a.routeOwnedSubAgentMailbox(mailbox) {
+		t.Fatal("routeOwnedSubAgentMailbox() = false")
+	}
+	owner.drainContextAppendsBeforeTurn()
+	a.flushPersist()
+	msgs := owner.ctxMgr.Snapshot()
+	if len(msgs) != 1 || msgs[0].Kind != message.KindSubAgentMailbox || msgs[0].Mailbox == nil {
+		t.Fatalf("owner context = %#v, want durable mailbox message", msgs)
+	}
+	if msgs[0].Mailbox.MessageID != mailbox.MessageID || msgs[0].Mailbox.Kind != string(SubAgentMailboxKindProgress) {
+		t.Fatalf("mailbox metadata = %#v", msgs[0].Mailbox)
+	}
+	persisted, err := a.recovery.LoadMessages(owner.instanceID)
+	if err != nil {
+		t.Fatalf("LoadMessages(owner): %v", err)
+	}
+	if len(persisted) != 1 || persisted[0].Mailbox == nil || persisted[0].Mailbox.MessageID != mailbox.MessageID {
+		t.Fatalf("persisted owner context = %#v", persisted)
+	}
+}
+
 func TestParkSubAgentWaitsForPendingTranscriptPersistence(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-park-persist")

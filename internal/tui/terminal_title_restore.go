@@ -36,10 +36,7 @@ func (m *Model) updateTerminalTitleFromRestoredSession() {
 	// Fallback: scan messages for the first non-compaction-summary user message.
 	msgs := m.agent.GetMessages()
 	for _, msg := range msgs {
-		if msg.Role != "user" {
-			continue
-		}
-		if msg.IsCompactionSummary {
+		if !message.IsUserAuthored(msg) {
 			continue
 		}
 		content := message.UserPromptPlainText(msg)
@@ -50,9 +47,10 @@ func (m *Model) updateTerminalTitleFromRestoredSession() {
 		return
 	}
 
-	// Last fallback: use the very first user message (may be compaction summary).
+	// Last fallback: use the very first non-mailbox user-role message. This may
+	// be a compaction summary when no original user prompt remains available.
 	for _, msg := range msgs {
-		if msg.Role != "user" {
+		if msg.Role != message.RoleUser || msg.Kind == message.KindSubAgentMailbox || msg.Kind == message.KindLoopNotice {
 			continue
 		}
 		content := message.UserPromptPlainText(msg)

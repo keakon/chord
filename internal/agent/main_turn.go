@@ -241,7 +241,7 @@ func (a *MainAgent) latestRecoverableUserIntent() string {
 	msgs := a.ctxMgr.Snapshot()
 	for i := len(msgs) - 1; i >= 0; i-- {
 		msg := msgs[i]
-		if msg.Role != message.RoleUser || msg.IsCompactionSummary {
+		if !message.IsUserAuthored(msg) {
 			continue
 		}
 		if text := strings.TrimSpace(message.UserPromptPlainText(msg)); text != "" {

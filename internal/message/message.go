@@ -113,6 +113,12 @@ func (a *ToolArgsAudit) Clone() *ToolArgsAudit {
 	return &cloned
 }
 
+// KindSubAgentMailbox identifies a durable SubAgent mailbox message.
+const KindSubAgentMailbox = "subagent_mailbox"
+
+// KindLoopNotice identifies a synthetic loop-control message.
+const KindLoopNotice = "loop_notice"
+
 // Message represents a conversation message (user, assistant, or tool result).
 type Message struct {
 	Role                Role               `json:"role"` // "user", "assistant", "tool"
@@ -135,9 +141,35 @@ type Message struct {
 	Provenance          *MessageProvenance `json:"provenance,omitempty"`            // optional producer/source metadata for model-compat replay decisions
 	// Usage is the token usage for this message when it ends an LLM round (assistant only).
 	// Persisted in JSONL so session resume can sum per-message usage to restore session totals.
-	Usage        *TokenUsage `json:"usage,omitempty"`
-	Kind         string      `json:"kind,omitempty"` // control/display subtype, e.g. "loop_notice"
-	MailboxAckID string      `json:"-"`              // transient runtime-only mailbox ack marker; never persisted
+	Usage        *TokenUsage      `json:"usage,omitempty"`
+	Kind         string           `json:"kind,omitempty"`    // control/display subtype, e.g. "loop_notice"
+	Mailbox      *MailboxMetadata `json:"mailbox,omitempty"` // durable metadata for a mailbox message actually sent to an agent
+	MailboxAckID string           `json:"-"`                 // transient runtime-only mailbox ack marker; never persisted
+}
+
+// MailboxMetadata identifies a durable SubAgent mailbox message in an agent's
+// conversation. Content remains the exact user message sent to the model.
+type MailboxMetadata struct {
+	MessageID    string `json:"message_id,omitempty"`
+	AgentID      string `json:"agent_id,omitempty"`
+	TaskID       string `json:"task_id,omitempty"`
+	OwnerAgentID string `json:"owner_agent_id,omitempty"`
+	OwnerTaskID  string `json:"owner_task_id,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+}
+
+// IsUserAuthored reports whether msg represents input authored by the user
+// rather than a synthetic user-role control or mailbox message.
+func IsUserAuthored(msg Message) bool {
+	if msg.Role != RoleUser || msg.IsCompactionSummary {
+		return false
+	}
+	switch msg.Kind {
+	case KindSubAgentMailbox, KindLoopNotice:
+		return false
+	default:
+		return true
+	}
 }
 
 // ToolCall represents a single tool invocation by the LLM.

@@ -17,6 +17,23 @@ func (a *MainAgent) prepareSubAgentMailboxMessage(msg *SubAgentMailboxMessage) {
 	if msg == nil {
 		return
 	}
+	a.normalizeSubAgentMailboxMessage(msg)
+	if sub := a.subAgentByID(msg.AgentID); sub != nil {
+		sub.setLastMailboxID(msg.MessageID)
+		if msg.Completion != nil && len(msg.Completion.Artifacts) > 0 {
+			sub.setLastArtifact(msg.Completion.Artifacts[0])
+		}
+		a.persistSubAgentMeta(sub)
+	}
+	a.persistSubAgentMailboxMessage(*msg)
+	a.syncTaskRecordFromMailbox(*msg)
+	a.emitSubAgentMailboxUI(*msg)
+}
+
+func (a *MainAgent) normalizeSubAgentMailboxMessage(msg *SubAgentMailboxMessage) {
+	if msg == nil {
+		return
+	}
 	if strings.TrimSpace(msg.MessageID) == "" {
 		msg.MessageID = a.nextSubAgentMailboxMessageID(msg.AgentID)
 	}
@@ -43,16 +60,6 @@ func (a *MainAgent) prepareSubAgentMailboxMessage(msg *SubAgentMailboxMessage) {
 			msg.Payload = compactMailboxArtifactPayload(msg.Summary, artifactRelPath)
 		}
 	}
-	if sub := a.subAgentByID(msg.AgentID); sub != nil {
-		sub.setLastMailboxID(msg.MessageID)
-		if msg.Completion != nil && len(msg.Completion.Artifacts) > 0 {
-			sub.setLastArtifact(msg.Completion.Artifacts[0])
-		}
-		a.persistSubAgentMeta(sub)
-	}
-	a.persistSubAgentMailboxMessage(*msg)
-	a.syncTaskRecordFromMailbox(*msg)
-	a.emitSubAgentMailboxUI(*msg)
 }
 
 func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
@@ -96,7 +103,7 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 		a.noteSubAgentStateTransition(live, SubAgentStateRunning)
 		a.emitActivity(live.instanceID, ActivityExecuting, "child event")
 		a.emitToTUI(AgentStatusEvent{AgentID: live.instanceID, Status: "running", Message: statusMsg})
-		if !live.InjectUserMessageWithMailboxAck(messageText, msg.MessageID) {
+		if !live.InjectUserMessageWithMailboxAck(messageText, msg.MessageID, mailboxMetadata(&msg)) {
 			return false
 		}
 		live.armStartupWatchdog()
@@ -112,7 +119,9 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 	}
 	enqueueContext := func(messageText string) bool {
 		return a.withRegisteredSubAgent(owner, func(live *SubAgent) bool {
-			return live.TryEnqueueContextAppend(message.Message{Role: "user", Content: messageText, MailboxAckID: msg.MessageID})
+			contextMessage := subAgentMailboxConversationMessage(&msg, messageText)
+			contextMessage.MailboxAckID = msg.MessageID
+			return live.TryEnqueueContextAppend(contextMessage)
 		})
 	}
 	enqueueForProcessing := func(messageText, statusMsg string) bool {
@@ -120,7 +129,7 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 			if live.State() != SubAgentStateRunning {
 				return reactivateLive(live, messageText, statusMsg, false)
 			}
-			if !live.InjectUserMessageWithMailboxAck(messageText, msg.MessageID) {
+			if !live.InjectUserMessageWithMailboxAck(messageText, msg.MessageID, mailboxMetadata(&msg)) {
 				return false
 			}
 			live.armStartupWatchdog()
@@ -650,4 +659,27 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 		b.WriteString("\n- requires_ack: true")
 	}
 	return b.String()
+}
+
+func mailboxMetadata(msg *SubAgentMailboxMessage) *message.MailboxMetadata {
+	if msg == nil {
+		return nil
+	}
+	return &message.MailboxMetadata{
+		MessageID:    strings.TrimSpace(msg.MessageID),
+		AgentID:      strings.TrimSpace(msg.AgentID),
+		TaskID:       strings.TrimSpace(msg.TaskID),
+		OwnerAgentID: strings.TrimSpace(msg.OwnerAgentID),
+		OwnerTaskID:  strings.TrimSpace(msg.OwnerTaskID),
+		Kind:         strings.TrimSpace(string(msg.Kind)),
+	}
+}
+
+func subAgentMailboxConversationMessage(msg *SubAgentMailboxMessage, content string) message.Message {
+	return message.Message{
+		Role:    message.RoleUser,
+		Content: content,
+		Kind:    message.KindSubAgentMailbox,
+		Mailbox: mailboxMetadata(msg),
+	}
 }

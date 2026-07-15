@@ -93,3 +93,34 @@ func TestUpdateTerminalTitleFromRestoredSession_PrefersOriginalWhenClean(t *test
 		t.Fatalf("terminalTitleBase = %q, want %q", got, want)
 	}
 }
+
+func TestUpdateTerminalTitleFromRestoredSession_SkipsSyntheticUserMessages(t *testing.T) {
+	stub := titleRestoreAgentStub{
+		messages: []message.Message{
+			{Role: message.RoleUser, Content: "mailbox", Kind: message.KindSubAgentMailbox, Mailbox: &message.MailboxMetadata{MessageID: "worker-1-1"}},
+			{Role: message.RoleUser, Content: "loop", Kind: message.KindLoopNotice},
+			{Role: message.RoleUser, Content: "real request"},
+		},
+	}
+	m := NewModelWithSize(stub, 80, 24)
+	m.updateTerminalTitleFromRestoredSession()
+	if got := m.terminalTitleBase; got != "real request" {
+		t.Fatalf("terminalTitleBase = %q, want real request", got)
+	}
+}
+
+func TestUpdateTerminalTitleFromRestoredSession_DoesNotUseMailboxAsLastFallback(t *testing.T) {
+	stub := titleRestoreAgentStub{
+		messages: []message.Message{{
+			Role:    message.RoleUser,
+			Content: "mailbox",
+			Kind:    message.KindSubAgentMailbox,
+			Mailbox: &message.MailboxMetadata{MessageID: "worker-1-1"},
+		}},
+	}
+	m := NewModelWithSize(stub, 80, 24)
+	m.updateTerminalTitleFromRestoredSession()
+	if got := m.terminalTitleBase; got != "" {
+		t.Fatalf("terminalTitleBase = %q, want default empty title", got)
+	}
+}

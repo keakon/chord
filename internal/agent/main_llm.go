@@ -522,12 +522,13 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	messages = a.injectSessionContextReminder(messages)
 	metaPrefixCount := len(messages) - beforeReminder
 
-	// Assemble per-turn overlays (SubAgent mailbox, bug triage hint, loop
-	// continuation) and prepend them before the first user message. Overlays
-	// never modify the stable system prompt.
+	// Assemble per-turn model input. Durable SubAgent mailbox messages are
+	// appended in the same conversation position persisted to ctxMgr; transient
+	// runtime hints remain overlays before the first user message.
 	if overlays := a.buildTurnOverlayMessages(); len(overlays) > 0 {
-		metaPrefixCount += len(overlays)
-		messages = injectTurnOverlays(messages, overlays)
+		var prefixCount int
+		messages, prefixCount = applyTurnOverlayMessages(messages, overlays)
+		metaPrefixCount += prefixCount
 	}
 
 	// Propagate the stable reduced-prefix boundary as a one-shot Anthropic

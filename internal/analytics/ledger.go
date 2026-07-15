@@ -792,13 +792,8 @@ func (l *UsageLedger) firstUserMessageLocked() string {
 		if err := dec.Decode(&msg); err != nil {
 			break
 		}
-		if msg.Role != message.RoleUser {
-			continue
-		}
-		// Skip compaction summary messages: when called after a compaction has
-		// already rewritten main.jsonl, the first user message is the summary
-		// itself; using it here would poison OriginalFirstUserMessage.
-		if msg.IsCompactionSummary {
+		// Synthetic user-role messages must not become the original user prompt.
+		if !message.IsUserAuthored(msg) {
 			continue
 		}
 		preview := usageFirstUserPreview(message.UserPromptPlainText(msg))

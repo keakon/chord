@@ -259,7 +259,7 @@ func (a *MainAgent) captureOriginalFirstUserHint() string {
 		}
 	}
 	for _, msg := range a.ctxMgr.Snapshot() {
-		if msg.Role != message.RoleUser || msg.IsCompactionSummary {
+		if !message.IsUserAuthored(msg) {
 			continue
 		}
 		candidate := strings.TrimSpace(message.UserPromptPlainText(msg))
@@ -302,7 +302,7 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 	}
 	if originalFirstUser == "" {
 		for _, msg := range messages {
-			if msg.Role != message.RoleUser || msg.IsCompactionSummary {
+			if !message.IsUserAuthored(msg) {
 				continue
 			}
 			if v := strings.TrimSpace(message.UserPromptPlainText(msg)); v != "" {

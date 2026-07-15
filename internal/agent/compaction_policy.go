@@ -1544,7 +1544,7 @@ func fitCompactionInputToContextLimit(head []message.Message, input *compactionI
 func buildGoalAnchor(messages []message.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
-		if msg.Role != message.RoleUser {
+		if !message.IsUserAuthored(msg) {
 			continue
 		}
 		text := strings.TrimSpace(msg.Content)

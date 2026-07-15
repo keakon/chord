@@ -496,6 +496,7 @@ type AgentDoneEvent struct {
 	ParentAgentID string // owner agent instance ID
 	ParentTaskID  string // owner delegated task ID; empty when owned by main
 	Summary       string // completion summary from Complete tool
+	Message       string // exact mailbox user message sent to the owner model
 }
 
 func (AgentDoneEvent) agentEvent() {}

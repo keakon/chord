@@ -116,11 +116,15 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		if ownerAgentID == "main" {
 			ownerAgentID = ""
 		}
+		content := strings.TrimSpace(evt.Message)
+		if content == "" {
+			content = fmt.Sprintf("[%s] completed: %s", evt.AgentID, evt.Summary)
+		}
 		block := &Block{
 			ID:            m.nextBlockID,
 			Type:          BlockStatus,
 			StatusTitle:   "AGENT COMPLETE",
-			Content:       fmt.Sprintf("[%s] completed: %s", evt.AgentID, evt.Summary),
+			Content:       content,
 			AgentID:       ownerAgentID,
 			LinkedAgentID: evt.AgentID,
 			LinkedTaskID:  evt.TaskID,

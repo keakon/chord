@@ -25,8 +25,8 @@ func (s *SubAgent) InjectManualUserMessage(content string, drainContextAppends b
 	return s.enqueueUserMessage(pendingUserMessage{Content: content, FromUser: true, DrainContextAppends: drainContextAppends})
 }
 
-func (s *SubAgent) InjectUserMessageWithMailboxAck(content, mailboxAckID string) bool {
-	return s.enqueueUserMessage(pendingUserMessage{Content: content, MailboxAckID: strings.TrimSpace(mailboxAckID)})
+func (s *SubAgent) InjectUserMessageWithMailboxAck(content, mailboxAckID string, mailbox *message.MailboxMetadata) bool {
+	return s.enqueueUserMessage(pendingUserMessage{Content: content, MailboxAckID: strings.TrimSpace(mailboxAckID), Mailbox: mailbox})
 }
 
 // InjectUserMessageWithParts enqueues a multi-part user message for the SubAgent.

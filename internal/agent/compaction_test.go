@@ -4333,10 +4333,40 @@ func TestBuildGoalAnchorUsesLatestOrdinaryUserRequest(t *testing.T) {
 		{Role: "assistant", Content: "working"},
 		{Role: "user", Content: "[SubAgent agent-2 requests intervention]\n\nReason: merge conflict"},
 		{Role: "user", Content: "生成压缩目标保持方案 plan"},
+		{Role: "user", Content: "<system-reminder>\nSubAgent mailbox update\n</system-reminder>", Kind: message.KindSubAgentMailbox, Mailbox: &message.MailboxMetadata{MessageID: "worker-1-1", Kind: "completed"}},
 		{Role: "user", Content: "[Context Summary]\nold summary", IsCompactionSummary: true},
 	})
 	if !strings.Contains(got, "plan") || strings.Contains(got, "rate limit") {
 		t.Fatalf("buildGoalAnchor() = %q, want latest ordinary user request", got)
+	}
+}
+
+func TestLatestRecoverableUserIntentSkipsSyntheticUserMessages(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "real user request"})
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "loop notice", Kind: message.KindLoopNotice})
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "mailbox", Kind: message.KindSubAgentMailbox, Mailbox: &message.MailboxMetadata{MessageID: "worker-1-1"}})
+	if got := a.latestRecoverableUserIntent(); got != "real user request" {
+		t.Fatalf("latestRecoverableUserIntent() = %q, want real user request", got)
+	}
+}
+
+func TestCollectCompactionEvidenceClassifiesTypedMailbox(t *testing.T) {
+	items := selectEvidenceItems([]message.Message{
+		{Role: message.RoleUser, Content: "real user request"},
+		{Role: message.RoleUser, Content: "completed mailbox", Kind: message.KindSubAgentMailbox, Mailbox: &message.MailboxMetadata{MessageID: "worker-1-1", Kind: string(SubAgentMailboxKindCompleted)}},
+	}, 10000)
+	var userRequests, completions int
+	for _, item := range items {
+		switch item.Kind {
+		case evidenceUserRequest:
+			userRequests++
+		case evidenceSubAgentDone:
+			completions++
+		}
+	}
+	if userRequests != 1 || completions != 1 {
+		t.Fatalf("evidence counts = user:%d completion:%d, want 1 each; items=%+v", userRequests, completions, items)
 	}
 }
 

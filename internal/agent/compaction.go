@@ -232,6 +232,36 @@ func isSubAgentDoneMessage(text string) bool {
 	return strings.HasPrefix(trimmed, "[SubAgent ") && strings.Contains(trimmed, " completed]")
 }
 
+func subAgentMailboxEvidence(msg message.Message, source string) (evidenceItem, bool) {
+	if msg.Kind != message.KindSubAgentMailbox || msg.Mailbox == nil {
+		return evidenceItem{}, false
+	}
+	text := strings.TrimSpace(message.UserPromptPlainText(msg))
+	if text == "" {
+		return evidenceItem{}, false
+	}
+	switch msg.Mailbox.Kind {
+	case string(SubAgentMailboxKindCompleted):
+		return buildEvidenceItem(
+			evidenceSubAgentDone,
+			"SubAgent completion summary",
+			"The main agent may need this exact completion summary before continuing.",
+			source,
+			compactTextSnippet(text, 700),
+		), true
+	case string(SubAgentMailboxKindBlocked), string(SubAgentMailboxKindDecisionRequired), string(SubAgentMailboxKindRiskAlert), string(SubAgentMailboxKindDirectionChange):
+		return buildEvidenceItem(
+			evidenceEscalate,
+			"SubAgent requested main-agent help",
+			"This unresolved intervention request may still determine the next action.",
+			source,
+			compactTextSnippet(text, 700),
+		), true
+	default:
+		return evidenceItem{}, false
+	}
+}
+
 func looksLikeUserCorrection(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	if lower == "" {
@@ -498,8 +528,19 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
 		sourceSeq := i + 1
+		if item, ok := subAgentMailboxEvidence(msg, fmt.Sprintf("message %d (SubAgent mailbox)", i+1)); ok {
+			item.Sequence = sourceSeq
+			if !seen[item.Key] {
+				seen[item.Key] = true
+				items = append(items, item)
+			}
+			continue
+		}
 		switch msg.Role {
 		case "user":
+			if !message.IsUserAuthored(msg) {
+				continue
+			}
 			text := strings.TrimSpace(msg.Content)
 			if len(msg.Parts) > 0 {
 				text = normalizeMessagesForSummary([]message.Message{msg})[0].Content

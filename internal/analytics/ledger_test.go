@@ -281,6 +281,32 @@ func TestFirstUserMessageLockedSkipsCompactionSummary(t *testing.T) {
 	}
 }
 
+func TestFirstUserMessageLockedSkipsSyntheticUserMessages(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.jsonl")
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: "mailbox", Kind: message.KindSubAgentMailbox, Mailbox: &message.MailboxMetadata{MessageID: "worker-1-1"}},
+		{Role: message.RoleUser, Content: "loop", Kind: message.KindLoopNotice},
+		{Role: message.RoleUser, Content: "real user message"},
+	}
+	var payload []byte
+	for _, msg := range messages {
+		encoded, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		payload = append(payload, encoded...)
+		payload = append(payload, '\n')
+	}
+	if err := os.WriteFile(mainPath, payload, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	if got := ledger.firstUserMessageLocked(); got != "real user message" {
+		t.Fatalf("firstUserMessageLocked = %q, want real user message", got)
+	}
+}
+
 func TestLoadSessionUsageSummaryRebuildsWhenSummaryStale(t *testing.T) {
 	dir := t.TempDir()
 	ledger := NewUsageLedger(dir, "/tmp/project")

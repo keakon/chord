@@ -277,6 +277,130 @@ func TestCompletedSubAgentMailboxStartsMainTurnBeforeGlobalIdle(t *testing.T) {
 	}
 }
 
+func TestMainMailboxOverlayPersistsExactModelMessage(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	mailbox := &SubAgentMailboxMessage{
+		MessageID: "worker-1-1",
+		AgentID:   "worker-1",
+		TaskID:    "task-1",
+		Kind:      SubAgentMailboxKindCompleted,
+		Summary:   "finished review",
+	}
+	a.pendingSubAgentMailboxes = []*SubAgentMailboxMessage{mailbox}
+
+	overlays := a.buildTurnOverlayMessages()
+	if len(overlays) != 1 {
+		t.Fatalf("overlay count = %d, want 1", len(overlays))
+	}
+	wantContent := "<system-reminder>\n" + formatSubAgentMailboxInjectionText(mailbox) + "\n</system-reminder>"
+	got := overlays[0]
+	if got.Content != wantContent || got.Kind != message.KindSubAgentMailbox || got.Mailbox == nil {
+		t.Fatalf("overlay = %#v, want durable mailbox message", got)
+	}
+	if got.Mailbox.MessageID != "worker-1-1" || got.Mailbox.Kind != "completed" {
+		t.Fatalf("mailbox metadata = %#v", got.Mailbox)
+	}
+	ctx := a.ctxMgr.Snapshot()
+	if len(ctx) != 1 || ctx[0].Content != got.Content || ctx[0].Mailbox == nil {
+		t.Fatalf("context messages = %#v, want exact overlay persisted in context", ctx)
+	}
+	a.flushPersist()
+	persisted, err := a.recovery.LoadMessages("main")
+	if err != nil {
+		t.Fatalf("LoadMessages(main): %v", err)
+	}
+	if len(persisted) != 1 || persisted[0].Content != got.Content || persisted[0].Mailbox == nil || persisted[0].Mailbox.MessageID != "worker-1-1" {
+		t.Fatalf("persisted messages = %#v, want exact durable mailbox message", persisted)
+	}
+}
+
+func TestMainMailboxRetryDoesNotDuplicateDurableMessage(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	mailbox := &SubAgentMailboxMessage{
+		MessageID: "worker-1-1",
+		AgentID:   "worker-1",
+		TaskID:    "task-1",
+		Kind:      SubAgentMailboxKindCompleted,
+		Summary:   "finished review",
+	}
+	a.pendingSubAgentMailboxes = []*SubAgentMailboxMessage{mailbox}
+	a.activeSubAgentMailboxes = []*SubAgentMailboxMessage{mailbox}
+	a.activeSubAgentMailbox = mailbox
+	a.activeSubAgentMailboxAck = true
+	first := a.buildTurnOverlayMessages()
+
+	a.markActiveSubAgentMailboxAck(false)
+	a.requeueActiveSubAgentMailbox()
+	a.activeSubAgentMailboxes = nil
+	a.activeSubAgentMailbox = nil
+	a.pendingSubAgentMailboxes = nil
+	if !a.stageNextSubAgentMailboxBatch() {
+		t.Fatal("retry mailbox was not restaged")
+	}
+	second := a.buildTurnOverlayMessages()
+	if len(first) != 1 || len(second) != 1 {
+		t.Fatalf("overlay counts = (%d, %d), want one delivery per request", len(first), len(second))
+	}
+	prepared, _ := applyTurnOverlayMessages(a.ctxMgr.Snapshot(), second)
+	if got := countSubAgentMailboxMessages(prepared, mailbox.MessageID); got != 1 {
+		t.Fatalf("request mailbox copies = %d, want 1", got)
+	}
+	a.flushPersist()
+	if got := countSubAgentMailboxMessages(a.ctxMgr.Snapshot(), mailbox.MessageID); got != 1 {
+		t.Fatalf("context mailbox copies = %d, want 1", got)
+	}
+	persisted, err := a.recovery.LoadMessages("main")
+	if err != nil {
+		t.Fatalf("LoadMessages(main): %v", err)
+	}
+	if got := countSubAgentMailboxMessages(persisted, mailbox.MessageID); got != 1 {
+		t.Fatalf("persisted mailbox copies = %d, want 1", got)
+	}
+}
+
+func countSubAgentMailboxMessages(messages []message.Message, messageID string) int {
+	count := 0
+	for _, msg := range messages {
+		if msg.Kind == message.KindSubAgentMailbox && msg.Mailbox != nil && msg.Mailbox.MessageID == messageID {
+			count++
+		}
+	}
+	return count
+}
+
+func TestApplyTurnOverlayMessagesKeepsDurableMailboxAtConversationTail(t *testing.T) {
+	base := []message.Message{{Role: "user", Content: "request"}, {Role: "assistant", Content: "working"}}
+	mailbox := message.Message{Role: "user", Content: "mailbox", Kind: message.KindSubAgentMailbox}
+	transient := message.Message{Role: "user", Content: "runtime hint"}
+
+	got, prefixCount := applyTurnOverlayMessages(base, []message.Message{mailbox, transient})
+	if prefixCount != 1 {
+		t.Fatalf("prefixCount = %d, want 1", prefixCount)
+	}
+	if len(got) != 4 {
+		t.Fatalf("message count = %d, want 4", len(got))
+	}
+	if got[0].Content != "runtime hint" || got[1].Content != "request" || got[2].Content != "working" || got[3].Content != "mailbox" {
+		t.Fatalf("message order = %#v", got)
+	}
+}
+
+func TestApplyTurnOverlayMessagesDoesNotDuplicateExistingMailbox(t *testing.T) {
+	mailbox := message.Message{
+		Role:    message.RoleUser,
+		Content: "mailbox",
+		Kind:    message.KindSubAgentMailbox,
+		Mailbox: &message.MailboxMetadata{MessageID: "worker-1-1"},
+	}
+	got, prefixCount := applyTurnOverlayMessages([]message.Message{{Role: message.RoleUser, Content: "request"}, mailbox}, []message.Message{mailbox})
+	if prefixCount != 0 {
+		t.Fatalf("prefixCount = %d, want 0", prefixCount)
+	}
+	if count := countSubAgentMailboxMessages(got, "worker-1-1"); count != 1 {
+		t.Fatalf("mailbox copies = %d, want 1", count)
+	}
+}
+
 func TestCustomSlashExpansionAndModelExpansion(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.SetCustomCommands([]*command.Definition{

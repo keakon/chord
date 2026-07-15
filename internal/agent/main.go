@@ -240,6 +240,7 @@ type pendingUserMessage struct {
 	Parts               []message.ContentPart
 	FromUser            bool
 	MailboxAckID        string
+	Mailbox             *message.MailboxMetadata
 	CoalesceKey         string
 	DrainContextAppends bool
 }
@@ -1194,6 +1195,14 @@ func (a *MainAgent) buildShutdownSnapshot() *recovery.SessionSnapshot {
 
 func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 	if msg.IsCompactionSummary {
+		return
+	}
+	if item, ok := subAgentMailboxEvidence(msg, "runtime SubAgent mailbox"); ok {
+		item.Sequence = a.evidence.len() + 1
+		a.addEvidenceCandidate(item)
+		return
+	}
+	if msg.Role == message.RoleUser && !message.IsUserAuthored(msg) {
 		return
 	}
 	if strings.TrimSpace(msg.Content) == "" && len(msg.Parts) == 0 && strings.TrimSpace(msg.ToolDiff) == "" {

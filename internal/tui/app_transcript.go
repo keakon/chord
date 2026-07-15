@@ -530,6 +530,25 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 	for msgIdx, msg := range msgs {
 		switch msg.Role {
 		case "user":
+			if msg.Kind == message.KindSubAgentMailbox && msg.Mailbox != nil {
+				title := "AGENT MESSAGE"
+				if msg.Mailbox.Kind == "completed" {
+					title = "AGENT COMPLETE"
+				} else if msg.Mailbox.Kind == "risk_alert" {
+					title = "AGENT RISK"
+				}
+				block := &Block{
+					ID:            *nextID,
+					Type:          BlockStatus,
+					StatusTitle:   title,
+					Content:       msg.Content,
+					LinkedAgentID: msg.Mailbox.AgentID,
+					LinkedTaskID:  msg.Mailbox.TaskID,
+				}
+				*nextID++
+				blocks = append(blocks, block)
+				continue
+			}
 			if msg.Kind == "loop_notice" {
 				raw := contentOrPartsText(msg)
 				title, body := "", raw

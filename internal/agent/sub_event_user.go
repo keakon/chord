@@ -21,7 +21,10 @@ func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 
 	content := pendingUserMessageText(input)
-	msg := message.Message{Role: "user", Content: content}
+	msg := message.Message{Role: "user", Content: content, Mailbox: input.Mailbox}
+	if input.Mailbox != nil {
+		msg.Kind = message.KindSubAgentMailbox
+	}
 	if len(input.Parts) > 0 {
 		msg.Parts = cloneContentParts(input.Parts)
 	}

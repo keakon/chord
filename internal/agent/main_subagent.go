@@ -242,7 +242,7 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		a.releaseSubAgentSlot(sub)
 	}
 	a.emitActivity(evt.SourceID, ActivityIdle, "")
-	a.sendEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
+	mailbox := &SubAgentMailboxMessage{
 		AgentID:      evt.SourceID,
 		TaskID:       sub.taskID,
 		OwnerAgentID: sub.ownerAgentID,
@@ -254,7 +254,13 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		Payload:      result.Summary,
 		Completion:   a.buildCompletionEnvelope(sub, result),
 		RequiresAck:  false,
-	}})
+	}
+	a.normalizeSubAgentMailboxMessage(mailbox)
+	a.sendEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: mailbox})
+	mailboxMessage := formatSubAgentMailboxInjectionText(mailbox)
+	if strings.TrimSpace(sub.ownerAgentID) == "" {
+		mailboxMessage = "<system-reminder>\n" + mailboxMessage + "\n</system-reminder>"
+	}
 
 	a.emitToTUI(AgentDoneEvent{
 		AgentID:       evt.SourceID,
@@ -263,6 +269,7 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		ParentAgentID: controlPlaneAgentID(sub.ownerAgentID),
 		ParentTaskID:  sub.ownerTaskID,
 		Summary:       result.Summary,
+		Message:       mailboxMessage,
 	})
 	a.handleSubAgentCloseRequestedEvent(Event{
 		Type:     EventSubAgentCloseRequested,

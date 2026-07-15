@@ -607,14 +607,9 @@ func firstUserMessageFromFile(mainPath string) (string, error) {
 			}
 			continue // skip malformed lines
 		}
-		if msg.Role != message.RoleUser {
-			continue
-		}
-		// Skip compaction summary messages: after a compaction has rewritten
-		// main.jsonl the first user message is the synthesised summary itself.
-		// Returning that here would poison callers that persist this value as
-		// the original first user message (e.g. usage-summary.json).
-		if msg.IsCompactionSummary {
+		// Synthetic user-role messages must not become the session's original
+		// user prompt when restoring metadata after compaction.
+		if !message.IsUserAuthored(msg) {
 			continue
 		}
 		s := message.UserPromptPlainText(msg)

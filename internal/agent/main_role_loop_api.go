@@ -178,7 +178,7 @@ func (a *MainAgent) appendLoopNoticeMessage(title, text string) {
 	// calls, or for explicit user-triggered loop entry (/loop on). Tool-call
 	// turns must continue via tool results plus pendingLoopContinuation overlays
 	// instead of injecting another user message.
-	msg := message.Message{Role: "user", Content: title + "\n\n" + text, Kind: "loop_notice"}
+	msg := message.Message{Role: "user", Content: title + "\n\n" + text, Kind: message.KindLoopNotice}
 	a.ctxMgr.Append(msg)
 	a.persistAsync(identity.MainAgentID, msg)
 }
