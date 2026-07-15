@@ -219,6 +219,122 @@ func TestToolCallAfterStreamPlaceholderLeavesNoAssistantCard(t *testing.T) {
 	}
 }
 
+func TestSubAgentToolCallDoesNotSplitMainAssistantStream(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "main first"}})
+	mainBlock := m.currentAssistantBlock
+	if mainBlock == nil {
+		t.Fatal("expected active main assistant block")
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "sub-call-1",
+		Name:     tools.NameRead,
+		ArgsJSON: `{"path":"README.md"}`,
+		AgentID:  "agent-1",
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: " second"}})
+
+	if m.currentAssistantBlock != mainBlock {
+		t.Fatal("subagent tool call replaced the active main assistant block")
+	}
+	if !mainBlock.Streaming {
+		t.Fatal("subagent tool call settled the main assistant block")
+	}
+	if got := pendingStreamingContentForTest(mainBlock); got != "main first second" {
+		t.Fatalf("main assistant content = %q, want one continuous stream", got)
+	}
+	mainCards := 0
+	for _, block := range m.viewport.blocks {
+		if block.Type == BlockAssistant && block.AgentID == "" {
+			mainCards++
+		}
+	}
+	if mainCards != 1 {
+		t.Fatalf("main assistant cards = %d, want 1", mainCards)
+	}
+}
+
+func TestInterleavedAgentTextStreamsKeepIndependentAssistantCards(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "main first"}})
+	mainBlock := m.currentAssistantBlock
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "sub first", AgentID: "agent-1"}})
+	subBlock := m.streamState("agent-1").assistant
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: " second"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: " second", AgentID: "agent-1"}})
+
+	if mainBlock == nil || subBlock == nil || mainBlock == subBlock {
+		t.Fatalf("independent stream blocks = main:%p sub:%p", mainBlock, subBlock)
+	}
+	if m.currentAssistantBlock != mainBlock || m.streamState("agent-1").assistant != subBlock {
+		t.Fatal("interleaved deltas replaced an agent's active assistant block")
+	}
+	if got := pendingStreamingContentForTest(mainBlock); got != "main first second" {
+		t.Fatalf("main assistant content = %q", got)
+	}
+	if got := pendingStreamingContentForTest(subBlock); got != "sub first second" {
+		t.Fatalf("subagent assistant content = %q", got)
+	}
+	for _, block := range []*Block{mainBlock, subBlock} {
+		if !block.Streaming {
+			t.Fatalf("block %d settled during another agent's delta", block.ID)
+		}
+	}
+}
+
+func TestSubAgentToolCallFinalizesOnlySubAgentAssistantStream(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "main"}})
+	mainBlock := m.currentAssistantBlock
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "sub", AgentID: "agent-1"}})
+	subBlock := m.streamState("agent-1").assistant
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "sub-call-1",
+		Name:     tools.NameRead,
+		ArgsJSON: `{"path":"README.md"}`,
+		AgentID:  "agent-1",
+	}})
+
+	if !mainBlock.Streaming || m.currentAssistantBlock != mainBlock {
+		t.Fatal("subagent tool call changed the main assistant stream")
+	}
+	if subBlock.Streaming || m.streamState("agent-1").assistant != nil {
+		t.Fatal("subagent tool call did not finalize its own assistant stream")
+	}
+}
+
+func TestInterleavedAgentThinkingStreamsKeepIndependentCards(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "main thought"}})
+	mainBlock := m.currentThinkingBlock
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{AgentID: "agent-1"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "sub thought", AgentID: "agent-1"}})
+	subBlock := m.streamState("agent-1").thinking
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{AgentID: "agent-1"}})
+
+	if mainBlock == nil || subBlock == nil || mainBlock == subBlock {
+		t.Fatalf("independent thinking blocks = main:%p sub:%p", mainBlock, subBlock)
+	}
+	if m.currentThinkingBlock != mainBlock || !mainBlock.Streaming {
+		t.Fatal("subagent thinking completion changed the main thinking stream")
+	}
+	if subBlock.Streaming || m.streamState("agent-1").thinking != nil {
+		t.Fatal("subagent thinking completion did not settle its own block")
+	}
+	if mainBlock.ThinkingDuration != 0 {
+		t.Fatalf("main thinking duration = %v before main completion, want 0", mainBlock.ThinkingDuration)
+	}
+	if subBlock.ThinkingDuration == 0 {
+		t.Fatal("subagent thinking duration was not recorded")
+	}
+}
+
 func TestStreamingAssistantPlaceholderRendersNoCard(t *testing.T) {
 	for _, content := range []string{"", " \n", ".", "..", "...", " … ", "\x1b[2m...\x1b[0m"} {
 		block := &Block{ID: 1, Type: BlockAssistant, Streaming: true, Content: content}

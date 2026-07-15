@@ -89,9 +89,9 @@ func (m *Model) currentMainAssistantMsgIndex() int {
 	return len(m.agent.GetMessages())
 }
 
-func (m *Model) ensureStreamingThinkingBlock(agentID string) *Block {
-	if m.currentThinkingBlock != nil {
-		return m.currentThinkingBlock
+func (m *Model) ensureStreamingThinkingBlock(agentID string, state *agentStreamState) *Block {
+	if state.thinking != nil {
+		return state.thinking
 	}
 	msgIndex := -1
 	blockIndex := 0
@@ -105,10 +105,10 @@ func (m *Model) ensureStreamingThinkingBlock(agentID string) *Block {
 		}
 		blockIndex = m.thinkingStreamBlockIndex
 	}
-	m.currentThinkingBlock = &Block{ID: m.nextBlockID, Type: BlockThinking, Streaming: true, AgentID: agentID, MsgIndex: msgIndex, ThinkingBlockIndex: blockIndex}
+	state.thinking = &Block{ID: m.nextBlockID, Type: BlockThinking, Streaming: true, AgentID: agentID, MsgIndex: msgIndex, ThinkingBlockIndex: blockIndex}
 	m.nextBlockID++
-	m.thinkingBlockAppended = false
-	return m.currentThinkingBlock
+	state.thinkingAppended = false
+	return state.thinking
 }
 
 func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
@@ -116,152 +116,158 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 	switch evt := event.(type) {
 	case agent.StreamTextEvent:
 		m.touchStreamDelta(evt.AgentID)
-		if m.currentAssistantBlock != nil && (m.currentAssistantBlock.AgentID != evt.AgentID || !m.currentAssistantBlock.Streaming) {
-			m.finalizeAssistantBlock()
-			m.currentAssistantBlock = nil
-			m.assistantBlockAppended = false
+		state := m.streamState(evt.AgentID)
+		if state.assistant != nil && !state.assistant.Streaming {
+			m.finalizeAgentStream(evt.AgentID)
+			state = m.streamState(evt.AgentID)
 		}
-		if m.currentAssistantBlock == nil {
+		if state.assistant == nil {
 			m.markRequestProgressBaseline(evt.AgentID)
-			m.currentAssistantBlock = &Block{ID: m.nextBlockID, Type: BlockAssistant, Streaming: true, AgentID: evt.AgentID, StartedAt: time.Now()}
+			state.assistant = &Block{ID: m.nextBlockID, Type: BlockAssistant, Streaming: true, AgentID: evt.AgentID, StartedAt: time.Now()}
 			m.nextBlockID++
-			m.assistantBlockAppended = false
+			state.assistantAppended = false
 		}
-		if !m.assistantBlockAppended && assistantStreamContentIsPlaceholder(m.currentAssistantBlock.Content) {
-			m.currentAssistantBlock.Content = ""
-			m.currentAssistantBlock.streamContentBuilder = nil
+		if !state.assistantAppended && assistantStreamContentIsPlaceholder(state.assistant.Content) {
+			state.assistant.Content = ""
+			state.assistant.streamContentBuilder = nil
 			if assistantStreamContentIsPlaceholder(evt.Text) {
-				m.currentAssistantBlock.InvalidateCache()
+				state.assistant.InvalidateCache()
+				m.storeStreamState(evt.AgentID, state)
 				m.exitRenderFreeze()
 				m.markStreamRenderDirty()
 				effects.addFollowup(m.scheduleStreamFlush(0))
 				return true, effects
 			}
 		}
-		m.currentAssistantBlock.appendStreamingContent(evt.Text)
-		firstVisibleAssistantDelta := !m.assistantBlockAppended && m.currentAssistantBlock.syncStreamingContent()
-		if !m.assistantBlockAppended && !assistantStreamContentIsPlaceholder(m.currentAssistantBlock.Content) {
-			m.appendViewportBlock(m.currentAssistantBlock)
-			m.assistantBlockAppended = true
+		state.assistant.appendStreamingContent(evt.Text)
+		firstVisibleAssistantDelta := !state.assistantAppended && state.assistant.syncStreamingContent()
+		if !state.assistantAppended && !assistantStreamContentIsPlaceholder(state.assistant.Content) {
+			m.appendViewportBlock(state.assistant)
+			state.assistantAppended = true
 			if m.displayState == stateForeground {
 				effects.addFollowup(m.requestStreamBoundaryFlush())
 			}
 		}
 		if firstVisibleAssistantDelta {
-			m.currentAssistantBlock.InvalidateCache()
-			if m.assistantBlockAppended {
-				m.viewport.InvalidateBlock(m.currentAssistantBlock.ID)
+			state.assistant.InvalidateCache()
+			if state.assistantAppended {
+				m.viewport.InvalidateBlock(state.assistant.ID)
 			}
 		}
 		if firstVisibleAssistantDelta && m.hasDeferredStartupTranscript() {
-			m.syncStartupDeferredTranscriptBlock(m.currentAssistantBlock)
+			m.syncStartupDeferredTranscriptBlock(state.assistant)
 		}
+		m.storeStreamState(evt.AgentID, state)
 		m.exitRenderFreeze()
 		m.markStreamRenderDirty()
 		effects.addFollowup(m.scheduleStreamFlush(0))
 		return true, effects
 	case agent.ThinkingStartedEvent:
-		if m.thinkingStartTime.IsZero() {
-			m.thinkingStartTime = time.Now()
+		state := m.streamState(evt.AgentID)
+		if state.thinkingStartedAt.IsZero() {
+			state.thinkingStartedAt = time.Now()
 		}
-		m.ensureStreamingThinkingBlock("")
+		m.ensureStreamingThinkingBlock(evt.AgentID, &state)
+		m.storeStreamState(evt.AgentID, state)
 		return true, effects
 	case agent.StreamThinkingDeltaEvent:
 		m.touchStreamDelta(evt.AgentID)
-		if m.thinkingStartTime.IsZero() {
-			m.thinkingStartTime = time.Now()
+		state := m.streamState(evt.AgentID)
+		if state.thinkingStartedAt.IsZero() {
+			state.thinkingStartedAt = time.Now()
 		}
-		if m.currentThinkingBlock != nil && m.currentThinkingBlock.AgentID != evt.AgentID {
-			m.finalizeAssistantBlock()
-		}
-		m.ensureStreamingThinkingBlock(evt.AgentID)
-		m.currentThinkingBlock.appendStreamingContent(evt.Text)
-		firstVisibleThinkingDelta := !m.thinkingBlockAppended && m.currentThinkingBlock.syncStreamingContent()
-		if strings.TrimSpace(m.currentThinkingBlock.Content) != "" && !m.thinkingBlockAppended {
-			m.appendViewportBlock(m.currentThinkingBlock)
-			m.thinkingBlockAppended = true
+		m.ensureStreamingThinkingBlock(evt.AgentID, &state)
+		state.thinking.appendStreamingContent(evt.Text)
+		firstVisibleThinkingDelta := !state.thinkingAppended && state.thinking.syncStreamingContent()
+		if strings.TrimSpace(state.thinking.Content) != "" && !state.thinkingAppended {
+			m.appendViewportBlock(state.thinking)
+			state.thinkingAppended = true
 			if m.displayState == stateForeground {
 				effects.addFollowup(m.requestStreamBoundaryFlush())
 			}
 		}
 		if firstVisibleThinkingDelta {
-			m.currentThinkingBlock.InvalidateCache()
-			if m.thinkingBlockAppended {
-				m.viewport.InvalidateBlock(m.currentThinkingBlock.ID)
+			state.thinking.InvalidateCache()
+			if state.thinkingAppended {
+				m.viewport.InvalidateBlock(state.thinking.ID)
 			}
 		}
 		if firstVisibleThinkingDelta && m.hasDeferredStartupTranscript() {
-			m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
+			m.syncStartupDeferredTranscriptBlock(state.thinking)
 		}
+		m.storeStreamState(evt.AgentID, state)
 		m.exitRenderFreeze()
 		m.markStreamRenderDirty()
 		effects.addFollowup(m.scheduleStreamFlush(0))
 		return true, effects
 	case agent.StreamThinkingEvent:
+		state := m.streamState(evt.AgentID)
 		flushedThinking := false
 		if strings.TrimSpace(evt.Text) != "" {
-			m.ensureStreamingThinkingBlock(evt.AgentID)
-			m.currentThinkingBlock.appendStreamingContent(evt.Text)
-			flushedThinking = m.currentThinkingBlock.syncStreamingContent()
-			if !m.thinkingBlockAppended {
-				m.appendViewportBlock(m.currentThinkingBlock)
-				m.thinkingBlockAppended = true
+			m.ensureStreamingThinkingBlock(evt.AgentID, &state)
+			state.thinking.appendStreamingContent(evt.Text)
+			flushedThinking = state.thinking.syncStreamingContent()
+			if !state.thinkingAppended {
+				m.appendViewportBlock(state.thinking)
+				state.thinkingAppended = true
 				if m.displayState == stateForeground {
 					effects.addFollowup(m.requestStreamBoundaryFlush())
 				}
 			}
 		}
-		if m.currentThinkingBlock != nil {
+		if state.thinking != nil {
 			if !flushedThinking {
-				flushedThinking = m.currentThinkingBlock.syncStreamingContent()
+				flushedThinking = state.thinking.syncStreamingContent()
 			}
-			m.currentThinkingBlock.Streaming = false
-			if !m.thinkingStartTime.IsZero() {
-				m.currentThinkingBlock.ThinkingDuration = time.Since(m.thinkingStartTime)
-				m.thinkingStartTime = time.Time{}
+			state.thinking.Streaming = false
+			if !state.thinkingStartedAt.IsZero() {
+				state.thinking.ThinkingDuration = time.Since(state.thinkingStartedAt)
+				state.thinkingStartedAt = time.Time{}
 			}
-			m.currentThinkingBlock.InvalidateCache()
-			if m.thinkingBlockAppended {
+			state.thinking.InvalidateCache()
+			if state.thinkingAppended {
 				if flushedThinking {
-					m.viewport.UpdateBlock(m.currentThinkingBlock.ID)
+					m.viewport.UpdateBlock(state.thinking.ID)
 				}
-				m.markBlockSettled(m.currentThinkingBlock)
-				m.viewport.InvalidateBlock(m.currentThinkingBlock.ID)
+				m.markBlockSettled(state.thinking)
+				m.viewport.InvalidateBlock(state.thinking.ID)
 			}
 			if flushedThinking && m.hasDeferredStartupTranscript() {
-				m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
+				m.syncStartupDeferredTranscriptBlock(state.thinking)
 			}
 			m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 			// Detach the settled block so the next round of thinking starts
 			// a fresh card. Without this, subsequent thinking deltas would
 			// be appended to an already-frozen block and the footer would
 			// render alongside still-streaming content.
-			if m.currentThinkingBlock.AgentID == "" {
+			if evt.AgentID == "" {
 				m.thinkingStreamBlockIndex++
 			}
-			m.currentThinkingBlock = nil
-			m.thinkingBlockAppended = false
+			state.thinking = nil
+			state.thinkingAppended = false
 		}
+		m.storeStreamState(evt.AgentID, state)
 		effects.addFollowup(m.requestStreamBoundaryFlush())
 		return true, effects
 	case agent.StreamRollbackEvent:
-		matchAgent := func(blockAgent string) bool { return blockAgent == evt.AgentID }
-		if m.currentThinkingBlock != nil && matchAgent(m.currentThinkingBlock.AgentID) {
-			if m.thinkingBlockAppended {
-				m.removeViewportBlockByID(m.currentThinkingBlock.ID)
+		state := m.streamState(evt.AgentID)
+		if state.thinking != nil {
+			if state.thinkingAppended {
+				m.removeViewportBlockByID(state.thinking.ID)
 			}
-			m.currentThinkingBlock = nil
-			m.thinkingBlockAppended = false
-			m.thinkingStartTime = time.Time{}
+			state.thinking = nil
+			state.thinkingAppended = false
+			state.thinkingStartedAt = time.Time{}
 		}
 		m.removeRolledBackThinkingBlocks(evt.AgentID)
-		if m.currentAssistantBlock != nil && matchAgent(m.currentAssistantBlock.AgentID) {
-			if m.assistantBlockAppended {
-				m.removeViewportBlockByID(m.currentAssistantBlock.ID)
+		if state.assistant != nil {
+			if state.assistantAppended {
+				m.removeViewportBlockByID(state.assistant.ID)
 			}
-			m.currentAssistantBlock = nil
-			m.assistantBlockAppended = false
+			state.assistant = nil
+			state.assistantAppended = false
 		}
+		m.storeStreamState(evt.AgentID, state)
 		if strings.TrimSpace(evt.Reason) != "" {
 			effects.addFollowup(m.enqueueToast(evt.Reason, "warn"))
 		}

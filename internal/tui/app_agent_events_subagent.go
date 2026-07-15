@@ -21,6 +21,16 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 	case agent.AgentStartedEvent:
 		previousAgentID := strings.TrimSpace(evt.PreviousAgentID)
 		if previousAgentID != "" && previousAgentID != evt.AgentID {
+			if state, ok := m.subAgentStreamStates[previousAgentID]; ok {
+				m.subAgentStreamStates[evt.AgentID] = state
+				delete(m.subAgentStreamStates, previousAgentID)
+				if state.assistant != nil {
+					state.assistant.AgentID = evt.AgentID
+				}
+				if state.thinking != nil {
+					state.thinking.AgentID = evt.AgentID
+				}
+			}
 			if state, ok := m.agentComposerStates[normalizeDraftAgentID(previousAgentID)]; ok {
 				m.agentComposerStates[normalizeDraftAgentID(evt.AgentID)] = state
 				delete(m.agentComposerStates, normalizeDraftAgentID(previousAgentID))
@@ -50,6 +60,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		return true, effects
 	case agent.AgentDoneEvent:
 		prevType := m.activities[evt.AgentID].Type
+		m.finalizeAgentStream(evt.AgentID)
 		if m.inflightDraftBelongsToAgent(evt.AgentID) {
 			m.inflightDraft = nil
 		}
@@ -176,6 +187,9 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		}
 		effects.addFollowup(m.startActiveAnimation())
 		if evt.Type == agent.ActivityIdle {
+			if evt.AgentID != "" && evt.AgentID != "main" {
+				m.finalizeAgentStream(evt.AgentID)
+			}
 			if m.inflightDraftBelongsToAgent(evt.AgentID) {
 				m.inflightDraft = nil
 			}

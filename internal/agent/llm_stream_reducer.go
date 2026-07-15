@@ -121,7 +121,7 @@ func (r *streamContentReducer) handleThinking(text string) {
 	if !r.thinkingActive {
 		r.thinkingActive = true
 		if r.emitThinkingStarted && r.emit != nil {
-			r.emit(ThinkingStartedEvent{})
+			r.emit(ThinkingStartedEvent{AgentID: r.agentID})
 		}
 		r.thinkingLastEmit = time.Now()
 	}

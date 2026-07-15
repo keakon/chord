@@ -25,6 +25,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Fixed concurrent MainAgent/SubAgent streaming splitting one assistant response into multiple visible cards. Assistant text, thinking state, rollback, and tool-call boundaries are now isolated per agent, so hidden background tool events cannot settle the foreground response.
 - Fixed global idle detection after delegation: the terminal title no longer shows completion while any SubAgent is connecting, retrying, streaming, or executing; completion is shown only after all Agents are idle.
 - Fixed TUI unresponsiveness when switching to a SubAgent with a large transcript. Focus switches now reuse bounded transcript windows and initially load only the tail, while small transcripts remain fully visible.
 - Fixed empty MODEL information after resuming and focusing a parked SubAgent. Model refs are now persisted in task, meta, and recovery records; legacy sessions recover them from the usage ledger and fall back to the latest Agent configuration and current model.

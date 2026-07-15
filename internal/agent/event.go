@@ -182,8 +182,10 @@ type StreamTextEvent struct {
 func (StreamTextEvent) agentEvent() {}
 
 // ThinkingStartedEvent is emitted when the first thinking delta is received
-// in a block, so the TUI can start the "thought duration" timer.
-type ThinkingStartedEvent struct{}
+// in a block, so the TUI can start that agent's "thought duration" timer.
+type ThinkingStartedEvent struct {
+	AgentID string
+}
 
 func (ThinkingStartedEvent) agentEvent() {}
 

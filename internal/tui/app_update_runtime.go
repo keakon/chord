@@ -81,7 +81,7 @@ func (m *Model) handleAnimTick(msg animTickMsg) tea.Cmd {
 		// own View() call. Scheduling an extra forced flush just re-renders an
 		// identical transcript frame — pure CPU waste on every terminal.
 		var flushCmd tea.Cmd
-		if m.currentAssistantBlock != nil || m.currentThinkingBlock != nil {
+		if m.hasActiveStreamBlock() {
 			flushCmd = m.scheduleStreamFlush(0)
 		}
 		return tea.Batch(animTickCmd(m.animTickGeneration, animTickSourceVisual, cadence.visualAnimDelay), flushCmd)
@@ -118,6 +118,15 @@ func (m *Model) handleStreamFlushTick(msg streamFlushTickMsg) tea.Cmd {
 	}
 	if m.currentThinkingBlock != nil && m.flushStreamingBlock(m.currentThinkingBlock, m.thinkingBlockAppended) && m.hasDeferredStartupTranscript() {
 		m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
+	}
+	for agentID, state := range m.subAgentStreamStates {
+		if state.assistant != nil && m.flushStreamingBlock(state.assistant, state.assistantAppended) && m.hasDeferredStartupTranscript() {
+			m.syncStartupDeferredTranscriptBlock(state.assistant)
+		}
+		if state.thinking != nil && m.flushStreamingBlock(state.thinking, state.thinkingAppended) && m.hasDeferredStartupTranscript() {
+			m.syncStartupDeferredTranscriptBlock(state.thinking)
+		}
+		m.subAgentStreamStates[agentID] = state
 	}
 	m.exitRenderFreeze()
 	m.setStreamRenderInvalidation(streamRenderInvalidateForce)

@@ -231,7 +231,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	case agent.ToolCallStartEvent:
 		evt.Name = tools.NormalizeName(evt.Name)
 		m.touchStreamDelta(evt.AgentID)
-		m.finalizeAssistantBlock()
+		m.finalizeAgentStream(evt.AgentID)
 		m.markRequestProgressBaseline(evt.AgentID)
 		_, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, agent.ToolCallExecutionStateRunning, true)
 		if created {

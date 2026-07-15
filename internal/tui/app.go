@@ -187,6 +187,7 @@ type Model struct {
 	assistantBlockAppended   bool   // true once we've appended the block (avoids empty blocks)
 	currentThinkingBlock     *Block // standalone streaming thinking block (nil when idle)
 	thinkingBlockAppended    bool   // true once thinking block has been appended to viewport
+	subAgentStreamStates     map[string]agentStreamState
 	thinkingStreamMsgIndex   int
 	thinkingStreamBlockIndex int
 	nextBlockID              int
@@ -681,7 +682,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case focusedContinueWithDraft:
 			draft := queuedDraft{Content: "continue", AgentID: msg.target.AgentID}
-			m.finalizeTurn()
+			m.finalizeAgentStream(msg.target.AgentID)
 			staged := m.stageDraft(draft)
 			send := func() tea.Msg {
 				if hasTargeted {

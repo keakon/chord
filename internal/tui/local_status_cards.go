@@ -13,7 +13,15 @@ func (m *Model) hasStreamingViewportBlock() bool {
 	if m == nil {
 		return false
 	}
-	return (m.currentThinkingBlock != nil && m.thinkingBlockAppended) || (m.currentAssistantBlock != nil && m.assistantBlockAppended)
+	if (m.currentThinkingBlock != nil && m.thinkingBlockAppended) || (m.currentAssistantBlock != nil && m.assistantBlockAppended) {
+		return true
+	}
+	for _, state := range m.subAgentStreamStates {
+		if (state.thinking != nil && state.thinkingAppended) || (state.assistant != nil && state.assistantAppended) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) appendLocalStatusCard(title, content string) {

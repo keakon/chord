@@ -543,7 +543,7 @@ func TestSubAgentPendingDraftConsumedFinalizesAssistantBeforeUserBlock(t *testin
 	m.focusedAgentID = "agent-1"
 	m.viewport.SetFilter("agent-1")
 	assistant := &Block{ID: 1, Type: BlockAssistant, AgentID: "agent-1", Content: "complete reply", Streaming: true}
-	m.currentAssistantBlock = assistant
+	m.storeStreamState("agent-1", agentStreamState{assistant: assistant, assistantAppended: true})
 	m.viewport.AppendBlock(assistant)
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.PendingDraftConsumedEvent{

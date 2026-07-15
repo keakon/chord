@@ -62,8 +62,8 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		if evt.AgentID == "" || evt.AgentID == "main" {
 			m.finalizeTurn()
-		} else if m.currentAssistantBlock != nil && m.currentAssistantBlock.AgentID == evt.AgentID {
-			m.finalizeAssistantBlock()
+		} else {
+			m.finalizeAgentStream(evt.AgentID)
 		}
 		imageCount := 0
 		content := userBlockTextFromParts(draft.contentParts(), draft.Content)

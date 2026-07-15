@@ -24,41 +24,105 @@ type focusedContinueActionMsg struct {
 	target agent.ConversationTarget
 }
 
+type agentStreamState struct {
+	assistant         *Block
+	assistantAppended bool
+	thinking          *Block
+	thinkingAppended  bool
+	thinkingStartedAt time.Time
+}
+
+func (m *Model) streamState(agentID string) agentStreamState {
+	if agentID == "" {
+		return agentStreamState{
+			assistant:         m.currentAssistantBlock,
+			assistantAppended: m.assistantBlockAppended,
+			thinking:          m.currentThinkingBlock,
+			thinkingAppended:  m.thinkingBlockAppended,
+			thinkingStartedAt: m.thinkingStartTime,
+		}
+	}
+	if m.subAgentStreamStates == nil {
+		return agentStreamState{}
+	}
+	return m.subAgentStreamStates[agentID]
+}
+
+func (m *Model) hasActiveStreamBlock() bool {
+	if m.currentAssistantBlock != nil || m.currentThinkingBlock != nil {
+		return true
+	}
+	for _, state := range m.subAgentStreamStates {
+		if state.assistant != nil || state.thinking != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) storeStreamState(agentID string, state agentStreamState) {
+	if agentID == "" {
+		m.currentAssistantBlock = state.assistant
+		m.assistantBlockAppended = state.assistantAppended
+		m.currentThinkingBlock = state.thinking
+		m.thinkingBlockAppended = state.thinkingAppended
+		m.thinkingStartTime = state.thinkingStartedAt
+		return
+	}
+	if state.assistant == nil && state.thinking == nil {
+		delete(m.subAgentStreamStates, agentID)
+		return
+	}
+	if m.subAgentStreamStates == nil {
+		m.subAgentStreamStates = make(map[string]agentStreamState)
+	}
+	m.subAgentStreamStates[agentID] = state
+}
+
 func (m *Model) finalizeAssistantBlock() {
-	if m.currentThinkingBlock != nil {
-		m.currentThinkingBlock.finishStreamingContent()
-		m.currentThinkingBlock.Streaming = false
+	m.finalizeAgentStream("")
+	for agentID := range m.subAgentStreamStates {
+		m.finalizeAgentStream(agentID)
+	}
+	m.flushPendingLocalStatusCards()
+}
+
+func (m *Model) finalizeAgentStream(agentID string) {
+	state := m.streamState(agentID)
+	if state.thinking != nil {
+		state.thinking.finishStreamingContent()
+		state.thinking.Streaming = false
 		// Only set ThinkingDuration here if it wasn't already frozen by
 		// StreamThinkingEvent (e.g. when thinking_end was never received
 		// due to cancellation or provider interleaving).
-		if !m.thinkingStartTime.IsZero() {
-			m.currentThinkingBlock.ThinkingDuration = time.Since(m.thinkingStartTime)
-			m.thinkingStartTime = time.Time{}
+		if !state.thinkingStartedAt.IsZero() {
+			state.thinking.ThinkingDuration = time.Since(state.thinkingStartedAt)
+			state.thinkingStartedAt = time.Time{}
 		}
-		if m.thinkingBlockAppended {
-			if m.currentThinkingBlock.SettledAt.IsZero() {
-				m.markBlockSettled(m.currentThinkingBlock)
+		if state.thinkingAppended {
+			if state.thinking.SettledAt.IsZero() {
+				m.markBlockSettled(state.thinking)
 			}
-			m.currentThinkingBlock.InvalidateCache()
-			m.viewport.UpdateBlock(m.currentThinkingBlock.ID)
-			m.syncStartupDeferredTranscriptBlock(m.currentThinkingBlock)
+			state.thinking.InvalidateCache()
+			m.viewport.UpdateBlock(state.thinking.ID)
+			m.syncStartupDeferredTranscriptBlock(state.thinking)
 		}
-		if m.currentThinkingBlock.AgentID == "" {
+		if agentID == "" {
 			m.thinkingStreamBlockIndex++
 		}
-		m.currentThinkingBlock = nil
-		m.thinkingBlockAppended = false
+		state.thinking = nil
+		state.thinkingAppended = false
 	}
-	if m.currentAssistantBlock != nil {
-		m.currentAssistantBlock.finishStreamingContent()
-		m.currentAssistantBlock.Streaming = false
+	if state.assistant != nil {
+		state.assistant.finishStreamingContent()
+		state.assistant.Streaming = false
 		// Heuristic: discard very-short streaming assistant prefix if it's
 		// likely an orphan fragment before a tool call (e.g. "Okay," "Sure", "Let").
 		// Only applies when the block was appended and the previous block is a
 		// completed tool call.
 		shouldDiscard := false
-		if m.assistantBlockAppended && m.currentAssistantBlock.Type == BlockAssistant {
-			nonWS := visibleAssistantStreamContent(m.currentAssistantBlock.Content)
+		if state.assistantAppended && state.assistant.Type == BlockAssistant {
+			nonWS := visibleAssistantStreamContent(state.assistant.Content)
 			if assistantStreamContentIsPlaceholder(nonWS) {
 				shouldDiscard = true
 			}
@@ -68,7 +132,7 @@ func (m *Model) finalizeAssistantBlock() {
 				// Check if previous visible block is a completed tool call
 				blocks := m.viewport.visibleBlocks()
 				for i, b := range blocks {
-					if b == m.currentAssistantBlock {
+					if b == state.assistant {
 						if i > 0 {
 							prev := blocks[i-1]
 							if prev.Type == BlockToolCall && prev.ResultDone {
@@ -81,21 +145,23 @@ func (m *Model) finalizeAssistantBlock() {
 			}
 		}
 		if shouldDiscard {
-			m.removeViewportBlockByID(m.currentAssistantBlock.ID)
-			m.currentAssistantBlock = nil
-			m.assistantBlockAppended = false
+			m.removeViewportBlockByID(state.assistant.ID)
+			state.assistant = nil
+			state.assistantAppended = false
+			m.storeStreamState(agentID, state)
 			m.flushPendingLocalStatusCards()
 			return
 		}
-		m.currentAssistantBlock.InvalidateCache()
-		if m.assistantBlockAppended {
-			m.markBlockSettled(m.currentAssistantBlock)
+		state.assistant.InvalidateCache()
+		if state.assistantAppended {
+			m.markBlockSettled(state.assistant)
 		}
-		m.viewport.UpdateBlock(m.currentAssistantBlock.ID)
-		m.syncStartupDeferredTranscriptBlock(m.currentAssistantBlock)
-		m.currentAssistantBlock = nil
-		m.assistantBlockAppended = false
+		m.viewport.UpdateBlock(state.assistant.ID)
+		m.syncStartupDeferredTranscriptBlock(state.assistant)
+		state.assistant = nil
+		state.assistantAppended = false
 	}
+	m.storeStreamState(agentID, state)
 	m.flushPendingLocalStatusCards()
 }
 
@@ -114,7 +180,7 @@ func isASCIILettersOnly(s string) bool {
 }
 
 func (m *Model) finalizeTurn() {
-	m.finalizeAssistantBlock()
+	m.finalizeAgentStream("")
 }
 
 // revealTrailingInterruptedTurnUserMessage keeps an explicitly interrupted
@@ -247,7 +313,7 @@ func (m *Model) drainQueuedDrafts() tea.Cmd {
 }
 
 func (m *Model) resetStreamingToIdle() {
-	m.finalizeTurn()
+	m.finalizeAssistantBlock()
 	m.markAgentIdle(identity.MainAgentID)
 	m.stopActiveAnimationIfIdle()
 }

@@ -114,6 +114,9 @@ func (m *Model) rebuildViewportFromMessagesWithReason(reason string) {
 	m.inflightDraft = nil
 	m.currentAssistantBlock = nil
 	m.assistantBlockAppended = false
+	m.currentThinkingBlock = nil
+	m.thinkingBlockAppended = false
+	m.subAgentStreamStates = nil
 	m.resetTimingStateForSessionRestore()
 	m.closeAtMention()
 	messagesStarted := time.Now()

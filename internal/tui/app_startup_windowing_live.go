@@ -278,6 +278,19 @@ func (m *Model) rebindLiveViewportBlocks() {
 			m.currentThinkingBlock = rebound
 		}
 	}
+	for agentID, state := range m.subAgentStreamStates {
+		if state.assistant != nil {
+			if rebound := m.viewport.GetFocusedBlock(state.assistant.ID); rebound != nil {
+				state.assistant = rebound
+			}
+		}
+		if state.thinking != nil {
+			if rebound := m.viewport.GetFocusedBlock(state.thinking.ID); rebound != nil {
+				state.thinking = rebound
+			}
+		}
+		m.subAgentStreamStates[agentID] = state
+	}
 }
 
 func (m *Model) syncStartupDeferredTranscriptAfterViewportRemove(blockID int) {

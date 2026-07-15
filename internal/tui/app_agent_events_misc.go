@@ -17,7 +17,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	case agent.LoopNoticeEvent:
 		m.invalidateStatusBarAgentSnapshot()
 		m.invalidateDrawCaches()
-		m.finalizeAssistantBlock()
+		m.finalizeTurn()
 		content := strings.TrimSpace(evt.Text)
 		if content == "" {
 			return true, effects
@@ -51,7 +51,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			m.recordAgentError(evt.AgentID, evt.Err, evt.Provider, evt.Model, evt.Key, evt.AccountID, evt.Email, false)
 		}
 		m.clearSessionSwitch()
-		m.finalizeAssistantBlock()
+		m.finalizeAgentStream(evt.AgentID)
 		block := &Block{ID: m.nextBlockID, Type: BlockError, Content: evt.Err.Error(), AgentID: evt.AgentID}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
@@ -63,7 +63,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		m.invalidateDrawCaches()
 		return true, effects
 	case agent.HandoffEvent:
-		m.finalizeAssistantBlock()
+		m.finalizeTurn()
 		block := &Block{ID: m.nextBlockID, Type: BlockAssistant, Content: fmt.Sprintf("Plan saved to: %s", evt.PlanPath)}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
@@ -79,14 +79,14 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			m.appendLocalStatusCard(title, content)
 			return true, effects
 		}
-		m.finalizeAssistantBlock()
+		m.finalizeAgentStream(evt.AgentID)
 		block := &Block{ID: m.nextBlockID, Type: BlockStatus, Content: evt.Message, AgentID: evt.AgentID}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
 		return true, effects
 	case agent.SpawnFinishedEvent:
-		m.finalizeAssistantBlock()
+		m.finalizeAgentStream(evt.AgentID)
 		backgroundID := evt.EffectiveID()
 		content := strings.TrimSpace(evt.Message)
 		if content == "" {

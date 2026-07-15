@@ -43,6 +43,30 @@ func TestStreamContentReducerMainClosesThinkingBeforeTextAndIgnoresLateThinking(
 	}
 }
 
+func TestStreamContentReducerThinkingStartedIncludesAgentID(t *testing.T) {
+	var events []AgentEvent
+	reducer := streamContentReducer{
+		agentID:               "agent-1",
+		emit:                  func(evt AgentEvent) { events = append(events, evt) },
+		emitThinkingStarted:   true,
+		thinkingCommitMode:    streamContentCommitFullText,
+		thinkingFlushInterval: time.Hour,
+	}
+
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaThinking, Text: "thought"})
+
+	if len(events) == 0 {
+		t.Fatal("expected ThinkingStartedEvent")
+	}
+	started, ok := events[0].(ThinkingStartedEvent)
+	if !ok {
+		t.Fatalf("events[0] = %T, want ThinkingStartedEvent", events[0])
+	}
+	if started.AgentID != "agent-1" {
+		t.Fatalf("ThinkingStartedEvent.AgentID = %q, want agent-1", started.AgentID)
+	}
+}
+
 func TestStreamContentReducerSubAgentKeepsImmediateThinkingDeltaAndFinalText(t *testing.T) {
 	var events []AgentEvent
 	reducer := streamContentReducer{
