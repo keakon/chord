@@ -1144,6 +1144,26 @@ func TestToolExpandedResultLinesHiddenCountDoesNotDoubleCountFirstHiddenLine(t *
 	}
 }
 
+func TestToolExpandedResultLinesCapsCollapsedWrappedDisplayLines(t *testing.T) {
+	result := strings.TrimSpace(strings.Repeat("segment ", maxToolCallCompactResultLines+3))
+
+	visible, hidden := toolExpandedResultLines(result, len("segment"), false)
+	if len(visible) != maxToolCallCompactResultLines {
+		t.Fatalf("collapsed visible lines = %d, want %d: %#v", len(visible), maxToolCallCompactResultLines, visible)
+	}
+	if hidden != 3 {
+		t.Fatalf("collapsed hidden lines = %d, want 3", hidden)
+	}
+
+	expanded, hidden := toolExpandedResultLines(result, len("segment"), true)
+	if len(expanded) != maxToolCallCompactResultLines+3 {
+		t.Fatalf("expanded visible lines = %d, want %d", len(expanded), maxToolCallCompactResultLines+3)
+	}
+	if hidden != 0 {
+		t.Fatalf("expanded hidden lines = %d, want 0", hidden)
+	}
+}
+
 func TestQueuedToolHeaderShowsQueuedLabelWithoutSpinner(t *testing.T) {
 	block := &Block{
 		ID:                         1,

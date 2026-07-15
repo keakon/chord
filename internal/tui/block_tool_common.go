@@ -228,28 +228,29 @@ func toolExpandedResultLines(displayResult string, width int, expanded bool) ([]
 		return nil, 0
 	}
 	resLines := strings.Split(strings.TrimRight(displayResult, "\n"), "\n")
-	n := len(resLines)
-	lim := n
-	if !expanded && n > maxToolCallCompactResultLines {
-		lim = maxToolCallCompactResultLines
-	}
-	out := make([]string, 0, lim)
-	for i := 0; i < lim; i++ {
-		out = append(out, wrapText(resLines[i], width)...)
-	}
-	hidden := 0
-	if !expanded {
-		visible := len(out)
-		total, truncated := toolPlainTextWrappedLineCount(displayResult, width, visible+1)
-		if truncated && n > lim {
-			// Avoid wrapping the entire hidden tail in collapsed mode. This is a
-			// cheap logical-line suffix, not an exact wrapped-line count.
-			hidden = n - lim
-		} else if total > visible {
-			hidden = total - visible
+	if expanded {
+		out := make([]string, 0, len(resLines))
+		for _, line := range resLines {
+			out = append(out, wrapText(line, width)...)
 		}
+		return out, 0
 	}
-	return out, hidden
+
+	out := make([]string, 0, maxToolCallCompactResultLines)
+	for i, line := range resLines {
+		wrapped := wrapText(line, width)
+		remaining := maxToolCallCompactResultLines - len(out)
+		if len(wrapped) <= remaining {
+			out = append(out, wrapped...)
+			continue
+		}
+		out = append(out, wrapped[:remaining]...)
+		// Avoid wrapping the entire hidden tail in collapsed mode. The current
+		// logical line is already wrapped exactly; each later logical line adds
+		// at least one hidden display line.
+		return out, len(wrapped) - remaining + len(resLines) - i - 1
+	}
+	return out, 0
 }
 
 func toolSummaryLine(line string) string {
