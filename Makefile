@@ -40,7 +40,7 @@ test-cover:
 	$(GO) tool cover -func=coverage.out
 
 race:
-	$(GO) test -race -count=1 -timeout=10m $(PKGS)
+	./scripts/check_ci_race.sh $(PKGS)
 
 vet:
 	$(GO) vet $(PKGS)

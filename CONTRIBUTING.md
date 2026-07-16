@@ -73,6 +73,15 @@ make docs-check
 make docs-examples-check
 ```
 
+`make race` delegates to `scripts/check_ci_race.sh`, the same entry point used
+by GitHub Actions. In addition to `go test -race`, that script rejects
+unexpected stderr and leaked runtime or interactive output. You can pass a
+focused package set through `PKGS`, for example:
+
+```bash
+make race PKGS=./internal/tui
+```
+
 If your changes touch TUI performance-critical paths, also run the checks in [Performance-sensitive changes](#performance-sensitive-changes).
 
 Optional integration tests that require external tools are not part of the default CI run. To run the real Pyright LSP integration test locally, install `pyright-langserver` and run:
