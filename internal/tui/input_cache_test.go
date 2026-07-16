@@ -3,7 +3,6 @@ package tui
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/keakon/chord/internal/agent"
 )
@@ -88,22 +87,22 @@ func TestViewRefreshesSearchInputAfterTyping(t *testing.T) {
 	}
 }
 
-func TestViewRebuildsInputRenderWhenBusyAnimationFrameChanges(t *testing.T) {
+func TestViewRebuildsInputRenderWhenBusyAnimationCacheKeyChanges(t *testing.T) {
 	m := NewModelWithSize(nil, 24, 12)
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityConnecting, AgentID: "main"}
 
 	_ = m.View()
 	stale := "stale input render"
+	staleAnimKey := m.cachedInputAnimKey + "-stale"
 	m.cachedInputRender.text = stale
-	m.cachedInputKey = "stale-key"
-	m.cachedInputAnimKey = m.inputAnimationCacheKeyAt(time.Now().Add(200 * time.Millisecond))
+	m.cachedInputAnimKey = staleAnimKey
 	_ = m.View()
 	after := m.cachedInputRender.text
 
 	if after == stale {
-		t.Fatal("cached input render did not rebuild after animation frame change")
+		t.Fatal("cached input render did not rebuild after animation cache key change")
 	}
-	if m.cachedInputAnimKey == "" {
-		t.Fatal("cached input animation key should be repopulated")
+	if m.cachedInputAnimKey == staleAnimKey || m.cachedInputAnimKey == "" {
+		t.Fatalf("cached input animation key was not refreshed: %q", m.cachedInputAnimKey)
 	}
 }
