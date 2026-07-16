@@ -287,7 +287,10 @@ type MainAgent struct {
 	// Internal event bus. Goroutines that perform async work (LLM calls,
 	// tool execution) send results here; the single-threaded Run loop
 	// processes them in order.
-	eventCh chan Event
+	eventCh        chan Event
+	eventWakeCh    chan struct{}
+	eventMu        sync.Mutex
+	deferredEvents []Event
 
 	// pendingUserMessages holds user-facing context additions received while the
 	// agent is busy (turn != nil). User-authored input must not be silently
@@ -675,6 +678,7 @@ func NewMainAgent(
 		globalConfig:            globalCfg,
 		projectConfig:           projectCfg,
 		eventCh:                 make(chan Event, 256),
+		eventWakeCh:             make(chan struct{}, 1),
 		outputCh:                make(chan AgentEvent, 512),
 		sessionDir:              sessionDir,
 		modelName:               modelName,

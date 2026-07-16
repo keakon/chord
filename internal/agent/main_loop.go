@@ -56,13 +56,36 @@ func (a *MainAgent) Run(ctx context.Context) error {
 	}()
 
 	for {
+		evt, err := a.nextEvent(ctx)
+		if err != nil {
+			return err
+		}
+		a.dispatch(evt)
+	}
+}
+
+func (a *MainAgent) nextEvent(ctx context.Context) (Event, error) {
+	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return Event{}, ctx.Err()
 		case <-a.parentCtx.Done():
-			return a.parentCtx.Err()
+			return Event{}, a.parentCtx.Err()
 		case evt := <-a.eventCh:
-			a.dispatch(evt)
+			return evt, nil
+		case <-a.eventWakeCh:
+			select {
+			case evt := <-a.eventCh:
+				a.wakeDeferredEvents()
+				return evt, nil
+			default:
+			}
+			if evt, ok := a.popDeferredEvent(); ok {
+				if a.hasDeferredEvents() {
+					a.wakeDeferredEvents()
+				}
+				return evt, nil
+			}
 		}
 	}
 }
@@ -142,11 +165,53 @@ func (a *MainAgent) dispatch(evt Event) {
 	}
 }
 
-// sendEvent assigns a monotonic sequence number and writes the event to the
-// internal event bus. This may block if the bus is full (cap 256).
+// sendEvent assigns a monotonic sequence number and queues the event without
+// blocking producers. Once the primary channel fills, events use a FIFO
+// overflow queue until it is drained so newer events cannot overtake them.
 func (a *MainAgent) sendEvent(evt Event) {
+	select {
+	case <-a.stoppingCh:
+		return
+	default:
+	}
+	a.eventMu.Lock()
 	evt.Seq = a.eventSeq.Add(1)
-	a.eventCh <- evt
+	if len(a.deferredEvents) == 0 {
+		select {
+		case a.eventCh <- evt:
+			a.eventMu.Unlock()
+			return
+		default:
+		}
+	}
+	a.deferredEvents = append(a.deferredEvents, evt)
+	a.eventMu.Unlock()
+	a.wakeDeferredEvents()
+}
+
+func (a *MainAgent) wakeDeferredEvents() {
+	select {
+	case a.eventWakeCh <- struct{}{}:
+	default:
+	}
+}
+
+func (a *MainAgent) popDeferredEvent() (Event, bool) {
+	a.eventMu.Lock()
+	defer a.eventMu.Unlock()
+	if len(a.deferredEvents) == 0 {
+		return Event{}, false
+	}
+	evt := a.deferredEvents[0]
+	a.deferredEvents[0] = Event{}
+	a.deferredEvents = a.deferredEvents[1:]
+	return evt, true
+}
+
+func (a *MainAgent) hasDeferredEvents() bool {
+	a.eventMu.Lock()
+	defer a.eventMu.Unlock()
+	return len(a.deferredEvents) > 0
 }
 
 func (a *MainAgent) emitGlobalIdleIfReady() bool {
@@ -187,6 +252,7 @@ func (a *MainAgent) drainRunnableMailboxWork() {
 
 func (a *MainAgent) hasQueuedAutomaticWork() bool {
 	return len(a.eventCh) > 0 ||
+		a.hasDeferredEvents() ||
 		len(a.pendingUserMessages) > 0 ||
 		a.hasRunnableMailboxWork() ||
 		strings.TrimSpace(a.pendingRecoveryPrompt) != "" ||
