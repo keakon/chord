@@ -306,6 +306,7 @@ func TestCancelCurrentTurnRoutesToFocusedSubAgentAndPersistsFailedToolResult(t *
 	if cancelled := a.CancelCurrentTurn(); !cancelled {
 		t.Fatal("CancelCurrentTurn() = false, want true")
 	}
+	a.flushPersist()
 
 	msgs := sub.GetMessages()
 	if len(msgs) != 2 {

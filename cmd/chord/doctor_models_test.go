@@ -1042,6 +1042,7 @@ func TestDoctorModelsOAuthRefresherUpdatesSharedRuntimeAuth(t *testing.T) {
 	}
 	creds := runtimeCfg.providerCredentials("openai")
 	llmProviderCfg := llm.NewProviderConfig("openai", providerCfg, config.ExtractAPIKeys(creds))
+	defer llmProviderCfg.Close()
 	if err := configureDoctorModelsOAuthRefresher(runtimeCfg, "openai", providerCfg, creds, llmProviderCfg, ""); err != nil {
 		t.Fatalf("configureDoctorModelsOAuthRefresher: %v", err)
 	}
@@ -1103,6 +1104,7 @@ func TestDoctorModelsOAuthRefresherSharesRefreshedTokenAcrossTargets(t *testing.
 	}
 	creds := runtimeCfg.providerCredentials("openai")
 	llmProviderCfg := llm.NewProviderConfig("openai", providerCfg, config.ExtractAPIKeys(creds))
+	defer llmProviderCfg.Close()
 	oauthMap, _, err := oauthCredentialMap(creds)
 	if err != nil {
 		t.Fatalf("oauthCredentialMap: %v", err)
