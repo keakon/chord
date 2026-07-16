@@ -169,9 +169,7 @@ func (a *MainAgent) abandonSubAgentsForSessionSwitch() int {
 			a.syncTaskRecordFromSub(subs[i], "terminated on session switch")
 		}
 		a.fileTrack.ReleaseAll(id)
-		if subs[i] != nil && subs[i].semHeld {
-			a.releaseSubAgentSlot(subs[i])
-		}
+		a.releaseSubAgentSlot(subs[i])
 		if subs[i] != nil {
 			tools.StopAllSpawnedForAgent(id, "terminated on session switch")
 			subs[i].cancel()
@@ -232,7 +230,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.skillsMu.Unlock()
 	a.setTaskRecords(nil)
 	a.gitStatusInjected.Store(false)
-	a.explicitUserTurnCount = 0
+	a.explicitUserTurnCount.Store(0)
 	a.subs.stateEnteredTurn = make(map[string]uint64)
 }
 

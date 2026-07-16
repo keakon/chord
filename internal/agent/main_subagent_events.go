@@ -98,9 +98,7 @@ func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {
 		status = "error"
 	}
 	a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: status, Message: reason})
-	if sub.semHeld {
-		a.releaseSubAgentSlot(sub)
-	}
+	a.releaseSubAgentSlot(sub)
 	a.fileTrack.ReleaseAll(evt.SourceID)
 	tools.StopAllSpawnedForAgent(evt.SourceID, "terminated on subagent stop")
 	a.parkSubAgent(evt.SourceID)

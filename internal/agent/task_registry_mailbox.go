@@ -14,13 +14,14 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 		return
 	}
 	now := time.Now()
+	currentTurn := a.explicitUserTurnCount.Load()
 	a.subs.mu.Lock()
 	if a.subs.taskRecords == nil {
 		a.subs.taskRecords = make(map[string]*DurableTaskRecord)
 	}
 	rec := cloneDurableTaskRecord(a.subs.taskRecords[taskID])
 	if rec == nil {
-		rec = &DurableTaskRecord{TaskID: taskID, CreatedAt: now, CreatedTurn: a.explicitUserTurnCount}
+		rec = &DurableTaskRecord{TaskID: taskID, CreatedAt: now, CreatedTurn: currentTurn}
 	}
 	if strings.TrimSpace(msg.AgentID) != "" {
 		rec.LatestInstanceID = strings.TrimSpace(msg.AgentID)
@@ -58,7 +59,7 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 			rec.ResumePolicy = taskResumePolicyLiveOnly
 		}
 	}
-	rec.LastUpdatedTurn = a.explicitUserTurnCount
+	rec.LastUpdatedTurn = currentTurn
 	rec.UpdatedAt = now
 	if live := a.subs.subAgents[rec.LatestInstanceID]; live == nil {
 		rec.RuntimeParked = true

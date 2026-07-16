@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -726,7 +727,7 @@ func TestCreateSubAgentReturnsChildLimitReachedForDirectOwner(t *testing.T) {
 	}
 }
 
-func TestCreateSubAgentIgnoresNonActiveDirectChildrenForLimit(t *testing.T) {
+func TestCreateSubAgentCountsNonTerminalDirectChildrenForLimit(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
@@ -749,8 +750,80 @@ func TestCreateSubAgentIgnoresNonActiveDirectChildrenForLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSubAgent(second): %v", err)
 	}
-	if second.Status != "started" {
-		t.Fatalf("second.Status = %q, want started", second.Status)
+	if second.Status != "child_limit_reached" {
+		t.Fatalf("second.Status = %q, want child_limit_reached", second.Status)
+	}
+}
+
+func TestConcurrentCreateSubAgentRespectsDirectChildLimit(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
+	parent.depth = 1
+	parent.delegation = config.DelegationConfig{MaxChildren: 1, MaxDepth: 2}
+	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
+
+	start := make(chan struct{})
+	results := make(chan tools.TaskHandle, 2)
+	errs := make(chan error, 2)
+	for i := range 2 {
+		go func() {
+			<-start
+			handle, err := a.CreateSubAgent(ctx, fmt.Sprintf("child %d", i), "worker", "", "", tools.WriteScope{})
+			results <- handle
+			errs <- err
+		}()
+	}
+	close(start)
+
+	statuses := map[string]int{}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("CreateSubAgent: %v", err)
+		}
+		statuses[(<-results).Status]++
+	}
+	if statuses["started"] != 1 || statuses["child_limit_reached"] != 1 {
+		t.Fatalf("statuses = %#v, want one started and one child_limit_reached", statuses)
+	}
+}
+
+func TestCreateSubAgentInitializesConcurrentlyBeforeAdmission(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	a.llmFactory = func(string, []string, string) *llm.Client {
+		entered <- struct{}{}
+		<-release
+		return newTestLLMClient()
+	}
+
+	results := make(chan tools.TaskHandle, 2)
+	errs := make(chan error, 2)
+	for i := range 2 {
+		go func() {
+			handle, err := a.CreateSubAgent(context.Background(), fmt.Sprintf("child %d", i), "worker", "", "", tools.WriteScope{})
+			results <- handle
+			errs <- err
+		}()
+	}
+	for range 2 {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			close(release)
+			t.Fatal("SubAgent initialization was serialized by admission locking")
+		}
+	}
+	close(release)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("CreateSubAgent: %v", err)
+		}
+		if handle := <-results; handle.Status != "started" {
+			t.Fatalf("handle.Status = %q, want started", handle.Status)
+		}
 	}
 }
 
@@ -1677,7 +1750,7 @@ func TestSubAgentWakeReevaluatesInputAfterRunningTransition(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-wake-transition")
 	sub.setState(SubAgentStateWaitingMain, "waiting")
-	go sub.runLoop()
+	sub.startRunLoop()
 	t.Cleanup(sub.cancel)
 
 	// Give runLoop time to enter select with its state-gated input channel
@@ -1823,7 +1896,7 @@ func TestWaitingMainLifecycleExpiresAfterUserTurns(t *testing.T) {
 	a.noteSubAgentStateTransition(sub, SubAgentStateWaitingMain)
 
 	for range waitingMainExpiryUserTurns {
-		a.explicitUserTurnCount++
+		a.explicitUserTurnCount.Add(1)
 	}
 	a.sweepSubAgentLifecycle()
 
@@ -2222,7 +2295,7 @@ func TestTerminalSubAgentsRemainAvailableAfterLifecycleSweep(t *testing.T) {
 	cancelled.setState(SubAgentStateCancelled, "cancelled by user")
 	a.noteSubAgentStateTransition(cancelled, SubAgentStateCancelled)
 
-	a.explicitUserTurnCount += waitingMainExpiryUserTurns + 1
+	a.explicitUserTurnCount.Add(waitingMainExpiryUserTurns + 1)
 	a.sweepSubAgentLifecycle()
 
 	if got := a.subAgentByID(failed.instanceID); got != failed {

@@ -9,6 +9,14 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// findDuplicateOrConflictingTask is a test-only locking wrapper; production
+// callers hold subs.mu and use findDuplicateOrConflictingTaskLocked directly.
+func (a *MainAgent) findDuplicateOrConflictingTask(ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (*DurableTaskRecord, bool) {
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
+	return a.findDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, expectedWriteScope)
+}
+
 func TestWriteScopesOverlapMatchesExactAndNestedPathsOnly(t *testing.T) {
 	tests := []struct {
 		name string
@@ -99,6 +107,51 @@ func TestMergeDurableTaskRecordsPreservesCoordinationIdentity(t *testing.T) {
 	}
 	if len(got.ExpectedWriteScope.PathPrefix) != 1 || got.ExpectedWriteScope.PathPrefix[0] != "internal/agent" {
 		t.Fatalf("merged write scope = %#v, want durable path prefix", got.ExpectedWriteScope)
+	}
+}
+
+func TestFindDuplicateOrConflictingTaskAllowsExplicitOnlyTerminalRetry(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	for _, state := range []SubAgentState{SubAgentStateFailed, SubAgentStateCancelled} {
+		t.Run(string(state), func(t *testing.T) {
+			a.setTaskRecords(map[string]*DurableTaskRecord{
+				"old-task": {
+					TaskID:          "old-task",
+					OwnerAgentID:    "owner",
+					OwnerTaskID:     "parent",
+					AgentDefName:    "worker",
+					PlanTaskRef:     "plan-item",
+					SemanticTaskKey: "semantic-key",
+					State:           string(state),
+					ResumePolicy:    taskResumePolicyExplicitOnly,
+				},
+			})
+
+			existing, conflict := a.findDuplicateOrConflictingTask("owner", "parent", "worker", "plan-item", "semantic-key", tools.WriteScope{})
+			if existing != nil || conflict {
+				t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v), want retry allowed", existing, conflict)
+			}
+		})
+	}
+}
+
+func TestFindDuplicateOrConflictingTaskKeepsNotifyRehydratableCompletedTask(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"completed-task": {
+			TaskID:          "completed-task",
+			OwnerAgentID:    "owner",
+			OwnerTaskID:     "parent",
+			AgentDefName:    "worker",
+			SemanticTaskKey: "semantic-key",
+			State:           string(SubAgentStateCompleted),
+			ResumePolicy:    taskResumePolicyNotify,
+		},
+	})
+
+	existing, conflict := a.findDuplicateOrConflictingTask("owner", "parent", "worker", "", "semantic-key", tools.WriteScope{})
+	if existing == nil || existing.TaskID != "completed-task" || conflict {
+		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v), want completed duplicate", existing, conflict)
 	}
 }
 

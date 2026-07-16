@@ -407,7 +407,7 @@ func TestReadArtifactToolRejectsPathEscapeAndReadsSessionArtifact(t *testing.T) 
 
 func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.explicitUserTurnCount = 5
+	a.explicitUserTurnCount.Store(5)
 	a.subs.taskRecords["task-1"] = &DurableTaskRecord{
 		TaskID:             "task-1",
 		AgentDefName:       "explorer",
@@ -443,7 +443,7 @@ func TestCoordinationSnapshotMarksRunningWorkerStallButNotWaitingMain(t *testing
 		LatestInstanceID: "worker-waiting",
 		State:            string(SubAgentStateWaitingMain),
 		LastSummary:      "needs decision",
-		LastUpdatedTurn:  a.explicitUserTurnCount,
+		LastUpdatedTurn:  a.explicitUserTurnCount.Load(),
 	}
 	a.subs.taskRecords[waiting.TaskID] = waiting
 

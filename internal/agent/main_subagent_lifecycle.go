@@ -16,15 +16,7 @@ func (a *MainAgent) noteSubAgentStateTransition(sub *SubAgent, state SubAgentSta
 	if a == nil || sub == nil {
 		return
 	}
-	if a.subs.stateEnteredTurn == nil {
-		a.subs.stateEnteredTurn = make(map[string]uint64)
-	}
-	switch state {
-	case SubAgentStateRunning:
-		delete(a.subs.stateEnteredTurn, sub.instanceID)
-	case SubAgentStateWaitingMain, SubAgentStateWaitingDescendant, SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled:
-		a.subs.stateEnteredTurn[sub.instanceID] = a.explicitUserTurnCount
-	}
+	a.subs.noteStateEnteredTurn(sub.instanceID, state, a.explicitUserTurnCount.Load())
 }
 
 func (a *MainAgent) closeSubAgent(agentID string) {
@@ -43,9 +35,7 @@ func (a *MainAgent) closeSubAgent(agentID string) {
 	if rec := a.focusedDurableTask(); rec != nil && rec.LatestInstanceID == agentID {
 		a.setFocusedTaskID("")
 	}
-	if sub.semHeld {
-		a.releaseSubAgentSlot(sub)
-	}
+	a.releaseSubAgentSlot(sub)
 	a.fileTrack.ReleaseAll(agentID)
 	tools.StopAllSpawnedForAgent(agentID, "terminated on subagent close")
 	sub.cancel()
@@ -108,9 +98,7 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 		}
 		return false
 	}
-	if sub.semHeld {
-		a.releaseSubAgentSlot(sub)
-	}
+	a.releaseSubAgentSlot(sub)
 	a.fileTrack.ReleaseAll(agentID)
 	tools.StopAllSpawnedForAgent(agentID, "terminated on subagent park")
 	sub.cancel()
@@ -204,16 +192,17 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 }
 
 func (a *MainAgent) sweepSubAgentLifecycle() {
+	currentTurn := a.explicitUserTurnCount.Load()
 	changed := false
 	for _, sub := range a.subs.snapshotSubAgents() {
 		if sub == nil {
 			continue
 		}
 		state := sub.State()
-		enteredTurn := a.subs.stateEnteredTurn[sub.instanceID]
+		enteredTurn := a.subs.stateEnteredTurnFor(sub.instanceID)
 		switch state {
 		case SubAgentStateWaitingMain:
-			if a.explicitUserTurnCount >= enteredTurn+waitingMainExpiryUserTurns {
+			if currentTurn >= enteredTurn+waitingMainExpiryUserTurns {
 				a.handleSubAgentCloseRequestedEvent(Event{
 					Type:     EventSubAgentCloseRequested,
 					SourceID: sub.instanceID,
@@ -235,7 +224,7 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		if rec == nil || !rec.RuntimeParked || SubAgentState(rec.State) != SubAgentStateWaitingMain {
 			continue
 		}
-		if a.explicitUserTurnCount >= rec.LastUpdatedTurn+waitingMainExpiryUserTurns {
+		if currentTurn >= rec.LastUpdatedTurn+waitingMainExpiryUserTurns {
 			rec.State = string(SubAgentStateCancelled)
 			rec.ResumePolicy = taskResumePolicyExplicitOnly
 			rec.LastSummary = "expired waiting for main reply"

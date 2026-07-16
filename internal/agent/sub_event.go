@@ -14,7 +14,10 @@ import (
 // via the inputCh channel.
 func (s *SubAgent) runLoop() {
 	log.Debugf("SubAgent event loop started instance=%v task_id=%v agent_def=%v", s.instanceID, s.taskID, s.agentDefName)
-	defer log.Debugf("SubAgent event loop stopped instance=%v", s.instanceID)
+	defer func() {
+		s.doneOnce.Do(func() { close(s.done) })
+		log.Debugf("SubAgent event loop stopped instance=%v", s.instanceID)
+	}()
 
 	for {
 		s.refillInputChannelFromOverflow()

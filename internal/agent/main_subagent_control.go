@@ -23,7 +23,12 @@ func (a *MainAgent) acquireWakeReactivationSlot(sub *SubAgent) error {
 }
 
 func (a *MainAgent) acquireSubAgentSlotWithBypass(sub *SubAgent, allowBypass bool) error {
-	if sub == nil || sub.semHeld {
+	if sub == nil {
+		return nil
+	}
+	sub.semMu.Lock()
+	defer sub.semMu.Unlock()
+	if sub.semHeld {
 		return nil
 	}
 	select {
@@ -42,7 +47,12 @@ func (a *MainAgent) acquireSubAgentSlotWithBypass(sub *SubAgent, allowBypass boo
 }
 
 func (a *MainAgent) releaseSubAgentSlot(sub *SubAgent) {
-	if sub == nil || !sub.semHeld {
+	if sub == nil {
+		return
+	}
+	sub.semMu.Lock()
+	defer sub.semMu.Unlock()
+	if !sub.semHeld {
 		return
 	}
 	if !sub.semBypassed {
@@ -64,7 +74,18 @@ func (a *MainAgent) markSubAgentReactivated(sub *SubAgent, summary string) {
 }
 
 func (a *MainAgent) transferSubAgentSlot(from, to *SubAgent) bool {
-	if from == nil || to == nil || !from.semHeld || to.semHeld {
+	if from == nil || to == nil || from == to {
+		return false
+	}
+	first, second := from, to
+	if first.instanceID > second.instanceID {
+		first, second = second, first
+	}
+	first.semMu.Lock()
+	second.semMu.Lock()
+	defer second.semMu.Unlock()
+	defer first.semMu.Unlock()
+	if !from.semHeld || to.semHeld {
 		return false
 	}
 	to.semHeld = true
@@ -486,7 +507,7 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 		ParentAgentID:   controlPlaneAgentID(sub.ownerAgentID),
 		ParentTaskID:    sub.ownerTaskID,
 	})
-	go sub.runLoop()
+	sub.startRunLoop()
 	return sub, previousAgentID, true, nil
 }
 
@@ -503,6 +524,11 @@ func (a *MainAgent) stopSubAgentNow(callerAgentID, callerTaskID, taskID, reason 
 	if sub == nil {
 		record := a.taskRecordByTaskID(taskID)
 		if record != nil && record.RuntimeParked {
+			for _, childTaskID := range a.directChildTaskIDs(taskID) {
+				if _, err := a.stopSubAgentNow(record.LatestInstanceID, taskID, childTaskID, fmt.Sprintf("cancelled because ancestor task %s was stopped", taskID)); err != nil {
+					return tools.TaskHandle{}, err
+				}
+			}
 			a.subs.mu.Lock()
 			if rec := a.subs.taskRecords[taskID]; rec != nil {
 				rec.State = string(SubAgentStateCancelled)

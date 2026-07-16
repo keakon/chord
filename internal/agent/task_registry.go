@@ -338,37 +338,24 @@ func writeScopesOverlap(a, b tools.WriteScope) bool {
 	return false
 }
 
-func (a *MainAgent) findDuplicateOrConflictingTask(ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (*DurableTaskRecord, bool) {
+func (a *MainAgent) findDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (*DurableTaskRecord, bool) {
 	planTaskRef = strings.TrimSpace(planTaskRef)
 	semanticTaskKey = strings.TrimSpace(semanticTaskKey)
 	if semanticTaskKey == "" {
 		semanticTaskKey = semanticTaskKeyFallback(planTaskRef)
 	}
 	expectedWriteScope = expectedWriteScope.Normalized()
-	a.subs.mu.RLock()
-	defer a.subs.mu.RUnlock()
 	for _, rec := range a.subs.taskRecords {
 		if rec == nil {
-			continue
-		}
-		if strings.TrimSpace(rec.OwnerAgentID) != strings.TrimSpace(ownerAgentID) || strings.TrimSpace(rec.OwnerTaskID) != strings.TrimSpace(ownerTaskID) {
-			continue
-		}
-		if strings.TrimSpace(rec.AgentDefName) != strings.TrimSpace(agentType) {
 			continue
 		}
 		if !isNonTerminalTaskState(rec.State) && !rec.allowsRehydrate(taskResumeByTargetedNotify) {
 			continue
 		}
-		duplicate := false
-		if planTaskRef != "" && strings.TrimSpace(rec.PlanTaskRef) == planTaskRef {
-			duplicate = true
-		}
-		if !duplicate && semanticTaskKey != "" && strings.TrimSpace(rec.SemanticTaskKey) == semanticTaskKey {
-			duplicate = true
-		}
-		if duplicate {
-			return cloneDurableTaskRecord(rec), false
+		if strings.TrimSpace(rec.OwnerAgentID) == strings.TrimSpace(ownerAgentID) && strings.TrimSpace(rec.OwnerTaskID) == strings.TrimSpace(ownerTaskID) && strings.TrimSpace(rec.AgentDefName) == strings.TrimSpace(agentType) {
+			if (planTaskRef != "" && strings.TrimSpace(rec.PlanTaskRef) == planTaskRef) || (semanticTaskKey != "" && strings.TrimSpace(rec.SemanticTaskKey) == semanticTaskKey) {
+				return cloneDurableTaskRecord(rec), false
+			}
 		}
 		if !expectedWriteScope.Empty() && !rec.ExpectedWriteScope.Empty() && writeScopesOverlap(expectedWriteScope, rec.ExpectedWriteScope) {
 			return cloneDurableTaskRecord(rec), true
@@ -430,14 +417,22 @@ func (a *MainAgent) persistTaskRegistry() {
 }
 
 func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
-	if a == nil || sub == nil {
+	if !a.updateTaskRecordFromSub(sub, closedReason) {
 		return
+	}
+	a.persistTaskRegistry()
+}
+
+func (a *MainAgent) updateTaskRecordFromSub(sub *SubAgent, closedReason string) bool {
+	if a == nil || sub == nil {
+		return false
 	}
 	taskID := strings.TrimSpace(sub.taskID)
 	if taskID == "" {
-		return
+		return false
 	}
 	state := sub.State()
+	currentTurn := a.explicitUserTurnCount.Load()
 	summary := sub.LastSummary()
 	lastMailboxID := sub.LastMailboxID()
 	lastReplyMessageID, lastReplyToMailboxID, lastReplyKind, lastReplySummary := sub.LastReplyThread()
@@ -453,7 +448,7 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 		rec = &DurableTaskRecord{
 			TaskID:      taskID,
 			CreatedAt:   now,
-			CreatedTurn: a.explicitUserTurnCount,
+			CreatedTurn: currentTurn,
 		}
 	}
 	rec.AgentDefName = strings.TrimSpace(sub.agentDefName)
@@ -497,7 +492,7 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	if strings.TrimSpace(lastArtifact.ID) != "" || strings.TrimSpace(lastArtifact.RelPath) != "" {
 		rec.LastArtifactRefs = tools.NormalizeArtifactRefs(append(rec.LastArtifactRefs, lastArtifact))
 	}
-	rec.LastUpdatedTurn = a.explicitUserTurnCount
+	rec.LastUpdatedTurn = currentTurn
 	rec.UpdatedAt = now
 	rec.RuntimeParked = false
 	if strings.TrimSpace(closedReason) != "" {
@@ -507,8 +502,7 @@ func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	}
 	a.subs.taskRecords[taskID] = rec
 	a.subs.mu.Unlock()
-
-	a.persistTaskRegistry()
+	return true
 }
 
 func taskRecordFromLoadedState(state loadedSubAgentState) *DurableTaskRecord {

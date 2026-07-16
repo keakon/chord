@@ -423,6 +423,7 @@ type MainAgent struct {
 	// RWMutex that guards them (formerly inline MainAgent fields mu/subAgents/
 	// taskRecords/nudgeCounts/subAgentStateEnteredTurn).
 	subs                     subAgentRegistry
+	admissionMu              sync.Mutex
 	taskRegistryPersistMu    sync.Mutex
 	taskRegistryPersistHook  func()                    // test-only barrier after snapshot, before durable write
 	sem                      chan struct{}             // bounded concurrency semaphore (cap = 10)
@@ -448,7 +449,7 @@ type MainAgent struct {
 	subAgentMailboxSeq       atomic.Uint64
 	subAgentInboxSummaryMu   sync.RWMutex
 	subAgentUrgentCounts     map[string]int
-	explicitUserTurnCount    uint64
+	explicitUserTurnCount    atomic.Uint64
 
 	// mcpServerCache maps scoped server keys to connections. Main-agent servers
 	// are registered as sentinels (Mgr==nil); SubAgent-exclusive servers are
@@ -1078,6 +1079,7 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	a.shuttingDown.Store(true)
 
 	a.cancelActiveWork()
+	a.waitForSubAgents(remaining)
 	a.closeSubAgentMCPServers()
 
 	// Close the persistence channel and wait for the loop to drain.
@@ -1144,6 +1146,21 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 		}
 	}
 	return fmt.Errorf("agent shutdown timed out after %v", timeout)
+}
+
+func (a *MainAgent) waitForSubAgents(remaining func() time.Duration) {
+	subs := a.subs.snapshotSubAgents()
+	for _, sub := range subs {
+		wait := remaining()
+		if wait <= 0 {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), wait)
+		if err := sub.waitDone(ctx); err != nil {
+			log.Warnf("SubAgent did not stop within shutdown budget agent_id=%v error=%v", sub.instanceID, err)
+		}
+		cancel()
+	}
 }
 
 // cancelActiveWork aborts the active turn (if any), cancels every live
@@ -1490,7 +1507,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	}
 	a.mailboxDeliveryPaused.Store(false)
 
-	a.explicitUserTurnCount++
+	a.explicitUserTurnCount.Add(1)
 	a.sweepSubAgentLifecycle()
 
 	trimmedContent := strings.TrimSpace(content)
@@ -1807,9 +1824,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 			SourceID: evt.SourceID,
 			Payload:  &SubAgentStateChangedPayload{State: SubAgentStateFailed, Summary: failureSummary},
 		})
-		if sub2.semHeld {
-			a.releaseSubAgentSlot(sub2)
-		}
+		a.releaseSubAgentSlot(sub2)
 		a.emitActivity(evt.SourceID, ActivityIdle, "")
 		a.sendEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
 			AgentID:      evt.SourceID,

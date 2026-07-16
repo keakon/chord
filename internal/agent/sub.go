@@ -99,6 +99,9 @@ type SubAgent struct {
 	llmClient          *llm.Client
 	llmRequestInFlight atomic.Bool
 	startupWatchdogSeq atomic.Uint64
+	done               chan struct{}
+	doneOnce           sync.Once
+	started            atomic.Bool
 	lifecycleMu        sync.Mutex      // coordinates parking with external wake-and-deliver operations
 	ctxMgr             *ctxmgr.Manager // own context; automatic compaction disabled
 	tools              *tools.Registry // shared base + SubAgent-specific tools
@@ -178,8 +181,34 @@ type SubAgent struct {
 	// Wake-path reactivation may temporarily bypass the semaphore when all
 	// tokens are held by descendants whose completion must resume this owner.
 	semBypassed bool
+	semMu       sync.Mutex
 
 	runtimeState subAgentRuntimeState
+}
+
+func (s *SubAgent) slotState() (held, bypassed bool) {
+	s.semMu.Lock()
+	defer s.semMu.Unlock()
+	return s.semHeld, s.semBypassed
+}
+
+func (s *SubAgent) waitDone(ctx context.Context) error {
+	if s == nil || s.done == nil || !s.started.Load() {
+		return nil
+	}
+	select {
+	case <-s.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *SubAgent) startRunLoop() {
+	if s == nil || !s.started.CompareAndSwap(false, true) {
+		return
+	}
+	go s.runLoop()
 }
 
 func (s *SubAgent) persistMessageAsync(msg message.Message, description string, after func()) {
@@ -355,6 +384,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 
 	s = &SubAgent{
 		instanceID:      cfg.InstanceID,
+		done:            make(chan struct{}),
 		taskID:          cfg.TaskID,
 		agentDefName:    cfg.AgentDefName,
 		taskDesc:        cfg.TaskDesc,

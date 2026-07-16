@@ -53,14 +53,14 @@ func (a *MainAgent) buildCoordinationSnapshotOverlay() string {
 	}
 	a.updateSubAgentStallMarkers()
 
+	currentTurn := a.explicitUserTurnCount.Load()
 	a.subs.mu.RLock()
 	records := make([]*DurableTaskRecord, 0, len(a.subs.taskRecords))
 	for _, rec := range a.subs.taskRecords {
-		if clone := cloneDurableTaskRecord(rec); clone != nil && isRelevantCoordinationTask(clone, a.explicitUserTurnCount) {
+		if clone := cloneDurableTaskRecord(rec); clone != nil && isRelevantCoordinationTask(clone, currentTurn) {
 			records = append(records, clone)
 		}
 	}
-	currentTurn := a.explicitUserTurnCount
 	a.subs.mu.RUnlock()
 	if len(records) == 0 {
 		return ""
@@ -213,7 +213,8 @@ func (a *MainAgent) updateSubAgentStallMarkers() {
 					reason = "waiting_descendant without active child progress"
 				}
 			case SubAgentStateRunning:
-				if sub.semHeld && now.Sub(sub.StateChangedAt()) > coordinationSnapshotStallAfter {
+				held, _ := sub.slotState()
+				if held && now.Sub(sub.StateChangedAt()) > coordinationSnapshotStallAfter {
 					reason = "running with no recent state/progress update"
 				}
 			}

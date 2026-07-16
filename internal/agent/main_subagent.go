@@ -94,10 +94,6 @@ func isNonTerminalTaskState(state string) bool {
 	}
 }
 
-func isActiveTaskState(state string) bool {
-	return strings.TrimSpace(state) == string(SubAgentStateRunning)
-}
-
 func effectiveDirectActiveChildLimit(cfg config.DelegationConfig) int {
 	limit := cfg.EffectiveMaxChildren()
 	if limit > config.DefaultDelegationMaxChildren {
@@ -106,8 +102,9 @@ func effectiveDirectActiveChildLimit(cfg config.DelegationConfig) int {
 	return limit
 }
 
-func (a *MainAgent) directActiveChildCountLocked(ownerAgentID, ownerTaskID string) int {
+func (a *MainAgent) directNonTerminalChildCountLocked(ownerAgentID, ownerTaskID string) int {
 	count := 0
+	seenTaskIDs := make(map[string]struct{})
 	for _, rec := range a.subs.taskRecords {
 		if rec == nil {
 			continue
@@ -118,11 +115,46 @@ func (a *MainAgent) directActiveChildCountLocked(ownerAgentID, ownerTaskID strin
 		if strings.TrimSpace(rec.OwnerTaskID) != strings.TrimSpace(ownerTaskID) {
 			continue
 		}
-		if isActiveTaskState(rec.State) {
+		if isNonTerminalTaskState(rec.State) {
+			count++
+			seenTaskIDs[strings.TrimSpace(rec.TaskID)] = struct{}{}
+		}
+	}
+	for _, sub := range a.subs.subAgents {
+		if sub == nil || strings.TrimSpace(sub.ownerAgentID) != strings.TrimSpace(ownerAgentID) || strings.TrimSpace(sub.ownerTaskID) != strings.TrimSpace(ownerTaskID) {
+			continue
+		}
+		if _, ok := seenTaskIDs[strings.TrimSpace(sub.taskID)]; ok {
+			continue
+		}
+		if isNonTerminalTaskState(string(sub.State())) {
 			count++
 		}
 	}
 	return count
+}
+
+func duplicateTaskHandle(existing *DurableTaskRecord, conflict bool) tools.TaskHandle {
+	handle := tools.TaskHandle{
+		Status:             "already_exists",
+		TaskID:             existing.TaskID,
+		AgentID:            existing.LatestInstanceID,
+		Message:            "matching task already exists; continue it with Notify instead of creating a duplicate delegate",
+		PlanTaskRef:        existing.PlanTaskRef,
+		SemanticTaskKey:    existing.SemanticTaskKey,
+		ExpectedWriteScope: existing.ExpectedWriteScope,
+		SuggestedTaskID:    existing.TaskID,
+		SuggestedAgentID:   existing.LatestInstanceID,
+		SuggestedAction:    "notify_existing",
+		DuplicateDetected:  !conflict,
+		ScopeConflict:      conflict,
+	}
+	if conflict {
+		handle.Status = "scope_conflict"
+		handle.Message = "write scope overlaps with an existing live task; serialize or explicitly coordinate before delegating"
+		handle.SuggestedAction = "serialize_or_notify_existing"
+	}
+	return handle
 }
 
 func (a *MainAgent) outstandingJoinChildTaskIDsLocked(taskID string) []string {
@@ -238,9 +270,7 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 	})
 	replyMessageID := firstReplyMessageID(sub)
 
-	if sub.semHeld {
-		a.releaseSubAgentSlot(sub)
-	}
+	a.releaseSubAgentSlot(sub)
 	a.emitActivity(evt.SourceID, ActivityIdle, "")
 	mailbox := &SubAgentMailboxMessage{
 		AgentID:      evt.SourceID,
@@ -519,45 +549,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	if !delegateAgentAvailable(caller.Ruleset, agentType) {
 		return tools.TaskHandle{}, fmt.Errorf("agent type %q is denied by Delegate permission policy", agentType)
 	}
-	a.subs.mu.RLock()
-	count := a.directActiveChildCountLocked(caller.AgentID, caller.TaskID)
-	a.subs.mu.RUnlock()
 	maxChildren := effectiveDirectActiveChildLimit(caller.Delegation)
-	if count >= maxChildren {
-		return tools.TaskHandle{
-			Status:  "child_limit_reached",
-			TaskID:  "",
-			AgentID: "",
-			Message: fmt.Sprintf("direct active child limit reached (max_children=%d)", maxChildren),
-		}, nil
-	}
-	if existing, conflict := a.findDuplicateOrConflictingTask(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey, expectedWriteScope); existing != nil {
-		handle := tools.TaskHandle{
-			Status:             "already_exists",
-			TaskID:             existing.TaskID,
-			AgentID:            existing.LatestInstanceID,
-			Message:            "matching task already exists; continue it with Notify instead of creating a duplicate delegate",
-			PlanTaskRef:        existing.PlanTaskRef,
-			SemanticTaskKey:    existing.SemanticTaskKey,
-			ExpectedWriteScope: existing.ExpectedWriteScope,
-			SuggestedTaskID:    existing.TaskID,
-			SuggestedAgentID:   existing.LatestInstanceID,
-			SuggestedAction:    "notify_existing",
-			DuplicateDetected:  !conflict,
-			ScopeConflict:      conflict,
-		}
-		if conflict {
-			handle.Status = "scope_conflict"
-			handle.Message = "write scope overlaps with an existing live task; serialize or explicitly coordinate before delegating"
-			handle.SuggestedAction = "serialize_or_notify_existing"
-		}
-		return handle, nil
-	}
-	select {
-	case a.sem <- struct{}{}:
-	default:
-		return tools.TaskHandle{}, fmt.Errorf("max concurrent agents reached (cap=%d), wait for a running agent to complete", cap(a.sem))
-	}
 	n := a.adhocSeq.Add(1)
 	taskID := fmt.Sprintf("adhoc-%d", n)
 	planTaskRef = strings.TrimSpace(planTaskRef)
@@ -568,11 +560,9 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	expectedWriteScope = expectedWriteScope.Normalized()
 	agentDef, err := a.resolveAgentDef(agentType)
 	if err != nil {
-		<-a.sem
 		return tools.TaskHandle{}, err
 	}
 	if a.llmFactory == nil {
-		<-a.sem
 		return tools.TaskHandle{}, fmt.Errorf("LLM client factory not configured; call SetLLMFactory before creating SubAgents")
 	}
 	subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
@@ -582,7 +572,6 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	if len(agentDef.MCP) > 0 {
 		extraMCPTools, err = a.getOrCreateAgentMCP(agentDef.Name, agentDef.MCP)
 		if err != nil {
-			<-a.sem
 			return tools.TaskHandle{}, err
 		}
 	}
@@ -619,10 +608,40 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		Skills:        a.loadedSkillsSnapshot(),
 		ModelName:     a.ModelName(),
 	})
+	a.admissionMu.Lock()
+	a.subs.mu.RLock()
+	count := a.directNonTerminalChildCountLocked(caller.AgentID, caller.TaskID)
+	if count >= maxChildren {
+		a.subs.mu.RUnlock()
+		a.admissionMu.Unlock()
+		cancel()
+		return tools.TaskHandle{
+			Status:  "child_limit_reached",
+			Message: fmt.Sprintf("direct non-terminal child limit reached (max_children=%d)", maxChildren),
+		}, nil
+	}
+	existing, conflict := a.findDuplicateOrConflictingTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey, expectedWriteScope)
+	a.subs.mu.RUnlock()
+	if existing != nil {
+		a.admissionMu.Unlock()
+		cancel()
+		return duplicateTaskHandle(existing, conflict), nil
+	}
+	select {
+	case a.sem <- struct{}{}:
+	default:
+		a.admissionMu.Unlock()
+		cancel()
+		return tools.TaskHandle{}, fmt.Errorf("max concurrent agents reached (cap=%d), wait for a running agent to complete", cap(a.sem))
+	}
+	sub.semMu.Lock()
 	sub.semHeld = true
+	sub.semMu.Unlock()
 	a.subs.add(sub)
+	a.updateTaskRecordFromSub(sub, "")
+	a.admissionMu.Unlock()
 	a.persistSubAgentMeta(sub)
-	a.syncTaskRecordFromSub(sub, "")
+	a.persistTaskRegistry()
 	log.Infof("SubAgent created and started instance=%v task_id=%v agent_def=%v", instanceID, taskID, agentDef.Name)
 	a.emitToTUI(AgentStartedEvent{
 		AgentID:       instanceID,
@@ -633,7 +652,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		ParentTaskID:  caller.TaskID,
 	})
 	a.emitToTUI(AgentStatusEvent{AgentID: instanceID, Status: "running", Message: fmt.Sprintf("Started task %s: %s", taskID, truncateString(description, 80))})
-	go sub.runLoop()
+	sub.startRunLoop()
 	if !sub.InjectUserMessage(description) {
 		a.closeSubAgent(sub.instanceID)
 		return tools.TaskHandle{}, fmt.Errorf("SubAgent %s rejected its initial task", sub.instanceID)

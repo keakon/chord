@@ -179,3 +179,23 @@ func (r *subAgentRegistry) removeLocked(instanceID string) *SubAgent {
 	delete(r.stateEnteredTurn, instanceID)
 	return sub
 }
+
+func (r *subAgentRegistry) noteStateEnteredTurn(instanceID string, state SubAgentState, turn uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stateEnteredTurn == nil {
+		r.stateEnteredTurn = make(map[string]uint64)
+	}
+	switch state {
+	case SubAgentStateRunning:
+		delete(r.stateEnteredTurn, instanceID)
+	case SubAgentStateWaitingMain, SubAgentStateWaitingDescendant, SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled:
+		r.stateEnteredTurn[instanceID] = turn
+	}
+}
+
+func (r *subAgentRegistry) stateEnteredTurnFor(instanceID string) uint64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.stateEnteredTurn[instanceID]
+}

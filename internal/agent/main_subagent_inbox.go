@@ -84,11 +84,16 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 		}
 	}
 	if owner == nil {
+		if rec := a.taskRecordByInstanceID(ownerAgentID); rec != nil && !isNonTerminalTaskState(rec.State) {
+			msg.OwnerAgentID = ""
+			a.enqueueSubAgentMailbox(msg)
+			return true
+		}
 		return false
 	}
 	text := formatSubAgentMailboxInjectionText(&msg)
 	reactivateLive := func(live *SubAgent, messageText string, statusMsg string, allowWakeBypass bool) bool {
-		if !live.semHeld {
+		if held, _ := live.slotState(); !held {
 			var err error
 			if allowWakeBypass {
 				err = a.acquireWakeReactivationSlot(live)
@@ -142,8 +147,12 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 	case SubAgentMailboxKindCompleted:
 		remaining := a.outstandingJoinChildTaskIDs(owner.taskID)
 		if owner.State() == SubAgentStateWaitingDescendant && len(remaining) == 0 && msg.AgentID != "" {
-			if child := a.subAgentByID(msg.AgentID); child != nil && child.semHeld && !owner.semHeld {
-				a.transferSubAgentSlot(child, owner)
+			if child := a.subAgentByID(msg.AgentID); child != nil {
+				childHeld, _ := child.slotState()
+				ownerHeld, _ := owner.slotState()
+				if childHeld && !ownerHeld {
+					a.transferSubAgentSlot(child, owner)
+				}
 			}
 			pendingComplete := owner.PendingCompleteIntent()
 			if pendingComplete != nil && strings.TrimSpace(pendingComplete.Summary) != "" {

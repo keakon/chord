@@ -182,3 +182,22 @@ func TestShutdownWaitsForMainLLMEmittersBeforeClosingOutput(t *testing.T) {
 		t.Fatal("timed out waiting for Run to exit")
 	}
 }
+
+func TestShutdownWaitsForStartedSubAgentRunLoop(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "shutdown-subagent")
+	sub.startRunLoop()
+	t.Cleanup(func() {
+		sub.cancel()
+		_ = sub.waitDone(context.Background())
+	})
+
+	if err := a.Shutdown(2 * time.Second); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	select {
+	case <-sub.done:
+	default:
+		t.Fatal("Shutdown returned before the SubAgent run loop finished")
+	}
+}

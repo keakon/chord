@@ -82,9 +82,7 @@ func (s *SubAgent) enterWaitingDescendant(reason string) {
 	}
 	s.setState(SubAgentStateWaitingDescendant, reason)
 	s.parent.noteSubAgentStateTransition(s, SubAgentStateWaitingDescendant)
-	if s.semHeld {
-		s.parent.releaseSubAgentSlot(s)
-	}
+	s.parent.releaseSubAgentSlot(s)
 	s.parent.emitActivity(s.instanceID, ActivityIdle, "")
 	s.parent.emitToTUI(AgentStatusEvent{
 		AgentID: s.instanceID,
