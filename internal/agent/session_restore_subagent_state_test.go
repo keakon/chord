@@ -729,6 +729,13 @@ func TestRestoreSessionCompletedTaskCanRehydrateFollowUp(t *testing.T) {
 		SourceID: sub.instanceID,
 		Payload:  &AgentResult{Summary: "done"},
 	})
+	records, err := loadDurableTaskRecords(sessionDir)
+	if err != nil {
+		t.Fatalf("loadDurableTaskRecords: %v", err)
+	}
+	if rec := records[sub.taskID]; rec == nil || rec.AgentDefName != "restorer" {
+		t.Fatalf("completed durable task = %#v, want restorer agent definition", rec)
+	}
 
 	a2 := newTestMainAgentForRestore(t, projectRoot, sessionDir)
 	a2.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -746,6 +753,9 @@ func TestRestoreSessionCompletedTaskCanRehydrateFollowUp(t *testing.T) {
 	}
 	if got := a2.GetSubAgents(); len(got) != 1 || got[0].InstanceID != sub.instanceID || got[0].State != string(SubAgentStateCompleted) {
 		t.Fatalf("GetSubAgents() = %#v, want one visible parked task before rehydrate", got)
+	}
+	if rec := a2.taskRecordByTaskID(sub.taskID); rec == nil || rec.AgentDefName != "restorer" {
+		t.Fatalf("restored durable task = %#v, want restorer agent definition", rec)
 	}
 
 	handle, err := a2.NotifySubAgent(context.Background(), "adhoc-21", "follow up on edge cases", "follow_up")

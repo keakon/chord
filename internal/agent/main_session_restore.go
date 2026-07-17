@@ -137,6 +137,12 @@ func (b *restoredSubAgentBuilder) overlayMeta(meta *subAgentMeta) {
 	if b.state.TaskID == "" {
 		b.state.TaskID = strings.TrimSpace(meta.TaskID)
 	}
+	// Snapshot and task-registry entries can lag the per-instance metadata by
+	// one transition. The metadata is written from the concrete runtime, so its
+	// role definition is authoritative for rehydrating that instance.
+	if agentDefName := strings.TrimSpace(meta.AgentDefName); agentDefName != "" {
+		b.state.AgentDefName = agentDefName
+	}
 	if b.state.PlanTaskRef == "" {
 		b.state.PlanTaskRef = strings.TrimSpace(meta.PlanTaskRef)
 	}
@@ -883,6 +889,9 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 			rec = taskRecordFromLoadedState(state)
 		}
 		if rec != nil {
+			if agentDefName := strings.TrimSpace(state.AgentDefName); agentDefName != "" {
+				rec.AgentDefName = agentDefName
+			}
 			rec.State = string(restoreState)
 			rec.ResumePolicy = durableTaskResumePolicy(restoreState)
 			rec.RuntimeParked = true
