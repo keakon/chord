@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,4 +143,27 @@ func TestSubAgentContextLengthRecoveryPreservesToolPairs(t *testing.T) {
 		t.Fatalf("context recovery left %d orphan tool results", dropped)
 	}
 	sub.cancel()
+}
+
+func TestSubAgentRejectsExcessiveToolCalls(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	calls := make([]message.ToolCall, maxToolCallsPerResponse+1)
+	for i := range calls {
+		calls[i] = message.ToolCall{ID: fmt.Sprintf("call-%d", i), Name: "Read", Args: json.RawMessage(`{"path":"README.md"}`)}
+	}
+	sub.handleLLMResponse(&llmResult{
+		turnID: sub.turn.ID,
+		resp:   &message.Response{ToolCalls: calls, StopReason: "tool_use"},
+	})
+	select {
+	case evt := <-parent.eventCh:
+		if evt.Type != EventAgentError {
+			t.Fatalf("event type = %q, want %q", evt.Type, EventAgentError)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("oversized SubAgent response did not report an error")
+	}
+	if got := len(sub.ctxMgr.Snapshot()); got != 0 {
+		t.Fatalf("persisted messages = %d, want 0 for rejected response", got)
+	}
 }

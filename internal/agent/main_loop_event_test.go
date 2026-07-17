@@ -125,6 +125,48 @@ func TestEventOverflowPreservesDistinctAgentLogs(t *testing.T) {
 	}
 }
 
+func TestLoopFollowUpReservePreservesCausalEventsPastSoftLimit(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.started.Store(true)
+	a.loopEventLimit = 1
+	a.queueLoopEvent(Event{Type: "first"})
+	a.queueLoopEvent(Event{Type: "second"})
+	for i, want := range []string{"first", "second"} {
+		evt, err := a.nextEvent(context.Background())
+		if err != nil {
+			t.Fatalf("nextEvent(%d): %v", i, err)
+		}
+		if evt.Type != want {
+			t.Fatalf("nextEvent(%d).Type = %q, want %q", i, evt.Type, want)
+		}
+	}
+}
+
+func TestHandleEscalateQueuesFollowUpWithoutBlockingOnFullExternalQueue(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.started.Store(true)
+	a.eventCh = make(chan Event, 1)
+	a.eventOverflowLimit = 1
+	a.eventCh <- Event{Type: "channel", Seq: 1}
+	a.deferredEvents = append(a.deferredEvents, Event{Type: "overflow", Seq: 2})
+	sub := newControllableTestSubAgent(t, a, "task-escalate")
+	done := make(chan struct{})
+	go func() {
+		a.handleEscalate(Event{SourceID: sub.instanceID, Payload: "need decision"})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("handleEscalate blocked on the full external event queue")
+	}
+	a.eventMu.Lock()
+	defer a.eventMu.Unlock()
+	if len(a.loopEvents) != 1 || a.loopEvents[0].Type != EventSubAgentMailbox {
+		t.Fatalf("loop follow-ups = %#v, want one mailbox event", a.loopEvents)
+	}
+}
+
 func TestEventOverflowCoalescingPreservesInterveningEventOrder(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.eventCh = make(chan Event, 1)

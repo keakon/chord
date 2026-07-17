@@ -25,6 +25,10 @@ import (
 // limits.
 const maxMalformedToolCalls = 3
 
+// maxToolCallsPerResponse bounds provider-controlled fan-out before tool
+// execution and loop-owned follow-up events are allocated.
+const maxToolCallsPerResponse = 256
+
 // sanitizeToolCallArgs replaces the malformed-args sentinel in tool calls with
 // an empty object {} before the assistant message is stored in conversation
 // history. This prevents the confusing error JSON from being replayed to the
@@ -234,6 +238,15 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			a.setIdleAndDrainPending()
 			return
 		}
+	}
+	if len(validCalls) > maxToolCallsPerResponse {
+		err := fmt.Errorf("model returned %d tool calls; maximum per response is %d", len(validCalls), maxToolCallsPerResponse)
+		log.Warnf("rejecting oversized tool-call response count=%v limit=%v", len(validCalls), maxToolCallsPerResponse)
+		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "tool_call_limit")
+		a.emitToTUI(ErrorEvent{Err: err})
+		a.stopLoopAsBlocked(err.Error())
+		a.setIdleAndDrainPending()
+		return
 	}
 
 	// Append the assistant message to the context.

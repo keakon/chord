@@ -141,6 +141,15 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			})
 		}
 	}
+	if len(validCalls) > maxToolCallsPerResponse {
+		err := fmt.Errorf("SubAgent %s received %d tool calls; maximum per response is %d", s.instanceID, len(validCalls), maxToolCallsPerResponse)
+		log.Warnf("SubAgent: rejecting oversized tool-call response agent=%v count=%v limit=%v", s.instanceID, len(validCalls), maxToolCallsPerResponse)
+		if s.parent != nil {
+			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "tool_call_limit")
+		}
+		s.sendEvent(Event{Type: EventAgentError, Payload: err})
+		return
+	}
 
 	// Append assistant message to context with valid calls only.
 	// Sanitize remaining calls as a safety net (no-op for valid calls).

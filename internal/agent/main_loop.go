@@ -217,8 +217,10 @@ func (a *MainAgent) queueLoopEvent(evt Event) {
 			a.loopEvents = append(a.loopEvents[:idx], a.loopEvents[idx+1:]...)
 			a.eventCoalesced.Add(1)
 		} else {
-			a.eventMu.Unlock()
-			panic(fmt.Sprintf("main-loop follow-up event reserve exhausted limit=%d type=%s", a.loopEventLimit, evt.Type))
+			// Loop-owned causal follow-ups cannot block waiting for capacity that
+			// only this goroutine can release, and dropping one would corrupt tool
+			// or mailbox ordering. Preserve it and surface the invariant breach.
+			log.Errorf("main-loop follow-up event reserve exceeded limit=%v type=%v", a.loopEventLimit, evt.Type)
 		}
 	}
 	evt = a.sequenceEvent(evt)

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -195,6 +196,29 @@ func TestHandleLLMResponseDoesNotPromoteReadOnlyShellBehindAskGatedCommit(t *tes
 		}
 	}
 	close(releaseConfirm)
+}
+
+func TestMainLLMResponseRejectsExcessiveToolCalls(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	calls := make([]message.ToolCall, maxToolCallsPerResponse+1)
+	for i := range calls {
+		calls[i] = message.ToolCall{ID: fmt.Sprintf("call-%d", i), Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)}
+	}
+	a.handleLLMResponse(Event{
+		Type:   EventLLMResponse,
+		TurnID: a.turn.ID,
+		Payload: &LLMResponsePayload{
+			ToolCalls:  calls,
+			StopReason: "tool_use",
+		},
+	})
+	if got := len(a.ctxMgr.Snapshot()); got != 0 {
+		t.Fatalf("persisted messages = %d, want 0 for rejected response", got)
+	}
+	if a.turn != nil {
+		t.Fatal("turn remained active after oversized response")
+	}
 }
 
 func TestModelNameFromRef(t *testing.T) {
