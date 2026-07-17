@@ -199,3 +199,35 @@ func (r *subAgentRegistry) stateEnteredTurnFor(instanceID string) uint64 {
 	defer r.mu.RUnlock()
 	return r.stateEnteredTurn[instanceID]
 }
+
+func (r *subAgentRegistry) incrementNudge(instanceID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nudgeCounts[instanceID]++
+	return r.nudgeCounts[instanceID]
+}
+
+func (r *subAgentRegistry) resetNudge(instanceID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.nudgeCounts[instanceID]; ok {
+		r.nudgeCounts[instanceID] = 0
+	}
+}
+
+func (r *subAgentRegistry) resetStateEnteredTurns() {
+	r.mu.Lock()
+	r.stateEnteredTurn = make(map[string]uint64)
+	r.mu.Unlock()
+}
+
+func (r *subAgentRegistry) removeAllLiveLocked() (ids []string, subs []*SubAgent) {
+	ids = make([]string, 0, len(r.subAgents))
+	subs = make([]*SubAgent, 0, len(r.subAgents))
+	for id, sub := range r.subAgents {
+		ids = append(ids, id)
+		subs = append(subs, sub)
+		r.removeLocked(id)
+	}
+	return ids, subs
+}

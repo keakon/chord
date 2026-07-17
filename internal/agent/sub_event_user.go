@@ -3,6 +3,8 @@ package agent
 import (
 	"strings"
 
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -41,7 +43,9 @@ func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 
 	s.persistMessageAsync(msg, "user message", func() {
 		if ackID := strings.TrimSpace(input.MailboxAckID); ackID != "" {
-			s.parent.markSubAgentMailboxConsumed(ackID)
+			if err := s.parent.markSubAgentMailboxConsumed(ackID); err != nil {
+				log.Warnf("SubAgent failed to persist mailbox consumption agent=%v message_id=%v error=%v", s.instanceID, ackID, err)
+			}
 		}
 	})
 }
@@ -155,7 +159,9 @@ func (s *SubAgent) appendContextOnly(msg message.Message) {
 	}
 	s.persistMessageAsync(persistMsg, "context-append message", func() {
 		if ackID != "" {
-			s.parent.markSubAgentMailboxConsumed(ackID)
+			if err := s.parent.markSubAgentMailboxConsumed(ackID); err != nil {
+				log.Warnf("SubAgent failed to persist context mailbox consumption agent=%v message_id=%v error=%v", s.instanceID, ackID, err)
+			}
 		}
 	})
 }

@@ -171,6 +171,32 @@ func TestCompressForTarget(t *testing.T) {
 	}
 }
 
+func TestCompressForTargetCountsMultipartPayload(t *testing.T) {
+	m := NewManager(1000, 0)
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "task"},
+		{Role: message.RoleUser, Parts: []message.ContentPart{{Type: message.ContentPartText, Text: strings.Repeat("large ", 1000)}}},
+		{Role: message.RoleAssistant, Content: "recent"},
+	}
+	got := m.CompressForTarget(msgs, 100)
+	if len(got) != 3 {
+		t.Fatalf("compressed len = %d, want first + checkpoint + recent: %+v", len(got), got)
+	}
+	if len(got[1].Parts) != 0 || !strings.Contains(got[1].Content, "Context was compressed") || got[2].Content != "recent" {
+		t.Fatalf("unexpected multipart compression result: %+v", got)
+	}
+}
+
+func TestEstimateMessageTokensCountsMultipartBinaryPayload(t *testing.T) {
+	msg := message.Message{Parts: []message.ContentPart{{
+		Type: message.ContentPartImage,
+		Data: make([]byte, 3000),
+	}}}
+	if got := EstimateMessageTokens(msg); got != 1000 {
+		t.Fatalf("EstimateMessageTokens() = %d, want 1000", got)
+	}
+}
+
 func TestShouldAutoCompact(t *testing.T) {
 	m := NewManager(1000, 0.8)
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 799})

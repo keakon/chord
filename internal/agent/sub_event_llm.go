@@ -25,6 +25,9 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	}
 
 	if result.err != nil {
+		if s.recoverFromContextLength(result.err) {
+			return
+		}
 		if llm.IsRoutingInvalidated(result.err) {
 			// Model routing changed mid-request (e.g. this sub-agent's model pool
 			// was switched while the request was in flight). Abandon the stale
@@ -35,7 +38,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			s.continueLLMWithPendingUserMessages()
 			return
 		}
-		if s.recoverTerminalResponse("The previous model request was interrupted by a transient transport error. Re-check the task state and finish coordination now. If the task is complete, call Complete with a concise summary. If blocked or parent input is required, call Escalate or Notify instead of stopping after plain text.", result.err) {
+		if !llm.IsContextLengthExceeded(result.err) && s.recoverTerminalResponse("The previous model request was interrupted by a transient transport error. Re-check the task state and finish coordination now. If the task is complete, call Complete with a concise summary. If blocked or parent input is required, call Escalate or Notify instead of stopping after plain text.", result.err) {
 			return
 		}
 		s.sendEvent(Event{
@@ -158,11 +161,12 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	})
 
 	// Emit finalized assistant message event for control-plane consumers.
+	ownerAgentID := s.OwnerAgentID()
 	s.parent.emitToTUI(AssistantMessageEvent{
 		AgentID:       s.instanceID,
 		TaskID:        s.taskID,
 		AgentType:     s.agentDefName,
-		ParentAgentID: controlPlaneAgentID(s.ownerAgentID),
+		ParentAgentID: controlPlaneAgentID(ownerAgentID),
 		Text:          resp.Content,
 		ToolCalls:     len(sanitizedCalls),
 	})

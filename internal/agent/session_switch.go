@@ -80,6 +80,7 @@ func (a *MainAgent) handleSessionControlEvent(evt Event) {
 }
 
 func (a *MainAgent) handleNewSessionCommand() {
+	defer a.finishSessionSwitch()
 	a.emitToTUI(SessionSwitchStartedEvent{Kind: "new"})
 	newSessionDir, err := a.createRuntimeSessionDir()
 	if err != nil {
@@ -122,6 +123,10 @@ func (a *MainAgent) handleNewSessionCommand() {
 }
 
 func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.Context) {
+	a.admissionMu.Lock()
+	defer a.admissionMu.Unlock()
+	a.admissionPaused.Store(true)
+	a.admissionEpoch.Add(1)
 	oldRecovery := a.recovery
 	a.subs.cancelTaskActivations(fmt.Errorf("task activation cancelled by session switch"))
 	a.focusedAgent.Store(nil)
@@ -146,6 +151,10 @@ func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.C
 	return oldRecovery, turnCtx
 }
 
+func (a *MainAgent) finishSessionSwitch() {
+	a.admissionPaused.Store(false)
+}
+
 func (a *MainAgent) abandonSubAgentsForSessionSwitch() int {
 	a.subs.mu.Lock()
 	if len(a.subs.subAgents) == 0 {
@@ -153,14 +162,7 @@ func (a *MainAgent) abandonSubAgentsForSessionSwitch() int {
 		return 0
 	}
 
-	ids := make([]string, 0, len(a.subs.subAgents))
-	subs := make([]*SubAgent, 0, len(a.subs.subAgents))
-	for id, sub := range a.subs.subAgents {
-		ids = append(ids, id)
-		subs = append(subs, sub)
-		delete(a.subs.subAgents, id)
-		delete(a.subs.nudgeCounts, id)
-	}
+	ids, subs := a.subs.removeAllLiveLocked()
 	a.subs.mu.Unlock()
 
 	for i, id := range ids {
@@ -231,7 +233,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.setTaskRecords(nil)
 	a.gitStatusInjected.Store(false)
 	a.explicitUserTurnCount.Store(0)
-	a.subs.stateEnteredTurn = make(map[string]uint64)
+	a.subs.resetStateEnteredTurns()
 }
 
 func (a *MainAgent) installSessionTarget(sessionDir string) {
@@ -336,6 +338,7 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 // msgIndex, emits SessionRestoredEvent + ForkSessionEvent so the TUI can
 // load the forked message into the composer.
 func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
+	defer a.finishSessionSwitch()
 	msgs := a.ctxMgr.Snapshot()
 	if msgIndex < 0 || msgIndex >= len(msgs) {
 		log.Warnf("handleForkSessionCommand: msgIndex out of range msgIndex=%v len=%v", msgIndex, len(msgs))

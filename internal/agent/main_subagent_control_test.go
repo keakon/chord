@@ -827,6 +827,207 @@ func TestCreateSubAgentInitializesConcurrentlyBeforeAdmission(t *testing.T) {
 	}
 }
 
+func TestCreateSubAgentDoesNotHoldAdmissionLockDuringReliableOutput(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	for len(a.outputCh) < cap(a.outputCh) {
+		a.outputCh <- InfoEvent{Message: "fill"}
+	}
+
+	createDone := make(chan error, 1)
+	go func() {
+		_, err := a.CreateSubAgent(context.Background(), "work", "worker", "", "", tools.WriteScope{})
+		createDone <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && len(a.subs.snapshotSubAgents()) == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	if got := len(a.subs.snapshotSubAgents()); got != 1 {
+		t.Fatalf("live SubAgents = %d, want registered worker", got)
+	}
+
+	acquired := make(chan struct{})
+	go func() {
+		a.admissionMu.Lock()
+		close(acquired)
+		a.admissionMu.Unlock()
+	}()
+	select {
+	case <-acquired:
+	case <-time.After(time.Second):
+		t.Fatal("admission lock remained held while reliable output was blocked")
+	}
+
+	deadline = time.Now().Add(time.Second)
+	for {
+		select {
+		case err := <-createDone:
+			if err != nil {
+				t.Fatalf("CreateSubAgent: %v", err)
+			}
+			a.cancelActiveWork()
+			return
+		case <-a.outputCh:
+		case <-time.After(time.Until(deadline)):
+			t.Fatal("CreateSubAgent remained blocked while output was drained")
+		}
+	}
+}
+
+func TestCreateSubAgentRejectsRegistrationAfterSessionSwitch(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	a.llmFactory = func(string, []string, string) *llm.Client {
+		close(entered)
+		<-release
+		return newTestLLMClient()
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := a.CreateSubAgent(context.Background(), "work", "worker", "", "", tools.WriteScope{})
+		result <- err
+	}()
+	<-entered
+	a.prepareSessionSwitch()
+	close(release)
+
+	if err := <-result; err == nil || !strings.Contains(err.Error(), "invalidated") {
+		t.Fatalf("CreateSubAgent error = %v, want lifecycle invalidation", err)
+	}
+	if got := len(a.subs.snapshotSubAgents()); got != 0 {
+		t.Fatalf("live SubAgents = %d, want 0 after session switch", got)
+	}
+}
+
+func TestCreateSubAgentRejectsWhileSessionTransitionIsPaused(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	a.prepareSessionSwitch()
+
+	if _, err := a.CreateSubAgent(context.Background(), "work", "worker", "", "", tools.WriteScope{}); err == nil || !strings.Contains(err.Error(), "session transition") {
+		t.Fatalf("CreateSubAgent error = %v, want transition rejection", err)
+	}
+	a.finishSessionSwitch()
+	handle, err := a.CreateSubAgent(context.Background(), "work", "worker", "", "", tools.WriteScope{})
+	if err != nil {
+		t.Fatalf("CreateSubAgent after transition: %v", err)
+	}
+	if handle.Status != "started" {
+		t.Fatalf("handle.Status = %q, want started", handle.Status)
+	}
+}
+
+func TestRehydrateTaskRejectsWhileSessionTransitionIsPaused(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	record := &DurableTaskRecord{
+		TaskID:           "parked-task",
+		AgentDefName:     "worker",
+		TaskDesc:         "resume work",
+		State:            string(SubAgentStateCompleted),
+		ResumePolicy:     taskResumePolicyNotify,
+		LatestInstanceID: "worker-old",
+		RuntimeParked:    true,
+	}
+	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
+	a.prepareSessionSwitch()
+
+	sub, _, _, err := a.getOrRehydrateTask(cloneDurableTaskRecord(record))
+	if err == nil || sub != nil {
+		t.Fatalf("getOrRehydrateTask during transition = (sub=%v, err=%v), want rejection", sub != nil, err)
+	}
+	if got := len(a.subs.snapshotSubAgents()); got != 0 {
+		t.Fatalf("live SubAgents = %d, want 0", got)
+	}
+}
+
+func TestCreateSubAgentRejectsRegistrationAfterOwnerCompletes(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
+	parent.depth = 1
+	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	a.llmFactory = func(string, []string, string) *llm.Client {
+		close(entered)
+		<-release
+		return newTestLLMClient()
+	}
+
+	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
+	result := make(chan error, 1)
+	go func() {
+		_, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tools.WriteScope{})
+		result <- err
+	}()
+	<-entered
+	parent.setState(SubAgentStateCompleted, "done")
+	close(release)
+
+	if err := <-result; err == nil || !strings.Contains(err.Error(), "owner task is no longer active") {
+		t.Fatalf("CreateSubAgent error = %v, want inactive owner rejection", err)
+	}
+	if child := a.subAgentByTaskID("adhoc-1"); child != nil {
+		t.Fatalf("unexpected child registered after owner completion: %s", child.instanceID)
+	}
+}
+
+func TestNestedCreateSubAgentRejectsBroaderWriteScope(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
+	parent.depth = 1
+	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
+	parent.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
+	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
+
+	_, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tools.WriteScope{PathPrefix: []string{"internal"}})
+	if err == nil || !strings.Contains(err.Error(), "must not be broader") {
+		t.Fatalf("CreateSubAgent error = %v, want scope inheritance rejection", err)
+	}
+	if got := len(a.subs.snapshotSubAgents()); got != 1 {
+		t.Fatalf("live SubAgents = %d, want only parent", got)
+	}
+}
+
+func TestNestedCreateSubAgentAllowsNarrowerWriteScope(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
+	parent.depth = 1
+	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
+	parent.writeScope = tools.WriteScope{PathPrefix: []string{"internal"}}
+	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
+
+	handle, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tools.WriteScope{Files: []string{"internal/agent/main.go"}})
+	if err != nil {
+		t.Fatalf("CreateSubAgent: %v", err)
+	}
+	if handle.Status != "started" {
+		t.Fatalf("handle.Status = %q, want started", handle.Status)
+	}
+}
+
+func TestNestedCreateSubAgentDoesNotExpandExactFileIntoPrefix(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
+	parent.depth = 1
+	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
+	parent.writeScope = tools.WriteScope{Files: []string{"internal/agent/main.go"}}
+	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
+
+	_, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tools.WriteScope{PathPrefix: []string{"internal/agent/main.go"}})
+	if err == nil || !strings.Contains(err.Error(), "must not be broader") {
+		t.Fatalf("CreateSubAgent error = %v, want exact-file expansion rejection", err)
+	}
+}
+
 func TestCreateSubAgentCapsActiveChildrenAtTen(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)

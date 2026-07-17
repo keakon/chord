@@ -403,8 +403,16 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	if mailboxMsgs, mailboxErr := loadSubAgentMailboxMessages(sessionPath); mailboxErr != nil {
 		log.Warnf("failed to load subagent mailbox log session=%v error=%v", sessionPath, mailboxErr)
 	} else {
-		loaded.MailboxMessages = mailboxMsgs
 		loaded.MailboxSeqMax = maxSubAgentMailboxSeq(sessionPath, mailboxMsgs)
+		if compactErr := compactSubAgentMailboxLogs(sessionPath, mailboxMsgs); compactErr != nil {
+			log.Warnf("failed to compact SubAgent mailbox logs session=%v error=%v", sessionPath, compactErr)
+		}
+		if compacted, reloadErr := loadSubAgentMailboxMessages(sessionPath); reloadErr != nil {
+			log.Warnf("failed to reload compacted SubAgent mailbox log session=%v error=%v", sessionPath, reloadErr)
+		} else {
+			mailboxMsgs = compacted
+		}
+		loaded.MailboxMessages = mailboxMsgs
 	}
 	if taskRecords, taskErr := loadDurableTaskRecords(sessionPath); taskErr != nil {
 		log.Warnf("failed to load durable task registry session=%v error=%v", sessionPath, taskErr)
@@ -428,6 +436,9 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 
 	snapshotDuration, subAgentRestoreDuration = a.applySessionSnapshot(loaded, sessionPath, tmpRecovery)
 	loaded.TaskRecords = mergeDurableTaskRecords(loaded.TaskRecords, buildDurableTaskRecordsFromLoadedStates(loaded.SubAgentStates))
+	if repairRestoredTaskTree(loaded.TaskRecords) {
+		log.Warnf("repaired inconsistent SubAgent task tree during restore session=%v", sessionPath)
+	}
 	for _, state := range loaded.SubAgentStates {
 		rec := loaded.TaskRecords[state.TaskID]
 		if rec == nil || len(rec.InvokedSkillNames) > 0 {
@@ -1097,6 +1108,7 @@ func (a *MainAgent) RestoreSessionAtStartup() error {
 
 // handleResumeCommand handles the /resume <sessionID> slash command.
 func (a *MainAgent) handleResumeCommand(sessionID string) {
+	defer a.finishSessionSwitch()
 	targetID := strings.TrimSpace(sessionID)
 	a.emitToTUI(SessionSwitchStartedEvent{Kind: "resume", SessionID: targetID})
 	sessionPath, err := a.resolveResumeSessionPath(targetID)

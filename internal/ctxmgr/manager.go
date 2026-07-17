@@ -433,8 +433,8 @@ func messageContextBytes(messages []message.Message) int {
 	return total
 }
 
-// EstimateMessagesTokens returns approximate token count for a slice of
-// messages (content/3 + tool/3 + thinking/reasoning/3, min 1 per msg).
+// EstimateMessagesTokens returns the approximate input-token count for a slice
+// of messages, including multipart text and attachment payloads.
 func EstimateMessagesTokens(messages []message.Message) int {
 	total := 0
 	for _, msg := range messages {
@@ -445,7 +445,15 @@ func EstimateMessagesTokens(messages []message.Message) int {
 
 // EstimateMessageTokens returns approximate token count for a single message.
 func EstimateMessageTokens(msg message.Message) int {
-	n := len(msg.Content) / 3
+	payloadBytes := len(msg.Content)
+	if len(msg.Parts) > 0 {
+		payloadBytes = 0
+		for _, part := range msg.Parts {
+			payloadBytes += len(part.Text) + len(part.Data)
+		}
+	}
+	n := payloadBytes / 3
+	n += len(msg.ToolCallID) / 3
 	for _, tc := range msg.ToolCalls {
 		n += len(tc.Args) / 3
 	}

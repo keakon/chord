@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/keakon/golog/log"
@@ -23,18 +24,20 @@ const (
 )
 
 type toolExecutionPipeline struct {
-	agentID      string
-	eventAgentID string
-	taskID       string
-	sessionDir   string
-	registry     *tools.Registry
-	fileTrack    *filelock.FileTracker
-	fileBackups  *fileBackupManager
-	eventSender  tools.EventSender
-	emit         func(AgentEvent)
-	guidance     string
-	logPrefix    string
-	projectRoot  string
+	agentID       string
+	eventAgentID  string
+	taskID        string
+	sessionDir    string
+	registry      *tools.Registry
+	fileTrack     *filelock.FileTracker
+	fileBackups   *fileBackupManager
+	eventSender   tools.EventSender
+	emit          func(AgentEvent)
+	guidance      string
+	logPrefix     string
+	projectRoot   string
+	writeScope    *tools.WriteScope
+	writeScopeDir string
 
 	currentRuleset                func() permission.Ruleset
 	refreshRulesetAfterRuleIntent func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset
@@ -48,9 +51,148 @@ type toolExecutionPipeline struct {
 	visibleToolNames              func() map[string]struct{}
 }
 
+func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
+	if p.writeScope == nil {
+		return nil
+	}
+	scope := p.writeScope.Normalized()
+	if scope.Empty() {
+		return nil
+	}
+	if _, ok := p.registry.Get(tc.Name); !ok {
+		return nil
+	}
+	if tc.Name == tools.NameShell {
+		return fmt.Errorf("shell is unavailable for a scoped SubAgent task because arbitrary command side effects cannot be path-validated")
+	}
+	if scope.ReadOnly {
+		if tools.IsFileMutation(tc.Name) || tc.Name == tools.NameSpawn {
+			return fmt.Errorf("tool %q is unavailable because this SubAgent task is read-only", tc.Name)
+		}
+		if !writeScopeKnownNonWorkspaceMutation(tc.Name) {
+			tool, _ := p.registry.Get(tc.Name)
+			if tool != nil && !tool.IsReadOnly() {
+				return fmt.Errorf("tool %q is unavailable because this SubAgent task is read-only and the runtime cannot prove it leaves the workspace unchanged", tc.Name)
+			}
+		}
+		return nil
+	}
+	if writeScopeKnownNonWorkspaceMutation(tc.Name) {
+		return nil
+	}
+	if !tools.IsFileMutation(tc.Name) {
+		if tool, _ := p.registry.Get(tc.Name); tool != nil && !tool.IsReadOnly() {
+			return fmt.Errorf("tool %q is unavailable for a path-scoped SubAgent task because the runtime cannot validate its workspace mutations", tc.Name)
+		}
+		return nil
+	}
+	if len(scope.Files) == 0 && len(scope.PathPrefix) == 0 {
+		return fmt.Errorf("tool %q cannot be path-validated because expected_write_scope declares only logical modules", tc.Name)
+	}
+	baseDir := p.writeScopeDir
+	if strings.TrimSpace(baseDir) == "" {
+		baseDir = p.projectRoot
+	}
+	paths, err := writeScopeToolPaths(tc, baseDir)
+	if err != nil {
+		return fmt.Errorf("validate expected_write_scope for %s: %w", tc.Name, err)
+	}
+	for _, path := range paths {
+		if !writeScopeAllowsPath(scope, path, baseDir) {
+			return fmt.Errorf("tool %q target %q is outside this SubAgent task's expected_write_scope", tc.Name, path)
+		}
+	}
+	return nil
+}
+
+func writeScopeKnownNonWorkspaceMutation(name string) bool {
+	switch name {
+	case tools.NameComplete, tools.NameNotify, tools.NameEscalate, tools.NameCancel, tools.NameDelegate, tools.NameHandoff, tools.NameSaveArtifact, tools.NameReadArtifact, tools.NameSpawnStatus, tools.NameSpawnStop, tools.NameTodoWrite:
+		return true
+	default:
+		return false
+	}
+}
+
+func writeScopeToolPaths(tc message.ToolCall, baseDir string) ([]string, error) {
+	switch tc.Name {
+	case tools.NameWrite, tools.NameEdit, tools.NamePatch:
+		path := tools.ExtractEditPathFromArgsInDir(llm.UnwrapToolArgs(tc.Args), baseDir)
+		if strings.TrimSpace(path) == "" {
+			return nil, fmt.Errorf("missing or invalid path")
+		}
+		return []string{path}, nil
+	case tools.NameDelete:
+		req, err := tools.DecodeDeleteRequestInDir(llm.UnwrapToolArgs(tc.Args), baseDir)
+		if err != nil {
+			return nil, err
+		}
+		return req.Paths, nil
+	default:
+		return nil, nil
+	}
+}
+
+func writeScopeAllowsPath(scope tools.WriteScope, target, baseDir string) bool {
+	target = normalizedScopeAbsPath(target, baseDir)
+	for _, file := range scope.Files {
+		if target == normalizedScopeAbsPath(file, baseDir) {
+			return true
+		}
+	}
+	for _, prefix := range scope.PathPrefix {
+		if pathWithinScope(normalizedScopeAbsPath(prefix, baseDir), target) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedScopeAbsPath(path, baseDir string) string {
+	path = strings.TrimSpace(path)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
+	}
+	abs, err := filepath.Abs(path)
+	if err == nil {
+		path = abs
+	}
+	path = filepath.Clean(path)
+	return resolveScopeSymlinks(path)
+}
+
+func resolveScopeSymlinks(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+	current := path
+	var tail []string
+	for {
+		parent := filepath.Dir(current)
+		if parent == current {
+			return path
+		}
+		tail = append([]string{filepath.Base(current)}, tail...)
+		current = parent
+		resolved, err := filepath.EvalSymlinks(current)
+		if err != nil {
+			continue
+		}
+		return filepath.Clean(filepath.Join(append([]string{resolved}, tail...)...))
+	}
+}
+
+func pathWithinScope(base, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall, fireHook bool) (ToolExecutionResult, error) {
 	tc.Name = tools.NormalizeName(tc.Name)
 	execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
+	if err := p.validateWriteScope(tc); err != nil {
+		return execResult, err
+	}
 	if p.reservedToolError != nil {
 		if err := p.reservedToolError(tc.Name); err != nil {
 			return execResult, err
@@ -142,6 +284,9 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 
 func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
 	tc.Name = tools.NormalizeName(tc.Name)
+	if err := p.validateWriteScope(tc); err != nil {
+		return ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}, err
+	}
 	execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
 	if p.visibleToolNames != nil {
 		if err := p.checkVisible(tc.Name); err != nil {

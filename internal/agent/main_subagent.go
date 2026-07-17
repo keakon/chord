@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -25,6 +26,8 @@ type delegationCaller struct {
 	Depth      int
 	Delegation config.DelegationConfig
 	Ruleset    permission.Ruleset
+	WriteScope tools.WriteScope
+	WorkDir    string
 	IsMain     bool
 }
 
@@ -68,6 +71,8 @@ func (a *MainAgent) delegationCallerFromContext(ctx context.Context) (delegation
 			Depth:      0,
 			Delegation: cfg.Delegation,
 			Ruleset:    a.effectiveRuleset(),
+			WriteScope: tools.WriteScope{},
+			WorkDir:    a.projectRoot,
 			IsMain:     true,
 		}, nil
 	}
@@ -75,12 +80,15 @@ func (a *MainAgent) delegationCallerFromContext(ctx context.Context) (delegation
 	if sub == nil {
 		return delegationCaller{}, fmt.Errorf("unknown caller agent %q", callerAgentID)
 	}
+	_, _, depth, _ := sub.ownerSnapshot()
 	return delegationCaller{
 		AgentID:    sub.instanceID,
 		TaskID:     sub.taskID,
-		Depth:      sub.depth,
+		Depth:      depth,
 		Delegation: sub.delegation,
 		Ruleset:    append(permission.Ruleset(nil), sub.ruleset...),
+		WriteScope: sub.writeScope.Normalized(),
+		WorkDir:    sub.workDir,
 		IsMain:     false,
 	}, nil
 }
@@ -102,6 +110,46 @@ func effectiveDirectActiveChildLimit(cfg config.DelegationConfig) int {
 	return limit
 }
 
+func childWriteScopeWithinParent(parent, child tools.WriteScope, baseDir string) bool {
+	parent = parent.Normalized()
+	child = child.Normalized()
+	if parent.Empty() {
+		return true
+	}
+	if parent.ReadOnly {
+		return child.ReadOnly
+	}
+	if child.Empty() || child.ReadOnly {
+		return child.ReadOnly
+	}
+	for _, file := range child.Files {
+		if !writeScopeAllowsPath(parent, normalizedScopeAbsPath(file, baseDir), baseDir) {
+			return false
+		}
+	}
+	for _, prefix := range child.PathPrefix {
+		path := normalizedScopeAbsPath(prefix, baseDir)
+		if !writeScopeAllowsPrefix(parent, path, baseDir) {
+			return false
+		}
+	}
+	for _, module := range child.Modules {
+		if !slices.Contains(parent.Modules, module) {
+			return false
+		}
+	}
+	return true
+}
+
+func writeScopeAllowsPrefix(scope tools.WriteScope, targetPrefix, baseDir string) bool {
+	for _, prefix := range scope.PathPrefix {
+		if pathWithinScope(normalizedScopeAbsPath(prefix, baseDir), targetPrefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *MainAgent) directNonTerminalChildCountLocked(ownerAgentID, ownerTaskID string) int {
 	count := 0
 	seenTaskIDs := make(map[string]struct{})
@@ -121,7 +169,11 @@ func (a *MainAgent) directNonTerminalChildCountLocked(ownerAgentID, ownerTaskID 
 		}
 	}
 	for _, sub := range a.subs.subAgents {
-		if sub == nil || strings.TrimSpace(sub.ownerAgentID) != strings.TrimSpace(ownerAgentID) || strings.TrimSpace(sub.ownerTaskID) != strings.TrimSpace(ownerTaskID) {
+		if sub == nil {
+			continue
+		}
+		subOwnerAgentID, subOwnerTaskID, _, _ := sub.ownerSnapshot()
+		if subOwnerAgentID != strings.TrimSpace(ownerAgentID) || subOwnerTaskID != strings.TrimSpace(ownerTaskID) {
 			continue
 		}
 		if _, ok := seenTaskIDs[strings.TrimSpace(sub.taskID)]; ok {
@@ -269,14 +321,15 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		Payload:  &SubAgentStateChangedPayload{State: SubAgentStateCompleted, Summary: result.Summary},
 	})
 	replyMessageID := firstReplyMessageID(sub)
+	ownerAgentID, ownerTaskID, _, _ := sub.ownerSnapshot()
 
 	a.releaseSubAgentSlot(sub)
 	a.emitActivity(evt.SourceID, ActivityIdle, "")
 	mailbox := &SubAgentMailboxMessage{
 		AgentID:      evt.SourceID,
 		TaskID:       sub.taskID,
-		OwnerAgentID: sub.ownerAgentID,
-		OwnerTaskID:  sub.ownerTaskID,
+		OwnerAgentID: ownerAgentID,
+		OwnerTaskID:  ownerTaskID,
 		InReplyTo:    replyMessageID,
 		Kind:         SubAgentMailboxKindCompleted,
 		Priority:     SubAgentMailboxPriorityUrgent,
@@ -286,9 +339,9 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		RequiresAck:  false,
 	}
 	a.normalizeSubAgentMailboxMessage(mailbox)
-	a.sendEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: mailbox})
+	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: mailbox})
 	mailboxMessage := formatSubAgentMailboxInjectionText(mailbox)
-	if strings.TrimSpace(sub.ownerAgentID) == "" {
+	if ownerAgentID == "" {
 		mailboxMessage = "<system-reminder>\n" + mailboxMessage + "\n</system-reminder>"
 	}
 
@@ -296,8 +349,8 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		AgentID:       evt.SourceID,
 		TaskID:        sub.taskID,
 		AgentType:     sub.agentDefName,
-		ParentAgentID: controlPlaneAgentID(sub.ownerAgentID),
-		ParentTaskID:  sub.ownerTaskID,
+		ParentAgentID: controlPlaneAgentID(ownerAgentID),
+		ParentTaskID:  ownerTaskID,
 		Summary:       result.Summary,
 		Message:       mailboxMessage,
 	})
@@ -319,11 +372,10 @@ func (a *MainAgent) handleAgentIdle(evt Event) {
 	if sub == nil {
 		return
 	}
-	a.subs.nudgeCounts[evt.SourceID]++
-	n := a.subs.nudgeCounts[evt.SourceID]
+	n := a.subs.incrementNudge(evt.SourceID)
 	if n > maxIdleNudges {
 		timeout, _ := evt.Payload.(time.Duration)
-		a.sendEvent(Event{Type: EventAgentError, SourceID: evt.SourceID, Payload: fmt.Errorf("SubAgent idle after %d nudges (timeout=%v each)", n, timeout)})
+		a.queueLoopEvent(Event{Type: EventAgentError, SourceID: evt.SourceID, Payload: fmt.Errorf("SubAgent idle after %d nudges (timeout=%v each)", n, timeout)})
 		return
 	}
 	message := "You appear to be idle. If the task is complete, call Complete with a summary. "
@@ -361,16 +413,17 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 	sub.setState(SubAgentStateRunning, msg)
 	a.noteSubAgentStateTransition(sub, SubAgentStateRunning)
 	a.persistSubAgentMeta(sub)
-	a.sendEvent(Event{
+	ownerAgentID, ownerTaskID, _, _ := sub.ownerSnapshot()
+	a.queueLoopEvent(Event{
 		Type:     EventSubAgentProgressUpdated,
 		SourceID: evt.SourceID,
 		Payload:  &SubAgentProgressUpdatedPayload{Summary: msg},
 	})
-	a.sendEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
+	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
 		AgentID:      evt.SourceID,
 		TaskID:       taskIDForSub(sub),
-		OwnerAgentID: sub.ownerAgentID,
-		OwnerTaskID:  sub.ownerTaskID,
+		OwnerAgentID: ownerAgentID,
+		OwnerTaskID:  ownerTaskID,
 		InReplyTo:    firstReplyMessageID(sub),
 		Kind:         SubAgentMailboxKindProgress,
 		Priority:     SubAgentMailboxPriorityNotify,
@@ -382,10 +435,10 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 		AgentID:       evt.SourceID,
 		TaskID:        sub.taskID,
 		AgentType:     sub.agentDefName,
-		ParentAgentID: controlPlaneAgentID(sub.ownerAgentID),
-		ParentTaskID:  sub.ownerTaskID,
-		TargetAgentID: controlPlaneAgentID(sub.ownerAgentID),
-		TargetTaskID:  sub.ownerTaskID,
+		ParentAgentID: controlPlaneAgentID(ownerAgentID),
+		ParentTaskID:  ownerTaskID,
+		TargetAgentID: controlPlaneAgentID(ownerAgentID),
+		TargetTaskID:  ownerTaskID,
 		Kind:          strings.TrimSpace(payload.Kind),
 		Message:       msg,
 	})
@@ -411,13 +464,14 @@ func (a *MainAgent) handleEscalate(evt Event) {
 		Payload:  &SubAgentStateChangedPayload{State: SubAgentStateWaitingMain, Summary: reason},
 	})
 	replyMessageID := firstReplyMessageID(sub)
+	ownerAgentID, ownerTaskID, _, _ := sub.ownerSnapshot()
 	a.releaseSubAgentSlot(sub)
 	a.emitActivity(evt.SourceID, ActivityIdle, "")
 	a.sendEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
 		AgentID:      evt.SourceID,
 		TaskID:       taskIDForSub(sub),
-		OwnerAgentID: sub.ownerAgentID,
-		OwnerTaskID:  sub.ownerTaskID,
+		OwnerAgentID: ownerAgentID,
+		OwnerTaskID:  ownerTaskID,
 		InReplyTo:    replyMessageID,
 		Kind:         SubAgentMailboxKindDecisionRequired,
 		Priority:     SubAgentMailboxPriorityInterrupt,
@@ -435,9 +489,7 @@ func (a *MainAgent) handleAgentLog(evt Event) {
 }
 
 func (a *MainAgent) handleResetNudge(evt Event) {
-	if _, ok := a.subs.nudgeCounts[evt.SourceID]; ok {
-		a.subs.nudgeCounts[evt.SourceID] = 0
-	}
+	a.subs.resetNudge(evt.SourceID)
 }
 
 func (a *MainAgent) handleSpawnFinished(evt Event) {
@@ -541,10 +593,15 @@ func (a *MainAgent) getOrCreateAgentMCP(agentName string, mcpCfg config.MCPConfi
 }
 
 func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType string, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (tools.TaskHandle, error) {
+	requestCtx := ctx
 	caller, err := a.canCallerDelegate(ctx)
 	if err != nil {
 		return tools.TaskHandle{}, err
 	}
+	if a.shuttingDown.Load() || a.admissionPaused.Load() {
+		return tools.TaskHandle{}, fmt.Errorf("cannot delegate during shutdown or session transition")
+	}
+	admissionEpoch := a.admissionEpoch.Load()
 	agentType = strings.TrimSpace(agentType)
 	if !delegateAgentAvailable(caller.Ruleset, agentType) {
 		return tools.TaskHandle{}, fmt.Errorf("agent type %q is denied by Delegate permission policy", agentType)
@@ -558,6 +615,9 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		semanticTaskKey = semanticTaskKeyFallback(planTaskRef)
 	}
 	expectedWriteScope = expectedWriteScope.Normalized()
+	if !caller.IsMain && !childWriteScopeWithinParent(caller.WriteScope, expectedWriteScope, caller.WorkDir) {
+		return tools.TaskHandle{}, fmt.Errorf("child expected_write_scope must not be broader than the parent SubAgent task scope")
+	}
 	agentDef, err := a.resolveAgentDef(agentType)
 	if err != nil {
 		return tools.TaskHandle{}, err
@@ -576,7 +636,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		}
 	}
 	instanceID := NextInstanceID(agentDef.Name)
-	ctx, cancel := context.WithCancel(a.parentCtx)
+	subCtx, cancel := context.WithCancel(a.parentCtx)
 	workDir, _ := os.Getwd()
 	sub := NewSubAgent(SubAgentConfig{
 		InstanceID:    instanceID,
@@ -596,7 +656,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		LLMClient:     subLLMClient,
 		Recovery:      a.recovery,
 		Parent:        a,
-		ParentCtx:     ctx,
+		ParentCtx:     subCtx,
 		Cancel:        cancel,
 		BaseTools:     a.tools,
 		ExtraMCPTools: extraMCPTools,
@@ -609,7 +669,24 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		ModelName:     a.ModelName(),
 	})
 	a.admissionMu.Lock()
+	if a.shuttingDown.Load() || a.admissionPaused.Load() || a.admissionEpoch.Load() != admissionEpoch || requestCtx.Err() != nil {
+		a.admissionMu.Unlock()
+		cancel()
+		if err := requestCtx.Err(); err != nil {
+			return tools.TaskHandle{}, err
+		}
+		return tools.TaskHandle{}, fmt.Errorf("delegate invalidated by session or lifecycle change")
+	}
 	a.subs.mu.RLock()
+	if !caller.IsMain {
+		owner := a.subs.subAgents[caller.AgentID]
+		if owner == nil || strings.TrimSpace(owner.taskID) != strings.TrimSpace(caller.TaskID) || !isNonTerminalTaskState(string(owner.State())) {
+			a.subs.mu.RUnlock()
+			a.admissionMu.Unlock()
+			cancel()
+			return tools.TaskHandle{}, fmt.Errorf("delegate owner task is no longer active")
+		}
+	}
 	count := a.directNonTerminalChildCountLocked(caller.AgentID, caller.TaskID)
 	if count >= maxChildren {
 		a.subs.mu.RUnlock()
@@ -639,9 +716,26 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	sub.semMu.Unlock()
 	a.subs.add(sub)
 	a.updateTaskRecordFromSub(sub, "")
+	sub.startRunLoop()
+	if !sub.InjectUserMessage(description) {
+		a.closeSubAgent(sub.instanceID)
+		a.admissionMu.Unlock()
+		return tools.TaskHandle{}, fmt.Errorf("SubAgent %s rejected its initial task", sub.instanceID)
+	}
+	sub.armStartupWatchdog()
+	registrationSessionDir := a.sessionDir
+	a.subs.mu.RLock()
+	registrationRecords := cloneDurableTaskRecordMap(a.subs.taskRecords)
+	a.subs.mu.RUnlock()
+	a.subAgentMetaPersistMu.Lock()
+	a.taskRegistryPersistMu.Lock()
 	a.admissionMu.Unlock()
-	a.persistSubAgentMeta(sub)
-	a.persistTaskRegistry()
+	a.persistSubAgentMetaToSession(sub, registrationSessionDir)
+	if err := persistDurableTaskRecords(registrationSessionDir, registrationRecords); err != nil {
+		log.Warnf("failed to persist initial durable task registration session=%v task_id=%v error=%v", registrationSessionDir, taskID, err)
+	}
+	a.taskRegistryPersistMu.Unlock()
+	a.subAgentMetaPersistMu.Unlock()
 	log.Infof("SubAgent created and started instance=%v task_id=%v agent_def=%v", instanceID, taskID, agentDef.Name)
 	a.emitToTUI(AgentStartedEvent{
 		AgentID:       instanceID,
@@ -652,12 +746,6 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		ParentTaskID:  caller.TaskID,
 	})
 	a.emitToTUI(AgentStatusEvent{AgentID: instanceID, Status: "running", Message: fmt.Sprintf("Started task %s: %s", taskID, truncateString(description, 80))})
-	sub.startRunLoop()
-	if !sub.InjectUserMessage(description) {
-		a.closeSubAgent(sub.instanceID)
-		return tools.TaskHandle{}, fmt.Errorf("SubAgent %s rejected its initial task", sub.instanceID)
-	}
-	sub.armStartupWatchdog()
 	return tools.TaskHandle{
 		Status:             "started",
 		TaskID:             taskID,
@@ -923,6 +1011,11 @@ func (a *MainAgent) SwitchFocus(agentID string) {
 		}
 	}
 	a.subs.mu.RUnlock()
+	if rec := a.taskRecordByInstanceID(agentID); rec != nil && rec.RuntimeParked {
+		a.focusedAgent.Store(nil)
+		a.setFocusedTaskID(rec.TaskID)
+		return
+	}
 	a.focusedAgent.Store(nil)
 	a.setFocusedTaskID("")
 }

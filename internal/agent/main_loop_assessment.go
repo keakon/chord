@@ -110,7 +110,7 @@ func (a *MainAgent) hasOpenTodos() bool {
 }
 
 func (a *MainAgent) hasActiveSubAgents() bool {
-	for _, sub := range a.subs.subAgents {
+	for _, sub := range a.subs.snapshotSubAgents() {
 		if sub == nil {
 			continue
 		}
@@ -374,11 +374,13 @@ func (a *MainAgent) openTodoContinuationLines() []string {
 
 // activeSubAgentContinuationLines returns formatted lines for active subagents.
 func (a *MainAgent) activeSubAgentContinuationLines() []string {
-	lines := make([]string, 0, len(a.subs.subAgents))
-	for id, sub := range a.subs.subAgents {
+	subs := a.subs.snapshotSubAgents()
+	lines := make([]string, 0, len(subs))
+	for _, sub := range subs {
 		if sub == nil {
 			continue
 		}
+		id := sub.instanceID
 		state := sub.State()
 		switch state {
 		case SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled, SubAgentStateIdle:

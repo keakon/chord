@@ -90,6 +90,7 @@ func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {
 	a.noteSubAgentStateTransition(sub, finalState)
 	a.persistSubAgentMeta(sub)
 	a.syncTaskRecordFromSub(sub, closedReason)
+	a.reconcileTerminalTaskChildren(sub.taskID, finalState, closedReason)
 	status := string(finalState)
 	switch finalState {
 	case SubAgentStateCompleted:

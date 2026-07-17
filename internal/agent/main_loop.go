@@ -66,26 +66,19 @@ func (a *MainAgent) Run(ctx context.Context) error {
 
 func (a *MainAgent) nextEvent(ctx context.Context) (Event, error) {
 	for {
+		if evt, ok := a.popQueuedEvent(); ok {
+			return evt, nil
+		}
 		select {
 		case <-ctx.Done():
 			return Event{}, ctx.Err()
 		case <-a.parentCtx.Done():
 			return Event{}, a.parentCtx.Err()
 		case evt := <-a.eventCh:
+			a.signalEventSpace()
 			return evt, nil
 		case <-a.eventWakeCh:
-			select {
-			case evt := <-a.eventCh:
-				a.wakeDeferredEvents()
-				return evt, nil
-			default:
-			}
-			if evt, ok := a.popDeferredEvent(); ok {
-				if a.hasDeferredEvents() {
-					a.wakeDeferredEvents()
-				}
-				return evt, nil
-			}
+			continue
 		}
 	}
 }
@@ -165,28 +158,90 @@ func (a *MainAgent) dispatch(evt Event) {
 	}
 }
 
-// sendEvent assigns a monotonic sequence number and queues the event without
-// blocking producers. Once the primary channel fills, events use a FIFO
-// overflow queue until it is drained so newer events cannot overtake them.
+// sendEvent queues events from asynchronous producers. Once the primary
+// channel and bounded overflow are full, producers wait for capacity or
+// shutdown. Main-loop handlers must use queueLoopEvent so they never wait on
+// capacity that only the loop itself can release.
 func (a *MainAgent) sendEvent(evt Event) {
-	select {
-	case <-a.stoppingCh:
-		return
-	default:
-	}
-	a.eventMu.Lock()
-	evt.Seq = a.eventSeq.Add(1)
-	if len(a.deferredEvents) == 0 {
+	for {
 		select {
-		case a.eventCh <- evt:
-			a.eventMu.Unlock()
+		case <-a.stoppingCh:
 			return
 		default:
 		}
+		a.eventMu.Lock()
+		if len(a.deferredEvents) == 0 && len(a.loopEvents) == 0 {
+			if len(a.eventCh) < cap(a.eventCh) {
+				evt = a.sequenceEvent(evt)
+				a.eventCh <- evt
+				a.eventMu.Unlock()
+				return
+			}
+		}
+		if a.coalesceQueuedEventLocked(a.deferredEvents, evt) {
+			a.eventCoalesced.Add(1)
+			a.eventMu.Unlock()
+			return
+		}
+		if len(a.deferredEvents) < a.eventOverflowLimit {
+			evt = a.sequenceEvent(evt)
+			a.deferredEvents = append(a.deferredEvents, evt)
+			a.updateEventOverflowPeakLocked()
+			a.eventMu.Unlock()
+			a.wakeDeferredEvents()
+			return
+		}
+		a.eventBackpressure.Add(1)
+		a.eventMu.Unlock()
+		select {
+		case <-a.eventSpaceCh:
+		case <-a.stoppingCh:
+			return
+		}
 	}
-	a.deferredEvents = append(a.deferredEvents, evt)
+}
+
+func (a *MainAgent) queueLoopEvent(evt Event) {
+	if !a.started.Load() {
+		a.sendEvent(evt)
+		return
+	}
+	a.eventMu.Lock()
+	if a.coalesceQueuedEventLocked(a.loopEvents, evt) {
+		a.eventCoalesced.Add(1)
+		a.eventMu.Unlock()
+		return
+	}
+	if len(a.loopEvents) >= a.loopEventLimit {
+		if idx := firstCoalescibleEventIndex(a.loopEvents); idx >= 0 {
+			a.loopEvents = append(a.loopEvents[:idx], a.loopEvents[idx+1:]...)
+			a.eventCoalesced.Add(1)
+		} else {
+			a.eventMu.Unlock()
+			panic(fmt.Sprintf("main-loop follow-up event reserve exhausted limit=%d type=%s", a.loopEventLimit, evt.Type))
+		}
+	}
+	evt = a.sequenceEvent(evt)
+	a.loopEvents = append(a.loopEvents, evt)
+	a.updateEventOverflowPeakLocked()
 	a.eventMu.Unlock()
 	a.wakeDeferredEvents()
+}
+
+func firstCoalescibleEventIndex(queue []Event) int {
+	for i := range queue {
+		if coalescibleEventKey(queue[i]) != "" {
+			return i
+		}
+	}
+	return -1
+}
+
+func (a *MainAgent) sequenceEvent(evt Event) Event {
+	if evt.Seq == 0 {
+		evt.Seq = a.eventSeq.Add(1)
+	}
+	return evt
 }
 
 func (a *MainAgent) wakeDeferredEvents() {
@@ -196,22 +251,102 @@ func (a *MainAgent) wakeDeferredEvents() {
 	}
 }
 
-func (a *MainAgent) popDeferredEvent() (Event, bool) {
+func (a *MainAgent) popQueuedEvent() (Event, bool) {
 	a.eventMu.Lock()
 	defer a.eventMu.Unlock()
-	if len(a.deferredEvents) == 0 {
+	select {
+	case evt := <-a.eventCh:
+		a.signalEventSpaceLocked()
+		return evt, true
+	default:
+	}
+	if len(a.deferredEvents) == 0 && len(a.loopEvents) == 0 {
 		return Event{}, false
 	}
-	evt := a.deferredEvents[0]
-	a.deferredEvents[0] = Event{}
-	a.deferredEvents = a.deferredEvents[1:]
+	useLoop := len(a.deferredEvents) == 0 || len(a.loopEvents) > 0 && a.loopEvents[0].Seq < a.deferredEvents[0].Seq
+	var evt Event
+	if useLoop {
+		evt = a.loopEvents[0]
+		a.loopEvents[0] = Event{}
+		a.loopEvents = a.loopEvents[1:]
+	} else {
+		evt = a.deferredEvents[0]
+		a.deferredEvents[0] = Event{}
+		a.deferredEvents = a.deferredEvents[1:]
+		a.signalEventSpaceLocked()
+	}
+	if len(a.deferredEvents) > 0 || len(a.loopEvents) > 0 {
+		a.wakeDeferredEvents()
+	}
 	return evt, true
 }
 
 func (a *MainAgent) hasDeferredEvents() bool {
 	a.eventMu.Lock()
 	defer a.eventMu.Unlock()
-	return len(a.deferredEvents) > 0
+	return len(a.deferredEvents) > 0 || len(a.loopEvents) > 0
+}
+
+func (a *MainAgent) signalEventSpace() {
+	select {
+	case a.eventSpaceCh <- struct{}{}:
+	default:
+	}
+}
+
+func (a *MainAgent) signalEventSpaceLocked() { a.signalEventSpace() }
+
+func (a *MainAgent) updateEventOverflowPeakLocked() {
+	depth := uint64(len(a.deferredEvents) + len(a.loopEvents))
+	for {
+		peak := a.eventOverflowPeak.Load()
+		if depth <= peak || a.eventOverflowPeak.CompareAndSwap(peak, depth) {
+			return
+		}
+	}
+}
+
+func (a *MainAgent) coalesceQueuedEventLocked(queue []Event, evt Event) bool {
+	key := coalescibleEventKey(evt)
+	if key == "" {
+		return false
+	}
+	for i := len(queue) - 1; i >= 0; i-- {
+		if coalescibleEventKey(queue[i]) == key {
+			copy(queue[i:], queue[i+1:])
+			queue[len(queue)-1] = a.sequenceEvent(evt)
+			return true
+		}
+	}
+	return false
+}
+
+func coalescibleEventKey(evt Event) string {
+	switch evt.Type {
+	case EventSubAgentProgressUpdated:
+		return evt.Type + "\x00" + evt.SourceID
+	default:
+		return ""
+	}
+}
+
+type EventQueueStats struct {
+	OverflowCurrent uint64
+	OverflowPeak    uint64
+	Coalesced       uint64
+	Backpressure    uint64
+}
+
+func (a *MainAgent) EventQueueStats() EventQueueStats {
+	a.eventMu.Lock()
+	current := len(a.deferredEvents) + len(a.loopEvents)
+	a.eventMu.Unlock()
+	return EventQueueStats{
+		OverflowCurrent: uint64(current),
+		OverflowPeak:    a.eventOverflowPeak.Load(),
+		Coalesced:       a.eventCoalesced.Load(),
+		Backpressure:    a.eventBackpressure.Load(),
+	}
 }
 
 func (a *MainAgent) emitGlobalIdleIfReady() bool {

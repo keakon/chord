@@ -434,24 +434,36 @@ func (a *MainAgent) setIdleAndDrainPending() {
 		}
 		if a.activeSubAgentMailboxAck {
 			replySummary := latestAssistantReplySummary(a.ctxMgr.Snapshot())
+			ackFailed := false
 			for _, msg := range batch {
 				if msg == nil {
 					continue
 				}
-				_, _, _ = a.markSubAgentMailboxConsumedWithReply(
+				_, _, _, err := a.markSubAgentMailboxConsumedWithReply(
 					msg.AgentID,
 					msg.MessageID,
 					turnID,
 					replySummary,
 					"main_turn",
 				)
+				if err != nil {
+					ackFailed = true
+					log.Warnf("failed to persist consumed SubAgent mailbox ack message_id=%v error=%v", msg.MessageID, err)
+				}
+			}
+			if ackFailed {
+				a.activeSubAgentMailboxAck = false
+				a.requeueActiveSubAgentMailbox()
+				skipMailboxDrain = true
 			}
 		} else {
 			for _, msg := range batch {
 				if msg == nil {
 					continue
 				}
-				a.markSubAgentMailboxRetryable(msg.MessageID, turnID)
+				if err := a.markSubAgentMailboxRetryable(msg.MessageID, turnID); err != nil {
+					log.Warnf("failed to persist retryable SubAgent mailbox ack message_id=%v error=%v", msg.MessageID, err)
+				}
 			}
 			a.requeueActiveSubAgentMailbox()
 			skipMailboxDrain = true

@@ -76,9 +76,13 @@ func (a *MainAgent) GetSubAgents() []SubAgentInfo {
 		state := sub.State()
 		summary := sub.LastSummary()
 		artifact := sub.LastArtifact()
+		ownerAgentID, ownerTaskID, depth, _ := sub.ownerSnapshot()
 		infos = append(infos, SubAgentInfo{
 			InstanceID:       sub.instanceID,
 			TaskID:           sub.taskID,
+			OwnerAgentID:     ownerAgentID,
+			OwnerTaskID:      ownerTaskID,
+			Depth:            depth,
 			AgentDefName:     sub.agentDefName,
 			TaskDesc:         sub.taskDesc,
 			ModelName:        modelName,
@@ -99,26 +103,39 @@ func (a *MainAgent) GetSubAgents() []SubAgentInfo {
 		if _, ok := seenTasks[taskID]; ok {
 			continue
 		}
-		var artifact tools.ArtifactRef
-		if len(rec.LastArtifactRefs) > 0 {
-			artifact = tools.NormalizeArtifactRef(rec.LastArtifactRefs[0])
-		}
-		selectedRef := a.restoredSubAgentModelRef(rec)
-		infos = append(infos, SubAgentInfo{
-			InstanceID:       rec.LatestInstanceID,
-			TaskID:           taskID,
-			AgentDefName:     rec.AgentDefName,
-			TaskDesc:         rec.TaskDesc,
-			SelectedRef:      selectedRef,
-			RunningRef:       restoredRunningModelRef(rec, selectedRef),
-			State:            rec.State,
-			LastSummary:      rec.LastSummary,
-			UrgentInboxCount: a.subAgentUrgentInboxCountLocked(rec.LatestInstanceID),
-			LastArtifact:     artifact,
-		})
+		infos = append(infos, a.parkedSubAgentInfo(rec))
+		seenTasks[taskID] = struct{}{}
 	}
 	a.subs.mu.RUnlock()
+	if focused := a.focusedDurableTask(); focused != nil && focused.RuntimeParked {
+		if _, ok := seenTasks[focused.TaskID]; !ok {
+			infos = append(infos, a.parkedSubAgentInfo(focused))
+		}
+	}
 	return infos
+}
+
+func (a *MainAgent) parkedSubAgentInfo(rec *DurableTaskRecord) SubAgentInfo {
+	var artifact tools.ArtifactRef
+	if len(rec.LastArtifactRefs) > 0 {
+		artifact = tools.NormalizeArtifactRef(rec.LastArtifactRefs[0])
+	}
+	selectedRef := a.restoredSubAgentModelRef(rec)
+	return SubAgentInfo{
+		InstanceID:       rec.LatestInstanceID,
+		TaskID:           rec.TaskID,
+		OwnerAgentID:     rec.OwnerAgentID,
+		OwnerTaskID:      rec.OwnerTaskID,
+		Depth:            rec.Depth,
+		AgentDefName:     rec.AgentDefName,
+		TaskDesc:         rec.TaskDesc,
+		SelectedRef:      selectedRef,
+		RunningRef:       restoredRunningModelRef(rec, selectedRef),
+		State:            rec.State,
+		LastSummary:      rec.LastSummary,
+		UrgentInboxCount: a.subAgentUrgentInboxCountLocked(rec.LatestInstanceID),
+		LastArtifact:     artifact,
+	}
 }
 
 func (a *MainAgent) restoredSubAgentModelRef(rec *DurableTaskRecord) string {

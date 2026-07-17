@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,68 @@ import (
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
+
+func TestLoadSessionUsesCompactedMailboxStateAndPreservesSequence(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "compacted-mailbox-state")
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "resume this session"}); err != nil {
+		t.Fatalf("PersistMessage(main): %v", err)
+	}
+	rm.Close()
+
+	subagentsDir := filepath.Join(sessionDir, "subagents")
+	if err := os.MkdirAll(subagentsDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(subagents): %v", err)
+	}
+	mailboxFile, err := os.Create(filepath.Join(subagentsDir, "mailbox.jsonl"))
+	if err != nil {
+		t.Fatalf("create mailbox log: %v", err)
+	}
+	ackFile, err := os.Create(filepath.Join(subagentsDir, "mailbox-acks.jsonl"))
+	if err != nil {
+		_ = mailboxFile.Close()
+		t.Fatalf("create ack log: %v", err)
+	}
+	mailboxEncoder := json.NewEncoder(mailboxFile)
+	ackEncoder := json.NewEncoder(ackFile)
+	for i := 0; i < mailboxCompactionThreshold; i++ {
+		id := fmt.Sprintf("worker-%d", i+1)
+		if i == 0 {
+			id = "worker-9999"
+		}
+		msg := SubAgentMailboxMessage{MessageID: id, AgentID: "worker", TaskID: "task", Kind: SubAgentMailboxKindCompleted}
+		if err := mailboxEncoder.Encode(msg); err != nil {
+			t.Fatalf("encode mailbox: %v", err)
+		}
+		if err := ackEncoder.Encode(SubAgentMailboxAckRecord{MessageID: id, Outcome: "consumed", AckedAt: time.Now()}); err != nil {
+			t.Fatalf("encode ack: %v", err)
+		}
+	}
+	if err := mailboxFile.Close(); err != nil {
+		t.Fatalf("close mailbox log: %v", err)
+	}
+	if err := ackFile.Close(); err != nil {
+		t.Fatalf("close ack log: %v", err)
+	}
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	loaded, err := a.loadSessionState(sessionDir)
+	if err != nil {
+		t.Fatalf("loadSessionState: %v", err)
+	}
+	if len(loaded.MailboxMessages) != mailboxConsumedHistoryKeep {
+		t.Fatalf("loaded mailbox messages = %d, want compacted %d", len(loaded.MailboxMessages), mailboxConsumedHistoryKeep)
+	}
+	for _, msg := range loaded.MailboxMessages {
+		if msg.MessageID == "worker-9999" {
+			t.Fatal("loaded mailbox state retained an entry removed by compaction")
+		}
+	}
+	if loaded.MailboxSeqMax != 9999 {
+		t.Fatalf("MailboxSeqMax = %d, want pre-compaction maximum 9999", loaded.MailboxSeqMax)
+	}
+}
 
 func TestRestoreLoadedSubAgentsPreservesCompletedTaskState(t *testing.T) {
 	projectRoot := t.TempDir()

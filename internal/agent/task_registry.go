@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	stdpath "path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -24,6 +23,7 @@ const (
 	taskResumePolicyLiveOnly     = "live_only"
 	taskResumePolicyNotify       = "notify"
 	taskResumePolicyExplicitOnly = "explicit_only"
+	maxRetainedTerminalTasks     = 256
 )
 
 type taskResumeTrigger string
@@ -31,7 +31,6 @@ type taskResumeTrigger string
 const (
 	taskResumeByTargetedNotify    taskResumeTrigger = "targeted_notify"
 	taskResumeByDescendantMailbox taskResumeTrigger = "descendant_mailbox"
-	taskResumeByUser              taskResumeTrigger = "user"
 )
 
 type DurableTaskRecord struct {
@@ -76,6 +75,14 @@ func durableTaskRegistryPath(sessionDir string) string {
 		return ""
 	}
 	return filepath.Join(sessionDir, "subagents", "tasks.json")
+}
+
+func durableTaskArchivePath(sessionDir string) string {
+	sessionDir = strings.TrimSpace(sessionDir)
+	if sessionDir == "" {
+		return ""
+	}
+	return filepath.Join(sessionDir, "subagents", "tasks.archive.jsonl")
 }
 
 func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
@@ -243,8 +250,6 @@ func (r *DurableTaskRecord) allowsRehydrate(trigger taskResumeTrigger) bool {
 	}
 	state := SubAgentState(strings.TrimSpace(r.State))
 	switch trigger {
-	case taskResumeByUser:
-		return state != SubAgentStateRunning
 	case taskResumeByDescendantMailbox:
 		return state == SubAgentStateWaitingDescendant
 	case taskResumeByTargetedNotify:
@@ -267,38 +272,7 @@ func semanticTaskKeyFallback(desc string) string {
 	return strings.Join(fields, " ")
 }
 
-func normalizeWriteScopePath(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	path = stdpath.Clean(strings.ReplaceAll(path, "\\", "/"))
-	if path == "." {
-		return ""
-	}
-	return strings.TrimPrefix(path, "./")
-}
-
-func pathContainsPath(base, target string) bool {
-	base = normalizeWriteScopePath(base)
-	target = normalizeWriteScopePath(target)
-	if base == "" || target == "" {
-		return false
-	}
-	if base == target {
-		return true
-	}
-	if !strings.HasSuffix(base, "/") {
-		base += "/"
-	}
-	return strings.HasPrefix(target, base)
-}
-
-func sameOrNestedPath(a, b string) bool {
-	return pathContainsPath(a, b) || pathContainsPath(b, a)
-}
-
-func writeScopesOverlap(a, b tools.WriteScope) bool {
+func writeScopesOverlap(a, b tools.WriteScope, baseDir string) bool {
 	a = a.Normalized()
 	b = b.Normalized()
 	if a.ReadOnly || b.ReadOnly {
@@ -306,26 +280,28 @@ func writeScopesOverlap(a, b tools.WriteScope) bool {
 	}
 	for _, fa := range a.Files {
 		for _, fb := range b.Files {
-			if sameOrNestedPath(fa, fb) {
+			if normalizedScopeAbsPath(fa, baseDir) == normalizedScopeAbsPath(fb, baseDir) {
 				return true
 			}
 		}
 		for _, pb := range b.PathPrefix {
-			if sameOrNestedPath(fa, pb) {
+			if pathWithinScope(normalizedScopeAbsPath(pb, baseDir), normalizedScopeAbsPath(fa, baseDir)) {
 				return true
 			}
 		}
 	}
 	for _, fb := range b.Files {
 		for _, pa := range a.PathPrefix {
-			if sameOrNestedPath(fb, pa) {
+			if pathWithinScope(normalizedScopeAbsPath(pa, baseDir), normalizedScopeAbsPath(fb, baseDir)) {
 				return true
 			}
 		}
 	}
 	for _, pa := range a.PathPrefix {
 		for _, pb := range b.PathPrefix {
-			if sameOrNestedPath(pa, pb) {
+			pa = normalizedScopeAbsPath(pa, baseDir)
+			pb = normalizedScopeAbsPath(pb, baseDir)
+			if pathWithinScope(pa, pb) || pathWithinScope(pb, pa) {
 				return true
 			}
 		}
@@ -349,15 +325,14 @@ func (a *MainAgent) findDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTask
 		if rec == nil {
 			continue
 		}
-		if !isNonTerminalTaskState(rec.State) && !rec.allowsRehydrate(taskResumeByTargetedNotify) {
-			continue
-		}
 		if strings.TrimSpace(rec.OwnerAgentID) == strings.TrimSpace(ownerAgentID) && strings.TrimSpace(rec.OwnerTaskID) == strings.TrimSpace(ownerTaskID) && strings.TrimSpace(rec.AgentDefName) == strings.TrimSpace(agentType) {
 			if (planTaskRef != "" && strings.TrimSpace(rec.PlanTaskRef) == planTaskRef) || (semanticTaskKey != "" && strings.TrimSpace(rec.SemanticTaskKey) == semanticTaskKey) {
-				return cloneDurableTaskRecord(rec), false
+				if isNonTerminalTaskState(rec.State) || rec.allowsRehydrate(taskResumeByTargetedNotify) {
+					return cloneDurableTaskRecord(rec), false
+				}
 			}
 		}
-		if !expectedWriteScope.Empty() && !rec.ExpectedWriteScope.Empty() && writeScopesOverlap(expectedWriteScope, rec.ExpectedWriteScope) {
+		if isNonTerminalTaskState(rec.State) && !expectedWriteScope.Empty() && !rec.ExpectedWriteScope.Empty() && writeScopesOverlap(expectedWriteScope, rec.ExpectedWriteScope, a.projectRoot) {
 			return cloneDurableTaskRecord(rec), true
 		}
 	}
@@ -370,8 +345,16 @@ func (a *MainAgent) taskRecordByTaskID(taskID string) *DurableTaskRecord {
 		return nil
 	}
 	a.subs.mu.RLock()
-	defer a.subs.mu.RUnlock()
-	return cloneDurableTaskRecord(a.subs.taskRecords[taskID])
+	rec := cloneDurableTaskRecord(a.subs.taskRecords[taskID])
+	a.subs.mu.RUnlock()
+	if rec != nil {
+		return rec
+	}
+	rec, err := loadArchivedTaskRecordByTaskID(a.sessionDir, taskID)
+	if err != nil {
+		log.Warnf("failed to load archived task task_id=%v error=%v", taskID, err)
+	}
+	return rec
 }
 
 func (a *MainAgent) taskRecordByInstanceID(instanceID string) *DurableTaskRecord {
@@ -380,13 +363,19 @@ func (a *MainAgent) taskRecordByInstanceID(instanceID string) *DurableTaskRecord
 		return nil
 	}
 	a.subs.mu.RLock()
-	defer a.subs.mu.RUnlock()
 	for _, rec := range a.subs.taskRecords {
 		if rec != nil && durableTaskRecordIncludesInstance(rec, instanceID) {
-			return cloneDurableTaskRecord(rec)
+			out := cloneDurableTaskRecord(rec)
+			a.subs.mu.RUnlock()
+			return out
 		}
 	}
-	return nil
+	a.subs.mu.RUnlock()
+	rec, err := loadArchivedTaskRecordByInstanceID(a.sessionDir, instanceID)
+	if err != nil {
+		log.Warnf("failed to load archived task instance_id=%v error=%v", instanceID, err)
+	}
+	return rec
 }
 
 func (a *MainAgent) setTaskRecords(records map[string]*DurableTaskRecord) {
@@ -408,6 +397,23 @@ func (a *MainAgent) persistTaskRegistry() {
 	records := cloneDurableTaskRecordMap(a.subs.taskRecords)
 	sessionDir := a.sessionDir
 	a.subs.mu.RUnlock()
+	archived, err := a.archiveEligibleTerminalTasks(records, sessionDir)
+	if err != nil {
+		log.Warnf("failed to archive terminal task records session=%v error=%v", sessionDir, err)
+	} else if len(archived) != len(records) {
+		a.subs.mu.Lock()
+		for taskID, before := range records {
+			if _, retained := archived[taskID]; retained || before == nil {
+				continue
+			}
+			current := a.subs.taskRecords[taskID]
+			if current != nil && current.State == before.State && current.UpdatedAt.Equal(before.UpdatedAt) {
+				delete(a.subs.taskRecords, taskID)
+			}
+		}
+		records = cloneDurableTaskRecordMap(a.subs.taskRecords)
+		a.subs.mu.Unlock()
+	}
 	if hook := a.taskRegistryPersistHook; hook != nil {
 		hook()
 	}
@@ -437,6 +443,7 @@ func (a *MainAgent) updateTaskRecordFromSub(sub *SubAgent, closedReason string) 
 	lastMailboxID := sub.LastMailboxID()
 	lastReplyMessageID, lastReplyToMailboxID, lastReplyKind, lastReplySummary := sub.LastReplyThread()
 	lastArtifact := sub.LastArtifact()
+	ownerAgentID, ownerTaskID, depth, joinToOwner := sub.ownerSnapshot()
 	now := time.Now()
 
 	a.subs.mu.Lock()
@@ -462,11 +469,11 @@ func (a *MainAgent) updateTaskRecordFromSub(sub *SubAgent, closedReason string) 
 	if writeScope := sub.writeScope.Normalized(); !writeScope.Empty() || rec.ExpectedWriteScope.Empty() {
 		rec.ExpectedWriteScope = writeScope
 	}
-	rec.OwnerAgentID = strings.TrimSpace(sub.ownerAgentID)
-	rec.OwnerTaskID = strings.TrimSpace(sub.ownerTaskID)
-	rec.Depth = sub.depth
+	rec.OwnerAgentID = ownerAgentID
+	rec.OwnerTaskID = ownerTaskID
+	rec.Depth = depth
 	rec.State = string(state)
-	rec.JoinToOwner = sub.joinToOwner
+	rec.JoinToOwner = joinToOwner
 	rec.ResumePolicy = durableTaskResumePolicy(state)
 	rec.LatestInstanceID = strings.TrimSpace(sub.instanceID)
 	rec.SelectedModelRef = subSelectedModelRef(sub)

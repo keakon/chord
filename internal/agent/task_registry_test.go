@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -64,23 +65,11 @@ func TestWriteScopesOverlapMatchesExactAndNestedPathsOnly(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := writeScopesOverlap(tc.a, tc.b)
+			got := writeScopesOverlap(tc.a, tc.b, "/repo")
 			if got != tc.want {
 				t.Fatalf("writeScopesOverlap(%+v, %+v) = %v, want %v", tc.a, tc.b, got, tc.want)
 			}
 		})
-	}
-}
-
-func TestPathContainsPathUsesPathBoundaries(t *testing.T) {
-	if !pathContainsPath("internal/foo", "internal/foo/bar.go") {
-		t.Fatal("expected nested path to match")
-	}
-	if pathContainsPath("internal/foo", "internal/foobar/bar.go") {
-		t.Fatal("did not expect prefix-like sibling path to match")
-	}
-	if !pathContainsPath("internal/foo", "internal/foo") {
-		t.Fatal("expected identical path to match")
 	}
 }
 
@@ -152,6 +141,87 @@ func TestFindDuplicateOrConflictingTaskKeepsNotifyRehydratableCompletedTask(t *t
 	existing, conflict := a.findDuplicateOrConflictingTask("owner", "parent", "worker", "", "semantic-key", tools.WriteScope{})
 	if existing == nil || existing.TaskID != "completed-task" || conflict {
 		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v), want completed duplicate", existing, conflict)
+	}
+}
+
+func TestFindDuplicateOrConflictingTaskReleasesCompletedWriteScope(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"completed-task": {
+			TaskID:             "completed-task",
+			OwnerAgentID:       "owner",
+			OwnerTaskID:        "parent",
+			AgentDefName:       "worker",
+			SemanticTaskKey:    "completed-work",
+			ExpectedWriteScope: tools.WriteScope{Files: []string{"internal/shared.go"}},
+			State:              string(SubAgentStateCompleted),
+			ResumePolicy:       taskResumePolicyNotify,
+		},
+	})
+
+	existing, conflict := a.findDuplicateOrConflictingTask(
+		"owner",
+		"parent",
+		"worker",
+		"",
+		"new-work",
+		tools.WriteScope{Files: []string{"internal/shared.go"}},
+	)
+	if existing != nil || conflict {
+		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v), want completed write scope released", existing, conflict)
+	}
+}
+
+func TestFindDuplicateOrConflictingTaskKeepsNonTerminalWriteScope(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"running-task": {
+			TaskID:             "running-task",
+			OwnerAgentID:       "other-owner",
+			OwnerTaskID:        "other-parent",
+			AgentDefName:       "worker",
+			SemanticTaskKey:    "other-work",
+			ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal"}},
+			State:              string(SubAgentStateWaitingMain),
+			ResumePolicy:       taskResumePolicyNotify,
+		},
+	})
+
+	existing, conflict := a.findDuplicateOrConflictingTask(
+		"owner",
+		"parent",
+		"worker",
+		"",
+		"new-work",
+		tools.WriteScope{Files: []string{"internal/shared.go"}},
+	)
+	if existing == nil || existing.TaskID != "running-task" || !conflict {
+		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v), want live scope conflict", existing, conflict)
+	}
+}
+
+func TestFindDuplicateOrConflictingTaskCanonicalizesScopeAliases(t *testing.T) {
+	root := t.TempDir()
+	a := newTestMainAgent(t, root)
+	a.projectRoot = root
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"running-task": {
+			TaskID:             "running-task",
+			State:              string(SubAgentStateRunning),
+			ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal"}},
+		},
+	})
+
+	existing, conflict := a.findDuplicateOrConflictingTask(
+		"owner",
+		"parent",
+		"worker",
+		"",
+		"new-work",
+		tools.WriteScope{Files: []string{filepath.Join(root, "internal", "shared.go")}},
+	)
+	if existing == nil || !conflict {
+		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v), want canonical scope conflict", existing, conflict)
 	}
 }
 

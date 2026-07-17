@@ -53,7 +53,13 @@ func (a *MainAgent) persistSubAgentMeta(sub *SubAgent) {
 	if a == nil || sub == nil {
 		return
 	}
-	path := subAgentMetaPath(a.sessionDir, sub.instanceID)
+	a.subAgentMetaPersistMu.Lock()
+	defer a.subAgentMetaPersistMu.Unlock()
+	a.persistSubAgentMetaToSession(sub, a.sessionDir)
+}
+
+func (a *MainAgent) persistSubAgentMetaToSession(sub *SubAgent, sessionDir string) {
+	path := subAgentMetaPath(sessionDir, sub.instanceID)
 	if path == "" {
 		return
 	}
@@ -63,6 +69,7 @@ func (a *MainAgent) persistSubAgentMeta(sub *SubAgent) {
 	lastReplyMessageID, lastReplyToMailboxID, lastReplyKind, lastReplySummary := sub.LastReplyThread()
 	lastArtifact := sub.LastArtifact()
 	pendingComplete := sub.PendingCompleteIntent()
+	ownerAgentID, ownerTaskID, depth, _ := sub.ownerSnapshot()
 	meta := subAgentMeta{
 		InstanceID:            sub.instanceID,
 		TaskID:                sub.taskID,
@@ -73,9 +80,9 @@ func (a *MainAgent) persistSubAgentMeta(sub *SubAgent) {
 		ExpectedWriteScope:    sub.writeScope.Normalized(),
 		SelectedModelRef:      subSelectedModelRef(sub),
 		RunningModelRef:       subRunningModelRef(sub),
-		OwnerAgentID:          sub.ownerAgentID,
-		OwnerTaskID:           sub.ownerTaskID,
-		Depth:                 sub.depth,
+		OwnerAgentID:          ownerAgentID,
+		OwnerTaskID:           ownerTaskID,
+		Depth:                 depth,
 		State:                 string(state),
 		LastSummary:           summary,
 		PendingCompleteIntent: pendingComplete != nil,
@@ -96,7 +103,7 @@ func (a *MainAgent) persistSubAgentMeta(sub *SubAgent) {
 		return
 	}
 	data = append(data, '\n')
-	_ = privatefs.WriteFile(a.sessionDir, path, data)
+	_ = privatefs.WriteFile(sessionDir, path, data)
 }
 
 func loadSubAgentMeta(sessionDir, instanceID string) (*subAgentMeta, error) {

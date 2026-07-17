@@ -44,20 +44,21 @@ type CompletionEnvelope struct {
 }
 
 type SubAgentMailboxMessage struct {
-	MessageID    string                  `json:"message_id"`
-	AgentID      string                  `json:"agent_id"`
-	TaskID       string                  `json:"task_id"`
-	OwnerAgentID string                  `json:"owner_agent_id,omitempty"`
-	OwnerTaskID  string                  `json:"owner_task_id,omitempty"`
-	InReplyTo    string                  `json:"in_reply_to,omitempty"`
-	Kind         SubAgentMailboxKind     `json:"kind"`
-	Priority     SubAgentMailboxPriority `json:"priority"`
-	Summary      string                  `json:"summary"`
-	Payload      string                  `json:"payload,omitempty"`
-	Completion   *CompletionEnvelope     `json:"completion,omitempty"`
-	RequiresAck  bool                    `json:"requires_ack,omitempty"`
-	Consumed     bool                    `json:"consumed,omitempty"`
-	CreatedAt    time.Time               `json:"created_at"`
+	MessageID      string                  `json:"message_id"`
+	AgentID        string                  `json:"agent_id"`
+	TaskID         string                  `json:"task_id"`
+	OwnerAgentID   string                  `json:"owner_agent_id,omitempty"`
+	OwnerTaskID    string                  `json:"owner_task_id,omitempty"`
+	InReplyTo      string                  `json:"in_reply_to,omitempty"`
+	Kind           SubAgentMailboxKind     `json:"kind"`
+	Priority       SubAgentMailboxPriority `json:"priority"`
+	Summary        string                  `json:"summary"`
+	Payload        string                  `json:"payload,omitempty"`
+	Completion     *CompletionEnvelope     `json:"completion,omitempty"`
+	RequiresAck    bool                    `json:"requires_ack,omitempty"`
+	Consumed       bool                    `json:"consumed,omitempty"`
+	CreatedAt      time.Time               `json:"created_at"`
+	persistPending bool                    `json:"-"`
 }
 
 type SubAgentMailboxAckRecord struct {
@@ -111,10 +112,10 @@ func normalizeReplyKind(kind string) string {
 	return kind
 }
 
-func (a *MainAgent) markSubAgentMailboxConsumedWithReply(agentID, messageID string, turnID uint64, replySummary, replyKind string) (replyMessageID, artifactRelPath, artifactType string) {
+func (a *MainAgent) markSubAgentMailboxConsumedWithReply(agentID, messageID string, turnID uint64, replySummary, replyKind string) (replyMessageID, artifactRelPath, artifactType string, err error) {
 	messageID = strings.TrimSpace(messageID)
 	if messageID == "" {
-		return "", "", ""
+		return "", "", "", nil
 	}
 	replyKind = normalizeReplyKind(replyKind)
 	replySummary = truncateMailboxReplySummary(replySummary)
@@ -140,7 +141,9 @@ func (a *MainAgent) markSubAgentMailboxConsumedWithReply(agentID, messageID stri
 		ArtifactType:     artifactType,
 		AckedAt:          time.Now(),
 	}
-	a.appendSubAgentMailboxAck(record)
+	if err := a.appendSubAgentMailboxAck(record); err != nil {
+		return "", "", "", err
+	}
 	if sub := a.subAgentByID(agentID); sub != nil {
 		sub.setReplyThread(replyMessageID, messageID, replyKind, replySummary)
 		if artifactRelPath != "" {
@@ -148,11 +151,11 @@ func (a *MainAgent) markSubAgentMailboxConsumedWithReply(agentID, messageID stri
 		}
 		a.persistSubAgentMeta(sub)
 	}
-	return replyMessageID, artifactRelPath, artifactType
+	return replyMessageID, artifactRelPath, artifactType, nil
 }
 
-func (a *MainAgent) markSubAgentMailboxRetryable(messageID string, turnID uint64) {
-	a.appendSubAgentMailboxAck(SubAgentMailboxAckRecord{
+func (a *MainAgent) markSubAgentMailboxRetryable(messageID string, turnID uint64) error {
+	return a.appendSubAgentMailboxAck(SubAgentMailboxAckRecord{
 		MessageID: messageID,
 		Outcome:   "retryable",
 		TurnID:    turnID,
@@ -160,23 +163,37 @@ func (a *MainAgent) markSubAgentMailboxRetryable(messageID string, turnID uint64
 	})
 }
 
-func (a *MainAgent) markSubAgentMailboxConsumed(messageID string) {
+func (a *MainAgent) markSubAgentMailboxConsumed(messageID string) error {
 	messageID = strings.TrimSpace(messageID)
 	if messageID == "" {
-		return
+		return nil
 	}
-	a.appendSubAgentMailboxAck(SubAgentMailboxAckRecord{
+	return a.appendSubAgentMailboxAck(SubAgentMailboxAckRecord{
 		MessageID: messageID,
 		Outcome:   "consumed",
 		AckedAt:   time.Now(),
 	})
 }
 
-func (a *MainAgent) appendSubAgentMailboxAck(record SubAgentMailboxAckRecord) {
+func (a *MainAgent) appendSubAgentMailboxAck(record SubAgentMailboxAckRecord) error {
 	sessionDir := strings.TrimSpace(a.sessionDir)
 	record.MessageID = strings.TrimSpace(record.MessageID)
 	if sessionDir == "" || record.MessageID == "" {
-		return
+		return nil
+	}
+	dir := filepath.Join(sessionDir, "subagents")
+	path := filepath.Join(dir, "mailbox-acks.jsonl")
+	f, err := privatefs.OpenFile(sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+	if err != nil {
+		return fmt.Errorf("open mailbox ack log: %w", err)
+	}
+	enc := json.NewEncoder(f)
+	if err := enc.Encode(record); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("append mailbox ack: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close mailbox ack log: %w", err)
 	}
 	a.subAgentMailboxIDsMu.Lock()
 	if a.subAgentMailboxConsumed == nil {
@@ -188,15 +205,7 @@ func (a *MainAgent) appendSubAgentMailboxAck(record SubAgentMailboxAckRecord) {
 		delete(a.subAgentMailboxConsumed, record.MessageID)
 	}
 	a.subAgentMailboxIDsMu.Unlock()
-	dir := filepath.Join(sessionDir, "subagents")
-	path := filepath.Join(dir, "mailbox-acks.jsonl")
-	f, err := privatefs.OpenFile(sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	enc := json.NewEncoder(f)
-	_ = enc.Encode(record)
+	return nil
 }
 
 func loadSubAgentMailboxAcks(sessionPath string) (map[string]SubAgentMailboxAckRecord, error) {

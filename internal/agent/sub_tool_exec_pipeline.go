@@ -22,18 +22,20 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		confirm = s.parent.confirmFn
 	}
 	return toolExecutionPipeline{
-		agentID:      s.instanceID,
-		eventAgentID: s.instanceID,
-		taskID:       s.taskID,
-		sessionDir:   s.sessionDir,
-		registry:     s.tools,
-		fileTrack:    fileTrack,
-		fileBackups:  fileBackups,
-		eventSender:  eventSender,
-		emit:         emit,
-		guidance:     subToolOutputGuidance,
-		logPrefix:    "SubAgent:",
-		projectRoot:  s.parent.projectRoot,
+		agentID:       s.instanceID,
+		eventAgentID:  s.instanceID,
+		taskID:        s.taskID,
+		sessionDir:    s.sessionDir,
+		registry:      s.tools,
+		fileTrack:     fileTrack,
+		fileBackups:   fileBackups,
+		eventSender:   eventSender,
+		emit:          emit,
+		guidance:      subToolOutputGuidance,
+		logPrefix:     "SubAgent:",
+		projectRoot:   s.parent.projectRoot,
+		writeScope:    &s.writeScope,
+		writeScopeDir: s.workDir,
 		currentRuleset: func() permission.Ruleset {
 			return s.ruleset
 		},

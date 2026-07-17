@@ -51,7 +51,7 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 			OwnerAgentID:          sub.OwnerAgentID(),
 			OwnerTaskID:           sub.OwnerTaskID(),
 			Depth:                 sub.Depth(),
-			JoinToOwner:           sub.joinToOwner,
+			JoinToOwner:           sub.JoinToOwner(),
 			State:                 string(state),
 			LastSummary:           summary,
 			PendingCompleteIntent: pendingComplete != nil,

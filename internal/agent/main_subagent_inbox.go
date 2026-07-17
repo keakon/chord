@@ -8,16 +8,29 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/tools"
 )
 
-func (a *MainAgent) prepareSubAgentMailboxMessage(msg *SubAgentMailboxMessage) {
+func (a *MainAgent) prepareSubAgentMailboxMessage(msg *SubAgentMailboxMessage) error {
+	if msg == nil {
+		return nil
+	}
+	a.normalizeSubAgentMailboxMessage(msg)
+	if err := a.persistSubAgentMailboxMessage(*msg); err != nil {
+		return err
+	}
+	a.applyPersistedSubAgentMailboxMessage(msg)
+	return nil
+}
+
+func (a *MainAgent) applyPersistedSubAgentMailboxMessage(msg *SubAgentMailboxMessage) {
 	if msg == nil {
 		return
 	}
-	a.normalizeSubAgentMailboxMessage(msg)
 	if sub := a.subAgentByID(msg.AgentID); sub != nil {
 		sub.setLastMailboxID(msg.MessageID)
 		if msg.Completion != nil && len(msg.Completion.Artifacts) > 0 {
@@ -25,7 +38,6 @@ func (a *MainAgent) prepareSubAgentMailboxMessage(msg *SubAgentMailboxMessage) {
 		}
 		a.persistSubAgentMeta(sub)
 	}
-	a.persistSubAgentMailboxMessage(*msg)
 	a.syncTaskRecordFromMailbox(*msg)
 	a.emitSubAgentMailboxUI(*msg)
 }
@@ -274,7 +286,15 @@ func (a *MainAgent) drainOwnedSubAgentMailboxes(ownerAgentID string) bool {
 }
 
 func (a *MainAgent) enqueueSubAgentMailbox(msg SubAgentMailboxMessage) {
-	a.prepareSubAgentMailboxMessage(&msg)
+	if err := a.prepareSubAgentMailboxMessage(&msg); err != nil {
+		log.Warnf("failed to persist SubAgent mailbox message message_id=%v task_id=%v kind=%v error=%v", msg.MessageID, msg.TaskID, msg.Kind, err)
+		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("SubAgent mailbox durability degraded: %w", err)})
+		if msg.Kind != SubAgentMailboxKindProgress {
+			msg.persistPending = true
+			a.requeueSubAgentMailboxInMemory(msg)
+			return
+		}
+	}
 	if !a.mailboxDeliveryPaused.Load() && a.routeOwnedSubAgentMailbox(msg) {
 		return
 	}
@@ -301,6 +321,20 @@ func (a *MainAgent) enqueueSubAgentMailbox(msg SubAgentMailboxMessage) {
 		} else {
 			a.subAgentInbox.normal = append(a.subAgentInbox.normal, msg)
 		}
+	}
+	a.refreshSubAgentInboxSummary()
+}
+
+func (a *MainAgent) requeueSubAgentMailboxInMemory(msg SubAgentMailboxMessage) {
+	if msg.Kind == SubAgentMailboxKindProgress {
+		if a.subAgentInbox.progress == nil {
+			a.subAgentInbox.progress = make(map[string]SubAgentMailboxMessage)
+		}
+		a.subAgentInbox.progress[msg.AgentID] = msg
+	} else if msg.Priority == SubAgentMailboxPriorityInterrupt || msg.Priority == SubAgentMailboxPriorityUrgent {
+		a.subAgentInbox.urgent = append([]SubAgentMailboxMessage{msg}, a.subAgentInbox.urgent...)
+	} else {
+		a.subAgentInbox.normal = append([]SubAgentMailboxMessage{msg}, a.subAgentInbox.normal...)
 	}
 	a.refreshSubAgentInboxSummary()
 }
@@ -420,20 +454,26 @@ func (a *MainAgent) emitSubAgentMailboxUI(msg SubAgentMailboxMessage) {
 	}
 }
 
-func (a *MainAgent) persistSubAgentMailboxMessage(msg SubAgentMailboxMessage) {
+func (a *MainAgent) persistSubAgentMailboxMessage(msg SubAgentMailboxMessage) error {
 	sessionDir := strings.TrimSpace(a.sessionDir)
 	if sessionDir == "" {
-		return
+		return nil
 	}
 	dir := filepath.Join(sessionDir, "subagents")
 	path := filepath.Join(dir, "mailbox.jsonl")
 	f, err := privatefs.OpenFile(sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 	if err != nil {
-		return
+		return fmt.Errorf("open mailbox log: %w", err)
 	}
-	defer f.Close()
 	enc := json.NewEncoder(f)
-	_ = enc.Encode(msg)
+	if err := enc.Encode(msg); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("append mailbox message: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close mailbox log: %w", err)
+	}
+	return nil
 }
 
 func (a *MainAgent) dequeueNextSubAgentMailbox() *SubAgentMailboxMessage {
@@ -452,12 +492,30 @@ func (a *MainAgent) dequeueNextSubAgentMailbox() *SubAgentMailboxMessage {
 	return nil
 }
 
+func (a *MainAgent) ensureSubAgentMailboxPersisted(msg *SubAgentMailboxMessage) bool {
+	if msg == nil || !msg.persistPending {
+		return true
+	}
+	if err := a.persistSubAgentMailboxMessage(*msg); err != nil {
+		log.Warnf("retrying SubAgent mailbox persistence failed message_id=%v task_id=%v error=%v", msg.MessageID, msg.TaskID, err)
+		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("SubAgent mailbox durability still degraded: %w", err)})
+		return false
+	}
+	msg.persistPending = false
+	a.applyPersistedSubAgentMailboxMessage(msg)
+	return true
+}
+
 func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 	if a.mailboxDeliveryPaused.Load() {
 		return false
 	}
 	msg := a.dequeueNextSubAgentMailbox()
 	if msg == nil {
+		return false
+	}
+	if !a.ensureSubAgentMailboxPersisted(msg) {
+		a.requeueSubAgentMailboxInMemory(*msg)
 		return false
 	}
 	if msg.Kind == SubAgentMailboxKindProgress {
@@ -472,6 +530,10 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 			}
 			if next.Kind == SubAgentMailboxKindProgress {
 				continue
+			}
+			if !a.ensureSubAgentMailboxPersisted(next) {
+				a.requeueSubAgentMailboxInMemory(*next)
+				break
 			}
 			if next.Kind != SubAgentMailboxKindCompleted {
 				if next.Priority == SubAgentMailboxPriorityInterrupt || next.Priority == SubAgentMailboxPriorityUrgent {

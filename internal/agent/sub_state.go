@@ -38,15 +38,44 @@ func (s *SubAgent) LastArtifact() tools.ArtifactRef {
 }
 
 func (s *SubAgent) OwnerAgentID() string {
-	return strings.TrimSpace(s.ownerAgentID)
+	ownerAgentID, _, _, _ := s.ownerSnapshot()
+	return ownerAgentID
 }
 
 func (s *SubAgent) OwnerTaskID() string {
-	return strings.TrimSpace(s.ownerTaskID)
+	_, ownerTaskID, _, _ := s.ownerSnapshot()
+	return ownerTaskID
+}
+
+func (s *SubAgent) ownerSnapshot() (ownerAgentID, ownerTaskID string, depth int, joinToOwner bool) {
+	if s == nil {
+		return "", "", 0, false
+	}
+	s.ownerMu.RLock()
+	defer s.ownerMu.RUnlock()
+	return strings.TrimSpace(s.ownerAgentID), strings.TrimSpace(s.ownerTaskID), s.depth, s.joinToOwner
+}
+
+func (s *SubAgent) reparentToMain() {
+	if s == nil {
+		return
+	}
+	s.ownerMu.Lock()
+	s.ownerAgentID = ""
+	s.ownerTaskID = ""
+	s.depth = 1
+	s.joinToOwner = false
+	s.ownerMu.Unlock()
 }
 
 func (s *SubAgent) Depth() int {
-	return s.depth
+	_, _, depth, _ := s.ownerSnapshot()
+	return depth
+}
+
+func (s *SubAgent) JoinToOwner() bool {
+	_, _, _, joinToOwner := s.ownerSnapshot()
+	return joinToOwner
 }
 
 func (s *SubAgent) PendingCompleteIntent() *AgentResult {

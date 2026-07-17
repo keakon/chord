@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestEventOverflowPreservesOrderAndRemainsRunnable(t *testing.T) {
@@ -34,6 +35,158 @@ func TestEventOverflowPreservesOrderAndRemainsRunnable(t *testing.T) {
 	}
 	if a.hasDeferredEvents() {
 		t.Fatal("overflow queue was not fully drained")
+	}
+}
+
+func TestEventOverflowBackpressuresUntilCapacityIsReleased(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.eventCh = make(chan Event, 1)
+	a.eventOverflowLimit = 1
+	a.sendEvent(Event{Type: "channel"})
+	a.sendEvent(Event{Type: "overflow"})
+
+	done := make(chan struct{})
+	go func() {
+		a.sendEvent(Event{Type: "blocked"})
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("producer completed before overflow capacity was released")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if _, err := a.nextEvent(context.Background()); err != nil {
+		t.Fatalf("nextEvent: %v", err)
+	}
+	if _, err := a.nextEvent(context.Background()); err != nil {
+		t.Fatalf("nextEvent: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("producer did not resume after capacity was released")
+	}
+	stats := a.EventQueueStats()
+	if stats.Backpressure == 0 || stats.OverflowPeak != 1 {
+		t.Fatalf("event queue stats = %+v, want backpressure and peak 1", stats)
+	}
+}
+
+func TestEventOverflowCoalescesProgressBySource(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.eventCh = make(chan Event, 1)
+	a.eventOverflowLimit = 1
+	a.sendEvent(Event{Type: "channel"})
+	a.sendEvent(Event{Type: EventSubAgentProgressUpdated, SourceID: "worker-1", Payload: &SubAgentProgressUpdatedPayload{Summary: "old"}})
+	a.sendEvent(Event{Type: EventSubAgentProgressUpdated, SourceID: "worker-1", Payload: &SubAgentProgressUpdatedPayload{Summary: "new"}})
+
+	if _, err := a.nextEvent(context.Background()); err != nil {
+		t.Fatalf("nextEvent: %v", err)
+	}
+	evt, err := a.nextEvent(context.Background())
+	if err != nil {
+		t.Fatalf("nextEvent: %v", err)
+	}
+	payload, _ := evt.Payload.(*SubAgentProgressUpdatedPayload)
+	if payload == nil || payload.Summary != "new" {
+		t.Fatalf("coalesced payload = %#v, want latest progress", evt.Payload)
+	}
+	if stats := a.EventQueueStats(); stats.Coalesced != 1 {
+		t.Fatalf("coalesced count = %d, want 1", stats.Coalesced)
+	}
+}
+
+func TestEventOverflowPreservesDistinctAgentLogs(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.eventCh = make(chan Event, 1)
+	a.sendEvent(Event{Type: "channel"})
+	a.sendEvent(Event{Type: EventAgentLog, SourceID: "worker-1", Payload: "first diagnostic"})
+	a.sendEvent(Event{Type: EventAgentLog, SourceID: "worker-1", Payload: "second diagnostic"})
+
+	wants := []string{"channel", "first diagnostic", "second diagnostic"}
+	for i, want := range wants {
+		evt, err := a.nextEvent(context.Background())
+		if err != nil {
+			t.Fatalf("nextEvent(%d): %v", i, err)
+		}
+		if i == 0 {
+			if evt.Type != want {
+				t.Fatalf("nextEvent(%d).Type = %q, want %q", i, evt.Type, want)
+			}
+			continue
+		}
+		if evt.Type != EventAgentLog || evt.Payload != want {
+			t.Fatalf("nextEvent(%d) = %#v, want AgentLog %q", i, evt, want)
+		}
+	}
+	if stats := a.EventQueueStats(); stats.Coalesced != 0 {
+		t.Fatalf("agent logs were coalesced: %+v", stats)
+	}
+}
+
+func TestEventOverflowCoalescingPreservesInterveningEventOrder(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.eventCh = make(chan Event, 1)
+	a.sendEvent(Event{Type: "channel"})
+	a.sendEvent(Event{Type: EventSubAgentProgressUpdated, SourceID: "worker-1", Payload: &SubAgentProgressUpdatedPayload{Summary: "old"}})
+	a.sendEvent(Event{Type: EventSubAgentStateChanged, SourceID: "worker-1"})
+	a.sendEvent(Event{Type: EventSubAgentProgressUpdated, SourceID: "worker-1", Payload: &SubAgentProgressUpdatedPayload{Summary: "new"}})
+
+	wants := []string{"channel", EventSubAgentStateChanged, EventSubAgentProgressUpdated}
+	for i, want := range wants {
+		evt, err := a.nextEvent(context.Background())
+		if err != nil {
+			t.Fatalf("nextEvent(%d): %v", i, err)
+		}
+		if evt.Type != want {
+			t.Fatalf("nextEvent(%d).Type = %q, want %q", i, evt.Type, want)
+		}
+		if evt.Type == EventSubAgentProgressUpdated {
+			payload, _ := evt.Payload.(*SubAgentProgressUpdatedPayload)
+			if payload == nil || payload.Summary != "new" {
+				t.Fatalf("progress payload = %#v, want latest progress", evt.Payload)
+			}
+		}
+	}
+}
+
+func TestEventOverflowDoesNotCoalesceResetNudgeAcrossIdle(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.eventCh = make(chan Event, 1)
+	a.sendEvent(Event{Type: "channel"})
+	a.sendEvent(Event{Type: EventResetNudge, SourceID: "worker-1"})
+	a.sendEvent(Event{Type: EventAgentIdle, SourceID: "worker-1"})
+	a.sendEvent(Event{Type: EventResetNudge, SourceID: "worker-1"})
+
+	wants := []string{"channel", EventResetNudge, EventAgentIdle, EventResetNudge}
+	for i, want := range wants {
+		evt, err := a.nextEvent(context.Background())
+		if err != nil {
+			t.Fatalf("nextEvent(%d): %v", i, err)
+		}
+		if evt.Type != want {
+			t.Fatalf("nextEvent(%d).Type = %q, want %q", i, evt.Type, want)
+		}
+	}
+}
+
+func TestEventOverflowBackpressureStopsOnShutdown(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.eventCh = make(chan Event, 1)
+	a.eventOverflowLimit = 1
+	a.sendEvent(Event{Type: "channel"})
+	a.sendEvent(Event{Type: "overflow"})
+	done := make(chan struct{})
+	go func() {
+		a.sendEvent(Event{Type: "blocked"})
+		close(done)
+	}()
+	close(a.stoppingCh)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("producer remained blocked after shutdown")
 	}
 }
 

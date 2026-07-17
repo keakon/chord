@@ -282,7 +282,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		if assessment := a.nextLoopAssessmentFromAssistant(assistantMsg); assessment != nil {
 			a.rememberIdleTurn(a.turn.ID)
 			a.turn = nil
-			a.sendEvent(Event{Type: EventLoopAssessment, Payload: assessment})
+			a.queueLoopEvent(Event{Type: EventLoopAssessment, Payload: assessment})
 			return
 		}
 		a.emitActivity("main", ActivityIdle, "")
@@ -394,7 +394,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 					}
 					// Consume and suppress speculative result, then surface the hook error.
 					_, _ = turn.streamingToolExec.DiscardCall(tc.ID, "hook_block")
-					a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q %s", tc.Name, msg), TurnID: turnID}})
+					a.queueLoopEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q %s", tc.Name, msg), TurnID: turnID}})
 					promoted = true
 					continue
 				case hook.ActionModify:
@@ -430,7 +430,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 				if err := a.commitPromotedToolSideEffects(effective, payload); err != nil {
 					payload.Error = fmt.Errorf("commit promoted tool side effects: %w", err)
 				}
-				a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: payload})
+				a.queueLoopEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: payload})
 				continue
 			} else if drift {
 				log.Debugf("speculative tool args drift; executing finalized call call_id=%s tool=%s", tc.ID, tc.Name)

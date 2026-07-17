@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -268,8 +270,9 @@ func (a *MainAgent) sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID
 	if callerAgentID != "" {
 		if caller := a.subAgentByID(callerAgentID); caller != nil {
 			sourceAgentType = caller.agentDefName
-			sourceParentAgentID = controlPlaneAgentID(caller.ownerAgentID)
-			sourceParentTaskID = caller.ownerTaskID
+			ownerAgentID, ownerTaskID, _, _ := caller.ownerSnapshot()
+			sourceParentAgentID = controlPlaneAgentID(ownerAgentID)
+			sourceParentTaskID = ownerTaskID
 		}
 	}
 	a.emitToTUI(AgentNotifyEvent{
@@ -321,12 +324,29 @@ func (a *MainAgent) deliverMessageToSubAgentWithMode(sub *SubAgent, message, kin
 	}
 
 	targetMailboxID := strings.TrimSpace(sub.LastMailboxID())
-	if mailbox := a.takeOutstandingMailboxForSub(sub); mailbox != nil {
-		targetMailboxID = strings.TrimSpace(mailbox.MessageID)
+	targetMailbox := a.takeOutstandingMailboxForSub(sub)
+	if targetMailbox != nil {
+		if !a.ensureSubAgentMailboxPersisted(targetMailbox) {
+			a.requeueSubAgentMailboxInMemory(*targetMailbox)
+			if needsResume {
+				a.releaseSubAgentSlot(sub)
+			}
+			return "", "", fmt.Errorf("persist target mailbox before reply acknowledgement")
+		}
+		targetMailboxID = strings.TrimSpace(targetMailbox.MessageID)
 	}
 
 	if targetMailboxID != "" {
-		_, artifactRelPath, _ := a.markSubAgentMailboxConsumedWithReply(sub.instanceID, targetMailboxID, 0, message, replyKind)
+		_, artifactRelPath, _, err := a.markSubAgentMailboxConsumedWithReply(sub.instanceID, targetMailboxID, 0, message, replyKind)
+		if err != nil {
+			if targetMailbox != nil {
+				a.requeueSubAgentMailboxInMemory(*targetMailbox)
+			}
+			if needsResume {
+				a.releaseSubAgentSlot(sub)
+			}
+			return "", "", fmt.Errorf("persist mailbox reply acknowledgement: %w", err)
+		}
 		if artifactRelPath != "" {
 			payload = fmt.Sprintf("[%s] Summary: %s\nDetailed instruction artifact: %s", replyKind, truncateMailboxReplySummary(message), artifactRelPath)
 		}
@@ -371,6 +391,10 @@ func (a *MainAgent) getOrRehydrateTask(record *DurableTaskRecord) (*SubAgent, st
 	if record == nil {
 		return nil, "", false, fmt.Errorf("missing task record")
 	}
+	if a.shuttingDown.Load() || a.admissionPaused.Load() {
+		return nil, "", false, fmt.Errorf("cannot reactivate task during shutdown or session transition")
+	}
+	admissionEpoch := a.admissionEpoch.Load()
 	taskID := strings.TrimSpace(record.TaskID)
 	if taskID == "" {
 		return nil, "", false, fmt.Errorf("missing task ID")
@@ -385,7 +409,7 @@ func (a *MainAgent) getOrRehydrateTask(record *DurableTaskRecord) (*SubAgent, st
 			return nil, "", false, a.parentCtx.Err()
 		}
 	} else {
-		return a.rehydrateTaskAsActivationLeader(record, activation)
+		return a.rehydrateTaskAsActivationLeader(record, activation, admissionEpoch)
 	}
 }
 
@@ -394,7 +418,7 @@ func (a *MainAgent) rehydrateTask(record *DurableTaskRecord) (*SubAgent, string,
 	return sub, previousAgentID, err
 }
 
-func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, activation *subAgentActivation) (sub *SubAgent, previousAgentID string, rehydrated bool, err error) {
+func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, activation *subAgentActivation, admissionEpoch uint64) (sub *SubAgent, previousAgentID string, rehydrated bool, err error) {
 	taskID := strings.TrimSpace(record.TaskID)
 	defer func() {
 		a.subs.completeTaskActivation(taskID, activation, sub, previousAgentID, err)
@@ -475,7 +499,14 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	if len(record.LastArtifactRefs) > 0 {
 		sub.setLastArtifact(record.LastArtifactRefs[0])
 	}
+	a.admissionMu.Lock()
+	if a.shuttingDown.Load() || a.admissionPaused.Load() || a.admissionEpoch.Load() != admissionEpoch {
+		a.admissionMu.Unlock()
+		cancel()
+		return nil, "", false, fmt.Errorf("task reactivation invalidated by session or lifecycle change")
+	}
 	if err := a.acquireSubAgentSlot(sub); err != nil {
+		a.admissionMu.Unlock()
 		cancel()
 		return nil, "", false, err
 	}
@@ -483,12 +514,18 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	live, registered := a.subs.registerTaskActivation(taskID, activation, sub)
 	if !registered {
 		a.releaseSubAgentSlot(sub)
+		a.admissionMu.Unlock()
 		cancel()
 		if live == nil {
 			return nil, "", false, fmt.Errorf("task %s activation was superseded", taskID)
 		}
 		return live, "", false, nil
 	}
+	sub.startRunLoop()
+	registrationSessionDir := a.sessionDir
+	a.subAgentMetaPersistMu.Lock()
+	a.taskRegistryPersistMu.Lock()
+	a.admissionMu.Unlock()
 	a.migrateSubAgentOwnerIdentity(previousAgentID, sub.instanceID)
 	a.focusedTaskMu.RLock()
 	focusedTaskID := a.focusedTaskID
@@ -496,18 +533,26 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	if focusedTaskID == sub.taskID {
 		a.focusedAgent.Store(sub)
 	}
-	a.persistSubAgentMeta(sub)
-	a.syncTaskRecordFromSub(sub, "")
+	a.persistSubAgentMetaToSession(sub, registrationSessionDir)
+	if a.updateTaskRecordFromSub(sub, "") {
+		a.subs.mu.RLock()
+		registrationRecords := cloneDurableTaskRecordMap(a.subs.taskRecords)
+		a.subs.mu.RUnlock()
+		if persistErr := persistDurableTaskRecords(registrationSessionDir, registrationRecords); persistErr != nil {
+			log.Warnf("failed to persist rehydrated durable task registration session=%v task_id=%v error=%v", registrationSessionDir, taskID, persistErr)
+		}
+	}
+	a.taskRegistryPersistMu.Unlock()
+	a.subAgentMetaPersistMu.Unlock()
 	a.emitToTUI(AgentStartedEvent{
 		AgentID:         sub.instanceID,
 		PreviousAgentID: previousAgentID,
 		TaskID:          sub.taskID,
 		AgentType:       sub.agentDefName,
 		Description:     sub.taskDesc,
-		ParentAgentID:   controlPlaneAgentID(sub.ownerAgentID),
-		ParentTaskID:    sub.ownerTaskID,
+		ParentAgentID:   controlPlaneAgentID(sub.OwnerAgentID()),
+		ParentTaskID:    sub.OwnerTaskID(),
 	})
-	sub.startRunLoop()
 	return sub, previousAgentID, true, nil
 }
 

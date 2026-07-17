@@ -33,6 +33,11 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+const (
+	defaultEventOverflowLimit = 4096
+	defaultLoopEventLimit     = 256
+)
+
 // Keyed by MCP scope and server name. Entries whose Mgr is nil are sentinels
 // for servers inherited from top-level config. Agent-private entries are scoped
 // by agent definition so instances of one agent reuse a connection without
@@ -90,6 +95,7 @@ type Turn struct {
 	// SubAgent terminal recovery is intentionally bounded to one additional
 	// request so transport failures or text-only replies cannot spin forever.
 	SubAgentTerminalRecoveryCount int
+	SubAgentContextRecoveryCount  int
 	// MalformedCount tracks consecutive LLM rounds where tool calls had
 	// abnormal arguments — either the malformed sentinel (invalid JSON) or
 	// empty "{}" for tools with required parameters (output truncation).
@@ -211,6 +217,9 @@ type ConfirmFunc func(ctx context.Context, toolName string, args string, needsAp
 type SubAgentInfo struct {
 	InstanceID       string
 	TaskID           string
+	OwnerAgentID     string
+	OwnerTaskID      string
+	Depth            int
 	AgentDefName     string
 	TaskDesc         string
 	ModelName        string
@@ -287,10 +296,17 @@ type MainAgent struct {
 	// Internal event bus. Goroutines that perform async work (LLM calls,
 	// tool execution) send results here; the single-threaded Run loop
 	// processes them in order.
-	eventCh        chan Event
-	eventWakeCh    chan struct{}
-	eventMu        sync.Mutex
-	deferredEvents []Event
+	eventCh            chan Event
+	eventWakeCh        chan struct{}
+	eventSpaceCh       chan struct{}
+	eventMu            sync.Mutex
+	deferredEvents     []Event
+	loopEvents         []Event
+	eventOverflowPeak  atomic.Uint64
+	eventCoalesced     atomic.Uint64
+	eventBackpressure  atomic.Uint64
+	eventOverflowLimit int
+	loopEventLimit     int
 
 	// pendingUserMessages holds user-facing context additions received while the
 	// agent is busy (turn != nil). User-authored input must not be silently
@@ -424,6 +440,9 @@ type MainAgent struct {
 	// taskRecords/nudgeCounts/subAgentStateEnteredTurn).
 	subs                     subAgentRegistry
 	admissionMu              sync.Mutex
+	admissionEpoch           atomic.Uint64
+	admissionPaused          atomic.Bool
+	subAgentMetaPersistMu    sync.Mutex
 	taskRegistryPersistMu    sync.Mutex
 	taskRegistryPersistHook  func()                    // test-only barrier after snapshot, before durable write
 	sem                      chan struct{}             // bounded concurrency semaphore (cap = 10)
@@ -680,6 +699,9 @@ func NewMainAgent(
 		projectConfig:           projectCfg,
 		eventCh:                 make(chan Event, 256),
 		eventWakeCh:             make(chan struct{}, 1),
+		eventSpaceCh:            make(chan struct{}, 1),
+		eventOverflowLimit:      defaultEventOverflowLimit,
+		loopEventLimit:          defaultLoopEventLimit,
 		outputCh:                make(chan AgentEvent, 512),
 		sessionDir:              sessionDir,
 		modelName:               modelName,
@@ -1076,7 +1098,10 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 
 	// Mark as shutting down so UpdateTodos stops saving snapshots (the final
 	// snapshot is saved below and must not be overwritten).
+	a.admissionMu.Lock()
 	a.shuttingDown.Store(true)
+	a.admissionEpoch.Add(1)
+	a.admissionMu.Unlock()
 
 	a.cancelActiveWork()
 	a.waitForSubAgents(remaining)
@@ -1826,11 +1851,11 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		})
 		a.releaseSubAgentSlot(sub2)
 		a.emitActivity(evt.SourceID, ActivityIdle, "")
-		a.sendEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
+		a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
 			AgentID:      evt.SourceID,
 			TaskID:       sub2.taskID,
-			OwnerAgentID: sub2.ownerAgentID,
-			OwnerTaskID:  sub2.ownerTaskID,
+			OwnerAgentID: sub2.OwnerAgentID(),
+			OwnerTaskID:  sub2.OwnerTaskID(),
 			InReplyTo:    firstReplyMessageID(sub2),
 			Kind:         SubAgentMailboxKindRiskAlert,
 			Priority:     SubAgentMailboxPriorityInterrupt,
@@ -1845,10 +1870,10 @@ func (a *MainAgent) handleAgentError(evt Event) {
 			AgentID:       evt.SourceID,
 			TaskID:        sub2.taskID,
 			AgentType:     sub2.agentDefName,
-			ParentAgentID: controlPlaneAgentID(sub2.ownerAgentID),
-			ParentTaskID:  sub2.ownerTaskID,
-			TargetAgentID: controlPlaneAgentID(sub2.ownerAgentID),
-			TargetTaskID:  sub2.ownerTaskID,
+			ParentAgentID: controlPlaneAgentID(sub2.OwnerAgentID()),
+			ParentTaskID:  sub2.OwnerTaskID(),
+			TargetAgentID: controlPlaneAgentID(sub2.OwnerAgentID()),
+			TargetTaskID:  sub2.OwnerTaskID(),
 			Kind:          string(SubAgentMailboxKindRiskAlert),
 			Message:       failureSummary,
 		})
@@ -1875,6 +1900,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 // prompt, and starts the LLM loop. planPath may be empty, in which case
 // lastPlanPath is used. agentName defaults to "builder" if empty.
 func (a *MainAgent) startPlanExecution(planPath, agentName string) {
+	defer a.finishSessionSwitch()
 	if agentName == "" {
 		agentName = "builder"
 	}

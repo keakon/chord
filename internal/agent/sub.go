@@ -89,6 +89,7 @@ type SubAgent struct {
 	planTaskRef        string
 	semanticTaskKey    string
 	writeScope         tools.WriteScope
+	ownerMu            sync.RWMutex
 	ownerAgentID       string
 	ownerTaskID        string
 	depth              int
