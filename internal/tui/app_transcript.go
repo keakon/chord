@@ -96,6 +96,10 @@ func findMatchingMainUserMsgIndex(msgs []message.Message, block *Block, used map
 }
 
 func (m *Model) rebuildViewportFromMessagesWithReason(reason string) {
+	m.rebuildViewportFromMessagesPreservingActivity(reason, false)
+}
+
+func (m *Model) rebuildViewportFromMessagesPreservingActivity(reason string, preserveRequestActivity bool) {
 	if m.agent == nil {
 		return
 	}
@@ -117,7 +121,7 @@ func (m *Model) rebuildViewportFromMessagesWithReason(reason string) {
 	m.currentThinkingBlock = nil
 	m.thinkingBlockAppended = false
 	m.subAgentStreamStates = nil
-	m.resetTimingStateForSessionRestore()
+	m.resetTimingStateForSessionRestore(preserveRequestActivity)
 	m.closeAtMention()
 	messagesStarted := time.Now()
 	msgs := m.agent.GetMessages()

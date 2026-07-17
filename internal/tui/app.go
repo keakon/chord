@@ -115,7 +115,8 @@ type reconnectedMsg struct {
 type reconnectFailedMsg struct{}
 
 type sessionRestoredRebuildMsg struct {
-	reason string
+	reason                  string
+	preserveRequestActivity bool
 }
 
 type statusBarCopyRegionState struct {
@@ -713,7 +714,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if shouldResetRuntimeCache {
 			oldStore, oldHandle, staleErr = m.prepareRuntimeCacheSession(true)
 		}
-		m.rebuildViewportFromMessagesWithReason(msg.reason)
+		m.rebuildViewportFromMessagesPreservingActivity(msg.reason, msg.preserveRequestActivity)
+		animationCmd := m.startActiveAnimation()
 		m.finishRuntimeCacheSessionSwap(oldStore, oldHandle)
 		m.clearSessionSwitch()
 		// Update terminal title from the restored session's first user message.
@@ -721,7 +723,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if staleErr != nil {
 			log.Warnf("tui runtime cache reset failed error=%v", staleErr)
 		}
-		return m, tea.Batch(m.imageProtocolCmd(), m.scheduleStartupDeferredTranscriptPreheat(startupDeferredTranscriptPreheatDelay))
+		return m, tea.Batch(animationCmd, m.imageProtocolCmd(), m.scheduleStartupDeferredTranscriptPreheat(startupDeferredTranscriptPreheatDelay))
 
 	// -- IME: got current IM before switching to English; save and switch to target
 	case imeCurrentMsg:

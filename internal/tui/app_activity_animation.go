@@ -203,7 +203,31 @@ func clearBlocksSettledAt(blocks []*Block) {
 	}
 }
 
-func (m *Model) resetTimingStateForSessionRestore() {
+func (m *Model) resetTimingStateForSessionRestore(preserveRequestActivity bool) {
+	var (
+		mainActivity        agent.AgentActivityEvent
+		mainActivityStart   time.Time
+		mainActivityChanged time.Time
+		mainProgress        requestProgressState
+		mainWorkStarted     time.Time
+		mainTurnStarted     time.Time
+		mainStreamDelta     time.Time
+	)
+	if preserveRequestActivity {
+		mainActivity = m.activityForAgent("main")
+		preserveRequestActivity = mainActivity.Type == agent.ActivityConnecting ||
+			mainActivity.Type == agent.ActivityWaitingHeaders ||
+			mainActivity.Type == agent.ActivityWaitingToken ||
+			mainActivity.Type == agent.ActivityStreaming
+		if preserveRequestActivity {
+			mainActivityStart = m.activityStartTime["main"]
+			mainActivityChanged = m.activityLastChanged["main"]
+			mainProgress = m.requestProgress["main"]
+			mainWorkStarted = m.workStartedAt["main"]
+			mainTurnStarted = m.turnBusyStartedAt["main"]
+			mainStreamDelta = m.streamLastDeltaAt["main"]
+		}
+	}
 	clear(m.activities)
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
 	clear(m.activityStartTime)
@@ -217,6 +241,15 @@ func (m *Model) resetTimingStateForSessionRestore() {
 	m.lastSweepAt = time.Time{}
 	m.idleSweepScheduled = false
 	m.idleSweepGeneration++
+	if preserveRequestActivity {
+		m.activities["main"] = mainActivity
+		m.activityStartTime["main"] = mainActivityStart
+		m.activityLastChanged["main"] = mainActivityChanged
+		m.requestProgress["main"] = mainProgress
+		m.workStartedAt["main"] = mainWorkStarted
+		m.turnBusyStartedAt["main"] = mainTurnStarted
+		m.streamLastDeltaAt["main"] = mainStreamDelta
+	}
 }
 
 func (m *Model) markRequestProgressBaseline(agentID string) {

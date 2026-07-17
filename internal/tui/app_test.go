@@ -5347,6 +5347,95 @@ func TestSessionRestoredEventClearsStartupRestorePlaceholder(t *testing.T) {
 	}
 }
 
+func TestCompactionRebuildPreservesActiveMainRequest(t *testing.T) {
+	backend := &sessionControlAgent{messages: []message.Message{{
+		Role:                message.RoleUser,
+		IsCompactionSummary: true,
+		Content:             "[Context Summary]\nsummary\n\n[Context compressed]",
+	}}}
+	m := NewModelWithSize(backend, 100, 30)
+	started := time.Now().Add(-2 * time.Second)
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityConnecting, AgentID: "main"}
+	m.activityStartTime["main"] = started
+	m.workStartedAt["main"] = started
+	m.turnBusyStartedAt["main"] = started
+	m.activities["agent-1"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "agent-1"}
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{PreserveRequestActivity: true}})
+	if cmd == nil {
+		t.Fatal("compaction SessionRestoredEvent should schedule a rebuild message")
+	}
+	updated, next := m.Update(cmd())
+	model, ok := updated.(*Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want *Model", updated)
+	}
+	m = *model
+	if next == nil {
+		t.Fatal("compaction rebuild did not schedule replacement animation tick")
+	}
+	commandMsg := next()
+	batch, ok := commandMsg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("compaction rebuild command = %T, want tea.BatchMsg", commandMsg)
+	}
+	animationScheduled := false
+	for _, child := range batch {
+		if child == nil {
+			continue
+		}
+		if _, ok := child().(animTickMsg); ok {
+			animationScheduled = true
+			break
+		}
+	}
+	if !animationScheduled {
+		t.Fatal("compaction rebuild did not include an animation tick")
+	}
+
+	if got := m.activityForAgent("main").Type; got != agent.ActivityConnecting {
+		t.Fatalf("main activity after compaction rebuild = %v, want connecting", got)
+	}
+	if got := m.activityStartTime["main"]; !got.Equal(started) {
+		t.Fatalf("main activity start after compaction rebuild = %v, want %v", got, started)
+	}
+	if _, ok := m.activities["agent-1"]; ok {
+		t.Fatal("compaction rebuild should not preserve unrelated sub-agent activity")
+	}
+	if plain := stripANSI(m.renderStatusBar()); !strings.Contains(plain, "↓ 0 B") {
+		t.Fatalf("status bar after compaction rebuild should show request activity, got %q", plain)
+	}
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 1 || blocks[0].Type != BlockCompactionSummary {
+		t.Fatalf("rebuilt blocks = %#v, want one compaction summary", blocks)
+	}
+}
+
+func TestOrdinarySessionRestoreStillClearsActiveMainRequest(t *testing.T) {
+	backend := &sessionControlAgent{messages: []message.Message{{Role: message.RoleUser, Content: "restored"}}}
+	m := NewModelWithSize(backend, 100, 30)
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityConnecting, AgentID: "main"}
+	m.activityStartTime["main"] = time.Now()
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	if cmd == nil {
+		t.Fatal("SessionRestoredEvent should schedule a rebuild message")
+	}
+	updated, _ := m.Update(cmd())
+	model, ok := updated.(*Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want *Model", updated)
+	}
+	m = *model
+
+	if got := m.activityForAgent("main").Type; got != agent.ActivityIdle {
+		t.Fatalf("main activity after ordinary restore = %v, want idle", got)
+	}
+	if _, ok := m.activityStartTime["main"]; ok {
+		t.Fatal("ordinary restore should clear the previous request timing")
+	}
+}
+
 func TestNarrowStatusBarShowsRunningModelRefVerbatim(t *testing.T) {
 	events := make(chan agent.AgentEvent, 1)
 	a := &sessionControlAgent{

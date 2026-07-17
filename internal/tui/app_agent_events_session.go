@@ -52,7 +52,12 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		m.setFocusedAgent("")
 		effects.refreshSidebar = true
 		effects.invalidateUsage = true
-		effects.addFollowup(func() tea.Msg { return sessionRestoredRebuildMsg{reason: reason} })
+		effects.addFollowup(func() tea.Msg {
+			return sessionRestoredRebuildMsg{
+				reason:                  reason,
+				preserveRequestActivity: evt.PreserveRequestActivity,
+			}
+		})
 		return true, effects
 	case agent.SessionTitleChangedEvent:
 		if evt.Title != "" {

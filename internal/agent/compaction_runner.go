@@ -371,7 +371,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	}
 	a.emitToTUI(ToastEvent{Message: info, Level: "info"})
 	a.emitToTUI(CompactionStatusEvent{Status: "succeeded"})
-	a.emitToTUI(SessionRestoredEvent{})
+	a.emitToTUI(SessionRestoredEvent{PreserveRequestActivity: true})
 
 	a.sessionReminderInjected.Store(false)
 

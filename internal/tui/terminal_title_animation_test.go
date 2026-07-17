@@ -435,7 +435,7 @@ func TestResetTimingStateForSessionRestoreStopsTerminalTitleTicker(t *testing.T)
 	m.animRunning = true
 	m.terminalTitleTickRunning = true
 
-	m.resetTimingStateForSessionRestore()
+	m.resetTimingStateForSessionRestore(false)
 
 	if m.animRunning {
 		t.Fatal("session restore timing reset should stop visual animation immediately")

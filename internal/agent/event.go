@@ -589,7 +589,9 @@ func (SessionSwitchStartedEvent) agentEvent() {}
 // SessionRestoredEvent signals that the conversation was restored from
 // a persisted session (e.g. after /resume <id>). The TUI should rebuild
 // the viewport from the current messages so the restored history is visible.
-type SessionRestoredEvent struct{}
+type SessionRestoredEvent struct {
+	PreserveRequestActivity bool
+}
 
 func (SessionRestoredEvent) agentEvent() {}
 
