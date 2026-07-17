@@ -278,6 +278,9 @@ func writeScopesOverlap(a, b tools.WriteScope, baseDir string) bool {
 	if a.ReadOnly || b.ReadOnly {
 		return false
 	}
+	if a.Empty() || b.Empty() {
+		return true
+	}
 	for _, fa := range a.Files {
 		for _, fb := range b.Files {
 			if normalizedScopeAbsPath(fa, baseDir) == normalizedScopeAbsPath(fb, baseDir) {
@@ -321,22 +324,57 @@ func (a *MainAgent) findDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTask
 		semanticTaskKey = semanticTaskKeyFallback(planTaskRef)
 	}
 	expectedWriteScope = expectedWriteScope.Normalized()
+	ownerLineage := a.taskOwnerLineageLocked(ownerTaskID)
 	for _, rec := range a.subs.taskRecords {
-		if rec == nil {
-			continue
-		}
-		if strings.TrimSpace(rec.OwnerAgentID) == strings.TrimSpace(ownerAgentID) && strings.TrimSpace(rec.OwnerTaskID) == strings.TrimSpace(ownerTaskID) && strings.TrimSpace(rec.AgentDefName) == strings.TrimSpace(agentType) {
-			if (planTaskRef != "" && strings.TrimSpace(rec.PlanTaskRef) == planTaskRef) || (semanticTaskKey != "" && strings.TrimSpace(rec.SemanticTaskKey) == semanticTaskKey) {
-				if isNonTerminalTaskState(rec.State) || rec.allowsRehydrate(taskResumeByTargetedNotify) {
-					return cloneDurableTaskRecord(rec), false
-				}
+		if rec != nil {
+			if _, ancestor := ownerLineage[strings.TrimSpace(rec.TaskID)]; ancestor {
+				continue
 			}
 		}
-		if isNonTerminalTaskState(rec.State) && !expectedWriteScope.Empty() && !rec.ExpectedWriteScope.Empty() && writeScopesOverlap(expectedWriteScope, rec.ExpectedWriteScope, a.projectRoot) {
-			return cloneDurableTaskRecord(rec), true
+		if duplicate, conflict := duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, expectedWriteScope, a.projectRoot); duplicate {
+			return cloneDurableTaskRecord(rec), conflict
 		}
 	}
 	return nil, false
+}
+
+func (a *MainAgent) taskOwnerLineageLocked(ownerTaskID string) map[string]struct{} {
+	lineage := make(map[string]struct{})
+	for taskID := strings.TrimSpace(ownerTaskID); taskID != ""; {
+		if _, seen := lineage[taskID]; seen {
+			break
+		}
+		lineage[taskID] = struct{}{}
+		rec := a.subs.taskRecords[taskID]
+		if rec == nil {
+			break
+		}
+		taskID = strings.TrimSpace(rec.OwnerTaskID)
+	}
+	return lineage
+}
+
+func duplicateOrConflictingTaskRecord(rec *DurableTaskRecord, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope, projectRoot string) (duplicate, conflict bool) {
+	if rec == nil {
+		return false, false
+	}
+	if strings.TrimSpace(rec.OwnerAgentID) == strings.TrimSpace(ownerAgentID) && strings.TrimSpace(rec.OwnerTaskID) == strings.TrimSpace(ownerTaskID) && strings.TrimSpace(rec.AgentDefName) == strings.TrimSpace(agentType) {
+		if (planTaskRef != "" && strings.TrimSpace(rec.PlanTaskRef) == planTaskRef) || (semanticTaskKey != "" && strings.TrimSpace(rec.SemanticTaskKey) == semanticTaskKey) {
+			if isNonTerminalTaskState(rec.State) || rec.allowsRehydrate(taskResumeByTargetedNotify) {
+				return true, false
+			}
+		}
+	}
+	// A parent delegates work from within its own write lease. The child scope
+	// is separately required to be no broader than the parent, so treating the
+	// owner record as a competing task would reject every nested delegation.
+	if strings.TrimSpace(rec.TaskID) == strings.TrimSpace(ownerTaskID) {
+		return false, false
+	}
+	if isNonTerminalTaskState(rec.State) && writeScopesOverlap(expectedWriteScope, rec.ExpectedWriteScope, projectRoot) {
+		return true, true
+	}
+	return false, false
 }
 
 func (a *MainAgent) taskRecordByTaskID(taskID string) *DurableTaskRecord {
@@ -387,9 +425,9 @@ func (a *MainAgent) setTaskRecords(records map[string]*DurableTaskRecord) {
 	}
 }
 
-func (a *MainAgent) persistTaskRegistry() {
+func (a *MainAgent) persistTaskRegistry() error {
 	if a == nil {
-		return
+		return nil
 	}
 	a.taskRegistryPersistMu.Lock()
 	defer a.taskRegistryPersistMu.Unlock()
@@ -419,14 +457,45 @@ func (a *MainAgent) persistTaskRegistry() {
 	}
 	if err := persistDurableTaskRecords(sessionDir, records); err != nil {
 		log.Warnf("failed to persist durable task registry session=%v error=%v", sessionDir, err)
+		return err
 	}
+	return nil
+}
+
+func (a *MainAgent) persistTaskRegistrySnapshot(sessionDir string, records map[string]*DurableTaskRecord) error {
+	if a == nil {
+		return nil
+	}
+	a.taskRegistryPersistMu.Lock()
+	defer a.taskRegistryPersistMu.Unlock()
+	if hook := a.taskRegistryPersistHook; hook != nil {
+		hook()
+	}
+	return persistDurableTaskRecords(sessionDir, records)
+}
+
+func (a *MainAgent) persistSubAgentRegistration(sessionDir string, sub *SubAgent, records map[string]*DurableTaskRecord) error {
+	if a == nil || sub == nil {
+		return nil
+	}
+	a.subAgentMetaPersistMu.Lock()
+	a.taskRegistryPersistMu.Lock()
+	defer a.taskRegistryPersistMu.Unlock()
+	defer a.subAgentMetaPersistMu.Unlock()
+	if err := a.persistSubAgentMetaToSession(sub, sessionDir); err != nil {
+		return err
+	}
+	if hook := a.taskRegistryPersistHook; hook != nil {
+		hook()
+	}
+	return persistDurableTaskRecords(sessionDir, records)
 }
 
 func (a *MainAgent) syncTaskRecordFromSub(sub *SubAgent, closedReason string) {
 	if !a.updateTaskRecordFromSub(sub, closedReason) {
 		return
 	}
-	a.persistTaskRegistry()
+	_ = a.persistTaskRegistry()
 }
 
 func (a *MainAgent) updateTaskRecordFromSub(sub *SubAgent, closedReason string) bool {
@@ -437,20 +506,31 @@ func (a *MainAgent) updateTaskRecordFromSub(sub *SubAgent, closedReason string) 
 	if taskID == "" {
 		return false
 	}
-	state := sub.State()
 	currentTurn := a.explicitUserTurnCount.Load()
-	summary := sub.LastSummary()
-	lastMailboxID := sub.LastMailboxID()
-	lastReplyMessageID, lastReplyToMailboxID, lastReplyKind, lastReplySummary := sub.LastReplyThread()
-	lastArtifact := sub.LastArtifact()
-	ownerAgentID, ownerTaskID, depth, joinToOwner := sub.ownerSnapshot()
 	now := time.Now()
 
 	a.subs.mu.Lock()
 	if a.subs.taskRecords == nil {
 		a.subs.taskRecords = make(map[string]*DurableTaskRecord)
 	}
-	rec := cloneDurableTaskRecord(a.subs.taskRecords[taskID])
+	rec := buildTaskRecordFromSub(sub, a.subs.taskRecords[taskID], closedReason, currentTurn, now)
+	a.subs.taskRecords[taskID] = rec
+	a.subs.mu.Unlock()
+	return true
+}
+
+func buildTaskRecordFromSub(sub *SubAgent, previous *DurableTaskRecord, closedReason string, currentTurn uint64, now time.Time) *DurableTaskRecord {
+	if sub == nil {
+		return nil
+	}
+	taskID := strings.TrimSpace(sub.taskID)
+	state := sub.State()
+	summary := sub.LastSummary()
+	lastMailboxID := sub.LastMailboxID()
+	lastReplyMessageID, lastReplyToMailboxID, lastReplyKind, lastReplySummary := sub.LastReplyThread()
+	lastArtifact := sub.LastArtifact()
+	ownerAgentID, ownerTaskID, depth, joinToOwner := sub.ownerSnapshot()
+	rec := cloneDurableTaskRecord(previous)
 	if rec == nil {
 		rec = &DurableTaskRecord{
 			TaskID:      taskID,
@@ -507,9 +587,7 @@ func (a *MainAgent) updateTaskRecordFromSub(sub *SubAgent, closedReason string) 
 	} else if state == SubAgentStateRunning || state == SubAgentStateWaitingMain || state == SubAgentStateIdle {
 		rec.ClosedReason = ""
 	}
-	a.subs.taskRecords[taskID] = rec
-	a.subs.mu.Unlock()
-	return true
+	return rec
 }
 
 func taskRecordFromLoadedState(state loadedSubAgentState) *DurableTaskRecord {

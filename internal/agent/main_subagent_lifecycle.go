@@ -61,13 +61,15 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 		return false
 	}
 	focused := a.focusedAgent.Load() == sub
-	a.persistSubAgentMeta(sub)
-	a.syncTaskRecordFromSub(sub, "")
 	a.flushPersistUntil(func() {
 		if hook := a.subAgentParkBarrierHook; hook != nil {
 			hook(sub)
 		}
 	})
+	if !sub.transcriptPersistenceHealthy() {
+		log.Warnf("refusing to park SubAgent because pending transcript persistence failed agent_id=%v task_id=%v", agentID, sub.taskID)
+		return false
+	}
 	if sub.hasPendingUserInput() {
 		switch sub.State() {
 		case SubAgentStateIdle, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant:
@@ -81,18 +83,57 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 	if !sub.canPark() {
 		return false
 	}
+	parkedAt := time.Now()
+	a.subs.mu.Lock()
+	if current := a.subs.subAgents[agentID]; current != sub || !sub.canPark() {
+		a.subs.mu.Unlock()
+		return false
+	}
+	previousRecord := cloneDurableTaskRecord(a.subs.taskRecords[sub.taskID])
+	parkedRecord := buildTaskRecordFromSub(sub, previousRecord, "", a.explicitUserTurnCount.Load(), parkedAt)
+	parkedRecord.RuntimeParked = true
+	records := cloneDurableTaskRecordMap(a.subs.taskRecords)
+	if records == nil {
+		records = make(map[string]*DurableTaskRecord)
+	}
+	records[sub.taskID] = parkedRecord
+	a.subs.mu.Unlock()
+	if err := a.persistSubAgentMeta(sub); err != nil {
+		log.Warnf("refusing to park SubAgent because metadata persistence failed agent_id=%v task_id=%v error=%v", agentID, sub.taskID, err)
+		return false
+	}
+	if err := a.persistTaskRegistrySnapshot(a.sessionDir, records); err != nil {
+		log.Warnf("refusing to park SubAgent because task registry persistence failed agent_id=%v task_id=%v error=%v", agentID, sub.taskID, err)
+		return false
+	}
 	a.subs.mu.Lock()
 	if current := a.subs.subAgents[agentID]; current != sub || !sub.canPark() {
 		a.subs.mu.Unlock()
 		return false
 	}
 	removed := a.subs.removeLocked(agentID)
-	parkedAt := time.Now()
-	if rec := a.subs.taskRecords[sub.taskID]; rec != nil {
-		rec.RuntimeParked = true
-		rec.UpdatedAt = parkedAt
-	}
+	a.subs.taskRecords[sub.taskID] = cloneDurableTaskRecord(parkedRecord)
 	a.subs.mu.Unlock()
+	if a.recovery != nil {
+		if err := a.recovery.SaveSnapshot(a.buildRecoverySnapshot()); err != nil {
+			a.subs.mu.Lock()
+			if removed == sub {
+				a.subs.subAgents[agentID] = sub
+			}
+			if previousRecord != nil {
+				a.subs.taskRecords[sub.taskID] = cloneDurableTaskRecord(previousRecord)
+			}
+			a.subs.stateEnteredTurn[agentID] = a.explicitUserTurnCount.Load()
+			a.subs.mu.Unlock()
+			rollbackRecords := cloneDurableTaskRecordMap(records)
+			if previousRecord != nil {
+				rollbackRecords[sub.taskID] = cloneDurableTaskRecord(previousRecord)
+			}
+			_ = a.persistTaskRegistrySnapshot(a.sessionDir, rollbackRecords)
+			log.Warnf("refusing to park SubAgent because recovery snapshot persistence failed agent_id=%v task_id=%v error=%v", agentID, sub.taskID, err)
+			return false
+		}
+	}
 	if removed != sub {
 		if removed != nil {
 			a.subs.add(removed)
@@ -108,7 +149,6 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 		a.setFocusedTaskID(sub.taskID)
 	}
 
-	a.persistTaskRegistry()
 	a.orchestrationMetrics.recordPark(sub.taskID, parkedAt)
 	log.Debugf("parked quiescent subagent agent_id=%v task_id=%v state=%v", agentID, sub.taskID, sub.State())
 	return true

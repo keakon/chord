@@ -49,19 +49,19 @@ func subAgentMetaPath(sessionDir, instanceID string) string {
 	return filepath.Join(sessionDir, "subagents", instanceID+".meta.json")
 }
 
-func (a *MainAgent) persistSubAgentMeta(sub *SubAgent) {
+func (a *MainAgent) persistSubAgentMeta(sub *SubAgent) error {
 	if a == nil || sub == nil {
-		return
+		return nil
 	}
 	a.subAgentMetaPersistMu.Lock()
 	defer a.subAgentMetaPersistMu.Unlock()
-	a.persistSubAgentMetaToSession(sub, a.sessionDir)
+	return a.persistSubAgentMetaToSession(sub, a.sessionDir)
 }
 
-func (a *MainAgent) persistSubAgentMetaToSession(sub *SubAgent, sessionDir string) {
+func (a *MainAgent) persistSubAgentMetaToSession(sub *SubAgent, sessionDir string) error {
 	path := subAgentMetaPath(sessionDir, sub.instanceID)
 	if path == "" {
-		return
+		return nil
 	}
 	state := sub.State()
 	summary := sub.LastSummary()
@@ -100,10 +100,10 @@ func (a *MainAgent) persistSubAgentMetaToSession(sub *SubAgent, sessionDir strin
 	}
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
-		return
+		return err
 	}
 	data = append(data, '\n')
-	_ = privatefs.WriteFile(sessionDir, path, data)
+	return privatefs.WriteFile(sessionDir, path, data)
 }
 
 func loadSubAgentMeta(sessionDir, instanceID string) (*subAgentMeta, error) {

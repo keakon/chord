@@ -129,6 +129,7 @@ func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.C
 	a.admissionEpoch.Add(1)
 	oldRecovery := a.recovery
 	a.subs.cancelTaskActivations(fmt.Errorf("task activation cancelled by session switch"))
+	a.cancelSubAgentAdmissions()
 	a.focusedAgent.Store(nil)
 	a.setFocusedTaskID("")
 	a.clearSystemPromptOverride()

@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/keakon/golog/log"
-
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -512,9 +510,17 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 		cancel()
 		return nil, "", false, err
 	}
+	clientCommitted := false
+	defer func() {
+		if !clientCommitted && subLLMClient != nil {
+			subLLMClient.InvalidateRouting("subagent_rehydrate_aborted")
+		}
+	}()
 	previousAgentID = strings.TrimSpace(record.LatestInstanceID)
-	live, registered := a.subs.registerTaskActivation(taskID, activation, sub)
-	if !registered {
+	a.subs.mu.Lock()
+	if a.subs.activations[taskID] != activation || activation.cancelled {
+		live := a.subs.subAgentByTaskIDLocked(taskID)
+		a.subs.mu.Unlock()
 		a.releaseSubAgentSlot(sub)
 		a.admissionMu.Unlock()
 		cancel()
@@ -523,10 +529,51 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 		}
 		return live, "", false, nil
 	}
-	sub.startRunLoop()
 	registrationSessionDir := a.sessionDir
-	a.subAgentMetaPersistMu.Lock()
-	a.taskRegistryPersistMu.Lock()
+	rehydratedRecord := buildTaskRecordFromSub(sub, a.subs.taskRecords[taskID], "", a.explicitUserTurnCount.Load(), time.Now())
+	registrationRecords := cloneDurableTaskRecordMap(a.subs.taskRecords)
+	registrationRecords[taskID] = rehydratedRecord
+	a.subs.mu.Unlock()
+	persistErr := a.persistSubAgentRegistration(registrationSessionDir, sub, registrationRecords)
+	if persistErr != nil {
+		_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
+		a.releaseSubAgentSlot(sub)
+		a.admissionMu.Unlock()
+		cancel()
+		return nil, "", false, fmt.Errorf("persist rehydrated durable task registration: %w", persistErr)
+	}
+	a.subs.mu.Lock()
+	if a.subs.activations[taskID] != activation || activation.cancelled || a.subs.subAgentByTaskIDLocked(taskID) != nil {
+		live := a.subs.subAgentByTaskIDLocked(taskID)
+		a.subs.mu.Unlock()
+		a.releaseSubAgentSlot(sub)
+		a.admissionMu.Unlock()
+		cancel()
+		if live == nil {
+			return nil, "", false, fmt.Errorf("task %s activation was superseded after persistence", taskID)
+		}
+		return live, "", false, nil
+	}
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.taskRecords[taskID] = cloneDurableTaskRecord(rehydratedRecord)
+	a.subs.mu.Unlock()
+	if a.recovery != nil {
+		if snapshotErr := a.recovery.SaveSnapshot(a.buildRecoverySnapshot()); snapshotErr != nil {
+			a.subs.mu.Lock()
+			delete(a.subs.subAgents, sub.instanceID)
+			a.subs.taskRecords[taskID] = cloneDurableTaskRecord(record)
+			a.subs.mu.Unlock()
+			_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
+			rollbackRecords := cloneDurableTaskRecordMap(registrationRecords)
+			rollbackRecords[taskID] = cloneDurableTaskRecord(record)
+			_ = a.persistTaskRegistrySnapshot(registrationSessionDir, rollbackRecords)
+			a.releaseSubAgentSlot(sub)
+			a.admissionMu.Unlock()
+			cancel()
+			return nil, "", false, fmt.Errorf("persist rehydrated recovery snapshot: %w", snapshotErr)
+		}
+	}
+	clientCommitted = true
 	a.admissionMu.Unlock()
 	a.migrateSubAgentOwnerIdentity(previousAgentID, sub.instanceID)
 	a.focusedTaskMu.RLock()
@@ -535,17 +582,7 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	if focusedTaskID == sub.taskID {
 		a.focusedAgent.Store(sub)
 	}
-	a.persistSubAgentMetaToSession(sub, registrationSessionDir)
-	if a.updateTaskRecordFromSub(sub, "") {
-		a.subs.mu.RLock()
-		registrationRecords := cloneDurableTaskRecordMap(a.subs.taskRecords)
-		a.subs.mu.RUnlock()
-		if persistErr := persistDurableTaskRecords(registrationSessionDir, registrationRecords); persistErr != nil {
-			log.Warnf("failed to persist rehydrated durable task registration session=%v task_id=%v error=%v", registrationSessionDir, taskID, persistErr)
-		}
-	}
-	a.taskRegistryPersistMu.Unlock()
-	a.subAgentMetaPersistMu.Unlock()
+	sub.startRunLoop()
 	a.emitToTUI(AgentStartedEvent{
 		AgentID:         sub.instanceID,
 		PreviousAgentID: previousAgentID,

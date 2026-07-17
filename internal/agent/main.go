@@ -1102,6 +1102,7 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	a.admissionMu.Lock()
 	a.shuttingDown.Store(true)
 	a.admissionEpoch.Add(1)
+	a.cancelSubAgentAdmissions()
 	a.admissionMu.Unlock()
 
 	a.cancelActiveWork()

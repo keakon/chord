@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 type subAgentActivation struct {
@@ -11,6 +14,34 @@ type subAgentActivation struct {
 	previousAgentID string
 	err             error
 	cancelled       bool
+}
+
+type subAgentAdmission struct {
+	taskID             string
+	ownerAgentID       string
+	ownerTaskID        string
+	agentType          string
+	planTaskRef        string
+	semanticTaskKey    string
+	expectedWriteScope tools.WriteScope
+	slotHeld           bool
+	done               chan struct{}
+	once               sync.Once
+	result             tools.TaskHandle
+	err                error
+}
+
+func (a *subAgentAdmission) complete(result tools.TaskHandle, err error) {
+	if a == nil {
+		return
+	}
+	a.once.Do(func() {
+		a.result = result
+		a.err = err
+		if a.done != nil {
+			close(a.done)
+		}
+	})
 }
 
 // subAgentRegistry owns the live sub-agent orchestration state and the single
@@ -30,6 +61,7 @@ type subAgentRegistry struct {
 	subAgents        map[string]*SubAgent           // instanceID → live SubAgent
 	taskRecords      map[string]*DurableTaskRecord  // taskID → durable task record
 	activations      map[string]*subAgentActivation // taskID → in-flight runtime rehydration
+	admissions       map[string]*subAgentAdmission  // taskID → in-flight new-task admission
 	nudgeCounts      map[string]int                 // agentID → idle nudge count
 	stateEnteredTurn map[string]uint64              // agentID → turn it entered a waiting/terminal state
 }
@@ -39,9 +71,44 @@ func newSubAgentRegistry() subAgentRegistry {
 		subAgents:        make(map[string]*SubAgent),
 		taskRecords:      make(map[string]*DurableTaskRecord),
 		activations:      make(map[string]*subAgentActivation),
+		admissions:       make(map[string]*subAgentAdmission),
 		nudgeCounts:      make(map[string]int),
 		stateEnteredTurn: make(map[string]uint64),
 	}
+}
+
+func (r *subAgentRegistry) addAdmissionLocked(admission *subAgentAdmission) {
+	if admission == nil || strings.TrimSpace(admission.taskID) == "" {
+		return
+	}
+	if r.admissions == nil {
+		r.admissions = make(map[string]*subAgentAdmission)
+	}
+	if admission.done == nil {
+		admission.done = make(chan struct{})
+	}
+	r.admissions[admission.taskID] = admission
+}
+
+func (r *subAgentRegistry) removeAdmissionLocked(taskID string) *subAgentAdmission {
+	taskID = strings.TrimSpace(taskID)
+	admission := r.admissions[taskID]
+	delete(r.admissions, taskID)
+	return admission
+}
+
+func (r *subAgentRegistry) cancelAdmissionsLocked() (slots int) {
+	for taskID, admission := range r.admissions {
+		if admission != nil && admission.slotHeld {
+			slots++
+			admission.slotHeld = false
+		}
+		if admission != nil {
+			admission.complete(tools.TaskHandle{}, fmt.Errorf("task admission cancelled"))
+		}
+		delete(r.admissions, taskID)
+	}
+	return slots
 }
 
 // subAgent returns the live SubAgent for instanceID, or nil if none.
@@ -96,19 +163,6 @@ func (r *subAgentRegistry) beginTaskActivation(taskID string) (*SubAgent, *subAg
 	activation := &subAgentActivation{done: make(chan struct{})}
 	r.activations[taskID] = activation
 	return nil, activation, true
-}
-
-func (r *subAgentRegistry) registerTaskActivation(taskID string, activation *subAgentActivation, sub *SubAgent) (*SubAgent, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.activations[taskID] != activation || activation.cancelled {
-		return r.subAgentByTaskIDLocked(taskID), false
-	}
-	if live := r.subAgentByTaskIDLocked(taskID); live != nil {
-		return live, false
-	}
-	r.subAgents[sub.instanceID] = sub
-	return sub, true
 }
 
 func (r *subAgentRegistry) completeTaskActivation(taskID string, activation *subAgentActivation, sub *SubAgent, previousAgentID string, err error) {

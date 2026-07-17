@@ -183,6 +183,15 @@ func (a *MainAgent) directNonTerminalChildCountLocked(ownerAgentID, ownerTaskID 
 			count++
 		}
 	}
+	for taskID, admission := range a.subs.admissions {
+		if admission == nil || strings.TrimSpace(admission.ownerAgentID) != strings.TrimSpace(ownerAgentID) || strings.TrimSpace(admission.ownerTaskID) != strings.TrimSpace(ownerTaskID) {
+			continue
+		}
+		if _, ok := seenTaskIDs[strings.TrimSpace(taskID)]; ok {
+			continue
+		}
+		count++
+	}
 	return count
 }
 
@@ -207,6 +216,67 @@ func duplicateTaskHandle(existing *DurableTaskRecord, conflict bool) tools.TaskH
 		handle.SuggestedAction = "serialize_or_notify_existing"
 	}
 	return handle
+}
+
+func (a *MainAgent) findPendingDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (*DurableTaskRecord, bool, *subAgentAdmission) {
+	for _, pending := range a.subs.admissions {
+		if pending == nil {
+			continue
+		}
+		rec := &DurableTaskRecord{
+			TaskID:             pending.taskID,
+			AgentDefName:       pending.agentType,
+			PlanTaskRef:        pending.planTaskRef,
+			SemanticTaskKey:    pending.semanticTaskKey,
+			ExpectedWriteScope: pending.expectedWriteScope,
+			OwnerAgentID:       pending.ownerAgentID,
+			OwnerTaskID:        pending.ownerTaskID,
+			State:              string(SubAgentStateRunning),
+		}
+		if duplicate, conflict := duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, expectedWriteScope, a.projectRoot); duplicate {
+			return rec, conflict, pending
+		}
+	}
+	return nil, false, nil
+}
+
+func (a *MainAgent) releaseSubAgentAdmission(admission *subAgentAdmission) {
+	if a == nil || admission == nil {
+		return
+	}
+	releaseSlot := false
+	a.subs.mu.Lock()
+	if current := a.subs.admissions[admission.taskID]; current == admission {
+		a.subs.removeAdmissionLocked(admission.taskID)
+		releaseSlot = admission.slotHeld
+		admission.slotHeld = false
+	}
+	a.subs.mu.Unlock()
+	if !releaseSlot {
+		return
+	}
+	select {
+	case <-a.sem:
+	default:
+		log.Errorf("SubAgent admission semaphore underflow task_id=%v", admission.taskID)
+	}
+}
+
+func (a *MainAgent) cancelSubAgentAdmissions() {
+	if a == nil {
+		return
+	}
+	a.subs.mu.Lock()
+	slots := a.subs.cancelAdmissionsLocked()
+	a.subs.mu.Unlock()
+	for range slots {
+		select {
+		case <-a.sem:
+		default:
+			log.Errorf("SubAgent admission semaphore underflow during cancellation")
+			return
+		}
+	}
 }
 
 func (a *MainAgent) outstandingJoinChildTaskIDsLocked(taskID string) []string {
@@ -592,7 +662,7 @@ func (a *MainAgent) getOrCreateAgentMCP(agentName string, mcpCfg config.MCPConfi
 	return extra, nil
 }
 
-func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType string, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (tools.TaskHandle, error) {
+func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType string, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (result tools.TaskHandle, resultErr error) {
 	requestCtx := ctx
 	caller, err := a.canCallerDelegate(ctx)
 	if err != nil {
@@ -622,10 +692,96 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	if err != nil {
 		return tools.TaskHandle{}, err
 	}
+	admission := &subAgentAdmission{
+		taskID:             taskID,
+		ownerAgentID:       caller.AgentID,
+		ownerTaskID:        caller.TaskID,
+		agentType:          agentType,
+		planTaskRef:        planTaskRef,
+		semanticTaskKey:    semanticTaskKey,
+		expectedWriteScope: expectedWriteScope,
+	}
+	admissionStartedAt := time.Now()
+	a.admissionMu.Lock()
+	a.orchestrationMetrics.recordAdmissionWait(time.Since(admissionStartedAt))
+	if a.shuttingDown.Load() || a.admissionPaused.Load() || a.admissionEpoch.Load() != admissionEpoch || requestCtx.Err() != nil {
+		a.admissionMu.Unlock()
+		if err := requestCtx.Err(); err != nil {
+			return tools.TaskHandle{}, err
+		}
+		return tools.TaskHandle{}, fmt.Errorf("delegate invalidated by session or lifecycle change")
+	}
+	a.subs.mu.Lock()
+	if !caller.IsMain {
+		owner := a.subs.subAgents[caller.AgentID]
+		if owner == nil || strings.TrimSpace(owner.taskID) != strings.TrimSpace(caller.TaskID) || !isNonTerminalTaskState(string(owner.State())) {
+			a.subs.mu.Unlock()
+			a.admissionMu.Unlock()
+			return tools.TaskHandle{}, fmt.Errorf("delegate owner task is no longer active")
+		}
+	}
+	count := a.directNonTerminalChildCountLocked(caller.AgentID, caller.TaskID)
+	if count >= maxChildren {
+		a.subs.mu.Unlock()
+		a.admissionMu.Unlock()
+		return tools.TaskHandle{
+			Status:  "child_limit_reached",
+			Message: fmt.Sprintf("direct non-terminal child limit reached (max_children=%d)", maxChildren),
+		}, nil
+	}
+	existing, conflict := a.findDuplicateOrConflictingTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey, expectedWriteScope)
+	var pendingDuplicate *subAgentAdmission
+	if existing == nil {
+		existing, conflict, pendingDuplicate = a.findPendingDuplicateOrConflictingTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey, expectedWriteScope)
+	}
+	if existing != nil {
+		a.subs.mu.Unlock()
+		if conflict {
+			a.orchestrationMetrics.scopeConflicts.Add(1)
+		}
+		a.admissionMu.Unlock()
+		if pendingDuplicate != nil && !conflict {
+			select {
+			case <-pendingDuplicate.done:
+				return pendingDuplicate.result, pendingDuplicate.err
+			case <-requestCtx.Done():
+				return tools.TaskHandle{}, requestCtx.Err()
+			case <-a.parentCtx.Done():
+				return tools.TaskHandle{}, a.parentCtx.Err()
+			}
+		}
+		return duplicateTaskHandle(existing, conflict), nil
+	}
 	if a.llmFactory == nil {
+		a.subs.mu.Unlock()
+		a.admissionMu.Unlock()
 		return tools.TaskHandle{}, fmt.Errorf("LLM client factory not configured; call SetLLMFactory before creating SubAgents")
 	}
+	select {
+	case a.sem <- struct{}{}:
+		admission.slotHeld = true
+	default:
+		a.subs.mu.Unlock()
+		a.admissionMu.Unlock()
+		return tools.TaskHandle{}, fmt.Errorf("max concurrent agents reached (cap=%d), wait for a running agent to complete", cap(a.sem))
+	}
+	a.subs.addAdmissionLocked(admission)
+	a.subs.mu.Unlock()
+	a.admissionMu.Unlock()
+	admissionCommitted := false
+	defer func() {
+		if !admissionCommitted {
+			a.releaseSubAgentAdmission(admission)
+		}
+		admission.complete(result, resultErr)
+	}()
 	subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
+	clientCommitted := false
+	defer func() {
+		if !clientCommitted && subLLMClient != nil {
+			subLLMClient.InvalidateRouting("subagent_admission_aborted")
+		}
+	}()
 	a.applyServiceTierToClient(subLLMClient)
 	agentRuleset := a.buildSubAgentRuleset(agentDef)
 	var extraMCPTools []tools.Tool
@@ -668,7 +824,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		Skills:        a.loadedSkillsSnapshot(),
 		ModelName:     a.ModelName(),
 	})
-	admissionStartedAt := time.Now()
+	admissionStartedAt = time.Now()
 	a.admissionMu.Lock()
 	a.orchestrationMetrics.recordAdmissionWait(time.Since(admissionStartedAt))
 	if a.shuttingDown.Load() || a.admissionPaused.Load() || a.admissionEpoch.Load() != admissionEpoch || requestCtx.Err() != nil {
@@ -679,68 +835,88 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		}
 		return tools.TaskHandle{}, fmt.Errorf("delegate invalidated by session or lifecycle change")
 	}
-	a.subs.mu.RLock()
+	a.subs.mu.Lock()
+	if a.subs.admissions[taskID] != admission {
+		a.subs.mu.Unlock()
+		a.admissionMu.Unlock()
+		cancel()
+		return tools.TaskHandle{}, fmt.Errorf("delegate admission was cancelled")
+	}
 	if !caller.IsMain {
 		owner := a.subs.subAgents[caller.AgentID]
 		if owner == nil || strings.TrimSpace(owner.taskID) != strings.TrimSpace(caller.TaskID) || !isNonTerminalTaskState(string(owner.State())) {
-			a.subs.mu.RUnlock()
+			a.subs.mu.Unlock()
 			a.admissionMu.Unlock()
 			cancel()
 			return tools.TaskHandle{}, fmt.Errorf("delegate owner task is no longer active")
 		}
 	}
-	count := a.directNonTerminalChildCountLocked(caller.AgentID, caller.TaskID)
-	if count >= maxChildren {
-		a.subs.mu.RUnlock()
+	if !sub.InjectUserMessage(description) {
+		a.subs.mu.Unlock()
 		a.admissionMu.Unlock()
 		cancel()
-		return tools.TaskHandle{
-			Status:  "child_limit_reached",
-			Message: fmt.Sprintf("direct non-terminal child limit reached (max_children=%d)", maxChildren),
-		}, nil
+		return tools.TaskHandle{}, fmt.Errorf("SubAgent %s rejected its initial task", sub.instanceID)
 	}
-	existing, conflict := a.findDuplicateOrConflictingTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey, expectedWriteScope)
-	a.subs.mu.RUnlock()
-	if existing != nil {
-		if conflict {
-			a.orchestrationMetrics.scopeConflicts.Add(1)
+	initialMessageCommitted := false
+	defer func() {
+		if !initialMessageCommitted {
+			sub.removeInitialUserMessage()
 		}
+	}()
+	registrationSessionDir := a.sessionDir
+	registrationRecord := buildTaskRecordFromSub(sub, nil, "", a.explicitUserTurnCount.Load(), time.Now())
+	registrationRecords := cloneDurableTaskRecordMap(a.subs.taskRecords)
+	if registrationRecords == nil {
+		registrationRecords = make(map[string]*DurableTaskRecord)
+	}
+	registrationRecords[taskID] = registrationRecord
+	a.subs.mu.Unlock()
+
+	persistErr := a.persistSubAgentRegistration(registrationSessionDir, sub, registrationRecords)
+	if persistErr != nil {
+		_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
 		a.admissionMu.Unlock()
 		cancel()
-		return duplicateTaskHandle(existing, conflict), nil
+		return tools.TaskHandle{}, fmt.Errorf("persist initial durable task registration: %w", persistErr)
 	}
-	select {
-	case a.sem <- struct{}{}:
-	default:
+
+	a.subs.mu.Lock()
+	if a.subs.admissions[taskID] != admission {
+		a.subs.mu.Unlock()
 		a.admissionMu.Unlock()
 		cancel()
-		return tools.TaskHandle{}, fmt.Errorf("max concurrent agents reached (cap=%d), wait for a running agent to complete", cap(a.sem))
+		return tools.TaskHandle{}, fmt.Errorf("delegate admission was cancelled after persistence")
 	}
+	a.subs.removeAdmissionLocked(taskID)
+	admission.slotHeld = false
 	sub.semMu.Lock()
 	sub.semHeld = true
 	sub.semMu.Unlock()
-	a.subs.add(sub)
-	a.updateTaskRecordFromSub(sub, "")
-	sub.startRunLoop()
-	if !sub.InjectUserMessage(description) {
-		a.closeSubAgent(sub.instanceID)
-		a.admissionMu.Unlock()
-		return tools.TaskHandle{}, fmt.Errorf("SubAgent %s rejected its initial task", sub.instanceID)
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.taskRecords[taskID] = cloneDurableTaskRecord(registrationRecord)
+	a.subs.mu.Unlock()
+	if a.recovery != nil {
+		if err := a.recovery.SaveSnapshot(a.buildRecoverySnapshot()); err != nil {
+			a.subs.mu.Lock()
+			delete(a.subs.subAgents, sub.instanceID)
+			delete(a.subs.taskRecords, taskID)
+			a.subs.mu.Unlock()
+			_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
+			rollbackRecords := cloneDurableTaskRecordMap(registrationRecords)
+			delete(rollbackRecords, taskID)
+			_ = a.persistTaskRegistrySnapshot(registrationSessionDir, rollbackRecords)
+			a.admissionMu.Unlock()
+			cancel()
+			return tools.TaskHandle{}, fmt.Errorf("persist initial recovery snapshot: %w", err)
+		}
 	}
-	sub.armStartupWatchdog()
-	registrationSessionDir := a.sessionDir
-	a.subs.mu.RLock()
-	registrationRecords := cloneDurableTaskRecordMap(a.subs.taskRecords)
-	a.subs.mu.RUnlock()
-	a.subAgentMetaPersistMu.Lock()
-	a.taskRegistryPersistMu.Lock()
+	admissionCommitted = true
+	clientCommitted = true
+	initialMessageCommitted = true
 	a.admissionMu.Unlock()
-	a.persistSubAgentMetaToSession(sub, registrationSessionDir)
-	if err := persistDurableTaskRecords(registrationSessionDir, registrationRecords); err != nil {
-		log.Warnf("failed to persist initial durable task registration session=%v task_id=%v error=%v", registrationSessionDir, taskID, err)
-	}
-	a.taskRegistryPersistMu.Unlock()
-	a.subAgentMetaPersistMu.Unlock()
+
+	sub.startRunLoop()
+	sub.armStartupWatchdog()
 	log.Infof("SubAgent created and started instance=%v task_id=%v agent_def=%v", instanceID, taskID, agentDef.Name)
 	a.emitToTUI(AgentStartedEvent{
 		AgentID:       instanceID,
@@ -751,7 +927,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		ParentTaskID:  caller.TaskID,
 	})
 	a.emitToTUI(AgentStatusEvent{AgentID: instanceID, Status: "running", Message: fmt.Sprintf("Started task %s: %s", taskID, truncateString(description, 80))})
-	return tools.TaskHandle{
+	handle := tools.TaskHandle{
 		Status:             "started",
 		TaskID:             taskID,
 		AgentID:            instanceID,
@@ -759,7 +935,8 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		PlanTaskRef:        planTaskRef,
 		SemanticTaskKey:    semanticTaskKey,
 		ExpectedWriteScope: expectedWriteScope,
-	}, nil
+	}
+	return handle, nil
 }
 
 func (a *MainAgent) subAgentByID(agentID string) *SubAgent {

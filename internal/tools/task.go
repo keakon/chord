@@ -205,7 +205,7 @@ func (t *DelegateTool) Parameters() map[string]any {
 			},
 			"expected_write_scope": map[string]any{
 				"type":        "object",
-				"description": "Optional write-scope declaration used for concurrency guardrails. Set read_only=true for research-only tasks.",
+				"description": "Optional write-scope declaration used for concurrency guardrails. Set read_only=true for research-only tasks. If omitted for a task that may write, the task is treated as having an unknown global write scope and runs exclusively with respect to other writing tasks.",
 				"properties": map[string]any{
 					"files":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 					"path_prefix": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},

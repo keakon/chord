@@ -99,6 +99,7 @@ type SubAgent struct {
 	llmMu              sync.RWMutex
 	llmClient          *llm.Client
 	llmRequestInFlight atomic.Bool
+	persistFailed      atomic.Bool
 	startupWatchdogSeq atomic.Uint64
 	done               chan struct{}
 	doneOnce           sync.Once
@@ -231,11 +232,26 @@ func (s *SubAgent) persistMessageAsync(msg message.Message, description string, 
 		}
 		return
 	}
-	s.parent.persistAsyncAfter(s.instanceID, msg, func(succeeded bool) {
-		if succeeded && after != nil {
+	s.notePersistenceEnqueue(s.parent.persistAsyncAfter(s.instanceID, msg, func(succeeded bool) {
+		if !succeeded {
+			s.persistFailed.Store(true)
+			return
+		}
+		if after != nil {
 			after()
 		}
-	})
+	}))
+}
+
+func (s *SubAgent) notePersistenceEnqueue(enqueued bool) bool {
+	if s != nil && !enqueued {
+		s.persistFailed.Store(true)
+	}
+	return enqueued
+}
+
+func (s *SubAgent) transcriptPersistenceHealthy() bool {
+	return s != nil && !s.persistFailed.Load()
 }
 
 // maxIdleNudges is the maximum number of idle nudges before escalating to

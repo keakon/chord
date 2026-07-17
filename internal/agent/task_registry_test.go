@@ -61,6 +61,24 @@ func TestWriteScopesOverlapMatchesExactAndNestedPathsOnly(t *testing.T) {
 			b:    tools.WriteScope{PathPrefix: []string{"internal/foo"}},
 			want: false,
 		},
+		{
+			name: "unspecified write scope is exclusive",
+			a:    tools.WriteScope{},
+			b:    tools.WriteScope{Files: []string{"internal/foo/a.go"}},
+			want: true,
+		},
+		{
+			name: "two unspecified write scopes overlap",
+			a:    tools.WriteScope{},
+			b:    tools.WriteScope{},
+			want: true,
+		},
+		{
+			name: "readonly and unspecified write scope do not overlap",
+			a:    tools.WriteScope{ReadOnly: true},
+			b:    tools.WriteScope{},
+			want: false,
+		},
 	}
 
 	for _, tc := range tests {
@@ -197,6 +215,66 @@ func TestFindDuplicateOrConflictingTaskKeepsNonTerminalWriteScope(t *testing.T) 
 	)
 	if existing == nil || existing.TaskID != "running-task" || !conflict {
 		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v), want live scope conflict", existing, conflict)
+	}
+}
+
+func TestFindDuplicateOrConflictingTaskTreatsUnspecifiedScopeAsExclusive(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"running-task": {
+			TaskID:             "running-task",
+			AgentDefName:       "worker",
+			SemanticTaskKey:    "other-work",
+			ExpectedWriteScope: tools.WriteScope{},
+			State:              string(SubAgentStateRunning),
+		},
+	})
+
+	existing, conflict := a.findDuplicateOrConflictingTask("owner", "parent", "worker", "", "new-work", tools.WriteScope{PathPrefix: []string{"internal/agent"}})
+	if existing == nil || existing.TaskID != "running-task" || !conflict {
+		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v), want unscoped exclusive conflict", existing, conflict)
+	}
+}
+
+func TestFindDuplicateOrConflictingTaskExcludesFullOwnerLineage(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"root-task": {
+			TaskID:             "root-task",
+			AgentDefName:       "worker",
+			ExpectedWriteScope: tools.WriteScope{},
+			State:              string(SubAgentStateRunning),
+		},
+		"parent-task": {
+			TaskID:             "parent-task",
+			AgentDefName:       "worker",
+			OwnerTaskID:        "root-task",
+			ExpectedWriteScope: tools.WriteScope{},
+			State:              string(SubAgentStateRunning),
+		},
+	})
+
+	existing, conflict := a.findDuplicateOrConflictingTask("parent-agent", "parent-task", "worker", "", "grandchild-work", tools.WriteScope{})
+	if existing != nil || conflict {
+		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v), want no conflict with owner lineage", existing, conflict)
+	}
+}
+
+func TestFindDuplicateOrConflictingTaskAllowsReadOnlyAlongsideUnspecifiedScope(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"running-task": {
+			TaskID:             "running-task",
+			AgentDefName:       "worker",
+			SemanticTaskKey:    "other-work",
+			ExpectedWriteScope: tools.WriteScope{},
+			State:              string(SubAgentStateRunning),
+		},
+	})
+
+	existing, conflict := a.findDuplicateOrConflictingTask("owner", "parent", "worker", "", "read-only-work", tools.WriteScope{ReadOnly: true})
+	if existing != nil || conflict {
+		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v), want no read-only conflict", existing, conflict)
 	}
 }
 

@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -788,6 +790,139 @@ func TestConcurrentCreateSubAgentRespectsDirectChildLimit(t *testing.T) {
 	}
 }
 
+func TestCreateSubAgentRejectsBeforeLLMFactoryWhenChildLimitReached(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
+	parent.depth = 1
+	parent.delegation = config.DelegationConfig{MaxChildren: 1, MaxDepth: 2}
+	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
+
+	first, err := a.CreateSubAgent(ctx, "child one", "worker", "", "", tools.WriteScope{})
+	if err != nil || first.Status != "started" {
+		t.Fatalf("CreateSubAgent(first) = (%#v, %v), want started", first, err)
+	}
+	var factoryCalls atomic.Int32
+	a.llmFactory = func(string, []string, string) *llm.Client {
+		factoryCalls.Add(1)
+		return newTestLLMClient()
+	}
+
+	second, err := a.CreateSubAgent(ctx, "child two", "worker", "", "", tools.WriteScope{})
+	if err != nil {
+		t.Fatalf("CreateSubAgent(second): %v", err)
+	}
+	if second.Status != "child_limit_reached" {
+		t.Fatalf("second.Status = %q, want child_limit_reached", second.Status)
+	}
+	if got := factoryCalls.Load(); got != 0 {
+		t.Fatalf("LLM factory calls = %d, want 0 on rejected admission", got)
+	}
+}
+
+func TestConcurrentDuplicateCreateSharesAdmissionResult(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var factoryCalls atomic.Int32
+	a.llmFactory = func(string, []string, string) *llm.Client {
+		factoryCalls.Add(1)
+		entered <- struct{}{}
+		<-release
+		return newTestLLMClient()
+	}
+
+	results := make(chan tools.TaskHandle, 2)
+	errs := make(chan error, 2)
+	create := func() {
+		handle, err := a.CreateSubAgent(context.Background(), "same task", "worker", "plan-1", "semantic-1", tools.WriteScope{})
+		results <- handle
+		errs <- err
+	}
+	go create()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("first admission did not reach LLM factory")
+	}
+	go create()
+	time.Sleep(20 * time.Millisecond)
+	if got := factoryCalls.Load(); got != 1 {
+		t.Fatalf("LLM factory calls before release = %d, want 1", got)
+	}
+	close(release)
+
+	var handles []tools.TaskHandle
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("CreateSubAgent: %v", err)
+		}
+		handles = append(handles, <-results)
+	}
+	if handles[0].Status != "started" || handles[1].Status != "started" || handles[0].TaskID != handles[1].TaskID || handles[0].AgentID != handles[1].AgentID {
+		t.Fatalf("shared admission handles = %#v, want identical started result", handles)
+	}
+	if got := factoryCalls.Load(); got != 1 {
+		t.Fatalf("LLM factory calls = %d, want 1", got)
+	}
+}
+
+func TestCreateSubAgentPersistenceFailureDoesNotStartRuntime(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	blockedRoot := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blockedRoot, []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile(blockedRoot): %v", err)
+	}
+	a.sessionDir = blockedRoot
+
+	handle, err := a.CreateSubAgent(context.Background(), "must persist", "worker", "plan-persist", "semantic-persist", tools.WriteScope{})
+	if err == nil || !strings.Contains(err.Error(), "persist initial durable task registration") {
+		t.Fatalf("CreateSubAgent() = (%#v, %v), want persistence failure", handle, err)
+	}
+	if got := len(a.subs.snapshotSubAgents()); got != 0 {
+		t.Fatalf("live SubAgents = %d, want 0 after failed registration", got)
+	}
+	if got := len(a.sem); got != 0 {
+		t.Fatalf("semaphore use = %d, want 0 after failed registration", got)
+	}
+	if rec := a.taskRecordByTaskID("adhoc-1"); rec != nil {
+		t.Fatalf("task record = %#v, want nil after failed registration", rec)
+	}
+}
+
+func TestRehydratePersistenceFailureDoesNotRegisterRuntime(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	record := &DurableTaskRecord{
+		TaskID:           "adhoc-rehydrate-persist",
+		AgentDefName:     "worker",
+		TaskDesc:         "resume",
+		State:            string(SubAgentStateIdle),
+		RuntimeParked:    true,
+		ResumePolicy:     taskResumePolicyNotify,
+		LatestInstanceID: "worker-old",
+	}
+	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
+	blockedRoot := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blockedRoot, []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile(blockedRoot): %v", err)
+	}
+	a.sessionDir = blockedRoot
+
+	_, _, err := a.rehydrateTask(record)
+	if err == nil || !strings.Contains(err.Error(), "persist rehydrated durable task registration") {
+		t.Fatalf("rehydrateTask() error = %v, want persistence failure", err)
+	}
+	if got := len(a.subs.snapshotSubAgents()); got != 0 {
+		t.Fatalf("live SubAgents = %d, want 0 after failed rehydrate", got)
+	}
+	if got := len(a.sem); got != 0 {
+		t.Fatalf("semaphore use = %d, want 0 after failed rehydrate", got)
+	}
+}
+
 func TestCreateSubAgentInitializesConcurrentlyBeforeAdmission(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
@@ -803,7 +938,7 @@ func TestCreateSubAgentInitializesConcurrentlyBeforeAdmission(t *testing.T) {
 	errs := make(chan error, 2)
 	for i := range 2 {
 		go func() {
-			handle, err := a.CreateSubAgent(context.Background(), fmt.Sprintf("child %d", i), "worker", "", "", tools.WriteScope{})
+			handle, err := a.CreateSubAgent(context.Background(), fmt.Sprintf("child %d", i), "worker", "", "", tools.WriteScope{PathPrefix: []string{fmt.Sprintf("module-%d", i)}})
 			results <- handle
 			errs <- err
 		}()
@@ -1037,7 +1172,7 @@ func TestCreateSubAgentCapsActiveChildrenAtTen(t *testing.T) {
 
 	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
 	for i := range 10 {
-		handle, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tools.WriteScope{})
+		handle, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tools.WriteScope{PathPrefix: []string{fmt.Sprintf("module-%d", i)}})
 		if err != nil {
 			t.Fatalf("CreateSubAgent(%d): %v", i, err)
 		}
@@ -1046,7 +1181,7 @@ func TestCreateSubAgentCapsActiveChildrenAtTen(t *testing.T) {
 		}
 	}
 
-	overflow, err := a.CreateSubAgent(ctx, "child overflow", "worker", "", "", tools.WriteScope{})
+	overflow, err := a.CreateSubAgent(ctx, "child overflow", "worker", "", "", tools.WriteScope{PathPrefix: []string{"overflow"}})
 	if err != nil {
 		t.Fatalf("CreateSubAgent(overflow): %v", err)
 	}
@@ -2242,6 +2377,28 @@ func TestParkSubAgentWaitsForPendingTranscriptPersistence(t *testing.T) {
 	}
 	if len(msgs) != 1 || msgs[0].Content != "final persisted reply" {
 		t.Fatalf("persisted messages = %#v, want final reply", msgs)
+	}
+}
+
+func TestParkSubAgentPersistenceFailureKeepsRuntimeLive(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-park-failure")
+	sub.setState(SubAgentStateCompleted, "done")
+	a.syncTaskRecordFromSub(sub, "")
+
+	blockedRoot := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blockedRoot, []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile(blockedRoot): %v", err)
+	}
+	a.sessionDir = blockedRoot
+	if parked := a.parkSubAgent(sub.instanceID); parked {
+		t.Fatal("parkSubAgent() = true, want false after persistence failure")
+	}
+	if got := a.subAgentByID(sub.instanceID); got != sub {
+		t.Fatalf("live SubAgent = %#v, want original runtime", got)
+	}
+	if rec := a.taskRecordByTaskID(sub.taskID); rec == nil || rec.RuntimeParked {
+		t.Fatalf("task record = %#v, want live non-parked record", rec)
 	}
 }
 

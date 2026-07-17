@@ -178,6 +178,22 @@ func (s *SubAgent) hasPendingUserInput() bool {
 	return len(s.inputCh) > 0 || len(s.inputOverflow) > 0
 }
 
+func (s *SubAgent) removeInitialUserMessage() {
+	if s == nil {
+		return
+	}
+	s.inputQueueMu.Lock()
+	defer s.inputQueueMu.Unlock()
+	select {
+	case <-s.inputCh:
+		return
+	default:
+	}
+	if len(s.inputOverflow) > 0 {
+		s.inputOverflow = s.inputOverflow[1:]
+	}
+}
+
 // drainPendingToolFailureSets clears speculative stream tools and execution
 // pending tools after a terminal error. emit is the union (for TUI); persist is
 // execution-phase only (for JSONL — stream-only IDs are absent from assistant).
@@ -211,7 +227,11 @@ func (s *SubAgent) persistInterruptedToolResults(calls []PendingToolCall, status
 		},
 		func(toolMsg message.Message) bool {
 			if s.parent != nil {
-				return s.parent.persistAsyncAfter(s.instanceID, toolMsg, nil)
+				return s.notePersistenceEnqueue(s.parent.persistAsyncAfter(s.instanceID, toolMsg, func(succeeded bool) {
+					if !succeeded {
+						s.persistFailed.Store(true)
+					}
+				}))
 			}
 			if s.recovery != nil {
 				if err := s.recovery.PersistMessage(s.instanceID, toolMsg); err != nil {
