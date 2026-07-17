@@ -27,6 +27,10 @@ func (d dummyTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 }
 func (d dummyTool) IsReadOnly() bool { return true }
 
+type dummyMutatingTool struct{ dummyTool }
+
+func (d dummyMutatingTool) IsReadOnly() bool { return false }
+
 type dummyMCPTool struct {
 	dummyTool
 	server string

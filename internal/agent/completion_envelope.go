@@ -45,12 +45,14 @@ func normalizeCompletionEnvelope(env *CompletionEnvelope) *CompletionEnvelope {
 	out := *env
 	out.Summary = strings.TrimSpace(out.Summary)
 	out.FilesChanged = normalizeStringList(out.FilesChanged)
+	out.ReportedFilesChanged = normalizeStringList(out.ReportedFilesChanged)
+	out.ActualFilesChanged = normalizeStringList(out.ActualFilesChanged)
 	out.VerificationRun = normalizeStringList(out.VerificationRun)
 	out.RemainingLimitations = normalizeStringList(out.RemainingLimitations)
 	out.KnownRisks = normalizeStringList(out.KnownRisks)
 	out.FollowUpRecommended = normalizeStringList(out.FollowUpRecommended)
 	out.Artifacts = tools.NormalizeArtifactRefs(out.Artifacts)
-	if out.Summary == "" && len(out.FilesChanged) == 0 && len(out.VerificationRun) == 0 && len(out.RemainingLimitations) == 0 && len(out.KnownRisks) == 0 && len(out.FollowUpRecommended) == 0 && len(out.Artifacts) == 0 {
+	if out.Summary == "" && len(out.FilesChanged) == 0 && len(out.ReportedFilesChanged) == 0 && len(out.ActualFilesChanged) == 0 && !out.FileAttributionIncomplete && len(out.VerificationRun) == 0 && len(out.RemainingLimitations) == 0 && len(out.KnownRisks) == 0 && len(out.FollowUpRecommended) == 0 && len(out.Artifacts) == 0 {
 		return nil
 	}
 	return &out

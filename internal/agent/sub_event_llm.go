@@ -350,6 +350,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		}
 		s.clearPendingCompleteIntent()
 		s.appendCompleteToolResult(taskCompleteCallID, taskComplete.Summary)
+		taskComplete = s.enrichCompletionResult(taskComplete)
 		s.sendEvent(Event{
 			Type:    EventAgentDone,
 			Payload: taskComplete,

@@ -34,13 +34,16 @@ const (
 type ArtifactRef = tools.ArtifactRef
 
 type CompletionEnvelope struct {
-	Summary              string              `json:"summary,omitempty"`
-	FilesChanged         []string            `json:"files_changed,omitempty"`
-	VerificationRun      []string            `json:"verification_run,omitempty"`
-	RemainingLimitations []string            `json:"remaining_limitations,omitempty"`
-	KnownRisks           []string            `json:"known_risks,omitempty"`
-	FollowUpRecommended  []string            `json:"follow_up_recommended,omitempty"`
-	Artifacts            []tools.ArtifactRef `json:"artifacts,omitempty"`
+	Summary                   string              `json:"summary,omitempty"`
+	FilesChanged              []string            `json:"files_changed,omitempty"`
+	ReportedFilesChanged      []string            `json:"reported_files_changed,omitempty"`
+	ActualFilesChanged        []string            `json:"actual_files_changed,omitempty"`
+	FileAttributionIncomplete bool                `json:"file_attribution_incomplete,omitempty"`
+	VerificationRun           []string            `json:"verification_run,omitempty"`
+	RemainingLimitations      []string            `json:"remaining_limitations,omitempty"`
+	KnownRisks                []string            `json:"known_risks,omitempty"`
+	FollowUpRecommended       []string            `json:"follow_up_recommended,omitempty"`
+	Artifacts                 []tools.ArtifactRef `json:"artifacts,omitempty"`
 }
 
 type SubAgentMailboxMessage struct {

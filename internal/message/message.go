@@ -121,24 +121,26 @@ const KindLoopNotice = "loop_notice"
 
 // Message represents a conversation message (user, assistant, or tool result).
 type Message struct {
-	Role                Role               `json:"role"` // "user", "assistant", "tool"
-	Content             string             `json:"content"`
-	Parts               []ContentPart      `json:"parts,omitempty"`                 // multi-part content (text + images); when set, supersedes Content
-	ThinkingBlocks      []ThinkingBlock    `json:"thinking_blocks,omitempty"`       // assistant only; must be replayed verbatim
-	ReasoningContent    string             `json:"reasoning_content,omitempty"`     // assistant only; OpenAI-compatible reasoning/thinking text for chain replay
-	ToolCalls           []ToolCall         `json:"tool_calls,omitempty"`            // non-nil for assistant tool_use
-	ToolCallID          string             `json:"tool_call_id,omitempty"`          // non-empty for tool results
-	ToolDiff            string             `json:"tool_diff,omitempty"`             // unified diff for Write/Edit tool results
-	ToolDiffAdded       int                `json:"tool_diff_added,omitempty"`       // total added lines for Write/Edit; computed before diff truncation
-	ToolDiffRemoved     int                `json:"tool_diff_removed,omitempty"`     // total removed lines for Write/Edit; computed before diff truncation
-	ToolDurationMs      int64              `json:"tool_duration_ms,omitempty"`      // final tool elapsed time in milliseconds for restored footer display
-	ToolStatus          string             `json:"tool_status,omitempty"`           // terminal tool status: success|error|cancelled
-	FileState           *ToolFileState     `json:"file_state,omitempty"`            // durable file-state metadata for restore-time safety sentinels
-	LSPReviews          []LSPReview        `json:"lsp_reviews,omitempty"`           // per-server last-review snapshot for the directly edited file only
-	Audit               *ToolArgsAudit     `json:"audit,omitempty"`                 // tool-call audit metadata when effective args differ after confirmation
-	IsCompactionSummary bool               `json:"is_compaction_summary,omitempty"` // first user message after compaction (summary of archived history)
-	StopReason          string             `json:"stop_reason,omitempty"`           // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
-	Provenance          *MessageProvenance `json:"provenance,omitempty"`            // optional producer/source metadata for model-compat replay decisions
+	Role                      Role               `json:"role"` // "user", "assistant", "tool"
+	Content                   string             `json:"content"`
+	Parts                     []ContentPart      `json:"parts,omitempty"`                       // multi-part content (text + images); when set, supersedes Content
+	ThinkingBlocks            []ThinkingBlock    `json:"thinking_blocks,omitempty"`             // assistant only; must be replayed verbatim
+	ReasoningContent          string             `json:"reasoning_content,omitempty"`           // assistant only; OpenAI-compatible reasoning/thinking text for chain replay
+	ToolCalls                 []ToolCall         `json:"tool_calls,omitempty"`                  // non-nil for assistant tool_use
+	ToolCallID                string             `json:"tool_call_id,omitempty"`                // non-empty for tool results
+	ToolDiff                  string             `json:"tool_diff,omitempty"`                   // unified diff for Write/Edit tool results
+	ToolDiffAdded             int                `json:"tool_diff_added,omitempty"`             // total added lines for Write/Edit; computed before diff truncation
+	ToolDiffRemoved           int                `json:"tool_diff_removed,omitempty"`           // total removed lines for Write/Edit; computed before diff truncation
+	ToolDurationMs            int64              `json:"tool_duration_ms,omitempty"`            // final tool elapsed time in milliseconds for restored footer display
+	ToolStatus                string             `json:"tool_status,omitempty"`                 // terminal tool status: success|error|cancelled
+	FileState                 *ToolFileState     `json:"file_state,omitempty"`                  // durable file-state metadata for restore-time safety sentinels
+	ToolChangedPaths          []string           `json:"tool_changed_paths,omitempty"`          // runtime-observed workspace paths attributed to this tool result
+	FileAttributionIncomplete bool               `json:"file_attribution_incomplete,omitempty"` // successful mutation could not be mapped to exact workspace paths
+	LSPReviews                []LSPReview        `json:"lsp_reviews,omitempty"`                 // per-server last-review snapshot for the directly edited file only
+	Audit                     *ToolArgsAudit     `json:"audit,omitempty"`                       // tool-call audit metadata when effective args differ after confirmation
+	IsCompactionSummary       bool               `json:"is_compaction_summary,omitempty"`       // first user message after compaction (summary of archived history)
+	StopReason                string             `json:"stop_reason,omitempty"`                 // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
+	Provenance                *MessageProvenance `json:"provenance,omitempty"`                  // optional producer/source metadata for model-compat replay decisions
 	// Usage is the token usage for this message when it ends an LLM round (assistant only).
 	// Persisted in JSONL so session resume can sum per-message usage to restore session totals.
 	Usage        *TokenUsage      `json:"usage,omitempty"`

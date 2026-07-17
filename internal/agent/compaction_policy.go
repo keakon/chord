@@ -1267,6 +1267,9 @@ func cloneMessageForRequestShape(msg message.Message) message.Message {
 	if msg.FileState != nil {
 		cloned.FileState = msg.FileState.Clone()
 	}
+	if len(msg.ToolChangedPaths) > 0 {
+		cloned.ToolChangedPaths = append([]string(nil), msg.ToolChangedPaths...)
+	}
 	if len(msg.LSPReviews) > 0 {
 		cloned.LSPReviews = append([]message.LSPReview(nil), msg.LSPReviews...)
 	}

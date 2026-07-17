@@ -246,6 +246,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 
 	rawResult := result.Result
 	displayResult, contextResult, errorText, isError := composeToolResultTexts(rawResult, result.Error)
+	toolChangedPaths, fileAttributionIncomplete := s.recordTaskToolChanges(result, isError)
 	contextResult = applyToolArgsAuditToContextResult(contextResult, result.Audit)
 	contextResult = appendModelContextNote(contextResult, result.ModelContextNote)
 
@@ -298,19 +299,21 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	})
 
 	toolMsg := message.Message{
-		Role:            "tool",
-		ToolCallID:      result.CallID,
-		Content:         contextResult,
-		Parts:           parts,
-		ToolDiff:        result.Diff,
-		ToolDiffAdded:   result.DiffAdded,
-		ToolDiffRemoved: result.DiffRemoved,
-		ToolDurationMs:  result.Duration.Milliseconds(),
-		ToolStatus:      string(toolResultStatusFromError(isError)),
-		FileState:       result.FileState.Clone(),
-		LSPReviews:      append([]message.LSPReview(nil), result.LSPReviews...),
-		Audit:           result.Audit.Clone(),
-		Provenance:      toolProvenanceForCall(s.ctxMgr.Snapshot(), result.CallID),
+		Role:                      "tool",
+		ToolCallID:                result.CallID,
+		Content:                   contextResult,
+		Parts:                     parts,
+		ToolDiff:                  result.Diff,
+		ToolDiffAdded:             result.DiffAdded,
+		ToolDiffRemoved:           result.DiffRemoved,
+		ToolDurationMs:            result.Duration.Milliseconds(),
+		ToolStatus:                string(toolResultStatusFromError(isError)),
+		FileState:                 result.FileState.Clone(),
+		ToolChangedPaths:          append([]string(nil), toolChangedPaths...),
+		FileAttributionIncomplete: fileAttributionIncomplete,
+		LSPReviews:                append([]message.LSPReview(nil), result.LSPReviews...),
+		Audit:                     result.Audit.Clone(),
+		Provenance:                toolProvenanceForCall(s.ctxMgr.Snapshot(), result.CallID),
 	}
 	s.ctxMgr.Append(toolMsg)
 
@@ -442,6 +445,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 			return
 		}
 		s.appendCompleteToolResult(s.pendingCompleteCallID, complete.Summary)
+		complete = s.enrichCompletionResult(complete)
 		s.pendingComplete = nil
 		s.pendingCompleteCallID = ""
 		s.clearPendingCompleteIntent()

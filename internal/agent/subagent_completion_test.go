@@ -48,6 +48,12 @@ func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 	if got := strings.Join(env.FilesChanged, ","); got != "internal/a.go" {
 		t.Fatalf("files_changed = %q", got)
 	}
+	if got := strings.Join(env.ReportedFilesChanged, ","); got != "internal/a.go" {
+		t.Fatalf("reported_files_changed = %q", got)
+	}
+	if len(env.ActualFilesChanged) != 0 || env.FileAttributionIncomplete {
+		t.Fatalf("runtime attribution = files %#v incomplete=%v, want empty and complete", env.ActualFilesChanged, env.FileAttributionIncomplete)
+	}
 	if got := strings.Join(env.VerificationRun, ","); got != "go test ./internal/a" {
 		t.Fatalf("verification_run = %q", got)
 	}
@@ -59,6 +65,104 @@ func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 	}
 	if len(env.Artifacts) != 1 || env.Artifacts[0].RelPath != "artifacts/subagents/worker-1/report.md" {
 		t.Fatalf("artifacts = %#v", env.Artifacts)
+	}
+}
+
+func TestSubAgentCompletionMergesObservedFileState(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	changedPath := filepath.Join(sub.workDir, "internal", "observed.go")
+	sub.recordTaskToolChanges(&toolResult{
+		Name:      tools.NameWrite,
+		ArgsJSON:  `{"path":"internal/observed.go","content":"package observed"}`,
+		FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: changedPath, Exists: true}}},
+	}, false)
+
+	result := sub.enrichCompletionResult(&AgentResult{Summary: "done", Envelope: &CompletionEnvelope{
+		Summary:      "done",
+		FilesChanged: []string{"internal/reported.go"},
+	}})
+	if result == nil || result.Envelope == nil {
+		t.Fatalf("result = %#v, want completion envelope", result)
+	}
+	env := result.Envelope
+	if got := strings.Join(env.ReportedFilesChanged, ","); got != "internal/reported.go" {
+		t.Fatalf("reported_files_changed = %q", got)
+	}
+	if got := strings.Join(env.ActualFilesChanged, ","); got != "internal/observed.go" {
+		t.Fatalf("actual_files_changed = %q", got)
+	}
+	if got := strings.Join(env.FilesChanged, ","); got != "internal/reported.go,internal/observed.go" {
+		t.Fatalf("files_changed = %q", got)
+	}
+	if env.FileAttributionIncomplete {
+		t.Fatal("file attribution unexpectedly incomplete")
+	}
+}
+
+func TestSubAgentCompletionMarksUnobservableMutationIncomplete(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	sub.tools.Register(dummyMutatingTool{dummyTool: dummyTool{name: "OpaqueMutation"}})
+	sub.recordTaskToolChanges(&toolResult{Name: "OpaqueMutation", ArgsJSON: `{}`}, false)
+
+	result := sub.enrichCompletionResult(&AgentResult{Summary: "done"})
+	if result == nil || result.Envelope == nil || !result.Envelope.FileAttributionIncomplete {
+		t.Fatalf("result = %#v, want incomplete file attribution", result)
+	}
+	if len(result.Envelope.ActualFilesChanged) != 0 || len(result.Envelope.FilesChanged) != 0 {
+		t.Fatalf("unobservable mutation invented paths: %#v", result.Envelope)
+	}
+}
+
+func TestSubAgentFailedMutationPreservesObservedPathsAndIncompleteState(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	changedPath := filepath.Join(sub.workDir, "internal", "partial.go")
+	files, incomplete := sub.recordTaskToolChanges(&toolResult{
+		Name:      tools.NameWrite,
+		ArgsJSON:  `{"path":"internal/partial.go","content":"partial"}`,
+		FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: changedPath, Exists: true}}},
+	}, true)
+	if got := strings.Join(files, ","); got != "internal/partial.go" || incomplete {
+		t.Fatalf("failed mutation attribution = files %q incomplete=%v", got, incomplete)
+	}
+
+	_, incomplete = sub.recordTaskToolChanges(&toolResult{
+		Name:     tools.NameWrite,
+		ArgsJSON: `{"path":"internal/unknown.go","content":"partial"}`,
+	}, true)
+	if !incomplete {
+		t.Fatal("failed mutation without file state should mark attribution incomplete")
+	}
+	result := sub.enrichCompletionResult(&AgentResult{Summary: "partial failure"})
+	if result == nil || result.Envelope == nil {
+		t.Fatalf("result = %#v, want completion envelope", result)
+	}
+	if got := strings.Join(result.Envelope.ActualFilesChanged, ","); got != "internal/partial.go" {
+		t.Fatalf("actual_files_changed = %q", got)
+	}
+	if !result.Envelope.FileAttributionIncomplete {
+		t.Fatal("completion should preserve incomplete failed mutation attribution")
+	}
+}
+
+func TestSubAgentRestoreMessagesRebuildsFileAttribution(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	legacyPath := filepath.Join(sub.workDir, "internal", "legacy.go")
+	sub.RestoreMessages([]message.Message{
+		{Role: "tool", ToolCallID: "ok", ToolStatus: message.ToolStatusSuccess, ToolChangedPaths: []string{"internal/observed.go"}},
+		{Role: "tool", ToolCallID: "legacy", ToolStatus: message.ToolStatusSuccess, FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: legacyPath, Exists: true}}}},
+		{Role: "tool", ToolCallID: "opaque", ToolStatus: message.ToolStatusSuccess, FileAttributionIncomplete: true},
+		{Role: "tool", ToolCallID: "failed", ToolStatus: message.ToolStatusError, ToolChangedPaths: []string{"internal/ignored.go"}, FileAttributionIncomplete: true},
+	})
+
+	result := sub.enrichCompletionResult(&AgentResult{Summary: "restored"})
+	if result == nil || result.Envelope == nil {
+		t.Fatalf("result = %#v, want completion envelope", result)
+	}
+	if got := strings.Join(result.Envelope.ActualFilesChanged, ","); got != "internal/ignored.go,internal/legacy.go,internal/observed.go" {
+		t.Fatalf("restored actual_files_changed = %q", got)
+	}
+	if !result.Envelope.FileAttributionIncomplete {
+		t.Fatal("restored file attribution should remain incomplete")
 	}
 }
 

@@ -173,7 +173,10 @@ type SubAgent struct {
 
 	// frozenToolDefs is the SubAgent's tool surface snapshot, computed once at
 	// construction. Kept stable so the provider request prefix does not drift.
-	frozenToolDefs []message.ToolDefinition
+	frozenToolDefs            []message.ToolDefinition
+	taskChangesMu             sync.Mutex
+	actualChangedFiles        map[string]struct{}
+	fileAttributionIncomplete bool
 
 	// semHeld is true when this SubAgent holds a slot in the MainAgent's
 	// concurrency semaphore. Set by CreateSubAgent; restored agents do not
