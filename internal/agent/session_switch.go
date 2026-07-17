@@ -176,6 +176,7 @@ func (a *MainAgent) abandonSubAgentsForSessionSwitch() int {
 		if subs[i] != nil {
 			tools.StopAllSpawnedForAgent(id, "terminated on session switch")
 			subs[i].cancel()
+			subs[i].closeLLMClient()
 		}
 	}
 

@@ -122,6 +122,12 @@ type AgentSnapshot struct {
 	PendingCompleteIntent   bool             `json:"pending_complete_intent,omitempty"`
 	PendingCompleteSummary  string           `json:"pending_complete_summary,omitempty"`
 	PendingCompleteEnvelope json.RawMessage  `json:"pending_complete_envelope,omitempty"`
+	Persistence             struct {
+		State       string    `json:"state"`
+		LastError   string    `json:"last_error,omitempty"`
+		FailedAt    time.Time `json:"failed_at,omitempty"`
+		RecoveredAt time.Time `json:"recovered_at,omitempty"`
+	} `json:"persistence"`
 }
 
 // RecoveryManager handles session persistence via JSONL message logs and

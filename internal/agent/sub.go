@@ -99,7 +99,7 @@ type SubAgent struct {
 	llmMu              sync.RWMutex
 	llmClient          *llm.Client
 	llmRequestInFlight atomic.Bool
-	persistFailed      atomic.Bool
+	persistenceHealth  subAgentPersistenceHealth
 	startupWatchdogSeq atomic.Uint64
 	done               chan struct{}
 	doneOnce           sync.Once
@@ -224,6 +224,7 @@ func (s *SubAgent) persistMessageAsync(msg message.Message, description string, 
 		if s.recovery != nil {
 			if err := s.recovery.PersistMessage(s.instanceID, msg); err != nil {
 				log.Warnf("SubAgent: failed to persist %s agent=%v error=%v", description, s.instanceID, err)
+				s.notePersistenceFailure(err)
 				return
 			}
 		}
@@ -232,9 +233,9 @@ func (s *SubAgent) persistMessageAsync(msg message.Message, description string, 
 		}
 		return
 	}
-	s.notePersistenceEnqueue(s.parent.persistAsyncAfter(s.instanceID, msg, func(succeeded bool) {
-		if !succeeded {
-			s.persistFailed.Store(true)
+	s.notePersistenceEnqueue(s.parent.persistAsyncAfter(s.instanceID, msg, func(err error) {
+		if err != nil {
+			s.notePersistenceFailure(err)
 			return
 		}
 		if after != nil {
@@ -245,13 +246,62 @@ func (s *SubAgent) persistMessageAsync(msg message.Message, description string, 
 
 func (s *SubAgent) notePersistenceEnqueue(enqueued bool) bool {
 	if s != nil && !enqueued {
-		s.persistFailed.Store(true)
+		s.notePersistenceFailure(errPersistenceQueueUnavailable)
 	}
 	return enqueued
 }
 
 func (s *SubAgent) transcriptPersistenceHealthy() bool {
-	return s != nil && !s.persistFailed.Load()
+	return s != nil && s.PersistenceHealth().State == PersistenceHealthy
+}
+
+func (s *SubAgent) PersistenceHealth() PersistenceHealth {
+	if s == nil {
+		return PersistenceHealth{State: PersistenceHealthy}
+	}
+	return s.persistenceHealth.snapshot()
+}
+
+func (s *SubAgent) notePersistenceFailure(err error) {
+	if s == nil || err == nil || !s.persistenceHealth.markDegraded(err) {
+		return
+	}
+	log.Warnf("SubAgent persistence degraded agent=%v task_id=%v error=%v", s.instanceID, s.taskID, err)
+	if s.parent != nil {
+		_ = s.parent.persistSubAgentMeta(s)
+		s.parent.updateTaskRecordFromSub(s, "")
+		_ = s.parent.persistTaskRegistry()
+		s.parent.saveRecoverySnapshot()
+	}
+}
+
+func (s *SubAgent) checkpointTranscript() error {
+	if s == nil || s.recovery == nil || !s.persistenceHealth.beginRecovery() {
+		return nil
+	}
+	if s.parent != nil {
+		_ = s.parent.persistSubAgentMeta(s)
+		s.parent.updateTaskRecordFromSub(s, "")
+	}
+	if err := s.recovery.RewriteLog(s.instanceID, s.ctxMgr.Snapshot()); err != nil {
+		s.notePersistenceFailure(err)
+		return err
+	}
+	s.persistenceHealth.markRecovered()
+	if s.parent != nil {
+		if err := s.parent.persistSubAgentMeta(s); err != nil {
+			s.notePersistenceFailure(err)
+			return err
+		}
+		s.parent.updateTaskRecordFromSub(s, "")
+		if err := s.parent.persistTaskRegistry(); err != nil {
+			s.notePersistenceFailure(err)
+			return err
+		}
+		s.parent.saveRecoverySnapshot()
+	}
+	log.Infof("SubAgent persistence recovered after transcript checkpoint agent=%v task_id=%v", s.instanceID, s.taskID)
+	return nil
 }
 
 // maxIdleNudges is the maximum number of idle nudges before escalating to
@@ -529,7 +579,7 @@ func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimi
 	prompt := s.buildSystemPrompt()
 	client.SetSystemPrompt(prompt)
 	if oldClient != nil && oldClient != client {
-		oldClient.InvalidateRouting("model_client_swapped")
+		oldClient.Close()
 	}
 	providerRef := client.PrimaryModelRef()
 	s.ctxMgr.SetTokenBudgets(contextLimit, client.InputLimitForModelRef(providerRef), 0)
@@ -539,6 +589,18 @@ func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimi
 		runningRef = providerRef
 	}
 	s.parent.emitToTUI(RunningModelChangedEvent{AgentID: s.instanceID, ProviderModelRef: providerRef, RunningModelRef: runningRef})
+}
+
+func (s *SubAgent) closeLLMClient() {
+	if s == nil {
+		return
+	}
+	s.llmMu.RLock()
+	client := s.llmClient
+	s.llmMu.RUnlock()
+	if client != nil {
+		client.Close()
+	}
 }
 
 func (s *SubAgent) llmSnapshot() (*llm.Client, string) {

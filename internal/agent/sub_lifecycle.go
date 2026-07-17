@@ -227,9 +227,9 @@ func (s *SubAgent) persistInterruptedToolResults(calls []PendingToolCall, status
 		},
 		func(toolMsg message.Message) bool {
 			if s.parent != nil {
-				return s.notePersistenceEnqueue(s.parent.persistAsyncAfter(s.instanceID, toolMsg, func(succeeded bool) {
-					if !succeeded {
-						s.persistFailed.Store(true)
+				return s.notePersistenceEnqueue(s.parent.persistAsyncAfter(s.instanceID, toolMsg, func(err error) {
+					if err != nil {
+						s.notePersistenceFailure(err)
 					}
 				}))
 			}
@@ -298,6 +298,7 @@ func (s *SubAgent) RemoveLastMessage() {
 		remaining := s.ctxMgr.Snapshot()
 		if err := s.recovery.RewriteLog(s.instanceID, remaining); err != nil {
 			log.Warnf("SubAgent.RemoveLastMessage: failed to rewrite log agent=%v error=%v", s.instanceID, err)
+			s.notePersistenceFailure(err)
 		}
 	}
 }

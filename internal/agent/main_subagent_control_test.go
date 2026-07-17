@@ -892,6 +892,70 @@ func TestCreateSubAgentPersistenceFailureDoesNotStartRuntime(t *testing.T) {
 	}
 }
 
+func TestCreateSubAgentCancellationDuringPersistenceDoesNotStartRuntime(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	a.taskRegistryPersistHook = func() {
+		close(entered)
+		<-release
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	type outcome struct {
+		handle tools.TaskHandle
+		err    error
+	}
+	result := make(chan outcome, 1)
+	go func() {
+		handle, err := a.CreateSubAgent(ctx, "cancel during persistence", "worker", "plan-cancel", "semantic-cancel", tools.WriteScope{})
+		result <- outcome{handle: handle, err: err}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("admission did not reach durable persistence")
+	}
+	cancel()
+	close(release)
+	got := <-result
+	if got.err == nil || !strings.Contains(got.err.Error(), context.Canceled.Error()) {
+		t.Fatalf("CreateSubAgent() = (%#v, %v), want cancellation", got.handle, got.err)
+	}
+	if live := len(a.subs.snapshotSubAgents()); live != 0 {
+		t.Fatalf("live SubAgents = %d, want 0 after cancellation", live)
+	}
+	if got := len(a.sem); got != 0 {
+		t.Fatalf("semaphore use = %d, want 0 after cancellation", got)
+	}
+	if rec := a.taskRecordByTaskID("adhoc-1"); rec != nil {
+		t.Fatalf("task record = %#v, want nil after cancellation", rec)
+	}
+}
+
+func TestSubAgentRegistrationMergesWithLatestTaskRegistry(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	sub := newControllableTestSubAgent(t, a, "new-task")
+	registration := buildTaskRecordFromSub(sub, nil, "", 0, time.Now())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"existing": {TaskID: "existing", State: string(SubAgentStateCompleted)},
+	})
+	if err := a.persistSubAgentRegistration(a.sessionDir, sub, registration); err != nil {
+		t.Fatalf("persistSubAgentRegistration: %v", err)
+	}
+	records, err := loadDurableTaskRecords(a.sessionDir)
+	if err != nil {
+		t.Fatalf("loadDurableTaskRecords: %v", err)
+	}
+	if got := records["existing"]; got == nil || got.State != string(SubAgentStateCompleted) {
+		t.Fatalf("existing task = %#v, want latest completed state", got)
+	}
+	if got := records[sub.taskID]; got == nil || got.LatestInstanceID != sub.instanceID {
+		t.Fatalf("registered task = %#v, want worker registration", got)
+	}
+}
+
 func TestRehydratePersistenceFailureDoesNotRegisterRuntime(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
@@ -2399,6 +2463,39 @@ func TestParkSubAgentPersistenceFailureKeepsRuntimeLive(t *testing.T) {
 	}
 	if rec := a.taskRecordByTaskID(sub.taskID); rec == nil || rec.RuntimeParked {
 		t.Fatalf("task record = %#v, want live non-parked record", rec)
+	}
+}
+
+func TestParkSubAgentRecoversDegradedTranscriptWithCheckpoint(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-park-recover")
+	sub.setState(SubAgentStateCompleted, "done")
+	sub.ctxMgr.Append(message.Message{Role: "assistant", Content: "checkpointed reply"})
+	sub.notePersistenceFailure(fmt.Errorf("temporary disk error"))
+
+	if got := sub.PersistenceHealth().State; got != PersistenceDegraded {
+		t.Fatalf("persistence state = %q, want degraded", got)
+	}
+	if !a.parkSubAgent(sub.instanceID) {
+		t.Fatal("parkSubAgent() = false after checkpoint recovery")
+	}
+	client, _ := sub.llmSnapshot()
+	if client == nil {
+		t.Fatal("parked SubAgent lost model metadata client")
+	}
+	if _, err := client.CompleteStream(context.Background(), nil, nil, nil); err == nil || err.Error() != "llm client is closed" {
+		t.Fatalf("parked SubAgent client error = %v, want closed", err)
+	}
+	rec := a.taskRecordByTaskID(sub.taskID)
+	if rec == nil || rec.Persistence.State != PersistenceHealthy {
+		t.Fatalf("task persistence = %#v, want healthy", rec)
+	}
+	msgs, err := loadTaskHistoryMessages(a.recovery, rec)
+	if err != nil {
+		t.Fatalf("loadTaskHistoryMessages: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].Content != "checkpointed reply" {
+		t.Fatalf("checkpointed messages = %#v", msgs)
 	}
 }
 

@@ -60,10 +60,12 @@ type Client struct {
 	serviceTier            config.ServiceTier
 
 	routingGeneration atomic.Uint64
+	closed            atomic.Bool
 	routingChangedCh  chan struct{}
 
 	codexWarmupStarted bool
 	codexWarmupCancel  context.CancelFunc
+	codexWarmupDone    <-chan struct{}
 }
 
 // CallStatus describes the effective model-routing outcome of the most recent
@@ -158,39 +160,47 @@ func (c *Client) InvalidateRouting(reason string) {
 	}
 }
 
+// Close releases client-owned background work and permanently invalidates any
+// in-flight routing plan. Provider implementations and ProviderConfig objects
+// may be shared by other clients, so their lifecycle remains externally owned.
+// Close is safe to call more than once.
+func (c *Client) Close() {
+	if c == nil || !c.closed.CompareAndSwap(false, true) {
+		return
+	}
+	c.InvalidateRouting("client_closed")
+	c.mu.RLock()
+	done := c.codexWarmupDone
+	c.mu.RUnlock()
+	if done != nil {
+		<-done
+	}
+}
+
 func (c *Client) startCodexWarmup() {
 	if c == nil {
 		return
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	c.mu.Lock()
-	if c.codexWarmupStarted {
+	if c.closed.Load() || c.codexWarmupStarted || c.provider == nil {
 		c.mu.Unlock()
+		cancel()
 		return
 	}
 	provider := c.provider
-	c.mu.Unlock()
-	if provider == nil {
-		return
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	c.mu.Lock()
-	if c.codexWarmupStarted || c.provider == nil {
-		c.mu.Unlock()
-		cancel()
-		return
-	}
 	c.codexWarmupStarted = true
 	c.codexWarmupCancel = cancel
-	c.mu.Unlock()
-
-	if !provider.StartCodexWarmup(ctx) {
+	done, started := provider.startCodexWarmup(ctx)
+	if !started {
 		cancel()
-		c.mu.Lock()
 		c.codexWarmupCancel = nil
 		c.codexWarmupStarted = false
 		c.mu.Unlock()
+		return
 	}
+	c.codexWarmupDone = done
+	c.mu.Unlock()
 }
 
 func (c *Client) routingSnapshot() (generation uint64, changed <-chan struct{}) {
@@ -836,7 +846,14 @@ func (c *Client) CompleteStream(
 	tools []message.ToolDefinition,
 	cb StreamCallback,
 ) (*message.Response, error) {
+	if c == nil || c.closed.Load() {
+		return nil, errors.New("llm client is closed")
+	}
 	c.mu.Lock()
+	if c.closed.Load() {
+		c.mu.Unlock()
+		return nil, errors.New("llm client is closed")
+	}
 	pool := c.modelPoolLocked()
 	startIdx := c.poolCursor
 	if startIdx < 0 || startIdx >= len(pool) {

@@ -84,15 +84,15 @@ func (a *MainAgent) startPersistLoop() {
 			close(entry.barrier)
 			return
 		}
-		succeeded := true
+		var persistErr error
 		if entry.recovery != nil {
 			if err := entry.recovery.PersistMessage(entry.agentID, entry.msg); err != nil {
 				log.Warnf("failed to persist message agent_id=%v error=%v", entry.agentID, err)
-				succeeded = false
+				persistErr = err
 			}
 		}
 		if entry.after != nil {
-			entry.after(succeeded)
+			entry.after(persistErr)
 		}
 	})
 }
@@ -108,7 +108,7 @@ func (a *MainAgent) persistAsync(agentID string, msg message.Message) {
 	a.persistAsyncAfter(agentID, msg, nil)
 }
 
-func (a *MainAgent) persistAsyncAfter(agentID string, msg message.Message, after func(bool)) bool {
+func (a *MainAgent) persistAsyncAfter(agentID string, msg message.Message, after func(error)) bool {
 	if a.shuttingDown.Load() {
 		return false
 	}

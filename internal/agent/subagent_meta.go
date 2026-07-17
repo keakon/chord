@@ -37,6 +37,7 @@ type subAgentMeta struct {
 	LastReplyKind           string              `json:"last_reply_kind,omitempty"`
 	LastReplySummary        string              `json:"last_reply_summary,omitempty"`
 	LastArtifact            tools.ArtifactRef   `json:"last_artifact"`
+	Persistence             PersistenceHealth   `json:"persistence"`
 	UpdatedAt               time.Time           `json:"updated_at"`
 }
 
@@ -92,6 +93,7 @@ func (a *MainAgent) persistSubAgentMetaToSession(sub *SubAgent, sessionDir strin
 		LastReplyKind:         lastReplyKind,
 		LastReplySummary:      lastReplySummary,
 		LastArtifact:          lastArtifact,
+		Persistence:           sub.PersistenceHealth(),
 		UpdatedAt:             time.Now(),
 	}
 	if pendingComplete != nil {

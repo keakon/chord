@@ -537,7 +537,7 @@ func (a *MainAgent) handleEscalate(evt Event) {
 	ownerAgentID, ownerTaskID, _, _ := sub.ownerSnapshot()
 	a.releaseSubAgentSlot(sub)
 	a.emitActivity(evt.SourceID, ActivityIdle, "")
-	a.sendEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
+	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
 		AgentID:      evt.SourceID,
 		TaskID:       taskIDForSub(sub),
 		OwnerAgentID: ownerAgentID,
@@ -779,7 +779,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	clientCommitted := false
 	defer func() {
 		if !clientCommitted && subLLMClient != nil {
-			subLLMClient.InvalidateRouting("subagent_admission_aborted")
+			subLLMClient.Close()
 		}
 	}()
 	a.applyServiceTierToClient(subLLMClient)
@@ -865,14 +865,9 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	}()
 	registrationSessionDir := a.sessionDir
 	registrationRecord := buildTaskRecordFromSub(sub, nil, "", a.explicitUserTurnCount.Load(), time.Now())
-	registrationRecords := cloneDurableTaskRecordMap(a.subs.taskRecords)
-	if registrationRecords == nil {
-		registrationRecords = make(map[string]*DurableTaskRecord)
-	}
-	registrationRecords[taskID] = registrationRecord
 	a.subs.mu.Unlock()
 
-	persistErr := a.persistSubAgentRegistration(registrationSessionDir, sub, registrationRecords)
+	persistErr := a.persistSubAgentRegistration(registrationSessionDir, sub, registrationRecord)
 	if persistErr != nil {
 		_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
 		a.admissionMu.Unlock()
@@ -881,10 +876,15 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	}
 
 	a.subs.mu.Lock()
-	if a.subs.admissions[taskID] != admission {
+	if a.subs.admissions[taskID] != admission || requestCtx.Err() != nil {
 		a.subs.mu.Unlock()
+		_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
+		_ = a.persistTaskRegistryRecord(registrationSessionDir, taskID, nil)
 		a.admissionMu.Unlock()
 		cancel()
+		if err := requestCtx.Err(); err != nil {
+			return tools.TaskHandle{}, err
+		}
 		return tools.TaskHandle{}, fmt.Errorf("delegate admission was cancelled after persistence")
 	}
 	a.subs.removeAdmissionLocked(taskID)
@@ -902,9 +902,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 			delete(a.subs.taskRecords, taskID)
 			a.subs.mu.Unlock()
 			_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
-			rollbackRecords := cloneDurableTaskRecordMap(registrationRecords)
-			delete(rollbackRecords, taskID)
-			_ = a.persistTaskRegistrySnapshot(registrationSessionDir, rollbackRecords)
+			_ = a.persistTaskRegistryRecord(registrationSessionDir, taskID, nil)
 			a.admissionMu.Unlock()
 			cancel()
 			return tools.TaskHandle{}, fmt.Errorf("persist initial recovery snapshot: %w", err)

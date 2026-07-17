@@ -3192,6 +3192,7 @@ func TestNewClientCodexWarmupCancelsOnInvalidateRouting(t *testing.T) {
 	})
 
 	c := NewClient(prov, noopProvider{}, "gpt-5.5", 1024, "")
+	defer c.Close()
 
 	select {
 	case <-started:
@@ -3205,6 +3206,57 @@ func TestNewClientCodexWarmupCancelsOnInvalidateRouting(t *testing.T) {
 	case <-canceled:
 	case <-time.After(2 * time.Second):
 		t.Fatal("warmup request was not cancelled after InvalidateRouting")
+	}
+}
+
+func TestClientCloseCancelsWarmupAndRejectsNewRequests(t *testing.T) {
+	started := make(chan string, 1)
+	canceled := make(chan struct{})
+	var canceledOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case started <- "started":
+		default:
+		}
+		<-r.Context().Done()
+		canceledOnce.Do(func() { close(canceled) })
+	}))
+	defer server.Close()
+
+	expires := time.Now().Add(time.Hour).UnixMilli()
+	creds := []config.ProviderCredential{
+		{OAuth: &config.OAuthCredential{Access: testProviderOAuthJWT(`{"chatgpt_account_id":"acc-a","exp":4102444800}`), Refresh: "refresh-a", Expires: expires, AccountID: "acc-a"}},
+		{OAuth: &config.OAuthCredential{Access: testProviderOAuthJWT(`{"chatgpt_account_id":"acc-b","exp":4102444800}`), Refresh: "refresh-b", Expires: expires, AccountID: "acc-b"}},
+	}
+	auth := config.AuthConfig{"openai": creds}
+	var authMu sync.Mutex
+	prov := NewProviderConfig("openai", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/backend-api/codex/responses",
+		Preset: config.ProviderPresetCodex,
+		Models: map[string]config.ModelConfig{"gpt-5.5": {Limit: config.ModelLimit{Context: 128000, Output: 1024}}},
+	}, config.ExtractAPIKeys(creds))
+	prov.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &auth, &authMu, map[string]OAuthKeySetup{
+		creds[0].OAuth.Access: {CredentialIndex: 0, AccountID: "acc-a", Expires: expires},
+		creds[1].OAuth.Access: {CredentialIndex: 1, AccountID: "acc-b", Expires: expires},
+	}, "")
+	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) { return nil, nil })
+	c := NewClient(prov, noopProvider{}, "gpt-5.5", 1024, "")
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("warmup request did not start")
+	}
+	c.Close()
+	c.Close()
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("warmup request was not cancelled by Close")
+	}
+	if _, err := c.CompleteStream(context.Background(), nil, nil, nil); err == nil || err.Error() != "llm client is closed" {
+		t.Fatalf("CompleteStream after Close error = %v, want closed error", err)
 	}
 }
 

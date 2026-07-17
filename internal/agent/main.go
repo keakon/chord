@@ -223,6 +223,7 @@ type SubAgentInfo struct {
 	AgentDefName     string
 	TaskDesc         string
 	ModelName        string
+	Persistence      PersistenceHealth
 	SelectedRef      string
 	RunningRef       string
 	State            string
@@ -644,7 +645,7 @@ type persistEntry struct {
 	agentID  string
 	msg      message.Message
 	recovery *recovery.RecoveryManager // snapshot of a.recovery at enqueue time
-	after    func(bool)
+	after    func(error)
 	barrier  chan struct{}
 	stop     bool
 }
@@ -1124,6 +1125,9 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 			log.Warn("shutdown budget exhausted before persist loop drain")
 		}
 	}
+	if failed := a.checkpointDegradedSubAgents(); len(failed) > 0 {
+		log.Warnf("shutdown leaving SubAgents with degraded persistence agent_ids=%v", failed)
+	}
 
 	if wait := remaining(); wait > 0 {
 		done := make(chan struct{})
@@ -1190,6 +1194,22 @@ func (a *MainAgent) waitForSubAgents(remaining func() time.Duration) {
 	}
 }
 
+func (a *MainAgent) checkpointDegradedSubAgents() []string {
+	if a == nil {
+		return nil
+	}
+	var failed []string
+	for _, sub := range a.subs.snapshotSubAgents() {
+		if sub == nil || sub.transcriptPersistenceHealthy() {
+			continue
+		}
+		if err := sub.checkpointTranscript(); err != nil {
+			failed = append(failed, sub.instanceID)
+		}
+	}
+	return failed
+}
+
 // cancelActiveWork aborts the active turn (if any), cancels every live
 // SubAgent, and stops orphaned background objects (Shell spawns, etc.). It is
 // the first phase of [MainAgent.Shutdown] and runs synchronously so tool
@@ -1201,11 +1221,18 @@ func (a *MainAgent) cancelActiveWork() {
 		a.turn.Cancel()
 	}
 	a.turnMu.Unlock()
+	a.llmMu.RLock()
+	mainClient := a.llmClient
+	a.llmMu.RUnlock()
+	if mainClient != nil {
+		mainClient.Close()
+	}
 
 	a.subs.mu.RLock()
 	for _, sub := range a.subs.subAgents {
 		tools.StopAllSpawnedForAgent(sub.instanceID, "terminated on client exit")
 		sub.cancel()
+		sub.closeLLMClient()
 	}
 	a.subs.mu.RUnlock()
 

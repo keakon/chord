@@ -393,8 +393,13 @@ func (p *ProviderConfig) Close() {
 }
 
 func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
+	_, started := p.startCodexWarmup(ctx)
+	return started
+}
+
+func (p *ProviderConfig) startCodexWarmup(ctx context.Context) (<-chan struct{}, bool) {
 	if p == nil {
-		return false
+		return nil, false
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -403,7 +408,7 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 	p.mu.Lock()
 	if p.oauthProfile != config.OAuthProfileOpenAICodex || p.codexPollFetchFn == nil || p.codexPollClosed {
 		p.mu.Unlock()
-		return false
+		return nil, false
 	}
 	p.maybeReloadAuthStateLocked()
 	now := time.Now()
@@ -419,7 +424,7 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 	}
 	if len(candidates) < 2 {
 		p.mu.Unlock()
-		return false
+		return nil, false
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
 		a := p.keyStates[candidates[i]]
@@ -458,9 +463,11 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 	}
 	p.codexPollWG.Add(1)
 	p.mu.Unlock()
+	done := make(chan struct{})
 
 	go func(providerName string, candidateIdxs []int, requestCtx, lifecycleCtx context.Context) {
 		defer p.codexPollWG.Done()
+		defer close(done)
 		ctx, cancel := context.WithCancel(requestCtx)
 		stopLifecycleCancel := context.AfterFunc(lifecycleCtx, cancel)
 		defer func() {
@@ -534,7 +541,7 @@ func (p *ProviderConfig) StartCodexWarmup(ctx context.Context) bool {
 		}
 	}(p.name, candidates, ctx, lifecycleCtx)
 
-	return true
+	return done, true
 }
 
 func (p *ProviderConfig) handleCodexWarmupAuthFailure(key string, err error) bool {

@@ -229,7 +229,7 @@ func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string
 	a.installedSysPrompt = ""
 	a.llmMu.Unlock()
 	if oldClient != nil && oldClient != newClient {
-		oldClient.InvalidateRouting("model_client_swapped")
+		oldClient.Close()
 	}
 	a.clearFrozenToolSurface()
 	a.markRuntimeSurfaceDirty()

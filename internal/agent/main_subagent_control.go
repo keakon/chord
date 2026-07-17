@@ -497,6 +497,7 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	if len(record.LastArtifactRefs) > 0 {
 		sub.setLastArtifact(record.LastArtifactRefs[0])
 	}
+	sub.persistenceHealth.restore(record.Persistence)
 	admissionStartedAt := time.Now()
 	a.admissionMu.Lock()
 	a.orchestrationMetrics.recordAdmissionWait(time.Since(admissionStartedAt))
@@ -513,7 +514,7 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	clientCommitted := false
 	defer func() {
 		if !clientCommitted && subLLMClient != nil {
-			subLLMClient.InvalidateRouting("subagent_rehydrate_aborted")
+			subLLMClient.Close()
 		}
 	}()
 	previousAgentID = strings.TrimSpace(record.LatestInstanceID)
@@ -531,10 +532,8 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	}
 	registrationSessionDir := a.sessionDir
 	rehydratedRecord := buildTaskRecordFromSub(sub, a.subs.taskRecords[taskID], "", a.explicitUserTurnCount.Load(), time.Now())
-	registrationRecords := cloneDurableTaskRecordMap(a.subs.taskRecords)
-	registrationRecords[taskID] = rehydratedRecord
 	a.subs.mu.Unlock()
-	persistErr := a.persistSubAgentRegistration(registrationSessionDir, sub, registrationRecords)
+	persistErr := a.persistSubAgentRegistration(registrationSessionDir, sub, rehydratedRecord)
 	if persistErr != nil {
 		_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
 		a.releaseSubAgentSlot(sub)
@@ -546,6 +545,8 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	if a.subs.activations[taskID] != activation || activation.cancelled || a.subs.subAgentByTaskIDLocked(taskID) != nil {
 		live := a.subs.subAgentByTaskIDLocked(taskID)
 		a.subs.mu.Unlock()
+		_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
+		_ = a.persistTaskRegistryRecord(registrationSessionDir, taskID, record)
 		a.releaseSubAgentSlot(sub)
 		a.admissionMu.Unlock()
 		cancel()
@@ -564,9 +565,7 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 			a.subs.taskRecords[taskID] = cloneDurableTaskRecord(record)
 			a.subs.mu.Unlock()
 			_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
-			rollbackRecords := cloneDurableTaskRecordMap(registrationRecords)
-			rollbackRecords[taskID] = cloneDurableTaskRecord(record)
-			_ = a.persistTaskRegistrySnapshot(registrationSessionDir, rollbackRecords)
+			_ = a.persistTaskRegistryRecord(registrationSessionDir, taskID, record)
 			a.releaseSubAgentSlot(sub)
 			a.admissionMu.Unlock()
 			cancel()

@@ -201,3 +201,16 @@ func TestShutdownWaitsForStartedSubAgentRunLoop(t *testing.T) {
 		t.Fatal("Shutdown returned before the SubAgent run loop finished")
 	}
 }
+
+func TestShutdownClosesMainLLMClient(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	client := newTestLLMClient()
+	a.swapLLMClientWithRef(client, "test-model", 128000, "test-provider/test-model")
+
+	if err := a.Shutdown(2 * time.Second); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	if _, err := client.CompleteStream(context.Background(), nil, nil, nil); err == nil || err.Error() != "llm client is closed" {
+		t.Fatalf("main client after Shutdown error = %v, want closed", err)
+	}
+}

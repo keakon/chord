@@ -61,6 +61,7 @@ type DurableTaskRecord struct {
 	LastCompletion       *CompletionEnvelope `json:"last_completion,omitempty"`
 	PendingCompletion    *CompletionEnvelope `json:"pending_completion,omitempty"`
 	SuspectedStallReason string              `json:"suspected_stall_reason,omitempty"`
+	Persistence          PersistenceHealth   `json:"persistence"`
 	RuntimeParked        bool                `json:"runtime_parked,omitempty"`
 	CreatedTurn          uint64              `json:"created_turn,omitempty"`
 	LastUpdatedTurn      uint64              `json:"last_updated_turn,omitempty"`
@@ -114,6 +115,8 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 	out.LastCompletion = normalizeCompletionEnvelope(out.LastCompletion)
 	out.PendingCompletion = normalizeCompletionEnvelope(out.PendingCompletion)
 	out.SuspectedStallReason = strings.TrimSpace(out.SuspectedStallReason)
+	out.Persistence.State = normalizePersistenceHealthState(out.Persistence.State)
+	out.Persistence.LastError = strings.TrimSpace(out.Persistence.LastError)
 	out.ClosedReason = strings.TrimSpace(out.ClosedReason)
 	out.InstanceHistory = dedupeTaskInstanceHistory(out.InstanceHistory)
 	return &out
@@ -462,19 +465,28 @@ func (a *MainAgent) persistTaskRegistry() error {
 	return nil
 }
 
-func (a *MainAgent) persistTaskRegistrySnapshot(sessionDir string, records map[string]*DurableTaskRecord) error {
+func (a *MainAgent) persistTaskRegistryRecord(sessionDir, taskID string, record *DurableTaskRecord) error {
 	if a == nil {
 		return nil
 	}
 	a.taskRegistryPersistMu.Lock()
 	defer a.taskRegistryPersistMu.Unlock()
-	if hook := a.taskRegistryPersistHook; hook != nil {
-		hook()
+	a.subs.mu.RLock()
+	records := cloneDurableTaskRecordMap(a.subs.taskRecords)
+	a.subs.mu.RUnlock()
+	if records == nil {
+		records = make(map[string]*DurableTaskRecord)
+	}
+	taskID = strings.TrimSpace(taskID)
+	if record == nil {
+		delete(records, taskID)
+	} else {
+		records[taskID] = cloneDurableTaskRecord(record)
 	}
 	return persistDurableTaskRecords(sessionDir, records)
 }
 
-func (a *MainAgent) persistSubAgentRegistration(sessionDir string, sub *SubAgent, records map[string]*DurableTaskRecord) error {
+func (a *MainAgent) persistSubAgentRegistration(sessionDir string, sub *SubAgent, record *DurableTaskRecord) error {
 	if a == nil || sub == nil {
 		return nil
 	}
@@ -485,6 +497,13 @@ func (a *MainAgent) persistSubAgentRegistration(sessionDir string, sub *SubAgent
 	if err := a.persistSubAgentMetaToSession(sub, sessionDir); err != nil {
 		return err
 	}
+	a.subs.mu.RLock()
+	records := cloneDurableTaskRecordMap(a.subs.taskRecords)
+	a.subs.mu.RUnlock()
+	if records == nil {
+		records = make(map[string]*DurableTaskRecord)
+	}
+	records[sub.taskID] = cloneDurableTaskRecord(record)
 	if hook := a.taskRegistryPersistHook; hook != nil {
 		hook()
 	}
@@ -563,6 +582,7 @@ func buildTaskRecordFromSub(sub *SubAgent, previous *DurableTaskRecord, closedRe
 	rec.InstanceHistory = append(rec.InstanceHistory, rec.LatestInstanceID)
 	rec.InstanceHistory = dedupeTaskInstanceHistory(rec.InstanceHistory)
 	rec.LastSummary = strings.TrimSpace(summary)
+	rec.Persistence = sub.PersistenceHealth()
 	if pending := sub.PendingCompleteIntent(); pending != nil {
 		rec.PendingCompletion = normalizeCompletionEnvelope(&CompletionEnvelope{Summary: pending.Summary})
 		if pending.Envelope != nil {
@@ -611,6 +631,7 @@ func taskRecordFromLoadedState(state loadedSubAgentState) *DurableTaskRecord {
 		LatestInstanceID:     strings.TrimSpace(state.InstanceID),
 		InstanceHistory:      dedupeTaskInstanceHistory([]string{state.InstanceID}),
 		LastSummary:          strings.TrimSpace(state.LastSummary),
+		Persistence:          state.Persistence,
 		SelectedModelRef:     strings.TrimSpace(state.SelectedModelRef),
 		RunningModelRef:      strings.TrimSpace(state.RunningModelRef),
 		LastMailboxID:        strings.TrimSpace(state.LastMailboxID),
@@ -884,6 +905,7 @@ func (a *MainAgent) taskInfosForCompaction() []SubAgentInfo {
 			AgentDefName:     sub.agentDefName,
 			TaskDesc:         sub.taskDesc,
 			ModelName:        modelName,
+			Persistence:      sub.PersistenceHealth(),
 			SelectedRef:      selectedRef,
 			RunningRef:       runningRef,
 			State:            string(state),
@@ -922,6 +944,7 @@ func (a *MainAgent) taskInfosForCompaction() []SubAgentInfo {
 			TaskID:       taskID,
 			AgentDefName: strings.TrimSpace(rec.AgentDefName),
 			TaskDesc:     strings.TrimSpace(rec.TaskDesc),
+			Persistence:  rec.Persistence,
 			State:        state,
 			LastSummary:  strings.TrimSpace(rec.LastSummary),
 			LastArtifact: lastArtifact,

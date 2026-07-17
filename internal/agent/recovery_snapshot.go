@@ -60,6 +60,11 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 			snap.PendingCompleteSummary = pendingComplete.Summary
 			snap.PendingCompleteEnvelope = marshalCompletionEnvelope(pendingComplete.Envelope)
 		}
+		persistence := sub.PersistenceHealth()
+		snap.Persistence.State = string(persistence.State)
+		snap.Persistence.LastError = persistence.LastError
+		snap.Persistence.FailedAt = persistence.FailedAt
+		snap.Persistence.RecoveredAt = persistence.RecoveredAt
 		agents = append(agents, snap)
 	}
 	a.subs.mu.RUnlock()

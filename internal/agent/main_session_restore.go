@@ -76,6 +76,7 @@ type loadedSubAgentState struct {
 	LastReplyKind           string
 	LastReplySummary        string
 	LastArtifact            tools.ArtifactRef
+	Persistence             PersistenceHealth
 }
 
 type restoredSubAgentBuilder struct {
@@ -118,6 +119,12 @@ func (b *restoredSubAgentBuilder) seedFromSnapshot(snap recovery.AgentSnapshot) 
 	b.state.PendingCompleteIntent = snap.PendingCompleteIntent
 	b.state.PendingCompleteSummary = strings.TrimSpace(snap.PendingCompleteSummary)
 	b.state.PendingCompleteEnvelope = append(json.RawMessage(nil), snap.PendingCompleteEnvelope...)
+	b.state.Persistence = PersistenceHealth{
+		State:       PersistenceHealthState(snap.Persistence.State),
+		LastError:   snap.Persistence.LastError,
+		FailedAt:    snap.Persistence.FailedAt,
+		RecoveredAt: snap.Persistence.RecoveredAt,
+	}
 	if b.state.PendingCompleteIntent {
 		b.state.PendingComplete = &AgentResult{
 			Summary:  b.state.PendingCompleteSummary,
@@ -194,6 +201,7 @@ func (b *restoredSubAgentBuilder) overlayMeta(meta *subAgentMeta) {
 	b.state.LastReplyKind = strings.TrimSpace(meta.LastReplyKind)
 	b.state.LastReplySummary = strings.TrimSpace(meta.LastReplySummary)
 	b.state.LastArtifact = tools.NormalizeArtifactRef(meta.LastArtifact)
+	b.state.Persistence = meta.Persistence
 }
 
 func (b *restoredSubAgentBuilder) overlayMailbox(mailbox restoredMailboxAgentState) {
@@ -219,6 +227,9 @@ func (b *restoredSubAgentBuilder) overlayTaskRecord(rec *DurableTaskRecord) {
 		b.state.ExpectedWriteScope = rec.ExpectedWriteScope.Normalized()
 	}
 	b.state.JoinToOwner = rec.JoinToOwner
+	if b.state.Persistence.State == "" || normalizePersistenceHealthState(rec.Persistence.State) != PersistenceHealthy {
+		b.state.Persistence = rec.Persistence
+	}
 }
 
 func (b *restoredSubAgentBuilder) attachTranscript(msgs []message.Message) {
@@ -245,6 +256,7 @@ func (b *restoredSubAgentBuilder) normalize() {
 	if b.state.State == SubAgentStateRunning || b.state.State == "" {
 		b.state.State = SubAgentStateIdle
 	}
+	b.state.Persistence.State = normalizePersistenceHealthState(b.state.Persistence.State)
 }
 
 func (b *restoredSubAgentBuilder) build() loadedSubAgentState {
@@ -896,6 +908,7 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 			rec.ResumePolicy = durableTaskResumePolicy(restoreState)
 			rec.RuntimeParked = true
 			rec.LastSummary = restoreSummary
+			rec.Persistence = state.Persistence
 			if state.PendingCompleteIntent {
 				pending := state.PendingComplete
 				if pending == nil && strings.TrimSpace(state.PendingCompleteSummary) != "" {

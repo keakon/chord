@@ -39,6 +39,7 @@ func (a *MainAgent) closeSubAgent(agentID string) {
 	a.fileTrack.ReleaseAll(agentID)
 	tools.StopAllSpawnedForAgent(agentID, "terminated on subagent close")
 	sub.cancel()
+	sub.closeLLMClient()
 	a.removeSubAgentMailboxState(agentID)
 	_ = os.Remove(subAgentMetaPath(a.sessionDir, agentID))
 }
@@ -66,6 +67,10 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 			hook(sub)
 		}
 	})
+	if err := sub.checkpointTranscript(); err != nil {
+		log.Warnf("refusing to park SubAgent because transcript checkpoint failed agent_id=%v task_id=%v error=%v", agentID, sub.taskID, err)
+		return false
+	}
 	if !sub.transcriptPersistenceHealthy() {
 		log.Warnf("refusing to park SubAgent because pending transcript persistence failed agent_id=%v task_id=%v", agentID, sub.taskID)
 		return false
@@ -92,17 +97,12 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 	previousRecord := cloneDurableTaskRecord(a.subs.taskRecords[sub.taskID])
 	parkedRecord := buildTaskRecordFromSub(sub, previousRecord, "", a.explicitUserTurnCount.Load(), parkedAt)
 	parkedRecord.RuntimeParked = true
-	records := cloneDurableTaskRecordMap(a.subs.taskRecords)
-	if records == nil {
-		records = make(map[string]*DurableTaskRecord)
-	}
-	records[sub.taskID] = parkedRecord
 	a.subs.mu.Unlock()
 	if err := a.persistSubAgentMeta(sub); err != nil {
 		log.Warnf("refusing to park SubAgent because metadata persistence failed agent_id=%v task_id=%v error=%v", agentID, sub.taskID, err)
 		return false
 	}
-	if err := a.persistTaskRegistrySnapshot(a.sessionDir, records); err != nil {
+	if err := a.persistTaskRegistryRecord(a.sessionDir, sub.taskID, parkedRecord); err != nil {
 		log.Warnf("refusing to park SubAgent because task registry persistence failed agent_id=%v task_id=%v error=%v", agentID, sub.taskID, err)
 		return false
 	}
@@ -125,11 +125,7 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 			}
 			a.subs.stateEnteredTurn[agentID] = a.explicitUserTurnCount.Load()
 			a.subs.mu.Unlock()
-			rollbackRecords := cloneDurableTaskRecordMap(records)
-			if previousRecord != nil {
-				rollbackRecords[sub.taskID] = cloneDurableTaskRecord(previousRecord)
-			}
-			_ = a.persistTaskRegistrySnapshot(a.sessionDir, rollbackRecords)
+			_ = a.persistTaskRegistryRecord(a.sessionDir, sub.taskID, previousRecord)
 			log.Warnf("refusing to park SubAgent because recovery snapshot persistence failed agent_id=%v task_id=%v error=%v", agentID, sub.taskID, err)
 			return false
 		}
@@ -144,6 +140,7 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 	a.fileTrack.ReleaseAll(agentID)
 	tools.StopAllSpawnedForAgent(agentID, "terminated on subagent park")
 	sub.cancel()
+	sub.closeLLMClient()
 	if focused {
 		a.focusedAgent.CompareAndSwap(sub, nil)
 		a.setFocusedTaskID(sub.taskID)
