@@ -499,7 +499,9 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	if len(record.LastArtifactRefs) > 0 {
 		sub.setLastArtifact(record.LastArtifactRefs[0])
 	}
+	admissionStartedAt := time.Now()
 	a.admissionMu.Lock()
+	a.orchestrationMetrics.recordAdmissionWait(time.Since(admissionStartedAt))
 	if a.shuttingDown.Load() || a.admissionPaused.Load() || a.admissionEpoch.Load() != admissionEpoch {
 		a.admissionMu.Unlock()
 		cancel()
@@ -553,6 +555,7 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 		ParentAgentID:   controlPlaneAgentID(sub.OwnerAgentID()),
 		ParentTaskID:    sub.OwnerTaskID(),
 	})
+	a.orchestrationMetrics.recordRehydrate(taskID, time.Now())
 	return sub, previousAgentID, true, nil
 }
 

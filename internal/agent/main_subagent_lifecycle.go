@@ -87,9 +87,10 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 		return false
 	}
 	removed := a.subs.removeLocked(agentID)
+	parkedAt := time.Now()
 	if rec := a.subs.taskRecords[sub.taskID]; rec != nil {
 		rec.RuntimeParked = true
-		rec.UpdatedAt = time.Now()
+		rec.UpdatedAt = parkedAt
 	}
 	a.subs.mu.Unlock()
 	if removed != sub {
@@ -108,6 +109,7 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 	}
 
 	a.persistTaskRegistry()
+	a.orchestrationMetrics.recordPark(sub.taskID, parkedAt)
 	log.Debugf("parked quiescent subagent agent_id=%v task_id=%v state=%v", agentID, sub.taskID, sub.State())
 	return true
 }

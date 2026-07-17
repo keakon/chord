@@ -208,6 +208,9 @@ func (a *MainAgent) appendSubAgentMailboxAck(record SubAgentMailboxAckRecord) er
 		delete(a.subAgentMailboxConsumed, record.MessageID)
 	}
 	a.subAgentMailboxIDsMu.Unlock()
+	if record.Outcome == "consumed" {
+		a.orchestrationMetrics.recordMailboxAck(record.MessageID)
+	}
 	return nil
 }
 

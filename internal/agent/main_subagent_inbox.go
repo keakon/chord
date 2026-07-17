@@ -31,6 +31,7 @@ func (a *MainAgent) applyPersistedSubAgentMailboxMessage(msg *SubAgentMailboxMes
 	if msg == nil {
 		return
 	}
+	a.orchestrationMetrics.recordMailboxCreated(msg.MessageID, msg.CreatedAt)
 	if sub := a.subAgentByID(msg.AgentID); sub != nil {
 		sub.setLastMailboxID(msg.MessageID)
 		if msg.Completion != nil && len(msg.Completion.Artifacts) > 0 {
@@ -123,6 +124,7 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 		if !live.InjectUserMessageWithMailboxAck(messageText, msg.MessageID, mailboxMetadata(&msg)) {
 			return false
 		}
+		a.orchestrationMetrics.recordMailboxDelivery(msg.MessageID, msg.CreatedAt)
 		live.armStartupWatchdog()
 		a.persistSubAgentMeta(live)
 		a.syncTaskRecordFromSub(live, "")
@@ -138,7 +140,11 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 		return a.withRegisteredSubAgent(owner, func(live *SubAgent) bool {
 			contextMessage := subAgentMailboxConversationMessage(&msg, messageText)
 			contextMessage.MailboxAckID = msg.MessageID
-			return live.TryEnqueueContextAppend(contextMessage)
+			if !live.TryEnqueueContextAppend(contextMessage) {
+				return false
+			}
+			a.orchestrationMetrics.recordMailboxDelivery(msg.MessageID, msg.CreatedAt)
+			return true
 		})
 	}
 	enqueueForProcessing := func(messageText, statusMsg string) bool {
@@ -149,6 +155,7 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 			if !live.InjectUserMessageWithMailboxAck(messageText, msg.MessageID, mailboxMetadata(&msg)) {
 				return false
 			}
+			a.orchestrationMetrics.recordMailboxDelivery(msg.MessageID, msg.CreatedAt)
 			live.armStartupWatchdog()
 			return true
 		})
@@ -551,6 +558,11 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 	a.activeSubAgentMailboxes = append([]*SubAgentMailboxMessage(nil), pending...)
 	a.activeSubAgentMailbox = msg
 	a.activeSubAgentMailboxAck = true
+	for _, delivered := range pending {
+		if delivered != nil {
+			a.orchestrationMetrics.recordMailboxDelivery(delivered.MessageID, delivered.CreatedAt)
+		}
+	}
 	a.refreshSubAgentInboxSummary()
 	return true
 }

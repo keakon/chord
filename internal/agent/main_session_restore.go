@@ -677,6 +677,12 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	if a.sessionTargetChangedFn != nil {
 		a.sessionTargetChangedFn(loaded.SessionPath)
 	}
+	a.orchestrationMetrics.resetCorrelations()
+	for _, rec := range loaded.TaskRecords {
+		if rec != nil && rec.RuntimeParked {
+			a.orchestrationMetrics.trackParked(rec.TaskID, rec.UpdatedAt)
+		}
+	}
 	a.subAgentInbox = newSubAgentInbox()
 	a.subAgentMailboxIDsMu.Lock()
 	a.subAgentMailboxIDs = make(map[string]struct{}, len(loaded.MailboxMessages))
@@ -694,6 +700,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		if msg.Consumed {
 			continue
 		}
+		a.orchestrationMetrics.recordMailboxCreated(msg.MessageID, msg.CreatedAt)
 		if strings.TrimSpace(msg.OwnerAgentID) != "" {
 			a.enqueueOwnedSubAgentMailbox(msg)
 			continue

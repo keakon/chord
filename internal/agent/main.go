@@ -439,6 +439,7 @@ type MainAgent struct {
 	// RWMutex that guards them (formerly inline MainAgent fields mu/subAgents/
 	// taskRecords/nudgeCounts/subAgentStateEnteredTurn).
 	subs                     subAgentRegistry
+	orchestrationMetrics     orchestrationRuntimeMetrics
 	admissionMu              sync.Mutex
 	admissionEpoch           atomic.Uint64
 	admissionPaused          atomic.Bool

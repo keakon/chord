@@ -668,7 +668,9 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		Skills:        a.loadedSkillsSnapshot(),
 		ModelName:     a.ModelName(),
 	})
+	admissionStartedAt := time.Now()
 	a.admissionMu.Lock()
+	a.orchestrationMetrics.recordAdmissionWait(time.Since(admissionStartedAt))
 	if a.shuttingDown.Load() || a.admissionPaused.Load() || a.admissionEpoch.Load() != admissionEpoch || requestCtx.Err() != nil {
 		a.admissionMu.Unlock()
 		cancel()
@@ -700,6 +702,9 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	existing, conflict := a.findDuplicateOrConflictingTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey, expectedWriteScope)
 	a.subs.mu.RUnlock()
 	if existing != nil {
+		if conflict {
+			a.orchestrationMetrics.scopeConflicts.Add(1)
+		}
 		a.admissionMu.Unlock()
 		cancel()
 		return duplicateTaskHandle(existing, conflict), nil
