@@ -11,6 +11,7 @@
 
 ### 改进
 
+- 委派任务的 `expected_write_scope` 现在会在工具执行阶段实际生效，不再只是提示元数据：只读任务拒绝工作区修改，任何 scoped task 都拒绝无法验证副作用的 Shell，文件/路径 scope 会基于规范化后的真实路径约束原生编辑工具，nested delegation 不能扩大 parent scope；child limit、重复任务、scope 冲突、runtime 注册与 parked task 重激活也由同一 admission 生命周期门控。
 - 进入静止状态的 SubAgent 现在会释放事件循环 goroutine、LLM client、context manager 及其他热运行时资源，同时保留 durable task descriptor 与 transcript。聚焦、历史查看和跟进能力不变；用户显式输入、获授权的定向通知或相关 descendant mailbox 事件会按需 rehydrate 新的 runtime 实例。failed / cancelled 任务必须由用户显式重启，模型通知不能自行复活它们。
 - TUI 聚焦已回收的 SubAgent 时仍会显示其任务专属 skills，与聚焦 live worker 的行为一致。
 - Headless 现在会为委派工作流输出可靠的结构化 `agent_started`、`agent_notify` 以及补充元数据后的 `agent_done` 事件；SubAgent 的 `assistant_message` payload 也会携带 task、agent 类型与 parent agent 标识，方便下游标注和路由。
@@ -25,6 +26,13 @@
 
 ### 修复
 
+- 修复 SubAgent transcript 持久化失败仅记录一次临时日志、后续仍可能被回收的问题。持久化健康状态现在随 durable task 保存，degraded worker 会在 park 或 shutdown 前 checkpoint 完整 transcript；废弃的 LLM client 也会取消其拥有的后台任务。并发 admission 会基于最新 task registry 合并，并在最终 durable commit point 前持续遵守 caller cancellation。
+- 修复 provider 返回过量并行工具调用时可能耗尽主循环 follow-up reserve，或 escalation 被已满的外部事件队列反向阻塞的问题。Loop-owned 因果事件现在保持非阻塞和有序，超大响应会在明确的单响应调用上限处正常失败；multipart 文本与附件 payload 也会计入上下文恢复的 token 预算。
+- 修复 SubAgent 上下文超限在模型 fallback 后直接永久失败的问题。严格分类的 context-length error 现在会触发一次有界的本地 transcript 恢复并自动重试，同时保留 task identity 与近期高价值上下文；若第二次仍超限则正常终止，不会进入恢复循环。
+- 修复 SubAgent mailbox 消息或 ack 在 append-only 日志真正落盘前就已显示、路由或标记 consumed 的问题。非 progress 消息现在先持久化再更新 task/UI，写入失败时以内存 pending 形式保留重试；consumed/reply 状态也只有在 ack 日志写入成功后才推进。
+- 修复并发 Delegate 跨越 `/new`、`/resume`、fork、plan execution、shutdown、caller 取消或 parent 完成后，仍可能把 worker 注册到错误生命周期轨道的问题。Session transition 现在会暂停 admission 并使旧 epoch 启动的初始化失效；所有切换返回路径都会可靠恢复 admission。
+- 修复长时间委派 session 中 event overflow、terminal task registry 与已消费 mailbox 历史可能无界增长的问题。事件突发现在使用有界背压并安全合并 progress；durable terminal task 与 mailbox 日志也会压缩，同时保留可恢复或尚未消费的状态。
+- 修复 failed / cancelled parent task 仍留下 joined descendants 运行，或恢复后挂在 terminal owner 下的问题。Joined descendants 现在会递归取消，独立 child 会重新归属 main，恢复前也会修复不一致的 task tree。
 - 修复 `grep` 等紧凑 TUI 工具卡按逻辑换行数控制折叠高度的问题。长匹配行软换行后的屏幕行现在会计入 10 行预览上限，展开卡片后仍可查看完整结果。
 - 修复 MainAgent 与 SubAgent 并发流式输出时，一条 assistant 回复可能被拆成多张可见卡片的问题。正文、thinking 状态、rollback 和工具调用边界现在按 Agent 隔离，后台不可见的工具事件不会再提前结束前台回复。
 - 修复委托后的全局空闲状态判断：MainAgent 停止而 SubAgent 仍处于连接、重试、流式或执行状态时，终端标题不会提前显示完成标记；只有所有 Agent 都空闲后才显示完成状态。
