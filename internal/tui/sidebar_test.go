@@ -288,3 +288,53 @@ func TestSidebarNormalizesDeletePathToMatchEditPath(t *testing.T) {
 		t.Fatalf("diff stats = +%d -%d, want +5 -2", edits[0].Added, edits[0].Removed)
 	}
 }
+
+func TestSidebarOrdersAndIndentsTaskTree(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update([]agent.SubAgentInfo{
+		{InstanceID: "agent-grandchild", TaskID: "task-grandchild", OwnerTaskID: "task-child", TaskDesc: "grandchild", State: "running"},
+		{InstanceID: "agent-z", TaskID: "task-z", TaskDesc: "independent", State: "running"},
+		{InstanceID: "agent-child", TaskID: "task-child", OwnerAgentID: "agent-root", OwnerTaskID: "task-root", TaskDesc: "child", State: "executing"},
+		{InstanceID: "agent-root", TaskID: "task-root", TaskDesc: "root", State: "running"},
+	}, "main", "builder")
+
+	wantIDs := []string{"main", "agent-root", "agent-child", "agent-grandchild", "agent-z"}
+	if len(sidebar.agents) != len(wantIDs) {
+		t.Fatalf("sidebar agents = %#v, want IDs %#v", sidebar.agents, wantIDs)
+	}
+	for i, want := range wantIDs {
+		if got := sidebar.agents[i].ID; got != want {
+			t.Fatalf("sidebar agent[%d] = %q, want %q; entries=%#v", i, got, want, sidebar.agents)
+		}
+	}
+	if sidebar.agents[1].TreeDepth != 0 || sidebar.agents[2].TreeDepth != 1 || sidebar.agents[3].TreeDepth != 2 {
+		t.Fatalf("tree depths = root %d child %d grandchild %d", sidebar.agents[1].TreeDepth, sidebar.agents[2].TreeDepth, sidebar.agents[3].TreeDepth)
+	}
+
+	plain := stripANSI(strings.Join(sidebar.buildLines(40), "\n"))
+	if !strings.Contains(plain, "└ child") || !strings.Contains(plain, "  └ grandchild") {
+		t.Fatalf("task tree indentation missing from sidebar:\n%s", plain)
+	}
+}
+
+func TestSidebarTaskTreeKeepsMalformedOwnerGraphVisible(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update([]agent.SubAgentInfo{
+		{InstanceID: "agent-a", TaskID: "task-a", OwnerTaskID: "task-b", TaskDesc: "cycle a", State: "running"},
+		{InstanceID: "agent-b", TaskID: "task-b", OwnerTaskID: "task-a", TaskDesc: "cycle b", State: "running"},
+		{InstanceID: "agent-orphan", TaskID: "task-orphan", OwnerAgentID: "missing-agent", OwnerTaskID: "missing-task", TaskDesc: "orphan", State: "running"},
+	}, "main", "builder")
+
+	seen := make(map[string]bool)
+	for _, entry := range sidebar.agents {
+		seen[entry.ID] = true
+	}
+	for _, want := range []string{"main", "agent-a", "agent-b", "agent-orphan"} {
+		if !seen[want] {
+			t.Fatalf("malformed owner graph hid %q: %#v", want, sidebar.agents)
+		}
+	}
+	if len(sidebar.agents) != 4 {
+		t.Fatalf("sidebar agents = %d, want all 4 visible: %#v", len(sidebar.agents), sidebar.agents)
+	}
+}

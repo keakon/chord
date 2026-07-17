@@ -97,6 +97,29 @@ func sidebarEntryDisplayName(entry SidebarEntry) string {
 	return entry.ID
 }
 
+func sidebarTreePrefix(entry SidebarEntry) string {
+	if entry.ID == "main" || entry.TreeDepth <= 0 {
+		return ""
+	}
+	return strings.Repeat("  ", entry.TreeDepth-1) + "└ "
+}
+
+func sidebarRenderedName(entry SidebarEntry, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	prefix := sidebarTreePrefix(entry)
+	prefixWidth := lipgloss.Width(prefix)
+	if prefixWidth >= maxWidth {
+		prefix = "└ "
+		prefixWidth = lipgloss.Width(prefix)
+		if prefixWidth >= maxWidth {
+			return "└"
+		}
+	}
+	return prefix + truncateOneLine(sidebarEntryDisplayName(entry), maxWidth-prefixWidth)
+}
+
 func sidebarEntryStyle(entry SidebarEntry, focused bool) lipgloss.Style {
 	color := strings.TrimSpace(entry.Color)
 	if color == "" {
@@ -182,14 +205,16 @@ func (s Sidebar) buildInfoPanelRenderedLines(innerWidth int) []sidebarRenderedLi
 		isFocused := s.isFocused(entry.ID)
 		indicator := statusIndicator(entry.Status, isFocused)
 
-		name := sidebarEntryDisplayName(entry)
+		nameWidth := max(4, innerWidth-2)
+		if isFocused || entry.ID == "main" {
+			nameWidth = innerWidth - 2
+		}
+		name := sidebarRenderedName(entry, nameWidth)
 
 		var line string
 		if isFocused || entry.ID == "main" {
-			name = truncateOneLine(name, innerWidth-2)
 			line = fmt.Sprintf("%s %s", indicator, name)
 		} else {
-			name = truncateOneLine(name, max(4, innerWidth-2))
 			line = InfoPanelAgentEntryStyle.Render(fmt.Sprintf("%s %s", indicator, name))
 		}
 
@@ -217,14 +242,16 @@ func (s Sidebar) buildLines(innerWidth int) []string {
 		isFocused := s.isFocused(entry.ID)
 		indicator := statusIndicator(entry.Status, isFocused)
 
-		name := sidebarEntryDisplayName(entry)
+		nameWidth := max(4, innerWidth-2)
+		if isFocused || entry.ID == "main" {
+			nameWidth = innerWidth - 2
+		}
+		name := sidebarRenderedName(entry, nameWidth)
 
 		var line string
 		if isFocused || entry.ID == "main" {
-			name = truncateOneLine(name, innerWidth-2)
 			line = fmt.Sprintf("%s %s", indicator, name)
 		} else {
-			name = truncateOneLine(name, max(4, innerWidth-2))
 			line = fmt.Sprintf("%s %s", indicator, name)
 		}
 

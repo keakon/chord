@@ -20,7 +20,11 @@ type FileEdit struct {
 
 // SidebarEntry represents a single agent in the sidebar listing.
 type SidebarEntry struct {
-	ID           string     // instance ID (e.g. "agent-1") or "main"
+	ID           string // instance ID (e.g. "agent-1") or "main"
+	TaskID       string
+	OwnerAgentID string
+	OwnerTaskID  string
+	TreeDepth    int
 	AgentDefName string     // SubAgent: agent config name (e.g. reviewer); empty for main
 	TaskDesc     string     // task description (truncated for display)
 	Status       string     // "running", "idle", "done", "error"
@@ -113,6 +117,9 @@ func (s *Sidebar) Update(subAgents []agent.SubAgentInfo, focusedID, mainRole str
 		}
 		entry := SidebarEntry{
 			ID:           info.InstanceID,
+			TaskID:       info.TaskID,
+			OwnerAgentID: info.OwnerAgentID,
+			OwnerTaskID:  info.OwnerTaskID,
 			AgentDefName: info.AgentDefName,
 			TaskDesc:     info.TaskDesc,
 			Status:       status,
@@ -130,15 +137,87 @@ func (s *Sidebar) Update(subAgents []agent.SubAgentInfo, focusedID, mainRole str
 		entries = append(entries, entry)
 	}
 
-	// Keep main first, then prioritize more active sub-agents before quieter/finished ones.
+	// Keep main first and preserve owner/child adjacency. Siblings still prioritize
+	// active workers before quieter or completed workers.
 	if len(entries) > 1 {
-		subEntries := entries[1:]
-		sort.SliceStable(subEntries, func(i, j int) bool {
-			return sidebarStatusPriority(subEntries[i].Status) < sidebarStatusPriority(subEntries[j].Status)
-		})
+		entries = append(entries[:1], orderSidebarTaskTree(entries[1:])...)
 	}
 
 	s.agents = entries
+}
+
+func orderSidebarTaskTree(entries []SidebarEntry) []SidebarEntry {
+	sorted := append([]SidebarEntry(nil), entries...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		left, right := sidebarStatusPriority(sorted[i].Status), sidebarStatusPriority(sorted[j].Status)
+		if left != right {
+			return left < right
+		}
+		return sorted[i].ID < sorted[j].ID
+	})
+
+	byTask := make(map[string]string, len(sorted))
+	byAgent := make(map[string]struct{}, len(sorted))
+	entryByAgent := make(map[string]SidebarEntry, len(sorted))
+	for _, entry := range sorted {
+		if entry.ID == "" {
+			continue
+		}
+		byAgent[entry.ID] = struct{}{}
+		entryByAgent[entry.ID] = entry
+		if taskID := strings.TrimSpace(entry.TaskID); taskID != "" {
+			if _, exists := byTask[taskID]; !exists {
+				byTask[taskID] = entry.ID
+			}
+		}
+	}
+
+	children := make(map[string][]string, len(sorted))
+	var roots []string
+	for _, entry := range sorted {
+		parentID := byTask[strings.TrimSpace(entry.OwnerTaskID)]
+		if parentID == "" {
+			candidate := strings.TrimSpace(entry.OwnerAgentID)
+			if _, ok := byAgent[candidate]; ok {
+				parentID = candidate
+			}
+		}
+		if parentID == "" || parentID == entry.ID {
+			roots = append(roots, entry.ID)
+			continue
+		}
+		children[parentID] = append(children[parentID], entry.ID)
+	}
+
+	ordered := make([]SidebarEntry, 0, len(sorted))
+	seen := make(map[string]struct{}, len(sorted))
+	var appendSubtree func(string, int)
+	appendSubtree = func(agentID string, depth int) {
+		if _, ok := seen[agentID]; ok {
+			return
+		}
+		entry, ok := entryByAgent[agentID]
+		if !ok {
+			return
+		}
+		seen[agentID] = struct{}{}
+		entry.TreeDepth = depth
+		ordered = append(ordered, entry)
+		for _, childID := range children[agentID] {
+			appendSubtree(childID, depth+1)
+		}
+	}
+	for _, rootID := range roots {
+		appendSubtree(rootID, 0)
+	}
+	// Restored metadata can be malformed or cyclic. Preserve visibility by
+	// treating the first still-unseen member of each component as a root.
+	for _, entry := range sorted {
+		if _, ok := seen[entry.ID]; !ok {
+			appendSubtree(entry.ID, 0)
+		}
+	}
+	return ordered
 }
 
 // sidebarStatusPriority returns a sort key for agent status strings.
