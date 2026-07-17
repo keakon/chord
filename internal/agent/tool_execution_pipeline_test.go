@@ -502,3 +502,29 @@ func TestToolExecutionPipelineRechecksDelegatePermissionAfterHookModification(t 
 		t.Fatalf("execute() err = %v, want Delegate permission deny", err)
 	}
 }
+
+func TestToolExecutionPipelineRechecksPermissionAfterHookModification(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(requiredValueTool{})
+	ruleset := permission.Ruleset{
+		{Permission: "RequiredValue", Pattern: "*", Action: permission.ActionDeny},
+		{Permission: "RequiredValue", Pattern: "safe", Action: permission.ActionAllow},
+	}
+	pipeline := toolExecutionPipeline{
+		registry:       registry,
+		currentRuleset: func() permission.Ruleset { return ruleset },
+		fireHook: func(context.Context, string, uint64, map[string]any) (*hook.Result, error) {
+			return &hook.Result{Action: hook.ActionModify, Data: map[string]any{
+				"args": map[string]any{"value": "denied"},
+			}}, nil
+		},
+	}
+
+	_, err := pipeline.execute(context.Background(), message.ToolCall{
+		Name: "RequiredValue",
+		Args: json.RawMessage(`{"value":"safe"}`),
+	}, true)
+	if err == nil || !errors.Is(err, errToolPermissionDenied) {
+		t.Fatalf("execute() err = %v, want permission deny for hook-modified args", err)
+	}
+}

@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -158,5 +160,62 @@ func TestSubAgentEmptyScopePreservesLegacyWriteBehavior(t *testing.T) {
 	args, _ := json.Marshal(map[string]string{"path": "legacy.txt", "content": "ok"})
 	if _, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "legacy", Name: tools.NameWrite, Args: args}); err != nil {
 		t.Fatalf("empty-scope legacy write failed: %v", err)
+	}
+}
+
+func TestSubAgentScopeRejectsUserEditedArgsOutsideScope(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	root := t.TempDir()
+	parent.projectRoot = root
+	sub.workDir = root
+	sub.writeScope = tools.WriteScope{PathPrefix: []string{"allowed"}}
+	sub.tools.Register(tools.WriteTool{BaseDir: root})
+	sub.ruleset = permission.Ruleset{{Permission: tools.NameWrite, Pattern: "*", Action: permission.ActionAsk}}
+	parent.confirmFn = func(context.Context, string, string, []string, []string, []string, []string) (ConfirmResponse, error) {
+		return ConfirmResponse{
+			Approved:      true,
+			FinalArgsJSON: `{"path":"outside.txt","content":"blocked"}`,
+			EditSummary:   "changed path",
+		}, nil
+	}
+
+	args, _ := json.Marshal(map[string]string{"path": "allowed/inside.txt", "content": "ok"})
+	result, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "write-confirm", Name: tools.NameWrite, Args: args})
+	if err == nil || !strings.Contains(err.Error(), "outside this SubAgent task's expected_write_scope") {
+		t.Fatalf("edited write error = %v, want scope rejection", err)
+	}
+	if result.EffectiveArgsJSON != `{"path":"outside.txt","content":"blocked"}` {
+		t.Fatalf("effective args = %q, want edited args", result.EffectiveArgsJSON)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "outside.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("outside file exists after rejected edit: %v", statErr)
+	}
+}
+
+func TestSubAgentScopeRejectsHookModifiedArgsOutsideScope(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	root := t.TempDir()
+	parent.projectRoot = root
+	sub.workDir = root
+	sub.writeScope = tools.WriteScope{PathPrefix: []string{"allowed"}}
+	sub.tools.Register(tools.WriteTool{BaseDir: root})
+	parent.hookEngine = fixedToolHookEngine{result: &hook.Result{
+		Action: hook.ActionModify,
+		Data: map[string]any{"args": map[string]any{
+			"path":    filepath.Join(root, "outside.txt"),
+			"content": "blocked",
+		}},
+	}}
+
+	args, _ := json.Marshal(map[string]string{"path": "allowed/inside.txt", "content": "ok"})
+	result, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "write-hook", Name: tools.NameWrite, Args: args})
+	if err == nil || !strings.Contains(err.Error(), "outside this SubAgent task's expected_write_scope") {
+		t.Fatalf("hook-modified write error = %v, want scope rejection", err)
+	}
+	if !strings.Contains(result.EffectiveArgsJSON, "outside.txt") {
+		t.Fatalf("effective args = %q, want hook-modified path", result.EffectiveArgsJSON)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "outside.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("outside file exists after rejected hook mutation: %v", statErr)
 	}
 }

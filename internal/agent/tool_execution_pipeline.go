@@ -217,14 +217,15 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 			return execResult, err
 		}
 		if modified {
-			if tc.Name == tools.NameDelegate {
-				if err := p.applyPermission(ctx, &tc, &execResult); err != nil {
-					return execResult, err
-				}
+			if err := p.applyPermission(ctx, &tc, &execResult); err != nil {
+				return execResult, err
 			}
 		}
 	}
 	if err := validateToolCallArguments(p.registry, tc, p.logPrefix, p.agentID); err != nil {
+		return execResult, err
+	}
+	if err := p.validateWriteScope(tc); err != nil {
 		return execResult, err
 	}
 
