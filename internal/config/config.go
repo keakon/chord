@@ -60,9 +60,15 @@ type Config struct {
 }
 
 const (
-	DefaultMaxLiveRuntimes      = 10
-	DefaultMaxBorrowedRuntimes  = 1
-	DefaultMaxActiveLLMRequests = 10
+	DefaultMaxLiveRuntimes       = 10
+	DefaultMaxBorrowedRuntimes   = 1
+	DefaultMaxActiveLLMRequests  = 10
+	DefaultSubAgentQueueMessages = 256
+	DefaultSubAgentQueueBytes    = 4 << 20
+	DefaultMailboxMemoryMessages = 512
+	DefaultMailboxMemoryBytes    = 8 << 20
+	DefaultContextCompactUsage   = 0.8
+	DefaultSubAgentCompactUsage  = DefaultContextCompactUsage
 )
 
 // OrchestrationConfig controls process-local multi-agent resource admission.
@@ -73,6 +79,46 @@ type OrchestrationConfig struct {
 	MaxActiveLLMRequests      int            `json:"max_active_llm_requests,omitempty" yaml:"max_active_llm_requests,omitempty"`
 	ProviderMaxActiveRequests map[string]int `json:"provider_max_active_requests,omitempty" yaml:"provider_max_active_requests,omitempty"`
 	ModelMaxActiveRequests    map[string]int `json:"model_max_active_requests,omitempty" yaml:"model_max_active_requests,omitempty"`
+	SubAgentQueueMessages     int            `json:"subagent_queue_messages,omitempty" yaml:"subagent_queue_messages,omitempty"`
+	SubAgentQueueBytes        int            `json:"subagent_queue_bytes,omitempty" yaml:"subagent_queue_bytes,omitempty"`
+	MailboxMemoryMessages     int            `json:"mailbox_memory_messages,omitempty" yaml:"mailbox_memory_messages,omitempty"`
+	MailboxMemoryBytes        int            `json:"mailbox_memory_bytes,omitempty" yaml:"mailbox_memory_bytes,omitempty"`
+	SubAgentCompactUsage      float64        `json:"subagent_compact_usage,omitempty" yaml:"subagent_compact_usage,omitempty"`
+}
+
+func (c OrchestrationConfig) EffectiveSubAgentQueueMessages() int {
+	if c.SubAgentQueueMessages > 0 {
+		return c.SubAgentQueueMessages
+	}
+	return DefaultSubAgentQueueMessages
+}
+
+func (c OrchestrationConfig) EffectiveSubAgentQueueBytes() int {
+	if c.SubAgentQueueBytes > 0 {
+		return c.SubAgentQueueBytes
+	}
+	return DefaultSubAgentQueueBytes
+}
+
+func (c OrchestrationConfig) EffectiveMailboxMemoryMessages() int {
+	if c.MailboxMemoryMessages > 0 {
+		return c.MailboxMemoryMessages
+	}
+	return DefaultMailboxMemoryMessages
+}
+
+func (c OrchestrationConfig) EffectiveMailboxMemoryBytes() int {
+	if c.MailboxMemoryBytes > 0 {
+		return c.MailboxMemoryBytes
+	}
+	return DefaultMailboxMemoryBytes
+}
+
+func (c OrchestrationConfig) EffectiveSubAgentCompactUsage() float64 {
+	if c.SubAgentCompactUsage > 0 && c.SubAgentCompactUsage < 1 {
+		return c.SubAgentCompactUsage
+	}
+	return DefaultSubAgentCompactUsage
 }
 
 func (c OrchestrationConfig) EffectiveMaxLiveRuntimes() int {
@@ -902,7 +948,7 @@ func DefaultConfig() *Config {
 				ForcePruneUsage:         0.90,
 			},
 			Compaction: CompactionConfig{
-				Threshold: 0.8,
+				Threshold: DefaultContextCompactUsage,
 				Profile:   CompactionProfileAuto,
 			},
 		},

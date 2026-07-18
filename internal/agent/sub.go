@@ -127,8 +127,15 @@ type SubAgent struct {
 	wakeCh            chan struct{}           // cap=1; forces the loop to re-evaluate state-gated channels
 	inputQueueMu      sync.Mutex
 	inputOverflow     []pendingUserMessage
+	inputQueueBytes   int
 	ctxAppendQueueMu  sync.Mutex
 	ctxAppendOverflow []message.Message
+	ctxAppendBytes    int
+	queueMessageLimit int
+	queueByteLimit    int
+	compactUsage      float64
+	reductionMu       sync.RWMutex
+	reductionStats    ContextReductionStats
 	promotedToolQueue []*toolResult // event-loop-owned FIFO; avoids sending results back into the active loop
 	pendingContinue   *continueMsg  // event-loop-owned restart deferred until the current LLM request exits
 
@@ -356,6 +363,7 @@ type SubAgentConfig struct {
 	ModelName      string
 	IdleTimeout    time.Duration // 0 → DefaultIdleTimeout
 	StartupTimeout time.Duration // 0 → DefaultSubAgentStartupTimeout
+	Orchestration  config.OrchestrationConfig
 }
 
 // NewSubAgent creates a fully-initialised SubAgent. The caller must invoke
@@ -456,44 +464,47 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	ctxMgr := ctxmgr.NewManager(0, 0)
 
 	s = &SubAgent{
-		instanceID:      cfg.InstanceID,
-		done:            make(chan struct{}),
-		taskID:          cfg.TaskID,
-		agentDefName:    cfg.AgentDefName,
-		taskDesc:        cfg.TaskDesc,
-		planTaskRef:     strings.TrimSpace(cfg.PlanTaskRef),
-		semanticTaskKey: strings.TrimSpace(cfg.SemanticKey),
-		writeScope:      cfg.WriteScope.Normalized(),
-		ownerAgentID:    strings.TrimSpace(cfg.OwnerAgentID),
-		ownerTaskID:     strings.TrimSpace(cfg.OwnerTaskID),
-		depth:           cfg.Depth,
-		joinToOwner:     cfg.JoinToOwner,
-		delegation:      cfg.Delegation,
-		color:           cfg.Color,
-		llmClient:       cfg.LLMClient,
-		ctxMgr:          ctxMgr,
-		tools:           subTools,
-		parent:          cfg.Parent,
-		parentCtx:       cfg.ParentCtx,
-		cancel:          cfg.Cancel,
-		recovery:        cfg.Recovery,
-		ruleset:         cfg.Ruleset,
-		workDir:         cfg.WorkDir,
-		venvPath:        cfg.VenvPath,
-		sessionDir:      cfg.SessionDir,
-		agentsMD:        cfg.AgentsMD,
-		loadedSkills:    cfg.Skills,
-		invokedSkills:   make(map[string]*skill.Meta),
-		modelName:       cfg.ModelName,
-		customPrompt:    cfg.SystemPrompt,
-		idleTimeout:     cfg.IdleTimeout,
-		startupTimeout:  cfg.StartupTimeout,
-		inputCh:         make(chan pendingUserMessage, inputChanCap),
-		ctxAppendCh:     make(chan message.Message, 16),
-		llmCh:           make(chan *llmResult, 1),
-		toolCh:          make(chan *toolResult, 8),
-		continueCh:      make(chan continueMsg, 1),
-		wakeCh:          make(chan struct{}, 1),
+		instanceID:        cfg.InstanceID,
+		done:              make(chan struct{}),
+		taskID:            cfg.TaskID,
+		agentDefName:      cfg.AgentDefName,
+		taskDesc:          cfg.TaskDesc,
+		planTaskRef:       strings.TrimSpace(cfg.PlanTaskRef),
+		semanticTaskKey:   strings.TrimSpace(cfg.SemanticKey),
+		writeScope:        cfg.WriteScope.Normalized(),
+		ownerAgentID:      strings.TrimSpace(cfg.OwnerAgentID),
+		ownerTaskID:       strings.TrimSpace(cfg.OwnerTaskID),
+		depth:             cfg.Depth,
+		joinToOwner:       cfg.JoinToOwner,
+		delegation:        cfg.Delegation,
+		color:             cfg.Color,
+		llmClient:         cfg.LLMClient,
+		ctxMgr:            ctxMgr,
+		tools:             subTools,
+		parent:            cfg.Parent,
+		parentCtx:         cfg.ParentCtx,
+		cancel:            cfg.Cancel,
+		recovery:          cfg.Recovery,
+		ruleset:           cfg.Ruleset,
+		workDir:           cfg.WorkDir,
+		venvPath:          cfg.VenvPath,
+		sessionDir:        cfg.SessionDir,
+		agentsMD:          cfg.AgentsMD,
+		loadedSkills:      cfg.Skills,
+		invokedSkills:     make(map[string]*skill.Meta),
+		modelName:         cfg.ModelName,
+		queueMessageLimit: cfg.Orchestration.EffectiveSubAgentQueueMessages(),
+		queueByteLimit:    cfg.Orchestration.EffectiveSubAgentQueueBytes(),
+		compactUsage:      cfg.Orchestration.EffectiveSubAgentCompactUsage(),
+		customPrompt:      cfg.SystemPrompt,
+		idleTimeout:       cfg.IdleTimeout,
+		startupTimeout:    cfg.StartupTimeout,
+		inputCh:           make(chan pendingUserMessage, inputChanCap),
+		ctxAppendCh:       make(chan message.Message, 16),
+		llmCh:             make(chan *llmResult, 1),
+		toolCh:            make(chan *toolResult, 8),
+		continueCh:        make(chan continueMsg, 1),
+		wakeCh:            make(chan struct{}, 1),
 	}
 	s.runtimeState.set(SubAgentStateRunning, "")
 	if hasSkillTool && !cfg.Ruleset.IsDisabled(tools.NameSkill) {

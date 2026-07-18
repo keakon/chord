@@ -29,20 +29,25 @@ type metricQueueEntry struct {
 }
 
 type orchestrationRuntimeMetrics struct {
-	admissionWaitCount  atomic.Uint64
-	admissionWaitNanos  atomic.Uint64
-	scopeConflicts      atomic.Uint64
-	rehydrates          atomic.Uint64
-	parks               atomic.Uint64
-	parkedSamples       atomic.Uint64
-	parkedNanos         atomic.Uint64
-	mailboxDeliveries   atomic.Uint64
-	mailboxDeliveryNs   atomic.Uint64
-	mailboxAcks         atomic.Uint64
-	mailboxAckNs        atomic.Uint64
-	mailboxEvictions    atomic.Uint64
-	parkedEvictions     atomic.Uint64
-	runtimeBypassGrants atomic.Uint64
+	admissionWaitCount     atomic.Uint64
+	admissionWaitNanos     atomic.Uint64
+	scopeConflicts         atomic.Uint64
+	rehydrates             atomic.Uint64
+	parks                  atomic.Uint64
+	parkedSamples          atomic.Uint64
+	parkedNanos            atomic.Uint64
+	mailboxDeliveries      atomic.Uint64
+	mailboxDeliveryNs      atomic.Uint64
+	mailboxAcks            atomic.Uint64
+	mailboxAckNs           atomic.Uint64
+	mailboxEvictions       atomic.Uint64
+	parkedEvictions        atomic.Uint64
+	subAgentQueueRejected  atomic.Uint64
+	subAgentCompactions    atomic.Uint64
+	subAgentTokensSaved    atomic.Uint64
+	mailboxSpoolQueued     atomic.Uint64
+	mailboxSpoolRehydrated atomic.Uint64
+	runtimeBypassGrants    atomic.Uint64
 
 	mailboxMu sync.Mutex
 	mailboxes map[string]mailboxMetricState
@@ -96,6 +101,11 @@ type OrchestrationStats struct {
 	MailboxAckLatencyAverage      time.Duration
 	MailboxTrackingEvictions      uint64
 	ParkedTrackingEvictions       uint64
+	SubAgentQueueRejected         uint64
+	SubAgentCompactions           uint64
+	SubAgentTokensSaved           uint64
+	MailboxSpoolQueued            uint64
+	MailboxSpoolRehydrated        uint64
 	RuntimeBypassGrants           uint64
 }
 
@@ -389,6 +399,11 @@ func (a *MainAgent) OrchestrationStats() OrchestrationStats {
 		MailboxAckLatencyAverage:      averageDuration(ackTotal, ackCount),
 		MailboxTrackingEvictions:      metrics.mailboxEvictions.Load(),
 		ParkedTrackingEvictions:       metrics.parkedEvictions.Load(),
+		SubAgentQueueRejected:         metrics.subAgentQueueRejected.Load(),
+		SubAgentCompactions:           metrics.subAgentCompactions.Load(),
+		SubAgentTokensSaved:           metrics.subAgentTokensSaved.Load(),
+		MailboxSpoolQueued:            metrics.mailboxSpoolQueued.Load(),
+		MailboxSpoolRehydrated:        metrics.mailboxSpoolRehydrated.Load(),
 		RuntimeBypassGrants:           metrics.runtimeBypassGrants.Load(),
 		TasksByState:                  make(map[string]uint64),
 		TerminalReasons:               make(map[string]uint64),

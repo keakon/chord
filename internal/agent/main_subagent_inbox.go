@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -220,7 +221,20 @@ func (a *MainAgent) enqueueOwnedSubAgentMailbox(msg SubAgentMailboxMessage) {
 	if a.ownedSubAgentMailboxes == nil {
 		a.ownedSubAgentMailboxes = make(map[string][]SubAgentMailboxMessage)
 	}
-	a.ownedSubAgentMailboxes[ownerAgentID] = append(a.ownedSubAgentMailboxes[ownerAgentID], msg)
+	messageLimit, byteLimit := a.mailboxMemoryLimits()
+	size := mailboxMessageBytes(msg)
+	// FIFO per owner: once anything is spooled for this owner, later messages
+	// must join the spool behind it rather than jump ahead through memory.
+	if len(a.ownedMailboxSpool[ownerAgentID]) == 0 && a.mailboxMemoryCount() < messageLimit && a.subAgentInbox.memoryBytes+size <= byteLimit {
+		a.ownedSubAgentMailboxes[ownerAgentID] = append(a.ownedSubAgentMailboxes[ownerAgentID], msg)
+		a.subAgentInbox.memoryBytes += size
+		return
+	}
+	if a.ownedMailboxSpool == nil {
+		a.ownedMailboxSpool = make(map[string][]string)
+	}
+	a.ownedMailboxSpool[ownerAgentID] = append(a.ownedMailboxSpool[ownerAgentID], msg.MessageID)
+	a.orchestrationMetrics.mailboxSpoolQueued.Add(1)
 }
 
 func (a *MainAgent) migrateSubAgentOwnerIdentity(previousAgentID, nextAgentID string) {
@@ -235,6 +249,10 @@ func (a *MainAgent) migrateSubAgentOwnerIdentity(previousAgentID, nextAgentID st
 		}
 		a.ownedSubAgentMailboxes[nextAgentID] = append(a.ownedSubAgentMailboxes[nextAgentID], queued...)
 		delete(a.ownedSubAgentMailboxes, previousAgentID)
+	}
+	if queued := a.ownedMailboxSpool[previousAgentID]; len(queued) > 0 {
+		a.ownedMailboxSpool[nextAgentID] = append(a.ownedMailboxSpool[nextAgentID], queued...)
+		delete(a.ownedMailboxSpool, previousAgentID)
 	}
 	a.subs.mu.Lock()
 	for _, rec := range a.subs.taskRecords {
@@ -267,18 +285,15 @@ func (a *MainAgent) drainOwnedSubAgentMailboxes(ownerAgentID string) bool {
 		return false
 	}
 	ownerAgentID = strings.TrimSpace(ownerAgentID)
-	if ownerAgentID == "" || len(a.ownedSubAgentMailboxes) == 0 {
+	if ownerAgentID == "" {
 		return false
 	}
 	queue := a.ownedSubAgentMailboxes[ownerAgentID]
-	if len(queue) == 0 {
-		delete(a.ownedSubAgentMailboxes, ownerAgentID)
-		return false
-	}
 	remaining := queue[:0]
 	progressed := false
 	for _, msg := range queue {
 		if a.routeOwnedSubAgentMailbox(msg) {
+			a.releaseMailboxMemory(msg)
 			progressed = true
 			continue
 		}
@@ -288,6 +303,29 @@ func (a *MainAgent) drainOwnedSubAgentMailboxes(ownerAgentID string) bool {
 		delete(a.ownedSubAgentMailboxes, ownerAgentID)
 	} else {
 		a.ownedSubAgentMailboxes[ownerAgentID] = remaining
+	}
+	spooled := a.ownedMailboxSpool[ownerAgentID]
+	spoolRemaining := spooled[:0]
+	for i, messageID := range spooled {
+		msg, found, err := a.loadSpooledMailbox(messageID)
+		if err != nil {
+			log.Warnf("failed to reload owned spooled SubAgent mailbox message owner_agent_id=%v message_id=%v error=%v", ownerAgentID, messageID, err)
+			spoolRemaining = append(spoolRemaining, spooled[i:]...)
+			break
+		}
+		if !found {
+			continue
+		}
+		if a.routeOwnedSubAgentMailbox(*msg) {
+			progressed = true
+			continue
+		}
+		spoolRemaining = append(spoolRemaining, messageID)
+	}
+	if len(spoolRemaining) == 0 {
+		delete(a.ownedMailboxSpool, ownerAgentID)
+	} else {
+		a.ownedMailboxSpool[ownerAgentID] = spoolRemaining
 	}
 	return progressed
 }
@@ -321,15 +359,40 @@ func (a *MainAgent) enqueueSubAgentMailbox(msg SubAgentMailboxMessage) {
 	}
 	switch msg.Kind {
 	case SubAgentMailboxKindProgress:
-		a.subAgentInbox.progress[msg.AgentID] = msg
+		a.replaceProgressMailboxWithinBudget(msg)
 	default:
-		if msg.Priority == SubAgentMailboxPriorityInterrupt || msg.Priority == SubAgentMailboxPriorityUrgent {
-			a.subAgentInbox.urgent = append(a.subAgentInbox.urgent, msg)
-		} else {
-			a.subAgentInbox.normal = append(a.subAgentInbox.normal, msg)
+		if !a.storeMailboxInMemory(msg, false) {
+			a.spoolMailboxMessage(msg, false)
+			a.orchestrationMetrics.mailboxSpoolQueued.Add(1)
 		}
 	}
 	a.refreshSubAgentInboxSummary()
+}
+
+// replaceProgressMailboxWithinBudget swaps the per-agent progress snapshot only
+// when the replacement fits the memory budget. When it does not, the previous
+// snapshot is kept so an overloaded inbox still reports last-known status
+// instead of dropping both the old and the new update.
+func (a *MainAgent) replaceProgressMailboxWithinBudget(msg SubAgentMailboxMessage) {
+	if a.subAgentInbox.progress == nil {
+		a.subAgentInbox.progress = make(map[string]SubAgentMailboxMessage)
+	}
+	previous, hadPrevious := a.subAgentInbox.progress[msg.AgentID]
+	freedBytes, freedCount := 0, 0
+	if hadPrevious {
+		freedBytes = mailboxMessageBytes(previous)
+		freedCount = 1
+	}
+	messageLimit, byteLimit := a.mailboxMemoryLimits()
+	size := mailboxMessageBytes(msg)
+	if a.mailboxMemoryCount()-freedCount >= messageLimit || a.subAgentInbox.memoryBytes-freedBytes+size > byteLimit {
+		return
+	}
+	a.subAgentInbox.progress[msg.AgentID] = msg
+	a.subAgentInbox.memoryBytes += size - freedBytes
+	if a.subAgentInbox.memoryBytes < 0 {
+		a.subAgentInbox.memoryBytes = 0
+	}
 }
 
 func (a *MainAgent) requeueSubAgentMailboxInMemory(msg SubAgentMailboxMessage) {
@@ -337,13 +400,120 @@ func (a *MainAgent) requeueSubAgentMailboxInMemory(msg SubAgentMailboxMessage) {
 		if a.subAgentInbox.progress == nil {
 			a.subAgentInbox.progress = make(map[string]SubAgentMailboxMessage)
 		}
+		if previous, ok := a.subAgentInbox.progress[msg.AgentID]; ok {
+			a.subAgentInbox.memoryBytes -= mailboxMessageBytes(previous)
+		}
 		a.subAgentInbox.progress[msg.AgentID] = msg
-	} else if msg.Priority == SubAgentMailboxPriorityInterrupt || msg.Priority == SubAgentMailboxPriorityUrgent {
-		a.subAgentInbox.urgent = append([]SubAgentMailboxMessage{msg}, a.subAgentInbox.urgent...)
-	} else {
-		a.subAgentInbox.normal = append([]SubAgentMailboxMessage{msg}, a.subAgentInbox.normal...)
+		a.subAgentInbox.memoryBytes += mailboxMessageBytes(msg)
+	} else if msg.persistPending {
+		if msg.Priority == SubAgentMailboxPriorityInterrupt || msg.Priority == SubAgentMailboxPriorityUrgent {
+			a.subAgentInbox.urgent = append([]SubAgentMailboxMessage{msg}, a.subAgentInbox.urgent...)
+		} else {
+			a.subAgentInbox.normal = append([]SubAgentMailboxMessage{msg}, a.subAgentInbox.normal...)
+		}
+		a.subAgentInbox.memoryBytes += mailboxMessageBytes(msg)
+	} else if !a.storeMailboxInMemory(msg, true) {
+		a.spoolMailboxMessage(msg, true)
+		a.orchestrationMetrics.mailboxSpoolQueued.Add(1)
 	}
 	a.refreshSubAgentInboxSummary()
+}
+
+func (a *MainAgent) loadSpooledMailbox(messageID string) (*SubAgentMailboxMessage, bool, error) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" || a.isSubAgentMailboxConsumed(messageID) {
+		return nil, false, nil
+	}
+	path := filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")
+	if err := a.indexSpooledMailbox(path); err != nil {
+		return nil, false, err
+	}
+	location, ok := a.subAgentInbox.spoolIndex[messageID]
+	if !ok {
+		return nil, false, nil
+	}
+	msg, err := readSpooledMailboxAt(path, location)
+	if err != nil {
+		return nil, false, err
+	}
+	a.orchestrationMetrics.mailboxSpoolRehydrated.Add(1)
+	return &msg, true, nil
+}
+
+func (a *MainAgent) indexSpooledMailbox(path string) error {
+	if a.subAgentInbox.spoolIndexReady {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open spooled mailbox: %w", err)
+	}
+	defer f.Close()
+	if a.subAgentInbox.spoolIndex == nil {
+		a.subAgentInbox.spoolIndex = make(map[string]mailboxSpoolLocation)
+	} else {
+		clear(a.subAgentInbox.spoolIndex)
+	}
+	dec := json.NewDecoder(f)
+	var offset int64
+	for {
+		var msg SubAgentMailboxMessage
+		if err := dec.Decode(&msg); err != nil {
+			if err == io.EOF {
+				a.subAgentInbox.spoolIndexReady = true
+				return nil
+			}
+			return fmt.Errorf("decode spooled mailbox: %w", err)
+		}
+		messageID := strings.TrimSpace(msg.MessageID)
+		if messageID != "" {
+			if _, exists := a.subAgentInbox.spoolIndex[messageID]; !exists {
+				a.subAgentInbox.spoolIndex[messageID] = mailboxSpoolLocation{offset: offset, length: dec.InputOffset() - offset}
+			}
+		}
+		offset = dec.InputOffset()
+	}
+}
+
+func readSpooledMailboxAt(path string, location mailboxSpoolLocation) (SubAgentMailboxMessage, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return SubAgentMailboxMessage{}, fmt.Errorf("open spooled mailbox message: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.Seek(location.offset, io.SeekStart); err != nil {
+		return SubAgentMailboxMessage{}, fmt.Errorf("seek spooled mailbox message: %w", err)
+	}
+	var msg SubAgentMailboxMessage
+	if err := json.NewDecoder(io.LimitReader(f, location.length)).Decode(&msg); err != nil {
+		return SubAgentMailboxMessage{}, fmt.Errorf("decode spooled mailbox message: %w", err)
+	}
+	return msg, nil
+}
+
+func (a *MainAgent) dequeueSpooledSubAgentMailbox() *SubAgentMailboxMessage {
+	if msg := a.dequeueSpooledMailboxQueue(&a.subAgentInbox.spoolNormal); msg != nil {
+		return msg
+	}
+	return nil
+}
+
+func (a *MainAgent) dequeueSpooledMailboxQueue(queue *[]string) *SubAgentMailboxMessage {
+	for len(*queue) > 0 {
+		id := strings.TrimSpace((*queue)[0])
+		msg, found, err := a.loadSpooledMailbox(id)
+		if err != nil {
+			log.Warnf("failed to reload spooled SubAgent mailbox message message_id=%v error=%v", id, err)
+			return nil
+		}
+		if !found {
+			*queue = (*queue)[1:]
+			continue
+		}
+		*queue = (*queue)[1:]
+		return msg
+	}
+	return nil
 }
 
 func shouldPersistMailboxArtifact(msg SubAgentMailboxMessage) bool {
@@ -480,6 +650,7 @@ func (a *MainAgent) persistSubAgentMailboxMessage(msg SubAgentMailboxMessage) er
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("close mailbox log: %w", err)
 	}
+	a.subAgentInbox.spoolIndexReady = false
 	return nil
 }
 
@@ -487,16 +658,23 @@ func (a *MainAgent) dequeueNextSubAgentMailbox() *SubAgentMailboxMessage {
 	if len(a.subAgentInbox.urgent) > 0 {
 		msg := a.subAgentInbox.urgent[0]
 		a.subAgentInbox.urgent = a.subAgentInbox.urgent[1:]
+		a.releaseMailboxMemory(msg)
 		a.refreshSubAgentInboxSummary()
 		return &msg
+	}
+	if len(a.subAgentInbox.spoolUrgent) > 0 {
+		if msg := a.dequeueSpooledMailboxQueue(&a.subAgentInbox.spoolUrgent); msg != nil {
+			return msg
+		}
 	}
 	if len(a.subAgentInbox.normal) > 0 {
 		msg := a.subAgentInbox.normal[0]
 		a.subAgentInbox.normal = a.subAgentInbox.normal[1:]
+		a.releaseMailboxMemory(msg)
 		a.refreshSubAgentInboxSummary()
 		return &msg
 	}
-	return nil
+	return a.dequeueSpooledSubAgentMailbox()
 }
 
 func (a *MainAgent) ensureSubAgentMailboxPersisted(msg *SubAgentMailboxMessage) bool {
@@ -543,12 +721,7 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 				break
 			}
 			if next.Kind != SubAgentMailboxKindCompleted {
-				if next.Priority == SubAgentMailboxPriorityInterrupt || next.Priority == SubAgentMailboxPriorityUrgent {
-					a.subAgentInbox.urgent = append([]SubAgentMailboxMessage{*next}, a.subAgentInbox.urgent...)
-				} else {
-					a.subAgentInbox.normal = append([]SubAgentMailboxMessage{*next}, a.subAgentInbox.normal...)
-				}
-				a.refreshSubAgentInboxSummary()
+				a.requeueSubAgentMailboxInMemory(*next)
 				break
 			}
 			pending = append(pending, next)
@@ -615,13 +788,13 @@ func (a *MainAgent) requeueActiveSubAgentMailbox() {
 		}
 		switch msg.Kind {
 		case SubAgentMailboxKindProgress:
-			a.subAgentInbox.progress[msg.AgentID] = *msg
-		default:
-			if msg.Priority == SubAgentMailboxPriorityInterrupt || msg.Priority == SubAgentMailboxPriorityUrgent {
-				a.subAgentInbox.urgent = append([]SubAgentMailboxMessage{*msg}, a.subAgentInbox.urgent...)
-			} else {
-				a.subAgentInbox.normal = append([]SubAgentMailboxMessage{*msg}, a.subAgentInbox.normal...)
+			if previous, ok := a.subAgentInbox.progress[msg.AgentID]; ok {
+				a.releaseMailboxMemory(previous)
 			}
+			a.subAgentInbox.progress[msg.AgentID] = *msg
+			a.subAgentInbox.memoryBytes += mailboxMessageBytes(*msg)
+		default:
+			a.requeueSubAgentMailboxInMemory(*msg)
 		}
 	}
 	a.refreshSubAgentInboxSummary()

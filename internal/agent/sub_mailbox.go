@@ -80,13 +80,105 @@ type SubAgentMailboxAckRecord struct {
 }
 
 type subAgentInbox struct {
-	urgent   []SubAgentMailboxMessage
-	normal   []SubAgentMailboxMessage
-	progress map[string]SubAgentMailboxMessage
+	urgent          []SubAgentMailboxMessage
+	normal          []SubAgentMailboxMessage
+	progress        map[string]SubAgentMailboxMessage
+	spoolUrgent     []string
+	spoolNormal     []string
+	spoolIndex      map[string]mailboxSpoolLocation
+	spoolIndexReady bool
+	memoryBytes     int
+}
+
+type mailboxSpoolLocation struct {
+	offset int64
+	length int64
 }
 
 func newSubAgentInbox() subAgentInbox {
-	return subAgentInbox{progress: make(map[string]SubAgentMailboxMessage)}
+	return subAgentInbox{
+		progress:   make(map[string]SubAgentMailboxMessage),
+		spoolIndex: make(map[string]mailboxSpoolLocation),
+	}
+}
+
+func mailboxMessageBytes(msg SubAgentMailboxMessage) int {
+	data, err := json.Marshal(msg)
+	if err == nil {
+		return len(data)
+	}
+	return len(msg.Summary) + len(msg.Payload)
+}
+
+func (a *MainAgent) mailboxMemoryLimits() (int, int) {
+	cfg := effectiveOrchestrationConfig(a.globalConfig, a.projectConfig)
+	return cfg.EffectiveMailboxMemoryMessages(), cfg.EffectiveMailboxMemoryBytes()
+}
+
+func (a *MainAgent) mailboxMemoryCount() int {
+	count := len(a.subAgentInbox.urgent) + len(a.subAgentInbox.normal) + len(a.subAgentInbox.progress)
+	for _, queued := range a.ownedSubAgentMailboxes {
+		count += len(queued)
+	}
+	return count
+}
+
+func (a *MainAgent) releaseMailboxMemory(msg SubAgentMailboxMessage) {
+	a.subAgentInbox.memoryBytes -= mailboxMessageBytes(msg)
+	if a.subAgentInbox.memoryBytes < 0 {
+		a.subAgentInbox.memoryBytes = 0
+	}
+}
+
+func (a *MainAgent) storeMailboxInMemory(msg SubAgentMailboxMessage, front bool) bool {
+	urgent := msg.Priority == SubAgentMailboxPriorityInterrupt || msg.Priority == SubAgentMailboxPriorityUrgent
+	if !front {
+		// Preserve FIFO within each priority class: while older messages sit in
+		// the durable spool, new arrivals must queue behind them there instead
+		// of jumping ahead through the in-memory queue.
+		spool := a.subAgentInbox.spoolNormal
+		if urgent {
+			spool = a.subAgentInbox.spoolUrgent
+		}
+		if len(spool) > 0 {
+			return false
+		}
+	}
+	messageLimit, byteLimit := a.mailboxMemoryLimits()
+	size := mailboxMessageBytes(msg)
+	if a.mailboxMemoryCount() >= messageLimit || a.subAgentInbox.memoryBytes+size > byteLimit {
+		return false
+	}
+	if urgent {
+		if front {
+			a.subAgentInbox.urgent = append([]SubAgentMailboxMessage{msg}, a.subAgentInbox.urgent...)
+		} else {
+			a.subAgentInbox.urgent = append(a.subAgentInbox.urgent, msg)
+		}
+	} else if front {
+		a.subAgentInbox.normal = append([]SubAgentMailboxMessage{msg}, a.subAgentInbox.normal...)
+	} else {
+		a.subAgentInbox.normal = append(a.subAgentInbox.normal, msg)
+	}
+	a.subAgentInbox.memoryBytes += size
+	return true
+}
+
+func (a *MainAgent) spoolMailboxMessage(msg SubAgentMailboxMessage, front bool) {
+	id := strings.TrimSpace(msg.MessageID)
+	if id == "" {
+		return
+	}
+	queue := &a.subAgentInbox.spoolNormal
+	if msg.Priority == SubAgentMailboxPriorityInterrupt || msg.Priority == SubAgentMailboxPriorityUrgent {
+		queue = &a.subAgentInbox.spoolUrgent
+	}
+	if front {
+		*queue = append([]string{id}, (*queue)...)
+	} else {
+		*queue = append(*queue, id)
+	}
+	a.subAgentInbox.spoolIndexReady = false
 }
 
 func (a *MainAgent) nextSubAgentMailboxMessageID(agentID string) string {

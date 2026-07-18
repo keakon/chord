@@ -187,6 +187,7 @@ func (a *MainAgent) takeOutstandingMailboxForSub(sub *SubAgent) *SubAgentMailbox
 		}
 		msg := a.subAgentInbox.urgent[i]
 		a.subAgentInbox.urgent = append(a.subAgentInbox.urgent[:i], a.subAgentInbox.urgent[i+1:]...)
+		a.releaseMailboxMemory(msg)
 		a.refreshSubAgentInboxSummary()
 		return &msg
 	}
@@ -196,6 +197,7 @@ func (a *MainAgent) takeOutstandingMailboxForSub(sub *SubAgent) *SubAgentMailbox
 		}
 		msg := a.subAgentInbox.normal[i]
 		a.subAgentInbox.normal = append(a.subAgentInbox.normal[:i], a.subAgentInbox.normal[i+1:]...)
+		a.releaseMailboxMemory(msg)
 		a.refreshSubAgentInboxSummary()
 		return &msg
 	}

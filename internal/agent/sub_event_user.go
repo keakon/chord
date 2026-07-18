@@ -16,7 +16,7 @@ func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 	s.llmRequestInFlight.Store(true)
 	s.appendPendingUserMessage(input)
 
-	messages := s.ctxMgr.Snapshot()
+	messages := s.prepareContextForLLM(s.ctxMgr.Snapshot())
 	s.asyncCallLLMWithFlightMarked(turn, messages)
 }
 
@@ -52,13 +52,22 @@ func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 
 func (s *SubAgent) takePendingUserMessagesLocked() []pendingUserMessage {
 	pending := make([]pendingUserMessage, 0, len(s.inputCh)+len(s.inputOverflow))
+	dequeuedBytes := 0
 	for {
 		select {
 		case input := <-s.inputCh:
 			pending = append(pending, input)
+			dequeuedBytes += pendingUserMessageBytes(input)
 		default:
 			pending = append(pending, s.inputOverflow...)
+			for _, input := range s.inputOverflow {
+				dequeuedBytes += pendingUserMessageBytes(input)
+			}
 			s.inputOverflow = nil
+			s.inputQueueBytes -= dequeuedBytes
+			if s.inputQueueBytes < 0 {
+				s.inputQueueBytes = 0
+			}
 			return pending
 		}
 	}
@@ -79,7 +88,7 @@ func (s *SubAgent) messagesForLLMContinuation() []message.Message {
 	s.llmRequestInFlight.Store(true)
 	s.inputQueueMu.Unlock()
 	s.appendPendingUserMessages(pending)
-	return s.ctxMgr.Snapshot()
+	return s.prepareContextForLLM(s.ctxMgr.Snapshot())
 }
 
 func (s *SubAgent) continueLLMWithPendingUserMessages() {
@@ -97,7 +106,7 @@ func (s *SubAgent) continueLLMIfPendingUserMessages() bool {
 	s.inputQueueMu.Unlock()
 
 	s.appendPendingUserMessages(pending)
-	s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
+	s.asyncCallLLMWithFlightMarked(s.turn, s.prepareContextForLLM(s.ctxMgr.Snapshot()))
 	return true
 }
 
@@ -133,6 +142,15 @@ func (s *SubAgent) TryEnqueueContextAppend(msg message.Message) bool {
 	}
 	s.ctxAppendQueueMu.Lock()
 	defer s.ctxAppendQueueMu.Unlock()
+	msgBytes := messageQueueBytes(msg)
+	messageLimit, byteLimit := s.effectiveQueueLimits()
+	if len(s.ctxAppendCh)+len(s.ctxAppendOverflow) >= messageLimit || s.ctxAppendBytes+msgBytes > byteLimit {
+		if s.parent != nil {
+			s.parent.orchestrationMetrics.subAgentQueueRejected.Add(1)
+		}
+		return false
+	}
+	s.ctxAppendBytes += msgBytes
 	if len(s.ctxAppendOverflow) > 0 {
 		s.ctxAppendOverflow = append(s.ctxAppendOverflow, msg)
 		return true

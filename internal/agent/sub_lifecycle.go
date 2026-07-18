@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -81,6 +83,7 @@ drained:
 	queued = append(queued, s.inputOverflow...)
 	s.inputOverflow = nil
 	found := false
+	queuedBytes := 0
 	for _, input := range queued {
 		if !found && input.DraftID == draftID {
 			updated, keep := mutate(input)
@@ -90,12 +93,14 @@ drained:
 				continue
 			}
 		}
+		queuedBytes += pendingUserMessageBytes(input)
 		select {
 		case s.inputCh <- input:
 		default:
 			s.inputOverflow = append(s.inputOverflow, input)
 		}
 	}
+	s.inputQueueBytes = queuedBytes
 	return found
 }
 
@@ -105,6 +110,15 @@ func (s *SubAgent) enqueueUserMessage(input pendingUserMessage) bool {
 	}
 	s.inputQueueMu.Lock()
 	defer s.inputQueueMu.Unlock()
+	inputBytes := pendingUserMessageBytes(input)
+	messageLimit, byteLimit := s.effectiveQueueLimits()
+	if len(s.inputCh)+len(s.inputOverflow) >= messageLimit || s.inputQueueBytes+inputBytes > byteLimit {
+		if s.parent != nil {
+			s.parent.orchestrationMetrics.subAgentQueueRejected.Add(1)
+		}
+		return false
+	}
+	s.inputQueueBytes += inputBytes
 	if len(s.inputOverflow) > 0 {
 		s.inputOverflow = append(s.inputOverflow, input)
 		s.signalWake()
@@ -115,12 +129,59 @@ func (s *SubAgent) enqueueUserMessage(input pendingUserMessage) bool {
 		s.signalWake()
 		return true
 	case <-s.parentCtx.Done():
+		s.inputQueueBytes -= inputBytes
 		return false
 	default:
 		s.inputOverflow = append(s.inputOverflow, input)
 		s.signalWake()
 		return true
 	}
+}
+
+func (s *SubAgent) effectiveQueueLimits() (int, int) {
+	messages := s.queueMessageLimit
+	if messages <= 0 {
+		messages = config.DefaultSubAgentQueueMessages
+	}
+	bytes := s.queueByteLimit
+	if bytes <= 0 {
+		bytes = config.DefaultSubAgentQueueBytes
+	}
+	return messages, bytes
+}
+
+func pendingUserMessageBytes(input pendingUserMessage) int {
+	data, err := json.Marshal(input)
+	if err == nil {
+		return len(data)
+	}
+	return len(input.Content)
+}
+
+func messageQueueBytes(msg message.Message) int {
+	data, err := json.Marshal(msg)
+	if err == nil {
+		return len(data)
+	}
+	return len(msg.Content)
+}
+
+func (s *SubAgent) accountDequeuedUserMessage(input pendingUserMessage) {
+	s.inputQueueMu.Lock()
+	s.inputQueueBytes -= pendingUserMessageBytes(input)
+	if s.inputQueueBytes < 0 {
+		s.inputQueueBytes = 0
+	}
+	s.inputQueueMu.Unlock()
+}
+
+func (s *SubAgent) accountDequeuedContextAppend(msg message.Message) {
+	s.ctxAppendQueueMu.Lock()
+	s.ctxAppendBytes -= messageQueueBytes(msg)
+	if s.ctxAppendBytes < 0 {
+		s.ctxAppendBytes = 0
+	}
+	s.ctxAppendQueueMu.Unlock()
 }
 
 func (s *SubAgent) signalWake() {
@@ -185,11 +246,19 @@ func (s *SubAgent) removeInitialUserMessage() {
 	s.inputQueueMu.Lock()
 	defer s.inputQueueMu.Unlock()
 	select {
-	case <-s.inputCh:
+	case input := <-s.inputCh:
+		s.inputQueueBytes -= pendingUserMessageBytes(input)
+		if s.inputQueueBytes < 0 {
+			s.inputQueueBytes = 0
+		}
 		return
 	default:
 	}
 	if len(s.inputOverflow) > 0 {
+		s.inputQueueBytes -= pendingUserMessageBytes(s.inputOverflow[0])
+		if s.inputQueueBytes < 0 {
+			s.inputQueueBytes = 0
+		}
 		s.inputOverflow = s.inputOverflow[1:]
 	}
 }
@@ -341,5 +410,10 @@ func (s *SubAgent) GetContextBytes() int {
 }
 
 func (s *SubAgent) GetContextReductionStats() ContextReductionStats {
-	return ContextReductionStats{}
+	if s == nil {
+		return ContextReductionStats{}
+	}
+	s.reductionMu.RLock()
+	defer s.reductionMu.RUnlock()
+	return cloneContextReductionStats(s.reductionStats)
 }

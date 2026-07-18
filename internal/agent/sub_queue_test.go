@@ -37,6 +37,51 @@ func TestSubAgentInputOverflowPreservesOrder(t *testing.T) {
 	}
 }
 
+func TestSubAgentInputQueueRejectsConfiguredBudget(t *testing.T) {
+	sub := &SubAgent{
+		parentCtx:         t.Context(),
+		inputCh:           make(chan pendingUserMessage, 1),
+		queueMessageLimit: 2,
+		queueByteLimit:    1024,
+	}
+	if !sub.enqueueUserMessage(pendingUserMessage{Content: "one"}) || !sub.enqueueUserMessage(pendingUserMessage{Content: "two"}) {
+		t.Fatal("expected first two messages to fit queue budget")
+	}
+	if sub.enqueueUserMessage(pendingUserMessage{Content: "three"}) {
+		t.Fatal("third message exceeded configured message budget")
+	}
+	first, ok := sub.tryReceiveUserInput()
+	if !ok || first.Content != "one" {
+		t.Fatalf("first dequeue = %#v, %v", first, ok)
+	}
+	sub.refillInputChannelFromOverflow()
+	if !sub.enqueueUserMessage(pendingUserMessage{Content: "three"}) {
+		t.Fatal("queue budget was not released after dequeue")
+	}
+}
+
+func TestSubAgentContextAppendQueueRejectsByteBudget(t *testing.T) {
+	sub := &SubAgent{
+		parentCtx:         t.Context(),
+		ctxAppendCh:       make(chan message.Message, 1),
+		queueMessageLimit: 4,
+		queueByteLimit:    160,
+	}
+	first := message.Message{Role: message.RoleUser, Content: strings.Repeat("a", 40)}
+	if !sub.TryEnqueueContextAppend(first) {
+		t.Fatal("first context append rejected")
+	}
+	if sub.TryEnqueueContextAppend(message.Message{Role: message.RoleUser, Content: strings.Repeat("b", 120)}) {
+		t.Fatal("oversized context append exceeded configured byte budget")
+	}
+	if got, ok := sub.tryReceiveContextAppend(); !ok || got.Content != first.Content {
+		t.Fatalf("context dequeue = %#v, %v", got, ok)
+	}
+	if !sub.TryEnqueueContextAppend(message.Message{Role: message.RoleUser, Content: "small"}) {
+		t.Fatal("context byte budget was not released after dequeue")
+	}
+}
+
 func TestSubAgentBusyTurnDefersQueuedUserInput(t *testing.T) {
 	sub := &SubAgent{
 		inputCh: make(chan pendingUserMessage, 1),

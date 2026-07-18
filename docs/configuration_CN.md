@@ -768,6 +768,59 @@ web_fetch:
 
 `web_fetch` 保持轻量级静态 HTTP 读取，不运行本地浏览器。对 JS-heavy 页面，若返回的 HTML 只有应用空壳而非可读正文，结果会标记为 `Content-Quality: suspect-shell`。
 
+## 多 Agent 编排资源限制
+
+顶层 `orchestration` 配置用于限制单个 Chord 进程内 MainAgent/SubAgent 工作流占用的资源。它不授予工具权限，也不改变 `delegation.max_children` 等单个 Agent 委派限制；它控制已准入 runtime 和 LLM 请求的并发量、SubAgent 输入队列容量，以及 mailbox 在内存中的保留量。
+
+大多数用户应保留内置默认值。只有当 provider 有严格并发配额、运行主机内存有限，或编排指标显示持续排队/拒绝时，才建议调整。
+
+```yaml
+orchestration:
+  max_live_runtimes: 10
+  max_borrowed_runtimes: 1
+  max_active_llm_requests: 10
+  provider_max_active_requests:
+    openai: 6
+    anthropic: 4
+  model_max_active_requests:
+    openai/gpt-5.5: 3
+  subagent_queue_messages: 256
+  subagent_queue_bytes: 4194304       # 4 MiB
+  mailbox_memory_messages: 512
+  mailbox_memory_bytes: 8388608       # 8 MiB
+  subagent_compact_usage: 0.8
+```
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `max_live_runtimes` | `10` | 正常准入的 Agent runtime 最大数量。达到上限后，后续 runtime 获取会等待已有槽位释放。 |
+| `max_borrowed_runtimes` | `1` | 为必须继续推进的编排工作临时增加的 runtime 准入量，例如子 Agent 事件到达后恢复父 Agent。借用额度单独设限，以避免死锁，同时不让普通准入无限增长。 |
+| `max_active_llm_requests` | `10` | 进程内所有编排 Agent 的 LLM 请求总并发上限。达到上限后，符合条件的请求等待。 |
+| `provider_max_active_requests` | 无 | 可选的 provider 级请求并发上限，key 如 `openai`。请求必须同时满足该限制和进程总限制。 |
+| `model_max_active_requests` | 无 | 可选的 `provider/model` 级请求并发上限。匹配时忽略 `@high` 等 inline variant，因此 `openai/gpt-5.5` 覆盖该模型的所有 variant。 |
+| `subagent_queue_messages` | `256` | 每个 SubAgent 的待处理输入消息上限。消息数或字节数任一达到上限时，新的入队会被拒绝，已排队消息不会被丢弃。 |
+| `subagent_queue_bytes` | `4194304` | 每个 SubAgent 待处理输入的估算字节数上限。这是内存准入限制，不会溢写到磁盘 spool。 |
+| `mailbox_memory_messages` | `512` | MainAgent inbox 和按 owner 分类的 mailbox 在内存中保留的 SubAgent 消息总数上限。 |
+| `mailbox_memory_bytes` | `8388608` | 上述内存 mailbox 的估算总字节数上限。超过内存预算的持久化非 progress 消息会通过磁盘 mailbox spool 引用；progress 更新可能在内存中合并或省略。 |
+| `subagent_compact_usage` | `0.8` | 当 SubAgent 的估算上下文用量达到可用输入预算的这一比例时，主动压缩其上下文。默认值与 `context.compaction.threshold` 一致；之所以保留单独配置，是因为 SubAgent 使用本地 token 估算和轻量滑动窗口 checkpoint，而不是 MainAgent 的 usage 驱动压缩管线。有效值必须严格大于 `0` 且小于 `1`。 |
+
+### 优先级和值规则
+
+- 这些设置既可写在全局配置，也可写在项目 `.chord/config.yaml` 中。项目配置中的正数标量会覆盖对应的全局值。
+- `provider_max_active_requests` 和 `model_max_active_requests` 按 key 合并：项目配置替换同名全局条目，同时保留其他全局条目。
+- 标量为零或负数不表示“无限制”，而是保留继承值或内置默认值。`subagent_compact_usage` 只有严格位于 `(0, 1)` 时才有效，否则回退到 `0.8`；与 `context.compaction.threshold: 0` 不同，零不会关闭 SubAgent 上下文保护。
+- provider/model map 中只有正数限制会生效。建议使用明确的 key 和正整数，不要把零当作通用的“无限制”开关。
+- 所有限制只在单个进程内生效，不会协调多个 Chord 进程之间的配额。
+
+### 调优建议
+
+- 为满足 API 配额，优先设置 provider 或 model 限制，并将 `max_active_llm_requests` 保留为整体安全上限。
+- 在内存有限的主机上，逐步降低 mailbox 消息数/字节数限制。overflow 使用持久化存储，因此更低的内存限制会以更多磁盘 I/O 为代价。
+- 只有当消息生产方能够处理入队拒绝时，才降低 SubAgent 队列限制。这些队列不会溢写到磁盘，限制过小可能中断父子 Agent 协作。
+- `max_borrowed_runtimes` 应保持较小的正数。借用槽位用于解除编排推进停滞，不用于提高普通吞吐量。
+- 降低 `subagent_compact_usage` 可减少上下文溢出风险，但会更早、更频繁地压缩；提高它可减少压缩开销，但会缩小恢复余量。
+- 提高并发不一定更快：provider 限流、模型延迟、本地内存压力和 workspace lease 竞争都可能降低实际吞吐。应依据排队/拒绝指标和端到端延迟调参，而不是只看 CPU 数量。
+
 ## MCP
 
 MCP server 可能暴露大量工具。通过 `allowed_tools` 只允许部分远端工具进入 Chord，避免把不必要的 tool schema 发送给模型：

@@ -9,6 +9,9 @@ import (
 
 func TestDefaultConfigCompactionProfileDefaultsToAuto(t *testing.T) {
 	cfg := DefaultConfig()
+	if cfg.Context.Compaction.Threshold != DefaultSubAgentCompactUsage {
+		t.Fatalf("main compaction threshold = %v, subagent default = %v; defaults should stay aligned", cfg.Context.Compaction.Threshold, DefaultSubAgentCompactUsage)
+	}
 	if cfg.Context.Compaction.Profile != CompactionProfileAuto {
 		t.Fatalf("DefaultConfig().Context.Compaction.Profile = %q, want %q", cfg.Context.Compaction.Profile, CompactionProfileAuto)
 	}

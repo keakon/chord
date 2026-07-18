@@ -817,6 +817,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		AgentsMD:      a.cachedAgentsMDSnapshot(),
 		Skills:        a.loadedSkillsSnapshot(),
 		ModelName:     a.ModelName(),
+		Orchestration: effectiveOrchestrationConfig(a.globalConfig, a.projectConfig),
 	})
 	admissionStartedAt = time.Now()
 	a.admissionMu.Lock()

@@ -460,6 +460,7 @@ type MainAgent struct {
 	focusedTaskID            string // focused durable task when its runtime is parked
 	subAgentInbox            subAgentInbox
 	ownedSubAgentMailboxes   map[string][]SubAgentMailboxMessage // owner agentID -> descendant mailbox waiting for owner-local delivery
+	ownedMailboxSpool        map[string][]string                 // owner agentID -> durable mailbox IDs outside the memory budget
 	subAgentMailboxIDsMu     sync.Mutex
 	subAgentMailboxIDs       map[string]struct{} // session-scoped idempotency keys for persisted and live mailbox events
 	subAgentMailboxConsumed  map[string]struct{} // consumed mailbox IDs loaded once and updated with ack writes
@@ -723,6 +724,7 @@ func NewMainAgent(
 		fileBackups:             newFileBackupManager(sessionDir),
 		subAgentInbox:           newSubAgentInbox(),
 		ownedSubAgentMailboxes:  make(map[string][]SubAgentMailboxMessage),
+		ownedMailboxSpool:       make(map[string][]string),
 		subAgentMailboxIDs:      make(map[string]struct{}),
 		subAgentMailboxConsumed: make(map[string]struct{}),
 		subAgentUrgentCounts:    make(map[string]int),

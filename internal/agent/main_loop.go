@@ -374,12 +374,22 @@ func (a *MainAgent) drainRunnableMailboxWork() {
 		a.drainSubAgentInbox()
 	}
 	ownerIDs := make([]string, 0, len(a.ownedSubAgentMailboxes))
+	seenOwners := make(map[string]struct{}, len(a.ownedSubAgentMailboxes)+len(a.ownedMailboxSpool))
 	for ownerID, queued := range a.ownedSubAgentMailboxes {
 		for _, msg := range queued {
 			if msg.Kind != SubAgentMailboxKindProgress {
 				ownerIDs = append(ownerIDs, ownerID)
+				seenOwners[ownerID] = struct{}{}
 				break
 			}
+		}
+	}
+	for ownerID, queued := range a.ownedMailboxSpool {
+		if len(queued) == 0 {
+			continue
+		}
+		if _, seen := seenOwners[ownerID]; !seen {
+			ownerIDs = append(ownerIDs, ownerID)
 		}
 	}
 	for _, ownerID := range ownerIDs {
@@ -414,6 +424,11 @@ func (a *MainAgent) hasRunnableMailboxWork() bool {
 			if msg.Kind != SubAgentMailboxKindProgress {
 				return true
 			}
+		}
+	}
+	for _, queued := range a.ownedMailboxSpool {
+		if len(queued) > 0 {
+			return true
 		}
 	}
 	return false

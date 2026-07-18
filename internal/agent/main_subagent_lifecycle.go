@@ -174,6 +174,7 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 		out := in[:0]
 		for _, msg := range in {
 			if strings.TrimSpace(msg.AgentID) == agentID {
+				a.releaseMailboxMemory(msg)
 				continue
 			}
 			out = append(out, msg)
@@ -203,11 +204,15 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 		a.activeSubAgentMailboxes = filtered
 	}
 	if len(a.ownedSubAgentMailboxes) > 0 {
+		for _, msg := range a.ownedSubAgentMailboxes[agentID] {
+			a.releaseMailboxMemory(msg)
+		}
 		delete(a.ownedSubAgentMailboxes, agentID)
 		for ownerID, queued := range a.ownedSubAgentMailboxes {
 			filtered := queued[:0]
 			for _, msg := range queued {
 				if strings.TrimSpace(msg.AgentID) == agentID || strings.TrimSpace(msg.OwnerAgentID) == agentID {
+					a.releaseMailboxMemory(msg)
 					continue
 				}
 				filtered = append(filtered, msg)
@@ -219,6 +224,7 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 			a.ownedSubAgentMailboxes[ownerID] = filtered
 		}
 	}
+	delete(a.ownedMailboxSpool, agentID)
 	if a.activeSubAgentMailbox != nil && strings.TrimSpace(a.activeSubAgentMailbox.AgentID) == agentID {
 		a.activeSubAgentMailbox = nil
 	}

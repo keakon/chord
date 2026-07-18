@@ -56,11 +56,13 @@ func (s *SubAgent) runLoop() {
 
 		select {
 		case input := <-inputCh:
+			s.accountDequeuedUserMessage(input)
 			s.resetIdleTimer()
 			s.handleUserInput(input)
 			s.refillInputChannelFromOverflow()
 
 		case msg := <-s.ctxAppendCh:
+			s.accountDequeuedContextAppend(msg)
 			s.appendContextOnly(msg)
 			s.refillContextAppendChannelFromOverflow()
 
@@ -200,6 +202,7 @@ func (s *SubAgent) tryReceiveUserInput() (pendingUserMessage, bool) {
 	}
 	select {
 	case input := <-s.inputCh:
+		s.accountDequeuedUserMessage(input)
 		return input, true
 	default:
 		return pendingUserMessage{}, false
@@ -212,6 +215,7 @@ func (s *SubAgent) tryReceiveContextAppend() (message.Message, bool) {
 	}
 	select {
 	case msg := <-s.ctxAppendCh:
+		s.accountDequeuedContextAppend(msg)
 		return msg, true
 	default:
 		return message.Message{}, false

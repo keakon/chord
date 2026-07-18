@@ -826,6 +826,59 @@ web_fetch:
 
 `web_fetch` intentionally remains a lightweight static HTTP reader. It does not run a local browser; JS-heavy pages may be marked as `Content-Quality: suspect-shell` when the returned HTML looks like an application shell rather than readable content.
 
+## Multi-agent orchestration resource limits
+
+The top-level `orchestration` section bounds process-local resources used by MainAgent/SubAgent workflows. It does not grant tool permissions or change per-agent delegation limits such as `delegation.max_children`; it limits how many admitted runtimes and LLM requests can run at once, how much SubAgent input can queue, and how much mailbox data remains in memory.
+
+Most users should keep the built-in defaults. Configure these limits when a provider has a strict concurrency quota, the host has limited memory, or orchestration metrics show sustained queueing or rejection.
+
+```yaml
+orchestration:
+  max_live_runtimes: 10
+  max_borrowed_runtimes: 1
+  max_active_llm_requests: 10
+  provider_max_active_requests:
+    openai: 6
+    anthropic: 4
+  model_max_active_requests:
+    openai/gpt-5.5: 3
+  subagent_queue_messages: 256
+  subagent_queue_bytes: 4194304       # 4 MiB
+  mailbox_memory_messages: 512
+  mailbox_memory_bytes: 8388608       # 8 MiB
+  subagent_compact_usage: 0.8
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `max_live_runtimes` | `10` | Maximum normally admitted Agent runtimes. Further runtime acquisition waits until a slot is released. |
+| `max_borrowed_runtimes` | `1` | Additional temporary runtime admissions used to wake orchestration work that must make progress, such as a parent resuming after a child event. Borrowing is bounded separately to avoid deadlock without making normal admission unbounded. |
+| `max_active_llm_requests` | `10` | Process-wide maximum concurrent LLM requests across orchestrated agents. Eligible requests wait when the limit is full. |
+| `provider_max_active_requests` | none | Optional concurrent-request limits keyed by provider name, for example `openai`. A request must satisfy this limit and the process-wide limit. |
+| `model_max_active_requests` | none | Optional concurrent-request limits keyed by `provider/model`. Inline variants such as `@high` are ignored for matching, so `openai/gpt-5.5` covers all variants of that model. |
+| `subagent_queue_messages` | `256` | Maximum pending input messages for each SubAgent. A new enqueue is rejected when either this count or the byte limit is reached; existing queued messages are preserved. |
+| `subagent_queue_bytes` | `4194304` | Maximum estimated bytes of pending input for each SubAgent. This is an in-memory admission bound, not a disk spool. |
+| `mailbox_memory_messages` | `512` | Maximum SubAgent mailbox messages retained in memory across the MainAgent inbox and owner-specific mailboxes. |
+| `mailbox_memory_bytes` | `8388608` | Maximum estimated bytes retained by those in-memory mailboxes. Durable non-progress messages that exceed the memory budget are referenced through the on-disk mailbox spool; progress updates may be coalesced or omitted from memory. |
+| `subagent_compact_usage` | `0.8` | Proactively compress a SubAgent's context when estimated usage reaches this fraction of its usable input budget. The default matches `context.compaction.threshold`; this separate setting remains available because SubAgents use local token estimates and a lightweight sliding-window checkpoint rather than MainAgent's usage-driven compaction pipeline. Must be greater than `0` and less than `1`. |
+
+### Precedence and value rules
+
+- These settings may appear in the global config and in project `.chord/config.yaml`. Positive project scalar values override the corresponding global values.
+- `provider_max_active_requests` and `model_max_active_requests` are merged by key. A project entry replaces the same global key while preserving unrelated global entries.
+- Scalar values that are zero or negative do not mean “unlimited”: they retain the inherited or built-in default. `subagent_compact_usage` also falls back to `0.8` unless it is strictly between `0` and `1`; unlike `context.compaction.threshold: 0`, zero does not disable SubAgent context protection.
+- Only positive provider/model map limits are enforced. Keep map keys explicit and use positive integers; do not rely on zero as a general unlimited-mode switch.
+- Limits are process-local. They do not coordinate quotas across multiple Chord processes.
+
+### Tuning guidance
+
+- To comply with an API quota, set the provider or model limit first; keep `max_active_llm_requests` as the overall safety ceiling.
+- On a memory-constrained host, reduce mailbox byte/message limits gradually. Overflow uses durable storage, so lower limits trade memory for additional disk I/O.
+- Reduce SubAgent queue limits only when producers can handle enqueue rejection. These queues do not spill to disk, and overly small limits can interrupt parent/child coordination.
+- Keep `max_borrowed_runtimes` small but positive. Borrowed slots exist to break orchestration progress stalls, not to increase ordinary throughput.
+- Lowering `subagent_compact_usage` reduces context-overflow risk but causes earlier and more frequent compression. Raising it reduces compression work but leaves less recovery headroom.
+- Increasing concurrency is not automatically faster: provider throttling, model latency, local memory pressure, and workspace lease contention can reduce effective throughput. Change limits using observed queue/rejection metrics and end-to-end latency rather than CPU count alone.
+
 ## MCP
 
 MCP servers can expose many tools. Use `allowed_tools` to expose only selected remote tool names and avoid sending unused tool schemas to the model:

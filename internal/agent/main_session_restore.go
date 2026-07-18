@@ -724,13 +724,12 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 			continue
 		}
 		if msg.Kind == SubAgentMailboxKindProgress {
-			a.subAgentInbox.progress[msg.AgentID] = msg
+			a.replaceProgressMailboxWithinBudget(msg)
 			continue
 		}
-		if msg.Priority == SubAgentMailboxPriorityInterrupt || msg.Priority == SubAgentMailboxPriorityUrgent {
-			a.subAgentInbox.urgent = append(a.subAgentInbox.urgent, msg)
-		} else {
-			a.subAgentInbox.normal = append(a.subAgentInbox.normal, msg)
+		if !a.storeMailboxInMemory(msg, false) {
+			a.spoolMailboxMessage(msg, false)
+			a.orchestrationMetrics.mailboxSpoolQueued.Add(1)
 		}
 	}
 	a.refreshSubAgentInboxSummary()
