@@ -15,6 +15,7 @@ import (
 
 	tea "github.com/keakon/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/buildinfo"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
@@ -179,7 +180,30 @@ func (m *Model) buildDiagnosticsMetadata(now time.Time, trigger, baseDir, bundle
 	} else {
 		fmt.Fprintf(&sb, "runtime_log_tail: (not found)\n")
 	}
+	if provider, ok := m.agent.(interface {
+		OrchestrationStats() agent.OrchestrationStats
+	}); ok {
+		writeOrchestrationDiagnostics(&sb, provider.OrchestrationStats())
+	}
 	return sb.String()
+}
+
+func writeOrchestrationDiagnostics(sb *strings.Builder, stats agent.OrchestrationStats) {
+	fmt.Fprintf(sb, "orchestration_event_queue: overflow=%d overflow_peak=%d coalesced=%d backpressure=%d\n",
+		stats.EventQueue.OverflowCurrent, stats.EventQueue.OverflowPeak,
+		stats.EventQueue.Coalesced, stats.EventQueue.Backpressure)
+	fmt.Fprintf(sb, "orchestration_runtimes: normal=%d/%d borrowed=%d/%d bypass_active=%d bypass_peak=%d bypass_grants=%d\n",
+		stats.SemaphoreInUse, stats.SemaphoreCapacity, stats.BorrowedInUse, stats.BorrowedCapacity,
+		stats.RuntimeBypassActive, stats.RuntimeBypassPeak, stats.RuntimeBypassGrants)
+	fmt.Fprintf(sb, "orchestration_llm_requests: active=%d capacity=%d queued=%d\n",
+		stats.LLMRequestsActive, stats.LLMRequestCapacity, stats.LLMRequestsQueued)
+	fmt.Fprintf(sb, "orchestration_workspace_leases: active=%d queued=%d\n",
+		stats.WorkspaceLeasesActive, stats.WorkspaceLeasesQueued)
+	fmt.Fprintf(sb, "orchestration_tasks: total=%d scope_conflicts=%d rehydrates=%d parks=%d queue_rejected=%d\n",
+		stats.TasksTotal, stats.ScopeConflicts, stats.Rehydrates, stats.Parks, stats.SubAgentQueueRejected)
+	fmt.Fprintf(sb, "orchestration_mailbox: deliveries=%d delivery_avg=%s acks=%d ack_avg=%s spool_queued=%d spool_rehydrated=%d tracking_evictions=%d\n",
+		stats.MailboxDeliveries, stats.MailboxDeliveryLatencyAverage, stats.MailboxAcks, stats.MailboxAckLatencyAverage,
+		stats.MailboxSpoolQueued, stats.MailboxSpoolRehydrated, stats.MailboxTrackingEvictions)
 }
 
 func writeBuildInfoDiagnostics(sb *strings.Builder, info buildinfo.Info, baseDir string) {

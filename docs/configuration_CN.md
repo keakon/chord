@@ -793,8 +793,8 @@ orchestration:
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
-| `max_live_runtimes` | `10` | 正常准入的 Agent runtime 最大数量。达到上限后，后续 runtime 获取会等待已有槽位释放。 |
-| `max_borrowed_runtimes` | `1` | 为必须继续推进的编排工作临时增加的 runtime 准入量，例如子 Agent 事件到达后恢复父 Agent。借用额度单独设限，以避免死锁，同时不让普通准入无限增长。 |
+| `max_live_runtimes` | `10` | 正常准入的 Agent runtime 最大数量。达到上限后，后续普通 runtime 获取会等待已有槽位释放。这是进程内软上限：唤醒重激活可使用有界 borrowed pool；仅当两个池都耗尽时，才使用不计数的紧急 bypass，避免 event loop 死锁。 |
+| `max_borrowed_runtimes` | `1` | 为必须继续推进的编排工作临时增加的 runtime 准入量，例如子 Agent 事件到达后恢复父 Agent。借用额度单独设限；紧急 bypass 可通过编排统计中的 `RuntimeBypassActive` / `RuntimeBypassPeak` 观察。 |
 | `max_active_llm_requests` | `10` | 进程内所有编排 Agent 的 LLM 请求总并发上限。达到上限后，符合条件的请求等待。 |
 | `provider_max_active_requests` | 无 | 可选的 provider 级请求并发上限，key 如 `openai`。请求必须同时满足该限制和进程总限制。 |
 | `model_max_active_requests` | 无 | 可选的 `provider/model` 级请求并发上限。匹配时忽略 `@high` 等 inline variant，因此 `openai/gpt-5.5` 覆盖该模型的所有 variant。 |

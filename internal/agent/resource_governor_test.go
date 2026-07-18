@@ -122,8 +122,14 @@ func TestAcquireWakeReactivationSlotFallsBackToUncountedBypass(t *testing.T) {
 	if got := a.orchestrationMetrics.runtimeBypassGrants.Load(); got != 1 {
 		t.Fatalf("runtimeBypassGrants = %d, want 1", got)
 	}
+	if stats := a.OrchestrationStats(); stats.RuntimeBypassActive != 1 || stats.RuntimeBypassPeak != 1 {
+		t.Fatalf("runtime bypass stats = active:%d peak:%d, want 1/1", stats.RuntimeBypassActive, stats.RuntimeBypassPeak)
+	}
 
 	a.releaseSubAgentSlot(third)
+	if stats := a.OrchestrationStats(); stats.RuntimeBypassActive != 0 || stats.RuntimeBypassPeak != 1 {
+		t.Fatalf("runtime bypass stats after release = active:%d peak:%d, want 0/1", stats.RuntimeBypassActive, stats.RuntimeBypassPeak)
+	}
 	if got := g.snapshot(); got.RuntimeInUse != 1 || got.BorrowedInUse != 1 {
 		t.Fatalf("bypass release changed counted pools = %+v", got)
 	}

@@ -57,7 +57,7 @@ func (a *MainAgent) acquireSubAgentSlotWithBypass(sub *SubAgent, allowBypass boo
 	// uncounted bypass grant — bounded by the number of existing parked tasks —
 	// and surface the overflow through metrics instead.
 	sub.semHeld, sub.semBorrowed, sub.semBypassed = true, false, true
-	a.orchestrationMetrics.runtimeBypassGrants.Add(1)
+	a.orchestrationMetrics.acquireRuntimeBypass()
 	log.Warnf("SubAgent wake reactivation exceeded runtime and borrow capacity; granting uncounted bypass agent_id=%v task_id=%v", sub.instanceID, sub.taskID)
 	return nil
 }
@@ -78,6 +78,9 @@ func (a *MainAgent) releaseSubAgentSlot(sub *SubAgent) {
 	sub.semBypassed = false
 	sub.semMu.Unlock()
 	if bypassed || a.governor == nil {
+		if bypassed {
+			a.orchestrationMetrics.releaseRuntimeBypass()
+		}
 		return
 	}
 	a.governor.releaseRuntime(borrowed)

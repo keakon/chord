@@ -172,6 +172,38 @@ func TestBuildDiagnosticsMetadataIncludesProcessInstanceID(t *testing.T) {
 	}
 }
 
+func TestWriteOrchestrationDiagnostics(t *testing.T) {
+	var sb strings.Builder
+	writeOrchestrationDiagnostics(&sb, agent.OrchestrationStats{
+		EventQueue:            agent.EventQueueStats{OverflowCurrent: 2, OverflowPeak: 4, Coalesced: 3, Backpressure: 1},
+		SemaphoreCapacity:     10,
+		SemaphoreInUse:        4,
+		BorrowedCapacity:      1,
+		BorrowedInUse:         1,
+		LLMRequestCapacity:    8,
+		LLMRequestsActive:     3,
+		LLMRequestsQueued:     2,
+		WorkspaceLeasesActive: 2,
+		WorkspaceLeasesQueued: 1,
+		TasksTotal:            6,
+		ScopeConflicts:        1,
+		SubAgentQueueRejected: 2,
+		RuntimeBypassGrants:   1,
+		RuntimeBypassPeak:     1,
+	})
+	got := sb.String()
+	for _, want := range []string{
+		"orchestration_event_queue: overflow=2 overflow_peak=4",
+		"orchestration_runtimes: normal=4/10 borrowed=1/1",
+		"orchestration_llm_requests: active=3 capacity=8 queued=2",
+		"orchestration_tasks: total=6 scope_conflicts=1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("diagnostics missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestCollectDiagnosticLLMTraceCurrentSession(t *testing.T) {
 	root := t.TempDir()
 	projectRoot := filepath.Join(root, "project")

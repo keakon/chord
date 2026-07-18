@@ -851,8 +851,8 @@ orchestration:
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `max_live_runtimes` | `10` | Maximum normally admitted Agent runtimes. Further runtime acquisition waits until a slot is released. |
-| `max_borrowed_runtimes` | `1` | Additional temporary runtime admissions used to wake orchestration work that must make progress, such as a parent resuming after a child event. Borrowing is bounded separately to avoid deadlock without making normal admission unbounded. |
+| `max_live_runtimes` | `10` | Maximum normally admitted Agent runtimes. Further normal runtime acquisition waits until a slot is released. This is a soft process-local limit: a wake reactivation may use the bounded borrowed pool or, only when both pools are exhausted, an uncounted emergency bypass to avoid deadlocking the event loop. |
+| `max_borrowed_runtimes` | `1` | Additional temporary runtime admissions used to wake orchestration work that must make progress, such as a parent resuming after a child event. Borrowing is bounded separately; emergency bypasses are observable in `RuntimeBypassActive` / `RuntimeBypassPeak` orchestration stats. |
 | `max_active_llm_requests` | `10` | Process-wide maximum concurrent LLM requests across orchestrated agents. Eligible requests wait when the limit is full. |
 | `provider_max_active_requests` | none | Optional concurrent-request limits keyed by provider name, for example `openai`. A request must satisfy this limit and the process-wide limit. |
 | `model_max_active_requests` | none | Optional concurrent-request limits keyed by `provider/model`. Inline variants such as `@high` are ignored for matching, so `openai/gpt-5.5` covers all variants of that model. |

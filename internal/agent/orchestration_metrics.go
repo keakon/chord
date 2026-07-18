@@ -48,6 +48,8 @@ type orchestrationRuntimeMetrics struct {
 	mailboxSpoolQueued     atomic.Uint64
 	mailboxSpoolRehydrated atomic.Uint64
 	runtimeBypassGrants    atomic.Uint64
+	runtimeBypassActive    atomic.Int64
+	runtimeBypassPeak      atomic.Uint64
 
 	mailboxMu sync.Mutex
 	mailboxes map[string]mailboxMetricState
@@ -107,6 +109,31 @@ type OrchestrationStats struct {
 	MailboxSpoolQueued            uint64
 	MailboxSpoolRehydrated        uint64
 	RuntimeBypassGrants           uint64
+	RuntimeBypassActive           int64
+	RuntimeBypassPeak             uint64
+}
+
+func (m *orchestrationRuntimeMetrics) acquireRuntimeBypass() {
+	if m == nil {
+		return
+	}
+	m.runtimeBypassGrants.Add(1)
+	active := uint64(m.runtimeBypassActive.Add(1))
+	for {
+		peak := m.runtimeBypassPeak.Load()
+		if active <= peak || m.runtimeBypassPeak.CompareAndSwap(peak, active) {
+			return
+		}
+	}
+}
+
+func (m *orchestrationRuntimeMetrics) releaseRuntimeBypass() {
+	if m == nil {
+		return
+	}
+	if active := m.runtimeBypassActive.Add(-1); active < 0 {
+		m.runtimeBypassActive.Store(0)
+	}
 }
 
 func averageDuration(total time.Duration, count uint64) time.Duration {
@@ -405,6 +432,8 @@ func (a *MainAgent) OrchestrationStats() OrchestrationStats {
 		MailboxSpoolQueued:            metrics.mailboxSpoolQueued.Load(),
 		MailboxSpoolRehydrated:        metrics.mailboxSpoolRehydrated.Load(),
 		RuntimeBypassGrants:           metrics.runtimeBypassGrants.Load(),
+		RuntimeBypassActive:           metrics.runtimeBypassActive.Load(),
+		RuntimeBypassPeak:             metrics.runtimeBypassPeak.Load(),
 		TasksByState:                  make(map[string]uint64),
 		TerminalReasons:               make(map[string]uint64),
 	}
