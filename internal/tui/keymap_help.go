@@ -87,6 +87,8 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 				helpBinding(km.InsertHistoryDown, "next history"),
 				helpBinding(km.InsertAttachClipboard, "attach clipboard image or PDF"),
 				helpBinding(km.InsertClearInput, "clear input"),
+				helpBinding(km.InsertPageUp, "page transcript up"),
+				helpBinding(km.InsertPageDown, "page transcript down"),
 				helpBinding(km.SwitchRole, "switch main agent mode (cycle; main view only)"),
 				helpBinding(km.SwitchAgent, "switch focused agent (cycle)"),
 				helpBinding(km.SwitchModel, "open model pool selector"),

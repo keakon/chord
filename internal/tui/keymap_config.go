@@ -8,6 +8,7 @@ package tui
 //
 //	insert_escape, insert_submit, insert_newline, insert_history_up, insert_history_down
 //	insert_attach_clipboard, insert_attach_file, insert_clear_input
+//	insert_page_up, insert_page_down
 //	enter_insert, quit, help_toggle
 //	scroll_down, scroll_up, full_page_down, full_page_up, scroll_to_bottom, scroll_to_top_seq
 //	next_block, prev_block, toggle_collapse, fork_session, directory, usage_stats
@@ -43,6 +44,8 @@ func KeyMapFromConfig(m map[string][]string) KeyMap {
 	apply(&km.InsertAttachClipboard, "insert_attach_clipboard")
 	apply(&km.InsertAttachFile, "insert_attach_file")
 	apply(&km.InsertClearInput, "insert_clear_input")
+	apply(&km.InsertPageUp, "insert_page_up")
+	apply(&km.InsertPageDown, "insert_page_down")
 	apply(&km.EnterInsert, "enter_insert")
 	apply(&km.Quit, "quit")
 	apply(&km.HelpToggle, "help_toggle")

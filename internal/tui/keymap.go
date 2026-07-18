@@ -15,6 +15,8 @@ type KeyMap struct {
 	InsertAttachClipboard []string // attach image/PDF from the system clipboard
 	InsertAttachFile      []string // pick image from file (optional; default unbound)
 	InsertClearInput      []string // clear input box and attachments
+	InsertPageUp          []string // page the transcript up without leaving insert mode
+	InsertPageDown        []string // page the transcript down without leaving insert mode
 
 	// Normal mode – mode switches
 	EnterInsert []string
@@ -69,6 +71,11 @@ func DefaultKeyMap() KeyMap {
 		InsertAttachClipboard: []string{"ctrl+v", "alt+v"},
 		InsertAttachFile:      nil,
 		InsertClearInput:      []string{"ctrl+u"},
+		// PgUp/PgDown scroll the transcript instead of the textarea cursor: the
+		// input box is height-clamped to a few lines, so in-input paging is
+		// nearly useless while glancing back at earlier output is common.
+		InsertPageUp:   []string{"pgup"},
+		InsertPageDown: []string{"pgdown"},
 
 		// Normal mode – mode switches
 		EnterInsert: []string{"i"},

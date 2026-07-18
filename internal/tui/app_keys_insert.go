@@ -442,6 +442,15 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		m.recalcViewportSize()
 		return nil
 
+	// Page the transcript without leaving insert mode. Intentionally shadows
+	// the textarea's own pgup/pgdown cursor paging: the input box is clamped
+	// to a few lines, so scrolling back through earlier output wins.
+	case keyMatches(key, m.keyMap.InsertPageDown):
+		return m.pageTranscript(1)
+
+	case keyMatches(key, m.keyMap.InsertPageUp):
+		return m.pageTranscript(-1)
+
 	case keyMatches(key, m.keyMap.SwitchModel):
 		m.openModelSelect()
 		return nil

@@ -206,21 +206,9 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 
 	// -- half / full page ------------------------------------------------
 	case keyMatches(key, m.keyMap.FullPageDown):
-		prevOffset := m.viewport.offset
-		if m.hasDeferredStartupTranscript() && m.viewport.atBottom() {
-			m.maybePageStartupDeferredTranscriptWindow(1, "page_down")
-			return m.refreshInlineImagesIfViewportMoved(prevOffset)
-		}
-		m.viewport.ScrollDown(m.viewport.height)
-		return m.refreshInlineImagesIfViewportMoved(prevOffset)
+		return m.pageTranscript(1)
 	case keyMatches(key, m.keyMap.FullPageUp):
-		prevOffset := m.viewport.offset
-		if m.hasDeferredStartupTranscript() && m.viewport.offset <= startupDeferredPageUpSwitchThreshold(m.viewport.height) {
-			m.maybePageStartupDeferredTranscriptWindow(-1, "page_up")
-			return m.refreshInlineImagesIfViewportMoved(prevOffset)
-		}
-		m.viewport.ScrollUp(m.viewport.height)
-		return m.refreshInlineImagesIfViewportMoved(prevOffset)
+		return m.pageTranscript(-1)
 
 	// -- jump to top / bottom --------------------------------------------
 	case keyMatches(key, m.keyMap.ScrollToBottom):
@@ -351,6 +339,27 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	return nil
+}
+
+// pageTranscript scrolls the conversation viewport one full page in the given
+// direction (+1 down, -1 up), stepping the deferred startup transcript window
+// when its edge is reached. Shared by Normal mode and Insert mode paging keys.
+func (m *Model) pageTranscript(dir int) tea.Cmd {
+	prevOffset := m.viewport.offset
+	if dir > 0 {
+		if m.hasDeferredStartupTranscript() && m.viewport.atBottom() {
+			m.maybePageStartupDeferredTranscriptWindow(1, "page_down")
+			return m.refreshInlineImagesIfViewportMoved(prevOffset)
+		}
+		m.viewport.ScrollDown(m.viewport.height)
+		return m.refreshInlineImagesIfViewportMoved(prevOffset)
+	}
+	if m.hasDeferredStartupTranscript() && m.viewport.offset <= startupDeferredPageUpSwitchThreshold(m.viewport.height) {
+		m.maybePageStartupDeferredTranscriptWindow(-1, "page_up")
+		return m.refreshInlineImagesIfViewportMoved(prevOffset)
+	}
+	m.viewport.ScrollUp(m.viewport.height)
+	return m.refreshInlineImagesIfViewportMoved(prevOffset)
 }
 
 func (m *Model) repeatNormalVertical(dir, count int) tea.Cmd {
