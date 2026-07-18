@@ -150,6 +150,7 @@ func (a *MainAgent) recordUsage(
 	turnID uint64,
 	usage *message.TokenUsage,
 	serviceTier config.ServiceTier,
+	diagnostic map[string]string,
 ) {
 	if runningModelRef == "" {
 		runningModelRef = selectedModelRef
@@ -176,5 +177,6 @@ func (a *MainAgent) recordUsage(
 		BillingUsage:     billingUsage,
 		Cost:             analytics.CalculateUsageCost(costCfg, billingUsage, serviceTier),
 		PricingSnapshot:  analytics.PricingSnapshotFromCost(costCfg, billingUsage, serviceTier),
+		Diagnostic:       diagnostic,
 	})
 }

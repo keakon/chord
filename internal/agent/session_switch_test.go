@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
@@ -93,6 +94,27 @@ func TestResetSessionRuntimeStateKeepsServiceTier(t *testing.T) {
 
 	if got := a.ServiceTier(); got != config.ServiceTierFast {
 		t.Fatalf("service tier = %q, want fast after session runtime reset", got)
+	}
+}
+
+func TestResetSessionRuntimeStateClearsCacheRoutingState(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.noteCacheExpectation("provider/model", []message.Message{{Role: message.RoleUser, Content: "old session"}}, a.computeToolDefinitionHash())
+	for range 3 {
+		a.cacheHitTracker.Observe("provider/model", 100, 90)
+	}
+	a.recordLLMModelRun("provider/model")
+
+	a.resetSessionRuntimeState()
+
+	if a.refCacheWarm("provider/model", time.Now()) {
+		t.Fatal("new session inherited the previous session's warm cache signal")
+	}
+	if _, ok := a.cacheHitTracker.HitRate("provider/model"); ok {
+		t.Fatal("new session inherited the previous session's cache hit observations")
+	}
+	if snapshot := a.llmModelContinuitySnapshot(); snapshot.PreviousModel != "" || snapshot.ProjectedModelRunLength != 1 {
+		t.Fatalf("model continuity after session reset = %+v, want empty previous model and projected run length 1", snapshot)
 	}
 }
 

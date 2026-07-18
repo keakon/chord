@@ -535,7 +535,7 @@ func (a *MainAgent) callCompactionSummary(client *llm.Client, fallbackModelRef, 
 	if serviceTier == "" {
 		serviceTier = client.EffectiveServiceTierForModelRef(runningRef)
 	}
-	a.recordUsage("main", "main", a.currentAgentName(), "compaction", selectedRef, runningRef, 0, resp.Usage, serviceTier)
+	a.recordUsage("main", "main", a.currentAgentName(), "compaction", selectedRef, runningRef, 0, resp.Usage, serviceTier, nil)
 	if strings.TrimSpace(runningRef) != "" {
 		modelRef = runningRef
 	} else if strings.TrimSpace(selectedRef) != "" {

@@ -723,7 +723,13 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		log.Debugf("automatic context compaction not requested last_input_tokens=%v estimated_input_tokens=%v effective_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.EstimatedInputTokens, decision.EffectiveInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
 	}
 
-	a.recordUsage("main", "main", a.currentAgentName(), "chat", selectedRef, callStatus.RunningModelRef, turnID, resp.Usage, callStatus.ServiceTier)
+	// Record token usage plus cache-attribution diagnostics: how many tokens
+	// the previous request to this same ref should have kept cacheable, so
+	// offline analysis can tell chord-side prefix mutations from provider-side
+	// cache loss. Also feed the observed hit into cache-aware model scoring.
+	cacheDiag := a.noteCacheExpectation(callStatus.RunningModelRef, messages, a.computeToolDefinitionHash())
+	a.observedCacheHit(callStatus.RunningModelRef, resp.Usage)
+	a.recordUsage("main", "main", a.currentAgentName(), "chat", selectedRef, callStatus.RunningModelRef, turnID, resp.Usage, callStatus.ServiceTier, cacheDiag)
 
 	// Hook: on_after_llm_call (after LLM call).
 	inputTok, outputTok := 0, 0

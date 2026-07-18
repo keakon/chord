@@ -623,6 +623,9 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		return sessionRestoreResult{}
 	}
 
+	a.resetCacheRoutingState()
+	a.clearLoopReductionCache(true)
+	a.resetLLMModelRun()
 	a.ctxMgr.RestoreMessages(append([]message.Message(nil), loaded.Messages...))
 	a.mailboxDeliveryPaused.Store(true)
 	a.pendingSubAgentMailboxes = nil

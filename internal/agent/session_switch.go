@@ -196,6 +196,8 @@ func (a *MainAgent) freezeCurrentSession(oldRecovery *recovery.RecoveryManager) 
 }
 
 func (a *MainAgent) resetSessionRuntimeState() {
+	a.resetCacheRoutingState()
+	a.resetLLMModelRun()
 	a.mailboxDeliveryPaused.Store(false)
 	a.subAgentMailboxIDsMu.Lock()
 	a.subAgentMailboxIDs = make(map[string]struct{})

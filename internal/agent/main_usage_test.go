@@ -39,6 +39,7 @@ func TestRecordUsageUsesProvidedServiceTier(t *testing.T) {
 		42,
 		&message.TokenUsage{InputTokens: 1_000_000, OutputTokens: 1_000_000},
 		config.ServiceTierFast,
+		nil,
 	)
 
 	if len(events) != 1 {

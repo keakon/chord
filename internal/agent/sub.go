@@ -778,7 +778,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 					s.ctxMgr.SetTokenBudgets(lim, llmClient.InputLimitForModelRef(runningRef), 0)
 				}
 			}
-			s.parent.recordUsage(s.instanceID, "sub", s.agentDefName, "chat", selectedRef, runningRef, turn.ID, resp.Usage, callStatus.ServiceTier)
+			s.parent.recordUsage(s.instanceID, "sub", s.agentDefName, "chat", selectedRef, runningRef, turn.ID, resp.Usage, callStatus.ServiceTier, nil)
 
 			// Hook: on_after_llm_call.
 			subInputTok, subOutputTok := 0, 0

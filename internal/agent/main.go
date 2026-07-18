@@ -367,6 +367,12 @@ type MainAgent struct {
 	lastLLMRequestModelRef       string
 	llmModelRunLength            int
 
+	// cacheExpectMu protects per-ref request fingerprints used to attribute
+	// prompt-cache misses (chord-side prefix mutation vs provider-side loss).
+	cacheExpectMu     sync.Mutex
+	cacheExpectations map[string]*cacheExpectationRecord
+	cacheHitTracker   *cacheHitTracker
+
 	// toolDefHashMemo caches the tool-definition hash keyed by the frozen
 	// tool-definition snapshot pointer, so per-request surface checks do not
 	// re-marshal and re-hash every tool schema.
@@ -727,6 +733,7 @@ func NewMainAgent(
 		done:                    make(chan struct{}),
 		stoppingCh:              make(chan struct{}),
 		evidence:                evidenceCandidateTracker{seen: make(map[string]struct{})},
+		cacheHitTracker:         newCacheHitTracker(),
 		projectRoot:             projectRoot,
 		subs:                    newSubAgentRegistry(),
 		governor:                governor,
