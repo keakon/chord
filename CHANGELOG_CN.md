@@ -12,6 +12,8 @@
 
 ### 改进
 
+- `grep` 现在用并行 worker（按 CPU 数量封顶）扫描候选文件，同时保持遍历顺序、预算与输出和串行扫描逐字节一致；中等规模仓库的全树搜索提速 4–6 倍，不匹配的行不再逐行分配内存，取消工具调用也会立即停止遍历。
+- 为 LLM 请求准备长对话时不再每次都对整个稳定 reduction surface 重新哈希与深拷贝：未变化的前缀通过字段相等性检测直接复用既有 shape，在 1000 个工具结果规模下稳态准备成本从约 8.3ms/14.8MB 降至 1.4ms/3.5MB。
 - `web_fetch` 权限规则现在可以按网络语义匹配请求 URL：pattern 可以指定 host（域名 glob、字面 IP 或 CIDR）及可选的端口或端口区间，例如用 `169.254.0.0/16: deny` 拦截云元数据端点。匹配仍在请求发出前基于模型提供的 URL 进行，默认全部允许的行为不变。
 - 新增顶层 `orchestration` 配置，治理进程内多 agent 资源：live 与 borrowed SubAgent runtime 槽位，全局、按 provider、按 model 的并发 LLM 请求上限，以及按执行粒度的 workspace lease——同资源的工具执行（同一文件，或 shell 对 shell）跨 agent 串行，无关工具保持并行。SubAgent 输入/上下文队列与协调 mailbox 现在有消息数和字节预算；mailbox 溢出会 spool 到持久日志并按 FIFO 顺序回灌，SubAgent 也会在 `subagent_compact_usage`（默认与 MainAgent 压缩阈值对齐）附近主动压缩上下文。
 - 委派任务的 `expected_write_scope` 现在会在工具执行阶段实际生效，不再只是提示元数据：只读任务拒绝工作区修改，任何 scoped task 都拒绝无法验证副作用的 Shell，文件/路径 scope 会基于规范化后的真实路径约束原生编辑工具，nested delegation 不能扩大 parent scope；child limit、重复任务、scope 冲突、runtime 注册与 parked task 重激活也由同一 admission 生命周期门控。
@@ -29,6 +31,7 @@
 
 ### 修复
 
+- 修复搜索根目录的 `.gitignore` 用类似 `.*` 的模式隐藏点文件时，`grep`（以及其他基于 gitignore 的遍历）静默跳过整棵树的问题：该模式会匹配根目录自身对应的字面 `.`。忽略规则现在只作用于树内条目，与 git 语义一致。
 - 修复恢复会话时引用已被删除的 model pool（表现为 `(missing)` 状态）的问题：恢复阶段会把过期的当前池与各 agent 覆盖项改写为该 agent 的第一个已配置池，使实际生效、界面显示与持久化状态保持一致。
 - OAuth token 刷新与 compaction 响应体现在通过大小上限读取，作为 OOM 兜底，与其他 provider 读取一致。
 - TUI diff 卡片的未变更上下文行现在也做语法高亮，不再渲染为纯暗色文本。

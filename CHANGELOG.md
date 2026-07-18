@@ -12,6 +12,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- `grep` now scans candidate files on parallel workers (bounded by CPU count) while keeping walk order, budgets, and output byte-identical to the sequential scan; full-tree searches over a mid-size repository run 4–6x faster, non-matching lines no longer allocate per line, and cancelling the tool stops the walk promptly.
+- Preparing a long conversation for an LLM request no longer re-hashes and re-clones the entire stable reduction surface on every call: unchanged prefixes are detected by field equality and previous shapes are reused, cutting the steady-state preparation cost from about 8.3ms/14.8MB to 1.4ms/3.5MB per request at a 1000-tool-result conversation size.
 - `web_fetch` permission rules can now target the requested URL with network-aware semantics: a pattern may name a host (domain glob, literal IP, or CIDR) with an optional port or port range, enabling rules such as `169.254.0.0/16: deny` for cloud metadata endpoints. Matching stays pre-fetch against the model-supplied URL and the default allow-everything behavior is unchanged.
 - A new top-level `orchestration` configuration governs process-local multi-agent resources: live and borrowed SubAgent runtime slots, global, per-provider, and per-model concurrent LLM request ceilings, and per-execution workspace leases that serialize same-resource tool runs across agents (same file, or shell against shell) while unrelated tools stay parallel. SubAgent input and context queues plus the coordinator mailbox now enforce message-count and byte budgets; mailbox overflow spools to the durable log and rehydrates in FIFO order, and SubAgents proactively compact their context at `subagent_compact_usage` (default aligned with the MainAgent compaction threshold).
 - Delegated `expected_write_scope` is now enforced at tool execution instead of remaining advisory metadata: read-only tasks reject workspace mutations, any scoped task rejects arbitrary Shell execution, file/path scopes constrain native edit tools using canonical paths, nested delegation cannot broaden its parent scope, and admission serializes child limits, duplicate detection, scope conflicts, runtime registration, and parked-task reactivation.
@@ -29,6 +31,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Fixed `grep` (and other gitignore-aware walks) silently skipping the entire tree when the search root's `.gitignore` hides dotfiles with a pattern like `.*`: the pattern matched the literal `.` used for the root itself. Ignore rules now apply only to entries inside the tree, matching git semantics.
 - Fixed restored sessions carrying a model pool selection that no longer exists in the owning agent's `model_pools` (surfacing as a `(missing)` status): stale current and per-agent selections are rewritten to that agent's first configured pool during restore so the effective, displayed, and persisted pool stay consistent.
 - OAuth token refresh and compaction response bodies are now read through a size bound as an OOM backstop, matching the other provider reads.
 - TUI diff cards now syntax-highlight unchanged context lines instead of rendering them as plain dimmed text.
