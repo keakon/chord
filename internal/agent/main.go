@@ -756,6 +756,9 @@ func NewMainAgent(
 		mcpReady:                make(chan struct{}),
 	}
 	a.interaction = newInteractionBroker(a.stoppingCh)
+	if llmClient != nil {
+		llmClient.SetCandidateScorer(a.cacheAwareCandidateScore)
+	}
 	a.startPersistLoop()
 	a.refreshSessionSummary()
 

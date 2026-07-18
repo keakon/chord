@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -57,7 +58,14 @@ type Client struct {
 	poolCursor             int             // sticky cursor over the effective model pool; success pins, failure advances
 	toolSurfacePrimary     FallbackModel   // first entry of the effective model pool; defines stable modality-dependent tool visibility
 	lastCallStatus         CallStatus
-	serviceTier            config.ServiceTier
+	// candidateScorer, when set, ranks interchangeable fallback providers
+	// (same model served by different providers) by preference; higher is
+	// better. Used for cache-aware routing: a provider whose prompt cache is
+	// warm and historically reliable is effectively cheaper than its nominal
+	// price. It never reorders across different models, so the configured
+	// model fallback chain is respected.
+	candidateScorer func(modelRef string) float64
+	serviceTier     config.ServiceTier
 
 	routingGeneration atomic.Uint64
 	closed            atomic.Bool
@@ -862,6 +870,9 @@ func (c *Client) CompleteStream(
 	}
 	start := pool[startIdx]
 	orderedFallbacks := rotatePoolAfterStart(pool, startIdx)
+	if c.candidateScorer != nil {
+		orderedFallbacks = reorderFallbacksByScore(orderedFallbacks, c.candidateScorer)
+	}
 	requestTuning := tuningForPoolTarget(start)
 	if override, ok := c.consumeRequestTuningOverrideLocked(); ok {
 		requestTuning = mergeRequestTuning(requestTuning, override)
@@ -1089,6 +1100,60 @@ func rotatePoolAfterStart(pool []FallbackModel, start int) []FallbackModel {
 	out := make([]FallbackModel, 0, len(pool)-1)
 	for i := 1; i < len(pool); i++ {
 		out = append(out, pool[(start+i)%len(pool)])
+	}
+	return out
+}
+
+// SetCandidateScorer installs a preference scorer over provider/model refs
+// used to reorder interchangeable fallback providers. Pass nil to disable.
+func (c *Client) SetCandidateScorer(score func(modelRef string) float64) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.candidateScorer = score
+	c.mu.Unlock()
+}
+
+// reorderFallbacksByScore stable-sorts fallback entries within each same-model
+// group by descending score, keeping the configured order across groups. Two
+// entries are in the same group when they serve the same ModelID: those are
+// interchangeable routing choices, while different models represent a
+// deliberate quality/capacity fallback order that must not be disturbed.
+func reorderFallbacksByScore(fallbacks []FallbackModel, score func(modelRef string) float64) []FallbackModel {
+	if len(fallbacks) <= 1 || score == nil {
+		return fallbacks
+	}
+	out := append([]FallbackModel(nil), fallbacks...)
+	type scored struct {
+		entry FallbackModel
+		score float64
+	}
+	for start := 0; start < len(out); {
+		_, variant := config.ParseModelRef(modelRefWithVariant(out[start]))
+		end := start + 1
+		for end < len(out) {
+			_, nextVariant := config.ParseModelRef(modelRefWithVariant(out[end]))
+			if out[end].ModelID != out[start].ModelID || nextVariant != variant {
+				break
+			}
+			end++
+		}
+		if end-start <= 1 {
+			start = end
+			continue
+		}
+		items := make([]scored, end-start)
+		for i, fb := range out[start:end] {
+			items[i] = scored{entry: fb, score: score(modelRefWithVariant(fb))}
+		}
+		sort.SliceStable(items, func(i, j int) bool {
+			return items[i].score > items[j].score
+		})
+		for i := range items {
+			out[start+i] = items[i].entry
+		}
+		start = end
 	}
 	return out
 }

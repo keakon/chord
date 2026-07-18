@@ -260,6 +260,11 @@ func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string
 		newClient.SetSystemPrompt(prompt)
 	}
 
+	// Cache-aware routing: rank interchangeable fallback providers by observed
+	// prompt-cache quality and warmth so retries prefer providers whose cache
+	// still holds our prefix.
+	newClient.SetCandidateScorer(a.cacheAwareCandidateScore)
+
 	log.Debugf("swapped LLM client model=%v context_limit=%v", modelName, contextLimit)
 }
 
