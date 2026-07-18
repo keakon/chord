@@ -31,6 +31,43 @@ type delegationCaller struct {
 	IsMain     bool
 }
 
+func (a *MainAgent) subAgentWorkDir() string {
+	if a == nil {
+		return ""
+	}
+	workDir := strings.TrimSpace(a.cachedWorkDir)
+	if workDir != "" {
+		return workDir
+	}
+	workDir, _ = os.Getwd()
+	return workDir
+}
+
+func (a *MainAgent) baseSubAgentConfig(agentDef *config.AgentConfig, instanceID string, client *llm.Client, parentCtx context.Context, cancel context.CancelFunc, extraMCPTools []tools.Tool) SubAgentConfig {
+	return SubAgentConfig{
+		InstanceID:    instanceID,
+		AgentDefName:  agentDef.Name,
+		Delegation:    agentDef.Delegation,
+		Color:         agentDef.Color,
+		SystemPrompt:  agentDef.SystemPrompt,
+		LLMClient:     client,
+		Recovery:      a.recovery,
+		Parent:        a,
+		ParentCtx:     parentCtx,
+		Cancel:        cancel,
+		BaseTools:     a.tools,
+		ExtraMCPTools: extraMCPTools,
+		Ruleset:       a.buildSubAgentRuleset(agentDef),
+		WorkDir:       a.subAgentWorkDir(),
+		VenvPath:      a.cachedVenvPath,
+		SessionDir:    a.sessionDir,
+		AgentsMD:      a.cachedAgentsMDSnapshot(),
+		Skills:        a.loadedSkillsSnapshot(),
+		ModelName:     a.ModelName(),
+		Orchestration: effectiveOrchestrationConfig(a.globalConfig, a.projectConfig),
+	}
+}
+
 func controlPlaneAgentID(agentID string) string {
 	if strings.TrimSpace(agentID) == "" {
 		return identity.MainAgentID
@@ -453,7 +490,10 @@ func (a *MainAgent) handleAgentIdle(evt Event) {
 		message += "If you are blocked and no control tool is available, explain the blocker clearly in assistant text. "
 	}
 	message += "If you are waiting for user input, continue waiting."
-	sub.InjectUserMessage(message)
+	if !sub.InjectUserMessage(message) {
+		a.queueLoopEvent(Event{Type: EventAgentError, SourceID: evt.SourceID, Payload: fmt.Errorf("SubAgent idle nudge %d could not be queued within the configured input limits", n)})
+		return
+	}
 	log.Infof("nudged idle SubAgent agent=%v nudge_count=%v", evt.SourceID, n)
 }
 
@@ -777,7 +817,6 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		}
 	}()
 	a.applyServiceTierToClient(subLLMClient)
-	agentRuleset := a.buildSubAgentRuleset(agentDef)
 	var extraMCPTools []tools.Tool
 	if len(agentDef.MCP) > 0 {
 		extraMCPTools, err = a.getOrCreateAgentMCP(agentDef.Name, agentDef.MCP)
@@ -787,38 +826,17 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	}
 	instanceID := NextInstanceID(agentDef.Name)
 	subCtx, cancel := context.WithCancel(a.parentCtx)
-	workDir, _ := os.Getwd()
-	sub := NewSubAgent(SubAgentConfig{
-		InstanceID:    instanceID,
-		TaskID:        taskID,
-		AgentDefName:  agentDef.Name,
-		TaskDesc:      description,
-		PlanTaskRef:   planTaskRef,
-		SemanticKey:   semanticTaskKey,
-		WriteScope:    expectedWriteScope,
-		OwnerAgentID:  caller.AgentID,
-		OwnerTaskID:   caller.TaskID,
-		Depth:         caller.Depth + 1,
-		JoinToOwner:   !caller.IsMain && caller.Delegation.ChildJoinEnabled(),
-		Delegation:    agentDef.Delegation,
-		Color:         agentDef.Color,
-		SystemPrompt:  agentDef.SystemPrompt,
-		LLMClient:     subLLMClient,
-		Recovery:      a.recovery,
-		Parent:        a,
-		ParentCtx:     subCtx,
-		Cancel:        cancel,
-		BaseTools:     a.tools,
-		ExtraMCPTools: extraMCPTools,
-		Ruleset:       agentRuleset,
-		WorkDir:       workDir,
-		VenvPath:      a.cachedVenvPath,
-		SessionDir:    a.sessionDir,
-		AgentsMD:      a.cachedAgentsMDSnapshot(),
-		Skills:        a.loadedSkillsSnapshot(),
-		ModelName:     a.ModelName(),
-		Orchestration: effectiveOrchestrationConfig(a.globalConfig, a.projectConfig),
-	})
+	subCfg := a.baseSubAgentConfig(agentDef, instanceID, subLLMClient, subCtx, cancel, extraMCPTools)
+	subCfg.TaskID = taskID
+	subCfg.TaskDesc = description
+	subCfg.PlanTaskRef = planTaskRef
+	subCfg.SemanticKey = semanticTaskKey
+	subCfg.WriteScope = expectedWriteScope
+	subCfg.OwnerAgentID = caller.AgentID
+	subCfg.OwnerTaskID = caller.TaskID
+	subCfg.Depth = caller.Depth + 1
+	subCfg.JoinToOwner = !caller.IsMain && caller.Delegation.ChildJoinEnabled()
+	sub := NewSubAgent(subCfg)
 	admissionStartedAt = time.Now()
 	a.admissionMu.Lock()
 	a.orchestrationMetrics.recordAdmissionWait(time.Since(admissionStartedAt))

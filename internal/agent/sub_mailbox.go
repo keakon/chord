@@ -207,22 +207,23 @@ func normalizeReplyKind(kind string) string {
 	return kind
 }
 
-func (a *MainAgent) markSubAgentMailboxConsumedWithReply(agentID, messageID string, turnID uint64, replySummary, replyKind string) (replyMessageID, artifactRelPath, artifactType string, err error) {
+func (a *MainAgent) prepareSubAgentMailboxReply(agentID, messageID string, turnID uint64, replyBody, replyKind string) (SubAgentMailboxAckRecord, tools.ArtifactRef) {
 	messageID = strings.TrimSpace(messageID)
 	if messageID == "" {
-		return "", "", "", nil
+		return SubAgentMailboxAckRecord{}, tools.ArtifactRef{}
 	}
 	replyKind = normalizeReplyKind(replyKind)
-	replySummary = truncateMailboxReplySummary(replySummary)
-	replyMessageID = a.nextSubAgentReplyMessageID(agentID)
-	artifactID := ""
-	artifactRelPath = ""
-	artifactType = ""
-	if len(strings.TrimSpace(replySummary)) > replyArtifactPayloadThreshold {
-		artifactType = "execution_spec"
-		artifactID, artifactRelPath, _ = persistSubAgentArtifact(a.sessionDir, agentID, replyMessageID, artifactType, "MainAgent follow-up", replySummary)
+	replySummary := truncateMailboxReplySummary(replyBody)
+	replyMessageID := a.nextSubAgentReplyMessageID(agentID)
+	artifact := tools.ArtifactRef{}
+	if len(strings.TrimSpace(replyBody)) > replyArtifactPayloadThreshold {
+		artifactType := "execution_spec"
+		artifactID, artifactRelPath, _ := persistSubAgentArtifact(a.sessionDir, agentID, replyMessageID, artifactType, "MainAgent follow-up", replyBody)
+		if artifactRelPath != "" {
+			artifact = tools.ArtifactRef{ID: artifactID, RelPath: artifactRelPath, Path: artifactRelPath, Type: artifactType}
+		}
 	}
-	record := SubAgentMailboxAckRecord{
+	return SubAgentMailboxAckRecord{
 		MessageID:        messageID,
 		Outcome:          "consumed",
 		TurnID:           turnID,
@@ -231,22 +232,33 @@ func (a *MainAgent) markSubAgentMailboxConsumedWithReply(agentID, messageID stri
 		ReplyToMailboxID: messageID,
 		ReplySummary:     replySummary,
 		ReplyKind:        replyKind,
-		ArtifactID:       artifactID,
-		ArtifactRelPath:  artifactRelPath,
-		ArtifactType:     artifactType,
+		ArtifactID:       artifact.ID,
+		ArtifactRelPath:  artifact.RelPath,
+		ArtifactType:     artifact.Type,
 		AckedAt:          time.Now(),
+	}, artifact
+}
+
+func (a *MainAgent) applySubAgentMailboxReply(agentID string, record SubAgentMailboxAckRecord, artifact tools.ArtifactRef) {
+	if sub := a.subAgentByID(agentID); sub != nil {
+		sub.setReplyThread(record.ReplyMessageID, record.ReplyToMailboxID, record.ReplyKind, record.ReplySummary)
+		if artifact.RelPath != "" {
+			sub.setLastArtifact(artifact)
+		}
+		a.persistSubAgentMeta(sub)
+	}
+}
+
+func (a *MainAgent) markSubAgentMailboxConsumedWithReply(agentID, messageID string, turnID uint64, replySummary, replyKind string) (replyMessageID, artifactRelPath, artifactType string, err error) {
+	record, artifact := a.prepareSubAgentMailboxReply(agentID, messageID, turnID, replySummary, replyKind)
+	if record.MessageID == "" {
+		return "", "", "", nil
 	}
 	if err := a.appendSubAgentMailboxAck(record); err != nil {
 		return "", "", "", err
 	}
-	if sub := a.subAgentByID(agentID); sub != nil {
-		sub.setReplyThread(replyMessageID, messageID, replyKind, replySummary)
-		if artifactRelPath != "" {
-			sub.setLastArtifact(tools.ArtifactRef{ID: artifactID, RelPath: artifactRelPath, Path: artifactRelPath, Type: artifactType})
-		}
-		a.persistSubAgentMeta(sub)
-	}
-	return replyMessageID, artifactRelPath, artifactType, nil
+	a.applySubAgentMailboxReply(agentID, record, artifact)
+	return record.ReplyMessageID, artifact.RelPath, artifact.Type, nil
 }
 
 func (a *MainAgent) markSubAgentMailboxRetryable(messageID string, turnID uint64) error {

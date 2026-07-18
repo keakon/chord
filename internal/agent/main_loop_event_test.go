@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -164,6 +165,28 @@ func TestHandleEscalateQueuesFollowUpWithoutBlockingOnFullExternalQueue(t *testi
 	defer a.eventMu.Unlock()
 	if len(a.loopEvents) != 1 || a.loopEvents[0].Type != EventSubAgentMailbox {
 		t.Fatalf("loop follow-ups = %#v, want one mailbox event", a.loopEvents)
+	}
+}
+
+func TestHandleAgentIdleEscalatesWhenNudgeQueueRejects(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.started.Store(true)
+	sub := newControllableTestSubAgent(t, a, "task-idle-nudge-reject")
+	sub.queueByteLimit = 1
+
+	a.handleAgentIdle(Event{SourceID: sub.instanceID, Payload: time.Second})
+
+	a.eventMu.Lock()
+	defer a.eventMu.Unlock()
+	if len(a.loopEvents) != 1 || a.loopEvents[0].Type != EventAgentError {
+		t.Fatalf("loop follow-ups = %#v, want one agent error", a.loopEvents)
+	}
+	err, ok := a.loopEvents[0].Payload.(error)
+	if !ok || !strings.Contains(err.Error(), "idle nudge 1 could not be queued") {
+		t.Fatalf("queued payload = %#v, want idle nudge queue error", a.loopEvents[0].Payload)
+	}
+	if sub.hasPendingUserInput() {
+		t.Fatal("rejected idle nudge remained queued")
 	}
 }
 

@@ -144,11 +144,12 @@ func (s *SubAgent) canPark() bool {
 	}
 	s.inputQueueMu.Lock()
 	inputOverflow := len(s.inputOverflow)
+	reservedInputs := s.inputQueueReservedMessages
 	s.inputQueueMu.Unlock()
 	s.ctxAppendQueueMu.Lock()
 	contextOverflow := len(s.ctxAppendOverflow)
 	s.ctxAppendQueueMu.Unlock()
-	if inputOverflow > 0 || contextOverflow > 0 {
+	if inputOverflow > 0 || contextOverflow > 0 || reservedInputs > 0 {
 		return false
 	}
 	return true

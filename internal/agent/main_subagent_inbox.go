@@ -107,7 +107,14 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 	}
 	text := formatSubAgentMailboxInjectionText(&msg)
 	reactivateLive := func(live *SubAgent, messageText string, statusMsg string, allowWakeBypass bool) bool {
-		if held, _ := live.slotState(); !held {
+		input := pendingUserMessage{Content: messageText, MailboxAckID: strings.TrimSpace(msg.MessageID), Mailbox: mailboxMetadata(&msg)}
+		reservation := live.reserveUserMessage(input)
+		if reservation == nil {
+			return false
+		}
+		defer reservation.Cancel()
+		held, _ := live.slotState()
+		if !held {
 			var err error
 			if allowWakeBypass {
 				err = a.acquireWakeReactivationSlot(live)
@@ -118,13 +125,16 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 				return false
 			}
 		}
+		if !reservation.Commit() {
+			if !held {
+				a.releaseSubAgentSlot(live)
+			}
+			return false
+		}
 		live.setState(SubAgentStateRunning, statusMsg)
 		a.noteSubAgentStateTransition(live, SubAgentStateRunning)
 		a.emitActivity(live.instanceID, ActivityExecuting, "child event")
 		a.emitToTUI(AgentStatusEvent{AgentID: live.instanceID, Status: "running", Message: statusMsg})
-		if !live.InjectUserMessageWithMailboxAck(messageText, msg.MessageID, mailboxMetadata(&msg)) {
-			return false
-		}
 		a.orchestrationMetrics.recordMailboxDelivery(msg.MessageID, msg.CreatedAt)
 		live.armStartupWatchdog()
 		a.persistSubAgentMeta(live)
@@ -167,11 +177,12 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 	case SubAgentMailboxKindCompleted:
 		remaining := a.outstandingJoinChildTaskIDs(owner.taskID)
 		if owner.State() == SubAgentStateWaitingDescendant && len(remaining) == 0 && msg.AgentID != "" {
+			var transferredFrom *SubAgent
 			if child := a.subAgentByID(msg.AgentID); child != nil {
 				childHeld, _ := child.slotState()
 				ownerHeld, _ := owner.slotState()
-				if childHeld && !ownerHeld {
-					a.transferSubAgentSlot(child, owner)
+				if childHeld && !ownerHeld && a.transferSubAgentSlot(child, owner) {
+					transferredFrom = child
 				}
 			}
 			pendingComplete := owner.PendingCompleteIntent()
@@ -200,7 +211,13 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 				text = pendingText + "\n\n" + text
 				owner.clearPendingCompleteIntent()
 			}
-			return reactivateOwner(text, "Child task completed; resuming", true)
+			if reactivateOwner(text, "Child task completed; resuming", true) {
+				return true
+			}
+			if transferredFrom != nil {
+				a.transferSubAgentSlot(owner, transferredFrom)
+			}
+			return false
 		}
 		return enqueueForProcessing(text, "Child task completed; resuming")
 	case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired, SubAgentMailboxKindRiskAlert, SubAgentMailboxKindDirectionChange:

@@ -647,6 +647,177 @@ func TestNotifySubAgentDoesNotAckMailboxWhenSlotUnavailable(t *testing.T) {
 	}
 }
 
+func TestNotifySubAgentQueueRejectionLeavesWaitingWorkerAndMailboxUnchanged(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-queue-reject")
+	sub.setState(SubAgentStateWaitingMain, "need approval")
+	sub.queueByteLimit = 1
+	a.enqueueSubAgentMailbox(SubAgentMailboxMessage{
+		MessageID:   "worker-1-queue-reject",
+		AgentID:     sub.instanceID,
+		TaskID:      sub.taskID,
+		Kind:        SubAgentMailboxKindDecisionRequired,
+		Priority:    SubAgentMailboxPriorityInterrupt,
+		Summary:     "need approval",
+		RequiresAck: true,
+	})
+
+	if _, err := a.NotifySubAgent(context.Background(), sub.taskID, "continue with option D", "reply"); err == nil {
+		t.Fatal("expected NotifySubAgent to reject the oversized resume message")
+	}
+	if sub.State() != SubAgentStateWaitingMain {
+		t.Fatalf("sub.State() = %q, want waiting_main", sub.State())
+	}
+	if held, _ := sub.slotState(); held {
+		t.Fatal("queue rejection left the waiting worker holding a runtime slot")
+	}
+	if got := len(a.sem); got != 0 {
+		t.Fatalf("runtime slots in use = %d, want 0", got)
+	}
+	if got := len(a.subAgentInbox.urgent); got != 1 || a.subAgentInbox.urgent[0].MessageID != "worker-1-queue-reject" {
+		t.Fatalf("urgent inbox = %#v, want the original mailbox message", a.subAgentInbox.urgent)
+	}
+	acks, err := loadSubAgentMailboxAcks(a.sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxAcks: %v", err)
+	}
+	if _, ok := acks["worker-1-queue-reject"]; ok {
+		t.Fatal("queue rejection persisted a mailbox acknowledgement")
+	}
+}
+
+func TestOwnedMailboxQueueRejectionRollsBackReactivation(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	owner := newControllableTestSubAgent(t, a, "adhoc-owner-queue-reject")
+	owner.setState(SubAgentStateWaitingMain, "waiting")
+	owner.queueByteLimit = 1
+
+	if a.routeOwnedSubAgentMailbox(SubAgentMailboxMessage{
+		MessageID:    "child-queue-reject",
+		AgentID:      "child",
+		TaskID:       "adhoc-child",
+		OwnerAgentID: owner.instanceID,
+		OwnerTaskID:  owner.taskID,
+		Kind:         SubAgentMailboxKindDecisionRequired,
+		Summary:      "needs a decision",
+	}) {
+		t.Fatal("oversized owned mailbox unexpectedly delivered")
+	}
+	if owner.State() != SubAgentStateWaitingMain {
+		t.Fatalf("owner state = %q, want waiting_main", owner.State())
+	}
+	if held, _ := owner.slotState(); held {
+		t.Fatal("rejected owned mailbox left the owner holding a runtime slot")
+	}
+	if got := len(a.sem); got != 0 {
+		t.Fatalf("runtime slots in use = %d, want 0", got)
+	}
+}
+
+func TestManualDeliveryRoutesOwnedMailboxesBeforeManualMessage(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-drain-order")
+	a.ownedSubAgentMailboxes = map[string][]SubAgentMailboxMessage{
+		sub.instanceID: {
+			{
+				MessageID:    "child-progress-1",
+				AgentID:      "child-1",
+				TaskID:       "adhoc-child",
+				OwnerAgentID: sub.instanceID,
+				OwnerTaskID:  sub.taskID,
+				Kind:         SubAgentMailboxKindProgress,
+				Priority:     SubAgentMailboxPriorityNotify,
+				Summary:      "child halfway done",
+				Payload:      "child halfway done",
+				CreatedAt:    time.Now(),
+			},
+			{
+				MessageID:    "child-report-1",
+				AgentID:      "child-1",
+				TaskID:       "adhoc-child",
+				OwnerAgentID: sub.instanceID,
+				OwnerTaskID:  sub.taskID,
+				Kind:         SubAgentMailboxKindCompleted,
+				Priority:     SubAgentMailboxPriorityUrgent,
+				Summary:      "child finished the refactor",
+				Payload:      "child finished the refactor",
+				CreatedAt:    time.Now(),
+			},
+		},
+	}
+
+	status, _, err := a.deliverManualMessageToSubAgent(sub, "please integrate the child result", "reply")
+	if err != nil {
+		t.Fatalf("deliverManualMessageToSubAgent: %v", err)
+	}
+	if status != "queued" {
+		t.Fatalf("status = %q, want queued", status)
+	}
+	if got := len(a.ownedSubAgentMailboxes[sub.instanceID]); got != 0 {
+		t.Fatalf("owned mailboxes left undrained = %d, want 0", got)
+	}
+	ctxMsg, ok := sub.tryReceiveContextAppend()
+	if !ok || !strings.Contains(ctxMsg.Content, "child halfway done") {
+		t.Fatalf("context append = (%q, %v), want the queued progress report", ctxMsg.Content, ok)
+	}
+	first, ok := sub.tryReceiveUserInput()
+	if !ok || first.MailboxAckID != "child-report-1" || !strings.Contains(first.Content, "child finished the refactor") {
+		t.Fatalf("first queued input = (%q, ack:%q, %v), want the child completion report", first.Content, first.MailboxAckID, ok)
+	}
+	second, ok := sub.tryReceiveUserInput()
+	if !ok || !strings.Contains(second.Content, "please integrate the child result") {
+		t.Fatalf("second queued input = (%q, %v), want the manual message", second.Content, ok)
+	}
+}
+
+func TestReservedInputBlocksParking(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-reserve-park")
+	sub.setState(SubAgentStateIdle, "waiting")
+	if !sub.canPark() {
+		t.Fatal("expected an idle SubAgent with empty queues to be parkable")
+	}
+
+	reservation := sub.reserveUserMessage(pendingUserMessage{Content: "queued follow-up"})
+	if reservation == nil {
+		t.Fatal("reserveUserMessage rejected a message within limits")
+	}
+	if sub.canPark() {
+		t.Fatal("outstanding input reservation must block parking")
+	}
+
+	reservation.Cancel()
+	if !sub.canPark() {
+		t.Fatal("cancelled reservation should make the SubAgent parkable again")
+	}
+}
+
+func TestReservationCommitFailsAfterSubAgentShutdown(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-reserve-shutdown")
+
+	reservation := sub.reserveUserMessage(pendingUserMessage{Content: "late delivery"})
+	if reservation == nil {
+		t.Fatal("reserveUserMessage rejected a message within limits")
+	}
+	sub.cancel()
+
+	if reservation.Commit() {
+		t.Fatal("Commit should fail once the SubAgent context is cancelled")
+	}
+	if sub.hasPendingUserInput() {
+		t.Fatal("failed commit must not leave queued input or reservations behind")
+	}
+	sub.inputQueueMu.Lock()
+	reserved := sub.inputQueueReservedMessages
+	reservedBytes := sub.inputQueueReservedBytes
+	queueBytes := sub.inputQueueBytes
+	sub.inputQueueMu.Unlock()
+	if reserved != 0 || reservedBytes != 0 || queueBytes != 0 {
+		t.Fatalf("queue accounting after failed commit = reserved:%d reservedBytes:%d queueBytes:%d, want zeros", reserved, reservedBytes, queueBytes)
+	}
+}
+
 func TestCreateSubAgentFromSubAgentContextSetsOwnerAndDepth(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
@@ -1431,6 +1602,47 @@ func TestOwnedCompletedMailboxReactivatesWaitingDescendantParent(t *testing.T) {
 	}
 }
 
+func TestOwnedCompletedMailboxQueueRejectionReturnsTransferredSlot(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	parent := newControllableTestSubAgent(t, a, "adhoc-parent-transfer-reject")
+	parent.instanceID = "worker-parent-transfer-reject"
+	parent.setState(SubAgentStateWaitingDescendant, "waiting for child")
+	parent.queueByteLimit = 1
+	child := newControllableTestSubAgent(t, a, "adhoc-child-transfer-reject")
+	child.instanceID = "worker-child-transfer-reject"
+	child.ownerAgentID = parent.instanceID
+	child.ownerTaskID = parent.taskID
+	child.joinToOwner = true
+	child.setState(SubAgentStateCompleted, "done")
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[parent.instanceID] = parent
+	a.subs.subAgents[child.instanceID] = child
+	a.subs.taskRecords[child.taskID] = buildTaskRecordFromSub(child, nil, "task completed", 0, time.Now())
+	a.subs.mu.Unlock()
+	if err := a.acquireSubAgentSlot(child); err != nil {
+		t.Fatalf("acquire child slot: %v", err)
+	}
+
+	if a.routeOwnedSubAgentMailbox(SubAgentMailboxMessage{
+		MessageID:    "child-complete-transfer-reject",
+		AgentID:      child.instanceID,
+		TaskID:       child.taskID,
+		OwnerAgentID: parent.instanceID,
+		OwnerTaskID:  parent.taskID,
+		Kind:         SubAgentMailboxKindCompleted,
+		Summary:      "child completed with a payload too large for the parent queue",
+	}) {
+		t.Fatal("oversized child completion unexpectedly delivered")
+	}
+	if held, _ := parent.slotState(); held {
+		t.Fatal("parent retained the transferred slot after queue rejection")
+	}
+	if held, _ := child.slotState(); !held {
+		t.Fatal("child did not recover the slot after parent queue rejection")
+	}
+}
+
 func TestWaitingDescendantDirectOwnerResumeReacquiresSemaphore(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
@@ -2059,6 +2271,66 @@ func TestSendMessageToCompletedTaskRehydratesParkedWorker(t *testing.T) {
 	}
 	if !restored.hasActiveTurn() {
 		t.Fatal("rehydrated worker did not consume the delivered message and create a turn")
+	}
+}
+
+func TestRehydratePreservesConfiguredOrchestrationAndWorkDir(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{Orchestration: config.OrchestrationConfig{
+		SubAgentQueueMessages: 7,
+		SubAgentQueueBytes:    12345,
+		SubAgentCompactUsage:  0.65,
+	}}
+	wantWorkDir := filepath.Join(a.projectRoot, "workspace")
+	a.cachedWorkDir = wantWorkDir
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"restorer": {
+			Name:   "restorer",
+			Mode:   config.AgentModeSubAgent,
+			Models: map[string][]string{"default": {"test/test-model"}},
+		},
+	})
+	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+	record := &DurableTaskRecord{
+		TaskID:           "adhoc-rehydrate-config",
+		AgentDefName:     "restorer",
+		TaskDesc:         "resume with configured limits",
+		State:            string(SubAgentStateCompleted),
+		ResumePolicy:     taskResumePolicyNotify,
+		LatestInstanceID: "restorer-old",
+		InstanceHistory:  []string{"restorer-old"},
+		RuntimeParked:    true,
+	}
+	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
+
+	sub, _, err := a.rehydrateTask(record)
+	if err != nil {
+		t.Fatalf("rehydrateTask: %v", err)
+	}
+	if sub.queueMessageLimit != 7 || sub.queueByteLimit != 12345 || sub.compactUsage != 0.65 {
+		t.Fatalf("rehydrated orchestration = messages:%d bytes:%d compact:%v", sub.queueMessageLimit, sub.queueByteLimit, sub.compactUsage)
+	}
+	if sub.workDir != wantWorkDir {
+		t.Fatalf("rehydrated workDir = %q, want %q", sub.workDir, wantWorkDir)
+	}
+}
+
+func TestCreateSubAgentUsesCachedWorkDir(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 1)
+	wantWorkDir := filepath.Join(a.projectRoot, "workspace")
+	a.cachedWorkDir = wantWorkDir
+
+	handle, err := a.CreateSubAgent(context.Background(), "use stable workspace", "worker", "", "", tools.WriteScope{})
+	if err != nil {
+		t.Fatalf("CreateSubAgent: %v", err)
+	}
+	sub := a.subAgentByTaskID(handle.TaskID)
+	if sub == nil {
+		t.Fatal("expected live SubAgent")
+	}
+	if sub.workDir != wantWorkDir {
+		t.Fatalf("created workDir = %q, want %q", sub.workDir, wantWorkDir)
 	}
 }
 

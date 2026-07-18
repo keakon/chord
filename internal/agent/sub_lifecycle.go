@@ -112,7 +112,7 @@ func (s *SubAgent) enqueueUserMessage(input pendingUserMessage) bool {
 	defer s.inputQueueMu.Unlock()
 	inputBytes := pendingUserMessageBytes(input)
 	messageLimit, byteLimit := s.effectiveQueueLimits()
-	if len(s.inputCh)+len(s.inputOverflow) >= messageLimit || s.inputQueueBytes+inputBytes > byteLimit {
+	if len(s.inputCh)+len(s.inputOverflow)+s.inputQueueReservedMessages >= messageLimit || s.inputQueueBytes+s.inputQueueReservedBytes+inputBytes > byteLimit {
 		if s.parent != nil {
 			s.parent.orchestrationMetrics.subAgentQueueRejected.Add(1)
 		}
@@ -135,6 +135,80 @@ func (s *SubAgent) enqueueUserMessage(input pendingUserMessage) bool {
 		s.inputOverflow = append(s.inputOverflow, input)
 		s.signalWake()
 		return true
+	}
+}
+
+type subAgentInputReservation struct {
+	sub   *SubAgent
+	input pendingUserMessage
+	bytes int
+	done  bool
+}
+
+func (s *SubAgent) reserveUserMessage(input pendingUserMessage) *subAgentInputReservation {
+	if s == nil {
+		return nil
+	}
+	s.inputQueueMu.Lock()
+	defer s.inputQueueMu.Unlock()
+	inputBytes := pendingUserMessageBytes(input)
+	messageLimit, byteLimit := s.effectiveQueueLimits()
+	if len(s.inputCh)+len(s.inputOverflow)+s.inputQueueReservedMessages >= messageLimit || s.inputQueueBytes+s.inputQueueReservedBytes+inputBytes > byteLimit {
+		if s.parent != nil {
+			s.parent.orchestrationMetrics.subAgentQueueRejected.Add(1)
+		}
+		return nil
+	}
+	s.inputQueueReservedMessages++
+	s.inputQueueReservedBytes += inputBytes
+	return &subAgentInputReservation{sub: s, input: input, bytes: inputBytes}
+}
+
+func (r *subAgentInputReservation) Commit() bool {
+	if r == nil || r.sub == nil || r.done {
+		return false
+	}
+	s := r.sub
+	s.inputQueueMu.Lock()
+	defer s.inputQueueMu.Unlock()
+	r.done = true
+	s.inputQueueReservedMessages--
+	s.inputQueueReservedBytes -= r.bytes
+	if s.parentCtx.Err() != nil {
+		return false
+	}
+	s.inputQueueBytes += r.bytes
+	if len(s.inputOverflow) > 0 {
+		s.inputOverflow = append(s.inputOverflow, r.input)
+		s.signalWake()
+		return true
+	}
+	select {
+	case s.inputCh <- r.input:
+	default:
+		s.inputOverflow = append(s.inputOverflow, r.input)
+	}
+	s.signalWake()
+	return true
+}
+
+func (r *subAgentInputReservation) Cancel() {
+	if r == nil || r.sub == nil || r.done {
+		return
+	}
+	s := r.sub
+	s.inputQueueMu.Lock()
+	defer s.inputQueueMu.Unlock()
+	if r.done {
+		return
+	}
+	r.done = true
+	if s.inputQueueReservedMessages > 0 {
+		s.inputQueueReservedMessages--
+	}
+	s.inputQueueReservedBytes -= r.bytes
+	if s.inputQueueReservedBytes < 0 {
+		s.inputQueueReservedBytes = 0
 	}
 }
 
@@ -236,7 +310,7 @@ func (s *SubAgent) hasPendingUserInput() bool {
 	}
 	s.inputQueueMu.Lock()
 	defer s.inputQueueMu.Unlock()
-	return len(s.inputCh) > 0 || len(s.inputOverflow) > 0
+	return len(s.inputCh) > 0 || len(s.inputOverflow) > 0 || s.inputQueueReservedMessages > 0
 }
 
 func (s *SubAgent) removeInitialUserMessage() {

@@ -119,25 +119,27 @@ type SubAgent struct {
 	nextTurnID uint64
 
 	// Event channels (buffered to avoid producer blocking).
-	inputCh           chan pendingUserMessage // buffered user messages from main (cap = inputChanCap)
-	ctxAppendCh       chan message.Message    // context-only user lines (e.g. !shell output); no LLM call
-	llmCh             chan *llmResult         // cap=1, LLM responses
-	toolCh            chan *toolResult        // cap=8, tool results
-	continueCh        chan continueMsg        // cap=1; signals ContinueFromContext/cancel
-	wakeCh            chan struct{}           // cap=1; forces the loop to re-evaluate state-gated channels
-	inputQueueMu      sync.Mutex
-	inputOverflow     []pendingUserMessage
-	inputQueueBytes   int
-	ctxAppendQueueMu  sync.Mutex
-	ctxAppendOverflow []message.Message
-	ctxAppendBytes    int
-	queueMessageLimit int
-	queueByteLimit    int
-	compactUsage      float64
-	reductionMu       sync.RWMutex
-	reductionStats    ContextReductionStats
-	promotedToolQueue []*toolResult // event-loop-owned FIFO; avoids sending results back into the active loop
-	pendingContinue   *continueMsg  // event-loop-owned restart deferred until the current LLM request exits
+	inputCh                    chan pendingUserMessage // buffered user messages from main (cap = inputChanCap)
+	ctxAppendCh                chan message.Message    // context-only user lines (e.g. !shell output); no LLM call
+	llmCh                      chan *llmResult         // cap=1, LLM responses
+	toolCh                     chan *toolResult        // cap=8, tool results
+	continueCh                 chan continueMsg        // cap=1; signals ContinueFromContext/cancel
+	wakeCh                     chan struct{}           // cap=1; forces the loop to re-evaluate state-gated channels
+	inputQueueMu               sync.Mutex
+	inputOverflow              []pendingUserMessage
+	inputQueueBytes            int
+	inputQueueReservedMessages int
+	inputQueueReservedBytes    int
+	ctxAppendQueueMu           sync.Mutex
+	ctxAppendOverflow          []message.Message
+	ctxAppendBytes             int
+	queueMessageLimit          int
+	queueByteLimit             int
+	compactUsage               float64
+	reductionMu                sync.RWMutex
+	reductionStats             ContextReductionStats
+	promotedToolQueue          []*toolResult // event-loop-owned FIFO; avoids sending results back into the active loop
+	pendingContinue            *continueMsg  // event-loop-owned restart deferred until the current LLM request exits
 
 	// Idle timeout: starts when LLM returns pure text (no tool_calls).
 	// MainAgent auto-intervenes on timeout.

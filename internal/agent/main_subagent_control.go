@@ -320,26 +320,94 @@ func (a *MainAgent) deliverManualMessageToSubAgent(sub *SubAgent, message, kind 
 	return a.deliverMessageToSubAgentWithMode(sub, message, kind, true)
 }
 
+// subAgentDeliveryPrep carries the state prepared under sub.lifecycleMu that
+// the unlocked delivery tail (owned-mailbox drain + commit + bookkeeping)
+// still needs.
+type subAgentDeliveryPrep struct {
+	reservation     *subAgentInputReservation
+	replyRecord     SubAgentMailboxAckRecord
+	replyArtifact   tools.ArtifactRef
+	replyMessageID  string
+	replySummary    string
+	replyKind       string
+	needsResume     bool
+	previousState   SubAgentState
+	previousSummary string
+	drainOwned      bool
+	status          string
+	statusMessage   string
+}
+
 func (a *MainAgent) deliverMessageToSubAgentWithMode(sub *SubAgent, message, kind string, manual bool) (string, string, error) {
 	if sub == nil {
 		return "", "", fmt.Errorf("missing worker")
 	}
+	prep, err := a.prepareSubAgentDelivery(sub, message, kind, manual)
+	if err != nil {
+		return "", "", err
+	}
+	defer prep.reservation.Cancel()
+
+	// Drain owned child mailboxes before the manual message becomes visible so
+	// the worker sees child reports first and its turn-start context drain
+	// cannot race ahead of this routing. This must run outside sub.lifecycleMu
+	// because routing re-enters the owner's lifecycle lock; parking stays
+	// excluded because the outstanding reservation blocks canPark.
+	if prep.drainOwned {
+		a.drainOwnedSubAgentMailboxes(sub.instanceID)
+	}
+	if !prep.reservation.Commit() {
+		if prep.needsResume {
+			sub.setState(prep.previousState, prep.previousSummary)
+			a.noteSubAgentStateTransition(sub, prep.previousState)
+			a.releaseSubAgentSlot(sub)
+		}
+		return "", "", fmt.Errorf("SubAgent %s is shutting down; message not delivered", sub.instanceID)
+	}
+	if prep.replyRecord.MessageID != "" {
+		a.applySubAgentMailboxReply(sub.instanceID, prep.replyRecord, prep.replyArtifact)
+	} else {
+		sub.setReplyThread(prep.replyMessageID, "", prep.replyKind, prep.replySummary)
+		if prep.replyArtifact.RelPath != "" {
+			sub.setLastArtifact(prep.replyArtifact)
+		}
+	}
+	if prep.needsResume {
+		sub.armStartupWatchdog()
+	}
+
+	a.saveRecoverySnapshot()
+	a.persistSubAgentMeta(sub)
+	a.syncTaskRecordFromSub(sub, "")
+	return prep.status, prep.statusMessage, nil
+}
+
+// prepareSubAgentDelivery performs the lifecycleMu-guarded half of a delivery:
+// liveness check, slot acquisition, mailbox targeting, reply preparation, input
+// reservation, ack persistence, and reactivation. On success the caller owns
+// the returned reservation and must Commit or Cancel it.
+func (a *MainAgent) prepareSubAgentDelivery(sub *SubAgent, message, kind string, manual bool) (*subAgentDeliveryPrep, error) {
 	sub.lifecycleMu.Lock()
 	defer sub.lifecycleMu.Unlock()
 	if !a.subs.withSubAgent(sub.instanceID, func(current *SubAgent) bool { return current == sub }) {
-		return "", "", fmt.Errorf("SubAgent %s is no longer live; retry through task %s", sub.instanceID, sub.taskID)
+		return nil, fmt.Errorf("SubAgent %s is no longer live; retry through task %s", sub.instanceID, sub.taskID)
 	}
 	state := sub.State()
 
-	status := "queued"
-	statusMessage := "message delivered to running worker"
+	prep := &subAgentDeliveryPrep{
+		replyKind:       normalizeReplyKind(kind),
+		needsResume:     state != SubAgentStateRunning,
+		previousState:   state,
+		previousSummary: sub.LastSummary(),
+		drainOwned:      manual && (len(a.ownedSubAgentMailboxes[sub.instanceID]) > 0 || len(a.ownedMailboxSpool[sub.instanceID]) > 0),
+		status:          "queued",
+		statusMessage:   "message delivered to running worker",
+	}
 	payload := normalizeSubAgentMessage(kind, message)
-	replyKind := normalizeReplyKind(kind)
-	needsResume := state != SubAgentStateRunning
 
-	if needsResume {
+	if prep.needsResume {
 		if err := a.acquireSubAgentSlot(sub); err != nil {
-			return "", "", err
+			return nil, err
 		}
 	}
 	if manual {
@@ -351,63 +419,61 @@ func (a *MainAgent) deliverMessageToSubAgentWithMode(sub *SubAgent, message, kin
 	if targetMailbox != nil {
 		if !a.ensureSubAgentMailboxPersisted(targetMailbox) {
 			a.requeueSubAgentMailboxInMemory(*targetMailbox)
-			if needsResume {
+			if prep.needsResume {
 				a.releaseSubAgentSlot(sub)
 			}
-			return "", "", fmt.Errorf("persist target mailbox before reply acknowledgement")
+			return nil, fmt.Errorf("persist target mailbox before reply acknowledgement")
 		}
 		targetMailboxID = strings.TrimSpace(targetMailbox.MessageID)
 	}
 
 	if targetMailboxID != "" {
-		_, artifactRelPath, _, err := a.markSubAgentMailboxConsumedWithReply(sub.instanceID, targetMailboxID, 0, message, replyKind)
-		if err != nil {
+		prep.replyRecord, prep.replyArtifact = a.prepareSubAgentMailboxReply(sub.instanceID, targetMailboxID, 0, message, prep.replyKind)
+		if prep.replyArtifact.RelPath != "" {
+			payload = fmt.Sprintf("[%s] Summary: %s\nDetailed instruction artifact: %s", prep.replyKind, truncateMailboxReplySummary(message), prep.replyArtifact.RelPath)
+		}
+	} else {
+		prep.replyMessageID = a.nextSubAgentReplyMessageID(sub.instanceID)
+		prep.replySummary = truncateMailboxReplySummary(message)
+		if len(strings.TrimSpace(message)) > replyArtifactPayloadThreshold {
+			artifactType := "execution_spec"
+			artifactID, artifactRelPath, err := persistSubAgentArtifact(a.sessionDir, sub.instanceID, prep.replyMessageID, artifactType, "MainAgent follow-up", message)
+			if err == nil && artifactRelPath != "" {
+				prep.replyArtifact = tools.ArtifactRef{ID: artifactID, RelPath: artifactRelPath, Path: artifactRelPath, Type: artifactType}
+				payload = fmt.Sprintf("[%s] Summary: %s\nDetailed instruction artifact: %s", prep.replyKind, truncateMailboxReplySummary(message), artifactRelPath)
+			}
+		}
+	}
+	prep.reservation = sub.reserveUserMessage(pendingUserMessage{Content: payload, FromUser: manual, DrainContextAppends: prep.drainOwned})
+	if prep.reservation == nil {
+		if targetMailbox != nil {
+			a.requeueSubAgentMailboxInMemory(*targetMailbox)
+		}
+		if prep.needsResume {
+			a.releaseSubAgentSlot(sub)
+		}
+		return nil, fmt.Errorf("SubAgent %s rejected the message during resume", sub.instanceID)
+	}
+
+	if prep.replyRecord.MessageID != "" {
+		if err := a.appendSubAgentMailboxAck(prep.replyRecord); err != nil {
+			prep.reservation.Cancel()
 			if targetMailbox != nil {
 				a.requeueSubAgentMailboxInMemory(*targetMailbox)
 			}
-			if needsResume {
+			if prep.needsResume {
 				a.releaseSubAgentSlot(sub)
 			}
-			return "", "", fmt.Errorf("persist mailbox reply acknowledgement: %w", err)
+			return nil, fmt.Errorf("persist mailbox reply acknowledgement: %w", err)
 		}
-		if artifactRelPath != "" {
-			payload = fmt.Sprintf("[%s] Summary: %s\nDetailed instruction artifact: %s", replyKind, truncateMailboxReplySummary(message), artifactRelPath)
-		}
-	} else {
-		replyMessageID := a.nextSubAgentReplyMessageID(sub.instanceID)
-		if len(strings.TrimSpace(message)) > replyArtifactPayloadThreshold {
-			artifactType := "execution_spec"
-			artifactID, artifactRelPath, err := persistSubAgentArtifact(a.sessionDir, sub.instanceID, replyMessageID, artifactType, "MainAgent follow-up", message)
-			if err == nil && artifactRelPath != "" {
-				sub.setLastArtifact(tools.ArtifactRef{ID: artifactID, RelPath: artifactRelPath, Path: artifactRelPath, Type: artifactType})
-				payload = fmt.Sprintf("[%s] Summary: %s\nDetailed instruction artifact: %s", replyKind, truncateMailboxReplySummary(message), artifactRelPath)
-			}
-		}
-		sub.setReplyThread(replyMessageID, "", replyKind, truncateMailboxReplySummary(message))
 	}
 
-	if needsResume {
+	if prep.needsResume {
 		a.markSubAgentReactivated(sub, message)
-		status = "resumed"
-		statusMessage = "message delivered and worker resumed"
+		prep.status = "resumed"
+		prep.statusMessage = "message delivered and worker resumed"
 	}
-	if manual {
-		if !sub.InjectManualUserMessage(payload, a.drainOwnedSubAgentMailboxes(sub.instanceID)) {
-			return "", "", fmt.Errorf("SubAgent %s rejected the message during resume", sub.instanceID)
-		}
-	} else {
-		if !sub.InjectUserMessage(payload) {
-			return "", "", fmt.Errorf("SubAgent %s rejected the message during resume", sub.instanceID)
-		}
-	}
-	if needsResume {
-		sub.armStartupWatchdog()
-	}
-
-	a.saveRecoverySnapshot()
-	a.persistSubAgentMeta(sub)
-	a.syncTaskRecordFromSub(sub, "")
-	return status, statusMessage, nil
+	return prep, nil
 }
 
 func (a *MainAgent) getOrRehydrateTask(record *DurableTaskRecord) (*SubAgent, string, bool, error) {
@@ -460,7 +526,6 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 
 	subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
 	a.applyServiceTierToClient(subLLMClient)
-	agentRuleset := a.buildSubAgentRuleset(agentDef)
 	var extraMCPTools []tools.Tool
 	if len(agentDef.MCP) > 0 {
 		extraMCPTools, err = a.getOrCreateAgentMCP(agentDef.Name, agentDef.MCP)
@@ -470,40 +535,17 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	}
 	instanceID := NextInstanceID(agentDef.Name)
 	ctx, cancel := context.WithCancel(a.parentCtx)
-	workDir := strings.TrimSpace(a.cachedWorkDir)
-	if workDir == "" {
-		workDir, _ = os.Getwd()
-	}
-	sub = NewSubAgent(SubAgentConfig{
-		InstanceID:    instanceID,
-		TaskID:        record.TaskID,
-		AgentDefName:  agentDef.Name,
-		TaskDesc:      record.TaskDesc,
-		PlanTaskRef:   record.PlanTaskRef,
-		SemanticKey:   record.SemanticTaskKey,
-		WriteScope:    record.ExpectedWriteScope,
-		OwnerAgentID:  record.OwnerAgentID,
-		OwnerTaskID:   record.OwnerTaskID,
-		Depth:         record.Depth,
-		JoinToOwner:   record.JoinToOwner,
-		Delegation:    agentDef.Delegation,
-		Color:         agentDef.Color,
-		SystemPrompt:  agentDef.SystemPrompt,
-		LLMClient:     subLLMClient,
-		Recovery:      a.recovery,
-		Parent:        a,
-		ParentCtx:     ctx,
-		Cancel:        cancel,
-		BaseTools:     a.tools,
-		ExtraMCPTools: extraMCPTools,
-		Ruleset:       agentRuleset,
-		WorkDir:       workDir,
-		VenvPath:      a.cachedVenvPath,
-		SessionDir:    a.sessionDir,
-		AgentsMD:      a.cachedAgentsMDSnapshot(),
-		Skills:        a.loadedSkillsSnapshot(),
-		ModelName:     a.ModelName(),
-	})
+	subCfg := a.baseSubAgentConfig(agentDef, instanceID, subLLMClient, ctx, cancel, extraMCPTools)
+	subCfg.TaskID = record.TaskID
+	subCfg.TaskDesc = record.TaskDesc
+	subCfg.PlanTaskRef = record.PlanTaskRef
+	subCfg.SemanticKey = record.SemanticTaskKey
+	subCfg.WriteScope = record.ExpectedWriteScope
+	subCfg.OwnerAgentID = record.OwnerAgentID
+	subCfg.OwnerTaskID = record.OwnerTaskID
+	subCfg.Depth = record.Depth
+	subCfg.JoinToOwner = record.JoinToOwner
+	sub = NewSubAgent(subCfg)
 	sub.RestoreMessages(msgs)
 	state := SubAgentState(strings.TrimSpace(record.State))
 	if state == "" || state == SubAgentStateRunning {
