@@ -26,6 +26,11 @@ func (b *Block) renderError(width int) []string {
 	if len(wrapped) == 0 {
 		lines = append(lines, ErrorStyle.Render("✗ unknown error"))
 	}
+	if b.errorHint != "" {
+		// The error panel holds the structured details (provider, model, masked
+		// key, status code, retry history) this card intentionally omits.
+		lines = append(lines, "", DimStyle.Render(b.errorHint))
+	}
 
 	cardBg := currentTheme.ErrorCardBg
 	lines = preserveCardBg(lines, cardBg)

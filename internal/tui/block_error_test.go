@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+	tea "github.com/keakon/bubbletea/v2"
 	uv "github.com/keakon/ultraviolet"
 )
 
@@ -84,5 +85,39 @@ func TestRenderErrorCardMessageLineKeepsBackgroundOnTrailingPadding(t *testing.T
 	}
 	if trailingSpaces == 0 {
 		t.Fatal("expected trailing padding spaces after error message")
+	}
+}
+
+func TestErrorCardUsesConfiguredNormalModeBinding(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	block := &Block{ID: 1, Type: BlockError, Content: "boom"}
+	m.viewport.AppendBlock(block)
+
+	initial := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	if !strings.Contains(initial, "normal mode · ctrl+e: error details") {
+		t.Fatalf("default error card hint missing: %q", initial)
+	}
+
+	km := KeyMapFromConfig(map[string][]string{"error_panel": {"alt+e"}})
+	m.SetKeyMap(km)
+
+	configured := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	if !strings.Contains(configured, "normal mode · alt+e: error details") || strings.Contains(configured, "ctrl+e: error details") {
+		t.Fatalf("error card hint did not follow configured binding: %q", configured)
+	}
+
+	m.mode = ModeInsert
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'e', Mod: tea.ModAlt}))
+	if m.mode != ModeInsert {
+		t.Fatalf("normal-only error binding changed Insert mode to %v", m.mode)
+	}
+
+	m.mode = ModeNormal
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'e', Mod: tea.ModAlt}))
+	if m.mode != ModeErrorPanel {
+		t.Fatalf("configured normal binding left mode at %v, want %v", m.mode, ModeErrorPanel)
+	}
+	if m.errorPanel.prevMode != ModeNormal {
+		t.Fatalf("error panel previous mode = %v, want %v", m.errorPanel.prevMode, ModeNormal)
 	}
 }

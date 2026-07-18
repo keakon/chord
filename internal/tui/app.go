@@ -500,6 +500,7 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		renderCacheState:           renderCacheState{statusBarAgentSnapshotDirty: true},
 	}
 	m.viewport.SetWorkingDir(wd)
+	m.viewport.SetErrorDetailsHint(errorDetailsHint(m.keyMap))
 	if a != nil {
 		pending, sessionID := a.StartupResumeStatus()
 		if pending {
@@ -577,6 +578,7 @@ func (m *Model) SetDesktopNotification(enabled bool, out io.Writer) {
 func (m *Model) SetKeyMap(km KeyMap) {
 	m.keyMap = km
 	m.input.SyncNewlineKeys(km.InsertNewline)
+	m.viewport.SetErrorDetailsHint(errorDetailsHint(km))
 }
 
 // ConfirmCh returns the send-only channel for submitting confirmation

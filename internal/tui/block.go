@@ -153,6 +153,7 @@ type Block struct {
 	// displayWorkingDir is UI-only context used to shorten absolute tool paths
 	// for rendering. It does not affect tool execution or persisted arguments.
 	displayWorkingDir string
+	errorHint         string
 
 	// MsgIndex is the index of the corresponding message in the agent's message
 	// list. Set for transcript-backed blocks; -1 for dynamically appended blocks

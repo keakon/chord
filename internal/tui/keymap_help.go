@@ -28,6 +28,13 @@ func keysDisplay(keys []string) string {
 	return strings.Join(keys, " / ")
 }
 
+func errorDetailsHint(km KeyMap) string {
+	if keys := keysDisplay(km.ErrorPanel); keys != "" {
+		return "normal mode · " + keys + ": error details"
+	}
+	return ""
+}
+
 func keyBindingContains(keys []string, target string) bool {
 	return slices.Contains(keys, target)
 }

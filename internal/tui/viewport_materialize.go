@@ -5,6 +5,7 @@ func (v *Viewport) prepareBlock(block *Block) {
 		return
 	}
 	block.displayWorkingDir = v.workingDir
+	block.errorHint = v.errorHint
 	block.spillStore = v.spill
 	block.spillRecover = v.recoverSpilledBlock
 	if block.spillLineCounts == nil {

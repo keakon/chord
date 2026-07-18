@@ -18,6 +18,7 @@ type Viewport struct {
 	offset         int
 	height         int
 	width          int
+	errorHint      string
 	sticky         bool
 	totalLines     int
 	lastBlockSpan  int
@@ -80,6 +81,27 @@ func (v *Viewport) SetWorkingDir(path string) {
 	}
 	v.bumpRenderVersion()
 	v.recalcTotalLines()
+}
+
+func (v *Viewport) SetErrorDetailsHint(hint string) {
+	if v == nil || v.errorHint == hint {
+		return
+	}
+	v.errorHint = hint
+	for _, block := range v.blocks {
+		if block == nil || block.Type != BlockError {
+			continue
+		}
+		block.errorHint = hint
+		block.InvalidateCache()
+	}
+	v.bumpRenderVersion()
+	v.recalcTotalLines()
+	if v.sticky {
+		v.scrollToEnd()
+	} else {
+		v.clampOffset()
+	}
 }
 
 func (v *Viewport) HasUserLocalShellPending() bool {
