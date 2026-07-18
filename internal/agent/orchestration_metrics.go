@@ -29,19 +29,20 @@ type metricQueueEntry struct {
 }
 
 type orchestrationRuntimeMetrics struct {
-	admissionWaitCount atomic.Uint64
-	admissionWaitNanos atomic.Uint64
-	scopeConflicts     atomic.Uint64
-	rehydrates         atomic.Uint64
-	parks              atomic.Uint64
-	parkedSamples      atomic.Uint64
-	parkedNanos        atomic.Uint64
-	mailboxDeliveries  atomic.Uint64
-	mailboxDeliveryNs  atomic.Uint64
-	mailboxAcks        atomic.Uint64
-	mailboxAckNs       atomic.Uint64
-	mailboxEvictions   atomic.Uint64
-	parkedEvictions    atomic.Uint64
+	admissionWaitCount  atomic.Uint64
+	admissionWaitNanos  atomic.Uint64
+	scopeConflicts      atomic.Uint64
+	rehydrates          atomic.Uint64
+	parks               atomic.Uint64
+	parkedSamples       atomic.Uint64
+	parkedNanos         atomic.Uint64
+	mailboxDeliveries   atomic.Uint64
+	mailboxDeliveryNs   atomic.Uint64
+	mailboxAcks         atomic.Uint64
+	mailboxAckNs        atomic.Uint64
+	mailboxEvictions    atomic.Uint64
+	parkedEvictions     atomic.Uint64
+	runtimeBypassGrants atomic.Uint64
 
 	mailboxMu sync.Mutex
 	mailboxes map[string]mailboxMetricState
@@ -60,9 +61,18 @@ type orchestrationRuntimeMetrics struct {
 type OrchestrationStats struct {
 	EventQueue EventQueueStats
 
-	SemaphoreCapacity    int
-	SemaphoreInUse       int
-	SemaphoreUtilization float64
+	SemaphoreCapacity     int
+	SemaphoreInUse        int
+	SemaphoreUtilization  float64
+	BorrowedCapacity      int
+	BorrowedInUse         int
+	LLMRequestCapacity    int
+	LLMRequestsActive     int
+	LLMRequestsQueued     int
+	ProviderRequests      map[string]int
+	ModelRequests         map[string]int
+	WorkspaceLeasesActive int
+	WorkspaceLeasesQueued int
 
 	TasksTotal      uint64
 	TasksByState    map[string]uint64
@@ -86,6 +96,7 @@ type OrchestrationStats struct {
 	MailboxAckLatencyAverage      time.Duration
 	MailboxTrackingEvictions      uint64
 	ParkedTrackingEvictions       uint64
+	RuntimeBypassGrants           uint64
 }
 
 func averageDuration(total time.Duration, count uint64) time.Duration {
@@ -340,11 +351,27 @@ func (a *MainAgent) OrchestrationStats() OrchestrationStats {
 	deliveryTotal := time.Duration(metrics.mailboxDeliveryNs.Load())
 	ackCount := metrics.mailboxAcks.Load()
 	ackTotal := time.Duration(metrics.mailboxAckNs.Load())
+	governorSnapshot := resourceGovernorSnapshot{}
+	if a.governor != nil {
+		governorSnapshot = a.governor.snapshot()
+	} else {
+		governorSnapshot.RuntimeCapacity = cap(a.sem)
+		governorSnapshot.RuntimeInUse = len(a.sem)
+	}
 
 	stats := OrchestrationStats{
 		EventQueue:                    a.EventQueueStats(),
-		SemaphoreCapacity:             cap(a.sem),
-		SemaphoreInUse:                len(a.sem),
+		SemaphoreCapacity:             governorSnapshot.RuntimeCapacity,
+		SemaphoreInUse:                governorSnapshot.RuntimeInUse,
+		BorrowedCapacity:              governorSnapshot.BorrowedLimit,
+		BorrowedInUse:                 governorSnapshot.BorrowedInUse,
+		LLMRequestCapacity:            governorSnapshot.LLMLimit,
+		LLMRequestsActive:             governorSnapshot.LLMActive,
+		LLMRequestsQueued:             governorSnapshot.LLMQueued,
+		ProviderRequests:              governorSnapshot.ProviderActive,
+		ModelRequests:                 governorSnapshot.ModelActive,
+		WorkspaceLeasesActive:         governorSnapshot.LeaseActive,
+		WorkspaceLeasesQueued:         governorSnapshot.LeaseQueued,
 		AdmissionWaitCount:            admissionCount,
 		AdmissionWaitTotal:            admissionTotal,
 		AdmissionWaitAverage:          averageDuration(admissionTotal, admissionCount),
@@ -362,6 +389,7 @@ func (a *MainAgent) OrchestrationStats() OrchestrationStats {
 		MailboxAckLatencyAverage:      averageDuration(ackTotal, ackCount),
 		MailboxTrackingEvictions:      metrics.mailboxEvictions.Load(),
 		ParkedTrackingEvictions:       metrics.parkedEvictions.Load(),
+		RuntimeBypassGrants:           metrics.runtimeBypassGrants.Load(),
 		TasksByState:                  make(map[string]uint64),
 		TerminalReasons:               make(map[string]uint64),
 	}

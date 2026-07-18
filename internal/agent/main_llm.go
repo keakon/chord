@@ -603,6 +603,11 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		}
 	}
 
+	releaseLLM, err := a.governor.acquireLLM(ctx, selectedRef)
+	if err != nil {
+		return nil, fmt.Errorf("acquire LLM request capacity: %w", err)
+	}
+	defer releaseLLM()
 	resp, err := llmClient.CompleteStream(ctx, messages, toolDefs, callback)
 	completeStreamReturnedAt := time.Now()
 	a.recordToolTraceCallLLMReturned(turn, completeStreamReturnedAt)

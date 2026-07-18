@@ -78,6 +78,23 @@ func ConcurrencyConflict(a, b ConcurrencyPolicy) bool {
 	return a.Mode == ConcurrencyModeWrite || b.Mode == ConcurrencyModeWrite
 }
 
+// WorkspaceLeaseConflict reports whether two tool executions contend for the
+// same workspace resource. Unlike ConcurrencyConflict — which batches calls
+// inside a single turn and treats exclusive mode as conflicting with
+// everything — this cross-agent variant scopes exclusivity to the declared
+// resource: `process:shell` serializes against other shells but not against
+// reads or writes of unrelated files, and a `workspace` resource still
+// overlaps everything. Tools whose default policy names only `tool:<name>`
+// therefore serialize per tool instead of freezing every other agent.
+func WorkspaceLeaseConflict(a, b ConcurrencyPolicy) bool {
+	a = normalizeConcurrencyPolicy("", a)
+	b = normalizeConcurrencyPolicy("", b)
+	if !resourceOverlap(a.Resource, b.Resource) {
+		return false
+	}
+	return a.Mode != ConcurrencyModeRead || b.Mode != ConcurrencyModeRead
+}
+
 func resourceOverlap(a, b string) bool {
 	a = strings.TrimSpace(a)
 	b = strings.TrimSpace(b)

@@ -27,6 +27,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		taskID:        s.taskID,
 		sessionDir:    s.sessionDir,
 		registry:      s.tools,
+		governor:      s.parent.governor,
 		fileTrack:     fileTrack,
 		fileBackups:   fileBackups,
 		eventSender:   eventSender,

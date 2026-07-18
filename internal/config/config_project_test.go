@@ -295,6 +295,30 @@ keymap:
 	}
 }
 
+func TestMergeProjectConfigMergesOrchestrationLimits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "project.yaml")
+	writeTestFile(t, path, `orchestration:
+  max_live_runtimes: 3
+  max_borrowed_runtimes: 2
+  max_active_llm_requests: 4
+  provider_max_active_requests:
+    openai: 1
+`)
+	global := DefaultConfig()
+	global.Orchestration.MaxLiveRuntimes = 8
+	global.Orchestration.ProviderMaxActiveRequests = map[string]int{"anthropic": 2}
+	_, merged, err := MergeProjectConfig(global, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.Orchestration.MaxLiveRuntimes != 3 || merged.Orchestration.MaxBorrowedRuntimes != 2 || merged.Orchestration.MaxActiveLLMRequests != 4 {
+		t.Fatalf("orchestration = %+v", merged.Orchestration)
+	}
+	if merged.Orchestration.ProviderMaxActiveRequests["openai"] != 1 || merged.Orchestration.ProviderMaxActiveRequests["anthropic"] != 2 {
+		t.Fatalf("provider limits = %#v", merged.Orchestration.ProviderMaxActiveRequests)
+	}
+}
+
 func TestMergeProjectConfigReplacesSameNameMCPServerAtomically(t *testing.T) {
 	globalCfg := DefaultConfig()
 	globalCfg.MCP = MCPConfig{

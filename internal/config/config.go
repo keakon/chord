@@ -29,6 +29,7 @@ const (
 type Config struct {
 	Providers      map[string]ProviderConfig `json:"providers" yaml:"providers"`                         // LLM providers
 	ModelPools     map[string][]string       `json:"model_pools,omitempty" yaml:"model_pools,omitempty"` // reusable model pool definitions
+	Orchestration  OrchestrationConfig       `json:"orchestration" yaml:"orchestration,omitempty"`       // multi-agent runtime resource limits
 	Context        ContextConfig             `json:"context" yaml:"context"`                             // context compression settings
 	Skills         SkillsConfig              `json:"skills" yaml:"skills"`                               // additional skill paths
 	ConfirmTimeout int                       `json:"confirm_timeout" yaml:"confirm_timeout"`             // confirmation timeout in seconds (0 = infinite, default)
@@ -56,6 +57,43 @@ type Config struct {
 	WebFetch            WebFetchConfig             `json:"web_fetch" yaml:"web_fetch,omitempty"`                                 // WebFetch-specific options
 	Worktree            WorktreeConfig             `json:"worktree" yaml:"worktree,omitempty"`                                   // git worktree integration options
 	ThinkingTranslation *ThinkingTranslationConfig `json:"thinking_translation,omitempty" yaml:"thinking_translation,omitempty"` // optional thinking translation enhancement
+}
+
+const (
+	DefaultMaxLiveRuntimes      = 10
+	DefaultMaxBorrowedRuntimes  = 1
+	DefaultMaxActiveLLMRequests = 10
+)
+
+// OrchestrationConfig controls process-local multi-agent resource admission.
+// Zero values retain the built-in defaults for backward compatibility.
+type OrchestrationConfig struct {
+	MaxLiveRuntimes           int            `json:"max_live_runtimes,omitempty" yaml:"max_live_runtimes,omitempty"`
+	MaxBorrowedRuntimes       int            `json:"max_borrowed_runtimes,omitempty" yaml:"max_borrowed_runtimes,omitempty"`
+	MaxActiveLLMRequests      int            `json:"max_active_llm_requests,omitempty" yaml:"max_active_llm_requests,omitempty"`
+	ProviderMaxActiveRequests map[string]int `json:"provider_max_active_requests,omitempty" yaml:"provider_max_active_requests,omitempty"`
+	ModelMaxActiveRequests    map[string]int `json:"model_max_active_requests,omitempty" yaml:"model_max_active_requests,omitempty"`
+}
+
+func (c OrchestrationConfig) EffectiveMaxLiveRuntimes() int {
+	if c.MaxLiveRuntimes > 0 {
+		return c.MaxLiveRuntimes
+	}
+	return DefaultMaxLiveRuntimes
+}
+
+func (c OrchestrationConfig) EffectiveMaxBorrowedRuntimes() int {
+	if c.MaxBorrowedRuntimes > 0 {
+		return c.MaxBorrowedRuntimes
+	}
+	return DefaultMaxBorrowedRuntimes
+}
+
+func (c OrchestrationConfig) EffectiveMaxActiveLLMRequests() int {
+	if c.MaxActiveLLMRequests > 0 {
+		return c.MaxActiveLLMRequests
+	}
+	return DefaultMaxActiveLLMRequests
 }
 
 // WebFetchConfig controls WebFetch runtime behavior.
@@ -992,6 +1030,7 @@ func normalizeContextReductionShorthand(raw map[string]any) bool {
 var projectScopedTopLevelKeys = map[string]bool{
 	"providers":            true,
 	"model_pools":          true,
+	"orchestration":        true,
 	"context":              true,
 	"thinking_translation": true,
 	"skills":               true,

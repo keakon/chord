@@ -441,13 +441,14 @@ type MainAgent struct {
 	// taskRecords/nudgeCounts/subAgentStateEnteredTurn).
 	subs                     subAgentRegistry
 	orchestrationMetrics     orchestrationRuntimeMetrics
+	governor                 *resourceGovernor
 	admissionMu              sync.Mutex
 	admissionEpoch           atomic.Uint64
 	admissionPaused          atomic.Bool
 	subAgentMetaPersistMu    sync.Mutex
 	taskRegistryPersistMu    sync.Mutex
 	taskRegistryPersistHook  func()                    // test-only barrier after snapshot, before durable write
-	sem                      chan struct{}             // bounded concurrency semaphore (cap = 10)
+	sem                      chan struct{}             // compatibility view of governor normal runtime slots
 	fileTrack                *filelock.FileTracker     // file write conflict detection
 	fileBackups              *fileBackupManager        // session-scoped risky write backups
 	recovery                 *recovery.RecoveryManager // session persistence and crash recovery
@@ -686,6 +687,7 @@ func NewMainAgent(
 		workDir = projectRoot
 	}
 	gitStatusReady := make(chan struct{})
+	governor := newResourceGovernor(effectiveOrchestrationConfig(globalCfg, projectCfg))
 
 	a := &MainAgent{
 		parentCtx:               parentCtx,
@@ -715,7 +717,8 @@ func NewMainAgent(
 		evidence:                evidenceCandidateTracker{seen: make(map[string]struct{})},
 		projectRoot:             projectRoot,
 		subs:                    newSubAgentRegistry(),
-		sem:                     make(chan struct{}, 10),
+		governor:                governor,
+		sem:                     governor.runtimeSlots,
 		fileTrack:               filelock.NewFileTracker(),
 		fileBackups:             newFileBackupManager(sessionDir),
 		subAgentInbox:           newSubAgentInbox(),

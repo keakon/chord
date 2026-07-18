@@ -108,3 +108,31 @@ func TestConcurrencyClassShellAllowlist(t *testing.T) {
 		t.Fatalf("shell mutating command class = %v, want Exclusive", got)
 	}
 }
+
+func TestWorkspaceLeaseConflictScopesExclusiveByResource(t *testing.T) {
+	shell := ConcurrencyPolicy{Resource: "process:shell", Mode: ConcurrencyModeExclusive}
+	question := ConcurrencyPolicy{Resource: "tool:question", Mode: ConcurrencyModeExclusive}
+	fileRead := ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeRead}
+	fileWrite := ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeWrite}
+	otherWrite := ConcurrencyPolicy{Resource: "file:src/other.go", Mode: ConcurrencyModeWrite}
+	workspace := ConcurrencyPolicy{Resource: "workspace", Mode: ConcurrencyModeExclusive}
+
+	if WorkspaceLeaseConflict(shell, fileRead) || WorkspaceLeaseConflict(shell, fileWrite) || WorkspaceLeaseConflict(shell, question) {
+		t.Fatal("scoped exclusive lease conflicted with unrelated resources")
+	}
+	if !WorkspaceLeaseConflict(shell, shell) || !WorkspaceLeaseConflict(question, question) {
+		t.Fatal("identical exclusive resources must conflict")
+	}
+	if !WorkspaceLeaseConflict(fileWrite, fileRead) {
+		t.Fatal("same-file write/read must conflict")
+	}
+	if WorkspaceLeaseConflict(fileWrite, otherWrite) {
+		t.Fatal("disjoint file writes must not conflict")
+	}
+	if !WorkspaceLeaseConflict(workspace, fileRead) || !WorkspaceLeaseConflict(workspace, shell) {
+		t.Fatal("workspace resource must overlap everything")
+	}
+	if WorkspaceLeaseConflict(fileRead, fileRead) {
+		t.Fatal("read/read on the same file must not conflict")
+	}
+}

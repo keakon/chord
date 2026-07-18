@@ -255,10 +255,8 @@ func (a *MainAgent) releaseSubAgentAdmission(admission *subAgentAdmission) {
 	if !releaseSlot {
 		return
 	}
-	select {
-	case <-a.sem:
-	default:
-		log.Errorf("SubAgent admission semaphore underflow task_id=%v", admission.taskID)
+	if a.governor != nil {
+		a.governor.releaseRuntime(false)
 	}
 }
 
@@ -270,11 +268,8 @@ func (a *MainAgent) cancelSubAgentAdmissions() {
 	slots := a.subs.cancelAdmissionsLocked()
 	a.subs.mu.Unlock()
 	for range slots {
-		select {
-		case <-a.sem:
-		default:
-			log.Errorf("SubAgent admission semaphore underflow during cancellation")
-			return
+		if a.governor != nil {
+			a.governor.releaseRuntime(false)
 		}
 	}
 }
@@ -757,10 +752,9 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		a.admissionMu.Unlock()
 		return tools.TaskHandle{}, fmt.Errorf("LLM client factory not configured; call SetLLMFactory before creating SubAgents")
 	}
-	select {
-	case a.sem <- struct{}{}:
+	if a.governor != nil && a.governor.tryAcquireRuntime() {
 		admission.slotHeld = true
-	default:
+	} else {
 		a.subs.mu.Unlock()
 		a.admissionMu.Unlock()
 		return tools.TaskHandle{}, fmt.Errorf("max concurrent agents reached (cap=%d), wait for a running agent to complete", cap(a.sem))

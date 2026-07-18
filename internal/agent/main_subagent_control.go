@@ -7,6 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -31,19 +34,32 @@ func (a *MainAgent) acquireSubAgentSlotWithBypass(sub *SubAgent, allowBypass boo
 	if sub.semHeld {
 		return nil
 	}
-	select {
-	case a.sem <- struct{}{}:
-		sub.semHeld = true
-		sub.semBypassed = false
+	governor := a.governor
+	if governor == nil {
+		governor = newResourceGovernor(config.OrchestrationConfig{})
+		a.governor = governor
+		a.sem = governor.runtimeSlots
+	}
+	if governor.tryAcquireRuntime() {
+		sub.semHeld, sub.semBorrowed, sub.semBypassed = true, false, false
 		return nil
-	default:
-		if allowBypass {
-			sub.semHeld = true
-			sub.semBypassed = true
-			return nil
-		}
+	}
+	if !allowBypass {
 		return fmt.Errorf("max concurrent agents reached (cap=%d), wait for a running agent to complete", cap(a.sem))
 	}
+	if governor.tryBorrowRuntime() {
+		sub.semHeld, sub.semBorrowed, sub.semBypassed = true, true, false
+		return nil
+	}
+	// Both pools are exhausted. Wake reactivations run on the main event loop,
+	// and the releases that would free capacity are processed by that same
+	// loop, so blocking here can deadlock the whole agent. Fall back to an
+	// uncounted bypass grant — bounded by the number of existing parked tasks —
+	// and surface the overflow through metrics instead.
+	sub.semHeld, sub.semBorrowed, sub.semBypassed = true, false, true
+	a.orchestrationMetrics.runtimeBypassGrants.Add(1)
+	log.Warnf("SubAgent wake reactivation exceeded runtime and borrow capacity; granting uncounted bypass agent_id=%v task_id=%v", sub.instanceID, sub.taskID)
+	return nil
 }
 
 func (a *MainAgent) releaseSubAgentSlot(sub *SubAgent) {
@@ -51,15 +67,20 @@ func (a *MainAgent) releaseSubAgentSlot(sub *SubAgent) {
 		return
 	}
 	sub.semMu.Lock()
-	defer sub.semMu.Unlock()
 	if !sub.semHeld {
+		sub.semMu.Unlock()
 		return
 	}
-	if !sub.semBypassed {
-		<-a.sem
-	}
+	borrowed := sub.semBorrowed
+	bypassed := sub.semBypassed
 	sub.semHeld = false
+	sub.semBorrowed = false
 	sub.semBypassed = false
+	sub.semMu.Unlock()
+	if bypassed || a.governor == nil {
+		return
+	}
+	a.governor.releaseRuntime(borrowed)
 }
 
 func (a *MainAgent) markSubAgentReactivated(sub *SubAgent, summary string) {
@@ -89,8 +110,10 @@ func (a *MainAgent) transferSubAgentSlot(from, to *SubAgent) bool {
 		return false
 	}
 	to.semHeld = true
+	to.semBorrowed = from.semBorrowed
 	to.semBypassed = from.semBypassed
 	from.semHeld = false
+	from.semBorrowed = false
 	from.semBypassed = false
 	return true
 }

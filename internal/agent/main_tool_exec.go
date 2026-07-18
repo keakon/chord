@@ -40,6 +40,7 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		eventAgentID: "",
 		sessionDir:   a.sessionDir,
 		registry:     a.tools,
+		governor:     a.governor,
 		fileTrack:    a.fileTrack,
 		fileBackups:  a.fileBackups,
 		eventSender:  a,

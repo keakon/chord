@@ -513,6 +513,11 @@ func (a *MainAgent) callCompactionSummary(client *llm.Client, fallbackModelRef, 
 		}
 	}
 
+	releaseLLM, err := a.governor.acquireLLM(ctx, client.PrimaryModelRef())
+	if err != nil {
+		return "", modelRef, fmt.Errorf("acquire compaction LLM request capacity: %w", err)
+	}
+	defer releaseLLM()
 	resp, err := client.CompleteStream(
 		ctx,
 		[]message.Message{{Role: "user", Content: prompt}},

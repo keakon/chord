@@ -29,6 +29,7 @@ type toolExecutionPipeline struct {
 	taskID        string
 	sessionDir    string
 	registry      *tools.Registry
+	governor      *resourceGovernor
 	fileTrack     *filelock.FileTracker
 	fileBackups   *fileBackupManager
 	eventSender   tools.EventSender
@@ -247,6 +248,15 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	} else if releaseWrite != nil {
 		defer releaseWrite()
 	}
+	// Acquire the workspace lease after per-file tracking locks so that same-path
+	// conflicts serialize on the cheaper file lock first; a blocking tool that
+	// holds a tracked write can then yield its lease slot without deadlocking
+	// against a sibling waiting for the same resource ordering.
+	releaseLease, err := p.acquireWorkspaceLease(ctx, tc)
+	if err != nil {
+		return execResult, err
+	}
+	defer releaseLease()
 	staleWrite := writeStatus.ExternalChanged || (deleteLocks != nil && deleteLocks.stale)
 	if tc.Name == tools.NamePatch {
 		plan, err := agentdiff.CapturePatchPlan(agentCtx, tc, p.projectRoot)
@@ -300,6 +310,15 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	if err := validateToolArgsAgainstSchema(p.registry, tc.Name, tc.Args); err != nil {
 		return execResult, err
 	}
+	releaseLease, err := p.acquireWorkspaceLease(ctx, tc)
+	if err != nil {
+		return execResult, err
+	}
+	// The lease covers only the speculative execution itself. Holding it until
+	// commit/rollback would let one agent's stream-length speculation block
+	// other agents and creates hold-and-wait cycles; post-execution conflicts
+	// are instead detected by file tracking and hash-guarded rollback.
+	defer releaseLease()
 	hooks, err := prepareSpeculativeToolCall(tc, p.registry, p.fileTrack, p.agentID, p.projectRoot)
 	if err != nil {
 		return execResult, err
@@ -344,6 +363,18 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	result = appendBackupNotes(result, staleWrite, speculativeStaleWritePathCount(tc.Name, trackedFilePath, hooks), backupOutcome)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, nil, p.guidance)
 	return execResult, nil
+}
+
+func (p toolExecutionPipeline) acquireWorkspaceLease(ctx context.Context, tc message.ToolCall) (func(), error) {
+	if p.governor == nil {
+		return func() {}, nil
+	}
+	policy := tools.PolicyForTool(p.registry, tc.Name, llm.UnwrapToolArgs(tc.Args))
+	release, err := p.governor.acquireWorkspaceLease(ctx, policy)
+	if err != nil {
+		return nil, fmt.Errorf("acquire workspace lease for %s: %w", tc.Name, err)
+	}
+	return release, nil
 }
 
 func speculativeTrackedFilePath(toolName, preFilePath string, hooks *speculativeToolHooks) string {

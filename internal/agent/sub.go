@@ -183,8 +183,11 @@ type SubAgent struct {
 	// concurrency semaphore. Set by CreateSubAgent; restored agents do not
 	// hold a slot (they are idle and don't count against the concurrency limit).
 	semHeld bool
-	// Wake-path reactivation may temporarily bypass the semaphore when all
-	// tokens are held by descendants whose completion must resume this owner.
+	// semBorrowed marks a slot granted from the bounded borrow pool; its
+	// release decrements the governor's borrow debt. semBypassed marks an
+	// uncounted wake-reactivation grant issued when both pools were exhausted;
+	// releasing it returns no capacity.
+	semBorrowed bool
 	semBypassed bool
 	semMu       sync.Mutex
 
@@ -730,6 +733,16 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 		callback := streamReducer.Handle
 
 		s.parent.emitActivity(s.instanceID, ActivityConnecting, "")
+		releaseLLM, err := s.parent.governor.acquireLLM(turn.Ctx, llmClient.PrimaryModelRef())
+		if err != nil {
+			select {
+			case s.llmCh <- &llmResult{err: fmt.Errorf("acquire LLM request capacity: %w", err), turnID: turn.ID}:
+				resultQueued = true
+			case <-s.parentCtx.Done():
+			}
+			return
+		}
+		defer releaseLLM()
 		resp, err := llmClient.CompleteStream(turn.Ctx, messages, toolDefs, callback)
 		streamReducer.Finish() // final flush: emit any remaining accumulated text
 		s.parent.emitToTUI(RequestProgressEvent{AgentID: s.instanceID, Bytes: streamState.requestProgressBytes, Events: streamState.requestProgressEvents, Done: true})

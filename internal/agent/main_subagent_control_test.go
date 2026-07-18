@@ -1575,8 +1575,8 @@ func TestOwnerRoutedWakeBypassesSemaphoreWhenOwnerMustResume(t *testing.T) {
 	if parent.State() != SubAgentStateRunning {
 		t.Fatalf("parent.State() = %q, want %q", parent.State(), SubAgentStateRunning)
 	}
-	if !parent.semHeld || !parent.semBypassed {
-		t.Fatalf("parent slot flags = held:%v bypassed:%v, want held:true bypassed:true", parent.semHeld, parent.semBypassed)
+	if !parent.semHeld || !parent.semBorrowed || parent.semBypassed {
+		t.Fatalf("parent slot flags = held:%v borrowed:%v bypassed:%v, want borrowed grant", parent.semHeld, parent.semBorrowed, parent.semBypassed)
 	}
 	if queued := a.ownedSubAgentMailboxes[parent.instanceID]; len(queued) != 0 {
 		t.Fatalf("ownedSubAgentMailboxes = %#v, want empty after wake bypass", queued)
