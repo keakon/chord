@@ -52,6 +52,8 @@ func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args js
 		return evaluateGlobToolPermission(ruleset, unwrapped)
 	case tools.NameShell:
 		return evaluateShellToolPermission(ruleset, unwrapped)
+	case tools.NameWebFetch:
+		return evaluateWebFetchToolPermission(ruleset, unwrapped)
 	default:
 		arg := extractToolArgument(toolName, unwrapped)
 		decision.Action = normalizeToolPermissionAction(toolName, ruleset.Evaluate(toolName, arg))
@@ -163,6 +165,24 @@ func aggregatePermissionItems(items []permissionAggregateItem, initial permissio
 	}
 	decision.NeedsApprovalRules = dedupeStrings(decision.NeedsApprovalRules)
 	decision.AlreadyAllowedRules = dedupeStrings(decision.AlreadyAllowedRules)
+	return decision
+}
+
+// evaluateWebFetchToolPermission matches the requested URL against WebFetch
+// host/IP/CIDR/port rules, falling back to generic wildcard evaluation when
+// there is no URL to match on.
+func evaluateWebFetchToolPermission(ruleset permission.Ruleset, args json.RawMessage) toolPermissionDecision {
+	decision := toolPermissionDecision{Action: permission.ActionDeny, MatchArgument: "*"}
+	arg := extractToolArgument(tools.NameWebFetch, args)
+	if strings.TrimSpace(arg) == "" || arg == "*" {
+		decision.Action = ruleset.Evaluate(tools.NameWebFetch, arg)
+		decision.MatchArgument = arg
+		return decision
+	}
+	if match := ruleset.EvaluateWebFetch(arg); match.Found {
+		decision.Action = match.Rule.Action
+	}
+	decision.MatchArgument = arg
 	return decision
 }
 

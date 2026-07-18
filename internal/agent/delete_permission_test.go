@@ -384,7 +384,7 @@ func TestEvaluateToolPermissionWebFetchMatchesURL(t *testing.T) {
 	node := parsePermissionNode(t, `
 "*": allow
 web_fetch:
-  "http://localhost:8000/*": deny
+  "localhost:8000": deny
 `)
 	ruleset := permission.ParsePermission(&node)
 
