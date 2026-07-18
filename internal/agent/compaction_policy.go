@@ -195,6 +195,31 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	toolResults := countToolResults(prepared)
 	reducedInputs := make(map[string]struct{})
 
+	// Pass 1: collect reduction proposals without mutating anything. Proposals
+	// inside the frozen boundary rewrite bytes the provider already cached, so
+	// they are only applied together ("batched") when a flush is justified;
+	// proposals in the new tail were never sent and are always free to apply.
+	type reductionProposal struct {
+		index    int
+		class    requestReductionClass
+		toolName string
+		rule     string
+		reduced  string
+	}
+	var proposals []reductionProposal
+	// Seed with the frozen prefix's already-reduced messages so a re-read of
+	// content that was reduced on an earlier request still counts as
+	// over-compression. Only proposals guaranteed to apply this request (tail,
+	// or any position when incremental is off) register during collection:
+	// boundary proposals may be deferred below, and content the model still
+	// sees in full must not count as over-compressed. Flushed boundary
+	// reductions join the frozen seed on the next request instead.
+	for i := range prepared {
+		if incrementalEnabled && frozenReducedIndices != nil && i < len(frozenReducedIndices) && frozenReducedIndices[i] && prepared[i].Role == message.RoleTool {
+			meta := callMeta[prepared[i].ToolCallID]
+			reducedInputs[contextReductionToolInputKey(toolname.Normalize(meta.Name), meta.Args)] = struct{}{}
+		}
+	}
 	for i := range prepared {
 		if prepared[i].Role != message.RoleTool {
 			continue
@@ -206,7 +231,6 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			noteSkip(contextReductionSkipFrozenReduced)
 			continue
 		}
-		original := prepared[i].Content
 		meta := callMeta[prepared[i].ToolCallID]
 		toolName := toolname.Normalize(meta.Name)
 		age := max(turnsAfter[i], messageAge[i])
@@ -225,7 +249,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		if class == requestReductionNone {
 			if turnsAfter[i] < policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {
 				noteSkip(contextReductionSkipRecentHighRisk)
-			} else if len(original) > policy.StaleOutputBytes {
+			} else if len(prepared[i].Content) > policy.StaleOutputBytes {
 				noteSkip(contextReductionSkipLargeUnreduced)
 			}
 			if _, reducedBefore := reducedInputs[contextReductionToolInputKey(toolName, meta.Args)]; reducedBefore {
@@ -235,17 +259,75 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					noteOverCompression(contextReductionOverCompressionResearch)
 				}
 			}
+			continue
 		}
 		reduced, rule, ok := reduceRequestToolOutput(class, ctx)
 		if !ok {
 			continue
 		}
-		prepared[i].Content = reduced
-		if class != requestReductionDiagnostics {
-			prepared[i].ToolDiff = ""
+		proposals = append(proposals, reductionProposal{
+			index:    i,
+			class:    class,
+			toolName: toolName,
+			rule:     rule,
+			reduced:  reduced,
+		})
+		if !incrementalEnabled || i >= frozenBoundary {
+			reducedInputs[contextReductionToolInputKey(toolName, meta.Args)] = struct{}{}
 		}
-		noteReduction(toolName, rule, original, prepared[i].Content)
-		reducedInputs[contextReductionToolInputKey(toolName, meta.Args)] = struct{}{}
+	}
+
+	// Decide whether boundary proposals are applied this request. Rewriting the
+	// cached prefix at position p re-bills everything after p at input price
+	// (~10x the cache-read price), while the reduction saves its tokens on
+	// every subsequent request. Flush when the cache is invalid anyway (first
+	// request on this model ref, or high context pressure) or when the pending
+	// savings amortize the rewrite within a short horizon of future requests.
+	applyBoundary := true
+	if incrementalEnabled && frozenBoundary > 0 {
+		pendingSaved := 0
+		earliestBoundary := -1
+		for _, p := range proposals {
+			if p.index >= frozenBoundary {
+				continue
+			}
+			if earliestBoundary < 0 {
+				earliestBoundary = p.index
+			}
+			saved := ctxmgr.EstimateMessageTokens(message.Message{Content: prepared[p.index].Content}) -
+				ctxmgr.EstimateMessageTokens(message.Message{Content: p.reduced})
+			if saved > 0 {
+				pendingSaved += saved
+			}
+		}
+		if earliestBoundary >= 0 {
+			cacheInvalidAnyway := modelSnapshot.ProjectedModelRunLength <= 1
+			usage := policy.contextUsage(stats.TokensBefore, inputBudget)
+			highPressure := policy.HighPressureUsage > 0 && usage >= policy.HighPressureUsage
+			tailTokens := ctxmgr.EstimateMessagesTokens(prepared[earliestBoundary:])
+			amortized := pendingSaved*reductionFlushHorizonRequests >= cacheMissPenaltyRatio*tailTokens
+			applyBoundary = cacheInvalidAnyway || highPressure || amortized
+		}
+	}
+
+	// Pass 2: apply. Deferred boundary proposals keep their original content so
+	// the previously sent bytes stay cache-stable; they will be re-proposed on
+	// later requests until a flush condition holds.
+	for _, p := range proposals {
+		if !applyBoundary && incrementalEnabled && p.index < frozenBoundary {
+			noteSkip(contextReductionSkipDeferredCache)
+			continue
+		}
+		if incrementalEnabled && p.index < frozenBoundary {
+			meta := callMeta[prepared[p.index].ToolCallID]
+			reducedInputs[contextReductionToolInputKey(p.toolName, meta.Args)] = struct{}{}
+		}
+		original := prepared[p.index].Content
+		prepared[p.index].Content = p.reduced
+		if p.class != requestReductionDiagnostics {
+			prepared[p.index].ToolDiff = ""
+		}
+		noteReduction(p.toolName, p.rule, original, prepared[p.index].Content)
 	}
 
 	if a != nil {
@@ -508,7 +590,7 @@ func toolDefinitionsHash(defs []message.ToolDefinition) [sha256.Size]byte {
 	return stableReductionHashBytes(h.Sum(nil))
 }
 
-// stableReductionSurfacePrefixLen returns the previous turn's stable reduced
+// stableReductionSurfacePrefixLen returns the previous request's stable reduced
 // prefix length for use as an Anthropic prompt-cache boundary hint. It reflects
 // the frozen surface reused by the current request, not the full prepared list.
 func (a *MainAgent) stableReductionSurfacePrefixLen(turnID uint64) (int, bool) {
@@ -517,7 +599,7 @@ func (a *MainAgent) stableReductionSurfacePrefixLen(turnID uint64) (int, bool) {
 	}
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
-	if a.lastPreparedLLMTurnID != turnID || len(a.lastPreparedLLMRequestPrefix) == 0 {
+	if len(a.lastPreparedLLMRequestPrefix) == 0 {
 		return 0, false
 	}
 	return len(a.lastPreparedLLMRequestPrefix), true
@@ -640,18 +722,23 @@ type stableReductionProvenanceShape struct {
 }
 
 // stableReductionSurfaceCandidate returns a read-only borrowed view of the
-// last prepared request surface for turnID. The returned slices alias agent
-// state that is only ever replaced wholesale (never mutated in place), so the
-// view stays consistent even if a later store swaps the fields. Callers must
-// not mutate the returned surface; reuse paths already clone every message
-// they copy into an outgoing request.
+// last prepared request surface. The returned slices alias agent state that is
+// only ever replaced wholesale (never mutated in place), so the view stays
+// consistent even if a later store swaps the fields. Callers must not mutate
+// the returned surface; reuse paths already clone every message they copy into
+// an outgoing request.
+//
+// The surface deliberately survives across turns: reuse correctness is
+// guaranteed by shape compatibility against the current message prefix, not by
+// turn identity, and keeping reduced markers byte-stable across turns is what
+// keeps the provider prompt cache warm at turn boundaries.
 func (a *MainAgent) stableReductionSurfaceCandidate(turnID uint64) (stableReductionSurface, bool) {
 	if a == nil || turnID == 0 {
 		return stableReductionSurface{}, false
 	}
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
-	if a.lastPreparedLLMTurnID != turnID || len(a.lastPreparedLLMRequestPrefix) == 0 {
+	if len(a.lastPreparedLLMRequestPrefix) == 0 {
 		return stableReductionSurface{}, false
 	}
 	return stableReductionSurface{
@@ -1171,16 +1258,16 @@ func (a *MainAgent) clearLoopReductionCache(clearVisibleStats bool) {
 	a.loopState.FrozenReductionPrefix = nil
 	a.loopState.FrozenReductionShape = nil
 	a.loopState.FrozenReductionStats = ContextReductionStats{}
-	a.lastPreparedLLMTurnID = 0
-	a.lastPreparedLLMRequestShape = nil
-	a.lastPreparedLLMShapeSource = nil
-	a.lastPreparedLLMRequestPrefix = nil
-	a.lastPreparedLLMReducedIndices = nil
-	a.lastPreparedLLMToolDefHash = [sha256.Size]byte{}
-	a.lastPreparedReductionStats = ContextReductionStats{}
 	a.wrapUpGraceTurnID = 0
 	a.wrapUpGraceRemaining = 0
 	if clearVisibleStats {
+		a.lastPreparedLLMTurnID = 0
+		a.lastPreparedLLMRequestShape = nil
+		a.lastPreparedLLMShapeSource = nil
+		a.lastPreparedLLMRequestPrefix = nil
+		a.lastPreparedLLMReducedIndices = nil
+		a.lastPreparedLLMToolDefHash = [sha256.Size]byte{}
+		a.lastPreparedReductionStats = ContextReductionStats{}
 		a.contextReductionStats = ContextReductionStats{}
 	}
 }

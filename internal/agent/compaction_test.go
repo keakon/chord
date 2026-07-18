@@ -2523,10 +2523,14 @@ func TestSetIdleAndDrainPendingKeepsVisibleContextReductionStats(t *testing.T) {
 		t.Fatalf("visible reduction stats after idle = %+v, want %+v", got, want)
 	}
 	a.loopReductionMu.Lock()
-	cacheCleared := a.lastPreparedLLMTurnID == 0 && len(a.lastPreparedLLMRequestPrefix) == 0
+	stableSurfaceRetained := a.lastPreparedLLMTurnID != 0 && len(a.lastPreparedLLMRequestPrefix) != 0
+	transientStateCleared := len(a.loopState.FrozenReductionPrefix) == 0 && a.wrapUpGraceTurnID == 0 && a.wrapUpGraceRemaining == 0
 	a.loopReductionMu.Unlock()
-	if !cacheCleared {
-		t.Fatal("idle should clear reusable reduction cache")
+	if !stableSurfaceRetained {
+		t.Fatal("idle should retain the stable request surface for cross-turn cache reuse")
+	}
+	if !transientStateCleared {
+		t.Fatal("idle should clear turn-local reduction state")
 	}
 }
 
