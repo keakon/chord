@@ -233,12 +233,12 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				if len(content) > 0 && content[0] == ' ' {
 					content = content[1:]
 				}
-				code := truncateLineToDisplayWidth(content, diffWidth)
+				code := renderHighlightedSnippetLine(content, nil, diffWidth-1, hl, "")
 				displayLineNum := newLineNum
 				if newLineNum < oldLineNum {
 					displayLineNum = oldLineNum
 				}
-				rendered = DimStyle.Render(formatLineNum(displayLineNum)) + DimStyle.Render(" "+code)
+				rendered = DimStyle.Render(formatLineNum(displayLineNum)) + " " + code
 				oldLineNum++
 				newLineNum++
 			}

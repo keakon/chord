@@ -58,6 +58,21 @@ func TestEditAndPatchToolCardsKeepAddedAndDeletedLineBackgrounds(t *testing.T) {
 	}
 }
 
+func TestEditAndPatchToolCardsHighlightContextLines(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	args, _ := json.Marshal(map[string]string{"path": "src/demo.go"})
+	diff := "@@ -1,5 +1,6 @@\n func demo() error {\n+\tvalue := 1\n if value != 0 {\n\treturn fmt.Errorf(\"bad: %d\", value)\n }\n return nil\n"
+	wantKeyword := colorOfTheme(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String())
+	for _, toolName := range []string{tools.NameEdit, tools.NamePatch} {
+		t.Run(toolName, func(t *testing.T) {
+			block := &Block{ID: 1, Type: BlockToolCall, ToolName: toolName, Content: string(args), Diff: diff, ResultDone: true}
+			contextLine := renderedLineContaining(t, block.Render(100, ""), "if value")
+			assertRenderedTextForeground(t, contextLine, "if", wantKeyword)
+			assertRenderedTextBackground(t, contextLine, "if", colorOfTheme(currentTheme.ToolCallBg))
+		})
+	}
+}
+
 func TestEditToolCardRendersDiagnosticsSummaryWithDiff(t *testing.T) {
 	block := &Block{
 		ID:           1,
