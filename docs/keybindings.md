@@ -26,6 +26,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Ctrl+V` / `Alt+V` | Attach an image or PDF from the system clipboard asynchronously; `Alt+V` works when the terminal reserves `Ctrl+V` |
 | `Cmd+V` / paste    | Paste text only; terminal paste events never probe clipboard attachments                       |
 | `Ctrl+U`           | Clear the input box and pending attachments                                                    |
+| `PgUp` / `PgDown`  | Page the transcript up / down without leaving Insert mode                                      |
 
 ### Normal mode — leaving and meta
 
@@ -33,7 +34,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | ------------------ | ----------------------------------------------- |
 | `i`                | Return to Insert mode                           |
 | `q`                | Press twice within ~2s to quit                  |
-| `Ctrl+C`           | Press twice within ~2s to quit                  |
+| `Ctrl+C`           | Press twice within ~2s to quit; inside any overlay or dialog it closes the overlay instead (like `Esc`) |
 | `?`                | Toggle the in-app help / cheatsheet overlay     |
 | `Esc`              | (when agent is running) Cancel the current turn |
 
@@ -161,6 +162,8 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `insert_attach_clipboard`  | `["ctrl+v", "alt+v"]` (attach a clipboard image or PDF) |
 | `insert_attach_file`       | `[]`                              |
 | `insert_clear_input`       | `["ctrl+u"]`                     |
+| `insert_page_up`           | `["pgup"]` (page the transcript) |
+| `insert_page_down`         | `["pgdown"]` (page the transcript) |
 | `enter_insert`             | `["i"]`                          |
 | `quit`                     | `["q"]`                          |
 | `help_toggle`              | `["?"]`                          |

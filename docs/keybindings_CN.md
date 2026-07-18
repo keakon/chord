@@ -26,6 +26,7 @@ TUI 有两种模式：
 | `Ctrl+V` / `Alt+V` | 异步读取系统剪贴板中的图片或 PDF，并作为附件添加；终端占用 `Ctrl+V` 时使用 `Alt+V`     |
 | `Cmd+V` / 普通粘贴 | 只粘贴文本；终端 paste 事件不会探测剪贴板附件                                          |
 | `Ctrl+U`           | 清空输入框和待发送附件                                                                              |
+| `PgUp` / `PgDown`  | 不离开 Insert 模式直接向上 / 向下翻页会话记录                                                       |
 
 ### Normal 模式 — 退出与元操作
 
@@ -33,7 +34,7 @@ TUI 有两种模式：
 | ------------------ | ------------------------------------------------- |
 | `i`                | 回到 Insert 模式                                  |
 | `q`                | 2 秒内连按两次退出                                |
-| `Ctrl+C`           | 2 秒内连按两次退出                                |
+| `Ctrl+C`           | 2 秒内连按两次退出；在任意浮层/对话框内则与 `Esc` 一样关闭浮层 |
 | `?`                | 切换内置帮助/键位速查浮层                         |
 | `Esc`              | （agent 运行中）取消当前轮次                      |
 
@@ -161,6 +162,8 @@ action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/
 | `insert_attach_clipboard`  | `["ctrl+v", "alt+v"]`（附加剪贴板图片或 PDF） |
 | `insert_attach_file`       | `[]`                               |
 | `insert_clear_input`       | `["ctrl+u"]`                      |
+| `insert_page_up`           | `["pgup"]`（翻页会话记录）        |
+| `insert_page_down`         | `["pgdown"]`（翻页会话记录）      |
 | `enter_insert`             | `["i"]`                           |
 | `quit`                     | `["q"]`                           |
 | `help_toggle`              | `["?"]`                           |
