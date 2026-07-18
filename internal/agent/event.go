@@ -440,9 +440,10 @@ func (InfoEvent) agentEvent() {}
 // ToastEvent carries a transient notification message.
 // Level is one of: "info", "warn", "error".
 type ToastEvent struct {
-	Message string
-	Level   string
-	AgentID string // originating agent ("" = main agent)
+	Message  string
+	Level    string
+	Category string // same-category queued toasts are merged; empty = no merge
+	AgentID  string // originating agent ("" = main agent)
 }
 
 func (ToastEvent) agentEvent() {}

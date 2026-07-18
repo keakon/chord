@@ -115,7 +115,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		return true, effects
 	case agent.ToastEvent:
-		effects.addFollowup(m.enqueueToast(evt.Message, evt.Level))
+		effects.addFollowup(m.enqueueToastWithCategory(evt.Message, evt.Level, evt.Category))
 		if m.shouldPriorityFlushToast(evt.Level) {
 			effects.addFollowup(m.requestStreamBoundaryFlush())
 		}

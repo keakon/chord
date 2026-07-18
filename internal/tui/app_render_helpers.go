@@ -10,6 +10,8 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
+const maxQueuedToasts = 10
+
 func renderDisabledInputArea(content string) string {
 	if content == "" {
 		return ""
@@ -30,9 +32,9 @@ func renderDisabledInputArea(content string) string {
 func toastDurationForLevel(level string) time.Duration {
 	switch strings.ToLower(level) {
 	case "error":
-		return 7 * time.Second
-	case "warn":
 		return 5 * time.Second
+	case "warn":
+		return 4 * time.Second
 	default:
 		return 3 * time.Second
 	}
@@ -133,6 +135,18 @@ func (m *Model) enqueueToastWithCategory(msg, level, category string) tea.Cmd {
 	}
 
 	m.toastQueue = append(m.toastQueue, t)
+	if len(m.toastQueue) > maxQueuedToasts {
+		dropIndex := 0
+		dropPriority := toastLevelPriority(m.toastQueue[0].Level)
+		for i := 1; i < len(m.toastQueue); i++ {
+			priority := toastLevelPriority(m.toastQueue[i].Level)
+			if priority < dropPriority {
+				dropIndex = i
+				dropPriority = priority
+			}
+		}
+		m.toastQueue = append(m.toastQueue[:dropIndex], m.toastQueue[dropIndex+1:]...)
+	}
 	return nil
 }
 

@@ -3541,6 +3541,64 @@ func TestWarnToastForcesPriorityBoundaryFlush(t *testing.T) {
 	}
 }
 
+func TestToastEventCategoryMergesQueuedNotifications(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToastEvent{Message: "invalidated account 1", Level: "error", Category: "oauth_account_invalidated"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToastEvent{Message: "invalidated account 2", Level: "error", Category: "oauth_account_invalidated"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToastEvent{Message: "invalidated account 3", Level: "error", Category: "oauth_account_invalidated"}})
+
+	if m.activeToast == nil || m.activeToast.Message != "invalidated account 1" {
+		t.Fatalf("active toast = %#v, want first notification", m.activeToast)
+	}
+	if len(m.toastQueue) != 1 || m.toastQueue[0].Message != "invalidated account 3" {
+		t.Fatalf("toast queue = %#v, want only latest queued notification", m.toastQueue)
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToastEvent{Message: "expired account", Level: "error", Category: "oauth_account_expired"}})
+	if len(m.toastQueue) != 2 || m.toastQueue[1].Category != "oauth_account_expired" {
+		t.Fatalf("toast queue = %#v, want different category preserved", m.toastQueue)
+	}
+}
+
+func TestToastDurationsStayWithinThreeToFiveSeconds(t *testing.T) {
+	for level, want := range map[string]time.Duration{
+		"info":  3 * time.Second,
+		"warn":  4 * time.Second,
+		"error": 5 * time.Second,
+	} {
+		if got := toastDurationForLevel(level); got != want {
+			t.Fatalf("toastDurationForLevel(%q) = %v, want %v", level, got, want)
+		}
+	}
+}
+
+func TestToastQueueLimitDropsOldestLowestPriority(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.activeToast = &toastItem{Message: "active", Level: "error"}
+	for i := range maxQueuedToasts {
+		level := "warn"
+		if i == 0 {
+			level = "info"
+		}
+		_ = m.enqueueToast(fmt.Sprintf("queued %d", i), level)
+	}
+
+	_ = m.enqueueToast("new error", "error")
+
+	if len(m.toastQueue) != maxQueuedToasts {
+		t.Fatalf("toast queue length = %d, want %d", len(m.toastQueue), maxQueuedToasts)
+	}
+	for _, toast := range m.toastQueue {
+		if toast.Message == "queued 0" {
+			t.Fatalf("oldest lowest-priority toast was not dropped: %#v", m.toastQueue)
+		}
+	}
+	if got := m.toastQueue[len(m.toastQueue)-1].Message; got != "new error" {
+		t.Fatalf("last queued toast = %q, want new error", got)
+	}
+}
+
 func TestToolResultEventDeleteTracksDeletedFileWithoutFakeLineCount(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.sidebar.Update(nil, "main", "builder")
