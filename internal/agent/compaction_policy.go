@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
@@ -396,11 +397,47 @@ func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, original, prepared
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
 	a.lastPreparedLLMTurnID = turnID
-	a.lastPreparedLLMRequestShape = stableReductionMessageShapes(original)
+	shapes, source := a.incrementalMessageShapesLocked(original)
+	a.lastPreparedLLMRequestShape = shapes
+	a.lastPreparedLLMShapeSource = source
 	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(prepared)
 	a.lastPreparedLLMReducedIndices = reducedIndices
 	a.lastPreparedLLMToolDefHash = toolDefHash
 	a.lastPreparedReductionStats = cloneContextReductionStats(a.contextReductionStats)
+}
+
+// incrementalMessageShapesLocked computes shapes for original plus the source
+// copy to store alongside them, reusing stored entries for the leading run of
+// messages that are field-equal to the previous shape source. In the steady
+// state (unchanged history) both return values are the previously stored
+// slices and nothing is hashed or allocated; with an append-only history only
+// the new tail is hashed. Caller must hold loopReductionMu.
+func (a *MainAgent) incrementalMessageShapesLocked(original []message.Message) ([]stableReductionMessageShape, []message.Message) {
+	if len(original) == 0 {
+		return nil, nil
+	}
+	prevSource := a.lastPreparedLLMShapeSource
+	prevShape := a.lastPreparedLLMRequestShape
+	reusable := 0
+	if len(prevSource) == len(prevShape) {
+		limit := min(len(prevSource), len(original))
+		for reusable < limit && stableReductionMessageEquivalent(&prevSource[reusable], &original[reusable]) {
+			reusable++
+		}
+	}
+	if reusable == len(original) && len(prevSource) == len(original) {
+		return prevShape, prevSource
+	}
+	source := append([]message.Message(nil), original...)
+	if reusable == 0 {
+		return stableReductionMessageShapes(original), source
+	}
+	shapes := make([]stableReductionMessageShape, len(original))
+	copy(shapes, prevShape[:reusable])
+	for i := reusable; i < len(original); i++ {
+		shapes[i] = stableReductionMessageShapeOf(&original[i])
+	}
+	return shapes, source
 }
 
 func (a *MainAgent) setPreparedStablePrefixLen(n int) {
@@ -435,8 +472,20 @@ func computeReducedToolResultIndices(original, prepared []message.Message) []boo
 // computeToolDefinitionHash returns a stable hash of the frozen tool surface.
 // A mismatch between turns invalidates the frozen prefix because tool changes
 // alter the cacheable prefix and may require re-evaluating earlier tool results.
+// The hash is memoized per frozen snapshot: freezeToolSurfaceFromDefinitions
+// stores an immutable slice behind an atomic pointer, so pointer identity is a
+// sound cache key and repeated per-request calls skip re-marshaling schemas.
 func (a *MainAgent) computeToolDefinitionHash() [sha256.Size]byte {
-	return toolDefinitionsHash(a.mainLLMToolDefinitions())
+	frozen := a.frozenToolDefs.Load()
+	if frozen == nil {
+		return toolDefinitionsHash(a.mainLLMToolDefinitions())
+	}
+	if memo := a.toolDefHashMemo.Load(); memo != nil && memo.defs == frozen {
+		return memo.hash
+	}
+	hash := toolDefinitionsHash(*frozen)
+	a.toolDefHashMemo.Store(&toolDefHashMemoEntry{defs: frozen, hash: hash})
+	return hash
 }
 
 // toolDefinitionsHash returns a stable hash of a tool surface. Name,
@@ -520,8 +569,8 @@ func (a *MainAgent) incrementalReductionSurface(prepared []message.Message, poli
 		return nil, nil, 0, false
 	}
 	// Shape compatibility ensures the prefix messages have not changed since
-	// the previous surface was recorded (same ContentHash, Role, ToolCalls, etc).
-	if !stableReductionShapesCompatible(previous.Shape[:len(previous.Messages)], prepared[:len(previous.Messages)]) {
+	// the previous surface was recorded (same content, Role, ToolCalls, etc).
+	if !stableReductionPrefixCompatible(previous, prepared[:len(previous.Messages)]) {
 		return nil, nil, 0, false
 	}
 	return previous.Messages, previous.ReducedIndices, len(previous.Messages), true
@@ -535,6 +584,7 @@ func (a *MainAgent) updatePreparedLLMRequestSurface(turnID uint64, prepared []me
 	defer a.loopReductionMu.Unlock()
 	if a.lastPreparedLLMTurnID != turnID || len(a.lastPreparedLLMRequestShape) != len(prepared) {
 		a.lastPreparedLLMRequestShape = stableReductionMessageShapes(prepared)
+		a.lastPreparedLLMShapeSource = append([]message.Message(nil), prepared...)
 	}
 	a.lastPreparedLLMTurnID = turnID
 	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(prepared)
@@ -542,11 +592,24 @@ func (a *MainAgent) updatePreparedLLMRequestSurface(turnID uint64, prepared []me
 }
 
 type stableReductionSurface struct {
-	Messages       []message.Message
-	Shape          []stableReductionMessageShape
+	Messages []message.Message
+	Shape    []stableReductionMessageShape
+	// ShapeSource holds shallow copies of the original messages Shape was
+	// computed from, when available. It enables direct field-equality
+	// compatibility checks that skip content re-hashing. May be nil (e.g.
+	// loop-frozen surfaces); callers must fall back to hash comparison.
+	ShapeSource    []message.Message
 	Stats          ContextReductionStats
 	ReducedIndices []bool
 	ToolDefHash    [sha256.Size]byte
+}
+
+// toolDefHashMemoEntry caches the hash of one frozen tool-definition snapshot.
+// defs is the exact pointer stored in MainAgent.frozenToolDefs; snapshots are
+// immutable after freeze, so pointer identity implies hash validity.
+type toolDefHashMemoEntry struct {
+	defs *[]message.ToolDefinition
+	hash [sha256.Size]byte
 }
 
 type stableReductionMessageShape struct {
@@ -576,6 +639,12 @@ type stableReductionProvenanceShape struct {
 	Imported   bool
 }
 
+// stableReductionSurfaceCandidate returns a read-only borrowed view of the
+// last prepared request surface for turnID. The returned slices alias agent
+// state that is only ever replaced wholesale (never mutated in place), so the
+// view stays consistent even if a later store swaps the fields. Callers must
+// not mutate the returned surface; reuse paths already clone every message
+// they copy into an outgoing request.
 func (a *MainAgent) stableReductionSurfaceCandidate(turnID uint64) (stableReductionSurface, bool) {
 	if a == nil || turnID == 0 {
 		return stableReductionSurface{}, false
@@ -586,10 +655,11 @@ func (a *MainAgent) stableReductionSurfaceCandidate(turnID uint64) (stableReduct
 		return stableReductionSurface{}, false
 	}
 	return stableReductionSurface{
-		Messages:       cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix),
-		Shape:          append([]stableReductionMessageShape(nil), a.lastPreparedLLMRequestShape...),
-		Stats:          cloneContextReductionStats(a.lastPreparedReductionStats),
-		ReducedIndices: append([]bool(nil), a.lastPreparedLLMReducedIndices...),
+		Messages:       a.lastPreparedLLMRequestPrefix,
+		Shape:          a.lastPreparedLLMRequestShape,
+		ShapeSource:    a.lastPreparedLLMShapeSource,
+		Stats:          a.lastPreparedReductionStats,
+		ReducedIndices: a.lastPreparedLLMReducedIndices,
 		ToolDefHash:    a.lastPreparedLLMToolDefHash,
 	}, true
 }
@@ -599,17 +669,36 @@ func reuseStableReductionPrefix(previous stableReductionSurface, current, shapeS
 	if len(previousMessages) == 0 {
 		return current, true
 	}
-	if len(current) < len(previousMessages) || len(shapeSource) < len(previousMessages) || !stableReductionShapesCompatible(previous.Shape, shapeSource[:len(previousMessages)]) {
+	if len(current) < len(previousMessages) || len(shapeSource) < len(previousMessages) || !stableReductionPrefixCompatible(previous, shapeSource[:len(previousMessages)]) {
 		return current, false
 	}
-	out := cloneMessageSliceForRequestShape(current)
+	// Build the output in one pass: the prefix is cloned from the stored
+	// surface, the tail from current. Cloning current first and overwriting
+	// the prefix would clone every prefix message twice for nothing.
+	out := make([]message.Message, len(current))
 	for i := range previousMessages {
 		out[i] = cloneMessageForRequestShape(previousMessages[i])
+	}
+	for i := len(previousMessages); i < len(current); i++ {
+		out[i] = cloneMessageForRequestShape(current[i])
 	}
 	if stableReductionReuseWouldCreateOrphans(current, out) {
 		return current, false
 	}
 	return out, true
+}
+
+// stableReductionPrefixCompatible reports whether the first len(previous.Shape)
+// messages of the current request still match the surface's recorded shape.
+// When the surface carries its shape source, plain field equality is used:
+// unchanged messages share string backing with the source copies, so each
+// comparison is O(1) and allocation-free. Without a source (loop-frozen
+// surfaces) it falls back to hashing the current prefix.
+func stableReductionPrefixCompatible(previous stableReductionSurface, currentPrefix []message.Message) bool {
+	if len(previous.ShapeSource) == len(previous.Shape) && len(previous.ShapeSource) == len(currentPrefix) {
+		return stableReductionMessagesEquivalent(previous.ShapeSource, currentPrefix)
+	}
+	return stableReductionShapesCompatible(previous.Shape, currentPrefix)
 }
 
 func stableReductionShapesCompatible(previous []stableReductionMessageShape, current []message.Message) bool {
@@ -630,25 +719,100 @@ func stableReductionMessageShapes(messages []message.Message) []stableReductionM
 		return nil
 	}
 	shapes := make([]stableReductionMessageShape, len(messages))
-	for i, msg := range messages {
-		shapes[i] = stableReductionMessageShape{
-			Role:                msg.Role,
-			ContentHash:         stableReductionHashString(msg.Content),
-			PartsHash:           stableReductionContentPartsHash(msg.Parts),
-			ThinkingHash:        stableReductionThinkingBlocksHash(msg.ThinkingBlocks),
-			ReasoningHash:       stableReductionHashString(msg.ReasoningContent),
-			ToolCallsHash:       stableReductionToolCallsHash(msg.ToolCalls),
-			ToolCallID:          msg.ToolCallID,
-			ToolDiffHash:        stableReductionHashString(msg.ToolDiff),
-			ToolDiffAdded:       msg.ToolDiffAdded,
-			ToolDiffRemoved:     msg.ToolDiffRemoved,
-			ToolStatus:          msg.ToolStatus,
-			Provenance:          stableReductionProvenanceShapeFor(msg.Provenance),
-			IsCompactionSummary: msg.IsCompactionSummary,
-			Kind:                msg.Kind,
-		}
+	for i := range messages {
+		shapes[i] = stableReductionMessageShapeOf(&messages[i])
 	}
 	return shapes
+}
+
+func stableReductionMessageShapeOf(msg *message.Message) stableReductionMessageShape {
+	return stableReductionMessageShape{
+		Role:                msg.Role,
+		ContentHash:         stableReductionHashString(msg.Content),
+		PartsHash:           stableReductionContentPartsHash(msg.Parts),
+		ThinkingHash:        stableReductionThinkingBlocksHash(msg.ThinkingBlocks),
+		ReasoningHash:       stableReductionHashString(msg.ReasoningContent),
+		ToolCallsHash:       stableReductionToolCallsHash(msg.ToolCalls),
+		ToolCallID:          msg.ToolCallID,
+		ToolDiffHash:        stableReductionHashString(msg.ToolDiff),
+		ToolDiffAdded:       msg.ToolDiffAdded,
+		ToolDiffRemoved:     msg.ToolDiffRemoved,
+		ToolStatus:          msg.ToolStatus,
+		Provenance:          stableReductionProvenanceShapeFor(msg.Provenance),
+		IsCompactionSummary: msg.IsCompactionSummary,
+		Kind:                msg.Kind,
+	}
+}
+
+// stableReductionMessagesEquivalent reports whether every message pair would
+// produce identical stableReductionMessageShape values. It compares exactly
+// the fields the shape hashes cover, using direct equality instead of
+// hashing: string comparison short-circuits on shared backing arrays, so an
+// unchanged (append-only) history costs O(1) per message with no allocation.
+// Field equality implies hash equality, so this is strictly at least as
+// precise as comparing hashes.
+func stableReductionMessagesEquivalent(source, current []message.Message) bool {
+	if len(source) != len(current) {
+		return false
+	}
+	for i := range source {
+		if !stableReductionMessageEquivalent(&source[i], &current[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func stableReductionMessageEquivalent(a, b *message.Message) bool {
+	if a.Role != b.Role ||
+		a.Content != b.Content ||
+		a.ReasoningContent != b.ReasoningContent ||
+		a.ToolCallID != b.ToolCallID ||
+		a.ToolDiff != b.ToolDiff ||
+		a.ToolDiffAdded != b.ToolDiffAdded ||
+		a.ToolDiffRemoved != b.ToolDiffRemoved ||
+		a.ToolStatus != b.ToolStatus ||
+		a.IsCompactionSummary != b.IsCompactionSummary ||
+		a.Kind != b.Kind {
+		return false
+	}
+	if stableReductionProvenanceShapeFor(a.Provenance) != stableReductionProvenanceShapeFor(b.Provenance) {
+		return false
+	}
+	if len(a.ToolCalls) != len(b.ToolCalls) {
+		return false
+	}
+	for i := range a.ToolCalls {
+		ac, bc := &a.ToolCalls[i], &b.ToolCalls[i]
+		if ac.ID != bc.ID || ac.Name != bc.Name || !bytes.Equal(ac.Args, bc.Args) {
+			return false
+		}
+	}
+	if len(a.ThinkingBlocks) != len(b.ThinkingBlocks) {
+		return false
+	}
+	for i := range a.ThinkingBlocks {
+		if a.ThinkingBlocks[i] != b.ThinkingBlocks[i] {
+			return false
+		}
+	}
+	if len(a.Parts) != len(b.Parts) {
+		return false
+	}
+	for i := range a.Parts {
+		ap, bp := &a.Parts[i], &b.Parts[i]
+		if ap.Type != bp.Type ||
+			ap.Text != bp.Text ||
+			ap.DisplayText != bp.DisplayText ||
+			ap.InlineToken != bp.InlineToken ||
+			ap.MimeType != bp.MimeType ||
+			ap.ImagePath != bp.ImagePath ||
+			ap.FileName != bp.FileName ||
+			!bytes.Equal(ap.Data, bp.Data) {
+			return false
+		}
+	}
+	return true
 }
 
 func stableReductionProvenanceShapeFor(provenance *message.MessageProvenance) stableReductionProvenanceShape {
@@ -742,8 +906,8 @@ func stableReductionWriteInt(h interface{ Write([]byte) (int, error) }, value in
 }
 
 func stableReductionReuseWouldCreateOrphans(current, reused []message.Message) bool {
-	_, currentDropped := message.RepairOrphanToolResults(current)
-	_, reusedDropped := message.RepairOrphanToolResults(reused)
+	currentDropped := message.CountDroppedOrphanToolResults(current)
+	reusedDropped := message.CountDroppedOrphanToolResults(reused)
 	if reusedDropped > currentDropped {
 		return true
 	}
@@ -1009,6 +1173,7 @@ func (a *MainAgent) clearLoopReductionCache(clearVisibleStats bool) {
 	a.loopState.FrozenReductionStats = ContextReductionStats{}
 	a.lastPreparedLLMTurnID = 0
 	a.lastPreparedLLMRequestShape = nil
+	a.lastPreparedLLMShapeSource = nil
 	a.lastPreparedLLMRequestPrefix = nil
 	a.lastPreparedLLMReducedIndices = nil
 	a.lastPreparedLLMToolDefHash = [sha256.Size]byte{}
@@ -1118,6 +1283,7 @@ func (a *MainAgent) freezeLoopReductionPrefixForCurrentTurn() {
 	defer a.loopReductionMu.Unlock()
 	if a.lastPreparedLLMTurnID != turnID || len(a.lastPreparedLLMRequestPrefix) == 0 {
 		a.lastPreparedLLMRequestShape = nil
+		a.lastPreparedLLMShapeSource = nil
 		a.lastPreparedLLMRequestPrefix = nil
 		a.lastPreparedLLMReducedIndices = nil
 		a.lastPreparedLLMToolDefHash = [sha256.Size]byte{}

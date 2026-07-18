@@ -354,12 +354,23 @@ type MainAgent struct {
 	lastPreparedReductionStats    ContextReductionStats
 	lastPreparedLLMToolDefHash    [sha256.Size]byte
 	lastPreparedStablePrefixLen   int
-	wrapUpGraceTurnID             uint64
-	wrapUpGraceRemaining          int
-	contextReductionStats         ContextReductionStats
-	contextSurfaceRefreshAllowed  atomic.Bool
-	lastLLMRequestModelRef        string
-	llmModelRunLength             int
+	// lastPreparedLLMShapeSource holds shallow struct copies of the original
+	// messages lastPreparedLLMRequestShape was computed from. It lets shape
+	// compatibility checks use direct field equality (O(1) per unchanged
+	// message thanks to shared string backing) instead of re-hashing every
+	// message's content on each request. Read-only after store.
+	lastPreparedLLMShapeSource   []message.Message
+	wrapUpGraceTurnID            uint64
+	wrapUpGraceRemaining         int
+	contextReductionStats        ContextReductionStats
+	contextSurfaceRefreshAllowed atomic.Bool
+	lastLLMRequestModelRef       string
+	llmModelRunLength            int
+
+	// toolDefHashMemo caches the tool-definition hash keyed by the frozen
+	// tool-definition snapshot pointer, so per-request surface checks do not
+	// re-marshal and re-hash every tool schema.
+	toolDefHashMemo atomic.Pointer[toolDefHashMemoEntry]
 
 	// Async durable compaction (pre-request gate): defer inbound events until commit.
 	compactionState      compactionState

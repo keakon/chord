@@ -108,7 +108,11 @@ func testBinaryBuiltWithRace() bool {
 	return false
 }
 
-func BenchmarkPrepareMessagesForLLMStablePrefixReuse(b *testing.B) {
+// BenchmarkPrepareMessagesForLLMForcePruneRescan measures the bookkeeping-heavy
+// worst case: a stable surface exists but context pressure (no input budget →
+// usage 1.0 ≥ ForcePruneUsage) rejects reuse, so every call pays the full
+// reduction scan plus surface snapshot/remember costs.
+func BenchmarkPrepareMessagesForLLMForcePruneRescan(b *testing.B) {
 	for _, toolResults := range []int{100, 1000} {
 		b.Run(fmt.Sprintf("tool_results_%d", toolResults), func(b *testing.B) {
 			a := benchmarkContextReductionAgent()
@@ -118,6 +122,48 @@ func BenchmarkPrepareMessagesForLLMStablePrefixReuse(b *testing.B) {
 				b.Fatal("benchmark fixture did not produce reduction savings")
 			}
 			withTail := append(append([]message.Message(nil), messages...), message.Message{Role: message.RoleAssistant, Content: "small follow-up"})
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				prepared := a.prepareMessagesForLLM(withTail)
+				if len(prepared) != len(withTail) || len(first) != len(messages) {
+					b.Fatalf("prepared messages = %d, want %d", len(prepared), len(withTail))
+				}
+			}
+		})
+	}
+}
+
+// benchmarkContextReductionAgentNoPressure disables the usage-pressure
+// rejections so the stable-prefix reuse fast path can engage even though the
+// fixture agent has no LLM client (input budget 0 → usage reported as 1.0).
+func benchmarkContextReductionAgentNoPressure() *MainAgent {
+	a := benchmarkContextReductionAgent()
+	a.projectConfig.Context.Reduction.HighPressureUsage = 4
+	a.projectConfig.Context.Reduction.ForcePruneUsage = 4
+	return a
+}
+
+// BenchmarkPrepareMessagesForLLMStablePrefixReuse measures the intended steady
+// state: an unchanged prefix is detected via the stored shape source and the
+// previous reduced surface is reused without re-running the reduction scan.
+func BenchmarkPrepareMessagesForLLMStablePrefixReuse(b *testing.B) {
+	for _, toolResults := range []int{100, 1000} {
+		b.Run(fmt.Sprintf("tool_results_%d", toolResults), func(b *testing.B) {
+			a := benchmarkContextReductionAgentNoPressure()
+			messages := benchmarkContextReductionMessages(toolResults)
+			first := a.prepareMessagesForLLM(messages)
+			if !hasReductionSavings(a.GetContextReductionStats()) {
+				b.Fatal("benchmark fixture did not produce reduction savings")
+			}
+			withTail := append(append([]message.Message(nil), messages...), message.Message{Role: message.RoleAssistant, Content: "small follow-up"})
+			warm := a.prepareMessagesForLLM(withTail)
+			if len(warm) != len(withTail) {
+				b.Fatalf("warm prepared messages = %d, want %d", len(warm), len(withTail))
+			}
+			if !a.GetContextReductionStats().ReusedStable {
+				b.Fatal("benchmark fixture did not engage stable-prefix reuse")
+			}
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
