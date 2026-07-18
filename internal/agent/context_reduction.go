@@ -36,7 +36,6 @@ type ContextReductionStats struct {
 const (
 	contextReductionWrapUpGraceRequests = 1
 
-	contextProtectReasonNone        = ""
 	contextProtectReasonWrapUpGrace = "wrap_up_grace"
 
 	contextReuseReasonNone                = ""
