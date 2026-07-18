@@ -3,13 +3,17 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestSanitizeGrepLine(t *testing.T) {
@@ -352,6 +356,141 @@ func TestGrepLongLinesAreBoundedByBytes(t *testing.T) {
 	}
 }
 
+// TestGrepRootWithHiddenFileIgnorePattern guards the whole-tree regression:
+// a .gitignore hiding dotfiles (".*") used to match the search root itself
+// ("."), skipping the entire walk and reporting no matches for everything.
+func TestGrepRootWithHiddenFileIgnorePattern(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".*\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pkg", "code.go"), []byte("package pkg\n// needle here\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".hidden.go"), []byte("// needle hidden\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := GrepTool{BaseDir: dir}
+	args, _ := json.Marshal(map[string]any{"pattern": "needle"})
+	out, err := tool.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "pkg/code.go:2:") {
+		t.Fatalf("root search missed visible file, output:\n%s", out)
+	}
+	if strings.Contains(out, ".hidden.go") {
+		t.Fatalf("root search should still honor dotfile ignore for entries inside the tree, output:\n%s", out)
+	}
+}
+
+func TestGrepParallelScanBoundsOutOfOrderResults(t *testing.T) {
+	dir := t.TempDir()
+	workers := grepScanWorkerCount()
+	if workers == 1 {
+		t.Skip("requires another worker to complete scans out of order")
+	}
+	window := grepScanWindow(workers)
+	for i := range window + 8 {
+		name := fmt.Sprintf("%04d.txt", i)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("content\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var started atomic.Int64
+	releaseFirst := make(chan struct{})
+	scanFile := func(_ context.Context, path, baseDir string, re *regexp.Regexp, capMatches, capBytes int) grepFileScan {
+		started.Add(1)
+		if filepath.Base(path) == "0000.txt" {
+			<-releaseFirst
+		}
+		return grepFileScan{}
+	}
+	type result struct {
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		_, _, _, _, err := grepWalkRootWithScanner(context.Background(), dir, regexp.MustCompile("missing"), nil, dir, maxGrepMatches, maxGrepOutputBytes, scanFile)
+		done <- result{err: err}
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for int(started.Load()) < window && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := int(started.Load()); got != window {
+		close(releaseFirst)
+		t.Fatalf("scans started before first result completed = %d, want window %d", got, window)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if got := int(started.Load()); got != window {
+		close(releaseFirst)
+		t.Fatalf("scan window grew while first result was blocked: got %d, want %d", got, window)
+	}
+	close(releaseFirst)
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("bounded parallel scan did not finish")
+	}
+}
+
+func TestGrepExecuteReturnsExternalCancellation(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(file, []byte("needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "file", args: map[string]any{"pattern": "needle", "paths": []string{file}}},
+		{name: "exact_include", args: map[string]any{"pattern": "needle", "paths": []string{dir}, "includes": []string{"a.txt"}}},
+		{name: "walk", args: map[string]any{"pattern": "needle", "paths": []string{dir}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			args, err := json.Marshal(tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := (GrepTool{BaseDir: dir}).Execute(ctx, args)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("output = %q, err = %v, want context.Canceled", out, err)
+			}
+		})
+	}
+}
+
+func TestGrepWalkRootReturnsCancellationDuringScan(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	scanFile := func(ctx context.Context, path, baseDir string, re *regexp.Regexp, capMatches, capBytes int) grepFileScan {
+		cancel()
+		return scanGrepFile(ctx, path, baseDir, re, capMatches, capBytes)
+	}
+	_, _, _, _, err := grepWalkRootWithScanner(ctx, dir, regexp.MustCompile("needle"), nil, dir, maxGrepMatches, maxGrepOutputBytes, scanFile)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
 func TestGrepFirstLongLineIsBoundedByBytes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "first-long.txt")
@@ -360,60 +499,58 @@ func TestGrepFirstLongLineIsBoundedByBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	matches, truncated, err := searchFile(path, func() string { return path }, regexp.MustCompile("needle"), maxGrepMatches, maxGrepOutputBytes)
-	if err != nil {
-		t.Fatalf("searchFile: %v", err)
+	scan := scanGrepFile(context.Background(), path, "", regexp.MustCompile("needle"), maxGrepMatches, maxGrepOutputBytes)
+	if scan.err != nil {
+		t.Fatalf("scanGrepFile: %v", scan.err)
 	}
+	matches, bytesUsed, truncated := appendBudgetedGrepMatches(nil, scan, maxGrepMatches, maxGrepOutputBytes)
 	if !truncated {
-		t.Fatal("searchFile should report byte truncation for first long match")
+		t.Fatal("budget application should report byte truncation for first long match")
 	}
 	if len(matches) != 1 {
 		t.Fatalf("matches = %d, want one truncated match", len(matches))
 	}
-	if joinedLinesBytes(matches) > maxGrepOutputBytes {
-		t.Fatalf("match bytes = %d, want <= %d", joinedLinesBytes(matches), maxGrepOutputBytes)
+	if bytesUsed > maxGrepOutputBytes {
+		t.Fatalf("match bytes = %d, want <= %d", bytesUsed, maxGrepOutputBytes)
 	}
 	if !strings.Contains(matches[0], "needle") || !strings.HasSuffix(matches[0], "...") {
 		t.Fatalf("truncated match should keep prefix and marker, got %q", matches[0])
 	}
 }
 
-func TestSearchFileComputesDisplayPathLazily(t *testing.T) {
+func TestScanGrepFileResolvesDisplayPathLazily(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "notes.txt")
 	if err := os.WriteFile(path, []byte("alpha\nneedle one\nneedle two\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	var calls int
-	matches, truncated, err := searchFile(path, func() string {
-		calls++
-		return "display/notes.txt"
-	}, regexp.MustCompile("missing"), maxGrepMatches, maxGrepOutputBytes)
-	if err != nil {
-		t.Fatalf("searchFile missing: %v", err)
+	scan := scanGrepFile(context.Background(), path, dir, regexp.MustCompile("missing"), maxGrepMatches, maxGrepOutputBytes)
+	if scan.err != nil {
+		t.Fatalf("scanGrepFile missing: %v", scan.err)
 	}
-	if truncated || len(matches) != 0 {
-		t.Fatalf("missing search returned matches=%v truncated=%v", matches, truncated)
+	if scan.hitCaps || len(scan.matches) != 0 {
+		t.Fatalf("missing search returned matches=%v hitCaps=%v", scan.matches, scan.hitCaps)
 	}
-	if calls != 0 {
-		t.Fatalf("display path resolver calls for no-match search = %d, want 0", calls)
+	if scan.displayPath != "" {
+		t.Fatalf("display path resolved for no-match search: %q", scan.displayPath)
 	}
 
-	matches, truncated, err = searchFile(path, func() string {
-		calls++
-		return "display/notes.txt"
-	}, regexp.MustCompile("needle"), maxGrepMatches, maxGrepOutputBytes)
-	if err != nil {
-		t.Fatalf("searchFile matching: %v", err)
+	scan = scanGrepFile(context.Background(), path, dir, regexp.MustCompile("needle"), maxGrepMatches, maxGrepOutputBytes)
+	if scan.err != nil {
+		t.Fatalf("scanGrepFile matching: %v", scan.err)
 	}
+	if scan.hitCaps || len(scan.matches) != 2 {
+		t.Fatalf("matching search returned matches=%v hitCaps=%v", scan.matches, scan.hitCaps)
+	}
+	if scan.displayPath != "notes.txt" {
+		t.Fatalf("display path = %q, want %q", scan.displayPath, "notes.txt")
+	}
+	matches, _, truncated := appendBudgetedGrepMatches(nil, scan, maxGrepMatches, maxGrepOutputBytes)
 	if truncated || len(matches) != 2 {
-		t.Fatalf("matching search returned matches=%v truncated=%v", matches, truncated)
+		t.Fatalf("budgeted matches = %v truncated=%v", matches, truncated)
 	}
-	if calls != 1 {
-		t.Fatalf("display path resolver calls for matching search = %d, want 1", calls)
-	}
-	if !strings.HasPrefix(matches[0], "display/notes.txt:2:") || !strings.HasPrefix(matches[1], "display/notes.txt:3:") {
+	if !strings.HasPrefix(matches[0], "notes.txt:2:") || !strings.HasPrefix(matches[1], "notes.txt:3:") {
 		t.Fatalf("matches used wrong display path: %#v", matches)
 	}
 }

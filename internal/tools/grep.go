@@ -11,7 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -74,8 +77,6 @@ const (
 	maxGrepOutputBytes = 12 * 1024
 )
 
-var errMaxGrepMatchesReached = errors.New("max grep matches reached")
-
 func (GrepTool) Name() string { return NameGrep }
 
 func (t GrepTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
@@ -136,6 +137,9 @@ func (GrepTool) legacyArgAliases() map[string]string {
 }
 
 func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	startedAt := time.Now()
 	var a grepArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
@@ -162,6 +166,9 @@ func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 
 	var pathErrors []string
 	for _, searchPath := range paths {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		resolvedSearchPath, info, err := resolveExistingToolPathInDir(searchPath, t.BaseDir, PathTargetAny, "search")
 		if err != nil {
 			pathErrors = append(pathErrors, grepPathErrorWithHint(searchPath, t.BaseDir, err).Error())
@@ -170,6 +177,9 @@ func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		searched = append(searched, resolvedSearchPath)
 		rootMatches, rootBytes, rootScanned, rootTruncated, err := grepSearchRoot(ctx, searchPath, resolvedSearchPath, info, re, includes, t.BaseDir, maxGrepMatches-len(matches), maxGrepOutputBytes-outputBytes)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return "", ctxErr
+			}
 			pathErrors = append(pathErrors, fmt.Sprintf("%s: %v", resolvedSearchPath, err))
 			continue
 		}
@@ -180,6 +190,9 @@ func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			truncated = true
 			break
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 
 	// Every path failed to resolve/search: return the aggregate error. Judge by
@@ -298,6 +311,9 @@ func DecodeStringOrList(raw json.RawMessage) ([]string, bool, error) {
 }
 
 func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, info os.FileInfo, re *regexp.Regexp, includes []string, baseDir string, maxMatches, maxBytes int) ([]string, int, int64, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, 0, false, err
+	}
 	if maxMatches <= 0 || maxBytes <= 0 {
 		return nil, 0, 0, true, nil
 	}
@@ -308,14 +324,13 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 		if IsBinaryExtension(filepath.Base(resolvedSearchPath)) {
 			return nil, 0, 1, false, nil
 		}
-		fileMatches, truncated, err := searchFile(resolvedSearchPath, func() string {
-			return displayPathForBaseDir(resolvedSearchPath, baseDir)
-		}, re, maxMatches, maxBytes)
-		if err != nil {
-			return nil, 0, 0, false, err
+		scan := scanGrepFile(ctx, resolvedSearchPath, baseDir, re, maxMatches, maxBytes)
+		if scan.err != nil {
+			return nil, 0, 0, false, scan.err
 		}
+		matches, bytesUsed, truncated := appendBudgetedGrepMatches(nil, scan, maxMatches, maxBytes)
 		reportToolProgress(ctx, ToolProgressSnapshot{Label: "files", Current: 1})
-		return fileMatches, joinedLinesBytes(fileMatches), 1, truncated, nil
+		return matches, bytesUsed, 1, truncated, nil
 	}
 
 	// Fast path: when includes contains a relative path with no glob metacharacters
@@ -329,6 +344,9 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 		var scannedFiles int64
 		truncated := false
 		for _, file := range exactFiles {
+			if err := ctx.Err(); err != nil {
+				return nil, 0, scannedFiles, truncated, err
+			}
 			remainingMatches := maxMatches - len(matches)
 			remainingBytes := maxBytes - outputBytes
 			if remainingMatches <= 0 || remainingBytes <= 0 {
@@ -342,14 +360,18 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 			if IsBinaryExtension(filepath.Base(file)) {
 				continue
 			}
-			fileMatches, fileTruncated, err := searchFile(file, func() string {
-				return displayPathForBaseDir(file, baseDir)
-			}, re, remainingMatches, remainingBytes)
-			if err != nil {
-				return nil, 0, 0, false, err
+			scan := scanGrepFile(ctx, file, baseDir, re, remainingMatches, remainingBytes)
+			if scan.err != nil {
+				return nil, 0, 0, false, scan.err
 			}
-			matches = append(matches, fileMatches...)
-			outputBytes = joinedLinesBytes(matches)
+			prevLen := len(matches)
+			var bytesUsed int
+			var fileTruncated bool
+			matches, bytesUsed, fileTruncated = appendBudgetedGrepMatches(matches, scan, remainingMatches, remainingBytes)
+			if prevLen > 0 && len(matches) > prevLen {
+				outputBytes++
+			}
+			outputBytes += bytesUsed
 			scannedFiles++
 			if fileTruncated {
 				truncated = true
@@ -362,79 +384,206 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 		return matches, outputBytes, scannedFiles, truncated, nil
 	}
 
+	return grepWalkRoot(ctx, resolvedSearchPath, re, includes, baseDir, maxMatches, maxBytes)
+}
+
+// errGrepWalkCanceled stops the walker when the merger has already filled its
+// output budgets; it is a clean stop, not an error surfaced to the caller.
+var errGrepWalkCanceled = errors.New("grep walk canceled")
+
+type grepWalkItem struct {
+	idx  int
+	path string
+}
+
+type grepScanResult struct {
+	idx  int
+	scan grepFileScan
+}
+
+type grepFileScanner func(ctx context.Context, path, baseDir string, re *regexp.Regexp, capMatches, capBytes int) grepFileScan
+
+// grepScanWorkerCount bounds the parallel file-scan workers. Scanning is
+// CPU-bound (regex over file contents), so GOMAXPROCS is the natural ceiling;
+// the cap keeps a wide machine from issuing excessive concurrent file reads.
+func grepScanWorkerCount() int {
+	n := runtime.GOMAXPROCS(0)
+	if n < 1 {
+		n = 1
+	}
+	return min(n, 8)
+}
+
+func grepScanWindow(workerCount int) int {
+	return max(workerCount*2, 1)
+}
+
+// grepWalkRoot walks the tree sequentially (gitignore, includes, and guard
+// checks stay single-threaded) while scanning candidate files on parallel
+// workers. Results are merged strictly in walk order and output budgets are
+// applied only at merge time, so matches, truncation markers, and ordering
+// are identical to a sequential scan; workers only ever over-scan files whose
+// results end up discarded after the budget fills, and cancellation stops the
+// walk promptly.
+func grepWalkRoot(ctx context.Context, resolvedSearchPath string, re *regexp.Regexp, includes []string, baseDir string, maxMatches, maxBytes int) ([]string, int, int64, bool, error) {
+	return grepWalkRootWithScanner(ctx, resolvedSearchPath, re, includes, baseDir, maxMatches, maxBytes, scanGrepFile)
+}
+
+func grepWalkRootWithScanner(ctx context.Context, resolvedSearchPath string, re *regexp.Regexp, includes []string, baseDir string, maxMatches, maxBytes int, scanFile grepFileScanner) ([]string, int, int64, bool, error) {
+	parentCtx := ctx
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
+
+	workers := grepScanWorkerCount()
+	items := make(chan grepWalkItem, workers*2)
+	results := make(chan grepScanResult, workers*2)
+	dispatchSlots := make(chan struct{}, grepScanWindow(workers))
+
+	ignore := newGitIgnoreMatcher(resolvedSearchPath)
+	guard := newBroadSearchGuard("Grep", resolvedSearchPath, "includes", includes)
+
+	walkErrCh := make(chan error, 1)
+	go func() {
+		defer close(items)
+		nextIdx := 0
+		walkErrCh <- filepath.WalkDir(resolvedSearchPath, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil
+			}
+			guard.visit()
+			if guard.shouldAbort() {
+				return errGuardAbort
+			}
+			if d.IsDir() && skipDirNames[d.Name()] {
+				return filepath.SkipDir
+			}
+			if d.IsDir() {
+				if rel, err := filepath.Rel(resolvedSearchPath, path); err == nil {
+					rel = filepath.ToSlash(rel)
+					if ignore.Match(rel, true) {
+						return filepath.SkipDir
+					}
+				}
+				return nil
+			}
+			if rel, err := filepath.Rel(resolvedSearchPath, path); err == nil {
+				rel = filepath.ToSlash(rel)
+				if ignore.Match(rel, false) {
+					return nil
+				}
+				if len(includes) > 0 {
+					matched, matchErr := matchAnyIncludePattern(rel, includes)
+					if matchErr != nil || !matched {
+						return nil
+					}
+				}
+			}
+			if !d.Type().IsRegular() || IsBinaryExtension(d.Name()) {
+				return nil
+			}
+			guard.candidate()
+			select {
+			case dispatchSlots <- struct{}{}:
+			case <-ctx.Done():
+				return errGrepWalkCanceled
+			}
+			select {
+			case items <- grepWalkItem{idx: nextIdx, path: path}:
+				nextIdx++
+				return nil
+			case <-ctx.Done():
+				<-dispatchSlots
+				return errGrepWalkCanceled
+			}
+		})
+	}()
+
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range items {
+				if ctx.Err() != nil {
+					continue // keep draining so the walker never blocks
+				}
+				scan := scanFile(ctx, item.path, baseDir, re, maxMatches, maxBytes)
+				select {
+				case results <- grepScanResult{idx: item.idx, scan: scan}:
+				case <-ctx.Done():
+				}
+			}
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
 	var matches []string
 	var outputBytes int
 	var scannedFiles int64
 	truncated := false
-	ignore := newGitIgnoreMatcher(resolvedSearchPath)
-	guard := newBroadSearchGuard("Grep", resolvedSearchPath, "includes", includes)
-	err := filepath.WalkDir(resolvedSearchPath, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
+	budgetDone := false
+
+	process := func(scan grepFileScan) {
+		if budgetDone || scan.err != nil {
+			return
 		}
-		guard.visit()
-		if guard.shouldAbort() {
-			return errGuardAbort
-		}
-		if d.IsDir() && skipDirNames[d.Name()] {
-			return filepath.SkipDir
-		}
-		if d.IsDir() {
-			if rel, err := filepath.Rel(resolvedSearchPath, path); err == nil {
-				rel = filepath.ToSlash(rel)
-				if ignore.Match(rel, true) {
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-		if rel, err := filepath.Rel(resolvedSearchPath, path); err == nil {
-			rel = filepath.ToSlash(rel)
-			if ignore.Match(rel, false) {
-				return nil
-			}
-			if len(includes) > 0 {
-				matched, matchErr := matchAnyIncludePattern(rel, includes)
-				if matchErr != nil || !matched {
-					return nil
-				}
-			}
-		}
-		if !d.Type().IsRegular() || IsBinaryExtension(d.Name()) {
-			return nil
-		}
-		guard.candidate()
 		remainingMatches := maxMatches - len(matches)
 		remainingBytes := maxBytes - outputBytes
 		if remainingMatches <= 0 || remainingBytes <= 0 {
 			truncated = true
-			return errMaxGrepMatchesReached
+			budgetDone = true
+			cancel()
+			return
 		}
-		fileMatches, truncatedByBytes, err := searchFile(path, func() string {
-			return displayPathForBaseDir(path, baseDir)
-		}, re, remainingMatches, remainingBytes)
-		if err != nil {
-			return nil
+		prevLen := len(matches)
+		var bytesUsed int
+		var fileTruncated bool
+		matches, bytesUsed, fileTruncated = appendBudgetedGrepMatches(matches, scan, remainingMatches, remainingBytes)
+		if prevLen > 0 && len(matches) > prevLen {
+			outputBytes++
 		}
-		matches = append(matches, fileMatches...)
-		outputBytes = joinedLinesBytes(matches)
+		outputBytes += bytesUsed
 		scannedFiles++
 		if scannedFiles <= 5 || scannedFiles%10 == 0 {
 			reportToolProgress(ctx, ToolProgressSnapshot{Label: "files", Current: scannedFiles})
 		}
-		if len(matches) >= maxMatches || truncatedByBytes || outputBytes >= maxBytes {
+		if fileTruncated || len(matches) >= maxMatches || outputBytes >= maxBytes {
 			truncated = true
-			return errMaxGrepMatchesReached
+			budgetDone = true
+			cancel()
 		}
-		return nil
-	})
+	}
+
+	pending := make(map[int]grepFileScan)
+	next := 0
+	for res := range results {
+		pending[res.idx] = res.scan
+		for {
+			scan, ok := pending[next]
+			if !ok {
+				break
+			}
+			delete(pending, next)
+			next++
+			process(scan)
+			<-dispatchSlots
+		}
+	}
+
+	walkErr := <-walkErrCh
+	if err := parentCtx.Err(); err != nil {
+		return nil, 0, scannedFiles, truncated, err
+	}
 	switch {
-	case err == nil:
-	case errors.Is(err, errMaxGrepMatchesReached):
-	case errors.Is(err, errGuardAbort):
+	case walkErr == nil:
+	case errors.Is(walkErr, errGrepWalkCanceled):
+	case errors.Is(walkErr, errGuardAbort):
 		return nil, 0, scannedFiles, truncated, guard.abortError()
 	default:
-		return nil, 0, scannedFiles, truncated, fmt.Errorf("walking directory: %w", err)
+		return nil, 0, scannedFiles, truncated, fmt.Errorf("walking directory: %w", walkErr)
 	}
 	if scannedFiles > 0 {
 		reportToolProgress(ctx, ToolProgressSnapshot{Label: "files", Current: scannedFiles})
@@ -462,101 +611,182 @@ func grepPathErrorWithHint(path string, baseDir string, err error) error {
 	return fmt.Errorf("%w. grep.paths accepts an array of file or directory paths; to search multiple directories, pass each path as a separate array item", err)
 }
 
-// searchFile reads a file and returns matching lines in "path:linenum:content" format.
-// Binary files are skipped to avoid producing mojibake / stray terminal control
-// sequences in the tool output.
-func searchFile(path string, displayPathFunc func() string, re *regexp.Regexp, maxMatches, maxBytes int) ([]string, bool, error) {
+// grepLineMatch is one matching line from a scanned file, kept as components
+// so budget application can reformat (and truncate) it exactly like the
+// former inline formatting did.
+type grepLineMatch struct {
+	num  int
+	text string // sanitized display text
+}
+
+// grepFileScan is the outcome of scanning one file: the display path, the
+// matching lines in file order, whether the scan stopped at its caps, and any
+// open/read error. A scan that stopped at caps includes the first match that
+// overflowed the byte cap so the budget layer can apply the same
+// head-truncation rule a direct scan would.
+type grepFileScan struct {
+	displayPath string
+	matches     []grepLineMatch
+	hitCaps     bool
+	err         error
+}
+
+// grepScanBuffers holds per-scan reusable allocations: the binary-detection
+// head sample and the line scanner's initial buffer.
+type grepScanBuffers struct {
+	head []byte
+	scan []byte
+}
+
+var grepScanBufPool = sync.Pool{
+	New: func() any {
+		return &grepScanBuffers{
+			head: make([]byte, binarySampleBytes),
+			scan: make([]byte, 0, 64*1024),
+		}
+	},
+}
+
+func grepMatchLine(displayPath string, num int, text string) string {
+	return displayPath + ":" + strconv.Itoa(num) + ":" + text
+}
+
+func grepMatchLineLen(displayPath string, num int, text string) int {
+	digits := 1
+	for n := num; n >= 10; n /= 10 {
+		digits++
+	}
+	return len(displayPath) + 1 + digits + 1 + len(text)
+}
+
+// scanGrepFile reads a file and collects matching lines in
+// "path:linenum:content" component form. Binary files yield an empty scan
+// with no error (they still count as scanned). Lines are matched as bytes so
+// non-matching lines allocate nothing. capMatches/capBytes bound the scan
+// exactly like the former searchFile budget accounting; when the caps equal
+// the caller's remaining output budget, appendBudgetedGrepMatches reproduces
+// the former output byte for byte.
+func scanGrepFile(ctx context.Context, path, baseDir string, re *regexp.Regexp, capMatches, capBytes int) grepFileScan {
+	if err := ctx.Err(); err != nil {
+		return grepFileScan{err: err}
+	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, false, err
+		return grepFileScan{err: err}
 	}
 	defer f.Close()
+
+	bufs := grepScanBufPool.Get().(*grepScanBuffers)
+	defer grepScanBufPool.Put(bufs)
 
 	// Peek the head of the file to detect binary content (NUL bytes, high
 	// ratio of control bytes, known binary content-types). Matches ripgrep's
 	// default behavior of skipping binary files.
-	head := make([]byte, binarySampleBytes)
-	n, _ := io.ReadFull(f, head)
-	if looksBinary(head[:n]) {
-		return nil, false, nil
+	n, _ := io.ReadFull(f, bufs.head)
+	if looksBinary(bufs.head[:n]) {
+		return grepFileScan{}
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return nil, false, err
+		return grepFileScan{err: err}
 	}
 
-	var matches []string
-	var outputBytes int
+	scan := grepFileScan{}
+	outputBytes := 0
 	scanner := bufio.NewScanner(f)
-	// Increase scanner buffer for long lines.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// Reuse the pooled initial buffer; long lines may still grow up to 1 MiB.
+	scanner.Buffer(bufs.scan[:0], 1024*1024)
 	lineNum := 0
-	displayPath := ""
-	displayPathResolved := false
-	getDisplayPath := func() string {
-		if !displayPathResolved {
-			if displayPathFunc != nil {
-				displayPath = displayPathFunc()
-			}
-			if strings.TrimSpace(displayPath) == "" {
-				displayPath = path
-			}
-			displayPathResolved = true
-		}
-		return displayPath
-	}
 
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			scan.err = err
+			scan.matches = nil
+			scan.displayPath = ""
+			return scan
+		}
 		lineNum++
-		line := scanner.Text()
-		if re.MatchString(line) {
-			displayPath := getDisplayPath()
-			display := sanitizeGrepLine(line)
-			match := fmt.Sprintf("%s:%d:%s", displayPath, lineNum, display)
-			matchBytes := len(match)
-			if len(matches) > 0 {
-				matchBytes++
-			}
-			if maxBytes > 0 && outputBytes+matchBytes > maxBytes {
-				if len(matches) > 0 {
-					return matches, true, scanner.Err()
-				}
-				prefix := fmt.Sprintf("%s:%d:", displayPath, lineNum)
-				available := maxBytes - len(prefix) - len("...")
-				if available <= 0 {
-					return nil, true, scanner.Err()
-				}
-				match = prefix + truncateStringToValidUTF8Prefix(display, available) + "..."
-				matchBytes = len(match)
-				if matchBytes > maxBytes {
-					return nil, true, scanner.Err()
-				}
-				matches = append(matches, match)
-				outputBytes += matchBytes
-				return matches, true, scanner.Err()
-			}
-			matches = append(matches, match)
-			outputBytes += matchBytes
-			if maxMatches > 0 && len(matches) >= maxMatches {
-				return matches, true, scanner.Err()
-			}
-			if maxBytes > 0 && outputBytes >= maxBytes {
-				return matches, true, scanner.Err()
+		if !re.Match(scanner.Bytes()) {
+			continue
+		}
+		if scan.displayPath == "" {
+			scan.displayPath = displayPathForBaseDir(path, baseDir)
+			if strings.TrimSpace(scan.displayPath) == "" {
+				scan.displayPath = path
 			}
 		}
+		text := sanitizeGrepLine(string(scanner.Bytes()))
+		matchBytes := grepMatchLineLen(scan.displayPath, lineNum, text)
+		if len(scan.matches) > 0 {
+			matchBytes++
+		}
+		if capBytes > 0 && outputBytes+matchBytes > capBytes {
+			// Include the overflowing match so the budget layer can apply the
+			// same first-match head-truncation rule, then stop scanning.
+			scan.matches = append(scan.matches, grepLineMatch{num: lineNum, text: text})
+			scan.hitCaps = true
+			return scan
+		}
+		scan.matches = append(scan.matches, grepLineMatch{num: lineNum, text: text})
+		outputBytes += matchBytes
+		if capMatches > 0 && len(scan.matches) >= capMatches {
+			scan.hitCaps = true
+			return scan
+		}
+		if capBytes > 0 && outputBytes >= capBytes {
+			scan.hitCaps = true
+			return scan
+		}
 	}
-
-	return matches, false, scanner.Err()
+	scan.err = scanner.Err()
+	if scan.err != nil {
+		scan.matches = nil
+		scan.displayPath = ""
+	}
+	return scan
 }
 
-func joinedLinesBytes(lines []string) int {
-	if len(lines) == 0 {
-		return 0
+// appendBudgetedGrepMatches formats scan's matches onto dst while enforcing
+// the remaining match-count and byte budgets, mirroring the former searchFile
+// accounting: a separator byte per additional match within the file, drop the
+// overflowing match when earlier file matches exist, and head-truncate with
+// "..." when the file's first match alone overflows the byte budget. It
+// returns the extended slice, the bytes consumed (file-internal separators
+// included), and whether output was truncated against the budgets.
+func appendBudgetedGrepMatches(dst []string, scan grepFileScan, remainingMatches, remainingBytes int) ([]string, int, bool) {
+	bytesUsed := 0
+	appended := 0
+	for _, m := range scan.matches {
+		formatted := grepMatchLine(scan.displayPath, m.num, m.text)
+		matchBytes := len(formatted)
+		if appended > 0 {
+			matchBytes++
+		}
+		if remainingBytes > 0 && bytesUsed+matchBytes > remainingBytes {
+			if appended > 0 {
+				return dst, bytesUsed, true
+			}
+			prefix := scan.displayPath + ":" + strconv.Itoa(m.num) + ":"
+			available := remainingBytes - len(prefix) - len("...")
+			if available <= 0 {
+				return dst, bytesUsed, true
+			}
+			formatted = prefix + truncateStringToValidUTF8Prefix(m.text, available) + "..."
+			if len(formatted) > remainingBytes {
+				return dst, bytesUsed, true
+			}
+			return append(dst, formatted), bytesUsed + len(formatted), true
+		}
+		dst = append(dst, formatted)
+		appended++
+		bytesUsed += matchBytes
+		if remainingMatches > 0 && appended >= remainingMatches {
+			return dst, bytesUsed, true
+		}
+		if remainingBytes > 0 && bytesUsed >= remainingBytes {
+			return dst, bytesUsed, true
+		}
 	}
-	n := len(lines) - 1
-	for _, line := range lines {
-		n += len(line)
-	}
-	return n
+	return dst, bytesUsed, false
 }
 
 // sanitizeGrepLine strips C0 control characters (except tab) and replaces
