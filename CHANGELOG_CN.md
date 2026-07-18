@@ -8,9 +8,12 @@
 
 - MCP 配置作用域现在具有明确语义：`.chord/config.yaml` 中的同名 server 会原子替换全局定义，不再逐字段递归继承；Agent 级 MCP 仅允许增量添加并自动启动。Agent server 与顶层重名或设置 `manual: true` 现在都会导致启动失败；要继承请删除 Agent 中的重复项，要使用私有连接请改名，手动启停的 server 则应配置在顶层。
 - 相比 v0.7.1 及更早版本，`compat.reasoning_continuity.mode: openai_visible` 现在只负责回放 assistant `reasoning_content`，不再隐式注入 GLM 专属的 `thinking.type` 或 `clear_thinking` 字段。Provider 请求差异统一通过新的协议无关配置 `compat.request_overrides` 表达：`body` 递归 patch JSON（`null` 删除字段），`rename_body_fields` 将动态计算值保留到另一个字段名，`headers` 设置或删除请求 header。已有 GLM Preserved Thinking 配置需要在 `request_overrides.body` 中加入 `thinking: {type: enabled, clear_thinking: false}`；DeepSeek thinking 配置需要加入 `thinking: {type: enabled}`，并在需要时把 `max_completion_tokens` 重命名为 `max_tokens`。
+- Agent 定义文件在声明的 `name` 与不带扩展名的文件名不一致，或同一目录内存在跨 `.md`、`.yaml`、`.yml` 的重名 agent 时，现在会直接加载失败。此前不一致的 `name` 会静默替换另一个无关的 agent 定义；请把文件名或 `name` 字段改为一致。项目级 agent 覆盖同名全局 agent 的既有设计不变。
 
 ### 改进
 
+- `web_fetch` 权限规则现在可以按网络语义匹配请求 URL：pattern 可以指定 host（域名 glob、字面 IP 或 CIDR）及可选的端口或端口区间，例如用 `169.254.0.0/16: deny` 拦截云元数据端点。匹配仍在请求发出前基于模型提供的 URL 进行，默认全部允许的行为不变。
+- 新增顶层 `orchestration` 配置，治理进程内多 agent 资源：live 与 borrowed SubAgent runtime 槽位，全局、按 provider、按 model 的并发 LLM 请求上限，以及按执行粒度的 workspace lease——同资源的工具执行（同一文件，或 shell 对 shell）跨 agent 串行，无关工具保持并行。SubAgent 输入/上下文队列与协调 mailbox 现在有消息数和字节预算；mailbox 溢出会 spool 到持久日志并按 FIFO 顺序回灌，SubAgent 也会在 `subagent_compact_usage`（默认与 MainAgent 压缩阈值对齐）附近主动压缩上下文。
 - 委派任务的 `expected_write_scope` 现在会在工具执行阶段实际生效，不再只是提示元数据：只读任务拒绝工作区修改，任何 scoped task 都拒绝无法验证副作用的 Shell，文件/路径 scope 会基于规范化后的真实路径约束原生编辑工具，nested delegation 不能扩大 parent scope；child limit、重复任务、scope 冲突、runtime 注册与 parked task 重激活也由同一 admission 生命周期门控。
 - 进入静止状态的 SubAgent 现在会释放事件循环 goroutine、LLM client、context manager 及其他热运行时资源，同时保留 durable task descriptor 与 transcript。聚焦、历史查看和跟进能力不变；用户显式输入、获授权的定向通知或相关 descendant mailbox 事件会按需 rehydrate 新的 runtime 实例。failed / cancelled 任务必须由用户显式重启，模型通知不能自行复活它们。
 - TUI 聚焦已回收的 SubAgent 时仍会显示其任务专属 skills，与聚焦 live worker 的行为一致。
@@ -26,6 +29,9 @@
 
 ### 修复
 
+- 修复恢复会话时引用已被删除的 model pool（表现为 `(missing)` 状态）的问题：恢复阶段会把过期的当前池与各 agent 覆盖项改写为该 agent 的第一个已配置池，使实际生效、界面显示与持久化状态保持一致。
+- OAuth token 刷新与 compaction 响应体现在通过大小上限读取，作为 OOM 兜底，与其他 provider 读取一致。
+- TUI diff 卡片的未变更上下文行现在也做语法高亮，不再渲染为纯暗色文本。
 - 修复 SubAgent transcript 持久化失败仅记录一次临时日志、后续仍可能被回收的问题。持久化健康状态现在随 durable task 保存，degraded worker 会在 park 或 shutdown 前 checkpoint 完整 transcript；废弃的 LLM client 也会取消其拥有的后台任务。并发 admission 会基于最新 task registry 合并，并在最终 durable commit point 前持续遵守 caller cancellation。
 - 修复 provider 返回过量并行工具调用时可能耗尽主循环 follow-up reserve，或 escalation 被已满的外部事件队列反向阻塞的问题。Loop-owned 因果事件现在保持非阻塞和有序，超大响应会在明确的单响应调用上限处正常失败；multipart 文本与附件 payload 也会计入上下文恢复的 token 预算。
 - 修复 SubAgent 上下文超限在模型 fallback 后直接永久失败的问题。严格分类的 context-length error 现在会触发一次有界的本地 transcript 恢复并自动重试，同时保留 task identity 与近期高价值上下文；若第二次仍超限则正常终止，不会进入恢复循环。
