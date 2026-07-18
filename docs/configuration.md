@@ -962,7 +962,7 @@ prompt: |
 
 Common fields include:
 
-- `name`: agent name. If omitted, Chord uses the filename without extension.
+- `name`: agent name. If omitted, Chord uses the filename without extension. If specified, it must match the filename without extension (for example, `builder.yaml` must declare `name: builder`). A single directory cannot contain duplicate agent names, including duplicates across `.md`, `.yaml`, and `.yml`. Project-level agents may still override same-named global agents by design.
 - `description`: short description shown to the main agent when delegation is available.
 - `mode`: `main` for a MainAgent role, or `subagent` for a SubAgent. Empty and unknown values behave as `main`; `sub_agent` and `sub` are accepted as SubAgent aliases.
 - `model_pools`: optional ordered list of pool names this agent can use. Pool definitions live in `config.yaml` top-level `model_pools`; when omitted, the agent can use all top-level pools sorted by name.

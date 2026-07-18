@@ -903,7 +903,7 @@ prompt: |
 
 常用字段：
 
-- `name`：agent 名称。省略时使用不带扩展名的文件名。
+- `name`：agent 名称。省略时使用不带扩展名的文件名；显式填写时，必须与不带扩展名的文件名一致（例如 `builder.yaml` 必须声明 `name: builder`）。同一目录内不能存在重名 agent，包括 `.md`、`.yaml`、`.yml` 之间的重名；项目级 agent 仍可按既有设计覆盖同名的全局 agent。
 - `description`：简短描述，在可委派给该 agent 时展示给 main agent。
 - `mode`：`main` 表示 MainAgent 角色，`subagent` 表示 SubAgent。为空或其他值时按 `main` 处理；`sub_agent` 和 `sub` 也可作为 SubAgent 别名。
 - `model_pools`：可选的有序池名列表，用于限制该 agent 可使用的池。池定义位于 `config.yaml` 顶层 `model_pools`；省略时，该 agent 可使用所有顶层池并按池名排序。`openai/gpt-5.5@high` 这类 inline variant 写在池定义中。

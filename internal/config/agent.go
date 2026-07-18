@@ -249,6 +249,14 @@ func finalizeAgentConfig(path string, cfg *AgentConfig) (*AgentConfig, error) {
 	if cfg.Name == "" {
 		base := filepath.Base(path)
 		cfg.Name = strings.TrimSuffix(base, filepath.Ext(base))
+	} else if base := filepath.Base(path); strings.TrimSuffix(base, filepath.Ext(base)) != cfg.Name {
+		// Enforce the project invariant that an agent's filename (without
+		// extension) matches its declared name. LoadAgentConfigs keys configs
+		// by name, so a mismatched name silently shadows or overrides another
+		// agent file — which is how a builder.yaml definition can be replaced
+		// wholesale by an unrelated file that happened to declare name:
+		// "builder".
+		return nil, fmt.Errorf("agent config %s: declared name %q does not match filename; rename the file to %q or set name to match", path, cfg.Name, strings.TrimSuffix(base, filepath.Ext(base)))
 	}
 
 	// model_pools list validation.
@@ -272,6 +280,7 @@ func finalizeAgentConfig(path string, cfg *AgentConfig) (*AgentConfig, error) {
 // Returns an empty (non-nil) map if the directory does not exist or is empty.
 func LoadAgentConfigs(dir string) (map[string]*AgentConfig, error) {
 	configs := make(map[string]*AgentConfig)
+	configPaths := make(map[string]string)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -296,8 +305,12 @@ func LoadAgentConfigs(dir string) (map[string]*AgentConfig, error) {
 		if err != nil {
 			return nil, err
 		}
+		if previousPath, exists := configPaths[cfg.Name]; exists {
+			return nil, fmt.Errorf("duplicate agent name %q in %s and %s", cfg.Name, previousPath, path)
+		}
 
 		configs[cfg.Name] = cfg
+		configPaths[cfg.Name] = path
 	}
 
 	return configs, nil

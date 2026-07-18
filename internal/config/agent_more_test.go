@@ -159,6 +159,41 @@ func TestLoadAgentConfigRejectsUnsupportedExtensionAndInlineModels(t *testing.T)
 	}
 }
 
+func TestLoadAgentConfigRejectsNameFilenameMismatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "builder2.yaml")
+	if err := os.WriteFile(path, []byte("name: builder\nmodel_pools: [default]\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile builder2.yaml: %v", err)
+	}
+
+	_, err := LoadAgentConfig(path)
+	if err == nil {
+		t.Fatal("LoadAgentConfig() error = nil, want name/filename mismatch")
+	}
+	if !strings.Contains(err.Error(), `declared name "builder" does not match filename`) {
+		t.Fatalf("LoadAgentConfig() error = %q, want name/filename mismatch", err)
+	}
+}
+
+func TestLoadAgentConfigsRejectsDuplicateNamesInSameDirectory(t *testing.T) {
+	dir := t.TempDir()
+	for _, filename := range []string{"builder.yaml", "builder.yml"} {
+		path := filepath.Join(dir, filename)
+		if err := os.WriteFile(path, []byte("name: builder\nmodel_pools: [default]\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile %s: %v", filename, err)
+		}
+	}
+
+	_, err := LoadAgentConfigs(dir)
+	if err == nil {
+		t.Fatal("LoadAgentConfigs() error = nil, want duplicate agent name")
+	}
+	if !strings.Contains(err.Error(), `duplicate agent name "builder"`) ||
+		!strings.Contains(err.Error(), "builder.yaml") ||
+		!strings.Contains(err.Error(), "builder.yml") {
+		t.Fatalf("LoadAgentConfigs() error = %q, want both duplicate paths", err)
+	}
+}
+
 func TestBuiltinAndResolvedAgentConfigs(t *testing.T) {
 	builtins := BuiltinAgentConfigs()
 	if builtins["planner"] == nil || builtins["builder"] == nil {
