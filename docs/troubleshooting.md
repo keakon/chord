@@ -312,7 +312,7 @@ See [Performance](./performance.md) for how rendering and streaming are optimize
 What to check:
 
 1. Verify `context.compaction.threshold` is set and greater than 0 (0 disables automatic compaction).
-2. Check the `Context` percentage in the TUI footer or info panel. It is based on the **usable input budget**, not the total context window, so it may be lower than expected (see [Configuration — Context compaction](./configuration.md#context-compaction)).
+2. Check the `Context` percentage in the TUI footer or info panel. It is based on the **usable input budget**, not the total context window, so it may be lower than expected (see [Context management — Compaction](./context-management.md#context-compaction)).
 3. If `context.compaction.reserved` is set, compaction triggers at a lower absolute token count because the reserve is subtracted before applying `threshold`; if compaction is too frequent, check whether reserved is too large.
 4. `/compact --no` temporarily disables automatic compaction for the current session. Restart the session or run `/compact` to re-enable.
 5. If your gateway returns missing or zero usage, enable `log_level: debug` and look for `estimated_input_tokens` and `effective_input_tokens` in automatic-compaction logs.
@@ -330,7 +330,7 @@ What to check:
 3. If build/test logs remain important context, raise `shell_success_bytes`.
 4. For more conservative trimming behavior, raise all `*_age_turns` and `*_bytes` values.
 
-See [Configuration — Context reduction](./configuration.md#context-reduction).
+See [Context management — Reduction](./context-management.md#context-reduction).
 
 ## Requests rejected: "context length" / "input too large"
 

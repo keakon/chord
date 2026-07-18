@@ -12,7 +12,7 @@
 - **配置模型**：[配置与认证](./configuration_CN.md) · [模型配置速查](./model-configs_CN.md) · [示例配置库](./examples/index_CN.md)
 - **安全编辑文件**：[编辑工具](./edit-tools_CN.md) · [权限与安全](./permissions-and-safety_CN.md)
 - **远程控制**：[Headless](./headless_CN.md) · [权限与安全](./permissions-and-safety_CN.md)
-- **长任务**：[使用指南 — `/loop`](./usage_CN.md#loop--持续执行模式)
+- **长任务**：[使用指南 — `/loop`](./usage_CN.md#loop--持续执行模式) · [上下文管理](./context-management_CN.md)
 - **扩展定制**：[扩展与定制](./customization_CN.md) · [Hooks](./hooks_CN.md)
 - **理解性能**：[性能](./performance_CN.md)
 - **排障**：[常见问题排查](./troubleshooting_CN.md)
@@ -27,6 +27,7 @@
 
 - [CLI](./cli_CN.md) —— 所有命令、子命令、flag
 - [配置与认证](./configuration_CN.md) —— `config.yaml`、`auth.yaml`、provider、模型池、完整速查表
+- [上下文管理](./context-management_CN.md) —— 上下文压缩与上下文剪裁：原理、配置、调参
 - [模型配置速查](./model-configs_CN.md) —— 常见 provider / model 家族的可复制片段
 - [内置工具](./tools_CN.md) —— 全部工具名，配权限规则和 hook 过滤器时用
 - [编辑工具](./edit-tools_CN.md) —— `edit`、`patch`、`write` 如何选择，以及参数格式、示例和安全行为

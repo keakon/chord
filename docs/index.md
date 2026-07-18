@@ -12,7 +12,7 @@ Start with what works out of the box; move on to customization and advanced work
 - **Configure models**: [Configuration & Auth](./configuration.md) · [Model configuration recipes](./model-configs.md) · [Examples](./examples/index.md)
 - **Edit files safely**: [Edit tools](./edit-tools.md) · [Permissions & Safety](./permissions-and-safety.md)
 - **Remote control**: [Headless](./headless.md) · [Permissions & Safety](./permissions-and-safety.md)
-- **Long-running tasks**: [Usage — `/loop`](./usage.md#loop--continuous-execution-mode)
+- **Long-running tasks**: [Usage — `/loop`](./usage.md#loop--continuous-execution-mode) · [Context management](./context-management.md)
 - **Extend and customize**: [Customization](./customization.md) · [Hooks](./hooks.md)
 - **Understand performance**: [Performance](./performance.md)
 - **Troubleshoot issues**: [Troubleshooting](./troubleshooting.md)
@@ -27,6 +27,7 @@ Start with what works out of the box; move on to customization and advanced work
 
 - [CLI](./cli.md) — every command, subcommand, and flag
 - [Configuration & Auth](./configuration.md) — `config.yaml`, `auth.yaml`, providers, model pools, full schema cheatsheet
+- [Context management](./context-management.md) — compaction and reduction: how they work, configuration, tuning
 - [Model configuration recipes](./model-configs.md) — copy-paste snippets for common provider/model families
 - [Built-in tools](./tools.md) — every tool name, for permission rules and hook filters
 - [Edit tools](./edit-tools.md) — choose between `edit`, `patch`, and `write`; formats, examples, and safety behavior

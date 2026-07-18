@@ -23,7 +23,7 @@
 | `glob` | 按 glob 模式匹配路径，输出有上限。 |
 | `lsp` | 在指定文件位置做语义化的 definition / references / implementation 查询，需要对应 LSP server 覆盖该文件类型。 |
 
-在 TUI 中，`lsp` 卡片会在头部概括查询动作和位置（例如 `find references internal/agent/main.go:54:17`）。查询完成后会显示位置数量，并在适用时显示涉及的文件数。工作目录内的路径会显示为相对路径，展开详情仍保留每个返回的 `path:line:character` 位置。默认的 `include_declaration=true` 不会显示；引用查询排除声明时会明确标注。
+在 TUI 中，`lsp` 卡片会在头部概括查询动作和位置（例如 `find references internal/agent/main.go:54:17`），查询完成后显示位置数量，展开详情可看到每个返回的 `path:line:character` 位置。
 
 ## 执行
 
@@ -66,19 +66,13 @@
 
 ### 长文本控制工具
 
-`done`、`complete` 和 `escalate` 可能携带较长的 Markdown 报告、总结或升级原因。参数仍在流式接收时，TUI 会临时显示 `N chars received`。参数接收完成后，该提示会移除；展开工具卡时，正文会按 Markdown 渲染。
+`done`、`complete` 和 `escalate` 可能携带较长的 Markdown 报告、总结或升级原因。参数仍在流式接收时，TUI 会临时显示 `N chars received`；接收完成后，展开工具卡即可看到按 Markdown 渲染的正文。`complete` 还会保留结构化完成信息，例如修改文件、验证命令、限制、风险、后续建议和 artifact 引用。
 
-`complete` 还会保留结构化完成信息，例如修改文件、验证命令、限制、风险、后续建议和 artifact 引用。成功的 `escalate` 不会在结果行中重复显示完整 reason。`write` 等源码预览工具，以及 `shell`、`read`、`grep` 等原始输出工具仍使用各自的专用预览，不会把所有输出都当作 Markdown。
+`delegate` 只有一个工具结果，即异步启动句柄。后续 `complete` 调用和 mailbox 更新是独立的 runtime 事件，按稳定的 `task_id` 更新已有委派任务/卡片，不会生成额外的 `delegate` 工具结果。每次 `complete` 报告都会在 owner 视图创建一张 **AGENT COMPLETE** 通知卡；worker 终止失败显示为 **AGENT BLOCKED**，并唤醒直接 owner。
 
-`delegate` 只有一个工具结果，即异步启动句柄。后续 `complete` 调用和 mailbox 更新是独立的 runtime 事件；它们按稳定的 `task_id` 更新已有委派任务/卡片，不会生成额外的 `delegate` 工具结果。worker 报告完成后仍可被要求继续，并再次调用 `complete`，但这不会创建新的委派返回值。
+agent 间消息遵守请求边界：目标 busy 时，消息只入队并随其下一次 LLM 请求一并处理，不打断当前请求；目标空闲但可恢复时，Chord 会唤醒它；纯 progress 更新不会强制本来空闲的 agent 启动。
 
-每次 `complete` 报告都会在更新已有 `delegate` 卡片的同时，在直接 owner 的视图创建一张可见的 **AGENT COMPLETE** 通知卡。agent 间通知和 worker 终止失败也会在目标视图创建消息卡；终止失败显示为 **AGENT BLOCKED**，并唤醒直接 owner。
-
-需要处理的 agent 消息遵守请求边界：目标 busy 时，Chord 只把消息入队，不打断当前 LLM 请求或工具批次，并在下一次请求中一并处理；目标不在运行但允许恢复时，Chord 会唤醒它处理消息。纯 progress 更新保持低打扰，只追加上下文，不会强制本来空闲的 agent 启动。
-
-对于已知支持该能力的 provider family，SubAgent 请求会沿用 loop 模式，以 `tool_choice=required` 作为尽力而为的输出约束；这仍允许模型先输出说明正文，再调用工具。runtime 仍是可靠性兜底：忽略提示、只返回正文或发生暂时性流中断时，会获得一次有界的后续请求，明确要求调用 `complete`、`escalate` 或 `notify`；中断前已经输出的文本会保留到恢复上下文。如果 worker 仍不能发出协调工具，或再次发生终止错误，Chord 会将其标记为 failed、发送紧急 risk alert 并唤醒 owner，避免委派链静默断开。
-
-SubAgent 失败不会被转换成 `complete`。当 provider / 模型重试耗尽，或恢复后的 worker 无法启动时，Chord 会以 failed 终态关闭该 runtime、记录 `risk_alert`，并唤醒 owner/MainAgent。Rehydrate 后的 runtime 可能获得新的 `agent_id`；后续协调应使用稳定的委派 `task_id`。
+委派状态以 runtime 为准，而不是以模型输出为准。worker 未能调用协调工具（`complete`、`escalate` 或 `notify`）时，会获得一次有界的后续请求；若仍然无法完成，或 provider/模型重试耗尽，Chord 会将其标记为 failed、记录 `risk_alert` 并唤醒 owner。Rehydrate 后的 runtime 可能获得新的 `agent_id`；后续协调应使用稳定的委派 `task_id`。
 
 ## MCP 工具
 

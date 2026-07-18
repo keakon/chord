@@ -20,11 +20,11 @@ A named parameter preset for a single model — for example `claude-opus-4.8@hig
 
 ## Compaction
 
-The runtime process of summarizing earlier conversation into a compact context summary so a long session can keep going without exceeding the model's context window. Auto-compaction means Chord triggers this process before the request gets too large; you can also trigger it manually with `/compact`. See [Configuration — Compaction](./configuration.md#context-compaction).
+The runtime process of summarizing earlier conversation into a compact context summary so a long session can keep going without exceeding the model's context window. Auto-compaction means Chord triggers this process before the request gets too large; you can also trigger it manually with `/compact`. See [Context management — Compaction](./context-management.md#context-compaction).
 
 ## Reduction (context reduction)
 
-A lightweight, deterministic pruning pass that runs before every LLM request. It trims stale tool results from the current prompt based on age and size heuristics — it never modifies saved session history on disk. Unlike compaction, reduction does not call an LLM and is entirely invisible to users. See [Configuration — Reduction](./configuration.md#context-reduction).
+A lightweight, deterministic pruning pass that runs before every LLM request. It trims stale tool results from the current prompt based on age and size heuristics — it never modifies saved session history on disk. Unlike compaction, reduction does not call an LLM and is entirely invisible to users. See [Context management — Reduction](./context-management.md#context-reduction).
 
 ## Service tier
 

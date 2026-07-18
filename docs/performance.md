@@ -23,7 +23,7 @@ Chord is optimized for long interactive sessions: large transcripts, streaming m
 
 Not all performance work is UI-side. Chord also reduces model-side cost by pruning stale tool outputs at request time, preserving structured summaries, and compacting long-running conversations before they hit the model limit. These optimizations reduce latency, token usage, and provider cost without deleting durable session history.
 
-See [Configuration & Auth](./configuration.md#context-reduction) for the available context reduction settings.
+See [Context management — Reduction](./context-management.md#context-reduction) for the available context reduction settings.
 
 ## If Chord feels slow
 

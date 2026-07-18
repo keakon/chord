@@ -304,7 +304,7 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 排查步骤：
 
 1. 确认 `context.compaction.threshold` 是否已设置且大于 0（0 表示关闭自动压缩）。
-2. 检查 TUI 底部栏或信息面板的 `Context` 百分比。它按**可用输入预算**计算，不是按总窗口大小，所以可能比预期的低（详见 [配置 — 上下文压缩](./configuration_CN.md#上下文压缩compaction)）。
+2. 检查 TUI 底部栏或信息面板的 `Context` 百分比。它按**可用输入预算**计算，不是按总窗口大小，所以可能比预期的低（详见 [上下文管理 — 上下文压缩](./context-management_CN.md#上下文压缩compaction)）。
 3. 如果设置了 `context.compaction.reserved`，由于会先扣除预留再应用 `threshold`，自动压缩会在更低的绝对 token 数触发；若压缩过于频繁，可检查 reserved 是否设得过大。
 4. `/compact --no` 会临时关闭当前会话的自动压缩；重新启动会话或执行 `/compact` 可恢复。
 5. 如果网关返回缺失或为 0 的用量数据，请开启 `log_level: debug`，并在自动压缩日志中查看 `estimated_input_tokens` 和 `effective_input_tokens`。
@@ -322,7 +322,7 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 3. 如果构建 / 测试日志仍然是重要上下文，可调高 `shell_success_bytes`。
 4. 如果希望更保守的裁剪行为，整体调高各 `*_age_turns` 和 `*_bytes` 参数。
 
-详见 [配置 — 上下文剪裁](./configuration_CN.md#上下文剪裁reduction)。
+详见 [上下文管理 — 上下文剪裁](./context-management_CN.md#上下文剪裁reduction)。
 
 ## 请求被拒绝：`context length` / `input too large`
 

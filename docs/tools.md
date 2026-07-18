@@ -23,7 +23,7 @@ For how `allow` / `ask` / `deny` are evaluated — including the special couplin
 | `glob` | Path matching by glob pattern(s), with output caps. |
 | `lsp` | Semantic definition / references / implementation lookup at a file position, when an LSP server covers the file type. |
 
-In the TUI, an `lsp` card summarizes the operation and query position in its header (for example, `find references internal/agent/main.go:54:17`). Completed queries show the location count and, when applicable, the number of files. Paths inside the working directory are displayed relative to it, while the expandable details retain every returned `path:line:character` location. The default `include_declaration=true` setting is omitted; reference queries explicitly show when declarations are excluded.
+In the TUI, an `lsp` card shows the operation and query position in its header (for example, `find references internal/agent/main.go:54:17`), the location count once the query completes, and every returned `path:line:character` location in the expandable details.
 
 ## Execution
 
@@ -66,19 +66,13 @@ These tools control agent workflows rather than local side effects. YOLO mode do
 
 ### Long-text control tools
 
-`done`, `complete`, and `escalate` may carry a long Markdown report, summary, or escalation reason. While their arguments are still streaming, the TUI shows a temporary `N chars received` indicator. Once the arguments are complete, the indicator is removed and the prose is rendered as Markdown when the tool card is expanded.
+`done`, `complete`, and `escalate` may carry a long Markdown report, summary, or escalation reason. While the arguments are still streaming, the TUI shows a temporary `N chars received` indicator; once they are complete, the prose is rendered as Markdown when the tool card is expanded. `complete` also keeps structured completion details, such as changed files, verification runs, limitations, risks, follow-up recommendations, and artifact references.
 
-`complete` also keeps structured completion details, such as changed files, verification runs, limitations, risks, follow-up recommendations, and artifact references. A successful `escalate` does not repeat its reason in the result line. Source-oriented tools such as `write`, and raw-output tools such as `shell`, `read`, and `grep`, retain their specialized previews rather than treating all output as Markdown.
+`delegate` has one tool result: the asynchronous startup handle. Later `complete` calls and mailbox updates are separate runtime events that update the existing delegated task/card by stable `task_id`; they never produce additional `delegate` tool results. Each `complete` report raises an owner-visible **AGENT COMPLETE** notification card, and terminal worker failures are shown as **AGENT BLOCKED** and wake the direct owner.
 
-`delegate` has one tool result: the asynchronous startup handle. Later `complete` calls and mailbox updates are separate runtime events; they update the existing delegated task/card by stable `task_id` and never produce additional `delegate` tool results. A worker may be continued after a completion report and call `complete` again without creating another delegation result.
+Agent-to-agent messages respect request boundaries: if the target is busy, the message is queued and included in its next LLM request instead of interrupting the active one; if the target is idle but resumable, Chord wakes it; progress-only updates never force an otherwise idle agent to run.
 
-Each `complete` report also creates an owner-visible **AGENT COMPLETE** notification card while updating the existing `delegate` card. Agent-to-agent notifications and terminal worker failures create target-visible message cards; terminal failures are shown as **AGENT BLOCKED** and wake the direct owner.
-
-Actionable agent messages obey request boundaries. If the target is busy, Chord queues the message without interrupting the active LLM request or tool batch and includes it in the next request. If the target is not running but can resume, Chord wakes it to process the message. Progress-only updates remain low-noise context updates and do not force an otherwise idle agent to run.
-
-For provider families known to support it, SubAgent requests use `tool_choice=required` as a best-effort output constraint, following loop mode. This still allows explanatory text before a tool call. Runtime remains the source of truth: a model that ignores the hint, returns text only, or suffers a transient stream interruption receives one bounded follow-up requiring `complete`, `escalate`, or `notify`. Partial streamed text is preserved for that recovery request. If the worker still cannot emit a coordination tool, or another terminal error occurs, Chord marks it failed, sends an urgent risk alert, and wakes the owner instead of leaving the delegation disconnected.
-
-SubAgent failures are not converted into `complete`. After provider/model retries are exhausted, or when a resumed worker cannot start, Chord closes that runtime as failed, records a `risk_alert`, and wakes its owner/MainAgent. A rehydrated runtime may receive a new `agent_id`; coordination should continue through the stable delegated `task_id`.
+The runtime, not the model, is the source of truth for delegation state. A worker that fails to emit a coordination tool (`complete`, `escalate`, or `notify`) receives one bounded follow-up request; if it still cannot comply, or provider/model retries are exhausted, Chord marks it failed, records a `risk_alert`, and wakes the owner. A rehydrated runtime may receive a new `agent_id`; coordination should continue through the stable delegated `task_id`.
 
 ## MCP tools
 

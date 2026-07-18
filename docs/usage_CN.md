@@ -172,7 +172,7 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 - `/models`：查看模型池状态或切换当前视图对象的模型池（main 视图 = 当前主角色；SubAgent 视图 = 该 agent）
 - `/models --agent <name> <pool>`：直接设置指定 agent 的模型池
 - `/mcp`：打开 MCP server 选择器；`/mcp status` 输出状态；`/mcp enable|disable <server>` 可切换手动 server。运行时切换会在下一次 LLM 请求生效，不影响当前正在进行的请求。
-- `/compact`：手动触发上下文压缩，将当前对话摘要为结构化归档，详见 [配置 — 上下文压缩](./configuration_CN.md#上下文压缩compaction)
+- `/compact`：手动触发上下文压缩，将当前对话摘要为结构化归档，详见 [上下文管理 — 上下文压缩](./context-management_CN.md#上下文压缩compaction)
 - `/tier standard|fast|slow`：设置后续模型请求的 service tier（包括尚未开始的后续 retry round）。空的 `/tier` 不是状态查询命令；当前有效 tier 请看侧边栏/状态显示。如果手动输入当前 provider/model 不支持的 tier，Chord 会保持当前 tier 不变并显示错误提示。
 - `/yolo on|off`：临时绕过 MainAgent 工具权限，但仍保留 handoff、delegate、cancel 和 done 权限。Agent 运行中也可以切换 YOLO；执行期权限绕过会立刻影响后续工具调用，而 LLM 可见的工具描述和权限提示会在下一次请求刷新。
 - `/help`：切换内置 cheatsheet 浮层（等同 Normal 模式按 `?`）

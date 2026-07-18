@@ -23,7 +23,7 @@ Chord 面向长时间交互会话做了性能优化：大 transcript、模型流
 
 性能不只在 UI 侧。Chord 还会在请求时裁剪陈旧工具输出、保留结构化摘要，并在长会话接近模型限制前做压缩。这些优化能降低延迟、token 用量和 provider 成本，同时不删除持久会话历史。
 
-可配置项见[配置与认证](./configuration_CN.md#上下文剪裁reduction)。
+可配置项见[上下文管理 — 上下文剪裁](./context-management_CN.md#上下文剪裁reduction)。
 
 ## 感觉变慢时
 
