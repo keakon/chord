@@ -18,6 +18,10 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+// maxCompactResponseBytes bounds the compaction response body read as an OOM
+// backstop. Real summaries are orders of magnitude smaller.
+const maxCompactResponseBytes = 64 << 20
+
 type responsesCompactOutputItem struct {
 	Type             string                  `json:"type"`
 	Role             string                  `json:"role,omitempty"`
@@ -194,7 +198,9 @@ func (r *ResponsesProvider) Compact(
 		}
 		return nil, apiErr
 	}
-	respBody, err := io.ReadAll(httpResp.Body)
+	// Bound the success-path read as an OOM backstop against a misbehaving or
+	// compromised endpoint; a real compaction summary is far smaller.
+	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, maxCompactResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("read compact response body: %w", err)
 	}
