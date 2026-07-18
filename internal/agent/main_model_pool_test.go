@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
@@ -201,6 +202,82 @@ func TestRuntimeModelPoolPolicyFallbackRespectsModelPoolsOrder(t *testing.T) {
 	p := NewRuntimeModelPoolPolicy()
 	if pool := p.EffectivePool("builder", cfg); pool != "thinking" {
 		t.Fatalf("fallback should respect model_pools list order: got %q, want %q", pool, "thinking")
+	}
+}
+
+func TestApplySessionModelPoolStateRewritesMissingPoolsByOwningAgent(t *testing.T) {
+	agents := map[string]*config.AgentConfig{
+		"builder": {
+			Name:       "builder",
+			Mode:       config.AgentModeMain,
+			ModelPools: []string{"gpt-5.6-sol-high", "gpt-5.6-sol-max"},
+		},
+		"planner": {
+			Name:       "planner",
+			Mode:       config.AgentModeMain,
+			ModelPools: []string{"free", "gpt-5.6-sol-high"},
+		},
+		"reviewer": {
+			Name:       "reviewer",
+			Mode:       config.AgentModeSubAgent,
+			ModelPools: []string{"glm", "free"},
+		},
+		"explorer": {
+			Name:       "explorer",
+			Mode:       config.AgentModeSubAgent,
+			ModelPools: []string{"free", "glm"},
+		},
+	}
+	globalPools := map[string][]string{
+		"gpt-5.6-sol-high": {"provider/high"},
+		"gpt-5.6-sol-max":  {"provider/max"},
+		"glm":              {"provider/glm"},
+		"free":             {"provider/free"},
+	}
+	if err := config.ResolveAgentModelPools(agents, globalPools); err != nil {
+		t.Fatalf("ResolveAgentModelPools: %v", err)
+	}
+
+	statePath := filepath.Join(t.TempDir(), "model_pool_state.yaml")
+	a := &MainAgent{
+		agentConfigs:       agents,
+		activeConfig:       agents["planner"],
+		modelPoolPolicy:    NewRuntimeModelPoolPolicy(),
+		modelPoolStatePath: statePath,
+	}
+	a.applySessionModelPoolState(&loadedSessionState{
+		ActiveRole:                "builder",
+		ModelPoolCurrentModelPool: "gpt-5.6-sol",
+		ModelPoolAgentOverrides: map[string]string{
+			"reviewer": "removed-review-pool",
+			"explorer": "glm",
+		},
+	})
+
+	if got := a.modelPoolPolicy.CurrentModelPool(); got != "gpt-5.6-sol-high" {
+		t.Fatalf("CurrentModelPool() = %q, want builder's first pool", got)
+	}
+	if got, ok := a.modelPoolPolicy.AgentOverride("reviewer"); !ok || got != "glm" {
+		t.Fatalf("reviewer override = %q, %v; want first reviewer pool", got, ok)
+	}
+	if got, ok := a.modelPoolPolicy.AgentOverride("explorer"); !ok || got != "glm" {
+		t.Fatalf("explorer override = %q, %v; want valid restored pool preserved", got, ok)
+	}
+
+	persisted, err := config.LoadModelPoolState(statePath)
+	if err != nil {
+		t.Fatalf("LoadModelPoolState: %v", err)
+	}
+	if persisted.CurrentModelPool != "gpt-5.6-sol-high" || persisted.AgentOverrides["reviewer"] != "glm" {
+		t.Fatalf("persisted state = %#v, want rewritten selections", persisted)
+	}
+
+	a.modelPoolPolicy = NewRuntimeModelPoolPolicy()
+	a.applySessionModelPoolState(&loadedSessionState{
+		ModelPoolCurrentModelPool: "removed-pool",
+	})
+	if got := a.modelPoolPolicy.CurrentModelPool(); got != "free" {
+		t.Fatalf("CurrentModelPool() without restored active role = %q, want current role's first pool", got)
 	}
 }
 

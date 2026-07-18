@@ -498,10 +498,93 @@ func (a *MainAgent) applySessionModelPoolState(loaded *loadedSessionState) {
 	if a.modelPoolPolicy == nil || loaded == nil {
 		return
 	}
-	if strings.TrimSpace(loaded.ModelPoolCurrentModelPool) == "" && len(loaded.ModelPoolAgentOverrides) == 0 {
+	currentPool := strings.TrimSpace(loaded.ModelPoolCurrentModelPool)
+	overrides := loaded.ModelPoolAgentOverrides
+	if currentPool == "" && len(overrides) == 0 {
 		return
 	}
-	a.modelPoolPolicy.ReplaceSelectionsForSessionRestore(strings.TrimSpace(loaded.ModelPoolCurrentModelPool), loaded.ModelPoolAgentOverrides)
+
+	// A restored session may reference a model pool that has since been removed
+	// from the owning agent's model_pools (e.g. the pool was split/renamed after
+	// the session was created). The runtime policy already falls back to the
+	// agent's first pool when an effective pool is missing, but the restored
+	// selection itself would otherwise keep carrying the stale name — surfacing
+	// as a "(missing)" status and dirty persisted state. Rewrite stale selections
+	// to the owning agent's first pool so the displayed/persisted selection stays
+	// consistent with what actually runs.
+	agentConfigs := a.snapshotAgentConfigs()
+
+	rewrittenCurrent := currentPool
+	if rewrittenCurrent != "" {
+		roleName := strings.TrimSpace(loaded.ActiveRole)
+		if roleName == "" {
+			if activeCfg := a.currentActiveConfig(); activeCfg != nil && !activeCfg.IsSubAgent() {
+				roleName = strings.TrimSpace(activeCfg.Name)
+			}
+		}
+		if cfg, ok := agentConfigs[roleName]; ok && cfg != nil && !cfg.IsSubAgent() && !cfg.HasPool(rewrittenCurrent) {
+			rewrittenCurrent = firstPoolName(cfg)
+		}
+	}
+
+	rewrittenOverrides := make(map[string]string, len(overrides))
+	for agentName, pool := range overrides {
+		agentName = strings.TrimSpace(agentName)
+		pool = strings.TrimSpace(pool)
+		if agentName == "" || pool == "" {
+			continue
+		}
+		if cfg, ok := agentConfigs[agentName]; ok && cfg != nil && !cfg.HasPool(pool) {
+			pool = firstPoolName(cfg)
+		}
+		if pool != "" {
+			rewrittenOverrides[agentName] = pool
+		}
+	}
+
+	rewritten := rewrittenCurrent != currentPool ||
+		len(rewrittenOverrides) != len(overrides)
+	if !rewritten {
+		for agentName, pool := range overrides {
+			if got, ok := rewrittenOverrides[agentName]; !ok || got != pool {
+				rewritten = true
+				break
+			}
+		}
+	}
+
+	a.modelPoolPolicy.ReplaceSelectionsForSessionRestore(rewrittenCurrent, rewrittenOverrides)
+
+	// Keep the project-level pool state aligned with the effective selection.
+	// The session snapshot is updated by the normal recovery snapshot flow.
+	if rewritten {
+		a.saveModelPoolState()
+	}
+}
+
+func (a *MainAgent) snapshotAgentConfigs() map[string]*config.AgentConfig {
+	a.stateMu.RLock()
+	defer a.stateMu.RUnlock()
+	if a.agentConfigs == nil {
+		return nil
+	}
+	out := make(map[string]*config.AgentConfig, len(a.agentConfigs))
+	for name, cfg := range a.agentConfigs {
+		out[name] = cfg
+	}
+	return out
+}
+
+// firstPoolName returns the agent's first model pool name, or "" if it defines none.
+func firstPoolName(cfg *config.AgentConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	names := cfg.PoolNames()
+	if len(names) == 0 {
+		return ""
+	}
+	return names[0]
 }
 
 func (a *MainAgent) saveModelPoolState() {
