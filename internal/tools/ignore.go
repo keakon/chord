@@ -139,6 +139,13 @@ func (m *gitIgnoreMatcher) Match(relPath string, isDir bool) bool {
 	if m == nil {
 		return false
 	}
+	// The search root itself ("." relative to the .gitignore location) is never
+	// subject to its own ignore rules, mirroring git semantics. Without this a
+	// common pattern like ".*" matches the literal "." and silently skips the
+	// entire walk.
+	if relPath == "." || relPath == "" {
+		return false
+	}
 
 	// Walk through patterns in order; last matching pattern wins.
 	result := false

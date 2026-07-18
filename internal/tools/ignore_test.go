@@ -20,6 +20,37 @@ func TestSkipDirNames(t *testing.T) {
 	}
 }
 
+// TestGitIgnoreMatcherNeverIgnoresRoot guards against hidden-file patterns
+// like ".*" matching the literal "." for the search root itself, which used
+// to make Grep silently skip the entire tree of any repo whose .gitignore
+// hides dotfiles.
+func TestGitIgnoreMatcherNeverIgnoresRoot(t *testing.T) {
+	dir := t.TempDir()
+	gitignore := `.*
+!.gitignore
+`
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newGitIgnoreMatcher(dir)
+	if m == nil {
+		t.Fatal("expected non-nil matcher")
+	}
+	if m.Match(".", true) {
+		t.Fatal(`Match(".", true) = true; the search root itself must never be ignored`)
+	}
+	if m.Match("", true) {
+		t.Fatal(`Match("", true) = true; empty rel path must never be ignored`)
+	}
+	if !m.Match(".hidden", false) {
+		t.Fatal(`Match(".hidden", false) = false, want true for dotfile pattern`)
+	}
+	if m.Match("main.go", false) {
+		t.Fatal(`Match("main.go", false) = true, want false`)
+	}
+}
+
 func TestGitIgnoreMatcherSimple(t *testing.T) {
 	dir := t.TempDir()
 	gitignore := `.chord/
