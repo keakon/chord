@@ -4377,6 +4377,12 @@ func TestViewShowsWelcomeVersionOnEmptySession(t *testing.T) {
 	if !strings.Contains(got, "ctrl+p: model pool") {
 		t.Fatalf("View() should describe Ctrl+P as model pool selection, got %q", got)
 	}
+	if !strings.Contains(got, "terminal paste: text") {
+		t.Fatalf("View() should describe text paste without guessing the client OS, got %q", got)
+	}
+	if strings.Contains(got, "cmd+v: paste text") || strings.Contains(got, "ctrl+shift+v: paste text") {
+		t.Fatalf("View() should not infer the terminal paste shortcut from the host OS, got %q", got)
+	}
 	lines := strings.Split(got, "\n")
 	for i, line := range lines {
 		if strings.Contains(line, "CHORD") {

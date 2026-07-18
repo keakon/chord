@@ -126,10 +126,20 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 		// Do not key off agent message history here because the TUI appends
 		// blocks immediately on user input.
 		if len(m.viewport.blocks) == 0 {
-			welcomeHints := []string{
-				DimStyle.Render("Press ? for help · /help for commands"),
-				DimStyle.Render("i: insert  /: search  ctrl+p: model pool  ctrl+t: directory"),
-				DimStyle.Render("enter: send  ctrl+v/alt+v: attach image/PDF  cmd+v: paste text"),
+			// Hints must match the active mode: the TUI starts in Insert mode,
+			// where "?" would just type a character instead of opening help.
+			var welcomeHints []string
+			if m.mode == ModeInsert {
+				welcomeHints = []string{
+					DimStyle.Render("Type your task and press enter to send · /help for commands"),
+					DimStyle.Render("esc: normal mode (? for help)  ctrl+p: model pool"),
+					DimStyle.Render("ctrl+v/alt+v: attach image/PDF  terminal paste: text"),
+				}
+			} else {
+				welcomeHints = []string{
+					DimStyle.Render("Press ? for help · /help for commands"),
+					DimStyle.Render("i: insert  /: search  ctrl+p: model pool  ctrl+t: directory"),
+				}
 			}
 			emptyMessage := DimStyle.Render("No messages yet. Start a conversation!")
 			if m.startupRestorePending {
