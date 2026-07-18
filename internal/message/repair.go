@@ -16,14 +16,17 @@ func assistantDeclaresToolCall(msg Message, callID string) bool {
 // older runtimes: one or more tool results could be appended immediately before
 // the assistant message that declared them. Only a contiguous block where every
 // result is uniquely justified by that following assistant is moved.
+// Copy-on-write: the input slice is returned unchanged until the first move.
 func repairAdjacentOutOfOrderToolResults(msgs []Message) []Message {
 	if len(msgs) < 2 {
 		return msgs
 	}
-	out := make([]Message, 0, len(msgs))
+	var out []Message
 	for i := 0; i < len(msgs); {
 		if msgs[i].Role != RoleTool {
-			out = append(out, msgs[i])
+			if out != nil {
+				out = append(out, msgs[i])
+			}
 			i++
 			continue
 		}
@@ -32,7 +35,9 @@ func repairAdjacentOutOfOrderToolResults(msgs []Message) []Message {
 			end++
 		}
 		if end >= len(msgs) || msgs[end].Role != RoleAssistant {
-			out = append(out, msgs[i:end]...)
+			if out != nil {
+				out = append(out, msgs[i:end]...)
+			}
 			i = end
 			continue
 		}
@@ -44,13 +49,21 @@ func repairAdjacentOutOfOrderToolResults(msgs []Message) []Message {
 			}
 		}
 		if !canMove {
-			out = append(out, msgs[i:end]...)
+			if out != nil {
+				out = append(out, msgs[i:end]...)
+			}
 			i = end
 			continue
+		}
+		if out == nil {
+			out = append(make([]Message, 0, len(msgs)), msgs[:i]...)
 		}
 		out = append(out, msgs[end])
 		out = append(out, msgs[i:end]...)
 		i = end + 1
+	}
+	if out == nil {
+		return msgs
 	}
 	return out
 }
@@ -100,4 +113,21 @@ func RepairOrphanToolResults(msgs []Message) ([]Message, int) {
 		out = append(out, msg)
 	}
 	return out, removed
+}
+
+// CountDroppedOrphanToolResults reports how many tool-role messages
+// RepairOrphanToolResults would drop, without allocating the repaired copy.
+// Use this when only the drop count matters (e.g. request-surface reuse checks).
+func CountDroppedOrphanToolResults(msgs []Message) int {
+	if len(msgs) == 0 {
+		return 0
+	}
+	msgs = repairAdjacentOutOfOrderToolResults(msgs)
+	removed := 0
+	for i := range msgs {
+		if msgs[i].Role == RoleTool && !toolMessageSupportedByHistory(msgs, i) {
+			removed++
+		}
+	}
+	return removed
 }
