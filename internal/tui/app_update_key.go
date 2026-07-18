@@ -40,6 +40,10 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 
+	return m.handleModeKey(msg)
+}
+
+func (m *Model) handleModeKey(msg tea.KeyMsg) tea.Cmd {
 	switch m.mode {
 	case ModeInsert:
 		return m.handleInsertKey(msg)

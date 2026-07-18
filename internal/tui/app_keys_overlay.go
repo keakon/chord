@@ -92,47 +92,10 @@ func (m *Model) clearPendingQuitForKey(msg tea.KeyMsg) {
 }
 
 func (m *Model) handleCtrlC() tea.Cmd {
+	if m.mode != ModeInsert && m.mode != ModeNormal {
+		return m.handleModeKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	}
 	now := time.Now()
-	if m.mode == ModeConfirm && m.confirm.request != nil {
-		return m.resolveConfirm(ConfirmResult{Action: ConfirmDeny})
-	}
-	if m.mode == ModeQuestion && m.question.request != nil {
-		return m.cancelQuestion()
-	}
-	if m.mode == ModeSearch {
-		ClearSearch(&m.search.State)
-		m.search.Input.Blur()
-		cmd := m.restoreModeWithIME(m.search.PrevMode)
-		m.recalcViewportSize()
-		return cmd
-	}
-	if m.mode == ModeModelSelect {
-		prevMode := m.modelSelect.prevMode
-		cmd := m.restoreModeWithIME(prevMode)
-		m.recalcViewportSize()
-		if prevMode == ModeInsert {
-			return tea.Batch(cmd, m.input.Focus())
-		}
-		return cmd
-	}
-	if m.mode == ModeMCPSelect {
-		return m.closeMCPSelect()
-	}
-	if m.mode == ModeSessionSelect {
-		prevMode := m.sessionSelect.prevMode
-		cmd := m.restoreModeWithIME(prevMode)
-		m.recalcViewportSize()
-		if prevMode == ModeInsert {
-			return tea.Batch(cmd, m.input.Focus())
-		}
-		return cmd
-	}
-	if m.mode == ModeUsageStats {
-		return m.closeUsageStats()
-	}
-	if m.mode == ModeErrorPanel {
-		return m.closeErrorPanel()
-	}
 	if m.quit.by == "ctrl+c" && !m.quit.at.IsZero() && now.Sub(m.quit.at) < pendingQuitWindow {
 		m.clearPendingQuit()
 		m.quitting = true

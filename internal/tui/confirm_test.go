@@ -705,6 +705,47 @@ func TestHandleConfirmDoneForceDenyIgnoresDenyShortcut(t *testing.T) {
 	}
 }
 
+func TestCtrlCUsesConfirmEscapeSemantics(t *testing.T) {
+	t.Run("forced denial enters reason input", func(t *testing.T) {
+		m := NewModelWithSize(nil, 100, 30)
+		m.mode = ModeConfirm
+		m.confirm.request = &ConfirmRequest{ToolName: tools.NameDone, ArgsJSON: `{}`, ForceDenyReason: true}
+
+		_ = m.handleCtrlC()
+
+		if !m.confirm.denyingWithReason {
+			t.Fatal("Ctrl+C should enter the required denial-reason input")
+		}
+		select {
+		case result := <-m.confirmResultCh:
+			t.Fatalf("Ctrl+C bypassed the required denial reason: %#v", result)
+		default:
+		}
+	})
+
+	t.Run("argument editing returns to confirmation", func(t *testing.T) {
+		m := NewModelWithSize(nil, 100, 30)
+		m.mode = ModeConfirm
+		m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{}`}
+		m.confirm.editing = true
+		m.confirm.editInput = newConfirmTextarea(m.width, m.height, `{}`)
+
+		_ = m.handleCtrlC()
+
+		if m.confirm.editing {
+			t.Fatal("Ctrl+C should leave argument editing like Escape")
+		}
+		if m.mode != ModeConfirm || m.confirm.request == nil {
+			t.Fatal("Ctrl+C should return to the confirmation instead of denying it")
+		}
+		select {
+		case result := <-m.confirmResultCh:
+			t.Fatalf("Ctrl+C unexpectedly resolved the confirmation: %#v", result)
+		default:
+		}
+	})
+}
+
 func TestHandleConfirmForceDenyIgnoresAllowShortcut(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmResultCh = make(chan ConfirmResult, 1)
