@@ -496,7 +496,6 @@ func (m *Model) resetStatusBarCopyRegions() {
 // renderStatusBar builds the bottom status line using pill-styled components.
 func (m *Model) renderStatusBar() string {
 	var pills []string
-	shortHelp := ""
 	quitHint := ""
 	inputs := m.statusBarInputs(time.Now())
 	snap := inputs.Snapshot
@@ -513,10 +512,6 @@ func (m *Model) renderStatusBar() string {
 
 	pills = m.buildStatusBarLeadingPills(inputs)
 	sessionID := snap.sessionID
-
-	if m.width >= 80 {
-		shortHelp = ""
-	}
 
 	// Only show technical details in status bar if InfoPanel is HIDDEN.
 	if !inputs.InfoPanelVisible {
@@ -547,15 +542,6 @@ func (m *Model) renderStatusBar() string {
 		m.cachedStatusBarPillsKey = leftPillsKey
 		m.cachedStatusBarLeftSide = leftSide
 		m.cachedStatusBarLeftW = leftWidth
-	}
-	if shortHelp != "" {
-		leftSide = lipgloss.JoinHorizontal(
-			lipgloss.Center,
-			leftSide,
-			DimStyle.Render("  ·  "),
-			shortHelp,
-		)
-		leftWidth = lipgloss.Width(leftSide)
 	}
 	if m.chord.active() {
 		leftSide = lipgloss.JoinHorizontal(
