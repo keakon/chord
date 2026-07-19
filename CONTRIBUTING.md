@@ -69,9 +69,12 @@ make race
 make vet
 make staticcheck
 make gopls-check
+make modernize-check
 make docs-check
 make docs-examples-check
 ```
+
+`make modernize-check` runs the pinned gopls `modernize` command across production and test code. Update `MODERNIZE_VERSION` in the Makefile deliberately when adopting a newer analyzer release; do not replace the pinned version with `@latest`, because new releases may add checks and fail the existing baseline.
 
 `make race` delegates to `scripts/check_ci_race.sh`, the same entry point used
 by GitHub Actions. In addition to `go test -race`, that script rejects

@@ -12,10 +12,12 @@ LOCAL ?= github.com/keakon/chord
 GOIMPORTS ?= goimports
 STATICCHECK ?= staticcheck
 GOPLS ?= gopls
+MODERNIZE_VERSION ?= v0.23.0
+MODERNIZE ?= $(GO) run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@$(MODERNIZE_VERSION)
 
-.PHONY: ci fmt fmt-check deps-check test test-cover race vet staticcheck gopls-check docs-check docs-examples-check bench-tui clean
+.PHONY: ci fmt fmt-check deps-check test test-cover race vet staticcheck gopls-check modernize-check docs-check docs-examples-check bench-tui clean
 
-ci: fmt-check deps-check test-cover race vet staticcheck gopls-check docs-check docs-examples-check
+ci: fmt-check deps-check test-cover race vet staticcheck gopls-check modernize-check docs-check docs-examples-check
 
 fmt:
 	$(GOIMPORTS) -w -local $(LOCAL) .
@@ -50,6 +52,9 @@ staticcheck:
 
 gopls-check:
 	git ls-files -z '*.go' | xargs -0 $(GOPLS) check
+
+modernize-check:
+	$(MODERNIZE) -test $(PKGS)
 
 docs-check:
 	./scripts/check_docs_consistency.sh
