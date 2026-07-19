@@ -202,13 +202,18 @@ func rewriteMailboxLog(sessionDir string, msgs []SubAgentMailboxMessage) error {
 	if err != nil {
 		return fmt.Errorf("open compacted mailbox log: %w", err)
 	}
-	enc := json.NewEncoder(f)
+	w := bufio.NewWriter(f)
+	enc := json.NewEncoder(w)
 	for _, msg := range msgs {
 		msg.Consumed = false
 		if err := enc.Encode(msg); err != nil {
 			_ = f.Close()
 			return fmt.Errorf("write compacted mailbox log: %w", err)
 		}
+	}
+	if err := w.Flush(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("flush compacted mailbox log: %w", err)
 	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("close compacted mailbox log: %w", err)
