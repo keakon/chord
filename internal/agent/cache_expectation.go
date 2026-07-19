@@ -12,13 +12,49 @@ import (
 // cacheExpectationRecord fingerprints the last request actually sent to one
 // running model ref. Provider prompt caches are independent per provider, so
 // expectations are tracked per ref: the next request to the same ref should
-// hit the cache for exactly the unchanged message prefix.
+// hit the cache for exactly the unchanged message prefix. Records are
+// immutable once stored; Source keeps a shallow copy of the sent messages so
+// the next request can reuse Shapes and Tokens for the field-equal prefix
+// instead of re-hashing the whole conversation.
 type cacheExpectationRecord struct {
+	Source      []message.Message
 	Shapes      []stableReductionMessageShape
 	Tokens      []int
 	ToolDefHash [sha256.Size]byte
 	PromptHash  [sha256.Size]byte
 	SentAt      time.Time
+}
+
+// incrementalCacheExpectationShapes computes the shape and token-estimate
+// slices for messages, reusing the previous record's entries for the leading
+// run of messages that are field-equal to the previously sent request.
+// stableReductionMessageEquivalent covers every field that
+// stableReductionMessageShapeOf hashes and ctxmgr.EstimateMessageTokens reads,
+// so equivalence guarantees identical shape and token values. In the
+// append-only steady state only the new tail is hashed; when the whole request
+// is unchanged the previous slices are returned as-is.
+func incrementalCacheExpectationShapes(previous *cacheExpectationRecord, messages []message.Message) (shapes []stableReductionMessageShape, tokens []int, source []message.Message) {
+	reusable := 0
+	if previous != nil && len(previous.Source) == len(previous.Shapes) && len(previous.Source) == len(previous.Tokens) {
+		limit := min(len(previous.Source), len(messages))
+		for reusable < limit && stableReductionMessageEquivalent(&previous.Source[reusable], &messages[reusable]) {
+			reusable++
+		}
+		if reusable == len(messages) && len(previous.Source) == len(messages) {
+			return previous.Shapes, previous.Tokens, previous.Source
+		}
+	}
+	shapes = make([]stableReductionMessageShape, len(messages))
+	tokens = make([]int, len(messages))
+	if reusable > 0 {
+		copy(shapes, previous.Shapes[:reusable])
+		copy(tokens, previous.Tokens[:reusable])
+	}
+	for i := reusable; i < len(messages); i++ {
+		shapes[i] = stableReductionMessageShapeOf(&messages[i])
+		tokens[i] = ctxmgr.EstimateMessageTokens(messages[i])
+	}
+	return shapes, tokens, append([]message.Message(nil), messages...)
 }
 
 // noteCacheExpectation compares the outgoing request against the previous
@@ -32,15 +68,18 @@ func (a *MainAgent) noteCacheExpectation(modelRef string, messages []message.Mes
 	if a == nil || modelRef == "" || len(messages) == 0 {
 		return nil
 	}
-	shapes := stableReductionMessageShapes(messages)
-	tokens := make([]int, len(messages))
+	a.cacheExpectMu.Lock()
+	previous := a.cacheExpectations[modelRef]
+	a.cacheExpectMu.Unlock()
+
+	shapes, tokens, source := incrementalCacheExpectationShapes(previous, messages)
 	totalTokens := 0
-	for i := range messages {
-		tokens[i] = ctxmgr.EstimateMessageTokens(messages[i])
-		totalTokens += tokens[i]
+	for _, t := range tokens {
+		totalTokens += t
 	}
 	now := time.Now()
 	record := &cacheExpectationRecord{
+		Source:      source,
 		Shapes:      shapes,
 		Tokens:      tokens,
 		ToolDefHash: toolDefHash,
@@ -52,7 +91,6 @@ func (a *MainAgent) noteCacheExpectation(modelRef string, messages []message.Mes
 	if a.cacheExpectations == nil {
 		a.cacheExpectations = make(map[string]*cacheExpectationRecord)
 	}
-	previous := a.cacheExpectations[modelRef]
 	a.cacheExpectations[modelRef] = record
 	a.cacheExpectMu.Unlock()
 

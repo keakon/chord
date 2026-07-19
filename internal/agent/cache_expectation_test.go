@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -37,6 +38,54 @@ func TestCacheHitTrackerRollingRate(t *testing.T) {
 	if rate, _ := tr.HitRate("q/m"); rate > 1 {
 		t.Fatalf("clamped rate = %v, want <= 1", rate)
 	}
+}
+
+func TestIncrementalCacheExpectationShapesMatchFullComputation(t *testing.T) {
+	base := []message.Message{
+		{Role: message.RoleUser, Content: "u1"},
+		{Role: message.RoleAssistant, Content: "a1", ToolCalls: []message.ToolCall{{ID: "t1", Name: "grep", Args: []byte(`{"pattern":"x"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "t1", Content: "match"},
+	}
+	assertMatchesFull := func(t *testing.T, msgs []message.Message, shapes []stableReductionMessageShape, tokens []int) {
+		t.Helper()
+		want := stableReductionMessageShapes(msgs)
+		if len(shapes) != len(want) || len(tokens) != len(msgs) {
+			t.Fatalf("incremental lengths shapes=%d tokens=%d, want %d", len(shapes), len(tokens), len(want))
+		}
+		for i := range want {
+			if shapes[i] != want[i] {
+				t.Fatalf("shape[%d] diverges from full computation", i)
+			}
+			if est := ctxmgr.EstimateMessageTokens(msgs[i]); tokens[i] != est {
+				t.Fatalf("tokens[%d] = %d, want %d", i, tokens[i], est)
+			}
+		}
+	}
+
+	shapes, tokens, source := incrementalCacheExpectationShapes(nil, base)
+	assertMatchesFull(t, base, shapes, tokens)
+	record := &cacheExpectationRecord{Source: source, Shapes: shapes, Tokens: tokens}
+
+	// Identical request: the previous slices are reused without reallocation.
+	sameShapes, sameTokens, sameSource := incrementalCacheExpectationShapes(record, base)
+	if &sameShapes[0] != &record.Shapes[0] || &sameTokens[0] != &record.Tokens[0] || &sameSource[0] != &record.Source[0] {
+		t.Fatal("unchanged request did not reuse the previous record's slices")
+	}
+
+	// Append-only growth: reused prefix plus freshly hashed tail.
+	grown := append(append([]message.Message(nil), base...), message.Message{Role: message.RoleUser, Content: "u2"})
+	shapes, tokens, _ = incrementalCacheExpectationShapes(record, grown)
+	assertMatchesFull(t, grown, shapes, tokens)
+
+	// In-place rewrite: everything from the mutated index is recomputed.
+	mutated := append([]message.Message(nil), grown...)
+	mutated[1].Content = "a1 rewritten"
+	shapes, tokens, _ = incrementalCacheExpectationShapes(record, mutated)
+	assertMatchesFull(t, mutated, shapes, tokens)
+
+	// Shrunk request: shorter than the previous record.
+	shapes, tokens, _ = incrementalCacheExpectationShapes(record, base[:1])
+	assertMatchesFull(t, base[:1], shapes, tokens)
 }
 
 func TestNoteCacheExpectationAttributesDivergence(t *testing.T) {
