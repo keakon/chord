@@ -2,7 +2,7 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
-## Unreleased
+## 0.7.2 - 2026-07-20
 
 ### Breaking Changes
 

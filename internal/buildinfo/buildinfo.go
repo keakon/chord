@@ -78,7 +78,7 @@ const (
 	fieldExecutableMTime = "executable_mtime"
 
 	unknown           = "unknown"
-	DefaultDevVersion = "v0.7.1-dev"
+	DefaultDevVersion = "v0.7.2-dev"
 
 	dirtyTrue    DirtyState = "true"
 	dirtyFalse   DirtyState = "false"
