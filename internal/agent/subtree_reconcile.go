@@ -86,6 +86,9 @@ func (a *MainAgent) cancelTaskTreeVisit(taskID, reason string, visited map[strin
 		sub.cancelCurrentTurnFromLoop()
 		sub.setState(SubAgentStateCancelled, reason)
 		a.noteSubAgentStateTransition(sub, SubAgentStateCancelled)
+		// parkSubAgent repeats this cleanup on success, but it refuses to park
+		// while the just-cancelled turn still has an LLM request or queued
+		// input in flight — this block is the only cleanup on that path.
 		a.releaseSubAgentSlot(sub)
 		a.fileTrack.ReleaseAll(sub.instanceID)
 		tools.StopAllSpawnedForAgent(sub.instanceID, "terminated with ancestor task")
