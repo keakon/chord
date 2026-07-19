@@ -97,6 +97,12 @@ lsp:
     command: gopls
     file_types: [".go"]
     root_markers: ["go.work", "go.mod", ".git"]
+    options:
+      staticcheck: true
+      analyses:
+        minmax: true
+        rangeint: true
+        slicescontains: true
   pyright:
     command: pyright-langserver
     args: ["--stdio"]
@@ -111,6 +117,10 @@ lsp:
     file_types: [".rs"]
     root_markers: ["Cargo.toml", "rust-project.json"]
 ```
+
+`options` contains language-server workspace settings. For gopls, put settings such as `staticcheck` and the `analyses` map there; `init_options` is sent only as LSP initialization metadata and is not the correct location for gopls settings. Analyzer names and defaults depend on the installed gopls version. Recent gopls releases already enable most `modernize` analyzers by default, while explicit `true` entries document and preserve the checks you rely on and `false` disables an individual analyzer. Chord forwards information and hint diagnostics from gopls after a Go file is changed, but errors and warnings take priority within the default 10-diagnostic output limit.
+
+This edit-time LSP feedback is incremental and does not replace a whole-repository CI gate. If a project adopts the standalone `modernize` command for CI, first clear and review the existing findings, then pin the command version instead of using `@latest`; some suggested fixes, such as changing `omitempty` to `omitzero`, intentionally change serialization behavior and require review.
 
 Availability depends on whether the corresponding language server is installed locally. For Pyright, Chord automatically uses a project-local virtual environment under the LSP root when no Python interpreter is configured. It probes the platform-appropriate layout: `.venv/bin/python`, `venv/bin/python`, and `env/bin/python` on Unix-like systems, including WSL; `.venv\Scripts\python.exe`, `venv\Scripts\python.exe`, and `env\Scripts\python.exe` on Windows. WSL auto-discovery intentionally does not select Windows virtual environments under `Scripts\python.exe`; create a Linux venv inside WSL or configure `python.pythonPath` explicitly if you need a custom interpreter.
 

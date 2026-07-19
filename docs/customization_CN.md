@@ -93,6 +93,12 @@ lsp:
     command: gopls
     file_types: [".go"]
     root_markers: ["go.work", "go.mod", ".git"]
+    options:
+      staticcheck: true
+      analyses:
+        minmax: true
+        rangeint: true
+        slicescontains: true
   pyright:
     command: pyright-langserver
     args: ["--stdio"]
@@ -107,6 +113,10 @@ lsp:
     file_types: [".rs"]
     root_markers: ["Cargo.toml", "rust-project.json"]
 ```
+
+`options` 用于语言服务器的 workspace settings。对 gopls，应把 `staticcheck`、`analyses` 等设置放在这里；`init_options` 只作为 LSP 初始化元数据发送，并不是 gopls settings 的正确位置。可用的 analyzer 名称及其默认值取决于本机安装的 gopls 版本。较新的 gopls 已默认启用大多数 `modernize` analyzer；显式设为 `true` 可以记录并保留项目依赖的检查，设为 `false` 则可关闭单项检查。修改 Go 文件后，Chord 会透传 gopls 的 information 和 hint 诊断，但在默认最多 10 条的输出额度内，error 和 warning 会优先展示。
+
+这种 LSP 反馈是编辑后的增量检查，不能替代 CI 中的全仓门禁。若项目要在 CI 中采用独立的 `modernize` 命令，应先清理并审查现有发现，再固定命令版本，而不是使用 `@latest`；部分建议修复（例如把 `omitempty` 改为 `omitzero`）会有意改变序列化行为，必须人工审查。
 
 需要先在本机安装对应语言服务器才能使用。对于 Pyright，未配置 Python 解释器时，Chord 会自动使用 LSP root 下的项目本地虚拟环境，并按当前运行平台探测对应布局：类 Unix（含 WSL）查找 `.venv/bin/python`、`venv/bin/python` 和 `env/bin/python`；Windows 查找 `.venv\Scripts\python.exe`、`venv\Scripts\python.exe` 和 `env\Scripts\python.exe`。WSL 自动发现有意识避开 Windows 虚拟环境中的 `Scripts\python.exe`；建议在 WSL 内创建 Linux venv，确需自定义解释器时再显式配置 `python.pythonPath`。
 
