@@ -53,6 +53,24 @@ func TestNormalizeRestoredMessages_DropsEmptyAssistant(t *testing.T) {
 	}
 }
 
+func TestNormalizeRestoredMessages_KeepsProviderOutputAssistant(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "user", Content: "continue"},
+		{
+			Role: message.RoleAssistant,
+			ResponsesOutput: []message.ResponsesOutputItem{{
+				Type: "function_call", CallID: "call-1", Name: "read", Arguments: "{}",
+			}},
+			GeminiParts: []message.GeminiReplayPart{{Type: "function_call", ToolCallID: "call-1", ThoughtSignature: "sig"}},
+			StopReason:  "stop",
+		},
+	}
+	got := normalizeRestoredMessages(msgs)
+	if len(got) != 2 || len(got[1].ResponsesOutput) != 1 || len(got[1].GeminiParts) != 1 {
+		t.Fatalf("provider output state was dropped: %#v", got)
+	}
+}
+
 func TestNormalizeRestoredMessages_PreservesPairedToolCalls(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "do it"},

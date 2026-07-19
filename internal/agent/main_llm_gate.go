@@ -382,6 +382,8 @@ func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnI
 		payload := &LLMResponsePayload{
 			Content:                   resp.Content,
 			ThinkingBlocks:            resp.ThinkingBlocks,
+			ResponsesOutput:           resp.ResponsesOutput,
+			GeminiParts:               resp.GeminiParts,
 			ToolCalls:                 resp.ToolCalls,
 			StopReason:                resp.StopReason,
 			ThinkingToolcallMarkerHit: resp.ThinkingToolcallMarkerHit,

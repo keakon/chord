@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 
 	"github.com/keakon/golog/log"
 
@@ -36,6 +37,10 @@ func applyResponsesCompletionPayload(resp *message.Response, payload responsesCo
 		}
 		return
 	}
+	collectResponsesOutput(resp, payload.Output)
+	if strings.TrimSpace(resp.Content) == "" {
+		resp.Content = responsesOutputRefusalText(payload.Output)
+	}
 	for _, out := range payload.Output {
 		if out.Type == "function_call" {
 			resp.StopReason = "tool_calls"
@@ -43,6 +48,48 @@ func applyResponsesCompletionPayload(resp *message.Response, payload responsesCo
 		}
 	}
 	resp.StopReason = "stop"
+}
+
+func responsesOutputRefusalText(output []responsesOutputEntry) string {
+	var refusals []string
+	for _, out := range output {
+		if out.Type != "message" {
+			continue
+		}
+		for _, content := range out.Content {
+			if content.Type == "refusal" && strings.TrimSpace(content.Refusal) != "" {
+				refusals = append(refusals, content.Refusal)
+			}
+		}
+	}
+	return strings.Join(refusals, "\n")
+}
+
+// collectResponsesOutput preserves recognized Responses output items in their
+// provider order so stateless replay does not reorder reasoning, messages, or
+// sequential function calls. Entries go through the same mapping as the
+// incremental baseline (responsesOutputEntryToMessageItem) so replayed
+// function_call items keep the call_id→id fallback the streaming tool-call
+// accumulator applies, and their outputs never end up orphaned.
+func collectResponsesOutput(resp *message.Response, output []responsesOutputEntry) {
+	resp.ResponsesOutput = nil
+	for _, out := range output {
+		item := responsesOutputEntryToMessageItem(out)
+		switch item.Type {
+		case "reasoning":
+		case "message":
+			if len(item.Content) == 0 {
+				continue
+			}
+		case "function_call":
+			if strings.TrimSpace(item.CallID) == "" || strings.TrimSpace(item.Name) == "" {
+				continue
+			}
+		default:
+			continue
+		}
+		resp.ResponsesOutput = append(resp.ResponsesOutput, item)
+	}
 }
 
 func recoverResponsesToolCallsFromOutput(resp *message.Response, output []responsesOutputEntry, cb StreamCallback) {

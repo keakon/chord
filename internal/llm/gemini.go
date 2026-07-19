@@ -105,6 +105,10 @@ type geminiPart struct {
 	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
 	Thought          bool                    `json:"thought,omitempty"`
+	// ThoughtSignature is an opaque signature attached by thinking models.
+	// It must be preserved and replayed verbatim with the same part in
+	// conversation history (Gemini 3 requires it on functionCall parts).
+	ThoughtSignature string `json:"thoughtSignature,omitempty"`
 }
 
 type geminiInlineData struct {
@@ -185,6 +189,7 @@ func (g *GeminiProvider) CompleteStream(
 	traceCollector := newLLMTraceCollector("gemini", model, cb)
 	traceCB := traceCollector.Callback
 	contents := convertMessagesToGemini(messages)
+	ensureGeminiActiveLoopSignatures(contents, model)
 	reqBody := geminiRequest{
 		Contents: contents,
 		Tools:    convertToolsToGemini(tools),
@@ -330,23 +335,7 @@ func convertMessagesToGemini(msgs []message.Message) []geminiContent {
 			result = appendGeminiUserContent(result, geminiUserParts(msg))
 			i++
 		case "assistant":
-			parts := make([]geminiPart, 0, 1+len(msg.ToolCalls))
-			if contentText := assistantContentForReplay(msg); contentText != "" {
-				parts = append(parts, geminiPart{Text: contentText})
-			}
-			for _, tc := range msg.ToolCalls {
-				if tc.ID == "" || tc.Name == "" {
-					log.Warnf("skipping Gemini functionCall with empty id or name in history tool=%v id=%v", tc.Name, tc.ID)
-					continue
-				}
-				args := tc.Args
-				if len(args) == 0 || !json.Valid(args) {
-					log.Warnf("sanitizing invalid tool call args in Gemini conversation history tool=%v id=%v raw_args=%v", tc.Name, tc.ID, string(args))
-					args = json.RawMessage(MalformedArgsSentinel)
-				}
-				toolNamesByID[tc.ID] = tc.Name
-				parts = append(parts, geminiPart{FunctionCall: &geminiFunctionCall{Name: tc.Name, Args: args}})
-			}
+			parts := geminiAssistantParts(msg, toolNamesByID)
 			if len(parts) == 0 {
 				log.Warn("skipping empty/reasoning-only assistant message in Gemini history")
 				i++
@@ -379,6 +368,102 @@ func convertMessagesToGemini(msgs []message.Message) []geminiContent {
 		}
 	}
 	return result
+}
+
+func geminiAssistantParts(msg message.Message, toolNamesByID map[string]string) []geminiPart {
+	toolCalls := make(map[string]message.ToolCall, len(msg.ToolCalls))
+	for _, tc := range msg.ToolCalls {
+		if tc.ID != "" {
+			toolCalls[tc.ID] = tc
+			toolNamesByID[tc.ID] = tc.Name
+		}
+	}
+	parts := make([]geminiPart, 0, max(1, len(msg.GeminiParts)))
+	usedToolCalls := make(map[string]bool, len(msg.ToolCalls))
+	for _, replay := range msg.GeminiParts {
+		switch replay.Type {
+		case "text":
+			parts = append(parts, geminiPart{Text: replay.Text, ThoughtSignature: replay.ThoughtSignature})
+		case "thought":
+			parts = append(parts, geminiPart{Text: replay.Text, Thought: true, ThoughtSignature: replay.ThoughtSignature})
+		case "function_call":
+			tc, ok := toolCalls[replay.ToolCallID]
+			if !ok || tc.Name == "" {
+				log.Warnf("skipping Gemini replay part with missing tool call id=%v", replay.ToolCallID)
+				continue
+			}
+			parts = append(parts, geminiFunctionCallPart(tc, replay.ThoughtSignature))
+			usedToolCalls[tc.ID] = true
+		}
+	}
+	if len(msg.GeminiParts) == 0 {
+		if contentText := assistantContentForReplay(msg); contentText != "" {
+			parts = append(parts, geminiPart{Text: contentText})
+		}
+	}
+	for _, tc := range msg.ToolCalls {
+		if usedToolCalls[tc.ID] {
+			continue
+		}
+		if tc.ID == "" || tc.Name == "" {
+			log.Warnf("skipping Gemini functionCall with empty id or name in history tool=%v id=%v", tc.Name, tc.ID)
+			continue
+		}
+		parts = append(parts, geminiFunctionCallPart(tc, tc.ThoughtSignature))
+	}
+	return parts
+}
+
+func geminiFunctionCallPart(tc message.ToolCall, signature string) geminiPart {
+	args := tc.Args
+	if len(args) == 0 || !json.Valid(args) {
+		log.Warnf("sanitizing invalid tool call args in Gemini conversation history tool=%v id=%v raw_args=%v", tc.Name, tc.ID, string(args))
+		args = json.RawMessage(MalformedArgsSentinel)
+	}
+	return geminiPart{FunctionCall: &geminiFunctionCall{Name: tc.Name, Args: args}, ThoughtSignature: signature}
+}
+
+const geminiSkipThoughtSignatureValidator = "skip_thought_signature_validator"
+
+func ensureGeminiActiveLoopSignatures(contents []geminiContent, model string) {
+	if !isGemini3Model(model) {
+		return
+	}
+	activeStart := 0
+	for i, content := range contents {
+		if content.Role != "user" {
+			continue
+		}
+		for _, part := range content.Parts {
+			if part.Text != "" || part.InlineData != nil {
+				activeStart = i
+				break
+			}
+		}
+	}
+	for i := activeStart; i < len(contents); i++ {
+		if contents[i].Role != "model" {
+			continue
+		}
+		for j := range contents[i].Parts {
+			part := &contents[i].Parts[j]
+			if part.FunctionCall == nil {
+				continue
+			}
+			if part.ThoughtSignature == "" {
+				part.ThoughtSignature = geminiSkipThoughtSignatureValidator
+			}
+			break
+		}
+	}
+}
+
+func isGemini3Model(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if slash := strings.LastIndex(model, "/"); slash >= 0 {
+		model = model[slash+1:]
+	}
+	return strings.HasPrefix(model, "gemini-3")
 }
 
 func appendGeminiUserContent(result []geminiContent, parts []geminiPart) []geminiContent {
@@ -537,6 +622,9 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 
 		for _, candidate := range chunk.Candidates {
 			for _, part := range candidate.Content.Parts {
+				if part.FunctionCall == nil {
+					appendGeminiResponseTextPart(&resp, part)
+				}
 				if part.Text != "" {
 					if part.Thought {
 						reasoning.WriteString(part.Text)
@@ -571,9 +659,10 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 					if len(args) == 0 {
 						args = json.RawMessage("{}")
 					}
-					acc := &openAIToolAccumulator{id: id, name: name}
+					acc := &openAIToolAccumulator{id: id, name: name, thoughtSignature: cloneLongLivedLLMString(part.ThoughtSignature)}
 					acc.args.Write(args)
 					toolCalls[idx] = acc
+					resp.GeminiParts = append(resp.GeminiParts, message.GeminiReplayPart{Type: "function_call", ToolCallID: id, ThoughtSignature: acc.thoughtSignature})
 					if cb != nil {
 						cb(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: id, Name: acc.name}})
 						cb(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: id, Name: acc.name, Input: acc.args.String()}})
@@ -632,6 +721,13 @@ func finalizeGeminiToolCalls(toolCalls map[int]*openAIToolAccumulator, resp *mes
 		return
 	}
 	if truncated {
+		keptParts := resp.GeminiParts[:0]
+		for _, part := range resp.GeminiParts {
+			if part.Type != "function_call" {
+				keptParts = append(keptParts, part)
+			}
+		}
+		resp.GeminiParts = keptParts
 		for idx, acc := range toolCalls {
 			log.Warnf("discarding truncated Gemini tool call tool=%v id=%v partial_args=%v", acc.name, acc.id, acc.args.String())
 			delete(toolCalls, idx)
@@ -658,12 +754,42 @@ func finalizeGeminiToolCalls(toolCalls map[int]*openAIToolAccumulator, resp *mes
 			log.Warnf("malformed Gemini tool call arguments tool=%v id=%v raw_args=%v", acc.name, acc.id, string(args))
 			args = json.RawMessage(MalformedArgsSentinel)
 		}
-		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{ID: cloneLongLivedLLMString(acc.id), Name: cloneLongLivedLLMString(acc.name), Args: args})
+		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{ID: cloneLongLivedLLMString(acc.id), Name: cloneLongLivedLLMString(acc.name), Args: args, ThoughtSignature: acc.thoughtSignature})
 		if cb != nil {
 			cb(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: acc.id, Name: acc.name, Input: string(args)}})
 		}
 		delete(toolCalls, idx)
 	}
+}
+
+func appendGeminiResponseTextPart(resp *message.Response, part geminiPart) {
+	if resp == nil || (part.Text == "" && part.ThoughtSignature == "") {
+		return
+	}
+	partType := "text"
+	if part.Thought {
+		partType = "thought"
+	}
+	signature := cloneLongLivedLLMString(part.ThoughtSignature)
+	if n := len(resp.GeminiParts); n > 0 && resp.GeminiParts[n-1].Type == partType {
+		previous := &resp.GeminiParts[n-1]
+		// Streaming commonly emits a signature-only tail for the preceding
+		// text. Merge that tail, but never merge across an already signed part:
+		// Gemini signatures are positional and must remain on their original
+		// part boundary.
+		if previous.ThoughtSignature == "" {
+			previous.Text += part.Text
+			if signature != "" {
+				previous.ThoughtSignature = signature
+			}
+			return
+		}
+	}
+	resp.GeminiParts = append(resp.GeminiParts, message.GeminiReplayPart{
+		Type:             partType,
+		Text:             part.Text,
+		ThoughtSignature: signature,
+	})
 }
 
 func parseGeminiHTTPErrorFromBytes(statusCode int, header http.Header, body []byte) *APIError {

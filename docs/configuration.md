@@ -647,9 +647,18 @@ Compatibility fields:
   - `none`: no provider-specific visible reasoning replay.
   - `openai_visible`: replays unchanged assistant `reasoning_content` during
     Chat Completions tool loops. It does not inject request fields; configure
-    those with `request_overrides.body`.
+    those with `request_overrides.body`. Replay requires the producing provider
+    ID to match, so documented in-provider upgrades such as Kimi K2.6/K2.7 to
+    K3 keep continuity; cross-provider fallback drops the paired reasoning/tool
+    trajectory and lets the target plan again.
   - Responses and Messages use their protocol-native continuity mechanisms; do
-    not use visible-reasoning replay for those transports.
+    not use visible-reasoning replay for those transports. Chord handles these
+    automatically: encrypted Responses reasoning items, Anthropic `thinking` /
+    `redacted_thinking` blocks, and Gemini `thoughtSignature` values are
+    captured, persisted, and replayed with compatible provenance. Responses
+    preserve ordered native output items; Gemini preserves original part
+    boundaries and uses the documented validator-skip sentinel when a Gemini 3
+    active tool step has no reusable signature.
 - `compat.thinking_toolcall`: enables a provider-specific parser for gateways
   that encode tool calls inside visible reasoning text. Leave disabled unless
   the gateway requires that format.

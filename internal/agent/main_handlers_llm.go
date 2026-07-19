@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -45,6 +46,21 @@ func sanitizeToolCallArgs(calls []message.ToolCall) []message.ToolCall {
 		out[i] = tc
 	}
 	return out
+}
+
+func toolCallTrajectoriesEqual(original, accepted []message.ToolCall) bool {
+	if len(original) != len(accepted) {
+		return false
+	}
+	for i := range original {
+		if original[i].ID != accepted[i].ID ||
+			original[i].Name != accepted[i].Name ||
+			original[i].ThoughtSignature != accepted[i].ThoughtSignature ||
+			!bytes.Equal(original[i].Args, accepted[i].Args) {
+			return false
+		}
+	}
+	return true
 }
 
 // isMalformedToolCall reports whether a tool call has malformed or effectively
@@ -254,11 +270,29 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	// so the context doesn't grow with useless entries. Sanitize remaining
 	// calls as a safety net (no-op for valid calls, but defensive).
 	sanitizedToolCalls := sanitizeToolCallArgs(validCalls)
+	thinkingBlocks := payload.ThinkingBlocks
+	responsesOutput := payload.ResponsesOutput
+	geminiParts := payload.GeminiParts
+	reasoningContent := payload.ReasoningContent
+	if !toolCallTrajectoriesEqual(payload.ToolCalls, validCalls) {
+		// Provider-native reasoning/signature payloads describe the complete tool
+		// trajectory. Replaying them after filtering, truncating, or replacing a
+		// call would claim that an unexecuted call is still part of the history.
+		thinkingBlocks = nil
+		responsesOutput = nil
+		geminiParts = nil
+		reasoningContent = ""
+		for i := range sanitizedToolCalls {
+			sanitizedToolCalls[i].ThoughtSignature = ""
+		}
+	}
 	assistantMsg := message.Message{
 		Role:             "assistant",
 		Content:          payload.Content,
-		ThinkingBlocks:   payload.ThinkingBlocks,
-		ReasoningContent: payload.ReasoningContent,
+		ThinkingBlocks:   thinkingBlocks,
+		ResponsesOutput:  responsesOutput,
+		GeminiParts:      geminiParts,
+		ReasoningContent: reasoningContent,
 		ToolCalls:        sanitizedToolCalls,
 		StopReason:       payload.StopReason,
 		Provenance:       mainAssistantProvenance(a),

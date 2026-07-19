@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -224,6 +225,38 @@ func TestSubAgentEmitsExecutingActivityWhenRegularToolsStart(t *testing.T) {
 			t.Fatal("expected SubAgent executing activity event before tool result completion")
 		}
 	}
+}
+
+func TestSubAgentClearsNativeTrajectoryAfterFilteringToolCall(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	sub.handleLLMResponse(&llmResult{
+		turnID: 1,
+		resp: &message.Response{
+			ToolCalls: []message.ToolCall{
+				{ID: "call-1", Name: "Dummy", Args: json.RawMessage(`{"value":"x"}`)},
+				{ID: "call-2", Name: "Dummy", Args: json.RawMessage(llm.MalformedArgsSentinel)},
+			},
+			ResponsesOutput: []message.ResponsesOutputItem{
+				{Type: "reasoning", ID: "rs-1", EncryptedContent: "encrypted"},
+				{Type: "function_call", ID: "fc-1", CallID: "call-1", Name: "Dummy", Arguments: `{"value":"x"}`},
+				{Type: "function_call", ID: "fc-2", CallID: "call-2", Name: "Dummy", Arguments: `{}`},
+			},
+		},
+	})
+
+	for _, msg := range sub.ctxMgr.Snapshot() {
+		if msg.Role != message.RoleAssistant {
+			continue
+		}
+		if len(msg.ToolCalls) != 1 || msg.ToolCalls[0].ID != "call-1" {
+			t.Fatalf("accepted tool calls = %+v, want call-1 only", msg.ToolCalls)
+		}
+		if len(msg.ResponsesOutput) != 0 {
+			t.Fatalf("filtered tool trajectory must clear native Responses output: %+v", msg.ResponsesOutput)
+		}
+		return
+	}
+	t.Fatal("expected assistant message in subagent context")
 }
 
 func TestSubAgentCompleteWithOutstandingJoinChildEntersWaitingDescendant(t *testing.T) {

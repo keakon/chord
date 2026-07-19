@@ -701,6 +701,8 @@ type stableReductionMessageShape struct {
 	ContentHash         [sha256.Size]byte
 	PartsHash           [sha256.Size]byte
 	ThinkingHash        [sha256.Size]byte
+	ResponsesOutputHash [sha256.Size]byte
+	GeminiPartsHash     [sha256.Size]byte
 	ReasoningHash       [sha256.Size]byte
 	ToolCallsHash       [sha256.Size]byte
 	ToolCallID          string
@@ -820,6 +822,8 @@ func stableReductionMessageShapeOf(msg *message.Message) stableReductionMessageS
 		ContentHash:         stableReductionHashString(msg.Content),
 		PartsHash:           stableReductionContentPartsHash(msg.Parts),
 		ThinkingHash:        stableReductionThinkingBlocksHash(msg.ThinkingBlocks),
+		ResponsesOutputHash: stableReductionResponsesOutputHash(msg.ResponsesOutput),
+		GeminiPartsHash:     stableReductionGeminiPartsHash(msg.GeminiParts),
 		ReasoningHash:       stableReductionHashString(msg.ReasoningContent),
 		ToolCallsHash:       stableReductionToolCallsHash(msg.ToolCalls),
 		ToolCallID:          msg.ToolCallID,
@@ -873,7 +877,7 @@ func stableReductionMessageEquivalent(a, b *message.Message) bool {
 	}
 	for i := range a.ToolCalls {
 		ac, bc := &a.ToolCalls[i], &b.ToolCalls[i]
-		if ac.ID != bc.ID || ac.Name != bc.Name || !bytes.Equal(ac.Args, bc.Args) {
+		if ac.ID != bc.ID || ac.Name != bc.Name || ac.ThoughtSignature != bc.ThoughtSignature || !bytes.Equal(ac.Args, bc.Args) {
 			return false
 		}
 	}
@@ -884,6 +888,9 @@ func stableReductionMessageEquivalent(a, b *message.Message) bool {
 		if a.ThinkingBlocks[i] != b.ThinkingBlocks[i] {
 			return false
 		}
+	}
+	if !slices.Equal(a.GeminiParts, b.GeminiParts) || !responsesOutputItemsEqual(a.ResponsesOutput, b.ResponsesOutput) {
+		return false
 	}
 	if len(a.Parts) != len(b.Parts) {
 		return false
@@ -957,6 +964,7 @@ func stableReductionThinkingBlocksHash(blocks []message.ThinkingBlock) [sha256.S
 	for _, block := range blocks {
 		stableReductionWriteString(h, block.Thinking)
 		stableReductionWriteString(h, block.Signature)
+		stableReductionWriteString(h, block.Data)
 	}
 	return stableReductionHashBytes(h.Sum(nil))
 }
@@ -971,8 +979,66 @@ func stableReductionToolCallsHash(calls []message.ToolCall) [sha256.Size]byte {
 		stableReductionWriteString(h, call.ID)
 		stableReductionWriteString(h, call.Name)
 		stableReductionWriteBytes(h, call.Args)
+		stableReductionWriteString(h, call.ThoughtSignature)
 	}
 	return stableReductionHashBytes(h.Sum(nil))
+}
+
+func stableReductionResponsesOutputHash(items []message.ResponsesOutputItem) [sha256.Size]byte {
+	if len(items) == 0 {
+		return stableReductionEmptySequenceHash
+	}
+	h := sha256.New()
+	stableReductionWriteInt(h, len(items))
+	for _, item := range items {
+		stableReductionWriteString(h, item.Type)
+		stableReductionWriteString(h, item.ID)
+		stableReductionWriteString(h, item.CallID)
+		stableReductionWriteString(h, item.Role)
+		stableReductionWriteString(h, item.Name)
+		stableReductionWriteString(h, item.Arguments)
+		stableReductionWriteString(h, item.Phase)
+		stableReductionWriteString(h, item.EncryptedContent)
+		stableReductionWriteInt(h, len(item.Content))
+		for _, content := range item.Content {
+			stableReductionWriteString(h, content.Type)
+			stableReductionWriteString(h, content.Text)
+			stableReductionWriteString(h, content.Refusal)
+		}
+		stableReductionWriteInt(h, len(item.Summary))
+		for _, summary := range item.Summary {
+			stableReductionWriteString(h, summary.Type)
+			stableReductionWriteString(h, summary.Text)
+		}
+	}
+	return stableReductionHashBytes(h.Sum(nil))
+}
+
+func stableReductionGeminiPartsHash(parts []message.GeminiReplayPart) [sha256.Size]byte {
+	if len(parts) == 0 {
+		return stableReductionEmptySequenceHash
+	}
+	h := sha256.New()
+	stableReductionWriteInt(h, len(parts))
+	for _, part := range parts {
+		stableReductionWriteString(h, part.Type)
+		stableReductionWriteString(h, part.Text)
+		stableReductionWriteString(h, part.ToolCallID)
+		stableReductionWriteString(h, part.ThoughtSignature)
+	}
+	return stableReductionHashBytes(h.Sum(nil))
+}
+
+func responsesOutputItemsEqual(a, b []message.ResponsesOutputItem) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Type != b[i].Type || a[i].ID != b[i].ID || a[i].CallID != b[i].CallID || a[i].Role != b[i].Role || a[i].Name != b[i].Name || a[i].Arguments != b[i].Arguments || a[i].Phase != b[i].Phase || a[i].EncryptedContent != b[i].EncryptedContent || !slices.Equal(a[i].Content, b[i].Content) || !slices.Equal(a[i].Summary, b[i].Summary) {
+			return false
+		}
+	}
+	return true
 }
 
 func stableReductionHashBytes(value []byte) [sha256.Size]byte {
@@ -1514,6 +1580,17 @@ func cloneMessageForRequestShape(msg message.Message) message.Message {
 	}
 	if len(msg.ThinkingBlocks) > 0 {
 		cloned.ThinkingBlocks = append([]message.ThinkingBlock(nil), msg.ThinkingBlocks...)
+	}
+	if len(msg.ResponsesOutput) > 0 {
+		cloned.ResponsesOutput = make([]message.ResponsesOutputItem, len(msg.ResponsesOutput))
+		copy(cloned.ResponsesOutput, msg.ResponsesOutput)
+		for i := range cloned.ResponsesOutput {
+			cloned.ResponsesOutput[i].Content = append([]message.ResponsesOutputContent(nil), msg.ResponsesOutput[i].Content...)
+			cloned.ResponsesOutput[i].Summary = append([]message.ResponsesReasoningSummary(nil), msg.ResponsesOutput[i].Summary...)
+		}
+	}
+	if len(msg.GeminiParts) > 0 {
+		cloned.GeminiParts = append([]message.GeminiReplayPart(nil), msg.GeminiParts...)
 	}
 	if msg.FileState != nil {
 		cloned.FileState = msg.FileState.Clone()

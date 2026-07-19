@@ -37,7 +37,7 @@ func dropTrailingInterruptedAssistants(msgs []message.Message) []message.Message
 		if last.Role != "assistant" || last.StopReason != "interrupted" {
 			break
 		}
-		if strings.TrimSpace(last.Content) != "" && len(last.ToolCalls) == 0 {
+		if assistantMessageHasOutput(last) && len(last.ToolCalls) == 0 {
 			break
 		}
 		msgs = msgs[:len(msgs)-1]
@@ -48,12 +48,29 @@ func dropTrailingInterruptedAssistants(msgs []message.Message) []message.Message
 func dropEmptyAssistantMessages(msgs []message.Message) []message.Message {
 	out := msgs[:0]
 	for _, msg := range msgs {
-		if msg.Role == "assistant" && strings.TrimSpace(msg.Content) == "" && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 && !message.HasReplayableThinkingBlocks(msg.ThinkingBlocks) {
+		if msg.Role == "assistant" && !assistantMessageHasOutput(msg) {
 			continue
 		}
 		out = append(out, msg)
 	}
 	return out
+}
+
+func assistantMessageHasOutput(msg message.Message) bool {
+	if strings.TrimSpace(msg.Content) != "" || len(msg.Parts) > 0 || len(msg.ToolCalls) > 0 || message.HasReplayableThinkingBlocks(msg.ThinkingBlocks) {
+		return true
+	}
+	for _, item := range msg.ResponsesOutput {
+		if item.Type == "message" || item.Type == "function_call" {
+			return true
+		}
+	}
+	for _, part := range msg.GeminiParts {
+		if part.Type == "text" || part.Type == "function_call" {
+			return true
+		}
+	}
+	return false
 }
 
 // repairOrphanToolCalls walks the transcript and synthesizes an error tool

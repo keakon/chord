@@ -272,11 +272,29 @@ func (p *codexWSProgressTracker) addMessageFrame(msg []byte) message.StreamProgr
 	return message.StreamProgressDelta{Bytes: p.bytes, Events: p.events}
 }
 
-func codexWSBuildBaseline(fullInput []responsesInputItem, outputItems []responsesInputItem) ([]responsesInputItem, int, string) {
+func codexWSBuildBaseline(fullInput []responsesInputItem, outputItems []responsesInputItem, includeItemIDs bool) ([]responsesInputItem, int, string) {
+	if !includeItemIDs {
+		outputItems = responsesInputItemsWithoutIDs(outputItems)
+	}
 	baseline := make([]responsesInputItem, 0, len(fullInput)+len(outputItems))
 	baseline = append(baseline, fullInput...)
 	baseline = append(baseline, outputItems...)
 	return baseline, len(baseline), responsesInputSignature(baseline)
+}
+
+func responsesInputItemsWithoutIDs(items []responsesInputItem) []responsesInputItem {
+	if len(items) == 0 {
+		return nil
+	}
+	normalized := make([]responsesInputItem, 0, len(items))
+	for _, item := range items {
+		item.ID = ""
+		if item.Type == "reasoning" && strings.TrimSpace(item.EncryptedContent) == "" {
+			continue
+		}
+		normalized = append(normalized, item)
+	}
+	return normalized
 }
 
 func (r *ResponsesProvider) codexWSClearChainStateLocked() {
@@ -714,7 +732,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		if prewarmErr != nil {
 			return nil, false, prewarmErr
 		}
-		_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, prewarmOutputItems)
+		_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, prewarmOutputItems, req.Store)
 		prewarmRespID := ""
 		if prewarmResp != nil {
 			prewarmRespID = prewarmResp.ProviderResponseID
@@ -763,7 +781,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		return nil, useIncremental, reqErr
 	}
 
-	_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, outputItems)
+	_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, outputItems, req.Store)
 	respID := ""
 	if resp != nil {
 		respID = resp.ProviderResponseID

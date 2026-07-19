@@ -128,19 +128,27 @@ func (r responsesRequest) MarshalJSON() ([]byte, error) {
 // responsesInputItem represents an item in the Responses API input array.
 // The API expects "arguments" to be a string (JSON-serialized object), not an object.
 type responsesInputItem struct {
-	Type      string `json:"type"` // "message", "function_call", "function_call_output"
+	Type      string `json:"type"` // "message", "function_call", "function_call_output", "reasoning"
+	ID        string `json:"id,omitempty"`
 	Role      string `json:"role,omitempty"`
 	Content   any    `json:"content,omitempty"`
 	Name      string `json:"name,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
 	Output    any    `json:"output,omitempty"`    // string or []responsesContentBlock for function_call_output
 	Arguments string `json:"arguments,omitempty"` // JSON object as string per API spec
+	Phase     string `json:"phase,omitempty"`
+	// Reasoning replay fields (type == "reasoning"). Summary is a pointer so a
+	// reasoning item can serialize an explicit empty [] (API rejects a missing
+	// summary field) while other item types omit it entirely.
+	Summary          *[]responsesReasoningSummaryPayload `json:"summary,omitempty"`
+	EncryptedContent string                              `json:"encrypted_content,omitempty"`
 }
 
 // responsesContentBlock is a content block within a message item.
 type responsesContentBlock struct {
 	Type     string `json:"type"` // "input_text", "output_text", "input_image", "input_file"
 	Text     string `json:"text,omitempty"`
+	Refusal  string `json:"refusal,omitempty"`
 	ImageURL string `json:"image_url,omitempty"`
 	Detail   string `json:"detail,omitempty"`
 	Filename string `json:"filename,omitempty"`  // input_file: display filename
@@ -176,10 +184,7 @@ const (
 	responsesClientMetadataWindowID       = "x-codex-window-id"
 )
 
-func responsesIncludeForReasoning(reasoning *reasoningConfig) []string {
-	if reasoning == nil {
-		return []string{}
-	}
+func responsesReasoningIncludes() []string {
 	return []string{responsesEncryptedReasoningInclude}
 }
 
@@ -304,11 +309,12 @@ func (r *ResponsesProvider) CompleteStream(
 		log.Warnf("ResponsesProvider called with non-Responses API URL model=%v api_url=%v expected=%v", model, url, "*/responses")
 	}
 
+	store := responsesConfiguredStore(r.provider, model)
 	// Convert messages to Responses API format. System/developer instructions are
 	// sent through the top-level instructions field (matching Codex) instead of as
 	// a system-role input message; some Responses-compatible backends reject typed
 	// system messages in input.
-	apiInput := convertMessagesToResponses("", messages)
+	apiInput := convertMessagesToResponsesWithItemIDs("", messages, store)
 
 	// Validate that we have at least one input item.
 	if len(apiInput) == 0 {
@@ -335,7 +341,7 @@ func (r *ResponsesProvider) CompleteStream(
 		Tools:             apiTools,
 		ToolChoice:        "auto",
 		ParallelToolCalls: true,
-		Store:             responsesConfiguredStore(r.provider, model),
+		Store:             store,
 		Stream:            true,
 		Include:           []string{},
 	}
@@ -378,7 +384,7 @@ func (r *ResponsesProvider) CompleteStream(
 	if ot.TextVerbosity != "" {
 		reqBody.Text = &textConfig{Verbosity: ot.TextVerbosity}
 	}
-	reqBody.Include = responsesIncludeForReasoning(reqBody.Reasoning)
+	reqBody.Include = responsesReasoningIncludes()
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {

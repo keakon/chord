@@ -79,7 +79,17 @@ type responsesOutputEntry struct {
 	Role      string                  `json:"role"`
 	Name      string                  `json:"name"`
 	Arguments string                  `json:"arguments"`
+	Phase     string                  `json:"phase,omitempty"`
 	Content   []responsesContentBlock `json:"content,omitempty"`
+	// Reasoning item fields (type == "reasoning").
+	EncryptedContent string                             `json:"encrypted_content,omitempty"`
+	Summary          []responsesReasoningSummaryPayload `json:"summary,omitempty"`
+}
+
+// responsesReasoningSummaryPayload is one summary block of a reasoning output item.
+type responsesReasoningSummaryPayload struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 type responsesUsagePayload struct {
@@ -101,6 +111,15 @@ type responseReasoningSummaryTextDelta struct {
 
 // responseReasoningSummaryTextDone is the payload for response.reasoning_summary_text.done (Responses API).
 type responseReasoningSummaryTextDone struct {
+	Text string `json:"text"`
+}
+
+// xAI Responses uses reasoning_text events for the raw reasoning trace.
+type responseReasoningTextDelta struct {
+	Delta string `json:"delta"`
+}
+
+type responseReasoningTextDone struct {
 	Text string `json:"text"`
 }
 
@@ -637,6 +656,34 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		}
 		if done.Text != "" {
 			state.resp.ThinkingBlocks = append(state.resp.ThinkingBlocks, message.ThinkingBlock{Thinking: done.Text})
+		}
+		return nil, nil, false, nil
+
+	case "response.reasoning_text.delta":
+		var delta responseReasoningTextDelta
+		if err := responsesSSEUnmarshal(eventData, &delta); err != nil {
+			log.Debugf("responses: skip unparseable reasoning_text.delta err=%v", err)
+			return nil, nil, false, nil
+		}
+		if delta.Delta != "" {
+			state.resp.ReasoningContent += delta.Delta
+			if state.cb != nil {
+				state.cb(message.StreamDelta{Type: message.StreamDeltaThinking, Text: delta.Delta})
+			}
+		}
+		return nil, nil, false, nil
+
+	case "response.reasoning_text.done":
+		var done responseReasoningTextDone
+		if err := responsesSSEUnmarshal(eventData, &done); err != nil {
+			log.Debugf("responses: skip unparseable reasoning_text.done err=%v", err)
+			return nil, nil, false, nil
+		}
+		if state.resp.ReasoningContent == "" && done.Text != "" {
+			state.resp.ReasoningContent = done.Text
+		}
+		if state.cb != nil {
+			state.cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
 		}
 		return nil, nil, false, nil
 

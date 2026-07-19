@@ -26,6 +26,8 @@ func markInterruptedTextResponse(resp *message.Response) *message.Response {
 	resp.StopReason = "interrupted"
 	resp.ToolCalls = nil
 	resp.ThinkingBlocks = nil
+	resp.ResponsesOutput = nil
+	resp.GeminiParts = nil
 	resp.ReasoningContent = ""
 	return resp
 }

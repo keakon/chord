@@ -303,6 +303,40 @@ func TestRoundTripToMessages(t *testing.T) {
 	}
 }
 
+func TestRoundTripPreservesProviderReasoningState(t *testing.T) {
+	original := message.Message{
+		Role:           message.RoleAssistant,
+		ThinkingBlocks: []message.ThinkingBlock{{Signature: "anthropic-sig"}, {Data: "redacted"}},
+		ResponsesOutput: []message.ResponsesOutputItem{
+			{Type: "reasoning", ID: "rs-1", EncryptedContent: "encrypted", Summary: []message.ResponsesReasoningSummary{{Type: "summary_text", Text: "summary"}}},
+			{Type: "function_call", ID: "fc-1", CallID: "call-1", Name: "read", Arguments: `{}`},
+		},
+		GeminiParts:      []message.GeminiReplayPart{{Type: "function_call", ToolCallID: "call-1", ThoughtSignature: "gemini-sig"}},
+		ReasoningContent: "visible reasoning",
+		ToolCalls:        []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`), ThoughtSignature: "gemini-sig"}},
+		Provenance:       &message.MessageProvenance{Source: "chord", ProviderID: "provider", ModelID: "model", WireFamily: "gemini"},
+	}
+
+	session, err := Export([]message.Message{original}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := session.ToMessages()
+	if len(restored) != 1 {
+		t.Fatalf("len(restored) = %d, want 1", len(restored))
+	}
+	got := restored[0]
+	if len(got.ThinkingBlocks) != 2 || len(got.ResponsesOutput) != 2 || len(got.GeminiParts) != 1 {
+		t.Fatalf("provider reasoning state was lost: %+v", got)
+	}
+	if got.ToolCalls[0].ThoughtSignature != "gemini-sig" || got.ReasoningContent != "visible reasoning" {
+		t.Fatalf("tool/reasoning state was lost: %+v", got)
+	}
+	if got.Provenance == nil || *got.Provenance != *original.Provenance {
+		t.Fatalf("provenance = %+v, want %+v", got.Provenance, original.Provenance)
+	}
+}
+
 func TestExportImagePartsNotIncludedInExportedMessages(t *testing.T) {
 	msgs := []message.Message{{
 		Role:    "user",

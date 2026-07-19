@@ -4868,6 +4868,7 @@ func TestStableReductionSequenceHashesMatchStreamingEncoding(t *testing.T) {
 		for _, block := range blocks {
 			stableReductionWriteString(h, block.Thinking)
 			stableReductionWriteString(h, block.Signature)
+			stableReductionWriteString(h, block.Data)
 		}
 	})
 	assertHash("tool calls", stableReductionToolCallsHash(calls), func(h interface{ Write([]byte) (int, error) }) {
@@ -4876,6 +4877,7 @@ func TestStableReductionSequenceHashesMatchStreamingEncoding(t *testing.T) {
 			stableReductionWriteString(h, call.ID)
 			stableReductionWriteString(h, call.Name)
 			stableReductionWriteBytes(h, call.Args)
+			stableReductionWriteString(h, call.ThoughtSignature)
 		}
 	})
 }

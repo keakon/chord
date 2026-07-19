@@ -538,6 +538,11 @@ func TestHandleLLMResponseLengthRecoveryRejectsMultipleToolCalls(t *testing.T) {
 			{ID: "call-1", Name: "read", Args: json.RawMessage(`{"path":"a","offset":0,"limit":1}`)},
 			{ID: "call-2", Name: "read", Args: json.RawMessage(`{"path":"b","offset":0,"limit":1}`)},
 		},
+		ResponsesOutput: []message.ResponsesOutputItem{
+			{Type: "reasoning", ID: "rs-1", EncryptedContent: "encrypted"},
+			{Type: "function_call", ID: "fc-1", CallID: "call-1", Name: "read", Arguments: `{"path":"a","offset":0,"limit":1}`},
+			{Type: "function_call", ID: "fc-2", CallID: "call-2", Name: "read", Arguments: `{"path":"b","offset":0,"limit":1}`},
+		},
 		StopReason: "stop",
 	}
 
@@ -554,6 +559,17 @@ func TestHandleLLMResponseLengthRecoveryRejectsMultipleToolCalls(t *testing.T) {
 	}
 	if a.turn.MalformedCount != 0 {
 		t.Fatalf("MalformedCount = %d, want 0 because stop_reason=stop does not enter truncation retry path", a.turn.MalformedCount)
+	}
+	snapshot := a.ctxMgr.Snapshot()
+	if len(snapshot) == 0 {
+		t.Fatal("expected accepted assistant tool call in context")
+	}
+	last := snapshot[len(snapshot)-1]
+	if len(last.ToolCalls) != 1 || last.ToolCalls[0].ID != "call-1" {
+		t.Fatalf("accepted tool calls = %+v, want call-1 only", last.ToolCalls)
+	}
+	if len(last.ResponsesOutput) != 0 {
+		t.Fatalf("filtered tool trajectory must clear native Responses output: %+v", last.ResponsesOutput)
 	}
 }
 

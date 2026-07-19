@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,34 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
+
+func TestSubAgentPersistsThinkingBlocksWithAssistantToolCall(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	blocks := []message.ThinkingBlock{{Thinking: "plan", Signature: "sig"}, {Data: "encrypted"}}
+	sub.handleLLMResponse(&llmResult{
+		turnID: 1,
+		resp: &message.Response{
+			ThinkingBlocks: blocks,
+			ToolCalls: convertCalls([]messageToolCall{
+				mustJSONToolCall(t, "complete-1", "complete", map[string]any{"summary": "done"}),
+			}),
+		},
+	})
+	msgs := sub.ctxMgr.Snapshot()
+	if len(msgs) == 0 {
+		t.Fatal("expected assistant message in subagent context")
+	}
+	var got []message.ThinkingBlock
+	for _, msg := range slices.Backward(msgs) {
+		if msg.Role == message.RoleAssistant && len(msg.ThinkingBlocks) > 0 {
+			got = msg.ThinkingBlocks
+			break
+		}
+	}
+	if len(got) != 2 || got[0] != blocks[0] || got[1] != blocks[1] {
+		t.Fatalf("thinking blocks = %+v, want %+v", got, blocks)
+	}
+}
 
 func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)

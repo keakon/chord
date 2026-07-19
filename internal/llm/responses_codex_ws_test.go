@@ -231,6 +231,68 @@ func TestCodexWSCanUseIncrementalLockedAllowEmptyDelta(t *testing.T) {
 	}
 }
 
+func TestCodexWSBuildBaselineMatchesStoreItemIDShape(t *testing.T) {
+	fullInput := []responsesInputItem{{Type: "message", Role: "user", Content: "hello"}}
+	output := []responsesInputItem{
+		{Type: "reasoning", ID: "rs-1", EncryptedContent: "enc", Summary: &[]responsesReasoningSummaryPayload{}},
+		{Type: "message", ID: "msg-1", Role: "assistant", Content: []responsesContentBlock{{Type: "output_text", Text: "working"}}},
+		{Type: "reasoning", ID: "rs-empty", Summary: &[]responsesReasoningSummaryPayload{}},
+	}
+
+	stateless, statelessLen, statelessSig := codexWSBuildBaseline(fullInput, output, false)
+	if statelessLen != 3 || stateless[1].ID != "" || stateless[2].ID != "" {
+		t.Fatalf("stateless baseline did not strip ids and empty reasoning: %+v", stateless)
+	}
+	statelessNext := append(append([]responsesInputItem(nil), fullInput...),
+		responsesInputItem{Type: "reasoning", EncryptedContent: "enc", Summary: &[]responsesReasoningSummaryPayload{}},
+		responsesInputItem{Type: "message", Role: "assistant", Content: []responsesContentBlock{{Type: "output_text", Text: "working"}}},
+		responsesInputItem{Type: "message", Role: "user", Content: "next"},
+	)
+	if got := responsesInputPrefixSignature(statelessNext, statelessLen); got != statelessSig {
+		t.Fatalf("stateless baseline cannot match next full input: got %q want %q", got, statelessSig)
+	}
+
+	stored, storedLen, _ := codexWSBuildBaseline(fullInput, output, true)
+	if storedLen != 4 || stored[1].ID != "rs-1" || stored[2].ID != "msg-1" || stored[3].ID != "rs-empty" {
+		t.Fatalf("stored baseline did not preserve ids: %+v", stored)
+	}
+}
+
+// TestCodexWSBaselineSignatureMatchesNextTurnConversion feeds one provider
+// output payload through both production paths — the chain-side baseline
+// (responsesOutputToInputItems → codexWSBuildBaseline) and the next turn's
+// message-side conversion (collectResponsesOutput → convertMessages) — and
+// asserts the prefix signatures agree. If these paths ever drift again, the
+// incremental WebSocket reuse silently degrades to full-input resends.
+func TestCodexWSBaselineSignatureMatchesNextTurnConversion(t *testing.T) {
+	output := []responsesOutputEntry{
+		{Type: "reasoning", ID: "rs_1", EncryptedContent: "enc-1", Summary: []responsesReasoningSummaryPayload{{Type: "summary_text", Text: "s"}}},
+		{Type: "message", ID: "msg_1", Phase: "commentary", Content: []responsesContentBlock{{Type: "output_text", Text: "working"}}}, // empty role: defaulted to assistant
+		{Type: "reasoning", ID: "rs_2"},                                    // summary-only reasoning: stateless replay drops it
+		{Type: "function_call", ID: "fc_1", Name: "read", Arguments: `{}`}, // missing call_id: falls back to id
+	}
+	userTurn := []message.Message{{Role: message.RoleUser, Content: "hello"}}
+
+	for _, store := range []bool{false, true} {
+		fullInput := convertMessagesToResponsesWithItemIDs("", userTurn, store)
+		_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, responsesOutputToInputItems(output), store)
+
+		resp := &message.Response{}
+		collectResponsesOutput(resp, output)
+		next := append(append([]message.Message(nil), userTurn...),
+			message.Message{Role: message.RoleAssistant, ResponsesOutput: resp.ResponsesOutput},
+			message.Message{Role: message.RoleUser, Content: "next"},
+		)
+		nextInput := convertMessagesToResponsesWithItemIDs("", next, store)
+		if len(nextInput) <= baselineLen {
+			t.Fatalf("store=%v next input must extend the baseline: len=%d baseline=%d", store, len(nextInput), baselineLen)
+		}
+		if got := responsesInputPrefixSignature(nextInput, baselineLen); got != baselineSig {
+			t.Fatalf("store=%v baseline signature mismatch: got %q want %q", store, got, baselineSig)
+		}
+	}
+}
+
 func TestCodexWSState_KeyOrModelChangeRequiresFull(t *testing.T) {
 	fullInput := []responsesInputItem{
 		{Type: "message", Role: "user", Content: "hello"},

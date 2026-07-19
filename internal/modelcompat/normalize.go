@@ -66,6 +66,7 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 
 	for i := range out {
 		msg := &out[i]
+		reasoningToolTrajectoryInvalid := false
 
 		if len(msg.ThinkingBlocks) > 0 {
 			kept := make([]message.ThinkingBlock, 0, len(msg.ThinkingBlocks))
@@ -74,11 +75,11 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 					report.DroppedThinkingBlocks++
 					continue
 				}
-				if strings.TrimSpace(block.Signature) == "" {
+				if !block.Replayable() {
 					report.DroppedThinkingBlocks++
 					continue
 				}
-				if !messageAllowsAnthropicThinkingReplay(*msg) {
+				if !messageAllowsAnthropicThinkingReplay(*msg, target) {
 					report.DroppedThinkingBlocks++
 					report.Warnings = append(report.Warnings, "dropped thinking blocks: missing/invalid anthropic provenance")
 					continue
@@ -86,14 +87,44 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 				kept = append(kept, block)
 			}
 			msg.ThinkingBlocks = kept
+			if allowThinking && len(kept) == 0 && len(msg.ToolCalls) > 0 {
+				reasoningToolTrajectoryInvalid = true
+			}
 		}
 
-		if strings.TrimSpace(msg.ReasoningContent) != "" && (!targetAllowsReasoningReplay(target) || !AllowsOpenAIVisibleReasoningReplay(*msg)) {
+		if strings.TrimSpace(msg.ReasoningContent) != "" && (!targetAllowsReasoningReplay(target) || !AllowsOpenAIVisibleReasoningReplay(*msg) || !messageProvenanceProviderMatchesTarget(*msg, target)) {
+			targetRequiresReasoning := targetAllowsReasoningReplay(target)
+			sourceHasNativeReasoning := AllowsOpenAIVisibleReasoningReplay(*msg)
 			msg.ReasoningContent = ""
+			report.DowngradedReasoning++
+			if targetRequiresReasoning && sourceHasNativeReasoning && len(msg.ToolCalls) > 0 {
+				reasoningToolTrajectoryInvalid = true
+			}
+		}
+
+		if len(msg.ResponsesOutput) > 0 && !allowsResponsesOutputReplay(*msg, target) {
+			if strings.TrimSpace(target.WireFamily) == WireFamilyOpenAIResponses && len(msg.ToolCalls) > 0 {
+				reasoningToolTrajectoryInvalid = true
+			}
+			msg.ResponsesOutput = nil
 			report.DowngradedReasoning++
 		}
 
-		if len(msg.ToolCalls) > 0 && !toolCallsReplayAllowed(*msg, toolResultsByID, target, allowStructuredTools) {
+		if !allowsGeminiThoughtSignatureReplay(*msg, target) {
+			stripped := len(msg.GeminiParts) > 0
+			msg.GeminiParts = nil
+			for j := range msg.ToolCalls {
+				if msg.ToolCalls[j].ThoughtSignature != "" {
+					msg.ToolCalls[j].ThoughtSignature = ""
+					stripped = true
+				}
+			}
+			if stripped {
+				report.DowngradedReasoning++
+			}
+		}
+
+		if len(msg.ToolCalls) > 0 && (reasoningToolTrajectoryInvalid || !toolCallsReplayAllowed(*msg, toolResultsByID, target, allowStructuredTools)) {
 			if canDowngradeToolCallsToText(*msg) {
 				downgraded := downgradeAssistantToolCallsToText(*msg)
 				if downgraded.Content != msg.Content || len(msg.ToolCalls) > 0 {
@@ -107,6 +138,8 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 					}
 				}
 				msg.ToolCalls = nil
+				msg.ResponsesOutput = nil
+				msg.GeminiParts = nil
 				report.Warnings = append(report.Warnings, "dropped unreplayable non-imported tool calls from request context")
 			}
 		}
@@ -166,6 +199,24 @@ func targetAllowsReasoningReplay(target TargetModel) bool {
 	return strings.TrimSpace(target.ReasoningContinuityMode) == ReasoningContinuityOpenAIVisible && strings.TrimSpace(target.WireFamily) == WireFamilyOpenAIChat
 }
 
+// allowsResponsesOutputReplay reports whether msg's native Responses API
+// output items can be replayed to the current target. The encrypted payload
+// is bound to the producing model, so replay requires an openai-responses
+// target and matching provenance (same wire family and model); anything else
+// risks a 400 reasoning-replay rejection.
+func allowsResponsesOutputReplay(msg message.Message, target TargetModel) bool {
+	if strings.TrimSpace(target.WireFamily) != WireFamilyOpenAIResponses {
+		return false
+	}
+	if msg.Provenance == nil {
+		return false
+	}
+	if strings.TrimSpace(msg.Provenance.WireFamily) != WireFamilyOpenAIResponses {
+		return false
+	}
+	return messageProvenanceMatchesTarget(msg, target)
+}
+
 func reasoningContinuityAllowsAnthropicBlocks(target TargetModel) bool {
 	return strings.TrimSpace(target.WireFamily) == WireFamilyAnthropic && strings.TrimSpace(target.ReasoningContinuityMode) == ReasoningContinuityAnthropicBlocks
 }
@@ -180,12 +231,46 @@ func AllowsOpenAIVisibleReasoningReplay(msg message.Message) bool {
 	return strings.TrimSpace(msg.Provenance.WireFamily) == WireFamilyOpenAIChat
 }
 
-func messageAllowsAnthropicThinkingReplay(msg message.Message) bool {
+// allowsGeminiThoughtSignatureReplay reports whether msg's Gemini thought
+// signatures can be replayed to the current target. Signatures are bound to
+// the producing model, so replay requires a gemini target with matching
+// provenance; anything else strips them (other wire formats never serialize
+// them, but stale signatures must not survive a model switch back to gemini).
+func allowsGeminiThoughtSignatureReplay(msg message.Message, target TargetModel) bool {
+	if strings.TrimSpace(target.WireFamily) != WireFamilyGemini {
+		return false
+	}
+	if msg.Provenance == nil {
+		return false
+	}
+	if strings.TrimSpace(msg.Provenance.WireFamily) != WireFamilyGemini {
+		return false
+	}
+	return messageProvenanceMatchesTarget(msg, target)
+}
+
+func messageAllowsAnthropicThinkingReplay(msg message.Message, target TargetModel) bool {
 	if msg.Provenance == nil {
 		return false
 	}
 	wire := strings.TrimSpace(msg.Provenance.WireFamily)
-	return wire == WireFamilyAnthropic
+	providerID := strings.TrimSpace(msg.Provenance.ProviderID)
+	return wire == WireFamilyAnthropic && (providerID == "" || providerID == strings.TrimSpace(target.ProviderID))
+}
+
+func messageProvenanceMatchesTarget(msg message.Message, target TargetModel) bool {
+	if msg.Provenance == nil {
+		return false
+	}
+	return strings.TrimSpace(msg.Provenance.ProviderID) == strings.TrimSpace(target.ProviderID) &&
+		strings.TrimSpace(msg.Provenance.ModelID) == strings.TrimSpace(target.ModelID)
+}
+
+func messageProvenanceProviderMatchesTarget(msg message.Message, target TargetModel) bool {
+	if msg.Provenance == nil {
+		return false
+	}
+	return strings.TrimSpace(msg.Provenance.ProviderID) == strings.TrimSpace(target.ProviderID)
 }
 
 func toolCallsReplayAllowed(msg message.Message, toolResultsByID map[string]bool, target TargetModel, allowStructuredTools bool) bool {
@@ -263,7 +348,7 @@ func compactAdjacentAssistantMessages(msgs []message.Message) []message.Message 
 			continue
 		}
 		last := &out[len(out)-1]
-		if last.Role == message.RoleAssistant && msg.Role == message.RoleAssistant && len(last.ToolCalls) == 0 && len(msg.ToolCalls) == 0 && len(last.Parts) == 0 && len(msg.Parts) == 0 && len(last.ThinkingBlocks) == 0 && len(msg.ThinkingBlocks) == 0 && strings.TrimSpace(last.ReasoningContent) == "" && strings.TrimSpace(msg.ReasoningContent) == "" {
+		if last.Role == message.RoleAssistant && msg.Role == message.RoleAssistant && len(last.ToolCalls) == 0 && len(msg.ToolCalls) == 0 && len(last.Parts) == 0 && len(msg.Parts) == 0 && len(last.ThinkingBlocks) == 0 && len(msg.ThinkingBlocks) == 0 && len(last.ResponsesOutput) == 0 && len(msg.ResponsesOutput) == 0 && len(last.GeminiParts) == 0 && len(msg.GeminiParts) == 0 && strings.TrimSpace(last.ReasoningContent) == "" && strings.TrimSpace(msg.ReasoningContent) == "" {
 			last.Content = joinNonEmpty(last.Content, msg.Content)
 			continue
 		}
@@ -291,6 +376,20 @@ func deepCopyMessages(msgs []message.Message) []message.Message {
 		}
 		if len(msg.ThinkingBlocks) > 0 {
 			out[i].ThinkingBlocks = append([]message.ThinkingBlock(nil), msg.ThinkingBlocks...)
+		}
+		if len(msg.ResponsesOutput) > 0 {
+			items := make([]message.ResponsesOutputItem, len(msg.ResponsesOutput))
+			copy(items, msg.ResponsesOutput)
+			for j := range items {
+				items[j].Content = append([]message.ResponsesOutputContent(nil), items[j].Content...)
+				if len(items[j].Summary) > 0 {
+					items[j].Summary = append([]message.ResponsesReasoningSummary(nil), items[j].Summary...)
+				}
+			}
+			out[i].ResponsesOutput = items
+		}
+		if len(msg.GeminiParts) > 0 {
+			out[i].GeminiParts = append([]message.GeminiReplayPart(nil), msg.GeminiParts...)
 		}
 		if len(msg.ToolCalls) > 0 {
 			calls := make([]message.ToolCall, len(msg.ToolCalls))

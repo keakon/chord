@@ -9,6 +9,26 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+func TestEstimateMessageTokensCountsOpaqueReasoningState(t *testing.T) {
+	msg := message.Message{
+		Role:           message.RoleAssistant,
+		ThinkingBlocks: []message.ThinkingBlock{{Data: strings.Repeat("r", 300)}},
+		ResponsesOutput: []message.ResponsesOutputItem{{
+			Type:             "reasoning",
+			ID:               strings.Repeat("i", 30),
+			EncryptedContent: strings.Repeat("e", 600),
+			Summary:          []message.ResponsesReasoningSummary{{Type: "summary_text", Text: strings.Repeat("s", 90)}},
+		}},
+		GeminiParts: []message.GeminiReplayPart{{Type: "text", ThoughtSignature: strings.Repeat("g", 120)}},
+	}
+	if got := EstimateMessageTokens(msg); got < 380 {
+		t.Fatalf("EstimateMessageTokens = %d, want opaque reasoning state included", got)
+	}
+	if got := messageContextBytes([]message.Message{msg}); got < 1100 {
+		t.Fatalf("messageContextBytes = %d, want opaque reasoning bytes included", got)
+	}
+}
+
 func TestRepairOrphanToolMessagesInPlace(t *testing.T) {
 	m := NewManager(1000, 0)
 	m.Append(message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "ok", Name: "Read", Args: json.RawMessage(`{}`)}}})

@@ -998,6 +998,23 @@ func TestParseResponsesSSE_ChunkTimeoutWithReasoningItemRecoversToolCalls(t *tes
 	}
 }
 
+func TestParseResponsesSSE_xAIReasoningText(t *testing.T) {
+	raw := strings.Join([]string{
+		`data: {"type":"response.reasoning_text.delta","delta":"thinking "}`,
+		`data: {"type":"response.reasoning_text.delta","delta":"deeply"}`,
+		`data: {"type":"response.reasoning_text.done","text":"thinking deeply"}`,
+		`data: {"type":"response.output_text.delta","delta":"answer"}`,
+		`data: {"type":"response.completed","response":{"id":"resp_xai","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}}`,
+	}, "\n\n") + "\n\n"
+	resp, err := parseResponsesSSE(strings.NewReader(raw), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.ReasoningContent != "thinking deeply" || resp.Content != "answer" {
+		t.Fatalf("response = %+v, want xAI reasoning and answer", resp)
+	}
+}
+
 // recordingPhaser records the timeout transitions a parser requests so tests
 // can assert the terminal drain was armed.
 type recordingPhaser struct {
@@ -1760,8 +1777,8 @@ func TestResponsesProvider_IncludeAlwaysSerialized(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// No preset, no reasoning: include is still serialized, but encrypted
-	// reasoning content is only requested when a reasoning block is present.
+	// No preset and no explicit reasoning tuning: stateless Responses models can
+	// still reason by default, so encrypted continuity is always requested.
 	providerCfg := NewProviderConfig("generic", config.ProviderConfig{
 		Type:   config.ProviderTypeResponses,
 		APIURL: server.URL + "/v1/responses",
@@ -1779,11 +1796,8 @@ func TestResponsesProvider_IncludeAlwaysSerialized(t *testing.T) {
 	}
 
 	inc, ok := gotBody["include"].([]any)
-	if !ok {
-		t.Fatalf("include = %#v, want explicit empty array", gotBody["include"])
-	}
-	if len(inc) != 0 {
-		t.Fatalf("include = %#v, want []", inc)
+	if !ok || len(inc) != 1 || inc[0] != responsesEncryptedReasoningInclude {
+		t.Fatalf("include = %#v, want [%q]", gotBody["include"], responsesEncryptedReasoningInclude)
 	}
 	if got := gotBody["tool_choice"]; got != "auto" {
 		t.Fatalf("tool_choice = %#v, want auto", got)

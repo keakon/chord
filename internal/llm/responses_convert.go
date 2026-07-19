@@ -10,6 +10,10 @@ import (
 
 // convertMessagesToResponses converts internal messages to Responses API input format.
 func convertMessagesToResponses(systemPrompt string, msgs []message.Message) []responsesInputItem {
+	return convertMessagesToResponsesWithItemIDs(systemPrompt, msgs, false)
+}
+
+func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.Message, includeItemIDs bool) []responsesInputItem {
 	// Always return a non-nil slice to ensure JSON marshaling produces [] instead of null.
 	result := make([]responsesInputItem, 0)
 
@@ -59,6 +63,15 @@ func convertMessagesToResponses(systemPrompt string, msgs []message.Message) []r
 			})
 
 		case "assistant":
+			if len(msg.ResponsesOutput) > 0 {
+				for _, item := range msg.ResponsesOutput {
+					converted, ok := convertResponsesOutputItem(item, includeItemIDs)
+					if ok {
+						result = append(result, converted)
+					}
+				}
+				continue
+			}
 			contentText := assistantContentForReplay(msg)
 			validToolCalls := make([]message.ToolCall, 0, len(msg.ToolCalls))
 			for _, tc := range msg.ToolCalls {
@@ -113,6 +126,48 @@ func convertMessagesToResponses(systemPrompt string, msgs []message.Message) []r
 	return result
 }
 
+func convertResponsesOutputItem(item message.ResponsesOutputItem, includeItemID bool) (responsesInputItem, bool) {
+	converted := responsesInputItem{
+		Type:             item.Type,
+		Role:             item.Role,
+		Name:             item.Name,
+		CallID:           item.CallID,
+		Arguments:        item.Arguments,
+		Phase:            item.Phase,
+		EncryptedContent: item.EncryptedContent,
+	}
+	if includeItemID {
+		converted.ID = item.ID
+	}
+	switch item.Type {
+	case "reasoning":
+		if strings.TrimSpace(item.EncryptedContent) == "" && (!includeItemID || strings.TrimSpace(item.ID) == "") {
+			return responsesInputItem{}, false
+		}
+		summary := make([]responsesReasoningSummaryPayload, 0, len(item.Summary))
+		for _, entry := range item.Summary {
+			summary = append(summary, responsesReasoningSummaryPayload{Type: entry.Type, Text: entry.Text})
+		}
+		converted.Summary = &summary
+	case "message":
+		content := make([]responsesContentBlock, 0, len(item.Content))
+		for _, entry := range item.Content {
+			content = append(content, responsesContentBlock{Type: entry.Type, Text: entry.Text, Refusal: entry.Refusal})
+		}
+		if len(content) == 0 {
+			return responsesInputItem{}, false
+		}
+		converted.Content = content
+	case "function_call":
+		if strings.TrimSpace(item.CallID) == "" || strings.TrimSpace(item.Name) == "" {
+			return responsesInputItem{}, false
+		}
+	default:
+		return responsesInputItem{}, false
+	}
+	return converted, true
+}
+
 func responsesToolOutput(msg message.Message) any {
 	if len(msg.Parts) == 0 {
 		return msg.Content
@@ -163,47 +218,48 @@ func convertToolsToResponses(tools []message.ToolDefinition) []responsesTool {
 	return result
 }
 
+// responsesOutputToInputItems always retains item IDs; the incremental
+// baseline is normalized for the store mode in one place, codexWSBuildBaseline.
 func responsesOutputToInputItems(output []responsesOutputEntry) []responsesInputItem {
 	if len(output) == 0 {
 		return nil
 	}
 	items := make([]responsesInputItem, 0, len(output))
 	for _, out := range output {
-		switch out.Type {
-		case "function_call":
-			callID := out.CallID
-			if callID == "" {
-				callID = out.ID
-			}
-			items = append(items, responsesInputItem{
-				Type:      "function_call",
-				Name:      out.Name,
-				CallID:    callID,
-				Arguments: out.Arguments,
-			})
-		case "message":
-			role := out.Role
-			if strings.TrimSpace(role) == "" {
-				role = "assistant"
-			}
-			content := make([]responsesContentBlock, 0, len(out.Content))
-			for _, c := range out.Content {
-				switch c.Type {
-				case "output_text", "text":
-					content = append(content, responsesContentBlock{Type: "output_text", Text: c.Text})
-				}
-			}
-			if len(content) == 0 {
-				continue
-			}
-			items = append(items, responsesInputItem{
-				Type:    "message",
-				Role:    role,
-				Content: content,
-			})
+		converted, ok := convertResponsesOutputItem(responsesOutputEntryToMessageItem(out), true)
+		if ok {
+			items = append(items, converted)
 		}
 	}
 	return items
+}
+
+func responsesOutputEntryToMessageItem(out responsesOutputEntry) message.ResponsesOutputItem {
+	role := out.Role
+	if strings.TrimSpace(role) == "" && out.Type == "message" {
+		role = "assistant"
+	}
+	callID := out.CallID
+	if strings.TrimSpace(callID) == "" && out.Type == "function_call" {
+		callID = out.ID
+	}
+	item := message.ResponsesOutputItem{
+		Type:             out.Type,
+		ID:               out.ID,
+		CallID:           callID,
+		Role:             role,
+		Name:             out.Name,
+		Arguments:        out.Arguments,
+		Phase:            out.Phase,
+		EncryptedContent: out.EncryptedContent,
+	}
+	for _, content := range out.Content {
+		item.Content = append(item.Content, message.ResponsesOutputContent{Type: content.Type, Text: content.Text, Refusal: content.Refusal})
+	}
+	for _, summary := range out.Summary {
+		item.Summary = append(item.Summary, message.ResponsesReasoningSummary{Type: summary.Type, Text: summary.Text})
+	}
+	return item
 }
 
 func responsesToolCallsToInputItems(calls []message.ToolCall) []responsesInputItem {
@@ -228,6 +284,16 @@ func responsesToolCallsToInputItems(calls []message.ToolCall) []responsesInputIt
 func responsesResponseToInputItems(resp *message.Response) []responsesInputItem {
 	if resp == nil {
 		return nil
+	}
+	if len(resp.ResponsesOutput) > 0 {
+		items := make([]responsesInputItem, 0, len(resp.ResponsesOutput))
+		for _, output := range resp.ResponsesOutput {
+			converted, ok := convertResponsesOutputItem(output, true)
+			if ok {
+				items = append(items, converted)
+			}
+		}
+		return items
 	}
 	items := make([]responsesInputItem, 0, 1+len(resp.ToolCalls))
 	if contentText := assistantContentForReplay(message.Message{Content: resp.Content, StopReason: resp.StopReason}); strings.TrimSpace(contentText) != "" {

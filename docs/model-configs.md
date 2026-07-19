@@ -552,6 +552,160 @@ Notes:
 - For compatible gateways, use the exact model ID and limits published by that
   gateway/account. See [Troubleshooting — DeepSeek / OpenAI-compatible thinking-mode 400s](./troubleshooting.md#deepseek--openai-compatible-thinking-mode-400s).
 
+## Qwen preserved thinking
+
+Qwen returns visible reasoning through `reasoning_content`, but most models
+ignore that field in history by default. Only enable replay on a model that
+documents `preserve_thinking` support (currently Qwen 3.6/3.7 Max and Plus
+families); older Qwen 3/3.5 models may still emit reasoning but should leave
+continuity disabled.
+
+```yaml
+model_templates:
+  qwen-preserved: &qwen-preserved
+    limit:
+      context: 1000000
+      output: 65536
+    compat:
+      request_overrides:
+        body:
+          enable_thinking: true
+          preserve_thinking: true
+      reasoning_continuity:
+        mode: openai_visible
+
+providers:
+  qwen:
+    type: chat-completions
+    api_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions
+    models:
+      qwen3.7-plus: *qwen-preserved
+
+model_pools:
+  default:
+    - qwen/qwen3.7-plus
+```
+
+Use the limits and regional endpoint published for your account. Historical
+reasoning counts as input tokens and billing when `preserve_thinking` is true.
+
+## Kimi K3
+
+Kimi K3 is the current flagship thinking model. It has a 1M-token context,
+always reasons, currently accepts only `reasoning_effort: max`, and requires
+the complete assistant message (including `reasoning_content`) in multi-turn
+conversations and tool-call loops. Do not pass the K2.x `thinking` parameter or
+fixed sampling fields such as `temperature`.
+
+```yaml
+model_templates:
+  kimi-k3: &kimi-k3
+    limit:
+      context: 1048576
+      output: 131072
+    reasoning:
+      effort: max
+    compat:
+      reasoning_continuity:
+        mode: openai_visible
+
+  kimi-k2.7-code: &kimi-k2-7-code
+    limit:
+      context: 262144
+      output: 32768
+    compat:
+      reasoning_continuity:
+        mode: openai_visible
+
+  kimi-k2.6-thinking: &kimi-k2-6-thinking
+    limit:
+      context: 262144
+      output: 32768
+    compat:
+      request_overrides:
+        body:
+          thinking:
+            type: enabled
+            keep: all
+      reasoning_continuity:
+        mode: openai_visible
+
+providers:
+  kimi:
+    type: chat-completions
+    api_url: https://api.moonshot.ai/v1/chat/completions
+    models:
+      kimi-k3: *kimi-k3
+      kimi-k2.7-code: *kimi-k2-7-code
+      kimi-k2.6: *kimi-k2-6-thinking
+
+model_pools:
+  default:
+    - kimi/kimi-k3
+```
+
+K2.7 Code is the 256K coding-specialized, thinking-only option; its thinking
+mode and `keep: all` behavior are fixed, so the template does not send a
+`thinking` object. K2.6 is the 256K general-purpose hybrid option and therefore
+sets both fields explicitly. K2.5 does not support preserved thinking and is
+being retired for new users; prefer K3 for new configurations.
+
+For all `openai_visible` recipes (DeepSeek, GLM, supported Qwen, and Kimi),
+Chord only replays native reasoning within the producing provider. This keeps
+documented in-provider upgrades such as Kimi K2.6/K2.7 to K3 working, while a
+cross-provider fallback drops the incompatible reasoning/tool trajectory so
+the target can plan afresh instead of receiving another provider's chain of
+thought or an invalid partial trajectory.
+
+## Grok 4.5 (xAI Responses)
+
+xAI recommends the Responses API for Grok. Grok 4.5 supports text and image
+input, function calling, structured output, reasoning, and a 500K context
+window. It emits raw reasoning through `response.reasoning_text.*` stream
+events; Chord maps those events to the normal thinking stream while preserving
+the ordered Responses output items for tool-loop continuity.
+
+```yaml
+model_templates:
+  grok-4.5: &grok-4-5
+    limit:
+      context: 500000
+      output: 64000 # conservative local allocation; xAI publishes the total context
+    reasoning:
+      effort: high
+    modalities:
+      input: [text, image]
+    cost:
+      input: 2
+      output: 6
+      cache_read: 0.3
+      input_tiers:
+        - above_input_tokens: 199999
+          input: 4
+          output: 12
+          cache_read: 0.6
+
+
+providers:
+  xai:
+    type: responses
+    api_url: https://api.x.ai/v1/responses
+    models:
+      grok-4.5: *grok-4-5
+
+model_pools:
+  default:
+    - xai/grok-4.5
+```
+
+Use `grok-4.5` or the rolling `grok-4.5-latest` alias. Do not configure
+`openai_visible`: xAI Responses uses native ordered output/reasoning state, not
+Chat Completions `reasoning_content`. `reasoning.effort` accepts `low`,
+`medium`, or `high`; high is the default and reasoning cannot be disabled.
+`grok-4.20-fast` is not an official xAI model ID. The official
+`grok-4.20-multi-agent` model has a 1M context window and should be configured
+from its own current xAI model page rather than copied from Grok 4.5.
+
 ## Verify any recipe
 
 After copying a recipe, run one targeted check first:

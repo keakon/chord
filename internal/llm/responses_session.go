@@ -91,6 +91,8 @@ func responsesItemKey(item responsesInputItem) string {
 			b.WriteString(c.Type)
 			b.WriteString(":")
 			b.WriteString(c.Text)
+			b.WriteString(":")
+			b.WriteString(c.Refusal)
 			b.WriteString(";")
 		}
 		return b.String()

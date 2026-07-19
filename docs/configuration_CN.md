@@ -621,9 +621,16 @@ providers:
   - `none`：不回放 provider 专属的可见 reasoning。
   - `openai_visible`：在 Chat Completions 工具循环中原样回放 assistant 的
     `reasoning_content`。它不注入请求字段；字段差异由
-    `request_overrides.body` 配置。
+    `request_overrides.body` 配置。只有产生状态的 provider ID 与目标一致时
+    才会回放，因此 Kimi K2.6/K2.7→K3 这类官方支持的同 provider 升级可保留
+    连续性；跨 provider fallback 会丢弃配对的 reasoning / 工具轨迹，让
+    目标模型重新规划。
   - Responses 与 Messages 使用各自协议原生的连续性机制，不应启用可见
-    reasoning 回放。
+    reasoning 回放。这些机制由 Chord 自动处理：Responses 的加密 reasoning
+    item、Anthropic 的 `thinking` / `redacted_thinking` 块、Gemini 的
+    `thoughtSignature` 都会按兼容 provenance 捕获、持久化和回放。Responses
+    会保留有序原生 output item；Gemini 会保留原始 part 边界，并在
+    Gemini 3 活跃工具 step 没有可复用签名时使用官方 validator-skip 哨兵。
 - `compat.thinking_toolcall`：为把工具调用编码进可见 reasoning 文本的网关
   启用专用解析器。只有网关明确要求时才开启。
 

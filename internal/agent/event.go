@@ -67,6 +67,8 @@ type manualContinueEvent struct{}
 type LLMResponsePayload struct {
 	Content                   string
 	ThinkingBlocks            []message.ThinkingBlock
+	ResponsesOutput           []message.ResponsesOutputItem
+	GeminiParts               []message.GeminiReplayPart
 	ToolCalls                 []message.ToolCall
 	StopReason                string
 	ThinkingToolcallMarkerHit bool

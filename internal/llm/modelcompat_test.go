@@ -122,7 +122,7 @@ func TestNormalizeMessagesForPoolTarget_PreservesOpenAIVisibleReasoningWhenCompa
 		Role:             message.RoleAssistant,
 		ReasoningContent: "preserved reasoning",
 		ToolCalls:        []message.ToolCall{{ID: "call_1", Name: "Shell", Args: json.RawMessage(`{"command":"pwd"}`)}},
-		Provenance:       &message.MessageProvenance{Source: "chord", ProviderID: "glm-main", WireFamily: modelcompat.WireFamilyOpenAIChat},
+		Provenance:       &message.MessageProvenance{Source: "chord", ProviderID: "glm-main", ModelID: "glm-5.2", WireFamily: modelcompat.WireFamilyOpenAIChat},
 	}, {Role: message.RoleTool, ToolCallID: "call_1", Content: "/tmp/project\n"}}
 	out, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "glm-5.2"}, RequestTuning{})
 	if len(out) != 2 || out[0].ReasoningContent != "preserved reasoning" {

@@ -68,11 +68,12 @@ type sseContentBlockStart struct {
 	Type         string `json:"type"`
 	Index        int    `json:"index"`
 	ContentBlock struct {
-		Type  string          `json:"type"`            // "text" or "tool_use"
+		Type  string          `json:"type"`            // "text", "tool_use", "thinking", or "redacted_thinking"
 		Text  string          `json:"text,omitempty"`  // for text blocks
 		ID    string          `json:"id,omitempty"`    // for tool_use blocks
 		Name  string          `json:"name,omitempty"`  // for tool_use blocks
 		Input json.RawMessage `json:"input,omitempty"` // for tool_use blocks (usually {})
+		Data  string          `json:"data,omitempty"`  // for redacted_thinking blocks (encrypted payload)
 	} `json:"content_block"`
 }
 
@@ -122,6 +123,7 @@ type contentBlock struct {
 	toolInput strings.Builder
 	thinking  strings.Builder // accumulated thinking text (thinking blocks only)
 	signature string          // thinking block signature (returned by signature_delta)
+	redacted  string          // redacted_thinking encrypted payload (replayed verbatim)
 }
 
 func applyAnthropicSSEUsage(dst *message.TokenUsage, usage sseUsage, adoptOnlyNonZero bool) {
@@ -256,6 +258,10 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					if p, ok := reader.(chunkPhaser); ok {
 						p.SetChunkTimeout(SlowPhaseChunkTimeout)
 					}
+				case "redacted_thinking":
+					// Encrypted reasoning arrives whole in the start event; it must be
+					// preserved and replayed verbatim for the conversation to remain valid.
+					block.redacted = cloneLongLivedLLMString(ev.ContentBlock.Data)
 				}
 				blocks[ev.Index] = block
 
@@ -363,6 +369,10 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					})
 					if cb != nil {
 						cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
+					}
+				case "redacted_thinking":
+					if block.redacted != "" {
+						resp.ThinkingBlocks = append(resp.ThinkingBlocks, message.ThinkingBlock{Data: block.redacted})
 					}
 				}
 				delete(blocks, ev.Index)

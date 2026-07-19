@@ -426,7 +426,16 @@ func messageContextBytes(messages []message.Message) int {
 			total += len(tc.ID) + len(tc.Name) + len(tc.Args)
 		}
 		for _, tb := range msg.ThinkingBlocks {
-			total += len(tb.Thinking) + len(tb.Signature)
+			total += len(tb.Thinking) + len(tb.Signature) + len(tb.Data)
+		}
+		for _, item := range msg.ResponsesOutput {
+			total += len(item.ID) + len(item.EncryptedContent)
+			for _, summary := range item.Summary {
+				total += len(summary.Text)
+			}
+		}
+		for _, part := range msg.GeminiParts {
+			total += len(part.ThoughtSignature)
 		}
 		total += len(msg.ReasoningContent)
 	}
@@ -458,7 +467,16 @@ func EstimateMessageTokens(msg message.Message) int {
 		n += len(tc.Args) / 3
 	}
 	for _, tb := range msg.ThinkingBlocks {
-		n += (len(tb.Thinking) + len(tb.Signature)) / 3
+		n += (len(tb.Thinking) + len(tb.Signature) + len(tb.Data)) / 3
+	}
+	for _, item := range msg.ResponsesOutput {
+		n += (len(item.ID) + len(item.EncryptedContent)) / 3
+		for _, summary := range item.Summary {
+			n += len(summary.Text) / 3
+		}
+	}
+	for _, part := range msg.GeminiParts {
+		n += len(part.ThoughtSignature) / 3
 	}
 	n += len(msg.ReasoningContent) / 3
 	if n < 1 {

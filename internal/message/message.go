@@ -121,26 +121,28 @@ const KindLoopNotice = "loop_notice"
 
 // Message represents a conversation message (user, assistant, or tool result).
 type Message struct {
-	Role                      Role               `json:"role"` // "user", "assistant", "tool"
-	Content                   string             `json:"content"`
-	Parts                     []ContentPart      `json:"parts,omitempty"`                       // multi-part content (text + images); when set, supersedes Content
-	ThinkingBlocks            []ThinkingBlock    `json:"thinking_blocks,omitempty"`             // assistant only; must be replayed verbatim
-	ReasoningContent          string             `json:"reasoning_content,omitempty"`           // assistant only; OpenAI-compatible reasoning/thinking text for chain replay
-	ToolCalls                 []ToolCall         `json:"tool_calls,omitempty"`                  // non-nil for assistant tool_use
-	ToolCallID                string             `json:"tool_call_id,omitempty"`                // non-empty for tool results
-	ToolDiff                  string             `json:"tool_diff,omitempty"`                   // unified diff for Write/Edit tool results
-	ToolDiffAdded             int                `json:"tool_diff_added,omitempty"`             // total added lines for Write/Edit; computed before diff truncation
-	ToolDiffRemoved           int                `json:"tool_diff_removed,omitempty"`           // total removed lines for Write/Edit; computed before diff truncation
-	ToolDurationMs            int64              `json:"tool_duration_ms,omitempty"`            // final tool elapsed time in milliseconds for restored footer display
-	ToolStatus                string             `json:"tool_status,omitempty"`                 // terminal tool status: success|error|cancelled
-	FileState                 *ToolFileState     `json:"file_state,omitempty"`                  // durable file-state metadata for restore-time safety sentinels
-	ToolChangedPaths          []string           `json:"tool_changed_paths,omitempty"`          // runtime-observed workspace paths attributed to this tool result
-	FileAttributionIncomplete bool               `json:"file_attribution_incomplete,omitempty"` // successful mutation could not be mapped to exact workspace paths
-	LSPReviews                []LSPReview        `json:"lsp_reviews,omitempty"`                 // per-server last-review snapshot for the directly edited file only
-	Audit                     *ToolArgsAudit     `json:"audit,omitempty"`                       // tool-call audit metadata when effective args differ after confirmation
-	IsCompactionSummary       bool               `json:"is_compaction_summary,omitempty"`       // first user message after compaction (summary of archived history)
-	StopReason                string             `json:"stop_reason,omitempty"`                 // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
-	Provenance                *MessageProvenance `json:"provenance,omitempty"`                  // optional producer/source metadata for model-compat replay decisions
+	Role                      Role                  `json:"role"` // "user", "assistant", "tool"
+	Content                   string                `json:"content"`
+	Parts                     []ContentPart         `json:"parts,omitempty"`                       // multi-part content (text + images); when set, supersedes Content
+	ThinkingBlocks            []ThinkingBlock       `json:"thinking_blocks,omitempty"`             // assistant only; must be replayed verbatim
+	ResponsesOutput           []ResponsesOutputItem `json:"responses_output,omitempty"`            // assistant only; ordered native Responses API output items
+	GeminiParts               []GeminiReplayPart    `json:"gemini_parts,omitempty"`                // assistant only; ordered native Gemini parts with positional signatures
+	ReasoningContent          string                `json:"reasoning_content,omitempty"`           // assistant only; OpenAI-compatible reasoning/thinking text for chain replay
+	ToolCalls                 []ToolCall            `json:"tool_calls,omitempty"`                  // non-nil for assistant tool_use
+	ToolCallID                string                `json:"tool_call_id,omitempty"`                // non-empty for tool results
+	ToolDiff                  string                `json:"tool_diff,omitempty"`                   // unified diff for Write/Edit tool results
+	ToolDiffAdded             int                   `json:"tool_diff_added,omitempty"`             // total added lines for Write/Edit; computed before diff truncation
+	ToolDiffRemoved           int                   `json:"tool_diff_removed,omitempty"`           // total removed lines for Write/Edit; computed before diff truncation
+	ToolDurationMs            int64                 `json:"tool_duration_ms,omitempty"`            // final tool elapsed time in milliseconds for restored footer display
+	ToolStatus                string                `json:"tool_status,omitempty"`                 // terminal tool status: success|error|cancelled
+	FileState                 *ToolFileState        `json:"file_state,omitempty"`                  // durable file-state metadata for restore-time safety sentinels
+	ToolChangedPaths          []string              `json:"tool_changed_paths,omitempty"`          // runtime-observed workspace paths attributed to this tool result
+	FileAttributionIncomplete bool                  `json:"file_attribution_incomplete,omitempty"` // successful mutation could not be mapped to exact workspace paths
+	LSPReviews                []LSPReview           `json:"lsp_reviews,omitempty"`                 // per-server last-review snapshot for the directly edited file only
+	Audit                     *ToolArgsAudit        `json:"audit,omitempty"`                       // tool-call audit metadata when effective args differ after confirmation
+	IsCompactionSummary       bool                  `json:"is_compaction_summary,omitempty"`       // first user message after compaction (summary of archived history)
+	StopReason                string                `json:"stop_reason,omitempty"`                 // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
+	Provenance                *MessageProvenance    `json:"provenance,omitempty"`                  // optional producer/source metadata for model-compat replay decisions
 	// Usage is the token usage for this message when it ends an LLM round (assistant only).
 	// Persisted in JSONL so session resume can sum per-message usage to restore session totals.
 	Usage        *TokenUsage      `json:"usage,omitempty"`
@@ -179,6 +181,11 @@ type ToolCall struct {
 	ID   string          `json:"id"`
 	Name string          `json:"name"`
 	Args json.RawMessage `json:"args"`
+	// ThoughtSignature is Gemini's per-part thought signature attached to this
+	// function call. It must be replayed verbatim with the functionCall part on
+	// subsequent Gemini requests (Gemini 3 rejects function-call history that
+	// is missing it). Other providers ignore it.
+	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
 // ToolDefinition describes a tool for the LLM API's tools parameter.
@@ -288,13 +295,23 @@ type TokenUsage struct {
 type ThinkingBlock struct {
 	Thinking  string `json:"thinking"`
 	Signature string `json:"signature"`
+	// Data holds an Anthropic redacted_thinking block (encrypted payload with
+	// no visible text). When set, Thinking/Signature are empty and the block
+	// must be replayed verbatim as a redacted_thinking content block.
+	Data string `json:"data,omitempty"`
 }
 
-// Replayable reports whether the block carries both the thinking text and the
-// signature required to be replayed verbatim to a provider. Blocks missing
-// either field cannot be sent back as assistant history.
+// Replayable reports whether the block carries the content required to be
+// replayed verbatim to a provider: either thinking text plus its signature, or
+// an encrypted redacted_thinking payload. Blocks with neither cannot be sent
+// back as assistant history.
 func (b ThinkingBlock) Replayable() bool {
-	return strings.TrimSpace(b.Thinking) != "" && strings.TrimSpace(b.Signature) != ""
+	if strings.TrimSpace(b.Data) != "" {
+		return true
+	}
+	// With display=omitted Anthropic intentionally returns an empty thinking
+	// string plus a signature that still has to be replayed verbatim.
+	return strings.TrimSpace(b.Signature) != ""
 }
 
 // HasReplayableThinkingBlocks reports whether any block in blocks is replayable.
@@ -305,6 +322,43 @@ func HasReplayableThinkingBlocks(blocks []ThinkingBlock) bool {
 		}
 	}
 	return false
+}
+
+// ResponsesOutputItem preserves one Responses API output item in provider
+// order. Stateless replay needs the complete sequence rather than separate
+// message/tool/reasoning buckets because newer models may interleave phases.
+type ResponsesOutputItem struct {
+	Type             string                      `json:"type"`
+	ID               string                      `json:"id,omitempty"`
+	CallID           string                      `json:"call_id,omitempty"`
+	Role             string                      `json:"role,omitempty"`
+	Name             string                      `json:"name,omitempty"`
+	Arguments        string                      `json:"arguments,omitempty"`
+	Phase            string                      `json:"phase,omitempty"`
+	Content          []ResponsesOutputContent    `json:"content,omitempty"`
+	EncryptedContent string                      `json:"encrypted_content,omitempty"`
+	Summary          []ResponsesReasoningSummary `json:"summary,omitempty"`
+}
+
+type ResponsesOutputContent struct {
+	Type    string `json:"type"`
+	Text    string `json:"text,omitempty"`
+	Refusal string `json:"refusal,omitempty"`
+}
+
+type ResponsesReasoningSummary struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// GeminiReplayPart preserves the original part boundary for thought
+// signatures. Type is text, thought, or function_call; ToolCallID links a
+// function_call part to Message.ToolCalls without duplicating its arguments.
+type GeminiReplayPart struct {
+	Type             string `json:"type"`
+	Text             string `json:"text,omitempty"`
+	ToolCallID       string `json:"tool_call_id,omitempty"`
+	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
 // MessageProvenance captures the producer/source metadata of a persisted
@@ -323,11 +377,13 @@ type MessageProvenance struct {
 
 // Response represents a complete LLM response.
 type Response struct {
-	Content        string
-	ThinkingBlocks []ThinkingBlock // non-nil when extended thinking was enabled
-	ToolCalls      []ToolCall
-	Usage          *TokenUsage
-	StopReason     string
+	Content         string
+	ThinkingBlocks  []ThinkingBlock // non-nil when extended thinking was enabled
+	ResponsesOutput []ResponsesOutputItem
+	GeminiParts     []GeminiReplayPart
+	ToolCalls       []ToolCall
+	Usage           *TokenUsage
+	StopReason      string
 	// ThinkingToolcallMarkerHit is true when provider-side reasoning content
 	// contained pseudo tool-call template markers (e.g. "<|tool_call_begin|>").
 	// This is observational metadata only; tool execution must still come from

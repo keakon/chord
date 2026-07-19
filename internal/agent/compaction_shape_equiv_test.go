@@ -19,9 +19,11 @@ func shapeEquivBaseMessage() message.Message {
 		ToolStatus:       "success",
 		Kind:             "",
 		ToolCalls: []message.ToolCall{
-			{ID: "call-1", Name: "read", Args: json.RawMessage(`{"path":"a.go"}`)},
+			{ID: "call-1", Name: "read", Args: json.RawMessage(`{"path":"a.go"}`), ThoughtSignature: "tool-sig"},
 		},
-		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "s"}},
+		ThinkingBlocks:  []message.ThinkingBlock{{Thinking: "t", Signature: "s", Data: "d"}},
+		ResponsesOutput: []message.ResponsesOutputItem{{Type: "reasoning", ID: "rs", EncryptedContent: "enc"}},
+		GeminiParts:     []message.GeminiReplayPart{{Type: "text", Text: "hello", ThoughtSignature: "sig"}},
 		Parts: []message.ContentPart{
 			{Type: message.ContentPartText, Text: "hello", DisplayText: "hello", MimeType: "", Data: nil},
 		},
@@ -58,14 +60,18 @@ func TestStableReductionMessageEquivalentMatchesShapeHashes(t *testing.T) {
 		"tool_call_args": func(m *message.Message) {
 			m.ToolCalls = []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{"path":"b.go"}`)}}
 		},
-		"tool_calls_len": func(m *message.Message) { m.ToolCalls = nil },
+		"tool_call_signature": func(m *message.Message) { m.ToolCalls[0].ThoughtSignature = "changed" },
+		"tool_calls_len":      func(m *message.Message) { m.ToolCalls = nil },
 		"thinking_text": func(m *message.Message) {
 			m.ThinkingBlocks = []message.ThinkingBlock{{Thinking: "changed", Signature: "s"}}
 		},
 		"thinking_signature": func(m *message.Message) {
 			m.ThinkingBlocks = []message.ThinkingBlock{{Thinking: "t", Signature: "changed"}}
 		},
-		"thinking_len": func(m *message.Message) { m.ThinkingBlocks = nil },
+		"thinking_len":     func(m *message.Message) { m.ThinkingBlocks = nil },
+		"thinking_data":    func(m *message.Message) { m.ThinkingBlocks[0].Data = "changed" },
+		"responses_output": func(m *message.Message) { m.ResponsesOutput[0].EncryptedContent = "changed" },
+		"gemini_parts":     func(m *message.Message) { m.GeminiParts[0].ThoughtSignature = "changed" },
 		"part_text": func(m *message.Message) {
 			m.Parts = []message.ContentPart{{Type: message.ContentPartText, Text: "changed", DisplayText: "hello"}}
 		},

@@ -547,6 +547,155 @@ model_pools:
 - 对兼容网关，请使用该网关 / 账号实际公开的模型 ID 和限制。见
   [常见问题排查 — DeepSeek / OpenAI 兼容 thinking 模式 400](./troubleshooting_CN.md#deepseek--openai-兼容-thinking-模式-400)。
 
+## Qwen 保留历史思考
+
+Qwen 通过 `reasoning_content` 返回可见思考，但大多数型号默认忽略历史
+消息里的该字段。只有模型文档明确支持 `preserve_thinking` 时才应开启
+回放（目前主要是 Qwen 3.6/3.7 Max、Plus 系列）；较早的 Qwen 3/3.5
+即使会输出思考，也应保持 continuity 关闭。
+
+```yaml
+model_templates:
+  qwen-preserved: &qwen-preserved
+    limit:
+      context: 1000000
+      output: 65536
+    compat:
+      request_overrides:
+        body:
+          enable_thinking: true
+          preserve_thinking: true
+      reasoning_continuity:
+        mode: openai_visible
+
+providers:
+  qwen:
+    type: chat-completions
+    api_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions
+    models:
+      qwen3.7-plus: *qwen-preserved
+
+model_pools:
+  default:
+    - qwen/qwen3.7-plus
+```
+
+请按账号和区域文档替换上下文限制及 endpoint。`preserve_thinking: true`
+时，历史思考会计入输入 token 和费用。
+
+## Kimi K3
+
+Kimi K3 是当前旗舰思考模型，提供 1M token 上下文、始终启用思考，目前
+只接受 `reasoning_effort: max`，并要求多轮对话和工具调用循环完整回传
+assistant 消息（包括 `reasoning_content`）。不要发送 K2.x 的 `thinking`
+参数，也不要显式发送 `temperature` 等固定采样字段。
+
+```yaml
+model_templates:
+  kimi-k3: &kimi-k3
+    limit:
+      context: 1048576
+      output: 131072
+    reasoning:
+      effort: max
+    compat:
+      reasoning_continuity:
+        mode: openai_visible
+
+  kimi-k2.7-code: &kimi-k2-7-code
+    limit:
+      context: 262144
+      output: 32768
+    compat:
+      reasoning_continuity:
+        mode: openai_visible
+
+  kimi-k2.6-thinking: &kimi-k2-6-thinking
+    limit:
+      context: 262144
+      output: 32768
+    compat:
+      request_overrides:
+        body:
+          thinking:
+            type: enabled
+            keep: all
+      reasoning_continuity:
+        mode: openai_visible
+
+providers:
+  kimi:
+    type: chat-completions
+    api_url: https://api.moonshot.ai/v1/chat/completions
+    models:
+      kimi-k3: *kimi-k3
+      kimi-k2.7-code: *kimi-k2-7-code
+      kimi-k2.6: *kimi-k2-6-thinking
+
+model_pools:
+  default:
+    - kimi/kimi-k3
+```
+
+K2.7 Code 是 256K 上下文、面向编码的纯思考型号；它的 thinking 和
+`keep: all` 行为固定，因此模板不发送 `thinking` 对象。K2.6 是 256K
+上下文的通用混合思考型号，所以显式设置这两个字段。K2.5 不支持保留
+历史思考，而且已对新用户进入退场阶段；新配置应优先使用 K3。
+
+对于所有使用 `openai_visible` 的模板（DeepSeek、GLM、受支持的 Qwen 和
+Kimi），Chord 只会在产生思考的 provider 内回放原生 reasoning。这样既
+支持 Kimi K2.6/K2.7→K3 这类官方允许的同 provider 升级，又会在跨 provider
+fallback 时丢弃不兼容的 reasoning / 工具轨迹，让目标模型重新规划，避免
+把其他 provider 的思考链或无效的半截轨迹发给目标模型。
+
+## Grok 4.5（xAI Responses）
+
+xAI 推荐通过 Responses API 使用 Grok。Grok 4.5 支持文本和图片输入、
+function calling、structured output、reasoning，并提供 500K 上下文。它通过
+`response.reasoning_text.*` 流事件返回原始 reasoning；Chord 会把这些事件
+映射到统一 thinking stream，同时保存有序 Responses output item 以延续工具
+调用状态。
+
+```yaml
+model_templates:
+  grok-4.5: &grok-4-5
+    limit:
+      context: 500000
+      output: 64000 # 保守的本地分配；xAI 公布的是总上下文
+    reasoning:
+      effort: high
+    modalities:
+      input: [text, image]
+    cost:
+      input: 2
+      output: 6
+      cache_read: 0.3
+      input_tiers:
+        - above_input_tokens: 199999
+          input: 4
+          output: 12
+          cache_read: 0.6
+
+
+providers:
+  xai:
+    type: responses
+    api_url: https://api.x.ai/v1/responses
+    models:
+      grok-4.5: *grok-4-5
+
+model_pools:
+  default:
+    - xai/grok-4.5
+```
+
+可使用 `grok-4.5` 或滚动别名 `grok-4.5-latest`。不要配置
+`openai_visible`：xAI Responses 使用原生有序 output / reasoning 状态，而非
+Chat Completions 的 `reasoning_content`。`reasoning.effort` 支持 `low`、
+`medium`、`high`；high 是默认值且不能关闭 reasoning。`grok-4.20-fast`
+不是 xAI 官方模型 ID。官方 `grok-4.20-multi-agent` 提供 1M 上下文，应按
+当前 xAI 型号页面单独配置，不要从 Grok 4.5 直接复制。
+
 ## 如何验证任意一份配置
 
 复制完配置后，先跑一个定向检查：

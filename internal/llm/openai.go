@@ -632,6 +632,7 @@ type openAIToolAccumulator struct {
 	name               string
 	args               strings.Builder
 	streamStartEmitted bool
+	thoughtSignature   string // Gemini thoughtSignature attached to the functionCall part
 }
 
 func maybeEmitOpenAIToolStart(acc *openAIToolAccumulator, cb StreamCallback) {

@@ -38,6 +38,10 @@
 
 ### 修复
 
+- OpenAI Responses 传输现在始终请求加密 reasoning 状态，并持久化完整、有序的原生 output 序列——包括 reasoning、message（含 phase）和 function call——stateless 回放时不再按类型重新分组。存储型请求保留 item ID，默认 `store: false` 路径则为兼容 relay 而省略 ID。Reasoning 模型因此能跨工具调用轮次延续状态；一个 Agent 基准任务的输出从约 330K 降至与 Codex 相当的约 36K token。
+- Anthropic `thinking` 与 `redacted_thinking` block 现在都会在 MainAgent 和 SubAgent 工具循环中原样保存及回放。此前 SubAgent 连普通 signed thinking 都会遗漏，而流解析也会丢弃 safety 加密 block，任一种情况都可能使下一次工具结果请求失效。
+- Gemini `thoughtSignature` 现在保存在原始 thought、text 或 function-call part 上，不再压到合并文本。Gemini 3 的活跃工具轨迹若缺失签名或签名因跨模型而被剥离，会在每个 model step 的第一个 function call 上加入 Google 文档规定的 validator-skip 哨兵，从而避免 fallback 期间的 400，同时不回放不兼容的加密签名。
+- DeepSeek、GLM、受支持的 Qwen 与 Kimi Chat Completions 目标现在只有在 provider provenance 匹配时才回放原生可见 reasoning。Kimi K2.6/K2.7→K3 这类官方支持的同 provider 升级会保留连续性；跨 provider fallback 则丢弃不兼容的 reasoning / 工具轨迹并重新规划，而不是把另一 provider 的思考链或不完整的 thinking-mode 工具轮次发给目标。模型配置文档也补充了 Qwen `preserve_thinking` 和 Kimi 各版本差异。
 - Toast 通知现在有界且去重：同类 OAuth 账号错误反复出现时更新同一条 toast 而不是不断堆叠，队列最多保留 10 条并优先丢弃严重级别最低的一条，error/warn 的展示时长缩短为 5s/4s。
 - 修复搜索根目录的 `.gitignore` 用类似 `.*` 的模式隐藏点文件时，`grep`（以及其他基于 gitignore 的遍历）静默跳过整棵树的问题：该模式会匹配根目录自身对应的字面 `.`。忽略规则现在只作用于树内条目，与 git 语义一致。
 - 修复恢复会话时引用已被删除的 model pool（表现为 `(missing)` 状态）的问题：恢复阶段会把过期的当前池与各 agent 覆盖项改写为该 agent 的第一个已配置池，使实际生效、界面显示与持久化状态保持一致。
