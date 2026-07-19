@@ -259,7 +259,7 @@ func (a *MainAgent) popQueuedEvent() (Event, bool) {
 	defer a.eventMu.Unlock()
 	select {
 	case evt := <-a.eventCh:
-		a.signalEventSpaceLocked()
+		a.signalEventSpace()
 		return evt, true
 	default:
 	}
@@ -276,7 +276,7 @@ func (a *MainAgent) popQueuedEvent() (Event, bool) {
 		evt = a.deferredEvents[0]
 		a.deferredEvents[0] = Event{}
 		a.deferredEvents = a.deferredEvents[1:]
-		a.signalEventSpaceLocked()
+		a.signalEventSpace()
 	}
 	if len(a.deferredEvents) > 0 || len(a.loopEvents) > 0 {
 		a.wakeDeferredEvents()
@@ -296,8 +296,6 @@ func (a *MainAgent) signalEventSpace() {
 	default:
 	}
 }
-
-func (a *MainAgent) signalEventSpaceLocked() { a.signalEventSpace() }
 
 func (a *MainAgent) updateEventOverflowPeakLocked() {
 	depth := uint64(len(a.deferredEvents) + len(a.loopEvents))
