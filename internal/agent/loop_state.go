@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
@@ -172,11 +173,11 @@ func extractLoopBlockedReason(content string) string {
 	if len(matches) == 0 {
 		return ""
 	}
-	for i := len(matches) - 1; i >= 0; i-- {
-		if len(matches[i]) < 2 {
+	for _, matche := range slices.Backward(matches) {
+		if len(matche) < 2 {
 			continue
 		}
-		reason := strings.Join(strings.Fields(matches[i][1]), " ")
+		reason := strings.Join(strings.Fields(matche[1]), " ")
 		if reason == "" {
 			continue
 		}

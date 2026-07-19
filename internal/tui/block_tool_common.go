@@ -69,23 +69,14 @@ func newToolCardMetricsWithContentCap(width, contentCap int) toolCardMetrics {
 
 func newToolCardMetricsForHeaderWidth(width, contentCap int, wideHeader bool) toolCardMetrics {
 	blockStyle := ToolBlockStyle
-	boxWidth := width - blockStyle.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	cardWidth := boxWidth - blockStyle.GetHorizontalPadding() - blockStyle.GetHorizontalBorderSize()
-	if cardWidth < 10 {
-		cardWidth = 10
-	}
+	boxWidth := max(width-blockStyle.GetHorizontalMargins(), 10)
+	cardWidth := max(boxWidth-blockStyle.GetHorizontalPadding()-blockStyle.GetHorizontalBorderSize(), 10)
 	if !wideHeader {
 		// Keep the card surface aligned with the prose cards' right edge on very
 		// wide viewports instead of stretching empty background past the text cap.
 		cardWidth = clampCardInnerWidth(cardWidth, blockStyle, contentCap)
 	}
-	contentWidth := min(cardWidth-4, contentCap)
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
+	contentWidth := max(min(cardWidth-4, contentCap), 10)
 	return toolCardMetrics{
 		blockStyle:   blockStyle,
 		toolCardBg:   currentTheme.ToolCallBg,
@@ -664,8 +655,8 @@ func sanitizeToolDisplayText(s string) string {
 
 func toolErrorDisplayContent(content string) string {
 	trimmed := strings.TrimSpace(content)
-	if strings.HasPrefix(trimmed, "Error: ") {
-		return strings.TrimSpace(strings.TrimPrefix(trimmed, "Error: "))
+	if after, ok := strings.CutPrefix(trimmed, "Error: "); ok {
+		return strings.TrimSpace(after)
 	}
 	if strings.HasPrefix(trimmed, "Error:\n") {
 		return strings.TrimSpace(strings.TrimPrefix(trimmed, "Error:"))

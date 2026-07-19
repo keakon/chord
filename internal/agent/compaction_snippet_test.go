@@ -16,7 +16,7 @@ func TestCompactTextSnippetPreservesUTF8(t *testing.T) {
 	// Every byte offset must be exercised so a boundary lands mid-rune for at
 	// least one input, regardless of the 2/3 head split.
 	base := strings.Repeat("石药中诺厂家分类", 40)
-	for extra := 0; extra < 8; extra++ {
+	for extra := range 8 {
 		in := strings.Repeat("a", extra) + base
 		for _, maxChars := range []int{10, 33, 64, 100, 200} {
 			got := compactTextSnippet(in, maxChars)

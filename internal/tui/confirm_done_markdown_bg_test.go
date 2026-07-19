@@ -106,7 +106,7 @@ func TestConfirmDialogDoneMarkdownUsesDialogCellBackgrounds(t *testing.T) {
 }
 
 func findRenderedLineContaining(out, needle string) string {
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.Contains(stripANSI(line), needle) {
 			return line
 		}

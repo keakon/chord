@@ -619,7 +619,7 @@ func commonSuffixParts(a, b []string) int {
 
 func commonPrefixParts(a, b []string) int {
 	limit := min(len(a), len(b))
-	for i := 0; i < limit; i++ {
+	for i := range limit {
 		if a[i] != b[i] {
 			return i
 		}

@@ -136,10 +136,7 @@ func (t *OverlayTable) Render(width int) string {
 	}
 	statusColWidth := t.statusGutterWidth()
 	colWidths := t.columnWidths(width)
-	contentWidth := width - statusColWidth
-	if contentWidth < 1 {
-		contentWidth = 1
-	}
+	contentWidth := max(width-statusColWidth, 1)
 	headerCells := make([]string, len(t.columns))
 	for i, col := range t.columns {
 		headerCells[i] = formatTableCell(col.Title, colWidths[i], col.Align)
@@ -192,10 +189,7 @@ func (t *OverlayTable) columnWidths(width int) []int {
 		return widths
 	}
 	gutter := t.statusGutterWidth()
-	contentWidth := width - gutter - (len(t.columns)-1)*2
-	if contentWidth < len(t.columns)*4 {
-		contentWidth = len(t.columns) * 4
-	}
+	contentWidth := max(width-gutter-(len(t.columns)-1)*2, len(t.columns)*4)
 	fixed := 0
 	autoCount := 0
 	for i, col := range t.columns {
@@ -206,10 +200,7 @@ func (t *OverlayTable) columnWidths(width int) []int {
 			autoCount++
 		}
 	}
-	remaining := contentWidth - fixed
-	if remaining < autoCount*6 {
-		remaining = autoCount * 6
-	}
+	remaining := max(contentWidth-fixed, autoCount*6)
 	for i, col := range t.columns {
 		if col.Width > 0 {
 			continue

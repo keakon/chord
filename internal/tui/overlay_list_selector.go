@@ -97,10 +97,7 @@ func (s *overlayListSelectorState) Render(
 	}
 
 	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
-	contentWidth := overlayCfg.MaxWidth - 4
-	if contentWidth < 1 {
-		contentWidth = 1
-	}
+	contentWidth := max(overlayCfg.MaxWidth-4, 1)
 
 	prefix = strings.TrimSuffix(prefix, "\n")
 	prefixLines := 0
@@ -110,10 +107,7 @@ func (s *overlayListSelectorState) Render(
 		prefixLines = 1 + strings.Count(prefix, "\n")
 
 		// Always move the list to the next line.
-		sepNewlines := 1 + gapBlankLines
-		if sepNewlines < 1 {
-			sepNewlines = 1
-		}
+		sepNewlines := max(1+gapBlankLines, 1)
 		contentParts = append(contentParts, strings.Repeat("\n", sepNewlines))
 	}
 	contentParts = append(contentParts, s.list.Render(contentWidth))

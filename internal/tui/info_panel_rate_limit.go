@@ -188,10 +188,7 @@ func formatRateLimitResetTime(w ratelimit.RateLimitWindow) string {
 	}
 
 	if d >= 24*time.Hour {
-		rounded := d.Round(time.Hour)
-		if rounded < 24*time.Hour {
-			rounded = 24 * time.Hour
-		}
+		rounded := max(d.Round(time.Hour), 24*time.Hour)
 		days := int(rounded / (24 * time.Hour))
 		hours := int((rounded % (24 * time.Hour)) / time.Hour)
 		return fmt.Sprintf("%dd%dh", days, hours)

@@ -7,6 +7,7 @@ package permission
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -135,8 +136,8 @@ func (rs Ruleset) IsDisabled(toolName string) bool {
 		}
 	}
 
-	for i := len(rs) - 1; i >= 0; i-- {
-		r := rs[i]
+	for _, r := range slices.Backward(rs) {
+
 		if globMatch(toolName, toolname.Normalize(r.Permission)) {
 			return r.Pattern == "*" && r.Action == ActionDeny
 		}
@@ -156,8 +157,8 @@ func (rs Ruleset) DeniesAllWithPrefix(prefix string, excludedPrefixes ...string)
 		return false
 	}
 	excluded := normalizePermissionPrefixes(excludedPrefixes)
-	for i := len(rs) - 1; i >= 0; i-- {
-		r := rs[i]
+	for _, r := range slices.Backward(rs) {
+
 		permissionPattern := toolname.Normalize(r.Permission)
 		if permissionPatternCanMatchOwnedPrefix(permissionPattern, prefix, excluded) && r.Action != ActionDeny {
 			return false
@@ -223,8 +224,8 @@ func (rs Ruleset) lastSpecificEditPatchToolRule(toolName, counterpart string) (R
 	var counterpartMatch Rule
 	counterpartFound := false
 
-	for i := len(rs) - 1; i >= 0; i-- {
-		r := rs[i]
+	for _, r := range slices.Backward(rs) {
+
 		normRulePerm := toolname.Normalize(r.Permission)
 		if normRulePerm == "*" {
 			continue
@@ -244,8 +245,8 @@ func (rs Ruleset) lastSpecificEditPatchToolMatch(toolName, counterpart, pattern 
 	var counterpartMatch Rule
 	counterpartFound := false
 
-	for i := len(rs) - 1; i >= 0; i-- {
-		r := rs[i]
+	for _, r := range slices.Backward(rs) {
+
 		normRulePerm := toolname.Normalize(r.Permission)
 		if normRulePerm == "*" {
 			continue

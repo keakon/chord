@@ -432,10 +432,7 @@ const spacePad = "                                                              
 // writeSpaces appends n spaces to b, reusing spacePad to avoid per-call allocs.
 func writeSpaces(b *strings.Builder, n int) {
 	for n > 0 {
-		chunk := n
-		if chunk > len(spacePad) {
-			chunk = len(spacePad)
-		}
+		chunk := min(n, len(spacePad))
 		b.WriteString(spacePad[:chunk])
 		n -= chunk
 	}

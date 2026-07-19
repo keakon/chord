@@ -48,14 +48,8 @@ func imageRenderSize(part BlockImagePart, width int, caps TerminalImageCapabilit
 		return 0, 0, fmt.Errorf("image has invalid dimensions")
 	}
 
-	available := width - imagePlaceholderMargin
-	if available < imagePlaceholderMinCols {
-		available = imagePlaceholderMinCols
-	}
-	cols = min(available, imagePlaceholderMaxCols)
-	if cols < imagePlaceholderMinCols {
-		cols = imagePlaceholderMinCols
-	}
+	available := max(width-imagePlaceholderMargin, imagePlaceholderMinCols)
+	cols = max(min(available, imagePlaceholderMaxCols), imagePlaceholderMinCols)
 	rows = max(1, int((float64(cfg.Height)*float64(cols)*imageCellWidthOverHeight)/float64(cfg.Width)+0.5))
 	if rows > imagePlaceholderMaxRows {
 		scale := float64(imagePlaceholderMaxRows) / float64(rows)
@@ -69,10 +63,7 @@ func imageRenderSize(part BlockImagePart, width int, caps TerminalImageCapabilit
 }
 
 func visibleImageLabelWidth(part BlockImagePart, width int) int {
-	labelWidth := width - imagePlaceholderMargin
-	if labelWidth < 1 {
-		labelWidth = 1
-	}
+	labelWidth := max(width-imagePlaceholderMargin, 1)
 	name := strings.TrimSpace(part.FileName)
 	if name == "" {
 		name = "image"
@@ -99,10 +90,7 @@ func renderImageBlock(part BlockImagePart, width int, cardBG string, caps Termin
 	if err != nil {
 		return renderImageFallback(part, width), visibleImageLabelWidth(part, width), 1, nil
 	}
-	bodyRows := totalRows - 1
-	if bodyRows < 1 {
-		bodyRows = 1
-	}
+	bodyRows := max(totalRows-1, 1)
 	useKittyBackend := caps.Backend == ImageBackendKitty
 	imageID := 0
 	if useKittyBackend {
@@ -121,10 +109,7 @@ func renderImageBlock(part BlockImagePart, width int, cardBG string, caps Termin
 			lines = append(lines, bgStyle.Styled("  "+blank))
 		}
 	}
-	labelWidth := width - imagePlaceholderMargin
-	if labelWidth < 1 {
-		labelWidth = 1
-	}
+	labelWidth := max(width-imagePlaceholderMargin, 1)
 	name := strings.TrimSpace(part.FileName)
 	if name == "" {
 		name = "image"
@@ -135,10 +120,7 @@ func renderImageBlock(part BlockImagePart, width int, cardBG string, caps Termin
 }
 
 func renderImageFallback(part BlockImagePart, width int) []string {
-	labelWidth := width - imagePlaceholderMargin
-	if labelWidth < 1 {
-		labelWidth = 1
-	}
+	labelWidth := max(width-imagePlaceholderMargin, 1)
 	name := strings.TrimSpace(part.FileName)
 	if name == "" {
 		name = "image"

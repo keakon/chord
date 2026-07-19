@@ -1,6 +1,9 @@
 package tui
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // DirectoryEntry is one row in the message-directory overlay (Ctrl+T).
 type DirectoryEntry struct {
@@ -131,8 +134,8 @@ func (v *Viewport) LastVisibleBlockStartedWall() (time.Time, bool) {
 	}
 	var found time.Time
 	blocks := v.visibleBlocks()
-	for i := len(blocks) - 1; i >= 0; i-- {
-		if t := blocks[i].StartedAt; !t.IsZero() {
+	for _, block := range slices.Backward(blocks) {
+		if t := block.StartedAt; !t.IsZero() {
 			found = t
 			break
 		}
@@ -197,8 +200,8 @@ func (v *Viewport) AppendBlocks(blocks []*Block) {
 }
 
 func (v *Viewport) RemoveLastUserBlock() {
-	for i := len(v.blocks) - 1; i >= 0; i-- {
-		if v.blocks[i].Type == BlockUser {
+	for i, v0 := range slices.Backward(v.blocks) {
+		if v0.Type == BlockUser {
 			v.blocks = append(v.blocks[:i], v.blocks[i+1:]...)
 			v.invalidateVisibleBlocksCache()
 			v.markHotBudgetDirty()
@@ -210,8 +213,8 @@ func (v *Viewport) RemoveLastUserBlock() {
 }
 
 func (v *Viewport) RemoveBlockByID(id int) {
-	for i := len(v.blocks) - 1; i >= 0; i-- {
-		if v.blocks[i].ID == id {
+	for i, v0 := range slices.Backward(v.blocks) {
+		if v0.ID == id {
 			v.blocks = append(v.blocks[:i], v.blocks[i+1:]...)
 			v.invalidateVisibleBlocksCache()
 			v.markHotBudgetDirty()
@@ -335,10 +338,7 @@ func (v *Viewport) UpdateBlock(id int) {
 }
 
 func (v *Viewport) clampOffset() {
-	maxOffset := v.totalLines - v.height
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
+	maxOffset := max(v.totalLines-v.height, 0)
 	if v.offset > maxOffset {
 		v.offset = maxOffset
 	}
@@ -348,10 +348,7 @@ func (v *Viewport) clampOffset() {
 }
 
 func (v *Viewport) scrollToEnd() {
-	v.offset = v.totalLines - v.height
-	if v.offset < 0 {
-		v.offset = 0
-	}
+	v.offset = max(v.totalLines-v.height, 0)
 }
 
 func (v *Viewport) atBottom() bool {

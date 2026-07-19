@@ -18,10 +18,7 @@ type numberedToolPreviewOptions struct {
 }
 
 func numberedToolPreviewWidth(cardWidth int) int {
-	contentWidth := cardWidth - 4
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
+	contentWidth := max(cardWidth-4, 10)
 	return contentWidth
 }
 
@@ -45,10 +42,7 @@ func renderNumberedToolPreview(opts numberedToolPreviewOptions) []string {
 			gutterWidth = max(gutterWidth, ansi.StringWidth(row.LineNo))
 		}
 	}
-	codeWidth := opts.contentWidth - gutterWidth - 2
-	if codeWidth < 10 {
-		codeWidth = 10
-	}
+	codeWidth := max(opts.contentWidth-gutterWidth-2, 10)
 
 	codeLines := make([]string, 0, len(visibleRows))
 	for _, row := range visibleRows {

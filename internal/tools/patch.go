@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -365,13 +366,7 @@ func parsePatchStrict(cleanPath, patchText string) (parsedPatch, error) {
 		}
 	}
 	// Check if patch has any actual changes (+ or - lines)
-	hasChanges := false
-	for _, h := range parsed.Hunks {
-		if hunkHasChanges(h) {
-			hasChanges = true
-			break
-		}
-	}
+	hasChanges := slices.ContainsFunc(parsed.Hunks, hunkHasChanges)
 	if !hasChanges {
 		return parsedPatch{}, noPatchChangesError(parsed.Hunks)
 	}
@@ -435,10 +430,8 @@ func appendUnsupportedPatchLine(lines []string, line string) []string {
 	if line == "" {
 		return lines
 	}
-	for _, existing := range lines {
-		if existing == line {
-			return lines
-		}
+	if slices.Contains(lines, line) {
+		return lines
 	}
 	return append(lines, line)
 }
@@ -838,8 +831,8 @@ func buildHunkReplacement(matchedOld []string, h patchHunk) []string {
 
 func trailingContextLineCount(h patchHunk) int {
 	count := 0
-	for i := len(h.Lines) - 1; i >= 0; i-- {
-		if h.Lines[i].Kind != ' ' {
+	for _, v := range slices.Backward(h.Lines) {
+		if v.Kind != ' ' {
 			break
 		}
 		count++
@@ -1084,7 +1077,7 @@ func longestContiguousRunInWindow(fileLines, oldSeq []string, start, searchLimit
 		linePositions[line] = append(linePositions[line], i)
 	}
 
-	for from := 0; from < len(oldSeq); from++ {
+	for from := range oldSeq {
 		positions, exists := linePositions[oldSeq[from]]
 		if !exists {
 			continue

@@ -35,9 +35,9 @@ func TestCombineActivityObserversFanout(t *testing.T) {
 }
 
 func TestRuntimeResourceControllerEnsureReadyAfterIdleUnload(t *testing.T) {
-	var restored int32
+	var restored atomic.Int32
 	ctrl := newRuntimeResourceController(context.Background(), nil, nil, func(context.Context) error {
-		atomic.AddInt32(&restored, 1)
+		restored.Add(1)
 		return nil
 	}, nil)
 	defer ctrl.Stop()
@@ -48,7 +48,7 @@ func TestRuntimeResourceControllerEnsureReadyAfterIdleUnload(t *testing.T) {
 	if err := ctrl.EnsureReady(context.Background()); err != nil {
 		t.Fatalf("EnsureReady() error = %v", err)
 	}
-	if got := atomic.LoadInt32(&restored); got != 0 {
+	if got := restored.Load(); got != 0 {
 		t.Fatalf("restore calls = %d, want 0 without MCP loaded", got)
 	}
 
@@ -62,7 +62,7 @@ func TestRuntimeResourceControllerEnsureReadyAfterIdleUnload(t *testing.T) {
 	if err := ctrl.EnsureReady(ctx); err != nil {
 		t.Fatalf("EnsureReady() with loaded MCP error = %v", err)
 	}
-	if got := atomic.LoadInt32(&restored); got != 1 {
+	if got := restored.Load(); got != 1 {
 		t.Fatalf("restore calls = %d, want 1", got)
 	}
 	if _, mcpIdle := ctrl.IdleStatus(); mcpIdle {
@@ -74,15 +74,15 @@ func TestRuntimeResourceControllerEnsureReadyAfterIdleUnload(t *testing.T) {
 	if err := ctrl.EnsureReady(ctx); err != nil {
 		t.Fatalf("second EnsureReady() error = %v", err)
 	}
-	if got := atomic.LoadInt32(&restored); got != 1 {
+	if got := restored.Load(); got != 1 {
 		t.Fatalf("restore calls after second EnsureReady = %d, want 1", got)
 	}
 }
 
 func TestRuntimeResourceControllerEnsureReadyWaitsForInFlightUnload(t *testing.T) {
-	var restored int32
+	var restored atomic.Int32
 	ctrl := newRuntimeResourceController(context.Background(), nil, nil, func(context.Context) error {
-		atomic.AddInt32(&restored, 1)
+		restored.Add(1)
 		return nil
 	}, nil)
 	defer ctrl.Stop()
@@ -99,7 +99,7 @@ func TestRuntimeResourceControllerEnsureReadyWaitsForInFlightUnload(t *testing.T
 	}()
 
 	time.Sleep(10 * time.Millisecond)
-	if got := atomic.LoadInt32(&restored); got != 0 {
+	if got := restored.Load(); got != 0 {
 		t.Fatalf("restore calls before unload completion = %d, want 0", got)
 	}
 
@@ -119,15 +119,15 @@ func TestRuntimeResourceControllerEnsureReadyWaitsForInFlightUnload(t *testing.T
 	case <-time.After(time.Second):
 		t.Fatal("EnsureReady() did not return after unload completion")
 	}
-	if got := atomic.LoadInt32(&restored); got != 1 {
+	if got := restored.Load(); got != 1 {
 		t.Fatalf("restore calls = %d, want 1", got)
 	}
 }
 
 func TestRuntimeResourceControllerEnsureReadyLeavesLSPLazy(t *testing.T) {
-	var restored int32
+	var restored atomic.Int32
 	ctrl := newRuntimeResourceController(context.Background(), nil, nil, func(context.Context) error {
-		atomic.AddInt32(&restored, 1)
+		restored.Add(1)
 		return nil
 	}, nil)
 	defer ctrl.Stop()
@@ -141,7 +141,7 @@ func TestRuntimeResourceControllerEnsureReadyLeavesLSPLazy(t *testing.T) {
 	if err := ctrl.EnsureReady(context.Background()); err != nil {
 		t.Fatalf("EnsureReady() error = %v", err)
 	}
-	if got := atomic.LoadInt32(&restored); got != 0 {
+	if got := restored.Load(); got != 0 {
 		t.Fatalf("restore calls = %d, want 0 for LSP-only idle unload", got)
 	}
 	if lspIdle, _ := ctrl.IdleStatus(); lspIdle {
@@ -213,21 +213,21 @@ func TestRestoreRuntimeMCPRequiresCompleteRuntime(t *testing.T) {
 }
 
 func TestRuntimeResourceControllerNotifiesEnvOnUnloadAndReady(t *testing.T) {
-	var updates int32
+	var updates atomic.Int32
 	ctrl := newRuntimeResourceController(context.Background(), nil, nil, nil, func() {
-		atomic.AddInt32(&updates, 1)
+		updates.Add(1)
 	})
 	defer ctrl.Stop()
 
 	ctrl.OnAgentActivity("main", agent.ActivityIdle)
 	ctrl.runIdleUnload(ctrl.idleGen)
-	if got := atomic.LoadInt32(&updates); got != 1 {
+	if got := updates.Load(); got != 1 {
 		t.Fatalf("env updates after unload = %d, want 1", got)
 	}
 	if err := ctrl.EnsureReady(context.Background()); err != nil {
 		t.Fatalf("EnsureReady() error = %v", err)
 	}
-	if got := atomic.LoadInt32(&updates); got != 2 {
+	if got := updates.Load(); got != 2 {
 		t.Fatalf("env updates after ready = %d, want 2", got)
 	}
 }

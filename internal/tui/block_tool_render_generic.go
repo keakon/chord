@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -182,10 +183,7 @@ func bashCollapsedResultHiddenLines(b *Block, contentWidth int) int {
 	if line := bashFirstNonEmptyLine(content); line != "" {
 		visible = len(wrapText(line, contentWidth))
 	}
-	shortLimit := bashCollapsedResultMinVisibleLines
-	if visible > shortLimit {
-		shortLimit = visible
-	}
+	shortLimit := max(visible, bashCollapsedResultMinVisibleLines)
 	total, truncated := toolPlainTextWrappedLineCount(content, contentWidth, shortLimit)
 	if !truncated && total <= bashCollapsedResultMinVisibleLines {
 		return 0
@@ -990,8 +988,8 @@ func tuiCutRight(s string, maxWidth int) string {
 	}
 	runes := []rune(s)
 	width := 0
-	for i := len(runes) - 1; i >= 0; i-- {
-		w := runewidth.RuneWidth(runes[i])
+	for i, rune := range slices.Backward(runes) {
+		w := runewidth.RuneWidth(rune)
 		if width+w > maxWidth {
 			return string(runes[i+1:])
 		}

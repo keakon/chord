@@ -322,22 +322,18 @@ func TestPersistTaskRegistrySerializesSnapshotOrder(t *testing.T) {
 	}
 
 	var writers sync.WaitGroup
-	writers.Add(1)
-	go func() {
-		defer writers.Done()
+	writers.Go(func() {
 		a.persistTaskRegistry()
-	}()
+	})
 	<-firstSnapshot
 	a.subs.mu.Lock()
 	a.subs.taskRecords["adhoc-persist-order"].State = string(SubAgentStateCompleted)
 	a.subs.mu.Unlock()
 	secondDone := make(chan struct{})
-	writers.Add(1)
-	go func() {
-		defer writers.Done()
+	writers.Go(func() {
 		a.persistTaskRegistry()
 		close(secondDone)
-	}()
+	})
 	select {
 	case <-secondDone:
 		t.Fatal("newer registry write bypassed the in-flight older snapshot")

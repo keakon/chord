@@ -358,10 +358,7 @@ func (m *Model) clampAndSliceInfoPanelContent(content string, height int) string
 	if start >= len(lines) {
 		return ""
 	}
-	end := start + height
-	if end > len(lines) {
-		end = len(lines)
-	}
+	end := min(start+height, len(lines))
 	return strings.Join(lines[start:end], "\n")
 }
 

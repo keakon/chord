@@ -176,7 +176,7 @@ func TestVisibleErrorRecordsPanelAndConversationBlock(t *testing.T) {
 
 func TestRecordAgentErrorRingBufferEvictsOldest(t *testing.T) {
 	m := NewModel(&sessionControlAgent{})
-	for i := 0; i < maxAgentErrors+5; i++ {
+	for i := range maxAgentErrors + 5 {
 		m.recordAgentError("", fmt.Errorf("err %d", i), "", "", "", "", "", false)
 	}
 

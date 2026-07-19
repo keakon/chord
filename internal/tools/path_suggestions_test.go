@@ -399,7 +399,7 @@ func TestPathSuggestionsRejectDistantSimilarBasename(t *testing.T) {
 
 func TestPathSuggestionsRespectCandidateLimit(t *testing.T) {
 	dir := t.TempDir()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("response_%d.go", i)), []byte("package test\n"), 0o644); err != nil {
 			t.Fatalf("WriteFile: %v", err)
 		}

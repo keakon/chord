@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/user"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -890,8 +891,8 @@ func applyCacheBreakpoints(system []anthropicContent, messages []anthropicMessag
 }
 
 func lastAnthropicMessageIndex(messages []anthropicMessage, role string) int {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == role {
+	for i, message := range slices.Backward(messages) {
+		if message.Role == role {
 			return i
 		}
 	}

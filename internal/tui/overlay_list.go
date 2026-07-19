@@ -233,10 +233,7 @@ func (l *OverlayList) Render(width int) string {
 	}
 	start, end := l.WindowRange()
 	lines := make([]string, 0, end-start)
-	contentWidth := width - 3
-	if contentWidth < 1 {
-		contentWidth = 1
-	}
+	contentWidth := max(width-3, 1)
 	for i := start; i < end; i++ {
 		item := l.items[i]
 		label := item.Label

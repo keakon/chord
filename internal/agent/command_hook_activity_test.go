@@ -497,7 +497,7 @@ func TestAutomationFeedbackFormattingAndPolicies(t *testing.T) {
 	if !strings.HasSuffix(defaultTrim, "... (truncated)") {
 		t.Fatalf("default trim = %q, want truncation suffix", defaultTrim)
 	}
-	if firstLine := strings.SplitN(defaultTrim, "\n", 2)[0]; len(firstLine) != hook.DefaultMaxResultBytes {
+	if firstLine, _, _ := strings.Cut(defaultTrim, "\n"); len(firstLine) != hook.DefaultMaxResultBytes {
 		t.Fatalf("default trim first line bytes = %d, want %d", len(firstLine), hook.DefaultMaxResultBytes)
 	}
 

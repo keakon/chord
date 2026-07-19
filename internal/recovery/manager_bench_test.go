@@ -21,7 +21,7 @@ func benchmarkRecoveryJSONL(b *testing.B, messageCount int) string {
 	}
 	content := strings.Repeat("recovery transcript line\n", 20)
 	enc := json.NewEncoder(f)
-	for i := 0; i < messageCount; i++ {
+	for i := range messageCount {
 		msg := message.Message{Role: message.RoleAssistant, Content: content}
 		if i%3 == 0 {
 			msg.Role = message.RoleUser

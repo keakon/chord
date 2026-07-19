@@ -22,8 +22,8 @@ var errPersistenceQueueUnavailable = errors.New("ordered persistence queue unava
 type PersistenceHealth struct {
 	State       PersistenceHealthState `json:"state"`
 	LastError   string                 `json:"last_error,omitempty"`
-	FailedAt    time.Time              `json:"failed_at,omitempty"`
-	RecoveredAt time.Time              `json:"recovered_at,omitempty"`
+	FailedAt    time.Time              `json:"failed_at"`
+	RecoveredAt time.Time              `json:"recovered_at"`
 }
 
 type subAgentPersistenceHealth struct {

@@ -60,7 +60,7 @@ func TestWaitForAgentEventReducesPacedStreamTextWakeups(t *testing.T) {
 
 func TestWaitForAgentEventStopsStreamTextBatchAtMax(t *testing.T) {
 	ch := make(chan agent.AgentEvent, agentEventBatchMax+1)
-	for i := 0; i < agentEventBatchMax+1; i++ {
+	for range agentEventBatchMax + 1 {
 		ch <- agent.StreamTextEvent{Text: "x"}
 	}
 	msg := waitForAgentEvent(ch)()
@@ -95,7 +95,7 @@ func TestWaitForAgentEventDoesNotDelayNonStreamingEvent(t *testing.T) {
 func BenchmarkWaitForAgentEventStreamTextMicroBatch(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		ch := make(chan agent.AgentEvent, agentEventBatchMax)
-		for j := 0; j < agentEventBatchMax; j++ {
+		for range agentEventBatchMax {
 			ch <- agent.StreamTextEvent{Text: "x"}
 		}
 		msg := waitForAgentEvent(ch)()

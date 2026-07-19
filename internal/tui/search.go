@@ -102,10 +102,7 @@ func (sm SearchModel) View(width int) string {
 	}
 	counter := DimStyle.Render(fmt.Sprintf(" [%d/%d]", current, total))
 	// Truncate input view to leave room for counter (ANSI-aware).
-	maxInput := width - len(fmt.Sprintf(" [%d/%d]", current, total)) - 2
-	if maxInput < 10 {
-		maxInput = 10
-	}
+	maxInput := max(width-len(fmt.Sprintf(" [%d/%d]", current, total))-2, 10)
 	inputView = truncate.String(inputView, uint(maxInput))
 	return inputView + counter
 }

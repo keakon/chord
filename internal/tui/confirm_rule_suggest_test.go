@@ -236,7 +236,7 @@ func TestSuggestRulePatterns_BashComplexCommandPrefersMatchedAskRules(t *testing
 			t.Fatalf("candidate[%d] = %q, want %q", i, got, want)
 		}
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if !candidates[i].Default {
 			t.Fatalf("expected matched ask rule candidate[%d] to be default, got %#v", i, candidates[i])
 		}

@@ -652,14 +652,8 @@ func extractToolParamsWithParsed(keys []string, vals map[string]string, maxWidth
 		fixedWidth += runewidth.StringWidth(prefix)
 	}
 	fixedWidth += runewidth.StringWidth(sep) * (len(keys) - 1)
-	availForVals := maxWidth - fixedWidth
-	if availForVals < minValWidth*len(keys) {
-		availForVals = minValWidth * len(keys)
-	}
-	perVal := availForVals / len(keys)
-	if perVal < minValWidth {
-		perVal = minValWidth
-	}
+	availForVals := max(maxWidth-fixedWidth, minValWidth*len(keys))
+	perVal := max(availForVals/len(keys), minValWidth)
 	type plainPart struct{ prefix, val string }
 	plainParts := make([]plainPart, len(entries))
 	for i, e := range entries {
@@ -745,10 +739,7 @@ func appendTodoCallItemLines(result *[]string, item todoCallArgItem, contentWidt
 	if idDisp != "" {
 		prefixCols += runewidth.StringWidth(idDisp) + 1
 	}
-	wrapW := contentWidth - prefixCols
-	if wrapW < 8 {
-		wrapW = 8
-	}
+	wrapW := max(contentWidth-prefixCols, 8)
 	wrapped := wrapText(content, wrapW)
 	if len(wrapped) == 0 {
 		wrapped = []string{""}

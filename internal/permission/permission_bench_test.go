@@ -33,7 +33,7 @@ func BenchmarkEvaluate_EditPatchFallback(b *testing.B) {
 				rs := Ruleset{
 					{Permission: "*", Pattern: "*", Action: ActionDeny},
 				}
-				for i := 0; i < 19; i++ {
+				for range 19 {
 					rs = append(rs, Rule{
 						Permission: "read",
 						Pattern:    "*.txt",
@@ -52,7 +52,7 @@ func BenchmarkEvaluate_EditPatchFallback(b *testing.B) {
 				rs := Ruleset{
 					{Permission: "*", Pattern: "*", Action: ActionDeny},
 				}
-				for i := 0; i < 48; i++ {
+				for range 48 {
 					rs = append(rs, Rule{
 						Permission: "read",
 						Pattern:    "*.txt",
@@ -136,7 +136,7 @@ func BenchmarkIsDisabled_EditPatchFallback(b *testing.B) {
 				rs := Ruleset{
 					{Permission: "*", Pattern: "*", Action: ActionAllow},
 				}
-				for i := 0; i < 18; i++ {
+				for range 18 {
 					rs = append(rs, Rule{
 						Permission: "read",
 						Pattern:    "*",
@@ -154,7 +154,7 @@ func BenchmarkIsDisabled_EditPatchFallback(b *testing.B) {
 				rs := Ruleset{
 					{Permission: "*", Pattern: "*", Action: ActionAllow},
 				}
-				for i := 0; i < 48; i++ {
+				for range 48 {
 					rs = append(rs, Rule{
 						Permission: "read",
 						Pattern:    "*",
@@ -205,7 +205,7 @@ func BenchmarkEvaluate_NoFallback(b *testing.B) {
 				rs := Ruleset{
 					{Permission: "*", Pattern: "*", Action: ActionDeny},
 				}
-				for i := 0; i < 18; i++ {
+				for range 18 {
 					rs = append(rs, Rule{
 						Permission: "write",
 						Pattern:    "*.txt",
@@ -224,7 +224,7 @@ func BenchmarkEvaluate_NoFallback(b *testing.B) {
 				rs := Ruleset{
 					{Permission: "*", Pattern: "*", Action: ActionDeny},
 				}
-				for i := 0; i < 48; i++ {
+				for range 48 {
 					rs = append(rs, Rule{
 						Permission: "write",
 						Pattern:    "*.txt",

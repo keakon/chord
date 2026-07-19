@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -525,8 +526,8 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 	items := make([]evidenceItem, 0, 8)
 	seen := make(map[string]bool)
 	capturedLatestUserRequest := false
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for i, msg := range slices.Backward(messages) {
+
 		sourceSeq := i + 1
 		if item, ok := subAgentMailboxEvidence(msg, fmt.Sprintf("message %d (SubAgent mailbox)", i+1)); ok {
 			item.Sequence = sourceSeq

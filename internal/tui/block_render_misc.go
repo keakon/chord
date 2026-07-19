@@ -5,14 +5,8 @@ import "strings"
 func (b *Block) renderError(width int) []string {
 	style := ErrorCardStyle
 	// v2: Width() sets border-box (excl margin).
-	boxWidth := width - style.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	innerWidth := boxWidth - style.GetHorizontalPadding() - style.GetHorizontalBorderSize()
-	if innerWidth < 10 {
-		innerWidth = 10
-	}
+	boxWidth := max(width-style.GetHorizontalMargins(), 10)
+	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	lines := []string{ErrorStyle.Render(blockLabelWithID("ERROR", b.displayLabelID())), ""}
 	wrapped := wrapText(b.Content, innerWidth)
@@ -39,14 +33,8 @@ func (b *Block) renderError(width int) []string {
 
 func (b *Block) renderStatus(width int) []string {
 	style := CompactionSummaryCardStyle
-	boxWidth := width - style.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	innerWidth := boxWidth - style.GetHorizontalPadding() - style.GetHorizontalBorderSize()
-	if innerWidth < 10 {
-		innerWidth = 10
-	}
+	boxWidth := max(width-style.GetHorizontalMargins(), 10)
+	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := min(innerWidth-2, maxProseWidth)
 
@@ -96,14 +84,8 @@ func (b *Block) renderBoundaryMarker(width int) []string {
 
 func (b *Block) renderCompactionSummary(width int) []string {
 	style := CompactionSummaryCardStyle
-	boxWidth := width - style.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	innerWidth := boxWidth - style.GetHorizontalPadding() - style.GetHorizontalBorderSize()
-	if innerWidth < 10 {
-		innerWidth = 10
-	}
+	boxWidth := max(width-style.GetHorizontalMargins(), 10)
+	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := min(innerWidth, maxProseWidth)
 	label := ThinkingLabelStyle.Render(blockLabelWithID("CONTEXT SUMMARY", b.displayLabelID()))

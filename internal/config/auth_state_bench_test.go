@@ -43,7 +43,7 @@ func BenchmarkParseAuthStateSonicStd(b *testing.B) {
 func buildAuthStateBenchBytes(accounts int) []byte {
 	state := make(AuthStateFile)
 	entries := make(map[string]OAuthStateRecord, accounts)
-	for i := 0; i < accounts; i++ {
+	for i := range accounts {
 		key := fmt.Sprintf("user-%03d__acc-%03d", i, i)
 		entries[key] = OAuthStateRecord{
 			AccountUserID:           key,

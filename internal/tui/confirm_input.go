@@ -40,18 +40,12 @@ func isPlainKey(msg tea.KeyMsg, code rune) bool {
 }
 
 func confirmDialogWidth(totalWidth int) int {
-	maxWidth := min(totalWidth-6, confirmDialogMaxWidth)
-	if maxWidth < 40 {
-		maxWidth = 40
-	}
+	maxWidth := max(min(totalWidth-6, confirmDialogMaxWidth), 40)
 	return maxWidth
 }
 
 func confirmDialogInnerWidth(totalWidth int) int {
-	innerWidth := confirmDialogWidth(totalWidth) - DirectoryBorderStyle.GetHorizontalPadding() - DirectoryBorderStyle.GetHorizontalBorderSize()
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
+	innerWidth := max(confirmDialogWidth(totalWidth)-DirectoryBorderStyle.GetHorizontalPadding()-DirectoryBorderStyle.GetHorizontalBorderSize(), 20)
 	return innerWidth
 }
 
@@ -79,13 +73,7 @@ func confirmDialogMaxBodyLines(totalHeight int) int {
 }
 
 func confirmEditHeight(totalHeight int) int {
-	height := totalHeight / 3
-	if height < confirmEditMinHeight {
-		height = confirmEditMinHeight
-	}
-	if height > confirmEditMaxHeight {
-		height = confirmEditMaxHeight
-	}
+	height := min(max(totalHeight/3, confirmEditMinHeight), confirmEditMaxHeight)
 	return height
 }
 

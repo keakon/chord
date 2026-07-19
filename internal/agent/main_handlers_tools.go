@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/keakon/golog/log"
@@ -283,8 +284,8 @@ func findAssistantMessageForToolCall(msgs []message.Message, callID string) (mes
 	if callID == "" {
 		return message.Message{}, false
 	}
-	for i := len(msgs) - 1; i >= 0; i-- {
-		msg := msgs[i]
+	for _, msg := range slices.Backward(msgs) {
+
 		if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
 			continue
 		}
@@ -330,8 +331,8 @@ func toolCallSkillName(msgs []message.Message, callID, fallbackArgsJSON string) 
 		return strings.TrimSpace(parsed.Name)
 	}
 	if callID != "" {
-		for i := len(msgs) - 1; i >= 0; i-- {
-			msg := msgs[i]
+		for _, msg := range slices.Backward(msgs) {
+
 			if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
 				continue
 			}

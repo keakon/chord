@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/keakon/golog/log"
@@ -135,9 +136,9 @@ func newSpeculativeFileMutation(track *filelock.FileTracker, agentID string, pat
 	for _, path := range paths {
 		snap, err := captureSpeculativeFileSnapshot(path)
 		if err != nil {
-			for i := len(locked) - 1; i >= 0; i-- {
+			for _, l := range slices.Backward(locked) {
 				if track != nil {
-					track.AbortWrite(locked[i], agentID)
+					track.AbortWrite(l, agentID)
 				}
 			}
 			return nil, err
@@ -145,8 +146,8 @@ func newSpeculativeFileMutation(track *filelock.FileTracker, agentID string, pat
 		if track != nil && snap.Existed {
 			status, err := track.AcquireWriteStatus(path, agentID, snap.Hash)
 			if err != nil {
-				for i := len(locked) - 1; i >= 0; i-- {
-					track.AbortWrite(locked[i], agentID)
+				for _, l := range slices.Backward(locked) {
+					track.AbortWrite(l, agentID)
 				}
 				return nil, err
 			}
@@ -273,8 +274,8 @@ func (m *speculativeFileMutation) Rollback() error {
 	}
 	m.rolledBack = true
 	var errs []error
-	for i := len(m.files) - 1; i >= 0; i-- {
-		snap := m.files[i]
+	for _, snap := range slices.Backward(m.files) {
+
 		if err := restoreSpeculativeFileSnapshot(snap); err != nil {
 			errs = append(errs, err)
 		}

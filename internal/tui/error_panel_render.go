@@ -12,13 +12,7 @@ func (m *Model) renderErrorPanelDialog() string {
 	innerWidth := m.errorPanelInnerWidth()
 	lines := m.errorPanelLines(innerWidth)
 	visible := min(m.errorPanelVisibleLines(), len(lines))
-	start := m.errorPanel.scrollOffset
-	if start > len(lines)-visible {
-		start = len(lines) - visible
-	}
-	if start < 0 {
-		start = 0
-	}
+	start := max(min(m.errorPanel.scrollOffset, len(lines)-visible), 0)
 	if m.errorPanel.dialogCacheText != "" &&
 		m.errorPanel.dialogCacheW == m.width &&
 		m.errorPanel.dialogCacheH == m.height &&

@@ -77,17 +77,11 @@ func startupDeferredWindowRange(total, targetIndex int) (start, end int) {
 		targetIndex = total - 1
 	}
 	half := windowCount / 2
-	start = targetIndex - half
-	if start < 0 {
-		start = 0
-	}
+	start = max(targetIndex-half, 0)
 	end = start + windowCount
 	if end > total {
 		end = total
-		start = end - windowCount
-		if start < 0 {
-			start = 0
-		}
+		start = max(end-windowCount, 0)
 	}
 	return start, end
 }

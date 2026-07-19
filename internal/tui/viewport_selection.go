@@ -128,32 +128,14 @@ func (v *Viewport) ExtractSelectionText(sel SelectionRange) string {
 			line := lines[lineIdx]
 			plain := stripANSI(line)
 			lineWidth := selectionPlainTextWidth(plain)
-			prefixAdjust := v.selectionLinePrefixWidth(block, lineIdx, plain)
-			if prefixAdjust < 0 {
-				prefixAdjust = 0
-			}
-			if prefixAdjust > lineWidth {
-				prefixAdjust = lineWidth
-			}
+			prefixAdjust := min(max(v.selectionLinePrefixWidth(block, lineIdx, plain), 0), lineWidth)
 			absStart := prefixAdjust
 			absEnd := lineWidth
 			if i == sIdx && lineIdx == sL {
-				absStart = sC
-				if absStart < prefixAdjust {
-					absStart = prefixAdjust
-				}
-				if absStart > lineWidth {
-					absStart = lineWidth
-				}
+				absStart = min(max(sC, prefixAdjust), lineWidth)
 			}
 			if i == eIdx && lineIdx == eL {
-				absEnd = eC
-				if absEnd < prefixAdjust {
-					absEnd = prefixAdjust
-				}
-				if absEnd > lineWidth {
-					absEnd = lineWidth
-				}
+				absEnd = min(max(eC, prefixAdjust), lineWidth)
 			}
 			if absStart < absEnd {
 				segment := extractPlainByColumns(plain, absStart, absEnd)

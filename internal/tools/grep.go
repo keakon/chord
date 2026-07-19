@@ -407,10 +407,7 @@ type grepFileScanner func(ctx context.Context, path, baseDir string, re *regexp.
 // CPU-bound (regex over file contents), so GOMAXPROCS is the natural ceiling;
 // the cap keeps a wide machine from issuing excessive concurrent file reads.
 func grepScanWorkerCount() int {
-	n := runtime.GOMAXPROCS(0)
-	if n < 1 {
-		n = 1
-	}
+	n := max(runtime.GOMAXPROCS(0), 1)
 	return min(n, 8)
 }
 
@@ -500,9 +497,7 @@ func grepWalkRootWithScanner(ctx context.Context, resolvedSearchPath string, re 
 
 	var wg sync.WaitGroup
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for item := range items {
 				if ctx.Err() != nil {
 					continue // keep draining so the walker never blocks
@@ -513,7 +508,7 @@ func grepWalkRootWithScanner(ctx context.Context, resolvedSearchPath string, re 
 				case <-ctx.Done():
 				}
 			}
-		}()
+		})
 	}
 	go func() {
 		wg.Wait()

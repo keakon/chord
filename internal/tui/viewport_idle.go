@@ -42,10 +42,7 @@ func (v *Viewport) DropOffScreenCaches() {
 	}
 
 	margin := 5 // rows above/below visible window to preserve
-	visibleStart := v.offset - margin
-	if visibleStart < 0 {
-		visibleStart = 0
-	}
+	visibleStart := max(v.offset-margin, 0)
 	visibleEnd := v.offset + v.height + margin
 
 	currentLine := 0
@@ -113,10 +110,9 @@ func (v *Viewport) ShrinkHotBudget() {
 		return
 	}
 
-	idleBudget := baseBudget / 4
-	if idleBudget < 1<<20 { // minimum 1 MiB
-		idleBudget = 1 << 20
-	}
+	idleBudget := max(baseBudget/4,
+		// minimum 1 MiB
+		1<<20)
 	if idleBudget >= v.maxHotBytes {
 		return
 	}

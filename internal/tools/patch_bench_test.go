@@ -9,7 +9,7 @@ import (
 func BenchmarkPatchLargeFile(b *testing.B) {
 	// Simulate a large file similar to internal/agent/main.go (around 3000 lines)
 	var lines []string
-	for i := 0; i < 750; i++ {
+	for i := range 750 {
 		lines = append(lines,
 			fmt.Sprintf("func handler%d(evt Event) {", i),
 			"    ctx := context.Background()",
@@ -48,7 +48,7 @@ func BenchmarkPatchLargeFile(b *testing.B) {
 func BenchmarkPatchMultipleHunks(b *testing.B) {
 	// Simulate a file with 1000 lines
 	var lines []string
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		lines = append(lines,
 			fmt.Sprintf("func process%d() error {", i),
 			"    x := initialize()",
@@ -93,7 +93,7 @@ func BenchmarkPatchMultipleHunks(b *testing.B) {
 // Benchmark the worst case: patch needs all 4 layers to match
 func BenchmarkPatchWithWhitespaceNormalization(b *testing.B) {
 	var lines []string
-	for i := 0; i < 500; i++ {
+	for range 500 {
 		lines = append(lines,
 			"func example() {",
 			"    value := 123  ", // trailing whitespace

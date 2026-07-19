@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -280,8 +281,8 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			return true, effects
 		}
 		if evt.BlockIndex >= 0 {
-			for i := len(m.viewport.blocks) - 1; i >= 0; i-- {
-				b := m.viewport.blocks[i]
+			for _, b := range slices.Backward(m.viewport.blocks) {
+
 				if b == nil || b.Type != BlockThinking || b.Streaming || b.AgentID != evt.AgentID {
 					continue
 				}
@@ -329,8 +330,8 @@ func (m *Model) removeRolledBackThinkingBlocks(agentID string) {
 			pendingMsgIndex = currentMsgIndex
 		}
 	}
-	for i := len(m.viewport.blocks) - 1; i >= 0; i-- {
-		b := m.viewport.blocks[i]
+	for _, b := range slices.Backward(m.viewport.blocks) {
+
 		if b == nil || b.Type != BlockThinking || b.Streaming || b.AgentID != agentID {
 			continue
 		}

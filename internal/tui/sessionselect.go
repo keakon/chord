@@ -399,10 +399,7 @@ func (m *Model) selectSessionAtCursor() tea.Cmd {
 // ---------------------------------------------------------------------------
 
 func (m *Model) sessionSelectMaxVisible() int {
-	maxVisible := m.viewport.height*2/3 - sessionSelectOverlayChromeRows
-	if maxVisible < 3 {
-		maxVisible = 3
-	}
+	maxVisible := max(m.viewport.height*2/3-sessionSelectOverlayChromeRows, 3)
 	return maxVisible
 }
 
@@ -591,10 +588,7 @@ func (m *Model) renderSessionSelectFilterLine(innerWidth int) string {
 		leftPlain = runewidth.Truncate(leftPlain, leftBudget, "…")
 	}
 	leftWidth := runewidth.StringWidth(leftPlain)
-	gap := innerWidth - countWidth - leftWidth
-	if gap < 0 {
-		gap = 0
-	}
+	gap := max(innerWidth-countWidth-leftWidth, 0)
 
 	leftRendered := leftPlain
 	if hintMode {
@@ -643,10 +637,7 @@ func (m *Model) renderSessionSelectDialog() string {
 	// instead of the list.
 	if len(m.sessionSelect.filteredIdx) == 0 && strings.TrimSpace(m.sessionSelect.filter) != "" {
 		query := m.sessionSelect.filter
-		maxQueryWidth := innerWidth - runewidth.StringWidth(`No sessions match ""`)
-		if maxQueryWidth < 8 {
-			maxQueryWidth = 8
-		}
+		maxQueryWidth := max(innerWidth-runewidth.StringWidth(`No sessions match ""`), 8)
 		if runewidth.StringWidth(query) > maxQueryWidth {
 			query = runewidth.Truncate(query, maxQueryWidth, "…")
 		}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/keakon/golog/log"
@@ -239,8 +240,8 @@ func (a *MainAgent) latestRecoverableUserIntent() string {
 		return ""
 	}
 	msgs := a.ctxMgr.Snapshot()
-	for i := len(msgs) - 1; i >= 0; i-- {
-		msg := msgs[i]
+	for _, msg := range slices.Backward(msgs) {
+
 		if !message.IsUserAuthored(msg) {
 			continue
 		}
@@ -536,11 +537,11 @@ func (a *MainAgent) setIdleForComposerEdit() {
 }
 
 func latestAssistantReplySummary(msgs []message.Message) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role != "assistant" {
+	for _, msg := range slices.Backward(msgs) {
+		if msg.Role != "assistant" {
 			continue
 		}
-		if text := strings.TrimSpace(msgs[i].Content); text != "" {
+		if text := strings.TrimSpace(msg.Content); text != "" {
 			return text
 		}
 	}

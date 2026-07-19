@@ -271,18 +271,12 @@ func (m *Model) usageStatsProjectRoot() string {
 }
 
 func (m *Model) usageStatsVisibleLines() int {
-	visible := m.height - 12
-	if visible < 8 {
-		visible = 8
-	}
+	visible := max(m.height-12, 8)
 	return visible
 }
 
 func (m *Model) usageStatsMaxWidth() int {
-	maxWidth := min(m.width-12, 110)
-	if maxWidth < 60 {
-		maxWidth = 60
-	}
+	maxWidth := max(min(m.width-12, 110), 60)
 	return maxWidth
 }
 
@@ -292,10 +286,7 @@ func (m *Model) usageStatsInnerWidth() int {
 
 func (m *Model) usageStatsMaxScroll() int {
 	lines := m.usageStatsLines(m.usageStatsInnerWidth())
-	maxScroll := len(lines) - m.usageStatsVisibleLines()
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
+	maxScroll := max(len(lines)-m.usageStatsVisibleLines(), 0)
 	return maxScroll
 }
 

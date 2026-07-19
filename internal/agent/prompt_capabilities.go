@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/permission"
@@ -291,8 +292,8 @@ func toolHasScopedRestriction(ruleset permission.Ruleset, toolName string) bool 
 }
 
 func lastToolWideRule(ruleset permission.Ruleset, toolName string) (permission.Action, bool) {
-	for i := len(ruleset) - 1; i >= 0; i-- {
-		rule := ruleset[i]
+	for _, rule := range slices.Backward(ruleset) {
+
 		if rule.Pattern != "*" {
 			continue
 		}

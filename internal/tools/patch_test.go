@@ -1032,7 +1032,7 @@ func TestLongestContiguousRun(t *testing.T) {
 			// fallback full scan should still recover the true 2-line run.
 			fileLines: func() []string {
 				lines := make([]string, 0, 501)
-				for i := 0; i < 499; i++ {
+				for range 499 {
 					lines = append(lines, "x")
 				}
 				lines = append(lines, "a")
@@ -1056,7 +1056,7 @@ func TestLongestContiguousRun(t *testing.T) {
 
 func TestNearestLineDiagnosticReportsIncompleteWindow(t *testing.T) {
 	fileLines := make([]string, 0, 120)
-	for i := 0; i < 105; i++ {
+	for range 105 {
 		fileLines = append(fileLines, "filler")
 	}
 	fileLines = append(fileLines, "prefix MISMATCH suffix")

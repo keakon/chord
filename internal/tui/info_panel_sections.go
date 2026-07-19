@@ -230,10 +230,7 @@ func (m *Model) buildInfoPanelLSPBlock(lineW int) string {
 			dot = mcpErrStyle
 			labelStyle = mcpErrLabelStyle
 		}
-		contentWidth := lineW - infoPanelCollapsibleContentInset - 2
-		if contentWidth < 1 {
-			contentWidth = 1
-		}
+		contentWidth := max(lineW-infoPanelCollapsibleContentInset-2, 1)
 		label := row.Name
 		diagSuffix := ""
 		if row.OK {
@@ -303,10 +300,7 @@ func (m *Model) buildInfoPanelMCPBlock(lineW int) string {
 			dot = mcpErrStyle
 			labelStyle = InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelCriticalFg))
 		}
-		contentWidth := lineW - infoPanelCollapsibleContentInset - 2
-		if contentWidth < 1 {
-			contentWidth = 1
-		}
+		contentWidth := max(lineW-infoPanelCollapsibleContentInset-2, 1)
 		line := lipgloss.JoinHorizontal(lipgloss.Left,
 			dot.Render("●"),
 			labelStyle.Render(" "+truncateOneLine(row.Name, contentWidth)),
@@ -401,10 +395,7 @@ func (m *Model) buildInfoPanelTodoBlock(lineW int) string {
 			marker = "○"
 		}
 		prefix := marker + " "
-		contentWidth := lineW - infoPanelCollapsibleContentInset - lipgloss.Width(prefix)
-		if contentWidth < 1 {
-			contentWidth = 1
-		}
+		contentWidth := max(lineW-infoPanelCollapsibleContentInset-lipgloss.Width(prefix), 1)
 		content := truncateInfoPanelLine(t.Content, contentWidth)
 		todoLines = append(todoLines,
 			renderInfoPanelCollapsibleContentLine(lineW,
@@ -511,10 +502,7 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 			lineStyle = invokedStyle
 		}
 		label := entry.name
-		labelWidth := lineW - infoPanelCollapsibleContentInset
-		if labelWidth < 1 {
-			labelWidth = 1
-		}
+		labelWidth := max(lineW-infoPanelCollapsibleContentInset, 1)
 		skillLines = append(skillLines, renderInfoPanelCollapsibleContentLine(lineW, lineStyle.Render(truncateOneLine(label, labelWidth))))
 	}
 	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(skillLines))
@@ -559,10 +547,7 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 			}
 		}
 		statStr := parts
-		contentW := lineW - infoPanelCollapsibleContentInset
-		if contentW < 0 {
-			contentW = 0
-		}
+		contentW := max(lineW-infoPanelCollapsibleContentInset, 0)
 		availName := contentW
 		if statStr != "" {
 			availName -= lipgloss.Width(statStr)
@@ -682,10 +667,7 @@ func renderUsageCacheLine(lineW int, stats analytics.SessionStats) string {
 }
 
 func renderUsageCacheDetailLine(lineW int, label string, labelWidth int, value string) string {
-	pad := labelWidth - ansi.StringWidth(label)
-	if pad < 0 {
-		pad = 0
-	}
+	pad := max(labelWidth-ansi.StringWidth(label), 0)
 	line := lipgloss.JoinHorizontal(lipgloss.Left,
 		InfoPanelDim.Render(label),
 		InfoPanelDim.Render(strings.Repeat(" ", pad+2)),

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 
 	clipboard "golang.design/x/clipboard"
 
@@ -79,12 +80,7 @@ func readAttachmentFromClipboardImpl() ([]byte, string, error) {
 }
 
 func clipboardHasFormat(formats []clipboard.Format, target clipboard.Format) bool {
-	for _, format := range formats {
-		if format == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(formats, target)
 }
 
 func clipboardHasMIME(formats []clipboard.Format, mimeType string) bool {

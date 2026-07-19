@@ -104,10 +104,7 @@ func (m *Model) cachedContentViewerLines(width int) []string {
 	if m.contentViewer.cachedWidth == innerWidth && m.contentViewer.cachedLines != nil {
 		return m.contentViewer.cachedLines
 	}
-	contentWidth := innerWidth - 2
-	if contentWidth < 20 {
-		contentWidth = 20
-	}
+	contentWidth := max(innerWidth-2, 20)
 	lines := []string{
 		centerHelpLine(m.contentViewer.title, innerWidth),
 		"",
@@ -224,10 +221,7 @@ func (m *Model) contentViewerSelectionPointAt(mouse tea.Mouse) (int, int, bool) 
 		return 0, 0, false
 	}
 	marginX := contentViewerHorizontalMargin(m.viewport.width)
-	col := mouse.X - m.layout.main.Min.X - marginX
-	if col < 0 {
-		col = 0
-	}
+	col := max(mouse.X-m.layout.main.Min.X-marginX, 0)
 	lineWidth := selectionStyledTextWidth(lines[lineIdx])
 	if col > lineWidth {
 		col = lineWidth
@@ -427,10 +421,7 @@ func (m *Model) renderContentViewer() string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
-	offset := m.contentViewer.scrollOffset
-	if offset < 0 {
-		offset = 0
-	}
+	offset := max(m.contentViewer.scrollOffset, 0)
 	lines := m.cachedContentViewerLines(width)
 	if offset > len(lines) {
 		offset = len(lines)

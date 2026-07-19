@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -172,12 +173,7 @@ func (t SkillTool) IsAvailable() bool {
 	if t.provider == nil {
 		return false
 	}
-	for _, sk := range t.provider.ListSkills() {
-		if isListableSkill(sk) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(t.provider.ListSkills(), isListableSkill)
 }
 
 func (t SkillTool) Execute(_ context.Context, raw json.RawMessage) (string, error) {

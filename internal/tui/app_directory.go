@@ -22,20 +22,11 @@ func (m Model) renderDirectory() string {
 		return centred
 	}
 
-	maxWidth := width - 6
-	if maxWidth < 20 {
-		maxWidth = 20
-	}
-	if maxWidth > width {
-		maxWidth = width
-	}
+	maxWidth := min(max(width-6, 20), width)
 
 	// innerWidth is the usable content width inside the DirectoryBorderStyle
 	// box, which has Padding(0, 1) — 1 char on each side.
-	innerWidth := maxWidth - 2
-	if innerWidth < 16 {
-		innerWidth = 16
-	}
+	innerWidth := max(maxWidth-2, 16)
 	if m.dirList == nil {
 		return ""
 	}
@@ -48,10 +39,7 @@ func (m Model) renderDirectory() string {
 }
 
 func (m *Model) directoryMaxVisible() int {
-	maxVisible := m.viewport.height - 4
-	if maxVisible < 3 {
-		maxVisible = 3
-	}
+	maxVisible := max(m.viewport.height-4, 3)
 	return maxVisible
 }
 

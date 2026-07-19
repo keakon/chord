@@ -197,9 +197,6 @@ func selectLineRange(data []byte, lineRange LineRange) ([]byte, bool) {
 	if lineRange.Start > len(lines) {
 		return nil, false
 	}
-	end := lineRange.End
-	if end > len(lines) {
-		end = len(lines)
-	}
+	end := min(lineRange.End, len(lines))
 	return bytes.Join(lines[lineRange.Start-1:end], nil), true
 }

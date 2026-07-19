@@ -269,11 +269,11 @@ func toolSuccessfulFileOpSummary(b *Block) string {
 
 func firstPathFromToolResult(result string) string {
 	for _, prefix := range []string{"Applied patch to ", "Updated file ", "Wrote file ", "Deleted file "} {
-		idx := strings.Index(result, prefix)
-		if idx < 0 {
+		_, after, ok := strings.Cut(result, prefix)
+		if !ok {
 			continue
 		}
-		rest := strings.TrimSpace(result[idx+len(prefix):])
+		rest := strings.TrimSpace(after)
 		if rest == "" {
 			continue
 		}

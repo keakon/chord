@@ -172,18 +172,12 @@ func (m *Model) handleErrorPanelKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) errorPanelVisibleLines() int {
-	visible := m.height - 12
-	if visible < 8 {
-		visible = 8
-	}
+	visible := max(m.height-12, 8)
 	return visible
 }
 
 func (m *Model) errorPanelMaxWidth() int {
-	maxWidth := min(m.width-12, 110)
-	if maxWidth < 60 {
-		maxWidth = 60
-	}
+	maxWidth := max(min(m.width-12, 110), 60)
 	return maxWidth
 }
 
@@ -193,10 +187,7 @@ func (m *Model) errorPanelInnerWidth() int {
 
 func (m *Model) errorPanelMaxScroll() int {
 	lines := m.errorPanelLines(m.errorPanelInnerWidth())
-	maxScroll := len(lines) - m.errorPanelVisibleLines()
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
+	maxScroll := max(len(lines)-m.errorPanelVisibleLines(), 0)
 	return maxScroll
 }
 

@@ -2373,12 +2373,10 @@ func TestConcurrentTaskRehydratePublishesOneRuntime(t *testing.T) {
 	results := make(chan result, 2)
 	var callers sync.WaitGroup
 	for range 2 {
-		callers.Add(1)
-		go func() {
-			defer callers.Done()
+		callers.Go(func() {
 			sub, _, rehydrated, err := a.getOrRehydrateTask(cloneDurableTaskRecord(record))
 			results <- result{sub: sub, rehydrated: rehydrated, err: err}
-		}()
+		})
 	}
 	<-factoryStarted
 	time.Sleep(20 * time.Millisecond)

@@ -103,10 +103,7 @@ func (b *Block) renderTodoCall(width int, spinnerFrame string) []string {
 	blockStyle := metrics.blockStyle
 	toolCardBg := metrics.toolCardBg
 	cardWidth := metrics.cardWidth
-	contentWidth := cardWidth - 6
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
+	contentWidth := max(cardWidth-6, 10)
 
 	type todoArgs struct {
 		Todos []todoCallArgItem `json:"todos"`
@@ -144,10 +141,7 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 	blockStyle := metrics.blockStyle
 	toolCardBg := metrics.toolCardBg
 	cardWidth := metrics.cardWidth
-	contentWidth := cardWidth - 6
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
+	contentWidth := max(cardWidth-6, 10)
 
 	questions, _ := tools.DecodeQuestionItems(json.RawMessage(b.Content))
 
@@ -196,10 +190,7 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 				optPrefix := fmt.Sprintf("      %s %d. %s", marker, i+1, displayLabel)
 				optLine := optPrefix
 				if opt.Description != "" {
-					descWidth := contentWidth - runewidth.StringWidth(optPrefix)
-					if descWidth < 0 {
-						descWidth = 0
-					}
+					descWidth := max(contentWidth-runewidth.StringWidth(optPrefix), 0)
 					optLine += DimStyle.Render(" — " + truncateOneLine(sanitizeToolDisplayText(opt.Description), descWidth))
 				}
 				result = append(result, optLine)

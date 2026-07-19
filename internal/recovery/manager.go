@@ -125,8 +125,8 @@ type AgentSnapshot struct {
 	Persistence             struct {
 		State       string    `json:"state"`
 		LastError   string    `json:"last_error,omitempty"`
-		FailedAt    time.Time `json:"failed_at,omitempty"`
-		RecoveredAt time.Time `json:"recovered_at,omitempty"`
+		FailedAt    time.Time `json:"failed_at"`
+		RecoveredAt time.Time `json:"recovered_at"`
 	} `json:"persistence"`
 }
 

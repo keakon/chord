@@ -41,7 +41,7 @@ func TestLoadSessionUsesCompactedMailboxStateAndPreservesSequence(t *testing.T) 
 	}
 	mailboxEncoder := json.NewEncoder(mailboxFile)
 	ackEncoder := json.NewEncoder(ackFile)
-	for i := 0; i < mailboxCompactionThreshold; i++ {
+	for i := range mailboxCompactionThreshold {
 		id := fmt.Sprintf("worker-%d", i+1)
 		if i == 0 {
 			id = "worker-9999"

@@ -322,10 +322,7 @@ func (m *Model) imageViewerTitleLine(contentWidth int) string {
 		left = truncateOneLine(left, max(1, contentWidth-badgeW-1))
 		leftW = lipgloss.Width(left)
 	}
-	gap := contentWidth - leftW - badgeW
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(contentWidth-leftW-badgeW, 1)
 	return left + strings.Repeat(" ", gap) + badge
 }
 

@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"maps"
+
 	"github.com/keakon/chord/internal/config"
 )
 
@@ -164,9 +166,7 @@ func cloneServiceTiers(tiers map[config.ServiceTier]bool) map[config.ServiceTier
 		return nil
 	}
 	out := make(map[config.ServiceTier]bool, len(tiers))
-	for tier, supported := range tiers {
-		out[tier] = supported
-	}
+	maps.Copy(out, tiers)
 	return out
 }
 

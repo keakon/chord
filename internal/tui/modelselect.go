@@ -307,10 +307,7 @@ func (m *Model) renderModelSelectDialog() string {
 }
 
 func (m *Model) modelSelectMaxVisible() int {
-	maxVisible := m.height/2 - 5
-	if maxVisible < 3 {
-		maxVisible = 3
-	}
+	maxVisible := max(m.height/2-5, 3)
 	return maxVisible
 }
 

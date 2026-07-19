@@ -14,6 +14,7 @@ package permission
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -350,8 +351,8 @@ func (o *Overlay) removeSessionRuleLocked(role string, target Rule) {
 }
 
 func removeLastMatchingRule(rs Ruleset, target Rule) Ruleset {
-	for i := len(rs) - 1; i >= 0; i-- {
-		r := rs[i]
+	for i, r := range slices.Backward(rs) {
+
 		if sameRule(r, target) {
 			return append(rs[:i], rs[i+1:]...)
 		}

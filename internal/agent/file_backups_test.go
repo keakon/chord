@@ -13,7 +13,7 @@ func TestFileBackupManagerPrunesPerPathInCreationOrder(t *testing.T) {
 	dir := t.TempDir()
 	mgr := newFileBackupManager(dir)
 	path := filepath.Join(dir, "target.txt")
-	for i := 0; i < maxToolBackupsPerPath+2; i++ {
+	for i := range maxToolBackupsPerPath + 2 {
 		if _, err := mgr.Backup(path, "Edit", []byte(fmt.Sprintf("backup-%02d", i))); err != nil {
 			t.Fatalf("Backup %d: %v", i, err)
 		}
@@ -81,7 +81,7 @@ func TestFileBackupManagerRejectsSingleLargeBackup(t *testing.T) {
 func TestFileBackupManagerRejectsSessionFileLimit(t *testing.T) {
 	dir := t.TempDir()
 	mgr := newFileBackupManager(dir)
-	for i := 0; i < maxToolBackupsPerSession; i++ {
+	for i := range maxToolBackupsPerSession {
 		path := filepath.Join(dir, fmt.Sprintf("file-%03d.txt", i))
 		if _, err := mgr.Backup(path, "Delete", []byte("x")); err != nil {
 			t.Fatalf("Backup %d: %v", i, err)

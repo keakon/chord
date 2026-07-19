@@ -14,14 +14,8 @@ import (
 func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	const toolName = tools.NameShell
 	style := UserCardStyle
-	boxWidth := width - style.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	innerWidth := boxWidth - style.GetHorizontalPadding() - style.GetHorizontalBorderSize()
-	if innerWidth < 10 {
-		innerWidth = 10
-	}
+	boxWidth := max(width-style.GetHorizontalMargins(), 10)
+	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	innerWidth = clampCardInnerWidth(innerWidth, style, maxTextWidth)
 	contentWidth := min(innerWidth-4, maxTextWidth)
 
@@ -125,14 +119,8 @@ func (b *Block) renderUser(width int, spinnerFrame string) []string {
 
 func (b *Block) renderUserPlain(width int) []string {
 	style := UserCardStyle
-	boxWidth := width - style.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	innerWidth := boxWidth - style.GetHorizontalPadding() - style.GetHorizontalBorderSize()
-	if innerWidth < 10 {
-		innerWidth = 10
-	}
+	boxWidth := max(width-style.GetHorizontalMargins(), 10)
+	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := min(innerWidth-2, maxProseWidth)
 

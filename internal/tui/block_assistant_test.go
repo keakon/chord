@@ -1147,7 +1147,7 @@ func TestRenderThinkingLongLinesKeepRightPadding(t *testing.T) {
 	viewport := NewViewport(width, 20)
 	viewport.AppendBlock(block)
 	var target string
-	for _, line := range strings.Split(viewport.Render("", nil, -1, 0, ""), "\n") {
+	for line := range strings.SplitSeq(viewport.Render("", nil, -1, 0, ""), "\n") {
 		if strings.Contains(stripANSI(line), "xxx") {
 			target = line
 			break

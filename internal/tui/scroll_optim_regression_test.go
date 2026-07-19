@@ -53,7 +53,7 @@ func buildScrollFrame(width, height, base int) string {
 	inputRow := height - 3
 	statusRow := height - 1
 	var b strings.Builder
-	for y := 0; y < height; y++ {
+	for y := range height {
 		var line string
 		switch y {
 		case sepRow:

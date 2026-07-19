@@ -12,7 +12,7 @@ import (
 func benchmarkLargeSessionMessages(messageCount int) []message.Message {
 	messages := make([]message.Message, 0, messageCount)
 	content := strings.Repeat("session transcript line\n", 20)
-	for i := 0; i < messageCount; i++ {
+	for i := range messageCount {
 		switch i % 3 {
 		case 0:
 			messages = append(messages, message.Message{Role: message.RoleUser, Content: fmt.Sprintf("inspect file %d", i)})

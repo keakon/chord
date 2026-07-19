@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/agent"
@@ -75,8 +76,8 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		msgIndex := -1
 		if (evt.AgentID == "" || evt.AgentID == "main") && m.agent != nil {
 			msgs := m.agent.GetMessages()
-			for i := len(msgs) - 1; i >= 0; i-- {
-				msg := msgs[i]
+			for i, msg := range slices.Backward(msgs) {
+
 				if msg.Role != "user" || msg.IsCompactionSummary {
 					continue
 				}

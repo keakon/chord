@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"time"
 )
@@ -172,10 +173,8 @@ func apiErrMessageContains(apiErr *APIError, substrs ...string) bool {
 
 func apiErrorSignalEquals(apiErr *APIError, values ...string) bool {
 	for _, signal := range apiErrorStructuredSignals(apiErr) {
-		for _, value := range values {
-			if signal == value {
-				return true
-			}
+		if slices.Contains(values, signal) {
+			return true
 		}
 	}
 	return false

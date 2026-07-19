@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -126,8 +127,8 @@ func (m *Model) enqueueToastWithCategory(msg, level, category string) tea.Cmd {
 	// Merge: if category is set and the queue already has a toast with the same category,
 	// replace it with the new one (moved to the tail of the queue).
 	if t.Category != "" {
-		for i := len(m.toastQueue) - 1; i >= 0; i-- {
-			if m.toastQueue[i].Category == t.Category {
+		for i, v := range slices.Backward(m.toastQueue) {
+			if v.Category == t.Category {
 				m.toastQueue = append(m.toastQueue[:i], m.toastQueue[i+1:]...)
 				break
 			}
@@ -165,15 +166,9 @@ func (m Model) renderQueuedDrafts(width, maxLines int) string {
 		}
 		prefix := fmt.Sprintf("  [%d] ", i+1)
 		deleteWidth := runewidth.StringWidth(queuedDraftDeleteToken)
-		maxTextWidth := width - runewidth.StringWidth(prefix) - deleteWidth - queuedDraftDeleteRightMargin - 1
-		if maxTextWidth < 8 {
-			maxTextWidth = 8
-		}
+		maxTextWidth := max(width-runewidth.StringWidth(prefix)-deleteWidth-queuedDraftDeleteRightMargin-1, 8)
 		line := prefix + truncateOneLine(text, maxTextWidth)
-		padding := width - runewidth.StringWidth(line) - deleteWidth - queuedDraftDeleteRightMargin
-		if padding < 1 {
-			padding = 1
-		}
+		padding := max(width-runewidth.StringWidth(line)-deleteWidth-queuedDraftDeleteRightMargin, 1)
 		lines = append(lines, DimStyle.Render(line+strings.Repeat(" ", padding)+queuedDraftDeleteToken+strings.Repeat(" ", queuedDraftDeleteRightMargin)))
 	}
 	return strings.Join(lines, "\n")

@@ -33,7 +33,7 @@ func TestSubAgentContextLengthRecoveryCompressesAndRetriesOnce(t *testing.T) {
 	sub.llmMu.Unlock()
 	sub.ctxMgr.SetTokenBudgets(12000, 10000, 0)
 	messages := []message.Message{{Role: message.RoleUser, Content: "task"}}
-	for i := 0; i < 14; i++ {
+	for range 14 {
 		messages = append(messages,
 			message.Message{Role: message.RoleAssistant, Content: strings.Repeat("analysis ", 420)},
 			message.Message{Role: message.RoleUser, Content: "continue"},
@@ -109,7 +109,7 @@ func TestSubAgentProactiveContextCompressionRecordsReductionStats(t *testing.T) 
 	sub.compactUsage = 0.5
 	sub.ctxMgr.SetTokenBudgets(3000, 2400, 0)
 	messages := []message.Message{{Role: message.RoleUser, Content: "task"}}
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		messages = append(messages,
 			message.Message{Role: message.RoleAssistant, Content: strings.Repeat("analysis ", 160)},
 			message.Message{Role: message.RoleUser, Content: "continue"},
@@ -168,7 +168,7 @@ func TestSubAgentContextLengthRecoveryPreservesToolPairs(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
 	sub.ctxMgr.SetTokenBudgets(12000, 10000, 0)
 	messages := []message.Message{{Role: message.RoleUser, Content: "task"}}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		callID := "call-" + string(rune('a'+i))
 		messages = append(messages,
 			message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: callID, Name: "Read"}}},

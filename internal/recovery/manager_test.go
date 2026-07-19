@@ -907,7 +907,7 @@ func TestListSessions_AndSessionInfoForDir(t *testing.T) {
 func TestLoadMessagesCountCacheOnlyProvidesCapacityHint(t *testing.T) {
 	rm, dir := newTestManager(t)
 	defer rm.Close()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := rm.PersistMessage("main", message.Message{Role: message.RoleUser, Content: fmt.Sprintf("message-%d", i)}); err != nil {
 			t.Fatal(err)
 		}

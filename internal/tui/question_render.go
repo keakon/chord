@@ -24,10 +24,7 @@ func newQuestionTextarea(width int) textarea.Model {
 }
 
 func questionInputWidth(totalWidth int) int {
-	w := min(totalWidth-6, questionDialogMaxWidth) - questionInputWidthPad
-	if w < questionInputMinWidth {
-		w = questionInputMinWidth
-	}
+	w := max(min(totalWidth-6, questionDialogMaxWidth)-questionInputWidthPad, questionInputMinWidth)
 	return w
 }
 
@@ -54,14 +51,10 @@ func (m *Model) renderQuestionDialog() string {
 	}
 
 	// Cap dialog width for readability.
-	maxWidth := min(m.width-6, questionDialogMaxWidth)
-	if maxWidth < 40 {
-		maxWidth = 40
-	}
-	innerWidth := maxWidth - 2 // account for border padding
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
+	maxWidth := max(min(m.width-6, questionDialogMaxWidth), 40)
+	innerWidth := max(
+		// account for border padding
+		maxWidth-2, 20)
 
 	total := len(m.question.request.Questions)
 
@@ -149,10 +142,7 @@ func (m *Model) renderQuestionDialog() string {
 
 	// Timeout countdown
 	if !m.question.deadline.IsZero() {
-		remaining := time.Until(m.question.deadline)
-		if remaining < 0 {
-			remaining = 0
-		}
+		remaining := max(time.Until(m.question.deadline), 0)
 		secs := int(remaining.Seconds()) + 1
 		lines = append(lines, QuestionTimeoutStyle.Render(
 			fmt.Sprintf("⏱ Auto-cancel in %ds", secs),
@@ -179,14 +169,8 @@ func renderCurrentQuestionOptionDescription(description, numKey string, innerWid
 	}
 	description = sanitizeToolDisplayText(description)
 	prefix := " " + strings.Repeat(" ", runewidth.StringWidth(numKey)+3)
-	wrapWidth := innerWidth - 2
-	if wrapWidth < 10 {
-		wrapWidth = 10
-	}
-	available := wrapWidth - runewidth.StringWidth(prefix)
-	if available < 10 {
-		available = 10
-	}
+	wrapWidth := max(innerWidth-2, 10)
+	available := max(wrapWidth-runewidth.StringWidth(prefix), 10)
 	var lines []string
 	for line := range strings.SplitSeq(strings.ReplaceAll(description, "<br>", "\n"), "\n") {
 		for _, wrapped := range wrapText(line, available) {

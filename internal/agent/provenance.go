@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
@@ -50,8 +51,8 @@ func toolProvenanceForCall(msgs []message.Message, callID string) *message.Messa
 	if callID == "" {
 		return nil
 	}
-	for i := len(msgs) - 1; i >= 0; i-- {
-		msg := msgs[i]
+	for _, msg := range slices.Backward(msgs) {
+
 		if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
 			continue
 		}

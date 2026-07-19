@@ -2,6 +2,7 @@ package agent
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/keakon/golog/log"
@@ -23,8 +24,8 @@ const (
 )
 
 func (a *MainAgent) latestCompactionSummarySignature(msgs []message.Message) (int, string) {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		msg := msgs[i]
+	for i, msg := range slices.Backward(msgs) {
+
 		if msg.Role != message.RoleUser || !msg.IsCompactionSummary {
 			continue
 		}
@@ -132,10 +133,7 @@ func (a *MainAgent) compactionInjectedFileBudgets(messages []message.Message) (m
 		return maxFileBytes, 0
 	}
 	remainingBytes := remainingTokens * 3
-	allowed := remainingBytes / 4
-	if allowed > maxTotalBytes {
-		allowed = maxTotalBytes
-	}
+	allowed := min(remainingBytes/4, maxTotalBytes)
 	if allowed < compactionInjectedFilesMinBytes {
 		return maxFileBytes, 0
 	}

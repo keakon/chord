@@ -17,7 +17,7 @@ func benchmarkExportedSession(messageCount int) *ExportedSession {
 		Messages:  make([]ExportedMessage, 0, messageCount),
 	}
 	content := strings.Repeat("session transcript line\n", 20)
-	for i := 0; i < messageCount; i++ {
+	for i := range messageCount {
 		msg := ExportedMessage{
 			Role:      message.RoleAssistant,
 			Content:   content,

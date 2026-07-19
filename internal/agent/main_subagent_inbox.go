@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -798,8 +799,8 @@ func (a *MainAgent) requeueActiveSubAgentMailbox() {
 	if len(batch) == 0 && a.activeSubAgentMailbox != nil {
 		batch = []*SubAgentMailboxMessage{a.activeSubAgentMailbox}
 	}
-	for i := len(batch) - 1; i >= 0; i-- {
-		msg := batch[i]
+	for _, msg := range slices.Backward(batch) {
+
 		if msg == nil {
 			continue
 		}

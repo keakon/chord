@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,13 +17,7 @@ func TestGlobParametersDeclareRequiredPatterns(t *testing.T) {
 	if !ok {
 		t.Fatalf("required has type %T, want []string", params["required"])
 	}
-	found := false
-	for _, name := range required {
-		if name == "patterns" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(required, "patterns")
 	if !found {
 		t.Fatalf("glob schema must declare patterns as required, got %v", required)
 	}

@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/keakon/chord/internal/tools"
+import (
+	"slices"
+
+	"github.com/keakon/chord/internal/tools"
+)
 
 // ScrollDown moves the viewport down by n lines.
 func (v *Viewport) ScrollDown(n int) {
@@ -186,8 +190,8 @@ func (v *Viewport) FindBlockByToolID(toolID string) (*Block, bool) {
 
 func (v *Viewport) FindLastPendingToolBlockByName(toolName string) (*Block, bool) {
 	toolName = tools.NormalizeName(toolName)
-	for i := len(v.blocks) - 1; i >= 0; i-- {
-		b := v.blocks[i]
+	for _, b := range slices.Backward(v.blocks) {
+
 		if b.Type == BlockToolCall && tools.NormalizeName(b.ToolName) == toolName && !b.ResultDone {
 			return v.materialize(b), true
 		}

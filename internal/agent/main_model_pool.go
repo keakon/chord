@@ -569,9 +569,7 @@ func (a *MainAgent) snapshotAgentConfigs() map[string]*config.AgentConfig {
 		return nil
 	}
 	out := make(map[string]*config.AgentConfig, len(a.agentConfigs))
-	for name, cfg := range a.agentConfigs {
-		out[name] = cfg
-	}
+	maps.Copy(out, a.agentConfigs)
 	return out
 }
 

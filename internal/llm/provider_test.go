@@ -136,7 +136,7 @@ func TestProviderDiagnosticsWritersAreRaceSafe(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				for i := 0; i < 10_000; i++ {
+				for range 10_000 {
 					SetProviderDumpWriter(tc.p, NewDumpWriter("dump"))
 					SetProviderTraceWriter(tc.p, NewTraceWriter("trace.jsonl"))
 				}
@@ -144,7 +144,7 @@ func TestProviderDiagnosticsWritersAreRaceSafe(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				for i := 0; i < 10_000; i++ {
+				for range 10_000 {
 					tc.load()
 				}
 			}()
@@ -174,11 +174,11 @@ func TestProviderAuthSchemeConcurrentReadIsRaceSafe(t *testing.T) {
 	var wg sync.WaitGroup
 	const readers = 8
 	wg.Add(readers)
-	for i := 0; i < readers; i++ {
+	for range readers {
 		go func() {
 			defer wg.Done()
 			<-start
-			for j := 0; j < 10_000; j++ {
+			for range 10_000 {
 				if got := p.AuthScheme(); got != config.AuthSchemeBearer {
 					t.Errorf("AuthScheme() = %q, want %q", got, config.AuthSchemeBearer)
 					return

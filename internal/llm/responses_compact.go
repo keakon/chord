@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -67,14 +68,14 @@ func resolveResponsesCompactURL(apiURL string) (string, error) {
 }
 
 func extractCompactSummary(resp responsesCompactResponse) string {
-	for i := len(resp.Output) - 1; i >= 0; i-- {
-		item := resp.Output[i]
+	for _, item := range slices.Backward(resp.Output) {
+
 		if item.Type == "compaction" && strings.TrimSpace(item.EncryptedContent) != "" {
 			return strings.TrimSpace(item.EncryptedContent)
 		}
 	}
-	for i := len(resp.Output) - 1; i >= 0; i-- {
-		item := resp.Output[i]
+	for _, item := range slices.Backward(resp.Output) {
+
 		if item.Type != "message" {
 			continue
 		}

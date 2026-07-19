@@ -190,10 +190,7 @@ func (m *Model) queuedDraftActionAt(x, y int) (idx int, remove bool, ok bool) {
 		return 0, false, false
 	}
 	deleteWidth := runewidth.StringWidth(queuedDraftDeleteToken)
-	deleteStart := m.layout.queue.Max.X - queuedDraftDeleteRightMargin - deleteWidth
-	if deleteStart < m.layout.queue.Min.X {
-		deleteStart = m.layout.queue.Min.X
-	}
+	deleteStart := max(m.layout.queue.Max.X-queuedDraftDeleteRightMargin-deleteWidth, m.layout.queue.Min.X)
 	deleteEnd := deleteStart + deleteWidth
 	return idx, x >= deleteStart && x < deleteEnd, true
 }

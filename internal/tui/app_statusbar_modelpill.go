@@ -42,10 +42,7 @@ func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSna
 	modelVariant := snap.modelVariant
 
 	const modelPillPrefixRunes = 2
-	modelSlotMax := effectiveWidth - leftWidth - modelPillPrefixRunes - 1
-	if modelSlotMax < 8 {
-		modelSlotMax = 8
-	}
+	modelSlotMax := max(effectiveWidth-leftWidth-modelPillPrefixRunes-1, 8)
 
 	var modelPill string
 	if m.cachedModelPillRef == modelRef && m.cachedModelPillSelectedRef == selectedRef && m.cachedModelPillVariant == modelVariant && m.cachedModelPillBusy == snap.busy &&

@@ -77,7 +77,7 @@ func TestOrchestrationMetricsEvictionIgnoresStaleQueueEntries(t *testing.T) {
 		parkedAt:  make(map[string]parkedMetricState),
 	}
 	now := time.Now()
-	for i := 0; i < orchestrationTrackedMailboxLimit; i++ {
+	for i := range orchestrationTrackedMailboxLimit {
 		id := fmt.Sprintf("tracked-%d", i)
 		metrics.recordMailboxCreated(id, now)
 		metrics.recordMailboxAck(id)
@@ -95,7 +95,7 @@ func TestOrchestrationMetricsEvictionIgnoresStaleQueueEntries(t *testing.T) {
 func BenchmarkOrchestrationMailboxTrackingAtCapacity(b *testing.B) {
 	var metrics orchestrationRuntimeMetrics
 	now := time.Now()
-	for i := 0; i < orchestrationTrackedMailboxLimit; i++ {
+	for i := range orchestrationTrackedMailboxLimit {
 		metrics.recordMailboxCreated(fmt.Sprintf("seed-%d", i), now)
 	}
 	b.ReportAllocs()

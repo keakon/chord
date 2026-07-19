@@ -569,9 +569,9 @@ func mustContain(t *testing.T, s, want string) {
 func parseWebFetchHeaderInt(t *testing.T, out, key string) int {
 	t.Helper()
 	prefix := key + ": "
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, prefix) {
-			value, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, prefix)))
+	for line := range strings.SplitSeq(out, "\n") {
+		if after, ok := strings.CutPrefix(line, prefix); ok {
+			value, err := strconv.Atoi(strings.TrimSpace(after))
 			if err != nil {
 				t.Fatalf("parse %s header %q: %v", key, line, err)
 			}

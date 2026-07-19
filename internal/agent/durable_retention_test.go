@@ -14,7 +14,7 @@ func TestArchiveEligibleTerminalTasksPreservesUnsafeRecords(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	now := time.Now()
 	records := make(map[string]*DurableTaskRecord)
-	for i := 0; i < maxRetainedTerminalTasks+2; i++ {
+	for i := range maxRetainedTerminalTasks + 2 {
 		taskID := fmt.Sprintf("terminal-%03d", i)
 		records[taskID] = &DurableTaskRecord{
 			TaskID:       taskID,
@@ -70,7 +70,7 @@ func TestArchiveEligibleTerminalTasksBoundsCompletedTasksAndSupportsLookup(t *te
 	a := newTestMainAgent(t, t.TempDir())
 	now := time.Now()
 	records := make(map[string]*DurableTaskRecord, maxRetainedTerminalTasks+2)
-	for i := 0; i < maxRetainedTerminalTasks+2; i++ {
+	for i := range maxRetainedTerminalTasks + 2 {
 		taskID := fmt.Sprintf("completed-%03d", i)
 		records[taskID] = &DurableTaskRecord{
 			TaskID:           taskID,
@@ -143,16 +143,16 @@ func TestCompactSubAgentMailboxLogsPreservesUnconsumedAndLatestProgress(t *testi
 			}
 		}
 	}
-	for i := 0; i < 900; i++ {
+	for i := range 900 {
 		writeMessage(SubAgentMailboxMessage{MessageID: fmt.Sprintf("old-%04d", i), TaskID: "old", Kind: SubAgentMailboxKindCompleted}, true)
 	}
-	for i := 0; i < 140; i++ {
+	for i := range 140 {
 		writeMessage(SubAgentMailboxMessage{MessageID: fmt.Sprintf("progress-%04d", i), TaskID: "task-progress", AgentID: "worker-1", Kind: SubAgentMailboxKindProgress, Summary: fmt.Sprintf("progress %d", i)}, false)
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		writeMessage(SubAgentMailboxMessage{MessageID: fmt.Sprintf("urgent-%04d", i), TaskID: "urgent", Kind: SubAgentMailboxKindRiskAlert}, false)
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		writeMessage(SubAgentMailboxMessage{MessageID: fmt.Sprintf("recent-%04d", i), TaskID: "recent", Kind: SubAgentMailboxKindCompleted}, true)
 	}
 	if err := mailboxFile.Close(); err != nil {

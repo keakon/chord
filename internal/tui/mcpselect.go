@@ -103,10 +103,7 @@ func (m *Model) openMCPSelect() {
 }
 
 func (m *Model) mcpSelectMaxVisible() int {
-	maxVisible := m.height/2 - 5
-	if maxVisible < 3 {
-		maxVisible = 3
-	}
+	maxVisible := max(m.height/2-5, 3)
 	return maxVisible
 }
 

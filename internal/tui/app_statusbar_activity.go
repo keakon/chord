@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -83,14 +84,8 @@ func (m Model) renderRequestProgressSummary(agentID string) string {
 	displayBytes := int64(0)
 	displayEvents := int64(0)
 	if ok {
-		displayBytes = prog.VisibleBytes - prog.BaseBytes
-		if displayBytes < 0 {
-			displayBytes = 0
-		}
-		displayEvents = prog.VisibleEvents - prog.BaseEvents
-		if displayEvents < 0 {
-			displayEvents = 0
-		}
+		displayBytes = max(prog.VisibleBytes-prog.BaseBytes, 0)
+		displayEvents = max(prog.VisibleEvents-prog.BaseEvents, 0)
 	}
 	hasDownloadState := false
 	if act, ok := m.activities[agentID]; ok {
@@ -126,10 +121,7 @@ func (m Model) renderExecutingSummary(agentID string) string {
 	if startedAt.IsZero() {
 		return "⚙"
 	}
-	elapsed := time.Since(startedAt).Round(time.Second)
-	if elapsed < time.Second {
-		elapsed = time.Second
-	}
+	elapsed := max(time.Since(startedAt).Round(time.Second), time.Second)
 	return "⚙ · " + elapsed.String()
 }
 
@@ -141,8 +133,8 @@ func statusBarTimingAnchor(agentID string) string {
 }
 
 func latestQueuedDraftWall(drafts []queuedDraft) (time.Time, bool) {
-	for i := len(drafts) - 1; i >= 0; i-- {
-		if t := drafts[i].QueuedAt; !t.IsZero() {
+	for _, draft := range slices.Backward(drafts) {
+		if t := draft.QueuedAt; !t.IsZero() {
 			return t, true
 		}
 	}
@@ -274,14 +266,8 @@ func (m Model) buildStatusBarActivityDisplay(a agent.AgentActivityEvent) statusB
 		bytes := int64(0)
 		events := int64(0)
 		if ok {
-			bytes = prog.VisibleBytes - prog.BaseBytes
-			if bytes < 0 {
-				bytes = 0
-			}
-			events = prog.VisibleEvents - prog.BaseEvents
-			if events < 0 {
-				events = 0
-			}
+			bytes = max(prog.VisibleBytes-prog.BaseBytes, 0)
+			events = max(prog.VisibleEvents-prog.BaseEvents, 0)
 		}
 		display.Text = formatStatusBarBytes(bytes)
 		if e := formatStatusBarEvents(events, false); e != "" {
@@ -334,10 +320,7 @@ func (m Model) renderActivityState(a agent.AgentActivityEvent, maxWidth int) str
 	}
 	if maxWidth > 0 && lipgloss.Width(out) > maxWidth && text != "" {
 		iconW := lipgloss.Width(iconStyle.Render(icon))
-		tw := maxWidth - iconW - 1
-		if tw < 1 {
-			tw = 1
-		}
+		tw := max(maxWidth-iconW-1, 1)
 		truncated := runewidth.Truncate(text, tw, "…")
 		out = iconStyle.Render(icon) + " " + textStyle.Render(truncated)
 	}

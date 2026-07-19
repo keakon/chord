@@ -163,7 +163,7 @@ func writeDiagnosticHorizontalLineRows(sb *strings.Builder, scr uv.ScreenBuffer,
 		return
 	}
 	found := false
-	for y := 0; y < height; y++ {
+	for y := range height {
 		line := scr.Line(y)
 		plain, occupied, cells := debugScreenBufferLineSummary(line)
 		plainWidth := ansi.StringWidth(plain)

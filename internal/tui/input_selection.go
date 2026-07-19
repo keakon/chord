@@ -172,10 +172,7 @@ func (i *Input) visibleWrappedContentLines() []string {
 	if len(all) == 0 {
 		return []string{""}
 	}
-	offset := i.textarea.ScrollYOffset()
-	if offset < 0 {
-		offset = 0
-	}
+	offset := max(i.textarea.ScrollYOffset(), 0)
 	if offset >= len(all) {
 		return []string{""}
 	}

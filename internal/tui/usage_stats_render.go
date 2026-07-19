@@ -14,16 +14,7 @@ func (m *Model) renderUsageStatsDialog() string {
 	innerWidth := m.usageStatsInnerWidth()
 	lines := m.usageStatsLines(innerWidth)
 	visible := min(m.usageStatsVisibleLines(), len(lines))
-	start := m.usageStats.scrollOffset
-	if start < 0 {
-		start = 0
-	}
-	if start > len(lines)-visible {
-		start = len(lines) - visible
-	}
-	if start < 0 {
-		start = 0
-	}
+	start := max(min(max(m.usageStats.scrollOffset, 0), len(lines)-visible), 0)
 	if m.usageStats.dialogCacheText != "" &&
 		m.usageStats.dialogCacheW == m.width &&
 		m.usageStats.dialogCacheH == m.height &&

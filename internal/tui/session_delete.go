@@ -102,14 +102,8 @@ func (m *Model) renderSessionDeleteConfirmDialog() string {
 		return m.sessionDeleteConfirm.renderCacheText
 	}
 	const maxDialogWidth = 90
-	maxWidth := min(m.width-6, maxDialogWidth)
-	if maxWidth < 40 {
-		maxWidth = 40
-	}
-	innerWidth := maxWidth - 2
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
+	maxWidth := max(min(m.width-6, maxDialogWidth), 40)
+	innerWidth := max(maxWidth-2, 20)
 	previewLines := wrapText(preview, max(10, innerWidth-2))
 	for i := range previewLines {
 		previewLines[i] = DimStyle.Render(previewLines[i])

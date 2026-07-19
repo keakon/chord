@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
@@ -43,8 +44,8 @@ func containsAnyFold(text string, keys []string) bool {
 }
 
 func latestUserPromptForBugTriage(messages []message.Message) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for _, msg := range slices.Backward(messages) {
+
 		if !message.IsUserAuthored(msg) {
 			continue
 		}

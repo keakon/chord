@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -313,8 +314,8 @@ func (a *MainAgent) coalesceQueuedEventLocked(queue []Event, evt Event) bool {
 	if key == "" {
 		return false
 	}
-	for i := len(queue) - 1; i >= 0; i-- {
-		if coalescibleEventKey(queue[i]) == key {
+	for i, q := range slices.Backward(queue) {
+		if coalescibleEventKey(q) == key {
 			copy(queue[i:], queue[i+1:])
 			queue[len(queue)-1] = a.sequenceEvent(evt)
 			return true

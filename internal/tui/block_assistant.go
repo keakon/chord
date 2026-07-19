@@ -162,13 +162,7 @@ const (
 )
 
 func thinkingMarkdownContentWidth(innerWidth int) int {
-	contentWidth := innerWidth - thinkingContentIndentWidth - ThinkingCardStyle.GetPaddingRight() - cardRailWidth
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
-	if contentWidth > maxProseWidth {
-		contentWidth = maxProseWidth
-	}
+	contentWidth := min(max(innerWidth-thinkingContentIndentWidth-ThinkingCardStyle.GetPaddingRight()-cardRailWidth, 10), maxProseWidth)
 	return contentWidth
 }
 
@@ -406,20 +400,14 @@ func renderCodeFence(seg assistantMarkdownSegment, codeSample string, width, con
 		codeBlockInnerPadX = 1
 		codeBlockInnerPadY = 1
 	)
-	innerWidth := width - codeBlockInnerPadX*2
-	if innerWidth < 1 {
-		innerWidth = 1
-	}
+	innerWidth := max(width-codeBlockInnerPadX*2, 1)
 
 	code := sanitizeDisplayText(seg.raw)
 	fenceDelim := seg.fenceMarker
 	if fenceDelim == 0 {
 		fenceDelim = '`'
 	}
-	fenceLen := seg.fenceLen
-	if fenceLen < 3 {
-		fenceLen = 3
-	}
+	fenceLen := max(seg.fenceLen, 3)
 	code = strings.TrimSpace(code)
 	if nl := strings.IndexByte(code, '\n'); nl >= 0 {
 		code = code[nl+1:]
@@ -603,10 +591,7 @@ func assistantMarkdownRenderWidth(content string, innerWidth int) int {
 }
 
 func markdownRenderWidthWithTable(hasTable bool, innerWidth int) int {
-	contentWidth := innerWidth - 2
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
+	contentWidth := max(innerWidth-2, 10)
 	limit := maxProseWidth
 	if hasTable {
 		limit = maxMarkdownTableWidth
@@ -672,7 +657,7 @@ func containsMarkdownTableInText(content string) bool {
 		return false
 	}
 	var previous string
-	for _, line := range strings.Split(markdownutil.NormalizeNewlines(content), "\n") {
+	for line := range strings.SplitSeq(markdownutil.NormalizeNewlines(content), "\n") {
 		if isMarkdownTableDelimiterLine(line) && isMarkdownTableHeaderLine(previous) {
 			return true
 		}
@@ -729,15 +714,9 @@ func (b *Block) renderAssistant(width int) []string {
 	// (Note: we removed the "[assistant]" string header for a cleaner conversational look)
 	style := AssistantCardStyle
 	// v2: Width() sets border-box (excl margin).
-	boxWidth := width - style.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
+	boxWidth := max(width-style.GetHorizontalMargins(), 10)
 	// innerWidth is the content area for text wrapping
-	innerWidth := boxWidth - style.GetHorizontalPadding() - style.GetHorizontalBorderSize()
-	if innerWidth < 10 {
-		innerWidth = 10
-	}
+	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 
 	// Parse summary metadata from content (if present at the start)
 	rawContent := removeTrailingCursorGlyph(b.Content)
@@ -768,10 +747,7 @@ func (b *Block) renderAssistant(width int) []string {
 	if hasThinking {
 		tStyle := ThinkingCardStyle
 		// Focus is indicated by the rail; the card surface stays the same.
-		thinkingInnerWidth := innerWidth - tStyle.GetHorizontalPadding() + style.GetHorizontalPadding()
-		if thinkingInnerWidth < 10 {
-			thinkingInnerWidth = 10
-		}
+		thinkingInnerWidth := max(innerWidth-tStyle.GetHorizontalPadding()+style.GetHorizontalPadding(), 10)
 		tLines := b.renderThinkingParts(thinkingInnerWidth)
 		if len(tLines) > 0 {
 			// Re-insert card background after inner ANSI resets.
@@ -1208,14 +1184,8 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 func (b *Block) renderThinking(width int) []string {
 	style := ThinkingCardStyle
 	// v2: Width() sets border-box (excl margin).
-	boxWidth := width - style.GetHorizontalMargins()
-	if boxWidth < 10 {
-		boxWidth = 10
-	}
-	innerWidth := boxWidth - style.GetHorizontalPadding() - style.GetHorizontalBorderSize()
-	if innerWidth < 10 {
-		innerWidth = 10
-	}
+	boxWidth := max(width-style.GetHorizontalMargins(), 10)
+	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := thinkingMarkdownContentWidth(innerWidth)
 	content := removeTrailingCursorGlyph(b.Content)

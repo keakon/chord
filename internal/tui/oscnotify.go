@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -103,8 +104,8 @@ func (m *Model) lastAssistantOrErrorTextForNotification() (string, bool) {
 		return "", false
 	}
 	blocks := m.viewport.visibleBlocks()
-	for i := len(blocks) - 1; i >= 0; i-- {
-		block := blocks[i]
+	for _, block := range slices.Backward(blocks) {
+
 		if block == nil {
 			continue
 		}

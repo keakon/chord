@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -42,8 +43,8 @@ func (m *Model) syncVisibleMainUserBlockMsgIndexes() {
 		used[block.MsgIndex] = struct{}{}
 	}
 
-	for i := len(blocks) - 1; i >= 0; i-- {
-		block := blocks[i]
+	for _, block := range slices.Backward(blocks) {
+
 		if block == nil || block.Type != BlockUser || block.IsUserLocalShell() {
 			continue
 		}
@@ -79,11 +80,11 @@ func findMatchingMainUserMsgIndex(msgs []message.Message, block *Block, used map
 	if target == "" {
 		return 0, false
 	}
-	for i := len(msgs) - 1; i >= 0; i-- {
+	for i, msg := range slices.Backward(msgs) {
 		if _, ok := used[i]; ok {
 			continue
 		}
-		msg := msgs[i]
+
 		if msg.Role != "user" || msg.IsCompactionSummary {
 			continue
 		}

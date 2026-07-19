@@ -224,21 +224,12 @@ func (m *Model) confirmHandoff() tea.Cmd {
 // ---------------------------------------------------------------------------
 
 func (m *Model) handoffSelectMaxVisible() int {
-	maxVisible := m.height/2 - 5
-	if maxVisible < 3 {
-		maxVisible = 3
-	}
+	maxVisible := max(m.height/2-5, 3)
 	return maxVisible
 }
 
 func (m *Model) handoffPlanVisibleLines() int {
-	visible := m.height/3 - 4
-	if visible < 3 {
-		visible = 3
-	}
-	if visible > 12 {
-		visible = 12
-	}
+	visible := min(max(m.height/3-4, 3), 12)
 	return visible
 }
 

@@ -825,7 +825,7 @@ func TestAtMentionFuzzyMatchesKeepsLowScoreMatches(t *testing.T) {
 
 func TestAtMentionFuzzyMatchesPreferShallowerPaths(t *testing.T) {
 	files := make([]string, 0, 62)
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		files = append(files, fmt.Sprintf("nebula/ring/%02d/AtlasGuide.txt", i))
 	}
 	files = append(files, "orbit/AtlasGuide.txt", "AtlasGuide.txt")

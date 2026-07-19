@@ -61,11 +61,11 @@ func FirstFileRefPath(text string) (string, bool) {
 }
 
 func nextFileRef(text string) (FileRef, string, bool) {
-	start := strings.Index(text, FileRefOpenTag)
-	if start < 0 {
+	_, after, ok := strings.Cut(text, FileRefOpenTag)
+	if !ok {
 		return FileRef{}, "", false
 	}
-	rest := text[start+len(FileRefOpenTag):]
+	rest := after
 	if len(rest) == 0 {
 		return FileRef{}, "", false
 	}

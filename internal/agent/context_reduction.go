@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -945,10 +946,8 @@ func summarizeGoTestSuccess(content string, limit int) goTestSuccessSummary {
 	resultLines := make([]string, 0, limit)
 	appendResult := func(line string) {
 		line = compactTextSnippet(line, summaryLineSnippetChars)
-		for _, existing := range resultLines {
-			if existing == line {
-				return
-			}
+		if slices.Contains(resultLines, line) {
+			return
 		}
 		if len(resultLines) < limit {
 			resultLines = append(resultLines, line)
@@ -1070,10 +1069,8 @@ func summarizeShellSuccess(content string, limit int) shellSuccessSummary {
 	summary := shellSuccessSummary{}
 
 	appendSignal := func(lines []string, line string, lineLimit int) []string {
-		for _, existing := range lines {
-			if existing == line {
-				return lines
-			}
+		if slices.Contains(lines, line) {
+			return lines
 		}
 		if len(lines) < lineLimit {
 			return append(lines, line)
@@ -1116,10 +1113,8 @@ func summarizeShellSuccess(content string, limit int) shellSuccessSummary {
 			return lines
 		}
 		lastTail := "- " + strings.ReplaceAll(tail[len(tail)-1], "\n", " ")
-		for _, line := range lines {
-			if line == lastTail {
-				return lines
-			}
+		if slices.Contains(lines, lastTail) {
+			return lines
 		}
 		return append(lines, lastTail)
 	}
@@ -1374,9 +1369,9 @@ func reduceReadOutputSummary(argsJSON, content string) string {
 // stripReadResultHeaderLine returns content without its leading READ_RESULT
 // metadata line, leaving only the raw source body.
 func stripReadResultHeaderLine(content string) string {
-	if idx := strings.IndexByte(content, '\n'); idx >= 0 {
-		if readResultRangeRe.MatchString(strings.TrimSpace(content[:idx])) {
-			return content[idx+1:]
+	if before, after, ok := strings.Cut(content, "\n"); ok {
+		if readResultRangeRe.MatchString(strings.TrimSpace(before)) {
+			return after
 		}
 	}
 	return content

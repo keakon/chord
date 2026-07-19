@@ -189,7 +189,7 @@ func TestReadToolExecuteOffsetPastEndSuggestionUsesDefaultLimit(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sample.txt")
 	var content strings.Builder
-	for i := 0; i < MaxOutputLines+3; i++ {
+	for i := range MaxOutputLines + 3 {
 		fmt.Fprintf(&content, "line %d\n", i+1)
 	}
 	if err := os.WriteFile(path, []byte(content.String()), 0o644); err != nil {

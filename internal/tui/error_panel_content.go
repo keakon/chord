@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -23,8 +24,8 @@ func (m *Model) errorPanelLines(innerWidth int) []string {
 		lines = []string{DimStyle.Render("No errors recorded in this session.")}
 	} else {
 		// Newest first so the most recent failure is visible without scrolling.
-		for i := len(records) - 1; i >= 0; i-- {
-			lines = append(lines, formatErrorRecordLines(records[i], innerWidth)...)
+		for i, record := range slices.Backward(records) {
+			lines = append(lines, formatErrorRecordLines(record, innerWidth)...)
 			if i > 0 {
 				lines = append(lines, "")
 			}

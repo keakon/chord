@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 
 	"github.com/keakon/chord/internal/config"
@@ -34,9 +35,7 @@ func applyRequestBodyOverrides(body []byte, overrides config.RequestOverridesCon
 			renamed[*target] = value
 		}
 	}
-	for target, value := range renamed {
-		patched[target] = value
-	}
+	maps.Copy(patched, renamed)
 	mergeRequestBody(patched, overrides.Body)
 	patchedBody, err := json.Marshal(patched)
 	if err != nil {

@@ -165,10 +165,7 @@ func compactSubAgentMailboxLogs(sessionDir string, msgs []SubAgentMailboxMessage
 			latestProgress[key] = i
 		}
 	}
-	keepConsumedFrom := len(msgs) - mailboxConsumedHistoryKeep
-	if keepConsumedFrom < 0 {
-		keepConsumedFrom = 0
-	}
+	keepConsumedFrom := max(len(msgs)-mailboxConsumedHistoryKeep, 0)
 	kept := make([]SubAgentMailboxMessage, 0, len(msgs))
 	for i, msg := range msgs {
 		if !msg.Consumed {

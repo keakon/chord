@@ -141,7 +141,7 @@ func TestWrapPreformattedTextPreservesIndentationAndTabs(t *testing.T) {
 func TestSanitizeDisplayTextEscapesRawControlCharacters(t *testing.T) {
 	var input strings.Builder
 	input.WriteString("start\tkeep\n")
-	for c := byte(0); c < 0x20; c++ {
+	for c := range byte(0x20) {
 		if c == '\t' || c == '\n' {
 			continue
 		}
@@ -543,7 +543,7 @@ func TestFocusedAssistantCardKeepsBaseBackground(t *testing.T) {
 	baseBg := lipgloss.Color(currentTheme.AssistantCardBg)
 	var checked int
 	cardEnd := len(cells) - AssistantCardStyle.GetMarginRight()
-	for i := 0; i < cardEnd; i++ {
+	for i := range cardEnd {
 		cell := cells[i]
 		if cell.IsZero() || cell.Content != " " {
 			continue

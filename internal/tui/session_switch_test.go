@@ -286,10 +286,7 @@ func TestStartupDeferredTranscriptPreheatPopulatesHaloMetadata(t *testing.T) {
 	if state == nil {
 		t.Fatal("startup transcript should remain deferred for preheat test")
 	}
-	leftIdx := state.windowStart - startupDeferredTranscriptPreheatHalo
-	if leftIdx < 0 {
-		leftIdx = 0
-	}
+	leftIdx := max(state.windowStart-startupDeferredTranscriptPreheatHalo, 0)
 	rightIdx := state.windowEnd + min(startupDeferredTranscriptPreheatHalo, len(state.allBlocks)-state.windowEnd) - 1
 	if rightIdx < state.windowEnd {
 		rightIdx = -1
@@ -347,10 +344,7 @@ func TestDeferredWindowSwitchRestartsPreheatForNewHalo(t *testing.T) {
 	if m.startupDeferredPreheatGeneration <= initialGen {
 		t.Fatalf("startupDeferredPreheatGeneration = %d, want > %d after window switch", m.startupDeferredPreheatGeneration, initialGen)
 	}
-	leftIdx := state.windowStart - startupDeferredTranscriptPreheatHalo
-	if leftIdx < 0 {
-		leftIdx = 0
-	}
+	leftIdx := max(state.windowStart-startupDeferredTranscriptPreheatHalo, 0)
 	rightIdx := state.windowEnd + min(startupDeferredTranscriptPreheatHalo, len(state.allBlocks)-state.windowEnd) - 1
 	if rightIdx < state.windowEnd {
 		rightIdx = -1

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1034,8 +1035,8 @@ func filterRestoredTodosByLatestCompactionSummary(messages []message.Message, to
 	if len(todos) == 0 {
 		return nil
 	}
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for _, msg := range slices.Backward(messages) {
+
 		if messageHasTodoWrite(msg) {
 			break
 		}
@@ -1087,8 +1088,8 @@ func compactionSummarySection(summary, startMarker, endMarker string) string {
 // tool call and reconstructs todo items from its arguments. Returns nil if no
 // TodoWrite call is found.
 func rebuildTodosFromMessages(msgs []message.Message) []tools.TodoItem {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		for _, tc := range msgs[i].ToolCalls {
+	for _, msg := range slices.Backward(msgs) {
+		for _, tc := range msg.ToolCalls {
 			if tools.NormalizeName(tc.Name) != tools.NameTodoWrite {
 				continue
 			}

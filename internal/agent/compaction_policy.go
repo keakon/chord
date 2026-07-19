@@ -6,7 +6,9 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -138,7 +140,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	// Tool-definition changes invalidate the frozen surface (full re-reduction).
 	frozenPrefix, frozenReducedIndices, frozenBoundary, incrementalEnabled := a.incrementalReductionSurface(prepared, policy)
 	if incrementalEnabled && frozenBoundary > 0 {
-		for i := 0; i < frozenBoundary; i++ {
+		for i := range frozenBoundary {
 			if frozenReducedIndices != nil && i < len(frozenReducedIndices) && frozenReducedIndices[i] {
 				prepared[i] = cloneMessageForRequestShape(frozenPrefix[i])
 			}
@@ -1163,9 +1165,7 @@ func cloneContextReductionBuckets(buckets map[string]ContextReductionBucket) map
 		return nil
 	}
 	cloned := make(map[string]ContextReductionBucket, len(buckets))
-	for key, value := range buckets {
-		cloned[key] = value
-	}
+	maps.Copy(cloned, buckets)
 	return cloned
 }
 
@@ -1174,9 +1174,7 @@ func cloneContextReductionIntMap(values map[string]int) map[string]int {
 		return nil
 	}
 	cloned := make(map[string]int, len(values))
-	for key, value := range values {
-		cloned[key] = value
-	}
+	maps.Copy(cloned, values)
 	return cloned
 }
 
@@ -1659,8 +1657,8 @@ func trimMessagesToBudget(messages []message.Message, targetTokens int) ([]messa
 
 	start := len(messages)
 	remaining := targetTokens
-	for i := len(messages) - 1; i >= 0; i-- {
-		cost := ctxmgr.EstimateMessageTokens(messages[i])
+	for i, message := range slices.Backward(messages) {
+		cost := ctxmgr.EstimateMessageTokens(message)
 		if remaining-cost < 0 {
 			break
 		}
@@ -1798,8 +1796,8 @@ func fitCompactionInputToContextLimit(head []message.Message, input *compactionI
 }
 
 func buildGoalAnchor(messages []message.Message) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for _, msg := range slices.Backward(messages) {
+
 		if !message.IsUserAuthored(msg) {
 			continue
 		}
@@ -1963,7 +1961,7 @@ func isVagueCompactionNextStep(section string) bool {
 		normalized = strings.TrimSpace(strings.TrimPrefix(normalized, "-"))
 	}
 	normalized = strings.Trim(strings.TrimSuffix(normalized, "."), " ")
-	for _, phrase := range []string{
+	return slices.Contains([]string{
 		"continue",
 		"continue working",
 		"continue the task",
@@ -1972,12 +1970,7 @@ func isVagueCompactionNextStep(section string) bool {
 		"resume",
 		"resume work",
 		"carry on",
-	} {
-		if normalized == phrase {
-			return true
-		}
-	}
-	return false
+	}, normalized)
 }
 
 func validateCompactionTodoState(summary string) error {
@@ -2026,7 +2019,7 @@ func markdownSection(summary, heading string) (string, bool) {
 func todoSubsectionLines(section, label string) []string {
 	var lines []string
 	inGroup := false
-	for _, raw := range strings.Split(section, "\n") {
+	for raw := range strings.SplitSeq(section, "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
@@ -2127,9 +2120,9 @@ func selectRecentTailMessages(messages []message.Message, userTurns int, maxToke
 	for turns := userTurns; turns >= 1; turns-- {
 		usersSeen := 0
 		start := len(messages)
-		for i := len(messages) - 1; i >= 0; i-- {
+		for i, message0 := range slices.Backward(messages) {
 			start = i
-			if messages[i].Role == message.RoleUser {
+			if message0.Role == message.RoleUser {
 				usersSeen++
 				if usersSeen >= turns {
 					break

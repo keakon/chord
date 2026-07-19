@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/toolname"
@@ -25,8 +26,8 @@ func (rs Ruleset) LastEvaluatedMatch(permission, pattern string) MatchResult {
 
 func (rs Ruleset) lastMatch(permission, pattern string, skipCompoundShellAllow bool) MatchResult {
 	permission = toolname.Normalize(permission)
-	for i := len(rs) - 1; i >= 0; i-- {
-		r := rs[i]
+	for _, r := range slices.Backward(rs) {
+
 		if globMatch(permission, toolname.Normalize(r.Permission)) && globMatch(pattern, r.Pattern) {
 			if skipCompoundShellAllow && r.Action == ActionAllow && shellCompoundCommandNeedsReview(permission, pattern, r.Pattern) {
 				continue
@@ -41,8 +42,8 @@ func (rs Ruleset) lastMatch(permission, pattern string, skipCompoundShellAllow b
 // pattern is an exact literal equal to the provided pattern.
 func (rs Ruleset) LastExactPatternMatch(permission, pattern string) MatchResult {
 	permission = toolname.Normalize(permission)
-	for i := len(rs) - 1; i >= 0; i-- {
-		r := rs[i]
+	for _, r := range slices.Backward(rs) {
+
 		if rulePatternHasWildcards(r.Pattern) {
 			continue
 		}

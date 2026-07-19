@@ -39,13 +39,7 @@ func (m *Model) restoreComposerStateForAgent(agentID string) {
 	}
 	m.input.applyDraftSnapshot(state.draft)
 	if state.historyBrowsing {
-		histIdx := state.historyIndex
-		if histIdx < 0 {
-			histIdx = 0
-		}
-		if histIdx > len(m.input.history) {
-			histIdx = len(m.input.history)
-		}
+		histIdx := min(max(state.historyIndex, 0), len(m.input.history))
 		m.input.histIdx = histIdx
 		m.input.draft = state.historyDraft
 	} else {

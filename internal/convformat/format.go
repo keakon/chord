@@ -8,6 +8,7 @@ package convformat
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 )
 
@@ -198,8 +199,8 @@ func TryParseUserShellPersistedMessage(content string) (userLine, cmd, output st
 	}
 	lines := strings.Split(c, "\n")
 	lastIdx := -1
-	for idx := len(lines) - 1; idx >= 0; idx-- {
-		if strings.TrimSpace(lines[idx]) == "" {
+	for idx, line := range slices.Backward(lines) {
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		lastIdx = idx
@@ -250,17 +251,17 @@ func tryParseLegacyUserShellMessage(content string) (userLine, cmd, output strin
 		return "", "", "", false, false
 	}
 	remainder := content[commandIdx+len(commandSep):]
-	outputIdx := strings.Index(remainder, outputSep)
-	if outputIdx < 0 {
+	before, after, ok := strings.Cut(remainder, outputSep)
+	if !ok {
 		return "", "", "", false, false
 	}
-	cmd = remainder[:outputIdx]
+	cmd = before
 	if strings.TrimSpace(strings.TrimPrefix(userLine, "!")) != strings.TrimSpace(cmd) {
 		return "", "", "", false, false
 	}
-	output = remainder[outputIdx+len(outputSep):]
-	if strings.HasSuffix(output, "\n\nstatus: error") {
-		output = strings.TrimSuffix(output, "\n\nstatus: error")
+	output = after
+	if before, ok0 := strings.CutSuffix(output, "\n\nstatus: error"); ok0 {
+		output = before
 		failed = true
 	}
 	return userLine, cmd, output, failed, true

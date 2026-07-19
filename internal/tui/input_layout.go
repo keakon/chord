@@ -17,13 +17,7 @@ func (i *Input) clampedDisplayLineCount() int {
 	if i.displayLineCacheResult != 0 && val == i.displayLineCacheVal && width == i.displayLineCacheWidth {
 		return i.displayLineCacheResult
 	}
-	lines := i.totalDisplayLineCount()
-	if lines < inputMinLines {
-		lines = inputMinLines
-	}
-	if lines > inputMaxLines {
-		lines = inputMaxLines
-	}
+	lines := min(max(i.totalDisplayLineCount(), inputMinLines), inputMaxLines)
 	i.displayLineCacheResult = lines
 	i.displayLineCacheVal = val
 	i.displayLineCacheWidth = width

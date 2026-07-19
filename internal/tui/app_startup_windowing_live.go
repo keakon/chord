@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/keakon/chord/internal/tools"
+import (
+	"slices"
+
+	"github.com/keakon/chord/internal/tools"
+)
 
 func (m *Model) startupDeferredTranscriptAtTail() bool {
 	state := m.startupDeferredTranscript
@@ -115,8 +119,8 @@ func (m *Model) findLastPendingToolBlockByName(toolName string) (*Block, bool) {
 	if state == nil || len(state.allBlocks) == 0 || toolName == "" {
 		return nil, false
 	}
-	for i := len(state.allBlocks) - 1; i >= 0; i-- {
-		block := state.allBlocks[i]
+	for _, block := range slices.Backward(state.allBlocks) {
+
 		if block != nil && block.Type == BlockToolCall && tools.NormalizeName(block.ToolName) == toolName && !block.ResultDone {
 			return block, true
 		}

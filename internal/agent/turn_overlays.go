@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
@@ -157,8 +158,8 @@ func reviewedToolPayloadPath(payload *ToolResultPayload) string {
 }
 
 func latestLSPReviewsForPath(history []message.Message, path string) ([]message.LSPReview, bool) {
-	for i := len(history) - 1; i >= 0; i-- {
-		msg := history[i]
+	for _, msg := range slices.Backward(history) {
+
 		if len(msg.LSPReviews) == 0 {
 			continue
 		}

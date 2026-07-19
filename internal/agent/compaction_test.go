@@ -1443,7 +1443,7 @@ func TestPrepareMessagesForLLM_ReusesStableReductionSurfaceForSmallLowPressureIn
 		{Role: "assistant", Content: "ack"},
 		{Role: "user", Content: "u3"},
 	}
-	for i := 0; i < 14; i++ {
+	for i := range 14 {
 		msgs = append(msgs,
 			message.Message{Role: "assistant", Content: fmt.Sprintf("ack %d", i)},
 			message.Message{Role: "user", Content: fmt.Sprintf("continue %d", i)},

@@ -116,10 +116,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 	const diffLineNumWidth = 5
-	diffWidth := cardWidth - 4 - diffLineNumWidth
-	if diffWidth < 10 {
-		diffWidth = 10
-	}
+	diffWidth := max(cardWidth-4-diffLineNumWidth, 10)
 	hl := ensureCodeHighlighter(&b.codeHL, filePath, diffContentSample(b.Diff))
 	diffLines := strings.Split(b.Diff, "\n")
 	shownLines := 0
@@ -219,7 +216,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 					}
 				}
 				seenHunk = true
-				hunkLine := strings.SplitN(line, "\n", 2)[0]
+				hunkLine, _, _ := strings.Cut(line, "\n")
 				if m := diffHunkHeaderRe.FindStringSubmatch(hunkLine); len(m) == 5 {
 					oldStart, _ := strconv.Atoi(m[1])
 					newStart, _ := strconv.Atoi(m[3])
@@ -234,10 +231,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 					content = content[1:]
 				}
 				code := renderHighlightedSnippetLine(content, nil, diffWidth-1, hl, "")
-				displayLineNum := newLineNum
-				if newLineNum < oldLineNum {
-					displayLineNum = oldLineNum
-				}
+				displayLineNum := max(newLineNum, oldLineNum)
 				rendered = DimStyle.Render(formatLineNum(displayLineNum)) + " " + code
 				oldLineNum++
 				newLineNum++

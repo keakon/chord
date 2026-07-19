@@ -515,10 +515,7 @@ func (m *Model) renderStatusBar() string {
 
 	// Only show technical details in status bar if InfoPanel is HIDDEN.
 	if !inputs.InfoPanelVisible {
-		effW := m.width - statusBarLeftMargin - statusBarRightMargin
-		if effW < 0 {
-			effW = 0
-		}
+		effW := max(m.width-statusBarLeftMargin-statusBarRightMargin, 0)
 		var leftW int
 		for _, p := range pills {
 			leftW += lipgloss.Width(p)
@@ -562,10 +559,7 @@ func (m *Model) renderStatusBar() string {
 		leftWidth = lipgloss.Width(leftSide)
 	}
 	// Content width: leave margins so the closing paren of elapsed "(Ns)" / "(NmNs)" is not covered by scrollbar.
-	effectiveWidth := m.width - statusBarLeftMargin - statusBarRightMargin
-	if effectiveWidth < 0 {
-		effectiveWidth = 0
-	}
+	effectiveWidth := max(m.width-statusBarLeftMargin-statusBarRightMargin, 0)
 
 	pathValue := inputs.WorkingDirDisplay
 	sessionValue := sessionID
@@ -642,10 +636,7 @@ func statusBarActivitySpan(leftWidth, rightStart, activityWidth, effectiveWidth 
 	}
 	activityStart := (effectiveWidth - activityWidth) / 2
 	minStart := leftWidth + 2
-	maxStart := rightStart - activityWidth - 2
-	if maxStart < minStart {
-		maxStart = minStart
-	}
+	maxStart := max(rightStart-activityWidth-2, minStart)
 	if activityStart < minStart {
 		activityStart = minStart
 	}
@@ -662,10 +653,7 @@ func statusBarActivitySpan(leftWidth, rightStart, activityWidth, effectiveWidth 
 func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWidth, leftWidth int) (string, int) {
 	statusActiveID := inputs.StatusActiveID
 	statusActivity := inputs.StatusActivity
-	availableCenter := effectiveWidth - leftWidth - 8
-	if availableCenter < 0 {
-		availableCenter = 0
-	}
+	availableCenter := max(effectiveWidth-leftWidth-8, 0)
 	activityText := ""
 	activityWidth := 0
 	compactIdle := m.width < 100 || !inputs.InfoPanelVisible
@@ -815,10 +803,7 @@ func (m *Model) renderStatusBarRightSide(effectiveWidth, leftWidth, activityWidt
 	}
 	rightSide = lipgloss.JoinHorizontal(lipgloss.Center, rightParts...)
 	rightWidth := lipgloss.Width(rightSide)
-	rightStart = effectiveWidth - rightWidth
-	if rightStart < 0 {
-		rightStart = 0
-	}
+	rightStart = max(effectiveWidth-rightWidth, 0)
 	m.cachedStatusBarRightKey = rightKey
 	m.cachedStatusBarRightSide = rightSide
 	m.cachedStatusBarRightWidth = rightWidth

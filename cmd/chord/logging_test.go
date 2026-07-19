@@ -94,7 +94,7 @@ func TestRotatingLogFileKeepsOnlyConfiguredRotations(t *testing.T) {
 	defer w.Close()
 
 	payload := bytes.Repeat([]byte("x"), 40)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if _, err := w.Write(payload); err != nil {
 			t.Fatalf("Write %d: %v", i, err)
 		}

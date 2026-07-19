@@ -214,10 +214,7 @@ func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
 	inputAnimKey := m.inputAnimationCacheKeyAt(time.Now())
 	searchInputArea := ""
 	if m.mode == ModeSearch {
-		searchWidth := m.width - 1
-		if searchWidth < 1 {
-			searchWidth = 1
-		}
+		searchWidth := max(m.width-1, 1)
 		searchInputArea = " " + m.search.View(searchWidth)
 	}
 	needInputRender := m.cachedInputKey == "" ||
@@ -427,10 +424,7 @@ func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tu
 			popup := m.atMentionList.Render(popupWidth)
 			popupHeight := lipgloss.Height(popup)
 			x := layout.input.Min.X
-			y := layout.input.Min.Y - popupHeight
-			if y < 0 {
-				y = 0
-			}
+			y := max(layout.input.Min.Y-popupHeight, 0)
 			popupRect := image.Rect(x, y, x+popupWidth, y+popupHeight)
 			uv.NewStyledString(popup).Draw(scr, popupRect)
 		}

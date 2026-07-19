@@ -15,7 +15,7 @@ import (
 func benchmarkContextReductionMessages(toolResults int) []message.Message {
 	messages := make([]message.Message, 0, toolResults*3+1)
 	output := strings.Repeat("line from source file\n", 100)
-	for i := 0; i < toolResults; i++ {
+	for i := range toolResults {
 		id := fmt.Sprintf("read-%d", i)
 		args, _ := json.Marshal(map[string]any{"path": fmt.Sprintf("file-%d.go", i)})
 		messages = append(messages,

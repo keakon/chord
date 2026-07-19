@@ -3,6 +3,7 @@ package permission
 import (
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -31,8 +32,8 @@ type webFetchTarget struct {
 // re-checked against the resolved IP.
 func (rs Ruleset) EvaluateWebFetch(rawURL string) MatchResult {
 	target, parsed := parseWebFetchTarget(rawURL)
-	for i := len(rs) - 1; i >= 0; i-- {
-		r := rs[i]
+	for _, r := range slices.Backward(rs) {
+
 		if !globMatch(toolname.WebFetch, toolname.Normalize(r.Permission)) {
 			continue
 		}

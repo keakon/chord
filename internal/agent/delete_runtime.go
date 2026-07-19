@@ -46,8 +46,8 @@ func acquireDeleteLocks(tracker *filelock.FileTracker, agentID string, args json
 		}
 		status, err := tracker.AcquireWriteStatus(path, agentID, currentHash)
 		if err != nil {
-			for i := len(locked) - 1; i >= 0; i-- {
-				tracker.AbortWrite(locked[i], agentID)
+			for _, l := range slices.Backward(locked) {
+				tracker.AbortWrite(l, agentID)
 			}
 			return nil, err
 		}
@@ -66,8 +66,8 @@ func (s *deleteLockSet) Release() {
 	if s == nil || s.track == nil {
 		return
 	}
-	for i := len(s.paths) - 1; i >= 0; i-- {
-		path := s.paths[i]
+	for _, path := range slices.Backward(s.paths) {
+
 		if s.mode == deleteLockReleaseCommitted {
 			if containsDeleteResultPath(s.result.Deleted, path) {
 				s.track.ReleaseWrite(path, s.agent, "")

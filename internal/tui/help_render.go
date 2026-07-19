@@ -12,10 +12,7 @@ func (m Model) helpLines(width int) []string {
 	if width <= 0 {
 		width = 80
 	}
-	contentWidth := width - 4
-	if contentWidth < 24 {
-		contentWidth = 24
-	}
+	contentWidth := max(width-4, 24)
 
 	lines := []string{
 		centerHelpLine("Chord "+buildinfo.Current().Short(), width),
@@ -51,10 +48,7 @@ func (m *Model) renderHelpView() string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
-	offset := m.help.scrollOffset
-	if offset < 0 {
-		offset = 0
-	}
+	offset := max(m.help.scrollOffset, 0)
 	lines := m.cachedHelpLines(width)
 	if offset > len(lines) {
 		offset = len(lines)
