@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +13,28 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestReadToolReportsHashFromReturnedBytes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	content := []byte("one\r\ntwo\r\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	collector := &ReadObservationCollector{}
+	ctx := WithReadObservationSink(context.Background(), collector)
+	if _, err := (ReadTool{BaseDir: dir}).Execute(ctx, json.RawMessage(`{"path":"sample.txt"}`)); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	observation, ok := collector.Observation()
+	if !ok {
+		t.Fatal("missing read observation")
+	}
+	sum := sha256.Sum256(content)
+	if observation.Path != path || observation.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("observation = %#v", observation)
+	}
+}
 
 type recordingLSPStarter struct {
 	ctx   context.Context

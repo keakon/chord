@@ -1,6 +1,7 @@
 package modelcompat
 
 import (
+	"maps"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
@@ -390,6 +391,10 @@ func deepCopyMessages(msgs []message.Message) []message.Message {
 		}
 		if len(msg.GeminiParts) > 0 {
 			out[i].GeminiParts = append([]message.GeminiReplayPart(nil), msg.GeminiParts...)
+		}
+		if len(msg.CompactionFileRevisions) > 0 {
+			out[i].CompactionFileRevisions = make(map[string]string, len(msg.CompactionFileRevisions))
+			maps.Copy(out[i].CompactionFileRevisions, msg.CompactionFileRevisions)
 		}
 		if len(msg.ToolCalls) > 0 {
 			calls := make([]message.ToolCall, len(msg.ToolCalls))

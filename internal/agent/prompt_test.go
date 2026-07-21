@@ -1055,7 +1055,7 @@ delete: allow
 	for _, want := range []string{
 		"Use `read` for file contents when the target path is already known or has been verified.",
 		"Use `patch` to modify the contents of one existing file with a verified path.",
-		"Use `delete` to remove files with verified paths.",
+		"Use `delete` to remove files with verified paths whose current version you know in full (a complete read or your own whole-file write).",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)

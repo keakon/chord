@@ -90,9 +90,10 @@ type restoreToolCall struct {
 }
 
 type restoreReadCandidate struct {
-	path    string
-	hash    string
-	durable bool
+	path         string
+	hash         string
+	observedHash string
+	durable      bool
 }
 
 // restoreTrackedFileStateFromMessages rebuilds tracked file snapshots from
@@ -155,12 +156,23 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 					result.skipInvalidPath()
 					continue
 				}
+				if statePath, durable := restoreReadStatePath(msg.FileState, path); durable {
+					path = statePath
+					key = restoreNormalizeTrackedPath(path)
+				}
 				hash, durable := restoreReadStateHashForPath(msg.FileState, path)
 				if msg.FileState != nil && len(msg.FileState.Reads) > 0 && !durable {
 					result.skipStateMismatch()
 					continue
 				}
-				candidates[key] = restoreReadCandidate{path: key, hash: hash, durable: durable}
+				candidate := restoreReadCandidate{path: key, hash: hash, durable: durable}
+				if previous, exists := candidates[key]; exists {
+					candidate.observedHash = previous.observedHash
+				}
+				if readResultShowsWholeFile(msg.Content) {
+					candidate.observedHash = hash
+				}
+				candidates[key] = candidate
 
 			case tools.NameEdit, tools.NamePatch:
 				path, key, ok := restoreSinglePathAndKey(args, call.name)
@@ -192,9 +204,9 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 					result.skipInvalidPath()
 					continue
 				}
-				candidate, exists := candidates[key]
-				if !exists {
-					continue
+				if statePath, durable := restoreSingleWriteStatePath(msg.FileState, path); durable {
+					path = statePath
+					key = restoreNormalizeTrackedPath(path)
 				}
 				hash, durable := restoreWriteStateHashForPath(msg.FileState, path)
 				if msg.FileState != nil && len(msg.FileState.Writes) > 0 && !durable {
@@ -202,9 +214,10 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 					result.skipStateMismatch()
 					continue
 				}
-				candidate.hash = hash
-				candidate.durable = durable
-				candidates[key] = candidate
+				// A whole-file write is authored in full by the model, so it
+				// both commits and observes the resulting content — matching
+				// the live pipeline, and independent of any earlier read.
+				candidates[key] = restoreReadCandidate{path: key, hash: hash, observedHash: hash, durable: durable}
 
 			case tools.NameDelete:
 				paths := restoreDeletePaths(msg, args)
@@ -233,7 +246,10 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 			continue
 		}
 		current := computeFileHash(candidate.path)
-		tracker.TrackSnapshot(candidate.path, agentID, candidate.hash)
+		if candidate.observedHash != "" {
+			tracker.TrackObservedSnapshot(candidate.path, agentID, candidate.observedHash)
+		}
+		tracker.TrackCommittedSnapshot(candidate.path, agentID, candidate.hash)
 		if current != "" && current == candidate.hash {
 			result.RestoredUsable++
 		} else {
@@ -362,6 +378,36 @@ func restoreWriteStatePathForKey(state *message.ToolFileState, key string) (stri
 		}
 	}
 	return "", false
+}
+
+func restoreReadStatePath(state *message.ToolFileState, argumentPath string) (string, bool) {
+	if state == nil || len(state.Reads) != 1 {
+		return "", false
+	}
+	read := state.Reads[0]
+	path := strings.TrimSpace(read.Path)
+	return path, read.Exists && strings.TrimSpace(read.SHA256) != "" && restoreStatePathMatchesArgument(path, argumentPath)
+}
+
+func restoreSingleWriteStatePath(state *message.ToolFileState, argumentPath string) (string, bool) {
+	if state == nil || len(state.Writes) != 1 {
+		return "", false
+	}
+	write := state.Writes[0]
+	path := strings.TrimSpace(write.Path)
+	return path, write.Exists && strings.TrimSpace(write.SHA256) != "" && restoreStatePathMatchesArgument(path, argumentPath)
+}
+
+func restoreStatePathMatchesArgument(statePath, argumentPath string) bool {
+	statePath = strings.TrimSpace(statePath)
+	argumentPath = strings.TrimSpace(argumentPath)
+	if statePath == "" || argumentPath == "" {
+		return false
+	}
+	if filepath.IsAbs(argumentPath) {
+		return restoreNormalizeTrackedPath(statePath) == restoreNormalizeTrackedPath(argumentPath)
+	}
+	return pathSuffixMatch(statePath, argumentPath)
 }
 
 func restoreEditWriteStatePath(state *message.ToolFileState, key string) (string, bool) {

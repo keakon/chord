@@ -51,7 +51,7 @@ func TestSpeculativeWritePromoteKeepsFile(t *testing.T) {
 	}
 }
 
-func TestSpeculativeWriteOnStaleFileWarnsAndBacksUp(t *testing.T) {
+func TestSpeculativeWriteOnStaleFileIsRejected(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "stale.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -79,19 +79,14 @@ func TestSpeculativeWriteOnStaleFileWarnsAndBacksUp(t *testing.T) {
 	if drift {
 		t.Fatal("Promote reported drift")
 	}
-	if !ok || payload == nil || payload.Error != nil {
-		t.Fatalf("Promote payload=%#v ok=%v", payload, ok)
+	if !ok || payload == nil || payload.Error == nil {
+		t.Fatalf("Promote payload=%#v ok=%v, want rejection", payload, ok)
 	}
-	if !strings.Contains(payload.Result, "Warning: the file changed on disk") || !strings.Contains(payload.Result, "Backup saved to:") {
-		t.Fatalf("result missing stale warning/backup: %q", payload.Result)
+	if !strings.Contains(payload.Error.Error(), "complete file") {
+		t.Fatalf("error missing full-read guidance: %v", payload.Error)
 	}
-	backupPath := strings.TrimSpace(payload.Result[strings.LastIndex(payload.Result, "Backup saved to:")+len("Backup saved to:"):])
-	backup, err := os.ReadFile(backupPath)
-	if err != nil {
-		t.Fatalf("ReadFile backup %q: %v", backupPath, err)
-	}
-	if string(backup) != "external" {
-		t.Fatalf("backup content = %q, want external", backup)
+	if got, err := os.ReadFile(path); err != nil || string(got) != "external" {
+		t.Fatalf("file content = %q, %v; want unchanged external", got, err)
 	}
 }
 
@@ -289,6 +284,7 @@ func TestSpeculativeDeleteDiscardRestoresDeletedFile(t *testing.T) {
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.DeleteTool{})
+	a.fileTrack.TrackObservedSnapshot(path, a.instanceID, computeFileHash(path))
 
 	ctx := t.Context()
 	exec := NewStreamingToolExecutor(7, ctx, nil, a.executeToolCallSpeculative)

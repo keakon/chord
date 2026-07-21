@@ -18,7 +18,7 @@ func (a *MainAgent) commitPromotedToolSideEffects(tc message.ToolCall, payload *
 			return err
 		}
 	}
-	commitPromotedReadToolSideEffects(a.fileTrack, a.instanceID, tc.Name, payload.ArgsJSON, payload.FileState)
+	commitPromotedReadToolSideEffects(a.fileTrack, a.instanceID, tc.Name, payload.Result, payload.FileState)
 	return nil
 }
 

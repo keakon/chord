@@ -40,7 +40,7 @@ Chord 自主连续执行任务的模式，适合长时间任务。loop 模式下
 
 ## Turn（用户轮次）
 
-一次完整的用户到 agent 交互：你发送消息，Chord 处理，模型回复文本和 / 或工具调用，工具执行，模型可能继续回复，最终 agent 回到 idle。上下文剪裁的 `*_age_turns` 是等效年龄阈值：用户轮次是年龄来源之一；很长的单轮 assistant/tool 消息进展也会让更早的工具输出变旧。
+一次完整的用户到 agent 交互：你发送消息，Chord 处理，模型回复文本和 / 或工具调用，工具执行，模型可能继续回复，最终 agent 回到 idle。上下文剪裁保留了 `*_age_turns` 这一历史配置名，但实际按 main-model request batch 计龄；同一 assistant 响应中的并行工具共享一个 batch。
 
 ## Session
 

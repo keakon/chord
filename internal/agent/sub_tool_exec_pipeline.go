@@ -35,6 +35,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		guidance:      subToolOutputGuidance,
 		logPrefix:     "SubAgent:",
 		projectRoot:   s.parent.projectRoot,
+		toolBaseDir:   s.workDir,
 		writeScope:    &s.writeScope,
 		writeScopeDir: s.workDir,
 		currentRuleset: func() permission.Ruleset {

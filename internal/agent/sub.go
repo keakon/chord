@@ -979,7 +979,7 @@ func (s *SubAgent) newTurn() *Turn {
 		activeToolBatchCancel: nil,
 	}
 	s.turn.streamingToolExec = NewStreamingToolExecutor(s.turn.ID, ctx, s.parent.emitToTUI, s.executeToolCallSpeculative)
-	s.turn.streamingToolExec.SetProjectRoot(s.parent.projectRoot)
+	s.turn.streamingToolExec.SetProjectRoot(s.toolExecutionPipeline().effectiveToolBaseDir())
 	s.turn.streamingToolExec.SetTraceCallbacks(s.parent.recordToolTraceSpeculativeStart, s.parent.recordToolTraceFirstVisibleResult, s.parent.recordToolTraceSpeculativeDiscard)
 	log.Debugf("SubAgent: new turn created agent=%v turn_id=%v", s.instanceID, s.turn.ID)
 	return s.turn

@@ -37,7 +37,7 @@ func CapturePreWriteState(tc message.ToolCall, baseDir string) (filePath, conten
 		if tc.Name == tools.NameEdit {
 			path, err = tools.ResolveEditPathInDir(args.Path, baseDir)
 		} else {
-			path, err = tools.ResolveToolPath(args.Path)
+			path, err = tools.ResolveToolPathInDir(args.Path, baseDir)
 		}
 		if err != nil {
 			return

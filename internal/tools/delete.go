@@ -211,6 +211,15 @@ func (t DeleteTool) Execute(ctx context.Context, raw json.RawMessage) (string, e
 	}
 
 	result, execErr := t.executeDelete(ctx, req)
+	if sink, ok := deleteAuditSinkFromContext(ctx); ok {
+		sink.SetDeleteAudit(DeleteAudit{
+			Deleted:       cloneDeleteAuditPaths(result.Deleted),
+			AlreadyAbsent: cloneDeleteAuditPaths(result.AlreadyAbsent),
+			Blocked:       deleteIssuePaths(result.Blocked),
+			Failed:        deleteIssuePaths(result.Failed),
+			NotAttempted:  cloneDeleteAuditPaths(result.NotAttempted),
+		})
+	}
 	text := formatDeleteResult(result, execErr, t.BaseDir)
 	if execErr == nil {
 		return text, nil
@@ -381,6 +390,17 @@ func formatDeletePathsSection(title string, paths []string) string {
 		lines = append(lines, "- "+path)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func deleteIssuePaths(issues []deletePathIssue) []string {
+	if len(issues) == 0 {
+		return nil
+	}
+	paths := make([]string, len(issues))
+	for i, issue := range issues {
+		paths[i] = issue.Path
+	}
+	return paths
 }
 
 func formatDeleteIssuesSection(title string, issues []deletePathIssue) string {

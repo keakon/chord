@@ -490,8 +490,14 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	if err := a.ensureSessionBuilt(ctx); err != nil {
 		return nil, err
 	}
+	requestBatch := a.requestBatches.reserve(a.sessionEpoch, maxRequestBatch(messages))
+	requestStarted := false
+	defer func() {
+		if !requestStarted {
+			a.requestBatches.rollback(a.sessionEpoch, requestBatch)
+		}
+	}()
 	messages = a.prepareMessagesForLLM(messages)
-	messages = a.injectCompactionFileContext(messages)
 	if repaired, dropped := message.RepairOrphanToolResults(messages); dropped > 0 {
 		log.Warnf("dropping orphan tool result messages before LLM request dropped=%v", dropped)
 		messages = repaired
@@ -514,6 +520,14 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	a.updatePreparedLLMRequestSurface(a.currentTurnID(), messages)
 	a.consumeContextSurfaceRefreshAllowance()
 
+	// Reload compaction checkpoint key files as a request-local overlay, only
+	// after the prepared surface was remembered above: the overlay never enters
+	// the durable history, so recording it in the stable-prefix shapes would
+	// make the next request's raw snapshot fail prefix compatibility and
+	// permanently disable incremental reduction reuse after the first
+	// compaction.
+	messages, keyFileCtxIdx := a.injectCompactionFileContext(messages)
+
 	// Inject the meta user message carrying environment + AGENTS.md before the
 	// first user message. AGENTS.md is delivered under a "# AGENTS.md
 	// instructions" / <INSTRUCTIONS> self-identifying block. This is a
@@ -533,11 +547,15 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 
 	// Propagate the stable reduced-prefix boundary as a one-shot Anthropic
 	// prompt-cache hint. The boundary index is computed against the prepared
-	// surface before the session-context reminder and turn overlays were
-	// inserted, so the count of all meta messages prepended before the first
-	// user message is added back to map it onto the source message list supplied
-	// to the provider. Anthropic resolves that source index after message merging.
+	// surface before the key-file overlay, session-context reminder, and turn
+	// overlays were inserted, so every overlay message inserted at or before
+	// the boundary is added back to map it onto the source message list
+	// supplied to the provider. Anthropic resolves that source index after
+	// message merging.
 	if stableLen := a.consumePreparedStablePrefixLen(); stableLen > 0 {
+		if keyFileCtxIdx >= 0 && keyFileCtxIdx < stableLen {
+			metaPrefixCount++
+		}
 		a.applyAnthropicCacheBoundaryHint(stableLen, metaPrefixCount)
 	}
 
@@ -608,6 +626,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		return nil, fmt.Errorf("acquire LLM request capacity: %w", err)
 	}
 	defer releaseLLM()
+	requestStarted = true
 	resp, err := llmClient.CompleteStream(ctx, messages, toolDefs, callback)
 	completeStreamReturnedAt := time.Now()
 	a.recordToolTraceCallLLMReturned(turn, completeStreamReturnedAt)
@@ -670,6 +689,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		}
 		return nil, fmt.Errorf("LLM stream failed: %w", err)
 	}
+	resp.RequestBatch = requestBatch
 
 	callStatus := llmClient.LastCallStatus()
 	callStatus.RunningModelRef = strings.TrimSpace(callStatus.RunningModelRef)

@@ -34,3 +34,25 @@ func TestBaseDirToolImplementationsCoverSessionPathTools(t *testing.T) {
 		})
 	}
 }
+
+func TestWithBaseDirOverridesInheritedSessionDirectory(t *testing.T) {
+	tool := ReadTool{BaseDir: "/parent"}
+	got, ok := tool.WithBaseDir("/child").(ReadTool)
+	if !ok {
+		t.Fatalf("WithBaseDir returned %T", tool.WithBaseDir("/child"))
+	}
+	if got.BaseDir != "/child" {
+		t.Fatalf("BaseDir = %q, want child directory", got.BaseDir)
+	}
+}
+
+func TestViewImageWithBaseDirDoesNotMutateParentTool(t *testing.T) {
+	parent := &ViewImageTool{BaseDir: "/parent"}
+	child, ok := parent.WithBaseDir("/child").(*ViewImageTool)
+	if !ok {
+		t.Fatalf("WithBaseDir returned %T", parent.WithBaseDir("/child"))
+	}
+	if parent.BaseDir != "/parent" || child.BaseDir != "/child" || child == parent {
+		t.Fatalf("parent=%#v child=%#v, want independent directories", parent, child)
+	}
+}

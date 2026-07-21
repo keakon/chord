@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
@@ -64,6 +65,33 @@ func applyCompactionProfile(profile compactionProfile, messages []message.Messag
 		return filterCompactionEvidenceForArchival(evidenceItems), nil
 	default:
 		return evidenceItems, selectRecentTailMessages(messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
+	}
+}
+
+func compactionHeadSplitForProfile(profile compactionProfile, messages []message.Message, contextLimit int) int {
+	rawBoundary := len(messages)
+	if profile != compactionProfileArchival {
+		recentTail := selectRecentTailMessages(messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
+		if len(recentTail) > 0 {
+			rawBoundary -= len(recentTail)
+		}
+		if rawBoundary < 4 {
+			rawBoundary = min(4, len(messages))
+		}
+	}
+	boundary := ctxmgr.SafeKeepBoundary(messages, rawBoundary)
+	if boundary < 4 && len(messages) >= 4 {
+		return ctxmgr.SafeKeepBoundary(messages, len(messages))
+	}
+	return boundary
+}
+
+func continuationRequiresRawTail(kind compactionContinuationKind) bool {
+	switch kind {
+	case compactionResumeMainLLM, compactionResumeLengthRecovery, compactionResumeAutoContinue:
+		return true
+	default:
+		return false
 	}
 }
 

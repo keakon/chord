@@ -11,6 +11,19 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+func setTestRequestBatch(a *MainAgent, messages []message.Message, batch uint64) {
+	a.requestBatches.mu.Lock()
+	a.requestBatches.sessionEpoch = a.sessionEpoch
+	a.requestBatches.sequence = batch
+	a.requestBatches.mu.Unlock()
+	for i := range messages {
+		if messages[i].Role == message.RoleAssistant && len(messages[i].ToolCalls) > 0 && messages[i].RequestBatch == 0 {
+			messages[i].RequestBatch = batch
+			return
+		}
+	}
+}
+
 // TestPrepareMessagesDefersBoundaryReductions verifies that a small reduction
 // inside the previously sent prefix is deferred (cache-stability wins) while
 // new tail content is still reduced immediately.
@@ -21,19 +34,18 @@ func TestPrepareMessagesDefersBoundaryReductions(t *testing.T) {
 			ReadLikeAgeTurns:     1,
 			ReadLikeOutputBytes:  80,
 			MinIncrementalTokens: 1 << 20,
-			HighPressureUsage:    1.5,
-			ForcePruneUsage:      1.5,
 		}},
 	}
 	a.runningModelRef = "p/m"
 	a.recordLLMModelRun("p/m")
 	a.recordLLMModelRun("p/m")
+	setTestRequestBatch(a, nil, 1)
 
-	readContent := "READ_RESULT lines=1-120 total=120\n" + strings.Repeat("line content for read result\n", 120)
+	readContent := strings.Repeat("line content for fetched page\n", 120)
 	bigTail := strings.Repeat("user context that cannot be reduced ", 20000)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: readContent},
 		{Role: "assistant", Content: bigTail},
 	}
@@ -43,9 +55,10 @@ func TestPrepareMessagesDefersBoundaryReductions(t *testing.T) {
 	a.turn = &Turn{ID: 1, Ctx: turnCtx, Cancel: turnCancel}
 	prepared := a.prepareMessagesForLLM(msgs)
 	if prepared[2].Content != readContent {
-		t.Fatalf("request 1 should not reduce a fresh read result")
+		t.Fatalf("request 1 should not reduce a fresh webfetch result")
 	}
 
+	setTestRequestBatch(a, nil, 2)
 	msgs = append(msgs,
 		message.Message{Role: "assistant", Content: "done"},
 		message.Message{Role: "user", Content: "u2"},
@@ -74,30 +87,30 @@ func TestStableReductionSurfaceSurvivesUserTurnBoundary(t *testing.T) {
 			ReadLikeAgeTurns:     1,
 			ReadLikeOutputBytes:  80,
 			MinIncrementalTokens: 1 << 20,
-			HighPressureUsage:    1.5,
-			ForcePruneUsage:      1.5,
 		}},
 	}
 	a.runningModelRef = "p/m"
 	a.recordLLMModelRun("p/m")
 	a.recordLLMModelRun("p/m")
 
-	readContent := "READ_RESULT lines=1-120 total=120\n" + strings.Repeat("line content for read result\n", 120)
+	readContent := strings.Repeat("line content for fetched page\n", 120)
 	bigTail := strings.Repeat("user context that cannot be reduced ", 20000)
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "u1"},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "tc1", Content: readContent},
 		{Role: message.RoleAssistant, Content: bigTail},
 	}
+	setTestRequestBatch(a, msgs, 1)
 	turnCtx, turnCancel := context.WithCancel(context.Background())
 	defer turnCancel()
 	a.turn = &Turn{ID: 1, Ctx: turnCtx, Cancel: turnCancel}
 	if prepared := a.prepareMessagesForLLM(msgs); prepared[2].Content != readContent {
-		t.Fatal("fresh read result was unexpectedly reduced")
+		t.Fatal("fresh webfetch result was unexpectedly reduced")
 	}
 
 	a.clearLoopReductionCache(false)
+	setTestRequestBatch(a, nil, 2)
 	msgs = append(msgs,
 		message.Message{Role: message.RoleAssistant, Content: "done"},
 		message.Message{Role: message.RoleUser, Content: "u2"},
@@ -118,32 +131,32 @@ func TestDeferredBoundaryReductionDoesNotReportOverCompression(t *testing.T) {
 			ReadLikeAgeTurns:     1,
 			ReadLikeOutputBytes:  80,
 			MinIncrementalTokens: 1 << 20,
-			HighPressureUsage:    1.5,
-			ForcePruneUsage:      1.5,
 		}},
 	}
 	a.runningModelRef = "p/m"
 	a.recordLLMModelRun("p/m")
 	a.recordLLMModelRun("p/m")
 
-	readArgs := json.RawMessage(`{"path":"a.go"}`)
-	readContent := "READ_RESULT lines=1-120 total=120\n" + strings.Repeat("line content for read result\n", 120)
+	readArgs := json.RawMessage(`{"url":"https://example.com/a"}`)
+	readContent := strings.Repeat("line content for fetched page\n", 120)
 	bigTail := strings.Repeat("user context that cannot be reduced ", 20000)
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "u1"},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: readArgs}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: readArgs}}},
 		{Role: message.RoleTool, ToolCallID: "tc1", Content: readContent},
 		{Role: message.RoleAssistant, Content: bigTail},
 	}
+	setTestRequestBatch(a, msgs, 1)
 	turnCtx, turnCancel := context.WithCancel(context.Background())
 	defer turnCancel()
 	a.turn = &Turn{ID: 1, Ctx: turnCtx, Cancel: turnCancel}
 	a.prepareMessagesForLLM(msgs)
 
+	setTestRequestBatch(a, nil, 2)
 	msgs = append(msgs,
 		message.Message{Role: message.RoleAssistant, Content: "done"},
 		message.Message{Role: message.RoleUser, Content: "u2"},
-		message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameRead, Args: readArgs}}},
+		message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameWebFetch, Args: readArgs}}},
 		message.Message{Role: message.RoleTool, ToolCallID: "tc2", Content: "fresh reread"},
 	)
 	prepared := a.prepareMessagesForLLM(msgs)
@@ -155,52 +168,50 @@ func TestDeferredBoundaryReductionDoesNotReportOverCompression(t *testing.T) {
 	}
 }
 
-// TestBoundaryReductionFlushesUnderHighPressure pins the high-pressure flush
-// condition specifically: incremental reduction stays enabled (usage is below
-// ForcePruneUsage) but usage at or above HighPressureUsage flushes boundary
-// proposals instead of deferring them.
-func TestBoundaryReductionFlushesUnderHighPressure(t *testing.T) {
+// TestBoundaryReductionIgnoresContextUsage verifies that input usage cannot
+// change request-level reduction. A warm cached prefix remains deferred even
+// when the current context manager reports an oversized prompt; compaction owns
+// pressure-driven size control.
+func TestBoundaryReductionIgnoresContextUsage(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,
 			ReadLikeOutputBytes:  80,
 			MinIncrementalTokens: 1 << 20,
-			// The test agent has no input budget, so contextUsage reports 1.0:
-			// at or above HighPressureUsage, below ForcePruneUsage.
-			HighPressureUsage: 0.9,
-			ForcePruneUsage:   1.5,
 		}},
 	}
 	a.runningModelRef = "p/m"
 	a.recordLLMModelRun("p/m")
 	a.recordLLMModelRun("p/m")
 
-	readContent := "READ_RESULT lines=1-120 total=120\n" + strings.Repeat("line content for read result\n", 120)
+	readContent := strings.Repeat("line content for fetched page\n", 120)
 	bigTail := strings.Repeat("user context that cannot be reduced ", 20000)
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "u1"},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "tc1", Content: readContent},
 		{Role: message.RoleAssistant, Content: bigTail},
 	}
+	setTestRequestBatch(a, msgs, 1)
 	turnCtx, turnCancel := context.WithCancel(context.Background())
 	defer turnCancel()
 	a.turn = &Turn{ID: 1, Ctx: turnCtx, Cancel: turnCancel}
 	if prepared := a.prepareMessagesForLLM(msgs); prepared[2].Content != readContent {
-		t.Fatal("fresh read result was unexpectedly reduced")
+		t.Fatal("fresh webfetch result was unexpectedly reduced")
 	}
 
+	setTestRequestBatch(a, nil, 2)
 	msgs = append(msgs,
 		message.Message{Role: message.RoleAssistant, Content: "done"},
 		message.Message{Role: message.RoleUser, Content: "u2"},
 	)
 	prepared := a.prepareMessagesForLLM(msgs)
-	if prepared[2].Content == readContent {
-		t.Fatal("high context pressure should flush the boundary reduction")
+	if prepared[2].Content != readContent {
+		t.Fatal("context usage changed the reduction surface")
 	}
-	if got := a.GetContextReductionStats().SkippedByReason[contextReductionSkipDeferredCache]; got != 0 {
-		t.Fatalf("high-pressure flush still recorded deferred_for_cache = %d", got)
+	if got := a.GetContextReductionStats().SkippedByReason[contextReductionSkipDeferredCache]; got == 0 {
+		t.Fatal("expected warm boundary reduction to remain deferred")
 	}
 }
 
@@ -214,8 +225,6 @@ func TestBoundaryReductionFlushesWhenSavingsAmortize(t *testing.T) {
 			ReadLikeAgeTurns:     1,
 			ReadLikeOutputBytes:  80,
 			MinIncrementalTokens: 1 << 20,
-			HighPressureUsage:    1.5,
-			ForcePruneUsage:      1.5,
 		}},
 	}
 	a.runningModelRef = "p/m"
@@ -226,20 +235,22 @@ func TestBoundaryReductionFlushesWhenSavingsAmortize(t *testing.T) {
 	// amortize the re-billing well inside the flush horizon
 	// (savings*30 >= 9*tail), unlike the deferral tests where an
 	// irreducible tail dominates.
-	readContent := "READ_RESULT lines=1-3000 total=3000\n" + strings.Repeat("line content for read result\n", 3000)
+	readContent := strings.Repeat("line content for fetched page\n", 3000)
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "u1"},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "tc1", Content: readContent},
 		{Role: message.RoleAssistant, Content: "short reply"},
 	}
+	setTestRequestBatch(a, msgs, 1)
 	turnCtx, turnCancel := context.WithCancel(context.Background())
 	defer turnCancel()
 	a.turn = &Turn{ID: 1, Ctx: turnCtx, Cancel: turnCancel}
 	if prepared := a.prepareMessagesForLLM(msgs); prepared[2].Content != readContent {
-		t.Fatal("fresh read result was unexpectedly reduced")
+		t.Fatal("fresh webfetch result was unexpectedly reduced")
 	}
 
+	setTestRequestBatch(a, nil, 2)
 	msgs = append(msgs,
 		message.Message{Role: message.RoleAssistant, Content: "done"},
 		message.Message{Role: message.RoleUser, Content: "u2"},

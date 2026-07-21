@@ -2,6 +2,8 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"slices"
 
 	"github.com/keakon/chord/internal/filelock"
@@ -16,20 +18,24 @@ const (
 	deleteLockReleaseCommitted
 )
 
-type deleteLockSet struct {
-	paths  []string
-	agent  string
-	track  *filelock.FileTracker
-	mode   deleteLockReleaseMode
-	stale  bool
-	result tools.DeleteResultGroups
+type deleteLockedPath struct {
+	path    string
+	lease   *filelock.WriteLease
+	symlink bool
 }
 
-func acquireDeleteLocks(tracker *filelock.FileTracker, agentID string, args json.RawMessage) (*deleteLockSet, error) {
+type deleteLockSet struct {
+	paths  []string
+	locked []deleteLockedPath
+	mode   deleteLockReleaseMode
+	audit  tools.DeleteAudit
+}
+
+func acquireDeleteLocks(tracker *filelock.FileTracker, agentID string, args json.RawMessage, baseDir string) (*deleteLockSet, error) {
 	if tracker == nil {
 		return nil, nil
 	}
-	req, err := tools.DecodeDeleteRequest(llm.UnwrapToolArgs(args))
+	req, err := tools.DecodeDeleteRequestInDir(llm.UnwrapToolArgs(args), baseDir)
 	if err != nil {
 		return nil, nil
 	}
@@ -37,44 +43,55 @@ func acquireDeleteLocks(tracker *filelock.FileTracker, agentID string, args json
 		return nil, nil
 	}
 
-	locked := make([]string, 0, len(req.Paths))
-	stale := false
+	locked := make([]deleteLockedPath, 0, len(req.Paths))
 	for _, path := range req.Paths {
-		currentHash := computeFileHash(path)
-		if currentHash == "" {
-			continue // already absent; DeleteTool treats this as warning, not blocker
-		}
-		status, err := tracker.AcquireWriteStatus(path, agentID, currentHash)
+		info, statErr := os.Lstat(path)
+		currentHash, exists, err := verifiedCurrentFileHash(path)
 		if err != nil {
 			for _, l := range slices.Backward(locked) {
-				tracker.AbortWrite(l, agentID)
+				l.lease.Abort()
+			}
+			return nil, fmt.Errorf("refusing to delete file %s because its current state cannot be verified: %w", path, err)
+		}
+		if !exists {
+			continue // already absent; DeleteTool treats this as warning, not blocker
+		}
+		status, lease, err := tracker.AcquireWriteLease(path, agentID, currentHash)
+		if err != nil {
+			for _, l := range slices.Backward(locked) {
+				l.lease.Abort()
 			}
 			return nil, err
 		}
-		if status.ExternalChanged {
-			stale = true
+		if err := requireCurrentFileObservation(tracker, agentID, path, currentHash, "delete", status.ExternalChanged); err != nil {
+			lease.Abort()
+			for _, l := range slices.Backward(locked) {
+				l.lease.Abort()
+			}
+			return nil, err
 		}
-		locked = append(locked, path)
+		locked = append(locked, deleteLockedPath{path: path, lease: lease, symlink: statErr == nil && info.Mode()&os.ModeSymlink != 0})
 	}
 	if len(locked) == 0 {
 		return nil, nil
 	}
-	return &deleteLockSet{paths: locked, agent: agentID, track: tracker, stale: stale}, nil
+	paths := make([]string, len(locked))
+	for i, lockedPath := range locked {
+		paths[i] = lockedPath.path
+	}
+	return &deleteLockSet{paths: paths, locked: locked}, nil
 }
 
 func (s *deleteLockSet) Release() {
-	if s == nil || s.track == nil {
+	if s == nil {
 		return
 	}
-	for _, path := range slices.Backward(s.paths) {
-
-		if s.mode == deleteLockReleaseCommitted {
-			if containsDeleteResultPath(s.result.Deleted, path) {
-				s.track.ReleaseWrite(path, s.agent, "")
-				continue
-			}
+	for _, locked := range slices.Backward(s.locked) {
+		if s.mode == deleteLockReleaseCommitted && containsDeleteResultPath(s.audit.Deleted, locked.path) && !locked.symlink {
+			locked.lease.CommitDelete()
+			continue
 		}
-		s.track.AbortWrite(path, s.agent)
+		locked.lease.Abort()
 	}
 }
 
@@ -82,7 +99,15 @@ func (s *deleteLockSet) Commit(rawResult string) {
 	if s == nil {
 		return
 	}
-	s.result = tools.ParseDeleteResult(rawResult)
+	legacy := tools.ParseDeleteResult(rawResult)
+	s.CommitAudit(tools.DeleteAudit(legacy))
+}
+
+func (s *deleteLockSet) CommitAudit(audit tools.DeleteAudit) {
+	if s == nil {
+		return
+	}
+	s.audit = audit
 	s.mode = deleteLockReleaseCommitted
 }
 

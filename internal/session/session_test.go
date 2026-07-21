@@ -144,6 +144,31 @@ func TestExportPreservesToolCalls(t *testing.T) {
 	}
 }
 
+func TestExportPreservesCompactionFileRevisions(t *testing.T) {
+	msgs := []message.Message{{
+		Role:                    message.RoleUser,
+		Content:                 "[Context Summary]\nsummary",
+		IsCompactionSummary:     true,
+		CompactionFileRevisions: map[string]string{"key.go": "abc123"},
+	}}
+	session, err := Export(msgs, nil, nil)
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	restored := session.ToMessages()
+	if len(restored) != 1 || !restored[0].IsCompactionSummary || restored[0].CompactionFileRevisions["key.go"] != "abc123" {
+		t.Fatalf("restored checkpoint = %#v", restored)
+	}
+	msgs[0].CompactionFileRevisions["key.go"] = "mutated-source"
+	if got := session.Messages[0].CompactionFileRevisions["key.go"]; got != "abc123" {
+		t.Fatalf("export alias changed revision to %q", got)
+	}
+	restored[0].CompactionFileRevisions["key.go"] = "mutated-restored"
+	if got := session.Messages[0].CompactionFileRevisions["key.go"]; got != "abc123" {
+		t.Fatalf("restore alias changed revision to %q", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // File I/O tests (round-trip)
 // ---------------------------------------------------------------------------

@@ -46,6 +46,17 @@ goals, progress, key decisions, file evidence, etc.), archives old messages,
 and replaces the conversation history with the summary. The compacted session
 is persisted to disk.
 
+Continuation-oriented compaction keeps a small, safe recent tail (normally the
+latest two user turns, within a token budget) as verbatim messages after the
+checkpoint. Tool-call/result pairs are never split, and short histories fall
+back to summarizing the full safe head when preserving the tail would leave too
+little material to summarize. Explicit `archival` profiles remain summary-only.
+Key files reloaded from the checkpoint are request-local overlays read from disk
+on every request; each `<file>` block includes its SHA-256 revision and whether
+it changed since that checkpoint's first injection. The overlay is injected only
+after the stable reduction surface is remembered, so it never enters
+prefix-compatibility checks and cannot invalidate incremental reduction reuse.
+
 **Minimal config** (enable automatic compaction):
 
 ```yaml
@@ -143,12 +154,11 @@ selected models have smaller input budgets or split input/output limits.
 
 ## Context reduction
 
-Before each LLM request, Chord applies a set of deterministic rules to inspect
-tool results in the conversation and trim large, stale output. **This only
-affects the prompt sent for the current request — it never rewrites session
-files on disk.** Decisions use only local signals (message count, local token
-estimates, model input budget, and tool-output age/bytes), not provider-reported
-prompt-cache tokens.
+Before each LLM request, Chord applies deterministic rules to inspect tool
+results and trim large, stale output. **This only affects the current request
+prompt — it never rewrites session files on disk.** Decisions use tool type,
+actual main-model request batches, size, and local validity state. Context usage
+affects durable compaction only and cannot change the reduction surface.
 
 Reduction is enabled by default and usually needs no per-field tuning. Either
 form keeps the built-in defaults:
@@ -183,8 +193,6 @@ context:
     wrap_up_grace_requests: 1
     min_tool_results_prune: 6
     min_incremental_saved_tokens: 2048
-    high_pressure_usage: 0.80
-    force_prune_usage: 0.90
 ```
 
 Unset or non-positive threshold fields use these defaults. Project-level
@@ -199,12 +207,15 @@ Unset or non-positive threshold fields use these defaults. Project-level
 ### Default behavior
 
 - Chord runs lightweight request-level reduction before each main-model request; normal prompt-cache warmup does not protect otherwise reducible tool output.
-- When `todo_write` marks every TODO as completed or cancelled, Chord treats the next main-model request as a wrap-up request. The default `wrap_up_grace_requests: 1` avoids low-value last-minute prompt-surface churn only when the same model is still active, no user input is queued, the context is not under high pressure, and the newly estimated savings are below `min_incremental_saved_tokens`. If a previous reduced prefix exists, wrap-up reuses that reduced prefix instead of restoring old raw tool output. New user input, model changes, high-pressure context sizing, or worthwhile savings resume normal reduction.
-- Older messages freeze after a stable **reduced** surface forms: under low pressure, Chord estimates only the new tail. If that tail is below `min_incremental_saved_tokens`, it reuses the previously reduced prefix and appends the current tail, avoiding repeated historical scans and prompt-surface churn. Unreduced prefixes are not reused to bypass reduction.
-- High pressure prunes immediately: `high_pressure_usage` disables small-increment hysteresis, and `force_prune_usage` prioritizes keeping the context size under control.
-- Recent high-risk tool outputs are protected by real user-turn age before normal age/byte pruning. The default `high_risk_protect_age_turns: 4` preserves diff/patches, failures, stack traces, permission/security output, and other active evidence for about four user turns. This is the main cost/correctness trade-off knob: lowering it saves tokens by allowing older high-risk evidence to summarize earlier, while current-turn high-risk output always remains intact.
+- When `todo_write` marks every TODO as completed or cancelled, Chord treats the next main-model request as a wrap-up request. The default `wrap_up_grace_requests: 1` avoids low-value prompt-surface churn only when the same model is active, no user input is queued, and estimated savings are below `min_incremental_saved_tokens`.
+- Reduced messages freeze and are reused byte-for-byte. Unreduced non-read results store their next request-batch review frontier, so only new, due, repeated, or invalidated items are reclassified. Due frontiers cannot be bypassed by small-tail reuse. Reads keep path/range-aware read/edit validity analysis; a still-current read stays full until a later mutation or covering read marks it `truncated=stale` / `truncated=superseded`.
+- Stable surfaces analyze only the new tail and due frontier. History shape, tool schema, model, Reduction policy, session, or incompatible message changes invalidate the surface.
+- Context pressure does not alter Reduction; usage thresholds belong to durable Compaction.
+- Recent high-risk tool outputs are protected by request-batch age. Parallel tool calls and results from one assistant response share one batch and do not age one another.
 - Successful shell output is treated as low risk once it is old enough and larger than `shell_success_bytes`. Chord keeps a compact summary with output size, line count, salient success lines when present, and a tail excerpt fallback; the shell command itself remains available from the associated tool call. Recent failures, stack traces, diffs, and warning-heavy build logs are routed through high-risk or structured-log handling before this success-output summary path; older outputs may later be summarized when they are no longer protected by the recent high-risk window.
+- After a successful shell invocation that is not on the static read-only allowlist, Chord rechecks durable hashes for previously read files in the affected stable/recovered prefix. A confirmed replacement, deletion, or hash change marks the old read `truncated=stale`; unreadable paths or legacy reads without a durable hash are not guessed stale.
 - Large old tool results are age/byte-pruned, but Chord preserves structured hints before falling back to generic omission: `read` keeps path/range metadata, `grep` / `glob` / LSP references keep query scope plus representative hits, JSON output keeps top-level shape/counts, successful shell output keeps size/salient-line context, and build/test logs keep key failure or warning lines. Older errors, diagnostics, and confirmations are reduced to compact fixed markers or summaries.
+- Reduction diagnostics keep the aggregate `reread_after_reduction` counter and additionally distinguish same-revision re-reads from changed-revision refreshes when both reads carry durable hashes. These are telemetry only; Chord does not automatically retune retention windows from a small number of samples.
 
 ### Loop mode and the Codex quota freeze
 
@@ -244,42 +255,53 @@ history.
 | Confirm / permission | Tool permission confirmations, user authorizations | `confirm_age_turns` (default 2) | — | Permission decisions become stale quickly |
 | Errors | Failed tool results | `error_age_turns` (default 3) | — | Failure reasons may still be relevant, kept a bit longer |
 | Shell success / logs | Successful commands, build/test/lint logs | `shell_success_age_turns` (default 1) | `shell_success_bytes` (default 3000) | Successful output is usually reproducible; summaries keep size, line count, salient success lines when present, and a tail fallback; the command remains available from the associated tool call; large logs keep key failures/warnings when summarized |
-| Read-like | `read`, file content previews | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 3000) | File contents can always be re-read; summaries keep path and requested/displayed ranges |
+| Read-like | `read`, file content previews | `read_like_age_turns` (default 1), applied only to invalidated/superseded reads | `read_like_output_bytes` (default 3000) | A read overlapped by a later local edit/patch (or followed by a whole-file/unknown-range mutation) is trimmed and marked `truncated=stale`; one covered by a later read of the same range is marked `truncated=superseded`. A read that is still the current view of its content is never trimmed, regardless of age or size — trimming it would force a re-read or, worse, an answer guessed from a summary |
 | Search-like | `grep`, `glob`, LSP references | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 3000) | Hit lists are reproducible; summaries keep scope, counts, and representative hits |
 | JSON / structured output | JSON from `shell` or structured tools | category-specific gate, then stale fallback | category-specific size gate | Large structured blobs keep top-level object keys or array counts before generic omission |
 | Other stale results | Tool output not covered above | `stale_age_turns` (default 3) | `stale_output_bytes` (default 1500) | Catch-all fallback; most conservative to avoid losing hard-to-reconstruct data |
 
 How to read the age and size parameters:
 
-- `*_age_turns` is an **effective age** threshold. A tool result becomes older
-  either when more user turns happen after it, or when a long single user turn
-  keeps adding later assistant/tool messages. Internally, Chord uses the larger
-  of "user turns after this result" and "later message progress converted to
-  effective turns". For example, `read_like_age_turns: 2` means a large read
-  result is preserved one effective turn longer than `1`, and can still be
-  trimmed within the same user turn after enough later tool work has made it stale.
+- `*_age_turns` keeps its configuration name, but the unit is an actual
+  main-model request batch. Chord allocates a batch immediately before provider
+  dispatch, so failed requests leave age gaps. Parallel tool calls and results
+  from one assistant response share one batch and count as one round. Legacy
+  sessions without batch metadata use a conservative user/assistant-response
+  fallback.
 - `*_bytes` is the **minimum output size in bytes** for that category to be
   eligible for trimming. Smaller outputs stay intact — short output doesn't
   need reduction.
+- A `read` output that is still current — its displayed range has not been
+  overlapped by a later edit/patch, its file has not been replaced or deleted,
+  and no later read covers the same range — is **never trimmed**, regardless
+  of age, size, or how many other reads share the context. Such an output is
+  the model's only current view of that content; trimming it forces either a
+  redundant re-read (extra rounds, broken prompt cache) or an answer guessed
+  from a summary. Capacity pressure is durable Compaction's job, not
+  reduction's: every read result is already bounded by the read tool's own
+  per-call output budget, so retained reads grow the prompt linearly and
+  Compaction archives them once the threshold is reached. Successful `edit`
+  and `patch` calls already retain their applied delta in the tool-call
+  arguments; their results therefore keep only the application summary and
+  diagnostics instead of echoing the changed text. Legacy sessions or
+  mutations without a reliable changed range conservatively invalidate all
+  reads of that file.
 - `min_tool_results_prune` (default 6) is a **safety gate** for the generic
   stale-output fallback: once a result is old enough and large enough for that
   catch-all path, Chord still waits until the conversation has at least this
   many tool-result messages before applying the generic stale trim. Category-
   specific paths such as shell-success, read-like, search-like, JSON, and
   build/log summaries still follow their own age/size rules. This setting does
-  not control how message progress is converted into effective age.
+  not control request-batch age.
 - `wrap_up_grace_requests` (default 1) protects the next main-model request
   after `todo_write` reports all TODOs completed/cancelled. It is counted in
-  LLM requests, not user turns. The grace is skipped when the model changed or
-  the context is under high pressure, because old prompt-cache entries are then
-  unlikely to be useful or context-limit safety is more important.
+  LLM requests, not user turns. The grace is skipped when the model changed.
 - Recent high-risk outputs are protected regardless of the thresholds above:
-  while fewer than `high_risk_protect_age_turns` real user turns have passed,
+  while fewer than `high_risk_protect_age_turns` request batches have passed,
   results that look like diffs,
   failed assertions, stack traces, or permission/security errors are kept intact
-  even when later tool work in the same turn would otherwise make them eligible
-  for trimming. This protection counts real user turns only, not the
-  message-progress component of effective age.
+  even when they would otherwise be eligible for trimming. Parallel results in
+  the same batch do not increase this age.
 
 ### Tuning guidance
 
@@ -301,7 +323,7 @@ context:
 | Short conversations with many tool results hitting limits | Lower `min_tool_results_prune` (e.g. `4`) |
 | Permission confirmations dominating the prompt | Lower `confirm_age_turns` (e.g. `1`) |
 | Build/test logs are important context to keep | Raise `shell_success_bytes` further (e.g. `16000`) |
-| File contents often need to be revisited | Raise `read_like_age_turns` (e.g. `3`) and `read_like_output_bytes` (e.g. `8000`) |
+| File contents often need to be revisited | Nothing to tune: still-valid reads are always retained until invalidated or superseded |
 | Final answers after TODO completion cost more because the prompt cache was disturbed | Keep `wrap_up_grace_requests: 1`; use `2` only if your workflow usually needs one extra verification request after TODO completion |
 | All tool output is important, nothing should be dropped | Raise all `*_age_turns` and `*_bytes` globally |
 

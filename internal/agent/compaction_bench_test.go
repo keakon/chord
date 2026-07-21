@@ -17,10 +17,10 @@ func benchmarkContextReductionMessages(toolResults int) []message.Message {
 	output := strings.Repeat("line from source file\n", 100)
 	for i := range toolResults {
 		id := fmt.Sprintf("read-%d", i)
-		args, _ := json.Marshal(map[string]any{"path": fmt.Sprintf("file-%d.go", i)})
+		args, _ := json.Marshal(map[string]any{"url": fmt.Sprintf("https://example.com/file-%d", i)})
 		messages = append(messages,
 			message.Message{Role: message.RoleUser, Content: fmt.Sprintf("inspect file %d", i)},
-			message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: args}}},
+			message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameWebFetch, Args: args}}},
 			message.Message{Role: message.RoleTool, ToolCallID: id, Content: output},
 		)
 	}
@@ -81,6 +81,9 @@ func TestPrepareMessagesForLLMColdAllocsGuard(t *testing.T) {
 	if !reduced {
 		t.Fatal("allocation guard fixture did not reduce any tool result")
 	}
+	// Parsed read requests are cached in tool-call metadata so validity analysis
+	// and reduction do not decode the same arguments twice. Keep the original
+	// cold-path budget to prevent that shared work from regressing again.
 	maxAllocs := 1700.0
 	mode := "normal"
 	if testBinaryBuiltWithRace() {
@@ -108,40 +111,65 @@ func testBinaryBuiltWithRace() bool {
 	return false
 }
 
-// BenchmarkPrepareMessagesForLLMForcePruneRescan measures the bookkeeping-heavy
-// worst case: a stable surface exists but context pressure (no input budget →
-// usage 1.0 ≥ ForcePruneUsage) rejects reuse, so every call pays the full
-// reduction scan plus surface snapshot/remember costs.
-func BenchmarkPrepareMessagesForLLMForcePruneRescan(b *testing.B) {
-	for _, toolResults := range []int{100, 1000} {
-		b.Run(fmt.Sprintf("tool_results_%d", toolResults), func(b *testing.B) {
-			a := benchmarkContextReductionAgent()
-			messages := benchmarkContextReductionMessages(toolResults)
-			first := a.prepareMessagesForLLM(messages)
-			if !hasReductionSavings(a.GetContextReductionStats()) {
-				b.Fatal("benchmark fixture did not produce reduction savings")
-			}
-			withTail := append(append([]message.Message(nil), messages...), message.Message{Role: message.RoleAssistant, Content: "small follow-up"})
-			b.ReportAllocs()
-			b.ResetTimer()
-			for b.Loop() {
-				prepared := a.prepareMessagesForLLM(withTail)
-				if len(prepared) != len(withTail) || len(first) != len(messages) {
-					b.Fatalf("prepared messages = %d, want %d", len(prepared), len(withTail))
-				}
-			}
-		})
+// BenchmarkAnalyzeReadValidityReadEditPaths covers the path-matching workload
+// that is absent from the generic reduction fixtures: many reads followed by
+// edits, with normal FileState metadata available. The suffix index should
+// keep this workload proportional to path segments rather than read*edit
+// comparisons.
+func BenchmarkAnalyzeReadValidityReadEditPaths(b *testing.B) {
+	const count = 1000
+	messages := make([]message.Message, 0, count*3)
+	for i := range count {
+		path := fmt.Sprintf("/tmp/worktree/pkg%d/internal/file%d.go", i%20, i)
+		readID := fmt.Sprintf("read-%d", i)
+		messages = append(messages,
+			message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: readID, Name: tools.NameRead, Args: json.RawMessage(`{"path":"` + path + `"}`)}}},
+			message.Message{Role: message.RoleTool, ToolCallID: readID, Content: "READ_RESULT lines=1-40 total=40\npackage p", FileState: &message.ToolFileState{Reads: []message.TrackedFileState{{Path: path, Exists: true}}}},
+		)
+	}
+	for i := range count {
+		path := fmt.Sprintf("pkg%d/internal/file%d.go", i%20, i)
+		patchID := fmt.Sprintf("patch-%d", i)
+		messages = append(messages,
+			message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: patchID, Name: tools.NamePatch, Args: json.RawMessage(`{"path":"` + path + `","patch":"@@"}`)}}},
+			message.Message{Role: message.RoleTool, ToolCallID: patchID, ToolStatus: "success", FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: path, Exists: true}}}},
+		)
+	}
+	callMeta := buildToolCallMeta(messages)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		validity := analyzeReadValidity(messages, callMeta)
+		if len(validity) != count {
+			b.Fatalf("validity entries = %d, want %d", len(validity), count)
+		}
 	}
 }
 
-// benchmarkContextReductionAgentNoPressure disables the usage-pressure
-// rejections so the stable-prefix reuse fast path can engage even though the
-// fixture agent has no LLM client (input budget 0 → usage reported as 1.0).
-func benchmarkContextReductionAgentNoPressure() *MainAgent {
-	a := benchmarkContextReductionAgent()
-	a.projectConfig.Context.Reduction.HighPressureUsage = 4
-	a.projectConfig.Context.Reduction.ForcePruneUsage = 4
-	return a
+// BenchmarkAnalyzeReadValidityRepeatedPath guards the long-session case where
+// one file is read repeatedly. Superseded detection must not compare every
+// older read with every newer read.
+func BenchmarkAnalyzeReadValidityRepeatedPath(b *testing.B) {
+	const count = 1000
+	messages := make([]message.Message, 0, count*2)
+	for i := range count {
+		readID := fmt.Sprintf("read-%d", i)
+		start := i%100 + 1
+		messages = append(messages,
+			message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: readID, Name: tools.NameRead, Args: json.RawMessage(`{"path":"shared.go"}`)}}},
+			message.Message{Role: message.RoleTool, ToolCallID: readID, Content: tools.FormatReadResultHeader(fmt.Sprintf("%d-%d", start, start+99), 200, "", "", "") + "\npackage p"},
+		)
+	}
+	callMeta := buildToolCallMeta(messages)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		validity := analyzeReadValidity(messages, callMeta)
+		const distinctRanges = 100
+		if len(validity) != count-distinctRanges {
+			b.Fatalf("validity entries = %d, want %d", len(validity), count-distinctRanges)
+		}
+	}
 }
 
 // BenchmarkPrepareMessagesForLLMStablePrefixReuse measures the intended steady
@@ -150,7 +178,7 @@ func benchmarkContextReductionAgentNoPressure() *MainAgent {
 func BenchmarkPrepareMessagesForLLMStablePrefixReuse(b *testing.B) {
 	for _, toolResults := range []int{100, 1000} {
 		b.Run(fmt.Sprintf("tool_results_%d", toolResults), func(b *testing.B) {
-			a := benchmarkContextReductionAgentNoPressure()
+			a := benchmarkContextReductionAgent()
 			messages := benchmarkContextReductionMessages(toolResults)
 			first := a.prepareMessagesForLLM(messages)
 			if !hasReductionSavings(a.GetContextReductionStats()) {

@@ -113,7 +113,51 @@ func TestToolExecutionPipelineWriteUpdatesFileStateAndTracker(t *testing.T) {
 	}
 }
 
-func TestToolExecutionPipelineStaleWriteBacksUpCurrentFile(t *testing.T) {
+func TestToolExecutionPipelineRelativeDeleteReleasesTrackedLease(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "delete.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+
+	tracker := filelock.NewFileTracker()
+	tracker.TrackObservedSnapshot(path, "agent-1", computeFileHash(path))
+	registry := tools.NewRegistry()
+	registry.Register(tools.DeleteTool{BaseDir: projectRoot})
+	pipeline := toolExecutionPipeline{
+		agentID:     "agent-1",
+		registry:    registry,
+		fileTrack:   tracker,
+		fileBackups: newFileBackupManager(filepath.Join(projectRoot, ".chord", "sessions", "test")),
+		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
+	}
+	call := message.ToolCall{
+		ID:   "delete-1",
+		Name: tools.NameDelete,
+		Args: json.RawMessage(`{"paths":["delete.txt"],"reason":"cleanup"}`),
+	}
+
+	result, err := pipeline.execute(context.Background(), call, false)
+	if err != nil {
+		t.Fatalf("execute delete: %v", err)
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("deleted path still exists: %v", err)
+	}
+	if !strings.Contains(result.Result, "- delete.txt") {
+		t.Fatalf("result = %q, want relative display path", result.Result)
+	}
+	if err := os.WriteFile(path, []byte("recreated\n"), 0o644); err != nil {
+		t.Fatalf("recreate path: %v", err)
+	}
+	if _, err := tracker.AcquireWriteStatus(path, "other-agent", computeFileHash(path)); err != nil {
+		t.Fatalf("delete lease remained after pipeline execution: %v", err)
+	}
+	tracker.AbortWrite(path, "other-agent")
+}
+
+func TestToolExecutionPipelineStaleWriteIsRejected(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := filepath.Join(projectRoot, ".chord", "sessions", "test")
 	path := filepath.Join(projectRoot, "notes.txt")
@@ -141,27 +185,19 @@ func TestToolExecutionPipelineStaleWriteBacksUpCurrentFile(t *testing.T) {
 		Args: json.RawMessage(`{"path":"` + path + `","content":"new\n"}`),
 	}
 
-	result, err := pipeline.execute(context.Background(), call, false)
-	if err != nil {
-		t.Fatalf("execute write: %v", err)
-	}
-	for _, want := range []string{"Warning: the file changed on disk", "Backup saved to:"} {
-		if !strings.Contains(result.Result, want) {
-			t.Fatalf("result = %q, want substring %q", result.Result, want)
-		}
+	_, err := pipeline.execute(context.Background(), call, false)
+	if err == nil || !strings.Contains(err.Error(), "changed after the last read") {
+		t.Fatalf("execute write error = %v, want stale-read rejection", err)
 	}
 	backups, err := filepath.Glob(filepath.Join(sessionDir, "backups", "*", "*"))
 	if err != nil {
 		t.Fatalf("glob backups: %v", err)
 	}
-	if len(backups) != 1 {
-		t.Fatalf("backups = %#v, want one backup", backups)
+	if len(backups) != 0 {
+		t.Fatalf("backups = %#v, want none before rejected write", backups)
 	}
-	if got, err := os.ReadFile(backups[0]); err != nil || string(got) != "external\n" {
-		t.Fatalf("backup content = %q, %v; want external\\n", got, err)
-	}
-	if got, err := os.ReadFile(path); err != nil || string(got) != "new\n" {
-		t.Fatalf("file content = %q, %v; want new\\n", got, err)
+	if got, err := os.ReadFile(path); err != nil || string(got) != "external\n" {
+		t.Fatalf("file content = %q, %v; want unchanged external\\n", got, err)
 	}
 }
 

@@ -80,6 +80,32 @@ func TestFirstFileRefPathAllowsAdditionalAttributes(t *testing.T) {
 	}
 }
 
+func TestParseSingleFileRefContentPreservesExactBody(t *testing.T) {
+	ref, body, ok := ParseSingleFileRefContent(`<file path="a.txt">` + "\nfirst\nsecond\n\n</file>\n")
+	if !ok {
+		t.Fatal("ParseSingleFileRefContent returned false")
+	}
+	if ref.Path != "a.txt" || ref.Lines != "" {
+		t.Fatalf("ref = %#v", ref)
+	}
+	if body != "first\nsecond\n" {
+		t.Fatalf("body = %q, want exact file bytes", body)
+	}
+}
+
+func TestParseSingleFileRefContentReturnsLineRange(t *testing.T) {
+	ref, body, ok := ParseSingleFileRefContent(`<file path="a.txt" lines="2-3">` + "\ntwo\nthree\n</file>")
+	if !ok || ref.Path != "a.txt" || ref.Lines != "2-3" || body != "two\nthree" {
+		t.Fatalf("ParseSingleFileRefContent = (%#v, %q, %v)", ref, body, ok)
+	}
+}
+
+func TestParseSingleFileRefContentRejectsSurroundingText(t *testing.T) {
+	if _, _, ok := ParseSingleFileRefContent("prefix\n<file path=\"a.txt\">\nbody\n</file>"); ok {
+		t.Fatal("ParseSingleFileRefContent accepted surrounding text")
+	}
+}
+
 func TestFileRefsIncludesLineMetadata(t *testing.T) {
 	got := FileRefs(`<file path="a.txt" lines="2-3">` + "\nbody\n</file>" + `<file path='b.txt'>` + "\nB\n</file>")
 	want := []FileRef{{Path: "a.txt", Lines: "2-3"}, {Path: "b.txt"}}

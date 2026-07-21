@@ -198,7 +198,16 @@ func readDecodedTextFile(path string, returnRaw bool) (decodedText, []byte, erro
 					if rerr != nil {
 						return decodedText{}, nil, rerr
 					}
-					return dec, data, nil
+					hash := cacheKeyForBytes(data)
+					if hash == entry.Hash {
+						return dec, data, nil
+					}
+					decoded, derr := decodeTextBytes(data, path)
+					if derr != nil {
+						return decodedText{}, nil, derr
+					}
+					setPathCache(path, pathCacheEntry{Size: int64(len(data)), ModTime: info.ModTime().UnixNano(), Hash: hash})
+					return decoded, data, nil
 				}
 			}
 		}

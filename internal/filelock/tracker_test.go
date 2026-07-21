@@ -44,6 +44,26 @@ func TestTrackSnapshotAndAcquireWriteNormalizeEquivalentPaths(t *testing.T) {
 	}
 }
 
+func TestWriteLeaseReleasesDeletedPathUsingAcquiredIdentity(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "deleted.txt")
+	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tracker := NewFileTracker()
+	_, lease, err := tracker.AcquireWriteLease(path, "main", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	lease.CommitDelete()
+	if err := tracker.AcquireWrite(path, "other", "new-hash"); err != nil {
+		t.Fatalf("deleted path identity was not released: %v", err)
+	}
+}
+
 func TestTrackSnapshot_ConcurrentReads(t *testing.T) {
 	ft := NewFileTracker()
 
@@ -243,6 +263,34 @@ func TestReleaseWrite_InvalidatesOtherReadHashes(t *testing.T) {
 	ft.TrackSnapshot("f.go", "agent-2", "v2")
 	if err := ft.AcquireWrite("f.go", "agent-2", "v2"); err != nil {
 		t.Fatalf("agent-2 should be able to write after re-reading: %v", err)
+	}
+}
+
+func TestWriteLeaseCommitDeleteRemovesWriterSnapshot(t *testing.T) {
+	tracker := NewFileTracker()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "deleted.txt")
+	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hash := readDiskHash(path)
+	tracker.TrackObservedSnapshot(path, "main", hash)
+	_, lease, err := tracker.AcquireWriteLease(path, "main", hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	lease.CommitDelete()
+	if tracker.HasSnapshot(path, "main") {
+		t.Fatal("delete should remove the writer snapshot")
+	}
+	if err := os.WriteFile(path, []byte("recreated"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tracker.AcquireWriteStatus(path, "other", readDiskHash(path)); err != nil {
+		t.Fatalf("write lock remained after delete: %v", err)
 	}
 }
 

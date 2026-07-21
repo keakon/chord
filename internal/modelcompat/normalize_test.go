@@ -24,6 +24,23 @@ func TestNormalizeForTarget_PreservesAnthropicThinkingWhenEnabled(t *testing.T) 
 	}
 }
 
+func TestNormalizeForTargetDeepCopiesCompactionFileRevisions(t *testing.T) {
+	msgs := []message.Message{{
+		Role:                    message.RoleUser,
+		Content:                 "[Context Summary]\nsummary",
+		IsCompactionSummary:     true,
+		CompactionFileRevisions: map[string]string{"key.go": "abc123"},
+	}}
+	out, _ := NormalizeForTarget(msgs, TargetModel{}, NormalizeOptions{})
+	if len(out) != 1 || out[0].CompactionFileRevisions["key.go"] != "abc123" {
+		t.Fatalf("normalized checkpoint = %#v", out)
+	}
+	out[0].CompactionFileRevisions["key.go"] = "mutated"
+	if got := msgs[0].CompactionFileRevisions["key.go"]; got != "abc123" {
+		t.Fatalf("source revision changed through normalized alias: %q", got)
+	}
+}
+
 func TestNormalizeForTarget_DropsAnthropicThinkingWithoutReplayEnable(t *testing.T) {
 	msgs := []message.Message{{
 		Role:           message.RoleAssistant,

@@ -246,6 +246,316 @@ func splitMessagesForCompactionForTestWithAgent(a *MainAgent, messages []message
 	return splitMessagesForCompactionWithSelections(messages, recentTail, items)
 }
 
+func TestRequestBatchesAfterCountsParallelToolsAsOneRequest(t *testing.T) {
+	messages := []message.Message{
+		{Role: message.RoleAssistant, RequestBatch: 7, ToolCalls: []message.ToolCall{{ID: "a"}, {ID: "b"}}},
+		{Role: message.RoleTool, ToolCallID: "a"},
+		{Role: message.RoleTool, ToolCallID: "b"},
+	}
+	ages := requestBatchesAfter(messages, 8)
+	if ages[1] != 1 || ages[2] != 1 {
+		t.Fatalf("parallel tool ages = %v, want both 1", ages)
+	}
+}
+
+func TestRequestBatchesAfterIncludesFailedRequestGaps(t *testing.T) {
+	messages := []message.Message{
+		{Role: message.RoleAssistant, RequestBatch: 4, ToolCalls: []message.ToolCall{{ID: "a"}}},
+		{Role: message.RoleTool, ToolCallID: "a"},
+	}
+	ages := requestBatchesAfter(messages, 7)
+	if ages[1] != 3 {
+		t.Fatalf("tool age = %d, want 3 actual requests", ages[1])
+	}
+}
+
+func TestPrepareMessagesForLLM_DefersUnchangedToolUntilFrontier(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		MinToolResultsPrune:  1,
+		StaleAgeTurns:        2,
+		StaleOutputBytes:     40,
+		ReadLikeAgeTurns:     9,
+		ReadLikeOutputBytes:  1 << 20,
+		ShellSuccessAgeTurns: 9,
+		ShellSuccessBytes:    1 << 20,
+		MinIncrementalTokens: 1,
+	}}}
+	a.newTurn()
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: "start"},
+		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "custom-1", Name: "custom_tool", Args: json.RawMessage(`{"query":"x"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "custom-1", Content: strings.Repeat("large unchanged output\n", 20)},
+	}
+	setTestRequestBatch(a, nil, 1)
+	first := a.prepareMessagesForLLM(messages)
+	if first[2].Content != messages[2].Content {
+		t.Fatal("batch 1 should not reduce output before stale frontier")
+	}
+
+	secondMessages := append(append([]message.Message(nil), messages...), message.Message{Role: message.RoleUser, Content: "more detail"})
+	second := a.prepareMessagesForLLM(secondMessages)
+	if second[2].Content != messages[2].Content {
+		t.Fatal("unchanged same-age output should remain intact")
+	}
+	if a.GetContextReductionStats().SkippedByReason[contextReductionSkipDeferredReview] == 0 {
+		t.Fatal("unchanged output did not use the reduction frontier")
+	}
+
+	setTestRequestBatch(a, nil, 3)
+	thirdMessages := append(append([]message.Message(nil), secondMessages...), message.Message{Role: message.RoleAssistant, RequestBatch: 3, Content: "continue"})
+	third := a.prepareMessagesForLLM(thirdMessages)
+	if third[2].Content == messages[2].Content {
+		t.Fatal("output was not re-evaluated at the stale frontier")
+	}
+}
+
+func TestPrepareMessagesForLLM_StableReuseHonorsDueFrontier(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		MinToolResultsPrune:  1,
+		StaleAgeTurns:        2,
+		StaleOutputBytes:     40,
+		ReadLikeAgeTurns:     1,
+		ReadLikeOutputBytes:  40,
+		ShellSuccessAgeTurns: 9,
+		ShellSuccessBytes:    1 << 20,
+		MinIncrementalTokens: 1 << 20,
+	}}}
+	a.newTurn()
+	a.runningModelRef = "p/m"
+	a.recordLLMModelRun("p/m")
+	a.recordLLMModelRun("p/m")
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "u"},
+		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "read", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: "success", Content: "READ_RESULT lines=1-40 total=40\n" + strings.Repeat("read line\n", 80)},
+		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "generic", Name: "custom_tool", Args: json.RawMessage(`{"q":"x"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "generic", ToolStatus: "success", Content: strings.Repeat("generic output ", 30)},
+	}
+	setTestRequestBatch(a, msgs, 2)
+	first := a.prepareMessagesForLLM(msgs)
+	if !hasReductionSavings(a.GetContextReductionStats()) || first[4].Content != msgs[4].Content {
+		t.Fatalf("fixture did not preserve the not-yet-due generic output: %+v", a.GetContextReductionStats())
+	}
+	setTestRequestBatch(a, msgs, 3)
+	second := a.prepareMessagesForLLM(msgs)
+	if second[4].Content == msgs[4].Content {
+		t.Fatalf("due generic output stayed full after review frontier: %+v", a.GetContextReductionStats())
+	}
+}
+
+func TestPrepareMessagesForLLM_ReducedReadBecomesStaleAfterTailEdit(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		MinToolResultsPrune:  1,
+		ReadLikeAgeTurns:     1,
+		ReadLikeOutputBytes:  40,
+		ShellSuccessAgeTurns: 9,
+		ShellSuccessBytes:    1 << 20,
+		MinIncrementalTokens: 1 << 20,
+	}}}
+	a.newTurn()
+	a.runningModelRef = "p/m"
+	a.recordLLMModelRun("p/m")
+	a.recordLLMModelRun("p/m")
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "u"},
+		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "read", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: "success", Content: "READ_RESULT lines=1-100 total=100\n" + strings.Repeat("source line\n", 100)},
+	}
+	setTestRequestBatch(a, msgs, 2)
+	first := a.prepareMessagesForLLM(msgs)
+	if first[2].Content != msgs[2].Content {
+		t.Fatalf("still-valid read should stay full before invalidation, got %q", first[2].Content)
+	}
+	msgs = append(msgs,
+		message.Message{Role: message.RoleAssistant, RequestBatch: 2, ToolCalls: []message.ToolCall{{ID: "edit", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"a.go","old_string":"x","new_string":"y"}`)}}},
+		message.Message{Role: message.RoleTool, ToolCallID: "edit", ToolStatus: "success", Content: "edited"},
+	)
+	setTestRequestBatch(a, msgs, 3)
+	second := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(second[2].Content, "truncated="+tools.ReadTruncatedStale) {
+		t.Fatalf("reduced read marker was not invalidated after edit: %q", second[2].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_ReducedReadBecomesStaleAfterMutatingShell(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "a.go")
+	if err := os.WriteFile(path, []byte("package main\n\nconst value = 1\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile initial: %v", err)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.NewShellTool("bash"))
+	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		MinToolResultsPrune:  1,
+		ReadLikeAgeTurns:     1,
+		ReadLikeOutputBytes:  40,
+		ShellSuccessAgeTurns: 99,
+		ShellSuccessBytes:    1 << 20,
+		MinIncrementalTokens: 1 << 20,
+	}}}
+	a.newTurn()
+	a.runningModelRef = "p/m"
+	a.recordLLMModelRun("p/m")
+	a.recordLLMModelRun("p/m")
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "u"},
+		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "read", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: "success", Content: "READ_RESULT lines=1-100 total=100\n" + strings.Repeat("source line\n", 100), FileState: buildReadFileState(path)},
+	}
+	setTestRequestBatch(a, msgs, 2)
+	first := a.prepareMessagesForLLM(msgs)
+	if first[2].Content != msgs[2].Content {
+		t.Fatalf("still-valid read should stay full before invalidation, got %q", first[2].Content)
+	}
+	if err := os.WriteFile(path, []byte("package main\n\nconst value = 2\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile changed: %v", err)
+	}
+	msgs = append(msgs,
+		message.Message{Role: message.RoleAssistant, RequestBatch: 2, ToolCalls: []message.ToolCall{{ID: "shell", Name: tools.NameShell, Args: json.RawMessage(`{"command":"sed -i '' 's/1/2/' a.go"}`)}}},
+		message.Message{Role: message.RoleTool, ToolCallID: "shell", ToolStatus: "success", Content: "ok"},
+	)
+	setTestRequestBatch(a, msgs, 3)
+	second := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(second[2].Content, "truncated="+tools.ReadTruncatedStale) {
+		t.Fatalf("read marker after mutating shell = %q, want stale", second[2].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_ShellInvalidationVerdictMemoizedPerShell(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "a.go")
+	if err := os.WriteFile(path, []byte("package main\n\nconst value = 1\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile initial: %v", err)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.NewShellTool("bash"))
+	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		MinToolResultsPrune:  1,
+		ReadLikeAgeTurns:     1,
+		ReadLikeOutputBytes:  40,
+		ShellSuccessAgeTurns: 99,
+		ShellSuccessBytes:    1 << 20,
+		MinIncrementalTokens: 1 << 20,
+	}}}
+	a.newTurn()
+	a.runningModelRef = "p/m"
+	a.recordLLMModelRun("p/m")
+	a.recordLLMModelRun("p/m")
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "u"},
+		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "read", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: "success", Content: "READ_RESULT lines=1-100 total=100\n" + strings.Repeat("source line\n", 100), FileState: buildReadFileState(path)},
+		{Role: message.RoleAssistant, RequestBatch: 2, ToolCalls: []message.ToolCall{{ID: "shell1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"touch other"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "shell1", ToolStatus: "success", Content: "ok"},
+	}
+	setTestRequestBatch(a, msgs, 3)
+	first := a.prepareMessagesForLLM(msgs)
+	if first[2].Content != msgs[2].Content {
+		t.Fatalf("unchanged read after harmless shell should stay full, got %q", first[2].Content)
+	}
+	// A completed shell's verdict is frozen: an external change without a new
+	// mutating shell is not re-verified against the disk.
+	if err := os.WriteFile(path, []byte("package main\n\nconst value = 2\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile changed: %v", err)
+	}
+	second := a.prepareMessagesForLLM(msgs)
+	if second[2].Content != msgs[2].Content {
+		t.Fatalf("memoized verdict should keep the read full, got %q", second[2].Content)
+	}
+	msgs = append(msgs,
+		message.Message{Role: message.RoleAssistant, RequestBatch: 3, ToolCalls: []message.ToolCall{{ID: "shell2", Name: tools.NameShell, Args: json.RawMessage(`{"command":"sed -i '' 's/1/2/' a.go"}`)}}},
+		message.Message{Role: message.RoleTool, ToolCallID: "shell2", ToolStatus: "success", Content: "ok"},
+	)
+	setTestRequestBatch(a, msgs, 4)
+	third := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(third[2].Content, "truncated="+tools.ReadTruncatedStale) {
+		t.Fatalf("new mutating shell must re-verify, read marker = %q, want stale", third[2].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_RestoredReadBecomesStaleAfterMutatingShell(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "a.go")
+	if err := os.WriteFile(path, []byte("package main\n\nconst value = 1\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile initial: %v", err)
+	}
+	readState := buildReadFileState(path)
+	if err := os.WriteFile(path, []byte("package main\n\nconst value = 2\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile changed: %v", err)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.NewShellTool("bash"))
+	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		MinToolResultsPrune:  1,
+		ReadLikeAgeTurns:     99,
+		ReadLikeOutputBytes:  40,
+		ShellSuccessAgeTurns: 99,
+		ShellSuccessBytes:    1 << 20,
+		MinIncrementalTokens: 1,
+	}}}
+	a.newTurn()
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "u"},
+		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "read", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: "success", Content: "READ_RESULT lines=1-100 total=100\n" + strings.Repeat("source line\n", 100), FileState: readState},
+		{Role: message.RoleAssistant, RequestBatch: 2, ToolCalls: []message.ToolCall{{ID: "shell", Name: tools.NameShell, Args: json.RawMessage(`{"command":"sed -i '' 's/1/2/' a.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "shell", ToolStatus: "success", Content: "ok"},
+	}
+	setTestRequestBatch(a, msgs, 3)
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "truncated="+tools.ReadTruncatedStale) {
+		t.Fatalf("restored read marker after mutating shell = %q, want stale", prepared[2].Content)
+	}
+}
+
+func TestPrepareMessagesForLLM_RestoredShellOnlyInvalidatesEarlierReads(t *testing.T) {
+	projectRoot := t.TempDir()
+	pathA := filepath.Join(projectRoot, "a.go")
+	pathB := filepath.Join(projectRoot, "b.go")
+	for _, path := range []string{pathA, pathB} {
+		if err := os.WriteFile(path, []byte("package main\n\nconst value = 1\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile %s: %v", path, err)
+		}
+	}
+	stateA := buildReadFileState(pathA)
+	if err := os.WriteFile(pathA, []byte("package main\n\nconst value = 2\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile changed A: %v", err)
+	}
+	stateB := buildReadFileState(pathB)
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.NewShellTool("bash"))
+	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		MinToolResultsPrune:  1,
+		ReadLikeAgeTurns:     99,
+		ReadLikeOutputBytes:  40,
+		ShellSuccessAgeTurns: 99,
+		ShellSuccessBytes:    1 << 20,
+		MinIncrementalTokens: 1,
+	}}}
+	a.newTurn()
+	content := "READ_RESULT lines=1-100 total=100\n" + strings.Repeat("source line\n", 100)
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "u"},
+		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "read-a", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "read-a", ToolStatus: "success", Content: content, FileState: stateA},
+		{Role: message.RoleAssistant, RequestBatch: 2, ToolCalls: []message.ToolCall{{ID: "shell", Name: tools.NameShell, Args: json.RawMessage(`{"command":"sed -i '' 's/1/2/' a.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "shell", ToolStatus: "success", Content: "ok"},
+		{Role: message.RoleAssistant, RequestBatch: 3, ToolCalls: []message.ToolCall{{ID: "read-b", Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "read-b", ToolStatus: "success", Content: content, FileState: stateB},
+	}
+	setTestRequestBatch(a, msgs, 4)
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "truncated="+tools.ReadTruncatedStale) {
+		t.Fatalf("read before shell = %q, want stale", prepared[2].Content)
+	}
+	if strings.Contains(prepared[6].Content, "truncated="+tools.ReadTruncatedStale) {
+		t.Fatalf("read after shell = %q, must remain current", prepared[6].Content)
+	}
+}
+
 func TestPrepareMessagesForLLM_PrunesRepeatedAndErrorOutputs(t *testing.T) {
 	a := &MainAgent{}
 
@@ -282,7 +592,7 @@ func TestPrepareMessagesForLLM_PrunesRepeatedAndErrorOutputs(t *testing.T) {
 }
 
 func TestPrepareMessagesForLLM_PrunesOldReadLikeOutput(t *testing.T) {
-	a := &MainAgent{}
+	a := &MainAgent{projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{}}}}
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{
@@ -290,15 +600,22 @@ func TestPrepareMessagesForLLM_PrunesOldReadLikeOutput(t *testing.T) {
 		}},
 		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("large read output ", 400)},
 		{Role: "user", Content: "u2"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc2", Name: "edit", Args: json.RawMessage(`{"path":"a.go","old_string":"x","new_string":"y"}`)},
+		}},
+		{Role: "tool", ToolCallID: "tc2", ToolStatus: "success", Content: "edited"},
 		{Role: "user", Content: "u3"},
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
 	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated for this request to save context; path=\"a.go\"") {
-		t.Fatalf("expected old read output to keep path hint, got %q", prepared[2].Content)
+		t.Fatalf("expected invalidated read output to keep path hint, got %q", prepared[2].Content)
 	}
 	if !strings.Contains(prepared[2].Content, "large read output") {
-		t.Fatalf("expected old read output to keep a small excerpt, got %q", prepared[2].Content)
+		t.Fatalf("expected invalidated read output to keep a small excerpt, got %q", prepared[2].Content)
+	}
+	if !strings.Contains(prepared[2].Content, "File modified after this read") {
+		t.Fatalf("expected stale note directing a re-read, got %q", prepared[2].Content)
 	}
 }
 
@@ -311,7 +628,6 @@ func TestPrepareMessagesForLLM_WrapUpGracePrunesWhenSavingsAreWorthIt(t *testing
 		MinToolResultsPrune:  1,
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
-		HighPressureUsage:    2,
 		MinIncrementalTokens: 64,
 	}}}}
 	a.newTurn()
@@ -320,14 +636,14 @@ func TestPrepareMessagesForLLM_WrapUpGracePrunesWhenSavingsAreWorthIt(t *testing
 	a.llmModelRunLength = 1
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("large read output ", 100)},
 		{Role: "user", Content: "u2"},
 	}
 
 	a.beginContextReductionWrapUpGrace()
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated for this request") {
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameWebFetch+" output truncated for this request") {
 		t.Fatalf("wrap-up grace should still prune worthwhile savings, got %q", prepared[2].Content)
 	}
 	stats := a.GetContextReductionStats()
@@ -336,7 +652,7 @@ func TestPrepareMessagesForLLM_WrapUpGracePrunesWhenSavingsAreWorthIt(t *testing
 	}
 
 	prepared = a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated for this request") {
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameWebFetch+" output truncated for this request") {
 		t.Fatalf("wrap-up grace should have been consumed after one request, got %q", prepared[2].Content)
 	}
 }
@@ -350,7 +666,6 @@ func TestPrepareMessagesForLLM_WrapUpGraceSkipsLowValueReduction(t *testing.T) {
 		MinToolResultsPrune:  1,
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
-		HighPressureUsage:    2,
 		MinIncrementalTokens: 4096,
 	}}}}
 	a.newTurn()
@@ -359,7 +674,7 @@ func TestPrepareMessagesForLLM_WrapUpGraceSkipsLowValueReduction(t *testing.T) {
 	a.llmModelRunLength = 1
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("small read output ", 20)},
 		{Role: "user", Content: "u2"},
 	}
@@ -374,8 +689,9 @@ func TestPrepareMessagesForLLM_WrapUpGraceSkipsLowValueReduction(t *testing.T) {
 		t.Fatalf("stats = %+v, want protected low-value no-op", stats)
 	}
 
+	a.resetLLMModelRun()
 	prepared = a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated for this request") {
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameWebFetch+" output truncated for this request") {
 		t.Fatalf("wrap-up grace should be consumed after one low-value skip, got %q", prepared[2].Content)
 	}
 }
@@ -389,7 +705,6 @@ func TestPrepareMessagesForLLM_WrapUpGraceDoesNotProtectWithQueuedUserMessage(t 
 		MinToolResultsPrune:  1,
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
-		HighPressureUsage:    2,
 	}}}}
 	a.newTurn()
 	a.providerModelRef = "test/model"
@@ -398,14 +713,14 @@ func TestPrepareMessagesForLLM_WrapUpGraceDoesNotProtectWithQueuedUserMessage(t 
 	a.pendingUserMessages = []pendingUserMessage{{Content: "queued follow-up"}}
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("large read output ", 100)},
 		{Role: "user", Content: "u2"},
 	}
 
 	a.beginContextReductionWrapUpGrace()
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated for this request") {
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameWebFetch+" output truncated for this request") {
 		t.Fatalf("queued user message should bypass wrap-up grace protection, got %q", prepared[2].Content)
 	}
 	if stats := a.GetContextReductionStats(); stats.Protected || stats.ProtectReason == contextProtectReasonWrapUpGrace {
@@ -422,7 +737,6 @@ func TestPrepareMessagesForLLM_WrapUpGraceReusesPreviouslyReducedPrefix(t *testi
 		MinToolResultsPrune:  1,
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
-		HighPressureUsage:    2,
 	}}}}
 	a.newTurn()
 	a.providerModelRef = "test/model"
@@ -431,13 +745,13 @@ func TestPrepareMessagesForLLM_WrapUpGraceReusesPreviouslyReducedPrefix(t *testi
 	largeReadOutput := strings.Repeat("large read output ", 100)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeReadOutput},
 		{Role: "user", Content: "u2"},
 	}
 
 	first := a.prepareMessagesForLLM(msgs)
-	if first[2].Content == largeReadOutput || !strings.Contains(first[2].Content, "Older "+tools.NameRead+" output truncated for this request") {
+	if first[2].Content == largeReadOutput || !strings.Contains(first[2].Content, "Older "+tools.NameWebFetch+" output truncated for this request") {
 		t.Fatalf("expected first request to reduce old read output, got %q", first[2].Content)
 	}
 	if stats := a.GetContextReductionStats(); stats.Bytes <= 0 || stats.Messages <= 0 {
@@ -474,7 +788,6 @@ func TestPrepareMessagesForLLM_SkipsStableReuseWhenProvenanceDiffers(t *testing.
 		MinToolResultsPrune:  1,
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
-		HighPressureUsage:    2,
 	}}}}
 	a.newTurn()
 	a.providerModelRef = "test/model"
@@ -515,7 +828,6 @@ func TestPrepareMessagesForLLM_SkipsIncompatibleStableReuse(t *testing.T) {
 		MinToolResultsPrune:  1,
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
-		HighPressureUsage:    2,
 	}}}}
 	a.newTurn()
 	a.providerModelRef = "test/model"
@@ -562,7 +874,6 @@ func TestPrepareMessagesForLLM_SkipsStableReuseWhenToolCallIDIsReusedForDifferen
 		MinToolResultsPrune:  1,
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
-		HighPressureUsage:    2,
 	}}}}
 	a.newTurn()
 	a.providerModelRef = "test/model"
@@ -603,7 +914,6 @@ func TestPrepareMessagesForLLM_WrapUpGraceDoesNotProtectAfterModelSwitch(t *test
 		MinToolResultsPrune:  1,
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
-		HighPressureUsage:    2,
 	}}}}
 	a.newTurn()
 	a.providerModelRef = "test/model-b"
@@ -611,14 +921,14 @@ func TestPrepareMessagesForLLM_WrapUpGraceDoesNotProtectAfterModelSwitch(t *test
 	a.llmModelRunLength = 3
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("large read output ", 100)},
 		{Role: "user", Content: "u2"},
 	}
 
 	a.beginContextReductionWrapUpGrace()
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Older "+tools.NameRead+" output truncated for this request") {
+	if !strings.Contains(prepared[2].Content, "Older "+tools.NameWebFetch+" output truncated for this request") {
 		t.Fatalf("model switch should bypass wrap-up grace, got %q", prepared[2].Content)
 	}
 }
@@ -635,7 +945,7 @@ func TestPrepareMessagesForLLM_DoesNotMutateOriginalMessages(t *testing.T) {
 	}}}}
 	original := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md","offset":10,"limit":20}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/README.md"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("line\n", 500)},
 		{Role: "user", Content: "u2"},
 		{Role: "user", Content: "u3"},
@@ -680,11 +990,11 @@ func TestPrepareMessagesForLLM_PrunesOldWebFetchOutput(t *testing.T) {
 }
 
 func TestPrepareMessagesForLLM_PrunesStaleToolOutputWithinSingleUserTurn(t *testing.T) {
-	a := &MainAgent{}
+	a := &MainAgent{projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{}}}}
 	const (
 		largeShellOutputLines = compactBashSuccessBytes
 		largeReadOutputCopies = compactReadLikeOutputBytes
-		fillerToolCalls       = compactMessagesPerEffectiveTurn * compactBashSuccessAgeTurns
+		fillerRequestBatches  = compactBashSuccessAgeTurns
 	)
 	largeShellOutput := strings.Repeat("test output line\n", largeShellOutputLines)
 	largeReadOutput := strings.Repeat("large read output ", largeReadOutputCopies)
@@ -692,13 +1002,13 @@ func TestPrepareMessagesForLLM_PrunesStaleToolOutputWithinSingleUserTurn(t *test
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"npm test"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeShellOutput},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc2", Content: largeReadOutput},
 	}
-	for i := range fillerToolCalls {
+	for i := range fillerRequestBatches {
 		id := fmt.Sprintf("tc-filler-%d", i)
 		msgs = append(msgs,
-			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
+			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/b.go"}`)}}},
 			message.Message{Role: "tool", ToolCallID: id, Content: "short read output"},
 		)
 	}
@@ -709,7 +1019,7 @@ func TestPrepareMessagesForLLM_PrunesStaleToolOutputWithinSingleUserTurn(t *test
 		!strings.Contains(prepared[2].Content, "- test output line") {
 		t.Fatalf("expected early shell output in same user turn to be pruned, got %q", prepared[2].Content)
 	}
-	if !strings.Contains(prepared[4].Content, "Older "+tools.NameRead+" output truncated for this request to save context; path=\"a.go\"") {
+	if !strings.Contains(prepared[4].Content, "Older "+tools.NameWebFetch+" output truncated for this request to save context; url=\"https://example.com/a.go\"") {
 		t.Fatalf("expected early read output in same user turn to be pruned, got %q", prepared[4].Content)
 	}
 	lastIndex := len(prepared) - 1
@@ -866,9 +1176,7 @@ func TestDefaultContextReductionPolicyMatchesDefaultConfig(t *testing.T) {
 		policy.StaleOutputBytes != cfg.StaleOutputBytes ||
 		policy.WrapUpGraceRequests != cfg.WrapUpGraceRequests ||
 		policy.MinToolResultsPrune != cfg.MinToolResultsPrune ||
-		policy.MinIncrementalTokens != cfg.MinIncrementalTokens ||
-		policy.HighPressureUsage != cfg.HighPressureUsage ||
-		policy.ForcePruneUsage != cfg.ForcePruneUsage {
+		policy.MinIncrementalTokens != cfg.MinIncrementalTokens {
 		t.Fatalf("default context reduction policy = %+v, DefaultConfig reduction = %+v", policy, cfg)
 	}
 }
@@ -923,7 +1231,7 @@ func TestPrepareMessagesForLLM_ProtectsRecentHighRiskOutputWithinSingleUserTurn(
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"pytest"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeFailureOutput},
 	}
-	for i := range compactMessagesPerEffectiveTurn * compactBashSuccessAgeTurns {
+	for i := range compactBashSuccessAgeTurns {
 		id := fmt.Sprintf("tc-filler-%d", i)
 		msgs = append(msgs,
 			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
@@ -952,14 +1260,6 @@ func TestPrepareMessagesForLLM_ConfiguresHighRiskProtectAgeTurns(t *testing.T) {
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
 		{Role: "tool", ToolCallID: "tc2", Content: currentFailureOutput},
 	}
-	for i := range compactMessagesPerEffectiveTurn * compactBashSuccessAgeTurns {
-		id := fmt.Sprintf("tc-filler-%d", i)
-		msgs = append(msgs,
-			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
-			message.Message{Role: "tool", ToolCallID: id, Content: "short read output"},
-		)
-	}
-
 	prepared := a.prepareMessagesForLLM(msgs)
 	if prepared[2].Content == largeFailureOutput {
 		t.Fatalf("previous-turn high-risk output should be reducible with high_risk_protect_age_turns=1")
@@ -980,7 +1280,7 @@ func TestPrepareMessagesForLLM_PrunesRecentLowRiskOutputWithinSingleUserTurn(t *
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"npm install"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
 	}
-	for i := range compactMessagesPerEffectiveTurn * compactBashSuccessAgeTurns {
+	for i := range compactBashSuccessAgeTurns {
 		id := fmt.Sprintf("tc-filler-%d", i)
 		msgs = append(msgs,
 			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
@@ -1005,7 +1305,7 @@ func TestPrepareMessagesForLLM_ProtectsRecentDiffOutputWithinSingleUserTurn(t *t
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"git diff"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: diffOutput},
 	}
-	for i := range compactMessagesPerEffectiveTurn * compactBashSuccessAgeTurns {
+	for i := range compactBashSuccessAgeTurns {
 		id := fmt.Sprintf("tc-filler-%d", i)
 		msgs = append(msgs,
 			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
@@ -1031,7 +1331,7 @@ func TestPrepareMessagesForLLM_ProtectsRecentShellFailureOutputWithinSingleUserT
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"make build"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: failureOutput},
 	}
-	for i := range compactMessagesPerEffectiveTurn * compactBashSuccessAgeTurns {
+	for i := range compactBashSuccessAgeTurns {
 		id := fmt.Sprintf("tc-filler-%d", i)
 		msgs = append(msgs,
 			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
@@ -1049,11 +1349,11 @@ func TestPrepareMessagesForLLM_ProtectsRecentShellFailureOutputWithinSingleUserT
 }
 
 func TestRefreshVisibleContextReductionStatsDoesNotRememberPreparedRequest(t *testing.T) {
-	a := &MainAgent{}
+	a := &MainAgent{projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{}}}}
 	largeReadOutput := strings.Repeat("large read output ", compactReadLikeOutputBytes)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeReadOutput},
 		{Role: "user", Content: "u2"},
 		{Role: "user", Content: "u3"},
@@ -1076,10 +1376,11 @@ func TestRefreshVisibleContextReductionStatsDoesNotRememberPreparedRequest(t *te
 func TestActivateLoadedSessionRefreshesVisibleContextReductionStats(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
+	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{}}}
 	largeReadOutput := strings.Repeat("large read output ", compactReadLikeOutputBytes)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeReadOutput},
 		{Role: "user", Content: "u2"},
 		{Role: "user", Content: "u3"},
@@ -1217,6 +1518,65 @@ func TestPrepareMessagesForLLM_DoesNotProtectWarmPromptCacheSurfaceAfterModelSwi
 	}
 	if stats.ModelRunLength != 1 {
 		t.Fatalf("model run length = %d, want 1", stats.ModelRunLength)
+	}
+}
+
+// TestPrepareMessagesForLLM_DoesNotReuseFrozenSurfaceAfterModelSwitch covers the
+// incrementalReductionSurface (frozen prefix) path: a stable surface recorded
+// under the old model must not be frozen-and-reused after a model switch, even
+// when tool definitions are unchanged. Otherwise the new model inherits the old
+// model's reduction budget and skips its own re-reduction.
+func TestPrepareMessagesForLLM_DoesNotReuseFrozenSurfaceAfterModelSwitch(t *testing.T) {
+	a := &MainAgent{projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ShellSuccessAgeTurns: 1,
+		ShellSuccessBytes:    10,
+	}}}}
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"model-a": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+			"model-b": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, stubProvider{}, "model-b", 1024, "")
+	largeOutput := strings.Repeat("test output line\n", 40)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"npm test"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	// First request on model-a, with a long prior run length so a stable
+	// reduction surface (frozen prefix) gets recorded carrying the reduced
+	// shell output.
+	a.llmMu.Lock()
+	a.runningModelRef = "test/model-a"
+	a.lastLLMRequestModelRef = "test/model-a"
+	a.llmModelRunLength = 5
+	a.llmMu.Unlock()
+	first := a.prepareMessagesForLLM(msgs)
+	if first[2].Content == largeOutput {
+		t.Fatalf("first request should reduce the shell output")
+	}
+
+	// Second request on model-b: tool definitions are identical, so without a
+	// model check the frozen prefix from model-a would be reused verbatim. The
+	// ProjectedModelRunLength must drop to 1, invalidating the frozen surface so
+	// model-b re-reduces instead of inheriting model-a's compressed prefix.
+	a.llmMu.Lock()
+	a.runningModelRef = "test/model-b"
+	a.lastLLMRequestModelRef = "test/model-a"
+	a.llmModelRunLength = 5
+	a.llmMu.Unlock()
+	second := a.prepareMessagesForLLM(msgs)
+	if second[2].Content == largeOutput {
+		t.Fatalf("model switch should re-reduce instead of freezing the old surface")
+	}
+	stats := a.GetContextReductionStats()
+	if stats.ModelRunLength != 1 {
+		t.Fatalf("model run length = %d, want 1 after switch", stats.ModelRunLength)
 	}
 }
 
@@ -1419,7 +1779,7 @@ func TestPrepareMessagesForLLM_ResetsReductionStatsWhenNothingReduced(t *testing
 func TestPrepareMessagesForLLM_ReusesStableReductionSurfaceForSmallLowPressureIncrease(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
-		Context:   config.ContextConfig{Reduction: config.ContextReductionConfig{MinIncrementalTokens: 4096, HighPressureUsage: 0.80, ForcePruneUsage: 0.90}},
+		Context:   config.ContextConfig{Reduction: config.ContextReductionConfig{MinIncrementalTokens: 4096}},
 		Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}},
 	}
 	a.providerModelRef = "codex/gpt-5.5"
@@ -1498,7 +1858,6 @@ func TestPrepareMessagesForLLM_SearchReducerBeatsGenericStaleFallback(t *testing
 			ShellSuccessAgeTurns: 9,
 			ShellSuccessBytes:    1 << 20,
 			MinIncrementalTokens: 1,
-			HighPressureUsage:    1.0,
 		}},
 	}
 	content := strings.Join([]string{
@@ -1548,7 +1907,6 @@ func TestPrepareMessagesForLLM_ShellSearchOutputUsesSearchSummary(t *testing.T) 
 			ShellSuccessAgeTurns: 1,
 			ShellSuccessBytes:    80,
 			MinIncrementalTokens: 1,
-			HighPressureUsage:    1.0,
 		}},
 	}
 	content := strings.Join([]string{
@@ -1590,7 +1948,6 @@ func TestPrepareMessagesForLLM_ShellSearchOutputParsesWindowsAbsolutePaths(t *te
 			ShellSuccessAgeTurns: 1,
 			ShellSuccessBytes:    80,
 			MinIncrementalTokens: 1,
-			HighPressureUsage:    1.0,
 		}},
 	}
 	content := strings.Join([]string{
@@ -1633,7 +1990,6 @@ func TestPrepareMessagesForLLM_LSPReferencesSearchReducerParsesFormattedArgs(t *
 			ShellSuccessAgeTurns: 9,
 			ShellSuccessBytes:    1 << 20,
 			MinIncrementalTokens: 1,
-			HighPressureUsage:    1.0,
 		}},
 	}
 	content := strings.Join([]string{
@@ -1680,7 +2036,6 @@ func TestPrepareMessagesForLLM_JSONReducerBeatsGenericStaleFallback(t *testing.T
 			ShellSuccessAgeTurns: 1,
 			ShellSuccessBytes:    60,
 			MinIncrementalTokens: 1,
-			HighPressureUsage:    1.0,
 		}},
 	}
 	content := `[{"path":"a.go","line":10,"message":"bad"},{"path":"b.go","line":12,"message":"worse"},{"path":"c.go","line":99,"message":"ok"},` + strings.Repeat(`{"path":"dup.go","line":1,"message":"extra"},`, 30) + `{"path":"z.go","line":100,"message":"tail"}]`
@@ -1718,7 +2073,6 @@ func TestPrepareMessagesForLLM_LongLogReducerBeatsShellSuccessMarker(t *testing.
 			ShellSuccessAgeTurns: 1,
 			ShellSuccessBytes:    80,
 			MinIncrementalTokens: 1,
-			HighPressureUsage:    1.0,
 		}},
 	}
 	content := strings.Join([]string{
@@ -1760,7 +2114,6 @@ func TestPrepareMessagesForLLM_OlderToolErrorKeepsImportantDetails(t *testing.T)
 			ErrorAgeTurns:           1,
 			HighRiskProtectAgeTurns: 1,
 			MinIncrementalTokens:    1,
-			HighPressureUsage:       1.0,
 		}},
 	}
 	content := strings.Join([]string{
@@ -1801,7 +2154,6 @@ func TestPrepareMessagesForLLM_GenericStaleKeepsHeadTailExcerpt(t *testing.T) {
 			ShellSuccessAgeTurns: 9,
 			ShellSuccessBytes:    1 << 20,
 			MinIncrementalTokens: 1,
-			HighPressureUsage:    1.0,
 		}},
 	}
 	content := "first important line\n" + strings.Repeat("middle filler\n", 80) + "last important line\n"
@@ -1833,7 +2185,6 @@ func TestPrepareMessagesForLLM_ShellNumberedSourceKeepsExcerpt(t *testing.T) {
 			ShellSuccessAgeTurns: 1,
 			ShellSuccessBytes:    80,
 			MinIncrementalTokens: 1,
-			HighPressureUsage:    1.0,
 		}},
 	}
 	content := strings.Join([]string{
@@ -1878,7 +2229,6 @@ func TestPrepareMessagesForLLM_RecordsSkipAndOverCompressionStats(t *testing.T) 
 			ShellSuccessAgeTurns:    9,
 			ShellSuccessBytes:       1 << 20,
 			MinIncrementalTokens:    1,
-			HighPressureUsage:       1.0,
 		}},
 	}
 	readContent := "READ_RESULT lines=1-120 total=120\n" + strings.Repeat("line content for read result\n", 120)
@@ -1910,6 +2260,71 @@ func TestPrepareMessagesForLLM_RecordsSkipAndOverCompressionStats(t *testing.T) 
 	}
 }
 
+func TestPrepareMessagesForLLM_ClassifiesRereadRevisionStats(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		firstRevision string
+		lastRevision  string
+		wantKey       string
+		rejectKey     string
+	}{
+		{
+			name:          "same revision",
+			firstRevision: "hash-v1",
+			lastRevision:  "hash-v1",
+			wantKey:       contextReductionOverCompressionRereadSameRevision,
+			rejectKey:     contextReductionOverCompressionRereadChangedRevision,
+		},
+		{
+			name:          "changed revision",
+			firstRevision: "hash-v1",
+			lastRevision:  "hash-v2",
+			wantKey:       contextReductionOverCompressionRereadChangedRevision,
+			rejectKey:     contextReductionOverCompressionRereadSameRevision,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newTestMainAgent(t, t.TempDir())
+			a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+				MinToolResultsPrune:  1,
+				ReadLikeAgeTurns:     1,
+				ReadLikeOutputBytes:  40,
+				MinIncrementalTokens: 1,
+			}}}
+			a.newTurn()
+			readState := func(revision string) *message.ToolFileState {
+				return &message.ToolFileState{Reads: []message.TrackedFileState{{Path: "/repo/a.go", SHA256: revision, Exists: true}}}
+			}
+			content := "READ_RESULT lines=1-100 total=100\n" + strings.Repeat("source line\n", 100)
+			firstMessages := []message.Message{
+				{Role: message.RoleUser, Content: "u1"},
+				{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "r1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"/repo/a.go"}`)}}},
+				{Role: message.RoleTool, ToolCallID: "r1", ToolStatus: "success", Content: content, FileState: readState(tc.firstRevision)},
+				{Role: message.RoleAssistant, RequestBatch: 2, ToolCalls: []message.ToolCall{{ID: "e1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"/repo/a.go","old_string":"x","new_string":"y"}`)}}},
+				{Role: message.RoleTool, ToolCallID: "e1", ToolStatus: "success", Content: "edited"},
+			}
+			setTestRequestBatch(a, firstMessages, 2)
+			first := a.prepareMessagesForLLM(firstMessages)
+			if !strings.Contains(first[2].Content, "truncated=") {
+				t.Fatalf("first request did not reduce the read: %q", first[2].Content)
+			}
+			messages := append(append([]message.Message(nil), firstMessages...),
+				message.Message{Role: message.RoleAssistant, RequestBatch: 3, ToolCalls: []message.ToolCall{{ID: "r2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"/repo/a.go"}`)}}},
+				message.Message{Role: message.RoleTool, ToolCallID: "r2", ToolStatus: "success", Content: content, FileState: readState(tc.lastRevision)},
+			)
+			setTestRequestBatch(a, messages, 3)
+			a.prepareMessagesForLLM(messages)
+			stats := a.GetContextReductionStats()
+			if stats.OverCompression[contextReductionOverCompressionReread] == 0 || stats.OverCompression[tc.wantKey] == 0 {
+				t.Fatalf("reread stats = %+v, want aggregate and %q", stats.OverCompression, tc.wantKey)
+			}
+			if stats.OverCompression[tc.rejectKey] != 0 {
+				t.Fatalf("reread stats = %+v, did not want %q", stats.OverCompression, tc.rejectKey)
+			}
+		})
+	}
+}
+
 func TestPrepareMessagesForLLM_EnhancedReadSummaryIncludesRangeDetails(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
@@ -1922,7 +2337,6 @@ func TestPrepareMessagesForLLM_EnhancedReadSummaryIncludesRangeDetails(t *testin
 			ShellSuccessAgeTurns: 9,
 			ShellSuccessBytes:    1 << 20,
 			MinIncrementalTokens: 1,
-			HighPressureUsage:    1.0,
 		}},
 	}
 	bodyLines := []string{"func important() {", "\treturn computeImportantValue()"}
@@ -1936,15 +2350,17 @@ func TestPrepareMessagesForLLM_EnhancedReadSummaryIncludesRangeDetails(t *testin
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"internal/agent/compaction_policy.go","offset":40,"limit":63}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: content},
 		{Role: "user", Content: "u2"},
-		{Role: "assistant", Content: "ack"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"internal/agent/compaction_policy.go","old_string":"x","new_string":"y"}`)}}},
+		{Role: "tool", ToolCallID: "tc2", ToolStatus: "success", Content: "edited"},
 		{Role: "user", Content: "u3"},
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
 	got := prepared[2].Content
-	// Stale reduction keeps only leading lines and reuses the shared
-	// READ_RESULT header with truncated=stale; the lines range starts at the
-	// original start and total stays the file total.
+	// The invalidating edit turns the read stale; the reduction keeps only
+	// leading lines and reuses the shared READ_RESULT header with
+	// truncated=stale; the lines range starts at the original start and total
+	// stays the file total.
 	if !strings.HasPrefix(got, "READ_RESULT lines=41-") || !strings.Contains(got, "total=200") || !strings.Contains(got, "truncated=stale") {
 		t.Fatalf("expected stale READ_RESULT header, got %q", got)
 	}
@@ -1971,6 +2387,40 @@ func TestParseDisplayedReadRangeSupportsReadResultHeader(t *testing.T) {
 	got := parseDisplayedReadRange(content)
 	if !got.OK || got.Start != 41 || got.End != 43 || got.Total != 200 {
 		t.Fatalf("parseDisplayedReadRange() = %+v, want 41-43/200", got)
+	}
+}
+
+func TestParseDisplayedReadRangeSupportsReadResultHeaderFieldOrder(t *testing.T) {
+	got := parseDisplayedReadRange("READ_RESULT total=200 truncated=aged lines=41-43\nbody")
+	if !got.OK || got.Start != 41 || got.End != 43 || got.Total != 200 {
+		t.Fatalf("parseDisplayedReadRange() = %+v, want 41-43/200", got)
+	}
+}
+
+func TestParseDisplayedReadRangeRejectsMalformedReadResultHeader(t *testing.T) {
+	for _, content := range []string{
+		"READ_RESULT lines=none total=20\n",
+		"READ_RESULT lines=43-41 total=200\n",
+		"READ_RESULT lines=41-x total=200\n",
+		"READ_RESULT lines=41-43 total=x\n",
+		"READ_RESULTS lines=41-43 total=200\n",
+	} {
+		if got := parseDisplayedReadRange(content); got.OK {
+			t.Fatalf("parseDisplayedReadRange(%q) = %+v, want invalid", content, got)
+		}
+	}
+}
+
+func TestParseDisplayedReadRangeReadResultAllocsGuard(t *testing.T) {
+	content := "READ_RESULT lines=41-43 total=200 truncated=aged\nbody"
+	allocs := testing.AllocsPerRun(100, func() {
+		if got := parseDisplayedReadRange(content); !got.OK {
+			t.Fatalf("parseDisplayedReadRange() = %+v, want valid", got)
+		}
+	})
+	const maxAllocs = 0
+	if allocs > maxAllocs {
+		t.Fatalf("READ_RESULT range parse allocs = %.0f, want %d", allocs, maxAllocs)
 	}
 }
 
@@ -2019,7 +2469,6 @@ func TestPrepareMessagesForLLM_FreshSpecializedOutputIsNotReduced(t *testing.T) 
 			ShellSuccessAgeTurns: 1,
 			ShellSuccessBytes:    40,
 			MinIncrementalTokens: 1,
-			HighPressureUsage:    1.0,
 		}},
 	}
 	content := strings.Join([]string{
@@ -2332,7 +2781,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	if firstStats.Messages != 1 || firstStats.Bytes == 0 {
 		t.Fatalf("expected initial reduction stats, got %+v", firstStats)
 	}
-	a.rememberPreparedLLMRequest(a.currentTurnID(), msgs, firstPrepared)
+	a.rememberPreparedLLMRequest(a.currentTurnID(), msgs, firstPrepared, nil, countToolResults(msgs), a.contextReductionPolicy())
 	a.rateLimitSnaps["codex"].Secondary.UsedPct = 100
 	a.EnableLoopMode("finish current task")
 	a.freezeLoopReductionPrefixForCurrentTurn()
@@ -2483,7 +2932,7 @@ func TestPrepareMessagesForLLM_LowQuotaCodexReusesFrozenReductionPrefixWithoutLo
 	if !isShellSuccessSummary(firstPrepared[2].Content) {
 		t.Fatalf("expected initial request to prune old shell output, got %q", firstPrepared[2].Content)
 	}
-	a.rememberPreparedLLMRequest(a.currentTurnID(), msgs, firstPrepared)
+	a.rememberPreparedLLMRequest(a.currentTurnID(), msgs, firstPrepared, nil, countToolResults(msgs), a.contextReductionPolicy())
 
 	a.rateLimitSnaps["codex"].Secondary.UsedPct = 100
 	continuationMsgs := append(append([]message.Message(nil), msgs...),
@@ -2515,7 +2964,7 @@ func TestSetIdleAndDrainPendingKeepsVisibleContextReductionStats(t *testing.T) {
 	a.newTurn()
 	want := ContextReductionStats{Messages: 2, Bytes: 2048, TokensBefore: 1000, TokensAfter: 700, TokensSaved: 300}
 	a.setContextReductionStats(want)
-	a.rememberPreparedLLMRequest(a.currentTurnID(), []message.Message{{Role: "user", Content: "u"}}, []message.Message{{Role: "user", Content: "u"}})
+	a.rememberPreparedLLMRequest(a.currentTurnID(), []message.Message{{Role: "user", Content: "u"}}, []message.Message{{Role: "user", Content: "u"}}, nil, 0, a.contextReductionPolicy())
 
 	a.setIdleAndDrainPending()
 
@@ -3564,7 +4013,7 @@ func TestProduceCompactionDraftArchivalProfileOmitsRecentTail(t *testing.T) {
 	// Test bypasses ctxmgr so use a non-zero headSplit directly. The async path
 	// requires headSplit > 0 because tail is preserved by ReplacePrefixAtomic.
 	headSplit := len(snapshot)
-	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, headSplit)
+	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, headSplit, compactionProfileArchival)
 	if err != nil {
 		t.Fatalf("produceCompactionDraftAsync error: %v", err)
 	}
@@ -3576,6 +4025,152 @@ func TestProduceCompactionDraftArchivalProfileOmitsRecentTail(t *testing.T) {
 	}
 	if got := len(draft.NewMessages); got != 1 {
 		t.Fatalf("len(draft.NewMessages) = %d, want 1 summary-only message", got)
+	}
+}
+
+func TestProduceCompactionDraftCapturesSummaryKeyFileRevision(t *testing.T) {
+	projectRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectRoot, "src"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	path := filepath.Join(projectRoot, "src", "current_task.go")
+	if err := os.WriteFile(path, []byte("package current\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	a.globalConfig.Context.Compaction.Profile = config.CompactionProfileArchival
+	a.SetProviderModelRef("sample/compact-model")
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: "stub",
+		Models: map[string]config.ModelConfig{
+			"compact-model": {Limit: config.ModelLimit{Context: 16384, Output: 2048}},
+		},
+	}, []string{"test-key"})
+	provider := &countingCompactionProvider{response: &message.Response{Content: validCompactionSummaryForTest("history-1.md")}}
+	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
+	a.SetModelSwitchFactory(func(string) (*llm.Client, string, int, error) {
+		return client, "compact-model", 16384, nil
+	})
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: "inspect current task"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "read-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"src/current_task.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "read-1", Content: "READ_RESULT lines=1-1 total=1\npackage current"},
+		{Role: message.RoleAssistant, Content: "continue"},
+	}
+	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival)
+	if err != nil {
+		t.Fatalf("produceCompactionDraftAsync: %v", err)
+	}
+	if len(draft.NewMessages) != 1 {
+		t.Fatalf("len(NewMessages) = %d, want 1", len(draft.NewMessages))
+	}
+	want := computeFileHash(path)
+	if got := draft.NewMessages[0].CompactionFileRevisions["src/current_task.go"]; got != want || got == "" {
+		t.Fatalf("checkpoint revision = %q, want %q", got, want)
+	}
+}
+
+func TestRefreshCompactionFileRevisionsUsesApplyTimeState(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "key.go")
+	if err := os.WriteFile(path, []byte("package key\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile baseline: %v", err)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	summary := buildCompactionCheckpointMessage(
+		"## Goal\n- continue\n\n## Files and Evidence\n- key.go\n\n## Next Step\n- continue",
+		nil,
+		"model_summary",
+		nil,
+	)
+	messages := []message.Message{{
+		Role:                    message.RoleUser,
+		Content:                 summary,
+		IsCompactionSummary:     true,
+		CompactionFileRevisions: map[string]string{"key.go": computeFileHash(path)},
+	}}
+	if err := os.WriteFile(path, []byte("package key\n\nconst applied = true\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile changed: %v", err)
+	}
+
+	refreshed := a.refreshCompactionFileRevisions(messages)
+	want := computeFileHash(path)
+	if got := refreshed[0].CompactionFileRevisions["key.go"]; got != want {
+		t.Fatalf("apply-time revision = %q, want %q", got, want)
+	}
+	if got := messages[0].CompactionFileRevisions["key.go"]; got == want {
+		t.Fatalf("refresh mutated draft input revision to %q", got)
+	}
+}
+
+func TestCompactionHeadSplitPreservesContinuationTail(t *testing.T) {
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: "u1"},
+		{Role: message.RoleAssistant, Content: "a1"},
+		{Role: message.RoleUser, Content: "u2"},
+		{Role: message.RoleAssistant, Content: "a2"},
+		{Role: message.RoleUser, Content: "u3"},
+		{Role: message.RoleAssistant, Content: "a3"},
+		{Role: message.RoleUser, Content: "u4"},
+		{Role: message.RoleAssistant, Content: "a4"},
+	}
+	headSplit := compactionHeadSplitForProfile(compactionProfileContinuation, snapshot, 16384)
+	if headSplit != 4 {
+		t.Fatalf("continuation headSplit = %d, want 4 so the latest two user turns remain raw", headSplit)
+	}
+	if got := snapshot[headSplit:]; !reflect.DeepEqual(got, snapshot[4:]) {
+		t.Fatalf("preserved tail = %+v, want %+v", got, snapshot[4:])
+	}
+	if archival := compactionHeadSplitForProfile(compactionProfileArchival, snapshot, 16384); archival != len(snapshot) {
+		t.Fatalf("archival headSplit = %d, want %d", archival, len(snapshot))
+	}
+}
+
+func TestCompactionHeadSplitKeepsMinimumSummaryHead(t *testing.T) {
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: "u1"},
+		{Role: message.RoleAssistant, Content: "a1"},
+		{Role: message.RoleUser, Content: "u2"},
+		{Role: message.RoleAssistant, Content: "a2"},
+		{Role: message.RoleUser, Content: "u3"},
+		{Role: message.RoleAssistant, Content: "a3"},
+	}
+	if got := compactionHeadSplitForProfile(compactionProfileContinuation, snapshot, 16384); got != 4 {
+		t.Fatalf("headSplit = %d, want a four-message summary head and one raw user turn", got)
+	}
+}
+
+func TestCompactionHeadSplitKeepsToolCallPairTogether(t *testing.T) {
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: "u1"},
+		{Role: message.RoleAssistant, Content: "a1"},
+		{Role: message.RoleUser, Content: "u2"},
+		{Role: message.RoleAssistant, Content: "a2"},
+		{Role: message.RoleUser, Content: "u3"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "read-1", Name: tools.NameRead}}},
+		{Role: message.RoleTool, ToolCallID: "read-1", Content: "result"},
+		{Role: message.RoleAssistant, Content: "done"},
+	}
+	headSplit := compactionHeadSplitForProfile(compactionProfileContinuation, snapshot, 16384)
+	if headSplit != 4 {
+		t.Fatalf("headSplit = %d, want 4 before the preserved user/tool turn", headSplit)
+	}
+	if snapshot[headSplit].Role != message.RoleUser || snapshot[headSplit+1].Role != message.RoleAssistant || len(snapshot[headSplit+1].ToolCalls) != 1 {
+		t.Fatalf("preserved tail does not begin at a complete user/tool turn: %+v", snapshot[headSplit:])
+	}
+}
+
+func TestCompactionHeadSplitFallsBackToFullHeadWhenSafeTailIsTooLarge(t *testing.T) {
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: "u1"},
+		{Role: message.RoleAssistant, Content: "a1"},
+		{Role: message.RoleUser, Content: "u2"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "read-1", Name: tools.NameRead}}},
+		{Role: message.RoleTool, ToolCallID: "read-1", Content: "result"},
+		{Role: message.RoleAssistant, Content: "done"},
+	}
+	if got := compactionHeadSplitForProfile(compactionProfileContinuation, snapshot, 16384); got != len(snapshot) {
+		t.Fatalf("headSplit = %d, want full head %d when preserving the tool turn leaves too little to summarize", got, len(snapshot))
 	}
 }
 
@@ -3752,23 +4347,92 @@ func TestInjectCompactionFileContextStablePerRequest(t *testing.T) {
 		nil,
 	)
 	msgs := []message.Message{
-		{Role: "user", IsCompactionSummary: true, Content: summary},
+		{
+			Role:                    "user",
+			IsCompactionSummary:     true,
+			Content:                 summary,
+			CompactionFileRevisions: captureCompactionFileRevisions([]string{"internal/agent/compaction.go"}, a.resolveCheckpointFilePath),
+		},
 		{Role: "user", Content: "continue"},
 	}
-	first := a.injectCompactionFileContext(msgs)
+	first, firstIdx := a.injectCompactionFileContext(msgs)
 	if len(first) != 3 {
 		t.Fatalf("len(first) = %d, want 3", len(first))
+	}
+	if firstIdx != 1 {
+		t.Fatalf("firstIdx = %d, want insertion right after the checkpoint", firstIdx)
 	}
 	if len(first[1].Parts) == 0 || !strings.Contains(first[1].Parts[0].Text, "Automatically loaded key files") {
 		t.Fatalf("injected message parts = %#v", first[1].Parts)
 	}
-	second := a.injectCompactionFileContext(msgs)
+	if len(first[1].Parts) < 2 || !strings.Contains(first[1].Parts[1].Text, `revision="sha256:`) || !strings.Contains(first[1].Parts[1].Text, `changed_since_checkpoint="false"`) {
+		t.Fatalf("injected file revision metadata = %q", first[1].Parts[1].Text)
+	}
+	if paths := message.FileRefPaths(first[1].Parts[1].Text); !reflect.DeepEqual(paths, []string{"internal/agent/compaction.go"}) {
+		t.Fatalf("annotated file-ref paths = %#v", paths)
+	}
+	second, _ := a.injectCompactionFileContext(msgs)
 	if len(second) != 3 {
 		t.Fatalf("len(second) = %d, want 3 for stable per-request injection", len(second))
 	}
-	alreadyInjected := a.injectCompactionFileContext(first)
-	if len(alreadyInjected) != 3 {
-		t.Fatalf("len(alreadyInjected) = %d, want 3 without duplicate injection", len(alreadyInjected))
+	alreadyInjected, alreadyIdx := a.injectCompactionFileContext(first)
+	if len(alreadyInjected) != 3 || alreadyIdx != -1 {
+		t.Fatalf("len(alreadyInjected) = %d idx = %d, want 3 and -1 without duplicate injection", len(alreadyInjected), alreadyIdx)
+	}
+	if err := os.WriteFile(path, []byte("package agent\n\nconst changed = true\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile changed revision: %v", err)
+	}
+	changed, _ := a.injectCompactionFileContext(msgs)
+	if len(changed) < 2 || len(changed[1].Parts) < 2 || !strings.Contains(changed[1].Parts[1].Text, `changed_since_checkpoint="true"`) {
+		t.Fatalf("changed file metadata = %#v", changed)
+	}
+}
+
+func TestInjectCompactionFileContextDetectsChangeBeforeFirstInjection(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "key.go")
+	if err := os.WriteFile(path, []byte("package key\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile baseline: %v", err)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	summary := buildCompactionCheckpointMessage(
+		"## Goal\n- continue\n\n## Files and Evidence\n- key.go\n\n## Next Step\n- continue",
+		[]string{".chord/sessions/test/history-1.md"},
+		"model_summary",
+		nil,
+	)
+	checkpoint := message.Message{
+		Role:                    message.RoleUser,
+		Content:                 summary,
+		IsCompactionSummary:     true,
+		CompactionFileRevisions: captureCompactionFileRevisions([]string{"key.go"}, a.resolveCheckpointFilePath),
+	}
+	if err := os.WriteFile(path, []byte("package key\n\nconst changed = true\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile changed: %v", err)
+	}
+
+	got, _ := a.injectCompactionFileContext([]message.Message{checkpoint})
+	if len(got) != 2 || len(got[1].Parts) < 2 || !strings.Contains(got[1].Parts[1].Text, `changed_since_checkpoint="true"`) {
+		t.Fatalf("injected changed metadata = %#v", got)
+	}
+}
+
+func TestInjectCompactionFileContextTreatsLegacyCheckpointAsChanged(t *testing.T) {
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "key.go"), []byte("package key\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	summary := buildCompactionCheckpointMessage(
+		"## Goal\n- continue\n\n## Files and Evidence\n- key.go\n\n## Next Step\n- continue",
+		[]string{".chord/sessions/test/history-1.md"},
+		"model_summary",
+		nil,
+	)
+
+	got, _ := a.injectCompactionFileContext([]message.Message{{Role: message.RoleUser, Content: summary, IsCompactionSummary: true}})
+	if len(got) != 2 || len(got[1].Parts) < 2 || !strings.Contains(got[1].Parts[1].Text, `changed_since_checkpoint="true"`) {
+		t.Fatalf("legacy checkpoint metadata = %#v", got)
 	}
 }
 
@@ -3805,7 +4469,7 @@ func TestInjectCompactionFileContextHonorsByteBudgets(t *testing.T) {
 		{Role: "user", IsCompactionSummary: true, Content: summary},
 		{Role: "user", Content: "continue"},
 	}
-	got := a.injectCompactionFileContext(msgs)
+	got, _ := a.injectCompactionFileContext(msgs)
 	if len(got) != 3 {
 		t.Fatalf("len(got) = %d, want 3", len(got))
 	}
@@ -3820,6 +4484,10 @@ func TestInjectCompactionFileContextHonorsByteBudgets(t *testing.T) {
 		if !strings.Contains(parts[i].Text, "showing first 12 KB only") {
 			t.Fatalf("expected per-file truncation note in part %d, got %q", i, parts[i].Text)
 		}
+	}
+	firstPath := filepath.Join(projectRoot, filepath.FromSlash(keyFiles[0]))
+	if observation := a.fileTrack.Observation(firstPath, a.instanceID, computeFileHash(firstPath)); observation.Observed {
+		t.Fatalf("truncated key file was incorrectly recorded as a complete observation: %+v", observation)
 	}
 }
 
@@ -3844,9 +4512,9 @@ func TestInjectCompactionFileContextSkipsWhenRequestBudgetIsExhausted(t *testing
 		{Role: "user", Content: strings.Repeat("already large ", 80)},
 	}
 
-	got := a.injectCompactionFileContext(msgs)
-	if len(got) != len(msgs) {
-		t.Fatalf("len(got) = %d, want unchanged %d", len(got), len(msgs))
+	got, gotIdx := a.injectCompactionFileContext(msgs)
+	if len(got) != len(msgs) || gotIdx != -1 {
+		t.Fatalf("len(got) = %d idx = %d, want unchanged %d and -1", len(got), gotIdx, len(msgs))
 	}
 }
 
@@ -4752,10 +5420,10 @@ func TestPrepareMessagesForLLM_IncrementalFreezesAlreadyReducedPrefix(t *testing
 	largeRead2 := strings.Repeat("line from file B\n", 100)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeRead1},
 		{Role: "user", Content: "u2"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/b.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc2", Content: largeRead2},
 		{Role: "user", Content: "u3"},
 	}
@@ -4775,7 +5443,7 @@ func TestPrepareMessagesForLLM_IncrementalFreezesAlreadyReducedPrefix(t *testing
 	// The prefix (msgs) hasn't changed, so incremental reduction should freeze
 	// the already-reduced tc1 and tc2 markers verbatim.
 	second := append(append([]message.Message(nil), msgs...),
-		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc3", Name: tools.NameRead, Args: json.RawMessage(`{"path":"c.go"}`)}}},
+		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc3", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/c.go"}`)}}},
 		message.Message{Role: "tool", ToolCallID: "tc3", Content: strings.Repeat("line from file C\n", 100)},
 		message.Message{Role: "user", Content: "u4"},
 	)
@@ -4923,7 +5591,7 @@ func TestPrepareMessagesForLLM_IncrementalReExaminesNotYetReducedPrefix(t *testi
 	// First request: tc1 is age 0 (same user turn), so NOT reduced.
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeRead},
 	}
 	firstPrepared := a.prepareMessagesForLLM(msgs)
@@ -4988,7 +5656,7 @@ func TestPrepareMessagesForLLM_IncrementalDisabledOnToolDefChange(t *testing.T) 
 	largeRead := strings.Repeat("line from file\n", 100)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeRead},
 		{Role: "user", Content: "u2"},
 	}
@@ -5093,7 +5761,7 @@ func TestPrepareMessagesForLLM_IncrementalDisabledOnInputSchemaChange(t *testing
 	largeRead := strings.Repeat("line from file\n", 100)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeRead},
 		{Role: "user", Content: "u2"},
 	}
@@ -5120,5 +5788,85 @@ func TestPrepareMessagesForLLM_IncrementalDisabledOnInputSchemaChange(t *testing
 	stats := a.GetContextReductionStats()
 	if stats.SkippedByReason[contextReductionSkipFrozenReduced] > 0 {
 		t.Fatalf("expected no frozen_reduced skips when input schema changed, got %d", stats.SkippedByReason[contextReductionSkipFrozenReduced])
+	}
+}
+
+// TestStableSurfaceReviewSkipsAlreadyReducedRepeatedOutputs pins the reuse
+// path against a permanent-review loop: repeated detection runs over the
+// immutable original history, so the earlier duplicate stays flagged forever.
+// Once that index has been reduced to the repeated marker there is nothing
+// left to trim, and the frozen surface must stay reusable.
+func TestStableSurfaceReviewSkipsAlreadyReducedRepeatedOutputs(t *testing.T) {
+	history := []message.Message{
+		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "c1", Name: "shell", Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
+		{Role: message.RoleTool, ToolCallID: "c1", ToolStatus: message.ToolStatusSuccess, Content: "ok\tpkg\t0.1s"},
+		{Role: message.RoleAssistant, RequestBatch: 2, ToolCalls: []message.ToolCall{{ID: "c2", Name: "shell", Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
+		{Role: message.RoleTool, ToolCallID: "c2", ToolStatus: message.ToolStatusSuccess, Content: "ok\tpkg\t0.1s"},
+		{Role: message.RoleAssistant, RequestBatch: 3, ToolCalls: []message.ToolCall{{ID: "c3", Name: "shell", Args: json.RawMessage(`{"command":"go vet ./..."}`)}}},
+		{Role: message.RoleTool, ToolCallID: "c3", ToolStatus: message.ToolStatusSuccess, Content: "vet ok"},
+	}
+	boundary := 4
+	surfaceMessages := append([]message.Message(nil), history[:boundary]...)
+	surfaceMessages[1].Content = "[repeated tool output reduced]"
+
+	surface := stableReductionSurface{
+		Messages:       surfaceMessages,
+		ReducedIndices: []bool{false, true, false, false},
+		NextReviewAge:  make([]int, boundary),
+		ToolResults:    0,
+		Policy:         defaultContextReductionPolicy(),
+	}
+	scan := newReductionHistoryScan(history)
+
+	if stableReductionSurfaceNeedsReview(surface, scan, 4, nil) {
+		t.Fatal("surface with the repeated index already reduced must stay reusable")
+	}
+
+	surface.ReducedIndices[1] = false
+	if !stableReductionSurfaceNeedsReview(surface, scan, 4, nil) {
+		t.Fatal("an unreduced repeated output must still trigger review")
+	}
+}
+
+// TestStableSurfaceReviewToleratesMarkerClassDivergence pins the other
+// permanent-review loop: review computes validity over ORIGINAL messages
+// while the frozen marker was built from the PREPARED view. A later edit can
+// overlap the original read range but not the kept head, making the original
+// Invalidated while the marker legitimately stays truncated=superseded. That
+// divergence must not force a full scan on every subsequent request.
+func TestStableSurfaceReviewToleratesMarkerClassDivergence(t *testing.T) {
+	history := []message.Message{
+		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "r1", Name: "read", Args: json.RawMessage(`{"path":"main.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "r1", ToolStatus: message.ToolStatusSuccess, Content: "READ_RESULT lines=10-50 total=80\nbody"},
+		{Role: message.RoleAssistant, RequestBatch: 2, ToolCalls: []message.ToolCall{{ID: "r2", Name: "read", Args: json.RawMessage(`{"path":"main.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "r2", ToolStatus: message.ToolStatusSuccess, Content: "READ_RESULT lines=1-80 total=80\nfull body"},
+		{Role: message.RoleAssistant, RequestBatch: 3, ToolCalls: []message.ToolCall{{ID: "e1", Name: "edit", Args: json.RawMessage(`{"path":"main.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "e1", ToolStatus: message.ToolStatusSuccess, Content: "ok", FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "main.go", Exists: true, ChangedStart: 20, ChangedEnd: 30}}}},
+		{Role: message.RoleAssistant, RequestBatch: 4, ToolCalls: []message.ToolCall{{ID: "s1", Name: "shell", Args: json.RawMessage(`{"command":"true"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "s1", ToolStatus: message.ToolStatusSuccess, Content: "ok"},
+	}
+	boundary := 6
+	surfaceMessages := append([]message.Message(nil), history[:boundary]...)
+	// The first read was reduced under the PREPARED view as superseded by r2;
+	// under the ORIGINAL view the edit at 20-30 also invalidates it.
+	surfaceMessages[1].Content = "READ_RESULT lines=10-12 total=80 truncated=superseded\nhead"
+
+	surface := stableReductionSurface{
+		Messages:       surfaceMessages,
+		ReducedIndices: []bool{false, true, false, false, false, false},
+		NextReviewAge:  make([]int, boundary),
+		ToolResults:    0,
+		Policy:         defaultContextReductionPolicy(),
+	}
+	scan := newReductionHistoryScan(history)
+	if stableReductionSurfaceNeedsReview(surface, scan, 5, nil) {
+		t.Fatal("marker-class divergence on an already-reduced read must not force review")
+	}
+
+	// An already-reduced read whose marker somehow lost its truncated tag
+	// still triggers review.
+	surface.Messages[1].Content = "READ_RESULT lines=10-12 total=80\nhead"
+	if !stableReductionSurfaceNeedsReview(surface, scan, 5, nil) {
+		t.Fatal("an unmarked reduced read with drifted validity must still trigger review")
 	}
 }

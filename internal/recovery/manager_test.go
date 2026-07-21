@@ -99,6 +99,27 @@ func TestFirstUserMessageFromFileSkipsCompactionSummary(t *testing.T) {
 	}
 }
 
+func TestCompactionFileRevisionsPersistAcrossMessageRecovery(t *testing.T) {
+	rm, _ := newTestManager(t)
+	checkpoint := message.Message{
+		Role:                    message.RoleUser,
+		Content:                 "[Context Summary]\nsummary",
+		IsCompactionSummary:     true,
+		CompactionFileRevisions: map[string]string{"internal/agent/main.go": "abc123"},
+	}
+	if err := rm.PersistMessage(identity.MainAgentID, checkpoint); err != nil {
+		t.Fatalf("PersistMessage: %v", err)
+	}
+
+	loaded, err := rm.LoadMessages(identity.MainAgentID)
+	if err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
+	if len(loaded) != 1 || !loaded[0].IsCompactionSummary || loaded[0].CompactionFileRevisions["internal/agent/main.go"] != "abc123" {
+		t.Fatalf("loaded checkpoint = %#v", loaded)
+	}
+}
+
 func TestFirstUserMessageFromFileSkipsSyntheticUserMessages(t *testing.T) {
 	dir := t.TempDir()
 	mainPath := filepath.Join(dir, "main.jsonl")

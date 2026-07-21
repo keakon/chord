@@ -60,6 +60,38 @@ func FirstFileRefPath(text string) (string, bool) {
 	return ref.Path, ok
 }
 
+// ParseSingleFileRefContent parses one complete <file> wrapper and returns the
+// exact body bytes represented by its model-visible text. It rejects surrounding
+// non-whitespace content so callers cannot mistake one reference embedded in a
+// larger text part for a complete file observation.
+func ParseSingleFileRefContent(text string) (FileRef, string, bool) {
+	trimmed := strings.TrimLeft(text, " \t\r\n")
+	if !strings.HasPrefix(trimmed, FileRefOpenTag) {
+		return FileRef{}, "", false
+	}
+	ref, rest, ok := nextFileRef(trimmed)
+	if !ok {
+		return FileRef{}, "", false
+	}
+	closeIdx := strings.LastIndex(rest, "</file>")
+	if closeIdx < 0 || strings.TrimSpace(rest[closeIdx+len("</file>"):]) != "" {
+		return FileRef{}, "", false
+	}
+	body := rest[:closeIdx]
+	switch {
+	case strings.HasPrefix(body, "\r\n"):
+		body = body[2:]
+	case strings.HasPrefix(body, "\n"):
+		body = body[1:]
+	default:
+		return FileRef{}, "", false
+	}
+	if !strings.HasSuffix(body, "\n") {
+		return FileRef{}, "", false
+	}
+	return ref, body[:len(body)-1], true
+}
+
 func nextFileRef(text string) (FileRef, string, bool) {
 	_, after, ok := strings.Cut(text, FileRefOpenTag)
 	if !ok {

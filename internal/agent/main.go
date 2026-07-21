@@ -255,6 +255,50 @@ type pendingUserMessage struct {
 	DrainContextAppends bool
 }
 
+type requestBatchState struct {
+	mu           sync.Mutex
+	sessionEpoch uint64
+	sequence     uint64
+}
+
+func (s *requestBatchState) reserve(sessionEpoch, historyMax uint64) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessionEpoch != sessionEpoch {
+		s.sessionEpoch = sessionEpoch
+		s.sequence = historyMax
+	} else if s.sequence < historyMax {
+		s.sequence = historyMax
+	}
+	s.sequence++
+	return s.sequence
+}
+
+func (s *requestBatchState) rollback(sessionEpoch, batch uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessionEpoch == sessionEpoch && s.sequence == batch {
+		s.sequence--
+	}
+}
+
+func (s *requestBatchState) current(sessionEpoch uint64) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessionEpoch != sessionEpoch {
+		return 0
+	}
+	return s.sequence
+}
+
+func maxRequestBatch(messages []message.Message) uint64 {
+	var maximum uint64
+	for _, msg := range messages {
+		maximum = max(maximum, msg.RequestBatch)
+	}
+	return maximum
+}
+
 // ---------------------------------------------------------------------------
 // MainAgent
 // ---------------------------------------------------------------------------
@@ -327,10 +371,11 @@ type MainAgent struct {
 	outputDropLogLastByType       map[string]time.Time
 	outputDropLogSuppressedByType map[string]int
 
-	turn       *Turn
-	nextTurnID uint64
-	turnEpoch  uint64
-	eventSeq   atomic.Uint64
+	turn           *Turn
+	nextTurnID     uint64
+	turnEpoch      uint64
+	eventSeq       atomic.Uint64
+	requestBatches requestBatchState
 	// autoCompactRequested is set after an LLM round crosses the configured
 	// context threshold. The next main-agent request (or the idle fallback
 	// path) will honor it via the durable-compaction gate.
@@ -343,6 +388,13 @@ type MainAgent struct {
 	// Runtime evidence candidates accumulated incrementally for durable compaction.
 	evidence evidenceCandidateTracker
 
+	// shellReadMemo caches externallyInvalidatedReadsAfterMutatingShell verdicts
+	// keyed by the triggering shell result, so the reduction pass hashes each
+	// historically read file once per completed shell rather than once per LLM
+	// request. Tracked write/edit/patch/delete invalidation stays with
+	// analyzeReadValidity and is unaffected by this memo.
+	shellReadMemo shellReadInvalidationMemo
+
 	// loopReductionMu protects request-shape snapshots, reduction stats, and
 	// loopState fields that may be read by callLLM on a worker goroutine while
 	// the event loop handles a busy /loop command.
@@ -351,6 +403,9 @@ type MainAgent struct {
 	lastPreparedLLMRequestShape   []stableReductionMessageShape
 	lastPreparedLLMRequestPrefix  []message.Message
 	lastPreparedLLMReducedIndices []bool
+	lastPreparedLLMNextReviewAge  []int
+	lastPreparedLLMToolResults    int
+	lastPreparedReductionPolicy   contextReductionPolicy
 	lastPreparedReductionStats    ContextReductionStats
 	lastPreparedLLMToolDefHash    [sha256.Size]byte
 	lastPreparedStablePrefixLen   int

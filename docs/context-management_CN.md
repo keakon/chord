@@ -24,6 +24,8 @@ Chord 提供两层互补的上下文管理机制：**上下文压缩（Compactio
 
 当主会话上下文使用量接近模型上限时，Chord 会自动触发上下文压缩。压缩过程调用 LLM 分析当前对话，生成结构化摘要（目标、进度、关键决策、文件证据等），归档旧消息，用摘要替换对话历史。压缩结果持久保存到磁盘，会话文件体积显著缩小。
 
+面向继续执行的压缩会在 checkpoint 后原样保留一个安全的最近尾部（通常为最近两个用户轮次，并受 token 预算约束）。工具调用与结果不会被拆开；若短会话保留尾部后不足以形成有效摘要，Chord 会安全退回到压缩完整 head。显式 `archival` profile 仍保持 summary-only。checkpoint 恢复的关键文件是每次请求从磁盘现读的 request-local overlay；每个 `<file>` 块都会带 SHA-256 revision，以及相对该 checkpoint 首次注入是否已变化的标记。该 overlay 只在稳定剪裁 surface 记录完成后注入，因此不会进入前缀兼容性检查，也不会让增量剪裁复用失效。
+
 **最小配置**（启用自动压缩）：
 
 ```yaml
@@ -85,7 +87,7 @@ providers:
 
 ## 上下文剪裁（Reduction）
 
-每次向 LLM 发送请求前，Chord 会用一套确定性规则检查对话中的工具输出，对过时的大段内容做裁剪。**这只影响本次请求的 prompt，不会改写磁盘上的会话文件。**剪裁决策只使用本地可确定信号（消息数、本地 token 估算、模型输入预算、工具输出 age/bytes），不会依赖 provider 是否返回 prompt cache 命中 token。
+每次向 LLM 发送请求前，Chord 会用一套确定性规则检查对话中的工具输出，对过时的大段内容做裁剪。**这只影响本次请求的 prompt，不会改写磁盘上的会话文件。**剪裁决策只使用工具输出类型、实际 main-model 请求批次、大小和本地有效性状态；上下文使用率只影响持久压缩（Compaction），不会改变 Reduction surface。
 
 剪裁默认启用，通常无需逐项配置，只写以下任一形式即可使用默认参数：
 
@@ -118,8 +120,6 @@ context:
     wrap_up_grace_requests: 1
     min_tool_results_prune: 6
     min_incremental_saved_tokens: 2048
-    high_pressure_usage: 0.80
-    force_prune_usage: 0.90
 ```
 
 未设置或非正数的字段使用以上默认值。项目级 `.chord/config.yaml` 可按字段覆盖全局配置。
@@ -129,12 +129,14 @@ context:
 ### 默认行为
 
 - Chord 会在每次 main-model 请求前执行轻量请求级剪裁；普通 prompt-cache 热身不会保护本来可剪裁的工具输出。
-- 当 `todo_write` 把所有 TODO 标为 completed/cancelled 后，Chord 会把下一次 main-model 请求视为收尾请求。默认 `wrap_up_grace_requests: 1` 只会在同模型、没有排队用户输入、上下文非高压、且重新估算的节省低于 `min_incremental_saved_tokens` 时，避免低收益的最终 prompt surface 抖动。如果已有稳定的已剪裁前缀，收尾请求会复用该已剪裁前缀，而不是把旧工具输出恢复成原文。用户新提问、模型切换、上下文高压力或可观节省会恢复正常剪裁。
-- 较老消息冻结复用：同一 turn 内形成稳定的**已剪裁** surface 后，低压力下只估算新增尾部；如果新增尾部低于 `min_incremental_saved_tokens`，复用上一次已剪裁前缀，只追加当前尾部消息，避免每轮重新扫描历史并减少 prompt surface 抖动。未剪裁前缀不会被用来绕过剪裁。
-- 高压力立即剪裁：估算输入达到 `high_pressure_usage` 后不再套用小增量 hysteresis；达到 `force_prune_usage` 后优先控制上下文体积。
-- 近期高风险工具输出会优先按真实 user-turn age 保护，再进入普通 age/bytes 剪裁。默认 `high_risk_protect_age_turns: 4` 会把 diff/patch、失败日志、stack trace、权限/安全输出和当前工作集关键证据完整保留约 4 个用户轮次。这是主要的成本/正确性权衡旋钮：调低能让更早轮次的高风险输出提前进入保守摘要，而当前用户轮刚产生、模型正要继续使用的高风险输出始终完整保留。
+- 当 `todo_write` 把所有 TODO 标为 completed/cancelled 后，Chord 会把下一次 main-model 请求视为收尾请求。默认 `wrap_up_grace_requests: 1` 只会在同模型、没有排队用户输入、且重新估算的节省低于 `min_incremental_saved_tokens` 时，避免低收益的最终 prompt surface 抖动。如果已有稳定的已剪裁前缀，收尾请求会复用该已剪裁前缀，而不是把旧工具输出恢复成原文。用户新提问、模型切换或可观节省会恢复正常剪裁。
+- 已剪裁消息会冻结并逐字节复用，避免每轮重写旧 marker。尚未剪裁的非-read 输出会记录下一次可能跨过规则阈值的 request-batch frontier；只有新增、到期、重复调用命中、工具结果门槛跨越或 surface 失效时才重新分类。小尾部复用不能跳过已经到期的 frontier。`read` 仍按 path/range 的 edit/read 有效性定向分析；仍然有效的读取保持完整，直到后续修改或覆盖读取将其标记为 `truncated=stale` / `truncated=superseded`。
+- 较老消息形成稳定 surface 后，只分析新增尾部和到期 frontier；如果新增节省低于 `min_incremental_saved_tokens`，复用上一次已剪裁前缀，只追加当前尾部消息。历史 shape、工具 schema、模型、Reduction 配置或 session 改变时会使该 surface 失效。
+- 近期高风险工具输出按实际 main-model request-batch age 保护，再进入普通 age/bytes 剪裁。默认 `high_risk_protect_age_turns: 4` 会把 diff/patch、失败日志、stack trace、权限/安全输出和当前工作集关键证据完整保留约 4 个请求批次。同一 assistant 响应中的并行工具调用共享一个批次，不会因为并行结果数量多而提前老化。
 - 成功 shell 输出在变旧且超过 `shell_success_bytes` 后按低风险噪音处理，并保留输出大小、行数、有代表性的成功信号行（如有）以及尾部片段 fallback；shell 命令本身仍可从关联的 tool call 中获得。近期失败、stack trace、diff 和 warning 密集的构建日志会先由高风险保护或结构化日志摘要处理；较旧输出在不再受近期高风险窗口保护后，后续仍可能被摘要化。
+- 对不在静态只读白名单中的成功 Shell 调用，Chord 会重新核验稳定/恢复前缀里已有 durable hash 的历史读取。确认文件被替换、删除或 hash 改变后，旧读取会标记为 `truncated=stale`；无法读取的路径和没有 durable hash 的旧会话记录不会被猜测为 stale。
 - 大块旧工具输出仍会按 age/bytes 规则剪裁，但在退回通用省略前会尽量保留结构化线索：`read` 保留路径与行范围元数据，`grep` / `glob` / LSP references 保留查询范围和代表命中，JSON 输出保留顶层结构和数量，成功 shell 输出保留大小/信号行上下文，构建 / 测试日志保留关键失败或警告行。旧错误、diagnostics、确认类输出会被压成固定短 marker 或摘要。
+- 剪裁诊断继续保留聚合的 `reread_after_reduction` 计数，并在前后两次读取都有 durable hash 时进一步区分“同 revision 重读”和“revision 已变化后的必要刷新”。这些目前只用于观测；Chord 不会基于少量样本自动修改保留窗口。
 
 ### Loop 模式与 Codex 额度冻结
 
@@ -151,18 +153,19 @@ Chord 会按工具输出类型和时效分类处理。专门摘要会优先于�
 | 确认/权限 | 工具权限确认、用户授权结果 | `confirm_age_turns`（默认 2 轮后） | — | 权限决策很快过时，可较早裁剪 |
 | 错误结果 | 工具执行失败的错误信息 | `error_age_turns`（默认 3 轮后） | — | 失败原因可能仍有参考价值，保留稍久 |
 | Shell 成功 / 日志 | 成功命令、构建 / 测试 / lint 日志 | `shell_success_age_turns`（默认 1 轮后） | `shell_success_bytes`（默认 3000 字节以上才剪） | 成功输出通常可重新执行；摘要保留大小、行数、有代表性的成功信号行（如有）以及尾部 fallback，命令仍可从关联 tool call 获取；大日志摘要会保留关键失败 / 警告 |
-| 读取类 | `read`、文件内容预览 | `read_like_age_turns`（默认 1 轮后） | `read_like_output_bytes`（默认 3000 字节以上才剪） | 文件内容可随时重新读取；摘要保留路径和请求 / 实际显示范围 |
+| 读取类 | `read`、文件内容预览 | `read_like_age_turns`（默认 1 轮后），仅作用于已失效/已被覆盖的读取 | `read_like_output_bytes`（默认 3000 字节以上才剪） | 被后续局部 edit/patch 的修改范围覆盖（或遇到整文件/未知范围修改）的读取会被裁剪并标记 `truncated=stale`；被后续更大范围读取覆盖的标记 `truncated=superseded`（更新副本就在后文）。仍是该内容现行视图的读取**永不裁剪**，与年龄和大小无关——裁掉它只会逼出重读，或让模型基于摘要猜测 |
 | 搜索类 | `grep`、`glob`、LSP references | `read_like_age_turns`（默认 1 轮后） | `read_like_output_bytes`（默认 3000 字节以上才剪） | 命中列表可重跑；摘要保留范围、数量和代表命中 |
 | JSON / 结构化输出 | `shell` 或结构化工具返回的 JSON | 先走类别 gate，再退回旧结果兜底 | 类别对应的大小 gate | 大型结构化内容在通用省略前保留顶层 object key 或 array 数量 |
 | 其他旧结果 | 不属于以上类别的旧工具输出 | `stale_age_turns`（默认 3 轮后） | `stale_output_bytes`（默认 1500 字节以上才剪） | 兜底规则，最保守，避免误删不易重建的内容 |
 
 年龄参数说明：
 
-- `*_age_turns` 是**等效年龄**阈值。工具结果会因为后续出现新的用户轮次而变旧，也会因为同一个用户轮次内继续产生很多后续 assistant/tool 消息而变旧。实现上，Chord 会取“该结果之后经过的用户轮次”和“后续消息进展折算出的等效轮次”两者的较大值。例如 `read_like_age_turns: 2` 会比 `1` 多保留一个等效轮次；如果同一轮里后续工具调用已经足够多，它仍可能在同一轮内被裁剪。
+- `*_age_turns` 保留旧配置名，但单位是**实际 main-model 请求批次**。请求在真正 dispatch 给 provider 前分配递增 batch；失败请求也会留下年龄间隔。同一 assistant 响应中的多个并行工具调用及其结果共享一个 batch，因此并行工具只算 1 轮。旧会话没有 batch 元数据时，Chord 会按后续 user/assistant 响应保守回退。
 - `*_bytes` 是该类别参与裁剪的**最小输出字节数**。小于此值的输出保留完整内容——短输出不需要裁剪。
-- `min_tool_results_prune`（默认 6）是 generic stale-output 兜底路径的**安全门槛**：某条结果即使已经达到这条兜底规则要求的年龄和大小，Chord 也会等到会话中至少有这么多条工具结果后，才应用 generic stale 剪裁，避免小会话过早触发这条最保守的兜底裁剪。像 shell-success、read-like、search-like、JSON、build/log 这类按类别定义的摘要路径，仍按各自的 age/size 规则生效。它不控制“后续消息进展”如何折算为等效年龄。
-- `wrap_up_grace_requests`（默认 1）在 `todo_write` 报告所有 TODO completed/cancelled 后保护下一次 main-model 请求。它按 LLM 请求次数计数，不按用户轮次计数；如果模型已切换或上下文已进入高压力，则跳过该保护，因为旧 prompt cache 很可能不可用，或上下文安全更重要。
-- 近期高风险输出不受上述阈值限制：在真实用户轮次还不足 `high_risk_protect_age_turns` 时，看起来像 diff、失败断言、stack trace、权限/安全错误的结果会保持完整，即使同一轮内后续工具调用本会让它们达到裁剪条件。该保护只按真实用户轮次计数，不计入等效年龄中的“消息进展”部分。
+- 仍然“现行”的 `read` 输出**永不裁剪**：其展示范围之后没有与局部 edit/patch 的修改范围重叠，文件没有被整体替换或删除,也没有更晚的读取覆盖同一范围。这类输出是模型对该内容唯一的现行视图，裁掉它要么逼出一次多余的重读（额外请求轮次、破坏 prompt cache），要么让模型基于摘要凭空作答。容量压力由持久 Compaction 负责：每条 read 结果本身已受读取工具的单次输出预算约束，保留的读取只会线性增长，达到阈值后由 Compaction 归档。成功的 `edit`/`patch` 调用参数本身已经保留应用后的 delta，因此结果只保留应用摘要和诊断，不重复回显修改文本；旧会话或无法可靠确定修改范围时，仍保守地使该文件的全部读取失效。
+- `min_tool_results_prune`（默认 6）是 generic stale-output 兜底路径的**安全门槛**：某条结果即使已经达到这条兜底规则要求的年龄和大小，Chord 也会等到会话中至少有这么多条工具结果后，才应用 generic stale 剪裁，避免小会话过早触发这条最保守的兜底裁剪。像 shell-success、read-like、search-like、JSON、build/log 这类按类别定义的摘要路径，仍按各自的 age/size 规则生效。它不参与 request-batch age 计算。
+- `wrap_up_grace_requests`（默认 1）在 `todo_write` 报告所有 TODO completed/cancelled 后保护下一次 main-model 请求。它按 LLM 请求次数计数；模型切换时跳过该保护。
+- 近期高风险输出不受普通类别阈值限制：在 request-batch age 还不足 `high_risk_protect_age_turns` 时，看起来像 diff、失败断言、stack trace、权限/安全错误的结果会保持完整。同一批并行工具不会互相增加年龄。
 
 ### 调参思路
 
@@ -180,7 +183,7 @@ context:
 | 每次对话很短但工具输出特别多 | 降低 `min_tool_results_prune`（如 `4`） |
 | Prompt 中权限确认信息过多 | 降低 `confirm_age_turns`（如 `1`） |
 | 构建/测试日志经常需要回头看 | 进一步调高 `shell_success_bytes`（如 `16000`） |
-| 文件内容经常需要回头查阅 | 调高 `read_like_age_turns`（如 `3`）和 `read_like_output_bytes`（如 `8000`） |
+| 文件内容经常需要回头查阅 | 无需调参：仍然有效的读取始终保留，直到被修改或被更新读取覆盖 |
 | TODO 完成后的最终回复因 prompt cache 被扰动而更贵 | 保持 `wrap_up_grace_requests: 1`；只有当你的流程通常在 TODO 完成后还会多一次验证请求时才考虑设为 `2` |
 | 工具输出都很重要不想丢 | 整体调高各 `*_age_turns` 和 `*_bytes` |
 

@@ -37,6 +37,7 @@ type toolExecutionPipeline struct {
 	guidance      string
 	logPrefix     string
 	projectRoot   string
+	toolBaseDir   string
 	writeScope    *tools.WriteScope
 	writeScopeDir string
 
@@ -104,6 +105,13 @@ func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
 		}
 	}
 	return nil
+}
+
+func (p toolExecutionPipeline) effectiveToolBaseDir() string {
+	if strings.TrimSpace(p.toolBaseDir) != "" {
+		return p.toolBaseDir
+	}
+	return p.projectRoot
 }
 
 func writeScopeKnownNonWorkspaceMutation(name string) bool {
@@ -233,6 +241,10 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	agentCtx := buildToolExecContext(ctx, tc, p.agentID, p.taskID, p.sessionDir, p.eventSender, p.emit)
 	imageSink := &tools.ImageCollector{}
 	agentCtx = tools.WithImageSink(agentCtx, imageSink)
+	readObservationSink := &tools.ReadObservationCollector{}
+	agentCtx = tools.WithReadObservationSink(agentCtx, readObservationSink)
+	deleteAuditSink := &tools.DeleteAuditCollector{}
+	agentCtx = tools.WithDeleteAuditSink(agentCtx, deleteAuditSink)
 	artifactKey := toolCallArtifactKey(tc)
 
 	trackedFilePath, deleteLocks, err := p.prepareTrackedToolFileAccess(tc)
@@ -246,7 +258,10 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if err != nil {
 		return execResult, err
 	} else if releaseWrite != nil {
-		defer releaseWrite()
+		defer releaseWrite.release()
+	}
+	if err := requireObservedDestructiveWrite(p.fileTrack, p.agentID, tc.Name, trackedFilePath, writeStatus, releaseWrite); err != nil {
+		return execResult, err
 	}
 	// Acquire the workspace lease after per-file tracking locks so that same-path
 	// conflicts serialize on the cheaper file lock first; a blocking tool that
@@ -257,9 +272,9 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		return execResult, err
 	}
 	defer releaseLease()
-	staleWrite := writeStatus.ExternalChanged || (deleteLocks != nil && deleteLocks.stale)
+	staleWrite := writeStatus.ExternalChanged
 	if tc.Name == tools.NamePatch {
-		plan, err := agentdiff.CapturePatchPlan(agentCtx, tc, p.projectRoot)
+		plan, err := agentdiff.CapturePatchPlan(agentCtx, tc, p.effectiveToolBaseDir())
 		if err != nil {
 			return execResult, err
 		}
@@ -267,13 +282,17 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		execResult.ModelContextNote = plan.ModelContextNote
 		agentCtx = tools.ContextWithPatchPlan(agentCtx, plan)
 	} else {
-		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc, p.projectRoot)
+		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc, p.effectiveToolBaseDir())
 	}
 
 	backupOutcome := p.backupRiskyPreWriteState(tc, trackedFilePath, staleWrite, execResult.PreContent, execResult.PreExisted, deleteLocks)
 
 	result, err := p.registry.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
 	execResult.Images = imageSink.Drain()
+	deleteAudit, hasDeleteAudit := deleteAuditSink.Audit()
+	if deleteLocks != nil && hasDeleteAudit {
+		deleteLocks.CommitAudit(deleteAudit)
+	}
 	if err != nil {
 		if staleWrite && (tc.Name == tools.NameEdit || tc.Name == tools.NamePatch) {
 			err = wrapStaleEditError(err)
@@ -284,10 +303,14 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		return execResult, err
 	}
 	if deleteLocks != nil {
-		deleteLocks.Commit(result)
-		execResult.FileState = buildDeleteFileStateFromResult(result)
+		if !hasDeleteAudit {
+			deleteLocks.Commit(result)
+		}
+		execResult.FileState = buildDeleteFileStateFromResultInDir(result, p.effectiveToolBaseDir())
 	}
-	p.applySuccessfulFileState(&execResult, tc, trackedFilePath)
+	execResult.Result = result
+	readObservation, _ := readObservationSink.Observation()
+	p.applySuccessfulFileState(&execResult, tc, trackedFilePath, readObservation, releaseWrite)
 	result = appendBackupNotes(result, staleWrite, staleWritePathCount(trackedFilePath, deleteLocks), backupOutcome)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, nil, p.guidance)
 	return execResult, nil
@@ -319,7 +342,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	// other agents and creates hold-and-wait cycles; post-execution conflicts
 	// are instead detected by file tracking and hash-guarded rollback.
 	defer releaseLease()
-	hooks, err := prepareSpeculativeToolCall(tc, p.registry, p.fileTrack, p.agentID, p.projectRoot)
+	hooks, err := prepareSpeculativeToolCall(tc, p.registry, p.fileTrack, p.agentID, p.effectiveToolBaseDir())
 	if err != nil {
 		return execResult, err
 	}
@@ -331,8 +354,10 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	}
 	imageSink := &tools.ImageCollector{}
 	agentCtx = tools.WithImageSink(agentCtx, imageSink)
+	readObservationSink := &tools.ReadObservationCollector{}
+	agentCtx = tools.WithReadObservationSink(agentCtx, readObservationSink)
 	if tc.Name == tools.NamePatch {
-		plan, err := agentdiff.CapturePatchPlan(agentCtx, tc, p.projectRoot)
+		plan, err := agentdiff.CapturePatchPlan(agentCtx, tc, p.effectiveToolBaseDir())
 		if err != nil {
 			rollbackSpeculativeToolHooks(execResult)
 			return execResult, err
@@ -341,7 +366,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 		execResult.ModelContextNote = plan.ModelContextNote
 		agentCtx = tools.ContextWithPatchPlan(agentCtx, plan)
 	} else {
-		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc, p.projectRoot)
+		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc, p.effectiveToolBaseDir())
 	}
 	artifactKey := toolCallArtifactKey(tc)
 	staleWrite := hooks != nil && hooks.stale
@@ -359,7 +384,8 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 		}
 		return execResult, err
 	}
-	applySpeculativeFileState(&execResult, p.registry, tc, result, p.projectRoot)
+	readObservation, _ := readObservationSink.Observation()
+	applySpeculativeFileState(&execResult, p.registry, tc, result, p.effectiveToolBaseDir(), readObservation)
 	result = appendBackupNotes(result, staleWrite, speculativeStaleWritePathCount(tc.Name, trackedFilePath, hooks), backupOutcome)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, nil, p.guidance)
 	return execResult, nil
@@ -521,7 +547,7 @@ func (p toolExecutionPipeline) applyToolHook(ctx context.Context, tc *message.To
 	if p.currentTurnID != nil {
 		turnID = p.currentTurnID()
 	}
-	hookResult, hookErr := p.fireHook(ctx, hook.OnToolCall, turnID, buildToolHookData(*tc, p.projectRoot))
+	hookResult, hookErr := p.fireHook(ctx, hook.OnToolCall, turnID, buildToolHookData(*tc, p.effectiveToolBaseDir()))
 	if hookErr != nil || hookResult == nil {
 		return false, nil
 	}
@@ -571,25 +597,60 @@ func (p toolExecutionPipeline) notePendingToolCall(tc message.ToolCall, execResu
 	}
 }
 
-func (p toolExecutionPipeline) applySuccessfulFileState(execResult *ToolExecutionResult, tc message.ToolCall, trackedFilePath string) {
-	if tc.Name == tools.NameRead && trackedFilePath != "" {
-		execResult.FileState = buildReadFileState(trackedFilePath)
+func (p toolExecutionPipeline) applySuccessfulFileState(execResult *ToolExecutionResult, tc message.ToolCall, trackedFilePath string, readObservation tools.ReadObservation, writeLock *trackedWriteLock) {
+	if tc.Name == tools.NameRead {
+		execResult.FileState = buildObservedReadFileState(readObservation)
 		if p.fileTrack != nil {
-			if hash := firstReadHashForPath(execResult.FileState, trackedFilePath); hash != "" {
-				p.fileTrack.TrackSnapshot(trackedFilePath, p.agentID, hash)
+			if hash := firstReadHashForPath(execResult.FileState, readObservation.Path); hash != "" {
+				p.fileTrack.TrackCommittedSnapshot(readObservation.Path, p.agentID, hash)
+				if readResultShowsWholeFile(execResult.Result) {
+					p.fileTrack.TrackObservedSnapshot(readObservation.Path, p.agentID, hash)
+				}
 			}
 		}
 		return
 	}
 	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit || tc.Name == tools.NamePatch) && trackedFilePath != "" {
-		execResult.FileState = buildWriteFileState(trackedFilePath)
+		if tc.Name == tools.NameEdit || tc.Name == tools.NamePatch {
+			execResult.FileState = buildLocalizedWriteFileState(trackedFilePath, execResult.PreContent)
+		} else {
+			execResult.FileState = buildWriteFileState(trackedFilePath)
+		}
 		if p.fileTrack != nil {
 			if hash := firstWriteHashForPath(execResult.FileState, trackedFilePath); hash != "" {
-				p.fileTrack.TrackSnapshot(trackedFilePath, p.agentID, hash)
+				writeLock.noteResultHash(hash)
+				p.fileTrack.TrackCommittedSnapshot(trackedFilePath, p.agentID, hash)
+				// A whole-file write's resulting content is exactly the bytes the
+				// model supplied, so it counts as an observation: a follow-up
+				// write or delete of this file must not demand a redundant
+				// full re-read. Edits and patches stay committed-only — the
+				// model has not seen the resulting full file.
+				if tc.Name == tools.NameWrite {
+					p.fileTrack.TrackObservedSnapshot(trackedFilePath, p.agentID, hash)
+				}
 			}
 		}
 		execResult.LSPReviews = speculativeWriteToolLSPReviews(p.registry, tc.Name, trackedFilePath)
 	}
+}
+
+// requireObservedDestructiveWrite gates whole-file replacement behind a
+// current full observation of the file. Delete paths are gated per-path in
+// acquireDeleteLocks; this function only sees the write tool's tracked path.
+// The pre-execution state captured while acquiring the write lock is reused so
+// the same file is not read and hashed twice per call.
+func requireObservedDestructiveWrite(track *filelock.FileTracker, agentID, toolName, path string, writeStatus filelock.WriteStatus, lock *trackedWriteLock) error {
+	if track == nil || path == "" || toolName != tools.NameWrite || lock == nil {
+		return nil
+	}
+	action := strings.ToLower(toolName)
+	if lock.preVerifyErr != nil {
+		return fmt.Errorf("refusing to %s file %s because its current state cannot be verified: %w", action, path, lock.preVerifyErr)
+	}
+	if !lock.preExists {
+		return nil
+	}
+	return requireCurrentFileObservation(track, agentID, path, lock.preHash, action, writeStatus.ExternalChanged)
 }
 
 func validateToolCallArguments(registry *tools.Registry, tc message.ToolCall, logPrefix, agentID string) error {
@@ -628,35 +689,77 @@ func validateToolCallArguments(registry *tools.Registry, tc message.ToolCall, lo
 func (p toolExecutionPipeline) prepareTrackedToolFileAccess(tc message.ToolCall) (string, *deleteLockSet, error) {
 	switch tc.Name {
 	case tools.NameDelete:
-		locks, err := acquireDeleteLocks(p.fileTrack, p.agentID, tc.Args)
+		locks, err := acquireDeleteLocks(p.fileTrack, p.agentID, tc.Args, p.effectiveToolBaseDir())
 		if err != nil {
 			return "", nil, fmt.Errorf("file conflict: %w", err)
 		}
 		return "", locks, nil
 	case tools.NameEdit, tools.NamePatch:
-		return tools.ExtractEditPathFromArgsInDir(tc.Args, p.projectRoot), nil, nil
+		return tools.ExtractEditPathFromArgsInDir(tc.Args, p.effectiveToolBaseDir()), nil, nil
 	case tools.NameRead, tools.NameWrite:
-		return toolPathFromArgs(tc.Args), nil, nil
+		path := toolPathFromArgs(tc.Args)
+		if path == "" {
+			return "", nil, nil
+		}
+		resolved, err := tools.ResolveToolPathInDir(path, p.effectiveToolBaseDir())
+		if err != nil {
+			return "", nil, err
+		}
+		return resolved, nil, nil
 	default:
 		return "", nil, nil
 	}
 }
 
-func acquireTrackedWriteLock(track *filelock.FileTracker, agentID, path, toolName string) (func(), filelock.WriteStatus, error) {
+// trackedWriteLock owns one tracked write lease acquired before tool
+// execution. It carries the pre-execution content hash for the destructive
+// write gate and accepts the post-execution hash captured while building the
+// tool's FileState, so neither side re-reads a file that was just hashed.
+type trackedWriteLock struct {
+	track        *filelock.FileTracker
+	agentID      string
+	path         string
+	preHash      string
+	preExists    bool
+	preVerifyErr error
+	postHash     string
+}
+
+func acquireTrackedWriteLock(track *filelock.FileTracker, agentID, path, toolName string) (*trackedWriteLock, filelock.WriteStatus, error) {
 	var status filelock.WriteStatus
 	if track == nil || path == "" || (toolName != tools.NameWrite && toolName != tools.NameEdit && toolName != tools.NamePatch) {
 		return nil, status, nil
 	}
-	currentHash := computeFileHash(path)
+	lock := &trackedWriteLock{track: track, agentID: agentID, path: path}
+	// An unreadable file leaves preHash empty, matching the pre-existing
+	// lease semantics for edit/patch; only the write gate turns preVerifyErr
+	// into a refusal.
+	lock.preHash, lock.preExists, lock.preVerifyErr = verifiedCurrentFileHash(path)
 	var err error
-	status, err = track.AcquireWriteStatus(path, agentID, currentHash)
+	status, err = track.AcquireWriteStatus(path, agentID, lock.preHash)
 	if err != nil {
 		return nil, status, wrapTrackedWriteError(err)
 	}
-	return func() {
-		newHash := computeFileHash(path)
-		track.ReleaseWrite(path, agentID, newHash)
-	}, status, nil
+	return lock, status, nil
+}
+
+// noteResultHash records the post-execution content hash captured while
+// building the tool's FileState, letting release skip re-hashing the file.
+func (l *trackedWriteLock) noteResultHash(hash string) {
+	if l != nil && hash != "" {
+		l.postHash = hash
+	}
+}
+
+func (l *trackedWriteLock) release() {
+	if l == nil {
+		return
+	}
+	hash := l.postHash
+	if hash == "" {
+		hash = computeFileHash(l.path)
+	}
+	l.track.ReleaseWrite(l.path, l.agentID, hash)
 }
 
 func wrapTrackedWriteError(err error) error {
@@ -746,22 +849,22 @@ func toolPathFromArgs(args json.RawMessage) string {
 	return parsed.Path
 }
 
-func applySpeculativeFileState(execResult *ToolExecutionResult, registry *tools.Registry, tc message.ToolCall, result, projectRoot string) {
+func applySpeculativeFileState(execResult *ToolExecutionResult, registry *tools.Registry, tc message.ToolCall, result, baseDir string, readObservation tools.ReadObservation) {
 	switch tc.Name {
 	case tools.NameRead:
-		if path := toolPathFromArgs(tc.Args); path != "" {
-			execResult.FileState = buildReadFileState(path)
-		}
+		execResult.FileState = buildObservedReadFileState(readObservation)
 	case tools.NameEdit, tools.NamePatch:
-		if path := tools.ExtractEditPathFromArgsInDir(tc.Args, projectRoot); path != "" {
-			execResult.FileState = buildWriteFileState(path)
+		if path := tools.ExtractEditPathFromArgsInDir(tc.Args, baseDir); path != "" {
+			execResult.FileState = buildLocalizedWriteFileState(path, execResult.PreContent)
 		}
 	case tools.NameWrite:
 		if path := toolPathFromArgs(tc.Args); path != "" {
-			execResult.FileState = buildWriteFileState(path)
+			if resolved, err := tools.ResolveToolPathInDir(path, baseDir); err == nil {
+				execResult.FileState = buildWriteFileState(resolved)
+			}
 		}
 	case tools.NameDelete:
-		execResult.FileState = buildDeleteFileStateFromResult(result)
+		execResult.FileState = buildDeleteFileStateFromResultInDir(result, baseDir)
 	}
 	if (tc.Name == tools.NameWrite || tc.Name == tools.NameEdit || tc.Name == tools.NamePatch) && execResult.PreFilePath != "" {
 		execResult.LSPReviews = speculativeWriteToolLSPReviews(registry, tc.Name, execResult.PreFilePath)
@@ -805,22 +908,18 @@ func logToolRejectedByUser(prefix, agentID, toolName, matchArgument, denyReason 
 	log.Infof("tool call rejected by user tool=%v argument=%v deny_reason=%v", toolName, matchArgument, denyReason)
 }
 
-func commitPromotedReadToolSideEffects(track *filelock.FileTracker, agentID, toolName, argsJSON string, fileState *message.ToolFileState) {
-	if toolName != tools.NameRead || track == nil {
+func commitPromotedReadToolSideEffects(track *filelock.FileTracker, agentID, toolName, result string, fileState *message.ToolFileState) {
+	if toolName != tools.NameRead || track == nil || fileState == nil || len(fileState.Reads) != 1 {
 		return
 	}
-	var parsed struct {
-		Path string `json:"path"`
-	}
-	if err := json.Unmarshal([]byte(argsJSON), &parsed); err != nil {
+	read := fileState.Reads[0]
+	path := strings.TrimSpace(read.Path)
+	hash := strings.TrimSpace(read.SHA256)
+	if path == "" || hash == "" || !read.Exists {
 		return
 	}
-	if strings.TrimSpace(parsed.Path) == "" {
-		return
+	track.TrackCommittedSnapshot(path, agentID, hash)
+	if readResultShowsWholeFile(result) {
+		track.TrackObservedSnapshot(path, agentID, hash)
 	}
-	hash := firstReadHashForPath(fileState, parsed.Path)
-	if hash == "" {
-		hash = computeFileHash(parsed.Path)
-	}
-	track.TrackSnapshot(parsed.Path, agentID, hash)
 }

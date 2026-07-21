@@ -27,6 +27,24 @@ type WriteStatus struct {
 	ExternalChanged bool
 }
 
+// ObservationStatus describes whether an agent has actually observed the
+// current content of a file. Localized mutations (edit/patch) update optimistic
+// concurrency state but deliberately do not count as observations: the model
+// has not seen the resulting full file. Whole-file writes do count — the
+// committed content is exactly the bytes the model supplied.
+type ObservationStatus struct {
+	Observed bool
+	Current  bool
+}
+
+// WriteLease captures the tracker key used for one acquired write. It lets a
+// caller release a path after deleting it without re-resolving missing symlinks.
+type WriteLease struct {
+	tracker *FileTracker
+	path    string
+	agentID string
+}
+
 // readDiskHash computes the SHA-256 hash of the file at path.
 // Returns "" if the file does not exist or cannot be read.
 func readDiskHash(path string) string {
@@ -78,6 +96,9 @@ type FileTracker struct {
 	snapshotHashes map[string]map[string]string
 	// file path → agent ID → actual disk hash recorded when the snapshot was taken
 	diskSnapshotHashes map[string]map[string]string
+	// file path → agent ID → content hash actually shown to the agent through a
+	// successful read, durable restored read, or complete <file> injection.
+	observedHashes map[string]map[string]string
 }
 
 // NewFileTracker creates a new FileTracker with empty state.
@@ -86,12 +107,31 @@ func NewFileTracker() *FileTracker {
 		writers:            make(map[string]string),
 		snapshotHashes:     make(map[string]map[string]string),
 		diskSnapshotHashes: make(map[string]map[string]string),
+		observedHashes:     make(map[string]map[string]string),
 	}
 }
 
 // TrackSnapshot records the content hash that an agent observed for a file. This
 // forms the basis for optimistic stale/external modification detection.
 func (t *FileTracker) TrackSnapshot(path, agentID, contentHash string) {
+	t.trackSnapshot(path, agentID, contentHash, true)
+}
+
+// TrackCommittedSnapshot advances optimistic concurrency state after a
+// successful mutation without claiming the resulting whole-file content was
+// shown to the model.
+func (t *FileTracker) TrackCommittedSnapshot(path, agentID, contentHash string) {
+	t.trackSnapshot(path, agentID, contentHash, false)
+}
+
+// TrackObservedSnapshot records content that was actually shown in full to an
+// agent. It is named separately at call sites so partial reads can advance only
+// committed concurrency state without authorizing destructive whole-file work.
+func (t *FileTracker) TrackObservedSnapshot(path, agentID, contentHash string) {
+	t.trackSnapshot(path, agentID, contentHash, true)
+}
+
+func (t *FileTracker) trackSnapshot(path, agentID, contentHash string, observed bool) {
 	path = normalizeTrackedPath(path)
 	if path == "" {
 		return
@@ -108,6 +148,34 @@ func (t *FileTracker) TrackSnapshot(path, agentID, contentHash string) {
 		t.diskSnapshotHashes[path] = make(map[string]string)
 	}
 	t.diskSnapshotHashes[path][agentID] = contentHash
+
+	if observed {
+		if t.observedHashes[path] == nil {
+			t.observedHashes[path] = make(map[string]string)
+		}
+		t.observedHashes[path][agentID] = contentHash
+	}
+}
+
+// Observation reports whether agentID has observed path and whether that
+// observation still matches currentHash. It performs no disk I/O; callers
+// should pass the hash captured immediately before their mutation.
+func (t *FileTracker) Observation(path, agentID, currentHash string) ObservationStatus {
+	if t == nil {
+		return ObservationStatus{}
+	}
+	path = normalizeTrackedPath(path)
+	if path == "" {
+		return ObservationStatus{}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	hashes, ok := t.observedHashes[path]
+	if !ok {
+		return ObservationStatus{}
+	}
+	hash, observed := hashes[agentID]
+	return ObservationStatus{Observed: observed, Current: observed && hash != "" && hash == currentHash}
 }
 
 // HasSnapshot reports whether the given agent has a recorded snapshot for path in
@@ -145,11 +213,29 @@ func (t *FileTracker) AcquireWrite(path, agentID, currentHash string) error {
 	return err
 }
 
+// AcquireWriteLease acquires a write and returns a lease carrying the exact
+// canonical key used by the tracker.
+func (t *FileTracker) AcquireWriteLease(path, agentID, currentHash string) (WriteStatus, *WriteLease, error) {
+	canonical := normalizeTrackedPath(path)
+	status, err := t.acquireWriteStatusCanonical(canonical, agentID, currentHash)
+	if err != nil {
+		return status, nil, err
+	}
+	if canonical == "" {
+		return status, nil, nil
+	}
+	return status, &WriteLease{tracker: t, path: canonical, agentID: agentID}, nil
+}
+
 // AcquireWriteStatus acquires write permission and reports stale/external-change
 // risk without rejecting it. Concurrent write-write conflicts are still rejected.
 func (t *FileTracker) AcquireWriteStatus(path, agentID, currentHash string) (WriteStatus, error) {
-	var status WriteStatus
 	path = normalizeTrackedPath(path)
+	return t.acquireWriteStatusCanonical(path, agentID, currentHash)
+}
+
+func (t *FileTracker) acquireWriteStatusCanonical(path, agentID, currentHash string) (WriteStatus, error) {
+	var status WriteStatus
 	if path == "" {
 		return status, nil
 	}
@@ -209,11 +295,31 @@ func (t *FileTracker) AcquireWriteStatus(path, agentID, currentHash string) (Wri
 	return status, nil
 }
 
+// Abort releases the write without committing an on-disk change.
+func (l *WriteLease) Abort() {
+	if l == nil || l.tracker == nil || l.path == "" {
+		return
+	}
+	l.tracker.abortWriteCanonical(l.path, l.agentID)
+}
+
+// CommitDelete releases the write after the leased path was deleted.
+func (l *WriteLease) CommitDelete() {
+	if l == nil || l.tracker == nil || l.path == "" {
+		return
+	}
+	l.tracker.releaseDeleteCanonical(l.path, l.agentID)
+}
+
 // AbortWrite releases write permission for a single file without updating read
 // hashes or invalidating other agents. Use this when a writer acquired the
 // lock but did not commit any on-disk change.
 func (t *FileTracker) AbortWrite(path, agentID string) {
 	path = normalizeTrackedPath(path)
+	t.abortWriteCanonical(path, agentID)
+}
+
+func (t *FileTracker) abortWriteCanonical(path, agentID string) {
 	if path == "" {
 		return
 	}
@@ -264,6 +370,43 @@ func (t *FileTracker) ReleaseWrite(path, agentID, newHash string) {
 	}
 }
 
+func (t *FileTracker) releaseDeleteCanonical(path, agentID string) {
+	if path == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.writers[path] != agentID {
+		return
+	}
+	delete(t.writers, path)
+	if hashes, ok := t.snapshotHashes[path]; ok {
+		delete(hashes, agentID)
+		for otherAgent := range hashes {
+			hashes[otherAgent] = ""
+		}
+		if len(hashes) == 0 {
+			delete(t.snapshotHashes, path)
+		}
+	}
+	if hashes, ok := t.diskSnapshotHashes[path]; ok {
+		delete(hashes, agentID)
+		for otherAgent := range hashes {
+			hashes[otherAgent] = ""
+		}
+		if len(hashes) == 0 {
+			delete(t.diskSnapshotHashes, path)
+		}
+	}
+	if hashes, ok := t.observedHashes[path]; ok {
+		delete(hashes, agentID)
+		if len(hashes) == 0 {
+			delete(t.observedHashes, path)
+		}
+	}
+}
+
 // ReleaseAll releases all write permissions and snapshot tracking for the given
 // agent. This should be called when an agent completes or errors out.
 func (t *FileTracker) ReleaseAll(agentID string) {
@@ -282,5 +425,9 @@ func (t *FileTracker) ReleaseAll(agentID string) {
 
 	for _, dh := range t.diskSnapshotHashes {
 		delete(dh, agentID)
+	}
+
+	for _, hashes := range t.observedHashes {
+		delete(hashes, agentID)
 	}
 }

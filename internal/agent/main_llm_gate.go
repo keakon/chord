@@ -389,6 +389,7 @@ func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnI
 			ThinkingToolcallMarkerHit: resp.ThinkingToolcallMarkerHit,
 			ReasoningContent:          resp.ReasoningContent,
 			Usage:                     resp.Usage,
+			RequestBatch:              resp.RequestBatch,
 		}
 		now := time.Now()
 		a.recordToolTraceLLMResponseEventSent(payload, now)

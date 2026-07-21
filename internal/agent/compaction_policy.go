@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/keakon/chord/internal/ctxmgr"
@@ -56,6 +58,52 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 	return a.prepareMessagesForLLMWithOptions(messages, true)
 }
 
+// reductionHistoryScan lazily computes and caches the whole-history scans
+// (tool-call metadata, repeated-output detection, read-validity analysis)
+// shared by the surface-review checks and the main reduction pass of a single
+// prepare call. Several review call sites can run per request; sharing one
+// scan avoids re-walking the full history at each of them.
+//
+// The scans run over the original messages. callMeta and repeatedOutputs
+// depend only on roles, tool-call IDs, and assistant tool calls, which are
+// identical in the prepared copy, so those results are also valid for it.
+// readValidity additionally parses tool-result content, so it is only valid
+// for the original messages; the main pass computes its own validity over the
+// prepared copy. Not safe for concurrent use.
+type reductionHistoryScan struct {
+	messages     []message.Message
+	meta         map[string]toolCallMeta
+	repeated     map[int]bool
+	validity     map[int]readValidity
+	validityDone bool
+}
+
+func newReductionHistoryScan(messages []message.Message) *reductionHistoryScan {
+	return &reductionHistoryScan{messages: messages}
+}
+
+func (s *reductionHistoryScan) callMeta() map[string]toolCallMeta {
+	if s.meta == nil {
+		s.meta = buildToolCallMeta(s.messages)
+	}
+	return s.meta
+}
+
+func (s *reductionHistoryScan) repeatedOutputs() map[int]bool {
+	if s.repeated == nil {
+		s.repeated = detectRepeatedToolOutputs(s.messages, s.callMeta())
+	}
+	return s.repeated
+}
+
+func (s *reductionHistoryScan) readValidity() map[int]readValidity {
+	if !s.validityDone {
+		s.validity = analyzeReadValidity(s.messages, s.callMeta())
+		s.validityDone = true
+	}
+	return s.validity
+}
+
 func (a *MainAgent) refreshVisibleContextReductionStats(messages []message.Message) {
 	if a == nil {
 		return
@@ -75,70 +123,72 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		return nil
 	}
 
-	prepared := make([]message.Message, len(messages))
-	copy(prepared, messages)
 	policy := a.contextReductionPolicy()
-	inputBudget := 0
+	scan := newReductionHistoryScan(messages)
+	currentBatch := a.currentRequestBatch(messages)
+	externalReadInvalidated := a.externallyInvalidatedReadsAfterMutatingShell(messages, scan)
 	wrapUpGraceActive := false
-	wrapUpGraceLowPressure := false
 	var modelSnapshot llmModelContinuitySnapshot
 	if a != nil {
-		inputBudget = a.contextReductionInputBudget()
-		estimatedTokens := ctxmgr.EstimateMessagesTokens(prepared)
 		modelSnapshot = a.llmModelContinuitySnapshot()
-		usage := policy.contextUsage(estimatedTokens, inputBudget)
-		wrapUpGraceLowPressure = policy.HighPressureUsage <= 0 || usage < policy.HighPressureUsage
-		if modelSnapshot.ProjectedModelRunLength > 1 && !a.hasQueuedUserInputForRecovery() && wrapUpGraceLowPressure && a.consumeContextReductionWrapUpGrace(a.currentTurnID()) {
+		if modelSnapshot.ProjectedModelRunLength > 1 && !a.hasQueuedUserInputForRecovery() && a.consumeContextReductionWrapUpGrace(a.currentTurnID()) {
 			wrapUpGraceActive = true
-			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && hasReductionSavings(previous.Stats) && len(previous.Messages) > 0 && len(prepared) >= len(previous.Messages) {
-				reused, compatible := reuseStableReductionPrefix(previous, prepared, prepared)
-				if compatible {
-					stats := highLevelContextReductionStats(prepared, reused)
-					if len(stats.ByToolAndRule) == 0 {
-						stats.ByToolAndRule = cloneContextReductionBuckets(previous.Stats.ByToolAndRule)
+			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok && hasReductionSavings(previous.Stats) && len(previous.Messages) > 0 && len(messages) >= len(previous.Messages) {
+				if stableReductionSurfaceNeedsReview(previous, scan, currentBatch, externalReadInvalidated) {
+					wrapUpGraceActive = false
+				} else {
+					reused, compatible := reuseStableReductionPrefix(previous, messages, messages)
+					if compatible {
+						stats := highLevelContextReductionStats(messages, reused)
+						if len(stats.ByToolAndRule) == 0 {
+							stats.ByToolAndRule = cloneContextReductionBuckets(previous.Stats.ByToolAndRule)
+						}
+						stats.Protected = true
+						stats.ProtectReason = contextProtectReasonWrapUpGrace
+						stats.ReusedStable = true
+						stats.fillModelContinuity(modelSnapshot)
+						a.setCurrentRequestSurface(&stats, reused)
+						a.setContextReductionStats(stats)
+						if rememberPrepared {
+							a.setPreparedStablePrefixLen(len(previous.Messages))
+							a.rememberPreparedLLMRequest(a.currentTurnID(), messages, reused, previous.NextReviewAge, previous.ToolResults, previous.Policy)
+						}
+						return reused
 					}
-					stats.Protected = true
-					stats.ProtectReason = contextProtectReasonWrapUpGrace
-					stats.ReusedStable = true
-					stats.fillModelContinuity(modelSnapshot)
-					a.setCurrentRequestSurface(&stats, reused)
-					a.setContextReductionStats(stats)
-					if rememberPrepared {
-						a.setPreparedStablePrefixLen(len(previous.Messages))
-						a.rememberPreparedLLMRequest(a.currentTurnID(), messages, reused)
-					}
-					return reused
 				}
 			}
 		}
 	}
 	if a != nil {
 		loopEnabled, frozen := a.contextSurfaceReductionSnapshot()
-		if loopEnabled {
+		if loopEnabled && (len(frozen.Messages) == 0 || !stableReductionSurfaceNeedsReview(frozen, scan, currentBatch, externalReadInvalidated)) {
+			prepared := append([]message.Message(nil), messages...)
 			return a.applyLoopFrozenReductionPrefix(prepared, frozen)
 		}
 	}
 	if a != nil {
 		if rememberPrepared {
-			if reused, stats, ok := a.tryReuseStableReductionSurfaceBeforeFullScan(prepared, policy, inputBudget); ok {
+			if reused, stats, ok := a.tryReuseStableReductionSurfaceBeforeFullScan(messages, policy, scan, currentBatch, externalReadInvalidated); ok {
 				a.fillReductionModelContinuity(&stats)
 				a.setCurrentRequestSurface(&stats, reused)
 				a.setContextReductionStats(stats)
 				if n, ok := a.stableReductionSurfacePrefixLen(a.currentTurnID()); ok {
 					a.setPreparedStablePrefixLen(n)
 				}
-				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, reused)
+				previous, _ := a.stableReductionSurfaceCandidate(a.currentTurnID())
+				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, reused, previous.NextReviewAge, previous.ToolResults, previous.Policy)
 				return reused
 			}
 		}
 	}
+	prepared := append([]message.Message(nil), messages...)
 	stats := ContextReductionStats{TokensBefore: ctxmgr.EstimateMessagesTokens(prepared)}
 
 	// Incremental reduction: freeze already-reduced tool results from the
 	// previous stable surface so their marker content stays cache-stable.
 	// Only the not-yet-reduced prefix and the new tail are re-examined.
 	// Tool-definition changes invalidate the frozen surface (full re-reduction).
-	frozenPrefix, frozenReducedIndices, frozenBoundary, incrementalEnabled := a.incrementalReductionSurface(prepared, policy)
+	frozenPrefix, frozenReducedIndices, frozenNextReviewAge, previousToolResults, frozenBoundary, incrementalEnabled := a.incrementalReductionSurface(prepared)
 	if incrementalEnabled && frozenBoundary > 0 {
 		for i := range frozenBoundary {
 			if frozenReducedIndices != nil && i < len(frozenReducedIndices) && frozenReducedIndices[i] {
@@ -190,12 +240,31 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		stats.OverCompression[kind]++
 	}
 
-	callMeta := buildToolCallMeta(prepared)
-	turnsAfter := userTurnsAfter(prepared)
-	messageAge := messageProgressTurnsAfter(prepared, compactMessagesPerEffectiveTurn)
-	repeated := detectRepeatedToolOutputs(prepared, callMeta)
+	// callMeta and repeated are computed over the original messages but are
+	// equally valid for prepared: assistant messages (the only inputs they
+	// read) are byte-identical between the two. Read validity is re-analyzed
+	// over prepared because frozen-reduced tool results carry marker content.
+	callMeta := scan.callMeta()
+	requestAge := requestBatchesAfter(prepared, currentBatch)
+	repeated := scan.repeatedOutputs()
 	toolResults := countToolResults(prepared)
+	nextReviewAge := make([]int, len(prepared))
+	if incrementalEnabled && len(frozenNextReviewAge) > 0 {
+		copy(nextReviewAge, frozenNextReviewAge)
+	}
+	toolResultThresholdCrossed := incrementalEnabled && previousToolResults < policy.MinToolResultsPrune && toolResults >= policy.MinToolResultsPrune
+	readValidityByIndex := analyzeReadValidity(prepared, callMeta)
+	if len(externalReadInvalidated) > 0 && readValidityByIndex == nil {
+		readValidityByIndex = make(map[int]readValidity, len(externalReadInvalidated))
+	}
+	for index := range externalReadInvalidated {
+		validity := readValidityByIndex[index]
+		validity.Invalidated = true
+		validity.Superseded = false
+		readValidityByIndex[index] = validity
+	}
 	reducedInputs := make(map[string]struct{})
+	reducedReadRevisions := make(map[string]string)
 
 	// Pass 1: collect reduction proposals without mutating anything. Proposals
 	// inside the frozen boundary rewrite bytes the provider already cached, so
@@ -207,8 +276,10 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		toolName string
 		rule     string
 		reduced  string
+		force    bool
 	}
 	var proposals []reductionProposal
+	semanticRefresh := false
 	// Seed with the frozen prefix's already-reduced messages so a re-read of
 	// content that was reduced on an earlier request still counts as
 	// over-compression. Only proposals guaranteed to apply this request (tail,
@@ -219,7 +290,14 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	for i := range prepared {
 		if incrementalEnabled && frozenReducedIndices != nil && i < len(frozenReducedIndices) && frozenReducedIndices[i] && prepared[i].Role == message.RoleTool {
 			meta := callMeta[prepared[i].ToolCallID]
-			reducedInputs[contextReductionToolInputKey(toolname.Normalize(meta.Name), meta.Args)] = struct{}{}
+			toolName := toolname.Normalize(meta.Name)
+			key := contextReductionToolInputKey(toolName, meta.Args)
+			reducedInputs[key] = struct{}{}
+			if toolName == tools.NameRead {
+				if revision := reductionReadRevision(&meta, prepared[i].FileState); revision != "" {
+					reducedReadRevisions[key] = revision
+				}
+			}
 		}
 	}
 	for i := range prepared {
@@ -229,40 +307,114 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		// Skip already-reduced frozen prefix messages: their content is a stable
 		// marker copied from the previous surface. Re-reducing could produce a
 		// different marker (e.g. repeated-call detection) and break cache reuse.
-		if incrementalEnabled && frozenReducedIndices != nil && i < len(frozenReducedIndices) && frozenReducedIndices[i] {
-			noteSkip(contextReductionSkipFrozenReduced)
-			continue
-		}
 		meta := callMeta[prepared[i].ToolCallID]
 		toolName := toolname.Normalize(meta.Name)
-		age := max(turnsAfter[i], messageAge[i])
+		age := requestAge[i]
+		validity := readValidityByIndex[i]
+		if incrementalEnabled && frozenReducedIndices != nil && i < len(frozenReducedIndices) && frozenReducedIndices[i] {
+			if toolName != tools.NameRead || (!validity.Invalidated && !validity.Superseded) {
+				noteSkip(contextReductionSkipFrozenReduced)
+				continue
+			}
+			ctx := requestReductionContext{
+				ToolName:        toolName,
+				Meta:            meta,
+				Content:         messages[i].Content,
+				ToolStatus:      messages[i].ToolStatus,
+				FileState:       messages[i].FileState,
+				Age:             age,
+				Policy:          policy,
+				ToolResults:     toolResults,
+				ReadInvalidated: validity.Invalidated,
+				ReadSuperseded:  validity.Superseded,
+			}
+			reduced, rule, ok := reduceRequestToolOutput(requestReductionReadLike, ctx)
+			if ok {
+				proposals = append(proposals, reductionProposal{
+					index:    i,
+					class:    requestReductionReadLike,
+					toolName: toolName,
+					rule:     rule,
+					reduced:  reduced,
+					force:    true,
+				})
+				semanticRefresh = true
+			}
+			continue
+		}
+		if externalReadInvalidated[i] && toolName == tools.NameRead {
+			ctx := requestReductionContext{
+				ToolName:        toolName,
+				Meta:            meta,
+				Content:         messages[i].Content,
+				ToolStatus:      messages[i].ToolStatus,
+				FileState:       messages[i].FileState,
+				Age:             age,
+				Policy:          policy,
+				ToolResults:     toolResults,
+				ReadInvalidated: true,
+			}
+			if reduced, rule, ok := reduceRequestToolOutput(requestReductionReadLike, ctx); ok {
+				proposals = append(proposals, reductionProposal{
+					index:    i,
+					class:    requestReductionReadLike,
+					toolName: toolName,
+					rule:     rule,
+					reduced:  reduced,
+					force:    true,
+				})
+				semanticRefresh = true
+			}
+			continue
+		}
+		if incrementalEnabled && i < frozenBoundary && toolName != tools.NameRead && !repeated[i] && !toolResultThresholdCrossed &&
+			i < len(frozenNextReviewAge) && frozenNextReviewAge[i] > age {
+			noteSkip(contextReductionSkipDeferredReview)
+			continue
+		}
 		ctx := requestReductionContext{
-			ToolName:    toolName,
-			Meta:        meta,
-			Content:     prepared[i].Content,
-			ToolStatus:  prepared[i].ToolStatus,
-			Age:         age,
-			UserTurnAge: turnsAfter[i],
-			Policy:      policy,
-			Repeated:    repeated[i],
-			ToolResults: toolResults,
+			ToolName:        toolName,
+			Meta:            meta,
+			Content:         prepared[i].Content,
+			ToolStatus:      prepared[i].ToolStatus,
+			FileState:       prepared[i].FileState,
+			Age:             age,
+			Policy:          policy,
+			Repeated:        repeated[i],
+			ToolResults:     toolResults,
+			ReadInvalidated: validity.Invalidated,
+			ReadSuperseded:  validity.Superseded,
 		}
 		class := classifyRequestReductionToolOutput(ctx)
 		if class == requestReductionNone {
-			if turnsAfter[i] < policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {
+			nextReviewAge[i] = nextContextReductionReviewAge(ctx)
+			if age < policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {
 				noteSkip(contextReductionSkipRecentHighRisk)
 			} else if len(prepared[i].Content) > policy.StaleOutputBytes {
 				noteSkip(contextReductionSkipLargeUnreduced)
 			}
-			if _, reducedBefore := reducedInputs[contextReductionToolInputKey(toolName, meta.Args)]; reducedBefore {
+			inputKey := contextReductionToolInputKey(toolName, meta.Args)
+			if _, reducedBefore := reducedInputs[inputKey]; reducedBefore {
 				if contextReductionIsReadLike(toolName) {
 					noteOverCompression(contextReductionOverCompressionReread)
+					if toolName == tools.NameRead {
+						previousRevision := reducedReadRevisions[inputKey]
+						currentRevision := reductionReadRevision(&meta, prepared[i].FileState)
+						if previousRevision != "" && currentRevision != "" {
+							if previousRevision == currentRevision {
+								noteOverCompression(contextReductionOverCompressionRereadSameRevision)
+							} else {
+								noteOverCompression(contextReductionOverCompressionRereadChangedRevision)
+							}
+						}
+					}
 				} else if looksLikeSearchResult(ctx) {
 					noteOverCompression(contextReductionOverCompressionResearch)
 				}
 			}
 			continue
 		}
+		nextReviewAge[i] = 0
 		reduced, rule, ok := reduceRequestToolOutput(class, ctx)
 		if !ok {
 			continue
@@ -275,7 +427,13 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			reduced:  reduced,
 		})
 		if !incrementalEnabled || i >= frozenBoundary {
-			reducedInputs[contextReductionToolInputKey(toolName, meta.Args)] = struct{}{}
+			inputKey := contextReductionToolInputKey(toolName, meta.Args)
+			reducedInputs[inputKey] = struct{}{}
+			if toolName == tools.NameRead {
+				if revision := reductionReadRevision(&meta, prepared[i].FileState); revision != "" {
+					reducedReadRevisions[inputKey] = revision
+				}
+			}
 		}
 	}
 
@@ -283,7 +441,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	// cached prefix at position p re-bills everything after p at input price
 	// (~10x the cache-read price), while the reduction saves its tokens on
 	// every subsequent request. Flush when the cache is invalid anyway (first
-	// request on this model ref, or high context pressure) or when the pending
+	// request on this model ref) or when the pending
 	// savings amortize the rewrite within a short horizon of future requests.
 	applyBoundary := true
 	if incrementalEnabled && frozenBoundary > 0 {
@@ -304,11 +462,9 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 		if earliestBoundary >= 0 {
 			cacheInvalidAnyway := modelSnapshot.ProjectedModelRunLength <= 1
-			usage := policy.contextUsage(stats.TokensBefore, inputBudget)
-			highPressure := policy.HighPressureUsage > 0 && usage >= policy.HighPressureUsage
 			tailTokens := ctxmgr.EstimateMessagesTokens(prepared[earliestBoundary:])
 			amortized := pendingSaved*reductionFlushHorizonRequests >= cacheMissPenaltyRatio*tailTokens
-			applyBoundary = cacheInvalidAnyway || highPressure || amortized
+			applyBoundary = cacheInvalidAnyway || amortized
 		}
 	}
 
@@ -316,7 +472,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	// the previously sent bytes stay cache-stable; they will be re-proposed on
 	// later requests until a flush condition holds.
 	for _, p := range proposals {
-		if !applyBoundary && incrementalEnabled && p.index < frozenBoundary {
+		if !p.force && !applyBoundary && incrementalEnabled && p.index < frozenBoundary {
 			noteSkip(contextReductionSkipDeferredCache)
 			continue
 		}
@@ -338,20 +494,21 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		if stats.TokensSaved == 0 && stats.TokensBefore > stats.TokensAfter {
 			stats.TokensSaved = stats.TokensBefore - stats.TokensAfter
 		}
-		if wrapUpGraceActive && wrapUpGraceLowPressure && stats.TokensSaved < policy.MinIncrementalTokens {
+		if !semanticRefresh && wrapUpGraceActive && stats.TokensSaved < policy.MinIncrementalTokens {
 			preserved := ContextReductionStats{TokensBefore: stats.TokensBefore, TokensAfter: stats.TokensBefore, Protected: true}
 			preserved.ProtectReason = contextProtectReasonWrapUpGrace
 			preserved.fillModelContinuity(modelSnapshot)
 			a.setCurrentRequestSurface(&preserved, messages)
 			a.setContextReductionStats(preserved)
 			if rememberPrepared {
-				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, messages)
+				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, messages, nextReviewAge, toolResults, policy)
 			}
 			return messages
 		}
-		if rememberPrepared {
-			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok {
-				reuseReason, savedDelta := policy.reuseStableReductionSurfaceReason(stats, previous.Stats, stats.TokensBefore, inputBudget)
+		if rememberPrepared && !semanticRefresh {
+			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok &&
+				!stableReductionSurfaceNeedsReview(previous, scan, currentBatch, externalReadInvalidated) {
+				reuseReason, savedDelta := policy.reuseStableReductionSurfaceReason(stats, previous.Stats)
 				stats.ReuseReason = reuseReason
 				stats.SavedDelta = savedDelta
 				if reuseReason == contextReuseReasonBelowIncrementalMin {
@@ -382,31 +539,196 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		a.fillReductionModelContinuity(&stats)
 		a.setContextReductionStats(stats)
 		if rememberPrepared {
-			a.rememberPreparedLLMRequest(a.currentTurnID(), messages, prepared)
+			a.rememberPreparedLLMRequest(a.currentTurnID(), messages, prepared, nextReviewAge, toolResults, policy)
 		}
 	}
 	return prepared
 }
 
-func (a *MainAgent) contextReductionInputBudget() int {
-	if a == nil || a.llmClient == nil {
-		return 0
+func (a *MainAgent) currentRequestBatch(messages []message.Message) uint64 {
+	if a != nil {
+		if batch := a.requestBatches.current(a.sessionEpoch); batch > 0 {
+			return batch
+		}
 	}
-	a.llmMu.RLock()
-	ref := a.runningModelRef
-	if ref == "" {
-		ref = a.providerModelRef
+	return maxRequestBatch(messages)
+}
+
+func reductionReadRevision(meta *toolCallMeta, state *message.ToolFileState) string {
+	if meta == nil || state == nil {
+		return ""
 	}
-	a.llmMu.RUnlock()
-	if ref == "" {
-		return 0
+	request := meta.parsedReadRequest()
+	if revision := firstReadHashForPath(state, request.Path); revision != "" {
+		return revision
 	}
-	limit := a.llmClient.ContextLimitForModelRef(ref)
-	if limit <= 0 {
-		return 0
+	for _, read := range state.Reads {
+		if read.Exists && strings.TrimSpace(read.SHA256) != "" {
+			return strings.TrimSpace(read.SHA256)
+		}
 	}
-	reserved := min(compactReservedOutput, limit/8)
-	return limit - reserved
+	return ""
+}
+
+// shellReadInvalidationMemo remembers, per mutating shell result, which
+// (path, expected-hash) pairs were already verified against the disk. It is
+// keyed by the shell's ToolCallID: a completed command's side effects are
+// fixed, so its verdicts never change, and a newer mutating shell resets the
+// map.
+type shellReadInvalidationMemo struct {
+	mu       sync.Mutex
+	shellID  string
+	verdicts map[string]bool
+}
+
+func (a *MainAgent) externallyInvalidatedReadsAfterMutatingShell(messages []message.Message, scan *reductionHistoryScan) map[int]bool {
+	if a == nil || a.tools == nil || len(messages) == 0 {
+		return nil
+	}
+	boundary := 0
+	if surface, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok {
+		boundary = min(len(surface.Messages), len(messages))
+	}
+	callMeta := scan.callMeta()
+	mutatingShell := false
+	shellIndex := -1
+	for i := len(messages) - 1; i >= boundary; i-- {
+		msg := messages[i]
+		if msg.Role != message.RoleTool || isToolResultErrorStatus(msg.ToolStatus) {
+			continue
+		}
+		meta := callMeta[msg.ToolCallID]
+		if toolname.Normalize(meta.Name) == tools.NameShell && tools.ConcurrencyClassForTool(a.tools, tools.NameShell, json.RawMessage(meta.Args)) != tools.ToolConcurrencyClassReadOnly {
+			mutatingShell = true
+			shellIndex = i
+			break
+		}
+	}
+	if !mutatingShell || shellIndex <= 0 {
+		return nil
+	}
+	type currentFileRevision struct {
+		hash   string
+		exists bool
+		valid  bool
+	}
+	hashes := make(map[string]currentFileRevision)
+	// A completed shell's side effects are fixed, so each (path, expected-hash)
+	// pair needs one disk verification per shell result instead of one per LLM
+	// request; a newer mutating shell resets the memo and re-verifies.
+	shellID := strings.TrimSpace(messages[shellIndex].ToolCallID)
+	a.shellReadMemo.mu.Lock()
+	defer a.shellReadMemo.mu.Unlock()
+	if a.shellReadMemo.shellID != shellID || a.shellReadMemo.verdicts == nil {
+		a.shellReadMemo.shellID = shellID
+		a.shellReadMemo.verdicts = make(map[string]bool)
+	}
+	verdicts := a.shellReadMemo.verdicts
+	var invalidated map[int]bool
+	for i := 0; i < shellIndex; i++ {
+		msg := messages[i]
+		if msg.Role != message.RoleTool || msg.FileState == nil || toolname.Normalize(callMeta[msg.ToolCallID].Name) != tools.NameRead {
+			continue
+		}
+		for _, read := range msg.FileState.Reads {
+			path := strings.TrimSpace(read.Path)
+			expected := strings.TrimSpace(read.SHA256)
+			if path == "" || expected == "" || !read.Exists {
+				continue
+			}
+			if !filepath.IsAbs(path) && a.projectRoot != "" {
+				path = filepath.Join(a.projectRoot, path)
+			}
+			key := path + "\x00" + expected
+			verdict, cached := verdicts[key]
+			if !cached {
+				current, checked := hashes[path]
+				if !checked {
+					hash, exists, err := verifiedCurrentFileHash(path)
+					current = currentFileRevision{hash: hash, exists: exists, valid: err == nil}
+					hashes[path] = current
+				}
+				if !current.valid {
+					// Transient verify error: leave the pair unmemoized so the
+					// next pass retries instead of freezing a bad verdict.
+					continue
+				}
+				verdict = !current.exists || current.hash != expected
+				verdicts[key] = verdict
+			}
+			if verdict {
+				if invalidated == nil {
+					invalidated = make(map[int]bool)
+				}
+				invalidated[i] = true
+				break
+			}
+		}
+	}
+	return invalidated
+}
+
+func stableReductionSurfaceNeedsReview(surface stableReductionSurface, scan *reductionHistoryScan, currentBatch uint64, externalInvalidated map[int]bool) bool {
+	messages := scan.messages
+	boundary := len(surface.Messages)
+	if boundary == 0 || len(messages) < boundary {
+		return true
+	}
+	latestBatch := uint64(0)
+	for i := range boundary {
+		if messages[i].Role == message.RoleAssistant && len(messages[i].ToolCalls) > 0 && messages[i].RequestBatch > 0 {
+			latestBatch = messages[i].RequestBatch
+		}
+		if i >= len(surface.NextReviewAge) || surface.NextReviewAge[i] <= 0 || messages[i].Role != message.RoleTool || latestBatch == 0 || currentBatch <= latestBatch {
+			continue
+		}
+		if int(currentBatch-latestBatch) >= surface.NextReviewAge[i] {
+			return true
+		}
+	}
+	if len(externalInvalidated) > 0 {
+		return true
+	}
+	newToolResults := countToolResults(messages[boundary:])
+	toolResults := surface.ToolResults + newToolResults
+	if surface.ToolResults < surface.Policy.MinToolResultsPrune && toolResults >= surface.Policy.MinToolResultsPrune {
+		return true
+	}
+	if newToolResults == 0 {
+		return false
+	}
+	callMeta := scan.callMeta()
+	repeated := scan.repeatedOutputs()
+	validity := scan.readValidity()
+	for i := range boundary {
+		alreadyReduced := i < len(surface.ReducedIndices) && surface.ReducedIndices[i]
+		// Repeated detection runs over the immutable original history, so a
+		// duplicated call flags its earlier index forever. Once that index is
+		// reduced to the repeated marker there is nothing left to review, and
+		// treating it as reviewable would permanently disable surface reuse.
+		if repeated[i] && !alreadyReduced {
+			return true
+		}
+		if !alreadyReduced || messages[i].Role != message.RoleTool || toolname.Normalize(callMeta[messages[i].ToolCallID].Name) != tools.NameRead {
+			continue
+		}
+		state := validity[i]
+		marker := surface.Messages[i].Content
+		// Validity here is computed over the ORIGINAL messages while the
+		// frozen marker was built from the PREPARED view, so the two can
+		// legitimately disagree on stale-vs-superseded for an already-reduced
+		// read (a later edit overlaps the original range but not the kept
+		// head). Either marker means the read was trimmed with guidance; the
+		// still-full covering read carries the stale warning. Requiring the
+		// exact class here would re-run the full scan on every request for
+		// the rest of the session without changing any output.
+		reducedMarked := strings.Contains(marker, "truncated="+tools.ReadTruncatedStale) ||
+			strings.Contains(marker, "truncated="+tools.ReadTruncatedSuperseded)
+		if (state.Invalidated || state.Superseded) && !reducedMarked {
+			return true
+		}
+	}
+	return false
 }
 
 type llmModelContinuitySnapshot struct {
@@ -472,7 +794,29 @@ func (a *MainAgent) resetLLMModelRun() {
 	a.llmModelRunLength = 0
 }
 
-func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, original, prepared []message.Message) {
+// modelChangedSinceLastPreparedRequest reports whether the running model
+// differs from the one used by the previous prepared LLM request. The frozen
+// reduction surface was produced under the previous model's budget, so a change
+// here means it must not be reused: the new model is entitled to its own
+// reduction. Returns false when there was no previous prepared request (fresh
+// session), since there is nothing to invalidate.
+func (a *MainAgent) modelChangedSinceLastPreparedRequest() bool {
+	if a == nil {
+		return false
+	}
+	a.llmMu.RLock()
+	defer a.llmMu.RUnlock()
+	if a.lastLLMRequestModelRef == "" {
+		return false
+	}
+	current := a.runningModelRef
+	if current == "" {
+		current = a.providerModelRef
+	}
+	return current != a.lastLLMRequestModelRef
+}
+
+func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, original, prepared []message.Message, nextReviewAge []int, toolResults int, policy contextReductionPolicy) {
 	if a == nil || turnID == 0 {
 		return
 	}
@@ -486,6 +830,9 @@ func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, original, prepared
 	a.lastPreparedLLMShapeSource = source
 	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(prepared)
 	a.lastPreparedLLMReducedIndices = reducedIndices
+	a.lastPreparedLLMNextReviewAge = append([]int(nil), nextReviewAge...)
+	a.lastPreparedLLMToolResults = toolResults
+	a.lastPreparedReductionPolicy = policy
 	a.lastPreparedLLMToolDefHash = toolDefHash
 	a.lastPreparedReductionStats = cloneContextReductionStats(a.contextReductionStats)
 }
@@ -631,33 +978,37 @@ func (a *MainAgent) consumePreparedStablePrefixLen() int {
 // Incremental reduction is disabled when:
 //   - there is no previous stable surface for this turn;
 //   - the prefix shapes are incompatible (history changed underneath us);
-//   - the tool-definition surface changed (cache prefix invalidated);
-//   - context pressure is at or above ForcePruneUsage (size control wins).
-func (a *MainAgent) incrementalReductionSurface(prepared []message.Message, policy contextReductionPolicy) (frozenPrefix []message.Message, reducedIndices []bool, boundary int, enabled bool) {
+//   - the tool-definition surface changed (cache prefix invalidated).
+func (a *MainAgent) incrementalReductionSurface(prepared []message.Message) (frozenPrefix []message.Message, reducedIndices []bool, nextReviewAge []int, previousToolResults, boundary int, enabled bool) {
 	if a == nil {
-		return nil, nil, 0, false
+		return nil, nil, nil, 0, 0, false
 	}
 	previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID())
 	if !ok || len(previous.Messages) == 0 || len(prepared) < len(previous.Messages) {
-		return nil, nil, 0, false
+		return nil, nil, nil, 0, 0, false
+	}
+	// A model switch that happened this turn must invalidate the frozen
+	// surface: the previous surface was reduced under the old model's context
+	// budget and run-length assumptions, so reusing it would skip the
+	// reduction the new model is entitled to. Compare against the model used by
+	// the previous prepared request, not ProjectedModelRunLength, since the
+	// latter is also 1 on the first request of a fresh model run (no switch).
+	if a.modelChangedSinceLastPreparedRequest() {
+		return nil, nil, nil, 0, 0, false
 	}
 	// Tool-definition change invalidates the entire frozen surface.
 	if previous.ToolDefHash != a.computeToolDefinitionHash() {
-		return nil, nil, 0, false
+		return nil, nil, nil, 0, 0, false
 	}
-	// High pressure: re-reduce everything to keep context size under control.
-	estimatedTokens := ctxmgr.EstimateMessagesTokens(prepared)
-	inputBudget := a.contextReductionInputBudget()
-	usage := policy.contextUsage(estimatedTokens, inputBudget)
-	if policy.ForcePruneUsage > 0 && usage >= policy.ForcePruneUsage {
-		return nil, nil, 0, false
+	if previous.Policy != a.contextReductionPolicy() {
+		return nil, nil, nil, 0, 0, false
 	}
 	// Shape compatibility ensures the prefix messages have not changed since
 	// the previous surface was recorded (same content, Role, ToolCalls, etc).
 	if !stableReductionPrefixCompatible(previous, prepared[:len(previous.Messages)]) {
-		return nil, nil, 0, false
+		return nil, nil, nil, 0, 0, false
 	}
-	return previous.Messages, previous.ReducedIndices, len(previous.Messages), true
+	return previous.Messages, previous.ReducedIndices, previous.NextReviewAge, previous.ToolResults, len(previous.Messages), true
 }
 
 func (a *MainAgent) updatePreparedLLMRequestSurface(turnID uint64, prepared []message.Message) {
@@ -685,6 +1036,9 @@ type stableReductionSurface struct {
 	ShapeSource    []message.Message
 	Stats          ContextReductionStats
 	ReducedIndices []bool
+	NextReviewAge  []int
+	ToolResults    int
+	Policy         contextReductionPolicy
 	ToolDefHash    [sha256.Size]byte
 }
 
@@ -704,8 +1058,10 @@ type stableReductionMessageShape struct {
 	ResponsesOutputHash [sha256.Size]byte
 	GeminiPartsHash     [sha256.Size]byte
 	ReasoningHash       [sha256.Size]byte
+	CompactionFilesHash [sha256.Size]byte
 	ToolCallsHash       [sha256.Size]byte
 	ToolCallID          string
+	RequestBatch        uint64
 	ToolDiffHash        [sha256.Size]byte
 	ToolDiffAdded       int
 	ToolDiffRemoved     int
@@ -751,6 +1107,9 @@ func (a *MainAgent) stableReductionSurfaceCandidate(turnID uint64) (stableReduct
 		ShapeSource:    a.lastPreparedLLMShapeSource,
 		Stats:          a.lastPreparedReductionStats,
 		ReducedIndices: a.lastPreparedLLMReducedIndices,
+		NextReviewAge:  a.lastPreparedLLMNextReviewAge,
+		ToolResults:    a.lastPreparedLLMToolResults,
+		Policy:         a.lastPreparedReductionPolicy,
 		ToolDefHash:    a.lastPreparedLLMToolDefHash,
 	}, true
 }
@@ -825,8 +1184,10 @@ func stableReductionMessageShapeOf(msg *message.Message) stableReductionMessageS
 		ResponsesOutputHash: stableReductionResponsesOutputHash(msg.ResponsesOutput),
 		GeminiPartsHash:     stableReductionGeminiPartsHash(msg.GeminiParts),
 		ReasoningHash:       stableReductionHashString(msg.ReasoningContent),
+		CompactionFilesHash: stableReductionStringMapHash(msg.CompactionFileRevisions),
 		ToolCallsHash:       stableReductionToolCallsHash(msg.ToolCalls),
 		ToolCallID:          msg.ToolCallID,
+		RequestBatch:        msg.RequestBatch,
 		ToolDiffHash:        stableReductionHashString(msg.ToolDiff),
 		ToolDiffAdded:       msg.ToolDiffAdded,
 		ToolDiffRemoved:     msg.ToolDiffRemoved,
@@ -861,12 +1222,16 @@ func stableReductionMessageEquivalent(a, b *message.Message) bool {
 		a.Content != b.Content ||
 		a.ReasoningContent != b.ReasoningContent ||
 		a.ToolCallID != b.ToolCallID ||
+		a.RequestBatch != b.RequestBatch ||
 		a.ToolDiff != b.ToolDiff ||
 		a.ToolDiffAdded != b.ToolDiffAdded ||
 		a.ToolDiffRemoved != b.ToolDiffRemoved ||
 		a.ToolStatus != b.ToolStatus ||
 		a.IsCompactionSummary != b.IsCompactionSummary ||
 		a.Kind != b.Kind {
+		return false
+	}
+	if !maps.Equal(a.CompactionFileRevisions, b.CompactionFileRevisions) {
 		return false
 	}
 	if stableReductionProvenanceShapeFor(a.Provenance) != stableReductionProvenanceShapeFor(b.Provenance) {
@@ -928,6 +1293,24 @@ func stableReductionProvenanceShapeFor(provenance *message.MessageProvenance) st
 
 func stableReductionHashString(value string) [sha256.Size]byte {
 	return sha256.Sum256([]byte(value))
+}
+
+func stableReductionStringMapHash(values map[string]string) [sha256.Size]byte {
+	if len(values) == 0 {
+		return stableReductionEmptySequenceHash
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	h := sha256.New()
+	stableReductionWriteInt(h, len(keys))
+	for _, key := range keys {
+		stableReductionWriteString(h, key)
+		stableReductionWriteString(h, values[key])
+	}
+	return stableReductionHashBytes(h.Sum(nil))
 }
 
 var stableReductionEmptySequenceHash = func() [sha256.Size]byte {
@@ -1106,7 +1489,7 @@ func toolResultSupportedByNearestAssistant(messages []message.Message, toolIdx i
 	return false
 }
 
-func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []message.Message, policy contextReductionPolicy, inputBudget int) ([]message.Message, ContextReductionStats, bool) {
+func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []message.Message, policy contextReductionPolicy, scan *reductionHistoryScan, currentBatch uint64, externalInvalidated map[int]bool) ([]message.Message, ContextReductionStats, bool) {
 	previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID())
 	if !ok || len(previous.Messages) == 0 || len(messages) < len(previous.Messages) {
 		return nil, ContextReductionStats{}, false
@@ -1114,12 +1497,13 @@ func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []mess
 	if !hasReductionSavings(previous.Stats) {
 		return nil, ContextReductionStats{}, false
 	}
-	currentTokens := ctxmgr.EstimateMessagesTokens(messages)
-	usage := policy.contextUsage(currentTokens, inputBudget)
-	if policy.ForcePruneUsage > 0 && usage >= policy.ForcePruneUsage {
+	// A model switch this turn invalidates the previous reduction surface for
+	// the same reason as the incremental path: the new model must get a fresh
+	// reduction under its own context budget, not the old model's frozen one.
+	if a.modelChangedSinceLastPreparedRequest() {
 		return nil, ContextReductionStats{}, false
 	}
-	if policy.HighPressureUsage > 0 && usage >= policy.HighPressureUsage {
+	if stableReductionSurfaceNeedsReview(previous, scan, currentBatch, externalInvalidated) {
 		return nil, ContextReductionStats{}, false
 	}
 	tailTokens := ctxmgr.EstimateMessagesTokens(messages[len(previous.Messages):])
@@ -1321,6 +1705,11 @@ func (a *MainAgent) clearLoopReductionCache(clearVisibleStats bool) {
 	defer a.loopReductionMu.Unlock()
 	a.loopState.FrozenReductionPrefix = nil
 	a.loopState.FrozenReductionShape = nil
+	a.loopState.FrozenReductionReducedIndices = nil
+	a.loopState.FrozenReductionNextReviewAge = nil
+	a.loopState.FrozenReductionToolResults = 0
+	a.loopState.FrozenReductionPolicy = contextReductionPolicy{}
+	a.loopState.FrozenReductionToolDefHash = [sha256.Size]byte{}
 	a.loopState.FrozenReductionStats = ContextReductionStats{}
 	a.wrapUpGraceTurnID = 0
 	a.wrapUpGraceRemaining = 0
@@ -1330,6 +1719,9 @@ func (a *MainAgent) clearLoopReductionCache(clearVisibleStats bool) {
 		a.lastPreparedLLMShapeSource = nil
 		a.lastPreparedLLMRequestPrefix = nil
 		a.lastPreparedLLMReducedIndices = nil
+		a.lastPreparedLLMNextReviewAge = nil
+		a.lastPreparedLLMToolResults = 0
+		a.lastPreparedReductionPolicy = contextReductionPolicy{}
 		a.lastPreparedLLMToolDefHash = [sha256.Size]byte{}
 		a.lastPreparedReductionStats = ContextReductionStats{}
 		a.contextReductionStats = ContextReductionStats{}
@@ -1443,6 +1835,11 @@ func (a *MainAgent) freezeLoopReductionPrefixForCurrentTurn() {
 	}
 	a.loopState.FrozenReductionShape = append([]stableReductionMessageShape(nil), a.lastPreparedLLMRequestShape...)
 	a.loopState.FrozenReductionPrefix = cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix)
+	a.loopState.FrozenReductionReducedIndices = append([]bool(nil), a.lastPreparedLLMReducedIndices...)
+	a.loopState.FrozenReductionNextReviewAge = append([]int(nil), a.lastPreparedLLMNextReviewAge...)
+	a.loopState.FrozenReductionToolResults = a.lastPreparedLLMToolResults
+	a.loopState.FrozenReductionPolicy = a.lastPreparedReductionPolicy
+	a.loopState.FrozenReductionToolDefHash = a.lastPreparedLLMToolDefHash
 	a.loopState.FrozenReductionStats = cloneContextReductionStats(a.lastPreparedReductionStats)
 	a.contextReductionStats = cloneContextReductionStats(a.lastPreparedReductionStats)
 }
@@ -1460,12 +1857,22 @@ func (a *MainAgent) contextSurfaceReductionSnapshot() (enabled bool, frozen stab
 	if len(a.loopState.FrozenReductionPrefix) == 0 && turnID != 0 && a.lastPreparedLLMTurnID == turnID {
 		a.loopState.FrozenReductionShape = append([]stableReductionMessageShape(nil), a.lastPreparedLLMRequestShape...)
 		a.loopState.FrozenReductionPrefix = cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix)
+		a.loopState.FrozenReductionReducedIndices = append([]bool(nil), a.lastPreparedLLMReducedIndices...)
+		a.loopState.FrozenReductionNextReviewAge = append([]int(nil), a.lastPreparedLLMNextReviewAge...)
+		a.loopState.FrozenReductionToolResults = a.lastPreparedLLMToolResults
+		a.loopState.FrozenReductionPolicy = a.lastPreparedReductionPolicy
+		a.loopState.FrozenReductionToolDefHash = a.lastPreparedLLMToolDefHash
 		a.loopState.FrozenReductionStats = cloneContextReductionStats(a.lastPreparedReductionStats)
 	}
 	return true, stableReductionSurface{
-		Messages: cloneMessageSliceForRequestShape(a.loopState.FrozenReductionPrefix),
-		Shape:    append([]stableReductionMessageShape(nil), a.loopState.FrozenReductionShape...),
-		Stats:    cloneContextReductionStats(a.loopState.FrozenReductionStats),
+		Messages:       cloneMessageSliceForRequestShape(a.loopState.FrozenReductionPrefix),
+		Shape:          append([]stableReductionMessageShape(nil), a.loopState.FrozenReductionShape...),
+		Stats:          cloneContextReductionStats(a.loopState.FrozenReductionStats),
+		ReducedIndices: append([]bool(nil), a.loopState.FrozenReductionReducedIndices...),
+		NextReviewAge:  append([]int(nil), a.loopState.FrozenReductionNextReviewAge...),
+		ToolResults:    a.loopState.FrozenReductionToolResults,
+		Policy:         a.loopState.FrozenReductionPolicy,
+		ToolDefHash:    a.loopState.FrozenReductionToolDefHash,
 	}
 }
 
@@ -1592,6 +1999,7 @@ func cloneMessageForRequestShape(msg message.Message) message.Message {
 	if len(msg.GeminiParts) > 0 {
 		cloned.GeminiParts = append([]message.GeminiReplayPart(nil), msg.GeminiParts...)
 	}
+	cloned.CompactionFileRevisions = cloneCompactionFileRevisions(msg.CompactionFileRevisions)
 	if msg.FileState != nil {
 		cloned.FileState = msg.FileState.Clone()
 	}
@@ -1624,31 +2032,38 @@ func buildToolCallMeta(messages []message.Message) map[string]toolCallMeta {
 	return meta
 }
 
-func userTurnsAfter(messages []message.Message) []int {
-	turnsAfter := make([]int, len(messages))
+// requestBatchesAfter reports tool-result age in main-model request batches.
+// Persisted request IDs preserve failed-request gaps; legacy histories without
+// IDs fall back to counting later assistant responses. All parallel tool calls
+// declared by one assistant message share its request batch.
+func requestBatchesAfter(messages []message.Message, currentBatch uint64) []int {
+	ages := make([]int, len(messages))
+	batchByToolCall := make(map[string]uint64)
+	for _, msg := range messages {
+		if msg.Role != message.RoleAssistant || msg.RequestBatch == 0 {
+			continue
+		}
+		for _, call := range msg.ToolCalls {
+			batchByToolCall[call.ID] = msg.RequestBatch
+		}
+	}
+	seenAssistants := 0
 	seenUsers := 0
 	for i := len(messages) - 1; i >= 0; i-- {
-		turnsAfter[i] = seenUsers
+		ages[i] = max(seenAssistants, seenUsers)
+		batch := messages[i].RequestBatch
+		if messages[i].Role == message.RoleTool {
+			batch = batchByToolCall[messages[i].ToolCallID]
+		}
+		if batch > 0 && currentBatch >= batch {
+			ages[i] = int(currentBatch - batch)
+		}
+		if messages[i].Role == message.RoleAssistant {
+			seenAssistants++
+		}
 		if messages[i].Role == message.RoleUser {
 			seenUsers++
 		}
-	}
-	return turnsAfter
-}
-
-// messageProgressTurnsAfter converts later message progress into an effective
-// age measured in the same units as the user-facing *_age_turns settings. This
-// prevents long single-turn tool chains from keeping early large outputs forever
-// just because no later user message has arrived yet.
-func messageProgressTurnsAfter(messages []message.Message, messagesPerEffectiveTurn int) []int {
-	ages := make([]int, len(messages))
-	if messagesPerEffectiveTurn <= 0 {
-		return ages
-	}
-	seenMessages := 0
-	for i := len(messages) - 1; i >= 0; i-- {
-		ages[i] = seenMessages / messagesPerEffectiveTurn
-		seenMessages++
 	}
 	return ages
 }

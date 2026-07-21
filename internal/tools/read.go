@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,7 +35,7 @@ func (t ReadTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (ReadTool) Description() string {
-	return "Read file contents by line for code inspection and edits, with optional offset/limit line paging up to 2000 lines by default. Prefer grep or lsp to locate symbols before reading a small nearby block. Normal output starts with one READ_RESULT metadata line of the form `READ_RESULT lines=a-b total=N` (1-based inclusive returned range and total file line count), or `READ_RESULT lines=none total=N` when no line was returned (empty file, or an offset exactly at end of file which is the normal end of paging; an offset strictly past the last line is an error); everything after that first line is exact file text without line-number gutters or extra indentation, so copy only the text after READ_RESULT into edit hunks. A read that simply did not reach the end of the file is not truncation. Only when the tool itself drops requested lines to fit the approximate 20k-token read budget does the header add `truncated=budget requested_lines=a-d`, where a-d is the range you originally requested; compare it with the returned lines=a-b and page further with offset/limit. If a file or saved output is a huge single line that cannot fit in read output, use grep to locate patterns or a script/parser via shell for structured processing instead of character-range reads. A later context-reduction pass may mark an aged read output with `truncated=stale`, keeping only its leading lines (lines=a-b then covers just the kept head) to save tokens; re-read with offset/limit if you need the rest. The header omits encoding for UTF-8 files and reports it only for other encodings. For edit, include a few unchanged source lines around the intended change; if you need more surrounding context, read the intended nearby block before patching. read output normalizes line endings to LF; edit preserves the file's existing line-ending style when writing."
+	return "Read file contents by line for code inspection and edits, with optional offset/limit line paging up to 2000 lines by default. Prefer grep or lsp to locate symbols before reading a small nearby block. Normal output starts with one READ_RESULT metadata line of the form `READ_RESULT lines=a-b total=N` (1-based inclusive returned range and total file line count), or `READ_RESULT lines=none total=N` when no line was returned (empty file, or an offset exactly at end of file which is the normal end of paging; an offset strictly past the last line is an error); everything after that first line is exact file text without line-number gutters or extra indentation, so copy only the text after READ_RESULT into edit hunks. A read that simply did not reach the end of the file is not truncation. Only when the tool itself drops requested lines to fit the approximate 20k-token read budget does the header add `truncated=budget requested_lines=a-d`, where a-d is the range you originally requested; compare it with the returned lines=a-b and page further with offset/limit. If a file or saved output is a huge single line that cannot fit in read output, use grep to locate patterns or a script/parser via shell for structured processing instead of character-range reads. A context-reduction pass trims an old read output only when its content is no longer the current view, keeping the leading lines (lines=a-b then covers just the kept head): truncated=stale means the file was modified after that read, so do not trust its content and re-read before editing; truncated=superseded means a newer read of the same range appears later in this conversation, so use that newer output. A read that is still current is never trimmed, so do not re-read files just to refresh them. The header omits encoding for UTF-8 files and reports it only for other encodings. For edit, include a few unchanged source lines around the intended change; if you need more surrounding context, read the intended nearby block before patching. read output normalizes line endings to LF; edit preserves the file's existing line-ending style when writing."
 }
 
 func (ReadTool) Parameters() map[string]any {
@@ -148,23 +150,26 @@ func readResultHeader(startLine, endLine, totalLines, requestedEndLine int, enco
 }
 
 // Read header truncation kinds. budget means the read tool itself dropped
-// requested lines at call time to fit the output budget; stale means a later
-// context-reduction pass trimmed an aged read output to save tokens.
+// requested lines at call time to fit the output budget; the other kinds are
+// applied by a later context-reduction pass: stale means the file was modified
+// after this read (content untrustworthy), superseded means a newer read of
+// the same range appears later in the conversation. Still-valid reads are
+// never trimmed.
 const (
-	ReadTruncatedBudget = "budget"
-	ReadTruncatedStale  = "stale"
+	ReadTruncatedBudget     = "budget"
+	ReadTruncatedStale      = "stale"
+	ReadTruncatedSuperseded = "superseded"
 )
 
 // FormatReadResultHeader builds the single READ_RESULT metadata line shared by
-// the read tool and the context-reduction summary so both truncation paths
-// (truncated=budget and truncated=stale) render identically and differ only in
-// the truncation reason.
+// the read tool and the context-reduction summary so all truncation paths
+// render identically and differ only in the truncation reason.
 //
 // linesField is the already-formatted returned range: "a-b", a multi-segment
 // "a-b,c-d" when only head/tail lines survive, or "none" when no line was
-// returned. truncatedKind is "", ReadTruncatedBudget or ReadTruncatedStale.
-// requestedLines (e.g. "a-d") is appended only for budget truncation. encoding
-// is appended only for non-UTF-8 files.
+// returned. truncatedKind is "", ReadTruncatedBudget, ReadTruncatedStale or
+// ReadTruncatedSuperseded. requestedLines (e.g. "a-d") is appended only for
+// budget truncation. encoding is appended only for non-UTF-8 files.
 func FormatReadResultHeader(linesField string, totalLines int, truncatedKind, requestedLines, encoding string) string {
 	header := fmt.Sprintf("READ_RESULT lines=%s total=%d", linesField, totalLines)
 	switch truncatedKind {
@@ -173,8 +178,8 @@ func FormatReadResultHeader(linesField string, totalLines int, truncatedKind, re
 		if requestedLines != "" {
 			header += " requested_lines=" + requestedLines
 		}
-	case ReadTruncatedStale:
-		header += " truncated=" + ReadTruncatedStale
+	case ReadTruncatedStale, ReadTruncatedSuperseded:
+		header += " truncated=" + truncatedKind
 	}
 	if normalized := strings.ToLower(strings.TrimSpace(encoding)); normalized != "" && normalized != "utf-8" {
 		header += " encoding=" + quoteReadHeaderValue(encoding)
@@ -277,7 +282,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("file too large (%d bytes, max %d); use offset/limit to read a portion or grep to search", info.Size(), MaxReadFileBytes)
 	}
 
-	decoded, err := ReadDecodedTextFile(resolvedPath)
+	decoded, rawBytes, err := ReadAndDecodeTextFile(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("file not found: %s", a.Path)
@@ -289,6 +294,14 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			return "", fmt.Errorf("cannot read binary file: %s", a.Path)
 		}
 		return "", fmt.Errorf("reading file: %w", err)
+	}
+	if sink, ok := readObservationSinkFromContext(ctx); ok {
+		sum := sha256.Sum256(rawBytes)
+		observedPath := resolvedPath
+		if absPath, absErr := resolveToolPathAbsInDir(a.Path, t.BaseDir); absErr == nil {
+			observedPath = absPath
+		}
+		sink.SetReadObservation(ReadObservation{Path: observedPath, SHA256: hex.EncodeToString(sum[:])})
 	}
 	lines := splitReadToolLines(decoded.Text)
 	totalLines := len(lines)

@@ -74,6 +74,7 @@ type LLMResponsePayload struct {
 	ThinkingToolcallMarkerHit bool
 	ReasoningContent          string              // full reasoning text when marker hit
 	Usage                     *message.TokenUsage // token usage for this round; nil when the provider did not return usage; persisted with the assistant message for session resume
+	RequestBatch              uint64              // actual main-model request sequence assigned before dispatch
 }
 
 // ToolResultPayload wraps a tool execution result for the internal event bus.

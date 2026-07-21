@@ -57,11 +57,15 @@ func (a *MainAgent) scheduleCompactionAsync(snapshot []message.Message, planID u
 }
 
 func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Message, planID uint64, target compactionTarget, trigger compactionTrigger, continuation continuationPlan, manual bool) {
-	// Calculate headSplit: the frozen boundary between archived head and preserved tail.
-	headSplit := len(snapshot)
-	if headSplit > 0 {
-		headSplit = a.ctxMgr.ComputeSafeKeepBoundary(headSplit)
+	todos := a.GetTodos()
+	subAgents := a.taskInfosForCompaction()
+	backgroundObjects := spawnStatesForSnapshot()
+	evidenceItems := a.evidenceItemsForCompaction(snapshot, a.ctxMgr.GetMaxTokens())
+	profile := a.resolveCompactionProfile(todos, subAgents, backgroundObjects, evidenceItems)
+	if a.configuredCompactionProfile() == compactionProfileAuto && continuationRequiresRawTail(continuation.kind) {
+		profile = compactionProfileContinuation
 	}
+	headSplit := compactionHeadSplitForProfile(profile, snapshot, a.ctxMgr.GetMaxTokens())
 
 	ctx, cancel := context.WithCancel(a.parentCtx)
 	a.beginCompactionState(planID, target, trigger, continuation, headSplit, cancel)
@@ -69,11 +73,11 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	a.emitActivity("main", ActivityCompacting, "context")
 	a.emitToTUI(CompactionStatusEvent{Status: "started"})
 	a.compactionWg.Add(1)
-	go func(ctx context.Context, snapshot []message.Message, planID uint64, target compactionTarget, headSplit int, manual bool) {
+	go func(ctx context.Context, snapshot []message.Message, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, manual bool) {
 		defer a.compactionWg.Done()
 		defer cancel()
 
-		draft, err := a.produceCompactionDraftAsync(ctx, snapshot, manual, planID, target, headSplit)
+		draft, err := a.produceCompactionDraftAsync(ctx, snapshot, manual, planID, target, headSplit, profile)
 		if err != nil {
 			a.sendEvent(Event{Type: EventCompactionFailed, Payload: &compactionFailure{planID: planID, target: target, err: err, absHistoryPath: getAbsHistoryPathFromDraft(draft)}})
 			return
@@ -84,7 +88,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 			draft.HeadSplit = headSplit
 		}
 		a.sendEvent(Event{Type: EventCompactionReady, Payload: draft})
-	}(ctx, snapshot, planID, target, headSplit, manual)
+	}(ctx, snapshot, planID, target, headSplit, profile, manual)
 }
 
 func (a *MainAgent) maybeRunAutoCompaction() {
@@ -124,7 +128,7 @@ func (a *MainAgent) handleCompactCommand() {
 // new message list. Safe to call from a background goroutine (read-only use of
 // MainAgent fields + LLM / filesystem). Tail messages [headSplit:) are preserved
 // by ReplacePrefixAtomic at apply time, so the draft only carries the summary.
-func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []message.Message, manual bool, planID uint64, target compactionTarget, headSplit int) (*compactionDraft, error) {
+func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []message.Message, manual bool, planID uint64, target compactionTarget, headSplit int, profile compactionProfile) (*compactionDraft, error) {
 	// Check for cancellation before starting expensive work
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -155,16 +159,13 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	todos := a.GetTodos()
 	subAgents := a.taskInfosForCompaction()
 	backgroundObjects := spawnStatesForSnapshot()
-	evidenceItems := a.evidenceItemsForCompaction(snapshot, a.ctxMgr.GetMaxTokens())
-	profile := a.resolveCompactionProfile(todos, subAgents, backgroundObjects, evidenceItems)
+	headSnapshot := snapshot[:headSplit]
+	evidenceItems := a.evidenceItemsForCompaction(headSnapshot, a.ctxMgr.GetMaxTokens())
 
-	// In async mode, we skip recentTail because [headSplit:] messages
-	// will be preserved as the tail by ReplacePrefixAtomic.
-	// Only apply the profile for evidence selection; set recentTail to nil.
-	evidenceItems, _ = applyCompactionProfile(profile, snapshot, a.ctxMgr.GetMaxTokens(), evidenceItems)
-	recentTail := []message.Message(nil) // Async: no recentTail in draft
+	evidenceItems, _ = applyCompactionProfile(profile, headSnapshot, a.ctxMgr.GetMaxTokens(), evidenceItems)
+	recentTail := append([]message.Message(nil), snapshot[headSplit:]...)
 	keyFiles := extractCompactionKeyFileCandidates(snapshot, a.projectRoot, 8)
-	head, evidenceMsgs := splitMessagesForCompactionWithSelections(snapshot, recentTail, evidenceItems)
+	head, evidenceMsgs := splitMessagesForCompactionWithSelections(headSnapshot, nil, evidenceItems)
 	if len(head) == 0 {
 		return &compactionDraft{
 			Skip:         true,
@@ -226,10 +227,14 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, fmt.Errorf("list history references: %w", err)
 	}
 	summaryText = ensureCompactionSummaryKeyFiles(strings.TrimSpace(summaryText), keyFiles)
+	checkpointContent := buildCompactionCheckpointMessage(summaryText, historyRefs, summaryMode, evidenceItems)
+	checkpointKeyFiles := extractCompactionKeyFiles(checkpointContent, a.projectRoot)
+	keyFileRevisions := captureCompactionFileRevisions(checkpointKeyFiles, a.resolveCheckpointFilePath)
 	contextSummaryMsg := message.Message{
-		Role:                "user",
-		Content:             buildCompactionCheckpointMessage(summaryText, historyRefs, summaryMode, evidenceItems),
-		IsCompactionSummary: true,
+		Role:                    "user",
+		Content:                 checkpointContent,
+		IsCompactionSummary:     true,
+		CompactionFileRevisions: keyFileRevisions,
 	}
 
 	// Async mode: NewMessages only contains [summary + evidence], no recentTail
@@ -288,6 +293,7 @@ func (a *MainAgent) applyCompactionDraft(d *compactionDraft) error {
 // preserving tail messages that were added during the async compaction goroutine.
 func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	headSplit := d.HeadSplit
+	d.NewMessages = a.refreshCompactionFileRevisions(d.NewMessages)
 
 	// Capture the original first user message BEFORE entering ReplacePrefixAtomic,
 	// because the rewrite callback runs while ctxmgr's write lock is held and

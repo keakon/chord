@@ -13,35 +13,34 @@ import (
 
 const (
 	// Raw evidence pack: small continuation stabilizer (checkpoint-first design).
-	compactEvidenceMinTokens        = 512
-	compactEvidenceMaxTokens        = 2048
-	compactEvidencePercentNumer     = 2 // ~2% of context window
-	compactEvidencePercentDenom     = 100
-	compactRecentTailMinTokens      = 768
-	compactRecentTailMaxTokens      = 3072
-	compactRecentTailTurns          = 2
-	compactPromptOverhead           = 4096
-	compactReservedOutput           = 4096
-	compactPreflightBufferMin       = 1024
-	compactPreflightBufferRatio     = 50 // reserve ~2% extra input budget for provider framing / hidden overhead
-	compactConfirmAgeTurns          = 2
-	compactErrorAgeTurns            = 3
-	compactBashSuccessAgeTurns      = 1
-	compactReadLikeAgeTurns         = 1
-	compactStaleAgeTurns            = 3
-	compactHighRiskProtectAgeTurns  = 4
-	compactBashSuccessBytes         = 3000
-	compactReadLikeOutputBytes      = 3000
-	reduceSnippetChars              = 500
-	summaryLineSnippetChars         = 180
-	compactStaleOutputBytes         = 1500
-	compactMinToolResultsPrune      = 6
-	compactMinIncrementalTokens     = 2048
-	compactMessagesPerEffectiveTurn = 8
-	compactSummaryMinChars          = 160
-	compactPromptSubAgentLimit      = 6
-	compactPromptDescMaxChars       = 240
-	compactPromptSummaryMaxChars    = 320
+	compactEvidenceMinTokens       = 512
+	compactEvidenceMaxTokens       = 2048
+	compactEvidencePercentNumer    = 2 // ~2% of context window
+	compactEvidencePercentDenom    = 100
+	compactRecentTailMinTokens     = 768
+	compactRecentTailMaxTokens     = 3072
+	compactRecentTailTurns         = 2
+	compactPromptOverhead          = 4096
+	compactReservedOutput          = 4096
+	compactPreflightBufferMin      = 1024
+	compactPreflightBufferRatio    = 50 // reserve ~2% extra input budget for provider framing / hidden overhead
+	compactConfirmAgeTurns         = 2
+	compactErrorAgeTurns           = 3
+	compactBashSuccessAgeTurns     = 1
+	compactReadLikeAgeTurns        = 1
+	compactStaleAgeTurns           = 3
+	compactHighRiskProtectAgeTurns = 4
+	compactBashSuccessBytes        = 3000
+	compactReadLikeOutputBytes     = 3000
+	reduceSnippetChars             = 500
+	summaryLineSnippetChars        = 180
+	compactStaleOutputBytes        = 1500
+	compactMinToolResultsPrune     = 6
+	compactMinIncrementalTokens    = 2048
+	compactSummaryMinChars         = 160
+	compactPromptSubAgentLimit     = 6
+	compactPromptDescMaxChars      = 240
+	compactPromptSummaryMaxChars   = 320
 	// Budget ratio for compaction input - use 1/6 of context window
 	// to reduce transcript size and speed up model calls.
 	compactBudgetRatio = 6
@@ -178,8 +177,18 @@ const (
 )
 
 type toolCallMeta struct {
-	Name string
-	Args string
+	Name              string
+	Args              string
+	readRequest       readRequestSummary
+	readRequestParsed bool
+}
+
+func (m *toolCallMeta) parsedReadRequest() readRequestSummary {
+	if !m.readRequestParsed {
+		m.readRequest = parseReadRequestSummary(m.Args)
+		m.readRequestParsed = true
+	}
+	return m.readRequest
 }
 
 func compactTextSnippet(s string, maxChars int) string {

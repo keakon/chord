@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -65,7 +66,12 @@ type loopRuntimeState struct {
 	// FrozenReductionShape is the original request shape for FrozenReductionPrefix.
 	// It lets reuse reject stale prefixes when the apparent prefix length still
 	// matches but tool-call chains or other model-visible fields changed.
-	FrozenReductionShape []stableReductionMessageShape
+	FrozenReductionShape          []stableReductionMessageShape
+	FrozenReductionReducedIndices []bool
+	FrozenReductionNextReviewAge  []int
+	FrozenReductionToolResults    int
+	FrozenReductionPolicy         contextReductionPolicy
+	FrozenReductionToolDefHash    [sha256.Size]byte
 	// FrozenReductionStats is the request-level reduction effect of the frozen
 	// prefix. It remains stable while the low-quota surface freeze is active because
 	// later messages are appended unreduced.
@@ -123,6 +129,11 @@ func (s *loopRuntimeState) disable() {
 	s.DeferContinuationPromptUntilDone = false
 	s.FrozenReductionPrefix = nil
 	s.FrozenReductionShape = nil
+	s.FrozenReductionReducedIndices = nil
+	s.FrozenReductionNextReviewAge = nil
+	s.FrozenReductionToolResults = 0
+	s.FrozenReductionPolicy = contextReductionPolicy{}
+	s.FrozenReductionToolDefHash = [sha256.Size]byte{}
 	s.FrozenReductionStats = ContextReductionStats{}
 	s.Enabled = false
 }

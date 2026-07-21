@@ -36,8 +36,6 @@ func TestDefaultConfigContextReductionThresholds(t *testing.T) {
 		WrapUpGraceRequests:     1,
 		MinToolResultsPrune:     6,
 		MinIncrementalTokens:    2048,
-		HighPressureUsage:       0.80,
-		ForcePruneUsage:         0.90,
 	}
 	if got != want {
 		t.Fatalf("DefaultConfig().Context.Reduction = %+v, want %+v", got, want)
@@ -126,6 +124,23 @@ func TestLoadConfigFromPathContextReductionFalseIsInvalid(t *testing.T) {
 	}
 	if got := err.Error(); !strings.Contains(got, "cannot unmarshal") || !strings.Contains(got, "ContextReductionConfig") {
 		t.Fatalf("LoadConfigFromPath error = %q, want bool-to-ContextReductionConfig parse error", got)
+	}
+}
+
+func TestLoadConfigFromPathRejectsRemovedContextReductionUsageKeys(t *testing.T) {
+	for _, key := range []string{"high_pressure_usage", "force_prune_usage"} {
+		t.Run(key, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.yaml")
+			content := []byte("context:\n  reduction:\n    " + key + ": 0.8\n")
+			if err := os.WriteFile(path, content, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadConfigFromPath(path)
+			if err == nil || !strings.Contains(err.Error(), key+" was removed") {
+				t.Fatalf("LoadConfigFromPath error = %v, want removed-key guidance", err)
+			}
+		})
 	}
 }
 

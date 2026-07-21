@@ -76,9 +76,12 @@ type ToolFileState struct {
 
 // TrackedFileState records the observed state of one file at tool completion.
 type TrackedFileState struct {
-	Path   string `json:"path"`
-	SHA256 string `json:"sha256,omitempty"`
-	Exists bool   `json:"exists"`
+	Path         string `json:"path"`
+	SHA256       string `json:"sha256,omitempty"`
+	Exists       bool   `json:"exists"`
+	ChangedStart int    `json:"changed_start,omitempty"` // 1-based pre-edit line range; zero means whole file/unknown
+	ChangedEnd   int    `json:"changed_end,omitempty"`
+	LineDelta    int    `json:"line_delta,omitempty"`
 }
 
 func (s *ToolFileState) Clone() *ToolFileState {
@@ -130,6 +133,7 @@ type Message struct {
 	ReasoningContent          string                `json:"reasoning_content,omitempty"`           // assistant only; OpenAI-compatible reasoning/thinking text for chain replay
 	ToolCalls                 []ToolCall            `json:"tool_calls,omitempty"`                  // non-nil for assistant tool_use
 	ToolCallID                string                `json:"tool_call_id,omitempty"`                // non-empty for tool results
+	RequestBatch              uint64                `json:"request_batch,omitempty"`               // main-model request sequence that produced this assistant message
 	ToolDiff                  string                `json:"tool_diff,omitempty"`                   // unified diff for Write/Edit tool results
 	ToolDiffAdded             int                   `json:"tool_diff_added,omitempty"`             // total added lines for Write/Edit; computed before diff truncation
 	ToolDiffRemoved           int                   `json:"tool_diff_removed,omitempty"`           // total removed lines for Write/Edit; computed before diff truncation
@@ -141,6 +145,7 @@ type Message struct {
 	LSPReviews                []LSPReview           `json:"lsp_reviews,omitempty"`                 // per-server last-review snapshot for the directly edited file only
 	Audit                     *ToolArgsAudit        `json:"audit,omitempty"`                       // tool-call audit metadata when effective args differ after confirmation
 	IsCompactionSummary       bool                  `json:"is_compaction_summary,omitempty"`       // first user message after compaction (summary of archived history)
+	CompactionFileRevisions   map[string]string     `json:"compaction_file_revisions,omitempty"`   // key-file revisions captured when this checkpoint was created
 	StopReason                string                `json:"stop_reason,omitempty"`                 // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
 	Provenance                *MessageProvenance    `json:"provenance,omitempty"`                  // optional producer/source metadata for model-compat replay decisions
 	// Usage is the token usage for this message when it ends an LLM round (assistant only).
@@ -398,4 +403,5 @@ type Response struct {
 	// (response.completed / response.incomplete). Used by the Codex WebSocket
 	// transport for connection-scoped previous_response_id incremental requests.
 	ProviderResponseID string
+	RequestBatch       uint64
 }

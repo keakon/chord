@@ -2,6 +2,17 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
+## Unreleased
+
+### Breaking Changes
+
+- Context reduction no longer accepts `context.reduction.high_pressure_usage` or `force_prune_usage`; request-batch age thresholds now determine when output is reduced. Remove those keys from existing configuration files. Chord reports a migration error instead of silently ignoring them.
+
+### Fixes
+
+- Still-valid `read` outputs are never trimmed by request-level context reduction anymore. The shared 96 KB valid-read protection budget and the `truncated=aged` age-based trimming were removed: both could evict content the model had just read (a batch of parallel reads competed against its own budget), forcing paged re-reads or summary-based guessing while the context was nowhere near its limit. Reduction now trims a read only when it is provably outdated (`truncated=stale` after a file mutation) or duplicated later in context (`truncated=superseded`); capacity pressure remains durable Compaction's job. The `READ_RECOVERY` metadata line and trimmed-definition outlines were dropped with the aged path — models never used them, re-reading is the natural recovery.
+- Whole-file `write` and `delete` authorization now binds a complete `read` or `<file>` reference to the exact bytes shown to the model. Partial/stale file references, files changed while a read is completing, and relative paths under a SubAgent working directory can no longer authorize replacement of an unseen version.
+
 ## 0.7.2 - 2026-07-20
 
 ### Breaking Changes

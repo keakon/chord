@@ -8,18 +8,19 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/filelock"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestAcquireDeleteLocksNoopsForInvalidOrAbsentInput(t *testing.T) {
 	tracker := filelock.NewFileTracker()
-	if locks, err := acquireDeleteLocks(nil, "main", json.RawMessage(`{"paths":["file.txt"],"reason":"cleanup"}`)); err != nil || locks != nil {
+	if locks, err := acquireDeleteLocks(nil, "main", json.RawMessage(`{"paths":["file.txt"],"reason":"cleanup"}`), ""); err != nil || locks != nil {
 		t.Fatalf("nil tracker acquire = (%#v, %v), want nil nil", locks, err)
 	}
-	if locks, err := acquireDeleteLocks(tracker, "main", json.RawMessage(`{`)); err != nil || locks != nil {
+	if locks, err := acquireDeleteLocks(tracker, "main", json.RawMessage(`{`), ""); err != nil || locks != nil {
 		t.Fatalf("invalid args acquire = (%#v, %v), want nil nil", locks, err)
 	}
 	absent := filepath.Join(t.TempDir(), "absent.txt")
-	if locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, absent)); err != nil || locks != nil {
+	if locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, absent), ""); err != nil || locks != nil {
 		t.Fatalf("absent path acquire = (%#v, %v), want nil nil", locks, err)
 	}
 }
@@ -27,8 +28,9 @@ func TestAcquireDeleteLocksNoopsForInvalidOrAbsentInput(t *testing.T) {
 func TestAcquireDeleteLocksLocksExistingPathsAndReleaseAborts(t *testing.T) {
 	tracker := filelock.NewFileTracker()
 	path := writeDeleteLockFile(t, "target.txt", "before")
+	tracker.TrackSnapshot(path, "main", computeFileHash(path))
 
-	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, path))
+	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, path), "")
 	if err != nil {
 		t.Fatalf("acquireDeleteLocks: %v", err)
 	}
@@ -45,7 +47,29 @@ func TestAcquireDeleteLocksLocksExistingPathsAndReleaseAborts(t *testing.T) {
 	tracker.AbortWrite(path, "other")
 }
 
-func TestAcquireDeleteLocksReportsStaleRead(t *testing.T) {
+func TestDeleteLockCommitAuditReleasesRelativeBaseDirPath(t *testing.T) {
+	dir := t.TempDir()
+	path := writeDeleteLockFileInDir(t, dir, "deleted.txt", "before")
+	tracker := filelock.NewFileTracker()
+	tracker.TrackObservedSnapshot(path, "main", computeFileHash(path))
+	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, "deleted.txt"), dir)
+	if err != nil {
+		t.Fatalf("acquireDeleteLocks: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	locks.CommitAudit(tools.DeleteAudit{Deleted: []string{path}})
+	locks.Release()
+	if err := os.WriteFile(path, []byte("recreated"), 0o644); err != nil {
+		t.Fatalf("recreate: %v", err)
+	}
+	if _, err := tracker.AcquireWriteStatus(path, "other", computeFileHash(path)); err != nil {
+		t.Fatalf("delete lock was not released: %v", err)
+	}
+}
+
+func TestAcquireDeleteLocksRejectsStaleRead(t *testing.T) {
 	tracker := filelock.NewFileTracker()
 	path := writeDeleteLockFile(t, "stale.txt", "before")
 	tracker.TrackSnapshot(path, "main", computeFileHash(path))
@@ -53,14 +77,81 @@ func TestAcquireDeleteLocksReportsStaleRead(t *testing.T) {
 		t.Fatalf("WriteFile external: %v", err)
 	}
 
-	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, path))
+	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, path), "")
+	if err == nil || locks != nil {
+		t.Fatalf("acquireDeleteLocks = (%#v, %v), want stale-read rejection", locks, err)
+	}
+	if !strings.Contains(err.Error(), "changed after the last read") {
+		t.Fatalf("unexpected stale-read error: %v", err)
+	}
+}
+
+func TestAcquireDeleteLocksRejectsUnreadableExistingFile(t *testing.T) {
+	tracker := filelock.NewFileTracker()
+	path := writeDeleteLockFile(t, "unreadable.txt", "secret")
+	if err := os.Chmod(path, 0); err != nil {
+		t.Skipf("chmod unsupported: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+	if _, err := os.ReadFile(path); err == nil {
+		t.Skip("platform still permits reading mode-000 file")
+	}
+
+	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, path), "")
+	if locks != nil {
+		locks.Release()
+	}
+	if err == nil || !strings.Contains(err.Error(), "current state cannot be verified") {
+		t.Fatalf("acquireDeleteLocks = (%#v, %v), want unverifiable-state rejection", locks, err)
+	}
+}
+
+func TestAcquireDeleteLocksRejectsDanglingSymlinkWithoutObservation(t *testing.T) {
+	tracker := filelock.NewFileTracker()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dangling-link")
+	if err := os.Symlink(filepath.Join(dir, "missing-target"), path); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, path), "")
+	if locks != nil {
+		locks.Release()
+	}
+	if err == nil || !strings.Contains(err.Error(), "current state cannot be verified") {
+		t.Fatalf("acquireDeleteLocks = (%#v, %v), want unverifiable-state rejection", locks, err)
+	}
+}
+
+func TestDeleteLockCommitAuditKeepsSymlinkTargetSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	target := writeDeleteLockFileInDir(t, dir, "target.txt", "target")
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	tracker := filelock.NewFileTracker()
+	hash := computeFileHash(target)
+	tracker.TrackObservedSnapshot(target, "main", hash)
+
+	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, link), "")
 	if err != nil {
 		t.Fatalf("acquireDeleteLocks: %v", err)
 	}
-	if locks == nil || !locks.stale {
-		t.Fatalf("locks = %#v, want stale lock set", locks)
+	if err := os.Remove(link); err != nil {
+		t.Fatalf("remove symlink: %v", err)
 	}
+	locks.CommitAudit(tools.DeleteAudit{Deleted: []string{link}})
 	locks.Release()
+
+	observation := tracker.Observation(target, "main", hash)
+	if !observation.Observed || !observation.Current {
+		t.Fatalf("target observation = %#v, want current target snapshot preserved", observation)
+	}
+	if _, err := tracker.AcquireWriteStatus(target, "other", hash); err != nil {
+		t.Fatalf("symlink target lock remained: %v", err)
+	}
+	tracker.AbortWrite(target, "other")
 }
 
 func TestAcquireDeleteLocksRollsBackEarlierLocksOnConflict(t *testing.T) {
@@ -68,12 +159,14 @@ func TestAcquireDeleteLocksRollsBackEarlierLocksOnConflict(t *testing.T) {
 	dir := t.TempDir()
 	first := writeDeleteLockFileInDir(t, dir, "a-first.txt", "one")
 	second := writeDeleteLockFileInDir(t, dir, "b-second.txt", "two")
+	tracker.TrackSnapshot(first, "main", computeFileHash(first))
+	tracker.TrackSnapshot(second, "main", computeFileHash(second))
 	if err := tracker.AcquireWrite(second, "other", computeFileHash(second)); err != nil {
 		t.Fatalf("AcquireWrite second: %v", err)
 	}
 	defer tracker.AbortWrite(second, "other")
 
-	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, first, second))
+	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, first, second), "")
 	if err == nil || locks != nil {
 		t.Fatalf("acquireDeleteLocks = (%#v, %v), want conflict error", locks, err)
 	}
@@ -90,9 +183,10 @@ func TestDeleteLockCommitInvalidatesOtherReaders(t *testing.T) {
 	tracker := filelock.NewFileTracker()
 	path := writeDeleteLockFile(t, "deleted.txt", "before")
 	otherHash := computeFileHash(path)
+	tracker.TrackSnapshot(path, "main", otherHash)
 	tracker.TrackSnapshot(path, "other", otherHash)
 
-	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, path))
+	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, path), "")
 	if err != nil {
 		t.Fatalf("acquireDeleteLocks: %v", err)
 	}

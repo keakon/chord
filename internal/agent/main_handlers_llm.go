@@ -295,6 +295,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		ReasoningContent: reasoningContent,
 		ToolCalls:        sanitizedToolCalls,
 		StopReason:       payload.StopReason,
+		RequestBatch:     payload.RequestBatch,
 		Provenance:       mainAssistantProvenance(a),
 	}
 	assistantMsg.Usage = payload.Usage

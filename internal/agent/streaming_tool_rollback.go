@@ -38,43 +38,47 @@ type speculativeFileSnapshot struct {
 }
 
 type speculativeFileMutation struct {
-	agentID    string
-	track      *filelock.FileTracker
-	files      []speculativeFileSnapshot
-	stale      bool
-	paths      []string
-	commit     bool
-	rolledBack bool
+	agentID string
+	track   *filelock.FileTracker
+	files   []speculativeFileSnapshot
+	stale   bool
+	paths   []string
+	// observedOnCommit marks whole-file writes: the committed content is
+	// exactly the bytes the model supplied, so committing records it as an
+	// observation and a follow-up write/delete needs no redundant re-read.
+	observedOnCommit bool
+	commit           bool
+	rolledBack       bool
 }
 
-func prepareSpeculativeToolCall(tc message.ToolCall, registry *tools.Registry, track *filelock.FileTracker, agentID, projectRoot string) (*speculativeToolHooks, error) {
+func prepareSpeculativeToolCall(tc message.ToolCall, registry *tools.Registry, track *filelock.FileTracker, agentID, baseDir string) (*speculativeToolHooks, error) {
 	switch strings.TrimSpace(tc.Name) {
 	case tools.NameWrite:
-		path, ok := singlePathToolPath(tc.Args)
+		path, ok := singlePathToolPath(tc.Args, baseDir)
 		if !ok {
 			return nil, nil
 		}
-		mutation, err := newSpeculativeFileMutation(track, agentID, []string{path})
+		mutation, err := newSpeculativeFileMutation(track, agentID, []string{path}, "write")
 		if err != nil {
 			return nil, err
 		}
 		return mutation.hooks(), nil
 	case tools.NameEdit, tools.NamePatch:
-		path := tools.ExtractEditPathFromArgsInDir(tc.Args, projectRoot)
+		path := tools.ExtractEditPathFromArgsInDir(tc.Args, baseDir)
 		if path == "" {
 			return nil, nil
 		}
-		mutation, err := newSpeculativeFileMutation(track, agentID, []string{path})
+		mutation, err := newSpeculativeFileMutation(track, agentID, []string{path}, "")
 		if err != nil {
 			return nil, err
 		}
 		return mutation.hooks(), nil
 	case tools.NameDelete:
-		paths, err := deleteToolPaths(tc.Args)
+		paths, err := deleteToolPaths(tc.Args, baseDir)
 		if err != nil {
 			return nil, err
 		}
-		mutation, err := newSpeculativeFileMutation(track, agentID, paths)
+		mutation, err := newSpeculativeFileMutation(track, agentID, paths, "delete")
 		if err != nil {
 			return nil, err
 		}
@@ -104,34 +108,38 @@ func prepareSpeculativeToolCall(tc message.ToolCall, registry *tools.Registry, t
 	}
 }
 
-func singlePathToolPath(args json.RawMessage) (string, bool) {
+func singlePathToolPath(args json.RawMessage, baseDir string) (string, bool) {
 	var parsed struct {
 		Path string `json:"path"`
 	}
 	if err := json.Unmarshal(llm.UnwrapToolArgs(args), &parsed); err != nil {
 		return "", false
 	}
-	path := normalizeSpeculativeMutationPath(parsed.Path)
+	path, err := tools.ResolveToolPathInDir(parsed.Path, baseDir)
+	if err != nil {
+		return "", false
+	}
+	path = normalizeSpeculativeMutationPath(path)
 	if path == "" {
 		return "", false
 	}
 	return path, true
 }
 
-func deleteToolPaths(args json.RawMessage) ([]string, error) {
-	req, err := tools.DecodeDeleteRequest(llm.UnwrapToolArgs(args))
+func deleteToolPaths(args json.RawMessage, baseDir string) ([]string, error) {
+	req, err := tools.DecodeDeleteRequestInDir(llm.UnwrapToolArgs(args), baseDir)
 	if err != nil {
 		return nil, err
 	}
 	return req.Paths, nil
 }
 
-func newSpeculativeFileMutation(track *filelock.FileTracker, agentID string, paths []string) (*speculativeFileMutation, error) {
+func newSpeculativeFileMutation(track *filelock.FileTracker, agentID string, paths []string, observationAction string) (*speculativeFileMutation, error) {
 	paths = normalizeSpeculativeMutationPaths(paths)
 	if len(paths) == 0 {
 		return nil, nil
 	}
-	mutation := &speculativeFileMutation{agentID: agentID, track: track, files: make([]speculativeFileSnapshot, 0, len(paths))}
+	mutation := &speculativeFileMutation{agentID: agentID, track: track, files: make([]speculativeFileSnapshot, 0, len(paths)), observedOnCommit: observationAction == "write"}
 	locked := make([]string, 0, len(paths))
 	for _, path := range paths {
 		snap, err := captureSpeculativeFileSnapshot(path)
@@ -151,7 +159,15 @@ func newSpeculativeFileMutation(track *filelock.FileTracker, agentID string, pat
 				}
 				return nil, err
 			}
-			if status.ExternalChanged {
+			if observationAction != "" {
+				if err := requireCurrentFileObservation(track, agentID, path, snap.Hash, observationAction, status.ExternalChanged); err != nil {
+					track.AbortWrite(path, agentID)
+					for _, l := range slices.Backward(locked) {
+						track.AbortWrite(l, agentID)
+					}
+					return nil, err
+				}
+			} else if status.ExternalChanged {
 				mutation.stale = true
 			}
 			locked = append(locked, path)
@@ -261,10 +277,15 @@ func (m *speculativeFileMutation) Commit() {
 	}
 	m.commit = true
 	for _, snap := range m.files {
-		if m.track == nil || !snap.Existed {
+		if m.track == nil {
 			continue
 		}
-		m.track.ReleaseWrite(snap.Path, m.agentID, snap.PostHash)
+		if snap.Existed {
+			m.track.ReleaseWrite(snap.Path, m.agentID, snap.PostHash)
+		}
+		if m.observedOnCommit && snap.PostHash != "" {
+			m.track.TrackObservedSnapshot(snap.Path, m.agentID, snap.PostHash)
+		}
 	}
 }
 

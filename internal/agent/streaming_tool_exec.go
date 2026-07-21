@@ -511,7 +511,7 @@ func (e *StreamingToolExecutor) speculativeMutationBarrierLocked(call message.To
 func speculativeConflictKeys(call message.ToolCall, projectRoot string) []string {
 	switch tools.NormalizeName(call.Name) {
 	case tools.NameWrite:
-		if path, ok := singlePathToolPath(call.Args); ok {
+		if path, ok := singlePathToolPath(call.Args, projectRoot); ok {
 			return []string{"file:" + path}
 		}
 	case tools.NameEdit, tools.NamePatch:
@@ -519,7 +519,7 @@ func speculativeConflictKeys(call message.ToolCall, projectRoot string) []string
 			return []string{"file:" + path}
 		}
 	case tools.NameDelete:
-		paths, err := deleteToolPaths(call.Args)
+		paths, err := deleteToolPaths(call.Args, projectRoot)
 		if err == nil && len(paths) > 0 {
 			normalized := normalizeSpeculativeMutationPaths(paths)
 			keys := make([]string, 0, len(normalized))

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -42,8 +43,6 @@ const (
 	contextReuseReasonNone                = ""
 	contextReuseReasonBelowIncrementalMin = "below_incremental_min"
 	contextReuseReasonNoPreviousSavings   = "no_previous_savings"
-	contextReuseReasonHighPressure        = "high_pressure"
-	contextReuseReasonForcePrune          = "force_prune"
 )
 
 type ContextReductionBucket struct {
@@ -57,9 +56,12 @@ const (
 	contextReductionSkipLargeUnreduced = "large_but_unreduced"
 	contextReductionSkipFrozenReduced  = "frozen_reduced"
 	contextReductionSkipDeferredCache  = "deferred_for_cache"
+	contextReductionSkipDeferredReview = "deferred_for_review"
 
-	contextReductionOverCompressionReread   = "reread_after_reduction"
-	contextReductionOverCompressionResearch = "research_after_reduction"
+	contextReductionOverCompressionReread                = "reread_after_reduction"
+	contextReductionOverCompressionRereadSameRevision    = "reread_same_revision_after_reduction"
+	contextReductionOverCompressionRereadChangedRevision = "reread_changed_revision_after_reduction"
+	contextReductionOverCompressionResearch              = "research_after_reduction"
 )
 
 // Cache-aware flush model for boundary reductions. Rewriting an already-sent
@@ -87,8 +89,6 @@ type contextReductionPolicy struct {
 	WrapUpGraceRequests     int
 	MinToolResultsPrune     int
 	MinIncrementalTokens    int
-	HighPressureUsage       float64
-	ForcePruneUsage         float64
 }
 
 func defaultContextReductionPolicy() contextReductionPolicy {
@@ -105,8 +105,6 @@ func defaultContextReductionPolicy() contextReductionPolicy {
 		WrapUpGraceRequests:     contextReductionWrapUpGraceRequests,
 		MinToolResultsPrune:     compactMinToolResultsPrune,
 		MinIncrementalTokens:    compactMinIncrementalTokens,
-		HighPressureUsage:       0.80,
-		ForcePruneUsage:         0.90,
 	}
 }
 
@@ -161,31 +159,11 @@ func (p *contextReductionPolicy) applyConfig(cfg config.ContextReductionConfig) 
 	if cfg.MinIncrementalTokens > 0 {
 		p.MinIncrementalTokens = cfg.MinIncrementalTokens
 	}
-	if cfg.HighPressureUsage > 0 {
-		p.HighPressureUsage = cfg.HighPressureUsage
-	}
-	if cfg.ForcePruneUsage > 0 {
-		p.ForcePruneUsage = cfg.ForcePruneUsage
-	}
 }
 
-func (p contextReductionPolicy) contextUsage(estimatedTokens, inputBudget int) float64 {
-	if inputBudget <= 0 {
-		return 1
-	}
-	return float64(estimatedTokens) / float64(inputBudget)
-}
-
-func (p contextReductionPolicy) reuseStableReductionSurfaceReason(stats, previous ContextReductionStats, estimatedTokens, inputBudget int) (string, int) {
+func (p contextReductionPolicy) reuseStableReductionSurfaceReason(stats, previous ContextReductionStats) (string, int) {
 	if p.MinIncrementalTokens <= 0 || stats.TokensSaved <= 0 || previous.TokensSaved <= 0 {
 		return contextReuseReasonNoPreviousSavings, 0
-	}
-	usage := p.contextUsage(estimatedTokens, inputBudget)
-	if p.ForcePruneUsage > 0 && usage >= p.ForcePruneUsage {
-		return contextReuseReasonForcePrune, stats.TokensSaved - previous.TokensSaved
-	}
-	if p.HighPressureUsage > 0 && usage >= p.HighPressureUsage {
-		return contextReuseReasonHighPressure, stats.TokensSaved - previous.TokensSaved
 	}
 	delta := stats.TokensSaved - previous.TokensSaved
 	if delta < p.MinIncrementalTokens {
@@ -195,7 +173,6 @@ func (p contextReductionPolicy) reuseStableReductionSurfaceReason(stats, previou
 }
 
 var (
-	readResultRangeRe    = regexp.MustCompile(`^READ_RESULT\b.*\blines=(\d+)-(\d+)\b.*\btotal=(\d+)\b`)
 	numberedSourceLineRe = regexp.MustCompile(`^\s*\d+\s+(?:\S|$)`)
 	pathListLikelyFileRe = regexp.MustCompile(`(?:^|/)[^/\s]+\.[A-Za-z0-9_+.-]+$`)
 	diffHunkHeaderLineRe = regexp.MustCompile(`^@@@?\s+-\d+(?:,\d+)?(?:\s+-\d+(?:,\d+)?)*\s+\+\d+(?:,\d+)?\s+@@@?`)
@@ -275,18 +252,40 @@ type requestReductionContext struct {
 	Meta        toolCallMeta
 	Content     string
 	ToolStatus  string
+	FileState   *message.ToolFileState
 	Age         int
-	UserTurnAge int
 	Policy      contextReductionPolicy
 	Repeated    bool
 	ToolResults int
+	// ReadInvalidated / ReadSuperseded carry the conversation-level validity of
+	// a read output (see analyzeReadValidity).
+	ReadInvalidated bool
+	ReadSuperseded  bool
+}
+
+// readRetentionProtects reports whether this successful read output must not
+// be reduced. A read that is still the model's only current view of the file
+// content — not invalidated by a later file mutation and not superseded by a
+// newer read of the same range — is protected indefinitely regardless of age
+// or size: trimming it forces the model either to re-read content it already
+// paid for (extra rounds, broken prompt cache) or, worse, to answer from a
+// summary it cannot verify. Capacity pressure is compaction's job, not
+// reduction's.
+func (ctx requestReductionContext) readRetentionProtects() bool {
+	if ctx.ToolName != tools.NameRead || isToolResultErrorStatus(ctx.ToolStatus) {
+		return false
+	}
+	return !ctx.ReadInvalidated && !ctx.ReadSuperseded
 }
 
 func classifyRequestReductionToolOutput(ctx requestReductionContext) requestReductionClass {
 	if ctx.Repeated && ctx.Age >= 1 {
 		return requestReductionRepeated
 	}
-	if ctx.UserTurnAge < ctx.Policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {
+	if ctx.Age < ctx.Policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {
+		return requestReductionNone
+	}
+	if ctx.readRetentionProtects() {
 		return requestReductionNone
 	}
 	if ctx.Age >= ctx.Policy.ErrorAgeTurns && (isToolResultErrorStatus(ctx.ToolStatus) || isToolErrorContent(ctx.Content)) {
@@ -343,6 +342,30 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		return requestReductionGeneric
 	}
 	return requestReductionNone
+}
+
+// nextContextReductionReviewAge returns the next request age at which an
+// unchanged non-read tool result can cross an age-based reduction rule. Zero
+// means no later age threshold can change its classification; other state
+// changes (repeat detection and the generic tool-count gate) are handled by the
+// caller before consulting this frontier.
+func nextContextReductionReviewAge(ctx requestReductionContext) int {
+	thresholds := []int{
+		1,
+		ctx.Policy.ErrorAgeTurns,
+		ctx.Policy.ConfirmAgeTurns,
+		ctx.Policy.ShellSuccessAgeTurns,
+		ctx.Policy.ReadLikeAgeTurns,
+		ctx.Policy.StaleAgeTurns,
+		ctx.Policy.HighRiskProtectAgeTurns,
+	}
+	next := 0
+	for _, threshold := range thresholds {
+		if threshold > ctx.Age && (next == 0 || threshold < next) {
+			next = threshold
+		}
+	}
+	return next
 }
 
 // Marker keyword sets shared by the context-reduction heuristics. They are kept
@@ -515,7 +538,7 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 		}
 		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
 	case requestReductionReadLike:
-		return reduceReadLikeOutputSummary(ctx.ToolName, ctx.Meta.Args, ctx.Content), "read_like", true
+		return reduceReadLikeOutputSummary(ctx), "read_like", true
 	case requestReductionSearch:
 		return reduceSearchLikeOutputSummary(ctx), "search_result", true
 	case requestReductionNumberedSrc:
@@ -1294,19 +1317,26 @@ type displayedReadRange struct {
 }
 
 func parseDisplayedReadRange(content string) displayedReadRange {
+	firstLine, rest, hasMore := strings.Cut(content, "\n")
+	firstLine = strings.TrimSpace(firstLine)
+	if standard := parseReadResultHeaderRange(firstLine); standard.OK {
+		return standard
+	}
+	if strings.HasPrefix(firstLine, "(showing ") {
+		if legacy := parseLegacyDisplayedReadRange(firstLine); legacy.OK {
+			return legacy
+		}
+	}
+	if !hasMore || (!strings.Contains(rest, "READ_RESULT") && !strings.Contains(rest, "(showing ")) {
+		return displayedReadRange{}
+	}
+
 	var found displayedReadRange
-	forEachLine(content, func(line string) bool {
+	forEachLine(rest, func(line string) bool {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "READ_RESULT") {
-			if m := readResultRangeRe.FindStringSubmatch(line); len(m) == 4 {
-				start, startErr := strconv.Atoi(m[1])
-				end, endErr := strconv.Atoi(m[2])
-				total, totalErr := strconv.Atoi(m[3])
-				if startErr == nil && endErr == nil && totalErr == nil {
-					found = displayedReadRange{Start: start, End: end, Total: total, OK: true}
-					return false
-				}
-			}
+		if standard := parseReadResultHeaderRange(line); standard.OK {
+			found = standard
+			return false
 		}
 		if !strings.HasPrefix(line, "(showing ") {
 			return true
@@ -1318,6 +1348,62 @@ func parseDisplayedReadRange(content string) displayedReadRange {
 		return true
 	})
 	return found
+}
+
+func readResultShowsWholeFile(content string) bool {
+	displayed := parseDisplayedReadRange(content)
+	if displayed.OK {
+		return displayed.Start == 1 && displayed.End == displayed.Total && !strings.Contains(content, "truncated="+tools.ReadTruncatedBudget)
+	}
+	return strings.Contains(content, "READ_RESULT lines=none total=0")
+}
+
+// parseReadResultHeaderRange parses the standard read metadata line without a
+// regexp or field-slice allocation. A full reduction scan calls this for every
+// read result, so the common path should remain proportional to header length.
+func parseReadResultHeaderRange(line string) displayedReadRange {
+	const prefix = "READ_RESULT"
+	if !strings.HasPrefix(line, prefix) || (len(line) > len(prefix) && line[len(prefix)] != ' ' && line[len(prefix)] != '\t') {
+		return displayedReadRange{}
+	}
+	var out displayedReadRange
+	haveRange := false
+	haveTotal := false
+	for rest := line[len(prefix):]; len(rest) > 0; {
+		rest = strings.TrimLeft(rest, " \t")
+		if rest == "" {
+			break
+		}
+		field := rest
+		if end := strings.IndexAny(rest, " \t"); end >= 0 {
+			field = rest[:end]
+			rest = rest[end:]
+		} else {
+			rest = ""
+		}
+		switch {
+		case strings.HasPrefix(field, "lines="):
+			rangeText := field[len("lines="):]
+			dash := strings.IndexByte(rangeText, '-')
+			if dash <= 0 || dash == len(rangeText)-1 {
+				continue
+			}
+			start, startErr := strconv.Atoi(rangeText[:dash])
+			end, endErr := strconv.Atoi(rangeText[dash+1:])
+			if startErr == nil && endErr == nil && start >= 1 && end >= start {
+				out.Start, out.End = start, end
+				haveRange = true
+			}
+		case strings.HasPrefix(field, "total="):
+			total, err := strconv.Atoi(field[len("total="):])
+			if err == nil && total >= 0 {
+				out.Total = total
+				haveTotal = true
+			}
+		}
+	}
+	out.OK = haveRange && haveTotal
+	return out
 }
 
 func parseLegacyDisplayedReadRange(line string) displayedReadRange {
@@ -1334,27 +1420,50 @@ func parseLegacyDisplayedReadRange(line string) displayedReadRange {
 	return displayedReadRange{}
 }
 
-func reduceReadOutputSummary(argsJSON, content string) string {
+// readReductionTruncatedKind picks the READ_RESULT truncation marker and a
+// trailing note for a trimmed read output based on its conversation-level
+// validity. Reads reach reduction only when invalidated or superseded; the
+// distinction matters to the model: stale content must not be trusted, while
+// superseded content exists fresher later in context.
+func readReductionTruncatedKind(ctx requestReductionContext) (kind, note string) {
+	if ctx.ReadSuperseded && !ctx.ReadInvalidated {
+		return tools.ReadTruncatedSuperseded, "[A newer read of this range appears later in this conversation; prefer that output.]"
+	}
+	return tools.ReadTruncatedStale, "[File modified after this read; the content above may be outdated. Re-read before relying on it.]"
+}
+
+func reduceReadOutputSummary(ctx requestReductionContext) string {
+	content := ctx.Content
 	displayed := parseDisplayedReadRange(content)
 	body := stripReadResultHeaderLine(content)
+	kind, note := readReductionTruncatedKind(ctx)
 
 	// Preferred path: a READ_RESULT range is present, so rebuild the same header
-	// the read tool emits, marked truncated=stale, keeping only leading lines.
+	// the read tool emits, marked with the validity-specific truncation kind and
+	// keeping only leading lines.
 	if displayed.OK && strings.TrimSpace(body) != "" {
 		headLines, headEnd := reduceReadHeadLines(body, displayed.Start, displayed.End, reduceSnippetChars)
 		if len(headLines) > 0 {
 			linesField := fmt.Sprintf("%d-%d", displayed.Start, headEnd)
-			header := tools.FormatReadResultHeader(linesField, displayed.Total, tools.ReadTruncatedStale, "", "")
-			return header + "\n" + strings.Join(headLines, "\n")
+			header := tools.FormatReadResultHeader(linesField, displayed.Total, kind, "", "")
+			out := header
+			out += "\n" + strings.Join(headLines, "\n")
+			if note != "" {
+				out += "\n" + note
+			}
+			return out
 		}
 	}
 
 	// Fallback for read output without a parseable range (e.g. legacy sessions
 	// or non-paged content): keep the path hint and a short excerpt.
-	request := parseReadRequestSummary(argsJSON)
+	request := ctx.Meta.parsedReadRequest()
 	snippet := strings.TrimSpace(compactTextSnippet(content, reduceSnippetChars))
 	if snippet == "" {
 		snippet = "(no preserved excerpt)"
+	}
+	if note != "" {
+		snippet += "\n" + note
 	}
 	requestedRange := ""
 	if request.Offset > 0 || request.Limit > 0 {
@@ -1370,7 +1479,7 @@ func reduceReadOutputSummary(argsJSON, content string) string {
 // metadata line, leaving only the raw source body.
 func stripReadResultHeaderLine(content string) string {
 	if before, after, ok := strings.Cut(content, "\n"); ok {
-		if readResultRangeRe.MatchString(strings.TrimSpace(before)) {
+		if parseReadResultHeaderRange(strings.TrimSpace(before)).OK {
 			return after
 		}
 	}
@@ -1405,14 +1514,14 @@ func reduceReadHeadLines(body string, startLine, endLine, budget int) ([]string,
 	return lines[:kept], startLine + kept - 1
 }
 
-func reduceReadLikeOutputSummary(toolName, argsJSON, content string) string {
-	switch strings.TrimSpace(toolName) {
+func reduceReadLikeOutputSummary(ctx requestReductionContext) string {
+	switch strings.TrimSpace(ctx.ToolName) {
 	case tools.NameRead:
-		return reduceReadOutputSummary(argsJSON, content)
+		return reduceReadOutputSummary(ctx)
 	case tools.NameWebFetch:
-		return reduceWebFetchOutputSummary(argsJSON, content)
+		return reduceWebFetchOutputSummary(ctx.Meta.Args, ctx.Content)
 	default:
-		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(toolName))
+		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(ctx.ToolName))
 	}
 }
 

@@ -18,7 +18,7 @@ func (s *SubAgent) commitPromotedToolSideEffects(tc message.ToolCall, result *to
 	if s.parent == nil {
 		return nil
 	}
-	commitPromotedReadToolSideEffects(s.parent.fileTrack, s.instanceID, tc.Name, result.ArgsJSON, result.FileState)
+	commitPromotedReadToolSideEffects(s.parent.fileTrack, s.instanceID, tc.Name, result.Result, result.FileState)
 	return nil
 }
 

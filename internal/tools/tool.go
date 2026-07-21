@@ -155,6 +155,8 @@ const (
 	sessionDirKey
 	taskIDKey
 	imageSinkKey
+	readObservationSinkKey
+	deleteAuditSinkKey
 )
 
 // WithAgentID returns a new context that carries the given agent ID.

@@ -32,6 +32,15 @@ func buildReadFileState(path string) *message.ToolFileState {
 	return &message.ToolFileState{Reads: []message.TrackedFileState{*state}}
 }
 
+func buildObservedReadFileState(observation tools.ReadObservation) *message.ToolFileState {
+	path := strings.TrimSpace(observation.Path)
+	hash := strings.TrimSpace(observation.SHA256)
+	if path == "" || hash == "" {
+		return nil
+	}
+	return &message.ToolFileState{Reads: []message.TrackedFileState{{Path: path, SHA256: hash, Exists: true}}}
+}
+
 func buildWriteFileState(path string) *message.ToolFileState {
 	state := trackedExistingFileState(path)
 	if state == nil {
@@ -40,9 +49,40 @@ func buildWriteFileState(path string) *message.ToolFileState {
 	return &message.ToolFileState{Writes: []message.TrackedFileState{*state}}
 }
 
-func buildDeleteFileStateFromResult(rawResult string) *message.ToolFileState {
+func buildLocalizedWriteFileState(path, before string) *message.ToolFileState {
+	state := trackedExistingFileState(path)
+	if state == nil {
+		return nil
+	}
+	after, err := tools.ReadDecodedTextFile(path)
+	if err != nil {
+		return &message.ToolFileState{Writes: []message.TrackedFileState{*state}}
+	}
+	state.ChangedStart, state.ChangedEnd, state.LineDelta = changedPreEditLineRange(before, after.Text)
+	return &message.ToolFileState{Writes: []message.TrackedFileState{*state}}
+}
+
+func changedPreEditLineRange(before, after string) (int, int, int) {
+	beforeLines := strings.Split(before, "\n")
+	afterLines := strings.Split(after, "\n")
+	prefix := 0
+	for prefix < len(beforeLines) && prefix < len(afterLines) && beforeLines[prefix] == afterLines[prefix] {
+		prefix++
+	}
+	suffix := 0
+	for suffix < len(beforeLines)-prefix && suffix < len(afterLines)-prefix &&
+		beforeLines[len(beforeLines)-1-suffix] == afterLines[len(afterLines)-1-suffix] {
+		suffix++
+	}
+	start := prefix + 1
+	// A pure insertion affects the boundary at which it occurred.
+	end := max(len(beforeLines)-suffix, start)
+	return start, end, len(afterLines) - len(beforeLines)
+}
+
+func buildDeleteFileStateFromResultInDir(rawResult, baseDir string) *message.ToolFileState {
 	groups := tools.ParseDeleteResult(rawResult)
-	return buildDeleteFileState(groups.Deleted)
+	return buildDeleteFileState(tools.NormalizeDeletePathsInDir(groups.Deleted, baseDir))
 }
 
 func buildDeleteFileState(paths []string) *message.ToolFileState {

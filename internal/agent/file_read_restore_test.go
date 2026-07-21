@@ -34,6 +34,25 @@ func TestRestoreTrackedFileStateDurableReadAllowsEdit(t *testing.T) {
 	}
 }
 
+func TestRestoreTrackedFileStateUsesDurablePathForRelativeReadArgs(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "demo.txt")
+	writeTestFile(t, path, "before")
+	hash := computeFileHash(path)
+	tracker := filelock.NewFileTracker()
+	msgs := []message.Message{
+		restoreAssistantCall(t, "read", tools.NameRead, map[string]any{"path": "demo.txt"}, nil),
+		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: string(ToolResultStatusSuccess), Content: "READ_RESULT lines=1-1 total=1\nbefore", FileState: &message.ToolFileState{Reads: []message.TrackedFileState{{Path: path, SHA256: hash, Exists: true}}}},
+	}
+	result := restoreTrackedFileStateFromMessages(tracker, "main", msgs)
+	if result.RestoredUsable != 1 || result.Skipped != 0 {
+		t.Fatalf("restore result = %+v", result)
+	}
+	if observation := tracker.Observation(path, "main", hash); !observation.Current {
+		t.Fatalf("observation = %+v, want current durable relative-path restore", observation)
+	}
+}
+
 func TestRestoreTrackedFileStateDurableHashMismatchRestoresStaleSentinel(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
@@ -67,6 +86,68 @@ func TestRestoreTrackedFileStateFailedReadDoesNotRestoreUsableRead(t *testing.T)
 
 	if a.fileTrack.HasSnapshot(path, a.instanceID) {
 		t.Fatal("failed read should not restore a usable tracked snapshot")
+	}
+}
+
+func TestRestoreTrackedFileStatePartialReadDoesNotAuthorizeDestructiveWrites(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "demo.txt")
+	writeTestFile(t, path, "one\ntwo\n")
+
+	a := newRestoreEditTestAgent(t, projectRoot)
+	a.tools.Register(tools.WriteTool{BaseDir: projectRoot})
+	msgs := []message.Message{
+		restoreAssistantCall(t, "read-1", tools.NameRead, map[string]any{"path": path, "offset": 1, "limit": 1}, nil),
+		{
+			Role:       message.RoleTool,
+			ToolCallID: "read-1",
+			ToolStatus: message.ToolStatusSuccess,
+			Content:    "READ_RESULT lines=2-2 total=2\ntwo\n",
+			FileState:  &message.ToolFileState{Reads: []message.TrackedFileState{{Path: path, SHA256: computeFileHash(path), Exists: true}}},
+		},
+	}
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, msgs)
+	if result.RestoredUsable != 1 || result.RestoredStale != 0 {
+		t.Fatalf("restore result = %+v, want committed snapshot restored", result)
+	}
+
+	writeArgs := mustJSONRaw(t, map[string]any{"path": path, "content": "replacement\n"})
+	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: writeArgs}); err == nil || !strings.Contains(err.Error(), "read the complete file first") {
+		t.Fatalf("write after restored partial read error = %v, want full-read requirement", err)
+	}
+	locks, err := acquireDeleteLocks(a.fileTrack, a.instanceID, deleteArgs(t, path), "")
+	if locks != nil {
+		locks.Release()
+	}
+	if err == nil || !strings.Contains(err.Error(), "read the complete file first") {
+		t.Fatalf("delete after restored partial read error = %v, want full-read requirement", err)
+	}
+	if got := readTestFile(t, path); got != "one\ntwo\n" {
+		t.Fatalf("file content = %q, want unchanged", got)
+	}
+}
+
+func TestRestoreTrackedFileStatePartialReadPreservesEarlierWholeObservation(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "demo.txt")
+	writeTestFile(t, path, "one\ntwo\n")
+	hash := computeFileHash(path)
+
+	a := newRestoreEditTestAgent(t, projectRoot)
+	msgs := append(restoreReadMessages(t, "read-full", path, hash, nil),
+		restoreAssistantCall(t, "read-partial", tools.NameRead, map[string]any{"path": path, "offset": 1, "limit": 1}, nil),
+		message.Message{
+			Role:       message.RoleTool,
+			ToolCallID: "read-partial",
+			ToolStatus: message.ToolStatusSuccess,
+			Content:    "READ_RESULT lines=2-2 total=2\ntwo\n",
+			FileState:  &message.ToolFileState{Reads: []message.TrackedFileState{{Path: path, SHA256: hash, Exists: true}}},
+		},
+	)
+	restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, msgs)
+	observation := a.fileTrack.Observation(path, a.instanceID, hash)
+	if !observation.Observed || !observation.Current {
+		t.Fatalf("observation = %+v, want current whole-file observation preserved", observation)
 	}
 }
 
@@ -159,6 +240,7 @@ func TestRestoreTrackedFileStateReadThenEditUsesPostWriteHash(t *testing.T) {
 	writeTestFile(t, path, "after")
 
 	a := newRestoreEditTestAgent(t, projectRoot)
+	a.tools.Register(tools.WriteTool{BaseDir: projectRoot})
 	msgs := append(restoreReadMessages(t, "read-1", path, readHash, nil),
 		restoreAssistantCall(t, "patch-1", tools.NameEdit, map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"}, nil),
 		message.Message{
@@ -175,6 +257,10 @@ func TestRestoreTrackedFileStateReadThenEditUsesPostWriteHash(t *testing.T) {
 	}
 
 	mustExecuteEdit(t, a, path, "after", "final")
+	writeArgs, _ := json.Marshal(map[string]any{"path": path, "content": "whole replacement"})
+	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: writeArgs}); err == nil || !strings.Contains(err.Error(), "changed after the last read") {
+		t.Fatalf("restored write error = %v, want reread requirement", err)
+	}
 }
 
 func TestRestoreTrackedFileStateReadThenPatchUsesPostWriteHash(t *testing.T) {
@@ -432,7 +518,7 @@ func restoreReadMessages(t *testing.T, callID, path, hash string, prov *message.
 			Role:       "tool",
 			ToolCallID: callID,
 			ToolStatus: string(ToolResultStatusSuccess),
-			Content:    "1\tcontent",
+			Content:    "READ_RESULT lines=1-1 total=1\ncontent\n",
 			Provenance: cloneProvenance(prov),
 			FileState:  &message.ToolFileState{Reads: []message.TrackedFileState{{Path: path, SHA256: hash, Exists: true}}},
 		},

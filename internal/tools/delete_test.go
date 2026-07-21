@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,49 @@ func TestDeleteToolDeletesFileAndInvalidatesCaches(t *testing.T) {
 	}
 	if _, ok := getPathCache(path); ok {
 		t.Fatal("expected path cache entry removed")
+	}
+}
+
+func TestDeleteToolReportsCanonicalAuditPaths(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "remove.txt")
+	if err := os.WriteFile(path, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	collector := &DeleteAuditCollector{}
+	ctx := WithDeleteAuditSink(context.Background(), collector)
+	got, err := (DeleteTool{BaseDir: dir}).Execute(ctx, mustRelativeDeleteArgs(t, "remove.txt"))
+	if err != nil {
+		t.Fatalf("DeleteTool.Execute: %v", err)
+	}
+	if !strings.Contains(got, "- remove.txt") {
+		t.Fatalf("result = %q, want display path", got)
+	}
+	audit, ok := collector.Audit()
+	if !ok || len(audit.Deleted) != 1 || audit.Deleted[0] != path {
+		t.Fatalf("audit = %#v, ok=%v, want canonical deleted path %q", audit, ok, path)
+	}
+}
+
+func TestDeleteToolReportsAuditWhenExecutionStops(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first.txt")
+	second := filepath.Join(dir, "second.txt")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, []byte("hello\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile %s: %v", path, err)
+		}
+	}
+	collector := &DeleteAuditCollector{}
+	ctx, cancel := context.WithCancel(WithDeleteAuditSink(context.Background(), collector))
+	cancel()
+	_, err := (DeleteTool{BaseDir: dir}).Execute(ctx, deleteArgsJSON(t, []string{"first.txt", "second.txt"}, "cleanup"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("DeleteTool.Execute error = %v, want context canceled", err)
+	}
+	audit, ok := collector.Audit()
+	if !ok || len(audit.NotAttempted) != 2 || audit.NotAttempted[0] != first || audit.NotAttempted[1] != second {
+		t.Fatalf("audit = %#v, ok=%v, want canonical not-attempted paths", audit, ok)
 	}
 }
 
@@ -123,4 +167,9 @@ func deleteArgsJSON(t *testing.T, paths []string, reason string) json.RawMessage
 		t.Fatalf("Marshal: %v", err)
 	}
 	return args
+}
+
+func mustRelativeDeleteArgs(t *testing.T, path string) json.RawMessage {
+	t.Helper()
+	return deleteArgsJSON(t, []string{path}, "remove test file")
 }

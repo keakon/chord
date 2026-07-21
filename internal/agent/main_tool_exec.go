@@ -50,6 +50,7 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		currentRuleset: func() permission.Ruleset {
 			return a.effectiveRuleset()
 		},
+		toolBaseDir: a.projectRoot,
 		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset {
 			a.processRuleIntent(toolName, intent)
 			return a.effectiveRuleset()
