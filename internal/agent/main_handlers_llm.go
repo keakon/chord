@@ -204,6 +204,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 		return
 	}
+	wasLengthRecovery := a.turn.InLengthRecovery
 	a.turn.InLengthRecovery = false
 	a.turn.LengthRecoveryCount = 0
 	a.turn.LastTruncatedToolName = ""
@@ -339,6 +340,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	}
 
 	// Execute finalized tool calls in concurrency-safe batches.
+	a.turn.noteDispatchedToolRound(validCalls, wasLengthRecovery)
 	batches := buildToolExecutionBatches(a.tools, validCalls)
 	a.turn.toolExecutionBatches = batches
 	a.turn.nextToolBatch = 0

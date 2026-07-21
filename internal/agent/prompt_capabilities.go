@@ -42,6 +42,9 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 	discoveryTools := visiblePathDiscoveryTools(visible)
 	lines := make([]string, 0, 12)
 	lines = append(lines, "- Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.")
+	if len(discoveryTools) > 0 || hasVisibleTool(visible, tools.NameRead) {
+		lines = append(lines, "- Minimize LLM round trips: a response that stops after a single lookup spends one full model round trip per lookup. When two or more read-only tool calls are independent (searches for different symbols, reads of different files or ranges, separate path lookups), issue them together in the same response — they execute in parallel. Use serial calls only when a later call depends on an earlier result, the call mutates state, or a command is intentionally high-cost.")
+	}
 	if hasVisibleTool(visible, tools.NameRead) {
 		lines = append(lines, "- Use "+toolPromptName(tools.NameRead)+" for file contents when the target path is already known or has been verified.")
 		lines = append(lines, "- When the user provides complete file contents in a "+"`<file path=...>`"+" reference, treat that content as the working context; do not re-read the same file merely to obtain duplicate contents. Re-read only when the supplied content is incomplete, the file may have changed on disk, or the edit workflow requires fresh file state, and then read only the needed range.")
@@ -76,7 +79,7 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 	if len(discoveryTools) > 0 {
 		lines = append(lines, "- Use "+strings.Join(discoveryTools, " / ")+" for discovery and navigation.")
 		if hasVisibleTool(visible, tools.NameGrep) && hasVisibleTool(visible, tools.NameRead) {
-			lines = append(lines, "- When "+toolPromptName(tools.NameGrep)+" returns path:line:snippet hits, use those line numbers to read narrow ranges around relevant matches instead of scanning broad file chunks.")
+			lines = append(lines, "- When "+toolPromptName(tools.NameGrep)+" returns path:line:snippet hits, use those line numbers to read narrow ranges around relevant matches instead of scanning broad file chunks; when several matches land in the same file or the file is central to the change, one fuller read of that file beats repeated narrow reads.")
 		}
 		if pathTools := visibleExistingPathTools(visible); len(pathTools) > 0 {
 			lines = append(lines, "- If you are unsure of the exact target path for "+strings.Join(pathTools, " / ")+
@@ -91,9 +94,6 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 			"- Use "+toolPromptName(tools.NameShell)+" mainly for tests, builds, git, and system commands.",
 			"- For native filesystem operations with no dedicated built-in tool, "+toolPromptName(tools.NameShell)+" is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
 		)
-	}
-	if len(discoveryTools) > 0 || hasVisibleTool(visible, tools.NameRead) {
-		lines = append(lines, "- Minimize LLM round trips. When two or more read-only tool calls are independent, issue them in the same response so they can run in parallel, especially multiple known file/range reads after search results; use serial calls only when a later call depends on an earlier result, the call mutates state, or a command is intentionally high-cost.")
 	}
 	if len(lines) == 0 {
 		return ""

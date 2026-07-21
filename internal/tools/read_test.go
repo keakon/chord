@@ -54,6 +54,7 @@ func TestReadToolDescriptionExplainsRawOutputForEdits(t *testing.T) {
 		"Read file contents by line for code inspection and edits",
 		"optional offset/limit line paging",
 		"Prefer grep or lsp to locate symbols before reading a small nearby block",
+		"For a file you will edit or consult repeatedly, prefer reading it in full once",
 		"Normal output starts with one READ_RESULT metadata line",
 		"`READ_RESULT lines=a-b total=N`",
 		"`READ_RESULT lines=none total=N`",

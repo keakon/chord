@@ -354,17 +354,21 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 				return output, FormatNonInteractiveRuntimeError(NameShell, a.Command, err, output)
 			}
 			if exitErr, ok := err.(*exec.ExitError); ok {
-				return output, shellExitErrorForCommand(a.Command, exitErr)
+				return output, shellExitErrorForCommand(a.Command, exitErr, output)
 			}
 			return output, fmt.Errorf("command error: %w", err)
 		}
 		return output, nil
 	case <-timer.C:
 		_ = terminateCommandProcessGroup(cmd)
-		return killProcessGroup(cmd, buf, fmt.Sprintf("timed out after %ds", timeoutInfo.EffectiveSec), doneCh)
+		guidance := "Do not re-run the same command unchanged: either narrow it to the relevant subset, raise timeout if the command legitimately needs longer, or use spawn for background execution."
+		if timeoutInfo.EffectiveSec >= maxTimeoutSec {
+			guidance = "This is the maximum shell timeout: do not re-run the same command unchanged. Narrow it to the relevant subset (for example one package or test), or use spawn to run the long command in the background and poll its output."
+		}
+		return killProcessGroup(cmd, buf, fmt.Sprintf("timed out after %ds", timeoutInfo.EffectiveSec), guidance, doneCh)
 	case <-ctx.Done():
 		_ = terminateCommandProcessGroup(cmd)
-		return killProcessGroup(cmd, buf, "cancelled", doneCh)
+		return killProcessGroup(cmd, buf, "cancelled", "", doneCh)
 	}
 }
 
@@ -376,7 +380,7 @@ func resolveShellExecution(shellType, command string) (string, []string) {
 	return binary, args
 }
 
-func shellExitErrorForCommand(command string, exitErr *exec.ExitError) error {
+func shellExitErrorForCommand(command string, exitErr *exec.ExitError, output string) error {
 	if exitErr == nil {
 		return fmt.Errorf("command failed")
 	}
@@ -385,9 +389,39 @@ func shellExitErrorForCommand(command string, exitErr *exec.ExitError) error {
 	}
 	msg := fmt.Sprintf("exit code %d", exitErr.ExitCode())
 	if isTestOrVerificationCommand(command) {
-		msg += ". Test or verification command failed. Inspect the first relevant failure; before rerunning a broad test, prefer a focused reproduction for the affected package/test. Do not repeat the same failing command unchanged unless there is a clear reason to expect a different result"
+		if testOutputShowsBuildFailure(output) {
+			msg += ". The build failed before tests could run. Fix compilation first and confirm with a build-only check (for example go build ./... / go vet, cargo check, or tsc --noEmit) — it surfaces the same errors in seconds. Do not re-run the test suite until the build passes, then start with the affected package instead of the full suite"
+		} else {
+			msg += ". Test or verification command failed. Inspect the first relevant failure; before rerunning a broad test, prefer a focused reproduction for the affected package/test. Do not repeat the same failing command unchanged unless there is a clear reason to expect a different result"
+		}
 	}
 	return fmt.Errorf("%s", msg)
+}
+
+// testOutputShowsBuildFailure reports whether a failed test command died in
+// its compile/build phase rather than in test execution. In that case any
+// time the runner spent on other packages was wasted, and the cheapest next
+// step is a build-only check, so the error guidance steers there explicitly.
+func testOutputShowsBuildFailure(output string) bool {
+	if output == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"[build failed]",           // go test
+		"[setup failed]",           // go test
+		"error: could not compile", // cargo test
+		"error: linking with",      // cargo test
+		"Compilation failed",       // various runners
+		"compilation terminated",   // gcc/clang via make test
+		"SyntaxError: ",            // node/python test entry
+		"error TS",                 // tsc diagnostics in test pipelines
+		"CompileError",             // ruby/elixir
+	} {
+		if strings.Contains(output, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func isTestOrVerificationCommand(command string) bool {
@@ -437,8 +471,10 @@ func isTestOrVerificationArgs(args []string) bool {
 }
 
 // killProcessGroup sends SIGTERM (then SIGKILL) to the process group and
-// returns whatever output was captured along with an error.
-func killProcessGroup(cmd *exec.Cmd, buf *cappedWriter, reason string, doneCh <-chan error) (string, error) {
+// returns whatever output was captured along with an error. guidance, when
+// non-empty, is appended after the output excerpt to steer the model's next
+// step (timeouts otherwise invite an unchanged, equally slow re-run).
+func killProcessGroup(cmd *exec.Cmd, buf *cappedWriter, reason, guidance string, doneCh <-chan error) (string, error) {
 	pid := cmd.Process.Pid
 	_ = pid
 	_ = terminateCommandProcessGroup(cmd)
@@ -453,7 +489,11 @@ func killProcessGroup(cmd *exec.Cmd, buf *cappedWriter, reason string, doneCh <-
 		}
 	}
 	output := buf.String()
-	return output, fmt.Errorf("command %s after output:\n%s", reason, truncateForError(output, 500))
+	err := fmt.Errorf("command %s after output:\n%s", reason, truncateForError(output, 500))
+	if guidance != "" {
+		err = fmt.Errorf("%w\n%s", err, guidance)
+	}
+	return output, err
 }
 
 // truncateForError trims output for inclusion in error messages.

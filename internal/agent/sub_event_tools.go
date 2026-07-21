@@ -249,6 +249,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	toolChangedPaths, fileAttributionIncomplete := s.recordTaskToolChanges(result, isError)
 	contextResult = applyToolArgsAuditToContextResult(contextResult, result.Audit)
 	contextResult = appendModelContextNote(contextResult, result.ModelContextNote)
+	contextResult = appendModelContextNote(contextResult, s.turn.efficiencyNoteForToolResult(result.CallID, result.Name, result.ArgsJSON, rawResult, isError))
 
 	hookResult, hookErr := s.fireHook(s.turn.Ctx, hook.OnBeforeToolResultAppend, s.turn.ID, buildBeforeToolResultAppendData(
 		result.Name,

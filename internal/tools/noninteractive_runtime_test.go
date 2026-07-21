@@ -84,12 +84,30 @@ func TestShellRuntimeFailureDoesNotRewriteOrdinaryFailure(t *testing.T) {
 
 func TestShellRuntimeFailureSuggestsFocusedReproductionForTestCommand(t *testing.T) {
 	_, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
-		"command": "go test ./definitely-missing-package",
+		// Fails during flag parsing, so no build phase runs and the generic
+		// focused-reproduction guidance applies.
+		"command": "go test -count=bogus ./...",
 	}))
 	if err == nil {
 		t.Fatal("expected command failure")
 	}
 	for _, want := range []string{"exit code ", "Test or verification command failed", "focused reproduction", "Do not repeat the same failing command unchanged"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want to contain %q", err.Error(), want)
+		}
+	}
+}
+
+func TestShellRuntimeFailureSuggestsBuildCheckWhenBuildFails(t *testing.T) {
+	_, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+		// go test reports [setup failed] for the missing package: the run died
+		// before any test executed, so the guidance steers to a build-only check.
+		"command": "go test ./definitely-missing-package",
+	}))
+	if err == nil {
+		t.Fatal("expected command failure")
+	}
+	for _, want := range []string{"exit code ", "build failed before tests could run", "build-only check", "Do not re-run the test suite until the build passes"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error = %q, want to contain %q", err.Error(), want)
 		}

@@ -8,6 +8,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Context reduction no longer accepts `context.reduction.high_pressure_usage` or `force_prune_usage`; request-batch age thresholds now determine when output is reduced. Remove those keys from existing configuration files. Chord reports a migration error instead of silently ignoring them.
 
+### Improvements
+
+- Tool results now carry one-shot efficiency hints when a turn drifts into serial single-lookup rounds or repeated small-window reads of a file that fits in a single read, re-surfacing the batching and whole-file-read guidance at the moment it applies. Failed test commands that died in their build or setup phase now steer to a build-only check first, and shell-timeout errors explain how to narrow or background the next attempt.
+
 ### Fixes
 
 - Still-valid `read` outputs are never trimmed by request-level context reduction anymore. The shared 96 KB valid-read protection budget and the `truncated=aged` age-based trimming were removed: both could evict content the model had just read (a batch of parallel reads competed against its own budget), forcing paged re-reads or summary-based guessing while the context was nowhere near its limit. Reduction now trims a read only when it is provably outdated (`truncated=stale` after a file mutation) or duplicated later in context (`truncated=superseded`); capacity pressure remains durable Compaction's job. The `READ_RECOVERY` metadata line and trimmed-definition outlines were dropped with the aged path — models never used them, re-reading is the natural recovery.

@@ -106,13 +106,17 @@ type Turn struct {
 	LastTruncatedToolName              string
 	LengthRecoveryAutoCompactAttempted bool
 	OversizeRecoveryCount              int
-	malformedInBatch                   int // abnormal calls in the current LLM-response batch
-	CompletedToolCalls                 []any
-	ChangedFiles                       []any
-	toolExecutionBatches               []toolExecutionBatch
-	nextToolBatch                      int
-	activeToolBatchCancel              context.CancelFunc
-	streamingToolExec                  *StreamingToolExecutor
+	// Efficiency tracks per-turn tool usage patterns for one-shot efficiency
+	// notes appended to tool results (see tool_efficiency_advisor.go).
+	// Event-loop-goroutine only, like MalformedCount.
+	Efficiency            toolEfficiencyState
+	malformedInBatch      int // abnormal calls in the current LLM-response batch
+	CompletedToolCalls    []any
+	ChangedFiles          []any
+	toolExecutionBatches  []toolExecutionBatch
+	nextToolBatch         int
+	activeToolBatchCancel context.CancelFunc
+	streamingToolExec     *StreamingToolExecutor
 }
 
 // PendingToolCall records the minimal metadata needed to close a pending tool

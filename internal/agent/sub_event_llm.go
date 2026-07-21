@@ -400,6 +400,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 
 	// Dispatch concurrency-safe finalize-time batches.
 	turn := s.turn
+	turn.noteDispatchedToolRound(regularToolCalls, false)
 	batches := buildToolExecutionBatches(s.tools, regularToolCalls)
 	turn.toolExecutionBatches = batches
 	turn.nextToolBatch = 0

@@ -68,7 +68,8 @@ func (GlobTool) Description() string {
 		" patterns are path globs, not regular expressions and not file-contents searches." +
 		" Pass patterns as a JSON array (e.g. patterns: [\"**/*.go\"] or patterns: [\"src/**/*.ts\", \"test/**/*.ts\"]); a single bare string is tolerated but a single-element array is preferred." +
 		" If the exact relative file path is known, pass it as the pattern (e.g. patterns: [\"src/main.go\"]) instead of using ** from a very broad path like /, /tmp, or the home directory." +
-		" Best for discovering candidate files by path or extension before using read, grep, or lsp."
+		" Best for discovering candidate files by path or extension before using read, grep, or lsp." +
+		" Independent read-only calls (read, grep, glob) issued in the same response run in parallel; batch independent lookups into one response instead of issuing them one per turn."
 }
 
 func (GlobTool) Parameters() map[string]any {
