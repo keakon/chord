@@ -11,6 +11,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Improvements
 
 - Tool results now carry one-shot efficiency hints when a turn drifts into serial single-lookup rounds or repeated small-window reads of a file that fits in a single read, re-surfacing the batching and whole-file-read guidance at the moment it applies. Failed test commands that died in their build or setup phase now steer to a build-only check first, and shell-timeout errors explain how to narrow or background the next attempt.
+- Shell tool results append a concise wall-clock elapsed-time note once a command crosses the slow-command threshold, so the model can factor real cost into choosing what to run next; sub-second commands stay unannotated.
 
 ### Fixes
 

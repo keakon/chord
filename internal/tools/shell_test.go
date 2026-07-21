@@ -394,3 +394,42 @@ func TestCappedWriterConcurrentWriteAndString(t *testing.T) {
 		t.Fatalf("total = %d, want %d", got, 32*200*6)
 	}
 }
+
+func TestShellAppendsDurationNoteForSlowCommand(t *testing.T) {
+	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+		"command": "sleep 1.1; echo done",
+	}))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "done") || !strings.Contains(out, "(command took ") {
+		t.Fatalf("output = %q, want duration note after slow command", out)
+	}
+}
+
+func TestShellOmitsDurationNoteForFastCommand(t *testing.T) {
+	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+		"command": "echo quick",
+	}))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if strings.Contains(out, "(command took ") {
+		t.Fatalf("output = %q, want no duration note for fast command", out)
+	}
+}
+
+func TestShellDurationNoteOnFailedCommandKeepsExitError(t *testing.T) {
+	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
+		"command": "sleep 1.1; printf fail >&2; exit 7",
+	}))
+	if err == nil {
+		t.Fatal("expected command failure")
+	}
+	if err.Error() != "exit code 7" {
+		t.Fatalf("error = %q, want ordinary exit code", err.Error())
+	}
+	if !strings.Contains(out, "(command took ") {
+		t.Fatalf("output = %q, want duration note on failed command output", out)
+	}
+}

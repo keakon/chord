@@ -340,6 +340,7 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		return "", fmt.Errorf("starting command: %w", err)
 	}
 
+	started := time.Now()
 	doneCh := make(chan error, 1)
 	go func() { doneCh <- cmd.Wait() }()
 
@@ -348,13 +349,16 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 
 	select {
 	case err := <-doneCh:
-		output := buf.String()
+		// Classify and format from the raw output; the duration note is
+		// model-facing decoration and must not feed output-sniffing logic.
+		raw := buf.String()
+		output := appendShellDurationNote(raw, time.Since(started))
 		if err != nil {
-			if ClassifyNonInteractiveRuntimeFailure(a.Command, err, output) != nil {
-				return output, FormatNonInteractiveRuntimeError(NameShell, a.Command, err, output)
+			if ClassifyNonInteractiveRuntimeFailure(a.Command, err, raw) != nil {
+				return output, FormatNonInteractiveRuntimeError(NameShell, a.Command, err, raw)
 			}
 			if exitErr, ok := err.(*exec.ExitError); ok {
-				return output, shellExitErrorForCommand(a.Command, exitErr, output)
+				return output, shellExitErrorForCommand(a.Command, exitErr, raw)
 			}
 			return output, fmt.Errorf("command error: %w", err)
 		}
@@ -370,6 +374,22 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		_ = terminateCommandProcessGroup(cmd)
 		return killProcessGroup(cmd, buf, "cancelled", "", doneCh)
 	}
+}
+
+// shellDurationNoteMin is the minimum elapsed time before a completed command's
+// output gets a wall-clock duration note. The model cannot observe how long a
+// command took, so without feedback it cannot weigh cheap checks against
+// expensive ones when choosing verification scope; sub-second commands are
+// left unannotated to keep short outputs clean.
+const shellDurationNoteMin = time.Second
+
+// appendShellDurationNote appends the elapsed wall-clock time to command output
+// so the model can factor real cost into deciding what to run next.
+func appendShellDurationNote(output string, elapsed time.Duration) string {
+	if elapsed < shellDurationNoteMin {
+		return output
+	}
+	return output + fmt.Sprintf("\n(command took %.1fs)", elapsed.Seconds())
 }
 
 // resolveShellExecution returns the binary and args to execute command in the
