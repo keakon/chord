@@ -461,7 +461,11 @@ model_pools:
   `max_tokens`。`request_overrides` 添加 GLM 思考字段并重命名动态计算的输出
   上限字段；`openai_visible` 只负责原样回放 `reasoning_content`。
 - Messages 兼容接口使用 `thinking` 和 `output_config.effort`。除非对应接口
-  明确支持，否则应关闭 Anthropic beta header。
+  明确支持，否则应关闭 Anthropic beta header。兼容 Messages 接口可能返回
+  无签名 thinking，而非 Claude 风格的签名块，不能仅凭 wire 格式推断签名
+  回放能力。在明确验证 provider 的无签名 thinking 连续性前，thinking +
+  工具循环应优先使用 Chat Completions，或为 Messages 显式设置
+  `thinking.type: disabled`。
 - GLM 的 `/responses` 由网关自行实现。只有网关明确说明支持 OpenAI
   Responses 映射时，才单独使用仅含 `reasoning.effort` 的模板。
 
@@ -542,6 +546,10 @@ model_pools:
   循环中，`openai_visible` 会原样返回 assistant 的 `reasoning_content`。
 - DeepSeek Messages 支持 `output_config.effort`；Chord 从
   `thinking.effort` 生成该字段。兼容接口应关闭 Anthropic beta header。
+  DeepSeek 的 Anthropic 兼容接口可能返回无签名 `thinking`，而不是 Claude
+  风格的签名块。在明确配置并验证无签名 Anthropic thinking 回放前，thinking
+  + 工具循环应优先使用 Chat Completions，或为 Messages 显式设置
+  `thinking.type: disabled`。
 - 第三方 `/responses` 端点由网关自行实现；只有网关明确说明映射方式时，
   才使用 `reasoning.effort`。
 - 对兼容网关，请使用该网关 / 账号实际公开的模型 ID 和限制。见
@@ -643,10 +651,29 @@ K2.7 Code 是 256K 上下文、面向编码的纯思考型号；它的 thinking 
 历史思考，而且已对新用户进入退场阶段；新配置应优先使用 K3。
 
 对于所有使用 `openai_visible` 的模板（DeepSeek、GLM、受支持的 Qwen 和
-Kimi），Chord 只会在产生思考的 provider 内回放原生 reasoning。这样既
-支持 Kimi K2.6/K2.7→K3 这类官方允许的同 provider 升级，又会在跨 provider
-fallback 时丢弃不兼容的 reasoning / 工具轨迹，让目标模型重新规划，避免
-把其他 provider 的思考链或无效的半截轨迹发给目标模型。
+Kimi），Chord 首次会把原生 reasoning 乐观回放给任何 Chat Completions
+目标，因此 Kimi K2.6/K2.7→K3 这类官方允许的同 provider 升级和同模型跨
+provider fallback 都能保留连续性。若目标拒绝原生 reasoning，Chord 只会
+删除或转换不兼容的 reasoning 负载；已完成且成对的工具调用和结果仍会保留。
+当目标连结构化形状也不接受时，严格降级会把已完成的动作历史文本化，而
+不会把外部工具事实静默删除。
+
+### 跨协议 fallback 的连续性
+
+当模型池在 Chat Completions、Responses、Messages 或 Gemini 之间切换时，
+Chord 会保留已完成工具轮次中可迁移的部分：
+
+- 已完成且成对的调用与结果会尽量转换为目标协议的结构化工具表示；
+- 与工具轮次绑定的可见 reasoning（`reasoning_content`、无签名 thinking
+  文本、Responses reasoning summary 或 Gemini thought 文本）若无法使用原生
+  格式跨协议传递，会作为带明确标记的 assistant 历史保留；
+- Claude signature、Responses 加密 reasoning、Gemini thought signature 等
+  provider 专属 opaque 状态不会被伪造，也不会复制到不兼容协议；
+- 若目标拒绝合成后的结构化形状，严格兼容降级会把完整调用/结果历史文本化，
+  而不是静默删除。
+
+纯 reasoning-only 历史不会转换为 fallback 文本。这样可以把跨协议上下文
+集中在与动作相关的状态上，避免为和工具轮次无关的旧思考链重复付费。
 
 ## Grok 4.5（xAI Responses）
 

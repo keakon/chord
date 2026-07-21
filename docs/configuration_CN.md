@@ -621,16 +621,25 @@ providers:
   - `none`：不回放 provider 专属的可见 reasoning。
   - `openai_visible`：在 Chat Completions 工具循环中原样回放 assistant 的
     `reasoning_content`。它不注入请求字段；字段差异由
-    `request_overrides.body` 配置。只有产生状态的 provider ID 与目标一致时
-    才会回放，因此 Kimi K2.6/K2.7→K3 这类官方支持的同 provider 升级可保留
-    连续性；跨 provider fallback 会丢弃配对的 reasoning / 工具轨迹，让
-    目标模型重新规划。
+    `request_overrides.body` 配置。首次尝试时，Chord 会把 chat 原生
+    reasoning 乐观回放给任何 Chat Completions 目标（包括跨 provider），
+    因此 Kimi K2.6/K2.7→K3 这类官方支持的同 provider 升级和同模型跨
+    provider fallback 都能保留连续性。如果某个目标拒绝了这类请求，Chord
+    会在本会话内对该目标降级：回放改为要求产生状态的 provider ID 一致，
+    跨 provider fallback 丢弃配对的 reasoning / 工具轨迹，让目标模型
+    重新规划。
   - Responses 与 Messages 使用各自协议原生的连续性机制，不应启用可见
     reasoning 回放。这些机制由 Chord 自动处理：Responses 的加密 reasoning
     item、Anthropic 的 `thinking` / `redacted_thinking` 块、Gemini 的
-    `thoughtSignature` 都会按兼容 provenance 捕获、持久化和回放。Responses
-    会保留有序原生 output item；Gemini 会保留原始 part 边界，并在
-    Gemini 3 活跃工具 step 没有可复用签名时使用官方 validator-skip 哨兵。
+    `thoughtSignature` 都会被捕获、持久化，并回放给任何使用相同 wire
+    协议的目标。后端是否接受原生载荷由后端自己裁决，无法从客户端配置
+    推断，因此 Chord 先发送协议兼容的最完整形态，只在目标拒绝后才按
+    target 降级：先回退到严格 provenance 匹配（Responses 工具调用重新
+    合成为只含 `call_id` 的普通 item），仍被拒绝时才整体丢弃无法回放的
+    reasoning / 工具轨迹。达到的级别按 target 记忆，不兼容的后端每会话
+    最多浪费两次失败请求。Responses 会保留有序原生 output item；Gemini
+    会保留原始 part 边界，并在 Gemini 3 活跃工具 step 没有可复用签名时
+    使用官方 validator-skip 哨兵。
 - `compat.thinking_toolcall`：为把工具调用编码进可见 reasoning 文本的网关
   启用专用解析器。只有网关明确要求时才开启。
 

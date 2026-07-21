@@ -12,11 +12,13 @@
 
 - 工具结果现在会携带一次性效率提示：当某一轮工作陷入逐次单个只读查询，或对单个一次即可读完的文件反复小窗读取时，在恰当时机重新提示并行批量调用与整文件读取。在构建或准备阶段即失败的测试命令现在会先引导执行仅构建检查；shell 超时错误会说明如何缩小范围或转入后台重试。
 - shell 工具结果在命令超过慢命令阈值后会附加简洁的墙钟耗时提示，让模型据实权衡下一步要跑什么；亚秒级命令保持不标注。
+- reasoning 回放改为乐观尝试并按 target 自适应降级：chat 原生 reasoning 与协议原生 item（Responses 加密 reasoning、Anthropic thinking block、Gemini thought signature）首次会回放给任何使用相同 wire 协议的目标，包括跨 provider fallback。拒绝该载荷的目标会在本会话内被降级——先严格 provenance 匹配，再文本化历史——不兼容的后端每会话最多浪费两次失败请求，而不是每次 fallback 都丢失 reasoning 连续性。
 
 ### 修复
 
 - 仍然有效的 `read` 输出不再被请求级上下文剪裁裁掉。共享的 96 KB 有效读取保护预算和 `truncated=aged` 按年龄裁剪已移除：两者都可能裁掉模型刚读过的内容（一批并行读取会挤占自己的预算），在上下文远未达到上限时就迫使模型分页重读、甚至只凭摘要作答。现在剪裁只处理确定过期（文件变更后的 `truncated=stale`）或在上下文后部有更新副本（`truncated=superseded`）的读取；容量压力仍由持久 Compaction 负责。`READ_RECOVERY` 元数据行与裁剪后定义大纲随 aged 路径一并移除——模型从未使用过它们，重读即是自然的恢复方式。
 - 整文件 `write` / `delete` 授权现在会把完整 `read` 或 `<file>` 引用绑定到模型实际看到的同一份字节。局部/过期的文件引用、读取完成前被外部修改的文件，以及 SubAgent 工作目录下的相对路径都不能再授权覆盖模型未见过的版本。
+- 跨 provider、跨协议 fallback 在原生 reasoning 无法回放时不再抹掉已完成的工具历史。Chord 现在跨 Chat Completions、Responses、Messages 与 Gemini 保留结构化的 call/result 对；把绑定动作的可见 reasoning 或公开摘要作为标注后的 assistant 历史携带，而不伪造签名或加密状态；只有在目标拒绝结构化形态之后才把已完成的工具轮次文本化。Fallback provenance 现在记录实际运行目标的 wire family，normalize 日志也会输出前后消息数及降级/丢弃计数。
 
 ## 0.7.2 - 2026-07-20
 

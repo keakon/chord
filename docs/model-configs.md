@@ -465,7 +465,12 @@ Notes:
   dynamically calculated output-limit field; `openai_visible` only replays
   unmodified `reasoning_content`.
 - Messages-compatible endpoints use `thinking` plus `output_config.effort`.
-  Disable Anthropic beta headers unless that endpoint documents support.
+  Disable Anthropic beta headers unless that endpoint documents support. A
+  compatible Messages endpoint may return unsigned thinking rather than
+  Claude-style signed blocks; do not infer signature replay support from the
+  wire format alone. Until the provider's unsigned-thinking continuity is
+  explicitly verified, prefer its Chat Completions recipe for thinking plus
+  tool-call loops or set `thinking.type: disabled`.
 - A GLM `/responses` endpoint is gateway-specific. Use a separate template with
   `reasoning.effort` only when the gateway documents OpenAI Responses mapping.
 
@@ -547,6 +552,11 @@ Notes:
   `reasoning_content` unchanged.
 - DeepSeek Messages supports `output_config.effort`; Chord derives it from
   `thinking.effort`. Disable Anthropic beta headers for the compatible endpoint.
+  DeepSeek's Anthropic-compatible endpoint may return unsigned `thinking`
+  blocks rather than Claude-style signed blocks. Until unsigned Anthropic
+  thinking replay is explicitly configured and verified, prefer the Chat
+  Completions recipe for thinking plus tool-call loops or set
+  `thinking.type: disabled`.
 - Treat third-party `/responses` endpoints as gateway-specific; use
   `reasoning.effort` only when the gateway documents its mapping.
 - For compatible gateways, use the exact model ID and limits published by that
@@ -651,11 +661,35 @@ sets both fields explicitly. K2.5 does not support preserved thinking and is
 being retired for new users; prefer K3 for new configurations.
 
 For all `openai_visible` recipes (DeepSeek, GLM, supported Qwen, and Kimi),
-Chord only replays native reasoning within the producing provider. This keeps
-documented in-provider upgrades such as Kimi K2.6/K2.7 to K3 working, while a
-cross-provider fallback drops the incompatible reasoning/tool trajectory so
-the target can plan afresh instead of receiving another provider's chain of
-thought or an invalid partial trajectory.
+Chord first replays native reasoning optimistically to any Chat Completions
+target, so documented in-provider upgrades such as Kimi K2.6/K2.7 to K3 and
+same-model provider fallback can keep continuity. If a target rejects native
+reasoning, Chord removes or converts only the incompatible reasoning payload.
+Completed tool calls and their paired results remain available to the next
+model; they are not treated as disposable chain-of-thought data. A strict
+compatibility fallback may textify the completed action history when the target
+cannot accept the structured shape.
+
+### Cross-protocol fallback continuity
+
+When a pool switches between Chat Completions, Responses, Messages, or Gemini,
+Chord preserves the portable parts of completed tool rounds:
+
+- completed calls and paired results are converted to the target protocol's
+  structured tool representation whenever possible;
+- visible reasoning attached to a tool round (`reasoning_content`, unsigned
+  thinking text, Responses reasoning summaries, or Gemini thought text) is
+  retained as explicitly marked assistant history when its native format cannot
+  cross the protocol boundary;
+- opaque provider state such as Claude signatures, Responses encrypted
+  reasoning, and Gemini thought signatures is never fabricated or copied into
+  an incompatible protocol;
+- if a target rejects the synthesized structured shape, strict compatibility
+  textifies the completed call/result history instead of silently deleting it.
+
+Reasoning-only turns are not copied as fallback text. This keeps cross-protocol
+context focused on action-relevant state and avoids paying repeatedly for old
+chain-of-thought that is not tied to a tool round.
 
 ## Grok 4.5 (xAI Responses)
 

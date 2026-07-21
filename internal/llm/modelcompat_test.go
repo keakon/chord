@@ -10,6 +10,52 @@ import (
 	"github.com/keakon/chord/internal/modelcompat"
 )
 
+func findResponsesToolItems(items []responsesInputItem, callID string) (call, output *responsesInputItem) {
+	for i := range items {
+		item := &items[i]
+		switch {
+		case item.Type == "function_call" && item.CallID == callID:
+			call = item
+		case item.Type == "function_call_output" && item.CallID == callID:
+			output = item
+		}
+	}
+	return call, output
+}
+
+func responsesItemsContainText(items []responsesInputItem, text string) bool {
+	for _, item := range items {
+		blocks, ok := item.Content.([]responsesContentBlock)
+		if !ok {
+			continue
+		}
+		for _, block := range blocks {
+			if strings.Contains(block.Text, text) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func anthropicBlocksContainToolUse(blocks []anthropicContent, id string) bool {
+	for _, block := range blocks {
+		if block.Type == "tool_use" && block.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func anthropicBlocksContainText(blocks []anthropicContent, text string) bool {
+	for _, block := range blocks {
+		if block.Type == "text" && strings.Contains(block.Text, text) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestNormalizeMessagesForPoolTarget_PreservesAnthropicThinkingForAnthropicTarget(t *testing.T) {
 	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{Type: config.ProviderTypeMessages}, nil)
 	msgs := []message.Message{{
@@ -290,17 +336,15 @@ func TestNormalizeMessagesForPoolTarget_ResponsesConversionDoesNotReplayReasonin
 	}
 
 	items := convertMessagesToResponses("", normalized)
-	if len(items) != 3 {
-		t.Fatalf("len(items)=%d, want 3", len(items))
-	}
 	if items[0].Type != "message" || items[0].Role != string(message.RoleUser) {
 		t.Fatalf("items[0] = %#v, want user message", items[0])
 	}
-	if items[1].Type != "function_call" || items[1].CallID != "call_1" || items[1].Name != "Shell" || items[1].Arguments != `{"command":"pwd"}` {
-		t.Fatalf("items[1] = %#v, want structured function_call item", items[1])
+	call, output := findResponsesToolItems(items, "call_1")
+	if call == nil || call.Name != "Shell" || call.Arguments != `{"command":"pwd"}` {
+		t.Fatalf("function_call = %#v, want structured item", call)
 	}
-	if items[2].Type != "function_call_output" || items[2].CallID != "call_1" || items[2].Output != "/tmp/project\n" {
-		t.Fatalf("items[2] = %#v, want tool result output", items[2])
+	if output == nil || output.Output != "/tmp/project\n" {
+		t.Fatalf("function_call_output = %#v, want tool result", output)
 	}
 }
 
@@ -318,5 +362,127 @@ func TestNormalizeMessagesForPoolTarget_DowngradesMissingToolResultForAnthropic(
 	}
 	if rep.DowngradedToolCalls == 0 {
 		t.Fatalf("DowngradedToolCalls=%d, want >0", rep.DowngradedToolCalls)
+	}
+}
+
+func TestNormalizeMessagesForPoolTarget_ResponsesToMessagesPreservesToolFacts(t *testing.T) {
+	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{Type: config.ProviderTypeMessages}, nil)
+	source := []message.Message{
+		{Role: message.RoleUser, Content: "inspect"},
+		{
+			Role: message.RoleAssistant,
+			ResponsesOutput: []message.ResponsesOutputItem{
+				{Type: "reasoning", ID: "rs_1", EncryptedContent: "opaque", Summary: []message.ResponsesReasoningSummary{{Type: "summary_text", Text: "public reasoning summary"}}},
+				{Type: "function_call", ID: "fc_1", CallID: "call_1", Name: "read", Arguments: `{"path":"README.md"}`},
+			},
+			ToolCalls:  []message.ToolCall{{ID: "call_1", Name: "read", Args: json.RawMessage(`{"path":"README.md"}`)}},
+			Provenance: &message.MessageProvenance{ProviderID: "openai", ModelID: "gpt-5", WireFamily: modelcompat.WireFamilyOpenAIResponses},
+		},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "README contents"},
+	}
+
+	normalized, report := normalizeMessagesForPoolTarget(source, FallbackModel{ProviderConfig: provider, ModelID: "claude-sonnet"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}})
+	if len(normalized) != 3 || len(normalized[1].ResponsesOutput) != 0 || len(normalized[1].ToolCalls) != 1 || normalized[2].ToolCallID != "call_1" {
+		t.Fatalf("Responses history lost portable tool facts: %+v (report %+v)", normalized, report)
+	}
+
+	converted := convertMessages(normalized)
+	if len(converted) != 3 {
+		t.Fatalf("Anthropic messages = %#v, want user/assistant/tool-result", converted)
+	}
+	assistantBlocks, ok := converted[1].Content.([]anthropicContent)
+	if !ok || !anthropicBlocksContainToolUse(assistantBlocks, "call_1") || !anthropicBlocksContainText(assistantBlocks, "public reasoning summary") {
+		t.Fatalf("Anthropic tool_use = %#v", converted[1].Content)
+	}
+	resultBlocks, ok := converted[2].Content.([]anthropicContent)
+	if !ok || len(resultBlocks) != 1 || resultBlocks[0].Type != "tool_result" || resultBlocks[0].ToolUseID != "call_1" {
+		t.Fatalf("Anthropic tool_result = %#v", converted[2].Content)
+	}
+}
+
+func TestNormalizeMessagesForPoolTarget_MessagesToResponsesPreservesToolFacts(t *testing.T) {
+	provider := NewProviderConfig("openai-main", config.ProviderConfig{Type: config.ProviderTypeResponses}, nil)
+	source := []message.Message{
+		{Role: message.RoleUser, Content: "inspect"},
+		{
+			Role:           message.RoleAssistant,
+			ThinkingBlocks: []message.ThinkingBlock{{Thinking: "unsigned provider reasoning"}},
+			ToolCalls:      []message.ToolCall{{ID: "call_1", Name: "read", Args: json.RawMessage(`{"path":"README.md"}`)}},
+			Provenance:     &message.MessageProvenance{ProviderID: "deepseek", ModelID: "deepseek-v4-pro", WireFamily: modelcompat.WireFamilyAnthropic},
+		},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "README contents"},
+	}
+
+	normalized, report := normalizeMessagesForPoolTarget(source, FallbackModel{ProviderConfig: provider, ModelID: "gpt-5"}, RequestTuning{})
+	if len(normalized) != 3 || len(normalized[1].ThinkingBlocks) != 0 || len(normalized[1].ToolCalls) != 1 || normalized[2].ToolCallID != "call_1" {
+		t.Fatalf("Messages history lost portable tool facts: %+v (report %+v)", normalized, report)
+	}
+
+	converted := convertMessagesToResponses("", normalized)
+	call, output := findResponsesToolItems(converted, "call_1")
+	if call == nil || call.Name != "read" {
+		t.Fatalf("Responses function_call = %#v", call)
+	}
+	if output == nil || output.Output != "README contents" {
+		t.Fatalf("Responses function_call_output = %#v", output)
+	}
+	if !responsesItemsContainText(converted, "unsigned provider reasoning") {
+		t.Fatalf("Responses input lost portable reasoning context: %#v", converted)
+	}
+}
+
+func TestNormalizeMessagesForPoolTarget_ChatToMessagesDropsOnlyReasoning(t *testing.T) {
+	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{Type: config.ProviderTypeMessages}, nil)
+	source := []message.Message{
+		{Role: message.RoleUser, Content: "inspect"},
+		{
+			Role:             message.RoleAssistant,
+			ReasoningContent: "visible chat reasoning",
+			ToolCalls:        []message.ToolCall{{ID: "call_1", Name: "read", Args: json.RawMessage(`{"path":"README.md"}`)}},
+			Provenance:       &message.MessageProvenance{ProviderID: "deepseek", ModelID: "deepseek-v4-pro", WireFamily: modelcompat.WireFamilyOpenAIChat},
+		},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "README contents"},
+	}
+
+	normalized, report := normalizeMessagesForPoolTarget(source, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}})
+	if len(normalized) != 3 || normalized[1].ReasoningContent != "" || len(normalized[1].ToolCalls) != 1 || report.DowngradedReasoning != 1 {
+		t.Fatalf("Chat reasoning should be dropped while tool facts survive: %+v (report %+v)", normalized, report)
+	}
+	converted := convertMessages(normalized)
+	blocks, ok := converted[1].Content.([]anthropicContent)
+	if !ok || !anthropicBlocksContainToolUse(blocks, "call_1") || !anthropicBlocksContainText(blocks, "visible chat reasoning") {
+		t.Fatalf("Anthropic conversion lost tool_use: %#v", converted[1].Content)
+	}
+}
+
+func TestNormalizeMessagesForPoolTarget_MessagesToChatDropsOnlyThinking(t *testing.T) {
+	provider := NewProviderConfig("chat-main", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, nil)
+	source := []message.Message{
+		{Role: message.RoleUser, Content: "inspect"},
+		{
+			Role:           message.RoleAssistant,
+			ThinkingBlocks: []message.ThinkingBlock{{Thinking: "signed or unsigned messages reasoning", Signature: "sig"}},
+			ToolCalls:      []message.ToolCall{{ID: "call_1", Name: "read", Args: json.RawMessage(`{"path":"README.md"}`)}},
+			Provenance:     &message.MessageProvenance{ProviderID: "anthropic-main", ModelID: "claude", WireFamily: modelcompat.WireFamilyAnthropic},
+		},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "README contents"},
+	}
+
+	normalized, report := normalizeMessagesForPoolTarget(source, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{})
+	if len(normalized) != 3 || len(normalized[1].ThinkingBlocks) != 0 || len(normalized[1].ToolCalls) != 1 || report.DroppedThinkingBlocks != 1 {
+		t.Fatalf("Messages thinking should be dropped while tool facts survive: %+v (report %+v)", normalized, report)
+	}
+	converted := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, normalized)
+	var foundCall, foundResult bool
+	for _, msg := range converted {
+		if msg.Role == "assistant" && len(msg.ToolCalls) == 1 && msg.ToolCalls[0].ID == "call_1" {
+			foundCall = true
+		}
+		if msg.Role == "tool" && msg.ToolCallID == "call_1" && msg.Content == "README contents" {
+			foundResult = true
+		}
+	}
+	if !foundCall || !foundResult {
+		t.Fatalf("OpenAI conversion lost portable tool facts: %#v", converted)
 	}
 }

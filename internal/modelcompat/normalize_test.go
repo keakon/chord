@@ -188,6 +188,18 @@ func TestNormalizeForTarget_DropsNonImportedUnreplayableToolsWithoutImportedMark
 	}
 }
 
+func TestNormalizeForTarget_TextifiesCompletedToolsWhenStructuredToolsDisabled(t *testing.T) {
+	args, _ := json.Marshal(map[string]any{"command": "ls"})
+	msgs := []message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call_1", Name: "shell", Args: args}}},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
+	}
+	out, report := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic}, NormalizeOptions{StructuredTools: false})
+	if len(out) != 1 || out[0].Role != message.RoleAssistant || len(out[0].ToolCalls) != 0 || !strings.Contains(out[0].Content, "[Previous tool call: shell]") || !strings.Contains(out[0].Content, "[Previous tool result for call_1]") {
+		t.Fatalf("completed tool history should be textified, got %+v (report %+v)", out, report)
+	}
+}
+
 func TestNormalizeForTarget_DoesNotMutateInput(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{"command": "ls"})
 	msgs := []message.Message{{

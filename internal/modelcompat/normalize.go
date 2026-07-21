@@ -25,6 +25,7 @@ const (
 
 	importedToolCallMarkerPrefix   = "[Imported tool call"
 	importedToolResultMarkerPrefix = "[Imported tool result for "
+	portableReasoningMarker        = "[Previous model reasoning preserved for continuity]"
 )
 
 type TargetModel struct {
@@ -39,15 +40,58 @@ type TargetModel struct {
 	SupportsStructuredTools bool
 }
 
+// Replay compatibility degradation ladder for provider-bound native payloads.
+// Levels only ever escalate for a target after it rejects the current level,
+// so the default is the most information-preserving shape the wire protocol
+// admits.
+const (
+	// ReplayCompatNative optimistically replays provider-bound native payloads
+	// (encrypted Responses items, thinking blocks, thought signatures, visible
+	// reasoning) to any target speaking the producing wire protocol, regardless
+	// of which configured provider entry or model version produced them.
+	// Whether a backend accepts such a payload is decided by that backend and
+	// cannot be derived from client-side config, so the richest
+	// protocol-compatible shape is sent first; a rejection escalates the level.
+	ReplayCompatNative = 0
+	// ReplayCompatSynthesized falls back to strict provenance matching for
+	// native payloads. Foreign native Responses items are re-synthesized as
+	// plain call_id-only function_call items — the same shape used for turns
+	// that never had native output. Reasoning continuity is lost but the
+	// action history stays intact.
+	ReplayCompatSynthesized = 1
+	// ReplayCompatStrict textifies completed tool trajectories whose native
+	// reasoning cannot be replayed. This is the last resort for backends that
+	// reject even the synthesized structured shape; external action history
+	// remains visible without replaying provider-bound payloads.
+	ReplayCompatStrict = 2
+)
+
 type NormalizeOptions struct {
 	StructuredTools bool
+	// ReplayCompat selects the degradation level for provider-bound native
+	// payload replay. The zero value is the optimistic native replay.
+	ReplayCompat int
 }
 
 type NormalizeReport struct {
 	DroppedThinkingBlocks int
 	DowngradedToolCalls   int
 	DowngradedReasoning   int
-	Warnings              []string
+	TextifiedReasoning    int
+	DroppedToolCalls      int
+	DroppedToolResults    int
+	// ForeignNativeReplays counts messages whose provider-bound native payloads
+	// were kept via the relaxed wire-protocol-only rule instead of strict
+	// provenance matching. It is diagnostic output; retry decisions compare the
+	// actual normalized request shapes because a stricter level may be identical.
+	ForeignNativeReplays int
+	Warnings             []string
+}
+
+func (r NormalizeReport) Changed() bool {
+	return r.DroppedThinkingBlocks != 0 || r.DowngradedToolCalls != 0 || r.DowngradedReasoning != 0 ||
+		r.TextifiedReasoning != 0 || r.DroppedToolCalls != 0 || r.DroppedToolResults != 0 ||
+		r.ForeignNativeReplays != 0 || len(r.Warnings) != 0
 }
 
 // NormalizeForTarget returns a wire-only deep-copied message slice suitable for
@@ -64,68 +108,142 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 	allowStructuredTools := opts.StructuredTools && target.SupportsStructuredTools && strings.TrimSpace(target.ToolResultEncoding) != "" && strings.TrimSpace(target.ToolResultEncoding) != ToolResultEncodingNone
 	toolResultsByID := collectToolResults(out)
 	droppedNonImportedToolIDs := make(map[string]bool)
+	textifiedToolResultIDs := make(map[string]bool)
 
 	for i := range out {
 		msg := &out[i]
 		reasoningToolTrajectoryInvalid := false
 
 		if len(msg.ThinkingBlocks) > 0 {
+			strictProvenance := messageAllowsAnthropicThinkingReplay(*msg, target)
+			foreignProvenance := !strictProvenance && opts.ReplayCompat <= ReplayCompatNative &&
+				provenanceWireFamily(*msg) == WireFamilyAnthropic
+			foreignKept := false
+			var portableThinking []string
 			kept := make([]message.ThinkingBlock, 0, len(msg.ThinkingBlocks))
 			for _, block := range msg.ThinkingBlocks {
 				if !allowThinking {
 					report.DroppedThinkingBlocks++
+					portableThinking = appendPortableText(portableThinking, block.Thinking)
 					continue
 				}
 				if !block.Replayable() {
 					report.DroppedThinkingBlocks++
+					portableThinking = appendPortableText(portableThinking, block.Thinking)
 					continue
 				}
-				if !messageAllowsAnthropicThinkingReplay(*msg, target) {
-					report.DroppedThinkingBlocks++
-					report.Warnings = append(report.Warnings, "dropped thinking blocks: missing/invalid anthropic provenance")
-					continue
+				if !strictProvenance {
+					if !foreignProvenance {
+						report.DroppedThinkingBlocks++
+						portableThinking = appendPortableText(portableThinking, block.Thinking)
+						report.Warnings = append(report.Warnings, "dropped thinking blocks: missing/invalid anthropic provenance")
+						continue
+					}
+					foreignKept = true
 				}
 				kept = append(kept, block)
 			}
+			if foreignKept {
+				report.ForeignNativeReplays++
+			}
 			msg.ThinkingBlocks = kept
-			if allowThinking && len(kept) == 0 && len(msg.ToolCalls) > 0 {
+			if len(portableThinking) > 0 && len(msg.ToolCalls) > 0 {
+				msg.Content = prependPortableReasoning(msg.Content, portableThinking)
+				report.TextifiedReasoning++
+			}
+			if len(kept) == 0 && len(msg.ToolCalls) > 0 && opts.ReplayCompat >= ReplayCompatStrict {
 				reasoningToolTrajectoryInvalid = true
 			}
 		}
 
-		if strings.TrimSpace(msg.ReasoningContent) != "" && (!targetAllowsReasoningReplay(target) || !AllowsOpenAIVisibleReasoningReplay(*msg) || !messageProvenanceProviderMatchesTarget(*msg, target)) {
+		if strings.TrimSpace(msg.ReasoningContent) != "" {
 			targetRequiresReasoning := targetAllowsReasoningReplay(target)
 			sourceHasNativeReasoning := AllowsOpenAIVisibleReasoningReplay(*msg)
-			msg.ReasoningContent = ""
-			report.DowngradedReasoning++
-			if targetRequiresReasoning && sourceHasNativeReasoning && len(msg.ToolCalls) > 0 {
-				reasoningToolTrajectoryInvalid = true
+			replayable := targetRequiresReasoning && sourceHasNativeReasoning && messageProvenanceProviderMatchesTarget(*msg, target)
+			if !replayable && opts.ReplayCompat <= ReplayCompatNative && targetRequiresReasoning && sourceHasNativeReasoning {
+				replayable = true
+				report.ForeignNativeReplays++
+			}
+			if !replayable {
+				portableReasoning := strings.TrimSpace(msg.ReasoningContent)
+				msg.ReasoningContent = ""
+				report.DowngradedReasoning++
+				if portableReasoning != "" && len(msg.ToolCalls) > 0 {
+					msg.Content = prependPortableReasoning(msg.Content, []string{portableReasoning})
+					report.TextifiedReasoning++
+				}
+				if len(msg.ToolCalls) > 0 && opts.ReplayCompat >= ReplayCompatStrict {
+					reasoningToolTrajectoryInvalid = true
+				}
 			}
 		}
 
-		if len(msg.ResponsesOutput) > 0 && !allowsResponsesOutputReplay(*msg, target) {
-			if strings.TrimSpace(target.WireFamily) == WireFamilyOpenAIResponses && len(msg.ToolCalls) > 0 {
-				reasoningToolTrajectoryInvalid = true
+		if len(msg.ResponsesOutput) > 0 {
+			replayable := allowsResponsesOutputReplay(*msg, target)
+			if !replayable && opts.ReplayCompat <= ReplayCompatNative && allowsForeignResponsesOutputReplay(*msg, target) {
+				replayable = true
+				report.ForeignNativeReplays++
 			}
-			msg.ResponsesOutput = nil
-			report.DowngradedReasoning++
+			if !replayable {
+				// Stripping the native items leaves the turn's tool calls to
+				// be re-synthesized as plain call_id-only function_call items
+				// — the same shape used for turns that never had native
+				// output. Dropping the turn instead would erase the model's
+				// own action history; that is reserved for the strict level,
+				// used only after a target rejected the synthesized shape.
+				if opts.ReplayCompat >= ReplayCompatStrict && len(msg.ToolCalls) > 0 {
+					reasoningToolTrajectoryInvalid = true
+				}
+				portableSummary := responsesReasoningSummaryText(msg.ResponsesOutput)
+				msg.ResponsesOutput = nil
+				report.DowngradedReasoning++
+				if len(portableSummary) > 0 && len(msg.ToolCalls) > 0 {
+					msg.Content = prependPortableReasoning(msg.Content, portableSummary)
+					report.TextifiedReasoning++
+				}
+			}
 		}
 
 		if !allowsGeminiThoughtSignatureReplay(*msg, target) {
-			stripped := len(msg.GeminiParts) > 0
-			msg.GeminiParts = nil
+			hasSignatures := len(msg.GeminiParts) > 0
 			for j := range msg.ToolCalls {
 				if msg.ToolCalls[j].ThoughtSignature != "" {
-					msg.ToolCalls[j].ThoughtSignature = ""
-					stripped = true
+					hasSignatures = true
 				}
 			}
-			if stripped {
+			switch {
+			case !hasSignatures:
+			case opts.ReplayCompat <= ReplayCompatNative && allowsForeignGeminiThoughtSignatureReplay(*msg, target):
+				report.ForeignNativeReplays++
+			default:
+				portableThoughts := geminiThoughtText(msg.GeminiParts)
+				msg.GeminiParts = nil
+				for j := range msg.ToolCalls {
+					msg.ToolCalls[j].ThoughtSignature = ""
+				}
 				report.DowngradedReasoning++
+				if len(portableThoughts) > 0 && len(msg.ToolCalls) > 0 {
+					msg.Content = prependPortableReasoning(msg.Content, portableThoughts)
+					report.TextifiedReasoning++
+				}
+				if opts.ReplayCompat >= ReplayCompatStrict && len(msg.ToolCalls) > 0 {
+					reasoningToolTrajectoryInvalid = true
+				}
 			}
 		}
 
 		if len(msg.ToolCalls) > 0 && (reasoningToolTrajectoryInvalid || !toolCallsReplayAllowed(*msg, toolResultsByID, target, allowStructuredTools)) {
+			if completedToolTrajectory(*msg, toolResultsByID) {
+				for _, tc := range msg.ToolCalls {
+					if id := strings.TrimSpace(tc.ID); id != "" {
+						textifiedToolResultIDs[id] = true
+					}
+				}
+				out[i] = downgradeCompletedToolCallsToText(*msg)
+				report.DowngradedToolCalls++
+				report.Warnings = append(report.Warnings, "textified completed tool trajectory for request compatibility")
+				continue
+			}
 			if canDowngradeToolCallsToText(*msg) {
 				downgraded := downgradeAssistantToolCallsToText(*msg)
 				if downgraded.Content != msg.Content || len(msg.ToolCalls) > 0 {
@@ -133,6 +251,7 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 					report.DowngradedToolCalls++
 				}
 			} else {
+				droppedCount := len(msg.ToolCalls)
 				for _, tc := range msg.ToolCalls {
 					if id := strings.TrimSpace(tc.ID); id != "" {
 						droppedNonImportedToolIDs[id] = true
@@ -142,18 +261,30 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 				msg.ResponsesOutput = nil
 				msg.GeminiParts = nil
 				report.Warnings = append(report.Warnings, "dropped unreplayable non-imported tool calls from request context")
+				report.DroppedToolCalls += droppedCount
 			}
 		}
 	}
 
-	if !allowStructuredTools {
-		for i := range out {
-			if out[i].Role != message.RoleTool {
-				continue
+	for i := range out {
+		if out[i].Role != message.RoleTool {
+			continue
+		}
+		if textifiedToolResultIDs[strings.TrimSpace(out[i].ToolCallID)] {
+			callID := strings.TrimSpace(out[i].ToolCallID)
+			out[i] = message.Message{
+				Role:       message.RoleAssistant,
+				Content:    joinNonEmpty("[Previous tool result for "+callID+"]", out[i].Content),
+				Provenance: cloneProvenance(out[i].Provenance),
 			}
+			report.DowngradedToolCalls++
+			continue
+		}
+		if !allowStructuredTools {
 			if !canDowngradeToolResultToText(out[i]) {
 				out[i].Role = ""
 				report.Warnings = append(report.Warnings, "dropped non-imported tool result from request context")
+				report.DroppedToolResults++
 				continue
 			}
 			callID := strings.TrimSpace(out[i].ToolCallID)
@@ -177,6 +308,7 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 				continue
 			}
 			if msg.Role == message.RoleTool && droppedNonImportedToolIDs[strings.TrimSpace(msg.ToolCallID)] {
+				report.DroppedToolResults++
 				continue
 			}
 			filtered = append(filtered, msg)
@@ -218,6 +350,17 @@ func allowsResponsesOutputReplay(msg message.Message, target TargetModel) bool {
 	return messageProvenanceMatchesTarget(msg, target)
 }
 
+// allowsForeignResponsesOutputReplay is the relaxed native-replay rule for
+// ReplayCompatNative: only the wire protocol must match. Encrypted reasoning
+// payloads are opaque to the client and decrypted by the producing backend
+// platform, which is identified by neither the configured provider entry nor
+// the model version string; a backend that cannot decrypt them rejects the
+// request and the caller escalates the replay compatibility level.
+func allowsForeignResponsesOutputReplay(msg message.Message, target TargetModel) bool {
+	return strings.TrimSpace(target.WireFamily) == WireFamilyOpenAIResponses &&
+		provenanceWireFamily(msg) == WireFamilyOpenAIResponses
+}
+
 func reasoningContinuityAllowsAnthropicBlocks(target TargetModel) bool {
 	return strings.TrimSpace(target.WireFamily) == WireFamilyAnthropic && strings.TrimSpace(target.ReasoningContinuityMode) == ReasoningContinuityAnthropicBlocks
 }
@@ -241,13 +384,28 @@ func allowsGeminiThoughtSignatureReplay(msg message.Message, target TargetModel)
 	if strings.TrimSpace(target.WireFamily) != WireFamilyGemini {
 		return false
 	}
-	if msg.Provenance == nil {
-		return false
-	}
-	if strings.TrimSpace(msg.Provenance.WireFamily) != WireFamilyGemini {
+	if provenanceWireFamily(msg) != WireFamilyGemini {
 		return false
 	}
 	return messageProvenanceMatchesTarget(msg, target)
+}
+
+// allowsForeignGeminiThoughtSignatureReplay is the relaxed variant for
+// ReplayCompatNative: signatures produced through the gemini wire protocol are
+// replayed to any gemini target, since the backend — not client-side config —
+// decides whether it can validate them; a rejection escalates the replay
+// compatibility level. Non-gemini targets always strip, so stale signatures
+// never survive a switch away from the gemini wire format.
+func allowsForeignGeminiThoughtSignatureReplay(msg message.Message, target TargetModel) bool {
+	return strings.TrimSpace(target.WireFamily) == WireFamilyGemini &&
+		provenanceWireFamily(msg) == WireFamilyGemini
+}
+
+func provenanceWireFamily(msg message.Message) string {
+	if msg.Provenance == nil {
+		return ""
+	}
+	return strings.TrimSpace(msg.Provenance.WireFamily)
 }
 
 func messageAllowsAnthropicThinkingReplay(msg message.Message, target TargetModel) bool {
@@ -285,6 +443,19 @@ func toolCallsReplayAllowed(msg message.Message, toolResultsByID map[string]bool
 	}
 	if strings.TrimSpace(target.ToolResultEncoding) == ToolResultEncodingAnthropicUserBlock && len(msg.ToolCalls) > 0 {
 		if len(msg.ThinkingBlocks) == 0 && msg.Provenance != nil && strings.Contains(msg.Provenance.Source, "claude") {
+			return false
+		}
+	}
+	return true
+}
+
+func completedToolTrajectory(msg message.Message, toolResultsByID map[string]bool) bool {
+	if len(msg.ToolCalls) == 0 {
+		return false
+	}
+	for _, tc := range msg.ToolCalls {
+		id := strings.TrimSpace(tc.ID)
+		if id == "" || !toolResultsByID[id] {
 			return false
 		}
 	}
@@ -331,6 +502,70 @@ func downgradeAssistantToolCallsToText(msg message.Message) message.Message {
 		Role:             message.RoleAssistant,
 		Content:          strings.TrimSpace(strings.Join(blocks, "\n\n")),
 		ThinkingBlocks:   msg.ThinkingBlocks,
+		ReasoningContent: msg.ReasoningContent,
+		StopReason:       msg.StopReason,
+		Usage:            cloneUsage(msg.Usage),
+		Provenance:       cloneProvenance(msg.Provenance),
+	}
+}
+
+func appendPortableText(items []string, text string) []string {
+	if text = strings.TrimSpace(text); text != "" {
+		return append(items, text)
+	}
+	return items
+}
+
+func prependPortableReasoning(content string, reasoning []string) string {
+	if len(reasoning) == 0 {
+		return content
+	}
+	parts := []string{portableReasoningMarker, strings.Join(reasoning, "\n")}
+	if strings.TrimSpace(content) != "" {
+		parts = append(parts, content)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func responsesReasoningSummaryText(items []message.ResponsesOutputItem) []string {
+	var out []string
+	for _, item := range items {
+		if item.Type != "reasoning" {
+			continue
+		}
+		for _, summary := range item.Summary {
+			out = appendPortableText(out, summary.Text)
+		}
+	}
+	return out
+}
+
+func geminiThoughtText(parts []message.GeminiReplayPart) []string {
+	var out []string
+	for _, part := range parts {
+		if part.Type == "thought" {
+			out = appendPortableText(out, part.Text)
+		}
+	}
+	return out
+}
+
+func downgradeCompletedToolCallsToText(msg message.Message) message.Message {
+	blocks := make([]string, 0, len(msg.ToolCalls)+1)
+	if strings.TrimSpace(msg.Content) != "" {
+		blocks = append(blocks, strings.TrimSpace(msg.Content))
+	}
+	for _, tc := range msg.ToolCalls {
+		marker := "[Previous tool call"
+		if strings.TrimSpace(tc.Name) != "" {
+			marker += ": " + strings.TrimSpace(tc.Name)
+		}
+		marker += "]"
+		blocks = append(blocks, joinNonEmpty(marker, strings.TrimSpace(string(tc.Args))))
+	}
+	return message.Message{
+		Role:             message.RoleAssistant,
+		Content:          strings.TrimSpace(strings.Join(blocks, "\n\n")),
 		ReasoningContent: msg.ReasoningContent,
 		StopReason:       msg.StopReason,
 		Usage:            cloneUsage(msg.Usage),

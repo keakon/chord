@@ -74,6 +74,39 @@ type Client struct {
 	codexWarmupStarted bool
 	codexWarmupCancel  context.CancelFunc
 	codexWarmupDone    <-chan struct{}
+
+	// replayCompatMu guards replayCompatByTarget: the per-target replay
+	// compatibility level achieved so far (see the modelcompat ladder). A
+	// target that rejected optimistic native replay stays at its escalated
+	// level for the rest of the session so later requests do not pay a
+	// guaranteed-failing round trip before degrading again.
+	replayCompatMu       sync.Mutex
+	replayCompatByTarget map[string]int
+}
+
+func (c *Client) replayCompatLevelFor(providerName, modelID, variant string) int {
+	key := oversizeTargetKey(providerName, modelID, variant)
+	if key == "" {
+		return modelcompat.ReplayCompatNative
+	}
+	c.replayCompatMu.Lock()
+	defer c.replayCompatMu.Unlock()
+	return c.replayCompatByTarget[key]
+}
+
+func (c *Client) setReplayCompatLevelFor(providerName, modelID, variant string, level int) {
+	key := oversizeTargetKey(providerName, modelID, variant)
+	if key == "" {
+		return
+	}
+	c.replayCompatMu.Lock()
+	defer c.replayCompatMu.Unlock()
+	if c.replayCompatByTarget == nil {
+		c.replayCompatByTarget = make(map[string]int)
+	}
+	if level > c.replayCompatByTarget[key] {
+		c.replayCompatByTarget[key] = level
+	}
 }
 
 // CallStatus describes the effective model-routing outcome of the most recent
@@ -333,6 +366,15 @@ func (c *Client) ProviderConfig() *ProviderConfig {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.provider
+}
+
+// ProviderForModelRef returns the provider configuration for a model-pool
+// reference, including fallback entries. It is used when durable message
+// provenance must describe the target that actually produced a response.
+func (c *Client) ProviderForModelRef(ref string) *ProviderConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.providerForModelRefLocked(ref)
 }
 
 // ModelID returns the model id of the current cursor head bound to this client.
@@ -1159,6 +1201,13 @@ func reorderFallbacksByScore(fallbacks []FallbackModel, score func(modelRef stri
 }
 
 func normalizeMessagesForPoolTarget(msgs []message.Message, target FallbackModel, tuning RequestTuning) ([]message.Message, modelcompat.NormalizeReport) {
+	return normalizeMessagesForPoolTargetWithOptions(msgs, target, tuning, modelcompat.ReplayCompatNative)
+}
+
+// normalizeMessagesForPoolTargetWithOptions normalizes messages for a pool
+// target at the given replay compatibility level. Levels escalate only after
+// the target rejected the current one; see the modelcompat ladder constants.
+func normalizeMessagesForPoolTargetWithOptions(msgs []message.Message, target FallbackModel, tuning RequestTuning, replayCompat int) ([]message.Message, modelcompat.NormalizeReport) {
 	if target.ProviderConfig == nil {
 		return msgs, modelcompat.NormalizeReport{}
 	}
@@ -1178,7 +1227,7 @@ func normalizeMessagesForPoolTarget(msgs []message.Message, target FallbackModel
 		ToolResultEncoding:      toolResultEncoding(target.ProviderConfig),
 		SupportsStructuredTools: supportsStructuredTools(target.ProviderConfig),
 	}
-	return modelcompat.NormalizeForTarget(msgs, tm, modelcompat.NormalizeOptions{StructuredTools: true})
+	return modelcompat.NormalizeForTarget(msgs, tm, modelcompat.NormalizeOptions{StructuredTools: true, ReplayCompat: replayCompat})
 }
 
 // filterUnsupportedBinaryPartsForTarget drops image/PDF parts the resolved

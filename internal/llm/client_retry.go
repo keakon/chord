@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/modelcompat"
 )
 
 type visibleStreamTracker struct {
@@ -22,6 +24,13 @@ type visibleStreamTracker struct {
 	keyLogID       string
 	keyAttempt     int
 	keyCount       int
+}
+
+func logNormalizeReport(provider, model string, level, messagesBefore, messagesAfter int, report modelcompat.NormalizeReport) {
+	if !report.Changed() {
+		return
+	}
+	log.Debugf("normalized LLM request provider=%v model=%v replay_level=%v messages_before=%v messages_after=%v dropped_thinking=%v downgraded_reasoning=%v textified_reasoning=%v downgraded_tool_calls=%v dropped_tool_calls=%v dropped_tool_results=%v foreign_native_replays=%v warnings=%q", provider, model, level, messagesBefore, messagesAfter, report.DroppedThinkingBlocks, report.DowngradedReasoning, report.TextifiedReasoning, report.DowngradedToolCalls, report.DroppedToolCalls, report.DroppedToolResults, report.ForeignNativeReplays, report.Warnings)
 }
 
 func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
@@ -432,14 +441,18 @@ func (c *Client) completeStreamTarget(
 		keyCount = 1
 	}
 	targetMessages := messages
-	targetMessages, _ = normalizeMessagesForPoolTarget(targetMessages, FallbackModel{
+	poolTarget := FallbackModel{
 		ProviderConfig: t.provider,
 		ProviderImpl:   t.impl,
 		ModelID:        t.modelID,
 		MaxTokens:      t.maxTokens,
 		ContextLimit:   t.contextLimit,
 		Variant:        t.variant,
-	}, t.tuning)
+	}
+	replayLevel := c.replayCompatLevelFor(t.provider.Name(), t.modelID, t.variant)
+	var normalizeReport modelcompat.NormalizeReport
+	targetMessages, normalizeReport = normalizeMessagesForPoolTargetWithOptions(targetMessages, poolTarget, t.tuning, replayLevel)
+	logNormalizeReport(t.provider.Name(), t.modelID, replayLevel, len(messages), len(targetMessages), normalizeReport)
 	effectiveMaxTokens := t.maxTokens
 	if m, ok := t.provider.GetModel(t.modelID); ok {
 		effectiveMaxTokens = clampEffectiveMaxTokens(
@@ -552,6 +565,64 @@ func (c *Client) completeStreamTarget(
 		if err := abortIfCancelled(); err != nil {
 			return result, lastInputTokens, err
 		}
+		// Context length is independent of replay compatibility. Handle it before
+		// the replay ladder so an oversized request cannot spend extra attempts or
+		// permanently downgrade a target merely because it also contains foreign
+		// native replay items.
+		if IsContextLengthExceeded(err) {
+			if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
+				status.FallbackReason = classifyFallbackReason(err)
+			}
+			result.setLastErr(t.provider, err)
+			oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
+			if !visibleStarted {
+				emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
+			} else {
+				log.Warnf("context length exceeded; trying next model provider=%v model=%v key_id=%v input_tokens_est=%v context_limit=%v input_limit=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), estimateRequestInputTokens(systemPrompt, targetMessages, tools), t.contextLimit, t.inputLimit, err)
+			}
+			modelDone = true
+			break
+		}
+
+		// A classified replay rejection means this target refused the
+		// optimistically replayed cross-provider payload, not that the key or
+		// provider is unhealthy. Escalate the replay compatibility level,
+		// remember it for this target, and retry the same key before treating the
+		// error as a normal failure. Do not infer replay incompatibility from an
+		// otherwise-unclassified 400/422 merely because the request carried
+		// foreign replay items: unrelated request errors must not trigger a
+		// billable retry or poison the target's compatibility state.
+		//
+		// Guard: only escalate when the next level actually changes the wire
+		// request. Normalize is a pure function over (messages, target, level),
+		// so if the next level produces a deep-equal message slice the retry
+		// sends a byte-identical request and fails the same way (e.g. there
+		// were no foreign items to begin with, or a prior level already dropped
+		// them); escalating would waste a billable retry on the same key.
+		if replayLevel < modelcompat.ReplayCompatStrict && isReasoningReplayRejection(err) {
+			replayEscalated := false
+			for nextLevel := replayLevel + 1; nextLevel <= modelcompat.ReplayCompatStrict; nextLevel++ {
+				nextMessages, nextReport := normalizeMessagesForPoolTargetWithOptions(messages, poolTarget, t.tuning, nextLevel)
+				// Skip compatibility levels that produce the same request shape.
+				// This preserves the no-identical-retry guarantee while still
+				// allowing Native and Synthesized to converge on the same shape
+				// before Strict textifies a rejected completed trajectory.
+				if reflect.DeepEqual(nextMessages, targetMessages) {
+					continue
+				}
+				replayLevel = nextLevel
+				c.setReplayCompatLevelFor(t.provider.Name(), t.modelID, t.variant, replayLevel)
+				log.Warnf("target rejected replayed trajectory; degrading replay compatibility provider=%v model=%v key_id=%v level=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), replayLevel, err)
+				targetMessages = nextMessages
+				logNormalizeReport(t.provider.Name(), t.modelID, replayLevel, len(messages), len(targetMessages), nextReport)
+				keyAttempt--
+				replayEscalated = true
+				break
+			}
+			if replayEscalated {
+				continue
+			}
+		}
 		if !visibleStarted {
 			fallbackEligible := shouldFallback(err)
 			cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, result.lastErr)
@@ -571,14 +642,6 @@ func (c *Client) completeStreamTarget(
 			if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
 				status.FallbackReason = classifyFallbackReason(err)
 			}
-			if IsContextLengthExceeded(err) {
-				result.setLastErr(t.provider, err)
-				oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
-				emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
-				modelDone = true
-				break
-			}
-
 			retriable := isRetriable(err)
 			apiErrPtr, ok := errors.AsType[*APIError](err)
 			if ok && apiErrPtr != nil {
@@ -674,13 +737,6 @@ func (c *Client) completeStreamTarget(
 
 		if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
 			status.FallbackReason = classifyFallbackReason(err)
-		}
-		if IsContextLengthExceeded(err) {
-			log.Warnf("context length exceeded; trying next model provider=%v model=%v key_id=%v input_tokens_est=%v context_limit=%v input_limit=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), estimateRequestInputTokens(systemPrompt, targetMessages, tools), t.contextLimit, t.inputLimit, err)
-			result.setLastErr(t.provider, err)
-			oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
-			modelDone = true
-			break
 		}
 		log.Warnf("stream interrupted after visible output; retrying current key provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
 		emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)

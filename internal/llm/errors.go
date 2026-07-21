@@ -264,6 +264,49 @@ func IsAllAttemptedCandidatesContextLengthExceeded(err error) bool {
 	return ok
 }
 
+// isReasoningReplayRejection reports whether err is a request rejection caused
+// by replaying reasoning/tool trajectory items the backend refuses to accept
+// (for example a function_call item missing its paired reasoning item, or an
+// encrypted reasoning payload it cannot decrypt). These rejections indicate
+// the request payload shape, not key or provider health, so the caller can
+// retry the same target with a stricter normalization instead of rotating
+// keys or falling back. The match is deliberately narrow: generic 400s must
+// not trigger a degradation retry.
+func isReasoningReplayRejection(err error) bool {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr == nil {
+		return false
+	}
+	if apiErr.StatusCode != 400 && apiErr.StatusCode != 422 {
+		return false
+	}
+	// OpenAI-compatible chat gateways and Anthropic Messages reject a
+	// provider-native reasoning block when it is omitted from the follow-up
+	// request. Require both the field and rejection semantics rather than
+	// treating every "reasoning" 400 as replay-related: unrelated
+	// parameter/schema errors must not cause an extra billable retry.
+	if apiErrMessageContainsAny(apiErr, "reasoning_content", "content[].thinking") &&
+		apiErrMessageContainsAny(apiErr, "must be passed back", "missing", "required", "invalid") {
+		return true
+	}
+	// Gemini commonly reports the signature problem as a structured
+	// INVALID_ARGUMENT/failed-precondition signal with provider-specific text.
+	// Require both a thought-signature marker and rejection semantics so generic
+	// INVALID_ARGUMENT errors do not enter the replay ladder.
+	if apiErrMessageContainsAny(apiErr, "thought_signature", "thoughtsignature", "thought signature") &&
+		apiErrMessageContainsAny(apiErr, "missing", "required", "invalid", "validation", "must be passed back") {
+		return true
+	}
+	return apiErrMessageContainsAny(apiErr,
+		"required 'reasoning' item",
+		"without its required reasoning",
+		"reasoning input items",
+		"item of type 'reasoning'",
+		"encrypted_content",
+		"encrypted content",
+	)
+}
+
 // IsContextLengthExceeded reports whether err indicates the input context
 // exceeds the model's maximum context window. This is a strict classification
 // that matches provider-specific error codes/messages; ordinary 400 errors

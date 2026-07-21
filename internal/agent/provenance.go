@@ -70,7 +70,8 @@ func provenanceFromClient(source string, client *llm.Client, selectedRef, runnin
 	if prov == nil || client == nil {
 		return prov
 	}
-	if providerCfg := client.ProviderConfig(); providerCfg != nil {
+	ref := strings.TrimSpace(prov.ModelRef)
+	if providerCfg := client.ProviderForModelRef(ref); providerCfg != nil {
 		prov.WireFamily = wireFamilyFromProviderType(providerCfg.Type())
 	}
 	return prov
