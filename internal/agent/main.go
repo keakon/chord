@@ -374,6 +374,7 @@ type MainAgent struct {
 	outputDropLogMu               sync.Mutex
 	outputDropLogLastByType       map[string]time.Time
 	outputDropLogSuppressedByType map[string]int
+	stoppingOnce                  sync.Once
 
 	turn           *Turn
 	nextTurnID     uint64
@@ -1187,33 +1188,42 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	// snapshot is saved below and must not be overwritten).
 	a.admissionMu.Lock()
 	a.shuttingDown.Store(true)
+	// Unblock reliable/interactive TUI sends immediately. Waiting until Run's
+	// defer is too late when the event-loop goroutine itself is blocked on a
+	// full output channel: it cannot reach that defer until Shutdown releases it.
+	a.signalStopping()
 	a.admissionEpoch.Add(1)
 	a.cancelSubAgentAdmissions()
 	a.admissionMu.Unlock()
 
+	// Stop the event loop before taking the final snapshot. signalStopping
+	// releases any output-channel backpressure, while cancelling parentCtx
+	// makes nextEvent return as soon as the current handler completes.
+	a.cancel()
 	a.cancelActiveWork()
 	a.waitForSubAgents(remaining)
-	a.closeSubAgentMCPServers()
 
 	// Close the persistence channel and wait for the loop to drain.
 	// The persist loop may be started outside Run (tests), so don't gate the wait
 	// on the main event loop start flag.
+	persistDrained := true
 	if a.persist.ch != nil {
 		a.closePersistLoop()
 		if wait := remaining(); wait > 0 {
 			select {
 			case <-a.persist.done:
 			case <-time.After(wait):
-				log.Warn("persist loop did not drain within shutdown budget, continuing")
+				persistDrained = false
 			}
 		} else {
-			log.Warn("shutdown budget exhausted before persist loop drain")
+			persistDrained = false
 		}
 	}
-	if failed := a.checkpointDegradedSubAgents(); len(failed) > 0 {
-		log.Warnf("shutdown leaving SubAgents with degraded persistence agent_ids=%v", failed)
+	if !persistDrained {
+		return a.shutdownTimeoutError(timeout)
 	}
 
+	compactionDrained := true
 	if wait := remaining(); wait > 0 {
 		done := make(chan struct{})
 		go func() {
@@ -1223,11 +1233,33 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 		select {
 		case <-done:
 		case <-time.After(wait):
-			log.Warn("compaction workers did not drain within shutdown budget, continuing")
+			compactionDrained = false
 		}
 	} else {
-		log.Warn("shutdown budget exhausted before compaction workers drain")
+		compactionDrained = false
 	}
+	if !compactionDrained {
+		return a.shutdownTimeoutError(timeout)
+	}
+
+	// If Run was started, wait until its current handler and output producers
+	// have fully stopped before reading mutable loop state or closing recovery.
+	if a.started.Load() {
+		if wait := remaining(); wait > 0 {
+			select {
+			case <-a.done:
+			case <-time.After(wait):
+				return a.shutdownTimeoutError(timeout)
+			}
+		} else {
+			return a.shutdownTimeoutError(timeout)
+		}
+	}
+
+	if failed := a.checkpointDegradedSubAgents(); len(failed) > 0 {
+		log.Warnf("shutdown leaving SubAgents with degraded persistence agent_ids=%v", failed)
+	}
+	a.closeSubAgentMCPServers()
 
 	// Save final snapshot and close recovery manager (flush JSONL file handles).
 	if a.recovery != nil {
@@ -1244,21 +1276,20 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 		}
 	}
 
-	// Cancel the parent context which will unblock the Run select loop.
-	a.cancel()
+	return nil
+}
 
-	// If Run was never started, there is nothing to wait for.
-	if !a.started.Load() {
-		return nil
-	}
-
-	// Wait for Run to return within the remaining shared shutdown budget.
-	if wait := remaining(); wait > 0 {
-		select {
-		case <-a.done:
-			return nil
-		case <-time.After(wait):
-			return fmt.Errorf("agent shutdown timed out after %v", timeout)
+// shutdownTimeoutError persists a best-effort snapshot before Shutdown aborts
+// with workers still live. buildRecoverySnapshot takes its own locks and
+// UpdateTodos saves the same snapshot concurrently during normal operation,
+// while SaveSnapshot writes atomically via temp+rename, so racing a wedged
+// loop can only yield a slightly stale snapshot — never a corrupt one. The
+// recovery manager stays open: the stuck persist loop may still be writing
+// JSONL, and Close would turn those writes into silent no-ops.
+func (a *MainAgent) shutdownTimeoutError(timeout time.Duration) error {
+	if a.recovery != nil {
+		if err := a.recovery.SaveSnapshot(a.buildShutdownSnapshot()); err != nil {
+			log.Warnf("failed to save best-effort recovery snapshot on shutdown timeout error=%v", err)
 		}
 	}
 	return fmt.Errorf("agent shutdown timed out after %v", timeout)

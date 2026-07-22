@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/keakon/chord/internal/identity"
 )
 
 func TestEventOverflowPreservesOrderAndRemainsRunnable(t *testing.T) {
@@ -247,11 +250,44 @@ func TestEventOverflowBackpressureStopsOnShutdown(t *testing.T) {
 		a.sendEvent(Event{Type: "blocked"})
 		close(done)
 	}()
-	close(a.stoppingCh)
+	a.signalStopping()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("producer remained blocked after shutdown")
+	}
+}
+
+func TestShutdownUnblocksReliableOutputFromEventLoop(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	for i := 0; i < cap(a.outputCh); i++ {
+		a.outputCh <- StreamTextEvent{Text: "busy"}
+	}
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- a.Run(context.Background()) }()
+	deadline := time.Now().Add(time.Second)
+	for !a.started.Load() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !a.started.Load() {
+		t.Fatal("Run did not start")
+	}
+	a.sendEvent(Event{Type: EventAgentError, Payload: errors.New("boom"), SourceID: identity.MainAgentID})
+	// Give the event loop time to enter the reliable output send. Before the
+	// shutdown signal moved earlier, Shutdown could not release this wait.
+	time.Sleep(20 * time.Millisecond)
+
+	if err := a.Shutdown(time.Second); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	select {
+	case err := <-runDone:
+		if err == nil || !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run error = %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run remained blocked on reliable output after Shutdown")
 	}
 }
 

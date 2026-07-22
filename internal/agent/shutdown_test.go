@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -135,6 +137,11 @@ func TestShutdownUsesSharedBudgetAcrossStages(t *testing.T) {
 	}
 	if elapsed > 650*time.Millisecond {
 		t.Fatalf("Shutdown exceeded shared budget too much: %v", elapsed)
+	}
+	// Aborting on timeout must still leave a best-effort recovery snapshot.
+	snapshotPath := filepath.Join(projectRoot, ".chord", "sessions", "test", "snapshot.json")
+	if _, statErr := os.Stat(snapshotPath); statErr != nil {
+		t.Fatalf("expected best-effort snapshot after shutdown timeout: %v", statErr)
 	}
 }
 

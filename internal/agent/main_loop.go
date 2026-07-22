@@ -41,7 +41,7 @@ func (a *MainAgent) Run(ctx context.Context) error {
 	defer func() {
 		log.Debugf("agent event loop stopped instance=%v", a.instanceID)
 		// 1. Signal interactive senders to stop.
-		close(a.stoppingCh)
+		a.signalStopping()
 		// 2. Wait for ConfirmFunc/QuestionFunc goroutines to exit.
 		a.toolWg.Wait()
 		// 3. Wait for async TUI producers (for example, main LLM goroutines) to
@@ -63,6 +63,13 @@ func (a *MainAgent) Run(ctx context.Context) error {
 		}
 		a.dispatch(evt)
 	}
+}
+
+func (a *MainAgent) signalStopping() {
+	if a == nil || a.stoppingCh == nil {
+		return
+	}
+	a.stoppingOnce.Do(func() { close(a.stoppingCh) })
 }
 
 func (a *MainAgent) nextEvent(ctx context.Context) (Event, error) {
@@ -451,7 +458,7 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 			"event_type", fmt.Sprintf("%T", evt),
 			"tool_id", e.ID,
 		}, true
-	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, AgentDoneEvent, GlobalIdleEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent:
+	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, AgentDoneEvent, GlobalIdleEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent:
 		return "TUI output channel full, waiting to deliver critical event", []any{
 			"event_type", fmt.Sprintf("%T", evt),
 		}, true
@@ -523,7 +530,7 @@ func (a *MainAgent) emitReliableToTUI(evt AgentEvent, warnMsg string, warnAttrs 
 // best-effort and may be dropped when the channel is full so streaming and
 // tool execution goroutines never block on UI throughput. A small set of
 // low-frequency correctness/control events (tool lifecycle milestones,
-// non-idle activity, session restore, draft consumption, fork reload, errors)
+// non-idle activity, model changes, session restore, draft consumption, fork reload, errors)
 // are delivered reliably with blocking semantics guarded by stoppingCh. This
 // is safe to call from any goroutine.
 func (a *MainAgent) emitToTUI(evt AgentEvent) {

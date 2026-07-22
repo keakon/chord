@@ -124,6 +124,24 @@ func TestEmitToTUIControlEventsWaitForSpaceInsteadOfDropping(t *testing.T) {
 			},
 		},
 		{
+			name: "RunningModelChanged",
+			event: RunningModelChangedEvent{
+				AgentID:          "main",
+				ProviderModelRef: "provider-b/model",
+				RunningModelRef:  "provider-c/model",
+			},
+			check: func(t *testing.T, evt AgentEvent) {
+				t.Helper()
+				got, ok := evt.(RunningModelChangedEvent)
+				if !ok {
+					t.Fatalf("event type = %T, want RunningModelChangedEvent", evt)
+				}
+				if got.AgentID != "main" || got.ProviderModelRef != "provider-b/model" || got.RunningModelRef != "provider-c/model" {
+					t.Fatalf("RunningModelChangedEvent = %+v, want main/provider-b/model/provider-c/model", got)
+				}
+			},
+		},
+		{
 			name:  "PendingDraftConsumed",
 			event: PendingDraftConsumedEvent{DraftID: "draft-1"},
 			check: func(t *testing.T, evt AgentEvent) {
