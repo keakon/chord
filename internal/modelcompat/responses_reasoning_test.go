@@ -191,6 +191,41 @@ func TestNormalizeUnsignedAnthropicThinkingKeepsToolTrajectoryUntilStrict(t *tes
 	}
 }
 
+func TestNormalizeAnthropicUnsignedContinuityReplayAndDegrade(t *testing.T) {
+	msgs := []message.Message{
+		{
+			Role:           message.RoleAssistant,
+			ThinkingBlocks: []message.ThinkingBlock{{Thinking: "provider-visible reasoning"}},
+			ToolCalls:      []message.ToolCall{{ID: "call-1", Name: "read", Args: []byte(`{}`)}},
+			Provenance:     &message.MessageProvenance{Source: "chord", ProviderID: "deepseek", ModelID: "deepseek-v4-pro", WireFamily: WireFamilyAnthropic},
+		},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
+	}
+	target := TargetModel{
+		ProviderID: "deepseek", ModelID: "deepseek-v4-pro", WireFamily: WireFamilyAnthropic,
+		ReasoningContinuityMode: ReasoningContinuityAnthropicUnsigned,
+		ToolResultEncoding:      ToolResultEncodingAnthropicUserBlock,
+		SupportsStructuredTools: true,
+	}
+
+	native, nativeReport := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatNative})
+	if len(native) != 2 || len(native[0].ThinkingBlocks) != 1 || native[0].ThinkingBlocks[0].Thinking != "provider-visible reasoning" || nativeReport.DroppedThinkingBlocks != 0 {
+		t.Fatalf("native unsigned replay = %+v (report %+v)", native, nativeReport)
+	}
+
+	synthesized, synthesizedReport := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatSynthesized})
+	if len(synthesized) != 2 || len(synthesized[0].ThinkingBlocks) != 0 || len(synthesized[0].ToolCalls) != 1 || !strings.Contains(synthesized[0].Content, "provider-visible reasoning") {
+		t.Fatalf("synthesized unsigned fallback = %+v (report %+v)", synthesized, synthesizedReport)
+	}
+
+	foreignTarget := target
+	foreignTarget.ProviderID = "other-relay"
+	foreign, foreignReport := NormalizeForTarget(msgs, foreignTarget, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatNative})
+	if len(foreign) != 2 || len(foreign[0].ThinkingBlocks) != 0 || !strings.Contains(foreign[0].Content, "provider-visible reasoning") || foreignReport.DroppedThinkingBlocks != 1 {
+		t.Fatalf("cross-provider unsigned replay must degrade: %+v (report %+v)", foreign, foreignReport)
+	}
+}
+
 func TestNormalizeClaudeThinkingFallbackTextifiesCompletedToolTrajectory(t *testing.T) {
 	msgs := []message.Message{
 		{

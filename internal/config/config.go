@@ -575,6 +575,10 @@ type RequestOverridesConfig struct {
 //   - "none": disable replay of provider-specific reasoning continuity state.
 //   - "openai_visible": replay OpenAI-compatible assistant reasoning_content
 //     without injecting provider-specific request fields.
+//   - "anthropic_unsigned": replay visible, unsigned Anthropic thinking for
+//     the same configured provider/model target, and convert visible OpenAI
+//     Chat reasoning_content into unsigned Anthropic thinking at the native
+//     compatibility level.
 //
 // Other protocols use dedicated runtime handling and default-safe stripping
 // when switching to an incompatible target wire format.

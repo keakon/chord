@@ -143,6 +143,35 @@ providers:
 	}
 }
 
+func TestConfigYAML_AnthropicUnsignedReasoningContinuity(t *testing.T) {
+	const raw = `
+providers:
+  deepseek-messages:
+    type: messages
+    models:
+      deepseek-v4-pro:
+        limit:
+          context: 1000000
+          output: 64000
+        thinking:
+          type: adaptive
+        compat:
+          reasoning_continuity:
+            mode: anthropic_unsigned
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("yaml unmarshal failed: %v", err)
+	}
+	model := cfg.Providers["deepseek-messages"].Models["deepseek-v4-pro"]
+	if model.Compat == nil || model.Compat.ReasoningContinuity == nil {
+		t.Fatal("expected compat.reasoning_continuity")
+	}
+	if got := model.Compat.ReasoningContinuity.EffectiveMode(); got != "anthropic_unsigned" {
+		t.Fatalf("EffectiveMode = %q, want anthropic_unsigned", got)
+	}
+}
+
 func TestConfigYAML_ProviderCompatReasoningContinuity(t *testing.T) {
 	const raw = `
 providers:

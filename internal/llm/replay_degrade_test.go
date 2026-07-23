@@ -212,6 +212,52 @@ func TestCompleteStreamSkipsEquivalentReplayLevelBeforeStrict(t *testing.T) {
 	}
 }
 
+func TestCompleteStreamDegradesConvertedUnsignedThinkingWithoutTextLeak(t *testing.T) {
+	cfg := NewProviderConfig("messages", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"glm-5.2": {
+				Thinking: &config.ThinkingConfig{Type: "adaptive"},
+				Compat:   &config.ModelCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: modelcompat.ReasoningContinuityAnthropicUnsigned}},
+			},
+		},
+	}, []string{"key"})
+	impl := &replayRejectingProvider{rejectCount: 1, rejectionMessage: "The `content[].thinking` in the thinking mode must be passed back to the API."}
+	client := NewClient(cfg, impl, "glm-5.2", 4096, "sys")
+	messages := []message.Message{
+		{
+			Role:             message.RoleAssistant,
+			Content:          "calling tool",
+			ReasoningContent: "portable reasoning",
+			ToolCalls:        []message.ToolCall{{ID: "call-1", Name: "read", Args: []byte(`{}`)}},
+			Provenance:       &message.MessageProvenance{ProviderID: "chat-source", ModelID: "glm-5.2", WireFamily: modelcompat.WireFamilyOpenAIChat},
+		},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "ok"},
+	}
+	result, _, err := client.completeStreamTarget(
+		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "glm-5.2", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
+		0, messages, nil, nil, false, nil, 0, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil,
+	)
+	if err != nil || result.resp == nil {
+		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
+	}
+	impl.mu.Lock()
+	attempts := append([][]message.Message(nil), impl.attempts...)
+	impl.mu.Unlock()
+	if len(attempts) != 2 {
+		t.Fatalf("attempts = %d, want converted native then synthesized fallback", len(attempts))
+	}
+	if len(attempts[0][0].ThinkingBlocks) != 1 || attempts[0][0].ThinkingBlocks[0].Thinking != "portable reasoning" || attempts[0][0].ReasoningContent != "" {
+		t.Fatalf("first attempt did not convert reasoning: %+v", attempts[0][0])
+	}
+	if len(attempts[1][0].ThinkingBlocks) != 0 || attempts[1][0].ReasoningContent != "" || len(attempts[1][0].ToolCalls) != 1 {
+		t.Fatalf("fallback did not preserve only the structured tool trajectory: %+v", attempts[1][0])
+	}
+	if strings.Contains(attempts[1][0].Content, "portable reasoning") || strings.Contains(attempts[1][0].Content, "Previous model reasoning") {
+		t.Fatalf("fallback leaked reasoning into assistant text: %q", attempts[1][0].Content)
+	}
+}
+
 func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.T) {
 	tests := []struct {
 		name      string

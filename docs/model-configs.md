@@ -426,6 +426,8 @@ model_templates:
       request_overrides:
         headers:
           anthropic-beta: null
+      reasoning_continuity:
+        mode: anthropic_unsigned
 
   glm-5.2-responses: &glm-5-2-responses
     limit:
@@ -468,9 +470,8 @@ Notes:
   Disable Anthropic beta headers unless that endpoint documents support. A
   compatible Messages endpoint may return unsigned thinking rather than
   Claude-style signed blocks; do not infer signature replay support from the
-  wire format alone. Until the provider's unsigned-thinking continuity is
-  explicitly verified, prefer its Chat Completions recipe for thinking plus
-  tool-call loops or set `thinking.type: disabled`.
+  wire format alone. Configure `anthropic_unsigned` only after verifying that
+  the endpoint accepts its own visible unsigned thinking in tool-call loops.
 - A GLM `/responses` endpoint is gateway-specific. Use a separate template with
   `reasoning.effort` only when the gateway documents OpenAI Responses mapping.
 
@@ -512,6 +513,8 @@ model_templates:
       request_overrides:
         headers:
           anthropic-beta: null
+      reasoning_continuity:
+        mode: anthropic_unsigned
 
   deepseek-v4-pro-responses: &deepseek-v4-pro-responses
     limit:
@@ -553,10 +556,10 @@ Notes:
 - DeepSeek Messages supports `output_config.effort`; Chord derives it from
   `thinking.effort`. Disable Anthropic beta headers for the compatible endpoint.
   DeepSeek's Anthropic-compatible endpoint may return unsigned `thinking`
-  blocks rather than Claude-style signed blocks. Until unsigned Anthropic
-  thinking replay is explicitly configured and verified, prefer the Chat
-  Completions recipe for thinking plus tool-call loops or set
-  `thinking.type: disabled`.
+  blocks rather than Claude-style signed blocks. `anthropic_unsigned` replays
+  that visible thinking only to the same provider/model; cross-provider or
+  rejected replay falls back to marked assistant history while preserving the
+  tool round.
 - Treat third-party `/responses` endpoints as gateway-specific; use
   `reasoning.effort` only when the gateway documents its mapping.
 - For compatible gateways, use the exact model ID and limits published by that

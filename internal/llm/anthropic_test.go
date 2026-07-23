@@ -42,7 +42,7 @@ func TestConvertMessagesSkipsEmptyAssistant(t *testing.T) {
 	got := convertMessages([]message.Message{
 		{Role: "user", Content: "before"},
 		{Role: "assistant", StopReason: "max_tokens"},
-		{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "analysis"}}, StopReason: "max_tokens"},
+		{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{{}}, StopReason: "max_tokens"},
 		{Role: "user", Content: "after"},
 	})
 	if len(got) != 1 {
@@ -1105,6 +1105,40 @@ func TestAnthropicCompleteStreamReplaysThinkingBlocksInAssistantHistory(t *testi
 	}
 	if blocks[1].Type != "tool_use" || blocks[1].ID != "toolu_1" {
 		t.Fatalf("second assistant block = %#v, want tool_use", blocks[1])
+	}
+}
+
+func TestConvertMessagesReplaysUnsignedThinkingWithoutSignature(t *testing.T) {
+	converted := convertMessages([]message.Message{{
+		Role:           message.RoleAssistant,
+		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "provider-visible reasoning"}},
+		ToolCalls:      []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}},
+	}})
+	if len(converted) != 1 {
+		t.Fatalf("converted = %#v", converted)
+	}
+	blocks, ok := converted[0].Content.([]anthropicContent)
+	if !ok || len(blocks) != 2 {
+		t.Fatalf("blocks = %#v", converted[0].Content)
+	}
+	if blocks[0].Type != "thinking" || blocks[0].Thinking != "provider-visible reasoning" || blocks[0].Signature != "" {
+		t.Fatalf("unsigned thinking block = %#v", blocks[0])
+	}
+	if blocks[1].Type != "tool_use" || blocks[1].ID != "call-1" {
+		t.Fatalf("tool block = %#v", blocks[1])
+	}
+
+	convertedNoReplay := convertMessages([]message.Message{{
+		Role:           message.RoleAssistant,
+		ThinkingBlocks: []message.ThinkingBlock{{}},
+		ToolCalls:      []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}},
+	}})
+	if len(convertedNoReplay) != 1 {
+		t.Fatalf("empty thinking should be skipped: %#v", convertedNoReplay)
+	}
+	noReplayBlocks, ok := convertedNoReplay[0].Content.([]anthropicContent)
+	if !ok || len(noReplayBlocks) != 1 || noReplayBlocks[0].Type != "tool_use" {
+		t.Fatalf("empty thinking assistant blocks = %#v", convertedNoReplay[0].Content)
 	}
 }
 

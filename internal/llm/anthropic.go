@@ -694,7 +694,13 @@ func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthr
 			// Anthropic requires them to be replayed verbatim (including signature).
 			for _, tb := range msg.ThinkingBlocks {
 				if !tb.Replayable() {
-					log.Warnf("skipping unreplayable thinking block in Anthropic history")
+					if tb.Thinking == "" {
+						continue
+					}
+					content = append(content, anthropicContent{
+						Type:     "thinking",
+						Thinking: tb.Thinking,
+					})
 					continue
 				}
 				if tb.Data != "" {

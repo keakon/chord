@@ -423,6 +423,8 @@ model_templates:
       request_overrides:
         headers:
           anthropic-beta: null
+      reasoning_continuity:
+        mode: anthropic_unsigned
 
   glm-5.2-responses: &glm-5-2-responses
     limit:
@@ -463,9 +465,8 @@ model_pools:
 - Messages 兼容接口使用 `thinking` 和 `output_config.effort`。除非对应接口
   明确支持，否则应关闭 Anthropic beta header。兼容 Messages 接口可能返回
   无签名 thinking，而非 Claude 风格的签名块，不能仅凭 wire 格式推断签名
-  回放能力。在明确验证 provider 的无签名 thinking 连续性前，thinking +
-  工具循环应优先使用 Chat Completions，或为 Messages 显式设置
-  `thinking.type: disabled`。
+  回放能力。只有明确验证 endpoint 接受自身无签名 thinking 的工具循环后，
+  才配置 `anthropic_unsigned`。
 - GLM 的 `/responses` 由网关自行实现。只有网关明确说明支持 OpenAI
   Responses 映射时，才单独使用仅含 `reasoning.effort` 的模板。
 
@@ -507,6 +508,8 @@ model_templates:
       request_overrides:
         headers:
           anthropic-beta: null
+      reasoning_continuity:
+        mode: anthropic_unsigned
 
   deepseek-v4-pro-responses: &deepseek-v4-pro-responses
     limit:
@@ -547,9 +550,9 @@ model_pools:
 - DeepSeek Messages 支持 `output_config.effort`；Chord 从
   `thinking.effort` 生成该字段。兼容接口应关闭 Anthropic beta header。
   DeepSeek 的 Anthropic 兼容接口可能返回无签名 `thinking`，而不是 Claude
-  风格的签名块。在明确配置并验证无签名 Anthropic thinking 回放前，thinking
-  + 工具循环应优先使用 Chat Completions，或为 Messages 显式设置
-  `thinking.type: disabled`。
+  风格的签名块。`anthropic_unsigned` 只向同 provider/model 回放该可见
+  thinking；跨 provider 或目标拒绝后会降级为带标记的 assistant 历史，同时
+  保留工具轮次。
 - 第三方 `/responses` 端点由网关自行实现；只有网关明确说明映射方式时，
   才使用 `reasoning.effort`。
 - 对兼容网关，请使用该网关 / 账号实际公开的模型 ID 和限制。见

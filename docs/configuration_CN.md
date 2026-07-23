@@ -624,22 +624,19 @@ providers:
     `request_overrides.body` 配置。首次尝试时，Chord 会把 chat 原生
     reasoning 乐观回放给任何 Chat Completions 目标（包括跨 provider），
     因此 Kimi K2.6/K2.7→K3 这类官方支持的同 provider 升级和同模型跨
-    provider fallback 都能保留连续性。如果某个目标拒绝了这类请求，Chord
-    会在本会话内对该目标降级：回放改为要求产生状态的 provider ID 一致，
-    跨 provider fallback 丢弃配对的 reasoning / 工具轨迹，让目标模型
-    重新规划。
-  - Responses 与 Messages 使用各自协议原生的连续性机制，不应启用可见
-    reasoning 回放。这些机制由 Chord 自动处理：Responses 的加密 reasoning
-    item、Anthropic 的 `thinking` / `redacted_thinking` 块、Gemini 的
-    `thoughtSignature` 都会被捕获、持久化，并回放给任何使用相同 wire
-    协议的目标。后端是否接受原生载荷由后端自己裁决，无法从客户端配置
-    推断，因此 Chord 先发送协议兼容的最完整形态，只在目标拒绝后才按
-    target 降级：先回退到严格 provenance 匹配（Responses 工具调用重新
-    合成为只含 `call_id` 的普通 item），仍被拒绝时才整体丢弃无法回放的
-    reasoning / 工具轨迹。达到的级别按 target 记忆，不兼容的后端每会话
-    最多浪费两次失败请求。Responses 会保留有序原生 output item；Gemini
-    会保留原始 part 边界，并在 Gemini 3 活跃工具 step 没有可复用签名时
-    使用官方 validator-skip 哨兵。
+    provider fallback 都能保留连续性。目标拒绝原生 reasoning 后，Chord
+    会移除或转换不兼容的 reasoning；已完成的工具调用和成对结果继续使用
+    结构化表示，严格级别才文本化。
+  - `anthropic_unsigned`：仅用于已验证的 Messages 兼容模型，例如返回无
+    Claude signature 的可见 `thinking` 的 DeepSeek/GLM endpoint。无签名
+    thinking 首次只对同 provider/model 原生回放；跨 provider fallback 或
+    目标拒绝后，会把可见 thinking 转为带标记的 assistant 历史，同时保留
+    已完成工具轮次。
+  - Responses、Claude 签名 Messages 和 Gemini 其余情况使用协议原生连续性
+    机制。Chord 只在 wire 和 provenance 允许时回放加密/签名 opaque 状态；
+    跨不兼容协议时可把公开且与动作绑定的 reasoning 转为带标记历史，但
+    不会伪造 opaque 状态。已完成工具事实会尽量转换为目标协议的结构化
+    表示，只有目标拒绝该形状时才文本化。达到的降级级别按 target 记忆。
 - `compat.thinking_toolcall`：为把工具调用编码进可见 reasoning 文本的网关
   启用专用解析器。只有网关明确要求时才开启。
 
@@ -1071,7 +1068,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `reasoning`       | object | OpenAI reasoning 选项。`reasoning.effort` 会先归一化再原样透传，因此 provider 支持的任意取值（如 GLM 的 `max` / `minimal` / `none`）都能不变地到达上游（留空 = 不发送，使用 provider/model 默认）。Responses 场景下还支持 `reasoning.summary`（`auto` / `concise` / `detailed`；留空 = 不发送 / 不显式请求 summary）。需要可读摘要时推荐 `auto`。 |
 | `text.verbosity`  | string | 可选的 OpenAI 文本详细程度提示，支持的模型生效；除非明确要覆盖为 `low` / `medium` / `high`，否则建议留空使用 provider/model 默认值。 |
 | `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算；`thinking.effort` 在 Messages 请求中会生成 `output_config.effort`；`display: summarized` 启用 summarized thinking block（仅 `type: enabled` 或 `adaptive` 有效）。 |
-| `compat.reasoning_continuity.mode` | string | 可选的连续性覆盖项。只有 Chat Completions 模型明确要求原样回放 assistant `reasoning_content` 时，才使用 `openai_visible`；该模式不会注入请求字段。模型级 `none` 可覆盖并关闭 provider 级默认值。 |
+| `compat.reasoning_continuity.mode` | string | 可选的连续性覆盖项。Chat Completions 模型需要原样回放 assistant `reasoning_content` 时使用 `openai_visible`；只有已验证的 Messages 兼容模型需要向同 provider/model 回放可见无签名 `thinking` 时使用 `anthropic_unsigned`；模型级 `none` 可关闭 provider 级默认值。 |
 | `compat.request_overrides.body` | object | Chord 构造完协议请求后应用的递归 JSON patch。`null` 删除字段。 |
 | `compat.request_overrides.rename_body_fields` | map | 重命名最终 JSON 字段，同时保留 Chord 动态计算的值。目标值为 `null` 时删除源字段。 |
 | `compat.request_overrides.headers` | map | 设置最终请求 header。值为 `null` 时删除该 header。 |

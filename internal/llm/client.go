@@ -1297,6 +1297,9 @@ func reasoningContinuityMode(provider *ProviderConfig, modelID string, tuning Re
 	}
 	wireFamily := providerWireFamily(provider)
 	if wireFamily == modelcompat.WireFamilyAnthropic {
+		if mode := reasoningContinuityCompatMode(provider, modelID); mode == modelcompat.ReasoningContinuityAnthropicUnsigned {
+			return mode
+		}
 		if tuning.Anthropic.ThinkingType == "enabled" || tuning.Anthropic.ThinkingType == "adaptive" {
 			return modelcompat.ReasoningContinuityAnthropicBlocks
 		}

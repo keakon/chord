@@ -13,6 +13,7 @@
 - 工具结果现在会携带一次性效率提示：当某一轮工作陷入逐次单个只读查询，或对单个一次即可读完的文件反复小窗读取时，在恰当时机重新提示并行批量调用与整文件读取。在构建或准备阶段即失败的测试命令现在会先引导执行仅构建检查；shell 超时错误会说明如何缩小范围或转入后台重试。
 - shell 工具结果在命令超过慢命令阈值后会附加简洁的墙钟耗时提示，让模型据实权衡下一步要跑什么；亚秒级命令保持不标注。
 - reasoning 回放改为乐观尝试并按 target 自适应降级：chat 原生 reasoning 与协议原生 item（Responses 加密 reasoning、Anthropic thinking block、Gemini thought signature）首次会回放给任何使用相同 wire 协议的目标，包括跨 provider fallback。拒绝该载荷的目标会在本会话内被降级——先严格 provenance 匹配，再文本化历史——不兼容的后端每会话最多浪费两次失败请求，而不是每次 fallback 都丢失 reasoning 连续性。
+- 新增可选的 `compat.reasoning_continuity.mode: anthropic_unsigned`：用于返回可见无签名 `thinking` 的 Messages 兼容 endpoint（如 DeepSeek/GLM）。无签名 thinking 只向同 provider/model 原生回放；跨 provider 或被目标拒绝时降级为带标记的 assistant 历史，并保留已完成的工具轮次。可见的 OpenAI Chat `reasoning_content` 也会在原生兼容级别转换为无签名 Anthropic thinking，使跨协议回退仍能保持 reasoning 可见而无需伪造签名；被拒绝时降级到 synthesized 级别，不会把 reasoning 泄漏进 assistant 文本。
 
 ### 修复
 

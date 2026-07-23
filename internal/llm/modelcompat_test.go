@@ -73,6 +73,76 @@ func TestNormalizeMessagesForPoolTarget_PreservesAnthropicThinkingForAnthropicTa
 	}
 }
 
+func TestNormalizeMessagesForPoolTarget_UsesAnthropicUnsignedContinuity(t *testing.T) {
+	provider := NewProviderConfig("deepseek", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"deepseek-v4-pro": {
+				Thinking: &config.ThinkingConfig{Type: "adaptive"},
+				Compat:   &config.ModelCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "anthropic_unsigned"}},
+			},
+		},
+	}, nil)
+	msgs := []message.Message{
+		{
+			Role:           message.RoleAssistant,
+			ThinkingBlocks: []message.ThinkingBlock{{Thinking: "unsigned"}},
+			ToolCalls:      []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}},
+			Provenance:     &message.MessageProvenance{ProviderID: "deepseek", ModelID: "deepseek-v4-pro", WireFamily: modelcompat.WireFamilyAnthropic},
+		},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
+	}
+	out, report := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, tuningForPoolTarget(FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}))
+	if len(out) != 2 || len(out[0].ThinkingBlocks) != 1 || len(out[0].ToolCalls) != 1 || report.DroppedThinkingBlocks != 0 {
+		t.Fatalf("unsigned continuity = %+v (report %+v)", out, report)
+	}
+}
+
+func TestNormalizeMessagesForPoolTarget_ConvertsOpenAIReasoningToAnthropicUnsigned(t *testing.T) {
+	provider := NewProviderConfig("messages-target", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"glm-5.2": {
+				Thinking: &config.ThinkingConfig{Type: "adaptive"},
+				Compat:   &config.ModelCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "anthropic_unsigned"}},
+			},
+		},
+	}, nil)
+	msgs := []message.Message{
+		{
+			Role:             message.RoleAssistant,
+			Content:          "calling tool",
+			ReasoningContent: "portable reasoning",
+			ToolCalls:        []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}},
+			Provenance:       &message.MessageProvenance{ProviderID: "chat-source", ModelID: "glm-5.2", WireFamily: modelcompat.WireFamilyOpenAIChat},
+		},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
+	}
+	target := FallbackModel{ProviderConfig: provider, ModelID: "glm-5.2"}
+	out, report := normalizeMessagesForPoolTarget(msgs, target, tuningForPoolTarget(target))
+	if len(out) != 2 || out[0].ReasoningContent != "" || len(out[0].ThinkingBlocks) != 1 || out[0].ThinkingBlocks[0].Thinking != "portable reasoning" {
+		t.Fatalf("converted messages = %+v (report %+v)", out, report)
+	}
+	if report.ConvertedReasoning != 1 || report.DowngradedReasoning != 0 || report.TextifiedReasoning != 0 {
+		t.Fatalf("report = %+v", report)
+	}
+
+	converted := convertMessages(out)
+	if len(converted) != 2 {
+		t.Fatalf("wire messages = %+v", converted)
+	}
+	blocks, ok := converted[0].Content.([]anthropicContent)
+	if !ok || len(blocks) != 3 {
+		t.Fatalf("assistant wire blocks = %#v", converted[0].Content)
+	}
+	if blocks[0].Type != "thinking" || blocks[0].Thinking != "portable reasoning" || blocks[0].Signature != "" {
+		t.Fatalf("thinking wire block = %+v", blocks[0])
+	}
+	if blocks[1].Type != "text" || blocks[1].Text != "calling tool" || blocks[2].Type != "tool_use" {
+		t.Fatalf("wire block order/content = %+v", blocks)
+	}
+}
+
 func TestNormalizeMessagesForPoolTarget_DropsAnthropicThinkingWithoutConfiguredThinking(t *testing.T) {
 	provider := NewProviderConfig("deepseek", config.ProviderConfig{Type: config.ProviderTypeMessages}, nil)
 	msgs := []message.Message{

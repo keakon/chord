@@ -72,6 +72,55 @@ func TestNormalizeForTarget_DropsReasoningContentForAnthropicTarget(t *testing.T
 	}
 }
 
+func TestNormalizeForTarget_ConvertsOpenAIReasoningToUnsignedAnthropicThinking(t *testing.T) {
+	msgs := []message.Message{
+		{
+			Role:             message.RoleAssistant,
+			Content:          "calling tool",
+			ReasoningContent: "portable reasoning",
+			ToolCalls:        []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}},
+			Provenance:       &message.MessageProvenance{ProviderID: "source-chat", ModelID: "glm-5.2", WireFamily: WireFamilyOpenAIChat},
+		},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
+	}
+	target := TargetModel{
+		ProviderID:              "target-messages",
+		ModelID:                 "glm-5.2",
+		WireFamily:              WireFamilyAnthropic,
+		ReasoningContinuityMode: ReasoningContinuityAnthropicUnsigned,
+		ToolResultEncoding:      ToolResultEncodingAnthropicUserBlock,
+		SupportsStructuredTools: true,
+	}
+
+	out, report := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true})
+	if len(out) != 2 || out[0].ReasoningContent != "" || len(out[0].ThinkingBlocks) != 1 {
+		t.Fatalf("converted messages = %+v", out)
+	}
+	if got := out[0].ThinkingBlocks[0]; got.Thinking != "portable reasoning" || got.Signature != "" || got.Data != "" {
+		t.Fatalf("converted thinking block = %+v", got)
+	}
+	if out[0].Content != "calling tool" || strings.Contains(out[0].Content, portableReasoningMarker) || len(out[0].ToolCalls) != 1 {
+		t.Fatalf("visible/tool content changed during conversion: %+v", out[0])
+	}
+	if report.ConvertedReasoning != 1 || report.DowngradedReasoning != 0 || report.TextifiedReasoning != 0 {
+		t.Fatalf("report = %+v", report)
+	}
+	if msgs[0].ReasoningContent != "portable reasoning" || len(msgs[0].ThinkingBlocks) != 0 {
+		t.Fatalf("input mutated: %+v", msgs[0])
+	}
+
+	degraded, degradedReport := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatSynthesized})
+	if len(degraded) != 2 || degraded[0].ReasoningContent != "" || len(degraded[0].ThinkingBlocks) != 0 || len(degraded[0].ToolCalls) != 1 {
+		t.Fatalf("synthesized fallback = %+v", degraded)
+	}
+	if strings.Contains(degraded[0].Content, portableReasoningMarker) || strings.Contains(degraded[0].Content, "portable reasoning") {
+		t.Fatalf("synthesized fallback leaked reasoning into content: %q", degraded[0].Content)
+	}
+	if degradedReport.ConvertedReasoning != 0 || degradedReport.DowngradedReasoning != 1 || degradedReport.TextifiedReasoning != 0 {
+		t.Fatalf("synthesized report = %+v", degradedReport)
+	}
+}
+
 func TestNormalizeForTarget_DropsAnthropicThinkingForOpenAI(t *testing.T) {
 	msgs := []message.Message{{
 		Role:           message.RoleAssistant,

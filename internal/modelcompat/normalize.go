@@ -14,9 +14,10 @@ const (
 	WireFamilyOpenAIResponses = "openai-responses"
 	WireFamilyGemini          = "gemini"
 
-	ReasoningContinuityNone            = "none"
-	ReasoningContinuityAnthropicBlocks = "anthropic_blocks"
-	ReasoningContinuityOpenAIVisible   = "openai_visible"
+	ReasoningContinuityNone              = "none"
+	ReasoningContinuityAnthropicBlocks   = "anthropic_blocks"
+	ReasoningContinuityAnthropicUnsigned = "anthropic_unsigned"
+	ReasoningContinuityOpenAIVisible     = "openai_visible"
 
 	ToolResultEncodingNone               = "none"
 	ToolResultEncodingOpenAIToolRole     = "openai_tool_role"
@@ -77,6 +78,7 @@ type NormalizeReport struct {
 	DroppedThinkingBlocks int
 	DowngradedToolCalls   int
 	DowngradedReasoning   int
+	ConvertedReasoning    int
 	TextifiedReasoning    int
 	DroppedToolCalls      int
 	DroppedToolResults    int
@@ -90,7 +92,7 @@ type NormalizeReport struct {
 
 func (r NormalizeReport) Changed() bool {
 	return r.DroppedThinkingBlocks != 0 || r.DowngradedToolCalls != 0 || r.DowngradedReasoning != 0 ||
-		r.TextifiedReasoning != 0 || r.DroppedToolCalls != 0 || r.DroppedToolResults != 0 ||
+		r.ConvertedReasoning != 0 || r.TextifiedReasoning != 0 || r.DroppedToolCalls != 0 || r.DroppedToolResults != 0 ||
 		r.ForeignNativeReplays != 0 || len(r.Warnings) != 0
 }
 
@@ -105,6 +107,7 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 	}
 
 	allowThinking := reasoningContinuityAllowsAnthropicBlocks(target)
+	allowUnsignedThinking := reasoningContinuityAllowsUnsignedAnthropicBlocks(target)
 	allowStructuredTools := opts.StructuredTools && target.SupportsStructuredTools && strings.TrimSpace(target.ToolResultEncoding) != "" && strings.TrimSpace(target.ToolResultEncoding) != ToolResultEncodingNone
 	toolResultsByID := collectToolResults(out)
 	droppedNonImportedToolIDs := make(map[string]bool)
@@ -128,6 +131,10 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 					continue
 				}
 				if !block.Replayable() {
+					if allowUnsignedThinking && opts.ReplayCompat <= ReplayCompatNative && unsignedAnthropicThinkingReplayAllowed(*msg, target, block) {
+						kept = append(kept, block)
+						continue
+					}
 					report.DroppedThinkingBlocks++
 					portableThinking = appendPortableText(portableThinking, block.Thinking)
 					continue
@@ -167,10 +174,16 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 			if !replayable {
 				portableReasoning := strings.TrimSpace(msg.ReasoningContent)
 				msg.ReasoningContent = ""
-				report.DowngradedReasoning++
-				if portableReasoning != "" && len(msg.ToolCalls) > 0 {
-					msg.Content = prependPortableReasoning(msg.Content, []string{portableReasoning})
-					report.TextifiedReasoning++
+				convertibleToUnsignedThinking := sourceHasNativeReasoning && reasoningContinuityAllowsUnsignedAnthropicBlocks(target)
+				if portableReasoning != "" && convertibleToUnsignedThinking && opts.ReplayCompat <= ReplayCompatNative {
+					msg.ThinkingBlocks = append(msg.ThinkingBlocks, message.ThinkingBlock{Thinking: portableReasoning})
+					report.ConvertedReasoning++
+				} else {
+					report.DowngradedReasoning++
+					if portableReasoning != "" && len(msg.ToolCalls) > 0 && !convertibleToUnsignedThinking {
+						msg.Content = prependPortableReasoning(msg.Content, []string{portableReasoning})
+						report.TextifiedReasoning++
+					}
 				}
 				if len(msg.ToolCalls) > 0 && opts.ReplayCompat >= ReplayCompatStrict {
 					reasoningToolTrajectoryInvalid = true
@@ -362,7 +375,22 @@ func allowsForeignResponsesOutputReplay(msg message.Message, target TargetModel)
 }
 
 func reasoningContinuityAllowsAnthropicBlocks(target TargetModel) bool {
-	return strings.TrimSpace(target.WireFamily) == WireFamilyAnthropic && strings.TrimSpace(target.ReasoningContinuityMode) == ReasoningContinuityAnthropicBlocks
+	if strings.TrimSpace(target.WireFamily) != WireFamilyAnthropic {
+		return false
+	}
+	mode := strings.TrimSpace(target.ReasoningContinuityMode)
+	return mode == ReasoningContinuityAnthropicBlocks || mode == ReasoningContinuityAnthropicUnsigned
+}
+
+func reasoningContinuityAllowsUnsignedAnthropicBlocks(target TargetModel) bool {
+	return strings.TrimSpace(target.WireFamily) == WireFamilyAnthropic && strings.TrimSpace(target.ReasoningContinuityMode) == ReasoningContinuityAnthropicUnsigned
+}
+
+func unsignedAnthropicThinkingReplayAllowed(msg message.Message, target TargetModel, block message.ThinkingBlock) bool {
+	if strings.TrimSpace(block.Thinking) == "" || strings.TrimSpace(block.Signature) != "" || strings.TrimSpace(block.Data) != "" {
+		return false
+	}
+	return messageProvenanceMatchesTarget(msg, target) && provenanceWireFamily(msg) == WireFamilyAnthropic
 }
 
 // AllowsOpenAIVisibleReasoningReplay reports whether msg carries

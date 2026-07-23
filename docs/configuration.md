@@ -652,25 +652,24 @@ Compatibility fields:
     providers, so documented in-provider upgrades such as Kimi K2.6/K2.7 to
     K3 and same-model provider fallback both keep continuity. If a target
     rejects such a request, Chord downgrades that target for the rest of the
-    session: replay then requires the producing provider ID to match, and a
-    cross-provider fallback drops the paired reasoning/tool trajectory and
-    lets the target plan again.
-  - Responses and Messages use their protocol-native continuity mechanisms; do
-    not use visible-reasoning replay for those transports. Chord handles these
-    automatically: encrypted Responses reasoning items, Anthropic `thinking` /
-    `redacted_thinking` blocks, and Gemini `thoughtSignature` values are
-    captured, persisted, and replayed to any target speaking the same wire
-    protocol. Whether a backend accepts a native payload is decided by that
-    backend and cannot be derived from client-side config, so Chord sends the
-    richest protocol-compatible shape first and degrades per target only after
-    a rejection: first falling back to strict provenance matching (Responses
-    tool calls are re-synthesized as plain `call_id`-only items), then
-    dropping unreplayable reasoning/tool trajectories entirely. The achieved
-    level is remembered per target, so an incompatible backend costs at most
-    two failed attempts per session. Responses preserve ordered native output
-    items; Gemini preserves original part boundaries and uses the documented
-    validator-skip sentinel when a Gemini 3 active tool step has no reusable
-    signature.
+    session. Incompatible native reasoning is removed or converted, while
+    completed tool calls and paired results remain structured or are textified
+    at the strict level.
+  - `anthropic_unsigned`: opt-in for Messages-compatible models such as
+    DeepSeek/GLM endpoints that return visible `thinking` blocks without Claude
+    signatures. Unsigned thinking is replayed natively only to the same
+    provider/model on the first attempt. Cross-provider fallback, or a target
+    rejection, converts visible thinking to marked assistant history while
+    preserving the completed tool round.
+  - Responses, signed Claude Messages, and Gemini otherwise use their
+    protocol-native continuity mechanisms automatically. Chord captures opaque
+    encrypted/signature state and replays it only where the target wire and
+    provenance permit. Across incompatible protocols, public action-bound
+    reasoning can become marked assistant history, but opaque state is never
+    fabricated. Completed tool facts are converted to the target protocol's
+    structured representation whenever possible and textified only if a target
+    rejects that shape. The achieved degradation level is remembered per
+    target.
 - `compat.thinking_toolcall`: enables a provider-specific parser for gateways
   that encode tool calls inside visible reasoning text. Leave disabled unless
   the gateway requires that format.
@@ -1158,7 +1157,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `reasoning`       | object | OpenAI reasoning options. `reasoning.effort` is normalized and passed through verbatim, so any provider-supported level (e.g. GLM `max` / `minimal` / `none`) reaches the upstream unchanged (unset = omit and use provider/model default). For Responses, `reasoning.summary` (`auto` / `concise` / `detailed`; unset = omit / no explicit summary request). Recommended summary value when you want readable summaries: `auto`. |
 | `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `thinking.effort` is sent as `output_config.effort` for Messages requests; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
-| `compat.reasoning_continuity.mode` | string | Optional continuity override. Use `openai_visible` only for Chat Completions models that require unchanged assistant `reasoning_content` replay; it does not inject request fields. Use `none` on a model to opt out of a provider-level default. |
+| `compat.reasoning_continuity.mode` | string | Optional continuity override. Use `openai_visible` for Chat Completions models that require unchanged assistant `reasoning_content`; use `anthropic_unsigned` only for verified Messages-compatible models that replay visible unsigned `thinking` to the same provider/model; use `none` to opt out of a provider-level default. |
 | `compat.request_overrides.body` | object | Recursive JSON patch applied after Chord constructs the protocol request. `null` deletes a field. |
 | `compat.request_overrides.rename_body_fields` | map | Renames final JSON fields while preserving Chord's computed values. A `null` target deletes the source field. |
 | `compat.request_overrides.headers` | map | Sets final request headers. A `null` value removes that header. |
