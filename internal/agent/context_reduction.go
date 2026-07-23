@@ -77,6 +77,7 @@ const (
 )
 
 type contextReductionPolicy struct {
+	Disabled                bool
 	ConfirmAgeTurns         int
 	ErrorAgeTurns           int
 	HighRiskProtectAgeTurns int
@@ -123,6 +124,9 @@ func (a *MainAgent) contextReductionPolicy() contextReductionPolicy {
 }
 
 func (p *contextReductionPolicy) applyConfig(cfg config.ContextReductionConfig) {
+	if enabled, explicit := cfg.ExplicitEnabledValue(); explicit {
+		p.Disabled = !enabled
+	}
 	if cfg.ConfirmAgeTurns > 0 {
 		p.ConfirmAgeTurns = cfg.ConfirmAgeTurns
 	}

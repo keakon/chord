@@ -16,6 +16,7 @@ import (
 
 	"github.com/keakon/golog"
 	"github.com/keakon/golog/log"
+	"gopkg.in/yaml.v3"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
@@ -964,6 +965,88 @@ func TestPrepareMessagesForLLM_DoesNotMutateOriginalMessages(t *testing.T) {
 	}
 	if !bytes.Equal(beforeBytes, afterBytes) {
 		t.Fatalf("prepareMessagesForLLM mutated original messages:\nbefore=%s\nafter=%s", beforeBytes, afterBytes)
+	}
+}
+
+// TestPrepareMessagesForLLM_DisabledSkipsReduction pins the `reduction: false`
+// boolean shorthand: with reduction disabled every message reaches the request
+// untouched, including outputs every rule would otherwise trim.
+func TestPrepareMessagesForLLM_DisabledSkipsReduction(t *testing.T) {
+	var disabledCfg config.ContextReductionConfig
+	if err := yaml.Unmarshal([]byte("false"), &disabledCfg); err != nil {
+		t.Fatalf("unmarshal boolean shorthand: %v", err)
+	}
+	if !disabledCfg.DisabledValue() {
+		t.Fatal("boolean shorthand false should disable reduction")
+	}
+	a := &MainAgent{projectConfig: &config.Config{Context: config.ContextConfig{Reduction: disabledCfg}}}
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "tc1", Name: "web_fetch", Args: json.RawMessage(`{"url":"https://example.com"}`)},
+		}},
+		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("large web output ", 400)},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	for i := range msgs {
+		if prepared[i].Content != msgs[i].Content {
+			t.Fatalf("disabled reduction modified message %d: %q", i, prepared[i].Content)
+		}
+	}
+}
+
+func TestContextReductionPolicyProjectMappingOverridesGlobalFalse(t *testing.T) {
+	var globalReduction config.ContextReductionConfig
+	if err := yaml.Unmarshal([]byte("false"), &globalReduction); err != nil {
+		t.Fatalf("unmarshal global reduction: %v", err)
+	}
+	var projectReduction config.ContextReductionConfig
+	if err := yaml.Unmarshal([]byte("confirm_age_turns: 9\n"), &projectReduction); err != nil {
+		t.Fatalf("unmarshal project reduction: %v", err)
+	}
+	a := &MainAgent{
+		globalConfig:  &config.Config{Context: config.ContextConfig{Reduction: globalReduction}},
+		projectConfig: &config.Config{Context: config.ContextConfig{Reduction: projectReduction}},
+	}
+
+	policy := a.contextReductionPolicy()
+	if policy.Disabled {
+		t.Fatal("project reduction mapping should re-enable globally disabled reduction")
+	}
+	if policy.ConfirmAgeTurns != 9 {
+		t.Fatalf("ConfirmAgeTurns = %d, want 9", policy.ConfirmAgeTurns)
+	}
+}
+
+// TestContextReductionPolicyProjectTrueOverGlobalFalseKeepsCompiledDefaults
+// pins the zero-tuning fallback the boolean shorthand relies on: a global
+// `reduction: false` marshals as a scalar, so a project `reduction: true`
+// re-parses without the base mapping and leaves every tuning field at zero.
+// The policy layer must then fall back to the compiled defaults instead of
+// running with zero thresholds.
+func TestContextReductionPolicyProjectTrueOverGlobalFalseKeepsCompiledDefaults(t *testing.T) {
+	var globalReduction config.ContextReductionConfig
+	if err := yaml.Unmarshal([]byte("false"), &globalReduction); err != nil {
+		t.Fatalf("unmarshal global reduction: %v", err)
+	}
+	// Decoded into a zero-valued receiver, mirroring the defaults-free re-parse
+	// of the merged project config: mode enabled, all tuning fields zero.
+	var projectReduction config.ContextReductionConfig
+	if err := yaml.Unmarshal([]byte("true"), &projectReduction); err != nil {
+		t.Fatalf("unmarshal project reduction: %v", err)
+	}
+	a := &MainAgent{
+		globalConfig:  &config.Config{Context: config.ContextConfig{Reduction: globalReduction}},
+		projectConfig: &config.Config{Context: config.ContextConfig{Reduction: projectReduction}},
+	}
+
+	policy := a.contextReductionPolicy()
+	want := defaultContextReductionPolicy()
+	if policy != want {
+		t.Fatalf("policy = %+v, want compiled defaults %+v", policy, want)
 	}
 }
 

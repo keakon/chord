@@ -124,6 +124,15 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	}
 
 	policy := a.contextReductionPolicy()
+	if policy.Disabled {
+		if a != nil {
+			stats := ContextReductionStats{TokensBefore: ctxmgr.EstimateMessagesTokens(messages)}
+			stats.TokensAfter = stats.TokensBefore
+			a.fillReductionModelContinuity(&stats)
+			a.setContextReductionStats(stats)
+		}
+		return messages
+	}
 	scan := newReductionHistoryScan(messages)
 	currentBatch := a.currentRequestBatch(messages)
 	externalReadInvalidated := a.externallyInvalidatedReadsAfterMutatingShell(messages, scan)

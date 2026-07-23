@@ -173,8 +173,13 @@ context:
   reduction: {}
 ```
 
-`context.reduction: false` is not supported; omit `context.reduction` or use
-`true` / `{}` to keep the default request-level reduction behavior.
+`context.reduction: false` disables request-level reduction entirely (durable
+Compaction still applies); `true` / `{}` — or omitting `context.reduction` —
+keeps the default request-level reduction behavior.
+
+Configuration layers use the usual more-specific-wins rule. In particular, a
+project-level `true` or mapping explicitly re-enables reduction after a global
+`false`; omitting the project value inherits the global setting.
 
 The full set of fields and their defaults:
 

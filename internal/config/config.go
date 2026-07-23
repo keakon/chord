@@ -903,7 +903,9 @@ type ContextConfig struct {
 	Reduction  ContextReductionConfig `json:"reduction" yaml:"reduction,omitempty"`
 }
 
-// ContextReductionConfig controls request-level context pruning.
+// ContextReductionConfig controls request-level context pruning. In YAML it
+// accepts either a mapping of per-rule fields or the boolean shorthand
+// `reduction: false`, which disables request-level reduction entirely.
 type ContextReductionConfig struct {
 	ConfirmAgeTurns         int `json:"confirm_age_turns,omitempty" yaml:"confirm_age_turns,omitempty"`
 	ErrorAgeTurns           int `json:"error_age_turns,omitempty" yaml:"error_age_turns,omitempty"`
@@ -917,6 +919,101 @@ type ContextReductionConfig struct {
 	WrapUpGraceRequests     int `json:"wrap_up_grace_requests,omitempty" yaml:"wrap_up_grace_requests,omitempty"`
 	MinToolResultsPrune     int `json:"min_tool_results_prune,omitempty" yaml:"min_tool_results_prune,omitempty"`
 	MinIncrementalTokens    int `json:"min_incremental_saved_tokens,omitempty" yaml:"min_incremental_saved_tokens,omitempty"`
+
+	mode contextReductionMode
+}
+
+type contextReductionMode uint8
+
+const (
+	contextReductionInherit contextReductionMode = iota
+	contextReductionEnabled
+	contextReductionDisabled
+)
+
+// DisabledValue reports whether request-level reduction was disabled via the
+// boolean shorthand `reduction: false`.
+func (c ContextReductionConfig) DisabledValue() bool { return c.mode == contextReductionDisabled }
+
+// ExplicitEnabledValue reports whether this config layer explicitly enables
+// or disables reduction. An omitted/null value inherits the less-specific
+// layer; true and mappings enable, while false disables.
+func (c ContextReductionConfig) ExplicitEnabledValue() (enabled, explicit bool) {
+	switch c.mode {
+	case contextReductionEnabled:
+		return true, true
+	case contextReductionDisabled:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// MarshalYAML preserves the boolean-shorthand disabled state across the
+// map-level project-config merge, which round-trips configs through YAML.
+func (c ContextReductionConfig) MarshalYAML() (any, error) {
+	if c.mode == contextReductionDisabled {
+		return false, nil
+	}
+	type plain ContextReductionConfig
+	return plain(c), nil
+}
+
+// contextReductionKnownKeys mirrors the yaml tags of ContextReductionConfig.
+// The custom UnmarshalYAML decodes through yaml.Node, which does not inherit
+// the loader's KnownFields strictness, so unknown keys are rejected here.
+var contextReductionKnownKeys = map[string]bool{
+	"confirm_age_turns":            true,
+	"error_age_turns":              true,
+	"high_risk_protect_age_turns":  true,
+	"shell_success_age_turns":      true,
+	"shell_success_bytes":          true,
+	"read_like_age_turns":          true,
+	"read_like_output_bytes":       true,
+	"stale_age_turns":              true,
+	"stale_output_bytes":           true,
+	"wrap_up_grace_requests":       true,
+	"min_tool_results_prune":       true,
+	"min_incremental_saved_tokens": true,
+}
+
+// UnmarshalYAML accepts a boolean shorthand (`reduction: false` disables
+// reduction, `reduction: true` keeps the current tuning) or the usual field
+// mapping. Mapping fields overlay the receiver's current values, matching the
+// load path that unmarshals into a defaults-initialised config. A non-boolean
+// scalar or an unknown field is a configuration error and is reported instead
+// of being silently ignored.
+func (c *ContextReductionConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		if value.Tag == "!!null" {
+			return nil
+		}
+		var enabled bool
+		if err := value.Decode(&enabled); err != nil {
+			return fmt.Errorf("context.reduction: expected a mapping or boolean, got %q", value.Value)
+		}
+		if enabled {
+			c.mode = contextReductionEnabled
+		} else {
+			c.mode = contextReductionDisabled
+		}
+		return nil
+	}
+	if value.Kind == yaml.MappingNode {
+		c.mode = contextReductionEnabled
+		for i := 0; i+1 < len(value.Content); i += 2 {
+			if key := value.Content[i].Value; !contextReductionKnownKeys[key] {
+				return fmt.Errorf("context.reduction: unknown field %q", key)
+			}
+		}
+	}
+	type plain ContextReductionConfig
+	p := plain(*c)
+	if err := value.Decode(&p); err != nil {
+		return err
+	}
+	*c = ContextReductionConfig(p)
+	return nil
 }
 
 // CompactionConfig controls durable compaction backend, output profile, and
@@ -946,6 +1043,7 @@ func DefaultConfig() *Config {
 				WrapUpGraceRequests:     1,
 				MinToolResultsPrune:     6,
 				MinIncrementalTokens:    2048,
+				mode:                    contextReductionEnabled,
 			},
 			Compaction: CompactionConfig{
 				Threshold: DefaultContextCompactUsage,
@@ -1045,14 +1143,6 @@ func normalizeConfigShorthands(path string, data []byte) ([]byte, error) {
 	if err := validateRemovedContextReductionKeys(raw); err != nil {
 		return nil, fmt.Errorf("validate config %s: %w", path, err)
 	}
-	changed := normalizeContextReductionShorthand(raw)
-	if changed {
-		out, err := yaml.Marshal(raw)
-		if err != nil {
-			return nil, fmt.Errorf("marshal normalized config %s: %w", path, err)
-		}
-		return out, nil
-	}
 	return data, nil
 }
 
@@ -1071,26 +1161,6 @@ func validateRemovedContextReductionKeys(raw map[string]any) error {
 		}
 	}
 	return nil
-}
-
-func normalizeContextReductionShorthand(raw map[string]any) bool {
-	contextRaw, ok := raw["context"].(map[string]any)
-	if !ok {
-		return false
-	}
-	reduction, ok := contextRaw["reduction"]
-	if !ok {
-		return false
-	}
-	enabled, ok := reduction.(bool)
-	if !ok {
-		return false
-	}
-	if enabled {
-		contextRaw["reduction"] = map[string]any{}
-	}
-	raw["context"] = contextRaw
-	return true
 }
 
 var projectScopedTopLevelKeys = map[string]bool{
@@ -1131,12 +1201,30 @@ func mergeConfigOverrideData(base *Config, overrideData []byte, overridePath str
 	if err := yaml.Unmarshal(overrideData, &overrideMap); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", overridePath, err)
 	}
+	normalizeContextReductionOverride(baseMap, overrideMap)
 	mergeProjectConfigMap(baseMap, overrideMap, nil)
 	mergedData, err := yaml.Marshal(baseMap)
 	if err != nil {
 		return nil, fmt.Errorf("marshal merged config %s: %w", overridePath, err)
 	}
 	return loadConfigData(overridePath, mergedData, false)
+}
+
+// normalizeContextReductionOverride resolves the context.reduction boolean
+// shorthand in a project override before the map-level merge: `true` means
+// "keep the base tuning" and is dropped so the base mapping survives, while
+// `false` is left in place and disables reduction after the merged re-parse.
+func normalizeContextReductionOverride(base, override map[string]any) {
+	contextRaw, ok := override["context"].(map[string]any)
+	if !ok {
+		return
+	}
+	if enabled, ok := contextRaw["reduction"].(bool); ok && enabled {
+		baseContext, _ := base["context"].(map[string]any)
+		if _, baseIsMapping := baseContext["reduction"].(map[string]any); baseIsMapping {
+			delete(contextRaw, "reduction")
+		}
+	}
 }
 
 func configToYAMLMap(cfg *Config) (map[string]any, error) {

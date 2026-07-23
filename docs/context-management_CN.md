@@ -101,7 +101,9 @@ context:
   reduction: {}
 ```
 
-不支持 `context.reduction: false`；不写 `context.reduction`，或使用 `true` / `{}`，都会保留默认的请求级剪裁行为。
+`context.reduction: false` 完全关闭请求级剪裁（持久 Compaction 不受影响）；`true` / `{}`（或不写 `context.reduction`）保留默认的请求级剪裁行为。
+
+配置层遵循更具体层优先规则。项目级 `true` 或 mapping 会在全局配置为 `false` 时显式重新启用剪裁；项目层省略该值则继承全局设置。
 
 全部字段及默认值：
 

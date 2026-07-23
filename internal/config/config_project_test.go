@@ -38,6 +38,30 @@ func TestMergeProjectConfigNormalizesContextReductionTrue(t *testing.T) {
 	}
 }
 
+func TestMergeProjectConfigContextReductionTrueOverridesGlobalFalse(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	writeTestFile(t, globalPath, "context:\n  reduction: false\n")
+	globalCfg, err := LoadConfigFromPath(globalPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "context:\n  reduction: true\n")
+
+	projectCfg, mergedCfg, err := MergeProjectConfig(globalCfg, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	if projectCfg.Context.Reduction.DisabledValue() {
+		t.Fatal("project context.reduction: true should explicitly enable reduction")
+	}
+	if enabled, explicit := projectCfg.Context.Reduction.ExplicitEnabledValue(); !explicit || !enabled {
+		t.Fatalf("project context.reduction mode = (%v, %v), want explicitly enabled", enabled, explicit)
+	}
+	if mergedCfg.Context.Reduction.DisabledValue() {
+		t.Fatal("project context.reduction: true should override global false")
+	}
+}
 func TestLoadConfigParsesResponseHeaderTimeout(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeTestFile(t, path, `providers:

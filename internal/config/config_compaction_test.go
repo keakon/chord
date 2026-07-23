@@ -36,6 +36,7 @@ func TestDefaultConfigContextReductionThresholds(t *testing.T) {
 		WrapUpGraceRequests:     1,
 		MinToolResultsPrune:     6,
 		MinIncrementalTokens:    2048,
+		mode:                    contextReductionEnabled,
 	}
 	if got != want {
 		t.Fatalf("DefaultConfig().Context.Reduction = %+v, want %+v", got, want)
@@ -110,7 +111,7 @@ func TestLoadConfigFromPathContextReductionTrueUsesDefaultTuning(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFromPathContextReductionFalseIsInvalid(t *testing.T) {
+func TestLoadConfigFromPathContextReductionFalseDisables(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	content := []byte("context:\n  reduction: false\n")
@@ -118,12 +119,29 @@ func TestLoadConfigFromPathContextReductionFalseIsInvalid(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if !cfg.Context.Reduction.DisabledValue() {
+		t.Fatal("context.reduction: false should disable request-level reduction")
+	}
+}
+
+func TestLoadConfigFromPathContextReductionInvalidScalarIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := []byte("context:\n  reduction: sometimes\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
 	_, err := LoadConfigFromPath(path)
 	if err == nil {
-		t.Fatal("LoadConfigFromPath succeeded, want parse error for context.reduction: false")
+		t.Fatal("LoadConfigFromPath succeeded, want parse error for context.reduction: sometimes")
 	}
-	if got := err.Error(); !strings.Contains(got, "cannot unmarshal") || !strings.Contains(got, "ContextReductionConfig") {
-		t.Fatalf("LoadConfigFromPath error = %q, want bool-to-ContextReductionConfig parse error", got)
+	if got := err.Error(); !strings.Contains(got, "expected a mapping or boolean") {
+		t.Fatalf("LoadConfigFromPath error = %q, want mapping-or-boolean parse error", got)
 	}
 }
 
