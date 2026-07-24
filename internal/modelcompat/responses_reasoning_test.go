@@ -214,14 +214,14 @@ func TestNormalizeAnthropicUnsignedContinuityReplayAndDegrade(t *testing.T) {
 	}
 
 	synthesized, synthesizedReport := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatSynthesized})
-	if len(synthesized) != 2 || len(synthesized[0].ThinkingBlocks) != 0 || len(synthesized[0].ToolCalls) != 1 || !strings.Contains(synthesized[0].Content, "provider-visible reasoning") {
+	if len(synthesized) != 2 || len(synthesized[0].ThinkingBlocks) != 1 || synthesized[0].ThinkingBlocks[0].Thinking != "provider-visible reasoning" || len(synthesized[0].ToolCalls) != 1 {
 		t.Fatalf("synthesized unsigned fallback = %+v (report %+v)", synthesized, synthesizedReport)
 	}
 
 	foreignTarget := target
 	foreignTarget.ProviderID = "other-relay"
 	foreign, foreignReport := NormalizeForTarget(msgs, foreignTarget, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatNative})
-	if len(foreign) != 2 || len(foreign[0].ThinkingBlocks) != 0 || !strings.Contains(foreign[0].Content, "provider-visible reasoning") || foreignReport.DroppedThinkingBlocks != 1 {
+	if len(foreign) != 2 || len(foreign[0].ThinkingBlocks) != 1 || foreign[0].ThinkingBlocks[0].Thinking != "provider-visible reasoning" || foreignReport.ConvertedReasoning != 1 {
 		t.Fatalf("cross-provider unsigned replay must degrade: %+v (report %+v)", foreign, foreignReport)
 	}
 }
@@ -305,7 +305,7 @@ func TestNormalizeStripsGeminiThoughtSignaturesOnMismatch(t *testing.T) {
 	}
 }
 
-func TestNormalizeGeminiToAnthropicPreservesVisibleThoughtAndToolFacts(t *testing.T) {
+func TestNormalizeGeminiToAnthropicDropsThoughtButKeepsToolFacts(t *testing.T) {
 	msgs := []message.Message{
 		{
 			Role: message.RoleAssistant,
@@ -323,10 +323,10 @@ func TestNormalizeGeminiToAnthropicPreservesVisibleThoughtAndToolFacts(t *testin
 		ToolResultEncoding: ToolResultEncodingAnthropicUserBlock, SupportsStructuredTools: true,
 	}
 	out, report := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true})
-	if len(out) != 2 || len(out[0].GeminiParts) != 0 || len(out[0].ToolCalls) != 1 || out[0].ToolCalls[0].ThoughtSignature != "" || !strings.Contains(out[0].Content, "public Gemini thought") {
-		t.Fatalf("Gemini cross-wire normalization lost portable context: %+v (report %+v)", out, report)
+	if len(out) != 2 || len(out[0].GeminiParts) != 0 || len(out[0].ToolCalls) != 1 || out[0].ToolCalls[0].ThoughtSignature != "" || strings.Contains(out[0].Content, "public Gemini thought") {
+		t.Fatalf("Gemini cross-wire normalization lost tool facts or leaked thought: %+v (report %+v)", out, report)
 	}
-	if report.TextifiedReasoning != 1 || report.DroppedToolCalls != 0 || report.DroppedToolResults != 0 {
+	if report.DowngradedReasoning != 1 || report.DroppedToolCalls != 0 || report.DroppedToolResults != 0 {
 		t.Fatalf("report = %+v", report)
 	}
 }

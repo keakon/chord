@@ -273,8 +273,18 @@ func (o *OpenAIProvider) CompleteStream(
 	}
 	// Request usage stats in the final streaming chunk.
 	// Without this, OpenAI-compatible APIs never populate chunk.Usage
-	// and token counts remain 0.
-	reqBody.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
+	// and token counts remain 0. Gateways that reject stream_options can
+	// disable it via compat.chat_completions.send_stream_options: false
+	// (token usage then stays unreported).
+	var sendStreamOptions *bool
+	if o.provider != nil {
+		if cc := o.provider.ChatCompletionsCompat(); cc != nil {
+			sendStreamOptions = cc.SendStreamOptions
+		}
+	}
+	if compatBool(sendStreamOptions, true) {
+		reqBody.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
+	}
 
 	if ot.ReasoningEffort != "" {
 		reqBody.ReasoningEffort = ot.ReasoningEffort
@@ -490,7 +500,10 @@ func convertMessagesToOpenAI(systemPrompt, targetWireFamily, continuityMode stri
 			omi := openAIMessage{
 				Role: "assistant",
 			}
-			if targetWireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible && modelcompat.AllowsOpenAIVisibleReasoningReplay(msg) {
+			// Normalization already decided which portable reasoning may reach
+			// this target, including cross-wire conversions from other visible
+			// reasoning carriers. Serialize whatever survived for openai_visible.
+			if targetWireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible && strings.TrimSpace(msg.ReasoningContent) != "" {
 				omi.ReasoningContent = msg.ReasoningContent
 			}
 			// OpenAI requires content to be null (not empty string) when

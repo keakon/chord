@@ -616,14 +616,16 @@ type RequestOverridesConfig struct {
 // Supported modes:
 //   - "none": disable replay of provider-specific reasoning continuity state.
 //   - "openai_visible": replay OpenAI-compatible assistant reasoning_content
-//     without injecting provider-specific request fields.
+//     without injecting provider-specific request fields, and accept portable
+//     visible reasoning from other wire families as reasoning_content.
 //   - "anthropic_unsigned": replay visible, unsigned Anthropic thinking for
-//     the same configured provider/model target, and convert visible OpenAI
-//     Chat reasoning_content into unsigned Anthropic thinking at the native
-//     compatibility level.
+//     the same configured provider/model target, and accept portable visible
+//     reasoning from other wire families as unsigned thinking blocks.
 //
-// Other protocols use dedicated runtime handling and default-safe stripping
-// when switching to an incompatible target wire format.
+// Other protocols use dedicated runtime handling. Provider-bound opaque
+// payloads replay only on compatible wires; when no structured target carrier
+// exists, Chord drops the reasoning payload instead of injecting it into
+// ordinary assistant content.
 type ReasoningContinuityCompatConfig struct {
 	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"`
 }

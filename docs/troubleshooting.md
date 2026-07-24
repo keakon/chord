@@ -101,8 +101,10 @@ If you use a `chat-completions` provider such as DeepSeek and see errors like:
 this usually means the provider requires thinking/reasoning content from the previous tool round to be included again in the follow-up request, with a strict assistant message shape. If the same error keeps repeating, keep the corresponding session dump / trace for diagnosis.
 
 Enable `compat.reasoning_continuity.mode: openai_visible` on the affected model
-or provider. This option only replays assistant `reasoning_content`; add any
-provider-specific thinking flags through `compat.request_overrides.body`.
+or provider. This option replays assistant `reasoning_content` and lets Chord
+map portable visible reasoning from other wire families into
+`reasoning_content`; add any provider-specific thinking flags through
+`compat.request_overrides.body`.
 
 For GLM Preserved Thinking, that body override must include
 `thinking.type: enabled` and `thinking.clear_thinking: false`. For DeepSeek it

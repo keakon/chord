@@ -132,7 +132,7 @@ func NewClient(
 ) *Client {
 	var tuning RequestTuning
 	if m, ok := providerCfg.GetModel(modelID); ok {
-		tuning = tuningFromModel(m, providerCfg.Preset(), providerCfg.SupportedServiceTiers())
+		tuning = tuningFromModel(m, providerCfg.Preset(), providerCfg.SupportedServiceTiers(), providerCfg.ParallelToolCallsConfig())
 	}
 
 	c := &Client{
@@ -345,7 +345,7 @@ func (c *Client) SetModelPool(models []FallbackModel, selectedIdx int) {
 	c.tuning = RequestTuning{}
 	c.activeVariant = ""
 	if m, ok := sel.ProviderConfig.GetModel(sel.ModelID); ok {
-		c.tuning = tuningFromModel(m, sel.ProviderConfig.Preset(), sel.ProviderConfig.SupportedServiceTiers())
+		c.tuning = tuningFromModel(m, sel.ProviderConfig.Preset(), sel.ProviderConfig.SupportedServiceTiers(), sel.ProviderConfig.ParallelToolCallsConfig())
 		if sel.Variant != "" {
 			if v, ok := m.Variants[sel.Variant]; ok {
 				c.tuning = mergeVariantTuning(c.tuning, v)
@@ -593,7 +593,7 @@ func (c *Client) SetVariant(variantName string) {
 	if !ok {
 		return
 	}
-	base := tuningFromModel(m, c.provider.Preset(), c.provider.SupportedServiceTiers())
+	base := tuningFromModel(m, c.provider.Preset(), c.provider.SupportedServiceTiers(), c.provider.ParallelToolCallsConfig())
 	c.tuning = mergeVariantTuning(base, v)
 	c.activeVariant = variantName
 }
@@ -1343,7 +1343,7 @@ func tuningForPoolTarget(t FallbackModel) RequestTuning {
 	if !ok {
 		return RequestTuning{}
 	}
-	base := tuningFromModel(m, t.ProviderConfig.Preset(), t.ProviderConfig.SupportedServiceTiers())
+	base := tuningFromModel(m, t.ProviderConfig.Preset(), t.ProviderConfig.SupportedServiceTiers(), t.ProviderConfig.ParallelToolCallsConfig())
 	variant := validVariantForModel(t.ProviderConfig, t.ModelID, t.Variant)
 	if variant == "" {
 		return base

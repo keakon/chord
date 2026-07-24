@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1765,6 +1766,110 @@ func TestResponsesProvider_SendsIncludeToolChoiceAndReasoning(t *testing.T) {
 	if _, hasEffort := reasoning["effort"]; hasEffort {
 		t.Fatalf("reasoning.effort should be omitted when no effort configured, got %#v", reasoning["effort"])
 	}
+}
+
+func TestResponsesProvider_CompatTogglesOmitOptionalFields(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	providerCfg := NewProviderConfig("gateway", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/v1/responses",
+		Compat: &config.ProviderCompatConfig{
+			Responses: &config.ResponsesCompatConfig{
+				SendStore:            new(false),
+				SendToolChoice:       new(false),
+				SendPromptCacheKey:   new(false),
+				SendReasoningInclude: new(false),
+				SendMaxOutputTokens:  new(true),
+			},
+		},
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+	r.SetSessionID("session-123")
+
+	_, err := r.CompleteStream(
+		context.Background(), "test-key", "gpt-5.5", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 128, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if _, has := gotBody["store"]; has {
+		t.Fatalf("store should be omitted, got %#v", gotBody["store"])
+	}
+	if _, has := gotBody["tool_choice"]; has {
+		t.Fatalf("tool_choice should be omitted, got %#v", gotBody["tool_choice"])
+	}
+	if _, has := gotBody["prompt_cache_key"]; has {
+		t.Fatalf("prompt_cache_key should be omitted, got %#v", gotBody["prompt_cache_key"])
+	}
+	if _, has := gotBody["client_metadata"]; has {
+		t.Fatalf("client_metadata should be omitted, got %#v", gotBody["client_metadata"])
+	}
+	if _, has := gotBody["include"]; has {
+		t.Fatalf("include should be omitted, got %#v", gotBody["include"])
+	}
+	if got := gotBody["max_output_tokens"]; got != float64(128) {
+		t.Fatalf("max_output_tokens = %#v, want 128", got)
+	}
+}
+
+func TestResponsesProvider_CompatTogglesDefaultsKeepStableShape(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	providerCfg := NewProviderConfig("generic", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/v1/responses",
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+	r.SetSessionID("session-123")
+
+	_, err := r.CompleteStream(
+		context.Background(), "test-key", "gpt-5.5", "",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil, 128, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if _, has := gotBody["store"]; !has {
+		t.Fatalf("store should be present by default, got keys %v", sortedKeys(gotBody))
+	}
+	if got := gotBody["tool_choice"]; got != "auto" {
+		t.Fatalf("tool_choice = %#v, want auto", got)
+	}
+	if _, has := gotBody["max_output_tokens"]; has {
+		t.Fatalf("max_output_tokens should be omitted by default, got %#v", gotBody["max_output_tokens"])
+	}
+	if _, has := gotBody["prompt_cache_key"]; !has {
+		t.Fatalf("prompt_cache_key should be present with session id by default")
+	}
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func TestResponsesProvider_IncludeAlwaysSerialized(t *testing.T) {

@@ -13,8 +13,10 @@ func geminiLevelFromThinking(t *config.ThinkingConfig) string {
 	return t.Level
 }
 
-// tuningFromModel builds a RequestTuning from a ModelConfig.
-func tuningFromModel(m config.ModelConfig, providerPreset string, providerTiers []config.ServiceTier) RequestTuning {
+// tuningFromModel builds a RequestTuning from a ModelConfig. Provider-level
+// defaults (parallel_tool_calls) act as the base; model fields override them
+// and variants override the result via mergeVariantTuning.
+func tuningFromModel(m config.ModelConfig, providerPreset string, providerTiers []config.ServiceTier, providerParallelToolCalls *bool) RequestTuning {
 	var t RequestTuning
 	t.SupportedServiceTiers = (&m).SupportedServiceTierSet(providerPreset, providerTiers)
 	t.Anthropic = mergeAnthropicThinkingTuning(t.Anthropic, m.Thinking)
@@ -28,6 +30,9 @@ func tuningFromModel(m config.ModelConfig, providerPreset string, providerTiers 
 		t.OpenAI.ReasoningSummary = m.Reasoning.Summary
 	}
 	t.OpenAI.TextVerbosity = m.EffectiveTextVerbosity()
+	if providerParallelToolCalls != nil {
+		t.OpenAI.ParallelToolCalls = new(*providerParallelToolCalls)
+	}
 	if m.ParallelToolCalls != nil {
 		t.OpenAI.ParallelToolCalls = new(*m.ParallelToolCalls)
 	}

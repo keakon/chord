@@ -104,17 +104,20 @@ type responsesRequest struct {
 	Instructions       *string              `json:"instructions,omitempty"`
 	Input              []responsesInputItem `json:"input"`
 	Tools              []responsesTool      `json:"tools"`
-	ToolChoice         string               `json:"tool_choice"`
+	ToolChoice         string               `json:"tool_choice,omitempty"`
 	ParallelToolCalls  bool                 `json:"parallel_tool_calls"`
 	ServiceTier        string               `json:"service_tier,omitempty"`
 	Reasoning          *reasoningConfig     `json:"reasoning,omitempty"`
 	Text               *textConfig          `json:"text,omitempty"`
 	PreviousResponseID string               `json:"previous_response_id,omitempty"`
+	MaxOutputTokens    int                  `json:"max_output_tokens,omitempty"`
 	Store              bool                 `json:"store"`
 	Stream             bool                 `json:"stream"`
 	Include            []string             `json:"include"`
 	PromptCacheKey     string               `json:"prompt_cache_key,omitempty"`
 	ClientMetadata     map[string]string    `json:"client_metadata,omitempty"`
+	omitStore          bool
+	omitInclude        bool
 }
 
 func (r responsesRequest) MarshalJSON() ([]byte, error) {
@@ -122,6 +125,25 @@ func (r responsesRequest) MarshalJSON() ([]byte, error) {
 	r.Input = normalizeResponsesInput(r.Input)
 	r.Tools = normalizeResponsesTools(r.Tools)
 	r.Include = normalizeResponsesInclude(r.Include)
+	if r.omitStore || r.omitInclude {
+		// The shallower fields shadow the embedded ones, so rejected optional
+		// fields are omitted entirely rather than serialized as empty values.
+		type withoutOptionalFields struct {
+			alias
+			Store   *bool     `json:"store,omitempty"`
+			Include *[]string `json:"include,omitempty"`
+		}
+		out := withoutOptionalFields{alias: alias(r)}
+		if !r.omitStore {
+			out.Store = &r.Store
+		}
+		if r.omitInclude {
+			out.Include = nil
+		} else {
+			out.Include = &r.Include
+		}
+		return json.Marshal(out)
+	}
 	return json.Marshal(alias(r))
 }
 
@@ -335,21 +357,38 @@ func (r *ResponsesProvider) CompleteStream(
 	// Keep the Responses HTTP request shape aligned with codex-rs for every
 	// Responses provider, not only preset:codex. Some relay endpoints validate
 	// these fields as the Responses client contract and reject narrower OpenAI
-	// samples that omit them.
+	// samples that omit them. Provider compat.responses toggles can drop
+	// individual fields for gateways that reject them instead.
+	rc := (*config.ResponsesCompatConfig)(nil)
+	if r.provider != nil {
+		rc = r.provider.ResponsesCompat()
+	}
+	var sendStore, sendToolChoice, sendPromptCacheKey, sendReasoningInclude, sendMaxOutputTokens *bool
+	if rc != nil {
+		sendStore = rc.SendStore
+		sendToolChoice = rc.SendToolChoice
+		sendPromptCacheKey = rc.SendPromptCacheKey
+		sendReasoningInclude = rc.SendReasoningInclude
+		sendMaxOutputTokens = rc.SendMaxOutputTokens
+	}
 	reqBody := responsesRequest{
 		Model:             model,
 		Tools:             apiTools,
-		ToolChoice:        "auto",
 		ParallelToolCalls: true,
 		Store:             store,
 		Stream:            true,
 		Include:           []string{},
 	}
+	reqBody.omitStore = !compatBool(sendStore, true)
+	reqBody.omitInclude = !compatBool(sendReasoningInclude, true)
+	if compatBool(sendToolChoice, true) {
+		reqBody.ToolChoice = "auto"
+	}
 	if ot.ToolChoice != "" {
 		reqBody.ToolChoice = ot.ToolChoice
 	}
 	reqBody.Input = fullInput
-	if r.sessionID != "" {
+	if r.sessionID != "" && compatBool(sendPromptCacheKey, true) {
 		reqBody.PromptCacheKey = r.sessionID
 		reqBody.ClientMetadata = responsesClientMetadata(r.sessionID, requestStartedAt)
 	}
@@ -372,7 +411,11 @@ func (r *ResponsesProvider) CompleteStream(
 	// than a stale Codex-specific allowlist in Chord.
 	effectiveReasoningEffort := resolveResponsesReasoningEffort(ot.ReasoningEffort)
 	if maxTokens > 0 {
-		log.Debugf("omitting max_output_tokens for Responses request requested=%v", maxTokens)
+		if compatBool(sendMaxOutputTokens, false) {
+			reqBody.MaxOutputTokens = maxTokens
+		} else {
+			log.Debugf("omitting max_output_tokens for Responses request requested=%v", maxTokens)
+		}
 	}
 
 	// Responses reasoning is emitted whenever effort or summary is configured. Codex's
@@ -384,8 +427,9 @@ func (r *ResponsesProvider) CompleteStream(
 	if ot.TextVerbosity != "" {
 		reqBody.Text = &textConfig{Verbosity: ot.TextVerbosity}
 	}
-	reqBody.Include = responsesReasoningIncludes()
-
+	if !reqBody.omitInclude {
+		reqBody.Include = responsesReasoningIncludes()
+	}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request body: %w", err)
@@ -397,7 +441,7 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 	dumpRequestBody := append([]byte(nil), bodyBytes...)
 
-	log.Debugf("responses request model=%v max_output_tokens=%v messages=%v tools=%v reasoning_effort=%v reasoning_summary=%v request_bytes=%v", model, 0, len(messages), len(tools), effectiveReasoningEffort, ot.ReasoningSummary, len(bodyBytes))
+	log.Debugf("responses request model=%v max_output_tokens=%v messages=%v tools=%v reasoning_effort=%v reasoning_summary=%v request_bytes=%v", model, reqBody.MaxOutputTokens, len(messages), len(tools), effectiveReasoningEffort, ot.ReasoningSummary, len(bodyBytes))
 
 	start := requestStartedAt
 	if useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() && requestOverridesEmpty(overrides) {

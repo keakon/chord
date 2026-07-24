@@ -127,21 +127,26 @@ func TestConvertMessagesToOpenAI_DoesNotReplayReasoningForNonOpenAITarget(t *tes
 	}
 }
 
-func TestConvertMessagesToOpenAI_DoesNotReplayReasoningWithoutProvenance(t *testing.T) {
+func TestConvertMessagesToOpenAI_ReplaysPortableReasoningWithoutProvenance(t *testing.T) {
 	msgs := []message.Message{{
 		Role:             "assistant",
 		ReasoningContent: "hidden reasoning",
 		ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Shell", Args: json.RawMessage(`{"command":"echo hi"}`)}},
 	}}
 	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs)
+	var replayed bool
 	for _, m := range out {
-		if m.ReasoningContent != "" {
-			t.Fatalf("unexpected reasoning replay: %#v", m)
+		if m.Role == "assistant" && m.ReasoningContent == "hidden reasoning" && len(m.ToolCalls) > 0 {
+			replayed = true
+			break
 		}
+	}
+	if !replayed {
+		t.Fatalf("expected portable reasoning replay once normalization has preserved it: %#v", out)
 	}
 }
 
-func TestConvertMessagesToOpenAI_DoesNotReplayReasoningWithNonOpenAIChatProvenance(t *testing.T) {
+func TestConvertMessagesToOpenAI_ReplaysPortableReasoningWithNonOpenAIChatProvenance(t *testing.T) {
 	msgs := []message.Message{{
 		Role:             "assistant",
 		ReasoningContent: "foreign reasoning",
@@ -149,10 +154,15 @@ func TestConvertMessagesToOpenAI_DoesNotReplayReasoningWithNonOpenAIChatProvenan
 		ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Shell", Args: json.RawMessage(`{"command":"echo hi"}`)}},
 	}}
 	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs)
+	var replayed bool
 	for _, m := range out {
-		if m.ReasoningContent != "" {
-			t.Fatalf("unexpected reasoning replay: %#v", m)
+		if m.Role == "assistant" && m.ReasoningContent == "foreign reasoning" && len(m.ToolCalls) > 0 {
+			replayed = true
+			break
 		}
+	}
+	if !replayed {
+		t.Fatalf("expected portable reasoning replay once normalization has preserved it: %#v", out)
 	}
 }
 

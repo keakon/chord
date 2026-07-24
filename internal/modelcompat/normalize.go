@@ -26,7 +26,6 @@ const (
 
 	importedToolCallMarkerPrefix   = "[Imported tool call"
 	importedToolResultMarkerPrefix = "[Imported tool result for "
-	portableReasoningMarker        = "[Previous model reasoning preserved for continuity]"
 )
 
 type TargetModel struct {
@@ -79,7 +78,6 @@ type NormalizeReport struct {
 	DowngradedToolCalls   int
 	DowngradedReasoning   int
 	ConvertedReasoning    int
-	TextifiedReasoning    int
 	DroppedToolCalls      int
 	DroppedToolResults    int
 	// ForeignNativeReplays counts messages whose provider-bound native payloads
@@ -92,7 +90,7 @@ type NormalizeReport struct {
 
 func (r NormalizeReport) Changed() bool {
 	return r.DroppedThinkingBlocks != 0 || r.DowngradedToolCalls != 0 || r.DowngradedReasoning != 0 ||
-		r.ConvertedReasoning != 0 || r.TextifiedReasoning != 0 || r.DroppedToolCalls != 0 || r.DroppedToolResults != 0 ||
+		r.ConvertedReasoning != 0 || r.DroppedToolCalls != 0 || r.DroppedToolResults != 0 ||
 		r.ForeignNativeReplays != 0 || len(r.Warnings) != 0
 }
 
@@ -116,6 +114,8 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 	for i := range out {
 		msg := &out[i]
 		reasoningToolTrajectoryInvalid := false
+		portableReasoningForChat := make([]string, 0, 1)
+		portableReasoningForUnsignedThinking := make([]string, 0, 1)
 
 		if len(msg.ThinkingBlocks) > 0 {
 			strictProvenance := messageAllowsAnthropicThinkingReplay(*msg, target)
@@ -154,9 +154,8 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 				report.ForeignNativeReplays++
 			}
 			msg.ThinkingBlocks = kept
-			if len(portableThinking) > 0 && len(msg.ToolCalls) > 0 {
-				msg.Content = prependPortableReasoning(msg.Content, portableThinking)
-				report.TextifiedReasoning++
+			if len(portableThinking) > 0 {
+				routePortableReasoning(portableThinking, &portableReasoningForChat, &portableReasoningForUnsignedThinking, target, opts.ReplayCompat)
 			}
 			if len(kept) == 0 && len(msg.ToolCalls) > 0 && opts.ReplayCompat >= ReplayCompatStrict {
 				reasoningToolTrajectoryInvalid = true
@@ -174,16 +173,13 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 			if !replayable {
 				portableReasoning := strings.TrimSpace(msg.ReasoningContent)
 				msg.ReasoningContent = ""
-				convertibleToUnsignedThinking := sourceHasNativeReasoning && reasoningContinuityAllowsUnsignedAnthropicBlocks(target)
-				if portableReasoning != "" && convertibleToUnsignedThinking && opts.ReplayCompat <= ReplayCompatNative {
-					msg.ThinkingBlocks = append(msg.ThinkingBlocks, message.ThinkingBlock{Thinking: portableReasoning})
-					report.ConvertedReasoning++
-				} else {
+				converted := false
+				if portableReasoning != "" && canConvertPortableReasoningToUnsignedAnthropic(target, opts.ReplayCompat) {
+					portableReasoningForUnsignedThinking = appendPortableText(portableReasoningForUnsignedThinking, portableReasoning)
+					converted = true
+				}
+				if !converted {
 					report.DowngradedReasoning++
-					if portableReasoning != "" && len(msg.ToolCalls) > 0 && !convertibleToUnsignedThinking {
-						msg.Content = prependPortableReasoning(msg.Content, []string{portableReasoning})
-						report.TextifiedReasoning++
-					}
 				}
 				if len(msg.ToolCalls) > 0 && opts.ReplayCompat >= ReplayCompatStrict {
 					reasoningToolTrajectoryInvalid = true
@@ -209,10 +205,8 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 				}
 				portableSummary := responsesReasoningSummaryText(msg.ResponsesOutput)
 				msg.ResponsesOutput = nil
-				report.DowngradedReasoning++
-				if len(portableSummary) > 0 && len(msg.ToolCalls) > 0 {
-					msg.Content = prependPortableReasoning(msg.Content, portableSummary)
-					report.TextifiedReasoning++
+				if !routePortableReasoning(portableSummary, &portableReasoningForChat, &portableReasoningForUnsignedThinking, target, opts.ReplayCompat) {
+					report.DowngradedReasoning++
 				}
 			}
 		}
@@ -234,15 +228,22 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 				for j := range msg.ToolCalls {
 					msg.ToolCalls[j].ThoughtSignature = ""
 				}
-				report.DowngradedReasoning++
-				if len(portableThoughts) > 0 && len(msg.ToolCalls) > 0 {
-					msg.Content = prependPortableReasoning(msg.Content, portableThoughts)
-					report.TextifiedReasoning++
+				if !routePortableReasoning(portableThoughts, &portableReasoningForChat, &portableReasoningForUnsignedThinking, target, opts.ReplayCompat) {
+					report.DowngradedReasoning++
 				}
 				if opts.ReplayCompat >= ReplayCompatStrict && len(msg.ToolCalls) > 0 {
 					reasoningToolTrajectoryInvalid = true
 				}
 			}
+		}
+
+		if len(portableReasoningForChat) > 0 && strings.TrimSpace(msg.ReasoningContent) == "" {
+			msg.ReasoningContent = strings.Join(portableReasoningForChat, "\n")
+			report.ConvertedReasoning++
+		}
+		if len(portableReasoningForUnsignedThinking) > 0 {
+			msg.ThinkingBlocks = append(msg.ThinkingBlocks, message.ThinkingBlock{Thinking: strings.Join(portableReasoningForUnsignedThinking, "\n")})
+			report.ConvertedReasoning++
 		}
 
 		if len(msg.ToolCalls) > 0 && (reasoningToolTrajectoryInvalid || !toolCallsReplayAllowed(*msg, toolResultsByID, target, allowStructuredTools)) {
@@ -331,7 +332,7 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 
 	filtered := out[:0]
 	for _, msg := range out {
-		if msg.Role == message.RoleAssistant && strings.TrimSpace(msg.Content) == "" && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 && !message.HasReplayableThinkingBlocks(msg.ThinkingBlocks) {
+		if msg.Role == message.RoleAssistant && strings.TrimSpace(msg.Content) == "" && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 && !hasSerializableThinkingBlocks(msg.ThinkingBlocks) {
 			continue
 		}
 		filtered = append(filtered, msg)
@@ -343,6 +344,30 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 
 func targetAllowsReasoningReplay(target TargetModel) bool {
 	return strings.TrimSpace(target.ReasoningContinuityMode) == ReasoningContinuityOpenAIVisible && strings.TrimSpace(target.WireFamily) == WireFamilyOpenAIChat
+}
+
+func canConvertPortableReasoningToOpenAIVisible(target TargetModel, level int) bool {
+	return targetAllowsReasoningReplay(target) && level <= ReplayCompatSynthesized
+}
+
+func canConvertPortableReasoningToUnsignedAnthropic(target TargetModel, level int) bool {
+	return reasoningContinuityAllowsUnsignedAnthropicBlocks(target) && level <= ReplayCompatSynthesized
+}
+
+func routePortableReasoning(portable []string, toChat, toUnsignedThinking *[]string, target TargetModel, level int) bool {
+	if len(portable) == 0 {
+		return false
+	}
+	switch {
+	case canConvertPortableReasoningToOpenAIVisible(target, level):
+		*toChat = append(*toChat, portable...)
+		return true
+	case canConvertPortableReasoningToUnsignedAnthropic(target, level):
+		*toUnsignedThinking = append(*toUnsignedThinking, portable...)
+		return true
+	default:
+		return false
+	}
 }
 
 // allowsResponsesOutputReplay reports whether msg's native Responses API
@@ -544,17 +569,6 @@ func appendPortableText(items []string, text string) []string {
 	return items
 }
 
-func prependPortableReasoning(content string, reasoning []string) string {
-	if len(reasoning) == 0 {
-		return content
-	}
-	parts := []string{portableReasoningMarker, strings.Join(reasoning, "\n")}
-	if strings.TrimSpace(content) != "" {
-		parts = append(parts, content)
-	}
-	return strings.Join(parts, "\n\n")
-}
-
 func responsesReasoningSummaryText(items []message.ResponsesOutputItem) []string {
 	var out []string
 	for _, item := range items {
@@ -576,6 +590,15 @@ func geminiThoughtText(parts []message.GeminiReplayPart) []string {
 		}
 	}
 	return out
+}
+
+func hasSerializableThinkingBlocks(blocks []message.ThinkingBlock) bool {
+	for _, block := range blocks {
+		if strings.TrimSpace(block.Thinking) != "" || strings.TrimSpace(block.Signature) != "" || strings.TrimSpace(block.Data) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func downgradeCompletedToolCallsToText(msg message.Message) message.Message {

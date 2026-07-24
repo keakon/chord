@@ -562,7 +562,8 @@ model_templates:
         body:
           thinking:
             type: enabled
-      # Replays reasoning_content without injecting request fields.
+      # Replays native reasoning_content and accepts portable visible
+      # reasoning from other wire families without injecting request fields.
       reasoning_continuity:
         mode: openai_visible
 
@@ -646,30 +647,32 @@ Compatibility fields:
 - `compat.reasoning_continuity.mode`:
   - `none`: no provider-specific visible reasoning replay.
   - `openai_visible`: replays unchanged assistant `reasoning_content` during
-    Chat Completions tool loops. It does not inject request fields; configure
-    those with `request_overrides.body`. On the first attempt Chord replays
-    chat-native reasoning to any Chat Completions target, even across
-    providers, so documented in-provider upgrades such as Kimi K2.6/K2.7 to
-    K3 and same-model provider fallback both keep continuity. If a target
-    rejects such a request, Chord downgrades that target for the rest of the
-    session. Incompatible native reasoning is removed or converted, while
-    completed tool calls and paired results remain structured or are textified
-    at the strict level.
+	Chat Completions tool loops and accepts portable visible reasoning from
+	other wire families as `reasoning_content`. It does not inject request
+	fields; configure those with `request_overrides.body`. On the first
+	attempt Chord still optimistically replays chat-native reasoning to any
+	Chat Completions target, even across providers, so documented in-provider
+	upgrades such as Kimi K2.6/K2.7 to K3 and same-model provider fallback
+	both keep continuity. If a target rejects that request, Chord degrades the
+	target for the rest of the session while keeping completed tool calls and
+	paired results structured until strict compatibility requires text facts.
   - `anthropic_unsigned`: opt-in for Messages-compatible models such as
     DeepSeek/GLM endpoints that return visible `thinking` blocks without Claude
-    signatures. Unsigned thinking is replayed natively only to the same
-    provider/model on the first attempt. Cross-provider fallback, or a target
-    rejection, converts visible thinking to marked assistant history while
-    preserving the completed tool round.
+	signatures. Unsigned thinking is replayed natively only to the same
+	provider/model on the first attempt. For compatible targets, portable
+	visible reasoning from other wire families is converted into unsigned
+	`thinking` blocks instead of being injected into assistant text.
   - Responses, signed Claude Messages, and Gemini otherwise use their
     protocol-native continuity mechanisms automatically. Chord captures opaque
-    encrypted/signature state and replays it only where the target wire and
-    provenance permit. Across incompatible protocols, public action-bound
-    reasoning can become marked assistant history, but opaque state is never
-    fabricated. Completed tool facts are converted to the target protocol's
-    structured representation whenever possible and textified only if a target
-    rejects that shape. The achieved degradation level is remembered per
-    target.
+	encrypted/signature state and replays it only where the target wire and
+	provenance permit. Across incompatible protocols, portable visible
+	reasoning is converted only when the target has a structured carrier
+	(`openai_visible` or `anthropic_unsigned`); otherwise it is dropped. Opaque
+	state is never fabricated, and reasoning is never injected into ordinary
+	assistant content. Completed tool facts are converted to the target
+	protocol's structured representation whenever possible and textified only
+	if a target rejects that shape. The achieved degradation level is
+	remembered per target.
 - `compat.thinking_toolcall`: enables a provider-specific parser for gateways
   that encode tool calls inside visible reasoning text. Leave disabled unless
   the gateway requires that format.
@@ -751,7 +754,13 @@ These settings are provider-scoped, so project-level `.chord/config.yaml` can ov
 
 Use `max_output_tokens` to set a global cap on requested output tokens. The effective request limit is still clamped by each model's `limit.output` and available total context (`limit.context` when known), so runtime uses the smallest applicable value.
 
-Responses providers keep the stable Responses wire shape and do not send a `max_output_tokens` field on the HTTP or WebSocket request. The value can still affect Chord-side budgeting and compatibility checks, but it is not serialized into Responses requests.
+Responses providers keep the stable Responses wire shape and do not send a
+`max_output_tokens` field on the HTTP or WebSocket request by default. For a
+compatible non-Codex gateway that needs an explicit server-side output cap, set
+`compat.responses.send_max_output_tokens: true`; the other Responses field
+toggles are available under the same provider-level object. The global value
+still affects Chord-side budgeting and compatibility checks when it is omitted
+from the wire request.
 
 `limit.input` is separate: use it only for models whose providers publish an extra input cap beyond the total context window. Lowering `max_output_tokens` can reduce cost and long-response failure risk, but it does **not** increase a provider's input allowance or replace `limit.input`.
 
@@ -1073,6 +1082,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | Key                     | Type                  | Default                          | Scope                    | Summary                                                                                                                  |
 | ----------------------- | --------------------- | -------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | `providers`             | `map[name]Provider`   | —                                | global / project         | Per-provider config (`type`, `api_url`, `preset`, `key_rotation`, `key_order`, `models`, `compress`). See [Minimal provider config](#minimal-provider-config). |
+| `model_templates`       | `map[name]YAML`       | empty                            | global / project         | YAML-anchor namespace only; entries are reusable through aliases and are not runtime model definitions. |
 | `model_pools`           | `map[name][]ref`      | —                                | global / project         | Reusable named pools of full `provider/model[@variant]` refs. See [Model pools](#model-pools-selecting-providermodel). |
 | `thinking_translation`  | object                | disabled (`max_chars: 1000`)     | global / project         | Optional appended translation preview for thinking / reasoning cards. Requires `target_language` and `model_pool`; failures only skip the affected thinking block. |
 | `context`               | object                | see below                        | global / project         | `compaction` and `reduction` settings. See [Context compaction](./context-management.md#context-compaction) and [Context reduction](./context-management.md#context-reduction). |
@@ -1144,6 +1154,9 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `stream_idle_timeout` | int | Stream idle timeout in seconds for this provider. `0` / omitted uses built-in SSE/WebSocket idle defaults. |
 | `websocket_handshake_timeout` | int | Responses WebSocket handshake timeout in seconds. `0` / omitted uses the built-in default. |
 | `supported_service_tiers` | list | Provider-level default accepted non-standard tiers for its models, e.g. `[fast, slow]` or `[fast]`. Model entries can override it. |
+| `parallel_tool_calls` | bool | `true` | Provider-level default for Responses / Chat Completions tool parallelism; model and variant values override it. |
+| `compat.responses.*` | object | protocol defaults | Provider-level optional Responses fields: `send_store`, `send_reasoning_include`, `send_tool_choice`, `send_prompt_cache_key`, and `send_max_output_tokens`. |
+| `compat.chat_completions.send_stream_options` | bool | `true` | Omit `stream_options.include_usage` for gateways that reject it; streaming token usage then remains unavailable. |
 | `models`       | map    | Map of model id → [model config](#model-field-reference).                                                                                               |
 
 ### Model field reference
@@ -1157,7 +1170,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `reasoning`       | object | OpenAI reasoning options. `reasoning.effort` is normalized and passed through verbatim, so any provider-supported level (e.g. GLM `max` / `minimal` / `none`) reaches the upstream unchanged (unset = omit and use provider/model default). For Responses, `reasoning.summary` (`auto` / `concise` / `detailed`; unset = omit / no explicit summary request). Recommended summary value when you want readable summaries: `auto`. |
 | `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `thinking.effort` is sent as `output_config.effort` for Messages requests; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
-| `compat.reasoning_continuity.mode` | string | Optional continuity override. Use `openai_visible` for Chat Completions models that require unchanged assistant `reasoning_content`; use `anthropic_unsigned` only for verified Messages-compatible models that replay visible unsigned `thinking` to the same provider/model; use `none` to opt out of a provider-level default. |
+| `compat.reasoning_continuity.mode` | string | Optional continuity override. Use `openai_visible` for Chat Completions models that require unchanged assistant `reasoning_content` and can accept portable visible reasoning from other wires as `reasoning_content`; use `anthropic_unsigned` only for verified Messages-compatible models that replay or accept visible unsigned `thinking`; use `none` to opt out of a provider-level default. |
 | `compat.request_overrides.body` | object | Recursive JSON patch applied after Chord constructs the protocol request. `null` deletes a field. |
 | `compat.request_overrides.rename_body_fields` | map | Renames final JSON fields while preserving Chord's computed values. A `null` target deletes the source field. |
 | `compat.request_overrides.headers` | map | Sets final request headers. A `null` value removes that header. |

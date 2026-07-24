@@ -11,6 +11,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Model setup now uses the Codex-specific GPT-5.6 limits (`500000` context / `372000` input / `128000` output) and keeps the GPT-5.4 input limit aligned at `950000`. Provider configuration now rejects unknown YAML fields, supports provider-level `parallel_tool_calls`, and exposes opt-in wire compatibility toggles for Responses and Chat Completions gateways.
+
 - Tool results now carry one-shot efficiency hints when a turn drifts into serial single-lookup rounds or repeated small-window reads of a file that fits in a single read, re-surfacing the batching and whole-file-read guidance at the moment it applies. Failed test commands that died in their build or setup phase now steer to a build-only check first, and shell-timeout errors explain how to narrow or background the next attempt.
 - Shell tool results append a concise wall-clock elapsed-time note once a command crosses the slow-command threshold, so the model can factor real cost into choosing what to run next; sub-second commands stay unannotated.
 - Reasoning replay is now optimistic with per-target adaptive degradation: chat-native reasoning and protocol-native items (Responses encrypted reasoning, Anthropic thinking blocks, Gemini thought signatures) are first replayed to any target speaking the same wire protocol, including cross-provider fallback. A target that rejects such a payload is downgraded for the rest of the session — first to strict provenance matching, then to textified history — so an incompatible backend costs at most two failed attempts per session instead of losing reasoning continuity on every fallback.

@@ -4623,6 +4623,44 @@ func TestClientSetVariantOverridesParallelToolCalls(t *testing.T) {
 	}
 }
 
+func TestClientProviderParallelToolCallsPrecedence(t *testing.T) {
+	// Model-level true wins over provider-level false.
+	cfgModelOverrides := NewProviderConfig("openai", config.ProviderConfig{
+		Type:              config.ProviderTypeResponses,
+		ParallelToolCalls: new(false),
+		Models: map[string]config.ModelConfig{
+			"gpt-5.5": {
+				Limit:             config.ModelLimit{Context: 400000, Output: 128000},
+				ParallelToolCalls: new(true),
+				Variants: map[string]config.ModelVariant{
+					"serial": {ParallelToolCalls: new(false)},
+				},
+			},
+		},
+	}, []string{"k"})
+	c := NewClient(cfgModelOverrides, &scriptedProvider{}, "gpt-5.5", 4096, "sys")
+	if c.tuning.OpenAI.ParallelToolCalls == nil || !*c.tuning.OpenAI.ParallelToolCalls {
+		t.Fatalf("model should override provider default to true, got %#v", c.tuning.OpenAI.ParallelToolCalls)
+	}
+	c.SetVariant("serial")
+	if c.tuning.OpenAI.ParallelToolCalls == nil || *c.tuning.OpenAI.ParallelToolCalls {
+		t.Fatalf("variant should override model to false, got %#v", c.tuning.OpenAI.ParallelToolCalls)
+	}
+
+	// Without a model-level setting, the provider default applies.
+	cfgProviderDefault := NewProviderConfig("openai", config.ProviderConfig{
+		Type:              config.ProviderTypeResponses,
+		ParallelToolCalls: new(false),
+		Models: map[string]config.ModelConfig{
+			"gpt-5.5": {Limit: config.ModelLimit{Context: 400000, Output: 128000}},
+		},
+	}, []string{"k"})
+	c2 := NewClient(cfgProviderDefault, &scriptedProvider{}, "gpt-5.5", 4096, "sys")
+	if c2.tuning.OpenAI.ParallelToolCalls == nil || *c2.tuning.OpenAI.ParallelToolCalls {
+		t.Fatalf("provider default false should apply when model is unset, got %#v", c2.tuning.OpenAI.ParallelToolCalls)
+	}
+}
+
 func TestClientSetModelPoolIgnoresUndefinedVariant(t *testing.T) {
 	provider := &recordingTuningProvider{}
 	cfg := NewProviderConfig("openai", config.ProviderConfig{

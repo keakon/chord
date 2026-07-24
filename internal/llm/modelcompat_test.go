@@ -123,7 +123,7 @@ func TestNormalizeMessagesForPoolTarget_ConvertsOpenAIReasoningToAnthropicUnsign
 	if len(out) != 2 || out[0].ReasoningContent != "" || len(out[0].ThinkingBlocks) != 1 || out[0].ThinkingBlocks[0].Thinking != "portable reasoning" {
 		t.Fatalf("converted messages = %+v (report %+v)", out, report)
 	}
-	if report.ConvertedReasoning != 1 || report.DowngradedReasoning != 0 || report.TextifiedReasoning != 0 {
+	if report.ConvertedReasoning != 1 || report.DowngradedReasoning != 0 {
 		t.Fatalf("report = %+v", report)
 	}
 
@@ -140,6 +140,110 @@ func TestNormalizeMessagesForPoolTarget_ConvertsOpenAIReasoningToAnthropicUnsign
 	}
 	if blocks[1].Type != "text" || blocks[1].Text != "calling tool" || blocks[2].Type != "tool_use" {
 		t.Fatalf("wire block order/content = %+v", blocks)
+	}
+}
+
+func TestNormalizeMessagesForPoolTarget_ConvertsAnthropicThinkingToOpenAIReasoningContent(t *testing.T) {
+	provider := NewProviderConfig("chat-target", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"glm-5.2": {
+				Compat: &config.ModelCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"}},
+			},
+		},
+	}, nil)
+	msgs := []message.Message{
+		{
+			Role:           message.RoleAssistant,
+			Content:        "calling tool",
+			ThinkingBlocks: []message.ThinkingBlock{{Thinking: "visible thinking", Signature: "sig"}},
+			ToolCalls:      []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}},
+			Provenance:     &message.MessageProvenance{ProviderID: "relay-a", ModelID: "glm-5.2", WireFamily: modelcompat.WireFamilyAnthropic},
+		},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
+	}
+	target := FallbackModel{ProviderConfig: provider, ModelID: "glm-5.2"}
+	out, report := normalizeMessagesForPoolTarget(msgs, target, tuningForPoolTarget(target))
+	if len(out) != 2 || out[0].ReasoningContent != "visible thinking" || len(out[0].ThinkingBlocks) != 0 || len(out[0].ToolCalls) != 1 {
+		t.Fatalf("converted messages = %+v (report %+v)", out, report)
+	}
+	if report.ConvertedReasoning != 1 || report.DroppedThinkingBlocks != 1 {
+		t.Fatalf("report = %+v", report)
+	}
+
+	wire := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, out)
+	var assistant *openAIMessage
+	for i := range wire {
+		if wire[i].Role == "assistant" {
+			assistant = &wire[i]
+			break
+		}
+	}
+	if assistant == nil || assistant.ReasoningContent != "visible thinking" {
+		t.Fatalf("wire reasoning_content = %#v, want converted text", wire)
+	}
+}
+
+func TestNormalizeMessagesForPoolTarget_ConvertsResponsesSummaryToOpenAIReasoningContent(t *testing.T) {
+	provider := NewProviderConfig("chat-target", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"deepseek-v4-pro": {
+				Compat: &config.ModelCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"}},
+			},
+		},
+	}, nil)
+	msgs := []message.Message{
+		{
+			Role: message.RoleAssistant,
+			ResponsesOutput: []message.ResponsesOutputItem{
+				{Type: "reasoning", ID: "rs_1", EncryptedContent: "opaque", Summary: []message.ResponsesReasoningSummary{{Type: "summary_text", Text: "public reasoning summary"}}},
+				{Type: "function_call", ID: "fc_1", CallID: "call_1", Name: "read", Arguments: `{}`},
+			},
+			ToolCalls:  []message.ToolCall{{ID: "call_1", Name: "read", Args: json.RawMessage(`{}`)}},
+			Provenance: &message.MessageProvenance{ProviderID: "openai", ModelID: "gpt-5", WireFamily: modelcompat.WireFamilyOpenAIResponses},
+		},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "result"},
+	}
+	target := FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}
+	out, report := normalizeMessagesForPoolTarget(msgs, target, tuningForPoolTarget(target))
+	if len(out) != 2 || out[0].ReasoningContent != "public reasoning summary" || len(out[0].ResponsesOutput) != 0 || len(out[0].ToolCalls) != 1 {
+		t.Fatalf("converted messages = %+v (report %+v)", out, report)
+	}
+	if report.ConvertedReasoning != 1 || report.DowngradedReasoning != 0 {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestNormalizeMessagesForPoolTarget_ConvertsGeminiThoughtToAnthropicUnsignedThinking(t *testing.T) {
+	provider := NewProviderConfig("messages-target", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"glm-5.2": {
+				Thinking: &config.ThinkingConfig{Type: "adaptive"},
+				Compat:   &config.ModelCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "anthropic_unsigned"}},
+			},
+		},
+	}, nil)
+	msgs := []message.Message{
+		{
+			Role: message.RoleAssistant,
+			GeminiParts: []message.GeminiReplayPart{
+				{Type: "thought", Text: "gemini thought", ThoughtSignature: "sig-thought"},
+				{Type: "function_call", ToolCallID: "call-1", ThoughtSignature: "sig-call"},
+			},
+			ToolCalls:  []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`), ThoughtSignature: "sig-call"}},
+			Provenance: &message.MessageProvenance{ProviderID: "google", ModelID: "gemini-3-pro", WireFamily: modelcompat.WireFamilyGemini},
+		},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
+	}
+	target := FallbackModel{ProviderConfig: provider, ModelID: "glm-5.2"}
+	out, report := normalizeMessagesForPoolTarget(msgs, target, tuningForPoolTarget(target))
+	if len(out) != 2 || len(out[0].GeminiParts) != 0 || len(out[0].ThinkingBlocks) != 1 || out[0].ThinkingBlocks[0].Thinking != "gemini thought" || len(out[0].ToolCalls) != 1 {
+		t.Fatalf("converted messages = %+v (report %+v)", out, report)
+	}
+	if out[0].ToolCalls[0].ThoughtSignature != "" || report.ConvertedReasoning != 1 || report.DowngradedReasoning != 0 {
+		t.Fatalf("report/tool_calls = %+v / %+v", report, out[0].ToolCalls)
 	}
 }
 
@@ -461,7 +565,7 @@ func TestNormalizeMessagesForPoolTarget_ResponsesToMessagesPreservesToolFacts(t 
 		t.Fatalf("Anthropic messages = %#v, want user/assistant/tool-result", converted)
 	}
 	assistantBlocks, ok := converted[1].Content.([]anthropicContent)
-	if !ok || !anthropicBlocksContainToolUse(assistantBlocks, "call_1") || !anthropicBlocksContainText(assistantBlocks, "public reasoning summary") {
+	if !ok || !anthropicBlocksContainToolUse(assistantBlocks, "call_1") || anthropicBlocksContainText(assistantBlocks, "public reasoning summary") {
 		t.Fatalf("Anthropic tool_use = %#v", converted[1].Content)
 	}
 	resultBlocks, ok := converted[2].Content.([]anthropicContent)
@@ -496,8 +600,8 @@ func TestNormalizeMessagesForPoolTarget_MessagesToResponsesPreservesToolFacts(t 
 	if output == nil || output.Output != "README contents" {
 		t.Fatalf("Responses function_call_output = %#v", output)
 	}
-	if !responsesItemsContainText(converted, "unsigned provider reasoning") {
-		t.Fatalf("Responses input lost portable reasoning context: %#v", converted)
+	if responsesItemsContainText(converted, "unsigned provider reasoning") {
+		t.Fatalf("Responses input must not carry dropped thinking text: %#v", converted)
 	}
 }
 
@@ -520,8 +624,8 @@ func TestNormalizeMessagesForPoolTarget_ChatToMessagesDropsOnlyReasoning(t *test
 	}
 	converted := convertMessages(normalized)
 	blocks, ok := converted[1].Content.([]anthropicContent)
-	if !ok || !anthropicBlocksContainToolUse(blocks, "call_1") || !anthropicBlocksContainText(blocks, "visible chat reasoning") {
-		t.Fatalf("Anthropic conversion lost tool_use: %#v", converted[1].Content)
+	if !ok || !anthropicBlocksContainToolUse(blocks, "call_1") || anthropicBlocksContainText(blocks, "visible chat reasoning") {
+		t.Fatalf("Anthropic conversion lost tool_use or leaked reasoning into text: %#v", converted[1].Content)
 	}
 }
 

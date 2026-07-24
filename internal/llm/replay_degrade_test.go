@@ -245,15 +245,15 @@ func TestCompleteStreamDegradesConvertedUnsignedThinkingWithoutTextLeak(t *testi
 	attempts := append([][]message.Message(nil), impl.attempts...)
 	impl.mu.Unlock()
 	if len(attempts) != 2 {
-		t.Fatalf("attempts = %d, want converted native then synthesized fallback", len(attempts))
+		t.Fatalf("attempts = %d, want converted native then strict fallback", len(attempts))
 	}
 	if len(attempts[0][0].ThinkingBlocks) != 1 || attempts[0][0].ThinkingBlocks[0].Thinking != "portable reasoning" || attempts[0][0].ReasoningContent != "" {
 		t.Fatalf("first attempt did not convert reasoning: %+v", attempts[0][0])
 	}
-	if len(attempts[1][0].ThinkingBlocks) != 0 || attempts[1][0].ReasoningContent != "" || len(attempts[1][0].ToolCalls) != 1 {
-		t.Fatalf("fallback did not preserve only the structured tool trajectory: %+v", attempts[1][0])
+	if len(attempts[1][0].ThinkingBlocks) != 0 || attempts[1][0].ReasoningContent != "" || len(attempts[1][0].ToolCalls) != 0 {
+		t.Fatalf("fallback did not degrade to strict text trajectory: %+v", attempts[1][0])
 	}
-	if strings.Contains(attempts[1][0].Content, "portable reasoning") || strings.Contains(attempts[1][0].Content, "Previous model reasoning") {
+	if !strings.Contains(attempts[1][0].Content, "[Previous tool call: read]") || strings.Contains(attempts[1][0].Content, "portable reasoning") || strings.Contains(attempts[1][0].Content, "Previous model reasoning") {
 		t.Fatalf("fallback leaked reasoning into assistant text: %q", attempts[1][0].Content)
 	}
 }

@@ -464,14 +464,17 @@ Notes:
 
 - Chat Completions requires `thinking.type: enabled`, `reasoning_effort`, and
   `max_tokens`. `request_overrides` adds GLM's thinking flags and renames the
-  dynamically calculated output-limit field; `openai_visible` only replays
-  unmodified `reasoning_content`.
+  dynamically calculated output-limit field; `openai_visible` replays native
+  `reasoning_content` and accepts portable visible reasoning from other wire
+  families as `reasoning_content`.
 - Messages-compatible endpoints use `thinking` plus `output_config.effort`.
   Disable Anthropic beta headers unless that endpoint documents support. A
   compatible Messages endpoint may return unsigned thinking rather than
   Claude-style signed blocks; do not infer signature replay support from the
   wire format alone. Configure `anthropic_unsigned` only after verifying that
-  the endpoint accepts its own visible unsigned thinking in tool-call loops.
+  the endpoint accepts its own visible unsigned thinking in tool-call loops;
+  once enabled, Chord can also map portable visible reasoning from other wire
+  families into unsigned `thinking` blocks for that target.
 - A GLM `/responses` endpoint is gateway-specific. Use a separate template with
   `reasoning.effort` only when the gateway documents OpenAI Responses mapping.
 
@@ -557,9 +560,10 @@ Notes:
   `thinking.effort`. Disable Anthropic beta headers for the compatible endpoint.
   DeepSeek's Anthropic-compatible endpoint may return unsigned `thinking`
   blocks rather than Claude-style signed blocks. `anthropic_unsigned` replays
-  that visible thinking only to the same provider/model; cross-provider or
-  rejected replay falls back to marked assistant history while preserving the
-  tool round.
+  same-provider/model unsigned thinking natively and can also accept portable
+  visible reasoning from other wire families as unsigned `thinking` blocks;
+  if the target still rejects that shape, strict compatibility drops the
+  reasoning carrier while preserving the tool round.
 - Treat third-party `/responses` endpoints as gateway-specific; use
   `reasoning.effort` only when the gateway documents its mapping.
 - For compatible gateways, use the exact model ID and limits published by that
@@ -682,8 +686,9 @@ Chord preserves the portable parts of completed tool rounds:
   structured tool representation whenever possible;
 - visible reasoning attached to a tool round (`reasoning_content`, unsigned
   thinking text, Responses reasoning summaries, or Gemini thought text) is
-  retained as explicitly marked assistant history when its native format cannot
-  cross the protocol boundary;
+  converted only when the target exposes a structured reasoning carrier
+  (`openai_visible` or `anthropic_unsigned`); otherwise it is dropped rather
+  than injected into assistant-visible text;
 - opaque provider state such as Claude signatures, Responses encrypted
   reasoning, and Gemini thought signatures is never fabricated or copied into
   an incompatible protocol;

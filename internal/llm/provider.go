@@ -161,6 +161,7 @@ type ProviderConfig struct {
 	models                     map[string]config.ModelConfig
 	compat                     *config.ProviderCompatConfig // provider-level compat defaults
 	store                      *bool                        // provider-level Responses storage preference; nil defaults to false
+	parallelToolCalls          *bool                        // provider-level parallel_tool_calls default; nil = true
 	officialAPI                *bool                        // nil = infer from known official endpoints
 	supportedServiceTiers      []config.ServiceTier         // provider-level default non-standard service tiers
 	preset                     string                       // trimmed config preset (e.g. "codex")
@@ -259,6 +260,7 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		models:                     models,
 		compat:                     cfg.Compat,
 		store:                      cfg.Store,
+		parallelToolCalls:          cfg.ParallelToolCalls,
 		officialAPI:                cfg.OfficialAPI,
 		supportedServiceTiers:      append([]config.ServiceTier(nil), cfg.SupportedServiceTiers...),
 		preset:                     strings.TrimSpace(cfg.Preset),
@@ -311,6 +313,44 @@ func (p *ProviderConfig) StoreConfig() *bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.store
+}
+
+// ParallelToolCallsConfig returns the provider-level parallel_tool_calls
+// default (nil means not configured; the wire default is true).
+func (p *ProviderConfig) ParallelToolCallsConfig() *bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.parallelToolCalls
+}
+
+// ResponsesCompat returns the provider-level Responses wire compat toggles
+// (nil when not configured; every knob falls back to its default).
+func (p *ProviderConfig) ResponsesCompat() *config.ResponsesCompatConfig {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.compat == nil {
+		return nil
+	}
+	return p.compat.Responses
+}
+
+// ChatCompletionsCompat returns the provider-level Chat Completions wire
+// compat toggles (nil when not configured).
+func (p *ProviderConfig) ChatCompletionsCompat() *config.ChatCompletionsCompatConfig {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.compat == nil {
+		return nil
+	}
+	return p.compat.ChatCompletions
+}
+
+// compatBool resolves an optional compat toggle against its default.
+func compatBool(v *bool, fallback bool) bool {
+	if v == nil {
+		return fallback
+	}
+	return *v
 }
 
 // EffectiveResponsesWebsocket returns whether the Responses WebSocket transport should be attempted

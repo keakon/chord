@@ -30,7 +30,7 @@ func logNormalizeReport(provider, model string, level, messagesBefore, messagesA
 	if !report.Changed() {
 		return
 	}
-	log.Debugf("normalized LLM request provider=%v model=%v replay_level=%v messages_before=%v messages_after=%v dropped_thinking=%v downgraded_reasoning=%v converted_reasoning=%v textified_reasoning=%v downgraded_tool_calls=%v dropped_tool_calls=%v dropped_tool_results=%v foreign_native_replays=%v warnings=%q", provider, model, level, messagesBefore, messagesAfter, report.DroppedThinkingBlocks, report.DowngradedReasoning, report.ConvertedReasoning, report.TextifiedReasoning, report.DowngradedToolCalls, report.DroppedToolCalls, report.DroppedToolResults, report.ForeignNativeReplays, report.Warnings)
+	log.Debugf("normalized LLM request provider=%v model=%v replay_level=%v messages_before=%v messages_after=%v dropped_thinking=%v downgraded_reasoning=%v converted_reasoning=%v downgraded_tool_calls=%v dropped_tool_calls=%v dropped_tool_results=%v foreign_native_replays=%v warnings=%q", provider, model, level, messagesBefore, messagesAfter, report.DroppedThinkingBlocks, report.DowngradedReasoning, report.ConvertedReasoning, report.DowngradedToolCalls, report.DroppedToolCalls, report.DroppedToolResults, report.ForeignNativeReplays, report.Warnings)
 }
 
 func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
@@ -205,7 +205,7 @@ func (c *Client) buildStreamRetryTargets(
 		fbContextLimit := fb.ContextLimit
 		fbInputLimit := resolveFallbackInputLimit(fb, outputCapSetting)
 		if m, ok := fb.ProviderConfig.GetModel(fb.ModelID); ok {
-			fbTuning = tuningFromModel(m, fb.ProviderConfig.Preset(), fb.ProviderConfig.SupportedServiceTiers())
+			fbTuning = tuningFromModel(m, fb.ProviderConfig.Preset(), fb.ProviderConfig.SupportedServiceTiers(), fb.ProviderConfig.ParallelToolCallsConfig())
 			if fbContextLimit <= 0 {
 				fbContextLimit = m.Limit.Context
 			}
