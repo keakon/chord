@@ -145,6 +145,15 @@ func TestBuildInitialSetupConfigYAML_Codex(t *testing.T) {
 			t.Fatalf("missing codex model %q in %#v", model, prov.Models)
 		}
 	}
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		limit := prov.Models[model].Limit
+		if limit.Context != 400000 || limit.Input != 272000 || limit.Output != 128000 {
+			t.Fatalf("codex %s limits = %#v, want 400000/272000/128000", model, limit)
+		}
+	}
+	if limit := prov.Models["gpt-5.4"].Limit; limit.Context != 1050000 || limit.Input != 950000 || limit.Output != 128000 {
+		t.Fatalf("codex gpt-5.4 limits = %#v, want 1050000/950000/128000", limit)
+	}
 	if normalized, err := normalizeProviderConfig("codex", prov, nil); err != nil {
 		t.Fatalf("normalizeProviderConfig: %v", err)
 	} else if normalized.Type != config.ProviderTypeResponses {

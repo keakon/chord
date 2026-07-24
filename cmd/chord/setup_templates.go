@@ -127,12 +127,12 @@ func buildInitialSetupConfigYAML(input initialSetupConfigInput) ([]byte, error) 
 
 func initialSetupCodexModels() []initialSetupModelDefaults {
 	return []initialSetupModelDefaults{
-		{Name: "gpt-5.6-sol", ContextLimit: 1050000, OutputLimit: 128000},
-		{Name: "gpt-5.6-terra", ContextLimit: 1050000, OutputLimit: 128000},
-		{Name: "gpt-5.6-luna", ContextLimit: 1050000, OutputLimit: 128000},
+		{Name: "gpt-5.6-sol", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
+		{Name: "gpt-5.6-terra", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
+		{Name: "gpt-5.6-luna", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
 		{Name: "gpt-5.2", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
 		{Name: "gpt-5.3-codex", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
-		{Name: "gpt-5.4", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
+		{Name: "gpt-5.4", ContextLimit: 1050000, InputLimit: 950000, OutputLimit: 128000},
 		{Name: "gpt-5.5", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
 	}
 }
