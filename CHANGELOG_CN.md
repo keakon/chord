@@ -7,6 +7,7 @@
 ### 不兼容变更
 
 - 上下文剪裁不再接受 `context.reduction.high_pressure_usage` 或 `force_prune_usage`；工具输出何时被剪裁现在由 request-batch age 阈值决定。请从已有配置中删除这些键。Chord 会给出迁移错误，不再静默忽略。
+- 配置加载现在在所有层级拒绝未知 YAML 字段——顶层、provider、model、`context`、`compat` 及各嵌套块——不再静默忽略。旧版本 Chord 曾容忍的键（拼写错误，或降级后残留的新版本字段）现在会以指明具体字段的解析错误阻止启动；升级前请删除或修正这类键。空文件与整体注释掉的配置文件行为不变，顶层 `model_templates` 键保留为纯 YAML anchor 命名空间。
 
 ### 改进
 

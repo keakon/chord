@@ -179,7 +179,7 @@ func TestLoadConfigFromPathParsesMaxOutputTokens(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFromPathIgnoresUnknownOutputTokenMax(t *testing.T) {
+func TestLoadConfigFromPathRejectsUnknownOutputTokenMax(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	content := []byte("output_token_max: 8192\n")
@@ -187,12 +187,8 @@ func TestLoadConfigFromPathIgnoresUnknownOutputTokenMax(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	cfg, err := LoadConfigFromPath(path)
-	if err != nil {
-		t.Fatalf("LoadConfigFromPath: %v", err)
-	}
-	if cfg.MaxOutputTokens != 0 {
-		t.Fatalf("output_token_max should be ignored, got max_output_tokens = %d", cfg.MaxOutputTokens)
+	if _, err := LoadConfigFromPath(path); err == nil {
+		t.Fatalf("LoadConfigFromPath: expected error for unknown output_token_max, got nil")
 	}
 }
 

@@ -1,7 +1,10 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,13 +30,17 @@ const (
 
 // Config is the top-level configuration for the chord agent.
 type Config struct {
-	Providers      map[string]ProviderConfig `json:"providers" yaml:"providers"`                         // LLM providers
-	ModelPools     map[string][]string       `json:"model_pools,omitempty" yaml:"model_pools,omitempty"` // reusable model pool definitions
-	Orchestration  OrchestrationConfig       `json:"orchestration" yaml:"orchestration,omitempty"`       // multi-agent runtime resource limits
-	Context        ContextConfig             `json:"context" yaml:"context"`                             // context compression settings
-	Skills         SkillsConfig              `json:"skills" yaml:"skills"`                               // additional skill paths
-	ConfirmTimeout int                       `json:"confirm_timeout" yaml:"confirm_timeout"`             // confirmation timeout in seconds (0 = infinite, default)
-	Diff           DiffConfig                `json:"diff" yaml:"diff"`                                   // TUI diff rendering options
+	Providers  map[string]ProviderConfig `json:"providers" yaml:"providers"`                         // LLM providers
+	ModelPools map[string][]string       `json:"model_pools,omitempty" yaml:"model_pools,omitempty"` // reusable model pool definitions
+	// ModelTemplates is a pure YAML anchor namespace: entries are only
+	// reachable through anchors/aliases elsewhere in the document and are never
+	// interpreted directly. Declared so strict decoding accepts the key.
+	ModelTemplates map[string]yaml.Node `json:"-" yaml:"model_templates,omitempty"`
+	Orchestration  OrchestrationConfig  `json:"orchestration" yaml:"orchestration,omitempty"` // multi-agent runtime resource limits
+	Context        ContextConfig        `json:"context" yaml:"context"`                       // context compression settings
+	Skills         SkillsConfig         `json:"skills" yaml:"skills"`                         // additional skill paths
+	ConfirmTimeout int                  `json:"confirm_timeout" yaml:"confirm_timeout"`       // confirmation timeout in seconds (0 = infinite, default)
+	Diff           DiffConfig           `json:"diff" yaml:"diff"`                             // TUI diff rendering options
 	// DesktopNotification, when true, enables terminal idle notifications in local TUI (terminal unfocused).
 	// Chord auto-selects the terminal OSC protocol by environment (for example, OSC 777 vs OSC 9).
 	// YAML: desktop_notification: true
@@ -322,6 +329,7 @@ type ProviderConfig struct {
 	Compat                    *ProviderCompatConfig  `json:"compat,omitempty" yaml:"compat,omitempty"`                                           // provider-level compat defaults (model-level can override model compat only)
 	OfficialAPI               *bool                  `json:"official_api,omitempty" yaml:"official_api,omitempty"`                               // true for direct official provider endpoints; false for aggregating/proxy gateways
 	SupportedServiceTiers     []ServiceTier          `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"`         // provider-level default non-standard tiers; model-level can override
+	ParallelToolCalls         *bool                  `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"`                 // provider-level default; nil = send parallel_tool_calls: true; model/variant can override
 	Models                    map[string]ModelConfig `json:"models" yaml:"models"`
 	KeyRotation               string                 `json:"key_rotation" yaml:"key_rotation"`             // "on_failure" (default) | "per_request"
 	KeyOrder                  string                 `json:"key_order" yaml:"key_order"`                   // "sequential" (default, non-Codex) | "random" | "smart" (default for preset: codex)
@@ -342,7 +350,7 @@ type ModelConfig struct {
 	Thinking              *ThinkingConfig         `json:"thinking,omitempty" yaml:"thinking,omitempty"`
 	Reasoning             *ReasoningConfig        `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
 	Text                  *TextConfig             `json:"text,omitempty" yaml:"text,omitempty"`
-	ParallelToolCalls     *bool                   `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = provider default true; non-nil = explicit override
+	ParallelToolCalls     *bool                   `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = inherit provider default (itself defaulting to true); non-nil = explicit override
 	PromptCache           *PromptCacheConfig      `json:"prompt_cache,omitempty" yaml:"prompt_cache,omitempty"`
 	Compat                *ModelCompatConfig      `json:"compat,omitempty" yaml:"compat,omitempty"`
 	Cost                  *ModelCost              `json:"cost,omitempty" yaml:"cost,omitempty"`
@@ -556,6 +564,40 @@ type ProviderCompatConfig struct {
 	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
 	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitempty" yaml:"reasoning_continuity,omitempty"`
 	RequestOverrides    *RequestOverridesConfig          `json:"request_overrides,omitempty" yaml:"request_overrides,omitempty"`
+	Responses           *ResponsesCompatConfig           `json:"responses,omitempty" yaml:"responses,omitempty"`
+	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitempty" yaml:"chat_completions,omitempty"`
+}
+
+// ResponsesCompatConfig controls which optional Responses request fields Chord
+// emits for a provider. Every knob defaults to the current stable Codex-shaped
+// behavior; set one only for compatible gateways that reject a specific field.
+type ResponsesCompatConfig struct {
+	// SendStore emits the top-level "store" field (default true). When false the
+	// field is omitted and the backend default applies — for official Responses
+	// backends that default is server-side retention (store=true).
+	SendStore *bool `json:"send_store,omitempty" yaml:"send_store,omitempty"`
+	// SendReasoningInclude requests include: ["reasoning.encrypted_content"]
+	// (default true). Set false for gateways that reject the include parameter.
+	SendReasoningInclude *bool `json:"send_reasoning_include,omitempty" yaml:"send_reasoning_include,omitempty"`
+	// SendToolChoice emits the default tool_choice: "auto" (default true).
+	// An explicit tool choice from model/variant tuning is always sent.
+	SendToolChoice *bool `json:"send_tool_choice,omitempty" yaml:"send_tool_choice,omitempty"`
+	// SendPromptCacheKey emits prompt_cache_key and client_metadata session
+	// routing metadata (default true).
+	SendPromptCacheKey *bool `json:"send_prompt_cache_key,omitempty" yaml:"send_prompt_cache_key,omitempty"`
+	// SendMaxOutputTokens emits max_output_tokens with the effective output cap
+	// (default false, preserving the stable Codex request shape). Enable for
+	// compatible gateways whose server-side default output is unbounded.
+	SendMaxOutputTokens *bool `json:"send_max_output_tokens,omitempty" yaml:"send_max_output_tokens,omitempty"`
+}
+
+// ChatCompletionsCompatConfig controls which optional Chat Completions request
+// fields Chord emits for a provider.
+type ChatCompletionsCompatConfig struct {
+	// SendStreamOptions emits stream_options: {include_usage: true} (default
+	// true). Set false for gateways that reject stream_options; token usage
+	// then stays unreported on streaming responses.
+	SendStreamOptions *bool `json:"send_stream_options,omitempty" yaml:"send_stream_options,omitempty"`
 }
 
 // RequestOverridesConfig applies protocol-agnostic patches after Chord builds a
@@ -1126,8 +1168,18 @@ func loadConfigData(path string, data []byte, withDefaults bool) (*Config, error
 	if withDefaults {
 		cfg = DefaultConfig()
 	}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	// Unknown keys are rejected instead of silently ignored: a misplaced field
+	// (e.g. include_thoughts at model root instead of under thinking) otherwise
+	// looks configured while never reaching the runtime.
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(cfg); err != nil {
+		// An empty or fully commented-out file has no YAML document; Decode
+		// reports io.EOF where Unmarshal used to be a no-op. Keep loading it
+		// as an empty config instead of refusing to start.
+		if !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("parse config %s: %w", path, err)
+		}
 	}
 	if err := ValidateDiagnosticsConfig(cfg); err != nil {
 		return nil, fmt.Errorf("validate config %s: %w", path, err)

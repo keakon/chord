@@ -339,3 +339,55 @@ func TestVariantBudgetWithoutTypeStaysUnset(t *testing.T) {
 		t.Fatalf("got %q, want empty", got)
 	}
 }
+
+func TestConfigYAML_ProviderParallelToolCallsAndWireCompat(t *testing.T) {
+	const raw = `
+providers:
+  gateway:
+    type: "chat-completions"
+    parallel_tool_calls: false
+    compat:
+      responses:
+        send_store: false
+        send_tool_choice: false
+        send_prompt_cache_key: false
+        send_reasoning_include: false
+        send_max_output_tokens: true
+      chat_completions:
+        send_stream_options: false
+    models:
+      gpt-5.5:
+        limit: {context: 400000, output: 128000}
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("yaml unmarshal failed: %v", err)
+	}
+	prov := cfg.Providers["gateway"]
+	if prov.ParallelToolCalls == nil || *prov.ParallelToolCalls {
+		t.Fatalf("provider parallel_tool_calls = %#v, want false", prov.ParallelToolCalls)
+	}
+	if prov.Compat == nil || prov.Compat.Responses == nil || prov.Compat.ChatCompletions == nil {
+		t.Fatalf("compat not parsed: %#v", prov.Compat)
+	}
+	r := prov.Compat.Responses
+	if r.SendStore == nil || *r.SendStore {
+		t.Fatalf("send_store = %#v, want false", r.SendStore)
+	}
+	if r.SendToolChoice == nil || *r.SendToolChoice {
+		t.Fatalf("send_tool_choice = %#v, want false", r.SendToolChoice)
+	}
+	if r.SendPromptCacheKey == nil || *r.SendPromptCacheKey {
+		t.Fatalf("send_prompt_cache_key = %#v, want false", r.SendPromptCacheKey)
+	}
+	if r.SendReasoningInclude == nil || *r.SendReasoningInclude {
+		t.Fatalf("send_reasoning_include = %#v, want false", r.SendReasoningInclude)
+	}
+	if r.SendMaxOutputTokens == nil || !*r.SendMaxOutputTokens {
+		t.Fatalf("send_max_output_tokens = %#v, want true", r.SendMaxOutputTokens)
+	}
+	cc := prov.Compat.ChatCompletions
+	if cc.SendStreamOptions == nil || *cc.SendStreamOptions {
+		t.Fatalf("send_stream_options = %#v, want false", cc.SendStreamOptions)
+	}
+}

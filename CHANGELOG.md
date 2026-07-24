@@ -7,6 +7,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Breaking Changes
 
 - Context reduction no longer accepts `context.reduction.high_pressure_usage` or `force_prune_usage`; request-batch age thresholds now determine when output is reduced. Remove those keys from existing configuration files. Chord reports a migration error instead of silently ignoring them.
+- Configuration loading now rejects unknown YAML fields at every level — top-level, provider, model, `context`, `compat`, and nested blocks — instead of silently ignoring them. Keys that older Chord versions tolerated (typos, or fields from a newer version after a downgrade) now prevent startup with an explicit parse error naming the offending field; remove or fix such keys before upgrading. Empty and fully commented-out config files still load as before, and the `model_templates` top-level key is reserved as a pure YAML-anchor namespace.
 
 ### Improvements
 
