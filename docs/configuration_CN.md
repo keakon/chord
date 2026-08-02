@@ -99,8 +99,8 @@ providers:
     models:
       gpt-5.6:
         limit:
-          context: 500000
-          input: 372000
+          context: 400000
+          input: 272000
           output: 128000
         reasoning:
           effort: medium
@@ -134,12 +134,17 @@ openai:
 ```
 
 - 如需固定模型 ID，把配置中的两处 `gpt-5.6` 同时替换为 `gpt-5.6-sol`、`gpt-5.6-terra` 或 `gpt-5.6-luna`。
+- 保守默认值为 `400000 / 272000 / 128000`，与 Codex 配额一致，也适合许多
+  基于 Codex 的 Responses 中转。如果账号或网关明确支持完整的 1.05M OpenAI
+  API 窗口，把 `context` 改成 `1050000` 并删除 `input`；Chord 会在预留实际
+  请求输出后推导可用输入预算。此时超过 272K 是计价阈值，不是输入上限。
 - API 支持的 reasoning effort 为 `none`、`low`、`medium`、`high`、`xhigh`、`max`；可用 `openai/gpt-5.6@max` 这样的 ref 选择已配置 variant。
 - `reasoning.summary: auto` 可省略。Chord 当前尚未暴露 GPT-5.6 的 `reasoning.mode: pro`。
 - `preset: codex` provider 也可以使用 `max`；是否接受该 effort 由具体模型 / 后端决定。
 
 模型限制和 reasoning 取值已根据当前 Codex 模型目录及 OpenAI 的
 [GPT-5.6 配置指南](https://developers.openai.com/api/docs/guides/latest-model)核对。
+中转的实际配额可能更小，应以上游公布的模型目录为准。
 
 按这个顺序理解模型限制：
 
@@ -147,8 +152,8 @@ openai:
 2. `limit.input` 只在 provider 还单独列出输入上限时才需要。部分 GPT 模型属于这种情况；如果省略，Chord 会从 `limit.context` 中预留有效请求输出后，推导可用输入预算。
 3. `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 仍是 `32000`，所以实际发送请求时会取更小的输出上限，除非你主动调大。
 
-当前 GPT-5.6 Codex 配额为 500K 总窗口、372K 输入上限和 128K 输出上限，
-因此三个字段都应显式配置。
+当前 GPT-5.6 Codex 配额为 400K 总窗口、272K 输入上限和 128K 输出上限，
+因此默认应显式配置这三个字段。
 
 Responses 和 Chat Completions 服务商的 `parallel_tool_calls` 默认都是 `true`。只有后端或工作流要求串行工具调用时，才在服务商、模型或变体上设为 `false`。部分网关要求特定客户端标识时，还可以配置服务商级 `user_agent`。
 
@@ -173,8 +178,8 @@ Provider 的认证头会与 `type` 分开推断；如果某个兼容 endpoint �
 
 ### OpenAI Codex preset
 
-Codex OAuth 复用 Responses 兼容示例中的模型限制，只有 provider preset
-和认证方式不同。
+Codex OAuth 使用与 Responses 兼容 API 示例不同的独立模型限制；provider
+preset 和认证方式也不同。
 
 ```yaml
 providers:
@@ -194,14 +199,14 @@ providers:
           output: 128000
       gpt-5.6-sol:
         limit:
-          context: 500000
-          input: 372000
+          context: 400000
+          input: 272000
           output: 128000
 ```
 
 GPT-5.4 使用 `1050000 / 950000 / 128000`；GPT-5.5 使用
 `400000 / 272000 / 128000`；GPT-5.6 Sol、Terra、Luna 使用
-`500000 / 372000 / 128000`（依次为 `context / input / output`）。完整示例见
+`400000 / 272000 / 128000`（依次为 `context / input / output`）。完整示例见
 [模型配置速查](./model-configs_CN.md#codex-oauth-preset)。
 
 `preset: codex` 可使用 `auth.yaml` 中的 OpenAI / ChatGPT OAuth 凭据。OAuth 条目通常是 mapping：

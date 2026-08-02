@@ -4,8 +4,13 @@
 
 ## OpenAI Responses 兼容接口：GPT-5.4 / GPT-5.5 / GPT-5.6
 
-Codex OAuth、Responses 中转和其他兼容 provider 都复用这里的模型限制。
-使用 API key 的 provider 需要在 `~/.config/chord/auth.yaml` 中配置同名条目：
+GPT-5.6 片段默认使用保守的 Codex / 常见中转配额（`400000` context /
+`272000` input / `128000` output），因为许多 Responses 中转开放的是
+Codex 受限窗口，而不是完整的 OpenAI API 窗口。如果账号或网关明确支持
+GPT-5.6 完整 API 窗口，可按下方说明手动启用 1.05M 上下文。价格块使用
+OpenAI API 费率；中转收费不同时需要自行覆盖。Codex OAuth 使用下方单独的
+preset 配置。使用 API key 的 provider 需要在
+`~/.config/chord/auth.yaml` 中配置同名条目：
 
 ```yaml
 openai:
@@ -104,14 +109,20 @@ providers:
     models:
       gpt-5.6:
         limit:
-          context: 500000
-          input: 372000
+          context: 400000
+          input: 272000
           output: 128000
         cost:
           input: 5
           output: 30
           cache_read: 0.5
           cache_write: 6.25
+          input_tiers:
+            - above_input_tokens: 272000
+              input: 10
+              output: 45
+              cache_read: 1
+              cache_write: 12.5
         reasoning:
           effort: medium
           summary: auto
@@ -148,14 +159,20 @@ providers:
     models:
       gpt-5.6-sol:
         limit:
-          context: 500000
-          input: 372000
+          context: 400000
+          input: 272000
           output: 128000
         cost:
           input: 5
           output: 30
           cache_read: 0.5
           cache_write: 6.25
+          input_tiers:
+            - above_input_tokens: 272000
+              input: 10
+              output: 45
+              cache_read: 1
+              cache_write: 12.5
         reasoning:
           effort: medium
           summary: auto
@@ -177,14 +194,20 @@ providers:
     models:
       gpt-5.6-terra:
         limit:
-          context: 500000
-          input: 372000
+          context: 400000
+          input: 272000
           output: 128000
         cost:
-          input: 2.5
-          output: 15
-          cache_read: 0.25
-          cache_write: 3.125
+          input: 2
+          output: 12
+          cache_read: 0.2
+          cache_write: 2.5
+          input_tiers:
+            - above_input_tokens: 272000
+              input: 4
+              output: 18
+              cache_read: 0.4
+              cache_write: 5
         reasoning:
           effort: medium
           summary: auto
@@ -206,14 +229,20 @@ providers:
     models:
       gpt-5.6-luna:
         limit:
-          context: 500000
-          input: 372000
+          context: 400000
+          input: 272000
           output: 128000
         cost:
-          input: 1
-          output: 6
-          cache_read: 0.1
-          cache_write: 1.25
+          input: 0.2
+          output: 1.2
+          cache_read: 0.02
+          cache_write: 0.25
+          input_tiers:
+            - above_input_tokens: 272000
+              input: 0.4
+              output: 1.8
+              cache_read: 0.04
+              cache_write: 0.5
         reasoning:
           effort: medium
           summary: auto
@@ -227,6 +256,12 @@ providers:
 
 要点：
 
+- GPT-5.6 示例默认使用 `400000 / 272000 / 128000`，适合 Codex 账号和
+  常见中转。除非上游明确公布了不同配额，否则应保留这三个值。
+- 使用 OpenAI 官方 API，或已确认网关开放完整 API 窗口时，把 `context`
+  改成 `1050000` 并删除 `input`。Chord 会从总上下文中预留实际请求输出后
+  推导可用输入预算。不要继续保留 `input: 272000`：超过 272K 是长上下文
+  计价阈值，不是完整 API 的输入硬上限。
 - `gpt-5.6` 当前会解析到 Sol，因此它的 `cost` 应按 Sol 费率填写。
 - GPT-5.6 API 可用的 reasoning effort 包括 `none`、`low`、`medium`、`high`、`xhigh`、`max`。
 - `reasoning.summary: auto` 是可选项；如果不希望 Chord 显式请求可读 reasoning 摘要，可以留空不写。
@@ -240,16 +275,16 @@ chord doctor models --model openai/gpt-5.6@max
 
 ## Codex OAuth preset
 
-当你要使用 ChatGPT/Codex OAuth，而不是 API key 时，用这个配置。模型限制
-与上面的 GPT-5.x 示例相同，只有 provider preset 和认证方式不同。
+当你要使用 ChatGPT/Codex OAuth，而不是 API key 时，用这个配置。Codex 使用
+独立的模型配额；与上方 API key 示例的区别不只是 provider preset 和认证方式。
 
-本页统一使用以下 GPT-5.x 限制：
+本节使用以下 Codex GPT-5.x 限制：
 
 | 模型 | `limit.context` | `limit.input` | `limit.output` |
 | --- | ---: | ---: | ---: |
 | GPT-5.4 | 1,050,000 | 950,000 | 128,000 |
 | GPT-5.5 | 400,000 | 272,000 | 128,000 |
-| GPT-5.6 Sol / Terra / Luna | 500,000 | 372,000 | 128,000 |
+| GPT-5.6 Sol / Terra / Luna | 400,000 | 272,000 | 128,000 |
 
 三个字段都要保留：`context` 表示 Codex 开放的输入加输出总窗口，`input`
 和 `output` 则是其中各自独立的硬上限。两个独立上限不必相加等于
@@ -283,8 +318,8 @@ providers:
           output: 128000
       gpt-5.6-sol:
         limit:
-          context: 500000
-          input: 372000
+          context: 400000
+          input: 272000
           output: 128000
 
 model_pools:
@@ -300,9 +335,9 @@ chord auth codex
 
 要点：
 
-- 同时使用 API key 和 Codex OAuth 时，因为凭据不同，应保留两个 provider，但复用同一组模型限制。
+- 同时使用 API key 和 Codex OAuth 时，因为凭据和模型配额不同，应保留两个 provider，并分别配置模型限制。
 - GPT-5.4 使用 `1050000 / 950000 / 128000`，分别对应 1.05M 总窗口、Codex 的 95% 有效输入预算和模型最大输出。
-- `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna` 都使用 `500000 / 372000 / 128000`。
+- `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna` 都使用 `400000 / 272000 / 128000`。
 - 这些数值跟随当前 Codex 模型目录，未来 Codex 版本可能调整。后端配额变化时，要同时更新三个字段。
 
 ## Anthropic Claude
@@ -671,8 +706,9 @@ Chord 会保留已完成工具轮次中可迁移的部分：
 
 - 已完成且成对的调用与结果会尽量转换为目标协议的结构化工具表示；
 - 与工具轮次绑定的可见 reasoning（`reasoning_content`、无签名 thinking
-  文本、Responses reasoning summary 或 Gemini thought 文本）若无法使用原生
-  格式跨协议传递，会作为带明确标记的 assistant 历史保留；
+  文本、Responses reasoning summary 或 Gemini thought 文本）只有在目标提供
+  结构化 reasoning carrier（`openai_visible` 或 `anthropic_unsigned`）时才会
+  转换；否则会被丢弃，而不会注入普通 assistant 正文；
 - Claude signature、Responses 加密 reasoning、Gemini thought signature 等
   provider 专属 opaque 状态不会被伪造，也不会复制到不兼容协议；
 - 若目标拒绝合成后的结构化形状，严格兼容降级会把完整调用/结果历史文本化，

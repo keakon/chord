@@ -4,8 +4,14 @@ Use this page when you already know which provider/model family you want and jus
 
 ## OpenAI Responses-compatible: GPT-5.4 / GPT-5.5 / GPT-5.6
 
-Use these same model limits with Codex OAuth, Responses relays, and other
-compatible providers. Pair API-key providers with the matching entry in
+The GPT-5.6 snippets use the conservative Codex/common-relay allocation by
+default (`400000` context / `272000` input / `128000` output), because many
+Responses relays expose Codex-backed limits rather than the full OpenAI API
+window. If your account or gateway explicitly supports the full GPT-5.6 API
+window, the notes below show how to opt in to 1.05M context manually. The cost
+blocks use OpenAI API pricing; override them when your relay charges different
+rates. Codex OAuth has a separate preset block below. Pair API-key providers
+with the matching entry in
 `~/.config/chord/auth.yaml`:
 
 ```yaml
@@ -105,14 +111,20 @@ providers:
     models:
       gpt-5.6:
         limit:
-          context: 500000
-          input: 372000
+          context: 400000
+          input: 272000
           output: 128000
         cost:
           input: 5
           output: 30
           cache_read: 0.5
           cache_write: 6.25
+          input_tiers:
+            - above_input_tokens: 272000
+              input: 10
+              output: 45
+              cache_read: 1
+              cache_write: 12.5
         reasoning:
           effort: medium
           summary: auto
@@ -149,14 +161,20 @@ providers:
     models:
       gpt-5.6-sol:
         limit:
-          context: 500000
-          input: 372000
+          context: 400000
+          input: 272000
           output: 128000
         cost:
           input: 5
           output: 30
           cache_read: 0.5
           cache_write: 6.25
+          input_tiers:
+            - above_input_tokens: 272000
+              input: 10
+              output: 45
+              cache_read: 1
+              cache_write: 12.5
         reasoning:
           effort: medium
           summary: auto
@@ -178,14 +196,20 @@ providers:
     models:
       gpt-5.6-terra:
         limit:
-          context: 500000
-          input: 372000
+          context: 400000
+          input: 272000
           output: 128000
         cost:
-          input: 2.5
-          output: 15
-          cache_read: 0.25
-          cache_write: 3.125
+          input: 2
+          output: 12
+          cache_read: 0.2
+          cache_write: 2.5
+          input_tiers:
+            - above_input_tokens: 272000
+              input: 4
+              output: 18
+              cache_read: 0.4
+              cache_write: 5
         reasoning:
           effort: medium
           summary: auto
@@ -207,14 +231,20 @@ providers:
     models:
       gpt-5.6-luna:
         limit:
-          context: 500000
-          input: 372000
+          context: 400000
+          input: 272000
           output: 128000
         cost:
-          input: 1
-          output: 6
-          cache_read: 0.1
-          cache_write: 1.25
+          input: 0.2
+          output: 1.2
+          cache_read: 0.02
+          cache_write: 0.25
+          input_tiers:
+            - above_input_tokens: 272000
+              input: 0.4
+              output: 1.8
+              cache_read: 0.04
+              cache_write: 0.5
         reasoning:
           effort: medium
           summary: auto
@@ -228,6 +258,14 @@ providers:
 
 Notes:
 
+- The GPT-5.6 examples default to `400000 / 272000 / 128000`, which is safe
+  for Codex-backed accounts and common relays. Keep all three values unless
+  your upstream explicitly documents a different allocation.
+- For the official OpenAI API, or a gateway confirmed to expose the full API
+  window, change `context` to `1050000` and remove `input`. Chord will then
+  derive the usable input budget from the total context after reserving the
+  effective requested output. Do not keep `input: 272000`: above 272K is the
+  long-context pricing threshold, not the full API input cap.
 - `gpt-5.6` currently resolves to Sol, so its `cost` block should match Sol pricing.
 - GPT-5.6 API reasoning efforts can include `none`, `low`, `medium`, `high`, `xhigh`, and `max`.
 - `reasoning.summary: auto` is optional. Leave it unset when you do not want Chord to explicitly request a readable reasoning summary.
@@ -241,17 +279,17 @@ chord doctor models --model openai/gpt-5.6@max
 
 ## Codex OAuth preset
 
-Use this when you want ChatGPT/Codex OAuth instead of API keys. Model limits are
-the same limits used by the GPT-5.x recipes above; only the provider preset and
-authentication method change.
+Use this when you want ChatGPT/Codex OAuth instead of API keys. Codex uses its
+own model allocation; its model limits, provider preset, and authentication
+method can all differ from the API-key examples above.
 
-The GPT-5.x limits used throughout this page are:
+The Codex GPT-5.x limits used in this section are:
 
 | Model | `limit.context` | `limit.input` | `limit.output` |
 | --- | ---: | ---: | ---: |
 | GPT-5.4 | 1,050,000 | 950,000 | 128,000 |
 | GPT-5.5 | 400,000 | 272,000 | 128,000 |
-| GPT-5.6 Sol / Terra / Luna | 500,000 | 372,000 | 128,000 |
+| GPT-5.6 Sol / Terra / Luna | 400,000 | 272,000 | 128,000 |
 
 Keep all three fields: `context` is the total input-plus-output window exposed
 by Codex, while `input` and `output` are the separate hard allocations within
@@ -286,8 +324,8 @@ providers:
           output: 128000
       gpt-5.6-sol:
         limit:
-          context: 500000
-          input: 372000
+          context: 400000
+          input: 272000
           output: 128000
 
 model_pools:
@@ -303,9 +341,9 @@ chord auth codex
 
 Notes:
 
-- Keep API-key and Codex OAuth providers separate when you use both because their credentials differ, but reuse the same model limit blocks.
+- Keep API-key and Codex OAuth providers separate when you use both because their credentials and model allocations differ.
 - GPT-5.4 uses `1050000 / 950000 / 128000`: the 1.05M total window, Codex's 95% effective input budget, and the model's maximum output.
-- Use `500000 / 372000 / 128000` for `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
+- Use `400000 / 272000 / 128000` for `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
 - These values track the current Codex model catalog and may change with a future Codex release. Update all three fields together when the backend allocation changes.
 
 ## Anthropic Claude
