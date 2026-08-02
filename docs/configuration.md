@@ -618,7 +618,9 @@ providers:
 
 Model field semantics:
 
-- `limit.context`: total request window when the provider publishes one.
+- `limit.context`: total request window when the provider publishes one. If it
+  is omitted and both `limit.input` and `limit.output` are positive, Chord
+  derives it as `input + output`; an explicit `context` always takes priority.
 - `limit.input`: independent input cap when published. If omitted, Chord derives
   the prompt budget from `limit.context` minus the effective requested output.
 - `limit.output`: model output capacity. Runtime requests are also capped by the

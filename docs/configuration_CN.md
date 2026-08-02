@@ -593,7 +593,9 @@ providers:
 
 模型字段语义：
 
-- `limit.context`：provider 公布的总请求窗口。
+- `limit.context`：provider 公布的总请求窗口。如果省略该字段且同时配置了
+  正数的 `limit.input` 和 `limit.output`，Chord 会按 `input + output` 推导；
+  显式配置的 `context` 始终优先。
 - `limit.input`：provider 单独公布的输入上限。省略时，Chord 按
   `limit.context` 减去有效请求输出推导 prompt 预算。
 - `limit.output`：模型输出能力上限。实际请求还受全局

@@ -62,6 +62,26 @@ func TestMergeProjectConfigContextReductionTrueOverridesGlobalFalse(t *testing.T
 		t.Fatal("project context.reduction: true should override global false")
 	}
 }
+
+func TestMergeProjectConfigDerivesModelContext(t *testing.T) {
+	base := DefaultConfig()
+	base.Providers = map[string]ProviderConfig{
+		"relay": {Models: map[string]ModelConfig{
+			"text": {Limit: ModelLimit{Input: 200000, Output: 64000}},
+		}},
+	}
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "commands:\n  /review: summarize changes\n")
+
+	_, merged, err := MergeProjectConfig(base, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	if got := merged.Providers["relay"].Models["text"].Limit.Context; got != 264000 {
+		t.Fatalf("derived context after merge = %d, want 264000", got)
+	}
+}
+
 func TestLoadConfigParsesResponseHeaderTimeout(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeTestFile(t, path, `providers:
@@ -408,4 +428,57 @@ func containsAll(s string, subs ...string) bool {
 		}
 	}
 	return true
+}
+
+// TestMergeProjectConfigRederivesContextAfterOutputOverride pins the derived
+// context total against going stale: the global config derived 264000 from
+// input+output, and a project override raising output must re-derive the sum
+// instead of keeping the frozen 264000 as if it were explicit.
+func TestMergeProjectConfigRederivesContextAfterOutputOverride(t *testing.T) {
+	base := DefaultConfig()
+	base.Providers = map[string]ProviderConfig{
+		"relay": {Models: map[string]ModelConfig{
+			"text": {Limit: ModelLimit{Input: 200000, Output: 64000}},
+		}},
+	}
+	normalizeModelLimits(base)
+	if got := base.Providers["relay"].Models["text"].Limit.Context; got != 264000 {
+		t.Fatalf("precondition: derived base context = %d, want 264000", got)
+	}
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "providers:\n  relay:\n    models:\n      text:\n        limit:\n          output: 128000\n")
+
+	_, merged, err := MergeProjectConfig(base, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	if got := merged.Providers["relay"].Models["text"].Limit.Context; got != 328000 {
+		t.Fatalf("re-derived context = %d, want 328000", got)
+	}
+}
+
+// TestMergeProjectConfigKeepsExplicitContextAcrossOutputOverride: an explicit
+// context (documented as allowed to differ from input+output) must survive a
+// project output override untouched.
+func TestMergeProjectConfigKeepsExplicitContextAcrossOutputOverride(t *testing.T) {
+	base := DefaultConfig()
+	base.Providers = map[string]ProviderConfig{
+		"relay": {Models: map[string]ModelConfig{
+			"text": {Limit: ModelLimit{Context: 300000, Input: 200000, Output: 64000}},
+		}},
+	}
+	normalizeModelLimits(base)
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "providers:\n  relay:\n    models:\n      text:\n        limit:\n          output: 128000\n")
+
+	_, merged, err := MergeProjectConfig(base, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	if got := merged.Providers["relay"].Models["text"].Limit.Context; got != 300000 {
+		t.Fatalf("explicit context after merge = %d, want 300000 preserved", got)
+	}
+	if got := merged.Providers["relay"].Models["text"].Limit.Output; got != 128000 {
+		t.Fatalf("merged output = %d, want 128000", got)
+	}
 }

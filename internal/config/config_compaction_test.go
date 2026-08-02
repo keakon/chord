@@ -235,3 +235,48 @@ func TestModelLimitEffectiveInputBudget(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfigDerivesContextFromInputAndOutput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeTestFile(t, path, `providers:
+  relay:
+    models:
+      text:
+        limit:
+          input: 200000
+          output: 64000
+`)
+
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	limit := cfg.Providers["relay"].Models["text"].Limit
+	if limit.Context != 264000 {
+		t.Fatalf("derived context = %d, want 264000", limit.Context)
+	}
+	if limit.Input != 200000 || limit.Output != 64000 {
+		t.Fatalf("derived limit changed input/output: %+v", limit)
+	}
+}
+
+func TestLoadConfigExplicitContextWinsOverInputAndOutput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeTestFile(t, path, `providers:
+  relay:
+    models:
+      text:
+        limit:
+          context: 400000
+          input: 200000
+          output: 64000
+`)
+
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if got := cfg.Providers["relay"].Models["text"].Limit.Context; got != 400000 {
+		t.Fatalf("explicit context = %d, want 400000", got)
+	}
+}

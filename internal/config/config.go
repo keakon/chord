@@ -661,6 +661,11 @@ type ModelLimit struct {
 	Context int `json:"context" yaml:"context"`
 	Input   int `json:"input,omitempty" yaml:"input,omitempty"`
 	Output  int `json:"output" yaml:"output"`
+	// ContextDerived marks a Context that normalizeModelLimits computed from
+	// Input+Output rather than explicit configuration. Derived totals must not
+	// survive a map-level project merge as if the user wrote them: a project
+	// override of input/output re-derives instead of keeping the stale sum.
+	ContextDerived bool `json:"-" yaml:"-"`
 }
 
 // EffectiveInputBudget returns the input-side budget for request sizing and
@@ -683,6 +688,26 @@ func (l ModelLimit) EffectiveInputBudget(outputCapSetting, defaultOutputCap int)
 		return 1
 	}
 	return budget
+}
+
+// normalizeModelLimits derives a total context window for models that publish
+// separate positive input and output limits but omit context. An explicit
+// context always wins because some providers publish a total window that is
+// not the simple sum of their input and output limits.
+func normalizeModelLimits(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	for providerName, provider := range cfg.Providers {
+		for modelName, model := range provider.Models {
+			if model.Limit.Context <= 0 && model.Limit.Input > 0 && model.Limit.Output > 0 {
+				model.Limit.Context = model.Limit.Input + model.Limit.Output
+				model.Limit.ContextDerived = true
+				provider.Models[modelName] = model
+			}
+		}
+		cfg.Providers[providerName] = provider
+	}
 }
 
 // EffectiveOutputBudget returns the requested-output budget after applying the
@@ -1183,6 +1208,7 @@ func loadConfigData(path string, data []byte, withDefaults bool) (*Config, error
 			return nil, fmt.Errorf("parse config %s: %w", path, err)
 		}
 	}
+	normalizeModelLimits(cfg)
 	if err := ValidateDiagnosticsConfig(cfg); err != nil {
 		return nil, fmt.Errorf("validate config %s: %w", path, err)
 	}
@@ -1285,7 +1311,28 @@ func configToYAMLMap(cfg *Config) (map[string]any, error) {
 	if cfg == nil {
 		return map[string]any{}, nil
 	}
-	data, err := yaml.Marshal(cfg)
+	// Derived context totals are recomputed on every load; marshaling them as
+	// explicit values would freeze a stale sum when a project override changes
+	// input or output. Strip them so the merged re-parse re-derives.
+	stripped := *cfg
+	if len(cfg.Providers) > 0 {
+		stripped.Providers = make(map[string]ProviderConfig, len(cfg.Providers))
+		for providerName, provider := range cfg.Providers {
+			if len(provider.Models) > 0 {
+				models := make(map[string]ModelConfig, len(provider.Models))
+				for modelName, model := range provider.Models {
+					if model.Limit.ContextDerived {
+						model.Limit.Context = 0
+						model.Limit.ContextDerived = false
+					}
+					models[modelName] = model
+				}
+				provider.Models = models
+			}
+			stripped.Providers[providerName] = provider
+		}
+	}
+	data, err := yaml.Marshal(&stripped)
 	if err != nil {
 		return nil, fmt.Errorf("marshal config: %w", err)
 	}
