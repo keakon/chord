@@ -450,16 +450,26 @@ func (c *Client) completeStreamTarget(
 		Variant:        t.variant,
 	}
 	replayLevel := c.replayCompatLevelFor(t.provider.Name(), t.modelID, t.variant)
+	if t.isFallback {
+		replayLevel = max(replayLevel, fallbackReplayLevel(messages, poolTarget))
+	}
+	if t.tuning.ReplayCompat != nil && *t.tuning.ReplayCompat > replayLevel {
+		replayLevel = min(*t.tuning.ReplayCompat, modelcompat.ReplayCompatStrict)
+	}
 	var normalizeReport modelcompat.NormalizeReport
 	targetMessages, normalizeReport = normalizeMessagesForPoolTargetWithOptions(targetMessages, poolTarget, t.tuning, replayLevel)
 	logNormalizeReport(t.provider.Name(), t.modelID, replayLevel, len(messages), len(targetMessages), normalizeReport)
+	requestTuning := replayCompatibleRequestTuning(t.tuning, targetMessages, poolTarget)
+	if requestTuning.DisableReasoning && !t.tuning.DisableReasoning {
+		log.Infof("disabling reasoning for replay-incompatible request provider=%v model=%v replay_level=%v", t.provider.Name(), t.modelID, replayLevel)
+	}
 	effectiveMaxTokens := t.maxTokens
 	if m, ok := t.provider.GetModel(t.modelID); ok {
 		effectiveMaxTokens = clampEffectiveMaxTokens(
 			m,
 			effectiveMaxTokens,
 			outputCapSetting,
-			t.tuning,
+			requestTuning,
 			systemPrompt,
 			targetMessages,
 			tools,
@@ -533,7 +543,7 @@ func (c *Client) completeStreamTarget(
 			targetMessages,
 			tools,
 			effectiveMaxTokens,
-			t.tuning,
+			requestTuning,
 			tracker.Callback,
 		)
 		if err == nil {
@@ -599,7 +609,8 @@ func (c *Client) completeStreamTarget(
 		// sends a byte-identical request and fails the same way (e.g. there
 		// were no foreign items to begin with, or a prior level already dropped
 		// them); escalating would waste a billable retry on the same key.
-		if replayLevel < modelcompat.ReplayCompatStrict && isReasoningReplayRejection(err) {
+		if replayLevel < modelcompat.ReplayCompatStrict &&
+			(isReasoningReplayRejection(err) || isGenericNativeReplayRejection(err, t.provider, normalizeReport)) {
 			replayEscalated := false
 			for nextLevel := replayLevel + 1; nextLevel <= modelcompat.ReplayCompatStrict; nextLevel++ {
 				nextMessages, nextReport := normalizeMessagesForPoolTargetWithOptions(messages, poolTarget, t.tuning, nextLevel)
@@ -614,6 +625,7 @@ func (c *Client) completeStreamTarget(
 				c.setReplayCompatLevelFor(t.provider.Name(), t.modelID, t.variant, replayLevel)
 				log.Warnf("target rejected replayed trajectory; degrading replay compatibility provider=%v model=%v key_id=%v level=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), replayLevel, err)
 				targetMessages = nextMessages
+				requestTuning = replayCompatibleRequestTuning(t.tuning, targetMessages, poolTarget)
 				logNormalizeReport(t.provider.Name(), t.modelID, replayLevel, len(messages), len(targetMessages), nextReport)
 				keyAttempt--
 				replayEscalated = true
@@ -770,6 +782,58 @@ func (c *Client) completeStreamTarget(
 		result.resp = resp
 	}
 	return result, lastInputTokens, nil
+}
+
+// fallbackReplayLevel selects a portable replay level when a fallback target
+// speaks a different wire family from the producing messages. Native
+// reasoning/tool payloads are not portable across Anthropic, OpenAI
+// Chat/Responses, and Gemini transports, so fallback targets avoid a known-
+// invalid native request while retaining portable reasoning text and
+// structured tool calls whenever the target supports them. Strict replay is
+// reserved for a target that explicitly rejects the synthesized shape.
+func fallbackReplayLevel(messages []message.Message, target FallbackModel) int {
+	targetFamily := providerWireFamily(target.ProviderConfig)
+	if targetFamily == modelcompat.WireFamilyUnknown {
+		return modelcompat.ReplayCompatNative
+	}
+	level := modelcompat.ReplayCompatNative
+	for _, msg := range messages {
+		if msg.Provenance == nil || msg.Provenance.WireFamily == "" || msg.Provenance.WireFamily == targetFamily {
+			continue
+		}
+		if len(msg.ResponsesOutput) > 0 || len(msg.ThinkingBlocks) > 0 ||
+			strings.TrimSpace(msg.ReasoningContent) != "" || len(msg.GeminiParts) > 0 {
+			level = max(level, modelcompat.ReplayCompatSynthesized)
+		}
+	}
+	return level
+}
+
+func replayCompatibleRequestTuning(tuning RequestTuning, messages []message.Message, target FallbackModel) RequestTuning {
+	if providerWireFamily(target.ProviderConfig) != modelcompat.WireFamilyOpenAIChat ||
+		!openAIChatReasoningEnabled(tuning, target) {
+		return tuning
+	}
+	for _, msg := range messages {
+		if msg.Role == message.RoleAssistant && len(msg.ToolCalls) > 0 && strings.TrimSpace(msg.ReasoningContent) == "" {
+			tuning.DisableReasoning = true
+			return tuning
+		}
+	}
+	return tuning
+}
+
+func openAIChatReasoningEnabled(tuning RequestTuning, target FallbackModel) bool {
+	if tuning.OpenAI.ReasoningEffort != "" {
+		return true
+	}
+	overrides := target.ProviderConfig.RequestOverrides(target.ModelID)
+	for _, key := range []string{"thinking", "reasoning", "reasoning_effort"} {
+		if value, ok := overrides.Body[key]; ok && value != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // completeStreamWithRetry walks the model pool (cursor-start entry + optional

@@ -122,6 +122,17 @@ const KindSubAgentMailbox = "subagent_mailbox"
 // KindLoopNotice identifies a synthetic loop-control message.
 const KindLoopNotice = "loop_notice"
 
+// KindReplayEvidence and KindReplayContinuation mark the pair of messages that
+// modelcompat synthesizes when a target cannot replay a native tool trajectory.
+// They exist only on the request face built for one provider call and are never
+// written to ctxmgr or the session file, so no persisted-message predicate
+// (IsUserAuthored and friends) has to recognize them. They live here so the
+// Kind vocabulary stays in one place and cannot collide with a durable kind.
+const (
+	KindReplayEvidence     = "replay_evidence"
+	KindReplayContinuation = "replay_continuation"
+)
+
 // Message represents a conversation message (user, assistant, or tool result).
 type Message struct {
 	Role                      Role                  `json:"role"` // "user", "assistant", "tool"

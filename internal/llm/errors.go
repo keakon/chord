@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/keakon/chord/internal/modelcompat"
 )
 
 // MalformedArgsSentinel is the JSON object stored in tool call args when the
@@ -305,6 +307,25 @@ func isReasoningReplayRejection(err error) bool {
 		"encrypted_content",
 		"encrypted content",
 	)
+}
+
+// isGenericNativeReplayRejection handles compatible gateways that return a
+// bare 400 for an otherwise valid request containing foreign native replay
+// items. It is intentionally limited to non-official providers and only
+// applies when normalization observed native replay in the request.
+func isGenericNativeReplayRejection(err error, provider *ProviderConfig, report modelcompat.NormalizeReport) bool {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr == nil || apiErr.StatusCode != 400 || provider == nil || providerUsesOfficialAPI(provider) {
+		return false
+	}
+	if report.ForeignNativeReplays == 0 && report.DroppedThinkingBlocks == 0 &&
+		report.DowngradedReasoning == 0 && report.ConvertedReasoning == 0 &&
+		report.DowngradedToolCalls == 0 && report.DroppedToolCalls == 0 &&
+		report.DroppedToolResults == 0 {
+		return false
+	}
+	return !hasExplicitRequestOrParamSignal(apiErr) && !classifyContextLengthExceeded(apiErr) &&
+		!hasTerminalNonRetriable400Signal(apiErr)
 }
 
 // IsContextLengthExceeded reports whether err indicates the input context

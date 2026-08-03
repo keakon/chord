@@ -8,6 +8,34 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+func requireHistoricalToolEvidence(t *testing.T, msgs []message.Message, toolName, callID string) {
+	t.Helper()
+	wantCall := "[Historical tool call: " + toolName + "]"
+	wantResult := "[Historical tool result for " + callID + "]"
+	foundEvidence := false
+	foundContinuation := false
+	for _, msg := range msgs {
+		if msg.Role == message.RoleTool || len(msg.ToolCalls) > 0 {
+			t.Fatalf("strict replay retained structured tool history: %+v", msgs)
+		}
+		if msg.Role == message.RoleAssistant && msg.Kind != message.KindReplayEvidence && strings.Contains(msg.Content, "[Historical tool") {
+			t.Fatalf("strict replay evidence was merged into ordinary assistant content: %+v", msgs)
+		}
+		if msg.Role == message.RoleAssistant && msg.Kind == message.KindReplayEvidence &&
+			strings.Contains(msg.Content, "[Historical tool execution record") &&
+			strings.Contains(msg.Content, wantCall) && strings.Contains(msg.Content, wantResult) &&
+			strings.Contains(msg.Content, "[End historical tool execution record]") {
+			foundEvidence = true
+		}
+		if msg.Role == message.RoleUser && msg.Kind == message.KindReplayContinuation && strings.Contains(msg.Content, "Continue the current task") {
+			foundContinuation = true
+		}
+	}
+	if !foundEvidence || !foundContinuation {
+		t.Fatalf("strict replay did not preserve isolated historical tool evidence: %+v", msgs)
+	}
+}
+
 func TestNormalizeForTarget_PreservesAnthropicThinkingWhenEnabled(t *testing.T) {
 	msgs := []message.Message{{
 		Role:           message.RoleAssistant,
@@ -124,7 +152,8 @@ func TestNormalizeForTarget_ConvertsOpenAIReasoningToUnsignedAnthropicThinking(t
 	}
 
 	strict, strictReport := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatStrict})
-	if len(strict) != 1 || strict[0].Role != message.RoleAssistant || len(strict[0].ToolCalls) != 0 || strings.Contains(strict[0].Content, "portable reasoning") {
+	requireHistoricalToolEvidence(t, strict, "read", "call-1")
+	if len(strict) != 3 || strict[0].Role != message.RoleAssistant || strict[0].Content != "calling tool" || strings.Contains(strict[0].Content, "portable reasoning") {
 		t.Fatalf("strict fallback = %+v", strict)
 	}
 	if strictReport.DowngradedReasoning == 0 || strictReport.DowngradedToolCalls == 0 {
@@ -175,7 +204,8 @@ func TestNormalizeForTarget_ConvertsAnthropicThinkingToOpenAIReasoningContent(t 
 	}
 
 	strict, strictReport := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatStrict})
-	if len(strict) != 1 || strict[0].Role != message.RoleAssistant || len(strict[0].ToolCalls) != 0 || strings.Contains(strict[0].Content, "visible thinking") {
+	requireHistoricalToolEvidence(t, strict, "read", "call-1")
+	if len(strict) != 3 || strict[0].Role != message.RoleAssistant || strict[0].Content != "calling tool" || strings.Contains(strict[0].Content, "visible thinking") {
 		t.Fatalf("strict fallback = %+v", strict)
 	}
 	if strictReport.DroppedThinkingBlocks != 2 || strictReport.DowngradedToolCalls == 0 || strictReport.ConvertedReasoning != 0 {
@@ -256,11 +286,9 @@ func TestNormalizeForTarget_DowngradesImportedStructuredToolsWhenDisabled(t *tes
 		{Role: message.RoleTool, ToolCallID: "toolu_1", Content: "ok", Provenance: &message.MessageProvenance{Imported: true}},
 	}
 	out, rep := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic}, NormalizeOptions{StructuredTools: false})
-	if len(out) != 1 {
-		t.Fatalf("len(out)=%d, want 1 after assistant merge", len(out))
-	}
-	if out[0].Role != message.RoleAssistant || len(out[0].ToolCalls) != 0 {
-		t.Fatalf("expected assistant text downgrade, got %+v", out[0])
+	requireHistoricalToolEvidence(t, out, "Shell", "toolu_1")
+	if len(out) != 2 || out[0].Kind != message.KindReplayEvidence || out[1].Kind != message.KindReplayContinuation {
+		t.Fatalf("expected isolated replay evidence and continuation, got %+v", out)
 	}
 	if rep.DowngradedToolCalls == 0 {
 		t.Fatalf("DowngradedToolCalls=%d, want >0", rep.DowngradedToolCalls)
@@ -306,8 +334,9 @@ func TestNormalizeForTarget_TextifiesCompletedToolsWhenStructuredToolsDisabled(t
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
 	}
 	out, report := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic}, NormalizeOptions{StructuredTools: false})
-	if len(out) != 1 || out[0].Role != message.RoleAssistant || len(out[0].ToolCalls) != 0 || !strings.Contains(out[0].Content, "[Previous tool call: shell]") || !strings.Contains(out[0].Content, "[Previous tool result for call_1]") {
-		t.Fatalf("completed tool history should be textified, got %+v (report %+v)", out, report)
+	requireHistoricalToolEvidence(t, out, "shell", "call_1")
+	if len(out) != 2 || out[0].Kind != message.KindReplayEvidence || out[1].Kind != message.KindReplayContinuation {
+		t.Fatalf("completed tool history should be isolated, got %+v (report %+v)", out, report)
 	}
 }
 

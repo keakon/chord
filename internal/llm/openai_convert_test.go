@@ -388,3 +388,54 @@ func TestOpenAICompleteStream_OpenAIVisibleReplayUsesRequestOverrides(t *testing
 		t.Fatalf("reasoning_content = %#v, want tool reasoning", first["reasoning_content"])
 	}
 }
+
+func TestOpenAICompleteStream_DisableReasoningRemovesRequestControls(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewProviderConfig("deepseek", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		APIURL: server.URL,
+		Models: map[string]config.ModelConfig{
+			"deepseek-v4-flash": {
+				Reasoning: &config.ReasoningConfig{Effort: "high"},
+				Compat: &config.ModelCompatConfig{
+					ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
+					RequestOverrides: &config.RequestOverridesConfig{Body: map[string]any{
+						"thinking": map[string]any{"type": "enabled"},
+					}},
+				},
+			},
+		},
+	}, []string{"k"})
+	impl, err := NewOpenAIProviderWithClient(provider, server.Client(), "")
+	if err != nil {
+		t.Fatalf("NewOpenAIProviderWithClient: %v", err)
+	}
+	target := FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-flash"}
+	tuning := tuningForPoolTarget(target)
+	tuning.DisableReasoning = true
+	_, err = impl.CompleteStream(context.Background(), "k", target.ModelID, "", []message.Message{{
+		Role:       message.RoleAssistant,
+		ToolCalls:  []message.ToolCall{{ID: "c1", Name: "Read", Args: json.RawMessage(`{"path":"README.md"}`)}},
+		Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyAnthropic},
+	}}, nil, 128, tuning, func(message.StreamDelta) {})
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	for _, key := range []string{"thinking", "reasoning", "reasoning_effort", "max_completion_tokens"} {
+		if _, ok := gotBody[key]; ok {
+			t.Fatalf("disabled reasoning request retained %q: %#v", key, gotBody)
+		}
+	}
+	if gotBody["max_tokens"] != float64(128) {
+		t.Fatalf("max_tokens = %#v, want 128", gotBody["max_tokens"])
+	}
+}

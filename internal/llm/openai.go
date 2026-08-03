@@ -248,6 +248,10 @@ func (o *OpenAIProvider) CompleteStream(
 	traceCB := traceCollector.Callback
 
 	ot := tuning.OpenAI
+	if tuning.DisableReasoning {
+		ot.ReasoningEffort = ""
+		ot.ReasoningSummary = ""
+	}
 	// Convert messages to OpenAI format.
 	wireFamily := providerWireFamily(o.provider)
 	continuityMode := reasoningContinuityCompatMode(o.provider, model)
@@ -307,6 +311,9 @@ func (o *OpenAIProvider) CompleteStream(
 		return nil, fmt.Errorf("marshal request body: %w", err)
 	}
 	overrides := o.provider.RequestOverrides(model)
+	if tuning.DisableReasoning {
+		overrides = withoutReasoningRequestOverrides(overrides)
+	}
 	bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
 	if err != nil {
 		return nil, err

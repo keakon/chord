@@ -23,6 +23,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/logtest"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/modelcompat"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
@@ -32,6 +33,7 @@ type countingCompactionProvider struct {
 	calls         int
 	compactCalls  int
 	invalidations []string
+	tunings       []llm.RequestTuning
 	response      *message.Response
 	responses     []*message.Response
 	err           error
@@ -51,10 +53,11 @@ func (p *countingCompactionProvider) CompleteStream(
 	_ []message.Message,
 	_ []message.ToolDefinition,
 	_ int,
-	_ llm.RequestTuning,
+	tuning llm.RequestTuning,
 	_ llm.StreamCallback,
 ) (*message.Response, error) {
 	p.calls++
+	p.tunings = append(p.tunings, tuning)
 	if p.err != nil {
 		return nil, p.err
 	}
@@ -3615,6 +3618,83 @@ func TestApplyCompactionDraftInvalidatesLLMRouting(t *testing.T) {
 	}
 	if len(provider.invalidations) != 1 || provider.invalidations[0] != "context_compacted" {
 		t.Fatalf("invalidations = %#v, want [context_compacted]", provider.invalidations)
+	}
+}
+
+func TestApplyCompactionDraftOnlyRequestsPortableReplayForNativePayload(t *testing.T) {
+	portableReplay := modelcompat.ReplayCompatSynthesized
+	for _, tc := range []struct {
+		name             string
+		newMessages      []message.Message
+		wantReplayCompat *int
+	}{
+		{
+			name: "plain text stays native",
+			newMessages: []message.Message{{
+				Role:                message.RoleUser,
+				Content:             "[Context Summary]",
+				IsCompactionSummary: true,
+			}},
+		},
+		{
+			name: "native reasoning becomes portable",
+			newMessages: []message.Message{
+				{Role: message.RoleUser, Content: "[Context Summary]", IsCompactionSummary: true},
+				{
+					Role:             message.RoleAssistant,
+					Content:          "answer",
+					ReasoningContent: "provider-native reasoning",
+					Provenance:       &message.MessageProvenance{ProviderID: "test", ModelID: "model", WireFamily: modelcompat.WireFamilyAnthropic},
+				},
+			},
+			wantReplayCompat: &portableReplay,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projectRoot := t.TempDir()
+			a := newTestMainAgent(t, projectRoot)
+			providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+				Type: config.ProviderTypeMessages,
+				Models: map[string]config.ModelConfig{
+					"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+				},
+			}, []string{"test-key"})
+			provider := &countingCompactionProvider{response: &message.Response{Content: "ok", StopReason: "stop"}}
+			a.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "")
+			a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "old user"})
+			a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "old assistant"})
+
+			draft := &compactionDraft{
+				NewMessages:    tc.newMessages,
+				HeadSplit:      2,
+				Index:          1,
+				AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
+				RelHistoryPath: "history-1.md",
+				SummaryMode:    "truncate_only",
+				PlanID:         1,
+				Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
+				Manual:         true,
+			}
+			if err := a.applyCompactionDraft(draft); err != nil {
+				t.Fatalf("applyCompactionDraft: %v", err)
+			}
+			if _, err := a.llmClient.CompleteStream(context.Background(), a.ctxMgr.Snapshot(), nil, nil); err != nil {
+				t.Fatalf("CompleteStream: %v", err)
+			}
+			if len(provider.tunings) != 1 {
+				t.Fatalf("tunings = %+v, want one request", provider.tunings)
+			}
+			got := provider.tunings[0].ReplayCompat
+			if tc.wantReplayCompat == nil {
+				if got != nil {
+					t.Fatalf("ReplayCompat = %v, want native/unset", *got)
+				}
+				return
+			}
+			if got == nil || *got != *tc.wantReplayCompat {
+				t.Fatalf("ReplayCompat = %v, want %d", got, *tc.wantReplayCompat)
+			}
+		})
 	}
 }
 

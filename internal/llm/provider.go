@@ -67,6 +67,14 @@ type RequestTuning struct {
 	OpenAI                OpenAITuning
 	Gemini                GeminiTuning
 	SupportedServiceTiers map[config.ServiceTier]bool
+	// DisableReasoning suppresses reasoning/thinking request controls for this
+	// request. It is used when replayed history cannot satisfy the target
+	// provider's reasoning continuity contract.
+	DisableReasoning bool
+	// ReplayCompat is a one-request minimum replay compatibility level.
+	// Compaction continuations use this to avoid replaying provider-native
+	// reasoning items across a rewritten checkpoint boundary.
+	ReplayCompat *int
 }
 
 // Provider is the interface that all LLM provider implementations must satisfy.

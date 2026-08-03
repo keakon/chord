@@ -61,6 +61,34 @@ func TestApplyRequestBodyOverridesRenamesFromOriginalRequest(t *testing.T) {
 	}
 }
 
+func TestWithoutReasoningRequestOverrides(t *testing.T) {
+	maxTokens := "max_tokens"
+	thinking := "thinking"
+	overrides := withoutReasoningRequestOverrides(config.RequestOverridesConfig{
+		Body: map[string]any{
+			"thinking":         map[string]any{"type": "enabled"},
+			"reasoning":        map[string]any{"effort": "high"},
+			"reasoning_effort": "high",
+			"keep":             true,
+		},
+		RenameBodyFields: map[string]*string{
+			"max_completion_tokens": &maxTokens,
+			"reasoning_effort":      &thinking,
+		},
+	})
+	for _, key := range []string{"thinking", "reasoning", "reasoning_effort"} {
+		if _, ok := overrides.Body[key]; ok {
+			t.Fatalf("body override %q was not removed: %#v", key, overrides.Body)
+		}
+	}
+	if overrides.Body["keep"] != true || overrides.RenameBodyFields["max_completion_tokens"] == nil {
+		t.Fatalf("unrelated overrides were not preserved: %#v", overrides)
+	}
+	if _, ok := overrides.RenameBodyFields["reasoning_effort"]; ok {
+		t.Fatalf("reasoning rename was not removed: %#v", overrides.RenameBodyFields)
+	}
+}
+
 func TestApplyRequestBodyOverridesRejectsDuplicateRenameTargets(t *testing.T) {
 	target := "renamed"
 	_, err := applyRequestBodyOverrides([]byte(`{"a":1,"b":2}`), config.RequestOverridesConfig{

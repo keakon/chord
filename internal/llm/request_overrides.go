@@ -58,6 +58,21 @@ func requestOverridesEmpty(overrides config.RequestOverridesConfig) bool {
 	return len(overrides.Body) == 0 && len(overrides.RenameBodyFields) == 0 && len(overrides.Headers) == 0
 }
 
+func withoutReasoningRequestOverrides(overrides config.RequestOverridesConfig) config.RequestOverridesConfig {
+	overrides.Body = maps.Clone(overrides.Body)
+	for _, key := range []string{"thinking", "reasoning", "reasoning_effort"} {
+		delete(overrides.Body, key)
+	}
+	overrides.RenameBodyFields = maps.Clone(overrides.RenameBodyFields)
+	for source, target := range overrides.RenameBodyFields {
+		if source == "reasoning" || source == "reasoning_effort" ||
+			target != nil && (*target == "thinking" || *target == "reasoning" || *target == "reasoning_effort") {
+			delete(overrides.RenameBodyFields, source)
+		}
+	}
+	return overrides
+}
+
 func mergeRequestBody(target, patch map[string]any) {
 	for key, value := range patch {
 		if value == nil {

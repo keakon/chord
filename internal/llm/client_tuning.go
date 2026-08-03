@@ -177,6 +177,10 @@ func cloneServiceTiers(tiers map[config.ServiceTier]bool) map[config.ServiceTier
 
 func cloneRequestTuning(tuning RequestTuning) RequestTuning {
 	copy := tuning
+	if tuning.ReplayCompat != nil {
+		copy.ReplayCompat = new(int)
+		*copy.ReplayCompat = *tuning.ReplayCompat
+	}
 	if tuning.Anthropic.Temperature != nil {
 		copy.Anthropic.Temperature = new(*tuning.Anthropic.Temperature)
 	}
@@ -194,6 +198,13 @@ func cloneRequestTuning(tuning RequestTuning) RequestTuning {
 }
 
 func mergeRequestTuning(base, tuning RequestTuning) RequestTuning {
+	if tuning.DisableReasoning {
+		base.DisableReasoning = true
+	}
+	if tuning.ReplayCompat != nil && (base.ReplayCompat == nil || *tuning.ReplayCompat > *base.ReplayCompat) {
+		base.ReplayCompat = new(int)
+		*base.ReplayCompat = *tuning.ReplayCompat
+	}
 	if tuning.Anthropic.ThinkingType != "" {
 		base.Anthropic.ThinkingType = tuning.Anthropic.ThinkingType
 	}

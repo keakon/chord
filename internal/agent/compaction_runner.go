@@ -16,6 +16,7 @@ import (
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/modelcompat"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -301,6 +302,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// snapshot here keeps rewriteSessionAfterCompaction lock-free with respect
 	// to ctxmgr.
 	originalFirstUserHint := a.captureOriginalFirstUserHint()
+	var compactedMessages []message.Message
 
 	// Use ReplacePrefixAtomic: replace [0, headSplit) with d.NewMessages,
 	// preserving [headSplit:) as tail. The under callback atomically rewrites
@@ -311,6 +313,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		newMessages := make([]message.Message, 0, len(d.NewMessages)+len(tail))
 		newMessages = append(newMessages, d.NewMessages...)
 		newMessages = append(newMessages, tail...)
+		compactedMessages = newMessages
 
 		// Rewrite session file atomically
 		var rewriteErr error
@@ -328,6 +331,11 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	a.resetContextReductionStats()
 	a.clearLoopFrozenReductionPrefix()
 	if a.llmClient != nil {
+		a.llmClient.ResetReplayCompatibility()
+		if modelcompat.HasNativeReplayPayload(compactedMessages) {
+			portableReplay := modelcompat.ReplayCompatSynthesized
+			a.llmClient.MergeNextRequestTuningOverride(llm.RequestTuning{ReplayCompat: &portableReplay})
+		}
 		a.llmClient.InvalidateRouting("context_compacted")
 	}
 	a.ctxMgr.ClearLastTokenUsage()

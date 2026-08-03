@@ -109,6 +109,24 @@ func (c *Client) setReplayCompatLevelFor(providerName, modelID, variant string, 
 	}
 }
 
+// ResetReplayCompatibility forgets adaptive replay degradation learned from
+// the previous transcript. History rewrites such as context compaction can
+// remove the native payload that caused a target to require stricter replay.
+func (c *Client) ResetReplayCompatibility() {
+	if c == nil {
+		return
+	}
+	c.replayCompatMu.Lock()
+	c.replayCompatByTarget = nil
+	c.replayCompatMu.Unlock()
+
+	c.mu.Lock()
+	if c.nextTuning != nil {
+		c.nextTuning.ReplayCompat = nil
+	}
+	c.mu.Unlock()
+}
+
 // CallStatus describes the effective model-routing outcome of the most recent
 // CompleteStream call.
 type CallStatus struct {

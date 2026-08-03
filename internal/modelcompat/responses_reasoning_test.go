@@ -183,9 +183,7 @@ func TestNormalizeUnsignedAnthropicThinkingKeepsToolTrajectoryUntilStrict(t *tes
 	}
 
 	out, report := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatStrict})
-	if len(out) != 1 || out[0].Role != message.RoleAssistant || len(out[0].ToolCalls) != 0 || !strings.Contains(out[0].Content, "[Previous tool call: read]") || !strings.Contains(out[0].Content, "[Previous tool result for call-1]") {
-		t.Fatalf("strict level must textify paired tool history, got %+v (report %+v)", out, report)
-	}
+	requireHistoricalToolEvidence(t, out, "read", "call-1")
 	if report.DroppedToolCalls != 0 || report.DroppedToolResults != 0 || len(report.Warnings) == 0 {
 		t.Fatalf("strict textification report = %+v", report)
 	}
@@ -244,10 +242,8 @@ func TestNormalizeClaudeThinkingFallbackTextifiesCompletedToolTrajectory(t *test
 		ToolResultEncoding:      ToolResultEncodingAnthropicUserBlock,
 		SupportsStructuredTools: true,
 	}
-	out, report := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatSynthesized})
-	if len(out) != 1 || out[0].Role != message.RoleAssistant || len(out[0].ToolCalls) != 0 || !strings.Contains(out[0].Content, "[Previous tool call: read]") || !strings.Contains(out[0].Content, "[Previous tool result for call-1]") {
-		t.Fatalf("Claude fallback must preserve completed action history, got %+v (report %+v)", out, report)
-	}
+	out, _ := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatSynthesized})
+	requireHistoricalToolEvidence(t, out, "read", "call-1")
 }
 
 func TestNormalizeStripsGeminiThoughtSignaturesOnMismatch(t *testing.T) {
@@ -389,9 +385,7 @@ func TestNormalizeStrictTextifiesCompletedTrajectoryAcrossWireFamilies(t *testin
 		t.Run(tc.name, func(t *testing.T) {
 			msgs := []message.Message{tc.msg, {Role: message.RoleTool, ToolCallID: "call-1", Content: "result"}}
 			out, report := NormalizeForTarget(msgs, tc.target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatStrict})
-			if len(out) != 1 || out[0].Role != message.RoleAssistant || len(out[0].ToolCalls) != 0 || !strings.Contains(out[0].Content, "[Previous tool call: read]") || !strings.Contains(out[0].Content, "[Previous tool result for call-1]") {
-				t.Fatalf("strict cross-wire fallback lost completed history: %+v (report %+v)", out, report)
-			}
+			requireHistoricalToolEvidence(t, out, "read", "call-1")
 			if report.DroppedToolCalls != 0 || report.DroppedToolResults != 0 {
 				t.Fatalf("strict cross-wire fallback dropped tool facts: %+v", report)
 			}
@@ -567,9 +561,7 @@ func TestNormalizeStrictReplayTextifiesCrossProviderResponsesToolTrajectory(t *t
 		ToolResultEncoding: ToolResultEncodingOpenAIToolRole, SupportsStructuredTools: true,
 	}
 	out, report := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatStrict})
-	if len(out) != 1 || out[0].Role != message.RoleAssistant || len(out[0].ToolCalls) > 0 || !strings.Contains(out[0].Content, "[Previous tool call: read]") || !strings.Contains(out[0].Content, "[Previous tool result for call_1]") {
-		t.Fatalf("strict mode must textify the completed trajectory, got %+v", out)
-	}
+	requireHistoricalToolEvidence(t, out, "read", "call_1")
 	if len(report.Warnings) == 0 {
 		t.Fatalf("strict drop was not reported: %+v", report)
 	}
