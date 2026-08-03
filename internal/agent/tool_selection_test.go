@@ -66,7 +66,7 @@ func TestFilterEditToolsByModel_GPTModels(t *testing.T) {
 	}
 
 	allTools := []tools.Tool{
-		tools.PatchTool{},
+		tools.ApplyPatchTool{},
 		tools.EditTool{},
 		tools.ReadTool{},
 		tools.WriteTool{},
@@ -88,7 +88,7 @@ func TestFilterEditToolsByModel_GPTModels(t *testing.T) {
 
 			for _, tool := range filtered {
 				switch tool.(type) {
-				case tools.PatchTool:
+				case tools.ApplyPatchTool:
 					hasPatch = true
 				case tools.EditTool:
 					hasEdit = true
@@ -119,7 +119,7 @@ func TestFilterEditToolsByModel_GPTModels(t *testing.T) {
 
 func TestFilterEditToolsByModel_OnlyOneEditToolExposed(t *testing.T) {
 	allTools := []tools.Tool{
-		tools.PatchTool{},
+		tools.ApplyPatchTool{},
 		tools.EditTool{},
 	}
 
@@ -164,7 +164,7 @@ func TestFilterEditToolsByModel_NoEditTools(t *testing.T) {
 
 func TestFilterEditToolsByModel_EditFamilyRuleOverridesWildcardDeny(t *testing.T) {
 	allTools := []tools.Tool{
-		tools.PatchTool{},
+		tools.ApplyPatchTool{},
 		tools.EditTool{},
 		tools.ReadTool{},
 	}
@@ -176,7 +176,7 @@ func TestFilterEditToolsByModel_EditFamilyRuleOverridesWildcardDeny(t *testing.T
 	filtered := filterEditToolsByModel(allTools, "gpt-4", ruleset)
 	hasPatch := false
 	for _, tool := range filtered {
-		if tool.Name() == tools.NamePatch {
+		if tool.Name() == tools.NameApplyPatch {
 			hasPatch = true
 		}
 		if tool.Name() == tools.NameEdit {
@@ -188,9 +188,9 @@ func TestFilterEditToolsByModel_EditFamilyRuleOverridesWildcardDeny(t *testing.T
 	}
 }
 
-func TestFilterEditToolsByModel_OnlyPatchTool(t *testing.T) {
+func TestFilterEditToolsByModel_OnlyApplyPatchTool(t *testing.T) {
 	allTools := []tools.Tool{
-		tools.PatchTool{},
+		tools.ApplyPatchTool{},
 		tools.ReadTool{},
 	}
 
@@ -201,23 +201,23 @@ func TestFilterEditToolsByModel_OnlyPatchTool(t *testing.T) {
 	filtered := filterEditToolsByModel(allTools, "gpt-5.5", rulesetEditFamilyAllowed)
 	hasPatch := false
 	for _, tool := range filtered {
-		if _, ok := tool.(tools.PatchTool); ok {
+		if _, ok := tool.(tools.ApplyPatchTool); ok {
 			hasPatch = true
 		}
 	}
 	if !hasPatch {
-		t.Errorf("gpt-5.5 should keep PatchTool when it is the only registered edit-family tool")
+		t.Errorf("gpt-5.5 should keep ApplyPatchTool when it is the only registered edit-family tool")
 	}
 
 	filtered = filterEditToolsByModel(allTools, "claude-opus-4", rulesetEditFamilyAllowed)
 	hasPatch = false
 	for _, tool := range filtered {
-		if _, ok := tool.(tools.PatchTool); ok {
+		if _, ok := tool.(tools.ApplyPatchTool); ok {
 			hasPatch = true
 		}
 	}
 	if !hasPatch {
-		t.Errorf("claude should keep PatchTool when it is the only registered edit-family tool")
+		t.Errorf("claude should keep ApplyPatchTool when it is the only registered edit-family tool")
 	}
 }
 
@@ -256,7 +256,7 @@ func TestFilterEditToolsByModel_OnlyEditTool(t *testing.T) {
 
 func TestFilterEditToolsByModel_ScopedPatchRuleKeepsPatchVisible(t *testing.T) {
 	allTools := []tools.Tool{
-		tools.PatchTool{},
+		tools.ApplyPatchTool{},
 		tools.EditTool{},
 		tools.ReadTool{},
 	}
@@ -271,7 +271,7 @@ func TestFilterEditToolsByModel_ScopedPatchRuleKeepsPatchVisible(t *testing.T) {
 	hasEdit := false
 	for _, tool := range filtered {
 		switch tool.(type) {
-		case tools.PatchTool:
+		case tools.ApplyPatchTool:
 			hasPatch = true
 		case tools.EditTool:
 			hasEdit = true
@@ -290,7 +290,7 @@ func TestFilterEditToolsByModel_ScopedPatchRuleKeepsPatchVisible(t *testing.T) {
 
 func TestFilterEditToolsByModel_ScopedEditRuleKeepsEditVisible(t *testing.T) {
 	allTools := []tools.Tool{
-		tools.PatchTool{},
+		tools.ApplyPatchTool{},
 		tools.EditTool{},
 		tools.ReadTool{},
 	}
@@ -305,7 +305,7 @@ func TestFilterEditToolsByModel_ScopedEditRuleKeepsEditVisible(t *testing.T) {
 	hasEdit := false
 	for _, tool := range filtered {
 		switch tool.(type) {
-		case tools.PatchTool:
+		case tools.ApplyPatchTool:
 			hasPatch = true
 		case tools.EditTool:
 			hasEdit = true
@@ -324,7 +324,7 @@ func TestFilterEditToolsByModel_ScopedEditRuleKeepsEditVisible(t *testing.T) {
 
 func TestFilterEditToolsByModel_PatchDenyHidesEditUnlessEditExplicitlyAllowed(t *testing.T) {
 	allTools := []tools.Tool{
-		tools.PatchTool{},
+		tools.ApplyPatchTool{},
 		tools.EditTool{},
 		tools.ReadTool{},
 	}
@@ -337,7 +337,7 @@ func TestFilterEditToolsByModel_PatchDenyHidesEditUnlessEditExplicitlyAllowed(t 
 	filtered := filterEditToolsByModel(allTools, "gpt-5.5", ruleset)
 	for _, tool := range filtered {
 		switch tool.Name() {
-		case tools.NamePatch:
+		case tools.NameApplyPatch:
 			t.Fatal("patch should stay hidden when explicitly denied")
 		case tools.NameEdit:
 			t.Fatal("edit should inherit patch deny when edit is not explicitly allowed")
@@ -353,7 +353,7 @@ func TestFilterEditToolsByModel_PatchDenyHidesEditUnlessEditExplicitlyAllowed(t 
 
 func TestFilterEditToolsByModel_EditDenyHidesPatchUnlessPatchExplicitlyAllowed(t *testing.T) {
 	allTools := []tools.Tool{
-		tools.PatchTool{},
+		tools.ApplyPatchTool{},
 		tools.EditTool{},
 		tools.ReadTool{},
 	}
@@ -368,7 +368,7 @@ func TestFilterEditToolsByModel_EditDenyHidesPatchUnlessPatchExplicitlyAllowed(t
 		switch tool.Name() {
 		case tools.NameEdit:
 			t.Fatal("edit should stay hidden when explicitly denied")
-		case tools.NamePatch:
+		case tools.NameApplyPatch:
 			t.Fatal("patch should inherit edit deny when patch is not explicitly allowed")
 		}
 	}
@@ -382,7 +382,7 @@ func TestFilterEditToolsByModel_EditDenyHidesPatchUnlessPatchExplicitlyAllowed(t
 
 func TestFilterEditToolsByModel_EditAllowPatchDenyFallsBackToEditForGPT(t *testing.T) {
 	allTools := []tools.Tool{
-		tools.PatchTool{},
+		tools.ApplyPatchTool{},
 		tools.EditTool{},
 		tools.ReadTool{},
 	}
@@ -396,7 +396,7 @@ func TestFilterEditToolsByModel_EditAllowPatchDenyFallsBackToEditForGPT(t *testi
 	hasEdit := false
 	for _, tool := range filtered {
 		switch tool.Name() {
-		case tools.NamePatch:
+		case tools.NameApplyPatch:
 			t.Fatal("patch should stay hidden when explicitly denied")
 		case tools.NameEdit:
 			hasEdit = true
@@ -409,7 +409,7 @@ func TestFilterEditToolsByModel_EditAllowPatchDenyFallsBackToEditForGPT(t *testi
 
 func TestFilterEditToolsByModel_PatchAllowEditDenyFallsBackToPatchForClaude(t *testing.T) {
 	allTools := []tools.Tool{
-		tools.PatchTool{},
+		tools.ApplyPatchTool{},
 		tools.EditTool{},
 		tools.ReadTool{},
 	}
@@ -425,7 +425,7 @@ func TestFilterEditToolsByModel_PatchAllowEditDenyFallsBackToPatchForClaude(t *t
 		switch tool.Name() {
 		case tools.NameEdit:
 			t.Fatal("edit should stay hidden when explicitly denied")
-		case tools.NamePatch:
+		case tools.NameApplyPatch:
 			hasPatch = true
 		}
 	}
@@ -436,7 +436,7 @@ func TestFilterEditToolsByModel_PatchAllowEditDenyFallsBackToPatchForClaude(t *t
 
 func TestFilterEditToolsByModel_ExplicitPatchAllowBeatsEditDeny(t *testing.T) {
 	allTools := []tools.Tool{
-		tools.PatchTool{},
+		tools.ApplyPatchTool{},
 		tools.EditTool{},
 		tools.ReadTool{},
 	}
@@ -452,7 +452,7 @@ func TestFilterEditToolsByModel_ExplicitPatchAllowBeatsEditDeny(t *testing.T) {
 	hasEdit := false
 	for _, tool := range filtered {
 		switch tool.(type) {
-		case tools.PatchTool:
+		case tools.ApplyPatchTool:
 			hasPatch = true
 		case tools.EditTool:
 			hasEdit = true
@@ -486,13 +486,13 @@ func TestExecuteToolCall_RejectsInvisibleEditFamilyTool(t *testing.T) {
 	a.markMCPReady()
 	targetPath := projectRoot + "/target.txt"
 	writeFile(t, targetPath, "old line\n")
-	a.tools.Register(tools.PatchTool{})
+	a.tools.Register(tools.ApplyPatchTool{})
 	a.tools.Register(tools.EditTool{})
 	// Allow both edit-family tools at the permission layer so the only thing
 	// hiding patch is the per-model edit-tool selection (model preference), not
 	// a permission deny.
 	a.ruleset = permission.Ruleset{
-		{Permission: tools.NamePatch, Pattern: "*", Action: permission.ActionAllow},
+		{Permission: tools.NameApplyPatch, Pattern: "*", Action: permission.ActionAllow},
 		{Permission: tools.NameEdit, Pattern: "*", Action: permission.ActionAllow},
 	}
 	// A non-OpenAI edit-only model: live visible set contains edit, not patch.
@@ -503,7 +503,7 @@ func TestExecuteToolCall_RejectsInvisibleEditFamilyTool(t *testing.T) {
 	// Calling the invisible "patch" must be rejected and point to "edit".
 	patchCall := message.ToolCall{
 		ID:   "patch-1",
-		Name: tools.NamePatch,
+		Name: tools.NameApplyPatch,
 		Args: json.RawMessage(`{"path":"` + targetPath + `","patch":"@@\n-old line\n+new line\n"}`),
 	}
 	_, err := a.executeToolCallWithHook(context.Background(), patchCall, false)

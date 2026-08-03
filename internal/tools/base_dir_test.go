@@ -7,7 +7,7 @@ func TestBaseDirToolImplementationsCoverSessionPathTools(t *testing.T) {
 		name string
 		tool Tool
 	}{
-		{name: "patch", tool: PatchTool{}},
+		{name: "apply_patch", tool: ApplyPatchTool{}},
 		{name: "edit", tool: EditTool{}},
 		{name: "read", tool: ReadTool{}},
 		{name: "write", tool: WriteTool{}},

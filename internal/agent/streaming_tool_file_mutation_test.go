@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -49,6 +50,187 @@ func TestSpeculativeWritePromoteKeepsFile(t *testing.T) {
 	if string(data) != "speculative" {
 		t.Fatalf("file content = %q, want speculative", data)
 	}
+}
+
+func TestSpeculativeApplyPatchPromoteIncludesEveryFileDiff(t *testing.T) {
+	projectRoot := t.TempDir()
+	files := []string{"one.txt", "two.txt", "three.txt", "four.txt"}
+	for _, name := range files {
+		content := "before-" + strings.TrimSuffix(name, ".txt") + "\n"
+		if err := os.WriteFile(filepath.Join(projectRoot, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	patch := "*** Begin Patch\n"
+	for _, name := range files {
+		stem := strings.TrimSuffix(name, ".txt")
+		patch += "*** Update File: " + name + "\n@@\n-before-" + stem + "\n+after-" + stem + "\n"
+	}
+	patch += "*** End Patch"
+	args, err := json.Marshal(tools.ApplyPatchArgs{Patch: patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
+	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: args}
+	exec := NewStreamingToolExecutor(7, t.Context(), nil, a.executeToolCallSpeculative)
+	if !exec.Start(call) {
+		t.Fatal("Start returned false")
+	}
+	payload, ok, drift := exec.Promote(call)
+	if drift || !ok || payload == nil || payload.Error != nil {
+		t.Fatalf("Promote payload=%#v ok=%v drift=%v", payload, ok, drift)
+	}
+	a.commitPromotedToolSideEffects(call, payload)
+
+	for _, name := range files {
+		if !strings.Contains(payload.Diff, "--- "+name+"\n") || !strings.Contains(payload.Diff, "+++ "+name+"\n") {
+			t.Fatalf("diff missing %s:\n%s", name, payload.Diff)
+		}
+	}
+	if got := strings.Count(payload.Diff, "--- "); got != len(files) {
+		t.Fatalf("diff contains %d file sections, want %d:\n%s", got, len(files), payload.Diff)
+	}
+	if payload.DiffAdded != len(files) || payload.DiffRemoved != len(files) {
+		t.Fatalf("diff counts = +%d/-%d, want +%d/-%d", payload.DiffAdded, payload.DiffRemoved, len(files), len(files))
+	}
+}
+
+func TestSpeculativeApplyPatchBacksUpEveryStaleFile(t *testing.T) {
+	projectRoot := t.TempDir()
+	files := []string{"one.txt", "two.txt", "three.txt"}
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.ReadTool{})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
+
+	for _, name := range files {
+		path := filepath.Join(projectRoot, name)
+		if err := os.WriteFile(path, []byte("tracked\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		readArgs := json.RawMessage(`{"path":` + mustJSONString(t, path) + `}`)
+		if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "read-" + name, Name: tools.NameRead, Args: readArgs}); err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		// Drift every tracked file so the patch runs against stale snapshots.
+		if err := os.WriteFile(path, []byte("external\n"), 0o644); err != nil {
+			t.Fatalf("external write %s: %v", name, err)
+		}
+	}
+
+	patch := "*** Begin Patch\n"
+	for _, name := range files {
+		patch += "*** Update File: " + name + "\n@@\n-external\n+patched\n"
+	}
+	patch += "*** End Patch"
+	args, err := json.Marshal(tools.ApplyPatchArgs{Patch: patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: args}
+	exec := NewStreamingToolExecutor(7, t.Context(), nil, a.executeToolCallSpeculative)
+	if !exec.Start(call) {
+		t.Fatal("Start returned false")
+	}
+	payload, ok, drift := exec.Promote(call)
+	if drift || !ok || payload == nil || payload.Error != nil {
+		t.Fatalf("Promote payload=%#v ok=%v drift=%v", payload, ok, drift)
+	}
+	a.commitPromotedToolSideEffects(call, payload)
+
+	if got := strings.Count(payload.Result, "Backup saved to:"); got != len(files) {
+		t.Fatalf("result has %d backups, want %d:\n%s", got, len(files), payload.Result)
+	}
+	for _, name := range files {
+		if !strings.Contains(payload.Result, strings.TrimSuffix(name, ".txt")) {
+			t.Fatalf("result missing backup for %s:\n%s", name, payload.Result)
+		}
+	}
+}
+
+func TestSpeculativeApplyPatchMoveDiscardPreservesExecutableMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not preserve Unix executable mode bits")
+	}
+	projectRoot := t.TempDir()
+	source := filepath.Join(projectRoot, "run.sh")
+	target := filepath.Join(projectRoot, "moved.sh")
+	if err := os.WriteFile(source, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
+	patch := "*** Begin Patch\n*** Update File: run.sh\n*** Move to: moved.sh\n*** End Patch"
+	args, err := json.Marshal(tools.ApplyPatchArgs{Patch: patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := message.ToolCall{ID: "move-1", Name: tools.NameApplyPatch, Args: args}
+	exec := NewStreamingToolExecutor(7, t.Context(), nil, a.executeToolCallSpeculative)
+	if !exec.Start(call) {
+		t.Fatal("Start returned false")
+	}
+	waitForFileContent(t, target, "#!/bin/sh\n")
+	waitForStreamingToolDone(t, exec, call.ID)
+	if _, ok := exec.DiscardCall(call.ID, "filtered"); !ok {
+		t.Fatal("DiscardCall returned false")
+	}
+	waitForFileContent(t, source, "#!/bin/sh\n")
+	info, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Fatalf("restored source mode = %#o, want 0755", got)
+	}
+	waitForMissingFile(t, target)
+}
+
+func TestSpeculativeApplyPatchMoveDiscardPreservesSymlink(t *testing.T) {
+	projectRoot := t.TempDir()
+	backing := filepath.Join(projectRoot, "backing.txt")
+	source := filepath.Join(projectRoot, "link.txt")
+	target := filepath.Join(projectRoot, "moved.txt")
+	if err := os.WriteFile(backing, []byte("target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("backing.txt", source); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
+	patch := "*** Begin Patch\n*** Update File: link.txt\n*** Move to: moved.txt\n*** End Patch"
+	args, err := json.Marshal(tools.ApplyPatchArgs{Patch: patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := message.ToolCall{ID: "move-1", Name: tools.NameApplyPatch, Args: args}
+	exec := NewStreamingToolExecutor(7, t.Context(), nil, a.executeToolCallSpeculative)
+	if !exec.Start(call) {
+		t.Fatal("Start returned false")
+	}
+	waitForFileContent(t, target, "target\n")
+	waitForStreamingToolDone(t, exec, call.ID)
+	if _, ok := exec.DiscardCall(call.ID, "filtered"); !ok {
+		t.Fatal("DiscardCall returned false")
+	}
+	info, err := os.Lstat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("restored source mode = %v, want symlink", info.Mode())
+	}
+	if got, err := os.Readlink(source); err != nil || got != "backing.txt" {
+		t.Fatalf("restored symlink target = %q, %v", got, err)
+	}
+	waitForMissingFile(t, target)
 }
 
 func TestSpeculativeWriteOnStaleFileIsRejected(t *testing.T) {
@@ -119,7 +301,7 @@ func TestSpeculativeEditDiscardRestoresExistingFile(t *testing.T) {
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
 
 	// Baseline Read so Edit satisfies the read-before-patch precondition.
 	readArgs := json.RawMessage(`{"path":` + mustJSONString(t, path) + `}`)
@@ -129,7 +311,7 @@ func TestSpeculativeEditDiscardRestoresExistingFile(t *testing.T) {
 
 	ctx := t.Context()
 	exec := NewStreamingToolExecutor(7, ctx, nil, a.executeToolCallSpeculative)
-	call := message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
+	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
 	if !exec.Start(call) {
 		t.Fatal("Start returned false")
 	}
@@ -148,7 +330,7 @@ func TestSpeculativeEditDiscardWhileExecutingRestoresExistingFile(t *testing.T) 
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
 
 	// Baseline Read so Edit satisfies the read-before-patch precondition.
 	readArgs := json.RawMessage(`{"path":` + mustJSONString(t, path) + `}`)
@@ -171,7 +353,7 @@ func TestSpeculativeEditDiscardWhileExecutingRestoresExistingFile(t *testing.T) 
 		}
 		return result, err
 	})
-	call := message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
+	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"` + filepath.Base(path) + `","patch":"@@\n-before\n+after\n"}`)}
 	if !exec.Start(call) {
 		t.Fatal("Start returned false")
 	}

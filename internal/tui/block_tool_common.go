@@ -98,7 +98,7 @@ const pendingToolGlyph = "⧗"
 
 func toolUsesCompactDetailToggle(toolName string) bool {
 	switch toolName {
-	case tools.NameWrite, tools.NameEdit, tools.NamePatch, tools.NameRead, tools.NameTodoWrite, tools.NameQuestion, tools.NameDelegate:
+	case tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameRead, tools.NameTodoWrite, tools.NameQuestion, tools.NameDelegate:
 		return false
 	}
 	return true
@@ -451,7 +451,7 @@ func formatToolResultSummaryLine(b *Block) string {
 	if b == nil {
 		return ""
 	}
-	b.ToolName = tools.NormalizeName(b.ToolName)
+	b.ToolName = toolNameKey(b.ToolName)
 	if b.toolResultIsCancelled() {
 		return "Cancelled"
 	}

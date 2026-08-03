@@ -89,13 +89,13 @@ func filterEditToolsByModel(tools []toolpkg.Tool, modelName string, ruleset perm
 	editAvailable := false
 	for _, tool := range tools {
 		switch toolpkg.NormalizeName(tool.Name()) {
-		case toolpkg.NamePatch:
+		case toolpkg.NameApplyPatch:
 			patchAvailable = true
 		case toolpkg.NameEdit:
 			editAvailable = true
 		}
 	}
-	patchAllowed := patchAvailable && !ruleset.IsDisabled(toolpkg.NamePatch)
+	patchAllowed := patchAvailable && !ruleset.IsDisabled(toolpkg.NameApplyPatch)
 	editAllowed := editAvailable && !ruleset.IsDisabled(toolpkg.NameEdit)
 
 	// Determine which tool to keep
@@ -114,7 +114,7 @@ func filterEditToolsByModel(tools []toolpkg.Tool, modelName string, ruleset perm
 		filtered := make([]toolpkg.Tool, 0, len(tools))
 		for _, tool := range tools {
 			name := toolpkg.NormalizeName(tool.Name())
-			if name != toolpkg.NamePatch && name != toolpkg.NameEdit {
+			if name != toolpkg.NameApplyPatch && name != toolpkg.NameEdit {
 				filtered = append(filtered, tool)
 			}
 		}
@@ -125,7 +125,7 @@ func filterEditToolsByModel(tools []toolpkg.Tool, modelName string, ruleset perm
 	for _, tool := range tools {
 		name := toolpkg.NormalizeName(tool.Name())
 		// Filter out the non-matching edit tool
-		if name == toolpkg.NamePatch && !keepPatch {
+		if name == toolpkg.NameApplyPatch && !keepPatch {
 			continue
 		}
 		if name == toolpkg.NameEdit && keepPatch {

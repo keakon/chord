@@ -128,7 +128,7 @@ func TestRenderConfirmSummaryShowsWriteFilePathAndPreview(t *testing.T) {
 }
 
 func TestBuildConfirmSummaryShowsStructuredPatchFields(t *testing.T) {
-	summary := buildConfirmSummary(tools.NamePatch, `{"path":"docs/README.md","patch":"@@\n-old\n+new\n"}`, nil, nil)
+	summary := buildConfirmSummary(tools.NameApplyPatch, `{"path":"docs/README.md","patch":"@@\n-old\n+new\n"}`, nil, nil)
 
 	if summary.Action != "Patch file" {
 		t.Fatalf("patch action = %q, want structured Patch action", summary.Action)

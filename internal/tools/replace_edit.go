@@ -17,7 +17,7 @@ import (
 //   - EditTool (this): Uses text matching (old_string → new_string).
 //     More widely recognized format, better for models trained with Claude Code
 //     or similar string-replacement interfaces.
-//   - PatchTool: Uses unified diff hunks (@@-style). Native format for models
+//   - ApplyPatchTool: Uses unified diff hunks (@@-style). Native format for models
 //     trained with OpenAI's apply_patch or similar patch-based interfaces.
 //
 // The system automatically selects the appropriate tool based on the active
@@ -71,7 +71,7 @@ func (EditTool) legacyArgAliases() map[string]string {
 func (EditTool) Name() string { return NameEdit }
 
 func (t EditTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return normalizeConcurrencyPolicy(NameEdit, fileToolConcurrencyPolicyInDir(args, false, t.BaseDir))
+	return normalizeConcurrencyPolicy(NameEdit, filePathConcurrencyPolicyInDir(extractEditPathArg(args), false, t.BaseDir))
 }
 
 func (t EditTool) Description() string {

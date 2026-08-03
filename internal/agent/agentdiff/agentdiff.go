@@ -25,18 +25,21 @@ type Summary struct {
 func CapturePreWriteState(tc message.ToolCall, baseDir string) (filePath, content string, existed bool) {
 	// NameEdit and NameWrite need path extraction and reading
 	if tc.Name == tools.NameEdit || tc.Name == tools.NameWrite {
-		var args struct {
-			Path string `json:"path"`
-		}
 		rawArgs := llm.UnwrapToolArgs(tc.Args)
-		if err := json.Unmarshal(rawArgs, &args); err != nil {
-			return
-		}
 		var path string
 		var err error
 		if tc.Name == tools.NameEdit {
-			path, err = tools.ResolveEditPathInDir(args.Path, baseDir)
+			path = tools.ExtractEditPathFromArgsInDir(rawArgs, baseDir)
+			if path == "" {
+				return
+			}
 		} else {
+			var args struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(rawArgs, &args); err != nil {
+				return
+			}
 			path, err = tools.ResolveToolPathInDir(args.Path, baseDir)
 		}
 		if err != nil {
@@ -55,22 +58,32 @@ func CapturePreWriteState(tc message.ToolCall, baseDir string) (filePath, conten
 	return
 }
 
-func CapturePatchPlan(ctx context.Context, tc message.ToolCall, baseDir string) (tools.PatchPlan, error) {
-	// Only NamePatch is supported; this function is only called from pipeline
-	// when tc.Name == tools.NamePatch is already verified
-	var args struct {
-		Path  string `json:"path"`
-		Patch string `json:"patch"`
-	}
-	rawArgs := llm.UnwrapToolArgs(tc.Args)
-	if err := json.Unmarshal(rawArgs, &args); err != nil {
-		return tools.PatchPlan{}, err
-	}
-	plan, err := tools.BuildPatchPlanInDirWithContext(ctx, args.Path, args.Patch, baseDir)
+type PatchPlan struct {
+	Path, Before, ModelContextNote string
+	Existed                        bool
+}
+
+func CapturePatchPlan(_ context.Context, tc message.ToolCall, baseDir string) (PatchPlan, error) {
+	// Only NameApplyPatch is supported; this function is only called from pipeline
+	// when tc.Name == tools.NameApplyPatch is already verified
+	targets, err := tools.ApplyPatchTargets(llm.UnwrapToolArgs(tc.Args), baseDir)
 	if err != nil {
-		return tools.PatchPlan{}, err
+		return PatchPlan{}, err
 	}
-	return plan, nil
+	if len(targets) == 0 {
+		return PatchPlan{}, nil
+	}
+	for _, target := range targets {
+		if target.Kind == tools.MutationAdd {
+			continue
+		}
+		path := target.SourcePath
+		decoded, err := tools.ReadDecodedTextFile(path)
+		if err == nil {
+			return PatchPlan{Path: path, Before: decoded.Text, Existed: true}, nil
+		}
+	}
+	return PatchPlan{Path: targets[0].TargetPath}, nil
 }
 
 // GenerateToolDiff builds a unified diff string for a completed file-editing tool call.
@@ -79,7 +92,7 @@ func CapturePatchPlan(ctx context.Context, tc message.ToolCall, baseDir string) 
 // Returns zero values for other tools or on any parse error.
 func GenerateToolDiff(tc message.ToolCall, preContent, preFilePath string, preExisted bool) Summary {
 	switch tc.Name {
-	case tools.NameEdit, tools.NamePatch:
+	case tools.NameEdit, tools.NameApplyPatch:
 		if preFilePath == "" {
 			return Summary{}
 		}

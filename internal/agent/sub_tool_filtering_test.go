@@ -59,7 +59,7 @@ func TestSubAgent_AppliesModelEditToolFilter(t *testing.T) {
 				tools:     tools.NewRegistry(),
 				ruleset:   permission.Ruleset{}, // empty ruleset = all allowed
 			}
-			s.tools.Register(tools.PatchTool{})
+			s.tools.Register(tools.ApplyPatchTool{})
 			s.tools.Register(tools.EditTool{})
 
 			// Get visible tools through the filtering logic
@@ -70,7 +70,7 @@ func TestSubAgent_AppliesModelEditToolFilter(t *testing.T) {
 			hasPatch := false
 			hasEdit := false
 			for _, tool := range filteredTools {
-				if tool.Name() == tools.NamePatch {
+				if tool.Name() == tools.NameApplyPatch {
 					hasPatch = true
 				}
 				if tool.Name() == tools.NameEdit {
@@ -93,7 +93,7 @@ func TestSubAgent_AppliesModelEditToolFilter(t *testing.T) {
 func TestSubAgent_ToolFilteringInAllVisibilityPaths(t *testing.T) {
 	// Test the filtering logic directly without creating a full SubAgent
 	baseTools := tools.NewRegistry()
-	baseTools.Register(tools.PatchTool{})
+	baseTools.Register(tools.ApplyPatchTool{})
 	baseTools.Register(tools.EditTool{})
 
 	ruleset := permission.Ruleset{} // empty = all allowed
@@ -109,7 +109,7 @@ func TestSubAgent_ToolFilteringInAllVisibilityPaths(t *testing.T) {
 		visibleNames[tool.Name()] = struct{}{}
 	}
 
-	if _, ok := visibleNames[tools.NamePatch]; !ok {
+	if _, ok := visibleNames[tools.NameApplyPatch]; !ok {
 		t.Error("patch tool not visible for GPT model")
 	}
 	if _, ok := visibleNames[tools.NameEdit]; ok {
@@ -124,7 +124,7 @@ func TestSubAgent_ToolFilteringInAllVisibilityPaths(t *testing.T) {
 		visibleNames[tool.Name()] = struct{}{}
 	}
 
-	if _, ok := visibleNames[tools.NamePatch]; ok {
+	if _, ok := visibleNames[tools.NameApplyPatch]; ok {
 		t.Error("patch tool incorrectly visible for Claude model")
 	}
 	if _, ok := visibleNames[tools.NameEdit]; !ok {
@@ -134,7 +134,7 @@ func TestSubAgent_ToolFilteringInAllVisibilityPaths(t *testing.T) {
 
 func TestSubAgentSwitchModelRefreshesFrozenToolDefinitions(t *testing.T) {
 	registry := tools.NewRegistry()
-	registry.Register(tools.PatchTool{})
+	registry.Register(tools.ApplyPatchTool{})
 	registry.Register(tools.EditTool{})
 
 	s := &SubAgent{
@@ -146,7 +146,7 @@ func TestSubAgentSwitchModelRefreshesFrozenToolDefinitions(t *testing.T) {
 		modelName:  "gpt-4",
 	}
 	s.frozenToolDefs = llmToolDefinitionsFromVisibleTools(s.filteredVisibleTools())
-	if !hasToolDefinition(s.frozenToolDefs, tools.NamePatch) || hasToolDefinition(s.frozenToolDefs, tools.NameEdit) {
+	if !hasToolDefinition(s.frozenToolDefs, tools.NameApplyPatch) || hasToolDefinition(s.frozenToolDefs, tools.NameEdit) {
 		t.Fatalf("initial frozen tools = %v, want patch only", toolDefinitionNames(s.frozenToolDefs))
 	}
 
@@ -154,7 +154,7 @@ func TestSubAgentSwitchModelRefreshesFrozenToolDefinitions(t *testing.T) {
 	client := llm.NewClient(providerCfg, stubProvider{}, "claude-3-opus", 1024, "")
 	s.switchModel(client, "claude-3-opus", 4096)
 
-	if hasToolDefinition(s.frozenToolDefs, tools.NamePatch) || !hasToolDefinition(s.frozenToolDefs, tools.NameEdit) {
+	if hasToolDefinition(s.frozenToolDefs, tools.NameApplyPatch) || !hasToolDefinition(s.frozenToolDefs, tools.NameEdit) {
 		t.Fatalf("frozen tools after switch = %v, want edit only", toolDefinitionNames(s.frozenToolDefs))
 	}
 }
@@ -242,7 +242,7 @@ func TestSubAgent_EditPatchPermissionFallback(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			baseTools := tools.NewRegistry()
-			baseTools.Register(tools.PatchTool{})
+			baseTools.Register(tools.ApplyPatchTool{})
 			baseTools.Register(tools.EditTool{})
 
 			// Test the filtering logic directly
@@ -256,7 +256,7 @@ func TestSubAgent_EditPatchPermissionFallback(t *testing.T) {
 
 			hasPatch := false
 			hasEdit := false
-			if _, ok := visibleNames[tools.NamePatch]; ok {
+			if _, ok := visibleNames[tools.NameApplyPatch]; ok {
 				hasPatch = true
 			}
 			if _, ok := visibleNames[tools.NameEdit]; ok {

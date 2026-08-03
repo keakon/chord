@@ -562,7 +562,7 @@ func toolCallMarkdownContent(b *Block) string {
 	if toolNameKey(toolName) == tools.NameDone {
 		return convformat.DoneToolCallMarkdown(b.DoneReport, b.ResultContent)
 	}
-	if toolNameKey(toolName) == tools.NameEdit || toolNameKey(toolName) == tools.NamePatch {
+	if toolNameKey(toolName) == tools.NameEdit || toolNameKey(toolName) == tools.NameApplyPatch {
 		return fileDiffToolCallMarkdownContent(b)
 	}
 
@@ -571,7 +571,7 @@ func toolCallMarkdownContent(b *Block) string {
 
 func fileDiffToolCallMarkdownContent(b *Block) string {
 	toolName := toolNameKey(b.ToolName)
-	if toolName != tools.NameEdit && toolName != tools.NamePatch {
+	if toolName != tools.NameEdit && toolName != tools.NameApplyPatch {
 		toolName = tools.NameEdit
 	}
 	parts := []string{"# Tool call: " + toolName}

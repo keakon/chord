@@ -95,8 +95,8 @@ func (rs Ruleset) Evaluate(permission, pattern string) Action {
 func getEditPatchCounterpart(toolName string) string {
 	switch toolName {
 	case toolname.Edit:
-		return toolname.Patch
-	case toolname.Patch:
+		return toolname.ApplyPatch
+	case toolname.ApplyPatch:
 		return toolname.Edit
 	default:
 		return ""
@@ -111,7 +111,7 @@ func (rs Ruleset) evaluateWithEditPatchFallback(permission, pattern string) Acti
 	counterpart := getEditPatchCounterpart(normPerm)
 
 	if counterpart != "" {
-		if match, ok := rs.lastSpecificEditPatchToolMatch(normPerm, counterpart, pattern); ok {
+		if match, ok := rs.lastSpecificEditApplyPatchToolMatch(normPerm, counterpart, pattern); ok {
 			return match.Action
 		}
 	}
@@ -131,7 +131,7 @@ func (rs Ruleset) IsDisabled(toolName string) bool {
 	counterpart := getEditPatchCounterpart(toolName)
 
 	if counterpart != "" {
-		if match, ok := rs.lastSpecificEditPatchToolRule(toolName, counterpart); ok {
+		if match, ok := rs.lastSpecificEditApplyPatchToolRule(toolName, counterpart); ok {
 			return match.Pattern == "*" && match.Action == ActionDeny
 		}
 	}
@@ -220,7 +220,7 @@ func permissionPatternCoversPrefix(pattern, prefix string) bool {
 	return strings.HasPrefix(prefix, fixed)
 }
 
-func (rs Ruleset) lastSpecificEditPatchToolRule(toolName, counterpart string) (Rule, bool) {
+func (rs Ruleset) lastSpecificEditApplyPatchToolRule(toolName, counterpart string) (Rule, bool) {
 	var counterpartMatch Rule
 	counterpartFound := false
 
@@ -241,7 +241,7 @@ func (rs Ruleset) lastSpecificEditPatchToolRule(toolName, counterpart string) (R
 	return counterpartMatch, counterpartFound
 }
 
-func (rs Ruleset) lastSpecificEditPatchToolMatch(toolName, counterpart, pattern string) (Rule, bool) {
+func (rs Ruleset) lastSpecificEditApplyPatchToolMatch(toolName, counterpart, pattern string) (Rule, bool) {
 	var counterpartMatch Rule
 	counterpartFound := false
 

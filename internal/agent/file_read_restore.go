@@ -118,7 +118,7 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 			}
 			for _, tc := range msg.ToolCalls {
 				id := strings.TrimSpace(tc.ID)
-				name := strings.TrimSpace(tc.Name)
+				name := tools.NormalizeName(tc.Name)
 				if id == "" || !tools.IsFileStateTool(name) {
 					continue
 				}
@@ -174,7 +174,10 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 				}
 				candidates[key] = candidate
 
-			case tools.NameEdit, tools.NamePatch:
+			case tools.NameApplyPatch:
+				restoreApplyPatchFileState(candidates, msg.FileState)
+
+			case tools.NameEdit:
 				path, key, ok := restoreSinglePathAndKey(args, call.name)
 				if !ok {
 					result.skipInvalidPath()
@@ -260,6 +263,33 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 	return result
 }
 
+func restoreApplyPatchFileState(candidates map[string]restoreReadCandidate, state *message.ToolFileState) {
+	if state == nil {
+		return
+	}
+	for _, write := range state.Writes {
+		key := restoreNormalizeTrackedPath(write.Path)
+		if key == "" || !write.Exists || strings.TrimSpace(write.SHA256) == "" {
+			continue
+		}
+		candidate, exists := candidates[key]
+		if !exists {
+			continue
+		}
+		candidate.hash = strings.TrimSpace(write.SHA256)
+		candidate.durable = true
+		candidates[key] = candidate
+	}
+	for _, deleted := range state.Deletes {
+		if deleted.Exists {
+			continue
+		}
+		if key := restoreNormalizeTrackedPath(deleted.Path); key != "" {
+			delete(candidates, key)
+		}
+	}
+}
+
 func (a *MainAgent) restoreMainTrackedFileState(messages []message.Message) restoreTrackedFileStateResult {
 	if a == nil {
 		return restoreTrackedFileStateResult{}
@@ -312,8 +342,8 @@ func restoreEffectiveArgs(msg message.Message, call restoreToolCall) (json.RawMe
 
 func restoreSinglePathAndKey(args json.RawMessage, toolName string) (string, string, bool) {
 	path, ok := parseRestoreSinglePath(args)
-	if !ok && (toolName == tools.NameEdit || toolName == tools.NamePatch) {
-		path = tools.ExtractEditPathFromArgsInDir(args, os.Getenv("CHORD_PROJECT_ROOT"))
+	if !ok && (toolName == tools.NameEdit || toolName == tools.NameApplyPatch) {
+		path = trackedEditPathFromArgs(args, os.Getenv("CHORD_PROJECT_ROOT"))
 		ok = path != ""
 	}
 	if !ok {

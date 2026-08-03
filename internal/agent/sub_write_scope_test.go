@@ -49,6 +49,51 @@ func TestSubAgentWriteScopeAllowsDeclaredFileAndRejectsOtherFile(t *testing.T) {
 	}
 }
 
+func TestSubAgentWriteScopeRejectsLaterApplyPatchTargetOutsideScope(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	root := t.TempDir()
+	parent.projectRoot = root
+	sub.workDir = root
+	sub.writeScope = tools.WriteScope{PathPrefix: []string{"allowed"}}
+	sub.tools.Register(tools.ApplyPatchTool{BaseDir: root})
+
+	args := json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: allowed/ok.txt\n+ok\n*** Add File: outside.txt\n+blocked\n*** End Patch"}`)
+	_, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "patch", Name: tools.NameApplyPatch, Args: args})
+	if err == nil || !strings.Contains(err.Error(), "outside this SubAgent task's expected_write_scope") {
+		t.Fatalf("error = %v, want second-target scope rejection", err)
+	}
+	for _, path := range []string{"allowed/ok.txt", "outside.txt"} {
+		if _, statErr := os.Stat(filepath.Join(root, path)); !os.IsNotExist(statErr) {
+			t.Fatalf("%s exists after rejected patch: %v", path, statErr)
+		}
+	}
+}
+
+func TestSubAgentWriteScopeRejectsApplyPatchMoveTargetOutsideScope(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	root := t.TempDir()
+	parent.projectRoot = root
+	sub.workDir = root
+	sub.writeScope = tools.WriteScope{PathPrefix: []string{"allowed"}}
+	sub.tools.Register(tools.ApplyPatchTool{BaseDir: root})
+	if err := os.MkdirAll(filepath.Join(root, "allowed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(root, "allowed", "old.txt")
+	if err := os.WriteFile(source, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: allowed/old.txt\n*** Move to: outside.txt\n@@\n-old\n+new\n*** End Patch"}`)
+	_, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "move", Name: tools.NameApplyPatch, Args: args})
+	if err == nil || !strings.Contains(err.Error(), "outside this SubAgent task's expected_write_scope") {
+		t.Fatalf("error = %v, want move-target scope rejection", err)
+	}
+	if got, readErr := os.ReadFile(source); readErr != nil || string(got) != "old\n" {
+		t.Fatalf("source = %q, %v; want unchanged", got, readErr)
+	}
+}
+
 func TestSubAgentReadOnlyScopeRejectsMutatingTool(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)
 	root := t.TempDir()

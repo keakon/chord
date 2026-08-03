@@ -180,26 +180,23 @@ func (m *Model) logTranscriptRebuildTiming(reason string, messageCount, blockCou
 }
 
 // rebuildSidebarFileEditsFromMessages scans the message history and reconstructs
-// sidebar changed-file statistics from stored diffs. Delete tool calls are not
-// restored because older transcripts do not carry reliable deleted-file state.
+// sidebar changed-file statistics from stored diffs and apply_patch operations.
 func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 	// Reset file edits for main agent (sub-agents manage their own edits live).
 	m.sidebar.ClearFileEdits("main")
-	// Build tool-call-id → paths index from assistant messages.
-	calls := make(map[string][]string)
+	// Build tool-call-id → call index from assistant messages.
+	calls := make(map[string]message.ToolCall)
 	for _, msg := range msgs {
 		if msg.Role != "assistant" {
 			continue
 		}
 		for _, tc := range msg.ToolCalls {
-			if tc.Name != tools.NameWrite && tc.Name != tools.NameEdit && tc.Name != tools.NamePatch {
+			name := tools.NormalizeName(tc.Name)
+			if name != tools.NameWrite && name != tools.NameEdit && name != tools.NameApplyPatch {
 				continue
 			}
-			paths := extractTranscriptToolPaths(tc.Args)
-			if len(paths) == 0 {
-				continue
-			}
-			calls[tc.ID] = paths
+			tc.Name = name
+			calls[tc.ID] = tc
 		}
 	}
 	// Walk tool result messages and record file edits.
@@ -207,11 +204,22 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 		if msg.Role != "tool" {
 			continue
 		}
-		paths, ok := calls[msg.ToolCallID]
-		if !ok || msg.ToolDiff == "" {
+		call, ok := calls[msg.ToolCallID]
+		if !ok || msg.ToolStatus == string(agent.ToolResultStatusError) || msg.ToolStatus == string(agent.ToolResultStatusCancelled) {
 			continue
 		}
-		for _, path := range paths {
+		if call.Name == tools.NameApplyPatch {
+			// Older results did not persist a terminal status. Require a diff for
+			// those records so failed historical calls are not treated as changes.
+			if msg.ToolStatus != "" || msg.ToolDiff != "" {
+				m.addApplyPatchSidebarChanges("main", call.Args)
+			}
+			continue
+		}
+		if msg.ToolDiff == "" {
+			continue
+		}
+		for _, path := range extractTranscriptToolPaths(call.Args) {
 			m.sidebar.AddFileEdit("main", path, msg.ToolDiffAdded, msg.ToolDiffRemoved)
 		}
 	}

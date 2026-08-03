@@ -7,7 +7,7 @@ type BaseDirTool interface {
 	WithBaseDir(baseDir string) Tool
 }
 
-func (t PatchTool) WithBaseDir(baseDir string) Tool {
+func (t ApplyPatchTool) WithBaseDir(baseDir string) Tool {
 	t.BaseDir = baseDir
 	return t
 }

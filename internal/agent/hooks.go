@@ -56,6 +56,16 @@ func extractHookFilePath(args json.RawMessage) string {
 	return paths[0]
 }
 
+func extractHookToolFilePaths(toolName string, args json.RawMessage, projectRoot string) []string {
+	if tools.NormalizeName(toolName) == tools.NameApplyPatch {
+		targets, err := tools.ApplyPatchTargets(args, projectRoot)
+		if err == nil {
+			return tools.MutationTargetPaths(targets)
+		}
+	}
+	return extractHookFilePaths(args, projectRoot)
+}
+
 func extractHookFilePaths(args json.RawMessage, projectRoot string) []string {
 	var parsed struct {
 		Path  string   `json:"path"`
@@ -67,7 +77,7 @@ func extractHookFilePaths(args json.RawMessage, projectRoot string) []string {
 	if parsed.Path != "" {
 		return []string{parsed.Path}
 	}
-	if path := tools.ExtractEditPathFromArgsInDir(args, projectRoot); path != "" {
+	if path := trackedEditPathFromArgs(args, projectRoot); path != "" {
 		return []string{path}
 	}
 	return tools.NormalizeDeletePaths(parsed.Paths)
@@ -78,7 +88,7 @@ func buildToolHookData(tc message.ToolCall, projectRoot string) map[string]any {
 		hook.DataKeyToolName: tc.Name,
 		"args":               json.RawMessage(tc.Args),
 	}
-	if filePaths := extractHookFilePaths(tc.Args, projectRoot); len(filePaths) > 0 {
+	if filePaths := extractHookToolFilePaths(tc.Name, tc.Args, projectRoot); len(filePaths) > 0 {
 		data["paths"] = append([]string(nil), filePaths...)
 		data["path"] = filePaths[0]
 	}
@@ -93,7 +103,7 @@ func buildToolResultHookData(tcName string, argsJSON string, result string, err 
 	}
 	if argsJSON != "" {
 		data["args"] = json.RawMessage(argsJSON)
-		if filePaths := extractHookFilePaths(json.RawMessage(argsJSON), ""); len(filePaths) > 0 {
+		if filePaths := extractHookToolFilePaths(tcName, json.RawMessage(argsJSON), ""); len(filePaths) > 0 {
 			data["paths"] = append([]string(nil), filePaths...)
 			data["path"] = filePaths[0]
 		}
@@ -128,7 +138,7 @@ func buildBeforeToolResultAppendData(tcName string, argsJSON string, rawResult s
 	}
 	if argsJSON != "" {
 		data["args"] = json.RawMessage(argsJSON)
-		if filePaths := extractHookFilePaths(json.RawMessage(argsJSON), ""); len(filePaths) > 0 {
+		if filePaths := extractHookToolFilePaths(tcName, json.RawMessage(argsJSON), ""); len(filePaths) > 0 {
 			data["paths"] = append([]string(nil), filePaths...)
 			data["path"] = filePaths[0]
 		}
@@ -167,8 +177,8 @@ func toolResultSummary(payload *ToolResultPayload, storedResult string, errText 
 		"result":             storedResult,
 		"diff":               payload.Diff,
 		"error":              errText,
-		"path":               extractHookFilePath(json.RawMessage(payload.ArgsJSON)),
-		"paths":              extractHookFilePaths(json.RawMessage(payload.ArgsJSON), ""),
+		"path":               firstString(extractHookToolFilePaths(payload.Name, json.RawMessage(payload.ArgsJSON), "")),
+		"paths":              extractHookToolFilePaths(payload.Name, json.RawMessage(payload.ArgsJSON), ""),
 		"is_changed":         payload.Diff != "" || payload.Name == tools.NameDelete,
 		"is_deleted":         payload.Name == tools.NameDelete,
 	}
@@ -179,7 +189,7 @@ func toolResultSummary(payload *ToolResultPayload, storedResult string, errText 
 }
 
 func changedFileSummary(payload *ToolResultPayload) map[string]any {
-	filePaths := extractHookFilePaths(json.RawMessage(payload.ArgsJSON), "")
+	filePaths := extractHookToolFilePaths(payload.Name, json.RawMessage(payload.ArgsJSON), "")
 	if len(filePaths) == 0 {
 		return nil
 	}
@@ -208,6 +218,13 @@ func changedFileSummary(payload *ToolResultPayload) map[string]any {
 		"is_deleted": false,
 		"diff":       payload.Diff,
 	}
+}
+
+func firstString(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
 
 func formatAutomationFeedback(h hook.HookDef, result hook.AutomationResult) string {

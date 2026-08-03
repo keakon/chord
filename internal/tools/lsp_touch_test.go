@@ -32,18 +32,18 @@ func TestWriteToolMarksTouchedFile(t *testing.T) {
 	}
 }
 
-func TestPatchToolMarksTouchedFileWithBaseDir(t *testing.T) {
+func TestApplyPatchToolMarksTouchedFileWithBaseDir(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "patched.txt")
 	if _, err := (WriteTool{}).Execute(context.Background(), mustJSON(t, map[string]any{"path": path, "content": "before\n"})); err != nil {
 		t.Fatalf("seed WriteTool.Execute: %v", err)
 	}
 	mgr := lsp.NewManager(&config.Config{}, dir, nil)
-	args, err := json.Marshal(map[string]any{"path": "patched.txt", "patch": "@@\n-before\n+after\n"})
+	args, err := json.Marshal(ApplyPatchArgs{Patch: "*** Begin Patch\n*** Update File: patched.txt\n@@\n-before\n+after\n*** End Patch"})
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	if _, err := (PatchTool{LSP: mgr, BaseDir: dir}).Execute(context.Background(), args); err != nil {
+	if _, err := (ApplyPatchTool{LSP: mgr, BaseDir: dir}).Execute(context.Background(), args); err != nil {
 		t.Fatalf("EditTool.Execute: %v", err)
 	}
 	want := []string{path}

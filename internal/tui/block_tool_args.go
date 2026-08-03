@@ -329,7 +329,7 @@ func cloneToolValsWithDisplayDirs(b *Block, vals map[string]string) map[string]s
 		switch b.ToolName {
 		case tools.NameGrep, tools.NameGlob, tools.NameLsp:
 			cloned["path"] = b.displayToolDir(path)
-		case tools.NameRead, tools.NameViewImage, tools.NameWrite, tools.NameEdit, tools.NamePatch, tools.NameDelete:
+		case tools.NameRead, tools.NameViewImage, tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameDelete:
 			cloned["path"] = b.displayToolPath(path)
 		}
 	}

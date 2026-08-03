@@ -42,11 +42,200 @@ func TestEditToolCardRendersHighlightedDiffWithPath(t *testing.T) {
 	}
 }
 
-func TestEditAndPatchToolCardsKeepAddedAndDeletedLineBackgrounds(t *testing.T) {
+func TestApplyPatchToolCardRendersNamePathAndHighlightedPreview(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	args, _ := json.Marshal(map[string]string{"patch": strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: src/demo.go",
+		"@@",
+		"-func old() {}",
+		"+func main() {}",
+		"*** End Patch",
+	}, "\n")})
+	block := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: tools.NameApplyPatch,
+		Content:  applyPatchToolDisplayArgs(string(args)),
+		RawArgs:  string(args),
+	}
+
+	lines := block.Render(100, "●")
+	plain := stripANSI(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "apply_patch src/demo.go") {
+		t.Fatalf("expected apply_patch header with path, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "↳ Files:") || strings.Contains(plain, "M src/demo.go") {
+		t.Fatalf("expected single-file target list to be omitted as duplicate, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "+func main() {}") {
+		t.Fatalf("expected patch preview, got:\n%s", plain)
+	}
+	added := renderedLineContaining(t, lines, "func main")
+	assertRenderedTextForeground(t, added, "func", colorOfTheme(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String()))
+	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentTheme.DiffAddLineBg))
+}
+
+func TestApplyPatchToolCardSummarizesMultiplePaths(t *testing.T) {
+	args, _ := json.Marshal(map[string]string{"patch": strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: src/old.go",
+		"*** Move to: src/new.go",
+		"@@",
+		"-package old",
+		"+package renamed",
+		"*** Add File: docs/new.md",
+		"+# New",
+		"*** Delete File: tmp/old.txt",
+		"*** End Patch",
+	}, "\n")})
+	block := &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch, Content: applyPatchToolDisplayArgs(string(args)), RawArgs: string(args)}
+	plain := stripANSI(strings.Join(block.Render(120, "●"), "\n"))
+	for _, want := range []string{
+		"apply_patch src/old.go → src/new.go +2 files",
+		"↳ Files:",
+		"R src/old.go → src/new.go",
+		"A docs/new.md",
+		"D tmp/old.txt",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected multi-file apply_patch display to contain %q, got:\n%s", want, plain)
+		}
+	}
+}
+
+func TestApplyPatchToolCardGroupsMultiFileDiffByFile(t *testing.T) {
+	args, _ := json.Marshal(map[string]string{"patch": strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: src/first.go",
+		"@@",
+		"-const first = 1",
+		"+const first = 2",
+		"*** Update File: src/second.go",
+		"@@",
+		"-const second = 1",
+		"+const second = 2",
+		"*** End Patch",
+	}, "\n")})
+	block := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: tools.NameApplyPatch,
+		Content:  applyPatchToolDisplayArgs(string(args)),
+		RawArgs:  string(args),
+		Diff: strings.Join([]string{
+			"--- src/first.go",
+			"+++ src/first.go",
+			"@@ -1,1 +1,1 @@",
+			"-const first = 1",
+			"+const first = 2",
+			"--- src/second.go",
+			"+++ src/second.go",
+			"@@ -1,1 +1,1 @@",
+			"-const second = 1",
+			"+const second = 2",
+		}, "\n"),
+	}
+
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if strings.Contains(plain, "↳ Files:") {
+		t.Fatalf("expected per-file diff sections instead of a detached file list, got:\n%s", plain)
+	}
+	firstHeader := strings.Index(plain, "↳ M src/first.go")
+	firstChange := strings.Index(plain, "const first = 2")
+	secondHeader := strings.Index(plain, "↳ M src/second.go")
+	secondChange := strings.Index(plain, "const second = 2")
+	if firstHeader < 0 || firstChange < 0 || secondHeader < 0 || secondChange < 0 ||
+		!(firstHeader < firstChange && firstChange < secondHeader && secondHeader < secondChange) {
+		t.Fatalf("expected each file heading immediately before its own diff section, got:\n%s", plain)
+	}
+}
+
+func TestApplyPatchToolCardLabelsMoveAddAndDeleteDiffSections(t *testing.T) {
+	args, _ := json.Marshal(map[string]string{"patch": strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: src/old.go",
+		"*** Move to: src/new.go",
+		"@@",
+		"-const moved = 1",
+		"+const moved = 2",
+		"*** Add File: docs/new.md",
+		"+# New",
+		"*** Delete File: tmp/old.txt",
+		"*** End Patch",
+	}, "\n")})
+	block := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: tools.NameApplyPatch,
+		Content:  applyPatchToolDisplayArgs(string(args)),
+		RawArgs:  string(args),
+		Diff: strings.Join([]string{
+			"--- src/old.go",
+			"+++ src/new.go",
+			"@@ -1,1 +1,1 @@",
+			"-const moved = 1",
+			"+const moved = 2",
+			"--- /dev/null",
+			"+++ docs/new.md",
+			"@@ -0,0 +1,1 @@",
+			"+# New",
+			"--- tmp/old.txt",
+			"+++ /dev/null",
+			"@@ -1,1 +0,0 @@",
+			"-obsolete",
+		}, "\n"),
+	}
+
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{
+		"↳ R src/old.go → src/new.go",
+		"↳ A docs/new.md",
+		"↳ D tmp/old.txt",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected multi-file diff section %q, got:\n%s", want, plain)
+		}
+	}
+}
+
+func TestLegacyPatchToolCardUsesApplyPatchDisplay(t *testing.T) {
+	args := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`
+	block := &Block{ID: 1, Type: BlockToolCall, ToolName: "patch", Content: args, RawArgs: args}
+	plain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	if !strings.Contains(plain, "apply_patch src/demo.go") || strings.Contains(plain, " patch ") {
+		t.Fatalf("expected legacy patch card to use apply_patch display, got:\n%s", plain)
+	}
+}
+
+func TestApplyPatchErrorCardKeepsHighlightedPatchPreview(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	args := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-func old() {}\n+func main() {}\n*** End Patch"}`
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameApplyPatch,
+		Content:       applyPatchToolDisplayArgs(args),
+		RawArgs:       args,
+		ResultContent: "hunk not found",
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+	}
+	lines := block.Render(100, "")
+	plain := stripANSI(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "apply_patch src/demo.go") || !strings.Contains(plain, "+func main() {}") || !strings.Contains(plain, "hunk not found") {
+		t.Fatalf("expected error card to preserve path, patch, and error, got:\n%s", plain)
+	}
+	added := renderedLineContaining(t, lines, "func main")
+	assertRenderedTextForeground(t, added, "func", colorOfTheme(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String()))
+	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentTheme.DiffAddLineBg))
+}
+
+func TestEditAndApplyPatchToolCardsKeepAddedAndDeletedLineBackgrounds(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	args, _ := json.Marshal(map[string]string{"path": "src/demo.go"})
 	diff := "@@ -1,1 +1,1 @@\n-package old\n+package main\n"
-	for _, toolName := range []string{tools.NameEdit, tools.NamePatch} {
+	for _, toolName := range []string{tools.NameEdit, tools.NameApplyPatch} {
 		t.Run(toolName, func(t *testing.T) {
 			block := &Block{ID: 1, Type: BlockToolCall, ToolName: toolName, Content: string(args), Diff: diff, ResultDone: true}
 			lines := block.Render(80, "")
@@ -58,12 +247,12 @@ func TestEditAndPatchToolCardsKeepAddedAndDeletedLineBackgrounds(t *testing.T) {
 	}
 }
 
-func TestEditAndPatchToolCardsHighlightContextLines(t *testing.T) {
+func TestEditAndApplyPatchToolCardsHighlightContextLines(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	args, _ := json.Marshal(map[string]string{"path": "src/demo.go"})
 	diff := "@@ -1,5 +1,6 @@\n func demo() error {\n+\tvalue := 1\n if value != 0 {\n\treturn fmt.Errorf(\"bad: %d\", value)\n }\n return nil\n"
 	wantKeyword := colorOfTheme(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String())
-	for _, toolName := range []string{tools.NameEdit, tools.NamePatch} {
+	for _, toolName := range []string{tools.NameEdit, tools.NameApplyPatch} {
 		t.Run(toolName, func(t *testing.T) {
 			block := &Block{ID: 1, Type: BlockToolCall, ToolName: toolName, Content: string(args), Diff: diff, ResultDone: true}
 			contextLine := renderedLineContaining(t, block.Render(100, ""), "if value")

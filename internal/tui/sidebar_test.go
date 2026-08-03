@@ -66,6 +66,40 @@ func TestSidebarAddFileEditAfterDeleteClearsDeletedState(t *testing.T) {
 	}
 }
 
+func TestSidebarAddFileMoveKeepsZeroStatTarget(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update(nil, "main", "builder")
+
+	sidebar.AddFileMove("main", "old.go", "new.go", 0, 0)
+
+	edits := sidebar.agents[0].EditedFiles
+	if len(edits) != 2 {
+		t.Fatalf("changed files = %d, want 2: %+v", len(edits), edits)
+	}
+	if edits[0].Path != "old.go" || !edits[0].Deleted {
+		t.Fatalf("move source = %+v, want deleted old.go", edits[0])
+	}
+	if edits[1].Path != "new.go" || edits[1].Deleted || edits[1].Added != 0 || edits[1].Removed != 0 {
+		t.Fatalf("move target = %+v, want zero-stat new.go", edits[1])
+	}
+}
+
+func TestSidebarAddFileMoveRevivesPreviouslyDeletedTarget(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update(nil, "main", "builder")
+	sidebar.AddFileDelete("main", "new.go")
+
+	sidebar.AddFileMove("main", "old.go", "new.go", 0, 0)
+
+	edits := sidebar.agents[0].EditedFiles
+	if len(edits) != 2 {
+		t.Fatalf("changed files = %d, want 2: %+v", len(edits), edits)
+	}
+	if edits[0].Path != "new.go" || edits[0].Deleted {
+		t.Fatalf("move target = %+v, want revived new.go", edits[0])
+	}
+}
+
 func TestSidebarAddFileEditAccumulatesCounts(t *testing.T) {
 	sidebar := NewSidebar(DefaultTheme())
 	sidebar.Update(nil, "main", "builder")

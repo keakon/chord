@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Benchmarks and regression checks for TUI and SSE hot paths. This script is
+# Benchmarks and regression checks for runtime hot paths. This script is
 # intended for local runs and CI smoke checks; it combines correctness tests,
-# alloc guards, and a small set of stable micro-benchmarks, including status-bar
-# cache hit/dirty/miss paths.
+# alloc guards, and a small set of stable micro-benchmarks, including TUI,
+# streaming, context-reduction, session, recovery, and patch-planning paths.
 #
 # Usage:
 #   ./scripts/bench_tui_regression.sh                 # smoke subset: default 1x benchtime
@@ -22,6 +22,7 @@ SSE_BENCH_PATTERN='^(BenchmarkSSEParseWithCallbackCumulative|BenchmarkSSEParseWi
 TRUNCATE_BENCH_PATTERN='^BenchmarkTruncateStringHeadTail$'
 SESSION_BENCH_PATTERN='^(BenchmarkImportFromBytesLargeSession|BenchmarkExportedSessionToMessagesLargeSession)$'
 RECOVERY_BENCH_PATTERN='^(BenchmarkLoadMessagesLargeSession.*|BenchmarkLoadMessagesBySize)$'
+TOOLS_BENCH_PATTERN='^BenchmarkBuildApplyPatchPlan(LargeFile|MultiFile)$'
 
 if [[ "${CHORD_BENCH_FULL:-}" == "1" ]]; then
   BENCH_PATTERN="$FULL_BENCH_PATTERN"
@@ -82,6 +83,13 @@ if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
   recovery_bench_args+=(-benchtime "${CHORD_BENCH_TIME}")
 fi
 go test ./internal/recovery "${recovery_bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
+
+printf '\n==> Running apply_patch planning benchmarks\n'
+tools_bench_args=(-run '^$' -bench "$TOOLS_BENCH_PATTERN" -benchmem)
+if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
+  tools_bench_args+=(-benchtime "${CHORD_BENCH_TIME}")
+fi
+go test ./internal/tools "${tools_bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
 
 if [[ $# -eq 2 ]]; then
   if command -v benchstat >/dev/null 2>&1; then

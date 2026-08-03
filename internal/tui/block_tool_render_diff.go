@@ -61,8 +61,8 @@ type diffOneSidedSpan struct {
 	LineWidth int
 }
 
-// appendPatchToolUnifiedDiffPair renders one logical (-,+) line pair from a unified diff.
-func appendPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine string, oldLineNum, newLineNum, diffWidth int, hl *codeHighlighter) int {
+// appendApplyPatchToolUnifiedDiffPair renders one logical (-,+) line pair from a unified diff.
+func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine string, oldLineNum, newLineNum, diffWidth int, hl *codeHighlighter) int {
 	formatLineNum := func(n int) string { return fmt.Sprintf("%4d ", n) }
 	if lines := renderInlineDiffLine(oldLine, newLine, diffWidth, hl); lines != nil {
 		if strings.HasPrefix(lines[0], "+") {
@@ -115,12 +115,23 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		}
 		return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
+	diffLines := strings.Split(b.Diff, "\n")
+	applyPatchTargets := b.applyPatchTargets()
+	multiFileApplyPatchDiff := b.ToolName == tools.NameApplyPatch && unifiedDiffFileCount(diffLines) > 1
+	if b.ToolName == tools.NameApplyPatch {
+		if !multiFileApplyPatchDiff {
+			result = appendApplyPatchTargetLines(result, applyPatchTargets, cardWidth-4)
+		}
+		if strings.TrimSpace(b.Diff) == "" && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+			result = appendApplyPatchPreview(result, b.editPatchArgsJSON(), filePath, cardWidth-4)
+		}
+	}
 	const diffLineNumWidth = 5
 	diffWidth := max(cardWidth-4-diffLineNumWidth, 10)
 	hl := ensureCodeHighlighter(&b.codeHL, filePath, diffContentSample(b.Diff))
-	diffLines := strings.Split(b.Diff, "\n")
 	shownLines := 0
 	seenHunk := false
+	diffFileCount := 0
 	var oldLineNum, newLineNum int
 	formatLineNum := func(n int) string { return fmt.Sprintf("%4d ", n) }
 	if !b.toolResultIsCancelled() {
@@ -175,7 +186,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 									result = append(result, "  "+DimStyle.Render("... (diff truncated)"))
 									break diffLoop
 								}
-								shownLines += appendPatchToolUnifiedDiffPair(&result, delBodies[k], addBodies[k], oldLineNum, newLineNum, diffWidth, hl)
+								shownLines += appendApplyPatchToolUnifiedDiffPair(&result, delBodies[k], addBodies[k], oldLineNum, newLineNum, diffWidth, hl)
 								oldLineNum++
 								newLineNum++
 							}
@@ -191,7 +202,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 							result = append(result, "  "+DimStyle.Render("... (diff truncated)"))
 							break diffLoop
 						}
-						shownLines += appendPatchToolUnifiedDiffPair(&result, line[1:], next[1:], oldLineNum, newLineNum, diffWidth, hl)
+						shownLines += appendApplyPatchToolUnifiedDiffPair(&result, line[1:], next[1:], oldLineNum, newLineNum, diffWidth, hl)
 						oldLineNum++
 						newLineNum++
 						i++
@@ -223,7 +234,23 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 					oldLineNum, newLineNum = oldStart, newStart
 				}
 				continue
-			case strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++"):
+			case strings.HasPrefix(line, "--- "):
+				if multiFileApplyPatchDiff && i+1 < len(diffLines) && strings.HasPrefix(diffLines[i+1], "+++ ") {
+					marker, path, syntaxPath := b.applyPatchDiffSectionDisplay(applyPatchTargets, line, diffLines[i+1])
+					if diffFileCount > 0 {
+						result = append(result, "  "+DimStyle.Render("─────────────"))
+						shownLines++
+					}
+					result = append(result, ToolResultExpandedStyle.Render("  ↳ "+marker+" ")+DimStyle.Render(path))
+					shownLines++
+					seenHunk = false
+					oldLineNum, newLineNum = 0, 0
+					hl = newCodeHighlighterWithLanguage(syntaxPath, diffContentSample(b.Diff), "")
+					diffFileCount++
+					i++
+				}
+				continue
+			case strings.HasPrefix(line, "+++ "):
 				continue
 			default:
 				content := line
@@ -240,12 +267,14 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			shownLines++
 		}
 	}
-	if (b.ToolName == tools.NameEdit || b.ToolName == tools.NamePatch) && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() && !toolShouldHideSuccessfulFileOpResult(b) {
+	if (b.ToolName == tools.NameEdit || b.ToolName == tools.NameApplyPatch) && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() && !toolShouldHideSuccessfulFileOpResult(b) {
 		result = append(result, ToolResultExpandedStyle.Render("  ↳ Diagnostics:"))
 		result = append(result, renderLSPDiagnosticsLines(editSuccessDiagnosticsContent(b.ResultContent), "    ", cardWidth-4)...)
 	}
 	if b.toolResultIsError() && b.ResultContent != "" {
-		if b.ToolName == tools.NameEdit || b.ToolName == tools.NamePatch {
+		if b.ToolName == tools.NameApplyPatch {
+			result = appendApplyPatchPreview(result, b.editPatchArgsJSON(), filePath, cardWidth-4)
+		} else if b.ToolName == tools.NameEdit {
 			before := len(result)
 			result = appendEditPatchPreview(result, b.editPatchArgsJSON(), cardWidth-4)
 			if len(result) == before {
@@ -265,6 +294,48 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
+func unifiedDiffFileCount(lines []string) int {
+	count := 0
+	for i := 0; i+1 < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "--- ") && strings.HasPrefix(lines[i+1], "+++ ") {
+			count++
+			i++
+		}
+	}
+	return count
+}
+
+func (b *Block) applyPatchDiffSectionDisplay(targets []tools.ApplyPatchDisplayTarget, oldHeader, newHeader string) (marker, path, syntaxPath string) {
+	oldPath := strings.TrimSpace(strings.TrimPrefix(oldHeader, "--- "))
+	newPath := strings.TrimSpace(strings.TrimPrefix(newHeader, "+++ "))
+	for _, target := range targets {
+		if oldPath != target.SourcePath && newPath != target.SourcePath &&
+			oldPath != target.TargetPath && newPath != target.TargetPath {
+			continue
+		}
+		marker, _ = applyPatchTargetDisplay(target)
+		source := b.displayToolPath(target.SourcePath)
+		if target.TargetPath != "" {
+			targetPath := b.displayToolPath(target.TargetPath)
+			return marker, source + " → " + targetPath, targetPath
+		}
+		return marker, source, source
+	}
+
+	oldPath = b.displayToolPath(oldPath)
+	newPath = b.displayToolPath(newPath)
+	switch {
+	case oldPath == "/dev/null":
+		return "A", newPath, newPath
+	case newPath == "/dev/null":
+		return "D", oldPath, oldPath
+	case oldPath != newPath:
+		return "R", oldPath + " → " + newPath, newPath
+	default:
+		return "M", oldPath, oldPath
+	}
+}
+
 func appendEditPatchPreview(result []string, argsJSON string, width int) []string {
 	patch := editPatchFromArgs(argsJSON)
 	if patch == "" {
@@ -277,6 +348,91 @@ func appendEditPatchPreview(result []string, argsJSON string, width int) []strin
 		}
 	}
 	return result
+}
+
+func appendApplyPatchPreview(result []string, argsJSON, filePath string, width int) []string {
+	patch := editPatchFromArgs(argsJSON)
+	if patch == "" {
+		return result
+	}
+	hl := newCodeHighlighterWithLanguage(filePath, applyPatchCodeSample(patch), "")
+	result = append(result, ToolResultExpandedStyle.Render("  ↳ Patch:"))
+	for _, line := range editPatchPreviewLines(patch) {
+		for _, wrapped := range wrapIndentedText(line, width) {
+			result = append(result, renderApplyPatchPreviewLine(wrapped, width, hl))
+		}
+	}
+	return result
+}
+
+func renderApplyPatchPreviewLine(line string, width int, hl *codeHighlighter) string {
+	switch {
+	case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+		code := line[1:]
+		return "    " + DiffAddStyle.Render("+") + renderHighlightedSnippetLine(code, nil, max(width-1, 1), hl, diffAddBg)
+	case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+		code := line[1:]
+		return "    " + DiffDelStyle.Render("-") + renderHighlightedSnippetLine(code, nil, max(width-1, 1), hl, diffDelBg)
+	case strings.HasPrefix(line, " "):
+		return "    " + " " + renderHighlightedSnippetLine(line[1:], nil, max(width-1, 1), hl, "")
+	case strings.HasPrefix(line, "@@"):
+		return "    " + ToolResultExpandedStyle.Render(line)
+	case strings.HasPrefix(line, "***"):
+		return "    " + ToolResultStyle.Render(line)
+	default:
+		return "    " + DimStyle.Render(line)
+	}
+}
+
+func applyPatchCodeSample(patch string) string {
+	var lines []string
+	for line := range strings.SplitSeq(patch, "\n") {
+		if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ") {
+			lines = append(lines, line[1:])
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func appendApplyPatchTargetLines(result []string, targets []tools.ApplyPatchDisplayTarget, width int) []string {
+	// A single target is already shown in the tool-card header. Keep the
+	// explicit list only when it adds information for a multi-file patch.
+	if len(targets) <= 1 {
+		return result
+	}
+	result = append(result, ToolResultExpandedStyle.Render("  ↳ Files:"))
+	for _, target := range targets {
+		marker, path := applyPatchTargetDisplay(target)
+		for _, wrapped := range wrapIndentedText(marker+" "+path, width) {
+			result = append(result, "    "+DimStyle.Render(wrapped))
+		}
+	}
+	return result
+}
+
+func applyPatchTargetDisplay(target tools.ApplyPatchDisplayTarget) (marker, path string) {
+	marker, path = "M", target.SourcePath
+	if target.TargetPath != "" {
+		return "R", target.SourcePath + " → " + target.TargetPath
+	}
+	switch target.Kind {
+	case tools.MutationAdd:
+		marker = "A"
+	case tools.MutationDelete:
+		marker = "D"
+	}
+	return marker, path
+}
+
+func (b *Block) applyPatchTargets() []tools.ApplyPatchDisplayTarget {
+	if b == nil || toolNameKey(b.ToolName) != tools.NameApplyPatch {
+		return nil
+	}
+	targets, err := tools.ApplyPatchDisplayTargets(json.RawMessage(b.editPatchArgsJSON()))
+	if err != nil {
+		return nil
+	}
+	return targets
 }
 
 func appendReplaceEditPreview(result []string, argsJSON string, width int) []string {
@@ -360,7 +516,21 @@ func editPatchPreviewLines(patch string) []string {
 }
 
 func (b *Block) diffToolFilePath() string {
-	if b.ToolName == tools.NameEdit || b.ToolName == tools.NamePatch {
+	if toolNameKey(b.ToolName) == tools.NameApplyPatch {
+		targets := b.applyPatchTargets()
+		if len(targets) == 0 {
+			var parsed struct {
+				Paths []string `json:"paths"`
+			}
+			if json.Unmarshal([]byte(b.Content), &parsed) != nil || len(parsed.Paths) == 0 {
+				return ""
+			}
+			return applyPatchPathSummary(parsed.Paths[0], len(parsed.Paths))
+		}
+		_, path := applyPatchTargetDisplay(targets[0])
+		return applyPatchPathSummary(path, len(targets))
+	}
+	if b.ToolName == tools.NameEdit {
 		path := tools.ExtractEditPathFromArgs(json.RawMessage(b.Content))
 		if path == "" {
 			var parsed struct {
@@ -389,6 +559,14 @@ func (b *Block) diffToolFilePath() string {
 		return ""
 	}
 	return strings.TrimSpace(parsed.Path)
+}
+
+func applyPatchPathSummary(path string, count int) string {
+	path = strings.TrimSpace(path)
+	if count <= 1 {
+		return path
+	}
+	return fmt.Sprintf("%s +%d files", path, count-1)
 }
 
 // processWorkingDir caches os.Getwd so per-render path shortening does not pay a

@@ -1007,12 +1007,12 @@ func validateImportedCodexMessages(msgs []message.Message, report *ImportReport)
 var codexToolMapping = map[string]string{
 	"exec_command": tools.NameShell,
 	"shell":        tools.NameShell,
-	"apply_patch":  tools.NamePatch,
+	"apply_patch":  tools.NameApplyPatch,
 	"read_file":    tools.NameRead,
 	"file_read":    tools.NameRead,
 	"write_file":   tools.NameWrite,
 	"file_write":   tools.NameWrite,
-	"edit_file":    tools.NamePatch,
+	"edit_file":    tools.NameApplyPatch,
 	"delete_file":  tools.NameDelete,
 	"file_delete":  tools.NameDelete,
 	"remove_file":  tools.NameDelete,
@@ -1044,7 +1044,7 @@ func codexNormalizeToolArgs(codexName string, chordName string, rawArgs json.Raw
 	}
 
 	switch chordName {
-	case tools.NamePatch, tools.NameEdit:
+	case tools.NameApplyPatch, tools.NameEdit:
 		// Imported Codex edit_file/apply_patch records are normalized as Chord patch-style
 		// calls to preserve historical session replay; replace-edit sessions use their own schema.
 		if strings.EqualFold(codexName, "edit_file") {
@@ -1073,15 +1073,16 @@ func codexNormalizeEditArgs(args map[string]any) json.RawMessage {
 	if patch == "" {
 		return nil
 	}
+	if strings.HasPrefix(strings.TrimSpace(patch), "*** Begin Patch") {
+		result := map[string]any{"patch": patch}
+		b, _ := json.Marshal(result)
+		return b
+	}
 	path := codexPickString(args, "path", "file_path", "file")
 	if path == "" {
-		var ok bool
-		path, patch, ok = splitImportedEditEnvelope(patch)
-		if !ok {
-			return nil
-		}
+		return nil
 	}
-	result := map[string]any{"path": path, "patch": patch}
+	result := map[string]any{"patch": buildImportedApplyPatchEnvelope(path, patch)}
 	b, _ := json.Marshal(result)
 	return b
 }
@@ -1093,10 +1094,14 @@ func codexNormalizeEditFileArgs(args map[string]any) json.RawMessage {
 	if path == "" || oldText == "" {
 		return nil
 	}
-	patch := buildSingleUpdatePatch(oldText, newText)
-	result := map[string]any{"path": path, "patch": patch}
+	patch := buildImportedApplyPatchEnvelope(path, buildSingleUpdatePatch(oldText, newText))
+	result := map[string]any{"patch": patch}
 	b, _ := json.Marshal(result)
 	return b
+}
+
+func buildImportedApplyPatchEnvelope(path, patch string) string {
+	return "*** Begin Patch\n*** Update File: " + path + "\n" + strings.TrimRight(patch, "\r\n") + "\n*** End Patch"
 }
 
 func codexNormalizeShellArgs(args map[string]any) json.RawMessage {

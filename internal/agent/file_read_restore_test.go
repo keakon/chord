@@ -119,8 +119,8 @@ func TestRestoreTrackedFileStatePartialReadDoesNotAuthorizeDestructiveWrites(t *
 	if locks != nil {
 		locks.Release()
 	}
-	if err == nil || !strings.Contains(err.Error(), "read the complete file first") {
-		t.Fatalf("delete after restored partial read error = %v, want full-read requirement", err)
+	if err != nil || locks == nil {
+		t.Fatalf("delete after restored partial read error = %v, want delete to proceed without read gate", err)
 	}
 	if got := readTestFile(t, path); got != "one\ntwo\n" {
 		t.Fatalf("file content = %q, want unchanged", got)
@@ -272,7 +272,7 @@ func TestRestoreTrackedFileStateReadThenPatchUsesPostWriteHash(t *testing.T) {
 
 	a := newRestoreEditTestAgent(t, projectRoot)
 	msgs := append(restoreReadMessages(t, "read-1", path, readHash, nil),
-		restoreAssistantCall(t, "patch-1", tools.NamePatch, map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"}, nil),
+		restoreAssistantCall(t, "patch-1", tools.NameApplyPatch, map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"}, nil),
 		message.Message{
 			Role:       "tool",
 			ToolCallID: "patch-1",
@@ -505,7 +505,7 @@ func newRestoreEditTestAgent(t *testing.T, projectRoot string) *MainAgent {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWD) })
 	a := newTestMainAgent(t, projectRoot)
-	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
 	a.fileTrack = filelock.NewFileTracker()
 	return a
 }
@@ -537,7 +537,7 @@ func restoreAssistantCall(t *testing.T, callID, name string, args map[string]any
 func executeEdit(t *testing.T, a *MainAgent, path, oldString, newString string) error {
 	t.Helper()
 	args := mustJSONRaw(t, map[string]any{"path": filepath.Base(path), "patch": "@@\n-" + oldString + "\n+" + newString + "\n"})
-	_, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-test", Name: tools.NamePatch, Args: args})
+	_, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-test", Name: tools.NameApplyPatch, Args: args})
 	return err
 }
 

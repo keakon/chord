@@ -31,6 +31,14 @@ type fileBackupRecord struct {
 	Size int64
 }
 
+// fileBackupSource is one pre-execution file snapshot eligible for backup.
+// Multi-file mutations carry one entry per touched path so every execution
+// path backs up the same set.
+type fileBackupSource struct {
+	Path string
+	Data []byte
+}
+
 type fileBackupOutcome struct {
 	Records []fileBackupRecord
 	Warning string

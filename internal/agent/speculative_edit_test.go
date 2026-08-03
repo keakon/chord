@@ -71,7 +71,7 @@ func TestStreamingToolExecutor_ReplaceEditSpeculativeExecution(t *testing.T) {
 }
 
 // TestStreamingToolExecutor_ReplaceEditPathExtraction verifies that
-// ExtractEditPathFromArgsInDir correctly extracts path from EditTool args
+// trackedEditPathFromArgs correctly extracts path from EditTool args
 func TestStreamingToolExecutor_ReplaceEditPathExtraction(t *testing.T) {
 	projectRoot := t.TempDir()
 
@@ -88,6 +88,15 @@ func TestStreamingToolExecutor_ReplaceEditPathExtraction(t *testing.T) {
 				"new_string": "new",
 			},
 			wantPath: filepath.Join(projectRoot, "src/main.go"),
+		},
+		{
+			name: "EditTool args with filePath alias",
+			args: map[string]any{
+				"filePath":   "src/legacy.go",
+				"old_string": "old",
+				"new_string": "new",
+			},
+			wantPath: filepath.Join(projectRoot, "src/legacy.go"),
 		},
 		{
 			name: "Relative path with parent directory",
@@ -116,9 +125,9 @@ func TestStreamingToolExecutor_ReplaceEditPathExtraction(t *testing.T) {
 				t.Fatalf("Marshal args: %v", err)
 			}
 
-			got := tools.ExtractEditPathFromArgsInDir(argsJSON, projectRoot)
+			got := trackedEditPathFromArgs(argsJSON, projectRoot)
 			if got != tt.wantPath {
-				t.Errorf("ExtractEditPathFromArgsInDir() = %q, want %q", got, tt.wantPath)
+				t.Errorf("trackedEditPathFromArgs() = %q, want %q", got, tt.wantPath)
 			}
 		})
 	}
@@ -186,9 +195,9 @@ func TestStreamingToolExecutor_ReplaceEditPreWriteStateCapture(t *testing.T) {
 	}
 }
 
-// TestStreamingToolExecutor_PatchToolSpeculativeExecution verifies that
-// PatchTool pre-write state capture works correctly (baseline comparison)
-func TestStreamingToolExecutor_PatchToolPreWriteStateCapture(t *testing.T) {
+// TestStreamingToolExecutor_ApplyPatchToolSpeculativeExecution verifies that
+// ApplyPatchTool pre-write state capture works correctly (baseline comparison)
+func TestStreamingToolExecutor_ApplyPatchToolPreWriteStateCapture(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "patch.txt")
 	if err := os.WriteFile(path, []byte("line1\nline2\n"), 0o644); err != nil {
@@ -196,16 +205,16 @@ func TestStreamingToolExecutor_PatchToolPreWriteStateCapture(t *testing.T) {
 	}
 
 	a := newTestMainAgent(t, projectRoot)
-	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
 
 	ctx := context.Background()
 
-	// Execute PatchTool
+	// Execute ApplyPatchTool
 	patchArgs, _ := json.Marshal(map[string]any{
 		"path":  "patch.txt",
 		"patch": "@@\n line1\n-line2\n+LINE2\n",
 	})
-	call := message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: patchArgs}
+	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs}
 
 	result, err := a.executeToolCall(ctx, call)
 	if err != nil {

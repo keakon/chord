@@ -782,7 +782,7 @@ func TestSwitchModelPropagatesCurrentSessionIDToNewClient(t *testing.T) {
 	}
 }
 
-func TestSwitchModelRefreshesMainEditPatchToolDefinitions(t *testing.T) {
+func TestSwitchModelRefreshesMainEditApplyPatchToolDefinitions(t *testing.T) {
 	tests := []struct {
 		name            string
 		initialModel    string
@@ -794,7 +794,7 @@ func TestSwitchModelRefreshesMainEditPatchToolDefinitions(t *testing.T) {
 		{
 			name:            "gpt to claude",
 			initialModel:    "gpt-4",
-			initialWantTool: tools.NamePatch,
+			initialWantTool: tools.NameApplyPatch,
 			targetRef:       "sample/claude-sonnet-4",
 			targetModel:     "claude-sonnet-4",
 			targetWantTool:  tools.NameEdit,
@@ -805,7 +805,7 @@ func TestSwitchModelRefreshesMainEditPatchToolDefinitions(t *testing.T) {
 			initialWantTool: tools.NameEdit,
 			targetRef:       "sample/gpt-4",
 			targetModel:     "gpt-4",
-			targetWantTool:  tools.NamePatch,
+			targetWantTool:  tools.NameApplyPatch,
 		},
 	}
 
@@ -816,10 +816,10 @@ func TestSwitchModelRefreshesMainEditPatchToolDefinitions(t *testing.T) {
 			a.markAgentsMDReady()
 			a.MarkSkillsReady()
 			a.markMCPReady()
-			a.tools.Register(tools.PatchTool{})
+			a.tools.Register(tools.ApplyPatchTool{})
 			a.tools.Register(tools.EditTool{})
 			a.ruleset = permission.Ruleset{
-				{Permission: tools.NamePatch, Pattern: "*", Action: permission.ActionAllow},
+				{Permission: tools.NameApplyPatch, Pattern: "*", Action: permission.ActionAllow},
 				{Permission: tools.NameEdit, Pattern: "*", Action: permission.ActionAllow},
 			}
 			a.llmMu.Lock()
@@ -829,7 +829,7 @@ func TestSwitchModelRefreshesMainEditPatchToolDefinitions(t *testing.T) {
 			if err := a.ensureSessionBuilt(context.Background()); err != nil {
 				t.Fatalf("initial ensureSessionBuilt: %v", err)
 			}
-			assertOnlyEditPatchTool(t, a.mainLLMToolDefinitions(), tt.initialWantTool)
+			assertOnlyEditApplyPatchTool(t, a.mainLLMToolDefinitions(), tt.initialWantTool)
 
 			providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"test-key"})
 			client := llm.NewClient(providerCfg, stubProvider{}, tt.targetModel, 2048, "")
@@ -846,25 +846,25 @@ func TestSwitchModelRefreshesMainEditPatchToolDefinitions(t *testing.T) {
 			if !a.surfaceDirty.Load() {
 				t.Fatal("model switch should mark tool surface dirty")
 			}
-			assertOnlyEditPatchTool(t, a.mainLLMToolDefinitions(), tt.targetWantTool)
+			assertOnlyEditApplyPatchTool(t, a.mainLLMToolDefinitions(), tt.targetWantTool)
 			if err := a.ensureSessionBuilt(context.Background()); err != nil {
 				t.Fatalf("ensureSessionBuilt after switch: %v", err)
 			}
-			assertOnlyEditPatchTool(t, a.mainLLMToolDefinitions(), tt.targetWantTool)
+			assertOnlyEditApplyPatchTool(t, a.mainLLMToolDefinitions(), tt.targetWantTool)
 		})
 	}
 }
 
-func TestLazyMainModelPolicyRefreshesEditPatchToolsBeforeRequest(t *testing.T) {
+func TestLazyMainModelPolicyRefreshesEditApplyPatchToolsBeforeRequest(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
 	a.markMCPReady()
-	a.tools.Register(tools.PatchTool{})
+	a.tools.Register(tools.ApplyPatchTool{})
 	a.tools.Register(tools.EditTool{})
 	a.ruleset = permission.Ruleset{
-		{Permission: tools.NamePatch, Pattern: "*", Action: permission.ActionAllow},
+		{Permission: tools.NameApplyPatch, Pattern: "*", Action: permission.ActionAllow},
 		{Permission: tools.NameEdit, Pattern: "*", Action: permission.ActionAllow},
 	}
 	a.llmMu.Lock()
@@ -876,7 +876,7 @@ func TestLazyMainModelPolicyRefreshesEditPatchToolsBeforeRequest(t *testing.T) {
 	if err := a.ensureSessionBuilt(context.Background()); err != nil {
 		t.Fatalf("initial ensureSessionBuilt: %v", err)
 	}
-	if !hasToolDefinition(a.mainLLMToolDefinitions(), tools.NamePatch) || hasToolDefinition(a.mainLLMToolDefinitions(), tools.NameEdit) {
+	if !hasToolDefinition(a.mainLLMToolDefinitions(), tools.NameApplyPatch) || hasToolDefinition(a.mainLLMToolDefinitions(), tools.NameEdit) {
 		t.Fatalf("initial tool definitions = %v, want patch only", toolDefinitionNames(a.mainLLMToolDefinitions()))
 	}
 
@@ -894,17 +894,17 @@ func TestLazyMainModelPolicyRefreshesEditPatchToolsBeforeRequest(t *testing.T) {
 	if _, err := a.callLLM(context.Background(), []message.Message{{Role: message.RoleUser, Content: "hi"}}); err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}
-	if hasToolDefinition(provider.tools, tools.NamePatch) || !hasToolDefinition(provider.tools, tools.NameEdit) {
+	if hasToolDefinition(provider.tools, tools.NameApplyPatch) || !hasToolDefinition(provider.tools, tools.NameEdit) {
 		t.Fatalf("request tool definitions = %v, want edit only", toolDefinitionNames(provider.tools))
 	}
 }
 
-func assertOnlyEditPatchTool(t *testing.T, defs []message.ToolDefinition, want string) {
+func assertOnlyEditApplyPatchTool(t *testing.T, defs []message.ToolDefinition, want string) {
 	t.Helper()
-	hasPatch := hasToolDefinition(defs, tools.NamePatch)
+	hasPatch := hasToolDefinition(defs, tools.NameApplyPatch)
 	hasEdit := hasToolDefinition(defs, tools.NameEdit)
 	switch want {
-	case tools.NamePatch:
+	case tools.NameApplyPatch:
 		if !hasPatch || hasEdit {
 			t.Fatalf("tool definitions = %v, want patch only", toolDefinitionNames(defs))
 		}

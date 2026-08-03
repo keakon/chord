@@ -206,6 +206,13 @@ func TestEditToolAcceptsFilePathAlias(t *testing.T) {
 	if err := ValidateToolArgs(EditTool{}, args); err != nil {
 		t.Fatalf("ValidateToolArgs(filePath) err = %v, want nil", err)
 	}
+	policy := (EditTool{BaseDir: dir}).ConcurrencyPolicy(args)
+	if policy.Resource != "file:"+path || policy.Mode != ConcurrencyModeWrite {
+		t.Fatalf("ConcurrencyPolicy(filePath) = %#v, want write lock for %q", policy, path)
+	}
+	if got := ExtractEditPathFromArgs(args); got != "demo.txt" {
+		t.Fatalf("ExtractEditPathFromArgs(filePath) = %q, want demo.txt", got)
+	}
 	// Execution honors the alias too.
 	out, err := runEdit(t, dir, map[string]any{
 		"filePath": "demo.txt", "old_string": "hello", "new_string": "world",

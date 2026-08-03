@@ -80,7 +80,7 @@ func analyzeReadValidity(messages []message.Message, callMeta map[string]toolCal
 
 	for i := range messages {
 		msg := &messages[i]
-		if msg.Role != message.RoleTool || isToolResultErrorStatus(msg.ToolStatus) {
+		if msg.Role != message.RoleTool || isToolResultUnsuccessfulStatus(msg.ToolStatus) {
 			continue
 		}
 		meta := callMeta[msg.ToolCallID]
@@ -106,7 +106,7 @@ func analyzeReadValidity(messages []message.Message, callMeta map[string]toolCal
 					firstReadByKey[key] = readIdx + 1
 				}
 			}
-		case tools.NameEdit, tools.NamePatch, tools.NameWrite, tools.NameDelete:
+		case tools.NameEdit, tools.NameApplyPatch, tools.NameWrite, tools.NameDelete:
 			for key, edit := range editTargetRecords(i, meta.Args, msg.FileState) {
 				editsByKey[key] = append(editsByKey[key], edit)
 			}
@@ -171,6 +171,12 @@ func analyzeReadValidity(messages []message.Message, callMeta map[string]toolCal
 		}
 	}
 	return out
+}
+
+func isToolResultUnsuccessfulStatus(status string) bool {
+	status = strings.TrimSpace(status)
+	return strings.EqualFold(status, string(ToolResultStatusError)) ||
+		strings.EqualFold(status, string(ToolResultStatusCancelled))
 }
 
 // analyzeSupersededReads reports reads wholly covered by a later read of the

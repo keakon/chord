@@ -538,7 +538,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.Registry = tools.NewRegistry()
 	ac.Registry.Register(tools.ReadTool{BaseDir: ac.ProjectRoot})
 	ac.Registry.Register(tools.WriteTool{BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.PatchTool{BaseDir: ac.ProjectRoot})
+	ac.Registry.Register(tools.ApplyPatchTool{BaseDir: ac.ProjectRoot})
 	ac.Registry.Register(tools.EditTool{BaseDir: ac.ProjectRoot})
 	ac.Registry.Register(tools.DeleteTool{BaseDir: ac.ProjectRoot})
 

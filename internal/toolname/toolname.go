@@ -6,7 +6,7 @@ const (
 	Read         = "read"
 	Write        = "write"
 	Edit         = "edit"
-	Patch        = "patch"
+	ApplyPatch   = "apply_patch"
 	Delete       = "delete"
 	Grep         = "grep"
 	Glob         = "glob"
@@ -31,7 +31,11 @@ const (
 	ViewImage    = "view_image"
 )
 
-// Normalize trims user-provided tool names while preserving exact spelling.
+// Normalize trims user-provided tool names and maps legacy aliases.
 func Normalize(name string) string {
-	return strings.TrimSpace(name)
+	name = strings.TrimSpace(name)
+	if name == "patch" {
+		return ApplyPatch
+	}
+	return name
 }

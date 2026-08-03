@@ -8,7 +8,7 @@ import (
 
 func TestLooksLikeBuildLikeLogIncludesPatch(t *testing.T) {
 	ctx := requestReductionContext{
-		ToolName: tools.NamePatch,
+		ToolName: tools.NameApplyPatch,
 		Content:  "Diagnostics:\nwarning: unused variable\n",
 	}
 	if !looksLikeBuildLikeLog(ctx) {

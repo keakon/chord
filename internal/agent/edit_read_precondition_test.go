@@ -70,13 +70,13 @@ func TestMainAgent_EditCanPatchFileWithoutPriorSnapshot(t *testing.T) {
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
 
 	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: patchArgs})
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs})
 	if err != nil {
 		t.Fatalf("Edit without Read failed: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestMainAgent_FailedEditWithoutReadDoesNotModifyFile(t *testing.T) {
 	}
 
 	a := newTestMainAgent(t, projectRoot)
-	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
 
 	err := executeEdit(t, a, path, "missing", "after")
 	if err == nil || !strings.Contains(err.Error(), "hunk not found") {
@@ -358,7 +358,7 @@ func TestMainAgent_EditAfterWriteTracksSnapshotForStaleBackup(t *testing.T) {
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.WriteTool{})
-	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
 
 	writeArgs, err := json.Marshal(map[string]any{"path": path, "content": "before\n"})
 	if err != nil {
@@ -376,7 +376,7 @@ func TestMainAgent_EditAfterWriteTracksSnapshotForStaleBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: patchArgs})
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs})
 	if err != nil {
 		t.Fatalf("Edit after Write failed: %v", err)
 	}
@@ -409,7 +409,7 @@ func TestMainAgent_FileMentionTracksSnapshotForStaleBackup(t *testing.T) {
 	}
 
 	a := newTestMainAgent(t, projectRoot)
-	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
 	a.recordCommittedUserMessage(message.Message{Role: "user", Parts: []message.ContentPart{{Type: "text", Text: `<file path="` + path + `">` + "\nbefore\n\n</file>"}}})
 	if err := os.WriteFile(path, []byte("external\n"), 0o644); err != nil {
 		t.Fatalf("external WriteFile: %v", err)
@@ -419,7 +419,7 @@ func TestMainAgent_FileMentionTracksSnapshotForStaleBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: patchArgs})
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs})
 	if err != nil {
 		t.Fatalf("Edit after @file mention failed: %v", err)
 	}
@@ -457,7 +457,7 @@ func TestMainAgent_EditStaleCreatesBackup(t *testing.T) {
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
 
 	readArgs, err := json.Marshal(map[string]any{"path": path})
 	if err != nil {
@@ -474,7 +474,7 @@ func TestMainAgent_EditStaleCreatesBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: patchArgs})
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs})
 	if err != nil {
 		t.Fatalf("Edit after stale file failed: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestMainAgent_EditBackupFailureDoesNotBlockEdit(t *testing.T) {
 
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.PatchTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
 
 	readArgs, err := json.Marshal(map[string]any{"path": path, "limit": 1})
 	if err != nil {
@@ -528,7 +528,7 @@ func TestMainAgent_EditBackupFailureDoesNotBlockEdit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
-	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: patchArgs})
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs})
 	if err != nil {
 		t.Fatalf("Edit with backup failure should continue: %v", err)
 	}

@@ -108,7 +108,7 @@ func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowe
 	switch toolNameKey(toolName) {
 	case tools.NameShell:
 		buildBashConfirmSummary(&summary, parsed)
-	case tools.NamePatch:
+	case tools.NameApplyPatch:
 		buildPatchConfirmSummary(&summary, parsed)
 	case tools.NameEdit:
 		buildReplaceEditConfirmSummary(&summary, parsed)
@@ -135,7 +135,11 @@ func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowe
 }
 
 func toolNameKey(toolName string) string {
-	return tools.NormalizeName(toolName)
+	name := tools.NormalizeName(toolName)
+	if name == "patch" {
+		return tools.NameApplyPatch
+	}
+	return name
 }
 
 func parseConfirmArgs(argsJSON string) (map[string]any, error) {
@@ -161,7 +165,7 @@ func confirmActionText(toolName string) string {
 		return "Start background process"
 	case tools.NameSpawnStop:
 		return "Stop background process"
-	case tools.NamePatch:
+	case tools.NameApplyPatch:
 		return "Patch file"
 	case tools.NameEdit:
 		return "Replace text in file"
@@ -193,7 +197,7 @@ func confirmRiskForTool(toolName string) confirmRiskLevel {
 	switch toolNameKey(toolName) {
 	case tools.NameShell, tools.NameSpawn, tools.NameSpawnStop:
 		return confirmRiskHigh
-	case tools.NameEdit, tools.NamePatch, tools.NameWrite, tools.NameDelete:
+	case tools.NameEdit, tools.NameApplyPatch, tools.NameWrite, tools.NameDelete:
 		return confirmRiskMedium
 	case tools.NameRead, tools.NameViewImage, tools.NameGrep, tools.NameGlob, tools.NameLsp, tools.NameWebFetch:
 		return confirmRiskLow

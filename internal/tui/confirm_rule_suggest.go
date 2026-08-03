@@ -32,7 +32,7 @@ func suggestRulePatternsWithContext(toolName, argsJSON string, needsApproval []s
 	switch toolNameKey(toolName) {
 	case tools.NameShell:
 		return suggestShellPatterns(argsJSON, needsApproval, needsApprovalRules)
-	case tools.NameEdit, tools.NamePatch, tools.NameWrite:
+	case tools.NameEdit, tools.NameApplyPatch, tools.NameWrite:
 		return suggestFilePatterns(toolName, argsJSON, cwd)
 	case tools.NameWebFetch:
 		return suggestWebFetchPatterns(argsJSON)

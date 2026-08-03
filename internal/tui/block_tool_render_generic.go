@@ -220,7 +220,7 @@ func bashCollapsedCommandHiddenLines(command string, contentWidth int) int {
 }
 
 func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
-	b.ToolName = tools.NormalizeName(b.ToolName)
+	b.ToolName = toolNameKey(b.ToolName)
 	metrics := newToolCardMetrics(width)
 	blockStyle := metrics.blockStyle
 	toolCardBg := metrics.toolCardBg
@@ -233,7 +233,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	if b.ToolName == tools.NameWrite {
 		return b.renderWriteCall(width, spinnerFrame)
 	}
-	if b.ToolName == tools.NameEdit || b.ToolName == tools.NamePatch {
+	if b.ToolName == tools.NameEdit || b.ToolName == tools.NameApplyPatch {
 		return b.renderFileDiffCall(width, spinnerFrame)
 	}
 	if b.ToolName == tools.NameRead {

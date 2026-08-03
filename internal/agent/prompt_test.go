@@ -159,7 +159,7 @@ func TestToolSelectionPromptBlock_UsesEditSpecificGuidance(t *testing.T) {
 		t.Fatalf("edit prompt should not use patch hunk guidance: %q", editPrompt)
 	}
 
-	patchPrompt := toolSelectionPromptBlock(map[string]struct{}{tools.NamePatch: {}})
+	patchPrompt := toolSelectionPromptBlock(map[string]struct{}{tools.NameApplyPatch: {}})
 	if !strings.Contains(patchPrompt, "keep hunks small") {
 		t.Fatalf("patch prompt missing hunk guidance: %q", patchPrompt)
 	}
@@ -936,7 +936,7 @@ read: allow
 func TestMainAgentCapabilityPromptBlock_UsesVisibleToolsOnly(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.PatchTool{})
+	a.tools.Register(tools.ApplyPatchTool{})
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.DeleteTool{})
 	a.tools.Register(tools.GrepTool{})
@@ -1043,7 +1043,7 @@ lsp: allow
 func TestMainAgentCapabilityPromptBlock_OmitsPathDiscoveryGuidanceWithoutDiscoveryTools(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry(), modelName: "gpt-4"} // Set GPT model to use patch tool
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.PatchTool{})
+	a.tools.Register(tools.ApplyPatchTool{})
 	a.tools.Register(tools.DeleteTool{})
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
@@ -1056,7 +1056,7 @@ delete: allow
 	got := a.mainAgentCapabilityPromptBlock()
 	for _, want := range []string{
 		"Use `read` for file contents when the target path is already known or has been verified.",
-		"Use `patch` to modify the contents of one existing file with a verified path.",
+		"Use `apply_patch` to modify the contents of one existing file with a verified path.",
 		"Use `delete` to remove files with verified paths whose current version you know in full (a complete read or your own whole-file write).",
 	} {
 		if !strings.Contains(got, want) {
@@ -1186,7 +1186,7 @@ question: deny
 func TestMainAgentCapabilityPromptBlock_ShowsLimitedFileScope(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.PatchTool{})
+	a.tools.Register(tools.ApplyPatchTool{})
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.DeleteTool{})
 	a.tools.Register(tools.NewShellTool("bash"))
@@ -1406,7 +1406,7 @@ notify: allow
 func TestMainAndSubCapabilityPromptBlocksUseAudienceSpecificEscalation(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(tools.ReadTool{})
-	reg.Register(tools.PatchTool{})
+	reg.Register(tools.ApplyPatchTool{})
 	reg.Register(tools.NewShellTool("bash"))
 	reg.Register(tools.NewQuestionTool(nil))
 	permNode := parsePermissionNode(t, `

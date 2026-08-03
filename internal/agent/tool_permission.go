@@ -46,6 +46,8 @@ func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args js
 
 	unwrapped := llm.UnwrapToolArgs(args)
 	switch toolName {
+	case tools.NameApplyPatch:
+		return evaluateApplyPatchPermission(ruleset, unwrapped)
 	case tools.NameDelete:
 		return evaluateDeleteToolPermission(ruleset, unwrapped)
 	case tools.NameGlob:
@@ -60,6 +62,34 @@ func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args js
 		decision.MatchArgument = arg
 		return decision
 	}
+}
+
+func evaluateApplyPatchPermission(ruleset permission.Ruleset, args json.RawMessage) toolPermissionDecision {
+	targets, err := tools.ApplyPatchDisplayTargets(args)
+	if err != nil {
+		arg := extractToolArgument(tools.NameApplyPatch, args)
+		return toolPermissionDecision{Action: ruleset.Evaluate(tools.NameApplyPatch, arg), MatchArgument: arg}
+	}
+	paths := make([]string, 0, len(targets)*2)
+	for _, target := range targets {
+		paths = append(paths, target.SourcePath)
+		if target.TargetPath != "" && target.TargetPath != target.SourcePath {
+			paths = append(paths, target.TargetPath)
+		}
+	}
+	items := make([]permissionAggregateItem, 0, len(paths))
+	for _, path := range dedupeStrings(paths) {
+		action := ruleset.Evaluate(tools.NameApplyPatch, path)
+		item := permissionAggregateItem{Argument: path, Action: action}
+		switch action {
+		case permission.ActionAsk:
+			item.AskList = []string{path}
+		case permission.ActionAllow:
+			item.AllowList = []string{path}
+		}
+		items = append(items, item)
+	}
+	return aggregatePermissionItems(items, permission.ActionAllow, "*")
 }
 
 func evaluateDeleteToolPermission(ruleset permission.Ruleset, args json.RawMessage) toolPermissionDecision {

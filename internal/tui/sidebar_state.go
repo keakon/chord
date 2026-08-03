@@ -366,7 +366,18 @@ func (s *Sidebar) AddFileDelete(agentID, filePath string) {
 	s.addFileChange(agentID, filePath, 0, 0, true)
 }
 
+// AddFileMove records both sides of a renamed file. The target remains visible
+// even when the move does not change any lines.
+func (s *Sidebar) AddFileMove(agentID, sourcePath, targetPath string, added, removed int) {
+	s.addFileChange(agentID, sourcePath, 0, 0, true)
+	s.addFileChangeWithEmpty(agentID, targetPath, added, removed, false, true)
+}
+
 func (s *Sidebar) addFileChange(agentID, filePath string, added, removed int, deleted bool) {
+	s.addFileChangeWithEmpty(agentID, filePath, added, removed, deleted, false)
+}
+
+func (s *Sidebar) addFileChangeWithEmpty(agentID, filePath string, added, removed int, deleted, keepEmpty bool) {
 	agentID = normalizeSidebarAgentID(agentID)
 	filePath = filepath.Clean(filePath)
 	for i := range s.agents {
@@ -380,14 +391,14 @@ func (s *Sidebar) addFileChange(agentID, filePath string, added, removed int, de
 				s.agents[i].EditedFiles[j].Removed += removed
 				if deleted {
 					s.agents[i].EditedFiles[j].Deleted = true
-				} else if added != 0 || removed != 0 {
+				} else if added != 0 || removed != 0 || keepEmpty {
 					s.agents[i].EditedFiles[j].Deleted = false
 				}
 				return
 			}
 		}
 		// Skip empty new files (no visible diff stats to show).
-		if added == 0 && removed == 0 && !deleted {
+		if added == 0 && removed == 0 && !deleted && !keepEmpty {
 			return
 		}
 		// New file entry (cap at 50 to avoid unbounded growth).

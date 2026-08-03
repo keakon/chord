@@ -54,7 +54,7 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 	if editToolName != "" {
 		lines = append(lines, "- Use "+toolPromptName(editToolName)+" to modify the contents of one existing file with a verified path.")
 		switch editToolName {
-		case tools.NamePatch:
+		case tools.NameApplyPatch:
 			lines = append(lines, "- For "+toolPromptName(editToolName)+", keep hunks small and include unique unchanged context; in repeated blocks such as tests or fixtures, include the enclosing function, test, or case name.")
 			lines = append(lines, "- If patching a file modified earlier in the turn and the target area is not freshly visible, re-read the small target range before patching.")
 		case tools.NameEdit:
@@ -166,7 +166,7 @@ func fileModificationConstraintsPromptBlock(visible map[string]struct{}, ruleset
 		return ""
 	}
 
-	hasEdit := hasVisibleTool(visible, tools.NameEdit) || hasVisibleTool(visible, tools.NamePatch)
+	hasEdit := hasVisibleTool(visible, tools.NameEdit) || hasVisibleTool(visible, tools.NameApplyPatch)
 	hasWrite := hasVisibleTool(visible, tools.NameWrite)
 	hasDelete := hasVisibleTool(visible, tools.NameDelete)
 	if hasEdit && hasWrite && hasDelete && !hasScopedFilePermissions(visible, ruleset) {
@@ -248,8 +248,8 @@ func hasScopedFilePermissions(visible map[string]struct{}, ruleset permission.Ru
 	if hasVisibleTool(visible, tools.NameEdit) {
 		visibleFileTools = append(visibleFileTools, tools.NameEdit)
 	}
-	if hasVisibleTool(visible, tools.NamePatch) {
-		visibleFileTools = append(visibleFileTools, tools.NamePatch)
+	if hasVisibleTool(visible, tools.NameApplyPatch) {
+		visibleFileTools = append(visibleFileTools, tools.NameApplyPatch)
 	}
 	if hasVisibleTool(visible, tools.NameDelete) {
 		visibleFileTools = append(visibleFileTools, tools.NameDelete)
@@ -274,8 +274,8 @@ func toolHasScopedRestriction(ruleset permission.Ruleset, toolName string) bool 
 	toolNames := []string{toolName}
 	switch toolName {
 	case tools.NameEdit:
-		toolNames = append(toolNames, tools.NamePatch)
-	case tools.NamePatch:
+		toolNames = append(toolNames, tools.NameApplyPatch)
+	case tools.NameApplyPatch:
 		toolNames = append(toolNames, tools.NameEdit)
 	}
 	for _, rule := range ruleset {
@@ -312,8 +312,8 @@ func hasVisibleTool(visible map[string]struct{}, name string) bool {
 // visibleEditToolName returns the visible edit-family tool name (patch preferred
 // over edit), or "" when neither is visible.
 func visibleEditToolName(visible map[string]struct{}) string {
-	if hasVisibleTool(visible, tools.NamePatch) {
-		return tools.NamePatch
+	if hasVisibleTool(visible, tools.NameApplyPatch) {
+		return tools.NameApplyPatch
 	}
 	if hasVisibleTool(visible, tools.NameEdit) {
 		return tools.NameEdit

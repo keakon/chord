@@ -142,7 +142,7 @@ func TestHighlightedFileToolsUseExpectedBackgrounds(t *testing.T) {
 		{name: tools.NameRead, block: &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameRead, Content: string(readArgs), ResultContent: content, ResultDone: true}, codeBackground: currentTheme.ToolCallBg},
 		{name: tools.NameWrite, block: &Block{ID: 2, Type: BlockToolCall, ToolName: tools.NameWrite, Content: string(writeArgs), ResultDone: true}, codeBackground: currentTheme.ToolCallBg},
 		{name: tools.NameEdit, block: &Block{ID: 3, Type: BlockToolCall, ToolName: tools.NameEdit, Content: string(diffArgs), Diff: diff, ResultDone: true}, codeBackground: currentTheme.DiffAddLineBg},
-		{name: tools.NamePatch, block: &Block{ID: 4, Type: BlockToolCall, ToolName: tools.NamePatch, Content: string(diffArgs), Diff: diff, ResultDone: true}, codeBackground: currentTheme.DiffAddLineBg},
+		{name: tools.NameApplyPatch, block: &Block{ID: 4, Type: BlockToolCall, ToolName: tools.NameApplyPatch, Content: string(diffArgs), Diff: diff, ResultDone: true}, codeBackground: currentTheme.DiffAddLineBg},
 	}
 	toolBackground := colorOfTheme(currentTheme.ToolCallBg)
 	for _, tt := range tests {
@@ -150,7 +150,7 @@ func TestHighlightedFileToolsUseExpectedBackgrounds(t *testing.T) {
 			lines := tt.block.Render(80, "")
 			line := renderedLineContaining(t, lines, content)
 			assertRenderedTextBackground(t, line, "package", colorOfTheme(tt.codeBackground))
-			if tt.name == tools.NameEdit || tt.name == tools.NamePatch {
+			if tt.name == tools.NameEdit || tt.name == tools.NameApplyPatch {
 				contextLine := renderedLineContaining(t, lines, "package context")
 				assertRenderedTextBackground(t, contextLine, "package", toolBackground)
 			}
@@ -2356,11 +2356,11 @@ func TestEditToolCallCopyIncludesPathAndPatchWhenDiffMissing(t *testing.T) {
 	}
 }
 
-func TestPatchToolCallCopyPreservesToolName(t *testing.T) {
+func TestApplyPatchToolCallCopyPreservesToolName(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      tools.NamePatch,
+		ToolName:      tools.NameApplyPatch,
 		Content:       `{"path":"foo.txt"}`,
 		RawArgs:       `{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`,
 		ResultContent: "Applied patch to foo.txt (+1 -1)",
@@ -2369,8 +2369,8 @@ func TestPatchToolCallCopyPreservesToolName(t *testing.T) {
 	}
 
 	got := toolCallMarkdownContent(block)
-	if !strings.Contains(got, "# Tool call: patch") {
-		t.Fatalf("copied Patch block should preserve its tool name; got:\n%s", got)
+	if !strings.Contains(got, "# Tool call: apply_patch") {
+		t.Fatalf("copied ApplyPatch block should preserve its tool name; got:\n%s", got)
 	}
 	if strings.Contains(got, "# Tool call: edit") {
 		t.Fatalf("copied Patch block should not be labeled as Edit; got:\n%s", got)

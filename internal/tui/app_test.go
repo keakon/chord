@@ -2761,7 +2761,7 @@ func TestFileMutationDisplaySurvivesExecutionAndResultEvents(t *testing.T) {
 		},
 		{
 			name:            "patch diff",
-			toolName:        tools.NamePatch,
+			toolName:        tools.NameApplyPatch,
 			partialArgs:     `{"path":"src/demo.go","patch":"@@\n-old`,
 			completeArgs:    `{"path":"src/demo.go","patch":"@@\n-old\n+new\n"}`,
 			result:          "Applied patch to src/demo.go (+1 -1)",
@@ -4909,7 +4909,7 @@ func TestMessagesToBlocksRestoredEditWithoutToolDiffHidesSuccessResult(t *testin
 	if err := json.Unmarshal([]byte(block.Content), &displayArgs); err != nil {
 		t.Fatalf("parse restored Edit Content %q: %v", block.Content, err)
 	}
-	if !strings.HasSuffix(filepath.ToSlash(displayArgs["path"]), "/foo.txt") {
+	if displayArgs["path"] != "foo.txt" {
 		t.Fatalf("restored Edit display path = %q, want foo.txt", displayArgs["path"])
 	}
 	if _, ok := displayArgs["patch"]; ok {

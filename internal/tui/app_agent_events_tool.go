@@ -10,7 +10,14 @@ import (
 )
 
 func stableToolDisplayArgs(toolName, argsJSON, result string) string {
-	if toolName == tools.NameEdit || toolName == tools.NamePatch {
+	toolName = toolNameKey(toolName)
+	if toolName == tools.NameApplyPatch {
+		if display := applyPatchToolDisplayArgs(argsJSON); display != "" {
+			return display
+		}
+		return fileToolPathDisplayArgs(tools.ExtractEditPathFromArgs([]byte(argsJSON)))
+	}
+	if toolName == tools.NameEdit {
 		path := tools.ExtractEditPathFromArgs([]byte(argsJSON))
 		return fileToolPathDisplayArgs(path)
 	}
@@ -18,8 +25,17 @@ func stableToolDisplayArgs(toolName, argsJSON, result string) string {
 }
 
 func streamingToolDisplayArgs(toolName, argsJSON, result string) string {
+	toolName = toolNameKey(toolName)
 	switch toolName {
-	case tools.NameEdit, tools.NamePatch:
+	case tools.NameApplyPatch:
+		if display := applyPatchToolDisplayArgs(argsJSON); display != "" {
+			return display
+		}
+		if path := tools.ExtractEditPathFromArgs([]byte(argsJSON)); path != "" {
+			return fileToolPathDisplayArgs(path)
+		}
+		return argsJSON
+	case tools.NameEdit:
 		path := tools.ExtractEditPathFromArgs([]byte(argsJSON))
 		if path == "" {
 			path = streamedFileToolPath(argsJSON)
@@ -30,6 +46,26 @@ func streamingToolDisplayArgs(toolName, argsJSON, result string) string {
 	default:
 		return eventToolDisplayArgs(toolName, argsJSON, result)
 	}
+}
+
+func applyPatchToolDisplayArgs(argsJSON string) string {
+	targets, err := tools.ApplyPatchDisplayTargets(json.RawMessage(argsJSON))
+	if err != nil || len(targets) == 0 {
+		return ""
+	}
+	paths := make([]string, 0, len(targets))
+	for _, target := range targets {
+		path := target.SourcePath
+		if target.TargetPath != "" {
+			path += " → " + target.TargetPath
+		}
+		paths = append(paths, path)
+	}
+	b, err := json.Marshal(map[string]any{"paths": paths})
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func fileToolPathDisplayArgs(path string) string {
@@ -44,7 +80,7 @@ func fileToolPathDisplayArgs(path string) string {
 }
 
 func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state agent.ToolCallExecutionState, includeArgProgress bool) (*Block, bool) {
-	name = tools.NormalizeName(name)
+	name = toolNameKey(name)
 	if m == nil || m.viewport == nil || strings.TrimSpace(id) == "" {
 		return nil, false
 	}
@@ -79,7 +115,7 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 }
 
 func (m *Model) ensureToolResultBlock(evt agent.ToolResultEvent) *Block {
-	evt.Name = tools.NormalizeName(evt.Name)
+	evt.Name = toolNameKey(evt.Name)
 	if m == nil || m.viewport == nil {
 		return nil
 	}
@@ -98,12 +134,12 @@ func (m *Model) ensureToolResultBlock(evt agent.ToolResultEvent) *Block {
 }
 
 func shouldRefreshGitStatusAfterToolResult(evt agent.ToolResultEvent) bool {
-	evt.Name = tools.NormalizeName(evt.Name)
+	evt.Name = toolNameKey(evt.Name)
 	if evt.Status == agent.ToolResultStatusError {
 		return false
 	}
 	switch evt.Name {
-	case tools.NameWrite, tools.NameEdit, tools.NamePatch, tools.NameDelete:
+	case tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameDelete:
 		return true
 	case tools.NameShell:
 		var args struct {
@@ -140,7 +176,7 @@ func shellCommandMayRunGit(command string) bool {
 
 func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffects {
 	var effects agentEventEffects
-	evt.Name = tools.NormalizeName(evt.Name)
+	evt.Name = toolNameKey(evt.Name)
 	if evt.Name == tools.NameDelegate && evt.AgentID == "" {
 		m.sidebar.ResolvePendingTask()
 		effects.refreshSidebar = true
@@ -179,6 +215,11 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 					effects.refreshSidebar = true
 					effects.invalidateUsage = true
 				}
+			} else if evt.Name == tools.NameApplyPatch {
+				if m.addApplyPatchSidebarChanges(evt.AgentID, json.RawMessage(evt.ArgsJSON)) {
+					effects.refreshSidebar = true
+					effects.invalidateUsage = true
+				}
 			} else if path := editedFilePathFromToolResult(evt); path != "" {
 				m.sidebar.AddFileEdit(evt.AgentID, path, evt.DiffAdded, evt.DiffRemoved)
 				effects.refreshSidebar = true
@@ -213,7 +254,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 }
 
 func editedFilePathFromToolResult(evt agent.ToolResultEvent) string {
-	if evt.Name == tools.NameEdit || evt.Name == tools.NamePatch {
+	if evt.Name == tools.NameEdit {
 		return tools.ExtractEditPathFromArgs(json.RawMessage(evt.ArgsJSON))
 	}
 	var args struct {
@@ -225,11 +266,35 @@ func editedFilePathFromToolResult(evt agent.ToolResultEvent) string {
 	return strings.TrimSpace(args.Path)
 }
 
+func (m *Model) addApplyPatchSidebarChanges(agentID string, args json.RawMessage) bool {
+	targets, err := tools.ApplyPatchDisplayTargets(args)
+	if err != nil {
+		return false
+	}
+	changed := false
+	for _, target := range targets {
+		if target.TargetPath != "" {
+			m.sidebar.AddFileMove(agentID, target.SourcePath, target.TargetPath, target.Added, target.Removed)
+			changed = true
+			continue
+		}
+		switch target.Kind {
+		case tools.MutationDelete:
+			m.sidebar.AddFileDelete(agentID, target.SourcePath)
+			changed = true
+		case tools.MutationAdd, tools.MutationUpdate:
+			m.sidebar.AddFileEdit(agentID, target.SourcePath, target.Added, target.Removed)
+			changed = changed || target.Added != 0 || target.Removed != 0
+		}
+	}
+	return changed
+}
+
 func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
 	case agent.ToolCallStartEvent:
-		evt.Name = tools.NormalizeName(evt.Name)
+		evt.Name = toolNameKey(evt.Name)
 		m.touchStreamDelta(evt.AgentID)
 		m.finalizeAgentStream(evt.AgentID)
 		m.markRequestProgressBaseline(evt.AgentID)
@@ -247,7 +312,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		return true, effects
 	case agent.ToolCallUpdateEvent:
-		evt.Name = tools.NormalizeName(evt.Name)
+		evt.Name = toolNameKey(evt.Name)
 		m.touchStreamDelta(evt.AgentID)
 		now := time.Now()
 		block, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, agent.ToolCallExecutionStateRunning, !evt.ArgsStreamingDone)
@@ -337,7 +402,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		m.removeViewportBlockByID(block.ID)
 		return true, effects
 	case agent.ToolCallExecutionEvent:
-		evt.Name = tools.NormalizeName(evt.Name)
+		evt.Name = toolNameKey(evt.Name)
 		delete(m.toolArgRenderState, evt.ID)
 		block, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, evt.State, false)
 		if block != nil {

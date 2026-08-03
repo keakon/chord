@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -21,20 +22,27 @@ import (
 )
 
 type speculativeToolHooks struct {
-	commit       func() error
-	rollback     func() error
-	captureAfter func()
-	stale        bool
-	paths        []string
+	commit        func() error
+	rollback      func() error
+	captureAfter  func()
+	fileState     func() *message.ToolFileState
+	backupSources func() []fileBackupSource
+	stale         bool
+	paths         []string
 }
 
 type speculativeFileSnapshot struct {
-	Path        string
-	Existed     bool
-	Data        []byte
-	Hash        string
-	PostExisted bool
-	PostHash    string
+	Path              string
+	Existed           bool
+	Data              []byte
+	Mode              os.FileMode
+	SymlinkTarget     string
+	Hash              string
+	PostExisted       bool
+	PostMode          os.FileMode
+	PostSymlinkTarget string
+	PostHash          string
+	lease             *filelock.WriteLease
 }
 
 type speculativeFileMutation struct {
@@ -63,12 +71,22 @@ func prepareSpeculativeToolCall(tc message.ToolCall, registry *tools.Registry, t
 			return nil, err
 		}
 		return mutation.hooks(), nil
-	case tools.NameEdit, tools.NamePatch:
-		path := tools.ExtractEditPathFromArgsInDir(tc.Args, baseDir)
+	case tools.NameEdit:
+		path := trackedEditPathFromArgs(tc.Args, baseDir)
 		if path == "" {
 			return nil, nil
 		}
 		mutation, err := newSpeculativeFileMutation(track, agentID, []string{path}, "")
+		if err != nil {
+			return nil, err
+		}
+		return mutation.hooks(), nil
+	case tools.NameApplyPatch:
+		paths, err := applyPatchToolPaths(tc.Args, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		mutation, err := newSpeculativeFileMutation(track, agentID, paths, "")
 		if err != nil {
 			return nil, err
 		}
@@ -134,45 +152,54 @@ func deleteToolPaths(args json.RawMessage, baseDir string) ([]string, error) {
 	return req.Paths, nil
 }
 
+func applyPatchToolPaths(args json.RawMessage, baseDir string) ([]string, error) {
+	targets, err := tools.ApplyPatchTargets(llm.UnwrapToolArgs(args), baseDir)
+	if err != nil {
+		return nil, err
+	}
+	return tools.MutationTargetPaths(targets), nil
+}
+
 func newSpeculativeFileMutation(track *filelock.FileTracker, agentID string, paths []string, observationAction string) (*speculativeFileMutation, error) {
 	paths = normalizeSpeculativeMutationPaths(paths)
 	if len(paths) == 0 {
 		return nil, nil
 	}
 	mutation := &speculativeFileMutation{agentID: agentID, track: track, files: make([]speculativeFileSnapshot, 0, len(paths)), observedOnCommit: observationAction == "write"}
-	locked := make([]string, 0, len(paths))
+	locked := make([]*filelock.WriteLease, 0, len(paths))
 	for _, path := range paths {
 		snap, err := captureSpeculativeFileSnapshot(path)
 		if err != nil {
 			for _, l := range slices.Backward(locked) {
-				if track != nil {
-					track.AbortWrite(l, agentID)
-				}
+				l.Abort()
 			}
 			return nil, err
 		}
-		if track != nil && snap.Existed {
-			status, err := track.AcquireWriteStatus(path, agentID, snap.Hash)
+		if track != nil {
+			status, lease, err := track.AcquireWriteLease(path, agentID, snap.Hash)
 			if err != nil {
 				for _, l := range slices.Backward(locked) {
-					track.AbortWrite(l, agentID)
+					l.Abort()
 				}
 				return nil, err
 			}
-			if observationAction != "" {
+			snap.lease = lease
+			if observationAction != "" && snap.Existed {
 				if err := requireCurrentFileObservation(track, agentID, path, snap.Hash, observationAction, status.ExternalChanged); err != nil {
-					track.AbortWrite(path, agentID)
+					lease.Abort()
 					for _, l := range slices.Backward(locked) {
-						track.AbortWrite(l, agentID)
+						l.Abort()
 					}
 					return nil, err
 				}
 			} else if status.ExternalChanged {
 				mutation.stale = true
 			}
-			locked = append(locked, path)
-			mutation.paths = append(mutation.paths, path)
+			if lease != nil {
+				locked = append(locked, lease)
+			}
 		}
+		mutation.paths = append(mutation.paths, path)
 		mutation.files = append(mutation.files, snap)
 	}
 	return mutation, nil
@@ -232,12 +259,20 @@ func captureSpeculativeFileSnapshot(path string) (speculativeFileSnapshot, error
 	if !info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
 		return snap, fmt.Errorf("capture speculative pre-state for %s: unsupported file type", path)
 	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(path)
+		if err != nil {
+			return snap, fmt.Errorf("capture speculative symlink target for %s: %w", path, err)
+		}
+		snap.SymlinkTarget = target
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return snap, fmt.Errorf("capture speculative pre-state for %s: %w", path, err)
 	}
 	snap.Existed = true
 	snap.Data = data
+	snap.Mode = info.Mode()
 	snap.Hash = hashBytesHex(data)
 	return snap, nil
 }
@@ -254,10 +289,29 @@ func (m *speculativeFileMutation) hooks() *speculativeToolHooks {
 		rollback: func() error {
 			return m.Rollback()
 		},
-		captureAfter: func() { m.CaptureAfter() },
-		stale:        m.stale,
-		paths:        append([]string(nil), m.paths...),
+		captureAfter:  func() { m.CaptureAfter() },
+		fileState:     func() *message.ToolFileState { return m.postState() },
+		backupSources: func() []fileBackupSource { return m.backupSources() },
+		stale:         m.stale,
+		paths:         append([]string(nil), m.paths...),
 	}
+}
+
+// backupSources returns the pre-execution content of every touched file that
+// existed and was non-empty, so a stale multi-file mutation can be backed up
+// in full rather than only through its first tracked path.
+func (m *speculativeFileMutation) backupSources() []fileBackupSource {
+	if m == nil {
+		return nil
+	}
+	sources := make([]fileBackupSource, 0, len(m.files))
+	for _, snap := range m.files {
+		if !snap.Existed || len(snap.Data) == 0 {
+			continue
+		}
+		sources = append(sources, fileBackupSource{Path: snap.Path, Data: snap.Data})
+	}
+	return sources
 }
 
 func (m *speculativeFileMutation) CaptureAfter() {
@@ -265,10 +319,24 @@ func (m *speculativeFileMutation) CaptureAfter() {
 		return
 	}
 	for i := range m.files {
-		path := m.files[i].Path
-		m.files[i].PostHash = computeFileHash(path)
-		m.files[i].PostExisted = m.files[i].PostHash != ""
+		captureSpeculativePostState(&m.files[i])
 	}
+}
+
+func captureSpeculativePostState(snap *speculativeFileSnapshot) {
+	if snap == nil {
+		return
+	}
+	info, err := os.Lstat(snap.Path)
+	if err != nil {
+		return
+	}
+	snap.PostExisted = true
+	snap.PostMode = info.Mode()
+	if info.Mode()&os.ModeSymlink != 0 {
+		snap.PostSymlinkTarget, _ = os.Readlink(snap.Path)
+	}
+	snap.PostHash = computeFileHash(snap.Path)
 }
 
 func (m *speculativeFileMutation) Commit() {
@@ -277,16 +345,50 @@ func (m *speculativeFileMutation) Commit() {
 	}
 	m.commit = true
 	for _, snap := range m.files {
-		if m.track == nil {
-			continue
+		if m.track != nil && snap.lease != nil {
+			if !snap.PostExisted {
+				snap.lease.CommitDelete()
+			} else {
+				m.track.ReleaseWrite(snap.Path, m.agentID, snap.PostHash)
+			}
 		}
-		if snap.Existed {
-			m.track.ReleaseWrite(snap.Path, m.agentID, snap.PostHash)
+		if m.track != nil && snap.PostExisted {
+			m.track.TrackCommittedSnapshot(snap.Path, m.agentID, snap.PostHash)
 		}
-		if m.observedOnCommit && snap.PostHash != "" {
+		if m.track != nil && m.observedOnCommit && snap.PostHash != "" {
 			m.track.TrackObservedSnapshot(snap.Path, m.agentID, snap.PostHash)
 		}
 	}
+}
+
+func (m *speculativeFileMutation) Abort() {
+	if m == nil || m.commit || m.rolledBack {
+		return
+	}
+	m.rolledBack = true
+	for _, snap := range slices.Backward(m.files) {
+		if snap.lease != nil {
+			snap.lease.Abort()
+		}
+	}
+}
+
+func (m *speculativeFileMutation) postState() *message.ToolFileState {
+	if m == nil {
+		return nil
+	}
+	state := &message.ToolFileState{}
+	for _, snap := range m.files {
+		if snap.PostExisted && snap.PostHash != "" {
+			state.Writes = append(state.Writes, message.TrackedFileState{Path: snap.Path, SHA256: snap.PostHash, Exists: true})
+		} else if snap.Existed {
+			state.Deletes = append(state.Deletes, message.TrackedFileState{Path: snap.Path, Exists: false})
+		}
+	}
+	if len(state.Writes) == 0 && len(state.Deletes) == 0 {
+		return nil
+	}
+	return state
 }
 
 func (m *speculativeFileMutation) Rollback() error {
@@ -302,10 +404,9 @@ func (m *speculativeFileMutation) Rollback() error {
 		}
 	}
 	for _, snap := range m.files {
-		if m.track == nil || !snap.Existed {
-			continue
+		if snap.lease != nil {
+			snap.lease.Abort()
 		}
-		m.track.AbortWrite(snap.Path, m.agentID)
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("rollback speculative file mutation: %w", errors.Join(errs...))
@@ -319,7 +420,7 @@ func restoreSpeculativeFileSnapshot(snap speculativeFileSnapshot) error {
 		return nil
 	}
 	if snap.PostExisted {
-		if current := computeFileHash(path); current != "" && current != snap.PostHash {
+		if !matchesSpeculativePostState(snap) {
 			return fmt.Errorf("%s changed after speculative execution; refusing to overwrite external changes", path)
 		}
 	} else {
@@ -335,7 +436,18 @@ func restoreSpeculativeFileSnapshot(snap speculativeFileSnapshot) error {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return fmt.Errorf("restore parent directory for %s: %w", path, err)
 		}
-		if err := os.WriteFile(path, snap.Data, 0o644); err != nil {
+		if snap.Mode&os.ModeSymlink != 0 {
+			if snap.PostExisted {
+				if err := os.Remove(path); err != nil {
+					return fmt.Errorf("remove speculative-mutated path %s: %w", path, err)
+				}
+			}
+			if err := os.Symlink(snap.SymlinkTarget, path); err != nil {
+				return fmt.Errorf("restore symlink %s: %w", path, err)
+			}
+			return nil
+		}
+		if err := writeSpeculativeSnapshot(path, snap.Data, snap.Mode, !snap.PostExisted); err != nil {
 			return fmt.Errorf("restore %s: %w", path, err)
 		}
 		return nil
@@ -350,6 +462,57 @@ func restoreSpeculativeFileSnapshot(snap speculativeFileSnapshot) error {
 		return fmt.Errorf("remove speculative-created path %s: %w", path, err)
 	}
 	return nil
+}
+
+func matchesSpeculativePostState(snap speculativeFileSnapshot) bool {
+	info, err := os.Lstat(snap.Path)
+	if err != nil || info.Mode() != snap.PostMode {
+		return false
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(snap.Path)
+		if err != nil || target != snap.PostSymlinkTarget {
+			return false
+		}
+	}
+	return computeFileHash(snap.Path) == snap.PostHash
+}
+
+func writeSpeculativeSnapshot(path string, data []byte, mode os.FileMode, requireNew bool) error {
+	flags := os.O_WRONLY
+	if requireNew {
+		flags |= os.O_CREATE | os.O_EXCL
+	}
+	f, err := os.OpenFile(path, flags, mode.Perm())
+	if err != nil {
+		return err
+	}
+	if !requireNew {
+		openedInfo, statErr := f.Stat()
+		pathInfo, lstatErr := os.Lstat(path)
+		if statErr != nil || lstatErr != nil || !pathInfo.Mode().IsRegular() || !os.SameFile(openedInfo, pathInfo) {
+			_ = f.Close()
+			return fmt.Errorf("path changed before restore")
+		}
+		if err := f.Truncate(0); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
+	n, err := f.Write(data)
+	if err != nil {
+		_ = f.Close()
+		return err
+	}
+	if n != len(data) {
+		_ = f.Close()
+		return io.ErrShortWrite
+	}
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func hashBytesHex(data []byte) string {
@@ -379,7 +542,7 @@ func speculativeWriteToolLSPReviews(registry *tools.Registry, toolName, path str
 		if t.LSP != nil {
 			return t.LSP.CurrentReviewSnapshots(path)
 		}
-	case tools.PatchTool:
+	case tools.ApplyPatchTool:
 		if t.LSP != nil {
 			return t.LSP.CurrentReviewSnapshots(path)
 		}

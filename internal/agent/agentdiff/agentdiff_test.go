@@ -65,6 +65,11 @@ func TestCapturePreWriteStateUsesBaseDirForReplaceEdit(t *testing.T) {
 	if gotPath != path || content != "before\n" || !existed {
 		t.Fatalf("CapturePreWriteState edit = (%q, %q, %v), want project file", gotPath, content, existed)
 	}
+
+	gotPath, content, existed = CapturePreWriteState(toolCall(tools.NameEdit, map[string]string{"filePath": "file.txt"}), dir)
+	if gotPath != path || content != "before\n" || !existed {
+		t.Fatalf("CapturePreWriteState filePath edit = (%q, %q, %v), want project file", gotPath, content, existed)
+	}
 }
 
 func TestGenerateToolDiffForEdit(t *testing.T) {

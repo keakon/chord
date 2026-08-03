@@ -67,19 +67,49 @@ func writtenLineCount(content string) int {
 }
 
 func writeFileNoFollow(path string, data []byte, perm os.FileMode) error {
-	f, err := openFileNoFollow(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	return writeFileNoFollowMode(path, data, perm, false)
+}
+
+func writeFileNoFollowExactMode(path string, data []byte, mode os.FileMode) error {
+	return writeFileNoFollowMode(path, data, mode, true)
+}
+
+func writeFileNoFollowMode(path string, data []byte, mode os.FileMode, exact bool) error {
+	f, err := openFileNoFollow(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode.Perm())
 	if err != nil {
 		return err
 	}
+	return writeOpenedFile(f, data, mode, exact)
+}
+
+// writeNewFileNoFollowMode reports whether it created the path before a later
+// write/close error. Callers use that signal to remove only their own partial
+// file, never a target that appeared after planning.
+func writeNewFileNoFollowMode(path string, data []byte, mode os.FileMode, exact bool) (bool, error) {
+	f, err := openFileNoFollow(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode.Perm())
+	if err != nil {
+		return false, err
+	}
+	return true, writeOpenedFile(f, data, mode, exact)
+}
+
+func writeOpenedFile(f *os.File, data []byte, mode os.FileMode, exact bool) error {
 	n, writeErr := f.Write(data)
-	closeErr := f.Close()
 	if writeErr != nil {
+		_ = f.Close()
 		return writeErr
 	}
 	if n != len(data) {
+		_ = f.Close()
 		return io.ErrShortWrite
 	}
-	return closeErr
+	if exact {
+		if err := f.Chmod(mode); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
+	return f.Close()
 }
 
 func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {

@@ -331,7 +331,7 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 	if entry.err == nil {
 		effective := call
 		effective.Args = json.RawMessage(entry.result.EffectiveArgsJSON)
-		diff = agentdiff.GenerateToolDiff(effective, entry.result.PreContent, entry.result.PreFilePath, entry.result.PreExisted)
+		diff = toolExecutionDiff(effective, entry.result)
 	}
 	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, ModelContextNote: entry.result.ModelContextNote, Images: entry.result.Images, Error: entry.err, TurnID: e.turnID, Duration: entry.completedAt.Sub(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...), FileState: entry.result.FileState.Clone(), speculativeHooks: entry.result.speculativeHooks}, true, false
 }
@@ -455,7 +455,7 @@ func (e *StreamingToolExecutor) DrainCompletedResults() map[string]*ToolResultPa
 		if entry.err == nil && entry.result.EffectiveArgsJSON != "" {
 			effective := entry.call
 			effective.Args = json.RawMessage(entry.result.EffectiveArgsJSON)
-			diff = agentdiff.GenerateToolDiff(effective, entry.result.PreContent, entry.result.PreFilePath, entry.result.PreExisted)
+			diff = toolExecutionDiff(effective, entry.result)
 		}
 
 		payload := &ToolResultPayload{
@@ -514,9 +514,18 @@ func speculativeConflictKeys(call message.ToolCall, projectRoot string) []string
 		if path, ok := singlePathToolPath(call.Args, projectRoot); ok {
 			return []string{"file:" + path}
 		}
-	case tools.NameEdit, tools.NamePatch:
-		if path := tools.ExtractEditPathFromArgsInDir(call.Args, projectRoot); path != "" {
+	case tools.NameEdit:
+		if path := trackedEditPathFromArgs(call.Args, projectRoot); path != "" {
 			return []string{"file:" + path}
+		}
+	case tools.NameApplyPatch:
+		paths, err := applyPatchToolPaths(call.Args, projectRoot)
+		if err == nil && len(paths) > 0 {
+			keys := make([]string, 0, len(paths))
+			for _, path := range paths {
+				keys = append(keys, "file:"+path)
+			}
+			return keys
 		}
 	case tools.NameDelete:
 		paths, err := deleteToolPaths(call.Args, projectRoot)

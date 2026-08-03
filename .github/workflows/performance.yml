@@ -10,6 +10,7 @@ on:
       - "internal/session/**"
       - "internal/recovery/**"
       - "internal/agent/**"
+      - "internal/tools/**"
       - "scripts/bench_tui_regression.sh"
       - ".github/workflows/performance.yml"
   pull_request:
@@ -19,6 +20,7 @@ on:
       - "internal/session/**"
       - "internal/recovery/**"
       - "internal/agent/**"
+      - "internal/tools/**"
       - "scripts/bench_tui_regression.sh"
       - ".github/workflows/performance.yml"
   workflow_dispatch:

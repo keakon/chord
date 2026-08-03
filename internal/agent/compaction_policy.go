@@ -2035,7 +2035,7 @@ func buildToolCallMeta(messages []message.Message) map[string]toolCallMeta {
 	meta := make(map[string]toolCallMeta)
 	for _, msg := range messages {
 		for _, tc := range msg.ToolCalls {
-			meta[tc.ID] = toolCallMeta{Name: tc.Name, Args: string(tc.Args)}
+			meta[tc.ID] = toolCallMeta{Name: tools.NormalizeName(tc.Name), Args: string(tc.Args)}
 		}
 	}
 	return meta

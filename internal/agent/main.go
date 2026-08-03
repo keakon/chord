@@ -157,6 +157,7 @@ type ToolExecutionResult struct {
 	Audit             *message.ToolArgsAudit
 	LSPReviews        []message.LSPReview
 	FileState         *message.ToolFileState
+	Diff              tools.DiffSummary
 	PreFilePath       string
 	PreContent        string
 	PreExisted        bool

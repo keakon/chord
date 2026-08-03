@@ -69,7 +69,7 @@ func TestDeleteLockCommitAuditReleasesRelativeBaseDirPath(t *testing.T) {
 	}
 }
 
-func TestAcquireDeleteLocksRejectsStaleRead(t *testing.T) {
+func TestAcquireDeleteLocksAllowsStaleRead(t *testing.T) {
 	tracker := filelock.NewFileTracker()
 	path := writeDeleteLockFile(t, "stale.txt", "before")
 	tracker.TrackSnapshot(path, "main", computeFileHash(path))
@@ -78,12 +78,10 @@ func TestAcquireDeleteLocksRejectsStaleRead(t *testing.T) {
 	}
 
 	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, path), "")
-	if err == nil || locks != nil {
-		t.Fatalf("acquireDeleteLocks = (%#v, %v), want stale-read rejection", locks, err)
+	if err != nil || locks == nil {
+		t.Fatalf("acquireDeleteLocks = (%#v, %v), want stale delete to proceed", locks, err)
 	}
-	if !strings.Contains(err.Error(), "changed after the last read") {
-		t.Fatalf("unexpected stale-read error: %v", err)
-	}
+	locks.Release()
 }
 
 func TestAcquireDeleteLocksRejectsUnreadableExistingFile(t *testing.T) {
@@ -106,7 +104,7 @@ func TestAcquireDeleteLocksRejectsUnreadableExistingFile(t *testing.T) {
 	}
 }
 
-func TestAcquireDeleteLocksRejectsDanglingSymlinkWithoutObservation(t *testing.T) {
+func TestAcquireDeleteLocksAllowsDanglingSymlink(t *testing.T) {
 	tracker := filelock.NewFileTracker()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dangling-link")
@@ -115,12 +113,10 @@ func TestAcquireDeleteLocksRejectsDanglingSymlinkWithoutObservation(t *testing.T
 	}
 
 	locks, err := acquireDeleteLocks(tracker, "main", deleteArgs(t, path), "")
-	if locks != nil {
-		locks.Release()
+	if err != nil || locks == nil {
+		t.Fatalf("acquireDeleteLocks = (%#v, %v), want dangling symlink delete to proceed", locks, err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "current state cannot be verified") {
-		t.Fatalf("acquireDeleteLocks = (%#v, %v), want unverifiable-state rejection", locks, err)
-	}
+	locks.Release()
 }
 
 func TestDeleteLockCommitAuditKeepsSymlinkTargetSnapshot(t *testing.T) {

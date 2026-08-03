@@ -34,7 +34,7 @@ func TestSpeculativeExecutionRejectsInvisibleEditFamilyToolBeforeFileMutation(t 
 		t.Fatal(err)
 	}
 	registry := tools.NewRegistry()
-	registry.Register(tools.PatchTool{BaseDir: projectRoot})
+	registry.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
 	registry.Register(tools.EditTool{BaseDir: projectRoot})
 	pipeline := toolExecutionPipeline{
 		registry:    registry,
@@ -44,7 +44,7 @@ func TestSpeculativeExecutionRejectsInvisibleEditFamilyToolBeforeFileMutation(t 
 		},
 	}
 
-	call := message.ToolCall{ID: "patch-1", Name: tools.NamePatch, Args: json.RawMessage(`{"path":"` + targetPath + `","patch":"@@\n-old line\n+new line\n"}`)}
+	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"` + targetPath + `","patch":"@@\n-old line\n+new line\n"}`)}
 	_, err := pipeline.executeSpeculative(t.Context(), call)
 	if err == nil {
 		t.Fatal("executeSpeculative patch on edit-only surface succeeded; want rejection")
@@ -135,7 +135,7 @@ func TestStreamingToolExecutorArgsDriftWaitsForCompletedRollback(t *testing.T) {
 		}, nil
 	})
 	exec.SetTraceCallbacks(nil, func(_, _ string, _ time.Time) { close(completed) }, nil)
-	if !exec.Start(message.ToolCall{ID: "call-1", Name: tools.NamePatch, Args: json.RawMessage(`{"path":"demo.txt","patch":"@@\n-before\n+after\n"}`)}) {
+	if !exec.Start(message.ToolCall{ID: "call-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"demo.txt","patch":"@@\n-before\n+after\n"}`)}) {
 		t.Fatal("Start returned false")
 	}
 	select {
@@ -148,7 +148,7 @@ func TestStreamingToolExecutorArgsDriftWaitsForCompletedRollback(t *testing.T) {
 	var payload *ToolResultPayload
 	var ok, drift bool
 	go func() {
-		payload, ok, drift = exec.Promote(message.ToolCall{ID: "call-1", Name: tools.NamePatch, Args: json.RawMessage(`{"path":"demo.txt","patch":"@@\n-before\n+final\n"}`)})
+		payload, ok, drift = exec.Promote(message.ToolCall{ID: "call-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"demo.txt","patch":"@@\n-before\n+final\n"}`)})
 		close(promoteReturned)
 	}()
 

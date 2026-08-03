@@ -195,7 +195,7 @@ func toolShouldHideSuccessfulFileOpResult(b *Block) bool {
 		return false
 	}
 	switch tools.NormalizeName(b.ToolName) {
-	case tools.NameEdit, tools.NamePatch:
+	case tools.NameEdit, tools.NameApplyPatch:
 		return !toolResultContainsLSPDiagnostics(b.ResultContent)
 	default:
 		return false
@@ -234,7 +234,7 @@ func toolSuccessfulFileOpSummary(b *Block) string {
 		return ""
 	}
 	switch tools.NormalizeName(b.ToolName) {
-	case tools.NameEdit, tools.NamePatch:
+	case tools.NameEdit, tools.NameApplyPatch:
 		path := b.displayToolPath(tools.ExtractEditPathFromArgs([]byte(b.Content)))
 		if path == "" {
 			path = b.displayToolPath(firstPathFromToolResult(b.ResultContent))

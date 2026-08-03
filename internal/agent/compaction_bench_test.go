@@ -131,7 +131,7 @@ func BenchmarkAnalyzeReadValidityReadEditPaths(b *testing.B) {
 		path := fmt.Sprintf("pkg%d/internal/file%d.go", i%20, i)
 		patchID := fmt.Sprintf("patch-%d", i)
 		messages = append(messages,
-			message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: patchID, Name: tools.NamePatch, Args: json.RawMessage(`{"path":"` + path + `","patch":"@@"}`)}}},
+			message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: patchID, Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"` + path + `","patch":"@@"}`)}}},
 			message.Message{Role: message.RoleTool, ToolCallID: patchID, ToolStatus: "success", FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: path, Exists: true}}}},
 		)
 	}

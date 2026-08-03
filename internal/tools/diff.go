@@ -34,37 +34,60 @@ func GenerateUnifiedDiff(oldContent, newContent, filename string) string {
 // GenerateUnifiedDiffSummary returns the rendered unified diff plus the exact
 // full add/remove counts before any maxDiffOutputLines truncation is applied.
 func GenerateUnifiedDiffSummary(oldContent, newContent, filename string) DiffSummary {
-	if oldContent == newContent {
-		return DiffSummary{}
-	}
+	return generateMultiFileUnifiedDiffSummary([]unifiedFileDiff{{
+		OldContent:  oldContent,
+		NewContent:  newContent,
+		OldFilename: filename,
+		NewFilename: filename,
+	}})
+}
 
-	oldLines := splitLines(oldContent)
-	newLines := splitLines(newContent)
+type unifiedFileDiff struct {
+	OldContent  string
+	NewContent  string
+	OldFilename string
+	NewFilename string
+}
 
-	ops := lcsEditScriptWindow(oldLines, newLines, 3)
-	hunks := buildHunks(ops, oldLines, newLines, 3)
-	if len(hunks) == 0 {
-		return DiffSummary{}
-	}
-
-	added, removed := diffOpStats(ops)
-
+func generateMultiFileUnifiedDiffSummary(files []unifiedFileDiff) DiffSummary {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("--- %s\n", filename))
-	sb.WriteString(fmt.Sprintf("+++ %s\n", filename))
+	added := 0
+	removed := 0
 	lineCount := 0
 	truncated := false
-	for _, h := range hunks {
-		for l := range strings.SplitSeq(h, "\n") {
-			if lineCount >= maxDiffOutputLines {
-				truncated = true
+	for _, file := range files {
+		if file.OldContent == file.NewContent {
+			continue
+		}
+		oldLines := splitLines(file.OldContent)
+		newLines := splitLines(file.NewContent)
+		ops := lcsEditScriptWindow(oldLines, newLines, 3)
+		hunks := buildHunks(ops, oldLines, newLines, 3)
+		if len(hunks) == 0 {
+			continue
+		}
+		fileAdded, fileRemoved := diffOpStats(ops)
+		added += fileAdded
+		removed += fileRemoved
+		if truncated || lineCount >= maxDiffOutputLines {
+			// Emitting the file header here would leave a section with no body.
+			truncated = true
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("--- %s\n", file.OldFilename))
+		sb.WriteString(fmt.Sprintf("+++ %s\n", file.NewFilename))
+		for _, h := range hunks {
+			for l := range strings.SplitSeq(h, "\n") {
+				if lineCount >= maxDiffOutputLines {
+					truncated = true
+					break
+				}
+				sb.WriteString(l + "\n")
+				lineCount++
+			}
+			if truncated {
 				break
 			}
-			sb.WriteString(l + "\n")
-			lineCount++
-		}
-		if truncated {
-			break
 		}
 	}
 	if truncated {

@@ -456,17 +456,18 @@ func TestPatchPlanFileNotFoundSuggestsWhitespaceRepair(t *testing.T) {
 	// Minimal patch text: a single hunk. The target file does not exist as typed
 	// (a misplaced space), so planning must fail with a repair suggestion rather
 	// than a bare not-found.
-	patchText := "@@\n content\n+changed\n"
-	_, err := BuildPatchPlanInDirWithContext(context.Background(), "~/ alpha/file.txt", patchText, "")
+	patchText := "*** Begin Patch\n*** Update File: ~/ alpha/file.txt\n@@\n content\n+changed\n*** End Patch"
+	args, marshalErr := json.Marshal(ApplyPatchArgs{Patch: patchText})
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	_, err := (ApplyPatchTool{}).Execute(context.Background(), args)
 	if err == nil {
-		t.Fatal("BuildPatchPlanInDirWithContext err = nil, want file-not-found with whitespace repair suggestion")
+		t.Fatal("ApplyPatchTool.Execute err = nil, want file-not-found with whitespace repair suggestion")
 	}
 	msg := err.Error()
 	if !strings.Contains(msg, "Did you mean") {
 		t.Fatalf("error missing \"Did you mean\": %s", msg)
-	}
-	if !strings.Contains(msg, "Use write to create files") {
-		t.Fatalf("error missing patch guidance: %s", msg)
 	}
 	if !strings.Contains(msg, filepath.ToSlash(filepath.Join("~", "alpha", "file.txt"))) {
 		t.Fatalf("error missing home-relative repaired suggestion: %s", msg)

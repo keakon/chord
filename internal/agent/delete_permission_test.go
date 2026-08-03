@@ -79,6 +79,22 @@ delete:
 	}
 }
 
+func TestEvaluateToolPermissionApplyPatchChecksEveryTarget(t *testing.T) {
+	node := parsePermissionNode(t, `
+"*": deny
+apply_patch:
+  "allowed/*": allow
+  "secret/*": deny
+`)
+	ruleset := permission.ParsePermission(&node)
+	args := json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: allowed/ok.txt\n+ok\n*** Add File: secret/no.txt\n+no\n*** End Patch"}`)
+
+	got := evaluateToolPermission(ruleset, tools.NameApplyPatch, args)
+	if got.Action != permission.ActionDeny || got.MatchArgument != "secret/no.txt" {
+		t.Fatalf("decision = %#v, want secret target denial", got)
+	}
+}
+
 func TestEvaluateToolPermissionGlobDenyWinsAcrossPatterns(t *testing.T) {
 	node := parsePermissionNode(t, `
 "*": deny
