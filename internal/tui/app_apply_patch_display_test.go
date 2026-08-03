@@ -78,6 +78,22 @@ func TestFailedApplyPatchResultDoesNotTrackChangedFiles(t *testing.T) {
 	}
 }
 
+func TestCancelledApplyPatchResultDoesNotTrackChangedFiles(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.sidebar.Update(nil, "main", "builder")
+	args := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`
+
+	m.handleToolAgentEvent(agent.ToolCallStartEvent{ID: "call-1", Name: tools.NameApplyPatch, ArgsJSON: args})
+	m.handleToolAgentEvent(agent.ToolResultEvent{
+		CallID: "call-1", Name: tools.NameApplyPatch, ArgsJSON: args,
+		Result: "Cancelled", Status: agent.ToolResultStatusCancelled,
+	})
+
+	if edits := m.sidebar.CurrentAgentFiles(); len(edits) != 0 {
+		t.Fatalf("cancelled apply_patch changed files = %+v, want none", edits)
+	}
+}
+
 func TestApplyPatchChangedFilesRestoreFromTranscript(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.sidebar.Update(nil, "main", "builder")
