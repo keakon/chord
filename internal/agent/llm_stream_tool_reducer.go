@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -118,7 +119,7 @@ func (r streamToolDeltaReducer) maybeStartEarlySpeculativeTool(callID string) {
 	if !ok || !early.CanRenderBeforeToolUseEnd(json.RawMessage(call.ArgsJSON)) {
 		return
 	}
-	if err := tools.ValidateToolArgs(tool, json.RawMessage(call.ArgsJSON)); err != nil {
+	if err := tools.ValidateToolArgs(tool, llm.UnwrapToolArgs(json.RawMessage(call.ArgsJSON))); err != nil {
 		return
 	}
 	ruleset := permission.Ruleset(nil)
@@ -154,6 +155,13 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 		ruleset = r.ruleset()
 	}
 	decision := evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(argsJSON), r.turn.streamingToolCallsBefore(callID))
+	if decision.Allowed && r.registry != nil {
+		if tool, ok := r.registry.Get(callName); ok {
+			if err := tools.ValidateToolArgs(tool, llm.UnwrapToolArgs(json.RawMessage(argsJSON))); err != nil {
+				decision = rejectSpeculativeExecution("invalid_args")
+			}
+		}
+	}
 	if decision.Allowed {
 		decision = r.checkVisibleSpeculativeTool(callName)
 	}

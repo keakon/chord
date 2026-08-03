@@ -285,6 +285,73 @@ func TestStreamToolDeltaReducerDoesNotEarlyStartIncompleteArgs(t *testing.T) {
 	}
 }
 
+func TestStreamToolDeltaReducerDoesNotStartMalformedArgsAtToolUseEnd(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	registry := tools.NewRegistry()
+	registry.Register(tools.GrepTool{})
+	started := make(chan message.ToolCall, 1)
+	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, context.Background(), nil, func(_ context.Context, call message.ToolCall) (ToolExecutionResult, error) {
+		started <- call
+		return ToolExecutionResult{EffectiveArgsJSON: string(call.Args), Result: "ok"}, nil
+	})
+	var events []AgentEvent
+	reducer := streamToolDeltaReducer{turn: turn, registry: registry, emit: func(event AgentEvent) { events = append(events, event) }}
+
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{
+		ID:    "call",
+		Name:  tools.NameGrep,
+		Input: `{"pattern":"TODO"} trailing garbage`,
+	}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call"}})
+
+	select {
+	case got := <-started:
+		t.Fatalf("unexpected speculative start for malformed final args: %+v", got)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if len(events) != 2 {
+		t.Fatalf("events len = %d, want start and final update", len(events))
+	}
+	final, ok := events[1].(ToolCallUpdateEvent)
+	if !ok || !final.ArgsStreamingDone || final.ArgsJSON != `{"pattern":"TODO"} trailing garbage` {
+		t.Fatalf("final update = %#v", events[1])
+	}
+}
+
+func TestStreamToolDeltaReducerAcceptsWrappedArgsForSpeculativeExecution(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	registry := tools.NewRegistry()
+	registry.Register(tools.ReadTool{})
+	started := make(chan message.ToolCall, 2)
+	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, context.Background(), nil, func(_ context.Context, call message.ToolCall) (ToolExecutionResult, error) {
+		started <- call
+		return ToolExecutionResult{EffectiveArgsJSON: string(call.Args), Result: "ok"}, nil
+	})
+	wrapped, err := json.Marshal(`{"path":"README.md"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reducer := streamToolDeltaReducer{turn: turn, registry: registry}
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{
+		ID: "wrapped", Name: tools.NameRead, Input: string(wrapped),
+	}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "wrapped"}})
+
+	select {
+	case got := <-started:
+		if string(got.Args) != string(wrapped) {
+			t.Fatalf("started args = %s, want %s", got.Args, wrapped)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("wrapped read did not start speculatively")
+	}
+	select {
+	case got := <-started:
+		t.Fatalf("wrapped read started twice: %+v", got)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
 func TestStreamToolDeltaReducerDoesNotEarlyStartWebFetch(t *testing.T) {
 	turn := newStreamToolReducerTestTurn()
 	registry := tools.NewRegistry()
