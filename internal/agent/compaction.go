@@ -658,18 +658,6 @@ func (a *MainAgent) evidenceItemsForCompaction(_ []message.Message, contextLimit
 	return evidenceItemsFromCandidates(a.evidence.snapshot(), contextLimit)
 }
 
-func isToolErrorContent(content string) bool {
-	return strings.HasPrefix(strings.TrimSpace(content), "Error:")
-}
-
-func isToolResultErrorStatus(status string) bool {
-	return strings.EqualFold(strings.TrimSpace(status), string(ToolResultStatusError))
-}
-
-func isToolResultErrorMessage(msg message.Message) bool {
-	return isToolResultErrorStatus(msg.ToolStatus) || strings.Contains(msg.Content, "Error:")
-}
-
 func isConfirmationOutput(content string) bool {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" || len(trimmed) > 180 {

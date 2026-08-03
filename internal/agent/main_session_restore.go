@@ -1038,7 +1038,7 @@ func restoreSkillResultSucceeded(msg message.Message) bool {
 		// successful result semantics while still rejecting explicit error text.
 		return !isToolResultErrorMessage(msg)
 	}
-	return strings.EqualFold(status, string(ToolResultStatusSuccess))
+	return isToolResultSuccessStatus(status)
 }
 
 func filterRestoredTodosByLatestCompactionSummary(messages []message.Message, todos []tools.TodoItem) []tools.TodoItem {

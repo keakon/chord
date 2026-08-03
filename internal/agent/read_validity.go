@@ -173,12 +173,6 @@ func analyzeReadValidity(messages []message.Message, callMeta map[string]toolCal
 	return out
 }
 
-func isToolResultUnsuccessfulStatus(status string) bool {
-	status = strings.TrimSpace(status)
-	return strings.EqualFold(status, string(ToolResultStatusError)) ||
-		strings.EqualFold(status, string(ToolResultStatusCancelled))
-}
-
 // analyzeSupersededReads reports reads wholly covered by a later read of the
 // same path. For each path it scans reads newest-first while a Fenwick tree
 // stores the maximum end line seen for every start-line prefix. This preserves

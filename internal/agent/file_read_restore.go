@@ -325,7 +325,7 @@ func isNativeChordProvenance(prov *message.MessageProvenance) bool {
 }
 
 func restoreToolResultSucceeded(msg message.Message) bool {
-	return strings.EqualFold(strings.TrimSpace(msg.ToolStatus), "success")
+	return isToolResultSuccessStatus(msg.ToolStatus)
 }
 
 func restoreEffectiveArgs(msg message.Message, call restoreToolCall) (json.RawMessage, bool) {
