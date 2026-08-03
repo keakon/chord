@@ -335,13 +335,27 @@ func TestConfirmSessionDeletionRemovesBySessionID(t *testing.T) {
 func TestRenderSessionSelectDialogShowsFilterHintAndNoMatch(t *testing.T) {
 	m := newSessionSelectTestModel(testSessionSummaries())
 
-	plain := stripANSI(m.renderSessionSelectDialog())
+	dialog := m.renderSessionSelectDialog()
+	plain := stripANSI(dialog)
 	if !strings.Contains(plain, "filter: (press / to search)") {
 		t.Fatalf("dialog missing filter hint:\n%s", plain)
 	}
 	if !strings.Contains(plain, "3/3") {
 		t.Fatalf("dialog missing filtered count:\n%s", plain)
 	}
+	filterLine := findRenderedLineContaining(dialog, "filter:")
+	plainFilterLine := stripANSI(filterLine)
+	filterStart := strings.Index(plainFilterLine, "filter:")
+	filterEnd := strings.LastIndex(plainFilterLine, "3/3") + len("3/3")
+	if filterStart < 0 || filterEnd < len("3/3") {
+		t.Fatalf("could not locate filter row contents: %q", plainFilterLine)
+	}
+	assertRenderedTextBackground(
+		t,
+		filterLine,
+		plainFilterLine[filterStart:filterEnd],
+		colorOfTheme(currentTheme.DialogBg),
+	)
 
 	m.sessionSelect.filter = "missing"
 	m.rebuildSessionSelectFilteredView(true)

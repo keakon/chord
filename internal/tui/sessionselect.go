@@ -596,7 +596,8 @@ func (m *Model) renderSessionSelectFilterLine(innerWidth int) string {
 	} else {
 		leftRendered = DimStyle.Render("filter: ") + strings.TrimPrefix(leftPlain, "filter: ")
 	}
-	return leftRendered + strings.Repeat(" ", gap) + DimStyle.Render(count)
+	line := leftRendered + strings.Repeat(" ", gap) + DimStyle.Render(count)
+	return styleDialogBodyLines([]string{line}, innerWidth)[0]
 }
 
 func (m *Model) renderSessionSelectDialog() string {
