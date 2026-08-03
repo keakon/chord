@@ -507,7 +507,7 @@ model_pools:
 - GLM 的 `/responses` 由网关自行实现。只有网关明确说明支持 OpenAI
   Responses 映射时，才单独使用仅含 `reasoning.effort` 的模板。
 
-## DeepSeek-V4-Pro
+## DeepSeek V4（Flash / Pro）
 
 在 `~/.config/chord/auth.yaml` 中配置：
 
@@ -516,14 +516,29 @@ deepseek:
   - "$DEEPSEEK_API_KEY"
 ```
 
+`deepseek-v4-pro` 与 `deepseek-v4-flash` 走同一套 API，协议层完全一致，
+共用下面按 wire family 命名的模板。`deepseek-v4-flash` 是 2026-07-31 发布的
+正式版（DeepSeek-V4-Flash-0731，API 模型 ID 不变、自动指向正式版），原生
+支持 Responses API；`deepseek-v4-pro` 官方支持 Responses 尚在预告中。
+
 ```yaml
 model_templates:
-  deepseek-v4-pro-chat: &deepseek-v4-pro-chat
+  deepseek-v4-chat: &deepseek-v4-chat
     limit:
       context: 1000000
       output: 64000
     reasoning:
-      effort: max
+      effort: high
+    variants:
+      low:
+        reasoning:
+          effort: low
+      high:
+        reasoning:
+          effort: high
+      max:
+        reasoning:
+          effort: max
     compat:
       request_overrides:
         rename_body_fields:
@@ -534,13 +549,23 @@ model_templates:
       reasoning_continuity:
         mode: openai_visible
 
-  deepseek-v4-pro-messages: &deepseek-v4-pro-messages
+  deepseek-v4-messages: &deepseek-v4-messages
     limit:
       context: 1000000
       output: 64000
     thinking:
       type: adaptive
-      effort: max
+      effort: high
+    variants:
+      low:
+        thinking:
+          effort: low
+      high:
+        thinking:
+          effort: high
+      max:
+        thinking:
+          effort: max
     compat:
       request_overrides:
         headers:
@@ -548,35 +573,47 @@ model_templates:
       reasoning_continuity:
         mode: anthropic_unsigned
 
-  deepseek-v4-pro-responses: &deepseek-v4-pro-responses
+  deepseek-v4-responses: &deepseek-v4-responses
     limit:
       context: 1000000
       output: 64000
     reasoning:
-      effort: max
+      effort: high
+    variants:
+      low:
+        reasoning:
+          effort: low
+      high:
+        reasoning:
+          effort: high
+      max:
+        reasoning:
+          effort: max
 
 providers:
   deepseek:
     type: chat-completions
     api_url: https://api.deepseek.com/v1/chat/completions
     models:
-      deepseek-v4-pro: *deepseek-v4-pro-chat
+      deepseek-v4-pro: *deepseek-v4-chat
+      deepseek-v4-flash: *deepseek-v4-chat
 
   deepseek-messages:
     type: messages
     api_url: https://api.deepseek.com/anthropic/v1/messages
     models:
-      deepseek-v4-pro: *deepseek-v4-pro-messages
+      deepseek-v4-pro: *deepseek-v4-messages
+      deepseek-v4-flash: *deepseek-v4-messages
 
   deepseek-responses:
     type: responses
-    api_url: https://example.com/v1/responses
+    api_url: https://api.deepseek.com/v1/responses
     models:
-      deepseek-v4-pro: *deepseek-v4-pro-responses
+      deepseek-v4-flash: *deepseek-v4-responses
 
 model_pools:
   default:
-    - deepseek/deepseek-v4-pro
+    - deepseek/deepseek-v4-flash@high
 ```
 
 要点：
@@ -595,6 +632,32 @@ model_pools:
   才使用 `reasoning.effort`。
 - 对兼容网关，请使用该网关 / 账号实际公开的模型 ID 和限制。见
   [常见问题排查 — DeepSeek / OpenAI 兼容 thinking 模式 400](./troubleshooting_CN.md#deepseek--openai-兼容-thinking-模式-400)。
+
+补充：
+
+- 官方定价页标注的最大输出为 384K；这里 `limit.output: 64000` 是保守的
+  本地分配，与 pro 保持一致。需要更长输出时按需调大。
+- flash 原生支持 Responses API（`api.deepseek.com/v1/responses`），pro
+  的 Responses 支持仍在预告中；上方的 `deepseek-responses` 只列了
+  flash。响应中的 `output_tokens_details.reasoning_tokens` 由 Chord 按
+  标准 reasoning 回显处理，无需额外配置。
+- `reasoning_effort` 官方支持 `low` / `high` / `max`（默认 `high`）。
+  `xhigh` 会被映射到 `high`，`medium` 映射到 `high`，所以模板只定义
+  `low` / `high` / `max` 三个 variant。
+- 模型间有差异时（例如某个型号默认思考强度不同），用 YAML 锚点继承
+  并覆盖差异部分即可，例如：
+
+```yaml
+  deepseek-v4-pro-chat: &deepseek-v4-pro-chat
+    <<: *deepseek-v4-chat
+    reasoning:
+      effort: max
+```
+
+  这样 pro 的默认思考强度为 `max`，flash 保持 `high`，其余字段（limit、
+  compat、variants）全部复用。
+- flash 定价约为 pro 的 1/3（输入 $0.14 / 输出 $0.28 每百万 token），
+  适合高频 / 低成本场景。见 [DeepSeek 官方定价](https://api-docs.deepseek.com/quick_start/pricing/)。
 
 ## Qwen 保留历史思考
 

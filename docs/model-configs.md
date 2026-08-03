@@ -516,7 +516,7 @@ Notes:
 - A GLM `/responses` endpoint is gateway-specific. Use a separate template with
   `reasoning.effort` only when the gateway documents OpenAI Responses mapping.
 
-## DeepSeek-V4-Pro
+## DeepSeek V4 (Flash / Pro)
 
 Pair with `~/.config/chord/auth.yaml`:
 
@@ -525,14 +525,31 @@ deepseek:
   - "$DEEPSEEK_API_KEY"
 ```
 
+`deepseek-v4-pro` and `deepseek-v4-flash` share the same API surface, so the
+protocol-level config is identical; they reuse the wire-family templates
+below. `deepseek-v4-flash` is the official release of 2026-07-31
+(DeepSeek-V4-Flash-0731; the API model ID is unchanged and automatically
+routes to the official build) and natively supports the Responses API;
+`deepseek-v4-pro`'s Responses support is still announced as upcoming.
+
 ```yaml
 model_templates:
-  deepseek-v4-pro-chat: &deepseek-v4-pro-chat
+  deepseek-v4-chat: &deepseek-v4-chat
     limit:
       context: 1000000
       output: 64000
     reasoning:
-      effort: max
+      effort: high
+    variants:
+      low:
+        reasoning:
+          effort: low
+      high:
+        reasoning:
+          effort: high
+      max:
+        reasoning:
+          effort: max
     compat:
       request_overrides:
         rename_body_fields:
@@ -543,13 +560,23 @@ model_templates:
       reasoning_continuity:
         mode: openai_visible
 
-  deepseek-v4-pro-messages: &deepseek-v4-pro-messages
+  deepseek-v4-messages: &deepseek-v4-messages
     limit:
       context: 1000000
       output: 64000
     thinking:
       type: adaptive
-      effort: max
+      effort: high
+    variants:
+      low:
+        thinking:
+          effort: low
+      high:
+        thinking:
+          effort: high
+      max:
+        thinking:
+          effort: max
     compat:
       request_overrides:
         headers:
@@ -557,35 +584,47 @@ model_templates:
       reasoning_continuity:
         mode: anthropic_unsigned
 
-  deepseek-v4-pro-responses: &deepseek-v4-pro-responses
+  deepseek-v4-responses: &deepseek-v4-responses
     limit:
       context: 1000000
       output: 64000
     reasoning:
-      effort: max
+      effort: high
+    variants:
+      low:
+        reasoning:
+          effort: low
+      high:
+        reasoning:
+          effort: high
+      max:
+        reasoning:
+          effort: max
 
 providers:
   deepseek:
     type: chat-completions
     api_url: https://api.deepseek.com/v1/chat/completions
     models:
-      deepseek-v4-pro: *deepseek-v4-pro-chat
+      deepseek-v4-pro: *deepseek-v4-chat
+      deepseek-v4-flash: *deepseek-v4-chat
 
   deepseek-messages:
     type: messages
     api_url: https://api.deepseek.com/anthropic/v1/messages
     models:
-      deepseek-v4-pro: *deepseek-v4-pro-messages
+      deepseek-v4-pro: *deepseek-v4-messages
+      deepseek-v4-flash: *deepseek-v4-messages
 
   deepseek-responses:
     type: responses
-    api_url: https://example.com/v1/responses
+    api_url: https://api.deepseek.com/v1/responses
     models:
-      deepseek-v4-pro: *deepseek-v4-pro-responses
+      deepseek-v4-flash: *deepseek-v4-responses
 
 model_pools:
   default:
-    - deepseek/deepseek-v4-pro
+    - deepseek/deepseek-v4-flash@high
 ```
 
 Notes:
@@ -606,6 +645,36 @@ Notes:
   `reasoning.effort` only when the gateway documents its mapping.
 - For compatible gateways, use the exact model ID and limits published by that
   gateway/account. See [Troubleshooting — DeepSeek / OpenAI-compatible thinking-mode 400s](./troubleshooting.md#deepseek--openai-compatible-thinking-mode-400s).
+
+Additional notes:
+
+- The official pricing page lists a maximum output of 384K; `limit.output:
+  64000` here is a conservative local allocation shared with pro. Raise it as
+  needed for longer outputs.
+- Flash natively supports the Responses API (`api.deepseek.com/v1/responses`);
+  pro's Responses support is still upcoming, so `deepseek-responses` above
+  lists flash only. The `output_tokens_details.reasoning_tokens` field in
+  responses is handled by Chord's standard reasoning replay without extra
+  configuration.
+- `reasoning_effort` officially supports `low` / `high` / `max` (default
+  `high`). `xhigh` is mapped to `high` and `medium` to `high`, so the
+  templates define only the `low` / `high` / `max` variants.
+- To override per-model differences (e.g. a different default thinking
+  effort), inherit the shared template with YAML anchors and override the
+  diff only:
+
+```yaml
+  deepseek-v4-pro-chat: &deepseek-v4-pro-chat
+    <<: *deepseek-v4-chat
+    reasoning:
+      effort: max
+```
+
+  That gives pro a `max` default thinking effort while flash keeps `high`,
+  and reuses everything else (limit, compat, variants).
+- Flash pricing is roughly 1/3 of pro (input $0.14 / output $0.28 per 1M
+  tokens), suitable for high-volume / low-cost scenarios. See
+  [DeepSeek official pricing](https://api-docs.deepseek.com/quick_start/pricing/).
 
 ## Qwen preserved thinking
 
