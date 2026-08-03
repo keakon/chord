@@ -61,8 +61,8 @@ stdout 不是合法 JSON 时记录为解析失败；非零退出码记录为执�
   "agent_id": "main",
   "agent_kind": "main",
   "project_root": "/path/to/project",
-  "selected_model": "anthropic/claude-opus-4.8",
-  "running_model": "anthropic/claude-opus-4.8",
+  "selected_model": "anthropic/claude-opus-5",
+  "running_model": "anthropic/claude-opus-5",
   "data": {
     "tool_name": "shell",
     "args": { "command": "git status" }

@@ -44,7 +44,7 @@ Chord 在后台运行时，当前聚焦的 Agent 从 busy 变为 idle 后，终�
 每条记录会展示：
 
 - 时间（`HH:MM:SS`）
-- Provider 和 model，例如 `Anthropic/claude-opus-4-8`
+- Provider 和 model，例如 `Anthropic/claude-opus-5`
 - 打码后的 API key 标识，例如 `key=sk-a...xyz9`，显示少量前缀和后缀便于安全识别
 - HTTP 状态码（如果有）
 - API 返回的错误 code / type（如果有）
@@ -53,7 +53,7 @@ Chord 在后台运行时，当前聚焦的 Agent 从 busy 变为 idle 后，终�
 示例：
 
 ```text
-14:25:38  Anthropic/claude-opus-4-8  key=sk-a...xyz9  HTTP 503  code=model_not_found
+14:25:38  Anthropic/claude-opus-5  key=sk-a...xyz9  HTTP 503  code=model_not_found
   No available channel for model sample/model under group default
 ```
 

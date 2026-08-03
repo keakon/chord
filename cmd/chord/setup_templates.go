@@ -199,7 +199,7 @@ func initialSetupDefaultsForProviderType(providerType string) initialSetupEndpoi
 			APIURL:       "https://api.anthropic.com/v1/messages",
 			ModelName:    "claude-opus-4.8",
 			ContextLimit: 1000000,
-			OutputLimit:  64000,
+			OutputLimit:  128000,
 		}
 	case "generate-content":
 		return initialSetupEndpointDefaults{

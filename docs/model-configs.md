@@ -356,38 +356,45 @@ anthropic:
 ```
 
 ```yaml
+model_templates:
+  claude-opus: &claude-opus
+    limit:
+      context: 1000000
+      output: 128000
+    cost:
+      input: 5
+      output: 25
+      cache_read: 0.5
+      cache_write: 6.25
+      cache_write_1h: 10
+    thinking:
+      type: adaptive
+      display: summarized
+    variants:
+      high:
+        thinking:
+          effort: high
+      xhigh:
+        thinking:
+          effort: xhigh
+    modalities:
+      input: [text, image, pdf]
+
 providers:
   anthropic:
     type: messages
     api_url: https://api.anthropic.com/v1/messages
     models:
-      claude-opus-4.8:
-        limit:
-          context: 1000000
-          output: 128000
-        cost:
-          input: 5
-          output: 25
-          cache_read: 0.5
-          cache_write: 6.25
-          cache_write_1h: 10
-        thinking:
-          type: adaptive
-          display: summarized
-        variants:
-          high:
-            thinking:
-              effort: high
-          xhigh:
-            thinking:
-              effort: xhigh
-        modalities:
-          input: [text, image, pdf]
+      claude-opus-5: *claude-opus
+      claude-opus-4.8: *claude-opus
+      claude-opus-4.7: *claude-opus
 
 model_pools:
   default:
-    - anthropic/claude-opus-4.8@high
+    - anthropic/claude-opus-5@high
 ```
+
+Claude Opus 5 / 4.8 / 4.7 share the same context window (1M), max output (128K), pricing, adaptive thinking, and input modalities, so all three reuse the single `&claude-opus` template — only the model ID differs. Remove the entries you don't use, and point `model_pools` at your preferred model (e.g. `anthropic/claude-opus-5@high`).
 
 For a lower-cost Claude family config, use the same shape with `claude-sonnet-4.6`, `output: 64000`, and Sonnet pricing from your account/provider docs.
 
@@ -868,5 +875,5 @@ Then verify the exact variant you plan to use, for example:
 ```bash
 chord doctor models --model openai/gpt-5.6@max
 chord doctor models --model codex/gpt-5.5@max
-chord doctor models --model anthropic/claude-opus-4.8@high
+chord doctor models --model anthropic/claude-opus-5@high
 ```

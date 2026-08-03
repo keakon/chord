@@ -350,38 +350,48 @@ anthropic:
 ```
 
 ```yaml
+model_templates:
+  claude-opus: &claude-opus
+    limit:
+      context: 1000000
+      output: 128000
+    cost:
+      input: 5
+      output: 25
+      cache_read: 0.5
+      cache_write: 6.25
+      cache_write_1h: 10
+    thinking:
+      type: adaptive
+      display: summarized
+    variants:
+      high:
+        thinking:
+          effort: high
+      xhigh:
+        thinking:
+          effort: xhigh
+    modalities:
+      input: [text, image, pdf]
+
 providers:
   anthropic:
     type: messages
     api_url: https://api.anthropic.com/v1/messages
     models:
-      claude-opus-4.8:
-        limit:
-          context: 1000000
-          output: 128000
-        cost:
-          input: 5
-          output: 25
-          cache_read: 0.5
-          cache_write: 6.25
-          cache_write_1h: 10
-        thinking:
-          type: adaptive
-          display: summarized
-        variants:
-          high:
-            thinking:
-              effort: high
-          xhigh:
-            thinking:
-              effort: xhigh
-        modalities:
-          input: [text, image, pdf]
+      claude-opus-5: *claude-opus
+      claude-opus-4.8: *claude-opus
+      claude-opus-4.7: *claude-opus
 
 model_pools:
   default:
-    - anthropic/claude-opus-4.8@high
+    - anthropic/claude-opus-5@high
 ```
+
+Opus 5、4.8、4.7 的上下文窗口（1M）、最大输出（128K）、定价、adaptive
+thinking 与输入模态完全一致，因此共用同一个 `&claude-opus` 模板，只有
+模型 ID 不同。用不到的型号可以删掉，`model_pools` 指向你想用的模型即可
+（例如 `anthropic/claude-opus-5@high`）。
 
 如果想要更低成本的 Claude 配置，可沿用同样结构，改为 `claude-sonnet-4.6`、`output: 64000`，并按你的账号 / provider 文档填写 Sonnet 费率。
 
@@ -841,5 +851,5 @@ chord doctor models --model provider/model
 ```bash
 chord doctor models --model openai/gpt-5.6@max
 chord doctor models --model codex/gpt-5.5@max
-chord doctor models --model anthropic/claude-opus-4.8@high
+chord doctor models --model anthropic/claude-opus-5@high
 ```

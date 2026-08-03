@@ -498,7 +498,7 @@ may reference pool names to restrict access; they cannot define inline pools.
 # ~/.config/chord/config.yaml or .chord/config.yaml
 model_pools:
   thinking:
-    - anthropic/claude-opus-4.8
+    - anthropic/claude-opus-5
     - openai/gpt-5.5
   non-thinking:
     - anthropic/claude-sonnet-4

@@ -488,7 +488,7 @@ Chord 通过命名模型池选择当前使用的模型。每个池条目建议�
 # ~/.config/chord/config.yaml 或 .chord/config.yaml
 model_pools:
   thinking:
-    - anthropic/claude-opus-4.8
+    - anthropic/claude-opus-5
     - openai/gpt-5.5
   non-thinking:
     - anthropic/claude-sonnet-4

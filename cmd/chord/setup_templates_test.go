@@ -174,6 +174,11 @@ func TestInitialSetupDefaultsForProviderType(t *testing.T) {
 	if defaults.APIURL != "https://api.anthropic.com/v1/messages" || defaults.ProviderName != "anthropic" || defaults.ModelName != "claude-opus-4.8" {
 		t.Fatalf("messages defaults = %#v", defaults)
 	}
+	// The docs' unified Opus 5/4.8/4.7 template advertises a 128K max output;
+	// the wizard must not undercut it.
+	if defaults.ContextLimit != 1000000 || defaults.OutputLimit != 128000 {
+		t.Fatalf("messages limits = %#v", defaults)
+	}
 
 	defaults = initialSetupDefaultsForProviderType("generate-content")
 	if defaults.APIURL != "https://generativelanguage.googleapis.com/v1beta/models" || defaults.ProviderName != "gemini" || defaults.ModelName != "gemini-3.5-flash" {

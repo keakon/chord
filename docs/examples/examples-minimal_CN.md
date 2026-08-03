@@ -17,7 +17,7 @@ providers:
     type: messages
     api_url: https://api.anthropic.com/v1/messages
     models:
-      claude-opus-4.8:
+      claude-opus-5:
         limit:
           context: 1000000
           output: 128000
@@ -30,7 +30,7 @@ providers:
 
 model_pools:
   default:
-    - anthropic/claude-opus-4.8
+    - anthropic/claude-opus-5
 
 context:
   compaction:
@@ -48,7 +48,7 @@ log_level: info
 ## 验证命令
 
 ```bash
-chord doctor models --model anthropic/claude-opus-4.8
+chord doctor models --model anthropic/claude-opus-5
 ```
 
 ## 常见失败原因
