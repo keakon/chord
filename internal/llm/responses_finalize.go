@@ -276,6 +276,8 @@ func unwrapJSONString(raw json.RawMessage) json.RawMessage {
 
 // UnwrapToolArgs unwraps JSON string layers so tool handlers receive a JSON object, not a string.
 // Call before passing Args to tools.Execute when the provider may send arguments as a string.
+// tools.unwrapToolArgs is the stdlib-decoder twin of this helper; keep the two
+// behaviourally identical when either changes.
 func UnwrapToolArgs(raw json.RawMessage) json.RawMessage {
 	return unwrapJSONString(raw)
 }

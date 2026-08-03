@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+// unwrapToolArgs peels JSON string layers so tool handlers receive a JSON
+// object, not a string. It must stay behaviourally identical to
+// llm.UnwrapToolArgs, which is kept separate on purpose: that copy decodes with
+// sonic on the streaming hot path, and sharing one implementation would either
+// pull sonic into this package or slow the provider path down.
 func unwrapToolArgs(raw json.RawMessage) json.RawMessage {
 	for len(raw) > 0 && raw[0] == '"' {
 		var s string
