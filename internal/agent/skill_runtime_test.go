@@ -36,6 +36,16 @@ func TestRebuildInvokedSkillsFromMessagesRestoresOnlySuccessfulSkills(t *testing
 	}
 }
 
+func TestRebuildInvokedSkillsFromMessagesSkipsCancelledSkills(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "skill-1", Name: "skill", Args: mustToolArgs(t, map[string]any{"name": "cancelled-skill"})}}},
+		{Role: "tool", ToolCallID: "skill-1", ToolStatus: string(ToolResultStatusCancelled), Content: "Cancelled"},
+	}
+	if got := rebuildInvokedSkillsFromMessages(msgs, nil); len(got) != 0 {
+		t.Fatalf("cancelled skill restored as invoked: %#v", got)
+	}
+}
+
 func TestSetSkillsHydratesRestoredInvokedSkillMetadata(t *testing.T) {
 	a := &MainAgent{invokedSkills: map[string]*skill.Meta{"go-expert": {Name: "go-expert", Invoked: true}}}
 	a.SetSkills([]*skill.Meta{{Name: "go-expert", Description: "Go language development expert"}})

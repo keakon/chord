@@ -1015,7 +1015,7 @@ func invokedSkillNamesFromMessages(msgs []message.Message) []string {
 			continue
 		}
 		name, ok := assistantSkillCalls[msg.ToolCallID]
-		if !ok || isToolResultErrorMessage(msg) {
+		if !ok || !restoreSkillResultSucceeded(msg) {
 			continue
 		}
 		invoked[name] = struct{}{}
@@ -1029,6 +1029,16 @@ func invokedSkillNamesFromMessages(msgs []message.Message) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func restoreSkillResultSucceeded(msg message.Message) bool {
+	status := strings.TrimSpace(msg.ToolStatus)
+	if status == "" {
+		// Older transcripts did not persist terminal status; retain their
+		// successful result semantics while still rejecting explicit error text.
+		return !isToolResultErrorMessage(msg)
+	}
+	return strings.EqualFold(status, string(ToolResultStatusSuccess))
 }
 
 func filterRestoredTodosByLatestCompactionSummary(messages []message.Message, todos []tools.TodoItem) []tools.TodoItem {
