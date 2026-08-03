@@ -406,6 +406,20 @@ func TestWrapTextKeepsOversizeGraphemeWithoutLeadingBlank(t *testing.T) {
 	}
 }
 
+func TestWrapTextLongWordsAccountForIndent(t *testing.T) {
+	for _, text := range []string{
+		"  " + strings.Repeat("x", 23),
+		"  " + strings.Repeat("界", 12),
+	} {
+		lines := wrapText(text, 24)
+		for _, line := range lines {
+			if got := tuiStringWidth(line); got > 24 {
+				t.Fatalf("wrapText(%q) line width = %d, want <= 24: %q", text, got, line)
+			}
+		}
+	}
+}
+
 func BenchmarkWrapTextLongParagraph(b *testing.B) {
 	text := strings.Repeat("streaming cheap path line with no markdown fences or bullets ", 160)
 	b.SetBytes(int64(len(text)))

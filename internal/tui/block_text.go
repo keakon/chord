@@ -885,7 +885,7 @@ func wrapPlainASCIIText(text string, width int) []string {
 }
 
 func appendASCIIWord(result *[]string, cur *strings.Builder, curWidth *int, word string, width int) {
-	if len(word) <= width {
+	if len(word) <= width-*curWidth {
 		cur.WriteString(word)
 		*curWidth += len(word)
 		return
@@ -914,24 +914,32 @@ func appendASCIIWord(result *[]string, cur *strings.Builder, curWidth *int, word
 // width exceeds the available line width. Uses the viewport width method so
 // columns match final rendering.
 func appendWord(result *[]string, cur *strings.Builder, curWidth *int, word string, wordWidth, width int) {
-	if wordWidth <= width {
+	if wordWidth <= width-*curWidth {
 		cur.WriteString(word)
 		*curWidth += wordWidth
 		return
 	}
-	// Word is wider than the line — break it by grapheme clusters.
-	parts := tuiHardwrap(word, width)
-	if len(parts) == 0 {
-		return
-	}
-	for i, part := range parts {
-		if i > 0 {
+	// Fill the current line first, then hard-wrap the remainder.
+	for word != "" {
+		available := width - *curWidth
+		if available <= 0 {
+			*result = append(*result, cur.String())
+			cur.Reset()
+			*curWidth = 0
+			available = width
+		}
+		part, rest := tuiWrapHeadTail(word, available)
+		if part == "" {
+			return
+		}
+		cur.WriteString(part)
+		*curWidth += tuiStringWidth(part)
+		word = rest
+		if word != "" {
 			*result = append(*result, cur.String())
 			cur.Reset()
 			*curWidth = 0
 		}
-		cur.WriteString(part)
-		*curWidth += tuiStringWidth(part)
 	}
 }
 

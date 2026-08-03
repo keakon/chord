@@ -81,8 +81,7 @@ func formatErrorRecordLines(rec agentErrorRecord, width int) []string {
 	if msg == "" {
 		msg = "(no message)"
 	}
-	for _, line := range wrapText(msg, width) {
-		out = append(out, "  "+line)
-	}
-	return out
+	// Include the two-column message indent in wrapping. Adding it after
+	// wrapping makes the measured line width differ from the rendered width.
+	return append(out, wrapText("  "+msg, width)...)
 }

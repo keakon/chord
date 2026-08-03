@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
 
@@ -249,5 +250,22 @@ func TestErrorPanelLinesShowStructuredFields(t *testing.T) {
 	}
 	if strings.Contains(joined, "fp=") {
 		t.Fatalf("error panel lines should not show fp\n%s", joined)
+	}
+}
+
+func TestFormatErrorRecordLinesAccountsForMessageIndent(t *testing.T) {
+	for _, message := range []string{
+		"operation timed out while waiting for the request",
+		strings.Repeat("x", 23),
+	} {
+		lines := formatErrorRecordLines(agentErrorRecord{Timestamp: time.Unix(0, 0), Message: message}, 24)
+		for _, line := range lines[1:] {
+			if got := tuiStringWidth(line); got > 24 {
+				t.Fatalf("message line width = %d, want <= 24: %q", got, line)
+			}
+		}
+		if got := stripANSI(strings.Join(lines, "\n")); !strings.Contains(got, "  ") {
+			t.Fatalf("message lost its indent: %q", got)
+		}
 	}
 }
