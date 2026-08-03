@@ -1247,6 +1247,27 @@ func TestReduceGoTestSuccessOutputSummaryRejectsErrorStatus(t *testing.T) {
 	}
 }
 
+func TestReduceGoTestSuccessOutputSummaryRejectsCancelledStatus(t *testing.T) {
+	ctx := requestReductionContext{
+		Meta:       toolCallMeta{Args: `{"command":"go test ./..."}`},
+		Content:    "ok  \tgithub.com/example/project/internal/a\t(cached)\n",
+		ToolStatus: string(ToolResultStatusCancelled),
+	}
+	if got, ok := reduceGoTestSuccessOutputSummary(ctx); ok {
+		t.Fatalf("cancelled go test output must not use success summary, got %q", got)
+	}
+}
+
+func TestReadRetentionDoesNotProtectCancelledRead(t *testing.T) {
+	ctx := requestReductionContext{
+		ToolName:   tools.NameRead,
+		ToolStatus: string(ToolResultStatusCancelled),
+	}
+	if ctx.readRetentionProtects() {
+		t.Fatal("cancelled read must not be protected as current file context")
+	}
+}
+
 func TestDefaultContextReductionPolicyMatchesDefaultConfig(t *testing.T) {
 	policy := defaultContextReductionPolicy()
 	cfg := config.DefaultConfig().Context.Reduction

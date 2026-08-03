@@ -276,7 +276,7 @@ type requestReductionContext struct {
 // summary it cannot verify. Capacity pressure is compaction's job, not
 // reduction's.
 func (ctx requestReductionContext) readRetentionProtects() bool {
-	if ctx.ToolName != tools.NameRead || isToolResultErrorStatus(ctx.ToolStatus) {
+	if ctx.ToolName != tools.NameRead || isToolResultUnsuccessfulStatus(ctx.ToolStatus) {
 		return false
 	}
 	return !ctx.ReadInvalidated && !ctx.ReadSuperseded
@@ -919,7 +919,7 @@ type goTestSuccessSummary struct {
 }
 
 func reduceGoTestSuccessOutputSummary(ctx requestReductionContext) (string, bool) {
-	if isToolResultErrorStatus(ctx.ToolStatus) || !isDirectGoTestCommand(ctx.Meta.Args) {
+	if isToolResultUnsuccessfulStatus(ctx.ToolStatus) || !isDirectGoTestCommand(ctx.Meta.Args) {
 		return "", false
 	}
 	summary := summarizeGoTestSuccess(ctx.Content, 4)
