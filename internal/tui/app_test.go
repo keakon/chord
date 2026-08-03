@@ -1934,7 +1934,7 @@ func TestClickOutsideViewportClearsFocusedBlock(t *testing.T) {
 	}
 }
 
-func TestClickBlockErrorDoesNotFocus(t *testing.T) {
+func TestClickBlockErrorFocusesForCopy(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	m.mode = ModeNormal
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockError, Content: "boom"})
@@ -1948,13 +1948,13 @@ func TestClickBlockErrorDoesNotFocus(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("viewport click should not schedule command, got %#v", cmd)
 	}
-	if model.focusedBlockID != -1 {
-		t.Fatalf("focusedBlockID after clicking BlockError = %d, want -1", model.focusedBlockID)
+	if model.focusedBlockID != 1 {
+		t.Fatalf("focusedBlockID after clicking BlockError = %d, want 1", model.focusedBlockID)
 	}
 	if errBlock := model.viewport.GetFocusedBlock(1); errBlock == nil {
 		t.Fatal("expected error block to remain in viewport")
-	} else if errBlock.Focused {
-		t.Fatal("BlockError should not become focused")
+	} else if !errBlock.Focused {
+		t.Fatal("BlockError should become focused for copy")
 	}
 }
 
@@ -8110,7 +8110,7 @@ func TestCopyFocusedBlocksJoinsPerCardCopyRepresentations(t *testing.T) {
 	}
 }
 
-func TestCopyFocusedBlockRejectsErrorCard(t *testing.T) {
+func TestCopyFocusedBlockCopiesErrorCard(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 8)
 	m.mode = ModeNormal
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockError, Content: "failed"})
@@ -8118,14 +8118,8 @@ func TestCopyFocusedBlockRejectsErrorCard(t *testing.T) {
 	m.refreshBlockFocus()
 
 	cmd := m.copyFocusedBlock()
-	if cmd == nil {
-		t.Fatal("copyFocusedBlock should return toast command for BlockError")
-	}
-	if m.activeToast == nil {
-		t.Fatal("copyFocusedBlock should enqueue toast for non-copyable block")
-	}
-	if got, want := m.activeToast.Message, "This card type cannot be copied"; got != want {
-		t.Fatalf("toast message = %q, want %q", got, want)
+	if cmd == nil || blockCopyContent(m.viewport.GetFocusedBlock(1)) != "failed" {
+		t.Fatal("copyFocusedBlock should copy BlockError content")
 	}
 }
 
@@ -8176,7 +8170,7 @@ func TestSuperCopyMouseSelectionKeepsLastCharacter(t *testing.T) {
 	}
 }
 
-func TestSuperCopyRejectsErrorCard(t *testing.T) {
+func TestSuperCopyCopiesErrorCard(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 8)
 	m.mode = ModeNormal
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockError, Content: "failed"})
@@ -8184,22 +8178,24 @@ func TestSuperCopyRejectsErrorCard(t *testing.T) {
 	m.refreshBlockFocus()
 
 	cmd := m.handleSuperCopy()
-	if cmd == nil {
-		t.Fatal("handleSuperCopy should return toast command for BlockError")
-	}
-	if m.activeToast == nil {
-		t.Fatal("handleSuperCopy should enqueue toast for non-copyable block")
-	}
-	if got, want := m.activeToast.Message, "This card type cannot be copied"; got != want {
-		t.Fatalf("toast message = %q, want %q", got, want)
+	if cmd == nil || blockCopyContent(m.viewport.GetFocusedBlock(1)) != "failed" {
+		t.Fatal("handleSuperCopy should copy BlockError content")
 	}
 }
 
-func TestNormalModeYankSkipsErrorCardAndFocusesNextSelectable(t *testing.T) {
+func TestNormalModeYankCopiesErrorCardAtViewport(t *testing.T) {
+	originalWriteAll := clipboardWriteAll
+	defer func() { clipboardWriteAll = originalWriteAll }()
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
 	m := NewModelWithSize(nil, 80, 8)
 	m.mode = ModeNormal
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockError, Content: "failed"})
 	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: "hello"})
+	m.viewport.ScrollToTop()
 
 	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'})); cmd == nil {
 		t.Fatal("first y should start yank chord")
@@ -8208,8 +8204,8 @@ func TestNormalModeYankSkipsErrorCardAndFocusesNextSelectable(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("yy should return clipboard command")
 	}
-	if m.focusedBlockID != 2 {
-		t.Fatalf("focusedBlockID = %d, want 2 (skip BlockError)", m.focusedBlockID)
+	if m.focusedBlockID != 1 {
+		t.Fatalf("focusedBlockID = %d, want 1 (copy BlockError)", m.focusedBlockID)
 	}
 	msg := cmd()
 	v := reflect.ValueOf(msg)
@@ -8219,6 +8215,9 @@ func TestNormalModeYankSkipsErrorCardAndFocusesNextSelectable(t *testing.T) {
 	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
 	if second.success != "Message card copied to clipboard" {
 		t.Fatalf("clipboard success = %q, want %q", second.success, "Message card copied to clipboard")
+	}
+	if copied != "failed" {
+		t.Fatalf("copied text = %q, want error content", copied)
 	}
 }
 

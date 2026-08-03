@@ -129,7 +129,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 			return m.startChordOp(chordG)
 		case key == "y":
 			if m.focusedBlockID < 0 {
-				m.setFocusedBlockFromViewport()
+				m.setCopyFocusedBlockFromViewport()
 			}
 			return m.startChordOp(chordY)
 		case key == "d":
@@ -196,7 +196,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 			}
 		}
 		if m.focusedBlockID < 0 {
-			m.setFocusedBlockFromViewport()
+			m.setCopyFocusedBlockFromViewport()
 		}
 		return m.startChordOp(chordY)
 

@@ -20,7 +20,11 @@ func isSelectableBlockType(t BlockType) bool {
 }
 
 func isCopyableBlockType(t BlockType) bool {
-	return isSelectableBlockType(t)
+	return isSelectableBlockType(t) || t == BlockError
+}
+
+func isFocusableBlockType(t BlockType) bool {
+	return isCopyableBlockType(t)
 }
 
 func normalizeFocusedBlockID(blocks []*Block, currentID int) int {
@@ -34,7 +38,7 @@ func normalizeFocusedBlockID(blocks []*Block, currentID int) int {
 			break
 		}
 	}
-	if idx >= 0 && blocks[idx] != nil && isSelectableBlockType(blocks[idx].Type) {
+	if idx >= 0 && blocks[idx] != nil && isFocusableBlockType(blocks[idx].Type) {
 		return currentID
 	}
 	for _, b := range blocks {
@@ -137,7 +141,7 @@ func (m *Model) revalidateFocusedBlock() {
 		return
 	}
 	if m.focusedBlockID >= 0 {
-		if block := m.viewport.GetFocusedBlock(m.focusedBlockID); block != nil && isSelectableBlockType(block.Type) {
+		if block := m.viewport.GetFocusedBlock(m.focusedBlockID); block != nil && isFocusableBlockType(block.Type) {
 			m.refreshBlockFocus()
 			return
 		}
@@ -289,6 +293,14 @@ func (m *Model) viewportSelectionPtr() *SelectionRange {
 // setFocusedBlockFromViewport sets focusedBlockID to the block at the current
 // viewport offset (e.g. after { / }) and refreshes block Focused state.
 func (m *Model) setFocusedBlockFromViewport() {
+	m.setFocusedBlockFromViewportByType(isSelectableBlockType)
+}
+
+func (m *Model) setCopyFocusedBlockFromViewport() {
+	m.setFocusedBlockFromViewportByType(isCopyableBlockType)
+}
+
+func (m *Model) setFocusedBlockFromViewportByType(allowed func(BlockType) bool) {
 	blocks := m.viewport.visibleBlocks()
 	if len(blocks) == 0 {
 		return
@@ -303,7 +315,7 @@ func (m *Model) setFocusedBlockFromViewport() {
 	}
 	for i := idx; i < len(blocks); i++ {
 		candidate := blocks[i]
-		if candidate == nil || !isSelectableBlockType(candidate.Type) {
+		if candidate == nil || !allowed(candidate.Type) {
 			continue
 		}
 		m.focusedBlockID = candidate.ID
@@ -312,7 +324,7 @@ func (m *Model) setFocusedBlockFromViewport() {
 	}
 	for i := idx - 1; i >= 0; i-- {
 		candidate := blocks[i]
-		if candidate == nil || !isSelectableBlockType(candidate.Type) {
+		if candidate == nil || !allowed(candidate.Type) {
 			continue
 		}
 		m.focusedBlockID = candidate.ID

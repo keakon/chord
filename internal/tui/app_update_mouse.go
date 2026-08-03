@@ -549,7 +549,7 @@ func (m *Model) setFocusedViewportBlock(block *Block) {
 			}
 		}
 	}
-	if block != nil && isSelectableBlockType(block.Type) {
+	if block != nil && isFocusableBlockType(block.Type) {
 		m.focusedBlockID = block.ID
 		block.Focused = true
 		block.InvalidateCache()
