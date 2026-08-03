@@ -72,7 +72,7 @@ context:
 |-------|------|---------|-------------|
 | `threshold` | float | `0.8` | Context usage ratio that triggers automatic compaction. Range `0`–`1`, e.g. `0.8` means trigger when usage reaches 80% of the usable input budget. Set to `0` to disable automatic compaction. |
 | `model_pool` | string | clone current agent pool | Name of a dedicated model pool for compaction. Use a low-cost/fast model to minimize overhead. |
-| `reserved` | int | `0` | Token headroom reserved for tokenizer drift, tool schema overhead, and compaction/recovery safety margin. Subtracted from the input budget before applying `threshold`. |
+| `reserved` | int | `0` | Fixed token headroom added on top of the proportional headroom left by `threshold`, for tokenizer drift, tool schema overhead, and compaction/recovery safety. Usually omit it (leave it at `0`); a non-zero value is subtracted from the input budget before applying `threshold`. |
 | `preset` | string | auto-detected | Force a specific compaction implementation. Usually unnecessary. |
 | `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |
 
@@ -82,9 +82,12 @@ Chord uses the **usable input budget** as
 the baseline. If the model config sets `limit.input`, that value is used;
 otherwise Chord derives it from `limit.context - effective requested output`
 (where effective output is `max_output_tokens` capped by the model's
-`limit.output`). If `reserved` is set, it is subtracted first. The TUI
-`Context` indicator in the info panel and footer uses the same input-budget
-baseline, so its percentage matches automatic compaction thresholds. For
+`limit.output`). If `reserved` is set, it is subtracted first. The effective
+trigger is therefore `(input budget - reserved) × threshold`: `reserved` adds
+to, rather than replaces, the unused proportional headroom left by
+`threshold`. The TUI `Context` indicator in the info panel and footer uses the
+same input-budget baseline after subtracting `reserved`, so its percentage
+matches automatic compaction thresholds. For
 providers that report prompt-cache writes separately, Chord counts the current
 prompt-side usage as `input_tokens + cache_write_tokens` so newly cached prompt
 segments are included in the displayed context burden.
@@ -102,7 +105,16 @@ the byte ratio and can trigger automatic compaction when the estimate reaches
 `threshold`. This byte-calibrated estimate is only an early compaction signal;
 it is not used for billing or as an exact context-window measurement.
 
-**Reserved headroom example**:
+**Additional fixed headroom example (only when needed)**:
+
+Usually, setting `threshold` is sufficient. With `input: 272000` and
+`threshold: 0.8`, omitting `reserved` triggers compaction at
+`272000 × 0.8 = 217600` tokens, already leaving `54400` tokens (20%) of
+proportional headroom.
+
+Set a non-zero `reserved` only when you need additional fixed headroom, such
+as with a very high threshold, unreliable provider usage, or an unusually
+large tool schema:
 
 ```yaml
 context:
@@ -111,10 +123,16 @@ context:
     reserved: 16000
 ```
 
-With a model configured as `input: 272000`, the usable budget after reserving
-is `256000`, and automatic compaction triggers when context reaches
-`256000 × 0.8 = 204800` tokens. A sensible `reserved` value prevents compaction
-from triggering too late due to tokenizer drift or tool-description overhead.
+The usable budget is then `256000`, and automatic compaction triggers when
+context reaches `256000 × 0.8 = 204800` tokens, `12800` tokens earlier than
+with `threshold: 0.8` alone. The TUI `Context` percentage also uses `256000` as
+its denominator. If you are unsure whether you need additional fixed
+headroom, keep the default value of `0`.
+
+Note: a non-zero `reserved` cannot be reset from a project config. Chord uses
+the first positive `reserved` across the project and global layers, so a
+project-level `reserved: 0` falls back to the global value; lower the global
+setting instead.
 
 ### Manual compaction and oversize recovery
 

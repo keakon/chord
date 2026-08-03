@@ -50,7 +50,6 @@ anthropic:
 context:
   compaction:
     model_pool: fast
-    reserved: 16000
 
 hooks:
   on_tool_call:

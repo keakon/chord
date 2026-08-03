@@ -73,7 +73,6 @@ context:
   compaction:
     threshold: 0.8
     model_pool: fast
-    reserved: 16000
 
 desktop_notification: true
 prevent_sleep: true

@@ -41,17 +41,21 @@ context:
 |------|------|------|------|
 | `threshold` | 浮点数 | `0.8` | 触发自动压缩的上下文使用率阈值。取值 `0` ~ `1`，例如 `0.8` 表示用量达到可用输入预算的 80% 时触发；设为 `0` 可关闭自动压缩。 |
 | `model_pool` | 字符串 | 克隆当前 agent 模型池 | 执行压缩的专用模型池名。建议使用低成本/快速模型以节省开销。 |
-| `reserved` | 整数 | `0` | 为 tokenizer 误差、工具 schema 开销、压缩恢复安全等预留的 token 余量。计算触发阈值时先从输入预算中扣除。 |
+| `reserved` | 整数 | `0` | 在 `threshold` 留出的比例余量之外，再为 tokenizer 误差、工具 schema 开销、压缩恢复安全等保留的固定 token 余量。通常建议省略（保持 `0`）；非零值会先从输入预算中扣除，再应用 `threshold`。 |
 | `preset` | 字符串 | 自动检测 | 强制指定压缩实现方式，一般无需设置。 |
 | `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
 
 ### 触发阈值如何计算
 
-以**可用输入预算**为基准。若模型配置了 `limit.input`，以此为准；否则按 `limit.context - 有效请求输出`（其中有效输出取 `max_output_tokens` 与模型 `limit.output` 的较小值）推导。若设置了 `reserved`，再从预算中扣除。TUI 信息面板和底部栏的 `Context` 百分比使用同一输入预算基准，与自动压缩阈值保持对齐。对于会单独报告 prompt cache 写入的 provider，Chord 会把当前 prompt 侧用量按 `input_tokens + cache_write_tokens` 计算，因此新写入缓存的 prompt 片段也会计入显示的上下文负担。
+以**可用输入预算**为基准。若模型配置了 `limit.input`，以此为准；否则按 `limit.context - 有效请求输出`（其中有效输出取 `max_output_tokens` 与模型 `limit.output` 的较小值）推导。若设置了 `reserved`，再从预算中扣除。因此实际触发点为 `(输入预算 - reserved) × threshold`；`reserved` 会和 `threshold` 未使用的比例余量叠加，而不是替代它。TUI 信息面板和底部栏的 `Context` 百分比使用扣除 `reserved` 后的同一输入预算基准，与自动压缩阈值保持对齐。对于会单独报告 prompt cache 写入的 provider，Chord 会把当前 prompt 侧用量按 `input_tokens + cache_write_tokens` 计算，因此新写入缓存的 prompt 片段也会计入显示的上下文负担。
 
 provider usage 是自动触发的权威依据。Chord 不会用请求级剪裁后的本地 token 估算去清除已经触发的自动压缩请求，因为多模态输入、工具 schema、provider/proxy framing 等都可能让本地估算与 provider 统计不一致。唯一的兜底是 usage 缺失场景：Chord 收到可信的非零 `input_tokens` 后，会记录当时会进入上下文的消息 bytes，包括正文、需要回放的 tool-call 参数、thinking blocks 和 reasoning text；如果后续响应缺少 usage 或返回 0，且这些 bytes 已增长，就按比例估算 `input_tokens`，估算值达到 `threshold` 时也会触发自动压缩。这个 byte-calibrated estimate 只用于提前压缩，不用于计费，也不表示精确的上下文窗口用量。
 
-**预留 headroom 示例**：
+**额外固定 headroom 示例（仅在需要时）**：
+
+通常只需设置 `threshold`。以模型 `input: 272000` 和 `threshold: 0.8` 为例，不设置 `reserved` 时会在 `272000 × 0.8 = 217600` tokens 触发压缩，已经留下 `54400` tokens（20%）的比例余量。
+
+只有还需要额外的固定余量时，例如阈值设得很高、provider usage 不可靠或工具 schema 特别大，才建议配置非零 `reserved`：
 
 ```yaml
 context:
@@ -60,7 +64,9 @@ context:
     reserved: 16000
 ```
 
-以模型 `input: 272000` 为例，扣除 `reserved` 后可用预算为 `256000`，当上下文达到 `256000 × 0.8 = 204800` tokens 时触发自动压缩。设置合理的 `reserved` 可避免由于 tokenizer 计算误差或工具描述开销导致压缩触发偏晚。
+此时扣除 `reserved` 后可用预算为 `256000`，当上下文达到 `256000 × 0.8 = 204800` tokens 时触发自动压缩，比仅设置 `threshold: 0.8` 提前 `12800` tokens；TUI 的 `Context` 百分比也以 `256000` 为分母。不确定是否需要额外固定余量时，请保持默认值 `0`。
+
+注意：非零的 `reserved` 无法在项目配置中重置。Chord 会取项目层与全局层中第一个正数的 `reserved`，项目层设置 `reserved: 0` 会落回全局值；如需降低请直接修改全局配置。
 
 ### 手动压缩与超长恢复
 
