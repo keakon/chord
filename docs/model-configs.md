@@ -268,7 +268,7 @@ Notes:
   long-context pricing threshold, not the full API input cap.
 - `gpt-5.6` currently resolves to Sol, so its `cost` block should match Sol pricing.
 - GPT-5.6 API reasoning efforts can include `none`, `low`, `medium`, `high`, `xhigh`, and `max`.
-- `reasoning.summary: auto` is optional. Leave it unset when you do not want Chord to explicitly request a readable reasoning summary.
+- Responses defaults `reasoning.summary` to `auto` while reasoning is active; set `reasoning.summary: none` when you do not want Chord to request a readable summary.
 - Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
 
 Verify:

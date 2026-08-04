@@ -148,7 +148,7 @@ openai:
   the usable input budget after reserving the effective requested output.
   Above 272K is then a pricing threshold, not an input cap.
 - Supported API reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`, and `max`; select a configured variant with a ref such as `openai/gpt-5.6@max`.
-- `reasoning.summary: auto` is optional. Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
+- When reasoning is active, Responses defaults `reasoning.summary` to `auto`; set it to `none` to opt out explicitly. Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
 - `preset: codex` providers can also use `max` when the selected model/backend supports it. Whether a given effort level is accepted is model/provider-specific.
 
 Limits and reasoning values were checked against the current Codex model
@@ -629,9 +629,10 @@ Model field semantics:
   casing, then forwards the value supported by the target provider.
   - Chat Completions sends top-level `reasoning_effort`.
   - Responses sends `reasoning.effort` and optional `reasoning.summary`.
-- `reasoning.summary`: optional Responses reasoning summary request. Supported
-  Chord values are `auto`, `concise`, and `detailed`; omit it to let the provider
-  decide whether to return a summary.
+- `reasoning.summary`: Responses reasoning summary request. Supported Chord
+  values are `auto`, `concise`, `detailed`, and `none`. When reasoning is
+  active, omission defaults to `auto` so cross-provider replay retains portable
+  summary text; use `none` to opt out explicitly.
 - `thinking`: Messages-compatible extended thinking. `type: adaptive` combines
   with `thinking.effort`, which Chord sends as `output_config.effort`.
 - `text.verbosity`: optional OpenAI-compatible visible-text verbosity hint.
@@ -1176,7 +1177,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `limit.input`     | int    | Separate input cap when a provider publishes one. Chord uses it to compact or retry before the prompt is too large.               |
 | `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |
 | `context.compaction.reserved` | int | Optional input-budget headroom reserved before `compaction.threshold` is applied. Useful for tokenizer drift, tool overhead, and safer overflow recovery. |
-| `reasoning`       | object | OpenAI reasoning options. `reasoning.effort` is normalized and passed through verbatim, so any provider-supported level (e.g. GLM `max` / `minimal` / `none`) reaches the upstream unchanged (unset = omit and use provider/model default). For Responses, `reasoning.summary` (`auto` / `concise` / `detailed`; unset = omit / no explicit summary request). Recommended summary value when you want readable summaries: `auto`. |
+| `reasoning`       | object | OpenAI reasoning options. `reasoning.effort` is normalized and passed through verbatim, so any provider-supported level (e.g. GLM `max` / `minimal` / `none`) reaches the upstream unchanged (unset = omit and use provider/model default). For Responses, `reasoning.summary` supports `auto` / `concise` / `detailed` / `none`; when reasoning is active, unset defaults to `auto`, while `none` opts out explicitly. |
 | `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `thinking.effort` is sent as `output_config.effort` for Messages requests; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
 | `compat.reasoning_continuity.mode` | string | Optional continuity override. Use `openai_visible` for Chat Completions models that require unchanged assistant `reasoning_content` and can accept portable visible reasoning from other wires as `reasoning_content`; use `anthropic_unsigned` only for verified Messages-compatible models that replay or accept visible unsigned `thinking`; use `none` to opt out of a provider-level default. |

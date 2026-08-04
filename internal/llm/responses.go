@@ -421,8 +421,18 @@ func (r *ResponsesProvider) CompleteStream(
 	// Responses reasoning is emitted whenever effort or summary is configured. Codex's
 	// request builder emits the block for any reasoning-capable model even when effort
 	// is empty (effort omitted, summary carried), so gating on effort alone dropped it.
-	if effectiveReasoningEffort != "" || ot.ReasoningSummary != "" {
-		reqBody.Reasoning = &reasoningConfig{Effort: effectiveReasoningEffort, Summary: ot.ReasoningSummary}
+	// Summaries default to "auto" when reasoning is active: the encrypted reasoning
+	// payload is bound to the producing platform, so the summary is the only reasoning
+	// text that survives a later switch to another provider or wire family. "none"
+	// opts out explicitly.
+	effectiveReasoningSummary := ot.ReasoningSummary
+	if effectiveReasoningSummary == "" && effectiveReasoningEffort != "" {
+		effectiveReasoningSummary = "auto"
+	} else if effectiveReasoningSummary == "none" {
+		effectiveReasoningSummary = ""
+	}
+	if effectiveReasoningEffort != "" || effectiveReasoningSummary != "" {
+		reqBody.Reasoning = &reasoningConfig{Effort: effectiveReasoningEffort, Summary: effectiveReasoningSummary}
 	}
 	if ot.TextVerbosity != "" {
 		reqBody.Text = &textConfig{Verbosity: ot.TextVerbosity}

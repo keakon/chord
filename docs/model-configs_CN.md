@@ -264,7 +264,7 @@ providers:
   计价阈值，不是完整 API 的输入硬上限。
 - `gpt-5.6` 当前会解析到 Sol，因此它的 `cost` 应按 Sol 费率填写。
 - GPT-5.6 API 可用的 reasoning effort 包括 `none`、`low`、`medium`、`high`、`xhigh`、`max`。
-- `reasoning.summary: auto` 是可选项；如果不希望 Chord 显式请求可读 reasoning 摘要，可以留空不写。
+- Responses 在启用 reasoning 时默认使用 `reasoning.summary: auto`；如果不希望 Chord 请求可读 reasoning 摘要，请显式配置 `reasoning.summary: none`。
 - Chord 当前尚未暴露 GPT-5.6 的 `reasoning.mode: pro`。
 
 验证：

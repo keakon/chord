@@ -3308,3 +3308,67 @@ func TestParseResponsesSSE_ReviewUncommittedCode_E2E(t *testing.T) {
 	// Agent path: with 0 tool calls and StopReason=length, MalformedCount is not incremented.
 	// So the turn can retry or user can start new conversation / increase max_output_tokens.
 }
+
+func TestResponsesProvider_ReasoningSummaryDefaultsToAuto(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		tuning      RequestTuning
+		wantSummary any // nil means the summary key must be absent
+	}{
+		{
+			name:        "effort without summary defaults to auto",
+			tuning:      RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "high"}},
+			wantSummary: "auto",
+		},
+		{
+			name:        "explicit summary wins",
+			tuning:      RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "high", ReasoningSummary: "detailed"}},
+			wantSummary: "detailed",
+		},
+		{
+			name:        "none opts out",
+			tuning:      RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "high", ReasoningSummary: "none"}},
+			wantSummary: nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+				_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			}))
+			defer server.Close()
+
+			providerCfg := NewProviderConfig("generic", config.ProviderConfig{
+				Type:   config.ProviderTypeResponses,
+				APIURL: server.URL + "/v1/responses",
+			}, []string{"test-key"})
+			r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+			_, err := r.CompleteStream(
+				context.Background(), "test-key", "gpt-5.5", "",
+				[]message.Message{{Role: "user", Content: "hello"}},
+				nil, 0, tc.tuning,
+				func(message.StreamDelta) {},
+			)
+			if err != nil {
+				t.Fatalf("CompleteStream: %v", err)
+			}
+			reasoning, ok := gotBody["reasoning"].(map[string]any)
+			if !ok {
+				t.Fatalf("reasoning = %#v, want object", gotBody["reasoning"])
+			}
+			got, present := reasoning["summary"]
+			if tc.wantSummary == nil {
+				if present {
+					t.Fatalf("reasoning.summary = %#v, want absent", got)
+				}
+				return
+			}
+			if got != tc.wantSummary {
+				t.Fatalf("reasoning.summary = %#v, want %#v", got, tc.wantSummary)
+			}
+		})
+	}
+}

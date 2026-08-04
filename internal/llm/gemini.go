@@ -209,7 +209,18 @@ func (g *GeminiProvider) CompleteStream(
 		// Gemini thinkingLevel values are documented as lowercase strings in the
 		// public Gemini API docs (e.g. "minimal"|"low"|"medium"|"high"). Keep the
 		// configured casing as-is.
-		genCfg.ThinkingConfig = &geminiThinkingConfig{ThinkingBudget: tuning.Gemini.ThinkingBudget, ThinkingLevel: tuning.Gemini.ThinkingLevel, IncludeThoughts: tuning.Gemini.IncludeThoughts}
+		includeThoughts := tuning.Gemini.IncludeThoughts
+		if includeThoughts == nil &&
+			((tuning.Gemini.ThinkingBudget != nil && *tuning.Gemini.ThinkingBudget != 0) || tuning.Gemini.ThinkingLevel != "") {
+			// Thought signatures are bound to the producing model, so the
+			// visible thought summary is the only reasoning text that survives
+			// a later switch to another provider or wire family. Capture it by
+			// default whenever thinking is active; include_thoughts: false in
+			// the model config opts out explicitly.
+			v := true
+			includeThoughts = &v
+		}
+		genCfg.ThinkingConfig = &geminiThinkingConfig{ThinkingBudget: tuning.Gemini.ThinkingBudget, ThinkingLevel: tuning.Gemini.ThinkingLevel, IncludeThoughts: includeThoughts}
 	}
 	if genCfg.MaxOutputTokens > 0 || genCfg.ThinkingConfig != nil {
 		reqBody.GenerationConfig = &genCfg

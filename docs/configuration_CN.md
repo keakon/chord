@@ -139,7 +139,7 @@ openai:
   API 窗口，把 `context` 改成 `1050000` 并删除 `input`；Chord 会在预留实际
   请求输出后推导可用输入预算。此时超过 272K 是计价阈值，不是输入上限。
 - API 支持的 reasoning effort 为 `none`、`low`、`medium`、`high`、`xhigh`、`max`；可用 `openai/gpt-5.6@max` 这样的 ref 选择已配置 variant。
-- `reasoning.summary: auto` 可省略。Chord 当前尚未暴露 GPT-5.6 的 `reasoning.mode: pro`。
+- Responses 在启用 reasoning 时默认使用 `reasoning.summary: auto`；如需明确关闭，请配置为 `none`。Chord 当前尚未暴露 GPT-5.6 的 `reasoning.mode: pro`。
 - `preset: codex` provider 也可以使用 `max`；是否接受该 effort 由具体模型 / 后端决定。
 
 模型限制和 reasoning 取值已根据当前 Codex 模型目录及 OpenAI 的
@@ -604,8 +604,9 @@ providers:
   provider 支持的值透传给上游。
   - Chat Completions 发送顶层 `reasoning_effort`。
   - Responses 发送 `reasoning.effort` 和可选的 `reasoning.summary`。
-- `reasoning.summary`：可选的 Responses 推理摘要请求。Chord 支持 `auto`、
-  `concise`、`detailed`；省略时由 provider 决定是否返回摘要。
+- `reasoning.summary`：Responses 推理摘要请求。Chord 支持 `auto`、
+  `concise`、`detailed`、`none`；启用 reasoning 时，省略该字段会默认使用
+  `auto`，以便跨 provider 回放时保留可移植的摘要文本；配置 `none` 可明确退出。
 - `thinking`：Messages 兼容的扩展思考配置。`type: adaptive` 可与
   `thinking.effort` 组合，Chord 会将 effort 发送为 `output_config.effort`。
 - `text.verbosity`：可选的 OpenAI 兼容可见文本详细程度提示。
@@ -1079,7 +1080,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `limit.input`     | int    | provider 单独公布输入上限时填写。Chord 用它判断何时在 prompt 过大前压缩或恢复重试。                |
 | `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |
 | `context.compaction.reserved` | int | 可选的输入预算预留值。在应用 `compaction.threshold` 前先扣除，适合为 tokenizer 误差、tool 开销和恢复安全余量留空间。 |
-| `reasoning`       | object | OpenAI reasoning 选项。`reasoning.effort` 会先归一化再原样透传，因此 provider 支持的任意取值（如 GLM 的 `max` / `minimal` / `none`）都能不变地到达上游（留空 = 不发送，使用 provider/model 默认）。Responses 场景下还支持 `reasoning.summary`（`auto` / `concise` / `detailed`；留空 = 不发送 / 不显式请求 summary）。需要可读摘要时推荐 `auto`。 |
+| `reasoning`       | object | OpenAI reasoning 选项。`reasoning.effort` 会先归一化再原样透传，因此 provider 支持的任意取值（如 GLM 的 `max` / `minimal` / `none`）都能不变地到达上游（留空 = 不发送，使用 provider/model 默认）。Responses 的 `reasoning.summary` 支持 `auto` / `concise` / `detailed` / `none`；启用 reasoning 时留空默认使用 `auto`，配置 `none` 可明确关闭。 |
 | `text.verbosity`  | string | 可选的 OpenAI 文本详细程度提示，支持的模型生效；除非明确要覆盖为 `low` / `medium` / `high`，否则建议留空使用 provider/model 默认值。 |
 | `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算；`thinking.effort` 在 Messages 请求中会生成 `output_config.effort`；`display: summarized` 启用 summarized thinking block（仅 `type: enabled` 或 `adaptive` 有效）。 |
 | `compat.reasoning_continuity.mode` | string | 可选的连续性覆盖项。Chat Completions 模型需要原样回放 assistant `reasoning_content`，并把其他 wire 的可移植可见 reasoning 转为 `reasoning_content` 时使用 `openai_visible`；只有已验证的 Messages 兼容模型需要回放或接收可见无签名 `thinking` 时使用 `anthropic_unsigned`；模型级 `none` 可关闭 provider 级默认值。 |

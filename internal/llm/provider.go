@@ -46,7 +46,7 @@ type AnthropicCacheBoundary struct {
 type OpenAITuning struct {
 	ServiceTier       string // ""|"fast"|"flex"|"priority" ("" = omit; OpenAI Responses only)
 	ReasoningEffort   string // "low"|"medium"|"high"|"xhigh" ("" = disabled)
-	ReasoningSummary  string // "auto"|"concise"|"detailed" ("" = disabled)
+	ReasoningSummary  string // "auto"|"concise"|"detailed"|"none" (Responses: "" defaults to auto when effort is set)
 	TextVerbosity     string // "low"|"medium"|"high" ("" = disabled)
 	ParallelToolCalls *bool  // nil = provider request default true; non-nil = explicit override
 	ToolChoice        string // ""|"auto"|"required"

@@ -137,8 +137,14 @@ func (r *ResponsesProvider) Compact(
 	// the official Codex backend, but Chord should not maintain a separate local
 	// whitelist for which normalized effort values are allowed to pass through.
 	effectiveReasoningEffort := resolveResponsesReasoningEffort(ot.ReasoningEffort)
-	if effectiveReasoningEffort != "" || ot.ReasoningSummary != "" {
-		reqBody.Reasoning = &reasoningConfig{Effort: effectiveReasoningEffort, Summary: ot.ReasoningSummary}
+	effectiveReasoningSummary := ot.ReasoningSummary
+	if effectiveReasoningSummary == "" && effectiveReasoningEffort != "" {
+		effectiveReasoningSummary = "auto"
+	} else if effectiveReasoningSummary == "none" {
+		effectiveReasoningSummary = ""
+	}
+	if effectiveReasoningEffort != "" || effectiveReasoningSummary != "" {
+		reqBody.Reasoning = &reasoningConfig{Effort: effectiveReasoningEffort, Summary: effectiveReasoningSummary}
 	}
 	if ot.TextVerbosity != "" {
 		reqBody.Text = &textConfig{Verbosity: ot.TextVerbosity}

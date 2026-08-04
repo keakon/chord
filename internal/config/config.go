@@ -774,8 +774,11 @@ func (p *PromptCacheConfig) CacheToolsEnabled() bool {
 // ReasoningConfig controls OpenAI reasoning models (o1, o3, o4-mini).
 // When set, reasoning_effort is sent in the request and temperature is omitted.
 type ReasoningConfig struct {
-	Effort  string `json:"effort" yaml:"effort"`                       // e.g. "low" | "medium" | "high" | "xhigh"
-	Summary string `json:"summary,omitempty" yaml:"summary,omitempty"` // "auto" | "concise" | "detailed" | ""
+	Effort string `json:"effort" yaml:"effort"` // e.g. "low" | "medium" | "high" | "xhigh"
+	// Summary defaults to "auto" when reasoning is active so that a visible
+	// reasoning summary is captured for later cross-provider replay; "none"
+	// disables the summary request explicitly.
+	Summary string `json:"summary,omitempty" yaml:"summary,omitempty"` // "auto" | "concise" | "detailed" | "none" | ""
 }
 
 // ModelVariant defines a named parameter preset for a model.
