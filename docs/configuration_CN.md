@@ -597,7 +597,10 @@ providers:
   正数的 `limit.input` 和 `limit.output`，Chord 会按 `input + output` 推导；
   显式配置的 `context` 始终优先。
 - `limit.input`：provider 单独公布的输入上限。省略时，Chord 按
-  `limit.context` 减去有效请求输出推导 prompt 预算。
+  `limit.context` 减去有效请求输出推导 prompt 预算。当两者都配置且公布的
+  上限不满足加和关系（`input + output` 超过 `context`）时，Chord 会把 prompt
+  预算收敛到 `limit.context` 减去有效请求输出，因为 provider 实际按总窗口
+  限制单次请求。
 - `limit.output`：模型输出能力上限。实际请求还受全局
   `max_output_tokens` 和总窗口剩余空间限制。
 - `reasoning.effort`：推理深度或预算。Chord 规范化空格和大小写后，将

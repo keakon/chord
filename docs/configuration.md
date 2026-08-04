@@ -623,6 +623,10 @@ Model field semantics:
   derives it as `input + output`; an explicit `context` always takes priority.
 - `limit.input`: independent input cap when published. If omitted, Chord derives
   the prompt budget from `limit.context` minus the effective requested output.
+  When both are set and the published limits are not additive (`input + output`
+  exceeds `context`), Chord clamps the prompt budget to `limit.context` minus
+  the effective requested output, since the total window is what the provider
+  enforces per request.
 - `limit.output`: model output capacity. Runtime requests are also capped by the
   global `max_output_tokens` setting and remaining total-context space.
 - `reasoning.effort`: reasoning depth/budget. Chord normalizes whitespace and

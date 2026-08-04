@@ -669,17 +669,17 @@ type ModelLimit struct {
 }
 
 // EffectiveInputBudget returns the input-side budget for request sizing and
-// automatic compaction. When limit.input is configured it is authoritative;
-// otherwise reserve the effective requested-output budget from the total context
-// window so input + output can still fit inside limit.context.
+// automatic compaction. When limit.input is configured it is used, clamped so
+// input + effective requested output still fits inside limit.context; otherwise
+// the budget is derived as limit.context minus the effective requested output.
 func (l ModelLimit) EffectiveInputBudget(outputCapSetting, defaultOutputCap int) int {
-	if l.Input > 0 {
+	outputBudget := l.EffectiveOutputBudget(outputCapSetting, defaultOutputCap)
+	if l.Input > 0 && (l.Context <= 0 || outputBudget <= 0 || l.Input <= l.Context-outputBudget) {
 		return l.Input
 	}
 	if l.Context <= 0 {
 		return 0
 	}
-	outputBudget := l.EffectiveOutputBudget(outputCapSetting, defaultOutputCap)
 	if outputBudget <= 0 {
 		return l.Context
 	}

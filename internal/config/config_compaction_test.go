@@ -225,6 +225,30 @@ func TestModelLimitEffectiveInputBudget(t *testing.T) {
 			outputCapSetting: 8192,
 			want:             395904,
 		},
+		{
+			// Non-additive published limits (gpt-5.4 shape): 950000 + 128000
+			// exceeds the 1050000 window, so the input budget is clamped to
+			// context minus the effective requested output.
+			name:             "explicit input clamped to context minus output",
+			limit:            ModelLimit{Context: 1050000, Input: 950000, Output: 128000},
+			outputCapSetting: 128000,
+			want:             922000,
+		},
+		{
+			// A smaller requested output leaves room for the full input limit.
+			name:             "explicit input fits with small requested output",
+			limit:            ModelLimit{Context: 1050000, Input: 950000, Output: 128000},
+			outputCapSetting: 8192,
+			want:             950000,
+		},
+		{
+			// Degenerate configuration: output consumes the whole window; the
+			// clamp still returns a positive budget.
+			name:             "clamp floors at one token",
+			limit:            ModelLimit{Context: 1000, Input: 900, Output: 1000},
+			outputCapSetting: 1000,
+			want:             1,
+		},
 	}
 
 	for _, tc := range cases {
