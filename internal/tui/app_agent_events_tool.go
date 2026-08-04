@@ -207,7 +207,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 				m.expectedAgentClose = true
 			}
 		}
-		if shouldTrackSidebarFileEdit(evt.Name) && evt.Status == agent.ToolResultStatusSuccess {
+		if shouldTrackSidebarFileEdit(evt.Name) && evt.Status.IsSuccess() {
 			if evt.Name == tools.NameDelete {
 				groups := tools.ParseDeleteResult(evt.Result)
 				for _, path := range groups.Deleted {

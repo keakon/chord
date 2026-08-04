@@ -164,6 +164,11 @@ func (m *Model) activityFrame() string {
 }
 
 // turnBusyKey normalizes agent IDs for per-agent busy-span bookkeeping.
+//
+// Note: this is the opposite convention from block attribution, which
+// normalizes "main" -> "" (see the SpawnFinishedEvent handler in
+// app_agent_events_misc.go and filterBlocksByAgent). Activity/animation state
+// keys the main agent as "main"; transcript blocks key it as "".
 func turnBusyKey(agentID string) string {
 	if agentID == "" || agentID == "main" {
 		return "main"

@@ -205,7 +205,7 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 			continue
 		}
 		call, ok := calls[msg.ToolCallID]
-		if !ok || msg.ToolStatus == string(agent.ToolResultStatusError) || msg.ToolStatus == string(agent.ToolResultStatusCancelled) {
+		if !ok || agent.ToolResultStatus(msg.ToolStatus).IsUnsuccessful() {
 			continue
 		}
 		if call.Name == tools.NameApplyPatch {

@@ -88,7 +88,10 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	blockStyle := metrics.blockStyle
 	toolCardBg := metrics.toolCardBg
 	cardWidth := metrics.cardWidth
-	filePath := b.diffToolFilePath()
+	// Parse the apply_patch targets once per render; both the header path and
+	// the body below need them, and parsing re-reads the patch args JSON.
+	applyPatchTargets := b.applyPatchTargets()
+	filePath := b.diffToolFilePathWithTargets(applyPatchTargets)
 	if filePath != "" {
 		filePath = b.displayToolPath(filePath)
 	}
@@ -116,7 +119,6 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 	diffLines := strings.Split(b.Diff, "\n")
-	applyPatchTargets := b.applyPatchTargets()
 	multiFileApplyPatchDiff := b.ToolName == tools.NameApplyPatch && unifiedDiffFileCount(diffLines) > 1
 	if b.ToolName == tools.NameApplyPatch {
 		if !multiFileApplyPatchDiff {
@@ -128,7 +130,10 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	}
 	const diffLineNumWidth = 5
 	diffWidth := max(cardWidth-4-diffLineNumWidth, 10)
-	hl := ensureCodeHighlighter(&b.codeHL, filePath, diffContentSample(b.Diff))
+	// Sample the diff content once; the initial highlighter and every per-file
+	// section highlighter of a multi-file patch share the same sample.
+	diffSample := diffContentSample(b.Diff)
+	hl := ensureCodeHighlighter(&b.codeHL, filePath, diffSample)
 	shownLines := 0
 	seenHunk := false
 	diffFileCount := 0
@@ -245,7 +250,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 					shownLines++
 					seenHunk = false
 					oldLineNum, newLineNum = 0, 0
-					hl = newCodeHighlighterWithLanguage(syntaxPath, diffContentSample(b.Diff), "")
+					hl = newCodeHighlighterWithLanguage(syntaxPath, diffSample, "")
 					diffFileCount++
 					i++
 				}
@@ -516,8 +521,14 @@ func editPatchPreviewLines(patch string) []string {
 }
 
 func (b *Block) diffToolFilePath() string {
+	return b.diffToolFilePathWithTargets(b.applyPatchTargets())
+}
+
+// diffToolFilePathWithTargets is the allocation-conscious variant: callers
+// that already parsed the apply_patch targets (renderFileDiffCall) pass them
+// in so the args JSON is not parsed a second time in the same frame.
+func (b *Block) diffToolFilePathWithTargets(targets []tools.ApplyPatchDisplayTarget) string {
 	if toolNameKey(b.ToolName) == tools.NameApplyPatch {
-		targets := b.applyPatchTargets()
 		if len(targets) == 0 {
 			var parsed struct {
 				Paths []string `json:"paths"`

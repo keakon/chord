@@ -88,6 +88,12 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	case agent.SpawnFinishedEvent:
 		// The runtime reports the main agent as "main"; main-view blocks are
 		// attributed with an empty AgentID (see filterBlocksByAgent).
+		//
+		// Note: two opposite normalization conventions coexist in the TUI. Block
+		// attribution normalizes "main" -> "" (here), while the activity/animation
+		// state normalizes "" -> "main" (see turnBusyKey in
+		// app_activity_animation.go). Keep both in mind before adding
+		// a third spelling.
 		agentID := evt.AgentID
 		if agentID == "main" {
 			agentID = ""

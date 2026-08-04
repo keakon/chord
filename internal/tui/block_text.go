@@ -920,6 +920,10 @@ func appendWord(result *[]string, cur *strings.Builder, curWidth *int, word stri
 		return
 	}
 	// Fill the current line first, then hard-wrap the remainder.
+	// Edge case: when the remaining space is 1 column and the next grapheme is
+	// 2 columns wide, tuiWrapHeadTail widens to keep the grapheme intact, so
+	// that line can exceed width by one column. Callers only invoke this with
+	// curWidth at the indent width, so it needs width-indent < 2 to trigger.
 	for word != "" {
 		available := width - *curWidth
 		if available <= 0 {

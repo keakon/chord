@@ -24,6 +24,19 @@ import (
 // Empty status means the transcript predates terminal-status persistence;
 // callers that must handle those decide their own fallback.
 
+// IsSuccess reports an explicit success only; empty or unknown statuses are
+// not assumed good. Exported so out-of-package callers (e.g. the TUI) reuse
+// this vocabulary instead of re-deriving it from the raw string.
+func (s ToolResultStatus) IsSuccess() bool {
+	return isToolResultSuccessStatus(string(s))
+}
+
+// IsUnsuccessful reports an explicit failure or cancellation. Exported for the
+// same reason as IsSuccess.
+func (s ToolResultStatus) IsUnsuccessful() bool {
+	return isToolResultUnsuccessfulStatus(string(s))
+}
+
 func isToolResultErrorStatus(status string) bool {
 	return strings.EqualFold(strings.TrimSpace(status), string(ToolResultStatusError))
 }
