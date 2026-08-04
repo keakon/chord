@@ -178,13 +178,13 @@ func filterMCPPromptToolNames(line, prefix string, visible []string) []string {
 	return filtered
 }
 
-const agentsMDInstructionRequirement = "Treat these loaded sections as mandatory scoped workspace instructions. You must follow every applicable instruction at all times. Do not use file, search, or shell tools to rediscover or reread them. Only inspect an additional AGENTS.md when entering a subdirectory or external directory whose instructions were not loaded, then inspect only task-relevant project files needed to understand, modify, or verify the requested work."
+const agentsMDInstructionRequirement = "Treat these loaded sections as mandatory scoped workspace instructions and follow every applicable instruction at all times. Do not use file, search, or shell tools to rediscover or reread them. Read an additional AGENTS.md only when entering a directory whose instructions were not loaded. Beyond that, inspect only the task-relevant project files needed to understand, modify, or verify the requested work."
 
 func agentsMDReminderFramingPromptBlock(agentsMD string) string {
 	if strings.TrimSpace(agentsMD) == "" {
 		return ""
 	}
-	return "## Workspace Instructions\nEach applicable AGENTS.md from the repository root through the current working directory is already loaded in context before the first visible user message, in root-to-current order and with its path labeled. " + agentsMDInstructionRequirement
+	return "## Workspace Instructions\nEach applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message. Follow it as mandatory scoped workspace instructions; do not reread AGENTS.md files with file, search, or shell tools."
 }
 
 func (a *MainAgent) pendingLoopContinuationPromptBlock() string {
@@ -228,15 +228,15 @@ func (a *MainAgent) userConfirmationPromptBlock() string {
 	if a.questionToolAvailable() {
 		question := toolPromptName(tools.NameQuestion)
 		return `## Structured User Confirmation
-	- Default to making ordinary implementation decisions yourself; use ` + question + ` only when user input is truly required to choose between materially different outcomes, confirm meaningful risk, or supply missing information that blocks correct execution
+- Default to making ordinary implementation decisions yourself; use ` + question + ` only when user input is truly required to choose between materially different outcomes, confirm meaningful risk, or supply missing information that blocks correct execution
 - Use plain assistant text only for lightweight clarifications that do not materially change the execution path
-- When asking the user to decide, keep the same high information standard as ordinary clarifications: include enough context for a non-implementer to answer, summarize the current situation, why a decision is needed, the main options, their tradeoffs/risks, and your recommended default when appropriate
-	- When a confirmation would change scope, permissions, risk, or implementation choice, prefer ` + question + ` so the user gets a structured decision UI instead of an unstructured text question`
+- When asking the user to decide, keep the same high information standard as ordinary clarifications (enough context for a non-implementer: current situation, why a decision is needed, the main options, tradeoffs/risks, recommended default)
+- When a confirmation would change scope, permissions, risk, or implementation choice, prefer ` + question + ` so the user gets a structured decision UI instead of an unstructured text question`
 	}
 	return `## Plain-Text User Confirmation
 - Default to making ordinary implementation decisions yourself; ask the user only when input is truly required to choose between materially different outcomes, confirm meaningful risk, or supply missing information that blocks correct execution
 - Because structured confirmation is unavailable in this tool/permission state, ask necessary user-decision questions in normal assistant text
-- Keep the same high information standard: include enough context for a non-implementer to answer, summarize the current situation, why a decision is needed, the main options, their tradeoffs/risks, and your recommended default when appropriate
+- Keep the same high information standard as ordinary clarifications (enough context for a non-implementer: current situation, why a decision is needed, the main options, tradeoffs/risks, recommended default)
 - When a clarification does not materially change the execution path, keep it brief and focused`
 }
 
@@ -254,7 +254,7 @@ func (a *MainAgent) lspDiagnosticPromptBlock() string {
 		toolRefs += " or " + toolPromptName(tools.NameWrite)
 	}
 	return strings.TrimSpace(`## LSP diagnostic follow-up
-	- When LSP diagnostics are available after your ` + toolRefs + ` changes, treat new blocking diagnostics in files you directly modified as regressions and fix them before finishing unless the user explicitly asked for a partial/WIP result
+- When LSP diagnostics are available after your ` + toolRefs + ` changes, treat new blocking diagnostics in files you directly modified as regressions and fix them before finishing unless the user explicitly asked for a partial/WIP result
 - If your current-session edits introduce non-blocking diagnostics in files you directly modified, prefer low-risk cleanup when it is small and clear; do not expand scope to unrelated historical diagnostics in untouched files unless they directly block the requested task`)
 }
 
@@ -306,10 +306,7 @@ func (a *MainAgent) loopCompletionDecisionRequirementLine() string {
 	return "- Do not call the " + done + " tool unless the task is actually complete and no unresolved user decision, error, or verification remains\n" +
 		"- If you still need to investigate, edit, test, or ask the user, continue working instead of calling " + done + "\n" +
 		"- Pass the complete final Markdown completion report in the " + done + " tool's required `report` argument. The report must include this structure:\n" +
-		"  - **Completion status**: one line summary (e.g., 'All requested work is finished')\n" +
-		"  - **What changed**: files modified, created, deleted or key actions taken\n" +
-		"  - **Verification**: tests run and their results\n" +
-		"  - **Remaining issues**: any limitations, unverified areas, or known issues\n" +
+		"  " + strings.ReplaceAll(tools.CompletionReportStructure, "\n", "\n  ") + "\n" +
 		"- If you are unsure whether the task is truly complete, do not call " + done + "; keep working"
 }
 
@@ -387,7 +384,7 @@ Rules:
 - Make tasks granular enough for independent execution
 - Do NOT include status markers — they are added during execution
 
-## Plan quality requirements
+### Plan quality requirements
 - A plan with only 1 step is not a plan — just do the task directly
 - Each step must name the specific file(s) to modify
 - Avoid vague verbs: "handle", "improve", "update" — use "add", "remove", "rename", "extract"
@@ -560,31 +557,8 @@ func (a *MainAgent) availableSkillsPromptBlock() string {
 	if len(entries) == 0 {
 		return ""
 	}
-
-	const maxTotal = tools.SkillListingMaxTotal
-	const maxEntries = tools.SkillListingMaxEntries
-	intro := "## Available Skills\nThe `skill` tool can load additional skill instructions on demand. When a task clearly matches one of these skills, call `skill` before proceeding.\n\n"
-	budget := max(maxTotal-len(intro), 0)
-	shown := 0
-	var sb strings.Builder
-	sb.WriteString(intro)
-	for i, e := range entries {
-		if shown >= maxEntries {
-			break
-		}
-		desc := tools.TruncateSkillDesc(e.Desc)
-		line := fmt.Sprintf("- **%s**: %s\n", e.Name, desc)
-		if sb.Len()+len(line)-len(intro) > budget && shown > 0 {
-			break
-		}
-		sb.WriteString(line)
-		shown = i + 1
-	}
-	remaining := len(entries) - shown
-	if remaining > 0 {
-		fmt.Fprintf(&sb, "+%d more skills available\n", remaining)
-	}
-	return sb.String()
+	header := "## Available Skills\nThe `skill` tool can load additional skill instructions on demand. When a task clearly matches one of these skills, call `skill` before proceeding.\n\n"
+	return tools.BuildSkillListing(entries, header)
 }
 
 // getGitStatus checks whether the working directory is inside a git repository

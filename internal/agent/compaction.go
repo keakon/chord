@@ -118,13 +118,10 @@ Then write the final summary using the exact Markdown section headings below, in
 
 Requirements:
 - Every section must be present.
-- The latest user request is authoritative. Identify it explicitly and prioritize it over older goals.
-- If the latest user request conflicts with older goals, summarize the newer instruction as authoritative and mention superseded older context only when needed.
+- The latest user request is authoritative: identify it explicitly, prioritize it over older or conflicting goals, and mention superseded older context only when needed. Do not let old implementation/debugging goals override a later meta-analysis, clarification request, or explicit correction.
 - Treat the most recent Done rejected reason as important user feedback/request when it asks for more work, asks a question, changes scope, or corrects the agent.
-- If the user changed topics after previous todos were created, do not treat stale todos as active work.
-- Separate active todos that directly serve the latest user request from historical, completed, or superseded todos.
+- Separate active todos that directly serve the latest user request from historical, completed, or superseded ones; if the user changed topics after todos were created, do not treat stale todos as active work.
 - "Active Objective" and "Next Step" must directly serve the latest user request. Do not restart tasks listed under "Completed/background" or "Stale/superseded".
-- Do not let old implementation/debugging goals override a later meta-analysis, clarification request, or explicit correction.
 - Under "Todo State", use these subgroups exactly: "Active/relevant to latest request", "Completed/background", and "Stale/superseded". If a subgroup has no items, write "(none)".
 - Use concise bullet-style prose under each heading.
 - Include concrete files, commands, errors, and decisions when known.

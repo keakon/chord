@@ -323,7 +323,7 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"Match final claims to the requested scope and the evidence actually gathered",
 		"For analysis, review, or planning tasks",
 		"When you modify code or claim behavior was fixed or implemented",
-		"choose verification scope by relevance, cost, project convention, and user intent",
+		"following project-local test/build conventions when known",
 		"Do not narrate every routine action or restate obvious next steps",
 		"Do not over-explain routine actions",
 		"If multiple interpretations exist but one is clearly the best fit",
@@ -384,7 +384,7 @@ question: allow
 	for _, want := range []string{
 		"Structured User Confirmation",
 		"Default to making ordinary implementation decisions yourself",
-		"include enough context for a non-implementer to answer",
+		"enough context for a non-implementer",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("userConfirmationPromptBlock missing %q in %q", want, got)
@@ -404,7 +404,7 @@ func TestBuildSystemPrompt_IncludesPermissionSpecificUserConfirmationGuidance(t 
 	}
 	for _, want := range []string{
 		"Because structured confirmation is unavailable in this tool/permission state",
-		"include enough context for a non-implementer to answer",
+		"enough context for a non-implementer",
 		"their tradeoffs/risks, and your recommended default",
 	} {
 		if !strings.Contains(got, want) {
@@ -532,7 +532,7 @@ func TestSharedCodingGuidelinesPrompt_RequiresHighQualityClarificationsWithoutQu
 func TestSharedCodingGuidelinesPrompt_PrefersReasonableAutonomyBeforeAsking(t *testing.T) {
 	got := sharedCodingGuidelinesPrompt
 	for _, want := range []string{
-		"Default to doing the most reasonable low-risk implementation work yourself",
+		"pick the one with the smallest blast radius on existing code and proceed without asking",
 		"If multiple interpretations exist but one is clearly the best fit",
 		"Ask before implementing only when missing information is genuinely blocking",
 	} {
@@ -545,14 +545,12 @@ func TestSharedCodingGuidelinesPrompt_PrefersReasonableAutonomyBeforeAsking(t *t
 func TestSharedCodingGuidelinesPrompt_SeparatesProductLevelAndImplementationLevelAmbiguity(t *testing.T) {
 	got := sharedCodingGuidelinesPrompt
 	for _, want := range []string{
-		"desired product behavior or feature surface genuinely ambiguous in ways the user would directly perceive",
+		"desired product behavior genuinely ambiguous in ways the user would directly perceive",
 		"surface the open product decisions to the user before implementing rather than silently picking the simplest interpretation",
-		"follow the confirmation quality requirements stated in the user confirmation guidance",
 		"If the user has explicitly indicated a minimal or specific scope",
 		"treat that as the resolved product decision and proceed without re-asking",
-		"When the request admits more than one reasonable implementation path with no externally visible behavior difference",
+		"When the request admits several implementation paths with no externally visible behavior difference",
 		"pick the one with the smallest blast radius on existing code",
-		"proceed without bringing routine implementation choices back to the user",
 		"If a blocker of this kind appears mid-execution, raise it then rather than continuing on a guess or pretending the task is complete",
 	} {
 		if !strings.Contains(got, want) {
@@ -597,8 +595,8 @@ question: allow
 	got := a.userConfirmationPromptBlock()
 	for _, want := range []string{
 		"Default to making ordinary implementation decisions yourself",
-		"include enough context for a non-implementer to answer",
-		"the main options, their tradeoffs/risks, and your recommended default",
+		"enough context for a non-implementer",
+		"the main options, tradeoffs/risks, recommended default",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("userConfirmationPromptBlock missing %q in %q", want, got)
@@ -610,7 +608,6 @@ func TestMainAgentCommunicationPrompt_PrefersAutonomyForLowRiskAdjacentWork(t *t
 	got := mainAgentCommunicationPrompt
 	for _, want := range []string{
 		"For low-risk, directly related, clearly necessary adjacent work",
-		"Ask the user to choose only when there are materially different options",
 		"Do not end responses with open-ended optional offers for routine in-scope next steps",
 		"This applies to equivalent wording in any language",
 		"if the next step is clearly necessary, low-risk, and within scope, do it instead of offering it",
@@ -838,9 +835,14 @@ func TestMainLLMToolDefinitionsIncludeSkillToolListing(t *testing.T) {
 	if defs[0].Name != "skill" {
 		t.Fatalf("tool name = %q, want skill", defs[0].Name)
 	}
-	for _, want := range []string{"Load a skill's full instructions on demand", "## Available Skills", "go-expert", "Go language development expert"} {
+	for _, want := range []string{"Load a skill's full instructions on demand", "listed in the system prompt's \"Available Skills\" section"} {
 		if !strings.Contains(defs[0].Description, want) {
 			t.Fatalf("missing %q in Skill description %q", want, defs[0].Description)
+		}
+	}
+	for _, unwanted := range []string{"## Available Skills", "go-expert"} {
+		if strings.Contains(defs[0].Description, unwanted) {
+			t.Fatalf("Skill description should not embed the listing, found %q in %q", unwanted, defs[0].Description)
 		}
 	}
 }
@@ -906,7 +908,7 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	if bashDesc == "" {
 		t.Fatal("missing Shell tool definition")
 	}
-	for _, want := range []string{"use LSP first", "use Grep for repo text search before reaching for rg", "use Glob for file or path discovery before reaching for rg --files or find", "use Read once you have narrowed the target files", "If file-reading, search, or code-navigation tools are hidden or denied in this role, shell is not a substitute for them.", "Do not use shell commands or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.", "If file-editing tools are hidden or denied in this role, shell is not a substitute for them.", "Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable."} {
+	for _, want := range []string{"use LSP first", "use Grep for repo text search before reaching for rg", "use Glob for file or path discovery before reaching for rg --files or find", "use Read once you have narrowed the target files", "If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts.", "Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable."} {
 		if !strings.Contains(bashDesc, want) {
 			t.Fatalf("missing %q in Shell description %q", want, bashDesc)
 		}
@@ -978,7 +980,6 @@ shell: allow
 		"Use `glob` / `grep` for discovery and navigation.",
 		"When `grep` returns path:line:snippet hits, use those line numbers to read narrow ranges around relevant matches instead of scanning broad file chunks; when several matches land in the same file or the file is central to the change, one fuller read of that file beats repeated narrow reads.",
 		"If you are unsure of the exact target path for `read`, use `glob` / `grep` to find or verify it before calling the path tool; do not guess plausible-looking paths.",
-		"Use `shell` mainly for tests, builds, git, and system commands.",
 		"Minimize LLM round trips: a response that stops after a single lookup spends one full model round trip per lookup.",
 		"issue them together in the same response — they execute in parallel.",
 		"Use serial calls only when a later call depends on an earlier result, the call mutates state, or a command is intentionally high-cost.",
@@ -1112,7 +1113,7 @@ edit: deny
 			t.Fatalf("mainAgentCapabilityPromptBlock() unexpectedly mentions edit when denied: %q in %q", unwanted, got)
 		}
 	}
-	for _, want := range []string{"Use `read`", "Use `write`", "Use `delete`", "Use `shell`"} {
+	for _, want := range []string{"Use `read`", "Use `write`", "Use `delete`"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing visible tool %q in %q", want, got)
 		}
@@ -1321,7 +1322,7 @@ shell: allow
 	if customRoleIdx > toolSelectionIdx {
 		t.Fatalf("buildSystemPrompt() should append dynamic capabilities after custom role body, got %q", got)
 	}
-	if !strings.Contains(got, "Use `read` for file contents when the target path is already known or has been verified.") || !strings.Contains(got, "Use `shell` mainly for tests, builds, git, and system commands.") || !strings.Contains(got, "Prefer the smallest safe number of tool calls.") {
+	if !strings.Contains(got, "Use `read` for file contents when the target path is already known or has been verified.") || !strings.Contains(got, "Prefer the smallest safe number of tool calls.") {
 		t.Fatalf("buildSystemPrompt() missing visible-tool guidance: %q", got)
 	}
 }
@@ -1835,17 +1836,16 @@ func TestBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPresent(t 
 		t.Fatalf("buildSystemPrompt() missing AGENTS.md workspace framing when AGENTS.md is present, got:\n%s", got)
 	}
 	for _, want := range []string{
-		"Each applicable AGENTS.md from the repository root through the current working directory is already loaded in context before the first visible user message",
-		"in root-to-current order and with its path labeled",
-		"Treat these loaded sections as mandatory scoped workspace instructions",
-		"You must follow every applicable instruction at all times",
-		"Do not use file, search, or shell tools to rediscover or reread them",
-		"Only inspect an additional AGENTS.md when entering a subdirectory or external directory whose instructions were not loaded",
-		"inspect only task-relevant project files needed to understand, modify, or verify the requested work",
+		"Each applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message",
+		"Follow it as mandatory scoped workspace instructions",
+		"do not reread AGENTS.md files with file, search, or shell tools",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("buildSystemPrompt() missing AGENTS.md framing %q, got:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "Read an additional AGENTS.md only when entering a directory") {
+		t.Fatalf("buildSystemPrompt() should not duplicate the full AGENTS.md requirement kept in the session reminder, got:\n%s", got)
 	}
 }
 
@@ -1864,13 +1864,9 @@ func TestSubAgentBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPr
 	got := s.buildSystemPrompt()
 	for _, want := range []string{
 		"## Workspace Instructions",
-		"Each applicable AGENTS.md from the repository root through the current working directory is already loaded in context before the first visible user message",
-		"in root-to-current order and with its path labeled",
-		"Treat these loaded sections as mandatory scoped workspace instructions",
-		"You must follow every applicable instruction at all times",
-		"Do not use file, search, or shell tools to rediscover or reread them",
-		"Only inspect an additional AGENTS.md when entering a subdirectory or external directory whose instructions were not loaded",
-		"inspect only task-relevant project files needed to understand, modify, or verify the requested work",
+		"Each applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message",
+		"Follow it as mandatory scoped workspace instructions",
+		"do not reread AGENTS.md files with file, search, or shell tools",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("SubAgent buildSystemPrompt() missing AGENTS.md framing %q, got:\n%s", want, got)

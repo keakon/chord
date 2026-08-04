@@ -53,7 +53,7 @@ func TestSkillToolIsAvailableRequiresListableSkills(t *testing.T) {
 	}
 }
 
-func TestSkillToolDescriptionForToolsListsAvailableSkills(t *testing.T) {
+func TestSkillToolDescriptionForToolsPointsAtSystemPromptListing(t *testing.T) {
 	tool := NewSkillTool(skillProviderStub{
 		list: []*skill.Meta{{Name: "go-expert", Description: "Go language development expert", Discovered: true}},
 	})
@@ -61,12 +61,17 @@ func TestSkillToolDescriptionForToolsListsAvailableSkills(t *testing.T) {
 	desc := tool.DescriptionForTools(nil)
 	for _, want := range []string{
 		"Load a skill's full instructions on demand",
-		"## Available Skills",
-		"go-expert",
-		"Go language development expert",
+		"listed in the system prompt's \"Available Skills\" section",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description missing %q in %q", want, desc)
+		}
+	}
+	// The listing itself lives only in the system prompt's Available Skills
+	// block; the tool description must not duplicate it.
+	for _, unwanted := range []string{"## Available Skills", "go-expert"} {
+		if strings.Contains(desc, unwanted) {
+			t.Fatalf("description should not embed the skill listing, found %q in %q", unwanted, desc)
 		}
 	}
 }
@@ -110,21 +115,17 @@ func TestSkillToolExecuteSubstitutesSkillPlaceholders(t *testing.T) {
 	}
 }
 
-func TestSkillToolDescriptionTruncatesLongDescription(t *testing.T) {
+func TestBuildSkillListingTruncatesLongDescription(t *testing.T) {
 	longDesc := strings.Repeat("A", 300)
-	tool := NewSkillTool(skillProviderStub{
-		list: []*skill.Meta{{Name: "long-skill", Description: longDesc, Discovered: true}},
-	})
-
-	desc := tool.DescriptionForTools(nil)
-	if !strings.Contains(desc, "long-skill") {
+	listing := BuildSkillListing([]SkillListingEntry{{Name: "long-skill", Desc: longDesc}}, "## Available Skills\n")
+	if !strings.Contains(listing, "long-skill") {
 		t.Fatal("skill name should be present")
 	}
-	if strings.Contains(desc, strings.Repeat("A", 200)) {
+	if strings.Contains(listing, strings.Repeat("A", 200)) {
 		t.Fatal("description should be truncated")
 	}
-	if !strings.Contains(desc, strings.Repeat("A", 157)+"...") {
-		t.Fatalf("expected truncated description ending with ..., got:\n%s", desc)
+	if !strings.Contains(listing, strings.Repeat("A", 157)+"...") {
+		t.Fatalf("expected truncated description ending with ..., got:\n%s", listing)
 	}
 }
 
@@ -143,58 +144,51 @@ func TestTruncateSkillDescPreservesUTF8AtByteBoundary(t *testing.T) {
 	}
 }
 
-func TestSkillToolDescriptionCapsAt32Entries(t *testing.T) {
-	list := make([]*skill.Meta, 40)
-	for i := range list {
-		list[i] = &skill.Meta{
-			Name:        fmt.Sprintf("skill-%02d", i),
-			Description: fmt.Sprintf("Description for skill %d", i),
-			Discovered:  true,
+func TestBuildSkillListingCapsAt32Entries(t *testing.T) {
+	entries := make([]SkillListingEntry, 40)
+	for i := range entries {
+		entries[i] = SkillListingEntry{
+			Name: fmt.Sprintf("skill-%02d", i),
+			Desc: fmt.Sprintf("Description for skill %d", i),
 		}
 	}
-	tool := NewSkillTool(skillProviderStub{list: list})
 
-	desc := tool.DescriptionForTools(nil)
-	if !strings.Contains(desc, "+8 more skills available") {
-		t.Fatalf("expected overflow summary, got:\n%s", desc)
+	listing := BuildSkillListing(entries, "## Available Skills\n")
+	if !strings.Contains(listing, "+8 more skills available") {
+		t.Fatalf("expected overflow summary, got:\n%s", listing)
 	}
 	// The first 32 skills should be shown.
-	if !strings.Contains(desc, "skill-00") {
+	if !strings.Contains(listing, "skill-00") {
 		t.Fatal("first skill should be listed")
 	}
-	if !strings.Contains(desc, "skill-31") {
+	if !strings.Contains(listing, "skill-31") {
 		t.Fatal("32nd skill should be listed")
 	}
-	if strings.Contains(desc, "skill-32") {
+	if strings.Contains(listing, "skill-32") {
 		t.Fatal("33rd skill should NOT be listed")
 	}
 }
 
-func TestSkillToolDescriptionRespectsTotalBudget(t *testing.T) {
+func TestBuildSkillListingRespectsTotalBudget(t *testing.T) {
 	// Create skills with very long descriptions so total exceeds 4000 chars.
-	list := make([]*skill.Meta, 100)
-	for i := range list {
-		list[i] = &skill.Meta{
-			Name:        fmt.Sprintf("skill-%03d", i),
-			Description: strings.Repeat("X", 200), // each truncated to 160 chars
-			Discovered:  true,
+	entries := make([]SkillListingEntry, 100)
+	for i := range entries {
+		entries[i] = SkillListingEntry{
+			Name: fmt.Sprintf("skill-%03d", i),
+			Desc: strings.Repeat("X", 200), // each truncated to 160 chars
 		}
 	}
-	tool := NewSkillTool(skillProviderStub{list: list})
 
-	desc := tool.DescriptionForTools(nil)
-	// The Available Skills listing part should not exceed budget + header overhead.
-	headerIdx := strings.Index(desc, "## Available Skills\n")
-	if headerIdx < 0 {
-		t.Fatal("missing Available Skills header")
+	listing := BuildSkillListing(entries, "## Available Skills\n")
+	if listing == "" {
+		t.Fatal("missing Available Skills listing")
 	}
-	listingPart := desc[headerIdx:]
-	if len(listingPart) > SkillListingMaxTotal+100 { // small tolerance for header text
-		t.Fatalf("listing section too large: %d chars", len(listingPart))
+	if len(listing) > SkillListingMaxTotal+100 { // small tolerance for header text
+		t.Fatalf("listing section too large: %d chars", len(listing))
 	}
 }
 
-func TestSkillToolDescriptionSkipsUndiscovered(t *testing.T) {
+func TestSkillToolDescriptionDoesNotListSkillNames(t *testing.T) {
 	tool := NewSkillTool(skillProviderStub{
 		list: []*skill.Meta{
 			{Name: "visible", Description: "Visible skill", Discovered: true},
@@ -202,11 +196,10 @@ func TestSkillToolDescriptionSkipsUndiscovered(t *testing.T) {
 		},
 	})
 	desc := tool.DescriptionForTools(nil)
-	if !strings.Contains(desc, "visible") {
-		t.Fatal("visible skill should be listed")
-	}
-	if strings.Contains(desc, "hidden") {
-		t.Fatal("undiscovered skill should NOT be listed")
+	for _, unwanted := range []string{"visible", "hidden"} {
+		if strings.Contains(desc, unwanted) {
+			t.Fatalf("skill %q should not appear in the tool description", unwanted)
+		}
 	}
 }
 

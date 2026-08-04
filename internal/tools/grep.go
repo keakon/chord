@@ -90,7 +90,6 @@ func (GrepTool) Description() string {
 		" Single bare strings are tolerated for paths/includes but arrays are preferred." +
 		" Returns matching lines with file paths and line numbers." +
 		" Best for discovering candidate files, symbols, or text matches when the exact location is not known yet." +
-		" Independent read-only calls (read, grep, glob) issued in the same response run in parallel; batch independent lookups into one response instead of issuing them one per turn." +
 		" For semantic navigation at a known position (definition, references, implementations), prefer the lsp tool when the file type has LSP coverage."
 }
 

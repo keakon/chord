@@ -17,23 +17,22 @@ type DoneTool struct{}
 
 func NewDoneTool() DoneTool { return DoneTool{} }
 
+// CompletionReportStructure is the required section shape of the final Markdown
+// completion report. Shared by the done tool description and the agent's
+// loop-mode completion instructions so the two never drift apart.
+const CompletionReportStructure = "- **Completion status**: one line summary (e.g., 'All requested work is finished')\n" +
+	"- **What changed**: files modified, created, deleted or key actions taken\n" +
+	"- **Verification**: tests run and their results\n" +
+	"- **Remaining issues**: any limitations, unverified areas, or known issues"
+
 func (DoneTool) Name() string { return NameDone }
 
 func (DoneTool) Description() string {
-	return "Exceptional tool-based completion signal, not the default way to end a conversation. " +
-		"Unless the current runtime or workflow explicitly requires a tool-based completion signal, DO NOT call this tool; return the final answer directly as assistant text. Tool availability, completed work, or this tool's required report argument do not by themselves require a Done call. " +
-		"When the runtime explicitly requires this signal, first use any available tool that can make real progress; call Done only when the current objective is fully complete, no unresolved user decision, error, or verification remains, and no other tool call is necessary or appropriate. " +
-		"Never call it for partial progress or while you still need to investigate, edit, test, or ask the user. " +
-		"When Done is explicitly required, provide a non-empty 'report' argument containing the complete final Markdown completion report. " +
-		"You must put the full completion summary in the report argument itself; do not rely on the surrounding assistant message to carry the report. " +
-		"Write the report in the user's current language unless the user explicitly asked for a different language. " +
-		"The report must include: " +
-		"- **Completion status**: one line summary (e.g., 'All requested work is finished') " +
-		"- **What changed**: files modified, created, deleted or key actions taken " +
-		"- **Verification**: tests run and their results " +
-		"- **Remaining issues**: any limitations, unverified areas, or known issues " +
-		"The report argument is used as the final completion report. " +
-		"If you are unsure whether the task is truly complete, continue working instead of calling Done."
+	return "Exceptional tool-based completion signal, not the default way to end a conversation.\n" +
+		"Unless the current runtime or workflow explicitly requires a tool-based completion signal, DO NOT call this tool; return the final answer directly as assistant text. Tool availability, completed work, or this tool's required report argument do not by themselves require a Done call.\n" +
+		"When the runtime explicitly requires this signal, first use any available tool that can make real progress; call Done only when the current objective is fully complete, no unresolved user decision, error, or verification remains, and no other tool call is necessary or appropriate. Never call it for partial progress or while you still need to investigate, edit, test, or ask the user. If you are unsure whether the task is truly complete, continue working instead of calling Done.\n" +
+		"When Done is explicitly required, provide a non-empty 'report' argument containing the complete final Markdown completion report; put the full completion summary in the report argument itself and do not rely on the surrounding assistant message to carry it. Write the report in the user's current language unless the user explicitly asked for a different language.\n" +
+		"The report must include:\n" + CompletionReportStructure
 }
 
 func (DoneTool) Parameters() map[string]any {

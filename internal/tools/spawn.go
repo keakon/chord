@@ -45,14 +45,17 @@ func (SpawnTool) DescriptionForTools(visible map[string]struct{}) string {
 
 func spawnToolDescription(_ map[string]struct{}) string {
 	return "Start a background process that runs independently of the current turn.\n" +
-		"Use spawn only when real asynchronous execution is needed: long-running services, commands that should keep running while you perform other useful work, or a small number of independent long-running checks that intentionally run in parallel.\n" +
-		"Do not choose spawn merely because a command may take a long time. If you need the result before continuing, or you would poll/wait for completion, use foreground shell with an appropriate timeout instead.\n" +
-		"Do not use spawn as a replacement for foreground shell. For ordinary tests/builds/checks, one-shot generation jobs, batch pipelines whose output you need next, short commands, commands whose output is needed immediately, or commands you will simply wait for, use shell instead.\n" +
-		"Appropriate: dev servers, file watchers, services that should remain running, and batch pipelines only when the user explicitly wants them in background.\n" +
-		"It uses the same detected shell environment as the foreground shell tool.\n" +
-		"It is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution. Use a real terminal for commands that require user input.\n" +
-		"You will NOT receive live stdout/stderr directly from this tool. Completion results are delivered automatically when the process exits and may re-enter the conversation asynchronously with a truncated relevant output snippet on failure. Services may expose a diagnostic log_file path that you can inspect with foreground shell when needed.\n" +
-		"Set timeout for tasks that should terminate after a duration. Omit timeout for services that should run indefinitely."
+		"When to use:\n" +
+		"- Use spawn only when real asynchronous execution is needed: long-running services, commands that should keep running while you perform other useful work, or a small number of independent long-running checks that intentionally run in parallel.\n" +
+		"- Appropriate: dev servers, file watchers, services that should remain running, and batch pipelines only when the user explicitly wants them in background.\n" +
+		"When NOT to use:\n" +
+		"- Do not choose spawn merely because a command may take a long time. If you need the result before continuing, or you would poll/wait for completion, use foreground shell with an appropriate timeout instead.\n" +
+		"- Do not use spawn as a replacement for foreground shell. For ordinary tests/builds/checks, one-shot generation jobs, batch pipelines whose output you need next, short commands, commands whose output is needed immediately, or commands you will simply wait for, use shell instead.\n" +
+		"Runtime behavior:\n" +
+		"- It uses the same detected shell environment as the foreground shell tool.\n" +
+		"- It is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution. Use a real terminal for commands that require user input.\n" +
+		"- You will NOT receive live stdout/stderr directly from this tool. Completion results are delivered automatically when the process exits and may re-enter the conversation asynchronously with a truncated relevant output snippet on failure. Services may expose a diagnostic log_file path that you can inspect with foreground shell when needed.\n" +
+		"- Set timeout for tasks that should terminate after a duration. Omit timeout for services that should run indefinitely."
 }
 
 func (SpawnTool) Parameters() map[string]any {

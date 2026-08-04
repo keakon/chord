@@ -243,9 +243,7 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 		"Use shell mainly for tests, builds, git, and other system commands.",
 		"Prefer the smallest safe number of tool calls. When one visible built-in tool can do the job directly, use it instead of simulating it in shell.",
 		"For native filesystem operations with no dedicated built-in tool, shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
-		"If file-reading, search, or code-navigation tools are hidden or denied in this role, shell is not a substitute for them.",
-		"Do not use shell commands or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
-		"If file-editing tools are hidden or denied in this role, shell is not a substitute for them.",
+		"If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts.",
 	)
 	if line := shellFileDeletionHint(visible); line != "" {
 		parts = append(parts, line)
@@ -260,7 +258,7 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 	if _, ok := visible[NameSpawn]; ok {
 		parts = append(parts, "For processes that must run independently of the current turn, use spawn instead.")
 	}
-	return strings.Join(parts, " ")
+	return strings.Join(parts, "\n")
 }
 
 // shellFileDeletionHint routes explicit file deletions to whichever dedicated

@@ -99,12 +99,6 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 	if hasVisibleTool(visible, tools.NameSkill) {
 		lines = append(lines, "- Use "+toolPromptName(tools.NameSkill)+" to load additional skill instructions on demand when one of the available skills clearly matches the task.")
 	}
-	if hasVisibleTool(visible, tools.NameShell) {
-		lines = append(lines,
-			"- Use "+toolPromptName(tools.NameShell)+" mainly for tests, builds, git, and system commands.",
-			"- For native filesystem operations with no dedicated built-in tool, "+toolPromptName(tools.NameShell)+" is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
-		)
-	}
 	if len(lines) == 0 {
 		return ""
 	}
@@ -345,48 +339,41 @@ func visibleEditToolName(visible map[string]struct{}) string {
 	return ""
 }
 
-func inspectionLimitationEscalation(visible map[string]struct{}, audience capabilityPromptAudience, limited bool) string {
+// limitationEscalationLine renders the escalation guidance shared by the file
+// inspection and file modification constraint blocks. The three phrases carry
+// the only wording difference between the two: needClause ("the task needs
+// repository inspection"), outOfScope ("out-of-scope inspection or
+// navigation"), and surfaceObject ("out-of-scope inspection or navigation
+// blockers").
+func limitationEscalationLine(visible map[string]struct{}, audience capabilityPromptAudience, limited bool, needClause, outOfScope, surfaceObject string) string {
 	if audience == capabilityPromptAudienceSub {
 		hasEscalate := hasVisibleTool(visible, tools.NameEscalate)
 		hasNotify := hasVisibleTool(visible, tools.NameNotify)
 		switch {
 		case hasEscalate && limited:
-			return "- Explain the limitation and use " + toolPromptName(tools.NameEscalate) + " when the owner agent needs to adjust permissions, scope, or approach for out-of-scope inspection or navigation."
+			return "- Explain the limitation and use " + toolPromptName(tools.NameEscalate) + " when the owner agent needs to adjust permissions, scope, or approach for " + outOfScope + "."
 		case hasEscalate:
-			return "- If the task needs repository inspection beyond your scope, explain the limitation and use " + toolPromptName(tools.NameEscalate) + " so the owner agent can adjust permissions, scope, or approach."
+			return "- If " + needClause + " beyond your scope, explain the limitation and use " + toolPromptName(tools.NameEscalate) + " so the owner agent can adjust permissions, scope, or approach."
 		case hasNotify && limited:
-			return "- Explain the limitation and use " + toolPromptName(tools.NameNotify) + " to surface out-of-scope inspection or navigation blockers because " + toolPromptName(tools.NameEscalate) + " is unavailable in this role."
+			return "- Explain the limitation and use " + toolPromptName(tools.NameNotify) + " to surface " + surfaceObject + " because " + toolPromptName(tools.NameEscalate) + " is unavailable in this role."
 		case hasNotify:
-			return "- If the task needs repository inspection beyond your scope, explain the limitation and use " + toolPromptName(tools.NameNotify) + " so the owner agent knows a scope or permission adjustment is needed."
+			return "- If " + needClause + " beyond your scope, explain the limitation and use " + toolPromptName(tools.NameNotify) + " so the owner agent knows a scope or permission adjustment is needed."
 		default:
-			return "- If the task needs repository inspection beyond your scope, explain the limitation clearly in assistant text because " + toolPromptName(tools.NameEscalate) + " and " + toolPromptName(tools.NameNotify) + " are unavailable in this role."
+			return "- If " + needClause + " beyond your scope, explain the limitation clearly in assistant text because " + toolPromptName(tools.NameEscalate) + " and " + toolPromptName(tools.NameNotify) + " are unavailable in this role."
 		}
 	}
 	if limited {
-		return "- Explain the limitation and ask to adjust permissions, scope, or approach when the task needs out-of-scope inspection or navigation."
+		return "- Explain the limitation and ask to adjust permissions, scope, or approach when the task needs " + outOfScope + "."
 	}
-	return "- If the task needs repository inspection, explain the limitation and ask to adjust permissions, scope, or approach."
+	return "- If " + needClause + ", explain the limitation and ask to adjust permissions, scope, or approach."
+}
+
+func inspectionLimitationEscalation(visible map[string]struct{}, audience capabilityPromptAudience, limited bool) string {
+	return limitationEscalationLine(visible, audience, limited,
+		"the task needs repository inspection", "out-of-scope inspection or navigation", "out-of-scope inspection or navigation blockers")
 }
 
 func modificationLimitationEscalation(visible map[string]struct{}, audience capabilityPromptAudience, limited bool) string {
-	if audience == capabilityPromptAudienceSub {
-		hasEscalate := hasVisibleTool(visible, tools.NameEscalate)
-		hasNotify := hasVisibleTool(visible, tools.NameNotify)
-		switch {
-		case hasEscalate && limited:
-			return "- Explain the limitation and use " + toolPromptName(tools.NameEscalate) + " when the owner agent needs to adjust permissions, scope, or approach for out-of-scope changes."
-		case hasEscalate:
-			return "- If the task requires code changes beyond your scope, explain the limitation and use " + toolPromptName(tools.NameEscalate) + " so the owner agent can adjust permissions, scope, or approach."
-		case hasNotify && limited:
-			return "- Explain the limitation and use " + toolPromptName(tools.NameNotify) + " to surface out-of-scope change requests because " + toolPromptName(tools.NameEscalate) + " is unavailable in this role."
-		case hasNotify:
-			return "- If the task requires code changes beyond your scope, explain the limitation and use " + toolPromptName(tools.NameNotify) + " so the owner agent knows a scope or permission adjustment is needed."
-		default:
-			return "- If the task requires code changes beyond your scope, explain the limitation clearly in assistant text because " + toolPromptName(tools.NameEscalate) + " and " + toolPromptName(tools.NameNotify) + " are unavailable in this role."
-		}
-	}
-	if limited {
-		return "- Explain the limitation and ask to adjust permissions, scope, or approach when the task needs out-of-scope changes."
-	}
-	return "- If the task requires code changes, explain the limitation and ask to adjust permissions, scope, or approach."
+	return limitationEscalationLine(visible, audience, limited,
+		"the task requires code changes", "out-of-scope changes", "out-of-scope change requests")
 }

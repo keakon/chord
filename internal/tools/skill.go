@@ -101,18 +101,6 @@ func BuildSkillListing(entries []SkillListingEntry, header string) string {
 	return sb.String()
 }
 
-// buildSkillListing builds the listing from a full skill.Meta slice (skill.go internal).
-func buildSkillListing(list []*skill.Meta) string {
-	entries := make([]SkillListingEntry, 0, len(list))
-	for _, sk := range list {
-		if !isListableSkill(sk) {
-			continue
-		}
-		entries = append(entries, SkillListingEntry{Name: sk.Name, Desc: sk.Description})
-	}
-	return BuildSkillListing(entries, "\n\n## Available Skills\n")
-}
-
 func isListableSkill(sk *skill.Meta) bool {
 	return sk != nil && sk.Discovered && strings.TrimSpace(sk.Name) != ""
 }
@@ -120,25 +108,15 @@ func isListableSkill(sk *skill.Meta) bool {
 func (t SkillTool) DescriptionForTools(_ map[string]struct{}) string {
 	base := []string{
 		"Load a skill's full instructions on demand when a task clearly matches an available skill.",
-		"When a user's request matches one of the skills listed below, call `skill` before proceeding.",
 		"The loaded result includes the skill body plus the skill root directory so relative `scripts/`, `references/`, and `assets/` paths are unambiguous.",
 		"Relative paths mentioned by a skill should be interpreted relative to the reported `<root>` directory.",
 	}
-	if t.provider == nil {
+	if t.provider == nil || len(t.provider.ListSkills()) == 0 {
 		base = append(base, "No skills are currently available.")
-		return strings.Join(base, " ")
+	} else {
+		base = append(base, "The available skills and their descriptions are listed in the system prompt's \"Available Skills\" section; when a task clearly matches one of them, call `skill` before proceeding.")
 	}
-	list := t.provider.ListSkills()
-	if len(list) == 0 {
-		base = append(base, "No skills are currently available.")
-		return strings.Join(base, " ")
-	}
-	listing := buildSkillListing(list)
-	if listing == "" {
-		base = append(base, "No skills are currently available.")
-		return strings.Join(base, " ")
-	}
-	return strings.Join(base, " ") + listing
+	return strings.Join(base, " ")
 }
 
 func (SkillTool) Parameters() map[string]any {
