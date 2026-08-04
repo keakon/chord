@@ -52,3 +52,50 @@ func TestSpawnFinishedEventUpdatesExistingDurableStatusBlock(t *testing.T) {
 		t.Fatalf("updated block content = %q, want backend tests", block.Content)
 	}
 }
+
+func TestSpawnFinishedEventForMainAgentVisibleInMainView(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	m.viewport.SetFilter("main")
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.SpawnFinishedEvent{
+		BackgroundID: "job-3",
+		AgentID:      "main",
+		Kind:         "job",
+		Description:  "Run integration tests",
+		Status:       "finished (exit 0)",
+		Message:      "[Job job-3 finished]\n\nDescription: Run integration tests\nStatus: finished (exit 0)",
+	}})
+
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-3")
+	if !ok {
+		t.Fatal("expected durable status block for main-agent background result")
+	}
+	if block.AgentID != "" {
+		t.Fatalf("block.AgentID = %q, want empty main attribution", block.AgentID)
+	}
+	visible := false
+	for _, b := range m.viewport.visibleBlocks() {
+		if b != nil && b.BackgroundObjectID == "job-3" {
+			visible = true
+			break
+		}
+	}
+	if !visible {
+		t.Fatal("expected background result block to be visible under the main filter")
+	}
+}
+
+func TestFilterBlocksByAgentMainIncludesMainAttributedBlocks(t *testing.T) {
+	blocks := []*Block{
+		{ID: 1, AgentID: ""},
+		{ID: 2, AgentID: "main"},
+		{ID: 3, AgentID: "builder-2"},
+	}
+	filtered := filterBlocksByAgent(blocks, "main")
+	if len(filtered) != 2 {
+		t.Fatalf("len(filtered) = %d, want 2", len(filtered))
+	}
+	if filtered[0].ID != 1 || filtered[1].ID != 2 {
+		t.Fatalf("filtered IDs = [%d %d], want [1 2]", filtered[0].ID, filtered[1].ID)
+	}
+}

@@ -24,6 +24,7 @@
 - 跨 provider、跨协议 fallback 在原生 reasoning 无法回放时不再抹掉已完成的工具历史。Chord 现在跨 Chat Completions、Responses、Messages 与 Gemini 保留结构化的 call/result 对；只有目标提供结构化 reasoning carrier 时才转换绑定动作的可见 reasoning 或公开摘要；目标拒绝结构化形态后才把已完成的工具轮次文本化。不受支持的 reasoning 会被丢弃，不会注入 assistant 正文。Fallback provenance 现在记录实际运行目标的 wire family，normalize 日志也会输出前后消息数及降级/丢弃计数。
 - 修复模型切换事件可能被丢弃、以及事件循环阻塞在已满输出通道时 shutdown 死锁的问题：running-model 变更现在可靠投递；Shutdown 会立即释放被阻塞的输出发送，并等待事件循环完全停止后再 checkpoint SubAgent、保存最终 recovery 快照；persist/compaction 排干超时现在返回错误，不再带着可能不一致的状态继续。
 - `edit` 工具新增引号容错兜底：当精确匹配与尾换行匹配都失败时，按引号标点归一化后重新匹配 `old_string`，并采用保留意图的替换——对未改动的上下文保留文件原始字节。这修复了模型无法逐字复现弯引号导致的主要编辑失败。同时接受已废弃的 `filePath` 参数作为 `path` 的别名（与 Glob/Grep 一致）。
+- 后台 `spawn` 完成后现在必定在主会话留下结果卡片。此前主 agent 自己的后台任务卡片带着会被主视图过滤掉的归属，只能看到 toast 通知；空闲时完成的任务在后续回复之前完全不显示卡片；卡片事件在 UI 事件通道饱和时还可能被丢弃。所属 SubAgent 已不存在的结果现在显示在主会话中，而不是一个再也打不开的视图里。
 
 ## 0.7.2 - 2026-07-20
 

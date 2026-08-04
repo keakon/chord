@@ -614,9 +614,9 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 	}
 	if payload.AgentID == "" || payload.AgentID == a.instanceID {
 		content := a.mainBackgroundResultContent(payload)
+		a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: payload.AgentID, Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: "info", AgentID: payload.AgentID})
 		if a.turn != nil {
-			a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: payload.AgentID, Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
-			a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: "info", AgentID: payload.AgentID})
 			a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{
 				Content:     content,
 				CoalesceKey: "main_background_completion",
@@ -635,7 +635,9 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 	a.subs.mu.RUnlock()
 	if sub == nil {
 		log.Warnf("handleSpawnFinished: owner subagent not found agent_id=%v background_id=%v", payload.AgentID, backgroundID)
-		a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: payload.AgentID, Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
+		// The owner is gone, so attribute the card to the main transcript where
+		// it stays visible; subagent-scoped blocks would have no view to render in.
+		a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: "", Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
 		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: "info", AgentID: payload.AgentID})
 		return
 	}

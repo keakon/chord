@@ -39,6 +39,42 @@ func TestHandleBackgroundObjectFinishedForMainAppendsContextAndStartsTurn(t *tes
 	}
 }
 
+func TestHandleBackgroundObjectFinishedForMainEmitsCardAndToastWhenIdle(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	payload := &tools.SpawnFinishedPayload{
+		BackgroundID: "job-1",
+		AgentID:      a.instanceID,
+		Kind:         "job",
+		Description:  "Run production build",
+		Status:       "finished (exit 0)",
+		Message:      "[Background object job-1 completed]\n\nDescription: Run production build\nStatus: finished (exit 0)",
+	}
+
+	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: payload})
+
+	var sawCard, sawToast bool
+	for _, evt := range drainAgentEvents(a.Events()) {
+		switch e := evt.(type) {
+		case SpawnFinishedEvent:
+			sawCard = true
+			if e.BackgroundID != "job-1" {
+				t.Fatalf("SpawnFinishedEvent.BackgroundID = %q, want job-1", e.BackgroundID)
+			}
+		case ToastEvent:
+			if strings.Contains(e.Message, "job-1") {
+				sawToast = true
+			}
+		}
+	}
+	if !sawCard {
+		t.Fatal("expected SpawnFinishedEvent emitted for idle main background result")
+	}
+	if !sawToast {
+		t.Fatal("expected ToastEvent emitted for idle main background result")
+	}
+}
+
 func TestHandleBackgroundObjectFinishedForMainQueuesWhileBusy(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

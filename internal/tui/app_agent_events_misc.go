@@ -86,7 +86,13 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		m.markBlockSettled(block)
 		return true, effects
 	case agent.SpawnFinishedEvent:
-		m.finalizeAgentStream(evt.AgentID)
+		// The runtime reports the main agent as "main"; main-view blocks are
+		// attributed with an empty AgentID (see filterBlocksByAgent).
+		agentID := evt.AgentID
+		if agentID == "main" {
+			agentID = ""
+		}
+		m.finalizeAgentStream(agentID)
 		backgroundID := evt.EffectiveID()
 		content := strings.TrimSpace(evt.Message)
 		if content == "" {
@@ -103,12 +109,12 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		if block, ok := m.findStatusBlockByBackgroundObject(backgroundID); ok {
 			block.Content = content
-			block.AgentID = evt.AgentID
+			block.AgentID = agentID
 			block.InvalidateCache()
 			m.updateViewportBlock(block)
 			m.markBlockSettled(block)
 		} else {
-			block := &Block{ID: m.nextBlockID, Type: BlockStatus, Content: content, AgentID: evt.AgentID, BackgroundObjectID: backgroundID}
+			block := &Block{ID: m.nextBlockID, Type: BlockStatus, Content: content, AgentID: agentID, BackgroundObjectID: backgroundID}
 			m.nextBlockID++
 			m.appendViewportBlock(block)
 			m.markBlockSettled(block)

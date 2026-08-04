@@ -773,9 +773,9 @@ func parseTaskResultInstanceID(result string) string {
 
 // filterBlocksByAgent returns the subset of blocks visible for the given agent.
 // If agentID is empty, all blocks are returned (show-all mode). If agentID is
-// "main", only blocks with empty AgentID (main agent) are shown:
-// main view does not mix in subagent blocks). Otherwise only blocks whose
-// AgentID matches or whose AgentID is empty (shared) are included.
+// "main", only main-agent blocks are shown (empty AgentID, or "main" from
+// runtime events that carry identity.MainAgentID): main view does not mix in
+// subagent blocks. Otherwise only blocks whose AgentID matches are included.
 func filterBlocksByAgent(blocks []*Block, agentID string) []*Block {
 	if agentID == "" {
 		return blocks
@@ -783,7 +783,7 @@ func filterBlocksByAgent(blocks []*Block, agentID string) []*Block {
 	filtered := make([]*Block, 0, len(blocks))
 	for _, b := range blocks {
 		if agentID == "main" {
-			if b.AgentID == "" {
+			if b.AgentID == "" || b.AgentID == "main" {
 				filtered = append(filtered, b)
 			}
 		} else if b.AgentID == agentID {
