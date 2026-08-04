@@ -249,8 +249,12 @@ func (a *MainAgent) lspDiagnosticPromptBlock() string {
 	if editToolName == "" {
 		editToolName = tools.NameEdit
 	}
+	toolRefs := toolPromptName(editToolName)
+	if _, ok := visible[tools.NameWrite]; ok {
+		toolRefs += " or " + toolPromptName(tools.NameWrite)
+	}
 	return strings.TrimSpace(`## LSP diagnostic follow-up
-	- When LSP diagnostics are available after your ` + toolPromptName(editToolName) + ` or ` + toolPromptName(tools.NameWrite) + ` changes, treat new blocking diagnostics in files you directly modified as regressions and fix them before finishing unless the user explicitly asked for a partial/WIP result
+	- When LSP diagnostics are available after your ` + toolRefs + ` changes, treat new blocking diagnostics in files you directly modified as regressions and fix them before finishing unless the user explicitly asked for a partial/WIP result
 - If your current-session edits introduce non-blocking diagnostics in files you directly modified, prefer low-risk cleanup when it is small and clear; do not expand scope to unrelated historical diagnostics in untouched files unless they directly block the requested task`)
 }
 
@@ -318,14 +322,18 @@ func (a *MainAgent) plannerPermissionAdjustmentInstruction() string {
 
 func (a *MainAgent) plannerModePromptBlock() string {
 	visible := a.mainLLMVisibleToolNames()
-	hasWrite := false
+	hasFileWrite := false
 	hasHandoff := false
 	if len(visible) > 0 {
-		_, hasWrite = visible[tools.NameWrite]
+		// apply_patch can create files (`*** Add File:`), so a patch-native
+		// surface without the write tool can still save the plan document.
+		_, hasWrite := visible[tools.NameWrite]
+		_, hasPatch := visible[tools.NameApplyPatch]
+		hasFileWrite = hasWrite || hasPatch
 		_, hasHandoff = visible[tools.NameHandoff]
 	}
 	step4 := "4. Save the plan document to a path like .chord/plans/plan-001.md before handing it off or finishing the planning turn."
-	if hasWrite {
+	if hasFileWrite {
 		step4 += " Write the plan document with the visible file tools available in this role."
 	} else {
 		step4 += " If this role cannot write the plan file, explain the limitation and " + a.plannerPermissionAdjustmentInstruction() + "."

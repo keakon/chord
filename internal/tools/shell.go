@@ -246,7 +246,11 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 		"If file-reading, search, or code-navigation tools are hidden or denied in this role, shell is not a substitute for them.",
 		"Do not use shell commands or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
 		"If file-editing tools are hidden or denied in this role, shell is not a substitute for them.",
-		"For explicit file deletions, prefer `delete`; use shell removal only when shell semantics are actually required, such as directory trees or batch cleanup.",
+	)
+	if line := shellFileDeletionHint(visible); line != "" {
+		parts = append(parts, line)
+	}
+	parts = append(parts,
 		"Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable.",
 		"This tool is exclusively for foreground execution — all background process management uses the spawn tool.",
 		"If this turn needs the command's stdout/stderr, use this tool.",
@@ -257,6 +261,25 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 		parts = append(parts, "For processes that must run independently of the current turn, use spawn instead.")
 	}
 	return strings.Join(parts, " ")
+}
+
+// shellFileDeletionHint routes explicit file deletions to whichever dedicated
+// deletion-capable tool is on the current surface. With no visibility
+// information (static descriptions) the delete tool is assumed present; with a
+// known surface that has neither delete nor apply_patch, no hint is emitted and
+// the generic "do not default to rm" guidance stands alone.
+func shellFileDeletionHint(visible map[string]struct{}) string {
+	const suffix = "; use shell removal only when shell semantics are actually required, such as directory trees or batch cleanup."
+	if visible == nil {
+		return "For explicit file deletions, prefer `delete`" + suffix
+	}
+	if _, ok := visible[NameDelete]; ok {
+		return "For explicit file deletions, prefer `delete`" + suffix
+	}
+	if _, ok := visible[NameApplyPatch]; ok {
+		return "For explicit file deletions, prefer `apply_patch` with `*** Delete File:`" + suffix
+	}
+	return ""
 }
 
 func (ShellTool) Parameters() map[string]any {

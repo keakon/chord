@@ -906,10 +906,28 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	if bashDesc == "" {
 		t.Fatal("missing Shell tool definition")
 	}
-	for _, want := range []string{"use LSP first", "use Grep for repo text search before reaching for rg", "use Glob for file or path discovery before reaching for rg --files or find", "use Read once you have narrowed the target files", "If file-reading, search, or code-navigation tools are hidden or denied in this role, shell is not a substitute for them.", "Do not use shell commands or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.", "If file-editing tools are hidden or denied in this role, shell is not a substitute for them.", "For explicit file deletions, prefer `delete`", "Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable."} {
+	for _, want := range []string{"use LSP first", "use Grep for repo text search before reaching for rg", "use Glob for file or path discovery before reaching for rg --files or find", "use Read once you have narrowed the target files", "If file-reading, search, or code-navigation tools are hidden or denied in this role, shell is not a substitute for them.", "Do not use shell commands or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.", "If file-editing tools are hidden or denied in this role, shell is not a substitute for them.", "Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable."} {
 		if !strings.Contains(bashDesc, want) {
 			t.Fatalf("missing %q in Shell description %q", want, bashDesc)
 		}
+	}
+	// With neither delete nor apply_patch on the surface there is no dedicated
+	// deletion tool to point at, so the routing hint must be omitted entirely.
+	if strings.Contains(bashDesc, "For explicit file deletions") {
+		t.Fatalf("unexpected deletion routing hint without a deletion-capable tool: %q", bashDesc)
+	}
+
+	a.tools.Register(tools.DeleteTool{})
+	defs = a.mainLLMToolDefinitions()
+	bashDesc = ""
+	for _, def := range defs {
+		if def.Name == "shell" {
+			bashDesc = def.Description
+			break
+		}
+	}
+	if !strings.Contains(bashDesc, "For explicit file deletions, prefer `delete`") {
+		t.Fatalf("missing delete routing hint with delete visible: %q", bashDesc)
 	}
 }
 
@@ -1054,14 +1072,19 @@ delete: allow
 	a.rebuildRuleset()
 
 	got := a.mainAgentCapabilityPromptBlock()
+	// gpt-4 is patch-native, so delete is hidden and its careful-deletion
+	// guidance is carried by the `*** Delete File:` line instead.
 	for _, want := range []string{
 		"Use `read` for file contents when the target path is already known or has been verified.",
-		"Use `apply_patch` to modify the contents of one existing file with a verified path.",
-		"Use `delete` to remove files with verified paths whose current version you know in full (a complete read or your own whole-file write).",
+		"Use `apply_patch` for all file modifications with verified paths",
+		"Only `*** Delete File:` paths you have verified exist",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
 		}
+	}
+	if strings.Contains(got, "Use `delete`") {
+		t.Fatalf("mainAgentCapabilityPromptBlock() unexpectedly references the hidden delete tool in %q", got)
 	}
 	for _, unwanted := range []string{"for discovery and navigation", "to find or verify it before calling the path tool", "`glob`", "`grep`", "`lsp`"} {
 		if strings.Contains(got, unwanted) {

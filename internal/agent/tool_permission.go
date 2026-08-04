@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 
 	"github.com/keakon/chord/internal/llm"
@@ -71,15 +72,47 @@ func evaluateApplyPatchPermission(ruleset permission.Ruleset, args json.RawMessa
 		return toolPermissionDecision{Action: ruleset.Evaluate(tools.NameApplyPatch, arg), MatchArgument: arg}
 	}
 	paths := make([]string, 0, len(targets)*2)
+	deletePaths := make(map[string]bool)
+	writePaths := make(map[string]bool)
 	for _, target := range targets {
-		paths = append(paths, target.SourcePath)
-		if target.TargetPath != "" && target.TargetPath != target.SourcePath {
-			paths = append(paths, target.TargetPath)
+		// Match rules against lexically cleaned paths: the model-facing patch
+		// spells paths free-form, and "./secret/x" must not slip past a
+		// "secret/*" deny rule. Resolution stays as-written (relative) by
+		// design; cleaning only removes redundant ./ and inner ".." hops.
+		source := filepath.ToSlash(filepath.Clean(target.SourcePath))
+		paths = append(paths, source)
+		switch target.Kind {
+		case tools.MutationAdd:
+			writePaths[source] = true
+		case tools.MutationDelete:
+			deletePaths[source] = true
+		case tools.MutationUpdate:
+			if target.TargetPath != "" {
+				// Move removes the source even though its protocol header is Update.
+				deletePaths[source] = true
+			}
+		}
+		if target.TargetPath != "" {
+			if targetPath := filepath.ToSlash(filepath.Clean(target.TargetPath)); targetPath != source {
+				paths = append(paths, targetPath)
+				writePaths[targetPath] = true
+			}
 		}
 	}
 	items := make([]permissionAggregateItem, 0, len(paths))
 	for _, path := range dedupeStrings(paths) {
 		action := ruleset.Evaluate(tools.NameApplyPatch, path)
+		// apply_patch subsumes write/delete for patch-native models. Preserve any
+		// explicit operation-specific threshold when those standalone tools are
+		// hidden; wildcard defaults remain represented by the patch evaluation.
+		for _, toolName := range []string{tools.NameWrite, tools.NameDelete} {
+			applies := toolName == tools.NameWrite && writePaths[path] || toolName == tools.NameDelete && deletePaths[path]
+			if applies {
+				if match := ruleset.LastSpecificToolMatch(toolName, path); match.Found {
+					action = permission.StricterAction(action, match.Rule.Action)
+				}
+			}
+		}
 		item := permissionAggregateItem{Argument: path, Action: action}
 		switch action {
 		case permission.ActionAsk:

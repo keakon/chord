@@ -543,32 +543,44 @@ func staleWritePathCount(trackedFilePath string, deleteLocks *deleteLockSet) int
 	return 0
 }
 
-// checkVisible rejects tool calls for edit-family tools (patch ↔ edit) that are
-// not in the current model-appropriate visible set. This enforces the per-model
-// edit tool filter at execution time so a model cannot circumvent the declared
-// tool surface by calling the sibling tool name from conversation history.
-// Tools outside the edit family are governed by the existing permission/registry
-// flow and do not need a secondary visibility gate.
+// checkVisible rejects tool calls for per-model filtered file tools (patch ↔
+// edit, and write/delete hidden for patch-native models) that are not in the
+// current model-appropriate visible set. This enforces the per-model file tool
+// filter at execution time so a model cannot circumvent the declared tool
+// surface by calling a hidden sibling tool name from conversation history.
+// Other tools are governed by the existing permission/registry flow and do not
+// need a secondary visibility gate.
 func (p toolExecutionPipeline) checkVisible(name string) error {
 	visible := p.visibleToolNames()
 	if visible == nil {
 		return nil
 	}
 	n := tools.NormalizeName(name)
-	if n != tools.NameApplyPatch && n != tools.NameEdit {
+	switch n {
+	case tools.NameApplyPatch, tools.NameEdit, tools.NameWrite, tools.NameDelete:
+	default:
 		return nil
 	}
 	if _, ok := visible[n]; ok {
 		return nil
 	}
+	_, patchVisible := visible[tools.NameApplyPatch]
 	switch n {
 	case tools.NameApplyPatch:
 		if _, ok := visible[tools.NameEdit]; ok {
 			return fmt.Errorf("tool %q is not available for the current model. Use %q instead (the %q file-modification tool)", tools.NameApplyPatch, tools.NameEdit, tools.NameEdit)
 		}
 	case tools.NameEdit:
-		if _, ok := visible[tools.NameApplyPatch]; ok {
+		if patchVisible {
 			return fmt.Errorf("tool %q is not available for the current model. Use %q instead (the %q file-modification tool)", tools.NameEdit, tools.NameApplyPatch, tools.NameApplyPatch)
+		}
+	case tools.NameWrite:
+		if patchVisible {
+			return fmt.Errorf("tool %q is not available for the current model. Use %q instead: create a file with `*** Add File:` or replace an existing file's contents with `*** Update File:` hunks", tools.NameWrite, tools.NameApplyPatch)
+		}
+	case tools.NameDelete:
+		if patchVisible {
+			return fmt.Errorf("tool %q is not available for the current model. Use %q instead: remove files with `*** Delete File:`", tools.NameDelete, tools.NameApplyPatch)
 		}
 	}
 	return fmt.Errorf("tool %q is not available for the current model", name)

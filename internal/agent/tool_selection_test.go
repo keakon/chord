@@ -70,6 +70,7 @@ func TestFilterEditToolsByModel_GPTModels(t *testing.T) {
 		tools.EditTool{},
 		tools.ReadTool{},
 		tools.WriteTool{},
+		tools.DeleteTool{},
 	}
 
 	// Ruleset that allows both edit and patch
@@ -84,7 +85,9 @@ func TestFilterEditToolsByModel_GPTModels(t *testing.T) {
 
 			hasPatch := false
 			hasEdit := false
-			hasOther := 0
+			hasRead := false
+			hasWrite := false
+			hasDelete := false
 
 			for _, tool := range filtered {
 				switch tool.(type) {
@@ -92,8 +95,12 @@ func TestFilterEditToolsByModel_GPTModels(t *testing.T) {
 					hasPatch = true
 				case tools.EditTool:
 					hasEdit = true
-				default:
-					hasOther++
+				case tools.ReadTool:
+					hasRead = true
+				case tools.WriteTool:
+					hasWrite = true
+				case tools.DeleteTool:
+					hasDelete = true
 				}
 			}
 
@@ -109,9 +116,18 @@ func TestFilterEditToolsByModel_GPTModels(t *testing.T) {
 			if !hasPatch && !hasEdit {
 				t.Errorf("model %q: neither patch nor edit tool exposed, should expose one", tt.modelID)
 			}
-			// Other tools should not be filtered
-			if hasOther != 2 {
-				t.Errorf("model %q: other tools count=%d, want 2", tt.modelID, hasOther)
+			if !hasRead {
+				t.Errorf("model %q: read tool was filtered, should always stay", tt.modelID)
+			}
+			// Patch-native models route file creation and deletion through the
+			// apply_patch envelope, so write/delete are hidden for them and kept
+			// for everyone else.
+			wantWriteDelete := !tt.wantPatch
+			if hasWrite != wantWriteDelete {
+				t.Errorf("model %q: hasWrite=%v, want %v", tt.modelID, hasWrite, wantWriteDelete)
+			}
+			if hasDelete != wantWriteDelete {
+				t.Errorf("model %q: hasDelete=%v, want %v", tt.modelID, hasDelete, wantWriteDelete)
 			}
 		})
 	}
@@ -526,5 +542,116 @@ func TestExecuteToolCall_RejectsInvisibleEditFamilyTool(t *testing.T) {
 	}
 	if _, err := a.executeToolCallWithHook(context.Background(), editCall, false); err != nil {
 		t.Fatalf("execute edit on edit-only model failed: %v", err)
+	}
+}
+
+// Fallback pairings must keep write/delete: hiding them is only correct when a
+// patch-native model actually kept apply_patch.
+func TestFilterEditToolsByModel_FallbacksKeepWriteDelete(t *testing.T) {
+	allTools := []tools.Tool{
+		tools.ApplyPatchTool{},
+		tools.EditTool{},
+		tools.ReadTool{},
+		tools.WriteTool{},
+		tools.DeleteTool{},
+	}
+
+	countKinds := func(filtered []tools.Tool) (hasWrite, hasDelete bool) {
+		for _, tool := range filtered {
+			switch tool.(type) {
+			case tools.WriteTool:
+				hasWrite = true
+			case tools.DeleteTool:
+				hasDelete = true
+			}
+		}
+		return
+	}
+
+	// Non-patch-native model that gets apply_patch only because edit is denied:
+	// it is not trained to route creation/deletion through the envelope.
+	claudePatchFallback := permission.Ruleset{
+		{Permission: "*", Pattern: "*", Action: permission.ActionAllow},
+		{Permission: "patch", Pattern: "*", Action: permission.ActionAllow},
+		{Permission: "edit", Pattern: "*", Action: permission.ActionDeny},
+	}
+	hasWrite, hasDelete := countKinds(filterEditToolsByModel(allTools, "claude-opus-4", claudePatchFallback))
+	if !hasWrite || !hasDelete {
+		t.Fatalf("claude patch fallback: hasWrite=%v hasDelete=%v, want both kept", hasWrite, hasDelete)
+	}
+
+	// Patch-native model downgraded to edit needs write to create files at all.
+	gptEditFallback := permission.Ruleset{
+		{Permission: "*", Pattern: "*", Action: permission.ActionAllow},
+		{Permission: "edit", Pattern: "*", Action: permission.ActionAllow},
+		{Permission: "patch", Pattern: "*", Action: permission.ActionDeny},
+	}
+	hasWrite, hasDelete = countKinds(filterEditToolsByModel(allTools, "gpt-5.5", gptEditFallback))
+	if !hasWrite || !hasDelete {
+		t.Fatalf("gpt edit fallback: hasWrite=%v hasDelete=%v, want both kept", hasWrite, hasDelete)
+	}
+
+	// The plain patch-native pairing hides both.
+	bothAllowed := permission.Ruleset{
+		{Permission: "*", Pattern: "*", Action: permission.ActionAllow},
+	}
+	hasWrite, hasDelete = countKinds(filterEditToolsByModel(allTools, "gpt-5.5", bothAllowed))
+	if hasWrite || hasDelete {
+		t.Fatalf("gpt patch-native: hasWrite=%v hasDelete=%v, want both hidden", hasWrite, hasDelete)
+	}
+}
+
+// A patch-native model calling the hidden write/delete tools (learned from
+// history or prior sessions) must be rejected with guidance that names the
+// concrete apply_patch operation, and the filesystem must stay untouched.
+func TestExecuteToolCall_RejectsHiddenWriteDeleteWithPatchGuidance(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	targetPath := projectRoot + "/target.txt"
+	writeFile(t, targetPath, "old line\n")
+	a.tools.Register(tools.ApplyPatchTool{})
+	a.tools.Register(tools.EditTool{})
+	a.tools.Register(tools.WriteTool{})
+	a.tools.Register(tools.DeleteTool{})
+	a.ruleset = permission.Ruleset{
+		{Permission: "*", Pattern: "*", Action: permission.ActionAllow},
+	}
+	a.llmMu.Lock()
+	a.modelName = "gpt-5.5"
+	a.llmMu.Unlock()
+
+	writeCall := message.ToolCall{
+		ID:   "write-1",
+		Name: tools.NameWrite,
+		Args: json.RawMessage(`{"path":"` + targetPath + `","content":"overwritten\n"}`),
+	}
+	_, err := a.executeToolCallWithHook(context.Background(), writeCall, false)
+	if err == nil {
+		t.Fatal("execute write on patch-native model succeeded; want rejection of hidden tool")
+	}
+	if !strings.Contains(err.Error(), "not available for the current model") || !strings.Contains(err.Error(), "*** Add File:") {
+		t.Fatalf("write rejection err = %q; want error mentioning unavailability and the Add File operation", err.Error())
+	}
+	if got, err := os.ReadFile(targetPath); err != nil || string(got) != "old line\n" {
+		t.Fatalf("file changed after rejected write call = %q; want old line", got)
+	}
+
+	deleteCall := message.ToolCall{
+		ID:   "delete-1",
+		Name: tools.NameDelete,
+		Args: json.RawMessage(`{"paths":["` + targetPath + `"],"reason":"cleanup"}`),
+	}
+	_, err = a.executeToolCallWithHook(context.Background(), deleteCall, false)
+	if err == nil {
+		t.Fatal("execute delete on patch-native model succeeded; want rejection of hidden tool")
+	}
+	if !strings.Contains(err.Error(), "not available for the current model") || !strings.Contains(err.Error(), "*** Delete File:") {
+		t.Fatalf("delete rejection err = %q; want error mentioning unavailability and the Delete File operation", err.Error())
+	}
+	if _, statErr := os.Stat(targetPath); statErr != nil {
+		t.Fatalf("file missing after rejected delete call: %v", statErr)
 	}
 }

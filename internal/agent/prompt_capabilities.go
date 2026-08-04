@@ -51,12 +51,22 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 	}
 	// Check for either edit tool (patch or edit/replace)
 	editToolName := visibleEditToolName(visible)
+	patchOnlySurface := editToolName == tools.NameApplyPatch &&
+		!hasVisibleTool(visible, tools.NameWrite) && !hasVisibleTool(visible, tools.NameDelete)
 	if editToolName != "" {
-		lines = append(lines, "- Use "+toolPromptName(editToolName)+" to modify the contents of one existing file with a verified path.")
+		if patchOnlySurface {
+			lines = append(lines, "- Use "+toolPromptName(editToolName)+" for all file modifications with verified paths: `*** Add File:` creates a new file, `*** Update File:` hunks change an existing file, `*** Delete File:` removes one, and `*** Update File:` with `*** Move to:` renames one.")
+		} else {
+			lines = append(lines, "- Use "+toolPromptName(editToolName)+" to modify the contents of one existing file with a verified path.")
+		}
 		switch editToolName {
 		case tools.NameApplyPatch:
 			lines = append(lines, "- For "+toolPromptName(editToolName)+", keep hunks small and include unique unchanged context; in repeated blocks such as tests or fixtures, include the enclosing function, test, or case name.")
 			lines = append(lines, "- If patching a file modified earlier in the turn and the target area is not freshly visible, re-read the small target range before patching.")
+			if patchOnlySurface {
+				lines = append(lines, "- To fully rewrite an existing file, use `*** Update File:` hunks that replace its content; do not `*** Delete File:` a path just to re-add it, and never combine delete and add operations for the same path in one patch.")
+				lines = append(lines, "- Only `*** Delete File:` paths you have verified exist; do not guess paths for deletions.")
+			}
 		case tools.NameEdit:
 			lines = append(lines, "- For "+toolPromptName(editToolName)+", use exact old_string/new_string replacements. Match the file's raw text exactly, including whitespace and newlines; prefer the smallest unique block and set replace_all only when every occurrence should change.")
 			lines = append(lines, "- If editing a file modified earlier in the turn and the target area is not freshly visible, re-read the small target range before editing.")
@@ -166,9 +176,13 @@ func fileModificationConstraintsPromptBlock(visible map[string]struct{}, ruleset
 		return ""
 	}
 
-	hasEdit := hasVisibleTool(visible, tools.NameEdit) || hasVisibleTool(visible, tools.NameApplyPatch)
-	hasWrite := hasVisibleTool(visible, tools.NameWrite)
-	hasDelete := hasVisibleTool(visible, tools.NameDelete)
+	hasPatch := hasVisibleTool(visible, tools.NameApplyPatch)
+	hasEdit := hasVisibleTool(visible, tools.NameEdit) || hasPatch
+	// apply_patch subsumes whole-file creation (`*** Add File:`) and deletion
+	// (`*** Delete File:`), so a patch-native surface with write/delete hidden
+	// is not a limited role and must not trigger the constraints framing.
+	hasWrite := hasVisibleTool(visible, tools.NameWrite) || hasPatch
+	hasDelete := hasVisibleTool(visible, tools.NameDelete) || hasPatch
 	if hasEdit && hasWrite && hasDelete && !hasScopedFilePermissions(visible, ruleset) {
 		return ""
 	}
@@ -250,6 +264,16 @@ func hasScopedFilePermissions(visible map[string]struct{}, ruleset permission.Ru
 	}
 	if hasVisibleTool(visible, tools.NameApplyPatch) {
 		visibleFileTools = append(visibleFileTools, tools.NameApplyPatch)
+		// Tool-specific write and delete rules also constrain apply_patch
+		// operations (`*** Add File:` / move targets for write,
+		// `*** Delete File:` / move sources for delete), so scoped
+		// restrictions matter even when those standalone tools are hidden.
+		if !hasVisibleTool(visible, tools.NameWrite) {
+			visibleFileTools = append(visibleFileTools, tools.NameWrite)
+		}
+		if !hasVisibleTool(visible, tools.NameDelete) {
+			visibleFileTools = append(visibleFileTools, tools.NameDelete)
+		}
 	}
 	if hasVisibleTool(visible, tools.NameDelete) {
 		visibleFileTools = append(visibleFileTools, tools.NameDelete)

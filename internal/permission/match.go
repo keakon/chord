@@ -38,6 +38,38 @@ func (rs Ruleset) lastMatch(permission, pattern string, skipCompoundShellAllow b
 	return MatchResult{}
 }
 
+// LastSpecificToolMatch returns the last rule that names toolName specifically
+// (wildcard-only "*" tool rules are skipped) and whose argument pattern matches.
+// It answers "did the user write a rule for this particular tool?" so callers
+// can layer tool-specific constraints without inheriting wildcard defaults.
+// Only the literal "*" is treated as non-specific: a glob tool name such as
+// "del*" still counts as specific, since the user deliberately targeted a
+// narrower tool set than the wildcard default.
+func (rs Ruleset) LastSpecificToolMatch(permission, pattern string) MatchResult {
+	permission = toolname.Normalize(permission)
+	for _, r := range slices.Backward(rs) {
+		normRulePerm := toolname.Normalize(r.Permission)
+		if normRulePerm == "*" {
+			continue
+		}
+		if globMatch(permission, normRulePerm) && globMatch(pattern, r.Pattern) {
+			return MatchResult{Rule: r, Found: true}
+		}
+	}
+	return MatchResult{}
+}
+
+// StricterAction returns the more restrictive of two actions (deny > ask > allow).
+func StricterAction(a, b Action) Action {
+	if a == ActionDeny || b == ActionDeny {
+		return ActionDeny
+	}
+	if a == ActionAsk || b == ActionAsk {
+		return ActionAsk
+	}
+	return ActionAllow
+}
+
 // LastExactPatternMatch returns the last rule whose permission matches and whose
 // pattern is an exact literal equal to the provided pattern.
 func (rs Ruleset) LastExactPatternMatch(permission, pattern string) MatchResult {

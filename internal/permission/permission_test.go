@@ -938,3 +938,53 @@ task: allow
 		rs.Evaluate("shell", "git push --force")
 	}
 }
+
+func TestLastSpecificToolMatchSkipsWildcardRules(t *testing.T) {
+	rs := Ruleset{
+		{Permission: "*", Pattern: "*", Action: ActionAllow},
+	}
+	if match := rs.LastSpecificToolMatch("delete", "tmp/x.txt"); match.Found {
+		t.Fatalf("wildcard-only ruleset matched = %#v, want no specific match", match)
+	}
+
+	rs = append(rs, Rule{Permission: "delete", Pattern: "tmp/*", Action: ActionAsk})
+	match := rs.LastSpecificToolMatch("delete", "tmp/x.txt")
+	if !match.Found || match.Rule.Action != ActionAsk {
+		t.Fatalf("match = %#v, want tool-specific ask rule", match)
+	}
+	if match := rs.LastSpecificToolMatch("delete", "src/main.go"); match.Found {
+		t.Fatalf("non-matching pattern matched = %#v, want no match", match)
+	}
+}
+
+func TestLastSpecificToolMatchLastRuleWins(t *testing.T) {
+	rs := Ruleset{
+		{Permission: "delete", Pattern: "*", Action: ActionAllow},
+		{Permission: "delete", Pattern: "*", Action: ActionDeny},
+	}
+	match := rs.LastSpecificToolMatch("delete", "any.txt")
+	if !match.Found || match.Rule.Action != ActionDeny {
+		t.Fatalf("match = %#v, want later deny rule", match)
+	}
+}
+
+func TestStricterAction(t *testing.T) {
+	cases := []struct {
+		a, b, want Action
+	}{
+		{ActionAllow, ActionAllow, ActionAllow},
+		{ActionAllow, ActionAsk, ActionAsk},
+		{ActionAsk, ActionAllow, ActionAsk},
+		{ActionAllow, ActionDeny, ActionDeny},
+		{ActionDeny, ActionAllow, ActionDeny},
+		{ActionAsk, ActionDeny, ActionDeny},
+		{ActionDeny, ActionAsk, ActionDeny},
+		{ActionAsk, ActionAsk, ActionAsk},
+		{ActionDeny, ActionDeny, ActionDeny},
+	}
+	for _, tc := range cases {
+		if got := StricterAction(tc.a, tc.b); got != tc.want {
+			t.Fatalf("StricterAction(%s, %s) = %s, want %s", tc.a, tc.b, got, tc.want)
+		}
+	}
+}

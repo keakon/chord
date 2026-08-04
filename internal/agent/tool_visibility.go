@@ -72,7 +72,7 @@ func (a *MainAgent) mainVisibleLLMTools() []toolpkg.Tool {
 	return filterEditToolsByModel(filtered, a.modelName, a.effectiveRuleset())
 }
 
-// filterEditToolsByModel applies per-model edit tool selection to visible tools.
+// filterEditToolsByModel applies per-model file tool selection to visible tools.
 // It is the shared implementation used by both MainAgent and SubAgent to keep a
 // consistent tool surface across agent types, filtering edit tools based on the
 // active model and tool-wide availability.
@@ -81,6 +81,13 @@ func (a *MainAgent) mainVisibleLLMTools() []toolpkg.Tool {
 // 2. If both are available, choose based on model preference
 // 3. If only one is available, use that one regardless of model
 // 4. If neither is available, remove both
+// 5. When a patch-native model keeps apply_patch, also hide write and delete:
+// the Codex envelope subsumes them (`*** Add File:` creates, `*** Delete File:`
+// removes), matching the native Codex CLI surface those models are trained on.
+// Fallback pairings keep write/delete: a non-patch-native model that only got
+// apply_patch because edit is disabled is not trained to route everything
+// through the envelope, and a patch-native model downgraded to edit needs write
+// to create files at all (edit cannot).
 func filterEditToolsByModel(tools []toolpkg.Tool, modelName string, ruleset permission.Ruleset) []toolpkg.Tool {
 	// Check which edit tools are available. Path-scoped allow/ask rules still make
 	// the tool usable, so visibility should only collapse when the whole tool is
@@ -100,9 +107,10 @@ func filterEditToolsByModel(tools []toolpkg.Tool, modelName string, ruleset perm
 
 	// Determine which tool to keep
 	var keepPatch bool
+	patchNativeModel := shouldUsePatchForModel(modelName)
 	if patchAllowed && editAllowed {
 		// Both allowed: use model preference
-		keepPatch = shouldUsePatchForModel(modelName)
+		keepPatch = patchNativeModel
 	} else if patchAllowed {
 		// Only patch allowed
 		keepPatch = true
@@ -121,6 +129,7 @@ func filterEditToolsByModel(tools []toolpkg.Tool, modelName string, ruleset perm
 		return filtered
 	}
 
+	hideWriteDelete := keepPatch && patchNativeModel
 	filtered := make([]toolpkg.Tool, 0, len(tools))
 	for _, tool := range tools {
 		name := toolpkg.NormalizeName(tool.Name())
@@ -129,6 +138,9 @@ func filterEditToolsByModel(tools []toolpkg.Tool, modelName string, ruleset perm
 			continue
 		}
 		if name == toolpkg.NameEdit && keepPatch {
+			continue
+		}
+		if hideWriteDelete && (name == toolpkg.NameWrite || name == toolpkg.NameDelete) {
 			continue
 		}
 		filtered = append(filtered, tool)

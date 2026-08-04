@@ -95,6 +95,120 @@ apply_patch:
 	}
 }
 
+// Tool-specific delete rules must constrain `*** Delete File:` operations inside
+// apply_patch: when the delete tool is hidden for patch-native models, deletion
+// must not silently drop to the (typically laxer) apply_patch threshold.
+func TestEvaluateToolPermissionApplyPatchLayersDeleteRules(t *testing.T) {
+	deletePatch := json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: src/main.go\n@@\n-old\n+new\n*** Delete File: tmp/obsolete.txt\n*** End Patch"}`)
+
+	t.Run("delete ask escalates only the delete target", func(t *testing.T) {
+		node := parsePermissionNode(t, `
+"*": deny
+apply_patch: allow
+delete: ask
+`)
+		ruleset := permission.ParsePermission(&node)
+		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, deletePatch)
+		if got.Action != permission.ActionAsk {
+			t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
+		}
+		if got.MatchArgument != "tmp/obsolete.txt" {
+			t.Fatalf("match argument = %q, want tmp/obsolete.txt", got.MatchArgument)
+		}
+		if want := []string{"tmp/obsolete.txt"}; !reflect.DeepEqual(got.NeedsApprovalPaths, want) {
+			t.Fatalf("needs approval = %#v, want %#v", got.NeedsApprovalPaths, want)
+		}
+		if want := []string{"src/main.go"}; !reflect.DeepEqual(got.AlreadyAllowedPaths, want) {
+			t.Fatalf("already allowed = %#v, want %#v", got.AlreadyAllowedPaths, want)
+		}
+	})
+
+	t.Run("scoped delete deny blocks the patch", func(t *testing.T) {
+		node := parsePermissionNode(t, `
+"*": deny
+apply_patch: allow
+delete:
+  "tmp/*": deny
+`)
+		ruleset := permission.ParsePermission(&node)
+		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, deletePatch)
+		if got.Action != permission.ActionDeny || got.MatchArgument != "tmp/obsolete.txt" {
+			t.Fatalf("decision = %#v, want delete-rule denial of tmp/obsolete.txt", got)
+		}
+	})
+
+	t.Run("wildcard-only rules are not layered", func(t *testing.T) {
+		node := parsePermissionNode(t, `
+"*": allow
+`)
+		ruleset := permission.ParsePermission(&node)
+		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, deletePatch)
+		if got.Action != permission.ActionAllow {
+			t.Fatalf("action = %q, want %q (wildcard allow must not be escalated)", got.Action, permission.ActionAllow)
+		}
+	})
+
+	t.Run("delete allow cannot lower the apply_patch threshold", func(t *testing.T) {
+		node := parsePermissionNode(t, `
+"*": deny
+apply_patch: ask
+delete: allow
+`)
+		ruleset := permission.ParsePermission(&node)
+		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, deletePatch)
+		if got.Action != permission.ActionAsk {
+			t.Fatalf("action = %q, want %q (stricter action wins)", got.Action, permission.ActionAsk)
+		}
+	})
+}
+
+func TestEvaluateToolPermissionApplyPatchLayersHiddenOperationRules(t *testing.T) {
+	t.Run("add inherits explicit write threshold", func(t *testing.T) {
+		node := parsePermissionNode(t, `
+"*": allow
+write:
+  "generated/*": ask
+`)
+		ruleset := permission.ParsePermission(&node)
+		args := json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: generated/client.go\n+package generated\n*** End Patch"}`)
+
+		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, args)
+		if got.Action != permission.ActionAsk || got.MatchArgument != "generated/client.go" {
+			t.Fatalf("decision = %#v, want write-rule approval", got)
+		}
+	})
+
+	t.Run("move inherits delete rule on source", func(t *testing.T) {
+		node := parsePermissionNode(t, `
+"*": allow
+delete:
+  "protected/*": deny
+`)
+		ruleset := permission.ParsePermission(&node)
+		args := json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: protected/key.txt\n*** Move to: archive/key.txt\n@@\n-secret\n+archived\n*** End Patch"}`)
+
+		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, args)
+		if got.Action != permission.ActionDeny || got.MatchArgument != "protected/key.txt" {
+			t.Fatalf("decision = %#v, want delete-rule denial of move source", got)
+		}
+	})
+
+	t.Run("move inherits write rule on target", func(t *testing.T) {
+		node := parsePermissionNode(t, `
+"*": allow
+write:
+  "protected/*": ask
+`)
+		ruleset := permission.ParsePermission(&node)
+		args := json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: src/key.txt\n*** Move to: protected/key.txt\n@@\n-secret\n+archived\n*** End Patch"}`)
+
+		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, args)
+		if got.Action != permission.ActionAsk || got.MatchArgument != "protected/key.txt" {
+			t.Fatalf("decision = %#v, want write-rule approval for move target", got)
+		}
+	})
+}
+
 func TestEvaluateToolPermissionGlobDenyWinsAcrossPatterns(t *testing.T) {
 	node := parsePermissionNode(t, `
 "*": deny
@@ -461,4 +575,32 @@ func mustCancelPermissionArgs(t *testing.T, taskID string) json.RawMessage {
 		t.Fatalf("Marshal: %v", err)
 	}
 	return message.ToolCall{Args: b}.Args
+}
+
+// TestEvaluateToolPermissionApplyPatchCleansTargetPaths pins deny rules
+// against path-spelling dodges: "./secret/x" and "allowed/../secret/x" must
+// hit a "secret/*" deny exactly like the plainly spelled path.
+func TestEvaluateToolPermissionApplyPatchCleansTargetPaths(t *testing.T) {
+	node := parsePermissionNode(t, `
+"*": deny
+apply_patch:
+  "allowed/*": allow
+  "secret/*": deny
+`)
+	ruleset := permission.ParsePermission(&node)
+	for name, patch := range map[string]string{
+		"dot-slash":  "*** Begin Patch\n*** Add File: ./secret/no.txt\n+no\n*** End Patch",
+		"parent-hop": "*** Begin Patch\n*** Add File: allowed/../secret/no.txt\n+no\n*** End Patch",
+	} {
+		t.Run(name, func(t *testing.T) {
+			args, err := json.Marshal(map[string]string{"patch": patch})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := evaluateToolPermission(ruleset, tools.NameApplyPatch, args)
+			if got.Action != permission.ActionDeny || got.MatchArgument != "secret/no.txt" {
+				t.Fatalf("decision = %#v, want cleaned secret target denial", got)
+			}
+		})
+	}
 }
