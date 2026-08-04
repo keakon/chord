@@ -91,6 +91,12 @@ type Client struct {
 // replayCompatEntry pins an escalated replay level to the conversation turn
 // that provoked it, identified by the index of the last user message when the
 // escalation happened.
+//
+// Identity by index is a heuristic: it assumes the message sequence keeps a
+// stable structure within a turn (append-only after the last user message).
+// Rewrites that shift indexes must reset this state (compaction calls
+// ResetReplayCompatibility); a stale mark that misses costs one optimistic
+// attempt, and an index collision over-degrades a single turn at worst.
 type replayCompatEntry struct {
 	level    int
 	turnMark int

@@ -41,6 +41,20 @@ func HasNativeReplayPayload(msgs []message.Message) bool {
 	return false
 }
 
+// LastUserMessageIndex returns the index of the last user message, or -1.
+// Thinking-mode chat backends validate reasoning presence only for assistant
+// tool-call messages after this boundary; normalize and the llm retry layer
+// must agree on the same window definition.
+func LastUserMessageIndex(msgs []message.Message) int {
+	last := -1
+	for i := range msgs {
+		if msgs[i].Role == message.RoleUser {
+			last = i
+		}
+	}
+	return last
+}
+
 type TargetModel struct {
 	ProviderID string
 	ModelID    string
@@ -128,12 +142,7 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 
 	// Thinking-mode chat backends validate reasoning presence only for
 	// assistant tool-call messages after the last user message.
-	lastUserIdx := -1
-	for i := range out {
-		if out[i].Role == message.RoleUser {
-			lastUserIdx = i
-		}
-	}
+	lastUserIdx := LastUserMessageIndex(out)
 
 	for i := range out {
 		msg := &out[i]

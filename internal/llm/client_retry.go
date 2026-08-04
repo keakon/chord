@@ -640,6 +640,12 @@ func (c *Client) completeStreamTarget(
 				c.setReplayCompatLevelFor(t.provider.Name(), t.modelID, t.variant, replayTurnMark, replayLevel)
 				log.Warnf("target rejected replayed trajectory; degrading replay compatibility provider=%v model=%v key_id=%v level=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), replayLevel, err)
 				targetMessages = nextMessages
+				// Keep normalizeReport describing the request actually on the
+				// wire: isGenericNativeReplayRejection consults it on the next
+				// rejection, and the stale first-level report can be empty
+				// (e.g. same-provider unsigned replay kept everything) while
+				// the escalated request was visibly rewritten.
+				normalizeReport = nextReport
 				requestTuning = replayCompatibleRequestTuning(t.tuning, targetMessages, poolTarget)
 				logNormalizeReport(t.provider.Name(), t.modelID, replayLevel, len(messages), len(targetMessages), nextReport)
 				keyAttempt--
@@ -827,14 +833,16 @@ func fallbackReplayLevel(messages []message.Message, target FallbackModel) int {
 // lastUserMessageIndex returns the index of the last user message, or -1.
 // Thinking-mode replay validation windows and their remediations all end at
 // this boundary.
+//
+// The index doubles as the replay-compat turn mark (replayCompatEntry): that
+// identity only holds while the message sequence keeps a stable structure
+// within a turn — messages are appended, never inserted or removed before the
+// last user message. A rewrite that shifts indexes mid-turn (compaction resets
+// state explicitly; content-only context reduction is safe) would make a
+// stored mark miss (harmless: one extra optimistic attempt) or collide with an
+// unrelated turn (over-degrades that turn only).
 func lastUserMessageIndex(messages []message.Message) int {
-	last := -1
-	for i := range messages {
-		if messages[i].Role == message.RoleUser {
-			last = i
-		}
-	}
-	return last
+	return modelcompat.LastUserMessageIndex(messages)
 }
 
 func replayCompatibleRequestTuning(tuning RequestTuning, messages []message.Message, target FallbackModel) RequestTuning {
@@ -861,7 +869,7 @@ func openAIChatReasoningEnabled(tuning RequestTuning, target FallbackModel) bool
 		return true
 	}
 	overrides := target.ProviderConfig.RequestOverrides(target.ModelID)
-	for _, key := range []string{"thinking", "reasoning", "reasoning_effort"} {
+	for _, key := range openAIChatReasoningBodyKeys {
 		if value, ok := overrides.Body[key]; ok && value != nil {
 			return true
 		}

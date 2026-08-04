@@ -58,9 +58,15 @@ func requestOverridesEmpty(overrides config.RequestOverridesConfig) bool {
 	return len(overrides.Body) == 0 && len(overrides.RenameBodyFields) == 0 && len(overrides.Headers) == 0
 }
 
+// openAIChatReasoningBodyKeys are the request-override body fields that enable
+// reasoning/thinking on OpenAI-compatible chat endpoints. Both the request-
+// tuning probe (openAIChatReasoningEnabled) and the disable path
+// (withoutReasoningRequestOverrides) must treat the same set of keys.
+var openAIChatReasoningBodyKeys = []string{"thinking", "reasoning", "reasoning_effort"}
+
 func withoutReasoningRequestOverrides(overrides config.RequestOverridesConfig) config.RequestOverridesConfig {
 	overrides.Body = maps.Clone(overrides.Body)
-	for _, key := range []string{"thinking", "reasoning", "reasoning_effort"} {
+	for _, key := range openAIChatReasoningBodyKeys {
 		delete(overrides.Body, key)
 	}
 	overrides.RenameBodyFields = maps.Clone(overrides.RenameBodyFields)

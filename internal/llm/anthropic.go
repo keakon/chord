@@ -697,6 +697,14 @@ func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthr
 					if tb.Thinking == "" {
 						continue
 					}
+					// Serializing an unsigned thinking block relies on an
+					// upstream invariant: NormalizeForTarget only lets
+					// unsigned blocks reach an Anthropic-wire request when the
+					// target's continuity mode is anthropic_unsigned, and
+					// drops them for anthropic_blocks targets (the official
+					// API rejects thinking blocks without a signature). This
+					// converter is mode-agnostic, so callers must not feed it
+					// unnormalized history.
 					content = append(content, anthropicContent{
 						Type:     "thinking",
 						Thinking: tb.Thinking,

@@ -21,8 +21,12 @@ type replayRejectingProvider struct {
 	rejectionCode         string
 	rejectionMessage      string
 	statusCode            int
-	attempts              [][]message.Message
-	tunings               []RequestTuning
+	// scriptedErrs, when non-empty, returns scriptedErrs[i] for attempt i and
+	// succeeds once the script is exhausted; it takes precedence over the
+	// rejectCount-based rejection.
+	scriptedErrs []error
+	attempts     [][]message.Message
+	tunings      []RequestTuning
 }
 
 func (p *replayRejectingProvider) CompleteStream(
@@ -42,6 +46,12 @@ func (p *replayRejectingProvider) CompleteStream(
 	copy(copied, msgs)
 	p.attempts = append(p.attempts, copied)
 	p.tunings = append(p.tunings, cloneRequestTuning(tuning))
+	if len(p.scriptedErrs) > 0 {
+		if len(p.attempts) <= len(p.scriptedErrs) {
+			return nil, p.scriptedErrs[len(p.attempts)-1]
+		}
+		return &message.Response{Content: "ok"}, nil
+	}
 	if p.contextLengthExceeded {
 		return nil, &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"}
 	}
@@ -195,6 +205,88 @@ func TestCompleteStreamDegradesReplayCompatLadderOnRejection(t *testing.T) {
 		}
 	}
 	requireStrictReplayEvidence(t, impl.attempts[3], "read", "call_1")
+}
+
+// TestGenericRejectionEscalatesAfterExplicitEscalationWithEmptyFirstReport
+// covers the escalation-report refresh: the Native-level normalize report can
+// be empty (same-provider unsigned thinking is kept verbatim), so after an
+// explicit reasoning-replay rejection escalates to Synthesized — which visibly
+// rewrites the request — a subsequent diagnostic-free bare 400 must be judged
+// against the Synthesized report, not the stale empty Native one, and continue
+// the ladder to Strict.
+func TestGenericRejectionEscalatesAfterExplicitEscalationWithEmptyFirstReport(t *testing.T) {
+	cfg := NewProviderConfig("deepseek", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"deepseek-v4-pro": {
+				Thinking: &config.ThinkingConfig{Type: "adaptive"},
+				Compat:   &config.ModelCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "anthropic_unsigned"}},
+			},
+		},
+	}, []string{"key"})
+	impl := &replayRejectingProvider{scriptedErrs: []error{
+		// Attempt 1 (Native): explicit thinking-replay rejection.
+		&APIError{StatusCode: 400, Message: "messages.1.content[].thinking: signature field required"},
+		// Attempt 2 (Synthesized): diagnostic-free gateway 400.
+		&APIError{StatusCode: 400, Message: "bad request"},
+	}}
+	client := NewClient(cfg, impl, "deepseek-v4-pro", 1024, "")
+	// The trailing newline makes the Synthesized rewrite (drop + re-add
+	// trimmed unsigned thinking) differ from the Native request while the
+	// Native normalize report stays empty.
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: "continue"},
+		{
+			Role:           message.RoleAssistant,
+			ThinkingBlocks: []message.ThinkingBlock{{Thinking: "plan\n"}},
+			ToolCalls:      []message.ToolCall{{ID: "call_1", Name: "read", Args: []byte(`{}`)}},
+			Provenance:     &message.MessageProvenance{ProviderID: "deepseek", ModelID: "deepseek-v4-pro", WireFamily: modelcompat.WireFamilyAnthropic},
+		},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
+		{Role: message.RoleUser, Content: "go on"},
+	}
+	target := FallbackModel{ProviderConfig: cfg, ModelID: "deepseek-v4-pro"}
+
+	resp, err := callCompleteStreamWithRetryForTest(
+		client,
+		context.Background(),
+		cfg,
+		impl,
+		"deepseek-v4-pro",
+		1024,
+		tuningForPoolTarget(target),
+		"",
+		messages,
+		nil,
+		nil,
+		false,
+		nil,
+		-2,
+		&CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream error = %v, want success after generic-400 escalation", err)
+	}
+	if resp == nil || resp.Content != "ok" {
+		t.Fatalf("response = %+v, want scripted success", resp)
+	}
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+	if len(impl.attempts) != 3 {
+		t.Fatalf("attempts = %d, want native, synthesized, strict", len(impl.attempts))
+	}
+	if len(impl.attempts[0][1].ThinkingBlocks) != 1 || impl.attempts[0][1].ThinkingBlocks[0].Thinking != "plan\n" {
+		t.Fatalf("first attempt should keep same-provider unsigned thinking verbatim: %+v", impl.attempts[0])
+	}
+	if len(impl.attempts[1][1].ThinkingBlocks) != 1 || impl.attempts[1][1].ThinkingBlocks[0].Thinking != "plan" {
+		t.Fatalf("second attempt should rewrite unsigned thinking through the portable path: %+v", impl.attempts[1])
+	}
+	// The generic 400 on the rewritten Synthesized request must escalate to
+	// Strict instead of being judged by the stale empty Native report.
+	requireStrictReplayEvidence(t, impl.attempts[2], "read", "call_1")
+	if got := client.replayCompatLevelFor(cfg.Name(), "deepseek-v4-pro", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatStrict {
+		t.Fatalf("remembered replay level = %v, want strict", got)
+	}
 }
 
 func TestFallbackTargetStartsWithSynthesizedReplayForForeignNativePayload(t *testing.T) {
