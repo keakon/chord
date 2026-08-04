@@ -219,6 +219,14 @@ func (c *Client) buildStreamRetryTargets(
 		if fbInputLimit <= 0 {
 			fbInputLimit = fbContextLimit
 		}
+		// The one-shot post-compaction replay floor rides on the start
+		// target's tuning; fallback tunings are rebuilt from model config and
+		// would otherwise replay a foreign native payload across the
+		// rewritten boundary at Native on the first post-compaction request.
+		if startTuning.ReplayCompat != nil && (fbTuning.ReplayCompat == nil || *fbTuning.ReplayCompat < *startTuning.ReplayCompat) {
+			level := *startTuning.ReplayCompat
+			fbTuning.ReplayCompat = &level
+		}
 		fbServiceTier := effectiveServiceTierForTuning(fbTuning, tier)
 		if tier != config.ServiceTierStandard {
 			fbTuning = serviceTierTuning(fbTuning, tier)
@@ -598,10 +606,16 @@ func (c *Client) completeStreamTarget(
 		// optimistically replayed cross-provider payload, not that the key or
 		// provider is unhealthy. Escalate the replay compatibility level,
 		// remember it for this target, and retry the same key before treating the
-		// error as a normal failure. Do not infer replay incompatibility from an
-		// otherwise-unclassified 400/422 merely because the request carried
-		// foreign replay items: unrelated request errors must not trigger a
-		// billable retry or poison the target's compatibility state.
+		// error as a normal failure. Escalation also accepts a diagnostic-free
+		// bare 400 from a non-official endpoint when this request actually
+		// carried a normalized replay payload (isGenericNativeReplayRejection):
+		// compatible gateways collapse many upstream failures into 400, so a
+		// transient error can be misread as a rejection and stick for the
+		// session — the accepted cost is bounded at two degraded attempts per
+		// target, versus never recovering when the gateway is genuinely unable
+		// to parse the replayed shape. Unclassified errors on requests whose
+		// payload the normalize pass left untouched never escalate or poison
+		// the target's compatibility state.
 		//
 		// Guard: only escalate when the next level actually changes the wire
 		// request. Normalize is a pure function over (messages, target, level),

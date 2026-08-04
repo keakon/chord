@@ -134,8 +134,14 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 
 		if len(msg.ThinkingBlocks) > 0 {
 			strictProvenance := messageAllowsAnthropicThinkingReplay(*msg, target)
+			// anthropic_unsigned targets declare a backend that returns and
+			// consumes visible unsigned thinking only: it cannot verify
+			// Anthropic signatures, so optimistic foreign replay of signed or
+			// redacted-encrypted blocks would ship Anthropic signature blobs
+			// to a third party for a guaranteed rejection. Their text routes
+			// through the portable path into unsigned thinking instead.
 			foreignProvenance := !strictProvenance && opts.ReplayCompat <= ReplayCompatNative &&
-				provenanceWireFamily(*msg) == WireFamilyAnthropic
+				provenanceWireFamily(*msg) == WireFamilyAnthropic && !allowUnsignedThinking
 			foreignKept := false
 			var portableThinking []string
 			kept := make([]message.ThinkingBlock, 0, len(msg.ThinkingBlocks))

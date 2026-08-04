@@ -763,3 +763,35 @@ func TestIsReasoningReplayRejection(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildStreamRetryTargetsPropagatesReplayFloorToFallbacks pins the
+// post-compaction one-shot replay floor across pool fallback: fallback
+// tunings are rebuilt from model config, and without inheriting the start
+// target's floor the first post-compaction request to a same-wire fallback
+// would replay a foreign native payload across the rewritten boundary.
+func TestBuildStreamRetryTargetsPropagatesReplayFloorToFallbacks(t *testing.T) {
+	cfg := NewProviderConfig("responses", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"gpt-5.6-sol": {}},
+	}, []string{"key"})
+	fbCfg := NewProviderConfig("fallback", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"gpt-5.6-luna": {}},
+	}, []string{"key"})
+	impl := &replayRejectingProvider{}
+	client := NewClient(cfg, impl, "gpt-5.6-sol", 4096, "sys")
+
+	level := modelcompat.ReplayCompatSynthesized
+	targets := client.buildStreamRetryTargets(
+		cfg, impl, "gpt-5.6-sol", 4096,
+		RequestTuning{ReplayCompat: &level}, "", 0, true,
+		[]FallbackModel{{ProviderConfig: fbCfg, ProviderImpl: impl, ModelID: "gpt-5.6-luna", MaxTokens: 4096}},
+	)
+	if len(targets) != 2 {
+		t.Fatalf("targets = %d, want start + fallback", len(targets))
+	}
+	fb := targets[1]
+	if fb.tuning.ReplayCompat == nil || *fb.tuning.ReplayCompat < modelcompat.ReplayCompatSynthesized {
+		t.Fatalf("fallback ReplayCompat = %v, want at least the start target's floor", fb.tuning.ReplayCompat)
+	}
+}

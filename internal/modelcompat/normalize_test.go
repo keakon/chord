@@ -352,3 +352,47 @@ func TestNormalizeForTarget_DoesNotMutateInput(t *testing.T) {
 		t.Fatalf("input mutated: %+v", msgs[0])
 	}
 }
+
+// TestNormalizeForTarget_UnsignedModeNeverReplaysForeignSignedThinking pins
+// the anthropic_unsigned guard: a target that declares it only handles
+// visible unsigned thinking must not receive optimistic Native replay of
+// signed or redacted-encrypted blocks from a real Anthropic history — those
+// would ship Anthropic signature blobs to a third party for a guaranteed
+// rejection. The signed block's text converts to unsigned thinking instead.
+func TestNormalizeForTarget_UnsignedModeNeverReplaysForeignSignedThinking(t *testing.T) {
+	msgs := []message.Message{
+		{
+			Role: message.RoleAssistant,
+			ThinkingBlocks: []message.ThinkingBlock{
+				{Thinking: "signed reasoning", Signature: "sig-blob"},
+			},
+			ToolCalls:  []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}},
+			Provenance: &message.MessageProvenance{ProviderID: "anthropic", ModelID: "claude-fable-5", WireFamily: WireFamilyAnthropic},
+		},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
+	}
+	target := TargetModel{
+		ProviderID:              "deepseek-messages",
+		ModelID:                 "deepseek-v4-pro",
+		WireFamily:              WireFamilyAnthropic,
+		ReasoningContinuityMode: ReasoningContinuityAnthropicUnsigned,
+		ToolResultEncoding:      ToolResultEncodingAnthropicUserBlock,
+		SupportsStructuredTools: true,
+	}
+
+	out, report := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatNative})
+	if len(out) != 2 {
+		t.Fatalf("messages = %+v", out)
+	}
+	for _, block := range out[0].ThinkingBlocks {
+		if block.Signature != "" || block.Data != "" {
+			t.Fatalf("foreign signed block replayed to unsigned-mode target: %+v", block)
+		}
+	}
+	if report.ForeignNativeReplays != 0 {
+		t.Fatalf("ForeignNativeReplays = %d, want 0 for unsigned-mode target", report.ForeignNativeReplays)
+	}
+	if len(out[0].ToolCalls) != 1 {
+		t.Fatalf("tool round lost: %+v", out[0])
+	}
+}
