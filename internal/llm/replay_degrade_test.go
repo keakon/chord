@@ -462,7 +462,7 @@ func TestCompleteStreamSkipsEquivalentReplayLevelBeforeStrict(t *testing.T) {
 		t.Fatalf("attempts = %d, want native then strict without identical synthesized retry", len(attempts))
 	}
 	requireStrictReplayEvidence(t, attempts[1], "read", "call-1")
-	if got := client.replayCompatLevelFor(cfg.Name(), "deepseek-v4-pro", ""); got != modelcompat.ReplayCompatStrict {
+	if got := client.replayCompatLevelFor(cfg.Name(), "deepseek-v4-pro", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatStrict {
 		t.Fatalf("replay level = %d, want strict", got)
 	}
 }
@@ -516,13 +516,13 @@ func TestCompleteStreamDegradesConvertedUnsignedThinkingWithoutTextLeak(t *testi
 
 func TestResetReplayCompatibilityClearsReplayStateOnly(t *testing.T) {
 	client, cfg, _ := replayTestClient(0)
-	client.setReplayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", modelcompat.ReplayCompatStrict)
+	client.setReplayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", 0, modelcompat.ReplayCompatStrict)
 	portable := modelcompat.ReplayCompatSynthesized
 	client.MergeNextRequestTuningOverride(RequestTuning{DisableReasoning: true, ReplayCompat: &portable})
 
 	client.ResetReplayCompatibility()
 
-	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", ""); got != modelcompat.ReplayCompatNative {
+	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", 0); got != modelcompat.ReplayCompatNative {
 		t.Fatalf("replay level after reset = %d, want native", got)
 	}
 	client.mu.Lock()
@@ -542,6 +542,7 @@ func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.
 		messages  []message.Message
 		err       *APIError
 		hasNative func(message.Message) bool
+		wantLevel int
 	}{
 		{
 			name:     "openai visible reasoning",
@@ -556,6 +557,10 @@ func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.
 			}, {Role: message.RoleTool, ToolCallID: "call-1", Content: "ok"}},
 			err:       &APIError{StatusCode: 400, Message: "The `reasoning_content` in the thinking mode must be passed back to the API."},
 			hasNative: func(msg message.Message) bool { return msg.ReasoningContent != "" },
+			// Plain-text reasoning_content survives through Synthesized (no
+			// cryptographic binding to strip), so the synthesized shape is
+			// identical to native and the ladder skips straight to Strict.
+			wantLevel: modelcompat.ReplayCompatStrict,
 		},
 		{
 			name:     "anthropic thinking",
@@ -571,6 +576,7 @@ func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.
 			}, {Role: message.RoleTool, ToolCallID: "call-1", Content: "ok"}},
 			err:       &APIError{StatusCode: 400, Message: "The `content[].thinking` in the thinking mode must be passed back to the API."},
 			hasNative: func(msg message.Message) bool { return len(msg.ThinkingBlocks) > 0 },
+			wantLevel: modelcompat.ReplayCompatSynthesized,
 		},
 		{
 			name:     "gemini thought signature",
@@ -589,6 +595,7 @@ func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.
 			hasNative: func(msg message.Message) bool {
 				return len(msg.GeminiParts) > 0 || (len(msg.ToolCalls) > 0 && msg.ToolCalls[0].ThoughtSignature != "")
 			},
+			wantLevel: modelcompat.ReplayCompatSynthesized,
 		},
 	}
 
@@ -624,8 +631,8 @@ func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.
 			if tc.hasNative(attempts[1][0]) {
 				t.Fatalf("second attempt did not degrade native replay: %#v", attempts[1][0])
 			}
-			if got := client.replayCompatLevelFor(cfg.Name(), tc.modelID, ""); got != modelcompat.ReplayCompatSynthesized {
-				t.Fatalf("replay level = %d, want synthesized", got)
+			if got := client.replayCompatLevelFor(cfg.Name(), tc.modelID, "", lastUserMessageIndex(tc.messages)); got != tc.wantLevel {
+				t.Fatalf("replay level = %d, want %d", got, tc.wantLevel)
 			}
 		})
 	}
@@ -646,7 +653,7 @@ func TestCompleteStreamDoesNotDegradeReplayForUnrelatedBadRequest(t *testing.T) 
 	if len(attempts) != 1 {
 		t.Fatalf("attempts = %d, want one request without replay degradation", len(attempts))
 	}
-	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", ""); got != modelcompat.ReplayCompatNative {
+	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", lastUserMessageIndex(crossProviderReplayMessages())); got != modelcompat.ReplayCompatNative {
 		t.Fatalf("replay compatibility level = %d, want native", got)
 	}
 }
@@ -735,7 +742,7 @@ func TestCompleteStreamPrioritizesContextLengthOverReplayDegradation(t *testing.
 	if attempts != 1 {
 		t.Fatalf("attempts = %d, want one request without replay degradation", attempts)
 	}
-	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", ""); got != modelcompat.ReplayCompatNative {
+	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", lastUserMessageIndex(crossProviderReplayMessages())); got != modelcompat.ReplayCompatNative {
 		t.Fatalf("replay compatibility level = %d, want native after oversize rejection", got)
 	}
 }
@@ -793,5 +800,59 @@ func TestBuildStreamRetryTargetsPropagatesReplayFloorToFallbacks(t *testing.T) {
 	fb := targets[1]
 	if fb.tuning.ReplayCompat == nil || *fb.tuning.ReplayCompat < modelcompat.ReplayCompatSynthesized {
 		t.Fatalf("fallback ReplayCompat = %v, want at least the start target's floor", fb.tuning.ReplayCompat)
+	}
+}
+
+func TestReplayCompatibleRequestTuningIgnoresPriorTurnMissingReasoning(t *testing.T) {
+	cfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{"deepseek": {
+			Reasoning: &config.ReasoningConfig{Effort: "high"},
+		}},
+	}, []string{"key"})
+	target := FallbackModel{ProviderConfig: cfg, ModelID: "deepseek"}
+	tuning := tuningForPoolTarget(target)
+	reasoninglessCall := message.Message{
+		Role:       message.RoleAssistant,
+		ToolCalls:  []message.ToolCall{{ID: "call_1", Name: "read", Args: []byte(`{}`)}},
+		Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat},
+	}
+	priorTurn := []message.Message{
+		reasoninglessCall,
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
+		{Role: message.RoleUser, Content: "continue"},
+		{
+			Role:             message.RoleAssistant,
+			ReasoningContent: "current reasoning",
+			ToolCalls:        []message.ToolCall{{ID: "call_2", Name: "read", Args: []byte(`{}`)}},
+			Provenance:       &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat},
+		},
+		{Role: message.RoleTool, ToolCallID: "call_2", Content: "ok"},
+	}
+	if got := replayCompatibleRequestTuning(tuning, priorTurn, target); got.DisableReasoning {
+		t.Fatalf("prior-turn missing reasoning must not suppress current-turn reasoning: %+v", got)
+	}
+	currentTurn := append(append([]message.Message(nil), priorTurn...), reasoninglessCall,
+		message.Message{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"})
+	if got := replayCompatibleRequestTuning(tuning, currentTurn, target); !got.DisableReasoning {
+		t.Fatalf("current-turn missing reasoning must disable reasoning: %+v", got)
+	}
+}
+
+func TestReplayCompatLevelResetsOnNewTurn(t *testing.T) {
+	client, cfg, _ := replayTestClient(0)
+	client.setReplayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", 3, modelcompat.ReplayCompatStrict)
+	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", 3); got != modelcompat.ReplayCompatStrict {
+		t.Fatalf("same-turn replay level = %d, want strict", got)
+	}
+	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", 5); got != modelcompat.ReplayCompatNative {
+		t.Fatalf("new-turn replay level = %d, want native", got)
+	}
+	client.setReplayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", 5, modelcompat.ReplayCompatSynthesized)
+	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", 5); got != modelcompat.ReplayCompatSynthesized {
+		t.Fatalf("new-turn escalation not recorded: %d", got)
+	}
+	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", 3); got != modelcompat.ReplayCompatNative {
+		t.Fatalf("stale-turn mark must not resurrect the old level: %d", got)
 	}
 }

@@ -78,23 +78,39 @@ type Client struct {
 	// replayCompatMu guards replayCompatByTarget: the per-target replay
 	// compatibility level achieved so far (see the modelcompat ladder). A
 	// target that rejected optimistic native replay stays at its escalated
-	// level for the rest of the session so later requests do not pay a
-	// guaranteed-failing round trip before degrading again.
+	// level while the conversation turn that provoked the rejection is still
+	// in progress, so later requests do not pay a guaranteed-failing round
+	// trip before degrading again. The rejected payload lives in the current
+	// turn (validation windows end at the last user message), so a new user
+	// turn retires it and the target starts over at optimistic native replay
+	// instead of degrading every later turn for the rest of the session.
 	replayCompatMu       sync.Mutex
-	replayCompatByTarget map[string]int
+	replayCompatByTarget map[string]replayCompatEntry
 }
 
-func (c *Client) replayCompatLevelFor(providerName, modelID, variant string) int {
+// replayCompatEntry pins an escalated replay level to the conversation turn
+// that provoked it, identified by the index of the last user message when the
+// escalation happened.
+type replayCompatEntry struct {
+	level    int
+	turnMark int
+}
+
+func (c *Client) replayCompatLevelFor(providerName, modelID, variant string, turnMark int) int {
 	key := oversizeTargetKey(providerName, modelID, variant)
 	if key == "" {
 		return modelcompat.ReplayCompatNative
 	}
 	c.replayCompatMu.Lock()
 	defer c.replayCompatMu.Unlock()
-	return c.replayCompatByTarget[key]
+	entry, ok := c.replayCompatByTarget[key]
+	if !ok || entry.turnMark != turnMark {
+		return modelcompat.ReplayCompatNative
+	}
+	return entry.level
 }
 
-func (c *Client) setReplayCompatLevelFor(providerName, modelID, variant string, level int) {
+func (c *Client) setReplayCompatLevelFor(providerName, modelID, variant string, turnMark, level int) {
 	key := oversizeTargetKey(providerName, modelID, variant)
 	if key == "" {
 		return
@@ -102,10 +118,11 @@ func (c *Client) setReplayCompatLevelFor(providerName, modelID, variant string, 
 	c.replayCompatMu.Lock()
 	defer c.replayCompatMu.Unlock()
 	if c.replayCompatByTarget == nil {
-		c.replayCompatByTarget = make(map[string]int)
+		c.replayCompatByTarget = make(map[string]replayCompatEntry)
 	}
-	if level > c.replayCompatByTarget[key] {
-		c.replayCompatByTarget[key] = level
+	entry, ok := c.replayCompatByTarget[key]
+	if !ok || entry.turnMark != turnMark || level > entry.level {
+		c.replayCompatByTarget[key] = replayCompatEntry{level: level, turnMark: turnMark}
 	}
 }
 

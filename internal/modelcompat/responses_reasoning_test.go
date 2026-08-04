@@ -137,12 +137,31 @@ func TestNormalizeVisibleReasoningForeignReplayLadder(t *testing.T) {
 		t.Fatalf("ForeignNativeReplays = %d, want 1", report.ForeignNativeReplays)
 	}
 
+	// Visible reasoning_content is plain text with no cryptographic binding:
+	// stripping it at the synthesized level would lose continuity for nothing
+	// while thinking-mode backends reject its absence, not its origin. It
+	// survives through Synthesized and only Strict removes the unsatisfiable
+	// shape by textifying the completed trajectory.
 	out, report = NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatSynthesized})
-	if len(out) != 2 || out[0].ReasoningContent != "" || len(out[0].ToolCalls) != 1 {
-		t.Fatalf("synthesized level must drop reasoning while keeping the tool trajectory, got %+v", out)
+	if len(out) != 2 || out[0].ReasoningContent != "native reasoning" || len(out[0].ToolCalls) != 1 {
+		t.Fatalf("synthesized level must keep cross-provider visible reasoning, got %+v (report %+v)", out, report)
 	}
-	if report.DowngradedReasoning == 0 || report.DroppedToolCalls != 0 {
-		t.Fatalf("report = %+v, want reasoning downgrade without tool deletion", report)
+	if report.ForeignNativeReplays != 1 {
+		t.Fatalf("ForeignNativeReplays = %d, want 1", report.ForeignNativeReplays)
+	}
+
+	out, report = NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatStrict})
+	var strictAssistant *message.Message
+	for i := range out {
+		if out[i].Role == message.RoleAssistant && len(out[i].ToolCalls) > 0 {
+			strictAssistant = &out[i]
+		}
+	}
+	if strictAssistant != nil {
+		t.Fatalf("strict level must textify the foreign-reasoning tool trajectory, got %+v", out)
+	}
+	if report.DowngradedReasoning == 0 || report.DowngradedToolCalls == 0 {
+		t.Fatalf("report = %+v, want reasoning downgrade with textified trajectory", report)
 	}
 
 	target.ProviderID = "deepseek"
@@ -564,5 +583,60 @@ func TestNormalizeStrictReplayTextifiesCrossProviderResponsesToolTrajectory(t *t
 	requireHistoricalToolEvidence(t, out, "read", "call_1")
 	if len(report.Warnings) == 0 {
 		t.Fatalf("strict drop was not reported: %+v", report)
+	}
+}
+
+func TestNormalizeStrictTextifiesCurrentTurnReasoninglessToolCalls(t *testing.T) {
+	target := TargetModel{
+		ProviderID: "ds", ModelID: "deepseek-v4-flash", WireFamily: WireFamilyOpenAIChat,
+		ReasoningContinuityMode: ReasoningContinuityOpenAIVisible,
+		ToolResultEncoding:      ToolResultEncodingOpenAIToolRole,
+		SupportsStructuredTools: true,
+	}
+	reasoninglessCall := message.Message{
+		Role:       message.RoleAssistant,
+		ToolCalls:  []message.ToolCall{{ID: "call_1", Name: "read", Args: []byte(`{}`)}},
+		Provenance: &message.MessageProvenance{ProviderID: "ds", ModelID: "deepseek-v4-flash", WireFamily: WireFamilyOpenAIChat},
+	}
+	current := []message.Message{
+		{Role: message.RoleUser, Content: "continue"},
+		reasoninglessCall,
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
+	}
+
+	// Native and Synthesized keep the structured trajectory: the wire layer
+	// satisfies the backend with an empty-but-present reasoning_content field.
+	for _, level := range []int{ReplayCompatNative, ReplayCompatSynthesized} {
+		out, report := NormalizeForTarget(current, target, NormalizeOptions{StructuredTools: true, ReplayCompat: level})
+		if len(out) != 3 || len(out[1].ToolCalls) != 1 {
+			t.Fatalf("level %d must keep the structured trajectory: %+v (report %+v)", level, out, report)
+		}
+	}
+
+	// Strict removes the unsatisfiable shape entirely.
+	out, report := NormalizeForTarget(current, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatStrict})
+	var evidence bool
+	for _, msg := range out {
+		if len(msg.ToolCalls) > 0 {
+			t.Fatalf("strict level left a current-turn reasoningless tool call: %+v", out)
+		}
+		if strings.Contains(msg.Content, "[Historical tool call: read]") {
+			evidence = true
+		}
+	}
+	if !evidence || report.DowngradedToolCalls == 0 {
+		t.Fatalf("strict level must textify the trajectory: %+v (report %+v)", out, report)
+	}
+
+	// The same trajectory before a later user message is outside the
+	// validation window and survives Strict untouched.
+	prior := []message.Message{
+		reasoninglessCall,
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
+		{Role: message.RoleUser, Content: "continue"},
+	}
+	out, report = NormalizeForTarget(prior, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatStrict})
+	if len(out) != 3 || len(out[0].ToolCalls) != 1 {
+		t.Fatalf("prior-turn trajectory must survive strict: %+v (report %+v)", out, report)
 	}
 }

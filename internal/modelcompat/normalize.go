@@ -126,6 +126,15 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 	textifiedToolResultIDs := make(map[string]bool)
 	strictToolEvidence := make(map[int][]message.Message)
 
+	// Thinking-mode chat backends validate reasoning presence only for
+	// assistant tool-call messages after the last user message.
+	lastUserIdx := -1
+	for i := range out {
+		if out[i].Role == message.RoleUser {
+			lastUserIdx = i
+		}
+	}
+
 	for i := range out {
 		msg := &out[i]
 		reasoningToolTrajectoryInvalid := false
@@ -187,7 +196,15 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 			targetRequiresReasoning := targetAllowsReasoningReplay(target)
 			sourceHasNativeReasoning := AllowsOpenAIVisibleReasoningReplay(*msg)
 			replayable := targetRequiresReasoning && sourceHasNativeReasoning && messageProvenanceProviderMatchesTarget(*msg, target)
-			if !replayable && opts.ReplayCompat <= ReplayCompatNative && targetRequiresReasoning && sourceHasNativeReasoning {
+			// Visible reasoning_content is plain text with no cryptographic
+			// binding, so cross-provider replay of the same wire shape cannot
+			// fail signature validation the way Anthropic/Gemini payloads can.
+			// Keep it through Synthesized: stripping it loses continuity for
+			// nothing, and thinking-mode backends that validate current-turn
+			// reasoning_content reject its absence, not its origin. Strict
+			// still falls back to provenance matching so a backend that
+			// genuinely rejects foreign reasoning text has an escape level.
+			if !replayable && opts.ReplayCompat <= ReplayCompatSynthesized && targetRequiresReasoning && sourceHasNativeReasoning {
 				replayable = true
 				report.ForeignNativeReplays++
 			}
@@ -265,6 +282,18 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 		if len(portableReasoningForUnsignedThinking) > 0 {
 			msg.ThinkingBlocks = append(msg.ThinkingBlocks, message.ThinkingBlock{Thinking: strings.Join(portableReasoningForUnsignedThinking, "\n")})
 			report.ConvertedReasoning++
+		}
+
+		// A current-turn tool-call message that ended up with no reasoning at
+		// all (the upstream emitted none and no portable text was available)
+		// cannot satisfy a thinking-mode backend that validates current-turn
+		// reasoning_content presence. The wire layer first tries an
+		// empty-but-present field; when the backend rejects even that, the
+		// strict level removes the unsatisfiable shape by textifying the
+		// completed trajectory instead of replaying a guaranteed rejection.
+		if opts.ReplayCompat >= ReplayCompatStrict && targetAllowsReasoningReplay(target) &&
+			i > lastUserIdx && len(msg.ToolCalls) > 0 && strings.TrimSpace(msg.ReasoningContent) == "" {
+			reasoningToolTrajectoryInvalid = true
 		}
 
 		crossWireStrictToolReplay := opts.ReplayCompat >= ReplayCompatStrict &&

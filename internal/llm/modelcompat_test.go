@@ -179,7 +179,7 @@ func TestNormalizeMessagesForPoolTarget_ConvertsAnthropicThinkingToOpenAIReasoni
 			break
 		}
 	}
-	if assistant == nil || assistant.ReasoningContent != "visible thinking" {
+	if assistant == nil || wireRC(*assistant) != "visible thinking" {
 		t.Fatalf("wire reasoning_content = %#v, want converted text", wire)
 	}
 }

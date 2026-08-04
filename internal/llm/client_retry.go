@@ -457,7 +457,8 @@ func (c *Client) completeStreamTarget(
 		ContextLimit:   t.contextLimit,
 		Variant:        t.variant,
 	}
-	replayLevel := c.replayCompatLevelFor(t.provider.Name(), t.modelID, t.variant)
+	replayTurnMark := lastUserMessageIndex(messages)
+	replayLevel := c.replayCompatLevelFor(t.provider.Name(), t.modelID, t.variant, replayTurnMark)
 	if t.isFallback {
 		replayLevel = max(replayLevel, fallbackReplayLevel(messages, poolTarget))
 	}
@@ -636,7 +637,7 @@ func (c *Client) completeStreamTarget(
 					continue
 				}
 				replayLevel = nextLevel
-				c.setReplayCompatLevelFor(t.provider.Name(), t.modelID, t.variant, replayLevel)
+				c.setReplayCompatLevelFor(t.provider.Name(), t.modelID, t.variant, replayTurnMark, replayLevel)
 				log.Warnf("target rejected replayed trajectory; degrading replay compatibility provider=%v model=%v key_id=%v level=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), replayLevel, err)
 				targetMessages = nextMessages
 				requestTuning = replayCompatibleRequestTuning(t.tuning, targetMessages, poolTarget)
@@ -823,12 +824,30 @@ func fallbackReplayLevel(messages []message.Message, target FallbackModel) int {
 	return level
 }
 
+// lastUserMessageIndex returns the index of the last user message, or -1.
+// Thinking-mode replay validation windows and their remediations all end at
+// this boundary.
+func lastUserMessageIndex(messages []message.Message) int {
+	last := -1
+	for i := range messages {
+		if messages[i].Role == message.RoleUser {
+			last = i
+		}
+	}
+	return last
+}
+
 func replayCompatibleRequestTuning(tuning RequestTuning, messages []message.Message, target FallbackModel) RequestTuning {
 	if providerWireFamily(target.ProviderConfig) != modelcompat.WireFamilyOpenAIChat ||
 		!openAIChatReasoningEnabled(tuning, target) {
 		return tuning
 	}
-	for _, msg := range messages {
+	// Thinking-mode chat backends only validate reasoning presence for
+	// assistant tool-call messages after the last user message, so a
+	// reasoning-free turn that has already scrolled out of the current turn
+	// must not suppress reasoning for the rest of the session.
+	for i := lastUserMessageIndex(messages) + 1; i < len(messages); i++ {
+		msg := messages[i]
 		if msg.Role == message.RoleAssistant && len(msg.ToolCalls) > 0 && strings.TrimSpace(msg.ReasoningContent) == "" {
 			tuning.DisableReasoning = true
 			return tuning

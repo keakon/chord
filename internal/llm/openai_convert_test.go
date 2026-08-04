@@ -14,6 +14,15 @@ import (
 	"github.com/keakon/chord/internal/modelcompat"
 )
 
+// wireRC dereferences an outbound message's reasoning_content pointer for
+// assertions; nil (field absent from the wire request) maps to "".
+func wireRC(m openAIMessage) string {
+	if m.ReasoningContent == nil {
+		return ""
+	}
+	return *m.ReasoningContent
+}
+
 func TestConvertMessagesToOpenAI_DoesNotReplayReasoningContentByDefault(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "do something"},
@@ -44,11 +53,11 @@ func TestConvertMessagesToOpenAI_DoesNotReplayReasoningContentByDefault(t *testi
 	if assistantWithToolCall == nil {
 		t.Fatal("expected an assistant tool_call message")
 	}
-	if assistantWithToolCall.ReasoningContent != "" {
-		t.Fatalf("ReasoningContent = %q, want empty", assistantWithToolCall.ReasoningContent)
+	if wireRC(*assistantWithToolCall) != "" {
+		t.Fatalf("ReasoningContent = %q, want empty", wireRC(*assistantWithToolCall))
 	}
 	for _, m := range out {
-		if m.Role == "assistant" && m.ReasoningContent != "" && len(m.ToolCalls) == 0 && m.Content == nil {
+		if m.Role == "assistant" && wireRC(m) != "" && len(m.ToolCalls) == 0 && m.Content == nil {
 			t.Fatalf("unexpected standalone reasoning-only assistant message: %#v", m)
 		}
 	}
@@ -65,7 +74,7 @@ func TestConvertMessagesToOpenAI_DoesNotReplayReasoningContentForOpenAIChatByDef
 	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
 	var replayed bool
 	for _, m := range out {
-		if m.Role == "assistant" && m.ReasoningContent == "deepseek thinking" && len(m.ToolCalls) > 0 {
+		if m.Role == "assistant" && wireRC(m) == "deepseek thinking" && len(m.ToolCalls) > 0 {
 			replayed = true
 			break
 		}
@@ -86,7 +95,7 @@ func TestConvertMessagesToOpenAI_ReplaysReasoningContentWhenOpenAIVisibleContinu
 	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs)
 	var replayed bool
 	for _, m := range out {
-		if m.Role == "assistant" && m.ReasoningContent == "glm preserved reasoning" && len(m.ToolCalls) > 0 {
+		if m.Role == "assistant" && wireRC(m) == "glm preserved reasoning" && len(m.ToolCalls) > 0 {
 			replayed = true
 			break
 		}
@@ -121,7 +130,7 @@ func TestConvertMessagesToOpenAI_DoesNotReplayReasoningForNonOpenAITarget(t *tes
 	}}
 	out := convertMessagesToOpenAI("", modelcompat.WireFamilyAnthropic, modelcompat.ReasoningContinuityNone, msgs)
 	for _, m := range out {
-		if m.ReasoningContent != "" {
+		if wireRC(m) != "" {
 			t.Fatalf("unexpected reasoning replay for non-openai target: %#v", m)
 		}
 	}
@@ -136,7 +145,7 @@ func TestConvertMessagesToOpenAI_ReplaysPortableReasoningWithoutProvenance(t *te
 	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs)
 	var replayed bool
 	for _, m := range out {
-		if m.Role == "assistant" && m.ReasoningContent == "hidden reasoning" && len(m.ToolCalls) > 0 {
+		if m.Role == "assistant" && wireRC(m) == "hidden reasoning" && len(m.ToolCalls) > 0 {
 			replayed = true
 			break
 		}
@@ -156,7 +165,7 @@ func TestConvertMessagesToOpenAI_ReplaysPortableReasoningWithNonOpenAIChatProven
 	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs)
 	var replayed bool
 	for _, m := range out {
-		if m.Role == "assistant" && m.ReasoningContent == "foreign reasoning" && len(m.ToolCalls) > 0 {
+		if m.Role == "assistant" && wireRC(m) == "foreign reasoning" && len(m.ToolCalls) > 0 {
 			replayed = true
 			break
 		}
@@ -437,5 +446,148 @@ func TestOpenAICompleteStream_DisableReasoningRemovesRequestControls(t *testing.
 	}
 	if gotBody["max_tokens"] != float64(128) {
 		t.Fatalf("max_tokens = %#v, want 128", gotBody["max_tokens"])
+	}
+}
+
+func TestFillCurrentTurnEmptyReasoning(t *testing.T) {
+	msgs := []message.Message{
+		{
+			Role:       "assistant",
+			Content:    "prior turn",
+			ToolCalls:  []message.ToolCall{{ID: "c0", Name: "Read", Args: json.RawMessage(`{}`)}},
+			Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat},
+		},
+		{Role: "tool", ToolCallID: "c0", Content: "ok"},
+		{Role: "user", Content: "continue"},
+		{
+			Role:             "assistant",
+			ReasoningContent: "thought",
+			ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Read", Args: json.RawMessage(`{}`)}},
+			Provenance:       &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat},
+		},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+		{
+			Role:       "assistant",
+			ToolCalls:  []message.ToolCall{{ID: "c2", Name: "Shell", Args: json.RawMessage(`{}`)}},
+			Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat},
+		},
+		{Role: "tool", ToolCallID: "c2", Content: "ok"},
+		{Role: "assistant", Content: "done"},
+	}
+	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs)
+	fillCurrentTurnEmptyReasoning(out)
+
+	byToolID := func(id string) *openAIMessage {
+		for i := range out {
+			for _, tc := range out[i].ToolCalls {
+				if tc.ID == id {
+					return &out[i]
+				}
+			}
+		}
+		return nil
+	}
+	if m := byToolID("c0"); m == nil || m.ReasoningContent != nil {
+		t.Fatalf("prior-turn tool call must not gain a reasoning_content field: %#v", m)
+	}
+	if m := byToolID("c1"); m == nil || m.ReasoningContent == nil || *m.ReasoningContent != "thought" {
+		t.Fatalf("current-turn reasoning replay lost: %#v", m)
+	}
+	poisoned := byToolID("c2")
+	if poisoned == nil || poisoned.ReasoningContent == nil || *poisoned.ReasoningContent != "" {
+		t.Fatalf("current-turn reasoningless tool call must gain an empty field: %#v", poisoned)
+	}
+	for i := range out {
+		if out[i].Role == "assistant" && len(out[i].ToolCalls) == 0 && out[i].ReasoningContent != nil {
+			t.Fatalf("plain assistant must not gain a reasoning_content field: %#v", out[i])
+		}
+	}
+
+	raw, err := json.Marshal(poisoned)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"reasoning_content":""`) {
+		t.Fatalf("empty reasoning_content field missing from wire JSON: %s", raw)
+	}
+	rawPrior, err := json.Marshal(byToolID("c0"))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(rawPrior), "reasoning_content") {
+		t.Fatalf("prior-turn message must omit reasoning_content entirely: %s", rawPrior)
+	}
+}
+
+func TestOpenAICompleteStream_FillsCurrentTurnEmptyReasoningUnlessDisabled(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		disableReasoning bool
+		wantField        bool
+	}{
+		{name: "reasoning active fills empty field", disableReasoning: false, wantField: true},
+		{name: "reasoning disabled omits field", disableReasoning: true, wantField: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					t.Fatalf("decode request body: %v", err)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			}))
+			defer server.Close()
+
+			provider := NewProviderConfig("deepseek", config.ProviderConfig{
+				Type:   config.ProviderTypeChatCompletions,
+				APIURL: server.URL,
+				Models: map[string]config.ModelConfig{
+					"deepseek-v4-flash": {
+						Compat: &config.ModelCompatConfig{
+							ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
+						},
+					},
+				},
+			}, []string{"k"})
+			impl, err := NewOpenAIProviderWithClient(provider, server.Client(), "")
+			if err != nil {
+				t.Fatalf("NewOpenAIProviderWithClient: %v", err)
+			}
+			tuning := tuningForPoolTarget(FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-flash"})
+			tuning.DisableReasoning = tc.disableReasoning
+			_, err = impl.CompleteStream(context.Background(), "k", "deepseek-v4-flash", "", []message.Message{
+				{Role: message.RoleUser, Content: "continue"},
+				{
+					Role:       message.RoleAssistant,
+					ToolCalls:  []message.ToolCall{{ID: "c1", Name: "Read", Args: json.RawMessage(`{"path":"README.md"}`)}},
+					Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat},
+				},
+				{Role: message.RoleTool, ToolCallID: "c1", Content: "ok"},
+			}, nil, 128, tuning, func(message.StreamDelta) {})
+			if err != nil {
+				t.Fatalf("CompleteStream returned error: %v", err)
+			}
+			rawMsgs, ok := gotBody["messages"].([]any)
+			if !ok {
+				t.Fatalf("request body missing messages: %#v", gotBody)
+			}
+			var sawField bool
+			for _, rm := range rawMsgs {
+				m, ok := rm.(map[string]any)
+				if !ok || m["role"] != "assistant" {
+					continue
+				}
+				if rc, present := m["reasoning_content"]; present {
+					if rc != "" {
+						t.Fatalf("reasoning_content = %#v, want empty string", rc)
+					}
+					sawField = true
+				}
+			}
+			if sawField != tc.wantField {
+				t.Fatalf("reasoning_content field present = %v, want %v (body %#v)", sawField, tc.wantField, gotBody)
+			}
+		})
 	}
 }

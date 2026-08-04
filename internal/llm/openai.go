@@ -123,9 +123,13 @@ type openAIRequest struct {
 
 // openAIMessage is a single message in the OpenAI API format.
 type openAIMessage struct {
-	Role             string           `json:"role"`
-	Content          any              `json:"content"`                     // string or []openAIContentBlock
-	ReasoningContent string           `json:"reasoning_content,omitempty"` // OpenAI-compatible reasoning/thinking replay
+	Role    string `json:"role"`
+	Content any    `json:"content"` // string or []openAIContentBlock
+	// ReasoningContent is a pointer so an empty-but-present field can be
+	// serialized: thinking-mode backends (DeepSeek family) require every
+	// current-turn assistant tool-call message to carry reasoning_content,
+	// including turns whose upstream produced no reasoning at all.
+	ReasoningContent *string          `json:"reasoning_content,omitempty"`
 	Name             string           `json:"name,omitempty"`
 	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string           `json:"tool_call_id,omitempty"`
@@ -256,6 +260,15 @@ func (o *OpenAIProvider) CompleteStream(
 	wireFamily := providerWireFamily(o.provider)
 	continuityMode := reasoningContinuityCompatMode(o.provider, model)
 	apiMessages := convertMessagesToOpenAI(systemPrompt, wireFamily, continuityMode, messages)
+	// When the request keeps reasoning active (either chord enables it or the
+	// endpoint enables thinking by default and offers no off switch),
+	// thinking-mode backends require every current-turn assistant tool-call
+	// message to carry reasoning_content. Skip the fill when reasoning was
+	// explicitly disabled for this request: a non-thinking request does not
+	// validate the field, and its tolerance for it is backend-specific.
+	if !tuning.DisableReasoning && wireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible {
+		fillCurrentTurnEmptyReasoning(apiMessages)
+	}
 
 	// Convert tools.
 	apiTools := convertToolsToOpenAI(tools)
@@ -456,6 +469,29 @@ func responseHeaderBytes(resp *http.Response) int64 {
 	return int64(n)
 }
 
+// fillCurrentTurnEmptyReasoning gives every assistant tool-call message after
+// the last user message an empty-but-present reasoning_content field when the
+// upstream produced none (e.g. a gateway routed the turn to a non-thinking
+// backend). Thinking-mode chat backends (DeepSeek family) validate the field's
+// presence on current-turn tool-call messages and reject the whole request
+// when it is absent; messages before the last user message are outside the
+// validation window and stay untouched.
+func fillCurrentTurnEmptyReasoning(apiMessages []openAIMessage) {
+	lastUserIdx := -1
+	for i := range apiMessages {
+		if apiMessages[i].Role == "user" {
+			lastUserIdx = i
+		}
+	}
+	for i := lastUserIdx + 1; i < len(apiMessages); i++ {
+		m := &apiMessages[i]
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 && m.ReasoningContent == nil {
+			empty := ""
+			m.ReasoningContent = &empty
+		}
+	}
+}
+
 // convertMessagesToOpenAI converts internal messages to OpenAI API format.
 func convertMessagesToOpenAI(systemPrompt, targetWireFamily, continuityMode string, msgs []message.Message) []openAIMessage {
 	var result []openAIMessage
@@ -511,7 +547,8 @@ func convertMessagesToOpenAI(systemPrompt, targetWireFamily, continuityMode stri
 			// this target, including cross-wire conversions from other visible
 			// reasoning carriers. Serialize whatever survived for openai_visible.
 			if targetWireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible && strings.TrimSpace(msg.ReasoningContent) != "" {
-				omi.ReasoningContent = msg.ReasoningContent
+				rc := msg.ReasoningContent
+				omi.ReasoningContent = &rc
 			}
 			// OpenAI requires content to be null (not empty string) when
 			// tool_calls are present; set it only when there is actual text.
