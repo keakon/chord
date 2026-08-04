@@ -36,6 +36,7 @@ func sampleMessages() []message.Message {
 			Role:            "tool",
 			Content:         "package main\n\nfunc main() {}",
 			ToolCallID:      "call_001",
+			ToolStatus:      message.ToolStatusCancelled,
 			ToolDiff:        "--- a.go\n+++ a.go\n+package main\n",
 			ToolDiffAdded:   1,
 			ToolDiffRemoved: 0,
@@ -302,6 +303,9 @@ func TestRoundTripToMessages(t *testing.T) {
 		}
 		if got.ToolDiff != orig.ToolDiff {
 			t.Errorf("restored[%d].ToolDiff: got %q, want %q", i, got.ToolDiff, orig.ToolDiff)
+		}
+		if got.ToolStatus != orig.ToolStatus {
+			t.Errorf("restored[%d].ToolStatus: got %q, want %q", i, got.ToolStatus, orig.ToolStatus)
 		}
 		if got.ToolDiffAdded != orig.ToolDiffAdded {
 			t.Errorf("restored[%d].ToolDiffAdded: got %d, want %d", i, got.ToolDiffAdded, orig.ToolDiffAdded)

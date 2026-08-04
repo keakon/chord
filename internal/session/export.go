@@ -37,6 +37,7 @@ type ExportedMessage struct {
 	Role                    message.Role                  `json:"role"`
 	Content                 string                        `json:"content"`
 	ToolCallID              string                        `json:"tool_call_id,omitempty"`
+	ToolStatus              string                        `json:"tool_status,omitempty"`       // success / error / cancelled outcome of a tool result
 	ToolDiff                string                        `json:"tool_diff,omitempty"`         // unified diff for Write/Edit results
 	ToolDiffAdded           int                           `json:"tool_diff_added,omitempty"`   // full added-line count before diff truncation
 	ToolDiffRemoved         int                           `json:"tool_diff_removed,omitempty"` // full removed-line count before diff truncation
@@ -120,6 +121,7 @@ func Export(
 			Role:                    msg.Role,
 			Content:                 msg.Content,
 			ToolCallID:              msg.ToolCallID,
+			ToolStatus:              msg.ToolStatus,
 			ToolDiff:                msg.ToolDiff,
 			ToolDiffAdded:           msg.ToolDiffAdded,
 			ToolDiffRemoved:         msg.ToolDiffRemoved,
@@ -343,6 +345,7 @@ func (es *ExportedSession) ToMessages() []message.Message {
 			Role:                    em.Role,
 			Content:                 em.Content,
 			ToolCallID:              em.ToolCallID,
+			ToolStatus:              em.ToolStatus,
 			ToolDiff:                em.ToolDiff,
 			ToolDiffAdded:           em.ToolDiffAdded,
 			ToolDiffRemoved:         em.ToolDiffRemoved,
