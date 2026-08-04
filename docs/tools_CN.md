@@ -11,9 +11,11 @@
 | `read` | 读取本地文件进上下文。 |
 | `write` | 创建文件，或有意整体替换一个文件。 |
 | `edit` | 在现有文件中替换精确文本。 |
-| `patch` | 对单个已有文件应用 unified diff hunk。 |
+| `apply_patch` | 应用 Codex 风格补丁信封（`*** Begin Patch`）：在单次事务性调用中新增、更新、删除或移动一个或多个文件。规则和过滤器中仍接受旧别名 `patch`。 |
 | `delete` | 删除整个文件。 |
 | `view_image` | 加载本地 PNG/JPEG 进上下文；仅当生效模型池的第一个模型支持图片输入时可用。本地路径权限处理与 `read` 相同。 |
+
+模型每次只会看到 `edit` / `apply_patch` 中的一个（按模型家族选择）；补丁原生模型的文件创建/删除也经由 `apply_patch` 信封而非 `write`/`delete`。详见[编辑工具](./edit-tools_CN.md)。
 
 ## 搜索与导航
 

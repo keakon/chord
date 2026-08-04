@@ -161,7 +161,7 @@ Chord 会按工具输出类型和时效分类处理。专门摘要会优先于�
 | 确认/权限 | 工具权限确认、用户授权结果 | `confirm_age_turns`（默认 2 轮后） | — | 权限决策很快过时，可较早裁剪 |
 | 错误结果 | 工具执行失败的错误信息 | `error_age_turns`（默认 3 轮后） | — | 失败原因可能仍有参考价值，保留稍久 |
 | Shell 成功 / 日志 | 成功命令、构建 / 测试 / lint 日志 | `shell_success_age_turns`（默认 1 轮后） | `shell_success_bytes`（默认 3000 字节以上才剪） | 成功输出通常可重新执行；摘要保留大小、行数、有代表性的成功信号行（如有）以及尾部 fallback，命令仍可从关联 tool call 获取；大日志摘要会保留关键失败 / 警告 |
-| 读取类 | `read`、文件内容预览 | `read_like_age_turns`（默认 1 轮后），仅作用于已失效/已被覆盖的读取 | `read_like_output_bytes`（默认 3000 字节以上才剪） | 被后续局部 edit/patch 的修改范围覆盖（或遇到整文件/未知范围修改）的读取会被裁剪并标记 `truncated=stale`；被后续更大范围读取覆盖的标记 `truncated=superseded`（更新副本就在后文）。仍是该内容现行视图的读取**永不裁剪**，与年龄和大小无关——裁掉它只会逼出重读，或让模型基于摘要猜测 |
+| 读取类 | `read`、文件内容预览 | `read_like_age_turns`（默认 1 轮后），仅作用于已失效/已被覆盖的读取 | `read_like_output_bytes`（默认 3000 字节以上才剪） | 被后续局部 edit/apply_patch 的修改范围覆盖（或遇到整文件/未知范围修改）的读取会被裁剪并标记 `truncated=stale`；被后续更大范围读取覆盖的标记 `truncated=superseded`（更新副本就在后文）。仍是该内容现行视图的读取**永不裁剪**，与年龄和大小无关——裁掉它只会逼出重读，或让模型基于摘要猜测 |
 | 搜索类 | `grep`、`glob`、LSP references | `read_like_age_turns`（默认 1 轮后） | `read_like_output_bytes`（默认 3000 字节以上才剪） | 命中列表可重跑；摘要保留范围、数量和代表命中 |
 | JSON / 结构化输出 | `shell` 或结构化工具返回的 JSON | 先走类别 gate，再退回旧结果兜底 | 类别对应的大小 gate | 大型结构化内容在通用省略前保留顶层 object key 或 array 数量 |
 | 其他旧结果 | 不属于以上类别的旧工具输出 | `stale_age_turns`（默认 3 轮后） | `stale_output_bytes`（默认 1500 字节以上才剪） | 兜底规则，最保守，避免误删不易重建的内容 |
@@ -170,7 +170,7 @@ Chord 会按工具输出类型和时效分类处理。专门摘要会优先于�
 
 - `*_age_turns` 保留旧配置名，但单位是**实际 main-model 请求批次**。请求在真正 dispatch 给 provider 前分配递增 batch；失败请求也会留下年龄间隔。同一 assistant 响应中的多个并行工具调用及其结果共享一个 batch，因此并行工具只算 1 轮。旧会话没有 batch 元数据时，Chord 会按后续 user/assistant 响应保守回退。
 - `*_bytes` 是该类别参与裁剪的**最小输出字节数**。小于此值的输出保留完整内容——短输出不需要裁剪。
-- 仍然“现行”的 `read` 输出**永不裁剪**：其展示范围之后没有与局部 edit/patch 的修改范围重叠，文件没有被整体替换或删除,也没有更晚的读取覆盖同一范围。这类输出是模型对该内容唯一的现行视图，裁掉它要么逼出一次多余的重读（额外请求轮次、破坏 prompt cache），要么让模型基于摘要凭空作答。容量压力由持久 Compaction 负责：每条 read 结果本身已受读取工具的单次输出预算约束，保留的读取只会线性增长，达到阈值后由 Compaction 归档。成功的 `edit`/`patch` 调用参数本身已经保留应用后的 delta，因此结果只保留应用摘要和诊断，不重复回显修改文本；旧会话或无法可靠确定修改范围时，仍保守地使该文件的全部读取失效。
+- 仍然“现行”的 `read` 输出**永不裁剪**：其展示范围之后没有与局部 edit/apply_patch 的修改范围重叠，文件没有被整体替换或删除,也没有更晚的读取覆盖同一范围。这类输出是模型对该内容唯一的现行视图，裁掉它要么逼出一次多余的重读（额外请求轮次、破坏 prompt cache），要么让模型基于摘要凭空作答。容量压力由持久 Compaction 负责：每条 read 结果本身已受读取工具的单次输出预算约束，保留的读取只会线性增长，达到阈值后由 Compaction 归档。成功的 `edit`/`apply_patch` 调用参数本身已经保留应用后的 delta，因此结果只保留应用摘要和诊断，不重复回显修改文本；旧会话或无法可靠确定修改范围时，仍保守地使该文件的全部读取失效。
 - `min_tool_results_prune`（默认 6）是 generic stale-output 兜底路径的**安全门槛**：某条结果即使已经达到这条兜底规则要求的年龄和大小，Chord 也会等到会话中至少有这么多条工具结果后，才应用 generic stale 剪裁，避免小会话过早触发这条最保守的兜底裁剪。像 shell-success、read-like、search-like、JSON、build/log 这类按类别定义的摘要路径，仍按各自的 age/size 规则生效。它不参与 request-batch age 计算。
 - `wrap_up_grace_requests`（默认 1）在 `todo_write` 报告所有 TODO completed/cancelled 后保护下一次 main-model 请求。它按 LLM 请求次数计数；模型切换时跳过该保护。
 - 近期高风险输出不受普通类别阈值限制：在 request-batch age 还不足 `high_risk_protect_age_turns` 时，看起来像 diff、失败断言、stack trace、权限/安全错误的结果会保持完整。同一批并行工具不会互相增加年龄。

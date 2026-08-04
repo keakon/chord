@@ -11,9 +11,11 @@ For how `allow` / `ask` / `deny` are evaluated — including the special couplin
 | `read` | Read a local file into context. |
 | `write` | Create a file or intentionally replace a whole file. |
 | `edit` | Replace exact text in one existing file. |
-| `patch` | Apply unified diff hunks to one existing file. |
+| `apply_patch` | Apply a Codex-style patch envelope (`*** Begin Patch`): add, update, delete, or move one or more files in a single transactional call. `patch` is accepted as a legacy alias in rules and filters. |
 | `delete` | Remove whole files. |
 | `view_image` | Load a local PNG/JPEG into context; available only when the active model pool's first model supports image input. Uses the same local-path permission handling as `read`. |
+
+Only one of `edit` / `apply_patch` is exposed to the model at a time, chosen by model family; patch-native models also route file creation/deletion through the `apply_patch` envelope instead of `write`/`delete`. See [Edit tools](./edit-tools.md).
 
 ## Search and navigation
 

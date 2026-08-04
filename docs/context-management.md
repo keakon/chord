@@ -278,7 +278,7 @@ history.
 | Confirm / permission | Tool permission confirmations, user authorizations | `confirm_age_turns` (default 2) | — | Permission decisions become stale quickly |
 | Errors | Failed tool results | `error_age_turns` (default 3) | — | Failure reasons may still be relevant, kept a bit longer |
 | Shell success / logs | Successful commands, build/test/lint logs | `shell_success_age_turns` (default 1) | `shell_success_bytes` (default 3000) | Successful output is usually reproducible; summaries keep size, line count, salient success lines when present, and a tail fallback; the command remains available from the associated tool call; large logs keep key failures/warnings when summarized |
-| Read-like | `read`, file content previews | `read_like_age_turns` (default 1), applied only to invalidated/superseded reads | `read_like_output_bytes` (default 3000) | A read overlapped by a later local edit/patch (or followed by a whole-file/unknown-range mutation) is trimmed and marked `truncated=stale`; one covered by a later read of the same range is marked `truncated=superseded`. A read that is still the current view of its content is never trimmed, regardless of age or size — trimming it would force a re-read or, worse, an answer guessed from a summary |
+| Read-like | `read`, file content previews | `read_like_age_turns` (default 1), applied only to invalidated/superseded reads | `read_like_output_bytes` (default 3000) | A read overlapped by a later local edit/apply_patch (or followed by a whole-file/unknown-range mutation) is trimmed and marked `truncated=stale`; one covered by a later read of the same range is marked `truncated=superseded`. A read that is still the current view of its content is never trimmed, regardless of age or size — trimming it would force a re-read or, worse, an answer guessed from a summary |
 | Search-like | `grep`, `glob`, LSP references | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 3000) | Hit lists are reproducible; summaries keep scope, counts, and representative hits |
 | JSON / structured output | JSON from `shell` or structured tools | category-specific gate, then stale fallback | category-specific size gate | Large structured blobs keep top-level object keys or array counts before generic omission |
 | Other stale results | Tool output not covered above | `stale_age_turns` (default 3) | `stale_output_bytes` (default 1500) | Catch-all fallback; most conservative to avoid losing hard-to-reconstruct data |
@@ -295,7 +295,7 @@ How to read the age and size parameters:
   eligible for trimming. Smaller outputs stay intact — short output doesn't
   need reduction.
 - A `read` output that is still current — its displayed range has not been
-  overlapped by a later edit/patch, its file has not been replaced or deleted,
+  overlapped by a later edit/apply_patch, its file has not been replaced or deleted,
   and no later read covers the same range — is **never trimmed**, regardless
   of age, size, or how many other reads share the context. Such an output is
   the model's only current view of that content; trimming it forces either a
@@ -304,7 +304,7 @@ How to read the age and size parameters:
   reduction's: every read result is already bounded by the read tool's own
   per-call output budget, so retained reads grow the prompt linearly and
   Compaction archives them once the threshold is reached. Successful `edit`
-  and `patch` calls already retain their applied delta in the tool-call
+  and `apply_patch` calls already retain their applied delta in the tool-call
   arguments; their results therefore keep only the application summary and
   diagnostics instead of echoing the changed text. Legacy sessions or
   mutations without a reliable changed range conservatively invalidate all

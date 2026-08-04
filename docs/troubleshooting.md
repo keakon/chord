@@ -151,7 +151,7 @@ For Python specifically:
 - Small files use `diagnostics.python.semantic_backend` (usually `lsp.pyright`). Make sure `diagnostics.python.semantic_backend.server` matches the server key under `lsp`.
 - Large Python files use Ruff quick diagnostics when `ruff` is on `PATH`.
 - If a large Python file reports diagnostics skipped because Ruff is unavailable, install Ruff or set `diagnostics.python.large_file.run_semantic_when_quick_unavailable: true` to force Pyright on large files too.
-- Ruff quick diagnostics do not update the LSP sidebar; they appear only in `edit`, `patch`, or `write` tool results and clearly note that full Python semantic diagnostics were skipped.
+- Ruff quick diagnostics do not update the LSP sidebar; they appear only in `edit`, `apply_patch`, or `write` tool results and clearly note that full Python semantic diagnostics were skipped.
 
 Recommended Python skeleton:
 
@@ -280,23 +280,23 @@ This warning means the file changed after the agent last read it. Chord validate
 
 Common causes:
 
-- the file was modified by another process (editor/formatter) between `read` and `edit`/`patch`;
+- the file was modified by another process (editor/formatter) between `read` and `edit`/`apply_patch`;
 - another agent or Chord process changed the file;
 - the file changed during a formatter, generator, or build step.
 
-Re-run `read` before retrying. If Chord creates a backup, the tool result includes its path under the current session directory. See [Edit tools](./edit-tools.md) for edit and patch matching behavior.
+Re-run `read` before retrying. If Chord creates a backup, the tool result includes its path under the current session directory. See [Edit tools](./edit-tools.md) for edit and apply_patch matching behavior.
 
-## Patch reports `hunk not found` or `matched multiple locations`
+## apply_patch reports `hunk not found`
 
-`patch` matches hunks line-by-line and applies the first match after the current search position. It can tolerate common whitespace and Unicode punctuation differences, but repeated blocks still need enough nearby context to make the intended location clear.
+`apply_patch` matches hunks line-by-line and applies the first match after the current search position. It can tolerate common whitespace and Unicode punctuation differences, but repeated blocks still need enough nearby context to make the intended location clear.
 
 If you see this:
 
 - re-run `read` on the file and rebuild the patch from the latest content;
-- if the success output says a hunk `matched multiple locations`, use the candidate line numbers in the note to `read` around the intended occurrence and add nearby unchanged lines to the `@@` hunk before retrying future related edits;
-- if the error says the hunk was not found, re-copy the target block from the latest `read` output and make sure context/removal lines match the current indentation; if the hunk came from old numbered output, remove any copied line-number prefix first;
-- split a broad patch into smaller single-file patches or smaller hunks;
-- do not run external `apply_patch` through `shell`; use Chord's native `patch` tool so permissions, stale tracking, diffs, LSP, and rollback stay connected.
+- re-copy the target block from the latest `read` output and make sure context/removal lines match the current indentation; if the hunk came from old numbered output, remove any copied line-number prefix first;
+- when the same block repeats in the file, add nearby unchanged lines to the `@@` hunk, use an `@@ header` anchor, or pin a tail edit with `*** End of File`, so the intended occurrence is unambiguous;
+- split a broad patch into smaller envelopes or smaller hunks;
+- do not run external `apply_patch` through `shell`; use Chord's native `apply_patch` tool so permissions, stale tracking, diffs, LSP, and rollback stay connected.
 
 ## Performance issues
 

@@ -142,7 +142,7 @@ Python 还需要注意：
 - 小文件使用 `diagnostics.python.semantic_backend`，通常是 `lsp.pyright`。请确认 `diagnostics.python.semantic_backend.server` 与 `lsp` 下的 server key 一致。
 - 大 Python 文件在 `PATH` 中能找到 `ruff` 时使用 Ruff quick diagnostics。
 - 如果大 Python 文件提示因为 Ruff 不可用而跳过诊断，可以安装 Ruff，或设置 `diagnostics.python.large_file.run_semantic_when_quick_unavailable: true`，强制大文件也运行 Pyright。
-- Ruff quick diagnostics 不更新 LSP 侧边栏，只出现在 `edit`、`patch` 或 `write` 工具结果中，并会明确提示完整 Python 语义诊断已跳过。
+- Ruff quick diagnostics 不更新 LSP 侧边栏，只出现在 `edit`、`apply_patch` 或 `write` 工具结果中，并会明确提示完整 Python 语义诊断已跳过。
 
 推荐 Python 配置骨架：
 
@@ -275,19 +275,19 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 - 另一个 Agent 或 Chord 进程改动了文件；
 - 格式化器、代码生成器或构建步骤改动了文件。
 
-重试前请重新 `read`。如果 Chord 创建了备份，工具结果会显示其在当前会话目录下的路径。`edit` 和 `patch` 的匹配行为详见[编辑工具](./edit-tools_CN.md)。
+重试前请重新 `read`。如果 Chord 创建了备份，工具结果会显示其在当前会话目录下的路径。`edit` 和 `apply_patch` 的匹配行为详见[编辑工具](./edit-tools_CN.md)。
 
-## Patch 报 `hunk not found` 或 `matched multiple locations`
+## apply_patch 报 `hunk not found`
 
-`patch` 按行匹配 hunk，并应用当前搜索位置之后的第一个匹配。它可以容忍常见空白和 Unicode 标点差异，但重复块仍需要足够的邻近上下文，让目标位置明确。
+`apply_patch` 按行匹配 hunk，并应用当前搜索位置之后的第一个匹配。它可以容忍常见空白和 Unicode 标点差异，但重复块仍需要足够的邻近上下文，让目标位置明确。
 
 看到这个错误时：
 
 - 重新 `read` 目标文件，并基于最新内容重建 patch；
-- 如果成功输出提示某个 hunk `matched multiple locations`，使用 note 中的候选行号去 `read` 目标位置附近，并在后续相关编辑的 `@@` hunk 中加入附近未变化的唯一上下文行；
-- 如果错误提示找不到 hunk，从最新 `read` 输出中重新复制目标块，并确认 context/removal 行缩进与当前文件一致；如果 hunk 来自旧的带编号输出，先移除复制进来的行号前缀；
-- 把过大的 patch 拆成更小的单文件 patch 或更小的 hunk；
-- 不要通过 `shell` 执行外部 `apply_patch`；请使用 Chord 原生 `patch`，这样权限、stale tracking、diff、LSP 和 rollback 才会保持接入。
+- 从最新 `read` 输出中重新复制目标块，并确认 context/removal 行缩进与当前文件一致；如果 hunk 来自旧的带编号输出，先移除复制进来的行号前缀；
+- 当同样的代码块在文件中重复出现时，在 `@@` hunk 中加入附近未变化的行、使用 `@@ header` 锚点，或用 `*** End of File` 钉住文件末尾的修改，让目标位置无歧义；
+- 把过大的 patch 拆成更小的信封或更小的 hunk；
+- 不要通过 `shell` 执行外部 `apply_patch`；请使用 Chord 原生 `apply_patch` 工具，这样权限、stale tracking、diff、LSP 和 rollback 才会保持接入。
 
 ## 性能问题
 

@@ -30,7 +30,7 @@ Start with what works out of the box; move on to customization and advanced work
 - [Context management](./context-management.md) — compaction and reduction: how they work, configuration, tuning
 - [Model configuration recipes](./model-configs.md) — copy-paste snippets for common provider/model families
 - [Built-in tools](./tools.md) — every tool name, for permission rules and hook filters
-- [Edit tools](./edit-tools.md) — choose between `edit`, `patch`, and `write`; formats, examples, and safety behavior
+- [Edit tools](./edit-tools.md) — choose between `edit`, `apply_patch`, and `write`; formats, examples, and safety behavior
 - [Keybindings](./keybindings.md) — complete key map and how to customize it
 - [Paths](./paths.md) — config / state / cache / project layout, what is safe to delete
 - [Environment variables](./environment.md) — every `CHORD_*` / `XDG_*` / proxy variable Chord reads

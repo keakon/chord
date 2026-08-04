@@ -7,6 +7,7 @@
 ### 不兼容变更
 
 - 上下文剪裁不再接受 `context.reduction.high_pressure_usage` 或 `force_prune_usage`；工具输出何时被剪裁现在由 request-batch age 阈值决定。请从已有配置中删除这些键。Chord 会给出迁移错误，不再静默忽略。
+- `patch` 工具被 `apply_patch` 取代：采用 Codex `*** Begin Patch` 信封格式，将多文件 Add/Update/Delete/Move 操作作为一个事务应用——所有操作基于同一份文件系统快照规划，提交前重新校验内容与文件 mode，任一提交步骤失败时整体回滚（包括自身写入失败的那个文件）。兼容性保持不变：旧的 `patch` 工具名与单文件 `{path, patch}` 参数继续可用，`patch` 权限规则键在解析时归一化为 `apply_patch`。权限模式现在匹配 patch 触及的每一个路径，并做词法规整，`./secret/x` 无法绕过 `secret/*` 的 deny；patch 内的 `*** Delete File:` 操作仍受工具级 `delete` 规则约束。删除文件不再要求先完整读取——其安全性由路径解析、权限规则、跟踪锁与删除前备份承担。
 - 配置加载现在在所有层级拒绝未知 YAML 字段——顶层、provider、model、`context`、`compat` 及各嵌套块——不再静默忽略。旧版本 Chord 曾容忍的键（拼写错误，或降级后残留的新版本字段）现在会以指明具体字段的解析错误阻止启动；升级前请删除或修正这类键。空文件与整体注释掉的配置文件行为不变，顶层 `model_templates` 键保留为纯 YAML anchor 命名空间。
 
 ### 改进
@@ -19,8 +20,8 @@
 
 ### 修复
 
-- 仍然有效的 `read` 输出不再被请求级上下文剪裁裁掉。共享的 96 KB 有效读取保护预算和 `truncated=aged` 按年龄裁剪已移除：两者都可能裁掉模型刚读过的内容（一批并行读取会挤占自己的预算），在上下文远未达到上限时就迫使模型分页重读、甚至只凭摘要作答。现在剪裁只处理确定过期（文件变更后的 `truncated=stale`）或在上下文后部有更新副本（`truncated=superseded`）的读取；容量压力仍由持久 Compaction 负责。`READ_RECOVERY` 元数据行与裁剪后定义大纲随 aged 路径一并移除——模型从未使用过它们，重读即是自然的恢复方式。`context.reduction` 另外接受布尔简写：`false` 完全关闭请求级剪裁（此前是解析错误），`true` 保持默认参数；未知的 reduction 键现在会报错，不再被静默丢弃。
-- 整文件 `write` / `delete` 授权现在会把完整 `read` 或 `<file>` 引用绑定到模型实际看到的同一份字节。局部/过期的文件引用、读取完成前被外部修改的文件，以及 SubAgent 工作目录下的相对路径都不能再授权覆盖模型未见过的版本。
+- 仍然有效的 `read` 输出不再被请求级上下文剪裁裁掉。此前，超过若干轮次且大于 read-like 尺寸阈值的读取即使仍是模型对该文件的唯一现行视图也会被摘要化，在上下文远未达到上限时就迫使模型分页重读、甚至只凭摘要作答。现在剪裁只处理确定过期（文件变更后的 `truncated=stale`）或在上下文后部有更新副本（`truncated=superseded`）的读取；仍然有效的读取无论年龄、大小或同批并行读取数量都一律保留，容量压力仍由持久 Compaction 负责。重读即是自然的恢复方式——不会输出任何机器可读的恢复元数据。`context.reduction` 另外接受布尔简写：`false` 完全关闭请求级剪裁（此前是解析错误），`true` 保持默认参数；未知的 reduction 键现在会报错，不再被静默丢弃。
+- 整文件 `write` 授权现在会把完整 `read` 或 `<file>` 引用绑定到模型实际看到的同一份字节。局部/过期的文件引用、读取完成前被外部修改的文件，以及 SubAgent 工作目录下的相对路径都不能再授权覆盖模型未见过的版本。`delete` 则有意采用路径授权而非读取门控（见上文 `apply_patch` 条目），删除文件不再强制先做一次浪费的完整读取。
 - 跨 provider、跨协议 fallback 在原生 reasoning 无法回放时不再抹掉已完成的工具历史。Chord 现在跨 Chat Completions、Responses、Messages 与 Gemini 保留结构化的 call/result 对；只有目标提供结构化 reasoning carrier 时才转换绑定动作的可见 reasoning 或公开摘要；目标拒绝结构化形态后才把已完成的工具轮次文本化。不受支持的 reasoning 会被丢弃，不会注入 assistant 正文。Fallback provenance 现在记录实际运行目标的 wire family，normalize 日志也会输出前后消息数及降级/丢弃计数。
 - 修复模型切换事件可能被丢弃、以及事件循环阻塞在已满输出通道时 shutdown 死锁的问题：running-model 变更现在可靠投递；Shutdown 会立即释放被阻塞的输出发送，并等待事件循环完全停止后再 checkpoint SubAgent、保存最终 recovery 快照；persist/compaction 排干超时现在返回错误，不再带着可能不一致的状态继续。
 - `edit` 工具新增引号容错兜底：当精确匹配与尾换行匹配都失败时，按引号标点归一化后重新匹配 `old_string`，并采用保留意图的替换——对未改动的上下文保留文件原始字节。这修复了模型无法逐字复现弯引号导致的主要编辑失败。同时接受已废弃的 `filePath` 参数作为 `path` 的别名（与 Glob/Grep 一致）。

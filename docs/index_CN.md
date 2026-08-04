@@ -30,7 +30,7 @@
 - [上下文管理](./context-management_CN.md) —— 上下文压缩与上下文剪裁：原理、配置、调参
 - [模型配置速查](./model-configs_CN.md) —— 常见 provider / model 家族的可复制片段
 - [内置工具](./tools_CN.md) —— 全部工具名，配权限规则和 hook 过滤器时用
-- [编辑工具](./edit-tools_CN.md) —— `edit`、`patch`、`write` 如何选择，以及参数格式、示例和安全行为
+- [编辑工具](./edit-tools_CN.md) —— `edit`、`apply_patch`、`write` 如何选择，以及参数格式、示例和安全行为
 - [快捷键](./keybindings_CN.md) —— 完整键位与自定义方式
 - [目录与路径](./paths_CN.md) —— 配置 / state / cache / 项目级布局，哪些可删
 - [环境变量](./environment_CN.md) —— Chord 读取的所有 `CHORD_*` / `XDG_*` / 代理变量

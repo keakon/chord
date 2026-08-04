@@ -1,13 +1,14 @@
-# 编辑工具：Patch vs Edit
+# 编辑工具：apply_patch vs Edit
 
 Chord 提供两种互补的文件编辑工具，针对不同模型的训练背景进行了优化。
 
 ## 快速对比
 
-| 特性 | **Patch 工具** | **Edit（替换）工具** |
-|---------|----------------|-------------------------|
-| **格式** | 统一差异块（`@@` 风格） | 文本匹配（old_string → new_string） |
+| 特性 | **apply_patch 工具** | **Edit（替换）工具** |
+|---------|----------------------|-------------------------|
+| **格式** | Codex 补丁信封（`*** Begin Patch` … `*** End Patch`）+ `@@` 差异块 | 文本匹配（old_string → new_string） |
 | **最适合** | 使用 OpenAI `apply_patch` 训练的模型 | 使用 Claude Code 或类似替换接口训练的模型 |
+| **作用范围** | 单次调用多个文件：新增、更新、删除、移动 | 单次调用一个已有文件 |
 | **位置控制** | 上下文行 + 可选的头部锚点 | 精确字符串匹配 |
 | **多次出现** | 不适用（基于上下文） | `replace_all` 参数 |
 | **典型模型** | gpt-5.5, gpt-5.3-codex, o3, o4 | Claude, Qwen, GLM, MiniMax, DeepSeek, Gemini |
@@ -16,43 +17,65 @@ Chord 提供两种互补的文件编辑工具，针对不同模型的训练背�
 
 Chord **自动根据当前模型选择**合适的工具：
 
-- **GPT/o 系列模型** → Patch 工具（@@-风格块）
-- **所有其他模型** → Edit 工具（old_string/new_string）
+- **GPT/o 系列模型** → `apply_patch`（Codex 信封）
+- **所有其他模型** → `edit`（old_string/new_string）
 
 你无需手动选择——系统只会向每个模型暴露合适的工具。
 
+当补丁原生（GPT/o 系列）模型保留 `apply_patch` 时，Chord 还会隐藏 `write` 和 `delete`：信封本身已覆盖它们（`*** Add File:` 创建、`*** Delete File:` 删除），与这些模型训练时熟悉的原生 Codex CLI 工具面一致。回退组合会保留 `write`/`delete`：非 GPT 模型仅因 `edit` 被禁用才拿到 `apply_patch` 时仍能看到它们；补丁原生模型被降级到 `edit` 时也需要 `write` 才能创建文件。
+
 ---
 
-## Patch 工具（@@-风格）
+## apply_patch 工具（Codex 信封）
 
 ### 格式
 
-```diff
-@@
+单个 `patch` 参数携带完整的 Codex 信封，可以包含任意数量的文件操作：
+
+```text
+*** Begin Patch
+*** Update File: src/main.go
+@@ func main() {
  上下文行
 -删除的行
 +添加的行
  上下文行
+*** Add File: docs/new.md
++# 新文档
++第一行。
+*** Delete File: tmp/old.txt
+*** End Patch
 ```
+
+支持的操作：
+
+- **`*** Add File: path`** —— 创建文件；每一行正文都以 `+` 开头。
+- **`*** Update File: path`** —— 用一个或多个 `@@` 差异块修改文件。
+- **`*** Move to: newpath`** —— 更新的同时重命名；必须紧跟在对应的 `*** Update File:` 行之后。纯重命名也需要至少一个（可以只含上下文的）差异块。
+- **`*** Delete File: path`** —— 删除文件；无正文。
+- **`*** End of File`** —— 放在差异块之后，把该块钉在文件末尾（当同样的内容也出现在文件前部时很有用）。
+
+差异块按顺序应用；每个块从上一个块的应用位置之后开始匹配第一个出现。块内的行保留原始的 `' '`/`+`/`-` 前缀，因此文件内容本身以 `*** ` 开头的行仍是普通上下文——只有不带前缀的 `*** ` 行才是协议标记。
 
 ### 何时使用
 
 - 你的模型使用 OpenAI 的 `apply_patch` 或类似的基于补丁的接口训练
+- 改动跨多个文件，或在修改内容的同时创建/删除/移动文件
 - 需要通过上下文行进行精确的位置控制
-- 改动是局部的，可以用周围代码进行锚定
 
 ### 示例
 
 ```json
 {
-  "path": "main.go",
-  "patch": "@@\n func main() {\n-\tfmt.Println(\"hello\")\n+\tfmt.Println(\"hello, world\")\n }"
+  "patch": "*** Begin Patch\n*** Update File: main.go\n@@\n func main() {\n-\tfmt.Println(\"hello\")\n+\tfmt.Println(\"hello, world\")\n }\n*** End Patch"
 }
 ```
 
+旧的单文件参数（`{"path": ..., "patch": "@@\n..."}`）仍然被接受，会被规范化为针对该路径的 Update 信封。
+
 ### 可选的头部锚点
 
-你可以添加头部行来帮助定位模糊的代码块：
+你可以在 `@@` 之后添加文本来帮助定位模糊的代码块：
 
 ```diff
 @@ func processUser(id int) error {
@@ -62,13 +85,19 @@ Chord **自动根据当前模型选择**合适的工具：
  }
 ```
 
-**重要提示**：只使用你已验证存在于文件中的头部。通用头部（例如单独的 `@@`）会被视为软锚点，如果找不到会回退到主体匹配。
+**重要提示**：只使用你已验证存在于文件中的头部。头部是软锚点：当头部文本找不到时，匹配会仅回退到块主体。
+
+### 事务性行为
+
+同一个信封内的所有操作会**在修改任何文件之前**基于同一份文件系统快照完成规划和验证。如果规划失败（文件缺失、同一路径存在重叠操作、`Add` 目标已存在），任何文件都不会改变。如果文件在规划与提交之间被外部修改，整个补丁会被拒绝。如果提交中途写入失败，已提交的操作会被回滚。
 
 ### 错误消息
 
-- **"hunk not found"**：上下文行与当前文件状态不匹配。重新读取文件并重新生成补丁。
-- **"patch makes no changes"**：所有行都是上下文（空格前缀）；添加 `-` 和 `+` 行进行实际更改。
-- **"multiple possible locations"**：块主体匹配多个位置。添加更多上下文或使用头部锚点。
+- **"hunk not found; re-read the current file before retrying"**：上下文行与当前文件状态不匹配。重新读取文件并重新生成补丁。
+- **"hunk has no context or removed lines; add unchanged context"**：差异块只包含 `+` 行；至少加入一行上下文或 `-` 行来锚定位置。
+- **"cannot add file that already exists"**：`*** Add File:` 的目标已存在；改用 `*** Update File:`。
+- **"apply_patch contains overlapping operations"**：同一信封中的两个操作触及同一路径；把它们合并为一个操作。
+- **"changed after planning"**：文件在验证与提交之间被修改；没有任何写入——基于当前内容重试。
 
 ---
 
@@ -151,7 +180,7 @@ Chord **自动根据当前模型选择**合适的工具：
 
 两个工具都很适用。根据模型训练选择：
 
-- **Patch**：当你需要位置控制时更好（例如，"更改此函数中的第一个出现"）。
+- **apply_patch**：当你需要位置控制时更好（例如，"更改此函数中的第一个出现"）。
 - **Edit**：对于具有清晰边界的简单查找替换更好。
 
 ### 重命名/重构
@@ -161,10 +190,7 @@ Chord **自动根据当前模型选择**合适的工具：
 
 ### 大规模更改
 
-这两个工具都不适合：
-
-- 创建新文件 → 使用 **Write**
-- 删除文件 → 使用 **Delete**
+- 创建、删除或移动文件 → `apply_patch` 原生支持（`*** Add File:` / `*** Delete File:` / `*** Move to:`）；使用 `edit` 的模型用 **Write** 和 **Delete**
 - 跨多个文件的批量文本替换 → 使用 **Shell** 配合 `sd` 或 `sed`
 - 跨文件的符号重命名 → 使用 **LSP**
 
@@ -174,6 +200,8 @@ Chord **自动根据当前模型选择**合适的工具：
 
 两个工具共享**文件权限族**（基于路径的授权）。对路径的单次批准适用于两个编辑工具。
 
+在权限规则、hook 过滤器和技能 `allowed_tools` 中，正式名称是 `edit` 和 `apply_patch`。`patch` 作为 `apply_patch` 的旧别名仍被接受，已有配置可以继续工作。
+
 ### 权限配置
 
 配置任一编辑工具名即可；一个编辑器的规则会作用到另一个编辑器，除非另一个编辑器也有自己的显式规则：
@@ -182,7 +210,7 @@ Chord **自动根据当前模型选择**合适的工具：
 
 ```yaml
 permission:
-  edit: allow  # patch 和 edit 工具都允许
+  edit: allow  # apply_patch 和 edit 工具都允许
 ```
 
 **禁用某一种格式**（高级）：
@@ -190,24 +218,24 @@ permission:
 ```yaml
 permission:
   edit: allow
-  patch: deny  # GPT/o 系列模型会退回使用 edit
+  apply_patch: deny  # GPT/o 系列模型会退回使用 edit
 ```
 
 **权限回退规则**：
 
-- 如果仅配置了 `edit`，`patch` 继承相同的权限
-- 如果仅配置了 `patch`，`edit` 继承相同的权限
-- 这也包括 `deny`：`edit: deny` 也会禁用 `patch`，除非 `patch` 同时有自己的显式规则
+- 如果仅配置了 `edit`，`apply_patch` 继承相同的权限
+- 如果仅配置了 `apply_patch`，`edit` 继承相同的权限
+- 这也包括 `deny`：`edit: deny` 也会禁用 `apply_patch`，除非 `apply_patch` 同时有自己的显式规则
 - 如果两者都配置了，各自使用自己的显式规则
-- 单独的 `edit` 或 `patch` 规则会同时作用于两个工具，并覆盖通配符规则
+- 单独的 `edit` 或 `apply_patch` 规则会同时作用于两个工具，并覆盖通配符规则
 
 **示例**：
 
-- `edit: allow` → 两个工具都允许；GPT/o 系列模型通常看到 `patch`，其他模型通常看到 `edit`
-- `edit: allow, patch: deny` → patch 拒绝，edit 允许；GPT/o 系列模型退回使用 `edit`
-- `patch: allow, edit: deny` → patch 允许，edit 拒绝；非 GPT 模型退回使用 `patch`
-- `*: deny, patch: allow` → 两个工具都允许（edit 继承 patch 规则）
-- `*: allow, patch: deny` → 两个工具都拒绝（edit 继承 patch 拒绝）
+- `edit: allow` → 两个工具都允许；GPT/o 系列模型通常看到 `apply_patch`，其他模型通常看到 `edit`
+- `edit: allow, apply_patch: deny` → apply_patch 拒绝，edit 允许；GPT/o 系列模型退回使用 `edit`
+- `apply_patch: allow, edit: deny` → apply_patch 允许，edit 拒绝；非 GPT 模型退回使用 `apply_patch`
+- `*: deny, apply_patch: allow` → 两个工具都允许（edit 继承 apply_patch 规则）
+- `*: allow, apply_patch: deny` → 两个工具都拒绝（edit 继承 apply_patch 拒绝）
 
 ---
 
@@ -225,10 +253,14 @@ permission:
 - **GPT 模型**：补丁格式成功率 91-96%，替换格式约 70%
 - **非 GPT 模型**：替换格式成功率 81-96%，补丁格式 44-79%
 
+### 匹配容错
+
+`apply_patch` 分多轮匹配差异块上下文：先精确匹配，再忽略行尾空白，然后忽略两端空白，最后规范化常见的 Unicode 标点变体。重复出现的代码块仍需要足够的邻近上下文（或 `*** End of File` 标记）来明确目标位置。
+
 ### Token 效率
 
 - **Replace**：对于小编辑通常减少 20-40% 的 token（无需上下文行）
-- **Patch**：由于上下文需要更多 token，但对复杂编辑具有更好的精度
+- **apply_patch**：由于上下文和信封需要更多 token，但对复杂和多文件编辑具有更好的精度
 
 ### 实现
 
@@ -245,9 +277,9 @@ permission:
 
 1. **无需操作**：Chord 自动为每个模型选择正确的工具
 2. **SessionImport 兼容性**：历史编辑调用会被映射：
-   - `codex` 提供者 → `patch` 工具
+   - `codex` 提供者 → `apply_patch` 工具
    - 其他提供者 → `edit` 工具
-3. **权限连续性**：两个工具共享文件权限族
+3. **权限连续性**：两个工具共享文件权限族，`patch` 规则会按 `apply_patch` 解读
 
 ---
 
@@ -257,7 +289,7 @@ permission:
 A：工具选择是自动的且特定于模型。覆盖它可能会降低成功率。
 
 **Q：如果我的模型未被识别怎么办？**
-A：默认情况下，未识别的模型使用 `edit`（替换）工具。GPT/o 系列模型使用 `patch`。
+A：默认情况下，未识别的模型使用 `edit`（替换）工具。GPT/o 系列模型使用 `apply_patch`。
 
 **Q：两个工具支持相同的文件类型吗？**
 A：是的。两者都适用于任何文本文件（检测到的编码：UTF-8、UTF-16、GB18030 等）。二进制文件会被拒绝。
