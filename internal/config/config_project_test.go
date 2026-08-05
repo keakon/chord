@@ -509,7 +509,7 @@ func TestProjectWhitelistCoversAllConfigKeys(t *testing.T) {
 		if tag == "" || tag == "-" {
 			continue
 		}
-		key := strings.SplitN(tag, ",", 2)[0]
+		key, _, _ := strings.Cut(tag, ",")
 		if key == "" {
 			continue
 		}

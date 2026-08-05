@@ -209,7 +209,7 @@ func BenchmarkSSEParseWithCollector(b *testing.B) {
 		if !ok || len(corpus.Entries) == 0 {
 			for _, fixed := range loadFixedCallbackFixtures() {
 				if fixed.provider == provider {
-					corpus = sseBenchCorpus{Provider: provider, Entries: []sseBenchFixture{{
+					corpus = sseBenchCorpus{Entries: []sseBenchFixture{{
 						Name:      fixed.name,
 						Provider:  provider,
 						Path:      fixed.name,

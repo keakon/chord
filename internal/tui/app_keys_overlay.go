@@ -84,7 +84,7 @@ func (m *Model) clearPendingQuit() {
 	m.quit.by = ""
 }
 
-func (m *Model) clearPendingQuitForKey(msg tea.KeyMsg) {
+func (m *Model) clearPendingQuitForKey() {
 	if m.quit.by == "" || m.quit.at.IsZero() {
 		return
 	}

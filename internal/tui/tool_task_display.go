@@ -62,10 +62,6 @@ func parseTaskToolHandle(result string) (taskToolHandle, bool) {
 	return handle, true
 }
 
-func taskToolHeaderTitle(argsJSON string) string {
-	return ""
-}
-
 func taskToolDescriptionContent(argsJSON string) string {
 	args := parseTaskToolArgs(argsJSON)
 	if args.Description == "" {

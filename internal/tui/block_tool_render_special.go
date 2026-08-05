@@ -20,15 +20,11 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 	args := parseTaskToolArgs(b.Content)
 	_, hasHandle := parseTaskToolHandle(b.ResultContent)
 	hasResultText := strings.TrimSpace(b.ResultContent) != ""
-	title := taskToolHeaderTitle(b.Content)
 	subType := strings.TrimSpace(args.AgentType)
 	isActive := b.toolExecutionIsRunning() && spinnerFrame != ""
 	prefix := b.renderToolPrefix(spinnerFrame)
 
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
-	if title != "" {
-		headerLine += " " + sanitizeToolDisplayText(title)
-	}
 	if subType != "" {
 		headerLine += " " + DimStyle.Render("("+sanitizeToolDisplayText(subType)+")")
 	}

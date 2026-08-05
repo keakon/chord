@@ -254,7 +254,6 @@ func (o *OpenAIProvider) CompleteStream(
 	ot := tuning.OpenAI
 	if tuning.DisableReasoning {
 		ot.ReasoningEffort = ""
-		ot.ReasoningSummary = ""
 	}
 	// Convert messages to OpenAI format.
 	wireFamily := providerWireFamily(o.provider)

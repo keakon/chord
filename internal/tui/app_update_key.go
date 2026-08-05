@@ -18,7 +18,7 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 	if isCtrlC(msg) {
 		return m.handleCtrlC()
 	}
-	m.clearPendingQuitForKey(msg)
+	m.clearPendingQuitForKey()
 
 	// Super+C (cmd+c) – copy: in some terminals (e.g. Ghostty) the key
 	// event is forwarded to the application. Copy the current content:

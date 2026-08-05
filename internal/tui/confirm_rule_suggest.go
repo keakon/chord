@@ -68,7 +68,7 @@ func suggestShellPatterns(argsJSON string, needsApproval []string, needsApproval
 		seed = strings.TrimSpace(needsApproval[0])
 	}
 
-	return buildBashCandidates(seed, command)
+	return buildBashCandidates(seed)
 }
 
 // suggestShellPatternsFromMatchedRules builds candidates for a compound command
@@ -105,7 +105,7 @@ func generalizeShellRulePatterns(patterns []string) []string {
 }
 
 // buildBashCandidates builds pattern candidates from a command string.
-func buildBashCandidates(seed, fullCommand string) []PatternCandidate {
+func buildBashCandidates(seed string) []PatternCandidate {
 	trimmed := strings.TrimSpace(seed)
 
 	// Check for complex commands (pipes, chains, subshells, or multi-line/heredoc)

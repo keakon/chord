@@ -254,7 +254,7 @@ func (m *Model) openCurrentRuleFile() tea.Cmd {
 		if role == "" && m.agent != nil {
 			role = strings.TrimSpace(m.agent.CurrentRole())
 		}
-		path = resolveRuleScopePath(r.Scope, m.usageStatsProjectRoot(), m.homeDir, role)
+		path = resolveRuleScopePath(r.Scope, m.usageStatsProjectRoot(), role)
 	}
 	if path == "" {
 		return m.enqueueToast("This rule has no backing file", "warn")
@@ -290,7 +290,7 @@ func (m *Model) addRuleToLocalList(rule permission.Rule, scope permission.RuleSc
 	if m.agent != nil {
 		role = strings.TrimSpace(m.agent.CurrentRole())
 	}
-	path := resolveRuleScopePath(scope, m.usageStatsProjectRoot(), m.homeDir, role)
+	path := resolveRuleScopePath(scope, m.usageStatsProjectRoot(), role)
 	m.rules.rules = append(m.rules.rules, permission.AddedRule{
 		Role:    role,
 		Rule:    rule,

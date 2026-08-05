@@ -266,7 +266,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 		spanChainMatch = true
 		expectedStart := 0
 		for i, block := range visible {
-			span := debugBlockLineCount(m.viewport, block, max(1, m.viewport.width))
+			span := debugBlockLineCount(block, max(1, m.viewport.width))
 			recomputedTotal += span
 			if span <= 0 {
 				spansPositive = false
@@ -409,7 +409,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 		for i, block := range visible {
 			lineCount := 0
 			if m.viewport != nil {
-				lineCount = debugBlockLineCount(m.viewport, block, max(1, m.viewport.width))
+				lineCount = debugBlockLineCount(block, max(1, m.viewport.width))
 			}
 			start := -1
 			span := -1
@@ -472,7 +472,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	return sb.String(), nil
 }
 
-func debugBlockLineCount(v *Viewport, block *Block, width int) int {
+func debugBlockLineCount(block *Block, width int) int {
 	if block == nil {
 		return 0
 	}

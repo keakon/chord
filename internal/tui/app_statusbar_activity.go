@@ -40,7 +40,7 @@ func formatStatusBarElapsed(d time.Duration) string {
 	return " " + formatBusyTotalWall(d)
 }
 
-func statusBarIdleLabel(compact bool) string {
+func statusBarIdleLabel() string {
 	return "Since "
 }
 
@@ -406,7 +406,7 @@ func (m *Model) renderCompactionBackgroundPill() string {
 	// Active state with breathing animation
 	if icon == "■" {
 		anim := time.Now().Truncate(300 * time.Millisecond)
-		if anim.Truncate(600*time.Millisecond) == anim {
+		if anim.Truncate(600 * time.Millisecond).Equal(anim) {
 			icon = "▪" // Dashed block for breathing state
 			if len(pillParts) > 0 {
 				pillParts[0] = strings.Replace(pillParts[0], "■ ", "▪ ", 1)

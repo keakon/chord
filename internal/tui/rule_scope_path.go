@@ -8,7 +8,7 @@ import (
 	"github.com/keakon/chord/internal/permission"
 )
 
-func resolveRuleScopePath(scope permission.RuleScope, projectRoot, homeDir, role string) string {
+func resolveRuleScopePath(scope permission.RuleScope, projectRoot, role string) string {
 	role = strings.TrimSpace(role)
 	if role == "" {
 		return ""

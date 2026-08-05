@@ -31,7 +31,7 @@ func writeStatusBarSpaces(b *strings.Builder, count int) {
 	}
 }
 
-func formatStatusBarSubAgentLabel(agentDefName, instanceID string) string {
+func formatStatusBarSubAgentLabel(instanceID string) string {
 	return instanceID
 }
 
@@ -209,11 +209,11 @@ func (m *Model) computeStatusBarCurrentAgentLabel(currentRole string, subAgents 
 	id := m.focusedAgentID
 	for _, sub := range subAgents {
 		if sub.InstanceID == id {
-			return formatStatusBarSubAgentLabel(sub.AgentDefName, id)
+			return formatStatusBarSubAgentLabel(id)
 		}
 	}
-	if defName, _, ok := m.sidebar.SubAgentLabels(id); ok {
-		return formatStatusBarSubAgentLabel(defName, id)
+	if _, _, ok := m.sidebar.SubAgentLabels(id); ok {
+		return formatStatusBarSubAgentLabel(id)
 	}
 	return id
 }
@@ -704,7 +704,7 @@ func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWid
 		} else {
 			if strings.HasPrefix(activityKey, "idle|") {
 				if ts, ok := m.latestStatusStartWall(statusActiveID); ok {
-					activityText = DimStyle.Render(statusBarIdleLabel(compactIdle) + ts.Format("15:04"))
+					activityText = DimStyle.Render(statusBarIdleLabel() + ts.Format("15:04"))
 				}
 			}
 			activityWidth = lipgloss.Width(activityText)

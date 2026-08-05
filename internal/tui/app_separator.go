@@ -19,7 +19,6 @@ const (
 	statusBarSpacePad               = "                                                                "
 	animatedInputSeparatorBandWidth = 18
 	separatorPhaseOverscan          = 20
-	separatorDemoFrameWidth         = 48
 )
 
 func normalizeSeparatorVariant(variant string) string {

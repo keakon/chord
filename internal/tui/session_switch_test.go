@@ -3744,7 +3744,7 @@ func TestRebuildViewportFromMessagesDoesNotShowLastForRestoredBlocks(t *testing.
 	m.rebuildViewportFromMessages()
 
 	plain := stripANSI(m.renderStatusBar())
-	if strings.Contains(plain, statusBarIdleLabel(false)) || strings.Contains(plain, statusBarIdleLabel(true)) {
+	if strings.Contains(plain, statusBarIdleLabel()) {
 		t.Fatalf("restored history should not fabricate Last time; got %q", plain)
 	}
 }

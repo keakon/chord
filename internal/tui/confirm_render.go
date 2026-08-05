@@ -73,7 +73,7 @@ func (m *Model) renderConfirmDialog() string {
 	}
 
 	if m.confirm.pickingRule {
-		return m.renderRulePicker(maxWidth, innerWidth)
+		return m.renderRulePicker(maxWidth)
 	}
 
 	summary := buildConfirmSummary(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.AlreadyAllowed, req.DoneReport)
@@ -179,7 +179,7 @@ func (m Model) renderConfirmOptions() string {
 }
 
 // renderRulePicker renders the rule picker sub-dialog.
-func (m *Model) renderRulePicker(maxWidth, innerWidth int) string {
+func (m *Model) renderRulePicker(maxWidth int) string {
 	title := ConfirmSeparatorStyle.Render("⚠ Add rule — " + m.confirm.request.ToolName)
 
 	lines := []string{title, ""}
@@ -237,7 +237,7 @@ func (m *Model) renderRulePicker(maxWidth, innerWidth int) string {
 			marker = "(●)"
 		}
 		scopeLabel := scopeLabel(scope)
-		scopePath := resolveRuleScopePath(scope, m.usageStatsProjectRoot(), m.homeDir, roleName)
+		scopePath := resolveRuleScopePath(scope, m.usageStatsProjectRoot(), roleName)
 		scopePathSuffix := ""
 		if scopePath != "" {
 			scopePathSuffix = " (" + scopePath + ")"
