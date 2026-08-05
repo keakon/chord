@@ -12,7 +12,7 @@
 
 ### 改进
 
-- 模型初始化现在为 GPT-5.6 使用保守的 Codex 专用限制（`400000` context / `272000` input / `128000` output），并将 GPT-5.4 input limit 保持为 `950000`。模型配置速查对基于 Codex 的中转采用相同默认值，同时说明如何手动启用完整的 1.05M OpenAI API 窗口。Provider 配置现在会拒绝未知 YAML 字段，支持 provider 级 `parallel_tool_calls`，并为 Responses 与 Chat Completions 网关提供可选的 wire compatibility 开关。
+- 模型初始化现在为 GPT-5.6 使用保守的 Codex 专用限制（`400000` context / `272000` input / `128000` output），并将 GPT-5.4 input limit 保持为 `950000`。模型配置速查对基于 Codex 的中转采用相同默认值，同时说明如何手动启用完整的 1.05M OpenAI API 窗口。Provider 配置支持 provider 级 `parallel_tool_calls`，并为 Responses 与 Chat Completions 网关提供可选的 wire compatibility 开关。
 - 工具结果现在会携带一次性效率提示：当某一轮工作陷入逐次单个只读查询，或对单个一次即可读完的文件反复小窗读取时，在恰当时机重新提示并行批量调用与整文件读取。在构建或准备阶段即失败的测试命令现在会先引导执行仅构建检查；shell 超时错误会说明如何缩小范围或转入后台重试。
 - shell 工具结果在命令超过慢命令阈值后会附加简洁的墙钟耗时提示，让模型据实权衡下一步要跑什么；亚秒级命令保持不标注。
 - reasoning 回放改为乐观尝试并按 target 自适应降级：chat 原生 reasoning 与协议原生 item（Responses 加密 reasoning、Anthropic thinking block、Gemini thought signature）首次会回放给任何使用相同 wire 协议的目标，包括跨 provider fallback。拒绝该载荷的目标会在本会话内被降级——先严格 provenance 匹配，再文本化历史——不兼容的后端每会话最多浪费两次失败请求，而不是每次 fallback 都丢失 reasoning 连续性。

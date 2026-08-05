@@ -12,7 +12,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
-- Model setup now uses the conservative Codex-specific GPT-5.6 limits (`400000` context / `272000` input / `128000` output) and keeps the GPT-5.4 input limit aligned at `950000`. Model recipes use the same GPT-5.6 default for Codex-backed relays and explain how to opt in to the full 1.05M OpenAI API window manually. Provider configuration now rejects unknown YAML fields, supports provider-level `parallel_tool_calls`, and exposes opt-in wire compatibility toggles for Responses and Chat Completions gateways.
+- Model setup now uses the conservative Codex-specific GPT-5.6 limits (`400000` context / `272000` input / `128000` output) and keeps the GPT-5.4 input limit aligned at `950000`. Model recipes use the same GPT-5.6 default for Codex-backed relays and explain how to opt in to the full 1.05M OpenAI API window manually. Provider configuration supports provider-level `parallel_tool_calls` and exposes opt-in wire compatibility toggles for Responses and Chat Completions gateways.
 
 - Tool results now carry one-shot efficiency hints when a turn drifts into serial single-lookup rounds or repeated small-window reads of a file that fits in a single read, re-surfacing the batching and whole-file-read guidance at the moment it applies. Failed test commands that died in their build or setup phase now steer to a build-only check first, and shell-timeout errors explain how to narrow or background the next attempt.
 - Shell tool results append a concise wall-clock elapsed-time note once a command crosses the slow-command threshold, so the model can factor real cost into choosing what to run next; sub-second commands stay unannotated.
