@@ -1271,6 +1271,17 @@ var projectScopedTopLevelKeys = map[string]bool{
 	"worktree":             true,
 }
 
+// projectIgnoredTopLevelKeys are valid global config keys that are
+// deliberately ignored in project config (documented in docs/configuration.md);
+// anything outside this set and projectScopedTopLevelKeys is a typo and must
+// fail startup, matching the strict single-file loader.
+var projectIgnoredTopLevelKeys = map[string]bool{
+	"paths":           true,
+	"maintenance":     true,
+	"model_templates": true,
+	"diagnostics":     true,
+}
+
 func mergeConfigOverrideData(base *Config, overrideData []byte, overridePath string) (*Config, error) {
 	baseMap, err := configToYAMLMap(base)
 	if err != nil {
@@ -1283,6 +1294,15 @@ func mergeConfigOverrideData(base *Config, overrideData []byte, overridePath str
 	var overrideMap map[string]any
 	if err := yaml.Unmarshal(overrideData, &overrideMap); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", overridePath, err)
+	}
+	// The strict parse in MergeProjectConfig already rejected fields unknown to
+	// Config, so anything left outside both sets is a known global field that
+	// was never classified for the project layer — fail loudly instead of
+	// silently dropping it when the whitelist drifts behind the struct.
+	for key := range overrideMap {
+		if !projectScopedTopLevelKeys[key] && !projectIgnoredTopLevelKeys[key] {
+			return nil, fmt.Errorf("parse config %s: field %q is not supported in project config", overridePath, key)
+		}
 	}
 	normalizeContextReductionOverride(baseMap, overrideMap)
 	mergeProjectConfigMap(baseMap, overrideMap, nil)

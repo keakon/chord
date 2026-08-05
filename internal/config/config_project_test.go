@@ -482,3 +482,39 @@ func TestMergeProjectConfigKeepsExplicitContextAcrossOutputOverride(t *testing.T
 		t.Fatalf("merged output = %d, want 128000", got)
 	}
 }
+
+func TestMergeProjectConfigIgnoresGlobalOnlyKeysButRejectsUnknown(t *testing.T) {
+	ignored := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, ignored, "diagnostics:\n  enabled: true\nlog_level: debug\n")
+	if _, _, err := MergeProjectConfig(DefaultConfig(), ignored); err != nil {
+		t.Fatalf("global-only keys should be ignored, got %v", err)
+	}
+
+	typo := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, typo, "provder:\n  x: 1\n")
+	_, _, err := MergeProjectConfig(DefaultConfig(), typo)
+	if err == nil || !strings.Contains(err.Error(), "provder") {
+		t.Fatalf("unknown top-level project key should fail startup, got %v", err)
+	}
+}
+
+// TestProjectWhitelistCoversAllConfigKeys uses reflection to verify that every
+// yaml-tagged top-level field in Config is accounted for by either
+// projectScopedTopLevelKeys or projectIgnoredTopLevelKeys. This prevents a
+// future field addition from silently falling through the guard in
+// mergeConfigOverrideData.
+func TestProjectWhitelistCoversAllConfigKeys(t *testing.T) {
+	for f := range reflect.TypeFor[Config]().Fields() {
+		tag := f.Tag.Get("yaml")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		key := strings.SplitN(tag, ",", 2)[0]
+		if key == "" {
+			continue
+		}
+		if !projectScopedTopLevelKeys[key] && !projectIgnoredTopLevelKeys[key] {
+			t.Errorf("Config yaml key %q is not in projectScopedTopLevelKeys or projectIgnoredTopLevelKeys; the project-layer whitelist guard will reject it at startup", key)
+		}
+	}
+}

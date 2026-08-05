@@ -37,7 +37,7 @@ rather than by searching parent directories. That means:
 
 - omitted project fields stay truly unset instead of silently shadowing global defaults;
 - malformed project config is treated as a startup error, not ignored;
-- global-only keys such as `paths.*` and `maintenance.*` are ignored in project config;
+- global-only keys such as `paths.*` and `maintenance.*` (also `model_templates` and `diagnostics`) are ignored in project config;
 - most scalar and object values override the global value at the same key;
 - `model_pools` merge by pool name, with same-name project pools overriding the global definition;
 - `mcp` merges by server name, with each same-name project server replacing the entire global server definition rather than inheriting individual connection or permission fields;
