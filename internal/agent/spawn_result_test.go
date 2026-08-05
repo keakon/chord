@@ -61,6 +61,9 @@ func TestHandleBackgroundObjectFinishedForMainEmitsCardAndToastWhenIdle(t *testi
 			if e.BackgroundID != "job-1" {
 				t.Fatalf("SpawnFinishedEvent.BackgroundID = %q, want job-1", e.BackgroundID)
 			}
+			if e.AgentID != "" {
+				t.Fatalf("SpawnFinishedEvent.AgentID = %q, want empty main attribution", e.AgentID)
+			}
 		case ToastEvent:
 			if strings.Contains(e.Message, "job-1") {
 				sawToast = true

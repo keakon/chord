@@ -614,7 +614,10 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 	}
 	if payload.AgentID == "" || payload.AgentID == a.instanceID {
 		content := a.mainBackgroundResultContent(payload)
-		a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: payload.AgentID, Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
+		// The main agent's instanceID is "main-1", not "main"; the TUI only
+		// attributes ""/"main" to the main transcript, so send "" here like the
+		// orphan branch below or the card gets filtered out of the main view.
+		a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: "", Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
 		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: "info", AgentID: payload.AgentID})
 		if a.turn != nil {
 			a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{

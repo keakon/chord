@@ -12,7 +12,7 @@ func TestSpawnFinishedEventAppendsDurableStatusBlock(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.SpawnFinishedEvent{
 		BackgroundID: "job-1",
-		AgentID:      "main-1",
+		AgentID:      "builder-2",
 		Kind:         "job",
 		Description:  "Run production build",
 		Status:       "finished (exit 0)",
@@ -23,8 +23,8 @@ func TestSpawnFinishedEventAppendsDurableStatusBlock(t *testing.T) {
 	if !ok {
 		t.Fatal("expected durable status block for background object result")
 	}
-	if block.AgentID != "main-1" {
-		t.Fatalf("block.AgentID = %q, want main-1", block.AgentID)
+	if block.AgentID != "builder-2" {
+		t.Fatalf("block.AgentID = %q, want builder-2", block.AgentID)
 	}
 	if !strings.Contains(block.Content, "Run production build") {
 		t.Fatalf("block.Content = %q, want build description", block.Content)
