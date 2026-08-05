@@ -78,6 +78,10 @@ func (b *Block) toolExecutionIsRunning() bool {
 	return b.ToolExecutionState == agent.ToolCallExecutionStateRunning
 }
 
+func (b *Block) toolArgumentsAreReceiving() bool {
+	return b != nil && !b.ResultDone && b.ToolExecutionState == agent.ToolCallExecutionStateReceiving
+}
+
 func (b *Block) toolExecutionIsQueued() bool {
 	return b != nil && !b.ResultDone && b.ToolExecutionState == agent.ToolCallExecutionStateQueued
 }

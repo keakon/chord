@@ -817,7 +817,7 @@ func styleToolStatusPrefix(prefix string) string {
 	if strings.HasPrefix(prefix, "✗") {
 		return ToolStatusErrorStyle.Render("✗") + prefix[len("✗"):]
 	}
-	for _, marker := range []string{"◌", queuedToolGlyph, pendingToolGlyph} {
+	for _, marker := range []string{receivingToolGlyph, queuedToolGlyph, pendingToolGlyph} {
 		if strings.HasPrefix(prefix, marker) {
 			return ToolStatusNeutralStyle.Render(marker) + prefix[len(marker):]
 		}
@@ -842,6 +842,9 @@ func renderAnimatedToolPrefixGlyph(spinnerFrame string) string {
 }
 
 func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded bool) string {
+	if b.toolArgumentsAreReceiving() {
+		return receivingToolGlyph
+	}
 	if b.toolExecutionIsRunning() && spinnerFrame != "" {
 		return renderAnimatedToolPrefixGlyph(spinnerFrame)
 	}

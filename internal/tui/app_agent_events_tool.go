@@ -298,7 +298,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		m.touchStreamDelta(evt.AgentID)
 		m.finalizeAgentStream(evt.AgentID)
 		m.markRequestProgressBaseline(evt.AgentID)
-		_, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, agent.ToolCallExecutionStateRunning, true)
+		_, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, agent.ToolCallExecutionStateReceiving, true)
 		if created {
 			if block, ok := m.findToolBlockByToolID(evt.ID); ok {
 				block.StartedAt = time.Time{}
@@ -315,14 +315,21 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		evt.Name = toolNameKey(evt.Name)
 		m.touchStreamDelta(evt.AgentID)
 		now := time.Now()
-		block, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, agent.ToolCallExecutionStateRunning, !evt.ArgsStreamingDone)
+		// An update without a start event is a recovery path. Preserve its
+		// historical running fallback until the stream explicitly ends; normal
+		// start events already created the card in receiving state.
+		initialState := agent.ToolCallExecutionStateRunning
+		if evt.ArgsStreamingDone {
+			initialState = agent.ToolCallExecutionStateQueued
+		}
+		block, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, initialState, !evt.ArgsStreamingDone)
 		if created {
 			if evt.ArgsStreamingDone {
 				delete(m.toolArgRenderState, evt.ID)
 				if block != nil {
 					block.Content = stableToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
 					block.StartedAt = time.Time{}
-					if block.ToolExecutionState == "" || block.ToolExecutionState == agent.ToolCallExecutionStateRunning {
+					if block.ToolExecutionState == "" || block.ToolExecutionState == agent.ToolCallExecutionStateReceiving || block.ToolExecutionState == agent.ToolCallExecutionStateRunning {
 						block.ToolExecutionState = agent.ToolCallExecutionStateQueued
 						block.ToolQueuedByExecutionEvent = false
 					}
@@ -367,7 +374,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			//
 			// Do not downgrade already-finished tool calls. Fast tools can emit
 			// ToolResultEvent before the final ArgsStreamingDone update arrives.
-			if !block.ResultDone && block.StartedAt.IsZero() && (block.ToolExecutionState == "" || block.ToolExecutionState == agent.ToolCallExecutionStateRunning) {
+			if !block.ResultDone && block.StartedAt.IsZero() && (block.ToolExecutionState == "" || block.ToolExecutionState == agent.ToolCallExecutionStateReceiving || block.ToolExecutionState == agent.ToolCallExecutionStateRunning) {
 				block.ToolExecutionState = agent.ToolCallExecutionStateQueued
 				block.ToolQueuedByExecutionEvent = false
 				updated = true

@@ -48,6 +48,10 @@ var activeToolSpinnerSegments = [...]string{"▖", "▘", "▝", "▗"}
 
 const queuedToolGlyph = "⏸"
 
+// receivingToolGlyph is used while the provider is still streaming tool
+// arguments. It is deliberately static: receiving arguments is not execution.
+const receivingToolGlyph = "◌"
+
 type toolCardMetrics struct {
 	blockStyle   lipgloss.Style
 	toolCardBg   string

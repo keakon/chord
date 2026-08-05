@@ -295,8 +295,11 @@ func (ToolCallDiscardEvent) agentEvent() {}
 type ToolCallExecutionState string
 
 const (
-	ToolCallExecutionStateQueued  ToolCallExecutionState = "queued"
-	ToolCallExecutionStateRunning ToolCallExecutionState = "running"
+	// ToolCallExecutionStateReceiving means the provider is still streaming
+	// the tool arguments. The tool has not been dispatched yet.
+	ToolCallExecutionStateReceiving ToolCallExecutionState = "receiving"
+	ToolCallExecutionStateQueued    ToolCallExecutionState = "queued"
+	ToolCallExecutionStateRunning   ToolCallExecutionState = "running"
 )
 
 // ToolCallExecutionEvent updates the live execution phase for an already-visible
