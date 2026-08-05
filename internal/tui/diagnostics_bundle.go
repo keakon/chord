@@ -180,6 +180,9 @@ func (m *Model) buildDiagnosticsMetadata(now time.Time, trigger, baseDir, bundle
 	} else {
 		fmt.Fprintf(&sb, "runtime_log_tail: (not found)\n")
 	}
+	if strings.TrimSpace(llmTraceName) != "" {
+		fmt.Fprintf(&sb, "llm_trace_tail: %s\n", sanitizeDiagnosticText(llmTraceName, baseDir))
+	}
 	if provider, ok := m.agent.(interface {
 		OrchestrationStats() agent.OrchestrationStats
 	}); ok {
