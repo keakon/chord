@@ -679,6 +679,7 @@ Additional notes:
 
   That gives pro a `max` default thinking effort while flash keeps `high`,
   and reuses everything else (limit, compat, variants).
+
 - Flash pricing is roughly 1/3 of pro (input $0.14 / output $0.28 per 1M
   tokens), suitable for high-volume / low-cost scenarios. See
   [DeepSeek official pricing](https://api-docs.deepseek.com/quick_start/pricing/).

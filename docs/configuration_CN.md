@@ -632,25 +632,25 @@ providers:
 - `compat.reasoning_continuity.mode`：
   - `none`：不回放 provider 专属的可见 reasoning。
   - `openai_visible`：在 Chat Completions 工具循环中原样回放 assistant 的
-	`reasoning_content`，并把其他 wire family 的可移植可见 reasoning 转成
-	`reasoning_content`。它不注入请求字段；字段差异由
-	`request_overrides.body` 配置。首次尝试时，Chord 仍会把 chat 原生
-	reasoning 乐观回放给任何 Chat Completions 目标（包括跨 provider），
-	因此 Kimi K2.6/K2.7→K3 这类官方支持的同 provider 升级和同模型跨
-	provider fallback 都能保留连续性。目标拒绝该请求后，Chord 会对该
-	target 降级，但在严格级别之前仍尽量保留结构化工具事实。
+    `reasoning_content`，并把其他 wire family 的可移植可见 reasoning 转成
+    `reasoning_content`。它不注入请求字段；字段差异由
+    `request_overrides.body` 配置。首次尝试时，Chord 仍会把 chat 原生
+    reasoning 乐观回放给任何 Chat Completions 目标（包括跨 provider），
+    因此 Kimi K2.6/K2.7→K3 这类官方支持的同 provider 升级和同模型跨
+    provider fallback 都能保留连续性。目标拒绝该请求后，Chord 会对该
+    target 降级，但在严格级别之前仍尽量保留结构化工具事实。
   - `anthropic_unsigned`：仅用于已验证的 Messages 兼容模型，例如返回无
-	Claude signature 的可见 `thinking` 的 DeepSeek/GLM endpoint。无签名
-	thinking 首次只对同 provider/model 原生回放；对兼容 target，其他
-	wire family 的可移植可见 reasoning 会转成无签名 `thinking` block，
-	而不会注入 assistant 正文。
+    Claude signature 的可见 `thinking` 的 DeepSeek/GLM endpoint。无签名
+    thinking 首次只对同 provider/model 原生回放；对兼容 target，其他
+    wire family 的可移植可见 reasoning 会转成无签名 `thinking` block，
+    而不会注入 assistant 正文。
   - Responses、Claude 签名 Messages 和 Gemini 其余情况使用协议原生连续性
     机制。Chord 只在 wire 和 provenance 允许时回放加密/签名 opaque 状态；
-	跨不兼容协议时，只有存在结构化目标载体（`openai_visible` 或
-	`anthropic_unsigned`）的可见 reasoning 才会被转换；否则直接丢弃。
-	Chord 不会伪造 opaque 状态，也不会把 reasoning 注入普通 assistant
-	正文。已完成工具事实会尽量转换为目标协议的结构化表示，只有目标拒绝
-	该形状时才文本化。达到的降级级别按 target 记忆。
+    跨不兼容协议时，只有存在结构化目标载体（`openai_visible` 或
+    `anthropic_unsigned`）的可见 reasoning 才会被转换；否则直接丢弃。
+    Chord 不会伪造 opaque 状态，也不会把 reasoning 注入普通 assistant
+    正文。已完成工具事实会尽量转换为目标协议的结构化表示，只有目标拒绝
+    该形状时才文本化。达到的降级级别按 target 记忆。
 - `compat.thinking_toolcall`：为把工具调用编码进可见 reasoning 文本的网关
   启用专用解析器。只有网关明确要求时才开启。
 
@@ -1070,9 +1070,9 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `response_header_timeout` | int | 从开始该 provider 的流式 HTTP 请求到收到响应头的超时，单位秒，包括连接建立与请求体上传。`0` / 省略表示使用内置默认值；健康流由 `stream_idle_timeout` 约束，而不是总请求计时器。 |
 | `stream_idle_timeout` | int | 该 provider 的流式空闲超时，单位秒。`0` / 省略表示使用内置 SSE/WebSocket idle 默认值。 |
 | `websocket_handshake_timeout` | int | Responses WebSocket 握手超时，单位秒。`0` / 省略表示使用内置默认值。 |
-| `parallel_tool_calls` | bool | `true` | provider 级 Responses / Chat Completions 工具并行默认值；模型和变体配置会覆盖它。 |
-| `compat.responses.*` | object | 协议默认值 | provider 级 Responses 可选字段开关：`send_store`、`send_reasoning_include`、`send_tool_choice`、`send_prompt_cache_key`、`send_max_output_tokens`。 |
-| `compat.chat_completions.send_stream_options` | bool | `true` | 对拒绝 `stream_options` 的网关设为 `false`；此时流式 token usage 不再可用。 |
+| `parallel_tool_calls` | bool | `true` — provider 级 Responses / Chat Completions 工具并行默认值；模型和变体配置会覆盖它。 |
+| `compat.responses.*` | object | 协议默认值 — provider 级 Responses 可选字段开关：`send_store`、`send_reasoning_include`、`send_tool_choice`、`send_prompt_cache_key`、`send_max_output_tokens`。 |
+| `compat.chat_completions.send_stream_options` | bool | `true` — 对拒绝 `stream_options` 的网关设为 `false`；此时流式 token usage 不再可用。 |
 | `models`      | map    | model id → [模型配置](#模型字段参考)。                                                                                                              |
 
 ### 模型字段参考

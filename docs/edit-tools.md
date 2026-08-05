@@ -55,7 +55,7 @@ Supported operations:
 - **`*** Delete File: path`** — remove a file; no body.
 - **`*** End of File`** — after a hunk, pins that hunk to the file tail (useful when the same block also appears earlier).
 
-Hunks apply in order; each hunk is matched at the first position after the previous hunk's application point. Lines inside a hunk keep their raw `' '`/`+`/`-` prefix, so file content that itself begins with `*** ` stays ordinary context—only unprefixed `*** ` lines are protocol markers.
+Hunks apply in order; each hunk is matched at the first position after the previous hunk's application point. Lines inside a hunk keep their raw `' '`/`+`/`-` prefix, so file content that itself begins with `***` followed by a space stays ordinary context—only lines beginning with an unprefixed `***` followed by a space are protocol markers.
 
 ### When to Use
 

@@ -666,6 +666,7 @@ model_pools:
 
   这样 pro 的默认思考强度为 `max`，flash 保持 `high`，其余字段（limit、
   compat、variants）全部复用。
+
 - flash 定价约为 pro 的 1/3（输入 $0.14 / 输出 $0.28 每百万 token），
   适合高频 / 低成本场景。见 [DeepSeek 官方定价](https://api-docs.deepseek.com/quick_start/pricing/)。
 

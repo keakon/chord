@@ -661,32 +661,32 @@ Compatibility fields:
 - `compat.reasoning_continuity.mode`:
   - `none`: no provider-specific visible reasoning replay.
   - `openai_visible`: replays unchanged assistant `reasoning_content` during
-	Chat Completions tool loops and accepts portable visible reasoning from
-	other wire families as `reasoning_content`. It does not inject request
-	fields; configure those with `request_overrides.body`. On the first
-	attempt Chord still optimistically replays chat-native reasoning to any
-	Chat Completions target, even across providers, so documented in-provider
-	upgrades such as Kimi K2.6/K2.7 to K3 and same-model provider fallback
-	both keep continuity. If a target rejects that request, Chord degrades the
-	target for the rest of the session while keeping completed tool calls and
-	paired results structured until strict compatibility requires text facts.
+    Chat Completions tool loops and accepts portable visible reasoning from
+    other wire families as `reasoning_content`. It does not inject request
+    fields; configure those with `request_overrides.body`. On the first
+    attempt Chord still optimistically replays chat-native reasoning to any
+    Chat Completions target, even across providers, so documented in-provider
+    upgrades such as Kimi K2.6/K2.7 to K3 and same-model provider fallback
+    both keep continuity. If a target rejects that request, Chord degrades the
+    target for the rest of the session while keeping completed tool calls and
+    paired results structured until strict compatibility requires text facts.
   - `anthropic_unsigned`: opt-in for Messages-compatible models such as
     DeepSeek/GLM endpoints that return visible `thinking` blocks without Claude
-	signatures. Unsigned thinking is replayed natively only to the same
-	provider/model on the first attempt. For compatible targets, portable
-	visible reasoning from other wire families is converted into unsigned
-	`thinking` blocks instead of being injected into assistant text.
+    signatures. Unsigned thinking is replayed natively only to the same
+    provider/model on the first attempt. For compatible targets, portable
+    visible reasoning from other wire families is converted into unsigned
+    `thinking` blocks instead of being injected into assistant text.
   - Responses, signed Claude Messages, and Gemini otherwise use their
     protocol-native continuity mechanisms automatically. Chord captures opaque
-	encrypted/signature state and replays it only where the target wire and
-	provenance permit. Across incompatible protocols, portable visible
-	reasoning is converted only when the target has a structured carrier
-	(`openai_visible` or `anthropic_unsigned`); otherwise it is dropped. Opaque
-	state is never fabricated, and reasoning is never injected into ordinary
-	assistant content. Completed tool facts are converted to the target
-	protocol's structured representation whenever possible and textified only
-	if a target rejects that shape. The achieved degradation level is
-	remembered per target.
+    encrypted/signature state and replays it only where the target wire and
+    provenance permit. Across incompatible protocols, portable visible
+    reasoning is converted only when the target has a structured carrier
+    (`openai_visible` or `anthropic_unsigned`); otherwise it is dropped. Opaque
+    state is never fabricated, and reasoning is never injected into ordinary
+    assistant content. Completed tool facts are converted to the target
+    protocol's structured representation whenever possible and textified only
+    if a target rejects that shape. The achieved degradation level is
+    remembered per target.
 - `compat.thinking_toolcall`: enables a provider-specific parser for gateways
   that encode tool calls inside visible reasoning text. Leave disabled unless
   the gateway requires that format.
@@ -1168,9 +1168,9 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `stream_idle_timeout` | int | Stream idle timeout in seconds for this provider. `0` / omitted uses built-in SSE/WebSocket idle defaults. |
 | `websocket_handshake_timeout` | int | Responses WebSocket handshake timeout in seconds. `0` / omitted uses the built-in default. |
 | `supported_service_tiers` | list | Provider-level default accepted non-standard tiers for its models, e.g. `[fast, slow]` or `[fast]`. Model entries can override it. |
-| `parallel_tool_calls` | bool | `true` | Provider-level default for Responses / Chat Completions tool parallelism; model and variant values override it. |
-| `compat.responses.*` | object | protocol defaults | Provider-level optional Responses fields: `send_store`, `send_reasoning_include`, `send_tool_choice`, `send_prompt_cache_key`, and `send_max_output_tokens`. |
-| `compat.chat_completions.send_stream_options` | bool | `true` | Omit `stream_options.include_usage` for gateways that reject it; streaming token usage then remains unavailable. |
+| `parallel_tool_calls` | bool | `true` — Provider-level default for Responses / Chat Completions tool parallelism; model and variant values override it. |
+| `compat.responses.*` | object | protocol defaults — Provider-level optional Responses fields: `send_store`, `send_reasoning_include`, `send_tool_choice`, `send_prompt_cache_key`, and `send_max_output_tokens`. |
+| `compat.chat_completions.send_stream_options` | bool | `true` — Omit `stream_options.include_usage` for gateways that reject it; streaming token usage then remains unavailable. |
 | `models`       | map    | Map of model id → [model config](#model-field-reference).                                                                                               |
 
 ### Model field reference
