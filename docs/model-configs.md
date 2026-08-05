@@ -342,7 +342,7 @@ chord auth codex
 Notes:
 
 - Keep API-key and Codex OAuth providers separate when you use both because their credentials and model allocations differ.
-- GPT-5.4 uses `1050000 / 950000 / 128000`: the 1.05M total window, Codex's 95% effective input budget, and the model's maximum output.
+- GPT-5.4 uses `1050000 / 950000 / 128000`: the 1.05M total window, Codex's effective input budget (about 90% of the window; Chord additionally clamps input to `context - output` per request), and the model's maximum output.
 - Use `400000 / 272000 / 128000` for `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
 - These values track the current Codex model catalog and may change with a future Codex release. Update all three fields together when the backend allocation changes.
 
