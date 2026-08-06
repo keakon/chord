@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/tools"
 )
+
+var shellDurationNoteRE = regexp.MustCompile(`\n\(command took ([0-9]+(?:\.[0-9]+)?)s\)\s*$`)
 
 type skillToolArgs struct {
 	Name         string `json:"name"`
@@ -170,6 +173,7 @@ func toolDisplayResultContent(b *Block) string {
 		return ""
 	}
 	result := toolExpandedResultContent(b.ToolName, b.ResultContent)
+	result = shellDurationNoteRE.ReplaceAllString(result, "")
 	if b.toolResultIsError() || b.toolResultIsCancelled() {
 		return result
 	}

@@ -92,6 +92,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	// the body below need them, and parsing re-reads the patch args JSON.
 	applyPatchTargets := b.applyPatchTargets()
 	successfulApplyPatch := b.ToolName == tools.NameApplyPatch && b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled()
+	applyPatchNoChanges := successfulApplyPatch && strings.Contains(b.ResultContent, "No net file changes")
 	displayDiff := b.Diff
 	if successfulApplyPatch {
 		displayDiff = b.applyPatchDisplayDiff(applyPatchTargets)
@@ -110,6 +111,9 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
 	if b.Collapsed {
+		if applyPatchNoChanges {
+			result = append(result, DimStyle.Render("  ▸ ↳ No changes"))
+		}
 		if strings.TrimSpace(displayDiff) == "" && strings.TrimSpace(b.ResultContent) != "" &&
 			!(b.ToolName == tools.NameApplyPatch && b.ResultDone && hasOperationSummaries && !b.toolResultIsError() && !b.toolResultIsCancelled()) {
 			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, toolDisplayResultContent(b)))
@@ -134,9 +138,12 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		} else if !groupedApplyPatchDiff {
 			result = appendApplyPatchTargetLines(result, applyPatchTargets, cardWidth-4)
 		}
-		if strings.TrimSpace(displayDiff) == "" && !b.toolResultIsError() && !b.toolResultIsCancelled() &&
+		if strings.TrimSpace(displayDiff) == "" && !applyPatchNoChanges && !b.toolResultIsError() && !b.toolResultIsCancelled() &&
 			!applyPatchOnlyMoveOrDeleteTargets(applyPatchTargets) {
 			result = appendApplyPatchPreview(result, b.editPatchArgsJSON(), filePath, cardWidth-4)
+		}
+		if applyPatchNoChanges {
+			result = append(result, DimStyle.Render("  ↳ No changes"))
 		}
 	}
 	const diffLineNumWidth = 5
@@ -306,7 +313,6 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		}
 	}
 	result = appendToolElapsedFooter(result, b)
-
 	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 

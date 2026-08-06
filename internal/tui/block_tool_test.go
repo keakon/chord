@@ -19,6 +19,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -425,6 +426,46 @@ func TestLspNoLocationsUsesSummaryWithoutDuplicateResult(t *testing.T) {
 	}
 	if strings.Count(joined, "No implementations found") != 1 {
 		t.Fatalf("expected no-results message exactly once; got:\n%s", joined)
+	}
+}
+
+func TestToolDisplayResultHidesModelFacingShellDurationNote(t *testing.T) {
+	block := &Block{
+		Type:          BlockToolCall,
+		ToolName:      tools.NameShell,
+		ResultContent: "done\n(command took 12.3s)",
+		ResultDone:    true,
+	}
+	if got := toolDisplayResultContent(block); got != "done" {
+		t.Fatalf("toolDisplayResultContent() = %q, want %q", got, "done")
+	}
+	rendered := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	if !strings.Contains(rendered, "⏱ 12.3s") {
+		t.Fatalf("expected rendered shell card to show duration clock; got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "command took") {
+		t.Fatalf("did not expect model-facing duration note in rendered card; got:\n%s", rendered)
+	}
+	if copied := blockCopyContent(block); !strings.Contains(copied, "(command took 12.3s)") {
+		t.Fatalf("expected copied shell card to retain duration note; got:\n%s", copied)
+	}
+}
+
+func TestRestoredShellToolCardShowsPersistedDuration(t *testing.T) {
+	nextID := 0
+	blocks := messagesToBlocks([]message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "shell-restore", Name: tools.NameShell, Args: []byte(`{"command":"go test ./..."}`)}}},
+		{Role: message.RoleTool, ToolCallID: "shell-restore", Content: "done", ToolStatus: string(agent.ToolResultStatusSuccess), ToolDurationMs: 8700},
+	}, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("messagesToBlocks() returned %d blocks, want 1", len(blocks))
+	}
+	rendered := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
+	if !strings.Contains(rendered, "⏱ 9s") {
+		t.Fatalf("expected restored shell card to show duration clock; got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "command took") {
+		t.Fatalf("did not expect raw duration note in restored card; got:\n%s", rendered)
 	}
 }
 

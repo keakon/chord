@@ -282,11 +282,23 @@ func appendToolElapsedFooter(result []string, b *Block) []string {
 	if b == nil || !b.ResultDone {
 		return result
 	}
-	if elapsed := b.toolElapsedLabel(); elapsed != "" {
+	elapsed := b.toolElapsedLabel()
+	if elapsed == "" && tools.NormalizeName(b.ToolName) == tools.NameShell {
+		elapsed = shellDurationNoteLabel(b.ResultContent)
+	}
+	if elapsed != "" {
 		result = append(result, "")
 		result = append(result, "  "+DimStyle.Render(fmt.Sprintf("⏱ %s", elapsed)))
 	}
 	return result
+}
+
+func shellDurationNoteLabel(result string) string {
+	matches := shellDurationNoteRE.FindStringSubmatch(result)
+	if len(matches) == 2 {
+		return matches[1] + "s"
+	}
+	return ""
 }
 
 func appendErrorResultLines(result []string, content string, width int) []string {
@@ -380,7 +392,7 @@ func bashSplitResultStreams(b *Block) (stderr, stdout string) {
 	if b == nil {
 		return "", ""
 	}
-	trimmed := strings.TrimSpace(b.ResultContent)
+	trimmed := strings.TrimSpace(shellDurationNoteRE.ReplaceAllString(b.ResultContent, ""))
 	if trimmed == "" {
 		return "", ""
 	}

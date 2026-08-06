@@ -53,7 +53,6 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 		})...)
 	}
 	result = appendToolElapsedFooter(result, b)
-
 	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 

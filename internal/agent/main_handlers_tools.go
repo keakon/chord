@@ -250,6 +250,7 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 		DiffAdded:   payload.DiffAdded,
 		DiffRemoved: payload.DiffRemoved,
 		FileCreated: payload.FileCreated,
+		Duration:    payload.Duration,
 	})
 
 	snapshot := a.ctxMgr.Snapshot()
@@ -445,6 +446,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			DiffAdded:   payload.DiffAdded,
 			DiffRemoved: payload.DiffRemoved,
 			FileCreated: payload.FileCreated,
+			Duration:    payload.Duration,
 		})
 	}
 

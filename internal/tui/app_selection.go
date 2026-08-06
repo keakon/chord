@@ -594,8 +594,12 @@ func fileDiffToolCallMarkdownContent(b *Block) string {
 		parts = append(parts, "## Result\n\n"+result)
 	}
 	diff := strings.TrimSpace(b.Diff)
-	if diff == "" {
+	applyPatchNoChanges := b.ToolName == tools.NameApplyPatch && b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() && strings.Contains(b.ResultContent, "No net file changes")
+	if diff == "" && !applyPatchNoChanges {
 		diff = editPatchFromArgs(b.editPatchArgsJSON())
+	}
+	if diff == "" && applyPatchNoChanges {
+		diff = "No changes"
 	}
 	if diff != "" {
 		parts = append(parts, "## Diff\n\n```diff\n"+diff+"\n```")

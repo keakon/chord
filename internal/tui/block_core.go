@@ -90,6 +90,9 @@ func (b *Block) toolElapsed() time.Duration {
 	if b == nil {
 		return 0
 	}
+	if b.ResultDone && b.PersistedDuration > 0 {
+		return b.PersistedDuration
+	}
 	if !b.StartedAt.IsZero() {
 		end := b.SettledAt
 		if end.IsZero() {
@@ -99,9 +102,6 @@ func (b *Block) toolElapsed() time.Duration {
 			return 0
 		}
 		return end.Sub(b.StartedAt)
-	}
-	if b.PersistedDuration > 0 {
-		return b.PersistedDuration
 	}
 	return 0
 }

@@ -2433,7 +2433,7 @@ func TestToolCallUpdateEventArgsStreamingDoneDoesNotDowngradeFinishedToolBlock(t
 	}
 }
 
-func TestToolCallElapsedFooterStartsAtRunningAndShowsAfterFiveSeconds(t *testing.T) {
+func TestToolCallRendersStructuredElapsedFooterAfterCompletion(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
@@ -2481,13 +2481,14 @@ func TestToolCallElapsedFooterStartsAtRunningAndShowsAfterFiveSeconds(t *testing
 		Result:   "done",
 		Status:   agent.ToolResultStatusSuccess,
 		AgentID:  "",
+		Duration: 7 * time.Second,
 	}})
 	if block.SettledAt.IsZero() {
 		t.Fatal("finished tool should record SettledAt")
 	}
 	joined = stripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if !strings.Contains(joined, "⏱ 7s") {
-		t.Fatalf("expected finished tool elapsed footer; got:\n%s", joined)
+		t.Fatalf("expected structured elapsed footer after completion; got:\n%s", joined)
 	}
 }
 

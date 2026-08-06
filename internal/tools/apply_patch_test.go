@@ -129,6 +129,85 @@ func TestApplyPatchUpdatesExistingEmptyFileWithPureInsertion(t *testing.T) {
 	}
 }
 
+func TestApplyPatchReportsNoNetChangesForContextOnlyUpdate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unchanged.md")
+	content := "## 5. Related docs\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: unchanged.md\n" +
+		"@@\n" +
+		" ## 5. Related docs\n" +
+		"*** End Patch"
+	plan, err := BuildApplyPatchPlan(context.Background(), patch, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Mutations) != 0 {
+		t.Fatalf("mutations = %#v, want no filesystem mutations", plan.Mutations)
+	}
+
+	result, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "Applied patch:\nNo net file changes" {
+		t.Fatalf("result = %q, want no-net-changes result", result)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != content {
+		t.Fatalf("unchanged.md = %q, want %q", got, content)
+	}
+}
+
+func TestApplyPatchReportsModeOnlyUpdate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not preserve Unix executable mode bits")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "run.sh")
+	content := "#!/bin/sh\necho ok\n"
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Delete File: run.sh\n" +
+		"*** Add File: run.sh\n" +
+		"+#!/bin/sh\n" +
+		"+echo ok\n" +
+		"*** End Patch"
+	plan, err := BuildApplyPatchPlan(context.Background(), patch, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Mutations) != 1 || plan.Mutations[0].Kind != MutationUpdate {
+		t.Fatalf("mutations = %#v, want one update", plan.Mutations)
+	}
+	if plan.Mutations[0].BeforeMode.Perm() != 0o755 || plan.Mutations[0].AfterMode.Perm() != 0o644 {
+		t.Fatalf("mode change = %#o -> %#o, want 0755 -> 0644", plan.Mutations[0].BeforeMode.Perm(), plan.Mutations[0].AfterMode.Perm())
+	}
+
+	result, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "Applied patch:\nM run.sh" {
+		t.Fatalf("result = %q, want mode-only update to be reported", result)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("run.sh mode = %#o, want 0644", info.Mode().Perm())
+	}
+}
+
 func TestApplyPatchPureInsertionWithoutContextAppendsToNonEmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "existing.txt")

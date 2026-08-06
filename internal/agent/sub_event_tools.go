@@ -298,6 +298,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		DiffAdded:   result.DiffAdded,
 		DiffRemoved: result.DiffRemoved,
 		FileCreated: result.FileCreated,
+		Duration:    result.Duration,
 	})
 
 	toolMsg := message.Message{

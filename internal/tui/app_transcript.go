@@ -212,7 +212,7 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 			// Older results did not persist a terminal status. Require a diff for
 			// those records so failed historical calls are not treated as changes.
 			if msg.ToolStatus != "" || msg.ToolDiff != "" {
-				m.addApplyPatchSidebarChanges("main", call.Args)
+				m.addApplyPatchSidebarChanges("main", call.Args, msg.Content)
 			}
 			continue
 		}

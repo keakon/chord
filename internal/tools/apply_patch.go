@@ -741,6 +741,9 @@ func buildApplyPatchMutationPlan(states map[string]*applyPatchVirtualFile) Mutat
 		if !state.initialExists && !state.exists {
 			continue
 		}
+		if state.initialExists && state.exists && state.initialMode == state.mode && bytes.Equal(state.initialBytes, state.bytes) {
+			continue
+		}
 		mutation := PlannedMutation{
 			SourcePath:       path,
 			TargetPath:       path,
@@ -1354,6 +1357,9 @@ func (t ApplyPatchTool) finishApplyPatch(plan MutationPlan) string {
 		}
 		invalidatePathCache(mutation.SourcePath)
 		invalidatePathCache(mutation.TargetPath)
+	}
+	if len(lines) == 0 {
+		return "Applied patch:\nNo net file changes"
 	}
 	sort.Strings(lines)
 	if punctuationHunks > 0 {

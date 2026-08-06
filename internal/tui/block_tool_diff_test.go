@@ -227,6 +227,24 @@ func TestApplyPatchToolCardHidesSingleDeleteDiff(t *testing.T) {
 	}
 }
 
+func TestApplyPatchToolCardShowsNoChangesWithoutPatchPreview(t *testing.T) {
+	args := `{"patch":"*** Begin Patch\n*** Update File: docs/guide.md\n@@\n section\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		ResultContent: "Applied patch:\nNo net file changes",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, "No changes") {
+		t.Fatalf("expected no-changes indicator, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "*** Begin Patch") {
+		t.Fatalf("expected successful no-change card to hide patch preview, got:\n%s", plain)
+	}
+}
+
 func TestApplyPatchToolCardHidesPureMoveDiff(t *testing.T) {
 	args := `{"patch":"*** Begin Patch\n*** Update File: src/old.go\n*** Move to: src/new.go\n*** End Patch"}`
 	block := &Block{

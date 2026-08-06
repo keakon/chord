@@ -197,6 +197,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 			status:              evt.Status,
 			audit:               evt.Audit,
 			diff:                evt.Diff,
+			duration:            evt.Duration,
 			doneReport:          evt.DoneReport,
 			displayArgs:         stableToolDisplayArgs,
 			imageParts:          imagePartsFromContentParts(evt.Parts),
@@ -217,7 +218,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 					effects.invalidateUsage = true
 				}
 			} else if evt.Name == tools.NameApplyPatch {
-				if m.addApplyPatchSidebarChanges(evt.AgentID, json.RawMessage(evt.ArgsJSON)) {
+				if m.addApplyPatchSidebarChanges(evt.AgentID, json.RawMessage(evt.ArgsJSON), evt.Result) {
 					effects.refreshSidebar = true
 					effects.invalidateUsage = true
 				}
@@ -267,7 +268,10 @@ func editedFilePathFromToolResult(evt agent.ToolResultEvent) string {
 	return strings.TrimSpace(args.Path)
 }
 
-func (m *Model) addApplyPatchSidebarChanges(agentID string, args json.RawMessage) bool {
+func (m *Model) addApplyPatchSidebarChanges(agentID string, args json.RawMessage, result ...string) bool {
+	if len(result) > 0 && strings.Contains(result[0], "No net file changes") {
+		return false
+	}
 	targets, err := tools.ApplyPatchDisplayTargets(args)
 	if err != nil {
 		return false
@@ -284,8 +288,10 @@ func (m *Model) addApplyPatchSidebarChanges(agentID string, args json.RawMessage
 			m.sidebar.AddFileDelete(agentID, target.SourcePath)
 			changed = true
 		case tools.MutationAdd, tools.MutationUpdate:
-			m.sidebar.AddFileEdit(agentID, target.SourcePath, target.Added, target.Removed)
-			changed = changed || target.Added != 0 || target.Removed != 0
+			if target.Added != 0 || target.Removed != 0 {
+				m.sidebar.AddFileEdit(agentID, target.SourcePath, target.Added, target.Removed)
+				changed = true
+			}
 		}
 	}
 	return changed
