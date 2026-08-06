@@ -35,6 +35,8 @@ type loadedSessionState struct {
 	Messages                  []message.Message
 	TodoItems                 []tools.TodoItem
 	TaskRecords               map[string]*DurableTaskRecord
+	TaskSettlements           map[taskAttemptKey]*TaskSettlement
+	TaskGroups                map[string]*DurableTaskGroup
 	ActiveRole                string
 	ModelPoolCurrentModelPool string
 	ModelPoolAgentOverrides   map[string]string
@@ -438,6 +440,16 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	} else {
 		loaded.TaskRecords = taskRecords
 	}
+	if settlements, settlementErr := loadTaskSettlements(sessionPath); settlementErr != nil {
+		return nil, fmt.Errorf("load task settlements: %w", settlementErr)
+	} else {
+		loaded.TaskSettlements = settlements
+	}
+	if groups, groupErr := loadTaskGroups(sessionPath); groupErr != nil {
+		return nil, fmt.Errorf("load task groups: %w", groupErr)
+	} else {
+		loaded.TaskGroups = groups
+	}
 	if modelRefs := loaded.AgentModelRefs; len(modelRefs) > 0 {
 		for _, rec := range loaded.TaskRecords {
 			if rec == nil {
@@ -457,6 +469,14 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	loaded.TaskRecords = mergeDurableTaskRecords(loaded.TaskRecords, buildDurableTaskRecordsFromLoadedStates(loaded.SubAgentStates))
 	if repairRestoredTaskTree(loaded.TaskRecords) {
 		log.Warnf("repaired inconsistent SubAgent task tree during restore session=%v", sessionPath)
+	}
+	var settlementErr error
+	loaded.TaskSettlements, settlementErr = migrateLegacyTaskSettlements(sessionPath, loaded.TaskRecords, loaded.TaskSettlements)
+	if settlementErr != nil {
+		return nil, settlementErr
+	}
+	if repairTaskRecordsFromSettlements(loaded.TaskRecords, loaded.TaskSettlements) {
+		log.Warnf("repaired durable task records from settlement journal session=%v", sessionPath)
 	}
 	for _, state := range loaded.SubAgentStates {
 		rec := loaded.TaskRecords[state.TaskID]
@@ -683,6 +703,8 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.setSessionSummary(summary)
 	a.resetSessionBuildState()
 	a.setTaskRecords(loaded.TaskRecords)
+	a.resetTaskCoordination(a.sessionEpoch, loaded.TaskSettlements)
+	a.resetTaskGroups(loaded.TaskGroups)
 	advanceInstanceCountersForTaskRecords(loaded.TaskRecords)
 	if nextAdhoc := nextAdhocSeqFromTaskRecords(loaded.TaskRecords); nextAdhoc > 0 {
 		a.adhocSeq.Store(nextAdhoc)
@@ -801,6 +823,7 @@ func loadSubAgentMailboxMessages(sessionPath string) ([]SubAgentMailboxMessage, 
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
 			return nil, err
 		}
+		normalizeLegacyAgentMessageContract(&msg)
 		out = append(out, msg)
 	}
 	acks, err := loadSubAgentMailboxAcks(sessionPath)

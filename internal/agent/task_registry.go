@@ -68,6 +68,10 @@ type DurableTaskRecord struct {
 	CreatedAt            time.Time           `json:"created_at"`
 	UpdatedAt            time.Time           `json:"updated_at"`
 	ClosedReason         string              `json:"closed_reason,omitempty"`
+	Attempt              uint64              `json:"attempt,omitempty"`
+	LifecycleRevision    uint64              `json:"lifecycle_revision,omitempty"`
+	LatestSettlement     *TaskSettlement     `json:"latest_settlement,omitempty"`
+	SettlementDurable    bool                `json:"settlement_durable,omitempty"`
 }
 
 func durableTaskRegistryPath(sessionDir string) string {
@@ -119,6 +123,10 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 	out.Persistence.LastError = strings.TrimSpace(out.Persistence.LastError)
 	out.ClosedReason = strings.TrimSpace(out.ClosedReason)
 	out.InstanceHistory = dedupeTaskInstanceHistory(out.InstanceHistory)
+	if out.Attempt == 0 {
+		out.Attempt = 1
+	}
+	out.LatestSettlement = cloneTaskSettlement(out.LatestSettlement)
 	return &out
 }
 
@@ -426,6 +434,7 @@ func (a *MainAgent) setTaskRecords(records map[string]*DurableTaskRecord) {
 	if a.subs.taskRecords == nil {
 		a.subs.taskRecords = make(map[string]*DurableTaskRecord)
 	}
+	a.subs.notifyTaskChangeLocked()
 }
 
 func (a *MainAgent) persistTaskRegistry() error {
@@ -534,6 +543,7 @@ func (a *MainAgent) updateTaskRecordFromSub(sub *SubAgent, closedReason string) 
 	}
 	rec := buildTaskRecordFromSub(sub, a.subs.taskRecords[taskID], closedReason, currentTurn, now)
 	a.subs.taskRecords[taskID] = rec
+	a.subs.notifyTaskChangeLocked()
 	a.subs.mu.Unlock()
 	return true
 }
@@ -555,8 +565,13 @@ func buildTaskRecordFromSub(sub *SubAgent, previous *DurableTaskRecord, closedRe
 			TaskID:      taskID,
 			CreatedAt:   now,
 			CreatedTurn: currentTurn,
+			Attempt:     1,
 		}
 	}
+	if rec.Attempt == 0 {
+		rec.Attempt = 1
+	}
+	rec.LifecycleRevision++
 	rec.AgentDefName = strings.TrimSpace(sub.agentDefName)
 	rec.TaskDesc = strings.TrimSpace(sub.taskDesc)
 	if planTaskRef := strings.TrimSpace(sub.planTaskRef); planTaskRef != "" || rec.PlanTaskRef == "" {
@@ -639,6 +654,8 @@ func taskRecordFromLoadedState(state loadedSubAgentState) *DurableTaskRecord {
 		LastReplyToMailboxID: strings.TrimSpace(state.LastReplyToMailboxID),
 		LastReplyKind:        strings.TrimSpace(state.LastReplyKind),
 		LastReplySummary:     strings.TrimSpace(state.LastReplySummary),
+		Attempt:              1,
+		LifecycleRevision:    1,
 	}
 	if ref := state.LastArtifact; strings.TrimSpace(ref.ID) != "" || strings.TrimSpace(ref.RelPath) != "" {
 		rec.LastArtifactRefs = tools.NormalizeArtifactRefs([]tools.ArtifactRef{ref})
@@ -750,6 +767,16 @@ func mergeDurableTaskRecords(base map[string]*DurableTaskRecord, extra ...map[st
 				}
 				if next.ClosedReason == "" {
 					next.ClosedReason = prev.ClosedReason
+				}
+				if next.Attempt == 0 {
+					next.Attempt = prev.Attempt
+				}
+				if next.LifecycleRevision == 0 {
+					next.LifecycleRevision = prev.LifecycleRevision
+				}
+				if next.LatestSettlement == nil {
+					next.LatestSettlement = prev.LatestSettlement
+					next.SettlementDurable = prev.SettlementDurable
 				}
 			}
 			out[taskID] = next

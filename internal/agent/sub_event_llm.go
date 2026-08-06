@@ -241,6 +241,9 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				KnownRisks           []string            `json:"known_risks,omitempty"`
 				FollowUpRecommended  []string            `json:"follow_up_recommended,omitempty"`
 				Artifacts            []tools.ArtifactRef `json:"artifacts,omitempty"`
+				ResultType           string              `json:"result_type,omitempty"`
+				Result               json.RawMessage     `json:"result,omitempty"`
+				ResultRef            *tools.ResultRef    `json:"result_ref,omitempty"`
 			}
 			if err := json.Unmarshal(tc.Args, &args); err != nil {
 				s.sendEvent(Event{
@@ -256,6 +259,16 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				})
 				return
 			}
+			artifacts, err := tools.ValidateArtifactRefs(s.sessionDir, args.Artifacts)
+			if err != nil {
+				s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("invalid Complete args: %w", err)})
+				return
+			}
+			resultType, result, resultRef, err := validateCompleteTypedResult(s.sessionDir, args.ResultType, args.Result, args.ResultRef)
+			if err != nil {
+				s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("invalid Complete args: %w", err)})
+				return
+			}
 			taskCompleteCallID = tc.ID
 			taskComplete = &AgentResult{
 				Summary: strings.TrimSpace(args.Summary),
@@ -266,7 +279,10 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 					RemainingLimitations: args.RemainingLimitations,
 					KnownRisks:           args.KnownRisks,
 					FollowUpRecommended:  args.FollowUpRecommended,
-					Artifacts:            args.Artifacts,
+					Artifacts:            artifacts,
+					ResultType:           resultType,
+					Result:               result,
+					ResultRef:            resultRef,
 				}),
 			}
 			break

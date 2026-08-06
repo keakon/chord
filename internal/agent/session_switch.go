@@ -235,6 +235,8 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.invokedSkills = make(map[string]*skill.Meta)
 	a.skillsMu.Unlock()
 	a.setTaskRecords(nil)
+	a.resetTaskCoordination(a.sessionEpoch, nil)
+	a.resetTaskGroups(nil)
 	a.gitStatusInjected.Store(false)
 	a.explicitUserTurnCount.Store(0)
 	a.subs.resetStateEnteredTurns()
@@ -250,6 +252,8 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	a.recovery = recovery.NewRecoveryManager(sessionDir)
 	a.usageLedger = analytics.NewUsageLedger(sessionDir, a.projectRoot)
 	a.setTaskRecords(nil)
+	a.resetTaskCoordination(a.sessionEpoch, nil)
+	a.resetTaskGroups(nil)
 	a.setSessionSummary(buildSessionSummaryForDir(sessionDir, a.sessionLock != nil))
 	a.resetSessionBuildState()
 	if a.sessionTargetChangedFn != nil {

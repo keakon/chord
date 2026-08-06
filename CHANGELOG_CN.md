@@ -7,7 +7,7 @@
 ### 不兼容变更
 
 - 上下文剪裁不再接受 `context.reduction.high_pressure_usage` 或 `force_prune_usage`；工具输出何时被剪裁现在由 request-batch age 阈值决定。请从已有配置中删除这些键。Chord 会给出迁移错误，不再静默忽略。
-- `patch` 工具被 `apply_patch` 取代：采用 Codex `*** Begin Patch` 信封格式，将多文件 Add/Update/Delete/Move 操作作为一个事务应用——所有操作基于同一份文件系统快照规划，提交前重新校验内容与文件 mode，任一提交步骤失败时整体回滚（包括自身写入失败的那个文件）。兼容性保持不变：旧的 `patch` 工具名与单文件 `{path, patch}` 参数继续可用，`patch` 权限规则键在解析时归一化为 `apply_patch`。权限模式现在匹配 patch 触及的每一个路径，并做词法规整，`./secret/x` 无法绕过 `secret/*` 的 deny；patch 内的 `*** Delete File:` 操作仍受工具级 `delete` 规则约束。删除文件不再要求先完整读取——其安全性由路径解析、权限规则、跟踪锁与删除前备份承担。
+- `patch` 工具被 `apply_patch` 取代：采用 Codex `*** Begin Patch` 信封格式，将多文件 Add/Update/Delete/Move 操作作为一个事务应用——每个文件基于同一份文件系统快照规划，提交前重新校验内容与文件 mode，任一提交步骤失败时整体回滚（包括自身写入失败的那个文件）。同一规范化路径可重复出现不带 Move 的 `*** Update File:` 段，并遵循 Codex 的顺序语义：后一段修改前一段的内存结果，最后把原始内容到最终内容作为一次文件 mutation 提交；因此后段匹配失败时工作区仍保持不变，不会暴露 Codex 的部分写入行为。兼容性保持不变：旧的 `patch` 工具名与单文件 `{path, patch}` 参数继续可用，`patch` 权限规则键在解析时归一化为 `apply_patch`。权限模式现在匹配 patch 触及的每一个路径，并做词法规整，`./secret/x` 无法绕过 `secret/*` 的 deny；patch 内的 `*** Delete File:` 操作仍受工具级 `delete` 规则约束。删除文件不再要求先完整读取——其安全性由路径解析、权限规则、跟踪锁与删除前备份承担。
 - 配置加载现在在所有层级拒绝未知 YAML 字段——顶层、provider、model、`context`、`compat` 及各嵌套块——不再静默忽略。旧版本 Chord 曾容忍的键（拼写错误，或降级后残留的新版本字段）现在会以指明具体字段的解析错误阻止启动；升级前请删除或修正这类键。空文件与整体注释掉的配置文件行为不变，顶层 `model_templates` 键保留为纯 YAML anchor 命名空间。
 
 ### 改进

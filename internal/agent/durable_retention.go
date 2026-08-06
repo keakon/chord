@@ -46,7 +46,7 @@ func (a *MainAgent) archiveEligibleTerminalTasks(records map[string]*DurableTask
 	}
 	candidates := make([]*DurableTaskRecord, 0)
 	for _, rec := range records {
-		if rec == nil || rec.TaskID == focusedTaskID || hasNonTerminalChild[rec.TaskID] || isNonTerminalTaskState(rec.State) {
+		if rec == nil || rec.TaskID == focusedTaskID || hasNonTerminalChild[rec.TaskID] || isNonTerminalTaskState(rec.State) || !rec.SettlementDurable {
 			continue
 		}
 		if mailboxID := strings.TrimSpace(rec.LastMailboxID); mailboxID != "" {
@@ -84,6 +84,52 @@ func loadArchivedTaskRecordByTaskID(sessionDir, taskID string) (*DurableTaskReco
 	return loadArchivedTaskRecord(sessionDir, func(rec *DurableTaskRecord) bool {
 		return rec.TaskID == taskID
 	})
+}
+
+func loadArchivedTaskRecordsByTaskIDs(sessionDir string, taskIDs []string) (map[string]*DurableTaskRecord, error) {
+	wanted := make(map[string]struct{}, len(taskIDs))
+	for _, taskID := range taskIDs {
+		if taskID = strings.TrimSpace(taskID); taskID != "" {
+			wanted[taskID] = struct{}{}
+		}
+	}
+	if len(wanted) == 0 {
+		return nil, nil
+	}
+	path := durableTaskArchivePath(sessionDir)
+	if path == "" {
+		return nil, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open task archive: %w", err)
+	}
+	defer f.Close()
+	out := make(map[string]*DurableTaskRecord)
+	dec := json.NewDecoder(f)
+	for {
+		var entry archivedTaskRecord
+		if err := dec.Decode(&entry); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("decode task archive: %w", err)
+		}
+		rec := cloneDurableTaskRecord(entry.Task)
+		if rec == nil {
+			continue
+		}
+		if _, ok := wanted[rec.TaskID]; ok {
+			out[rec.TaskID] = rec
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 func loadArchivedTaskRecordByInstanceID(sessionDir, instanceID string) (*DurableTaskRecord, error) {

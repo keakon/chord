@@ -170,12 +170,21 @@ type Message struct {
 // MailboxMetadata identifies a durable SubAgent mailbox message in an agent's
 // conversation. Content remains the exact user message sent to the model.
 type MailboxMetadata struct {
-	MessageID    string `json:"message_id,omitempty"`
-	AgentID      string `json:"agent_id,omitempty"`
-	TaskID       string `json:"task_id,omitempty"`
-	OwnerAgentID string `json:"owner_agent_id,omitempty"`
-	OwnerTaskID  string `json:"owner_task_id,omitempty"`
-	Kind         string `json:"kind,omitempty"`
+	MessageID     string `json:"message_id,omitempty"`
+	AgentID       string `json:"agent_id,omitempty"`
+	TaskID        string `json:"task_id,omitempty"`
+	OwnerAgentID  string `json:"owner_agent_id,omitempty"`
+	OwnerTaskID   string `json:"owner_task_id,omitempty"`
+	Kind          string `json:"kind,omitempty"`
+	LifecycleKind string `json:"lifecycle_kind,omitempty"`
+	MessageType   string `json:"message_type,omitempty"`
+	Subtype       string `json:"subtype,omitempty"`
+	SourceTaskID  string `json:"source_task_id,omitempty"`
+	SourceAttempt uint64 `json:"source_attempt,omitempty"`
+	TargetTaskID  string `json:"target_task_id,omitempty"`
+	TargetAttempt uint64 `json:"target_attempt,omitempty"`
+	CorrelationID string `json:"correlation_id,omitempty"`
+	InReplyTo     string `json:"in_reply_to,omitempty"`
 }
 
 // IsUserAuthored reports whether msg represents input authored by the user

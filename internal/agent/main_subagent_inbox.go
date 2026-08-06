@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +23,9 @@ func (a *MainAgent) prepareSubAgentMailboxMessage(msg *SubAgentMailboxMessage) e
 		return nil
 	}
 	a.normalizeSubAgentMailboxMessage(msg)
+	if err := validateAgentMessageContract(msg); err != nil {
+		return err
+	}
 	if err := a.persistSubAgentMailboxMessage(*msg); err != nil {
 		return err
 	}
@@ -55,8 +59,57 @@ func (a *MainAgent) normalizeSubAgentMailboxMessage(msg *SubAgentMailboxMessage)
 	if msg.CreatedAt.IsZero() {
 		msg.CreatedAt = time.Now()
 	}
+	normalizeLegacyAgentMessageContract(msg)
+	if msg.CorrelationID == "" && msg.MessageType == AgentMessageTypeRequest {
+		msg.CorrelationID = msg.MessageID
+	}
+	if msg.Durability == "" {
+		if msg.Kind == SubAgentMailboxKindProgress {
+			msg.Durability = "best_effort"
+		} else {
+			msg.Durability = "required"
+		}
+	}
 	if msg.Completion != nil {
 		msg.Completion = normalizeCompletionEnvelope(msg.Completion)
+	}
+	if msg.Attempt == 0 && strings.TrimSpace(msg.TaskID) != "" {
+		a.subs.mu.RLock()
+		if rec := a.subs.taskRecords[strings.TrimSpace(msg.TaskID)]; rec != nil {
+			msg.Attempt = rec.Attempt
+		}
+		a.subs.mu.RUnlock()
+	}
+	if msg.SourceAttempt == 0 {
+		msg.SourceAttempt = msg.Attempt
+	}
+	if msg.TargetAttempt == 0 && msg.TargetTaskID != "" {
+		a.subs.mu.RLock()
+		if rec := a.subs.taskRecords[msg.TargetTaskID]; rec != nil {
+			msg.TargetAttempt = rec.Attempt
+		}
+		a.subs.mu.RUnlock()
+	}
+	msg.ArtifactRefs = tools.NormalizeArtifactRefs(msg.ArtifactRefs)
+	if msg.Completion != nil {
+		msg.ArtifactRefs = mergeArtifactRefs(msg.ArtifactRefs, msg.Completion.Artifacts)
+	}
+	if len(msg.MessagePayload) > mailboxArtifactPayloadThreshold {
+		artifactType := "agent_message_payload"
+		title := fmt.Sprintf("%s %s payload", msg.AgentID, msg.MessageType)
+		artifactID, artifactRelPath, err := persistSubAgentArtifact(a.sessionDir, msg.AgentID, msg.MessageID, artifactType, title, string(msg.MessagePayload))
+		if err == nil && artifactRelPath != "" {
+			abs, resolveErr := tools.ResolveSessionArtifactPath(a.sessionDir, artifactRelPath)
+			if resolveErr == nil {
+				if info, statErr := os.Stat(abs); statErr == nil {
+					if digest, hashErr := tools.ArtifactSHA256(abs); hashErr == nil {
+						ref := tools.ArtifactRef{ID: artifactID, RelPath: artifactRelPath, Type: artifactType, SizeBytes: info.Size(), SHA256: digest}
+						msg.ArtifactRefs = mergeArtifactRefs(msg.ArtifactRefs, []tools.ArtifactRef{ref})
+						msg.MessagePayload = nil
+					}
+				}
+			}
+		}
 	}
 	if shouldPersistMailboxArtifact(*msg) {
 		artifactType := artifactTypeForMailboxKind(msg.Kind)
@@ -75,6 +128,84 @@ func (a *MainAgent) normalizeSubAgentMailboxMessage(msg *SubAgentMailboxMessage)
 			msg.Payload = compactMailboxArtifactPayload(msg.Summary, artifactRelPath)
 		}
 	}
+}
+
+func normalizeLegacyAgentMessageContract(msg *SubAgentMailboxMessage) {
+	if msg == nil {
+		return
+	}
+	msg.LifecycleKind = msg.Kind
+	msg.SourceTaskID = strings.TrimSpace(msg.SourceTaskID)
+	if msg.SourceTaskID == "" {
+		msg.SourceTaskID = strings.TrimSpace(msg.TaskID)
+	}
+	msg.SourceAttempt = max(msg.SourceAttempt, msg.Attempt)
+	msg.TargetTaskID = strings.TrimSpace(msg.TargetTaskID)
+	if msg.TargetTaskID == "" {
+		msg.TargetTaskID = strings.TrimSpace(msg.OwnerTaskID)
+	}
+	msg.Subtype = strings.TrimSpace(msg.Subtype)
+	msg.CorrelationID = strings.TrimSpace(msg.CorrelationID)
+	msg.InReplyTo = strings.TrimSpace(msg.InReplyTo)
+	if msg.MessageType == "" {
+		msg.MessageType = messageTypeForLifecycleKind(msg.Kind)
+	}
+	if msg.CorrelationID == "" && msg.MessageType == AgentMessageTypeRequest {
+		msg.CorrelationID = strings.TrimSpace(msg.MessageID)
+	}
+	if msg.Durability == "" {
+		if msg.Kind == SubAgentMailboxKindProgress {
+			msg.Durability = "best_effort"
+		} else {
+			msg.Durability = "required"
+		}
+	}
+}
+
+func messageTypeForLifecycleKind(kind SubAgentMailboxKind) AgentMessageType {
+	switch kind {
+	case SubAgentMailboxKindProgress:
+		return AgentMessageTypeProgress
+	case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired, SubAgentMailboxKindDirectionChange:
+		return AgentMessageTypeRequest
+	default:
+		return AgentMessageTypeNotice
+	}
+}
+
+func validateAgentMessageContract(msg *SubAgentMailboxMessage) error {
+	if msg == nil {
+		return nil
+	}
+	switch msg.MessageType {
+	case AgentMessageTypeProgress, AgentMessageTypeNotice, AgentMessageTypeRequest, AgentMessageTypeResponse:
+	default:
+		return fmt.Errorf("invalid message_type %q", msg.MessageType)
+	}
+	if msg.Durability != "required" && msg.Durability != "best_effort" {
+		return fmt.Errorf("invalid message durability %q", msg.Durability)
+	}
+	if len(msg.MessagePayload) > maxAgentMessagePayloadBytes {
+		return fmt.Errorf("message_payload exceeds maximum size %d bytes", maxAgentMessagePayloadBytes)
+	}
+	if len(msg.MessagePayload) > 0 {
+		trimmed := bytes.TrimSpace(msg.MessagePayload)
+		if len(trimmed) == 0 || trimmed[0] != '{' {
+			return fmt.Errorf("message_payload must be a JSON object")
+		}
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(trimmed, &object); err != nil || object == nil {
+			return fmt.Errorf("message_payload must be a JSON object")
+		}
+		msg.MessagePayload = append(json.RawMessage(nil), trimmed...)
+	}
+	if msg.MessageType == AgentMessageTypeRequest && msg.CorrelationID == "" {
+		return fmt.Errorf("request message requires correlation_id")
+	}
+	if msg.MessageType == AgentMessageTypeResponse && (msg.CorrelationID == "" || msg.InReplyTo == "") {
+		return fmt.Errorf("response message requires correlation_id and in_reply_to")
+	}
+	return nil
 }
 
 func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
@@ -884,6 +1015,26 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 	}
 	b.WriteString("\n- kind: ")
 	b.WriteString(string(msg.Kind))
+	b.WriteString("\n- lifecycle_kind: ")
+	b.WriteString(string(msg.LifecycleKind))
+	b.WriteString("\n- message_type: ")
+	b.WriteString(string(msg.MessageType))
+	if msg.Subtype != "" {
+		b.WriteString("\n- subtype: ")
+		b.WriteString(msg.Subtype)
+	}
+	if msg.SourceTaskID != "" {
+		b.WriteString("\n- source: ")
+		b.WriteString(fmt.Sprintf("%s#%d", msg.SourceTaskID, msg.SourceAttempt))
+	}
+	if msg.TargetTaskID != "" {
+		b.WriteString("\n- target: ")
+		b.WriteString(fmt.Sprintf("%s#%d", msg.TargetTaskID, msg.TargetAttempt))
+	}
+	if msg.CorrelationID != "" {
+		b.WriteString("\n- correlation_id: ")
+		b.WriteString(msg.CorrelationID)
+	}
 	b.WriteString("\n- priority: ")
 	b.WriteString(string(msg.Priority))
 	b.WriteString("\n- summary: ")
@@ -891,6 +1042,17 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 	if strings.TrimSpace(msg.Payload) != "" {
 		b.WriteString("\n- payload: ")
 		b.WriteString(msg.Payload)
+	}
+	if len(msg.MessagePayload) > 0 {
+		b.WriteString("\n- message_payload: ")
+		b.Write(msg.MessagePayload)
+	}
+	if len(msg.ArtifactRefs) > 0 {
+		b.WriteString("\n- artifact_refs:")
+		for _, ref := range msg.ArtifactRefs {
+			b.WriteString("\n  - ")
+			b.WriteString(ref.RelPath)
+		}
 	}
 	if msg.Completion != nil {
 		if len(msg.Completion.FilesChanged) > 0 {
@@ -940,12 +1102,21 @@ func mailboxMetadata(msg *SubAgentMailboxMessage) *message.MailboxMetadata {
 		return nil
 	}
 	return &message.MailboxMetadata{
-		MessageID:    strings.TrimSpace(msg.MessageID),
-		AgentID:      strings.TrimSpace(msg.AgentID),
-		TaskID:       strings.TrimSpace(msg.TaskID),
-		OwnerAgentID: strings.TrimSpace(msg.OwnerAgentID),
-		OwnerTaskID:  strings.TrimSpace(msg.OwnerTaskID),
-		Kind:         strings.TrimSpace(string(msg.Kind)),
+		MessageID:     strings.TrimSpace(msg.MessageID),
+		AgentID:       strings.TrimSpace(msg.AgentID),
+		TaskID:        strings.TrimSpace(msg.TaskID),
+		OwnerAgentID:  strings.TrimSpace(msg.OwnerAgentID),
+		OwnerTaskID:   strings.TrimSpace(msg.OwnerTaskID),
+		Kind:          strings.TrimSpace(string(msg.Kind)),
+		LifecycleKind: strings.TrimSpace(string(msg.LifecycleKind)),
+		MessageType:   strings.TrimSpace(string(msg.MessageType)),
+		Subtype:       strings.TrimSpace(msg.Subtype),
+		SourceTaskID:  strings.TrimSpace(msg.SourceTaskID),
+		SourceAttempt: msg.SourceAttempt,
+		TargetTaskID:  strings.TrimSpace(msg.TargetTaskID),
+		TargetAttempt: msg.TargetAttempt,
+		CorrelationID: strings.TrimSpace(msg.CorrelationID),
+		InReplyTo:     strings.TrimSpace(msg.InReplyTo),
 	}
 }
 

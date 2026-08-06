@@ -711,6 +711,8 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		ac.Registry.Register(tools.NewDelegateTool(ac.MainAgent))
 		ac.Registry.Register(tools.NewNotifyTool(nil, ac.MainAgent, false, true))
 		ac.Registry.Register(tools.NewCancelTool(ac.MainAgent))
+		ac.Registry.Register(tools.NewTaskCollectTool(ac.MainAgent))
+		ac.Registry.Register(tools.NewTaskGroupCreateTool(ac.MainAgent))
 	}
 
 	// Skill loading.

@@ -14,20 +14,23 @@ import (
 type CompleteTool struct{}
 
 type completeArgs struct {
-	Summary              string        `json:"summary"`
-	FilesChanged         []string      `json:"files_changed,omitempty"`
-	VerificationRun      []string      `json:"verification_run,omitempty"`
-	RemainingLimitations []string      `json:"remaining_limitations,omitempty"`
-	KnownRisks           []string      `json:"known_risks,omitempty"`
-	FollowUpRecommended  []string      `json:"follow_up_recommended,omitempty"`
-	Artifacts            []ArtifactRef `json:"artifacts,omitempty"`
+	Summary              string          `json:"summary"`
+	FilesChanged         []string        `json:"files_changed,omitempty"`
+	VerificationRun      []string        `json:"verification_run,omitempty"`
+	RemainingLimitations []string        `json:"remaining_limitations,omitempty"`
+	KnownRisks           []string        `json:"known_risks,omitempty"`
+	FollowUpRecommended  []string        `json:"follow_up_recommended,omitempty"`
+	Artifacts            []ArtifactRef   `json:"artifacts,omitempty"`
+	ResultType           string          `json:"result_type,omitempty"`
+	Result               json.RawMessage `json:"result,omitempty"`
+	ResultRef            *ResultRef      `json:"result_ref,omitempty"`
 }
 
 func (CompleteTool) Name() string { return NameComplete }
 
 func (CompleteTool) Description() string {
 	return "Mark the current delegated task as complete. Call this only after all non-blocked work is finished. " +
-		"Provide a concise summary plus structured completion details when available: actual files changed, verification run, non-blocking limitations/risks, recommended follow-up, and artifact references. " +
+		"Provide a concise summary plus structured completion details when available. For generic machine-readable output, set result_type and provide either a small JSON-object result or an immutable result_ref from save_result. " +
 		"If a true blocker prevents completion, use escalate/notify/blocked flow instead of complete. This is the ONLY way to signal completion — do NOT simply stop responding."
 }
 
@@ -80,6 +83,16 @@ func (CompleteTool) Parameters() map[string]any {
 					},
 					"additionalProperties": false,
 				},
+			},
+			"result_type": map[string]any{"type": "string", "description": "Application-defined type for a generic machine-readable result."},
+			"result":      map[string]any{"type": "object", "description": "Optional small JSON-object result. Runtime persists an immutable ResultRef automatically."},
+			"result_ref": map[string]any{
+				"type": "object", "description": "Immutable ResultRef returned by save_result.",
+				"properties": map[string]any{
+					"id": map[string]any{"type": "string"}, "result_type": map[string]any{"type": "string"},
+					"rel_path": map[string]any{"type": "string"}, "sha256": map[string]any{"type": "string"}, "size_bytes": map[string]any{"type": "integer"},
+				},
+				"required": []string{"id", "result_type", "rel_path", "sha256", "size_bytes"}, "additionalProperties": false,
 			},
 		},
 		"required":             []string{"summary"},

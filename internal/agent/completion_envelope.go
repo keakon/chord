@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 
 	"github.com/keakon/chord/internal/tools"
@@ -52,7 +54,13 @@ func normalizeCompletionEnvelope(env *CompletionEnvelope) *CompletionEnvelope {
 	out.KnownRisks = normalizeStringList(out.KnownRisks)
 	out.FollowUpRecommended = normalizeStringList(out.FollowUpRecommended)
 	out.Artifacts = tools.NormalizeArtifactRefs(out.Artifacts)
-	if out.Summary == "" && len(out.FilesChanged) == 0 && len(out.ReportedFilesChanged) == 0 && len(out.ActualFilesChanged) == 0 && !out.FileAttributionIncomplete && len(out.VerificationRun) == 0 && len(out.RemainingLimitations) == 0 && len(out.KnownRisks) == 0 && len(out.FollowUpRecommended) == 0 && len(out.Artifacts) == 0 {
+	out.ResultType = strings.TrimSpace(out.ResultType)
+	out.Result = append(json.RawMessage(nil), bytes.TrimSpace(out.Result)...)
+	if out.ResultRef != nil {
+		ref := *out.ResultRef
+		out.ResultRef = &ref
+	}
+	if out.Summary == "" && len(out.FilesChanged) == 0 && len(out.ReportedFilesChanged) == 0 && len(out.ActualFilesChanged) == 0 && !out.FileAttributionIncomplete && len(out.VerificationRun) == 0 && len(out.RemainingLimitations) == 0 && len(out.KnownRisks) == 0 && len(out.FollowUpRecommended) == 0 && len(out.Artifacts) == 0 && out.ResultType == "" && len(out.Result) == 0 && out.ResultRef == nil {
 		return nil
 	}
 	return &out

@@ -31,6 +31,17 @@ const (
 	SubAgentMailboxPriorityInterrupt SubAgentMailboxPriority = "interrupt"
 )
 
+type AgentMessageType string
+
+const (
+	AgentMessageTypeProgress AgentMessageType = "progress"
+	AgentMessageTypeNotice   AgentMessageType = "notice"
+	AgentMessageTypeRequest  AgentMessageType = "request"
+	AgentMessageTypeResponse AgentMessageType = "response"
+)
+
+const maxAgentMessagePayloadBytes = 32 * 1024
+
 type ArtifactRef = tools.ArtifactRef
 
 type CompletionEnvelope struct {
@@ -44,12 +55,16 @@ type CompletionEnvelope struct {
 	KnownRisks                []string            `json:"known_risks,omitempty"`
 	FollowUpRecommended       []string            `json:"follow_up_recommended,omitempty"`
 	Artifacts                 []tools.ArtifactRef `json:"artifacts,omitempty"`
+	ResultType                string              `json:"result_type,omitempty"`
+	Result                    json.RawMessage     `json:"result,omitempty"`
+	ResultRef                 *tools.ResultRef    `json:"result_ref,omitempty"`
 }
 
 type SubAgentMailboxMessage struct {
 	MessageID      string                  `json:"message_id"`
 	AgentID        string                  `json:"agent_id"`
 	TaskID         string                  `json:"task_id"`
+	Attempt        uint64                  `json:"attempt,omitempty"`
 	OwnerAgentID   string                  `json:"owner_agent_id,omitempty"`
 	OwnerTaskID    string                  `json:"owner_task_id,omitempty"`
 	InReplyTo      string                  `json:"in_reply_to,omitempty"`
@@ -61,6 +76,17 @@ type SubAgentMailboxMessage struct {
 	RequiresAck    bool                    `json:"requires_ack,omitempty"`
 	Consumed       bool                    `json:"consumed,omitempty"`
 	CreatedAt      time.Time               `json:"created_at"`
+	LifecycleKind  SubAgentMailboxKind     `json:"lifecycle_kind,omitempty"`
+	MessageType    AgentMessageType        `json:"message_type,omitempty"`
+	Subtype        string                  `json:"subtype,omitempty"`
+	SourceTaskID   string                  `json:"source_task_id,omitempty"`
+	SourceAttempt  uint64                  `json:"source_attempt,omitempty"`
+	TargetTaskID   string                  `json:"target_task_id,omitempty"`
+	TargetAttempt  uint64                  `json:"target_attempt,omitempty"`
+	CorrelationID  string                  `json:"correlation_id,omitempty"`
+	MessagePayload json.RawMessage         `json:"message_payload,omitempty"`
+	ArtifactRefs   []tools.ArtifactRef     `json:"artifact_refs,omitempty"`
+	Durability     string                  `json:"durability,omitempty"`
 	persistPending bool                    `json:"-"`
 }
 

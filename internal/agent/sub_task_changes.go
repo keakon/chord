@@ -116,6 +116,8 @@ func isFileAttributionNeutralTool(name string) bool {
 		tools.NameNotify,
 		tools.NameEscalate,
 		tools.NameCancel,
+		tools.NameTaskCollect,
+		tools.NameTaskGroupCreate,
 		tools.NameTodoWrite,
 		tools.NameQuestion,
 		tools.NameSkill,
@@ -123,6 +125,7 @@ func isFileAttributionNeutralTool(name string) bool {
 		tools.NameDone,
 		tools.NameSaveArtifact,
 		tools.NameReadArtifact,
+		tools.NameSaveResult,
 		tools.NameViewImage,
 		tools.NameSpawnStatus,
 		tools.NameSpawnStop:

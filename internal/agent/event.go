@@ -139,6 +139,7 @@ type SubAgentCloseRequestedPayload struct {
 	Reason       string
 	ClosedReason string
 	FinalState   SubAgentState
+	Completion   *CompletionEnvelope
 }
 
 type SubAgentProgressUpdatedPayload struct {

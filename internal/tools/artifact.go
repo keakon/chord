@@ -1,7 +1,10 @@
 package tools
 
 import (
+	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,6 +27,15 @@ type ArtifactRef struct {
 	SizeBytes      int64  `json:"size_bytes,omitempty"`
 	CreatedByTask  string `json:"created_by_task,omitempty"`
 	CreatedByAgent string `json:"created_by_agent,omitempty"`
+	SHA256         string `json:"sha256,omitempty"`
+}
+
+type ResultRef struct {
+	ID         string `json:"id"`
+	ResultType string `json:"result_type"`
+	RelPath    string `json:"rel_path"`
+	SHA256     string `json:"sha256"`
+	SizeBytes  int64  `json:"size_bytes"`
 }
 
 func NormalizeArtifactRef(ref ArtifactRef) ArtifactRef {
@@ -35,6 +47,7 @@ func NormalizeArtifactRef(ref ArtifactRef) ArtifactRef {
 	ref.MimeType = strings.TrimSpace(ref.MimeType)
 	ref.CreatedByTask = strings.TrimSpace(ref.CreatedByTask)
 	ref.CreatedByAgent = strings.TrimSpace(ref.CreatedByAgent)
+	ref.SHA256 = strings.ToLower(strings.TrimSpace(ref.SHA256))
 	if ref.RelPath == "" && ref.Path != "" {
 		ref.RelPath = ref.Path
 	}
@@ -83,6 +96,23 @@ func writeArtifactString(f *os.File, content string) error {
 		return io.ErrShortWrite
 	}
 	return nil
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func ArtifactSHA256(path string) (string, error) {
+	return fileSHA256(path)
 }
 
 // SaveArtifactTool writes a runtime artifact under the active session artifacts dir.
@@ -243,6 +273,10 @@ func (SaveArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	if info != nil {
 		ref.SizeBytes = info.Size()
 	}
+	ref.SHA256, err = fileSHA256(abs)
+	if err != nil {
+		return "", fmt.Errorf("hash artifact: %w", err)
+	}
 	out, err := json.Marshal(NormalizeArtifactRef(ref))
 	if err != nil {
 		return "", err
@@ -293,15 +327,18 @@ func sanitizeArtifactFilename(s string) string {
 type ReadArtifactTool struct{}
 
 type readArtifactArgs struct {
-	ID      string `json:"id,omitempty"`
-	Path    string `json:"path,omitempty"`
-	RelPath string `json:"rel_path,omitempty"`
+	ID             string `json:"id,omitempty"`
+	Path           string `json:"path,omitempty"`
+	RelPath        string `json:"rel_path,omitempty"`
+	Offset         *int   `json:"offset,omitempty"`
+	Limit          *int   `json:"limit,omitempty"`
+	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
 }
 
 func (ReadArtifactTool) Name() string { return NameReadArtifact }
 
 func (ReadArtifactTool) Description() string {
-	return "Read a runtime artifact by session-relative artifact path. Use this for SubAgent handoff artifacts such as research reports, task graphs, review reports, or verification logs. Only artifacts under the current session's artifacts directory are readable."
+	return "Read a runtime artifact by session-relative path with bounded line paging. offset is a 0-based line offset and limit defaults to 2000 lines. The result reports the returned range, total lines, and SHA-256. Supply expected_sha256 to reject content changed since an ArtifactRef snapshot was created."
 }
 
 func (ReadArtifactTool) Parameters() map[string]any {
@@ -320,6 +357,9 @@ func (ReadArtifactTool) Parameters() map[string]any {
 				"type":        "string",
 				"description": "Optional artifact id for logs; path or rel_path is still required.",
 			},
+			"offset":          map[string]any{"type": "integer", "minimum": 0, "description": "0-based line offset. Defaults to 0."},
+			"limit":           map[string]any{"type": "integer", "minimum": 1, "maximum": MaxOutputLines, "description": "Maximum lines to return. Defaults to 2000."},
+			"expected_sha256": map[string]any{"type": "string", "description": "Optional lowercase SHA-256 digest expected for the complete artifact."},
 		},
 		"additionalProperties": false,
 		"anyOf": []map[string]any{
@@ -352,11 +392,134 @@ func (ReadArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(abs)
+	result, err := readArtifactPage(abs, args.Offset, args.Limit)
 	if err != nil {
 		return "", err
 	}
-	return string(data), nil
+	expected := strings.ToLower(strings.TrimSpace(args.ExpectedSHA256))
+	if expected != "" {
+		if len(expected) != sha256.Size*2 {
+			return "", fmt.Errorf("expected_sha256 must be a 64-character hexadecimal SHA-256 digest")
+		}
+		if _, err := hex.DecodeString(expected); err != nil {
+			return "", fmt.Errorf("expected_sha256 must be hexadecimal")
+		}
+		if expected != result.SHA256 {
+			return "", fmt.Errorf("artifact digest mismatch: expected %s, got %s", expected, result.SHA256)
+		}
+	}
+	return result.render(), nil
+}
+
+type artifactReadResult struct {
+	Lines      []string
+	StartLine  int
+	EndLine    int
+	TotalLines int
+	SHA256     string
+	Truncated  bool
+}
+
+func (r artifactReadResult) render() string {
+	rangeText := "none"
+	if r.StartLine > 0 && r.EndLine >= r.StartLine {
+		rangeText = fmt.Sprintf("%d-%d", r.StartLine, r.EndLine)
+	}
+	header := fmt.Sprintf("ARTIFACT_RESULT lines=%s total=%d sha256=%s", rangeText, r.TotalLines, r.SHA256)
+	if r.Truncated {
+		header += " truncated=budget"
+	}
+	return buildReadContent(header, r.Lines)
+}
+
+func readArtifactPage(path string, offsetArg, limitArg *int) (artifactReadResult, error) {
+	offset := 0
+	if offsetArg != nil {
+		if *offsetArg < 0 {
+			return artifactReadResult{}, fmt.Errorf("offset must be non-negative")
+		}
+		offset = *offsetArg
+	}
+	limit := MaxOutputLines
+	if limitArg != nil {
+		if *limitArg <= 0 || *limitArg > MaxOutputLines {
+			return artifactReadResult{}, fmt.Errorf("limit must be between 1 and %d", MaxOutputLines)
+		}
+		limit = *limitArg
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return artifactReadResult{}, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	reader := bufio.NewReaderSize(f, 32*1024)
+	result := artifactReadResult{}
+	lineIndex := 0
+	line := make([]byte, 0, 1024)
+	outputBytes := 0
+	lineTruncated := false
+	for {
+		fragment, readErr := reader.ReadSlice('\n')
+		if len(fragment) > 0 {
+			_, _ = h.Write(fragment)
+			if lineIndex >= offset && lineIndex < offset+limit {
+				contentFragment := fragment
+				if readErr != bufio.ErrBufferFull {
+					contentFragment = bytesTrimLineEnding(contentFragment)
+				}
+				// Reserve one byte for buildReadContent's trailing newline so an
+				// oversized requested line still returns a bounded prefix instead
+				// of being dropped in favor of a later line.
+				remaining := MaxOutputBytes - outputBytes - len(line) - 1
+				if remaining > 0 {
+					line = append(line, contentFragment[:min(len(contentFragment), remaining)]...)
+				}
+				if len(contentFragment) > max(remaining, 0) {
+					lineTruncated = true
+				}
+			}
+		}
+		lineDone := readErr != bufio.ErrBufferFull
+		if lineDone && (len(fragment) > 0 || len(line) > 0) {
+			result.TotalLines++
+			if lineIndex >= offset && lineIndex < offset+limit {
+				candidate := truncateStringToValidUTF8Prefix(string(line), len(line))
+				candidateBytes := len(candidate) + 1
+				if outputBytes+candidateBytes <= MaxOutputBytes {
+					if len(result.Lines) == 0 {
+						result.StartLine = lineIndex + 1
+					}
+					result.Lines = append(result.Lines, candidate)
+					outputBytes += candidateBytes
+					result.EndLine = lineIndex + 1
+				} else {
+					result.Truncated = true
+				}
+				result.Truncated = result.Truncated || lineTruncated
+			}
+			lineIndex++
+			line = line[:0]
+			lineTruncated = false
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil && readErr != bufio.ErrBufferFull {
+			return artifactReadResult{}, readErr
+		}
+	}
+	result.SHA256 = hex.EncodeToString(h.Sum(nil))
+	if offset > result.TotalLines {
+		return artifactReadResult{}, readOffsetPastEndError(offset, result.TotalLines, limitArg)
+	}
+	return result, nil
+}
+
+func bytesTrimLineEnding(line []byte) []byte {
+	text := strings.TrimSuffix(string(line), "\n")
+	text = strings.TrimSuffix(text, "\r")
+	return []byte(text)
 }
 
 func ResolveSessionArtifactPath(sessionDir, relPath string) (string, error) {
@@ -392,5 +555,65 @@ func ResolveSessionArtifactPath(sessionDir, relPath string) (string, error) {
 	if abs != artifactsRoot && !strings.HasPrefix(abs, artifactsRoot+string(filepath.Separator)) {
 		return "", fmt.Errorf("artifact path escapes artifacts directory")
 	}
+	resolvedRoot, err := filepath.EvalSymlinks(artifactsRoot)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		resolvedRoot = artifactsRoot
+	}
+	if rootInfo, lstatErr := os.Lstat(artifactsRoot); lstatErr == nil && rootInfo.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("artifacts directory must not be a symbolic link")
+	} else if lstatErr != nil && !os.IsNotExist(lstatErr) {
+		return "", lstatErr
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return abs, nil
+		}
+		return "", err
+	}
+	if resolved != resolvedRoot && !strings.HasPrefix(resolved, resolvedRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("artifact path escapes artifacts directory through symbolic link")
+	}
+	abs = resolved
 	return abs, nil
+}
+
+func ValidateArtifactRefs(sessionDir string, refs []ArtifactRef) ([]ArtifactRef, error) {
+	refs = NormalizeArtifactRefs(refs)
+	for i := range refs {
+		ref := refs[i]
+		path := ref.RelPath
+		if path == "" {
+			path = ref.Path
+		}
+		abs, err := ResolveSessionArtifactPath(sessionDir, path)
+		if err != nil {
+			return nil, fmt.Errorf("artifact %d: %w", i+1, err)
+		}
+		info, err := os.Stat(abs)
+		if err != nil {
+			return nil, fmt.Errorf("artifact %d: %w", i+1, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("artifact %d is not a regular file", i+1)
+		}
+		if ref.SizeBytes != 0 && ref.SizeBytes != info.Size() {
+			return nil, fmt.Errorf("artifact %d size mismatch: expected %d, got %d", i+1, ref.SizeBytes, info.Size())
+		}
+		if ref.SHA256 != "" {
+			digest, err := fileSHA256(abs)
+			if err != nil {
+				return nil, fmt.Errorf("artifact %d hash: %w", i+1, err)
+			}
+			if digest != ref.SHA256 {
+				return nil, fmt.Errorf("artifact %d digest mismatch: expected %s, got %s", i+1, ref.SHA256, digest)
+			}
+		}
+		refs[i].RelPath = filepath.ToSlash(path)
+		refs[i].Path = ""
+	}
+	return refs, nil
 }

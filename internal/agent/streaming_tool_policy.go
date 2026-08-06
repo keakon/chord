@@ -61,7 +61,7 @@ func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, rule
 			return rejectSpeculativeExecution("process_side_effect")
 		case tools.NameQuestion:
 			return rejectSpeculativeExecution("interactive_tool")
-		case tools.NameDelegate, tools.NameNotify, tools.NameHandoff, tools.NameEscalate, tools.NameCancel, tools.NameComplete, tools.NameSaveArtifact:
+		case tools.NameDelegate, tools.NameNotify, tools.NameHandoff, tools.NameEscalate, tools.NameCancel, tools.NameComplete, tools.NameSaveArtifact, tools.NameSaveResult:
 			return rejectSpeculativeExecution("stateful_or_control_tool")
 		case tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameDelete:
 			return rejectSpeculativeExecution("mutation_tool")

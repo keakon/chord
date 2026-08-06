@@ -32,15 +32,23 @@ func NewNotifyTool(sender EventSender, messenger SubAgentMessenger, allowOwner, 
 }
 
 type notifyArgs struct {
-	Message      string `json:"message"`
-	TargetTaskID string `json:"target_task_id,omitempty"`
-	Kind         string `json:"kind,omitempty"`
+	Message       string          `json:"message"`
+	TargetTaskID  string          `json:"target_task_id,omitempty"`
+	Kind          string          `json:"kind,omitempty"`
+	MessageType   string          `json:"message_type,omitempty"`
+	Subtype       string          `json:"subtype,omitempty"`
+	CorrelationID string          `json:"correlation_id,omitempty"`
+	Payload       json.RawMessage `json:"payload,omitempty"`
 }
 
 // AgentNotifyPayload is the structured owner-update payload emitted by Notify.
 type AgentNotifyPayload struct {
-	Message string `json:"message"`
-	Kind    string `json:"kind,omitempty"`
+	Message       string          `json:"message"`
+	Kind          string          `json:"kind,omitempty"`
+	MessageType   string          `json:"message_type,omitempty"`
+	Subtype       string          `json:"subtype,omitempty"`
+	CorrelationID string          `json:"correlation_id,omitempty"`
+	Payload       json.RawMessage `json:"payload,omitempty"`
 }
 
 func (NotifyTool) Name() string { return NameNotify }
@@ -67,6 +75,13 @@ func (t *NotifyTool) Parameters() map[string]any {
 			"type":        "string",
 			"description": "Optional message kind hint such as progress, clarification, correction, or constraint_update.",
 		},
+		"message_type": map[string]any{
+			"type": "string", "enum": []string{"progress", "notice"},
+			"description": "Optional communication category for owner notifications. Defaults to progress. Structured fields are unavailable with target_task_id until a durable owner-to-child outbox exists.",
+		},
+		"subtype":        map[string]any{"type": "string", "description": "Optional application-defined subtype. Runtime does not interpret it."},
+		"correlation_id": map[string]any{"type": "string", "description": "Optional application correlation ID for owner-visible notices."},
+		"payload":        map[string]any{"type": "object", "description": "Optional JSON object payload, limited to 32 KiB. Runtime does not interpret business fields."},
 	}
 	required := []string{"message"}
 	if t.allowTarget {
@@ -111,12 +126,18 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 	a.Message = strings.TrimSpace(a.Message)
 	a.TargetTaskID = strings.TrimSpace(a.TargetTaskID)
 	a.Kind = strings.TrimSpace(a.Kind)
+	a.MessageType = strings.TrimSpace(a.MessageType)
+	a.Subtype = strings.TrimSpace(a.Subtype)
+	a.CorrelationID = strings.TrimSpace(a.CorrelationID)
 
 	if a.Message == "" {
 		return "", fmt.Errorf("message is required")
 	}
 
 	if a.TargetTaskID != "" {
+		if a.MessageType != "" || a.Subtype != "" || a.CorrelationID != "" || len(a.Payload) != 0 {
+			return "", fmt.Errorf("structured message fields are unavailable with target_task_id until durable owner-to-child delivery is implemented")
+		}
 		if !t.allowTarget {
 			return "", fmt.Errorf("target_task_id is not available in this role")
 		}
@@ -140,7 +161,33 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 	if t.sender == nil {
 		return "", fmt.Errorf("event sender not available (no EventSender configured)")
 	}
+	if a.MessageType == "" {
+		a.MessageType = "progress"
+	}
+	if a.MessageType != "progress" && a.MessageType != "notice" {
+		return "", fmt.Errorf("message_type must be progress or notice")
+	}
+	if len(a.Subtype) > 256 || len(a.CorrelationID) > 256 {
+		return "", fmt.Errorf("subtype and correlation_id must not exceed 256 bytes")
+	}
+	if len(a.Payload) > 32*1024 {
+		return "", fmt.Errorf("payload exceeds maximum size 32768 bytes")
+	}
+	if len(a.Payload) > 0 {
+		trimmed := []byte(strings.TrimSpace(string(a.Payload)))
+		if len(trimmed) == 0 || trimmed[0] != '{' {
+			return "", fmt.Errorf("payload must be a JSON object")
+		}
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(trimmed, &object); err != nil || object == nil {
+			return "", fmt.Errorf("payload must be a JSON object")
+		}
+		a.Payload = append(json.RawMessage(nil), trimmed...)
+	}
 	agentID := AgentIDFromContext(ctx)
-	t.sender.SendAgentEvent("agent_notify", agentID, AgentNotifyPayload{Message: a.Message, Kind: a.Kind})
+	t.sender.SendAgentEvent("agent_notify", agentID, AgentNotifyPayload{
+		Message: a.Message, Kind: a.Kind, MessageType: a.MessageType, Subtype: a.Subtype,
+		CorrelationID: a.CorrelationID, Payload: a.Payload,
+	})
 	return "Owner coordination chain has been notified. Continue working.", nil
 }

@@ -86,10 +86,14 @@ func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {
 	if closedReason == "" {
 		closedReason = reason
 	}
-	sub.setState(finalState, reason)
-	a.noteSubAgentStateTransition(sub, finalState)
-	a.persistSubAgentMeta(sub)
-	a.syncTaskRecordFromSub(sub, closedReason)
+	if isTerminalSubAgentState(finalState) {
+		_, _, _ = a.commitTerminalTask(sub, finalState, reason, closedReason, payload.Completion)
+	} else {
+		sub.setState(finalState, reason)
+		a.noteSubAgentStateTransition(sub, finalState)
+		a.persistSubAgentMeta(sub)
+		a.syncTaskRecordFromSub(sub, closedReason)
+	}
 	a.reconcileTerminalTaskChildren(sub.taskID, finalState, closedReason)
 	status := string(finalState)
 	switch finalState {

@@ -402,7 +402,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	// when this instance's depth/config does not allow nested delegation.
 	for _, t := range cfg.BaseTools.ListTools() {
 		switch t.Name() {
-		case tools.NameTodoWrite, tools.NameHandoff, tools.NameReadArtifact, tools.NameSaveArtifact:
+		case tools.NameTodoWrite, tools.NameHandoff, tools.NameTaskCollect, tools.NameTaskGroupCreate, tools.NameReadArtifact, tools.NameSaveArtifact, tools.NameSaveResult:
 			// Skip MainAgent-only tools.
 		case tools.NameNotify:
 			// SubAgents get a dedicated Notify tool so owner-notify and
@@ -455,6 +455,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	subTools.Register(tools.CompleteTool{})
 	subTools.Register(tools.SaveArtifactTool{})
 	subTools.Register(tools.ReadArtifactTool{})
+	subTools.Register(tools.SaveResultTool{})
 	if !cfg.Ruleset.IsDisabled(tools.NameEscalate) {
 		subTools.Register(tools.NewEscalateTool(sender))
 	}

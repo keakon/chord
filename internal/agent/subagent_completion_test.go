@@ -47,6 +47,13 @@ func TestSubAgentPersistsThinkingBlocksWithAssistantToolCall(t *testing.T) {
 
 func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)
+	artifactPath := filepath.Join(sub.sessionDir, "artifacts", "subagents", "worker-1", "report.md")
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifactPath, []byte("report"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
 		resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
@@ -94,6 +101,61 @@ func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 	}
 	if len(env.Artifacts) != 1 || env.Artifacts[0].RelPath != "artifacts/subagents/worker-1/report.md" {
 		t.Fatalf("artifacts = %#v", env.Artifacts)
+	}
+}
+
+func TestCompleteRejectsArtifactOutsideSessionBoundary(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	sub.handleLLMResponse(&llmResult{
+		turnID: 1,
+		resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+			mustJSONToolCall(t, "call-1", "complete", map[string]any{
+				"summary":   "done",
+				"artifacts": []map[string]any{{"rel_path": "../outside.txt"}},
+			}),
+		})},
+	})
+	select {
+	case evt := <-parent.eventCh:
+		if evt.Type != EventAgentError || !strings.Contains(evt.Payload.(error).Error(), "artifact path escapes") {
+			t.Fatalf("event = %#v", evt)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for invalid Complete error")
+	}
+}
+
+func TestCompleteSchemaAndParserAcceptTypedResult(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	completeTool, ok := sub.tools.Get(tools.NameComplete)
+	if !ok {
+		t.Fatal("Complete tool missing")
+	}
+	properties := completeTool.Parameters()["properties"].(map[string]any)
+	for _, field := range []string{"result_type", "result", "result_ref"} {
+		if properties[field] == nil {
+			t.Fatalf("Complete schema missing %s", field)
+		}
+	}
+	sub.handleLLMResponse(&llmResult{
+		turnID: 1,
+		resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+			mustJSONToolCall(t, "call-1", "complete", map[string]any{
+				"summary": "done", "result_type": "type/test", "result": map[string]any{"value": 1},
+			}),
+		})},
+	})
+	select {
+	case evt := <-parent.eventCh:
+		if evt.Type != EventAgentDone {
+			t.Fatalf("event = %#v", evt)
+		}
+		result := evt.Payload.(*AgentResult)
+		if result.Envelope == nil || result.Envelope.ResultType != "type/test" || result.Envelope.ResultRef == nil || string(result.Envelope.Result) != `{"value":1}` {
+			t.Fatalf("envelope = %#v", result.Envelope)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for typed Complete")
 	}
 }
 
@@ -394,7 +456,7 @@ func TestSaveArtifactToolWritesSessionArtifactAndReadArtifactReadsIt(t *testing.
 	if err != nil {
 		t.Fatalf("ReadArtifact saved artifact: %v", err)
 	}
-	if strings.TrimSpace(read) != "research body" {
+	if !strings.Contains(read, "ARTIFACT_RESULT lines=1-1 total=1 sha256=") || !strings.HasSuffix(strings.TrimSpace(read), "research body") {
 		t.Fatalf("artifact body = %q", read)
 	}
 	// Default mode=create should fail on second write.
@@ -468,7 +530,7 @@ func TestSaveArtifactOverwriteReplacesExistingContent(t *testing.T) {
 		t.Fatalf("ReadArtifact overwrite: %v", err)
 	}
 	body = strings.TrimSpace(body)
-	if body != "new body" {
+	if !strings.HasSuffix(body, "new body") {
 		t.Fatalf("overwrite body = %q, want %q", body, "new body")
 	}
 	if strings.Contains(body, "old body") {
@@ -528,7 +590,7 @@ func TestReadArtifactToolRejectsPathEscapeAndReadsSessionArtifact(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ReadArtifact valid path: %v", err)
 	}
-	if out != "artifact body" {
+	if !strings.Contains(out, "ARTIFACT_RESULT lines=1-1 total=1 sha256=") || !strings.HasSuffix(strings.TrimSpace(out), "artifact body") {
 		t.Fatalf("artifact content = %q", out)
 	}
 	for _, bad := range []string{"../secret.md", filepath.ToSlash(filepath.Join("subagents", "worker-1", "report.md")), filepath.ToSlash(filepath.Join("artifacts", "..", "secret.md")), artifactAbs} {

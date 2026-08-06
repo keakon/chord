@@ -64,6 +64,11 @@ type subAgentRegistry struct {
 	admissions       map[string]*subAgentAdmission  // taskID → in-flight new-task admission
 	nudgeCounts      map[string]int                 // agentID → idle nudge count
 	stateEnteredTurn map[string]uint64              // agentID → turn it entered a waiting/terminal state
+	settlements      map[taskAttemptKey]*TaskSettlement
+	taskGroups       map[string]*DurableTaskGroup
+	taskRevision     uint64
+	taskChanged      chan struct{}
+	sessionEpoch     uint64
 }
 
 func newSubAgentRegistry() subAgentRegistry {
@@ -74,7 +79,18 @@ func newSubAgentRegistry() subAgentRegistry {
 		admissions:       make(map[string]*subAgentAdmission),
 		nudgeCounts:      make(map[string]int),
 		stateEnteredTurn: make(map[string]uint64),
+		settlements:      make(map[taskAttemptKey]*TaskSettlement),
+		taskGroups:       make(map[string]*DurableTaskGroup),
+		taskChanged:      make(chan struct{}),
 	}
+}
+
+func (r *subAgentRegistry) notifyTaskChangeLocked() {
+	r.taskRevision++
+	if r.taskChanged != nil {
+		close(r.taskChanged)
+	}
+	r.taskChanged = make(chan struct{})
 }
 
 func (r *subAgentRegistry) addAdmissionLocked(admission *subAgentAdmission) {

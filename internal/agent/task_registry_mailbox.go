@@ -23,6 +23,10 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 	if rec == nil {
 		rec = &DurableTaskRecord{TaskID: taskID, CreatedAt: now, CreatedTurn: currentTurn}
 	}
+	if msg.Attempt != 0 && msg.Attempt != rec.Attempt {
+		a.subs.mu.Unlock()
+		return
+	}
 	if strings.TrimSpace(msg.AgentID) != "" {
 		rec.LatestInstanceID = strings.TrimSpace(msg.AgentID)
 		rec.InstanceHistory = append(rec.InstanceHistory, rec.LatestInstanceID)
@@ -48,8 +52,10 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 	}
 	switch msg.Kind {
 	case SubAgentMailboxKindCompleted:
-		rec.State = string(SubAgentStateCompleted)
-		rec.ResumePolicy = taskResumePolicyNotify
+		if msg.Attempt == 0 || msg.Attempt == rec.Attempt {
+			rec.State = string(SubAgentStateCompleted)
+			rec.ResumePolicy = taskResumePolicyNotify
+		}
 	case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired:
 		rec.State = string(SubAgentStateWaitingMain)
 		rec.ResumePolicy = taskResumePolicyNotify
@@ -61,10 +67,12 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 	}
 	rec.LastUpdatedTurn = currentTurn
 	rec.UpdatedAt = now
+	rec.LifecycleRevision++
 	if live := a.subs.subAgents[rec.LatestInstanceID]; live == nil {
 		rec.RuntimeParked = true
 	}
 	a.subs.taskRecords[taskID] = rec
+	a.subs.notifyTaskChangeLocked()
 	a.subs.mu.Unlock()
 	a.persistTaskRegistry()
 }

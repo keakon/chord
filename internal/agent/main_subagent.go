@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
@@ -417,13 +418,9 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		log.Warnf("handleAgentDone: unknown SubAgent source=%v", evt.SourceID)
 		return
 	}
-	a.handleSubAgentStateChangedEvent(Event{
-		Type:     EventSubAgentStateChanged,
-		SourceID: evt.SourceID,
-		Payload:  &SubAgentStateChangedPayload{State: SubAgentStateCompleted, Summary: result.Summary},
-	})
 	replyMessageID := firstReplyMessageID(sub)
 	ownerAgentID, ownerTaskID, _, _ := sub.ownerSnapshot()
+	completion := a.buildCompletionEnvelope(sub, result)
 
 	a.releaseSubAgentSlot(sub)
 	a.emitActivity(evt.SourceID, ActivityIdle, "")
@@ -434,10 +431,12 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		OwnerTaskID:  ownerTaskID,
 		InReplyTo:    replyMessageID,
 		Kind:         SubAgentMailboxKindCompleted,
+		MessageType:  AgentMessageTypeNotice,
+		Subtype:      "task_completion",
 		Priority:     SubAgentMailboxPriorityUrgent,
 		Summary:      result.Summary,
 		Payload:      result.Summary,
-		Completion:   a.buildCompletionEnvelope(sub, result),
+		Completion:   completion,
 		RequiresAck:  false,
 	}
 	a.normalizeSubAgentMailboxMessage(mailbox)
@@ -463,6 +462,7 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 			Reason:       result.Summary,
 			ClosedReason: "task completed",
 			FinalState:   SubAgentStateCompleted,
+			Completion:   completion,
 		},
 	})
 }
@@ -519,22 +519,31 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 	a.noteSubAgentStateTransition(sub, SubAgentStateRunning)
 	a.persistSubAgentMeta(sub)
 	ownerAgentID, ownerTaskID, _, _ := sub.ownerSnapshot()
+	messageType := AgentMessageType(strings.TrimSpace(payload.MessageType))
+	if messageType == "" {
+		messageType = AgentMessageTypeProgress
+	}
+	lifecycleKind := SubAgentMailboxKindProgress
 	a.queueLoopEvent(Event{
 		Type:     EventSubAgentProgressUpdated,
 		SourceID: evt.SourceID,
 		Payload:  &SubAgentProgressUpdatedPayload{Summary: msg},
 	})
 	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
-		AgentID:      evt.SourceID,
-		TaskID:       taskIDForSub(sub),
-		OwnerAgentID: ownerAgentID,
-		OwnerTaskID:  ownerTaskID,
-		InReplyTo:    firstReplyMessageID(sub),
-		Kind:         SubAgentMailboxKindProgress,
-		Priority:     SubAgentMailboxPriorityNotify,
-		Summary:      msg,
-		Payload:      msg,
-		RequiresAck:  false,
+		AgentID:        evt.SourceID,
+		TaskID:         taskIDForSub(sub),
+		OwnerAgentID:   ownerAgentID,
+		OwnerTaskID:    ownerTaskID,
+		InReplyTo:      firstReplyMessageID(sub),
+		Kind:           lifecycleKind,
+		MessageType:    messageType,
+		Subtype:        strings.TrimSpace(payload.Subtype),
+		CorrelationID:  strings.TrimSpace(payload.CorrelationID),
+		MessagePayload: append(json.RawMessage(nil), payload.Payload...),
+		Priority:       SubAgentMailboxPriorityNotify,
+		Summary:        msg,
+		Payload:        msg,
+		RequiresAck:    false,
 	}})
 	a.emitToTUI(AgentNotifyEvent{
 		AgentID:       evt.SourceID,
@@ -579,6 +588,8 @@ func (a *MainAgent) handleEscalate(evt Event) {
 		OwnerTaskID:  ownerTaskID,
 		InReplyTo:    replyMessageID,
 		Kind:         SubAgentMailboxKindDecisionRequired,
+		MessageType:  AgentMessageTypeRequest,
+		Subtype:      "decision",
 		Priority:     SubAgentMailboxPriorityInterrupt,
 		Summary:      reason,
 		Payload:      reason,
@@ -912,6 +923,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	sub.semMu.Unlock()
 	a.subs.subAgents[sub.instanceID] = sub
 	a.subs.taskRecords[taskID] = cloneDurableTaskRecord(registrationRecord)
+	a.subs.notifyTaskChangeLocked()
 	a.subs.mu.Unlock()
 	if a.recovery != nil {
 		if err := a.recovery.SaveSnapshot(a.buildRecoverySnapshot()); err != nil {

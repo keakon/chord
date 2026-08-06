@@ -256,6 +256,12 @@ func (a *MainAgent) sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID
 	if err != nil {
 		return tools.TaskHandle{}, err
 	}
+	if strings.TrimSpace(record.State) == string(SubAgentStateCompleted) && !record.SettlementDurable {
+		record, err = a.retryTaskSettlementDurability(taskID)
+		if err != nil || !record.SettlementDurable {
+			return tools.TaskHandle{}, fmt.Errorf("task %s cannot start a new attempt until its terminal settlement is durable: %w", taskID, err)
+		}
+	}
 	sub := a.subAgentByTaskID(taskID)
 	rehydrated := false
 	previousAgentID := ""
@@ -602,6 +608,12 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	}
 	registrationSessionDir := a.sessionDir
 	rehydratedRecord := buildTaskRecordFromSub(sub, a.subs.taskRecords[taskID], "", a.explicitUserTurnCount.Load(), time.Now())
+	if strings.TrimSpace(record.State) == string(SubAgentStateCompleted) {
+		rehydratedRecord.Attempt = record.Attempt + 1
+		rehydratedRecord.LatestSettlement = nil
+		rehydratedRecord.SettlementDurable = false
+		rehydratedRecord.LastCompletion = nil
+	}
 	a.subs.mu.Unlock()
 	persistErr := a.persistSubAgentRegistration(registrationSessionDir, sub, rehydratedRecord)
 	if persistErr != nil {
@@ -627,6 +639,7 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	}
 	a.subs.subAgents[sub.instanceID] = sub
 	a.subs.taskRecords[taskID] = cloneDurableTaskRecord(rehydratedRecord)
+	a.subs.notifyTaskChangeLocked()
 	a.subs.mu.Unlock()
 	if a.recovery != nil {
 		if snapshotErr := a.recovery.SaveSnapshot(a.buildRecoverySnapshot()); snapshotErr != nil {

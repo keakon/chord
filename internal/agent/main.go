@@ -525,6 +525,8 @@ type MainAgent struct {
 	admissionPaused          atomic.Bool
 	subAgentMetaPersistMu    sync.Mutex
 	taskRegistryPersistMu    sync.Mutex
+	settlementJournalMu      sync.Mutex
+	taskGroupPersistMu       sync.Mutex
 	taskRegistryPersistHook  func()                    // test-only barrier after snapshot, before durable write
 	sem                      chan struct{}             // compatibility view of governor normal runtime slots
 	fileTrack                *filelock.FileTracker     // file write conflict detection
@@ -607,7 +609,8 @@ type MainAgent struct {
 	toolTrace                    map[string]toolCallStageTrace
 
 	// Adhoc task counter for auto-assigning "adhoc-N" IDs.
-	adhocSeq atomic.Uint64
+	adhocSeq     atomic.Uint64
+	taskGroupSeq atomic.Uint64
 
 	// Optional MCP summary injected into the system prompt (set after MCP init).
 	mcpServersPromptMu    sync.RWMutex
@@ -1990,11 +1993,6 @@ func (a *MainAgent) handleAgentError(evt Event) {
 	if sub2 != nil {
 		errorKind := classifyAgentError(err)
 		failureSummary := fmt.Sprintf("SubAgent failed (%s): %s", errorKind, err.Error())
-		a.handleSubAgentStateChangedEvent(Event{
-			Type:     EventSubAgentStateChanged,
-			SourceID: evt.SourceID,
-			Payload:  &SubAgentStateChangedPayload{State: SubAgentStateFailed, Summary: failureSummary},
-		})
 		a.releaseSubAgentSlot(sub2)
 		a.emitActivity(evt.SourceID, ActivityIdle, "")
 		a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{

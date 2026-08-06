@@ -120,6 +120,14 @@ func (a *MainAgent) buildCoordinationSnapshotOverlay() string {
 			b.WriteString(truncateCoordinationSnapshotText(rec.LastSummary, coordinationSnapshotSummaryMaxRunes))
 		}
 		if rec.LastCompletion != nil {
+			if rec.LastCompletion.ResultType != "" {
+				b.WriteString("\n  result_type: ")
+				b.WriteString(rec.LastCompletion.ResultType)
+			}
+			if rec.LastCompletion.ResultRef != nil {
+				b.WriteString("\n  result_ref: ")
+				b.WriteString(rec.LastCompletion.ResultRef.RelPath)
+			}
 			if len(rec.LastCompletion.FilesChanged) > 0 {
 				b.WriteString("\n  files_changed: ")
 				b.WriteString(strings.Join(rec.LastCompletion.FilesChanged, ", "))

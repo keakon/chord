@@ -17,22 +17,24 @@ func TestArchiveEligibleTerminalTasksPreservesUnsafeRecords(t *testing.T) {
 	for i := range maxRetainedTerminalTasks + 2 {
 		taskID := fmt.Sprintf("terminal-%03d", i)
 		records[taskID] = &DurableTaskRecord{
-			TaskID:       taskID,
-			State:        string(SubAgentStateCancelled),
-			ResumePolicy: taskResumePolicyExplicitOnly,
-			UpdatedAt:    now.Add(time.Duration(i) * time.Second),
+			TaskID:            taskID,
+			State:             string(SubAgentStateCancelled),
+			ResumePolicy:      taskResumePolicyExplicitOnly,
+			SettlementDurable: true,
+			UpdatedAt:         now.Add(time.Duration(i) * time.Second),
 		}
 	}
 	records["active"] = &DurableTaskRecord{TaskID: "active", State: string(SubAgentStateRunning), UpdatedAt: now}
 	records["focused"] = &DurableTaskRecord{TaskID: "focused", State: string(SubAgentStateCancelled), ResumePolicy: taskResumePolicyExplicitOnly, UpdatedAt: now.Add(-time.Hour)}
 	records["unconsumed"] = &DurableTaskRecord{TaskID: "unconsumed", State: string(SubAgentStateCancelled), ResumePolicy: taskResumePolicyExplicitOnly, LastMailboxID: "pending-mailbox", UpdatedAt: now.Add(-time.Hour)}
+	records["non-durable"] = &DurableTaskRecord{TaskID: "non-durable", State: string(SubAgentStateCompleted), ResumePolicy: taskResumePolicyNotify, UpdatedAt: now.Add(-2 * time.Hour)}
 	a.setFocusedTaskID("focused")
 
 	retained, err := a.archiveEligibleTerminalTasks(records, a.sessionDir)
 	if err != nil {
 		t.Fatalf("archiveEligibleTerminalTasks: %v", err)
 	}
-	if retained["active"] == nil || retained["focused"] == nil || retained["unconsumed"] == nil {
+	if retained["active"] == nil || retained["focused"] == nil || retained["unconsumed"] == nil || retained["non-durable"] == nil {
 		t.Fatalf("unsafe records were removed: %#v", retained)
 	}
 	terminalCount := 0
@@ -73,13 +75,14 @@ func TestArchiveEligibleTerminalTasksBoundsCompletedTasksAndSupportsLookup(t *te
 	for i := range maxRetainedTerminalTasks + 2 {
 		taskID := fmt.Sprintf("completed-%03d", i)
 		records[taskID] = &DurableTaskRecord{
-			TaskID:           taskID,
-			LatestInstanceID: fmt.Sprintf("worker-%03d", i),
-			InstanceHistory:  []string{fmt.Sprintf("worker-old-%03d", i)},
-			State:            string(SubAgentStateCompleted),
-			ResumePolicy:     taskResumePolicyNotify,
-			RuntimeParked:    true,
-			UpdatedAt:        now.Add(time.Duration(i) * time.Second),
+			TaskID:            taskID,
+			LatestInstanceID:  fmt.Sprintf("worker-%03d", i),
+			InstanceHistory:   []string{fmt.Sprintf("worker-old-%03d", i)},
+			State:             string(SubAgentStateCompleted),
+			ResumePolicy:      taskResumePolicyNotify,
+			RuntimeParked:     true,
+			SettlementDurable: true,
+			UpdatedAt:         now.Add(time.Duration(i) * time.Second),
 		}
 	}
 
