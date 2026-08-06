@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -109,16 +108,7 @@ func persistTaskGroups(sessionDir string, groups map[string]*DurableTaskGroup) e
 		}
 	}
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].GroupID < ordered[j].GroupID })
-	data, err := json.MarshalIndent(ordered, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	tmpPath := filepath.Join(filepath.Dir(path), fmt.Sprintf("task-groups.%d.json.tmp", time.Now().UnixNano()))
-	if err := privatefs.WriteFile(sessionDir, tmpPath, data); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	return persistJSONAtomically(sessionDir, path, "task-groups", ordered)
 }
 
 func taskGroupMembersEqual(a, b []tools.TaskGroupMember) bool {

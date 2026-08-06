@@ -14,7 +14,6 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -106,16 +105,7 @@ func persistAgentRequests(sessionDir string, records map[string]*DurableAgentReq
 		ordered = append(ordered, cloneDurableAgentRequest(record))
 	}
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].CorrelationID < ordered[j].CorrelationID })
-	data, err := json.MarshalIndent(ordered, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	tmp := filepath.Join(filepath.Dir(path), fmt.Sprintf("agent-requests.%d.json.tmp", time.Now().UnixNano()))
-	if err := privatefs.WriteFile(sessionDir, tmp, data); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return persistJSONAtomically(sessionDir, path, "agent-requests", ordered)
 }
 
 func retainAgentRequests(records map[string]*DurableAgentRequest) map[string]*DurableAgentRequest {

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,7 +13,6 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -232,16 +230,7 @@ func persistDurableTaskRecords(sessionDir string, records map[string]*DurableTas
 	sort.Slice(ordered, func(i, j int) bool {
 		return ordered[i].TaskID < ordered[j].TaskID
 	})
-	data, err := json.MarshalIndent(ordered, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	tmpPath := filepath.Join(filepath.Dir(path), fmt.Sprintf("tasks.%d.json.tmp", time.Now().UnixNano()))
-	if err := privatefs.WriteFile(sessionDir, tmpPath, data); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	return persistJSONAtomically(sessionDir, path, "tasks", ordered)
 }
 
 func durableTaskResumePolicy(state SubAgentState) string {
