@@ -52,6 +52,24 @@ func TestApplyPatchDisplayTargetsPreserveModelFacingPaths(t *testing.T) {
 	}
 }
 
+func TestApplyPatchDisplayTargetsAggregateRepeatedUpdates(t *testing.T) {
+	patch := "*** Begin Patch\n" +
+		"*** Update File: src/demo.go\n@@\n-old\n+middle\n" +
+		"*** Update File: src/./demo.go\n@@\n-middle\n+new\n" +
+		"*** End Patch"
+	targets, err := ApplyPatchDisplayTargets(applyPatchArgs(t, patch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("targets = %#v, want one file-level target", targets)
+	}
+	target := targets[0]
+	if target.SourcePath != "src/demo.go" || target.Added != 2 || target.Removed != 2 {
+		t.Fatalf("target = %#v, want first model path with aggregate operation stats", target)
+	}
+}
+
 func TestApplyPatchCodexMultiFileOperations(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, content string) {
@@ -502,23 +520,104 @@ func TestApplyPatchEnvelopeWithLeadingWhitespaceIsNotTreatedAsLegacy(t *testing.
 	}
 }
 
-func TestApplyPatchRejectsOverlappingTargets(t *testing.T) {
+func TestApplyPatchRepeatedUpdatesAreAppliedInOperationOrder(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "same.txt")
+	if err := os.WriteFile(path, []byte("first\nmiddle\nlast\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: same.txt\n@@\n-last\n+LAST\n" +
+		"*** Update File: same.txt\n@@\n-first\n+FIRST\n" +
+		"*** End Patch"
+	if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "FIRST\nmiddle\nLAST\n" {
+		t.Fatalf("file = %q, %v; want both repeated updates", got, err)
+	}
+}
+
+func TestApplyPatchRepeatedUpdateCanDependOnEarlierUpdate(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "same.txt")
 	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	patch := "*** Begin Patch\n" +
-		"*** Update File: same.txt\n@@\n-before\n+first\n" +
-		"*** Update File: same.txt\n@@\n-before\n+second\n" +
+		"*** Update File: same.txt\n@@\n-before\n+middle\n" +
+		"*** Update File: same.txt\n@@\n-middle\n+after\n" +
+		"*** End Patch"
+	plan, err := BuildApplyPatchPlan(context.Background(), patch, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Mutations) != 1 {
+		t.Fatalf("mutations = %#v, want one file-level mutation", plan.Mutations)
+	}
+	mutation := plan.Mutations[0]
+	if string(mutation.BeforeBytes) != "before\n" || string(mutation.AfterBytes) != "after\n" || mutation.Added != 1 || mutation.Removed != 1 {
+		t.Fatalf("mutation = %#v, want original-to-final update", mutation)
+	}
+	if err := CommitMutationPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "after\n" {
+		t.Fatalf("file = %q, %v; want dependent update result", got, err)
+	}
+}
+
+func TestApplyPatchRepeatedUpdateFailureDoesNotModifyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "same.txt")
+	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: same.txt\n@@\n-before\n+after\n" +
+		"*** Update File: same.txt\n@@\n-missing\n+never\n" +
 		"*** End Patch"
 	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
-	if err == nil || !strings.Contains(err.Error(), "duplicate operations") {
-		t.Fatalf("err = %v, want duplicate-operation rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "hunk not found") {
+		t.Fatalf("err = %v, want later update failure", err)
 	}
 	got, readErr := os.ReadFile(path)
 	if readErr != nil || string(got) != "before\n" {
 		t.Fatalf("file = %q, %v; want unchanged", got, readErr)
+	}
+}
+
+func TestApplyPatchRejectsRepeatedNonUpdateOperations(t *testing.T) {
+	for name, patch := range map[string]string{
+		"add": "*** Begin Patch\n" +
+			"*** Add File: same.txt\n+first\n" +
+			"*** Add File: same.txt\n+second\n" +
+			"*** End Patch",
+		"delete": "*** Begin Patch\n" +
+			"*** Delete File: same.txt\n" +
+			"*** Delete File: same.txt\n" +
+			"*** End Patch",
+		"move source": "*** Begin Patch\n" +
+			"*** Update File: same.txt\n*** Move to: first.txt\n" +
+			"*** Update File: same.txt\n*** Move to: second.txt\n" +
+			"*** End Patch",
+		"update then delete": "*** Begin Patch\n" +
+			"*** Update File: same.txt\n@@\n-old\n+new\n" +
+			"*** Delete File: same.txt\n" +
+			"*** End Patch",
+		"move destination then update": "*** Begin Patch\n" +
+			"*** Update File: old.txt\n*** Move to: same.txt\n" +
+			"*** Update File: same.txt\n@@\n-old\n+new\n" +
+			"*** End Patch",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ApplyPatchTargets(applyPatchArgs(t, patch), t.TempDir())
+			if err == nil || !strings.Contains(err.Error(), "duplicate operations") {
+				t.Fatalf("err = %v, want duplicate-operation rejection", err)
+			}
+		})
 	}
 }
 
@@ -784,18 +883,18 @@ func TestApplyPatchRenameOnlyUpdate(t *testing.T) {
 	}
 }
 
-func TestApplyPatchDuplicateOperationErrorMentionsSinglePath(t *testing.T) {
+func TestApplyPatchTargetsDeduplicateRepeatedUpdates(t *testing.T) {
 	dir := t.TempDir()
 	patch := "*** Begin Patch\n" +
 		"*** Update File: dup.txt\n@@\n-a\n+b\n" +
-		"*** Update File: dup.txt\n@@\n-c\n+d\n" +
+		"*** Update File: ./dup.txt\n@@\n-b\n+c\n" +
 		"*** End Patch"
-	_, err := ApplyPatchTargets(applyPatchArgs(t, patch), dir)
-	if err == nil || !strings.Contains(err.Error(), "duplicate operations for") {
-		t.Fatalf("err = %v, want duplicate-operations error", err)
+	targets, err := ApplyPatchTargets(applyPatchArgs(t, patch), dir)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Count(err.Error(), filepath.Join(dir, "dup.txt")) != 1 {
-		t.Fatalf("err = %v, want the path mentioned once", err)
+	if len(targets) != 1 || targets[0].Kind != MutationUpdate || targets[0].SourcePath != filepath.Join(dir, "dup.txt") {
+		t.Fatalf("targets = %#v, want one normalized update target", targets)
 	}
 }
 

@@ -110,6 +110,12 @@ func (s *SubAgent) enqueueUserMessage(input pendingUserMessage) bool {
 	}
 	s.inputQueueMu.Lock()
 	defer s.inputQueueMu.Unlock()
+	mailboxID := pendingUserMailboxID(input)
+	if mailboxID != "" {
+		if _, accepted := s.acceptedMailboxIDs[mailboxID]; accepted {
+			return true
+		}
+	}
 	inputBytes := pendingUserMessageBytes(input)
 	messageLimit, byteLimit := s.effectiveQueueLimits()
 	if len(s.inputCh)+len(s.inputOverflow)+s.inputQueueReservedMessages >= messageLimit || s.inputQueueBytes+s.inputQueueReservedBytes+inputBytes > byteLimit {
@@ -121,11 +127,13 @@ func (s *SubAgent) enqueueUserMessage(input pendingUserMessage) bool {
 	s.inputQueueBytes += inputBytes
 	if len(s.inputOverflow) > 0 {
 		s.inputOverflow = append(s.inputOverflow, input)
+		s.markMailboxAcceptedLocked(mailboxID)
 		s.signalWake()
 		return true
 	}
 	select {
 	case s.inputCh <- input:
+		s.markMailboxAcceptedLocked(mailboxID)
 		s.signalWake()
 		return true
 	case <-s.parentCtx.Done():
@@ -133,16 +141,18 @@ func (s *SubAgent) enqueueUserMessage(input pendingUserMessage) bool {
 		return false
 	default:
 		s.inputOverflow = append(s.inputOverflow, input)
+		s.markMailboxAcceptedLocked(mailboxID)
 		s.signalWake()
 		return true
 	}
 }
 
 type subAgentInputReservation struct {
-	sub   *SubAgent
-	input pendingUserMessage
-	bytes int
-	done  bool
+	sub       *SubAgent
+	input     pendingUserMessage
+	bytes     int
+	done      bool
+	duplicate bool
 }
 
 func (s *SubAgent) reserveUserMessage(input pendingUserMessage) *subAgentInputReservation {
@@ -151,6 +161,11 @@ func (s *SubAgent) reserveUserMessage(input pendingUserMessage) *subAgentInputRe
 	}
 	s.inputQueueMu.Lock()
 	defer s.inputQueueMu.Unlock()
+	if mailboxID := pendingUserMailboxID(input); mailboxID != "" {
+		if _, accepted := s.acceptedMailboxIDs[mailboxID]; accepted {
+			return &subAgentInputReservation{sub: s, duplicate: true}
+		}
+	}
 	inputBytes := pendingUserMessageBytes(input)
 	messageLimit, byteLimit := s.effectiveQueueLimits()
 	if len(s.inputCh)+len(s.inputOverflow)+s.inputQueueReservedMessages >= messageLimit || s.inputQueueBytes+s.inputQueueReservedBytes+inputBytes > byteLimit {
@@ -168,6 +183,10 @@ func (r *subAgentInputReservation) Commit() bool {
 	if r == nil || r.sub == nil || r.done {
 		return false
 	}
+	if r.duplicate {
+		r.done = true
+		return true
+	}
 	s := r.sub
 	s.inputQueueMu.Lock()
 	defer s.inputQueueMu.Unlock()
@@ -178,6 +197,7 @@ func (r *subAgentInputReservation) Commit() bool {
 		return false
 	}
 	s.inputQueueBytes += r.bytes
+	s.markMailboxAcceptedLocked(pendingUserMailboxID(r.input))
 	if len(s.inputOverflow) > 0 {
 		s.inputOverflow = append(s.inputOverflow, r.input)
 		s.signalWake()
@@ -194,6 +214,10 @@ func (r *subAgentInputReservation) Commit() bool {
 
 func (r *subAgentInputReservation) Cancel() {
 	if r == nil || r.sub == nil || r.done {
+		return
+	}
+	if r.duplicate {
+		r.done = true
 		return
 	}
 	s := r.sub
@@ -230,6 +254,38 @@ func pendingUserMessageBytes(input pendingUserMessage) int {
 		return len(data)
 	}
 	return len(input.Content)
+}
+
+func pendingUserMailboxID(input pendingUserMessage) string {
+	if input.Mailbox == nil || input.Mailbox.MessageType != string(AgentMessageTypeResponse) {
+		return ""
+	}
+	return strings.TrimSpace(input.Mailbox.MessageID)
+}
+
+func (s *SubAgent) markMailboxAcceptedLocked(messageID string) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return
+	}
+	if s.acceptedMailboxIDs == nil {
+		s.acceptedMailboxIDs = make(map[string]struct{})
+	}
+	s.acceptedMailboxIDs[messageID] = struct{}{}
+}
+
+func (s *SubAgent) hasAcceptedMailbox(messageID string) bool {
+	if s == nil {
+		return false
+	}
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return false
+	}
+	s.inputQueueMu.Lock()
+	_, accepted := s.acceptedMailboxIDs[messageID]
+	s.inputQueueMu.Unlock()
+	return accepted
 }
 
 func messageQueueBytes(msg message.Message) int {
@@ -413,6 +469,14 @@ func (s *SubAgent) GetMessages() []message.Message {
 // SubAgent's conversation without replaying LLM calls.
 func (s *SubAgent) RestoreMessages(msgs []message.Message) {
 	s.ctxMgr.RestoreMessages(msgs)
+	s.inputQueueMu.Lock()
+	s.acceptedMailboxIDs = make(map[string]struct{})
+	for _, msg := range msgs {
+		if msg.Mailbox != nil && msg.Mailbox.MessageType == string(AgentMessageTypeResponse) {
+			s.markMailboxAcceptedLocked(msg.Mailbox.MessageID)
+		}
+	}
+	s.inputQueueMu.Unlock()
 	s.restoreTaskToolChanges(msgs)
 	s.restoreInvokedSkills(msgs)
 }

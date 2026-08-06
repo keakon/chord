@@ -524,11 +524,6 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 		messageType = AgentMessageTypeProgress
 	}
 	lifecycleKind := SubAgentMailboxKindProgress
-	a.queueLoopEvent(Event{
-		Type:     EventSubAgentProgressUpdated,
-		SourceID: evt.SourceID,
-		Payload:  &SubAgentProgressUpdatedPayload{Summary: msg},
-	})
 	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
 		AgentID:        evt.SourceID,
 		TaskID:         taskIDForSub(sub),
@@ -561,15 +556,27 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 }
 
 func (a *MainAgent) handleEscalate(evt Event) {
-	reason, ok := evt.Payload.(string)
+	payload, ok := evt.Payload.(tools.AgentRequestPayload)
+	if !ok {
+		if reason, legacyOK := evt.Payload.(string); legacyOK {
+			payload = tools.AgentRequestPayload{Reason: reason}
+			ok = true
+		}
+	}
 	if !ok {
 		log.Errorf("handleEscalate: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
+	reason := strings.TrimSpace(payload.Reason)
 	log.Infof("SubAgent escalated to owner agent source=%v reason=%v", evt.SourceID, reason)
 	sub := a.subAgentByID(evt.SourceID)
 	if sub == nil {
 		log.Debugf("dropping escalate from abandoned subagent agent_id=%v", evt.SourceID)
+		return
+	}
+	request, err := a.createAgentRequest(sub, payload)
+	if err != nil {
+		a.queueLoopEvent(Event{Type: EventAgentError, SourceID: evt.SourceID, Payload: fmt.Errorf("persist agent request: %w", err)})
 		return
 	}
 	a.handleSubAgentStateChangedEvent(Event{
@@ -577,23 +584,23 @@ func (a *MainAgent) handleEscalate(evt Event) {
 		SourceID: evt.SourceID,
 		Payload:  &SubAgentStateChangedPayload{State: SubAgentStateWaitingMain, Summary: reason},
 	})
-	replyMessageID := firstReplyMessageID(sub)
 	ownerAgentID, ownerTaskID, _, _ := sub.ownerSnapshot()
 	a.releaseSubAgentSlot(sub)
 	a.emitActivity(evt.SourceID, ActivityIdle, "")
 	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
-		AgentID:      evt.SourceID,
-		TaskID:       taskIDForSub(sub),
-		OwnerAgentID: ownerAgentID,
-		OwnerTaskID:  ownerTaskID,
-		InReplyTo:    replyMessageID,
-		Kind:         SubAgentMailboxKindDecisionRequired,
-		MessageType:  AgentMessageTypeRequest,
-		Subtype:      "decision",
-		Priority:     SubAgentMailboxPriorityInterrupt,
-		Summary:      reason,
-		Payload:      reason,
-		RequiresAck:  true,
+		AgentID:       evt.SourceID,
+		TaskID:        taskIDForSub(sub),
+		OwnerAgentID:  ownerAgentID,
+		OwnerTaskID:   ownerTaskID,
+		MessageID:     request.RequestMessageID,
+		Kind:          SubAgentMailboxKindDecisionRequired,
+		MessageType:   AgentMessageTypeRequest,
+		Subtype:       "decision",
+		CorrelationID: request.CorrelationID,
+		Priority:      SubAgentMailboxPriorityInterrupt,
+		Summary:       reason,
+		Payload:       reason,
+		RequiresAck:   true,
 	}})
 	a.parkSubAgent(evt.SourceID)
 }

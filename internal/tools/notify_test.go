@@ -44,10 +44,30 @@ func (notifyMessengerStub) NotifySubAgent(context.Context, string, string, strin
 	return TaskHandle{}, nil
 }
 
+func (notifyMessengerStub) NotifySubAgentMessage(context.Context, AgentResponseRequest) (TaskHandle, error) {
+	return TaskHandle{Status: "delivered"}, nil
+}
+
 func TestNotifyRejectsStructuredTargetedDelivery(t *testing.T) {
 	tool := NewNotifyTool(nil, notifyMessengerStub{}, false, true)
 	_, err := tool.Execute(context.Background(), json.RawMessage(`{"target_task_id":"task-a","message":"continue","message_type":"notice"}`))
 	if err == nil || !strings.Contains(err.Error(), "durable owner-to-child") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestNotifyDeliversCorrelatedTargetedResponse(t *testing.T) {
+	tool := NewNotifyTool(nil, notifyMessengerStub{}, false, true)
+	result, err := tool.Execute(context.Background(), json.RawMessage(`{"target_task_id":"task-a","message":"continue","message_type":"response","correlation_id":"corr-1"}`))
+	if err != nil || !strings.Contains(result, `"status":"delivered"`) {
+		t.Fatalf("result=%q error=%v", result, err)
+	}
+}
+
+func TestNotifyRejectsStructuredFieldsOnTargetedResponse(t *testing.T) {
+	tool := NewNotifyTool(nil, notifyMessengerStub{}, false, true)
+	_, err := tool.Execute(context.Background(), json.RawMessage(`{"target_task_id":"task-a","message":"continue","message_type":"response","correlation_id":"corr-1","payload":{"option":"a"}}`))
+	if err == nil || !strings.Contains(err.Error(), "unavailable for response") {
 		t.Fatalf("error = %v", err)
 	}
 }

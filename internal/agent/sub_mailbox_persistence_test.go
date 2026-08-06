@@ -100,6 +100,36 @@ func TestSpooledMailboxIndexRefreshesAfterAppend(t *testing.T) {
 	}
 }
 
+func TestPersistSubAgentMailboxMessageExtendsReadySpoolIndex(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	first := SubAgentMailboxMessage{MessageID: "msg-1", TaskID: "task-1", Summary: "first"}
+	if err := a.persistSubAgentMailboxMessage(first); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")
+	if err := a.indexSpooledMailbox(path); err != nil {
+		t.Fatal(err)
+	}
+	second := SubAgentMailboxMessage{MessageID: "msg-2", TaskID: "task-2", Summary: "second"}
+	if err := a.persistSubAgentMailboxMessage(second); err != nil {
+		t.Fatal(err)
+	}
+	if !a.subAgentInbox.spoolIndexReady {
+		t.Fatal("append invalidated a ready spool index")
+	}
+	location, ok := a.subAgentInbox.spoolIndex[second.MessageID]
+	if !ok {
+		t.Fatalf("spool index = %#v, want msg-2", a.subAgentInbox.spoolIndex)
+	}
+	loaded, err := readSpooledMailboxAt(path, location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.MessageID != second.MessageID || loaded.Summary != second.Summary {
+		t.Fatalf("loaded message = %#v", loaded)
+	}
+}
+
 func TestMailboxPersistenceFailureDefersCriticalDeliveryUntilRetrySucceeds(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	validSessionDir := a.sessionDir

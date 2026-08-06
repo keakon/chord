@@ -791,15 +791,34 @@ func (a *MainAgent) persistSubAgentMailboxMessage(msg SubAgentMailboxMessage) er
 	if err != nil {
 		return fmt.Errorf("open mailbox log: %w", err)
 	}
+	startOffset := int64(-1)
+	if a.subAgentInbox.spoolIndexReady {
+		if info, statErr := f.Stat(); statErr == nil {
+			startOffset = info.Size()
+		}
+	}
 	enc := json.NewEncoder(f)
 	if err := enc.Encode(msg); err != nil {
 		_ = f.Close()
+		a.subAgentInbox.spoolIndexReady = false
 		return fmt.Errorf("append mailbox message: %w", err)
 	}
+	endOffset := int64(-1)
+	if info, statErr := f.Stat(); statErr == nil {
+		endOffset = info.Size()
+	}
 	if err := f.Close(); err != nil {
+		a.subAgentInbox.spoolIndexReady = false
 		return fmt.Errorf("close mailbox log: %w", err)
 	}
-	a.subAgentInbox.spoolIndexReady = false
+	messageID := strings.TrimSpace(msg.MessageID)
+	if a.subAgentInbox.spoolIndexReady && startOffset >= 0 && endOffset > startOffset && messageID != "" {
+		if _, exists := a.subAgentInbox.spoolIndex[messageID]; !exists {
+			a.subAgentInbox.spoolIndex[messageID] = mailboxSpoolLocation{offset: startOffset, length: endOffset - startOffset}
+		}
+	} else {
+		a.subAgentInbox.spoolIndexReady = false
+	}
 	return nil
 }
 

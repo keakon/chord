@@ -49,7 +49,7 @@ func NewEscalateTool(sender EventSender) *EscalateTool {
 	return &EscalateTool{sender: sender}
 }
 
-type escalateArgs struct {
+type AgentRequestPayload struct {
 	Reason string `json:"reason"`
 }
 
@@ -61,7 +61,7 @@ func (EscalateTool) Description() string {
 		"(2) you need information from another task's output, " +
 		"(3) you are blocked and need the task to be reassigned or split, " +
 		"(4) you need a decision that is beyond your scope. " +
-		"Unlike complete, this does NOT end your task — you remain active."
+		"Unlike complete, this does not end the task; the worker parks until its direct owner replies."
 }
 
 func (EscalateTool) Parameters() map[string]any {
@@ -81,20 +81,19 @@ func (EscalateTool) Parameters() map[string]any {
 func (EscalateTool) IsReadOnly() bool { return false }
 
 func (t *EscalateTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
-	var a escalateArgs
+	var a AgentRequestPayload
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 	if a.Reason == "" {
 		return "", fmt.Errorf("reason is required")
 	}
-
 	if t.sender == nil {
 		return "", fmt.Errorf("event sender not available (no EventSender configured)")
 	}
 
 	agentID := AgentIDFromContext(ctx)
-	t.sender.SendAgentEvent("escalate", agentID, a.Reason)
+	t.sender.SendAgentEvent("escalate", agentID, a)
 
-	return "The parent-agent coordination chain has been notified. Continue working or wait for instructions.", nil
+	return "The parent-agent coordination chain has been notified. This task will wait for its direct owner's reply.", nil
 }

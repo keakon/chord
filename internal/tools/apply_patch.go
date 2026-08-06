@@ -388,8 +388,18 @@ func ApplyPatchDisplayTargets(raw json.RawMessage) ([]ApplyPatchDisplayTarget, e
 		return nil, err
 	}
 	targets := make([]ApplyPatchDisplayTarget, 0, len(doc.Operations))
+	plainUpdateIndexByPath := make(map[string]int)
 	for _, op := range doc.Operations {
 		added, removed := applyPatchOperationLineStats(op)
+		if op.Kind == MutationUpdate && op.MovePath == "" {
+			pathKey := filepath.Clean(strings.TrimSpace(op.Path))
+			if index, ok := plainUpdateIndexByPath[pathKey]; ok {
+				targets[index].Added += added
+				targets[index].Removed += removed
+				continue
+			}
+			plainUpdateIndexByPath[pathKey] = len(targets)
+		}
 		targets = append(targets, ApplyPatchDisplayTarget{
 			Kind:       op.Kind,
 			SourcePath: op.Path,
@@ -421,6 +431,7 @@ func applyPatchOperationLineStats(op applyPatchOperation) (added, removed int) {
 func resolveApplyPatchTargets(doc applyPatchDocument, baseDir string) ([]MutationTarget, error) {
 	targets := make([]MutationTarget, 0, len(doc.Operations))
 	seen := make(map[string]struct{})
+	targetIndexBySource := make(map[string]int)
 	for _, op := range doc.Operations {
 		source, err := resolveApplyPatchPath(op.Path, baseDir)
 		if err != nil {
@@ -438,6 +449,14 @@ func resolveApplyPatchTargets(doc applyPatchDocument, baseDir string) ([]Mutatio
 			}
 			kind = MutationMove
 		}
+		if op.Kind == MutationUpdate && op.MovePath == "" {
+			if index, ok := targetIndexBySource[source]; ok {
+				existing := targets[index]
+				if existing.Kind == MutationUpdate && existing.SourcePath == existing.TargetPath {
+					continue
+				}
+			}
+		}
 		paths := []string{source}
 		if target != source {
 			paths = append(paths, target)
@@ -454,6 +473,7 @@ func resolveApplyPatchTargets(doc applyPatchDocument, baseDir string) ([]Mutatio
 			seen[candidate] = struct{}{}
 		}
 		targets = append(targets, MutationTarget{Kind: kind, SourcePath: source, TargetPath: target})
+		targetIndexBySource[source] = len(targets) - 1
 	}
 	sort.Slice(targets, func(i, j int) bool {
 		if targets[i].SourcePath != targets[j].SourcePath {
@@ -524,6 +544,17 @@ func BuildApplyPatchPlan(ctx context.Context, patch, baseDir string) (MutationPl
 	for _, target := range targets {
 		bySource[target.SourcePath] = target
 	}
+	plainUpdatesBySource := make(map[string][]applyPatchOperation)
+	for _, op := range doc.Operations {
+		if op.Kind != MutationUpdate || op.MovePath != "" {
+			continue
+		}
+		source, err := resolveApplyPatchPath(op.Path, baseDir)
+		if err != nil {
+			return MutationPlan{}, err
+		}
+		plainUpdatesBySource[source] = append(plainUpdatesBySource[source], op)
+	}
 
 	type existingTarget struct {
 		path string
@@ -541,12 +572,19 @@ func BuildApplyPatchPlan(ctx context.Context, patch, baseDir string) (MutationPl
 	}
 
 	plan := MutationPlan{Mutations: make([]PlannedMutation, 0, len(doc.Operations))}
+	plannedPlainUpdates := make(map[string]struct{})
 	for _, op := range doc.Operations {
 		// resolveApplyPatchTargets resolved this same doc above, so resolution
 		// cannot fail here; the check guards against the two paths drifting.
 		source, err := resolveApplyPatchPath(op.Path, baseDir)
 		if err != nil {
 			return MutationPlan{}, err
+		}
+		if op.Kind == MutationUpdate && op.MovePath == "" {
+			if _, planned := plannedPlainUpdates[source]; planned {
+				continue
+			}
+			plannedPlainUpdates[source] = struct{}{}
 		}
 		target := bySource[source]
 		mutation := PlannedMutation{Kind: target.Kind, SourcePath: source, TargetPath: target.TargetPath}
@@ -608,9 +646,16 @@ func BuildApplyPatchPlan(ctx context.Context, patch, baseDir string) (MutationPl
 				if err != nil {
 					return MutationPlan{}, fmt.Errorf("read update source %s: %w. No files were modified", op.Path, err)
 				}
-				after, err := applyApplyPatchHunks(ctx, decoded.Text, op.Hunks)
-				if err != nil {
-					return MutationPlan{}, fmt.Errorf("update %s: %w", op.Path, err)
+				after := decoded.Text
+				updates := []applyPatchOperation{op}
+				if op.MovePath == "" {
+					updates = plainUpdatesBySource[source]
+				}
+				for _, update := range updates {
+					after, err = applyApplyPatchHunks(ctx, after, update.Hunks)
+					if err != nil {
+						return MutationPlan{}, fmt.Errorf("update %s: %w", update.Path, err)
+					}
 				}
 				encoded, err := encodeString(after, decoded.Encoding)
 				if err != nil {

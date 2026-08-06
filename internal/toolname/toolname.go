@@ -21,6 +21,7 @@ const (
 	Done            = "done"
 	Delegate        = "delegate"
 	Notify          = "notify"
+	NotifyPeer      = "notify_peer"
 	Skill           = "skill"
 	Handoff         = "handoff"
 	Escalate        = "escalate"

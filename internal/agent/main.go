@@ -527,6 +527,7 @@ type MainAgent struct {
 	taskRegistryPersistMu    sync.Mutex
 	settlementJournalMu      sync.Mutex
 	taskGroupPersistMu       sync.Mutex
+	agentRequestPersistMu    sync.Mutex
 	taskRegistryPersistHook  func()                    // test-only barrier after snapshot, before durable write
 	sem                      chan struct{}             // compatibility view of governor normal runtime slots
 	fileTrack                *filelock.FileTracker     // file write conflict detection
@@ -609,8 +610,9 @@ type MainAgent struct {
 	toolTrace                    map[string]toolCallStageTrace
 
 	// Adhoc task counter for auto-assigning "adhoc-N" IDs.
-	adhocSeq     atomic.Uint64
-	taskGroupSeq atomic.Uint64
+	adhocSeq        atomic.Uint64
+	taskGroupSeq    atomic.Uint64
+	agentRequestSeq atomic.Uint64
 
 	// Optional MCP summary injected into the system prompt (set after MCP init).
 	mcpServersPromptMu    sync.RWMutex

@@ -818,6 +818,39 @@ func TestReservationCommitFailsAfterSubAgentShutdown(t *testing.T) {
 	}
 }
 
+func TestResponseMailboxReservationIsIdempotent(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-response-idempotent")
+	input := pendingUserMessage{Content: "decision", Mailbox: &message.MailboxMetadata{
+		MessageID: "response-corr-1", MessageType: string(AgentMessageTypeResponse),
+	}}
+	first := sub.reserveUserMessage(input)
+	if first == nil || !first.Commit() {
+		t.Fatal("first response reservation was not committed")
+	}
+	second := sub.reserveUserMessage(input)
+	if second == nil || !second.duplicate || !second.Commit() {
+		t.Fatalf("duplicate reservation = %#v, want successful no-op", second)
+	}
+	if got := len(sub.inputCh) + len(sub.inputOverflow); got != 1 {
+		t.Fatalf("queued response count = %d, want 1", got)
+	}
+}
+
+func TestRestoreMessagesRebuildsResponseMailboxIdempotency(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-response-restore")
+	sub.RestoreMessages([]message.Message{{Role: "user", Content: "decision", Mailbox: &message.MailboxMetadata{
+		MessageID: "response-corr-1", MessageType: string(AgentMessageTypeResponse),
+	}}})
+	if !sub.hasAcceptedMailbox("response-corr-1") {
+		t.Fatal("restored response mailbox ID was not indexed")
+	}
+	if sub.hasAcceptedMailbox("other") {
+		t.Fatal("unexpected mailbox ID was indexed")
+	}
+}
+
 func TestCreateSubAgentFromSubAgentContextSetsOwnerAndDepth(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)

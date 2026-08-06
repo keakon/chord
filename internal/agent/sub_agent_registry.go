@@ -66,6 +66,7 @@ type subAgentRegistry struct {
 	stateEnteredTurn map[string]uint64              // agentID → turn it entered a waiting/terminal state
 	settlements      map[taskAttemptKey]*TaskSettlement
 	taskGroups       map[string]*DurableTaskGroup
+	agentRequests    map[string]*DurableAgentRequest
 	taskRevision     uint64
 	taskChanged      chan struct{}
 	sessionEpoch     uint64
@@ -81,6 +82,7 @@ func newSubAgentRegistry() subAgentRegistry {
 		stateEnteredTurn: make(map[string]uint64),
 		settlements:      make(map[taskAttemptKey]*TaskSettlement),
 		taskGroups:       make(map[string]*DurableTaskGroup),
+		agentRequests:    make(map[string]*DurableAgentRequest),
 		taskChanged:      make(chan struct{}),
 	}
 }

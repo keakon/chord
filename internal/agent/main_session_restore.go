@@ -37,6 +37,7 @@ type loadedSessionState struct {
 	TaskRecords               map[string]*DurableTaskRecord
 	TaskSettlements           map[taskAttemptKey]*TaskSettlement
 	TaskGroups                map[string]*DurableTaskGroup
+	AgentRequests             map[string]*DurableAgentRequest
 	ActiveRole                string
 	ModelPoolCurrentModelPool string
 	ModelPoolAgentOverrides   map[string]string
@@ -450,6 +451,11 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	} else {
 		loaded.TaskGroups = groups
 	}
+	if requests, requestErr := loadAgentRequests(sessionPath); requestErr != nil {
+		return nil, fmt.Errorf("load agent requests: %w", requestErr)
+	} else {
+		loaded.AgentRequests = requests
+	}
 	if modelRefs := loaded.AgentModelRefs; len(modelRefs) > 0 {
 		for _, rec := range loaded.TaskRecords {
 			if rec == nil {
@@ -705,6 +711,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.setTaskRecords(loaded.TaskRecords)
 	a.resetTaskCoordination(a.sessionEpoch, loaded.TaskSettlements)
 	a.resetTaskGroups(loaded.TaskGroups)
+	a.resetAgentRequests(loaded.AgentRequests)
 	advanceInstanceCountersForTaskRecords(loaded.TaskRecords)
 	if nextAdhoc := nextAdhocSeqFromTaskRecords(loaded.TaskRecords); nextAdhoc > 0 {
 		a.adhocSeq.Store(nextAdhoc)

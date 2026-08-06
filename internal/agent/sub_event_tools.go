@@ -422,10 +422,15 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		if s.pendingEscalate != "" {
 			reason := s.pendingEscalate
 			s.pendingEscalate = ""
+			payload := tools.AgentRequestPayload{Reason: reason}
+			if s.pendingEscalateRequest != nil {
+				payload = *s.pendingEscalateRequest
+				s.pendingEscalateRequest = nil
+			}
 			s.sendEvent(Event{
 				Type:     EventEscalate,
 				SourceID: s.instanceID,
-				Payload:  reason,
+				Payload:  payload,
 			})
 			return
 		}
@@ -459,10 +464,15 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	if s.pendingEscalate != "" {
 		reason := s.pendingEscalate
 		s.pendingEscalate = ""
+		payload := tools.AgentRequestPayload{Reason: reason}
+		if s.pendingEscalateRequest != nil {
+			payload = *s.pendingEscalateRequest
+			s.pendingEscalateRequest = nil
+		}
 		s.sendEvent(Event{
 			Type:     EventEscalate,
 			SourceID: s.instanceID,
-			Payload:  reason,
+			Payload:  payload,
 		})
 		return
 	}

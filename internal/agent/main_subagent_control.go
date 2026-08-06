@@ -10,6 +10,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -333,27 +334,45 @@ func (a *MainAgent) deliverManualMessageToSubAgent(sub *SubAgent, message, kind 
 // the unlocked delivery tail (owned-mailbox drain + commit + bookkeeping)
 // still needs.
 type subAgentDeliveryPrep struct {
-	reservation     *subAgentInputReservation
-	replyRecord     SubAgentMailboxAckRecord
-	replyArtifact   tools.ArtifactRef
-	replyMessageID  string
-	replySummary    string
-	replyKind       string
-	needsResume     bool
-	previousState   SubAgentState
-	previousSummary string
-	drainOwned      bool
-	status          string
-	statusMessage   string
+	reservation      *subAgentInputReservation
+	alreadyDelivered bool
+	replyRecord      SubAgentMailboxAckRecord
+	replyArtifact    tools.ArtifactRef
+	replyMessageID   string
+	replySummary     string
+	replyKind        string
+	needsResume      bool
+	previousState    SubAgentState
+	previousSummary  string
+	drainOwned       bool
+	status           string
+	statusMessage    string
+	mailboxMetadata  *message.MailboxMetadata
+	trackReply       bool
 }
 
 func (a *MainAgent) deliverMessageToSubAgentWithMode(sub *SubAgent, message, kind string, manual bool) (string, string, error) {
+	return a.deliverMessageToSubAgentWithMetadata(sub, message, kind, manual, nil)
+}
+
+func (a *MainAgent) deliverMessageToSubAgentWithMetadata(sub *SubAgent, message, kind string, manual bool, metadata *message.MailboxMetadata) (string, string, error) {
+	return a.deliverMessageToSubAgentWithMetadataMode(sub, message, kind, manual, metadata, true)
+}
+
+func (a *MainAgent) deliverPeerMessageToSubAgent(sub *SubAgent, message, kind string, metadata *message.MailboxMetadata) (string, string, error) {
+	return a.deliverMessageToSubAgentWithMetadataMode(sub, message, kind, false, metadata, false)
+}
+
+func (a *MainAgent) deliverMessageToSubAgentWithMetadataMode(sub *SubAgent, message, kind string, manual bool, metadata *message.MailboxMetadata, trackReply bool) (string, string, error) {
 	if sub == nil {
 		return "", "", fmt.Errorf("missing worker")
 	}
-	prep, err := a.prepareSubAgentDelivery(sub, message, kind, manual)
+	prep, err := a.prepareSubAgentDelivery(sub, message, kind, manual, metadata, trackReply)
 	if err != nil {
 		return "", "", err
+	}
+	if prep.alreadyDelivered {
+		return prep.status, prep.statusMessage, nil
 	}
 	defer prep.reservation.Cancel()
 
@@ -375,7 +394,7 @@ func (a *MainAgent) deliverMessageToSubAgentWithMode(sub *SubAgent, message, kin
 	}
 	if prep.replyRecord.MessageID != "" {
 		a.applySubAgentMailboxReply(sub.instanceID, prep.replyRecord, prep.replyArtifact)
-	} else {
+	} else if prep.trackReply {
 		sub.setReplyThread(prep.replyMessageID, "", prep.replyKind, prep.replySummary)
 		if prep.replyArtifact.RelPath != "" {
 			sub.setLastArtifact(prep.replyArtifact)
@@ -395,11 +414,18 @@ func (a *MainAgent) deliverMessageToSubAgentWithMode(sub *SubAgent, message, kin
 // liveness check, slot acquisition, mailbox targeting, reply preparation, input
 // reservation, ack persistence, and reactivation. On success the caller owns
 // the returned reservation and must Commit or Cancel it.
-func (a *MainAgent) prepareSubAgentDelivery(sub *SubAgent, message, kind string, manual bool) (*subAgentDeliveryPrep, error) {
+func (a *MainAgent) prepareSubAgentDelivery(sub *SubAgent, message, kind string, manual bool, metadata *message.MailboxMetadata, trackReply bool) (*subAgentDeliveryPrep, error) {
 	sub.lifecycleMu.Lock()
 	defer sub.lifecycleMu.Unlock()
 	if !a.subs.withSubAgent(sub.instanceID, func(current *SubAgent) bool { return current == sub }) {
 		return nil, fmt.Errorf("SubAgent %s is no longer live; retry through task %s", sub.instanceID, sub.taskID)
+	}
+	if metadata != nil && sub.hasAcceptedMailbox(metadata.MessageID) {
+		return &subAgentDeliveryPrep{
+			alreadyDelivered: true,
+			status:           "delivered",
+			statusMessage:    "message already delivered",
+		}, nil
 	}
 	state := sub.State()
 
@@ -411,6 +437,8 @@ func (a *MainAgent) prepareSubAgentDelivery(sub *SubAgent, message, kind string,
 		drainOwned:      manual && (len(a.ownedSubAgentMailboxes[sub.instanceID]) > 0 || len(a.ownedMailboxSpool[sub.instanceID]) > 0),
 		status:          "queued",
 		statusMessage:   "message delivered to running worker",
+		mailboxMetadata: metadata,
+		trackReply:      trackReply,
 	}
 	payload := normalizeSubAgentMessage(kind, message)
 
@@ -423,8 +451,12 @@ func (a *MainAgent) prepareSubAgentDelivery(sub *SubAgent, message, kind string,
 		a.mailboxDeliveryPaused.Store(false)
 	}
 
-	targetMailboxID := strings.TrimSpace(sub.LastMailboxID())
-	targetMailbox := a.takeOutstandingMailboxForSub(sub)
+	var targetMailboxID string
+	var targetMailbox *SubAgentMailboxMessage
+	if trackReply {
+		targetMailboxID = strings.TrimSpace(sub.LastMailboxID())
+		targetMailbox = a.takeOutstandingMailboxForSub(sub)
+	}
 	if targetMailbox != nil {
 		if !a.ensureSubAgentMailboxPersisted(targetMailbox) {
 			a.requeueSubAgentMailboxInMemory(*targetMailbox)
@@ -441,7 +473,7 @@ func (a *MainAgent) prepareSubAgentDelivery(sub *SubAgent, message, kind string,
 		if prep.replyArtifact.RelPath != "" {
 			payload = fmt.Sprintf("[%s] Summary: %s\nDetailed instruction artifact: %s", prep.replyKind, truncateMailboxReplySummary(message), prep.replyArtifact.RelPath)
 		}
-	} else {
+	} else if trackReply {
 		prep.replyMessageID = a.nextSubAgentReplyMessageID(sub.instanceID)
 		prep.replySummary = truncateMailboxReplySummary(message)
 		if len(strings.TrimSpace(message)) > replyArtifactPayloadThreshold {
@@ -453,7 +485,7 @@ func (a *MainAgent) prepareSubAgentDelivery(sub *SubAgent, message, kind string,
 			}
 		}
 	}
-	prep.reservation = sub.reserveUserMessage(pendingUserMessage{Content: payload, FromUser: manual, DrainContextAppends: prep.drainOwned})
+	prep.reservation = sub.reserveUserMessage(pendingUserMessage{Content: payload, FromUser: manual, DrainContextAppends: prep.drainOwned, Mailbox: prep.mailboxMetadata})
 	if prep.reservation == nil {
 		if targetMailbox != nil {
 			a.requeueSubAgentMailboxInMemory(*targetMailbox)

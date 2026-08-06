@@ -230,6 +230,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	var taskComplete *AgentResult
 	var wakeMainCallID string
 	var wakeMainReason string
+	var wakeMainRequest *tools.AgentRequestPayload
 	var wakeMainArgsJSON string
 	for _, tc := range validCalls {
 		if tools.NormalizeName(tc.Name) == tools.NameComplete {
@@ -290,9 +291,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	}
 	for _, tc := range validCalls {
 		if tools.NormalizeName(tc.Name) == tools.NameEscalate {
-			var args struct {
-				Reason string `json:"reason"`
-			}
+			var args tools.AgentRequestPayload
 			if err := json.Unmarshal(tc.Args, &args); err != nil {
 				s.sendEvent(Event{
 					Type:    EventAgentError,
@@ -302,6 +301,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			}
 			wakeMainCallID = tc.ID
 			wakeMainReason = args.Reason
+			wakeMainRequest = &args
 			wakeMainArgsJSON = string(tc.Args)
 			break
 		}
@@ -375,7 +375,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			s.sendEvent(Event{
 				Type:     EventEscalate,
 				SourceID: s.instanceID,
-				Payload:  wakeMainReason,
+				Payload:  *wakeMainRequest,
 			})
 			return
 		}
@@ -412,6 +412,10 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	if wakeMainCallID != "" {
 		log.Infof("Escalate co-returned with other tools; executing others first agent=%v other_tools=%v", s.instanceID, len(regularToolCalls))
 		s.pendingEscalate = wakeMainReason
+		if wakeMainRequest != nil {
+			request := *wakeMainRequest
+			s.pendingEscalateRequest = &request
+		}
 	}
 
 	// Dispatch concurrency-safe finalize-time batches.

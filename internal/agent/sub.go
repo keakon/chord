@@ -151,9 +151,11 @@ type SubAgent struct {
 	// calls in one LLM response. The other tools execute first; EventAgentDone
 	// is sent once all of them complete. This prevents the last batch of file
 	// edits from being silently dropped.
-	pendingComplete       *AgentResult
-	pendingCompleteCallID string
-	pendingEscalate       string
+	pendingComplete        *AgentResult
+	pendingCompleteCallID  string
+	pendingEscalate        string
+	pendingEscalateRequest *tools.AgentRequestPayload
+	acceptedMailboxIDs     map[string]struct{} // guarded by inputQueueMu; de-duplicates durable deliveries
 
 	// Permission: merged ruleset (global + project + agent-level).
 	ruleset permission.Ruleset
@@ -461,6 +463,9 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	}
 	if notifyVisible || delegateVisible {
 		subTools.Register(tools.NewNotifyTool(sender, cfg.Parent, notifyVisible, notifyVisible && delegateVisible))
+	}
+	if cfg.Ruleset.Evaluate(tools.NameNotifyPeer, "*") != permission.ActionDeny {
+		subTools.Register(tools.NewNotifyPeerTool(cfg.Parent))
 	}
 
 	// Build the SubAgent's own context manager; sub-agents do not auto-compact.

@@ -23,6 +23,7 @@ const (
 	NameDone            = toolname.Done
 	NameDelegate        = toolname.Delegate
 	NameNotify          = toolname.Notify
+	NameNotifyPeer      = toolname.NotifyPeer
 	NameSkill           = toolname.Skill
 	NameHandoff         = toolname.Handoff
 	NameEscalate        = toolname.Escalate

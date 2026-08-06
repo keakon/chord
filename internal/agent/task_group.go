@@ -151,18 +151,9 @@ func (a *MainAgent) CreateTaskGroup(ctx context.Context, request tools.TaskGroup
 	if err := ctx.Err(); err != nil {
 		return tools.TaskGroupCreateResult{}, err
 	}
-	seen := make(map[string]struct{}, len(request.TaskIDs))
-	taskIDs := make([]string, 0, len(request.TaskIDs))
-	for _, taskID := range request.TaskIDs {
-		taskID = strings.TrimSpace(taskID)
-		if taskID == "" {
-			return tools.TaskGroupCreateResult{}, fmt.Errorf("task_ids must not contain empty values")
-		}
-		if _, ok := seen[taskID]; ok {
-			continue
-		}
-		seen[taskID] = struct{}{}
-		taskIDs = append(taskIDs, taskID)
+	taskIDs, err := tools.DedupeTaskIDs(request.TaskIDs)
+	if err != nil {
+		return tools.TaskGroupCreateResult{}, err
 	}
 	if len(taskIDs) == 0 {
 		return tools.TaskGroupCreateResult{}, fmt.Errorf("task_ids is required")
