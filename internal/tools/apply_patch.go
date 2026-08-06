@@ -92,6 +92,7 @@ type PlannedMutation struct {
 	TargetBeforeBytes  []byte
 	TargetBeforeMode   os.FileMode
 	AfterBytes         []byte
+	AfterMode          os.FileMode
 	AfterText          string
 	Added              int
 	Removed            int
@@ -301,11 +302,15 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 						continue
 					}
 				}
-				if !strings.HasPrefix(lines[i], "@@") {
+				implicitFirstHunk := len(op.Hunks) == 0 && (lines[i] == "" || strings.ContainsRune(" +-", rune(lines[i][0])))
+				if !strings.HasPrefix(lines[i], "@@") && !implicitFirstHunk {
 					return applyPatchDocument{}, fmt.Errorf("invalid update hunk at line %d: expected @@", i+1)
 				}
-				h := applyPatchHunk{Header: strings.TrimSpace(strings.TrimPrefix(lines[i], "@@"))}
-				i++
+				var h applyPatchHunk
+				if !implicitFirstHunk {
+					h.Header = strings.TrimSpace(strings.TrimPrefix(lines[i], "@@"))
+					i++
+				}
 				for i < len(lines)-1 && !strings.HasPrefix(lines[i], "@@") && !isApplyPatchMarker(lines[i]) {
 					if lines[i] == "" {
 						next, ok := skipApplyPatchSeparatorRun(lines, i, true)
@@ -431,7 +436,6 @@ func applyPatchOperationLineStats(op applyPatchOperation) (added, removed int) {
 func resolveApplyPatchTargets(doc applyPatchDocument, baseDir string) ([]MutationTarget, error) {
 	targets := make([]MutationTarget, 0, len(doc.Operations))
 	seen := make(map[string]struct{})
-	targetIndexBySource := make(map[string]int)
 	for _, op := range doc.Operations {
 		source, err := resolveApplyPatchPath(op.Path, baseDir)
 		if err != nil {
@@ -449,21 +453,13 @@ func resolveApplyPatchTargets(doc applyPatchDocument, baseDir string) ([]Mutatio
 			}
 			kind = MutationMove
 		}
-		if op.Kind == MutationUpdate && op.MovePath == "" {
-			if index, ok := targetIndexBySource[source]; ok {
-				existing := targets[index]
-				if existing.Kind == MutationUpdate && existing.SourcePath == existing.TargetPath {
-					continue
-				}
-			}
-		}
 		paths := []string{source}
 		if target != source {
 			paths = append(paths, target)
 		}
 		for _, candidate := range paths {
-			if _, dup := seen[candidate]; dup {
-				return nil, fmt.Errorf("apply_patch contains duplicate operations for %s", candidate)
+			if _, duplicate := seen[candidate]; duplicate {
+				continue
 			}
 			for existing := range seen {
 				if isCleanPathWithin(candidate, existing) || isCleanPathWithin(existing, candidate) {
@@ -473,7 +469,6 @@ func resolveApplyPatchTargets(doc applyPatchDocument, baseDir string) ([]Mutatio
 			seen[candidate] = struct{}{}
 		}
 		targets = append(targets, MutationTarget{Kind: kind, SourcePath: source, TargetPath: target})
-		targetIndexBySource[source] = len(targets) - 1
 	}
 	sort.Slice(targets, func(i, j int) bool {
 		if targets[i].SourcePath != targets[j].SourcePath {
@@ -540,164 +535,273 @@ func BuildApplyPatchPlan(ctx context.Context, patch, baseDir string) (MutationPl
 	if err != nil {
 		return MutationPlan{}, err
 	}
-	bySource := make(map[string]MutationTarget, len(targets))
-	for _, target := range targets {
-		bySource[target.SourcePath] = target
+	states, err := snapshotApplyPatchStates(targets)
+	if err != nil {
+		return MutationPlan{}, err
 	}
-	plainUpdatesBySource := make(map[string][]applyPatchOperation)
 	for _, op := range doc.Operations {
-		if op.Kind != MutationUpdate || op.MovePath != "" {
-			continue
-		}
-		source, err := resolveApplyPatchPath(op.Path, baseDir)
-		if err != nil {
+		if err := applyPatchOperationToVirtualState(ctx, states, op, baseDir); err != nil {
 			return MutationPlan{}, err
 		}
-		plainUpdatesBySource[source] = append(plainUpdatesBySource[source], op)
 	}
+	return buildApplyPatchMutationPlan(states), nil
+}
 
-	type existingTarget struct {
+type applyPatchVirtualFile struct {
+	path          string
+	displayPath   string
+	originPath    string
+	initialExists bool
+	initialBytes  []byte
+	initialMode   os.FileMode
+	exists        bool
+	bytes         []byte
+	mode          os.FileMode
+	touched       bool
+}
+
+func snapshotApplyPatchStates(targets []MutationTarget) (map[string]*applyPatchVirtualFile, error) {
+	states := make(map[string]*applyPatchVirtualFile, len(targets)*2)
+	type existingFile struct {
 		path string
 		info os.FileInfo
 	}
-	existingTargets := make([]existingTarget, 0, len(targets)*2)
-	recordExistingTarget := func(path string, info os.FileInfo) error {
-		for _, existing := range existingTargets {
-			if os.SameFile(existing.info, info) {
-				return fmt.Errorf("apply_patch contains overlapping operations for %s and %s", existing.path, path)
-			}
-		}
-		existingTargets = append(existingTargets, existingTarget{path: path, info: info})
-		return nil
-	}
-
-	plan := MutationPlan{Mutations: make([]PlannedMutation, 0, len(doc.Operations))}
-	plannedPlainUpdates := make(map[string]struct{})
-	for _, op := range doc.Operations {
-		// resolveApplyPatchTargets resolved this same doc above, so resolution
-		// cannot fail here; the check guards against the two paths drifting.
-		source, err := resolveApplyPatchPath(op.Path, baseDir)
-		if err != nil {
-			return MutationPlan{}, err
-		}
-		if op.Kind == MutationUpdate && op.MovePath == "" {
-			if _, planned := plannedPlainUpdates[source]; planned {
+	var existingFiles []existingFile
+	for _, target := range targets {
+		for _, path := range []string{target.SourcePath, target.TargetPath} {
+			if path == "" {
 				continue
 			}
-			plannedPlainUpdates[source] = struct{}{}
+			if _, ok := states[path]; ok {
+				continue
+			}
+			state := &applyPatchVirtualFile{path: path, displayPath: path}
+			info, err := os.Lstat(path)
+			if os.IsNotExist(err) {
+				states[path] = state
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("inspect apply_patch path %s: %w. No files were modified", path, err)
+			}
+			if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+				return nil, fmt.Errorf("apply_patch path is not a regular file: %s. No files were modified", path)
+			}
+			for _, existing := range existingFiles {
+				if os.SameFile(existing.info, info) {
+					return nil, fmt.Errorf("apply_patch contains overlapping operations for %s and %s", existing.path, path)
+				}
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("read apply_patch path %s: %w. No files were modified", path, err)
+			}
+			state.initialExists = true
+			state.initialBytes = append([]byte(nil), data...)
+			state.initialMode = info.Mode()
+			state.originPath = path
+			state.exists = true
+			state.bytes = append([]byte(nil), data...)
+			state.mode = info.Mode()
+			states[path] = state
+			existingFiles = append(existingFiles, existingFile{path: path, info: info})
 		}
-		target := bySource[source]
-		mutation := PlannedMutation{Kind: target.Kind, SourcePath: source, TargetPath: target.TargetPath}
-		switch op.Kind {
-		case MutationAdd:
-			if _, err := os.Lstat(source); err == nil {
-				return MutationPlan{}, fmt.Errorf("cannot add file that already exists: %s. No files were modified", op.Path)
-			} else if !os.IsNotExist(err) {
-				return MutationPlan{}, fmt.Errorf("inspect add target %s: %w. No files were modified", op.Path, err)
-			}
-			mutation.AfterBytes = []byte(op.Content)
-			mutation.AfterText = op.Content
-			mutation.Added = lineCountForMutation(op.Content)
-			mutation.diffInput = unifiedFileDiff{NewContent: op.Content, OldFilename: op.Path, NewFilename: op.Path}
-			mutation.diffable = true
-		case MutationDelete:
-			before, info, err := readApplyPatchSource(source, op.Path)
-			if err != nil {
-				return MutationPlan{}, err
-			}
-			if err := recordExistingTarget(source, info); err != nil {
-				return MutationPlan{}, err
-			}
-			mutation.BeforeExists = true
-			mutation.BeforeBytes = before
-			mutation.BeforeMode = info.Mode()
-			mutation.Removed = lineCountForMutation(string(before))
-			if decoded, decodeErr := decodeTextBytes(before, source); decodeErr == nil {
-				mutation.diffInput = unifiedFileDiff{OldContent: decoded.Text, OldFilename: op.Path, NewFilename: op.Path}
-				mutation.diffable = true
-			}
-		case MutationUpdate:
-			before, info, err := readApplyPatchSource(source, op.Path)
-			if err != nil {
-				return MutationPlan{}, err
-			}
-			if err := recordExistingTarget(source, info); err != nil {
-				return MutationPlan{}, err
-			}
-			mutation.BeforeExists = true
-			mutation.BeforeBytes = before
-			mutation.BeforeMode = info.Mode()
+	}
+	return states, nil
+}
 
-			if len(op.Hunks) == 0 {
-				// Rename-only: carry the bytes unchanged so mixed EOL,
-				// binary, and regional encodings survive a round-trip.
-				mutation.AfterBytes = before
-				if decoded, decodeErr := decodeTextBytes(before, source); decodeErr == nil {
-					mutation.AfterText = decoded.Text
-					mutation.diffInput = unifiedFileDiff{OldContent: decoded.Text, NewContent: decoded.Text, OldFilename: op.Path, NewFilename: op.MovePath}
-					mutation.diffable = true
-				}
-			} else {
-				// Decode the bytes already read for the revalidation
-				// snapshot instead of re-reading the file: a second read
-				// would double the I/O and could observe different content
-				// than BeforeBytes.
-				decoded, err := decodeTextBytes(before, source)
-				if err != nil {
-					return MutationPlan{}, fmt.Errorf("read update source %s: %w. No files were modified", op.Path, err)
-				}
-				after := decoded.Text
-				updates := []applyPatchOperation{op}
-				if op.MovePath == "" {
-					updates = plainUpdatesBySource[source]
-				}
-				for _, update := range updates {
-					after, err = applyApplyPatchHunks(ctx, after, update.Hunks)
-					if err != nil {
-						return MutationPlan{}, fmt.Errorf("update %s: %w", update.Path, err)
-					}
-				}
-				encoded, err := encodeString(after, decoded.Encoding)
-				if err != nil {
-					return MutationPlan{}, fmt.Errorf("encode update %s: %w. No files were modified", op.Path, err)
-				}
-				mutation.AfterBytes = encoded
-				mutation.AfterText = after
-				newPath := op.Path
-				if op.MovePath != "" {
-					newPath = op.MovePath
-				}
-				mutation.diffInput = unifiedFileDiff{OldContent: decoded.Text, NewContent: after, OldFilename: op.Path, NewFilename: newPath}
-				mutation.diffable = true
-				diff := GenerateUnifiedDiffSummary(decoded.Text, after, op.Path)
-				mutation.Added, mutation.Removed = diff.Added, diff.Removed
+func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*applyPatchVirtualFile, op applyPatchOperation, baseDir string) error {
+	source, err := resolveApplyPatchPath(op.Path, baseDir)
+	if err != nil {
+		return err
+	}
+	state := states[source]
+	state.displayPath = op.Path
+	state.touched = true
+	switch op.Kind {
+	case MutationAdd:
+		if state.exists {
+			return fmt.Errorf("cannot add file that already exists: %s. No files were modified", op.Path)
+		}
+		state.mode = 0o644
+		state.exists = true
+		state.bytes = []byte(op.Content)
+		state.originPath = ""
+		return nil
+	case MutationDelete:
+		if !state.exists {
+			return applyPatchMissingSourceError(op.Path, baseDir)
+		}
+		state.exists = false
+		state.bytes = nil
+		state.originPath = ""
+		return nil
+	case MutationUpdate:
+		if !state.exists {
+			return applyPatchMissingSourceError(op.Path, baseDir)
+		}
+		if len(op.Hunks) > 0 {
+			decoded, err := decodeTextBytes(state.bytes, source)
+			if err != nil {
+				return fmt.Errorf("read update source %s: %w. No files were modified", op.Path, err)
 			}
-			if op.MovePath != "" {
-				mutation.Kind = MutationMove
-				if target.TargetPath != source {
-					if data, err := os.ReadFile(target.TargetPath); err == nil {
-						info, statErr := os.Stat(target.TargetPath)
-						if statErr != nil {
-							return MutationPlan{}, fmt.Errorf("inspect move target %s: %w. No files were modified", op.MovePath, statErr)
-						}
-						if err := ensureRegularFilePath(op.MovePath, info); err != nil {
-							return MutationPlan{}, fmt.Errorf("%w. No files were modified", err)
-						}
-						if err := recordExistingTarget(target.TargetPath, info); err != nil {
-							return MutationPlan{}, err
-						}
-						mutation.TargetBeforeExists = true
-						mutation.TargetBeforeBytes = data
-						mutation.TargetBeforeMode = info.Mode()
-					} else if !os.IsNotExist(err) {
-						return MutationPlan{}, fmt.Errorf("inspect move target %s: %w. No files were modified", op.MovePath, err)
-					}
-				}
+			after, err := applyApplyPatchHunks(ctx, decoded.Text, op.Hunks)
+			if err != nil {
+				return fmt.Errorf("update %s: %w", op.Path, err)
+			}
+			state.bytes, err = encodeString(after, decoded.Encoding)
+			if err != nil {
+				return fmt.Errorf("encode update %s: %w. No files were modified", op.Path, err)
 			}
 		}
+		if op.MovePath == "" {
+			return nil
+		}
+		targetPath, err := resolveApplyPatchPath(op.MovePath, baseDir)
+		if err != nil {
+			return err
+		}
+		if targetPath == source {
+			return fmt.Errorf("apply_patch move source and target are the same: %s", source)
+		}
+		target := states[targetPath]
+		target.displayPath = op.MovePath
+		target.touched = true
+		target.exists = true
+		target.bytes = append([]byte(nil), state.bytes...)
+		target.mode = state.mode
+		target.originPath = state.originPath
+		state.exists = false
+		state.bytes = nil
+		state.originPath = ""
+		return nil
+	default:
+		return fmt.Errorf("unsupported apply_patch operation %q", op.Kind)
+	}
+}
+
+func applyPatchMissingSourceError(displayPath, baseDir string) error {
+	return withPathSuggestionsInDir(
+		fmt.Sprintf("read apply_patch source %s: file not found: %s. No files were modified", displayPath, displayPath),
+		displayPath, baseDir, PathTargetRegularFile,
+	)
+}
+
+func buildApplyPatchMutationPlan(states map[string]*applyPatchVirtualFile) MutationPlan {
+	paths := make([]string, 0, len(states))
+	for path, state := range states {
+		if state.touched {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	plan := MutationPlan{Mutations: make([]PlannedMutation, 0, len(paths))}
+	consumed := make(map[string]struct{})
+	for _, sourcePath := range paths {
+		source := states[sourcePath]
+		if !source.initialExists || source.exists {
+			continue
+		}
+		for _, targetPath := range paths {
+			target := states[targetPath]
+			if targetPath == sourcePath || !target.exists || target.originPath != sourcePath {
+				continue
+			}
+			mutation := PlannedMutation{
+				Kind:               MutationMove,
+				SourcePath:         sourcePath,
+				TargetPath:         targetPath,
+				BeforeExists:       true,
+				BeforeBytes:        append([]byte(nil), source.initialBytes...),
+				BeforeMode:         source.initialMode,
+				TargetBeforeExists: target.initialExists,
+				TargetBeforeBytes:  append([]byte(nil), target.initialBytes...),
+				TargetBeforeMode:   target.initialMode,
+				AfterBytes:         append([]byte(nil), target.bytes...),
+				AfterMode:          target.mode,
+			}
+			populateApplyPatchMutationDiff(&mutation, source.displayPath, target.displayPath)
+			plan.Mutations = append(plan.Mutations, mutation)
+			consumed[sourcePath] = struct{}{}
+			consumed[targetPath] = struct{}{}
+			break
+		}
+	}
+	for _, path := range paths {
+		if _, ok := consumed[path]; ok {
+			continue
+		}
+		state := states[path]
+		if !state.initialExists && !state.exists {
+			continue
+		}
+		mutation := PlannedMutation{
+			SourcePath:   path,
+			TargetPath:   path,
+			BeforeExists: state.initialExists,
+			BeforeBytes:  append([]byte(nil), state.initialBytes...),
+			BeforeMode:   state.initialMode,
+			AfterBytes:   append([]byte(nil), state.bytes...),
+			AfterMode:    state.mode,
+		}
+		switch {
+		case !state.initialExists && state.exists:
+			mutation.Kind = MutationAdd
+		case state.initialExists && !state.exists:
+			mutation.Kind = MutationDelete
+		default:
+			mutation.Kind = MutationUpdate
+		}
+		populateApplyPatchMutationDiff(&mutation, state.displayPath, state.displayPath)
 		plan.Mutations = append(plan.Mutations, mutation)
 	}
-	return plan, nil
+	sort.Slice(plan.Mutations, func(i, j int) bool {
+		if plan.Mutations[i].SourcePath != plan.Mutations[j].SourcePath {
+			return plan.Mutations[i].SourcePath < plan.Mutations[j].SourcePath
+		}
+		return plan.Mutations[i].TargetPath < plan.Mutations[j].TargetPath
+	})
+	return plan
+}
+
+func populateApplyPatchMutationDiff(mutation *PlannedMutation, oldDisplayPath, newDisplayPath string) {
+	if mutation == nil {
+		return
+	}
+	oldText, oldTextOK := decodedText{}, false
+	if mutation.BeforeExists {
+		if decoded, err := decodeTextBytes(mutation.BeforeBytes, mutation.SourcePath); err == nil {
+			oldText, oldTextOK = decoded, true
+		}
+	}
+	newText, newTextOK := decodedText{}, false
+	if mutation.Kind != MutationDelete {
+		if decoded, err := decodeTextBytes(mutation.AfterBytes, mutation.TargetPath); err == nil {
+			newText, newTextOK = decoded, true
+			mutation.AfterText = decoded.Text
+		}
+	}
+	switch mutation.Kind {
+	case MutationAdd:
+		if newTextOK {
+			mutation.Added = lineCountForMutation(newText.Text)
+			mutation.diffInput = unifiedFileDiff{NewContent: newText.Text, OldFilename: oldDisplayPath, NewFilename: newDisplayPath}
+			mutation.diffable = true
+		}
+	case MutationDelete:
+		if oldTextOK {
+			mutation.Removed = lineCountForMutation(oldText.Text)
+			mutation.diffInput = unifiedFileDiff{OldContent: oldText.Text, OldFilename: oldDisplayPath, NewFilename: newDisplayPath}
+			mutation.diffable = true
+		}
+	case MutationUpdate, MutationMove:
+		if oldTextOK && newTextOK {
+			diff := GenerateUnifiedDiffSummary(oldText.Text, newText.Text, oldDisplayPath)
+			mutation.Added, mutation.Removed = diff.Added, diff.Removed
+			mutation.diffInput = unifiedFileDiff{OldContent: oldText.Text, NewContent: newText.Text, OldFilename: oldDisplayPath, NewFilename: newDisplayPath}
+			mutation.diffable = true
+		}
+	}
 }
 
 func applyPatchMutationDiffSummary(plan MutationPlan) DiffSummary {
@@ -717,34 +821,12 @@ func applyPatchMutationDiffSummary(plan MutationPlan) DiffSummary {
 	return summary
 }
 
-func readApplyPatchSource(path, display string) ([]byte, os.FileInfo, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil, withPathSuggestionsInDir(
-				fmt.Sprintf("read apply_patch source %s: file not found: %s. No files were modified", display, display),
-				display, "", PathTargetRegularFile,
-			)
-		}
-		return nil, nil, fmt.Errorf("read apply_patch source %s: %w. No files were modified", display, err)
-	}
-	if err := ensureRegularFilePath(display, info); err != nil {
-		return nil, nil, fmt.Errorf("%w. No files were modified", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, nil, fmt.Errorf("read apply_patch source %s: %w. No files were modified", display, err)
-	}
-	return data, info, nil
-}
-
 func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatchHunk) (string, error) {
 	newline := "\n"
 	if strings.Contains(content, "\r\n") {
 		newline = "\r\n"
 	}
 	logical := strings.ReplaceAll(content, "\r\n", "\n")
-	finalNewline := strings.HasSuffix(logical, "\n")
 	var fileLines []string
 	if logical != "" {
 		fileLines = strings.Split(strings.TrimSuffix(logical, "\n"), "\n")
@@ -769,13 +851,7 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 		}
 		match := -1
 		if len(oldSeq) == 0 {
-			// A single pure insertion is unambiguous only for an existing empty
-			// file. Non-empty files still require context so a stale model cannot
-			// silently insert at the wrong location.
-			if len(fileLines) != 0 || len(hunks) != 1 || hunk.Header != "" || hunk.EndOfFile {
-				return "", fmt.Errorf("hunk has no context or removed lines; add unchanged context. No files were modified")
-			}
-			match = 0
+			match = len(fileLines)
 		} else {
 			match = findApplyPatchSequence(fileLines, oldSeq, searchStart, hunk.EndOfFile)
 		}
@@ -807,10 +883,12 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 		replaced = append(replaced, newSeq...)
 		replaced = append(replaced, fileLines[match+len(oldSeq):]...)
 		fileLines = replaced
-		searchStart = match + len(newSeq)
+		if len(oldSeq) > 0 {
+			searchStart = match + len(newSeq)
+		}
 	}
 	out := strings.Join(fileLines, "\n")
-	if finalNewline {
+	if len(fileLines) > 0 {
 		out += "\n"
 	}
 	if newline == "\r\n" {
@@ -857,7 +935,7 @@ func findApplyPatchSequence(lines, pattern []string, start int, eof bool) int {
 
 func CommitMutationPlan(plan MutationPlan) error {
 	if len(plan.Mutations) == 0 {
-		return fmt.Errorf("no files were modified")
+		return nil
 	}
 	for _, mutation := range plan.Mutations {
 		if err := revalidateMutation(mutation); err != nil {
@@ -933,17 +1011,18 @@ func revalidateMutation(m PlannedMutation) error {
 }
 
 func commitMutation(m PlannedMutation) (bool, error) {
+	afterMode := mutationAfterMode(m)
 	switch m.Kind {
 	case MutationAdd:
 		if err := os.MkdirAll(filepath.Dir(m.TargetPath), 0755); err != nil {
 			return false, err
 		}
-		return writeNewFileNoFollowMode(m.TargetPath, m.AfterBytes, 0644, false)
+		return writeNewFileNoFollowMode(m.TargetPath, m.AfterBytes, afterMode, false)
 	case MutationUpdate:
 		if err := os.MkdirAll(filepath.Dir(m.TargetPath), 0755); err != nil {
 			return false, err
 		}
-		err := writeFileNoFollow(m.TargetPath, m.AfterBytes, 0644)
+		err := writeFileNoFollowExactMode(m.TargetPath, m.AfterBytes, afterMode)
 		return err != nil, err
 	case MutationDelete:
 		return false, os.Remove(m.SourcePath)
@@ -952,13 +1031,13 @@ func commitMutation(m PlannedMutation) (bool, error) {
 			return false, err
 		}
 		if m.TargetBeforeExists {
-			if err := writeFileNoFollowExactMode(m.TargetPath, m.AfterBytes, m.BeforeMode); err != nil {
+			if err := writeFileNoFollowExactMode(m.TargetPath, m.AfterBytes, afterMode); err != nil {
 				if rollbackErr := rollbackMoveTarget(m); rollbackErr != nil {
 					return false, fmt.Errorf("%w; rollback move target failed: %v", err, rollbackErr)
 				}
 				return false, err
 			}
-		} else if created, err := writeNewFileNoFollowMode(m.TargetPath, m.AfterBytes, m.BeforeMode, true); err != nil {
+		} else if created, err := writeNewFileNoFollowMode(m.TargetPath, m.AfterBytes, afterMode, true); err != nil {
 			if created {
 				if rollbackErr := rollbackMoveTarget(m); rollbackErr != nil {
 					return false, fmt.Errorf("%w; rollback move target failed: %v", err, rollbackErr)
@@ -976,6 +1055,19 @@ func commitMutation(m PlannedMutation) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func mutationAfterMode(m PlannedMutation) os.FileMode {
+	if m.AfterMode != 0 {
+		return m.AfterMode
+	}
+	if m.Kind == MutationMove && m.TargetBeforeExists && m.TargetBeforeMode != 0 {
+		return m.TargetBeforeMode
+	}
+	if m.BeforeMode != 0 {
+		return m.BeforeMode
+	}
+	return 0o644
 }
 
 func rollbackMoveTarget(m PlannedMutation) error {
@@ -1031,6 +1123,9 @@ func rollbackMutations(committed []PlannedMutation) error {
 }
 
 func (t ApplyPatchTool) finishApplyPatch(plan MutationPlan) string {
+	if len(plan.Mutations) == 0 {
+		return "Applied patch:\nNo net file changes"
+	}
 	var lines []string
 	for _, mutation := range plan.Mutations {
 		marker, path := "M", mutation.SourcePath

@@ -124,12 +124,12 @@ func TestApplyPatchUpdatesExistingEmptyFileWithPureInsertion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "hello" {
-		t.Fatalf("empty.txt = %q, want %q", got, "hello")
+	if string(got) != "hello\n" {
+		t.Fatalf("empty.txt = %q, want %q", got, "hello\\n")
 	}
 }
 
-func TestApplyPatchRejectsPureInsertionWithoutContextInNonEmptyFile(t *testing.T) {
+func TestApplyPatchPureInsertionWithoutContextAppendsToNonEmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "existing.txt")
 	if err := os.WriteFile(path, []byte("existing\n"), 0644); err != nil {
@@ -137,16 +137,15 @@ func TestApplyPatchRejectsPureInsertionWithoutContextInNonEmptyFile(t *testing.T
 	}
 	patch := "*** Begin Patch\n*** Update File: existing.txt\n@@\n+ambiguous\n*** End Patch"
 
-	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
-	if err == nil || !strings.Contains(err.Error(), "no context or removed lines") {
-		t.Fatalf("err = %v, want missing-context rejection", err)
+	if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch)); err != nil {
+		t.Fatal(err)
 	}
-	got, readErr := os.ReadFile(path)
-	if readErr != nil {
-		t.Fatal(readErr)
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if string(got) != "existing\n" {
-		t.Fatalf("existing.txt changed to %q", got)
+	if string(got) != "existing\nambiguous\n" {
+		t.Fatalf("existing.txt = %q, want appended line", got)
 	}
 }
 
@@ -177,6 +176,279 @@ func TestApplyPatchMove(t *testing.T) {
 		if got, want := info.Mode().Perm(), os.FileMode(0755); got != want {
 			t.Fatalf("new.txt mode = %04o, want %04o", got, want)
 		}
+	}
+}
+
+func TestApplyPatchCodexSequentialFileOperations(t *testing.T) {
+	t.Run("move then recreate source", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "plan.md")
+		archive := filepath.Join(dir, "archive", "plan.md")
+		if err := os.WriteFile(path, []byte("# old\nbody\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: plan.md\n*** Move to: archive/plan.md\n@@\n-# old\n+# archived\n" +
+			"*** Add File: plan.md\n+# new\n+replacement\n" +
+			"*** End Patch"
+		plan, err := BuildApplyPatchPlan(context.Background(), patch, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plan.Mutations) != 2 {
+			t.Fatalf("mutations = %#v, want source update plus archive add", plan.Mutations)
+		}
+		byPath := make(map[string]PlannedMutation, len(plan.Mutations))
+		for _, mutation := range plan.Mutations {
+			byPath[mutation.TargetPath] = mutation
+		}
+		if mutation := byPath[path]; mutation.Kind != MutationUpdate || string(mutation.BeforeBytes) != "# old\nbody\n" || string(mutation.AfterBytes) != "# new\nreplacement\n" || mutation.AfterMode.Perm() != 0o644 {
+			t.Fatalf("source mutation = %#v", mutation)
+		}
+		if mutation := byPath[archive]; mutation.Kind != MutationAdd || string(mutation.AfterBytes) != "# archived\nbody\n" || mutation.AfterMode.Perm() != 0o600 {
+			t.Fatalf("archive mutation = %#v", mutation)
+		}
+		if err := CommitMutationPlan(plan); err != nil {
+			t.Fatal(err)
+		}
+		assertApplyPatchFile(t, path, "# new\nreplacement\n")
+		assertApplyPatchFile(t, archive, "# archived\nbody\n")
+	})
+
+	t.Run("add rejects existing file atomically", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "file.txt")
+		if err := os.WriteFile(path, []byte("original\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Add File: file.txt\n+middle\n" +
+			"*** Update File: file.txt\n-middle\n+final\n" +
+			"*** End Patch"
+		if _, err := BuildApplyPatchPlan(context.Background(), patch, dir); err == nil || !strings.Contains(err.Error(), "cannot add file that already exists") {
+			t.Fatalf("error = %v, want existing-file rejection", err)
+		}
+		assertApplyPatchFile(t, path, "original\n")
+	})
+
+	t.Run("update then delete", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "file.txt")
+		if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: file.txt\n@@\n-old\n+new\n" +
+			"*** Delete File: file.txt\n" +
+			"*** End Patch"
+		plan, err := BuildApplyPatchPlan(context.Background(), patch, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plan.Mutations) != 1 || plan.Mutations[0].Kind != MutationDelete || string(plan.Mutations[0].BeforeBytes) != "old\n" {
+			t.Fatalf("mutations = %#v, want deletion of original file", plan.Mutations)
+		}
+		if err := CommitMutationPlan(plan); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("file still exists, err=%v", err)
+		}
+	})
+
+	t.Run("delete then add", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "file.txt")
+		if err := os.WriteFile(path, []byte("old\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Delete File: file.txt\n" +
+			"*** Add File: file.txt\n+new\n" +
+			"*** End Patch"
+		plan, err := BuildApplyPatchPlan(context.Background(), patch, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plan.Mutations) != 1 || plan.Mutations[0].Kind != MutationUpdate || string(plan.Mutations[0].AfterBytes) != "new\n" || plan.Mutations[0].AfterMode.Perm() != 0o644 {
+			t.Fatalf("mutations = %#v, want recreated 0644 file", plan.Mutations)
+		}
+		if err := CommitMutationPlan(plan); err != nil {
+			t.Fatal(err)
+		}
+		assertApplyPatchFile(t, path, "new\n")
+	})
+}
+
+func TestApplyPatchCodexSequentialMoves(t *testing.T) {
+	t.Run("move then update destination", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "old.txt"), []byte("old\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: old.txt\n*** Move to: middle.txt\n@@\n-old\n+middle\n" +
+			"*** Update File: middle.txt\n@@\n-middle\n+final\n" +
+			"*** End Patch"
+		plan, err := BuildApplyPatchPlan(context.Background(), patch, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plan.Mutations) != 1 || plan.Mutations[0].Kind != MutationMove || plan.Mutations[0].SourcePath != filepath.Join(dir, "old.txt") || plan.Mutations[0].TargetPath != filepath.Join(dir, "middle.txt") || string(plan.Mutations[0].AfterBytes) != "final\n" {
+			t.Fatalf("mutations = %#v, want one folded move", plan.Mutations)
+		}
+		if err := CommitMutationPlan(plan); err != nil {
+			t.Fatal(err)
+		}
+		assertApplyPatchFile(t, filepath.Join(dir, "middle.txt"), "final\n")
+	})
+
+	t.Run("move chain folds original to final", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "old.txt"), []byte("old\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: old.txt\n*** Move to: middle.txt\n@@\n-old\n+middle\n" +
+			"*** Update File: middle.txt\n*** Move to: final.txt\n@@\n-middle\n+final\n" +
+			"*** End Patch"
+		plan, err := BuildApplyPatchPlan(context.Background(), patch, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plan.Mutations) != 1 || plan.Mutations[0].Kind != MutationMove || plan.Mutations[0].SourcePath != filepath.Join(dir, "old.txt") || plan.Mutations[0].TargetPath != filepath.Join(dir, "final.txt") {
+			t.Fatalf("mutations = %#v, want old-to-final move", plan.Mutations)
+		}
+		if err := CommitMutationPlan(plan); err != nil {
+			t.Fatal(err)
+		}
+		assertApplyPatchFile(t, filepath.Join(dir, "final.txt"), "final\n")
+		if _, err := os.Stat(filepath.Join(dir, "middle.txt")); !os.IsNotExist(err) {
+			t.Fatalf("middle file exists, err=%v", err)
+		}
+	})
+
+	t.Run("move overwrites target and keeps source mode", func(t *testing.T) {
+		dir := t.TempDir()
+		source := filepath.Join(dir, "old.txt")
+		target := filepath.Join(dir, "target.txt")
+		if err := os.WriteFile(source, []byte("old\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte("target\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n*** Update File: old.txt\n*** Move to: target.txt\n@@\n-old\n+new\n*** End Patch"
+		plan, err := BuildApplyPatchPlan(context.Background(), patch, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plan.Mutations) != 1 || plan.Mutations[0].Kind != MutationMove || !plan.Mutations[0].TargetBeforeExists || plan.Mutations[0].AfterMode.Perm() != 0o700 {
+			t.Fatalf("mutations = %#v, want overwrite move with source mode", plan.Mutations)
+		}
+		if err := CommitMutationPlan(plan); err != nil {
+			t.Fatal(err)
+		}
+		assertApplyPatchFile(t, target, "new\n")
+		if runtime.GOOS != "windows" {
+			info, err := os.Stat(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := info.Mode().Perm(); got != 0o700 {
+				t.Fatalf("target mode = %04o, want source mode 0700", got)
+			}
+		}
+	})
+}
+
+func TestApplyPatchCodexParserAndHunkCompatibility(t *testing.T) {
+	t.Run("first hunk omits marker", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "file.txt")
+		if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n*** Update File: file.txt\n-old\n+new\n*** End Patch"
+		if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch)); err != nil {
+			t.Fatal(err)
+		}
+		assertApplyPatchFile(t, path, "new\n")
+	})
+
+	t.Run("pure addition precedes earlier replacement", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "file.txt")
+		if err := os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: file.txt\n@@\n+tail-one\n+tail-two\n@@\n line1\n-line2\n-line3\n+replacement\n" +
+			"*** End Patch"
+		if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch)); err != nil {
+			t.Fatal(err)
+		}
+		assertApplyPatchFile(t, path, "line1\nreplacement\ntail-one\ntail-two\n")
+	})
+
+	t.Run("update adds final newline", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "file.txt")
+		if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n*** Update File: file.txt\n@@\n-old\n+new\n*** End Patch"
+		if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch)); err != nil {
+			t.Fatal(err)
+		}
+		assertApplyPatchFile(t, path, "new\n")
+	})
+
+	t.Run("implicit hunk preserves bare empty context", func(t *testing.T) {
+		doc, err := ParseApplyPatch("*** Begin Patch\n*** Update File: file.txt\n context before\n\n context after\n*** End Patch")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(doc.Operations) != 1 || len(doc.Operations[0].Hunks) != 1 {
+			t.Fatalf("doc = %#v", doc)
+		}
+		lines := doc.Operations[0].Hunks[0].Lines
+		if len(lines) != 3 || lines[1].Kind != ' ' || lines[1].Text != "" {
+			t.Fatalf("lines = %#v, want bare empty context line", lines)
+		}
+	})
+}
+
+func TestApplyPatchSequentialPlanningFailureIsAtomic(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "plan.md")
+	archive := filepath.Join(dir, "archive", "plan.md")
+	if err := os.WriteFile(source, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: plan.md\n*** Move to: archive/plan.md\n@@\n-old\n+archived\n" +
+		"*** Add File: plan.md\n+new\n" +
+		"*** Update File: archive/plan.md\n@@\n-missing\n+never\n" +
+		"*** End Patch"
+	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil || !strings.Contains(err.Error(), "hunk not found") {
+		t.Fatalf("err = %v, want late hunk failure", err)
+	}
+	assertApplyPatchFile(t, source, "old\n")
+	if _, err := os.Stat(archive); !os.IsNotExist(err) {
+		t.Fatalf("archive exists after planning failure, err=%v", err)
+	}
+}
+
+func assertApplyPatchFile(t *testing.T, path, want string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("%s = %q, want %q", path, got, want)
 	}
 }
 
@@ -482,7 +754,7 @@ func TestApplyPatchLegacySingleFileArgsAreNormalized(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(path)
-	if err != nil || string(got) != "after" {
+	if err != nil || string(got) != "after\n" {
 		t.Fatalf("legacy result = %q, %v; want after", got, err)
 	}
 }
@@ -586,38 +858,6 @@ func TestApplyPatchRepeatedUpdateFailureDoesNotModifyFile(t *testing.T) {
 	got, readErr := os.ReadFile(path)
 	if readErr != nil || string(got) != "before\n" {
 		t.Fatalf("file = %q, %v; want unchanged", got, readErr)
-	}
-}
-
-func TestApplyPatchRejectsRepeatedNonUpdateOperations(t *testing.T) {
-	for name, patch := range map[string]string{
-		"add": "*** Begin Patch\n" +
-			"*** Add File: same.txt\n+first\n" +
-			"*** Add File: same.txt\n+second\n" +
-			"*** End Patch",
-		"delete": "*** Begin Patch\n" +
-			"*** Delete File: same.txt\n" +
-			"*** Delete File: same.txt\n" +
-			"*** End Patch",
-		"move source": "*** Begin Patch\n" +
-			"*** Update File: same.txt\n*** Move to: first.txt\n" +
-			"*** Update File: same.txt\n*** Move to: second.txt\n" +
-			"*** End Patch",
-		"update then delete": "*** Begin Patch\n" +
-			"*** Update File: same.txt\n@@\n-old\n+new\n" +
-			"*** Delete File: same.txt\n" +
-			"*** End Patch",
-		"move destination then update": "*** Begin Patch\n" +
-			"*** Update File: old.txt\n*** Move to: same.txt\n" +
-			"*** Update File: same.txt\n@@\n-old\n+new\n" +
-			"*** End Patch",
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, err := ApplyPatchTargets(applyPatchArgs(t, patch), t.TempDir())
-			if err == nil || !strings.Contains(err.Error(), "duplicate operations") {
-				t.Fatalf("err = %v, want duplicate-operation rejection", err)
-			}
-		})
 	}
 }
 
@@ -883,7 +1123,7 @@ func TestApplyPatchRenameOnlyUpdate(t *testing.T) {
 	}
 }
 
-func TestApplyPatchTargetsDeduplicateRepeatedUpdates(t *testing.T) {
+func TestApplyPatchTargetsPreserveRepeatedUpdateOperations(t *testing.T) {
 	dir := t.TempDir()
 	patch := "*** Begin Patch\n" +
 		"*** Update File: dup.txt\n@@\n-a\n+b\n" +
@@ -893,8 +1133,12 @@ func TestApplyPatchTargetsDeduplicateRepeatedUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(targets) != 1 || targets[0].Kind != MutationUpdate || targets[0].SourcePath != filepath.Join(dir, "dup.txt") {
-		t.Fatalf("targets = %#v, want one normalized update target", targets)
+	if len(targets) != 2 || targets[0].Kind != MutationUpdate || targets[1].Kind != MutationUpdate || targets[0].SourcePath != filepath.Join(dir, "dup.txt") || targets[1].SourcePath != targets[0].SourcePath {
+		t.Fatalf("targets = %#v, want two operations on one normalized path", targets)
+	}
+	paths := MutationTargetPaths(targets)
+	if len(paths) != 1 || paths[0] != filepath.Join(dir, "dup.txt") {
+		t.Fatalf("paths = %#v, want one lock and permission path", paths)
 	}
 }
 
