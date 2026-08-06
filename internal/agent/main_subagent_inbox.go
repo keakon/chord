@@ -327,6 +327,9 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 					if len(env.VerificationRun) > 0 {
 						pendingText += "\n- verification_run: " + strings.Join(env.VerificationRun, ", ")
 					}
+					if len(env.VerificationRecords) > 0 {
+						pendingText += "\n- verification: " + formatCompletionVerificationRecords(env.VerificationRecords)
+					}
 					if len(env.Artifacts) > 0 {
 						refs := make([]string, 0, len(env.Artifacts))
 						for _, ref := range env.Artifacts {

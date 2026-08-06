@@ -394,12 +394,12 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		}
 		if err := s.validateCompletionVerification(taskComplete.Envelope); err != nil {
 			s.appendCompleteToolResult(taskCompleteCallID, "Completion rejected: "+err.Error())
-			s.continueLLMWithPendingUserMessages()
+			s.retryCompletionVerification(err)
 			return
 		}
 		s.clearPendingCompleteIntent()
-		s.appendCompleteToolResult(taskCompleteCallID, taskComplete.Summary)
 		taskComplete = s.enrichCompletionResult(taskComplete)
+		s.appendCompleteToolResult(taskCompleteCallID, taskComplete.Summary, taskComplete.Envelope.VerificationRecords)
 		s.sendEvent(Event{
 			Type:    EventAgentDone,
 			Payload: taskComplete,

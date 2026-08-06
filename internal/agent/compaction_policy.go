@@ -2720,6 +2720,18 @@ func fallbackCurrentUserRequestSection(input *compactionInput) string {
 	return "- Unknown: model summarization was unavailable and no reliable latest-request anchor was preserved. Do not infer the active task from completed or stale todos."
 }
 
+func compactionSummaryHasUnknownUserRequest(content string) bool {
+	const heading = "## Current User Request"
+	_, section, ok := strings.Cut(content, heading)
+	if !ok {
+		return false
+	}
+	if before, _, found := strings.Cut(section, "\n## "); found {
+		section = before
+	}
+	return strings.HasPrefix(strings.TrimSpace(section), "- Unknown:")
+}
+
 type fallbackAnchor struct {
 	Kind  string
 	Label string

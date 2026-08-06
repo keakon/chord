@@ -669,6 +669,20 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		a.ctxMgr.SetLastTotalContextTokens(loaded.LastTotalContextTokens)
 	}
 	a.setPendingCompactionResume(loaded.PendingCompactionResume)
+	if resume := a.pendingCompactionResume; resume != nil &&
+		resume.Kind == string(compactionResumeAutoContinue) &&
+		strings.TrimSpace(resume.UserIntent) == "" &&
+		!a.hasQueuedUserInputForRecovery() {
+		for _, msg := range slices.Backward(restoredMessages) {
+			if !msg.IsCompactionSummary {
+				continue
+			}
+			if compactionSummaryHasUnknownUserRequest(msg.Content) {
+				resume.AwaitUserInput = true
+			}
+			break
+		}
+	}
 	if a.usageTracker != nil {
 		a.usageTracker.RestoreStats(loaded.UsageStats)
 	}

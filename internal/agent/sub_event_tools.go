@@ -455,11 +455,11 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 			s.appendCompleteToolResult(s.pendingCompleteCallID, "Completion rejected: "+err.Error())
 			s.pendingComplete = nil
 			s.pendingCompleteCallID = ""
-			s.continueLLMWithPendingUserMessages()
+			s.retryCompletionVerification(err)
 			return
 		}
-		s.appendCompleteToolResult(s.pendingCompleteCallID, complete.Summary)
 		complete = s.enrichCompletionResult(complete)
+		s.appendCompleteToolResult(s.pendingCompleteCallID, complete.Summary, complete.Envelope.VerificationRecords)
 		s.pendingComplete = nil
 		s.pendingCompleteCallID = ""
 		s.clearPendingCompleteIntent()

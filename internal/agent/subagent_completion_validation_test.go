@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -24,6 +25,21 @@ func TestCompleteRejectsBlankSummaryInIntercept(t *testing.T) {
 	}
 }
 
+func TestCompletionVerificationRecordsRoundTrip(t *testing.T) {
+	original := &CompletionEnvelope{VerificationRun: []string{"go test ./..."}, VerificationRecords: []VerificationRecord{{ToolCallID: "call-1", Command: "go test ./...", Status: "failed", Summary: "exit 1"}}}
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored CompletionEnvelope
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.VerificationRecords) != 1 || restored.VerificationRecords[0] != original.VerificationRecords[0] {
+		t.Fatalf("restored = %#v", restored.VerificationRecords)
+	}
+}
+
 func TestCompletionVerificationUsesLatestFinalizedExactCommand(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
 	sub.verificationLedger = []verificationLedgerEntry{{ToolCallID: "old", Command: "go test ./internal/a", Status: "failed"}, {ToolCallID: "new", Command: "go test ./internal/a", Status: "passed"}}
@@ -33,6 +49,31 @@ func TestCompletionVerificationUsesLatestFinalizedExactCommand(t *testing.T) {
 	}
 	if len(env.VerificationRecords) != 1 || env.VerificationRecords[0].ToolCallID != "new" || env.VerificationRecords[0].Status != "passed" {
 		t.Fatalf("records = %#v", env.VerificationRecords)
+	}
+}
+
+func TestCompletionVerificationRejectsLatestFailureAfterEarlierPass(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	sub.verificationLedger = []verificationLedgerEntry{{ToolCallID: "old", Command: "go test ./internal/a", Status: "passed"}, {ToolCallID: "new", Command: "go test ./internal/a", Status: "failed"}}
+	env := &CompletionEnvelope{VerificationRun: []string{"go test ./internal/a"}}
+	err := sub.validateCompletionVerification(env)
+	if err == nil || !strings.Contains(err.Error(), `status "failed"`) {
+		t.Fatalf("validation error = %v, want latest failed status", err)
+	}
+	if len(env.VerificationRecords) != 0 {
+		t.Fatalf("verification records = %#v, want none", env.VerificationRecords)
+	}
+}
+
+func TestCompletionVerificationRejectsFailedCommand(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	sub.verificationLedger = []verificationLedgerEntry{{ToolCallID: "failed", Command: "go test ./internal/a", Status: "failed"}}
+	err := sub.validateCompletionVerification(&CompletionEnvelope{VerificationRun: []string{"go test ./internal/a"}})
+	if err == nil {
+		t.Fatal("expected failed verification command to be rejected")
+	}
+	if !strings.Contains(err.Error(), `status "failed"`) {
+		t.Fatalf("error = %q, want failed status", err)
 	}
 }
 
@@ -74,6 +115,25 @@ func TestCompletionVerificationAcceptsConsecutiveDeclaredCommands(t *testing.T) 
 		t.Fatalf("verification records = %#v, want two records", env.VerificationRecords)
 	}
 }
+
+func TestCompletionVerificationIsolatedBetweenSubAgents(t *testing.T) {
+	parent, first := newMixedBatchTestSubAgent(t)
+	second := newControllableTestSubAgent(t, parent, "task-second")
+	first.verificationLedger = []verificationLedgerEntry{{ToolCallID: "sibling-call", Command: "go test ./shared", Status: "passed"}}
+	if err := second.validateCompletionVerification(&CompletionEnvelope{VerificationRun: []string{"go test ./shared"}}); err == nil {
+		t.Fatal("expected sibling verification command to be rejected")
+	}
+}
+
+func TestCompletionVerificationDoesNotReuseOldInstanceLedger(t *testing.T) {
+	parent, old := newMixedBatchTestSubAgent(t)
+	old.verificationLedger = []verificationLedgerEntry{{ToolCallID: "old-call", Command: "go test ./old", Status: "passed"}}
+	newInstance := newControllableTestSubAgent(t, parent, old.taskID)
+	if err := newInstance.validateCompletionVerification(&CompletionEnvelope{VerificationRun: []string{"go test ./old"}}); err == nil {
+		t.Fatal("expected old instance verification command to be rejected")
+	}
+}
+
 func TestDeferredCompletionRetainsStructuredEnvelope(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)
 	parent.subs.mu.Lock()

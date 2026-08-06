@@ -53,11 +53,15 @@ func (s *SubAgent) validateCompletionVerification(env *CompletionEnvelope) error
 		command := strings.TrimSpace(declared)
 		var found *verificationLedgerEntry
 		for i := len(s.verificationLedger) - 1; i >= 0; i-- {
-			if s.verificationLedger[i].Command == command {
-				entry := s.verificationLedger[i]
-				found = &entry
-				break
+			entry := &s.verificationLedger[i]
+			if entry.Command != command {
+				continue
 			}
+			if entry.Status != "passed" {
+				return fmt.Errorf("verification command %q was finalized with status %q; run it successfully before Complete", command, entry.Status)
+			}
+			found = entry
+			break
 		}
 		if found == nil {
 			return fmt.Errorf("verification command %q was not found among finalized Shell calls; run it again before Complete", command)
@@ -75,4 +79,17 @@ func (s *SubAgent) validateCompletionVerification(env *CompletionEnvelope) error
 	}
 	env.VerificationRecords = records
 	return nil
+}
+
+func (s *SubAgent) retryCompletionVerification(cause error) {
+	if s == nil || s.turn == nil {
+		return
+	}
+	if s.turn.SubAgentTerminalRecoveryCount >= 1 {
+		s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("completion verification failed after retry: %w", cause)})
+		return
+	}
+	s.turn.SubAgentTerminalRecoveryCount++
+	s.appendPendingUserMessage(pendingUserMessage{Content: "Completion was rejected because the declared verification command was not observed as a finalized successful Shell call. Run the verification command, then call Complete again with the exact command."})
+	s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
 }

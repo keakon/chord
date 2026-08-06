@@ -479,7 +479,19 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 			}
 		}
 		appendList("Files changed", args.FilesChanged)
-		appendList("Verification", args.VerificationRun)
+		if len(b.VerificationRecords) > 0 {
+			values := make([]string, 0, len(b.VerificationRecords))
+			for _, record := range b.VerificationRecords {
+				value := record.Command + " [" + record.Status + "]"
+				if record.Summary != "" {
+					value += ": " + record.Summary
+				}
+				values = append(values, value)
+			}
+			appendList("Verification", values)
+		} else {
+			appendList("Verification", args.VerificationRun)
+		}
 		appendList("Remaining limitations", args.RemainingLimitations)
 		appendList("Known risks", args.KnownRisks)
 		appendList("Follow-up recommended", args.FollowUpRecommended)

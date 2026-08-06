@@ -136,6 +136,20 @@ func (a *MainAgent) buildCoordinationSnapshotOverlay() string {
 				b.WriteString("\n  verification_run: ")
 				b.WriteString(strings.Join(rec.LastCompletion.VerificationRun, ", "))
 			}
+			if len(rec.LastCompletion.VerificationRecords) > 0 {
+				b.WriteString("\n  verification:")
+				for _, record := range rec.LastCompletion.VerificationRecords {
+					b.WriteString("\n    - ")
+					b.WriteString(truncateCoordinationSnapshotText(record.Command, coordinationSnapshotSummaryMaxRunes))
+					b.WriteString(" [")
+					b.WriteString(record.Status)
+					b.WriteString("]")
+					if record.Summary != "" {
+						b.WriteString(": ")
+						b.WriteString(truncateCoordinationSnapshotText(record.Summary, coordinationSnapshotSummaryMaxRunes))
+					}
+				}
+			}
 			if len(rec.LastCompletion.RemainingLimitations) > 0 {
 				b.WriteString("\n  remaining_limitations: ")
 				b.WriteString(strings.Join(rec.LastCompletion.RemainingLimitations, ", "))

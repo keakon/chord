@@ -124,7 +124,7 @@ func (s *SubAgent) enterWaitingDescendant(reason string) {
 	s.parent.parkSubAgent(s.instanceID)
 }
 
-func (s *SubAgent) appendCompleteToolResult(callID, resultContent string) {
+func (s *SubAgent) appendCompleteToolResult(callID, resultContent string, verification ...[]VerificationRecord) {
 	if strings.TrimSpace(callID) == "" {
 		return
 	}
@@ -136,12 +136,16 @@ func (s *SubAgent) appendCompleteToolResult(callID, resultContent string) {
 	s.ctxMgr.Append(toolMsg)
 	s.persistMessageAsync(toolMsg, "Complete tool result", nil)
 	s.turn.removeStreamingToolCall(callID)
-	s.parent.emitToTUI(ToolResultEvent{
+	event := ToolResultEvent{
 		CallID:  callID,
 		Result:  resultContent,
 		Status:  ToolResultStatusSuccess,
 		AgentID: s.instanceID,
-	})
+	}
+	if len(verification) > 0 {
+		event.VerificationRecords = append([]VerificationRecord(nil), verification[0]...)
+	}
+	s.parent.emitToTUI(event)
 }
 
 func (s *SubAgent) StateChangedAt() time.Time {

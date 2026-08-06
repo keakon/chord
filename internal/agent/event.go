@@ -339,19 +339,20 @@ func (ToolProgressEvent) agentEvent() {}
 
 // ToolResultEvent is emitted after a tool execution completes.
 type ToolResultEvent struct {
-	CallID      string
-	Name        string
-	ArgsJSON    string // full tool arguments (available after streaming completes)
-	Audit       *message.ToolArgsAudit
-	Result      string
-	DoneReport  string
-	Status      ToolResultStatus
-	AgentID     string // originating agent ("" = main agent)
-	Parts       []message.ContentPart
-	Diff        string // unified diff for Write/Edit tools (not sent to LLM)
-	DiffAdded   int    // full added-line count before any diff truncation
-	DiffRemoved int    // full removed-line count before any diff truncation
-	FileCreated bool   // true when Write created a file that did not previously exist
+	CallID              string
+	Name                string
+	ArgsJSON            string // full tool arguments (available after streaming completes)
+	Audit               *message.ToolArgsAudit
+	Result              string
+	DoneReport          string
+	Status              ToolResultStatus
+	AgentID             string // originating agent ("" = main agent)
+	Parts               []message.ContentPart
+	Diff                string // unified diff for Write/Edit tools (not sent to LLM)
+	DiffAdded           int    // full added-line count before any diff truncation
+	DiffRemoved         int    // full removed-line count before any diff truncation
+	FileCreated         bool   // true when Write created a file that did not previously exist
+	VerificationRecords []VerificationRecord
 }
 
 func (ToolResultEvent) agentEvent() {}

@@ -467,6 +467,27 @@ func TestRestoreSessionAtStartupRestoresPendingCompactionResume(t *testing.T) {
 	}
 }
 
+func TestRestoreSessionAtStartupPausesUnknownCompactionResume(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "unknown-compaction-resume")
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", IsCompactionSummary: true, Content: "## Current User Request\n- Unknown: no reliable latest-request anchor was preserved."}); err != nil {
+		t.Fatalf("PersistMessage(summary): %v", err)
+	}
+	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{PendingCompactionResume: &recovery.PendingCompactionResume{Kind: string(compactionResumeAutoContinue)}}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	rm.Close()
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := a.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+	if a.pendingCompactionResume == nil || !a.pendingCompactionResume.AwaitUserInput {
+		t.Fatalf("pendingCompactionResume = %#v, want AwaitUserInput", a.pendingCompactionResume)
+	}
+}
+
 func TestRestoreSessionAtStartupRestoresTodoOrderFromSnapshot(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "todo-order")

@@ -192,15 +192,16 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		}
 		m.recordTUIDiagnostic("tool-result", "tool=%s call=%s block=%d status=%s result_len=%d had_diff=%t", evt.Name, evt.CallID, block.ID, evt.Status, len(evt.Result), evt.Diff != "")
 		applyStableToolResultToBlock(block, transcriptToolResult{
-			argsJSON:       evt.ArgsJSON,
-			result:         evt.Result,
-			status:         evt.Status,
-			audit:          evt.Audit,
-			diff:           evt.Diff,
-			doneReport:     evt.DoneReport,
-			displayArgs:    stableToolDisplayArgs,
-			imageParts:     imagePartsFromContentParts(evt.Parts),
-			resetExecution: true,
+			argsJSON:            evt.ArgsJSON,
+			result:              evt.Result,
+			status:              evt.Status,
+			audit:               evt.Audit,
+			diff:                evt.Diff,
+			doneReport:          evt.DoneReport,
+			displayArgs:         stableToolDisplayArgs,
+			imageParts:          imagePartsFromContentParts(evt.Parts),
+			resetExecution:      true,
+			verificationRecords: append([]agent.VerificationRecord(nil), evt.VerificationRecords...),
 		})
 		if toolNameKey(evt.Name) == tools.NameDone {
 			if evt.Status == agent.ToolResultStatusSuccess && !doneResultIsRejected(evt.Result) {

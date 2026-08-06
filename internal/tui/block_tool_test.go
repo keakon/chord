@@ -1243,6 +1243,22 @@ func TestExpandedCompleteRendersSummaryMarkdownAndStructuredDetails(t *testing.T
 	}
 }
 
+func TestExpandedCompleteRendersRuntimeVerificationRecord(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameComplete,
+		RawArgs:       `{"summary":"done","verification_run":["legacy command"]}`,
+		Content:       `{"summary":"done","verification_run":["legacy command"]}`,
+		ResultContent: "done", ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		ToolCallDetailExpanded: true,
+		VerificationRecords:    []agent.VerificationRecord{{Command: "go test ./...", Status: "failed", Summary: "exit 1"}},
+	}
+	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(joined, "go test ./... [failed]: exit 1") || strings.Contains(joined, "legacy command") {
+		t.Fatalf("runtime verification rendering = %s", joined)
+	}
+}
+
 func TestExpandedEscalateRendersReasonMarkdownWithoutRepeatingResult(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	resetMarkdownRenderer()

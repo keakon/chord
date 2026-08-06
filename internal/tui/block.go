@@ -88,6 +88,7 @@ type Block struct {
 	ToolProgress               *agent.ToolProgressSnapshot // optional structured progress for running tools with real progress signals
 	Audit                      *message.ToolArgsAudit      // optional audit metadata for user-modified approved arguments
 	PersistedDuration          time.Duration               // restored final elapsed time from durable tool result metadata
+	VerificationRecords        []agent.VerificationRecord
 
 	// BackgroundObjectID links a durable status/result block to a background
 	// service/job identifier so repeated finish notifications can update the same

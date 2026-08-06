@@ -435,16 +435,17 @@ func assistantThinkingBlocksForTranscript(msg message.Message) []message.Thinkin
 }
 
 type transcriptToolResult struct {
-	argsJSON       string
-	result         string
-	status         agent.ToolResultStatus
-	audit          *message.ToolArgsAudit
-	diff           string
-	duration       time.Duration
-	doneReport     string
-	displayArgs    func(toolName, argsJSON, result string) string
-	imageParts     []BlockImagePart
-	resetExecution bool
+	argsJSON            string
+	result              string
+	status              agent.ToolResultStatus
+	audit               *message.ToolArgsAudit
+	diff                string
+	duration            time.Duration
+	doneReport          string
+	displayArgs         func(toolName, argsJSON, result string) string
+	imageParts          []BlockImagePart
+	resetExecution      bool
+	verificationRecords []agent.VerificationRecord
 }
 
 func newTranscriptToolCallBlock(nextID int, tc message.ToolCall) *Block {
@@ -498,6 +499,7 @@ func applyStableToolResultToBlock(block *Block, result transcriptToolResult) {
 		}
 	}
 	block.ResultStatus = result.status
+	block.VerificationRecords = append([]agent.VerificationRecord(nil), result.verificationRecords...)
 	block.ResultDone = true
 	if result.resetExecution {
 		block.ToolExecutionState = ""

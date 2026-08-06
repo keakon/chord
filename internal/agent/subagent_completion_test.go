@@ -54,6 +54,12 @@ func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 	if err := os.WriteFile(artifactPath, []byte("report"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	sub.verificationLedger = []verificationLedgerEntry{{
+		ToolCallID: "verify-1",
+		Command:    "go test ./internal/a",
+		Status:     "passed",
+		Summary:    "ok",
+	}}
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
 		resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
@@ -613,11 +619,11 @@ func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) 
 		LastSummary:        "research complete",
 		LastUpdatedTurn:    5,
 		LastArtifactRefs:   []tools.ArtifactRef{{ID: "art-1", Type: "research_report", RelPath: "artifacts/subagents/worker-1/report.md"}},
-		LastCompletion:     &CompletionEnvelope{Summary: "research complete", FilesChanged: []string{"internal/a.go"}, VerificationRun: []string{"go test ./internal/a"}},
+		LastCompletion:     &CompletionEnvelope{Summary: "research complete", FilesChanged: []string{"internal/a.go"}, VerificationRun: []string{"go test ./internal/a"}, VerificationRecords: []VerificationRecord{{ToolCallID: "verify-1", Command: "go test ./internal/a", Status: "passed", Summary: "ok"}}},
 		ExpectedWriteScope: tools.WriteScope{Files: []string{"internal/a.go"}},
 	}
 	block := a.buildCoordinationSnapshotOverlay()
-	for _, want := range []string{"SubAgent coordination snapshot", "task_id: task-1", "artifact_refs: artifacts/subagents/worker-1/report.md(research_report)", "files_changed: internal/a.go", "verification_run: go test ./internal/a", "write_scope: file:internal/a.go"} {
+	for _, want := range []string{"SubAgent coordination snapshot", "task_id: task-1", "artifact_refs: artifacts/subagents/worker-1/report.md(research_report)", "files_changed: internal/a.go", "verification_run: go test ./internal/a", "verification:", "go test ./internal/a [passed]: ok", "write_scope: file:internal/a.go"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("snapshot missing %q:\n%s", want, block)
 		}

@@ -583,6 +583,16 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 		return true
 	}
 	if pending.continuation == compactionResumeAutoContinue {
+		if a.pendingCompactionResume != nil && a.pendingCompactionResume.AwaitUserInput {
+			a.clearPendingCompactionResume()
+			a.emitActivity("main", ActivityIdle, "")
+			if a.turn == nil {
+				a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
+				a.drainPendingUserMessages()
+				return true
+			}
+			return false
+		}
 		// Automatic compaction just applied (or failed). Unlike the idle
 		// continuation we want the agent to keep going, because auto
 		// compaction was triggered by the agent itself with no fresh user
@@ -614,6 +624,13 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 		// Spawn a fresh turn on the compacted context so the model keeps
 		// making progress. Mirrors handleContinueFromContext.
 		a.armOversizeAutoContinueResume()
+		if a.pendingCompactionResume != nil && a.pendingCompactionResume.AwaitUserInput {
+			a.clearPendingCompactionResume()
+			a.emitActivity("main", ActivityIdle, "")
+			a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
+			a.drainPendingUserMessages()
+			return true
+		}
 		if a.pendingCompactionResume != nil {
 			a.pendingCompactionResume.Mode = a.chooseCompactionResumeMode(a.pendingCompactionResume.UserIntent)
 		}

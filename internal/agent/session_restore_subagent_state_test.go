@@ -17,6 +17,15 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+func mustMarshalCompletionEnvelopeForTest(t *testing.T, env *CompletionEnvelope) json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 func TestLoadSessionUsesCompactedMailboxStateAndPreservesSequence(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "compacted-mailbox-state")
@@ -236,7 +245,16 @@ func TestRestoreLoadedSubAgentsRestoresOwnerDepthAndPendingComplete(t *testing.T
 		LastSummary:            "waiting for child",
 		PendingCompleteIntent:  true,
 		PendingCompleteSummary: "final summary",
-		JoinToOwner:            true,
+		PendingCompleteEnvelope: mustMarshalCompletionEnvelopeForTest(t, &CompletionEnvelope{
+			Summary: "final summary",
+			VerificationRecords: []VerificationRecord{{
+				ToolCallID: "verify-restore",
+				Command:    "go test ./internal/agent",
+				Status:     "failed",
+				Summary:    "exit 1",
+			}},
+		}),
+		JoinToOwner: true,
 	}})
 	if count != 1 {
 		t.Fatalf("restoreLoadedSubAgents() = %d, want 1", count)
@@ -256,6 +274,10 @@ func TestRestoreLoadedSubAgentsRestoresOwnerDepthAndPendingComplete(t *testing.T
 	}
 	if restored.PendingCompletion == nil || restored.PendingCompletion.Summary != "final summary" {
 		t.Fatalf("PendingCompletion = %#v, want summary %q", restored.PendingCompletion, "final summary")
+	}
+	records := restored.PendingCompletion.VerificationRecords
+	if len(records) != 1 || records[0].ToolCallID != "verify-restore" || records[0].Command != "go test ./internal/agent" || records[0].Status != "failed" || records[0].Summary != "exit 1" {
+		t.Fatalf("restored verification records = %#v", records)
 	}
 }
 

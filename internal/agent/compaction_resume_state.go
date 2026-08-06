@@ -86,6 +86,12 @@ func (a *MainAgent) armOversizeAutoContinueResume() {
 		OversizeRetryCount: 0,
 	}
 	state.Mode = a.chooseCompactionResumeMode(state.UserIntent)
+	if state.UserIntent == "" &&
+		!a.hasQueuedUserInputForRecovery() &&
+		!a.hasPendingToolSideEffectsForRecovery() &&
+		!a.hasOutstandingMailboxPressureForRecovery() {
+		state.AwaitUserInput = true
+	}
 	if a.turn != nil {
 		state.OversizeRetryCount = a.turn.OversizeRecoveryCount
 	}
@@ -116,6 +122,11 @@ func (a *MainAgent) applyPendingCompactionResumeOverlays(state *recovery.Pending
 	state = clonePendingCompactionResume(state)
 	if state == nil {
 		return
+	}
+	if state.AwaitUserInput {
+		state.Kind = string(compactionResumeIdle)
+		state.Mode = ""
+		state.UserIntent = ""
 	}
 	if strings.TrimSpace(state.Mode) == "" {
 		state.Mode = a.chooseCompactionResumeMode(state.UserIntent)
