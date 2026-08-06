@@ -20,7 +20,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func (a *MainAgent) exportCompactionHistory(messages []message.Message, index int) (absPath string, relPath string, err error) {
+func (a *MainAgent) exportCompactionHistory(messages []message.Message, index int) (absPath string, relPath string, sourceRefs []checkpointSourceRef, sourceFingerprint string, err error) {
 	absPath = filepath.Join(a.sessionDir, fmt.Sprintf("history-%d.md", index))
 	metadata := map[string]string{
 		session.MetadataKeyModel:       a.ModelName(),
@@ -30,24 +30,33 @@ func (a *MainAgent) exportCompactionHistory(messages []message.Message, index in
 	}
 	exported, err := session.Export(messages, nil, metadata)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, "", err
 	}
 	if err := privatefs.WriteFile(a.sessionDir, absPath, []byte(session.ExportToMarkdown(exported))); err != nil {
-		return "", "", err
+		return "", "", nil, "", err
 	}
+	generation := fmt.Sprintf("compaction-%d", index)
+	sourceRefs, err = buildCheckpointSourceRefs(a.exportPersistentSessionID(), generation, filepath.Base(absPath), messages)
+	if err != nil {
+		return "", "", nil, "", err
+	}
+	sourceFingerprint = checkpointSourceFingerprint(sourceRefs)
 	if err := writeCompactionHistoryMeta(a.sessionDir, compactionHistoryMetaPath(absPath), compactionHistoryMeta{
-		Version:     1,
-		HistoryFile: filepath.Base(absPath),
-		Status:      compactionHistoryPending,
-		ExportedAt:  time.Now(),
+		Version:           1,
+		HistoryFile:       filepath.Base(absPath),
+		Status:            compactionHistoryPending,
+		ExportedAt:        time.Now(),
+		SourceGeneration:  generation,
+		SourceRefs:        sourceRefs,
+		SourceFingerprint: sourceFingerprint,
 	}); err != nil {
-		return "", "", err
+		return "", "", nil, "", err
 	}
 	relPath, err = filepath.Rel(a.projectRoot, absPath)
 	if err != nil {
 		relPath = absPath
 	}
-	return absPath, relPath, nil
+	return absPath, relPath, sourceRefs, sourceFingerprint, nil
 }
 
 func compactionHistoryMetaPath(absHistoryPath string) string {

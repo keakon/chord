@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +59,7 @@ func (a *MainAgent) scheduleCompactionAsync(snapshot []message.Message, planID u
 }
 
 func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Message, planID uint64, target compactionTarget, trigger compactionTrigger, continuation continuationPlan, manual bool) {
+	a.recordCompactionLifecycleEvent("started", map[string]string{"trigger": trigger.analyticsName(), "message_count": strconv.Itoa(len(snapshot))})
 	todos := a.GetTodos()
 	subAgents := a.taskInfosForCompaction()
 	backgroundObjects := spawnStatesForSnapshot()
@@ -187,7 +189,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, fmt.Errorf("determine compaction index: %w", err)
 	}
 
-	absHistoryPath, relHistoryPath, err := a.exportCompactionHistory(head, index)
+	absHistoryPath, relHistoryPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(head, index)
 	if err != nil {
 		return nil, fmt.Errorf("export compacted history: %w", err)
 	}
@@ -250,6 +252,8 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		AbsHistoryPath:     absHistoryPath,
 		AbsHistoryMetaPath: absHistoryMetaPath,
 		RelHistoryPath:     relHistoryPath,
+		SourceRefs:         sourceRefs,
+		SourceFingerprint:  sourceFingerprint,
 		SummaryMode:        summaryMode,
 		Backend:            backendName,
 		Profile:            string(profile),
@@ -294,6 +298,29 @@ func (a *MainAgent) applyCompactionDraft(d *compactionDraft) error {
 // preserving tail messages that were added during the async compaction goroutine.
 func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	headSplit := d.HeadSplit
+	if len(d.SourceRefs) > 0 {
+		started := time.Now()
+		currentMessages := a.ctxMgr.Snapshot()
+		if headSplit > len(currentMessages) {
+			a.recordCompactionProvenanceEvent("boundary_mismatch", map[string]string{"source_ref_count": strconv.Itoa(len(d.SourceRefs)), "head_split": strconv.Itoa(headSplit), "current_message_count": strconv.Itoa(len(currentMessages)), "duration_us": strconv.FormatInt(time.Since(started).Microseconds(), 10)})
+			return fmt.Errorf("compaction source boundary %d exceeds current message count %d", headSplit, len(currentMessages))
+		}
+		if err := validateCheckpointSourceRefs(d.SourceRefs, currentMessages[:headSplit]); err != nil {
+			result := "source_identity_mismatch"
+			if strings.Contains(err.Error(), "fingerprint changed") {
+				result = "payload_fingerprint_mismatch"
+			}
+			a.recordCompactionProvenanceEvent(result, map[string]string{"source_ref_count": strconv.Itoa(len(d.SourceRefs)), "head_split": strconv.Itoa(headSplit), "current_message_count": strconv.Itoa(len(currentMessages)), "duration_us": strconv.FormatInt(time.Since(started).Microseconds(), 10)})
+			return fmt.Errorf("validate compaction source provenance: %w", err)
+		}
+		if got := checkpointSourceFingerprint(d.SourceRefs); got != d.SourceFingerprint {
+			a.recordCompactionProvenanceEvent("source_fingerprint_mismatch", map[string]string{"source_ref_count": strconv.Itoa(len(d.SourceRefs)), "head_split": strconv.Itoa(headSplit), "current_message_count": strconv.Itoa(len(currentMessages)), "duration_us": strconv.FormatInt(time.Since(started).Microseconds(), 10)})
+			return fmt.Errorf("validate compaction source provenance: fingerprint changed")
+		}
+		a.recordCompactionProvenanceEvent("success", map[string]string{"source_ref_count": strconv.Itoa(len(d.SourceRefs)), "head_split": strconv.Itoa(headSplit), "current_message_count": strconv.Itoa(len(currentMessages)), "duration_us": strconv.FormatInt(time.Since(started).Microseconds(), 10)})
+	} else {
+		a.recordCompactionProvenanceEvent("legacy_unvalidated", map[string]string{"head_split": strconv.Itoa(headSplit)})
+	}
 	d.NewMessages = a.refreshCompactionFileRevisions(d.NewMessages)
 
 	// Capture the original first user message BEFORE entering ReplacePrefixAtomic,
@@ -326,6 +353,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	if err != nil {
 		return err
 	}
+	a.recordCompactionLifecycleEvent("applied", map[string]string{"source_ref_count": strconv.Itoa(len(d.SourceRefs)), "head_split": strconv.Itoa(headSplit), "message_count": strconv.Itoa(len(compactedMessages))})
 
 	a.resetRuntimeEvidenceFromMessages(d.NewMessages)
 	a.resetContextReductionStats()
@@ -344,10 +372,15 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	a.resetAutoCompactionFailureState()
 	if d.AbsHistoryMetaPath != "" {
 		meta := compactionHistoryMeta{
-			Version:     1,
-			HistoryFile: filepath.Base(d.AbsHistoryPath),
-			Status:      compactionHistoryApplied,
-			AppliedAt:   time.Now(),
+			Version:           1,
+			HistoryFile:       filepath.Base(d.AbsHistoryPath),
+			Status:            compactionHistoryApplied,
+			AppliedAt:         time.Now(),
+			SourceRefs:        append([]checkpointSourceRef(nil), d.SourceRefs...),
+			SourceFingerprint: d.SourceFingerprint,
+		}
+		if len(d.SourceRefs) > 0 {
+			meta.SourceGeneration = d.SourceRefs[0].TranscriptGeneration
 		}
 		if existing, err := readCompactionHistoryMeta(d.AbsHistoryMetaPath); err == nil {
 			if existing.Version != 0 {
@@ -357,6 +390,15 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 				meta.HistoryFile = existing.HistoryFile
 			}
 			meta.ExportedAt = existing.ExportedAt
+			if existing.SourceGeneration != "" {
+				meta.SourceGeneration = existing.SourceGeneration
+			}
+			if len(existing.SourceRefs) > 0 {
+				meta.SourceRefs = existing.SourceRefs
+			}
+			if existing.SourceFingerprint != "" {
+				meta.SourceFingerprint = existing.SourceFingerprint
+			}
 		} else if !os.IsNotExist(err) {
 			log.Warnf("failed to read compaction history meta before apply path=%v error=%v", d.AbsHistoryMetaPath, err)
 		}

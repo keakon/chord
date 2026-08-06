@@ -15,24 +15,31 @@ import (
 )
 
 type ContextReductionStats struct {
-	Messages        int
-	Bytes           int
-	CurrentBytes    int
-	CurrentMessages int
-	TokensBefore    int
-	TokensAfter     int
-	TokensSaved     int
-	Protected       bool
-	ReusedStable    bool
-	ProtectReason   string
-	ReuseReason     string
-	SavedDelta      int
-	PreviousModel   string
-	ModelChanged    bool
-	ModelRunLength  int
-	ByToolAndRule   map[string]ContextReductionBucket
-	SkippedByReason map[string]int
-	OverCompression map[string]int
+	Messages                  int
+	Bytes                     int
+	CurrentBytes              int
+	CurrentMessages           int
+	TokensBefore              int
+	TokensAfter               int
+	TokensSaved               int
+	Protected                 bool
+	ReusedStable              bool
+	ProtectReason             string
+	ReuseReason               string
+	SavedDelta                int
+	PreviousModel             string
+	ModelChanged              bool
+	ModelRunLength            int
+	ByToolAndRule             map[string]ContextReductionBucket
+	SkippedByReason           map[string]int
+	OverCompression           map[string]int
+	EvidenceRebuildDurationUS int64
+	EvidenceFiles             int
+	EvidenceObservations      int
+	EvidenceCurrent           int
+	EvidenceStale             int
+	EvidenceSuperseded        int
+	EvidenceUnknown           int
 }
 
 const (

@@ -84,6 +84,38 @@ func (a *MainAgent) recordCompactionPolicyAnalyticsEvent(detail string) {
 	})
 }
 
+func (a *MainAgent) recordContextDiagnosticEvent(purpose string, diagnostic map[string]string) {
+	if a == nil {
+		return
+	}
+	a.emitUsageEvent(analytics.UsageEvent{
+		AgentID:          identity.MainAgentID,
+		AgentKind:        identity.MainAgentID,
+		AgentName:        a.currentAgentName(),
+		Purpose:          purpose,
+		SelectedModelRef: a.ProviderModelRef(),
+		RunningModelRef:  a.RunningModelRef(),
+		TurnID:           a.currentTurnID(),
+		Diagnostic:       diagnostic,
+	})
+}
+
+func (a *MainAgent) recordCompactionProvenanceEvent(result string, diagnostic map[string]string) {
+	if diagnostic == nil {
+		diagnostic = make(map[string]string)
+	}
+	diagnostic["result"] = result
+	a.recordContextDiagnosticEvent(compactionProvenanceAnalyticsPurpose, diagnostic)
+}
+
+func (a *MainAgent) recordCompactionLifecycleEvent(stage string, diagnostic map[string]string) {
+	if diagnostic == nil {
+		diagnostic = make(map[string]string)
+	}
+	diagnostic["stage"] = stage
+	a.recordContextDiagnosticEvent(compactionLifecycleAnalyticsPurpose, diagnostic)
+}
+
 func (a *MainAgent) recordCompactionFailureAnalyticsEvent(err error, class compactionFailureClass, stage string) {
 	if err == nil {
 		return

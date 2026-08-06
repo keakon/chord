@@ -77,6 +77,8 @@ type compactionDraft struct {
 	AbsHistoryPath     string
 	AbsHistoryMetaPath string
 	RelHistoryPath     string
+	SourceRefs         []checkpointSourceRef
+	SourceFingerprint  string
 	SummaryMode        string
 	Backend            string
 	Profile            string
@@ -161,11 +163,14 @@ type evidenceItem struct {
 }
 
 type compactionHistoryMeta struct {
-	Version     int       `json:"version"`
-	HistoryFile string    `json:"history_file"`
-	Status      string    `json:"status"`
-	ExportedAt  time.Time `json:"exported_at"`
-	AppliedAt   time.Time `json:"applied_at"`
+	Version           int                   `json:"version"`
+	HistoryFile       string                `json:"history_file"`
+	Status            string                `json:"status"`
+	ExportedAt        time.Time             `json:"exported_at"`
+	AppliedAt         time.Time             `json:"applied_at"`
+	SourceGeneration  string                `json:"source_generation,omitempty"`
+	SourceRefs        []checkpointSourceRef `json:"source_refs,omitempty"`
+	SourceFingerprint string                `json:"source_fingerprint,omitempty"`
 }
 
 const (

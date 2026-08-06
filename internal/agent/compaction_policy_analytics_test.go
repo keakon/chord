@@ -7,6 +7,25 @@ import (
 	"github.com/keakon/chord/internal/analytics"
 )
 
+func TestContextDiagnosticEventsCarryStructuredResults(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	var events []analytics.UsageEvent
+	a.SetUsageEventSink(func(event analytics.UsageEvent) { events = append(events, event) })
+
+	a.recordCompactionProvenanceEvent("success", map[string]string{"source_ref_count": "3", "duration_us": "12"})
+	a.recordCompactionLifecycleEvent("applied", map[string]string{"message_count": "5"})
+
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2", len(events))
+	}
+	if events[0].Purpose != compactionProvenanceAnalyticsPurpose || events[0].Diagnostic["result"] != "success" || events[0].Diagnostic["source_ref_count"] != "3" {
+		t.Fatalf("provenance event = %#v", events[0])
+	}
+	if events[1].Purpose != compactionLifecycleAnalyticsPurpose || events[1].Diagnostic["stage"] != "applied" {
+		t.Fatalf("lifecycle event = %#v", events[1])
+	}
+}
+
 func TestCompactionPolicyAnalyticsEventsRecordedInTrackerAndLedger(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

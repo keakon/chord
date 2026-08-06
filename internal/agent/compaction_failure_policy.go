@@ -16,6 +16,8 @@ const (
 	compactionPolicyAnalyticsPurpose      = "compaction_policy"
 	compactionFailureAnalyticsPurpose     = "compaction_failure"
 	oversizeRecoveryAnalyticsPurpose      = "oversize_recovery"
+	compactionProvenanceAnalyticsPurpose  = "context_provenance"
+	compactionLifecycleAnalyticsPurpose   = "context_compaction"
 )
 
 type autoCompactionFailureState struct {

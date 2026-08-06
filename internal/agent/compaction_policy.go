@@ -71,11 +71,12 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 // for the original messages; the main pass computes its own validity over the
 // prepared copy. Not safe for concurrent use.
 type reductionHistoryScan struct {
-	messages     []message.Message
-	meta         map[string]toolCallMeta
-	repeated     map[int]bool
-	validity     map[int]readValidity
-	validityDone bool
+	messages      []message.Message
+	meta          map[string]toolCallMeta
+	repeated      map[int]bool
+	evidence      fileEvidenceView
+	evidenceDone  bool
+	evidenceStats fileEvidenceStats
 }
 
 func newReductionHistoryScan(messages []message.Message) *reductionHistoryScan {
@@ -97,11 +98,17 @@ func (s *reductionHistoryScan) repeatedOutputs() map[int]bool {
 }
 
 func (s *reductionHistoryScan) readValidity() map[int]readValidity {
-	if !s.validityDone {
-		s.validity = analyzeReadValidity(s.messages, s.callMeta())
-		s.validityDone = true
+	return s.fileEvidence().validityByMessage()
+}
+
+func (s *reductionHistoryScan) fileEvidence() fileEvidenceView {
+	if !s.evidenceDone {
+		started := time.Now()
+		s.evidence = buildFileEvidenceViewWithMeta(s.messages, "", "current", s.callMeta())
+		s.evidenceStats = s.evidence.stats(time.Since(started))
+		s.evidenceDone = true
 	}
-	return s.validity
+	return s.evidence
 }
 
 func (a *MainAgent) refreshVisibleContextReductionStats(messages []message.Message) {
@@ -262,7 +269,10 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		copy(nextReviewAge, frozenNextReviewAge)
 	}
 	toolResultThresholdCrossed := incrementalEnabled && previousToolResults < policy.MinToolResultsPrune && toolResults >= policy.MinToolResultsPrune
-	readValidityByIndex := analyzeReadValidity(prepared, callMeta)
+	evidenceStarted := time.Now()
+	evidence := buildFileEvidenceViewWithMeta(prepared, "", "current", callMeta)
+	evidenceStats := evidence.stats(time.Since(evidenceStarted))
+	readValidityByIndex := evidence.validityByMessage()
 	if len(externalReadInvalidated) > 0 && readValidityByIndex == nil {
 		readValidityByIndex = make(map[int]readValidity, len(externalReadInvalidated))
 	}
@@ -498,6 +508,13 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	}
 
 	if a != nil {
+		stats.EvidenceRebuildDurationUS = evidenceStats.DurationUS
+		stats.EvidenceFiles = evidenceStats.Files
+		stats.EvidenceObservations = evidenceStats.Observations
+		stats.EvidenceCurrent = evidenceStats.Current
+		stats.EvidenceStale = evidenceStats.Stale
+		stats.EvidenceSuperseded = evidenceStats.Superseded
+		stats.EvidenceUnknown = evidenceStats.Unknown
 		stats.TokensAfter = ctxmgr.EstimateMessagesTokens(prepared)
 		a.setCurrentRequestSurface(&stats, prepared)
 		if stats.TokensSaved == 0 && stats.TokensBefore > stats.TokensAfter {

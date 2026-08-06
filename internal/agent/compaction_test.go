@@ -4210,6 +4210,9 @@ func TestProduceCompactionDraftArchivalProfileOmitsRecentTail(t *testing.T) {
 	if got := len(draft.NewMessages); got != 1 {
 		t.Fatalf("len(draft.NewMessages) = %d, want 1 summary-only message", got)
 	}
+	if len(draft.SourceRefs) != headSplit || draft.SourceFingerprint == "" {
+		t.Fatalf("draft provenance refs=%d fingerprint=%q", len(draft.SourceRefs), draft.SourceFingerprint)
+	}
 }
 
 func TestProduceCompactionDraftCapturesSummaryKeyFileRevision(t *testing.T) {
@@ -4769,7 +4772,7 @@ func TestExportCompactionHistoryMetaPendingThenApplied(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	msgs := []message.Message{{Role: "user", Content: "hello"}}
 
-	absPath, relPath, err := a.exportCompactionHistory(msgs, 1)
+	absPath, relPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(msgs, 1)
 	if err != nil {
 		t.Fatalf("exportCompactionHistory: %v", err)
 	}
@@ -4789,15 +4792,19 @@ func TestExportCompactionHistoryMetaPendingThenApplied(t *testing.T) {
 	if exportedAt.IsZero() {
 		t.Fatal("expected ExportedAt to be set in pending meta")
 	}
+	a.ctxMgr.RestoreMessages(msgs)
 
 	draft := &compactionDraft{
 		PlanID:             1,
 		Target:             compactionTarget{sessionEpoch: a.sessionEpoch, turnEpoch: a.turnEpoch},
 		NewMessages:        []message.Message{{Role: "user", Content: "[Context Summary]\nsummary"}},
+		HeadSplit:          len(msgs),
 		Index:              1,
 		AbsHistoryPath:     absPath,
 		AbsHistoryMetaPath: metaPath,
 		RelHistoryPath:     relPath,
+		SourceRefs:         sourceRefs,
+		SourceFingerprint:  sourceFingerprint,
 		SummaryMode:        "structured_fallback",
 		ModelRef:           "fallback",
 	}
@@ -4820,6 +4827,9 @@ func TestExportCompactionHistoryMetaPendingThenApplied(t *testing.T) {
 	}
 	if meta.AppliedAt.IsZero() {
 		t.Fatal("expected AppliedAt to be set")
+	}
+	if len(meta.SourceRefs) != len(msgs) || meta.SourceFingerprint != sourceFingerprint || meta.SourceGeneration == "" {
+		t.Fatalf("applied metadata lost provenance: %#v", meta)
 	}
 }
 
