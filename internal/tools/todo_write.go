@@ -38,7 +38,7 @@ type TodoStore interface {
 }
 
 // MultiInProgressTodoPolicy may be implemented by a TodoStore that can decide
-// whether the current agent role supports multiple active delegated workstreams.
+// whether the current agent role supports multiple active workstreams.
 type MultiInProgressTodoPolicy interface {
 	AllowMultipleInProgressTodos() bool
 }
@@ -68,7 +68,7 @@ func (TodoWriteTool) Description() string {
 2. Multi-step bug triage or investigation where explicit checkpoints help
 3. After new instructions — capture as todos (order reflects execution order)
 4. When starting direct work — mark one item in_progress
-5. When the current role supports parallel delegated workstreams — multiple in_progress items are allowed only when each maps to a distinct live workstream and has a unique active_form
+5. When tracking multiple active workstreams — multiple in_progress items are allowed when each maps to a distinct live workstream and has a unique active_form
 6. After meaningful progress — update statuses / active_form
 7. Before the final response — if you used TodoWrite, sync once more (all completed or cancelled)
 
@@ -84,7 +84,7 @@ func (TodoWriteTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"todos": map[string]any{
 				"type":        "array",
-				"description": "Complete todo list (replaces existing list). Provide ALL items, not just changes. Array order is the intended execution order. Multiple in_progress items are accepted only when this role supports parallel delegated workstreams; each in_progress item must represent a distinct live workstream and use a unique active_form.",
+				"description": "Complete todo list (replaces existing list). Provide ALL items, not just changes. Array order is the intended execution order. Multiple in_progress items are accepted when this role supports multiple workstreams; each in_progress item must represent a distinct live workstream and use a unique active_form.",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -129,7 +129,7 @@ func (t *TodoWriteTool) validateInProgressItems(todos []TodoItem, inProgress int
 		return nil
 	}
 	if !t.allowMultipleInProgressTodos() {
-		return fmt.Errorf("todo list may contain at most one in_progress item unless the current role supports parallel delegated workstreams, got %d", inProgress)
+		return fmt.Errorf("todo list may contain multiple in_progress items only when the current role supports multiple workstreams, got %d", inProgress)
 	}
 
 	activeForms := make(map[string]string, inProgress)

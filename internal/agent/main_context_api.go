@@ -213,11 +213,10 @@ func (a *MainAgent) sessionArtifactsDir() string {
 	return filepath.Join(a.sessionDir, "artifacts")
 }
 
-// AllowMultipleInProgressTodos reports whether the current role exposes Delegate
-// parallelism to the main LLM, allowing distinct delegated workstreams to be
-// tracked as simultaneous in-progress todos.
+// AllowMultipleInProgressTodos reports whether the current role can use
+// TodoWrite to track multiple distinct workstreams as simultaneously active.
 func (a *MainAgent) AllowMultipleInProgressTodos() bool {
-	return a.hasDelegateWorkflowAccess()
+	return a.hasTodoWriteAccess()
 }
 
 // UpdateTodos replaces the todo list and saves a snapshot via the recovery

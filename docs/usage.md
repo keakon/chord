@@ -298,8 +298,7 @@ Card numbers are local to the viewed agent: the main transcript and every SubAge
 
 After resuming a session, every restored agent is idle rather than pretending work from the previous process is still active. Any previous SubAgent state—including waiting, completed, failed, and cancelled—can be continued manually: focus that SubAgent and submit an empty input to continue from its existing context, or submit text to start a follow-up turn. Chord first reacquires a SubAgent concurrency slot and marks it running. An empty input starts a new turn without appending a synthetic user message. Mailboxes restored from the session remain queued while idle and are delivered only as part of this explicit manual continue or input action; mailbox events produced during normal live execution are dispatched immediately to the owning agent.
 
-When `todo_write` is enabled but no `delegate` workflow is available, the todo list normally keeps a single `in_progress` item that represents the MainAgent's current directly executed focus.
-When `delegate` workflow is available and multiple delegated workstreams are genuinely active, the todo list may contain multiple `in_progress` items, but each one should map clearly to a real live delegated workstream and use a unique `active_form` rather than work that is only planned, blocked on prerequisites, or merely waiting to start.
+When `todo_write` is enabled, the todo list may contain multiple `in_progress` items while the agent is genuinely switching between distinct active workstreams. Each active item must use a unique `active_form`; delegated tasks should map to separate live workstreams. Do not mark work as `in_progress` when it is only planned, blocked on prerequisites, or merely waiting to start.
 
 ## Images and PDFs
 

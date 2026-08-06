@@ -215,7 +215,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `assistant_rollback` | 丢弃尚未提交的流式 assistant 输出            | `agent_id`、`reason` |
 | `info`               | 运行时信息消息                               | `agent_id`、`message` |
 | `toast`              | TUI 中的瞬时通知；headless 可以忽略          | `agent_id`、`message`、`level`（`info` / `warn` / `error`） |
-| `todos`              | 替换当前 todo 列表                           | `todos[]`，元素结构为 `{id, content, status, active_form}`；当启用 Delegate workflow 且各项分别对应不同的活跃委派工作流、并使用唯一 `active_form` 时，允许同时存在多个 `in_progress`。 |
+| `todos`              | 替换当前 todo 列表                           | `todos[]`，元素结构为 `{id, content, status, active_form}`；启用 `todo_write` 时，多个独立且正在处理的工作流可以同时为 `in_progress`，但必须使用唯一的 `active_form`。 |
 | `error`              | 运行时错误                                   | `agent_id`、`message`，可选 `code` |
 
 如果 stdin 上的单行输入超过协议行长度限制，Chord 会输出带 `code: "stdin_line_too_long"` 的 `error` envelope，并继续读取后续行。集成方应在存在 `code` 时用它做错误分类，把 `message` 作为面向人的诊断信息。

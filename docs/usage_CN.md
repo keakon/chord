@@ -298,8 +298,7 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 
 恢复会话后，所有还原的 agent 都处于 idle，不会假装旧进程里的执行仍然存活。SubAgent 在恢复前的任意状态（包括 waiting、completed、failed、cancelled）都可手动继续：先聚焦该 SubAgent，提交空输入可沿现有上下文继续，提交文字则会创建 follow-up turn。Chord 会先重新获取 SubAgent 并发槽并将其切回 running；空输入不会追加虚构的用户消息。从会话恢复的待处理 mailbox 在 idle 时继续排队，只会在这次明确的手动继续或输入操作中投递；正常运行期间实时产生的 mailbox 事件会立即投递给所属 agent。
 
-当启用 `todo_write` 但没有可用的 `delegate` workflow 时，todo 列表默认只保留一个 `in_progress`，表示 MainAgent 当前直接执行的焦点工作。
-当 `delegate` workflow 可用且确实派出了多个活跃的 delegated workstreams 时，todo 列表可以同时存在多个 `in_progress`，但每一项都应清楚映射到一个真实活跃的委派工作流，并使用唯一的 `active_form`；不要把尚未开始、仅计划中或只是等待条件的事项也标成 `in_progress`。
+启用 `todo_write` 后，当 agent 确实在多个独立且活跃的工作流之间交错推进时，todo 列表可以同时存在多个 `in_progress`。每一项都必须使用唯一的 `active_form`；委派任务也应分别对应独立且仍然活跃的工作流。不要把尚未开始、仅计划中、受前置条件阻塞或只是等待条件的事项标成 `in_progress`。
 
 ## 图片与 PDF 输入
 
