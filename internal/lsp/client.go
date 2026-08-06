@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -493,108 +492,12 @@ func (c *Client) NotifyChange(ctx context.Context, path string) error {
 }
 
 func handleApplyEdit(_ context.Context, _ string, params json.RawMessage) (any, error) {
-	var par protocol.ApplyWorkspaceEditParams
-	if err := json.Unmarshal(params, &par); err != nil {
-		return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: err.Error()}, nil
+	// A language server request is not an authorized Chord tool operation.
+	// Never inspect the edit or touch the filesystem on this path.
+	if !json.Valid(params) {
+		return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: "workspace/applyEdit rejected: malformed parameters"}, nil
 	}
-	if err := applyWorkspaceEdit(par.Edit); err != nil {
-		log.Errorf("lsp: applyWorkspaceEdit error=%v", err)
-		return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: err.Error()}, nil
-	}
-	return protocol.ApplyWorkspaceEditResult{Applied: true}, nil
-}
-
-func applyWorkspaceEdit(edit protocol.WorkspaceEdit) error {
-	if edit.Changes != nil {
-		for uri, edits := range edit.Changes {
-			path, err := uri.Path()
-			if err != nil {
-				return err
-			}
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			content := string(data)
-			// Sort edits in reverse position order so earlier edits don't shift
-			// the byte offsets of later ones.
-			sort.Slice(edits, func(i, j int) bool {
-				si, sj := edits[i].Range.Start, edits[j].Range.Start
-				if si.Line != sj.Line {
-					return si.Line > sj.Line
-				}
-				return si.Character > sj.Character
-			})
-			for _, te := range edits {
-				content = applyTextEdit(content, te)
-			}
-			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func applyTextEdit(content string, te protocol.TextEdit) string {
-	lines := splitLines(content)
-	startL, startC := int(te.Range.Start.Line), int(te.Range.Start.Character)
-	endL, endC := int(te.Range.End.Line), int(te.Range.End.Character)
-	if startL >= len(lines) {
-		return content + te.NewText
-	}
-	startByte := lineCharToByte(lines, startL, startC)
-	endByte := lineCharToByte(lines, endL, endC)
-	return content[:startByte] + te.NewText + content[endByte:]
-}
-
-// splitLines splits s on '\n'. CRLF files are handled correctly: the '\r'
-// is retained as the last byte of each line, which matches what LSP servers
-// report for Character offsets on CRLF content (each '\r' counts as one
-// UTF-16 code unit, just as it does in utf16CharToByteOffset).
-func splitLines(s string) []string {
-	var out []string
-	for len(s) > 0 {
-		i := 0
-		for i < len(s) && s[i] != '\n' {
-			i++
-		}
-		out = append(out, s[:i])
-		if i < len(s) {
-			i++
-		}
-		s = s[i:]
-	}
-	return out
-}
-
-func lineCharToByte(lines []string, line, char int) int {
-	byteOffset := 0
-	for i := 0; i < line && i < len(lines); i++ {
-		byteOffset += len(lines[i]) + 1
-	}
-	if line < len(lines) {
-		byteOffset += utf16CharToByteOffset(lines[line], char)
-	}
-	return byteOffset
-}
-
-// utf16CharToByteOffset converts a UTF-16 code unit offset to a byte offset
-// within a string. LSP positions use UTF-16 offsets, so surrogate pairs
-// (runes >= U+10000) consume 2 UTF-16 code units.
-func utf16CharToByteOffset(s string, utf16Chars int) int {
-	consumed := 0
-	for i, r := range s {
-		if consumed >= utf16Chars {
-			return i
-		}
-		if r >= 0x10000 {
-			consumed += 2 // surrogate pair
-		} else {
-			consumed++
-		}
-	}
-	return len(s)
+	return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: "workspace/applyEdit rejected: no authorized tool operation"}, nil
 }
 
 func handleRegisterCapability(_ context.Context, _ string, _ json.RawMessage) (any, error) {
