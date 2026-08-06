@@ -279,6 +279,48 @@ func TestHandleAgentErrorPersistsFailedPendingToolCalls(t *testing.T) {
 	}
 }
 
+func TestHandleAgentErrorDiscardsPartialAssistantText(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	a.turn.appendPartialText("the second conflict is caused by the next commit touching the same file")
+
+	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
+	a.flushPersist()
+
+	for _, msg := range a.GetMessages() {
+		if msg.Role == "assistant" && strings.Contains(msg.Content, "the second conflict") {
+			t.Fatalf("partial failed response was appended to context: %#v", msg)
+		}
+	}
+	restored, err := a.recovery.LoadMessages("main")
+	if err != nil {
+		t.Fatalf("LoadMessages(main): %v", err)
+	}
+	for _, msg := range restored {
+		if msg.Role == "assistant" && strings.Contains(msg.Content, "the second conflict") {
+			t.Fatalf("partial failed response was persisted: %#v", msg)
+		}
+	}
+}
+
+func TestHandleAgentErrorRollsBackVisiblePartialAssistantText(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+
+	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
+
+	var rollback bool
+	for len(a.outputCh) > 0 {
+		evt := <-a.outputCh
+		if _, ok := evt.(StreamRollbackEvent); ok {
+			rollback = true
+		}
+	}
+	if !rollback {
+		t.Fatal("expected StreamRollbackEvent after main-agent error")
+	}
+}
+
 func TestCancelCurrentTurnRoutesToFocusedSubAgentAndPersistsFailedToolResult(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

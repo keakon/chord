@@ -86,7 +86,7 @@ func evaluateApplyPatchPermission(ruleset permission.Ruleset, args json.RawMessa
 			writePaths[source] = true
 		case tools.MutationDelete:
 			deletePaths[source] = true
-		case tools.MutationUpdate:
+		case tools.MutationUpdate, tools.MutationMove:
 			if target.TargetPath != "" {
 				// Move removes the source even though its protocol header is Update.
 				deletePaths[source] = true

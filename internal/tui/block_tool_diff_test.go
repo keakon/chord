@@ -151,7 +151,7 @@ func TestApplyPatchToolCardGroupsMultiFileDiffByFile(t *testing.T) {
 	}
 }
 
-func TestApplyPatchToolCardLabelsMoveAddAndDeleteDiffSections(t *testing.T) {
+func TestApplyPatchToolCardSummarizesDeleteAndKeepsMoveUpdateDiff(t *testing.T) {
 	args, _ := json.Marshal(map[string]string{"patch": strings.Join([]string{
 		"*** Begin Patch",
 		"*** Update File: src/old.go",
@@ -165,11 +165,13 @@ func TestApplyPatchToolCardLabelsMoveAddAndDeleteDiffSections(t *testing.T) {
 		"*** End Patch",
 	}, "\n")})
 	block := &Block{
-		ID:       1,
-		Type:     BlockToolCall,
-		ToolName: tools.NameApplyPatch,
-		Content:  applyPatchToolDisplayArgs(string(args)),
-		RawArgs:  string(args),
+		ID:           1,
+		Type:         BlockToolCall,
+		ToolName:     tools.NameApplyPatch,
+		Content:      applyPatchToolDisplayArgs(string(args)),
+		RawArgs:      string(args),
+		ResultDone:   true,
+		ResultStatus: agent.ToolResultStatusSuccess,
 		Diff: strings.Join([]string{
 			"--- src/old.go",
 			"+++ src/new.go",
@@ -192,10 +194,71 @@ func TestApplyPatchToolCardLabelsMoveAddAndDeleteDiffSections(t *testing.T) {
 		"↳ R src/old.go → src/new.go",
 		"↳ A docs/new.md",
 		"↳ D tmp/old.txt",
+		"const moved = 2",
+		"# New",
 	} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected multi-file diff section %q, got:\n%s", want, plain)
 		}
+	}
+	if strings.Contains(plain, "obsolete") {
+		t.Fatalf("expected deleted file contents to be hidden, got:\n%s", plain)
+	}
+}
+
+func TestApplyPatchToolCardHidesSingleDeleteDiff(t *testing.T) {
+	args := `{"patch":"*** Begin Patch\n*** Delete File: tmp/old.txt\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		ResultContent: "Applied patch:\nD tmp/old.txt",
+		Diff:          "--- tmp/old.txt\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-obsolete\n-secret\n",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, "apply_patch D tmp/old.txt") {
+		t.Fatalf("expected delete summary in header, got:\n%s", plain)
+	}
+	for _, hidden := range []string{"obsolete", "secret", "↳ Patch:"} {
+		if strings.Contains(plain, hidden) {
+			t.Fatalf("expected %q to be hidden for file deletion, got:\n%s", hidden, plain)
+		}
+	}
+}
+
+func TestApplyPatchToolCardHidesPureMoveDiff(t *testing.T) {
+	args := `{"patch":"*** Begin Patch\n*** Update File: src/old.go\n*** Move to: src/new.go\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		ResultContent: "Applied patch:\nR src/old.go -> src/new.go",
+		Diff:          "--- src/old.go\n+++ src/new.go\n",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, "apply_patch src/old.go → src/new.go") {
+		t.Fatalf("expected move path summary in header, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "↳ Patch:") || strings.Contains(plain, "Applied patch:") {
+		t.Fatalf("expected pure move to omit patch and generic result bodies, got:\n%s", plain)
+	}
+}
+
+func TestApplyPatchToolCardKeepsMoveWithUpdateDiff(t *testing.T) {
+	args := `{"patch":"*** Begin Patch\n*** Update File: src/old.go\n*** Move to: src/new.go\n@@\n-old\n+new\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		Diff: "--- src/old.go\n+++ src/new.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, "apply_patch src/old.go → src/new.go") ||
+		!strings.Contains(plain, "-old") || !strings.Contains(plain, "+new") {
+		t.Fatalf("expected move path and content update diff, got:\n%s", plain)
 	}
 }
 

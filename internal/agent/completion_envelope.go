@@ -50,6 +50,19 @@ func normalizeCompletionEnvelope(env *CompletionEnvelope) *CompletionEnvelope {
 	out.ReportedFilesChanged = normalizeStringList(out.ReportedFilesChanged)
 	out.ActualFilesChanged = normalizeStringList(out.ActualFilesChanged)
 	out.VerificationRun = normalizeStringList(out.VerificationRun)
+	if len(out.VerificationRecords) > 0 {
+		records := make([]VerificationRecord, 0, len(out.VerificationRecords))
+		for _, record := range out.VerificationRecords {
+			record.ToolCallID = strings.TrimSpace(record.ToolCallID)
+			record.Command = strings.TrimSpace(record.Command)
+			record.Status = strings.TrimSpace(record.Status)
+			record.Summary = strings.TrimSpace(record.Summary)
+			if record.Command != "" {
+				records = append(records, record)
+			}
+		}
+		out.VerificationRecords = records
+	}
 	out.RemainingLimitations = normalizeStringList(out.RemainingLimitations)
 	out.KnownRisks = normalizeStringList(out.KnownRisks)
 	out.FollowUpRecommended = normalizeStringList(out.FollowUpRecommended)
@@ -60,7 +73,7 @@ func normalizeCompletionEnvelope(env *CompletionEnvelope) *CompletionEnvelope {
 		ref := *out.ResultRef
 		out.ResultRef = &ref
 	}
-	if out.Summary == "" && len(out.FilesChanged) == 0 && len(out.ReportedFilesChanged) == 0 && len(out.ActualFilesChanged) == 0 && !out.FileAttributionIncomplete && len(out.VerificationRun) == 0 && len(out.RemainingLimitations) == 0 && len(out.KnownRisks) == 0 && len(out.FollowUpRecommended) == 0 && len(out.Artifacts) == 0 && out.ResultType == "" && len(out.Result) == 0 && out.ResultRef == nil {
+	if out.Summary == "" && len(out.FilesChanged) == 0 && len(out.ReportedFilesChanged) == 0 && len(out.ActualFilesChanged) == 0 && !out.FileAttributionIncomplete && len(out.VerificationRun) == 0 && len(out.VerificationRecords) == 0 && len(out.RemainingLimitations) == 0 && len(out.KnownRisks) == 0 && len(out.FollowUpRecommended) == 0 && len(out.Artifacts) == 0 && out.ResultType == "" && len(out.Result) == 0 && out.ResultRef == nil {
 		return nil
 	}
 	return &out

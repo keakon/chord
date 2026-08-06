@@ -638,3 +638,16 @@ func (a *MainAgent) savePartialAssistantMsgForTurn(turn *Turn) {
 func (a *MainAgent) savePartialAssistantMsg() {
 	a.savePartialAssistantMsgForTurn(a.turn)
 }
+
+// discardPartialAssistantMsg drops text emitted by an LLM request that ended
+// in an error. A failed request has no resumable assistant turn; retaining its
+// tool-preface text would make an incomplete response look complete in history.
+func (a *MainAgent) discardPartialAssistantMsg() {
+	if a.turn == nil {
+		return
+	}
+	text := a.turn.drainPartialText()
+	if strings.TrimSpace(text) != "" {
+		log.Debugf("discarded partial assistant message after LLM error len=%v turn_id=%v", len(text), a.turn.ID)
+	}
+}

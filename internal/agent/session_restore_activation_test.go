@@ -169,7 +169,7 @@ func TestNewAuxModelPoolClientFallsBackAcrossRefs(t *testing.T) {
 	}
 }
 
-func TestNewAuxModelPoolClientReturnsFirstErrorWhenAllRefsFail(t *testing.T) {
+func TestNewAuxModelPoolClientReportsAllErrorsWhenAllRefsFail(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.modelSwitchFactory = func(providerModel string) (*llm.Client, string, int, error) {
 		return nil, "", 0, fmt.Errorf("failed %s", providerModel)
@@ -177,10 +177,10 @@ func TestNewAuxModelPoolClientReturnsFirstErrorWhenAllRefsFail(t *testing.T) {
 
 	_, err := a.newAuxModelPoolClient([]string{"first/ref", "second/ref"}, 0, 0)
 	if err == nil {
-		t.Fatal("newAuxModelPoolClient() error = nil, want first failure")
+		t.Fatal("newAuxModelPoolClient() error = nil, want aggregated construction errors")
 	}
-	if got := err.Error(); got != "failed first/ref" {
-		t.Fatalf("newAuxModelPoolClient() error = %q, want %q", got, "failed first/ref")
+	if got := err.Error(); !strings.Contains(got, "first/ref: failed first/ref") || !strings.Contains(got, "second/ref: failed second/ref") {
+		t.Fatalf("newAuxModelPoolClient() error = %q, want both refs and reasons", got)
 	}
 }
 

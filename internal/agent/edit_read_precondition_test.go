@@ -87,8 +87,8 @@ func TestMainAgent_EditCanPatchFileWithoutPriorSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if string(got) != "after" {
-		t.Fatalf("file content = %q, want after", got)
+	if string(got) != "after\n" {
+		t.Fatalf("file content = %q, want after with final newline", got)
 	}
 }
 

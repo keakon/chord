@@ -29,8 +29,8 @@ func TestRestoreTrackedFileStateDurableReadAllowsEdit(t *testing.T) {
 	}
 
 	mustExecuteEdit(t, a, path, "before", "after")
-	if got := readTestFile(t, path); got != "after" {
-		t.Fatalf("file content = %q, want after", got)
+	if got := readTestFile(t, path); got != "after\n" {
+		t.Fatalf("file content = %q, want after with final newline", got)
 	}
 }
 

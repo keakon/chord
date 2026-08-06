@@ -207,6 +207,27 @@ write:
 			t.Fatalf("decision = %#v, want write-rule approval for move target", got)
 		}
 	})
+
+	t.Run("move then recreate source layers all path operations", func(t *testing.T) {
+		node := parsePermissionNode(t, `
+"*": allow
+write:
+  "plans/current.md": ask
+  "plans/archive/*": ask
+delete:
+  "plans/current.md": ask
+`)
+		ruleset := permission.ParsePermission(&node)
+		args := json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: plans/current.md\n*** Move to: plans/archive/old.md\n@@\n-old\n+archived\n*** Add File: plans/current.md\n+new\n*** End Patch"}`)
+
+		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, args)
+		if got.Action != permission.ActionAsk {
+			t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
+		}
+		if want := []string{"plans/current.md", "plans/archive/old.md"}; !reflect.DeepEqual(got.NeedsApprovalPaths, want) {
+			t.Fatalf("needs approval = %#v, want %#v", got.NeedsApprovalPaths, want)
+		}
+	})
 }
 
 func TestEvaluateToolPermissionGlobDenyWinsAcrossPatterns(t *testing.T) {

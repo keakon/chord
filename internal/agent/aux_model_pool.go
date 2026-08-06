@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -50,8 +51,7 @@ func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, 
 	if a.modelSwitchFactory == nil {
 		return nil, fmt.Errorf("model switch factory is not configured")
 	}
-	var firstErr error
-	var directClient *llm.Client
+	var constructionErrs []error
 	pool := make([]llm.FallbackModel, 0, len(refs))
 	for _, selectedRef := range refs {
 		selectedRef = strings.TrimSpace(selectedRef)
@@ -60,19 +60,12 @@ func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, 
 		}
 		client, _, _, err := a.modelSwitchFactory(selectedRef)
 		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
+			constructionErrs = append(constructionErrs, fmt.Errorf("%s: %w", selectedRef, err))
 			continue
 		}
 		if client == nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("model pool ref %q produced nil client", selectedRef)
-			}
+			constructionErrs = append(constructionErrs, fmt.Errorf("%s: produced nil client", selectedRef))
 			continue
-		}
-		if directClient == nil {
-			directClient = client
 		}
 		if timeout > 0 {
 			if rebuilt, err := rebuildClientWithTotalTimeout(client, timeout); err == nil && rebuilt != nil {
@@ -81,23 +74,14 @@ func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, 
 		}
 		entry := client.PrimaryModelEntry()
 		if entry.ProviderConfig == nil || entry.ProviderImpl == nil || strings.TrimSpace(entry.ModelID) == "" {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("model pool ref %q produced unusable client", selectedRef)
-			}
+			constructionErrs = append(constructionErrs, fmt.Errorf("%s: produced unusable client", selectedRef))
 			continue
 		}
 		pool = append(pool, entry)
 	}
 	if len(pool) == 0 {
-		if directClient != nil {
-			if outputMax > 0 {
-				directClient.SetOutputTokenMax(outputMax)
-			}
-			directClient.SetServiceTier(a.ServiceTier())
-			return directClient, nil
-		}
-		if firstErr != nil {
-			return nil, firstErr
+		if len(constructionErrs) > 0 {
+			return nil, errors.Join(constructionErrs...)
 		}
 		return nil, fmt.Errorf("model pool has no usable refs")
 	}

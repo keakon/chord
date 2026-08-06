@@ -1933,7 +1933,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		}
 
 		log.Errorf("agent error error=%v turn_id=%v instance=%v", err, evt.TurnID, a.instanceID)
-		a.savePartialAssistantMsg()
+		a.discardPartialAssistantMsg()
 		a.failPendingToolCalls(a.turn, err)
 		a.applyPendingModelPoolSwitchesAtRequestBoundary()
 		a.fireHookBackground(a.parentCtx, hook.OnAgentError, evt.TurnID, map[string]any{
@@ -1941,6 +1941,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 			"error_kind":      classifyAgentError(err),
 			"source_agent_id": a.instanceID,
 		})
+		a.emitToTUI(StreamRollbackEvent{Reason: err.Error()})
 		a.emitToTUI(ErrorEvent{Err: err})
 		a.stopLoopAsBlocked(err.Error())
 		a.markActiveSubAgentMailboxAck(false)

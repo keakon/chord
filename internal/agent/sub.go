@@ -56,6 +56,16 @@ type toolResult struct {
 	speculativeHooks *speculativeToolHooks
 }
 
+const maxVerificationLedgerEntries = 128
+
+type verificationLedgerEntry struct {
+	ToolCallID    string
+	Command       string
+	Status        string
+	Summary       string
+	MutationEpoch uint64
+}
+
 // AgentResult is the completion payload sent via EventAgentDone when a
 // SubAgent finishes its task (or fails).
 type AgentResult struct {
@@ -155,6 +165,8 @@ type SubAgent struct {
 	pendingCompleteCallID  string
 	pendingEscalate        string
 	pendingEscalateRequest *tools.AgentRequestPayload
+	verificationLedger     []verificationLedgerEntry
+	workspaceMutationEpoch uint64
 	acceptedMailboxIDs     map[string]struct{} // guarded by inputQueueMu; de-duplicates durable deliveries
 
 	// Permission: merged ruleset (global + project + agent-level).

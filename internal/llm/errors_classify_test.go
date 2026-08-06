@@ -43,6 +43,24 @@ func TestIsRetriable4xxNotRetriableExceptAuth(t *testing.T) {
 	}
 }
 
+func TestGlobalQuota403IsFallbackEligible(t *testing.T) {
+	t.Parallel()
+	err := &APIError{
+		StatusCode: 403,
+		Code:       "global_fixed_window_quota_exhausted",
+		Message:    "provider quota exhausted",
+	}
+	if !isGlobalQuotaExhausted(err) {
+		t.Fatal("global quota 403 should be recognized")
+	}
+	if !shouldFallback(err) || !isRetriable(err) {
+		t.Fatal("global quota 403 should rotate keys and try fallback")
+	}
+	if got := classifyFallbackReason(err); got != "global_quota_exhausted" {
+		t.Fatalf("fallback reason = %q, want global_quota_exhausted", got)
+	}
+}
+
 func TestIsConcurrentRequestLimit429(t *testing.T) {
 	t.Parallel()
 	if !isConcurrentRequestLimit429(&APIError{StatusCode: 429, Message: `{"error":"Too many concurrent requests for this model"}`}) {

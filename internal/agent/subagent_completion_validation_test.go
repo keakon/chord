@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestCompleteRejectsBlankSummaryInIntercept(t *testing.T) {
@@ -21,6 +24,56 @@ func TestCompleteRejectsBlankSummaryInIntercept(t *testing.T) {
 	}
 }
 
+func TestCompletionVerificationUsesLatestFinalizedExactCommand(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	sub.verificationLedger = []verificationLedgerEntry{{ToolCallID: "old", Command: "go test ./internal/a", Status: "failed"}, {ToolCallID: "new", Command: "go test ./internal/a", Status: "passed"}}
+	env := &CompletionEnvelope{VerificationRun: []string{"go test ./internal/a"}}
+	if err := sub.validateCompletionVerification(env); err != nil {
+		t.Fatal(err)
+	}
+	if len(env.VerificationRecords) != 1 || env.VerificationRecords[0].ToolCallID != "new" || env.VerificationRecords[0].Status != "passed" {
+		t.Fatalf("records = %#v", env.VerificationRecords)
+	}
+}
+
+func TestCompletionVerificationRejectsUnmatchedCommand(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	if err := sub.validateCompletionVerification(&CompletionEnvelope{VerificationRun: []string{"go test ./missing"}}); err == nil {
+		t.Fatal("expected unmatched verification command to be rejected")
+	}
+}
+
+func TestCompletionVerificationRejectsPassedCommandBeforeLaterMutation(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	passed := &toolResult{CallID: "verify", Name: "shell", ArgsJSON: `{"command":"go test ./internal/a"}`}
+	sub.recordTaskToolChanges(passed, false)
+	sub.recordVerificationToolResult(passed, "ok", false)
+
+	sub.recordTaskToolChanges(&toolResult{
+		CallID: "edit", Name: tools.NameWrite, ArgsJSON: `{"path":"internal/a.go"}`,
+		FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "internal/a.go", Exists: true}}},
+	}, false)
+
+	if err := sub.validateCompletionVerification(&CompletionEnvelope{VerificationRun: []string{"go test ./internal/a"}}); err == nil || !strings.Contains(err.Error(), "mutation epoch") {
+		t.Fatalf("validation error = %v, want stale verification rejection", err)
+	}
+}
+
+func TestCompletionVerificationAcceptsConsecutiveDeclaredCommands(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	for i, command := range []string{"go test ./internal/a", "go test ./internal/b"} {
+		result := &toolResult{CallID: fmt.Sprintf("verify-%d", i), Name: tools.NameShell, ArgsJSON: fmt.Sprintf(`{"command":%q}`, command)}
+		sub.recordTaskToolChanges(result, false)
+		sub.recordVerificationToolResult(result, "ok", false)
+	}
+	env := &CompletionEnvelope{VerificationRun: []string{"go test ./internal/a", "go test ./internal/b"}}
+	if err := sub.validateCompletionVerification(env); err != nil {
+		t.Fatal(err)
+	}
+	if len(env.VerificationRecords) != 2 {
+		t.Fatalf("verification records = %#v, want two records", env.VerificationRecords)
+	}
+}
 func TestDeferredCompletionRetainsStructuredEnvelope(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)
 	parent.subs.mu.Lock()

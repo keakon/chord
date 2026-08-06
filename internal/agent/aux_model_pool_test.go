@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
@@ -185,7 +186,42 @@ func TestNewCompactionClientFailsWhenConfiguredPoolRefFails(t *testing.T) {
 	}
 }
 
-func TestNewAuxModelPoolClientAppliesServiceTierToDirectFallback(t *testing.T) {
+func TestNewAuxModelPoolClientSkipsInvalidRefAndUsesRemainingPool(t *testing.T) {
+	a := &MainAgent{}
+	valid := newAuxModelPoolTestClient("valid", "model")
+	var calls []string
+	a.modelSwitchFactory = func(ref string) (*llm.Client, string, int, error) {
+		calls = append(calls, ref)
+		if ref == "invalid/model" {
+			return nil, "", 0, fmt.Errorf("provider is unavailable")
+		}
+		return valid, ref, 0, nil
+	}
+
+	client, err := a.newAuxModelPoolClient([]string{"invalid/model", "valid/model"}, 0, 0)
+	if err != nil {
+		t.Fatalf("newAuxModelPoolClient() error = %v", err)
+	}
+	if got := client.PrimaryModelRef(); got != "valid/model" {
+		t.Fatalf("primary model ref = %q, want valid/model", got)
+	}
+	if !reflect.DeepEqual(calls, []string{"invalid/model", "valid/model"}) {
+		t.Fatalf("modelSwitchFactory calls = %#v, want both pool refs", calls)
+	}
+}
+
+func TestNewAuxModelPoolClientReportsAllConstructionErrors(t *testing.T) {
+	a := &MainAgent{}
+	a.modelSwitchFactory = func(ref string) (*llm.Client, string, int, error) {
+		return nil, "", 0, fmt.Errorf("failed %s", ref)
+	}
+	_, err := a.newAuxModelPoolClient([]string{"first/ref", "second/ref"}, 0, 0)
+	if err == nil || !strings.Contains(err.Error(), "first/ref: failed first/ref") || !strings.Contains(err.Error(), "second/ref: failed second/ref") {
+		t.Fatalf("error = %v, want both refs and reasons", err)
+	}
+}
+
+func TestNewAuxModelPoolClientAppliesServiceTierToPoolClient(t *testing.T) {
 	a := &MainAgent{}
 	mainClient := newAuxClientFromPool([]llm.FallbackModel{{
 		ProviderConfig: llm.NewProviderConfig("main", config.ProviderConfig{
@@ -205,7 +241,7 @@ func TestNewAuxModelPoolClientAppliesServiceTierToDirectFallback(t *testing.T) {
 		Models: map[string]config.ModelConfig{
 			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
 		},
-	}, []string{"key"}), nil, "model", 1024, "")
+	}, []string{"key"}), auxModelPoolStubProvider{}, "model", 1024, "")
 	a.modelSwitchFactory = func(providerModel string) (*llm.Client, string, int, error) {
 		if providerModel != "aux/model" {
 			t.Fatalf("providerModel = %q, want aux/model", providerModel)

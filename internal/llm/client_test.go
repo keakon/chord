@@ -1117,6 +1117,24 @@ func TestMarkKeyCooldown402And429UseRetryAfterOrDefault(t *testing.T) {
 	}
 	err429 := &APIError{StatusCode: 429, Message: "rate limited"}
 
+	t.Run("403_global_quota_uses_retry_after", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeResponses}, []string{"k1"})
+		res := markKeyCooldown(ctx, p, "k1", &APIError{
+			StatusCode: 403, Code: "global_fixed_window_quota_exhausted",
+			Message: "provider quota exhausted", RetryAfter: 2 * time.Minute,
+		})
+		if !res.cooldownApplied {
+			t.Fatal("expected cooldownApplied=true for global quota 403")
+		}
+		p.mu.Lock()
+		end := p.keyStates[0].ExhaustedUntil
+		p.mu.Unlock()
+		remain := time.Until(end)
+		if remain < 115*time.Second || remain > 125*time.Second {
+			t.Fatalf("expected ~2m cooldown from Retry-After, got remaining %v", remain)
+		}
+	})
+
 	t.Run("default_is_1s_when_no_retry_after", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"k1"})
 		p.UpdateKeySnapshot("k1", snap)

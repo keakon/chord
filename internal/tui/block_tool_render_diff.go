@@ -91,6 +91,12 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	// Parse the apply_patch targets once per render; both the header path and
 	// the body below need them, and parsing re-reads the patch args JSON.
 	applyPatchTargets := b.applyPatchTargets()
+	successfulApplyPatch := b.ToolName == tools.NameApplyPatch && b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled()
+	displayDiff := b.Diff
+	if successfulApplyPatch {
+		displayDiff = b.applyPatchDisplayDiff(applyPatchTargets)
+	}
+	hasOperationSummaries := successfulApplyPatch && applyPatchHasSummaryOnlyTargets(applyPatchTargets)
 	filePath := b.diffToolFilePathWithTargets(applyPatchTargets)
 	if filePath != "" {
 		filePath = b.displayToolPath(filePath)
@@ -104,7 +110,8 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
 	if b.Collapsed {
-		if strings.TrimSpace(b.Diff) == "" && strings.TrimSpace(b.ResultContent) != "" {
+		if strings.TrimSpace(displayDiff) == "" && strings.TrimSpace(b.ResultContent) != "" &&
+			!(b.ToolName == tools.NameApplyPatch && b.ResultDone && hasOperationSummaries && !b.toolResultIsError() && !b.toolResultIsCancelled()) {
 			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, toolDisplayResultContent(b)))
 			lineCount := len(strings.Split(displayResult, "\n"))
 			summary := truncateOneLine(displayResult, cardWidth-26)
@@ -118,13 +125,17 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		}
 		return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
-	diffLines := strings.Split(b.Diff, "\n")
-	multiFileApplyPatchDiff := b.ToolName == tools.NameApplyPatch && unifiedDiffFileCount(diffLines) > 1
+	diffLines := strings.Split(displayDiff, "\n")
+	diffFileCount := unifiedDiffFileCount(diffLines)
+	groupedApplyPatchDiff := b.ToolName == tools.NameApplyPatch && (diffFileCount > 1 || hasOperationSummaries && diffFileCount > 0)
 	if b.ToolName == tools.NameApplyPatch {
-		if !multiFileApplyPatchDiff {
+		if hasOperationSummaries {
+			result = appendApplyPatchOperationSummaries(result, applyPatchTargets, cardWidth-4)
+		} else if !groupedApplyPatchDiff {
 			result = appendApplyPatchTargetLines(result, applyPatchTargets, cardWidth-4)
 		}
-		if strings.TrimSpace(b.Diff) == "" && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+		if strings.TrimSpace(displayDiff) == "" && !b.toolResultIsError() && !b.toolResultIsCancelled() &&
+			!applyPatchOnlyMoveOrDeleteTargets(applyPatchTargets) {
 			result = appendApplyPatchPreview(result, b.editPatchArgsJSON(), filePath, cardWidth-4)
 		}
 	}
@@ -132,11 +143,11 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	diffWidth := max(cardWidth-4-diffLineNumWidth, 10)
 	// Sample the diff content once; the initial highlighter and every per-file
 	// section highlighter of a multi-file patch share the same sample.
-	diffSample := diffContentSample(b.Diff)
+	diffSample := diffContentSample(displayDiff)
 	hl := ensureCodeHighlighter(&b.codeHL, filePath, diffSample)
 	shownLines := 0
 	seenHunk := false
-	diffFileCount := 0
+	renderedDiffFileCount := 0
 	var oldLineNum, newLineNum int
 	formatLineNum := func(n int) string { return fmt.Sprintf("%4d ", n) }
 	if !b.toolResultIsCancelled() {
@@ -240,9 +251,9 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				}
 				continue
 			case strings.HasPrefix(line, "--- "):
-				if multiFileApplyPatchDiff && i+1 < len(diffLines) && strings.HasPrefix(diffLines[i+1], "+++ ") {
+				if groupedApplyPatchDiff && i+1 < len(diffLines) && strings.HasPrefix(diffLines[i+1], "+++ ") {
 					marker, path, syntaxPath := b.applyPatchDiffSectionDisplay(applyPatchTargets, line, diffLines[i+1])
-					if diffFileCount > 0 {
+					if renderedDiffFileCount > 0 {
 						result = append(result, "  "+DimStyle.Render("─────────────"))
 						shownLines++
 					}
@@ -251,7 +262,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 					seenHunk = false
 					oldLineNum, newLineNum = 0, 0
 					hl = newCodeHighlighterWithLanguage(syntaxPath, diffSample, "")
-					diffFileCount++
+					renderedDiffFileCount++
 					i++
 				}
 				continue
@@ -310,12 +321,69 @@ func unifiedDiffFileCount(lines []string) int {
 	return count
 }
 
+func (b *Block) applyPatchDisplayDiff(targets []tools.ApplyPatchDisplayTarget) string {
+	lines := strings.Split(b.Diff, "\n")
+	filtered := make([]string, 0, len(lines))
+	foundSection := false
+	for i := 0; i < len(lines); {
+		if i+1 >= len(lines) || !strings.HasPrefix(lines[i], "--- ") || !strings.HasPrefix(lines[i+1], "+++ ") {
+			filtered = append(filtered, lines[i])
+			i++
+			continue
+		}
+		foundSection = true
+		end := i + 2
+		for end < len(lines) {
+			if end+1 < len(lines) && strings.HasPrefix(lines[end], "--- ") && strings.HasPrefix(lines[end+1], "+++ ") {
+				break
+			}
+			end++
+		}
+		if !b.applyPatchDiffSectionIsSummaryOnly(targets, lines[i], lines[i+1]) {
+			filtered = append(filtered, lines[i:end]...)
+		}
+		i = end
+	}
+	if !foundSection {
+		return b.Diff
+	}
+	return strings.TrimSpace(strings.Join(filtered, "\n"))
+}
+
+func (b *Block) applyPatchDiffSectionIsSummaryOnly(targets []tools.ApplyPatchDisplayTarget, oldHeader, newHeader string) bool {
+	oldPath := strings.TrimSpace(strings.TrimPrefix(oldHeader, "--- "))
+	newPath := strings.TrimSpace(strings.TrimPrefix(newHeader, "+++ "))
+	for _, target := range targets {
+		switch {
+		case target.Kind == tools.MutationDelete && target.TargetPath == "":
+			if oldPath == target.SourcePath && newPath == "/dev/null" {
+				return true
+			}
+		case target.TargetPath != "" && target.Added == 0 && target.Removed == 0:
+			if oldPath == target.SourcePath && newPath == target.TargetPath {
+				return true
+			}
+		}
+	}
+	return newPath == "/dev/null"
+}
+
 func (b *Block) applyPatchDiffSectionDisplay(targets []tools.ApplyPatchDisplayTarget, oldHeader, newHeader string) (marker, path, syntaxPath string) {
 	oldPath := strings.TrimSpace(strings.TrimPrefix(oldHeader, "--- "))
 	newPath := strings.TrimSpace(strings.TrimPrefix(newHeader, "+++ "))
 	for _, target := range targets {
-		if oldPath != target.SourcePath && newPath != target.SourcePath &&
-			oldPath != target.TargetPath && newPath != target.TargetPath {
+		matches := false
+		switch {
+		case target.TargetPath != "":
+			matches = oldPath == target.SourcePath && newPath == target.TargetPath
+		case target.Kind == tools.MutationAdd:
+			matches = oldPath == "/dev/null" && newPath == target.SourcePath
+		case target.Kind == tools.MutationDelete:
+			matches = oldPath == target.SourcePath && newPath == "/dev/null"
+		default:
+			matches = oldPath == target.SourcePath && newPath == target.SourcePath
+		}
+		if !matches {
 			continue
 		}
 		marker, _ = applyPatchTargetDisplay(target)
@@ -413,6 +481,50 @@ func appendApplyPatchTargetLines(result []string, targets []tools.ApplyPatchDisp
 		}
 	}
 	return result
+}
+
+func appendApplyPatchOperationSummaries(result []string, targets []tools.ApplyPatchDisplayTarget, width int) []string {
+	if len(targets) <= 1 {
+		return result
+	}
+	for _, target := range targets {
+		marker, path := applyPatchTargetDisplay(target)
+		if marker != "D" && (marker != "R" || target.Added != 0 || target.Removed != 0) {
+			continue
+		}
+		wrapped := wrapIndentedText(marker+" "+path, width)
+		for i, line := range wrapped {
+			if i == 0 {
+				result = append(result, ToolResultExpandedStyle.Render("  ↳ "+marker+" ")+DimStyle.Render(strings.TrimPrefix(line, marker+" ")))
+				continue
+			}
+			result = append(result, "    "+DimStyle.Render(line))
+		}
+	}
+	return result
+}
+
+func applyPatchHasSummaryOnlyTargets(targets []tools.ApplyPatchDisplayTarget) bool {
+	for _, target := range targets {
+		marker, _ := applyPatchTargetDisplay(target)
+		if marker == "D" || marker == "R" && target.Added == 0 && target.Removed == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func applyPatchOnlyMoveOrDeleteTargets(targets []tools.ApplyPatchDisplayTarget) bool {
+	if len(targets) == 0 {
+		return false
+	}
+	for _, target := range targets {
+		marker, _ := applyPatchTargetDisplay(target)
+		if marker != "D" && (marker != "R" || target.Added != 0 || target.Removed != 0) {
+			return false
+		}
+	}
+	return true
 }
 
 func applyPatchTargetDisplay(target tools.ApplyPatchDisplayTarget) (marker, path string) {
@@ -538,7 +650,10 @@ func (b *Block) diffToolFilePathWithTargets(targets []tools.ApplyPatchDisplayTar
 			}
 			return applyPatchPathSummary(parsed.Paths[0], len(parsed.Paths))
 		}
-		_, path := applyPatchTargetDisplay(targets[0])
+		marker, path := applyPatchTargetDisplay(targets[0])
+		if marker == "D" {
+			path = marker + " " + path
+		}
 		return applyPatchPathSummary(path, len(targets))
 	}
 	if b.ToolName == tools.NameEdit {

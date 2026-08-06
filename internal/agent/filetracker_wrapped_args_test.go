@@ -41,8 +41,8 @@ func TestMainAgent_EditAllowsWrappedArgsWithoutPriorSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if got := string(data); got != "after" {
-		t.Fatalf("file content = %q, want after", got)
+	if got := string(data); got != "after\n" {
+		t.Fatalf("file content = %q, want after with final newline", got)
 	}
 }
 
@@ -132,8 +132,8 @@ func TestMainAgent_ConsecutiveEditesWithWrappedArgsDoNotTriggerStaleRead(t *test
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if got := string(data); got != "final" {
-		t.Fatalf("file content = %q, want final", got)
+	if got := string(data); got != "final\n" {
+		t.Fatalf("file content = %q, want final with final newline", got)
 	}
 }
 

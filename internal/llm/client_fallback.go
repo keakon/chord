@@ -23,6 +23,9 @@ func classifyFallbackReason(err error) string {
 		if IsContextLengthExceeded(apiErr) {
 			return "context_length_exceeded"
 		}
+		if isGlobalQuotaExhausted(apiErr) {
+			return "global_quota_exhausted"
+		}
 		switch {
 		case apiErr.StatusCode == 402:
 			return "402"
@@ -40,6 +43,14 @@ func classifyFallbackReason(err error) string {
 		return "timeout"
 	}
 	return "error"
+}
+
+func isGlobalQuotaExhausted(apiErr *APIError) bool {
+	if apiErr == nil || apiErr.StatusCode != 403 {
+		return false
+	}
+	return apiErrorSignalContains(apiErr, "global_fixed_window_quota_exhausted") ||
+		apiErrMessageContainsAny(apiErr, "global quota exhausted", "全站额度已用完")
 }
 
 // maskedKey returns a short masked key label for UI output.
@@ -292,6 +303,15 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 		provider.MarkCooldown(key, time.Minute)
 		return markKeyCooldownResult{cooldownApplied: true}
 	case 403:
+		if isGlobalQuotaExhausted(apiErr) {
+			cooldown := apiErr.RetryAfter
+			if cooldown <= 0 {
+				cooldown = time.Minute
+			}
+			log.Warnf("global provider quota exhausted, marking key unavailable key_id=%v cooldown=%v", keyLogID(key), cooldown)
+			provider.MarkQuotaExhaustedUntil(key, time.Now().Add(cooldown))
+			return markKeyCooldownResult{cooldownApplied: true}
+		}
 		if info := provider.oauthInfoForKey(key); info != nil {
 			if isAccountInvalidated(apiErr) {
 				log.Warnf("OAuth account invalidated (403), permanently removing key key_id=%v code=%v", keyLogID(key), apiErr.Code)

@@ -44,6 +44,7 @@ func (s *SubAgent) recordTaskToolChanges(result *toolResult, isError bool) (file
 	s.taskChangesMu.Lock()
 	defer s.taskChangesMu.Unlock()
 	if len(exactPaths) > 0 {
+		s.workspaceMutationEpoch++
 		if s.actualChangedFiles == nil {
 			s.actualChangedFiles = make(map[string]struct{})
 		}
@@ -63,10 +64,12 @@ func (s *SubAgent) recordTaskToolChanges(result *toolResult, isError bool) (file
 		return nil, false
 	}
 	if isError && tools.IsFileMutation(name) {
+		s.workspaceMutationEpoch++
 		s.fileAttributionIncomplete = true
 		return nil, true
 	}
 	if tool, ok := s.tools.Get(name); ok && !tool.IsReadOnly() {
+		s.workspaceMutationEpoch++
 		s.fileAttributionIncomplete = true
 		return nil, true
 	}

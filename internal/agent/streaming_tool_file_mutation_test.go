@@ -191,7 +191,7 @@ func TestSpeculativeApplyPatchMoveDiscardPreservesExecutableMode(t *testing.T) {
 	waitForMissingFile(t, target)
 }
 
-func TestSpeculativeApplyPatchMoveDiscardPreservesSymlink(t *testing.T) {
+func TestSpeculativeApplyPatchMoveRejectsSymlinkWithoutMutation(t *testing.T) {
 	projectRoot := t.TempDir()
 	backing := filepath.Join(projectRoot, "backing.txt")
 	source := filepath.Join(projectRoot, "link.txt")
@@ -215,10 +215,13 @@ func TestSpeculativeApplyPatchMoveDiscardPreservesSymlink(t *testing.T) {
 	if !exec.Start(call) {
 		t.Fatal("Start returned false")
 	}
-	waitForFileContent(t, target, "target\n")
 	waitForStreamingToolDone(t, exec, call.ID)
-	if _, ok := exec.DiscardCall(call.ID, "filtered"); !ok {
-		t.Fatal("DiscardCall returned false")
+	payload, ok, drift := exec.Promote(call)
+	if drift || !ok || payload == nil || payload.Error == nil {
+		t.Fatalf("Promote payload=%#v ok=%v drift=%v, want symlink rejection", payload, ok, drift)
+	}
+	if !strings.Contains(payload.Error.Error(), "not a regular file") {
+		t.Fatalf("error = %v, want regular-file rejection", payload.Error)
 	}
 	info, err := os.Lstat(source)
 	if err != nil {

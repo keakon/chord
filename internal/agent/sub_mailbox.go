@@ -45,19 +45,27 @@ const maxAgentMessagePayloadBytes = 32 * 1024
 type ArtifactRef = tools.ArtifactRef
 
 type CompletionEnvelope struct {
-	Summary                   string              `json:"summary,omitempty"`
-	FilesChanged              []string            `json:"files_changed,omitempty"`
-	ReportedFilesChanged      []string            `json:"reported_files_changed,omitempty"`
-	ActualFilesChanged        []string            `json:"actual_files_changed,omitempty"`
-	FileAttributionIncomplete bool                `json:"file_attribution_incomplete,omitempty"`
-	VerificationRun           []string            `json:"verification_run,omitempty"`
-	RemainingLimitations      []string            `json:"remaining_limitations,omitempty"`
-	KnownRisks                []string            `json:"known_risks,omitempty"`
-	FollowUpRecommended       []string            `json:"follow_up_recommended,omitempty"`
-	Artifacts                 []tools.ArtifactRef `json:"artifacts,omitempty"`
-	ResultType                string              `json:"result_type,omitempty"`
-	Result                    json.RawMessage     `json:"result,omitempty"`
-	ResultRef                 *tools.ResultRef    `json:"result_ref,omitempty"`
+	Summary                   string               `json:"summary,omitempty"`
+	FilesChanged              []string             `json:"files_changed,omitempty"`
+	ReportedFilesChanged      []string             `json:"reported_files_changed,omitempty"`
+	ActualFilesChanged        []string             `json:"actual_files_changed,omitempty"`
+	FileAttributionIncomplete bool                 `json:"file_attribution_incomplete,omitempty"`
+	VerificationRun           []string             `json:"verification_run,omitempty"`
+	VerificationRecords       []VerificationRecord `json:"verification_records,omitempty"`
+	RemainingLimitations      []string             `json:"remaining_limitations,omitempty"`
+	KnownRisks                []string             `json:"known_risks,omitempty"`
+	FollowUpRecommended       []string             `json:"follow_up_recommended,omitempty"`
+	Artifacts                 []tools.ArtifactRef  `json:"artifacts,omitempty"`
+	ResultType                string               `json:"result_type,omitempty"`
+	Result                    json.RawMessage      `json:"result,omitempty"`
+	ResultRef                 *tools.ResultRef     `json:"result_ref,omitempty"`
+}
+
+type VerificationRecord struct {
+	ToolCallID string `json:"tool_call_id"`
+	Command    string `json:"command"`
+	Status     string `json:"status"`
+	Summary    string `json:"summary,omitempty"`
 }
 
 type SubAgentMailboxMessage struct {

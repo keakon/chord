@@ -247,6 +247,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	rawResult := result.Result
 	displayResult, contextResult, errorText, isError := composeToolResultTexts(rawResult, result.Error)
 	toolChangedPaths, fileAttributionIncomplete := s.recordTaskToolChanges(result, isError)
+	s.recordVerificationToolResult(result, contextResult, isError)
 	contextResult = applyToolArgsAuditToContextResult(contextResult, result.Audit)
 	contextResult = appendModelContextNote(contextResult, result.ModelContextNote)
 	contextResult = appendModelContextNote(contextResult, s.turn.efficiencyNoteForToolResult(result.CallID, result.Name, result.ArgsJSON, rawResult, isError))
@@ -448,6 +449,13 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 			s.pendingCompleteCallID = ""
 			s.appendPendingUserMessages(pending)
 			s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
+			return
+		}
+		if err := s.validateCompletionVerification(complete.Envelope); err != nil {
+			s.appendCompleteToolResult(s.pendingCompleteCallID, "Completion rejected: "+err.Error())
+			s.pendingComplete = nil
+			s.pendingCompleteCallID = ""
+			s.continueLLMWithPendingUserMessages()
 			return
 		}
 		s.appendCompleteToolResult(s.pendingCompleteCallID, complete.Summary)
