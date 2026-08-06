@@ -3,7 +3,9 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -116,6 +118,41 @@ func TestBashExecutesReadWithClosedStdinInsteadOfRejecting(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output = %q, want substring %q", out, want)
 		}
+	}
+}
+
+func TestShellRejectsInvalidWorkdirBeforeStartingCommand(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(file, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		workdir string
+		want    string
+	}{
+		{name: "missing", workdir: filepath.Join(dir, "missing"), want: "path not found"},
+		{name: "regular file", workdir: file, want: "path is not a directory"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := (ShellTool{}).Execute(context.Background(), mustMarshal(t, map[string]any{
+				"command": "pwd",
+				"workdir": tc.workdir,
+			}))
+			if err == nil {
+				t.Fatal("expected invalid workdir error")
+			}
+			for _, want := range []string{"invalid workdir", tc.want, tc.workdir} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q missing %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), "starting command") || strings.Contains(err.Error(), "fork/exec") {
+				t.Fatalf("invalid workdir reached process startup: %v", err)
+			}
+		})
 	}
 }
 

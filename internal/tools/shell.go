@@ -334,19 +334,9 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	binary, args := resolveShellExecution(t.shellType, a.Command)
 	cmd := exec.Command(binary, args...)
 	_, _ = configureCommandProcessGroup(cmd)
-	resolvedWorkdir := strings.TrimSpace(t.BaseDir)
-	if a.Workdir != "" {
-		var err error
-		resolvedWorkdir, err = resolveToolPathInDir(a.Workdir, t.BaseDir)
-		if err != nil {
-			return "", fmt.Errorf("resolve workdir: %w", err)
-		}
-	} else if resolvedWorkdir != "" {
-		var err error
-		resolvedWorkdir, err = resolveToolPath(resolvedWorkdir)
-		if err != nil {
-			return "", fmt.Errorf("resolve workdir: %w", err)
-		}
+	resolvedWorkdir, err := resolveCommandWorkdir(a.Workdir, t.BaseDir)
+	if err != nil {
+		return "", err
 	}
 	if resolvedWorkdir != "" {
 		cmd.Dir = resolvedWorkdir

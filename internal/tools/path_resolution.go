@@ -91,6 +91,22 @@ func resolveToolPathInDir(path, baseDir string) (string, error) {
 	return filepath.Clean(filepath.Join(base, resolved)), nil
 }
 
+func resolveCommandWorkdir(workdir, baseDir string) (string, error) {
+	requested := strings.TrimSpace(workdir)
+	if requested == "" {
+		requested = strings.TrimSpace(baseDir)
+		baseDir = ""
+	}
+	if requested == "" {
+		return "", nil
+	}
+	resolved, _, err := resolveExistingToolPathInDir(requested, baseDir, PathTargetDirectory, "use as working directory")
+	if err != nil {
+		return "", fmt.Errorf("invalid workdir: %w", err)
+	}
+	return resolved, nil
+}
+
 func ResolveToolPath(path string) (string, error) {
 	return resolveToolPath(path)
 }

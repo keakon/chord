@@ -73,6 +73,46 @@ func TestSpawnRejectsInteractiveCommandBeforeExecution(t *testing.T) {
 	}
 }
 
+func TestSpawnRejectsInvalidWorkdirBeforeRegisteringProcess(t *testing.T) {
+	resetSpawnRegistryOnlyForTest(t)
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(file, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		workdir string
+		want    string
+	}{
+		{name: "missing", workdir: filepath.Join(dir, "missing"), want: "path not found"},
+		{name: "regular file", workdir: file, want: "path is not a directory"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewSpawnTool("posix").Execute(context.Background(), mustMarshal(t, map[string]any{
+				"command":     "sleep 1",
+				"description": "invalid workdir test",
+				"workdir":     tc.workdir,
+			}))
+			if err == nil {
+				t.Fatal("expected invalid workdir error")
+			}
+			for _, want := range []string{"invalid workdir", tc.want, tc.workdir} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q missing %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), "starting command") || strings.Contains(err.Error(), "fork/exec") {
+				t.Fatalf("invalid workdir reached process startup: %v", err)
+			}
+			if got := len(SnapshotSpawnedProcesses()); got != 0 {
+				t.Fatalf("spawn registry length = %d, want 0", got)
+			}
+		})
+	}
+}
+
 func TestSpawnToolUsesDetectedShellDescription(t *testing.T) {
 	desc := NewSpawnTool("posix").Description()
 	for _, want := range []string{

@@ -124,19 +124,9 @@ func (t SpawnTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	}
 	exposeLogToModel := kind == spawnKindService
 
-	resolvedWorkdir := strings.TrimSpace(t.BaseDir)
-	if strings.TrimSpace(a.Workdir) != "" {
-		var err error
-		resolvedWorkdir, err = resolveToolPathInDir(a.Workdir, t.BaseDir)
-		if err != nil {
-			return "", fmt.Errorf("resolve workdir: %w", err)
-		}
-	} else if resolvedWorkdir != "" {
-		var err error
-		resolvedWorkdir, err = resolveToolPath(resolvedWorkdir)
-		if err != nil {
-			return "", fmt.Errorf("resolve workdir: %w", err)
-		}
+	resolvedWorkdir, err := resolveCommandWorkdir(a.Workdir, t.BaseDir)
+	if err != nil {
+		return "", err
 	}
 
 	obj, err := globalSpawnRegistry.start(ctx, spawnedProcessStartRequest{
