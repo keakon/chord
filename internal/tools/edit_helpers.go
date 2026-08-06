@@ -82,6 +82,43 @@ func normalizePatchUnicodeLine(s string) string {
 	return b.String()
 }
 
+func normalizePatchProsePunctuationLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '\u00a0', '\u2007', '\u202f':
+			r = ' '
+		case '“', '”', '„', '‟':
+			r = '"'
+		case '‘', '’', '‚', '‛':
+			r = '\''
+		case '–', '—', '−':
+			r = '-'
+		case '，':
+			r = ','
+		case '；':
+			r = ';'
+		case '：':
+			r = ':'
+		case '。':
+			r = '.'
+		case '！':
+			r = '!'
+		case '？':
+			r = '?'
+		case '（':
+			r = '('
+		case '）':
+			r = ')'
+		}
+		if unicode.IsSpace(r) {
+			r = ' '
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 func commonPrefixLen(a, b string) (runes int, bytes int) {
 	for bytes < len(a) && bytes < len(b) {
 		ra, sizeA := utf8.DecodeRuneInString(a[bytes:])

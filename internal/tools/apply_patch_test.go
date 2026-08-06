@@ -419,6 +419,180 @@ func TestApplyPatchCodexParserAndHunkCompatibility(t *testing.T) {
 	})
 }
 
+func TestApplyPatchProsePunctuationTolerance(t *testing.T) {
+	t.Run("preserves unchanged punctuation", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "proposal.md")
+		content := "注册表保持配置数组顺序；旧字段，结尾。\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: proposal.md\n" +
+			"@@\n" +
+			"-注册表保持配置数组顺序;旧字段,结尾.\n" +
+			"+注册表保持配置数组顺序;新字段,结尾.\n" +
+			"*** End Patch"
+
+		out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, "used punctuation-tolerant matching for 1 hunk") {
+			t.Fatalf("output = %q, want punctuation-tolerant note", out)
+		}
+		assertApplyPatchFile(t, path, "注册表保持配置数组顺序；新字段，结尾。\n")
+	})
+
+	t.Run("rejects ambiguous normalized matches", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "proposal.md")
+		content := "相同；文本。\n中间\n相同；文本。\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: proposal.md\n" +
+			"@@\n" +
+			"-相同;文本.\n" +
+			"+不同;文本.\n" +
+			"*** End Patch"
+
+		_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+		if err == nil || !strings.Contains(err.Error(), "punctuation-tolerant matching is ambiguous at lines 1, 3") {
+			t.Fatalf("error = %v, want ambiguous punctuation candidates", err)
+		}
+		assertApplyPatchFile(t, path, content)
+	})
+
+	t.Run("applies to any decoded text file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, ".env.example")
+		content := "MESSAGE=\"old;value。\"\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: .env.example\n" +
+			"@@\n" +
+			"-MESSAGE=\"old;value.\"\n" +
+			"+MESSAGE=\"new;value.\"\n" +
+			"*** End Patch"
+
+		out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, "used punctuation-tolerant matching for 1 hunk") {
+			t.Fatalf("output = %q, want punctuation-tolerant note", out)
+		}
+		assertApplyPatchFile(t, path, "MESSAGE=\"new;value。\"\n")
+	})
+
+	t.Run("applies to extensionless text files", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "Makefile")
+		content := "说明:old value。\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: Makefile\n" +
+			"@@\n" +
+			"-说明:old value.\n" +
+			"+说明:new value.\n" +
+			"*** End Patch"
+
+		if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch)); err != nil {
+			t.Fatal(err)
+		}
+		assertApplyPatchFile(t, path, "说明:new value。\n")
+	})
+
+	t.Run("reports text that is only part of a line", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "proposal.md")
+		content := "前缀；`pipeline_timeout_seconds` 是旧字段，后缀。\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: proposal.md\n" +
+			"@@\n" +
+			"-`pipeline_timeout_seconds` 是旧字段\n" +
+			"+`EXTERNAL_TIMEOUT_SECONDS` 是统一字段\n" +
+			"*** End Patch"
+
+		_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+		if err == nil || !strings.Contains(err.Error(), "only part of current line 1") || !strings.Contains(err.Error(), "include that complete line") {
+			t.Fatalf("error = %v, want complete-line guidance", err)
+		}
+		assertApplyPatchFile(t, path, content)
+	})
+
+	t.Run("rejects unsafe replacement after tolerant match", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "proposal.md")
+		content := "旧值；结尾。\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: proposal.md\n" +
+			"@@\n" +
+			"-旧值;结尾.\n" +
+			"+完全不同\n" +
+			"*** End Patch"
+
+		_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+		if err == nil || !strings.Contains(err.Error(), "cannot preserve unchanged punctuation safely") {
+			t.Fatalf("error = %v, want unsafe tolerant replacement rejection", err)
+		}
+		assertApplyPatchFile(t, path, content)
+	})
+
+	t.Run("does not hide shifted surrounding whitespace", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "proposal.md")
+		content := " 相同；文本。\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: proposal.md\n" +
+			"@@\n" +
+			"-相同;文本. \n" +
+			"+不同;文本. \n" +
+			"*** End Patch"
+
+		_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+		if err == nil || !strings.Contains(err.Error(), "hunk not found (1/1)") {
+			t.Fatalf("error = %v, want surrounding-whitespace mismatch", err)
+		}
+		assertApplyPatchFile(t, path, content)
+	})
+}
+
+func TestApplyPatchHunkFailureReportsEarlierContextOrder(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "proposal.md")
+	content := "first\nmiddle\nlast\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: proposal.md\n" +
+		"@@\n-last\n+LAST\n" +
+		"@@\n-first\n+FIRST\n" +
+		"*** End Patch"
+
+	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil || !strings.Contains(err.Error(), "hunk not found (2/2)") || !strings.Contains(err.Error(), "matching context exists earlier at line 1") || !strings.Contains(err.Error(), "hunks must follow file order") {
+		t.Fatalf("error = %v, want hunk-order guidance", err)
+	}
+	assertApplyPatchFile(t, path, content)
+}
+
 func TestApplyPatchSequentialPlanningFailureIsAtomic(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "plan.md")

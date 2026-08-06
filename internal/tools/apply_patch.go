@@ -96,6 +96,7 @@ type PlannedMutation struct {
 	AfterText          string
 	Added              int
 	Removed            int
+	PunctuationHunks   int
 	diffInput          unifiedFileDiff
 	diffable           bool
 }
@@ -548,16 +549,17 @@ func BuildApplyPatchPlan(ctx context.Context, patch, baseDir string) (MutationPl
 }
 
 type applyPatchVirtualFile struct {
-	path          string
-	displayPath   string
-	originPath    string
-	initialExists bool
-	initialBytes  []byte
-	initialMode   os.FileMode
-	exists        bool
-	bytes         []byte
-	mode          os.FileMode
-	touched       bool
+	path             string
+	displayPath      string
+	originPath       string
+	initialExists    bool
+	initialBytes     []byte
+	initialMode      os.FileMode
+	exists           bool
+	bytes            []byte
+	mode             os.FileMode
+	touched          bool
+	punctuationHunks int
 }
 
 func snapshotApplyPatchStates(targets []MutationTarget) (map[string]*applyPatchVirtualFile, error) {
@@ -645,10 +647,11 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 			if err != nil {
 				return fmt.Errorf("read update source %s: %w. No files were modified", op.Path, err)
 			}
-			after, err := applyApplyPatchHunks(ctx, decoded.Text, op.Hunks)
+			after, punctuationHunks, err := applyApplyPatchHunks(ctx, decoded.Text, op.Hunks)
 			if err != nil {
 				return fmt.Errorf("update %s: %w", op.Path, err)
 			}
+			state.punctuationHunks += punctuationHunks
 			state.bytes, err = encodeString(after, decoded.Encoding)
 			if err != nil {
 				return fmt.Errorf("encode update %s: %w. No files were modified", op.Path, err)
@@ -671,9 +674,11 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 		target.bytes = append([]byte(nil), state.bytes...)
 		target.mode = state.mode
 		target.originPath = state.originPath
+		target.punctuationHunks += state.punctuationHunks
 		state.exists = false
 		state.bytes = nil
 		state.originPath = ""
+		state.punctuationHunks = 0
 		return nil
 	default:
 		return fmt.Errorf("unsupported apply_patch operation %q", op.Kind)
@@ -719,6 +724,7 @@ func buildApplyPatchMutationPlan(states map[string]*applyPatchVirtualFile) Mutat
 				TargetBeforeMode:   target.initialMode,
 				AfterBytes:         append([]byte(nil), target.bytes...),
 				AfterMode:          target.mode,
+				PunctuationHunks:   target.punctuationHunks,
 			}
 			populateApplyPatchMutationDiff(&mutation, source.displayPath, target.displayPath)
 			plan.Mutations = append(plan.Mutations, mutation)
@@ -736,13 +742,14 @@ func buildApplyPatchMutationPlan(states map[string]*applyPatchVirtualFile) Mutat
 			continue
 		}
 		mutation := PlannedMutation{
-			SourcePath:   path,
-			TargetPath:   path,
-			BeforeExists: state.initialExists,
-			BeforeBytes:  append([]byte(nil), state.initialBytes...),
-			BeforeMode:   state.initialMode,
-			AfterBytes:   append([]byte(nil), state.bytes...),
-			AfterMode:    state.mode,
+			SourcePath:       path,
+			TargetPath:       path,
+			BeforeExists:     state.initialExists,
+			BeforeBytes:      append([]byte(nil), state.initialBytes...),
+			BeforeMode:       state.initialMode,
+			AfterBytes:       append([]byte(nil), state.bytes...),
+			AfterMode:        state.mode,
+			PunctuationHunks: state.punctuationHunks,
 		}
 		switch {
 		case !state.initialExists && state.exists:
@@ -821,7 +828,7 @@ func applyPatchMutationDiffSummary(plan MutationPlan) DiffSummary {
 	return summary
 }
 
-func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatchHunk) (string, error) {
+func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatchHunk) (string, int, error) {
 	newline := "\n"
 	if strings.Contains(content, "\r\n") {
 		newline = "\r\n"
@@ -832,6 +839,7 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 		fileLines = strings.Split(strings.TrimSuffix(logical, "\n"), "\n")
 	}
 	searchStart := 0
+	punctuationHunks := 0
 	for i, hunk := range hunks {
 		if len(hunks) > 1 {
 			reportToolProgress(ctx, ToolProgressSnapshot{Text: fmt.Sprintf("matching hunk %d/%d", i+1, len(hunks))})
@@ -861,22 +869,28 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 			// Retry from the header itself so both styles anchor to one location.
 			match = findApplyPatchSequence(fileLines, oldSeq, headerPos, hunk.EndOfFile)
 		}
+		punctuationMatch := false
+		var punctuationCandidates []int
+		if match < 0 && len(oldSeq) > 0 {
+			match, punctuationCandidates = findUniqueApplyPatchSequence(
+				fileLines, oldSeq, searchStart, hunk.EndOfFile, normalizePatchProsePunctuationLine,
+			)
+			if match >= 0 {
+				punctuationMatch = true
+			}
+		}
 		if match < 0 {
-			return "", fmt.Errorf("hunk not found; re-read the current file before retrying. No files were modified")
+			return "", 0, applyPatchHunkNotFoundError(fileLines, oldSeq, searchStart, i, len(hunks), punctuationCandidates)
 		}
 		matched := fileLines[match : match+len(oldSeq)]
-		newSeq := make([]string, 0, len(hunk.Lines))
-		oldIndex := 0
-		for _, line := range hunk.Lines {
-			switch line.Kind {
-			case ' ':
-				newSeq = append(newSeq, matched[oldIndex])
-				oldIndex++
-			case '-':
-				oldIndex++
-			case '+':
-				newSeq = append(newSeq, line.Text)
+		newSeq := buildApplyPatchNewSequence(hunk, matched)
+		if punctuationMatch {
+			var ok bool
+			newSeq, ok = buildPunctuationTolerantApplyPatchSequence(hunk, matched)
+			if !ok {
+				return "", 0, applyPatchUnsafePunctuationMatchError(oldSeq, i, len(hunks), match)
 			}
+			punctuationHunks++
 		}
 		replaced := make([]string, 0, len(fileLines)-len(oldSeq)+len(newSeq))
 		replaced = append(replaced, fileLines[:match]...)
@@ -894,7 +908,197 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 	if newline == "\r\n" {
 		out = strings.ReplaceAll(out, "\n", "\r\n")
 	}
-	return out, nil
+	return out, punctuationHunks, nil
+}
+
+func buildApplyPatchNewSequence(hunk applyPatchHunk, matched []string) []string {
+	newSeq := make([]string, 0, len(hunk.Lines))
+	oldIndex := 0
+	for _, line := range hunk.Lines {
+		switch line.Kind {
+		case ' ':
+			newSeq = append(newSeq, matched[oldIndex])
+			oldIndex++
+		case '-':
+			oldIndex++
+		case '+':
+			newSeq = append(newSeq, line.Text)
+		}
+	}
+	return newSeq
+}
+
+func buildPunctuationTolerantApplyPatchSequence(hunk applyPatchHunk, matched []string) ([]string, bool) {
+	newSeq := make([]string, 0, len(hunk.Lines))
+	oldIndex := 0
+	for i := 0; i < len(hunk.Lines); {
+		if hunk.Lines[i].Kind == ' ' {
+			newSeq = append(newSeq, matched[oldIndex])
+			oldIndex++
+			i++
+			continue
+		}
+
+		var removed, added []string
+		var matchedRemoved []string
+		for i < len(hunk.Lines) && hunk.Lines[i].Kind != ' ' {
+			switch hunk.Lines[i].Kind {
+			case '-':
+				removed = append(removed, hunk.Lines[i].Text)
+				matchedRemoved = append(matchedRemoved, matched[oldIndex])
+				oldIndex++
+			case '+':
+				added = append(added, hunk.Lines[i].Text)
+			}
+			i++
+		}
+
+		switch {
+		case len(removed) == 0:
+			newSeq = append(newSeq, added...)
+		case len(added) == 0:
+			continue
+		case len(removed) != len(added):
+			return nil, false
+		default:
+			for j := range removed {
+				line, ok := punctuationTolerantReplacementLine(matchedRemoved[j], removed[j], added[j])
+				if !ok {
+					return nil, false
+				}
+				newSeq = append(newSeq, line)
+			}
+		}
+	}
+	return newSeq, true
+}
+
+func punctuationTolerantReplacementLine(current, oldText, newText string) (string, bool) {
+	if current == oldText {
+		return newText, true
+	}
+	currentRunes := []rune(current)
+	oldRunes := []rune(oldText)
+	newRunes := []rune(newText)
+	if len(currentRunes) != len(oldRunes) || normalizePatchProsePunctuationLine(current) != normalizePatchProsePunctuationLine(oldText) {
+		return "", false
+	}
+
+	prefix := 0
+	for prefix < len(oldRunes) && prefix < len(newRunes) && oldRunes[prefix] == newRunes[prefix] {
+		prefix++
+	}
+	suffix := 0
+	for suffix < len(oldRunes)-prefix && suffix < len(newRunes)-prefix && oldRunes[len(oldRunes)-1-suffix] == newRunes[len(newRunes)-1-suffix] {
+		suffix++
+	}
+	if prefix == 0 && suffix == 0 {
+		return "", false
+	}
+
+	result := make([]rune, 0, prefix+len(newRunes)-prefix-suffix+suffix)
+	result = append(result, currentRunes[:prefix]...)
+	result = append(result, newRunes[prefix:len(newRunes)-suffix]...)
+	result = append(result, currentRunes[len(currentRunes)-suffix:]...)
+	return string(result), true
+}
+
+func findUniqueApplyPatchSequence(lines, pattern []string, start int, eof bool, normalize func(string) string) (int, []int) {
+	if len(pattern) == 0 || len(pattern) > len(lines) {
+		return -1, nil
+	}
+	from := max(start, 0)
+	to := len(lines) - len(pattern)
+	if eof {
+		from = to
+	}
+	var candidates []int
+	for i := from; i <= to; i++ {
+		matched := true
+		for j := range pattern {
+			if normalize(lines[i+j]) != normalize(pattern[j]) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			candidates = append(candidates, i)
+		}
+	}
+	if len(candidates) == 1 {
+		return candidates[0], candidates
+	}
+	return -1, candidates
+}
+
+func applyPatchHunkNotFoundError(fileLines, oldSeq []string, searchStart, index, total int, punctuationCandidates []int) error {
+	parts := []string{fmt.Sprintf("hunk not found (%d/%d)", index+1, total)}
+	if preview := applyPatchExpectedPreview(oldSeq); preview != "" {
+		parts = append(parts, "expected complete line: "+preview)
+	}
+	if len(punctuationCandidates) > 1 {
+		parts = append(parts, "punctuation-tolerant matching is ambiguous at lines "+formatApplyPatchCandidateLines(punctuationCandidates))
+	}
+	if earlier := findApplyPatchSequence(fileLines, oldSeq, 0, false); earlier >= 0 && earlier < searchStart {
+		parts = append(parts, fmt.Sprintf("matching context exists earlier at line %d, but hunks must follow file order", earlier+1))
+	} else if line := findApplyPatchSubstringLine(fileLines, oldSeq); line >= 0 {
+		parts = append(parts, fmt.Sprintf("the expected text is only part of current line %d; include that complete line in the hunk", line+1))
+	}
+	parts = append(parts, "re-read the current target range before retrying; do not retry the same hunk unchanged. No files were modified")
+	return fmt.Errorf("%s", strings.Join(parts, "; "))
+}
+
+func applyPatchUnsafePunctuationMatchError(oldSeq []string, index, total, match int) error {
+	parts := []string{
+		fmt.Sprintf("hunk not found (%d/%d)", index+1, total),
+		fmt.Sprintf("a punctuation-tolerant candidate exists at line %d, but the replacement cannot preserve unchanged punctuation safely", match+1),
+	}
+	if preview := applyPatchExpectedPreview(oldSeq); preview != "" {
+		parts = append(parts, "expected complete line: "+preview)
+	}
+	parts = append(parts, "re-read the current target range and use exact complete lines. No files were modified")
+	return fmt.Errorf("%s", strings.Join(parts, "; "))
+}
+
+func applyPatchExpectedPreview(oldSeq []string) string {
+	if len(oldSeq) == 0 {
+		return ""
+	}
+	runes := []rune(strings.TrimSpace(oldSeq[0]))
+	const maxRunes = 120
+	if len(runes) > maxRunes {
+		runes = append(runes[:maxRunes], '…')
+	}
+	return fmt.Sprintf("%q", string(runes))
+}
+
+func findApplyPatchSubstringLine(fileLines, oldSeq []string) int {
+	if len(oldSeq) != 1 {
+		return -1
+	}
+	needle := normalizePatchProsePunctuationLine(oldSeq[0])
+	if needle == "" {
+		return -1
+	}
+	for i, line := range fileLines {
+		normalized := normalizePatchProsePunctuationLine(line)
+		if normalized != needle && strings.Contains(normalized, needle) {
+			return i
+		}
+	}
+	return -1
+}
+
+func formatApplyPatchCandidateLines(candidates []int) string {
+	const maxCandidates = 3
+	parts := make([]string, 0, min(len(candidates), maxCandidates))
+	for _, candidate := range candidates[:min(len(candidates), maxCandidates)] {
+		parts = append(parts, fmt.Sprintf("%d", candidate+1))
+	}
+	if len(candidates) > maxCandidates {
+		parts = append(parts, "…")
+	}
+	return strings.Join(parts, ", ")
 }
 
 func findApplyPatchSequence(lines, pattern []string, start int, eof bool) int {
@@ -1127,7 +1331,9 @@ func (t ApplyPatchTool) finishApplyPatch(plan MutationPlan) string {
 		return "Applied patch:\nNo net file changes"
 	}
 	var lines []string
+	punctuationHunks := 0
 	for _, mutation := range plan.Mutations {
+		punctuationHunks += mutation.PunctuationHunks
 		marker, path := "M", mutation.SourcePath
 		switch mutation.Kind {
 		case MutationAdd:
@@ -1150,6 +1356,9 @@ func (t ApplyPatchTool) finishApplyPatch(plan MutationPlan) string {
 		invalidatePathCache(mutation.TargetPath)
 	}
 	sort.Strings(lines)
+	if punctuationHunks > 0 {
+		lines = append(lines, fmt.Sprintf("Note: used punctuation-tolerant matching for %d hunk(s); unchanged punctuation was preserved from the current file", punctuationHunks))
+	}
 	return "Applied patch:\n" + strings.Join(lines, "\n")
 }
 

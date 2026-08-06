@@ -93,7 +93,7 @@ All operations in one envelope are planned and validated from a single filesyste
 
 ### Error Messages
 
-- **"hunk not found; re-read the current file before retrying"**: Context lines don't match current file state. Re-read the file and regenerate the patch.
+- **"hunk not found (N/M)"**: The indicated hunk does not match the current file. The error includes a short expected-line preview and, when available, explains that the text occurs only within a longer line or earlier than the preceding hunk. Re-read the target range and rebuild the hunk from complete current lines.
 - **"hunk has no context or removed lines; add unchanged context"**: A hunk contains only `+` lines; include at least one context or `-` line to anchor it.
 - **"cannot add file that already exists"**: `*** Add File:` targets an existing path; use `*** Update File:` instead.
 - **"apply_patch contains overlapping operations"**: Two operations in one envelope touch the same path; merge them into one operation.
@@ -255,7 +255,9 @@ Empirical testing (Aider's edit-bench, internal chord metrics) shows:
 
 ### Matching Tolerance
 
-`apply_patch` matches hunk context in passes: exact match first, then ignoring trailing whitespace, then ignoring surrounding whitespace, then normalizing common Unicode punctuation variants. Repeated blocks still need enough nearby context (or an `*** End of File` marker) to make the intended location clear.
+`apply_patch` matches hunk context in passes: exact match first, then ignoring trailing whitespace, then ignoring surrounding whitespace, then normalizing common Unicode quote, dash, and whitespace variants. Repeated blocks still need enough nearby context (or an `*** End of File` marker) to make the intended location clear.
+
+For any file that can be decoded as text, a final fallback also treats common Chinese and ASCII punctuation as equivalent. This includes source files, dotenv files such as `.env.example`, and extensionless text files. The fallback applies only when the complete hunk has one unique match. It preserves punctuation from the current file in unchanged parts of replacement lines and reports its use in the tool result. Ambiguous matches are rejected, and a fragment occurring inside a longer line is diagnostic only—not an automatic substring edit. Binary or otherwise undecodable files do not enter this fallback because text decoding fails before hunk matching.
 
 ### Token Efficiency
 
