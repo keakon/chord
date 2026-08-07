@@ -2,7 +2,9 @@ package analytics
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +22,6 @@ const maxUsageSummaryFirstUserPreview = 80
 
 // UsageEvent is one immutable usage record in usage.jsonl.
 type UsageEvent struct {
-	Version          int               `json:"version"`
 	EventID          string            `json:"event_id"`
 	SessionID        string            `json:"session_id"`
 	ProjectID        string            `json:"project_id,omitempty"`
@@ -65,7 +66,6 @@ type UsageAggregate struct {
 
 // SessionUsageSummary is the materialized session-level view of usage.jsonl.
 type SessionUsageSummary struct {
-	Version                             int                                   `json:"version"`
 	SessionID                           string                                `json:"session_id"`
 	ProjectID                           string                                `json:"project_id,omitempty"`
 	ProjectPath                         string                                `json:"project_path,omitempty"`
@@ -246,10 +246,11 @@ func (l *UsageLedger) BuildSessionStatsWithAgentModelRefs() (SessionStats, int64
 	err := scanUsageEvents(l.usagePath(), func(evt UsageEvent) {
 		eventCount++
 		raw := evt.UsageRaw
-		stats.InputTokens += raw.InputTokens
+		billing := evt.BillingUsage
+		stats.InputTokens += billing.InputTokens
 		stats.OutputTokens += raw.OutputTokens
-		stats.CacheReadTokens += raw.CacheReadTokens
-		stats.CacheWriteTokens += raw.CacheWriteTokens
+		stats.CacheReadTokens += billing.CacheReadTokens
+		stats.CacheWriteTokens += billing.CacheWriteTokens
 		stats.ReasoningTokens += raw.ReasoningTokens
 		stats.LLMCalls++
 		stats.EstimatedCost += evt.Cost.TotalCost
@@ -261,10 +262,10 @@ func (l *UsageLedger) BuildSessionStatsWithAgentModelRefs() (SessionStats, int64
 			stats.ByModel[modelKey] = ms
 		}
 		ms.Calls++
-		ms.InputTokens += raw.InputTokens
+		ms.InputTokens += billing.InputTokens
 		ms.OutputTokens += raw.OutputTokens
-		ms.CacheReadTokens += raw.CacheReadTokens
-		ms.CacheWriteTokens += raw.CacheWriteTokens
+		ms.CacheReadTokens += billing.CacheReadTokens
+		ms.CacheWriteTokens += billing.CacheWriteTokens
 		ms.ReasoningTokens += raw.ReasoningTokens
 		ms.EstimatedCost += evt.Cost.TotalCost
 
@@ -282,10 +283,10 @@ func (l *UsageLedger) BuildSessionStatsWithAgentModelRefs() (SessionStats, int64
 			as = &AgentStats{ByModel: make(map[string]*ModelStats)}
 			stats.ByAgent[agentID] = as
 		}
-		as.InputTokens += raw.InputTokens
+		as.InputTokens += billing.InputTokens
 		as.OutputTokens += raw.OutputTokens
-		as.CacheReadTokens += raw.CacheReadTokens
-		as.CacheWriteTokens += raw.CacheWriteTokens
+		as.CacheReadTokens += billing.CacheReadTokens
+		as.CacheWriteTokens += billing.CacheWriteTokens
 		as.ReasoningTokens += raw.ReasoningTokens
 		as.LLMCalls++
 		as.EstimatedCost += evt.Cost.TotalCost
@@ -296,10 +297,10 @@ func (l *UsageLedger) BuildSessionStatsWithAgentModelRefs() (SessionStats, int64
 			as.ByModel[modelKey] = ams
 		}
 		ams.Calls++
-		ams.InputTokens += raw.InputTokens
+		ams.InputTokens += billing.InputTokens
 		ams.OutputTokens += raw.OutputTokens
-		ams.CacheReadTokens += raw.CacheReadTokens
-		ams.CacheWriteTokens += raw.CacheWriteTokens
+		ams.CacheReadTokens += billing.CacheReadTokens
+		ams.CacheWriteTokens += billing.CacheWriteTokens
 		ams.ReasoningTokens += raw.ReasoningTokens
 		ams.EstimatedCost += evt.Cost.TotalCost
 	})
@@ -357,9 +358,6 @@ func (l *UsageLedger) AppendEvent(event UsageEvent) error {
 }
 
 func (l *UsageLedger) prepareEventLocked(event UsageEvent) UsageEvent {
-	if event.Version == 0 {
-		event.Version = usageEventVersion
-	}
 	if strings.TrimSpace(event.EventID) == "" {
 		l.eventSeq++
 		event.EventID = fmt.Sprintf("%d-%06d", time.Now().UnixNano(), l.eventSeq)
@@ -391,14 +389,7 @@ func (l *UsageLedger) prepareEventLocked(event UsageEvent) UsageEvent {
 	if event.AgentID == "" {
 		event.AgentID = identity.MainAgentID
 	}
-	if event.BillingUsage.BillingTotalTokens == 0 &&
-		event.BillingUsage.InputTokens == 0 &&
-		event.BillingUsage.OutputTokens == 0 &&
-		event.BillingUsage.CacheReadTokens == 0 &&
-		event.BillingUsage.CacheWriteTokens == 0 &&
-		event.BillingUsage.CacheWrite1hTokens == 0 {
-		event.BillingUsage = NormalizeBillingUsage(event.UsageRaw)
-	}
+	event.BillingUsage = NormalizeBillingUsage(event.UsageRaw)
 	if event.Cost.Currency == "" {
 		event.Cost.Currency = "USD"
 	}
@@ -419,18 +410,21 @@ func (l *UsageLedger) ensureSummaryLocked() (*SessionUsageSummary, error) {
 		return l.summary, nil
 	}
 
-	summary, _ := readUsageSummaryFile(l.summaryPath())
+	summary, summaryErr := readUsageSummaryFile(l.summaryPath())
 	lastEvent, hasLastEvent, err := readLastCompleteUsageEvent(l.usagePath())
 	if err != nil {
 		return nil, err
 	}
-	summaryFresh := summary != nil && summary.Version >= usageSummaryVersion
+	if summaryErr != nil && !os.IsNotExist(summaryErr) && !hasLastEvent {
+		return nil, fmt.Errorf("read usage summary: %w", summaryErr)
+	}
+	summaryFresh := summary != nil
 
 	switch {
 	case hasLastEvent && summaryFresh && summary.LastEventID == lastEvent.EventID:
 		l.adoptSummaryLocked(summary)
 		return l.summary, nil
-	case !hasLastEvent && summaryFresh && summary.LastEventID == "":
+	case !hasLastEvent && summaryFresh:
 		l.adoptSummaryLocked(summary)
 		return l.summary, nil
 	default:
@@ -519,7 +513,6 @@ func (l *UsageLedger) adoptSummaryLocked(summary *SessionUsageSummary) {
 
 func (l *UsageLedger) newEmptySummaryLocked() *SessionUsageSummary {
 	return &SessionUsageSummary{
-		Version:          usageSummaryVersion,
 		SessionID:        filepath.Base(l.sessionDir),
 		ProjectID:        l.projectID,
 		ProjectPath:      l.projectPath,
@@ -557,9 +550,6 @@ func (l *UsageLedger) writeSummaryLocked(summary *SessionUsageSummary) error {
 func applyUsageEvent(summary *SessionUsageSummary, event UsageEvent) {
 	if summary == nil {
 		return
-	}
-	if summary.Version == 0 {
-		summary.Version = usageSummaryVersion
 	}
 	if summary.SessionID == "" {
 		summary.SessionID = event.SessionID
@@ -599,13 +589,17 @@ func addUsageAggregate(dst *UsageAggregate, event UsageEvent) {
 		return
 	}
 	dst.LLMCalls++
-	dst.InputTokens += event.UsageRaw.InputTokens
+	billing := event.BillingUsage
+	dst.InputTokens += billing.InputTokens
 	dst.OutputTokens += event.UsageRaw.OutputTokens
-	dst.CacheReadTokens += event.UsageRaw.CacheReadTokens
-	dst.CacheWriteTokens += event.UsageRaw.CacheWriteTokens
+	dst.CacheReadTokens += billing.CacheReadTokens
+	dst.CacheWriteTokens += billing.CacheWriteTokens
 	dst.ReasoningTokens += event.UsageRaw.ReasoningTokens
-	dst.ProviderTotalTokens += event.UsageRaw.InputTokens + event.UsageRaw.OutputTokens
-	dst.BillingTotalTokens += event.BillingUsage.BillingTotalTokens
+	// ProviderTotalTokens preserves the provider-style prompt/output total:
+	// cache reads are part of the provider input count, while cache writes are
+	// an additional billing bucket rather than part of that top-level count.
+	dst.ProviderTotalTokens += billing.InputTokens + billing.CacheReadTokens + event.UsageRaw.OutputTokens
+	dst.BillingTotalTokens += billing.BillingTotalTokens
 	dst.TotalCost += event.Cost.TotalCost
 }
 
@@ -682,7 +676,7 @@ func readUsageSummaryFile(path string) (*SessionUsageSummary, error) {
 		return nil, err
 	}
 	var summary SessionUsageSummary
-	if err := json.Unmarshal(data, &summary); err != nil {
+	if err := decodeCurrentUsageJSON(data, &summary); err != nil {
 		return nil, err
 	}
 	return &summary, nil
@@ -718,19 +712,11 @@ func scanUsageEvents(path string, fn func(UsageEvent)) error {
 			continue
 		}
 		var evt UsageEvent
-		if err := json.Unmarshal([]byte(line), &evt); err != nil {
-			continue
-		}
-		if evt.Version == 0 {
-			evt.Version = usageEventVersion
-		}
-		if evt.BillingUsage.BillingTotalTokens == 0 &&
-			evt.BillingUsage.InputTokens == 0 &&
-			evt.BillingUsage.OutputTokens == 0 &&
-			evt.BillingUsage.CacheReadTokens == 0 &&
-			evt.BillingUsage.CacheWriteTokens == 0 &&
-			evt.BillingUsage.CacheWrite1hTokens == 0 {
-			evt.BillingUsage = NormalizeBillingUsage(evt.UsageRaw)
+		if err := decodeCurrentUsageJSON([]byte(line), &evt); err != nil {
+			if _, ok := errors.AsType[*json.SyntaxError](err); ok {
+				continue
+			}
+			return fmt.Errorf("decode usage event: %w", err)
 		}
 		if evt.Cost.Currency == "" {
 			evt.Cost.Currency = "USD"
@@ -744,6 +730,12 @@ func scanUsageEvents(path string, fn func(UsageEvent)) error {
 		fn(evt)
 	}
 	return scanner.Err()
+}
+
+func decodeCurrentUsageJSON(data []byte, dst any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode(dst)
 }
 
 func usageModelKey(event UsageEvent) string {

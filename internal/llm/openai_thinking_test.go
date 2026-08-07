@@ -226,8 +226,8 @@ func TestParseOpenAISSEStream_AggregatesOpenAIPromptTokenDetails(t *testing.T) {
 	if resp == nil || resp.Usage == nil {
 		t.Fatal("expected non-nil response usage")
 	}
-	if got := resp.Usage.InputTokens; got != 1792 {
-		t.Fatalf("InputTokens = %d, want 1792", got)
+	if got := resp.Usage.InputTokens; got != 2048 {
+		t.Fatalf("InputTokens = %d, want raw provider input 2048", got)
 	}
 	if got := resp.Usage.CacheReadTokens; got != 1024 {
 		t.Fatalf("CacheReadTokens = %d, want 1024", got)

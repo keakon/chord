@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 )
 
@@ -83,7 +84,7 @@ func (m *Model) sessionUsageStatsLines(width int) []string {
 		return []string{
 			DialogTitleStyle.Render(titlePrefix + "Overview"),
 			fmt.Sprintf("Calls: %d", stats.LLMCalls),
-			fmt.Sprintf("Input: %s    Output: %s", formatUsageTokens(stats.InputTokens), formatUsageTokens(stats.OutputTokens)),
+			fmt.Sprintf("Input: %s    Output: %s", formatUsageTokens(analytics.FullInputTokens(stats.InputTokens, stats.CacheReadTokens, stats.CacheWriteTokens)), formatUsageTokens(stats.OutputTokens)),
 			fmt.Sprintf("Cache R: %s    Cache W: %s", formatUsageTokens(stats.CacheReadTokens), formatUsageTokens(stats.CacheWriteTokens)),
 			fmt.Sprintf("Reasoning: %s    Cost: %s", formatUsageTokens(stats.ReasoningTokens), formatCost(stats.EstimatedCost)),
 		}
@@ -172,7 +173,7 @@ func (m *Model) projectUsageStatsLines(width int) []string {
 			fmt.Sprintf("Range: %s", report.Range.Label()),
 			fmt.Sprintf("Sessions: %d    Active days: %d", report.SessionCount, report.ActiveDays),
 			fmt.Sprintf("Calls: %d", report.UsageTotal.LLMCalls),
-			fmt.Sprintf("Input: %s    Output: %s", formatUsageTokens(report.UsageTotal.InputTokens), formatUsageTokens(report.UsageTotal.OutputTokens)),
+			fmt.Sprintf("Input: %s    Output: %s", formatUsageTokens(analytics.FullInputTokens(report.UsageTotal.InputTokens, report.UsageTotal.CacheReadTokens, report.UsageTotal.CacheWriteTokens)), formatUsageTokens(report.UsageTotal.OutputTokens)),
 			fmt.Sprintf("Cache R: %s    Cache W: %s", formatUsageTokens(report.UsageTotal.CacheReadTokens), formatUsageTokens(report.UsageTotal.CacheWriteTokens)),
 			fmt.Sprintf("Reasoning: %s    Cost: %s", formatUsageTokens(report.UsageTotal.ReasoningTokens), formatCost(report.UsageTotal.TotalCost)),
 			fmt.Sprintf("First active: %s", formatUsageTime(report.FirstEventAt)),

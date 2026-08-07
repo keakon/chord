@@ -500,8 +500,9 @@ func TestRenderInfoPanelUsageUsesSingleColumnAndHidesZeroValues(t *testing.T) {
 
 	want := []string{
 		"TOKENS",
-		"↑ 123.5k",
-		"Cache R  1.2k (1%)",
+		"↑ 124.7k",
+		"Uncached  123.5k",
+		"Cache R   1.2k (1%)",
 	}
 	if len(usageLines) != len(want) {
 		t.Fatalf("usage lines = %#v, want %#v", usageLines, want)
@@ -635,8 +636,9 @@ func TestRenderInfoPanelUsageGroupsContextMessagesAndCache(t *testing.T) {
 		"Messages: 12",
 		"",
 		"TOKENS",
-		"↑ 20.4M  ↓ 112.4k",
-		"Cache R  2.3M (11%)",
+		"↑ 22.7M  ↓ 112.4k",
+		"Uncached  20.4M",
+		"Cache R   2.3M (10%)",
 	}
 	if len(usageLines) != len(want) {
 		t.Fatalf("usage lines = %#v, want %#v", usageLines, want)
@@ -683,9 +685,10 @@ func TestRenderInfoPanelUsageCacheDetailsAlignReadAndWriteValues(t *testing.T) {
 	usageLines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(36, 20)), "USAGE")
 	want := []string{
 		"TOKENS",
-		"↑ 10.0k",
-		"Cache R  2.3k (22%)",
-		"Cache W  640",
+		"↑ 12.9k",
+		"Uncached  10.0k",
+		"Cache R   2.3k (18%)",
+		"Cache W   640",
 	}
 	for _, expected := range want {
 		found := slices.Contains(usageLines, expected)
@@ -705,11 +708,11 @@ func TestRenderInfoPanelUsageCacheReadPercentIncludesCacheWrites(t *testing.T) {
 
 	m := NewModel(backend)
 	usageLines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(36, 20)), "USAGE")
-	if !slices.Contains(usageLines, "Cache R  5.0k (25%)") {
-		t.Fatalf("usage lines = %#v, want cache read percent over input plus cache writes", usageLines)
+	if !slices.Contains(usageLines, "Cache R   5.0k (20%)") {
+		t.Fatalf("usage lines = %#v, want cache read percent over uncached input, cache reads, and cache writes", usageLines)
 	}
-	if slices.Contains(usageLines, "Cache R  5.0k (50%)") {
-		t.Fatalf("usage lines = %#v, cache read percent should not ignore cache writes", usageLines)
+	if slices.Contains(usageLines, "Cache R   5.0k (25%)") {
+		t.Fatalf("usage lines = %#v, cache read percent should not omit cache reads from full input", usageLines)
 	}
 }
 
@@ -780,8 +783,9 @@ func TestRenderInfoPanelUsageStandardWidthShowsCurrentStableLayout(t *testing.T)
 		"Messages: 452",
 		"",
 		"TOKENS",
-		"↑ 29.9M  ↓ 143.1k",
-		"Cache R  3.5M (12%)",
+		"↑ 33.4M  ↓ 143.1k",
+		"Uncached  29.9M",
+		"Cache R   3.5M (10%)",
 	}
 	if len(usageLines) != len(want) {
 		t.Fatalf("usage lines = %#v, want %#v", usageLines, want)

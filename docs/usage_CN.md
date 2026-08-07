@@ -206,7 +206,7 @@ Agent 运行中也可以打开选择器查看 MCP 状态，不需要等待当前
 - `Bytes` 和 `Messages` 描述将发送给模型的会话上下文。请求级 context reduction 运行后，`Bytes` 显示当前请求剪裁后的实际上下文字节数，并用 `↓` 标出当前请求相对未剪裁上下文的节省百分比：`(剪裁前字节数 - 剪裁后字节数) / 剪裁前字节数`。该比例不是跨请求累计值；已冻结复用的剪裁摘要只要仍用于当前请求，其节省量就会计入。恢复会话时，Chord 会预计算同一套剪裁用于展示，让 `Bytes` 一开始就是剪裁后的估算值，而不是等下一次请求后突然变小；在任何请求 surface 都无法准备时，回退显示当前持久上下文估算。
 - `Bytes` 统计已安装的系统提示词、消息内容、图片负载，以及工具名/描述；不包含 JSON 转义开销、tool-call 参数 JSON、thinking 元数据，也不包含 stream 设置、思考预算等请求参数。
 - 这些剪裁不是持久化压缩：较旧的工具结果通常会在请求中替换成更短的占位摘要，而持久化会话历史保持不变。`/compact`、自动压缩、工具输出增长以及系统提示词或工具定义变化会更新回退用的持久估算；新的请求准备会刷新实际发送请求大小，loop 模式运行中也会同步更新。
-- `Cache R` 显示百分比时，分子是 cache-read tokens，分母是输入侧 prompt tokens 加上 provider 单独上报的 cache-write tokens。输出 token 不参与计算，因为 prompt cache 只作用于输入侧。
+- `↑` 显示完整 prompt input,即未缓存输入、cache-read 和 cache-write token 的总和。存在缓存桶时,下面会分别显示 `Uncached`、`Cache R` 和 `Cache W`; `Cache R` 的百分比分母是完整输入侧 prompt tokens。输出 token 不参与计算，因为 prompt cache 只作用于输入侧。
 - `Think` 行只在 provider 上报 reasoning/thinking tokens 时显示。这些 token 已包含在输出 token 计费中；该行只是可见性拆解，不是额外的 token 计费桶。
 
 ### `/stats` — 用量统计浮层

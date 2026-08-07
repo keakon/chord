@@ -334,13 +334,7 @@ func (a *MainAgent) restoreUsageEvidence(loaded *loadedSessionState, sessionPath
 		} else if eventCount > 0 {
 			loaded.UsageStats = ledgerStats
 			loaded.AgentModelRefs = modelRefs
-			loaded.ContextUsage = message.TokenUsage{
-				InputTokens:      int(ledgerStats.InputTokens),
-				OutputTokens:     int(ledgerStats.OutputTokens),
-				CacheReadTokens:  int(ledgerStats.CacheReadTokens),
-				CacheWriteTokens: int(ledgerStats.CacheWriteTokens),
-				ReasoningTokens:  int(ledgerStats.ReasoningTokens),
-			}
+			loaded.ContextUsage = tokenUsageFromSessionStats(ledgerStats)
 			return time.Since(usageStarted), eventCount
 		}
 		return time.Since(usageStarted), 0
@@ -366,26 +360,6 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	loaded.LastInputTokens = snap.LastInputTokens
 	loaded.LastTotalContextTokens = snap.LastTotalContextTokens
 	loaded.PendingCompactionResume = clonePendingCompactionResume(snap.PendingCompactionResume)
-	if loaded.UsageStats.LLMCalls == 0 && (snap.UsageLLMCalls > 0 || snap.UsageInputTokens > 0) {
-		loaded.ContextUsage = message.TokenUsage{
-			InputTokens:      int(snap.UsageInputTokens),
-			OutputTokens:     int(snap.UsageOutputTokens),
-			CacheReadTokens:  int(snap.UsageCacheReadTokens),
-			CacheWriteTokens: int(snap.UsageCacheWriteTokens),
-			ReasoningTokens:  int(snap.UsageReasoningTokens),
-		}
-		loaded.UsageStats = analytics.SessionStats{
-			InputTokens:      snap.UsageInputTokens,
-			OutputTokens:     snap.UsageOutputTokens,
-			CacheReadTokens:  snap.UsageCacheReadTokens,
-			CacheWriteTokens: snap.UsageCacheWriteTokens,
-			ReasoningTokens:  snap.UsageReasoningTokens,
-			LLMCalls:         snap.UsageLLMCalls,
-			EstimatedCost:    snap.UsageEstimatedCost,
-			ByModel:          snap.UsageByModel,
-			ByAgent:          snap.UsageByAgent,
-		}
-	}
 	subAgentStarted := time.Now()
 	loaded.SubAgentStates = a.loadRestoredSubAgentStates(sessionPath, tmpRecovery, snap, loaded.MailboxMessages, loaded.TaskRecords)
 	subAgentRestoreDuration = time.Since(subAgentStarted)
@@ -418,7 +392,6 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 		snapshotDuration        time.Duration
 		subAgentRestoreDuration time.Duration
 		todoFallbackDuration    time.Duration
-		usageFallbackDuration   time.Duration
 	)
 
 	usageLedgerDuration, usageLedgerEventCount = a.restoreUsageEvidence(loaded, sessionPath)
@@ -502,45 +475,7 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 		todoFallbackDuration = time.Since(todoStarted)
 	}
 
-	if loaded.UsageStats.LLMCalls == 0 {
-		usageFallbackStarted := time.Now()
-		var sumInput, sumOutput, sumCacheR, sumCacheW, sumReasoning int64
-		var llmCalls int64
-		for _, m := range msgs {
-			if m.Usage == nil {
-				continue
-			}
-			sumInput += int64(m.Usage.InputTokens)
-			sumOutput += int64(m.Usage.OutputTokens)
-			sumCacheR += int64(m.Usage.CacheReadTokens)
-			sumCacheW += int64(m.Usage.CacheWriteTokens)
-			sumReasoning += int64(m.Usage.ReasoningTokens)
-			llmCalls++
-		}
-		if llmCalls > 0 {
-			loaded.ContextUsage = message.TokenUsage{
-				InputTokens:      int(sumInput),
-				OutputTokens:     int(sumOutput),
-				CacheReadTokens:  int(sumCacheR),
-				CacheWriteTokens: int(sumCacheW),
-				ReasoningTokens:  int(sumReasoning),
-			}
-			loaded.UsageStats = analytics.SessionStats{
-				InputTokens:      sumInput,
-				OutputTokens:     sumOutput,
-				CacheReadTokens:  sumCacheR,
-				CacheWriteTokens: sumCacheW,
-				ReasoningTokens:  sumReasoning,
-				LLMCalls:         llmCalls,
-				EstimatedCost:    0,
-				ByModel:          nil,
-				ByAgent:          nil,
-			}
-		}
-		usageFallbackDuration = time.Since(usageFallbackStarted)
-	}
-
-	log.Debugf("session restore load timing session=%v messages=%v subagents=%v usage_events=%v load_main_ms=%v normalize_main_ms=%v build_summary_ms=%v usage_ledger_ms=%v snapshot_ms=%v restore_subagents_ms=%v todos_fallback_ms=%v usage_fallback_ms=%v total_ms=%v", filepath.Base(sessionPath), len(loaded.Messages), len(loaded.SubAgentStates), usageLedgerEventCount, mainLoadDuration.Milliseconds(), normalizeDuration.Milliseconds(), summaryDuration.Milliseconds(), usageLedgerDuration.Milliseconds(), snapshotDuration.Milliseconds(), subAgentRestoreDuration.Milliseconds(), todoFallbackDuration.Milliseconds(), usageFallbackDuration.Milliseconds(), time.Since(loadStarted).Milliseconds())
+	log.Debugf("session restore load timing session=%v messages=%v subagents=%v usage_events=%v load_main_ms=%v normalize_main_ms=%v build_summary_ms=%v usage_ledger_ms=%v snapshot_ms=%v restore_subagents_ms=%v todos_fallback_ms=%v total_ms=%v", filepath.Base(sessionPath), len(loaded.Messages), len(loaded.SubAgentStates), usageLedgerEventCount, mainLoadDuration.Milliseconds(), normalizeDuration.Milliseconds(), summaryDuration.Milliseconds(), usageLedgerDuration.Milliseconds(), snapshotDuration.Milliseconds(), subAgentRestoreDuration.Milliseconds(), todoFallbackDuration.Milliseconds(), time.Since(loadStarted).Milliseconds())
 
 	return loaded, nil
 }
@@ -651,6 +586,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	}
 
 	a.resetCacheRoutingState()
+	a.restoreCacheHitStats(loaded.UsageStats)
 	a.clearLoopReductionCache(true)
 	a.resetLLMModelRun()
 	a.ctxMgr.RestoreMessages(append([]message.Message(nil), loaded.Messages...))

@@ -353,6 +353,16 @@ func (p *ProviderConfig) ChatCompletionsCompat() *config.ChatCompletionsCompatCo
 	return p.compat.ChatCompletions
 }
 
+// UsageCompat returns provider-specific usage-field semantic overrides.
+func (p *ProviderConfig) UsageCompat() *config.UsageCompatConfig {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.compat == nil {
+		return nil
+	}
+	return p.compat.Usage
+}
+
 // compatBool resolves an optional compat toggle against its default.
 func compatBool(v *bool, fallback bool) bool {
 	if v == nil {

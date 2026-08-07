@@ -164,8 +164,8 @@ type Message struct {
 	CompactionFileRevisions   map[string]string     `json:"compaction_file_revisions,omitempty"`   // key-file revisions captured when this checkpoint was created
 	StopReason                string                `json:"stop_reason,omitempty"`                 // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
 	Provenance                *MessageProvenance    `json:"provenance,omitempty"`                  // optional producer/source metadata for model-compat replay decisions
-	// Usage is the token usage for this message when it ends an LLM round (assistant only).
-	// Persisted in JSONL so session resume can sum per-message usage to restore session totals.
+	// Usage carries provider usage on imported messages; runtime session totals
+	// are restored from the usage ledger, not by re-aggregating this field.
 	Usage        *TokenUsage      `json:"usage,omitempty"`
 	Kind         string           `json:"kind,omitempty"`    // control/display subtype, e.g. "loop_notice"
 	Mailbox      *MailboxMetadata `json:"mailbox,omitempty"` // durable metadata for a mailbox message actually sent to an agent
@@ -317,6 +317,13 @@ type TokenUsage struct {
 	CacheWriteTokens   int `json:"cache_creation_input_tokens"`
 	CacheWrite1hTokens int `json:"cache_creation_1h_input_tokens,omitempty"`
 	ReasoningTokens    int `json:"reasoning_tokens"`
+
+	// Transient raw-provider semantics. The LLM client normalizes successful
+	// responses to InputTokens including cache reads and excluding cache writes
+	// before usage reaches agents or persistence.
+	InputSemanticsKnown     bool `json:"-"`
+	InputIncludesCacheRead  bool `json:"-"`
+	InputIncludesCacheWrite bool `json:"-"`
 }
 
 // ThinkingBlock holds extended-thinking content returned by Anthropic models.

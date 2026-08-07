@@ -5,28 +5,18 @@ import (
 	"sync"
 )
 
-// cacheHitTracker maintains a rolling observed prompt-cache hit rate per
-// running model ref. Provider gateways differ wildly in cache quality (same
-// client behavior measured 40%–94% across providers), so observed hit rate is
-// a routing signal: it converts a provider's nominal token price into an
-// effective price.
+// cacheHitTracker maintains the exact token-weighted prompt-cache hit rate per
+// running model ref for the current session.
 type cacheHitTracker struct {
 	mu    sync.Mutex
 	byRef map[string]*cacheHitWindow
 }
 
-// cacheHitWindow is an exponentially-weighted average of per-call hit ratios,
-// weighted by input size so one huge request counts more than many small ones.
+// cacheHitWindow stores mutually-exclusive token totals.
 type cacheHitWindow struct {
-	weightedHit   float64
-	weightedTotal float64
-	observations  int
+	hitTokens   int64
+	totalTokens int64
 }
-
-// cacheHitDecay keeps roughly the last ~20 large calls influential, so a
-// provider that fixes (or degrades) its cache routing is re-scored within a
-// single long session.
-const cacheHitDecay = 0.95
 
 func newCacheHitTracker() *cacheHitTracker {
 	return &cacheHitTracker{byRef: make(map[string]*cacheHitWindow)}
@@ -51,9 +41,10 @@ func (t *cacheHitTracker) Observe(modelRef string, inputTokens, cacheReadTokens 
 	}
 	// InputTokens is the normalized full input. Clamp both sides so provider
 	// inconsistencies cannot produce a hit rate above 100%.
-	hit := float64(max(cacheReadTokens, 0))
-	if hit > float64(inputTokens) {
-		hit = float64(inputTokens)
+	hit := int64(max(cacheReadTokens, 0))
+	total := int64(inputTokens)
+	if hit > total {
+		hit = total
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -62,24 +53,23 @@ func (t *cacheHitTracker) Observe(modelRef string, inputTokens, cacheReadTokens 
 		w = &cacheHitWindow{}
 		t.byRef[modelRef] = w
 	}
-	w.weightedHit = w.weightedHit*cacheHitDecay + hit
-	w.weightedTotal = w.weightedTotal*cacheHitDecay + float64(inputTokens)
-	w.observations++
+	w.hitTokens += hit
+	w.totalTokens += total
 }
 
-// HitRate returns the observed rolling hit rate for a ref. ok is false until
-// enough large calls have been seen to trust the estimate; callers should use
-// an optimistic default in that case so new providers are not penalized.
+// HitRate returns the exact token-weighted hit rate for a ref.
 func (t *cacheHitTracker) HitRate(modelRef string) (rate float64, ok bool) {
-	const minObservations = 3
 	if t == nil {
 		return 0, false
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	w := t.byRef[strings.TrimSpace(modelRef)]
-	if w == nil || w.observations < minObservations || w.weightedTotal <= 0 {
+	if w == nil || w.totalTokens <= 0 {
 		return 0, false
 	}
-	return w.weightedHit / w.weightedTotal, true
+	rate = float64(w.hitTokens) / float64(w.totalTokens)
+	// Keep the public routing signal valid even with provider inconsistencies
+	// or floating-point accumulation at the boundary.
+	return min(max(rate, 0), 1), true
 }

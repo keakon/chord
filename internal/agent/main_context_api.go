@@ -235,22 +235,12 @@ func (a *MainAgent) UpdateTodos(todos []tools.TodoItem) error {
 
 	if a.recovery != nil && !a.shuttingDown.Load() {
 		todoStates := snapshotTodos(todos)
-		usageSnap := a.usageTracker.SessionStats()
 		if err := a.recovery.SaveSnapshot(&recovery.SessionSnapshot{
 			Todos:                  todoStates,
 			ModelName:              a.ModelName(),
 			ActiveRole:             a.CurrentRole(),
 			LastInputTokens:        a.ctxMgr.LastInputTokens(),
 			LastTotalContextTokens: a.ctxMgr.LastTotalContextTokens(),
-			UsageInputTokens:       usageSnap.InputTokens,
-			UsageOutputTokens:      usageSnap.OutputTokens,
-			UsageCacheReadTokens:   usageSnap.CacheReadTokens,
-			UsageCacheWriteTokens:  usageSnap.CacheWriteTokens,
-			UsageReasoningTokens:   usageSnap.ReasoningTokens,
-			UsageLLMCalls:          usageSnap.LLMCalls,
-			UsageEstimatedCost:     usageSnap.EstimatedCost,
-			UsageByModel:           usageSnap.ByModel,
-			UsageByAgent:           usageSnap.ByAgent,
 		}); err != nil {
 			log.Warnf("failed to save todo snapshot error=%v", err)
 		}

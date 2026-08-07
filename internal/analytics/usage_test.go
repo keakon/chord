@@ -7,6 +7,17 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+func TestUsageSnapshotFromTokenUsageProducesMutuallyExclusiveBuckets(t *testing.T) {
+	got := UsageSnapshotFromTokenUsage(message.TokenUsage{InputTokens: 30_002, CacheReadTokens: 30_000})
+	if got.InputTokens != 2 || got.CacheReadTokens != 30_000 {
+		t.Fatalf("UsageSnapshotFromTokenUsage() = %+v, want input=2 cache_read=30000", got)
+	}
+	billing := NormalizeBillingUsage(got)
+	if billing.InputTokens != 2 || billing.CacheReadTokens != 30_000 || billing.BillingTotalTokens != 30_002 {
+		t.Fatalf("NormalizeBillingUsage() = %+v, want input=2 cache_read=30000 total=30002", billing)
+	}
+}
+
 func TestCalculateUsageCostUsesCacheWrite1hPrice(t *testing.T) {
 	cost := &config.ModelCost{
 		Input:        5,

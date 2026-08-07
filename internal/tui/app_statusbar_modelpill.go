@@ -76,10 +76,11 @@ func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSna
 	}
 
 	usage := snap.tokenUsage
-	if usage.InputTokens != 0 || usage.OutputTokens != 0 {
+	fullInputTokens := usage.InputTokens + usage.CacheWriteTokens
+	if fullInputTokens != 0 || usage.OutputTokens != 0 {
 		tokenParts := make([]string, 0, 2)
-		if usage.InputTokens != 0 {
-			tokenParts = append(tokenParts, "↑ "+formatTokens(usage.InputTokens))
+		if fullInputTokens != 0 {
+			tokenParts = append(tokenParts, "↑ "+formatTokens(fullInputTokens))
 		}
 		if usage.OutputTokens != 0 {
 			tokenParts = append(tokenParts, "↓ "+formatTokens(usage.OutputTokens))

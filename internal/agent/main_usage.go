@@ -12,6 +12,16 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+func tokenUsageFromSessionStats(stats analytics.SessionStats) message.TokenUsage {
+	return message.TokenUsage{
+		InputTokens:      int(max(stats.InputTokens, 0) + max(stats.CacheReadTokens, 0)),
+		OutputTokens:     int(max(stats.OutputTokens, 0)),
+		CacheReadTokens:  int(max(stats.CacheReadTokens, 0)),
+		CacheWriteTokens: int(max(stats.CacheWriteTokens, 0)),
+		ReasoningTokens:  int(max(stats.ReasoningTokens, 0)),
+	}
+}
+
 func (a *MainAgent) lookupModelCost(modelRef string) *config.ModelCost {
 	providerName, modelID := analytics.SplitModelRef(modelRef)
 	for _, cfg := range []*config.Config{a.projectConfig, a.globalConfig} {

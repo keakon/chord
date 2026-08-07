@@ -693,6 +693,9 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 			resp.Usage.OutputTokens = chunk.UsageMetadata.CandidatesTokenCount
 			resp.Usage.CacheReadTokens = chunk.UsageMetadata.CachedContentTokenCount
 			resp.Usage.ReasoningTokens = chunk.UsageMetadata.ThoughtsTokenCount
+			resp.Usage.InputSemanticsKnown = true
+			resp.Usage.InputIncludesCacheRead = true
+			resp.Usage.InputIncludesCacheWrite = false
 		}
 	}
 	if err := scanner.Err(); err != nil {

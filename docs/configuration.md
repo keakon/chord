@@ -1171,6 +1171,8 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `parallel_tool_calls` | bool | `true` — Provider-level default for Responses / Chat Completions tool parallelism; model and variant values override it. |
 | `compat.responses.*` | object | protocol defaults — Provider-level optional Responses fields: `send_store`, `send_reasoning_include`, `send_tool_choice`, `send_prompt_cache_key`, and `send_max_output_tokens`. |
 | `compat.chat_completions.send_stream_options` | bool | `true` — Omit `stream_options.include_usage` for gateways that reject it; streaming token usage then remains unavailable. |
+| `compat.usage.input_includes_cache_read` | bool | Protocol default — Override whether the provider's top-level input count already contains cache-read tokens. Defaults: Messages `false`; Chat Completions / Responses / Generate Content `true`. |
+| `compat.usage.input_includes_cache_write` | bool | Protocol default — Override whether the provider's top-level input count already contains cache-write/cache-creation tokens. Defaults: Chat Completions / Responses `true`; Messages / Generate Content `false`. |
 | `models`       | map    | Map of model id → [model config](#model-field-reference).                                                                                               |
 
 ### Model field reference
@@ -1193,6 +1195,15 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `supported_service_tiers` | list | Provider-level default or model-level override for accepted non-standard tiers, e.g. `[fast, slow]` or `[fast]`. Omit to use preset defaults. |
 
 Service tiers and prompt caching are provider-specific. OpenAI supports priority/flex-style tiering plus `prompt_cache_key` / `prompt_cache_retention`; Anthropic supports `cache_control` with 5m and 1h TTLs and service-tier controls; Gemini uses its own routing / thinking / cached-content mechanisms when available. Chord maps the user-facing tier to the closest supported provider behavior instead of forcing one wire format across all backends.
+
+For a compatible gateway whose usage fields differ from its declared protocol, set the usage semantics explicitly. For example, a Responses-compatible gateway that reports uncached input separately from both cache buckets needs:
+
+```yaml
+compat:
+  usage:
+    input_includes_cache_read: false
+    input_includes_cache_write: false
+```
 
 OpenAI reasoning items can also be returned as `reasoning.encrypted_content` when you need stateless continuation. Treat that field as opaque continuation data: it is not meant to be rendered directly in the UI. When a readable summary is available, that is the user-facing form to show.
 

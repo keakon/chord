@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 )
@@ -166,17 +167,35 @@ func (a *MainAgent) resetCacheRoutingState() {
 	}
 }
 
-// observedCacheHit feeds the actual provider-reported usage back into the
-// per-ref rolling hit-rate tracker used by cache-aware model selection.
-// Small requests are skipped: their hit ratio is dominated by the system
-// prompt and carries no routing signal.
+func (a *MainAgent) restoreCacheHitStats(stats analytics.SessionStats) {
+	if a == nil || a.cacheHitTracker == nil {
+		return
+	}
+	for modelRef, modelStats := range stats.ByModel {
+		if modelStats == nil {
+			continue
+		}
+		fullInputTokens := analytics.FullInputTokens(modelStats.InputTokens, modelStats.CacheReadTokens, modelStats.CacheWriteTokens)
+		if fullInputTokens <= 0 {
+			continue
+		}
+		a.cacheHitTracker.Observe(modelRef, int(fullInputTokens), int(modelStats.CacheReadTokens))
+	}
+}
+
+// observedCacheHit feeds every valid provider-reported usage record into the
+// exact token-weighted cache hit-rate tracker used by cache-aware routing.
 func (a *MainAgent) observedCacheHit(modelRef string, usage *message.TokenUsage) {
-	const minObservedInputTokens = 30000
-	if a == nil || modelRef == "" || usage == nil || usage.InputTokens < minObservedInputTokens {
+	if a == nil || modelRef == "" || usage == nil {
+		return
+	}
+	billing := analytics.NormalizeBillingUsage(analytics.UsageSnapshotFromTokenUsage(*usage))
+	fullInputTokens := analytics.FullInputTokens(billing.InputTokens, billing.CacheReadTokens, billing.CacheWriteTokens)
+	if fullInputTokens <= 0 {
 		return
 	}
 	if a.cacheHitTracker != nil {
-		a.cacheHitTracker.Observe(modelRef, usage.InputTokens, usage.CacheReadTokens)
+		a.cacheHitTracker.Observe(modelRef, int(fullInputTokens), int(billing.CacheReadTokens))
 	}
 }
 

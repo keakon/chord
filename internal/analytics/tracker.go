@@ -11,8 +11,8 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-// ModelStats holds per-model aggregated statistics.
-// Input/Output are prompt and generated; Cache* are cache read/write; Reasoning is thinking output when reported separately.
+// ModelStats holds per-model aggregated statistics. InputTokens,
+// CacheReadTokens, and CacheWriteTokens are mutually-exclusive input buckets.
 type ModelStats struct {
 	Calls            int64   `json:"calls"`
 	InputTokens      int64   `json:"input_tokens"`
@@ -36,7 +36,8 @@ type AgentStats struct {
 	ByModel          map[string]*ModelStats `json:"by_model,omitempty"`
 }
 
-// SessionStats holds session-wide aggregated statistics.
+// SessionStats holds session-wide aggregated statistics. InputTokens is the
+// uncached input bucket; full prompt input is Input + CacheRead + CacheWrite.
 type SessionStats struct {
 	InputTokens      int64                  `json:"input_tokens"`
 	OutputTokens     int64                  `json:"output_tokens"`
@@ -105,17 +106,21 @@ func (t *UsageTracker) RecordForAgent(agentID, model string, cost *config.ModelC
 }
 
 func (t *UsageTracker) applyRecordLocked(agentID, model string, cost *config.ModelCost, usage message.TokenUsage) {
-	agentID = normalizeAgentID(agentID)
+	t.applyUsageSnapshotLocked(agentID, model, cost, UsageSnapshotFromTokenUsage(usage))
+}
 
-	t.stats.InputTokens += int64(usage.InputTokens)
-	t.stats.OutputTokens += int64(usage.OutputTokens)
-	t.stats.CacheReadTokens += int64(usage.CacheReadTokens)
-	t.stats.CacheWriteTokens += int64(usage.CacheWriteTokens)
-	t.stats.ReasoningTokens += int64(usage.ReasoningTokens)
+func (t *UsageTracker) applyUsageSnapshotLocked(agentID, model string, cost *config.ModelCost, raw UsageSnapshot) {
+	agentID = normalizeAgentID(agentID)
+	billing := NormalizeBillingUsage(raw)
+
+	t.stats.InputTokens += billing.InputTokens
+	t.stats.OutputTokens += raw.OutputTokens
+	t.stats.CacheReadTokens += billing.CacheReadTokens
+	t.stats.CacheWriteTokens += billing.CacheWriteTokens
+	t.stats.ReasoningTokens += raw.ReasoningTokens
 	t.stats.LLMCalls++
 
-	rawUsage := UsageSnapshotFromTokenUsage(usage)
-	callCost := CalculateUsageCost(cost, NormalizeBillingUsage(rawUsage), config.ServiceTierStandard).TotalCost
+	callCost := CalculateUsageCost(cost, billing, config.ServiceTierStandard).TotalCost
 	t.stats.EstimatedCost += callCost
 
 	ms, ok := t.stats.ByModel[model]
@@ -124,11 +129,11 @@ func (t *UsageTracker) applyRecordLocked(agentID, model string, cost *config.Mod
 		t.stats.ByModel[model] = ms
 	}
 	ms.Calls++
-	ms.InputTokens += int64(usage.InputTokens)
-	ms.OutputTokens += int64(usage.OutputTokens)
-	ms.CacheReadTokens += int64(usage.CacheReadTokens)
-	ms.CacheWriteTokens += int64(usage.CacheWriteTokens)
-	ms.ReasoningTokens += int64(usage.ReasoningTokens)
+	ms.InputTokens += billing.InputTokens
+	ms.OutputTokens += raw.OutputTokens
+	ms.CacheReadTokens += billing.CacheReadTokens
+	ms.CacheWriteTokens += billing.CacheWriteTokens
+	ms.ReasoningTokens += raw.ReasoningTokens
 	ms.EstimatedCost += callCost
 
 	as, ok := t.stats.ByAgent[agentID]
@@ -138,11 +143,11 @@ func (t *UsageTracker) applyRecordLocked(agentID, model string, cost *config.Mod
 		}
 		t.stats.ByAgent[agentID] = as
 	}
-	as.InputTokens += int64(usage.InputTokens)
-	as.OutputTokens += int64(usage.OutputTokens)
-	as.CacheReadTokens += int64(usage.CacheReadTokens)
-	as.CacheWriteTokens += int64(usage.CacheWriteTokens)
-	as.ReasoningTokens += int64(usage.ReasoningTokens)
+	as.InputTokens += billing.InputTokens
+	as.OutputTokens += raw.OutputTokens
+	as.CacheReadTokens += billing.CacheReadTokens
+	as.CacheWriteTokens += billing.CacheWriteTokens
+	as.ReasoningTokens += raw.ReasoningTokens
 	as.LLMCalls++
 	as.EstimatedCost += callCost
 
@@ -152,11 +157,11 @@ func (t *UsageTracker) applyRecordLocked(agentID, model string, cost *config.Mod
 		as.ByModel[model] = ams
 	}
 	ams.Calls++
-	ams.InputTokens += int64(usage.InputTokens)
-	ams.OutputTokens += int64(usage.OutputTokens)
-	ams.CacheReadTokens += int64(usage.CacheReadTokens)
-	ams.CacheWriteTokens += int64(usage.CacheWriteTokens)
-	ams.ReasoningTokens += int64(usage.ReasoningTokens)
+	ams.InputTokens += billing.InputTokens
+	ams.OutputTokens += raw.OutputTokens
+	ams.CacheReadTokens += billing.CacheReadTokens
+	ams.CacheWriteTokens += billing.CacheWriteTokens
+	ams.ReasoningTokens += raw.ReasoningTokens
 	ams.EstimatedCost += callCost
 }
 
@@ -166,14 +171,6 @@ func (t *UsageTracker) AddUsageEvent(event UsageEvent) {
 	defer t.mu.Unlock()
 
 	raw := event.UsageRaw
-	usage := message.TokenUsage{
-		InputTokens:        int(raw.InputTokens),
-		OutputTokens:       int(raw.OutputTokens),
-		CacheReadTokens:    int(raw.CacheReadTokens),
-		CacheWriteTokens:   int(raw.CacheWriteTokens),
-		CacheWrite1hTokens: int(raw.CacheWrite1hTokens),
-		ReasoningTokens:    int(raw.ReasoningTokens),
-	}
 	model := strings.TrimSpace(event.RunningModelRef)
 	if model == "" {
 		model = strings.TrimSpace(event.SelectedModelRef)
@@ -191,7 +188,7 @@ func (t *UsageTracker) AddUsageEvent(event UsageEvent) {
 	if event.PricingSnapshot.Source == "" && event.Cost.TotalCost == 0 {
 		costCfg = nil
 	}
-	t.applyRecordLocked(event.AgentID, model, costCfg, usage)
+	t.applyUsageSnapshotLocked(event.AgentID, model, costCfg, raw)
 }
 
 // SessionStatsForAgent returns cumulative token/cost for a single agent ID

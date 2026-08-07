@@ -23,10 +23,13 @@ func applyResponsesCompletionPayload(resp *message.Response, payload responsesCo
 			cacheReadTokens = u.InputTokensDetails.CachedTokens
 		}
 		resp.Usage = &message.TokenUsage{
-			InputTokens:      normalizedOpenAIInputTokens(u.InputTokens, cacheReadTokens, cacheWriteTokens),
-			OutputTokens:     u.OutputTokens,
-			CacheWriteTokens: cacheWriteTokens,
-			CacheReadTokens:  cacheReadTokens,
+			InputTokens:             u.InputTokens,
+			OutputTokens:            u.OutputTokens,
+			CacheWriteTokens:        cacheWriteTokens,
+			CacheReadTokens:         cacheReadTokens,
+			InputSemanticsKnown:     true,
+			InputIncludesCacheRead:  true,
+			InputIncludesCacheWrite: true,
 		}
 		if u.OutputTokensDetails != nil {
 			resp.Usage.ReasoningTokens = u.OutputTokensDetails.ReasoningTokens

@@ -1171,8 +1171,8 @@ func TestParseSSEStreamAggregatesAnthropicCacheUsage(t *testing.T) {
 	if resp == nil || resp.Usage == nil {
 		t.Fatalf("resp/usage = %#v, want non-nil", resp)
 	}
-	if got := resp.Usage.InputTokens; got != 107 {
-		t.Fatalf("InputTokens = %d, want 107", got)
+	if got := resp.Usage.InputTokens; got != 100 {
+		t.Fatalf("InputTokens = %d, want raw provider input 100", got)
 	}
 	if got := resp.Usage.OutputTokens; got != 23 {
 		t.Fatalf("OutputTokens = %d, want 23", got)
@@ -1337,9 +1337,8 @@ func TestParseSSEStreamAdoptsMessageDeltaInputUsage(t *testing.T) {
 	if resp == nil || resp.Usage == nil {
 		t.Fatalf("resp/usage = %#v, want non-nil", resp)
 	}
-	// InputTokens normalizes to input_tokens + cache_read_input_tokens.
-	if got := resp.Usage.InputTokens; got != 858 {
-		t.Fatalf("InputTokens = %d, want 858", got)
+	if got := resp.Usage.InputTokens; got != 90 {
+		t.Fatalf("InputTokens = %d, want raw provider input 90", got)
 	}
 	if got := resp.Usage.OutputTokens; got != 27 {
 		t.Fatalf("OutputTokens = %d, want 27", got)
@@ -1369,8 +1368,8 @@ func TestParseSSEStreamMessageDeltaZeroUsageDoesNotClobberStartUsage(t *testing.
 	if resp == nil || resp.Usage == nil {
 		t.Fatalf("resp/usage = %#v, want non-nil", resp)
 	}
-	if got := resp.Usage.InputTokens; got != 107 {
-		t.Fatalf("InputTokens = %d, want 107", got)
+	if got := resp.Usage.InputTokens; got != 100 {
+		t.Fatalf("InputTokens = %d, want raw provider input 100", got)
 	}
 	if got := resp.Usage.CacheReadTokens; got != 7 {
 		t.Fatalf("CacheReadTokens = %d, want 7", got)

@@ -1073,6 +1073,8 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `parallel_tool_calls` | bool | `true` — provider 级 Responses / Chat Completions 工具并行默认值；模型和变体配置会覆盖它。 |
 | `compat.responses.*` | object | 协议默认值 — provider 级 Responses 可选字段开关：`send_store`、`send_reasoning_include`、`send_tool_choice`、`send_prompt_cache_key`、`send_max_output_tokens`。 |
 | `compat.chat_completions.send_stream_options` | bool | `true` — 对拒绝 `stream_options` 的网关设为 `false`；此时流式 token usage 不再可用。 |
+| `compat.usage.input_includes_cache_read` | bool | 协议默认值 — 覆盖 provider 顶层 input 是否已包含 cache read。默认：Messages 为 `false`；Chat Completions / Responses / Generate Content 为 `true`。 |
+| `compat.usage.input_includes_cache_write` | bool | 协议默认值 — 覆盖 provider 顶层 input 是否已包含 cache write/cache creation。默认：Chat Completions / Responses 为 `true`；Messages / Generate Content 为 `false`。 |
 | `models`      | map    | model id → [模型配置](#模型字段参考)。                                                                                                              |
 
 ### 模型字段参考
@@ -1095,6 +1097,15 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `supported_service_tiers` | 列表 | provider-level 默认值或 model-level 覆盖值，用于声明可接收的非 standard tier，例如 `[fast, slow]` 或 `[fast]`。省略时使用 preset 默认值。 |
 
 服务层和 prompt cache 是 provider-specific 的：OpenAI 支持 priority/flex 风格的 tiering 以及 `prompt_cache_key` / `prompt_cache_retention`；Anthropic 支持 `cache_control`，并提供 5 分钟和 1 小时 TTL；Gemini 则使用它自己的路由 / thinking / cached-content 机制。Chord 会把用户侧的 tier 映射到当前 provider 能支持的最接近行为，而不是强行统一成同一种 wire 格式。
+
+若兼容网关的 usage 字段与它声明的协议不同，应显式配置语义。例如某个 Responses 兼容网关把普通 input、cache read、cache write 三个桶分开返回：
+
+```yaml
+compat:
+  usage:
+    input_includes_cache_read: false
+    input_includes_cache_write: false
+```
 
 OpenAI 的 reasoning item 还可能通过 `reasoning.encrypted_content` 返回，用于无状态续传。这个字段是加密后的续传载荷，不适合直接在 UI 里展示；如果有可读摘要，应优先展示摘要而不是 encrypted payload。
 

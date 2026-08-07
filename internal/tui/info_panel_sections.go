@@ -622,8 +622,9 @@ func renderInfoPanelKVLine(lineW int, key, value string) string {
 
 func renderUsageSummaryLine(lineW int, stats analytics.SessionStats) string {
 	parts := make([]string, 0, 2)
-	if stats.InputTokens > 0 {
-		parts = append(parts, InfoPanelDim.Render("↑ ")+InfoPanelValue.Render(formatUsageTokens(stats.InputTokens)))
+	fullInputTokens := analytics.FullInputTokens(stats.InputTokens, stats.CacheReadTokens, stats.CacheWriteTokens)
+	if fullInputTokens > 0 {
+		parts = append(parts, InfoPanelDim.Render("↑ ")+InfoPanelValue.Render(formatUsageTokens(fullInputTokens)))
 	}
 	if stats.OutputTokens > 0 {
 		parts = append(parts, InfoPanelDim.Render("↓ ")+InfoPanelValue.Render(formatUsageTokens(stats.OutputTokens)))
@@ -650,11 +651,15 @@ func renderUsageReasoningLine(lineW int, stats analytics.SessionStats) string {
 }
 
 func renderUsageCacheLine(lineW int, stats analytics.SessionStats) string {
-	rows := make([]string, 0, 2)
-	labelWidth := ansi.StringWidth("Cache W")
+	rows := make([]string, 0, 3)
+	labelWidth := ansi.StringWidth("Uncached")
+	if stats.CacheReadTokens > 0 || stats.CacheWriteTokens > 0 {
+		rows = append(rows, renderUsageCacheDetailLine(lineW, "Uncached", labelWidth,
+			InfoPanelValue.Render(formatUsageTokens(stats.InputTokens))))
+	}
 	if stats.CacheReadTokens > 0 {
 		rows = append(rows, renderUsageCacheDetailLine(lineW, "Cache R", labelWidth,
-			formatUsageCacheValue(stats.CacheReadTokens, stats.InputTokens+stats.CacheWriteTokens)))
+			formatUsageCacheValue(stats.CacheReadTokens, analytics.FullInputTokens(stats.InputTokens, stats.CacheReadTokens, stats.CacheWriteTokens))))
 	}
 	if stats.CacheWriteTokens > 0 {
 		rows = append(rows, renderUsageCacheDetailLine(lineW, "Cache W", labelWidth,

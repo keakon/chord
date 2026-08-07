@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 )
@@ -15,21 +16,17 @@ func TestCacheHitTrackerRollingRate(t *testing.T) {
 	}
 	tr.Observe("p/m", 100000, 90000)
 	tr.Observe("p/m", 100000, 90000)
-	if _, ok := tr.HitRate("p/m"); ok {
-		t.Fatal("expected no rate below min observations")
-	}
-	tr.Observe("p/m", 100000, 90000)
 	rate, ok := tr.HitRate("p/m")
 	if !ok || rate < 0.89 || rate > 0.91 {
 		t.Fatalf("rate = %v ok=%v, want ~0.9", rate, ok)
 	}
-	// A run of misses drags the rate down quickly.
+	// Misses contribute their full input tokens to the exact aggregate.
 	for range 10 {
 		tr.Observe("p/m", 100000, 0)
 	}
 	rate, _ = tr.HitRate("p/m")
-	if rate > 0.4 {
-		t.Fatalf("rate after misses = %v, want < 0.4", rate)
+	if rate < 0.1 || rate > 0.2 {
+		t.Fatalf("rate after misses = %v, want ~0.15", rate)
 	}
 	// Cache read above input is clamped.
 	tr.Observe("q/m", 1000, 5000)
@@ -37,6 +34,33 @@ func TestCacheHitTrackerRollingRate(t *testing.T) {
 	tr.Observe("q/m", 1000, 5000)
 	if rate, _ := tr.HitRate("q/m"); rate > 1 {
 		t.Fatalf("clamped rate = %v, want <= 1", rate)
+	}
+}
+
+func TestObservedCacheHitAcceptsSplitInputUsage(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.observedCacheHit("p/m", &message.TokenUsage{InputTokens: 2, CacheReadTokens: 30000})
+	rate, ok := a.cacheHitTracker.HitRate("p/m")
+	if !ok {
+		t.Fatal("expected split input usage to be observed")
+	}
+	if rate <= 0.98 || rate > 1 {
+		t.Fatalf("rate = %v, want approximately 100%% and never above 100%%", rate)
+	}
+}
+
+func TestActivateLoadedSessionRestoresHistoricalCacheHitRate(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.activateLoadedSession(&loadedSessionState{
+		SessionPath: t.TempDir(),
+		Messages:    []message.Message{{Role: message.RoleUser, Content: "restored"}},
+		UsageStats: analytics.SessionStats{ByModel: map[string]*analytics.ModelStats{
+			"p/m": {InputTokens: 2, CacheReadTokens: 30_000},
+		}},
+	})
+	rate, ok := a.cacheHitTracker.HitRate("p/m")
+	if !ok || rate < 0.999 || rate > 1 {
+		t.Fatalf("restored rate = %v ok=%v, want 30000/30002", rate, ok)
 	}
 }
 

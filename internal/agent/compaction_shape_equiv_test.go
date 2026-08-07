@@ -115,7 +115,6 @@ func TestStableReductionMessageEquivalentMatchesShapeHashes(t *testing.T) {
 	nonShape := shapeEquivBaseMessage()
 	nonShape.ToolDurationMs = 1234
 	nonShape.StopReason = "end_turn"
-	nonShape.Usage = &message.TokenUsage{}
 	if !stableReductionMessageEquivalent(&base, &nonShape) {
 		t.Fatal("non-shape field change unexpectedly broke equivalence")
 	}

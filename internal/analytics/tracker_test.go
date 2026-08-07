@@ -54,8 +54,8 @@ func TestRecord_BasicTracking(t *testing.T) {
 	if stats.LLMCalls != 1 {
 		t.Errorf("expected 1 LLM call, got %d", stats.LLMCalls)
 	}
-	if stats.InputTokens != 1000 {
-		t.Errorf("expected 1000 input tokens, got %d", stats.InputTokens)
+	if stats.InputTokens != 800 {
+		t.Errorf("expected 800 uncached input tokens, got %d", stats.InputTokens)
 	}
 	if stats.OutputTokens != 500 {
 		t.Errorf("expected 500 output tokens, got %d", stats.OutputTokens)
@@ -75,8 +75,8 @@ func TestRecord_BasicTracking(t *testing.T) {
 	if ms.Calls != 1 {
 		t.Errorf("expected 1 call for model, got %d", ms.Calls)
 	}
-	if ms.InputTokens != 1000 {
-		t.Errorf("expected 1000 input tokens for model, got %d", ms.InputTokens)
+	if ms.InputTokens != 800 {
+		t.Errorf("expected 800 uncached input tokens for model, got %d", ms.InputTokens)
 	}
 	if ms.OutputTokens != 500 {
 		t.Errorf("expected 500 output tokens for model, got %d", ms.OutputTokens)
@@ -94,7 +94,7 @@ func TestRecord_BasicTracking(t *testing.T) {
 	}
 
 	mainOnly := tracker.SessionStatsForAgent("main")
-	if mainOnly.LLMCalls != 1 || mainOnly.InputTokens != 1000 {
+	if mainOnly.LLMCalls != 1 || mainOnly.InputTokens != 800 {
 		t.Fatalf("SessionStatsForAgent(main) = %+v, want main-only totals", mainOnly)
 	}
 	if len(mainOnly.ByAgent) != 0 {

@@ -579,6 +579,7 @@ func (c *Client) completeStreamTarget(
 			requestTuning,
 			tracker.Callback,
 		)
+		normalizeResponseUsage(t.provider, resp)
 		if err == nil {
 			if resp != nil && modelcompat.IsReplayEvidenceEcho(resp.Content, targetMessages) {
 				echoErr := &ReplayEvidenceEchoError{}

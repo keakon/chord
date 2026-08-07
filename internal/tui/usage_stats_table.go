@@ -28,7 +28,7 @@ func usageModelItems(models map[string]*analytics.ModelStats) []OverlayTableItem
 			Cells: []string{
 				name,
 				fmt.Sprintf("%d", stats.Calls),
-				formatUsageTokens(stats.InputTokens),
+				formatUsageTokens(analytics.FullInputTokens(stats.InputTokens, stats.CacheReadTokens, stats.CacheWriteTokens)),
 				formatUsageTokens(stats.OutputTokens),
 				formatCost(stats.EstimatedCost),
 			},
@@ -60,7 +60,7 @@ func usageAgentItems(agents map[string]*analytics.AgentStats) []OverlayTableItem
 			Cells: []string{
 				label,
 				fmt.Sprintf("%d", stats.LLMCalls),
-				formatUsageTokens(stats.InputTokens),
+				formatUsageTokens(analytics.FullInputTokens(stats.InputTokens, stats.CacheReadTokens, stats.CacheWriteTokens)),
 				formatUsageTokens(stats.OutputTokens),
 				formatCost(stats.EstimatedCost),
 			},
@@ -83,8 +83,10 @@ func lessModelStatsByUsage(nameA, nameB string, a, b *analytics.ModelStats) bool
 	if a.Calls != b.Calls {
 		return a.Calls > b.Calls
 	}
-	if a.InputTokens != b.InputTokens {
-		return a.InputTokens > b.InputTokens
+	inputA := analytics.FullInputTokens(a.InputTokens, a.CacheReadTokens, a.CacheWriteTokens)
+	inputB := analytics.FullInputTokens(b.InputTokens, b.CacheReadTokens, b.CacheWriteTokens)
+	if inputA != inputB {
+		return inputA > inputB
 	}
 	if a.OutputTokens != b.OutputTokens {
 		return a.OutputTokens > b.OutputTokens
@@ -106,8 +108,10 @@ func lessAgentStatsByUsage(nameA, nameB string, a, b *analytics.AgentStats) bool
 	if a.LLMCalls != b.LLMCalls {
 		return a.LLMCalls > b.LLMCalls
 	}
-	if a.InputTokens != b.InputTokens {
-		return a.InputTokens > b.InputTokens
+	inputA := analytics.FullInputTokens(a.InputTokens, a.CacheReadTokens, a.CacheWriteTokens)
+	inputB := analytics.FullInputTokens(b.InputTokens, b.CacheReadTokens, b.CacheWriteTokens)
+	if inputA != inputB {
+		return inputA > inputB
 	}
 	if a.OutputTokens != b.OutputTokens {
 		return a.OutputTokens > b.OutputTokens
@@ -129,8 +133,10 @@ func lessUsageAggregateByUsage(keyA, keyB string, a, b *analytics.UsageAggregate
 	if a.LLMCalls != b.LLMCalls {
 		return a.LLMCalls > b.LLMCalls
 	}
-	if a.InputTokens != b.InputTokens {
-		return a.InputTokens > b.InputTokens
+	inputA := analytics.FullInputTokens(a.InputTokens, a.CacheReadTokens, a.CacheWriteTokens)
+	inputB := analytics.FullInputTokens(b.InputTokens, b.CacheReadTokens, b.CacheWriteTokens)
+	if inputA != inputB {
+		return inputA > inputB
 	}
 	if a.OutputTokens != b.OutputTokens {
 		return a.OutputTokens > b.OutputTokens
@@ -164,7 +170,7 @@ func usageRefAggregateItemsByUsage(groups map[string]*analytics.UsageAggregate, 
 			Cells: []string{
 				label,
 				fmt.Sprintf("%d", agg.LLMCalls),
-				formatUsageTokens(agg.InputTokens),
+				formatUsageTokens(analytics.FullInputTokens(agg.InputTokens, agg.CacheReadTokens, agg.CacheWriteTokens)),
 				formatUsageTokens(agg.OutputTokens),
 				formatCost(agg.TotalCost),
 			},
@@ -223,7 +229,7 @@ func usageDateAggregateItems(groups map[string]*analytics.UsageAggregate, labelF
 			Cells: []string{
 				label,
 				fmt.Sprintf("%d", agg.LLMCalls),
-				formatUsageTokens(agg.InputTokens),
+				formatUsageTokens(analytics.FullInputTokens(agg.InputTokens, agg.CacheReadTokens, agg.CacheWriteTokens)),
 				formatUsageTokens(agg.OutputTokens),
 				formatCost(agg.TotalCost),
 			},

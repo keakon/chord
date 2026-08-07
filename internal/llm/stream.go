@@ -127,6 +127,9 @@ type contentBlock struct {
 }
 
 func applyAnthropicSSEUsage(dst *message.TokenUsage, usage sseUsage, adoptOnlyNonZero bool) {
+	dst.InputSemanticsKnown = true
+	dst.InputIncludesCacheRead = false
+	dst.InputIncludesCacheWrite = false
 	if !adoptOnlyNonZero || usage.OutputTokens > 0 {
 		dst.OutputTokens = usage.OutputTokens
 	}
@@ -137,10 +140,7 @@ func applyAnthropicSSEUsage(dst *message.TokenUsage, usage sseUsage, adoptOnlyNo
 		dst.CacheReadTokens = usage.CacheReadInputTokens
 	}
 	if !adoptOnlyNonZero || usage.InputTokens > 0 {
-		// Chord tracks InputTokens as the full prompt-side token burden
-		// excluding cache writes but including cache reads. Anthropic-style
-		// transports report cache reads separately, so normalize here.
-		dst.InputTokens = usage.InputTokens + dst.CacheReadTokens
+		dst.InputTokens = usage.InputTokens
 	}
 
 	cacheWrite, cacheWrite1h := anthropicSSECacheWriteUsage(usage)

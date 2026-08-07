@@ -44,16 +44,6 @@ type SessionSnapshot struct {
 	SessionEpoch              uint64                   `json:"session_epoch,omitempty"`
 	ActiveBackgroundObjects   []BackgroundObjectState  `json:"active_background_objects,omitempty"`
 	PendingCompactionResume   *PendingCompactionResume `json:"pending_compaction_resume,omitempty"`
-	// Usage statistics — restored when a session is resumed via /resume.
-	UsageInputTokens      int64                            `json:"usage_input_tokens,omitempty"`
-	UsageOutputTokens     int64                            `json:"usage_output_tokens,omitempty"`
-	UsageCacheReadTokens  int64                            `json:"usage_cache_read_tokens,omitempty"`
-	UsageCacheWriteTokens int64                            `json:"usage_cache_write_tokens,omitempty"`
-	UsageReasoningTokens  int64                            `json:"usage_reasoning_tokens,omitempty"`
-	UsageLLMCalls         int64                            `json:"usage_llm_calls,omitempty"`
-	UsageEstimatedCost    float64                          `json:"usage_estimated_cost,omitempty"`
-	UsageByModel          map[string]*analytics.ModelStats `json:"usage_by_model,omitempty"`
-	UsageByAgent          map[string]*analytics.AgentStats `json:"usage_by_agent,omitempty"`
 }
 
 // BackgroundObjectState captures the durable summary of an active background object.

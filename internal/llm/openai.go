@@ -964,9 +964,12 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 			if chunk.Usage.PromptTokensDetails != nil {
 				cacheWriteTokens = chunk.Usage.PromptTokensDetails.CacheWriteTokens
 			}
-			resp.Usage.InputTokens = normalizedOpenAIInputTokens(promptTokens, cacheReadTokens, cacheWriteTokens)
+			resp.Usage.InputTokens = promptTokens
 			resp.Usage.CacheReadTokens = cacheReadTokens
 			resp.Usage.CacheWriteTokens = cacheWriteTokens
+			resp.Usage.InputSemanticsKnown = true
+			resp.Usage.InputIncludesCacheRead = true
+			resp.Usage.InputIncludesCacheWrite = true
 			resp.Usage.OutputTokens = chunk.Usage.CompletionTokens
 			if chunk.Usage.CompletionTokensDetails != nil {
 				resp.Usage.ReasoningTokens = chunk.Usage.CompletionTokensDetails.ReasoningTokens
@@ -1011,20 +1014,6 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 	// chunk but before the transport-level [DONE] marker.
 	finalizeToolCalls(toolCalls, &resp, cb, truncated)
 	return &resp, nil
-}
-
-// OpenAI reports cache writes as a detail bucket within its top-level input
-// count. Chord stores that bucket separately so billing and context accounting
-// can add it exactly once, matching transports that report cache writes apart.
-func normalizedOpenAIInputTokens(inputTokens, cacheReadTokens, cacheWriteTokens int) int {
-	inputTokens = max(inputTokens-cacheWriteTokens, 0)
-	// Standard OpenAI prompt_tokens includes cached tokens. Some compatible
-	// gateways report only uncached input while exposing the cached prefix
-	// separately; cached > input unambiguously identifies that split form.
-	if cacheReadTokens > inputTokens {
-		inputTokens += cacheReadTokens
-	}
-	return inputTokens
 }
 
 // finalizeToolCalls converts all accumulated tool calls into the response and

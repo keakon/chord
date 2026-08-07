@@ -94,6 +94,8 @@ Common workflows:
 
 When exiting, if the current session can be resumed, Chord prints the corresponding resume command.
 
+Usage statistics use the current `usage.jsonl` ledger format. Session restore and summaries do not migrate older usage schemas; an invalid or stale `usage-summary.json` is rebuilt from the ledger.
+
 `/new` resets session state such as conversation history, todos, and usage. Runtime preferences such as the current model pool, service tier, and MCP state stay active until the process exits.
 
 Custom titles are shown in the session picker and terminal title. They are metadata only: `/rename` does not change the session ID, directory, transcript, or resume command.

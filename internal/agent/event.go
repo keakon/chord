@@ -73,7 +73,7 @@ type LLMResponsePayload struct {
 	StopReason                string
 	ThinkingToolcallMarkerHit bool
 	ReasoningContent          string              // full reasoning text when marker hit
-	Usage                     *message.TokenUsage // token usage for this round; nil when the provider did not return usage; persisted with the assistant message for session resume
+	Usage                     *message.TokenUsage // token usage for this round; nil when the provider did not return usage
 	RequestBatch              uint64              // actual main-model request sequence assigned before dispatch
 }
 

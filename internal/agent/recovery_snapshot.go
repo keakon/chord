@@ -70,7 +70,6 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 	a.subs.mu.RUnlock()
 
 	modelPoolCurrentModelPool, modelPoolAgentOverrides := a.snapshotModelPoolState()
-	usageSnap := a.usageTracker.SessionStats()
 	return &recovery.SessionSnapshot{
 		Todos:                     todoStates,
 		ActiveAgents:              agents,
@@ -86,14 +85,5 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 		SessionEpoch:              a.sessionEpoch,
 		ActiveBackgroundObjects:   spawnStatesForSnapshot(),
 		PendingCompactionResume:   a.snapshotPendingCompactionResume(),
-		UsageInputTokens:          usageSnap.InputTokens,
-		UsageOutputTokens:         usageSnap.OutputTokens,
-		UsageCacheReadTokens:      usageSnap.CacheReadTokens,
-		UsageCacheWriteTokens:     usageSnap.CacheWriteTokens,
-		UsageReasoningTokens:      usageSnap.ReasoningTokens,
-		UsageLLMCalls:             usageSnap.LLMCalls,
-		UsageEstimatedCost:        usageSnap.EstimatedCost,
-		UsageByModel:              usageSnap.ByModel,
-		UsageByAgent:              usageSnap.ByAgent,
 	}
 }

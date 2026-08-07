@@ -9,14 +9,7 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-const (
-	usageEventVersion   = 1
-	usageSummaryVersion = 2
-)
-
-// UsageSnapshot records normalized runtime usage. InputTokens is the complete
-// prompt input (including cache reads when the provider reports them
-// separately); cache-read tokens remain separate for pricing and analytics.
+// UsageSnapshot records mutually-exclusive runtime usage buckets.
 type UsageSnapshot struct {
 	InputTokens        int64 `json:"input_tokens"`
 	OutputTokens       int64 `json:"output_tokens"`
@@ -47,6 +40,12 @@ type BillingUsage struct {
 	BillingTotalTokens int64 `json:"billing_total_tokens"`
 }
 
+// FullInputTokens returns the complete prompt input from mutually-exclusive
+// uncached, cache-read, and cache-write buckets.
+func FullInputTokens(inputTokens, cacheReadTokens, cacheWriteTokens int64) int64 {
+	return max(inputTokens, 0) + max(cacheReadTokens, 0) + max(cacheWriteTokens, 0)
+}
+
 // UsageCost stores the cost breakdown for a single usage event.
 type UsageCost struct {
 	Currency       string  `json:"currency"`
@@ -72,27 +71,31 @@ type PricingSnapshot struct {
 
 // UsageSnapshotFromTokenUsage converts runtime usage into a persisted snapshot.
 func UsageSnapshotFromTokenUsage(usage message.TokenUsage) UsageSnapshot {
+	cacheReadTokens := max(int64(usage.CacheReadTokens), 0)
 	return UsageSnapshot{
-		InputTokens:        int64(usage.InputTokens),
+		InputTokens:        max(int64(usage.InputTokens)-cacheReadTokens, 0),
 		OutputTokens:       int64(usage.OutputTokens),
-		CacheReadTokens:    int64(usage.CacheReadTokens),
+		CacheReadTokens:    cacheReadTokens,
 		CacheWriteTokens:   int64(usage.CacheWriteTokens),
 		CacheWrite1hTokens: int64(usage.CacheWrite1hTokens),
 		ReasoningTokens:    int64(usage.ReasoningTokens),
 	}
 }
 
-// NormalizeBillingUsage converts raw provider usage into mutually-exclusive billing buckets.
+// NormalizeBillingUsage clamps current-format mutually-exclusive usage buckets.
 func NormalizeBillingUsage(raw UsageSnapshot) BillingUsage {
-	inputTokens := max(raw.InputTokens-raw.CacheReadTokens, 0)
+	inputTokens := max(raw.InputTokens, 0)
+	cacheReadTokens := max(raw.CacheReadTokens, 0)
+	cacheWriteTokens := max(raw.CacheWriteTokens, 0)
+	cacheWrite1hTokens := min(max(raw.CacheWrite1hTokens, 0), cacheWriteTokens)
 	out := BillingUsage{
 		InputTokens:        inputTokens,
-		OutputTokens:       raw.OutputTokens,
-		CacheReadTokens:    raw.CacheReadTokens,
-		CacheWriteTokens:   raw.CacheWriteTokens,
-		CacheWrite1hTokens: raw.CacheWrite1hTokens,
+		OutputTokens:       max(raw.OutputTokens, 0),
+		CacheReadTokens:    cacheReadTokens,
+		CacheWriteTokens:   cacheWriteTokens,
+		CacheWrite1hTokens: cacheWrite1hTokens,
 	}
-	out.BillingTotalTokens = out.InputTokens + out.OutputTokens + out.CacheReadTokens + out.CacheWriteTokens
+	out.BillingTotalTokens = FullInputTokens(out.InputTokens, out.CacheReadTokens, out.CacheWriteTokens) + out.OutputTokens
 	return out
 }
 

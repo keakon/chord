@@ -355,6 +355,9 @@ providers:
         send_max_output_tokens: true
       chat_completions:
         send_stream_options: false
+      usage:
+        input_includes_cache_read: false
+        input_includes_cache_write: false
     models:
       gpt-5.5:
         limit: {context: 400000, output: 128000}
@@ -369,6 +372,9 @@ providers:
 	}
 	if prov.Compat == nil || prov.Compat.Responses == nil || prov.Compat.ChatCompletions == nil {
 		t.Fatalf("compat not parsed: %#v", prov.Compat)
+	}
+	if prov.Compat.Usage == nil || prov.Compat.Usage.InputIncludesCacheRead == nil || *prov.Compat.Usage.InputIncludesCacheRead || prov.Compat.Usage.InputIncludesCacheWrite == nil || *prov.Compat.Usage.InputIncludesCacheWrite {
+		t.Fatalf("usage compat = %#v, want both input cache flags false", prov.Compat.Usage)
 	}
 	r := prov.Compat.Responses
 	if r.SendStore == nil || *r.SendStore {

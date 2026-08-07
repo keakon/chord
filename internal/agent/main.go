@@ -1152,13 +1152,7 @@ func (a *MainAgent) GetTokenUsage() message.TokenUsage {
 	}
 	if target.parked {
 		stats := a.usageStatsForTask(target.task)
-		return message.TokenUsage{
-			InputTokens:      int(stats.InputTokens),
-			OutputTokens:     int(stats.OutputTokens),
-			CacheReadTokens:  int(stats.CacheReadTokens),
-			CacheWriteTokens: int(stats.CacheWriteTokens),
-			ReasoningTokens:  int(stats.ReasoningTokens),
-		}
+		return tokenUsageFromSessionStats(stats)
 	}
 	return a.ctxMgr.GetStats()
 }

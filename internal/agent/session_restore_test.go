@@ -69,7 +69,23 @@ func TestRestoreUsageEvidenceReusesLedgerScanForAgentModelRefs(t *testing.T) {
 		t.Fatalf("restored model refs = %#v", refs)
 	}
 	if loaded.UsageStats.InputTokens != 7 {
-		t.Fatalf("restored input tokens = %d, want 7", loaded.UsageStats.InputTokens)
+		t.Fatalf("restored input tokens = %d, want 7 uncached tokens", loaded.UsageStats.InputTokens)
+	}
+	if loaded.ContextUsage.InputTokens != 7 {
+		t.Fatalf("restored context input tokens = %d, want 7", loaded.ContextUsage.InputTokens)
+	}
+}
+
+func TestTokenUsageFromSessionStatsIncludesCacheReads(t *testing.T) {
+	usage := tokenUsageFromSessionStats(analytics.SessionStats{
+		InputTokens:      30,
+		OutputTokens:     10,
+		CacheReadTokens:  70,
+		CacheWriteTokens: 20,
+		ReasoningTokens:  4,
+	})
+	if usage.InputTokens != 100 || usage.OutputTokens != 10 || usage.CacheReadTokens != 70 || usage.CacheWriteTokens != 20 || usage.ReasoningTokens != 4 {
+		t.Fatalf("token usage = %+v, want total input 100 with separate cache buckets", usage)
 	}
 }
 
@@ -1147,15 +1163,16 @@ func persistRestorableSession(t *testing.T, sessionDir string) {
 	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "hello"}); err != nil {
 		t.Fatalf("PersistMessage(user): %v", err)
 	}
-	if err := rm.PersistMessage("main", message.Message{
-		Role:    "assistant",
-		Content: "world",
-		Usage: &message.TokenUsage{
-			InputTokens:  11,
-			OutputTokens: 7,
-		},
-	}); err != nil {
+	if err := rm.PersistMessage("main", message.Message{Role: "assistant", Content: "world"}); err != nil {
 		t.Fatalf("PersistMessage(assistant): %v", err)
+	}
+	if err := analytics.NewUsageLedger(sessionDir, filepath.Dir(sessionDir)).AppendEvent(analytics.UsageEvent{
+		AgentID:          "main",
+		SelectedModelRef: "test/model",
+		RunningModelRef:  "test/model",
+		UsageRaw:         analytics.UsageSnapshot{InputTokens: 11, OutputTokens: 7},
+	}); err != nil {
+		t.Fatalf("AppendEvent(usage): %v", err)
 	}
 	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
 		Todos:                  []recovery.TodoState{},

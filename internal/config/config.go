@@ -564,8 +564,16 @@ type ProviderCompatConfig struct {
 	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
 	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitempty" yaml:"reasoning_continuity,omitempty"`
 	RequestOverrides    *RequestOverridesConfig          `json:"request_overrides,omitempty" yaml:"request_overrides,omitempty"`
+	Usage               *UsageCompatConfig               `json:"usage,omitempty" yaml:"usage,omitempty"`
 	Responses           *ResponsesCompatConfig           `json:"responses,omitempty" yaml:"responses,omitempty"`
 	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitempty" yaml:"chat_completions,omitempty"`
+}
+
+// UsageCompatConfig overrides provider usage-field semantics when a compatible
+// gateway differs from the official wire protocol. Nil uses protocol defaults.
+type UsageCompatConfig struct {
+	InputIncludesCacheRead  *bool `json:"input_includes_cache_read,omitempty" yaml:"input_includes_cache_read,omitempty"`
+	InputIncludesCacheWrite *bool `json:"input_includes_cache_write,omitempty" yaml:"input_includes_cache_write,omitempty"`
 }
 
 // ResponsesCompatConfig controls which optional Responses request fields Chord

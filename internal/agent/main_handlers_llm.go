@@ -299,6 +299,8 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		RequestBatch:     payload.RequestBatch,
 		Provenance:       mainAssistantProvenance(a),
 	}
+	// Usage is retained on the in-memory message for external-session export;
+	// session restore reads usage.jsonl as the sole analytics source.
 	assistantMsg.Usage = payload.Usage
 	a.ctxMgr.Append(assistantMsg)
 
@@ -308,7 +310,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		ToolCalls: len(sanitizedToolCalls),
 	})
 
-	// Persist assistant message for crash recovery (including usage for session resume).
+	// Persist assistant message for crash recovery.
 	if a.recovery != nil {
 		a.persistAsync(identity.MainAgentID, assistantMsg)
 	}

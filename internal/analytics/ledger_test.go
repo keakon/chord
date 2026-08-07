@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -25,9 +26,10 @@ func TestUsageLedgerAppendEventWritesSummary(t *testing.T) {
 		CacheRead: 0.3,
 	}
 	raw := UsageSnapshot{
-		InputTokens:     1000,
-		OutputTokens:    200,
-		CacheReadTokens: 300,
+		InputTokens:      1000,
+		OutputTokens:     200,
+		CacheReadTokens:  300,
+		CacheWriteTokens: 20,
 	}
 	billing := NormalizeBillingUsage(raw)
 	if err := ledger.AppendEvent(UsageEvent{
@@ -58,8 +60,14 @@ func TestUsageLedgerAppendEventWritesSummary(t *testing.T) {
 	if summary.FirstUserMessage != "sample first request" {
 		t.Fatalf("FirstUserMessage = %q", summary.FirstUserMessage)
 	}
-	if summary.UsageTotal.InputTokens != raw.InputTokens {
-		t.Fatalf("InputTokens = %d, want %d", summary.UsageTotal.InputTokens, raw.InputTokens)
+	if summary.UsageTotal.InputTokens != billing.InputTokens {
+		t.Fatalf("InputTokens = %d, want uncached bucket %d", summary.UsageTotal.InputTokens, billing.InputTokens)
+	}
+	if summary.UsageTotal.ProviderTotalTokens != 1500 {
+		t.Fatalf("ProviderTotalTokens = %d, want provider input/output total 1500", summary.UsageTotal.ProviderTotalTokens)
+	}
+	if summary.UsageTotal.BillingTotalTokens != 1520 {
+		t.Fatalf("BillingTotalTokens = %d, want billing total 1520", summary.UsageTotal.BillingTotalTokens)
 	}
 	if summary.ByModelRef["provider-a/model-1"] == nil {
 		t.Fatal("missing by_model_ref entry")
@@ -81,6 +89,46 @@ func TestUsageLedgerAppendEventWritesSummary(t *testing.T) {
 	}
 	if onDisk.LastEventID != summary.LastEventID {
 		t.Fatalf("on-disk LastEventID = %q, want %q", onDisk.LastEventID, summary.LastEventID)
+	}
+}
+
+func TestLoadSessionUsageSummaryRejectsUnknownSummaryFields(t *testing.T) {
+	dir := t.TempDir()
+	original := `{"unknown_field":true,"session_id":"old","usage_total":{"llm_calls":3,"input_tokens":9}}`
+	if err := os.WriteFile(filepath.Join(dir, "usage-summary.json"), []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSessionUsageSummary(dir); err == nil {
+		t.Fatal("expected unknown summary field error")
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "usage-summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != original {
+		t.Fatalf("unknown-field summary was rewritten: %s", data)
+	}
+}
+
+func TestLoadSessionUsageSummaryKeepsCurrentSummaryWhenLedgerIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	original := `{"session_id":"current","last_event_id":"event-1","event_count":1,"usage_total":{"llm_calls":1,"input_tokens":9}}`
+	if err := os.WriteFile(filepath.Join(dir, "usage-summary.json"), []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadSessionUsageSummary(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.UsageTotal.InputTokens != 9 || got.EventCount != 1 {
+		t.Fatalf("summary = %+v, want existing aggregate", got.UsageTotal)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "usage-summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != original {
+		t.Fatalf("current summary was rewritten: %s", data)
 	}
 }
 
@@ -144,7 +192,6 @@ func TestRewriteFirstUserMessagePreservesOriginalFirstUserMessage(t *testing.T) 
 func TestSetFirstUserMessageAdoptsExistingSummary(t *testing.T) {
 	dir := t.TempDir()
 	seed := &SessionUsageSummary{
-		Version:                  usageSummaryVersion,
 		SessionID:                filepath.Base(dir),
 		FirstUserMessage:         "original first request",
 		OriginalFirstUserMessage: "original first request",
@@ -333,7 +380,6 @@ func TestLoadSessionUsageSummaryRebuildsWhenSummaryStale(t *testing.T) {
 	}
 
 	secondEvent := UsageEvent{
-		Version:          usageEventVersion,
 		EventID:          "event-2",
 		SessionID:        filepath.Base(dir),
 		ProjectID:        ProjectIDForPath("/tmp/project"),
@@ -385,6 +431,39 @@ func TestLoadSessionUsageSummaryRebuildsWhenSummaryStale(t *testing.T) {
 	}
 	if rebuilt.LastEventID == staleSummary.LastEventID {
 		t.Fatalf("summary was not rebuilt; LastEventID still %q", rebuilt.LastEventID)
+	}
+}
+
+func TestLoadSessionUsageSummaryRebuildsWhenSummarySchemaIsInvalid(t *testing.T) {
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	raw := UsageSnapshot{InputTokens: 100, OutputTokens: 50}
+	if err := ledger.AppendEvent(UsageEvent{
+		AgentID:          "main",
+		SelectedModelRef: "provider-a/model-1",
+		RunningModelRef:  "provider-a/model-1",
+		UsageRaw:         raw,
+	}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "usage-summary.json"), []byte(`{"version":2,"session_id":"stale"}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(usage-summary.json): %v", err)
+	}
+
+	rebuilt, err := LoadSessionUsageSummary(dir)
+	if err != nil {
+		t.Fatalf("LoadSessionUsageSummary: %v", err)
+	}
+	if rebuilt.EventCount != 1 || rebuilt.UsageTotal.InputTokens != raw.InputTokens {
+		t.Fatalf("rebuilt summary = %+v, want one current-format event", rebuilt)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "usage-summary.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(usage-summary.json): %v", err)
+	}
+	if bytes.Contains(data, []byte(`"version"`)) {
+		t.Fatalf("rebuilt summary retained obsolete version metadata: %s", data)
 	}
 }
 
