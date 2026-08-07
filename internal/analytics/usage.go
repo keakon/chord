@@ -14,7 +14,9 @@ const (
 	usageSummaryVersion = 2
 )
 
-// UsageSnapshot records provider-reported usage fields as-is.
+// UsageSnapshot records normalized runtime usage. InputTokens is the complete
+// prompt input (including cache reads when the provider reports them
+// separately); cache-read tokens remain separate for pricing and analytics.
 type UsageSnapshot struct {
 	InputTokens        int64 `json:"input_tokens"`
 	OutputTokens       int64 `json:"output_tokens"`

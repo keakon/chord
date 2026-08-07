@@ -21,8 +21,8 @@ type Manager struct {
 	messages                 []message.Message
 	payloadBytes             int
 	contextBytes             int
-	lastInputTokens          int // prompt size only (for compaction thresholds and input-budget displays)
-	lastTotalContextTokens   int // true input-side context burden (input + cache_write) for recovery/diagnostics
+	lastInputTokens          int // full prompt size for compaction thresholds and input-budget displays
+	lastTotalContextTokens   int // post-response context baseline (input + cache_write + output)
 	calibrationInputTokens   int
 	calibrationContextBytes  int
 	maxTokens                int
@@ -287,11 +287,9 @@ func (m *Manager) RestoreStats(usage message.TokenUsage) {
 }
 
 // UpdateFromUsage accumulates token usage statistics from an API response.
-// lastInputTokens = prompt size (for compaction thresholds and input-budget displays).
-// lastTotalContextTokens = actual context-window burden from the most recent request:
-// input_tokens plus cache_creation_input_tokens. Anthropic input_tokens already
-// includes cache_read_input_tokens, while output/reasoning are generated after
-// the request and do not occupy the input-side context window for that request.
+// lastInputTokens = full normalized prompt size (for compaction thresholds and
+// input-budget displays). lastTotalContextTokens is the post-response context
+// baseline: full prompt plus generated output.
 func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 	m.mu.Lock()
 	m.stats.InputTokens += usage.InputTokens
@@ -300,7 +298,7 @@ func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 	m.stats.CacheWriteTokens += usage.CacheWriteTokens
 	m.stats.ReasoningTokens += usage.ReasoningTokens
 	m.lastInputTokens = usage.InputTokens
-	m.lastTotalContextTokens = usage.InputTokens + usage.CacheWriteTokens
+	m.lastTotalContextTokens = usage.InputTokens + usage.CacheWriteTokens + usage.OutputTokens
 	if usage.InputTokens > 0 {
 		contextBytes := m.systemPromptContextBytes + m.contextBytes
 		if contextBytes > 0 {
@@ -325,9 +323,8 @@ func (m *Manager) LastInputTokens() int {
 	return m.lastInputTokens
 }
 
-// LastTotalContextTokens returns the true input-side context burden from the
-// most recent API call: input_tokens plus cache_creation_input_tokens.
-// Preserved for recovery and diagnostics when callers need the full prompt-side burden.
+// LastTotalContextTokens returns the post-response context baseline from the
+// most recent API call: full input plus cache-write tokens and output.
 func (m *Manager) LastTotalContextTokens() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

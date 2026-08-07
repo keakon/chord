@@ -76,8 +76,8 @@ func (a *MainAgent) usageStatsForTask(rec *DurableTaskRecord) analytics.SessionS
 	return out
 }
 
-// GetContextStats returns current input-context usage and usable input budget for the focused agent.
-// current is the full prompt-side burden from the most recent API call: input tokens plus cache-write tokens.
+// GetContextStats returns the post-response context baseline and usable input budget.
+// current is the full normalized input plus output from the most recent API call.
 func (a *MainAgent) GetContextStats() (current, limit int) {
 	target := a.focusedAgentSnapshot()
 	if target.sub != nil {

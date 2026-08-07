@@ -345,8 +345,8 @@ func TestUpdateFromUsageTracksTrueContextBurden(t *testing.T) {
 	if got := m.LastInputTokens(); got != 100 {
 		t.Fatalf("LastInputTokens() = %d, want 100", got)
 	}
-	if got := m.LastTotalContextTokens(); got != 120 {
-		t.Fatalf("LastTotalContextTokens() = %d, want 120 (input + cache_write only)", got)
+	if got := m.LastTotalContextTokens(); got != 160 {
+		t.Fatalf("LastTotalContextTokens() = %d, want 160 (input + cache_write + output)", got)
 	}
 }
 

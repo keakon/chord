@@ -49,7 +49,9 @@ func (t *cacheHitTracker) Observe(modelRef string, inputTokens, cacheReadTokens 
 	if modelRef == "" {
 		return
 	}
-	hit := float64(cacheReadTokens)
+	// InputTokens is the normalized full input. Clamp both sides so provider
+	// inconsistencies cannot produce a hit rate above 100%.
+	hit := float64(max(cacheReadTokens, 0))
 	if hit > float64(inputTokens) {
 		hit = float64(inputTokens)
 	}
