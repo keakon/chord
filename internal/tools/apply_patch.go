@@ -13,6 +13,7 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/lsp"
 )
 
@@ -211,7 +212,7 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	if collector := applyPatchDiffCollectorFromContext(ctx); collector != nil {
 		collector.set(applyPatchMutationDiffSummary(plan))
 	}
-	return t.finishApplyPatch(plan), nil
+	return t.finishApplyPatch(ctx, plan), nil
 }
 
 // isApplyPatchMarker reports whether a raw patch line starts a protocol
@@ -1329,7 +1330,7 @@ func rollbackMutations(committed []PlannedMutation) error {
 	return nil
 }
 
-func (t ApplyPatchTool) finishApplyPatch(plan MutationPlan) string {
+func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan) string {
 	if len(plan.Mutations) == 0 {
 		return "Applied patch:\nNo net file changes"
 	}
@@ -1347,14 +1348,6 @@ func (t ApplyPatchTool) finishApplyPatch(plan MutationPlan) string {
 			marker, path = "R", mutation.SourcePath+" -> "+mutation.TargetPath
 		}
 		lines = append(lines, marker+" "+displayPathForBaseDir(path, t.BaseDir))
-		if t.LSP != nil {
-			switch mutation.Kind {
-			case MutationAdd, MutationUpdate:
-				t.LSP.MarkTouched(mutation.TargetPath)
-			case MutationMove:
-				t.LSP.MarkTouched(mutation.TargetPath)
-			}
-		}
 		invalidatePathCache(mutation.SourcePath)
 		invalidatePathCache(mutation.TargetPath)
 	}
@@ -1365,7 +1358,79 @@ func (t ApplyPatchTool) finishApplyPatch(plan MutationPlan) string {
 	if punctuationHunks > 0 {
 		lines = append(lines, fmt.Sprintf("Note: used punctuation-tolerant matching for %d hunk(s); unchanged punctuation was preserved from the current file", punctuationHunks))
 	}
-	return "Applied patch:\n" + strings.Join(lines, "\n")
+	out := "Applied patch:\n" + strings.Join(lines, "\n")
+	if t.LSP == nil {
+		return out
+	}
+	baselines := make(map[string][]lsp.Diagnostic)
+	outputs := make(map[string]config.DiagnosticOutputConfig)
+	extras := make(map[string][]lsp.Diagnostic)
+	type finalWrite struct {
+		path    string
+		content string
+		change  lsp.WatchedFileChangeType
+	}
+	finalWrites := make(map[string]finalWrite)
+	var reviewedPaths []string
+	for _, mutation := range plan.Mutations {
+		switch mutation.Kind {
+		case MutationAdd:
+			path := normalizedLSPPath(mutation.TargetPath)
+			if _, ok := baselines[path]; !ok {
+				baselines[path] = nil
+			}
+			finalWrites[path] = finalWrite{path: mutation.TargetPath, content: mutation.AfterText, change: lsp.WatchedFileCreated}
+		case MutationUpdate:
+			path := normalizedLSPPath(mutation.TargetPath)
+			if _, ok := baselines[path]; !ok {
+				baselines[path] = t.LSP.Diagnostics(mutation.TargetPath)
+			}
+			finalWrites[path] = finalWrite{path: mutation.TargetPath, content: mutation.AfterText, change: lsp.WatchedFileChanged}
+		case MutationDelete:
+			t.clearLSPDeletedPath(ctx, mutation.SourcePath)
+		case MutationMove:
+			t.clearLSPDeletedPath(ctx, mutation.SourcePath)
+			path := normalizedLSPPath(mutation.TargetPath)
+			if _, ok := baselines[path]; !ok {
+				baselines[path] = nil
+			}
+			finalWrites[path] = finalWrite{path: mutation.TargetPath, content: mutation.AfterText, change: lsp.WatchedFileCreated}
+		}
+	}
+	paths := make([]string, 0, len(finalWrites))
+	for path := range finalWrites {
+		paths = append(paths, path)
+	}
+	slices.Sort(paths)
+	for _, path := range paths {
+		write := finalWrites[path]
+		t.LSP.MarkTouched(write.path)
+		outputs[path] = t.LSP.DiagnosticOutputConfigForPath(path)
+		result := t.LSP.AfterFileWriteToolResult(ctx, write.path, write.content, "", false, write.change)
+		if parsed := lsp.ParseToolOutputDiagnostics(result); len(parsed) > 0 {
+			extras[path] = parsed
+		}
+		reviewedPaths = append(reviewedPaths, write.path)
+	}
+	slices.Sort(reviewedPaths)
+	return t.LSP.AppendLSPDiagnosticsToToolOutputForPaths(out, reviewedPaths, true, baselines, outputs, extras)
+}
+
+func normalizedLSPPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(abs)
+}
+
+func (t ApplyPatchTool) clearLSPDeletedPath(ctx context.Context, path string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	t.LSP.UnmarkTouched(path)
+	_ = t.LSP.NotifyWatchedFileChanged(ctx, path, lsp.WatchedFileDeleted)
+	_ = t.LSP.DidCloseErr(ctx, path)
 }
 
 func lineCountForMutation(s string) int {

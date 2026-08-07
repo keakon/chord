@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/keakon/x/powernap/pkg/lsp/protocol"
@@ -13,8 +14,9 @@ import (
 
 // Limits for tool result text appended to the model (aligned with opencode).
 const (
-	ToolOutputMaxDiagnosticsPerFile = 10
-	ToolOutputMaxOtherErrorFiles    = 5
+	ToolOutputMaxDiagnosticsPerFile  = 10
+	ToolOutputMaxDiagnosticsPerBatch = 10
+	ToolOutputMaxOtherErrorFiles     = 5
 )
 
 // AppendLSPDiagnosticsToToolOutput appends all LSP diagnostics (severity 1-4)
@@ -22,6 +24,219 @@ const (
 // edited file are listed first; optionally include diagnostics from other files.
 func (m *Manager) AppendLSPDiagnosticsToToolOutput(base, editedPath string, includeOtherFiles bool) string {
 	return m.appendLSPDiagnosticsToToolOutput(base, editedPath, includeOtherFiles, nil, config.DiagnosticOutputConfig{})
+}
+
+// DiagnosticOutputConfigForPath returns the configured output policy for a
+// file. Batch editors use this to keep their per-file selection rules aligned
+// with the single-file edit/write path.
+func (m *Manager) DiagnosticOutputConfigForPath(path string) config.DiagnosticOutputConfig {
+	if m == nil {
+		return config.DiagnosticOutputConfig{}
+	}
+	return diagnosticsOutputConfig(m.cfg, path)
+}
+
+// AppendLSPDiagnosticsToToolOutputForPaths appends diagnostics for a batch of
+// files changed by one tool call. All changed files are treated as primary
+// files, so diagnostics are selected once with one shared output budget rather
+// than being appended once per file. baselines is keyed by normalized absolute
+// path and is used only for the concise changed/resolved summary.
+func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPaths []string, includeOtherFiles bool, baselines map[string][]Diagnostic, outputs map[string]config.DiagnosticOutputConfig, extras map[string][]Diagnostic) string {
+	if m == nil {
+		return base
+	}
+	byPath := m.allDiagnosticsByAbsPath()
+	for path, diags := range extras {
+		byPath[path] = append(byPath[path], diags...)
+	}
+	primaryPaths := make([]string, 0, len(editedPaths))
+	seen := make(map[string]struct{}, len(editedPaths))
+	for _, path := range editedPaths {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			abs = filepath.Clean(path)
+		} else {
+			abs = filepath.Clean(abs)
+		}
+		if _, ok := seen[abs]; ok {
+			continue
+		}
+		seen[abs] = struct{}{}
+		primaryPaths = append(primaryPaths, abs)
+	}
+
+	maxTotal := ToolOutputMaxDiagnosticsPerBatch
+	remaining := maxTotal
+	selectedByPath := make(map[string][]Diagnostic)
+	omitted := 0
+	selectWithinRemaining := func(path string, diags []Diagnostic) ([]Diagnostic, int) {
+		if remaining <= 0 {
+			return nil, len(diags)
+		}
+		output := outputs[path]
+		output.MaxTotalDiagnostics = remaining
+		selected, count := selectDiagnosticsByOutput(diags, output, nil)
+		remaining -= len(selected)
+		return selected, count
+	}
+	for _, path := range primaryPaths {
+		selected, count := selectWithinRemaining(path, deduplicateDiagnostics(byPath[path]))
+		selectedByPath[path] = selected
+		omitted += count
+	}
+
+	type otherDiagnostics struct {
+		path  string
+		diags []Diagnostic
+	}
+	var others []otherDiagnostics
+	if includeOtherFiles && remaining > 0 {
+		primary := make(map[string]struct{}, len(primaryPaths))
+		for _, path := range primaryPaths {
+			primary[path] = struct{}{}
+		}
+		paths := make([]string, 0, len(byPath))
+		for path := range byPath {
+			if _, ok := primary[path]; !ok {
+				paths = append(paths, path)
+			}
+		}
+		sort.Strings(paths)
+		for _, path := range paths {
+			if remaining <= 0 || len(others) >= ToolOutputMaxOtherErrorFiles {
+				break
+			}
+			selected, count := selectWithinRemaining(path, deduplicateDiagnostics(byPath[path]))
+			if len(selected) == 0 {
+				continue
+			}
+			others = append(others, otherDiagnostics{path: path, diags: selected})
+			omitted += count
+		}
+	}
+
+	var b strings.Builder
+	wrote := false
+	appendBlock := func(path string, diags []Diagnostic, primary bool) {
+		if len(diags) == 0 {
+			return
+		}
+		if !wrote {
+			b.WriteString(base)
+			b.WriteString("\n\nDiagnostics:\n")
+			wrote = true
+		} else {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(strings.TrimLeft(formatSelectedDiagnosticsBlock(path, diags, primary), "\n"))
+	}
+	for _, path := range primaryPaths {
+		if len(primaryPaths) > 1 && len(selectedByPath[path]) > 0 {
+			if !wrote {
+				b.WriteString(base)
+				b.WriteString("\n\nDiagnostics:\n")
+				wrote = true
+			} else {
+				b.WriteString("\n\n")
+			}
+			b.WriteString(path + ":\n" + strings.Join(formatDiagnosticLines(selectedByPath[path]), "\n"))
+		} else {
+			appendBlock(path, selectedByPath[path], true)
+		}
+	}
+	for _, other := range others {
+		appendBlock(other.path, other.diags, false)
+	}
+	if !wrote {
+		return base
+	}
+	if omitted > 0 {
+		b.WriteString("\n\n")
+		b.WriteString(diagnosticsOmittedLine(omitted))
+	}
+	for _, path := range primaryPaths {
+		baseline := baselines[path]
+		if changed := diagnosticChangeSummary(baseline, byPath[path]); changed != "" {
+			if len(primaryPaths) > 1 {
+				b.WriteString("\nDiagnostics changed for ")
+				b.WriteString(path)
+				b.WriteString(": ")
+				b.WriteString(changed)
+			} else {
+				b.WriteByte('\n')
+				b.WriteString(changed)
+			}
+		}
+	}
+	return b.String()
+}
+
+// ParseToolOutputDiagnostics extracts diagnostics produced by a non-LSP
+// backend (currently Ruff) from the common tool-output representation.
+func ParseToolOutputDiagnostics(text string) []Diagnostic {
+	var out []Diagnostic
+	for raw := range strings.SplitSeq(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if len(line) < 8 || line[0] != '[' {
+			continue
+		}
+		end := strings.Index(line, "] ")
+		if end != 2 || (line[1] != 'E' && line[1] != 'W' && line[1] != 'I' && line[1] != 'H') {
+			continue
+		}
+		rest := line[4:]
+		colon := strings.Index(rest, ":")
+		space := strings.Index(rest, " ")
+		if colon <= 0 || space <= colon {
+			continue
+		}
+		lineNo, err1 := strconv.Atoi(rest[:colon])
+		colNo, err2 := strconv.Atoi(rest[colon+1 : space])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		message := strings.TrimSpace(rest[space+1:])
+		code := ""
+		if strings.HasPrefix(message, "[") {
+			if endCode := strings.Index(message, "] "); endCode > 1 {
+				code = message[1:endCode]
+				message = message[endCode+2:]
+			}
+		}
+		severity := 4
+		switch line[1] {
+		case 'E':
+			severity = 1
+		case 'W':
+			severity = 2
+		case 'I':
+			severity = 3
+		}
+		out = append(out, Diagnostic{Severity: severity, Line: lineNo - 1, Col: colNo - 1, Code: code, Message: message})
+	}
+	return out
+}
+
+func formatDiagnosticLines(diags []Diagnostic) []string {
+	lines := make([]string, 0, len(diags))
+	for _, d := range diags {
+		lines = append(lines, formatDiagLine(d))
+	}
+	return lines
+}
+
+func deduplicateDiagnostics(diags []Diagnostic) []Diagnostic {
+	seen := make(map[string]struct{}, len(diags))
+	out := make([]Diagnostic, 0, len(diags))
+	for _, d := range diags {
+		key := fmt.Sprintf("%d\x00%d\x00%d\x00%s\x00%s\x00%s", d.Severity, d.Line, d.Col, d.Code, d.Message, d.Source)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, d)
+	}
+	return out
 }
 
 func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, includeOtherFiles bool, ranges []EditRange, output config.DiagnosticOutputConfig) string {

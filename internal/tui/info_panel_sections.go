@@ -653,10 +653,6 @@ func renderUsageReasoningLine(lineW int, stats analytics.SessionStats) string {
 func renderUsageCacheLine(lineW int, stats analytics.SessionStats) string {
 	rows := make([]string, 0, 3)
 	labelWidth := ansi.StringWidth("Uncached")
-	if stats.CacheReadTokens > 0 || stats.CacheWriteTokens > 0 {
-		rows = append(rows, renderUsageCacheDetailLine(lineW, "Uncached", labelWidth,
-			InfoPanelValue.Render(formatUsageTokens(stats.InputTokens))))
-	}
 	if stats.CacheReadTokens > 0 {
 		rows = append(rows, renderUsageCacheDetailLine(lineW, "Cache R", labelWidth,
 			formatUsageCacheValue(stats.CacheReadTokens, analytics.FullInputTokens(stats.InputTokens, stats.CacheReadTokens, stats.CacheWriteTokens))))

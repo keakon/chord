@@ -52,6 +52,33 @@ func TestApplyPatchToolMarksTouchedFileWithBaseDir(t *testing.T) {
 	}
 }
 
+func TestApplyPatchToolCleansDeletedAndMovedLSPPaths(t *testing.T) {
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "old.go")
+	deletePath := filepath.Join(dir, "delete.go")
+	if err := os.WriteFile(oldPath, []byte("package old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(deletePath, []byte("package delete\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mgr := lsp.NewManager(&config.Config{}, dir, nil)
+	mgr.MarkTouched(oldPath)
+	mgr.MarkTouched(deletePath)
+	patch := "*** Begin Patch\n" +
+		"*** Update File: old.go\n*** Move to: new.go\n@@\n-package old\n+package new\n" +
+		"*** Delete File: delete.go\n" +
+		"*** End Patch"
+	if _, err := (ApplyPatchTool{LSP: mgr, BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch)); err != nil {
+		t.Fatal(err)
+	}
+	got := mgr.TouchedPaths()
+	want := []string{filepath.Join(dir, "new.go")}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("TouchedPaths() = %#v, want %#v", got, want)
+	}
+}
+
 func TestWriteToolAppendsPyrightDiagnosticsForSyntaxError(t *testing.T) {
 	if os.Getenv("CHORD_RUN_REAL_PYRIGHT_TESTS") != "1" {
 		t.Skip("set CHORD_RUN_REAL_PYRIGHT_TESTS=1 to run real pyright integration")

@@ -342,6 +342,23 @@ func (a *MainAgent) restoreUsageEvidence(loaded *loadedSessionState, sessionPath
 	return 0, 0
 }
 
+func legacyUsageSnapshotPresent(sessionPath string) bool {
+	data, err := os.ReadFile(filepath.Join(sessionPath, "snapshot.json"))
+	if err != nil {
+		return false
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false
+	}
+	for _, key := range []string{"usage_input_tokens", "usage_output_tokens", "usage_cache_read_tokens", "usage_cache_write_tokens", "usage_llm_calls"} {
+		if value, ok := raw[key]; ok && len(value) > 0 && string(value) != "null" {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath string, tmpRecovery *recovery.RecoveryManager) (time.Duration, time.Duration) {
 	if loaded == nil || tmpRecovery == nil {
 		return 0, 0
@@ -445,6 +462,9 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	}
 
 	snapshotDuration, subAgentRestoreDuration = a.applySessionSnapshot(loaded, sessionPath, tmpRecovery)
+	if usageLedgerEventCount == 0 && legacyUsageSnapshotPresent(sessionPath) {
+		log.Warnf("session restore: legacy usage fields found but not migrated; session=%v", filepath.Base(sessionPath))
+	}
 	loaded.TaskRecords = mergeDurableTaskRecords(loaded.TaskRecords, buildDurableTaskRecordsFromLoadedStates(loaded.SubAgentStates))
 	if repairRestoredTaskTree(loaded.TaskRecords) {
 		log.Warnf("repaired inconsistent SubAgent task tree during restore session=%v", sessionPath)

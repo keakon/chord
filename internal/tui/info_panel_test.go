@@ -501,7 +501,6 @@ func TestRenderInfoPanelUsageUsesSingleColumnAndHidesZeroValues(t *testing.T) {
 	want := []string{
 		"TOKENS",
 		"↑ 124.7k",
-		"Uncached  123.5k",
 		"Cache R   1.2k (1%)",
 	}
 	if len(usageLines) != len(want) {
@@ -637,7 +636,6 @@ func TestRenderInfoPanelUsageGroupsContextMessagesAndCache(t *testing.T) {
 		"",
 		"TOKENS",
 		"↑ 22.7M  ↓ 112.4k",
-		"Uncached  20.4M",
 		"Cache R   2.3M (10%)",
 	}
 	if len(usageLines) != len(want) {
@@ -686,7 +684,6 @@ func TestRenderInfoPanelUsageCacheDetailsAlignReadAndWriteValues(t *testing.T) {
 	want := []string{
 		"TOKENS",
 		"↑ 12.9k",
-		"Uncached  10.0k",
 		"Cache R   2.3k (18%)",
 		"Cache W   640",
 	}
@@ -695,6 +692,9 @@ func TestRenderInfoPanelUsageCacheDetailsAlignReadAndWriteValues(t *testing.T) {
 		if !found {
 			t.Fatalf("usage lines = %#v, missing %q", usageLines, expected)
 		}
+	}
+	if slices.Contains(usageLines, "Uncached  10.0k") {
+		t.Fatalf("usage lines = %#v, sidebar should hide uncached bucket", usageLines)
 	}
 }
 
@@ -784,7 +784,6 @@ func TestRenderInfoPanelUsageStandardWidthShowsCurrentStableLayout(t *testing.T)
 		"",
 		"TOKENS",
 		"↑ 33.4M  ↓ 143.1k",
-		"Uncached  29.9M",
 		"Cache R   3.5M (10%)",
 	}
 	if len(usageLines) != len(want) {

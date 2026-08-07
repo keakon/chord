@@ -6,7 +6,8 @@ import (
 )
 
 // cacheHitTracker maintains the exact token-weighted prompt-cache hit rate per
-// running model ref for the current session.
+// running model ref for the current session. It is a lifetime session rate,
+// not a recent/decaying rate; restoring a session restores the same evidence.
 type cacheHitTracker struct {
 	mu    sync.Mutex
 	byRef map[string]*cacheHitWindow

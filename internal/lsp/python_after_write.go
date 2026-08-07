@@ -153,6 +153,13 @@ func appendDiagnosticChangeSummary(out string, baseline, current []Diagnostic) s
 	if !strings.Contains(out, "Diagnostics:") {
 		return out
 	}
+	if changed := diagnosticChangeSummary(baseline, current); changed != "" {
+		return out + "\n" + changed
+	}
+	return out
+}
+
+func diagnosticChangeSummary(baseline, current []Diagnostic) string {
 	baseKeys := make(map[string]struct{}, len(baseline))
 	for _, d := range baseline {
 		baseKeys[diagnosticComparisonKey(d)] = struct{}{}
@@ -174,9 +181,9 @@ func appendDiagnosticChangeSummary(out string, baseline, current []Diagnostic) s
 		}
 	}
 	if newCount == 0 && resolvedCount == 0 {
-		return out
+		return ""
 	}
-	return fmt.Sprintf("%s\nDiagnostics changed: %d new, %d resolved.", out, newCount, resolvedCount)
+	return fmt.Sprintf("Diagnostics changed: %d new, %d resolved.", newCount, resolvedCount)
 }
 
 func (m *Manager) currentFileDiagnostics(absPath string) []Diagnostic {

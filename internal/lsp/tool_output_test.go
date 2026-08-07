@@ -25,6 +25,69 @@ func TestFormatDiagLineIncludesCode(t *testing.T) {
 	}
 }
 
+func TestParseToolOutputDiagnostics(t *testing.T) {
+	got := ParseToolOutputDiagnostics("ok\n\nDiagnostics:\n[E] 3:4 [F821] Undefined name\n[W] 5:1 warning")
+	if len(got) != 2 {
+		t.Fatalf("parsed diagnostics = %#v, want two entries", got)
+	}
+	if got[0].Severity != 1 || got[0].Line != 2 || got[0].Col != 3 || got[0].Code != "F821" || got[0].Message != "Undefined name" {
+		t.Fatalf("first diagnostic = %#v", got[0])
+	}
+	if got[1].Severity != 2 || got[1].Line != 4 || got[1].Col != 0 || got[1].Message != "warning" {
+		t.Fatalf("second diagnostic = %#v", got[1])
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPathsUsesSharedLimitAndFileLabels(t *testing.T) {
+	mgr := &Manager{}
+	pathA := "/tmp/a.go"
+	pathB := "/tmp/b.go"
+	mgr.diagByServer = map[string]map[string]diagCounts{}
+	// Feed the batch formatter through its non-LSP extras input so this test
+	// does not require starting a language server.
+	extras := map[string][]Diagnostic{
+		pathA: {{Severity: 1, Line: 0, Col: 0, Message: "a"}},
+		pathB: {{Severity: 2, Line: 1, Col: 1, Message: "b"}},
+	}
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras)
+	if !strings.Contains(out, pathA+":\n[E] 1:1 a") || !strings.Contains(out, pathB+":\n[W] 2:2 b") {
+		t.Fatalf("batch output = %q", out)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPathsUsesBatchBudget(t *testing.T) {
+	mgr := &Manager{}
+	paths := []string{"/tmp/a.go", "/tmp/b.go"}
+	extras := map[string][]Diagnostic{}
+	for _, path := range paths {
+		for i := range 6 {
+			extras[path] = append(extras[path], Diagnostic{Severity: 1, Line: i, Message: path})
+		}
+	}
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", paths, false, nil, nil, extras)
+	if got := countFormattedDiagnostics(out); got != ToolOutputMaxDiagnosticsPerBatch {
+		t.Fatalf("formatted diagnostics = %d, want batch budget %d\n%s", got, ToolOutputMaxDiagnosticsPerBatch, out)
+	}
+	if !strings.Contains(out, "diagnostics not shown due to output limits") {
+		t.Fatalf("output = %q, want omitted diagnostics summary", out)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPathsReportsChangesPerFile(t *testing.T) {
+	mgr := &Manager{}
+	pathA, pathB := "/tmp/a.go", "/tmp/b.go"
+	key := func(message string) []Diagnostic { return []Diagnostic{{Severity: 1, Line: 0, Message: message}} }
+	baselines := map[string][]Diagnostic{pathA: key("old"), pathB: key("gone")}
+	extras := map[string][]Diagnostic{pathA: key("new"), pathB: nil}
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, baselines, nil, extras)
+	if !strings.Contains(out, "Diagnostics changed for "+pathA+": Diagnostics changed: 1 new, 1 resolved.") {
+		t.Fatalf("output = %q, want new/resolved summary for %s", out, pathA)
+	}
+	if !strings.Contains(out, "Diagnostics changed for "+pathB+": Diagnostics changed: 0 new, 1 resolved.") {
+		t.Fatalf("output = %q, want resolved summary for %s", out, pathB)
+	}
+}
+
 func TestFormatDiagnosticsBlockWithRangesPrioritizesNearDiagnostics(t *testing.T) {
 	diags := []Diagnostic{
 		{Severity: 1, Line: 300, Col: 0, Message: "far"},
