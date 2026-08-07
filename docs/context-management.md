@@ -207,6 +207,7 @@ context:
     confirm_age_turns: 2
     error_age_turns: 3
     high_risk_protect_age_turns: 4
+    diff_protect_age_turns: 12
     shell_success_age_turns: 1
     shell_success_bytes: 3000
     read_like_age_turns: 1
@@ -234,10 +235,10 @@ Unset or non-positive threshold fields use these defaults. Project-level
 - Reduced messages freeze and are reused byte-for-byte. Unreduced non-read results store their next request-batch review frontier, so only new, due, repeated, or invalidated items are reclassified. Due frontiers cannot be bypassed by small-tail reuse. Reads keep path/range-aware read/edit validity analysis; a still-current read stays full until a later mutation or covering read marks it `truncated=stale` / `truncated=superseded`.
 - Stable surfaces analyze only the new tail and due frontier. History shape, tool schema, model, Reduction policy, session, or incompatible message changes invalidate the surface.
 - Context pressure does not alter Reduction; usage thresholds belong to durable Compaction.
-- Recent high-risk tool outputs are protected by request-batch age. Parallel tool calls and results from one assistant response share one batch and do not age one another.
+- Recent high-risk tool outputs are protected by request-batch age. Failures, stack traces, permission/security output, and active-work evidence use `high_risk_protect_age_turns: 4`; diff/patch evidence uses the dedicated `diff_protect_age_turns: 12` so long reviews retain the exact change until there has been time to form findings. Parallel tool calls and results from one assistant response share one batch and do not age one another.
 - Successful shell output is treated as low risk once it is old enough and larger than `shell_success_bytes`. Chord keeps a compact summary with output size, line count, salient success lines when present, and a tail excerpt fallback; the shell command itself remains available from the associated tool call. Recent failures, stack traces, diffs, and warning-heavy build logs are routed through high-risk or structured-log handling before this success-output summary path; older outputs may later be summarized when they are no longer protected by the recent high-risk window.
 - After a successful shell invocation that is not on the static read-only allowlist, Chord rechecks durable hashes for previously read files in the affected stable/recovered prefix. A confirmed replacement, deletion, or hash change marks the old read `truncated=stale`; unreadable paths or legacy reads without a durable hash are not guessed stale.
-- Large old tool results are age/byte-pruned, but Chord preserves structured hints before falling back to generic omission: `read` keeps path/range metadata, `grep` / `glob` / LSP references keep query scope plus representative hits, JSON output keeps top-level shape/counts, successful shell output keeps size/salient-line context, and build/test logs keep key failure or warning lines. Older errors, diagnostics, and confirmations are reduced to compact fixed markers or summaries.
+- Large old tool results are age/byte-pruned, but Chord preserves structured hints before falling back to generic omission: `read` keeps path/range metadata, `grep` / `glob` / LSP references keep query scope plus representative hits, JSON output keeps top-level shape/counts, successful shell output keeps size/salient-line context, diff/patch output keeps files, hunks, change counts and bounded representative lines, and build/test logs keep key failure or warning lines. Older errors, diagnostics, and confirmations are reduced to compact fixed markers or summaries.
 - Reduction diagnostics keep the aggregate `reread_after_reduction` counter and additionally distinguish same-revision re-reads from changed-revision refreshes when both reads carry durable hashes. These are telemetry only; Chord does not automatically retune retention windows from a small number of samples.
 
 ### Loop mode and the Codex quota freeze

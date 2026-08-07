@@ -1275,6 +1275,7 @@ func TestDefaultContextReductionPolicyMatchesDefaultConfig(t *testing.T) {
 	if policy.ConfirmAgeTurns != cfg.ConfirmAgeTurns ||
 		policy.ErrorAgeTurns != cfg.ErrorAgeTurns ||
 		policy.HighRiskProtectAgeTurns != cfg.HighRiskProtectAgeTurns ||
+		policy.DiffProtectAgeTurns != cfg.DiffProtectAgeTurns ||
 		policy.ShellSuccessAgeTurns != cfg.ShellSuccessAgeTurns ||
 		policy.ReadLikeAgeTurns != cfg.ReadLikeAgeTurns ||
 		policy.StaleAgeTurns != cfg.StaleAgeTurns ||

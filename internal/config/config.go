@@ -982,6 +982,7 @@ type ContextReductionConfig struct {
 	ConfirmAgeTurns         int `json:"confirm_age_turns,omitempty" yaml:"confirm_age_turns,omitempty"`
 	ErrorAgeTurns           int `json:"error_age_turns,omitempty" yaml:"error_age_turns,omitempty"`
 	HighRiskProtectAgeTurns int `json:"high_risk_protect_age_turns,omitempty" yaml:"high_risk_protect_age_turns,omitempty"`
+	DiffProtectAgeTurns     int `json:"diff_protect_age_turns,omitempty" yaml:"diff_protect_age_turns,omitempty"`
 	ShellSuccessAgeTurns    int `json:"shell_success_age_turns,omitempty" yaml:"shell_success_age_turns,omitempty"`
 	ShellSuccessBytes       int `json:"shell_success_bytes,omitempty" yaml:"shell_success_bytes,omitempty"`
 	ReadLikeAgeTurns        int `json:"read_like_age_turns,omitempty" yaml:"read_like_age_turns,omitempty"`
@@ -1038,6 +1039,7 @@ var contextReductionKnownKeys = map[string]bool{
 	"confirm_age_turns":            true,
 	"error_age_turns":              true,
 	"high_risk_protect_age_turns":  true,
+	"diff_protect_age_turns":       true,
 	"shell_success_age_turns":      true,
 	"shell_success_bytes":          true,
 	"read_like_age_turns":          true,
@@ -1106,6 +1108,7 @@ func DefaultConfig() *Config {
 				ConfirmAgeTurns:         2,
 				ErrorAgeTurns:           3,
 				HighRiskProtectAgeTurns: 4,
+				DiffProtectAgeTurns:     12,
 				ShellSuccessAgeTurns:    1,
 				ShellSuccessBytes:       3000,
 				ReadLikeAgeTurns:        1,

@@ -27,6 +27,7 @@ func TestDefaultConfigContextReductionThresholds(t *testing.T) {
 		ConfirmAgeTurns:         2,
 		ErrorAgeTurns:           3,
 		HighRiskProtectAgeTurns: 4,
+		DiffProtectAgeTurns:     12,
 		ShellSuccessAgeTurns:    1,
 		ReadLikeAgeTurns:        1,
 		StaleAgeTurns:           3,

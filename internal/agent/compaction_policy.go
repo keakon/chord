@@ -1523,6 +1523,9 @@ func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []mess
 	if !hasReductionSavings(previous.Stats) {
 		return nil, ContextReductionStats{}, false
 	}
+	if previous.Policy != policy {
+		return nil, ContextReductionStats{}, false
+	}
 	// A model switch this turn invalidates the previous reduction surface for
 	// the same reason as the incremental path: the new model must get a fresh
 	// reduction under its own context budget, not the old model's frozen one.

@@ -30,6 +30,7 @@ const (
 	compactReadLikeAgeTurns        = 1
 	compactStaleAgeTurns           = 3
 	compactHighRiskProtectAgeTurns = 4
+	compactDiffProtectAgeTurns     = 12
 	compactBashSuccessBytes        = 3000
 	compactReadLikeOutputBytes     = 3000
 	reduceSnippetChars             = 500

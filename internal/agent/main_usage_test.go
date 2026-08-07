@@ -6,6 +6,7 @@ import (
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestRecordUsageUsesProvidedServiceTier(t *testing.T) {
@@ -54,5 +55,32 @@ func TestRecordUsageUsesProvidedServiceTier(t *testing.T) {
 	}
 	if event.Cost.TotalCost != 6 {
 		t.Fatalf("total cost = %v, want 6", event.Cost.TotalCost)
+	}
+}
+
+func TestContextReductionDiagnosticForTurn(t *testing.T) {
+	a := &MainAgent{}
+	a.lastPreparedLLMTurnID = 7
+	a.lastPreparedReductionStats = ContextReductionStats{
+		Messages:     2,
+		Bytes:        1200,
+		TokensSaved:  300,
+		CurrentBytes: 8000,
+		ByToolAndRule: map[string]ContextReductionBucket{
+			tools.NameShell + "/diff": {Messages: 1},
+		},
+		OverCompression: map[string]int{
+			contextReductionOverCompressionRereadSameRevision: 1,
+		},
+	}
+	d := a.contextReductionDiagnosticForTurn(7)
+	if d["reduction_messages"] != "2" || d["reduction_bytes"] != "1200" || d["reduction_tokens_saved"] != "300" {
+		t.Fatalf("unexpected reduction diagnostic: %+v", d)
+	}
+	if d["overcompression."+contextReductionOverCompressionRereadSameRevision] != "1" {
+		t.Fatalf("missing over-compression diagnostic: %+v", d)
+	}
+	if d["reduction_rule."+tools.NameShell+"/diff"] != "1" {
+		t.Fatalf("missing reduction rule diagnostic: %+v", d)
 	}
 }

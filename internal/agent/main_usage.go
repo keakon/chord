@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/keakon/golog/log"
@@ -98,6 +99,33 @@ func (a *MainAgent) recordContextDiagnosticEvent(purpose string, diagnostic map[
 		TurnID:           a.currentTurnID(),
 		Diagnostic:       diagnostic,
 	})
+}
+
+func (a *MainAgent) contextReductionDiagnosticForTurn(turnID uint64) map[string]string {
+	if a == nil || turnID == 0 {
+		return nil
+	}
+	stats := a.preparedContextReductionStatsForTurn(turnID)
+	if isZeroContextReductionStats(stats) {
+		return nil
+	}
+	diagnostic := map[string]string{
+		"reduction_messages":      strconv.Itoa(stats.Messages),
+		"reduction_bytes":         strconv.Itoa(stats.Bytes),
+		"reduction_tokens_saved":  strconv.Itoa(stats.TokensSaved),
+		"reduction_current_bytes": strconv.Itoa(stats.CurrentBytes),
+	}
+	for key, value := range stats.OverCompression {
+		if value > 0 {
+			diagnostic["overcompression."+key] = strconv.Itoa(value)
+		}
+	}
+	for key, bucket := range stats.ByToolAndRule {
+		if bucket.Messages > 0 {
+			diagnostic["reduction_rule."+key] = strconv.Itoa(bucket.Messages)
+		}
+	}
+	return diagnostic
 }
 
 func (a *MainAgent) recordCompactionProvenanceEvent(result string, diagnostic map[string]string) {

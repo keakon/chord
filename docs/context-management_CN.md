@@ -119,6 +119,7 @@ context:
     confirm_age_turns: 2
     error_age_turns: 3
     high_risk_protect_age_turns: 4
+    diff_protect_age_turns: 12
     shell_success_age_turns: 1
     shell_success_bytes: 3000
     read_like_age_turns: 1
@@ -140,10 +141,10 @@ context:
 - 当 `todo_write` 把所有 TODO 标为 completed/cancelled 后，Chord 会把下一次 main-model 请求视为收尾请求。默认 `wrap_up_grace_requests: 1` 只会在同模型、没有排队用户输入、且重新估算的节省低于 `min_incremental_saved_tokens` 时，避免低收益的最终 prompt surface 抖动。如果已有稳定的已剪裁前缀，收尾请求会复用该已剪裁前缀，而不是把旧工具输出恢复成原文。用户新提问、模型切换或可观节省会恢复正常剪裁。
 - 已剪裁消息会冻结并逐字节复用，避免每轮重写旧 marker。尚未剪裁的非-read 输出会记录下一次可能跨过规则阈值的 request-batch frontier；只有新增、到期、重复调用命中、工具结果门槛跨越或 surface 失效时才重新分类。小尾部复用不能跳过已经到期的 frontier。`read` 仍按 path/range 的 edit/read 有效性定向分析；仍然有效的读取保持完整，直到后续修改或覆盖读取将其标记为 `truncated=stale` / `truncated=superseded`。
 - 较老消息形成稳定 surface 后，只分析新增尾部和到期 frontier；如果新增节省低于 `min_incremental_saved_tokens`，复用上一次已剪裁前缀，只追加当前尾部消息。历史 shape、工具 schema、模型、Reduction 配置或 session 改变时会使该 surface 失效。
-- 近期高风险工具输出按实际 main-model request-batch age 保护，再进入普通 age/bytes 剪裁。默认 `high_risk_protect_age_turns: 4` 会把 diff/patch、失败日志、stack trace、权限/安全输出和当前工作集关键证据完整保留约 4 个请求批次。同一 assistant 响应中的并行工具调用共享一个批次，不会因为并行结果数量多而提前老化。
+- 近期高风险工具输出按实际 main-model request-batch age 保护，再进入普通 age/bytes 剪裁。默认 `high_risk_protect_age_turns: 4` 保护失败日志、stack trace、权限/安全输出和当前工作集关键证据；diff/patch 使用独立的 `diff_protect_age_turns: 12`，避免长审查在形成 findings 前过早丢失核心变更证据。同一 assistant 响应中的并行工具调用共享一个批次，不会因为并行结果数量多而提前老化。
 - 成功 shell 输出在变旧且超过 `shell_success_bytes` 后按低风险噪音处理，并保留输出大小、行数、有代表性的成功信号行（如有）以及尾部片段 fallback；shell 命令本身仍可从关联的 tool call 中获得。近期失败、stack trace、diff 和 warning 密集的构建日志会先由高风险保护或结构化日志摘要处理；较旧输出在不再受近期高风险窗口保护后，后续仍可能被摘要化。
 - 对不在静态只读白名单中的成功 Shell 调用，Chord 会重新核验稳定/恢复前缀里已有 durable hash 的历史读取。确认文件被替换、删除或 hash 改变后，旧读取会标记为 `truncated=stale`；无法读取的路径和没有 durable hash 的旧会话记录不会被猜测为 stale。
-- 大块旧工具输出仍会按 age/bytes 规则剪裁，但在退回通用省略前会尽量保留结构化线索：`read` 保留路径与行范围元数据，`grep` / `glob` / LSP references 保留查询范围和代表命中，JSON 输出保留顶层结构和数量，成功 shell 输出保留大小/信号行上下文，构建 / 测试日志保留关键失败或警告行。旧错误、diagnostics、确认类输出会被压成固定短 marker 或摘要。
+- 大块旧工具输出仍会按 age/bytes 规则剪裁，但在退回通用省略前会尽量保留结构化线索：`read` 保留路径与行范围元数据，`grep` / `glob` / LSP references 保留查询范围和代表命中，JSON 输出保留顶层结构和数量，成功 shell 输出保留大小/信号行上下文，diff/patch 保留文件、hunk、变更数量和有界代表行，构建 / 测试日志保留关键失败或警告行。旧错误、diagnostics、确认类输出会被压成固定短 marker 或摘要。
 - 剪裁诊断继续保留聚合的 `reread_after_reduction` 计数，并在前后两次读取都有 durable hash 时进一步区分“同 revision 重读”和“revision 已变化后的必要刷新”。这些目前只用于观测；Chord 不会基于少量样本自动修改保留窗口。
 
 ### Loop 模式与 Codex 额度冻结
@@ -161,6 +162,7 @@ Chord 会按工具输出类型和时效分类处理。专门摘要会优先于�
 | 确认/权限 | 工具权限确认、用户授权结果 | `confirm_age_turns`（默认 2 轮后） | — | 权限决策很快过时，可较早裁剪 |
 | 错误结果 | 工具执行失败的错误信息 | `error_age_turns`（默认 3 轮后） | — | 失败原因可能仍有参考价值，保留稍久 |
 | Shell 成功 / 日志 | 成功命令、构建 / 测试 / lint 日志 | `shell_success_age_turns`（默认 1 轮后） | `shell_success_bytes`（默认 3000 字节以上才剪） | 成功输出通常可重新执行；摘要保留大小、行数、有代表性的成功信号行（如有）以及尾部 fallback，命令仍可从关联 tool call 获取；大日志摘要会保留关键失败 / 警告 |
+| Diff / Patch | `git diff`、unified/combined diff、ApplyPatch 文本 | `diff_protect_age_turns`（默认完整保留 12 轮） | 超过 Shell/读取类字节阈值后才摘要 | 保留文件、hunk、变更数量和有界代表行；不会按源码中的 `error`/`failed` 标识符误判为构建日志 |
 | 读取类 | `read`、文件内容预览 | `read_like_age_turns`（默认 1 轮后），仅作用于已失效/已被覆盖的读取 | `read_like_output_bytes`（默认 3000 字节以上才剪） | 被后续局部 edit/apply_patch 的修改范围覆盖（或遇到整文件/未知范围修改）的读取会被裁剪并标记 `truncated=stale`；被后续更大范围读取覆盖的标记 `truncated=superseded`（更新副本就在后文）。仍是该内容现行视图的读取**永不裁剪**，与年龄和大小无关——裁掉它只会逼出重读，或让模型基于摘要猜测 |
 | 搜索类 | `grep`、`glob`、LSP references | `read_like_age_turns`（默认 1 轮后） | `read_like_output_bytes`（默认 3000 字节以上才剪） | 命中列表可重跑；摘要保留范围、数量和代表命中 |
 | JSON / 结构化输出 | `shell` 或结构化工具返回的 JSON | 先走类别 gate，再退回旧结果兜底 | 类别对应的大小 gate | 大型结构化内容在通用省略前保留顶层 object key 或 array 数量 |

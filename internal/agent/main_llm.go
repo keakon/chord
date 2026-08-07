@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"time"
@@ -748,6 +749,12 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	// offline analysis can tell chord-side prefix mutations from provider-side
 	// cache loss. Also feed the observed hit into cache-aware model scoring.
 	cacheDiag := a.noteCacheExpectation(callStatus.RunningModelRef, messages, a.computeToolDefinitionHash())
+	if reductionDiag := a.contextReductionDiagnosticForTurn(turnID); reductionDiag != nil {
+		if cacheDiag == nil {
+			cacheDiag = make(map[string]string)
+		}
+		maps.Copy(cacheDiag, reductionDiag)
+	}
 	a.observedCacheHit(callStatus.RunningModelRef, resp.Usage)
 	a.recordUsage("main", "main", a.currentAgentName(), "chat", selectedRef, callStatus.RunningModelRef, turnID, resp.Usage, callStatus.ServiceTier, cacheDiag)
 
