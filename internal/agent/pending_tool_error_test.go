@@ -404,6 +404,73 @@ func TestHandleAgentErrorPersistsFailedSubAgentPendingToolCalls(t *testing.T) {
 	}
 }
 
+func TestHandleAgentErrorWaitsForFailedToolPersistenceBarrier(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	sub := newPersistenceTestSubAgent(a, "agent-barrier")
+
+	assistant := message.Message{
+		Role: "assistant",
+		ToolCalls: []message.ToolCall{{
+			ID:   "tool-barrier",
+			Name: "web_fetch",
+			Args: []byte(`{"url":"https://blocked.example"}`),
+		}},
+	}
+	sub.ctxMgr.Append(assistant)
+	if err := a.recovery.PersistMessage(sub.instanceID, assistant); err != nil {
+		t.Fatalf("PersistMessage(sub assistant): %v", err)
+	}
+	sub.turn.PendingToolCalls.Store(1)
+	sub.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-barrier", Name: "web_fetch", ArgsJSON: `{"url":"https://blocked.example"}`, AgentID: sub.instanceID})
+	a.subs.mu.Lock()
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.mu.Unlock()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	if !a.persist.enqueue(persistEntry{after: func(error) {
+		close(started)
+		<-release
+	}}, a.stoppingCh) {
+		t.Fatal("failed to enqueue persistence barrier test entry")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		a.handleAgentError(Event{Type: EventAgentError, SourceID: sub.instanceID, TurnID: sub.turn.ID, Payload: context.DeadlineExceeded})
+		close(done)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("persistence test entry did not start")
+	}
+	select {
+	case <-done:
+		t.Fatal("terminal SubAgent error completed before persistence barrier released")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if rec := a.taskRecordByTaskID(sub.taskID); rec != nil && rec.State == string(SubAgentStateFailed) {
+		t.Fatalf("task record became failed before persistence barrier released: %#v", rec)
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("terminal SubAgent error did not complete after persistence barrier release")
+	}
+	restored, err := a.recovery.LoadMessages(sub.instanceID)
+	if err != nil {
+		t.Fatalf("LoadMessages(sub): %v", err)
+	}
+	if len(restored) != 2 || restored[1].ToolCallID != "tool-barrier" {
+		t.Fatalf("restored messages = %#v, want persisted failed tool result", restored)
+	}
+}
+
 func TestMainExecuteToolCallPreservesOutputAndError(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

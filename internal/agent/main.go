@@ -1965,6 +1965,10 @@ func (a *MainAgent) handleAgentError(evt Event) {
 	if len(persistCalls) > 0 && sub != nil {
 		persistedResults := sub.persistInterruptedToolResults(persistCalls, ToolResultStatusError, err)
 		if persistedResults > 0 {
+			// The SubAgent is about to enter its terminal close path. Ensure the
+			// synthetic tool results queued above are durable before restore,
+			// export, or cleanup can observe the failed instance.
+			a.flushPersist()
 			log.Infof("persisted failed sub-agent tool-call results after terminal error agent=%v count=%v", evt.SourceID, persistedResults)
 		}
 	}
