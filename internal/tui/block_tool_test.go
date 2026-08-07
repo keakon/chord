@@ -2434,6 +2434,30 @@ func TestApplyPatchToolCallCopyPreservesToolName(t *testing.T) {
 	}
 }
 
+func TestApplyPatchToolCallCopyOmitsPathAndPlacesDiffBeforeResult(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameApplyPatch,
+		Content:       `{"path":"foo.txt"}`,
+		RawArgs:       `{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`,
+		Diff:          "@@ -1 +1 @@\n-old\n+new",
+		ResultContent: "Applied patch",
+		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultDone:    true,
+	}
+
+	got := toolCallMarkdownContent(block)
+	if strings.Contains(got, "## Path") {
+		t.Fatalf("ApplyPatch copy should omit derived path section; got:\n%s", got)
+	}
+	diffIndex := strings.Index(got, "## Diff")
+	resultIndex := strings.Index(got, "## Result")
+	if diffIndex < 0 || resultIndex < 0 || diffIndex > resultIndex {
+		t.Fatalf("ApplyPatch copy should place Diff before Result; got:\n%s", got)
+	}
+}
+
 func TestReplaceEditToolCallErrorCopyIncludesArgumentsWhenDiffMissing(t *testing.T) {
 	block := &Block{
 		ID:            1,

@@ -32,6 +32,9 @@ func (b *Block) renderError(width int) []string {
 }
 
 func (b *Block) renderStatus(width int) []string {
+	if b.BackgroundObjectID != "" || b.StatusTitle == backgroundResultCardTitle {
+		return b.renderBackgroundResult(width)
+	}
 	style := CompactionSummaryCardStyle
 	boxWidth := max(width-style.GetHorizontalMargins(), 10)
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)

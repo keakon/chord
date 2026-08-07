@@ -545,6 +545,20 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 	for msgIdx, msg := range msgs {
 		switch msg.Role {
 		case "user":
+			if msg.Kind == message.KindBackgroundResult {
+				content, backgroundID := formatBackgroundResultCardContent(msg.Content, "", "", "", "")
+				blocks = append(blocks, &Block{
+					ID:                    *nextID,
+					Type:                  BlockStatus,
+					StatusTitle:           backgroundResultCardTitle,
+					Content:               content,
+					BackgroundCopyContent: msg.Content,
+					BackgroundObjectID:    backgroundID,
+					MsgIndex:              msgIdx,
+				})
+				*nextID++
+				continue
+			}
 			if msg.Kind == message.KindSubAgentMailbox && msg.Mailbox != nil {
 				title := "AGENT MESSAGE"
 				if msg.Mailbox.Kind == "completed" {

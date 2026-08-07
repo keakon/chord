@@ -94,6 +94,9 @@ type Block struct {
 	// service/job identifier so repeated finish notifications can update the same
 	// visible card instead of appending duplicates.
 	BackgroundObjectID string
+	// BackgroundCopyContent preserves the model-facing background result for
+	// copy actions while Content contains the card-specific display form.
+	BackgroundCopyContent string
 
 	// LinkedAgentID is set for Delegate tool blocks when the result contains the
 	// created subagent's instance ID (e.g. "agent-1"). Clicking the block

@@ -550,6 +550,9 @@ func blockCopyContent(b *Block) string {
 	if b.Type == BlockToolResult {
 		return convformat.ToolResultMarkdown(b.ToolName, toolExpandedResultContent(b.ToolName, b.toolResultContentForCopy()), b.Diff)
 	}
+	if b.Type == BlockStatus && b.BackgroundCopyContent != "" {
+		return b.BackgroundCopyContent
+	}
 	return blockPlainContent(b)
 }
 
@@ -587,11 +590,10 @@ func fileDiffToolCallMarkdownContent(b *Block) string {
 		toolName = tools.NameEdit
 	}
 	parts := []string{"# Tool call: " + toolName}
-	if path := strings.TrimSpace(b.diffToolFilePath()); path != "" {
-		parts = append(parts, "## Path\n\n"+path)
-	}
-	if result := strings.TrimSpace(toolExpandedResultContent(b.ToolName, b.ResultContent)); result != "" {
-		parts = append(parts, "## Result\n\n"+result)
+	if toolName != tools.NameApplyPatch {
+		if path := strings.TrimSpace(b.diffToolFilePath()); path != "" {
+			parts = append(parts, "## Path\n\n"+path)
+		}
 	}
 	diff := strings.TrimSpace(b.Diff)
 	applyPatchNoChanges := b.ToolName == tools.NameApplyPatch && b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() && strings.Contains(b.ResultContent, "No net file changes")
@@ -603,7 +605,11 @@ func fileDiffToolCallMarkdownContent(b *Block) string {
 	}
 	if diff != "" {
 		parts = append(parts, "## Diff\n\n```diff\n"+diff+"\n```")
-	} else if b.toolResultIsError() {
+	}
+	if result := strings.TrimSpace(toolExpandedResultContent(b.ToolName, b.ResultContent)); result != "" {
+		parts = append(parts, "## Result\n\n"+result)
+	}
+	if diff == "" && b.toolResultIsError() {
 		if preview := strings.TrimSpace(replaceEditPreviewFromArgs(b.editPatchArgsJSON())); preview != "" {
 			parts = append(parts, "## Arguments\n\n```json\n"+preview+"\n```")
 		}

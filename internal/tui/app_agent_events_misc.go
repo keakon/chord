@@ -100,27 +100,17 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		m.finalizeAgentStream(agentID)
 		backgroundID := evt.EffectiveID()
-		content := strings.TrimSpace(evt.Message)
-		if content == "" {
-			kind := strings.TrimSpace(evt.Kind)
-			if kind == "" {
-				kind = "job"
-			}
-			desc := strings.TrimSpace(evt.Description)
-			if desc == "" {
-				desc = evt.Command
-			}
-			label := strings.ToUpper(kind[:1]) + kind[1:]
-			content = fmt.Sprintf("[%s %s finished]\n\nDescription: %s\nStatus: %s", label, backgroundID, desc, evt.Status)
-		}
+		content, _ := formatBackgroundResultCardContent(evt.Message, backgroundID, evt.Status, evt.Command, evt.Description)
 		if block, ok := m.findStatusBlockByBackgroundObject(backgroundID); ok {
 			block.Content = content
+			block.BackgroundCopyContent = evt.Message
+			block.StatusTitle = backgroundResultCardTitle
 			block.AgentID = agentID
 			block.InvalidateCache()
 			m.updateViewportBlock(block)
 			m.markBlockSettled(block)
 		} else {
-			block := &Block{ID: m.nextBlockID, Type: BlockStatus, Content: content, AgentID: agentID, BackgroundObjectID: backgroundID}
+			block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: content, BackgroundCopyContent: evt.Message, AgentID: agentID, BackgroundObjectID: backgroundID}
 			m.nextBlockID++
 			m.appendViewportBlock(block)
 			m.markBlockSettled(block)
