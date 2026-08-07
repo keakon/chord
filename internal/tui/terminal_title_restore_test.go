@@ -99,6 +99,7 @@ func TestUpdateTerminalTitleFromRestoredSession_SkipsSyntheticUserMessages(t *te
 		messages: []message.Message{
 			{Role: message.RoleUser, Content: "mailbox", Kind: message.KindSubAgentMailbox, Mailbox: &message.MailboxMetadata{MessageID: "worker-1-1"}},
 			{Role: message.RoleUser, Content: "loop", Kind: message.KindLoopNotice},
+			{Role: message.RoleUser, Content: "job result", Kind: message.KindBackgroundResult},
 			{Role: message.RoleUser, Content: "real request"},
 		},
 	}

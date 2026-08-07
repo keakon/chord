@@ -223,7 +223,7 @@ func (p *spawnedProcess) completionMessage(status string) string {
 	if p == nil {
 		return ""
 	}
-	msg := fmt.Sprintf("[%s %s finished: %s]\n\nDescription: %s", displaySpawnKind(p.Kind), p.ID, status, p.Description)
+	msg := fmt.Sprintf("[%s %s result]\n\nDescription: %s\nStatus: %s", displaySpawnKind(p.Kind), p.ID, p.Description, status)
 	if p.exitErr == nil {
 		return msg
 	}

@@ -50,7 +50,7 @@ func (m *Model) updateTerminalTitleFromRestoredSession() {
 	// Last fallback: use the very first non-mailbox user-role message. This may
 	// be a compaction summary when no original user prompt remains available.
 	for _, msg := range msgs {
-		if msg.Role != message.RoleUser || msg.Kind == message.KindSubAgentMailbox || msg.Kind == message.KindLoopNotice {
+		if msg.Role != message.RoleUser || msg.Kind == message.KindSubAgentMailbox || msg.Kind == message.KindLoopNotice || msg.Kind == message.KindBackgroundResult {
 			continue
 		}
 		content := message.UserPromptPlainText(msg)

@@ -122,6 +122,11 @@ const KindSubAgentMailbox = "subagent_mailbox"
 // KindLoopNotice identifies a synthetic loop-control message.
 const KindLoopNotice = "loop_notice"
 
+// KindBackgroundResult identifies a synthetic user-role message containing a
+// completion notification for a background job. It is persisted so the TUI can
+// restore it as a JOB RESULT card instead of treating it as user input.
+const KindBackgroundResult = "background_result"
+
 // KindReplayEvidence and KindReplayContinuation mark the pair of messages that
 // modelcompat synthesizes when a target cannot replay a native tool trajectory.
 // They exist only on the request face built for one provider call and are never
@@ -194,7 +199,7 @@ func IsUserAuthored(msg Message) bool {
 		return false
 	}
 	switch msg.Kind {
-	case KindSubAgentMailbox, KindLoopNotice:
+	case KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult:
 		return false
 	default:
 		return true

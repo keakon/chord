@@ -192,6 +192,14 @@ func TestSpawnOrdinaryFailureCompletionPreservesRelevantOutput(t *testing.T) {
 				t.Fatalf("finished message = %q, want %q", finished.Message, want)
 			}
 		}
+		if strings.Contains(finished.Message, "finished: finished") {
+			t.Fatalf("finished message repeated terminal wording: %q", finished.Message)
+		}
+		for _, want := range []string{"[Job ", " result]", "Status: finished (error:"} {
+			if !strings.Contains(finished.Message, want) {
+				t.Fatalf("finished message = %q, want canonical field %q", finished.Message, want)
+			}
+		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for spawn completion event")
 	}

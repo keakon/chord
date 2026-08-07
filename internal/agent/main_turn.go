@@ -148,7 +148,7 @@ func (a *MainAgent) pendingUserMessageToConversationMessage(p pendingUserMessage
 	}
 	outC, outP := a.expandSlashCommandForModel(content, p.Parts)
 	outC, outP = a.filterUnsupportedParts(outC, outP)
-	return message.Message{Role: message.RoleUser, Content: outC, Parts: outP}, true
+	return message.Message{Role: message.RoleUser, Content: outC, Parts: outP, Kind: p.Kind}, true
 }
 
 func (a *MainAgent) injectGitStatusIntoFirstUserMessage(messages []message.Message) bool {

@@ -31,6 +31,9 @@ func TestHandleBackgroundObjectFinishedForMainAppendsContextAndStartsTurn(t *tes
 	if last.Role != "user" {
 		t.Fatalf("last role = %q, want user", last.Role)
 	}
+	if last.Kind != message.KindBackgroundResult {
+		t.Fatalf("last kind = %q, want %q", last.Kind, message.KindBackgroundResult)
+	}
 	if !strings.Contains(last.Content, "Run production build") {
 		t.Fatalf("last content = %q, want build description", last.Content)
 	}
@@ -67,6 +70,9 @@ func TestHandleBackgroundObjectFinishedForMainEmitsCardAndToastWhenIdle(t *testi
 		case ToastEvent:
 			if strings.Contains(e.Message, "job-1") {
 				sawToast = true
+				if e.Level != "info" {
+					t.Fatalf("success toast level = %q, want info", e.Level)
+				}
 			}
 		}
 	}
@@ -254,6 +260,9 @@ func TestHandleBackgroundObjectFinishedForMainMergesAfterToolBatch(t *testing.T)
 	if msgs[2].Role != "user" || !strings.Contains(msgs[2].Content, "Run production build") {
 		t.Fatalf("merged background completion message = %#v, want user background completion", msgs[2])
 	}
+	if msgs[2].Kind != message.KindBackgroundResult {
+		t.Fatalf("merged background completion kind = %q, want %q", msgs[2].Kind, message.KindBackgroundResult)
+	}
 	if got := len(a.pendingUserMessages); got != 0 {
 		t.Fatalf("len(pendingUserMessages) = %d, want 0 after merge", got)
 	}
@@ -292,6 +301,9 @@ func TestHandleBackgroundObjectFinishedRoutesToOwnerSubAgentOnly(t *testing.T) {
 		if !strings.Contains(msg.Content, "Run production build") {
 			t.Fatalf("subagent append msg = %q, want build description", msg.Content)
 		}
+		if msg.Kind != message.KindBackgroundResult {
+			t.Fatalf("subagent append kind = %q, want %q", msg.Kind, message.KindBackgroundResult)
+		}
 	default:
 		t.Fatal("expected subagent to receive background completion context append")
 	}
@@ -304,6 +316,23 @@ func TestHandleBackgroundObjectFinishedRoutesToOwnerSubAgentOnly(t *testing.T) {
 	for _, msg := range a.ctxMgr.Snapshot() {
 		if strings.Contains(msg.Content, "Run production build") {
 			t.Fatalf("main context should not receive subagent background result: %q", msg.Content)
+		}
+	}
+}
+
+func TestBackgroundCompletionToastLevelFollowsTerminalStatus(t *testing.T) {
+	tests := []struct {
+		status string
+		want   string
+	}{
+		{status: "finished (exit 0)", want: "info"},
+		{status: "finished (error: exit status 7)", want: "error"},
+		{status: "finished (error: command timed out after 120s: exit status 143)", want: "error"},
+		{status: "finished (error: command cancelled by SpawnStop)", want: "warn"},
+	}
+	for _, tt := range tests {
+		if got := backgroundCompletionToastLevel(tt.status); got != tt.want {
+			t.Errorf("backgroundCompletionToastLevel(%q) = %q, want %q", tt.status, got, tt.want)
 		}
 	}
 }

@@ -636,10 +636,11 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 		// attributes ""/"main" to the main transcript, so send "" here like the
 		// orphan branch below or the card gets filtered out of the main view.
 		a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: "", Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
-		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: "info", AgentID: payload.AgentID})
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: backgroundCompletionToastLevel(payload.Status), AgentID: payload.AgentID})
 		if a.turn != nil {
 			a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{
 				Content:     content,
+				Kind:        message.KindBackgroundResult,
 				CoalesceKey: "main_background_completion",
 			})
 			return
@@ -659,20 +660,31 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 		// The owner is gone, so attribute the card to the main transcript where
 		// it stays visible; subagent-scoped blocks would have no view to render in.
 		a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: "", Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
-		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: "info", AgentID: payload.AgentID})
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: backgroundCompletionToastLevel(payload.Status), AgentID: payload.AgentID})
 		return
 	}
 	content := strings.TrimSpace(payload.Message)
 	if content == "" {
 		content = fmt.Sprintf("[Background %s %s completed]\n\nDescription: %s\nStatus: %s", payload.Kind, backgroundID, payload.Description, payload.Status)
 	}
-	if !sub.TryEnqueueContextAppend(message.Message{Role: "user", Content: content}) {
+	if !sub.TryEnqueueContextAppend(message.Message{Role: message.RoleUser, Content: content, Kind: message.KindBackgroundResult}) {
 		log.Warnf("handleSpawnFinished: subagent context append rejected agent_id=%v background_id=%v state=%v", payload.AgentID, backgroundID, sub.State())
 	} else {
 		sub.ContinueFromContext()
 	}
 	a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: payload.AgentID, Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
-	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: "info", AgentID: payload.AgentID})
+	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: backgroundCompletionToastLevel(payload.Status), AgentID: payload.AgentID})
+}
+
+func backgroundCompletionToastLevel(status string) string {
+	lower := strings.ToLower(strings.TrimSpace(status))
+	if strings.Contains(lower, "cancel") {
+		return "warn"
+	}
+	if strings.Contains(lower, "error") || strings.Contains(lower, "failed") || strings.Contains(lower, "timed out") || strings.Contains(lower, "exit status") {
+		return "error"
+	}
+	return "info"
 }
 
 // getOrCreateAgentMCP returns the private MCP tools declared by one agent

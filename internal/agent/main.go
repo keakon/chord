@@ -253,6 +253,7 @@ type pendingUserMessage struct {
 	DraftID             string
 	Content             string
 	Parts               []message.ContentPart
+	Kind                string
 	FromUser            bool
 	MailboxAckID        string
 	Mailbox             *message.MailboxMetadata

@@ -169,12 +169,19 @@ func (a *MainAgent) mainBackgroundResultContent(payload *tools.SpawnFinishedPayl
 	return fmt.Sprintf("[Background %s %s completed]\n\nDescription: %s\nStatus: %s\nReview this result before continuing.", kind, payload.EffectiveID(), desc, payload.Status)
 }
 
+func (a *MainAgent) mainBackgroundResultMessage(payload *tools.SpawnFinishedPayload) message.Message {
+	return message.Message{
+		Role:    message.RoleUser,
+		Content: a.mainBackgroundResultContent(payload),
+		Kind:    message.KindBackgroundResult,
+	}
+}
+
 func (a *MainAgent) handleSpawnResultForMain(payload *tools.SpawnFinishedPayload) {
 	if payload == nil {
 		return
 	}
-	content := a.mainBackgroundResultContent(payload)
-	msg := message.Message{Role: message.RoleUser, Content: content}
+	msg := a.mainBackgroundResultMessage(payload)
 	a.ctxMgr.Append(msg)
 	a.recordEvidenceFromMessage(msg)
 	if a.recovery != nil {
