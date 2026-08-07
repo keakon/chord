@@ -56,6 +56,34 @@ func TestNormalizeCodeFenceLanguage(t *testing.T) {
 	}
 }
 
+func TestGenericToolParamSummaryShowsSafeValues(t *testing.T) {
+	keys, vals := parseToolArgs(`{"numResults":8,"query":"file path typo suggestion ranking"}`)
+	if got := formatToolHeaderParamsWithParsed("mcp_exa_web_search_exa", keys, vals); got != `numResults=8 · query=file path typo suggestion ranking` {
+		t.Fatalf("summary = %q", got)
+	}
+}
+
+func TestGenericToolParamSummaryRedactsSensitiveValues(t *testing.T) {
+	keys, vals := parseToolArgs(`{"query":"search","api_key":"secret-value","filters":{"language":"go"},"urls":["a","b"]}`)
+	got := formatToolHeaderParamsWithParsed("mcp_any_tool", keys, vals)
+	for _, want := range []string{"query=search", "api_key=••••••", "filters={1 fields}", "urls=[2 items]"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary = %q, want %q", got, want)
+		}
+	}
+	if strings.Contains(got, "secret-value") {
+		t.Fatalf("summary exposed sensitive value: %q", got)
+	}
+}
+
+func TestGenericToolParamSummaryTruncatesLongStrings(t *testing.T) {
+	keys, vals := parseToolArgs(`{"query":"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"}`)
+	got := formatToolHeaderParamsWithParsed("mcp_any_tool", keys, vals)
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("summary = %q, want truncated value", got)
+	}
+}
+
 func TestToolCodeChromaStyleKeepsTokenContrastOnToolBackgrounds(t *testing.T) {
 	style := toolCodeChromaStyle()
 

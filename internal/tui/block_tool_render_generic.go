@@ -689,7 +689,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 
 	expanded := b.ToolCallDetailExpanded || b.compactToolResultForceExpanded(contentWidth)
 	keys, vals := b.toolArgsParsed()
-	_, mainPart, grayPart, collapsedMain, collapsedGray, collapsedOK, _ := b.toolHeaderMeta()
+	paramSummary, mainPart, grayPart, collapsedMain, collapsedGray, collapsedOK, _ := b.toolHeaderMeta()
 	hiddenDetail := 0
 	if !expanded {
 		hiddenDetail = compactToolHiddenDetailLines(b, keys, vals, mainPart, contentWidth, false)
@@ -702,7 +702,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	result := make([]string, 0, 16)
 	prefix := b.renderToolPrefixForExpanded(spinnerFrame, expanded)
 	toolHeaderLine := renderToolHeaderLine(prefix, b.ToolName)
-	toolHeaderLine = appendToolHeaderSummary(toolHeaderLine, mainPart, grayPart, "", cardWidth-4)
+	toolHeaderLine = appendToolHeaderSummary(toolHeaderLine, mainPart, grayPart, paramSummary, cardWidth-4)
 	toolHeaderLine = buildToolHeaderLine(toolHeaderLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, isActive)
 	result = append(result, toolHeaderLine)
 
@@ -717,7 +717,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		} else {
 			appendBashCollapsedSummary(&result, b, vals, contentWidth, !collapsedOK)
 		}
-	} else if mainPart == "" && len(keys) > 0 && b.ToolName != tools.NameSkill && !(b.ToolName == tools.NameComplete && !expanded) {
+	} else if mainPart == "" && paramSummary == "" && len(keys) > 0 {
 		if expanded {
 			for _, k := range keys {
 				line := fmt.Sprintf("%s: %s", k, vals[k])

@@ -170,6 +170,25 @@ func formatParamValue(v any) string {
 	}
 }
 
+const toolParamValueMaxRunes = 120
+
+func truncateToolParamValue(value string) string {
+	if len([]rune(value)) <= toolParamValueMaxRunes {
+		return value
+	}
+	return string([]rune(value)[:toolParamValueMaxRunes-3]) + "..."
+}
+
+func isSensitiveToolParam(key string) bool {
+	key = strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(key), "-", "_"), " ", "_"))
+	for _, part := range []string{"password", "passwd", "token", "api_key", "apikey", "secret", "authorization", "access_token", "refresh_token", "client_secret", "private_key"} {
+		if key == part || strings.HasSuffix(key, "_"+part) {
+			return true
+		}
+	}
+	return false
+}
+
 func paramStringList(raw string) []string {
 	var values []string
 	if err := json.Unmarshal([]byte(raw), &values); err != nil {
@@ -621,8 +640,39 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 		}
 		return name
 	default:
-		return ""
+		if !strings.HasPrefix(toolName, "mcp_") {
+			return ""
+		}
+		return genericToolParamSummary(keys, vals)
 	}
+}
+
+func genericToolParamSummary(keys []string, vals map[string]string) string {
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if value := strings.TrimSpace(vals[key]); value != "" {
+			parts = append(parts, key+"="+genericToolParamValue(key, value))
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+func genericToolParamValue(key, value string) string {
+	if isSensitiveToolParam(key) {
+		return "••••••"
+	}
+	var parsed any
+	if json.Unmarshal([]byte(value), &parsed) == nil {
+		switch v := parsed.(type) {
+		case string:
+			return truncateToolParamValue(sanitizeToolDisplayText(v))
+		case []any:
+			return fmt.Sprintf("[%d items]", len(v))
+		case map[string]any:
+			return fmt.Sprintf("{%d fields}", len(v))
+		}
+	}
+	return truncateToolParamValue(value)
 }
 
 func formatToolHeaderParams(toolName, argsJSON string) string {
