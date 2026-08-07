@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/modelcompat"
 )
 
 func TestIsRetriable5xxRotatesKeysBeforeFallback(t *testing.T) {
@@ -237,6 +238,41 @@ func TestTerminalModelPoolFailureForProviderKeepsCompatible400Retryable(t *testi
 	err := &APIError{StatusCode: 400, Message: "Concurrency limit exceeded for user, please retry later"}
 	if isTerminalModelPoolFailureForProvider(compatible, err) {
 		t.Fatal("compatible gateway 400 should not stop after model pool exhaustion")
+	}
+}
+
+func TestGenericReplayRejectionExcludesTransientCapacity400(t *testing.T) {
+	t.Parallel()
+	provider := NewProviderConfig("gateway", config.ProviderConfig{OfficialAPI: new(false)}, nil)
+	report := modelcompat.NormalizeReport{ForeignNativeReplays: 1}
+	for _, msg := range []string{
+		"Our servers are currently overloaded. Please try again later.",
+		"Concurrency limit exceeded for user, please retry later",
+		"Service temporarily unavailable",
+		"Rate limit exceeded",
+	} {
+		if isGenericNativeReplayRejection(&APIError{StatusCode: 400, Message: msg}, provider, report) {
+			t.Fatalf("transient capacity error %q must not enter replay degradation", msg)
+		}
+	}
+	for _, apiErr := range []*APIError{
+		{StatusCode: 400, Code: "resource_exhausted", Message: "bad request"},
+		{StatusCode: 400, Type: "rate_limit_error", Message: "bad request"},
+		{StatusCode: 400, Message: `{"error":{"code":"server_busy"},"message":"bad request"}`},
+	} {
+		if isGenericNativeReplayRejection(apiErr, provider, report) {
+			t.Fatalf("structured transient capacity error %#v must not enter replay degradation", apiErr)
+		}
+	}
+	if !isGenericNativeReplayRejection(&APIError{StatusCode: 400, Message: "bad request"}, provider, report) {
+		t.Fatal("diagnostic-free compatible-gateway 400 should retain generic replay recovery")
+	}
+}
+
+func TestReplayEvidenceEchoIsTerminalAfterModelPoolExhaustion(t *testing.T) {
+	t.Parallel()
+	if !isTerminalModelPoolFailureForProvider(nil, &ReplayEvidenceEchoError{}) {
+		t.Fatal("repeated replay evidence echo should stop retry rounds after the model pool is exhausted")
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -153,6 +154,22 @@ func responseHasUsableOutput(resp *message.Response) bool {
 	return message.HasReplayableThinkingBlocks(resp.ThinkingBlocks)
 }
 
+func reinforceReplayContinuation(messages []message.Message) []message.Message {
+	out := append([]message.Message(nil), messages...)
+	content := "Proceed with the current task now. Do not quote, reproduce, summarize, or discuss any preceding historical tool record. Respond with the next necessary task action or the task's final result."
+	for i, msg := range slices.Backward(out) {
+		if msg.Kind == message.KindReplayContinuation {
+			out[i].Content = content
+			return out
+		}
+	}
+	return append(out, message.Message{
+		Role:    message.RoleUser,
+		Content: content,
+		Kind:    message.KindReplayContinuation,
+	})
+}
+
 type streamRetryTarget struct {
 	provider     *ProviderConfig
 	impl         Provider
@@ -164,6 +181,12 @@ type streamRetryTarget struct {
 	serviceTier  config.ServiceTier
 	variant      string
 	isFallback   bool
+}
+
+type replayEchoTarget struct {
+	provider *ProviderConfig
+	modelID  string
+	variant  string
 }
 
 func (c *Client) buildStreamRetryTargets(
@@ -489,6 +512,7 @@ func (c *Client) completeStreamTarget(
 	var resp *message.Response
 	var err error
 	var tracker *visibleStreamTracker
+	replayEchoRetried := false
 	modelDone := false
 	for keyAttempt := 0; keyAttempt < keyCount; keyAttempt++ {
 		if err := abortIfCancelled(); err != nil {
@@ -556,6 +580,27 @@ func (c *Client) completeStreamTarget(
 			tracker.Callback,
 		)
 		if err == nil {
+			if resp != nil && modelcompat.IsReplayEvidenceEcho(resp.Content, targetMessages) {
+				echoErr := &ReplayEvidenceEchoError{}
+				tracker.EmitRollback(echoErr.Error())
+				log.Warnf("model echoed request-only replay evidence provider=%v model=%v key_id=%v retry=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), !replayEchoRetried)
+				if !replayEchoRetried {
+					replayEchoRetried = true
+					targetMessages = reinforceReplayContinuation(targetMessages)
+					requestTuning = replayCompatibleRequestTuning(t.tuning, targetMessages, poolTarget)
+					keyAttempt--
+					continue
+				}
+				result.setLastErr(t.provider, echoErr)
+				if status != nil && !t.isFallback && status.FallbackReason == "" {
+					status.FallbackReason = "replay_evidence_echo"
+				}
+				emitRetryErrorForKey(cb, echoErr, t.provider, t.modelID, apiKey)
+				resp = nil
+				err = echoErr
+				modelDone = true
+				break
+			}
 			if responseHasUsableOutput(resp) {
 				result.roundHadUsableReply = true
 			}
@@ -931,6 +976,7 @@ func (c *Client) completeStreamWithRetry(
 	variantForStart := validVariantForModel(startProvider, startModelID, startVariant)
 
 	retryCount := 0
+	replayEchoRejectedTargets := make(map[replayEchoTarget]struct{})
 
 	// Public CompleteStream defaults to unlimited full-round retries. Callers can
 	// pass a positive maxAttempts for the historical soft cap (cooling /
@@ -1019,6 +1065,11 @@ func (c *Client) completeStreamWithRetry(
 				return nil, err
 			}
 			t := targets[ti]
+			replayTarget := replayEchoTarget{provider: t.provider, modelID: t.modelID, variant: t.variant}
+			if _, rejected := replayEchoRejectedTargets[replayTarget]; rejected {
+				log.Infof("skipping model: target repeated replay evidence in this request provider=%v model=%v variant=%v", t.provider.Name(), t.modelID, t.variant)
+				continue
+			}
 			if skipReason, ok := skippedProviders[t.provider]; ok {
 				log.Infof("skipping model: provider skipped for current round provider=%v model=%v reason=%v", t.provider.Name(), t.modelID, skipReason)
 				continue
@@ -1047,6 +1098,9 @@ func (c *Client) completeStreamWithRetry(
 			); err != nil {
 				return nil, err
 			} else {
+				if _, repeatedEcho := errors.AsType[*ReplayEvidenceEchoError](targetResult.lastErr); repeatedEcho {
+					replayEchoRejectedTargets[replayTarget] = struct{}{}
+				}
 				lastInputTokens = updatedLastInputTokens
 				lastErr = targetResult.lastErr
 				lastErrProvider = targetResult.lastErrProvider

@@ -224,6 +224,14 @@ func (e *EmptyResponseError) Error() string {
 	return "model returned empty response (stop_reason=stop with no content or tool calls)"
 }
 
+// ReplayEvidenceEchoError means the model repeated a request-only historical
+// tool envelope instead of continuing the active task.
+type ReplayEvidenceEchoError struct{}
+
+func (e *ReplayEvidenceEchoError) Error() string {
+	return "model repeated internal replay evidence instead of continuing the task"
+}
+
 // ContextLengthExceededError indicates the LLM provider rejected the request
 // because the input context exceeds the model's maximum context window. This
 // is distinct from other 400 errors: it signals that compaction or truncation
@@ -318,6 +326,13 @@ func isGenericNativeReplayRejection(err error, provider *ProviderConfig, report 
 	if !ok || apiErr == nil || apiErr.StatusCode != 400 || provider == nil || providerUsesOfficialAPI(provider) {
 		return false
 	}
+	// Compatible gateways sometimes tunnel upstream capacity failures through
+	// a bare 400. Those failures must use the ordinary retry/fallback path; if
+	// they entered the replay ladder, a transient outage would permanently
+	// textify the current turn's tool history.
+	if hasTransientProviderCapacitySignal(apiErr) {
+		return false
+	}
 	if report.ForeignNativeReplays == 0 && report.DroppedThinkingBlocks == 0 &&
 		report.DowngradedReasoning == 0 && report.ConvertedReasoning == 0 &&
 		report.DowngradedToolCalls == 0 && report.DroppedToolCalls == 0 &&
@@ -326,6 +341,36 @@ func isGenericNativeReplayRejection(err error, provider *ProviderConfig, report 
 	}
 	return !hasExplicitRequestOrParamSignal(apiErr) && !classifyContextLengthExceeded(apiErr) &&
 		!hasTerminalNonRetriable400Signal(apiErr)
+}
+
+func hasTransientProviderCapacitySignal(apiErr *APIError) bool {
+	if apiErr == nil {
+		return false
+	}
+	if apiErrorSignalContains(apiErr,
+		"overloaded",
+		"temporarily_unavailable",
+		"server_busy",
+		"service_unavailable",
+		"concurrency_limit",
+		"too_many_requests",
+		"rate_limit",
+		"resource_exhausted",
+	) {
+		return true
+	}
+	return apiErrMessageContainsAny(apiErr,
+		"overloaded",
+		"try again later",
+		"temporarily unavailable",
+		"server busy",
+		"service unavailable",
+		"concurrency limit",
+		"too many concurrent requests",
+		"too many requests",
+		"rate limit",
+		"resource exhausted",
+	)
 }
 
 // IsContextLengthExceeded reports whether err indicates the input context
@@ -691,6 +736,9 @@ func hasTerminalNonRetriable400Signal(apiErr *APIError) bool {
 // compatible gateways often mis-map upstream overload/rate-limit/provider
 // failures to 400.
 func isTerminalModelPoolFailureForProvider(provider *ProviderConfig, err error) bool {
+	if _, ok := errors.AsType[*ReplayEvidenceEchoError](err); ok {
+		return true
+	}
 	if IsContextLengthExceeded(err) {
 		return true
 	}

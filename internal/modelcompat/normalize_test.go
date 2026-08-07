@@ -340,6 +340,74 @@ func TestNormalizeForTarget_TextifiesCompletedToolsWhenStructuredToolsDisabled(t
 	}
 }
 
+func TestNormalizeForTarget_AddsSingleContinuationForMultipleCurrentTurnToolTrajectories(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "continue"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call_1", Name: "read", Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "first"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call_2", Name: "grep", Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "call_2", Content: "second"},
+	}
+
+	out, _ := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic}, NormalizeOptions{StructuredTools: false})
+	evidenceMessages := 0
+	evidenceRecords := 0
+	continuationCount := 0
+	for _, msg := range out {
+		switch msg.Kind {
+		case message.KindReplayEvidence:
+			evidenceMessages++
+			evidenceRecords += strings.Count(msg.Content, historicalToolRecordStart)
+		case message.KindReplayContinuation:
+			continuationCount++
+		}
+	}
+	if evidenceMessages != 1 || evidenceRecords != 2 || continuationCount != 1 {
+		t.Fatalf("evidence_messages=%d evidence_records=%d continuation=%d, want 1, 2, and 1: %+v", evidenceMessages, evidenceRecords, continuationCount, out)
+	}
+	if out[len(out)-1].Kind != message.KindReplayContinuation {
+		t.Fatalf("single continuation must follow all current-turn evidence: %+v", out)
+	}
+}
+
+func TestNormalizeForTarget_DoesNotAddContinuationWhenRealUserMessageFollowsEvidence(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call_1", Name: "read", Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "result"},
+		{Role: message.RoleUser, Content: "continue with the implementation"},
+	}
+
+	out, _ := NormalizeForTarget(msgs, TargetModel{WireFamily: WireFamilyAnthropic}, NormalizeOptions{StructuredTools: false})
+	for _, msg := range out {
+		if msg.Kind == message.KindReplayContinuation {
+			t.Fatalf("real user continuation should make synthetic continuation unnecessary: %+v", out)
+		}
+	}
+	if out[len(out)-1].Role != message.RoleUser || out[len(out)-1].Content != "continue with the implementation" {
+		t.Fatalf("real user message was not preserved at request tail: %+v", out)
+	}
+}
+
+func TestIsReplayEvidenceEcho(t *testing.T) {
+	evidence := completedToolTrajectoryEvidence(message.Message{
+		Role:      message.RoleAssistant,
+		ToolCalls: []message.ToolCall{{ID: "call_1", Name: "read", Args: json.RawMessage(`{}`)}},
+	}, map[string]message.Message{"call_1": {Role: message.RoleTool, ToolCallID: "call_1", Content: "result"}})
+	msgs := []message.Message{evidence}
+	if !IsReplayEvidenceEcho(evidence.Content, msgs) {
+		t.Fatal("exact historical envelope should be detected as replay evidence echo")
+	}
+	if !IsReplayEvidenceEcho("Here is the requested record:\n\n```text\n"+evidence.Content+"\n```", msgs) {
+		t.Fatal("historical envelope with a preamble or code fence should be detected")
+	}
+	if IsReplayEvidenceEcho("ordinary answer", msgs) {
+		t.Fatal("ordinary answer should not be detected as replay evidence echo")
+	}
+	if IsReplayEvidenceEcho(evidence.Content, []message.Message{{Role: message.RoleAssistant, Content: evidence.Content}}) {
+		t.Fatal("marker without request-only replay evidence kind should not be rejected")
+	}
+}
+
 func TestNormalizeForTarget_DoesNotMutateInput(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{"command": "ls"})
 	msgs := []message.Message{{

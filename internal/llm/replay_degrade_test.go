@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"sync"
@@ -125,7 +126,6 @@ func requireStrictReplayEvidence(t *testing.T, messages []message.Message, toolN
 	wantCall := "[Historical tool call: " + toolName + "]"
 	wantResult := "[Historical tool result for " + callID + "]"
 	var evidence message.Message
-	foundContinuation := false
 	for _, msg := range messages {
 		if msg.Role == message.RoleTool || len(msg.ToolCalls) > 0 {
 			t.Fatalf("strict replay retained structured tool history: %+v", messages)
@@ -134,15 +134,217 @@ func requireStrictReplayEvidence(t *testing.T, messages []message.Message, toolN
 			strings.Contains(msg.Content, wantCall) && strings.Contains(msg.Content, wantResult) {
 			evidence = msg
 		}
-		if msg.Kind == "replay_continuation" && msg.Role == message.RoleUser &&
-			strings.Contains(msg.Content, "Continue the current task") {
-			foundContinuation = true
-		}
 	}
-	if evidence.Kind == "" || !foundContinuation {
-		t.Fatalf("strict replay did not preserve isolated evidence and continuation: %+v", messages)
+	if evidence.Kind == "" {
+		t.Fatalf("strict replay did not preserve isolated evidence: %+v", messages)
 	}
 	return evidence
+}
+
+type replayEchoProvider struct {
+	mu         sync.Mutex
+	attempts   [][]message.Message
+	alwaysEcho bool
+}
+
+func (p *replayEchoProvider) CompleteStream(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ string,
+	msgs []message.Message,
+	_ []message.ToolDefinition,
+	_ int,
+	_ RequestTuning,
+	cb StreamCallback,
+) (*message.Response, error) {
+	p.mu.Lock()
+	copied := append([]message.Message(nil), msgs...)
+	p.attempts = append(p.attempts, copied)
+	attempt := len(p.attempts)
+	p.mu.Unlock()
+
+	evidence := ""
+	for _, msg := range msgs {
+		if msg.Kind == message.KindReplayEvidence {
+			evidence = msg.Content
+			break
+		}
+	}
+	if evidence == "" {
+		return nil, errors.New("strict replay evidence missing")
+	}
+	if attempt == 1 || p.alwaysEcho {
+		if cb != nil {
+			cb(message.StreamDelta{Type: message.StreamDeltaText, Text: evidence})
+		}
+		return &message.Response{Content: evidence, StopReason: "stop"}, nil
+	}
+	if cb != nil {
+		cb(message.StreamDelta{Type: message.StreamDeltaText, Text: "continued task"})
+	}
+	return &message.Response{Content: "continued task", StopReason: "stop"}, nil
+}
+
+func strictCurrentTurnReplayMessages() []message.Message {
+	return []message.Message{
+		{Role: message.RoleUser, Content: "implement the fix"},
+		{
+			Role:            message.RoleAssistant,
+			ResponsesOutput: []message.ResponsesOutputItem{{Type: "function_call", ID: "fc_1", CallID: "call_1", Name: "read", Arguments: `{}`}},
+			ToolCalls:       []message.ToolCall{{ID: "call_1", Name: "read", Args: []byte(`{}`)}},
+			Provenance:      &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIResponses, ProviderID: "source"},
+		},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
+	}
+}
+
+func TestCompleteStreamRetriesReplayEvidenceEchoWithReinforcedContinuation(t *testing.T) {
+	cfg := NewProviderConfig("responses", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"gpt-5.6-sol": {}},
+	}, []string{"key"})
+	impl := &replayEchoProvider{}
+	client := NewClient(cfg, impl, "gpt-5.6-sol", 1024, "")
+	strict := modelcompat.ReplayCompatStrict
+	var deltas []message.StreamDelta
+	result, _, err := client.completeStreamTarget(
+		context.Background(),
+		streamRetryTarget{provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 1024, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{ReplayCompat: &strict}},
+		0, strictCurrentTurnReplayMessages(), nil, func(delta message.StreamDelta) { deltas = append(deltas, delta) }, false, nil, 0, false,
+		&CallStatus{}, "", 0, 0, func() error { return nil }, nil,
+	)
+	if err != nil {
+		t.Fatalf("completeStreamTarget error = %v", err)
+	}
+	if result.resp == nil || result.resp.Content != "continued task" {
+		t.Fatalf("response = %+v, want successful corrective retry", result.resp)
+	}
+	impl.mu.Lock()
+	attempts := append([][]message.Message(nil), impl.attempts...)
+	impl.mu.Unlock()
+	if len(attempts) != 2 {
+		t.Fatalf("attempts = %d, want echo plus one corrective retry", len(attempts))
+	}
+	continuations := 0
+	for _, msg := range attempts[1] {
+		if msg.Kind == message.KindReplayContinuation {
+			continuations++
+			if !strings.Contains(msg.Content, "Proceed with the current task now") {
+				t.Fatalf("corrective retry did not reinforce continuation: %q", msg.Content)
+			}
+		}
+	}
+	if continuations != 1 {
+		t.Fatalf("corrective retry continuations = %d, want one: %+v", continuations, attempts[1])
+	}
+	rollbackCount := 0
+	for _, delta := range deltas {
+		if delta.Type == message.StreamDeltaRollback {
+			rollbackCount++
+		}
+	}
+	if rollbackCount != 1 {
+		t.Fatalf("rollback deltas = %d, want one for discarded echo", rollbackCount)
+	}
+}
+
+func TestCompleteStreamRejectsRepeatedReplayEvidenceEcho(t *testing.T) {
+	cfg := NewProviderConfig("responses", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"gpt-5.6-sol": {}},
+	}, []string{"key"})
+	impl := &replayEchoProvider{alwaysEcho: true}
+	client := NewClient(cfg, impl, "gpt-5.6-sol", 1024, "")
+	strict := modelcompat.ReplayCompatStrict
+	_, err := callCompleteStreamWithRetryForTest(
+		client, context.Background(), cfg, impl, "gpt-5.6-sol", 1024,
+		RequestTuning{ReplayCompat: &strict}, "", strictCurrentTurnReplayMessages(), nil, nil,
+		false, nil, -1, &CallStatus{},
+	)
+	if _, ok := errors.AsType[*ReplayEvidenceEchoError](err); !ok {
+		t.Fatalf("error = %v, want ReplayEvidenceEchoError", err)
+	}
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+	if len(impl.attempts) != 2 {
+		t.Fatalf("attempts = %d, want one corrective retry before terminal failure", len(impl.attempts))
+	}
+}
+
+func TestCompleteStreamSkipsRepeatedReplayEchoTargetInLaterRounds(t *testing.T) {
+	primaryCfg := NewProviderConfig("primary", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"primary-model": {}},
+	}, []string{"primary-key"})
+	fallbackCfg := NewProviderConfig("fallback", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"fallback-model": {}},
+	}, []string{"fallback-key"})
+	disableRetryDelayForTest(primaryCfg)
+	disableRetryDelayForTest(fallbackCfg)
+	primary := &replayEchoProvider{alwaysEcho: true}
+	fallback := &replayRejectingProvider{scriptedErrs: []error{
+		&APIError{StatusCode: 502, Message: "upstream unavailable"},
+	}}
+	client := NewClient(primaryCfg, primary, "primary-model", 1024, "")
+	strict := modelcompat.ReplayCompatStrict
+	resp, err := callCompleteStreamWithRetryForTest(
+		client, context.Background(), primaryCfg, primary, "primary-model", 1024,
+		RequestTuning{ReplayCompat: &strict}, "", strictCurrentTurnReplayMessages(), nil, nil,
+		true, []FallbackModel{{ProviderConfig: fallbackCfg, ProviderImpl: fallback, ModelID: "fallback-model", MaxTokens: 1024}},
+		-2, &CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream error = %v, want fallback recovery", err)
+	}
+	if resp == nil || resp.Content != "ok" {
+		t.Fatalf("response = %+v, want fallback success", resp)
+	}
+	primary.mu.Lock()
+	primaryAttempts := len(primary.attempts)
+	primary.mu.Unlock()
+	if primaryAttempts != 2 {
+		t.Fatalf("primary attempts = %d, want initial echo plus one corrective retry only", primaryAttempts)
+	}
+	fallback.mu.Lock()
+	fallbackAttempts := len(fallback.attempts)
+	fallback.mu.Unlock()
+	if fallbackAttempts != 2 {
+		t.Fatalf("fallback attempts = %d, want transient failure plus next-round recovery", fallbackAttempts)
+	}
+}
+
+func TestCompleteStreamDoesNotDegradeReplayForTransientOverloaded400(t *testing.T) {
+	cfg := NewProviderConfig("responses", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"gpt-5.6-sol": {}},
+	}, []string{"key-1", "key-2"})
+	impl := &replayRejectingProvider{}
+	client := NewClient(cfg, impl, "gpt-5.6-sol", 1024, "")
+	disableRetryDelayForTest(cfg)
+	impl.scriptedErrs = []error{&APIError{StatusCode: 400, Message: "Our servers are currently overloaded. Please try again later."}}
+
+	resp, err := callReplayTestStream(t, client, cfg, impl)
+	if err != nil {
+		t.Fatalf("CompleteStream error = %v, want retry recovery", err)
+	}
+	if resp == nil || resp.Content != "ok" {
+		t.Fatalf("response = %+v, want success after transient retry", resp)
+	}
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+	if len(impl.attempts) != 2 {
+		t.Fatalf("attempts = %d, want overloaded attempt plus retry", len(impl.attempts))
+	}
+	for i, attempt := range impl.attempts {
+		if len(attempt[1].ResponsesOutput) == 0 {
+			t.Fatalf("attempt %d degraded native replay after transient overload: %+v", i+1, attempt)
+		}
+	}
+	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", lastUserMessageIndex(crossProviderReplayMessages())); got != modelcompat.ReplayCompatNative {
+		t.Fatalf("remembered replay level = %d, want native", got)
+	}
 }
 
 func TestCompleteStreamDegradesReplayCompatLadderOnRejection(t *testing.T) {
