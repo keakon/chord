@@ -225,11 +225,25 @@ func formatDiagnosticLines(diags []Diagnostic) []string {
 	return lines
 }
 
+type diagnosticIdentity struct {
+	severity int
+	line     int
+	col      int
+	code     string
+	message  string
+}
+
+func diagnosticIdentityKey(d Diagnostic) diagnosticIdentity {
+	// Source is deliberately excluded: rendered lines never show it, and a
+	// diagnostic that round-trips through rendered text loses it.
+	return diagnosticIdentity{severity: d.Severity, line: d.Line, col: d.Col, code: d.Code, message: d.Message}
+}
+
 func deduplicateDiagnostics(diags []Diagnostic) []Diagnostic {
-	seen := make(map[string]struct{}, len(diags))
+	seen := make(map[diagnosticIdentity]struct{}, len(diags))
 	out := make([]Diagnostic, 0, len(diags))
 	for _, d := range diags {
-		key := fmt.Sprintf("%d\x00%d\x00%d\x00%s\x00%s\x00%s", d.Severity, d.Line, d.Col, d.Code, d.Message, d.Source)
+		key := diagnosticIdentityKey(d)
 		if _, ok := seen[key]; ok {
 			continue
 		}

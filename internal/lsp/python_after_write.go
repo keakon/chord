@@ -160,13 +160,13 @@ func appendDiagnosticChangeSummary(out string, baseline, current []Diagnostic) s
 }
 
 func diagnosticChangeSummary(baseline, current []Diagnostic) string {
-	baseKeys := make(map[string]struct{}, len(baseline))
+	baseKeys := make(map[diagnosticIdentity]struct{}, len(baseline))
 	for _, d := range baseline {
-		baseKeys[diagnosticComparisonKey(d)] = struct{}{}
+		baseKeys[diagnosticIdentityKey(d)] = struct{}{}
 	}
-	currentKeys := make(map[string]struct{}, len(current))
+	currentKeys := make(map[diagnosticIdentity]struct{}, len(current))
 	for _, d := range current {
-		currentKeys[diagnosticComparisonKey(d)] = struct{}{}
+		currentKeys[diagnosticIdentityKey(d)] = struct{}{}
 	}
 	newCount := 0
 	for key := range currentKeys {
@@ -193,10 +193,6 @@ func (m *Manager) currentFileDiagnostics(absPath string) []Diagnostic {
 	path := normalizeWaiterPath(absPath)
 	diags := m.allDiagnosticsByAbsPath()[path]
 	return append([]Diagnostic(nil), diags...)
-}
-
-func diagnosticComparisonKey(d Diagnostic) string {
-	return fmt.Sprintf("%d:%d:%d:%s:%s:%s", d.Severity, d.Line, d.Col, d.Code, d.Source, d.Message)
 }
 
 func appendRuffDiagnostics(base string, selection pythonDiagnosticSelection, diags []Diagnostic, output config.DiagnosticOutputConfig, ranges []EditRange) string {

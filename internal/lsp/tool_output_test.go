@@ -418,3 +418,22 @@ func TestEditRangesForReplacement(t *testing.T) {
 		t.Fatalf("ranges = %+v", ranges)
 	}
 }
+
+func TestDeduplicateDiagnosticsCollapsesSourcelessRoundTripCopy(t *testing.T) {
+	original := Diagnostic{Severity: 1, Line: 10, Col: 3, Code: "E100", Message: "undefined name", Source: "compiler"}
+	// apply_patch re-parses rendered manager output; the rendered line carries
+	// no source, so the re-parsed copy must dedupe onto the original.
+	roundTripped := original
+	roundTripped.Source = ""
+
+	out := deduplicateDiagnostics([]Diagnostic{original, roundTripped})
+	if len(out) != 1 {
+		t.Fatalf("deduplicateDiagnostics() kept %d entries, want 1: %#v", len(out), out)
+	}
+	if out[0].Source != "compiler" {
+		t.Fatalf("kept diagnostic = %#v, want the original with its source", out[0])
+	}
+	if diagnosticIdentityKey(original) != diagnosticIdentityKey(roundTripped) {
+		t.Fatal("comparison keys differ; unchanged diagnostics would be reported as new")
+	}
+}
