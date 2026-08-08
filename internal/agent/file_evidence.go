@@ -43,6 +43,16 @@ type fileEvidenceStats struct {
 	Unknown      int
 }
 
+func (s *reductionHistoryScan) fileEvidence() fileEvidenceView {
+	if !s.evidenceDone {
+		started := time.Now()
+		s.evidence = buildFileEvidenceViewWithMeta(s.messages, "", "current", s.callMeta())
+		s.evidenceStats = s.evidence.stats(time.Since(started))
+		s.evidenceDone = true
+	}
+	return s.evidence
+}
+
 func (v fileEvidenceView) stats(duration time.Duration) fileEvidenceStats {
 	stats := fileEvidenceStats{DurationUS: duration.Microseconds(), Files: len(v)}
 	for _, observations := range v {

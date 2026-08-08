@@ -101,16 +101,6 @@ func (s *reductionHistoryScan) readValidity() map[int]readValidity {
 	return s.fileEvidence().validityByMessage()
 }
 
-func (s *reductionHistoryScan) fileEvidence() fileEvidenceView {
-	if !s.evidenceDone {
-		started := time.Now()
-		s.evidence = buildFileEvidenceViewWithMeta(s.messages, "", "current", s.callMeta())
-		s.evidenceStats = s.evidence.stats(time.Since(started))
-		s.evidenceDone = true
-	}
-	return s.evidence
-}
-
 func (a *MainAgent) refreshVisibleContextReductionStats(messages []message.Message) {
 	if a == nil {
 		return
