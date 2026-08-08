@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
@@ -173,16 +174,29 @@ func formatParamValue(v any) string {
 const toolParamValueMaxRunes = 120
 
 func truncateToolParamValue(value string) string {
-	if len([]rune(value)) <= toolParamValueMaxRunes {
-		return value
+	cut := len(value)
+	for runeCount, byteIndex := 0, 0; byteIndex < len(value); runeCount++ {
+		_, size := utf8.DecodeRuneInString(value[byteIndex:])
+		if runeCount == toolParamValueMaxRunes-3 {
+			cut = byteIndex
+		}
+		if runeCount == toolParamValueMaxRunes {
+			return value[:cut] + "..."
+		}
+		byteIndex += size
 	}
-	return string([]rune(value)[:toolParamValueMaxRunes-3]) + "..."
+	return value
 }
 
 func isSensitiveToolParam(key string) bool {
-	key = strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(key), "-", "_"), " ", "_"))
-	for _, part := range []string{"password", "passwd", "token", "api_key", "apikey", "secret", "authorization", "access_token", "refresh_token", "client_secret", "private_key"} {
-		if key == part || strings.HasSuffix(key, "_"+part) {
+	key = strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return unicode.ToLower(r)
+		}
+		return -1
+	}, strings.TrimSpace(key))
+	for _, part := range []string{"password", "passwd", "token", "apikey", "secret", "authorization", "accesstoken", "refreshtoken", "clientsecret", "privatekey", "secretkey"} {
+		if key == part || strings.HasSuffix(key, part) {
 			return true
 		}
 	}
@@ -651,7 +665,8 @@ func genericToolParamSummary(keys []string, vals map[string]string) string {
 	parts := make([]string, 0, len(keys))
 	for _, key := range keys {
 		if value := strings.TrimSpace(vals[key]); value != "" {
-			parts = append(parts, key+"="+genericToolParamValue(key, value))
+			displayKey := truncateToolParamValue(sanitizeToolDisplayText(strings.TrimSpace(key)))
+			parts = append(parts, displayKey+"="+genericToolParamValue(key, value))
 		}
 	}
 	return strings.Join(parts, " · ")

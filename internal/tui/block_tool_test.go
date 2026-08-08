@@ -64,15 +64,25 @@ func TestGenericToolParamSummaryShowsSafeValues(t *testing.T) {
 }
 
 func TestGenericToolParamSummaryRedactsSensitiveValues(t *testing.T) {
-	keys, vals := parseToolArgs(`{"query":"search","api_key":"secret-value","filters":{"language":"go"},"urls":["a","b"]}`)
+	keys, vals := parseToolArgs(`{"query":"search","apiKey":"secret-value","clientSecret":"client-secret","privateKey":"private-key","filters":{"language":"go"},"urls":["a","b"]}`)
 	got := formatToolHeaderParamsWithParsed("mcp_any_tool", keys, vals)
-	for _, want := range []string{"query=search", "api_key=••••••", "filters={1 fields}", "urls=[2 items]"} {
+	for _, want := range []string{"query=search", "apiKey=••••••", "clientSecret=••••••", "privateKey=••••••", "filters={1 fields}", "urls=[2 items]"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("summary = %q, want %q", got, want)
 		}
 	}
-	if strings.Contains(got, "secret-value") {
-		t.Fatalf("summary exposed sensitive value: %q", got)
+	for _, leaked := range []string{"secret-value", "client-secret", "private-key"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("summary exposed sensitive value: %q", got)
+		}
+	}
+}
+
+func TestGenericToolParamSummarySanitizesParameterNames(t *testing.T) {
+	keys, vals := parseToolArgs("{\"query\\n\":\"search\"}")
+	got := formatToolHeaderParamsWithParsed("mcp_any_tool", keys, vals)
+	if strings.ContainsAny(got, "\r\n") {
+		t.Fatalf("summary contains raw control characters: %q", got)
 	}
 }
 
