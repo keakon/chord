@@ -414,12 +414,17 @@ type MainAgent struct {
 	lastPreparedLLMRequestShape   []stableReductionMessageShape
 	lastPreparedLLMRequestPrefix  []message.Message
 	lastPreparedLLMReducedIndices []bool
-	lastPreparedLLMNextReviewAge  []int
-	lastPreparedLLMToolResults    int
-	lastPreparedReductionPolicy   contextReductionPolicy
-	lastPreparedReductionStats    ContextReductionStats
-	lastPreparedLLMToolDefHash    [sha256.Size]byte
-	lastPreparedStablePrefixLen   int
+	// lastPreparedLLMDiscardedInputs is session-scoped recall evidence: input
+	// key -> ToolCallID of the call whose output was summarized away,
+	// excluding repeated-collapse. Dropped with the reduction caches on
+	// restore or model switch.
+	lastPreparedLLMDiscardedInputs map[string]string
+	lastPreparedLLMNextReviewAge   []int
+	lastPreparedLLMToolResults     int
+	lastPreparedReductionPolicy    contextReductionPolicy
+	lastPreparedReductionStats     ContextReductionStats
+	lastPreparedLLMToolDefHash     [sha256.Size]byte
+	lastPreparedStablePrefixLen    int
 	// lastPreparedLLMShapeSource holds shallow struct copies of the original
 	// messages lastPreparedLLMRequestShape was computed from. It lets shape
 	// compatibility checks use direct field equality (O(1) per unchanged
@@ -432,6 +437,15 @@ type MainAgent struct {
 	contextSurfaceRefreshAllowed atomic.Bool
 	lastLLMRequestModelRef       string
 	llmModelRunLength            int
+
+	// recalledReductionInputs remembers tool-input keys (normalized tool + raw args)
+	// whose reduced output the model later re-fetched with an identical call —
+	// direct evidence that reduction discarded content the model still needed.
+	// The newest output of a recalled input is exempt from reduction for the
+	// rest of the session. Derived, in-memory, session-scoped state: cleared
+	// with the reduction caches and simply absent after restore. Guarded by
+	// loopReductionMu.
+	recalledReductionInputs map[string]struct{}
 
 	// cacheExpectMu protects per-ref request fingerprints used to attribute
 	// prompt-cache misses (chord-side prefix mutation vs provider-side loss).

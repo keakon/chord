@@ -64,6 +64,7 @@ const (
 	contextReductionSkipFrozenReduced  = "frozen_reduced"
 	contextReductionSkipDeferredCache  = "deferred_for_cache"
 	contextReductionSkipDeferredReview = "deferred_for_review"
+	contextReductionSkipRecalledInput  = "recalled_input_protect"
 
 	contextReductionOverCompressionReread                = "reread_after_reduction"
 	contextReductionOverCompressionRereadSameRevision    = "reread_same_revision_after_reduction"

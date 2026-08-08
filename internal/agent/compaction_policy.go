@@ -157,7 +157,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 						a.setContextReductionStats(stats)
 						if rememberPrepared {
 							a.setPreparedStablePrefixLen(len(previous.Messages))
-							a.rememberPreparedLLMRequest(a.currentTurnID(), messages, reused, previous.NextReviewAge, previous.ToolResults, previous.Policy)
+							a.rememberPreparedLLMRequest(a.currentTurnID(), messages, reused, nil, previous.NextReviewAge, previous.ToolResults, previous.Policy)
 						}
 						return reused
 					}
@@ -182,7 +182,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					a.setPreparedStablePrefixLen(n)
 				}
 				previous, _ := a.stableReductionSurfaceCandidate(a.currentTurnID())
-				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, reused, previous.NextReviewAge, previous.ToolResults, previous.Policy)
+				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, reused, nil, previous.NextReviewAge, previous.ToolResults, previous.Policy)
 				return reused
 			}
 		}
@@ -272,8 +272,30 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		validity.Superseded = false
 		readValidityByIndex[index] = validity
 	}
-	reducedInputs := make(map[string]struct{})
-	reducedReadRevisions := make(map[string]string)
+	// discardedInputs is the recall-protection evidence base: input key ->
+	// ToolCallID of the call whose output was actually summarized away on this
+	// or an earlier request. Repeated-collapse never registers — it always
+	// leaves a fresher full copy in context, so a re-issue after it is model
+	// redundancy, not proof that reduction dropped needed content. The
+	// ToolCallID distinguishes a genuine re-issue (same input, different call)
+	// from the discarded message itself being re-evaluated after a surface
+	// invalidation.
+	discardedInputs := a.lastPreparedDiscardedInputsSnapshot()
+	discardedReadRevisions := make(map[string]string)
+	// recalledInputs carries the session's recall-protection set into this pass;
+	// registrations during the pass update both the local view (so later
+	// messages in the same pass see them) and the durable per-agent set.
+	recalledInputs := a.recalledReductionInputsSnapshot()
+	noteRecalledInput := func(key string) {
+		if key == "" {
+			return
+		}
+		if recalledInputs == nil {
+			recalledInputs = make(map[string]struct{})
+		}
+		recalledInputs[key] = struct{}{}
+		a.noteRecalledReductionInput(key)
+	}
 
 	// Pass 1: collect reduction proposals without mutating anything. Proposals
 	// inside the frozen boundary rewrite bytes the provider already cached, so
@@ -289,22 +311,22 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	}
 	var proposals []reductionProposal
 	semanticRefresh := false
-	// Seed with the frozen prefix's already-reduced messages so a re-read of
-	// content that was reduced on an earlier request still counts as
-	// over-compression. Only proposals guaranteed to apply this request (tail,
-	// or any position when incremental is off) register during collection:
-	// boundary proposals may be deferred below, and content the model still
-	// sees in full must not count as over-compressed. Flushed boundary
-	// reductions join the frozen seed on the next request instead.
+	// Recover read revisions for discarded reads still present in the frozen
+	// prefix so the reread-same-revision over-compression split keeps working
+	// across requests. Key membership itself travels via DiscardedInputs: the
+	// frozen indices alone cannot distinguish a summarized output from a
+	// repeated-collapse, which must not count as discarded.
 	for i := range prepared {
 		if incrementalEnabled && frozenReducedIndices != nil && i < len(frozenReducedIndices) && frozenReducedIndices[i] && prepared[i].Role == message.RoleTool {
 			meta := callMeta[prepared[i].ToolCallID]
 			toolName := toolname.Normalize(meta.Name)
 			key := contextReductionToolInputKey(toolName, meta.Args)
-			reducedInputs[key] = struct{}{}
+			if _, discarded := discardedInputs[key]; !discarded {
+				continue
+			}
 			if toolName == tools.NameRead {
 				if revision := reductionReadRevision(&meta, prepared[i].FileState); revision != "" {
-					reducedReadRevisions[key] = revision
+					discardedReadRevisions[key] = revision
 				}
 			}
 		}
@@ -395,6 +417,22 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			ReadInvalidated: validity.Invalidated,
 			ReadSuperseded:  validity.Superseded,
 		}
+		inputKey := contextReductionToolInputKey(toolName, meta.Args)
+		// Recall protection applies to content-fetch shapes only (reads, web
+		// fetches, searches, read-only shell): re-running a mutating command
+		// seeks fresh state, not lost content. Older duplicates keep collapsing
+		// to repeated markers, and a read known to be stale keeps its stale
+		// marker — that guidance outweighs retention.
+		staleRead := toolName == tools.NameRead && (validity.Invalidated || validity.Superseded)
+		contentFetch := !repeated[i] && !staleRead &&
+			(contextReductionIsReadLike(toolName) || ctx.ShellReadOnly || (toolName != tools.NameShell && looksLikeSearchResult(ctx)))
+		if contentFetch {
+			if _, recalled := recalledInputs[inputKey]; recalled {
+				noteSkip(contextReductionSkipRecalledInput)
+				nextReviewAge[i] = 0
+				continue
+			}
+		}
 		class := classifyRequestReductionToolOutput(ctx)
 		if class == requestReductionNone {
 			nextReviewAge[i] = nextContextReductionReviewAge(ctx)
@@ -403,12 +441,14 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			} else if len(prepared[i].Content) > policy.StaleOutputBytes {
 				noteSkip(contextReductionSkipLargeUnreduced)
 			}
-			inputKey := contextReductionToolInputKey(toolName, meta.Args)
-			if _, reducedBefore := reducedInputs[inputKey]; reducedBefore {
+			if discardedID, discardedBefore := discardedInputs[inputKey]; discardedBefore && discardedID != prepared[i].ToolCallID {
+				if contentFetch {
+					noteRecalledInput(inputKey)
+				}
 				if contextReductionIsReadLike(toolName) {
 					noteOverCompression(contextReductionOverCompressionReread)
 					if toolName == tools.NameRead {
-						previousRevision := reducedReadRevisions[inputKey]
+						previousRevision := discardedReadRevisions[inputKey]
 						currentRevision := reductionReadRevision(&meta, prepared[i].FileState)
 						if previousRevision != "" && currentRevision != "" {
 							if previousRevision == currentRevision {
@@ -424,6 +464,18 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			}
 			continue
 		}
+		// A second live copy of a content-fetch input whose earlier output was
+		// genuinely discarded is about to be reduced too: the model re-fetched
+		// content that reduction had dropped. Keep the newest copy instead and
+		// remember the input for the rest of the session.
+		if contentFetch {
+			if discardedID, dup := discardedInputs[inputKey]; dup && discardedID != prepared[i].ToolCallID {
+				noteRecalledInput(inputKey)
+				noteSkip(contextReductionSkipRecalledInput)
+				nextReviewAge[i] = 0
+				continue
+			}
+		}
 		nextReviewAge[i] = 0
 		reduced, rule, ok := reduceRequestToolOutput(class, ctx)
 		if !ok {
@@ -436,12 +488,11 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			rule:     rule,
 			reduced:  reduced,
 		})
-		if !incrementalEnabled || i >= frozenBoundary {
-			inputKey := contextReductionToolInputKey(toolName, meta.Args)
-			reducedInputs[inputKey] = struct{}{}
+		if class != requestReductionRepeated && (!incrementalEnabled || i >= frozenBoundary) {
+			discardedInputs[inputKey] = prepared[i].ToolCallID
 			if toolName == tools.NameRead {
 				if revision := reductionReadRevision(&meta, prepared[i].FileState); revision != "" {
-					reducedReadRevisions[inputKey] = revision
+					discardedReadRevisions[inputKey] = revision
 				}
 			}
 		}
@@ -486,9 +537,9 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			noteSkip(contextReductionSkipDeferredCache)
 			continue
 		}
-		if incrementalEnabled && p.index < frozenBoundary {
+		if p.class != requestReductionRepeated && incrementalEnabled && p.index < frozenBoundary {
 			meta := callMeta[prepared[p.index].ToolCallID]
-			reducedInputs[contextReductionToolInputKey(p.toolName, meta.Args)] = struct{}{}
+			discardedInputs[contextReductionToolInputKey(p.toolName, meta.Args)] = prepared[p.index].ToolCallID
 		}
 		original := prepared[p.index].Content
 		prepared[p.index].Content = p.reduced
@@ -518,7 +569,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			a.setCurrentRequestSurface(&preserved, messages)
 			a.setContextReductionStats(preserved)
 			if rememberPrepared {
-				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, messages, nextReviewAge, toolResults, policy)
+				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, messages, nil, nextReviewAge, toolResults, policy)
 			}
 			return messages
 		}
@@ -556,7 +607,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		a.fillReductionModelContinuity(&stats)
 		a.setContextReductionStats(stats)
 		if rememberPrepared {
-			a.rememberPreparedLLMRequest(a.currentTurnID(), messages, prepared, nextReviewAge, toolResults, policy)
+			a.rememberPreparedLLMRequest(a.currentTurnID(), messages, prepared, discardedInputs, nextReviewAge, toolResults, policy)
 		}
 	}
 	return prepared
@@ -869,7 +920,7 @@ func (a *MainAgent) modelChangedSinceLastPreparedRequest() bool {
 	return current != a.lastLLMRequestModelRef
 }
 
-func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, original, prepared []message.Message, nextReviewAge []int, toolResults int, policy contextReductionPolicy) {
+func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, original, prepared []message.Message, discardedInputs map[string]string, nextReviewAge []int, toolResults int, policy contextReductionPolicy) {
 	if a == nil || turnID == 0 {
 		return
 	}
@@ -883,6 +934,9 @@ func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, original, prepared
 	a.lastPreparedLLMShapeSource = source
 	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(prepared)
 	a.lastPreparedLLMReducedIndices = reducedIndices
+	if discardedInputs != nil {
+		a.lastPreparedLLMDiscardedInputs = maps.Clone(discardedInputs)
+	}
 	a.lastPreparedLLMNextReviewAge = append([]int(nil), nextReviewAge...)
 	a.lastPreparedLLMToolResults = toolResults
 	a.lastPreparedReductionPolicy = policy
@@ -1592,6 +1646,65 @@ func contextReductionToolInputKey(toolName, args string) string {
 	return toolname.Normalize(toolName) + "\x00" + strings.TrimSpace(args)
 }
 
+// reductionRecallProtectMaxKeys bounds the per-session recall-protection set so
+// a pathological session cannot grow it without limit. Beyond the cap new
+// recall evidence is dropped; existing protections persist.
+const reductionRecallProtectMaxKeys = 512
+
+// noteRecalledReductionInput records that the output of this tool input was
+// reduced on an earlier request and the model re-issued the identical call —
+// direct evidence that the reduction discarded content the model still needed.
+// The newest output of a recalled input is exempt from reduction for the rest
+// of the session.
+func (a *MainAgent) noteRecalledReductionInput(key string) {
+	if a == nil || key == "" {
+		return
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	if a.recalledReductionInputs == nil {
+		a.recalledReductionInputs = make(map[string]struct{})
+	}
+	if len(a.recalledReductionInputs) >= reductionRecallProtectMaxKeys {
+		if _, ok := a.recalledReductionInputs[key]; !ok {
+			return
+		}
+	}
+	a.recalledReductionInputs[key] = struct{}{}
+}
+
+// lastPreparedDiscardedInputsSnapshot clones the session's discarded-input
+// evidence set for a reduction pass. The set is monotonic session state —
+// input keys whose newest output was genuinely summarized away (never
+// repeated-collapse, which always leaves a fresher full copy in context) —
+// and is dropped with the visible reduction caches on restore or model switch.
+func (a *MainAgent) lastPreparedDiscardedInputsSnapshot() map[string]string {
+	out := make(map[string]string)
+	if a == nil {
+		return out
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	maps.Copy(out, a.lastPreparedLLMDiscardedInputs)
+	return out
+}
+
+func (a *MainAgent) recalledReductionInputsSnapshot() map[string]struct{} {
+	if a == nil {
+		return nil
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	if len(a.recalledReductionInputs) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(a.recalledReductionInputs))
+	for key := range a.recalledReductionInputs {
+		out[key] = struct{}{}
+	}
+	return out
+}
+
 func highLevelContextReductionStats(original, reduced []message.Message) ContextReductionStats {
 	stats := ContextReductionStats{
 		TokensBefore: ctxmgr.EstimateMessagesTokens(original),
@@ -1775,12 +1888,17 @@ func (a *MainAgent) clearLoopReductionCache(clearVisibleStats bool) {
 		a.lastPreparedLLMShapeSource = nil
 		a.lastPreparedLLMRequestPrefix = nil
 		a.lastPreparedLLMReducedIndices = nil
+		a.lastPreparedLLMDiscardedInputs = nil
 		a.lastPreparedLLMNextReviewAge = nil
 		a.lastPreparedLLMToolResults = 0
 		a.lastPreparedReductionPolicy = contextReductionPolicy{}
 		a.lastPreparedLLMToolDefHash = [sha256.Size]byte{}
 		a.lastPreparedReductionStats = ContextReductionStats{}
 		a.contextReductionStats = ContextReductionStats{}
+		// Recall protection derives from the same conversation the caches
+		// describe; dropping it alongside them is conservative — a stale entry
+		// could only over-protect, never mis-reduce, but hygiene wins.
+		a.recalledReductionInputs = nil
 		// Read-only shell verdicts are immutable per ToolCallID; dropping them
 		// here only bounds the map across restores and model switches.
 		a.shellReadOnlyClass.mu.Lock()
@@ -1890,6 +2008,8 @@ func (a *MainAgent) freezeLoopReductionPrefixForCurrentTurn() {
 		a.lastPreparedLLMShapeSource = nil
 		a.lastPreparedLLMRequestPrefix = nil
 		a.lastPreparedLLMReducedIndices = nil
+		// lastPreparedLLMDiscardedInputs survives: it is session-scoped recall
+		// evidence, not a property of the invalidated request snapshot.
 		a.lastPreparedLLMToolDefHash = [sha256.Size]byte{}
 		a.lastPreparedReductionStats = ContextReductionStats{}
 		return

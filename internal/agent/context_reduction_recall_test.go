@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -220,6 +221,111 @@ func TestCanonicalRepeatedToolCallArgsPreservesLargeIntegerIdentity(t *testing.T
 	right := canonicalRepeatedToolCallArgs(json.RawMessage(`{"limit":9007199254740993}`))
 	if left == right {
 		t.Fatalf("distinct JSON integers collapsed to the same input key: %q", left)
+	}
+}
+
+func TestPrepareMessagesForLLMRecallProtectsNewestOutput(t *testing.T) {
+	a := &MainAgent{parentCtx: context.Background()}
+	a.newTurn()
+	args := json.RawMessage(`{"pattern":"callSite","paths":["internal"]}`)
+	output := bigSearchOutput(80, 2)
+	if len(output) <= defaultContextReductionPolicy().ReadLikeOutputBytes {
+		t.Fatal("fixture must exceed the read-like byte threshold")
+	}
+
+	// Pass 1: the only copy ages out and is genuinely summarized away. This is
+	// the discard the later re-issue proves was premature.
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameGrep, Args: args}}},
+		{Role: "tool", ToolCallID: "tc1", Content: output},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content == output {
+		t.Fatalf("fixture must be summarized on the first pass, got full output")
+	}
+
+	// Pass 2: the model re-issues the identical call. The discarded-input
+	// evidence must survive across passes and protect the newest output.
+	msgs = append(msgs,
+		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameGrep, Args: args}}},
+		message.Message{Role: "tool", ToolCallID: "tc2", Content: output},
+		message.Message{Role: "user", Content: "u4"},
+		message.Message{Role: "user", Content: "u5"},
+	)
+	prepared = a.prepareMessagesForLLM(msgs)
+	if prepared[6].Content != output {
+		t.Fatalf("re-fetched output must stay unreduced, got %q", compactTextSnippet(prepared[6].Content, 120))
+	}
+	stats := a.GetContextReductionStats()
+	if stats.SkippedByReason[contextReductionSkipRecalledInput] == 0 {
+		t.Fatalf("expected recalled-input skip to be recorded: %v", stats.SkippedByReason)
+	}
+	if len(a.recalledReductionInputsSnapshot()) != 1 {
+		t.Fatalf("expected one recalled input key, got %v", a.recalledReductionInputsSnapshot())
+	}
+
+	// The protection is durable session state: on a later, older request the
+	// newest copy still survives while an ordinary search of that age would
+	// have been reduced.
+	msgs = append(msgs, message.Message{Role: "user", Content: "u6"}, message.Message{Role: "user", Content: "u7"})
+	prepared = a.prepareMessagesForLLM(msgs)
+	if prepared[6].Content != output {
+		t.Fatalf("recalled input lost protection on a later request: %q", compactTextSnippet(prepared[6].Content, 120))
+	}
+}
+
+func TestPrepareMessagesForLLMRepeatedCollapseIsNotRecallEvidence(t *testing.T) {
+	a := &MainAgent{parentCtx: context.Background()}
+	a.newTurn()
+	args := json.RawMessage(`{"pattern":"callSite","paths":["internal"]}`)
+	output := bigSearchOutput(80, 2)
+	// Two identical live copies in one pass: the older collapses to a repeated
+	// marker, which leaves the fresher full copy in context — nothing was
+	// discarded, so the redundant re-issue must not mint recall protection.
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameGrep, Args: args}}},
+		{Role: "tool", ToolCallID: "tc1", Content: output},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameGrep, Args: args}}},
+		{Role: "tool", ToolCallID: "tc2", Content: output},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Repeated") {
+		t.Fatalf("older duplicate should collapse to the repeated marker: %q", compactTextSnippet(prepared[2].Content, 120))
+	}
+	if prepared[4].Content == output {
+		t.Fatal("newest copy must follow the ordinary rules, not gain recall protection from a repeated collapse")
+	}
+	if got := a.recalledReductionInputsSnapshot(); len(got) != 0 {
+		t.Fatalf("model redundancy must not register recall evidence, got %v", got)
+	}
+}
+
+func TestPrepareMessagesForLLMMutatingShellGetsNoRecallProtection(t *testing.T) {
+	a := &MainAgent{}
+	args := json.RawMessage(`{"command":"go test ./..."}`)
+	output := strings.Repeat("internal/agent/file.go:10: callSite()\n", 160)
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: args}}},
+		{Role: "tool", ToolCallID: "tc1", Content: output},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameShell, Args: args}}},
+		{Role: "tool", ToolCallID: "tc2", Content: output},
+		{Role: "user", Content: "u2"},
+		{Role: "user", Content: "u3"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[4].Content == output || !strings.Contains(prepared[4].Content, "summarized") {
+		t.Fatalf("mutating shell rerun should still reduce, got %q", compactTextSnippet(prepared[4].Content, 120))
+	}
+	if recalled := a.recalledReductionInputsSnapshot(); len(recalled) != 0 {
+		t.Fatalf("mutating shell rerun must not enter recall protection: %v", recalled)
 	}
 }
 

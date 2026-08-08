@@ -2342,18 +2342,34 @@ func TestPrepareMessagesForLLM_RecordsSkipAndOverCompressionStats(t *testing.T) 
 	readContent := "READ_RESULT lines=1-120 total=120\n" + strings.Repeat("line content for read result\n", 120)
 	freshHighRisk := "panic: boom\n" + strings.Repeat("stack frame\n", 40)
 	largeFreshUnmatched := strings.Repeat("fresh unmatched output\n", 20)
+	a.newTurn()
+
+	// Pass 1: the only copy of the fetch ages out and is genuinely summarized
+	// away. A same-pass duplicate would collapse as repeated instead, which is
+	// not discard evidence — the reread signal is inherently cross-request.
+	fetchArgs := json.RawMessage(`{"url":"https://example.com/spec"}`)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: fetchArgs}}},
 		{Role: "tool", ToolCallID: "tc1", Content: readContent},
 		{Role: "user", Content: "u2"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
-		{Role: "tool", ToolCallID: "tc2", Content: readContent},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc3", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
-		{Role: "tool", ToolCallID: "tc3", Content: freshHighRisk},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc4", Name: tools.NameShell, Args: json.RawMessage(`{"command":"printf lots"}`)}}},
-		{Role: "tool", ToolCallID: "tc4", Content: largeFreshUnmatched},
 	}
+	if prepared := a.prepareMessagesForLLM(msgs); prepared[2].Content == readContent {
+		t.Fatal("fixture fetch must be summarized on the first pass")
+	}
+
+	// Pass 2: fresh high-risk and large-but-unmatched outputs feed the
+	// skip-reason stats, then the model re-fetches the same URL. The re-fetch
+	// is the newest batch, so the fresh copy is kept by age and the discarded
+	// evidence surfaces as the reread over-compression signal.
+	msgs = append(msgs,
+		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc3", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
+		message.Message{Role: "tool", ToolCallID: "tc3", Content: freshHighRisk},
+		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc4", Name: tools.NameShell, Args: json.RawMessage(`{"command":"printf lots"}`)}}},
+		message.Message{Role: "tool", ToolCallID: "tc4", Content: largeFreshUnmatched},
+		message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameWebFetch, Args: fetchArgs}}},
+		message.Message{Role: "tool", ToolCallID: "tc2", Content: readContent},
+	)
 
 	a.prepareMessagesForLLM(msgs)
 	stats := a.GetContextReductionStats()
@@ -2889,7 +2905,7 @@ func TestPrepareMessagesForLLM_LoopReusesFrozenReductionPrefix(t *testing.T) {
 	if firstStats.Messages != 1 || firstStats.Bytes == 0 {
 		t.Fatalf("expected initial reduction stats, got %+v", firstStats)
 	}
-	a.rememberPreparedLLMRequest(a.currentTurnID(), msgs, firstPrepared, nil, countToolResults(msgs), a.contextReductionPolicy())
+	a.rememberPreparedLLMRequest(a.currentTurnID(), msgs, firstPrepared, nil, nil, countToolResults(msgs), a.contextReductionPolicy())
 	a.rateLimitSnaps["codex"].Secondary.UsedPct = 100
 	a.EnableLoopMode("finish current task")
 	a.freezeLoopReductionPrefixForCurrentTurn()
@@ -3040,7 +3056,7 @@ func TestPrepareMessagesForLLM_LowQuotaCodexReusesFrozenReductionPrefixWithoutLo
 	if !isShellSuccessSummary(firstPrepared[2].Content) {
 		t.Fatalf("expected initial request to prune old shell output, got %q", firstPrepared[2].Content)
 	}
-	a.rememberPreparedLLMRequest(a.currentTurnID(), msgs, firstPrepared, nil, countToolResults(msgs), a.contextReductionPolicy())
+	a.rememberPreparedLLMRequest(a.currentTurnID(), msgs, firstPrepared, nil, nil, countToolResults(msgs), a.contextReductionPolicy())
 
 	a.rateLimitSnaps["codex"].Secondary.UsedPct = 100
 	continuationMsgs := append(append([]message.Message(nil), msgs...),
@@ -3072,7 +3088,7 @@ func TestSetIdleAndDrainPendingKeepsVisibleContextReductionStats(t *testing.T) {
 	a.newTurn()
 	want := ContextReductionStats{Messages: 2, Bytes: 2048, TokensBefore: 1000, TokensAfter: 700, TokensSaved: 300}
 	a.setContextReductionStats(want)
-	a.rememberPreparedLLMRequest(a.currentTurnID(), []message.Message{{Role: "user", Content: "u"}}, []message.Message{{Role: "user", Content: "u"}}, nil, 0, a.contextReductionPolicy())
+	a.rememberPreparedLLMRequest(a.currentTurnID(), []message.Message{{Role: "user", Content: "u"}}, []message.Message{{Role: "user", Content: "u"}}, nil, nil, 0, a.contextReductionPolicy())
 
 	a.setIdleAndDrainPending()
 
