@@ -318,7 +318,13 @@ func isReasoningReplayRejection(err error) bool {
 	if !ok || apiErr == nil {
 		return false
 	}
-	if apiErr.StatusCode != 400 && apiErr.StatusCode != 422 && !apiErr.isStreamEvent() {
+	// Replay rejections surface as HTTP 400/422 responses or as stream events
+	// that carry no HTTP status at all. A stream event that does carry a
+	// status (WebSocket transports preserve theirs) is classified by that
+	// status like any HTTP response: a 5xx/429 whose text happens to mention
+	// reasoning must not be treated as an explicit replay rejection.
+	if apiErr.StatusCode != 400 && apiErr.StatusCode != 422 &&
+		!(apiErr.isStreamEvent() && apiErr.StatusCode == 0) {
 		return false
 	}
 	// OpenAI-compatible chat gateways and Anthropic Messages reject a
