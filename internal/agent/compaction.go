@@ -27,6 +27,7 @@ const (
 	compactConfirmAgeTurns         = 2
 	compactErrorAgeTurns           = 3
 	compactBashSuccessAgeTurns     = 1
+	compactShellReadOnlyAgeTurns   = 3
 	compactReadLikeAgeTurns        = 1
 	compactStaleAgeTurns           = 3
 	compactHighRiskProtectAgeTurns = 4

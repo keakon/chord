@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -32,6 +33,7 @@ func TestDefaultConfigContextReductionThresholds(t *testing.T) {
 		ReadLikeAgeTurns:        1,
 		StaleAgeTurns:           3,
 		ShellSuccessBytes:       3000,
+		ShellReadOnlyAgeTurns:   3,
 		ReadLikeOutputBytes:     3000,
 		StaleOutputBytes:        1500,
 		WrapUpGraceRequests:     1,
@@ -41,6 +43,34 @@ func TestDefaultConfigContextReductionThresholds(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("DefaultConfig().Context.Reduction = %+v, want %+v", got, want)
+	}
+}
+
+// TestContextReductionKnownKeysCoverAllYamlTags uses reflection to verify that
+// contextReductionKnownKeys stays in sync with the yaml tags of
+// ContextReductionConfig. The custom UnmarshalYAML rejects keys missing from
+// that map, so a field added without a map entry would break user configs at
+// startup, and a stale map entry would admit a key no field consumes.
+func TestContextReductionKnownKeysCoverAllYamlTags(t *testing.T) {
+	tags := map[string]bool{}
+	for f := range reflect.TypeFor[ContextReductionConfig]().Fields() {
+		tag := f.Tag.Get("yaml")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		key, _, _ := strings.Cut(tag, ",")
+		if key == "" {
+			continue
+		}
+		tags[key] = true
+		if !contextReductionKnownKeys[key] {
+			t.Errorf("ContextReductionConfig yaml key %q is missing from contextReductionKnownKeys; UnmarshalYAML would reject it as an unknown field", key)
+		}
+	}
+	for key := range contextReductionKnownKeys {
+		if !tags[key] {
+			t.Errorf("contextReductionKnownKeys entry %q matches no ContextReductionConfig yaml tag; remove the stale key", key)
+		}
 	}
 }
 

@@ -90,6 +90,7 @@ type contextReductionPolicy struct {
 	HighRiskProtectAgeTurns int
 	DiffProtectAgeTurns     int
 	ShellSuccessAgeTurns    int
+	ShellReadOnlyAgeTurns   int
 	ReadLikeAgeTurns        int
 	StaleAgeTurns           int
 	ShellSuccessBytes       int
@@ -107,6 +108,7 @@ func defaultContextReductionPolicy() contextReductionPolicy {
 		HighRiskProtectAgeTurns: compactHighRiskProtectAgeTurns,
 		DiffProtectAgeTurns:     compactDiffProtectAgeTurns,
 		ShellSuccessAgeTurns:    compactBashSuccessAgeTurns,
+		ShellReadOnlyAgeTurns:   compactShellReadOnlyAgeTurns,
 		ReadLikeAgeTurns:        compactReadLikeAgeTurns,
 		StaleAgeTurns:           compactStaleAgeTurns,
 		ShellSuccessBytes:       compactBashSuccessBytes,
@@ -150,6 +152,9 @@ func (p *contextReductionPolicy) applyConfig(cfg config.ContextReductionConfig) 
 	}
 	if cfg.ShellSuccessAgeTurns > 0 {
 		p.ShellSuccessAgeTurns = cfg.ShellSuccessAgeTurns
+	}
+	if cfg.ShellReadOnlyAgeTurns > 0 {
+		p.ShellReadOnlyAgeTurns = cfg.ShellReadOnlyAgeTurns
 	}
 	if cfg.ReadLikeAgeTurns > 0 {
 		p.ReadLikeAgeTurns = cfg.ReadLikeAgeTurns
@@ -274,6 +279,11 @@ type requestReductionContext struct {
 	Policy      contextReductionPolicy
 	Repeated    bool
 	ToolResults int
+	// ShellReadOnly marks a shell result whose command was classified read-only
+	// (cat, ls, git log, ...). Such output is the shell-based analogue of a read
+	// and gets a longer protection age: session data shows identical re-calls
+	// arrive with a median gap of ~3 request batches.
+	ShellReadOnly bool
 	// ReadInvalidated / ReadSuperseded carry the conversation-level validity of
 	// a read output (see analyzeReadValidity).
 	ReadInvalidated bool
@@ -309,6 +319,12 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 	if ctx.Age >= ctx.Policy.ErrorAgeTurns && failed {
 		return requestReductionToolError
 	}
+	// Read-only shell output (cat, ls, git log, ...) is the shell-based analogue
+	// of a read: unlike the read tool it has no validity tracking, so it relies
+	// on a longer protection age before any size-based rule may reduce it.
+	if ctx.ShellReadOnly && ctx.Age < ctx.Policy.ShellReadOnlyAgeTurns {
+		return requestReductionNone
+	}
 	if ctx.Age < ctx.Policy.DiffProtectAgeTurns && looksLikeDiffOrPatch(ctx.Content) {
 		return requestReductionNone
 	}
@@ -331,6 +347,13 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 			return requestReductionSearch
 		}
 		if looksLikeStructuredJSON(ctx.Content) {
+			// The JSON skeleton (top-level keys / first items) is the lossiest
+			// summary shape, and the model usually consumes values over several
+			// requests, so a JSON document waits for the stale age instead of
+			// the shell age. NDJSON log streams get no such retention.
+			if !looksLikeJSONLinesLog(ctx.Content) && ctx.Age < ctx.Policy.StaleAgeTurns {
+				return requestReductionNone
+			}
 			return requestReductionJSON
 		}
 		if looksLikeNumberedSourceOutput(ctx.Content) {
@@ -345,10 +368,16 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		switch {
 		case looksLikeSearchResult(ctx):
 			return requestReductionSearch
-		case looksLikeStructuredJSON(ctx.Content):
-			return requestReductionJSON
+		// Read-like tools take precedence over the JSON shape: a stale read of
+		// a JSON file must keep its READ_RESULT stale/superseded marker and a
+		// web fetch must keep its URL, rather than collapsing to a key list.
 		case contextReductionIsReadLike(ctx.ToolName):
 			return requestReductionReadLike
+		case looksLikeStructuredJSON(ctx.Content):
+			if !looksLikeJSONLinesLog(ctx.Content) && ctx.Age < ctx.Policy.StaleAgeTurns {
+				return requestReductionNone
+			}
+			return requestReductionJSON
 		case looksLikeNumberedSourceOutput(ctx.Content):
 			return requestReductionNumberedSrc
 		case looksLikeBuildLikeLog(ctx):
@@ -384,6 +413,7 @@ func nextContextReductionReviewAge(ctx requestReductionContext) int {
 		ctx.Policy.ErrorAgeTurns,
 		ctx.Policy.ConfirmAgeTurns,
 		ctx.Policy.ShellSuccessAgeTurns,
+		ctx.Policy.ShellReadOnlyAgeTurns,
 		ctx.Policy.ReadLikeAgeTurns,
 		ctx.Policy.StaleAgeTurns,
 		ctx.Policy.HighRiskProtectAgeTurns,
@@ -751,6 +781,27 @@ func looksLikeStructuredJSON(content string) bool {
 		return false
 	}
 	return (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) || (strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]"))
+}
+
+// looksLikeJSONLinesLog reports NDJSON-shaped output (each early line its own
+// JSON object), e.g. `go test -json` or structured build logs. That is log
+// streaming, not a JSON document the model reads values from over several
+// requests, so it earns no extended JSON retention.
+func looksLikeJSONLinesLog(content string) bool {
+	lines := 0
+	jsonLines := 0
+	forEachLine(content, func(line string) bool {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			return true
+		}
+		lines++
+		if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+			jsonLines++
+		}
+		return lines < 3
+	})
+	return lines >= 2 && jsonLines == lines
 }
 
 func looksLikeBuildLikeLog(ctx requestReductionContext) bool {

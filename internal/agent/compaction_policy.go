@@ -391,6 +391,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			Policy:          policy,
 			Repeated:        repeated[i],
 			ToolResults:     toolResults,
+			ShellReadOnly:   toolName == tools.NameShell && a.shellCommandReadOnly(prepared[i].ToolCallID, meta.Args),
 			ReadInvalidated: validity.Invalidated,
 			ReadSuperseded:  validity.Superseded,
 		}
@@ -586,6 +587,42 @@ func reductionReadRevision(meta *toolCallMeta, state *message.ToolFileState) str
 	return ""
 }
 
+// shellReadOnlyClassMemo caches the read-only classification of shell calls
+// by ToolCallID. A completed call's args never change and the read-only
+// allowlist is static, so the verdict is immutable — while the reduction pass
+// re-evaluates every shell result still in context on each LLM request.
+type shellReadOnlyClassMemo struct {
+	mu       sync.Mutex
+	verdicts map[string]bool
+}
+
+// shellCommandReadOnly reports whether a shell call's command line is on the
+// read-only allowlist, memoized per ToolCallID so the JSON args are parsed
+// once per call instead of once per LLM request.
+func (a *MainAgent) shellCommandReadOnly(toolCallID string, args string) bool {
+	if a == nil {
+		return false
+	}
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" {
+		return tools.ConcurrencyClassForTool(a.tools, tools.NameShell, json.RawMessage(args)) == tools.ToolConcurrencyClassReadOnly
+	}
+	a.shellReadOnlyClass.mu.Lock()
+	if verdict, ok := a.shellReadOnlyClass.verdicts[toolCallID]; ok {
+		a.shellReadOnlyClass.mu.Unlock()
+		return verdict
+	}
+	a.shellReadOnlyClass.mu.Unlock()
+	verdict := tools.ConcurrencyClassForTool(a.tools, tools.NameShell, json.RawMessage(args)) == tools.ToolConcurrencyClassReadOnly
+	a.shellReadOnlyClass.mu.Lock()
+	if a.shellReadOnlyClass.verdicts == nil {
+		a.shellReadOnlyClass.verdicts = make(map[string]bool)
+	}
+	a.shellReadOnlyClass.verdicts[toolCallID] = verdict
+	a.shellReadOnlyClass.mu.Unlock()
+	return verdict
+}
+
 // shellReadInvalidationMemo remembers, per mutating shell result, which
 // (path, expected-hash) pairs were already verified against the disk. It is
 // keyed by the shell's ToolCallID: a completed command's side effects are
@@ -614,7 +651,7 @@ func (a *MainAgent) externallyInvalidatedReadsAfterMutatingShell(messages []mess
 			continue
 		}
 		meta := callMeta[msg.ToolCallID]
-		if toolname.Normalize(meta.Name) == tools.NameShell && tools.ConcurrencyClassForTool(a.tools, tools.NameShell, json.RawMessage(meta.Args)) != tools.ToolConcurrencyClassReadOnly {
+		if toolname.Normalize(meta.Name) == tools.NameShell && !a.shellCommandReadOnly(msg.ToolCallID, meta.Args) {
 			mutatingShell = true
 			shellIndex = i
 			break
@@ -1744,6 +1781,11 @@ func (a *MainAgent) clearLoopReductionCache(clearVisibleStats bool) {
 		a.lastPreparedLLMToolDefHash = [sha256.Size]byte{}
 		a.lastPreparedReductionStats = ContextReductionStats{}
 		a.contextReductionStats = ContextReductionStats{}
+		// Read-only shell verdicts are immutable per ToolCallID; dropping them
+		// here only bounds the map across restores and model switches.
+		a.shellReadOnlyClass.mu.Lock()
+		a.shellReadOnlyClass.verdicts = nil
+		a.shellReadOnlyClass.mu.Unlock()
 	}
 }
 

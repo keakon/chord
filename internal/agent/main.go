@@ -402,6 +402,10 @@ type MainAgent struct {
 	// analyzeReadValidity and is unaffected by this memo.
 	shellReadMemo shellReadInvalidationMemo
 
+	// shellReadOnlyClass caches per-ToolCallID read-only classification of
+	// shell commands for the reduction pass (see shellReadOnlyClassMemo).
+	shellReadOnlyClass shellReadOnlyClassMemo
+
 	// loopReductionMu protects request-shape snapshots, reduction stats, and
 	// loopState fields that may be read by callLLM on a worker goroutine while
 	// the event loop handles a busy /loop command.
