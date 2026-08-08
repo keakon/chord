@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -712,11 +711,22 @@ func scanUsageEvents(path string, fn func(UsageEvent)) error {
 			continue
 		}
 		var evt UsageEvent
-		if err := decodeCurrentUsageJSON([]byte(line), &evt); err != nil {
-			if _, ok := errors.AsType[*json.SyntaxError](err); ok {
-				continue
-			}
-			return fmt.Errorf("decode usage event: %w", err)
+		// Ledger lines are decoded permissively: fields written by other chord
+		// versions (for example the removed "version" field) are ignored, and a
+		// line that fails to decode is skipped instead of aborting the scan, so
+		// one bad line never takes down session stats or ledger appends. The
+		// summary file stays on strict decoding so schema drift still triggers
+		// a rebuild from this ledger.
+		if err := json.Unmarshal([]byte(line), &evt); err != nil {
+			continue
+		}
+		// A line from a foreign schema can also decode "successfully" into all
+		// defaults. Without an event ID it is not a usable event: counting it
+		// would record zero-usage entries, and surfacing it as the last event
+		// would make its empty ID match a stale summary's empty LastEventID
+		// and freeze summary freshness.
+		if strings.TrimSpace(evt.EventID) == "" {
+			continue
 		}
 		if evt.Cost.Currency == "" {
 			evt.Cost.Currency = "USD"

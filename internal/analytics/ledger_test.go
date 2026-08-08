@@ -467,6 +467,58 @@ func TestLoadSessionUsageSummaryRebuildsWhenSummarySchemaIsInvalid(t *testing.T)
 	}
 }
 
+func TestLoadSessionUsageSummaryToleratesLedgerLinesFromOtherVersions(t *testing.T) {
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	raw := UsageSnapshot{InputTokens: 100, OutputTokens: 50}
+	if err := ledger.AppendEvent(UsageEvent{
+		AgentID:          "main",
+		SelectedModelRef: "provider-a/model-1",
+		RunningModelRef:  "provider-a/model-1",
+		UsageRaw:         raw,
+	}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	// A v0.7.2-style line (removed "version" field plus a hypothetical future
+	// field) must still count; an undecodable line must be skipped without
+	// aborting the scan; and a foreign-schema line that decodes into all
+	// defaults (no event_id) must neither count as a zero-usage event nor
+	// become the last event — as the tail line its empty ID would otherwise
+	// match a stale summary's empty LastEventID and freeze freshness.
+	legacyLines := `{"version":1,"event_id":"legacy-1","session_id":"s","occurred_at":"2026-07-03T08:57:37+08:00","agent_id":"main","running_model_ref":"provider-a/model-1","usage_raw":{"llm_calls":1,"input_tokens":30,"output_tokens":5},"billing_usage":{"llm_calls":1,"input_tokens":30,"output_tokens":5},"cost":{},"pricing_snapshot":{},"future_field":{"x":1}}
+{"event_id":42}
+{"id":"foreign-1","note":"written by a future chord version"}
+`
+	f, err := os.OpenFile(filepath.Join(dir, "usage.jsonl"), os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatalf("OpenFile(usage.jsonl): %v", err)
+	}
+	if _, err := f.WriteString(legacyLines); err != nil {
+		t.Fatalf("WriteString: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close(usage.jsonl): %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "usage-summary.json")); err != nil {
+		t.Fatalf("Remove(usage-summary.json): %v", err)
+	}
+
+	rebuilt, err := LoadSessionUsageSummary(dir)
+	if err != nil {
+		t.Fatalf("LoadSessionUsageSummary: %v", err)
+	}
+	if rebuilt.EventCount != 2 {
+		t.Fatalf("EventCount = %d, want 2 (current + legacy line, undecodable line skipped)", rebuilt.EventCount)
+	}
+	if got, want := rebuilt.UsageTotal.InputTokens, raw.InputTokens+30; got != want {
+		t.Fatalf("InputTokens = %d, want %d", got, want)
+	}
+	if rebuilt.LastEventID != "legacy-1" {
+		t.Fatalf("LastEventID = %q, want legacy-1", rebuilt.LastEventID)
+	}
+}
+
 func TestUsageLedgerBuildSessionStatsUsesRunningModelRefs(t *testing.T) {
 	dir := t.TempDir()
 	ledger := NewUsageLedger(dir, "/tmp/project")
