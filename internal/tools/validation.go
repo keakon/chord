@@ -25,8 +25,8 @@ func ValidateToolArgs(tool Tool, args json.RawMessage) error {
 		return fmt.Errorf("decode arguments: %w", err)
 	}
 
-	if aliaser, ok := tool.(legacyArgAliaser); ok {
-		value = applyLegacyArgAliases(value, aliaser.legacyArgAliases())
+	if aliaser, ok := tool.(argumentAliaser); ok {
+		value = applyArgumentAliases(value, aliaser.argumentAliases())
 	}
 
 	if err := validateValueAgainstSchema(value, tool.Parameters(), "args"); err != nil {
@@ -35,20 +35,18 @@ func ValidateToolArgs(tool Tool, args json.RawMessage) error {
 	return nil
 }
 
-// legacyArgAliaser is implemented by tools that still accept deprecated
-// argument field names mapped onto their current schema fields. Aliases are
-// honored by validation and the tool's own decoding for backward compatibility,
-// but are intentionally excluded from Parameters() so models only ever see the
-// current field names and are not tempted to choose between two spellings.
-type legacyArgAliaser interface {
-	legacyArgAliases() map[string]string
+// argumentAliaser is implemented by tools that tolerate non-canonical argument
+// field names at the model-input boundary. Aliases are honored by validation
+// and the tool's own decoding, but are intentionally excluded from Parameters()
+// so models only see the canonical field names.
+type argumentAliaser interface {
+	argumentAliases() map[string]string
 }
 
-// applyLegacyArgAliases rewrites a decoded argument object in place, renaming
-// any present legacy field to its current name when the current field is not
-// already set. This lets validation accept legacy field names without exposing
-// them in the schema. The current field always wins when both are present.
-func applyLegacyArgAliases(value any, aliases map[string]string) any {
+// applyArgumentAliases rewrites a decoded argument object in place, renaming
+// any tolerated field to its canonical name when the canonical field is not
+// already set. The canonical field always wins when both are present.
+func applyArgumentAliases(value any, aliases map[string]string) any {
 	if len(aliases) == 0 {
 		return value
 	}

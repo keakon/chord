@@ -37,10 +37,10 @@ type replaceEditArgs struct {
 	ReplaceAll *bool  `json:"replace_all,omitempty"`
 }
 
-// UnmarshalJSON accepts the deprecated "filePath" alias for "path" (current
-// field always wins) so calls shaped with the legacy field name still execute.
+// UnmarshalJSON accepts the tolerated "filePath" alias for "path" (current
+// field always wins) so model calls with that common spelling still execute.
 // The alias is intentionally not exposed in Parameters(); validation accepts it
-// via legacyArgAliases instead.
+// via argumentAliases instead.
 func (a *replaceEditArgs) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		Path       string `json:"path"`
@@ -62,9 +62,9 @@ func (a *replaceEditArgs) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// legacyArgAliases lets validation accept the deprecated "filePath" field name
+// argumentAliases lets validation accept the tolerated "filePath" field name
 // without exposing it in the schema, mirroring Glob/Grep singular aliases.
-func (EditTool) legacyArgAliases() map[string]string {
+func (EditTool) argumentAliases() map[string]string {
 	return map[string]string{"filePath": "path"}
 }
 

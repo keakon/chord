@@ -129,10 +129,10 @@ func (GrepTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 
 func (GrepTool) CanRenderBeforeToolUseEnd(json.RawMessage) bool { return true }
 
-// legacyArgAliases maps deprecated singular field names to the current plural
-// schema fields so legacy-shaped calls validate without exposing the old names
-// in Parameters().
-func (GrepTool) legacyArgAliases() map[string]string {
+// argumentAliases maps tolerated singular field names to the current plural
+// schema fields so model-generated variants validate without exposing the
+// alternate names in Parameters().
+func (GrepTool) argumentAliases() map[string]string {
 	return map[string]string{"path": "paths", "glob": "includes"}
 }
 
