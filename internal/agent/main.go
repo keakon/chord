@@ -1204,6 +1204,12 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	a.cancelActiveWork()
 	a.waitForSubAgents(remaining)
 
+	// Defer SubAgent MCP cleanup across every subsequent shutdown return. The
+	// helper waits for Run to finish before closing transports, so timeout paths
+	// do not race an event-loop MCP call or leave cleanup behind if Run exits
+	// shortly after Shutdown's budget expires.
+	defer a.closeSubAgentMCPServersAfterRun()
+
 	// Close the persistence channel and wait for the loop to drain.
 	// The persist loop may be started outside Run (tests), so don't gate the wait
 	// on the main event loop start flag.
@@ -1260,7 +1266,6 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	if failed := a.checkpointDegradedSubAgents(); len(failed) > 0 {
 		log.Warnf("shutdown leaving SubAgents with degraded persistence agent_ids=%v", failed)
 	}
-	a.closeSubAgentMCPServers()
 
 	// Save final snapshot and close recovery manager (flush JSONL file handles).
 	if a.recovery != nil {
@@ -1372,6 +1377,22 @@ func (a *MainAgent) closeSubAgentMCPServers() {
 		}
 	}
 	a.mcpServerCache = nil
+}
+
+func (a *MainAgent) closeSubAgentMCPServersAfterRun() {
+	if !a.started.Load() {
+		a.closeSubAgentMCPServers()
+		return
+	}
+	select {
+	case <-a.done:
+		a.closeSubAgentMCPServers()
+	default:
+		go func() {
+			<-a.done
+			a.closeSubAgentMCPServers()
+		}()
+	}
 }
 
 // buildShutdownSnapshot collects todos, sub-agent states, and current usage

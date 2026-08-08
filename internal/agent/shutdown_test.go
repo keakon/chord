@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -124,6 +125,11 @@ func TestShutdownUsesSharedBudgetAcrossStages(t *testing.T) {
 
 	a.started.Store(true)
 	a.done = make(chan struct{})
+	a.mcpServerCache = map[string]*mcpServerEntry{
+		agentMCPServerCacheKey("worker", "search"): {
+			Mgr: mcp.NewPendingManager([]mcp.ServerConfig{{Name: "search", URL: "https://worker.example/mcp"}}),
+		},
+	}
 
 	began := time.Now()
 	err := a.Shutdown(350 * time.Millisecond)
@@ -142,6 +148,45 @@ func TestShutdownUsesSharedBudgetAcrossStages(t *testing.T) {
 	snapshotPath := filepath.Join(projectRoot, ".chord", "sessions", "test", "snapshot.json")
 	if _, statErr := os.Stat(snapshotPath); statErr != nil {
 		t.Fatalf("expected best-effort snapshot after shutdown timeout: %v", statErr)
+	}
+	a.mcpServerCacheMu.Lock()
+	if a.mcpServerCache == nil {
+		a.mcpServerCacheMu.Unlock()
+		t.Fatal("MCP cache closed before the event loop stopped")
+	}
+	a.mcpServerCacheMu.Unlock()
+
+	close(a.done)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		a.mcpServerCacheMu.Lock()
+		closed := a.mcpServerCache == nil
+		a.mcpServerCacheMu.Unlock()
+		if closed {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("MCP cache was not closed after the event loop stopped")
+}
+
+func TestShutdownClosesSubAgentMCPServersWhenCompactionDrainTimesOut(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.mcpServerCache = map[string]*mcpServerEntry{
+		agentMCPServerCacheKey("worker", "search"): {
+			Mgr: mcp.NewPendingManager([]mcp.ServerConfig{{Name: "search", URL: "https://worker.example/mcp"}}),
+		},
+	}
+
+	a.compactionWg.Add(1)
+	defer a.compactionWg.Done()
+
+	err := a.Shutdown(100 * time.Millisecond)
+	if err == nil {
+		t.Fatal("Shutdown() error = nil, want timeout")
+	}
+	if a.mcpServerCache != nil {
+		t.Fatalf("mcpServerCache = %#v, want nil after timeout cleanup", a.mcpServerCache)
 	}
 }
 
