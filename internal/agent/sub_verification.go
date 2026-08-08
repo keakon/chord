@@ -47,8 +47,7 @@ func (s *SubAgent) validateCompletionVerification(env *CompletionEnvelope) error
 		return nil
 	}
 	records := make([]VerificationRecord, 0, len(env.VerificationRun))
-	coveredEpochs := make(map[uint64]struct{}, len(env.VerificationRun))
-	oldestCoveredEpoch := s.workspaceMutationEpoch
+	var latestCoveredEpoch uint64
 	for _, declared := range env.VerificationRun {
 		command := strings.TrimSpace(declared)
 		var found *verificationLedgerEntry
@@ -67,15 +66,19 @@ func (s *SubAgent) validateCompletionVerification(env *CompletionEnvelope) error
 			return fmt.Errorf("verification command %q was not found among finalized Shell calls; run it again before Complete", command)
 		}
 		records = append(records, VerificationRecord{ToolCallID: found.ToolCallID, Command: found.Command, Status: found.Status, Summary: found.Summary})
-		coveredEpochs[found.MutationEpoch] = struct{}{}
-		if found.MutationEpoch < oldestCoveredEpoch {
-			oldestCoveredEpoch = found.MutationEpoch
+		if found.MutationEpoch > latestCoveredEpoch {
+			latestCoveredEpoch = found.MutationEpoch
 		}
 	}
-	for epoch := oldestCoveredEpoch; epoch <= s.workspaceMutationEpoch; epoch++ {
-		if _, ok := coveredEpochs[epoch]; !ok {
-			return fmt.Errorf("declared verification commands do not cover workspace mutation epoch %d; run them again before Complete", epoch)
-		}
+	// Every non-read-only tool call advances the epoch, including commands
+	// that never touch a file (lint, build), so requiring the declared
+	// commands to cover every epoch in between punished honest declarations:
+	// after modify → lint → build → test, declaring [lint, test] failed on the
+	// build gap while declaring only [test] passed. Completion needs exactly
+	// one guarantee — nothing touched the workspace after the newest declared
+	// verification ran — so compare only that newest epoch to the current one.
+	if latestCoveredEpoch < s.workspaceMutationEpoch {
+		return fmt.Errorf("the workspace mutation epoch advanced after the declared verification commands last ran; re-run them before Complete")
 	}
 	env.VerificationRecords = records
 	return nil
@@ -90,6 +93,6 @@ func (s *SubAgent) retryCompletionVerification(cause error) {
 		return
 	}
 	s.turn.SubAgentTerminalRecoveryCount++
-	s.appendPendingUserMessage(pendingUserMessage{Content: "Completion was rejected because the declared verification command was not observed as a finalized successful Shell call. Run the verification command, then call Complete again with the exact command."})
+	s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Re-run the declared verification command(s) so they are the most recent workspace activity, then call Complete again with the exact command(s).", cause)})
 	s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
 }

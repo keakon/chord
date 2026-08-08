@@ -116,6 +116,29 @@ func TestCompletionVerificationAcceptsConsecutiveDeclaredCommands(t *testing.T) 
 	}
 }
 
+func TestCompletionVerificationAcceptsDeclaredCommandsWithUndeclaredEpochGap(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	// modify → lint → build → test: build is a non-declared, non-read-only
+	// command that advances the epoch between the two declared commands.
+	// Declaring the honest superset [lint, test] must not fail on that gap.
+	sub.recordTaskToolChanges(&toolResult{
+		CallID: "edit", Name: tools.NameWrite, ArgsJSON: `{"path":"internal/a.go"}`,
+		FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "internal/a.go", Exists: true}}},
+	}, false)
+	for i, command := range []string{"golangci-lint run", "go build ./...", "go test ./..."} {
+		result := &toolResult{CallID: fmt.Sprintf("cmd-%d", i), Name: tools.NameShell, ArgsJSON: fmt.Sprintf(`{"command":%q}`, command)}
+		sub.recordTaskToolChanges(result, false)
+		sub.recordVerificationToolResult(result, "ok", false)
+	}
+	env := &CompletionEnvelope{VerificationRun: []string{"golangci-lint run", "go test ./..."}}
+	if err := sub.validateCompletionVerification(env); err != nil {
+		t.Fatalf("honest declaration rejected on undeclared epoch gap: %v", err)
+	}
+	if len(env.VerificationRecords) != 2 {
+		t.Fatalf("verification records = %#v, want two records", env.VerificationRecords)
+	}
+}
+
 func TestCompletionVerificationIsolatedBetweenSubAgents(t *testing.T) {
 	parent, first := newMixedBatchTestSubAgent(t)
 	second := newControllableTestSubAgent(t, parent, "task-second")
