@@ -113,7 +113,6 @@ func buildFileEvidenceViewWithMeta(messages []message.Message, sessionID, genera
 			continue
 		}
 		ref := checkpointSourceRef{SessionID: sessionID, TranscriptGeneration: generation, SegmentKind: "transcript", LegacyOrdinal: index, Role: string(msg.Role), ToolCallID: msg.ToolCallID}
-		ref.CanonicalPayloadHash, _ = canonicalMessageHash(*msg)
 		for path, observation := range evidenceObservations(msg, &call, operation) {
 			if observation.Operation == "read" {
 				if state, ok := validity[index]; ok {
