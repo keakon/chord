@@ -30,8 +30,7 @@ type sseBenchFixture struct {
 }
 
 type sseBenchCorpus struct {
-	Provider string
-	Entries  []sseBenchFixture
+	Entries []sseBenchFixture
 }
 
 type sseBenchCandidate struct {
@@ -472,7 +471,7 @@ func buildSSEBenchCorpora() (map[string]sseBenchCorpus, error) {
 			fixtures = append(fixtures, fixture)
 		}
 		if len(fixtures) > 0 {
-			corpora[provider] = sseBenchCorpus{Provider: provider, Entries: fixtures}
+			corpora[provider] = sseBenchCorpus{Entries: fixtures}
 		}
 	}
 	return corpora, nil

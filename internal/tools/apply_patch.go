@@ -1351,9 +1351,6 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 		invalidatePathCache(mutation.SourcePath)
 		invalidatePathCache(mutation.TargetPath)
 	}
-	if len(lines) == 0 {
-		return "Applied patch:\nNo net file changes"
-	}
 	sort.Strings(lines)
 	if punctuationHunks > 0 {
 		lines = append(lines, fmt.Sprintf("Note: used punctuation-tolerant matching for %d hunk(s); unchanged punctuation was preserved from the current file", punctuationHunks))

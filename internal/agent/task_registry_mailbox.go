@@ -52,10 +52,10 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 	}
 	switch msg.Kind {
 	case SubAgentMailboxKindCompleted:
-		if msg.Attempt == 0 || msg.Attempt == rec.Attempt {
-			rec.State = string(SubAgentStateCompleted)
-			rec.ResumePolicy = taskResumePolicyNotify
-		}
+		// The attempt gate above already returned on a mismatched non-zero
+		// attempt, so the message is authoritative for this record here.
+		rec.State = string(SubAgentStateCompleted)
+		rec.ResumePolicy = taskResumePolicyNotify
 	case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired:
 		rec.State = string(SubAgentStateWaitingMain)
 		rec.ResumePolicy = taskResumePolicyNotify
