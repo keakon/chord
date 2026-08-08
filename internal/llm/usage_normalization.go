@@ -8,6 +8,9 @@ import (
 )
 
 func normalizeResponseUsage(provider *ProviderConfig, resp *message.Response) {
+	// This consumes one raw provider response and canonicalizes its usage in place;
+	// callers must not invoke it again on the same response because the original
+	// cache-bucket inclusion semantics are intentionally not retained.
 	if provider == nil || resp == nil || resp.Usage == nil {
 		return
 	}
