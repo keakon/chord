@@ -57,9 +57,23 @@ func TestNormalizeCodeFenceLanguage(t *testing.T) {
 }
 
 func TestGenericToolParamSummaryShowsValues(t *testing.T) {
-	keys, vals := parseToolArgs(`{"numResults":8,"query":"file path typo suggestion ranking","maxToken":4096,"tokenCount":12,"filters":{"language":"go"},"urls":["a","b"]}`)
-	if got := formatToolHeaderParamsWithParsed("mcp_exa_web_search_exa", keys, vals); got != `numResults=8 · query=file path typo suggestion ranking · maxToken=4096 · tokenCount=12 · filters={1 fields} · urls=[2 items]` {
+	keys, vals := parseToolArgs(`{"numResults":8,"query":"file path typo suggestion ranking","maxToken":4096,"tokenCount":12,"temperature":0.7,"filters":{"language":"go"},"urls":["a","b"]}`)
+	if got := formatToolHeaderParamsWithParsed("mcp_exa_web_search_exa", keys, vals); got != `numResults=8 · query=file path typo suggestion ranking · maxToken=4096 · tokenCount=12 · temperature=0.7 · filters={1 fields} · urls=[2 items]` {
 		t.Fatalf("summary = %q", got)
+	}
+}
+
+func TestParseToolArgsPreservesExactJSONNumbers(t *testing.T) {
+	_, vals := parseToolArgs(`{"decimal":1.0000000000000001,"integer":10000000000000001,"exponent":1e-7}`)
+	want := map[string]string{
+		"decimal":  "1.0000000000000001",
+		"integer":  "10000000000000001",
+		"exponent": "1e-7",
+	}
+	for key, value := range want {
+		if got := vals[key]; got != value {
+			t.Errorf("vals[%q] = %q, want %q", key, got, value)
+		}
 	}
 }
 

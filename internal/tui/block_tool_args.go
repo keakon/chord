@@ -114,6 +114,7 @@ func parseToolArgs(argsJSON string) (keys []string, vals map[string]string) {
 		return
 	}
 	dec := json.NewDecoder(strings.NewReader(argsJSON))
+	dec.UseNumber()
 	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
 		return
 	}
@@ -154,8 +155,8 @@ func formatParamValue(v any) string {
 	switch val := v.(type) {
 	case string:
 		return sanitizeToolDisplayText(val)
-	case float64:
-		return fmt.Sprintf("%.0f", val)
+	case json.Number:
+		return val.String()
 	case bool:
 		if !val {
 			return ""
