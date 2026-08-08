@@ -131,7 +131,7 @@ func suggestExistingToolPathsWithOptionsInDir(path string, baseDir string, kind 
 	}
 
 	if len(candidates) == 0 {
-		ancestor, ok := nearestExistingAncestorForPathSuggestions(path, resolved)
+		ancestor, ok := pathSuggestionSearchRoot(path, resolved, baseDir)
 		if ok && shouldWalkForPathSuggestions(ancestor) {
 			matcher := newGitIgnoreMatcher(ancestor)
 			_ = filepath.WalkDir(ancestor, func(candidate string, d fs.DirEntry, err error) error {
@@ -338,6 +338,29 @@ func nearestExistingAncestorForPathSuggestions(requested, resolved string) (stri
 	return ".", true
 }
 
+func pathSuggestionSearchRoot(requested, resolved, baseDir string) (string, bool) {
+	requestedResolved, _ := resolveToolPath(requested)
+	relativeRequest := !filepath.IsAbs(requestedResolved)
+	if relativeRequest && strings.TrimSpace(baseDir) != "" {
+		root, err := resolveToolPathAbs(baseDir)
+		if err == nil && directoryExists(root) {
+			return root, true
+		}
+	}
+
+	// A relative request from a marked working tree may refer to a file that
+	// moved to another project directory. Keep unmarked directories local-only
+	// so a typo does not trigger an unexpected broad filesystem walk.
+	if relativeRequest && directoryLooksLikeProjectRoot(".") {
+		root, err := filepath.Abs(".")
+		if err == nil {
+			return root, true
+		}
+	}
+
+	return nearestExistingAncestorForPathSuggestions(requested, resolved)
+}
+
 func directoryLooksLikeProjectRoot(dir string) bool {
 	for _, marker := range []string{".git", "go.mod", "package.json", "Cargo.toml", "pyproject.toml"} {
 		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
@@ -511,7 +534,7 @@ func scorePathSuggestion(target, candidate string) int {
 		baseScore := fuzzyNameScore(targetBase, candidateBase)
 		stemScore := fuzzyNameScore(targetStem, candidateStem)
 		best := max(baseScore, stemScore)
-		if best < 55 {
+		if best < 55 || !plausiblePathNameTypo(targetStem, candidateStem) {
 			return -1
 		}
 		score += best
@@ -528,7 +551,6 @@ func scorePathSuggestion(target, candidate string) int {
 
 	targetParts := pathSuggestionParts(targetClean)
 	candidateParts := pathSuggestionParts(candidateClean)
-	sharedPrefix := commonPrefixParts(targetParts, candidateParts)
 	sharedSuffix := commonSuffixParts(targetParts, candidateParts)
 	// When the parent directory chains share no trailing segment, a mere
 	// basename similarity is not enough: home-wide walks would otherwise
@@ -542,9 +564,20 @@ func scorePathSuggestion(target, candidate string) int {
 		}
 	}
 	score += sharedSuffix * 15
-	score += sharedPrefix * 3
 	score -= absInt(len(candidateParts)-len(targetParts)) * 2
 	return score
+}
+
+func plausiblePathNameTypo(targetStem, candidateStem string) bool {
+	if targetStem == "" || candidateStem == "" {
+		return false
+	}
+	targetLength := len([]rune(targetStem))
+	if targetLength < 3 {
+		return false
+	}
+	maxDistance := max(1, targetLength/3)
+	return levenshteinDistance(targetStem, candidateStem) <= maxDistance
 }
 
 func fuzzyNameScore(a, b string) int {
@@ -615,16 +648,6 @@ func commonSuffixParts(a, b []string) int {
 		count++
 	}
 	return count
-}
-
-func commonPrefixParts(a, b []string) int {
-	limit := min(len(a), len(b))
-	for i := range limit {
-		if a[i] != b[i] {
-			return i
-		}
-	}
-	return limit
 }
 
 func absInt(n int) int {

@@ -373,6 +373,100 @@ func TestPathSuggestionsOmitLowConfidenceCandidates(t *testing.T) {
 	}
 }
 
+func TestPathSuggestionsRejectUnrelatedSameExtensionSibling(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "keymap.go"), []byte("package tui\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile keymap.go: %v", err)
+	}
+
+	got := suggestExistingToolPathsWithOptions(filepath.Join(dir, "format.go"), PathTargetRegularFile, pathSuggestionOptions{
+		Timeout:        time.Second,
+		MaxVisited:     100,
+		MaxCandidates:  100,
+		MaxSuggestions: 3,
+		MinScore:       pathSuggestionMinScore,
+	})
+	if len(got) != 0 {
+		t.Fatalf("suggestExistingToolPathsWithOptions() = %#v, want no unrelated same-extension suggestion", got)
+	}
+}
+
+func TestReadToolDoesNotSuggestUnrelatedSameExtensionSibling(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "keymap.go"), []byte("package tui\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile keymap.go: %v", err)
+	}
+
+	raw := json.RawMessage(fmt.Sprintf(`{"path":%q}`, filepath.Join(dir, "format.go")))
+	_, err := (ReadTool{}).Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("ReadTool.Execute error = nil, want file-not-found error")
+	}
+	if strings.Contains(err.Error(), "Did you mean:") {
+		t.Fatalf("ReadTool.Execute error = %q, want no unrelated path suggestion", err)
+	}
+}
+
+func TestPathSuggestionsDoNotUseAbsolutePrefixForConfidence(t *testing.T) {
+	shortTarget := filepath.Join("repo", "internal", "tui", "format.go")
+	shortCandidate := filepath.Join("repo", "internal", "tui", "keymap.go")
+	deepTarget := filepath.Join("users", "keakon", "workspace", "chord", shortTarget)
+	deepCandidate := filepath.Join("users", "keakon", "workspace", "chord", shortCandidate)
+
+	if got, want := scorePathSuggestion(shortTarget, shortCandidate), scorePathSuggestion(deepTarget, deepCandidate); got != want {
+		t.Fatalf("scorePathSuggestion changed with absolute-like prefix: short=%d deep=%d", got, want)
+	}
+}
+
+func TestPathSuggestionsFindMovedFileFromProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.test\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile go.mod: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "internal", "tui"), 0o755); err != nil {
+		t.Fatalf("MkdirAll tui: %v", err)
+	}
+	moved := filepath.Join(root, "internal", "convformat", "format.go")
+	if err := os.MkdirAll(filepath.Dir(moved), 0o755); err != nil {
+		t.Fatalf("MkdirAll convformat: %v", err)
+	}
+	if err := os.WriteFile(moved, []byte("package convformat\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile moved format.go: %v", err)
+	}
+
+	got := suggestExistingToolPathsWithOptionsInDir("internal/tui/format.go", root, PathTargetRegularFile, pathSuggestionOptions{
+		Timeout:        time.Second,
+		MaxVisited:     100,
+		MaxCandidates:  100,
+		MaxSuggestions: 3,
+		MinScore:       pathSuggestionMinScore,
+	})
+	want := filepath.ToSlash(filepath.Join("internal", "convformat", "format.go"))
+	if len(got) == 0 || got[0] != want {
+		t.Fatalf("suggestExistingToolPathsWithOptionsInDir() = %#v, want moved %q first", got, want)
+	}
+}
+
+func TestPathSuggestionsDoNotUseBaseDirForTildePath(t *testing.T) {
+	home := t.TempDir()
+	base := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(base, "format.go"), []byte("package base\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile format.go: %v", err)
+	}
+
+	got := suggestExistingToolPathsWithOptionsInDir("~/format.go", base, PathTargetRegularFile, pathSuggestionOptions{
+		Timeout:        time.Second,
+		MaxVisited:     100,
+		MaxCandidates:  100,
+		MaxSuggestions: 3,
+		MinScore:       pathSuggestionMinScore,
+	})
+	if len(got) != 0 {
+		t.Fatalf("suggestExistingToolPathsWithOptionsInDir() = %#v, want no base-dir suggestion for tilde path", got)
+	}
+}
+
 func TestPathSuggestionsRejectDistantSimilarBasename(t *testing.T) {
 	dir := t.TempDir()
 	// A distant file whose stem matches but extension differs, with no shared
