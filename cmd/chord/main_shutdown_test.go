@@ -63,16 +63,12 @@ func TestCLIExitCodeAndPrintPolicy(t *testing.T) {
 
 func TestShutdownLocalRuntimeWaitsForIdleOnlyWhenCancelSucceeds(t *testing.T) {
 	agent := &shutdownTrackingAgent{cancelResult: true}
-	rt := &Runtime{Agent: nil}
-	ac := &AppContext{}
 
 	waitCalled := false
 	closeCalled := false
 	appCloseCalled := false
 
 	shutdownLocalRuntimeForTest(
-		ac,
-		rt,
 		localExitIdleWait,
 		false,
 		func() bool { return agent.CancelCurrentTurn() },
@@ -153,16 +149,12 @@ func TestHookDefsFromConfigFlattensEntries(t *testing.T) {
 
 func TestShutdownLocalRuntimeSkipsIdleWaitWhenAlreadyIdle(t *testing.T) {
 	agent := &shutdownTrackingAgent{cancelResult: false}
-	rt := &Runtime{Agent: nil}
-	ac := &AppContext{}
 
 	waitCalled := false
 	closeCalled := false
 	appCloseCalled := false
 
 	shutdownLocalRuntimeForTest(
-		ac,
-		rt,
 		localExitIdleWait,
 		false,
 		func() bool { return agent.CancelCurrentTurn() },
@@ -190,16 +182,12 @@ func TestShutdownLocalRuntimeSkipsIdleWaitWhenAlreadyIdle(t *testing.T) {
 
 func TestShutdownLocalRuntimeSkipsCancelWhenDoneCompletedExpectedClose(t *testing.T) {
 	agent := &shutdownTrackingAgent{cancelResult: true}
-	rt := &Runtime{Agent: nil}
-	ac := &AppContext{}
 
 	waitCalled := false
 	closeCalled := false
 	appCloseCalled := false
 
 	shutdownLocalRuntimeForTest(
-		ac,
-		rt,
 		localExitIdleWait,
 		true,
 		func() bool { return agent.CancelCurrentTurn() },

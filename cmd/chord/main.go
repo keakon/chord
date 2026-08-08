@@ -297,8 +297,6 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 
 func shutdownLocalRuntime(ac *AppContext, rt *Runtime, waitTimeout time.Duration, skipCancel bool) {
 	shutdownLocalRuntimeForTest(
-		ac,
-		rt,
 		waitTimeout,
 		skipCancel,
 		func() bool {
@@ -324,8 +322,6 @@ func shutdownLocalRuntime(ac *AppContext, rt *Runtime, waitTimeout time.Duration
 }
 
 func shutdownLocalRuntimeForTest(
-	ac *AppContext,
-	rt *Runtime,
 	waitTimeout time.Duration,
 	skipCancel bool,
 	cancelCurrentTurn func() bool,
