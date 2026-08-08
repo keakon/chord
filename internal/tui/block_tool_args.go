@@ -188,21 +188,6 @@ func truncateToolParamValue(value string) string {
 	return value
 }
 
-func isSensitiveToolParam(key string) bool {
-	key = strings.Map(func(r rune) rune {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			return unicode.ToLower(r)
-		}
-		return -1
-	}, strings.TrimSpace(key))
-	for _, part := range []string{"password", "passwd", "token", "apikey", "secret", "authorization", "accesstoken", "refreshtoken", "clientsecret", "privatekey", "secretkey"} {
-		if key == part || strings.HasSuffix(key, part) {
-			return true
-		}
-	}
-	return false
-}
-
 func paramStringList(raw string) []string {
 	var values []string
 	if err := json.Unmarshal([]byte(raw), &values); err != nil {
@@ -666,16 +651,13 @@ func genericToolParamSummary(keys []string, vals map[string]string) string {
 	for _, key := range keys {
 		if value := strings.TrimSpace(vals[key]); value != "" {
 			displayKey := truncateToolParamValue(sanitizeToolDisplayText(strings.TrimSpace(key)))
-			parts = append(parts, displayKey+"="+genericToolParamValue(key, value))
+			parts = append(parts, displayKey+"="+genericToolParamValue(value))
 		}
 	}
 	return strings.Join(parts, " · ")
 }
 
-func genericToolParamValue(key, value string) string {
-	if isSensitiveToolParam(key) {
-		return "••••••"
-	}
+func genericToolParamValue(value string) string {
 	var parsed any
 	if json.Unmarshal([]byte(value), &parsed) == nil {
 		switch v := parsed.(type) {

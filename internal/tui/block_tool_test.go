@@ -56,24 +56,19 @@ func TestNormalizeCodeFenceLanguage(t *testing.T) {
 	}
 }
 
-func TestGenericToolParamSummaryShowsSafeValues(t *testing.T) {
-	keys, vals := parseToolArgs(`{"numResults":8,"query":"file path typo suggestion ranking"}`)
-	if got := formatToolHeaderParamsWithParsed("mcp_exa_web_search_exa", keys, vals); got != `numResults=8 · query=file path typo suggestion ranking` {
+func TestGenericToolParamSummaryShowsValues(t *testing.T) {
+	keys, vals := parseToolArgs(`{"numResults":8,"query":"file path typo suggestion ranking","maxToken":4096,"tokenCount":12,"filters":{"language":"go"},"urls":["a","b"]}`)
+	if got := formatToolHeaderParamsWithParsed("mcp_exa_web_search_exa", keys, vals); got != `numResults=8 · query=file path typo suggestion ranking · maxToken=4096 · tokenCount=12 · filters={1 fields} · urls=[2 items]` {
 		t.Fatalf("summary = %q", got)
 	}
 }
 
-func TestGenericToolParamSummaryRedactsSensitiveValues(t *testing.T) {
-	keys, vals := parseToolArgs(`{"query":"search","apiKey":"secret-value","clientSecret":"client-secret","privateKey":"private-key","filters":{"language":"go"},"urls":["a","b"]}`)
+func TestGenericToolParamSummaryShowsModelArguments(t *testing.T) {
+	keys, vals := parseToolArgs(`{"query":"search","apiKey":"model-supplied-value","filters":{"language":"go"},"urls":["a","b"]}`)
 	got := formatToolHeaderParamsWithParsed("mcp_any_tool", keys, vals)
-	for _, want := range []string{"query=search", "apiKey=••••••", "clientSecret=••••••", "privateKey=••••••", "filters={1 fields}", "urls=[2 items]"} {
+	for _, want := range []string{"query=search", "apiKey=model-supplied-value", "filters={1 fields}", "urls=[2 items]"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("summary = %q, want %q", got, want)
-		}
-	}
-	for _, leaked := range []string{"secret-value", "client-secret", "private-key"} {
-		if strings.Contains(got, leaked) {
-			t.Fatalf("summary exposed sensitive value: %q", got)
 		}
 	}
 }

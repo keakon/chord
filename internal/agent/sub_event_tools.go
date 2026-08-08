@@ -78,7 +78,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 							execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, originalArgs, effective.Args)
 							hookModified = true
 							turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, AgentID: s.instanceID, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
-							s.parent.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, ArgsStreamingDone: true, AgentID: s.instanceID})
+							s.parent.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: modelRequestedToolArgsJSON(execResult.EffectiveArgsJSON, execResult.Audit), ArgsStreamingDone: true, AgentID: s.instanceID})
 						}
 					}
 				}

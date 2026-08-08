@@ -53,6 +53,17 @@ func wrapToolRejectedByUser(toolName, denyReason string) error {
 	return toolRejectedByUserError{toolName: toolName, denyReason: denyReason}
 }
 
+// modelRequestedToolArgsJSON returns the arguments the model put in its tool
+// call. Execution may use a different JSON document after confirmation or a
+// hook, but that effective document is not what the tool card is meant to
+// summarize.
+func modelRequestedToolArgsJSON(effective string, audit *message.ToolArgsAudit) string {
+	if audit != nil && strings.TrimSpace(audit.OriginalArgsJSON) != "" {
+		return audit.OriginalArgsJSON
+	}
+	return effective
+}
+
 func wrapEditedArgsPermissionDenied(toolName string) error {
 	return fmt.Errorf("edited arguments for tool %q are denied by permission policy: %w", toolName, errEditedArgsPermissionDeny)
 }
@@ -162,7 +173,7 @@ func emitToolExecutionState(emit func(AgentEvent), calls []PendingToolCall, stat
 		if strings.TrimSpace(call.CallID) == "" {
 			continue
 		}
-		emit(ToolCallExecutionEvent{ID: call.CallID, Name: call.Name, ArgsJSON: call.ArgsJSON, State: state, AgentID: call.AgentID})
+		emit(ToolCallExecutionEvent{ID: call.CallID, Name: call.Name, ArgsJSON: modelRequestedToolArgsJSON(call.ArgsJSON, call.Audit), State: state, AgentID: call.AgentID})
 	}
 }
 

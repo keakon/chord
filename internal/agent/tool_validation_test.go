@@ -260,3 +260,16 @@ func TestSyncAuditEffectiveArgsCreatesAuditForHookOnlyMutation(t *testing.T) {
 		t.Fatal("expected hook-only args mutation to mark UserModified")
 	}
 }
+
+func TestModelRequestedToolArgsJSONUsesOriginalAuditArguments(t *testing.T) {
+	original := `{"query":"cats"}`
+	effective := `{"query":"cats","apiKey":"runtime-secret"}`
+	audit := &message.ToolArgsAudit{OriginalArgsJSON: original, EffectiveArgsJSON: effective, UserModified: true}
+
+	if got := modelRequestedToolArgsJSON(effective, audit); got != original {
+		t.Fatalf("modelRequestedToolArgsJSON() = %q, want %q", got, original)
+	}
+	if got := modelRequestedToolArgsJSON(effective, nil); got != effective {
+		t.Fatalf("modelRequestedToolArgsJSON() without audit = %q, want %q", got, effective)
+	}
+}

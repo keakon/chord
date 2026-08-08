@@ -191,8 +191,17 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 			return effects
 		}
 		m.recordTUIDiagnostic("tool-result", "tool=%s call=%s block=%d status=%s result_len=%d had_diff=%t", evt.Name, evt.CallID, block.ID, evt.Status, len(evt.Result), evt.Diff != "")
+		displayArgsJSON := evt.ArgsJSON
+		if block.RawArgs != "" {
+			// Keep the model-generated arguments already captured by the start or
+			// streaming events. evt.ArgsJSON is the effective execution payload
+			// used for result processing and file attribution.
+			displayArgsJSON = ""
+		} else if evt.Audit != nil && strings.TrimSpace(evt.Audit.OriginalArgsJSON) != "" {
+			displayArgsJSON = evt.Audit.OriginalArgsJSON
+		}
 		applyStableToolResultToBlock(block, transcriptToolResult{
-			argsJSON:            evt.ArgsJSON,
+			argsJSON:            displayArgsJSON,
 			result:              evt.Result,
 			status:              evt.Status,
 			audit:               evt.Audit,
@@ -434,13 +443,14 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			return true, effects
 		}
 		updated := false
-		displayArgs := stableToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
-		if evt.ArgsJSON != "" && evt.ArgsJSON != block.RawArgs {
+		// Execution-state events may carry effective arguments after a hook or
+		// confirmation. The card already contains the model's original call;
+		// update arguments only for a recovery event that created an empty card.
+		if block.RawArgs == "" && evt.ArgsJSON != "" {
 			block.RawArgs = evt.ArgsJSON
-			updated = true
-		}
-		if displayArgs != "" && displayArgs != block.Content {
-			block.Content = displayArgs
+			if displayArgs := stableToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent); displayArgs != "" {
+				block.Content = displayArgs
+			}
 			updated = true
 		}
 		if block.ToolExecutionState != evt.State {

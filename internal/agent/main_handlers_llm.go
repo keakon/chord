@@ -459,7 +459,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 								execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, originalArgs, effective.Args)
 								hookModified = true
 								turn.updatePendingToolCall(PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
-								a.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, ArgsStreamingDone: true})
+								a.emitToTUI(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: modelRequestedToolArgsJSON(execResult.EffectiveArgsJSON, execResult.Audit), ArgsStreamingDone: true})
 							}
 						}
 					}

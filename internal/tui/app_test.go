@@ -2253,6 +2253,40 @@ func TestToolCallExecutionEventMarksToolQueuedWithoutAnimating(t *testing.T) {
 	}
 }
 
+func TestToolCardKeepsModelArgumentsWhenEffectiveArgumentsDiffer(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 16)
+	modelArgs := `{"query":"cats"}`
+	effectiveArgs := `{"query":"cats","apiKey":"runtime-secret"}`
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID: "mcp-call-1", Name: "mcp_exa_search", ArgsJSON: modelArgs,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
+		ID: "mcp-call-1", Name: "mcp_exa_search", ArgsJSON: effectiveArgs,
+		State: agent.ToolCallExecutionStateRunning,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID: "mcp-call-1", Name: "mcp_exa_search", ArgsJSON: effectiveArgs,
+		Audit:  &message.ToolArgsAudit{OriginalArgsJSON: modelArgs, EffectiveArgsJSON: effectiveArgs, UserModified: true},
+		Result: "ok", Status: agent.ToolResultStatusSuccess,
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("mcp-call-1")
+	if !ok {
+		t.Fatal("expected MCP tool block")
+	}
+	if block.RawArgs != modelArgs {
+		t.Fatalf("RawArgs = %q, want model args %q", block.RawArgs, modelArgs)
+	}
+	header := formatToolHeaderParams(block.ToolName, block.RawArgs)
+	if strings.Contains(header, "runtime-secret") {
+		t.Fatalf("tool card exposed effective argument: %q", header)
+	}
+	if !strings.Contains(header, "query=cats") {
+		t.Fatalf("tool card omitted model argument: %q", header)
+	}
+}
+
 func TestToolCallUpdateEventArgsStreamingDoneMarksQueuedBeforeExecution(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 

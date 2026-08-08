@@ -711,7 +711,7 @@ func (p toolExecutionPipeline) notePendingToolCall(tc message.ToolCall, execResu
 		p.updatePending(pending)
 	}
 	if p.emit != nil {
-		p.emit(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, ArgsStreamingDone: true, AgentID: p.eventAgentID})
+		p.emit(ToolCallUpdateEvent{ID: tc.ID, Name: tc.Name, ArgsJSON: modelRequestedToolArgsJSON(execResult.EffectiveArgsJSON, execResult.Audit), ArgsStreamingDone: true, AgentID: p.eventAgentID})
 	}
 }
 
