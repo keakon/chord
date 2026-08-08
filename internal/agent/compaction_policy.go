@@ -2141,12 +2141,23 @@ func detectRepeatedToolOutputs(messages []message.Message, meta map[string]toolC
 		if !ok {
 			continue
 		}
-		key := call.Name + "\x00" + call.Args
+		key := contextReductionToolInputKey(call.Name, call.Args)
 		if seen[key] {
 			repeated[i] = true
 			continue
 		}
-		seen[key] = true
+		// Only a trustworthy result establishes "a fresher identical output
+		// exists later": explicit failures/cancellations must not make the
+		// repeated marker point at an unsuccessful run. Content sniffing is
+		// reserved for status-less legacy transcripts (matching the rendered
+		// "Error:" prefix, as in classifyRequestReductionToolOutput): an
+		// explicit success that merely mentions "Error:" mid-output — a grep
+		// over error handling, a log dump — is still a trustworthy copy.
+		trustworthy := isToolResultSuccessStatus(msg.ToolStatus) ||
+			(strings.TrimSpace(msg.ToolStatus) == "" && !isToolErrorContent(msg.Content))
+		if trustworthy {
+			seen[key] = true
+		}
 	}
 	return repeated
 }

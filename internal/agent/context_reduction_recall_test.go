@@ -184,6 +184,45 @@ func TestSummarizeSearchResultLocationsListsPlainPaths(t *testing.T) {
 	}
 }
 
+func TestDetectRepeatedToolOutputsIgnoresFailedRerun(t *testing.T) {
+	args := json.RawMessage(`{"pattern":"callSite"}`)
+	msgs := []message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameGrep, Args: args}}},
+		{Role: "tool", ToolCallID: "tc1", Content: "a.go:1: callSite()"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameGrep, Args: args}}},
+		{Role: "tool", ToolCallID: "tc2", Content: "grep failed", ToolStatus: string(ToolResultStatusError)},
+	}
+	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs)); len(repeated) != 0 {
+		t.Fatalf("a failed rerun must not mark the earlier success repeated: %v", repeated)
+	}
+	msgs[3].ToolStatus = ""
+	msgs[3].Content = "Error: grep failed"
+	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs)); len(repeated) != 0 {
+		t.Fatalf("a legacy rendered error must not mark the earlier success repeated: %v", repeated)
+	}
+	msgs[3].ToolStatus = string(ToolResultStatusSuccess)
+	msgs[3].Content = "a.go:1: callSite()"
+	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs)); !repeated[1] {
+		t.Fatal("a successful rerun must mark the earlier output repeated")
+	}
+	msgs[3].Content = "a.go:1: callSite() // Error: wrapped by caller"
+	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs)); !repeated[1] {
+		t.Fatal("an explicit success mentioning Error: mid-output must still establish the fresher copy")
+	}
+	msgs[3].ToolStatus = ""
+	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs)); !repeated[1] {
+		t.Fatal("a status-less result not rendered as an error must still establish the fresher copy")
+	}
+}
+
+func TestCanonicalRepeatedToolCallArgsPreservesLargeIntegerIdentity(t *testing.T) {
+	left := canonicalRepeatedToolCallArgs(json.RawMessage(`{"limit":9007199254740992}`))
+	right := canonicalRepeatedToolCallArgs(json.RawMessage(`{"limit":9007199254740993}`))
+	if left == right {
+		t.Fatalf("distinct JSON integers collapsed to the same input key: %q", left)
+	}
+}
+
 func TestPrepareMessagesForLLMReadOnlyShellKeepsOutputUntilReadOnlyAge(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(tools.ShellTool{})
