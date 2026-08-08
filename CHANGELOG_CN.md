@@ -2,7 +2,7 @@
 
 本项目采用语义化版本风格发布。1.0 之前的版本可能包含不兼容变更。
 
-## Unreleased
+## 0.7.3 - 2026-08-08
 
 ### 不兼容变更
 
@@ -17,6 +17,18 @@
 - shell 工具结果在命令超过慢命令阈值后会附加简洁的墙钟耗时提示，让模型据实权衡下一步要跑什么；亚秒级命令保持不标注。
 - reasoning 回放改为乐观尝试并按 target 自适应降级：chat 原生 reasoning 与协议原生 item（Responses 加密 reasoning、Anthropic thinking block、Gemini thought signature）首次会回放给任何使用相同 wire 协议的目标，包括跨 provider fallback。拒绝该载荷的目标会在本会话内被降级——先严格 provenance 匹配，再文本化历史——不兼容的后端每会话最多浪费两次失败请求，而不是每次 fallback 都丢失 reasoning 连续性。
 - 新增可选的 `compat.reasoning_continuity.mode: anthropic_unsigned`：用于返回可见无签名 `thinking` 的 Messages 兼容 endpoint（如 DeepSeek/GLM）。无签名 thinking 只向同 provider/model 原生回放。目标提供该结构化 carrier 时，可见的 OpenAI Chat `reasoning_content` 也能转换为无签名 Anthropic thinking，从而无需伪造签名即可保持 reasoning 可见。跨 provider 或被目标拒绝时仍保留已完成的工具轮次；目标无法结构化承载 reasoning 时会将其丢弃，而不会泄漏进 assistant 正文。
+- MCP 工具调用现在会在 TUI 卡片头部显示模型生成参数的紧凑摘要：标量值保持可见，JSON 值摘要为 `{N fields}` 或 `[N items]`，长值截断显示。MCP server 的启动参数与环境变量不属于模型生成的工具调用参数，不会被加入卡片。
+- 用量统计现在跨协议归一化：顶层 input 计数视为完整 prompt（含单独报告的 cache read），响应后的上下文基线计入 input + cache write + output，因此无论 provider 如何拆分缓存桶，compaction 阈值、输入预算显示与用量统计都保持一致。新增 `compat.usage.input_includes_cache_read` 与 `compat.usage.input_includes_cache_write` 覆盖项，用于修正 usage 字段与声明协议不一致的网关；缓存感知的 fallback 定价现在使用本会话内按 model ref 观测到的精确 token 加权缓存命中率。用量统计采用当前的 `usage.jsonl` ledger 格式；无效或过期的 `usage-summary.json` 会从 ledger 重建。
+- 待办列表现在允许同时存在多个 `in_progress` 项，前提是 agent 确实在多个不同的活动工作流之间切换，且每项使用唯一的 `active_form`；仅处于计划中、被前置条件阻塞或等待开始的工作必须保持 `pending`。
+- 上下文剪裁现在用专门的 `diff_protect_age_turns: 12` 阈值保护 diff/patch 证据；剪裁旧的 diff/patch 输出时会保留文件、hunk、变更计数与有限的代表性行，而不是通用的省略标记。
+- `apply_patch` 的 hunk 匹配新增最后的标点归一化兜底，适用于任何可解码为文本的文件：中文与 ASCII 标点视为等价，仅在完整 hunk 恰好只有一个唯一匹配时应用，未改动部分保留文件自身的标点，并在结果中报告使用情况；歧义匹配会被拒绝。"Hunk not found" 错误现在报告 `(N/M)` 进度、附简短期望行预览，并在文本仅出现在更长行内部时说明原因。
+- 未找到路径的建议现在会针对来自已标记项目目录的相对请求搜索工作树根目录，且评分要求合理的拼写距离，不再建议无关文件。
+- `apply_patch` 结果现在与 `write`、`edit` 一样运行写后 LSP 诊断流程，并以统一格式报告诊断。
+- 工具卡片完成后会显示该次调用的墙钟执行耗时。
+- 终端通知现在在 TUI 聚焦时也会触发：新增 `desktop_notification_foreground: true`（默认）在聚焦状态下也发送通知，设为 `false` 则恢复仅在失焦时通知。Chord 会按终端自动选择 OSC 9 / OSC 777 转义序列，是否附带提示音由终端决定。
+- SubAgent 完成验证记录（例如 `go test ./... [failed]: exit 1`）现在会随任务恢复与 compaction 持久化，并在 TUI 中一致渲染；provenance 未知时恢复的续跑会被拦截。
+- 委派任务协调现在具备持久性：不可变结算、任务组、邮箱载荷与父子请求/响应状态都能跨 compaction 与重启存活。`notify` 新增 `response` message type，配合 `target_task_id` 与 `correlation_id` 发送结构化回复；`notify_peer` 的 peer 路由仅限存活的兄弟任务，且跨任务水合保持幂等投递。
+- Compaction 现在为 provenance 与生命周期各阶段（source-ref 计数、耗时、失败类别）输出结构化 analytics 事件，供诊断使用。
 
 ### 修复
 
@@ -25,7 +37,16 @@
 - 跨 provider、跨协议 fallback 在原生 reasoning 无法回放时不再抹掉已完成的工具历史。Chord 现在跨 Chat Completions、Responses、Messages 与 Gemini 保留结构化的 call/result 对；只有目标提供结构化 reasoning carrier 时才转换绑定动作的可见 reasoning 或公开摘要；目标拒绝结构化形态后才把已完成的工具轮次文本化。不受支持的 reasoning 会被丢弃，不会注入 assistant 正文。Fallback provenance 现在记录实际运行目标的 wire family，normalize 日志也会输出前后消息数及降级/丢弃计数。
 - 修复模型切换事件可能被丢弃、以及事件循环阻塞在已满输出通道时 shutdown 死锁的问题：running-model 变更现在可靠投递；Shutdown 会立即释放被阻塞的输出发送，并等待事件循环完全停止后再 checkpoint SubAgent、保存最终 recovery 快照；persist/compaction 排干超时现在返回错误，不再带着可能不一致的状态继续。
 - `edit` 工具新增引号容错兜底：当精确匹配与尾换行匹配都失败时，按引号标点归一化后重新匹配 `old_string`，并采用保留意图的替换——对未改动的上下文保留文件原始字节。这修复了模型无法逐字复现弯引号导致的主要编辑失败。同时接受已废弃的 `filePath` 参数作为 `path` 的别名（与 Glob/Grep 一致）。
-- 后台 `spawn` 完成后现在必定在主会话留下结果卡片。此前主 agent 自己的后台任务卡片带着会被主视图过滤掉的归属，只能看到 toast 通知；空闲时完成的任务在后续回复之前完全不显示卡片；卡片事件在 UI 事件通道饱和时还可能被丢弃。所属 SubAgent 已不存在的结果现在显示在主会话中，而不是一个再也打不开的视图里。
+- 后台 `spawn` 完成后现在必定在主会话留下结果卡片。此前主 agent 自己的后台任务卡片带着会被主视图过滤掉的归属，只能看到 toast 通知；空闲时完成的任务在后续回复之前完全不显示卡片；卡片事件在 UI 事件通道饱和时还可能被丢弃。所属 SubAgent 已不存在的结果现在显示在主会话中，而不是一个再也打不开的视图里。完成的后台工作现在渲染为专用的 JOB RESULT 卡片，并作为结构化后台结果消息持久化、可跨会话恢复保留；完成 toast 的级别也反映结果状态（取消、失败或成功）。
+- 没有显式 HTTP status 的 SSE 与 WebSocket 流事件不再被猜测为 4xx/5xx：每个 `APIError` 都会记录来源（`http_response`、`sse_event` 或 `websocket_event`），未知的 Codex WebSocket status 保持原样而不再强制为 500，流事件在缺少显式请求、鉴权、上下文或回放信号时保持可重试。瞬态 provider 容量信号（overloaded、限流、暂时不可用）不再进入 reasoning 回放降级阶梯；模型重复内部回放证据而不继续任务时会被识别并当作回放失败处理。
+- LSP 的 `workspace/applyEdit` 请求现在被直接拒绝：语言服务器不能再要求 Chord 应用任意的 workspace 编辑，该路径上不会发生任何文件写入。
+- LSP review snapshot 现在能正确为 `apply_patch` 调用重建：持久化的文件状态元数据会标识每个写入、移动或删除的路径，每条 review snapshot 也记录自身路径，使逐文件诊断在恢复与 compaction 后仍保持准确。
+- 失败的 SubAgent 工具结果现在会在终结关闭路径可观察到该失败实例之前持久化落盘，restore 与 export 始终能看到已持久化的错误结果。
+- 畸形调用、compaction 与终结恢复的重试现在都有上限，回放前会丢弃失败的部分输出。SubAgent 的 shell 证据在恢复后会得到验证，同时保留 model-pool 与配额 fallback 行为。
+- TUI 的 apply_patch 路径摘要现在为删除操作显示 `D` 标记。
+- 无净变更的 `apply_patch`（没有任何实际文件变化）现在返回 `No net file changes`，而不是空 diff。
+- MCP 工具卡片现在保留模型生成的原始参数：头部摘要始终反映模型实际生成的调用，不再被钩子或确认改写后的实际执行参数覆盖；执行状态更新也不会再覆盖恢复卡片上已记录的调用参数。
+- 即使关闭超时，SubAgent 的 MCP 服务器现在也会被关闭：清理操作会延迟到 agent 运行结束，关闭预算耗尽时不再泄漏 MCP 传输连接。
 
 ## 0.7.2 - 2026-07-20
 

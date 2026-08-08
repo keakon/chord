@@ -64,7 +64,8 @@
 | `cancel` | 取消一个被委派的 worker；前提是 `delegate` 已启用。 |
 | `complete` | SubAgent 侧：携带摘要把当前委派任务标记为完成。 |
 | `escalate` | SubAgent 侧：请求父 agent 介入，但不结束自己的任务。 |
-| `notify` | 向 owner 或指定的被委派 worker 发送非阻塞通知。 |
+| `notify` | 向 owner 或指定的被委派 worker 发送非阻塞通知。`message_type: response` 配合 `target_task_id` 和可选的 `correlation_id` 可向被委派 worker 发送结构化回复；`payload` 接受不超过 32 KiB 的 JSON 对象。 |
+| `notify_peer` | SubAgent 侧：向同一个直接 owner 的存活兄弟任务发送非阻塞通知。它不会授予对 peer 的控制权——需要回复或决策时请使用 owner 中转的 `escalate` / `notify`。 |
 
 ### 长文本控制工具
 
@@ -72,7 +73,7 @@
 
 `delegate` 只有一个工具结果，即异步启动句柄。后续 `complete` 调用和 mailbox 更新是独立的 runtime 事件，按稳定的 `task_id` 更新已有委派任务/卡片，不会生成额外的 `delegate` 工具结果。每次 `complete` 报告都会在 owner 视图创建一张 **AGENT COMPLETE** 通知卡；worker 终止失败显示为 **AGENT BLOCKED**，并唤醒直接 owner。
 
-agent 间消息遵守请求边界：目标 busy 时，消息只入队并随其下一次 LLM 请求一并处理，不打断当前请求；目标空闲但可恢复时，Chord 会唤醒它；纯 progress 更新不会强制本来空闲的 agent 启动。
+agent 间消息遵守请求边界：目标 busy 时，消息只入队并随其下一次 LLM 请求一并处理，不打断当前请求；目标空闲但可恢复时，Chord 会唤醒它；纯 progress 更新不会强制本来空闲的 agent 启动。mailbox 与协调状态具备持久性：父子请求/响应记录、peer 路由与排队载荷都能跨 compaction 与重启存活，投递跨任务水合保持幂等。`notify_peer` 只会发送给同一个直接 owner 下的存活兄弟任务。
 
 委派状态以 runtime 为准，而不是以模型输出为准。worker 未能调用协调工具（`complete`、`escalate` 或 `notify`）时，会获得一次有界的后续请求；若仍然无法完成，或 provider/模型重试耗尽，Chord 会将其标记为 failed、记录 `risk_alert` 并唤醒 owner。Rehydrate 后的 runtime 可能获得新的 `agent_id`；后续协调应使用稳定的委派 `task_id`。
 

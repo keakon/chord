@@ -55,7 +55,7 @@ Supported operations:
 - **`*** Delete File: path`** — remove a file; no body.
 - **`*** End of File`** — after a hunk, pins that hunk to the file tail (useful when the same block also appears earlier).
 
-Hunks apply in order; each hunk is matched at the first position after the previous hunk's application point. Lines inside a hunk keep their raw `' '`/`+`/`-` prefix, so file content that itself begins with `***` followed by a space stays ordinary context—only lines beginning with an unprefixed `***` followed by a space are protocol markers.
+Hunks apply in order; each hunk is matched at the first position after the previous hunk's application point. Repeated plain `*** Update File:` sections for the same normalized path follow Codex ordering semantics: each section patches the previous section's in-memory result, and the whole envelope is committed as one file mutation (so a later mismatch leaves the workspace unchanged rather than exposing Codex's partial-write behavior). Lines inside a hunk keep their raw `' '`/`+`/`-` prefix, so file content that itself begins with `***` followed by a space stays ordinary context—only lines beginning with an unprefixed `***` followed by a space are protocol markers.
 
 ### When to Use
 
@@ -96,7 +96,7 @@ All operations in one envelope are planned and validated from a single filesyste
 - **"hunk not found (N/M)"**: The indicated hunk does not match the current file. The error includes a short expected-line preview and, when available, explains that the text occurs only within a longer line or earlier than the preceding hunk. Re-read the target range and rebuild the hunk from complete current lines.
 - **"hunk has no context or removed lines; add unchanged context"**: A hunk contains only `+` lines; include at least one context or `-` line to anchor it.
 - **"cannot add file that already exists"**: `*** Add File:` targets an existing path; use `*** Update File:` instead.
-- **"apply_patch contains overlapping operations"**: Two operations in one envelope touch the same path; merge them into one operation.
+- **"apply_patch contains overlapping operations"**: Two operations in one envelope touch paths where one contains the other (for example `dir` and `dir/file`), or resolve to the same file through different names; merge them into one operation. Repeated `*** Update File:` sections for the exact same path are allowed and apply in order.
 - **"changed after planning"**: The file was modified between validation and commit; nothing was written—retry against the current content.
 
 ---

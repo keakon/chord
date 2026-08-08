@@ -64,7 +64,8 @@ These tools control agent workflows rather than local side effects. YOLO mode do
 | `cancel` | Cancel a delegated worker; requires `delegate` to be enabled. |
 | `complete` | SubAgent-side: mark the current delegated task as complete with a summary. |
 | `escalate` | SubAgent-side: request parent-agent intervention without ending the task. |
-| `notify` | Send a non-blocking update to the owner or a specific delegated worker. |
+| `notify` | Send a non-blocking update to the owner or a specific delegated worker. `message_type: response` with `target_task_id` and optional `correlation_id` delivers a structured reply to a delegated worker; `payload` accepts a JSON object up to 32 KiB. |
+| `notify_peer` | SubAgent-side: send a non-blocking notice to a live sibling task that has the same direct owner. It does not grant control over the peer — use owner-mediated `escalate` / `notify` when a reply or decision is required. |
 
 ### Long-text control tools
 
@@ -72,7 +73,7 @@ These tools control agent workflows rather than local side effects. YOLO mode do
 
 `delegate` has one tool result: the asynchronous startup handle. Later `complete` calls and mailbox updates are separate runtime events that update the existing delegated task/card by stable `task_id`; they never produce additional `delegate` tool results. Each `complete` report raises an owner-visible **AGENT COMPLETE** notification card, and terminal worker failures are shown as **AGENT BLOCKED** and wake the direct owner.
 
-Agent-to-agent messages respect request boundaries: if the target is busy, the message is queued and included in its next LLM request instead of interrupting the active one; if the target is idle but resumable, Chord wakes it; progress-only updates never force an otherwise idle agent to run.
+Agent-to-agent messages respect request boundaries: if the target is busy, the message is queued and included in its next LLM request instead of interrupting the active one; if the target is idle but resumable, Chord wakes it; progress-only updates never force an otherwise idle agent to run. Mailbox and coordination state is durable: parent-child request/response records, peer routing, and queued payloads survive compaction and restart, and delivery stays idempotent across task rehydration. `notify_peer` targets only live sibling tasks with the same direct owner.
 
 The runtime, not the model, is the source of truth for delegation state. A worker that fails to emit a coordination tool (`complete`, `escalate`, or `notify`) receives one bounded follow-up request; if it still cannot comply, or provider/model retries are exhausted, Chord marks it failed, records a `risk_alert`, and wakes the owner. A rehydrated runtime may receive a new `agent_id`; coordination should continue through the stable delegated `task_id`.
 

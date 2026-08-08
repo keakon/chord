@@ -17,6 +17,8 @@ After startup, the input box is focused by default. Type a message and press `En
 
 Tool cards show terminal-safe previews. File paths inside the session working directory are displayed as relative paths; external paths remain absolute. Long file and diff previews start collapsed: focus the card and press `Space`, `Enter`, or `o` to expand or collapse it.
 
+MCP tool calls show a compact summary of the model-generated arguments in their card header, with JSON values summarized as `{N fields}` / `[N items]` and long values truncated. MCP server startup arguments and environment variables remain separate from tool-call arguments and are not added to the card. Completed tool cards also show the call's wall-clock duration, and finished background `spawn` work renders as a dedicated `JOB RESULT` card with its command, status, and output.
+
 When Chord is running in the background, the terminal title shows a one-shot `✅` completion marker when the focused agent transitions from busy to idle. Focusing the terminal clears the marker; ordinary tab/window focus changes do not re-add it unless new background work later completes.
 
 Common keys:
