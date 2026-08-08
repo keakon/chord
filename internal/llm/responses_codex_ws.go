@@ -47,11 +47,8 @@ func parseCodexWebSocketErrorJSON(msg []byte) (*APIError, http.Header) {
 		return nil, nil
 	}
 	msgText := strings.TrimSpace(frame.Error.Message)
-	if frame.Status == 0 {
-		if msgText == "" {
-			return nil, nil
-		}
-		frame.Status = http.StatusInternalServerError
+	if msgText == "" {
+		return nil, nil
 	}
 	apiErr := &APIError{
 		StatusCode: frame.Status,

@@ -414,6 +414,17 @@ func TestParseCodexWebSocketErrorJSON401(t *testing.T) {
 	}
 }
 
+func TestParseCodexWebSocketErrorJSONPreservesUnknownStatus(t *testing.T) {
+	msg := []byte(`{"type":"error","error":{"type":"future_error","message":"upstream failed"}}`)
+	apiErr, h := parseCodexWebSocketErrorJSON(msg)
+	if apiErr == nil || apiErr.StatusCode != 0 || apiErr.Origin != APIErrorOriginWebSocketEvent || len(h) != 0 {
+		t.Fatalf("apiErr=%+v h=%v, want status-less WebSocket APIError", apiErr, h)
+	}
+	if !isRetriable(apiErr) {
+		t.Fatalf("status-less WebSocket provider error should remain retryable: %v", apiErr)
+	}
+}
+
 type codexWSCaptureServer struct {
 	server *httptest.Server
 
