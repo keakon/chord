@@ -94,7 +94,6 @@ All operations in one envelope are planned and validated from a single filesyste
 ### Error Messages
 
 - **"hunk not found (N/M)"**: The indicated hunk does not match the current file. The error includes a short expected-line preview and, when available, explains that the text occurs only within a longer line or earlier than the preceding hunk. Re-read the target range and rebuild the hunk from complete current lines.
-- **"hunk has no context or removed lines; add unchanged context"**: A hunk contains only `+` lines; include at least one context or `-` line to anchor it.
 - **"cannot add file that already exists"**: `*** Add File:` targets an existing path; use `*** Update File:` instead.
 - **"apply_patch contains overlapping operations"**: Two operations in one envelope touch paths where one contains the other (for example `dir` and `dir/file`), or resolve to the same file through different names; merge them into one operation. Repeated `*** Update File:` sections for the exact same path are allowed and apply in order.
 - **"changed after planning"**: The file was modified between validation and commit; nothing was written—retry against the current content.

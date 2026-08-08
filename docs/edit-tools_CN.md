@@ -94,7 +94,6 @@ Chord **自动根据当前模型选择**合适的工具：
 ### 错误消息
 
 - **"hunk not found (N/M)"**：指定差异块与当前文件不匹配。错误会包含简短的期望行摘要；如果能够判断，还会说明该文本只是某个较长行的片段，或位于前一个差异块之前。重新读取目标范围，并使用当前文件的完整行重建差异块。
-- **"hunk has no context or removed lines; add unchanged context"**：差异块只包含 `+` 行；至少加入一行上下文或 `-` 行来锚定位置。
 - **"cannot add file that already exists"**：`*** Add File:` 的目标已存在；改用 `*** Update File:`。
 - **"apply_patch contains overlapping operations"**：同一信封中的两个操作所触及的路径互为包含关系（例如 `dir` 与 `dir/file`），或通过不同名称解析到同一个文件；把它们合并为一个操作。针对完全相同路径的连续 `*** Update File:` 段是被允许的，并按顺序应用。
 - **"changed after planning"**：文件在验证与提交之间被修改；没有任何写入——基于当前内容重试。
