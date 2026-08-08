@@ -800,7 +800,7 @@ func loadSubAgentMailboxMessages(sessionPath string) ([]SubAgentMailboxMessage, 
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
 			return nil, err
 		}
-		normalizeLegacyAgentMessageContract(&msg)
+		normalizeAgentMessageContract(&msg)
 		out = append(out, msg)
 	}
 	acks, err := loadSubAgentMailboxAcks(sessionPath)

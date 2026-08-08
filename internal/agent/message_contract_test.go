@@ -11,12 +11,12 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestNormalizeLegacyAgentMessageContractKeepsLifecycleSeparate(t *testing.T) {
+func TestNormalizeAgentMessageContractKeepsLifecycleSeparate(t *testing.T) {
 	msg := SubAgentMailboxMessage{
 		MessageID: "msg-1", TaskID: "task-a", Attempt: 2, OwnerTaskID: "task-owner",
 		Kind: SubAgentMailboxKindDecisionRequired,
 	}
-	normalizeLegacyAgentMessageContract(&msg)
+	normalizeAgentMessageContract(&msg)
 	if msg.LifecycleKind != SubAgentMailboxKindDecisionRequired || msg.MessageType != AgentMessageTypeRequest || msg.Subtype != "" {
 		t.Fatalf("contract = %#v", msg)
 	}
@@ -91,15 +91,15 @@ func TestLoadLegacyMailboxAddsContractWithoutRewriting(t *testing.T) {
 }
 
 func TestValidateAgentMessageContractPayloadAndCorrelation(t *testing.T) {
-	valid := &SubAgentMailboxMessage{MessageType: AgentMessageTypeRequest, CorrelationID: "corr-1", Durability: "required", MessagePayload: json.RawMessage(`{"question":"preserve?"}`)}
+	valid := &SubAgentMailboxMessage{MessageType: AgentMessageTypeRequest, CorrelationID: "corr-1", Durability: AgentMessageDurabilityRequired, MessagePayload: json.RawMessage(`{"question":"preserve?"}`)}
 	if err := validateAgentMessageContract(valid); err != nil {
 		t.Fatalf("valid request: %v", err)
 	}
 	for _, msg := range []*SubAgentMailboxMessage{
-		{MessageType: AgentMessageTypeRequest, Durability: "required"},
-		{MessageType: AgentMessageTypeResponse, CorrelationID: "corr-1", Durability: "required"},
-		{MessageType: AgentMessageTypeNotice, Durability: "required", MessagePayload: json.RawMessage(`[1]`)},
-		{MessageType: AgentMessageTypeNotice, Durability: "required", MessagePayload: json.RawMessage(`{"value":"` + strings.Repeat("x", maxAgentMessagePayloadBytes) + `"}`)},
+		{MessageType: AgentMessageTypeRequest, Durability: AgentMessageDurabilityRequired},
+		{MessageType: AgentMessageTypeResponse, CorrelationID: "corr-1", Durability: AgentMessageDurabilityRequired},
+		{MessageType: AgentMessageTypeNotice, Durability: AgentMessageDurabilityRequired, MessagePayload: json.RawMessage(`[1]`)},
+		{MessageType: AgentMessageTypeNotice, Durability: AgentMessageDurabilityRequired, MessagePayload: json.RawMessage(`{"value":"` + strings.Repeat("x", maxAgentMessagePayloadBytes) + `"}`)},
 	} {
 		if err := validateAgentMessageContract(msg); err == nil {
 			t.Fatalf("invalid contract succeeded: %#v", msg)

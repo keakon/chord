@@ -59,17 +59,7 @@ func (a *MainAgent) normalizeSubAgentMailboxMessage(msg *SubAgentMailboxMessage)
 	if msg.CreatedAt.IsZero() {
 		msg.CreatedAt = time.Now()
 	}
-	normalizeLegacyAgentMessageContract(msg)
-	if msg.CorrelationID == "" && msg.MessageType == AgentMessageTypeRequest {
-		msg.CorrelationID = msg.MessageID
-	}
-	if msg.Durability == "" {
-		if msg.Kind == SubAgentMailboxKindProgress {
-			msg.Durability = "best_effort"
-		} else {
-			msg.Durability = "required"
-		}
-	}
+	normalizeAgentMessageContract(msg)
 	if msg.Completion != nil {
 		msg.Completion = normalizeCompletionEnvelope(msg.Completion)
 	}
@@ -130,7 +120,7 @@ func (a *MainAgent) normalizeSubAgentMailboxMessage(msg *SubAgentMailboxMessage)
 	}
 }
 
-func normalizeLegacyAgentMessageContract(msg *SubAgentMailboxMessage) {
+func normalizeAgentMessageContract(msg *SubAgentMailboxMessage) {
 	if msg == nil {
 		return
 	}
@@ -155,9 +145,9 @@ func normalizeLegacyAgentMessageContract(msg *SubAgentMailboxMessage) {
 	}
 	if msg.Durability == "" {
 		if msg.Kind == SubAgentMailboxKindProgress {
-			msg.Durability = "best_effort"
+			msg.Durability = AgentMessageDurabilityBestEffort
 		} else {
-			msg.Durability = "required"
+			msg.Durability = AgentMessageDurabilityRequired
 		}
 	}
 }
@@ -182,7 +172,7 @@ func validateAgentMessageContract(msg *SubAgentMailboxMessage) error {
 	default:
 		return fmt.Errorf("invalid message_type %q", msg.MessageType)
 	}
-	if msg.Durability != "required" && msg.Durability != "best_effort" {
+	if msg.Durability != AgentMessageDurabilityRequired && msg.Durability != AgentMessageDurabilityBestEffort {
 		return fmt.Errorf("invalid message durability %q", msg.Durability)
 	}
 	if len(msg.MessagePayload) > maxAgentMessagePayloadBytes {

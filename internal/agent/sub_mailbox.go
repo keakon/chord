@@ -40,6 +40,13 @@ const (
 	AgentMessageTypeResponse AgentMessageType = "response"
 )
 
+type AgentMessageDurability string
+
+const (
+	AgentMessageDurabilityBestEffort AgentMessageDurability = "best_effort"
+	AgentMessageDurabilityRequired   AgentMessageDurability = "required"
+)
+
 const maxAgentMessagePayloadBytes = 32 * 1024
 
 type ArtifactRef = tools.ArtifactRef
@@ -94,7 +101,7 @@ type SubAgentMailboxMessage struct {
 	CorrelationID  string                  `json:"correlation_id,omitempty"`
 	MessagePayload json.RawMessage         `json:"message_payload,omitempty"`
 	ArtifactRefs   []tools.ArtifactRef     `json:"artifact_refs,omitempty"`
-	Durability     string                  `json:"durability,omitempty"`
+	Durability     AgentMessageDurability  `json:"durability,omitempty"`
 	persistPending bool                    `json:"-"`
 }
 
