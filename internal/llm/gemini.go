@@ -152,6 +152,11 @@ func geminiToolConfigFromTuning(choice string) *geminiToolConfig {
 }
 
 type geminiStreamChunk struct {
+	Error *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Status  string `json:"status"`
+	} `json:"error,omitempty"`
 	Candidates []struct {
 		Content      geminiContent `json:"content"`
 		FinishReason string        `json:"finishReason"`
@@ -627,6 +632,14 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		if err := sonicjson.ConfigDefault.Unmarshal(data, &chunk); err != nil {
 			return nil, fmt.Errorf("parse Gemini stream chunk: %w", err)
 		}
+		if chunk.Error != nil {
+			return nil, &APIError{
+				Origin:  APIErrorOriginSSEEvent,
+				Code:    strconv.Itoa(chunk.Error.Code),
+				Type:    chunk.Error.Status,
+				Message: chunk.Error.Message,
+			}
+		}
 		if cb != nil {
 			cb(message.StreamDelta{Event: &message.StreamEventDelta{Type: "gemini.chunk"}})
 		}
@@ -807,7 +820,7 @@ func appendGeminiResponseTextPart(resp *message.Response, part geminiPart) {
 }
 
 func parseGeminiHTTPErrorFromBytes(statusCode int, header http.Header, body []byte) *APIError {
-	apiErr := &APIError{StatusCode: statusCode}
+	apiErr := &APIError{StatusCode: statusCode, Origin: APIErrorOriginHTTPResponse}
 	if ra := header.Get("Retry-After"); ra != "" {
 		if seconds, err := strconv.Atoi(ra); err == nil {
 			apiErr.RetryAfter = durationFromPositiveSecondsClamped(int64(seconds), 0)

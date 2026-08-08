@@ -338,9 +338,12 @@ func TestCompleteStreamDoesNotDegradeReplayForTransientOverloaded400(t *testing.
 		t.Fatalf("attempts = %d, want overloaded attempt plus retry", len(impl.attempts))
 	}
 	for i, attempt := range impl.attempts {
-		if len(attempt[1].ResponsesOutput) == 0 {
-			t.Fatalf("attempt %d degraded native replay after transient overload: %+v", i+1, attempt)
+		if len(attempt[1].ResponsesOutput) != 0 || len(attempt[1].ToolCalls) == 0 {
+			t.Fatalf("attempt %d changed the preflight-synthesized replay shape after transient overload: %+v", i+1, attempt)
 		}
+	}
+	if !reflect.DeepEqual(impl.attempts[0], impl.attempts[1]) {
+		t.Fatalf("transient overload changed request shape: first=%+v second=%+v", impl.attempts[0], impl.attempts[1])
 	}
 	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", lastUserMessageIndex(crossProviderReplayMessages())); got != modelcompat.ReplayCompatNative {
 		t.Fatalf("remembered replay level = %d, want native", got)
@@ -348,7 +351,7 @@ func TestCompleteStreamDoesNotDegradeReplayForTransientOverloaded400(t *testing.
 }
 
 func TestCompleteStreamDegradesReplayCompatLadderOnRejection(t *testing.T) {
-	client, cfg, impl := replayTestClient(2)
+	client, cfg, impl := replayTestClient(1)
 
 	resp, err := callReplayTestStream(t, client, cfg, impl)
 	if err != nil {
@@ -360,36 +363,27 @@ func TestCompleteStreamDegradesReplayCompatLadderOnRejection(t *testing.T) {
 	impl.mu.Lock()
 	attempts := impl.attempts
 	impl.mu.Unlock()
-	if len(attempts) != 3 {
-		t.Fatalf("attempts = %d, want native, synthesized, strict", len(attempts))
-	}
-	nativeKept := false
-	for _, m := range attempts[0] {
-		if len(m.ResponsesOutput) > 0 {
-			nativeKept = true
-		}
-	}
-	if !nativeKept {
-		t.Fatalf("first attempt should replay foreign native items optimistically: %+v", attempts[0])
+	if len(attempts) != 2 {
+		t.Fatalf("attempts = %d, want synthesized then strict", len(attempts))
 	}
 	callsKept := false
-	for _, m := range attempts[1] {
+	for _, m := range attempts[0] {
 		if len(m.ResponsesOutput) > 0 {
-			t.Fatalf("second attempt should strip native items, got %+v", m.ResponsesOutput)
+			t.Fatalf("first attempt should preflight foreign native items to synthesized, got %+v", m.ResponsesOutput)
 		}
 		if len(m.ToolCalls) > 0 {
 			callsKept = true
 		}
 	}
 	if !callsKept {
-		t.Fatalf("second attempt should keep synthesized tool calls: %+v", attempts[1])
+		t.Fatalf("first attempt should keep synthesized tool calls: %+v", attempts[0])
 	}
-	for _, m := range attempts[2] {
+	for _, m := range attempts[1] {
 		if len(m.ToolCalls) > 0 || m.Role == message.RoleTool {
-			t.Fatalf("strict attempt should remove the rejected structured trajectory, got %+v", attempts[2])
+			t.Fatalf("strict attempt should remove the rejected structured trajectory, got %+v", attempts[1])
 		}
 	}
-	requireStrictReplayEvidence(t, attempts[2], "read", "call_1")
+	requireStrictReplayEvidence(t, attempts[1], "read", "call_1")
 
 	// The achieved level is remembered: a new request on the same client
 	// starts at the strict level without paying failing round trips again.
@@ -398,25 +392,18 @@ func TestCompleteStreamDegradesReplayCompatLadderOnRejection(t *testing.T) {
 	}
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
-	if len(impl.attempts) != 4 {
+	if len(impl.attempts) != 3 {
 		t.Fatalf("attempts after second call = %d, want a single request at the remembered level", len(impl.attempts))
 	}
-	for _, m := range impl.attempts[3] {
+	for _, m := range impl.attempts[2] {
 		if len(m.ToolCalls) > 0 || m.Role == message.RoleTool {
-			t.Fatalf("remembered level should avoid the rejected structured trajectory, got %+v", impl.attempts[3])
+			t.Fatalf("remembered level should avoid the rejected structured trajectory, got %+v", impl.attempts[2])
 		}
 	}
-	requireStrictReplayEvidence(t, impl.attempts[3], "read", "call_1")
+	requireStrictReplayEvidence(t, impl.attempts[2], "read", "call_1")
 }
 
-// TestGenericRejectionEscalatesAfterExplicitEscalationWithEmptyFirstReport
-// covers the escalation-report refresh: the Native-level normalize report can
-// be empty (same-provider unsigned thinking is kept verbatim), so after an
-// explicit reasoning-replay rejection escalates to Synthesized — which visibly
-// rewrites the request — a subsequent diagnostic-free bare 400 must be judged
-// against the Synthesized report, not the stale empty Native one, and continue
-// the ladder to Strict.
-func TestGenericRejectionEscalatesAfterExplicitEscalationWithEmptyFirstReport(t *testing.T) {
+func TestAmbiguous400AfterExplicitEscalationRetriesWithoutPersistentStrict(t *testing.T) {
 	cfg := NewProviderConfig("deepseek", config.ProviderConfig{
 		Type: config.ProviderTypeMessages,
 		Models: map[string]config.ModelConfig{
@@ -475,7 +462,7 @@ func TestGenericRejectionEscalatesAfterExplicitEscalationWithEmptyFirstReport(t 
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
 	if len(impl.attempts) != 3 {
-		t.Fatalf("attempts = %d, want native, synthesized, strict", len(impl.attempts))
+		t.Fatalf("attempts = %d, want native, synthesized, unchanged synthesized retry", len(impl.attempts))
 	}
 	if len(impl.attempts[0][1].ThinkingBlocks) != 1 || impl.attempts[0][1].ThinkingBlocks[0].Thinking != "plan\n" {
 		t.Fatalf("first attempt should keep same-provider unsigned thinking verbatim: %+v", impl.attempts[0])
@@ -483,11 +470,11 @@ func TestGenericRejectionEscalatesAfterExplicitEscalationWithEmptyFirstReport(t 
 	if len(impl.attempts[1][1].ThinkingBlocks) != 1 || impl.attempts[1][1].ThinkingBlocks[0].Thinking != "plan" {
 		t.Fatalf("second attempt should rewrite unsigned thinking through the portable path: %+v", impl.attempts[1])
 	}
-	// The generic 400 on the rewritten Synthesized request must escalate to
-	// Strict instead of being judged by the stale empty Native report.
-	requireStrictReplayEvidence(t, impl.attempts[2], "read", "call_1")
-	if got := client.replayCompatLevelFor(cfg.Name(), "deepseek-v4-pro", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatStrict {
-		t.Fatalf("remembered replay level = %v, want strict", got)
+	if !reflect.DeepEqual(impl.attempts[1], impl.attempts[2]) {
+		t.Fatalf("ambiguous 400 changed the retry shape before an unchanged retry: second=%+v third=%+v", impl.attempts[1], impl.attempts[2])
+	}
+	if got := client.replayCompatLevelFor(cfg.Name(), "deepseek-v4-pro", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatSynthesized {
+		t.Fatalf("remembered replay level = %v, want only the explicitly confirmed synthesized level", got)
 	}
 }
 
@@ -497,20 +484,34 @@ func TestFallbackTargetStartsWithSynthesizedReplayForForeignNativePayload(t *tes
 		Models: map[string]config.ModelConfig{"deepseek-v4-flash-free": {}},
 	}, []string{"key"})
 	target := FallbackModel{ProviderConfig: cfg, ModelID: "deepseek-v4-flash-free"}
-	if got := fallbackReplayLevel(crossProviderReplayMessages(), target); got != modelcompat.ReplayCompatSynthesized {
+	if got := minimumReplayLevelForTarget(crossProviderReplayMessages(), target); got != modelcompat.ReplayCompatSynthesized {
 		t.Fatalf("fallbackReplayLevel = %v, want synthesized for cross-wire tool trajectory", got)
 	}
 }
 
-func TestFallbackReplayLevelKeepsNativeForSameWireFamily(t *testing.T) {
+func TestFallbackReplayLevelSynthesizesSameWireTargetMismatch(t *testing.T) {
 	cfg := NewProviderConfig("openai", config.ProviderConfig{
 		Type:   config.ProviderTypeChatCompletions,
 		Models: map[string]config.ModelConfig{"other": {}},
 	}, []string{"key"})
 	msg := crossProviderReplayMessages()[1]
 	msg.Provenance = &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat}
-	if got := fallbackReplayLevel([]message.Message{msg}, FallbackModel{ProviderConfig: cfg, ModelID: "other"}); got != modelcompat.ReplayCompatNative {
-		t.Fatalf("same-wire fallbackReplayLevel = %v, want native", got)
+	if got := minimumReplayLevelForTarget([]message.Message{msg}, FallbackModel{ProviderConfig: cfg, ModelID: "other"}); got != modelcompat.ReplayCompatSynthesized {
+		t.Fatalf("same-wire target-mismatch fallbackReplayLevel = %v, want synthesized", got)
+	}
+
+	geminiCfg := NewProviderConfig("gemini-target", config.ProviderConfig{Type: config.ProviderTypeGenerateContent}, nil)
+	geminiMsg := message.Message{
+		Role:      message.RoleAssistant,
+		ToolCalls: []message.ToolCall{{ID: "call-1", Name: "read", ThoughtSignature: "sig"}},
+		Provenance: &message.MessageProvenance{
+			ProviderID: "gemini-source",
+			ModelID:    "source-model",
+			WireFamily: modelcompat.WireFamilyGemini,
+		},
+	}
+	if got := minimumReplayLevelForTarget([]message.Message{geminiMsg}, FallbackModel{ProviderConfig: geminiCfg, ModelID: "target-model"}); got != modelcompat.ReplayCompatSynthesized {
+		t.Fatalf("Gemini tool-signature target mismatch level = %v, want synthesized", got)
 	}
 }
 
@@ -698,34 +699,85 @@ func TestCompleteStreamCompactionReplayFloorUsesPortableShape(t *testing.T) {
 	}
 }
 
-func TestCompleteStreamGeneric400OnlyDegradesNativeReplay(t *testing.T) {
+func TestCompleteStreamAmbiguousFailureRetriesUnchangedWithoutPersistingReplayLevel(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "compatible HTTP 400", err: &APIError{StatusCode: 400, Message: "请求未能完成,请检查模型、参数或客户端配置后重试。"}},
+		{name: "status-less Responses stream error", err: &APIError{Origin: APIErrorOriginSSEEvent, Type: "upstream_error", Code: "future_stream_failure", Message: "stream failed"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := NewProviderConfig("responses", config.ProviderConfig{
+				Type:   config.ProviderTypeResponses,
+				Models: map[string]config.ModelConfig{"gpt-5.6-sol": {}},
+			}, []string{"key"})
+			impl := &replayRejectingProvider{scriptedErrs: []error{tc.err}}
+			client := NewClient(cfg, impl, "gpt-5.6-sol", 4096, "sys")
+			messages := crossProviderReplayMessages()
+			messages[1].Provenance.ProviderID = cfg.Name()
+			messages[1].Provenance.ModelID = "gpt-5.6-sol"
+			result, _, err := client.completeStreamTarget(
+				context.Background(), streamRetryTarget{
+					provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
+					contextLimit: 128000, inputLimit: 128000,
+				},
+				0, messages, nil, nil, false, nil, 0, false,
+				&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil,
+			)
+			if err != nil || result.resp == nil {
+				t.Fatalf("completeStreamTarget = (%+v, %v), want recovery after ambiguous failure", result, err)
+			}
+			impl.mu.Lock()
+			defer impl.mu.Unlock()
+			if len(impl.attempts) != 2 {
+				t.Fatalf("attempts = %d, want request plus one unchanged retry", len(impl.attempts))
+			}
+			if !reflect.DeepEqual(impl.attempts[0], impl.attempts[1]) {
+				t.Fatalf("ambiguous failure changed request shape before retry: first=%+v second=%+v", impl.attempts[0], impl.attempts[1])
+			}
+			if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatNative {
+				t.Fatalf("ambiguous recovery persisted replay level = %d, want native", got)
+			}
+		})
+	}
+}
+
+func TestCompleteStreamAmbiguousFailureProbeIsRequestScoped(t *testing.T) {
 	cfg := NewProviderConfig("responses", config.ProviderConfig{
 		Type:   config.ProviderTypeResponses,
 		Models: map[string]config.ModelConfig{"gpt-5.6-sol": {}},
 	}, []string{"key"})
-	impl := &replayRejectingProvider{
-		rejectCount:      1,
-		rejectionMessage: "请求未能完成,请检查模型、参数或客户端配置后重试。",
+	streamErr := func() error {
+		return &APIError{Origin: APIErrorOriginSSEEvent, Type: "upstream_error", Code: "future_stream_failure", Message: "stream failed"}
 	}
+	impl := &replayRejectingProvider{scriptedErrs: []error{streamErr(), streamErr()}}
 	client := NewClient(cfg, impl, "gpt-5.6-sol", 4096, "sys")
+	messages := crossProviderReplayMessages()
+	messages[1].Provenance.ProviderID = cfg.Name()
+	messages[1].Provenance.ModelID = "gpt-5.6-sol"
 	result, _, err := client.completeStreamTarget(
 		context.Background(), streamRetryTarget{
 			provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 			contextLimit: 128000, inputLimit: 128000,
 		},
-		0, crossProviderReplayMessages(), nil, nil, false, nil, 0, false,
+		0, messages, nil, nil, false, nil, 0, false,
 		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil,
 	)
 	if err != nil || result.resp == nil {
-		t.Fatalf("completeStreamTarget = (%+v, %v), want recovery after generic 400", result, err)
+		t.Fatalf("completeStreamTarget = (%+v, %v), want request-scoped probe recovery", result, err)
 	}
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
-	if len(impl.attempts) != 2 {
-		t.Fatalf("attempts = %d, want native request plus one degraded retry", len(impl.attempts))
+	if len(impl.attempts) != 3 {
+		t.Fatalf("attempts = %d, want native, unchanged native, strict probe", len(impl.attempts))
 	}
-	if len(impl.attempts[1][1].ResponsesOutput) != 0 || len(impl.attempts[1][1].ToolCalls) == 0 {
-		t.Fatalf("synthesized request did not remove native output while retaining tool call: %+v", impl.attempts[1])
+	if !reflect.DeepEqual(impl.attempts[0], impl.attempts[1]) {
+		t.Fatalf("second attempt should preserve the original request shape")
+	}
+	requireStrictReplayEvidence(t, impl.attempts[2], "read", "call_1")
+	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatNative {
+		t.Fatalf("request-scoped probe persisted replay level = %d, want native", got)
 	}
 }
 
@@ -870,7 +922,7 @@ func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.
 			}, {Role: message.RoleTool, ToolCallID: "call-1", Content: "ok"}},
 			err:       &APIError{StatusCode: 400, Message: "The `content[].thinking` in the thinking mode must be passed back to the API."},
 			hasNative: func(msg message.Message) bool { return len(msg.ThinkingBlocks) > 0 },
-			wantLevel: modelcompat.ReplayCompatSynthesized,
+			wantLevel: modelcompat.ReplayCompatStrict,
 		},
 		{
 			name:     "gemini thought signature",
@@ -889,13 +941,23 @@ func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.
 			hasNative: func(msg message.Message) bool {
 				return len(msg.GeminiParts) > 0 || (len(msg.ToolCalls) > 0 && msg.ToolCalls[0].ThoughtSignature != "")
 			},
-			wantLevel: modelcompat.ReplayCompatSynthesized,
+			wantLevel: modelcompat.ReplayCompatStrict,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := NewProviderConfig("target", tc.provider, []string{"key"})
+			messages := append([]message.Message(nil), tc.messages...)
+			for i := range messages {
+				if messages[i].Provenance == nil {
+					continue
+				}
+				provenance := *messages[i].Provenance
+				provenance.ProviderID = cfg.Name()
+				provenance.ModelID = tc.modelID
+				messages[i].Provenance = &provenance
+			}
 			impl := &replayRejectingProvider{
 				rejectCount:      1,
 				rejectionCode:    tc.err.Code,
@@ -907,7 +969,7 @@ func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.
 					provider: cfg, impl: impl, modelID: tc.modelID, maxTokens: 4096,
 					contextLimit: 128000, inputLimit: 128000, tuning: tc.tuning,
 				},
-				0, tc.messages, nil, nil, false, nil, 0, false, &CallStatus{}, "sys", 0, 0,
+				0, messages, nil, nil, false, nil, 0, false, &CallStatus{}, "sys", 0, 0,
 				func() error { return nil }, nil,
 			)
 			if err != nil || result.resp == nil {
@@ -925,7 +987,7 @@ func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.
 			if tc.hasNative(attempts[1][0]) {
 				t.Fatalf("second attempt did not degrade native replay: %#v", attempts[1][0])
 			}
-			if got := client.replayCompatLevelFor(cfg.Name(), tc.modelID, "", lastUserMessageIndex(tc.messages)); got != tc.wantLevel {
+			if got := client.replayCompatLevelFor(cfg.Name(), tc.modelID, "", lastUserMessageIndex(messages)); got != tc.wantLevel {
 				t.Fatalf("replay level = %d, want %d", got, tc.wantLevel)
 			}
 		})
@@ -952,14 +1014,10 @@ func TestCompleteStreamDoesNotDegradeReplayForUnrelatedBadRequest(t *testing.T) 
 	}
 }
 
-// TestCompleteStreamDoesNotDegradeWhenNoForeignReplay guards against retrying a
-// byte-identical request: when the request carries no foreign native replay
-// items (ForeignNativeReplays == 0), a stricter replay level cannot change the
-// wire payload, so escalating would only waste a billable retry on the same key.
-// The client must fall through to normal failure handling after a single attempt.
-func TestCompleteStreamDoesNotDegradeWhenNoForeignReplay(t *testing.T) {
-	// Native (same-provenance) payload: the target's own reasoning output, so
-	// normalization keeps it at every replay level and ForeignNativeReplays == 0.
+// An explicit replay rejection is stronger evidence than same-target
+// provenance. Strict must be able to textify the rejected trajectory even when
+// the native payload was originally produced by the current provider/model.
+func TestCompleteStreamExplicitRejectionOverridesSameTargetProvenance(t *testing.T) {
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "continue"},
 		{
@@ -1011,14 +1069,12 @@ func TestCompleteStreamDoesNotDegradeWhenNoForeignReplay(t *testing.T) {
 	if len(attempts) < 2 {
 		t.Fatalf("attempts = %d, want >= 2 to compare degradation", len(attempts))
 	}
-	// Without any foreign replay items, a stricter replay level cannot change
-	// the wire payload. Both attempts must send a byte-identical message list;
-	// if the second attempt differs, an ineffective degradation rewrote it and
-	// wasted a billable retry that would fail the same way.
-	for i := 1; i < len(attempts); i++ {
-		if !reflect.DeepEqual(attempts[0], attempts[i]) {
-			t.Fatalf("attempt %d differs from attempt 0: a stricter replay level changed the request despite no foreign replay items", i)
-		}
+	if reflect.DeepEqual(attempts[0], attempts[1]) {
+		t.Fatal("explicit rejection did not produce a distinct strict request")
+	}
+	requireStrictReplayEvidence(t, attempts[1], "read", "call_1")
+	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", lastUserMessageIndex(msgs)); got != modelcompat.ReplayCompatStrict {
+		t.Fatalf("remembered replay level = %v, want strict after explicit rejection", got)
 	}
 }
 
@@ -1053,6 +1109,7 @@ func TestIsReasoningReplayRejection(t *testing.T) {
 		{"anthropic thinking 400", &APIError{StatusCode: 400, Message: "The `content[].thinking` in the thinking mode must be passed back to the API."}, true},
 		{"gemini signature 400", &APIError{StatusCode: 400, Code: "INVALID_ARGUMENT", Message: "Function call is missing a valid thought signature"}, true},
 		{"gemini signature structured 400", &APIError{StatusCode: 400, Code: "INVALID_ARGUMENT", Message: "thought signature validation failed"}, true},
+		{"responses stream replay rejection", &APIError{Origin: APIErrorOriginSSEEvent, Code: "invalid_encrypted_content", Message: "could not decrypt encrypted_content"}, true},
 		{"unrelated 400", &APIError{StatusCode: 400, Message: "invalid_request_error: unknown parameter"}, false},
 		{"unrelated invalid argument", &APIError{StatusCode: 400, Code: "INVALID_ARGUMENT", Message: "invalid tool schema"}, false},
 		{"reasoning 500", &APIError{StatusCode: 500, Message: "required 'reasoning' item"}, false},

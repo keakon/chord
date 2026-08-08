@@ -802,10 +802,14 @@ func parseResponsesProviderErrorEvent(eventType string, eventData []byte) (*APIE
 	if typ == "" {
 		typ = strings.TrimSpace(payload.Type)
 	}
+	param := strings.TrimSpace(errObj.Param)
+	if param == "" {
+		param = strings.TrimSpace(payload.Param)
+	}
 	if msg == "" {
 		msg = strings.TrimSpace(string(eventData))
 	}
-	return &APIError{StatusCode: 400, Code: code, Type: typ, Message: msg}, nil
+	return &APIError{Origin: APIErrorOriginSSEEvent, Code: code, Type: typ, Param: param, Message: msg}, nil
 }
 
 func readSSELine(r *bufio.Reader) ([]byte, error) {

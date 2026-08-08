@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -47,6 +48,19 @@ func TestConvertMessagesToGemini(t *testing.T) {
 	}
 	if fr := got[2].Parts[1].FunctionResponse; fr == nil || fr.Name != "call_2" || fr.Response["result"] != "fallback name" {
 		t.Fatalf("second functionResponse = %#v", fr)
+	}
+}
+
+func TestParseGeminiSSEStreamPreservesStatuslessErrorEnvelope(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"error":{"code":503,"message":"backend failed","status":"UNAVAILABLE"}}`,
+		"",
+	}, "\n")
+
+	_, err := parseGeminiSSEStream(strings.NewReader(stream), nil, nil)
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Origin != APIErrorOriginSSEEvent || apiErr.StatusCode != 0 || apiErr.Code != "503" || apiErr.Type != "UNAVAILABLE" {
+		t.Fatalf("err = %T %v, want status-less Gemini SSE APIError", err, err)
 	}
 }
 

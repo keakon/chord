@@ -1132,8 +1132,8 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 		if !ok {
 			t.Fatalf("err = %T %v, want *APIError", err, err)
 		}
-		if apiErr.StatusCode != 400 || apiErr.Code != "context_length_exceeded" {
-			t.Fatalf("apiErr = %+v, want status=400 code=context_length_exceeded", apiErr)
+		if apiErr.StatusCode != 0 || apiErr.Origin != APIErrorOriginSSEEvent || apiErr.Code != "context_length_exceeded" || apiErr.Param != "input" {
+			t.Fatalf("apiErr = %+v, want status unknown with preserved SSE fields", apiErr)
 		}
 		if !IsContextLengthExceeded(err) {
 			t.Fatalf("expected IsContextLengthExceeded(%v) = true", err)
@@ -1157,8 +1157,22 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 		if strings.Contains(err.Error(), "incomplete SSE stream") {
 			t.Fatalf("err = %v, want provider API error preserved over incomplete SSE", err)
 		}
-		if apiErr.Code != "context_length_exceeded" {
-			t.Fatalf("apiErr.Code = %q, want context_length_exceeded", apiErr.Code)
+		if apiErr.Origin != APIErrorOriginSSEEvent || apiErr.StatusCode != 0 || apiErr.Code != "context_length_exceeded" || apiErr.Param != "input" {
+			t.Fatalf("apiErr = %+v, want status unknown with preserved SSE fields", apiErr)
+		}
+	})
+
+	t.Run("unknown_stream_error_remains_retryable_without_guessed_status", func(t *testing.T) {
+		stream := buildSSEStream([]string{
+			`{"type":"error","error":{"type":"future_gateway_error","code":"future_unknown_v7","message":"stream failed"}}`,
+		})
+		_, err := parseResponsesSSE(stream, nil, nil)
+		apiErr, ok := errors.AsType[*APIError](err)
+		if !ok || apiErr.Origin != APIErrorOriginSSEEvent || apiErr.StatusCode != 0 {
+			t.Fatalf("err = %T %v, want status-less SSE APIError", err, err)
+		}
+		if !isRetriable(err) {
+			t.Fatalf("unknown SSE provider error should remain retryable: %v", err)
 		}
 	})
 }

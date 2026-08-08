@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -25,6 +26,19 @@ func TestParseOpenAISSEStreamLargeDataLine(t *testing.T) {
 	}
 	if resp.Content != content {
 		t.Fatalf("large SSE content length = %d, want %d", len(resp.Content), len(content))
+	}
+}
+
+func TestParseOpenAISSEStreamPreservesStatuslessErrorEnvelope(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"error":{"type":"future_chat_error","code":"future_unknown_v7","message":"stream failed","param":"messages"}}`,
+		"",
+	}, "\n")
+
+	_, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Origin != APIErrorOriginSSEEvent || apiErr.StatusCode != 0 || apiErr.Param != "messages" {
+		t.Fatalf("err = %T %v, want status-less Chat SSE APIError", err, err)
 	}
 }
 

@@ -78,17 +78,48 @@ func RequiredFields(schema map[string]any) []string {
 	return out
 }
 
+type APIErrorOrigin string
+
+const (
+	APIErrorOriginHTTPResponse   APIErrorOrigin = "http_response"
+	APIErrorOriginSSEEvent       APIErrorOrigin = "sse_event"
+	APIErrorOriginWebSocketEvent APIErrorOrigin = "websocket_event"
+)
+
 // APIError represents an error returned by the LLM provider's API.
 type APIError struct {
+	// StatusCode is populated only when the HTTP response or provider event
+	// explicitly supplied a status. Stream events without a status must leave it
+	// at zero rather than guessing an HTTP 4xx class.
 	StatusCode int
+	Origin     APIErrorOrigin
 	Message    string
 	Code       string        // provider error code (e.g. "model_not_allowed")
 	Type       string        // provider error type (e.g. "invalid_request_error")
+	Param      string        // provider parameter associated with the error, when supplied
 	RetryAfter time.Duration // suggested retry wait time (parsed from Retry-After header)
 }
 
 func (e *APIError) Error() string {
+	if e.StatusCode <= 0 {
+		if e.Origin != "" {
+			return fmt.Sprintf("API %s error: %s", e.Origin, e.Message)
+		}
+		return fmt.Sprintf("API error: %s", e.Message)
+	}
 	return fmt.Sprintf("API error %d: %s", e.StatusCode, e.Message)
+}
+
+func (e *APIError) isStreamEvent() bool {
+	return e != nil && (e.Origin == APIErrorOriginSSEEvent || e.Origin == APIErrorOriginWebSocketEvent)
+}
+
+func apiErrorOrigin(err error) APIErrorOrigin {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr == nil {
+		return ""
+	}
+	return apiErr.Origin
 }
 
 func apiErrorStructuredSignals(apiErr *APIError) []string {
@@ -287,7 +318,7 @@ func isReasoningReplayRejection(err error) bool {
 	if !ok || apiErr == nil {
 		return false
 	}
-	if apiErr.StatusCode != 400 && apiErr.StatusCode != 422 {
+	if apiErr.StatusCode != 400 && apiErr.StatusCode != 422 && !apiErr.isStreamEvent() {
 		return false
 	}
 	// OpenAI-compatible chat gateways and Anthropic Messages reject a
@@ -317,30 +348,26 @@ func isReasoningReplayRejection(err error) bool {
 	)
 }
 
-// isGenericNativeReplayRejection handles compatible gateways that return a
-// bare 400 for an otherwise valid request containing foreign native replay
-// items. It is intentionally limited to non-official providers and only
-// applies when normalization observed native replay in the request.
-func isGenericNativeReplayRejection(err error, provider *ProviderConfig, report modelcompat.NormalizeReport) bool {
+// isAmbiguousReplayRecoveryCandidate reports whether a request-scoped replay
+// probe may help recover an otherwise unclassified provider failure. It does
+// not diagnose replay incompatibility and callers must not persist a degraded
+// replay level based on this result alone.
+func isAmbiguousReplayRecoveryCandidate(err error, provider *ProviderConfig, report modelcompat.NormalizeReport) bool {
 	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr == nil || apiErr.StatusCode != 400 || provider == nil || providerUsesOfficialAPI(provider) {
+	if !ok || apiErr == nil || report.ReplaySensitiveItems == 0 {
 		return false
 	}
-	// Compatible gateways sometimes tunnel upstream capacity failures through
-	// a bare 400. Those failures must use the ordinary retry/fallback path; if
-	// they entered the replay ladder, a transient outage would permanently
-	// textify the current turn's tool history.
 	if hasTransientProviderCapacitySignal(apiErr) {
 		return false
 	}
-	if report.ForeignNativeReplays == 0 && report.DroppedThinkingBlocks == 0 &&
-		report.DowngradedReasoning == 0 && report.ConvertedReasoning == 0 &&
-		report.DowngradedToolCalls == 0 && report.DroppedToolCalls == 0 &&
-		report.DroppedToolResults == 0 {
+	if isReasoningReplayRejection(apiErr) || hasExplicitRequestOrParamSignal(apiErr) ||
+		classifyContextLengthExceeded(apiErr) || hasTerminalNonRetriable400Signal(apiErr) {
 		return false
 	}
-	return !hasExplicitRequestOrParamSignal(apiErr) && !classifyContextLengthExceeded(apiErr) &&
-		!hasTerminalNonRetriable400Signal(apiErr)
+	if apiErr.isStreamEvent() {
+		return true
+	}
+	return apiErr.StatusCode == 400 && provider != nil && !providerUsesOfficialAPI(provider)
 }
 
 func hasTransientProviderCapacitySignal(apiErr *APIError) bool {
@@ -627,6 +654,12 @@ func isRetriable(err error) bool {
 	// the provider promises.
 	if isRequestOrParamError(apiErr) {
 		return false
+	}
+	// A stream event is not an HTTP client error. Without an explicit request,
+	// auth, context, or replay signal, keep it retryable instead of interpreting
+	// a missing/guessed status as a terminal 4xx.
+	if apiErr.isStreamEvent() {
+		return true
 	}
 
 	switch apiErr.StatusCode {

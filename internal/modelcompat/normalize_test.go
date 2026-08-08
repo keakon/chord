@@ -23,11 +23,14 @@ func requireHistoricalToolEvidence(t *testing.T, msgs []message.Message, toolNam
 		}
 		if msg.Role == message.RoleAssistant && msg.Kind == message.KindReplayEvidence &&
 			strings.Contains(msg.Content, "[Historical tool execution record") &&
+			strings.Contains(msg.Content, "verified execution") &&
 			strings.Contains(msg.Content, wantCall) && strings.Contains(msg.Content, wantResult) &&
 			strings.Contains(msg.Content, "[End historical tool execution record]") {
 			foundEvidence = true
 		}
-		if msg.Role == message.RoleUser && msg.Kind == message.KindReplayContinuation && strings.Contains(msg.Content, "Continue the current task") {
+		if msg.Role == message.RoleUser && msg.Kind == message.KindReplayContinuation &&
+			strings.Contains(msg.Content, "Continue from the completed work") &&
+			strings.Contains(msg.Content, "do not repeat successful tool calls") {
 			foundContinuation = true
 		}
 	}

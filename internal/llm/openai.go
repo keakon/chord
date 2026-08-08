@@ -206,7 +206,13 @@ type openAIStreamChunk struct {
 	ID      string               `json:"id"`
 	Model   string               `json:"model"`
 	Choices []openAIStreamChoice `json:"choices"`
-	Usage   *struct {
+	Error   *struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+		Code    string `json:"code"`
+		Param   string `json:"param"`
+	} `json:"error,omitempty"`
+	Usage *struct {
 		PromptTokens          int `json:"prompt_tokens"`
 		CompletionTokens      int `json:"completion_tokens"`
 		TotalTokens           int `json:"total_tokens"`
@@ -229,6 +235,7 @@ type openAIErrorResponse struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
 		Code    string `json:"code"`
+		Param   string `json:"param"`
 	} `json:"error"`
 }
 
@@ -641,6 +648,7 @@ func convertToolsToOpenAI(tools []message.ToolDefinition) []openAITool {
 func parseOpenAIHTTPErrorFromBytes(statusCode int, header http.Header, body []byte) *APIError {
 	apiErr := &APIError{
 		StatusCode: statusCode,
+		Origin:     APIErrorOriginHTTPResponse,
 	}
 
 	// Parse Retry-After header: try integer seconds first, then HTTP-date.
@@ -657,6 +665,7 @@ func parseOpenAIHTTPErrorFromBytes(statusCode int, header http.Header, body []by
 		apiErr.Message = errResp.Error.Message
 		apiErr.Code = errResp.Error.Code
 		apiErr.Type = errResp.Error.Type
+		apiErr.Param = errResp.Error.Param
 	} else {
 		var detailResp struct {
 			Detail  string `json:"detail"`
@@ -810,6 +819,15 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		var chunk openAIStreamChunk
 		if err := sonicjson.ConfigDefault.Unmarshal(data, &chunk); err != nil {
 			return nil, fmt.Errorf("parse stream chunk: %w", err)
+		}
+		if chunk.Error != nil {
+			return nil, &APIError{
+				Origin:  APIErrorOriginSSEEvent,
+				Code:    chunk.Error.Code,
+				Type:    chunk.Error.Type,
+				Param:   chunk.Error.Param,
+				Message: chunk.Error.Message,
+			}
 		}
 		if cb != nil {
 			cb(message.StreamDelta{Event: &message.StreamEventDelta{Type: "openai.chunk"}})

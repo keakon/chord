@@ -241,18 +241,18 @@ func TestTerminalModelPoolFailureForProviderKeepsCompatible400Retryable(t *testi
 	}
 }
 
-func TestGenericReplayRejectionExcludesTransientCapacity400(t *testing.T) {
+func TestAmbiguousReplayRecoveryCandidateRequiresUnclassifiedReplayExposure(t *testing.T) {
 	t.Parallel()
 	provider := NewProviderConfig("gateway", config.ProviderConfig{OfficialAPI: new(false)}, nil)
-	report := modelcompat.NormalizeReport{ForeignNativeReplays: 1}
+	report := modelcompat.NormalizeReport{ReplaySensitiveItems: 1}
 	for _, msg := range []string{
 		"Our servers are currently overloaded. Please try again later.",
 		"Concurrency limit exceeded for user, please retry later",
 		"Service temporarily unavailable",
 		"Rate limit exceeded",
 	} {
-		if isGenericNativeReplayRejection(&APIError{StatusCode: 400, Message: msg}, provider, report) {
-			t.Fatalf("transient capacity error %q must not enter replay degradation", msg)
+		if isAmbiguousReplayRecoveryCandidate(&APIError{StatusCode: 400, Message: msg}, provider, report) {
+			t.Fatalf("transient capacity error %q must not enter an ambiguous replay probe", msg)
 		}
 	}
 	for _, apiErr := range []*APIError{
@@ -260,12 +260,18 @@ func TestGenericReplayRejectionExcludesTransientCapacity400(t *testing.T) {
 		{StatusCode: 400, Type: "rate_limit_error", Message: "bad request"},
 		{StatusCode: 400, Message: `{"error":{"code":"server_busy"},"message":"bad request"}`},
 	} {
-		if isGenericNativeReplayRejection(apiErr, provider, report) {
-			t.Fatalf("structured transient capacity error %#v must not enter replay degradation", apiErr)
+		if isAmbiguousReplayRecoveryCandidate(apiErr, provider, report) {
+			t.Fatalf("structured transient capacity error %#v must not enter an ambiguous replay probe", apiErr)
 		}
 	}
-	if !isGenericNativeReplayRejection(&APIError{StatusCode: 400, Message: "bad request"}, provider, report) {
-		t.Fatal("diagnostic-free compatible-gateway 400 should retain generic replay recovery")
+	if !isAmbiguousReplayRecoveryCandidate(&APIError{StatusCode: 400, Message: "bad request"}, provider, report) {
+		t.Fatal("diagnostic-free compatible-gateway 400 should allow request-scoped replay recovery")
+	}
+	if !isAmbiguousReplayRecoveryCandidate(&APIError{Origin: APIErrorOriginSSEEvent, Code: "future_unknown", Message: "failed"}, provider, report) {
+		t.Fatal("unknown stream event should allow request-scoped replay recovery without a guessed HTTP status")
+	}
+	if isAmbiguousReplayRecoveryCandidate(&APIError{StatusCode: 400, Message: "bad request"}, provider, modelcompat.NormalizeReport{}) {
+		t.Fatal("request without replay-sensitive items must not enter replay recovery")
 	}
 }
 

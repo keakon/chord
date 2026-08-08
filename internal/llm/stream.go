@@ -110,7 +110,9 @@ type sseError struct {
 	Type  string `json:"type"`
 	Error struct {
 		Type    string `json:"type"`
+		Code    string `json:"code"`
 		Message string `json:"message"`
+		Param   string `json:"param"`
 	} `json:"error"`
 }
 
@@ -403,15 +405,12 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse error event: %w", err)
 				}
-				// Some proxies embed the HTTP status in the message (e.g. "HTTP 429 - ...").
-				// Parse it out so retry/fallback logic can classify the error correctly.
-				statusCode := 0
-				if i := strings.Index(ev.Error.Message, "HTTP "); i >= 0 {
-					fmt.Sscanf(ev.Error.Message[i+5:], "%d", &statusCode)
-				}
 				return nil, &APIError{
-					StatusCode: statusCode,
-					Message:    ev.Error.Message,
+					Origin:  APIErrorOriginSSEEvent,
+					Code:    ev.Error.Code,
+					Type:    ev.Error.Type,
+					Param:   ev.Error.Param,
+					Message: ev.Error.Message,
 				}
 
 			case "ping":

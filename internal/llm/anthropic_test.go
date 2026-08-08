@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1185,6 +1186,26 @@ func TestParseSSEStreamAggregatesAnthropicCacheUsage(t *testing.T) {
 	}
 	if got := resp.Usage.CacheWrite1hTokens; got != 13 {
 		t.Fatalf("CacheWrite1hTokens = %d, want 13", got)
+	}
+}
+
+func TestParseSSEStreamPreservesStatuslessMessagesError(t *testing.T) {
+	stream := strings.Join([]string{
+		"event: error",
+		`data: {"type":"error","error":{"type":"future_messages_error","code":"future_unknown_v7","message":"HTTP 400 - upstream failed","param":"messages"}}`,
+		"",
+	}, "\n")
+
+	_, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
+		t.Fatalf("err = %T %v, want *APIError", err, err)
+	}
+	if apiErr.Origin != APIErrorOriginSSEEvent || apiErr.StatusCode != 0 || apiErr.Type != "future_messages_error" || apiErr.Code != "future_unknown_v7" || apiErr.Param != "messages" {
+		t.Fatalf("apiErr = %+v, want status-less Messages SSE fields", apiErr)
+	}
+	if !isRetriable(err) {
+		t.Fatalf("unknown Messages SSE error should remain retryable: %v", err)
 	}
 }
 

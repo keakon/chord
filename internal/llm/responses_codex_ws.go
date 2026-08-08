@@ -55,6 +55,7 @@ func parseCodexWebSocketErrorJSON(msg []byte) (*APIError, http.Header) {
 	}
 	apiErr := &APIError{
 		StatusCode: frame.Status,
+		Origin:     APIErrorOriginWebSocketEvent,
 		Message:    msgText,
 		Code:       frame.Error.Type,
 	}

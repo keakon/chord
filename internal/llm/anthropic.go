@@ -369,6 +369,7 @@ func (a *AnthropicProvider) CompleteStream(
 func parseHTTPErrorFromBytes(statusCode int, header http.Header, body []byte) *APIError {
 	apiErr := &APIError{
 		StatusCode: statusCode,
+		Origin:     APIErrorOriginHTTPResponse,
 	}
 
 	// Parse Retry-After header if present.
