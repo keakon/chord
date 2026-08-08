@@ -79,7 +79,6 @@ func TestGenerateToolDiffForEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWD) })
-	t.Setenv("CHORD_PROJECT_ROOT", dir)
 	path := "file.txt"
 	if err := os.WriteFile(path, []byte("before\nafter\n"), 0o600); err != nil {
 		t.Fatal(err)

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -101,7 +100,7 @@ type restoreReadCandidate struct {
 // are attached to the current runtime agentID rather than the historical
 // main/subagent IDs that originally produced them, so stale/external-change
 // detection continues without replaying the old execution topology.
-func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID string, messages []message.Message) restoreTrackedFileStateResult {
+func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID, projectRoot string, messages []message.Message) restoreTrackedFileStateResult {
 	var result restoreTrackedFileStateResult
 	if tracker == nil || strings.TrimSpace(agentID) == "" || len(messages) == 0 {
 		return result
@@ -151,7 +150,7 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 
 			switch call.name {
 			case tools.NameRead:
-				path, key, ok := restoreSinglePathAndKey(args, call.name)
+				path, key, ok := restoreSinglePathAndKey(args, call.name, projectRoot)
 				if !ok {
 					result.skipInvalidPath()
 					continue
@@ -178,7 +177,7 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 				restoreApplyPatchFileState(candidates, msg.FileState)
 
 			case tools.NameEdit:
-				path, key, ok := restoreSinglePathAndKey(args, call.name)
+				path, key, ok := restoreSinglePathAndKey(args, call.name, projectRoot)
 				if !ok {
 					result.skipInvalidPath()
 					continue
@@ -202,7 +201,7 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID 
 				candidates[key] = candidate
 
 			case tools.NameWrite:
-				path, key, ok := restoreSinglePathAndKey(args, call.name)
+				path, key, ok := restoreSinglePathAndKey(args, call.name, projectRoot)
 				if !ok {
 					result.skipInvalidPath()
 					continue
@@ -297,7 +296,7 @@ func (a *MainAgent) restoreMainTrackedFileState(messages []message.Message) rest
 	if a.fileTrack == nil {
 		a.fileTrack = filelock.NewFileTracker()
 	}
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, messages)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, messages)
 	log.Debugf("restored tracked file state from session restored_usable=%d restored_stale=%d skipped=%d skipped_non_native=%d skipped_non_success=%d skipped_missing_args=%d skipped_invalid_path=%d skipped_state_mismatch=%d skipped_delete_state=%d skipped_missing_durable_state=%d",
 		result.RestoredUsable,
 		result.RestoredStale,
@@ -340,10 +339,10 @@ func restoreEffectiveArgs(msg message.Message, call restoreToolCall) (json.RawMe
 	return append(json.RawMessage(nil), call.args...), true
 }
 
-func restoreSinglePathAndKey(args json.RawMessage, toolName string) (string, string, bool) {
+func restoreSinglePathAndKey(args json.RawMessage, toolName, projectRoot string) (string, string, bool) {
 	path, ok := parseRestoreSinglePath(args)
 	if !ok && (toolName == tools.NameEdit || toolName == tools.NameApplyPatch) {
-		path = trackedEditPathFromArgs(args, os.Getenv("CHORD_PROJECT_ROOT"))
+		path = trackedEditPathFromArgs(args, projectRoot)
 		ok = path != ""
 	}
 	if !ok {

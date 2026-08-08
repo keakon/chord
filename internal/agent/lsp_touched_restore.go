@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"os"
 	"sort"
 
 	"github.com/keakon/chord/internal/message"
@@ -11,7 +10,7 @@ import (
 // RebuildTouchedPathsFromMessages reconstructs the session-scoped touched-file set
 // from persisted tool history. Successful Write/Edit add files; successful Delete
 // removes files. Read-only tools are ignored.
-func RebuildTouchedPathsFromMessages(msgs []message.Message) []string {
+func RebuildTouchedPathsFromMessages(msgs []message.Message, projectRoot string) []string {
 	type callInfo struct {
 		name  string
 		paths []string
@@ -26,7 +25,7 @@ func RebuildTouchedPathsFromMessages(msgs []message.Message) []string {
 			if name != tools.NameWrite && name != tools.NameEdit && name != tools.NameApplyPatch && name != tools.NameDelete {
 				continue
 			}
-			paths := extractHookToolFilePaths(name, tc.Args, os.Getenv("CHORD_PROJECT_ROOT"))
+			paths := extractHookToolFilePaths(name, tc.Args, projectRoot)
 			if len(paths) == 0 {
 				continue
 			}

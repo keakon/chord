@@ -21,7 +21,7 @@ func TestRebuildTouchedPathsFromMessagesTracksWritesEditesAndDeletes(t *testing.
 		{Role: "tool", ToolCallID: "delete-1", Content: "Delete completed.\n\nDeleted (1):\n- foo.go"},
 		{Role: "tool", ToolCallID: "delete-2", Content: "Cancelled"},
 	}
-	got := RebuildTouchedPathsFromMessages(msgs)
+	got := RebuildTouchedPathsFromMessages(msgs, "")
 	want := []string{"bar.go"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("RebuildTouchedPathsFromMessages() = %#v, want %#v", got, want)

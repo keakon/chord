@@ -149,7 +149,7 @@ func configureRuntimeStateProviders(ac *AppContext) {
 			if ac.LSPManager == nil {
 				return
 			}
-			ac.LSPManager.RebuildTouchedPaths(agent.RebuildTouchedPathsFromMessages(msgs))
+			ac.LSPManager.RebuildTouchedPaths(agent.RebuildTouchedPathsFromMessages(msgs, ac.ProjectRoot))
 			ac.LSPManager.RebuildReviewSnapshots(lsp.RebuildReviewSnapshotsFromMessages(msgs))
 			ac.MainAgent.NotifyEnvStatusUpdated()
 		},
