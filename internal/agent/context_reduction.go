@@ -388,6 +388,9 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		if looksLikeSearchResult(ctx) {
 			return requestReductionSearch
 		}
+		if contextReductionIsReadLike(ctx.ToolName) {
+			return requestReductionReadLike
+		}
 		if looksLikeStructuredJSON(ctx.Content) {
 			return requestReductionJSON
 		}
@@ -833,12 +836,162 @@ func looksLikeBuildLikeLog(ctx requestReductionContext) bool {
 
 func reduceSearchLikeOutputSummary(ctx requestReductionContext) string {
 	toolName := toolNameOrUnknown(ctx.ToolName)
-	snippetLines := summarizeSearchResultLines(ctx.Content, 6)
+	snippetLines := summarizeSearchResultLocations(ctx.Content, searchSummaryByteBudget)
+	if len(snippetLines) == 0 {
+		snippetLines = summarizeSearchResultLines(ctx.Content, 6)
+	}
 	if len(snippetLines) == 0 {
 		snippetLines = []string{"- (no preserved matches)"}
 	}
 	scope := reduceSearchScope(ctx)
 	return fmt.Sprintf("[Older %s results summarized for this request to save context; %s; matches=%d]\n%s", toolName, scope, countMeaningfulLines(ctx.Content), strings.Join(snippetLines, "\n"))
+}
+
+const (
+	// searchSummaryByteBudget bounds the location listing of a reduced search
+	// result. Within it every matched file keeps its line numbers: the
+	// path:line list — not the snippets — is what a multi-site task acts on,
+	// and session data shows >3000B search outputs carry ~75 matches at the
+	// median, which fits comfortably as locations but not as snippet groups.
+	searchSummaryByteBudget      = 1400
+	searchSummaryMaxLinesPerFile = 8
+	searchSummarySnippetGroups   = 3
+)
+
+type searchLocationGroup struct {
+	path    string
+	lines   []string
+	matches int
+	snippet string
+}
+
+// summarizeSearchResultLocations renders search output as a location-first
+// listing: every matched path with its line numbers (capped per file), the
+// first few groups keeping one snippet as a content reminder, all within
+// byteBudget. Outputs without path:line matches (glob, rg -l) become a plain
+// budget-bounded line list. Returns nil when nothing was parseable.
+func summarizeSearchResultLocations(content string, byteBudget int) []string {
+	if byteBudget <= 0 {
+		return nil
+	}
+	groups := make([]searchLocationGroup, 0)
+	groupByPath := make(map[string]int)
+	var plain []string
+	plainTotal := 0
+	totalMatches := 0
+	forEachLine(content, func(line string) bool {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			return true
+		}
+		path, lineNo, snippet, ok := parseSearchResultLine(trimmed)
+		if !ok {
+			plainTotal++
+			if len(plain) < 64 {
+				plain = append(plain, compactTextSnippet(trimmed, summaryLineSnippetChars))
+			}
+			return true
+		}
+		totalMatches++
+		idx, seen := groupByPath[path]
+		if !seen {
+			idx = len(groups)
+			groupByPath[path] = idx
+			g := searchLocationGroup{path: path}
+			// Only the leading snippet groups ever render their snippet;
+			// building one per path is wasted allocation on large outputs.
+			if idx < searchSummarySnippetGroups {
+				g.snippet = compactTextSnippet(snippet, 100)
+			}
+			groups = append(groups, g)
+		}
+		g := &groups[idx]
+		g.matches++
+		if len(g.lines) < searchSummaryMaxLinesPerFile && (len(g.lines) == 0 || g.lines[len(g.lines)-1] != lineNo) {
+			g.lines = append(g.lines, lineNo)
+		}
+		return true
+	})
+	if len(groups) == 0 {
+		if len(plain) == 0 {
+			return nil
+		}
+		out := make([]string, 0, len(plain))
+		used := 0
+		for _, line := range plain {
+			cost := len(line) + 3
+			if used+cost > byteBudget {
+				break
+			}
+			out = append(out, "- "+strings.ReplaceAll(line, "\n", " "))
+			used += cost
+		}
+		for omitted := plainTotal - len(out); omitted > 0; omitted++ {
+			marker := fmt.Sprintf("- ... (+%d lines omitted) ...", omitted)
+			if used+len(marker)+1 <= byteBudget {
+				out = append(out, marker)
+				break
+			}
+			if len(out) == 0 {
+				break
+			}
+			last := out[len(out)-1]
+			out = out[:len(out)-1]
+			used -= len(last) + 1
+		}
+		return out
+	}
+	out := make([]string, 0, min(len(groups), 32))
+	used := 0
+	renderedMatches := 0
+	for i := range groups {
+		g := &groups[i]
+		line := "- " + g.path + ": " + strings.Join(g.lines, ", ")
+		if extra := g.matches - len(g.lines); extra > 0 {
+			line += fmt.Sprintf(" (+%d more)", extra)
+		}
+		if len(out) < searchSummarySnippetGroups && g.snippet != "" {
+			line += " — " + strings.ReplaceAll(g.snippet, "\n", " ")
+		}
+		cost := len(line) + 1
+		if used+cost > byteBudget {
+			break
+		}
+		out = append(out, line)
+		used += cost
+		renderedMatches += g.matches
+	}
+	// Non-match lines mixed into a path:line output (tool truncation notes,
+	// invalid-regex warnings) are not rendered; account for them in the tail
+	// so the reader cannot mistake the listed matches for the complete output.
+	otherLinesNote := ""
+	if plainTotal > 0 {
+		otherLinesNote = fmt.Sprintf(", %d other lines", plainTotal)
+	}
+	if len(out) == len(groups) {
+		if plainTotal > 0 {
+			marker := fmt.Sprintf("- ... (+%d other lines omitted) ...", plainTotal)
+			if used+len(marker)+1 <= byteBudget {
+				out = append(out, marker)
+			}
+		}
+		return out
+	}
+	for omittedFiles := len(groups) - len(out); omittedFiles > 0; omittedFiles++ {
+		marker := fmt.Sprintf("- ... (+%d files, %d matches%s omitted) ...", omittedFiles, totalMatches-renderedMatches, otherLinesNote)
+		if used+len(marker)+1 <= byteBudget {
+			out = append(out, marker)
+			break
+		}
+		if len(out) == 0 {
+			break
+		}
+		last := out[len(out)-1]
+		out = out[:len(out)-1]
+		used -= len(last) + 1
+		renderedMatches -= groups[len(out)].matches
+	}
+	return out
 }
 
 func reduceSearchScope(ctx requestReductionContext) string {

@@ -2,12 +2,23 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
+
+func bigSearchOutput(files, matchesPerFile int) string {
+	var sb strings.Builder
+	for i := range files {
+		for j := range matchesPerFile {
+			fmt.Fprintf(&sb, "internal/agent/file%d.go:%d: callSite(target%d)\n", i, 10+j, i)
+		}
+	}
+	return sb.String()
+}
 
 func TestClassifyReadOnlyShellWaitsForReadOnlyAge(t *testing.T) {
 	policy := defaultContextReductionPolicy()
@@ -80,6 +91,96 @@ func TestClassifyJSONDocumentWaitsForStaleAge(t *testing.T) {
 	}
 	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionJSON {
 		t.Fatalf("ndjson class = %q, want json", got)
+	}
+}
+
+func TestClassifyStaleWebFetchJSONKeepsReadLikeSummary(t *testing.T) {
+	policy := defaultContextReductionPolicy()
+	doc := `{"payload":"` + strings.Repeat("x", policy.StaleOutputBytes) + `"}`
+	if len(doc) <= policy.StaleOutputBytes || len(doc) > policy.ReadLikeOutputBytes {
+		t.Fatalf("fixture bytes = %d, want (%d, %d]", len(doc), policy.StaleOutputBytes, policy.ReadLikeOutputBytes)
+	}
+	ctx := requestReductionContext{
+		ToolName:    tools.NameWebFetch,
+		Content:     doc,
+		Age:         policy.StaleAgeTurns,
+		Policy:      policy,
+		ToolResults: policy.MinToolResultsPrune,
+	}
+	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionReadLike {
+		t.Fatalf("web fetch class = %q, want read-like", got)
+	}
+}
+
+func TestSummarizeSearchResultLocationsKeepsAllPathsWithinBudget(t *testing.T) {
+	content := bigSearchOutput(12, 2)
+	lines := summarizeSearchResultLocations(content, searchSummaryByteBudget)
+	if len(lines) != 12 {
+		t.Fatalf("expected one line per file, got %d: %v", len(lines), lines)
+	}
+	for i := range 12 {
+		want := fmt.Sprintf("internal/agent/file%d.go: 10, 11", i)
+		if !strings.Contains(lines[i], want) {
+			t.Fatalf("line %d missing locations %q: %q", i, want, lines[i])
+		}
+	}
+	if !strings.Contains(lines[0], "callSite(target0)") {
+		t.Fatalf("first group should keep a snippet: %q", lines[0])
+	}
+	if strings.Contains(lines[len(lines)-1], "omitted") {
+		t.Fatalf("no omission tail expected for 12 files: %q", lines[len(lines)-1])
+	}
+
+	huge := summarizeSearchResultLocations(bigSearchOutput(300, 1), searchSummaryByteBudget)
+	last := huge[len(huge)-1]
+	if !strings.Contains(last, "matches omitted") {
+		t.Fatalf("expected omission tail for 300 files: %q", last)
+	}
+	if len(huge) <= 7 {
+		t.Fatalf("budgeted listing should keep far more than the old 6 groups, got %d lines", len(huge))
+	}
+	if got := len(strings.Join(huge, "\n")); got > searchSummaryByteBudget {
+		t.Fatalf("summary bytes = %d, budget = %d", got, searchSummaryByteBudget)
+	}
+}
+
+func TestSummarizeSearchResultLocationsCountsPlainLinesInTail(t *testing.T) {
+	// A mixed output: path:line matches plus a tool-level truncation note.
+	content := bigSearchOutput(4, 2) + "(showing first 8 matches within 64 KiB; narrow the pattern for more)\n"
+	lines := summarizeSearchResultLocations(content, searchSummaryByteBudget)
+	if len(lines) == 0 {
+		t.Fatal("expected a rendered summary")
+	}
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, "1 other lines omitted") {
+		t.Fatalf("the dropped truncation note must be accounted for in the tail: %q", last)
+	}
+
+	// When groups themselves overflow the budget, the note joins the file tail.
+	huge := summarizeSearchResultLocations(bigSearchOutput(300, 1)+"note: pattern was reinterpreted\n", searchSummaryByteBudget)
+	tail := huge[len(huge)-1]
+	if !strings.Contains(tail, "matches, 1 other lines omitted") {
+		t.Fatalf("overflow tail must carry the other-lines count: %q", tail)
+	}
+}
+
+func TestSummarizeSearchResultLocationsListsPlainPaths(t *testing.T) {
+	var sb strings.Builder
+	for i := range 40 {
+		fmt.Fprintf(&sb, "internal/tools/generated_%d.go\n", i)
+	}
+	lines := summarizeSearchResultLocations(sb.String(), 400)
+	if len(lines) == 0 {
+		t.Fatal("expected plain path listing")
+	}
+	if !strings.Contains(lines[0], "internal/tools/generated_0.go") {
+		t.Fatalf("first path missing: %q", lines[0])
+	}
+	if !strings.Contains(lines[len(lines)-1], "omitted") {
+		t.Fatalf("expected omission tail once the budget is exhausted: %q", lines[len(lines)-1])
+	}
+	if got := len(strings.Join(lines, "\n")); got > 400 {
+		t.Fatalf("plain summary bytes = %d, budget = 400", got)
 	}
 }
 
