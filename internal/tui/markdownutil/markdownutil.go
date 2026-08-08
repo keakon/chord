@@ -15,6 +15,155 @@ func NormalizeNewlines(s string) string {
 	return strings.ReplaceAll(s, "\r", "\n")
 }
 
+// NormalizeAdjacentStrong separates adjacent strong spans for renderers that
+// interpret the four delimiter characters in **a****b** as literal content.
+// Code fences and inline code are left untouched because their asterisks are
+// literal text, not Markdown emphasis delimiters.
+func NormalizeAdjacentStrong(content string) string {
+	if content == "" || !strings.Contains(content, "****") {
+		return content
+	}
+
+	var out strings.Builder
+	var fence Fence
+	var (
+		inFence         bool
+		inlineCodeTicks int
+		inStrong        bool
+	)
+	for _, line := range strings.SplitAfter(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if inFence {
+			out.WriteString(line)
+			if IsFenceClose(line, fence) {
+				inFence = false
+				fence = Fence{}
+			}
+			continue
+		}
+		if inlineCodeTicks == 0 {
+			if parsed, ok := ParseFenceLine(line); ok {
+				out.WriteString(line)
+				fence = parsed
+				inFence = true
+				inStrong = false
+				continue
+			}
+		}
+		// A line made only of asterisks is a possible thematic break, not two
+		// adjacent strong spans.
+		if inlineCodeTicks == 0 && trimmed != "" && strings.Trim(trimmed, "*") == "" {
+			out.WriteString(line)
+			inStrong = false
+			continue
+		}
+
+		for i := 0; i < len(line); {
+			if line[i] == '`' {
+				n := 1
+				for i+n < len(line) && line[i+n] == '`' {
+					n++
+				}
+				if inlineCodeTicks > 0 {
+					if n == inlineCodeTicks {
+						inlineCodeTicks = 0
+					}
+				} else if !markdownDelimiterEscaped(line, i) {
+					inlineCodeTicks = n
+				}
+				out.WriteString(line[i : i+n])
+				i += n
+				continue
+			}
+			if inlineCodeTicks == 0 && line[i] == '*' {
+				n := 1
+				for i+n < len(line) && line[i+n] == '*' {
+					n++
+				}
+				if !markdownDelimiterEscaped(line, i) {
+					canOpen := i+n < len(line) && !markdownDelimiterWhitespace(line[i+n])
+					canClose := i > 0 && !markdownDelimiterWhitespace(line[i-1])
+					switch {
+					case n == 4 && inStrong && canOpen && canClose && hasClosingStrongDelimiter(line, i+n):
+						out.WriteString("**<!--chord-adjacent-strong-->**")
+						i += n
+						continue
+					case n == 2 && inStrong && canClose:
+						inStrong = false
+					case n == 2 && canOpen:
+						inStrong = true
+					}
+				}
+				out.WriteString(line[i : i+n])
+				i += n
+				continue
+			}
+			out.WriteByte(line[i])
+			i++
+		}
+		if trimmed == "" {
+			// Neither inline code nor emphasis can span a blank line, so a
+			// dangling backtick or ** in one paragraph must not disable
+			// normalization (or fence detection) for the rest of the document.
+			inlineCodeTicks = 0
+			inStrong = false
+		}
+	}
+	return out.String()
+}
+
+func hasClosingStrongDelimiter(line string, offset int) bool {
+	inlineCodeTicks := 0
+	for i := offset; i < len(line); {
+		if line[i] == '`' {
+			n := 1
+			for i+n < len(line) && line[i+n] == '`' {
+				n++
+			}
+			if inlineCodeTicks > 0 {
+				if n == inlineCodeTicks {
+					inlineCodeTicks = 0
+				}
+			} else if !markdownDelimiterEscaped(line, i) {
+				inlineCodeTicks = n
+			}
+			i += n
+			continue
+		}
+		if inlineCodeTicks == 0 && line[i] == '*' {
+			n := 1
+			for i+n < len(line) && line[i+n] == '*' {
+				n++
+			}
+			if n >= 2 && !markdownDelimiterEscaped(line, i) && i > offset && !markdownDelimiterWhitespace(line[i-1]) {
+				return true
+			}
+			i += n
+			continue
+		}
+		i++
+	}
+	return false
+}
+
+func markdownDelimiterEscaped(line string, offset int) bool {
+	backslashes := 0
+	for offset > 0 && line[offset-1] == '\\' {
+		backslashes++
+		offset--
+	}
+	return backslashes%2 == 1
+}
+
+func markdownDelimiterWhitespace(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\r':
+		return true
+	default:
+		return false
+	}
+}
+
 func FirstFenceInfoField(info string) string {
 	if fields := strings.Fields(strings.TrimSpace(info)); len(fields) > 0 {
 		return fields[0]

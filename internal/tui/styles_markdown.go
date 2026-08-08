@@ -97,10 +97,15 @@ func renderMarkdownContent(content string, width int) (lines []string) {
 	}
 	content = sanitizeDisplayText(content)
 	content = markdownutil.RepairForDisplay(content)
+	// The adjacent-strong marker is glamour vocabulary: every non-glamour
+	// fallback below must render the pre-normalization text, or the marker
+	// would surface verbatim in the output.
+	fallback := content
+	content = markdownutil.NormalizeAdjacentStrong(content)
 	defer func() {
 		if recover() != nil {
 			resetMarkdownRenderer()
-			lines = wrapText(content, width)
+			lines = wrapText(fallback, width)
 		}
 	}()
 	if glamourContentRenderer == nil || glamourContentRendererWidth != width {
@@ -110,14 +115,14 @@ func renderMarkdownContent(content string, width int) (lines []string) {
 			glamour.WithInlineTableLinks(true),
 		)
 		if err != nil {
-			return wrapText(content, width)
+			return wrapText(fallback, width)
 		}
 		glamourContentRenderer = r
 		glamourContentRendererWidth = width
 	}
 	out, err := renderMarkdownWithGlamour(glamourContentRenderer, content)
 	if err != nil {
-		return wrapText(content, width)
+		return wrapText(fallback, width)
 	}
 	out = strings.TrimLeft(out, "\n\r")
 	out = strings.TrimRight(out, "\n")

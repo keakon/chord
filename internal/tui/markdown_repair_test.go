@@ -59,6 +59,57 @@ func TestRepairMarkdownForDisplayClosesUnterminatedFence(t *testing.T) {
 	}
 }
 
+func TestNormalizeAdjacentStrong(t *testing.T) {
+	input := "**a****b**"
+	got := markdownutil.NormalizeAdjacentStrong(input)
+	if got != "**a**<!--chord-adjacent-strong-->**b**" {
+		t.Fatalf("normalized adjacent strong = %q", got)
+	}
+}
+
+func TestNormalizeAdjacentStrongPreservesLiteralAsterisks(t *testing.T) {
+	inputs := []string{
+		"```text\n**a****b**\n```\n\n`**a****b**`\n\n****\n",
+		"a****b",
+		"**a****b",
+		"**a****b `**`",
+		"``one ` **a****b** two``",
+		"`**a\n****b**`",
+		`\**a****b**`,
+		// A dangling backtick before the fence must not carry inline-code
+		// state across the blank line: the fence must still be recognized so
+		// its content is never rewritten.
+		"para `odd\n\n```\nend`\nx**y (int****)q**r\n```\n",
+	}
+	for _, input := range inputs {
+		if got := markdownutil.NormalizeAdjacentStrong(input); got != input {
+			t.Errorf("NormalizeAdjacentStrong(%q) = %q", input, got)
+		}
+	}
+}
+
+func TestNormalizeAdjacentStrongRecoversAfterDanglingBacktick(t *testing.T) {
+	input := "opens `dangling tick\n\n**a****b** tail\n"
+	want := "opens `dangling tick\n\n**a**<!--chord-adjacent-strong-->**b** tail\n"
+	if got := markdownutil.NormalizeAdjacentStrong(input); got != want {
+		t.Fatalf("NormalizeAdjacentStrong(%q) = %q, want %q", input, got, want)
+	}
+}
+
+func TestRenderMarkdownContentSupportsAdjacentStrong(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	resetMarkdownRenderer()
+	lines := renderMarkdownContent("**a****b**", 40)
+	joined := strings.Join(lines, "\n")
+	plain := stripANSI(joined)
+	if strings.Contains(plain, "****") || !strings.Contains(plain, "ab") {
+		t.Fatalf("adjacent strong rendered incorrect text: %q", plain)
+	}
+	if strings.Count(joined, "\x1b[") < 2 {
+		t.Fatalf("expected ANSI styling for both adjacent strong spans: %q", joined)
+	}
+}
+
 func TestRepairMarkdownForDisplayClosesUnterminatedTildeFence(t *testing.T) {
 	input := "## Sample\n\n~~~md\nbody\n"
 	got := markdownutil.RepairForDisplay(input)
@@ -176,6 +227,28 @@ func TestRenderMarkdownContentFallsBackOnRendererError(t *testing.T) {
 	joined := stripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(joined, "Summary") || !strings.Contains(joined, "body") {
 		t.Fatalf("expected plain markdown fallback content, got %q", joined)
+	}
+}
+
+func TestRenderMarkdownContentFallbackHidesAdjacentStrongMarker(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	resetMarkdownRenderer()
+	originalRender := renderMarkdownWithGlamour
+	renderMarkdownWithGlamour = func(_ *glamour.TermRenderer, _ string) (string, error) {
+		return "", errors.New("render failed")
+	}
+	t.Cleanup(func() {
+		renderMarkdownWithGlamour = originalRender
+		resetMarkdownRenderer()
+	})
+
+	lines := renderMarkdownContent("**a****b**", 40)
+	joined := stripANSI(strings.Join(lines, "\n"))
+	if strings.Contains(joined, "chord-adjacent-strong") {
+		t.Fatalf("fallback leaked the internal marker: %q", joined)
+	}
+	if !strings.Contains(joined, "**a****b**") {
+		t.Fatalf("fallback must show the original text, got %q", joined)
 	}
 }
 
