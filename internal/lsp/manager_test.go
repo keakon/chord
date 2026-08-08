@@ -360,7 +360,7 @@ func TestCurrentReviewSnapshotsIncludesCleanConnectedServer(t *testing.T) {
 	mgr.clients["gopls"] = &Client{}
 
 	got := mgr.CurrentReviewSnapshots(path)
-	want := []message.LSPReview{{ServerID: "gopls", Errors: 0, Warnings: 0}}
+	want := []message.LSPReview{{Path: path, ServerID: "gopls", Errors: 0, Warnings: 0}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("CurrentReviewSnapshots() = %#v, want %#v", got, want)
 	}

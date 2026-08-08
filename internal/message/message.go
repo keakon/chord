@@ -102,6 +102,7 @@ func (s *ToolFileState) Clone() *ToolFileState {
 }
 
 type LSPReview struct {
+	Path     string `json:"path,omitempty"`
 	ServerID string `json:"server_id,omitempty"`
 	Errors   int    `json:"errors,omitempty"`
 	Warnings int    `json:"warnings,omitempty"`
@@ -158,7 +159,7 @@ type Message struct {
 	FileState                 *ToolFileState        `json:"file_state,omitempty"`                  // durable file-state metadata for restore-time safety sentinels
 	ToolChangedPaths          []string              `json:"tool_changed_paths,omitempty"`          // runtime-observed workspace paths attributed to this tool result
 	FileAttributionIncomplete bool                  `json:"file_attribution_incomplete,omitempty"` // successful mutation could not be mapped to exact workspace paths
-	LSPReviews                []LSPReview           `json:"lsp_reviews,omitempty"`                 // per-server last-review snapshot for the directly edited file only
+	LSPReviews                []LSPReview           `json:"lsp_reviews,omitempty"`                 // per-file, per-server last-review snapshots for directly edited files
 	Audit                     *ToolArgsAudit        `json:"audit,omitempty"`                       // tool-call audit metadata when effective args differ after confirmation
 	IsCompactionSummary       bool                  `json:"is_compaction_summary,omitempty"`       // first user message after compaction (summary of archived history)
 	CompactionFileRevisions   map[string]string     `json:"compaction_file_revisions,omitempty"`   // key-file revisions captured when this checkpoint was created

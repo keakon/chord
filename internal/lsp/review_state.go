@@ -172,7 +172,7 @@ func (m *Manager) currentReviewSnapshots(path string) []message.LSPReview {
 	out := make([]message.LSPReview, 0, len(serverIDs))
 	for _, serverID := range serverIDs {
 		counts := m.reviewCountsForPathLocked(serverID, path)
-		out = append(out, message.LSPReview{ServerID: serverID, Errors: counts.errors, Warnings: counts.warnings})
+		out = append(out, message.LSPReview{Path: path, ServerID: serverID, Errors: counts.errors, Warnings: counts.warnings})
 	}
 	return out
 }
@@ -322,12 +322,12 @@ func (m *Manager) RebuildReviewSnapshots(items []ReviewedFileSnapshot) {
 }
 
 // RebuildReviewSnapshotsFromMessages reconstructs the per-file last-review
-// snapshots used by the LSP sidebar/info panel. Only the directly edited file's
+// snapshots used by the LSP sidebar/info panel. Only directly edited files'
 // own diagnostics count; diagnostics in other files from the same tool result are ignored.
 func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSnapshot {
 	type callInfo struct {
-		name string
-		path string
+		name  string
+		paths []string
 	}
 	calls := make(map[string]callInfo)
 	for _, msg := range msgs {
@@ -336,14 +336,11 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 		}
 		for _, tc := range msg.ToolCalls {
 			toolName := toolname.Normalize(tc.Name)
-			if toolName != toolname.Write && toolName != toolname.Edit && toolName != toolname.Delete {
+			if toolName != toolname.Write && toolName != toolname.Edit && toolName != toolname.ApplyPatch && toolName != toolname.Delete {
 				continue
 			}
 			paths := extractReviewFilePaths(tc.Args)
-			info := callInfo{name: toolName}
-			if len(paths) > 0 {
-				info.path = paths[0]
-			}
+			info := callInfo{name: toolName, paths: paths}
 			calls[tc.ID] = info
 		}
 	}
@@ -351,42 +348,85 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 		return nil
 	}
 	byKey := make(map[string]ReviewedFileSnapshot)
+	deletePaths := func(paths []string) {
+		if len(paths) == 0 {
+			return
+		}
+		for key, snap := range byKey {
+			for _, path := range paths {
+				if reviewPathsMatch(snap.Path, path) {
+					delete(byKey, key)
+					break
+				}
+			}
+		}
+	}
+	storeReview := func(path string, review message.LSPReview) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		serverID := strings.TrimSpace(review.ServerID)
+		if serverID == "" {
+			return
+		}
+		key := serverID + "\x00" + path
+		byKey[key] = ReviewedFileSnapshot{Path: path, ServerID: serverID, Errors: review.Errors, Warnings: review.Warnings}
+	}
 	for _, msg := range msgs {
-		if msg.Role != "tool" || !message.ToolResultSucceeded(msg.Content) {
+		succeeded := msg.ToolStatus == message.ToolStatusSuccess ||
+			(msg.ToolStatus == "" && message.ToolResultSucceeded(msg.Content))
+		if msg.Role != "tool" || !succeeded {
 			continue
 		}
 		info, ok := calls[msg.ToolCallID]
 		if !ok {
 			continue
 		}
+		var writePaths, deletedPaths []string
+		if msg.FileState != nil {
+			for _, write := range msg.FileState.Writes {
+				writePaths = append(writePaths, write.Path)
+			}
+			for _, deleted := range msg.FileState.Deletes {
+				deletedPaths = append(deletedPaths, deleted.Path)
+			}
+		}
+		deletePaths(deletedPaths)
 		switch info.name {
 		case toolname.Delete:
-			groups := parseDeleteReviewResult(msg.Content)
-			for _, path := range groups.Deleted {
-				for key, snap := range byKey {
-					if snap.Path == path {
-						delete(byKey, key)
-					}
-				}
+			if len(deletedPaths) == 0 {
+				deletePaths(parseDeleteReviewResult(msg.Content).Deleted)
 			}
-		case toolname.Write, toolname.Edit:
-			if strings.TrimSpace(info.path) == "" {
-				continue
+		case toolname.Write, toolname.Edit, toolname.ApplyPatch:
+			if len(writePaths) == 0 {
+				writePaths = info.paths
 			}
 			if len(msg.LSPReviews) > 0 {
+				var pathless []message.LSPReview
 				for _, review := range msg.LSPReviews {
-					serverID := strings.TrimSpace(review.ServerID)
-					if serverID == "" {
+					if strings.TrimSpace(review.Path) == "" {
+						pathless = append(pathless, review)
 						continue
 					}
-					key := serverID + "\x00" + info.path
-					byKey[key] = ReviewedFileSnapshot{Path: info.path, ServerID: serverID, Errors: review.Errors, Warnings: review.Warnings}
+					if path, ok := canonicalReviewWritePath(review.Path, writePaths); ok {
+						storeReview(path, review)
+					}
+				}
+				// Sessions written before reviews carried their own path only have
+				// unambiguous ownership for single-file tool results.
+				if len(writePaths) == 1 {
+					for _, review := range pathless {
+						storeReview(writePaths[0], review)
+					}
 				}
 				continue
 			}
-			for serverID, counts := range parseDirectFileDiagnostics(msg.Content) {
-				key := serverID + "\x00" + info.path
-				byKey[key] = ReviewedFileSnapshot{Path: info.path, ServerID: serverID, Errors: counts.errors, Warnings: counts.warnings}
+			if len(writePaths) == 1 {
+				for serverID, counts := range parseDirectFileDiagnostics(msg.Content) {
+					key := serverID + "\x00" + writePaths[0]
+					byKey[key] = ReviewedFileSnapshot{Path: writePaths[0], ServerID: serverID, Errors: counts.errors, Warnings: counts.warnings}
+				}
 			}
 		}
 	}
@@ -404,4 +444,47 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 		return out[i].Path < out[j].Path
 	})
 	return out
+}
+
+func canonicalReviewWritePath(reviewPath string, writePaths []string) (string, bool) {
+	reviewPath = strings.TrimSpace(reviewPath)
+	if reviewPath == "" {
+		return "", false
+	}
+	if len(writePaths) == 0 {
+		return reviewPath, true
+	}
+	match := ""
+	for _, path := range writePaths {
+		if !reviewPathsMatch(reviewPath, path) {
+			continue
+		}
+		if match != "" && filepath.Clean(match) != filepath.Clean(path) {
+			return "", false
+		}
+		match = path
+	}
+	return match, strings.TrimSpace(match) != ""
+}
+
+func reviewPathsMatch(a, b string) bool {
+	a = filepath.Clean(strings.TrimSpace(a))
+	b = filepath.Clean(strings.TrimSpace(b))
+	if a == "." || b == "." {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	if filepath.IsAbs(a) == filepath.IsAbs(b) {
+		return false
+	}
+	absPath, relPath := a, b
+	if !filepath.IsAbs(absPath) {
+		absPath, relPath = relPath, absPath
+	}
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return strings.HasSuffix(absPath, string(filepath.Separator)+relPath)
 }

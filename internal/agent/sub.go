@@ -51,7 +51,7 @@ type toolResult struct {
 	DiffAdded        int                 // full added-line count before any diff truncation
 	DiffRemoved      int                 // full removed-line count before any diff truncation
 	FileCreated      bool                // true when Write created a file that did not previously exist
-	LSPReviews       []message.LSPReview // last-review snapshot for the directly edited file only
+	LSPReviews       []message.LSPReview // per-file last-review snapshots for directly edited files
 	FileState        *message.ToolFileState
 	speculativeHooks *speculativeToolHooks
 }
