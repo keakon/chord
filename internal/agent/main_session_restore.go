@@ -37,7 +37,9 @@ type loadedSessionState struct {
 	TaskRecords               map[string]*DurableTaskRecord
 	TaskSettlements           map[taskAttemptKey]*TaskSettlement
 	TaskGroups                map[string]*DurableTaskGroup
+	TaskGroupsDegraded        bool
 	AgentRequests             map[string]*DurableAgentRequest
+	AgentRequestsDegraded     bool
 	ActiveRole                string
 	ModelPoolCurrentModelPool string
 	ModelPoolAgentOverrides   map[string]string
@@ -431,18 +433,34 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	} else {
 		loaded.TaskRecords = taskRecords
 	}
+	settlementMigrationDir := sessionPath
+	// Coordination files degrade like the mailbox and task registry above: a
+	// corrupt file costs that slice of coordination state, not the whole
+	// session restore — the transcript itself is intact either way.
 	if settlements, settlementErr := loadTaskSettlements(sessionPath); settlementErr != nil {
-		return nil, fmt.Errorf("load task settlements: %w", settlementErr)
+		log.Warnf("failed to load task settlements session=%v error=%v", sessionPath, settlementErr)
+		if !isTaskSettlementJournalCorruption(settlementErr) {
+			settlementMigrationDir = ""
+		} else if quarantinePath, quarantineErr := quarantineCorruptTaskSettlementJournal(sessionPath); quarantineErr != nil {
+			// Rebuild settlements in memory only rather than appending after a
+			// corrupt complete line and growing the broken journal every restore.
+			settlementMigrationDir = ""
+			log.Warnf("failed to quarantine corrupt task settlements session=%v error=%v", sessionPath, quarantineErr)
+		} else if quarantinePath != "" {
+			log.Warnf("quarantined corrupt task settlements session=%v path=%v", sessionPath, quarantinePath)
+		}
 	} else {
 		loaded.TaskSettlements = settlements
 	}
 	if groups, groupErr := loadTaskGroups(sessionPath); groupErr != nil {
-		return nil, fmt.Errorf("load task groups: %w", groupErr)
+		log.Warnf("failed to load task groups session=%v error=%v", sessionPath, groupErr)
+		loaded.TaskGroupsDegraded = true
 	} else {
 		loaded.TaskGroups = groups
 	}
 	if requests, requestErr := loadAgentRequests(sessionPath); requestErr != nil {
-		return nil, fmt.Errorf("load agent requests: %w", requestErr)
+		log.Warnf("failed to load agent requests session=%v error=%v", sessionPath, requestErr)
+		loaded.AgentRequestsDegraded = true
 	} else {
 		loaded.AgentRequests = requests
 	}
@@ -470,7 +488,7 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 		log.Warnf("repaired inconsistent SubAgent task tree during restore session=%v", sessionPath)
 	}
 	var settlementErr error
-	loaded.TaskSettlements, settlementErr = migrateLegacyTaskSettlements(sessionPath, loaded.TaskRecords, loaded.TaskSettlements)
+	loaded.TaskSettlements, settlementErr = migrateLegacyTaskSettlements(settlementMigrationDir, loaded.TaskRecords, loaded.TaskSettlements)
 	if settlementErr != nil {
 		return nil, settlementErr
 	}
@@ -681,7 +699,9 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.setTaskRecords(loaded.TaskRecords)
 	a.resetTaskCoordination(a.sessionEpoch, loaded.TaskSettlements)
 	a.resetTaskGroups(loaded.TaskGroups)
+	a.guardDegradedTaskGroupSeq(loaded.TaskGroupsDegraded)
 	a.resetAgentRequests(loaded.AgentRequests)
+	a.guardDegradedAgentRequestSeq(loaded.AgentRequestsDegraded)
 	advanceInstanceCountersForTaskRecords(loaded.TaskRecords)
 	if nextAdhoc := nextAdhocSeqFromTaskRecords(loaded.TaskRecords); nextAdhoc > 0 {
 		a.adhocSeq.Store(nextAdhoc)

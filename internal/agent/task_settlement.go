@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +18,18 @@ import (
 type taskAttemptKey struct {
 	TaskID  string
 	Attempt uint64
+}
+
+type taskSettlementJournalCorruptionError struct {
+	err error
+}
+
+func (e *taskSettlementJournalCorruptionError) Error() string { return e.err.Error() }
+func (e *taskSettlementJournalCorruptionError) Unwrap() error { return e.err }
+
+func isTaskSettlementJournalCorruption(err error) bool {
+	var corruption *taskSettlementJournalCorruptionError
+	return errors.As(err, &corruption)
 }
 
 type TaskSettlement struct {
@@ -53,6 +66,21 @@ func taskSettlementJournalPath(sessionDir string) string {
 		return ""
 	}
 	return filepath.Join(sessionDir, "subagents", "task-settlements.jsonl")
+}
+
+func quarantineCorruptTaskSettlementJournal(sessionDir string) (string, error) {
+	path := taskSettlementJournalPath(sessionDir)
+	if path == "" {
+		return "", nil
+	}
+	quarantinePath := fmt.Sprintf("%s.corrupt-%d", path, time.Now().UnixNano())
+	if err := os.Rename(path, quarantinePath); err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("quarantine corrupt task settlement journal: %w", err)
+	}
+	return quarantinePath, nil
 }
 
 func canonicalTaskSettlement(settlement *TaskSettlement) ([]byte, error) {
@@ -105,17 +133,17 @@ func loadTaskSettlements(sessionDir string) (map[taskAttemptKey]*TaskSettlement,
 			if i == len(lines)-1 && len(data) > 0 && data[len(data)-1] != '\n' {
 				break
 			}
-			return nil, fmt.Errorf("decode task settlement journal line %d: %w", i+1, err)
+			return nil, &taskSettlementJournalCorruptionError{err: fmt.Errorf("decode task settlement journal line %d: %w", i+1, err)}
 		}
 		canonical, err := canonicalTaskSettlement(&settlement)
 		if err != nil {
-			return nil, fmt.Errorf("validate task settlement journal line %d: %w", i+1, err)
+			return nil, &taskSettlementJournalCorruptionError{err: fmt.Errorf("validate task settlement journal line %d: %w", i+1, err)}
 		}
 		key := taskAttemptKey{TaskID: strings.TrimSpace(settlement.TaskID), Attempt: settlement.Attempt}
 		if existing := out[key]; existing != nil {
 			existingCanonical, _ := canonicalTaskSettlement(existing)
 			if !bytes.Equal(existingCanonical, canonical) {
-				return nil, fmt.Errorf("conflicting task settlements for task %s attempt %d", key.TaskID, key.Attempt)
+				return nil, &taskSettlementJournalCorruptionError{err: fmt.Errorf("conflicting task settlements for task %s attempt %d", key.TaskID, key.Attempt)}
 			}
 			continue
 		}

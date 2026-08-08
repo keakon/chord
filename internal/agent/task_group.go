@@ -248,3 +248,17 @@ func (a *MainAgent) resetTaskGroups(groups map[string]*DurableTaskGroup) {
 	a.subs.mu.Unlock()
 	a.taskGroupSeq.Store(nextTaskGroupSeq(groups))
 }
+
+// guardDegradedTaskGroupSeq raises the group ID sequence to a wall-clock floor
+// after a soft-degraded restore dropped the task-groups file. The corrupt file
+// may have named groups the restored transcript still references; restarting
+// the sequence at group-1 would alias those references onto unrelated new
+// groups, silently resolving collects against the wrong member set.
+func (a *MainAgent) guardDegradedTaskGroupSeq(degraded bool) {
+	if a == nil || !degraded {
+		return
+	}
+	if floor := uint64(time.Now().Unix()); a.taskGroupSeq.Load() < floor {
+		a.taskGroupSeq.Store(floor)
+	}
+}

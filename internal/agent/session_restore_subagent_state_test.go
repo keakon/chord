@@ -88,6 +88,116 @@ func TestLoadSessionUsesCompactedMailboxStateAndPreservesSequence(t *testing.T) 
 	}
 }
 
+func TestLoadSessionQuarantinesCorruptTaskSettlementJournal(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "corrupt-task-settlements")
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "resume this session"}); err != nil {
+		t.Fatalf("PersistMessage(main): %v", err)
+	}
+	rm.Close()
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	record := &DurableTaskRecord{
+		TaskID:            "task-complete",
+		Attempt:           1,
+		State:             string(SubAgentStateCompleted),
+		LifecycleRevision: 2,
+		LastSummary:       "done",
+		UpdatedAt:         time.Now(),
+	}
+	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
+	if err := a.persistTaskRegistry(); err != nil {
+		t.Fatalf("persistTaskRegistry: %v", err)
+	}
+	journalPath := taskSettlementJournalPath(sessionDir)
+	if err := os.WriteFile(journalPath, []byte("not-json\n"), 0o600); err != nil {
+		t.Fatalf("write corrupt settlement journal: %v", err)
+	}
+
+	loaded, err := a.loadSessionState(sessionDir)
+	if err != nil {
+		t.Fatalf("loadSessionState: %v", err)
+	}
+	key := taskAttemptKey{TaskID: record.TaskID, Attempt: record.Attempt}
+	if loaded.TaskSettlements[key] == nil {
+		t.Fatalf("missing reconstructed settlement: %v", loaded.TaskSettlements)
+	}
+	if _, err := loadTaskSettlements(sessionDir); err != nil {
+		t.Fatalf("replacement settlement journal remains corrupt: %v", err)
+	}
+	quarantined, err := filepath.Glob(journalPath + ".corrupt-*")
+	if err != nil {
+		t.Fatalf("glob quarantined journals: %v", err)
+	}
+	if len(quarantined) != 1 {
+		t.Fatalf("quarantined journals = %v, want one", quarantined)
+	}
+}
+
+func TestLoadSessionDegradesCorruptCoordinationFiles(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "corrupt-coordination")
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "resume this session"}); err != nil {
+		t.Fatalf("PersistMessage(main): %v", err)
+	}
+	rm.Close()
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	for _, path := range []string{taskGroupsPath(sessionDir), agentRequestsPath(sessionDir)} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+			t.Fatalf("write corrupt %s: %v", path, err)
+		}
+	}
+
+	loaded, err := a.loadSessionState(sessionDir)
+	if err != nil {
+		t.Fatalf("corrupt coordination files must degrade the slice, not fail restore: %v", err)
+	}
+	if !loaded.TaskGroupsDegraded {
+		t.Fatal("TaskGroupsDegraded flag not set for a corrupt task-groups file")
+	}
+	if !loaded.AgentRequestsDegraded {
+		t.Fatal("AgentRequestsDegraded flag not set for a corrupt agent-requests file")
+	}
+	if len(loaded.TaskGroups) != 0 || len(loaded.AgentRequests) != 0 {
+		t.Fatalf("degraded coordination state = %v / %v, want empty", loaded.TaskGroups, loaded.AgentRequests)
+	}
+}
+
+func TestGuardDegradedTaskGroupSeqAvoidsIDReuse(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.guardDegradedTaskGroupSeq(false)
+	if got := a.taskGroupSeq.Load(); got != 0 {
+		t.Fatalf("a healthy restore must keep the loaded sequence, got %d", got)
+	}
+	// After a degraded restore the transcript may still reference old
+	// group-N IDs; the wall-clock floor keeps new IDs disjoint from them.
+	a.guardDegradedTaskGroupSeq(true)
+	if got := a.taskGroupSeq.Load(); got < 1_700_000_000 {
+		t.Fatalf("a degraded restore must raise the sequence floor, got %d", got)
+	}
+}
+
+func TestGuardDegradedAgentRequestSeqAvoidsIDReuse(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.guardDegradedAgentRequestSeq(false)
+	if got := a.agentRequestSeq.Load(); got != 0 {
+		t.Fatalf("a healthy restore must keep the loaded sequence, got %d", got)
+	}
+	// The restored transcript and mailbox may still reference corr-N IDs from
+	// the dropped file; the wall-clock floor keeps new IDs disjoint so replies
+	// to old requests cannot resolve against unrelated new ones.
+	a.guardDegradedAgentRequestSeq(true)
+	if got := a.agentRequestSeq.Load(); got < 1_700_000_000 {
+		t.Fatalf("a degraded restore must raise the sequence floor, got %d", got)
+	}
+}
+
 func TestRestoreLoadedSubAgentsPreservesCompletedTaskState(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
