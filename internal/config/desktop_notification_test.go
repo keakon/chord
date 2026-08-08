@@ -61,3 +61,17 @@ providers:
 		t.Fatal("expected desktop_notification omitted (nil)")
 	}
 }
+
+func TestConfigYAML_DesktopNotificationForeground(t *testing.T) {
+	const raw = `
+desktop_notification: true
+desktop_notification_foreground: false
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if cfg.DesktopNotificationForeground == nil || *cfg.DesktopNotificationForeground {
+		t.Fatal("expected desktop_notification_foreground: false")
+	}
+}

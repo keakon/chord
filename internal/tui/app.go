@@ -300,11 +300,12 @@ type Model struct {
 	activeToast     *toastItem
 	toastGeneration uint64
 
-	// OSC terminal notifications (local TUI): emit when idle and terminal unfocused.
-	terminalAppFocused           bool
-	desktopNotificationsEnabled  bool
-	oscNotifyOut                 io.Writer
-	terminalNotificationProtocol terminalNotificationProtocol
+	// OSC terminal notifications (local TUI), optionally suppressed while focused.
+	terminalAppFocused             bool
+	desktopNotificationsEnabled    bool
+	desktopNotificationsForeground bool
+	oscNotifyOut                   io.Writer
+	terminalNotificationProtocol   terminalNotificationProtocol
 
 	visibilityState
 	cadenceProfiles cadenceProfiles
@@ -565,11 +566,11 @@ func (m *Model) SetInstanceID(id string) {
 	m.instanceID = strings.TrimSpace(id)
 }
 
-// SetDesktopNotification configures terminal idle notifications when the
-// terminal loses focus. Pass nil out to disable writes (e.g. non-TTY). Local
-// TUI only.
-func (m *Model) SetDesktopNotification(enabled bool, out io.Writer) {
+// SetDesktopNotification configures local TUI terminal notifications. When
+// foreground is false, notifications are suppressed while the terminal is focused.
+func (m *Model) SetDesktopNotification(enabled, foreground bool, out io.Writer) {
 	m.desktopNotificationsEnabled = enabled
+	m.desktopNotificationsForeground = foreground
 	m.oscNotifyOut = out
 }
 

@@ -81,7 +81,7 @@ func (m *Model) maybeTerminalNotifyCmd(msg string) tea.Cmd {
 	if !m.desktopNotificationsEnabled || m.oscNotifyOut == nil {
 		return nil
 	}
-	if m.terminalAppFocused {
+	if !m.desktopNotificationsForeground && m.terminalAppFocused {
 		return nil
 	}
 	w := m.oscNotifyOut

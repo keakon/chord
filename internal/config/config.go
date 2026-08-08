@@ -41,10 +41,13 @@ type Config struct {
 	Skills         SkillsConfig         `json:"skills" yaml:"skills"`                         // additional skill paths
 	ConfirmTimeout int                  `json:"confirm_timeout" yaml:"confirm_timeout"`       // confirmation timeout in seconds (0 = infinite, default)
 	Diff           DiffConfig           `json:"diff" yaml:"diff"`                             // TUI diff rendering options
-	// DesktopNotification, when true, enables terminal idle notifications in local TUI (terminal unfocused).
+	// DesktopNotification, when true, enables terminal notifications in local TUI.
 	// Chord auto-selects the terminal OSC protocol by environment (for example, OSC 777 vs OSC 9).
 	// YAML: desktop_notification: true
 	DesktopNotification *bool `json:"desktop_notification,omitempty" yaml:"desktop_notification,omitempty"`
+	// DesktopNotificationForeground controls notifications while the TUI is focused.
+	// Nil defaults to true. YAML: desktop_notification_foreground: true
+	DesktopNotificationForeground *bool `json:"desktop_notification_foreground,omitempty" yaml:"desktop_notification_foreground,omitempty"`
 	// PreventSleep, when true, prevents macOS idle sleep while any agent is active (non-idle). YAML: prevent_sleep: true
 	// Only effective in the local TUI.
 	PreventSleep        *bool                      `json:"prevent_sleep,omitempty" yaml:"prevent_sleep,omitempty"`
@@ -1258,28 +1261,29 @@ func validateRemovedContextReductionKeys(raw map[string]any) error {
 }
 
 var projectScopedTopLevelKeys = map[string]bool{
-	"providers":            true,
-	"model_pools":          true,
-	"orchestration":        true,
-	"context":              true,
-	"thinking_translation": true,
-	"skills":               true,
-	"confirm_timeout":      true,
-	"diff":                 true,
-	"desktop_notification": true,
-	"prevent_sleep":        true,
-	"keymap":               true,
-	"commands":             true,
-	"ime_switch_target":    true,
-	"log_level":            true,
-	"lsp":                  true,
-	"mcp":                  true,
-	"hooks":                true,
-	"max_output_tokens":    true,
-	"stream_retry_rounds":  true,
-	"proxy":                true,
-	"web_fetch":            true,
-	"worktree":             true,
+	"providers":                       true,
+	"model_pools":                     true,
+	"orchestration":                   true,
+	"context":                         true,
+	"thinking_translation":            true,
+	"skills":                          true,
+	"confirm_timeout":                 true,
+	"diff":                            true,
+	"desktop_notification":            true,
+	"desktop_notification_foreground": true,
+	"prevent_sleep":                   true,
+	"keymap":                          true,
+	"commands":                        true,
+	"ime_switch_target":               true,
+	"log_level":                       true,
+	"lsp":                             true,
+	"mcp":                             true,
+	"hooks":                           true,
+	"max_output_tokens":               true,
+	"stream_retry_rounds":             true,
+	"proxy":                           true,
+	"web_fetch":                       true,
+	"worktree":                        true,
 }
 
 // projectIgnoredTopLevelKeys are valid global config keys that are

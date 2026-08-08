@@ -168,6 +168,7 @@ skills:
   paths: [/global-skill]
 confirm_timeout: 45
 desktop_notification: false
+desktop_notification_foreground: true
 prevent_sleep: false
 commands:
   /global: global command
@@ -222,6 +223,7 @@ thinking_translation:
   model_pool: fast
   max_chars: 500
 desktop_notification: true
+desktop_notification_foreground: false
 prevent_sleep: true
 commands:
   /project: project command
@@ -282,6 +284,9 @@ keymap:
 	}
 	if mergedCfg.DesktopNotification == nil || !*mergedCfg.DesktopNotification {
 		t.Fatal("expected desktop_notification project override to apply")
+	}
+	if mergedCfg.DesktopNotificationForeground == nil || *mergedCfg.DesktopNotificationForeground {
+		t.Fatal("expected desktop_notification_foreground project override to apply")
 	}
 	if mergedCfg.PreventSleep == nil || !*mergedCfg.PreventSleep {
 		t.Fatal("expected prevent_sleep project override to apply")

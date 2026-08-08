@@ -123,10 +123,14 @@ func (f tuiProgramFactory) build(ac *AppContext) (tuiProgramPlan, error) {
 	}
 	if f.isTerminal(terminalOut.Fd()) {
 		osc9 := false
+		foreground := true
 		if ac != nil && ac.Cfg != nil && ac.Cfg.DesktopNotification != nil {
 			osc9 = *ac.Cfg.DesktopNotification
 		}
-		tuiModel.SetDesktopNotification(osc9, terminalOut)
+		if ac != nil && ac.Cfg != nil && ac.Cfg.DesktopNotificationForeground != nil {
+			foreground = *ac.Cfg.DesktopNotificationForeground
+		}
+		tuiModel.SetDesktopNotification(osc9, foreground, terminalOut)
 	}
 
 	opts = append(opts, tea.WithWindowSize(initialWidth, initialHeight))

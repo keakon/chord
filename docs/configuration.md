@@ -824,15 +824,20 @@ can also be overridden by project-level `.chord/config.yaml` when appropriate.
 
 ```yaml
 desktop_notification: true
+desktop_notification_foreground: true
 ime_switch_target: com.apple.keylayout.ABC
 prevent_sleep: true
 ```
 
 - `desktop_notification`: enables terminal notifications in local TUI mode,
-  mainly when the terminal is unfocused. Chord auto-selects a notification
-  escape sequence by terminal (OSC 9 or OSC 777) and sends notifications for
-  events such as permission confirmations, questions waiting for input, and
-  agents returning to idle.
+  regardless of whether the terminal is focused. Chord auto-selects a
+  notification escape sequence by terminal (OSC 9 or OSC 777) and sends
+  notifications for events such as permission confirmations, questions waiting
+  for input, and agents returning to idle. The terminal controls whether the
+  notification also produces a sound.
+- `desktop_notification_foreground`: controls whether notifications are sent
+  while the TUI is focused. Defaults to `true`; set it to `false` to notify
+  only when the terminal is unfocused.
 - `ime_switch_target`: uses `im-select` (`im-select.exe` on Windows) to switch
   to the specified input method when entering Normal mode, and restore the
   previous input method when returning to Insert mode. This is useful when you
@@ -1104,7 +1109,8 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `skills`                | object                | empty                            | global / project         | `paths: [...]` — additional skill directories beyond the defaults.                                                       |
 | `confirm_timeout`       | int (seconds)         | `0` (no timeout)                 | global / project         | Timeout for confirmation dialogs in TUI; `0` means wait forever.                                                         |
 | `diff`                  | object                | `{inline_max_columns: 200}`      | global / project         | TUI diff rendering. `inline_max_columns` caps one-line inline diff width.                                                |
-| `desktop_notification`  | bool                  | `false`                          | global / project         | Enable local-TUI terminal notifications when the terminal is unfocused; Chord auto-selects OSC 9 or OSC 777 by terminal. (Unsupported terminals ignore the sequence.) |
+| `desktop_notification`  | bool                  | `false`                          | global / project         | Enable local-TUI terminal notifications; Chord auto-selects OSC 9 or OSC 777 by terminal. (Unsupported terminals ignore the sequence.) |
+| `desktop_notification_foreground` | bool | `true` | global / project | Send local-TUI terminal notifications while the terminal is focused. Set to `false` for background-only notifications. |
 | `prevent_sleep`         | bool                  | `false`                          | global / project         | Prevent macOS idle sleep while any agent is active. macOS-only; no-op elsewhere.                                         |
 | `keymap`                | `map[action][]key`    | see [Keybindings](./keybindings.md#action-name-reference) | global / project | Override key bindings. Action names use lower snake_case.                                                                |
 | `commands`              | `map[/cmd]text`       | empty                            | global / project         | Custom slash commands; `"/cmd"` → text inserted as a user message. See [Customization — Custom slash commands](./customization.md#custom-slash-commands). |

@@ -154,7 +154,7 @@ func TestMaybeOSC777NotifyCmd(t *testing.T) {
 	}
 }
 
-func TestMaybeTerminalNotifyCmdSuppressed(t *testing.T) {
+func TestMaybeTerminalNotifyCmdSuppressedWhenDisabled(t *testing.T) {
 	var buf bytes.Buffer
 	m := Model{
 		desktopNotificationsEnabled: false,
@@ -164,10 +164,46 @@ func TestMaybeTerminalNotifyCmdSuppressed(t *testing.T) {
 	if cmd := m.maybeTerminalNotifyCmd("Ready"); cmd != nil {
 		t.Fatal("expected nil cmd when disabled")
 	}
+
+	// Notifications are emitted regardless of whether the terminal is focused;
+	// the terminal decides how to present the OSC notification, including sound.
 	m.desktopNotificationsEnabled = true
+	m.desktopNotificationsForeground = true
 	m.terminalAppFocused = true
+	if cmd := m.maybeTerminalNotifyCmd("Ready"); cmd == nil {
+		t.Fatal("expected notify cmd when focused")
+	}
+}
+
+func TestMaybeTerminalNotifyCmdEmitsWhenFocused(t *testing.T) {
+	var buf bytes.Buffer
+	m := Model{
+		desktopNotificationsEnabled:    true,
+		terminalAppFocused:             true,
+		desktopNotificationsForeground: true,
+		oscNotifyOut:                   &buf,
+		terminalNotificationProtocol:   terminalNotificationOSC9,
+	}
+	cmd := m.maybeTerminalNotifyCmd("Ready")
+	if cmd == nil {
+		t.Fatal("expected notify cmd")
+	}
+	_ = cmd()
+	if got := buf.String(); got != "\x1b]9;Ready\x07" {
+		t.Fatalf("osc sequence = %q", got)
+	}
+}
+
+func TestMaybeTerminalNotifyCmdCanSuppressFocusedNotifications(t *testing.T) {
+	var buf bytes.Buffer
+	m := Model{
+		desktopNotificationsEnabled:    true,
+		desktopNotificationsForeground: false,
+		terminalAppFocused:             true,
+		oscNotifyOut:                   &buf,
+	}
 	if cmd := m.maybeTerminalNotifyCmd("Ready"); cmd != nil {
-		t.Fatal("expected nil cmd when focused")
+		t.Fatal("expected nil cmd when foreground notifications are disabled")
 	}
 }
 
