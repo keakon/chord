@@ -264,21 +264,21 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 			// user-turn GC. Recovery or explicit control actions decide what to do.
 		}
 	}
-	a.subs.mu.Lock()
-	for _, rec := range a.subs.taskRecords {
+	var expiredTaskIDs []string
+	a.subs.mu.RLock()
+	for taskID, rec := range a.subs.taskRecords {
 		if rec == nil || !rec.RuntimeParked || SubAgentState(rec.State) != SubAgentStateWaitingMain {
 			continue
 		}
 		if currentTurn >= rec.LastUpdatedTurn+waitingMainExpiryUserTurns {
-			rec.State = string(SubAgentStateCancelled)
-			rec.ResumePolicy = taskResumePolicyExplicitOnly
-			rec.LastSummary = "expired waiting for main reply"
-			rec.ClosedReason = rec.LastSummary
-			rec.UpdatedAt = time.Now()
-			changed = true
+			expiredTaskIDs = append(expiredTaskIDs, taskID)
 		}
 	}
-	a.subs.mu.Unlock()
+	a.subs.mu.RUnlock()
+	for _, taskID := range expiredTaskIDs {
+		a.settleDetachedTerminalTask(taskID, SubAgentStateCancelled, "expired waiting for main reply", "expired waiting for main reply")
+		changed = true
+	}
 	if changed {
 		a.persistTaskRegistry()
 		a.saveRecoverySnapshot()

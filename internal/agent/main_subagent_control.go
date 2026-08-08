@@ -728,18 +728,23 @@ func (a *MainAgent) stopSubAgentNow(callerAgentID, callerTaskID, taskID, reason 
 					return tools.TaskHandle{}, err
 				}
 			}
-			a.subs.mu.Lock()
-			if rec := a.subs.taskRecords[taskID]; rec != nil {
-				rec.State = string(SubAgentStateCancelled)
-				rec.ResumePolicy = taskResumePolicyExplicitOnly
-				rec.ClosedReason = blankToDefault(reason, "stopped by main agent")
-				rec.LastSummary = rec.ClosedReason
-				rec.UpdatedAt = time.Now()
+			reasonText := blankToDefault(reason, "stopped by main agent")
+			outcome := a.settleDetachedTerminalTask(taskID, SubAgentStateCancelled, reasonText, reasonText)
+			if outcome == "" {
+				return tools.TaskHandle{}, fmt.Errorf("task %s disappeared while stopping parked worker", taskID)
 			}
-			a.subs.mu.Unlock()
-			a.persistTaskRegistry()
-			a.emitToTUI(AgentStatusEvent{AgentID: record.LatestInstanceID, Status: string(SubAgentStateCancelled), Message: blankToDefault(reason, "Stopped by MainAgent")})
-			return tools.TaskHandle{Status: "cancelled", TaskID: taskID, AgentID: record.LatestInstanceID, Message: "parked worker stopped"}, nil
+			handleMessage := "parked worker stopped"
+			eventMessage := blankToDefault(reason, "Stopped by MainAgent")
+			if outcome != SubAgentStateCancelled {
+				handleMessage = fmt.Sprintf("parked worker already %s", outcome)
+				if current := a.taskRecordByTaskID(taskID); current != nil {
+					eventMessage = blankToDefault(current.LastSummary, handleMessage)
+				} else {
+					eventMessage = handleMessage
+				}
+			}
+			a.emitToTUI(AgentStatusEvent{AgentID: record.LatestInstanceID, Status: string(outcome), Message: eventMessage})
+			return tools.TaskHandle{Status: string(outcome), TaskID: taskID, AgentID: record.LatestInstanceID, Message: handleMessage}, nil
 		}
 		return tools.TaskHandle{}, fmt.Errorf("unknown task_id %q; cannot stop a missing worker", taskID)
 	}

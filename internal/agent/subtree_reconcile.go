@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -84,33 +86,23 @@ func (a *MainAgent) cancelTaskTreeVisit(taskID, reason string, visited map[strin
 	}
 	if sub := a.subAgentByTaskID(taskID); sub != nil {
 		sub.cancelCurrentTurnFromLoop()
-		sub.setState(SubAgentStateCancelled, reason)
-		a.noteSubAgentStateTransition(sub, SubAgentStateCancelled)
+		_, _, err := a.commitTerminalTask(sub, SubAgentStateCancelled, reason, reason, nil)
+		if err != nil {
+			log.Warnf("cascade cancel settlement failed task_id=%v error=%v", taskID, err)
+		}
+		status := a.terminalStatusAfterCommit(taskID, SubAgentStateCancelled, err)
 		// parkSubAgent repeats this cleanup on success, but it refuses to park
 		// while the just-cancelled turn still has an LLM request or queued
 		// input in flight — this block is the only cleanup on that path.
 		a.releaseSubAgentSlot(sub)
 		a.fileTrack.ReleaseAll(sub.instanceID)
 		tools.StopAllSpawnedForAgent(sub.instanceID, "terminated with ancestor task")
-		a.persistSubAgentMeta(sub)
-		a.syncTaskRecordFromSub(sub, reason)
-		a.emitToTUI(AgentStatusEvent{AgentID: sub.instanceID, Status: string(SubAgentStateCancelled), Message: reason})
+		a.emitToTUI(AgentStatusEvent{AgentID: sub.instanceID, Status: string(status), Message: reason})
 		a.parkSubAgent(sub.instanceID)
 		return
 	}
 
-	a.subs.mu.Lock()
-	if current := a.subs.taskRecords[taskID]; current != nil && isNonTerminalTaskState(current.State) {
-		next := cloneDurableTaskRecord(current)
-		next.State = string(SubAgentStateCancelled)
-		next.ResumePolicy = taskResumePolicyExplicitOnly
-		next.LastSummary = reason
-		next.ClosedReason = reason
-		next.RuntimeParked = true
-		next.UpdatedAt = time.Now()
-		a.subs.taskRecords[taskID] = next
-	}
-	a.subs.mu.Unlock()
+	a.settleDetachedTerminalTask(taskID, SubAgentStateCancelled, reason, reason)
 }
 
 func repairRestoredTaskTree(records map[string]*DurableTaskRecord) bool {

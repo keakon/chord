@@ -17,6 +17,21 @@ func isTerminalSubAgentState(state SubAgentState) bool {
 	}
 }
 
+// terminalStatusAfterCommit returns the state to report after attempting a
+// terminal commit: the requested state on success, or the record's actual
+// terminal state when an existing settlement won the conflict — reporting the
+// requested state then would contradict the record (for example announcing a
+// cancel for a task that had already completed).
+func (a *MainAgent) terminalStatusAfterCommit(taskID string, requested SubAgentState, err error) SubAgentState {
+	if err == nil {
+		return requested
+	}
+	if rec := a.taskRecordByTaskID(taskID); rec != nil && isTerminalSubAgentState(SubAgentState(rec.State)) {
+		return SubAgentState(rec.State)
+	}
+	return requested
+}
+
 func (a *MainAgent) commitTerminalTask(sub *SubAgent, state SubAgentState, summary, closedReason string, completion *CompletionEnvelope) (*TaskSettlement, bool, error) {
 	if a == nil || sub == nil {
 		return nil, false, fmt.Errorf("missing task runtime")
@@ -122,6 +137,118 @@ func (a *MainAgent) commitTerminalTask(sub *SubAgent, state SubAgentState, summa
 		log.Warnf("task settlement durability degraded task_id=%v attempt=%v error=%v", taskID, settlement.Attempt, persistErr)
 	}
 	return cloneTaskSettlement(settlement), durable, persistErr
+}
+
+// settleDetachedTerminalTask commits a terminal outcome for a task whose
+// SubAgent runtime is gone (parked or already released). It maintains the
+// invariant that a terminal record state always has a matching settlement —
+// collect and retention only trust settlements, so a bare record-state flip
+// would leave waiters blocked until timeout and the record unarchivable. If
+// the attempt was already settled, the existing settlement wins and the record
+// mirrors its outcome instead of the requested state: an earlier real
+// completion must not be rewritten into a cancel, and restore-time repair
+// would revert such a rewrite anyway.
+func (a *MainAgent) settleDetachedTerminalTask(taskID string, state SubAgentState, summary, closedReason string) SubAgentState {
+	taskID = strings.TrimSpace(taskID)
+	if a == nil || taskID == "" || !isTerminalSubAgentState(state) {
+		return ""
+	}
+	summary = strings.TrimSpace(summary)
+
+	a.settlementJournalMu.Lock()
+	defer a.settlementJournalMu.Unlock()
+
+	a.subs.mu.RLock()
+	previous := cloneDurableTaskRecord(a.subs.taskRecords[taskID])
+	a.subs.mu.RUnlock()
+	if previous == nil {
+		return ""
+	}
+	attempt := previous.Attempt
+	if attempt == 0 {
+		attempt = 1
+	}
+	key := taskAttemptKey{TaskID: taskID, Attempt: attempt}
+	a.subs.mu.RLock()
+	existing := cloneTaskSettlement(a.subs.settlements[key])
+	a.subs.mu.RUnlock()
+	if existing == nil && previous.LatestSettlement != nil && previous.LatestSettlement.Attempt == attempt {
+		existing = cloneTaskSettlement(previous.LatestSettlement)
+	}
+
+	settlement := existing
+	durable := previous.SettlementDurable
+	var persistErr error
+	if settlement == nil {
+		settlement = &TaskSettlement{
+			TaskID:           taskID,
+			Attempt:          attempt,
+			TerminalRevision: previous.LifecycleRevision + 1,
+			Outcome:          string(state),
+			Summary:          summary,
+			SettledAt:        time.Now(),
+		}
+		// A terminal record without a settlement is a durability gap (for
+		// example a completion mailbox replayed after a crash), not a live
+		// task: mint the settlement from the record's own outcome so a later
+		// cancel or sweep cannot rewrite a real completion — the same
+		// existing-wins rule applied when a settlement survives.
+		if recorded := SubAgentState(previous.State); isTerminalSubAgentState(recorded) && recorded != state {
+			settlement.Outcome = previous.State
+			settlement.Summary = strings.TrimSpace(previous.LastSummary)
+			settlement.Completion = normalizeCompletionEnvelope(previous.LastCompletion)
+			settlement.ArtifactRefs = mergeArtifactRefs(nil, previous.LastArtifactRefs)
+			if settlement.Completion != nil && settlement.Completion.ResultRef != nil {
+				ref := *settlement.Completion.ResultRef
+				settlement.ResultRef = &ref
+			}
+		}
+		persistErr = appendTaskSettlement(a.sessionDir, settlement)
+		durable = persistErr == nil
+	} else if !durable {
+		persistErr = appendTaskSettlement(a.sessionDir, settlement)
+		durable = persistErr == nil
+	}
+
+	a.subs.mu.Lock()
+	rec := a.subs.taskRecords[taskID]
+	if rec == nil || (rec.Attempt != 0 && rec.Attempt != attempt) {
+		a.subs.mu.Unlock()
+		return ""
+	}
+	next := cloneDurableTaskRecord(rec)
+	next.Attempt = attempt
+	if next.LifecycleRevision < settlement.TerminalRevision {
+		next.LifecycleRevision = settlement.TerminalRevision
+	}
+	next.State = settlement.Outcome
+	next.ResumePolicy = durableTaskResumePolicy(SubAgentState(settlement.Outcome))
+	if settlement.Summary != "" {
+		next.LastSummary = settlement.Summary
+	}
+	next.LastCompletion = normalizeCompletionEnvelope(settlement.Completion)
+	next.LastArtifactRefs = mergeArtifactRefs(next.LastArtifactRefs, settlement.ArtifactRefs)
+	if settlement.Outcome == string(state) {
+		next.ClosedReason = blankToDefault(closedReason, next.ClosedReason)
+	} else if strings.TrimSpace(next.ClosedReason) == "" {
+		next.ClosedReason = settlement.Summary
+	}
+	next.LatestSettlement = cloneTaskSettlement(settlement)
+	next.SettlementDurable = durable
+	next.RuntimeParked = true
+	next.UpdatedAt = time.Now()
+	a.subs.taskRecords[taskID] = next
+	a.subs.settlements[key] = cloneTaskSettlement(settlement)
+	a.subs.notifyTaskChangeLocked()
+	a.subs.mu.Unlock()
+
+	if err := a.persistTaskRegistry(); err != nil && persistErr == nil {
+		persistErr = err
+	}
+	if persistErr != nil {
+		log.Warnf("detached task settlement durability degraded task_id=%v attempt=%v error=%v", taskID, attempt, persistErr)
+	}
+	return SubAgentState(settlement.Outcome)
 }
 
 func (a *MainAgent) retryTaskSettlementDurability(taskID string) (*DurableTaskRecord, error) {

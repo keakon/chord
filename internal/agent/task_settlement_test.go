@@ -244,6 +244,121 @@ func TestCommitTerminalTaskRejectsConflictingCompletion(t *testing.T) {
 	}
 }
 
+func TestSettleDetachedTerminalTaskWritesSettlement(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"task-parked": {
+			TaskID:            "task-parked",
+			Attempt:           1,
+			State:             string(SubAgentStateWaitingMain),
+			RuntimeParked:     true,
+			LifecycleRevision: 3,
+		},
+	})
+
+	a.settleDetachedTerminalTask("task-parked", SubAgentStateCancelled, "stopped by main agent", "stopped by main agent")
+
+	rec := a.taskRecordByTaskID("task-parked")
+	if rec == nil || rec.State != string(SubAgentStateCancelled) || rec.LatestSettlement == nil || !rec.SettlementDurable {
+		t.Fatalf("task record = %#v", rec)
+	}
+	loaded, err := loadTaskSettlements(a.sessionDir)
+	if err != nil {
+		t.Fatalf("loadTaskSettlements: %v", err)
+	}
+	settlement := loaded[taskAttemptKey{TaskID: "task-parked", Attempt: 1}]
+	if settlement == nil || settlement.Outcome != string(SubAgentStateCancelled) {
+		t.Fatalf("journal settlement = %#v, want durable cancelled outcome", settlement)
+	}
+	a.subs.mu.RLock()
+	inMemory := a.subs.settlements[taskAttemptKey{TaskID: "task-parked", Attempt: 1}]
+	a.subs.mu.RUnlock()
+	if inMemory == nil {
+		t.Fatal("in-memory settlement missing; collect would wait forever")
+	}
+}
+
+func TestSettleDetachedTerminalTaskMirrorsUnsettledTerminalRecord(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"task-replayed": {
+			TaskID:            "task-replayed",
+			Attempt:           1,
+			State:             string(SubAgentStateCompleted),
+			LastSummary:       "built and verified",
+			RuntimeParked:     true,
+			LifecycleRevision: 4,
+		},
+	})
+
+	// A completed record without any settlement models the crash window where
+	// the completion mailbox was replayed but the settlement never hit disk. A
+	// later cascade cancel must mint the settlement from the record's own
+	// outcome instead of rewriting the completion into a cancel.
+	outcome := a.settleDetachedTerminalTask("task-replayed", SubAgentStateCancelled, "stopped by main agent", "stopped by main agent")
+	if outcome != SubAgentStateCompleted {
+		t.Fatalf("settle outcome = %q, want completed preserved", outcome)
+	}
+
+	rec := a.taskRecordByTaskID("task-replayed")
+	if rec == nil || rec.State != string(SubAgentStateCompleted) {
+		t.Fatalf("task record = %#v, want completed preserved", rec)
+	}
+	if rec.LastSummary != "built and verified" {
+		t.Fatalf("LastSummary = %q, want the recorded completion summary", rec.LastSummary)
+	}
+	loaded, err := loadTaskSettlements(a.sessionDir)
+	if err != nil {
+		t.Fatalf("loadTaskSettlements: %v", err)
+	}
+	settlement := loaded[taskAttemptKey{TaskID: "task-replayed", Attempt: 1}]
+	if settlement == nil || settlement.Outcome != string(SubAgentStateCompleted) {
+		t.Fatalf("journal settlement = %#v, want completed minted from the record", settlement)
+	}
+	if settlement.Summary != "built and verified" {
+		t.Fatalf("settlement summary = %q, want the recorded completion summary", settlement.Summary)
+	}
+}
+
+func TestSettleDetachedTerminalTaskPreservesExistingOutcome(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "task-done")
+	if _, _, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done", "task completed", nil); err != nil {
+		t.Fatalf("commitTerminalTask: %v", err)
+	}
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, sub.instanceID)
+	a.subs.taskRecords["task-done"].RuntimeParked = true
+	a.subs.mu.Unlock()
+
+	// Stopping a parked task whose attempt already settled must not rewrite
+	// the completed outcome into a cancel: restore-time repair trusts the
+	// journal, so a rewrite would silently revert after restart anyway.
+	handle, err := a.stopSubAgentNow("", "", "task-done", "stopped by main agent")
+	if err != nil {
+		t.Fatalf("stopSubAgentNow: %v", err)
+	}
+	if handle.Status != string(SubAgentStateCompleted) {
+		t.Fatalf("stop status = %q, want completed", handle.Status)
+	}
+
+	rec := a.taskRecordByTaskID("task-done")
+	if rec == nil || rec.State != string(SubAgentStateCompleted) {
+		t.Fatalf("task record state = %#v, want completed preserved", rec)
+	}
+	if rec.ClosedReason != "task completed" {
+		t.Fatalf("ClosedReason = %q, want original completion reason", rec.ClosedReason)
+	}
+	loaded, err := loadTaskSettlements(a.sessionDir)
+	if err != nil {
+		t.Fatalf("loadTaskSettlements: %v", err)
+	}
+	settlement := loaded[taskAttemptKey{TaskID: "task-done", Attempt: 1}]
+	if settlement == nil || settlement.Outcome != string(SubAgentStateCompleted) {
+		t.Fatalf("journal settlement = %#v, want completed preserved", settlement)
+	}
+}
+
 func TestCompletedTaskRehydrateRequiresDurableSettlement(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	blockedRoot := filepath.Join(t.TempDir(), "not-a-directory")
@@ -320,5 +435,67 @@ func TestPersistTaskRegistryDoesNotArchiveNonDurableSettlement(t *testing.T) {
 	}
 	if _, err := a.retryTaskSettlementDurability("task-000"); err != nil {
 		t.Fatalf("retryTaskSettlementDurability: %v", err)
+	}
+}
+
+func TestUserCancelSettlesTaskBackedSubAgents(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	newControllableTestSubAgent(t, a, "task-user-cancel")
+
+	if !a.interruptSubAgentTurnsForUserCancel() {
+		t.Fatal("expected the user cancel to interrupt the live SubAgent")
+	}
+
+	rec := a.taskRecordByTaskID("task-user-cancel")
+	if rec == nil || rec.State != string(SubAgentStateCancelled) {
+		t.Fatalf("task record = %#v, want cancelled", rec)
+	}
+	if rec.LatestSettlement == nil || rec.LatestSettlement.Outcome != string(SubAgentStateCancelled) {
+		t.Fatalf("settlement = %#v, want a cancelled settlement so collect and retention observe the terminal state", rec.LatestSettlement)
+	}
+	loaded, err := loadTaskSettlements(a.sessionDir)
+	if err != nil {
+		t.Fatalf("loadTaskSettlements: %v", err)
+	}
+	if got := loaded[taskAttemptKey{TaskID: "task-user-cancel", Attempt: rec.Attempt}]; got == nil || got.Outcome != string(SubAgentStateCancelled) {
+		t.Fatalf("journal settlement = %#v, want durable cancel", got)
+	}
+}
+
+func TestUserCancelKeepsAlreadySettledOutcome(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "task-user-done")
+	if _, _, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done", "task completed", nil); err != nil {
+		t.Fatalf("commitTerminalTask: %v", err)
+	}
+
+	// A completed settlement is immutable: the interrupt sweeping over a
+	// just-finished SubAgent must not rewrite its outcome into a cancel.
+	a.interruptSubAgentTurnsForUserCancel()
+
+	rec := a.taskRecordByTaskID("task-user-done")
+	if rec == nil || rec.State != string(SubAgentStateCompleted) {
+		t.Fatalf("task record = %#v, want completed preserved", rec)
+	}
+	if rec.LatestSettlement == nil || rec.LatestSettlement.Outcome != string(SubAgentStateCompleted) {
+		t.Fatalf("settlement = %#v, want the completed settlement preserved", rec.LatestSettlement)
+	}
+}
+
+func TestTerminalStatusAfterCommitMirrorsSettledRecord(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "task-mirror")
+	if _, _, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done", "task completed", nil); err != nil {
+		t.Fatalf("commitTerminalTask: %v", err)
+	}
+	_, _, err := a.commitTerminalTask(sub, SubAgentStateCancelled, "stop", "stop", nil)
+	if err == nil {
+		t.Fatal("expected a conflicting settlement error")
+	}
+	if got := a.terminalStatusAfterCommit("task-mirror", SubAgentStateCancelled, err); got != SubAgentStateCompleted {
+		t.Fatalf("status after conflict = %v, want completed mirrored from the record", got)
+	}
+	if got := a.terminalStatusAfterCommit("task-mirror", SubAgentStateCancelled, nil); got != SubAgentStateCancelled {
+		t.Fatalf("status after success = %v, want the requested state", got)
 	}
 }

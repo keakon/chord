@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 
 	"github.com/keakon/golog/log"
 )
@@ -30,11 +31,27 @@ func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
 		interrupted := sub.interruptCurrentTurnWithStatus(ToolResultStatusError, context.Canceled, true)
 		state := sub.State()
 		if interrupted || state == SubAgentStateRunning || state == SubAgentStateIdle || state == SubAgentStateWaitingMain || state == SubAgentStateWaitingDescendant {
-			sub.setState(SubAgentStateCancelled, "stopped by user")
-			a.noteSubAgentStateTransition(sub, SubAgentStateCancelled)
-			a.persistSubAgentMeta(sub)
-			a.syncTaskRecordFromSub(sub, "")
-			a.emitToTUI(AgentStatusEvent{AgentID: sub.instanceID, Status: string(SubAgentStateCancelled), Message: "Stopped by user"})
+			// A task-backed SubAgent must settle its terminal state: collect
+			// and retention only trust settlements, so a bare record flip
+			// would leave task.collect(wait) blocked until timeout and the
+			// record unarchivable until restore-time migration. If the attempt
+			// already settled (the task finished just before the interrupt, or
+			// an in-flight request error raced this path), the existing
+			// outcome wins and the conflict is only logged.
+			status := SubAgentStateCancelled
+			if strings.TrimSpace(sub.taskID) != "" {
+				_, _, err := a.commitTerminalTask(sub, SubAgentStateCancelled, "stopped by user", "stopped by user", nil)
+				if err != nil {
+					log.Warnf("user-cancel settlement failed agent=%v task_id=%v error=%v", sub.instanceID, sub.taskID, err)
+				}
+				status = a.terminalStatusAfterCommit(sub.taskID, SubAgentStateCancelled, err)
+			} else {
+				sub.setState(SubAgentStateCancelled, "stopped by user")
+				a.noteSubAgentStateTransition(sub, SubAgentStateCancelled)
+				a.persistSubAgentMeta(sub)
+				a.syncTaskRecordFromSub(sub, "")
+			}
+			a.emitToTUI(AgentStatusEvent{AgentID: sub.instanceID, Status: string(status), Message: "Stopped by user"})
 			cancelled = true
 		}
 	}
