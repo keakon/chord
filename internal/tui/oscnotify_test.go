@@ -426,3 +426,38 @@ func TestQuestionRequestNotifiesWhileLoopStillBusy(t *testing.T) {
 		t.Fatalf("osc sequence = %q, want question notification while loop is busy", got)
 	}
 }
+
+func TestIdleNotificationIgnoresMidTurnNarrationBeforeToolActivity(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	// A turn whose reply never materialized: narration, then tool activity, and
+	// no assistant block for the final response (for example an output-limit
+	// truncation that produced only thinking).
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, Content: "commit it"})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: "I am on main, checking hunks:"})
+	m.viewport.AppendBlock(&Block{ID: 3, Type: BlockToolCall, ToolName: "shell"})
+	m.viewport.AppendBlock(&Block{ID: 4, Type: BlockToolResult, Content: "diff output"})
+
+	if got, ok := m.lastAssistantOrErrorTextForNotification(); ok {
+		t.Fatalf("notification text = %q, want none: mid-turn narration must not be announced as the turn result", got)
+	}
+	if got := m.idleNotificationText(); got != "Chord: Ready for input" {
+		t.Fatalf("idleNotificationText = %q, want the neutral fallback", got)
+	}
+}
+
+func TestIdleNotificationUsesFinalReplyAfterToolActivity(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, Content: "commit it"})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: "checking:"})
+	m.viewport.AppendBlock(&Block{ID: 3, Type: BlockToolCall, ToolName: "shell"})
+	m.viewport.AppendBlock(&Block{ID: 4, Type: BlockToolResult, Content: "diff output"})
+	m.viewport.AppendBlock(&Block{ID: 5, Type: BlockAssistant, Content: "committed as 4f2e59fc"})
+
+	got, ok := m.lastAssistantOrErrorTextForNotification()
+	if !ok {
+		t.Fatal("expected the final reply to be used for the notification")
+	}
+	if got != "committed as 4f2e59fc" {
+		t.Fatalf("notification text = %q, want the final reply", got)
+	}
+}

@@ -99,6 +99,12 @@ func (m *Model) idleNotificationText() string {
 	return "Chord: Ready for input"
 }
 
+// lastAssistantOrErrorTextForNotification returns the text that describes how
+// the transcript currently ends. The scan stops at the first tool or user block
+// so it cannot reach back past them: assistant text followed by tool activity is
+// mid-turn narration, and a turn whose reply never materialized (for example an
+// output-limit truncation that produced no assistant block) must not be
+// announced with a line the user already read.
 func (m *Model) lastAssistantOrErrorTextForNotification() (string, bool) {
 	if m == nil || m.viewport == nil {
 		return "", false
@@ -116,6 +122,8 @@ func (m *Model) lastAssistantOrErrorTextForNotification() (string, bool) {
 				continue
 			}
 			return content, true
+		case BlockUser, BlockToolCall, BlockToolResult:
+			return "", false
 		}
 	}
 	return "", false
