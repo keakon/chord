@@ -191,6 +191,7 @@ func (a *AnthropicProvider) CompleteStream(
 	// Convert internal messages to Anthropic API format.
 	apiMessages, messageMap := convertMessagesWithMap(messages)
 	at.CacheBoundary = resolveAnthropicCacheBoundary(at.CacheBoundary, messageMap)
+	at.CacheLatestBoundary = resolveAnthropicCacheBoundary(at.CacheLatestBoundary, messageMap)
 
 	// Convert tool definitions with optional cache markers.
 	apiTools := convertToolsWithCache(tools, at)
@@ -428,6 +429,22 @@ func normalizeAnthropicPromptCacheMode(mode string) (string, error) {
 	}
 }
 
+// normalizeAnthropicPromptCacheTTL validates prompt_cache.ttl. Anthropic accepts
+// only the 5-minute default and the 1-hour extended TTL, and rejects anything
+// else with HTTP 400; failing locally reports the bad config instead of burning
+// a request.
+func normalizeAnthropicPromptCacheTTL(ttl string) (string, error) {
+	switch strings.TrimSpace(ttl) {
+	case "", "5m":
+		// "" means the provider default (5m); keep it omitted on the wire.
+		return "", nil
+	case "1h":
+		return "1h", nil
+	default:
+		return "", fmt.Errorf("unsupported anthropic prompt_cache.ttl %q (want \"5m\" or \"1h\")", ttl)
+	}
+}
+
 func validateAnthropicTuning(tuning AnthropicTuning) (AnthropicTuning, error) {
 	tuning.ThinkingType = effectiveAnthropicThinkingType(tuning)
 	switch tuning.ThinkingType {
@@ -465,6 +482,11 @@ func validateAnthropicTuning(tuning AnthropicTuning) (AnthropicTuning, error) {
 		return tuning, err
 	}
 	tuning.PromptCacheMode = mode
+	ttl, err := normalizeAnthropicPromptCacheTTL(tuning.PromptCacheTTL)
+	if err != nil {
+		return tuning, err
+	}
+	tuning.PromptCacheTTL = ttl
 	return tuning, nil
 }
 
@@ -851,7 +873,13 @@ func anthropicToolResultContent(msg message.Message) any {
 // Existing tool breakpoints count toward the Anthropic limit. The stable
 // reduced-prefix boundary is prioritized over the weaker tail assistant marker
 // so long tool loops can reuse the frozen historical surface.
-func applyCacheBreakpoints(system []anthropicContent, messages []anthropicMessage, boundary AnthropicCacheBoundary, existing int) {
+//
+// latest, when valid, is the newest message that survives into the next request
+// byte-identically; it replaces the "last user message" heuristic so a trailing
+// request-scoped overlay never receives the newest breakpoint. ttl is applied to
+// every breakpoint placed here so a configured prompt_cache.ttl is not silently
+// downgraded to the 5-minute default.
+func applyCacheBreakpoints(system []anthropicContent, messages []anthropicMessage, boundary, latest AnthropicCacheBoundary, ttl string, existing int) {
 	remaining := 4 - existing
 	if remaining <= 0 {
 		return
@@ -861,7 +889,7 @@ func applyCacheBreakpoints(system []anthropicContent, messages []anthropicMessag
 		if remaining <= 0 || i < 0 || i >= len(system) || system[i].CacheControl != nil {
 			return false
 		}
-		system[i].CacheControl = &anthropicCacheCtrl{Type: "ephemeral"}
+		system[i].CacheControl = &anthropicCacheCtrl{Type: "ephemeral", TTL: ttl}
 		remaining--
 		return true
 	}
@@ -890,7 +918,7 @@ func applyCacheBreakpoints(system []anthropicContent, messages []anthropicMessag
 			if blocks[j].CacheControl != nil {
 				return false
 			}
-			blocks[j].CacheControl = &anthropicCacheCtrl{Type: "ephemeral"}
+			blocks[j].CacheControl = &anthropicCacheCtrl{Type: "ephemeral", TTL: ttl}
 			messages[i].Content = blocks
 			remaining--
 			return true
@@ -902,7 +930,11 @@ func applyCacheBreakpoints(system []anthropicContent, messages []anthropicMessag
 	if boundary.Valid {
 		markMessageBlock(boundary.MessageIndex, boundary.BlockIndex, true)
 	}
-	if i := lastAnthropicMessageIndex(messages, "user"); i >= 0 {
+	// Newest breakpoint: an explicit durable boundary when the caller supplied
+	// one, otherwise the last user message on the wire.
+	if latest.Valid {
+		markMessageBlock(latest.MessageIndex, latest.BlockIndex, true)
+	} else if i := lastAnthropicMessageIndex(messages, "user"); i >= 0 {
 		markMessageBlock(i, -1, false)
 	}
 	if i := lastAnthropicMessageIndex(messages, "assistant"); i >= 0 {
@@ -969,7 +1001,7 @@ func applyPromptCaching(at AnthropicTuning, req *anthropicRequest) error {
 	case "auto":
 		req.CacheControl = &anthropicCacheCtrl{Type: "ephemeral", TTL: at.PromptCacheTTL}
 	case "explicit":
-		applyCacheBreakpoints(req.System, req.Messages, at.CacheBoundary, countAnthropicToolCacheBreakpoints(req.Tools))
+		applyCacheBreakpoints(req.System, req.Messages, at.CacheBoundary, at.CacheLatestBoundary, at.PromptCacheTTL, countAnthropicToolCacheBreakpoints(req.Tools))
 	}
 	return nil
 }

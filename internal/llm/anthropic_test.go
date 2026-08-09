@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -349,7 +350,7 @@ func TestResolveAnthropicCacheBoundaryAfterUserMessageMerging(t *testing.T) {
 	}
 
 	system := []anthropicContent{{Type: "text", Text: "system"}}
-	applyCacheBreakpoints(system, apiMessages, boundary, 0)
+	applyCacheBreakpoints(system, apiMessages, boundary, AnthropicCacheBoundary{}, "", 0)
 	texts := cacheControlBlockTexts(apiMessages)
 	if len(texts) == 0 || texts[0] != "stable-prefix-end" {
 		t.Fatalf("cache_control texts = %#v, want boundary block first", texts)
@@ -380,7 +381,7 @@ func TestApplyCacheBreakpointsPrioritizesStablePrefixBoundary(t *testing.T) {
 		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "last-user"}}},
 	}
 
-	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{MessageIndex: 0, Valid: true}, 0)
+	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{MessageIndex: 0, Valid: true}, AnthropicCacheBoundary{}, "", 0)
 
 	if system[len(system)-1].CacheControl == nil {
 		t.Fatalf("expected system[-1] cache_control")
@@ -411,7 +412,7 @@ func TestApplyCacheBreakpointsFallsBackToTailWhenNoBoundary(t *testing.T) {
 		{Role: "assistant", Content: []anthropicContent{{Type: "text", Text: "last-assistant"}}},
 	}
 
-	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{}, 0)
+	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{}, AnthropicCacheBoundary{}, "", 0)
 
 	if system[len(system)-1].CacheControl == nil {
 		t.Fatalf("expected system[-1] cache_control")
@@ -438,7 +439,7 @@ func TestApplyCacheBreakpointsRespectsFourBreakpointLimitWithCachedTools(t *test
 	}
 
 	// One tool breakpoint already placed; only three message/system slots remain.
-	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{MessageIndex: 0, Valid: true}, 1)
+	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{MessageIndex: 0, Valid: true}, AnthropicCacheBoundary{}, "", 1)
 
 	total := 0
 	if system[len(system)-1].CacheControl != nil {
@@ -458,10 +459,106 @@ func TestApplyCacheBreakpointsSkipsAlreadyMarkedBlocks(t *testing.T) {
 		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "last-user"}}},
 	}
 
-	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{MessageIndex: 0, Valid: true}, 0)
+	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{MessageIndex: 0, Valid: true}, AnthropicCacheBoundary{}, "", 0)
 
 	if got := countCacheControls(messages); got != 3 {
 		t.Fatalf("expected 3 marked message blocks (boundary reused + assistant + user), got %d", got)
+	}
+}
+
+// TestApplyCacheBreakpointsAppliesConfiguredTTL pins that a configured
+// prompt_cache.ttl reaches every explicit breakpoint. Previously only the tools
+// breakpoint carried the TTL, so system/message breakpoints silently fell back
+// to the 5-minute default in the default explicit mode.
+func TestApplyCacheBreakpointsAppliesConfiguredTTL(t *testing.T) {
+	system := []anthropicContent{{Type: "text", Text: "system"}}
+	messages := []anthropicMessage{
+		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "frozen-prefix-end"}}},
+		{Role: "assistant", Content: []anthropicContent{{Type: "text", Text: "last-assistant"}}},
+		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "last-user"}}},
+	}
+
+	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{MessageIndex: 0, Valid: true}, AnthropicCacheBoundary{}, "1h", 0)
+
+	if got := system[len(system)-1].CacheControl; got == nil || got.TTL != "1h" {
+		t.Fatalf("system cache_control = %+v, want ttl 1h", got)
+	}
+	marked := 0
+	for _, msg := range messages {
+		blocks, ok := msg.Content.([]anthropicContent)
+		if !ok {
+			continue
+		}
+		for _, b := range blocks {
+			if b.CacheControl == nil {
+				continue
+			}
+			marked++
+			if b.CacheControl.TTL != "1h" {
+				t.Fatalf("block %q cache_control = %+v, want ttl 1h", b.Text, b.CacheControl)
+			}
+		}
+	}
+	if marked != 3 {
+		t.Fatalf("marked message blocks = %d, want 3", marked)
+	}
+}
+
+// TestApplyCacheBreakpointsPutsNewestBreakpointOnDurableTail pins that the
+// newest breakpoint lands on the last durable message rather than on a trailing
+// request-scoped overlay, whose bytes are gone next request and would make the
+// cache entry unreadable.
+func TestApplyCacheBreakpointsPutsNewestBreakpointOnDurableTail(t *testing.T) {
+	system := []anthropicContent{{Type: "text", Text: "system"}}
+	messages := []anthropicMessage{
+		{Role: "user", Content: []anthropicContent{{Type: "text", Text: "u1"}}},
+		{Role: "assistant", Content: []anthropicContent{{Type: "text", Text: "last-assistant"}}},
+		{Role: "user", Content: []anthropicContent{
+			{Type: "text", Text: "durable-tail"},
+			{Type: "text", Text: "transient-overlay"},
+		}},
+	}
+
+	latest := AnthropicCacheBoundary{MessageIndex: 2, BlockIndex: 0, Valid: true}
+	applyCacheBreakpoints(system, messages, AnthropicCacheBoundary{}, latest, "", 0)
+
+	texts := cacheControlBlockTexts(messages)
+	for _, text := range texts {
+		if text == "transient-overlay" {
+			t.Fatalf("newest breakpoint landed on the transient overlay (marked: %v)", texts)
+		}
+	}
+	if !slices.Contains(texts, "durable-tail") {
+		t.Fatalf("expected a breakpoint on the durable tail block, marked: %v", texts)
+	}
+}
+
+func TestNormalizeAnthropicPromptCacheTTL(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{in: "", want: ""},
+		{in: "5m", want: ""},
+		{in: " 1h ", want: "1h"},
+		{in: "1h", want: "1h"},
+		{in: "10m", wantErr: true},
+		{in: "3600", wantErr: true},
+	} {
+		got, err := normalizeAnthropicPromptCacheTTL(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("normalizeAnthropicPromptCacheTTL(%q) = %q, want error", tc.in, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("normalizeAnthropicPromptCacheTTL(%q): %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Fatalf("normalizeAnthropicPromptCacheTTL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 

@@ -5520,7 +5520,7 @@ func TestRewriteSessionAfterCompactionPreservesOriginalFirstUserMessage(t *testi
 	}
 }
 
-func TestApplyAnthropicCacheBoundaryHintCountsMetaPrefix(t *testing.T) {
+func TestApplyAnthropicCacheHintsCountsMetaPrefixAndDurableTail(t *testing.T) {
 	newAnthropicAgent := func(t *testing.T) (*MainAgent, *recordingLoopTuningProvider) {
 		t.Helper()
 		a := newTestMainAgent(t, t.TempDir())
@@ -5539,7 +5539,7 @@ func TestApplyAnthropicCacheBoundaryHintCountsMetaPrefix(t *testing.T) {
 		return a, provider
 	}
 
-	readBoundary := func(t *testing.T, a *MainAgent, provider *recordingLoopTuningProvider) llm.AnthropicCacheBoundary {
+	readTuning := func(t *testing.T, a *MainAgent, provider *recordingLoopTuningProvider) llm.AnthropicTuning {
 		t.Helper()
 		if _, err := a.llmClient.CompleteStream(context.Background(), nil, nil, nil); err != nil {
 			t.Fatalf("CompleteStream: %v", err)
@@ -5549,14 +5549,18 @@ func TestApplyAnthropicCacheBoundaryHintCountsMetaPrefix(t *testing.T) {
 		if len(provider.tunes) != 1 {
 			t.Fatalf("len(tunes) = %d, want 1", len(provider.tunes))
 		}
-		return provider.tunes[0].Anthropic.CacheBoundary
+		return provider.tunes[0].Anthropic
+	}
+	readBoundary := func(t *testing.T, a *MainAgent, provider *recordingLoopTuningProvider) llm.AnthropicCacheBoundary {
+		t.Helper()
+		return readTuning(t, a, provider).CacheBoundary
 	}
 
 	t.Run("meta prefix shifts boundary", func(t *testing.T) {
 		a, provider := newAnthropicAgent(t)
-		// stableLen=4 stable-prefix messages, plus 1 reminder + 2 overlay meta
-		// messages prepended before the first user message.
-		a.applyAnthropicCacheBoundaryHint(4, 3)
+		// stableLen=4 stable-prefix messages, plus 1 reminder + 2 meta messages
+		// prepended before the first user message.
+		a.applyAnthropicCacheHints(4, 3, 0)
 		got := readBoundary(t, a, provider)
 		if !got.Valid {
 			t.Fatal("expected a valid cache boundary on an Anthropic explicit-cache client")
@@ -5568,10 +5572,38 @@ func TestApplyAnthropicCacheBoundaryHintCountsMetaPrefix(t *testing.T) {
 
 	t.Run("zero meta prefix keeps boundary at stable tail", func(t *testing.T) {
 		a, provider := newAnthropicAgent(t)
-		a.applyAnthropicCacheBoundaryHint(4, 0)
+		a.applyAnthropicCacheHints(4, 0, 0)
 		got := readBoundary(t, a, provider)
 		if got.MessageIndex != 3 {
 			t.Fatalf("boundary index = %d, want 3 (stableLen-1) when no meta prefix", got.MessageIndex)
+		}
+	})
+
+	// The newest breakpoint must land on the last durable message so the cache
+	// entry it writes is still readable next request; transient tail overlays
+	// are excluded from durableLen by the caller.
+	t.Run("latest boundary excludes transient tail overlays", func(t *testing.T) {
+		a, provider := newAnthropicAgent(t)
+		// 10 messages on the wire, the last 2 being transient overlays.
+		a.applyAnthropicCacheHints(4, 0, 8)
+		got := readTuning(t, a, provider)
+		if !got.CacheLatestBoundary.Valid {
+			t.Fatal("expected a valid latest cache boundary")
+		}
+		if got.CacheLatestBoundary.MessageIndex != 7 {
+			t.Fatalf("latest boundary index = %d, want 7 (durableLen-1)", got.CacheLatestBoundary.MessageIndex)
+		}
+	})
+
+	t.Run("no frozen prefix still hints the latest boundary", func(t *testing.T) {
+		a, provider := newAnthropicAgent(t)
+		a.applyAnthropicCacheHints(0, 0, 6)
+		got := readTuning(t, a, provider)
+		if got.CacheBoundary.Valid {
+			t.Fatalf("expected no frozen-prefix boundary, got %+v", got.CacheBoundary)
+		}
+		if !got.CacheLatestBoundary.Valid || got.CacheLatestBoundary.MessageIndex != 5 {
+			t.Fatalf("latest boundary = %+v, want index 5", got.CacheLatestBoundary)
 		}
 	})
 
@@ -5589,7 +5621,7 @@ func TestApplyAnthropicCacheBoundaryHintCountsMetaPrefix(t *testing.T) {
 		a.llmMu.Lock()
 		a.runningModelRef = "openai/gpt"
 		a.llmMu.Unlock()
-		a.applyAnthropicCacheBoundaryHint(4, 3)
+		a.applyAnthropicCacheHints(4, 3, 8)
 		got := readBoundary(t, a, provider)
 		if got.Valid {
 			t.Fatalf("expected no cache boundary for a non-Anthropic provider, got %+v", got)

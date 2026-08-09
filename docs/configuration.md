@@ -1141,11 +1141,16 @@ stable routing `session_id` derived from local/provider identity. These
 Anthropic metadata fields are not user-configurable. In `explicit` mode (the
 default for Anthropic models), Chord places up to four `cache_control`
 breakpoints by priority: the last system block, the frozen reduced-prefix
-boundary (when incremental reduction has frozen a stable prefix), the last
-user message, and the last assistant message — so long agent loops reuse the
-frozen historical surface instead of re-writing the moving tail each turn.
-For Anthropic models, you can request an hourly cache TTL with
-`prompt_cache.ttl: 1h`:
+boundary (when incremental reduction has frozen a stable prefix), the newest
+durable message, and the last assistant message — so long agent loops reuse the
+frozen historical surface instead of re-writing the moving tail each turn. The
+newest breakpoint deliberately skips request-scoped overlays (runtime hints
+appended after the conversation tail), because those bytes are gone on the next
+request and a cache entry written past them could never be read back.
+
+For Anthropic models, `prompt_cache.ttl` accepts `5m` (the default when
+omitted) and `1h`, and applies to every breakpoint Chord places in both `auto`
+and `explicit` mode:
 
 ```yaml
 providers:
@@ -1153,7 +1158,6 @@ providers:
     models:
       claude-sonnet-4-5:
         prompt_cache:
-          mode: auto
           ttl: 1h
 ```
 

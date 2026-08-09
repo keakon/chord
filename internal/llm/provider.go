@@ -23,19 +23,26 @@ type AnthropicTuning struct {
 	ThinkingEffort  string // ""|"low"|"medium"|"high"|"max"
 	ThinkingDisplay string // ""|"summarized"|"omitted"
 	PromptCacheMode string // ""|"off"|"auto"|"explicit"
-	PromptCacheTTL  string // ""|"1h"
+	PromptCacheTTL  string // ""|"5m"|"1h"
 	CacheTools      bool
 	CacheBoundary   AnthropicCacheBoundary
-	ServiceTier     string // ""|"fast" (Anthropic first-party service tier)
-	ToolChoice      string // ""|"auto"|"required" (required maps to Anthropic any)
-	Temperature     *float64
+	// CacheLatestBoundary marks the newest durably cacheable message, i.e. the
+	// last message that will still be present (byte-identical) in the next
+	// request. It exists because transient request-scoped overlays are appended
+	// after the real conversation tail: placing the newest breakpoint on an
+	// overlay would write a cache entry that the next request can never read.
+	CacheLatestBoundary AnthropicCacheBoundary
+	ServiceTier         string // ""|"fast" (Anthropic first-party service tier)
+	ToolChoice          string // ""|"auto"|"required" (required maps to Anthropic any)
+	Temperature         *float64
 }
 
 // AnthropicCacheBoundary carries request-local prompt-cache placement hints.
 // MessageIndex is zero-based in the original message list supplied to the
-// provider and marks the stable reduced prefix's last source message. Providers
-// that normalize or merge messages resolve it against their final wire shape.
-// It is intentionally transient tuning, not persisted conversation state.
+// provider and marks a source message a cache breakpoint should land on.
+// Providers that normalize or merge messages resolve it against their final
+// wire shape. It is intentionally transient tuning, not persisted conversation
+// state.
 type AnthropicCacheBoundary struct {
 	MessageIndex int
 	BlockIndex   int

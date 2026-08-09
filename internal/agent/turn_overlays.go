@@ -10,7 +10,7 @@ import (
 
 const pendingLSPDiagnosticOverlayText = "LSP diagnostics changed after one or more recent Edit/Write tool calls. Review the affected tool results' LSPReviews, treat blocking diagnostics in directly modified files as regressions to fix before finishing unless the user explicitly asked for a partial/WIP result, and keep any cleanup small and low-risk without expanding scope to unrelated untouched files."
 
-// buildTurnOverlayMessages assembles meta user messages prepended to the real
+// buildTurnOverlayMessages assembles meta user messages appended after the real
 // user turn by callLLM. SubAgent mailbox messages are also appended to ctxMgr
 // and persisted because they are real owner-visible model input. Other runtime
 // hints remain request-scoped overlays.
@@ -199,22 +199,31 @@ func sameLSPReviews(a, b []message.LSPReview) bool {
 	return true
 }
 
-// injectTurnOverlays prepends transient turn overlays before the first user
-// message (or at the head if no user message exists). Durable mailbox messages
-// do not use this path. Returns a new slice when overlays are injected,
-// otherwise the original slice unchanged.
+// injectTurnOverlays appends transient turn overlays after the conversation
+// tail. Durable mailbox messages do not use this path. Returns a new slice when
+// overlays are injected, otherwise the original slice unchanged.
+//
+// The tail is the only cache-safe position for request-scoped content: these
+// overlays vanish (or change) on the next request, so placing them anywhere
+// earlier would change the prompt prefix at that point and invalidate every
+// downstream prompt-cache breakpoint. Appending also puts the runtime hint
+// closest to the work it applies to, and never separates an assistant tool_use
+// from its tool_result.
 func injectTurnOverlays(messages []message.Message, overlays []message.Message) []message.Message {
 	if len(overlays) == 0 {
 		return messages
 	}
-	insertAt := max(firstUserMessageIndex(messages), 0)
 	out := make([]message.Message, 0, len(messages)+len(overlays))
-	out = append(out, messages[:insertAt]...)
+	out = append(out, messages...)
 	out = append(out, overlays...)
-	out = append(out, messages[insertAt:]...)
 	return out
 }
 
+// applyTurnOverlayMessages appends durable mailbox overlays in their persisted
+// conversation position, then appends the transient overlays after them. The
+// second return value is the number of transient messages appended at the tail;
+// callers use it to keep the newest prompt-cache breakpoint on the last durable
+// message.
 func applyTurnOverlayMessages(messages, overlays []message.Message) ([]message.Message, int) {
 	transient := make([]message.Message, 0, len(overlays))
 	for _, overlay := range overlays {

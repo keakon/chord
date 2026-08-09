@@ -229,6 +229,9 @@ func mergeRequestTuning(base, tuning RequestTuning) RequestTuning {
 	if tuning.Anthropic.CacheBoundary.Valid {
 		base.Anthropic.CacheBoundary = tuning.Anthropic.CacheBoundary
 	}
+	if tuning.Anthropic.CacheLatestBoundary.Valid {
+		base.Anthropic.CacheLatestBoundary = tuning.Anthropic.CacheLatestBoundary
+	}
 	if tuning.Anthropic.ServiceTier != "" {
 		base.Anthropic.ServiceTier = tuning.Anthropic.ServiceTier
 	}

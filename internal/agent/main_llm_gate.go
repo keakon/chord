@@ -250,28 +250,48 @@ func (a *MainAgent) applyMainLLMRequestTuningOverride(tuning llm.RequestTuning) 
 	a.llmClient.MergeNextRequestTuningOverride(tuning)
 }
 
-// applyAnthropicCacheBoundaryHint records a one-shot Anthropic prompt-cache
-// boundary at the stable reduced prefix end. stableLen is the prepared-surface
-// prefix length before the session-context reminder and turn overlays were
-// inserted; metaPrefixCount is the number of meta messages prepended before the
-// first user message (session-context reminder plus turn overlays), so the
-// source-message boundary index is stableLen - 1 + metaPrefixCount. Anthropic
-// resolves that source index after provider-specific message merging. Only
-// main-model requests carrying an Anthropic-compatible provider consume the hint.
-func (a *MainAgent) applyAnthropicCacheBoundaryHint(stableLen, metaPrefixCount int) {
-	if a == nil || a.llmClient == nil || stableLen <= 0 {
+// applyAnthropicCacheHints records the one-shot Anthropic prompt-cache
+// placement hints for the next main-model request.
+//
+// stableLen is the prepared-surface prefix length before the session-context
+// reminder and key-file overlay were inserted; metaPrefixCount is the number of
+// meta messages prepended before the first user message, so the frozen-prefix
+// boundary index is stableLen - 1 + metaPrefixCount. stableLen <= 0 means no
+// frozen prefix is available this request.
+//
+// durableLen is the request's message count excluding transient tail overlays,
+// so durableLen - 1 is the newest message that will still be present
+// byte-identically in the next request. Pointing the newest breakpoint there
+// keeps the cache entry readable next request instead of wasting it on an
+// overlay that disappears.
+//
+// Anthropic resolves both source indices after provider-specific message
+// merging. Only main-model requests carrying an Anthropic-compatible provider
+// consume the hints.
+func (a *MainAgent) applyAnthropicCacheHints(stableLen, metaPrefixCount, durableLen int) {
+	if a == nil || a.llmClient == nil {
+		return
+	}
+	if stableLen <= 0 && durableLen <= 0 {
 		return
 	}
 	if !a.llmClient.SupportsAnthropicPromptCache(a.llmClient.NextRequestModelRef()) {
 		return
 	}
-	boundary := llm.AnthropicCacheBoundary{
-		MessageIndex: stableLen - 1 + metaPrefixCount,
-		Valid:        true,
+	var tuning llm.AnthropicTuning
+	if stableLen > 0 {
+		tuning.CacheBoundary = llm.AnthropicCacheBoundary{
+			MessageIndex: stableLen - 1 + metaPrefixCount,
+			Valid:        true,
+		}
 	}
-	a.applyMainLLMRequestTuningOverride(llm.RequestTuning{
-		Anthropic: llm.AnthropicTuning{CacheBoundary: boundary},
-	})
+	if durableLen > 0 {
+		tuning.CacheLatestBoundary = llm.AnthropicCacheBoundary{
+			MessageIndex: durableLen - 1,
+			Valid:        true,
+		}
+	}
+	a.applyMainLLMRequestTuningOverride(llm.RequestTuning{Anthropic: tuning})
 }
 
 func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID uint64, agentErrSourceID string) {

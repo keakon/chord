@@ -539,26 +539,24 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 
 	// Assemble per-turn model input. Durable SubAgent mailbox messages are
 	// appended in the same conversation position persisted to ctxMgr; transient
-	// runtime hints remain overlays before the first user message.
+	// runtime hints are appended after the conversation tail so they never
+	// change the cacheable prompt prefix.
+	tailOverlayCount := 0
 	if overlays := a.buildTurnOverlayMessages(); len(overlays) > 0 {
-		var prefixCount int
-		messages, prefixCount = applyTurnOverlayMessages(messages, overlays)
-		metaPrefixCount += prefixCount
+		messages, tailOverlayCount = applyTurnOverlayMessages(messages, overlays)
 	}
 
-	// Propagate the stable reduced-prefix boundary as a one-shot Anthropic
-	// prompt-cache hint. The boundary index is computed against the prepared
-	// surface before the key-file overlay, session-context reminder, and turn
-	// overlays were inserted, so every overlay message inserted at or before
-	// the boundary is added back to map it onto the source message list
-	// supplied to the provider. Anthropic resolves that source index after
-	// message merging.
-	if stableLen := a.consumePreparedStablePrefixLen(); stableLen > 0 {
-		if keyFileCtxIdx >= 0 && keyFileCtxIdx < stableLen {
-			metaPrefixCount++
-		}
-		a.applyAnthropicCacheBoundaryHint(stableLen, metaPrefixCount)
+	// Propagate prompt-cache placement as one-shot Anthropic hints. The stable
+	// boundary index is computed against the prepared surface before the
+	// key-file overlay and session-context reminder were inserted, so every
+	// overlay message inserted at or before the boundary is added back to map it
+	// onto the source message list supplied to the provider. Anthropic resolves
+	// both source indices after message merging.
+	stableLen := a.consumePreparedStablePrefixLen()
+	if stableLen > 0 && keyFileCtxIdx >= 0 && keyFileCtxIdx < stableLen {
+		metaPrefixCount++
 	}
+	a.applyAnthropicCacheHints(stableLen, metaPrefixCount, len(messages)-tailOverlayCount)
 
 	// Emit early activity event so the TUI shows "connecting" immediately,
 	// before the HTTP request starts.

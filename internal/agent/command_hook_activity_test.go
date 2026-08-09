@@ -368,19 +368,23 @@ func countSubAgentMailboxMessages(messages []message.Message, messageID string) 
 	return count
 }
 
-func TestApplyTurnOverlayMessagesKeepsDurableMailboxAtConversationTail(t *testing.T) {
+// TestApplyTurnOverlayMessagesAppendsTransientOverlaysAfterDurableTail pins the
+// cache-safe overlay position: durable mailbox messages keep their persisted
+// conversation position and request-scoped hints go after them, so the prompt
+// prefix up to the last durable message stays byte-stable across requests.
+func TestApplyTurnOverlayMessagesAppendsTransientOverlaysAfterDurableTail(t *testing.T) {
 	base := []message.Message{{Role: "user", Content: "request"}, {Role: "assistant", Content: "working"}}
 	mailbox := message.Message{Role: "user", Content: "mailbox", Kind: message.KindSubAgentMailbox}
 	transient := message.Message{Role: "user", Content: "runtime hint"}
 
-	got, prefixCount := applyTurnOverlayMessages(base, []message.Message{mailbox, transient})
-	if prefixCount != 1 {
-		t.Fatalf("prefixCount = %d, want 1", prefixCount)
+	got, tailCount := applyTurnOverlayMessages(base, []message.Message{mailbox, transient})
+	if tailCount != 1 {
+		t.Fatalf("tailCount = %d, want 1", tailCount)
 	}
 	if len(got) != 4 {
 		t.Fatalf("message count = %d, want 4", len(got))
 	}
-	if got[0].Content != "runtime hint" || got[1].Content != "request" || got[2].Content != "working" || got[3].Content != "mailbox" {
+	if got[0].Content != "request" || got[1].Content != "working" || got[2].Content != "mailbox" || got[3].Content != "runtime hint" {
 		t.Fatalf("message order = %#v", got)
 	}
 }
@@ -392,9 +396,9 @@ func TestApplyTurnOverlayMessagesDoesNotDuplicateExistingMailbox(t *testing.T) {
 		Kind:    message.KindSubAgentMailbox,
 		Mailbox: &message.MailboxMetadata{MessageID: "worker-1-1"},
 	}
-	got, prefixCount := applyTurnOverlayMessages([]message.Message{{Role: message.RoleUser, Content: "request"}, mailbox}, []message.Message{mailbox})
-	if prefixCount != 0 {
-		t.Fatalf("prefixCount = %d, want 0", prefixCount)
+	got, tailCount := applyTurnOverlayMessages([]message.Message{{Role: message.RoleUser, Content: "request"}, mailbox}, []message.Message{mailbox})
+	if tailCount != 0 {
+		t.Fatalf("tailCount = %d, want 0", tailCount)
 	}
 	if count := countSubAgentMailboxMessages(got, "worker-1-1"); count != 1 {
 		t.Fatalf("mailbox copies = %d, want 1", count)

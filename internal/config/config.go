@@ -765,7 +765,8 @@ func (t *ThinkingConfig) EffectiveType() string {
 
 // PromptCacheConfig controls Anthropic prompt caching strategy.
 // Mode: "off" | "auto" | "explicit" (default when empty: "explicit", preserving existing behaviour).
-// TTL: "" (5-minute default) | "1h".
+// TTL: "" | "5m" (both the 5-minute provider default) | "1h"; applies to every
+// breakpoint Chord places, in both auto and explicit mode.
 // CacheTools: when true, the last tool definition gets a cache breakpoint.
 type PromptCacheConfig struct {
 	Mode       string `json:"mode,omitempty" yaml:"mode,omitempty"`
