@@ -22,12 +22,22 @@ func isTerminalSubAgentState(state SubAgentState) bool {
 // terminal state when an existing settlement won the conflict — reporting the
 // requested state then would contradict the record (for example announcing a
 // cancel for a task that had already completed).
-func (a *MainAgent) terminalStatusAfterCommit(taskID string, requested SubAgentState, err error) SubAgentState {
+func (a *MainAgent) terminalStatusAfterCommit(sub *SubAgent, requested SubAgentState, err error) SubAgentState {
 	if err == nil {
 		return requested
 	}
+	taskID := ""
+	if sub != nil {
+		taskID = strings.TrimSpace(sub.taskID)
+	}
 	if rec := a.taskRecordByTaskID(taskID); rec != nil && isTerminalSubAgentState(SubAgentState(rec.State)) {
-		return SubAgentState(rec.State)
+		status := SubAgentState(rec.State)
+		// A conflicting settlement returns before updating the runtime. Pin it
+		// to the immutable winner so terminal cleanup can still park it.
+		if sub != nil && !isTerminalSubAgentState(sub.State()) {
+			sub.setState(status, rec.LastSummary)
+		}
+		return status
 	}
 	return requested
 }

@@ -44,7 +44,7 @@ func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
 				if err != nil {
 					log.Warnf("user-cancel settlement failed agent=%v task_id=%v error=%v", sub.instanceID, sub.taskID, err)
 				}
-				status = a.terminalStatusAfterCommit(sub.taskID, SubAgentStateCancelled, err)
+				status = a.terminalStatusAfterCommit(sub, SubAgentStateCancelled, err)
 			} else {
 				sub.setState(SubAgentStateCancelled, "stopped by user")
 				a.noteSubAgentStateTransition(sub, SubAgentStateCancelled)

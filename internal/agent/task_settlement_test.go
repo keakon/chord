@@ -552,10 +552,10 @@ func TestTerminalStatusAfterCommitMirrorsSettledRecord(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a conflicting settlement error")
 	}
-	if got := a.terminalStatusAfterCommit("task-mirror", SubAgentStateCancelled, err); got != SubAgentStateCompleted {
+	if got := a.terminalStatusAfterCommit(sub, SubAgentStateCancelled, err); got != SubAgentStateCompleted {
 		t.Fatalf("status after conflict = %v, want completed mirrored from the record", got)
 	}
-	if got := a.terminalStatusAfterCommit("task-mirror", SubAgentStateCancelled, nil); got != SubAgentStateCancelled {
+	if got := a.terminalStatusAfterCommit(sub, SubAgentStateCancelled, nil); got != SubAgentStateCancelled {
 		t.Fatalf("status after success = %v, want the requested state", got)
 	}
 }

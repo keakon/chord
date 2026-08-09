@@ -82,6 +82,37 @@ func TestTerminalParentReparentsDetachedChildToMain(t *testing.T) {
 	}
 }
 
+func TestTerminalParentCloseKeepsSettledOutcomeAndJoinedChild(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 3)
+	parent := newSubtreeTestSubAgent(t, a, "worker-parent", "parent-task")
+	child := newSubtreeTestSubAgent(t, a, "worker-child", "child-task")
+	child.ownerMu.Lock()
+	child.ownerAgentID = parent.instanceID
+	child.ownerTaskID = parent.taskID
+	child.depth = 2
+	child.joinToOwner = true
+	child.ownerMu.Unlock()
+	a.syncTaskRecordFromSub(child, "")
+	if _, _, err := a.commitTerminalTask(parent, SubAgentStateCompleted, "done", "task completed", nil); err != nil {
+		t.Fatalf("commitTerminalTask: %v", err)
+	}
+
+	// A stale cancel close can arrive after completion. The immutable
+	// completion settlement must win; treating the requested cancel as the
+	// parent outcome would incorrectly cascade-cancel the joined child.
+	a.handleSubAgentCloseRequestedEvent(Event{SourceID: parent.instanceID, Payload: &SubAgentCloseRequestedPayload{
+		Reason: "stopped by main agent", ClosedReason: "stopped by main agent", FinalState: SubAgentStateCancelled,
+	}})
+
+	if got := a.taskRecordByTaskID(parent.taskID); got == nil || got.State != string(SubAgentStateCompleted) {
+		t.Fatalf("parent record = %#v, want completed settlement preserved", got)
+	}
+	if got := a.taskRecordByTaskID(child.taskID); got == nil || got.State != string(SubAgentStateRunning) {
+		t.Fatalf("joined child record = %#v, want running child preserved", got)
+	}
+}
+
 func TestRepairRestoredTaskTree(t *testing.T) {
 	records := map[string]*DurableTaskRecord{
 		"terminal": {TaskID: "terminal", State: string(SubAgentStateFailed)},

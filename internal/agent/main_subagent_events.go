@@ -86,17 +86,22 @@ func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {
 	if closedReason == "" {
 		closedReason = reason
 	}
+	statusState := finalState
 	if isTerminalSubAgentState(finalState) {
-		_, _, _ = a.commitTerminalTask(sub, finalState, reason, closedReason, payload.Completion)
+		_, _, err := a.commitTerminalTask(sub, finalState, reason, closedReason, payload.Completion)
+		if err != nil {
+			log.Warnf("terminal settlement failed agent=%v task_id=%v error=%v", sub.instanceID, sub.taskID, err)
+			statusState = a.terminalStatusAfterCommit(sub, finalState, err)
+		}
 	} else {
 		sub.setState(finalState, reason)
 		a.noteSubAgentStateTransition(sub, finalState)
 		a.persistSubAgentMeta(sub)
 		a.syncTaskRecordFromSub(sub, closedReason)
 	}
-	a.reconcileTerminalTaskChildren(sub.taskID, finalState, closedReason)
-	status := string(finalState)
-	switch finalState {
+	a.reconcileTerminalTaskChildren(sub.taskID, statusState, closedReason)
+	status := string(statusState)
+	switch statusState {
 	case SubAgentStateCompleted:
 		status = "done"
 	case SubAgentStateFailed:
