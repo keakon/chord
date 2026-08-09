@@ -78,7 +78,7 @@ func TestAgentResponseResumesSourceWithCorrelatedMailboxMetadata(t *testing.T) {
 			MessageType: string(AgentMessageTypeResponse), CorrelationID: request.CorrelationID,
 			InReplyTo: request.RequestMessageID, TargetTaskID: sub.taskID, TargetAttempt: request.SourceAttempt,
 		}
-		if input.Mailbox.MessageID != want.MessageID || input.Mailbox.MessageType != want.MessageType || input.Mailbox.CorrelationID != want.CorrelationID || input.Mailbox.InReplyTo != want.InReplyTo || input.Mailbox.TargetTaskID != want.TargetTaskID || input.Mailbox.TargetAttempt != want.TargetAttempt {
+		if input.Mailbox.MessageID != want.MessageID || input.Mailbox.TaskID != want.TaskID || input.Mailbox.MessageType != want.MessageType || input.Mailbox.CorrelationID != want.CorrelationID || input.Mailbox.InReplyTo != want.InReplyTo || input.Mailbox.TargetTaskID != want.TargetTaskID || input.Mailbox.TargetAttempt != want.TargetAttempt {
 			t.Fatalf("mailbox = %#v", input.Mailbox)
 		}
 	default:
