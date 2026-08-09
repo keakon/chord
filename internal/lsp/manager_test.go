@@ -347,6 +347,70 @@ func TestRecordReviewSnapshotClearsStaleDiagnosticsForCleanTouchedFile(t *testin
 	}
 }
 
+func TestPublishedDiagnosticsRefreshExistingReviewedSnapshot(t *testing.T) {
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"gopls": {
+				Command:   "gopls",
+				FileTypes: []string{".go"},
+			},
+		},
+	}, t.TempDir(), nil)
+	path := normalizeWaiterPath("/a.go")
+	reviewedAt := time.Now().Add(-time.Minute)
+	mgr.clients["gopls"] = &Client{}
+	mgr.reviewByServer = map[string]map[string]reviewCounts{
+		"gopls": {
+			path: {errors: 1, reviewedAt: reviewedAt},
+		},
+	}
+	mgr.touchedPaths = map[string]struct{}{path: {}}
+	publish := mgr.onDiagnostics("gopls")
+
+	publish("file:///a.go", "", []protocol.Diagnostic{{Severity: protocol.SeverityWarning, Message: "warning"}}, 1)
+	got := mgr.reviewByServer["gopls"][path]
+	if got.errors != 0 || got.warnings != 1 {
+		t.Fatalf("review snapshot after warning publish = %+v, want 0E/1W", got)
+	}
+	if !got.reviewedAt.Equal(reviewedAt) {
+		t.Fatalf("reviewedAt = %v, want preserved %v", got.reviewedAt, reviewedAt)
+	}
+
+	publish("file:///a.go", "", nil, 2)
+	got = mgr.reviewByServer["gopls"][path]
+	if got.errors != 0 || got.warnings != 0 {
+		t.Fatalf("review snapshot after clean publish = %+v, want 0E/0W", got)
+	}
+	rows := mgr.SidebarEntries()
+	if len(rows) != 1 || rows[0].Errors != 0 || rows[0].Warnings != 0 {
+		t.Fatalf("SidebarEntries() = %+v, want clean gopls row", rows)
+	}
+}
+
+func TestPublishedDiagnosticsDoNotAdmitUnreviewedPathToSidebar(t *testing.T) {
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"gopls": {
+				Command:   "gopls",
+				FileTypes: []string{".go"},
+			},
+		},
+	}, t.TempDir(), nil)
+	path := normalizeWaiterPath("/a.go")
+	mgr.clients["gopls"] = &Client{}
+	mgr.touchedPaths = map[string]struct{}{path: {}}
+
+	mgr.onDiagnostics("gopls")("file:///a.go", "", []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: "existing project error"}}, 1)
+
+	if byPath := mgr.reviewByServer["gopls"]; len(byPath) != 0 {
+		t.Fatalf("unreviewed publish created sidebar snapshots: %+v", byPath)
+	}
+	rows := mgr.SidebarEntries()
+	if len(rows) != 1 || rows[0].Errors != 0 || rows[0].Warnings != 0 {
+		t.Fatalf("SidebarEntries() = %+v, want unreviewed diagnostics hidden", rows)
+	}
+}
+
 func TestCurrentReviewSnapshotsIncludesCleanConnectedServer(t *testing.T) {
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{

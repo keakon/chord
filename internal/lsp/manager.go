@@ -140,7 +140,10 @@ func (m *Manager) onDiagnostics(serverID string) func(uri string, _ string, diag
 		}
 		m.broadcast(TypeLSPDiagnostics, payload)
 
-		// Track diagnostics for SidebarEntries().
+		// Track the server's latest diagnostics. Paths already admitted to the
+		// sidebar by an explicit post-write review stay live from this point on:
+		// external editor saves and git operations bypass AfterFileWrite, but a
+		// later publish must still replace (or clear) their stale review counts.
 		var errs, warns int
 		for _, d := range chordDiags {
 			switch d.Severity {
@@ -168,6 +171,14 @@ func (m *Manager) onDiagnostics(serverID string) func(uri string, _ string, diag
 				m.diagByServer[serverID] = byURI
 			}
 			byURI[uri] = diagCounts{errors: errs, warnings: warns}
+		}
+		if byPath := m.reviewByServer[serverID]; byPath != nil {
+			if reviewed, ok := byPath[path]; ok {
+				latest := m.reviewCountsForPathLocked(serverID, path)
+				reviewed.errors = latest.errors
+				reviewed.warnings = latest.warnings
+				byPath[path] = reviewed
+			}
 		}
 		m.diagMu.Unlock()
 		m.notifySidebarChanged()
