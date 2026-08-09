@@ -31,6 +31,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Adjacent markdown strong spans (`**a****b**`) render correctly in the TUI instead of leaking literal asterisks.
 - The WaitingMain expiry sweep no longer races task revival: settling an expired parked task now re-checks, inside the settlement journal lock, that the task is still parked, still waiting, and still expired, so a task revived for a direct reply in that window is not cancelled out from under its live attempt. Stopping a parked worker whose attempt changed concurrently now reports the conflict and suggests a retry instead of claiming the task disappeared, and a cascade cancel that loses a settlement conflict now pins the runtime to the settled terminal state so it can still be parked.
 - Atomic coordination-JSON writes now fsync the parent directory after rename, so a crash immediately after a write can no longer revert agent requests, task groups, or settlements to their previous version and re-open identifier reuse.
+- Context reduction no longer registers un-recallable inputs in its discarded-input set: reductions of mutating shell output and edit/apply_patch diagnostics — whose keys embed the full original arguments, including entire patches — were remembered for the rest of the loop despite never qualifying for recall protection, growing the set and its per-request clones without bound in long sessions.
 
 ## 0.7.3 - 2026-08-08
 

@@ -302,12 +302,13 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	// they are only applied together ("batched") when a flush is justified;
 	// proposals in the new tail were never sent and are always free to apply.
 	type reductionProposal struct {
-		index    int
-		class    requestReductionClass
-		toolName string
-		rule     string
-		reduced  string
-		force    bool
+		index      int
+		class      requestReductionClass
+		toolName   string
+		rule       string
+		reduced    string
+		force      bool
+		recallable bool
 	}
 	var proposals []reductionProposal
 	semanticRefresh := false
@@ -362,12 +363,13 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			reduced, rule, ok := reduceRequestToolOutput(requestReductionReadLike, ctx)
 			if ok {
 				proposals = append(proposals, reductionProposal{
-					index:    i,
-					class:    requestReductionReadLike,
-					toolName: toolName,
-					rule:     rule,
-					reduced:  reduced,
-					force:    true,
+					index:      i,
+					class:      requestReductionReadLike,
+					toolName:   toolName,
+					rule:       rule,
+					reduced:    reduced,
+					force:      true,
+					recallable: true,
 				})
 				semanticRefresh = true
 			}
@@ -387,12 +389,13 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			}
 			if reduced, rule, ok := reduceRequestToolOutput(requestReductionReadLike, ctx); ok {
 				proposals = append(proposals, reductionProposal{
-					index:    i,
-					class:    requestReductionReadLike,
-					toolName: toolName,
-					rule:     rule,
-					reduced:  reduced,
-					force:    true,
+					index:      i,
+					class:      requestReductionReadLike,
+					toolName:   toolName,
+					rule:       rule,
+					reduced:    reduced,
+					force:      true,
+					recallable: true,
 				})
 				semanticRefresh = true
 			}
@@ -481,14 +484,23 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		if !ok {
 			continue
 		}
+		// discardedInputs is consumed only by recall protection (content-fetch
+		// shapes) and over-compression stats (read-like or search shapes).
+		// Keys outside those shapes — mutating shells, edit/apply_patch
+		// diagnostics — can never be read back, and their keys embed the full
+		// original args (a whole patch for apply_patch), so registering them
+		// only grows the map and every per-request clone of it.
+		recallable := contentFetch || contextReductionIsReadLike(toolName) ||
+			(toolName != tools.NameShell && looksLikeSearchResult(ctx))
 		proposals = append(proposals, reductionProposal{
-			index:    i,
-			class:    class,
-			toolName: toolName,
-			rule:     rule,
-			reduced:  reduced,
+			index:      i,
+			class:      class,
+			toolName:   toolName,
+			rule:       rule,
+			reduced:    reduced,
+			recallable: recallable,
 		})
-		if class != requestReductionRepeated && (!incrementalEnabled || i >= frozenBoundary) {
+		if class != requestReductionRepeated && recallable && (!incrementalEnabled || i >= frozenBoundary) {
 			discardedInputs[inputKey] = prepared[i].ToolCallID
 			if toolName == tools.NameRead {
 				if revision := reductionReadRevision(&meta, prepared[i].FileState); revision != "" {
@@ -537,7 +549,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			noteSkip(contextReductionSkipDeferredCache)
 			continue
 		}
-		if p.class != requestReductionRepeated && incrementalEnabled && p.index < frozenBoundary {
+		if p.class != requestReductionRepeated && p.recallable && incrementalEnabled && p.index < frozenBoundary {
 			meta := callMeta[prepared[p.index].ToolCallID]
 			discardedInputs[contextReductionToolInputKey(p.toolName, meta.Args)] = prepared[p.index].ToolCallID
 		}

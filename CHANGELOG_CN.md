@@ -31,6 +31,7 @@
 - 相邻的 markdown 加粗片段（`**a****b**`）在 TUI 中正确渲染，不再泄漏星号字面量。
 - WaitingMain 过期清扫不再与任务复活竞争：结算过期的 parked 任务时，会在 settlement journal 锁内复核该任务仍处 parked、仍在等待且仍已过期，因此在此窗口内被直接回复复活的任务不会被从存活 attempt 下取消。停止 parked worker 时若 attempt 被并发变更，现在会如实报告冲突并建议重试，而不是声称任务消失；cascade 取消在 settlement 冲突落败时会将运行时钉到已结算的终态，使其仍可被 park。
 - 协调用 JSON 的原子写入现在在 rename 后对父目录 fsync：写入刚完成即崩溃时，agent 请求、任务组与 settlement 不会再回退到上一版本，重新打开标识符复用的口子。
+- 上下文剪裁不再把不可召回的输入注册进 discarded-input 集合：变更类 shell 输出与 edit/apply_patch 诊断的剪裁——其 key 内嵌完整原始参数（apply_patch 是整个 patch）——此前会被记住整轮循环却永远无法转化为召回保护，导致该集合及其每请求克隆在长会话中无界增长。
 
 ## 0.7.3 - 2026-08-08
 
