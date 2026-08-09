@@ -47,9 +47,11 @@ func (b *Block) finishStreamingContent() {
 // existing streaming block alive, so the final payload must replace the
 // accumulated delta rather than being appended to it. It reports whether the
 // replacement applied, which requires a SubAgent event (AgentID set) and a
-// live builder.
+// live builder. A blank payload never replaces accumulated content: SubAgent
+// reducers commit full text and skip empty blocks, so a blank thinking_end
+// here means an emitter changed and must not erase what already streamed.
 func (b *Block) replaceFinalSubAgentThinkingPayload(agentID, text string) bool {
-	if agentID == "" || b == nil || b.streamContentBuilder == nil {
+	if agentID == "" || b == nil || b.streamContentBuilder == nil || strings.TrimSpace(text) == "" {
 		return false
 	}
 	b.Content = text

@@ -664,6 +664,20 @@ func TestSubAgentThinkingFinalBlockReplacesDeltaAfterToolCall(t *testing.T) {
 	}
 }
 
+func TestSubAgentEmptyFinalThinkingKeepsAccumulatedDeltas(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
+	const agentID = "agent-thinking-empty-final"
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "streamed reasoning", AgentID: agentID}})
+	thinking := m.streamState(agentID).thinking
+	// SubAgent reducers commit full text and never emit blank thinking_end
+	// today; if an emitter ever does, the blank payload must not erase the
+	// content that already streamed.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{Text: "  ", AgentID: agentID}})
+	if thinking == nil || thinking.Content != "streamed reasoning" {
+		t.Fatalf("thinking content after blank final event = %q, want accumulated deltas kept", blockContentForTest(thinking))
+	}
+}
+
 func streamingToolArgs(count int) []string {
 	out := make([]string, count)
 	var payload strings.Builder
