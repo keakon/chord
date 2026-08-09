@@ -232,6 +232,45 @@ func TestGuardedDetachedSettlementRollsBackWhenRecordChanges(t *testing.T) {
 	}
 }
 
+func TestGuardedDetachedSettlementRollbackKeepsCrashTailTruncated(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	if err := appendTaskSettlement(a.sessionDir, &TaskSettlement{
+		TaskID: "task-existing", Attempt: 1, TerminalRevision: 1,
+		Outcome: string(SubAgentStateCompleted), Summary: "done", SettledAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(taskSettlementJournalPath(a.sessionDir), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"task_id":"crash-tail"`); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sub := newControllableTestSubAgent(t, a, "task-guard-crash-tail")
+	a.syncTaskRecordFromSub(sub, "")
+	calls := 0
+	guard := func(*DurableTaskRecord) bool {
+		calls++
+		return calls == 1
+	}
+	if got := a.settleDetachedTerminalTaskGuarded(sub.taskID, SubAgentStateCancelled, "expired", "expired", guard); got != "" {
+		t.Fatalf("guarded settlement = %q, want rollback", got)
+	}
+	settlements, err := loadTaskSettlements(a.sessionDir)
+	if err != nil {
+		t.Fatalf("loadTaskSettlements after rollback: %v", err)
+	}
+	if len(settlements) != 1 || settlements[taskAttemptKey{TaskID: "task-existing", Attempt: 1}] == nil {
+		t.Fatalf("settlements after rollback = %#v, want only the valid pre-crash record", settlements)
+	}
+}
+
 func TestCommitTerminalTaskIsIdempotent(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-terminal")

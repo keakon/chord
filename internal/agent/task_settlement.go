@@ -156,50 +156,60 @@ func loadTaskSettlements(sessionDir string) (map[taskAttemptKey]*TaskSettlement,
 }
 
 func appendTaskSettlement(sessionDir string, settlement *TaskSettlement) error {
+	_, err := appendTaskSettlementWithRollbackOffset(sessionDir, settlement)
+	return err
+}
+
+// appendTaskSettlementWithRollbackOffset returns the file offset immediately
+// before the new record. The offset is measured after an incomplete crash tail
+// is removed, so guarded callers can roll back the append without restoring a
+// stale pre-truncation size and manufacturing a new corrupt tail.
+func appendTaskSettlementWithRollbackOffset(sessionDir string, settlement *TaskSettlement) (int64, error) {
 	path := taskSettlementJournalPath(sessionDir)
 	if path == "" {
-		return nil
+		return -1, nil
 	}
 	canonical, err := canonicalTaskSettlement(settlement)
 	if err != nil {
-		return err
+		return -1, err
 	}
 	f, err := privatefs.OpenFile(sessionDir, path, os.O_CREATE|os.O_RDWR)
 	if err != nil {
-		return fmt.Errorf("open task settlement journal: %w", err)
+		return -1, fmt.Errorf("open task settlement journal: %w", err)
 	}
 	stat, err := f.Stat()
 	if err != nil {
 		_ = f.Close()
-		return fmt.Errorf("stat task settlement journal: %w", err)
+		return -1, fmt.Errorf("stat task settlement journal: %w", err)
 	}
 	if stat.Size() > 0 {
 		if err := truncateIncompleteTaskSettlementTail(f, stat.Size()); err != nil {
 			_ = f.Close()
-			return err
+			return -1, err
 		}
 	}
-	if _, err := f.Seek(0, 2); err != nil {
+	rollbackOffset, err := f.Seek(0, 2)
+	if err != nil {
 		_ = f.Close()
-		return fmt.Errorf("seek task settlement journal: %w", err)
+		return -1, fmt.Errorf("seek task settlement journal: %w", err)
 	}
 	w := bufio.NewWriter(f)
 	if _, err := w.Write(append(canonical, '\n')); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("append task settlement journal: %w", err)
+		return -1, fmt.Errorf("append task settlement journal: %w", err)
 	}
 	if err := w.Flush(); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("flush task settlement journal: %w", err)
+		return -1, fmt.Errorf("flush task settlement journal: %w", err)
 	}
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("sync task settlement journal: %w", err)
+		return -1, fmt.Errorf("sync task settlement journal: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("close task settlement journal: %w", err)
+		return -1, fmt.Errorf("close task settlement journal: %w", err)
 	}
-	return nil
+	return rollbackOffset, nil
 }
 
 func truncateTaskSettlementJournal(sessionDir string, size int64) error {
