@@ -295,6 +295,23 @@ func TestPrepareMessagesForLLMRecallProtectsNewestOutput(t *testing.T) {
 	}
 }
 
+func TestRecordDiscardedInputEvidenceIsBounded(t *testing.T) {
+	evidence := make(map[string]string, reductionRecallProtectMaxKeys)
+	for i := range reductionRecallProtectMaxKeys {
+		recordDiscardedInputEvidence(evidence, fmt.Sprintf("key-%d", i), fmt.Sprintf("call-%d", i))
+	}
+	recordDiscardedInputEvidence(evidence, "new-key", "new-call")
+	if len(evidence) != reductionRecallProtectMaxKeys {
+		t.Fatalf("discarded input evidence size = %d, want cap %d", len(evidence), reductionRecallProtectMaxKeys)
+	}
+	// Updating existing evidence remains allowed after the cap so a current
+	// call ID is not made stale merely because the session is large.
+	recordDiscardedInputEvidence(evidence, "key-0", "new-call-0")
+	if got := evidence["key-0"]; got != "new-call-0" {
+		t.Fatalf("existing evidence = %q, want updated call ID", got)
+	}
+}
+
 func TestPrepareMessagesForLLMRepeatedCollapseIsNotRecallEvidence(t *testing.T) {
 	a := &MainAgent{parentCtx: context.Background()}
 	a.newTurn()

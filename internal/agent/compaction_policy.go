@@ -501,7 +501,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			recallable: recallable,
 		})
 		if class != requestReductionRepeated && recallable && (!incrementalEnabled || i >= frozenBoundary) {
-			discardedInputs[inputKey] = prepared[i].ToolCallID
+			recordDiscardedInputEvidence(discardedInputs, inputKey, prepared[i].ToolCallID)
 			if toolName == tools.NameRead {
 				if revision := reductionReadRevision(&meta, prepared[i].FileState); revision != "" {
 					discardedReadRevisions[inputKey] = revision
@@ -551,7 +551,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 		if p.class != requestReductionRepeated && p.recallable && incrementalEnabled && p.index < frozenBoundary {
 			meta := callMeta[prepared[p.index].ToolCallID]
-			discardedInputs[contextReductionToolInputKey(p.toolName, meta.Args)] = prepared[p.index].ToolCallID
+			recordDiscardedInputEvidence(discardedInputs, contextReductionToolInputKey(p.toolName, meta.Args), prepared[p.index].ToolCallID)
 		}
 		original := prepared[p.index].Content
 		prepared[p.index].Content = p.reduced
@@ -1662,6 +1662,21 @@ func contextReductionToolInputKey(toolName, args string) string {
 // a pathological session cannot grow it without limit. Beyond the cap new
 // recall evidence is dropped; existing protections persist.
 const reductionRecallProtectMaxKeys = 512
+
+// recordDiscardedInputEvidence bounds the session-scoped evidence copied into
+// every reduction pass. Once the cap is reached, existing evidence remains
+// useful while new entries are conservatively omitted rather than allowing a
+// long session's unique reads/searches to make each request grow without
+// bound.
+func recordDiscardedInputEvidence(evidence map[string]string, key, callID string) {
+	if evidence == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	if _, exists := evidence[key]; !exists && len(evidence) >= reductionRecallProtectMaxKeys {
+		return
+	}
+	evidence[key] = callID
+}
 
 // noteRecalledReductionInput records that the output of this tool input was
 // reduced on an earlier request and the model re-issued the identical call —
