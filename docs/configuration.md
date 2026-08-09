@@ -159,7 +159,7 @@ Read model limits in this order:
 
 1. `limit.context` is the total window. For most models, input + requested output just needs to fit inside this number.
 2. `limit.input` is only needed when the provider also lists a separate input cap. Some GPT models work this way; if you omit it, Chord derives the usable input budget from `limit.context` after reserving effective requested output.
-3. `limit.output` is the model's own output capacity. Chord's default requested output cap (`max_output_tokens`) is `64000`, so real requests use `min(64000, limit.output)` before the available-context clamp. Set `max_output_tokens` explicitly to choose a different global cap.
+3. `limit.output` is the model's own output capacity. Chord's default requested output cap (`max_output_tokens`) is `64000`, so real requests use `min(64000, limit.output)` before the available-context clamp. Set `max_output_tokens` explicitly to choose a different global cap. If a model's real output capacity is below `64000` and `limit.output` is omitted, backends that validate the requested `max_tokens` server-side will reject those requests — declare `limit.output` for such models, or lower the global `max_output_tokens`.
 
 The current GPT-5.6 Codex allocation is a 400K total window with a 272K input
 cap and a 128K output cap, so configure all three fields explicitly by default.

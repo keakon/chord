@@ -150,7 +150,7 @@ openai:
 
 1. `limit.context` 是总窗口。对大多数模型，只要“输入 + 请求输出”放得进这个数字即可。
 2. `limit.input` 只在 provider 还单独列出输入上限时才需要。部分 GPT 模型属于这种情况；如果省略，Chord 会从 `limit.context` 中预留有效请求输出后，推导可用输入预算。
-3. `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 为 `64000`，因此在按可用上下文继续收缩前，实际请求上限为 `min(64000, limit.output)`。如需不同的全局上限，请显式设置 `max_output_tokens`。
+3. `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 为 `64000`，因此在按可用上下文继续收缩前，实际请求上限为 `min(64000, limit.output)`。如需不同的全局上限，请显式设置 `max_output_tokens`。若某模型实际输出能力低于 `64000` 且未配置 `limit.output`，在服务端校验 `max_tokens` 的后端会直接拒绝这类请求——请为该模型声明 `limit.output`，或调低全局 `max_output_tokens`。
 
 当前 GPT-5.6 Codex 配额为 400K 总窗口、272K 输入上限和 128K 输出上限，
 因此默认应显式配置这三个字段。
