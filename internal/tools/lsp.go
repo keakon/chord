@@ -17,6 +17,15 @@ type LspTool struct {
 	BaseDir string       // session working directory for relative paths; empty keeps process cwd behavior
 }
 
+const lspMutationFollowUpDescription = "When LSP is configured, inspect any diagnostics included in this tool result for directly modified files. Treat newly introduced blocking diagnostics as regressions and fix them before finishing unless the user explicitly requested a partial or WIP result; keep non-blocking cleanup small and low-risk, and do not expand cleanup to unrelated untouched files."
+
+func lspMutationFollowUp(manager *lsp.Manager) string {
+	if manager == nil || len(manager.ConfiguredServers()) == 0 {
+		return ""
+	}
+	return " " + lspMutationFollowUpDescription
+}
+
 type lspArgs struct {
 	Operation   string `json:"operation"` // "definition", "references", or "implementation"
 	Path        string `json:"path"`

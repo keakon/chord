@@ -93,6 +93,9 @@ func TestShouldQueueLSPDiagnosticOverlay_RequiresRelevantChangedDiagnostics(t *t
 }
 
 func TestLSPDiagnosticOverlay_IsInjectedAsOneShotOverlay(t *testing.T) {
+	if !strings.Contains(pendingLSPDiagnosticOverlayText, "file-editing tool calls") {
+		t.Fatalf("generic LSP overlay must cover Edit, Write, and apply_patch: %q", pendingLSPDiagnosticOverlayText)
+	}
 	a := newReadyTestMainAgent(t)
 	a.modelName = "gpt-4" // Ensure ApplyPatchTool is visible
 	a.tools.Register(tools.ApplyPatchTool{})

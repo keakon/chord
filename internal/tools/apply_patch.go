@@ -177,7 +177,7 @@ func (t ApplyPatchTool) ConcurrencyPolicy(json.RawMessage) ConcurrencyPolicy {
 	return ConcurrencyPolicy{Resource: "workspace", Mode: ConcurrencyModeExclusive}
 }
 func (t ApplyPatchTool) Description() string {
-	return "Apply a Codex-compatible patch to one or more files. The patch must begin with `*** Begin Patch` and end with `*** End Patch`. Supported operations are `*** Add File:`, `*** Delete File:`, `*** Update File:`, and `*** Move to:`. All operations are planned and validated before any file is modified."
+	return "Apply a Codex-compatible patch to one or more files. The patch must begin with `*** Begin Patch` and end with `*** End Patch`. Supported operations are `*** Add File:`, `*** Delete File:`, `*** Update File:`, and `*** Move to:`. All operations are planned and validated before any file is modified." + lspMutationFollowUp(t.LSP)
 }
 func (ApplyPatchTool) Parameters() map[string]any {
 	return map[string]any{

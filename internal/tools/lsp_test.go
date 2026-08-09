@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/lsp"
 )
 
@@ -48,6 +49,47 @@ func TestLspToolDescriptionGuidesRoutingWithoutHover(t *testing.T) {
 	}
 	if strings.Contains(desc, "hover") {
 		t.Fatalf("Description() should not mention hover: %q", desc)
+	}
+}
+
+func TestFileMutationDescriptionsConditionallyExplainLSPFollowUp(t *testing.T) {
+	disabledLSP := lsp.NewManager(&config.Config{LSP: config.LSPConfig{
+		"disabled": {Command: "gopls", Disabled: true, FileTypes: []string{".go"}},
+	}}, "", nil)
+	enabledLSP := lsp.NewManager(&config.Config{LSP: config.LSPConfig{
+		"go": {Command: "gopls", FileTypes: []string{".go"}},
+	}}, "", nil)
+	withoutLSP := []Tool{
+		EditTool{},
+		WriteTool{},
+		ApplyPatchTool{},
+		EditTool{LSP: lsp.NewManager(nil, "", nil)},
+		WriteTool{LSP: disabledLSP},
+		ApplyPatchTool{LSP: disabledLSP},
+	}
+	withLSP := []Tool{
+		EditTool{LSP: enabledLSP},
+		WriteTool{LSP: enabledLSP},
+		ApplyPatchTool{LSP: enabledLSP},
+	}
+	for _, tool := range withoutLSP {
+		if strings.Contains(tool.Description(), "When LSP is configured") {
+			t.Fatalf("%s description unexpectedly contains LSP guidance when disabled: %q", tool.Name(), tool.Description())
+		}
+	}
+	for _, tool := range withLSP {
+		desc := tool.Description()
+		for _, want := range []string{
+			"When LSP is configured",
+			"inspect any diagnostics included in this tool result",
+			"newly introduced blocking diagnostics",
+			"fix them before finishing",
+			"unrelated untouched files",
+		} {
+			if !strings.Contains(desc, want) {
+				t.Fatalf("%s description missing %q: %q", tool.Name(), want, desc)
+			}
+		}
 	}
 }
 

@@ -30,7 +30,7 @@ func (t WriteTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (t WriteTool) Description() string {
-	return "Write the full contents of a file, creating parent directories as needed. This replaces the entire file rather than appending to it. Overwriting an existing file requires that you know its current version in full: a successful complete read, or the file's current content being your own previous whole-file write; partial reads do not authorize whole-file replacement. Prefer edit for localized changes to existing files. If the path should still exist afterward with new full contents, use write directly rather than deleting it first. Empty content truncates the file to zero bytes but does not delete it; use delete only when the file should no longer exist."
+	return "Write the full contents of a file, creating parent directories as needed. This replaces the entire file rather than appending to it. Overwriting an existing file requires that you know its current version in full: a successful complete read, or the file's current content being your own previous whole-file write; partial reads do not authorize whole-file replacement. Prefer edit for localized changes to existing files. If the path should still exist afterward with new full contents, use write directly rather than deleting it first. Empty content truncates the file to zero bytes but does not delete it; use delete only when the file should no longer exist." + lspMutationFollowUp(t.LSP)
 }
 
 func (t WriteTool) Parameters() map[string]any {
