@@ -40,6 +40,33 @@ func TestLegacyPatchEventsUseStableApplyPatchDisplay(t *testing.T) {
 	}
 }
 
+func TestApplyPatchDeleteUsesDDisplayAndHidesDiff(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	args := `{"patch":"*** Begin Patch\n*** Delete File: tmp/old.txt\n*** End Patch"}`
+
+	m.handleToolAgentEvent(agent.ToolCallStartEvent{ID: "call-delete", Name: tools.NameApplyPatch, ArgsJSON: args})
+	m.handleToolAgentEvent(agent.ToolResultEvent{
+		CallID: "call-delete", Name: tools.NameApplyPatch, ArgsJSON: args,
+		Result: "Applied patch:\nD tmp/old.txt", Status: agent.ToolResultStatusSuccess,
+		Diff: "--- tmp/old.txt\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-old\n-content\n",
+	})
+
+	block, ok := m.findToolBlockByToolID("call-delete")
+	if !ok {
+		t.Fatal("missing tool block")
+	}
+	if block.Content != `{"paths":["D tmp/old.txt"]}` {
+		t.Fatalf("Content = %q, want deletion marker", block.Content)
+	}
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, "apply_patch D tmp/old.txt") {
+		t.Fatalf("expected deletion marker in header, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "-old") || strings.Contains(plain, "-content") {
+		t.Fatalf("expected deleted file diff to be hidden, got:\n%s", plain)
+	}
+}
+
 func TestApplyPatchResultTracksChangedFiles(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.sidebar.Update(nil, "main", "builder")

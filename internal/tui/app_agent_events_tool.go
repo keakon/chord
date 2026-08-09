@@ -58,6 +58,10 @@ func applyPatchToolDisplayArgs(argsJSON string) string {
 		path := target.SourcePath
 		if target.TargetPath != "" {
 			path += " → " + target.TargetPath
+		} else if target.Kind == tools.MutationDelete {
+			// Keep the compact path-only display for ordinary updates, but make
+			// deletion explicit because its content diff is intentionally hidden.
+			path = "D " + path
 		}
 		paths = append(paths, path)
 	}
