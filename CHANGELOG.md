@@ -4,15 +4,31 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+### Breaking Changes
+
+- `prompt_cache.ttl` is now validated at startup: `"5m"` and `"1h"` are accepted (and `"5m"`, the API default, is normalized to omitting the field), while any other value is a configuration error instead of being silently ignored. The TTL is also honored in `explicit` breakpoint mode, not just `auto`.
+
 ### Improvements
 
 - The default requested output-token cap (`max_output_tokens`) rises from `32000` to `64000`, so tool-heavy and reasoning-heavy turns are less likely to be truncated mid-response. The effective request limit is still the smallest of the global cap, the model's `limit.output`, and remaining context space. Models without an explicit `limit.input` now reserve more of the window for output, so their derived input budget shrinks and automatic compaction triggers earlier; set `max_output_tokens: 32000` to keep the previous cap.
+- Read-only shell output and JSON documents are retained longer before context reduction: harmless inspection commands get a dedicated `context.reduction.shell_read_only_age_turns: 12` threshold, and JSON documents that are not line-delimited logs are kept until the stale-age threshold instead of being skeletonized early.
+- Search summaries produced by context reduction now keep the full `path:line` location list within the byte budget instead of collapsing to a generic marker, so the model can still navigate to every reported match.
+- Tool inputs that the model re-fetched after reduction are exempt from being reduced again (`recalled_input_protect`): re-reading a pruned file or re-running a pruned lookup durably protects that evidence for the rest of the loop.
 
 ### Fixes
 
 - A SubAgent's automatic recovery request is no longer silently cancelled by queued user input. When the model returned only text, or a stream was cut by a transient transport error, or a completion was rejected by verification, Chord sends one bounded recovery request — but the in-flight request gate had already been cleared before that request was launched, so the event loop treated the SubAgent as idle: it could dequeue a waiting user message and start a new turn, which cancels the recovery request, or park the SubAgent outright. The gate is now re-armed before those recovery requests, matching the existing context-length recovery path, and a stale in-flight model-pool switch can no longer swap the LLM client mid-request.
 - One thinking block is no longer split across two TUI cards when an Anthropic-compatible gateway splices a complete `tool_use` block into the middle of it. Such gateways interleave content blocks — thinking deltas, then a whole tool call, then the rest of the *same* thinking block — and starting the tool card used to settle and detach the in-flight thinking card, so the remaining deltas opened a second card, usually breaking mid-word. A thinking card now stays attached until its own `thinking_end` arrives, which also keeps the reported thinking duration covering the whole block instead of only the resumed tail. Genuine terminal points (turn end, cancellation, errors, idle) still settle an unended thinking card and compute the fallback duration as before.
 - Search summaries produced by context reduction no longer silently drop omission metadata. When every file group fit the rendered list but the trailing "other lines omitted" marker did not fit the byte budget, the marker disappeared and the summary looked complete; already-rendered groups are now reclaimed to make room, so the summary always reports how many files, matches, and other lines were omitted.
+- Repeated-call matching in context reduction only trusts results that visibly succeeded: a failed attempt no longer masks an earlier successful run of the same call, and large integer arguments keep their exact identity during canonicalization.
+- Every terminal task state transition now settles through the same journal path, so cancelled, expired, and stopped tasks leave consistent durable settlements instead of bare record-state flips.
+- Verification declarations are no longer rejected on epoch gaps: the ledger compares against the epoch that includes the declaring call's own changes, so a verification recorded right after its file changes is accepted.
+- Stream-event replay rejection is gated by the status the event actually carried: SSE events without an explicit HTTP status stay retryable instead of being guessed terminal, while WebSocket frames with a real status are classified by it.
+- Coordination JSON (agent requests, task groups, settlements) is fsynced before rename, and a corrupt file at restore time is quarantined and rebuilt instead of aborting restore or appending to the damaged file.
+- Usage-ledger scanning tolerates unknown fields and blank event ids in `usage.jsonl` lines written by other versions, instead of discarding the whole ledger.
+- LSP diagnostics re-parsed from rendered output are deduplicated against server-pushed ones, and reviewed diagnostic counts refresh when the server pushes updates for already-reviewed files, so the sidebar no longer shows stale or doubled counts.
+- Tool-card headers preserve fractional and large-integer parameter values exactly as the model wrote them instead of round-tripping through float formatting.
+- Adjacent markdown strong spans (`**a****b**`) render correctly in the TUI instead of leaking literal asterisks.
 
 ## 0.7.3 - 2026-08-08
 
