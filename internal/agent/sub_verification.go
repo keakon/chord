@@ -94,5 +94,6 @@ func (s *SubAgent) retryCompletionVerification(cause error) {
 	}
 	s.turn.SubAgentTerminalRecoveryCount++
 	s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Re-run the declared verification command(s) so they are the most recent workspace activity, then call Complete again with the exact command(s).", cause)})
+	s.llmRequestInFlight.Store(true)
 	s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
 }

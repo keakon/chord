@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -275,25 +276,19 @@ func TestSubAgentPureTextGetsSingleTerminalRecoveryRequest(t *testing.T) {
 	sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
 
 	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{Content: "I finished the work."}})
+	waitForSubAgentLLMResult(t, sub, time.Second)
 
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		provider.mu.Lock()
-		seen := append([][]message.Message(nil), provider.seenMessages...)
-		provider.mu.Unlock()
-		if len(seen) == 1 {
-			last := seen[0][len(seen[0])-1]
-			if last.Role != "user" || !strings.Contains(last.Content, "call Complete") {
-				t.Fatalf("terminal recovery message = %#v", last)
-			}
-			if sub.turn.SubAgentTerminalRecoveryCount != 1 {
-				t.Fatalf("terminal recovery count = %d, want 1", sub.turn.SubAgentTerminalRecoveryCount)
-			}
-			return
-		}
-		time.Sleep(time.Millisecond)
+	seen, _ := provider.snapshot()
+	if len(seen) != 1 {
+		t.Fatalf("provider request count = %d, want 1", len(seen))
 	}
-	t.Fatal("timed out waiting for terminal recovery request")
+	last := seen[0][len(seen[0])-1]
+	if last.Role != "user" || !strings.Contains(last.Content, "call Complete") {
+		t.Fatalf("terminal recovery message = %#v", last)
+	}
+	if sub.turn.SubAgentTerminalRecoveryCount != 1 {
+		t.Fatalf("terminal recovery count = %d, want 1", sub.turn.SubAgentTerminalRecoveryCount)
+	}
 }
 
 func TestSubAgentUnparseableThinkingToolcallGetsTerminalRecoveryRequest(t *testing.T) {
@@ -316,28 +311,22 @@ func TestSubAgentUnparseableThinkingToolcallGetsTerminalRecoveryRequest(t *testi
 		StopReason:                "stop",
 		ThinkingToolcallMarkerHit: true,
 	}})
+	waitForSubAgentLLMResult(t, sub, time.Second)
 
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		provider.mu.Lock()
-		seen := append([][]message.Message(nil), provider.seenMessages...)
-		provider.mu.Unlock()
-		if len(seen) == 1 {
-			last := seen[0][len(seen[0])-1]
-			if last.Role != "user" || !strings.Contains(last.Content, "call Complete") {
-				t.Fatalf("terminal recovery message = %#v", last)
-			}
-			if sub.turn.SubAgentTerminalRecoveryCount != 1 {
-				t.Fatalf("terminal recovery count = %d, want 1", sub.turn.SubAgentTerminalRecoveryCount)
-			}
-			if sub.idleTimer != nil {
-				t.Fatal("unparseable thinking toolcall entered idle wait")
-			}
-			return
-		}
-		time.Sleep(time.Millisecond)
+	seen, _ := provider.snapshot()
+	if len(seen) != 1 {
+		t.Fatalf("provider request count = %d, want 1", len(seen))
 	}
-	t.Fatalf("timed out waiting for terminal recovery request; idleTimer=%v recoveryCount=%d", sub.idleTimer != nil, sub.turn.SubAgentTerminalRecoveryCount)
+	last := seen[0][len(seen[0])-1]
+	if last.Role != "user" || !strings.Contains(last.Content, "call Complete") {
+		t.Fatalf("terminal recovery message = %#v", last)
+	}
+	if sub.turn.SubAgentTerminalRecoveryCount != 1 {
+		t.Fatalf("terminal recovery count = %d, want 1", sub.turn.SubAgentTerminalRecoveryCount)
+	}
+	if sub.idleTimer != nil {
+		t.Fatal("unparseable thinking toolcall entered idle wait")
+	}
 }
 
 func TestSubAgentRequestsRequiredToolChoiceWhenProviderSupportsIt(t *testing.T) {
@@ -352,23 +341,18 @@ func TestSubAgentRequestsRequiredToolChoiceWhenProviderSupportsIt(t *testing.T) 
 	sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
 
 	sub.asyncCallLLMWithFlightMarked(sub.turn, sub.ctxMgr.Snapshot())
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		provider.mu.Lock()
-		seen := append([]llm.RequestTuning(nil), provider.seenTuning...)
-		provider.mu.Unlock()
-		if len(seen) == 1 {
-			if seen[0].OpenAI.ToolChoice != "required" || seen[0].Anthropic.ToolChoice != "required" || seen[0].Gemini.ToolChoice != "required" {
-				t.Fatalf("request tuning = %#v, want required tool choice", seen[0])
-			}
-			if seen[0].OpenAI.ParallelToolCalls != nil {
-				t.Fatalf("parallel tool calls = %#v, want no required-tool override", seen[0].OpenAI.ParallelToolCalls)
-			}
-			return
-		}
-		time.Sleep(time.Millisecond)
+	waitForSubAgentLLMResult(t, sub, time.Second)
+
+	_, seen := provider.snapshot()
+	if len(seen) != 1 {
+		t.Fatalf("provider request count = %d, want 1", len(seen))
 	}
-	t.Fatal("timed out waiting for SubAgent request tuning")
+	if seen[0].OpenAI.ToolChoice != "required" || seen[0].Anthropic.ToolChoice != "required" || seen[0].Gemini.ToolChoice != "required" {
+		t.Fatalf("request tuning = %#v, want required tool choice", seen[0])
+	}
+	if seen[0].OpenAI.ParallelToolCalls != nil {
+		t.Fatalf("parallel tool calls = %#v, want no required-tool override", seen[0].OpenAI.ParallelToolCalls)
+	}
 }
 
 func TestSubAgentInterruptedStreamGetsSingleTerminalRecoveryRequest(t *testing.T) {
@@ -384,25 +368,92 @@ func TestSubAgentInterruptedStreamGetsSingleTerminalRecoveryRequest(t *testing.T
 	sub.turn.appendPartialText("partial result")
 
 	sub.handleLLMResponse(&llmResult{turnID: 1, err: io.ErrUnexpectedEOF})
+	waitForSubAgentLLMResult(t, sub, time.Second)
 
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		provider.mu.Lock()
-		seen := append([][]message.Message(nil), provider.seenMessages...)
-		provider.mu.Unlock()
-		if len(seen) == 1 {
-			if len(seen[0]) < 2 || seen[0][0].Role != "assistant" || seen[0][0].Content != "partial result" {
-				t.Fatalf("recovery context = %#v, want interrupted assistant text", seen[0])
-			}
-			last := seen[0][len(seen[0])-1]
-			if last.Role != "user" || !strings.Contains(last.Content, "transient transport error") {
-				t.Fatalf("transport recovery message = %#v", last)
-			}
-			return
-		}
-		time.Sleep(time.Millisecond)
+	seen, _ := provider.snapshot()
+	if len(seen) != 1 {
+		t.Fatalf("provider request count = %d, want 1", len(seen))
 	}
-	t.Fatal("timed out waiting for interrupted stream recovery request")
+	if len(seen[0]) < 2 || seen[0][0].Role != "assistant" || seen[0][0].Content != "partial result" {
+		t.Fatalf("recovery context = %#v, want interrupted assistant text", seen[0])
+	}
+	last := seen[0][len(seen[0])-1]
+	if last.Role != "user" || !strings.Contains(last.Content, "transient transport error") {
+		t.Fatalf("transport recovery message = %#v", last)
+	}
+}
+
+// Terminal recovery and completion-verification retry both issue an LLM request
+// from inside handleLLMResponse, after runLoop's finishLLMRequest already cleared
+// the in-flight gate. They must re-arm it: otherwise runLoop sees an idle
+// sub-agent and can consume queued input — newTurn then cancels the recovery
+// request's context and its result is silently dropped — or park the sub-agent
+// mid-request.
+func TestSubAgentRecoveryRequestsKeepInFlightGateClosed(t *testing.T) {
+	tests := []struct {
+		name    string
+		trigger func(t *testing.T, sub *SubAgent)
+	}{
+		{
+			name: "terminal recovery after pure text",
+			trigger: func(t *testing.T, sub *SubAgent) {
+				sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{Content: "I finished the work."}})
+			},
+		},
+		{
+			name: "terminal recovery after interrupted stream",
+			trigger: func(t *testing.T, sub *SubAgent) {
+				sub.handleLLMResponse(&llmResult{turnID: 1, err: io.ErrUnexpectedEOF})
+			},
+		},
+		{
+			name: "completion verification retry",
+			trigger: func(t *testing.T, sub *SubAgent) {
+				sub.retryCompletionVerification(errors.New("verification commands did not run"))
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Hold the provider inside CompleteStream so the assertions observe a
+			// genuinely in-flight request.
+			provider := &blockingStreamProvider{
+				calls:      []scriptedStreamCall{{holdAfterStreams: true, resp: &message.Response{Content: "held"}}},
+				streamedCh: make(chan struct{}),
+				releaseCh:  make(chan struct{}),
+			}
+			providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+				Type:   config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+			}, []string{"key"})
+			_, sub := newMixedBatchTestSubAgent(t)
+			sub.llmMu.Lock()
+			sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
+			sub.llmMu.Unlock()
+			// runLoop clears the gate via finishLLMRequest before dispatching the
+			// response, so the recovery path starts from the cleared state.
+			sub.llmRequestInFlight.Store(false)
+
+			tc.trigger(t, sub)
+
+			select {
+			case <-provider.streamedCh:
+			case <-time.After(2 * time.Second):
+				t.Fatal("recovery request never reached the provider")
+			}
+			if !sub.llmRequestInFlight.Load() {
+				t.Error("in-flight gate is open during the recovery request; runLoop can consume queued input and cancel it via newTurn")
+			}
+			if sub.canStartUserTurn() {
+				t.Error("canStartUserTurn() = true while the recovery request is in flight")
+			}
+
+			// Release the provider so the async goroutine completes its session-dir
+			// writes before TempDir cleanup.
+			close(provider.releaseCh)
+			waitForSubAgentLLMResult(t, sub, 2*time.Second)
+		})
+	}
 }
 
 func TestSubAgentTerminalRecoveryIsBounded(t *testing.T) {

@@ -493,6 +493,10 @@ func (s *SubAgent) recoverTerminalResponse(instruction string, cause error) bool
 	s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "terminal_recovery")
 	s.turn.SubAgentTerminalRecoveryCount++
 	s.appendPendingUserMessage(pendingUserMessage{Content: instruction})
+	// finishLLMRequest already cleared the gate before handleLLMResponse ran, so
+	// re-arm it: otherwise runLoop treats the sub-agent as idle and may consume
+	// queued input (newTurn cancels this recovery request) or park it.
+	s.llmRequestInFlight.Store(true)
 	s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
 	return true
 }

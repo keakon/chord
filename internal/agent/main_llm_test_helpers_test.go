@@ -91,6 +91,33 @@ func (p *blockingStreamProvider) Complete(
 	return p.CompleteStream(ctx, apiKey, model, systemPrompt, messages, tools, maxTokens, tuning, nil)
 }
 
+// snapshot returns copies of the recorded requests. Callers must not read the
+// slice fields directly: CompleteStream appends to them from the SubAgent's
+// async LLM goroutine.
+func (p *blockingStreamProvider) snapshot() ([][]message.Message, []llm.RequestTuning) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([][]message.Message(nil), p.seenMessages...), append([]llm.RequestTuning(nil), p.seenTuning...)
+}
+
+// waitForSubAgentLLMResult waits until the SubAgent's async LLM goroutine hands
+// its result to llmCh. Tests that only poll the provider's recorded requests
+// return while that goroutine is still running, and it keeps writing usage
+// ledger files into the parent session directory afterwards — racing t.TempDir
+// cleanup ("directory not empty"). The goroutine performs every session-dir
+// write before this send, so receiving the result makes the test's exit
+// deterministic.
+func waitForSubAgentLLMResult(t *testing.T, sub *SubAgent, timeout time.Duration) *llmResult {
+	t.Helper()
+	select {
+	case result := <-sub.llmCh:
+		return result
+	case <-time.After(timeout):
+		t.Fatal("timed out waiting for SubAgent async LLM request to finish")
+		return nil
+	}
+}
+
 func newReadyTestMainAgent(t *testing.T) *MainAgent {
 	t.Helper()
 	a := newTestMainAgent(t, t.TempDir())
