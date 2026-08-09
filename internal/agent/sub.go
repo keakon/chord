@@ -668,6 +668,12 @@ func subAgentToolWithBaseDir(t tools.Tool, workDir string) tools.Tool {
 // ---------------------------------------------------------------------------
 
 func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.Message) {
+	// Arm the in-flight gate up front (idempotent). Relying on every caller to
+	// Store(true) after finishLLMRequest cleared the gate has repeatedly left
+	// the gate down, letting runLoop treat a busy sub-agent as idle and consume
+	// queued input or park it. Callers that must arm earlier — atomically with
+	// draining the input queue under inputQueueMu — still do so themselves.
+	s.llmRequestInFlight.Store(true)
 	defer func() {
 		if recoverValue := recover(); recoverValue != nil {
 			s.llmRequestInFlight.Store(false)

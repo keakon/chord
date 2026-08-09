@@ -40,7 +40,6 @@ func (s *SubAgent) recoverFromContextLength(err error) bool {
 	}
 	s.turn.SubAgentContextRecoveryCount++
 	log.Infof("SubAgent context length recovery compressed history agent=%v turn_id=%v before=%v after=%v target_tokens=%v", s.instanceID, s.turn.ID, len(messages), len(compressed), target)
-	s.llmRequestInFlight.Store(true)
 	s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
 	return true
 }
