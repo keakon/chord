@@ -173,18 +173,15 @@ func (a *MainAgent) resetAgentRequests(records map[string]*DurableAgentRequest) 
 	a.agentRequestSeq.Store(nextAgentRequestSeq(records))
 }
 
-// guardDegradedAgentRequestSeq raises the correlation ID sequence to a
-// wall-clock floor after a soft-degraded restore dropped the agent-requests
-// file. The corrupt file may have held corr-N IDs the restored transcript and
-// mailbox still reference; restarting the sequence at corr-1 would alias those
-// references onto unrelated new requests, routing replies to the wrong asker.
+// guardDegradedAgentRequestSeq guards correlation IDs: the corrupt
+// agent-requests file may have held corr-N IDs the restored transcript and
+// mailbox still reference, and aliasing them would route replies to the wrong
+// asker.
 func (a *MainAgent) guardDegradedAgentRequestSeq(degraded bool) {
-	if a == nil || !degraded {
+	if a == nil {
 		return
 	}
-	if floor := uint64(time.Now().Unix()); a.agentRequestSeq.Load() < floor {
-		a.agentRequestSeq.Store(floor)
-	}
+	raiseDegradedSeqFloor(&a.agentRequestSeq, degraded)
 }
 
 func (a *MainAgent) createAgentRequest(sub *SubAgent, payload tools.AgentRequestPayload) (*DurableAgentRequest, error) {

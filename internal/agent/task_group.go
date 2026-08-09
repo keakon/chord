@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/keakon/chord/internal/tools"
@@ -249,16 +250,29 @@ func (a *MainAgent) resetTaskGroups(groups map[string]*DurableTaskGroup) {
 	a.taskGroupSeq.Store(nextTaskGroupSeq(groups))
 }
 
-// guardDegradedTaskGroupSeq raises the group ID sequence to a wall-clock floor
-// after a soft-degraded restore dropped the task-groups file. The corrupt file
-// may have named groups the restored transcript still references; restarting
-// the sequence at group-1 would alias those references onto unrelated new
-// groups, silently resolving collects against the wrong member set.
-func (a *MainAgent) guardDegradedTaskGroupSeq(degraded bool) {
-	if a == nil || !degraded {
+// raiseDegradedSeqFloor raises an ID sequence to a wall-clock floor after a
+// soft-degraded restore dropped its backing file: restarting the sequence at 1
+// would alias IDs the restored transcript still references onto unrelated new
+// records.
+func raiseDegradedSeqFloor(seq *atomic.Uint64, degraded bool) {
+	if !degraded {
 		return
 	}
-	if floor := uint64(time.Now().Unix()); a.taskGroupSeq.Load() < floor {
-		a.taskGroupSeq.Store(floor)
+	floor := uint64(time.Now().Unix())
+	for {
+		current := seq.Load()
+		if current >= floor || seq.CompareAndSwap(current, floor) {
+			return
+		}
 	}
+}
+
+// guardDegradedTaskGroupSeq guards group IDs: the corrupt task-groups file may
+// have named groups the restored transcript still references, and aliasing
+// them would silently resolve collects against the wrong member set.
+func (a *MainAgent) guardDegradedTaskGroupSeq(degraded bool) {
+	if a == nil {
+		return
+	}
+	raiseDegradedSeqFloor(&a.taskGroupSeq, degraded)
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -215,6 +216,17 @@ func TestGuardDegradedTaskGroupSeqAvoidsIDReuse(t *testing.T) {
 	a.guardDegradedTaskGroupSeq(true)
 	if got := a.taskGroupSeq.Load(); got < 1_700_000_000 {
 		t.Fatalf("a degraded restore must raise the sequence floor, got %d", got)
+	}
+}
+
+func TestRaiseDegradedSeqFloorDoesNotOverwriteConcurrentProgress(t *testing.T) {
+	var seq atomic.Uint64
+	seq.Store(1)
+	const concurrentValue = 2_000_000_000
+	seq.Store(concurrentValue)
+	raiseDegradedSeqFloor(&seq, true)
+	if got := seq.Load(); got != concurrentValue {
+		t.Fatalf("degraded sequence floor overwrote newer sequence, got %d want %d", got, concurrentValue)
 	}
 }
 
