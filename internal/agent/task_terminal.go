@@ -240,7 +240,9 @@ func (a *MainAgent) settleDetachedTerminalTaskGuarded(taskID string, state SubAg
 		a.subs.mu.Unlock()
 		if journalRollbackOffset >= 0 && persistErr == nil {
 			if err := truncateTaskSettlementJournal(a.sessionDir, journalRollbackOffset); err != nil {
-				log.Warnf("failed to roll back guarded task settlement task_id=%v error=%v", taskID, err)
+				// The journal now carries a settlement the registry never saw; a
+				// later restore reconciles it, but flag the divergence loudly.
+				log.Errorf("failed to roll back guarded task settlement task_id=%v error=%v", taskID, err)
 			}
 		}
 		return ""

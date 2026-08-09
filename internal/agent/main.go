@@ -548,6 +548,7 @@ type MainAgent struct {
 	taskGroupPersistMu       sync.Mutex
 	agentRequestPersistMu    sync.Mutex
 	taskRegistryPersistHook  func()                    // test-only barrier after snapshot, before durable write
+	rehydrateCommitHook      func()                    // test-only barrier between rehydrate attempt decision and final commit
 	sem                      chan struct{}             // compatibility view of governor normal runtime slots
 	fileTrack                *filelock.FileTracker     // file write conflict detection
 	fileBackups              *fileBackupManager        // session-scoped risky write backups

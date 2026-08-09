@@ -639,14 +639,27 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 		return live, "", false, nil
 	}
 	registrationSessionDir := a.sessionDir
+	// The caller's record may be a stale snapshot: the WaitingMain expiry sweep
+	// or a cascade cancel can settle this task between that snapshot and this
+	// point, and deciding the attempt from the snapshot would resurrect an
+	// attempt that already has a terminal settlement — its real completion
+	// could then never be recorded. Decide from the current record instead.
+	baseRecord := a.subs.taskRecords[taskID]
+	if baseRecord == nil {
+		baseRecord = record
+	}
+	baseWasTerminal := isTerminalSubAgentState(SubAgentState(strings.TrimSpace(baseRecord.State)))
 	rehydratedRecord := buildTaskRecordFromSub(sub, a.subs.taskRecords[taskID], "", a.explicitUserTurnCount.Load(), time.Now())
-	if isTerminalSubAgentState(SubAgentState(strings.TrimSpace(record.State))) {
-		rehydratedRecord.Attempt = record.Attempt + 1
+	if baseWasTerminal {
+		rehydratedRecord.Attempt = baseRecord.Attempt + 1
 		rehydratedRecord.LatestSettlement = nil
 		rehydratedRecord.SettlementDurable = false
 		rehydratedRecord.LastCompletion = nil
 	}
 	a.subs.mu.Unlock()
+	if a.rehydrateCommitHook != nil {
+		a.rehydrateCommitHook()
+	}
 	persistErr := a.persistSubAgentRegistration(registrationSessionDir, sub, rehydratedRecord)
 	if persistErr != nil {
 		_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
@@ -656,18 +669,35 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 		return nil, "", false, fmt.Errorf("persist rehydrated durable task registration: %w", persistErr)
 	}
 	a.subs.mu.Lock()
-	if a.subs.activations[taskID] != activation || activation.cancelled || a.subs.subAgentByTaskIDLocked(taskID) != nil {
+	// Re-check the record at the commit point: the sweep or a cascade cancel
+	// may have settled this attempt while the registration was being persisted.
+	// Publishing the runtime then would overwrite a terminal record whose
+	// settlement already exists, so back off and let the caller retry — the
+	// retry sees the terminal record and starts a fresh attempt.
+	settledDuringRehydrate := false
+	if current := a.subs.taskRecords[taskID]; !baseWasTerminal && current != nil &&
+		isTerminalSubAgentState(SubAgentState(strings.TrimSpace(current.State))) {
+		settledDuringRehydrate = true
+	}
+	if a.subs.activations[taskID] != activation || activation.cancelled || a.subs.subAgentByTaskIDLocked(taskID) != nil || settledDuringRehydrate {
 		live := a.subs.subAgentByTaskIDLocked(taskID)
+		restoreRecord := record
+		if settledDuringRehydrate {
+			restoreRecord = cloneDurableTaskRecord(a.subs.taskRecords[taskID])
+		}
 		a.subs.mu.Unlock()
 		_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
-		_ = a.persistTaskRegistryRecord(registrationSessionDir, taskID, record)
+		_ = a.persistTaskRegistryRecord(registrationSessionDir, taskID, restoreRecord)
 		a.releaseSubAgentSlot(sub)
 		a.admissionMu.Unlock()
 		cancel()
-		if live == nil {
-			return nil, "", false, fmt.Errorf("task %s activation was superseded after persistence", taskID)
+		if live != nil {
+			return live, "", false, nil
 		}
-		return live, "", false, nil
+		if settledDuringRehydrate {
+			return nil, "", false, fmt.Errorf("task %s settled as %s while reactivating; retry to start a new attempt", taskID, restoreRecord.State)
+		}
+		return nil, "", false, fmt.Errorf("task %s activation was superseded after persistence", taskID)
 	}
 	a.subs.subAgents[sub.instanceID] = sub
 	a.subs.taskRecords[taskID] = cloneDurableTaskRecord(rehydratedRecord)

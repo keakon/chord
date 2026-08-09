@@ -2449,6 +2449,99 @@ func TestConcurrentTaskRehydratePublishesOneRuntime(t *testing.T) {
 	}
 }
 
+func newRevivalRaceTestMainAgent(t *testing.T) (*MainAgent, *DurableTaskRecord) {
+	t.Helper()
+	a := newTestMainAgent(t, t.TempDir())
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"restorer": {
+			Name:   "restorer",
+			Mode:   config.AgentModeSubAgent,
+			Models: map[string][]string{"default": {"test/test-model"}},
+		},
+	})
+	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+	record := &DurableTaskRecord{
+		TaskID:           "revival-race",
+		AgentDefName:     "restorer",
+		TaskDesc:         "reply after parking",
+		State:            string(SubAgentStateWaitingMain),
+		Attempt:          3,
+		ResumePolicy:     taskResumePolicyNotify,
+		LatestInstanceID: "restorer-9",
+		InstanceHistory:  []string{"restorer-9"},
+		RuntimeParked:    true,
+	}
+	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: cloneDurableTaskRecord(record)})
+	return a, record
+}
+
+func TestRehydrateDecidesAttemptFromCurrentRecordNotStaleSnapshot(t *testing.T) {
+	a, record := newRevivalRaceTestMainAgent(t)
+	// The sweep settles the attempt after the caller took its snapshot but
+	// before rehydration begins: the current record is terminal even though
+	// the snapshot still says waiting_main.
+	if got := a.settleDetachedTerminalTask(record.TaskID, SubAgentStateCancelled, "expired waiting for main reply", "expired"); got != SubAgentStateCancelled {
+		t.Fatalf("settleDetachedTerminalTask = %q, want cancelled", got)
+	}
+
+	sub, _, err := a.rehydrateTask(cloneDurableTaskRecord(record))
+	if err != nil {
+		t.Fatalf("rehydrateTask: %v", err)
+	}
+	if sub == nil {
+		t.Fatal("expected revived runtime")
+	}
+	rec := a.taskRecordByTaskID(record.TaskID)
+	if rec.Attempt != 4 {
+		t.Fatalf("revived attempt = %d, want 4 (bumped past the settled attempt)", rec.Attempt)
+	}
+	if rec.LatestSettlement != nil || rec.SettlementDurable {
+		t.Fatalf("revived record kept the settled attempt's settlement: %+v", rec.LatestSettlement)
+	}
+}
+
+func TestRehydrateBacksOffWhenTaskSettlesDuringCommit(t *testing.T) {
+	a, record := newRevivalRaceTestMainAgent(t)
+	// The sweep wins the race inside the rehydration window: after the attempt
+	// decision was made from a live record, but before the runtime is published.
+	a.rehydrateCommitHook = func() {
+		a.rehydrateCommitHook = nil
+		if got := a.settleDetachedTerminalTask(record.TaskID, SubAgentStateCancelled, "expired waiting for main reply", "expired"); got != SubAgentStateCancelled {
+			t.Errorf("settleDetachedTerminalTask = %q, want cancelled", got)
+		}
+	}
+
+	sub, _, err := a.rehydrateTask(cloneDurableTaskRecord(record))
+	if err == nil || !strings.Contains(err.Error(), "settled") {
+		t.Fatalf("rehydrateTask error = %v, want settled-while-reactivating conflict", err)
+	}
+	if sub != nil {
+		t.Fatal("conflicting revival must not publish a runtime")
+	}
+	rec := a.taskRecordByTaskID(record.TaskID)
+	if rec.State != string(SubAgentStateCancelled) || rec.Attempt != 3 {
+		t.Fatalf("record after lost race = state:%s attempt:%d, want the settled cancelled attempt 3", rec.State, rec.Attempt)
+	}
+	if rec.LatestSettlement == nil || rec.LatestSettlement.Outcome != string(SubAgentStateCancelled) {
+		t.Fatalf("settlement after lost race = %+v, want cancelled", rec.LatestSettlement)
+	}
+	if live := a.subAgentByTaskID(record.TaskID); live != nil {
+		t.Fatal("no runtime should remain registered for the settled attempt")
+	}
+
+	// Retrying from the now-terminal record starts a clean next attempt.
+	retried, _, err := a.rehydrateTask(a.taskRecordByTaskID(record.TaskID))
+	if err != nil {
+		t.Fatalf("retry rehydrateTask: %v", err)
+	}
+	if retried == nil {
+		t.Fatal("expected revived runtime on retry")
+	}
+	if rec := a.taskRecordByTaskID(record.TaskID); rec.Attempt != 4 || rec.LatestSettlement != nil {
+		t.Fatalf("retried record = attempt:%d settlement:%v, want fresh attempt 4", rec.Attempt, rec.LatestSettlement)
+	}
+}
+
 func TestSubAgentWakeReevaluatesInputAfterRunningTransition(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-wake-transition")
