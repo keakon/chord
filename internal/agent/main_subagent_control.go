@@ -640,7 +640,7 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	}
 	registrationSessionDir := a.sessionDir
 	rehydratedRecord := buildTaskRecordFromSub(sub, a.subs.taskRecords[taskID], "", a.explicitUserTurnCount.Load(), time.Now())
-	if strings.TrimSpace(record.State) == string(SubAgentStateCompleted) {
+	if isTerminalSubAgentState(SubAgentState(strings.TrimSpace(record.State))) {
 		rehydratedRecord.Attempt = record.Attempt + 1
 		rehydratedRecord.LatestSettlement = nil
 		rehydratedRecord.SettlementDurable = false

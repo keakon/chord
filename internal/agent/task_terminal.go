@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -192,6 +193,15 @@ func (a *MainAgent) settleDetachedTerminalTaskGuarded(taskID string, state SubAg
 	settlement := existing
 	durable := previous.SettlementDurable
 	var persistErr error
+	journalSize := int64(-1)
+	if settlement == nil {
+		journalSize = 0
+		if info, err := os.Stat(taskSettlementJournalPath(a.sessionDir)); err == nil {
+			journalSize = info.Size()
+		} else if !os.IsNotExist(err) {
+			journalSize = -1
+		}
+	}
 	if settlement == nil {
 		settlement = &TaskSettlement{
 			TaskID:           taskID,
@@ -227,6 +237,11 @@ func (a *MainAgent) settleDetachedTerminalTaskGuarded(taskID string, state SubAg
 	rec := a.subs.taskRecords[taskID]
 	if rec == nil || (rec.Attempt != 0 && rec.Attempt != attempt) || (guard != nil && !guard(rec)) {
 		a.subs.mu.Unlock()
+		if journalSize >= 0 && persistErr == nil {
+			if err := truncateTaskSettlementJournal(a.sessionDir, journalSize); err != nil {
+				log.Warnf("failed to roll back guarded task settlement task_id=%v error=%v", taskID, err)
+			}
+		}
 		return ""
 	}
 	next := cloneDurableTaskRecord(rec)

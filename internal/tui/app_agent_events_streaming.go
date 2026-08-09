@@ -42,6 +42,22 @@ func (b *Block) finishStreamingContent() {
 	}
 }
 
+// replaceFinalSubAgentThinkingPayload handles the complete thinking block a
+// SubAgent reducer emits at thinking_end. A tool card may have kept the
+// existing streaming block alive, so the final payload must replace the
+// accumulated delta rather than being appended to it. It reports whether the
+// replacement applied, which requires a SubAgent event (AgentID set) and a
+// live builder.
+func (b *Block) replaceFinalSubAgentThinkingPayload(agentID, text string) bool {
+	if agentID == "" || b == nil || b.streamContentBuilder == nil {
+		return false
+	}
+	b.Content = text
+	b.streamContentBuilder.Reset()
+	b.streamContentBuilder.WriteString(text)
+	return true
+}
+
 func (m *Model) flushStreamingBlock(block *Block, updateViewport bool) bool {
 	if block == nil || !block.syncStreamingContent() {
 		return false
@@ -206,8 +222,12 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		flushedThinking := false
 		if strings.TrimSpace(evt.Text) != "" {
 			m.ensureStreamingThinkingBlock(evt.AgentID, &state)
-			state.thinking.appendStreamingContent(evt.Text)
-			flushedThinking = state.thinking.syncStreamingContent()
+			if state.thinking.replaceFinalSubAgentThinkingPayload(evt.AgentID, evt.Text) {
+				flushedThinking = true
+			} else {
+				state.thinking.appendStreamingContent(evt.Text)
+				flushedThinking = state.thinking.syncStreamingContent()
+			}
 			if !state.thinkingAppended {
 				m.appendViewportBlock(state.thinking)
 				state.thinkingAppended = true
@@ -218,7 +238,11 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		}
 		if state.thinking != nil {
 			if !flushedThinking {
-				flushedThinking = state.thinking.syncStreamingContent()
+				if state.thinking.replaceFinalSubAgentThinkingPayload(evt.AgentID, evt.Text) {
+					flushedThinking = true
+				} else {
+					flushedThinking = state.thinking.syncStreamingContent()
+				}
 			}
 			state.thinking.Streaming = false
 			if !state.thinkingStartedAt.IsZero() {

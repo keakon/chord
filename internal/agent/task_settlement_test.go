@@ -211,6 +211,27 @@ func TestCommitTerminalTaskPublishesDurableSettlement(t *testing.T) {
 	}
 }
 
+func TestGuardedDetachedSettlementRollsBackWhenRecordChanges(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "task-guard-rollback")
+	a.syncTaskRecordFromSub(sub, "")
+	calls := 0
+	guard := func(*DurableTaskRecord) bool {
+		calls++
+		return calls == 1
+	}
+	if got := a.settleDetachedTerminalTaskGuarded(sub.taskID, SubAgentStateCancelled, "expired", "expired", guard); got != "" {
+		t.Fatalf("guarded settlement = %q, want rollback", got)
+	}
+	settlements, err := loadTaskSettlements(a.sessionDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settlements) != 0 {
+		t.Fatalf("rolled-back settlement journal = %#v", settlements)
+	}
+}
+
 func TestCommitTerminalTaskIsIdempotent(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-terminal")

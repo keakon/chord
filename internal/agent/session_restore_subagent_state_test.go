@@ -135,6 +135,41 @@ func TestLoadSessionQuarantinesCorruptTaskSettlementJournal(t *testing.T) {
 	}
 }
 
+func TestLoadSessionPreservesValidSettlementPrefixBeforeCorruption(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "corrupt-settlement-prefix")
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "resume"}); err != nil {
+		t.Fatal(err)
+	}
+	rm.Close()
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := appendTaskSettlement(sessionDir, &TaskSettlement{
+		TaskID: "task-prefix", Attempt: 1, TerminalRevision: 2,
+		Outcome: string(SubAgentStateCompleted), Summary: "completed before corruption", SettledAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(taskSettlementJournalPath(sessionDir), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("not-json\n"); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := a.loadSessionState(sessionDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.TaskSettlements[taskAttemptKey{TaskID: "task-prefix", Attempt: 1}]; got == nil || got.Summary != "completed before corruption" {
+		t.Fatalf("valid settlement prefix = %#v", got)
+	}
+}
+
 func TestLoadSessionDegradesCorruptCoordinationFiles(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "corrupt-coordination")

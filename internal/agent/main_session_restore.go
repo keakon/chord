@@ -439,6 +439,7 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	// session restore — the transcript itself is intact either way.
 	if settlements, settlementErr := loadTaskSettlements(sessionPath); settlementErr != nil {
 		log.Warnf("failed to load task settlements session=%v error=%v", sessionPath, settlementErr)
+		loaded.TaskSettlements = settlements
 		if !isTaskSettlementJournalCorruption(settlementErr) {
 			settlementMigrationDir = ""
 		} else if quarantinePath, quarantineErr := quarantineCorruptTaskSettlementJournal(sessionPath); quarantineErr != nil {

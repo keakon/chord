@@ -65,6 +65,18 @@ func TestCompletionVerificationRejectsLatestFailureAfterEarlierPass(t *testing.T
 	}
 }
 
+func TestCompletionVerificationAcceptsOlderDeclarationWhenNewestCoversCurrentEpoch(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	sub.verificationLedger = []verificationLedgerEntry{
+		{ToolCallID: "lint", Command: "golangci-lint run", Status: "passed", MutationEpoch: 1},
+		{ToolCallID: "test", Command: "go test ./...", Status: "passed", MutationEpoch: 2},
+	}
+	sub.workspaceMutationEpoch = 2
+	if err := sub.validateCompletionVerification(&CompletionEnvelope{VerificationRun: []string{"golangci-lint run", "go test ./..."}}); err != nil {
+		t.Fatalf("multi-command verification rejected even though the newest command covers the current epoch: %v", err)
+	}
+}
+
 func TestCompletionVerificationRejectsFailedCommand(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
 	sub.verificationLedger = []verificationLedgerEntry{{ToolCallID: "failed", Command: "go test ./internal/a", Status: "failed"}}
@@ -102,6 +114,7 @@ func TestCompletionVerificationRejectsPassedCommandBeforeLaterMutation(t *testin
 
 func TestCompletionVerificationAcceptsConsecutiveDeclaredCommands(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
+	sub.tools.Register(tools.ShellTool{})
 	for i, command := range []string{"go test ./internal/a", "go test ./internal/b"} {
 		result := &toolResult{CallID: fmt.Sprintf("verify-%d", i), Name: tools.NameShell, ArgsJSON: fmt.Sprintf(`{"command":%q}`, command)}
 		sub.recordTaskToolChanges(result, false)
@@ -118,6 +131,7 @@ func TestCompletionVerificationAcceptsConsecutiveDeclaredCommands(t *testing.T) 
 
 func TestCompletionVerificationAcceptsDeclaredCommandsWithUndeclaredEpochGap(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
+	sub.tools.Register(tools.ShellTool{})
 	// modify → lint → build → test: build is a non-declared, non-read-only
 	// command that advances the epoch between the two declared commands.
 	// Declaring the honest superset [lint, test] must not fail on that gap.

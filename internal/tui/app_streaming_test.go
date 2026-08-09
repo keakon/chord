@@ -650,6 +650,20 @@ func TestToolCallInsideThinkingBlockKeepsOneThinkingCard(t *testing.T) {
 	}
 }
 
+func TestSubAgentThinkingFinalBlockReplacesDeltaAfterToolCall(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
+	const agentID = "agent-thinking-final"
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "sub plan", AgentID: agentID}})
+	thinking := m.streamState(agentID).thinking
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID: "call-thinking-final", Name: tools.NameRead, ArgsJSON: `{"path":"README.md"}`, AgentID: agentID,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{Text: "sub plan", AgentID: agentID}})
+	if thinking == nil || thinking.Content != "sub plan" {
+		t.Fatalf("final thinking content = %q, want one complete block", blockContentForTest(thinking))
+	}
+}
+
 func streamingToolArgs(count int) []string {
 	out := make([]string, count)
 	var payload strings.Builder

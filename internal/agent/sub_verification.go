@@ -71,12 +71,12 @@ func (s *SubAgent) validateCompletionVerification(env *CompletionEnvelope) error
 		}
 	}
 	// Every non-read-only tool call advances the epoch, including commands
-	// that never touch a file (lint, build), so requiring the declared
-	// commands to cover every epoch in between punished honest declarations:
-	// after modify → lint → build → test, declaring [lint, test] failed on the
-	// build gap while declaring only [test] passed. Completion needs exactly
-	// one guarantee — nothing touched the workspace after the newest declared
-	// verification ran — so compare only that newest epoch to the current one.
+	// that never touch a file (lint, build), so requiring the declared commands
+	// to cover every epoch in between would punish honest declarations: after
+	// modify → lint → build → test, declaring [lint, test] must be valid. The
+	// newest declared verification is the freshness barrier: requiring every
+	// declaration to share its epoch would make any multi-command verification
+	// impossible because each production Shell call advances the epoch itself.
 	if latestCoveredEpoch < s.workspaceMutationEpoch {
 		return fmt.Errorf("the workspace mutation epoch advanced after the declared verification commands last ran; re-run them before Complete")
 	}

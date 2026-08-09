@@ -133,17 +133,17 @@ func loadTaskSettlements(sessionDir string) (map[taskAttemptKey]*TaskSettlement,
 			if i == len(lines)-1 && len(data) > 0 && data[len(data)-1] != '\n' {
 				break
 			}
-			return nil, &taskSettlementJournalCorruptionError{err: fmt.Errorf("decode task settlement journal line %d: %w", i+1, err)}
+			return out, &taskSettlementJournalCorruptionError{err: fmt.Errorf("decode task settlement journal line %d: %w", i+1, err)}
 		}
 		canonical, err := canonicalTaskSettlement(&settlement)
 		if err != nil {
-			return nil, &taskSettlementJournalCorruptionError{err: fmt.Errorf("validate task settlement journal line %d: %w", i+1, err)}
+			return out, &taskSettlementJournalCorruptionError{err: fmt.Errorf("validate task settlement journal line %d: %w", i+1, err)}
 		}
 		key := taskAttemptKey{TaskID: strings.TrimSpace(settlement.TaskID), Attempt: settlement.Attempt}
 		if existing := out[key]; existing != nil {
 			existingCanonical, _ := canonicalTaskSettlement(existing)
 			if !bytes.Equal(existingCanonical, canonical) {
-				return nil, &taskSettlementJournalCorruptionError{err: fmt.Errorf("conflicting task settlements for task %s attempt %d", key.TaskID, key.Attempt)}
+				return out, &taskSettlementJournalCorruptionError{err: fmt.Errorf("conflicting task settlements for task %s attempt %d", key.TaskID, key.Attempt)}
 			}
 			continue
 		}
@@ -200,6 +200,26 @@ func appendTaskSettlement(sessionDir string, settlement *TaskSettlement) error {
 		return fmt.Errorf("close task settlement journal: %w", err)
 	}
 	return nil
+}
+
+func truncateTaskSettlementJournal(sessionDir string, size int64) error {
+	path := taskSettlementJournalPath(sessionDir)
+	if path == "" || size < 0 {
+		return nil
+	}
+	f, err := privatefs.OpenFile(sessionDir, path, os.O_RDWR)
+	if err != nil {
+		return err
+	}
+	if err := f.Truncate(size); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func truncateIncompleteTaskSettlementTail(f *os.File, size int64) error {
