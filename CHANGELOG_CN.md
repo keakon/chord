@@ -30,6 +30,7 @@
 - 工具卡片头部现在按模型的原始写法保留小数与大整数参数值，不再经 float 格式化往返。
 - 相邻的 markdown 加粗片段（`**a****b**`）在 TUI 中正确渲染，不再泄漏星号字面量。
 - WaitingMain 过期清扫不再与任务复活竞争：结算过期的 parked 任务时，会在 settlement journal 锁内复核该任务仍处 parked、仍在等待且仍已过期，因此在此窗口内被直接回复复活的任务不会被从存活 attempt 下取消。停止 parked worker 时若 attempt 被并发变更，现在会如实报告冲突并建议重试，而不是声称任务消失；cascade 取消在 settlement 冲突落败时会将运行时钉到已结算的终态，使其仍可被 park。
+- 协调用 JSON 的原子写入现在在 rename 后对父目录 fsync：写入刚完成即崩溃时，agent 请求、任务组与 settlement 不会再回退到上一版本，重新打开标识符复用的口子。
 
 ## 0.7.3 - 2026-08-08
 

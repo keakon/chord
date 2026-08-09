@@ -2,9 +2,12 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/keakon/chord/internal/privatefs"
@@ -23,6 +26,31 @@ func persistJSONAtomically(sessionDir, path, tempPrefix string, value any) error
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
+		return err
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+// syncDir fsyncs a directory so a completed rename survives a crash. Without
+// it the rename itself can be lost and the file silently reverts to its
+// previous version — consistent, but stale, which re-opens the corr-N/group-N
+// alias reuse these files exist to prevent. Best-effort on platforms that
+// reject directory fsync.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		// Windows FlushFileBuffers does not support directory handles. Some
+		// Unix filesystems likewise report EINVAL/ENOTSUP for directory fsync.
+		// The file itself was already synced before rename, so these platforms
+		// retain the previous best-effort durability instead of failing every
+		// otherwise-successful coordination write after the rename committed.
+		if runtime.GOOS == "windows" || os.IsPermission(err) || errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) {
+			return nil
+		}
 		return err
 	}
 	return nil
