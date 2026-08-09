@@ -2618,6 +2618,27 @@ func TestClampEffectiveMaxTokensReasoningStillRespectsGlobalOutputCap(t *testing
 	}
 }
 
+func TestClampEffectiveMaxTokensUsesSmallerDefaultOrModelOutputLimit(t *testing.T) {
+	cases := []struct {
+		name        string
+		modelOutput int
+		want        int
+	}{
+		{name: "default bounds larger model", modelOutput: 128000, want: DefaultOutputTokenMax},
+		{name: "model bounds default", modelOutput: 16000, want: 16000},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := config.ModelConfig{Limit: config.ModelLimit{Context: 400000, Output: tc.modelOutput}}
+			got := clampEffectiveMaxTokens(model, tc.modelOutput, 0, RequestTuning{}, "", []message.Message{{Role: "user", Content: "hi"}}, nil, 0)
+			if got != tc.want {
+				t.Fatalf("clampEffectiveMaxTokens() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestInputLimitForModelRefDerivesContextMinusOutputBudget(t *testing.T) {
 	cfg := NewProviderConfig("prov", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -2627,8 +2648,8 @@ func TestInputLimitForModelRefDerivesContextMinusOutputBudget(t *testing.T) {
 	}, []string{"k"})
 	c := NewClient(cfg, &scriptedProvider{}, "model", 128000, "")
 
-	if got := c.InputLimitForModelRef("prov/model"); got != 368000 {
-		t.Fatalf("default InputLimitForModelRef() = %d, want 368000", got)
+	if got := c.InputLimitForModelRef("prov/model"); got != 336000 {
+		t.Fatalf("default InputLimitForModelRef() = %d, want 336000", got)
 	}
 	c.SetOutputTokenMax(8192)
 	if got := c.InputLimitForModelRef("prov/model"); got != 391808 {

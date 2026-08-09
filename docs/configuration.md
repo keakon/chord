@@ -159,7 +159,7 @@ Read model limits in this order:
 
 1. `limit.context` is the total window. For most models, input + requested output just needs to fit inside this number.
 2. `limit.input` is only needed when the provider also lists a separate input cap. Some GPT models work this way; if you omit it, Chord derives the usable input budget from `limit.context` after reserving effective requested output.
-3. `limit.output` is the model's own output capacity. Chord's default requested output cap (`max_output_tokens`) is still `32000`, so real requests use the smaller output limit unless you raise it.
+3. `limit.output` is the model's own output capacity. Chord's default requested output cap (`max_output_tokens`) is `64000`, so real requests use `min(64000, limit.output)` before the available-context clamp. Set `max_output_tokens` explicitly to choose a different global cap.
 
 The current GPT-5.6 Codex allocation is a 400K total window with a 272K input
 cap and a 128K output cap, so configure all three fields explicitly by default.
@@ -766,7 +766,7 @@ These settings are provider-scoped, so project-level `.chord/config.yaml` can ov
 
 ## Output token cap
 
-Use `max_output_tokens` to set a global cap on requested output tokens. The effective request limit is still clamped by each model's `limit.output` and available total context (`limit.context` when known), so runtime uses the smallest applicable value.
+Use `max_output_tokens` to set a global cap on requested output tokens. It defaults to `64000`. The effective request limit is still clamped by each model's `limit.output` and available total context (`limit.context` when known), so runtime uses the smallest applicable value across all providers.
 
 Responses providers keep the stable Responses wire shape and do not send a
 `max_output_tokens` field on the HTTP or WebSocket request by default. For a
@@ -779,7 +779,7 @@ from the wire request.
 `limit.input` is separate: use it only for models whose providers publish an extra input cap beyond the total context window. Lowering `max_output_tokens` can reduce cost and long-response failure risk, but it does **not** increase a provider's input allowance or replace `limit.input`.
 
 ```yaml
-max_output_tokens: 32000
+max_output_tokens: 64000
 ```
 
 ## Stream retry cap
@@ -1121,7 +1121,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `lsp`                   | `map[name]Server`     | empty                            | global / project         | Per-language-server config. See [Customization — LSP](./customization.md#lsp).                                          |
 | `mcp`                   | `map[name]MCP`        | empty                            | global / project / agent | Per-MCP-server config. See [MCP](#mcp).                                                                                  |
 | `hooks`                 | object                | empty                            | global / project / agent | Hooks per trigger point. See [Hooks](./hooks.md).                                                                        |
-| `max_output_tokens`     | int                   | model-default                    | global / project         | Global cap on requested output tokens. Effective limit is also clamped by each model's `limit.output`; reasoning requests also respect it. |
+| `max_output_tokens`     | int                   | `64000`                          | global / project         | Global cap on requested output tokens. Effective limit is also clamped by each model's `limit.output`; reasoning requests also respect it. |
 | `stream_retry_rounds`   | int                   | `0` (retry until success/cancel) | global / project         | Hard cap on public LLM full-round retries. `0` keeps retrying until success, cancellation, or terminal failure. |
 | `proxy`                 | string                | empty (use env / direct)         | global / project         | Global proxy URL. Per-tool override via `web_fetch.proxy`.                                                              |
 | `web_fetch`             | object                | empty                            | global / project         | `user_agent`, `proxy` (inherits global if nil; empty string = direct). See [WebFetch](#webfetch).                       |

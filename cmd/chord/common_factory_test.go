@@ -577,8 +577,8 @@ func TestBuildModelPoolMarksDerivedInputBudgetsDynamic(t *testing.T) {
 	if !pool[0].DeriveInputLimit {
 		t.Fatal("expected split-less model pool entry to mark input budget as dynamic")
 	}
-	if got := pool[0].InputLimit; got != 368000 {
-		t.Fatalf("derived pool[0] InputLimit = %d, want 368000 cached fallback", got)
+	if got := pool[0].InputLimit; got != 336000 {
+		t.Fatalf("derived pool[0] InputLimit = %d, want 336000 cached fallback", got)
 	}
 	if pool[1].DeriveInputLimit {
 		t.Fatal("expected explicit limit.input model pool entry to keep fixed input budget")

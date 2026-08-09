@@ -4,6 +4,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+### Improvements
+
+- The default requested output-token cap (`max_output_tokens`) rises from `32000` to `64000`, so tool-heavy and reasoning-heavy turns are less likely to be truncated mid-response. The effective request limit is still the smallest of the global cap, the model's `limit.output`, and remaining context space. Models without an explicit `limit.input` now reserve more of the window for output, so their derived input budget shrinks and automatic compaction triggers earlier; set `max_output_tokens: 32000` to keep the previous cap.
+
 ### Fixes
 
 - Search summaries produced by context reduction no longer silently drop omission metadata. When every file group fit the rendered list but the trailing "other lines omitted" marker did not fit the byte budget, the marker disappeared and the summary looked complete; already-rendered groups are now reclaimed to make room, so the summary always reports how many files, matches, and other lines were omitted.

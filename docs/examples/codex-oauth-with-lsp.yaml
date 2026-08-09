@@ -4,8 +4,8 @@
 # extra agents in ~/.config/chord/agents/*.md instead of embedding them here.
 #
 # This example uses `gpt-5.5` with `context=400000`, `input=272000`, `output=128000`.
-# Chord still defaults `max_output_tokens` to 32000, so requests use the smaller
-# output limit unless you raise it.
+# Chord defaults `max_output_tokens` to 64000, so its output budget is the
+# smaller of 64000 and `limit.output` unless you override the global cap.
 
 providers:
   codex:

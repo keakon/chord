@@ -150,7 +150,7 @@ openai:
 
 1. `limit.context` 是总窗口。对大多数模型，只要“输入 + 请求输出”放得进这个数字即可。
 2. `limit.input` 只在 provider 还单独列出输入上限时才需要。部分 GPT 模型属于这种情况；如果省略，Chord 会从 `limit.context` 中预留有效请求输出后，推导可用输入预算。
-3. `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 仍是 `32000`，所以实际发送请求时会取更小的输出上限，除非你主动调大。
+3. `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 为 `64000`，因此在按可用上下文继续收缩前，实际请求上限为 `min(64000, limit.output)`。如需不同的全局上限，请显式设置 `max_output_tokens`。
 
 当前 GPT-5.6 Codex 配额为 400K 总窗口、272K 输入上限和 128K 输出上限，
 因此默认应显式配置这三个字段。
@@ -721,14 +721,14 @@ providers:
 
 ## 输出 token 上限
 
-`max_output_tokens` 设置全局输出 token 请求上限。实际请求上限仍受各模型 `limit.output` 和可用总上下文（已知时为 `limit.context`）限制，因此运行时会取适用限制中的最小值。
+`max_output_tokens` 设置全局输出 token 请求上限，默认值为 `64000`。实际请求上限仍受各模型 `limit.output` 和可用总上下文（已知时为 `limit.context`）限制，因此所有 provider 都会取适用限制中的最小值。
 
 Responses provider 默认保持稳定的 Responses 请求形态，HTTP 和 WebSocket 请求都不会发送 `max_output_tokens` 字段。对于需要显式服务端输出上限的兼容网关，可以在 provider 下设置 `compat.responses.send_max_output_tokens: true`；其余 Responses 字段开关也位于同一对象下。全局值在不发送到 wire 时仍会影响 Chord 侧预算和兼容性检查。
 
 `limit.input` 是另一回事：只有当模型除了总上下文窗口外，还额外存在输入上限时才需要配置。降低 `max_output_tokens` 有助于控制成本、降低超长输出失败风险，但**不会**提升 provider 的输入上限，也不能替代 `limit.input`。
 
 ```yaml
-max_output_tokens: 32000
+max_output_tokens: 64000
 ```
 
 ## 流式重试上限
@@ -1039,7 +1039,7 @@ chord doctor models --pool thinking
 | `lsp`                   | `map[name]Server`     | 空                              | global / project         | 各 language server 的配置。见 [扩展与定制 — LSP](./customization_CN.md#lsp)。                                      |
 | `mcp`                   | `map[name]MCP`        | 空                              | global / project / agent | 各 MCP 服务器的配置。见 [MCP](#mcp)。                                                                              |
 | `hooks`                 | object                | 空                              | global / project / agent | 按触发点分组的 hooks。见 [Hooks](./hooks_CN.md)。                                                                    |
-| `max_output_tokens`     | int                   | 模型默认                        | global / project         | 全局输出 token 上限。实际请求还会受各模型 `limit.output` 限制；reasoning 请求同样遵守该上限。                      |
+| `max_output_tokens`     | int                   | `64000`                        | global / project         | 全局输出 token 上限。实际请求还会受各模型 `limit.output` 限制；reasoning 请求同样遵守该上限。                      |
 | `stream_retry_rounds`   | int                   | `0`（重试直到成功/取消）       | global / project         | 公开 LLM 流式请求的整轮重试硬上限。`0` 表示一直重试，直到成功、取消或终态失败。                                       |
 | `proxy`                 | string                | 空（用环境变量或直连）          | global / project         | 全局代理 URL。可通过 `web_fetch.proxy` 单独覆盖。                                                                    |
 | `web_fetch`             | object                | 空                              | global / project         | `user_agent`、`proxy`（nil 继承全局；空字符串 = 显式直连）。见 [WebFetch](#webfetch)。                                |

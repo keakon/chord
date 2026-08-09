@@ -59,6 +59,19 @@ if grep -RInE 'Go 1\.26\+|Go 1\.26 or later|Go 1\.26 或更高版本|需要 Go 1
  fail "public Go version docs contain stale Go 1.26 wording; use Go 1.26.3+"
 fi
 
+default_output_cap=$(sed -nE 's/^const DefaultOutputTokenMax = ([0-9]+)$/\1/p' internal/llm/client.go)
+[[ "$default_output_cap" =~ ^[0-9]+$ ]] || fail "could not read DefaultOutputTokenMax from internal/llm/client.go"
+output_cap_docs=(
+ docs/configuration.md
+ docs/configuration_CN.md
+ docs/examples/codex-oauth-with-lsp.yaml
+ docs/examples/examples-codex-workstation.md
+ docs/examples/examples-codex-workstation_CN.md
+)
+for doc in "${output_cap_docs[@]}"; do
+ grep -n "max_output_tokens.*${default_output_cap}" "$doc" >/dev/null || fail "$doc must mention max_output_tokens default ${default_output_cap}"
+done
+
 ci_coverage=$(grep -E 'MIN_COVERAGE:' .github/workflows/ci.yml | head -n1 | sed -E 's/.*"([0-9.]+)".*/\1/')
 [[ -n "$ci_coverage" ]] || fail "could not read MIN_COVERAGE from .github/workflows/ci.yml"
 coverage_docs=(CONTRIBUTING.md .github/pull_request_template.md)

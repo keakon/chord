@@ -15,10 +15,10 @@ import (
 )
 
 // DefaultOutputTokenMax is the global cap on requested output tokens.
-// Tool-heavy or reasoning flows often need more; 32K reduces truncation
-// while still avoiding context overflow. Users can override via
-// max_output_tokens in config.
-const DefaultOutputTokenMax = 32000
+// The effective request still uses the smaller model output limit and is
+// dynamically reduced when the remaining context window cannot fit 64K.
+// Users can override this cap via max_output_tokens in config.
+const DefaultOutputTokenMax = 64000
 
 // DefaultStreamRetryRounds is retained for explicit bounded retry calls in
 // tests/internal helpers. The public streaming path now defaults to infinite
