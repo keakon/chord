@@ -149,6 +149,16 @@ func (a *MainAgent) commitTerminalTask(sub *SubAgent, state SubAgentState, summa
 // completion must not be rewritten into a cancel, and restore-time repair
 // would revert such a rewrite anyway.
 func (a *MainAgent) settleDetachedTerminalTask(taskID string, state SubAgentState, summary, closedReason string) SubAgentState {
+	return a.settleDetachedTerminalTaskGuarded(taskID, state, summary, closedReason, nil)
+}
+
+// settleDetachedTerminalTaskGuarded is settleDetachedTerminalTask with an
+// optional precondition. The guard re-runs against the current record under
+// settlementJournalMu — once after the record is read and again inside the
+// final registry commit — so a caller that decided to settle from a stale
+// scan (the WaitingMain expiry sweep) backs off when the task was revived
+// in between instead of minting a cancel for a live attempt.
+func (a *MainAgent) settleDetachedTerminalTaskGuarded(taskID string, state SubAgentState, summary, closedReason string, guard func(*DurableTaskRecord) bool) SubAgentState {
 	taskID = strings.TrimSpace(taskID)
 	if a == nil || taskID == "" || !isTerminalSubAgentState(state) {
 		return ""
@@ -162,6 +172,9 @@ func (a *MainAgent) settleDetachedTerminalTask(taskID string, state SubAgentStat
 	previous := cloneDurableTaskRecord(a.subs.taskRecords[taskID])
 	a.subs.mu.RUnlock()
 	if previous == nil {
+		return ""
+	}
+	if guard != nil && !guard(previous) {
 		return ""
 	}
 	attempt := previous.Attempt
@@ -212,7 +225,7 @@ func (a *MainAgent) settleDetachedTerminalTask(taskID string, state SubAgentStat
 
 	a.subs.mu.Lock()
 	rec := a.subs.taskRecords[taskID]
-	if rec == nil || (rec.Attempt != 0 && rec.Attempt != attempt) {
+	if rec == nil || (rec.Attempt != 0 && rec.Attempt != attempt) || (guard != nil && !guard(rec)) {
 		a.subs.mu.Unlock()
 		return ""
 	}

@@ -731,6 +731,12 @@ func (a *MainAgent) stopSubAgentNow(callerAgentID, callerTaskID, taskID, reason 
 			reasonText := blankToDefault(reason, "stopped by main agent")
 			outcome := a.settleDetachedTerminalTask(taskID, SubAgentStateCancelled, reasonText, reasonText)
 			if outcome == "" {
+				// Settle bails for two distinct reasons: the record vanished, or
+				// its attempt changed inside the settlement window (the task was
+				// revived concurrently). Only the former means "disappeared".
+				if current := a.taskRecordByTaskID(taskID); current != nil {
+					return tools.TaskHandle{}, fmt.Errorf("task %s changed while stopping parked worker; retry the stop", taskID)
+				}
 				return tools.TaskHandle{}, fmt.Errorf("task %s disappeared while stopping parked worker", taskID)
 			}
 			handleMessage := "parked worker stopped"

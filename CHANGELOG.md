@@ -29,6 +29,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - LSP diagnostics re-parsed from rendered output are deduplicated against server-pushed ones, and reviewed diagnostic counts refresh when the server pushes updates for already-reviewed files, so the sidebar no longer shows stale or doubled counts.
 - Tool-card headers preserve fractional and large-integer parameter values exactly as the model wrote them instead of round-tripping through float formatting.
 - Adjacent markdown strong spans (`**a****b**`) render correctly in the TUI instead of leaking literal asterisks.
+- The WaitingMain expiry sweep no longer races task revival: settling an expired parked task now re-checks, inside the settlement journal lock, that the task is still parked, still waiting, and still expired, so a task revived for a direct reply in that window is not cancelled out from under its live attempt. Stopping a parked worker whose attempt changed concurrently now reports the conflict and suggests a retry instead of claiming the task disappeared, and a cascade cancel that loses a settlement conflict now pins the runtime to the settled terminal state so it can still be parked.
 
 ## 0.7.3 - 2026-08-08
 

@@ -91,6 +91,12 @@ func (a *MainAgent) cancelTaskTreeVisit(taskID, reason string, visited map[strin
 			log.Warnf("cascade cancel settlement failed task_id=%v error=%v", taskID, err)
 		}
 		status := a.terminalStatusAfterCommit(taskID, SubAgentStateCancelled, err)
+		// A conflicting-settlement commit returns before setState, which would
+		// leave the runtime non-terminal and unparkable; pin it to the settled
+		// terminal outcome so parkSubAgent below can accept it.
+		if err != nil && !isTerminalSubAgentState(sub.State()) && isTerminalSubAgentState(status) {
+			sub.setState(status, reason)
+		}
 		// parkSubAgent repeats this cleanup on success, but it refuses to park
 		// while the just-cancelled turn still has an LLM request or queued
 		// input in flight — this block is the only cleanup on that path.

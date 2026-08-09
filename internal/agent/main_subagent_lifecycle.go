@@ -275,12 +275,26 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		}
 	}
 	a.subs.mu.RUnlock()
+	// A task collected above can be revived (rehydrated for a direct reply)
+	// before its settle runs, without changing its attempt. The guard re-runs
+	// the expiry predicate against the live record inside the settlement
+	// journal lock so the sweep backs off instead of cancelling the revived
+	// attempt.
+	stillExpiredParkedWaiting := func(rec *DurableTaskRecord) bool {
+		return rec != nil && rec.RuntimeParked &&
+			SubAgentState(rec.State) == SubAgentStateWaitingMain &&
+			currentTurn >= rec.LastUpdatedTurn+waitingMainExpiryUserTurns
+	}
 	for _, taskID := range expiredTaskIDs {
-		a.settleDetachedTerminalTask(taskID, SubAgentStateCancelled, "expired waiting for main reply", "expired waiting for main reply")
-		changed = true
+		if a.settleDetachedTerminalTaskGuarded(taskID, SubAgentStateCancelled, "expired waiting for main reply", "expired waiting for main reply", stillExpiredParkedWaiting) != "" {
+			changed = true
+		}
 	}
 	if changed {
-		a.persistTaskRegistry()
+		// Both settle paths (commitTerminalTask via the close-requested handler
+		// and settleDetachedTerminalTaskGuarded) already persisted the task
+		// registry per task; only the recovery snapshot still needs to observe
+		// the batch.
 		a.saveRecoverySnapshot()
 	}
 }
