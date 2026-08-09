@@ -312,7 +312,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	case agent.ToolCallStartEvent:
 		evt.Name = toolNameKey(evt.Name)
 		m.touchStreamDelta(evt.AgentID)
-		m.finalizeAgentStream(evt.AgentID)
+		m.finalizeAgentStreamForCard(evt.AgentID, true)
 		m.markRequestProgressBaseline(evt.AgentID)
 		_, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, agent.ToolCallExecutionStateReceiving, true)
 		if created {

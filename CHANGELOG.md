@@ -10,6 +10,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- One thinking block is no longer split across two TUI cards when an Anthropic-compatible gateway splices a complete `tool_use` block into the middle of it. Such gateways interleave content blocks — thinking deltas, then a whole tool call, then the rest of the *same* thinking block — and starting the tool card used to settle and detach the in-flight thinking card, so the remaining deltas opened a second card, usually breaking mid-word. A thinking card now stays attached until its own `thinking_end` arrives, which also keeps the reported thinking duration covering the whole block instead of only the resumed tail. Genuine terminal points (turn end, cancellation, errors, idle) still settle an unended thinking card and compute the fallback duration as before.
 - Search summaries produced by context reduction no longer silently drop omission metadata. When every file group fit the rendered list but the trailing "other lines omitted" marker did not fit the byte budget, the marker disappeared and the summary looked complete; already-rendered groups are now reclaimed to make room, so the summary always reports how many files, matches, and other lines were omitted.
 
 ## 0.7.3 - 2026-08-08

@@ -88,8 +88,27 @@ func (m *Model) finalizeAssistantBlock() {
 }
 
 func (m *Model) finalizeAgentStream(agentID string) {
+	m.finalizeAgentStreamForCard(agentID, false)
+}
+
+// finalizeAgentStreamForCard settles the in-flight streaming blocks for
+// agentID before another card is appended to the transcript.
+//
+// keepUnendedThinking keeps a thinking card attached when its wire thinking
+// block has not been closed yet (no thinking_end, so no StreamThinkingEvent),
+// letting later thinking deltas continue in the same card. Some
+// Anthropic-compatible gateways splice a complete tool_use block into the
+// middle of one thinking block; detaching here would split a single thinking
+// block across two cards, usually mid-word.
+func (m *Model) finalizeAgentStreamForCard(agentID string, keepUnendedThinking bool) {
 	state := m.streamState(agentID)
-	if state.thinking != nil {
+	if state.thinking != nil && keepUnendedThinking {
+		// Only bring the rendered content up to date. Streaming, the duration
+		// clock and thinkingStreamBlockIndex stay owned by StreamThinkingEvent.
+		if m.flushStreamingBlock(state.thinking, state.thinkingAppended) && m.hasDeferredStartupTranscript() {
+			m.syncStartupDeferredTranscriptBlock(state.thinking)
+		}
+	} else if state.thinking != nil {
 		state.thinking.finishStreamingContent()
 		state.thinking.Streaming = false
 		// Only set ThinkingDuration here if it wasn't already frozen by

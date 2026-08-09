@@ -9085,9 +9085,13 @@ func TestStreamingThinkingBlocksIncrementThinkingBlockIndex(t *testing.T) {
 }
 
 func TestThinkingDurationFallbackInFinalizeWhenNoThinkingEnd(t *testing.T) {
-	// When thinking_end is never received (e.g. cancellation or provider
-	// interleaving), finalizeAssistantBlock should still compute
-	// ThinkingDuration as a fallback.
+	// When thinking_end is never received (e.g. cancellation), finalizing the
+	// turn should still compute ThinkingDuration as a fallback.
+	//
+	// A tool call is deliberately not such a terminal point: gateways may
+	// splice a tool_use block into the middle of one thinking block, so the
+	// duration stays owned by thinking_end there. See
+	// TestToolCallInsideThinkingBlockKeepsOneThinkingCard.
 	m := NewModelWithSize(nil, 80, 12)
 
 	// Start thinking but never send StreamThinkingEvent (thinking_end).
@@ -9098,13 +9102,9 @@ func TestThinkingDurationFallbackInFinalizeWhenNoThinkingEnd(t *testing.T) {
 		t.Fatal("expected thinkingStartTime to be set after ThinkingStartedEvent")
 	}
 
-	// Finalize without thinking_end (e.g. via ToolCallStartEvent or IdleEvent).
-	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
-		ID:   "call-1",
-		Name: "read",
-	}})
+	m.finalizeTurn()
 
-	// The thinking block should have a duration computed by finalizeAssistantBlock.
+	// The thinking block should have a duration computed by the fallback.
 	blocks := m.viewport.visibleBlocks()
 	var thinkingBlock *Block
 	for _, b := range blocks {

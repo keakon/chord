@@ -578,6 +578,78 @@ func repeatedStreamDeltas(count int, delta string) []string {
 	return out
 }
 
+// TestToolCallInsideThinkingBlockKeepsOneThinkingCard covers Anthropic-compatible
+// gateways that splice a complete tool_use block into the middle of a single
+// thinking block (thinking#0 deltas, tool_use#1 start/delta/stop, then more
+// thinking#0 deltas before thinking#0 stops). The spliced tool card must not
+// split that one thinking block across two cards.
+func TestToolCallInsideThinkingBlockKeepsOneThinkingCard(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "preserving the final on"}})
+	thinkingBlock := m.currentThinkingBlock
+	if thinkingBlock == nil {
+		t.Fatal("expected an active thinking block")
+	}
+	// Backdate the clock so the recorded duration must span the whole block.
+	m.thinkingStartTime = time.Now().Add(-3 * time.Second)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-1",
+		Name:     tools.NameShell,
+		ArgsJSON: `{"command":"git tag -d review-backup"}`,
+	}})
+
+	if m.currentThinkingBlock != thinkingBlock {
+		t.Fatal("tool call detached the thinking block that had not received thinking_end")
+	}
+	if !thinkingBlock.Streaming {
+		t.Fatal("tool call settled a thinking block whose wire block is still open")
+	}
+	if thinkingBlock.ThinkingDuration != 0 {
+		t.Fatalf("thinking duration = %v, want it frozen only on thinking_end", thinkingBlock.ThinkingDuration)
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "e."}})
+	if m.currentThinkingBlock != thinkingBlock {
+		t.Fatal("thinking delta after the tool card started a new thinking block")
+	}
+	if got := pendingStreamingContentForTest(thinkingBlock); got != "preserving the final one." {
+		t.Fatalf("thinking content = %q, want one continuous block", got)
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{}})
+	if thinkingBlock.Streaming || m.currentThinkingBlock != nil {
+		t.Fatal("thinking_end did not settle the thinking block")
+	}
+	if thinkingBlock.ThinkingDuration < 3*time.Second {
+		t.Fatalf("thinking duration = %v, want the full block span", thinkingBlock.ThinkingDuration)
+	}
+
+	var thinkingCards, toolCards int
+	var thinkingIdx, toolIdx int
+	for i, block := range m.viewport.blocks {
+		switch {
+		case block.Type == BlockThinking && block.AgentID == "":
+			thinkingCards++
+			thinkingIdx = i
+		case block.Type == BlockToolCall:
+			toolCards++
+			toolIdx = i
+		}
+	}
+	if thinkingCards != 1 || toolCards != 1 {
+		t.Fatalf("cards = %d thinking / %d tool, want 1 each", thinkingCards, toolCards)
+	}
+	if thinkingIdx > toolIdx {
+		t.Fatalf("thinking card at %d should precede the tool card at %d", thinkingIdx, toolIdx)
+	}
+	if rendered := stripANSI(m.View().Content); !strings.Contains(rendered, "preserving the final one.") {
+		t.Fatalf("view should show the reunited thinking text, got:\n%s", rendered)
+	}
+}
+
 func streamingToolArgs(count int) []string {
 	out := make([]string, count)
 	var payload strings.Builder
