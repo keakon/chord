@@ -265,6 +265,23 @@ func truncateIncompleteTaskSettlementTail(f *os.File, size int64) error {
 	return nil
 }
 
+// reseedTaskSettlementJournal appends the settlements recovered from a
+// quarantined journal's valid prefix into the fresh journal. Without this the
+// recovered entries exist only in memory and the task registry: repair marks
+// them durable, so nothing ever re-appends them, and a later registry loss
+// silently drops their existing-wins protection.
+func reseedTaskSettlementJournal(sessionDir string, settlements map[taskAttemptKey]*TaskSettlement) error {
+	for _, settlement := range settlements {
+		if settlement == nil {
+			continue
+		}
+		if err := appendTaskSettlement(sessionDir, settlement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func repairTaskRecordsFromSettlements(records map[string]*DurableTaskRecord, settlements map[taskAttemptKey]*TaskSettlement) bool {
 	changed := false
 	for key, settlement := range settlements {

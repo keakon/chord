@@ -169,6 +169,16 @@ func TestLoadSessionPreservesValidSettlementPrefixBeforeCorruption(t *testing.T)
 	if got := loaded.TaskSettlements[taskAttemptKey{TaskID: "task-prefix", Attempt: 1}]; got == nil || got.Summary != "completed before corruption" {
 		t.Fatalf("valid settlement prefix = %#v", got)
 	}
+	// The recovered prefix must be re-seeded into the fresh journal: repair
+	// marks these settlements durable, so nothing re-appends them later, and
+	// without the reseed a subsequent registry loss would drop them entirely.
+	reloaded, err := loadTaskSettlements(sessionDir)
+	if err != nil {
+		t.Fatalf("replacement settlement journal remains corrupt: %v", err)
+	}
+	if got := reloaded[taskAttemptKey{TaskID: "task-prefix", Attempt: 1}]; got == nil || got.Summary != "completed before corruption" {
+		t.Fatalf("re-seeded journal settlement = %#v, want recovered prefix on disk", got)
+	}
 }
 
 func TestLoadSessionDegradesCorruptCoordinationFiles(t *testing.T) {

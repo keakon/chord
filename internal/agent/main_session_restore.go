@@ -449,6 +449,13 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 			log.Warnf("failed to quarantine corrupt task settlements session=%v error=%v", sessionPath, quarantineErr)
 		} else if quarantinePath != "" {
 			log.Warnf("quarantined corrupt task settlements session=%v path=%v", sessionPath, quarantinePath)
+			// Re-seed the fresh journal with the recovered valid prefix so those
+			// settlements keep their existing-wins protection even if the task
+			// registry is lost later; repair marks them durable on this basis.
+			if reseedErr := reseedTaskSettlementJournal(sessionPath, settlements); reseedErr != nil {
+				settlementMigrationDir = ""
+				log.Warnf("failed to re-seed recovered task settlements session=%v error=%v", sessionPath, reseedErr)
+			}
 		}
 	} else {
 		loaded.TaskSettlements = settlements
