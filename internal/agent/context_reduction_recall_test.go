@@ -165,6 +165,24 @@ func TestSummarizeSearchResultLocationsCountsPlainLinesInTail(t *testing.T) {
 	}
 }
 
+func TestSummarizeSearchResultLocationsMakesRoomForPlainLineTail(t *testing.T) {
+	path := strings.Repeat("segment/", 8) + "file.go"
+	match := fmt.Sprintf("%s:42: %s\n", path, strings.Repeat("x", 100))
+	group := summarizeSearchResultLocations(match, searchSummaryByteBudget)
+	if len(group) != 1 {
+		t.Fatalf("expected one rendered group, got %v", group)
+	}
+	budget := len(group[0]) + 1
+
+	lines := summarizeSearchResultLocations(match+"tool-level truncation note\n", budget)
+	if len(lines) != 1 || !strings.Contains(lines[0], "1 files, 1 matches, 1 other lines omitted") {
+		t.Fatalf("the summary must trade a group for a complete omission marker: %v", lines)
+	}
+	if got := len(strings.Join(lines, "\n")); got > budget {
+		t.Fatalf("summary bytes = %d, budget = %d", got, budget)
+	}
+}
+
 func TestSummarizeSearchResultLocationsListsPlainPaths(t *testing.T) {
 	var sb strings.Builder
 	for i := range 40 {

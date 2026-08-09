@@ -2,6 +2,12 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
+## Unreleased
+
+### Fixes
+
+- Search summaries produced by context reduction no longer silently drop omission metadata. When every file group fit the rendered list but the trailing "other lines omitted" marker did not fit the byte budget, the marker disappeared and the summary looked complete; already-rendered groups are now reclaimed to make room, so the summary always reports how many files, matches, and other lines were omitted.
+
 ## 0.7.3 - 2026-08-08
 
 ### Breaking Changes

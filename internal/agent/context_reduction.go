@@ -969,30 +969,29 @@ func summarizeSearchResultLocations(content string, byteBudget int) []string {
 	if plainTotal > 0 {
 		otherLinesNote = fmt.Sprintf(", %d other lines", plainTotal)
 	}
-	if len(out) == len(groups) {
-		if plainTotal > 0 {
-			marker := fmt.Sprintf("- ... (+%d other lines omitted) ...", plainTotal)
-			if used+len(marker)+1 <= byteBudget {
-				out = append(out, marker)
-			}
+	for {
+		omittedFiles := len(groups) - len(out)
+		if omittedFiles == 0 && plainTotal == 0 {
+			return out
 		}
-		return out
-	}
-	for omittedFiles := len(groups) - len(out); omittedFiles > 0; omittedFiles++ {
-		marker := fmt.Sprintf("- ... (+%d files, %d matches%s omitted) ...", omittedFiles, totalMatches-renderedMatches, otherLinesNote)
+		var marker string
+		if omittedFiles > 0 {
+			marker = fmt.Sprintf("- ... (+%d files, %d matches%s omitted) ...", omittedFiles, totalMatches-renderedMatches, otherLinesNote)
+		} else {
+			marker = fmt.Sprintf("- ... (+%d other lines omitted) ...", plainTotal)
+		}
 		if used+len(marker)+1 <= byteBudget {
 			out = append(out, marker)
-			break
+			return out
 		}
 		if len(out) == 0 {
-			break
+			return out
 		}
 		last := out[len(out)-1]
 		out = out[:len(out)-1]
 		used -= len(last) + 1
 		renderedMatches -= groups[len(out)].matches
 	}
-	return out
 }
 
 func reduceSearchScope(ctx requestReductionContext) string {

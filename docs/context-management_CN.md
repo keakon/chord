@@ -145,7 +145,7 @@ context:
 - 近期高风险工具输出按实际 main-model request-batch age 保护，再进入普通 age/bytes 剪裁。默认 `high_risk_protect_age_turns: 4` 保护失败日志、stack trace、权限/安全输出和当前工作集关键证据；diff/patch 使用独立的 `diff_protect_age_turns: 12`，避免长审查在形成 findings 前过早丢失核心变更证据。同一 assistant 响应中的并行工具调用共享一个批次，不会因为并行结果数量多而提前老化。
 - 成功 shell 输出在变旧且超过 `shell_success_bytes` 后按低风险噪音处理，并保留输出大小、行数、有代表性的成功信号行（如有）以及尾部片段 fallback；shell 命令本身仍可从关联的 tool call 中获得。近期失败、stack trace、diff 和 warning 密集的构建日志会先由高风险保护或结构化日志摘要处理；较旧输出在不再受近期高风险窗口保护后，后续仍可能被摘要化。
 - 对不在静态只读白名单中的成功 Shell 调用，Chord 会重新核验稳定/恢复前缀里已有 durable hash 的历史读取。确认文件被替换、删除或 hash 改变后，旧读取会标记为 `truncated=stale`；无法读取的路径和没有 durable hash 的旧会话记录不会被猜测为 stale。
-- 大块旧工具输出仍会按 age/bytes 规则剪裁，但在退回通用省略前会尽量保留结构化线索：`read` 保留路径与行范围元数据，`grep` / `glob` / LSP references 保留查询范围和代表命中，JSON 输出保留顶层结构和数量，成功 shell 输出保留大小/信号行上下文，diff/patch 保留文件、hunk、变更数量和有界代表行，构建 / 测试日志保留关键失败或警告行。旧错误、diagnostics、确认类输出会被压成固定短 marker 或摘要。
+- 大块旧工具输出仍会按 age/bytes 规则剪裁，但在退回通用省略前会尽量保留结构化线索：`read` 保留路径与行范围元数据，`grep` / `glob` / LSP references 保留查询范围、受字节预算约束的位置清单和显式省略标记，JSON 输出保留顶层结构和数量，成功 shell 输出保留大小/信号行上下文，diff/patch 保留文件、hunk、变更数量和有界代表行，构建 / 测试日志保留关键失败或警告行。旧错误、diagnostics、确认类输出会被压成固定短 marker 或摘要。
 - 剪裁诊断继续保留聚合的 `reread_after_reduction` 计数，并在前后两次读取都有 durable hash 时进一步区分“同 revision 重读”和“revision 已变化后的必要刷新”。
 - 重调证据会反馈到保留策略：当模型对“输出已被剪裁”的调用重新发起完全相同的调用（重读、重搜、只读 shell 重跑）时，该 input 的最新输出在本会话余下时间内免于剪裁，并记录 `recalled_input_protect` 跳过原因。较旧的重复副本仍会折叠为 repeated marker；已判定 stale 的读取仍保留 stale 标记；重跑会改变状态的命令（如测试）不获得豁免——那是在求新鲜结果，不是找回被裁内容。豁免集合是会话内存态，随剪裁缓存在恢复或模型切换时丢弃，并从实时证据重建。
 
