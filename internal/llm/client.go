@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
@@ -155,6 +156,7 @@ func (c *Client) ResetReplayCompatibility() {
 type CallStatus struct {
 	SelectedModelRef    string
 	RunningModelRef     string
+	RunningAttemptAt    time.Time
 	RunningContextLimit int
 	RunningInputLimit   int
 	FallbackTriggered   bool

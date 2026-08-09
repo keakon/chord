@@ -23,7 +23,12 @@ type cacheExpectationRecord struct {
 	Tokens      []int
 	ToolDefHash [sha256.Size]byte
 	PromptHash  [sha256.Size]byte
-	SentAt      time.Time
+	// SentAt is when the request was dispatched to the provider — the closest
+	// local approximation of when the provider refreshed its cache entry
+	// (prefill). Using the response-completion time instead would overstate
+	// cache age by the whole streaming duration for both the warm-window
+	// outcome classification and refCacheWarm routing.
+	SentAt time.Time
 }
 
 // incrementalCacheExpectationShapes computes the shape and token-estimate
@@ -58,16 +63,70 @@ func incrementalCacheExpectationShapes(previous *cacheExpectationRecord, message
 	return shapes, tokens, append([]message.Message(nil), messages...)
 }
 
+// Cache outcome classes attribute one request's cache result. Provider-side
+// loss is never reported as definitive: a low cache read after the warm window
+// or without any reported cache usage stays unknown.
+const (
+	cacheOutcomeLocalRewrite          = "local_rewrite"
+	cacheOutcomeAppend                = "append"
+	cacheOutcomeSuspectedProviderMiss = "suspected_provider_miss"
+	cacheOutcomeUnknown               = "unknown"
+)
+
+// minAttributableCacheTokens is the smallest expected stable prefix worth
+// attributing a miss to: providers do not cache prompts below roughly this
+// size, so a smaller expectation cannot prove anything about provider behavior.
+const minAttributableCacheTokens = 1024
+
+// classifyCacheOutcome buckets a request into the four cache diagnostic
+// classes: a proven chord-side rewrite, an append-only change with consistent
+// cache reads, a stable local prefix whose provider cache reads fell far short
+// (suspected provider or routing miss), or unknown when the evidence cannot
+// separate those cases.
+func classifyCacheOutcome(localRewriteReason string, expectedTokens int, sinceLastRequest time.Duration, usage *message.TokenUsage) (outcome, reason string) {
+	if localRewriteReason != "" {
+		return cacheOutcomeLocalRewrite, localRewriteReason
+	}
+	if usage == nil || (usage.CacheReadTokens <= 0 && usage.CacheWriteTokens <= 0 && usage.CacheWrite1hTokens <= 0) {
+		// All-zero cache fields cannot distinguish a provider without prompt
+		// caching from a complete miss.
+		return cacheOutcomeUnknown, "no_cache_usage"
+	}
+	if expectedTokens < minAttributableCacheTokens {
+		return cacheOutcomeAppend, ""
+	}
+	// expectedTokens is a local estimate while CacheReadTokens is
+	// provider-accurate, so require a shortfall beyond estimation error.
+	if usage.CacheReadTokens*2 >= expectedTokens {
+		return cacheOutcomeAppend, ""
+	}
+	if sinceLastRequest >= cacheWarmWindow {
+		// The provider may have legitimately expired the entry; a miss after
+		// the warm window is not evidence of provider misbehavior.
+		return cacheOutcomeUnknown, "warm_window_elapsed"
+	}
+	return cacheOutcomeSuspectedProviderMiss, "low_cache_read"
+}
+
 // noteCacheExpectation compares the outgoing request against the previous
 // request sent to the same running model ref and returns usage diagnostics
-// that let offline analysis attribute cache misses: if actual cache_read is
-// far below cache_expected_tokens, the provider dropped a cache chord kept
-// byte-stable; if cache_prefix_divergence is small, chord itself mutated an
-// early message (e.g. context reduction) and the miss is self-inflicted.
-// It then records the current request as the new expectation for that ref.
-func (a *MainAgent) noteCacheExpectation(modelRef string, messages []message.Message, toolDefHash [sha256.Size]byte) map[string]string {
+// that attribute cache misses: if actual cache_read is far below
+// cache_expected_tokens, the provider dropped a cache chord kept byte-stable;
+// if cache_prefix_divergence is small, chord itself mutated an early message
+// (e.g. context reduction) and the miss is self-inflicted. The provider-
+// reported usage for the current response, when available, resolves the
+// attribution into cache_outcome. It then records the current request as the
+// new expectation for that ref.
+//
+// tailOverlayCount transient messages at the end of the request are excluded
+// from the expectation: the cache boundary is placed before them, so their
+// churn across requests is not a chord-side prefix rewrite.
+func (a *MainAgent) noteCacheExpectation(modelRef string, messages []message.Message, tailOverlayCount int, toolDefHash [sha256.Size]byte, sentAt time.Time, usage *message.TokenUsage) map[string]string {
 	if a == nil || modelRef == "" || len(messages) == 0 {
 		return nil
+	}
+	if tailOverlayCount > 0 && tailOverlayCount < len(messages) {
+		messages = messages[:len(messages)-tailOverlayCount]
 	}
 	a.cacheExpectMu.Lock()
 	previous := a.cacheExpectations[modelRef]
@@ -78,14 +137,13 @@ func (a *MainAgent) noteCacheExpectation(modelRef string, messages []message.Mes
 	for _, t := range tokens {
 		totalTokens += t
 	}
-	now := time.Now()
 	record := &cacheExpectationRecord{
 		Source:      source,
 		Shapes:      shapes,
 		Tokens:      tokens,
 		ToolDefHash: toolDefHash,
 		PromptHash:  a.systemPromptHash(),
-		SentAt:      now,
+		SentAt:      sentAt,
 	}
 
 	a.cacheExpectMu.Lock()
@@ -103,6 +161,8 @@ func (a *MainAgent) noteCacheExpectation(modelRef string, messages []message.Mes
 		diag["cache_expected_tokens"] = "0"
 		diag["cache_prefix_divergence"] = "0"
 		diag["cache_first_request"] = "true"
+		diag["cache_outcome"] = cacheOutcomeUnknown
+		diag["cache_outcome_reason"] = "first_request"
 		return diag
 	}
 
@@ -125,20 +185,35 @@ func (a *MainAgent) noteCacheExpectation(modelRef string, messages []message.Mes
 	diag["cache_expected_tokens"] = strconv.Itoa(expected)
 	diag["cache_prefix_divergence"] = strconv.Itoa(divergence)
 	diag["cache_prev_messages"] = strconv.Itoa(len(previous.Shapes))
-	diag["cache_prev_gap_ms"] = strconv.FormatInt(now.Sub(previous.SentAt).Milliseconds(), 10)
+	diag["cache_prev_gap_ms"] = strconv.FormatInt(sentAt.Sub(previous.SentAt).Milliseconds(), 10)
 	if toolDefChanged {
 		diag["cache_tooldef_changed"] = "true"
 	}
 	if promptChanged {
 		diag["cache_system_prompt_changed"] = "true"
 	}
-	if divergence < len(previous.Shapes) && divergence < len(shapes) {
+	prefixRewrite := divergence < len(previous.Shapes) && divergence < len(shapes)
+	if prefixRewrite {
 		// The first differing position tells whether the mutation was an
 		// append (tail growth, cheap) or an in-place rewrite (early message
 		// changed, expensive: everything after it is re-billed at input price).
 		diag["cache_divergence_kind"] = "rewrite"
 	} else {
 		diag["cache_divergence_kind"] = "append"
+	}
+	localRewriteReason := ""
+	switch {
+	case toolDefChanged:
+		localRewriteReason = "tool_definitions_changed"
+	case promptChanged:
+		localRewriteReason = "system_prompt_changed"
+	case prefixRewrite:
+		localRewriteReason = "prefix_rewrite"
+	}
+	outcome, reason := classifyCacheOutcome(localRewriteReason, expected, sentAt.Sub(previous.SentAt), usage)
+	diag["cache_outcome"] = outcome
+	if reason != "" {
+		diag["cache_outcome_reason"] = reason
 	}
 	return diag
 }

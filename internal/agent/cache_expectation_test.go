@@ -120,34 +120,102 @@ func TestNoteCacheExpectationAttributesDivergence(t *testing.T) {
 	}
 	hash := a.computeToolDefinitionHash()
 
-	diag := a.noteCacheExpectation("p/m", base, hash)
-	if diag["cache_first_request"] != "true" {
+	diag := a.noteCacheExpectation("p/m", base, 0, hash, time.Now(), nil)
+	if diag["cache_first_request"] != "true" || diag["cache_outcome"] != cacheOutcomeUnknown {
 		t.Fatalf("first request diag = %v", diag)
 	}
 
 	// Append-only growth: divergence at the old length, expectation covers the
 	// full previous request.
 	grown := append(append([]message.Message(nil), base...), message.Message{Role: "user", Content: "u2"})
-	diag = a.noteCacheExpectation("p/m", grown, hash)
+	diag = a.noteCacheExpectation("p/m", grown, 0, hash, time.Now(), nil)
 	if diag["cache_prefix_divergence"] != "2" || diag["cache_divergence_kind"] != "append" {
 		t.Fatalf("append diag = %v", diag)
 	}
 	if diag["cache_expected_tokens"] == "0" {
 		t.Fatalf("expected nonzero cache expectation, diag = %v", diag)
 	}
+	if diag["cache_outcome"] != cacheOutcomeUnknown || diag["cache_outcome_reason"] != "no_cache_usage" {
+		t.Fatalf("append without usage diag = %v", diag)
+	}
 
-	// In-place rewrite of an early message: divergence at that index.
+	// In-place rewrite of an early message: divergence at that index, and the
+	// outcome blames the local rewrite regardless of provider usage.
 	mutated := append([]message.Message(nil), grown...)
 	mutated[0].Content = "u1 rewritten"
-	diag = a.noteCacheExpectation("p/m", mutated, hash)
+	diag = a.noteCacheExpectation("p/m", mutated, 0, hash, time.Now(), &message.TokenUsage{CacheReadTokens: 10})
 	if diag["cache_prefix_divergence"] != "0" || diag["cache_divergence_kind"] != "rewrite" {
 		t.Fatalf("rewrite diag = %v", diag)
 	}
+	if diag["cache_outcome"] != cacheOutcomeLocalRewrite || diag["cache_outcome_reason"] != "prefix_rewrite" {
+		t.Fatalf("rewrite outcome diag = %v", diag)
+	}
 
 	// A different ref tracks its own expectation independently.
-	diag = a.noteCacheExpectation("q/m", mutated, hash)
+	diag = a.noteCacheExpectation("q/m", mutated, 0, hash, time.Now(), nil)
 	if diag["cache_first_request"] != "true" {
 		t.Fatalf("other-ref diag = %v", diag)
+	}
+}
+
+// Transient tail overlays sit after the cache boundary and never enter the
+// cacheable prefix, so replacing them with new durable messages on the next
+// request must read as an append, not as a chord-side prefix rewrite.
+func TestNoteCacheExpectationIgnoresTailOverlayChurn(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	hash := a.computeToolDefinitionHash()
+	durable := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", Content: "a1"},
+	}
+	withOverlay := append(append([]message.Message(nil), durable...),
+		message.Message{Role: "user", Content: "<system-reminder>turn hint</system-reminder>"})
+
+	a.noteCacheExpectation("p/m", withOverlay, 1, hash, time.Now(), nil)
+
+	grown := append(append([]message.Message(nil), durable...),
+		message.Message{Role: "assistant", Content: "a2"},
+		message.Message{Role: "user", Content: "u2"})
+	diag := a.noteCacheExpectation("p/m", grown, 0, hash, time.Now(), nil)
+	if diag["cache_prefix_divergence"] != "2" || diag["cache_divergence_kind"] != "append" {
+		t.Fatalf("overlay churn diag = %v", diag)
+	}
+	if diag["cache_outcome"] == cacheOutcomeLocalRewrite {
+		t.Fatalf("overlay churn misread as local rewrite: %v", diag)
+	}
+}
+
+func TestClassifyCacheOutcome(t *testing.T) {
+	warm := cacheWarmWindow / 2
+	cases := []struct {
+		name             string
+		localRewrite     string
+		expected         int
+		sinceLastRequest time.Duration
+		usage            *message.TokenUsage
+		wantOutcome      string
+		wantReason       string
+	}{
+		{"local rewrite wins over usage", "prefix_rewrite", 50_000, warm,
+			&message.TokenUsage{CacheReadTokens: 50_000}, cacheOutcomeLocalRewrite, "prefix_rewrite"},
+		{"missing usage is unknown", "", 50_000, warm,
+			nil, cacheOutcomeUnknown, "no_cache_usage"},
+		{"all-zero cache fields are unknown", "", 50_000, warm,
+			&message.TokenUsage{InputTokens: 60_000}, cacheOutcomeUnknown, "no_cache_usage"},
+		{"tiny expectation stays append", "", minAttributableCacheTokens - 1, warm,
+			&message.TokenUsage{CacheWriteTokens: 500}, cacheOutcomeAppend, ""},
+		{"consistent cache read is append", "", 50_000, warm,
+			&message.TokenUsage{CacheReadTokens: 30_000}, cacheOutcomeAppend, ""},
+		{"low read inside warm window is suspected", "", 50_000, warm,
+			&message.TokenUsage{CacheReadTokens: 100, CacheWriteTokens: 49_000}, cacheOutcomeSuspectedProviderMiss, "low_cache_read"},
+		{"low read after warm window is unknown", "", 50_000, cacheWarmWindow + time.Second,
+			&message.TokenUsage{CacheReadTokens: 100, CacheWriteTokens: 49_000}, cacheOutcomeUnknown, "warm_window_elapsed"},
+	}
+	for _, tc := range cases {
+		outcome, reason := classifyCacheOutcome(tc.localRewrite, tc.expected, tc.sinceLastRequest, tc.usage)
+		if outcome != tc.wantOutcome || reason != tc.wantReason {
+			t.Errorf("%s: outcome=%q reason=%q, want %q %q", tc.name, outcome, reason, tc.wantOutcome, tc.wantReason)
+		}
 	}
 }
 
@@ -157,11 +225,14 @@ func TestCacheExpectationInvalidatesAcrossPromptAndSessionBoundaries(t *testing.
 	hash := a.computeToolDefinitionHash()
 
 	a.installSystemPrompt("first system prompt")
-	a.noteCacheExpectation("p/m", msgs, hash)
+	a.noteCacheExpectation("p/m", msgs, 0, hash, time.Now(), nil)
 	a.installSystemPrompt("different system prompt")
-	diag := a.noteCacheExpectation("p/m", msgs, hash)
+	diag := a.noteCacheExpectation("p/m", msgs, 0, hash, time.Now(), nil)
 	if diag["cache_expected_tokens"] != "0" || diag["cache_system_prompt_changed"] != "true" {
 		t.Fatalf("system prompt change did not invalidate expectation: %v", diag)
+	}
+	if diag["cache_outcome"] != cacheOutcomeLocalRewrite || diag["cache_outcome_reason"] != "system_prompt_changed" {
+		t.Fatalf("system prompt change outcome diag = %v", diag)
 	}
 
 	a.activateLoadedSession(&loadedSessionState{

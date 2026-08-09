@@ -743,10 +743,15 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	}
 
 	// Record token usage plus cache-attribution diagnostics: how many tokens
-	// the previous request to this same ref should have kept cacheable, so
-	// offline analysis can tell chord-side prefix mutations from provider-side
-	// cache loss. Also feed the observed hit into cache-aware model scoring.
-	cacheDiag := a.noteCacheExpectation(callStatus.RunningModelRef, messages, a.computeToolDefinitionHash())
+	// the previous request to this same ref should have kept cacheable, and the
+	// resolved cache_outcome class separating chord-side prefix mutations from
+	// suspected provider-side cache loss. Also feed the observed hit into
+	// cache-aware model scoring.
+	requestSentAt := callStatus.RunningAttemptAt
+	if requestSentAt.IsZero() {
+		requestSentAt = time.Now()
+	}
+	cacheDiag := a.noteCacheExpectation(callStatus.RunningModelRef, messages, tailOverlayCount, a.computeToolDefinitionHash(), requestSentAt, resp.Usage)
 	if reductionDiag := a.contextReductionDiagnosticForTurn(turnID); reductionDiag != nil {
 		if cacheDiag == nil {
 			cacheDiag = make(map[string]string)

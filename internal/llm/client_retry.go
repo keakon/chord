@@ -567,6 +567,7 @@ func (c *Client) completeStreamTarget(
 		tracker = newStreamAttemptTracker(cb, t, apiKey, modelRef, attemptReason, keyAttempt, keyCount)
 
 		result.hadRequestAttempt = true
+		attemptStartedAt := time.Now()
 		resp, err = t.impl.CompleteStream(
 			ctx,
 			apiKey,
@@ -615,6 +616,9 @@ func (c *Client) completeStreamTarget(
 			}
 			log.Debugf("LLM request completed provider=%v model=%v input_tokens=%v output_tokens=%v stop_reason=%v", t.provider.Name(), t.modelID, inputTok, outputTok, resp.StopReason)
 			updateSuccessfulCallStatus(status, t)
+			if status != nil {
+				status.RunningAttemptAt = attemptStartedAt
+			}
 			modelDone = true
 			break
 		}

@@ -2718,6 +2718,9 @@ func TestClientFallbackRunningInputLimitRecomputesDerivedBudgetAfterOutputCapCha
 	if got := st.RunningInputLimit; got != 391808 {
 		t.Fatalf("RunningInputLimit = %d, want 391808 after output cap update", got)
 	}
+	if st.RunningAttemptAt.IsZero() {
+		t.Fatal("RunningAttemptAt is zero after successful fallback request")
+	}
 }
 
 func TestClassifyFallbackReasonUsesContextLengthExceededCode(t *testing.T) {

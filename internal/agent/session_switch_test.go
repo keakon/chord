@@ -99,7 +99,7 @@ func TestResetSessionRuntimeStateKeepsServiceTier(t *testing.T) {
 
 func TestResetSessionRuntimeStateClearsCacheRoutingState(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.noteCacheExpectation("provider/model", []message.Message{{Role: message.RoleUser, Content: "old session"}}, a.computeToolDefinitionHash())
+	a.noteCacheExpectation("provider/model", []message.Message{{Role: message.RoleUser, Content: "old session"}}, 0, a.computeToolDefinitionHash(), time.Now(), nil)
 	for range 3 {
 		a.cacheHitTracker.Observe("provider/model", 100, 90)
 	}

@@ -257,6 +257,27 @@ func TestShouldAutoCompactUsesUsableInputBudgetWhenReserved(t *testing.T) {
 	}
 }
 
+// A lower local byte-calibrated estimate must never cancel a compaction the
+// provider-reported usage already triggered: provider usage stays authoritative
+// and the estimate can only raise the effective input, never lower it.
+func TestShouldAutoCompactUsageAuthorityNotCanceledByLowerEstimate(t *testing.T) {
+	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 300)}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 800})
+
+	decision := m.AutoCompactDecision()
+	if decision.EstimatedInputTokens >= decision.LastInputTokens {
+		t.Fatalf("EstimatedInputTokens = %d, want below LastInputTokens = %d for this scenario",
+			decision.EstimatedInputTokens, decision.LastInputTokens)
+	}
+	if got := decision.EffectiveInputTokens; got != 800 {
+		t.Fatalf("EffectiveInputTokens = %d, want 800 from authoritative usage", got)
+	}
+	if !decision.ShouldCompact {
+		t.Fatal("expected usage-triggered compaction to survive a lower local estimate")
+	}
+}
+
 func TestShouldAutoCompactUsesPayloadByteCalibrationWhenUsageMissing(t *testing.T) {
 	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 100)}})
