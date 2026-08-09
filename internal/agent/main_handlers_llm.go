@@ -150,7 +150,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 				turnID := a.turn.ID
 				turnCtx := a.turn.Ctx
 				a.applyPendingModelPoolSwitchesAtRequestBoundary()
-				a.beginLengthRecoveryRetry(a.turn.LastTruncatedToolName, turnID, turnCtx)
+				a.beginLengthRecoveryRetry(lengthRecoveryPrompt(a.turn.LastTruncatedToolName), turnID, turnCtx)
 				return
 			}
 			a.turn.MalformedCount++
@@ -204,6 +204,51 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 		return
 	}
+
+	// --- Truncation that produced nothing at all ---
+	// The output limit can be reached while the model is still emitting
+	// thinking/reasoning, before any tool call or visible text exists. Such a
+	// response has no malformed call for the branch above to detect and no
+	// content for the idle path below to display, so without this branch the
+	// turn ends silently and the user is left with a thinking card and no reply.
+	// Recovery is bounded by the same counter as the malformed path.
+	if isTruncated && len(validCalls) == 0 && strings.TrimSpace(payload.Content) == "" {
+		outputTokens := 0
+		if payload.Usage != nil {
+			outputTokens = payload.Usage.OutputTokens
+		}
+		if a.turn.LengthRecoveryCount < maxLengthRecoveryAttempts {
+			a.turn.LengthRecoveryCount++
+			log.Warnf("LLM output truncated before any tool call or visible text; retrying with recovery prompt recovery_attempt=%v max_attempts=%v stop_reason=%v thinking_blocks=%v output_tokens=%v", a.turn.LengthRecoveryCount, maxLengthRecoveryAttempts, payload.StopReason, len(payload.ThinkingBlocks), outputTokens)
+			a.emitToTUI(ToastEvent{
+				Message: "Response hit the output limit before replying; retrying with a smaller next step",
+				Level:   "warn",
+			})
+			turnID := a.turn.ID
+			turnCtx := a.turn.Ctx
+			a.applyPendingModelPoolSwitchesAtRequestBoundary()
+			a.beginLengthRecoveryRetry(noOutputLengthRecoveryPrompt(), turnID, turnCtx)
+			return
+		}
+		// Compaction is deliberately not attempted here. This shape is driven by
+		// the output budget being spent on reasoning, not by oversized input, so
+		// shrinking the context would not change the outcome.
+		attempts := a.turn.LengthRecoveryCount + 1
+		log.Warnf("aborting turn: LLM output truncated before any tool call or visible text attempts=%v stop_reason=%v", attempts, payload.StopReason)
+		a.emitToTUI(ErrorEvent{
+			Err: fmt.Errorf(
+				"turn aborted: the model hit the output limit %d times in a row while "+
+					"reasoning, without producing a reply; ask for a smaller next step "+
+					"or raise max_output_tokens in config",
+				attempts,
+			),
+		})
+		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "length_recovery_no_output")
+		a.applyPendingModelPoolSwitchesAtRequestBoundary()
+		a.setIdleAndDrainPending()
+		return
+	}
+
 	wasLengthRecovery := a.turn.InLengthRecovery
 	a.turn.InLengthRecovery = false
 	a.turn.LengthRecoveryCount = 0
@@ -325,9 +370,19 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	// No valid tool calls → agent is idle, waiting for the next user message.
 	if len(validCalls) == 0 {
 		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "no_valid_calls")
-		if payload.StopReason == "tool_calls" {
+		switch {
+		case payload.StopReason == "tool_calls":
 			log.Warnf("LLM response stop_reason=tool_calls but no tool calls parsed; going idle total_tool_calls=%v malformed_count=%v", len(payload.ToolCalls), len(malformedCalls))
-		} else {
+		case isTruncated:
+			// Reached only with visible text: the empty-content case retried or
+			// aborted earlier. The text is kept because it is partial work the
+			// user may still want, but it is not a complete reply.
+			log.Warnf("LLM response truncated after producing text; going idle with partial reply stop_reason=%v content_len=%v", payload.StopReason, len(payload.Content))
+			a.emitToTUI(ToastEvent{
+				Message: "Response hit the output limit; the reply above is incomplete",
+				Level:   "warn",
+			})
+		default:
 			log.Debug("LLM response has no tool calls, agent going idle")
 		}
 		if assessment := a.nextLoopAssessmentFromAssistant(assistantMsg); assessment != nil {

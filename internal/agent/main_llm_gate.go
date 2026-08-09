@@ -704,7 +704,9 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 			return false
 		}
 		// Compaction succeeded: resume recovery request with single-tool constraint.
-		a.beginLengthRecoveryRetry(a.turn.LastTruncatedToolName, pending.turnID, a.turn.Ctx)
+		// Only the malformed-tool-args shape schedules compaction, so the
+		// tool-argument prompt is always the right one here.
+		a.beginLengthRecoveryRetry(lengthRecoveryPrompt(a.turn.LastTruncatedToolName), pending.turnID, a.turn.Ctx)
 		return true
 	}
 	if a.turn == nil || a.turn.ID != pending.turnID || a.turn.Epoch != pending.turnEpoch {

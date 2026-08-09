@@ -781,3 +781,117 @@ func TestRecoveryPromptNotInCompactionCheckpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleLLMResponseTruncatedWithNoOutputStartsLengthRecovery(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+
+	// Output limit reached while still emitting thinking: no tool calls, and
+	// content that is whitespace only.
+	payload := &LLMResponsePayload{
+		Content:        " ",
+		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "long reasoning"}},
+		StopReason:     "max_tokens",
+		Usage:          &message.TokenUsage{OutputTokens: 15283},
+	}
+
+	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: payload})
+
+	if a.turn == nil {
+		t.Fatal("turn unexpectedly cleared; truncation with no output must retry, not go idle")
+	}
+	if !a.turn.InLengthRecovery {
+		t.Fatal("expected turn to enter length recovery")
+	}
+	if a.turn.LengthRecoveryCount != 1 {
+		t.Fatalf("LengthRecoveryCount = %d, want 1", a.turn.LengthRecoveryCount)
+	}
+	// The prompt must describe reasoning overrun, not tool-argument overrun:
+	// telling the model to shorten arguments would not address this shape.
+	if got := a.pendingRecoveryPrompt; got != noOutputLengthRecoveryPrompt() {
+		t.Fatalf("recovery prompt = %q, want the no-output variant", got)
+	}
+	var gotToast bool
+	for len(a.outputCh) > 0 {
+		if toast, ok := (<-a.outputCh).(ToastEvent); ok && strings.Contains(toast.Message, "output limit") {
+			gotToast = true
+		}
+	}
+	if !gotToast {
+		t.Fatal("expected a warn toast telling the user the response hit the output limit")
+	}
+}
+
+func TestHandleLLMResponseTruncatedWithNoOutputAbortsAfterMaxAttempts(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.turn.LengthRecoveryCount = maxLengthRecoveryAttempts
+
+	payload := &LLMResponsePayload{
+		Content:    " ",
+		StopReason: "max_tokens",
+	}
+
+	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: payload})
+
+	if a.turn != nil {
+		t.Fatal("expected turn to be cleared after abort")
+	}
+	var gotErr error
+	for len(a.outputCh) > 0 {
+		if errEvt, ok := (<-a.outputCh).(ErrorEvent); ok {
+			gotErr = errEvt.Err
+			break
+		}
+	}
+	if gotErr == nil {
+		t.Fatal("expected error event so the turn does not end silently")
+	}
+	if !strings.Contains(gotErr.Error(), "output limit") {
+		t.Fatalf("error %q does not mention the output limit", gotErr)
+	}
+	// Compaction must not be scheduled: this shape is caused by the output
+	// budget, not by oversized input.
+	if a.IsCompactionRunning() {
+		t.Fatal("compaction should not be scheduled for output-budget truncation")
+	}
+}
+
+func TestHandleLLMResponseTruncatedWithTextKeepsReplyAndWarns(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+
+	payload := &LLMResponsePayload{
+		Content:    "partial answer that got cut off mid-",
+		StopReason: "max_tokens",
+	}
+
+	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: payload})
+
+	if a.turn != nil {
+		t.Fatal("expected turn to go idle when truncated output still carried text")
+	}
+	if a.turn != nil && a.turn.InLengthRecovery {
+		t.Fatal("expected no retry when partial text is available")
+	}
+	var gotToast bool
+	for len(a.outputCh) > 0 {
+		if toast, ok := (<-a.outputCh).(ToastEvent); ok && strings.Contains(toast.Message, "incomplete") {
+			gotToast = true
+		}
+	}
+	if !gotToast {
+		t.Fatal("expected a warn toast marking the kept reply as incomplete")
+	}
+	msgs := a.ctxMgr.Snapshot()
+	if len(msgs) == 0 {
+		t.Fatal("expected the partial reply to be appended to context")
+	}
+	last := msgs[len(msgs)-1]
+	if !strings.Contains(last.Content, "partial answer") {
+		t.Fatalf("last message content = %q, want the partial reply preserved", last.Content)
+	}
+}
