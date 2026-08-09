@@ -34,7 +34,7 @@ func (t LspTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (t LspTool) Description() string {
-	base := "Semantic code navigation via LSP. Use this tool first for definition, references, and implementation at a known file position. Prefer it over text or file search once the file path and cursor position are known and the file type has LSP coverage. Use available discovery tools only to discover candidate files or positions when the location is not known yet. Put the cursor on the identifier itself, not file start or whitespace. If references fails because no identifier is found, inspect the file and retry on the symbol name. Use 1-based line and character from the raw file content; count Unicode grapheme clusters (user-perceived characters) in the source line, including tabs as a single character, and prefer the start of the target identifier. Returned locations use the same line/character counting."
+	base := "Semantic code navigation via LSP. Use this tool first for definition, references, and implementation at a known file position. Prefer it over text or file search once the file path and cursor position are known and the file type has LSP coverage. Use available discovery tools only to discover candidate files or positions when the location is not known yet. Put the cursor on the identifier itself, not file start or whitespace. If references fails because no identifier is found, inspect the file and retry on the symbol name. After editing a file, reread the current source before reusing line or character coordinates. Use 1-based line and character from the raw file content; count Unicode grapheme clusters (user-perceived characters) in the source line, including tabs as a single character, and prefer the start of the target identifier. Returned locations use the same line/character counting."
 	if t.LSP == nil {
 		return base
 	}
@@ -68,11 +68,13 @@ func (t LspTool) Parameters() map[string]any {
 			},
 			"line": map[string]any{
 				"type":        "integer",
-				"description": "1-based line number.",
+				"minimum":     1,
+				"description": "1-based line number from the current verified file content. Reread the file after edits; do not reuse stale coordinates.",
 			},
 			"character": map[string]any{
 				"type":        "integer",
-				"description": "1-based character offset on the raw source line, counted as Unicode grapheme clusters (user-perceived characters). Count tabs as a single character. For symbol queries, this should point to a character inside the identifier.",
+				"minimum":     1,
+				"description": "1-based character offset on the current raw source line, counted as Unicode grapheme clusters (user-perceived characters). Count tabs as a single character. For symbol queries, this must point inside the identifier, not beyond the line; reread the file after edits.",
 			},
 			"include_declaration": map[string]any{
 				"type":        "boolean",
@@ -148,7 +150,7 @@ func lspSourceLinesForPath(path string, sourceLinesByPath map[string][]string) (
 	if err != nil {
 		return nil, false
 	}
-	lines := splitReadToolLines(decoded.Text)
+	lines := splitLSPSourceLines(decoded.Text)
 	sourceLinesByPath[path] = lines
 	return lines, true
 }
@@ -163,7 +165,7 @@ func formatLspLocations(locs []lsp.RefLocation, sourceLinesByPath map[string][]s
 		if lines, ok := lspSourceLinesForPath(loc.Path, sourceLinesByPath); ok {
 			col = utf16OffsetToLspCharacter(lines, loc.Line, loc.Col)
 		}
-		b.WriteString(fmt.Sprintf("%s:%d:%d", loc.Path, loc.Line+1, col+1))
+		fmt.Fprintf(&b, "%s:%d:%d", loc.Path, loc.Line+1, col+1)
 	}
 	return b.String()
 }
@@ -179,13 +181,22 @@ func (t LspTool) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 	if a.Path == "" {
 		return "", fmt.Errorf("path is required")
 	}
+	if a.Line <= 0 {
+		return "", fmt.Errorf("line must be a positive 1-based line number, got %d", a.Line)
+	}
+	if a.Character <= 0 {
+		return "", fmt.Errorf("character must be a positive 1-based character offset, got %d", a.Character)
+	}
 	absPath, err := resolveToolPathAbsInDir(a.Path, t.BaseDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w", err)
 	}
 	sourceLinesByPath := make(map[string][]string)
 	if decoded, readErr := ReadDecodedTextFile(absPath); readErr == nil {
-		sourceLinesByPath[absPath] = splitReadToolLines(decoded.Text)
+		sourceLinesByPath[absPath] = splitLSPSourceLines(decoded.Text)
+		if err := validateLSPSourcePosition(sourceLinesByPath[absPath], a.Line, a.Character); err != nil {
+			return "", fmt.Errorf("%s: %w", absPath, err)
+		}
 	}
 	// LSP uses 0-based line and character.
 	line, char := a.Line-1, a.Character-1
@@ -209,7 +220,7 @@ func (t LspTool) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 	case "definition":
 		locs, err := client.GoToDefinition(ctx, absPath, line, char)
 		if err != nil {
-			return "", fmt.Errorf("definition: %w", err)
+			return "", formatLSPQueryError("definition", a.Path, a.Line, a.Character, err)
 		}
 		if len(locs) == 0 {
 			return "No definition found.", nil
@@ -218,7 +229,7 @@ func (t LspTool) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 	case "references":
 		locs, err := client.FindReferences(ctx, absPath, line, char, includeDecl)
 		if err != nil {
-			return "", fmt.Errorf("references: %w", err)
+			return "", formatLSPQueryError("references", a.Path, a.Line, a.Character, err)
 		}
 		if len(locs) == 0 {
 			return "No references found.", nil
@@ -227,7 +238,7 @@ func (t LspTool) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 	case "implementation":
 		locs, err := client.FindImplementations(ctx, absPath, line, char)
 		if err != nil {
-			return "", fmt.Errorf("implementation: %w", err)
+			return "", formatLSPQueryError("implementation", a.Path, a.Line, a.Character, err)
 		}
 		if len(locs) == 0 {
 			return "No implementations found.", nil
@@ -236,4 +247,44 @@ func (t LspTool) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 	default:
 		return "", fmt.Errorf("operation must be definition, references, or implementation, got %q", a.Operation)
 	}
+}
+
+func splitLSPSourceLines(content string) []string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+	return strings.Split(content, "\n")
+}
+
+func validateLSPSourcePosition(lines []string, line, character int) error {
+	if line <= 0 {
+		return fmt.Errorf("line must be a positive 1-based line number, got %d", line)
+	}
+	if character <= 0 {
+		return fmt.Errorf("character must be a positive 1-based character offset, got %d", character)
+	}
+	if line < 1 || line > len(lines) {
+		return fmt.Errorf("line %d is outside the current file (1-%d); reread the file and retry with a current line number", line, len(lines))
+	}
+	graphemes := uniseg.NewGraphemes(lines[line-1])
+	lineCharacters := 0
+	for graphemes.Next() {
+		lineCharacters++
+	}
+	// The one-past-the-end position is a valid LSP position, although semantic
+	// queries normally need a character inside an identifier and will return no
+	// result there.
+	if character > lineCharacters+1 {
+		return fmt.Errorf("character %d is outside line %d (1-%d); reread the current line and retry with the cursor inside the target identifier", character, line, lineCharacters+1)
+	}
+	return nil
+}
+
+func formatLSPQueryError(operation, path string, line, character int, err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "no identifier found") {
+		return fmt.Errorf("%s at %s:%d:%d: %w; reread the current source line and retry with character inside the target identifier", operation, path, line, character, err)
+	}
+	return fmt.Errorf("%s at %s:%d:%d: %w", operation, path, line, character, err)
 }

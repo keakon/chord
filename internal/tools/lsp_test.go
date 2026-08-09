@@ -3,7 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -37,6 +40,7 @@ func TestLspToolDescriptionGuidesRoutingWithoutHover(t *testing.T) {
 		"tabs as a single character",
 		"Returned locations use the same line/character counting.",
 		"prefer the start of the target identifier",
+		"After editing a file, reread the current source before reusing line or character coordinates.",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q: %q", want, desc)
@@ -62,9 +66,112 @@ func TestLspToolCharacterParameterExplainsRawSourceCounting(t *testing.T) {
 		"raw source line",
 		"Unicode grapheme clusters",
 		"Count tabs as a single character",
+		"must point inside the identifier",
+		"reread the file after edits",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("character description missing %q: %q", want, desc)
+		}
+	}
+}
+
+func TestLspToolPositionParametersHavePositiveMinimum(t *testing.T) {
+	props := (LspTool{}).Parameters()["properties"].(map[string]any)
+	for _, name := range []string{"line", "character"} {
+		if got := props[name].(map[string]any)["minimum"]; got != 1 {
+			t.Fatalf("%s minimum = %#v, want 1", name, got)
+		}
+	}
+}
+
+func TestSplitLSPSourceLinesPreservesProtocolPositions(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{name: "empty file", content: "", want: []string{""}},
+		{name: "trailing newline", content: "a\n", want: []string{"a", ""}},
+		{name: "windows newlines", content: "a\r\n\r\n", want: []string{"a", "", ""}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitLSPSourceLines(tc.content)
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("splitLSPSourceLines(%q) = %#v, want %#v", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateLSPSourcePosition(t *testing.T) {
+	lines := []string{"package demo", "", "func main() {}"}
+	for _, tc := range []struct {
+		name       string
+		line       int
+		character  int
+		wantSubstr string
+	}{
+		{name: "line below one", line: 0, character: 1, wantSubstr: "positive 1-based"},
+		{name: "character below one", line: 1, character: 0, wantSubstr: "positive 1-based"},
+		{name: "line beyond file", line: 4, character: 1, wantSubstr: "outside the current file"},
+		{name: "character beyond line", line: 1, character: 14, wantSubstr: "outside line 1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateLSPSourcePosition(lines, tc.line, tc.character)
+			if err == nil || !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Fatalf("validateLSPSourcePosition() error = %v, want substring %q", err, tc.wantSubstr)
+			}
+		})
+	}
+	if err := validateLSPSourcePosition(lines, 3, 5); err != nil {
+		t.Fatalf("valid identifier position rejected: %v", err)
+	}
+	if err := validateLSPSourcePosition(lines, 2, 1); err != nil {
+		t.Fatalf("empty-line start position rejected: %v", err)
+	}
+	if err := validateLSPSourcePosition(splitLSPSourceLines("a\n"), 2, 1); err != nil {
+		t.Fatalf("trailing empty source line rejected: %v", err)
+	}
+}
+
+func TestLspToolExecuteRejectsStaleSourceCoordinatesBeforeServerLookup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.go")
+	if err := os.WriteFile(path, []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tool := LspTool{LSP: lsp.NewManager(nil, dir, nil), BaseDir: dir}
+	for _, tc := range []struct {
+		name       string
+		args       string
+		wantSubstr string
+	}{
+		{name: "line beyond current file", args: `{"operation":"references","path":"demo.go","line":3,"character":1}`, wantSubstr: "line 3 is outside the current file"},
+		{name: "character beyond current line", args: `{"operation":"references","path":"demo.go","line":1,"character":31}`, wantSubstr: "character 31 is outside line 1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tool.Execute(context.Background(), json.RawMessage(tc.args))
+			if err == nil || !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Fatalf("Execute() error = %v, want substring %q", err, tc.wantSubstr)
+			}
+			if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "reread") {
+				t.Fatalf("Execute() error lacks path/recovery guidance: %v", err)
+			}
+		})
+	}
+}
+
+func TestFormatLSPQueryErrorAddsIdentifierRecoveryGuidance(t *testing.T) {
+	err := formatLSPQueryError("references", "internal/demo.go", 86, 31, fmt.Errorf("no identifier found"))
+	got := err.Error()
+	for _, want := range []string{
+		"references at internal/demo.go:86:31",
+		"no identifier found",
+		"reread the current source line",
+		"inside the target identifier",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatLSPQueryError() = %q, missing %q", got, want)
 		}
 	}
 }
