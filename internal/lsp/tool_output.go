@@ -40,7 +40,8 @@ func (m *Manager) DiagnosticOutputConfigForPath(path string) config.DiagnosticOu
 // files changed by one tool call. All changed files are treated as primary
 // files, so diagnostics are selected once with one shared output budget rather
 // than being appended once per file. baselines is keyed by normalized absolute
-// path and is used only for the concise changed/resolved summary.
+// path and feeds the per-file "(N new, M resolved)" header counts; a nil map
+// means no baseline information and omits the counts entirely.
 func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPaths []string, includeOtherFiles bool, baselines map[string][]Diagnostic, outputs map[string]config.DiagnosticOutputConfig, extras map[string][]Diagnostic) string {
 	if m == nil {
 		return base
@@ -85,11 +86,7 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		omitted += count
 	}
 
-	type otherDiagnostics struct {
-		path  string
-		diags []Diagnostic
-	}
-	var others []otherDiagnostics
+	var others []otherFileDiagnostics
 	if includeOtherFiles && remaining > 0 {
 		primary := make(map[string]struct{}, len(primaryPaths))
 		for _, path := range primaryPaths {
@@ -110,62 +107,62 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 			if len(selected) == 0 {
 				continue
 			}
-			others = append(others, otherDiagnostics{path: path, diags: selected})
+			others = append(others, otherFileDiagnostics{path: path, diags: selected})
 			omitted += count
 		}
 	}
 
-	var b strings.Builder
-	wrote := false
-	appendBlock := func(path string, diags []Diagnostic, primary bool) {
-		if len(diags) == 0 {
-			return
-		}
-		if !wrote {
-			b.WriteString(base)
-			b.WriteString("\n\nDiagnostics:\n")
-			wrote = true
-		} else {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(strings.TrimLeft(formatSelectedDiagnosticsBlock(path, diags, primary), "\n"))
-	}
+	hasBlocks := len(others) > 0
 	for _, path := range primaryPaths {
-		if len(primaryPaths) > 1 && len(selectedByPath[path]) > 0 {
-			if !wrote {
-				b.WriteString(base)
-				b.WriteString("\n\nDiagnostics:\n")
-				wrote = true
-			} else {
-				b.WriteString("\n\n")
-			}
-			b.WriteString(path + ":\n" + strings.Join(formatDiagnosticLines(selectedByPath[path]), "\n"))
-		} else {
-			appendBlock(path, selectedByPath[path], true)
+		if len(selectedByPath[path]) > 0 {
+			hasBlocks = true
+			break
 		}
 	}
-	for _, other := range others {
-		appendBlock(other.path, other.diags, false)
-	}
-	if !wrote {
+	if !hasBlocks {
 		return base
 	}
-	if omitted > 0 {
-		b.WriteString("\n\n")
-		b.WriteString(diagnosticsOmittedLine(omitted))
+
+	multi := len(primaryPaths) > 1
+	var b strings.Builder
+	b.WriteString(base)
+	b.WriteString("\n\nDiagnostics:\n")
+	wroteBlock := false
+	writeBlock := func(block string) {
+		if wroteBlock {
+			b.WriteByte('\n')
+		}
+		b.WriteString(block)
+		wroteBlock = true
 	}
 	for _, path := range primaryPaths {
-		baseline := baselines[path]
-		if changed := diagnosticChangeSummary(baseline, byPath[path]); changed != "" {
-			if len(primaryPaths) > 1 {
-				b.WriteString("\nDiagnostics changed for ")
-				b.WriteString(path)
-				b.WriteString(": ")
-				b.WriteString(changed)
-			} else {
-				b.WriteByte('\n')
-				b.WriteString(changed)
+		var counts string
+		if multi && baselines != nil {
+			counts = diagnosticChangeCounts(baselines[path], byPath[path])
+		}
+		diags := selectedByPath[path]
+		switch {
+		case len(diags) > 0 && multi:
+			header := path
+			if counts != "" {
+				header += " (" + counts + ")"
 			}
+			writeBlock(header + ":\n" + strings.Join(formatDiagnosticLines(diags), "\n"))
+		case len(diags) > 0:
+			writeBlock(strings.Join(formatDiagnosticLines(diags), "\n"))
+		case counts != "" && multi:
+			writeBlock(path + ": " + counts + ".")
+		}
+	}
+	appendOtherFileDiagnosticsSection(&b, others, wroteBlock)
+	if omitted > 0 {
+		b.WriteByte('\n')
+		b.WriteString(diagnosticsOmittedLine(omitted))
+	}
+	if len(primaryPaths) == 1 && baselines != nil {
+		if changed := diagnosticChangeSummary(baselines[primaryPaths[0]], byPath[primaryPaths[0]]); changed != "" {
+			b.WriteByte('\n')
+			b.WriteString(changed)
 		}
 	}
 	return b.String()
@@ -284,11 +281,7 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 	}
 
 	primary := selectWithinRemaining(byPath[edited], ranges)
-	type otherDiagnostics struct {
-		path  string
-		diags []Diagnostic
-	}
-	var others []otherDiagnostics
+	var others []otherFileDiagnostics
 	if includeOtherFiles && remaining > 0 {
 		otherPaths := make([]string, 0, len(byPath))
 		for p, diags := range byPath {
@@ -306,7 +299,7 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 			if len(selected) == 0 {
 				continue
 			}
-			others = append(others, otherDiagnostics{path: p, diags: selected})
+			others = append(others, otherFileDiagnostics{path: p, diags: selected})
 		}
 	}
 	if len(primary) == 0 && len(others) == 0 {
@@ -317,23 +310,10 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 	b.WriteString(base)
 	b.WriteString("\n\nDiagnostics:\n")
 
-	wroteBlock := false
-	appendDiagBlock := func(file string, diags []Diagnostic, thisFile bool) {
-		if len(diags) == 0 {
-			return
-		}
-		if wroteBlock {
-			b.WriteString("\n\n")
-		}
-		block := formatSelectedDiagnosticsBlock(file, diags, thisFile)
-		b.WriteString(strings.TrimLeft(block, "\n"))
-		wroteBlock = true
+	if len(primary) > 0 {
+		b.WriteString(strings.Join(formatDiagnosticLines(primary), "\n"))
 	}
-	appendDiagBlock(edited, primary, true)
-
-	for _, other := range others {
-		appendDiagBlock(other.path, other.diags, false)
-	}
+	appendOtherFileDiagnosticsSection(&b, others, len(primary) > 0)
 
 	return b.String()
 }
@@ -375,28 +355,42 @@ func diagnosticsOmittedLine(count int) string {
 	return fmt.Sprintf("... %d diagnostics not shown due to output limits; they may still need fixing.", count)
 }
 
-func formatSelectedDiagnosticsBlock(file string, diags []Diagnostic, thisFile bool) string {
-	if len(diags) == 0 {
-		return ""
-	}
-
-	var lines []string
-	for _, d := range diags {
-		lines = append(lines, formatDiagLine(d))
-	}
-
-	if thisFile {
-		return strings.Join(lines, "\n")
-	}
-	return fmt.Sprintf("\n\nLSP diagnostics in other files:\n%s\n%s", file, strings.Join(lines, "\n"))
+// otherFileDiagnostics pairs a non-primary file with the diagnostics selected
+// for it under the shared output budget.
+type otherFileDiagnostics struct {
+	path  string
+	diags []Diagnostic
 }
 
-func formatDiagnosticsBlockWithRanges(file string, diags []Diagnostic, output config.DiagnosticOutputConfig, ranges []EditRange, thisFile bool) string {
+// otherFilesDiagnosticsHeader labels the non-primary-file section; the
+// review-state parser keys on it to stop counting primary-file lines.
+const otherFilesDiagnosticsHeader = "LSP diagnostics in other files:"
+
+// appendOtherFileDiagnosticsSection writes one shared "LSP diagnostics in
+// other files:" header followed by a compact path-labelled block per file.
+// afterBlock inserts a blank line so the section stays visually separate from
+// preceding primary-file blocks.
+func appendOtherFileDiagnosticsSection(b *strings.Builder, others []otherFileDiagnostics, afterBlock bool) {
+	for i, other := range others {
+		if i == 0 {
+			if afterBlock {
+				b.WriteString("\n\n")
+			}
+			b.WriteString(otherFilesDiagnosticsHeader)
+		}
+		b.WriteByte('\n')
+		b.WriteString(other.path)
+		b.WriteString(":\n")
+		b.WriteString(strings.Join(formatDiagnosticLines(other.diags), "\n"))
+	}
+}
+
+func formatDiagnosticsBlockWithRanges(diags []Diagnostic, output config.DiagnosticOutputConfig, ranges []EditRange) string {
 	selected, omitted := selectDiagnosticsByOutput(diags, output, ranges)
 	if len(selected) == 0 {
 		return ""
 	}
-	out := formatSelectedDiagnosticsBlock(file, selected, thisFile)
+	out := strings.Join(formatDiagnosticLines(selected), "\n")
 	if omitted > 0 {
 		out += "\n" + diagnosticsOmittedLine(omitted)
 	}

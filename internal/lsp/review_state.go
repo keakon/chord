@@ -131,7 +131,7 @@ func parseDirectFileDiagnostics(content string) map[string]reviewCounts {
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "LSP diagnostics in other files:") {
+		if strings.HasPrefix(line, otherFilesDiagnosticsHeader) {
 			break
 		}
 		if !reviewDiagLineRe.MatchString(line) {

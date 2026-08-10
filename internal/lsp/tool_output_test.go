@@ -80,11 +80,27 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsReportsChangesPerFile(t *testin
 	baselines := map[string][]Diagnostic{pathA: key("old"), pathB: key("gone")}
 	extras := map[string][]Diagnostic{pathA: key("new"), pathB: nil}
 	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, baselines, nil, extras)
-	if !strings.Contains(out, "Diagnostics changed for "+pathA+": Diagnostics changed: 1 new, 1 resolved.") {
-		t.Fatalf("output = %q, want new/resolved summary for %s", out, pathA)
+	if !strings.Contains(out, pathA+" (1 new, 1 resolved):\n[E] 1:1 new") {
+		t.Fatalf("output = %q, want change counts in the %s block header", out, pathA)
 	}
-	if !strings.Contains(out, "Diagnostics changed for "+pathB+": Diagnostics changed: 0 new, 1 resolved.") {
-		t.Fatalf("output = %q, want resolved summary for %s", out, pathB)
+	if !strings.Contains(out, pathB+": 0 new, 1 resolved.") {
+		t.Fatalf("output = %q, want resolved-only line for %s", out, pathB)
+	}
+	if strings.Contains(out, "Diagnostics changed") {
+		t.Fatalf("output = %q, want no trailing per-file change summary", out)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPathsOmitsCountsWithoutBaselines(t *testing.T) {
+	mgr := &Manager{}
+	pathA, pathB := "/tmp/a.go", "/tmp/b.go"
+	extras := map[string][]Diagnostic{
+		pathA: {{Severity: 1, Line: 0, Message: "a"}},
+		pathB: {{Severity: 1, Line: 0, Message: "b"}},
+	}
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras)
+	if !strings.Contains(out, pathA+":\n[E] 1:1 a\n"+pathB+":\n[E] 1:1 b") {
+		t.Fatalf("output = %q, want compact plain path headers when no baselines are provided", out)
 	}
 }
 
@@ -94,13 +110,13 @@ func TestFormatDiagnosticsBlockWithRangesPrioritizesNearDiagnostics(t *testing.T
 		{Severity: 1, Line: 12, Col: 0, Message: "near"},
 		{Severity: 2, Line: 11, Col: 0, Message: "near warning"},
 	}
-	out := formatDiagnosticsBlockWithRanges("", diags, config.DiagnosticOutputConfig{
+	out := formatDiagnosticsBlockWithRanges(diags, config.DiagnosticOutputConfig{
 		MaxNearDiagnostics:    1,
 		MaxOutsideDiagnostics: 1,
 		MaxTotalDiagnostics:   2,
 		NearRangeBeforeLines:  2,
 		NearRangeAfterLines:   2,
-	}, []EditRange{{StartLine: 10, EndLine: 10}}, true)
+	}, []EditRange{{StartLine: 10, EndLine: 10}})
 	if !strings.Contains(out, "near") || !strings.Contains(out, "far") {
 		t.Fatalf("expected near and outside diagnostics, got %q", out)
 	}
@@ -118,7 +134,7 @@ func TestFormatDiagnosticsBlockFillsLimitWithInfoAndHints(t *testing.T) {
 		{Severity: 3, Line: 3, Message: "info"},
 		{Severity: 2, Line: 2, Message: "warning"},
 	}
-	out := formatDiagnosticsBlockWithRanges("", diags, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, nil, true)
+	out := formatDiagnosticsBlockWithRanges(diags, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, nil)
 	for _, want := range []string{"warning", "info", "hint"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q included when E/W do not fill the limit, got %q", want, out)
@@ -134,7 +150,7 @@ func TestFormatDiagnosticsBlockPrioritizesErrorsWarningsOverInfoHints(t *testing
 		{Severity: 1, Line: 3, Message: "error"},
 		{Severity: 2, Line: 4, Message: "warning two"},
 	}
-	out := formatDiagnosticsBlockWithRanges("", diags, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 3}, nil, true)
+	out := formatDiagnosticsBlockWithRanges(diags, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 3}, nil)
 	for _, want := range []string{"error", "warning one", "warning two"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected priority diagnostic %q, got %q", want, out)
@@ -154,13 +170,13 @@ func TestFormatDiagnosticsBlockWithRangesPrioritizesErrorsWarningsAcrossRanges(t
 		{Severity: 4, Line: 11, Message: "near hint"},
 		{Severity: 2, Line: 300, Message: "far warning"},
 	}
-	out := formatDiagnosticsBlockWithRanges("", diags, config.DiagnosticOutputConfig{
+	out := formatDiagnosticsBlockWithRanges(diags, config.DiagnosticOutputConfig{
 		MaxNearDiagnostics:    2,
 		MaxOutsideDiagnostics: 1,
 		MaxTotalDiagnostics:   2,
 		NearRangeAfterLines:   1,
 		NearRangeBeforeLines:  1,
-	}, []EditRange{{StartLine: 10, EndLine: 10}}, true)
+	}, []EditRange{{StartLine: 10, EndLine: 10}})
 	for _, want := range []string{"far warning", "near info"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q included, got %q", want, out)
@@ -177,12 +193,12 @@ func TestFormatDiagnosticsBlockWithRangesIncludesInfoAndHintsWhenSlotsAvailable(
 		{Severity: 4, Line: 10, Message: "hint"},
 		{Severity: 2, Line: 10, Message: "warning"},
 	}
-	out := formatDiagnosticsBlockWithRanges("", diags, config.DiagnosticOutputConfig{
+	out := formatDiagnosticsBlockWithRanges(diags, config.DiagnosticOutputConfig{
 		MaxNearDiagnostics:   10,
 		MaxTotalDiagnostics:  10,
 		NearRangeAfterLines:  1,
 		NearRangeBeforeLines: 1,
-	}, []EditRange{{StartLine: 10, EndLine: 10}}, true)
+	}, []EditRange{{StartLine: 10, EndLine: 10}})
 	if !strings.Contains(out, "warning") || !strings.Contains(out, "info") || !strings.Contains(out, "hint") {
 		t.Fatalf("expected warning/info/hint included when slots are available, got %q", out)
 	}
@@ -194,7 +210,7 @@ func TestFormatDiagnosticsBlockWithoutRangesIncludesInfoAndHintsWhenSlotsAvailab
 		{Severity: 4, Line: 2, Message: "hint"},
 		{Severity: 2, Line: 3, Message: "warning"},
 	}
-	out := formatDiagnosticsBlockWithRanges("", diags, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, nil, true)
+	out := formatDiagnosticsBlockWithRanges(diags, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, nil)
 	if !strings.Contains(out, "warning") || !strings.Contains(out, "info") || !strings.Contains(out, "hint") {
 		t.Fatalf("expected warning/info/hint included when slots are available, got %q", out)
 	}
@@ -256,6 +272,9 @@ func TestAppendLSPDiagnosticsToToolOutput_LimitsDiagnosticsGlobally(t *testing.T
 	if strings.Contains(out, "other warning 4") || strings.Contains(out, "other warning 5") {
 		t.Fatalf("expected global budget to omit diagnostics after 10 total, got %q", out)
 	}
+	if got := strings.Count(out, "LSP diagnostics in other files:"); got != 1 {
+		t.Fatalf("other-files header count = %d, want single shared header\n%s", got, out)
+	}
 }
 
 func countFormattedDiagnostics(s string) int {
@@ -310,12 +329,12 @@ func TestFormatDiagnosticsBlockWithRangesIncludesOnlyInfoHints(t *testing.T) {
 		{Severity: 3, Line: 10, Message: "info"},
 		{Severity: 4, Line: 11, Message: "hint"},
 	}
-	out := formatDiagnosticsBlockWithRanges("", diags, config.DiagnosticOutputConfig{
+	out := formatDiagnosticsBlockWithRanges(diags, config.DiagnosticOutputConfig{
 		MaxNearDiagnostics:   10,
 		MaxTotalDiagnostics:  10,
 		NearRangeAfterLines:  1,
 		NearRangeBeforeLines: 1,
-	}, []EditRange{{StartLine: 10, EndLine: 10}}, true)
+	}, []EditRange{{StartLine: 10, EndLine: 10}})
 	if !strings.Contains(out, "info") || !strings.Contains(out, "hint") {
 		t.Fatalf("expected info/hint diagnostics included when slots are available, got %q", out)
 	}
@@ -326,7 +345,7 @@ func TestFormatDiagnosticsBlockWithoutRangesIncludesOnlyInfoHints(t *testing.T) 
 		{Severity: 3, Line: 1, Message: "info"},
 		{Severity: 4, Line: 2, Message: "hint"},
 	}
-	out := formatDiagnosticsBlockWithRanges("", diags, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, nil, true)
+	out := formatDiagnosticsBlockWithRanges(diags, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, nil)
 	if !strings.Contains(out, "info") || !strings.Contains(out, "hint") {
 		t.Fatalf("expected info/hint diagnostics included when slots are available, got %q", out)
 	}
@@ -401,7 +420,10 @@ func TestAppendLSPDiagnosticsToToolOutput_LimitsOtherFilesAfterSelection(t *test
 	mgr.clientsMu.Unlock()
 
 	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10})
-	if got := strings.Count(out, "LSP diagnostics in other files:"); got != ToolOutputMaxOtherErrorFiles {
+	if got := strings.Count(out, "LSP diagnostics in other files:"); got != 1 {
+		t.Fatalf("other-files header count = %d, want single shared header\n%s", got, out)
+	}
+	if got := strings.Count(out, ".py:\n"); got != ToolOutputMaxOtherErrorFiles {
 		t.Fatalf("other file blocks = %d, want %d\n%s", got, ToolOutputMaxOtherErrorFiles, out)
 	}
 	if !strings.Contains(out, "info 0") {

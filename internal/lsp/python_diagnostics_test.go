@@ -194,7 +194,7 @@ func TestAppendRuffDiagnosticsOmitsBackendStatusAndLimitsOutput(t *testing.T) {
 		diags[i] = Diagnostic{Severity: 2, Line: i, Col: 26, Code: "B005", Message: "Using `.strip()` with multi-character strings is misleading", Source: "ruff"}
 	}
 
-	out := appendRuffDiagnostics("Replaced 1 occurrence", pythonDiagnosticSelection{Reason: "large-file"}, diags, config.DiagnosticOutputConfig{}, nil)
+	out := appendRuffDiagnostics("Replaced 1 occurrence", diags, config.DiagnosticOutputConfig{}, nil)
 	if strings.Contains(out, "Used Ruff quick diagnostics") || strings.Contains(out, "Diagnostics status:") || strings.Contains(out, "Full Python semantic diagnostics") {
 		t.Fatalf("output should omit backend/status lines, got %q", out)
 	}
@@ -213,7 +213,7 @@ func TestAppendRuffDiagnosticsHonorsSmallerConfiguredLimit(t *testing.T) {
 		{Severity: 2, Line: 2, Message: "third"},
 	}
 
-	out := appendRuffDiagnostics("ok", pythonDiagnosticSelection{}, diags, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 2}, nil)
+	out := appendRuffDiagnostics("ok", diags, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 2}, nil)
 	if got := strings.Count(out, "[W]"); got != 2 {
 		t.Fatalf("warning lines = %d, want 2\n%s", got, out)
 	}

@@ -112,7 +112,7 @@ func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, cont
 		}
 		return appendRuffDiagnosticsFailure(base, selection, err)
 	}
-	return appendRuffDiagnostics(base, selection, diags, pyCfg.Output, ranges)
+	return appendRuffDiagnostics(base, diags, pyCfg.Output, ranges)
 }
 
 func appendPythonDiagnosticsSkipped(base string, selection pythonDiagnosticSelection) string {
@@ -160,6 +160,16 @@ func appendDiagnosticChangeSummary(out string, baseline, current []Diagnostic) s
 }
 
 func diagnosticChangeSummary(baseline, current []Diagnostic) string {
+	counts := diagnosticChangeCounts(baseline, current)
+	if counts == "" {
+		return ""
+	}
+	return "Diagnostics changed: " + counts + "."
+}
+
+// diagnosticChangeCounts returns "N new, M resolved" relative to baseline, or
+// "" when the diagnostic set is unchanged.
+func diagnosticChangeCounts(baseline, current []Diagnostic) string {
 	baseKeys := make(map[diagnosticIdentity]struct{}, len(baseline))
 	for _, d := range baseline {
 		baseKeys[diagnosticIdentityKey(d)] = struct{}{}
@@ -183,7 +193,7 @@ func diagnosticChangeSummary(baseline, current []Diagnostic) string {
 	if newCount == 0 && resolvedCount == 0 {
 		return ""
 	}
-	return fmt.Sprintf("Diagnostics changed: %d new, %d resolved.", newCount, resolvedCount)
+	return fmt.Sprintf("%d new, %d resolved", newCount, resolvedCount)
 }
 
 func (m *Manager) currentFileDiagnostics(absPath string) []Diagnostic {
@@ -195,7 +205,7 @@ func (m *Manager) currentFileDiagnostics(absPath string) []Diagnostic {
 	return append([]Diagnostic(nil), diags...)
 }
 
-func appendRuffDiagnostics(base string, selection pythonDiagnosticSelection, diags []Diagnostic, output config.DiagnosticOutputConfig, ranges []EditRange) string {
+func appendRuffDiagnostics(base string, diags []Diagnostic, output config.DiagnosticOutputConfig, ranges []EditRange) string {
 	var b strings.Builder
 	b.WriteString(base)
 	if strings.Contains(base, "Diagnostics:") {
@@ -206,18 +216,10 @@ func appendRuffDiagnostics(base string, selection pythonDiagnosticSelection, dia
 	if output.MaxTotalDiagnostics <= 0 || output.MaxTotalDiagnostics > ruffDiagnosticsOutputMax {
 		output.MaxTotalDiagnostics = ruffDiagnosticsOutputMax
 	}
-	selected, omitted := selectDiagnosticsByOutput(diags, output, ranges)
-	if len(selected) == 0 {
-		b.WriteString("No Ruff diagnostics found.")
-		return b.String()
-	}
-	block := formatSelectedDiagnosticsBlock("", selected, true)
-	if block != "" {
+	if block := formatDiagnosticsBlockWithRanges(diags, output, ranges); block != "" {
 		b.WriteString(block)
-	}
-	if omitted > 0 {
-		b.WriteByte('\n')
-		b.WriteString(diagnosticsOmittedLine(omitted))
+	} else {
+		b.WriteString("No Ruff diagnostics found.")
 	}
 	return b.String()
 }
