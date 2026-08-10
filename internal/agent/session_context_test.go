@@ -201,3 +201,61 @@ func TestInjectMetaUserReminder_EmptyMessagesReturnsReminderOnly(t *testing.T) {
 		t.Errorf("unexpected: %+v", out)
 	}
 }
+
+// The reminder must be injected into every request, not once per session-head:
+// it never persists, so a once-only injection made consecutive payloads differ
+// at position zero, and every session-head event (compaction apply, restore)
+// re-armed another insert/remove pair — each flip rewriting the provider
+// prompt cache from the start.
+func TestInjectSessionContextReminderIsStableAcrossRequests(t *testing.T) {
+	a := &MainAgent{}
+	content := "# AGENTS.md instructions\n<INSTRUCTIONS>\nuse tabs\n</INSTRUCTIONS>"
+	a.cachedSessionReminderContent.Store(&content)
+
+	base := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", Content: "a1"},
+	}
+	first := a.injectSessionContextReminder(append([]message.Message(nil), base...))
+	second := a.injectSessionContextReminder(append([]message.Message(nil), base...))
+	if len(first) != len(base)+1 || len(second) != len(base)+1 {
+		t.Fatalf("reminder must be injected on every request: first=%d second=%d", len(first), len(second))
+	}
+	if first[0].Content != content || second[0].Content != content {
+		t.Fatalf("reminder must lead both payloads: first=%q second=%q", first[0].Content, second[0].Content)
+	}
+
+	// Nil content (session genuinely has no AGENTS.md/env) stays a no-op.
+	a.cachedSessionReminderContent.Store(nil)
+	if got := a.injectSessionContextReminder(append([]message.Message(nil), base...)); len(got) != len(base) {
+		t.Fatalf("nil reminder content must not inject, got %d messages", len(got))
+	}
+}
+
+// The SubAgent path follows the same every-request contract: its reminder is
+// also request-only payload rebuilt from ctxMgr snapshots, so the previous
+// once-only flag dropped AGENTS.md guidance from every request after the
+// first and flipped the prefix shape between request one and two.
+func TestSubAgentInjectSessionContextReminderIsStableAcrossRequests(t *testing.T) {
+	content := "# AGENTS.md instructions\n<INSTRUCTIONS>\nuse tabs\n</INSTRUCTIONS>"
+	s := &SubAgent{cachedSessionReminderContent: content}
+
+	base := []message.Message{
+		{Role: "user", Content: "task"},
+		{Role: "assistant", Content: "a1"},
+	}
+	first := s.injectSessionContextReminder(append([]message.Message(nil), base...))
+	second := s.injectSessionContextReminder(append([]message.Message(nil), base...))
+	if len(first) != len(base)+1 || len(second) != len(base)+1 {
+		t.Fatalf("reminder must be injected on every request: first=%d second=%d", len(first), len(second))
+	}
+	if first[0].Content != content || second[0].Content != content {
+		t.Fatalf("reminder must lead both payloads: first=%q second=%q", first[0].Content, second[0].Content)
+	}
+
+	// Empty content (no AGENTS.md/env for this SubAgent) stays a no-op.
+	s.cachedSessionReminderContent = ""
+	if got := s.injectSessionContextReminder(append([]message.Message(nil), base...)); len(got) != len(base) {
+		t.Fatalf("empty reminder content must not inject, got %d messages", len(got))
+	}
+}

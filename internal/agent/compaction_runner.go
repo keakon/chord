@@ -464,8 +464,6 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	a.emitToTUI(CompactionStatusEvent{Status: "succeeded"})
 	a.emitToTUI(SessionRestoredEvent{PreserveRequestActivity: true})
 
-	a.sessionReminderInjected.Store(false)
-
 	log.Infof("context compacted (async) mode=%v summary_mode=%v backend=%v profile=%v model=%v history_path=%v backup_path=%v archived_messages=%v evidence_artifacts=%v head_split=%v", modeLabel, d.SummaryMode, d.Backend, d.Profile, d.ModelRef, d.AbsHistoryPath, backupPath, d.ArchivedCount, d.EvidenceArtifacts, headSplit)
 	if _, err := a.fireHook(a.parentCtx, hook.OnAfterCompress, 0, map[string]any{
 		"message_count":      a.ctxMgr.MessageCount(),

@@ -188,12 +188,10 @@ type SubAgent struct {
 
 	// cachedSessionReminderContent is the meta user message content carrying
 	// environment + AGENTS.md (under "# AGENTS.md instructions" /
-	// <INSTRUCTIONS>). Built once at construction, injected
-	// once per SubAgent lifetime (session-head for SubAgent == construction).
-	// Not persisted. Mirrors MainAgent.
+	// <INSTRUCTIONS>). Built once at construction (session-head for SubAgent ==
+	// construction), injected into every request so the prompt prefix keeps one
+	// stable shape. Not persisted. Mirrors MainAgent.
 	cachedSessionReminderContent string
-	// sessionReminderInjected is true once the reminder has been injected.
-	sessionReminderInjected bool
 
 	// frozenToolDefs is the SubAgent's tool surface snapshot, computed once at
 	// construction. Kept stable so the provider request prefix does not drift.
@@ -686,13 +684,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 	if toolDefs == nil {
 		toolDefs = llmToolDefinitionsFromVisibleTools(s.filteredVisibleTools())
 	}
-	if !s.sessionReminderInjected {
-		out := injectMetaUserReminder(messages, s.cachedSessionReminderContent)
-		if len(out) != len(messages) {
-			messages = out
-			s.sessionReminderInjected = true
-		}
-	}
+	messages = s.injectSessionContextReminder(messages)
 	llmClient, modelName := s.llmSnapshot()
 	if llmClient == nil {
 		select {

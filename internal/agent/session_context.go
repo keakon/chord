@@ -119,10 +119,6 @@ func (a *MainAgent) refreshSessionContextReminder() {
 	a.cachedSessionReminderContent.Store(&content)
 }
 
-func (a *MainAgent) clearSessionContextReminder() {
-	a.cachedSessionReminderContent.Store(nil)
-}
-
 // firstUserMessageIndex returns the index of the first user-role message in
 // messages, or -1 if none exists. Used by injection helpers to find the
 // insertion point for meta/overlay messages.
@@ -159,21 +155,24 @@ func injectMetaUserReminder(messages []message.Message, content string) []messag
 // first user message in messages.
 //
 // The reminder is meta: it is not stored in ctxMgr or persisted. It is injected
-// once per session-head only.
+// into every request so the prompt prefix keeps one stable shape. It was
+// previously injected once per session-head, but the reminder never persists,
+// so the very next request dropped it again and every session-head event
+// (compaction apply, session restore) re-armed one more insert/remove pair —
+// each flip rewriting the provider cache from position zero (observed seven
+// times in one session). Steady re-injection costs a few cached KB per request
+// and never invalidates the prefix; content changes only on refresh.
 func (a *MainAgent) injectSessionContextReminder(messages []message.Message) []message.Message {
-	if a.sessionReminderInjected.Load() {
-		return messages
-	}
 	ptr := a.cachedSessionReminderContent.Load()
 	if ptr == nil {
-		// No reminder for this session-head (e.g. AGENTS.md missing); treat as injected
-		// so we don't re-check on every call.
-		a.sessionReminderInjected.Store(true)
 		return messages
 	}
-	out := injectMetaUserReminder(messages, *ptr)
-	if len(out) != len(messages) {
-		a.sessionReminderInjected.Store(true)
-	}
-	return out
+	return injectMetaUserReminder(messages, *ptr)
+}
+
+// injectSessionContextReminder is the SubAgent counterpart: same every-request
+// contract as MainAgent, with content built once at construction (the
+// SubAgent's only session-head) instead of refreshed on session-head resets.
+func (s *SubAgent) injectSessionContextReminder(messages []message.Message) []message.Message {
+	return injectMetaUserReminder(messages, s.cachedSessionReminderContent)
 }

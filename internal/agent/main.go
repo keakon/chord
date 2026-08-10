@@ -715,13 +715,10 @@ type MainAgent struct {
 
 	// cachedSessionReminderContent is the meta user message content carrying
 	// environment + AGENTS.md (under "# AGENTS.md instructions" /
-	// <INSTRUCTIONS>). Built once ensureSessionBuilt completes.
-	// Injected before the first user message only once per session-head, then
-	// suppressed until resetSessionBuildState. Not persisted to ctxMgr or jsonl.
+	// <INSTRUCTIONS>). Built once ensureSessionBuilt completes and refreshed
+	// in place on session-head events; injected into every LLM request so the
+	// prompt prefix keeps one stable shape. Not persisted to ctxMgr or jsonl.
 	cachedSessionReminderContent atomic.Pointer[string]
-	// sessionReminderInjected is true after cachedSessionReminderContent has been
-	// injected into an LLM call for the current session-head.
-	sessionReminderInjected atomic.Bool
 
 	// frozenToolDefs is the LLM tool surface snapshot captured at
 	// ensureSessionBuilt time. Kept stable for the life of the agent instance

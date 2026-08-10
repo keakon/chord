@@ -163,8 +163,9 @@ func (a *MainAgent) resetSessionBuildState() {
 	if a.shouldFreezeLLMContextSurface() {
 		return
 	}
-	a.sessionReminderInjected.Store(false)
-	a.clearSessionContextReminder()
+	// The session reminder content is intentionally kept: it is injected into
+	// every request, and ensureSessionBuilt refreshes it in place, so there is
+	// no window where the prompt loses its AGENTS.md/env block.
 	a.clearFrozenToolSurface()
 }
 
