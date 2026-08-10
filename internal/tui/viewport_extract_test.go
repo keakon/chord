@@ -89,6 +89,143 @@ func TestExtractSelectionTextTabExpandedColumnsMatchViewportRender(t *testing.T)
 		t.Fatalf("ExtractSelectionText() tabbed line\n got %q\nwant %q", got, want)
 	}
 }
+func TestExtractSelectionTextAssistantCodeFenceLineAfterSoftWrappedLine(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	v := NewViewport(100, 40)
+	longLine := "first_key: " + strings.Repeat("payload_segment_", 12)
+	block := &Block{
+		ID:      1,
+		Type:    BlockAssistant,
+		Content: "intro paragraph\n\n```json\n" + longLine + "\nsecond_key: short\n```\n",
+	}
+	v.AppendBlock(block)
+
+	lines := block.Render(v.width, "")
+	targetLine := -1
+	startCol := -1
+	endCol := -1
+	want := "second_key"
+	for i, line := range lines {
+		plain := stripANSI(line)
+		before, _, ok := strings.Cut(plain, want)
+		if !ok {
+			continue
+		}
+		targetLine = i
+		startCol = selectionPlainTextWidth(before)
+		endCol = startCol + selectionPlainTextWidth(want)
+		break
+	}
+	if targetLine < 0 {
+		t.Fatalf("target line not found in rendered assistant code fence: %q", want)
+	}
+
+	got := v.ExtractSelectionText(SelectionRange{
+		StartBlockID: block.ID,
+		StartLine:    targetLine,
+		StartCol:     startCol,
+		EndBlockID:   block.ID,
+		EndLine:      targetLine,
+		EndCol:       endCol,
+	})
+	if got != want {
+		t.Fatalf("ExtractSelectionText() code fence line after soft wrap\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestAssistantRenderSyntheticPrefixWidthsAlignWithRenderedLines(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	v := NewViewport(100, 40)
+	block := &Block{
+		ID:      1,
+		Type:    BlockAssistant,
+		Content: "intro paragraph\n\n```json\n" + "first_key: " + strings.Repeat("payload_segment_", 12) + "\nsecond_key: short\n```\n",
+	}
+	v.AppendBlock(block)
+
+	lines := block.Render(v.width, "")
+	if len(block.renderSyntheticPrefixWidths) != len(lines) {
+		t.Fatalf("synthetic prefix widths length = %d, rendered lines = %d",
+			len(block.renderSyntheticPrefixWidths), len(lines))
+	}
+	for i, line := range lines {
+		plain := stripANSI(line)
+		if strings.TrimSpace(plain) == "" {
+			continue
+		}
+		adjust := block.renderSyntheticPrefixWidths[i]
+		if adjust == 0 {
+			continue
+		}
+		indent := selectionPlainTextWidth(plain) - selectionPlainTextWidth(strings.TrimLeft(plain, " │"))
+		if adjust > indent {
+			t.Fatalf("line %d synthetic prefix %d exceeds rendered indent %d: %q", i, adjust, indent, plain)
+		}
+	}
+}
+
+func TestAssistantSyntheticPrefixWidthsStayAlignedWhenCachedLineEmbedsNewline(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	v := NewViewport(100, 40)
+	longLine := "first_key: " + strings.Repeat("payload_segment_", 12)
+	block := &Block{
+		ID:      1,
+		Type:    BlockAssistant,
+		Content: "intro paragraph\n\n```json\n" + longLine + "\nsecond_key: short\n```\n",
+	}
+	v.AppendBlock(block)
+
+	_ = block.Render(v.width, "")
+	injected := false
+	for i, line := range block.mdCache {
+		if strings.Contains(stripANSI(line), "intro paragraph") {
+			block.mdCache[i] = line + "\nsplit-fallback"
+			injected = true
+			break
+		}
+	}
+	if !injected {
+		t.Fatal("intro line not found in markdown cache")
+	}
+
+	lines := block.Render(v.width, "")
+	if len(block.renderSyntheticPrefixWidths) != len(lines) {
+		t.Fatalf("synthetic prefix widths length = %d, rendered lines = %d",
+			len(block.renderSyntheticPrefixWidths), len(lines))
+	}
+
+	targetLine := -1
+	startCol := -1
+	endCol := -1
+	want := "first_key"
+	for i, line := range lines {
+		plain := stripANSI(line)
+		before, _, ok := strings.Cut(plain, want)
+		if !ok {
+			continue
+		}
+		targetLine = i
+		startCol = selectionPlainTextWidth(before)
+		endCol = startCol + selectionPlainTextWidth(want)
+		break
+	}
+	if targetLine < 0 {
+		t.Fatalf("target line not found after embedded-newline injection: %q", want)
+	}
+
+	got := v.ExtractSelectionText(SelectionRange{
+		StartBlockID: block.ID,
+		StartLine:    targetLine,
+		StartCol:     startCol,
+		EndBlockID:   block.ID,
+		EndLine:      targetLine,
+		EndCol:       endCol,
+	})
+	if got != want {
+		t.Fatalf("ExtractSelectionText() after embedded-newline split\n got %q\nwant %q", got, want)
+	}
+}
+
 func TestExtractSelectionTextEditToolKeepsRenderedColumnsAligned(t *testing.T) {
 	v := NewViewport(120, 20)
 	block := &Block{

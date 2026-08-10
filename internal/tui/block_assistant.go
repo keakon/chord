@@ -948,6 +948,12 @@ func (b *Block) renderAssistant(width int) []string {
 			assistantLines = preserveCardBg(assistantLines, assBg)
 			cardLines = renderPrewrappedCard(style, innerWidth, assistantLines, assBg, railSeq)
 		}
+		// Body lines start after any preceding thinking card plus the card's own
+		// top margin/padding. Deriving this from the trailing-inclusive
+		// len(out)-len(assistantLines) would shift every entry down by the
+		// bottom padding/margin, so selection would read a neighbour line's
+		// prefix width and drop leading characters on copy.
+		bodyOffset := len(out) + style.GetMarginTop() + style.GetPaddingTop()
 		if len(out) == 0 {
 			out = cardLines
 		} else {
@@ -957,7 +963,7 @@ func (b *Block) renderAssistant(width int) []string {
 		leftInset := style.GetMarginLeft() + style.GetPaddingLeft() + ansi.StringWidth(assistantContentPrefix)
 		b.renderSyntheticPrefixWidths = make([]int, 0, len(out))
 		b.renderSoftWrapContinuations = make([]bool, 0, len(out))
-		for range len(out) - len(assistantLines) {
+		for range bodyOffset {
 			b.renderSyntheticPrefixWidths = append(b.renderSyntheticPrefixWidths, 0)
 			b.renderSoftWrapContinuations = append(b.renderSoftWrapContinuations, false)
 		}
@@ -972,6 +978,17 @@ func (b *Block) renderAssistant(width int) []string {
 				softWrap = assistantSoftWraps[i]
 			}
 			b.renderSoftWrapContinuations = append(b.renderSoftWrapContinuations, softWrap)
+			// Card rendering splits embedded newlines into extra lines; pad
+			// placeholders so the arrays stay line-aligned (0 = copy strips no
+			// prefix) instead of shifting every later entry onto a neighbour.
+			for range strings.Count(assistantLines[i], "\n") {
+				b.renderSyntheticPrefixWidths = append(b.renderSyntheticPrefixWidths, 0)
+				b.renderSoftWrapContinuations = append(b.renderSoftWrapContinuations, false)
+			}
+		}
+		for range len(out) - len(b.renderSyntheticPrefixWidths) {
+			b.renderSyntheticPrefixWidths = append(b.renderSyntheticPrefixWidths, 0)
+			b.renderSoftWrapContinuations = append(b.renderSoftWrapContinuations, false)
 		}
 		b.renderSyntheticPrefixWidthsW = width
 	}
