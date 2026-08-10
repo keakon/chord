@@ -7,10 +7,13 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+// "review" / "审查" are deliberately excluded: combined with broad issue words
+// like "error" / "错误" they would route ordinary code-review requests (e.g.
+// "review this error handling") into the bug-triage workflow.
 var bugTriageAnalysisKeywords = []string{
-	"analyze", "analysis", "investigate", "debug", "triage", "review",
+	"analyze", "analysis", "investigate", "debug", "triage",
 	"why", "root cause", "conclusion", "correct",
-	"分析", "排查", "定位", "审查", "调查", "根因", "为什么", "结论", "是否正确",
+	"分析", "排查", "定位", "调查", "根因", "为什么", "结论", "是否正确",
 }
 
 var bugTriageIssueKeywords = []string{

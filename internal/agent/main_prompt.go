@@ -76,106 +76,42 @@ func (a *MainAgent) visibleMCPServersPromptBlock() string {
 	if block == "" {
 		return ""
 	}
-	if !strings.HasPrefix(strings.TrimSpace(block), "## MCP ") {
+	servers := mcp.ParseServersPromptBlock(block)
+	if servers == nil {
+		// Block not produced by the mcp renderer: pass through unfiltered.
 		return block
 	}
 
-	lines := strings.Split(block, "\n")
-	serverNames := make([]string, 0, len(lines))
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "- **") {
-			continue
-		}
-		end := strings.Index(trimmed[len("- **"):], "**")
-		if end < 0 {
-			continue
-		}
-		serverNames = append(serverNames, trimmed[len("- **"):len("- **")+end])
+	serverNames := make([]string, 0, len(servers))
+	for _, srv := range servers {
+		serverNames = append(serverNames, srv.Name)
 	}
 	visibility := a.mcpVisibilitySnapshot(serverNames)
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "- **") {
-			continue
-		}
-		end := strings.Index(trimmed[len("- **"):], "**")
-		if end < 0 {
-			continue
-		}
-		server := trimmed[len("- **") : len("- **")+end]
-		prefix := strings.TrimSuffix(mcp.RegisteredMCPToolName(server, ""), "tool")
-		visibility.knownTools[server] = append(visibility.knownTools[server], mcpPromptToolNames(line, prefix)...)
+	for _, srv := range servers {
+		visibility.knownTools[srv.Name] = append(visibility.knownTools[srv.Name], srv.Tools...)
 	}
-	filtered := make([]string, 0, len(lines))
-	serverRows := 0
-	for i, line := range lines {
-		if i == 0 {
-			filtered = append(filtered, line)
-			continue
+
+	filtered := make([]mcp.ServerTools, 0, len(servers))
+	for _, srv := range servers {
+		allowed := make(map[string]struct{})
+		for _, name := range visibility.visibleToolNames(srv.Name) {
+			allowed[name] = struct{}{}
 		}
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "- **") {
-			filtered = append(filtered, line)
-			continue
+		visibleTools := make([]string, 0, len(srv.Tools))
+		for _, name := range srv.Tools {
+			if _, ok := allowed[tools.NormalizeName(name)]; ok {
+				visibleTools = append(visibleTools, name)
+			}
 		}
-		end := strings.Index(trimmed[len("- **"):], "**")
-		if end < 0 {
-			continue
-		}
-		server := trimmed[len("- **") : len("- **")+end]
-		visibleTools := visibility.visibleToolNames(server)
 		if len(visibleTools) == 0 {
 			continue
 		}
-		prefix := strings.TrimSuffix(mcp.RegisteredMCPToolName(server, ""), "tool")
-		visiblePromptTools := filterMCPPromptToolNames(line, prefix, visibleTools)
-		if len(visiblePromptTools) == 0 {
-			continue
-		}
-		filtered = append(filtered, fmt.Sprintf("- **%s** — tools: %s", server, strings.Join(visiblePromptTools, ", ")))
-		serverRows++
+		filtered = append(filtered, mcp.ServerTools{Name: srv.Name, Tools: visibleTools})
 	}
-	if serverRows == 0 {
+	if len(filtered) == 0 {
 		return ""
 	}
-	result := strings.Join(filtered, "\n")
-	if strings.HasSuffix(block, "\n") {
-		result += "\n"
-	}
-	return result
-}
-
-func mcpPromptToolNames(line, prefix string) []string {
-	fields := strings.FieldsFunc(line, func(r rune) bool { return r == ' ' || r == ',' })
-	names := make([]string, 0, len(fields))
-	for _, field := range fields {
-		name := tools.NormalizeName(strings.Trim(field, "`*()[]{};:"))
-		if strings.HasPrefix(name, prefix) {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
-func filterMCPPromptToolNames(line, prefix string, visible []string) []string {
-	allowed := make(map[string]struct{}, len(visible))
-	for _, name := range visible {
-		allowed[tools.NormalizeName(name)] = struct{}{}
-	}
-	filtered := make([]string, 0, len(visible))
-	seen := make(map[string]struct{}, len(visible))
-	for _, name := range mcpPromptToolNames(line, prefix) {
-		if _, ok := allowed[name]; !ok {
-			continue
-		}
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		filtered = append(filtered, name)
-	}
-	return filtered
+	return mcp.RenderServersPromptBlock(filtered)
 }
 
 const agentsMDInstructionRequirement = "Treat these loaded sections as mandatory scoped workspace instructions and follow every applicable instruction at all times. Do not use file, search, or shell tools to rediscover or reread them. Read an additional AGENTS.md only when entering a directory whose instructions were not loaded. Beyond that, inspect only the task-relevant project files needed to understand, modify, or verify the requested work."
@@ -225,18 +161,19 @@ func (a *MainAgent) doneToolAvailable() bool {
 }
 
 func (a *MainAgent) userConfirmationPromptBlock() string {
+	// The asking threshold and the information standard for questions live only
+	// in sharedCodingGuidelinesPrompt (single source, visible to both agents);
+	// these branches only decide which channel carries a necessary question.
 	if a.questionToolAvailable() {
 		question := toolPromptName(tools.NameQuestion)
 		return `## Structured User Confirmation
-- Default to making ordinary implementation decisions yourself; use ` + question + ` only when user input is truly required to choose between materially different outcomes, confirm meaningful risk, or supply missing information that blocks correct execution
-- Use plain assistant text only for lightweight clarifications that do not materially change the execution path
-- When asking the user to decide, keep the same high information standard as ordinary clarifications (enough context for a non-implementer: current situation, why a decision is needed, the main options, tradeoffs/risks, recommended default)
-- When a confirmation would change scope, permissions, risk, or implementation choice, prefer ` + question + ` so the user gets a structured decision UI instead of an unstructured text question`
+- Default to making ordinary implementation decisions yourself; the Guidelines section defines when asking the user is justified and what information a question must carry
+- When a necessary confirmation would change scope, permissions, risk, or implementation choice, prefer ` + question + ` so the user gets a structured decision UI instead of an unstructured text question
+- Use plain assistant text only for lightweight clarifications that do not materially change the execution path`
 	}
 	return `## Plain-Text User Confirmation
-- Default to making ordinary implementation decisions yourself; ask the user only when input is truly required to choose between materially different outcomes, confirm meaningful risk, or supply missing information that blocks correct execution
-- Because structured confirmation is unavailable in this tool/permission state, ask necessary user-decision questions in normal assistant text
-- Keep the same high information standard as ordinary clarifications (enough context for a non-implementer: current situation, why a decision is needed, the main options, tradeoffs/risks, recommended default)
+- Default to making ordinary implementation decisions yourself; the Guidelines section defines when asking the user is justified and what information a question must carry
+- Because structured confirmation is unavailable in this tool/permission state, ask necessary user-decision questions in normal assistant text while meeting that same information standard
 - When a clarification does not materially change the execution path, keep it brief and focused`
 }
 

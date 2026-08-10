@@ -36,3 +36,28 @@ func TestConnectedServersPromptBlockFiltersAllowedTools(t *testing.T) {
 		t.Fatalf("prompt block contained filtered tool: %q", block)
 	}
 }
+
+func TestServersPromptBlockRenderParseRoundTrip(t *testing.T) {
+	servers := []ServerTools{
+		{Name: "search", Tools: []string{"mcp_search_alpha_tool", "mcp_search_beta_tool"}},
+		{Name: "broken", Note: "(could not list tools: connection refused)"},
+		{Name: "idle", Note: "(no tools)"},
+	}
+	block := RenderServersPromptBlock(servers)
+	parsed := ParseServersPromptBlock(block)
+	if len(parsed) != len(servers) {
+		t.Fatalf("round trip lost rows: got %d, want %d\nblock: %q", len(parsed), len(servers), block)
+	}
+	for i, want := range servers {
+		got := parsed[i]
+		if got.Name != want.Name || strings.Join(got.Tools, ",") != strings.Join(want.Tools, ",") || got.Note != want.Note {
+			t.Fatalf("round trip row %d = %+v, want %+v", i, got, want)
+		}
+	}
+	if ParseServersPromptBlock("MCP original prompt") != nil {
+		t.Fatal("custom block without the renderer header must parse as nil (pass-through)")
+	}
+	if ParseServersPromptBlock("") != nil {
+		t.Fatal("empty block must parse as nil")
+	}
+}

@@ -346,7 +346,7 @@ func TestTestProvidersWiresOAuthMetadataForCodexPreset(t *testing.T) {
 
 func TestApplyInitialMCPPromptStateSyncConfiguredInjectsPrompt(t *testing.T) {
 	ac := newTestAppContext(t)
-	block := "## MCP (Model Context Protocol) integrations\n- **filesystem** — tools: mcp_filesystem_read\n"
+	block := mcp.RenderServersPromptBlock([]mcp.ServerTools{{Name: "filesystem", Tools: []string{"mcp_filesystem_read"}}})
 
 	applyInitialMCPPromptState(ac, false, true, block)
 
@@ -358,7 +358,7 @@ func TestApplyInitialMCPPromptStateSyncConfiguredInjectsPrompt(t *testing.T) {
 func TestApplyInitialMCPPromptStateAsyncConfiguredDefersPromptInjection(t *testing.T) {
 	ac := newTestAppContext(t)
 	ac.MCPConfigs = []mcp.ServerConfig{{Name: "filesystem"}}
-	block := "## MCP (Model Context Protocol) integrations\n- **filesystem** — tools: mcp_filesystem_read\n"
+	block := mcp.RenderServersPromptBlock([]mcp.ServerTools{{Name: "filesystem", Tools: []string{"mcp_filesystem_read"}}})
 
 	applyInitialMCPPromptState(ac, true, true, block)
 

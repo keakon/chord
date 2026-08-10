@@ -382,7 +382,7 @@ question: allow
 	for _, want := range []string{
 		"Structured User Confirmation",
 		"Default to making ordinary implementation decisions yourself",
-		"enough context for a non-implementer",
+		"the Guidelines section defines when asking the user is justified",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("userConfirmationPromptBlock missing %q in %q", want, got)
@@ -402,7 +402,7 @@ func TestBuildSystemPrompt_IncludesPermissionSpecificUserConfirmationGuidance(t 
 	}
 	for _, want := range []string{
 		"Because structured confirmation is unavailable in this tool/permission state",
-		"enough context for a non-implementer",
+		"make it easy for a non-implementer to answer",
 		"their tradeoffs/risks, and your recommended default",
 	} {
 		if !strings.Contains(got, want) {
@@ -593,11 +593,20 @@ question: allow
 	got := a.userConfirmationPromptBlock()
 	for _, want := range []string{
 		"Default to making ordinary implementation decisions yourself",
-		"enough context for a non-implementer",
-		"the main options, tradeoffs/risks, recommended default",
+		"the Guidelines section defines when asking the user is justified and what information a question must carry",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("userConfirmationPromptBlock missing %q in %q", want, got)
+		}
+	}
+	// The referenced information standard must actually exist in Guidelines
+	// (single source for both Main and Sub agents).
+	for _, want := range []string{
+		"make it easy for a non-implementer to answer",
+		"the main options, their tradeoffs/risks, and your recommended default",
+	} {
+		if !strings.Contains(sharedCodingGuidelinesPrompt, want) {
+			t.Fatalf("sharedCodingGuidelinesPrompt missing question information standard %q", want)
 		}
 	}
 }

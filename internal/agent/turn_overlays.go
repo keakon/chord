@@ -8,7 +8,10 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-const pendingLSPDiagnosticOverlayText = "LSP diagnostics changed after one or more recent file-editing tool calls. Review the affected tool results' LSPReviews, treat blocking diagnostics in directly modified files as regressions to fix before finishing unless the user explicitly asked for a partial/WIP result, and keep any cleanup small and low-risk without expanding scope to unrelated untouched files."
+// The full policy lives in the stable system prompt's "LSP diagnostic
+// follow-up" section (takePendingLSPDiagnosticOverlay only fires when that
+// section is injected), so this one-shot reminder just points back at it.
+const pendingLSPDiagnosticOverlayText = "LSP diagnostics changed after one or more recent file-editing tool calls. Review the affected tool results' LSPReviews and apply the LSP diagnostic follow-up rules from the system prompt."
 
 // buildTurnOverlayMessages assembles meta user messages appended after the real
 // user turn by callLLM. SubAgent mailbox messages are also appended to ctxMgr
