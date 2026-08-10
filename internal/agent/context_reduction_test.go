@@ -156,3 +156,54 @@ func TestDiffRecognitionProtectsBinaryModeAndRenameEvidence(t *testing.T) {
 		}
 	}
 }
+
+// A read output that is both repeated (an identical call appears later) and
+// invalidated/superseded must classify as read_like so every reduction path
+// renders the same validity-marked summary. Returning the repeated marker here
+// while the frozen incremental path force-refreshes the same message to the
+// truncated=stale/superseded shape made the two renderings alternate across
+// requests, rewriting the cached prefix each time.
+func TestRepeatedInvalidatedReadClassifiesAsReadLikeNotRepeated(t *testing.T) {
+	content := "READ_RESULT lines=1-40 total=40\n" + strings.Repeat("source line\n", 40)
+	base := requestReductionContext{
+		ToolName: tools.NameRead,
+		Content:  content,
+		Age:      2,
+		Repeated: true,
+		Policy:   defaultContextReductionPolicy(),
+	}
+
+	for _, tc := range []struct {
+		name        string
+		invalidated bool
+		superseded  bool
+		want        requestReductionClass
+	}{
+		{name: "superseded", superseded: true, want: requestReductionReadLike},
+		{name: "invalidated", invalidated: true, want: requestReductionReadLike},
+		{name: "still_valid", want: requestReductionRepeated},
+	} {
+		ctx := base
+		ctx.ReadInvalidated = tc.invalidated
+		ctx.ReadSuperseded = tc.superseded
+		if got := classifyRequestReductionToolOutput(ctx); got != tc.want {
+			t.Fatalf("%s: class = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+
+	// The read_like rendering must be deterministic and carry the truncated=
+	// marker stableReductionSurfaceNeedsReview treats as settled.
+	ctx := base
+	ctx.ReadSuperseded = true
+	first, rule, ok := reduceRequestToolOutput(requestReductionReadLike, ctx)
+	if !ok || rule != "read_like" {
+		t.Fatalf("reduction = (rule=%q, ok=%v), want read_like", rule, ok)
+	}
+	if !strings.Contains(first, "truncated="+tools.ReadTruncatedSuperseded) {
+		t.Fatalf("summary missing superseded marker: %q", first)
+	}
+	second, _, _ := reduceRequestToolOutput(requestReductionReadLike, ctx)
+	if first != second {
+		t.Fatalf("read_like rendering is not deterministic:\n%q\nvs\n%q", first, second)
+	}
+}

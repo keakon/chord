@@ -309,6 +309,12 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		reduced    string
 		force      bool
 		recallable bool
+		// repeated marks outputs whose content survives in an identical later
+		// call; reducing such a copy discards nothing, so it must not register
+		// in discardedInputs (a repeated read that is also invalidated or
+		// superseded classifies as read-like, not repeated, so class alone
+		// cannot express this).
+		repeated bool
 	}
 	var proposals []reductionProposal
 	semanticRefresh := false
@@ -370,6 +376,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					reduced:    reduced,
 					force:      true,
 					recallable: true,
+					repeated:   repeated[i],
 				})
 				semanticRefresh = true
 			}
@@ -396,6 +403,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					reduced:    reduced,
 					force:      true,
 					recallable: true,
+					repeated:   repeated[i],
 				})
 				semanticRefresh = true
 			}
@@ -499,8 +507,14 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			rule:       rule,
 			reduced:    reduced,
 			recallable: recallable,
+			repeated:   ctx.Repeated,
 		})
-		if class != requestReductionRepeated && recallable && (!incrementalEnabled || i >= frozenBoundary) {
+		// ctx.Repeated (not class) guards the registry: a repeated read that is
+		// also invalidated/superseded classifies as read-like, but an identical
+		// later call still carries the content, so reducing this copy discards
+		// nothing — registering it would flag that later copy as a false
+		// over-compression reread.
+		if !ctx.Repeated && recallable && (!incrementalEnabled || i >= frozenBoundary) {
 			recordDiscardedInputEvidence(discardedInputs, inputKey, prepared[i].ToolCallID)
 			if toolName == tools.NameRead {
 				if revision := reductionReadRevision(&meta, prepared[i].FileState); revision != "" {
@@ -549,7 +563,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			noteSkip(contextReductionSkipDeferredCache)
 			continue
 		}
-		if p.class != requestReductionRepeated && p.recallable && incrementalEnabled && p.index < frozenBoundary {
+		if !p.repeated && p.recallable && incrementalEnabled && p.index < frozenBoundary {
 			meta := callMeta[prepared[p.index].ToolCallID]
 			recordDiscardedInputEvidence(discardedInputs, contextReductionToolInputKey(p.toolName, meta.Args), prepared[p.index].ToolCallID)
 		}

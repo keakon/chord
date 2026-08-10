@@ -308,6 +308,16 @@ func (ctx requestReductionContext) readRetentionProtects() bool {
 
 func classifyRequestReductionToolOutput(ctx requestReductionContext) requestReductionClass {
 	if ctx.Repeated && ctx.Age >= 1 {
+		// A read that is also invalidated or superseded must render as the
+		// validity-marked read summary, not the repeated marker: the frozen
+		// incremental path force-refreshes such reads to the truncated=stale/
+		// superseded shape, and stableReductionSurfaceNeedsReview only treats
+		// that shape as settled. Emitting the repeated marker here would make
+		// the two paths alternate renderings of the same message across
+		// requests, rewriting the cached prefix each time.
+		if ctx.ToolName == tools.NameRead && (ctx.ReadInvalidated || ctx.ReadSuperseded) {
+			return requestReductionReadLike
+		}
 		return requestReductionRepeated
 	}
 	if ctx.Age < ctx.Policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {

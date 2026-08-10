@@ -587,8 +587,14 @@ func TestPrepareMessagesForLLM_PrunesRepeatedAndErrorOutputs(t *testing.T) {
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Repeated "+tools.NameRead+" output omitted") {
-		t.Fatalf("expected repeated tool output to be pruned, got %q", prepared[2].Content)
+	// The older identical read is superseded by the newer one, so it renders
+	// as the validity-marked read summary (stable across incremental and full
+	// scans) rather than the repeated marker.
+	if !strings.Contains(prepared[2].Content, "A newer read of this range appears later") {
+		t.Fatalf("expected superseded read output to be trimmed with guidance, got %q", prepared[2].Content)
+	}
+	if strings.Contains(prepared[2].Content, "Repeated ") {
+		t.Fatalf("superseded read must not use the repeated marker, got %q", prepared[2].Content)
 	}
 	if !strings.Contains(prepared[8].Content, "Older shell error summarized") || !strings.Contains(prepared[8].Content, "Error: command failed") {
 		t.Fatalf("expected old error output to be summarized, got %q", prepared[8].Content)
