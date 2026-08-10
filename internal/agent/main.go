@@ -2087,6 +2087,9 @@ func (a *MainAgent) handleAgentError(evt Event) {
 // lastPlanPath is used. agentName defaults to "builder" if empty.
 func (a *MainAgent) startPlanExecution(planPath, agentName string) {
 	defer a.finishSessionSwitch()
+	if !a.stopCompactionForSessionSwitch() {
+		return
+	}
 	if agentName == "" {
 		agentName = "builder"
 	}

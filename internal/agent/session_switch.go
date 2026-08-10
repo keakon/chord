@@ -81,6 +81,9 @@ func (a *MainAgent) handleSessionControlEvent(evt Event) {
 
 func (a *MainAgent) handleNewSessionCommand() {
 	defer a.finishSessionSwitch()
+	if !a.stopCompactionForSessionSwitch() {
+		return
+	}
 	a.emitToTUI(SessionSwitchStartedEvent{Kind: "new"})
 	newSessionDir, err := a.createRuntimeSessionDir()
 	if err != nil {
@@ -150,6 +153,30 @@ func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.C
 	}
 
 	return oldRecovery, turnCtx
+}
+
+// stopCompactionForSessionSwitch prevents a cancelled compaction worker from
+// observing the new session's directory or message store. It never waits on
+// the MainAgent event loop: an active worker is cancelled and this switch is
+// rejected, while a completed draft waiting at the continuation barrier can
+// be discarded synchronously.
+func (a *MainAgent) stopCompactionForSessionSwitch() bool {
+	if !a.IsCompactionRunning() {
+		return true
+	}
+
+	readyDraft := a.compactionState.readyDraft
+	a.CancelCompaction()
+	if readyDraft != nil {
+		cleanupOrphanCompactionFiles(readyDraft.AbsHistoryPath)
+		a.resetCompactionState()
+		a.emitActivity("main", ActivityIdle, "")
+		a.emitToTUI(CompactionStatusEvent{Status: "cancelled"})
+		return true
+	}
+
+	a.emitToTUI(ErrorEvent{Err: fmt.Errorf("context compaction is stopping; retry the session switch after it finishes")})
+	return false
 }
 
 func (a *MainAgent) finishSessionSwitch() {
@@ -349,6 +376,9 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 // load the forked message into the composer.
 func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	defer a.finishSessionSwitch()
+	if !a.stopCompactionForSessionSwitch() {
+		return
+	}
 	msgs := a.ctxMgr.Snapshot()
 	if msgIndex < 0 || msgIndex >= len(msgs) {
 		log.Warnf("handleForkSessionCommand: msgIndex out of range msgIndex=%v len=%v", msgIndex, len(msgs))

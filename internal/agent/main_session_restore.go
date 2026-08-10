@@ -1179,6 +1179,9 @@ func (a *MainAgent) RestoreSessionAtStartup() error {
 // handleResumeCommand handles the /resume <sessionID> slash command.
 func (a *MainAgent) handleResumeCommand(sessionID string) {
 	defer a.finishSessionSwitch()
+	if !a.stopCompactionForSessionSwitch() {
+		return
+	}
 	targetID := strings.TrimSpace(sessionID)
 	a.emitToTUI(SessionSwitchStartedEvent{Kind: "resume", SessionID: targetID})
 	sessionPath, err := a.resolveResumeSessionPath(targetID)

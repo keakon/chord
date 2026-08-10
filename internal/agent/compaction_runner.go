@@ -58,6 +58,24 @@ func (a *MainAgent) scheduleCompactionAsync(snapshot []message.Message, planID u
 	a.startCompactionAsyncWithContinuation(snapshot, planID, target, trigger, continuationPlan{kind: resumeKind, turnEpoch: target.turnEpoch}, trigger.Manual)
 }
 
+// Draft production must reach a terminal event within this window. The
+// summarize calls derive their own 5-minute timeouts from the draft context
+// (one initial call plus one validation-repair retry), so the deadline and
+// user cancellation interrupt them mid-request; the remaining steps are local
+// file I/O. The watchdog grace covers a goroutine stuck in a call that ignores
+// context cancellation (e.g. blocking file-lock or filesystem I/O): after it
+// fires, a synthetic failure event releases the compaction state so automatic
+// compaction can trigger again.
+const (
+	compactionDraftTimeout  = 12 * time.Minute
+	compactionWatchdogGrace = time.Minute
+)
+
+// errCompactionWatchdog is the synthetic failure emitted when the draft
+// goroutine never reaches a terminal event. It classifies as transient like
+// other timeouts so the failure breaker still allows a retry.
+var errCompactionWatchdog = errors.New("compaction draft production timed out (watchdog)")
+
 func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Message, planID uint64, target compactionTarget, trigger compactionTrigger, continuation continuationPlan, manual bool) {
 	a.recordCompactionLifecycleEvent("started", map[string]string{"trigger": trigger.analyticsName(), "message_count": strconv.Itoa(len(snapshot))})
 	todos := a.GetTodos()
@@ -70,7 +88,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	}
 	headSplit := compactionHeadSplitForProfile(profile, snapshot, a.ctxMgr.GetMaxTokens())
 
-	ctx, cancel := context.WithCancel(a.parentCtx)
+	ctx, cancel := context.WithTimeout(a.parentCtx, compactionDraftTimeout)
 	a.beginCompactionState(planID, target, trigger, continuation, headSplit, cancel)
 
 	a.emitActivity("main", ActivityCompacting, "context")
@@ -79,6 +97,23 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	go func(ctx context.Context, snapshot []message.Message, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, manual bool) {
 		defer a.compactionWg.Done()
 		defer cancel()
+
+		// Watchdog: if this goroutine never reaches a terminal event (stuck in
+		// a call that ignores ctx), emit a synthetic failure so the event loop
+		// releases the compaction state. A late genuine Ready/Failed event is
+		// then ignored by the plan-ID stale checks in its handler.
+		draftDone := make(chan struct{})
+		defer close(draftDone)
+		go func() {
+			timer := time.NewTimer(compactionDraftTimeout + compactionWatchdogGrace)
+			defer timer.Stop()
+			select {
+			case <-draftDone:
+			case <-timer.C:
+				log.Errorf("compaction draft watchdog fired plan_id=%v head_split=%v", planID, headSplit)
+				a.sendEvent(Event{Type: EventCompactionFailed, Payload: &compactionFailure{planID: planID, target: target, err: errCompactionWatchdog}})
+			}
+		}()
 
 		draft, err := a.produceCompactionDraftAsync(ctx, snapshot, manual, planID, target, headSplit, profile)
 		if err != nil {
@@ -202,7 +237,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	summaryMode := "model_summary"
 	backendName := config.CompactionPresetGeneric
 	modelRef := ""
-	summaryText, backendUsed, usedModel, summarizeErr := a.summarizeCompactionHead(head, relHistoryPath, evidenceItems, recentTail, todos, subAgents, backgroundObjects)
+	summaryText, backendUsed, usedModel, summarizeErr := a.summarizeCompactionHead(ctx, head, relHistoryPath, evidenceItems, recentTail, todos, subAgents, backgroundObjects)
 	if strings.TrimSpace(backendUsed) != "" {
 		backendName = backendUsed
 	}
@@ -450,7 +485,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	return nil
 }
 
-func (a *MainAgent) summarizeCompactionHead(head []message.Message, relHistoryPath string, evidenceItems []evidenceItem, recentTail []message.Message, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) (summary string, backendName string, modelRef string, err error) {
+func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.Message, relHistoryPath string, evidenceItems []evidenceItem, recentTail []message.Message, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) (summary string, backendName string, modelRef string, err error) {
 	modelRef = a.compactionModelRef()
 	client, utilityContextLimit, err := a.newCompactionClient(modelRef)
 	if err != nil {
@@ -479,7 +514,7 @@ func (a *MainAgent) summarizeCompactionHead(head []message.Message, relHistoryPa
 
 	backend := a.selectCompactionBackend(client)
 	backendName = backend.Name()
-	summary, modelRef, err = backend.ProduceSummary(client, modelRef, prompt)
+	summary, modelRef, err = backend.ProduceSummary(ctx, client, modelRef, prompt)
 	if err == nil {
 		return summary, backendName, modelRef, nil
 	}
@@ -489,7 +524,7 @@ func (a *MainAgent) summarizeCompactionHead(head []message.Message, relHistoryPa
 	repairPrompt := buildCompactionRepairPrompt(prompt, err)
 	if repairPrompt != "" {
 		log.Debugf("compaction summary validation failed; requesting corrected summary backend=%v error=%v", backendName, err)
-		repairedSummary, repairedModelRef, repairErr := backend.ProduceSummary(client, modelRef, repairPrompt)
+		repairedSummary, repairedModelRef, repairErr := backend.ProduceSummary(ctx, client, modelRef, repairPrompt)
 		if repairErr == nil {
 			return repairedSummary, backendName, repairedModelRef, nil
 		}
@@ -498,13 +533,12 @@ func (a *MainAgent) summarizeCompactionHead(head []message.Message, relHistoryPa
 	return "", backendName, modelRef, err
 }
 
-func (a *MainAgent) callCompactionEndpoint(client *llm.Client, fallbackModelRef, prompt string) (string, string, error) {
+func (a *MainAgent) callCompactionEndpoint(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string) (string, string, error) {
 	if client == nil {
 		return "", fallbackModelRef, fmt.Errorf("compaction client is nil")
 	}
 	client.SetSystemPrompt(compactionSystemPrompt)
-	modelRef := fallbackModelRef
-	ctx, cancel := context.WithTimeout(a.parentCtx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	go a.compactionKeepAlive(ctx)
 
@@ -518,35 +552,27 @@ func (a *MainAgent) callCompactionEndpoint(client *llm.Client, fallbackModelRef,
 		nil,
 	)
 	if err != nil {
-		return "", modelRef, err
+		return "", fallbackModelRef, err
 	}
 	// Emit final progress with response size so TUI updates before the
 	// succeeded/failed terminal event arrives.
 	respBytes := int64(len(resp.Content))
 	a.emitToTUI(CompactionStatusEvent{Status: "progress", Bytes: respBytes, Events: 2})
 
-	selectedRef := client.PrimaryModelRef()
-	runningRef := client.RunningModelRef()
-	if strings.TrimSpace(runningRef) != "" {
-		modelRef = runningRef
-	} else if strings.TrimSpace(selectedRef) != "" {
-		modelRef = selectedRef
-	}
-	summary := compactionSummaryFromResponseContent(resp.Content)
-	if err := validateCompactionSummary(summary); err != nil {
-		return summary, modelRef, fmt.Errorf("%w: %w", errInvalidCompactionSummary, err)
+	summary, modelRef, err := a.finishCompactionCall(client, fallbackModelRef, resp)
+	if err != nil {
+		return summary, modelRef, err
 	}
 	log.Debugf("compaction endpoint produced summary prompt_bytes=%v response_bytes=%v summary_len=%v", promptBytes, respBytes, len(summary))
 	return summary, modelRef, nil
 }
 
-func (a *MainAgent) callCompactionSummary(client *llm.Client, fallbackModelRef, prompt string) (string, string, error) {
+func (a *MainAgent) callCompactionSummary(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string) (string, string, error) {
 	if client == nil {
 		return "", fallbackModelRef, fmt.Errorf("compaction client is nil")
 	}
 	client.SetSystemPrompt(compactionSystemPrompt)
-	modelRef := fallbackModelRef
-	ctx, cancel := context.WithTimeout(a.parentCtx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	var (
@@ -571,7 +597,7 @@ func (a *MainAgent) callCompactionSummary(client *llm.Client, fallbackModelRef, 
 
 	releaseLLM, err := a.governor.acquireLLM(ctx, client.PrimaryModelRef())
 	if err != nil {
-		return "", modelRef, fmt.Errorf("acquire compaction LLM request capacity: %w", err)
+		return "", fallbackModelRef, fmt.Errorf("acquire compaction LLM request capacity: %w", err)
 	}
 	defer releaseLLM()
 	resp, err := client.CompleteStream(
@@ -581,9 +607,18 @@ func (a *MainAgent) callCompactionSummary(client *llm.Client, fallbackModelRef, 
 		callback,
 	)
 	if err != nil {
-		return "", modelRef, err
+		return "", fallbackModelRef, err
 	}
 	a.emitToTUI(CompactionStatusEvent{Status: "progress", Bytes: progressBytes, Events: progressEvents})
+	return a.finishCompactionCall(client, fallbackModelRef, resp)
+}
+
+// finishCompactionCall settles a completed summarize response identically for
+// the streaming and the provider-endpoint path: record the call's usage under
+// the compaction purpose (otherwise these full-context requests are invisible
+// in analytics or attributed to chat), resolve which model actually ran, and
+// validate the summary.
+func (a *MainAgent) finishCompactionCall(client *llm.Client, fallbackModelRef string, resp *message.Response) (string, string, error) {
 	selectedRef := client.PrimaryModelRef()
 	runningRef := client.RunningModelRef()
 	callStatus := client.LastCallStatus()
@@ -592,6 +627,7 @@ func (a *MainAgent) callCompactionSummary(client *llm.Client, fallbackModelRef, 
 		serviceTier = client.EffectiveServiceTierForModelRef(runningRef)
 	}
 	a.recordUsage("main", "main", a.currentAgentName(), "compaction", selectedRef, runningRef, 0, resp.Usage, serviceTier, nil)
+	modelRef := fallbackModelRef
 	if strings.TrimSpace(runningRef) != "" {
 		modelRef = runningRef
 	} else if strings.TrimSpace(selectedRef) != "" {

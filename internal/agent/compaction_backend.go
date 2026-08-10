@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
@@ -9,7 +10,7 @@ import (
 
 type compactionBackend interface {
 	Name() string
-	ProduceSummary(client *llm.Client, fallbackModelRef, prompt string) (string, string, error)
+	ProduceSummary(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string) (string, string, error)
 }
 
 type genericCompactionBackend struct {
@@ -18,8 +19,8 @@ type genericCompactionBackend struct {
 
 func (b genericCompactionBackend) Name() string { return config.CompactionPresetGeneric }
 
-func (b genericCompactionBackend) ProduceSummary(client *llm.Client, fallbackModelRef, prompt string) (string, string, error) {
-	return b.agent.callCompactionSummary(client, fallbackModelRef, prompt)
+func (b genericCompactionBackend) ProduceSummary(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string) (string, string, error) {
+	return b.agent.callCompactionSummary(ctx, client, fallbackModelRef, prompt)
 }
 
 type codexCompactionBackend struct {
@@ -28,8 +29,8 @@ type codexCompactionBackend struct {
 
 func (b codexCompactionBackend) Name() string { return config.CompactionPresetCodex }
 
-func (b codexCompactionBackend) ProduceSummary(client *llm.Client, fallbackModelRef, prompt string) (string, string, error) {
-	return b.agent.callCompactionEndpoint(client, fallbackModelRef, prompt)
+func (b codexCompactionBackend) ProduceSummary(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string) (string, string, error) {
+	return b.agent.callCompactionEndpoint(ctx, client, fallbackModelRef, prompt)
 }
 
 func (a *MainAgent) configuredCompactionPreset() string {

@@ -254,3 +254,116 @@ func TestClassifyCompactionFailureTransientForAPIRateLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyCompactionFailureTransientForWatchdogTimeout(t *testing.T) {
+	if got := classifyCompactionFailure(errCompactionWatchdog); got != compactionFailureTransient {
+		t.Fatalf("classifyCompactionFailure = %q, want %q", got, compactionFailureTransient)
+	}
+}
+
+// A failure event whose planID matches the running compaction must release the
+// compaction state even when the continuation snapshot's turn fields have
+// drifted from the goroutine's original target (oversize-suspend rewrites the
+// continuation while the goroutine keeps its target). Treating that mismatch
+// as a stale event left IsCompactionRunning() true forever, silently disabling
+// every future automatic compaction in the session.
+func TestCompactionFailureWithDriftedContinuationStillReleasesState(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	target := compactionTarget{turnID: 7, turnEpoch: 1, sessionEpoch: a.sessionEpoch}
+	a.startCompactionState(4, target, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeAutoContinue, turnID: 7, turnEpoch: 1})
+	// Simulate a later path rewriting the continuation to resume a newer turn.
+	a.compactionState.continuation.turnID = 9
+	a.compactionState.continuation.turnEpoch = 2
+
+	a.handleCompactionFailed(Event{
+		Type:    EventCompactionFailed,
+		Payload: &compactionFailure{planID: 4, target: target, err: errors.New("compaction backend unavailable")},
+	})
+
+	if a.IsCompactionRunning() {
+		t.Fatal("failure for the running plan must release the compaction state despite continuation drift")
+	}
+}
+
+// A genuinely stale failure event (older planID than the running compaction)
+// must still be ignored without touching the newer compaction's state.
+func TestCompactionFailureFromOlderPlanKeepsRunningState(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	a.startCompactionState(6, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeIdle})
+	a.handleCompactionFailed(Event{
+		Type:    EventCompactionFailed,
+		Payload: &compactionFailure{planID: 5, target: compactionTarget{sessionEpoch: a.sessionEpoch}, err: errors.New("late failure from a superseded plan")},
+	})
+
+	if !a.IsCompactionRunning() {
+		t.Fatal("stale failure from an older plan must not release the newer compaction's state")
+	}
+}
+
+// The success path must survive the same continuation drift as the failure
+// path: a ready draft whose planID matches the running compaction is applied
+// even when oversize-suspend has rewritten the continuation's turn fields.
+// Treating the drift as stale discarded the produced draft, leaked
+// IsCompactionRunning() forever, and never resumed the suspended LLM call.
+func TestCompactionReadyWithDriftedContinuationStillApplies(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	target := compactionTarget{turnID: 7, turnEpoch: 1, sessionEpoch: a.sessionEpoch}
+	a.startCompactionState(4, target, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeAutoContinue, turnID: 7, turnEpoch: 1})
+	// Simulate a later path rewriting the continuation to resume a newer turn.
+	a.compactionState.continuation.turnID = 9
+	a.compactionState.continuation.turnEpoch = 2
+
+	a.handleCompactionReady(Event{
+		Type: EventCompactionReady,
+		Payload: &compactionDraft{
+			PlanID:         4,
+			Target:         target,
+			NewMessages:    []message.Message{{Role: "user", Content: "[Context Summary]\nsummary"}},
+			Index:          1,
+			AbsHistoryPath: "/tmp/history-drift.md",
+			RelHistoryPath: "history-drift.md",
+			SummaryMode:    "truncate_only",
+			ModelRef:       "fallback",
+			ArchivedCount:  4,
+		},
+	})
+
+	if a.IsCompactionRunning() {
+		t.Fatal("ready draft for the running plan must release the compaction state despite continuation drift")
+	}
+	messages := a.ctxMgr.Snapshot()
+	if len(messages) != 1 || messages[0].Content != "[Context Summary]\nsummary" {
+		t.Fatalf("drifted ready draft must still be applied, got messages = %+v", messages)
+	}
+}
+
+// A genuinely stale ready event (older planID than the running compaction)
+// must still be discarded without applying its draft or touching the newer
+// compaction's state.
+func TestCompactionReadyFromOlderPlanKeepsRunningState(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	a.startCompactionState(6, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeIdle})
+	a.handleCompactionReady(Event{
+		Type: EventCompactionReady,
+		Payload: &compactionDraft{
+			PlanID:      5,
+			Target:      compactionTarget{sessionEpoch: a.sessionEpoch},
+			NewMessages: []message.Message{{Role: "user", Content: "[Context Summary]\nsuperseded"}},
+		},
+	})
+
+	if !a.IsCompactionRunning() {
+		t.Fatal("stale ready event from an older plan must not release the newer compaction's state")
+	}
+	if messages := a.ctxMgr.Snapshot(); len(messages) != 0 {
+		t.Fatalf("stale ready draft must not be applied, got messages = %+v", messages)
+	}
+}

@@ -134,7 +134,7 @@ func classifyCompactionFailure(err error) compactionFailureClass {
 	if err == nil {
 		return compactionFailureUnknown
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errCompactionWatchdog) {
 		return compactionFailureTransient
 	}
 

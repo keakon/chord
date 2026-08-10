@@ -428,9 +428,22 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 		a.resetCompactionState()
 		return
 	}
+	if draft.Target.sessionEpoch != 0 && draft.Target.sessionEpoch != a.sessionEpoch {
+		log.Debugf("ignoring compaction ready event from another session draft_plan_id=%v draft_session_epoch=%v current_session_epoch=%v", draft.PlanID, draft.Target.sessionEpoch, a.sessionEpoch)
+		cleanupOrphanCompactionFiles(draft.AbsHistoryPath)
+		return
+	}
 
 	pending := a.currentCompactionPendingCall()
-	if !compactionDraftMatchesPending(draft, pending) {
+	// Match against the running plan itself before consulting the continuation
+	// snapshot, mirroring handleCompactionFailed: oversize-suspend rewrites the
+	// continuation's turn fields while the compaction goroutine keeps its
+	// original target. Treating that drift as stale would discard a
+	// successfully produced draft, leave IsCompactionRunning() true forever
+	// (silently disabling every future automatic compaction), and never resume
+	// the suspended LLM call.
+	matchesRunningPlan := a.compactionState.isRunning() && draft.PlanID != 0 && draft.PlanID == a.compactionState.planID
+	if !matchesRunningPlan && !compactionDraftMatchesPending(draft, pending) {
 		log.Debugf("ignoring stale compaction ready event draft_plan_id=%v pending_plan_id=%v draft_session_epoch=%v draft_turn=%v draft_turn_epoch=%v", draft.PlanID, func() uint64 {
 			if pending == nil {
 				return 0
@@ -787,9 +800,30 @@ func (a *MainAgent) handleCompactionFailed(evt Event) {
 		log.Errorf("handleCompactionFailed: invalid payload type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
+	if payload.target.sessionEpoch != 0 && payload.target.sessionEpoch != a.sessionEpoch {
+		log.Debugf("ignoring compaction failure event from another session failure_plan_id=%v failure_session_epoch=%v current_session_epoch=%v", payload.planID, payload.target.sessionEpoch, a.sessionEpoch)
+		cleanupOrphanCompactionFiles(payload.absHistoryPath)
+		return
+	}
+
+	// A ready draft parked at the continuation barrier means the worker already
+	// reached its terminal event for this plan; a same-plan failure arriving now
+	// can only be the watchdog racing that completion. Keep the draft.
+	if a.compactionState.readyDraft != nil && payload.planID != 0 &&
+		payload.planID == a.compactionState.readyDraft.PlanID {
+		log.Infof("ignoring compaction failure racing a parked ready draft plan_id=%v", payload.planID)
+		return
+	}
 
 	pending := a.currentCompactionPendingCall()
-	if payload.planID != 0 && !compactionFailureMatchesPending(payload, pending) {
+	// Match against the running plan itself before consulting the continuation
+	// snapshot: oversize-suspend and similar paths rewrite the continuation's
+	// turn fields while the compaction goroutine keeps its original target, and
+	// treating that mismatch as stale would leave IsCompactionRunning() true
+	// forever, silently disabling every future automatic compaction (observed
+	// as ~1h of requests climbing past the threshold with no retry).
+	matchesRunningPlan := a.compactionState.isRunning() && payload.planID == a.compactionState.planID
+	if payload.planID != 0 && !matchesRunningPlan && !compactionFailureMatchesPending(payload, pending) {
 		log.Debugf("ignoring stale compaction failure event failure_plan_id=%v pending_plan_id=%v", payload.planID, func() uint64 {
 			if pending == nil {
 				return 0

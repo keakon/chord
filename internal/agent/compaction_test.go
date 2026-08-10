@@ -228,7 +228,7 @@ func validCompactionSummaryForTest(history string) string {
 // summarizeCompactionHeadForTest invokes summarizeCompactionHead with the
 // continuation profile defaults previously baked into the deleted 2-arg wrapper.
 func summarizeCompactionHeadForTest(a *MainAgent, head []message.Message, relHistoryPath string) (summary string, modelRef string, err error) {
-	summary, _, modelRef, err = a.summarizeCompactionHead(head, relHistoryPath, nil, nil, a.GetTodos(), a.taskInfosForCompaction(), spawnStatesForSnapshot())
+	summary, _, modelRef, err = a.summarizeCompactionHead(context.Background(), head, relHistoryPath, nil, nil, a.GetTodos(), a.taskInfosForCompaction(), spawnStatesForSnapshot())
 	return summary, modelRef, err
 }
 
@@ -4787,6 +4787,99 @@ func TestHandleCompactionReadyIgnoresStaleSessionDraft(t *testing.T) {
 	}
 	if got := len(a.ctxMgr.Snapshot()); got != 0 {
 		t.Fatalf("len(snapshot) = %d, want 0 for stale ready event", got)
+	}
+}
+
+func TestHandleCompactionReadyIgnoresCurrentPlanFromOldSession(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.sessionEpoch = 1
+	oldSessionEpoch := a.sessionEpoch
+	a.startCompactionState(2, compactionTarget{sessionEpoch: oldSessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle})
+	a.sessionEpoch++
+
+	a.handleCompactionReady(Event{Type: EventCompactionReady, Payload: &compactionDraft{
+		PlanID:      2,
+		Target:      compactionTarget{sessionEpoch: oldSessionEpoch},
+		NewMessages: []message.Message{{Role: "user", Content: "[Context Summary]\nold session"}},
+	}})
+
+	if !a.IsCompactionRunning() {
+		t.Fatal("ready event from an old session must not release current compaction state")
+	}
+	if got := len(a.ctxMgr.Snapshot()); got != 0 {
+		t.Fatalf("old-session ready event applied %d messages", got)
+	}
+}
+
+func TestHandleCompactionFailedIgnoresCurrentPlanFromOldSession(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.sessionEpoch = 1
+	oldSessionEpoch := a.sessionEpoch
+	a.startCompactionState(2, compactionTarget{sessionEpoch: oldSessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle})
+	a.sessionEpoch++
+
+	a.handleCompactionFailed(Event{Type: EventCompactionFailed, Payload: &compactionFailure{
+		planID: 2,
+		target: compactionTarget{sessionEpoch: oldSessionEpoch},
+		err:    fmt.Errorf("old session failure"),
+	}})
+
+	if !a.IsCompactionRunning() {
+		t.Fatal("failure event from an old session must not release current compaction state")
+	}
+}
+
+// A watchdog failure that loses the race against a completed draft parked at
+// the continuation barrier must not discard that draft: the worker sends one
+// terminal event per plan, so a same-plan failure after Ready can only be the
+// watchdog's synthetic timeout.
+func TestHandleCompactionFailedKeepsParkedReadyDraft(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 1, nil)
+	a.compactionState.readyDraft = &compactionDraft{PlanID: 1, Target: compactionTarget{sessionEpoch: a.sessionEpoch}}
+
+	a.handleCompactionFailed(Event{Type: EventCompactionFailed, Payload: &compactionFailure{
+		planID: 1,
+		target: compactionTarget{sessionEpoch: a.sessionEpoch},
+		err:    errCompactionWatchdog,
+	}})
+
+	if a.compactionState.readyDraft == nil {
+		t.Fatal("watchdog failure discarded the parked ready draft")
+	}
+	if !a.IsCompactionRunning() {
+		t.Fatal("compaction state must stay armed until the barrier applies the draft")
+	}
+}
+
+func TestStopCompactionForSessionSwitchCancelsWorkerWithoutBlocking(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	ctx, cancel := context.WithCancel(t.Context())
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 0, cancel)
+
+	if a.stopCompactionForSessionSwitch() {
+		t.Fatal("session switch should be rejected while the compaction worker stops")
+	}
+	if ctx.Err() != context.Canceled {
+		t.Fatalf("compaction context error = %v, want canceled", ctx.Err())
+	}
+	if !a.IsCompactionRunning() {
+		t.Fatal("compaction state must remain active until its terminal event")
+	}
+}
+
+func TestStopCompactionForSessionSwitchDiscardsReadyDraft(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 1, nil)
+	a.compactionState.readyDraft = &compactionDraft{PlanID: 1, Target: compactionTarget{sessionEpoch: a.sessionEpoch}}
+
+	if !a.stopCompactionForSessionSwitch() {
+		t.Fatal("session switch should proceed after discarding a completed draft")
+	}
+	if a.IsCompactionRunning() {
+		t.Fatal("completed compaction state should be cleared")
 	}
 }
 
