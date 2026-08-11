@@ -22,7 +22,7 @@ type Manager struct {
 	payloadBytes             int
 	contextBytes             int
 	lastInputTokens          int // full prompt size for compaction thresholds and input-budget displays
-	lastTotalContextTokens   int // post-response context baseline (input + cache_write + output)
+	lastTotalContextTokens   int // post-response context baseline (full prompt + output)
 	calibrationInputTokens   int
 	calibrationContextBytes  int
 	maxTokens                int
@@ -286,6 +286,28 @@ func (m *Manager) RestoreStats(usage message.TokenUsage) {
 	m.stats = usage
 }
 
+// fullPromptTokens normalizes a usage report to the full prompt size across
+// wire accounting conventions. Live responses already arrive canonicalized by
+// the LLM client (input includes cache reads and excludes cache writes — see
+// message.TokenUsage), so on that path only the cache-write add-back applies;
+// the other branches are defense in depth for raw provider shapes, so a path
+// that bypasses that normalization cannot blind the compaction threshold and
+// the byte calibration below. Anthropic-style wires report cache-read and
+// cache-write prefixes outside input_tokens (flags false — add them back), and
+// some OpenAI-compatible relays report only the uncached remainder even though
+// the wire contract says input includes the cached prefix — when input is
+// smaller than a slice it supposedly contains, trust the sum instead.
+func fullPromptTokens(usage message.TokenUsage) int {
+	full := usage.InputTokens
+	if !usage.InputIncludesCacheRead || usage.InputTokens < usage.CacheReadTokens {
+		full += usage.CacheReadTokens
+	}
+	if !usage.InputIncludesCacheWrite || usage.InputTokens < usage.CacheWriteTokens {
+		full += usage.CacheWriteTokens
+	}
+	return full
+}
+
 // UpdateFromUsage accumulates token usage statistics from an API response.
 // lastInputTokens = full normalized prompt size (for compaction thresholds and
 // input-budget displays). lastTotalContextTokens is the post-response context
@@ -297,12 +319,13 @@ func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 	m.stats.CacheReadTokens += usage.CacheReadTokens
 	m.stats.CacheWriteTokens += usage.CacheWriteTokens
 	m.stats.ReasoningTokens += usage.ReasoningTokens
-	m.lastInputTokens = usage.InputTokens
-	m.lastTotalContextTokens = usage.InputTokens + usage.CacheWriteTokens + usage.OutputTokens
-	if usage.InputTokens > 0 {
+	fullPrompt := fullPromptTokens(usage)
+	m.lastInputTokens = fullPrompt
+	m.lastTotalContextTokens = fullPrompt + usage.OutputTokens
+	if fullPrompt > 0 {
 		contextBytes := m.systemPromptContextBytes + m.contextBytes
 		if contextBytes > 0 {
-			m.calibrationInputTokens = usage.InputTokens
+			m.calibrationInputTokens = fullPrompt
 			m.calibrationContextBytes = contextBytes
 		}
 	}
@@ -324,7 +347,7 @@ func (m *Manager) LastInputTokens() int {
 }
 
 // LastTotalContextTokens returns the post-response context baseline from the
-// most recent API call: full input plus cache-write tokens and output.
+// most recent API call: the full normalized prompt plus generated output.
 func (m *Manager) LastTotalContextTokens() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -508,7 +531,11 @@ func (m *Manager) AutoCompactDecision() AutoCompactDecision {
 		thresholdTokens = int(m.threshold * float64(usable))
 	}
 	estimatedInputTokens := m.estimatedInputTokensFromPayloadBytesLocked()
-	effectiveInputTokens := max(m.lastInputTokens, estimatedInputTokens)
+	// The next request replays the last full prompt plus the generated
+	// output, so the post-response context baseline — not the last prompt
+	// alone — is what the threshold must catch. Comparing the prompt alone
+	// would start compaction one request later, past the configured margin.
+	effectiveInputTokens := max(m.lastTotalContextTokens, m.lastInputTokens, estimatedInputTokens)
 	shouldCompact := m.threshold > 0 && usable > 0 && float64(effectiveInputTokens) >= m.threshold*float64(usable)
 	return AutoCompactDecision{
 		LastInputTokens:      m.lastInputTokens,

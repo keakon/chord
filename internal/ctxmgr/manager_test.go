@@ -257,6 +257,65 @@ func TestShouldAutoCompactUsesUsableInputBudgetWhenReserved(t *testing.T) {
 	}
 }
 
+// Some OpenAI-compatible relays report only the uncached remainder in
+// input_tokens even though the wire flags say the cached prefix is included; a
+// warm-cache request must not report a near-zero prompt to the threshold.
+func TestShouldAutoCompactNormalizesUncachedOnlyRelayUsage(t *testing.T) {
+	m := NewManagerWithInputBudget(400000, 272000, 0, 0.8)
+	m.UpdateFromUsage(message.TokenUsage{
+		InputTokens:            2,
+		CacheReadTokens:        230000,
+		InputSemanticsKnown:    true,
+		InputIncludesCacheRead: true,
+	})
+	if got := m.LastInputTokens(); got != 230002 {
+		t.Fatalf("LastInputTokens() = %d, want normalized full prompt 230002", got)
+	}
+	if !m.ShouldAutoCompact() {
+		t.Fatal("expected normalized full prompt to cross the threshold")
+	}
+}
+
+// Anthropic-style wires report cache-read and cache-write prefixes outside
+// input_tokens (semantics flags false): the full prompt is their sum.
+func TestShouldAutoCompactAddsCachePrefixesForAnthropicStyleUsage(t *testing.T) {
+	m := NewManagerWithInputBudget(400000, 272000, 0, 0.8)
+	m.UpdateFromUsage(message.TokenUsage{
+		InputTokens:      100000,
+		CacheReadTokens:  100000,
+		CacheWriteTokens: 30000,
+	})
+	if got := m.LastInputTokens(); got != 230000 {
+		t.Fatalf("LastInputTokens() = %d, want 230000", got)
+	}
+	if !m.ShouldAutoCompact() {
+		t.Fatal("expected summed cache prefixes to cross the threshold")
+	}
+}
+
+// The next request replays the last prompt plus the generated output, so the
+// threshold compares the post-response context baseline, not the prompt alone.
+func TestShouldAutoCompactIncludesGeneratedOutput(t *testing.T) {
+	m := NewManagerWithInputBudget(400000, 272000, 0, 0.8)
+	m.UpdateFromUsage(message.TokenUsage{
+		InputTokens:            210000,
+		OutputTokens:           10000,
+		InputSemanticsKnown:    true,
+		InputIncludesCacheRead: true,
+	})
+	if !m.ShouldAutoCompact() {
+		t.Fatal("expected prompt+output context baseline to cross the threshold")
+	}
+	m.UpdateFromUsage(message.TokenUsage{
+		InputTokens:            210000,
+		InputSemanticsKnown:    true,
+		InputIncludesCacheRead: true,
+	})
+	if m.ShouldAutoCompact() {
+		t.Fatal("expected prompt alone below threshold to stay false")
+	}
+}
+
 // A lower local byte-calibrated estimate must never cancel a compaction the
 // provider-reported usage already triggered: provider usage stays authoritative
 // and the estimate can only raise the effective input, never lower it.
@@ -363,11 +422,13 @@ func TestUpdateFromUsageTracksTrueContextBurden(t *testing.T) {
 		CacheWriteTokens: 20,
 		ReasoningTokens:  10,
 	})
-	if got := m.LastInputTokens(); got != 100 {
-		t.Fatalf("LastInputTokens() = %d, want 100", got)
+	// Without semantics flags the wire is treated as Anthropic-style: cached
+	// prefixes live outside input_tokens, so the full prompt is their sum.
+	if got := m.LastInputTokens(); got != 180 {
+		t.Fatalf("LastInputTokens() = %d, want 180 (input + cache_read + cache_write)", got)
 	}
-	if got := m.LastTotalContextTokens(); got != 160 {
-		t.Fatalf("LastTotalContextTokens() = %d, want 160 (input + cache_write + output)", got)
+	if got := m.LastTotalContextTokens(); got != 220 {
+		t.Fatalf("LastTotalContextTokens() = %d, want 220 (full prompt + output)", got)
 	}
 }
 
