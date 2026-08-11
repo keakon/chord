@@ -17,6 +17,10 @@
 
 ### 修复
 
+- 请求级上下文剪裁不再摘要模型从未看到过的新鲜工具输出。结果在首个能对它作出反应的请求上就已是 age 1，此前 `shell_success_age_turns`/`read_like_age_turns` 默认值 1 会让大小类规则在模型完整看到大体积成功输出之前就将其摘要；两项默认值升至 2（硬编码的 diagnostics 规则同步跟进），保证每份新鲜的成功输出恰好被完整看到一次。已失效或已被覆盖的读取仍立即渲染有效性标记：它们跳过年龄门控和 high-risk/diff 保护分支，而不是继续回放陈旧的文件内容。
+- 自动压缩在 prompt cache 命中时不再"失明"。阈值此前直接比较上报的 `input_tokens`，但 Anthropic 风格 wire 把缓存前缀报在 `input_tokens` 之外，部分 OpenAI 兼容中转只报未缓存的余量，于是缓存命中的请求看起来像近乎零的 prompt，并污染字节校准。现在会把用量归一化为完整 prompt，且阈值比较响应后的上下文基线（完整 prompt 加输出）——下一个请求会同时回放两者，只比较 prompt 会让压缩晚一个请求才触发。
+- 服务端自行开启 thinking 的端点（网关后的 DeepSeek 系列）在请求侧 reasoning 被关闭后，不再沿 "reasoning_content must be passed back" 400 逐级降级：当前轮的空 reasoning 填充现在即使 thinking 控制字段已被剥离也会执行，空字段即可满足存在性校验。
+- 已完成轮次的明文 `reasoning_content` 和无签名 thinking 块默认不再回放给后端。多数 thinking 模式后端只校验最后一条 user 消息之后的 reasoning，更早轮次的 reasoning 会在服务端被丢弃，因此回放的历史每次请求都计费却从未被使用——在受影响端点上占大型请求的一半以上。当前轮 reasoning 以及带签名或 redacted 的 Anthropic thinking 块不受影响。文档明确要求回传完整 assistant 历史的 preserved-thinking 模型（Kimi K3 / `keep: all`、Qwen `preserve_thinking`、GLM `clear_thinking: false`）通过新增的 `compat.reasoning_continuity.preserve_history: true` 保留历史；模型配置指南中的相应模板已同步设置。
 - 同一份 read 输出既重复、又已失效或被取代时，上下文剪裁现在始终使用稳定的有效性标记，不再反复让 prompt cache 失效。
 - 上下文压缩遇到卡住或完成事件不匹配时会正常恢复，不再一直停在运行中并阻止后续自动压缩。草稿生成现在有明确截止时间，迟到结果不能跨会话生效（压缩收尾时切换会话会提示稍后重试），压缩模型调用也会计入用量统计。
 - 环境信息与 AGENTS.md 会话指引现在会出现在 MainAgent 和 SubAgent 的每次请求中；压缩或恢复会话后仍然保留，同时不会反复让 prompt cache 失效。
