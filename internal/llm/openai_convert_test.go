@@ -519,14 +519,17 @@ func TestFillCurrentTurnEmptyReasoning(t *testing.T) {
 	}
 }
 
-func TestOpenAICompleteStream_FillsCurrentTurnEmptyReasoningUnlessDisabled(t *testing.T) {
+func TestOpenAICompleteStream_FillsCurrentTurnEmptyReasoningEvenWhenDisabled(t *testing.T) {
+	// DisableReasoning only strips request-side thinking controls; endpoints
+	// that enable thinking server-side keep validating reasoning_content
+	// passback, so the fill must run in both cases.
 	for _, tc := range []struct {
 		name             string
 		disableReasoning bool
 		wantField        bool
 	}{
 		{name: "reasoning active fills empty field", disableReasoning: false, wantField: true},
-		{name: "reasoning disabled omits field", disableReasoning: true, wantField: false},
+		{name: "reasoning disabled still fills empty field", disableReasoning: true, wantField: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var gotBody map[string]any

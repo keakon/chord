@@ -266,13 +266,15 @@ func (o *OpenAIProvider) CompleteStream(
 	wireFamily := providerWireFamily(o.provider)
 	continuityMode := reasoningContinuityCompatMode(o.provider, model)
 	apiMessages := convertMessagesToOpenAI(systemPrompt, wireFamily, continuityMode, messages)
-	// When the request keeps reasoning active (either chord enables it or the
-	// endpoint enables thinking by default and offers no off switch),
-	// thinking-mode backends require every current-turn assistant tool-call
-	// message to carry reasoning_content. Skip the fill when reasoning was
-	// explicitly disabled for this request: a non-thinking request does not
-	// validate the field, and its tolerance for it is backend-specific.
-	if !tuning.DisableReasoning && wireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible {
+	// When the wire keeps visible reasoning continuity, thinking-mode backends
+	// require every current-turn assistant tool-call message to carry
+	// reasoning_content. Fill even when reasoning was disabled for this
+	// request: DisableReasoning only strips the request-side thinking
+	// controls, and endpoints that enable thinking server-side (DeepSeek
+	// family behind gateways) keep validating the field regardless — a
+	// session dump shows 12 "reasoning_content must be passed back" 400s on
+	// requests whose thinking key was already stripped.
+	if wireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible {
 		fillCurrentTurnEmptyReasoning(apiMessages)
 	}
 
