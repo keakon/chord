@@ -132,13 +132,10 @@ func (DelegateTool) Name() string { return NameDelegate }
 
 func (DelegateTool) Description() string {
 	return "Delegate a task to a SubAgent for parallel execution. " +
-		"The SubAgent runs independently and reports back when done. " +
+		"The SubAgent runs independently with its own context and tool access, and reports back when done. " +
 		"Prefer using Read, Grep, and Shell directly when one or a few tool calls suffice; " +
 		"use Delegate only for substantial sub-work that benefits from a dedicated agent (e.g. multi-file edits or independent plan items). " +
-		"Use Notify(existing) for the same task's follow-up, clarification, rework, added tests, added verification, or final acceptance work; use Delegate(new) for a genuinely new, independently trackable task. " +
-		"Only parallelize tasks when their write scopes are clearly independent; do not create concurrent workers that may edit the same file or tightly coupled targets. " +
-		"If unsure whether work belongs to the same deliverable, prefer continuing the existing task when continuity is strong, and prefer a new delegate when independence is strong. " +
-		"Each SubAgent has its own context and tool access. " +
+		"Your system prompt's delegation workflow section governs when to continue an existing task with Notify versus creating a new delegate, and when parallel delegates are safe. " +
 		"IMPORTANT: The result is delivered asynchronously — do NOT poll or retrieve SubAgent results with Spawn/SpawnStop. " +
 		"The returned task_id is the stable durable handle for that delegate; reuse it with Notify or Cancel instead of spawning a duplicate delegate for follow-up."
 }

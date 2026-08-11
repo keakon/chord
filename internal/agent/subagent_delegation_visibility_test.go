@@ -144,6 +144,54 @@ func TestSubAgentDelegateTargetsUseSubAgentRuleset(t *testing.T) {
 	}
 }
 
+// A SubAgent with nested delegation must receive the shared delegation
+// strategy (continue-with-Notify versus new delegate, write-scope
+// parallelism) in its own system prompt: the Delegate tool description
+// defers to the surrounding prompt, and this role has no "SubAgent
+// Workflow" section.
+func TestSubAgentSystemPromptIncludesDelegationStrategyWhenNested(t *testing.T) {
+	parent := newTestMainAgent(t, t.TempDir())
+	parent.SetAgentConfigs(map[string]*config.AgentConfig{
+		"builder":  {Name: "builder", Mode: config.AgentModeMain},
+		"reviewer": {Name: "reviewer", Mode: config.AgentModeSubAgent},
+	})
+	reg := tools.NewRegistry()
+	reg.Register(tools.NewDelegateTool(parent))
+	reg.Register(tools.NewNotifyTool(nil, parent, false, true))
+	reg.Register(tools.NewCancelTool(parent))
+
+	sub := NewSubAgent(SubAgentConfig{
+		InstanceID:   "worker-1",
+		TaskID:       "adhoc-1",
+		AgentDefName: "worker",
+		TaskDesc:     "inspect code",
+		LLMClient:    newTestLLMClient(),
+		Recovery:     parent.recovery,
+		Parent:       parent,
+		ParentCtx:    context.Background(),
+		Cancel:       func() {},
+		BaseTools:    reg,
+		Ruleset:      permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}},
+		Depth:        1,
+		Delegation:   config.DelegationConfig{MaxDepth: 2},
+		WorkDir:      t.TempDir(),
+		SessionDir:   parent.sessionDir,
+		ModelName:    "test-model",
+	})
+
+	prompt := sub.buildSystemPrompt()
+	for _, want := range []string{
+		"## Nested Delegation",
+		"prefer Notify on the existing task instead of creating a new delegate",
+		"prefer a new Delegate instead of overloading an existing worker",
+		"Dispatch tasks in parallel only when their write scopes are clearly independent",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("nested SubAgent system prompt missing %q", want)
+		}
+	}
+}
+
 func TestSubAgentDisableStarKeepsOnlyCompleteAsInternalControlTool(t *testing.T) {
 	parent := newTestMainAgent(t, t.TempDir())
 	reg := tools.NewRegistry()

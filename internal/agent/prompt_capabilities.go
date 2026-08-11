@@ -28,7 +28,7 @@ func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset perm
 	if block := fileModificationConstraintsPromptBlock(visible, ruleset, audience); block != "" {
 		blocks = append(blocks, block)
 	}
-	if block := riskAndReportingPromptBlock(visible, audience); block != "" {
+	if block := authorizationAndDecisionsPromptBlock(visible, audience); block != "" {
 		blocks = append(blocks, block)
 	}
 	return strings.Join(blocks, "\n\n")
@@ -96,9 +96,8 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 				", use "+strings.Join(discoveryTools, " / ")+" to find or verify it before calling the path tool; do not guess plausible-looking paths.")
 		}
 	}
-	if hasVisibleTool(visible, tools.NameSkill) {
-		lines = append(lines, "- Use "+toolPromptName(tools.NameSkill)+" to load additional skill instructions on demand when one of the available skills clearly matches the task.")
-	}
+	// Skill routing guidance lives in the Available Skills block and the skill
+	// tool description; no extra line is emitted here.
 	if len(lines) == 0 {
 		return ""
 	}
@@ -199,35 +198,37 @@ func fileModificationConstraintsPromptBlock(visible map[string]struct{}, ruleset
 	return "## File Modification Constraints\n" + strings.Join(lines, "\n")
 }
 
-func riskAndReportingPromptBlock(visible map[string]struct{}, audience capabilityPromptAudience) string {
-	lines := []string{
-		"- Be more conservative with irreversible, destructive, shared-state, or high-blast-radius actions.",
-	}
+// authorizationAndDecisionsPromptBlock explains how execution authorization
+// and materially different decisions are routed. Conservative handling of
+// destructive actions and verification reporting live in the shared
+// Guidelines section, not here.
+func authorizationAndDecisionsPromptBlock(visible map[string]struct{}, audience capabilityPromptAudience) string {
+	const authorizationLine = "- Execution authorization is handled by the permission system: when a tool call needs approval, the runtime asks automatically, so attempt the call instead of asking for permission in text."
+	lines := []string{authorizationLine}
 	if audience == capabilityPromptAudienceSub {
 		hasQuestion := hasVisibleTool(visible, tools.NameQuestion)
 		hasEscalate := hasVisibleTool(visible, tools.NameEscalate)
 		hasNotify := hasVisibleTool(visible, tools.NameNotify)
 		switch {
 		case hasQuestion && hasEscalate:
-			lines = append(lines, "- Use permission approval for execution authorization. Use "+toolPromptName(tools.NameQuestion)+" only when the user must choose between materially different options; otherwise use "+toolPromptName(tools.NameEscalate)+" when owner-agent intervention or a decision is required.")
+			lines = append(lines, "- Use "+toolPromptName(tools.NameQuestion)+" only when the user must choose between materially different options; otherwise use "+toolPromptName(tools.NameEscalate)+" when owner-agent intervention or a decision is required.")
 		case hasQuestion && hasNotify:
-			lines = append(lines, "- Use permission approval for execution authorization. Use "+toolPromptName(tools.NameQuestion)+" only when the user must choose between materially different options; otherwise use "+toolPromptName(tools.NameNotify)+" to surface owner-agent intervention or decision points because "+toolPromptName(tools.NameEscalate)+" is unavailable in this role.")
+			lines = append(lines, "- Use "+toolPromptName(tools.NameQuestion)+" only when the user must choose between materially different options; otherwise use "+toolPromptName(tools.NameNotify)+" to surface owner-agent intervention or decision points because "+toolPromptName(tools.NameEscalate)+" is unavailable in this role.")
 		case hasQuestion:
-			lines = append(lines, "- Use permission approval for execution authorization. Use "+toolPromptName(tools.NameQuestion)+" when the user must choose between materially different options, and clearly explain any remaining owner-agent dependency in assistant text because "+toolPromptName(tools.NameEscalate)+" is unavailable in this role.")
+			lines = append(lines, "- Use "+toolPromptName(tools.NameQuestion)+" when the user must choose between materially different options, and clearly explain any remaining owner-agent dependency in assistant text because "+toolPromptName(tools.NameEscalate)+" is unavailable in this role.")
 		case hasEscalate:
-			lines = append(lines, "- Use permission approval for execution authorization, and use "+toolPromptName(tools.NameEscalate)+" when owner-agent intervention or a materially different decision is required.")
+			lines = append(lines, "- Use "+toolPromptName(tools.NameEscalate)+" when owner-agent intervention or a materially different decision is required.")
 		case hasNotify:
-			lines = append(lines, "- Use permission approval for execution authorization, and use "+toolPromptName(tools.NameNotify)+" to surface materially different decisions or owner-agent intervention because "+toolPromptName(tools.NameEscalate)+" is unavailable in this role.")
+			lines = append(lines, "- Use "+toolPromptName(tools.NameNotify)+" to surface materially different decisions or owner-agent intervention because "+toolPromptName(tools.NameEscalate)+" is unavailable in this role.")
 		default:
-			lines = append(lines, "- Use permission approval for execution authorization. If a materially different decision or owner-agent intervention is required, explain the blocker clearly in assistant text because neither "+toolPromptName(tools.NameQuestion)+", "+toolPromptName(tools.NameNotify)+", nor "+toolPromptName(tools.NameEscalate)+" is available in this role.")
+			lines = append(lines, "- If a materially different decision or owner-agent intervention is required, explain the blocker clearly in assistant text because neither "+toolPromptName(tools.NameQuestion)+", "+toolPromptName(tools.NameNotify)+", nor "+toolPromptName(tools.NameEscalate)+" is available in this role.")
 		}
 	} else if hasVisibleTool(visible, tools.NameQuestion) {
-		lines = append(lines, "- Use permission approval for execution authorization; see Structured User Confirmation for when to use "+toolPromptName(tools.NameQuestion)+" versus plain assistant text.")
+		lines = append(lines, "- See Structured User Confirmation for when to use "+toolPromptName(tools.NameQuestion)+" versus plain assistant text.")
 	} else {
-		lines = append(lines, "- Use permission approval for execution authorization, and ask the user for clarification when they need to choose between materially different options.")
+		lines = append(lines, "- Ask the user for clarification when they need to choose between materially different options.")
 	}
-	lines = append(lines, "- Report verification status explicitly: passed, failed, not run, or only inspected statically.")
-	return "## Risk & Reporting\n" + strings.Join(lines, "\n")
+	return "## Authorization & Decisions\n" + strings.Join(lines, "\n")
 }
 
 func hasScopedInspectionPermissions(ruleset permission.Ruleset) bool {

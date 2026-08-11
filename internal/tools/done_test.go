@@ -46,7 +46,8 @@ func TestDoneToolParameters(t *testing.T) {
 func TestDoneToolDescriptionUsesRequiredToolFallbackProtocol(t *testing.T) {
 	desc := NewDoneTool().Description()
 	for _, want := range []string{
-		"Unless the current runtime or workflow explicitly requires a tool-based completion signal, DO NOT call this tool",
+		"Call this tool only when an explicit workflow instruction in the current conversation",
+		"designates it as the required completion signal; otherwise DO NOT call it",
 		"return the final answer directly as assistant text",
 		"Tool availability, completed work, or this tool's required report argument do not by themselves require a Done call",
 		"no other tool call is necessary or appropriate",

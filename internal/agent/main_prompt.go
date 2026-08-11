@@ -34,7 +34,7 @@ func (a *MainAgent) buildSystemPrompt() string {
 		parts = append(parts, block)
 	}
 	parts = append(parts, mainAgentCommunicationPrompt)
-	parts = append(parts, mainAgentResponseClosurePrompt)
+	parts = append(parts, a.responseClosurePromptBlock())
 	if block := a.userConfirmationPromptBlock(); block != "" {
 		parts = append(parts, block)
 	}
@@ -160,6 +160,14 @@ func (a *MainAgent) doneToolAvailable() bool {
 	return true
 }
 
+// responseClosurePromptBlock renders the Response Closure section with the
+// Done guidance only when the done tool is available in this role (same
+// availability source as questionToolAvailable), so the prompt never
+// references a tool the model cannot call.
+func (a *MainAgent) responseClosurePromptBlock() string {
+	return mainAgentResponseClosurePromptText(a.doneToolAvailable())
+}
+
 func (a *MainAgent) userConfirmationPromptBlock() string {
 	// The asking threshold and the information standard for questions live only
 	// in sharedCodingGuidelinesPrompt (single source, visible to both agents);
@@ -240,11 +248,9 @@ func (a *MainAgent) loopContinuationDecisionInstructionLine() string {
 
 func (a *MainAgent) loopCompletionDecisionRequirementLine() string {
 	done := toolPromptName(tools.NameDone)
-	return "- Do not call the " + done + " tool unless the task is actually complete and no unresolved user decision, error, or verification remains\n" +
-		"- If you still need to investigate, edit, test, or ask the user, continue working instead of calling " + done + "\n" +
-		"- Pass the complete final Markdown completion report in the " + done + " tool's required `report` argument. The report must include this structure:\n" +
-		"  " + strings.ReplaceAll(tools.CompletionReportStructure, "\n", "\n  ") + "\n" +
-		"- If you are unsure whether the task is truly complete, do not call " + done + "; keep working"
+	return "- In this loop workflow, the " + done + " tool is the explicitly required completion signal\n" +
+		"- Do not call the " + done + " tool unless the task is actually complete and no unresolved user decision, error, or verification remains; if you are unsure, or still need to investigate, edit, test, or ask the user, continue working instead of calling " + done + "\n" +
+		"- Pass the complete final Markdown completion report in the " + done + " tool's required `report` argument, following the report structure in its tool description"
 }
 
 func (a *MainAgent) plannerPermissionAdjustmentInstruction() string {
@@ -266,7 +272,7 @@ func (a *MainAgent) plannerModePromptBlock() string {
 		hasFileWrite = hasWrite || hasPatch
 		_, hasHandoff = visible[tools.NameHandoff]
 	}
-	step4 := "4. Save the plan document to a path like .chord/plans/plan-001.md before handing it off or finishing the planning turn."
+	step4 := "4. Save the plan document under .chord/plans/ as plan-<NNN>.md, using the next unused three-digit number (for example .chord/plans/plan-001.md), before handing it off or finishing the planning turn."
 	if hasFileWrite {
 		step4 += " Write the plan document with the visible file tools available in this role."
 	} else {

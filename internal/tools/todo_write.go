@@ -68,9 +68,9 @@ func (TodoWriteTool) Description() string {
 2. Multi-step bug triage or investigation where explicit checkpoints help
 3. After new instructions — capture as todos (order reflects execution order)
 4. When starting direct work — mark one item in_progress
-5. When tracking multiple active workstreams — multiple in_progress items are allowed when each maps to a distinct live workstream and has a unique active_form
-6. After meaningful progress — update statuses / active_form
-7. Before the final response — if you used TodoWrite, sync once more (all completed or cancelled)
+5. When tracking multiple active workstreams — multiple in_progress items are allowed when each maps to a distinct live workstream and has a unique active_form; update each item when its workstream completes, blocks, or is cancelled
+6. After meaningful progress — update statuses / active_form so the list stays aligned with real progress
+7. Before the final response — if you used TodoWrite, sync once more (all completed or cancelled); do not finish with pending/in_progress items unless you say what is left and why
 
 ## When NOT to Use
 1. Single straightforward task

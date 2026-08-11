@@ -65,17 +65,25 @@ func TestDelegateToolReturnsSingleBackgroundHandle(t *testing.T) {
 	}
 }
 
-func TestDelegateToolDescriptionIncludesWriteScopeParallelismGuard(t *testing.T) {
+func TestDelegateToolDescriptionKeepsUsageSemantics(t *testing.T) {
 	desc := NewDelegateTool(taskTestCreator{}).Description()
 	for _, want := range []string{
-		"Only parallelize tasks when their write scopes are clearly independent",
-		"do not create concurrent workers that may edit the same file or tightly coupled targets",
 		"reuse it with Notify or Cancel instead of spawning a duplicate delegate for follow-up",
-		"Use Notify(existing) for the same task's follow-up",
-		"use Delegate(new) for a genuinely new, independently trackable task",
+		"do NOT poll or retrieve SubAgent results with Spawn/SpawnStop",
+		"delegation workflow section governs when to continue an existing task with Notify versus creating a new delegate, and when parallel delegates are safe",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q in %q", want, desc)
+		}
+	}
+	// Orchestration strategy (Notify-vs-new-delegate, write-scope parallelism)
+	// lives in the SubAgent Workflow prompt block, not the tool description.
+	for _, unwanted := range []string{
+		"Use Notify(existing) for the same task's follow-up",
+		"Only parallelize tasks when their write scopes are clearly independent",
+	} {
+		if strings.Contains(desc, unwanted) {
+			t.Fatalf("Description() should not duplicate workflow-block strategy %q in %q", unwanted, desc)
 		}
 	}
 }

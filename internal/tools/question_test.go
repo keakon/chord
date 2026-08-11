@@ -7,10 +7,13 @@ import (
 	"testing"
 )
 
-func TestQuestionToolDescriptionMentionsUserLanguage(t *testing.T) {
+// The user-language rule lives in the shared Values prompt and the per-field
+// parameter descriptions (where the text is actually written); the tool
+// description no longer repeats it.
+func TestQuestionToolDescriptionOmitsDuplicatedLanguageRule(t *testing.T) {
 	desc := NewQuestionTool(nil).Description()
-	if !strings.Contains(desc, "user's current language") {
-		t.Fatalf("Description() missing user language guidance: %q", desc)
+	if strings.Contains(desc, "user's current language") {
+		t.Fatalf("Description() should not duplicate the parameter-level language guidance: %q", desc)
 	}
 }
 

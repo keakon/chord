@@ -64,9 +64,7 @@ func (QuestionTool) Description() string {
 		"Use this when you need user input for decisions. " +
 		"Each question can have predefined options (single or multi-select). " +
 		"Users can always type a free-text answer even when options are available. " +
-		"If no options are provided, the question is free-text only. " +
-		"Always write the question text, header, option labels, and option descriptions " +
-		"in the user's current language."
+		"If no options are provided, the question is free-text only."
 }
 
 func (QuestionTool) Parameters() map[string]any {

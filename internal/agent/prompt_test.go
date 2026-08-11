@@ -98,29 +98,9 @@ func TestLoadAgentsMDWithWorkDir_MissingFiles(t *testing.T) {
 	}
 }
 
-func TestTodoWorkflowPromptBlock_HiddenWithoutTodoWriteTool(t *testing.T) {
-	a := &MainAgent{tools: tools.NewRegistry()}
-
-	if got := a.todoWorkflowPromptBlock(); got != "" {
-		t.Fatalf("todoWorkflowPromptBlock() = %q, want empty", got)
-	}
-}
-
-func TestTodoWorkflowPromptBlock_HiddenWhenTodoWriteDisabled(t *testing.T) {
-	a := &MainAgent{tools: tools.NewRegistry()}
-	a.tools.Register(tools.NewTodoWriteTool(nil))
-	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
-"*": allow
-todo_write: deny
-`)}
-	a.rebuildRuleset()
-
-	if got := a.todoWorkflowPromptBlock(); got != "" {
-		t.Fatalf("todoWorkflowPromptBlock() = %q, want empty", got)
-	}
-}
-
-func TestTodoWorkflowPromptBlock_ShownWhenTodoWriteAvailable(t *testing.T) {
+// Todo workflow discipline lives entirely in the TodoWrite tool description
+// (single source); the system prompt no longer renders a separate todo block.
+func TestTodoWriteDescription_CarriesWorkflowDiscipline(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.NewTodoWriteTool(nil))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
@@ -132,21 +112,24 @@ todo_write: allow
 	if !a.AllowMultipleInProgressTodos() {
 		t.Fatal("AllowMultipleInProgressTodos() = false, want true with TodoWrite available")
 	}
-	got := a.todoWorkflowPromptBlock()
-	if !strings.Contains(got, "## Todo workflow") {
-		t.Fatalf("todoWorkflowPromptBlock() missing title: %q", got)
+	if got := a.primaryAgentCoordinationPromptBlock(); strings.Contains(got, "## Todo workflow") {
+		t.Fatalf("coordination block should not duplicate TodoWrite description guidance: %q", got)
 	}
-	if !strings.Contains(got, "before your final response") {
-		t.Fatalf("todoWorkflowPromptBlock() missing final sync guidance: %q", got)
+	desc := tools.TodoWriteTool{}.Description()
+	for _, want := range []string{
+		"Before the final response — if you used TodoWrite, sync once more (all completed or cancelled)",
+		"do not finish with pending/in_progress items unless you say what is left and why",
+		"bug triage",
+		"multiple in_progress items are allowed when each maps to a distinct live workstream and has a unique active_form",
+		"update each item when its workstream completes, blocks, or is cancelled",
+		"so the list stays aligned with real progress",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("TodoWrite description missing %q in %q", want, desc)
+		}
 	}
-	if !strings.Contains(got, "bug triage") {
-		t.Fatalf("todoWorkflowPromptBlock() missing investigation guidance: %q", got)
-	}
-	if !strings.Contains(got, "Multiple todo items may be in_progress") {
-		t.Fatalf("todoWorkflowPromptBlock() missing multiple in_progress guidance: %q", got)
-	}
-	if strings.Contains(got, "Keep at most one todo item in_progress at a time.") {
-		t.Fatalf("todoWorkflowPromptBlock() unexpectedly included single in_progress guidance: %q", got)
+	if strings.Contains(desc, "Keep at most one todo item in_progress at a time.") {
+		t.Fatalf("TodoWrite description unexpectedly included single in_progress guidance: %q", desc)
 	}
 }
 
@@ -171,7 +154,7 @@ func TestToolSelectionPromptBlock_UsesEditSpecificGuidance(t *testing.T) {
 	}
 }
 
-func TestTodoWorkflowPromptBlock_DelegateWorkflowAllowsMultipleInProgress(t *testing.T) {
+func TestTodoWriteDescription_DelegateWorkflowAllowsMultipleInProgress(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.NewTodoWriteTool(nil))
 	a.tools.Register(tools.NewDelegateTool(taskCreatorStub{agents: []tools.AgentInfo{{Name: "coder", Description: "General coding"}}}))
@@ -187,17 +170,17 @@ func TestTodoWorkflowPromptBlock_DelegateWorkflowAllowsMultipleInProgress(t *tes
 	if !a.AllowMultipleInProgressTodos() {
 		t.Fatal("AllowMultipleInProgressTodos() = false, want true when TodoWrite is available")
 	}
-	got := a.todoWorkflowPromptBlock()
+	desc := tools.TodoWriteTool{}.Description()
 	for _, want := range []string{
-		"Multiple todo items may be in_progress when you are actively switching between distinct workstreams; give each one a unique active_form.",
-		"Keep each in-progress item scoped to a distinct workstream",
+		"multiple in_progress items are allowed when each maps to a distinct live workstream and has a unique active_form",
+		"update each item when its workstream completes, blocks, or is cancelled",
 	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("todoWorkflowPromptBlock() missing %q in %q", want, got)
+		if !strings.Contains(desc, want) {
+			t.Fatalf("TodoWrite description missing %q in %q", want, desc)
 		}
 	}
-	if strings.Contains(got, "Keep at most one todo item in_progress at a time.") {
-		t.Fatalf("todoWorkflowPromptBlock() should not use single in_progress wording when Delegate workflow is available: %q", got)
+	if strings.Contains(desc, "Keep at most one todo item in_progress at a time.") {
+		t.Fatalf("TodoWrite description should not use single in_progress wording: %q", desc)
 	}
 }
 
@@ -321,6 +304,8 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"Match final claims to the requested scope and the evidence actually gathered",
 		"For analysis, review, or planning tasks",
 		"When you modify code or claim behavior was fixed or implemented",
+		"Do not equate self-authored happy-path tests passing with full verification of the requested behavior",
+		"state verification status explicitly (passed, failed, not run, or only inspected statically)",
 		"following project-local test/build conventions when known",
 		"Do not narrate every routine action or restate obvious next steps",
 		"Do not over-explain routine actions",
@@ -343,6 +328,33 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		if !strings.Contains(got, want) {
 			t.Fatalf("sharedCodingGuidelinesPrompt missing %q in %q", want, got)
 		}
+	}
+}
+
+// The guidelines audience only changes who receives surfaced decisions and
+// necessary questions: main talks to the user, sub reaches the owner agent
+// through its coordination tools.
+func TestCodingGuidelinesPrompt_RoutesDecisionsByAudience(t *testing.T) {
+	main := sharedCodingGuidelinesPrompt
+	sub := subAgentCodingGuidelinesPrompt
+
+	if !strings.Contains(main, "surface the open product decisions to the user before implementing") {
+		t.Fatalf("main guidelines should surface product decisions to the user: %q", main)
+	}
+	if strings.Contains(main, "owner agent") {
+		t.Fatalf("main guidelines should not mention the owner agent: %q", main)
+	}
+
+	for _, want := range []string{
+		"surface the open product decisions to the owner agent (through the coordination tools available in this role)",
+		"Ask before implementing only when missing information is genuinely blocking, the owner agent or user must choose between materially different outcomes",
+	} {
+		if !strings.Contains(sub, want) {
+			t.Fatalf("sub guidelines missing owner-agent routing %q in %q", want, sub)
+		}
+	}
+	if strings.Contains(sub, "surface the open product decisions to the user before implementing") {
+		t.Fatalf("sub guidelines should not route product decisions directly to the user: %q", sub)
 	}
 }
 
@@ -463,16 +475,26 @@ done: allow
 	a.rebuildRuleset()
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
 	for _, want := range []string{
-		"Pass the complete final Markdown completion report in the `done` tool's required `report` argument. The report must include this structure:",
-		"**Completion status**: one line summary",
-		"**What changed**: files modified, created, deleted or key actions taken",
-		"**Verification**: tests run and their results",
-		"**Remaining issues**: any limitations, unverified areas, or known issues",
+		"In this loop workflow, the `done` tool is the explicitly required completion signal",
+		"Pass the complete final Markdown completion report in the `done` tool's required `report` argument, following the report structure in its tool description",
 		"Do not call the `done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains",
 		"continue working instead of calling `done`",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("loop completion requirements should include %q, got %q", want, joined)
+		}
+	}
+	// The report structure itself lives in the Done tool description (single
+	// source referenced by the loop requirement line above).
+	desc := tools.DoneTool{}.Description()
+	for _, want := range []string{
+		"**Completion status**: one line summary",
+		"**What changed**: files modified, created, deleted or key actions taken",
+		"**Verification**: tests run and their results",
+		"**Remaining issues**: any limitations, unverified areas, or known issues",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("Done description should include %q, got %q", want, desc)
 		}
 	}
 }
@@ -614,11 +636,10 @@ question: allow
 func TestMainAgentCommunicationPrompt_PrefersAutonomyForLowRiskAdjacentWork(t *testing.T) {
 	got := mainAgentCommunicationPrompt
 	for _, want := range []string{
-		"For low-risk, directly related, clearly necessary adjacent work",
 		"Do not end responses with open-ended optional offers for routine in-scope next steps",
 		"This applies to equivalent wording in any language",
-		"if the next step is clearly necessary, low-risk, and within scope, do it instead of offering it",
-		"keep the user oriented about the current direction; if the next step is still in scope and low-risk, do it instead of offering it as an option",
+		"if the next step is clearly necessary, low-risk, and within scope, do it yourself instead of offering it or asking the user to decide",
+		"keep the user oriented about the current direction",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("mainAgentCommunicationPrompt missing %q in %q", want, got)
@@ -627,21 +648,27 @@ func TestMainAgentCommunicationPrompt_PrefersAutonomyForLowRiskAdjacentWork(t *t
 }
 
 func TestMainAgentResponseClosurePrompt_RequiresContinueUnlessBlocked(t *testing.T) {
-	got := mainAgentResponseClosurePrompt
+	got := mainAgentResponseClosurePromptText(true)
 	for _, want := range []string{
 		"Within a normal turn, continue until the current in-scope work package is finished",
-		"A regular assistant response is not the end of the task when in-scope work still remains",
-		"If more in-scope, low-risk work remains, continue instead of stopping with a partial summary or optional offer",
-		"Before declaring implementation work complete, check that final claims are supported by the work performed and evidence gathered",
+		"A regular assistant response is not the end of the task when in-scope, low-risk work still remains; continue instead of stopping with a partial summary or optional offer",
 		"ask exactly the necessary high-context question instead of pretending the task is complete",
 		"By default, return that completion report directly in the final assistant response",
-		"Do not call the Done tool merely because work is complete or Done is available",
-		"use it only when the current runtime or workflow explicitly requires a tool-based completion signal",
+		"call the Done tool only when an explicit workflow instruction in the conversation designates it as the required completion signal",
+		"never merely because work is complete or Done is available",
 		"After reporting completion, stop there; do not append routine in-scope follow-up work as an optional invitation",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("mainAgentResponseClosurePrompt missing %q in %q", want, got)
+			t.Fatalf("mainAgentResponseClosurePromptText(true) missing %q in %q", want, got)
 		}
+	}
+
+	withoutDone := mainAgentResponseClosurePromptText(false)
+	if strings.Contains(withoutDone, "Done") {
+		t.Fatalf("mainAgentResponseClosurePromptText(false) must not reference the hidden Done tool: %q", withoutDone)
+	}
+	if !strings.Contains(withoutDone, "Return that completion report directly in the final assistant response") {
+		t.Fatalf("mainAgentResponseClosurePromptText(false) missing completion report guidance: %q", withoutDone)
 	}
 }
 
@@ -649,7 +676,7 @@ func TestMainAgentRolePromptBlock_UsesPlannerPromptOnlyForPlannerRole(t *testing
 	a := &MainAgent{}
 	a.activeConfig = &config.AgentConfig{Name: "planner"}
 	got := a.mainAgentRolePromptBlock()
-	for _, want := range []string{"Save the plan document to a path like .chord/plans/plan-001.md", "Explore the codebase using the tools and permissions available in this role."} {
+	for _, want := range []string{"Save the plan document under .chord/plans/ as plan-<NNN>.md, using the next unused three-digit number", "Explore the codebase using the tools and permissions available in this role."} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("planner prompt missing %q in %q", want, got)
 		}
@@ -700,16 +727,35 @@ handoff: allow
 	}
 }
 
-func TestShouldEnableBugTriagePrompt_SupportsWhyAndConclusionReviewQueries(t *testing.T) {
-	tests := []string{
-		"why did this bug happen?",
-		"which bug conclusion is more accurate?",
-		"review whether the bug conclusion is correct",
+func TestShouldEnableBugTriagePrompt_TriggersAndNonTriggers(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		// Analysis + issue keyword combinations.
+		{"why did this bug happen?", true},
+		{"which bug conclusion is more accurate?", true},
+		{"review whether the bug conclusion is correct", true},
+		// Standalone phrases carrying a failure or conclusion-review qualifier.
+		{"为什么会这样", true},
+		{"为什么会出现这个现象", true},
+		{"分析这个调查结果是否正确", true},
+		// Conclusion-comparison questions match by structure.
+		{"你认为哪个分析出来的bug结论更正确", true},
+		{"这两个说法哪个更对", true},
+		// Ordinary review, config-check, and design questions must not enter
+		// the bug-triage workflow even though they contain "是否正确" or
+		// "为什么会" (regression guard: see CHANGELOG "Ordinary code-review
+		// requests no longer trigger the bug-triage analysis workflow").
+		{"审查最新的2个提交是否正确合理", false},
+		{"检查这个配置是否正确", false},
+		{"为什么会选择这个 API", false},
+		{"review the last two commits", false},
 	}
-	for _, input := range tests {
-		msgs := []message.Message{{Role: "user", Content: input}}
-		if !shouldEnableBugTriagePrompt(msgs) {
-			t.Fatalf("expected bug triage prompt to activate for %q", input)
+	for _, c := range tests {
+		msgs := []message.Message{{Role: "user", Content: c.input}}
+		if got := shouldEnableBugTriagePrompt(msgs); got != c.want {
+			t.Errorf("shouldEnableBugTriagePrompt(%q) = %v, want %v", c.input, got, c.want)
 		}
 	}
 }
@@ -723,11 +769,8 @@ func TestPrimaryAgentCoordinationPromptBlock_DependsOnVisibleTools(t *testing.T)
 
 	a.tools.Register(tools.NewTodoWriteTool(nil))
 	got := a.primaryAgentCoordinationPromptBlock()
-	if !strings.Contains(got, "## Todo workflow") {
-		t.Fatalf("expected todo workflow block, got %q", got)
-	}
-	if strings.Contains(got, "## Available Agent Types (for Delegate tool)") {
-		t.Fatalf("did not expect Delegate block without Delegate tool, got %q", got)
+	if got != "" {
+		t.Fatalf("primaryAgentCoordinationPromptBlock() = %q, want empty without Delegate tool (todo guidance lives in the TodoWrite description)", got)
 	}
 
 	a.agentConfigs = map[string]*config.AgentConfig{
@@ -758,6 +801,7 @@ delegate: allow
 	for _, want := range []string{
 		"## Available Agent Types (for Delegate tool)",
 		"## SubAgent Workflow",
+		"prefer Notify on the existing task instead of creating a new delegate",
 		"Dispatch tasks in parallel only when their write scopes are clearly independent",
 		"For implementation tasks, first dispatch all currently independent tasks whose write scopes are clearly disjoint",
 		"if there is no new independent task to send, stop doing implementation work in MainAgent",
@@ -996,8 +1040,9 @@ shell: allow
 		"## File Modification Constraints",
 		"This role is currently read-only for files",
 		"Do not use `shell`, shell redirection, or inline scripts to simulate file edits, writes, or deletes.",
-		"## Risk & Reporting",
-		"ask the user for clarification when they need to choose between materially different options.",
+		"## Authorization & Decisions",
+		"Execution authorization is handled by the permission system",
+		"Ask the user for clarification when they need to choose between materially different options.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
@@ -1187,7 +1232,7 @@ question: allow
 	a.rebuildRuleset()
 
 	got := a.mainAgentCapabilityPromptBlock()
-	if !strings.Contains(got, "see Structured User Confirmation for when to use `question` versus plain assistant text.") {
+	if !strings.Contains(got, "See Structured User Confirmation for when to use `question` versus plain assistant text.") {
 		t.Fatalf("mainAgentCapabilityPromptBlock() should reference Structured User Confirmation when Question is visible, got %q", got)
 	}
 }
@@ -1209,7 +1254,7 @@ question: deny
 	if strings.Contains(got, "`question`") {
 		t.Fatalf("mainAgentCapabilityPromptBlock() should not mention hidden Question tool, got %q", got)
 	}
-	if !strings.Contains(got, "ask the user for clarification when they need to choose between materially different options.") {
+	if !strings.Contains(got, "Ask the user for clarification when they need to choose between materially different options.") {
 		t.Fatalf("mainAgentCapabilityPromptBlock() missing generic clarification guidance, got %q", got)
 	}
 }
@@ -1353,7 +1398,7 @@ shell: allow
 	}
 
 	got := s.buildSystemPrompt()
-	for _, want := range []string{subAgentIdentityPrompt, sharedAgentValuesPrompt, "## Guidelines", "## SubAgent Coordination", "## SubAgent Task Closure", "## Custom SubAgent Role", "## Tool Selection", "Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.", "Use `read` for file contents when the target path is already known or has been verified.", "## Your Task"} {
+	for _, want := range []string{subAgentIdentityPrompt, sharedAgentValuesPrompt, "## Guidelines", "## SubAgent Coordination", "## SubAgent Task Closure", "## Custom SubAgent Role", "## Tool Selection", "Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.", "Use `read` for file contents when the target path is already known or has been verified.", "## Your Task", "surface the open product decisions to the owner agent (through the coordination tools available in this role)"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("buildSystemPrompt() missing %q in %q", want, got)
 		}
@@ -1460,7 +1505,7 @@ edit:
 	if !strings.Contains(mainBlock, "ask to adjust permissions, scope, or approach") {
 		t.Fatalf("main capability block missing user-facing escalation wording: %q", mainBlock)
 	}
-	if !strings.Contains(mainBlock, "see Structured User Confirmation for when to use `question` versus plain assistant text") {
+	if !strings.Contains(mainBlock, "See Structured User Confirmation for when to use `question` versus plain assistant text") {
 		t.Fatalf("main capability block missing Structured User Confirmation reference: %q", mainBlock)
 	}
 	if !strings.Contains(subBlock, "question` when the user must choose between materially different options") && !strings.Contains(subBlock, "Use `question` when the user must choose between materially different options") {
@@ -1480,7 +1525,7 @@ notify: allow
 	ruleset = permission.ParsePermission(&permNode)
 	s = &SubAgent{tools: reg, ruleset: ruleset}
 	subBlock = s.capabilityPromptBlock()
-	if !strings.Contains(subBlock, "use `notify` to surface materially different decisions or owner-agent intervention because `escalate` is unavailable") {
+	if !strings.Contains(subBlock, "Use `notify` to surface materially different decisions or owner-agent intervention because `escalate` is unavailable") {
 		t.Fatalf("sub capability block should fall back to Notify when Escalate is unavailable, got %q", subBlock)
 	}
 }
@@ -1543,21 +1588,13 @@ delegate: allow
 func TestLoopCompletionRequirementLinesIncludeDoneToolContract(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
-	// Check for the new structured format in the final report instruction
-	if !strings.Contains(joined, "Pass the complete final Markdown completion report in the `done` tool's required `report` argument. The report must include this structure:") {
-		t.Fatalf("loop completion requirements should mention final report structure, got %q", joined)
+	// The report structure lives in the Done tool description; the loop line
+	// must reference it and require the report argument.
+	if !strings.Contains(joined, "Pass the complete final Markdown completion report in the `done` tool's required `report` argument, following the report structure in its tool description") {
+		t.Fatalf("loop completion requirements should reference the Done report structure, got %q", joined)
 	}
-	if !strings.Contains(joined, "**Completion status**:") {
-		t.Fatalf("loop completion requirements should mention completion status field, got %q", joined)
-	}
-	if !strings.Contains(joined, "**What changed**:") {
-		t.Fatalf("loop completion requirements should mention what changed field, got %q", joined)
-	}
-	if !strings.Contains(joined, "**Verification**:") {
-		t.Fatalf("loop completion requirements should mention verification field, got %q", joined)
-	}
-	if !strings.Contains(joined, "**Remaining issues**:") {
-		t.Fatalf("loop completion requirements should mention remaining issues field, got %q", joined)
+	if !strings.Contains(joined, "In this loop workflow, the `done` tool is the explicitly required completion signal") {
+		t.Fatalf("loop completion requirements should designate Done as the required completion signal, got %q", joined)
 	}
 	finalJoined := strings.Join(a.loopFinalCompletionResponseLines(), "\n")
 	if !strings.Contains(finalJoined, "Call the `done` tool to request loop exit once those conditions are satisfied") {

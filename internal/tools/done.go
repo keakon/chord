@@ -29,9 +29,9 @@ func (DoneTool) Name() string { return NameDone }
 
 func (DoneTool) Description() string {
 	return "Exceptional tool-based completion signal, not the default way to end a conversation.\n" +
-		"Unless the current runtime or workflow explicitly requires a tool-based completion signal, DO NOT call this tool; return the final answer directly as assistant text. Tool availability, completed work, or this tool's required report argument do not by themselves require a Done call.\n" +
-		"When the runtime explicitly requires this signal, first use any available tool that can make real progress; call Done only when the current objective is fully complete, no unresolved user decision, error, or verification remains, and no other tool call is necessary or appropriate. Never call it for partial progress or while you still need to investigate, edit, test, or ask the user. If you are unsure whether the task is truly complete, continue working instead of calling Done.\n" +
-		"When Done is explicitly required, provide a non-empty 'report' argument containing the complete final Markdown completion report; put the full completion summary in the report argument itself and do not rely on the surrounding assistant message to carry it. Write the report in the user's current language unless the user explicitly asked for a different language.\n" +
+		"Call this tool only when an explicit workflow instruction in the current conversation (for example a loop anchor stating that Done is required to exit) designates it as the required completion signal; otherwise DO NOT call it and return the final answer directly as assistant text. Tool availability, completed work, or this tool's required report argument do not by themselves require a Done call.\n" +
+		"When such an instruction is active, first use any available tool that can make real progress; call Done only when the current objective is fully complete, no unresolved user decision, error, or verification remains, and no other tool call is necessary or appropriate. Never call it for partial progress or while you still need to investigate, edit, test, or ask the user. If you are unsure whether the task is truly complete, continue working instead of calling Done.\n" +
+		"When calling Done, provide a non-empty 'report' argument containing the complete final Markdown completion report; put the full completion summary in the report argument itself and do not rely on the surrounding assistant message to carry it.\n" +
 		"The report must include:\n" + CompletionReportStructure
 }
 

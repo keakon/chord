@@ -1742,14 +1742,17 @@ func TestSendLoopAnchorFromCommandIncludesCompletionContract(t *testing.T) {
 	if !strings.Contains(found.Content, "Completion requirements:") || !strings.Contains(found.Content, "Final completion response requirements:") {
 		t.Fatalf("loop notice content = %q, want completion contract", found.Content)
 	}
-	if !strings.Contains(found.Content, "Pass the complete final Markdown completion report in the `done` tool's required `report` argument. The report must include this structure:") {
+	if !strings.Contains(found.Content, "Pass the complete final Markdown completion report in the `done` tool's required `report` argument, following the report structure in its tool description") {
 		t.Fatalf("loop notice content = %q, want Done report-argument requirement", found.Content)
 	}
-	if !strings.Contains(found.Content, "**Completion status**:") {
-		t.Fatalf("loop notice content = %q, want completion status field", found.Content)
+	// The report structure fields live in the Done tool description, which the
+	// loop notice references instead of inlining.
+	desc := tools.DoneTool{}.Description()
+	if !strings.Contains(desc, "**Completion status**:") {
+		t.Fatalf("Done description = %q, want completion status field", desc)
 	}
-	if !strings.Contains(found.Content, "**Verification**:") {
-		t.Fatalf("loop notice content = %q, want verification field", found.Content)
+	if !strings.Contains(desc, "**Verification**:") {
+		t.Fatalf("Done description = %q, want verification field", desc)
 	}
 }
 

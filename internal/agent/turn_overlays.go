@@ -79,20 +79,23 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 
 	// Auto-continue prompt from usage-driven / oversize-driven compaction: keep it
 	// request-scoped so the durable session history remains a clean compressed
-	// summary, while the next turn explicitly resumes the task.
+	// summary, while the next turn explicitly resumes the task. The continue and
+	// replay notes share one reminder because they always describe the same
+	// compaction event.
+	autoContinueParts := make([]string, 0, 2)
 	if block := strings.TrimSpace(a.pendingAutoContinuePrompt); block != "" {
-		overlays = append(overlays, message.Message{
-			Role:    "user",
-			Content: "<system-reminder>\n" + block + "\n</system-reminder>",
-		})
+		autoContinueParts = append(autoContinueParts, block)
 		a.pendingAutoContinuePrompt = ""
 	}
 	if block := strings.TrimSpace(a.pendingAutoContinueReplayPrompt); block != "" {
+		autoContinueParts = append(autoContinueParts, block)
+		a.pendingAutoContinueReplayPrompt = ""
+	}
+	if len(autoContinueParts) > 0 {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
-			Content: "<system-reminder>\n" + block + "\n</system-reminder>",
+			Content: "<system-reminder>\n" + strings.Join(autoContinueParts, "\n") + "\n</system-reminder>",
 		})
-		a.pendingAutoContinueReplayPrompt = ""
 	}
 
 	return overlays

@@ -1100,7 +1100,7 @@ func (s *SubAgent) taskCompletionInstruction() string {
 func (s *SubAgent) buildSystemPrompt() string {
 	var parts []string
 
-	parts = append(parts, subAgentIdentityPrompt, sharedAgentValuesPrompt, sharedCodingGuidelinesPrompt, s.subAgentCoordinationPromptBlock(), subAgentResponseClosurePrompt)
+	parts = append(parts, subAgentIdentityPrompt, sharedAgentValuesPrompt, subAgentCodingGuidelinesPrompt, s.subAgentCoordinationPromptBlock(), subAgentResponseClosurePrompt)
 	if s.customPrompt != "" {
 		parts = append(parts, s.customPrompt)
 	}
@@ -1153,6 +1153,7 @@ func (s *SubAgent) delegationPromptBlock() string {
 	var sb strings.Builder
 	sb.WriteString("## Nested Delegation\n")
 	sb.WriteString("- You may delegate child work only when the sub-problem is clearly independent and within your configured delegation depth.\n")
+	sb.WriteString(delegationStrategyPromptLines())
 	sb.WriteString("- Child workers are owned by you directly; do not assume higher-level ancestors can message or stop them for you.\n")
 	sb.WriteString("- When `child_join` is enabled, do not consider your task complete until all joined child tasks have finished or been explicitly stopped.\n")
 	sb.WriteString("- If you need to finish early, explicitly stop the child task first; do not assume a later ancestor will clean it up for you.\n")

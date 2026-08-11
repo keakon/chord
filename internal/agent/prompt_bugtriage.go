@@ -22,19 +22,28 @@ var bugTriageIssueKeywords = []string{
 	"bug结论", "回归", "根因", "失败", "错误", "异常", "报错", "失效", "不工作", "不生效", "无法", "不能", "不对",
 }
 
+// bugTriageExactPhrases are standalone triggers for analysis questions that
+// lack an explicit issue keyword. Every phrase must keep a failure or
+// conclusion-review qualifier: bare substrings like "是否正确" or "为什么会"
+// also match ordinary review and design questions ("检查这个配置是否正确",
+// "为什么会选择这个 API"), which must not enter the bug-triage workflow.
+// Longer observed sentences are covered as superstrings (e.g.
+// "分析这个调查结果是否正确" contains "调查结果是否正确").
 var bugTriageExactPhrases = []string{
 	"为什么会这样",
 	"为什么会出现",
 	"为什么会发生",
-	"哪个结论更对",
-	"哪个结论更正确",
-	"哪个更对",
-	"哪个更正确",
 	"结论是否正确",
-	"审查结论",
 	"调查结果是否正确",
-	"分析这个调查结果是否正确",
-	"你认为哪个分析出来的bug结论更正确",
+	"审查结论",
+}
+
+// bugTriageConclusionComparison matches "which conclusion is more correct"
+// style questions (哪个结论更对 / 你认为哪个分析出来的bug结论更正确 / …)
+// without enumerating each full sentence.
+func bugTriageConclusionComparison(text string) bool {
+	return strings.Contains(text, "哪个") &&
+		(strings.Contains(text, "更对") || strings.Contains(text, "更正确"))
 }
 
 func containsAnyFold(text string, keys []string) bool {
@@ -64,7 +73,7 @@ func shouldEnableBugTriagePrompt(messages []message.Message) bool {
 	if text == "" {
 		return false
 	}
-	if containsAnyFold(text, bugTriageExactPhrases) {
+	if containsAnyFold(text, bugTriageExactPhrases) || bugTriageConclusionComparison(text) {
 		return true
 	}
 	return containsAnyFold(text, bugTriageAnalysisKeywords) && containsAnyFold(text, bugTriageIssueKeywords)

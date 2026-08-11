@@ -2254,9 +2254,6 @@ func (a *MainAgent) buildExecuteSystemPrompt(planPath string) string {
 	hasTodoWrite := a.hasTodoWriteAccess()
 
 	var sb strings.Builder
-	if hasTodoWrite {
-		base = strings.Replace(base, a.todoWorkflowPromptBlock(), "", 1)
-	}
 	sb.WriteString(base)
 
 	if hasTodoWrite {
