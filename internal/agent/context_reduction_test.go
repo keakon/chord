@@ -18,6 +18,53 @@ func TestLooksLikeBuildLikeLogIncludesPatch(t *testing.T) {
 	}
 }
 
+// A tool result is already age 1 at the first request whose response can react
+// to it, so size-based summarization must not fire before age 2: the model has
+// to see every fresh payload in full exactly once. Age-1 reduction shipped
+// summaries of outputs the model had never seen, which it reported to users as
+// "output truncated".
+func TestFreshToolOutputsAreNeverSummarizedAtFirstSight(t *testing.T) {
+	policy := defaultContextReductionPolicy()
+	bigShellSuccess := strings.Repeat("pipeline case line\n", 300)
+	bigSearch := func() string {
+		var b strings.Builder
+		for i := range 200 {
+			b.WriteString("internal/agent/file" + strconv.Itoa(i) + ".go:12: match line\n")
+		}
+		return b.String()
+	}()
+	diagnostics := "Replaced 1 occurrence\n\nDiagnostics:\n[E] 10:1 [F821] Undefined name `x`\n[E] 11:1 another diagnostic"
+	for _, tc := range []struct {
+		name string
+		ctx  requestReductionContext
+	}{
+		{name: "shell success", ctx: requestReductionContext{ToolName: tools.NameShell, Content: bigShellSuccess, Policy: policy}},
+		{name: "search result", ctx: requestReductionContext{ToolName: tools.NameGrep, Content: bigSearch, Policy: policy}},
+		{name: "edit diagnostics", ctx: requestReductionContext{ToolName: tools.NameEdit, Content: diagnostics, Policy: policy}},
+	} {
+		tc.ctx.Age = 1
+		if got := classifyRequestReductionToolOutput(tc.ctx); got != requestReductionNone {
+			t.Fatalf("%s at first sight (age 1) classified %q, want none", tc.name, got)
+		}
+		tc.ctx.Age = 2
+		if got := classifyRequestReductionToolOutput(tc.ctx); got == requestReductionNone {
+			t.Fatalf("%s at age 2 should be reducible, got none", tc.name)
+		}
+	}
+	// Validity markers are not payload thinning: a stale read renders its
+	// marker immediately instead of exposing misleading content for a round.
+	staleRead := requestReductionContext{
+		ToolName:        tools.NameRead,
+		Content:         "READ_RESULT lines=1-400 total=400\n" + strings.Repeat("stale content line\n", 300),
+		Policy:          policy,
+		Age:             1,
+		ReadInvalidated: true,
+	}
+	if got := classifyRequestReductionToolOutput(staleRead); got != requestReductionReadLike {
+		t.Fatalf("invalidated read at age 1 classified %q, want read_like validity marker", got)
+	}
+}
+
 func TestDiffReductionUsesReviewSummaryInsteadOfLogSummary(t *testing.T) {
 	content := "diff --git a/internal/llm/errors.go b/internal/llm/errors.go\n" +
 		"--- a/internal/llm/errors.go\n+++ b/internal/llm/errors.go\n" +

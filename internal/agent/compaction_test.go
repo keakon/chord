@@ -1370,6 +1370,8 @@ func TestPrepareMessagesForLLM_ConfiguresHighRiskProtectAgeTurns(t *testing.T) {
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"pytest"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeFailureOutput},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc-mid", Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
+		{Role: "tool", ToolCallID: "tc-mid", Content: "short read output"},
 		{Role: "user", Content: "u2"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
 		{Role: "tool", ToolCallID: "tc2", Content: currentFailureOutput},
@@ -1381,8 +1383,8 @@ func TestPrepareMessagesForLLM_ConfiguresHighRiskProtectAgeTurns(t *testing.T) {
 	if !strings.Contains(prepared[2].Content, "Older shell log summarized") {
 		t.Fatalf("previous-turn high-risk output should use conservative log summary, got %q", prepared[2].Content)
 	}
-	if prepared[5].Content != currentFailureOutput {
-		t.Fatalf("current-turn high-risk output should remain intact, got %q", prepared[5].Content)
+	if prepared[7].Content != currentFailureOutput {
+		t.Fatalf("current-turn high-risk output should remain intact, got %q", prepared[7].Content)
 	}
 }
 

@@ -13,22 +13,28 @@ import (
 
 const (
 	// Raw evidence pack: small continuation stabilizer (checkpoint-first design).
-	compactEvidenceMinTokens       = 512
-	compactEvidenceMaxTokens       = 2048
-	compactEvidencePercentNumer    = 2 // ~2% of context window
-	compactEvidencePercentDenom    = 100
-	compactRecentTailMinTokens     = 768
-	compactRecentTailMaxTokens     = 3072
-	compactRecentTailTurns         = 2
-	compactPromptOverhead          = 4096
-	compactReservedOutput          = 4096
-	compactPreflightBufferMin      = 1024
-	compactPreflightBufferRatio    = 50 // reserve ~2% extra input budget for provider framing / hidden overhead
-	compactConfirmAgeTurns         = 2
-	compactErrorAgeTurns           = 3
-	compactBashSuccessAgeTurns     = 1
+	compactEvidenceMinTokens    = 512
+	compactEvidenceMaxTokens    = 2048
+	compactEvidencePercentNumer = 2 // ~2% of context window
+	compactEvidencePercentDenom = 100
+	compactRecentTailMinTokens  = 768
+	compactRecentTailMaxTokens  = 3072
+	compactRecentTailTurns      = 2
+	compactPromptOverhead       = 4096
+	compactReservedOutput       = 4096
+	compactPreflightBufferMin   = 1024
+	compactPreflightBufferRatio = 50 // reserve ~2% extra input budget for provider framing / hidden overhead
+	compactConfirmAgeTurns      = 2
+	compactErrorAgeTurns        = 3
+	// Age is currentBatch minus producing batch, so a tool result is already
+	// age 1 at the first request whose response can react to it. Success and
+	// read-like thresholds therefore start at 2: the model must see a fresh
+	// payload in full exactly once before any size-based summary may replace
+	// it (age-1 reduction hid outputs the model had never seen, which it
+	// reported to users as "output truncated").
+	compactBashSuccessAgeTurns     = 2
 	compactShellReadOnlyAgeTurns   = 3
-	compactReadLikeAgeTurns        = 1
+	compactReadLikeAgeTurns        = 2
 	compactStaleAgeTurns           = 3
 	compactHighRiskProtectAgeTurns = 4
 	compactDiffProtectAgeTurns     = 12

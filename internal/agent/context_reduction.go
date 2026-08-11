@@ -320,6 +320,15 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		}
 		return requestReductionRepeated
 	}
+	// An invalidated or superseded read must render its validity marker as
+	// soon as the state is known — stale file content is misleading at any
+	// age. It bypasses first-sight retention and the protection branches
+	// below (high-risk, diff), matching the frozen incremental path, which
+	// force-refreshes such reads to the marker shape.
+	if ctx.ToolName == tools.NameRead && (ctx.ReadInvalidated || ctx.ReadSuperseded) &&
+		len(ctx.Content) > ctx.Policy.ReadLikeOutputBytes {
+		return requestReductionReadLike
+	}
 	if ctx.Age < ctx.Policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {
 		return requestReductionNone
 	}
@@ -350,7 +359,7 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 	if ctx.Age >= ctx.Policy.ConfirmAgeTurns && isConfirmationOutput(ctx.Content) {
 		return requestReductionConfirm
 	}
-	if ctx.Age >= 1 && (ctx.ToolName == tools.NameEdit || ctx.ToolName == tools.NameApplyPatch || ctx.ToolName == tools.NameWrite) && strings.Contains(ctx.Content, "Diagnostics:") {
+	if ctx.Age >= 2 && (ctx.ToolName == tools.NameEdit || ctx.ToolName == tools.NameApplyPatch || ctx.ToolName == tools.NameWrite) && strings.Contains(ctx.Content, "Diagnostics:") {
 		return requestReductionDiagnostics
 	}
 	if ctx.Age >= ctx.Policy.ShellSuccessAgeTurns && len(ctx.Content) > ctx.Policy.ShellSuccessBytes && ctx.ToolName == tools.NameShell {
@@ -375,13 +384,15 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		}
 		return requestReductionShellOK
 	}
+	// An invalidated or superseded read was already classified above; a web
+	// fetch or other read-like output waits for the age gate here.
 	if ctx.Age >= ctx.Policy.ReadLikeAgeTurns && len(ctx.Content) > ctx.Policy.ReadLikeOutputBytes {
 		switch {
 		case looksLikeSearchResult(ctx):
 			return requestReductionSearch
-		// Read-like tools take precedence over the JSON shape: a stale read of
-		// a JSON file must keep its READ_RESULT stale/superseded marker and a
-		// web fetch must keep its URL, rather than collapsing to a key list.
+		// Read-like tools take precedence over the JSON shape: a web fetch
+		// of a JSON document must keep its URL rather than collapsing to a
+		// key list.
 		case contextReductionIsReadLike(ctx.ToolName):
 			return requestReductionReadLike
 		case looksLikeStructuredJSON(ctx.Content):
@@ -423,7 +434,7 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 // caller before consulting this frontier.
 func nextContextReductionReviewAge(ctx requestReductionContext) int {
 	thresholds := []int{
-		1,
+		2, // the hardcoded diagnostics-rule age in classifyRequestReductionToolOutput
 		ctx.Policy.ErrorAgeTurns,
 		ctx.Policy.ConfirmAgeTurns,
 		ctx.Policy.ShellSuccessAgeTurns,
