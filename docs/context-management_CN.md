@@ -120,10 +120,10 @@ context:
     error_age_turns: 3
     high_risk_protect_age_turns: 4
     diff_protect_age_turns: 12
-    shell_success_age_turns: 1
+    shell_success_age_turns: 2
     shell_success_bytes: 3000
     shell_read_only_age_turns: 3
-    read_like_age_turns: 1
+    read_like_age_turns: 2
     read_like_output_bytes: 3000
     stale_age_turns: 3
     stale_output_bytes: 1500
@@ -163,10 +163,10 @@ Chord 会按工具输出类型和时效分类处理。专门摘要会优先于�
 |------|----------|----------|----------|----------|
 | 确认/权限 | 工具权限确认、用户授权结果 | `confirm_age_turns`（默认 2 轮后） | — | 权限决策很快过时，可较早裁剪 |
 | 错误结果 | 工具执行失败的错误信息 | `error_age_turns`（默认 3 轮后） | — | 失败原因可能仍有参考价值，保留稍久 |
-| Shell 成功 / 日志 | 成功命令、构建 / 测试 / lint 日志 | `shell_success_age_turns`（默认 1 轮后）；命中 shell 工具只读白名单的命令（`cat`、`ls`、`git log` 等）使用 `shell_read_only_age_turns`（默认 3 轮后） | `shell_success_bytes`（默认 3000 字节以上才剪） | 成功输出通常可重新执行；只读命令是内容获取——相当于没有有效性追踪的 read——因此保护窗口更长（真实会话统计中相同重调的中位间隔约 3 个请求批次）；摘要保留大小、行数、有代表性的成功信号行（如有）以及尾部 fallback，命令仍可从关联 tool call 获取；大日志摘要会保留关键失败 / 警告 |
+| Shell 成功 / 日志 | 成功命令、构建 / 测试 / lint 日志 | `shell_success_age_turns`（默认 2 轮后——结果在首个可响应它的请求里就已是 age 1，因此新鲜成功输出总能被完整看到恰好一次）；命中 shell 工具只读白名单的命令（`cat`、`ls`、`git log` 等）使用 `shell_read_only_age_turns`（默认 3 轮后） | `shell_success_bytes`（默认 3000 字节以上才剪） | 成功输出通常可重新执行；只读命令是内容获取——相当于没有有效性追踪的 read——因此保护窗口更长（真实会话统计中相同重调的中位间隔约 3 个请求批次）；摘要保留大小、行数、有代表性的成功信号行（如有）以及尾部 fallback，命令仍可从关联 tool call 获取；大日志摘要会保留关键失败 / 警告 |
 | Diff / Patch | `git diff`、unified/combined diff、ApplyPatch 文本 | `diff_protect_age_turns`（默认完整保留 12 轮） | 超过 Shell/读取类字节阈值后才摘要 | 保留文件、hunk、变更数量和有界代表行；不会按源码中的 `error`/`failed` 标识符误判为构建日志 |
-| 读取类 | `read`、文件内容预览 | `read_like_age_turns`（默认 1 轮后），仅作用于已失效/已被覆盖的读取 | `read_like_output_bytes`（默认 3000 字节以上才剪） | 被后续局部 edit/apply_patch 的修改范围覆盖（或遇到整文件/未知范围修改）的读取会被裁剪并标记 `truncated=stale`；被后续更大范围读取覆盖的标记 `truncated=superseded`（更新副本就在后文）。仍是该内容现行视图的读取**永不裁剪**，与年龄和大小无关——裁掉它只会逼出重读，或让模型基于摘要猜测 |
-| 搜索类 | `grep`、`glob`、LSP references | `read_like_age_turns`（默认 1 轮后） | `read_like_output_bytes`（默认 3000 字节以上才剪） | 命中列表可重跑，但多点修改任务真正依赖的是 `path:line` 清单——摘要在字节预算内保留**完整位置清单**（每个命中文件及其行号），只给前几个文件附代表片段，超出预算才显式标注省略 |
+| 读取类 | `read`、文件内容预览 | 读取本身无年龄门控——已失效/已被覆盖的读取在状态确定后立即渲染有效性标记（陈旧内容在任何年龄都有误导性，因此跳过年龄门控和各保护分支）；其他读取类输出等到 `read_like_age_turns`（默认 2 轮后） | `read_like_output_bytes`（默认 3000 字节以上才剪） | 被后续局部 edit/apply_patch 的修改范围覆盖（或遇到整文件/未知范围修改）的读取会被裁剪并标记 `truncated=stale`；被后续更大范围读取覆盖的标记 `truncated=superseded`（更新副本就在后文）。仍是该内容现行视图的读取**永不裁剪**，与年龄和大小无关——裁掉它只会逼出重读，或让模型基于摘要猜测 |
+| 搜索类 | `grep`、`glob`、LSP references | `read_like_age_turns`（默认 2 轮后） | `read_like_output_bytes`（默认 3000 字节以上才剪） | 命中列表可重跑，但多点修改任务真正依赖的是 `path:line` 清单——摘要在字节预算内保留**完整位置清单**（每个命中文件及其行号），只给前几个文件附代表片段，超出预算才显式标注省略 |
 | JSON / 结构化输出 | `shell` 或结构化工具返回的 JSON | JSON 文档等到 `stale_age_turns`（默认 3 轮后）——key/item 骨架是信息损失最大的摘要形态，且取值往往跨多个请求；NDJSON 日志流（如 `go test -json`）沿用所在类别的年龄 | 类别对应的大小 gate | 大型结构化内容在通用省略前保留顶层 object key 或 array 数量 |
 | 其他旧结果 | 不属于以上类别的旧工具输出 | `stale_age_turns`（默认 3 轮后） | `stale_output_bytes`（默认 1500 字节以上才剪） | 兜底规则，最保守，避免误删不易重建的内容 |
 

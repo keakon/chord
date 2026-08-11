@@ -208,10 +208,10 @@ context:
     error_age_turns: 3
     high_risk_protect_age_turns: 4
     diff_protect_age_turns: 12
-    shell_success_age_turns: 1
+    shell_success_age_turns: 2
     shell_success_bytes: 3000
     shell_read_only_age_turns: 3
-    read_like_age_turns: 1
+    read_like_age_turns: 2
     read_like_output_bytes: 3000
     stale_age_turns: 3
     stale_output_bytes: 1500
@@ -280,9 +280,9 @@ history.
 |----------|-----------------|---------------|----------------|-----------|
 | Confirm / permission | Tool permission confirmations, user authorizations | `confirm_age_turns` (default 2) | — | Permission decisions become stale quickly |
 | Errors | Failed tool results | `error_age_turns` (default 3) | — | Failure reasons may still be relevant, kept a bit longer |
-| Shell success / logs | Successful commands, build/test/lint logs | `shell_success_age_turns` (default 1); commands on the shell tool's read-only allowlist (`cat`, `ls`, `git log`, ...) use `shell_read_only_age_turns` (default 3) | `shell_success_bytes` (default 3000) | Successful output is usually reproducible; read-only commands are content fetches — the shell analogue of a read without validity tracking — so they get a longer window (identical re-calls arrive with a median gap of ~3 request batches in session data); summaries keep size, line count, salient success lines when present, and a tail fallback; the command remains available from the associated tool call; large logs keep key failures/warnings when summarized |
-| Read-like | `read`, file content previews | `read_like_age_turns` (default 1), applied only to invalidated/superseded reads | `read_like_output_bytes` (default 3000) | A read overlapped by a later local edit/apply_patch (or followed by a whole-file/unknown-range mutation) is trimmed and marked `truncated=stale`; one covered by a later read of the same range is marked `truncated=superseded`. A read that is still the current view of its content is never trimmed, regardless of age or size — trimming it would force a re-read or, worse, an answer guessed from a summary |
-| Search-like | `grep`, `glob`, LSP references | `read_like_age_turns` (default 1) | `read_like_output_bytes` (default 3000) | Hit lists are reproducible, but the `path:line` list is what a multi-site task acts on — summaries keep the full location list (every matched file with its line numbers) within a byte budget, snippets only for the leading files, and an explicit omission tail beyond the budget |
+| Shell success / logs | Successful commands, build/test/lint logs | `shell_success_age_turns` (default 2 — a result is already age 1 at the first request that can react to it, so the model always sees a fresh success in full exactly once); commands on the shell tool's read-only allowlist (`cat`, `ls`, `git log`, ...) use `shell_read_only_age_turns` (default 3) | `shell_success_bytes` (default 3000) | Successful output is usually reproducible; read-only commands are content fetches — the shell analogue of a read without validity tracking — so they get a longer window (identical re-calls arrive with a median gap of ~3 request batches in session data); summaries keep size, line count, salient success lines when present, and a tail fallback; the command remains available from the associated tool call; large logs keep key failures/warnings when summarized |
+| Read-like | `read`, file content previews | none for reads — an invalidated/superseded read renders its validity marker as soon as the state is known (stale content is misleading at any age, so it skips the age gate and the protection branches); other read-like output waits for `read_like_age_turns` (default 2) | `read_like_output_bytes` (default 3000) | A read overlapped by a later local edit/apply_patch (or followed by a whole-file/unknown-range mutation) is trimmed and marked `truncated=stale`; one covered by a later read of the same range is marked `truncated=superseded`. A read that is still the current view of its content is never trimmed, regardless of age or size — trimming it would force a re-read or, worse, an answer guessed from a summary |
+| Search-like | `grep`, `glob`, LSP references | `read_like_age_turns` (default 2) | `read_like_output_bytes` (default 3000) | Hit lists are reproducible, but the `path:line` list is what a multi-site task acts on — summaries keep the full location list (every matched file with its line numbers) within a byte budget, snippets only for the leading files, and an explicit omission tail beyond the budget |
 | JSON / structured output | JSON from `shell` or structured tools | JSON documents wait for `stale_age_turns` (default 3) — the key/item skeleton is the lossiest summary and values are typically consumed over several requests; NDJSON log streams (e.g. `go test -json`) use the surrounding category's age | category-specific size gate | Large structured blobs keep top-level object keys or array counts before generic omission |
 | Other stale results | Tool output not covered above | `stale_age_turns` (default 3) | `stale_output_bytes` (default 1500) | Catch-all fallback; most conservative to avoid losing hard-to-reconstruct data |
 
