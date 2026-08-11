@@ -1261,14 +1261,15 @@ func normalizeMessagesForPoolTargetWithOptions(msgs []message.Message, target Fa
 		modelRef = modelRef + "@" + variant
 	}
 	tm := modelcompat.TargetModel{
-		ProviderID:              target.ProviderConfig.Name(),
-		ModelID:                 target.ModelID,
-		Variant:                 variant,
-		ModelRef:                modelRef,
-		WireFamily:              providerWireFamily(target.ProviderConfig),
-		ReasoningContinuityMode: reasoningContinuityMode(target.ProviderConfig, target.ModelID, tuning),
-		ToolResultEncoding:      toolResultEncoding(target.ProviderConfig),
-		SupportsStructuredTools: supportsStructuredTools(target.ProviderConfig),
+		ProviderID:                  target.ProviderConfig.Name(),
+		ModelID:                     target.ModelID,
+		Variant:                     variant,
+		ModelRef:                    modelRef,
+		WireFamily:                  providerWireFamily(target.ProviderConfig),
+		ReasoningContinuityMode:     reasoningContinuityMode(target.ProviderConfig, target.ModelID, tuning),
+		PreserveHistoricalReasoning: preserveHistoricalReasoning(target.ProviderConfig, target.ModelID),
+		ToolResultEncoding:          toolResultEncoding(target.ProviderConfig),
+		SupportsStructuredTools:     supportsStructuredTools(target.ProviderConfig),
 	}
 	return modelcompat.NormalizeForTarget(msgs, tm, modelcompat.NormalizeOptions{StructuredTools: true, ReplayCompat: replayCompat})
 }
@@ -1361,6 +1362,17 @@ func reasoningContinuityMode(provider *ProviderConfig, modelID string, tuning Re
 		return mode
 	}
 	return modelcompat.ReasoningContinuityNone
+}
+
+// preserveHistoricalReasoning reports whether the target opts out of the
+// completed-turn plaintext reasoning strip. Deliberately independent of
+// request tuning: even when a degraded request disables reasoning generation,
+// a preserved-thinking backend still expects the existing history unchanged.
+func preserveHistoricalReasoning(provider *ProviderConfig, modelID string) bool {
+	if provider == nil {
+		return false
+	}
+	return provider.ReasoningContinuityCompat(modelID).PreserveHistoryValue()
 }
 
 func reasoningContinuityCompatMode(provider *ProviderConfig, modelID string) string {

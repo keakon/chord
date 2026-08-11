@@ -459,6 +459,7 @@ model_templates:
             clear_thinking: false
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
 
   glm-5.2-messages: &glm-5-2-messages
     limit:
@@ -705,6 +706,7 @@ model_templates:
           preserve_thinking: true
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
 
 providers:
   qwen:
@@ -719,7 +721,8 @@ model_pools:
 ```
 
 Use the limits and regional endpoint published for your account. Historical
-reasoning counts as input tokens and billing when `preserve_thinking` is true.
+reasoning counts as input tokens and billing when `preserve_thinking` is true;
+`preserve_history: true` keeps Chord from stripping that history client-side.
 
 ## Kimi K3
 
@@ -740,6 +743,7 @@ model_templates:
     compat:
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
 
   kimi-k2.7-code: &kimi-k2-7-code
     limit:
@@ -748,6 +752,7 @@ model_templates:
     compat:
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
 
   kimi-k2.6-thinking: &kimi-k2-6-thinking
     limit:
@@ -761,6 +766,7 @@ model_templates:
             keep: all
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
 
 providers:
   kimi:
@@ -785,7 +791,12 @@ being retired for new users; prefer K3 for new configurations.
 For all `openai_visible` recipes (DeepSeek, GLM, supported Qwen, and Kimi),
 Chord first replays native reasoning optimistically to any Chat Completions
 target, so documented in-provider upgrades such as Kimi K2.6/K2.7 to K3 and
-same-model provider fallback can keep continuity. If a target rejects native
+same-model provider fallback can keep continuity. Recipes for backends that
+drop earlier-turn reasoning server-side (DeepSeek) omit `preserve_history`,
+so Chord strips completed-turn reasoning before replay instead of paying to
+resend it; preserved-thinking recipes (GLM `clear_thinking: false`, Qwen
+`preserve_thinking`, Kimi K3 / `keep: all`) set `preserve_history: true` so
+the complete assistant history is replayed unchanged. If a target rejects native
 reasoning, Chord removes or converts only the incompatible reasoning payload.
 Completed tool calls and their paired results remain available to the next
 model; they are not treated as disposable chain-of-thought data. A strict

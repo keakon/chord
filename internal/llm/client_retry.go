@@ -31,7 +31,7 @@ func logNormalizeReport(provider, model string, level, messagesBefore, messagesA
 	if !report.Changed() {
 		return
 	}
-	log.Debugf("normalized LLM request provider=%v model=%v replay_level=%v messages_before=%v messages_after=%v dropped_thinking=%v downgraded_reasoning=%v converted_reasoning=%v downgraded_tool_calls=%v dropped_tool_calls=%v dropped_tool_results=%v replay_sensitive_items=%v foreign_native_replays=%v warnings=%q", provider, model, level, messagesBefore, messagesAfter, report.DroppedThinkingBlocks, report.DowngradedReasoning, report.ConvertedReasoning, report.DowngradedToolCalls, report.DroppedToolCalls, report.DroppedToolResults, report.ReplaySensitiveItems, report.ForeignNativeReplays, report.Warnings)
+	log.Debugf("normalized LLM request provider=%v model=%v replay_level=%v messages_before=%v messages_after=%v dropped_thinking=%v downgraded_reasoning=%v converted_reasoning=%v downgraded_tool_calls=%v dropped_tool_calls=%v dropped_tool_results=%v replay_sensitive_items=%v foreign_native_replays=%v stripped_historical_reasoning=%v warnings=%q", provider, model, level, messagesBefore, messagesAfter, report.DroppedThinkingBlocks, report.DowngradedReasoning, report.ConvertedReasoning, report.DowngradedToolCalls, report.DroppedToolCalls, report.DroppedToolResults, report.ReplaySensitiveItems, report.ForeignNativeReplays, report.StrippedHistoricalReasoning, report.Warnings)
 }
 
 func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {

@@ -456,6 +456,7 @@ model_templates:
             clear_thinking: false
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
 
   glm-5.2-messages: &glm-5-2-messages
     limit:
@@ -690,6 +691,7 @@ model_templates:
           preserve_thinking: true
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
 
 providers:
   qwen:
@@ -704,7 +706,8 @@ model_pools:
 ```
 
 请按账号和区域文档替换上下文限制及 endpoint。`preserve_thinking: true`
-时，历史思考会计入输入 token 和费用。
+时，历史思考会计入输入 token 和费用；`preserve_history: true` 让 Chord
+不在客户端剥离这段历史。
 
 ## Kimi K3
 
@@ -724,6 +727,7 @@ model_templates:
     compat:
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
 
   kimi-k2.7-code: &kimi-k2-7-code
     limit:
@@ -732,6 +736,7 @@ model_templates:
     compat:
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
 
   kimi-k2.6-thinking: &kimi-k2-6-thinking
     limit:
@@ -745,6 +750,7 @@ model_templates:
             keep: all
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
 
 providers:
   kimi:
@@ -768,7 +774,11 @@ K2.7 Code 是 256K 上下文、面向编码的纯思考型号；它的 thinking 
 对于所有使用 `openai_visible` 的模板（DeepSeek、GLM、受支持的 Qwen 和
 Kimi），Chord 首次会把原生 reasoning 乐观回放给任何 Chat Completions
 目标，因此 Kimi K2.6/K2.7→K3 这类官方允许的同 provider 升级和同模型跨
-provider fallback 都能保留连续性。若目标拒绝原生 reasoning，Chord 只会
+provider fallback 都能保留连续性。服务端会丢弃更早轮次 reasoning 的
+后端（DeepSeek）不设 `preserve_history`，Chord 会在回放前剥离已完成
+轮次的 reasoning，避免为其付费；preserved-thinking 模板（GLM
+`clear_thinking: false`、Qwen `preserve_thinking`、Kimi K3 / `keep: all`）
+设置 `preserve_history: true`，完整 assistant 历史会原样回放。若目标拒绝原生 reasoning，Chord 只会
 删除或转换不兼容的 reasoning 负载；已完成且成对的工具调用和结果仍会保留。
 当目标连结构化形状也不接受时，严格降级会把已完成的动作历史文本化，而
 不会把外部工具事实静默删除。

@@ -1695,6 +1695,32 @@ func TestProviderConfig_ReasoningContinuityCompat_ModelOverride(t *testing.T) {
 	}
 }
 
+func TestProviderConfig_ReasoningContinuityCompat_PreserveHistoryMerge(t *testing.T) {
+	preserve := true
+	suppress := false
+	cfg := config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Compat: &config.ProviderCompatConfig{
+			ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible", PreserveHistory: &preserve},
+		},
+		Models: map[string]config.ModelConfig{
+			"inherits": {},
+			"overrides": {
+				Compat: &config.ModelCompatConfig{
+					ReasoningContinuity: &config.ReasoningContinuityCompatConfig{PreserveHistory: &suppress},
+				},
+			},
+		},
+	}
+	p := NewProviderConfig("test", cfg, []string{"k"})
+	if got := p.ReasoningContinuityCompat("inherits"); !got.PreserveHistoryValue() {
+		t.Fatalf("expected provider-level preserve_history to be inherited, got %#v", got)
+	}
+	if got := p.ReasoningContinuityCompat("overrides"); got.PreserveHistoryValue() {
+		t.Fatalf("expected model-level preserve_history=false to override, got %#v", got)
+	}
+}
+
 // --- Key Rotation: on_failure ---
 
 // TestSelectKey_OnFailure_NoCooldown verifies that repeated calls with on_failure

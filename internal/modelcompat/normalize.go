@@ -66,8 +66,13 @@ type TargetModel struct {
 
 	WireFamily              string
 	ReasoningContinuityMode string
-	ToolResultEncoding      string
-	SupportsStructuredTools bool
+	// PreserveHistoricalReasoning exempts the target from the completed-turn
+	// plaintext reasoning strip: preserved-thinking backends keep earlier-turn
+	// reasoning in their chat template and expect it replayed unchanged. Set
+	// from compat.reasoning_continuity.preserve_history.
+	PreserveHistoricalReasoning bool
+	ToolResultEncoding          string
+	SupportsStructuredTools     bool
 }
 
 // Replay compatibility degradation ladder for provider-bound native payloads.
@@ -119,7 +124,15 @@ type NormalizeReport struct {
 	// provenance matching. It is diagnostic output; retry decisions compare the
 	// actual normalized request shapes because a stricter level may be identical.
 	ForeignNativeReplays int
-	Warnings             []string
+	// StrippedHistoricalReasoning counts plaintext reasoning payloads removed
+	// from completed turns (before the last user message). Deliberately not
+	// part of Changed(): for a given target the strip is applied identically
+	// at every replay level (preserved-thinking targets opt out entirely via
+	// PreserveHistoricalReasoning), so a replay rejection can never be
+	// attributed to it and it must not push bare-400 heuristics into the
+	// degradation ladder.
+	StrippedHistoricalReasoning int
+	Warnings                    []string
 }
 
 func (r NormalizeReport) Changed() bool {
@@ -154,6 +167,37 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 
 	for i := range out {
 		msg := &out[i]
+		// Reasoning continuity is usually a current-turn contract: most
+		// thinking-mode chat backends validate reasoning presence only after
+		// the last user message, and their chat templates drop earlier-turn
+		// reasoning server-side, so replaying it inflates every request for
+		// nothing — measured at 56-68% of large DeepSeek prompts (plaintext
+		// reasoning_content on the chat wire, unsigned thinking blocks on the
+		// Anthropic-compatible wire). Strip both from completed turns before
+		// any replay or sensitivity decision. Preserved-thinking backends
+		// (Kimi keep:all, Qwen preserve_thinking, GLM clear_thinking:false)
+		// keep earlier-turn reasoning in their template and expect it replayed
+		// unchanged — they opt out per target via
+		// compat.reasoning_continuity.preserve_history. Cryptographically
+		// bound payloads (signed or redacted Anthropic blocks, Responses
+		// items, Gemini parts) keep their provider-specific handling below.
+		if i < lastUserIdx && !target.PreserveHistoricalReasoning {
+			if strings.TrimSpace(msg.ReasoningContent) != "" {
+				msg.ReasoningContent = ""
+				report.StrippedHistoricalReasoning++
+			}
+			if len(msg.ThinkingBlocks) > 0 {
+				kept := msg.ThinkingBlocks[:0]
+				for _, block := range msg.ThinkingBlocks {
+					if block.Replayable() {
+						kept = append(kept, block)
+						continue
+					}
+					report.StrippedHistoricalReasoning++
+				}
+				msg.ThinkingBlocks = kept
+			}
+		}
 		reasoningToolTrajectoryInvalid := false
 		hadReplaySensitivePayload := strings.TrimSpace(msg.ReasoningContent) != "" ||
 			len(msg.ThinkingBlocks) > 0 || len(msg.ResponsesOutput) > 0 || len(msg.GeminiParts) > 0

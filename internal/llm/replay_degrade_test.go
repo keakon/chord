@@ -422,7 +422,9 @@ func TestAmbiguous400AfterExplicitEscalationRetriesWithoutPersistentStrict(t *te
 	client := NewClient(cfg, impl, "deepseek-v4-pro", 1024, "")
 	// The trailing newline makes the Synthesized rewrite (drop + re-add
 	// trimmed unsigned thinking) differ from the Native request while the
-	// Native normalize report stays empty.
+	// Native normalize report stays empty. The assistant stays in the current
+	// turn (no trailing user message): historical unsigned thinking is now
+	// stripped unconditionally and would never reach the wire.
 	messages := []message.Message{
 		{Role: message.RoleUser, Content: "continue"},
 		{
@@ -432,7 +434,6 @@ func TestAmbiguous400AfterExplicitEscalationRetriesWithoutPersistentStrict(t *te
 			Provenance:     &message.MessageProvenance{ProviderID: "deepseek", ModelID: "deepseek-v4-pro", WireFamily: modelcompat.WireFamilyAnthropic},
 		},
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
-		{Role: message.RoleUser, Content: "go on"},
 	}
 	target := FallbackModel{ProviderConfig: cfg, ModelID: "deepseek-v4-pro"}
 

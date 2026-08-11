@@ -111,6 +111,7 @@ providers:
               anthropic-beta: null
           reasoning_continuity:
             mode: "openai_visible"
+            preserve_history: true
 `
 
 	var cfg Config
@@ -124,6 +125,9 @@ providers:
 	}
 	if got := model.Compat.ReasoningContinuity.EffectiveMode(); got != "openai_visible" {
 		t.Fatalf("EffectiveMode = %q, want openai_visible", got)
+	}
+	if !model.Compat.ReasoningContinuity.PreserveHistoryValue() {
+		t.Fatal("expected compat.reasoning_continuity.preserve_history=true")
 	}
 	if got := model.Compat.RequestOverrides.RenameBodyFields["max_completion_tokens"]; got == nil || *got != "max_tokens" {
 		t.Fatalf("rename max_completion_tokens = %#v, want max_tokens", got)

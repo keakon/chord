@@ -687,6 +687,17 @@ Compatibility fields:
     protocol's structured representation whenever possible and textified only
     if a target rejects that shape. The achieved degradation level is
     remembered per target.
+- `compat.reasoning_continuity.preserve_history`: by default Chord strips
+  plaintext reasoning (`reasoning_content` and unsigned `thinking` blocks)
+  from completed turns — everything before the last user message — because
+  most thinking backends drop earlier-turn reasoning server-side while still
+  billing it as input. Set `preserve_history: true` for preserved-thinking
+  models whose documentation requires the complete assistant history (Kimi K3
+  and `keep: all` models, Qwen `preserve_thinking`, GLM
+  `clear_thinking: false`); historical reasoning is then replayed unchanged
+  and billed on every request. Current-turn reasoning always follows the mode
+  above, and signed or encrypted payloads (Claude signed thinking, Responses
+  items, Gemini thought signatures) are unaffected by this switch.
 - `compat.thinking_toolcall`: enables a provider-specific parser for gateways
   that encode tool calls inside visible reasoning text. Leave disabled unless
   the gateway requires that format.
@@ -1197,6 +1208,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `thinking.effort` is sent as `output_config.effort` for Messages requests; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
 | `compat.reasoning_continuity.mode` | string | Optional continuity override. Use `openai_visible` for Chat Completions models that require unchanged assistant `reasoning_content` and can accept portable visible reasoning from other wires as `reasoning_content`; use `anthropic_unsigned` only for verified Messages-compatible models that replay or accept visible unsigned `thinking`; use `none` to opt out of a provider-level default. |
+| `compat.reasoning_continuity.preserve_history` | bool | Keep plaintext reasoning from completed turns in the replayed conversation, for preserved-thinking models (Kimi K3 / `keep: all`, Qwen `preserve_thinking`, GLM `clear_thinking: false`). Default `false`: completed-turn `reasoning_content` and unsigned `thinking` are stripped because most thinking backends drop them server-side while billing them as input. |
 | `compat.request_overrides.body` | object | Recursive JSON patch applied after Chord constructs the protocol request. `null` deletes a field. |
 | `compat.request_overrides.rename_body_fields` | map | Renames final JSON fields while preserving Chord's computed values. A `null` target deletes the source field. |
 | `compat.request_overrides.headers` | map | Sets final request headers. A `null` value removes that header. |

@@ -99,8 +99,12 @@ assistant `reasoning_content`，并把其他 wire family 的可移植可见 reas
 `compat.request_overrides.body` 添加。
 
 GLM Preserved Thinking 的 body override 需要包含 `thinking.type: enabled` 和
-`thinking.clear_thinking: false`；DeepSeek 只需要 `thinking.type: enabled`。
-两种情况下，回放的 `reasoning_content` 都必须保持完整、未修改且顺序不变。
+`thinking.clear_thinking: false`，并设置
+`reasoning_continuity.preserve_history: true`，让 Chord 在回放历史中保留
+已完成轮次的 reasoning；DeepSeek 只需要 `thinking.type: enabled`——它在
+服务端丢弃更早轮次的 reasoning，因此不要设置 `preserve_history`。两种
+情况下，回放的 `reasoning_content` 都必须保持完整、未修改且顺序不变：
+DeepSeek 覆盖当前轮，preserved-thinking 模型覆盖全部历史。
 
 ### Codex WebSocket 400 "No tool call found for function call output"
 

@@ -107,9 +107,14 @@ map portable visible reasoning from other wire families into
 `compat.request_overrides.body`.
 
 For GLM Preserved Thinking, that body override must include
-`thinking.type: enabled` and `thinking.clear_thinking: false`. For DeepSeek it
-only needs `thinking.type: enabled`. In both cases, replayed
-`reasoning_content` must remain complete, unchanged, and in order.
+`thinking.type: enabled` and `thinking.clear_thinking: false`, plus
+`reasoning_continuity.preserve_history: true` so Chord keeps completed-turn
+reasoning in the replayed history. For DeepSeek it only needs
+`thinking.type: enabled`; DeepSeek drops earlier-turn reasoning server-side,
+so leave `preserve_history` unset there. In both cases, replayed
+`reasoning_content` must remain complete, unchanged, and in order — for the
+current turn on DeepSeek, and for the whole history on preserved-thinking
+models.
 
 ### Codex WebSocket 400 "No tool call found for function call output"
 

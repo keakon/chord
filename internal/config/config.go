@@ -639,6 +639,13 @@ type RequestOverridesConfig struct {
 // ordinary assistant content.
 type ReasoningContinuityCompatConfig struct {
 	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"`
+	// PreserveHistory keeps plaintext reasoning from completed turns in the
+	// replayed conversation instead of stripping it before the last user
+	// message. Enable it only for preserved-thinking models whose chat
+	// template documents using earlier-turn reasoning (Kimi K3 / keep:all,
+	// Qwen preserve_thinking, GLM clear_thinking:false); historical reasoning
+	// is then billed as input on every request.
+	PreserveHistory *bool `json:"preserve_history,omitempty" yaml:"preserve_history,omitempty"`
 }
 
 // EffectiveMode returns the configured continuity mode.
@@ -647,6 +654,15 @@ func (c *ReasoningContinuityCompatConfig) EffectiveMode() string {
 		return ""
 	}
 	return strings.TrimSpace(c.Mode)
+}
+
+// PreserveHistoryValue reports whether completed-turn plaintext reasoning must
+// be kept in the replayed conversation. The default is false: strip it.
+func (c *ReasoningContinuityCompatConfig) PreserveHistoryValue() bool {
+	if c == nil || c.PreserveHistory == nil {
+		return false
+	}
+	return *c.PreserveHistory
 }
 
 // ThinkingToolcallCompatConfig controls compatibility handling for providers

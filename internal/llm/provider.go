@@ -488,10 +488,14 @@ func (p *ProviderConfig) ReasoningContinuityCompat(modelID string) *config.Reaso
 
 	if providerCfg != nil {
 		merged.Mode = providerCfg.Mode
+		merged.PreserveHistory = providerCfg.PreserveHistory
 	}
 
 	if modelCfg != nil && strings.TrimSpace(modelCfg.Mode) != "" {
 		merged.Mode = modelCfg.Mode
+	}
+	if modelCfg != nil && modelCfg.PreserveHistory != nil {
+		merged.PreserveHistory = modelCfg.PreserveHistory
 	}
 
 	return merged

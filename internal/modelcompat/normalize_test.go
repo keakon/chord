@@ -55,6 +55,99 @@ func TestNormalizeForTarget_PreservesAnthropicThinkingWhenEnabled(t *testing.T) 
 	}
 }
 
+// Reasoning continuity is a current-turn contract: plaintext reasoning and
+// unsigned thinking from completed turns never reach the wire — backends only
+// validate the window after the last user message and their chat templates
+// drop earlier reasoning anyway, so replaying it inflated large DeepSeek
+// prompts by 56-68%. Signed blocks keep their provider handling.
+func TestNormalizeForTarget_StripsHistoricalPlaintextReasoning(t *testing.T) {
+	deepseekProv := &message.MessageProvenance{Source: "chord", ProviderID: "deepseek", ModelID: "m", WireFamily: WireFamilyOpenAIChat}
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "q1"},
+		{Role: message.RoleAssistant, Content: "old", ReasoningContent: "old plan", Provenance: deepseekProv},
+		{Role: message.RoleUser, Content: "q2"},
+		{Role: message.RoleAssistant, Content: "new", ReasoningContent: "current plan", Provenance: deepseekProv},
+	}
+	target := TargetModel{ProviderID: "deepseek", ModelID: "m", WireFamily: WireFamilyOpenAIChat, ReasoningContinuityMode: ReasoningContinuityOpenAIVisible}
+	out, rep := NormalizeForTarget(msgs, target, NormalizeOptions{})
+	if got := out[1].ReasoningContent; got != "" {
+		t.Fatalf("historical reasoning_content survived: %q", got)
+	}
+	if got := out[3].ReasoningContent; got != "current plan" {
+		t.Fatalf("current-turn reasoning_content = %q, want preserved", got)
+	}
+	if rep.StrippedHistoricalReasoning != 1 {
+		t.Fatalf("StrippedHistoricalReasoning=%d, want 1", rep.StrippedHistoricalReasoning)
+	}
+	if rep.Changed() {
+		t.Fatalf("historical strip must not mark the report changed: %+v", rep)
+	}
+}
+
+func TestNormalizeForTarget_StripsHistoricalUnsignedThinkingKeepsSigned(t *testing.T) {
+	prov := &message.MessageProvenance{Source: "chord", ProviderID: "deepseek", ModelID: "m", WireFamily: WireFamilyAnthropic}
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "q1"},
+		{Role: message.RoleAssistant, Content: "old", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "old plan"}, {Thinking: "signed", Signature: "sig"}}, Provenance: prov},
+		{Role: message.RoleUser, Content: "q2"},
+		{Role: message.RoleAssistant, Content: "new", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "current plan"}}, Provenance: prov},
+	}
+	target := TargetModel{ProviderID: "deepseek", ModelID: "m", WireFamily: WireFamilyAnthropic, ReasoningContinuityMode: ReasoningContinuityAnthropicUnsigned}
+	out, rep := NormalizeForTarget(msgs, target, NormalizeOptions{})
+	var histThinking []string
+	for _, b := range out[1].ThinkingBlocks {
+		histThinking = append(histThinking, b.Thinking)
+	}
+	if len(histThinking) != 1 || histThinking[0] != "signed" {
+		t.Fatalf("historical blocks = %v, want only the signed block kept", histThinking)
+	}
+	if len(out[3].ThinkingBlocks) != 1 || out[3].ThinkingBlocks[0].Thinking != "current plan" {
+		t.Fatalf("current-turn unsigned thinking should be preserved: %+v", out[3].ThinkingBlocks)
+	}
+	if rep.StrippedHistoricalReasoning != 1 {
+		t.Fatalf("StrippedHistoricalReasoning=%d, want 1", rep.StrippedHistoricalReasoning)
+	}
+}
+
+func TestNormalizeForTarget_PreserveHistoryKeepsCompletedTurnReasoning(t *testing.T) {
+	chatProv := &message.MessageProvenance{Source: "chord", ProviderID: "kimi", ModelID: "k3", WireFamily: WireFamilyOpenAIChat}
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "q1"},
+		{Role: message.RoleAssistant, Content: "old", ReasoningContent: "old plan", Provenance: chatProv},
+		{Role: message.RoleUser, Content: "q2"},
+		{Role: message.RoleAssistant, Content: "new", ReasoningContent: "current plan", Provenance: chatProv},
+	}
+	target := TargetModel{ProviderID: "kimi", ModelID: "k3", WireFamily: WireFamilyOpenAIChat, ReasoningContinuityMode: ReasoningContinuityOpenAIVisible, PreserveHistoricalReasoning: true}
+	out, rep := NormalizeForTarget(msgs, target, NormalizeOptions{})
+	if got := out[1].ReasoningContent; got != "old plan" {
+		t.Fatalf("historical reasoning_content = %q, want preserved for a preserved-thinking target", got)
+	}
+	if got := out[3].ReasoningContent; got != "current plan" {
+		t.Fatalf("current-turn reasoning_content = %q, want preserved", got)
+	}
+	if rep.StrippedHistoricalReasoning != 0 {
+		t.Fatalf("StrippedHistoricalReasoning=%d, want 0", rep.StrippedHistoricalReasoning)
+	}
+}
+
+func TestNormalizeForTarget_PreserveHistoryKeepsUnsignedThinking(t *testing.T) {
+	prov := &message.MessageProvenance{Source: "chord", ProviderID: "glm", ModelID: "m", WireFamily: WireFamilyAnthropic}
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "q1"},
+		{Role: message.RoleAssistant, Content: "old", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "old plan"}}, Provenance: prov},
+		{Role: message.RoleUser, Content: "q2"},
+		{Role: message.RoleAssistant, Content: "new", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "current plan"}}, Provenance: prov},
+	}
+	target := TargetModel{ProviderID: "glm", ModelID: "m", WireFamily: WireFamilyAnthropic, ReasoningContinuityMode: ReasoningContinuityAnthropicUnsigned, PreserveHistoricalReasoning: true}
+	out, rep := NormalizeForTarget(msgs, target, NormalizeOptions{})
+	if len(out[1].ThinkingBlocks) != 1 || out[1].ThinkingBlocks[0].Thinking != "old plan" {
+		t.Fatalf("historical unsigned thinking should be preserved: %+v", out[1].ThinkingBlocks)
+	}
+	if rep.StrippedHistoricalReasoning != 0 {
+		t.Fatalf("StrippedHistoricalReasoning=%d, want 0", rep.StrippedHistoricalReasoning)
+	}
+}
+
 func TestNormalizeForTargetDeepCopiesCompactionFileRevisions(t *testing.T) {
 	msgs := []message.Message{{
 		Role:                    message.RoleUser,
