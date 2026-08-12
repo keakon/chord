@@ -1109,12 +1109,8 @@ func TestClient_ModelPoolAllNoUsableKeysStopsWithoutEmptyRetryLoop(t *testing.T)
 	}
 }
 
-func TestMarkKeyCooldown402And429UseRetryAfterOrDefault(t *testing.T) {
+func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 	ctx := context.Background()
-	snapReset := time.Now().Add(3 * time.Minute)
-	snap := &ratelimit.KeyRateLimitSnapshot{
-		Primary: &ratelimit.RateLimitWindow{UsedPct: 50, ResetsAt: snapReset},
-	}
 	err429 := &APIError{StatusCode: 429, Message: "rate limited"}
 
 	t.Run("403_global_quota_uses_retry_after", func(t *testing.T) {
@@ -1135,44 +1131,198 @@ func TestMarkKeyCooldown402And429UseRetryAfterOrDefault(t *testing.T) {
 		}
 	})
 
-	t.Run("default_is_1s_when_no_retry_after", func(t *testing.T) {
+	t.Run("unconfigured_429_without_retry_after_uses_default_exponential", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"k1"})
-		p.UpdateKeySnapshot("k1", snap)
-		res := markKeyCooldown(ctx, p, "k1", err429)
-		if !res.cooldownApplied {
-			t.Fatal("expected cooldownApplied=true for 429")
-		}
-		p.mu.Lock()
-		var end time.Time
-		for _, ks := range p.keyStates {
-			if ks.Key == "k1" {
-				end = ks.CooldownEnd
+		for attempt, want := range []time.Duration{time.Second, 2 * time.Second} {
+			res := markKeyCooldown(ctx, p, "k1", err429)
+			if !res.cooldownApplied {
+				t.Fatal("expected cooldownApplied=true for 429")
 			}
-		}
-		p.mu.Unlock()
-		remain := time.Until(end)
-		if remain < 500*time.Millisecond || remain > 1500*time.Millisecond {
-			t.Fatalf("expected ~1s cooldown, got remaining %v", remain)
+			p.mu.Lock()
+			end := p.keyStates[0].CooldownEnd
+			count := p.keyStates[0].CooldownCount
+			p.mu.Unlock()
+			remain := time.Until(end)
+			if remain < want-500*time.Millisecond || remain > want+500*time.Millisecond {
+				t.Fatalf("attempt %d cooldown remaining = %v, want ~%v", attempt+1, remain, want)
+			}
+			if count != attempt+1 {
+				t.Fatalf("attempt %d CooldownCount = %d, want %d", attempt+1, count, attempt+1)
+			}
 		}
 	})
 
-	t.Run("retry_after_is_capped_at_1m", func(t *testing.T) {
+	t.Run("unconfigured_429_preserves_retry_after", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"k1"})
-		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
-		if !res.cooldownApplied {
-			t.Fatal("expected cooldownApplied=true for Retry-After 429")
-		}
-		p.mu.Lock()
-		var end time.Time
-		for _, ks := range p.keyStates {
-			if ks.Key == "k1" {
-				end = ks.CooldownEnd
+		for attempt := range 2 {
+			res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+			if !res.cooldownApplied {
+				t.Fatal("expected cooldownApplied=true for Retry-After 429")
+			}
+			p.mu.Lock()
+			end := p.keyStates[0].CooldownEnd
+			count := p.keyStates[0].CooldownCount
+			p.mu.Unlock()
+			remain := time.Until(end)
+			if remain < 115*time.Second || remain > 125*time.Second {
+				t.Fatalf("attempt %d cooldown remaining = %v, want full ~2m Retry-After", attempt+1, remain)
+			}
+			if count != attempt+1 {
+				t.Fatalf("attempt %d CooldownCount = %d, want %d", attempt+1, count, attempt+1)
 			}
 		}
+	})
+
+	t.Run("explicit_delay_only_429_overrides_retry_after", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{
+			Type:         config.ProviderTypeChatCompletions,
+			RetryDelayMS: new(2500),
+		}, []string{"k1"})
+		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+		if !res.cooldownApplied {
+			t.Fatal("expected explicit retry_delay_ms cooldown for 429")
+		}
+		p.mu.Lock()
+		end := p.keyStates[0].CooldownEnd
 		p.mu.Unlock()
 		remain := time.Until(end)
-		if remain < 55*time.Second || remain > 61*time.Second {
-			t.Fatalf("expected ~1m cooldown cap, got remaining %v", remain)
+		if remain < 2*time.Second || remain > 3*time.Second {
+			t.Fatalf("cooldown remaining = %v, want ~2.5s", remain)
+		}
+	})
+
+	t.Run("explicit_zero_delay_429_uses_default_instead_of_retry_after", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{
+			Type:         config.ProviderTypeChatCompletions,
+			RetryDelayMS: new(0),
+		}, []string{"k1"})
+		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+		if !res.cooldownApplied {
+			t.Fatal("expected explicit zero retry_delay_ms cooldown for 429")
+		}
+		p.mu.Lock()
+		end := p.keyStates[0].CooldownEnd
+		p.mu.Unlock()
+		remain := time.Until(end)
+		if remain < 500*time.Millisecond || remain > 1500*time.Millisecond {
+			t.Fatalf("cooldown remaining = %v, want explicit default ~1s", remain)
+		}
+	})
+
+	t.Run("explicit_exponential_429_overrides_retry_after", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{
+			Type:         config.ProviderTypeChatCompletions,
+			RetryBackoff: config.RetryBackoffExponential,
+			RetryDelayMS: new(2000),
+		}, []string{"k1"})
+		for attempt, want := range []time.Duration{2 * time.Second, 4 * time.Second} {
+			res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+			if !res.cooldownApplied {
+				t.Fatal("expected configured exponential cooldown for 429")
+			}
+			p.mu.Lock()
+			end := p.keyStates[0].CooldownEnd
+			p.mu.Unlock()
+			remain := time.Until(end)
+			if remain < want-500*time.Millisecond || remain > want+500*time.Millisecond {
+				t.Fatalf("attempt %d cooldown remaining = %v, want ~%v", attempt+1, remain, want)
+			}
+		}
+	})
+
+	t.Run("explicit_fixed_429_overrides_retry_after_without_doubling", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{
+			Type:         config.ProviderTypeChatCompletions,
+			RetryBackoff: config.RetryBackoffFixed,
+			RetryDelayMS: new(3000),
+		}, []string{"k1"})
+		for attempt := range 2 {
+			res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+			if !res.cooldownApplied {
+				t.Fatal("expected configured fixed cooldown for 429")
+			}
+			p.mu.Lock()
+			end := p.keyStates[0].CooldownEnd
+			count := p.keyStates[0].CooldownCount
+			p.mu.Unlock()
+			remain := time.Until(end)
+			if remain < 2500*time.Millisecond || remain > 3500*time.Millisecond {
+				t.Fatalf("attempt %d cooldown remaining = %v, want ~3s", attempt+1, remain)
+			}
+			if count != attempt+1 {
+				t.Fatalf("attempt %d CooldownCount = %d, want %d", attempt+1, count, attempt+1)
+			}
+		}
+	})
+
+	t.Run("explicit_none_429_ignores_retry_after_and_marks_recovering", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{
+			Type:         config.ProviderTypeChatCompletions,
+			RetryBackoff: config.RetryBackoffNone,
+		}, []string{"k1", "k2"})
+		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+		if res.cooldownApplied {
+			t.Fatal("expected retry_backoff=none to skip timed 429 cooldown")
+		}
+		p.mu.Lock()
+		ks := *p.keyStates[0]
+		p.mu.Unlock()
+		if !ks.CooldownEnd.IsZero() || ks.CooldownCount != 0 || !ks.Recovering {
+			t.Fatalf("key state = cooldown_end=%v count=%d recovering=%v, want no timed cooldown and recovering", ks.CooldownEnd, ks.CooldownCount, ks.Recovering)
+		}
+		key, _, err := p.SelectKeyWithContext(ctx)
+		if err != nil {
+			t.Fatalf("SelectKeyWithContext() error = %v", err)
+		}
+		if key != "k2" {
+			t.Fatalf("selected key = %q, want healthy alternative k2", key)
+		}
+	})
+
+	t.Run("explicit_none_429_does_not_clear_existing_cooldown", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{
+			Type:         config.ProviderTypeChatCompletions,
+			RetryBackoff: config.RetryBackoffNone,
+		}, []string{"k1"})
+		p.MarkCooldown("k1", time.Minute)
+		p.mu.Lock()
+		before := p.keyStates[0].CooldownEnd
+		beforeCount := p.keyStates[0].CooldownCount
+		p.mu.Unlock()
+
+		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+		if res.cooldownApplied {
+			t.Fatal("expected retry_backoff=none not to add a timed 429 cooldown")
+		}
+		p.mu.Lock()
+		after := p.keyStates[0].CooldownEnd
+		afterCount := p.keyStates[0].CooldownCount
+		p.mu.Unlock()
+		if !after.Equal(before) || afterCount != beforeCount {
+			t.Fatalf("existing cooldown changed from %v/%d to %v/%d", before, beforeCount, after, afterCount)
+		}
+	})
+
+	t.Run("explicit_fixed_429_does_not_shorten_existing_cooldown", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{
+			Type:         config.ProviderTypeChatCompletions,
+			RetryBackoff: config.RetryBackoffFixed,
+			RetryDelayMS: new(2000),
+		}, []string{"k1"})
+		p.MarkCooldown("k1", time.Minute)
+		p.mu.Lock()
+		before := p.keyStates[0].CooldownEnd
+		p.mu.Unlock()
+
+		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: time.Millisecond})
+		if !res.cooldownApplied {
+			t.Fatal("expected fixed 429 pacing to be applied")
+		}
+		p.mu.Lock()
+		after := p.keyStates[0].CooldownEnd
+		p.mu.Unlock()
+		if after.Before(before) {
+			t.Fatalf("existing cooldown shortened from %v to %v", before, after)
 		}
 	})
 
@@ -1249,7 +1399,11 @@ func TestMarkKeyCooldown429CodexOAuthQuotaExhaustedUsesResetWindow(t *testing.T)
 	ctx := context.Background()
 	resetPrimary := time.Now().Add(2 * time.Hour)
 	resetSecondary := time.Now().Add(24 * time.Hour)
-	p := NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"oauth-key"})
+	p := NewProviderConfig("p", config.ProviderConfig{
+		Type:         config.ProviderTypeResponses,
+		Preset:       config.ProviderPresetCodex,
+		RetryBackoff: config.RetryBackoffNone,
+	}, []string{"oauth-key"})
 	p.mu.Lock()
 	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli()}
 	p.mu.Unlock()
@@ -1271,6 +1425,65 @@ func TestMarkKeyCooldown429CodexOAuthQuotaExhaustedUsesResetWindow(t *testing.T)
 	}
 	if !cooldownEnd.IsZero() {
 		t.Fatalf("CooldownEnd = %v, want zero when quota exhaustion uses hard reset window", cooldownEnd)
+	}
+}
+
+func TestMarkKeyCooldown429CodexOAuthRetryHintUsesExplicitPacingWithoutExhaustedSnapshot(t *testing.T) {
+	ctx := context.Background()
+	p := NewProviderConfig("p", config.ProviderConfig{
+		Type:         config.ProviderTypeResponses,
+		Preset:       config.ProviderPresetCodex,
+		RetryBackoff: config.RetryBackoffNone,
+	}, []string{"oauth-key"})
+	p.mu.Lock()
+	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli()}
+	p.mu.Unlock()
+
+	res := markKeyCooldown(ctx, p, "oauth-key", &APIError{
+		StatusCode: 429,
+		Code:       "usage_limit_reached",
+		Message:    "usage limit reached",
+		RetryAfter: 2 * time.Minute,
+	})
+	if res.cooldownApplied {
+		t.Fatal("expected explicit retry_backoff=none to override the Codex retry hint")
+	}
+	p.mu.Lock()
+	ks := *p.keyStates[0]
+	p.mu.Unlock()
+	if !ks.CooldownEnd.IsZero() || !ks.ExhaustedUntil.IsZero() || !ks.Recovering {
+		t.Fatalf("key state = cooldown_end=%v exhausted_until=%v recovering=%v, want no timed state and recovering", ks.CooldownEnd, ks.ExhaustedUntil, ks.Recovering)
+	}
+}
+
+func TestCompleteStreamApplies429PacingAfterVisibleOutput(t *testing.T) {
+	cfg := NewProviderConfig("sample", config.ProviderConfig{
+		Type:         config.ProviderTypeChatCompletions,
+		RetryBackoff: config.RetryBackoffFixed,
+		RetryDelayMS: new(config.MaxProviderRetryDelayMS),
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"k1"})
+	impl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{
+		{
+			streams: []message.StreamDelta{{Type: message.StreamDeltaText, Text: "partial"}},
+			err:     &APIError{StatusCode: 429, Message: "rate limited", RetryAfter: time.Millisecond},
+		},
+	}}}
+	c := NewClient(cfg, impl, "test-model", 4096, "sys")
+	c.SetStreamRetryRounds(1)
+
+	_, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, func(message.StreamDelta) {})
+	if err == nil {
+		t.Fatal("CompleteStream() error = nil, want capped 429 failure")
+	}
+	cfg.mu.Lock()
+	end := cfg.keyStates[0].CooldownEnd
+	cfg.mu.Unlock()
+	remain := time.Until(end)
+	if remain < 55*time.Second || remain > 61*time.Second {
+		t.Fatalf("cooldown remaining = %v, want configured ~1m after visible 429", remain)
 	}
 }
 
@@ -2731,20 +2944,26 @@ func TestClassifyFallbackReasonUsesContextLengthExceededCode(t *testing.T) {
 }
 
 func TestCompleteStreamWithRetryKeepsRetryingWhileAllKeysCooling(t *testing.T) {
-	primaryCfg := testProviderConfigWithKeys("primary-prov", "gpt-test", []string{"k1"})
-	primaryCfg.MarkCooldown("k1", 20*time.Millisecond)
+	primaryCfg := NewProviderConfig("primary-prov", config.ProviderConfig{
+		Type:         config.ProviderTypeChatCompletions,
+		RetryBackoff: config.RetryBackoffNone,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"k1"})
 	impl := &recordingProvider{}
 	impl.calls = []scriptedCall{
 		{resp: &message.Response{Content: "ok after cooldown"}},
 	}
-	c := NewClient(primaryCfg, impl, "gpt-test", 4096, "sys")
+	c := NewClient(primaryCfg, impl, "test-model", 4096, "sys")
+	primaryCfg.MarkCooldown("k1", 30*time.Millisecond)
 
 	resp, err := callCompleteStreamWithRetryForTest(
 		c,
 		context.Background(),
 		primaryCfg,
 		impl,
-		"gpt-test",
+		"test-model",
 		4096,
 		RequestTuning{},
 		"",
@@ -2764,6 +2983,95 @@ func TestCompleteStreamWithRetryKeepsRetryingWhileAllKeysCooling(t *testing.T) {
 	}
 	if got := impl.CallCount(); got != 1 {
 		t.Fatalf("provider calls = %d, want 1 after cooldown wait", got)
+	}
+}
+
+func TestCompleteStreamRetryRoundUsesCursorProviderBackoff(t *testing.T) {
+	primaryCfg := NewProviderConfig("primary-prov", config.ProviderConfig{
+		Type:         config.ProviderTypeChatCompletions,
+		RetryBackoff: config.RetryBackoffFixed,
+		RetryDelayMS: new(config.MaxProviderRetryDelayMS),
+		Models: map[string]config.ModelConfig{
+			"primary-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"k1"})
+	fallbackCfg := NewProviderConfig("fallback-prov", config.ProviderConfig{
+		Type:         config.ProviderTypeChatCompletions,
+		RetryBackoff: config.RetryBackoffNone,
+		Models: map[string]config.ModelConfig{
+			"fallback-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"k2"})
+	primaryImpl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{
+		{err: &APIError{StatusCode: 503, Message: "temporary primary failure"}},
+		{resp: &message.Response{Content: "should wait before this call"}},
+	}}}
+	fallbackImpl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{
+		{err: &APIError{StatusCode: 503, Message: "temporary fallback failure"}},
+	}}}
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	c.SetModelPool([]FallbackModel{
+		{ProviderConfig: primaryCfg, ProviderImpl: primaryImpl, ModelID: "primary-model", MaxTokens: 4096, ContextLimit: 128000},
+		{ProviderConfig: fallbackCfg, ProviderImpl: fallbackImpl, ModelID: "fallback-model", MaxTokens: 4096, ContextLimit: 128000},
+	}, 0)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CompleteStream() error = %v, want context deadline during cursor-provider backoff", err)
+	}
+	if got := primaryImpl.CallCount(); got != 1 {
+		t.Fatalf("primary calls = %d, want 1 before round backoff completes", got)
+	}
+	if got := fallbackImpl.CallCount(); got != 1 {
+		t.Fatalf("fallback calls = %d, want 1 within the first round", got)
+	}
+}
+
+func TestCompleteStreamRetryBackoffFollowsPinnedCursor(t *testing.T) {
+	primaryCfg := NewProviderConfig("primary-prov", config.ProviderConfig{
+		Type:         config.ProviderTypeChatCompletions,
+		RetryBackoff: config.RetryBackoffFixed,
+		RetryDelayMS: new(config.MaxProviderRetryDelayMS),
+		Models: map[string]config.ModelConfig{
+			"primary-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"k1"})
+	fallbackCfg := NewProviderConfig("fallback-prov", config.ProviderConfig{
+		Type:         config.ProviderTypeChatCompletions,
+		RetryBackoff: config.RetryBackoffNone,
+		Models: map[string]config.ModelConfig{
+			"fallback-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"k2"})
+	primaryImpl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{
+		{err: &APIError{StatusCode: 503, Message: "use fallback"}},
+		{err: &APIError{StatusCode: 503, Message: "primary still unavailable"}},
+	}}}
+	fallbackImpl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{
+		{resp: &message.Response{Content: "pin fallback"}},
+		{err: &APIError{StatusCode: 503, Message: "retry fallback"}},
+		{resp: &message.Response{Content: "fallback recovered"}},
+	}}}
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	c.SetModelPool([]FallbackModel{
+		{ProviderConfig: primaryCfg, ProviderImpl: primaryImpl, ModelID: "primary-model", MaxTokens: 4096, ContextLimit: 128000},
+		{ProviderConfig: fallbackCfg, ProviderImpl: fallbackImpl, ModelID: "fallback-model", MaxTokens: 4096, ContextLimit: 128000},
+	}, 0)
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "first"}}, nil, nil)
+	if err != nil || resp == nil || resp.Content != "pin fallback" {
+		t.Fatalf("first CompleteStream() = %#v, %v", resp, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	resp, err = c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "second"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("second CompleteStream() error = %v", err)
+	}
+	if resp == nil || resp.Content != "fallback recovered" {
+		t.Fatalf("second response = %#v, want fallback recovery", resp)
 	}
 }
 
@@ -2860,6 +3168,9 @@ func TestCompleteStreamWithRetryPrefersShortestRoundWaitAcrossModels(t *testing.
 }
 
 func TestMergeRoundWaitPrefersShortestCoolingWindow(t *testing.T) {
+	if got := roundRetryDelay(0, 30*time.Millisecond); got != 30*time.Millisecond {
+		t.Fatalf("roundRetryDelay(0, 30ms) = %v, want mandatory cooling wait", got)
+	}
 	got := mergeRoundWait(0, time.Minute)
 	got = mergeRoundWait(got, time.Second)
 	if got != time.Second {

@@ -710,6 +710,28 @@ providers:
     user_agent: "codex-tui/0.139.0 (Mac OS 15.3.2; arm64) ghostty/1.3.1 (codex-tui; 0.139.0)"
 ```
 
+## Provider 重试延迟
+
+Provider 级重试配置控制完整重试轮之间由 Chord 生成的等待。一轮从当前 sticky 模型池游标开始，继续尝试模型池剩余候选及其可用 key；切换 fallback target 时不会单独等待。下一轮开始前使用游标所指 provider 的策略；某个 fallback 成功并成为新游标后，后续请求自然改用它的配置。只要显式设置其中任一字段，同一策略也会控制普通 HTTP 429 的 key 冷却。
+
+```yaml
+providers:
+  gateway:
+    retry_backoff: exponential
+    retry_delay_ms: 500
+```
+
+- `retry_backoff: exponential` 是默认策略，从 `retry_delay_ms`（默认 `1000`）开始逐轮翻倍，最多等待 60 秒；
+- `retry_backoff: fixed` 每轮固定等待 `retry_delay_ms`；
+- `retry_backoff: none` 关闭 Chord 生成的轮间退避。遇到普通 429 时也会忽略 `Retry-After`，不给失败 key 设置定时冷却，只把它标为 recovering，让健康 key 和 fallback target 保持优先；默认轮次没有上限，`none` 下上游快速持续失败时会被零间隔连续重试；
+- `retry_delay_ms` 可取 `0` 到 `60000`；`0` / 省略表示 1000ms。策略拼错、负数或超过上限都会作为配置错误暴露。
+
+两个字段都没配置时，普通 429 会遵守完整、合法的 `Retry-After`；没有这个 header 才从 1 秒开始，按同一 key 的连续 429 次数指数退避。显式配置会替换普通 429 的 `Retry-After`：`exponential` / `fixed` 使用本地策略，`none` 不设置定时 429 冷却。已确认的配额重置窗口、失效或停用凭据，以及其它硬状态已经建立的冷却不会被该覆盖缩短或清除。这套 429 节奏在可见流式输出前后一致：打断可见输出流的 429 会冷却该 key 并轮换到下一个。
+
+Codex OAuth 遵循同样的规则：Codex 的所有 429 都算普通 429。带重试提示（`Retry-After` 或 WebSocket 的 `resets_in_seconds`）时显式配置可以替换该提示；既没有提示、也没有已耗尽额度快照的 usage-limit 429 使用上文的普通默认值，而不是 `codex` preset 的 1 分钟冷却（后者仍用于非 429 的 usage-limit 错误）。若 Codex 额度快照显示某个窗口已耗尽，并带有未来重置时间，Chord 会确认额度耗尽，仍以服务端重置时间为准。
+
+项目级 `.chord/config.yaml` 可以单独覆盖某个 provider 的这些字段。
+
 ## Provider 超时
 
 Provider 级超时配置都是可选项，单位为秒。省略或设为 `0` 会保持内置默认行为。
@@ -1079,6 +1101,8 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `official_api`| bool   | 将该 endpoint 视为官方 provider API；HTTP 400 通常表示请求无效，不应按临时网关错误重试。`preset: codex` 和 `preset: azure` 默认按官方 API 处理；聚合或代理网关可省略或设为 `false`。 |
 | `key_rotation`| string | `on_failure`（默认）/ `per_request`。控制何时重新选择 credential / API key。                                                                    |
 | `key_order`   | string | `sequential`（非 Codex 默认）/ `random` / `smart`（仅 Codex）。控制在候选 key 中如何选择。                                               |
+| `retry_backoff`| string | `exponential`（默认）/ `fixed` / `none`。控制完整重试轮之间由 Chord 生成的等待；显式设置后也控制普通 HTTP 429 的 key 冷却，并替换这类响应的 `Retry-After`。已确认的配额重置与凭据硬状态仍然优先。 |
+| `retry_delay_ms`| int   | 轮间退避和普通 429 冷却的基准值或固定值，单位毫秒，可取 `0` 到 `60000`；`0` / 省略默认 1000ms。即使省略 `retry_backoff`，只要写出该字段（包括显式 `0`）就算覆盖。`none` 模式下忽略。非法值会使配置加载失败。 |
 | `compress`    | bool   | gzip 能减小体积时启用请求体压缩。默认关闭。                                                                                                      |
 | `response_header_timeout` | int | 从开始该 provider 的流式 HTTP 请求到收到响应头的超时，单位秒，包括连接建立与请求体上传。`0` / 省略表示使用内置默认值；健康流由 `stream_idle_timeout` 约束，而不是总请求计时器。 |
 | `stream_idle_timeout` | int | 该 provider 的流式空闲超时，单位秒。`0` / 省略表示使用内置 SSE/WebSocket idle 默认值。 |

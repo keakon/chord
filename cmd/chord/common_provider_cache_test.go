@@ -111,3 +111,30 @@ func TestNormalizeProviderConfigAzurePresetSetsResponsesDefaults(t *testing.T) {
 		t.Fatalf("Store = %v, want true", got.Store)
 	}
 }
+
+func TestNormalizeProviderConfigRejectsInvalidRetrySettings(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  config.ProviderConfig
+		want string
+	}{
+		{
+			name: "unknown backoff",
+			cfg:  config.ProviderConfig{Type: config.ProviderTypeResponses, RetryBackoff: "linear"},
+			want: "invalid retry_backoff",
+		},
+		{
+			name: "delay above cap",
+			cfg:  config.ProviderConfig{Type: config.ProviderTypeResponses, RetryDelayMS: new(config.MaxProviderRetryDelayMS + 1)},
+			want: "retry_delay_ms must be between",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := normalizeProviderConfig("sample", tt.cfg, nil)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("normalizeProviderConfig() error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}

@@ -191,12 +191,8 @@ func isAccountInvalidated(apiErr *APIError) bool {
 // caps the resulting cooldown (0 disables the cap). Returns
 // markKeyCooldownResult so callers can return directly.
 func applyCodexQuotaOrCooldown(provider *ProviderConfig, key string, apiErr *APIError, defaultCooldown, maxCooldown time.Duration, quotaLogPrefix, cooldownLogPrefix string) markKeyCooldownResult {
-	now := time.Now()
-	if primaryResetAt, secondaryResetAt, until, ok := confirmedCodexQuotaExhausted(provider, key, apiErr, now); ok {
-		log.Warnf("%s, marking unavailable until reset key_id=%v until=%v", quotaLogPrefix, keyLogID(key), until)
-		provider.MarkQuotaExhaustedUntil(key, until)
-		_ = provider.persistCodexResetHintsForKey(key, primaryResetAt, secondaryResetAt)
-		return markKeyCooldownResult{cooldownApplied: true}
+	if result, ok := applyConfirmedCodexQuotaReset(provider, key, apiErr, quotaLogPrefix); ok {
+		return result
 	}
 	cooldown := apiErr.RetryAfter
 	if cooldown <= 0 {
@@ -208,6 +204,26 @@ func applyCodexQuotaOrCooldown(provider *ProviderConfig, key string, apiErr *API
 	log.Warnf("%s, marking cooldown key_id=%v cooldown=%v", cooldownLogPrefix, keyLogID(key), cooldown)
 	provider.MarkCooldown(key, cooldown)
 	return markKeyCooldownResult{cooldownApplied: true}
+}
+
+func applyConfirmedCodexQuotaReset(provider *ProviderConfig, key string, apiErr *APIError, logPrefix string) (markKeyCooldownResult, bool) {
+	primaryResetAt, secondaryResetAt, until, ok := confirmedCodexQuotaExhausted(provider, key, apiErr, time.Now())
+	if !ok {
+		return markKeyCooldownResult{}, false
+	}
+	log.Warnf("%s, marking unavailable until reset key_id=%v until=%v", logPrefix, keyLogID(key), until)
+	provider.MarkQuotaExhaustedUntil(key, until)
+	_ = provider.persistCodexResetHintsForKey(key, primaryResetAt, secondaryResetAt)
+	return markKeyCooldownResult{cooldownApplied: true}, true
+}
+
+func applyRateLimitCooldown(provider *ProviderConfig, key string, apiErr *APIError) markKeyCooldownResult {
+	if result, ok := applyConfirmedCodexQuotaReset(provider, key, apiErr, "API key quota exhausted"); ok {
+		return result
+	}
+	applied := provider.markRateLimitCooldown(key, apiErr.RetryAfter)
+	log.Warnf("API key rate limited, applying retry pacing key_id=%v configured=%v retry_after=%v cooldown_applied=%v", keyLogID(key), provider.retryPacingExplicit, apiErr.RetryAfter, applied)
+	return markKeyCooldownResult{cooldownApplied: applied}
 }
 
 // markKeyCooldown checks the error and puts the key into cooldown if the
@@ -222,7 +238,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 	if !ok {
 		return markKeyCooldownResult{}
 	}
-	if provider != nil && provider.usesPresetCodexRateLimitCooldown() && confirmedCodexUsageLimitError(apiErr) {
+	if apiErr.StatusCode != 429 && provider != nil && provider.usesPresetCodexRateLimitCooldown() && confirmedCodexUsageLimitError(apiErr) {
 		return applyCodexQuotaOrCooldown(provider, key, apiErr, time.Minute, 0,
 			"Codex usage limit reached", "Codex usage limit reached")
 	}
@@ -257,8 +273,7 @@ func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, 
 		return applyCodexQuotaOrCooldown(provider, key, apiErr, time.Second, time.Minute,
 			"API key quota exhausted", "API key temporarily unavailable")
 	case 429:
-		return applyCodexQuotaOrCooldown(provider, key, apiErr, time.Second, time.Minute,
-			"API key quota exhausted", "API key temporarily unavailable")
+		return applyRateLimitCooldown(provider, key, apiErr)
 	case 401:
 		if info := provider.oauthInfoForKey(key); info != nil {
 			if isAccountInvalidated(apiErr) {

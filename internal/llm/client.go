@@ -23,7 +23,7 @@ const DefaultOutputTokenMax = 64000
 
 // DefaultStreamRetryRounds is retained for explicit bounded retry calls in
 // tests/internal helpers. The public streaming path now defaults to infinite
-// round retries, with the round backoff still capped at 1 minute.
+// round retries, with generated round backoff still capped at 1 minute.
 const DefaultStreamRetryRounds = 3
 
 // FallbackModel describes an entry in the ordered model pool used by the
@@ -921,13 +921,15 @@ func fallbackModelCanReplayToolResultModalities(model FallbackModel, modalities 
 
 // CompleteStream sends a streaming completion request with automatic retries.
 // Routing uses completeStreamWithRetry: within each model, keys are tried
-// according to isRetriable/shouldFallback plus overrides (currently 401/403).
-// Timeouts before any visible output skip remaining keys on the provider and
-// may skip other models on the same provider (skipRemainingModelsOnProvider);
-// visible stream interruptions retry on the same key.
+// according to isRetriable/shouldFallback plus overrides (currently
+// 401/403/429). Timeouts before any visible output skip remaining keys on the
+// provider and may skip other models on the same provider
+// (skipRemainingModelsOnProvider); visible stream interruptions retry on the
+// same key, except auth and 429 errors, which cool the key down and rotate to
+// the next one.
 //
-// Retries happen in full rounds with exponential backoff between rounds; each
-// round walks the model pool and each model's selectable keys.
+// Retries happen in full rounds with provider-configured pacing between rounds;
+// each round walks the model pool and each model's selectable keys.
 //
 // If additional model-pool entries are configured and the current cursor-head
 // model fails with a fallback-eligible error after exhausting keys (and any

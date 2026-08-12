@@ -347,6 +347,11 @@ func isAuthAPIStatusError(err error) bool {
 	return ok && apiErr != nil && (apiErr.StatusCode == 401 || apiErr.StatusCode == 403)
 }
 
+func isRateLimitAPIStatusError(err error) bool {
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && apiErr != nil && apiErr.StatusCode == 429
+}
+
 func newStreamAttemptTracker(cb StreamCallback, target streamRetryTarget, apiKey, modelRef, attemptReason string, keyAttempt, keyCount int) *visibleStreamTracker {
 	keyLogIDValue := keyLogID(apiKey)
 	return &visibleStreamTracker{
@@ -764,7 +769,7 @@ func (c *Client) completeStreamTarget(
 			continue
 		}
 
-		if isAuthAPIStatusError(err) {
+		if isAuthAPIStatusError(err) || isRateLimitAPIStatusError(err) {
 			cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, result.lastErr)
 			if err := abortIfCancelled(); err != nil {
 				return result, lastInputTokens, err
@@ -784,7 +789,7 @@ func (c *Client) completeStreamTarget(
 			if !cooldownResult.cooldownApplied && keyForRotationCooldown != "" {
 				t.provider.MarkRecovering(keyForRotationCooldown)
 			}
-			log.Warnf("auth error after visible output, trying next key provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
+			log.Warnf("key-scoped API error after visible output, trying next key provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
 			emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
 			if cb != nil && keyAttempt+1 < keyCount {
 				if err := abortIfCancelled(); err != nil {
@@ -933,12 +938,14 @@ func openAIChatReasoningEnabled(tuning RequestTuning, target FallbackModel) bool
 
 // completeStreamWithRetry walks the model pool (cursor-start entry + optional
 // remaining entries) and, for each model, loops over keys until success, a permanent failure, or
-// keys exhausted. Retriable API errors rotate keys; 401/403 force key rotation
-// (OAuth refresh when possible). Timeouts before any visible output do not
-// rotate to another key on the same provider; they skip sibling targets on that
-// provider for the current round and advance to the next provider/model. Visible
-// stream interruptions are retried by the caller on the same key. Exponential
-// backoff applies between full rounds, not between keys.
+// keys exhausted. Retriable API errors rotate keys; 401/403/429 force key
+// rotation (OAuth refresh when possible for auth errors). Timeouts before any
+// visible output do not rotate to another key on the same provider; they skip
+// sibling targets on that provider for the current round and advance to the
+// next provider/model. Visible stream interruptions are retried by the caller
+// on the same key, except auth and 429 errors, which cool the key down and
+// rotate to the next one. Provider-configured pacing applies between full
+// rounds, not between keys.
 func (c *Client) completeStreamWithRetry(
 	ctx context.Context,
 	startProvider *ProviderConfig,

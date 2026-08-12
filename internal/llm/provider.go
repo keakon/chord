@@ -186,6 +186,9 @@ type ProviderConfig struct {
 	websocketHandshakeTimeout  time.Duration                // provider-level Responses WebSocket handshake timeout; 0 means default
 	keyRotation                string                       // "on_failure" (default) | "per_request"
 	keyOrder                   string                       // "sequential" (default, non-Codex) | "random" | "smart" (Codex)
+	retryBackoff               string                       // "exponential" (default) | "fixed" | "none"
+	retryPacingExplicit        bool                         // retry_backoff or retry_delay_ms was explicitly configured
+	retryDelay                 time.Duration                // normalized base/fixed round delay, capped at maxProviderRetryDelay
 	retryDelayBase             time.Duration                // test hook; <0 disables retry backoff
 	stickyIdx                  int                          // index of the currently pinned key (on_failure rotation)
 	oauthRefresher             *OAuthRefresher              // nil if no OAuth support
@@ -212,6 +215,8 @@ type ProviderConfig struct {
 	authStateDigest            string
 	authStateMonitor           *authStateMonitor
 }
+
+const maxProviderRetryDelay = time.Duration(config.MaxProviderRetryDelayMS) * time.Millisecond
 
 // NewProviderConfig creates a new ProviderConfig.
 func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *ProviderConfig {
@@ -247,6 +252,18 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 			keyOrder = config.KeyOrderSequential
 		}
 	}
+
+	retryBackoff := strings.TrimSpace(cfg.RetryBackoff)
+	switch retryBackoff {
+	case config.RetryBackoffFixed, config.RetryBackoffNone:
+	default:
+		retryBackoff = config.RetryBackoffExponential
+	}
+	retryDelay := time.Duration(config.DefaultProviderRetryDelayMS) * time.Millisecond
+	if cfg.RetryDelayMS != nil && *cfg.RetryDelayMS > 0 {
+		retryDelay = durationFromPositiveMillisecondsClamped(int64(*cfg.RetryDelayMS), maxProviderRetryDelay)
+	}
+	retryPacingExplicit := strings.TrimSpace(cfg.RetryBackoff) != "" || cfg.RetryDelayMS != nil
 
 	// Initialize stickyIdx: for random order, pick a random starting key.
 	stickyIdx := 0
@@ -285,6 +302,9 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		websocketHandshakeTimeout:  durationFromPositiveSecondsClamped(int64(cfg.WebSocketHandshakeTimeout), 0),
 		keyRotation:                keyRotation,
 		keyOrder:                   keyOrder,
+		retryBackoff:               retryBackoff,
+		retryPacingExplicit:        retryPacingExplicit,
+		retryDelay:                 retryDelay,
 		stickyIdx:                  stickyIdx,
 		lastSelectedSlot:           -1,
 		effectiveProxyURL:          "",
@@ -599,7 +619,9 @@ func mergeHeaderPointerMaps(base, override map[string]*string) map[string]*strin
 }
 
 // GetRetryDelay returns the delay before the next retry round.
-// Backoff is deterministic: 1s, 2s, 4s, 8s, 16s, 32s, then 60s for later rounds.
+// The current model-pool cursor provider owns the generated delay between full
+// retry rounds; fallback targets never sleep independently within a round.
+// Mandatory key cooldown waits remain active even when this returns zero.
 func (p *ProviderConfig) GetRetryDelay(attempt int) time.Duration {
 	if attempt <= 0 {
 		return 0
@@ -607,16 +629,18 @@ func (p *ProviderConfig) GetRetryDelay(attempt int) time.Duration {
 	if p.retryDelayBase < 0 {
 		return 0
 	}
-	baseDelay := time.Second
-	if p.retryDelayBase > 0 {
-		baseDelay = p.retryDelayBase
+	switch p.retryBackoff {
+	case config.RetryBackoffNone:
+		return 0
+	case config.RetryBackoffFixed:
+		return p.retryDelay
+	default:
+		baseDelay := p.retryDelay
+		if p.retryDelayBase > 0 {
+			baseDelay = p.retryDelayBase
+		}
+		return saturatingDoublingDuration(baseDelay, maxProviderRetryDelay, attempt-1)
 	}
-	const maxRetryDelayAttempt = 6
-	const maxRetryDelay = 60 * time.Second
-	if attempt > maxRetryDelayAttempt {
-		return maxRetryDelay
-	}
-	return saturatingDoublingDuration(baseDelay, maxRetryDelay, attempt-1)
 }
 
 // EffectiveProxyURL returns the effective proxy URL configured for this provider.

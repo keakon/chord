@@ -4,24 +4,33 @@ import "time"
 
 const maxTimeDuration = time.Duration(1<<63 - 1)
 const maxSafeDurationSeconds = int64((1<<63 - 1) / int64(time.Second))
+const maxSafeDurationMilliseconds = int64((1<<63 - 1) / int64(time.Millisecond))
 
 func durationFromPositiveSecondsClamped(seconds int64, cap time.Duration) time.Duration {
-	if seconds <= 0 {
+	return durationFromPositiveUnitsClamped(seconds, time.Second, maxSafeDurationSeconds, cap)
+}
+
+func durationFromPositiveMillisecondsClamped(milliseconds int64, cap time.Duration) time.Duration {
+	return durationFromPositiveUnitsClamped(milliseconds, time.Millisecond, maxSafeDurationMilliseconds, cap)
+}
+
+func durationFromPositiveUnitsClamped(value int64, unit time.Duration, maxSafeValue int64, cap time.Duration) time.Duration {
+	if value <= 0 {
 		return 0
 	}
 	if cap > 0 {
-		capSeconds := int64(cap / time.Second)
-		if capSeconds > 0 && seconds > capSeconds {
+		capUnits := int64(cap / unit)
+		if capUnits > 0 && value > capUnits {
 			return cap
 		}
 	}
-	if seconds > maxSafeDurationSeconds {
+	if value > maxSafeValue {
 		if cap > 0 {
 			return cap
 		}
 		return maxTimeDuration
 	}
-	return time.Duration(seconds) * time.Second
+	return time.Duration(value) * unit
 }
 
 func saturatingDoublingDuration(base, cap time.Duration, doublings int) time.Duration {

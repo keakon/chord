@@ -40,7 +40,7 @@ func normalizeProviderConfig(provName string, cfg config.ProviderConfig, _ []con
 	if err != nil {
 		return cfg, fmt.Errorf("normalize provider %q: %w", provName, err)
 	}
-	if err := config.ValidateProviderKeySelection(provName, normalized); err != nil {
+	if err := config.ValidateProviderRuntime(provName, normalized); err != nil {
 		return cfg, err
 	}
 

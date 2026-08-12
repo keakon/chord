@@ -69,6 +69,10 @@ func (p *ProviderConfig) markRecoveringLocked(ks *KeyState) {
 }
 
 func (p *ProviderConfig) markCooldownLocked(ks *KeyState, d time.Duration) {
+	p.markCooldownWithModeLocked(ks, d, true)
+}
+
+func (p *ProviderConfig) markCooldownWithModeLocked(ks *KeyState, d time.Duration, exponential bool) {
 	if ks == nil {
 		return
 	}
@@ -79,10 +83,14 @@ func (p *ProviderConfig) markCooldownLocked(ks *KeyState, d time.Duration) {
 	}
 	ks.CooldownCount++
 	ks.Recovering = true
-	// Exponential backoff: d * 2^(count-1), capped at 1 minute.
-	const maxCooldown = 1 * time.Minute
-	effective := saturatingDoublingDuration(d, maxCooldown, ks.CooldownCount-1)
-	ks.CooldownEnd = time.Now().Add(effective)
+	effective := d
+	if exponential {
+		effective = saturatingDoublingDuration(d, maxProviderRetryDelay, ks.CooldownCount-1)
+	}
+	end := time.Now().Add(effective)
+	if end.After(ks.CooldownEnd) {
+		ks.CooldownEnd = end
+	}
 }
 
 func (p *ProviderConfig) markQuotaExhaustedLocked(ks *KeyState, until time.Time) {
@@ -455,8 +463,36 @@ func (p *ProviderConfig) MarkCooldown(key string, d time.Duration) {
 	})
 }
 
+func (p *ProviderConfig) markRateLimitCooldown(key string, retryAfter time.Duration) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	applied := false
+	p.forEachKeyStateByKeyLocked(key, func(ks *KeyState) {
+		if !p.retryPacingExplicit {
+			if retryAfter > 0 {
+				p.markCooldownWithModeLocked(ks, retryAfter, false)
+			} else {
+				p.markCooldownWithModeLocked(ks, time.Second, true)
+			}
+			applied = true
+			return
+		}
+		switch p.retryBackoff {
+		case config.RetryBackoffNone:
+			p.markRecoveringLocked(ks)
+		case config.RetryBackoffFixed:
+			p.markCooldownWithModeLocked(ks, p.retryDelay, false)
+			applied = true
+		default:
+			p.markCooldownWithModeLocked(ks, p.retryDelay, true)
+			applied = true
+		}
+	})
+	return applied
+}
+
 // MarkQuotaExhaustedUntil marks a key unavailable until the real provider reset time.
-// Unlike MarkCooldown, this does not use exponential backoff or the 5-minute cap.
+// Unlike MarkCooldown, this does not use exponential backoff or the 1-minute cap.
 
 func (p *ProviderConfig) MarkQuotaExhaustedUntil(key string, until time.Time) {
 	if key == "" || until.IsZero() || !until.After(time.Now()) {

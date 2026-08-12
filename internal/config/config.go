@@ -303,6 +303,14 @@ const (
 )
 
 const (
+	// RetryBackoff modes for ProviderConfig.
+	RetryBackoffExponential = "exponential" // default: exponential doubling, base = retry_delay_ms (default 1s), cap 60s
+	RetryBackoffFixed       = "fixed"       // fixed delay per round = retry_delay_ms (default 1s), max 60s
+	RetryBackoffNone        = "none"        // no generated round or ordinary-429 delay; hard key state still applies
+
+	DefaultProviderRetryDelayMS = 1000
+	MaxProviderRetryDelayMS     = 60_000
+
 	OAuthProfileOpenAICodex       = "openai_codex"
 	ProviderPresetCodex           = "codex"
 	ProviderPresetAzure           = "azure"
@@ -334,9 +342,11 @@ type ProviderConfig struct {
 	SupportedServiceTiers     []ServiceTier          `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"`         // provider-level default non-standard tiers; model-level can override
 	ParallelToolCalls         *bool                  `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"`                 // provider-level default; nil = send parallel_tool_calls: true; model/variant can override
 	Models                    map[string]ModelConfig `json:"models" yaml:"models"`
-	KeyRotation               string                 `json:"key_rotation" yaml:"key_rotation"`             // "on_failure" (default) | "per_request"
-	KeyOrder                  string                 `json:"key_order" yaml:"key_order"`                   // "sequential" (default, non-Codex) | "random" | "smart" (default for preset: codex)
-	Compress                  bool                   `json:"compress,omitempty" yaml:"compress,omitempty"` // enable gzip request compression for this provider
+	KeyRotation               string                 `json:"key_rotation" yaml:"key_rotation"`                         // "on_failure" (default) | "per_request"
+	KeyOrder                  string                 `json:"key_order" yaml:"key_order"`                               // "sequential" (default, non-Codex) | "random" | "smart" (default for preset: codex)
+	RetryBackoff              string                 `json:"retry_backoff,omitempty" yaml:"retry_backoff,omitempty"`   // "exponential" (default) | "fixed" | "none"
+	RetryDelayMS              *int                   `json:"retry_delay_ms,omitempty" yaml:"retry_delay_ms,omitempty"` // millisecond delay for retry backoff; nil = omitted, 0 = explicit default
+	Compress                  bool                   `json:"compress,omitempty" yaml:"compress,omitempty"`             // enable gzip request compression for this provider
 }
 
 // ModelModalities declares which input modalities a model supports.
@@ -1246,6 +1256,11 @@ func loadConfigData(path string, data []byte, withDefaults bool) (*Config, error
 		}
 	}
 	normalizeModelLimits(cfg)
+	for providerName, providerCfg := range cfg.Providers {
+		if err := ValidateProviderRetry(providerName, providerCfg); err != nil {
+			return nil, fmt.Errorf("validate config %s: %w", path, err)
+		}
+	}
 	if err := ValidateDiagnosticsConfig(cfg); err != nil {
 		return nil, fmt.Errorf("validate config %s: %w", path, err)
 	}

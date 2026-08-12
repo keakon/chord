@@ -757,6 +757,56 @@ providers:
     user_agent: "codex-tui/0.139.0 (Mac OS 15.3.2; arm64) ghostty/1.3.1 (codex-tui; 0.139.0)"
 ```
 
+## Provider retry delays
+
+Provider-level retry settings control the generated delay between complete
+retry rounds. A round starts at the current sticky model-pool cursor and walks
+the remaining pool entries and their eligible keys without sleeping between
+fallback targets. The cursor provider's settings own the delay before the next
+round; if a fallback later succeeds and becomes the sticky cursor, its settings
+apply to subsequent requests. The same settings also control ordinary HTTP 429
+key cooldown when either field is explicitly configured.
+
+```yaml
+providers:
+  gateway:
+    retry_backoff: exponential
+    retry_delay_ms: 500
+```
+
+- `retry_backoff: exponential` is the default. It starts at `retry_delay_ms`
+  (default `1000`) and doubles each round, capped at 60 seconds.
+- `retry_backoff: fixed` uses `retry_delay_ms` for every round.
+- `retry_backoff: none` disables generated round backoff. For an ordinary 429,
+  it also ignores `Retry-After` and marks the failed key as recovering without
+  a timed cooldown, so healthy keys and fallback targets still take priority.
+  Rounds are unlimited by default, so with `none` a fast-failing upstream is
+  retried back-to-back without delay.
+- `retry_delay_ms` accepts `0` through `60000`; `0` / omitted means 1000ms.
+  Invalid modes, negative values, and values above the cap are configuration
+  errors.
+
+Without either field, ordinary 429 responses honor the full valid
+`Retry-After`; when that header is absent, key cooldown starts at one second and
+doubles after consecutive 429s. Explicit retry settings replace `Retry-After`
+for ordinary 429s: `exponential` and `fixed` use the configured pacing, while
+`none` applies no timed 429 cooldown. Confirmed quota reset windows, invalid or
+deactivated credentials, and cooldowns already established by other hard
+states are not shortened or cleared by this override. This 429 pacing applies
+before and after visible streaming output alike: a 429 that interrupts a
+visible stream cools the key down and rotates to the next one.
+
+Codex OAuth follows the same rules: every Codex 429 is an ordinary 429. A
+retry hint (`Retry-After` or WebSocket `resets_in_seconds`) may be replaced by
+explicit settings, and a usage-limit 429 carrying neither a hint nor an
+exhausted quota snapshot uses the ordinary defaults above — not the one-minute
+cooldown of the `codex` preset, which still covers non-429 usage-limit errors.
+When a Codex rate-limit snapshot shows an exhausted window with a future
+reset, Chord treats that as confirmed quota exhaustion and keeps the provider
+reset authoritative.
+
+Project-level `.chord/config.yaml` can override these fields for one provider.
+
 ## Provider timeouts
 
 Provider-level timeout settings are optional and use seconds. Unset or `0` keeps the built-in defaults.
@@ -1184,6 +1234,8 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `official_api` | bool   | Treat this endpoint as an official provider API where HTTP 400 usually means an invalid request and should not be retried as a transient gateway error. `preset: codex` and `preset: azure` are official by default; omit or set `false` for aggregating/proxy gateways. |
 | `key_rotation` | string | `on_failure` (default) / `per_request`. Controls when a credential / API key is reselected.                                                            |
 | `key_order`    | string | `sequential` (non-Codex default) / `random` / `smart` (Codex only). Controls how Chord chooses among selectable keys.                                   |
+| `retry_backoff`| string | `exponential` (default) / `fixed` / `none`. Controls generated delay between complete rounds and, when explicitly set, ordinary HTTP 429 key cooldown. Explicit settings replace `Retry-After` for ordinary 429s; confirmed quota resets and hard credential states still win. |
+| `retry_delay_ms`| int   | Base/fixed round and ordinary-429 delay in milliseconds, from `0` through `60000`; `0` / omitted defaults to 1000ms. Setting the field—including explicit `0`—is an override even when `retry_backoff` is omitted. Ignored for `none`. Invalid values fail configuration loading. |
 | `compress`     | bool   | gzip request bodies when compression saves bytes. Off by default.                                                                                       |
 | `response_header_timeout` | int | Timeout in seconds from starting a streaming HTTP request until response headers arrive, including connection setup and request-body upload. `0` / omitted uses the built-in default; healthy streams are bounded by `stream_idle_timeout`, not a total request timer. |
 | `stream_idle_timeout` | int | Stream idle timeout in seconds for this provider. `0` / omitted uses built-in SSE/WebSocket idle defaults. |

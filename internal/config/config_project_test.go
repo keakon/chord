@@ -145,6 +145,36 @@ func TestMergeProjectConfigResponseHeaderTimeoutZeroOverridesGlobal(t *testing.T
 	}
 }
 
+func TestMergeProjectConfigOverridesProviderRetrySettings(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	writeTestFile(t, globalPath, `providers:
+  sample:
+    type: responses
+    retry_backoff: exponential
+    retry_delay_ms: 2000
+`)
+	globalCfg, err := LoadConfigFromPath(globalPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath(global): %v", err)
+	}
+
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, `providers:
+  sample:
+    retry_backoff: fixed
+    retry_delay_ms: 0
+`)
+
+	_, mergedCfg, err := MergeProjectConfig(globalCfg, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	provider := mergedCfg.Providers["sample"]
+	if provider.RetryBackoff != RetryBackoffFixed || provider.RetryDelayMS == nil || *provider.RetryDelayMS != 0 {
+		t.Fatalf("merged provider retry = %q/%v, want %q/0", provider.RetryBackoff, provider.RetryDelayMS, RetryBackoffFixed)
+	}
+}
+
 func TestMergeProjectConfigMergesProjectScopedKeysAndIgnoresGlobalOnlyKeys(t *testing.T) {
 	globalPath := filepath.Join(t.TempDir(), "global.yaml")
 	writeTestFile(t, globalPath, `providers:
