@@ -561,9 +561,10 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 			}
 			if msg.Kind == message.KindSubAgentMailbox && msg.Mailbox != nil {
 				title := "AGENT MESSAGE"
-				if msg.Mailbox.Kind == "completed" {
+				switch agent.SubAgentMailboxKind(msg.Mailbox.Kind) {
+				case agent.SubAgentMailboxKindCompleted:
 					title = "AGENT COMPLETE"
-				} else if msg.Mailbox.Kind == "risk_alert" {
+				case agent.SubAgentMailboxKindRiskAlert:
 					title = "AGENT RISK"
 				}
 				block := &Block{

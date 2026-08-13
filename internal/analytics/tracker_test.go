@@ -301,7 +301,6 @@ func TestSessionStats_SnapshotIsolation(t *testing.T) {
 	snap := tracker.SessionStats()
 
 	// Mutate the snapshot.
-	snap.InputTokens = 999999
 	snap.ByModel["model-a"].Calls = 999
 	snap.ByAgent["main"].LLMCalls = 999
 

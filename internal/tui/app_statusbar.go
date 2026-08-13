@@ -43,7 +43,6 @@ func (m *Model) statusBarDynamicCacheKeyAt(now time.Time) string {
 	}
 	return m.statusBarDynamicCacheKeyFromState(
 		now,
-		focused,
 		m.viewport != nil && m.viewport.HasUserLocalShellPending(),
 		m.renderRequestProgressSummary(focused),
 		m.activityForAgent(focused).Type == agent.ActivityCompacting,
@@ -52,7 +51,7 @@ func (m *Model) statusBarDynamicCacheKeyAt(now time.Time) string {
 	)
 }
 
-func (m *Model) statusBarDynamicCacheKeyFromState(now time.Time, focused string, localShellPending bool, progress string, compacting, busy, latestStatusStart bool) string {
+func (m *Model) statusBarDynamicCacheKeyFromState(now time.Time, localShellPending bool, progress string, compacting, busy, latestStatusStart bool) string {
 	if localShellPending {
 		return m.visualAnimationCacheKeyAt(now)
 	}
@@ -152,7 +151,6 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 	}
 	dynamicCacheKey := m.statusBarDynamicCacheKeyFromState(
 		now,
-		statusActiveID,
 		localShellPending,
 		m.renderRequestProgressSummary(statusActiveID),
 		m.activityForAgent(statusActiveID).Type == agent.ActivityCompacting,

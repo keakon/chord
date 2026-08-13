@@ -295,9 +295,10 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		result = append(result, renderLSPDiagnosticsLines(editSuccessDiagnosticsContent(b.ResultContent), "    ", cardWidth-4)...)
 	}
 	if b.toolResultIsError() && b.ResultContent != "" {
-		if b.ToolName == tools.NameApplyPatch {
+		switch b.ToolName {
+		case tools.NameApplyPatch:
 			result = appendApplyPatchPreview(result, b.editPatchArgsJSON(), filePath, cardWidth-4)
-		} else if b.ToolName == tools.NameEdit {
+		case tools.NameEdit:
 			before := len(result)
 			result = appendEditPatchPreview(result, b.editPatchArgsJSON(), cardWidth-4)
 			if len(result) == before {

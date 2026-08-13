@@ -433,9 +433,10 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		delete(m.toolArgRenderState, evt.ID)
 		block, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, evt.State, false)
 		if block != nil {
-			if evt.State == agent.ToolCallExecutionStateQueued {
+			switch evt.State {
+			case agent.ToolCallExecutionStateQueued:
 				block.ToolQueuedByExecutionEvent = true
-			} else if evt.State == agent.ToolCallExecutionStateRunning {
+			case agent.ToolCallExecutionStateRunning:
 				block.ToolQueuedByExecutionEvent = false
 			}
 		}
@@ -461,9 +462,10 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			block.ToolExecutionState = evt.State
 			updated = true
 		}
-		if evt.State == agent.ToolCallExecutionStateQueued {
+		switch evt.State {
+		case agent.ToolCallExecutionStateQueued:
 			block.ToolQueuedByExecutionEvent = true
-		} else if evt.State == agent.ToolCallExecutionStateRunning {
+		case agent.ToolCallExecutionStateRunning:
 			block.ToolQueuedByExecutionEvent = false
 		}
 		if block.ToolProgress != nil {
