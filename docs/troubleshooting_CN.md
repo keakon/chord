@@ -110,6 +110,19 @@ DeepSeek 覆盖当前轮，preserved-thinking 模型覆盖全部历史。
 
 这类 WebSocket 会话状态不一致通常会由 Chord 使用本地完整对话自动重试恢复。如果错误反复出现，请导出诊断包，并在反馈中附上会话 ID。
 
+### `Cache R` 百分比明显偏低
+
+**现象**：信息面板的缓存读取百分比在 50% 左右（或其他远低于实际命中率的值），但请求体在轮次之间几乎没变，命中率本应接近 100%。
+
+排查步骤：
+
+1. 该百分比 = cache-read token 数 ÷ 完整输入侧（未缓存 + cache-read + cache-write）。它只看输入侧，输出量不会稀释它。
+2. Chord 按协议假设 usage 字段语义：`messages` provider 的 `input_tokens` 是未缓存输入，缓存桶单独上报；`chat-completions` / `responses` provider 的 `input_tokens` 已包含缓存命中部分。
+3. 兼容网关可能在暴露 `messages` 端点的同时，按另一套协议语义上报 usage——常见的是 `input_tokens` 为包含缓存命中的总输入，`cache_read_input_tokens` 只是其中的命中子集。Chord 于是把 cache-read 重复计了一次，显示出来的百分比大约被砍半。
+4. 要确认，可查看该会话的 LLM dump，再对照网关 usage 文档，或用相同请求的 token counting 结果核验原始字段。若文档或对照结果能确认 `input_tokens` 是完整输入，而 `cache_read_input_tokens` 只是其中一部分，再给该 provider 设置 `compat.usage.input_includes_cache_read: true`（见[配置](./configuration_CN.md)）。仅凭两个字段的大小关系不足以判断语义。
+
+已写入的 usage 记录是 append-only 的，改配置后不会被重算；只有新请求会按修正后的语义统计。
+
 ## MCP 一直未就绪
 
 先确认：

@@ -1279,6 +1279,17 @@ compat:
     input_includes_cache_write: false
 ```
 
+A Messages-compatible gateway that reports inclusive usage — `input_tokens` is
+the full input including cache hits, and `cache_read_input_tokens` is only the
+hit subset — needs the opposite override. Otherwise, Chord counts the cache
+reads twice and understates the cache-hit rate:
+
+```yaml
+compat:
+  usage:
+    input_includes_cache_read: true
+```
+
 OpenAI reasoning items can also be returned as `reasoning.encrypted_content` when you need stateless continuation. Treat that field as opaque continuation data: it is not meant to be rendered directly in the UI. When a readable summary is available, that is the user-facing form to show.
 
 ## Related

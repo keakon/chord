@@ -1145,6 +1145,14 @@ compat:
     input_includes_cache_write: false
 ```
 
+反过来，若某个 Messages 兼容网关按包含式语义上报——`input_tokens` 是包含缓存命中的总输入，`cache_read_input_tokens` 只是其中的命中子集——就需要设成 `true`，否则 Chord 会把 cache read 重复计一次，导致缓存命中率被低估：
+
+```yaml
+compat:
+  usage:
+    input_includes_cache_read: true
+```
+
 OpenAI 的 reasoning item 还可能通过 `reasoning.encrypted_content` 返回，用于无状态续传。这个字段是加密后的续传载荷，不适合直接在 UI 里展示；如果有可读摘要，应优先展示摘要而不是 encrypted payload。
 
 ## 相关文档

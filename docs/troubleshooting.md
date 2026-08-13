@@ -120,6 +120,37 @@ models.
 
 Chord normally recovers from this WebSocket conversation-state mismatch automatically by retrying with the full local conversation. If the error repeats, export a diagnostics bundle and include the session ID in your report.
 
+### `Cache R` percentage is much lower than expected
+
+**Symptom**: the info panel shows a cache-read percentage around 50% (or any
+value far from the actual hit rate) while the request body has barely changed
+between turns, so the hit rate should be close to 100%.
+
+What to check:
+
+1. The percentage is cache-read tokens divided by the full input side
+   (`uncached + cache-read + cache-write`). It only counts the input side, so
+   a large output does not dilute it.
+2. Chord assumes protocol semantics for usage fields: for `messages`
+   providers, `input_tokens` is the uncached input and the cache buckets are
+   reported separately; for `chat-completions` / `responses` providers,
+   `input_tokens` already includes the cached portion.
+3. A compatible gateway may report usage with the other protocol's semantics
+   while still exposing a `messages` endpoint — most commonly `input_tokens`
+   is the full input including cache hits, and `cache_read_input_tokens` is
+   only the hit subset. Chord then counts the cache reads twice, which
+   roughly halves the displayed percentage.
+4. To confirm, inspect a session LLM dump and compare its raw usage fields with
+   the gateway's usage documentation or a token-counting response for the same
+   request. If `input_tokens` is documented or verified as the full input while
+   `cache_read_input_tokens` is only a subset, set
+   `compat.usage.input_includes_cache_read: true` on that provider (see
+   [Configuration](./configuration.md)). The inequality between these two
+   fields alone is not enough to identify their semantics.
+
+Existing usage records are append-only and are not recalculated after a
+config change; only new requests use the corrected semantics.
+
 ## MCP never becomes ready
 
 Check first:
