@@ -50,3 +50,39 @@ func TestCalculateUsageCostUsesCacheWrite1hPrice(t *testing.T) {
 		t.Fatalf("unexpected cache write pricing snapshot: %+v", snapshot)
 	}
 }
+
+func TestCalculateUsageCostSelectsInputTierFromFullPrompt(t *testing.T) {
+	cost := &config.ModelCost{
+		Input:      1,
+		Output:     2,
+		CacheRead:  0.1,
+		CacheWrite: 0.2,
+		InputTiers: []config.ModelCostInputTier{{
+			AboveInputTokens: 1_000_000,
+			Input:            3,
+			Output:           4,
+			CacheRead:        0.3,
+			CacheWrite:       0.4,
+		}},
+	}
+	billing := NormalizeBillingUsage(UsageSnapshot{
+		InputTokens:      300_000,
+		OutputTokens:     100_000,
+		CacheReadTokens:  600_000,
+		CacheWriteTokens: 200_000,
+	})
+
+	got := CalculateUsageCost(cost, billing, config.ServiceTierStandard)
+	want := 0.9 + 0.4 + 0.18 + 0.08
+	if !almostEqual(got.TotalCost, want, 0.0001) {
+		t.Fatalf("total cost = %.4f, want %.4f (%+v)", got.TotalCost, want, got)
+	}
+
+	snapshot := PricingSnapshotFromCost(cost, billing, config.ServiceTierStandard)
+	if snapshot.InputTierAboveTokens != 1_000_000 {
+		t.Fatalf("input tier threshold = %d, want 1000000", snapshot.InputTierAboveTokens)
+	}
+	if snapshot.InputPerMillion != 3 || snapshot.OutputPerMillion != 4 || snapshot.CacheReadPerMillion != 0.3 || snapshot.CacheWritePerMillion != 0.4 {
+		t.Fatalf("unexpected long-context pricing snapshot: %+v", snapshot)
+	}
+}

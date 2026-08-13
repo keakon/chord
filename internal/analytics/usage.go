@@ -105,7 +105,8 @@ func CalculateUsageCost(cost *config.ModelCost, billing BillingUsage, tier confi
 	if cost == nil {
 		return out
 	}
-	resolved := cost.ResolvePricing(billing.InputTokens, tier)
+	fullInputTokens := FullInputTokens(billing.InputTokens, billing.CacheReadTokens, billing.CacheWriteTokens)
+	resolved := cost.ResolvePricing(fullInputTokens, tier)
 	cacheWrite1hTokens := min(billing.CacheWrite1hTokens, billing.CacheWriteTokens)
 	cacheWriteDefaultTokens := billing.CacheWriteTokens - cacheWrite1hTokens
 	out.InputCost = float64(billing.InputTokens) / 1_000_000 * resolved.Input
@@ -122,7 +123,8 @@ func PricingSnapshotFromCost(cost *config.ModelCost, billing BillingUsage, tier 
 	if cost == nil {
 		return out
 	}
-	resolved := cost.ResolvePricing(billing.InputTokens, tier)
+	fullInputTokens := FullInputTokens(billing.InputTokens, billing.CacheReadTokens, billing.CacheWriteTokens)
+	resolved := cost.ResolvePricing(fullInputTokens, tier)
 	out.InputPerMillion = resolved.Input
 	out.OutputPerMillion = resolved.Output
 	out.CacheReadPerMillion = resolved.CacheRead
