@@ -825,20 +825,19 @@ Reasoning-only turns are not copied as fallback text. This keeps cross-protocol
 context focused on action-relevant state and avoids paying repeatedly for old
 chain-of-thought that is not tied to a tool round.
 
-## Grok 4.5 (xAI Responses)
+## Grok 4.6 (xAI Responses)
 
-xAI recommends the Responses API for Grok. Grok 4.5 supports text and image
+xAI recommends the Responses API for Grok. Grok 4.6 supports text and image
 input, function calling, structured output, reasoning, and a 500K context
-window. It emits raw reasoning through `response.reasoning_text.*` stream
+window. It emits reasoning text through `response.reasoning_text.*` stream
 events; Chord maps those events to the normal thinking stream while preserving
 the ordered Responses output items for tool-loop continuity.
 
 ```yaml
 model_templates:
-  grok-4.5: &grok-4-5
+  grok-4.6: &grok-4-6
     limit:
       context: 500000
-      output: 64000 # conservative local allocation; xAI publishes the total context
     reasoning:
       effort: high
     modalities:
@@ -846,33 +845,39 @@ model_templates:
     cost:
       input: 2
       output: 6
-      cache_read: 0.3
+      cache_read: 0.5
       input_tiers:
         - above_input_tokens: 199999
           input: 4
           output: 12
-          cache_read: 0.6
-
+          cache_read: 1
 
 providers:
   xai:
     type: responses
     api_url: https://api.x.ai/v1/responses
     models:
-      grok-4.5: *grok-4-5
+      grok-4.6: *grok-4-6
 
 model_pools:
   default:
-    - xai/grok-4.5
+    - xai/grok-4.6
 ```
 
-Use `grok-4.5` or the rolling `grok-4.5-latest` alias. Do not configure
+xAI publishes a 500K total context window for Grok 4.6, but not a lower,
+separate model output cap, so this recipe omits `limit.output`. Chord therefore
+does not send `max_output_tokens` to xAI and lets the API fit output within the
+remaining context. Locally, Chord still reserves its default `64000` output
+budget when deriving the input budget from `limit.context`. Set `limit.output`,
+raise Chord's `max_output_tokens`, and enable
+`compat.responses.send_max_output_tokens: true` only when you intentionally
+want to enforce and send an explicit cap.
+
+Use `grok-4.6` as the model ID. Do not configure
 `openai_visible`: xAI Responses uses native ordered output/reasoning state, not
 Chat Completions `reasoning_content`. `reasoning.effort` accepts `low`,
-`medium`, or `high`; high is the default and reasoning cannot be disabled.
-`grok-4.20-fast` is not an official xAI model ID. The official
-`grok-4.20-multi-agent` model has a 1M context window and should be configured
-from its own current xAI model page rather than copied from Grok 4.5.
+`medium`, `high`, and `xhigh` (Grok 4.6 only; models that do not support it
+treat it as `high`). High is the default and reasoning cannot be disabled.
 
 ## Verify any recipe
 

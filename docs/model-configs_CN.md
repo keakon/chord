@@ -801,20 +801,19 @@ Chord 会保留已完成工具轮次中可迁移的部分：
 纯 reasoning-only 历史不会转换为 fallback 文本。这样可以把跨协议上下文
 集中在与动作相关的状态上，避免为和工具轮次无关的旧思考链重复付费。
 
-## Grok 4.5（xAI Responses）
+## Grok 4.6（xAI Responses）
 
-xAI 推荐通过 Responses API 使用 Grok。Grok 4.5 支持文本和图片输入、
+xAI 推荐通过 Responses API 使用 Grok。Grok 4.6 支持文本和图片输入、
 function calling、structured output、reasoning，并提供 500K 上下文。它通过
-`response.reasoning_text.*` 流事件返回原始 reasoning；Chord 会把这些事件
+`response.reasoning_text.*` 流事件返回 reasoning text；Chord 会把这些事件
 映射到统一 thinking stream，同时保存有序 Responses output item 以延续工具
 调用状态。
 
 ```yaml
 model_templates:
-  grok-4.5: &grok-4-5
+  grok-4.6: &grok-4-6
     limit:
       context: 500000
-      output: 64000 # 保守的本地分配；xAI 公布的是总上下文
     reasoning:
       effort: high
     modalities:
@@ -822,32 +821,37 @@ model_templates:
     cost:
       input: 2
       output: 6
-      cache_read: 0.3
+      cache_read: 0.5
       input_tiers:
         - above_input_tokens: 199999
           input: 4
           output: 12
-          cache_read: 0.6
-
+          cache_read: 1
 
 providers:
   xai:
     type: responses
     api_url: https://api.x.ai/v1/responses
     models:
-      grok-4.5: *grok-4-5
+      grok-4.6: *grok-4-6
 
 model_pools:
   default:
-    - xai/grok-4.5
+    - xai/grok-4.6
 ```
 
-可使用 `grok-4.5` 或滚动别名 `grok-4.5-latest`。不要配置
+xAI 只公布了 Grok 4.6 的 500K 总上下文窗口，没有再给出更低的独立模型输出
+上限，因此这里省略 `limit.output`。Chord 不会向 xAI 发送
+`max_output_tokens`，由 API 在剩余上下文内安排输出；本地从 `limit.context`
+推导输入预算时，仍会预留默认的 `64000` 输出预算。只有明确需要发送固定上限时，
+才配置 `limit.output`、提高 Chord 的 `max_output_tokens`，并设置
+`compat.responses.send_max_output_tokens: true`。
+
+可使用 `grok-4.6` 作为模型 ID。不要配置
 `openai_visible`：xAI Responses 使用原生有序 output / reasoning 状态，而非
 Chat Completions 的 `reasoning_content`。`reasoning.effort` 支持 `low`、
-`medium`、`high`；high 是默认值且不能关闭 reasoning。`grok-4.20-fast`
-不是 xAI 官方模型 ID。官方 `grok-4.20-multi-agent` 提供 1M 上下文，应按
-当前 xAI 型号页面单独配置，不要从 Grok 4.5 直接复制。
+`medium`、`high`、`xhigh`（仅 Grok 4.6 可用，不支持该档位的模型会按 `high`
+处理）；`high` 是默认值，且 reasoning 不可关闭。
 
 ## 如何验证任意一份配置
 
