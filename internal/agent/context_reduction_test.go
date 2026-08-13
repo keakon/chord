@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -252,5 +254,111 @@ func TestRepeatedInvalidatedReadClassifiesAsReadLikeNotRepeated(t *testing.T) {
 	second, _, _ := reduceRequestToolOutput(requestReductionReadLike, ctx)
 	if first != second {
 		t.Fatalf("read_like rendering is not deterministic:\n%q\nvs\n%q", first, second)
+	}
+}
+
+func TestSummarizeJSONObjectEntriesKeepsScalarValues(t *testing.T) {
+	content := `{"error":"permission denied on /etc/hosts","code":403,"retry_after":30,"nested":{"x":1,"y":[2,3]},"ok":true,"nil":null,"arr":[1,2,3]}`
+	var decoded any
+	if err := json.Unmarshal([]byte(content), &decoded); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	obj, ok := decoded.(map[string]any)
+	if !ok {
+		t.Fatalf("fixture type: %T", decoded)
+	}
+	lines := summarizeJSONObjectEntries(obj)
+	joined := strings.Join(lines, "\n")
+	// Scalar values must survive: the exact fields a model re-reads. Keys are
+	// quoted by summarizeJSONKey; assert on the value content plus quoted key.
+	if !strings.Contains(joined, `"error": "permission denied on /etc/hosts"`) {
+		t.Fatalf("object summary dropped string value: %q", joined)
+	}
+	if !strings.Contains(joined, `"code": 403`) {
+		t.Fatalf("object summary dropped number value: %q", joined)
+	}
+	if !strings.Contains(joined, `"retry_after": 30`) {
+		t.Fatalf("object summary dropped number value: %q", joined)
+	}
+	if !strings.Contains(joined, `"ok": true`) {
+		t.Fatalf("object summary dropped bool value: %q", joined)
+	}
+	if !strings.Contains(joined, `"nil": null`) {
+		t.Fatalf("object summary dropped null value: %q", joined)
+	}
+	// Nested containers collapse to shape markers, not bare keys.
+	if !strings.Contains(joined, `"nested": {"x", "y"}`) {
+		t.Fatalf("nested object should collapse to key shape: %q", joined)
+	}
+	if !strings.Contains(joined, `"arr": [3 items]`) {
+		t.Fatalf("nested array should collapse to item count: %q", joined)
+	}
+}
+
+func TestSummarizeJSONObjectEntriesTruncatesKeyList(t *testing.T) {
+	obj := map[string]any{}
+	for i := range 20 {
+		obj[fmt.Sprintf("k%02d", i)] = i
+	}
+	lines := summarizeJSONObjectEntries(obj)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "+12 more keys omitted") {
+		t.Fatalf("expected omission tail, got %q", joined)
+	}
+	if strings.Contains(joined, "k19:") {
+		t.Fatalf("overflow keys should be omitted: %q", joined)
+	}
+}
+
+func TestSummarizeJSONArrayItemsSamplesFirstMiddleLast(t *testing.T) {
+	items := make([]any, 7)
+	for i := range items {
+		items[i] = fmt.Sprintf("item-%d", i)
+	}
+	lines := summarizeJSONArrayItems(items, 3)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "[0]") || !strings.Contains(joined, "[3]") || !strings.Contains(joined, "[6]") {
+		t.Fatalf("expected first/middle/last sampling, got %q", joined)
+	}
+	if strings.Contains(joined, "[1]") || strings.Contains(joined, "[5]") {
+		t.Fatalf("unexpected interior-only indices in 3-item sample: %q", joined)
+	}
+}
+
+func TestNumberedSourceStats(t *testing.T) {
+	content := "1 package main\n\n3 func main() {\n5\tfmt.Println(\"x\")\n"
+	meaningful, note := numberedSourceStats(content)
+	if meaningful != 3 {
+		t.Fatalf("meaningful lines = %d, want 3", meaningful)
+	}
+	if note != " range=1-5" {
+		t.Fatalf("range note = %q, want range=1-5", note)
+	}
+	if _, note := numberedSourceStats("no numbers here\nplain text\n"); note != "" {
+		t.Fatalf("range note = %q, want empty", note)
+	}
+	if _, note := numberedSourceStats("42 only line\n"); note != " range=42" {
+		t.Fatalf("single line range note = %q, want range=42", note)
+	}
+}
+
+func TestParseNumberedSourceLine(t *testing.T) {
+	for _, tc := range []struct {
+		line    string
+		wantNum int
+		wantOk  bool
+	}{
+		{line: "12 func main() {", wantNum: 12, wantOk: true},
+		{line: "  3\t\timport \"fmt\"", wantNum: 3, wantOk: true},
+		{line: "1 package main", wantNum: 1, wantOk: true},
+		{line: "123", wantOk: false},    // all digits, no content
+		{line: "123abc", wantOk: false}, // no separator after digits
+		{line: "func main() {", wantOk: false},
+		{line: "", wantOk: false},
+	} {
+		num, ok := parseNumberedSourceLine(tc.line)
+		if ok != tc.wantOk || (ok && num != tc.wantNum) {
+			t.Fatalf("parseNumberedSourceLine(%q) = (%d, %v), want num=%d ok=%v", tc.line, num, ok, tc.wantNum, tc.wantOk)
+		}
 	}
 }

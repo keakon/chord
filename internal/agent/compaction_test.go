@@ -2324,6 +2324,9 @@ func TestPrepareMessagesForLLM_ShellNumberedSourceKeepsExcerpt(t *testing.T) {
 	if !strings.Contains(got, "Older shell output summarized as numbered source") || !strings.Contains(got, "1 package main") || !strings.Contains(got, "3 func main() {") {
 		t.Fatalf("expected shell numbered source summary to keep source excerpt, got %q", got)
 	}
+	if !strings.Contains(got, "range=1-6") {
+		t.Fatalf("expected numbered source summary to preserve source range, got %q", got)
+	}
 	if got == "[Older "+tools.NameShell+" output omitted from this request to save context.]" {
 		t.Fatalf("numbered source should not fall back to shell success omission")
 	}

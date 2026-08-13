@@ -2,10 +2,11 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -633,7 +634,7 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 		if compacted, ok := reduceDiagnosticsToolOutput(ctx.Content); ok {
 			return compacted, "diagnostics", true
 		}
-		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
+		return staleOutputOmittedMarker(ctx.Meta.Name), "stale", true
 	case requestReductionDiff:
 		return reduceDiffOutputSummary(ctx.Content), "diff", true
 	case requestReductionReadLike:
@@ -643,10 +644,14 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 	case requestReductionNumberedSrc:
 		return reduceNumberedSourceOutputSummary(ctx), "numbered_source", true
 	case requestReductionJSON:
-		if compacted, ok := reduceJSONBlobSummary(ctx); ok {
+		if compacted, ok := reduceJSONBlobSummary(ctx); ok && len(compacted) < len(ctx.Content) {
 			return compacted, "json_blob", true
 		}
-		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(ctx.Meta.Name)), "stale", true
+		omitted := staleOutputOmittedMarker(ctx.Meta.Name)
+		if len(omitted) < len(ctx.Content) {
+			return omitted, "stale", true
+		}
+		return "", "", false
 	case requestReductionLongLog:
 		return reduceLongLogOutputSummary(ctx), "long_log", true
 	case requestReductionShellOK:
@@ -656,6 +661,14 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 	default:
 		return "", "", false
 	}
+}
+
+// staleOutputOmittedMarker is the fallback rendering for an output whose
+// class-specific summarizer produced nothing usable. Callers pass whichever
+// name their class tracks: the reduction switch reads the recorded call meta,
+// while the read-like path reads the resolved tool name.
+func staleOutputOmittedMarker(toolName string) string {
+	return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(toolName))
 }
 
 func reduceToolErrorOutputSummary(ctx requestReductionContext) string {
@@ -706,7 +719,62 @@ func reduceNumberedSourceOutputSummary(ctx requestReductionContext) string {
 	if len(lines) == 0 {
 		lines = []string{"- (no preserved source excerpt)"}
 	}
-	return fmt.Sprintf("[Older %s output summarized as numbered source for this request; lines=%d bytes=%d]\n%s", toolNameOrUnknown(ctx.ToolName), countMeaningfulLines(ctx.Content), len(ctx.Content), strings.Join(lines, "\n"))
+	meaningfulLines, rangeNote := numberedSourceStats(ctx.Content)
+	return fmt.Sprintf("[Older %s output summarized as numbered source for this request; lines=%d bytes=%d%s]\n%s", toolNameOrUnknown(ctx.ToolName), meaningfulLines, len(ctx.Content), rangeNote, strings.Join(lines, "\n"))
+}
+
+// numberedSourceStats reports the meaningful line count and first→last source
+// range in one pass. The range is empty when no line numbers could be parsed.
+func numberedSourceStats(content string) (int, string) {
+	meaningful := 0
+	first, last := 0, 0
+	found := false
+	forEachLine(content, func(line string) bool {
+		if strings.TrimSpace(line) == "" {
+			return true
+		}
+		meaningful++
+		num, ok := parseNumberedSourceLine(line)
+		if !ok {
+			return true
+		}
+		if !found {
+			first = num
+			found = true
+		}
+		last = num
+		return true
+	})
+	if !found {
+		return meaningful, ""
+	}
+	if first == last {
+		return meaningful, fmt.Sprintf(" range=%d", first)
+	}
+	return meaningful, fmt.Sprintf(" range=%d-%d", first, last)
+}
+
+// parseNumberedSourceLine extracts the line number from "123 content".
+// A number must be followed by whitespace so identifiers like "123abc" are
+// not mistaken for source line numbers. Content after the separator may be
+// empty because nl still numbers blank source lines.
+func parseNumberedSourceLine(line string) (num int, ok bool) {
+	trimmed := strings.TrimLeft(line, " \t")
+	digits := 0
+	for digits < len(trimmed) && trimmed[digits] >= '0' && trimmed[digits] <= '9' {
+		digits++
+	}
+	if digits == 0 || digits == len(trimmed) {
+		return 0, false
+	}
+	if trimmed[digits] != ' ' && trimmed[digits] != '\t' {
+		return 0, false
+	}
+	n, err := strconv.Atoi(trimmed[:digits])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 func looksLikeSearchResult(ctx requestReductionContext) bool {
@@ -1116,20 +1184,22 @@ func summarizeSearchResultLines(content string, limit int) []string {
 
 func reduceJSONBlobSummary(ctx requestReductionContext) (string, bool) {
 	var decoded any
-	if err := json.Unmarshal([]byte(ctx.Content), &decoded); err != nil {
+	dec := json.NewDecoder(strings.NewReader(ctx.Content))
+	dec.UseNumber()
+	if err := dec.Decode(&decoded); err != nil {
+		return "", false
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return "", false
 	}
 	switch v := decoded.(type) {
 	case map[string]any:
-		keys := make([]string, 0, len(v))
-		for key := range v {
-			keys = append(keys, key)
+		lines := summarizeJSONObjectEntries(v)
+		if len(lines) == 0 {
+			lines = []string{"- (no preserved entries)"}
 		}
-		sort.Strings(keys)
-		if len(keys) > 8 {
-			keys = append(keys[:8], fmt.Sprintf("... (+%d more)", len(v)-8))
-		}
-		return fmt.Sprintf("[Older %s JSON object summarized to save context; keys=%d]\n- top-level keys: %s", toolNameOrUnknown(ctx.ToolName), len(v), strings.Join(keys, ", ")), true
+		return fmt.Sprintf("[Older %s JSON object summarized to save context; keys=%d]\n%s", toolNameOrUnknown(ctx.ToolName), len(v), strings.Join(lines, "\n")), true
 	case []any:
 		items := summarizeJSONArrayItems(v, 3)
 		if len(items) == 0 {
@@ -1141,15 +1211,112 @@ func reduceJSONBlobSummary(ctx requestReductionContext) (string, bool) {
 	}
 }
 
+// summarizeJSONObjectEntries keeps scalar values before nested containers — the
+// exact fields a model most often re-reads across requests — while rendering
+// containers as shape markers.
+func summarizeJSONObjectEntries(v map[string]any) []string {
+	scalarKeys := make([]string, 0, len(v))
+	containerKeys := make([]string, 0, len(v))
+	for key, value := range v {
+		switch value.(type) {
+		case []any, map[string]any:
+			containerKeys = append(containerKeys, key)
+		default:
+			scalarKeys = append(scalarKeys, key)
+		}
+	}
+	slices.Sort(scalarKeys)
+	slices.Sort(containerKeys)
+	const maxEntries = 8
+	scalarCount := min(len(scalarKeys), maxEntries)
+	containerCount := min(len(containerKeys), maxEntries-scalarCount)
+	omitted := len(v) - scalarCount - containerCount
+	out := make([]string, 0, scalarCount+containerCount+min(omitted, 1))
+	for _, key := range scalarKeys[:scalarCount] {
+		out = append(out, "- "+summarizeJSONKey(key)+": "+summarizeJSONValue(v[key]))
+	}
+	for _, key := range containerKeys[:containerCount] {
+		out = append(out, "- "+summarizeJSONKey(key)+": "+summarizeJSONValue(v[key]))
+	}
+	if omitted > 0 {
+		out = append(out, fmt.Sprintf("- ... (+%d more keys omitted) ...", omitted))
+	}
+	return out
+}
+
+func summarizeJSONKey(key string) string {
+	return strconv.Quote(compactTextSnippet(key, summaryLineSnippetChars))
+}
+
+// summarizeJSONValue renders a decoded JSON value as a compact summary.
+// Scalar values keep their content (truncated); nested containers collapse to
+// a shape marker so the summary stays small while still identifying the value
+// kind.
+func summarizeJSONValue(value any) string {
+	switch t := value.(type) {
+	case nil:
+		return "null"
+	case string:
+		return strconv.Quote(compactTextSnippet(t, summaryLineSnippetChars))
+	case bool:
+		return strconv.FormatBool(t)
+	case json.Number:
+		return strings.ReplaceAll(compactTextSnippet(t.String(), summaryLineSnippetChars), "\n", " ")
+	case []any:
+		return fmt.Sprintf("[%d items]", len(t))
+	case map[string]any:
+		return summarizeJSONNestedKeys(t)
+	default:
+		if raw, err := json.Marshal(value); err == nil {
+			return strings.ReplaceAll(compactTextSnippet(string(raw), summaryLineSnippetChars), "\n", " ")
+		}
+		return ""
+	}
+}
+
+// summarizeJSONNestedKeys renders a nested object's key set as a compact shape
+// marker; its values are deliberately omitted (the top-level pass already kept
+// the scalar values the model reads directly).
+func summarizeJSONNestedKeys(v map[string]any) string {
+	if len(v) == 0 {
+		return "{}"
+	}
+	keys := make([]string, 0, len(v))
+	for key := range v {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	const maxNested = 5
+	shown := min(len(keys), maxNested)
+	for i := range shown {
+		keys[i] = summarizeJSONKey(keys[i])
+	}
+	s := "{" + strings.Join(keys[:shown], ", ")
+	if len(keys) > maxNested {
+		s += fmt.Sprintf(", ... (+%d more)", len(keys)-maxNested)
+	}
+	return s + "}"
+}
+
 func summarizeJSONArrayItems(items []any, limit int) []string {
 	if limit <= 0 || len(items) == 0 {
 		return nil
 	}
-	limit = min(limit, len(items))
+	if limit > len(items) {
+		limit = len(items)
+	}
+	// Sample first/middle/last rather than a naive head slice: arrays are often
+	// time-ordered or sorted, but the representative item can sit anywhere.
+	// Keeping both ends plus an interior item covers more shapes than three
+	// head items, which systematically miss the tail.
 	out := make([]string, 0, limit)
 	for i := range limit {
-		rendered, _ := json.Marshal(items[i])
-		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(string(rendered), summaryLineSnippetChars), "\n", " "))
+		idx := 0
+		if limit > 1 {
+			idx = (len(items) - 1) * i / (limit - 1)
+		}
+		rendered, _ := json.Marshal(items[idx])
+		out = append(out, fmt.Sprintf("- [%d] %s", idx, strings.ReplaceAll(compactTextSnippet(string(rendered), summaryLineSnippetChars), "\n", " ")))
 	}
 	return out
 }
@@ -1971,7 +2138,7 @@ func reduceReadLikeOutputSummary(ctx requestReductionContext) string {
 	case tools.NameWebFetch:
 		return reduceWebFetchOutputSummary(ctx.Meta.Args, ctx.Content)
 	default:
-		return fmt.Sprintf("[Older %s output omitted from this request to save context.]", toolNameOrUnknown(ctx.ToolName))
+		return staleOutputOmittedMarker(ctx.ToolName)
 	}
 }
 
