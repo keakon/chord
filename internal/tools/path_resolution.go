@@ -115,6 +115,14 @@ func ResolveToolPathInDir(path, baseDir string) (string, error) {
 	return resolveToolPathInDir(path, baseDir)
 }
 
+// ResolveToolPathAbsInDir resolves path against baseDir and returns it in
+// absolute form. Callers that key on a path (deduping edits, comparing against
+// a recorded path) need the absolute form so the relative and absolute
+// spellings of one file collapse to a single key.
+func ResolveToolPathAbsInDir(path, baseDir string) (string, error) {
+	return resolveToolPathAbsInDir(path, baseDir)
+}
+
 func resolveToolPathAbs(path string) (string, error) {
 	resolved, err := resolveToolPath(path)
 	if err != nil {

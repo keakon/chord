@@ -12,10 +12,11 @@ import (
 
 // FileEdit records a single changed-file event (Write, Edit, or Delete tool call).
 type FileEdit struct {
-	Path    string // file path
-	Added   int    // added lines
-	Removed int    // removed lines
-	Deleted bool   // file was deleted
+	Path          string // file path
+	Added         int    // added lines
+	Removed       int    // removed lines
+	Deleted       bool   // file was deleted
+	stateSequence uint64
 }
 
 // SidebarEntry represents a single agent in the sidebar listing.
@@ -43,9 +44,11 @@ type SidebarEntry struct {
 type Sidebar struct {
 	agents       []SidebarEntry
 	focusedID    string // instance ID of focused agent ("" or "main" = main agent)
+	workingDir   string // project root used to canonicalize changed-file paths
 	width        int
 	theme        Theme
 	pendingTasks int // Delegate tool calls that have started but whose SubAgent hasn't appeared yet
+	fileEditSeq  uint64
 }
 
 // DefaultSidebarWidth is the fixed width (in terminal columns) for the sidebar
@@ -57,6 +60,27 @@ func NewSidebar(theme Theme) Sidebar {
 	return Sidebar{
 		width: DefaultSidebarWidth,
 		theme: theme,
+	}
+}
+
+// SetWorkingDir sets the project root used to merge equivalent changed-file paths.
+func (s *Sidebar) SetWorkingDir(workingDir string) {
+	if s == nil {
+		return
+	}
+	workingDir = strings.TrimSpace(workingDir)
+	if s.workingDir == workingDir {
+		return
+	}
+	previousWorkingDir := s.workingDir
+	s.workingDir = workingDir
+	for i := range s.agents {
+		edits := make([]FileEdit, 0, len(s.agents[i].EditedFiles))
+		for _, edit := range s.agents[i].EditedFiles {
+			edit.Path = normalizeSidebarFilePath(resolveSidebarFilePath(edit.Path, previousWorkingDir), workingDir)
+			edits = append(edits, edit)
+		}
+		s.agents[i].EditedFiles = mergeSidebarFileEdits(edits)
 	}
 }
 
@@ -379,7 +403,7 @@ func (s *Sidebar) addFileChange(agentID, filePath string, added, removed int, de
 
 func (s *Sidebar) addFileChangeWithEmpty(agentID, filePath string, added, removed int, deleted, keepEmpty bool) {
 	agentID = normalizeSidebarAgentID(agentID)
-	filePath = filepath.Clean(filePath)
+	filePath = normalizeSidebarFilePath(filePath, s.workingDir)
 	for i := range s.agents {
 		if s.agents[i].ID != agentID {
 			continue
@@ -389,10 +413,12 @@ func (s *Sidebar) addFileChangeWithEmpty(agentID, filePath string, added, remove
 			if s.agents[i].EditedFiles[j].Path == filePath {
 				s.agents[i].EditedFiles[j].Added += added
 				s.agents[i].EditedFiles[j].Removed += removed
-				if deleted {
-					s.agents[i].EditedFiles[j].Deleted = true
-				} else if added != 0 || removed != 0 || keepEmpty {
-					s.agents[i].EditedFiles[j].Deleted = false
+				// Only a call that carries an actual state transition restamps
+				// the sequence; a no-op re-report must not win the merge.
+				if deleted || added != 0 || removed != 0 || keepEmpty {
+					s.fileEditSeq++
+					s.agents[i].EditedFiles[j].Deleted = deleted
+					s.agents[i].EditedFiles[j].stateSequence = s.fileEditSeq
 				}
 				return
 			}
@@ -401,19 +427,68 @@ func (s *Sidebar) addFileChangeWithEmpty(agentID, filePath string, added, remove
 		if added == 0 && removed == 0 && !deleted && !keepEmpty {
 			return
 		}
+		s.fileEditSeq++
 		// New file entry (cap at 50 to avoid unbounded growth).
 		const maxEditedFiles = 50
 		s.agents[i].EditedFiles = append(s.agents[i].EditedFiles, FileEdit{
-			Path:    filePath,
-			Added:   added,
-			Removed: removed,
-			Deleted: deleted,
+			Path:          filePath,
+			Added:         added,
+			Removed:       removed,
+			Deleted:       deleted,
+			stateSequence: s.fileEditSeq,
 		})
 		if len(s.agents[i].EditedFiles) > maxEditedFiles {
 			s.agents[i].EditedFiles = s.agents[i].EditedFiles[len(s.agents[i].EditedFiles)-maxEditedFiles:]
 		}
 		return
 	}
+}
+
+func normalizeSidebarFilePath(filePath, workingDir string) string {
+	return filepath.Clean(displayToolPath(filePath, workingDir))
+}
+
+func resolveSidebarFilePath(filePath, workingDir string) string {
+	filePath = strings.TrimSpace(filePath)
+	if filePath == "" {
+		return filePath
+	}
+	// Without a project root there is nothing to anchor a relative path to, so
+	// resolve it without forcing an absolute form against the process cwd.
+	if strings.TrimSpace(workingDir) == "" {
+		resolved, err := tools.ResolveToolPathInDir(filePath, workingDir)
+		if err != nil {
+			return filePath
+		}
+		return resolved
+	}
+	resolved, err := tools.ResolveToolPathAbsInDir(filePath, workingDir)
+	if err != nil {
+		return filePath
+	}
+	return resolved
+}
+
+func mergeSidebarFileEdits(edits []FileEdit) []FileEdit {
+	if len(edits) == 0 {
+		return edits
+	}
+	normalized := make([]FileEdit, 0, len(edits))
+	byPath := make(map[string]int, len(edits))
+	for _, edit := range edits {
+		if idx, ok := byPath[edit.Path]; ok {
+			normalized[idx].Added += edit.Added
+			normalized[idx].Removed += edit.Removed
+			if edit.stateSequence >= normalized[idx].stateSequence {
+				normalized[idx].Deleted = edit.Deleted
+				normalized[idx].stateSequence = edit.stateSequence
+			}
+			continue
+		}
+		byPath[edit.Path] = len(normalized)
+		normalized = append(normalized, edit)
+	}
+	return normalized
 }
 
 func normalizeSidebarAgentID(agentID string) string {

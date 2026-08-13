@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -320,6 +321,102 @@ func TestSidebarNormalizesDeletePathToMatchEditPath(t *testing.T) {
 	// Stats from edit should be preserved
 	if edits[0].Added != 5 || edits[0].Removed != 2 {
 		t.Fatalf("diff stats = +%d -%d, want +5 -2", edits[0].Added, edits[0].Removed)
+	}
+}
+
+func TestSidebarNormalizesAbsoluteAndRelativePathsAgainstWorkingDir(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update(nil, "main", "builder")
+	workingDir := t.TempDir()
+	relPath := filepath.Join("app", "recall.py")
+	absPath := filepath.Join(workingDir, relPath)
+
+	sidebar.AddFileEdit("main", absPath, 6, 4)
+	sidebar.AddFileDelete("main", relPath)
+	sidebar.AddFileEdit("main", relPath, 3, 2)
+	sidebar.SetWorkingDir(workingDir)
+
+	edits := sidebar.agents[0].EditedFiles
+	if got := len(edits); got != 1 {
+		t.Fatalf("edited files = %d, want 1 after delete and restore: %+v", got, edits)
+	}
+	if edits[0].Path != relPath {
+		t.Fatalf("normalized path = %q, want %q", edits[0].Path, relPath)
+	}
+	if edits[0].Deleted {
+		t.Fatalf("deleted flag should clear after later edit: %+v", edits[0])
+	}
+	if edits[0].Added != 9 || edits[0].Removed != 6 {
+		t.Fatalf("diff stats = +%d -%d, want +9 -6", edits[0].Added, edits[0].Removed)
+	}
+}
+
+func TestSidebarRenormalizationPreservesLatestStateAcrossPathForms(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update(nil, "main", "builder")
+	workingDir := t.TempDir()
+	relPath := filepath.Join("app", "recall.py")
+	absPath := filepath.Join(workingDir, relPath)
+
+	sidebar.AddFileEdit("main", absPath, 6, 4)
+	sidebar.AddFileDelete("main", relPath)
+	sidebar.AddFileEdit("main", absPath, 3, 2)
+	sidebar.SetWorkingDir(workingDir)
+
+	edits := sidebar.agents[0].EditedFiles
+	if got := len(edits); got != 1 {
+		t.Fatalf("edited files = %d, want 1 after delete and restore: %+v", got, edits)
+	}
+	if edits[0].Deleted {
+		t.Fatalf("deleted flag should reflect the latest edit across path forms: %+v", edits[0])
+	}
+	if edits[0].Added != 9 || edits[0].Removed != 6 {
+		t.Fatalf("diff stats = +%d -%d, want +9 -6", edits[0].Added, edits[0].Removed)
+	}
+}
+
+func TestSidebarNormalizesPathsAsChangesArrive(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	workingDir := t.TempDir()
+	sidebar.SetWorkingDir(workingDir)
+	sidebar.Update(nil, "main", "builder")
+
+	filePath := filepath.Join("app", "main.go")
+	sidebar.AddFileEdit("main", filepath.Join(workingDir, filePath), 6, 4)
+	sidebar.AddFileDelete("main", filePath)
+	sidebar.AddFileEdit("main", filePath, 3, 2)
+
+	edits := sidebar.agents[0].EditedFiles
+	if got := len(edits); got != 1 {
+		t.Fatalf("edited files = %d, want 1 after delete and restore: %+v", got, edits)
+	}
+	if edits[0].Path != filePath {
+		t.Fatalf("normalized path = %q, want %q", edits[0].Path, filePath)
+	}
+	if edits[0].Deleted {
+		t.Fatalf("deleted flag should clear after later edit: %+v", edits[0])
+	}
+	if edits[0].Added != 9 || edits[0].Removed != 6 {
+		t.Fatalf("diff stats = +%d -%d, want +9 -6", edits[0].Added, edits[0].Removed)
+	}
+}
+
+func TestSidebarRenormalizesPathsWhenWorkingDirChanges(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	workingDir := t.TempDir()
+	sidebar.SetWorkingDir(filepath.Join(workingDir, "nested"))
+	sidebar.Update(nil, "main", "builder")
+	sidebar.AddFileEdit("main", "main.go", 2, 1)
+
+	sidebar.SetWorkingDir(workingDir)
+
+	edits := sidebar.agents[0].EditedFiles
+	if got := len(edits); got != 1 {
+		t.Fatalf("edited files = %d, want 1: %+v", got, edits)
+	}
+	want := filepath.Join("nested", "main.go")
+	if edits[0].Path != want {
+		t.Fatalf("normalized path after working directory change = %q, want %q", edits[0].Path, want)
 	}
 }
 

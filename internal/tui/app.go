@@ -501,6 +501,7 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		renderCacheState:           renderCacheState{statusBarAgentSnapshotDirty: true},
 	}
 	m.viewport.SetWorkingDir(wd)
+	m.sidebar.SetWorkingDir(wd)
 	m.viewport.SetErrorDetailsHint(errorDetailsHint(m.keyMap))
 	if a != nil {
 		pending, sessionID := a.StartupResumeStatus()
@@ -541,15 +542,16 @@ func (m *Model) syncWorkingDirFromAgent() {
 			wd = projectRoot
 		}
 	}
-	if wd == m.workingDir {
-		if m.viewport != nil {
-			m.viewport.SetWorkingDir(wd)
-		}
-		return
-	}
+	// The working dir is pushed to both views on every sync, not only when it
+	// changes: a view constructed after the last change still needs it.
+	changed := wd != m.workingDir
 	m.workingDir = wd
 	if m.viewport != nil {
 		m.viewport.SetWorkingDir(wd)
+	}
+	m.sidebar.SetWorkingDir(wd)
+	if !changed {
+		return
 	}
 	m.invalidateStatusBarAgentSnapshot()
 	m.invalidateDrawCaches()

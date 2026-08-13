@@ -418,6 +418,54 @@ func TestStartupRestoredDeferredTranscriptUsesUpdatedProjectRootForRelativeToolP
 	}
 }
 
+func TestStartupRestoreRenormalizesSidebarFilesForUpdatedProjectRoot(t *testing.T) {
+	projectRoot := t.TempDir()
+	editedPath := filepath.Join(projectRoot, "internal", "tui", "app.go")
+	args, err := json.Marshal(map[string]string{
+		"path":       editedPath,
+		"old_string": "old",
+		"new_string": "new",
+	})
+	if err != nil {
+		t.Fatalf("marshal edit args: %v", err)
+	}
+	backend := &sessionControlAgent{
+		resumePending:   true,
+		startupResumeID: "123",
+		projectRoot:     projectRoot,
+		messages: []message.Message{
+			{Role: "assistant", ToolCalls: []message.ToolCall{{
+				ID:   "call-edit-root-1",
+				Name: tools.NameEdit,
+				Args: args,
+			}}},
+			{
+				Role:            "tool",
+				ToolCallID:      "call-edit-root-1",
+				ToolStatus:      string(agent.ToolResultStatusSuccess),
+				ToolDiff:        "diff",
+				ToolDiffAdded:   2,
+				ToolDiffRemoved: 1,
+			},
+		},
+	}
+	m := NewModelWithSize(backend, 120, 24)
+	m.workingDir = t.TempDir()
+	m.sidebar.SetWorkingDir(m.workingDir)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+
+	edits := m.sidebar.CurrentAgentFiles()
+	if got := len(edits); got != 1 {
+		t.Fatalf("sidebar edits after startup restore = %d, want 1: %+v", got, edits)
+	}
+	want := filepath.Join("internal", "tui", "app.go")
+	if edits[0].Path != want {
+		t.Fatalf("sidebar path after startup restore = %q, want %q", edits[0].Path, want)
+	}
+}
+
 func TestDeferredStartupTranscriptSearchRevealExpandsToolCallContent(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
 	for i := range startupTranscriptWindowMinBlocks + 110 {
