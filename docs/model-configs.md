@@ -535,10 +535,7 @@ deepseek:
 
 `deepseek-v4-pro` and `deepseek-v4-flash` share the same API surface, so the
 protocol-level config is identical; they reuse the wire-family templates
-below. `deepseek-v4-flash` is the official release of 2026-07-31
-(DeepSeek-V4-Flash-0731; the API model ID is unchanged and automatically
-routes to the official build) and natively supports the Responses API;
-`deepseek-v4-pro`'s Responses support is still announced as upcoming.
+below. Both models support the Responses API.
 
 ```yaml
 model_templates:
@@ -567,6 +564,8 @@ model_templates:
             type: enabled
       reasoning_continuity:
         mode: openai_visible
+      forced_tool_choice:
+        suppress_in_thinking: true
 
   deepseek-v4-messages: &deepseek-v4-messages
     limit:
@@ -608,6 +607,12 @@ model_templates:
       max:
         reasoning:
           effort: max
+    compat:
+      responses:
+        send_reasoning_include: false
+        send_max_output_tokens: true
+      reasoning_continuity:
+        mode: openai_visible
 
 providers:
   deepseek:
@@ -628,6 +633,7 @@ providers:
     type: responses
     api_url: https://api.deepseek.com/v1/responses
     models:
+      deepseek-v4-pro: *deepseek-v4-responses
       deepseek-v4-flash: *deepseek-v4-responses
 
 model_pools:
@@ -640,7 +646,14 @@ Notes:
 - DeepSeek Chat thinking uses `thinking.type`, top-level `reasoning_effort`, and
   `max_tokens`. `request_overrides` supplies the request-shape differences;
   during thinking + tool-call loops, `openai_visible` returns the assistant's
-  `reasoning_content` unchanged.
+  `reasoning_content` unchanged. DeepSeek rejects forced tool choice while
+  thinking is active, so the template downgrades loop-forced `tool_choice:
+  required` to the backend default for those requests.
+- DeepSeek Responses supports `tool_choice: required`, so its template keeps
+  loop-forced tool choice. Plaintext `reasoning_text` makes the encrypted
+  reasoning include unnecessary, while `max_output_tokens` remains enabled
+  because the endpoint supports it. Other unsupported fields are silently
+  ignored by DeepSeek.
 - DeepSeek Messages supports `output_config.effort`; Chord derives it from
   `thinking.effort`. Disable Anthropic beta headers for the compatible endpoint.
   DeepSeek's Anthropic-compatible endpoint may return unsigned `thinking`
@@ -650,7 +663,8 @@ Notes:
   if the target still rejects that shape, strict compatibility drops the
   reasoning carrier while preserving the tool round.
 - Treat third-party `/responses` endpoints as gateway-specific; use
-  `reasoning.effort` only when the gateway documents its mapping.
+  `reasoning.effort` and `openai_visible` only when the gateway documents its
+  mapping.
 - For compatible gateways, use the exact model ID and limits published by that
   gateway/account. See [Troubleshooting — DeepSeek / OpenAI-compatible thinking-mode 400s](./troubleshooting.md#deepseek--openai-compatible-thinking-mode-400s).
 
@@ -659,11 +673,9 @@ Additional notes:
 - The official pricing page lists a maximum output of 384K; `limit.output:
   64000` here is a conservative local allocation shared with pro. Raise it as
   needed for longer outputs.
-- Flash natively supports the Responses API (`api.deepseek.com/v1/responses`);
-  pro's Responses support is still upcoming, so `deepseek-responses` above
-  lists flash only. The `output_tokens_details.reasoning_tokens` field in
-  responses is handled by Chord's standard reasoning replay without extra
-  configuration.
+- Flash and pro support the Responses API (`api.deepseek.com/v1/responses`).
+  The `output_tokens_details.reasoning_tokens` field in responses is handled
+  by Chord's standard reasoning replay without extra configuration.
 - `reasoning_effort` officially supports `low` / `high` / `max` (default
   `high`). `xhigh` is mapped to `high` and `medium` to `high`, so the
   templates define only the `low` / `high` / `max` variants.

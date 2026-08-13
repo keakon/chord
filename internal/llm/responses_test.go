@@ -3344,6 +3344,11 @@ func TestResponsesProvider_ReasoningSummaryDefaultsToAuto(t *testing.T) {
 			tuning:      RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "high", ReasoningSummary: "none"}},
 			wantSummary: nil,
 		},
+		{
+			name:        "effort none keeps summary absent",
+			tuning:      RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "none"}},
+			wantSummary: nil,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var gotBody map[string]any
@@ -3384,5 +3389,139 @@ func TestResponsesProvider_ReasoningSummaryDefaultsToAuto(t *testing.T) {
 				t.Fatalf("reasoning.summary = %#v, want %#v", got, tc.wantSummary)
 			}
 		})
+	}
+}
+
+func TestResponsesProvider_SuppressesForcedToolChoiceUnderThinking(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		overrides  *config.RequestOverridesConfig
+		tuning     RequestTuning
+		wantChoice any
+	}{
+		{
+			name:       "suppressed under thinking",
+			tuning:     RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required", ReasoningEffort: "high"}},
+			wantChoice: "auto",
+		},
+		{
+			name:       "kept when reasoning effort is none",
+			tuning:     RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required", ReasoningEffort: "none"}},
+			wantChoice: "required",
+		},
+		{
+			// Codex emits the reasoning block with the effort omitted and only a
+			// summary carried. That request still thinks, so the probe must not
+			// read the absent effort as an opt-out.
+			name:       "suppressed when only a summary is configured",
+			tuning:     RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required", ReasoningSummary: "detailed"}},
+			wantChoice: "auto",
+		},
+		{
+			name:       "kept when no reasoning is configured",
+			tuning:     RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required"}},
+			wantChoice: "required",
+		},
+		{
+			name: "kept when override disables reasoning",
+			overrides: &config.RequestOverridesConfig{Body: map[string]any{
+				"reasoning": map[string]any{"effort": "none"},
+			}},
+			tuning:     RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required", ReasoningEffort: "high"}},
+			wantChoice: "required",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+				_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			}))
+			defer server.Close()
+
+			providerCfg := NewProviderConfig("sample", config.ProviderConfig{
+				Type:   config.ProviderTypeResponses,
+				APIURL: server.URL + "/v1/responses",
+				Models: map[string]config.ModelConfig{
+					"test-model": {
+						Compat: &config.ModelCompatConfig{
+							ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(true)},
+							RequestOverrides: tc.overrides,
+						},
+					},
+				},
+			}, []string{"test-key"})
+			r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+			_, err := r.CompleteStream(
+				context.Background(), "test-key", "test-model", "",
+				[]message.Message{{Role: "user", Content: "hello"}},
+				nil, 0, tc.tuning,
+				func(message.StreamDelta) {},
+			)
+			if err != nil {
+				t.Fatalf("CompleteStream: %v", err)
+			}
+			if got := gotBody["tool_choice"]; got != tc.wantChoice {
+				t.Fatalf("tool_choice = %#v, want %#v", got, tc.wantChoice)
+			}
+		})
+	}
+}
+
+func TestResponsesProvider_SynthesizesReasoningTextForReplay(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	providerCfg := NewProviderConfig("sample", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/v1/responses",
+		Models: map[string]config.ModelConfig{
+			"test-model": {
+				Compat: &config.ModelCompatConfig{
+					ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
+				},
+			},
+		},
+	}, []string{"test-key"})
+	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+	_, err := r.CompleteStream(
+		context.Background(), "test-key", "test-model", "",
+		[]message.Message{
+			{Role: "user", Content: "do the thing"},
+			{Role: "assistant", Content: "done", ToolCalls: []message.ToolCall{{ID: "call_1", Name: "read", Args: json.RawMessage(`{}`)}}},
+			{Role: "tool", ToolCallID: "call_1", Content: "result"},
+		},
+		nil, 0, RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "high"}},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+
+	input, ok := gotBody["input"].([]any)
+	if !ok {
+		t.Fatalf("input = %#v, want array", gotBody["input"])
+	}
+	var kinds []string
+	for _, raw := range input {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("input item = %#v, want object", raw)
+		}
+		kinds = append(kinds, item["type"].(string))
+	}
+	// A synthesized reasoning item must precede the replayed assistant turn
+	// that has no native reasoning payload.
+	want := "message,reasoning,message,function_call,function_call_output"
+	if got := strings.Join(kinds, ","); got != want {
+		t.Fatalf("input item types = %v, want %v", kinds, want)
 	}
 }

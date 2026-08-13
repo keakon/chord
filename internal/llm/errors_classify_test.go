@@ -204,6 +204,23 @@ func TestReasoningReplay400FallsBackToAnotherModel(t *testing.T) {
 	}
 }
 
+func TestResponsesReasoningTextReplay400FallsBackToAnotherModel(t *testing.T) {
+	t.Parallel()
+	err := &APIError{StatusCode: 400, Message: "The request is invalid: The `reasoning_text` in the thinking mode must be passed back to the API.. Please check the request body, required fields, and request format."}
+	if !isReasoningReplayRejection(err) {
+		t.Fatal("responses reasoning_text 400 should be classified as a replay rejection")
+	}
+	if !shouldFallback(err) {
+		t.Fatal("responses reasoning_text replay 400 should be fallback-eligible for another model")
+	}
+	if isRetriable(err) {
+		t.Fatal("responses reasoning_text replay 400 should not rotate keys on same model globally")
+	}
+	if !isTerminalModelPoolFailureForProvider(nil, err) {
+		t.Fatal("responses reasoning_text replay 400 should stop after model pool exhaustion by default")
+	}
+}
+
 func TestAnthropicThinkingReplay400FallsBackToAnotherModel(t *testing.T) {
 	t.Parallel()
 	err := &APIError{StatusCode: 400, Message: "The `content[].thinking` in the thinking mode must be passed back to the API."}

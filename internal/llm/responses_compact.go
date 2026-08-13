@@ -136,13 +136,7 @@ func (r *ResponsesProvider) Compact(
 	// is configured (effort may be omitted). Compact is currently restricted to
 	// the official Codex backend, but Chord should not maintain a separate local
 	// whitelist for which normalized effort values are allowed to pass through.
-	effectiveReasoningEffort := resolveResponsesReasoningEffort(ot.ReasoningEffort)
-	effectiveReasoningSummary := ot.ReasoningSummary
-	if effectiveReasoningSummary == "" && effectiveReasoningEffort != "" {
-		effectiveReasoningSummary = "auto"
-	} else if effectiveReasoningSummary == "none" {
-		effectiveReasoningSummary = ""
-	}
+	effectiveReasoningEffort, effectiveReasoningSummary := resolveResponsesReasoningFields(ot.ReasoningEffort, ot.ReasoningSummary)
 	if effectiveReasoningEffort != "" || effectiveReasoningSummary != "" {
 		reqBody.Reasoning = &reasoningConfig{Effort: effectiveReasoningEffort, Summary: effectiveReasoningSummary}
 	}

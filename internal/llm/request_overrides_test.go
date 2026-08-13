@@ -89,6 +89,146 @@ func TestWithoutReasoningRequestOverrides(t *testing.T) {
 	}
 }
 
+func TestRequestOverridesEnableReasoning(t *testing.T) {
+	tests := []struct {
+		name      string
+		overrides config.RequestOverridesConfig
+		want      bool
+	}{
+		{
+			name: "thinking enabled object",
+			overrides: config.RequestOverridesConfig{Body: map[string]any{
+				"thinking": map[string]any{"type": "enabled"},
+			}},
+			want: true,
+		},
+		{
+			name: "reasoning effort high",
+			overrides: config.RequestOverridesConfig{Body: map[string]any{
+				"reasoning": map[string]any{"effort": "high"},
+			}},
+			want: true,
+		},
+		{
+			name: "reasoning effort top level",
+			overrides: config.RequestOverridesConfig{Body: map[string]any{
+				"reasoning_effort": "max",
+			}},
+			want: true,
+		},
+		{
+			name: "thinking disabled object",
+			overrides: config.RequestOverridesConfig{Body: map[string]any{
+				"thinking": map[string]any{"type": "disabled"},
+			}},
+			want: false,
+		},
+		{
+			name: "reasoning none object",
+			overrides: config.RequestOverridesConfig{Body: map[string]any{
+				"reasoning": map[string]any{"effort": "none"},
+			}},
+			want: false,
+		},
+		{
+			name: "reasoning effort none",
+			overrides: config.RequestOverridesConfig{Body: map[string]any{
+				"reasoning_effort": "none",
+			}},
+			want: false,
+		},
+		{
+			name: "reasoning summary none",
+			overrides: config.RequestOverridesConfig{Body: map[string]any{
+				"reasoning": map[string]any{"summary": "none"},
+			}},
+			want: false,
+		},
+		{
+			name: "bool false",
+			overrides: config.RequestOverridesConfig{Body: map[string]any{
+				"thinking": false,
+			}},
+			want: false,
+		},
+		{
+			name: "unrelated override",
+			overrides: config.RequestOverridesConfig{Body: map[string]any{
+				"stream": false,
+			}},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := requestOverridesEnableReasoning(tt.overrides); got != tt.want {
+				t.Fatalf("requestOverridesEnableReasoning() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEffectiveRequestReasoningActiveHonorsFinalOverride(t *testing.T) {
+	tests := []struct {
+		name      string
+		base      map[string]any
+		overrides config.RequestOverridesConfig
+		want      bool
+	}{
+		{
+			name: "override disables generated effort",
+			base: map[string]any{"reasoning_effort": "high"},
+			overrides: config.RequestOverridesConfig{Body: map[string]any{
+				"reasoning_effort": "none",
+			}},
+			want: false,
+		},
+		{
+			name: "override enables reasoning without tuning",
+			overrides: config.RequestOverridesConfig{Body: map[string]any{
+				"thinking": map[string]any{"type": "enabled"},
+			}},
+			want: true,
+		},
+		{
+			name: "renamed generated effort remains visible",
+			base: map[string]any{"reasoning_effort": "high"},
+			overrides: config.RequestOverridesConfig{RenameBodyFields: map[string]*string{
+				"reasoning_effort": new("thinking"),
+			}},
+			want: true,
+		},
+		{
+			name: "custom renamed generated effort remains active",
+			base: map[string]any{"reasoning_effort": "high"},
+			overrides: config.RequestOverridesConfig{RenameBodyFields: map[string]*string{
+				"reasoning_effort": new("reasoningEffort"),
+			}},
+			want: true,
+		},
+		{
+			name: "custom renamed generated effort can be disabled",
+			base: map[string]any{"reasoning_effort": "high"},
+			overrides: config.RequestOverridesConfig{
+				RenameBodyFields: map[string]*string{"reasoning_effort": new("reasoningEffort")},
+				Body:             map[string]any{"reasoningEffort": "none"},
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := effectiveRequestReasoningActive(tt.base, tt.overrides)
+			if err != nil {
+				t.Fatalf("effectiveRequestReasoningActive: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("effectiveRequestReasoningActive() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestApplyRequestBodyOverridesRejectsDuplicateRenameTargets(t *testing.T) {
 	target := "renamed"
 	_, err := applyRequestBodyOverrides([]byte(`{"a":1,"b":2}`), config.RequestOverridesConfig{

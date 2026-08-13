@@ -1850,6 +1850,34 @@ func TestProviderConfig_ReasoningContinuityCompat_PreserveHistoryMerge(t *testin
 	}
 }
 
+func TestProviderConfig_ForcedToolChoiceCompat_Merge(t *testing.T) {
+	cfg := config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Compat: &config.ProviderCompatConfig{
+			ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(true)},
+		},
+		Models: map[string]config.ModelConfig{
+			"inherits": {},
+			"overrides": {
+				Compat: &config.ModelCompatConfig{
+					ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(false)},
+				},
+			},
+			"unconfigured": {},
+		},
+	}
+	p := NewProviderConfig("test", cfg, []string{"k"})
+	if got := p.ForcedToolChoiceCompat("inherits"); got == nil || got.SuppressInThinking == nil || !*got.SuppressInThinking {
+		t.Fatalf("expected provider-level suppress to be inherited, got %#v", got)
+	}
+	if got := p.ForcedToolChoiceCompat("overrides"); got == nil || got.SuppressInThinking == nil || *got.SuppressInThinking {
+		t.Fatalf("expected model-level suppress=false to override, got %#v", got)
+	}
+	if got := p.ForcedToolChoiceCompat("unconfigured"); got == nil || got.SuppressInThinking == nil || !*got.SuppressInThinking {
+		t.Fatalf("expected empty model to inherit provider default, got %#v", got)
+	}
+}
+
 // --- Key Rotation: on_failure ---
 
 // TestSelectKey_OnFailure_NoCooldown verifies that repeated calls with on_failure

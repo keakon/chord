@@ -84,6 +84,36 @@ func TestNormalizeDropsResponsesOutputOnProvenanceMismatch(t *testing.T) {
 	}
 }
 
+func TestNormalizeConvertsResponsesReasoningTextToVisibleChatReasoning(t *testing.T) {
+	msg := responsesOutputMsg("provider", "model-1")
+	msg.ResponsesOutput[0] = message.ResponsesOutputItem{
+		Type:    "reasoning",
+		Content: []message.ResponsesOutputContent{{Type: "reasoning_text", Text: "visible reasoning"}},
+		Summary: []message.ResponsesReasoningSummary{{Type: "summary_text", Text: "short summary"}},
+	}
+	target := TargetModel{
+		ProviderID:              "sample",
+		ModelID:                 "test-model",
+		WireFamily:              WireFamilyOpenAIChat,
+		ReasoningContinuityMode: ReasoningContinuityOpenAIVisible,
+		ToolResultEncoding:      ToolResultEncodingOpenAIToolRole,
+		SupportsStructuredTools: true,
+	}
+	out, report := NormalizeForTarget([]message.Message{
+		msg,
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
+	}, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatSynthesized})
+	if len(out) != 2 || out[0].ReasoningContent != "visible reasoning" {
+		t.Fatalf("Responses reasoning_text was not converted: %+v (report %+v)", out, report)
+	}
+	if strings.Contains(out[0].ReasoningContent, "short summary") {
+		t.Fatalf("summary must not duplicate available reasoning_text: %q", out[0].ReasoningContent)
+	}
+	if report.ConvertedReasoning != 1 {
+		t.Fatalf("ConvertedReasoning = %d, want 1", report.ConvertedReasoning)
+	}
+}
+
 func TestNormalizeClearsNativeTrajectoryWhenToolResultsAreMissing(t *testing.T) {
 	msg := responsesOutputMsg("openai", "gpt-5.6-sol")
 	msg.Content = ""

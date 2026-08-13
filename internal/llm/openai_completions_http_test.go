@@ -64,3 +64,89 @@ func TestOpenAIProvider_StreamOptionsDefaultAndCompatToggle(t *testing.T) {
 		})
 	}
 }
+
+// TestOpenAIProvider_SuppressesForcedToolChoiceUnderThinking confirms the chat
+// completions path downgrades loop-forced tool_choice="required" for models
+// that reject forced tool choice while thinking is enabled.
+func TestOpenAIProvider_SuppressesForcedToolChoiceUnderThinking(t *testing.T) {
+	cases := []struct {
+		name        string
+		compat      *config.ModelCompatConfig
+		tuning      RequestTuning
+		wantPresent bool
+	}{
+		{
+			name:        "suppressed under thinking",
+			compat:      &config.ModelCompatConfig{ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(true)}},
+			tuning:      RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required", ReasoningEffort: "high"}},
+			wantPresent: false,
+		},
+		{
+			name:        "kept when reasoning inactive",
+			compat:      &config.ModelCompatConfig{ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(true)}},
+			tuning:      RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required"}},
+			wantPresent: true,
+		},
+		{
+			name:        "kept when reasoning effort is none",
+			compat:      &config.ModelCompatConfig{ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(true)}},
+			tuning:      RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required", ReasoningEffort: "none"}},
+			wantPresent: true,
+		},
+		{
+			name: "kept when override disables reasoning",
+			compat: &config.ModelCompatConfig{
+				ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(true)},
+				RequestOverrides: &config.RequestOverridesConfig{Body: map[string]any{
+					"reasoning_effort": "none",
+				}},
+			},
+			tuning:      RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required", ReasoningEffort: "high"}},
+			wantPresent: true,
+		},
+		{
+			name:        "kept without suppression flag",
+			compat:      nil,
+			tuning:      RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required", ReasoningEffort: "high"}},
+			wantPresent: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				data, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(data, &gotBody)
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			}))
+			defer server.Close()
+
+			provider := NewProviderConfig("sample", config.ProviderConfig{
+				Type:   config.ProviderTypeChatCompletions,
+				APIURL: server.URL + "/v1/chat/completions",
+				Models: map[string]config.ModelConfig{
+					"test-model": {Limit: config.ModelLimit{Context: 1000000, Output: 64000}, Compat: tc.compat},
+				},
+			}, []string{"test-key"})
+			o := &OpenAIProvider{provider: provider, client: server.Client(), responsesProvider: &ResponsesProvider{}}
+
+			_, err := o.CompleteStream(
+				context.Background(), "test-key", "test-model", "",
+				[]message.Message{{Role: "user", Content: "hello"}},
+				nil, 128, tc.tuning,
+				func(message.StreamDelta) {},
+			)
+			if err != nil {
+				t.Fatalf("CompleteStream: %v", err)
+			}
+			got, has := gotBody["tool_choice"]
+			if has != tc.wantPresent {
+				t.Fatalf("tool_choice present = %v, want %v (value %#v)", has, tc.wantPresent, got)
+			}
+			if has && got != "required" {
+				t.Fatalf("tool_choice = %#v, want required", got)
+			}
+		})
+	}
+}

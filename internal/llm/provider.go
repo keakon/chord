@@ -483,6 +483,48 @@ func (p *ProviderConfig) ThinkingToolcallCompat(modelID string) *config.Thinking
 	return merged
 }
 
+// ForcedToolChoiceCompat resolves forced-tool-choice compatibility config for
+// the given model. Provider-level compat acts as defaults, model-level compat
+// overrides provider-level fields when present.
+func (p *ProviderConfig) ForcedToolChoiceCompat(modelID string) *config.ForcedToolChoiceCompatConfig {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var providerCfg *config.ForcedToolChoiceCompatConfig
+	if p.compat != nil {
+		providerCfg = p.compat.ForcedToolChoice
+	}
+
+	var modelCfg *config.ForcedToolChoiceCompatConfig
+	if m, ok := p.models[modelID]; ok && m.Compat != nil {
+		modelCfg = m.Compat.ForcedToolChoice
+	}
+
+	if providerCfg == nil && modelCfg == nil {
+		return nil
+	}
+
+	merged := &config.ForcedToolChoiceCompatConfig{}
+	if providerCfg != nil {
+		merged.SuppressInThinking = providerCfg.SuppressInThinking
+	}
+	if modelCfg != nil && modelCfg.SuppressInThinking != nil {
+		merged.SuppressInThinking = modelCfg.SuppressInThinking
+	}
+	return merged
+}
+
+// forcedToolChoiceSuppressedInThinking reports whether the target model
+// disallows forced tool_choice while reasoning/thinking is active. Callers use
+// it to downgrade loop exit-control "required" to the server default.
+func forcedToolChoiceSuppressedInThinking(provider *ProviderConfig, modelID string) bool {
+	if provider == nil {
+		return false
+	}
+	cfg := provider.ForcedToolChoiceCompat(modelID)
+	return cfg != nil && cfg.SuppressInThinking != nil && *cfg.SuppressInThinking
+}
+
 // ReasoningContinuityCompat resolves reasoning-continuity compatibility config
 // for the given model. Provider-level compat acts as defaults, model-level
 // compat overrides provider-level fields when present.

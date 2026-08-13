@@ -567,6 +567,7 @@ func (m *ModelConfig) SupportedServiceTierSet(providerPreset string, providerTie
 type ModelCompatConfig struct {
 	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
 	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitempty" yaml:"reasoning_continuity,omitempty"`
+	ForcedToolChoice    *ForcedToolChoiceCompatConfig    `json:"forced_tool_choice,omitempty" yaml:"forced_tool_choice,omitempty"`
 	RequestOverrides    *RequestOverridesConfig          `json:"request_overrides,omitempty" yaml:"request_overrides,omitempty"`
 }
 
@@ -576,10 +577,22 @@ type ModelCompatConfig struct {
 type ProviderCompatConfig struct {
 	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
 	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitempty" yaml:"reasoning_continuity,omitempty"`
+	ForcedToolChoice    *ForcedToolChoiceCompatConfig    `json:"forced_tool_choice,omitempty" yaml:"forced_tool_choice,omitempty"`
 	RequestOverrides    *RequestOverridesConfig          `json:"request_overrides,omitempty" yaml:"request_overrides,omitempty"`
 	Usage               *UsageCompatConfig               `json:"usage,omitempty" yaml:"usage,omitempty"`
 	Responses           *ResponsesCompatConfig           `json:"responses,omitempty" yaml:"responses,omitempty"`
 	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitempty" yaml:"chat_completions,omitempty"`
+}
+
+// ForcedToolChoiceCompatConfig controls whether request-level forced tool
+// choice (loop exit-control tool_choice "required") may be combined with
+// reasoning/thinking. Some compatible chat backends reject non-auto tool
+// choice while thinking is enabled, so Chord downgrades the forced choice to
+// the server default for those targets instead of sending a rejected request.
+type ForcedToolChoiceCompatConfig struct {
+	// SuppressInThinking downgrades forced tool_choice to "auto" whenever
+	// reasoning/thinking is active for the request.
+	SuppressInThinking *bool `json:"suppress_in_thinking,omitempty" yaml:"suppress_in_thinking,omitempty"`
 }
 
 // UsageCompatConfig overrides provider usage-field semantics when a compatible
@@ -636,9 +649,12 @@ type RequestOverridesConfig struct {
 //
 // Supported modes:
 //   - "none": disable replay of provider-specific reasoning continuity state.
-//   - "openai_visible": replay OpenAI-compatible assistant reasoning_content
+//   - "openai_visible": replay OpenAI-compatible visible assistant reasoning
 //     without injecting provider-specific request fields, and accept portable
-//     visible reasoning from other wire families as reasoning_content.
+//     visible reasoning from other wire families. On the chat wire the visible
+//     reasoning is carried as reasoning_content; on the Responses wire the
+//     request builder synthesizes reasoning_text items for replayed assistant
+//     turns that lost their native reasoning (DeepSeek V4 contract).
 //   - "anthropic_unsigned": replay visible, unsigned Anthropic thinking for
 //     the same configured provider/model target, and accept portable visible
 //     reasoning from other wire families as unsigned thinking blocks.

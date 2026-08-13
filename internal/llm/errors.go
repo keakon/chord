@@ -332,7 +332,7 @@ func isReasoningReplayRejection(err error) bool {
 	// request. Require both the field and rejection semantics rather than
 	// treating every "reasoning" 400 as replay-related: unrelated
 	// parameter/schema errors must not cause an extra billable retry.
-	if apiErrMessageContainsAny(apiErr, "reasoning_content", "content[].thinking") &&
+	if apiErrMessageContainsAny(apiErr, "reasoning_content", "reasoning_text", "content[].thinking") &&
 		apiErrMessageContainsAny(apiErr, "must be passed back", "missing", "required", "invalid") {
 		return true
 	}
@@ -758,6 +758,7 @@ func hasTerminalNonRetriable400Signal(apiErr *APIError) bool {
 		"invalid assistant message",
 		"invalid tool schema",
 		"reasoning_content",
+		"reasoning_text",
 		"content[].thinking",
 		"must be set to true",
 		"must be set to false",

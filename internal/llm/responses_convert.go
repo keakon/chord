@@ -8,6 +8,76 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+// responsesReasoningContentBlock is a reasoning item content part carrying
+// plaintext chain-of-thought (DeepSeek-family Responses replay). Text is always
+// serialized so a synthesized item keeps the reasoning_text shape even when no
+// plaintext reasoning is available.
+type responsesReasoningContentBlock struct {
+	Type string `json:"type"` // "reasoning_text"
+	Text string `json:"text"`
+}
+
+// fillResponsesReasoningForReplay inserts an empty reasoning item before each
+// assistant turn that has no reasoning item. DeepSeek V4 Responses thinking
+// mode requires reasoning_text for replayed function-call turns; the empty
+// item is the optimistic first shape for turns whose native reasoning was
+// dropped across a model switch or compaction. A backend that requires the
+// actual text rejects it, and the retry ladder then textifies the tool
+// trajectory instead. Input that already carries reasoning on every turn is
+// returned untouched, so the common case copies nothing.
+func fillResponsesReasoningForReplay(items []responsesInputItem) []responsesInputItem {
+	insertAt := responsesReplayTurnsMissingReasoning(items)
+	if len(insertAt) == 0 {
+		return items
+	}
+	out := make([]responsesInputItem, 0, len(items)+len(insertAt))
+	next := 0
+	for i, item := range items {
+		if next < len(insertAt) && insertAt[next] == i {
+			out = append(out, emptyResponsesReasoningItem())
+			next++
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+// responsesReplayTurnsMissingReasoning returns the item indices before which a
+// synthesized reasoning item must be inserted: the start of every assistant
+// turn that opens without one. Returning positions instead of a rebuilt slice
+// keeps the no-op case allocation-free on long replayed conversations.
+func responsesReplayTurnsMissingReasoning(items []responsesInputItem) []int {
+	var insertAt []int
+	inTurn := false
+	for i, item := range items {
+		startsTurn := (item.Type == "message" && item.Role == "assistant") || item.Type == "function_call"
+		if startsTurn && !inTurn {
+			insertAt = append(insertAt, i)
+		}
+		switch item.Type {
+		case "reasoning", "function_call":
+			inTurn = true
+		case "message":
+			inTurn = item.Role == "assistant"
+		default:
+			inTurn = false
+		}
+	}
+	return insertAt
+}
+
+// emptyResponsesReasoningItem builds the placeholder reasoning item replayed
+// for turns whose native reasoning was dropped. It deliberately carries no id:
+// the item references no server-stored state, and a synthetic id would be
+// rejected by backends that resolve ids against a stored response.
+func emptyResponsesReasoningItem() responsesInputItem {
+	return responsesInputItem{
+		Type:    "reasoning",
+		Content: []responsesReasoningContentBlock{{Type: "reasoning_text"}},
+		Summary: &[]responsesReasoningSummaryPayload{},
+	}
+}
+
 // convertMessagesToResponses converts internal messages to Responses API input format.
 func convertMessagesToResponses(systemPrompt string, msgs []message.Message) []responsesInputItem {
 	return convertMessagesToResponsesWithItemIDs(systemPrompt, msgs, false)
@@ -141,8 +211,17 @@ func convertResponsesOutputItem(item message.ResponsesOutputItem, includeItemID 
 	}
 	switch item.Type {
 	case "reasoning":
-		if strings.TrimSpace(item.EncryptedContent) == "" && (!includeItemID || strings.TrimSpace(item.ID) == "") {
+		content := make([]responsesReasoningContentBlock, 0, len(item.Content))
+		for _, entry := range item.Content {
+			if entry.Type == "reasoning_text" {
+				content = append(content, responsesReasoningContentBlock{Type: entry.Type, Text: entry.Text})
+			}
+		}
+		if strings.TrimSpace(item.EncryptedContent) == "" && len(content) == 0 && (!includeItemID || strings.TrimSpace(item.ID) == "") {
 			return responsesInputItem{}, false
+		}
+		if len(content) > 0 {
+			converted.Content = content
 		}
 		summary := make([]responsesReasoningSummaryPayload, 0, len(item.Summary))
 		for _, entry := range item.Summary {

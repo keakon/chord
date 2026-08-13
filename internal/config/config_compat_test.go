@@ -205,6 +205,35 @@ providers:
 	}
 }
 
+func TestConfigYAML_ModelCompatForcedToolChoice(t *testing.T) {
+	const raw = `
+providers:
+  sample:
+    type: responses
+    models:
+      test-model:
+        limit:
+          context: 1000000
+          output: 64000
+        reasoning:
+          effort: high
+        compat:
+          forced_tool_choice:
+            suppress_in_thinking: true
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("yaml unmarshal failed: %v", err)
+	}
+	model := cfg.Providers["sample"].Models["test-model"]
+	if model.Compat == nil || model.Compat.ForcedToolChoice == nil {
+		t.Fatal("expected compat.forced_tool_choice to be present")
+	}
+	if got := model.Compat.ForcedToolChoice.SuppressInThinking; got == nil || !*got {
+		t.Fatalf("suppress_in_thinking = %#v, want true", got)
+	}
+}
+
 func TestConfigYAML_ProviderUserAgent(t *testing.T) {
 	const raw = `
 providers:

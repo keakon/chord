@@ -528,9 +528,7 @@ deepseek:
 ```
 
 `deepseek-v4-pro` 与 `deepseek-v4-flash` 走同一套 API，协议层完全一致，
-共用下面按 wire family 命名的模板。`deepseek-v4-flash` 是 2026-07-31 发布的
-正式版（DeepSeek-V4-Flash-0731，API 模型 ID 不变、自动指向正式版），原生
-支持 Responses API；`deepseek-v4-pro` 官方支持 Responses 尚在预告中。
+共用下面按 wire family 命名的模板；两个模型都支持 Responses API。
 
 ```yaml
 model_templates:
@@ -559,6 +557,8 @@ model_templates:
             type: enabled
       reasoning_continuity:
         mode: openai_visible
+      forced_tool_choice:
+        suppress_in_thinking: true
 
   deepseek-v4-messages: &deepseek-v4-messages
     limit:
@@ -600,6 +600,12 @@ model_templates:
       max:
         reasoning:
           effort: max
+    compat:
+      responses:
+        send_reasoning_include: false
+        send_max_output_tokens: true
+      reasoning_continuity:
+        mode: openai_visible
 
 providers:
   deepseek:
@@ -620,6 +626,7 @@ providers:
     type: responses
     api_url: https://api.deepseek.com/v1/responses
     models:
+      deepseek-v4-pro: *deepseek-v4-responses
       deepseek-v4-flash: *deepseek-v4-responses
 
 model_pools:
@@ -632,6 +639,12 @@ model_pools:
 - DeepSeek Chat thinking 使用 `thinking.type`、顶层 `reasoning_effort` 和
   `max_tokens`。`request_overrides` 提供请求形状差异；thinking + 工具调用
   循环中，`openai_visible` 会原样返回 assistant 的 `reasoning_content`。
+  DeepSeek 在启用 thinking 时会拒绝 forced tool choice，所以模板会把 loop
+  强制的 `tool_choice: required` 降级为后端默认选择。
+- DeepSeek Responses 支持 `tool_choice: required`，因此模板保留 loop 的强制
+  工具选择。该接口直接返回明文 `reasoning_text`，因此无需请求加密 reasoning；
+  它支持 `max_output_tokens`，模板会继续显式发送上限。其他不支持的字段会被
+  DeepSeek 静默忽略。
 - DeepSeek Messages 支持 `output_config.effort`；Chord 从
   `thinking.effort` 生成该字段。兼容接口应关闭 Anthropic beta header。
   DeepSeek 的 Anthropic 兼容接口可能返回无签名 `thinking`，而不是 Claude
@@ -640,7 +653,7 @@ model_pools:
   `thinking` block；如果 target 仍拒绝该形状，严格兼容级别会丢弃 reasoning
   carrier，但保留工具轮次。
 - 第三方 `/responses` 端点由网关自行实现；只有网关明确说明映射方式时，
-  才使用 `reasoning.effort`。
+  才使用 `reasoning.effort` 和 `openai_visible`。
 - 对兼容网关，请使用该网关 / 账号实际公开的模型 ID 和限制。见
   [常见问题排查 — DeepSeek / OpenAI 兼容 thinking 模式 400](./troubleshooting_CN.md#deepseek--openai-兼容-thinking-模式-400)。
 
@@ -648,10 +661,9 @@ model_pools:
 
 - 官方定价页标注的最大输出为 384K；这里 `limit.output: 64000` 是保守的
   本地分配，与 pro 保持一致。需要更长输出时按需调大。
-- flash 原生支持 Responses API（`api.deepseek.com/v1/responses`），pro
-  的 Responses 支持仍在预告中；上方的 `deepseek-responses` 只列了
-  flash。响应中的 `output_tokens_details.reasoning_tokens` 由 Chord 按
-  标准 reasoning 回显处理，无需额外配置。
+- flash 与 pro 都支持 Responses API（`api.deepseek.com/v1/responses`）。
+  响应中的 `output_tokens_details.reasoning_tokens` 由 Chord 按标准 reasoning
+  回显处理，无需额外配置。
 - `reasoning_effort` 官方支持 `low` / `high` / `max`（默认 `high`）。
   `xhigh` 会被映射到 `high`，`medium` 映射到 `high`，所以模板只定义
   `low` / `high` / `max` 三个 variant。

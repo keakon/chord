@@ -11,7 +11,7 @@ import (
 func TestCollectResponsesOutputPreservesProviderOrder(t *testing.T) {
 	resp := &message.Response{}
 	output := []responsesOutputEntry{
-		{Type: "reasoning", ID: "rs_1", EncryptedContent: "enc-1", Summary: []responsesReasoningSummaryPayload{{Type: "summary_text", Text: "thinking about it"}}},
+		{Type: "reasoning", ID: "rs_1", Content: []responsesContentBlock{{Type: "reasoning_text", Text: "visible reasoning"}}, EncryptedContent: "enc-1", Summary: []responsesReasoningSummaryPayload{{Type: "summary_text", Text: "thinking about it"}}},
 		{Type: "message", ID: "msg_1", Role: "assistant", Phase: "final_answer", Content: []responsesContentBlock{{Type: "output_text", Text: "working"}}},
 		{Type: "function_call", ID: "fc_1", CallID: "call_1", Name: "read", Arguments: "{}"},
 		{Type: "reasoning", ID: "rs_2", EncryptedContent: "enc-2"},
@@ -27,6 +27,9 @@ func TestCollectResponsesOutputPreservesProviderOrder(t *testing.T) {
 	}
 	if len(resp.ResponsesOutput[0].Summary) != 1 || resp.ResponsesOutput[0].Summary[0].Text != "thinking about it" {
 		t.Fatalf("unexpected summary: %+v", resp.ResponsesOutput[0].Summary)
+	}
+	if got := resp.ResponsesOutput[0].Content; len(got) != 1 || got[0].Type != "reasoning_text" || got[0].Text != "visible reasoning" {
+		t.Fatalf("plaintext reasoning content was not retained: %+v", got)
 	}
 	if resp.ResponsesOutput[1].Phase != "final_answer" || resp.ResponsesOutput[1].Content[0].Text != "working" {
 		t.Fatalf("unexpected message item: %+v", resp.ResponsesOutput[1])
@@ -45,7 +48,7 @@ func TestConvertMessagesReplaysResponsesOutputInProviderOrder(t *testing.T) {
 		{
 			Role: message.RoleAssistant,
 			ResponsesOutput: []message.ResponsesOutputItem{
-				{Type: "reasoning", ID: "rs_1", EncryptedContent: "enc-1"},
+				{Type: "reasoning", ID: "rs_1", Content: []message.ResponsesOutputContent{{Type: "reasoning_text", Text: "visible reasoning"}}},
 				{Type: "function_call", ID: "fc_1", CallID: "call_1", Name: "read", Arguments: `{}`},
 				{Type: "reasoning", ID: "rs_2", EncryptedContent: "enc-2", Summary: []message.ResponsesReasoningSummary{{Type: "summary_text", Text: "s"}}},
 			},
@@ -67,8 +70,12 @@ func TestConvertMessagesReplaysResponsesOutputInProviderOrder(t *testing.T) {
 	}
 
 	r1 := items[2]
-	if r1.ID != "" || r1.EncryptedContent != "enc-1" {
+	if r1.ID != "" {
 		t.Fatalf("unexpected reasoning item: %+v", r1)
+	}
+	reasoningContent, ok := r1.Content.([]responsesReasoningContentBlock)
+	if !ok || len(reasoningContent) != 1 || reasoningContent[0].Type != "reasoning_text" || reasoningContent[0].Text != "visible reasoning" {
+		t.Fatalf("plaintext reasoning content was not replayed: %#v", r1.Content)
 	}
 	// Empty summary must serialize as [] (not be omitted): API rejects a
 	// reasoning input item without a summary field.
@@ -131,6 +138,11 @@ func TestConvertResponsesOutputItemDropsEmptyStatelessReasoning(t *testing.T) {
 	if converted, ok := convertResponsesOutputItem(item, false); !ok || converted.ID != "" || converted.EncryptedContent != "enc" {
 		t.Fatalf("encrypted stateless reasoning must be kept without id: %+v ok=%v", converted, ok)
 	}
+	item.EncryptedContent = ""
+	item.Content = []message.ResponsesOutputContent{{Type: "reasoning_text", Text: "visible reasoning"}}
+	if converted, ok := convertResponsesOutputItem(item, false); !ok {
+		t.Fatalf("plaintext stateless reasoning must be kept: %+v ok=%v", converted, ok)
+	}
 }
 
 func TestApplyResponsesCompletionPayloadExposesRefusal(t *testing.T) {
@@ -160,5 +172,74 @@ func TestCollectResponsesOutputNormalizesRelayEntries(t *testing.T) {
 	// missing, so the collected item must too or its output would be orphaned.
 	if resp.ResponsesOutput[1].CallID != "fc_1" {
 		t.Fatalf("function_call call_id fallback missing: %+v", resp.ResponsesOutput[1])
+	}
+}
+
+func TestFillResponsesReasoningForReplay(t *testing.T) {
+	user := responsesInputItem{Type: "message", Role: "user", Content: []responsesContentBlock{{Type: "input_text", Text: "hi"}}}
+	assistant := responsesInputItem{Type: "message", Role: "assistant", Content: []responsesContentBlock{{Type: "output_text", Text: "done"}}}
+	call := responsesInputItem{Type: "function_call", Name: "read", CallID: "call_1", Arguments: `{}`}
+	output := responsesInputItem{Type: "function_call_output", CallID: "call_1", Output: "result"}
+	reasoning := responsesInputItem{Type: "reasoning", Content: []responsesReasoningContentBlock{{Type: "reasoning_text", Text: "think"}}, Summary: &[]responsesReasoningSummaryPayload{}}
+
+	tests := []struct {
+		name string
+		in   []responsesInputItem
+		want []string // item types after fill
+	}{
+		{
+			name: "assistant turn without reasoning gets synthesized item",
+			in:   []responsesInputItem{user, assistant},
+			want: []string{"message", "reasoning", "message"},
+		},
+		{
+			name: "native reasoning is not duplicated",
+			in:   []responsesInputItem{user, reasoning, assistant},
+			want: []string{"message", "reasoning", "message"},
+		},
+		{
+			name: "tool-call-only turn gets synthesized item",
+			in:   []responsesInputItem{user, call, output, call},
+			want: []string{"message", "reasoning", "function_call", "function_call_output", "reasoning", "function_call"},
+		},
+		{
+			name: "consecutive function calls share one turn",
+			in:   []responsesInputItem{user, call, call},
+			want: []string{"message", "reasoning", "function_call", "function_call"},
+		},
+		{
+			name: "empty input stays empty",
+			in:   nil,
+			want: []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := fillResponsesReasoningForReplay(tt.in)
+			var kinds []string
+			for _, it := range got {
+				kinds = append(kinds, it.Type)
+			}
+			if strings.Join(kinds, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("item types = %v, want %v", kinds, tt.want)
+			}
+		})
+	}
+
+	// Synthesized items must serialize reasoning_text content and an explicit
+	// empty summary array, matching the provider's presence contract.
+	filled := fillResponsesReasoningForReplay([]responsesInputItem{user, assistant})
+	raw, err := json.Marshal(filled[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"reasoning_text"`) {
+		t.Fatalf("synthesized item missing reasoning_text content: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"summary":[]`) {
+		t.Fatalf("synthesized item missing explicit empty summary: %s", raw)
+	}
+	if strings.Contains(string(raw), `"id"`) {
+		t.Fatalf("synthesized stateless reasoning item must not carry an id: %s", raw)
 	}
 }

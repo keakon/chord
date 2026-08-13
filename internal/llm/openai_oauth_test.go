@@ -471,7 +471,7 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 		[]message.Message{{Role: "user", Content: "hello"}},
 		nil,
 		128,
-		RequestTuning{OpenAI: OpenAITuning{TextVerbosity: "low"}},
+		RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: " HIGH ", TextVerbosity: "low"}},
 	)
 	if err != nil {
 		t.Fatalf("Compact returned error: %v", err)
@@ -502,6 +502,16 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 	}
 	if gotBody["parallel_tool_calls"] != false {
 		t.Fatalf("expected compact request parallel_tool_calls=false, got %#v", gotBody["parallel_tool_calls"])
+	}
+	reasoning, ok := gotBody["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatalf("compact request reasoning = %#v, want object", gotBody["reasoning"])
+	}
+	if got := reasoning["effort"]; got != "high" {
+		t.Fatalf("compact request reasoning.effort = %#v, want high", got)
+	}
+	if got := reasoning["summary"]; got != "auto" {
+		t.Fatalf("compact request reasoning.summary = %#v, want auto", got)
 	}
 	for _, key := range []string{"tool_choice", "stream", "include", "store", "max_output_tokens"} {
 		if _, ok := gotBody[key]; ok {

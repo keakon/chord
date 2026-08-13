@@ -312,7 +312,7 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 				if opts.ReplayCompat >= ReplayCompatStrict && len(msg.ToolCalls) > 0 {
 					reasoningToolTrajectoryInvalid = true
 				}
-				portableSummary := responsesReasoningSummaryText(msg.ResponsesOutput)
+				portableSummary := responsesPortableReasoningText(msg.ResponsesOutput)
 				msg.ResponsesOutput = nil
 				if !routePortableReasoning(portableSummary, &portableReasoningForChat, &portableReasoningForUnsignedThinking, target, opts.ReplayCompat) {
 					report.DowngradedReasoning++
@@ -740,10 +740,19 @@ func appendPortableText(items []string, text string) []string {
 	return items
 }
 
-func responsesReasoningSummaryText(items []message.ResponsesOutputItem) []string {
+func responsesPortableReasoningText(items []message.ResponsesOutputItem) []string {
 	var out []string
 	for _, item := range items {
 		if item.Type != "reasoning" {
+			continue
+		}
+		before := len(out)
+		for _, content := range item.Content {
+			if content.Type == "reasoning_text" {
+				out = appendPortableText(out, content.Text)
+			}
+		}
+		if len(out) > before {
 			continue
 		}
 		for _, summary := range item.Summary {

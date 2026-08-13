@@ -21,6 +21,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/modelcompat"
 	"github.com/keakon/chord/internal/ratelimit"
 )
 
@@ -195,6 +196,22 @@ type textConfig struct {
 	Verbosity string `json:"verbosity,omitempty"` // "low"|"medium"|"high"
 }
 
+// responsesReasoningProbeFields mirrors the omitempty encoding of
+// reasoningConfig so the reasoning-active probe sees exactly the fields the
+// backend will see. Encoding an absent effort as a present "" would make the
+// probe read it as an explicit opt-out and mask a summary that still turns
+// thinking on — the effort-omitted/summary-carried shape Codex emits.
+func responsesReasoningProbeFields(effort, summary string) map[string]any {
+	fields := make(map[string]any, 2)
+	if effort != "" {
+		fields["effort"] = effort
+	}
+	if summary != "" {
+		fields["summary"] = summary
+	}
+	return fields
+}
+
 const responsesEncryptedReasoningInclude = "reasoning.encrypted_content"
 
 const (
@@ -304,6 +321,18 @@ func responsesClientMetadata(sessionID string, startedAt time.Time) map[string]s
 	return metadata
 }
 
+// resolveResponsesReasoningFields keeps the main and compact Responses request
+// shapes aligned when normalizing effort and applying the summary default.
+func resolveResponsesReasoningFields(effort, summary string) (string, string) {
+	effort = resolveResponsesReasoningEffort(effort)
+	if summary == "" && openAIReasoningEffortActive(effort) {
+		summary = "auto"
+	} else if summary == "none" {
+		summary = ""
+	}
+	return effort, summary
+}
+
 func (r *ResponsesProvider) CompleteStream(
 	ctx context.Context,
 	apiKey string,
@@ -371,6 +400,43 @@ func (r *ResponsesProvider) CompleteStream(
 		sendReasoningInclude = rc.SendReasoningInclude
 		sendMaxOutputTokens = rc.SendMaxOutputTokens
 	}
+	// Hoist reasoning computation so the reasoning replay synthesis below shares
+	// the same reasoning-active signal as the request body.
+	effectiveReasoningEffort, effectiveReasoningSummary := resolveResponsesReasoningFields(ot.ReasoningEffort, ot.ReasoningSummary)
+	var overrides config.RequestOverridesConfig
+	if r.provider != nil {
+		overrides = r.provider.RequestOverrides(model)
+	}
+	// Body overrides can enable thinking server-side (e.g. a gateway-injected
+	// thinking key) even when tuning carries no explicit effort or summary.
+	continuityMode := reasoningContinuityCompatMode(r.provider, model)
+	needsReasoningState := continuityMode == modelcompat.ReasoningContinuityOpenAIVisible ||
+		(ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(r.provider, model))
+	reasoningActive := false
+	if needsReasoningState {
+		reasoningProbe := make(map[string]any, 1)
+		if reasoning := responsesReasoningProbeFields(effectiveReasoningEffort, effectiveReasoningSummary); len(reasoning) > 0 {
+			reasoningProbe["reasoning"] = reasoning
+		}
+		var err error
+		reasoningActive, err = effectiveRequestReasoningActive(reasoningProbe, overrides)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// DeepSeek-family Responses backends reject a thinking-mode continuation
+	// whose replayed function-call turns carry no reasoning_text. Synthesize an
+	// empty reasoning_text item for turns whose native reasoning was dropped
+	// across a model switch or compaction; if the backend still requires the
+	// actual text, the replay ladder textifies those tool trajectories on
+	// retry. The openai_visible continuity mode also covers the Responses wire
+	// here: on chat it replays reasoning_content, on Responses it replays
+	// reasoning_text.
+	if reasoningActive && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible {
+		fullInput = fillResponsesReasoningForReplay(fullInput)
+	}
+
 	reqBody := responsesRequest{
 		Model:             model,
 		Tools:             apiTools,
@@ -384,7 +450,8 @@ func (r *ResponsesProvider) CompleteStream(
 	if compatBool(sendToolChoice, true) {
 		reqBody.ToolChoice = "auto"
 	}
-	if ot.ToolChoice != "" {
+	if ot.ToolChoice != "" && !(ot.ToolChoice == "required" && reasoningActive &&
+		forcedToolChoiceSuppressedInThinking(r.provider, model)) {
 		reqBody.ToolChoice = ot.ToolChoice
 	}
 	reqBody.Input = fullInput
@@ -406,10 +473,6 @@ func (r *ResponsesProvider) CompleteStream(
 		reqBody.ParallelToolCalls = *ot.ParallelToolCalls
 	}
 
-	// Reasoning effort is normalized but not locally whitelisted. Transport/model
-	// support should be driven by configured models and upstream validation rather
-	// than a stale Codex-specific allowlist in Chord.
-	effectiveReasoningEffort := resolveResponsesReasoningEffort(ot.ReasoningEffort)
 	if maxTokens > 0 {
 		if compatBool(sendMaxOutputTokens, false) {
 			reqBody.MaxOutputTokens = maxTokens
@@ -425,12 +488,6 @@ func (r *ResponsesProvider) CompleteStream(
 	// payload is bound to the producing platform, so the summary is the only reasoning
 	// text that survives a later switch to another provider or wire family. "none"
 	// opts out explicitly.
-	effectiveReasoningSummary := ot.ReasoningSummary
-	if effectiveReasoningSummary == "" && effectiveReasoningEffort != "" {
-		effectiveReasoningSummary = "auto"
-	} else if effectiveReasoningSummary == "none" {
-		effectiveReasoningSummary = ""
-	}
 	if effectiveReasoningEffort != "" || effectiveReasoningSummary != "" {
 		reqBody.Reasoning = &reasoningConfig{Effort: effectiveReasoningEffort, Summary: effectiveReasoningSummary}
 	}
@@ -444,7 +501,6 @@ func (r *ResponsesProvider) CompleteStream(
 	if err != nil {
 		return nil, fmt.Errorf("marshal request body: %w", err)
 	}
-	overrides := r.provider.RequestOverrides(model)
 	bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
 	if err != nil {
 		return nil, err

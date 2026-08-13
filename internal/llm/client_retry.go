@@ -924,16 +924,10 @@ func replayCompatibleRequestTuning(tuning RequestTuning, messages []message.Mess
 }
 
 func openAIChatReasoningEnabled(tuning RequestTuning, target FallbackModel) bool {
-	if tuning.OpenAI.ReasoningEffort != "" {
+	if openAIReasoningEffortActive(tuning.OpenAI.ReasoningEffort) {
 		return true
 	}
-	overrides := target.ProviderConfig.RequestOverrides(target.ModelID)
-	for _, key := range openAIChatReasoningBodyKeys {
-		if value, ok := overrides.Body[key]; ok && value != nil {
-			return true
-		}
-	}
-	return false
+	return requestOverridesEnableReasoning(target.ProviderConfig.RequestOverrides(target.ModelID))
 }
 
 // completeStreamWithRetry walks the model pool (cursor-start entry + optional

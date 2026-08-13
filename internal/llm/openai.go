@@ -281,6 +281,13 @@ func (o *OpenAIProvider) CompleteStream(
 	// Convert tools.
 	apiTools := convertToolsToOpenAI(tools)
 
+	// Resolve request overrides up front so the forced tool_choice guard sees
+	// the final reasoning fields after compatibility patches.
+	overrides := o.provider.RequestOverrides(model)
+	if tuning.DisableReasoning {
+		overrides = withoutReasoningRequestOverrides(overrides)
+	}
+
 	// Build request body.
 	url := o.provider.APIURL()
 	reqBody := openAIRequest{
@@ -293,7 +300,19 @@ func (o *OpenAIProvider) CompleteStream(
 	if ot.ParallelToolCalls != nil {
 		reqBody.ParallelToolCalls = *ot.ParallelToolCalls
 	}
-	if ot.ToolChoice != "" {
+	suppressForcedToolChoice := false
+	if ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(o.provider, model) {
+		reasoningProbe := make(map[string]any, 1)
+		if ot.ReasoningEffort != "" {
+			reasoningProbe["reasoning_effort"] = ot.ReasoningEffort
+		}
+		var err error
+		suppressForcedToolChoice, err = effectiveRequestReasoningActive(reasoningProbe, overrides)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if ot.ToolChoice != "" && !suppressForcedToolChoice {
 		reqBody.ToolChoice = ot.ToolChoice
 	}
 	// Request usage stats in the final streaming chunk.
@@ -330,10 +349,6 @@ func (o *OpenAIProvider) CompleteStream(
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request body: %w", err)
-	}
-	overrides := o.provider.RequestOverrides(model)
-	if tuning.DisableReasoning {
-		overrides = withoutReasoningRequestOverrides(overrides)
 	}
 	bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
 	if err != nil {
