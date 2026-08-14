@@ -641,15 +641,27 @@ func matchesToolFilter(filters []string, env Envelope) bool {
 func matchesPathFilter(filters []string, env Envelope) bool {
 	data, _ := env.Data.(map[string]any)
 	var candidates []string
+	appendCandidate := func(path string) {
+		if path == "" {
+			return
+		}
+		candidates = append(candidates, normalizePath(path))
+		// Tool payloads may carry resolved absolute paths (FileState-derived);
+		// also offer the project-relative form so root-relative glob filters
+		// like "src/**/*.go" keep matching.
+		if rel := projectRelativePath(env.ProjectRoot, path); rel != "" {
+			candidates = append(candidates, rel)
+		}
+	}
 
 	if path, _ := data["path"].(string); path != "" {
-		candidates = append(candidates, normalizePath(path))
+		appendCandidate(path)
 	}
 	for _, path := range pathsFromData(data) {
-		candidates = append(candidates, normalizePath(path))
+		appendCandidate(path)
 	}
 	for _, changed := range changedFilesFromData(data) {
-		candidates = append(candidates, normalizePath(changed.Path))
+		appendCandidate(changed.Path)
 	}
 
 	for _, candidate := range candidates {
@@ -778,6 +790,24 @@ func pathsFromData(data map[string]any) []string {
 
 func normalizePath(path string) string {
 	return filepath.ToSlash(path)
+}
+
+// projectRelativePath returns the project-relative slash form of an absolute
+// path under root, or "" when the path is relative, outside root, or root is
+// unknown.
+func projectRelativePath(root, path string) string {
+	if root == "" || !filepath.IsAbs(path) {
+		return ""
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return ""
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return ""
+	}
+	return rel
 }
 
 func containsString(list []string, target string) bool {

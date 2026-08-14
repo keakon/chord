@@ -63,6 +63,27 @@ func TestHookOutputBufferCapsOutput(t *testing.T) {
 	}
 }
 
+func TestMatchesPathFilterProjectRelativeCandidates(t *testing.T) {
+	env := Envelope{
+		ProjectRoot: "/repo",
+		Data:        map[string]any{"path": "/repo/internal/agent/main.go"},
+	}
+	if !matchesPathFilter([]string{"internal/**/*.go"}, env) {
+		t.Fatal("root-relative glob should match an absolute payload path under the project root")
+	}
+	if !matchesPathFilter([]string{"/repo/internal/**"}, env) {
+		t.Fatal("absolute glob should keep matching the absolute payload path")
+	}
+	outside := Envelope{ProjectRoot: "/repo", Data: map[string]any{"path": "/elsewhere/internal/agent/main.go"}}
+	if matchesPathFilter([]string{"internal/**"}, outside) {
+		t.Fatal("absolute path outside the project root must not gain a relative candidate")
+	}
+	rootless := Envelope{Data: map[string]any{"path": "/repo/internal/agent/main.go"}}
+	if matchesPathFilter([]string{"internal/**"}, rootless) {
+		t.Fatal("without a project root the absolute path must not match a relative glob")
+	}
+}
+
 func TestHookFiltersAndEnvHelpers(t *testing.T) {
 	env := testEnv(OnToolBatchComplete, map[string]any{
 		"tool_name":  "Shell",
