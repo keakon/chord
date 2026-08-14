@@ -156,6 +156,143 @@ func TestParseOpenAISSEStream_PreservesReasoningContentWithoutMarkers(t *testing
 	}
 }
 
+func TestParseOpenAISSEStream_AcceptsReasoningAliasesWithoutDuplication(t *testing.T) {
+	tests := []struct {
+		name  string
+		delta string
+		want  string
+	}{
+		{
+			name:  "reasoning",
+			delta: `"reasoning":"provider reasoning"`,
+			want:  "provider reasoning",
+		},
+		{
+			name:  "reasoning_text",
+			delta: `"reasoning_text":"provider reasoning text"`,
+			want:  "provider reasoning text",
+		},
+		{
+			name:  "prefer reasoning_content",
+			delta: `"reasoning_content":"preferred","reasoning":"duplicate","reasoning_text":"duplicate"`,
+			want:  "preferred",
+		},
+		{
+			name:  "empty primary falls back to alias",
+			delta: `"reasoning_content":"","reasoning":"alias text"`,
+			want:  "alias text",
+		},
+		{
+			name:  "non-string alias falls back",
+			delta: `"reasoning":{"summary":"ignored"},"reasoning_text":"alias text"`,
+			want:  "alias text",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := strings.Join([]string{
+				`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{` + tt.delta + `}}]}`,
+				`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"content":"answer"}}]}`,
+				`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}]}`,
+				`data: [DONE]`,
+				"",
+			}, "\n")
+
+			var thinkingDeltas []string
+			var thinkingEndCount int
+			resp, err := parseOpenAISSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
+				switch delta.Type {
+				case message.StreamDeltaThinking:
+					thinkingDeltas = append(thinkingDeltas, delta.Text)
+				case message.StreamDeltaThinkingEnd:
+					thinkingEndCount++
+				}
+			}, nil)
+			if err != nil {
+				t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+			}
+			if resp == nil {
+				t.Fatal("expected non-nil response")
+			}
+			if resp.ReasoningContent != tt.want {
+				t.Fatalf("ReasoningContent = %q, want %q", resp.ReasoningContent, tt.want)
+			}
+			if got := strings.Join(thinkingDeltas, ""); got != tt.want {
+				t.Fatalf("thinking deltas = %q, want %q", got, tt.want)
+			}
+			if thinkingEndCount != 1 {
+				t.Fatalf("thinking_end count = %d, want 1", thinkingEndCount)
+			}
+		})
+	}
+}
+
+func TestParseOpenAISSEStream_IgnoresNonStringReasoningAliases(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"reasoning":{"summary":"ignored"},"reasoning_text":["ignored"],"content":"answer"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "answer" || resp.ReasoningContent != "" {
+		t.Fatalf("response = %#v, want answer without reasoning", resp)
+	}
+}
+
+func TestParseOpenAISSEStream_StillRejectsMalformedJSON(t *testing.T) {
+	stream := "data: {\"choices\":[{\"delta\":{\"reasoning\":{}}}]\n"
+	if _, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil); err == nil || !strings.Contains(err.Error(), "parse stream chunk") {
+		t.Fatalf("parseOpenAISSEStream error = %v, want malformed chunk error", err)
+	}
+}
+
+// TestParseOpenAISSEStream_AliasSwitchMidStreamContinuesOneThinkingBlock covers
+// gateways that fail over between upstreams mid-response: the alias field may
+// change between chunks, but the reasoning must accumulate into one block with
+// a single thinking-end, not restart or duplicate.
+func TestParseOpenAISSEStream_AliasSwitchMidStreamContinuesOneThinkingBlock(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"reasoning":"first half"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"reasoning_content":" second half"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"content":"answer"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	var thinkingDeltas []string
+	var thinkingEndCount int
+	resp, err := parseOpenAISSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
+		switch delta.Type {
+		case message.StreamDeltaThinking:
+			thinkingDeltas = append(thinkingDeltas, delta.Text)
+		case message.StreamDeltaThinkingEnd:
+			thinkingEndCount++
+		}
+	}, nil)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if resp.ReasoningContent != "first half second half" {
+		t.Fatalf("ReasoningContent = %q, want the switched aliases concatenated", resp.ReasoningContent)
+	}
+	if got := strings.Join(thinkingDeltas, ""); got != "first half second half" {
+		t.Fatalf("thinking deltas = %q, want continuous accumulation across the alias switch", got)
+	}
+	if thinkingEndCount != 1 {
+		t.Fatalf("thinking_end count = %d, want 1", thinkingEndCount)
+	}
+}
+
 func TestParseOpenAISSEStream_AggregatesPromptCacheUsage(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"content":"Hello"}}]}`,

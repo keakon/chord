@@ -198,7 +198,37 @@ type openAIStreamDelta struct {
 	Role             string           `json:"role,omitempty"`
 	Content          *string          `json:"content,omitempty"`
 	ReasoningContent *string          `json:"reasoning_content,omitempty"`
+	Reasoning        reasoningAlias   `json:"reasoning,omitempty"`
+	ReasoningText    reasoningAlias   `json:"reasoning_text,omitempty"`
 	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
+}
+
+type reasoningAlias string
+
+func (a *reasoningAlias) UnmarshalJSON(data []byte) error {
+	*a = ""
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || data[0] != '"' {
+		return nil
+	}
+	var value string
+	if err := sonicjson.ConfigDefault.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*a = reasoningAlias(value)
+	return nil
+}
+
+func openAIReasoningDelta(delta openAIStreamDelta) string {
+	if delta.ReasoningContent != nil && *delta.ReasoningContent != "" {
+		return *delta.ReasoningContent
+	}
+	for _, alias := range []reasoningAlias{delta.Reasoning, delta.ReasoningText} {
+		if alias != "" {
+			return string(alias)
+		}
+	}
+	return ""
 }
 
 // openAIStreamChunk is a single SSE chunk in streaming mode.
@@ -852,10 +882,11 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 
 		// Process choices.
 		for _, choice := range chunk.Choices {
-			// Handle reasoning_content (thinking) delta — emitted by
-			// DeepSeek-R1, ZhipuAI GLM and other OpenAI-compatible providers.
-			if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
-				thinking := *choice.Delta.ReasoningContent
+			// OpenAI-compatible providers use several fields for visible reasoning.
+			// Prefer reasoning_content when a gateway duplicates the same delta
+			// under multiple aliases.
+			thinking := openAIReasoningDelta(choice.Delta)
+			if thinking != "" {
 				reasoningBuf.WriteString(thinking)
 				if !thinkingToolcallMarkerHit {
 					candidate := reasoningTail + thinking

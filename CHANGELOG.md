@@ -24,6 +24,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- OpenAI-compatible chat streams now recognize visible reasoning returned as `reasoning` or `reasoning_text`, in addition to `reasoning_content`. When a gateway duplicates one delta under multiple aliases, Chord uses the first non-empty field in that order without showing or replaying the thinking twice.
 - Long-context pricing tiers now use the complete prompt size, including cache-read and cache-write tokens, so requests crossing a configured tier threshold use the correct input, output, and cache rates.
 - Changed-file tracking now merges workspace-relative and absolute forms of the same path, including after a restored session updates its project root, and preserves whether the latest operation deleted or restored the file.
 - Request-level context reduction no longer summarizes a fresh tool output the model has never seen. A result is already age 1 at the first request that can react to it, so the previous `shell_success_age_turns`/`read_like_age_turns` defaults of 1 let size-based rules summarize a large success before the model ever saw it in full; both defaults rise to 2 (the hardcoded diagnostics rule follows), so every fresh success is visible in full exactly once. Invalidated or superseded reads still render their validity marker immediately: they skip the age gate and the high-risk/diff protection branches instead of replaying stale file content.
