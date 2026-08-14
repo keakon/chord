@@ -182,7 +182,11 @@ func (m *Model) reconcileTerminalTitleState(desired terminalTitleDesiredState) t
 		return nil
 	}
 	if m.terminalTitleTickRunning && m.terminalTitleTickerMode == desired.mode && m.terminalTitleTickerDelay == desired.tickerDelay {
-		m.setTerminalTitle(desired.mode)
+		// Do NOT re-render the title here. setTerminalTitle advances the shared
+		// spinner frame, so every activity/progress event would spin the title
+		// faster than the ticker cadence. Frame advancement belongs solely to
+		// handleTerminalTitleTick; this path only confirms the ticker is already
+		// running at the right cadence.
 		return nil
 	}
 	// Bounce the ticker only when the effective title animation configuration

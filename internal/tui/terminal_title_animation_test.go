@@ -89,6 +89,42 @@ func TestBackgroundRequestProgressDoesNotRestartTerminalTitleTicker(t *testing.T
 	}
 }
 
+func TestRequestProgressDoesNotAdvanceTitleFrameBetweenTicks(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.displayState = stateForeground
+	m.terminalTitleBase = "steady spinner"
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{
+		Type:    agent.ActivityStreaming,
+		AgentID: "main",
+	}})
+	if !m.terminalTitleTickRunning {
+		t.Fatal("activity should start terminal title ticker")
+	}
+
+	// Seed a sentinel so any re-render on the event path is observable even when
+	// stdout is not a TTY (setTerminalTitle clears the pending title there).
+	const sentinel = "steady-frame-sentinel"
+	m.terminalTitleView = sentinel
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{
+		AgentID: "main",
+		Bytes:   128 * 1024,
+		Events:  42,
+	}})
+	if m.terminalTitleView != sentinel {
+		t.Fatalf("progress event rewrote terminal title: got %q, want %q", m.terminalTitleView, sentinel)
+	}
+
+	cmd := m.handleTerminalTitleTick(terminalTitleTickMsg{generation: m.terminalTitleTickGeneration})
+	if cmd == nil {
+		t.Fatal("ticker tick should schedule the next tick")
+	}
+	if m.terminalTitleView == sentinel {
+		t.Fatal("ticker tick should advance the spinner frame")
+	}
+}
+
 func TestHandleBlurMsgKeepsBackgroundActiveTitleTickerForBusyAgent(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateForeground
