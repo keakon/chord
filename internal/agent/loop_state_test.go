@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -209,7 +210,7 @@ done: allow
 	if doneResult.DoneReport != report {
 		t.Fatalf("Done ToolResultEvent.DoneReport = %q, want %q", doneResult.DoneReport, report)
 	}
-	restored := normalizeRestoredMessages(a.ctxMgr.Snapshot())
+	restored := normalizeRestoredMessages(a.ctxMgr.Snapshot(), nil, identity.MainAgentID)
 	var restoredTool *message.Message
 	for i := range restored {
 		if restored[i].Role == "tool" && restored[i].ToolCallID == callID {

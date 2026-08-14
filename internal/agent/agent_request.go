@@ -473,7 +473,7 @@ func (a *MainAgent) agentResponseDeliveryRecorded(request *DurableAgentRequest) 
 	if record == nil || a.recovery == nil {
 		return false
 	}
-	messages, err := loadTaskHistoryMessages(a.recovery, record)
+	messages, err := loadTaskHistoryMessages(a.recovery, record, loadToolActivityStarted(a.recovery))
 	if err != nil {
 		log.Warnf("failed to inspect durable agent response delivery response_id=%v task_id=%v error=%v", responseID, request.SourceTaskID, err)
 		return false

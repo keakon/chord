@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 // ---------------------------------------------------------------------------
@@ -32,17 +34,18 @@ func (a *MainAgent) executeToolCallSpeculative(ctx context.Context, tc message.T
 
 func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 	return toolExecutionPipeline{
-		agentID:      a.instanceID,
-		eventAgentID: "",
-		sessionDir:   a.sessionDir,
-		registry:     a.tools,
-		governor:     a.governor,
-		fileTrack:    a.fileTrack,
-		fileBackups:  a.fileBackups,
-		eventSender:  a,
-		emit:         a.emitToTUI,
-		projectRoot:  a.projectRoot,
-		guidance:     mainToolOutputGuidance,
+		agentID:        a.instanceID,
+		journalAgentID: identity.MainAgentID,
+		eventAgentID:   "",
+		sessionDir:     a.sessionDir,
+		registry:       a.tools,
+		governor:       a.governor,
+		fileTrack:      a.fileTrack,
+		fileBackups:    a.fileBackups,
+		eventSender:    a,
+		emit:           a.emitToTUI,
+		projectRoot:    a.projectRoot,
+		guidance:       mainToolOutputGuidance,
 		currentRuleset: func() permission.Ruleset {
 			return a.effectiveRuleset()
 		},
@@ -70,6 +73,12 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 			return a.YoloEnabled() && !yoloProtectedPermissionTool(name)
 		},
 		visibleToolNames: a.mainVisibleLLMToolNames,
+		appendToolActivity: func(rec recovery.ToolActivityRecord) error {
+			if a.recovery == nil {
+				return nil
+			}
+			return a.recovery.AppendToolActivity(rec)
+		},
 	}
 }
 

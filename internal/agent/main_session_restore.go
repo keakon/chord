@@ -313,7 +313,7 @@ func (a *MainAgent) resolveResumeSessionPath(sessionID string) (string, error) {
 	return sessionPath, nil
 }
 
-func (a *MainAgent) loadMainTranscript(tmpRecovery *recovery.RecoveryManager, sessionPath string) ([]message.Message, time.Duration, time.Duration, error) {
+func (a *MainAgent) loadMainTranscript(tmpRecovery *recovery.RecoveryManager, sessionPath string, started map[recovery.ToolActivityKey]struct{}) ([]message.Message, time.Duration, time.Duration, error) {
 	mainLoadStarted := time.Now()
 	msgs, err := tmpRecovery.LoadMessages(identity.MainAgentID)
 	mainLoadDuration := time.Since(mainLoadStarted)
@@ -321,7 +321,7 @@ func (a *MainAgent) loadMainTranscript(tmpRecovery *recovery.RecoveryManager, se
 		return nil, mainLoadDuration, 0, fmt.Errorf("no messages found in session %s", filepath.Base(sessionPath))
 	}
 	normalizeStarted := time.Now()
-	msgs = normalizeRestoredMessages(msgs)
+	msgs = normalizeRestoredMessages(msgs, started, identity.MainAgentID)
 	return msgs, mainLoadDuration, time.Since(normalizeStarted), nil
 }
 
@@ -361,7 +361,7 @@ func legacyUsageSnapshotPresent(sessionPath string) bool {
 	return false
 }
 
-func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath string, tmpRecovery *recovery.RecoveryManager) (time.Duration, time.Duration) {
+func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath string, tmpRecovery *recovery.RecoveryManager, started map[recovery.ToolActivityKey]struct{}) (time.Duration, time.Duration) {
 	if loaded == nil || tmpRecovery == nil {
 		return 0, 0
 	}
@@ -380,9 +380,27 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	loaded.LastTotalContextTokens = snap.LastTotalContextTokens
 	loaded.PendingCompactionResume = clonePendingCompactionResume(snap.PendingCompactionResume)
 	subAgentStarted := time.Now()
-	loaded.SubAgentStates = a.loadRestoredSubAgentStates(sessionPath, tmpRecovery, snap, loaded.MailboxMessages, loaded.TaskRecords)
+	loaded.SubAgentStates = a.loadRestoredSubAgentStates(sessionPath, tmpRecovery, snap, loaded.MailboxMessages, loaded.TaskRecords, started)
 	subAgentRestoreDuration = time.Since(subAgentStarted)
 	return snapshotDuration, subAgentRestoreDuration
+}
+
+// loadToolActivityStarted loads the tool-activity journal once for a restore
+// pass. A nil map means no classification information is available (missing
+// journal), which normalizeRestoredMessages treats conservatively.
+func loadToolActivityStarted(rm *recovery.RecoveryManager) map[recovery.ToolActivityKey]struct{} {
+	if rm == nil {
+		return nil
+	}
+	started, err := rm.LoadToolActivity()
+	if err != nil {
+		log.Warnf("failed to load tool-activity journal error=%v", err)
+		return nil
+	}
+	if len(started) > 0 {
+		log.Debugf("loaded tool-activity journal started_records=%d", len(started))
+	}
+	return started
 }
 
 func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, error) {
@@ -390,7 +408,9 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	tmpRecovery := recovery.NewRecoveryManager(sessionPath)
 	defer tmpRecovery.Close()
 
-	msgs, mainLoadDuration, normalizeDuration, err := a.loadMainTranscript(tmpRecovery, sessionPath)
+	started := loadToolActivityStarted(tmpRecovery)
+
+	msgs, mainLoadDuration, normalizeDuration, err := a.loadMainTranscript(tmpRecovery, sessionPath, started)
 	if err != nil {
 		return nil, err
 	}
@@ -487,7 +507,7 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 		}
 	}
 
-	snapshotDuration, subAgentRestoreDuration = a.applySessionSnapshot(loaded, sessionPath, tmpRecovery)
+	snapshotDuration, subAgentRestoreDuration = a.applySessionSnapshot(loaded, sessionPath, tmpRecovery, started)
 	if usageLedgerEventCount == 0 && legacyUsageSnapshotPresent(sessionPath) {
 		log.Warnf("session restore: legacy usage fields found but not migrated; session=%v", filepath.Base(sessionPath))
 	}
@@ -526,7 +546,7 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	return loaded, nil
 }
 
-func (a *MainAgent) loadRestoredSubAgentStates(sessionPath string, rm *recovery.RecoveryManager, snap *recovery.SessionSnapshot, mailboxMsgs []SubAgentMailboxMessage, taskRecords map[string]*DurableTaskRecord) []loadedSubAgentState {
+func (a *MainAgent) loadRestoredSubAgentStates(sessionPath string, rm *recovery.RecoveryManager, snap *recovery.SessionSnapshot, mailboxMsgs []SubAgentMailboxMessage, taskRecords map[string]*DurableTaskRecord, started map[recovery.ToolActivityKey]struct{}) []loadedSubAgentState {
 	if rm == nil || snap == nil || a.llmFactory == nil {
 		return nil
 	}
@@ -568,10 +588,10 @@ func (a *MainAgent) loadRestoredSubAgentStates(sessionPath string, rm *recovery.
 			err  error
 		)
 		if rec != nil {
-			msgs, err = loadTaskHistoryMessages(rm, rec)
+			msgs, err = loadTaskHistoryMessages(rm, rec, started)
 		} else {
 			msgs, err = rm.LoadMessages(id)
-			msgs = normalizeRestoredMessages(msgs)
+			msgs = normalizeRestoredMessages(msgs, started, id)
 		}
 		if err != nil {
 			log.Warnf("loadRestoredSubAgentStates: failed to load messages, skipping id=%v error=%v", id, err)

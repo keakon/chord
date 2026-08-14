@@ -716,6 +716,66 @@ func TestExportToMarkdownToolResult(t *testing.T) {
 	}
 }
 
+func TestExportToMarkdownToolRecoveryState(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "user", Content: "run it"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "call-1", Name: "Shell"}}},
+		{Role: "tool", ToolCallID: "call-1", Content: "session restored after the tool started", ToolStatus: "error", ToolRecoveryState: message.ToolRecoveryStateOutcomeUnknown},
+	}
+
+	session, err := Export(msgs, nil, nil)
+	if err != nil {
+		t.Fatalf("Export() error: %v", err)
+	}
+
+	md := ExportToMarkdown(session)
+	if !strings.Contains(md, "side effects may be partially or fully applied") {
+		t.Error("outcome_unknown note missing from markdown export")
+	}
+
+	msgs[2].ToolRecoveryState = message.ToolRecoveryStateNotStarted
+	session, err = Export(msgs, nil, nil)
+	if err != nil {
+		t.Fatalf("Export() error: %v", err)
+	}
+	md = ExportToMarkdown(session)
+	if !strings.Contains(md, "no result was produced") {
+		t.Error("not_started note missing from markdown export")
+	}
+}
+
+func TestExportImportRoundTripPreservesToolRecoveryState(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "user", Content: "run it"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "call-1", Name: "Shell"}}},
+		{Role: "tool", ToolCallID: "call-1", Content: "session restored after the tool started", ToolStatus: "error", ToolRecoveryState: message.ToolRecoveryStateOutcomeUnknown},
+	}
+
+	session, err := Export(msgs, nil, nil)
+	if err != nil {
+		t.Fatalf("Export() error: %v", err)
+	}
+	restored := session.ToMessages()
+	if len(restored) != 3 {
+		t.Fatalf("len(ToMessages) = %d, want 3", len(restored))
+	}
+	if restored[2].ToolRecoveryState != message.ToolRecoveryStateOutcomeUnknown {
+		t.Fatalf("round-trip recovery state = %q, want outcome_unknown", restored[2].ToolRecoveryState)
+	}
+
+	path := filepath.Join(t.TempDir(), "session.json")
+	if err := ExportToFile(session, path); err != nil {
+		t.Fatalf("ExportToFile: %v", err)
+	}
+	imported, err := ImportFromFile(path)
+	if err != nil {
+		t.Fatalf("ImportFromFile: %v", err)
+	}
+	if imported.Messages[2].ToolRecoveryState != message.ToolRecoveryStateOutcomeUnknown {
+		t.Fatalf("imported recovery state = %q, want outcome_unknown", imported.Messages[2].ToolRecoveryState)
+	}
+}
+
 func TestExportToMarkdownThinkingBlock(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "think about this"},

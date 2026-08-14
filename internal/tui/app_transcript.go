@@ -461,6 +461,7 @@ type transcriptToolResult struct {
 	imageParts          []BlockImagePart
 	resetExecution      bool
 	verificationRecords []agent.VerificationRecord
+	recoveryState       string
 }
 
 func newTranscriptToolCallBlock(nextID int, tc message.ToolCall) *Block {
@@ -514,6 +515,7 @@ func applyStableToolResultToBlock(block *Block, result transcriptToolResult) {
 		}
 	}
 	block.ResultStatus = result.status
+	block.RecoveryState = result.recoveryState
 	block.VerificationRecords = append([]agent.VerificationRecord(nil), result.verificationRecords...)
 	block.ResultDone = true
 	if result.resetExecution {
@@ -714,6 +716,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					duration:       time.Duration(msg.ToolDurationMs) * time.Millisecond,
 					displayArgs:    stableToolDisplayArgs,
 					resetExecution: true,
+					recoveryState:  msg.ToolRecoveryState,
 				})
 			}
 		}

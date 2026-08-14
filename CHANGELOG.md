@@ -8,6 +8,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - `prompt_cache.ttl` is now validated at startup: `"5m"` and `"1h"` are accepted (and `"5m"`, the API default, is normalized to omitting the field), while any other value is a configuration error instead of being silently ignored. The TTL is also honored in `explicit` breakpoint mode, not just `auto`.
 
+### Features
+
+- Interrupted sessions now recover unfinished tool outcomes more precisely. A tool whose result was never saved is marked **not started** (the tool never began executing, so re-check preconditions and retry) or **result unknown** (the tool had started, so its side effects may be partially or fully applied — verify the current state before retrying). Chord writes the tool-call message to disk before running the tool, so an interruption cannot leave side effects it does not know were intended, and when the session directory becomes unwritable it pauses tool execution until persistence recovers instead of risking unrecoverable repeated side effects.
+
 ### Improvements
 
 - `apply_patch` now commits successful file groups even when unrelated files in the same patch fail, and returns the complete unapplied dependency chain as an editable patch reference. The result clearly separates committed changes from unapplied operations, tells the model to revise stale operations instead of retrying them unchanged, and avoids repeating the same failure in a trailing `Error:` block. Move dependencies are directional: a failed move keeps later source/destination operations uncommitted, while a source group that fails after moving also rolls back operations that depended on its destination. Changed-file tracking and restored sessions reflect only the file groups that actually committed.

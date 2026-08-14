@@ -843,14 +843,38 @@ func advanceInstanceCountersForTaskRecords(records map[string]*DurableTaskRecord
 	}
 }
 
-func loadTaskHistoryMessages(rm *recovery.RecoveryManager, rec *DurableTaskRecord) ([]message.Message, error) {
+func loadTaskHistoryMessages(rm *recovery.RecoveryManager, rec *DurableTaskRecord, started map[recovery.ToolActivityKey]struct{}) ([]message.Message, error) {
 	if rm == nil || rec == nil {
 		return nil, nil
 	}
-	historyIDs := dedupeTaskInstanceHistory(rec.InstanceHistory)
-	if len(historyIDs) == 0 && strings.TrimSpace(rec.LatestInstanceID) != "" {
-		historyIDs = []string{strings.TrimSpace(rec.LatestInstanceID)}
+	historyIDs := taskInstanceHistoryIDs(rec)
+	var out []message.Message
+	for _, id := range historyIDs {
+		msgs, err := rm.LoadMessages(id)
+		if err != nil {
+			return nil, err
+		}
+		// Repair orphan tool calls per historical instance so the (agent_id,
+		// call_id) journal scope stays correct before the transcripts are
+		// concatenated.
+		msgs = normalizeRestoredMessages(msgs, started, id)
+		out = append(out, msgs...)
 	}
+	if len(out) == 0 && strings.TrimSpace(rec.TaskDesc) != "" {
+		out = append(out, message.Message{Role: "user", Content: rec.TaskDesc})
+	}
+	return out, nil
+}
+
+// loadTaskHistoryMessagesRaw loads the raw concatenated task history without
+// synthesizing recovery results. Used only by write paths that rewrite the
+// per-instance JSONL files (RemoveLastMessage): synthetic recovery results
+// must never be written back to disk.
+func loadTaskHistoryMessagesRaw(rm *recovery.RecoveryManager, rec *DurableTaskRecord) ([]message.Message, error) {
+	if rm == nil || rec == nil {
+		return nil, nil
+	}
+	historyIDs := taskInstanceHistoryIDs(rec)
 	var out []message.Message
 	for _, id := range historyIDs {
 		msgs, err := rm.LoadMessages(id)
@@ -863,6 +887,14 @@ func loadTaskHistoryMessages(rm *recovery.RecoveryManager, rec *DurableTaskRecor
 		out = append(out, message.Message{Role: "user", Content: rec.TaskDesc})
 	}
 	return out, nil
+}
+
+func taskInstanceHistoryIDs(rec *DurableTaskRecord) []string {
+	historyIDs := dedupeTaskInstanceHistory(rec.InstanceHistory)
+	if len(historyIDs) == 0 && strings.TrimSpace(rec.LatestInstanceID) != "" {
+		return []string{strings.TrimSpace(rec.LatestInstanceID)}
+	}
+	return historyIDs
 }
 
 func rewriteTaskHistoryMessages(rm *recovery.RecoveryManager, rec *DurableTaskRecord, msgs []message.Message) error {

@@ -95,6 +95,10 @@ type ToolResultPayload struct {
 	FileCreated      bool                // true when Write created a file that did not previously exist
 	LSPReviews       []message.LSPReview // per-file last-review snapshots for directly edited files
 	FileState        *message.ToolFileState
+	// RecoveryState classifies synthetic results synthesized during session
+	// restore or a failed intent barrier (not_started / outcome_unknown).
+	// Ordinary runtime results leave it empty.
+	RecoveryState    string
 	speculativeHooks *speculativeToolHooks
 }
 
@@ -355,6 +359,9 @@ type ToolResultEvent struct {
 	FileState           *message.ToolFileState // committed file states, including successful subsets of error results
 	Duration            time.Duration          // wall-clock execution time for the completed tool
 	VerificationRecords []VerificationRecord
+	// RecoveryState mirrors message.ToolRecoveryState for synthetic restore /
+	// barrier-failure results; ordinary results leave it empty.
+	RecoveryState string
 }
 
 func (ToolResultEvent) agentEvent() {}
@@ -457,6 +464,17 @@ type ToastEvent struct {
 }
 
 func (ToastEvent) agentEvent() {}
+
+// PersistenceHealthEvent reports a change of the main transcript's persistence
+// health. Degraded=true means writes are failing and tool dispatch is paused
+// by the intent barrier; the TUI shows a persistent indicator until a
+// Degraded=false event clears it.
+type PersistenceHealthEvent struct {
+	Degraded bool
+	Reason   string
+}
+
+func (PersistenceHealthEvent) agentEvent() {}
 
 // CompactionStatusEvent drives the TUI background compaction slot precisely.
 // Status is one of: "started", "succeeded", "failed", "cancelled".

@@ -36,6 +36,14 @@ const (
 	ToolStatusCancelled = "cancelled"
 )
 
+// ToolRecoveryState classifies a synthetic tool result produced during session
+// restore, distinguishing "never started" from "started but outcome unknown".
+// Ordinary results leave the field empty.
+const (
+	ToolRecoveryStateNotStarted     = "not_started"
+	ToolRecoveryStateOutcomeUnknown = "outcome_unknown"
+)
+
 // ContentPart is one part of a multi-part user message (text, image, or pdf).
 type ContentPart struct {
 	Type        ContentPartType `json:"type"`                   // "text", "image", or "pdf"
@@ -194,6 +202,10 @@ type Message struct {
 	Kind         string           `json:"kind,omitempty"`    // control/display subtype, e.g. "loop_notice"
 	Mailbox      *MailboxMetadata `json:"mailbox,omitempty"` // durable metadata for a mailbox message actually sent to an agent
 	MailboxAckID string           `json:"-"`                 // transient runtime-only mailbox ack marker; never persisted
+	// ToolRecoveryState classifies synthetic tool results synthesized during
+	// session restore (not_started / outcome_unknown). Ordinary runtime tool
+	// results leave it empty.
+	ToolRecoveryState string `json:"tool_recovery_state,omitempty"`
 }
 
 // MailboxMetadata identifies a durable SubAgent mailbox message in an agent's

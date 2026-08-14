@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,6 +27,34 @@ import (
 )
 
 const maxSessionDirRetries = 1000
+
+// ErrClosed is returned when a persistence write races with or follows Close.
+var ErrClosed = errors.New("recovery manager is closed")
+
+// ToolActivityFilename is the append-only journal recording tool calls that
+// reached their execution body. It is read-only during session restore and is
+// deliberately separate from main.jsonl so a started fact never becomes model-
+// visible transcript content.
+const ToolActivityFilename = "tool-activity.jsonl"
+
+// ToolActivityStateStarted marks that a tool call reached its execution body.
+const ToolActivityStateStarted = "started"
+
+// ToolActivityKey identifies one tool invocation in the activity journal.
+type ToolActivityKey struct {
+	AgentID string
+	CallID  string
+}
+
+// ToolActivityRecord is one append-only line of the tool-activity journal.
+type ToolActivityRecord struct {
+	CallID  string `json:"call_id"`
+	AgentID string `json:"agent_id"`
+	TurnID  uint64 `json:"turn_id"`
+	Tool    string `json:"tool"`
+	State   string `json:"state"`
+	TS      int64  `json:"ts"` // unix nanoseconds
+}
 
 // SessionSnapshot captures the recoverable state of a session at a point in
 // time. It is atomically written to snapshot.json for crash recovery.
@@ -130,6 +159,13 @@ type RecoveryManager struct {
 	mu         sync.Mutex
 	handles    map[string]*os.File // agentID → open JSONL file handle
 	closed     bool                // true after Close() is called
+
+	// The tool-activity journal is written from tool-execution goroutines, so it
+	// uses its own mutex and file handle instead of sharing r.mu with message
+	// writes; the two paths must not serialize against each other.
+	journalMu     sync.Mutex
+	journalHandle *os.File
+	journalClosed bool
 }
 
 // NewRecoveryManager creates a new RecoveryManager rooted at sessionDir.
@@ -230,12 +266,13 @@ func (r *RecoveryManager) persistBinaryParts(msg message.Message) (message.Messa
 // Each message is written as a single JSON line terminated by '\n'.
 // Image/PDF data in ContentParts is written to separate files under images/;
 // only the file path is stored in the JSONL record.
-// After Close is called, PersistMessage is a no-op and returns nil.
+// After Close is called, PersistMessage returns ErrClosed so callers never
+// mistake a dropped durability write for success.
 func (r *RecoveryManager) PersistMessage(agentID string, msg message.Message) error {
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		return nil
+		return ErrClosed
 	}
 	r.mu.Unlock()
 
@@ -253,7 +290,7 @@ func (r *RecoveryManager) PersistMessage(agentID string, msg message.Message) er
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		return nil
+		return ErrClosed
 	}
 
 	f, ok := r.handles[agentID]
@@ -268,6 +305,77 @@ func (r *RecoveryManager) PersistMessage(agentID string, msg message.Message) er
 
 	_, err = f.Write(data)
 	return err
+}
+
+// AppendToolActivity durably appends one started record to the tool-activity
+// journal. The write is a plain file write (process-crash durable, not fsync).
+// After Close it returns an error instead of silently succeeding.
+func (r *RecoveryManager) AppendToolActivity(rec ToolActivityRecord) error {
+	r.journalMu.Lock()
+	defer r.journalMu.Unlock()
+	if r.journalClosed {
+		return fmt.Errorf("tool-activity journal is closed")
+	}
+	if r.journalHandle == nil {
+		f, err := privatefs.OpenFile(r.sessionDir, r.toolActivityPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+		if err != nil {
+			return fmt.Errorf("open tool-activity journal: %w", err)
+		}
+		r.journalHandle = f
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		return fmt.Errorf("marshal tool-activity record: %w", err)
+	}
+	data = append(data, '\n')
+	if _, err := r.journalHandle.Write(data); err != nil {
+		return fmt.Errorf("append tool-activity record: %w", err)
+	}
+	return nil
+}
+
+// LoadToolActivity reads the tool-activity journal and returns the set of
+// started tool calls keyed by (agent_id, call_id). A missing journal returns a
+// nil set (no classification information available); an existing but empty
+// journal returns an empty non-nil set (every tool was read-only or never
+// started). Any malformed record makes the journal unusable for classification:
+// skipping it could incorrectly label a tool that started as not_started.
+func (r *RecoveryManager) LoadToolActivity() (map[ToolActivityKey]struct{}, error) {
+	path := filepath.Join(r.sessionDir, ToolActivityFilename)
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	started := make(map[ToolActivityKey]struct{})
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, recoveryMaxReadBufferSize), recoveryMaxJournalLineSize)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var rec ToolActivityRecord
+		if err := json.Unmarshal(line, &rec); err != nil {
+			return nil, fmt.Errorf("decode tool-activity journal record: %w", err)
+		}
+		if rec.State != ToolActivityStateStarted || rec.CallID == "" || rec.AgentID == "" {
+			return nil, fmt.Errorf("invalid tool-activity journal record")
+		}
+		started[ToolActivityKey{AgentID: rec.AgentID, CallID: rec.CallID}] = struct{}{}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan tool-activity journal: %w", err)
+	}
+	return started, nil
+}
+
+func (r *RecoveryManager) toolActivityPath() string {
+	return filepath.Join(r.sessionDir, ToolActivityFilename)
 }
 
 // LoadMessages reads all messages from an agent's JSONL log file. If the file
@@ -351,8 +459,16 @@ func (r *RecoveryManager) Recover() (*SessionSnapshot, error) {
 }
 
 // Close flushes and closes all open JSONL file handles. This should be called
-// during graceful shutdown. After Close, PersistMessage is a no-op.
+// during graceful shutdown. After Close, PersistMessage returns ErrClosed.
 func (r *RecoveryManager) Close() {
+	r.journalMu.Lock()
+	r.journalClosed = true
+	if r.journalHandle != nil {
+		r.journalHandle.Close()
+		r.journalHandle = nil
+	}
+	r.journalMu.Unlock()
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, f := range r.handles {
@@ -432,6 +548,7 @@ const (
 	maxFirstUserMessagePreview = 80
 	recoveryMinReadBufferSize  = 4 * 1024
 	recoveryMaxReadBufferSize  = 64 * 1024
+	recoveryMaxJournalLineSize = 1 << 20
 )
 
 // ListSessions scans the sessions directory and returns SessionInfo for each

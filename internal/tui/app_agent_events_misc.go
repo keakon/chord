@@ -116,6 +116,9 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			m.markBlockSettled(block)
 		}
 		return true, effects
+	case agent.PersistenceHealthEvent:
+		m.persistenceDegraded = evt.Degraded
+		return true, effects
 	case agent.ToastEvent:
 		effects.addFollowup(m.enqueueToastWithCategory(evt.Message, evt.Level, evt.Category))
 		if m.shouldPriorityFlushToast(evt.Level) {

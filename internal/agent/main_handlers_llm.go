@@ -26,6 +26,13 @@ import (
 // limits.
 const maxMalformedToolCalls = 3
 
+// maxIntentBarrierFailureRounds bounds consecutive LLM rounds whose tool
+// dispatch failed the intent barrier within one turn. The first failure is
+// reported to the model via not_started tool errors so it can surface the
+// problem; a second consecutive failure aborts the turn — the write path is
+// still broken and another round could only fail the same way.
+const maxIntentBarrierFailureRounds = 2
+
 // maxToolCallsPerResponse bounds provider-controlled fan-out before tool
 // execution and loop-owned follow-up events are allocated.
 const maxToolCallsPerResponse = 256
@@ -355,9 +362,15 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		ToolCalls: len(sanitizedToolCalls),
 	})
 
-	// Persist assistant message for crash recovery.
+	// Persist assistant message for crash recovery, and capture its write result
+	// so the intent barrier below can gate tool dispatch on it.
+	persistBarrier := make(chan error, 1)
+	persistPending := false
 	if a.recovery != nil {
-		a.persistAsync(identity.MainAgentID, assistantMsg)
+		persistPending = a.persistAsyncAfter(identity.MainAgentID, assistantMsg, func(err error) {
+			a.notePersistenceFailure(err)
+			persistBarrier <- err
+		})
 	}
 
 	// Thinking translation is a best-effort post-processing enhancement. It is
@@ -397,8 +410,20 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	}
 
 	// Execute finalized tool calls in concurrency-safe batches.
-	a.turn.noteDispatchedToolRound(validCalls, wasLengthRecovery)
 	batches := buildToolExecutionBatches(a.tools, validCalls)
+
+	// Intent barrier: the assistant message carrying these tool calls must be
+	// process-crash durable before any tool body can produce side effects.
+	if len(batches) > 0 && a.recovery != nil {
+		if err := a.waitPersistBarrier(persistBarrier, persistPending); err != nil {
+			a.failIntentBarrier(validCalls, err)
+			return
+		}
+		a.turn.BarrierFailureRounds = 0
+		a.markPersistenceRecoveredAfterBarrier()
+	}
+
+	a.turn.noteDispatchedToolRound(validCalls, wasLengthRecovery)
 	a.turn.toolExecutionBatches = batches
 	a.turn.nextToolBatch = 0
 	a.turn.activeToolBatchCancel = nil
@@ -450,6 +475,74 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	}
 	if len(batches) > 0 {
 		a.startNextToolBatch(a.turn)
+	}
+}
+
+// failIntentBarrier handles an intent-barrier failure after the assistant
+// message carrying tool calls could not be made process-crash durable. It must
+// not dispatch any tool body. Instead it synthesizes not_started terminal tool
+// results for every call that would have run, closes speculative streaming
+// cards, degrades the persistence health, and lets the normal tool-result
+// accounting drive the next LLM round (so the model sees the failures instead
+// of orphan tool_calls).
+func (a *MainAgent) failIntentBarrier(calls []message.ToolCall, cause error) {
+	turn := a.turn
+	if turn == nil || len(calls) == 0 {
+		return
+	}
+	a.notePersistenceFailure(cause)
+	turn.BarrierFailureRounds++
+
+	validCallIDs := make(map[string]struct{}, len(calls))
+	pending := make([]PendingToolCall, 0, len(calls))
+	for _, tc := range calls {
+		validCallIDs[tc.ID] = struct{}{}
+		pending = append(pending, PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)})
+	}
+	// No tool body may run: discard every speculative execution (valid IDs
+	// included — they are reported not_started below, so committed speculative
+	// writes must roll back), then close the streaming cards. Snapshot before
+	// finalize: finalize drains the streaming list.
+	streamingSnapshot := turn.snapshotStreamingToolCalls()
+	var discardInfo map[string]StreamingToolDiscardInfo
+	if turn.streamingToolExec != nil {
+		discarded := turn.streamingToolExec.DiscardExceptInfo(nil, "barrier_failed")
+		logStreamingToolDiscardInfo("barrier_failed", discarded)
+		if len(discarded) > 0 {
+			discardInfo = make(map[string]StreamingToolDiscardInfo, len(discarded))
+			for _, it := range discarded {
+				discardInfo[it.CallID] = it
+			}
+		}
+	}
+	finalizeStreamingToolCards(a.emitToTUI, validCallIDs, discardInfo, turn)
+	if len(streamingSnapshot) > 0 {
+		orphans := make([]PendingToolCall, 0, len(streamingSnapshot))
+		for _, c := range streamingSnapshot {
+			if _, ok := validCallIDs[c.CallID]; ok {
+				continue
+			}
+			orphans = append(orphans, c)
+		}
+		a.clearToolTraceForCalls(orphans)
+	}
+
+	barrierErr := fmt.Errorf("tool not executed: session persistence failed before the tool started: %w", cause)
+	turnID := turn.ID
+	turn.PendingToolCalls.Store(int32(len(pending)))
+	turn.TotalToolCalls.Store(int32(len(pending)))
+	turn.toolExecutionBatches = nil
+	turn.nextToolBatch = 0
+	turn.activeToolBatchCancel = nil
+	for _, call := range pending {
+		a.queueLoopEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{
+			CallID:        call.CallID,
+			Name:          call.Name,
+			ArgsJSON:      call.ArgsJSON,
+			Error:         barrierErr,
+			TurnID:        turnID,
+			RecoveryState: message.ToolRecoveryStateNotStarted,
+		}})
 	}
 }
 

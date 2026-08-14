@@ -334,6 +334,12 @@ type Model struct {
 	// startup or tab switches.
 	rightPanelVisible bool
 
+	// persistenceDegraded mirrors the main agent's persistence health: true
+	// between a PersistenceHealthEvent{Degraded: true} and its clearing event.
+	// Rendered as a persistent status-bar pill so the paused tool execution
+	// stays explained after the transient toast is gone.
+	persistenceDegraded bool
+
 	// Resize handling keeps layout stable for small shrink jitter while avoiding visible
 	// blank space when the terminal grows. We always remember the latest observed
 	// dimensions in pendingResizeW/H. Width/height growth is applied immediately so

@@ -53,6 +53,9 @@ type ExportedMessage struct {
 	CompactionFileRevisions map[string]string             `json:"compaction_file_revisions,omitempty"`
 	Provenance              *message.MessageProvenance    `json:"provenance,omitempty"`
 	Timestamp               time.Time                     `json:"timestamp"`
+	// ToolRecoveryState classifies synthetic restore / barrier-failure results
+	// (not_started / outcome_unknown). Ordinary results leave it empty.
+	ToolRecoveryState string `json:"tool_recovery_state,omitempty"`
 }
 
 // ExportedToolCall is a simplified tool call representation for export.
@@ -135,6 +138,7 @@ func Export(
 			IsCompactionSummary:     msg.IsCompactionSummary,
 			CompactionFileRevisions: cloneStringMap(msg.CompactionFileRevisions),
 			Provenance:              provenance,
+			ToolRecoveryState:       msg.ToolRecoveryState,
 			// Use incremental timestamps (1µs apart) to preserve ordering
 			// since source messages don't carry original timestamps.
 			Timestamp: now.Add(time.Duration(i) * time.Microsecond),
@@ -287,6 +291,12 @@ func ExportToMarkdown(session *ExportedSession) string {
 				toolName = "unknown"
 			}
 			sb.WriteString(convformat.ToolResultMarkdown(toolName, em.Content, em.ToolDiff))
+			switch em.ToolRecoveryState {
+			case message.ToolRecoveryStateOutcomeUnknown:
+				sb.WriteString("\n\n> ⚠ This tool had started before the session was interrupted and its result was not persisted; its side effects may be partially or fully applied. Verify the current state before retrying.")
+			case message.ToolRecoveryStateNotStarted:
+				sb.WriteString("\n\n> This tool had not started before the session was interrupted; no result was produced. Re-check preconditions before retrying.")
+			}
 			sb.WriteString("\n")
 			needSep = true
 		}
@@ -359,6 +369,7 @@ func (es *ExportedSession) ToMessages() []message.Message {
 			IsCompactionSummary:     em.IsCompactionSummary,
 			CompactionFileRevisions: cloneStringMap(em.CompactionFileRevisions),
 			Provenance:              provenance,
+			ToolRecoveryState:       em.ToolRecoveryState,
 		}
 
 		// Restore tool calls.

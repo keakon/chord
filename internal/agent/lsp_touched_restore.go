@@ -38,6 +38,13 @@ func RebuildTouchedPathsFromMessages(msgs []message.Message, projectRoot string)
 		if msg.Role != "tool" || (!msg.FileState.HasChanges() && !message.ToolResultSucceeded(msg.Content)) {
 			continue
 		}
+		// Synthetic not_started recovery results prove the tool body never
+		// ran; their informational content must not count as success.
+		// outcome_unknown stays: side effects may exist, and over-including
+		// a path only costs an extra diagnostics pass.
+		if msg.ToolRecoveryState == message.ToolRecoveryStateNotStarted {
+			continue
+		}
 		info, ok := calls[msg.ToolCallID]
 		if !ok {
 			continue

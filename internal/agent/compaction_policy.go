@@ -1202,6 +1202,7 @@ type stableReductionMessageShape struct {
 	Provenance          stableReductionProvenanceShape
 	IsCompactionSummary bool
 	Kind                string
+	ToolRecoveryState   string
 }
 
 type stableReductionProvenanceShape struct {
@@ -1328,6 +1329,7 @@ func stableReductionMessageShapeOf(msg *message.Message) stableReductionMessageS
 		Provenance:          stableReductionProvenanceShapeFor(msg.Provenance),
 		IsCompactionSummary: msg.IsCompactionSummary,
 		Kind:                msg.Kind,
+		ToolRecoveryState:   msg.ToolRecoveryState,
 	}
 }
 
@@ -1361,7 +1363,8 @@ func stableReductionMessageEquivalent(a, b *message.Message) bool {
 		a.ToolDiffRemoved != b.ToolDiffRemoved ||
 		a.ToolStatus != b.ToolStatus ||
 		a.IsCompactionSummary != b.IsCompactionSummary ||
-		a.Kind != b.Kind {
+		a.Kind != b.Kind ||
+		a.ToolRecoveryState != b.ToolRecoveryState {
 		return false
 	}
 	if !maps.Equal(a.CompactionFileRevisions, b.CompactionFileRevisions) {

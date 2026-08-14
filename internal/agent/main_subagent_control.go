@@ -560,7 +560,7 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	if a.llmFactory == nil {
 		return nil, "", false, fmt.Errorf("LLM client factory not configured; call SetLLMFactory before rehydrating SubAgents")
 	}
-	msgs, err := loadTaskHistoryMessages(a.recovery, record)
+	msgs, err := loadTaskHistoryMessages(a.recovery, record, loadToolActivityStarted(a.recovery))
 	if err != nil {
 		return nil, "", false, fmt.Errorf("load task history for %s: %w", record.TaskID, err)
 	}

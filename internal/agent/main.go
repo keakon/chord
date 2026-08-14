@@ -100,7 +100,14 @@ type Turn struct {
 	// abnormal arguments — either the malformed sentinel (invalid JSON) or
 	// empty "{}" for tools with required parameters (output truncation).
 	// When this reaches maxMalformedToolCalls the turn is aborted.
-	MalformedCount                     int
+	MalformedCount int
+	// BarrierFailureRounds tracks consecutive LLM rounds in this turn whose
+	// tool dispatch was blocked by an intent-barrier persistence failure. The
+	// first failure is fed back to the model as not_started tool errors; when
+	// it reaches maxIntentBarrierFailureRounds the turn is aborted instead of
+	// burning further LLM rounds against a broken write path. Reset to zero by
+	// every successful barrier. Event-loop-goroutine only, like MalformedCount.
+	BarrierFailureRounds               int
 	LengthRecoveryCount                int
 	InLengthRecovery                   bool
 	LastTruncatedToolName              string
@@ -405,6 +412,11 @@ type MainAgent struct {
 	// shellReadOnlyClass caches per-ToolCallID read-only classification of
 	// shell commands for the reduction pass (see shellReadOnlyClassMemo).
 	shellReadOnlyClass shellReadOnlyClassMemo
+
+	// persistenceHealth tracks the durability of the main transcript writes.
+	// Degraded means writes are failing; the intent barrier then blocks tool
+	// dispatch while Q&A turns keep working until a checkpoint recovers.
+	persistenceHealth agentPersistenceHealth
 
 	// loopReductionMu protects request-shape snapshots, reduction stats, and
 	// loopState fields that may be read by callLLM on a worker goroutine while
@@ -1747,6 +1759,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	}
 
 	// Start a new turn and call LLM.
+	a.tryRecoverPersistenceBeforeTurn()
 	a.stageNextSubAgentMailboxBatch()
 	a.newTurn()
 	turnID := a.turn.ID
@@ -1801,6 +1814,7 @@ func (a *MainAgent) handlePendingDraftUpsert(evt Event) {
 	}
 
 	a.mailboxDeliveryPaused.Store(false)
+	a.tryRecoverPersistenceBeforeTurn()
 	a.stageNextSubAgentMailboxBatch()
 	a.newTurn()
 	turnID := a.turn.ID

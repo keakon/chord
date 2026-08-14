@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -250,13 +251,13 @@ func TestPersistMessageRestrictsExistingSessionFiles(t *testing.T) {
 	assertMode(t, logPath, 0o600)
 }
 
-func TestPersistMessageAfterCloseDoesNotCreateSessionDir(t *testing.T) {
+func TestPersistMessageAfterCloseReturnsErrorWithoutCreatingSessionDir(t *testing.T) {
 	sessionDir := filepath.Join(t.TempDir(), "session")
 	rm := NewRecoveryManager(sessionDir)
 	rm.Close()
 
-	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "secret"}); err != nil {
-		t.Fatalf("PersistMessage after Close: %v", err)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "secret"}); !errors.Is(err, ErrClosed) {
+		t.Fatalf("PersistMessage after Close error = %v, want ErrClosed", err)
 	}
 	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
 		t.Fatalf("session directory created after Close: %v", err)

@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -1028,6 +1029,9 @@ func (b *Block) renderToolResult(width int) []string {
 		} else if b.toolResultIsCancelled() {
 			prefix = "◌"
 		}
+		if b.RecoveryState == message.ToolRecoveryStateOutcomeUnknown {
+			prefix = "!"
+		}
 		var body []string
 		body = append(body, renderToolHeaderLine(prefix, b.ToolName))
 		lim := min(lineCount, maxToolCallCompactResultLines)
@@ -1049,9 +1053,15 @@ func (b *Block) renderToolResult(width int) []string {
 		renderHeader = func(s string) string { return ErrorStyle.Render(s) }
 		renderBody = func(s string) string { return ErrorStyle.Render(s) }
 	}
+	if b.RecoveryState == message.ToolRecoveryStateOutcomeUnknown {
+		renderHeader = func(s string) string { return LSPWarnStyle.Render(s) }
+	}
 	headerPrefix := "  ↳ Result from"
 	if b.toolResultIsCancelled() {
 		headerPrefix = "  ↳ Cancelled"
+	}
+	if b.RecoveryState == message.ToolRecoveryStateOutcomeUnknown {
+		headerPrefix = "  ↳ Result unknown"
 	}
 	header := renderHeader(fmt.Sprintf("%s %s:", headerPrefix, b.ToolName))
 	result := []string{header}

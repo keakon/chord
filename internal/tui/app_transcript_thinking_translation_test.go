@@ -36,6 +36,23 @@ func TestMessagesToBlocksRestoresThinkingTranslationsByMessageBlock(t *testing.T
 	}
 }
 
+func TestMessagesToBlocksPreservesToolRecoveryState(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "user", Content: "run it"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "call-1", Name: "shell"}}},
+		{Role: "tool", ToolCallID: "call-1", Content: "session restored after the tool started", ToolStatus: "error", ToolRecoveryState: message.ToolRecoveryStateOutcomeUnknown},
+	}
+	var nextID int
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 2 {
+		t.Fatalf("blocks len = %d, want 2 (call+result share one block): %#v", len(blocks), blocks)
+	}
+	result := blocks[1]
+	if result.ToolID != "call-1" || result.RecoveryState != message.ToolRecoveryStateOutcomeUnknown {
+		t.Fatalf("tool result block = %#v, want call-1 with outcome_unknown", result)
+	}
+}
+
 func TestMessagesToBlocksSkipsStaleThinkingTranslationHash(t *testing.T) {
 	msgs := []message.Message{{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "new thinking"}}}}
 	translations := map[string]ThinkingTranslationView{

@@ -217,6 +217,13 @@ If `--continue` or `--resume` does not appear to work as expected:
 
 Chord automatically repairs incomplete turns caused by an interrupted process before resuming. If restored model/provider state or conversation order looks wrong, export a diagnostics bundle from a current build and include the session ID.
 
+For a tool whose result was never saved, the repaired card shows one of two markers:
+
+- **Not started** — the tool had not begun executing, so no side effect could have happened. Re-check the preconditions and retry if appropriate.
+- **Result unknown** — the tool had already started, so its side effects may be partially or fully applied. Verify the current file or remote state before retrying.
+
+Chord writes the tool-call message to disk before running the tool, so an interruption cannot leave side effects that Chord does not know were intended. If the session directory becomes unwritable (for example, the disk is full), Chord pauses tool execution to avoid unrecoverable repeated side effects, shows a status card with the cause, and resumes tools automatically once writing succeeds again.
+
 ## A delegated SubAgent appears stuck or an `escalate` card keeps running
 
 Current builds automatically recover two failure modes that older sessions could expose:

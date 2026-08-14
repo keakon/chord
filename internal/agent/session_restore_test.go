@@ -411,7 +411,7 @@ func TestRestoreSessionAtStartupRestoresSubAgentInterruptedToolResults(t *testin
 	if rec == nil || !rec.RuntimeParked {
 		t.Fatalf("task record = %#v, want parked restored task", rec)
 	}
-	msgs, err := loadTaskHistoryMessages(a.recovery, rec)
+	msgs, err := loadTaskHistoryMessages(a.recovery, rec, nil)
 	if err != nil {
 		t.Fatalf("loadTaskHistoryMessages: %v", err)
 	}

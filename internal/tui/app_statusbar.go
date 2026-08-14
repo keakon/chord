@@ -112,30 +112,31 @@ type statusBarAgentSnapshot struct {
 }
 
 type statusBarInputs struct {
-	Now               time.Time
-	ModeText          string
-	Snapshot          statusBarAgentSnapshot
-	StatusActiveID    string
-	StatusActivity    agent.AgentActivityEvent
-	InfoPanelVisible  bool
-	SessionSwitchKind string
-	SessionSwitchID   string
-	WorkingDirDisplay string
-	PendingQuitFP     string
-	ChordDisplay      string
-	SearchFP          string
-	NextEscHint       string
-	LoopState         agent.LoopState
-	YoloEnabled       bool
-	LoopIteration     int
-	LoopMaxIterations int
-	ServiceTier       config.ServiceTier
-	DynamicCacheKey   string
-	InflightDraft     bool
-	LocalShellPending bool
-	Width             int
-	Height            int
-	ViewportOffset    int
+	Now                 time.Time
+	ModeText            string
+	Snapshot            statusBarAgentSnapshot
+	StatusActiveID      string
+	StatusActivity      agent.AgentActivityEvent
+	InfoPanelVisible    bool
+	SessionSwitchKind   string
+	SessionSwitchID     string
+	WorkingDirDisplay   string
+	PendingQuitFP       string
+	ChordDisplay        string
+	SearchFP            string
+	NextEscHint         string
+	LoopState           agent.LoopState
+	YoloEnabled         bool
+	PersistenceDegraded bool
+	LoopIteration       int
+	LoopMaxIterations   int
+	ServiceTier         config.ServiceTier
+	DynamicCacheKey     string
+	InflightDraft       bool
+	LocalShellPending   bool
+	Width               int
+	Height              int
+	ViewportOffset      int
 }
 
 func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
@@ -166,30 +167,31 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		loopMaxIterations = m.agent.CurrentLoopMaxIterations()
 	}
 	return statusBarInputs{
-		Now:               now,
-		ModeText:          m.statusBarModeText(),
-		Snapshot:          snap,
-		StatusActiveID:    statusActiveID,
-		StatusActivity:    m.activityForAgent(statusActiveID),
-		InfoPanelVisible:  m.rightPanelVisible && m.mode != ModeHelp,
-		SessionSwitchKind: m.sessionSwitch.kind,
-		SessionSwitchID:   m.sessionSwitch.sessionID,
-		WorkingDirDisplay: displayWorkingDir(m.workingDir),
-		PendingQuitFP:     strings.TrimSpace(m.pendingQuitFingerprint(now)),
-		ChordDisplay:      m.chord.display(),
-		SearchFP:          m.statusBarSearchFingerprint(),
-		NextEscHint:       m.nextEscHint(),
-		LoopState:         loopState,
-		YoloEnabled:       m.yoloEnabled(),
-		LoopIteration:     loopIteration,
-		LoopMaxIterations: loopMaxIterations,
-		ServiceTier:       m.effectiveServiceTier(),
-		DynamicCacheKey:   dynamicCacheKey,
-		InflightDraft:     m.inflightDraft != nil,
-		LocalShellPending: localShellPending,
-		Width:             m.width,
-		Height:            m.height,
-		ViewportOffset:    m.viewport.offset,
+		Now:                 now,
+		ModeText:            m.statusBarModeText(),
+		Snapshot:            snap,
+		StatusActiveID:      statusActiveID,
+		StatusActivity:      m.activityForAgent(statusActiveID),
+		InfoPanelVisible:    m.rightPanelVisible && m.mode != ModeHelp,
+		SessionSwitchKind:   m.sessionSwitch.kind,
+		SessionSwitchID:     m.sessionSwitch.sessionID,
+		WorkingDirDisplay:   displayWorkingDir(m.workingDir),
+		PendingQuitFP:       strings.TrimSpace(m.pendingQuitFingerprint(now)),
+		ChordDisplay:        m.chord.display(),
+		SearchFP:            m.statusBarSearchFingerprint(),
+		NextEscHint:         m.nextEscHint(),
+		LoopState:           loopState,
+		YoloEnabled:         m.yoloEnabled(),
+		PersistenceDegraded: m.persistenceDegraded,
+		LoopIteration:       loopIteration,
+		LoopMaxIterations:   loopMaxIterations,
+		ServiceTier:         m.effectiveServiceTier(),
+		DynamicCacheKey:     dynamicCacheKey,
+		InflightDraft:       m.inflightDraft != nil,
+		LocalShellPending:   localShellPending,
+		Width:               m.width,
+		Height:              m.height,
+		ViewportOffset:      m.viewport.offset,
 	}
 }
 
@@ -340,13 +342,20 @@ func (m *Model) appendStatusBarYoloPill(pills []string, inputs statusBarInputs) 
 	return append(pills, StatusHintStyle.Render("YOLO"))
 }
 
+func (m *Model) appendStatusBarPersistencePill(pills []string, inputs statusBarInputs) []string {
+	if !inputs.PersistenceDegraded {
+		return pills
+	}
+	return append(pills, ErrorStyle.Render("PERSIST-FAIL"))
+}
+
 func (m *Model) buildStatusBarLeadingPills(inputs statusBarInputs) []string {
 	snap := inputs.Snapshot
 	pills := []string{
 		m.statusBarModePill(inputs.ModeText),
 		m.statusBarViewingPill(snap.viewingLabel, snap.viewingColor),
 	}
-	return m.appendStatusBarYoloPill(m.appendStatusBarLoopPill(pills, inputs), inputs)
+	return m.appendStatusBarPersistencePill(m.appendStatusBarYoloPill(m.appendStatusBarLoopPill(pills, inputs), inputs), inputs)
 }
 
 func (m *Model) statusBarSearchPill() string {
@@ -423,7 +432,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	snap := inputs.Snapshot
 	statusActivity := inputs.StatusActivity
 	usage := snap.tokenUsage
-	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%d|%d|%f|%d|%d|%t|%d|%d|%d|%d|%t",
+	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%d|%d|%f|%d|%d|%t|%d|%d|%d|%d|%t",
 		inputs.Width,
 		inputs.Height,
 		m.mode,
@@ -443,6 +452,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		inputs.LoopMaxIterations,
 		inputs.InfoPanelVisible,
 		inputs.YoloEnabled,
+		inputs.PersistenceDegraded,
 		inputs.SessionSwitchKind,
 		inputs.SessionSwitchID,
 		inputs.WorkingDirDisplay,

@@ -442,38 +442,40 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	parts := a.toolResultParts(contextResult, payload.Images)
 	if !deferToolResultEmission {
 		a.emitToTUI(ToolResultEvent{
-			CallID:      payload.CallID,
-			Name:        payload.Name,
-			ArgsJSON:    payload.ArgsJSON,
-			Audit:       payload.Audit.Clone(),
-			Result:      displayResult,
-			Status:      toolResultStatusFromError(isError),
-			Parts:       parts,
-			Diff:        payload.Diff,
-			DiffAdded:   payload.DiffAdded,
-			DiffRemoved: payload.DiffRemoved,
-			FileCreated: payload.FileCreated,
-			FileState:   payload.FileState.Clone(),
-			Duration:    payload.Duration,
+			CallID:        payload.CallID,
+			Name:          payload.Name,
+			ArgsJSON:      payload.ArgsJSON,
+			Audit:         payload.Audit.Clone(),
+			Result:        displayResult,
+			Status:        toolResultStatusFromError(isError),
+			Parts:         parts,
+			Diff:          payload.Diff,
+			DiffAdded:     payload.DiffAdded,
+			DiffRemoved:   payload.DiffRemoved,
+			FileCreated:   payload.FileCreated,
+			FileState:     payload.FileState.Clone(),
+			Duration:      payload.Duration,
+			RecoveryState: payload.RecoveryState,
 		})
 	}
 
 	a.queueLSPDiagnosticOverlay(a.ctxMgr.Snapshot(), payload)
 	if !deferToolResultEmission {
 		toolMsg := message.Message{
-			Role:            "tool",
-			Content:         contextResult,
-			Parts:           parts,
-			ToolCallID:      payload.CallID,
-			ToolDiff:        payload.Diff,
-			ToolDiffAdded:   payload.DiffAdded,
-			ToolDiffRemoved: payload.DiffRemoved,
-			ToolDurationMs:  payload.Duration.Milliseconds(),
-			ToolStatus:      string(toolResultStatusFromError(isError)),
-			Audit:           payload.Audit.Clone(),
-			LSPReviews:      append([]message.LSPReview(nil), payload.LSPReviews...),
-			FileState:       payload.FileState.Clone(),
-			Provenance:      toolProvenanceForCall(a.ctxMgr.Snapshot(), payload.CallID),
+			Role:              "tool",
+			Content:           contextResult,
+			Parts:             parts,
+			ToolCallID:        payload.CallID,
+			ToolDiff:          payload.Diff,
+			ToolDiffAdded:     payload.DiffAdded,
+			ToolDiffRemoved:   payload.DiffRemoved,
+			ToolDurationMs:    payload.Duration.Milliseconds(),
+			ToolStatus:        string(toolResultStatusFromError(isError)),
+			Audit:             payload.Audit.Clone(),
+			LSPReviews:        append([]message.LSPReview(nil), payload.LSPReviews...),
+			FileState:         payload.FileState.Clone(),
+			Provenance:        toolProvenanceForCall(a.ctxMgr.Snapshot(), payload.CallID),
+			ToolRecoveryState: payload.RecoveryState,
 		}
 		a.ctxMgr.Append(toolMsg)
 		if a.recovery != nil {
@@ -526,6 +528,19 @@ func (a *MainAgent) handleToolResult(evt Event) {
 						"issue or context overflow. Please start a new conversation. "+
 						"You can also increase max_output_tokens in config to allow longer outputs",
 					a.turn.MalformedCount,
+				),
+			})
+			a.setIdleAndDrainPending()
+			return
+		}
+		if a.turn.BarrierFailureRounds >= maxIntentBarrierFailureRounds {
+			log.Warnf("aborting turn: repeated intent-barrier persistence failures rounds=%v threshold=%v", a.turn.BarrierFailureRounds, maxIntentBarrierFailureRounds)
+			a.emitToTUI(ErrorEvent{
+				Err: fmt.Errorf(
+					"turn aborted: session persistence failed %d rounds in a row, so tool "+
+						"execution stays paused to avoid unrecoverable repeated side effects. "+
+						"Check disk space or restart the session",
+					a.turn.BarrierFailureRounds,
 				),
 			})
 			a.setIdleAndDrainPending()

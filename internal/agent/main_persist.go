@@ -6,6 +6,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -105,7 +106,14 @@ func (a *MainAgent) closePersistLoop() {
 // Blocks if the channel is full (preferable to silently dropping
 // persistence data). No-op once Shutdown has closed the channel.
 func (a *MainAgent) persistAsync(agentID string, msg message.Message) {
-	a.persistAsyncAfter(agentID, msg, nil)
+	var after func(error)
+	if agentID == identity.MainAgentID {
+		// Every main-transcript write failure folds into the main persistence
+		// health state machine, which degrades the session and gates tool
+		// dispatch until the write path recovers.
+		after = a.notePersistenceFailure
+	}
+	a.persistAsyncAfter(agentID, msg, after)
 }
 
 func (a *MainAgent) persistAsyncAfter(agentID string, msg message.Message, after func(error)) bool {
@@ -158,4 +166,112 @@ func (a *MainAgent) flushPersistUntil(beforeWait func()) {
 		beforeWait()
 	}
 	<-barrier
+}
+
+// waitPersistBarrier waits for one persistence entry's write result, or fails
+// closed when the entry was never enqueued (shutdown / pump stopped) or the
+// agent is stopping first. A nil error means the message completed its
+// f.Write (process-crash durable), which is the intent-barrier gate.
+func (a *MainAgent) waitPersistBarrier(barrier <-chan error, enqueued bool) error {
+	return waitPersistBarrierOn(barrier, enqueued, a.stoppingCh)
+}
+
+// waitPersistBarrierOn is the shared intent-barrier wait: it fails closed on a
+// missing entry or a stopping signal, and records the wait duration for the
+// barrier-latency observability metric.
+func waitPersistBarrierOn(barrier <-chan error, enqueued bool, stop <-chan struct{}) error {
+	if !enqueued {
+		return errPersistenceQueueUnavailable
+	}
+	start := time.Now()
+	var err error
+	if stop == nil {
+		err = <-barrier
+	} else {
+		select {
+		case err = <-barrier:
+		case <-stop:
+			err = errPersistenceStopping
+		}
+	}
+	d := time.Since(start)
+	if d >= intentBarrierSlowThreshold {
+		log.Warnf("intent barrier wait slow duration_ms=%d error=%v", d.Milliseconds(), err)
+	} else {
+		log.Debugf("intent barrier wait duration_us=%d error=%v", d.Microseconds(), err)
+	}
+	return err
+}
+
+const intentBarrierSlowThreshold = 20 * time.Millisecond
+
+// notePersistenceFailure records a main-transcript write failure and degrades
+// the session's persistence health. It is invoked from the persistence pump
+// after-callbacks and the intent barrier, so it must be cheap and non-blocking
+// for the event loop; TUI notification is emitted once per degradation.
+func (a *MainAgent) notePersistenceFailure(err error) {
+	if a == nil || err == nil || !a.persistenceHealth.markDegraded(err) {
+		return
+	}
+	log.Errorf("main persistence degraded error=%v", err)
+	msg := mainPersistenceDegradedMessage(err)
+	a.emitToTUI(PersistenceHealthEvent{Degraded: true, Reason: err.Error()})
+	a.emitToTUI(ToastEvent{Message: msg, Level: "error", Category: "persistence_health"})
+	a.emitToTUI(InfoEvent{Message: msg})
+}
+
+func mainPersistenceDegradedMessage(err error) string {
+	return "Session persistence is degraded; tool execution is paused to avoid unrecoverable repeated side effects. " +
+		"Check disk space or restart the session. (" + err.Error() + ")"
+}
+
+// persistenceDegraded reports whether the main agent's persistence health is
+// currently degraded. In the degraded state the session remains usable for
+// Q&A turns, but tool dispatch is blocked by the intent barrier and automatic
+// loop advance is paused.
+func (a *MainAgent) persistenceDegraded() bool {
+	return a != nil && a.persistenceHealth.snapshot().State == PersistenceDegraded
+}
+
+// markPersistenceRecoveredAfterBarrier records recovery proven by a successful
+// assistant-message write. A barrier is sufficient because the persistence
+// pump processes entries FIFO and reports this entry only after its Write has
+// completed. Checkpoint recovery remains responsible for repairing earlier
+// entries that may have been lost before the successful write.
+func (a *MainAgent) markPersistenceRecoveredAfterBarrier() {
+	if a == nil || !a.persistenceDegraded() {
+		return
+	}
+	a.persistenceHealth.markRecovered()
+	log.Infof("main persistence recovered after intent barrier")
+	a.emitPersistenceRecovered()
+}
+
+// emitPersistenceRecovered clears the persistent degraded indicator and posts
+// the transient recovery notifications.
+func (a *MainAgent) emitPersistenceRecovered() {
+	a.emitToTUI(PersistenceHealthEvent{Degraded: false})
+	a.emitToTUI(ToastEvent{Message: "Session persistence recovered", Level: "info", Category: "persistence_health"})
+	a.emitToTUI(InfoEvent{Message: "Session persistence recovered"})
+}
+
+// tryRecoverPersistenceBeforeTurn runs once at the start of a new user turn
+// when degraded: drain the ordered write queue and checkpoint the full main
+// transcript. Success restores healthy; failure stays degraded while the
+// Q&A-only turn is still allowed to proceed.
+func (a *MainAgent) tryRecoverPersistenceBeforeTurn() {
+	if a == nil || a.recovery == nil || !a.persistenceDegraded() {
+		return
+	}
+	if !a.persistenceHealth.beginRecovery() {
+		return
+	}
+	a.flushPersist()
+	if err := a.recovery.RewriteLog(identity.MainAgentID, a.ctxMgr.Snapshot()); err != nil {
+		a.notePersistenceFailure(err)
+		return
+	}
+	a.persistenceHealth.markRecovered()
+	log.Infof("main persistence recovered after transcript checkpoint")
+	a.emitPersistenceRecovered()
 }

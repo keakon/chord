@@ -267,6 +267,13 @@ func (a *MainAgent) nextLoopAssessmentFromAssistant(msg message.Message) *LoopAs
 	if !a.loopState.Enabled {
 		return nil
 	}
+	if a.persistenceDegraded() {
+		// Tool dispatch is blocked while persistence is degraded; auto-advancing
+		// the loop would only produce a repeated fail-and-report cycle.
+		a.loopState.State = LoopStateAssessing
+		a.emitLoopStateChanged()
+		return a.loopBlockedAssessment("persistence degraded")
+	}
 	a.loopState.State = LoopStateAssessing
 	a.emitLoopStateChanged()
 	if a.loopState.ProgressVersion != a.loopState.LastAssessmentVersion {

@@ -3,6 +3,7 @@ package agent
 import (
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -22,22 +23,23 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		confirm = s.parent.confirmFn
 	}
 	return toolExecutionPipeline{
-		agentID:       s.instanceID,
-		eventAgentID:  s.instanceID,
-		taskID:        s.taskID,
-		sessionDir:    s.sessionDir,
-		registry:      s.tools,
-		governor:      s.parent.governor,
-		fileTrack:     fileTrack,
-		fileBackups:   fileBackups,
-		eventSender:   eventSender,
-		emit:          emit,
-		guidance:      subToolOutputGuidance,
-		logPrefix:     "SubAgent:",
-		projectRoot:   s.parent.projectRoot,
-		toolBaseDir:   s.workDir,
-		writeScope:    &s.writeScope,
-		writeScopeDir: s.workDir,
+		agentID:        s.instanceID,
+		journalAgentID: s.instanceID,
+		eventAgentID:   s.instanceID,
+		taskID:         s.taskID,
+		sessionDir:     s.sessionDir,
+		registry:       s.tools,
+		governor:       s.parent.governor,
+		fileTrack:      fileTrack,
+		fileBackups:    fileBackups,
+		eventSender:    eventSender,
+		emit:           emit,
+		guidance:       subToolOutputGuidance,
+		logPrefix:      "SubAgent:",
+		projectRoot:    s.parent.projectRoot,
+		toolBaseDir:    s.workDir,
+		writeScope:     &s.writeScope,
+		writeScopeDir:  s.workDir,
 		currentRuleset: func() permission.Ruleset {
 			return s.ruleset
 		},
@@ -58,5 +60,11 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 			}
 		},
 		visibleToolNames: s.visibleToolNames,
+		appendToolActivity: func(rec recovery.ToolActivityRecord) error {
+			if s.recovery == nil {
+				return nil
+			}
+			return s.recovery.AppendToolActivity(rec)
+		},
 	}
 }

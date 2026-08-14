@@ -96,7 +96,7 @@ func (a *MainAgent) GetContextMessageCount() int {
 		return target.sub.GetContextMessageCount()
 	}
 	if target.parked {
-		msgs, err := loadTaskHistoryMessages(a.recovery, target.task)
+		msgs, err := loadTaskHistoryMessages(a.recovery, target.task, loadToolActivityStarted(a.recovery))
 		if err != nil {
 			return 0
 		}
@@ -111,7 +111,7 @@ func (a *MainAgent) GetContextBytes() int {
 		return target.sub.GetContextBytes()
 	}
 	if target.parked {
-		msgs, err := loadTaskHistoryMessages(a.recovery, target.task)
+		msgs, err := loadTaskHistoryMessages(a.recovery, target.task, loadToolActivityStarted(a.recovery))
 		if err != nil {
 			return 0
 		}

@@ -248,6 +248,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 			imageParts:          imagePartsFromContentParts(evt.Parts),
 			resetExecution:      true,
 			verificationRecords: append([]agent.VerificationRecord(nil), evt.VerificationRecords...),
+			recoveryState:       evt.RecoveryState,
 		})
 		if toolNameKey(evt.Name) == tools.NameDone {
 			if evt.Status == agent.ToolResultStatusSuccess && !doneResultIsRejected(evt.Result) {
@@ -295,7 +296,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		m.updateViewportBlock(block)
 		m.markBlockSettled(block)
 	} else {
-		block := &Block{ID: m.nextBlockID, Type: BlockToolResult, Content: toolExpandedResultContent(evt.Name, evt.Result), RawArgs: evt.ArgsJSON, ToolName: evt.Name, ToolID: evt.CallID, ResultContent: evt.Result, ResultStatus: evt.Status, ResultDone: true, Collapsed: true, AgentID: evt.AgentID, ImageParts: imagePartsFromContentParts(evt.Parts)}
+		block := &Block{ID: m.nextBlockID, Type: BlockToolResult, Content: toolExpandedResultContent(evt.Name, evt.Result), RawArgs: evt.ArgsJSON, ToolName: evt.Name, ToolID: evt.CallID, ResultContent: evt.Result, ResultStatus: evt.Status, ResultDone: true, Collapsed: true, AgentID: evt.AgentID, ImageParts: imagePartsFromContentParts(evt.Parts), RecoveryState: evt.RecoveryState}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)

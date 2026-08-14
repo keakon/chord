@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/keakon/golog/log"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -24,22 +26,23 @@ const (
 )
 
 type toolExecutionPipeline struct {
-	agentID       string
-	eventAgentID  string
-	taskID        string
-	sessionDir    string
-	registry      *tools.Registry
-	governor      *resourceGovernor
-	fileTrack     *filelock.FileTracker
-	fileBackups   *fileBackupManager
-	eventSender   tools.EventSender
-	emit          func(AgentEvent)
-	guidance      string
-	logPrefix     string
-	projectRoot   string
-	toolBaseDir   string
-	writeScope    *tools.WriteScope
-	writeScopeDir string
+	agentID        string
+	journalAgentID string
+	eventAgentID   string
+	taskID         string
+	sessionDir     string
+	registry       *tools.Registry
+	governor       *resourceGovernor
+	fileTrack      *filelock.FileTracker
+	fileBackups    *fileBackupManager
+	eventSender    tools.EventSender
+	emit           func(AgentEvent)
+	guidance       string
+	logPrefix      string
+	projectRoot    string
+	toolBaseDir    string
+	writeScope     *tools.WriteScope
+	writeScopeDir  string
 
 	currentRuleset                func() permission.Ruleset
 	refreshRulesetAfterRuleIntent func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset
@@ -51,6 +54,7 @@ type toolExecutionPipeline struct {
 	reservedToolError             func(string) error
 	bypassPermission              func(string) bool
 	visibleToolNames              func() map[string]struct{}
+	appendToolActivity            func(recovery.ToolActivityRecord) error
 }
 
 func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
@@ -112,6 +116,43 @@ func (p toolExecutionPipeline) effectiveToolBaseDir() string {
 		return p.toolBaseDir
 	}
 	return p.projectRoot
+}
+
+// toolActivityJournalRequired reports whether a finalized tool call needs a
+// started journal record before execution. It skips calls in the read-only
+// concurrency class; TodoWrite is journaled on the normal path, while its
+// side-effect-free speculative preview is journaled only when promoted.
+func toolActivityJournalRequired(registry *tools.Registry, tc message.ToolCall) bool {
+	return tools.ConcurrencyClassForTool(registry, tc.Name, llm.UnwrapToolArgs(tc.Args)) != tools.ToolConcurrencyClassReadOnly
+}
+
+// recordToolActivityStarted appends a started journal record for non-read-only
+// calls right before their execution body runs so a crash afterwards can be
+// distinguished from "never started" during restore. Read-only calls are
+// skipped (safe to re-run). A failed append aborts execution: running a
+// mutation without the record would let restore classify it as not_started
+// ("safe to retry") after its side effects already hit disk.
+func (p toolExecutionPipeline) recordToolActivityStarted(tc message.ToolCall) error {
+	if p.appendToolActivity == nil || !toolActivityJournalRequired(p.registry, tc) {
+		return nil
+	}
+	turnID := uint64(0)
+	if p.currentTurnID != nil {
+		turnID = p.currentTurnID()
+	}
+	rec := recovery.ToolActivityRecord{
+		CallID:  tc.ID,
+		AgentID: p.toolActivityAgentID(),
+		TurnID:  turnID,
+		Tool:    tc.Name,
+		State:   recovery.ToolActivityStateStarted,
+		TS:      time.Now().UnixNano(),
+	}
+	if err := p.appendToolActivity(rec); err != nil {
+		log.Warnf("tool-activity journal append failed agent=%v call_id=%v error=%v", p.toolActivityAgentID(), tc.ID, err)
+		return fmt.Errorf("tool %q not executed: failed to record started state before execution: %w", tc.Name, err)
+	}
+	return nil
 }
 
 func writeScopeKnownNonWorkspaceMutation(name string) bool {
@@ -337,6 +378,11 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		backupOutcome = p.backupRiskyPreWriteState(tc, trackedFilePath, staleWrite, execResult.PreContent, execResult.PreExisted, deleteLocks)
 	}
 
+	// Started journal: see recordToolActivityStarted.
+	if err := p.recordToolActivityStarted(tc); err != nil {
+		return execResult, err
+	}
+
 	result, err := p.registry.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
 	execResult.Images = imageSink.Drain()
 	deleteAudit, hasDeleteAudit := deleteAuditSink.Audit()
@@ -385,6 +431,13 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	result = appendBackupNotes(result, staleWrite, stalePathCount, backupOutcome)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 	return execResult, err
+}
+
+func (p toolExecutionPipeline) toolActivityAgentID() string {
+	if strings.TrimSpace(p.journalAgentID) != "" {
+		return p.journalAgentID
+	}
+	return p.agentID
 }
 
 func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
@@ -454,6 +507,16 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 		backupOutcome = p.backupRiskyPatchState(tc, staleWrite, hooks.backupSources())
 	} else {
 		backupOutcome = p.backupRiskyPreWriteState(tc, trackedFilePath, staleWrite, execResult.PreContent, execResult.PreExisted, speculativeDeleteLocks(tc.Name, hooks))
+	}
+	// Started journal: mirror execute() so a crash after a speculative file
+	// mutation is classified outcome_unknown during restore, never not_started
+	// ("safe to retry"). TodoWrite stays promote-journaled — its speculative
+	// run is a side-effect-free preview.
+	if tc.Name != tools.NameTodoWrite {
+		if err := p.recordToolActivityStarted(tc); err != nil {
+			rollbackSpeculativeToolHooks(execResult)
+			return execResult, err
+		}
 	}
 	result, err := p.registry.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
 	execResult.Images = imageSink.Drain()

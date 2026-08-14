@@ -2,8 +2,13 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"time"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // commitPromotedToolSideEffects applies the minimal post-execution side effects
@@ -14,11 +19,31 @@ func (a *MainAgent) commitPromotedToolSideEffects(tc message.ToolCall, payload *
 		return nil
 	}
 	if payload.speculativeHooks != nil && payload.speculativeHooks.commit != nil {
+		if err := appendPromotedTodoActivity(a.recovery, identity.MainAgentID, payload.TurnID, tc); err != nil {
+			return err
+		}
 		if err := payload.speculativeHooks.commit(); err != nil {
 			return err
 		}
 	}
 	commitPromotedReadToolSideEffects(a.fileTrack, a.instanceID, tc.Name, payload.Result, payload.FileState)
+	return nil
+}
+
+func appendPromotedTodoActivity(rm *recovery.RecoveryManager, agentID string, turnID uint64, tc message.ToolCall) error {
+	if rm == nil || tools.NormalizeName(tc.Name) != tools.NameTodoWrite {
+		return nil
+	}
+	if err := rm.AppendToolActivity(recovery.ToolActivityRecord{
+		CallID:  tc.ID,
+		AgentID: agentID,
+		TurnID:  turnID,
+		Tool:    tools.NameTodoWrite,
+		State:   recovery.ToolActivityStateStarted,
+		TS:      time.Now().UnixNano(),
+	}); err != nil {
+		return fmt.Errorf("record promoted todo execution: %w", err)
+	}
 	return nil
 }
 

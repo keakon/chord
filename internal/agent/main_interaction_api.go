@@ -187,7 +187,7 @@ func (a *MainAgent) GetMessagesForTarget(conversation ConversationTarget) []mess
 		return target.sub.GetMessages()
 	}
 	if target.parked {
-		msgs, err := loadTaskHistoryMessages(a.recovery, target.task)
+		msgs, err := loadTaskHistoryMessages(a.recovery, target.task, loadToolActivityStarted(a.recovery))
 		if err != nil {
 			log.Warnf("GetMessages: failed to load parked subagent transcript task_id=%v error=%v", target.task.TaskID, err)
 			return nil
@@ -264,7 +264,7 @@ func (a *MainAgent) RemoveLastMessageForTarget(conversation ConversationTarget) 
 		return
 	}
 	if target.parked {
-		msgs, err := loadTaskHistoryMessages(a.recovery, target.task)
+		msgs, err := loadTaskHistoryMessagesRaw(a.recovery, target.task)
 		if err != nil {
 			log.Warnf("RemoveLastMessage: failed to load parked subagent transcript task_id=%v error=%v", target.task.TaskID, err)
 			return

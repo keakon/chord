@@ -11,6 +11,9 @@ func (s *SubAgent) commitPromotedToolSideEffects(tc message.ToolCall, result *to
 		return nil
 	}
 	if result.speculativeHooks != nil && result.speculativeHooks.commit != nil {
+		if err := appendPromotedTodoActivity(s.recovery, s.instanceID, result.TurnID, tc); err != nil {
+			return err
+		}
 		if err := result.speculativeHooks.commit(); err != nil {
 			return err
 		}

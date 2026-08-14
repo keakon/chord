@@ -2831,7 +2831,7 @@ func TestParkSubAgentWaitsForPendingTranscriptPersistence(t *testing.T) {
 		t.Fatal("parkSubAgent() = false")
 	}
 	rec := a.taskRecordByTaskID(sub.taskID)
-	msgs, err := loadTaskHistoryMessages(a.recovery, rec)
+	msgs, err := loadTaskHistoryMessages(a.recovery, rec, nil)
 	if err != nil {
 		t.Fatalf("loadTaskHistoryMessages: %v", err)
 	}
@@ -2886,7 +2886,7 @@ func TestParkSubAgentRecoversDegradedTranscriptWithCheckpoint(t *testing.T) {
 	if rec == nil || rec.Persistence.State != PersistenceHealthy {
 		t.Fatalf("task persistence = %#v, want healthy", rec)
 	}
-	msgs, err := loadTaskHistoryMessages(a.recovery, rec)
+	msgs, err := loadTaskHistoryMessages(a.recovery, rec, nil)
 	if err != nil {
 		t.Fatalf("loadTaskHistoryMessages: %v", err)
 	}

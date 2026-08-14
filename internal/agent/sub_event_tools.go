@@ -288,20 +288,21 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	// Emit tool result to TUI so the tool call block shows its result.
 	s.turn.markToolCallCompleted(result.CallID)
 	s.parent.emitToTUI(ToolResultEvent{
-		CallID:      result.CallID,
-		Name:        result.Name,
-		ArgsJSON:    result.ArgsJSON,
-		Audit:       result.Audit.Clone(),
-		Result:      displayResult,
-		Status:      toolResultStatusFromError(isError),
-		AgentID:     s.instanceID,
-		Parts:       parts,
-		Diff:        result.Diff,
-		DiffAdded:   result.DiffAdded,
-		DiffRemoved: result.DiffRemoved,
-		FileCreated: result.FileCreated,
-		FileState:   result.FileState.Clone(),
-		Duration:    result.Duration,
+		CallID:        result.CallID,
+		Name:          result.Name,
+		ArgsJSON:      result.ArgsJSON,
+		Audit:         result.Audit.Clone(),
+		Result:        displayResult,
+		Status:        toolResultStatusFromError(isError),
+		AgentID:       s.instanceID,
+		Parts:         parts,
+		Diff:          result.Diff,
+		DiffAdded:     result.DiffAdded,
+		DiffRemoved:   result.DiffRemoved,
+		FileCreated:   result.FileCreated,
+		FileState:     result.FileState.Clone(),
+		Duration:      result.Duration,
+		RecoveryState: result.RecoveryState,
 	})
 
 	toolMsg := message.Message{
@@ -320,6 +321,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		LSPReviews:                append([]message.LSPReview(nil), result.LSPReviews...),
 		Audit:                     result.Audit.Clone(),
 		Provenance:                toolProvenanceForCall(s.ctxMgr.Snapshot(), result.CallID),
+		ToolRecoveryState:         result.RecoveryState,
 	}
 	s.ctxMgr.Append(toolMsg)
 
@@ -381,6 +383,19 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 				"SubAgent %s aborted: the model produced malformed tool call arguments "+
 					"%d times in a row",
 				s.instanceID, s.turn.MalformedCount,
+			),
+		})
+		return
+	}
+
+	if s.turn.BarrierFailureRounds >= maxIntentBarrierFailureRounds {
+		log.Warnf("SubAgent: aborting turn due to repeated intent-barrier persistence failures agent=%v rounds=%v threshold=%v", s.instanceID, s.turn.BarrierFailureRounds, maxIntentBarrierFailureRounds)
+		s.sendEvent(Event{
+			Type: EventAgentError,
+			Payload: fmt.Errorf(
+				"SubAgent %s aborted: session persistence failed %d rounds in a row; "+
+					"tool execution stays paused to avoid unrecoverable repeated side effects",
+				s.instanceID, s.turn.BarrierFailureRounds,
 			),
 		})
 		return

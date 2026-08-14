@@ -209,7 +209,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		Provenance:       subAssistantProvenance(s),
 	}
 	persistMsg.Usage = resp.Usage
-	s.persistMessageAsync(persistMsg, "assistant message", nil)
+	persistBarrier, persistPending := s.persistMessageBarrier(persistMsg, "assistant message")
 
 	// Update token usage (does not auto-compact, but tracks stats).
 	if resp.Usage != nil {
@@ -425,8 +425,19 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 
 	// Dispatch concurrency-safe finalize-time batches.
 	turn := s.turn
-	turn.noteDispatchedToolRound(regularToolCalls, false)
 	batches := buildToolExecutionBatches(s.tools, regularToolCalls)
+
+	// Intent barrier: the assistant message carrying these tool calls must be
+	// process-crash durable before any tool body can produce side effects.
+	if len(batches) > 0 {
+		if err := s.waitPersistBarrier(persistBarrier, persistPending); err != nil {
+			s.failIntentBarrier(regularToolCalls, err)
+			return
+		}
+		turn.BarrierFailureRounds = 0
+	}
+
+	turn.noteDispatchedToolRound(regularToolCalls, false)
 	turn.toolExecutionBatches = batches
 	turn.nextToolBatch = 0
 	turn.activeToolBatchCancel = nil
@@ -513,4 +524,71 @@ func isTransientSubAgentTransportError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "connection reset") || strings.Contains(msg, "broken pipe") ||
 		(strings.Contains(msg, "stream") && strings.Contains(msg, "interrupt"))
+}
+
+// failIntentBarrier handles a SubAgent intent-barrier failure: no regular tool
+// body runs. It synthesizes not_started terminal results for the calls that
+// would have run and closes speculative streaming cards, then lets the normal
+// tool-result accounting drive the next LLM round. Persistence health was
+// already degraded by persistMessageBarrier.
+func (s *SubAgent) failIntentBarrier(calls []message.ToolCall, cause error) {
+	turn := s.turn
+	if turn == nil || len(calls) == 0 {
+		return
+	}
+	turn.BarrierFailureRounds++
+	validCallIDs := make(map[string]struct{}, len(calls))
+	for _, tc := range calls {
+		validCallIDs[tc.ID] = struct{}{}
+	}
+	emit := func(AgentEvent) {}
+	clearTrace := func([]PendingToolCall) {}
+	if s.parent != nil {
+		emit = s.parent.emitToTUI
+		clearTrace = s.parent.clearToolTraceForCalls
+	}
+	// No tool body may run: discard every speculative execution (valid IDs
+	// included — they are reported not_started below, so committed speculative
+	// writes must roll back), then close the streaming cards. Snapshot before
+	// finalize: finalize drains the streaming list.
+	streamingSnapshot := turn.snapshotStreamingToolCalls()
+	var discardInfo map[string]StreamingToolDiscardInfo
+	if turn.streamingToolExec != nil {
+		discarded := turn.streamingToolExec.DiscardExceptInfo(nil, "barrier_failed")
+		logStreamingToolDiscardInfo("barrier_failed", discarded)
+		if len(discarded) > 0 {
+			discardInfo = make(map[string]StreamingToolDiscardInfo, len(discarded))
+			for _, it := range discarded {
+				discardInfo[it.CallID] = it
+			}
+		}
+	}
+	finalizeStreamingToolCards(emit, validCallIDs, discardInfo, turn)
+	if len(streamingSnapshot) > 0 {
+		orphans := make([]PendingToolCall, 0, len(streamingSnapshot))
+		for _, c := range streamingSnapshot {
+			if _, ok := validCallIDs[c.CallID]; ok {
+				continue
+			}
+			orphans = append(orphans, c)
+		}
+		clearTrace(orphans)
+	}
+
+	barrierErr := fmt.Errorf("tool not executed: session persistence failed before the tool started: %w", cause)
+	turn.PendingToolCalls.Store(int32(len(calls)))
+	turn.TotalToolCalls.Store(int32(len(calls)))
+	turn.toolExecutionBatches = nil
+	turn.nextToolBatch = 0
+	turn.activeToolBatchCancel = nil
+	for _, tc := range calls {
+		s.enqueuePromotedToolResult(&toolResult{
+			CallID:        tc.ID,
+			Name:          tc.Name,
+			ArgsJSON:      string(tc.Args),
+			Error:         barrierErr,
+			TurnID:        turn.ID,
+			RecoveryState: message.ToolRecoveryStateNotStarted,
+		})
+	}
 }

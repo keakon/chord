@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -25,6 +27,57 @@ func (s *streamingTodoStore) UpdateTodos(todos []tools.TodoItem) error {
 
 func (s *streamingTodoStore) GetTodos() []tools.TodoItem {
 	return append([]tools.TodoItem(nil), s.items...)
+}
+
+func TestSpeculativeExecutionJournalsStartedBeforeMutation(t *testing.T) {
+	// The crash-recovery contract classifies orphan calls with no started
+	// journal record as not_started ("safe to retry"). A speculative file
+	// mutation hits disk before promote, so it must journal started exactly
+	// like the normal execute() path.
+	projectRoot := t.TempDir()
+	targetPath := filepath.Join(projectRoot, "target.txt")
+	registry := tools.NewRegistry()
+	registry.Register(tools.WriteTool{BaseDir: projectRoot})
+	var recs []recovery.ToolActivityRecord
+	pipeline := toolExecutionPipeline{
+		registry:    registry,
+		projectRoot: projectRoot,
+		appendToolActivity: func(rec recovery.ToolActivityRecord) error {
+			recs = append(recs, rec)
+			return nil
+		},
+	}
+
+	call := message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: json.RawMessage(`{"path":"` + targetPath + `","content":"data"}`)}
+	if _, err := pipeline.executeSpeculative(t.Context(), call); err != nil {
+		t.Fatalf("executeSpeculative: %v", err)
+	}
+	if len(recs) != 1 || recs[0].CallID != "write-1" || recs[0].State != recovery.ToolActivityStateStarted {
+		t.Fatalf("journal records = %#v, want one started record for write-1", recs)
+	}
+}
+
+func TestSpeculativeExecutionAbortsMutationWhenJournalAppendFails(t *testing.T) {
+	projectRoot := t.TempDir()
+	targetPath := filepath.Join(projectRoot, "target.txt")
+	registry := tools.NewRegistry()
+	registry.Register(tools.WriteTool{BaseDir: projectRoot})
+	pipeline := toolExecutionPipeline{
+		registry:    registry,
+		projectRoot: projectRoot,
+		appendToolActivity: func(recovery.ToolActivityRecord) error {
+			return errors.New("journal closed")
+		},
+	}
+
+	call := message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: json.RawMessage(`{"path":"` + targetPath + `","content":"data"}`)}
+	_, err := pipeline.executeSpeculative(t.Context(), call)
+	if err == nil || !strings.Contains(err.Error(), "failed to record started state") {
+		t.Fatalf("err = %v, want started-journal failure", err)
+	}
+	if _, statErr := os.Stat(targetPath); !os.IsNotExist(statErr) {
+		t.Fatalf("file exists after aborted speculative write (statErr=%v)", statErr)
+	}
 }
 
 func TestSpeculativeExecutionRejectsInvisibleEditFamilyToolBeforeFileMutation(t *testing.T) {

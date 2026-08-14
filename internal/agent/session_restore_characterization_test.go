@@ -60,7 +60,7 @@ func TestLoadRestoredSubAgentStatesCharacterizationMetaMailboxTaskPriority(t *te
 	if err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	states := a.loadRestoredSubAgentStates(sessionDir, rm2, snap, mailbox, taskRecords)
+	states := a.loadRestoredSubAgentStates(sessionDir, rm2, snap, mailbox, taskRecords, nil)
 	if len(states) != 1 {
 		t.Fatalf("len(states) = %d, want 1", len(states))
 	}

@@ -1,10 +1,12 @@
 package agent
 
 import (
-	"errors"
 	"strings"
 
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 // normalizeRestoredMessages repairs structural defects that can survive a
@@ -16,7 +18,12 @@ import (
 // runs on transcripts loaded from disk on resume. Anything that depends on
 // payload content shape (text heuristics, missing ToolStatus fields, etc.)
 // belongs at write time, not here.
-func normalizeRestoredMessages(msgs []message.Message) []message.Message {
+//
+// started is the tool-activity journal lookup keyed by (agent_id, call_id).
+// agentID scopes orphan repair to this transcript's journal entries. A nil
+// started map means no journal information is available (pre-journal
+// session), which falls back to the conservative outcome_unknown default.
+func normalizeRestoredMessages(msgs []message.Message, started map[recovery.ToolActivityKey]struct{}, agentID string) []message.Message {
 	if len(msgs) == 0 {
 		return msgs
 	}
@@ -28,7 +35,7 @@ func normalizeRestoredMessages(msgs []message.Message) []message.Message {
 	if len(msgs) == 0 {
 		return msgs
 	}
-	return repairOrphanToolCalls(msgs)
+	return repairOrphanToolCalls(msgs, started, agentID)
 }
 
 func dropTrailingInterruptedAssistants(msgs []message.Message) []message.Message {
@@ -78,16 +85,31 @@ func assistantMessageHasOutput(msg message.Message) bool {
 // Without this, sending the loaded history to a provider that requires
 // function_call ↔ function_call_output pairing (OpenAI Responses, Anthropic
 // tool_use ↔ tool_result) produces an API 400.
-func repairOrphanToolCalls(msgs []message.Message) []message.Message {
+//
+// The synthetic result's recovery state distinguishes:
+//   - not_started: the journal has no started record for this call, so no side
+//     effect could have begun (safe to re-check preconditions and retry);
+//   - outcome_unknown: the call had started before the interruption, so side
+//     effects may be partially or fully applied (verify current state first).
+func repairOrphanToolCalls(msgs []message.Message, started map[recovery.ToolActivityKey]struct{}, agentID string) []message.Message {
+	agentID = strings.TrimSpace(agentID)
 	out := make([]message.Message, 0, len(msgs))
 	pending := make(map[string]struct{})
 	pendingOrder := make([]string, 0)
+	notStartedCount := 0
+	outcomeUnknownCount := 0
 	flushPending := func() {
 		for _, id := range pendingOrder {
 			if _, ok := pending[id]; !ok {
 				continue
 			}
-			out = append(out, syntheticInterruptedToolResult(id))
+			state := toolRecoveryStateForOrphan(started, agentID, id)
+			if state == message.ToolRecoveryStateNotStarted {
+				notStartedCount++
+			} else {
+				outcomeUnknownCount++
+			}
+			out = append(out, syntheticInterruptedToolResult(id, state))
 			delete(pending, id)
 		}
 		pendingOrder = pendingOrder[:0]
@@ -130,16 +152,41 @@ func repairOrphanToolCalls(msgs []message.Message) []message.Message {
 	if len(pending) > 0 {
 		flushPending()
 	}
+	if notStartedCount > 0 || outcomeUnknownCount > 0 {
+		log.Infof("restore repaired orphan tool calls agent=%v not_started=%d outcome_unknown=%d", agentID, notStartedCount, outcomeUnknownCount)
+	}
 	return out
 }
 
-var errRestoreToolResultMissing = errors.New("session restored before tool result was persisted")
+// toolRecoveryStateForOrphan classifies one orphan tool call. A missing
+// journal (nil started) has no classification information and stays
+// conservative: outcome_unknown. An existing journal with no started entry
+// proves the tool never reached its execution body.
+func toolRecoveryStateForOrphan(started map[recovery.ToolActivityKey]struct{}, agentID, callID string) string {
+	if started == nil {
+		return message.ToolRecoveryStateOutcomeUnknown
+	}
+	if _, ok := started[recovery.ToolActivityKey{AgentID: agentID, CallID: callID}]; ok {
+		return message.ToolRecoveryStateOutcomeUnknown
+	}
+	return message.ToolRecoveryStateNotStarted
+}
 
-func syntheticInterruptedToolResult(callID string) message.Message {
+const (
+	errRestoreToolResultNotStarted     = "session restored before the tool started; no result was produced. Re-check preconditions before retrying."
+	errRestoreToolResultOutcomeUnknown = "session restored after the tool started but before its result was persisted. Its side effects may be partially or fully applied — verify the current state before retrying."
+)
+
+func syntheticInterruptedToolResult(callID, recoveryState string) message.Message {
+	content := errRestoreToolResultOutcomeUnknown
+	if recoveryState == message.ToolRecoveryStateNotStarted {
+		content = errRestoreToolResultNotStarted
+	}
 	return message.Message{
-		Role:       "tool",
-		ToolCallID: callID,
-		Content:    toolCallFailureMessage(errRestoreToolResultMissing),
-		ToolStatus: string(ToolResultStatusError),
+		Role:              "tool",
+		ToolCallID:        callID,
+		Content:           content,
+		ToolStatus:        string(ToolResultStatusError),
+		ToolRecoveryState: recoveryState,
 	}
 }

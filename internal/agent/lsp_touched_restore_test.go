@@ -49,6 +49,34 @@ func TestRebuildTouchedPathsFromMessagesUsesPartialErrorFileState(t *testing.T) 
 	}
 }
 
+func TestRebuildTouchedPathsFromMessagesSkipsNotStartedRecoveryResults(t *testing.T) {
+	msgs := []message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{
+			{ID: "write-1", Name: "write", Args: mustToolArgs(t, map[string]any{"path": "never-ran.go"})},
+			{ID: "write-2", Name: "write", Args: mustToolArgs(t, map[string]any{"path": "maybe-ran.go"})},
+		}},
+		{
+			Role:              "tool",
+			ToolCallID:        "write-1",
+			Content:           errRestoreToolResultNotStarted,
+			ToolStatus:        string(ToolResultStatusError),
+			ToolRecoveryState: message.ToolRecoveryStateNotStarted,
+		},
+		{
+			Role:              "tool",
+			ToolCallID:        "write-2",
+			Content:           errRestoreToolResultOutcomeUnknown,
+			ToolStatus:        string(ToolResultStatusError),
+			ToolRecoveryState: message.ToolRecoveryStateOutcomeUnknown,
+		},
+	}
+	got := RebuildTouchedPathsFromMessages(msgs, "")
+	want := []string{"maybe-ran.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("RebuildTouchedPathsFromMessages() = %#v, want %#v", got, want)
+	}
+}
+
 func mustToolArgs(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(v)

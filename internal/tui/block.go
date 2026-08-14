@@ -79,6 +79,7 @@ type Block struct {
 	ResultContent      string                       // tool execution result text
 	ResultStatus       agent.ToolResultStatus       // success, error, or cancelled
 	ResultDone         bool                         // true once a terminal tool event has been received (even if result is empty)
+	RecoveryState      string                       // tool_recovery_state for synthetic restore / barrier-failure results
 	ToolExecutionState agent.ToolCallExecutionState // empty while speculative/unknown; receiving while arguments stream; queued or running once finalize dispatches execution state
 	// ToolQueuedByExecutionEvent is true when ToolExecutionState=queued originated from
 	// ToolCallExecutionEvent (i.e. a real scheduler queue, such as later batches).

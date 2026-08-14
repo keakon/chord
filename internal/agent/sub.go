@@ -53,6 +53,9 @@ type toolResult struct {
 	FileCreated      bool                // true when Write created a file that did not previously exist
 	LSPReviews       []message.LSPReview // per-file last-review snapshots for directly edited files
 	FileState        *message.ToolFileState
+	// RecoveryState classifies synthetic results synthesized during session
+	// restore or a failed intent barrier (not_started / outcome_unknown).
+	RecoveryState    string
 	speculativeHooks *speculativeToolHooks
 }
 
@@ -109,7 +112,7 @@ type SubAgent struct {
 	llmMu              sync.RWMutex
 	llmClient          *llm.Client
 	llmRequestInFlight atomic.Bool
-	persistenceHealth  subAgentPersistenceHealth
+	persistenceHealth  agentPersistenceHealth
 	startupWatchdogSeq atomic.Uint64
 	done               chan struct{}
 	doneOnce           sync.Once
@@ -273,6 +276,55 @@ func (s *SubAgent) notePersistenceEnqueue(enqueued bool) bool {
 		s.notePersistenceFailure(errPersistenceQueueUnavailable)
 	}
 	return enqueued
+}
+
+// persistMessageBarrier persists msg and returns a channel that receives the
+// write result exactly once. When the write path is synchronous (no parent
+// pump) or recovery is nil, the result is already buffered before the channel
+// is returned. The returned enqueued flag is false only when the parent pump
+// rejected the entry (shutdown); the channel still carries a non-nil error so
+// callers can wait uniformly.
+func (s *SubAgent) persistMessageBarrier(msg message.Message, description string) (<-chan error, bool) {
+	barrier := make(chan error, 1)
+	if s == nil || s.recovery == nil {
+		barrier <- nil
+		return barrier, true
+	}
+	if s.parent == nil {
+		var err error
+		if writeErr := s.recovery.PersistMessage(s.instanceID, msg); writeErr != nil {
+			log.Warnf("SubAgent: failed to persist %s agent=%v error=%v", description, s.instanceID, writeErr)
+			err = writeErr
+		}
+		if err != nil {
+			s.notePersistenceFailure(err)
+		}
+		barrier <- err
+		return barrier, true
+	}
+	enqueued := s.parent.persistAsyncAfter(s.instanceID, msg, func(err error) {
+		if err != nil {
+			s.notePersistenceFailure(err)
+		}
+		barrier <- err
+	})
+	if !enqueued {
+		s.notePersistenceFailure(errPersistenceQueueUnavailable)
+		barrier <- errPersistenceQueueUnavailable
+	}
+	return barrier, enqueued
+}
+
+// waitPersistBarrier waits for a persistence barrier result, failing closed on
+// shutdown, pump-stop, or the agent's own cancellation.
+func (s *SubAgent) waitPersistBarrier(barrier <-chan error, enqueued bool) error {
+	var stop <-chan struct{}
+	if s.parent != nil {
+		stop = s.parent.stoppingCh
+	} else if s.turn != nil {
+		stop = s.turn.Ctx.Done()
+	}
+	return waitPersistBarrierOn(barrier, enqueued, stop)
 }
 
 func (s *SubAgent) transcriptPersistenceHealthy() bool {

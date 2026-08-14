@@ -15,9 +15,12 @@ const (
 	PersistenceRecovering PersistenceHealthState = "recovering"
 )
 
-var errPersistenceQueueUnavailable = errors.New("ordered persistence queue unavailable")
+var (
+	errPersistenceQueueUnavailable = errors.New("ordered persistence queue unavailable")
+	errPersistenceStopping         = errors.New("persistence barrier interrupted by shutdown")
+)
 
-// PersistenceHealth is a read-only snapshot of a SubAgent's durable transcript
+// PersistenceHealth is a read-only snapshot of an agent's durable transcript
 // health. Missing state in older sessions is interpreted as healthy.
 type PersistenceHealth struct {
 	State       PersistenceHealthState `json:"state"`
@@ -26,7 +29,7 @@ type PersistenceHealth struct {
 	RecoveredAt time.Time              `json:"recovered_at"`
 }
 
-type subAgentPersistenceHealth struct {
+type agentPersistenceHealth struct {
 	mu          sync.RWMutex
 	state       PersistenceHealthState
 	lastError   string
@@ -43,7 +46,7 @@ func normalizePersistenceHealthState(state PersistenceHealthState) PersistenceHe
 	}
 }
 
-func (h *subAgentPersistenceHealth) snapshot() PersistenceHealth {
+func (h *agentPersistenceHealth) snapshot() PersistenceHealth {
 	if h == nil {
 		return PersistenceHealth{State: PersistenceHealthy}
 	}
@@ -57,7 +60,7 @@ func (h *subAgentPersistenceHealth) snapshot() PersistenceHealth {
 	}
 }
 
-func (h *subAgentPersistenceHealth) restore(snapshot PersistenceHealth) {
+func (h *agentPersistenceHealth) restore(snapshot PersistenceHealth) {
 	if h == nil {
 		return
 	}
@@ -74,7 +77,7 @@ func (h *subAgentPersistenceHealth) restore(snapshot PersistenceHealth) {
 	h.mu.Unlock()
 }
 
-func (h *subAgentPersistenceHealth) markDegraded(err error) bool {
+func (h *agentPersistenceHealth) markDegraded(err error) bool {
 	if h == nil || err == nil {
 		return false
 	}
@@ -88,7 +91,7 @@ func (h *subAgentPersistenceHealth) markDegraded(err error) bool {
 	return changed
 }
 
-func (h *subAgentPersistenceHealth) beginRecovery() bool {
+func (h *agentPersistenceHealth) beginRecovery() bool {
 	if h == nil {
 		return false
 	}
@@ -101,7 +104,7 @@ func (h *subAgentPersistenceHealth) beginRecovery() bool {
 	return true
 }
 
-func (h *subAgentPersistenceHealth) markRecovered() {
+func (h *agentPersistenceHealth) markRecovered() {
 	if h == nil {
 		return
 	}
