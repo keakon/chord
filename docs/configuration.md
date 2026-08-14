@@ -1259,6 +1259,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `parallel_tool_calls` | bool | `true` — Provider-level default for Responses / Chat Completions tool parallelism; model and variant values override it. |
 | `compat.responses.*` | object | protocol defaults — Provider-level optional Responses fields: `send_store`, `send_reasoning_include`, `send_tool_choice`, `send_prompt_cache_key`, and `send_max_output_tokens`. |
 | `compat.chat_completions.send_stream_options` | bool | `true` — Omit `stream_options.include_usage` for gateways that reject it; streaming token usage then remains unavailable. |
+| `compat.chat_completions.infer_finish_reason` | bool | `false` — Derive a normal `stop` / `tool_calls` completion for compatible gateways that end the stream without emitting `finish_reason`; otherwise those streams are treated as interrupted. |
 | `compat.usage.input_includes_cache_read` | bool | Protocol default — Override whether the provider's top-level input count already contains cache-read tokens. Defaults: Messages `false`; Chat Completions / Responses / Generate Content `true`. |
 | `compat.usage.input_includes_cache_write` | bool | Protocol default — Override whether the provider's top-level input count already contains cache-write/cache-creation tokens. Defaults: Chat Completions / Responses `true`; Messages / Generate Content `false`. |
 | `models`       | map    | Map of model id → [model config](#model-field-reference).                                                                                               |

@@ -470,7 +470,13 @@ func (o *OpenAIProvider) CompleteStream(
 	}
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, o.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
-	resp, parseErr := parseOpenAISSEStream(cr, traceCB, collector)
+	inferFinishReason := false
+	if o.provider != nil {
+		if cc := o.provider.ChatCompletionsCompat(); cc != nil {
+			inferFinishReason = compatBool(cc.InferFinishReason, false)
+		}
+	}
+	resp, parseErr := parseOpenAISSEStreamOptions(cr, traceCB, collector, inferFinishReason)
 
 	// Write dump asynchronously (whether success or failure).
 	if dumpWriter != nil {
@@ -779,6 +785,10 @@ func hasThinkingToolcallMarkers(text string) bool {
 // parseOpenAISSEStream reads an OpenAI SSE stream and calls cb for each delta.
 // If collector is non-nil, raw SSE data lines are recorded for debug dumps.
 func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, error) {
+	return parseOpenAISSEStreamOptions(reader, cb, collector, false)
+}
+
+func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector *SSECollector, inferFinishReason bool) (*message.Response, error) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, sseInitialBufferSize), sseMaxTokenSize)
 
@@ -855,6 +865,9 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 				resp.ReasoningContent = reasoningBuf.String()
 			}
 			flushContent()
+			if inferFinishReason {
+				applyInferredFinishReason(&resp, len(resp.ToolCalls) > 0)
+			}
 			return &resp, nil
 		}
 
@@ -1070,6 +1083,9 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		resp.ReasoningContent = reasoningBuf.String()
 	}
 	flushContent()
+	if inferFinishReason && accumulatedToolCallArgsComplete(toolCalls) {
+		applyInferredFinishReason(&resp, len(toolCalls) > 0)
+	}
 	if resp.StopReason == "" {
 		if partial := markInterruptedTextResponse(&resp); partial != nil {
 			return partial, nil
@@ -1080,6 +1096,34 @@ func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 	// chunk but before the transport-level [DONE] marker.
 	finalizeToolCalls(toolCalls, &resp, cb, truncated)
 	return &resp, nil
+}
+
+// accumulatedToolCallArgsComplete reports whether every accumulated tool
+// call's arguments are complete JSON (empty means "no arguments yet" and is
+// finalized as {}). At transport EOF without [DONE] this is the only signal
+// separating a gateway that simply closes its stream from a connection
+// truncated mid-tool-call; a truncated call must fall through to interrupted
+// handling instead of being inferred as a normal tool_calls stop.
+func accumulatedToolCallArgsComplete(toolCalls map[int]*openAIToolAccumulator) bool {
+	for _, acc := range toolCalls {
+		if args := acc.args.String(); args != "" && !json.Valid([]byte(args)) {
+			return false
+		}
+	}
+	return true
+}
+
+// applyInferredFinishReason backfills a missing stop reason for gateways that
+// omit finish_reason: tool calls win, then visible text or reasoning.
+func applyInferredFinishReason(resp *message.Response, hasToolCalls bool) {
+	if resp.StopReason != "" {
+		return
+	}
+	if hasToolCalls {
+		resp.StopReason = "tool_calls"
+	} else if responseHasText(resp) || strings.TrimSpace(resp.ReasoningContent) != "" {
+		resp.StopReason = "stop"
+	}
 }
 
 // finalizeToolCalls converts all accumulated tool calls into the response and

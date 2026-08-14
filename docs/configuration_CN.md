@@ -1122,6 +1122,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `parallel_tool_calls` | bool | `true` — provider 级 Responses / Chat Completions 工具并行默认值；模型和变体配置会覆盖它。 |
 | `compat.responses.*` | object | 协议默认值 — provider 级 Responses 可选字段开关：`send_store`、`send_reasoning_include`、`send_tool_choice`、`send_prompt_cache_key`、`send_max_output_tokens`。 |
 | `compat.chat_completions.send_stream_options` | bool | `true` — 对拒绝 `stream_options` 的网关设为 `false`；此时流式 token usage 不再可用。 |
+| `compat.chat_completions.infer_finish_reason` | bool | `false` — 对结束流时不发 `finish_reason` 的兼容网关，自动推断为正常的 `stop` / `tool_calls` 完成；不开启时这类流会被当成中断处理。 |
 | `compat.usage.input_includes_cache_read` | bool | 协议默认值 — 覆盖 provider 顶层 input 是否已包含 cache read。默认：Messages 为 `false`；Chat Completions / Responses / Generate Content 为 `true`。 |
 | `compat.usage.input_includes_cache_write` | bool | 协议默认值 — 覆盖 provider 顶层 input 是否已包含 cache write/cache creation。默认：Chat Completions / Responses 为 `true`；Messages / Generate Content 为 `false`。 |
 | `models`      | map    | model id → [模型配置](#模型字段参考)。                                                                                                              |

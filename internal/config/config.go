@@ -632,6 +632,11 @@ type ChatCompletionsCompatConfig struct {
 	// true). Set false for gateways that reject stream_options; token usage
 	// then stays unreported on streaming responses.
 	SendStreamOptions *bool `json:"send_stream_options,omitempty" yaml:"send_stream_options,omitempty"`
+	// InferFinishReason derives a normal completion when a compatible gateway
+	// ends the stream without emitting finish_reason (default false). Text-only
+	// streams finalize as "stop" and tool-call streams as "tool_calls" instead
+	// of being marked interrupted.
+	InferFinishReason *bool `json:"infer_finish_reason,omitempty" yaml:"infer_finish_reason,omitempty"`
 }
 
 // RequestOverridesConfig applies protocol-agnostic patches after Chord builds a

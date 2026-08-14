@@ -224,3 +224,82 @@ func TestParseOpenAISSEStream_InterruptedTextDropsPartialToolAndReasoning(t *tes
 		t.Fatalf("unsafe partial context retained: tool_calls=%#v reasoning=%q", resp.ToolCalls, resp.ReasoningContent)
 	}
 }
+
+func TestParseOpenAISSEStreamOptions_InferFinishReasonStop(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"content":"final answer"}}]}`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, true)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "final answer" || resp.StopReason != "stop" {
+		t.Fatalf("resp = %#v, want inferred stop", resp)
+	}
+	if len(resp.ToolCalls) != 0 {
+		t.Fatalf("unexpected tool calls: %#v", resp.ToolCalls)
+	}
+}
+
+func TestParseOpenAISSEStreamOptions_InferFinishReasonTruncatedToolArgsStaysInterrupted(t *testing.T) {
+	// Transport EOF (no [DONE]) with tool-call arguments cut mid-JSON: the
+	// inference knob must not finalize this as a normal tool_calls stop.
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"content":"partial answer"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"Read","arguments":"{\"path\":"}}]}}]}`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, true)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
+	}
+	if resp == nil || resp.StopReason != "interrupted" {
+		t.Fatalf("resp = %#v, want interrupted", resp)
+	}
+	if len(resp.ToolCalls) != 0 {
+		t.Fatalf("truncated tool call retained: %#v", resp.ToolCalls)
+	}
+}
+
+func TestParseOpenAISSEStreamOptions_InferFinishReasonEOFCompleteToolArgs(t *testing.T) {
+	// A gateway that ends the stream without [DONE] but with complete tool
+	// arguments still gets the inferred tool_calls stop.
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"Read","arguments":"{\"path\":\"x\"}"}}]}}]}`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, true)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
+	}
+	if resp == nil || resp.StopReason != "tool_calls" {
+		t.Fatalf("resp = %#v, want inferred tool_calls", resp)
+	}
+	if len(resp.ToolCalls) != 1 || string(resp.ToolCalls[0].Args) != `{"path":"x"}` {
+		t.Fatalf("unexpected tool calls: %#v", resp.ToolCalls)
+	}
+}
+
+func TestParseOpenAISSEStreamOptions_InferFinishReasonToolCalls(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"Read","arguments":""}}]}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"x\"}"}}]}}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, true)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
+	}
+	if resp == nil || resp.StopReason != "tool_calls" {
+		t.Fatalf("resp = %#v, want inferred tool_calls", resp)
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "Read" || string(resp.ToolCalls[0].Args) != `{"path":"x"}` {
+		t.Fatalf("unexpected tool calls: %#v", resp.ToolCalls)
+	}
+}

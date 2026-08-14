@@ -410,6 +410,7 @@ providers:
         send_max_output_tokens: true
       chat_completions:
         send_stream_options: false
+        infer_finish_reason: true
       usage:
         input_includes_cache_read: false
         input_includes_cache_write: false
@@ -450,5 +451,8 @@ providers:
 	cc := prov.Compat.ChatCompletions
 	if cc.SendStreamOptions == nil || *cc.SendStreamOptions {
 		t.Fatalf("send_stream_options = %#v, want false", cc.SendStreamOptions)
+	}
+	if cc.InferFinishReason == nil || !*cc.InferFinishReason {
+		t.Fatalf("infer_finish_reason = %#v, want true", cc.InferFinishReason)
 	}
 }
