@@ -411,6 +411,8 @@ providers:
       chat_completions:
         send_stream_options: false
         infer_finish_reason: true
+        requires_tool_result_name: true
+        requires_assistant_after_tool_result: true
       usage:
         input_includes_cache_read: false
         input_includes_cache_write: false
@@ -454,5 +456,11 @@ providers:
 	}
 	if cc.InferFinishReason == nil || !*cc.InferFinishReason {
 		t.Fatalf("infer_finish_reason = %#v, want true", cc.InferFinishReason)
+	}
+	if cc.RequiresToolResultName == nil || !*cc.RequiresToolResultName {
+		t.Fatalf("requires_tool_result_name = %#v, want true", cc.RequiresToolResultName)
+	}
+	if cc.RequiresAssistantAfterToolResult == nil || !*cc.RequiresAssistantAfterToolResult {
+		t.Fatalf("requires_assistant_after_tool_result = %#v, want true", cc.RequiresAssistantAfterToolResult)
 	}
 }

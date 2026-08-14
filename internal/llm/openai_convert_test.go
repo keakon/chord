@@ -209,6 +209,80 @@ func TestConvertMessagesToOpenAI_ToolOutputWithImageParts(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesToOpenAIWithOptions_ToolResultName(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call_1", Name: "Read", Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
+	}
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{requiresToolResultName: true})
+	if len(out) != 2 || out[1].Name != "Read" {
+		t.Fatalf("tool result name not emitted: %#v", out)
+	}
+
+	out = convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
+	if len(out) != 2 || out[1].Name != "" {
+		t.Fatalf("tool result name must be omitted by default: %#v", out)
+	}
+}
+
+func TestConvertMessagesToOpenAIWithOptions_ToolResultNameUsesPrecedingCall(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call_1", Name: "Read", Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "first"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call_1", Name: "Write", Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "second"},
+	}
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{requiresToolResultName: true})
+	if len(out) != 4 {
+		t.Fatalf("len = %d, want 4: %#v", len(out), out)
+	}
+	if out[1].Name != "Read" || out[3].Name != "Write" {
+		t.Fatalf("tool result names = %q, %q; want preceding call names", out[1].Name, out[3].Name)
+	}
+}
+
+func TestConvertMessagesToOpenAIWithOptions_AssistantAfterToolResult(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call_1", Name: "Read", Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
+		{Role: message.RoleUser, Content: "next"},
+	}
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{requiresAssistantAfterToolResult: true})
+	if len(out) != 4 {
+		t.Fatalf("len = %d, want 4: %#v", len(out), out)
+	}
+	if out[2].Role != "assistant" || out[2].Content != assistantAfterToolResultText {
+		t.Fatalf("synthetic assistant not inserted: %#v", out[2])
+	}
+	if out[3].Role != "user" || out[3].Content != "next" {
+		t.Fatalf("user message misplaced: %#v", out[3])
+	}
+
+	out = convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
+	if len(out) != 3 {
+		t.Fatalf("len = %d, want 3 without the compat flag: %#v", len(out), out)
+	}
+}
+
+func TestConvertMessagesToOpenAIWithOptions_AssistantAfterToolResultIgnoresSkippedAssistant(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call_1", Name: "Read", Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
+		{Role: message.RoleAssistant, ReasoningContent: "hidden reasoning"},
+		{Role: message.RoleUser, Content: "next"},
+	}
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{requiresAssistantAfterToolResult: true})
+	if len(out) != 4 {
+		t.Fatalf("len = %d, want 4: %#v", len(out), out)
+	}
+	if out[2].Role != "assistant" || out[2].Content != assistantAfterToolResultText {
+		t.Fatalf("synthetic assistant not inserted after skipped assistant: %#v", out[2])
+	}
+	if out[3].Role != "user" || out[3].Content != "next" {
+		t.Fatalf("user message misplaced: %#v", out[3])
+	}
+}
+
 func TestOpenAICompleteStream_GLMPreservedContinuityAddsThinkingAndUsesMaxTokens(t *testing.T) {
 	var gotBody map[string]any
 

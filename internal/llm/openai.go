@@ -295,7 +295,14 @@ func (o *OpenAIProvider) CompleteStream(
 	// Convert messages to OpenAI format.
 	wireFamily := providerWireFamily(o.provider)
 	continuityMode := reasoningContinuityCompatMode(o.provider, model)
-	apiMessages := convertMessagesToOpenAI(systemPrompt, wireFamily, continuityMode, messages)
+	convertOpts := openAIConvertOptions{}
+	if o.provider != nil {
+		if cc := o.provider.ChatCompletionsCompat(); cc != nil {
+			convertOpts.requiresToolResultName = compatBool(cc.RequiresToolResultName, false)
+			convertOpts.requiresAssistantAfterToolResult = compatBool(cc.RequiresAssistantAfterToolResult, false)
+		}
+	}
+	apiMessages := convertMessagesToOpenAIWithOptions(systemPrompt, wireFamily, continuityMode, messages, convertOpts)
 	// When the wire keeps visible reasoning continuity, thinking-mode backends
 	// require every current-turn assistant tool-call message to carry
 	// reasoning_content. Fill even when reasoning was disabled for this
@@ -551,8 +558,19 @@ func fillCurrentTurnEmptyReasoning(apiMessages []openAIMessage) {
 	}
 }
 
+const assistantAfterToolResultText = "I have processed the tool results."
+
 // convertMessagesToOpenAI converts internal messages to OpenAI API format.
 func convertMessagesToOpenAI(systemPrompt, targetWireFamily, continuityMode string, msgs []message.Message) []openAIMessage {
+	return convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continuityMode, msgs, openAIConvertOptions{})
+}
+
+type openAIConvertOptions struct {
+	requiresToolResultName           bool
+	requiresAssistantAfterToolResult bool
+}
+
+func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continuityMode string, msgs []message.Message, opts openAIConvertOptions) []openAIMessage {
 	var result []openAIMessage
 
 	// Add system prompt as first message.
@@ -563,9 +581,19 @@ func convertMessagesToOpenAI(systemPrompt, targetWireFamily, continuityMode stri
 		})
 	}
 
+	toolNames := make(map[string]string)
+	lastWasTool := false
+
 	for _, msg := range msgs {
 		switch msg.Role {
 		case "user":
+			if opts.requiresAssistantAfterToolResult && lastWasTool {
+				result = append(result, openAIMessage{
+					Role:    "assistant",
+					Content: assistantAfterToolResultText,
+				})
+			}
+			lastWasTool = false
 			if len(msg.Parts) > 0 {
 				// Multi-part message (may include images).
 				var blocks []openAIContentBlock
@@ -599,6 +627,13 @@ func convertMessagesToOpenAI(systemPrompt, targetWireFamily, continuityMode stri
 			}
 
 		case "assistant":
+			if opts.requiresToolResultName {
+				for _, tc := range msg.ToolCalls {
+					if tc.ID != "" && tc.Name != "" {
+						toolNames[tc.ID] = tc.Name
+					}
+				}
+			}
 			omi := openAIMessage{
 				Role: "assistant",
 			}
@@ -655,6 +690,7 @@ func convertMessagesToOpenAI(systemPrompt, targetWireFamily, continuityMode stri
 				log.Warn("skipping empty/reasoning-only assistant message in OpenAI history")
 				continue
 			}
+			lastWasTool = false
 			result = append(result, omi)
 
 		case "tool":
@@ -664,11 +700,16 @@ func convertMessagesToOpenAI(systemPrompt, targetWireFamily, continuityMode stri
 				log.Warn("skipping tool result with empty tool_call_id in history")
 				continue
 			}
-			result = append(result, openAIMessage{
+			omi := openAIMessage{
 				Role:       "tool",
 				Content:    msg.Content,
 				ToolCallID: msg.ToolCallID,
-			})
+			}
+			if opts.requiresToolResultName {
+				omi.Name = toolNames[msg.ToolCallID]
+			}
+			result = append(result, omi)
+			lastWasTool = true
 		}
 	}
 

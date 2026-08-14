@@ -637,6 +637,15 @@ type ChatCompletionsCompatConfig struct {
 	// streams finalize as "stop" and tool-call streams as "tool_calls" instead
 	// of being marked interrupted.
 	InferFinishReason *bool `json:"infer_finish_reason,omitempty" yaml:"infer_finish_reason,omitempty"`
+	// RequiresToolResultName emits the paired tool name on tool result messages
+	// (default false). Some compatible gateways require the name in addition to
+	// tool_call_id.
+	RequiresToolResultName *bool `json:"requires_tool_result_name,omitempty" yaml:"requires_tool_result_name,omitempty"`
+	// RequiresAssistantAfterToolResult inserts a synthetic assistant message
+	// between a tool result and the next user message (default false). Some
+	// compatible gateways reject a user message that directly follows tool
+	// results.
+	RequiresAssistantAfterToolResult *bool `json:"requires_assistant_after_tool_result,omitempty" yaml:"requires_assistant_after_tool_result,omitempty"`
 }
 
 // RequestOverridesConfig applies protocol-agnostic patches after Chord builds a
