@@ -1500,13 +1500,56 @@ func TestParseSSEStreamMessageDeltaZeroUsageDoesNotClobberStartUsage(t *testing.
 	}
 }
 
+func TestParseSSEStreamPreservesInitialBlockContent(t *testing.T) {
+	stream := strings.Join([]string{
+		"event: message_start",
+		`data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","model":"claude","usage":{"input_tokens":1,"output_tokens":0}}}`,
+		"",
+		"event: content_block_start",
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Initial text"}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" plus delta"}}`,
+		"",
+		"event: content_block_stop",
+		`data: {"type":"content_block_stop","index":0}`,
+		"",
+		"event: content_block_start",
+		`data: {"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":"Initial thinking"}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":" plus delta"}}`,
+		"",
+		"event: content_block_stop",
+		`data: {"type":"content_block_stop","index":1}`,
+		"",
+		"event: message_delta",
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+		"",
+		"event: message_stop",
+		`data: {"type":"message_stop"}`,
+		"",
+	}, "\n")
+
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseSSEStream: %v", err)
+	}
+	if resp == nil || resp.Content != "Initial text plus delta" {
+		t.Fatalf("Content = %q, want text seeded from the initial block", resp.Content)
+	}
+	if len(resp.ThinkingBlocks) != 1 || resp.ThinkingBlocks[0].Thinking != "Initial thinking plus delta" {
+		t.Fatalf("ThinkingBlocks = %+v, want thinking seeded from the initial block", resp.ThinkingBlocks)
+	}
+}
+
 func TestParseSSEStreamKeepsInterruptedTextWithoutMessageStop(t *testing.T) {
 	stream := strings.Join([]string{
 		"event: message_start",
 		"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"claude\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}",
 		"",
 		"event: content_block_start",
-		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"hello\"}}",
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}",
 		"",
 		"event: content_block_delta",
 		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}",
@@ -1588,8 +1631,8 @@ func TestParseSSEStreamAllowsMaxTokensTruncatedContentWithoutMessageStop(t *test
 	if err != nil {
 		t.Fatalf("parseSSEStream: %v", err)
 	}
-	if resp == nil || resp.Content != " world" || resp.StopReason != "max_tokens" {
-		t.Fatalf("resp = %#v, want truncated content", resp)
+	if resp == nil || resp.Content != "hello world" || resp.StopReason != "max_tokens" {
+		t.Fatalf("resp = %#v, want truncated content seeded from the initial block", resp)
 	}
 }
 

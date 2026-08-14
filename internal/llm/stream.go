@@ -68,12 +68,14 @@ type sseContentBlockStart struct {
 	Type         string `json:"type"`
 	Index        int    `json:"index"`
 	ContentBlock struct {
-		Type  string          `json:"type"`            // "text", "tool_use", "thinking", or "redacted_thinking"
-		Text  string          `json:"text,omitempty"`  // for text blocks
-		ID    string          `json:"id,omitempty"`    // for tool_use blocks
-		Name  string          `json:"name,omitempty"`  // for tool_use blocks
-		Input json.RawMessage `json:"input,omitempty"` // for tool_use blocks (usually {})
-		Data  string          `json:"data,omitempty"`  // for redacted_thinking blocks (encrypted payload)
+		Type      string          `json:"type"`                // "text", "tool_use", "thinking", or "redacted_thinking"
+		Text      string          `json:"text,omitempty"`      // for text blocks
+		Thinking  string          `json:"thinking,omitempty"`  // for thinking blocks
+		Signature string          `json:"signature,omitempty"` // for thinking blocks
+		ID        string          `json:"id,omitempty"`        // for tool_use blocks
+		Name      string          `json:"name,omitempty"`      // for tool_use blocks
+		Input     json.RawMessage `json:"input,omitempty"`     // for tool_use blocks (usually {})
+		Data      string          `json:"data,omitempty"`      // for redacted_thinking blocks (encrypted payload)
 	} `json:"content_block"`
 }
 
@@ -236,6 +238,14 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					blockType: ev.ContentBlock.Type,
 				}
 				switch ev.ContentBlock.Type {
+				case "text":
+					block.text.WriteString(ev.ContentBlock.Text)
+					if cb != nil && ev.ContentBlock.Text != "" {
+						cb(message.StreamDelta{
+							Type: message.StreamDeltaText,
+							Text: ev.ContentBlock.Text,
+						})
+					}
 				case "tool_use":
 					block.toolID = ev.ContentBlock.ID
 					block.toolName = ev.ContentBlock.Name
@@ -256,7 +266,16 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 						p.SetChunkTimeout(SlowPhaseChunkTimeout)
 					}
 				case message.StreamDeltaThinking:
-					// thinking block started; no delta emitted yet (content arrives via thinking_delta)
+					block.thinking.WriteString(ev.ContentBlock.Thinking)
+					if ev.ContentBlock.Signature != "" {
+						block.signature = cloneLongLivedLLMString(ev.ContentBlock.Signature)
+					}
+					if cb != nil && ev.ContentBlock.Thinking != "" {
+						cb(message.StreamDelta{
+							Type: message.StreamDeltaThinking,
+							Text: ev.ContentBlock.Thinking,
+						})
+					}
 					if p, ok := reader.(chunkPhaser); ok {
 						p.SetChunkTimeout(SlowPhaseChunkTimeout)
 					}
