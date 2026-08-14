@@ -303,6 +303,9 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 	for _, want := range []string{
 		"Match final claims to the requested scope and the evidence actually gathered",
 		"For analysis, review, or planning tasks",
+		"begin with repository evidence: relevant code, existing tests, CI configuration, documentation, and history",
+		"Do not install dependencies or run builds, tests, benchmarks, services, or network checks unless the user requests dynamic verification or a material conclusion cannot otherwise be supported",
+		"state remaining runtime uncertainty instead of silently expanding the task into project acceptance testing",
 		"When you modify code or claim behavior was fixed or implemented",
 		"Do not equate self-authored happy-path tests passing with full verification of the requested behavior",
 		"state verification status explicitly (passed, failed, not run, or only inspected statically)",
@@ -319,10 +322,15 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"Do not leave backwards-compatibility shims",
 		"Remove imports, variables, and functions that your own changes made unused",
 		"Do not remove pre-existing dead code unless asked",
+		"Keep necessary callers, fixtures, tests, accessibility, security, compatibility, and migration work when reachable evidence requires it",
+		"fewer files or lines is not the goal — the smallest correct result is",
+		"Do not introduce new abstractions, helper layers, configuration knobs, feature flags, checksums, dependencies, migrations, compatibility layers, or parameters reserved for hypothetical future needs",
+		"Do not add a final audit loop, re-review, or re-test pass only to demonstrate compliance with these rules",
 		"state a brief plan with verifiable success criteria per step",
-		"Prefer incremental verification",
+		"For analysis-only tasks, define success in terms of evidence gathered and conclusions supported, not implementation or acceptance-test completion",
+		"For implementation and bug-fix tasks, or when dynamic evidence is justified above, prefer incremental verification",
 		"first the cheapest compile/typecheck-only command",
-		"A full test suite is expensive: run it at most once as a final check",
+		"For implementation work, a full test suite is expensive: run it at most once as a final check",
 		"When a broad test fails, narrow the reproduction before retrying",
 	} {
 		if !strings.Contains(got, want) {
@@ -591,6 +599,8 @@ func TestSharedCodingGuidelinesPrompt_SeparatesProductLevelAndImplementationLeve
 func TestSharedAgentValuesPrompt_AllowsNecessaryLowRiskAdjacentWork(t *testing.T) {
 	got := sharedAgentValuesPrompt
 	for _, want := range []string{
+		"Verify > Assume — verify claims proportionally to the task and risk",
+		"always confirm that your own code changes work",
 		"Complete the requested outcome with the smallest safe change set",
 		"targeted regression tests",
 		"required doc updates",
