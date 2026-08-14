@@ -209,6 +209,20 @@ func TestAnalyzeReadValidityDoesNotSuffixMatchDistinctCanonicalPaths(t *testing.
 	}
 }
 
+func TestAnalyzeReadValidityUsesCommittedFilesFromPartialPatchError(t *testing.T) {
+	content := tools.FormatReadResultHeader("1-10", 10, "", "", "") + "\n" + strings.Repeat("body\n", 10)
+	msgs := []message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "r1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "r1", Content: content, ToolStatus: message.ToolStatusSuccess, FileState: &message.ToolFileState{Reads: []message.TrackedFileState{{Path: "a.go", SHA256: "old", Exists: true}}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "p1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\\n*** End Patch"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "p1", Content: "partially applied\n\nError: one file failed", ToolStatus: message.ToolStatusError, FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "a.go", SHA256: "new", Exists: true}}}},
+	}
+	validity := analyzeReadValidity(msgs, buildToolCallMeta(msgs))
+	if got := validity[1]; !got.Invalidated {
+		t.Fatalf("partial patch committed write should invalidate the read, got %+v", got)
+	}
+}
+
 // TestValidReadsNeverReducedRegardlessOfAgeOrVolume locks the core retention
 // invariant: a read output that is still the model's current view of the file
 // is never reduced, no matter how old it is or how many sibling reads share

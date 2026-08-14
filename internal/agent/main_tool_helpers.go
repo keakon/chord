@@ -374,6 +374,10 @@ func composeToolResultTexts(rawResult string, err error) (displayResult, context
 	if strings.TrimSpace(rawResult) == "" {
 		return errorText, fmt.Sprintf("Error: %s", errorText), errorText, true
 	}
+	if tools.ErrorDescribedInResult(err) {
+		result := strings.TrimRight(rawResult, "\n")
+		return result, result, errorText, true
+	}
 	if deduped, ok := deduplicateMatchingToolError(rawResult, errorText); ok {
 		return deduped, deduped, errorText, true
 	}

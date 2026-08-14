@@ -227,7 +227,7 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 	// distinguish speculative writes from later external changes. It must run even
 	// when the call was discarded while the tool was still executing; otherwise
 	// rollback lacks the post-state hash and can refuse to restore edited files.
-	if err == nil && result.speculativeHooks != nil && result.speculativeHooks.captureAfter != nil {
+	if toolExecutionCommitted(err) && result.speculativeHooks != nil && result.speculativeHooks.captureAfter != nil {
 		result.speculativeHooks.captureAfter()
 	}
 
@@ -262,7 +262,7 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 		e.onFirstVisibleResult(call.ID, call.Name, time.Now())
 	}
 	status := toolResultStatusFromError(err != nil)
-	e.emit(ToolResultEvent{CallID: call.ID, Name: call.Name, ArgsJSON: result.EffectiveArgsJSON, Audit: result.Audit.Clone(), Result: result.Result, Status: status, Duration: completedAt.Sub(startedAt)})
+	e.emit(ToolResultEvent{CallID: call.ID, Name: call.Name, ArgsJSON: result.EffectiveArgsJSON, Audit: result.Audit.Clone(), Result: result.Result, Status: status, FileState: result.FileState.Clone(), Duration: completedAt.Sub(startedAt)})
 }
 
 func (e *StreamingToolExecutor) startDeferredLocked() {
@@ -328,7 +328,7 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 		startedAt = entry.completedAt
 	}
 	var diff agentdiff.Summary
-	if entry.err == nil {
+	if toolExecutionCommitted(entry.err) {
 		effective := call
 		effective.Args = json.RawMessage(entry.result.EffectiveArgsJSON)
 		diff = toolExecutionDiff(effective, entry.result)
@@ -452,7 +452,7 @@ func (e *StreamingToolExecutor) DrainCompletedResults() map[string]*ToolResultPa
 		}
 
 		var diff agentdiff.Summary
-		if entry.err == nil && entry.result.EffectiveArgsJSON != "" {
+		if toolExecutionCommitted(entry.err) && entry.result.EffectiveArgsJSON != "" {
 			effective := entry.call
 			effective.Args = json.RawMessage(entry.result.EffectiveArgsJSON)
 			diff = toolExecutionDiff(effective, entry.result)
@@ -475,6 +475,7 @@ func (e *StreamingToolExecutor) DrainCompletedResults() map[string]*ToolResultPa
 			FileCreated:      entry.call.Name == tools.NameWrite && !entry.result.PreExisted,
 			LSPReviews:       append([]message.LSPReview(nil), entry.result.LSPReviews...),
 			FileState:        entry.result.FileState.Clone(),
+			speculativeHooks: entry.result.speculativeHooks,
 		}
 		results[callID] = payload
 	}

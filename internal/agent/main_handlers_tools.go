@@ -111,6 +111,10 @@ func (a *MainAgent) handleCompletedInterruptedToolResult(call PendingToolCall, p
 		emitToolCallDiscards(a.emitToTUI, []PendingToolCall{call}, discardReason)
 		return false
 	}
+	tc := message.ToolCall{ID: call.CallID, Name: call.Name, Args: json.RawMessage(call.ArgsJSON)}
+	if err := a.commitPromotedToolSideEffects(tc, payload); err != nil {
+		payload.Error = fmt.Errorf("commit completed speculative tool side effects: %w", err)
+	}
 	// Tool completed execution: persist and emit immediately so the result
 	// survives terminal turn failure/interruption and can be reused on resume.
 	a.appendCompletedInterruptedToolResult(payload)
@@ -250,6 +254,7 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 		DiffAdded:   payload.DiffAdded,
 		DiffRemoved: payload.DiffRemoved,
 		FileCreated: payload.FileCreated,
+		FileState:   payload.FileState.Clone(),
 		Duration:    payload.Duration,
 	})
 
@@ -390,6 +395,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		contextResult,
 		payload.Error,
 		payload.Audit,
+		payload.FileState,
 	))
 	if hookErr != nil {
 		log.Warnf("on_before_tool_result_append hook error error=%v", hookErr)
@@ -409,6 +415,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		payload.Error,
 		payload.Diff,
 		payload.Audit,
+		payload.FileState,
 	))
 
 	if payload.Name == tools.NameHandoff && payload.Error == nil {
@@ -446,6 +453,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			DiffAdded:   payload.DiffAdded,
 			DiffRemoved: payload.DiffRemoved,
 			FileCreated: payload.FileCreated,
+			FileState:   payload.FileState.Clone(),
 			Duration:    payload.Duration,
 		})
 	}

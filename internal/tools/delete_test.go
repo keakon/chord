@@ -90,6 +90,49 @@ func TestDeleteToolReportsAuditWhenExecutionStops(t *testing.T) {
 	}
 }
 
+type cancelAfterFirstDelete struct {
+	cancel context.CancelFunc
+}
+
+func (r cancelAfterFirstDelete) ReportToolProgress(progress ToolProgressSnapshot) {
+	if progress.Label == "paths" && progress.Current == 1 {
+		r.cancel()
+	}
+}
+
+func TestDeleteToolMarksErrorAfterDeletingFiles(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first.txt")
+	second := filepath.Join(dir, "second.txt")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, []byte("hello\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile %s: %v", path, err)
+		}
+	}
+
+	collector := &DeleteAuditCollector{}
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = WithDeleteAuditSink(ctx, collector)
+	ctx = WithToolProgressReporter(ctx, cancelAfterFirstDelete{cancel: cancel})
+	out, err := (DeleteTool{BaseDir: dir}).Execute(ctx, deleteArgsJSON(t, []string{"first.txt", "second.txt"}, "cleanup"))
+	if !errors.Is(err, context.Canceled) || !ErrorHasCommittedChanges(err) {
+		t.Fatalf("DeleteTool.Execute error = %v, want committed context cancellation", err)
+	}
+	if !strings.Contains(out, "Deleted (1):\n- first.txt") || !strings.Contains(out, "Not attempted (1):\n- second.txt") {
+		t.Fatalf("result = %q, want deleted and not-attempted groups", out)
+	}
+	if _, statErr := os.Stat(first); !os.IsNotExist(statErr) {
+		t.Fatalf("first file still exists: %v", statErr)
+	}
+	if _, statErr := os.Stat(second); statErr != nil {
+		t.Fatalf("second file was modified: %v", statErr)
+	}
+	audit, ok := collector.Audit()
+	if !ok || len(audit.Deleted) != 1 || audit.Deleted[0] != first || len(audit.NotAttempted) != 1 || audit.NotAttempted[0] != second {
+		t.Fatalf("audit = %#v, ok=%v, want first deleted and second not attempted", audit, ok)
+	}
+}
+
 func TestDeleteToolDeletesSymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.txt")

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -123,5 +124,11 @@ func TestShouldRefreshGitStatusAfterEditResult(t *testing.T) {
 	}
 	if shouldRefreshGitStatusAfterToolResult(agent.ToolResultEvent{Name: tools.NameEdit, Status: agent.ToolResultStatusError}) {
 		t.Fatal("failed Edit should not refresh git status")
+	}
+	if !shouldRefreshGitStatusAfterToolResult(agent.ToolResultEvent{
+		Name: tools.NameApplyPatch, Status: agent.ToolResultStatusError,
+		FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "committed.go", Exists: true}}},
+	}) {
+		t.Fatal("partially applied patch should refresh git status")
 	}
 }

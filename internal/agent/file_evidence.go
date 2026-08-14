@@ -104,7 +104,7 @@ func buildFileEvidenceViewWithMeta(messages []message.Message, sessionID, genera
 	view := make(fileEvidenceView)
 	for index := range messages {
 		msg := &messages[index]
-		if msg.Role != message.RoleTool || isToolResultUnsuccessfulStatus(msg.ToolStatus) {
+		if msg.Role != message.RoleTool || (isToolResultUnsuccessfulStatus(msg.ToolStatus) && !msg.FileState.HasChanges()) {
 			continue
 		}
 		call := meta[msg.ToolCallID]

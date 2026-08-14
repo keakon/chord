@@ -72,6 +72,18 @@ type ToolFileState struct {
 	Reads   []TrackedFileState `json:"reads,omitempty"`
 	Writes  []TrackedFileState `json:"writes,omitempty"`
 	Deletes []TrackedFileState `json:"deletes,omitempty"`
+	Changes []ToolFileChange   `json:"changes,omitempty"`
+}
+
+// ToolFileChange records one committed file mutation for UI attribution.
+// TargetPath is set only for moves; Deleted distinguishes deletes from
+// zero-line-delta writes such as mode-only or binary changes.
+type ToolFileChange struct {
+	Path       string `json:"path"`
+	TargetPath string `json:"target_path,omitempty"`
+	Added      int    `json:"added,omitempty"`
+	Removed    int    `json:"removed,omitempty"`
+	Deleted    bool   `json:"deleted,omitempty"`
 }
 
 // TrackedFileState records the observed state of one file at tool completion.
@@ -98,7 +110,18 @@ func (s *ToolFileState) Clone() *ToolFileState {
 	if len(s.Deletes) > 0 {
 		cloned.Deletes = append([]TrackedFileState(nil), s.Deletes...)
 	}
+	if len(s.Changes) > 0 {
+		cloned.Changes = append([]ToolFileChange(nil), s.Changes...)
+	}
 	return cloned
+}
+
+// HasChanges reports whether the persisted state records committed writes or
+// deletes. FileState is the source of truth for per-file mutations: a tool can
+// end with an error status because some file groups failed while still
+// committing the mutations recorded here. Safe to call on a nil receiver.
+func (s *ToolFileState) HasChanges() bool {
+	return s != nil && (len(s.Writes) > 0 || len(s.Deletes) > 0)
 }
 
 type LSPReview struct {

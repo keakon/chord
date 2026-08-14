@@ -8,8 +8,9 @@ import (
 )
 
 // RebuildTouchedPathsFromMessages reconstructs the session-scoped touched-file set
-// from persisted tool history. Successful Write/Edit add files; successful Delete
-// removes files. Read-only tools are ignored.
+// from persisted tool history. FileState is authoritative for committed
+// per-file changes even when a multi-file tool ended with an error; otherwise
+// successful Write/Edit add files and successful Delete removes files.
 func RebuildTouchedPathsFromMessages(msgs []message.Message, projectRoot string) []string {
 	type callInfo struct {
 		name  string
@@ -26,9 +27,6 @@ func RebuildTouchedPathsFromMessages(msgs []message.Message, projectRoot string)
 				continue
 			}
 			paths := extractHookToolFilePaths(name, tc.Args, projectRoot)
-			if len(paths) == 0 {
-				continue
-			}
 			calls[tc.ID] = callInfo{name: name, paths: paths}
 		}
 	}
@@ -37,7 +35,7 @@ func RebuildTouchedPathsFromMessages(msgs []message.Message, projectRoot string)
 	}
 	paths := make(map[string]struct{})
 	for _, msg := range msgs {
-		if msg.Role != "tool" || !message.ToolResultSucceeded(msg.Content) {
+		if msg.Role != "tool" || (!msg.FileState.HasChanges() && !message.ToolResultSucceeded(msg.Content)) {
 			continue
 		}
 		info, ok := calls[msg.ToolCallID]

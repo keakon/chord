@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -105,6 +106,32 @@ func TestFailedApplyPatchResultDoesNotTrackChangedFiles(t *testing.T) {
 	}
 }
 
+func TestPartiallyAppliedPatchTracksOnlyCommittedFileState(t *testing.T) {
+	projectRoot := t.TempDir()
+	m := NewModelWithSize(nil, 100, 30)
+	m.workingDir = projectRoot
+	m.sidebar.SetWorkingDir(projectRoot)
+	m.sidebar.Update(nil, "main", "builder")
+	args := `{"patch":"*** Begin Patch\n*** Update File: committed.go\n@@\n-old\n+new\n*** Update File: failed.go\n@@\n-missing\n+new\n*** End Patch"}`
+
+	m.handleToolAgentEvent(agent.ToolCallStartEvent{ID: "call-1", Name: tools.NameApplyPatch, ArgsJSON: args})
+	m.handleToolAgentEvent(agent.ToolResultEvent{
+		CallID: "call-1", Name: tools.NameApplyPatch, ArgsJSON: args,
+		Result: "apply_patch partially applied", Status: agent.ToolResultStatusError,
+		FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{
+			Path: filepath.Join(projectRoot, "committed.go"), Exists: true,
+		}}, Changes: []message.ToolFileChange{{
+			Path: filepath.Join(projectRoot, "committed.go"), Added: 3, Removed: 1,
+		}}},
+	})
+
+	edits := m.sidebar.CurrentAgentFiles()
+	if len(edits) != 1 {
+		t.Fatalf("changed files = %d, want only committed.go: %+v", len(edits), edits)
+	}
+	assertFileEdit(t, edits[0], "committed.go", 3, 1, false)
+}
+
 func TestCancelledApplyPatchResultDoesNotTrackChangedFiles(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.sidebar.Update(nil, "main", "builder")
@@ -136,6 +163,32 @@ func TestApplyPatchChangedFilesRestoreFromTranscript(t *testing.T) {
 	}
 	assertFileEdit(t, edits[0], "docs/new.md", 1, 0, false)
 	assertFileEdit(t, edits[1], "tmp/old.txt", 0, 0, true)
+}
+
+func TestPartiallyAppliedPatchRestoresCommittedFileState(t *testing.T) {
+	projectRoot := t.TempDir()
+	m := NewModelWithSize(nil, 100, 30)
+	m.workingDir = projectRoot
+	m.sidebar.SetWorkingDir(projectRoot)
+	m.sidebar.Update(nil, "main", "builder")
+	args := []byte(`{"patch":"*** Begin Patch\n*** Update File: committed.go\n@@\n-old\n+new\n*** Update File: failed.go\n@@\n-missing\n+new\n*** End Patch"}`)
+	m.rebuildSidebarFileEditsFromMessages([]message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameApplyPatch, Args: args}}},
+		{
+			Role: "tool", ToolCallID: "call-1", ToolStatus: string(agent.ToolResultStatusError),
+			FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{
+				Path: filepath.Join(projectRoot, "committed.go"), Exists: true,
+			}}, Changes: []message.ToolFileChange{{
+				Path: filepath.Join(projectRoot, "committed.go"), Added: 2, Removed: 1,
+			}}},
+		},
+	})
+
+	edits := m.sidebar.CurrentAgentFiles()
+	if len(edits) != 1 {
+		t.Fatalf("restored changed files = %d, want only committed.go: %+v", len(edits), edits)
+	}
+	assertFileEdit(t, edits[0], "committed.go", 2, 1, false)
 }
 
 func TestLegacyPatchChangedFilesRestoreFromTranscript(t *testing.T) {

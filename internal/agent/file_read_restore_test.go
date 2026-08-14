@@ -289,6 +289,32 @@ func TestRestoreTrackedFileStateReadThenPatchUsesPostWriteHash(t *testing.T) {
 	mustExecuteEdit(t, a, path, "after", "final")
 }
 
+func TestRestoreTrackedFileStatePartialPatchErrorUsesCommittedFileState(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "demo.txt")
+	readHash := sha256String("before")
+	postHash := sha256String("after")
+	writeTestFile(t, path, "after")
+
+	a := newRestoreEditTestAgent(t, projectRoot)
+	msgs := append(restoreReadMessages(t, "read-1", path, readHash, nil),
+		restoreAssistantCall(t, "patch-1", tools.NameApplyPatch, map[string]any{"patch": "*** Begin Patch\n*** End Patch"}, nil),
+		message.Message{
+			Role:       message.RoleTool,
+			ToolCallID: "patch-1",
+			ToolStatus: message.ToolStatusError,
+			Content:    "partially applied\n\nError: one file failed",
+			FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: path, SHA256: postHash, Exists: true}}},
+		},
+	)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, msgs)
+	if result.RestoredUsable != 1 || result.RestoredStale != 0 {
+		t.Fatalf("restore result = %+v, want committed partial write restored", result)
+	}
+
+	mustExecuteEdit(t, a, path, "after", "final")
+}
+
 func TestActivateLoadedSessionRebuildsFileTrackerFromLoadedMessages(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")

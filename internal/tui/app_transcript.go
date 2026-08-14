@@ -180,7 +180,8 @@ func (m *Model) logTranscriptRebuildTiming(reason string, messageCount, blockCou
 }
 
 // rebuildSidebarFileEditsFromMessages scans the message history and reconstructs
-// sidebar changed-file statistics from stored diffs and apply_patch operations.
+// sidebar changed-file statistics from persisted FileState records, falling back
+// to stored diffs, apply_patch operations, and delete result text.
 func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 	// Reset file edits for main agent (sub-agents manage their own edits live).
 	m.sidebar.ClearFileEdits("main")
@@ -192,7 +193,7 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 		}
 		for _, tc := range msg.ToolCalls {
 			name := tools.NormalizeName(tc.Name)
-			if name != tools.NameWrite && name != tools.NameEdit && name != tools.NameApplyPatch {
+			if name != tools.NameWrite && name != tools.NameEdit && name != tools.NameApplyPatch && name != tools.NameDelete {
 				continue
 			}
 			tc.Name = name
@@ -205,7 +206,21 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 			continue
 		}
 		call, ok := calls[msg.ToolCallID]
-		if !ok || agent.ToolResultStatus(msg.ToolStatus).IsUnsuccessful() {
+		if !ok {
+			continue
+		}
+		if agent.ToolResultStatus(msg.ToolStatus).IsUnsuccessful() {
+			if msg.FileState.HasChanges() {
+				m.addSidebarFileState("main", msg.FileState)
+			}
+			continue
+		}
+		if call.Name == tools.NameDelete {
+			if !m.addSidebarFileState("main", msg.FileState) {
+				for _, path := range tools.ParseDeleteResult(msg.Content).Deleted {
+					m.sidebar.AddFileDelete("main", path)
+				}
+			}
 			continue
 		}
 		if call.Name == tools.NameApplyPatch {

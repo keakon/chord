@@ -24,12 +24,12 @@ func BenchmarkBuildApplyPatchPlanLargeFile(b *testing.B) {
 	b.SetBytes(int64(content.Len()))
 	b.ResetTimer()
 	for b.Loop() {
-		plan, err := BuildApplyPatchPlan(context.Background(), patch, dir)
-		if err != nil {
-			b.Fatal(err)
+		result, err := buildApplyPatchPlanWithOutcomes(context.Background(), patch, dir)
+		if err != nil || result.HasFailures() {
+			b.Fatalf("plan failed: %v %#v", err, result.Outcomes)
 		}
-		if len(plan.Mutations) != 1 {
-			b.Fatalf("mutations = %d, want 1", len(plan.Mutations))
+		if len(result.Plan.Mutations) != 1 {
+			b.Fatalf("mutations = %d, want 1", len(result.Plan.Mutations))
 		}
 	}
 }
@@ -50,12 +50,12 @@ func BenchmarkBuildApplyPatchPlanMultiFile(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		plan, err := BuildApplyPatchPlan(context.Background(), patchText, dir)
-		if err != nil {
-			b.Fatal(err)
+		result, err := buildApplyPatchPlanWithOutcomes(context.Background(), patchText, dir)
+		if err != nil || result.HasFailures() {
+			b.Fatalf("plan failed: %v %#v", err, result.Outcomes)
 		}
-		if len(plan.Mutations) != 20 {
-			b.Fatalf("mutations = %d, want 20", len(plan.Mutations))
+		if len(result.Plan.Mutations) != 20 {
+			b.Fatalf("mutations = %d, want 20", len(result.Plan.Mutations))
 		}
 	}
 }

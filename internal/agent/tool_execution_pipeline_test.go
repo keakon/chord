@@ -113,6 +113,119 @@ func TestToolExecutionPipelineWriteUpdatesFileStateAndTracker(t *testing.T) {
 	}
 }
 
+func TestToolExecutionPipelineApplyPatchPartialFailureRecordsCommittedFiles(t *testing.T) {
+	projectRoot := t.TempDir()
+	committedPath := filepath.Join(projectRoot, "committed.txt")
+	failedPath := filepath.Join(projectRoot, "failed.txt")
+	if err := os.WriteFile(committedPath, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(failedPath, []byte("unchanged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tracker := filelock.NewFileTracker()
+	tracker.TrackSnapshot(committedPath, "agent-1", computeFileHash(committedPath))
+	tracker.TrackSnapshot(failedPath, "agent-1", computeFileHash(failedPath))
+	registry := tools.NewRegistry()
+	registry.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
+	pipeline := toolExecutionPipeline{
+		agentID:     "agent-1",
+		registry:    registry,
+		fileTrack:   tracker,
+		fileBackups: newFileBackupManager(filepath.Join(projectRoot, ".chord", "sessions", "test")),
+		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: committed.txt\n@@\n-before\n+after\n" +
+		"*** Update File: failed.txt\n@@\n-missing\n+never\n" +
+		"*** End Patch"
+	args, err := json.Marshal(tools.ApplyPatchArgs{Patch: patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: args}
+
+	result, err := pipeline.execute(context.Background(), call, false)
+	if err == nil || !tools.ErrorHasCommittedChanges(err) {
+		t.Fatalf("execute error = %v, want partial failure with committed files", err)
+	}
+	if got, readErr := os.ReadFile(committedPath); readErr != nil || string(got) != "after\n" {
+		t.Fatalf("committed file = %q, %v; want after", got, readErr)
+	}
+	if got, readErr := os.ReadFile(failedPath); readErr != nil || string(got) != "unchanged\n" {
+		t.Fatalf("failed file = %q, %v; want unchanged", got, readErr)
+	}
+	if result.FileState == nil || len(result.FileState.Writes) != 1 || len(result.FileState.Deletes) != 0 {
+		t.Fatalf("FileState = %#v, want only the committed write", result.FileState)
+	}
+	if got := result.FileState.Writes[0].Path; got != committedPath {
+		t.Fatalf("FileState write path = %q, want %q", got, committedPath)
+	}
+	if got := result.FileState.Changes; len(got) != 1 || got[0].Path != committedPath || got[0].Added != 1 || got[0].Removed != 1 || got[0].Deleted || got[0].TargetPath != "" {
+		t.Fatalf("FileState changes = %#v, want committed line counts only", got)
+	}
+	if !strings.Contains(result.Diff.Text, "committed.txt") || strings.Contains(result.Diff.Text, "failed.txt") {
+		t.Fatalf("diff must describe only committed files:\n%s", result.Diff.Text)
+	}
+
+	for _, path := range []string{committedPath, failedPath} {
+		status, acquireErr := tracker.AcquireWriteStatus(path, "agent-1", computeFileHash(path))
+		if acquireErr != nil {
+			t.Fatalf("AcquireWriteStatus(%s): %v", path, acquireErr)
+		}
+		tracker.AbortWrite(path, "agent-1")
+		if status.ExternalChanged {
+			t.Fatalf("tracker reports %s changed outside the committed file result", path)
+		}
+	}
+}
+
+func TestToolExecutionPipelineZeroCommitStaleApplyPatchSurfacesWarning(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "notes.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tracker := filelock.NewFileTracker()
+	tracker.TrackSnapshot(path, "agent-1", computeFileHash(path))
+	// External edit invalidates the tracked snapshot and the hunk below.
+	if err := os.WriteFile(path, []byte("external\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := tools.NewRegistry()
+	registry.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
+	pipeline := toolExecutionPipeline{
+		agentID:     "agent-1",
+		registry:    registry,
+		fileTrack:   tracker,
+		fileBackups: newFileBackupManager(filepath.Join(projectRoot, ".chord", "sessions", "test")),
+		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: notes.txt\n@@\n-old\n+new\n" +
+		"*** End Patch"
+	args, err := json.Marshal(tools.ApplyPatchArgs{Patch: patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := message.ToolCall{ID: "patch-stale", Name: tools.NameApplyPatch, Args: args}
+
+	result, execErr := pipeline.execute(context.Background(), call, false)
+	if execErr == nil || tools.ErrorHasCommittedChanges(execErr) {
+		t.Fatalf("execute error = %v, want zero-commit failure", execErr)
+	}
+	if !tools.ErrorDescribedInResult(execErr) {
+		t.Fatalf("error should stay described-in-result, got %v", execErr)
+	}
+	if !strings.Contains(result.Result, "changed on disk since it was last read") {
+		t.Fatalf("result must surface the stale-read warning:\n%s", result.Result)
+	}
+}
+
 func TestToolExecutionPipelineRelativeDeleteReleasesTrackedLease(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "delete.txt")
@@ -155,6 +268,51 @@ func TestToolExecutionPipelineRelativeDeleteReleasesTrackedLease(t *testing.T) {
 		t.Fatalf("delete lease remained after pipeline execution: %v", err)
 	}
 	tracker.AbortWrite(path, "other-agent")
+}
+
+func TestToolExecutionPipelineDeletePartialFailureRecordsCommittedFiles(t *testing.T) {
+	projectRoot := t.TempDir()
+	first := filepath.Join(projectRoot, "first.txt")
+	second := filepath.Join(projectRoot, "second.txt")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+			t.Fatalf("write seed file: %v", err)
+		}
+	}
+
+	registry := tools.NewRegistry()
+	registry.Register(tools.DeleteTool{BaseDir: projectRoot})
+	ctx, cancel := context.WithCancel(context.Background())
+	pipeline := toolExecutionPipeline{
+		agentID:     "agent-1",
+		registry:    registry,
+		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
+		emit: func(event AgentEvent) {
+			if progress, ok := event.(ToolProgressEvent); ok && progress.Progress.Label == "paths" && progress.Progress.Current == 1 {
+				cancel()
+			}
+		},
+	}
+	call := message.ToolCall{
+		ID:   "delete-partial",
+		Name: tools.NameDelete,
+		Args: json.RawMessage(`{"paths":["first.txt","second.txt"],"reason":"cleanup"}`),
+	}
+
+	result, err := pipeline.execute(ctx, call, false)
+	if !errors.Is(err, context.Canceled) || !tools.ErrorHasCommittedChanges(err) {
+		t.Fatalf("execute error = %v, want committed context cancellation", err)
+	}
+	if result.FileState == nil || len(result.FileState.Deletes) != 1 || result.FileState.Deletes[0].Path != first {
+		t.Fatalf("FileState = %#v, want only first.txt deleted", result.FileState)
+	}
+	if _, statErr := os.Stat(first); !os.IsNotExist(statErr) {
+		t.Fatalf("first file still exists: %v", statErr)
+	}
+	if _, statErr := os.Stat(second); statErr != nil {
+		t.Fatalf("second file was modified: %v", statErr)
+	}
 }
 
 func TestToolExecutionPipelineStaleWriteIsRejected(t *testing.T) {

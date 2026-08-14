@@ -80,7 +80,7 @@ func analyzeReadValidity(messages []message.Message, callMeta map[string]toolCal
 
 	for i := range messages {
 		msg := &messages[i]
-		if msg.Role != message.RoleTool || isToolResultUnsuccessfulStatus(msg.ToolStatus) {
+		if msg.Role != message.RoleTool || (isToolResultUnsuccessfulStatus(msg.ToolStatus) && !msg.FileState.HasChanges()) {
 			continue
 		}
 		meta := callMeta[msg.ToolCallID]

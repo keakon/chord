@@ -143,7 +143,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 						return
 					}
 					var diff agentdiff.Summary
-					if err == nil {
+					if toolExecutionCommitted(err) {
 						effectiveCall := tc
 						effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
 						diff = toolExecutionDiff(effectiveCall, execResult)
@@ -207,7 +207,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				return
 			}
 			var diff agentdiff.Summary
-			if err == nil {
+			if toolExecutionCommitted(err) {
 				effectiveCall := tc
 				effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
 				diff = toolExecutionDiff(effectiveCall, execResult)
@@ -260,6 +260,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		contextResult,
 		result.Error,
 		result.Audit,
+		result.FileState,
 	))
 	if hookErr != nil {
 		log.Warnf("SubAgent on_before_tool_result_append hook error agent=%v error=%v", s.instanceID, hookErr)
@@ -279,6 +280,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		result.Error,
 		result.Diff,
 		result.Audit,
+		result.FileState,
 	))
 
 	parts := s.toolResultParts(contextResult, result.Images)
@@ -298,6 +300,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		DiffAdded:   result.DiffAdded,
 		DiffRemoved: result.DiffRemoved,
 		FileCreated: result.FileCreated,
+		FileState:   result.FileState.Clone(),
 		Duration:    result.Duration,
 	})
 
@@ -323,17 +326,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	// Persist tool result.
 	s.persistMessageAsync(toolMsg, "tool result", nil)
 
-	s.turn.CompletedToolCalls = append(s.turn.CompletedToolCalls, map[string]any{
-		hook.DataKeyCallID:   result.CallID,
-		hook.DataKeyToolName: result.Name,
-		"args":               json.RawMessage(result.ArgsJSON),
-		"args_audit":         toolArgsAuditHookData(result.Audit),
-		"result":             contextResult,
-		"error":              errorText,
-		"diff":               result.Diff,
-		"path":               extractHookFilePath(json.RawMessage(result.ArgsJSON)),
-	})
-	if changed := changedFileSummary(&ToolResultPayload{
+	hookPayload := &ToolResultPayload{
 		CallID:      result.CallID,
 		Name:        result.Name,
 		ArgsJSON:    result.ArgsJSON,
@@ -342,7 +335,10 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		Diff:        result.Diff,
 		DiffAdded:   result.DiffAdded,
 		DiffRemoved: result.DiffRemoved,
-	}); changed != nil {
+		FileState:   result.FileState,
+	}
+	s.turn.CompletedToolCalls = append(s.turn.CompletedToolCalls, toolResultSummary(hookPayload, contextResult, errorText))
+	if changed := changedFileSummary(hookPayload); changed != nil {
 		s.turn.ChangedFiles = append(s.turn.ChangedFiles, changed)
 	}
 

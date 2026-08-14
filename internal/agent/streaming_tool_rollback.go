@@ -345,6 +345,12 @@ func (m *speculativeFileMutation) Commit() {
 	}
 	m.commit = true
 	for _, snap := range m.files {
+		if !speculativeFileSnapshotChanged(snap) {
+			if snap.lease != nil {
+				snap.lease.Abort()
+			}
+			continue
+		}
 		if m.track != nil && snap.lease != nil {
 			if !snap.PostExisted {
 				snap.lease.CommitDelete()
@@ -379,6 +385,9 @@ func (m *speculativeFileMutation) postState() *message.ToolFileState {
 	}
 	state := &message.ToolFileState{}
 	for _, snap := range m.files {
+		if !speculativeFileSnapshotChanged(snap) {
+			continue
+		}
 		if snap.PostExisted && snap.PostHash != "" {
 			state.Writes = append(state.Writes, message.TrackedFileState{Path: snap.Path, SHA256: snap.PostHash, Exists: true})
 		} else if snap.Existed {
@@ -391,6 +400,19 @@ func (m *speculativeFileMutation) postState() *message.ToolFileState {
 	return state
 }
 
+func speculativeFileSnapshotChanged(snap speculativeFileSnapshot) bool {
+	if snap.Existed != snap.PostExisted {
+		return true
+	}
+	if !snap.Existed {
+		return false
+	}
+	if snap.Mode != snap.PostMode || snap.Hash != snap.PostHash {
+		return true
+	}
+	return snap.SymlinkTarget != snap.PostSymlinkTarget
+}
+
 func (m *speculativeFileMutation) Rollback() error {
 	if m == nil || m.commit || m.rolledBack {
 		return nil
@@ -398,7 +420,9 @@ func (m *speculativeFileMutation) Rollback() error {
 	m.rolledBack = true
 	var errs []error
 	for _, snap := range slices.Backward(m.files) {
-
+		if !speculativeFileSnapshotChanged(snap) {
+			continue
+		}
 		if err := restoreSpeculativeFileSnapshot(snap); err != nil {
 			errs = append(errs, err)
 		}

@@ -5,6 +5,7 @@ import (
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -54,6 +55,45 @@ func TestChangedFileSummaryDeleteUsesDeletedResultPaths(t *testing.T) {
 	payload.Result = "Already absent (1):\n- old.txt"
 	if changedFileSummary(payload) != nil {
 		t.Fatal("delete without deleted paths should not produce changed file summary")
+	}
+}
+
+func TestChangedFileSummaryPartialPatchUsesCommittedFileState(t *testing.T) {
+	payload := &ToolResultPayload{
+		Name:     tools.NameApplyPatch,
+		ArgsJSON: `{"patch":"*** Begin Patch\n*** Update File: committed.go\n@@\n-old\n+new\n*** Update File: failed.go\n@@\n-missing\n+never\n*** End Patch"}`,
+		Diff:     "--- committed.go\n+++ committed.go\n",
+		FileState: &message.ToolFileState{Writes: []message.TrackedFileState{
+			{Path: "committed.go", Exists: true},
+		}},
+	}
+	summary := changedFileSummary(payload)
+	if summary == nil {
+		t.Fatal("changedFileSummary returned nil")
+	}
+	paths, ok := summary["paths"].([]string)
+	if !ok || len(paths) != 1 || paths[0] != "committed.go" {
+		t.Fatalf("paths = %#v, want only committed.go", summary["paths"])
+	}
+}
+
+func TestToolResultHookDataPartialPatchUsesCommittedFileState(t *testing.T) {
+	const argsJSON = `{"patch":"*** Begin Patch\n*** Update File: committed.go\n@@\n-old\n+new\n*** Update File: failed.go\n@@\n-missing\n+never\n*** End Patch"}`
+	fileState := &message.ToolFileState{Writes: []message.TrackedFileState{
+		{Path: "committed.go", Exists: true},
+	}}
+
+	for name, data := range map[string]map[string]any{
+		"before result append": buildBeforeToolResultAppendData(tools.NameApplyPatch, argsJSON, "raw", "display", "context", nil, nil, fileState),
+		"tool result":          buildToolResultHookData(tools.NameApplyPatch, argsJSON, "context", nil, "diff", nil, fileState),
+	} {
+		paths, ok := data["paths"].([]string)
+		if !ok || len(paths) != 1 || paths[0] != "committed.go" {
+			t.Fatalf("%s paths = %#v, want only committed.go", name, data["paths"])
+		}
+		if data["path"] != "committed.go" {
+			t.Fatalf("%s path = %#v, want committed.go", name, data["path"])
+		}
 	}
 }
 

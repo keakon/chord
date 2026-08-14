@@ -567,7 +567,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 							return
 						}
 						var diff agentdiff.Summary
-						if err == nil {
+						if toolExecutionCommitted(err) {
 							effectiveCall := tc
 							effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
 							diff = toolExecutionDiff(effectiveCall, execResult)
@@ -625,7 +625,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 				return
 			}
 			var diff agentdiff.Summary
-			if err == nil {
+			if toolExecutionCommitted(err) {
 				effectiveCall := tc
 				effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
 				diff = toolExecutionDiff(effectiveCall, execResult)

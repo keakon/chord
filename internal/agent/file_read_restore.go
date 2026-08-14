@@ -137,7 +137,7 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID,
 				result.skipNonNativeProvenance()
 				continue
 			}
-			if !restoreToolResultSucceeded(msg) {
+			if !restoreToolResultCommitted(msg) {
 				result.skipNonSuccessResult()
 				continue
 			}
@@ -323,8 +323,8 @@ func isNativeChordProvenance(prov *message.MessageProvenance) bool {
 	return source == "" || source == "chord"
 }
 
-func restoreToolResultSucceeded(msg message.Message) bool {
-	return isToolResultSuccessStatus(msg.ToolStatus)
+func restoreToolResultCommitted(msg message.Message) bool {
+	return isToolResultSuccessStatus(msg.ToolStatus) || msg.FileState.HasChanges()
 }
 
 func restoreEffectiveArgs(msg message.Message, call restoreToolCall) (json.RawMessage, bool) {

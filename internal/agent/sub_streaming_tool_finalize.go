@@ -7,7 +7,7 @@ import (
 )
 
 func (s *SubAgent) commitPromotedToolSideEffects(tc message.ToolCall, result *toolResult) error {
-	if s == nil || result == nil || result.Error != nil {
+	if s == nil || result == nil || !toolExecutionCommitted(result.Error) {
 		return nil
 	}
 	if result.speculativeHooks != nil && result.speculativeHooks.commit != nil {

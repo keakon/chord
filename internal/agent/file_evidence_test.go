@@ -45,3 +45,16 @@ func TestBuildFileEvidenceViewMarksUnknownWriteConservatively(t *testing.T) {
 		t.Fatalf("unknown-range read validity = %q, want stale", got)
 	}
 }
+
+func TestBuildFileEvidenceViewIncludesCommittedFilesFromPartialError(t *testing.T) {
+	messages := []message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "patch", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\\n*** End Patch"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "patch", Content: "partially applied\n\nError: one file failed", ToolStatus: message.ToolStatusError, FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "a.go", SHA256: "new", Exists: true}}}},
+	}
+
+	view := buildFileEvidenceView(messages, "session-a", "current")
+	observations := view["a.go"]
+	if len(observations) != 1 || observations[0].Operation != "write" || observations[0].ObservedRevision != "new" {
+		t.Fatalf("observations = %#v, want committed partial write", observations)
+	}
+}

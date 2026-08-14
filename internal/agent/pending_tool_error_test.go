@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -597,6 +598,48 @@ func TestComposeToolResultTextsDeduplicatesMatchingResultAndError(t *testing.T) 
 	}
 	if strings.Contains(display, "\n\nError:") {
 		t.Fatalf("display should not duplicate matching error text, got %q", display)
+	}
+}
+
+func TestComposeToolResultTextsDoesNotAppendErrorAlreadyDescribedByTool(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "good.txt"), []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args, err := json.Marshal(tools.ApplyPatchArgs{Patch: "*** Begin Patch\n" +
+		"*** Update File: good.txt\n@@\n-before\n+after\n" +
+		"*** Update File: missing.txt\n@@\n-missing\n+never\n" +
+		"*** End Patch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := (tools.ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), args)
+	if err == nil || !tools.ErrorDescribedInResult(err) || !tools.ErrorHasCommittedChanges(err) {
+		t.Fatalf("Execute error = %v, want described partial-commit error", err)
+	}
+
+	display, contextResult, errorText, isError := composeToolResultTexts(raw, err)
+	if !isError {
+		t.Fatal("expected error status")
+	}
+	if display != raw || contextResult != raw {
+		t.Fatalf("display/context = %q / %q, want result without duplicate error", display, contextResult)
+	}
+	if errorText != err.Error() {
+		t.Fatalf("errorText = %q, want %q", errorText, err.Error())
+	}
+	for _, want := range []string{
+		"1 change committed; 1 file group not applied.",
+		"Not applied:",
+		"Next action: resolve each failure above",
+		"Unapplied operations (reference copy; do not submit unchanged):",
+	} {
+		if !strings.Contains(display, want) {
+			t.Fatalf("display missing %q: %q", want, display)
+		}
+	}
+	if strings.Contains(display, "\n\nError:") {
+		t.Fatalf("display must not append a duplicate error summary: %q", display)
 	}
 }
 

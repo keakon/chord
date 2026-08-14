@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -672,7 +673,36 @@ func TestApplyPatchHunkFailureReportsEarlierContextOrder(t *testing.T) {
 	assertApplyPatchFile(t, path, content)
 }
 
-func TestApplyPatchSequentialPlanningFailureIsAtomic(t *testing.T) {
+func TestApplyPatchHunkFailureLabelsTruncatedExpectedLineAsPrefix(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "long.txt")
+	if err := os.WriteFile(path, []byte("current\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	expected := strings.Repeat("x", 160)
+	patch := "*** Begin Patch\n*** Update File: long.txt\n@@\n-" + expected + "\n+replacement\n*** End Patch"
+
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil {
+		t.Fatal("Execute error = nil, want hunk mismatch")
+	}
+	if !strings.Contains(out, "first expected line prefix: \"") {
+		t.Fatalf("output must label a truncated diagnostic as a prefix: %q", out)
+	}
+	diagnostic := strings.Split(out, "Unapplied operations")[0]
+	if strings.Contains(diagnostic, "expected complete line") || strings.Contains(diagnostic, expected) {
+		t.Fatalf("diagnostic must not claim or print the unavailable complete line: %q", diagnostic)
+	}
+	if !strings.Contains(out, "This operation was not applied") {
+		t.Fatalf("output must describe operation outcome precisely: %q", out)
+	}
+	if strings.Contains(out, "changes already listed under Applied patch") {
+		t.Fatalf("all-failed output must not refer to a nonexistent committed section: %q", out)
+	}
+	assertApplyPatchFile(t, path, "current\n")
+}
+
+func TestApplyPatchSequentialPartialFailureAppliesIndependentOps(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "plan.md")
 	archive := filepath.Join(dir, "archive", "plan.md")
@@ -684,13 +714,25 @@ func TestApplyPatchSequentialPlanningFailureIsAtomic(t *testing.T) {
 		"*** Add File: plan.md\n+new\n" +
 		"*** Update File: archive/plan.md\n@@\n-missing\n+never\n" +
 		"*** End Patch"
-	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
 	if err == nil || !strings.Contains(err.Error(), "hunk not found") {
 		t.Fatalf("err = %v, want late hunk failure", err)
 	}
-	assertApplyPatchFile(t, source, "old\n")
-	if _, err := os.Stat(archive); !os.IsNotExist(err) {
-		t.Fatalf("archive exists after planning failure, err=%v", err)
+	// The move + add are independent of the failing update on archive/plan.md
+	// (the failure is a content mismatch, not a dependency on a failed op), so
+	// they must be committed.
+	assertApplyPatchFile(t, source, "new\n")
+	assertApplyPatchFile(t, archive, "archived\n")
+	// The failed op and only the failed op must appear in the unapplied
+	// operation reference.
+	if !strings.Contains(out, "Not applied") || !strings.Contains(out, "archive/plan.md") {
+		t.Fatalf("output must name the unapplied operation group: %q", out)
+	}
+	if !strings.Contains(out, "*** Update File: archive/plan.md") {
+		t.Fatalf("retry patch must contain the failed op: %q", out)
+	}
+	if strings.Contains(out, "*** Move to:") || strings.Contains(out, "*** Add File: plan.md") {
+		t.Fatalf("retry patch must not contain already-applied ops: %q", out)
 	}
 }
 
@@ -839,25 +881,60 @@ func TestApplyPatchFailedMoveRestoresTarget(t *testing.T) {
 	}
 }
 
-func TestApplyPatchPlanningFailureDoesNotModifyAnyFile(t *testing.T) {
+func TestApplyPatchPlanningFailureAppliesSuccessfulFilesAndReportsFailures(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "good.txt"), []byte("good\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	patch := "*** Begin Patch\n*** Update File: good.txt\n@@\n-good\n+changed\n*** Update File: missing.txt\n@@\n-missing\n+created\n*** Add File: should-not-exist.txt\n+no\n*** End Patch"
-	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
-	if err == nil || !strings.Contains(err.Error(), "missing.txt") {
-		t.Fatalf("err=%v", err)
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil || !strings.Contains(err.Error(), "partially applied") {
+		t.Fatalf("err = %v, want partial-apply error", err)
 	}
+	if !ErrorHasCommittedChanges(err) {
+		t.Fatalf("err = %v, want committed-changes marker", err)
+	}
+	// good.txt was an independent successful operation and must be committed.
 	got, readErr := os.ReadFile(filepath.Join(dir, "good.txt"))
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
-	if string(got) != "good\n" {
-		t.Fatalf("good.txt changed to %q", got)
+	if string(got) != "changed\n" {
+		t.Fatalf("good.txt = %q, want %q (independent successful op must be applied)", got, "changed\n")
 	}
-	if _, statErr := os.Stat(filepath.Join(dir, "should-not-exist.txt")); !os.IsNotExist(statErr) {
-		t.Fatalf("unexpected added file, err=%v", statErr)
+	// Add File after a failed op on an unrelated file still applies because it
+	// touches a different file; only ops touching the failed file cascade-fail.
+	if _, statErr := os.Stat(filepath.Join(dir, "should-not-exist.txt")); statErr != nil {
+		t.Fatalf("should-not-exist.txt should have been applied (independent of missing.txt failure), err=%v", statErr)
+	}
+	// The model-facing output must name the committed files, the unapplied file,
+	// and carry a reference patch containing only the unapplied operation.
+	if !strings.Contains(out, "Applied") || !strings.Contains(out, "good.txt") || !strings.Contains(out, "should-not-exist.txt") {
+		t.Fatalf("output missing applied file list: %q", out)
+	}
+	if !strings.Contains(out, "Not applied") || !strings.Contains(out, "missing.txt") {
+		t.Fatalf("output missing unapplied file group: %q", out)
+	}
+	if !strings.Contains(out, "\n\nNot applied:") {
+		t.Fatalf("output must keep a blank line before the unapplied section: %q", out)
+	}
+	if !strings.Contains(out, "*** Update File: missing.txt") || strings.Contains(out, "good.txt\n@@") {
+		t.Fatalf("reference patch should contain only unapplied ops, out=%q", out)
+	}
+	for _, want := range []string{
+		"Next action: resolve each failure above",
+		"re-read targets when instructed",
+		"Unapplied operations (reference copy; do not submit unchanged):",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing recovery instruction %q: %q", want, out)
+		}
+	}
+	if strings.Contains(out, "Retry only") || strings.Contains(out, "must be retried") {
+		t.Fatalf("output must not present stale operations as directly retryable: %q", out)
+	}
+	if strings.Contains(out, "update missing.txt: update missing.txt:") {
+		t.Fatalf("output must not duplicate the operation path prefix: %q", out)
 	}
 }
 
@@ -1456,5 +1533,343 @@ func TestApplyPatchRenameOnlyWorksForBinaryFiles(t *testing.T) {
 	got, _ := os.ReadFile(filepath.Join(dir, "logo.png"))
 	if !bytes.Equal(got, bin) {
 		t.Fatalf("rename-only changed binary bytes: got %x, want %x", got, bin)
+	}
+}
+
+// TestApplyPatchCrossFilePartialFailureCommitsIndependentOps verifies that
+// when an operation on one file fails, all other independent file operations
+// (before and after the failure) are still committed, and the operation
+// reference contains only the unapplied operation.
+func TestApplyPatchCrossFilePartialFailureCommitsIndependentOps(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("one.txt", "one\n")
+	write("two.txt", "two\n")
+	write("four.txt", "four\n")
+	write("five.txt", "five\n")
+
+	patch := "*** Begin Patch\n" +
+		"*** Update File: one.txt\n@@\n-one\n+ONE\n" +
+		"*** Update File: two.txt\n@@\n-two\n+TWO\n" +
+		"*** Update File: three.txt\n@@\n-three\n+THREE\n" +
+		"*** Update File: four.txt\n@@\n-four\n+FOUR\n" +
+		"*** Update File: five.txt\n@@\n-five\n+FIVE\n" +
+		"*** End Patch"
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil || !strings.Contains(err.Error(), "partially applied") || !strings.Contains(err.Error(), "1 file group not applied") {
+		t.Fatalf("err = %v, want partial failure for one file", err)
+	}
+	if !ErrorHasCommittedChanges(err) {
+		t.Fatalf("err = %v, want committed-changes marker", err)
+	}
+	for _, name := range []string{"one.txt", "two.txt", "four.txt", "five.txt"} {
+		got, readErr := os.ReadFile(filepath.Join(dir, name))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if string(got) != strings.ToUpper(strings.TrimSuffix(name, ".txt"))+"\n" {
+			t.Fatalf("%s = %q, want committed content", name, got)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "three.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("three.txt should not have been created, err=%v", statErr)
+	}
+	// The operation reference must contain only the unapplied op on three.txt.
+	if !strings.Contains(out, "*** Update File: three.txt") {
+		t.Fatalf("operation reference must contain the unapplied op: %q", out)
+	}
+	for _, leak := range []string{"one.txt\n@@", "two.txt\n@@", "four.txt\n@@", "five.txt\n@@"} {
+		if strings.Contains(out, leak) {
+			t.Fatalf("operation reference must not contain committed ops (%s): %q", leak, out)
+		}
+	}
+}
+
+// TestApplyPatchSameFileCascadeFailureIsAtomic verifies that when a file has
+// two operations and the first succeeds but the second fails, the whole file
+// is rolled back to its pre-group state and both operations appear as failed
+// in the retry patch.
+func TestApplyPatchSameFileCascadeFailureIsAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "same.txt")
+	if err := os.WriteFile(path, []byte("first\nlast\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: same.txt\n@@\n-first\n+FIRST\n" +
+		"*** Update File: same.txt\n@@\n-missing\n+NEVER\n" +
+		"*** End Patch"
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil || !strings.Contains(err.Error(), "1 file group not applied") {
+		t.Fatalf("err = %v, want one-file failure", err)
+	}
+	if ErrorHasCommittedChanges(err) {
+		t.Fatalf("err = %v, do not want committed-changes marker", err)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil || string(got) != "first\nlast\n" {
+		t.Fatalf("same.txt = %q, %v; want unchanged because the whole file group was discarded", got, readErr)
+	}
+	// Both operations on the failed file must be retried: the first matched
+	// in memory but was rolled back, so the model must redo it too.
+	if !strings.Contains(out, "*** Update File: same.txt") {
+		t.Fatalf("retry patch must name the failed file: %q", out)
+	}
+	if !strings.Contains(out, "+FIRST") || !strings.Contains(out, "+NEVER") {
+		t.Fatalf("retry patch must contain both operations of the failed group: %q", out)
+	}
+}
+
+// TestApplyPatchSameFileCascadeFailurePreservesPriorMove verifies that a
+// successful move into a file does not get erased when a later failed update
+// on that same file is rolled back: the moved-to file keeps its moved
+// content, and only the failed update is retried.
+func TestApplyPatchSameFileCascadeFailurePreservesPriorMove(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "old.txt")
+	archive := filepath.Join(dir, "archive.txt")
+	if err := os.WriteFile(source, []byte("orig\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: old.txt\n*** Move to: archive.txt\n@@\n-orig\n+moved\n" +
+		"*** Update File: archive.txt\n@@\n-missing\n+never\n" +
+		"*** End Patch"
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil || !strings.Contains(err.Error(), "partially applied") {
+		t.Fatalf("err = %v, want partial-apply error", err)
+	}
+	if !ErrorHasCommittedChanges(err) {
+		t.Fatalf("err = %v, want committed move marker", err)
+	}
+	// The successful move must be committed and must survive the failed
+	// update's rollback.
+	if _, statErr := os.Stat(source); !os.IsNotExist(statErr) {
+		t.Fatalf("old.txt should have been moved away, err=%v", statErr)
+	}
+	got, readErr := os.ReadFile(archive)
+	if readErr != nil || string(got) != "moved\n" {
+		t.Fatalf("archive.txt = %q, %v; want the committed moved content", got, readErr)
+	}
+	// Retry patch must contain only the failed update, not the applied move.
+	if !strings.Contains(out, "*** Update File: archive.txt") {
+		t.Fatalf("retry patch must contain the failed update: %q", out)
+	}
+	if strings.Contains(out, "*** Move to:") {
+		t.Fatalf("retry patch must not contain the applied move: %q", out)
+	}
+}
+
+// TestApplyPatchSingleFileMultiHunkPriorHunkWarning verifies that when a file
+// has multiple hunks and a later hunk fails, the error notes which earlier
+// hunks already matched in memory and directs the model to rebuild the complete
+// atomic file operation.
+func TestApplyPatchSingleFileMultiHunkPriorHunkWarning(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "multi.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbeta\ngamma\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: multi.txt\n" +
+		"@@\n-alpha\n+ALPHA\n" +
+		"@@\n-missing\n+NEVER\n" +
+		"*** End Patch"
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil || !strings.Contains(err.Error(), "hunk not found") {
+		t.Fatalf("err = %v, want hunk-match failure", err)
+	}
+	if !strings.Contains(err.Error(), "hunks 1..1 matched successfully in memory but were not applied") {
+		t.Fatalf("err = %v, want prior-hunks matched note", err)
+	}
+	if !strings.Contains(err.Error(), "keep all hunks 1..2 together when rebuilding this operation") || strings.Contains(err.Error(), "only hunks") {
+		t.Fatalf("err = %v, want whole-operation rebuild guidance", err)
+	}
+	// The file must be unchanged because the whole file group was discarded.
+	got, readErr := os.ReadFile(path)
+	if readErr != nil || string(got) != "alpha\nbeta\ngamma\n" {
+		t.Fatalf("multi.txt = %q, %v; want unchanged", got, readErr)
+	}
+	// The operation reference should contain the failed file so the model can
+	// rebuild it without losing the earlier matched hunk.
+	if !strings.Contains(out, "*** Update File: multi.txt") {
+		t.Fatalf("retry patch must contain the failed file: %q", out)
+	}
+	if !strings.Contains(out, "+ALPHA") || !strings.Contains(out, "+NEVER") {
+		t.Fatalf("retry patch must contain every hunk in the failed operation: %q", out)
+	}
+}
+
+// TestRenderApplyPatchOperationsRoundTrip verifies that the retry-patch
+// renderer is parse-faithful: re-parsing the rendered document must yield the
+// exact same operations. This pins the two lossy renderings that used to break
+// retry patches: bare @@ hunk boundaries being dropped (merging adjacent hunks
+// into one unmatched pattern) and trailing blank lines of added files being
+// trimmed away.
+func TestRenderApplyPatchOperationsRoundTrip(t *testing.T) {
+	patch := "*** Begin Patch\n" +
+		// Multiple bare @@ hunks in one file: boundaries must survive.
+		"*** Update File: multi.txt\n" +
+		"@@\n-alpha\n+ALPHA\n" +
+		"@@\n-gamma\n+GAMMA\n" +
+		"@@\n-missing\n+NEVER\n" +
+		// Headered hunk plus end-of-file pin, then a trailing bare hunk: the
+		// bare hunk after the marker needs its own @@ to stay parseable.
+		"*** Update File: pinned.txt\n" +
+		"@@ func main\n context\n-old\n+new\n*** End of File\n" +
+		"@@\n-tail\n+TAIL\n" +
+		// Added file with intentional blank lines at EOF.
+		"*** Add File: fresh.txt\n+line\n+\n+\n" +
+		"*** Delete File: gone.txt\n" +
+		"*** Update File: src.txt\n*** Move to: dst.txt\n@@\n-before\n+after\n" +
+		"*** End Patch"
+	doc, err := ParseApplyPatch(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.Operations[2].Content; got != "line\n\n\n" {
+		t.Fatalf("added content = %q, want trailing blank lines preserved by the parser", got)
+	}
+	rendered := renderApplyPatchOperations(doc.Operations)
+	reparsed, err := ParseApplyPatch(rendered)
+	if err != nil {
+		t.Fatalf("rendered retry patch must re-parse, got %v:\n%s", err, rendered)
+	}
+	if !reflect.DeepEqual(doc.Operations, reparsed.Operations) {
+		t.Fatalf("render/parse round trip diverged:\noriginal: %#v\nreparsed: %#v\nrendered:\n%s", doc.Operations, reparsed.Operations, rendered)
+	}
+}
+
+// TestApplyPatchRetryPatchReappliesAfterFix walks the retry loop the error
+// message tells the model to follow: a multi-hunk file fails on its last bare
+// @@ hunk, the model corrects only that hunk inside the returned retry patch,
+// and resubmitting must then succeed against the untouched file.
+func TestApplyPatchRetryPatchReappliesAfterFix(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "multi.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbeta\ngamma\ndelta\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: multi.txt\n" +
+		"@@\n-alpha\n+ALPHA\n" +
+		"@@\n-gamma\n+GAMMA\n" +
+		"@@\n-missing\n+NEVER\n" +
+		"*** End Patch"
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil {
+		t.Fatalf("out = %q, want hunk-match failure", out)
+	}
+	start := strings.Index(out, "*** Begin Patch")
+	end := strings.Index(out, "*** End Patch")
+	if start < 0 || end < start {
+		t.Fatalf("output must embed a retry patch: %q", out)
+	}
+	retry := out[start : end+len("*** End Patch")]
+	fixed := strings.ReplaceAll(retry, "-missing", "-delta")
+	if fixed == retry {
+		t.Fatalf("retry patch must carry the failed hunk verbatim: %q", retry)
+	}
+	if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, fixed)); err != nil {
+		t.Fatalf("corrected retry patch must apply, got %v:\n%s", err, fixed)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil || string(got) != "ALPHA\nbeta\nGAMMA\nNEVER\n" {
+		t.Fatalf("multi.txt = %q, %v; want all three hunks applied", got, readErr)
+	}
+}
+
+func TestApplyPatchFailedSourceGroupRollsBackMoveTarget(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "old.txt")
+	target := filepath.Join(dir, "new.txt")
+	if err := os.WriteFile(source, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: old.txt\n*** Move to: new.txt\n@@\n-before\n+after\n" +
+		"*** Update File: old.txt\n@@\n-missing\n+never\n" +
+		"*** End Patch"
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil || !strings.Contains(err.Error(), "1 file group not applied") {
+		t.Fatalf("err = %v, want one-file failure", err)
+	}
+	if ErrorHasCommittedChanges(err) {
+		t.Fatalf("err = %v, move group should have been fully rolled back", err)
+	}
+	if got, readErr := os.ReadFile(source); readErr != nil || string(got) != "before\n" {
+		t.Fatalf("old.txt = %q, %v; want original content", got, readErr)
+	}
+	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+		t.Fatalf("new.txt should not survive the failed source group, err=%v", statErr)
+	}
+	if !strings.Contains(out, "*** Move to: new.txt") || !strings.Contains(out, "*** Update File: old.txt") {
+		t.Fatalf("retry patch must contain the whole rolled-back group: %q", out)
+	}
+}
+
+func TestApplyPatchFailedMoveBlocksLaterTargetOperation(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "old.txt")
+	target := filepath.Join(dir, "new.txt")
+	if err := os.WriteFile(source, []byte("source\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: old.txt\n*** Move to: new.txt\n@@\n-missing\n+moved\n" +
+		"*** Update File: new.txt\n@@\n-target\n+updated\n" +
+		"*** End Patch"
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil || !strings.Contains(err.Error(), "2 file groups not applied") {
+		t.Fatalf("err = %v, want failed move plus dependent target group", err)
+	}
+	if ErrorHasCommittedChanges(err) {
+		t.Fatalf("err = %v, dependent target update must not commit", err)
+	}
+	assertApplyPatchFile(t, source, "source\n")
+	assertApplyPatchFile(t, target, "target\n")
+	if !strings.Contains(out, "*** Move to: new.txt") || strings.Count(out, "*** Update File: new.txt") != 1 {
+		t.Fatalf("retry patch must include the failed move and dependent target update: %q", out)
+	}
+}
+
+func TestApplyPatchLateSourceFailureRollsBackDependentTargetOperation(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "old.txt")
+	target := filepath.Join(dir, "new.txt")
+	if err := os.WriteFile(source, []byte("source\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: old.txt\n*** Move to: new.txt\n@@\n-source\n+moved\n" +
+		"*** Update File: new.txt\n*** Move to: final.txt\n@@\n-moved\n+updated\n" +
+		"*** Add File: new.txt\n+replacement\n" +
+		"*** Update File: new.txt\n*** Move to: old.txt\n" +
+		"*** Update File: old.txt\n@@\n-missing\n+never\n" +
+		"*** End Patch"
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil || !strings.Contains(err.Error(), "2 file groups not applied") {
+		t.Fatalf("err = %v, want failed source group plus dependent target group", err)
+	}
+	if ErrorHasCommittedChanges(err) {
+		t.Fatalf("err = %v, dependent target update must be rolled back", err)
+	}
+	assertApplyPatchFile(t, source, "source\n")
+	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+		t.Fatalf("new.txt should be rolled back with its prerequisite move, err=%v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "final.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("final.txt should be rolled back with the dependent move, err=%v", statErr)
+	}
+	if !strings.Contains(out, "*** Move to: new.txt") || !strings.Contains(out, "*** Move to: final.txt") || !strings.Contains(out, "*** Move to: old.txt") || !strings.Contains(out, "+updated") {
+		t.Fatalf("retry patch must include the move and dependent target update: %q", out)
 	}
 }

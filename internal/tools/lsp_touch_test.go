@@ -52,6 +52,27 @@ func TestApplyPatchToolMarksTouchedFileWithBaseDir(t *testing.T) {
 	}
 }
 
+func TestApplyPatchPartialFailureMarksOnlyCommittedFiles(t *testing.T) {
+	dir := t.TempDir()
+	committed := filepath.Join(dir, "committed.txt")
+	if err := os.WriteFile(committed, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mgr := lsp.NewManager(&config.Config{}, dir, nil)
+	patch := "*** Begin Patch\n" +
+		"*** Update File: committed.txt\n@@\n-before\n+after\n" +
+		"*** Update File: failed.txt\n@@\n-missing\n+never\n" +
+		"*** End Patch"
+	_, err := (ApplyPatchTool{LSP: mgr, BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil || !ErrorHasCommittedChanges(err) {
+		t.Fatalf("err = %v, want partial failure with committed changes", err)
+	}
+	want := []string{committed}
+	if got := mgr.TouchedPaths(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("TouchedPaths() = %#v, want %#v", got, want)
+	}
+}
+
 func TestApplyPatchToolCleansDeletedAndMovedLSPPaths(t *testing.T) {
 	dir := t.TempDir()
 	oldPath := filepath.Join(dir, "old.go")

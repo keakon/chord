@@ -95,7 +95,7 @@ func buildToolHookData(tc message.ToolCall, projectRoot string) map[string]any {
 	return data
 }
 
-func buildToolResultHookData(tcName string, argsJSON string, result string, err error, diff string, audit *message.ToolArgsAudit) map[string]any {
+func buildToolResultHookData(tcName string, argsJSON string, result string, err error, diff string, audit *message.ToolArgsAudit, fileState *message.ToolFileState) map[string]any {
 	data := map[string]any{
 		hook.DataKeyToolName: tcName,
 		"result":             result,
@@ -103,7 +103,7 @@ func buildToolResultHookData(tcName string, argsJSON string, result string, err 
 	}
 	if argsJSON != "" {
 		data["args"] = json.RawMessage(argsJSON)
-		if filePaths := extractHookToolFilePaths(tcName, json.RawMessage(argsJSON), ""); len(filePaths) > 0 {
+		if filePaths := toolResultFilePaths(tcName, json.RawMessage(argsJSON), fileState); len(filePaths) > 0 {
 			data["paths"] = append([]string(nil), filePaths...)
 			data["path"] = filePaths[0]
 		}
@@ -129,7 +129,7 @@ func toolArgsAuditHookData(audit *message.ToolArgsAudit) map[string]any {
 	}
 }
 
-func buildBeforeToolResultAppendData(tcName string, argsJSON string, rawResult string, displayResult string, contextResult string, err error, audit *message.ToolArgsAudit) map[string]any {
+func buildBeforeToolResultAppendData(tcName string, argsJSON string, rawResult string, displayResult string, contextResult string, err error, audit *message.ToolArgsAudit, fileState *message.ToolFileState) map[string]any {
 	data := map[string]any{
 		hook.DataKeyToolName: tcName,
 		"raw_result":         rawResult,
@@ -138,7 +138,7 @@ func buildBeforeToolResultAppendData(tcName string, argsJSON string, rawResult s
 	}
 	if argsJSON != "" {
 		data["args"] = json.RawMessage(argsJSON)
-		if filePaths := extractHookToolFilePaths(tcName, json.RawMessage(argsJSON), ""); len(filePaths) > 0 {
+		if filePaths := toolResultFilePaths(tcName, json.RawMessage(argsJSON), fileState); len(filePaths) > 0 {
 			data["paths"] = append([]string(nil), filePaths...)
 			data["path"] = filePaths[0]
 		}
@@ -170,6 +170,7 @@ func applyBeforeToolResultAppendHook(currentDisplay string, currentContext strin
 }
 
 func toolResultSummary(payload *ToolResultPayload, storedResult string, errText string) map[string]any {
+	filePaths := toolResultFilePaths(payload.Name, json.RawMessage(payload.ArgsJSON), payload.FileState)
 	summary := map[string]any{
 		hook.DataKeyCallID:   payload.CallID,
 		hook.DataKeyToolName: payload.Name,
@@ -177,8 +178,8 @@ func toolResultSummary(payload *ToolResultPayload, storedResult string, errText 
 		"result":             storedResult,
 		"diff":               payload.Diff,
 		"error":              errText,
-		"path":               firstString(extractHookToolFilePaths(payload.Name, json.RawMessage(payload.ArgsJSON), "")),
-		"paths":              extractHookToolFilePaths(payload.Name, json.RawMessage(payload.ArgsJSON), ""),
+		"path":               firstString(filePaths),
+		"paths":              filePaths,
 		"is_changed":         payload.Diff != "" || payload.Name == tools.NameDelete,
 		"is_deleted":         payload.Name == tools.NameDelete,
 	}
@@ -189,7 +190,7 @@ func toolResultSummary(payload *ToolResultPayload, storedResult string, errText 
 }
 
 func changedFileSummary(payload *ToolResultPayload) map[string]any {
-	filePaths := extractHookToolFilePaths(payload.Name, json.RawMessage(payload.ArgsJSON), "")
+	filePaths := toolResultFilePaths(payload.Name, json.RawMessage(payload.ArgsJSON), payload.FileState)
 	if len(filePaths) == 0 {
 		return nil
 	}
@@ -218,6 +219,26 @@ func changedFileSummary(payload *ToolResultPayload) map[string]any {
 		"is_deleted": false,
 		"diff":       payload.Diff,
 	}
+}
+
+func toolResultFilePaths(toolName string, args json.RawMessage, fileState *message.ToolFileState) []string {
+	var paths []string
+	if fileState != nil {
+		for _, state := range fileState.Writes {
+			if path := strings.TrimSpace(state.Path); path != "" {
+				paths = append(paths, path)
+			}
+		}
+		for _, state := range fileState.Deletes {
+			if path := strings.TrimSpace(state.Path); path != "" {
+				paths = append(paths, path)
+			}
+		}
+	}
+	if len(paths) > 0 {
+		return paths
+	}
+	return extractHookToolFilePaths(toolName, args, "")
 }
 
 func firstString(values []string) string {

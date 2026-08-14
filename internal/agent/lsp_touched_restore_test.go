@@ -28,6 +28,27 @@ func TestRebuildTouchedPathsFromMessagesTracksWritesEditesAndDeletes(t *testing.
 	}
 }
 
+func TestRebuildTouchedPathsFromMessagesUsesPartialErrorFileState(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "patch-1", Name: "apply_patch", Args: mustToolArgs(t, map[string]any{"patch": "*** Begin Patch\n*** End Patch"})}}},
+		{
+			Role:       message.RoleTool,
+			ToolCallID: "patch-1",
+			ToolStatus: message.ToolStatusError,
+			Content:    "partially applied\n\nError: one file failed",
+			FileState: &message.ToolFileState{
+				Writes:  []message.TrackedFileState{{Path: "written.go", Exists: true}},
+				Deletes: []message.TrackedFileState{{Path: "deleted.go", Exists: false}},
+			},
+		},
+	}
+	got := RebuildTouchedPathsFromMessages(msgs, "")
+	want := []string{"written.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("RebuildTouchedPathsFromMessages() = %#v, want %#v", got, want)
+	}
+}
+
 func mustToolArgs(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(v)

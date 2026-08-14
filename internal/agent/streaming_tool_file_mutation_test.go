@@ -99,6 +99,92 @@ func TestSpeculativeApplyPatchPromoteIncludesEveryFileDiff(t *testing.T) {
 	}
 }
 
+func TestSpeculativeApplyPatchPartialFailurePromotesCommittedFiles(t *testing.T) {
+	projectRoot := t.TempDir()
+	committedPath := filepath.Join(projectRoot, "committed.txt")
+	failedPath := filepath.Join(projectRoot, "failed.txt")
+	if err := os.WriteFile(committedPath, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(failedPath, []byte("unchanged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: committed.txt\n@@\n-before\n+after\n" +
+		"*** Update File: failed.txt\n@@\n-missing\n+never\n" +
+		"*** End Patch"
+	args, err := json.Marshal(tools.ApplyPatchArgs{Patch: patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
+	call := message.ToolCall{ID: "patch-partial", Name: tools.NameApplyPatch, Args: args}
+	exec := NewStreamingToolExecutor(7, t.Context(), nil, a.executeToolCallSpeculative)
+	if !exec.Start(call) {
+		t.Fatal("Start returned false")
+	}
+	payload, ok, drift := exec.Promote(call)
+	if drift || !ok || payload == nil || !tools.ErrorHasCommittedChanges(payload.Error) {
+		t.Fatalf("Promote payload=%#v ok=%v drift=%v", payload, ok, drift)
+	}
+	if payload.FileState == nil || len(payload.FileState.Writes) != 1 || payload.FileState.Writes[0].Path != committedPath {
+		t.Fatalf("FileState = %#v, want only committed.txt", payload.FileState)
+	}
+	if !strings.Contains(payload.Diff, "committed.txt") || strings.Contains(payload.Diff, "failed.txt") {
+		t.Fatalf("diff must describe only committed files:\n%s", payload.Diff)
+	}
+	if err := a.commitPromotedToolSideEffects(call, payload); err != nil {
+		t.Fatalf("commit promoted side effects: %v", err)
+	}
+	if got, readErr := os.ReadFile(committedPath); readErr != nil || string(got) != "after\n" {
+		t.Fatalf("committed file = %q, %v; want after", got, readErr)
+	}
+	if got, readErr := os.ReadFile(failedPath); readErr != nil || string(got) != "unchanged\n" {
+		t.Fatalf("failed file = %q, %v; want unchanged", got, readErr)
+	}
+}
+
+func TestSpeculativeApplyPatchPartialFailureDiscardRollsBackCommittedFiles(t *testing.T) {
+	projectRoot := t.TempDir()
+	committedPath := filepath.Join(projectRoot, "committed.txt")
+	failedPath := filepath.Join(projectRoot, "failed.txt")
+	if err := os.WriteFile(committedPath, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(failedPath, []byte("unchanged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: committed.txt\n@@\n-before\n+after\n" +
+		"*** Update File: failed.txt\n@@\n-missing\n+never\n" +
+		"*** End Patch"
+	args, err := json.Marshal(tools.ApplyPatchArgs{Patch: patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
+	call := message.ToolCall{ID: "patch-partial-discard", Name: tools.NameApplyPatch, Args: args}
+	exec := NewStreamingToolExecutor(7, t.Context(), nil, a.executeToolCallSpeculative)
+	if !exec.Start(call) {
+		t.Fatal("Start returned false")
+	}
+	waitForFileContent(t, committedPath, "after\n")
+	waitForStreamingToolDone(t, exec, call.ID)
+	if _, ok := exec.DiscardCall(call.ID, "filtered"); !ok {
+		t.Fatal("DiscardCall returned false")
+	}
+	if got, readErr := os.ReadFile(committedPath); readErr != nil || string(got) != "before\n" {
+		t.Fatalf("discarded committed file = %q, %v; want original content", got, readErr)
+	}
+	if got, readErr := os.ReadFile(failedPath); readErr != nil || string(got) != "unchanged\n" {
+		t.Fatalf("failed file = %q, %v; want unchanged", got, readErr)
+	}
+}
+
 func TestSpeculativeApplyPatchBacksUpEveryStaleFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	files := []string{"one.txt", "two.txt", "three.txt"}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -139,7 +140,7 @@ func (m *Model) ensureToolResultBlock(evt agent.ToolResultEvent) *Block {
 
 func shouldRefreshGitStatusAfterToolResult(evt agent.ToolResultEvent) bool {
 	evt.Name = toolNameKey(evt.Name)
-	if evt.Status == agent.ToolResultStatusError {
+	if evt.Status == agent.ToolResultStatusError && !evt.FileState.HasChanges() {
 		return false
 	}
 	switch evt.Name {
@@ -156,6 +157,37 @@ func shouldRefreshGitStatusAfterToolResult(evt agent.ToolResultEvent) bool {
 	default:
 		return false
 	}
+}
+
+func (m *Model) addSidebarFileState(agentID string, state *message.ToolFileState) bool {
+	if m == nil || state == nil {
+		return false
+	}
+	if len(state.Changes) > 0 {
+		for _, change := range state.Changes {
+			switch {
+			case change.TargetPath != "":
+				m.sidebar.AddFileMove(agentID, change.Path, change.TargetPath, change.Added, change.Removed)
+			case change.Deleted:
+				m.sidebar.AddFileDelete(agentID, change.Path)
+			case change.Added != 0 || change.Removed != 0:
+				m.sidebar.AddFileEdit(agentID, change.Path, change.Added, change.Removed)
+			default:
+				m.sidebar.AddFileWrite(agentID, change.Path)
+			}
+		}
+		return true
+	}
+	changed := false
+	for _, deleted := range state.Deletes {
+		m.sidebar.AddFileDelete(agentID, deleted.Path)
+		changed = true
+	}
+	for _, write := range state.Writes {
+		m.sidebar.AddFileWrite(agentID, write.Path)
+		changed = true
+	}
+	return changed
 }
 
 func shellCommandMayRunGit(command string) bool {
@@ -222,8 +254,13 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 				m.expectedAgentClose = true
 			}
 		}
-		if shouldTrackSidebarFileEdit(evt.Name) && evt.Status.IsSuccess() {
-			if evt.Name == tools.NameDelete {
+		if shouldTrackSidebarFileEdit(evt.Name) && (evt.Status.IsSuccess() || evt.FileState.HasChanges()) {
+			if !evt.Status.IsSuccess() {
+				if m.addSidebarFileState(evt.AgentID, evt.FileState) {
+					effects.refreshSidebar = true
+					effects.invalidateUsage = true
+				}
+			} else if evt.Name == tools.NameDelete {
 				groups := tools.ParseDeleteResult(evt.Result)
 				for _, path := range groups.Deleted {
 					m.sidebar.AddFileDelete(evt.AgentID, path)

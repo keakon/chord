@@ -224,6 +224,9 @@ func (t DeleteTool) Execute(ctx context.Context, raw json.RawMessage) (string, e
 	if execErr == nil {
 		return text, nil
 	}
+	if len(result.Deleted) > 0 {
+		return text, markErrorWithCommittedChanges(execErr)
+	}
 	return text, execErr
 }
 

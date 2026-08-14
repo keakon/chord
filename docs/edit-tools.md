@@ -55,7 +55,7 @@ Supported operations:
 - **`*** Delete File: path`** — remove a file; no body.
 - **`*** End of File`** — after a hunk, pins that hunk to the file tail (useful when the same block also appears earlier).
 
-Hunks apply in order; each hunk is matched at the first position after the previous hunk's application point. Repeated plain `*** Update File:` sections for the same normalized path follow Codex ordering semantics: each section patches the previous section's in-memory result, and the whole envelope is committed as one file mutation (so a later mismatch leaves the workspace unchanged rather than exposing Codex's partial-write behavior). Lines inside a hunk keep their raw `' '`/`+`/`-` prefix, so file content that itself begins with `***` followed by a space stays ordinary context—only lines beginning with an unprefixed `***` followed by a space are protocol markers.
+Hunks apply in order; each hunk is matched at the first position after the previous hunk's application point. Repeated plain `*** Update File:` sections for the same normalized path follow Codex ordering semantics: each section patches the previous section's in-memory result, and that file is committed as one mutation (so a later mismatch leaves that file unchanged rather than exposing Codex's partial-write behavior). Lines inside a hunk keep their raw `' '`/`+`/`-` prefix, so file content that itself begins with `***` followed by a space stays ordinary context—only lines beginning with an unprefixed `***` followed by a space are protocol markers.
 
 ### When to Use
 
@@ -89,14 +89,21 @@ You can add text after `@@` to help locate ambiguous blocks:
 
 ### Transactional Behavior
 
-All operations in one envelope are planned and validated from a single filesystem snapshot **before any file is modified**. If planning fails (missing file, overlapping operations on the same path, an `Add` target that already exists), no files change. If a file changes on disk between planning and commit, the whole patch is rejected. If a write fails mid-commit, already-committed operations are rolled back.
+All operations in one envelope are planned from a single filesystem snapshot **before any file is modified**. Envelope-wide preflight failures—such as malformed syntax, unsafe overlapping paths, or an unreadable snapshot—leave every file unchanged. An operation-level failure, such as a missing update source or an existing `Add` target, rejects that file group while independent file groups can still commit. If any planned file changes on disk before commit, the commit is rejected without writing its successful subset. If a write fails mid-commit, already-written mutations from that commit attempt are rolled back.
+
+Atomicity is per file, not per envelope. Each file is an independent unit: all operations that touch one file (including repeated `*** Update File:` sections for that same path) commit together, or are rolled back together. When one file fails the other independent files in the same envelope are still applied and written to disk. The failure result lists the committed changes (which do not need to be redone), explains which operation groups were not applied, and preserves those operations as an editable reference patch. Resolve each reported failure and revise that patch against the current workspace before submitting it; do not re-emit committed files.
+
+A failed file drags its whole group: if an earlier operation on the same file matched in memory but a later one failed, all of that file's operations are reported as unapplied and omitted from the final plan. Earlier successful prerequisite groups remain eligible to commit, while groups that depend on the discarded group are omitted with it. The operation reference carries every omitted operation (including the ones that matched), so the revised patch can restore the complete failed dependency chain.
+
+A move binds both its source and destination into the same dependency boundary. If the move fails, later operations touching either path are also rejected and included in the unapplied-operation reference. The same rule applies when a source group fails after an earlier move appeared to succeed: operations that depended on the moved destination are rolled back with it. This keeps the reference complete instead of reporting a dependent destination edit as committed after its prerequisite was discarded.
 
 ### Error Messages
 
-- **"hunk not found (N/M)"**: The indicated hunk does not match the current file. The error includes a short expected-line preview and, when available, explains that the text occurs only within a longer line or earlier than the preceding hunk. Re-read the target range and rebuild the hunk from complete current lines.
+- **"hunk not found (N/M)"**: The indicated hunk does not match the current file. The error identifies the first expected complete line, or labels it as a prefix when the diagnostic preview is truncated. When available, it also explains that the text occurs only within a longer line or earlier than the preceding hunk. If earlier hunks of the same file matched in memory but a later one failed, none of that file group's hunks were applied. Re-read the target range, rebuild the failing hunk from current complete lines, keep the group's other hunks with it, and then submit the revised operation reference.
 - **"cannot add file that already exists"**: `*** Add File:` targets an existing path; use `*** Update File:` instead.
 - **"apply_patch contains overlapping operations"**: Two operations in one envelope touch paths where one contains the other (for example `dir` and `dir/file`), or resolve to the same file through different names; merge them into one operation. Repeated `*** Update File:` sections for the exact same path are allowed and apply in order.
 - **"changed after planning"**: The file was modified between validation and commit; nothing was written—retry against the current content.
+- **"apply_patch partially applied: N changes committed, M file groups not applied: ..."**: One or more independent changes committed while other operation groups were omitted (the singular form uses "change" / "file group"). The changes under "Applied patch" are already on disk — do not redo them. Use the appended unapplied-operation patch as a reference, not as an automatic retry: resolve each listed cause, re-read targets when instructed, revise the affected operations, and submit only those operations.
 
 ---
 

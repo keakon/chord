@@ -10,7 +10,7 @@ import (
 // that speculative execution intentionally skipped, but that must still happen
 // once a tool call is validated and committed to context.
 func (a *MainAgent) commitPromotedToolSideEffects(tc message.ToolCall, payload *ToolResultPayload) error {
-	if a == nil || payload == nil || payload.Error != nil {
+	if a == nil || payload == nil || !toolExecutionCommitted(payload.Error) {
 		return nil
 	}
 	if payload.speculativeHooks != nil && payload.speculativeHooks.commit != nil {

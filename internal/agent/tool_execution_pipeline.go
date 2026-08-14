@@ -343,25 +343,35 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if deleteLocks != nil && hasDeleteAudit {
 		deleteLocks.CommitAudit(deleteAudit)
 	}
-	if err != nil {
-		if staleWrite && (tc.Name == tools.NameEdit || tc.Name == tools.NameApplyPatch) {
-			err = wrapStaleEditError(err)
-		}
+	if err != nil && staleWrite && (tc.Name == tools.NameEdit || tc.Name == tools.NameApplyPatch) {
+		err = wrapStaleEditError(err)
+	}
+	if !toolExecutionCommitted(err) {
 		if result != "" {
+			if staleWrite && tools.ErrorDescribedInResult(err) {
+				// Described-in-result errors are not appended to the model-visible
+				// text, so surface the stale-read root cause in the result itself.
+				result += "\nWarning: the target changed on disk since it was last read; failed hunks may be based on stale content. Re-read the failed targets and revise against current contents."
+			}
 			execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 		}
 		return execResult, err
 	}
-	if deleteLocks != nil {
-		if !hasDeleteAudit {
+	if tc.Name == tools.NameDelete {
+		if deleteLocks != nil && !hasDeleteAudit {
 			deleteLocks.Commit(result)
 		}
-		execResult.FileState = buildDeleteFileStateFromResultInDir(result, p.effectiveToolBaseDir())
+		if hasDeleteAudit {
+			execResult.FileState = buildDeleteFileState(deleteAudit.Deleted)
+		} else {
+			execResult.FileState = buildDeleteFileStateFromResultInDir(result, p.effectiveToolBaseDir())
+		}
 	}
 	if patchMutation != nil {
 		execResult.Diff = patchDiffCollector.Summary()
 		patchMutation.CaptureAfter()
 		execResult.FileState = patchMutation.postState()
+		attachApplyPatchFileChanges(execResult.FileState, patchDiffCollector.Changes())
 		patchMutation.Commit()
 		execResult.LSPReviews = lspReviewsForFileState(p.registry, tc.Name, execResult.FileState)
 	}
@@ -373,8 +383,8 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		stalePathCount = len(patchMutation.paths)
 	}
 	result = appendBackupNotes(result, staleWrite, stalePathCount, backupOutcome)
-	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, nil, p.guidance)
-	return execResult, nil
+	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
+	return execResult, err
 }
 
 func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
@@ -447,11 +457,11 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	}
 	result, err := p.registry.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
 	execResult.Images = imageSink.Drain()
-	if err != nil {
+	if err != nil && staleWrite && (tc.Name == tools.NameEdit || tc.Name == tools.NameApplyPatch) {
+		err = wrapStaleEditError(err)
+	}
+	if !toolExecutionCommitted(err) {
 		rollbackSpeculativeToolHooks(execResult)
-		if staleWrite && (tc.Name == tools.NameEdit || tc.Name == tools.NameApplyPatch) {
-			err = wrapStaleEditError(err)
-		}
 		if result != "" {
 			execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 		}
@@ -465,9 +475,43 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	}
 	readObservation, _ := readObservationSink.Observation()
 	applySpeculativeFileState(&execResult, p.registry, tc, result, p.effectiveToolBaseDir(), readObservation, hooks)
+	if patchDiffCollector != nil {
+		attachApplyPatchFileChanges(execResult.FileState, patchDiffCollector.Changes())
+	}
 	result = appendBackupNotes(result, staleWrite, speculativeStaleWritePathCount(tc.Name, trackedFilePath, hooks), backupOutcome)
-	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, nil, p.guidance)
-	return execResult, nil
+	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
+	return execResult, err
+}
+
+func attachApplyPatchFileChanges(state *message.ToolFileState, changes []tools.ApplyPatchChange) {
+	if state == nil || len(changes) == 0 {
+		return
+	}
+	state.Changes = make([]message.ToolFileChange, 0, len(changes))
+	for _, change := range changes {
+		fileChange := message.ToolFileChange{
+			Path:    change.SourcePath,
+			Added:   change.Added,
+			Removed: change.Removed,
+		}
+		switch change.Kind {
+		case tools.MutationAdd, tools.MutationUpdate:
+			fileChange.Path = change.TargetPath
+		case tools.MutationDelete:
+			fileChange.Deleted = true
+		case tools.MutationMove:
+			fileChange.TargetPath = change.TargetPath
+		}
+		state.Changes = append(state.Changes, fileChange)
+	}
+}
+
+// toolExecutionCommitted distinguishes an ordinary failure from a tool result
+// that reports an error after committing a subset of its file mutations. The
+// latter still needs error handling at the model/UI boundary, but runtime
+// bookkeeping must follow the actual committed FileState.
+func toolExecutionCommitted(err error) bool {
+	return err == nil || tools.ErrorHasCommittedChanges(err)
 }
 
 func toolExecutionDiff(tc message.ToolCall, result ToolExecutionResult) agentdiff.Summary {

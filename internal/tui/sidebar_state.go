@@ -385,6 +385,11 @@ func (s *Sidebar) AddFileEdit(agentID, filePath string, added, removed int) {
 	s.addFileChange(agentID, filePath, added, removed, false)
 }
 
+// AddFileWrite records a committed write when exact line counts are unknown.
+func (s *Sidebar) AddFileWrite(agentID, filePath string) {
+	s.addFileChangeWithEmpty(agentID, filePath, 0, 0, false, true)
+}
+
 // AddFileDelete records a deleted-file event for the given agent.
 func (s *Sidebar) AddFileDelete(agentID, filePath string) {
 	s.addFileChange(agentID, filePath, 0, 0, true)
