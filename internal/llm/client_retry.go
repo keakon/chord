@@ -924,7 +924,7 @@ func replayCompatibleRequestTuning(tuning RequestTuning, messages []message.Mess
 }
 
 func openAIChatReasoningEnabled(tuning RequestTuning, target FallbackModel) bool {
-	if openAIReasoningEffortActive(tuning.OpenAI.ReasoningEffort) {
+	if openAIReasoningEffortActive(tuning.OpenAI.EffectiveReasoningEffort()) {
 		return true
 	}
 	return requestOverridesEnableReasoning(target.ProviderConfig.RequestOverrides(target.ModelID))

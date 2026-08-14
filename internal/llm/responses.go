@@ -402,7 +402,7 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 	// Hoist reasoning computation so the reasoning replay synthesis below shares
 	// the same reasoning-active signal as the request body.
-	effectiveReasoningEffort, effectiveReasoningSummary := resolveResponsesReasoningFields(ot.ReasoningEffort, ot.ReasoningSummary)
+	effectiveReasoningEffort, effectiveReasoningSummary := resolveResponsesReasoningFields(ot.EffectiveReasoningEffort(), ot.ReasoningSummary)
 	var overrides config.RequestOverridesConfig
 	if r.provider != nil {
 		overrides = r.provider.RequestOverrides(model)

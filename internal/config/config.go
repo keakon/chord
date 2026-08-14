@@ -829,6 +829,11 @@ func (p *PromptCacheConfig) CacheToolsEnabled() bool {
 // When set, reasoning_effort is sent in the request and temperature is omitted.
 type ReasoningConfig struct {
 	Effort string `json:"effort" yaml:"effort"` // e.g. "low" | "medium" | "high" | "xhigh"
+	// EffortMap maps the canonical effort value to the provider-specific wire
+	// value for this model. Providers that accept only their own effort levels
+	// (e.g. a gateway exposing "max" for canonical "high") use this instead of
+	// passthrough. Variant-level maps replace the model-level map.
+	EffortMap map[string]string `json:"effort_map,omitempty" yaml:"effort_map,omitempty"`
 	// Summary defaults to "auto" when reasoning is active so that a visible
 	// reasoning summary is captured for later cross-provider replay; "none"
 	// disables the summary request explicitly.

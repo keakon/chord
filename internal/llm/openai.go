@@ -333,8 +333,8 @@ func (o *OpenAIProvider) CompleteStream(
 	suppressForcedToolChoice := false
 	if ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(o.provider, model) {
 		reasoningProbe := make(map[string]any, 1)
-		if ot.ReasoningEffort != "" {
-			reasoningProbe["reasoning_effort"] = ot.ReasoningEffort
+		if effort := ot.EffectiveReasoningEffort(); effort != "" {
+			reasoningProbe["reasoning_effort"] = effort
 		}
 		var err error
 		suppressForcedToolChoice, err = effectiveRequestReasoningActive(reasoningProbe, overrides)
@@ -360,8 +360,8 @@ func (o *OpenAIProvider) CompleteStream(
 		reqBody.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
 	}
 
-	if ot.ReasoningEffort != "" {
-		reqBody.ReasoningEffort = ot.ReasoningEffort
+	if effort := ot.EffectiveReasoningEffort(); effort != "" {
+		reqBody.ReasoningEffort = effort
 		if maxTokens > 0 {
 			// OpenAI reasoning models require max_completion_tokens. Compatible
 			// providers can rename this dynamically computed field through

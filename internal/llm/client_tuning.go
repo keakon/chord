@@ -28,6 +28,7 @@ func tuningFromModel(m config.ModelConfig, providerPreset string, providerTiers 
 	if m.Reasoning != nil {
 		t.OpenAI.ReasoningEffort = m.Reasoning.Effort
 		t.OpenAI.ReasoningSummary = m.Reasoning.Summary
+		t.OpenAI.ReasoningEffortMap = cloneReasoningEffortMap(m.Reasoning.EffortMap)
 	}
 	t.OpenAI.TextVerbosity = m.EffectiveTextVerbosity()
 	if providerParallelToolCalls != nil {
@@ -145,6 +146,9 @@ func mergeVariantTuning(base RequestTuning, v config.ModelVariant) RequestTuning
 		if v.Reasoning.Summary != "" {
 			base.OpenAI.ReasoningSummary = v.Reasoning.Summary
 		}
+		if v.Reasoning.EffortMap != nil {
+			base.OpenAI.ReasoningEffortMap = cloneReasoningEffortMap(v.Reasoning.EffortMap)
+		}
 	}
 	if tv := v.EffectiveTextVerbosity(); tv != "" {
 		base.OpenAI.TextVerbosity = tv
@@ -175,6 +179,18 @@ func cloneServiceTiers(tiers map[config.ServiceTier]bool) map[config.ServiceTier
 	return out
 }
 
+// cloneReasoningEffortMap deep-copies a reasoning effort map so merged tunings
+// never alias the model/variant config or a request-local tuning reused by a
+// later merge.
+func cloneReasoningEffortMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	maps.Copy(out, m)
+	return out
+}
+
 func cloneRequestTuning(tuning RequestTuning) RequestTuning {
 	copy := tuning
 	if tuning.ReplayCompat != nil {
@@ -187,6 +203,7 @@ func cloneRequestTuning(tuning RequestTuning) RequestTuning {
 	if tuning.OpenAI.ParallelToolCalls != nil {
 		copy.OpenAI.ParallelToolCalls = new(*tuning.OpenAI.ParallelToolCalls)
 	}
+	copy.OpenAI.ReasoningEffortMap = cloneReasoningEffortMap(tuning.OpenAI.ReasoningEffortMap)
 	if tuning.Gemini.ThinkingBudget != nil {
 		copy.Gemini.ThinkingBudget = new(*tuning.Gemini.ThinkingBudget)
 	}
@@ -246,6 +263,9 @@ func mergeRequestTuning(base, tuning RequestTuning) RequestTuning {
 	}
 	if tuning.OpenAI.ReasoningSummary != "" {
 		base.OpenAI.ReasoningSummary = tuning.OpenAI.ReasoningSummary
+	}
+	if tuning.OpenAI.ReasoningEffortMap != nil {
+		base.OpenAI.ReasoningEffortMap = cloneReasoningEffortMap(tuning.OpenAI.ReasoningEffortMap)
 	}
 	if tuning.OpenAI.TextVerbosity != "" {
 		base.OpenAI.TextVerbosity = tuning.OpenAI.TextVerbosity

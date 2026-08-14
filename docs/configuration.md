@@ -633,6 +633,10 @@ Model field semantics:
   casing, then forwards the value supported by the target provider.
   - Chat Completions sends top-level `reasoning_effort`.
   - Responses sends `reasoning.effort` and optional `reasoning.summary`.
+- `reasoning.effort_map`: maps the canonical effort value to the wire value the
+  provider actually accepts, for example `{high: max}` when a gateway exposes
+  `max` for Chord's `high`. The mapping applies to the final resolved effort,
+  so variant-level maps replace the model-level map for that variant.
 - `reasoning.summary`: Responses reasoning summary request. Supported Chord
   values are `auto`, `concise`, `detailed`, and `none`. When reasoning is
   active, omission defaults to `auto` so cross-provider replay retains portable

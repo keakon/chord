@@ -607,6 +607,9 @@ providers:
   provider 支持的值透传给上游。
   - Chat Completions 发送顶层 `reasoning_effort`。
   - Responses 发送 `reasoning.effort` 和可选的 `reasoning.summary`。
+- `reasoning.effort_map`：把规范 effort 值映射成 provider 实际接受的 wire
+  值，例如网关用 `max` 表达 Chord 的 `high` 时配置 `{high: max}`。映射作用
+  于最终解析后的 effort；variant 级别的 map 会替换该 variant 的模型级 map。
 - `reasoning.summary`：Responses 推理摘要请求。Chord 支持 `auto`、
   `concise`、`detailed`、`none`；启用 reasoning 时，省略该字段会默认使用
   `auto`，以便跨 provider 回放时保留可移植的摘要文本；配置 `none` 可明确退出。

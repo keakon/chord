@@ -57,6 +57,23 @@ type OpenAITuning struct {
 	TextVerbosity     string // "low"|"medium"|"high" ("" = disabled)
 	ParallelToolCalls *bool  // nil = provider request default true; non-nil = explicit override
 	ToolChoice        string // ""|"auto"|"required"
+	// ReasoningEffortMap maps the canonical reasoning effort to the wire value
+	// for the target model. It is carried through variant merging so the final
+	// resolved effort can be translated at request build time.
+	ReasoningEffortMap map[string]string
+}
+
+// EffectiveReasoningEffort resolves the wire reasoning effort for this tuning,
+// applying the configured canonical-to-wire mapping when present.
+func (t OpenAITuning) EffectiveReasoningEffort() string {
+	effort := t.ReasoningEffort
+	if effort == "" {
+		return ""
+	}
+	if mapped, ok := t.ReasoningEffortMap[effort]; ok {
+		return mapped
+	}
+	return effort
 }
 
 // GeminiTuning holds Gemini-specific request tuning parameters.

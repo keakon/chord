@@ -234,6 +234,28 @@ providers:
 	}
 }
 
+func TestConfigYAML_ModelReasoningEffortMap(t *testing.T) {
+	const raw = `
+providers:
+  sample:
+    type: chat-completions
+    models:
+      test-model:
+        reasoning:
+          effort: high
+          effort_map:
+            high: max
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("yaml unmarshal failed: %v", err)
+	}
+	model := cfg.Providers["sample"].Models["test-model"]
+	if model.Reasoning == nil || model.Reasoning.Effort != "high" || model.Reasoning.EffortMap["high"] != "max" {
+		t.Fatalf("reasoning effort map not parsed: %+v", model.Reasoning)
+	}
+}
+
 func TestConfigYAML_ProviderUserAgent(t *testing.T) {
 	const raw = `
 providers:
