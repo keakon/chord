@@ -31,6 +31,17 @@ func TestLoadConfigFromPathRejectsUnknownProviderField(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFromPathRejectsRemovedOfficialAPIField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := []byte("providers:\n  sample:\n    type: responses\n    official_api: true\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := LoadConfigFromPath(path); err == nil {
+		t.Fatal("LoadConfigFromPath: expected error for removed official_api key, got nil")
+	}
+}
+
 // TestLoadConfigFromPathRejectsUnknownModelField guards against fields placed
 // at the model root that only take effect under a nested object, such as
 // include_thoughts (valid only under thinking).

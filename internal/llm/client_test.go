@@ -785,9 +785,10 @@ func TestClientNoteRunningModelRefRefreshesLimitsWhenRunningRefChanges(t *testin
 
 func testOfficialOpenAIProviderConfigWithKeys(name, model string, keys []string) *ProviderConfig {
 	return NewProviderConfig(name, config.ProviderConfig{
-		Type:        config.ProviderTypeResponses,
-		APIURL:      "https://api.openai.com/v1/responses",
-		OfficialAPI: new(true),
+		Type:           config.ProviderTypeResponses,
+		APIURL:         "https://api.openai.com/v1/responses",
+		TrustHTTP400:   new(true),
+		RetryAfterMaxS: new(config.OfficialRetryAfterMaxS),
 		Models: map[string]config.ModelConfig{
 			model: {
 				Limit: config.ModelLimit{
@@ -801,9 +802,9 @@ func testOfficialOpenAIProviderConfigWithKeys(name, model string, keys []string)
 
 func testCompatibleResponsesProviderConfigWithKeys(name, model string, keys []string) *ProviderConfig {
 	return NewProviderConfig(name, config.ProviderConfig{
-		Type:        config.ProviderTypeResponses,
-		APIURL:      "https://gateway.example.com/v1/responses",
-		OfficialAPI: new(false),
+		Type:         config.ProviderTypeResponses,
+		APIURL:       "https://gateway.example.com/v1/responses",
+		TrustHTTP400: new(false),
 		Models: map[string]config.ModelConfig{
 			model: {
 				Limit: config.ModelLimit{
@@ -1126,8 +1127,8 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		end := p.keyStates[0].ExhaustedUntil
 		p.mu.Unlock()
 		remain := time.Until(end)
-		if remain < 115*time.Second || remain > 125*time.Second {
-			t.Fatalf("expected ~2m cooldown from Retry-After, got remaining %v", remain)
+		if remain < 55*time.Second || remain > 65*time.Second {
+			t.Fatalf("expected ~1m capped cooldown from Retry-After, got remaining %v", remain)
 		}
 	})
 
@@ -1152,8 +1153,11 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		}
 	})
 
-	t.Run("unconfigured_429_preserves_retry_after", func(t *testing.T) {
-		p := NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"k1"})
+	t.Run("unconfigured_429_preserves_full_retry_after", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{
+			Type:           config.ProviderTypeChatCompletions,
+			RetryAfterMaxS: new(config.OfficialRetryAfterMaxS),
+		}, []string{"k1"})
 		for attempt := range 2 {
 			res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
 			if !res.cooldownApplied {
@@ -1165,7 +1169,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 			p.mu.Unlock()
 			remain := time.Until(end)
 			if remain < 115*time.Second || remain > 125*time.Second {
-				t.Fatalf("attempt %d cooldown remaining = %v, want full ~2m Retry-After", attempt+1, remain)
+				t.Fatalf("attempt %d cooldown remaining = %v, want full ~2m trusted Retry-After", attempt+1, remain)
 			}
 			if count != attempt+1 {
 				t.Fatalf("attempt %d CooldownCount = %d, want %d", attempt+1, count, attempt+1)
@@ -1173,12 +1177,33 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit_delay_only_429_overrides_retry_after", func(t *testing.T) {
+	t.Run("third_party_429_caps_retry_after_at_one_minute", func(t *testing.T) {
+		p := testCompatibleResponsesProviderConfigWithKeys("gateway", "gpt-test", []string{"k1"})
+		for attempt := range 2 {
+			res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+			if !res.cooldownApplied {
+				t.Fatal("expected cooldownApplied=true for third-party 429")
+			}
+			p.mu.Lock()
+			end := p.keyStates[0].CooldownEnd
+			count := p.keyStates[0].CooldownCount
+			p.mu.Unlock()
+			remain := time.Until(end)
+			if remain < 55*time.Second || remain > 65*time.Second {
+				t.Fatalf("attempt %d cooldown remaining = %v, want capped ~1m third-party Retry-After", attempt+1, remain)
+			}
+			if count != attempt+1 {
+				t.Fatalf("attempt %d CooldownCount = %d, want %d", attempt+1, count, attempt+1)
+			}
+		}
+	})
+
+	t.Run("explicit_delay_only_429_paces_when_no_retry_after", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{
 			Type:         config.ProviderTypeChatCompletions,
 			RetryDelayMS: new(2500),
 		}, []string{"k1"})
-		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+		res := markKeyCooldown(ctx, p, "k1", err429)
 		if !res.cooldownApplied {
 			t.Fatal("expected explicit retry_delay_ms cooldown for 429")
 		}
@@ -1191,12 +1216,12 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit_zero_delay_429_uses_default_instead_of_retry_after", func(t *testing.T) {
+	t.Run("explicit_zero_delay_429_uses_default_when_no_retry_after", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{
 			Type:         config.ProviderTypeChatCompletions,
 			RetryDelayMS: new(0),
 		}, []string{"k1"})
-		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+		res := markKeyCooldown(ctx, p, "k1", err429)
 		if !res.cooldownApplied {
 			t.Fatal("expected explicit zero retry_delay_ms cooldown for 429")
 		}
@@ -1209,14 +1234,14 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit_exponential_429_overrides_retry_after", func(t *testing.T) {
+	t.Run("explicit_exponential_429_paces_when_no_retry_after", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{
 			Type:         config.ProviderTypeChatCompletions,
 			RetryBackoff: config.RetryBackoffExponential,
 			RetryDelayMS: new(2000),
 		}, []string{"k1"})
 		for attempt, want := range []time.Duration{2 * time.Second, 4 * time.Second} {
-			res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+			res := markKeyCooldown(ctx, p, "k1", err429)
 			if !res.cooldownApplied {
 				t.Fatal("expected configured exponential cooldown for 429")
 			}
@@ -1230,14 +1255,14 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit_fixed_429_overrides_retry_after_without_doubling", func(t *testing.T) {
+	t.Run("explicit_fixed_429_paces_when_no_retry_after_without_doubling", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{
 			Type:         config.ProviderTypeChatCompletions,
 			RetryBackoff: config.RetryBackoffFixed,
 			RetryDelayMS: new(3000),
 		}, []string{"k1"})
 		for attempt := range 2 {
-			res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+			res := markKeyCooldown(ctx, p, "k1", err429)
 			if !res.cooldownApplied {
 				t.Fatal("expected configured fixed cooldown for 429")
 			}
@@ -1255,12 +1280,36 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit_none_429_ignores_retry_after_and_marks_recovering", func(t *testing.T) {
+	t.Run("explicit_none_429_still_honors_retry_after", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{
 			Type:         config.ProviderTypeChatCompletions,
 			RetryBackoff: config.RetryBackoffNone,
 		}, []string{"k1", "k2"})
-		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 30 * time.Second})
+		if !res.cooldownApplied {
+			t.Fatal("server-directed Retry-After must apply even under retry_backoff=none")
+		}
+		p.mu.Lock()
+		end := p.keyStates[0].CooldownEnd
+		p.mu.Unlock()
+		if remain := time.Until(end); remain < 25*time.Second || remain > 31*time.Second {
+			t.Fatalf("cooldown remaining = %v, want ~30s verbatim Retry-After", remain)
+		}
+		key, _, err := p.SelectKeyWithContext(ctx)
+		if err != nil {
+			t.Fatalf("SelectKeyWithContext() error = %v", err)
+		}
+		if key != "k2" {
+			t.Fatalf("selected key = %q, want healthy alternative k2", key)
+		}
+	})
+
+	t.Run("explicit_none_429_without_retry_after_marks_recovering", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{
+			Type:         config.ProviderTypeChatCompletions,
+			RetryBackoff: config.RetryBackoffNone,
+		}, []string{"k1", "k2"})
+		res := markKeyCooldown(ctx, p, "k1", err429)
 		if res.cooldownApplied {
 			t.Fatal("expected retry_backoff=none to skip timed 429 cooldown")
 		}
@@ -1290,7 +1339,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		beforeCount := p.keyStates[0].CooldownCount
 		p.mu.Unlock()
 
-		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+		res := markKeyCooldown(ctx, p, "k1", err429)
 		if res.cooldownApplied {
 			t.Fatal("expected retry_backoff=none not to add a timed 429 cooldown")
 		}
@@ -1393,6 +1442,62 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 			t.Fatalf("total = %d, want 0: deactivated OAuth key should be excluded", total)
 		}
 	})
+
+	t.Run("explicit_pacing_429_still_honors_retry_after", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{
+			Type:         config.ProviderTypeChatCompletions,
+			RetryBackoff: config.RetryBackoffFixed,
+			RetryDelayMS: new(5000),
+		}, []string{"k1"})
+		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 30 * time.Second})
+		if !res.cooldownApplied {
+			t.Fatal("expected Retry-After cooldown despite explicit pacing")
+		}
+		p.mu.Lock()
+		end := p.keyStates[0].CooldownEnd
+		p.mu.Unlock()
+		if remain := time.Until(end); remain < 25*time.Second || remain > 31*time.Second {
+			t.Fatalf("cooldown remaining = %v, want ~30s: server-directed Retry-After outranks retry_backoff", remain)
+		}
+	})
+
+	t.Run("402_honors_long_retry_after_verbatim_without_60s_cap", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{
+			Type:           config.ProviderTypeChatCompletions,
+			RetryAfterMaxS: new(config.OfficialRetryAfterMaxS),
+		}, []string{"k1"})
+		for attempt := range 2 {
+			res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 402, Message: "quota", RetryAfter: 2 * time.Hour})
+			if !res.cooldownApplied {
+				t.Fatal("expected cooldownApplied=true for 402 with Retry-After")
+			}
+			p.mu.Lock()
+			end := p.keyStates[0].CooldownEnd
+			p.mu.Unlock()
+			remain := time.Until(end)
+			if remain < 2*time.Hour-time.Minute || remain > 2*time.Hour+time.Minute {
+				t.Fatalf("attempt %d cooldown remaining = %v, want verbatim ~2h (no exponential 60s cap)", attempt+1, remain)
+			}
+		}
+	})
+
+	t.Run("retry_after_max_s_explicit_cap_bounds_the_hint", func(t *testing.T) {
+		p := NewProviderConfig("p", config.ProviderConfig{
+			Type:           config.ProviderTypeChatCompletions,
+			RetryAfterMaxS: new(120),
+		}, []string{"k1"})
+		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 5 * time.Minute})
+		if !res.cooldownApplied {
+			t.Fatal("expected cooldownApplied=true for capped 429")
+		}
+		p.mu.Lock()
+		end := p.keyStates[0].CooldownEnd
+		p.mu.Unlock()
+		if remain := time.Until(end); remain < 115*time.Second || remain > 125*time.Second {
+			t.Fatalf("cooldown remaining = %v, want ~2m explicit retry_after_max_s cap", remain)
+		}
+	})
+
 }
 
 func TestMarkKeyCooldown429CodexOAuthQuotaExhaustedUsesResetWindow(t *testing.T) {
@@ -1428,7 +1533,7 @@ func TestMarkKeyCooldown429CodexOAuthQuotaExhaustedUsesResetWindow(t *testing.T)
 	}
 }
 
-func TestMarkKeyCooldown429CodexOAuthRetryHintUsesExplicitPacingWithoutExhaustedSnapshot(t *testing.T) {
+func TestMarkKeyCooldown429CodexOAuthRetryHintOutranksExplicitPacingWithoutExhaustedSnapshot(t *testing.T) {
 	ctx := context.Background()
 	p := NewProviderConfig("p", config.ProviderConfig{
 		Type:         config.ProviderTypeResponses,
@@ -1445,14 +1550,17 @@ func TestMarkKeyCooldown429CodexOAuthRetryHintUsesExplicitPacingWithoutExhausted
 		Message:    "usage limit reached",
 		RetryAfter: 2 * time.Minute,
 	})
-	if res.cooldownApplied {
-		t.Fatal("expected explicit retry_backoff=none to override the Codex retry hint")
+	if !res.cooldownApplied {
+		t.Fatal("server-directed Retry-After must apply even under retry_backoff=none")
 	}
 	p.mu.Lock()
 	ks := *p.keyStates[0]
 	p.mu.Unlock()
-	if !ks.CooldownEnd.IsZero() || !ks.ExhaustedUntil.IsZero() || !ks.Recovering {
-		t.Fatalf("key state = cooldown_end=%v exhausted_until=%v recovering=%v, want no timed state and recovering", ks.CooldownEnd, ks.ExhaustedUntil, ks.Recovering)
+	if !ks.ExhaustedUntil.IsZero() {
+		t.Fatalf("exhausted_until = %v, want zero without a confirmed quota snapshot", ks.ExhaustedUntil)
+	}
+	if remain := time.Until(ks.CooldownEnd); remain < 115*time.Second || remain > 125*time.Second {
+		t.Fatalf("cooldown remaining = %v, want verbatim ~2m Retry-After", remain)
 	}
 }
 
@@ -1468,7 +1576,7 @@ func TestCompleteStreamApplies429PacingAfterVisibleOutput(t *testing.T) {
 	impl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{
 		{
 			streams: []message.StreamDelta{{Type: message.StreamDeltaText, Text: "partial"}},
-			err:     &APIError{StatusCode: 429, Message: "rate limited", RetryAfter: time.Millisecond},
+			err:     &APIError{StatusCode: 429, Message: "rate limited"},
 		},
 	}}}
 	c := NewClient(cfg, impl, "test-model", 4096, "sys")
@@ -1483,7 +1591,38 @@ func TestCompleteStreamApplies429PacingAfterVisibleOutput(t *testing.T) {
 	cfg.mu.Unlock()
 	remain := time.Until(end)
 	if remain < 55*time.Second || remain > 61*time.Second {
-		t.Fatalf("cooldown remaining = %v, want configured ~1m after visible 429", remain)
+		t.Fatalf("cooldown remaining = %v, want configured ~1m after visible hint-less 429", remain)
+	}
+}
+
+func TestCompleteStreamThirdParty429PacingAfterVisibleOutputCapsRetryAfter(t *testing.T) {
+	cfg := NewProviderConfig("sample", config.ProviderConfig{
+		Type:         config.ProviderTypeChatCompletions,
+		RetryBackoff: config.RetryBackoffFixed,
+		RetryDelayMS: new(config.MaxProviderRetryDelayMS),
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"k1"})
+	impl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{
+		{
+			streams: []message.StreamDelta{{Type: message.StreamDeltaText, Text: "partial"}},
+			err:     &APIError{StatusCode: 429, Message: "rate limited", RetryAfter: 5 * time.Minute},
+		},
+	}}}
+	c := NewClient(cfg, impl, "test-model", 4096, "sys")
+	c.SetStreamRetryRounds(1)
+
+	_, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, func(message.StreamDelta) {})
+	if err == nil {
+		t.Fatal("CompleteStream() error = nil, want capped 429 failure")
+	}
+	cfg.mu.Lock()
+	end := cfg.keyStates[0].CooldownEnd
+	cfg.mu.Unlock()
+	remain := time.Until(end)
+	if remain < 55*time.Second || remain > 61*time.Second {
+		t.Fatalf("cooldown remaining = %v, want ~1m (third-party Retry-After capped at the default retry_after_max_s)", remain)
 	}
 }
 

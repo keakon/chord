@@ -16,6 +16,9 @@ func ValidateProviderRetry(providerName string, cfg ProviderConfig) error {
 	if cfg.RetryDelayMS != nil && (*cfg.RetryDelayMS < 0 || *cfg.RetryDelayMS > MaxProviderRetryDelayMS) {
 		return fmt.Errorf("retry_delay_ms must be between 0 and %d for provider %q", MaxProviderRetryDelayMS, providerName)
 	}
+	if cfg.RetryAfterMaxS != nil && (*cfg.RetryAfterMaxS < 1 || *cfg.RetryAfterMaxS > MaxRetryAfterMaxS) {
+		return fmt.Errorf("retry_after_max_s must be between 1 and %d for provider %q", MaxRetryAfterMaxS, providerName)
+	}
 	return nil
 }
 

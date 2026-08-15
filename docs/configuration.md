@@ -780,7 +780,8 @@ the remaining pool entries and their eligible keys without sleeping between
 fallback targets. The cursor provider's settings own the delay before the next
 round; if a fallback later succeeds and becomes the sticky cursor, its settings
 apply to subsequent requests. The same settings also control ordinary HTTP 429
-key cooldown when either field is explicitly configured.
+key cooldown when the response carries no `Retry-After` hint; a valid hint
+(bounded by `retry_after_max_s`) always outranks them.
 
 ```yaml
 providers:
@@ -792,28 +793,28 @@ providers:
 - `retry_backoff: exponential` is the default. It starts at `retry_delay_ms`
   (default `1000`) and doubles each round, capped at 60 seconds.
 - `retry_backoff: fixed` uses `retry_delay_ms` for every round.
-- `retry_backoff: none` disables generated round backoff. For an ordinary 429,
-  it also ignores `Retry-After` and marks the failed key as recovering without
-  a timed cooldown, so healthy keys and fallback targets still take priority.
+- `retry_backoff: none` disables generated round backoff. An ordinary 429
+  without a `Retry-After` hint marks the failed key as recovering without a
+  timed cooldown, so healthy keys and fallback targets still take priority.
   Rounds are unlimited by default, so with `none` a fast-failing upstream is
   retried back-to-back without delay.
 - `retry_delay_ms` accepts `0` through `60000`; `0` / omitted means 1000ms.
   Invalid modes, negative values, and values above the cap are configuration
   errors.
 
-Without either field, ordinary 429 responses honor the full valid
-`Retry-After`; when that header is absent, key cooldown starts at one second and
-doubles after consecutive 429s. Explicit retry settings replace `Retry-After`
-for ordinary 429s: `exponential` and `fixed` use the configured pacing, while
-`none` applies no timed 429 cooldown. Confirmed quota reset windows, invalid or
+For an ordinary 429, the key cooldown follows a single priority order: a
+confirmed quota reset window wins, then a valid `Retry-After` (bounded by
+`retry_after_max_s`) applies verbatim, and only a hint-less 429 falls to the
+retry pacing above — the configured `exponential`/`fixed`/`none` mode, or the
+one-second exponential default when neither field is set. Invalid or
 deactivated credentials, and cooldowns already established by other hard
-states are not shortened or cleared by this override. This 429 pacing applies
-before and after visible streaming output alike: a 429 that interrupts a
-visible stream cools the key down and rotates to the next one.
+states, are never shortened or cleared. This 429 pacing applies before and
+after visible streaming output alike: a 429 that interrupts a visible stream
+cools the key down and rotates to the next one.
 
 Codex OAuth follows the same rules: every Codex 429 is an ordinary 429. A
-retry hint (`Retry-After` or WebSocket `resets_in_seconds`) may be replaced by
-explicit settings, and a usage-limit 429 carrying neither a hint nor an
+retry hint (`Retry-After` or WebSocket `resets_in_seconds`) is honored ahead
+of explicit settings, and a usage-limit 429 carrying neither a hint nor an
 exhausted quota snapshot uses the ordinary defaults above — not the one-minute
 cooldown of the `codex` preset, which still covers non-429 usage-limit errors.
 When a Codex rate-limit snapshot shows an exhausted window with a future
@@ -1248,7 +1249,8 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `type`         | string | `messages` / `chat-completions` / `responses` / `generate-content`. Auto-detected from `api_url` or `preset` when omitted.                              |
 | `api_url`      | string | Endpoint URL. Chord detects provider type from the URL path, ignoring query strings and fragments. For Gemini, the `/models` base path; Chord appends `/{model}:streamGenerateContent?alt=sse`. For Azure Responses, `?api-version=...` is optional and can be used to pin a specific API version. |
 | `preset`       | string | `codex` (OpenAI Codex / ChatGPT OAuth) or `azure` (Azure OpenAI Responses with `api-key` auth).                                                           |
-| `official_api` | bool   | Treat this endpoint as an official provider API where HTTP 400 usually means an invalid request and should not be retried as a transient gateway error. `preset: codex` and `preset: azure` are official by default; omit or set `false` for aggregating/proxy gateways. |
+| `trust_http_400` | bool   | Treat HTTP 400 as a terminal request error. `preset: codex` and `preset: azure` default to `true`; aggregating/proxy gateways default to `false` because they often wrap upstream overload as 400. |
+| `retry_after_max_s` | int    | Longest `Retry-After` wait honored, in seconds (1-86400). The header always applies as the key cooldown, ahead of `retry_backoff`/`retry_delay_ms`; this only bounds how long a single hint may block a key. `preset: codex` and `preset: azure` default to `86400`; third-party gateways, which can echo arbitrary values, default to `60`. |
 | `key_rotation` | string | `on_failure` (default) / `per_request`. Controls when a credential / API key is reselected.                                                            |
 | `key_order`    | string | `sequential` (non-Codex default) / `random` / `smart` (Codex only). Controls how Chord chooses among selectable keys.                                   |
 | `retry_backoff`| string | `exponential` (default) / `fixed` / `none`. Controls generated delay between complete rounds and, when explicitly set, ordinary HTTP 429 key cooldown. Explicit settings replace `Retry-After` for ordinary 429s; confirmed quota resets and hard credential states still win. |

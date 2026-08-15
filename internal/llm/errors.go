@@ -373,7 +373,7 @@ func isAmbiguousReplayRecoveryCandidate(err error, provider *ProviderConfig, rep
 	if apiErr.isStreamEvent() {
 		return true
 	}
-	return apiErr.StatusCode == 400 && provider != nil && !providerUsesOfficialAPI(provider)
+	return apiErr.StatusCode == 400 && provider != nil && !providerTrustsHTTP400(provider)
 }
 
 func hasTransientProviderCapacitySignal(apiErr *APIError) bool {
@@ -789,5 +789,5 @@ func isTerminalModelPoolFailureForProvider(provider *ProviderConfig, err error) 
 	if apiErr.StatusCode != 400 {
 		return false
 	}
-	return providerUsesOfficialAPI(provider) || hasTerminalNonRetriable400Signal(apiErr)
+	return providerTrustsHTTP400(provider) || hasTerminalNonRetriable400Signal(apiErr)
 }

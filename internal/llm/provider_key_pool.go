@@ -463,17 +463,35 @@ func (p *ProviderConfig) MarkCooldown(key string, d time.Duration) {
 	})
 }
 
+// MarkServerDirectedCooldown puts the key into cooldown for exactly the given
+// duration: no exponential doubling and no 60s cap. It carries a
+// server-directed wait (a Retry-After hint already bounded by
+// retry_after_max_s), which must be honored verbatim.
+
+func (p *ProviderConfig) MarkServerDirectedCooldown(key string, d time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.forEachKeyStateByKeyLocked(key, func(ks *KeyState) {
+		p.markCooldownWithModeLocked(ks, d, false)
+	})
+}
+
 func (p *ProviderConfig) markRateLimitCooldown(key string, retryAfter time.Duration) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	applied := false
 	p.forEachKeyStateByKeyLocked(key, func(ks *KeyState) {
+		// Server-directed pacing wins: a Retry-After hint (already bounded by
+		// retry_after_max_s) applies verbatim whether or not explicit retry
+		// pacing is configured. retry_backoff / retry_delay_ms only govern
+		// Chord-generated delays when the error carries no hint.
+		if retryAfter > 0 {
+			p.markCooldownWithModeLocked(ks, retryAfter, false)
+			applied = true
+			return
+		}
 		if !p.retryPacingExplicit {
-			if retryAfter > 0 {
-				p.markCooldownWithModeLocked(ks, retryAfter, false)
-			} else {
-				p.markCooldownWithModeLocked(ks, time.Second, true)
-			}
+			p.markCooldownWithModeLocked(ks, time.Second, true)
 			applied = true
 			return
 		}

@@ -194,7 +194,8 @@ type ProviderConfig struct {
 	compat                     *config.ProviderCompatConfig // provider-level compat defaults
 	store                      *bool                        // provider-level Responses storage preference; nil defaults to false
 	parallelToolCalls          *bool                        // provider-level parallel_tool_calls default; nil = true
-	officialAPI                *bool                        // nil = infer from known official endpoints
+	trustHTTP400               *bool                        // nil = infer from official preset (codex/azure)
+	retryAfterMax              time.Duration                // longest honored Retry-After wait; resolved from retry_after_max_s / preset
 	supportedServiceTiers      []config.ServiceTier         // provider-level default non-standard service tiers
 	preset                     string                       // trimmed config preset (e.g. "codex")
 	responsesWebsocket         *bool                        // provider-level Responses WebSocket preference; nil = preset default
@@ -310,7 +311,8 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		compat:                     cfg.Compat,
 		store:                      cfg.Store,
 		parallelToolCalls:          cfg.ParallelToolCalls,
-		officialAPI:                cfg.OfficialAPI,
+		trustHTTP400:               cfg.TrustHTTP400,
+		retryAfterMax:              resolveRetryAfterMax(cfg),
 		supportedServiceTiers:      append([]config.ServiceTier(nil), cfg.SupportedServiceTiers...),
 		preset:                     strings.TrimSpace(cfg.Preset),
 		responsesWebsocket:         cfg.ResponsesWebsocket,

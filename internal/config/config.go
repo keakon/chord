@@ -311,6 +311,12 @@ const (
 	DefaultProviderRetryDelayMS = 1000
 	MaxProviderRetryDelayMS     = 60_000
 
+	// retry_after_max_s bounds. The header is always honored as the key
+	// cooldown; this only caps how long a single hint may block a key.
+	DefaultRetryAfterMaxS  = 60
+	OfficialRetryAfterMaxS = 86_400 // preset codex/azure default
+	MaxRetryAfterMaxS      = 86_400
+
 	OAuthProfileOpenAICodex       = "openai_codex"
 	ProviderPresetCodex           = "codex"
 	ProviderPresetAzure           = "azure"
@@ -338,7 +344,8 @@ type ProviderConfig struct {
 	AuthScheme                string                 `json:"auth_scheme,omitempty" yaml:"auth_scheme,omitempty"`                                 // optional auth scheme override for request header selection
 	Proxy                     *string                `json:"proxy,omitempty" yaml:"proxy,omitempty"`                                             // per-provider proxy URL; nil = inherit global, non-nil (incl. "") = override
 	Compat                    *ProviderCompatConfig  `json:"compat,omitempty" yaml:"compat,omitempty"`                                           // provider-level compat defaults (model-level can override model compat only)
-	OfficialAPI               *bool                  `json:"official_api,omitempty" yaml:"official_api,omitempty"`                               // true for direct official provider endpoints; false for aggregating/proxy gateways
+	TrustHTTP400              *bool                  `json:"trust_http_400,omitempty" yaml:"trust_http_400,omitempty"`                           // whether to treat HTTP 400 as a terminal request error; nil = official presets (codex/azure) true, others false
+	RetryAfterMaxS            *int                   `json:"retry_after_max_s,omitempty" yaml:"retry_after_max_s,omitempty"`                     // longest Retry-After wait honored, in seconds (1-86400); nil = official presets (codex/azure) 86400, others 60
 	SupportedServiceTiers     []ServiceTier          `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"`         // provider-level default non-standard tiers; model-level can override
 	ParallelToolCalls         *bool                  `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"`                 // provider-level default; nil = send parallel_tool_calls: true; model/variant can override
 	Models                    map[string]ModelConfig `json:"models" yaml:"models"`

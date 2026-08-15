@@ -727,7 +727,7 @@ func (c *Client) completeStreamTarget(
 						return result, lastInputTokens, err
 					}
 					// For compatible gateways, other 400s are retriable (may be overload).
-					retriable = !providerUsesOfficialAPI(t.provider)
+					retriable = !providerTrustsHTTP400(t.provider)
 				}
 			}
 			if !retriable && isTimeoutLikeError(err) {
@@ -741,7 +741,7 @@ func (c *Client) completeStreamTarget(
 				// Use the narrower request/parameter check here: the broader terminal
 				// 400 handling above already routes model/protocol incompatibility to
 				// fallback when available, while official API 400s still stop directly.
-				if apiErrPtr != nil && apiErrPtr.StatusCode == 400 && (providerUsesOfficialAPI(t.provider) || isRequestOrParamError(apiErrPtr)) {
+				if apiErrPtr != nil && apiErrPtr.StatusCode == 400 && (providerTrustsHTTP400(t.provider) || isRequestOrParamError(apiErrPtr)) {
 					return result, lastInputTokens, err
 				}
 				if fallbackEligible && fallbackEnabled && len(fallbackModels) > 0 {

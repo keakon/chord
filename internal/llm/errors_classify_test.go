@@ -251,7 +251,7 @@ func TestAssistantMessageShape400FallsBackToAnotherModel(t *testing.T) {
 
 func TestTerminalModelPoolFailureForProviderKeepsCompatible400Retryable(t *testing.T) {
 	t.Parallel()
-	compatible := NewProviderConfig("gateway", config.ProviderConfig{OfficialAPI: new(false)}, nil)
+	compatible := NewProviderConfig("gateway", config.ProviderConfig{TrustHTTP400: new(false)}, nil)
 	err := &APIError{StatusCode: 400, Message: "Concurrency limit exceeded for user, please retry later"}
 	if isTerminalModelPoolFailureForProvider(compatible, err) {
 		t.Fatal("compatible gateway 400 should not stop after model pool exhaustion")
@@ -260,7 +260,7 @@ func TestTerminalModelPoolFailureForProviderKeepsCompatible400Retryable(t *testi
 
 func TestAmbiguousReplayRecoveryCandidateRequiresUnclassifiedReplayExposure(t *testing.T) {
 	t.Parallel()
-	provider := NewProviderConfig("gateway", config.ProviderConfig{OfficialAPI: new(false)}, nil)
+	provider := NewProviderConfig("gateway", config.ProviderConfig{TrustHTTP400: new(false)}, nil)
 	report := modelcompat.NormalizeReport{ReplaySensitiveItems: 1}
 	for _, msg := range []string{
 		"Our servers are currently overloaded. Please try again later.",
@@ -301,7 +301,7 @@ func TestReplayEvidenceEchoIsTerminalAfterModelPoolExhaustion(t *testing.T) {
 
 func TestTerminalModelPoolFailureForProviderOfficial400StillStops(t *testing.T) {
 	t.Parallel()
-	official := NewProviderConfig("official", config.ProviderConfig{OfficialAPI: new(true)}, nil)
+	official := NewProviderConfig("official", config.ProviderConfig{TrustHTTP400: new(true)}, nil)
 	err := &APIError{StatusCode: 400, Message: "Our servers are currently overloaded. Please try again later."}
 	if !isTerminalModelPoolFailureForProvider(official, err) {
 		t.Fatal("official API 400 should remain terminal even if the message looks transient")

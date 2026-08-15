@@ -14,6 +14,8 @@ func TestValidateProviderRetryAcceptsSupportedValues(t *testing.T) {
 		{RetryBackoff: RetryBackoffFixed, RetryDelayMS: new(500)},
 		{RetryBackoff: RetryBackoffNone, RetryDelayMS: new(MaxProviderRetryDelayMS)},
 		{RetryDelayMS: new(0)},
+		{RetryAfterMaxS: new(1)},
+		{RetryAfterMaxS: new(MaxRetryAfterMaxS)},
 	}
 	for _, cfg := range tests {
 		if err := ValidateProviderRetry("sample", cfg); err != nil {
@@ -31,6 +33,8 @@ func TestValidateProviderRetryRejectsInvalidValues(t *testing.T) {
 		{name: "unknown mode", cfg: ProviderConfig{RetryBackoff: "linear"}, want: "invalid retry_backoff"},
 		{name: "negative delay", cfg: ProviderConfig{RetryDelayMS: new(-1)}, want: "retry_delay_ms must be between"},
 		{name: "delay above cap", cfg: ProviderConfig{RetryDelayMS: new(MaxProviderRetryDelayMS + 1)}, want: "retry_delay_ms must be between"},
+		{name: "zero Retry-After cap", cfg: ProviderConfig{RetryAfterMaxS: new(0)}, want: "retry_after_max_s must be between"},
+		{name: "Retry-After cap above maximum", cfg: ProviderConfig{RetryAfterMaxS: new(MaxRetryAfterMaxS + 1)}, want: "retry_after_max_s must be between"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

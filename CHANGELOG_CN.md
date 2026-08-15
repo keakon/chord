@@ -6,6 +6,7 @@
 
 ### 不兼容变更
 
+- Provider 配置键 `official_api` 拆分为 `trust_http_400`（把 HTTP 400 视为终止性请求错误）与 `retry_after_max_s`（采纳 `Retry-After` 的最长等待秒数，1–86400）。严格解析会在启动时拒绝仍包含 `official_api` 的配置。请把 `official_api: true` 迁移为 `trust_http_400: true` 加 `retry_after_max_s: 86400`；`official_api: false` 改成 `trust_http_400: false`，也可以直接省略。第三方 Provider 现在默认只采纳最长 60 秒的 `Retry-After`；旧配置若依赖更长等待，请显式设置 `retry_after_max_s: 86400`。`preset: codex` 和 `preset: azure` 会自动启用可信 400 语义与一天上限。
 - `prompt_cache.ttl` 现在会在启动时校验：接受 `"5m"` 与 `"1h"`（`"5m"` 是 API 默认值，会归一化为省略该字段），其余取值报配置错误，不再被静默忽略。TTL 现在在 `explicit` 断点模式下同样生效，而不仅是 `auto` 模式。
 
 ### 新功能
@@ -19,7 +20,7 @@
 - `delete` 遵循同样的部分结果契约：失败前已删除的文件会计入已提交变更，而不是随错误一起被丢弃；会话恢复后，删除操作（包括完全成功的）现在也会重新出现在变更文件侧栏中。
 - 工具结果类 hook 载荷（`on_tool_result`、`on_before_tool_result_append` 以及批量 `tool_calls` 的每一项）的 `path`/`paths` 现在优先取自已提交的 FileState：路径为解析后的绝对路径，部分失败的调用只列出真正变更的文件，SubAgent 与主 agent 的载荷形态一致。`src/**/*.go` 这类相对 `path_filter` glob 现在也能匹配项目根内的绝对载荷路径。
 - 请求级上下文剪裁现在会在 JSON 对象摘要中保留标量值和精确的大整数，JSON 数组改为抽取首项、中间项与末项，带行号的源码输出则会标明原始行号范围。摘要长度有明确上限；只有 JSON 摘要比原工具结果更小时，才会替换原内容。
-- Provider 重试节奏现在可通过 `retry_backoff: exponential | fixed | none` 与 `retry_delay_ms`（0–60000ms）配置。它控制完整模型池重试轮之间由 Chord 生成的等待；显式配置后还会替换普通 HTTP 429 的 `Retry-After` key 冷却节奏。已确认的配额重置窗口与凭据硬状态仍然优先；没有显式覆盖时，Chord 会遵守完整、合法的 `Retry-After`。作为该变更的一部分，所有 HTTP 429 现在都走普通限流路径：既没有重试提示、也没有已耗尽额度快照的 Codex usage-limit 429 从共享的 1 秒指数默认值起步，而不再是 preset 的 1 分钟冷却（preset 分支仍处理非 429 的 usage-limit 错误）；打断可见流式输出的 429 也会应用同样的节奏并轮换到下一个 key，而不是在同一 key 上无冷却重试。
+- Provider 重试节奏现在可通过 `retry_backoff: exponential | fixed | none` 与 `retry_delay_ms`（0–60000ms）配置。它控制完整模型池重试轮之间由 Chord 生成的等待，以及未携带 `Retry-After` 提示的普通 HTTP 429 key 冷却；合法的 `Retry-After`（受 `retry_after_max_s` 限制）始终优先于已配置的节奏、按原值生效。已确认的配额重置窗口与凭据硬状态仍然优先。作为该变更的一部分，所有 HTTP 429 现在都走普通限流路径：既没有重试提示、也没有已耗尽额度快照的 Codex usage-limit 429 从共享的 1 秒指数默认值起步，而不再是 preset 的 1 分钟冷却（preset 分支仍处理非 429 的 usage-limit 错误）；打断可见流式输出的 429 也会应用同样的节奏并轮换到下一个 key，而不是在同一 key 上无冷却重试。
 - 系统提示词与工具描述不再重复相同的引导规则，每个 agent 只会看到与其角色和可见工具匹配的指导：Done 工具仅在可见时才被提及，其必需信号来源有了具体所指（对话中的显式工作流指令，例如 loop 锚点）；loop 完成要求改为引用 Done 报告结构而不再内联第二份副本；SubAgent 的开放产品决策和必要提问会被路由到 owner agent，而不是让它去"询问用户"；agent 被明确告知执行授权由权限系统自动处理，无需自行评估风险。
 - 委派策略——用 Notify 延续既有任务还是新建 delegate、仅在写作用域明确独立时并行——现在对所有能委派的 agent 可见，包括启用嵌套委派的 SubAgent。
 - 若干小型清理：压缩后的两条继续执行提示合并为一条 system reminder；Read 工具的截断语义按状态逐条说明（`budget` / `stale` / `superseded`）；planner 提示词明确了计划文件的命名规则；中文 bug 排查的结论比较类问题（"哪个结论更对 / 哪个更正确"及变体）按结构匹配、无需持续追加短语列表，普通代码审查请求仍不会触发故障调查工作流；新文件"发挥创意且全面"改为具体指令——覆盖请求隐含的边界情况、不虚构额外范围。
