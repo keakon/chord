@@ -428,7 +428,8 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if patchMutation != nil {
 		stalePathCount = len(patchMutation.paths)
 	}
-	result = appendBackupNotes(result, staleWrite, stalePathCount, backupOutcome)
+	result, backupPaths := appendBackupNotes(result, staleWrite, stalePathCount, backupOutcome)
+	execResult.BackupPaths = backupPaths
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 	return execResult, err
 }
@@ -541,7 +542,8 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	if patchDiffCollector != nil {
 		attachApplyPatchFileChanges(execResult.FileState, patchDiffCollector.Changes())
 	}
-	result = appendBackupNotes(result, staleWrite, speculativeStaleWritePathCount(tc.Name, trackedFilePath, hooks), backupOutcome)
+	result, backupPaths := appendBackupNotes(result, staleWrite, speculativeStaleWritePathCount(tc.Name, trackedFilePath, hooks), backupOutcome)
+	execResult.BackupPaths = backupPaths
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 	return execResult, err
 }

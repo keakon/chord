@@ -380,7 +380,7 @@ func TestMainAgent_EditAfterWriteTracksSnapshotForStaleBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Edit after Write failed: %v", err)
 	}
-	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup saved to:") {
+	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup created") || len(result.BackupPaths) == 0 {
 		t.Fatalf("result missing stale warning/backup: %q", result.Result)
 	}
 	got, err := os.ReadFile(path)
@@ -423,7 +423,7 @@ func TestMainAgent_FileMentionTracksSnapshotForStaleBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Edit after @file mention failed: %v", err)
 	}
-	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup saved to:") {
+	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup created") || len(result.BackupPaths) == 0 {
 		t.Fatalf("result missing stale warning/backup: %q", result.Result)
 	}
 }
@@ -478,13 +478,12 @@ func TestMainAgent_EditStaleCreatesBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Edit after stale file failed: %v", err)
 	}
-	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup saved to:") {
+	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup created") || len(result.BackupPaths) == 0 {
 		t.Fatalf("result missing stale warning/backup: %q", result.Result)
 	}
-	backupPath := strings.TrimSpace(result.Result[strings.LastIndex(result.Result, "Backup saved to:")+len("Backup saved to:"):])
-	backup, err := os.ReadFile(backupPath)
+	backup, err := os.ReadFile(result.BackupPaths[0])
 	if err != nil {
-		t.Fatalf("ReadFile backup %q: %v", backupPath, err)
+		t.Fatalf("ReadFile backup %q: %v", result.BackupPaths[0], err)
 	}
 	if string(backup) != "external\n" {
 		t.Fatalf("backup content = %q, want external", backup)

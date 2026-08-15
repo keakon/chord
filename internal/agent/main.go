@@ -165,6 +165,7 @@ type ToolExecutionResult struct {
 	LSPReviews        []message.LSPReview
 	FileState         *message.ToolFileState
 	Diff              tools.DiffSummary
+	BackupPaths       []string
 	PreFilePath       string
 	PreContent        string
 	PreExisted        bool

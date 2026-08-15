@@ -161,8 +161,9 @@ func shortPathHash(path string) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-func appendBackupNotes(result string, stale bool, stalePaths int, outcome fileBackupOutcome) string {
+func appendBackupNotes(result string, stale bool, stalePaths int, outcome fileBackupOutcome) (string, []string) {
 	var notes []string
+	var backupPaths []string
 	if stale {
 		if stalePaths > 1 {
 			notes = append(notes, "Warning: one or more files changed on disk since their last tracked snapshot; the tool validated current contents before writing and continued.")
@@ -170,18 +171,49 @@ func appendBackupNotes(result string, stale bool, stalePaths int, outcome fileBa
 			notes = append(notes, "Warning: the file changed on disk since its last tracked snapshot; the tool validated current contents before writing and continued.")
 		}
 	}
-	for _, backup := range outcome.Records {
-		if strings.TrimSpace(backup.Path) != "" {
-			notes = append(notes, "Backup saved to: "+backup.Path)
+	if len(outcome.Records) > 0 {
+		created := 0
+		for _, backup := range outcome.Records {
+			if strings.TrimSpace(backup.Path) != "" {
+				created++
+				backupPaths = append(backupPaths, backup.Path)
+			}
+		}
+		if created > 0 {
+			notes = append(notes, "Backup created")
 		}
 	}
 	if strings.TrimSpace(outcome.Warning) != "" {
 		notes = append(notes, "No backup was created: "+outcome.Warning+".")
 	}
 	if len(notes) == 0 {
-		return result
+		return result, backupPaths
 	}
 	if strings.TrimSpace(result) == "" {
+		return strings.Join(notes, "\n"), backupPaths
+	}
+	return result + "\n" + strings.Join(notes, "\n"), backupPaths
+}
+
+// appendBackupPathsToDisplay appends the concrete backup locations to the
+// TUI-visible display result only. The model-visible context keeps the compact
+// "Backup created" signal produced by appendBackupNotes, so backup paths never
+// enter the LLM request surface.
+func appendBackupPathsToDisplay(result string, backupPaths []string) string {
+	if len(backupPaths) == 0 {
+		return result
+	}
+	var notes []string
+	for _, path := range backupPaths {
+		if strings.TrimSpace(path) != "" {
+			notes = append(notes, "Backup saved to: "+path)
+		}
+	}
+	if len(notes) == 0 {
+		return result
+	}
+	result = strings.TrimRight(result, "\n")
+	if result == "" {
 		return strings.Join(notes, "\n")
 	}
 	return result + "\n" + strings.Join(notes, "\n")

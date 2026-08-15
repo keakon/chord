@@ -107,6 +107,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				FileCreated:      payload.FileCreated,
 				LSPReviews:       append([]message.LSPReview(nil), payload.LSPReviews...),
 				FileState:        payload.FileState.Clone(),
+				BackupPaths:      payload.BackupPaths,
 				speculativeHooks: payload.speculativeHooks,
 			}
 			if err := s.commitPromotedToolSideEffects(effective, tr); err != nil {
@@ -154,7 +155,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 						}
 					}
 					select {
-					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, ModelContextNote: execResult.ModelContextNote, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: time.Since(startedAt)}:
+					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, ModelContextNote: execResult.ModelContextNote, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), BackupPaths: execResult.BackupPaths, Duration: time.Since(startedAt)}:
 					case <-s.parentCtx.Done():
 					}
 				}(effective)
@@ -218,7 +219,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				}
 			}
 			select {
-			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, ModelContextNote: execResult.ModelContextNote, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: time.Since(startedAt)}:
+			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, ModelContextNote: execResult.ModelContextNote, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), BackupPaths: execResult.BackupPaths, Duration: time.Since(startedAt)}:
 			case <-s.parentCtx.Done():
 			}
 		}(tc)
@@ -287,6 +288,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 
 	// Emit tool result to TUI so the tool call block shows its result.
 	s.turn.markToolCallCompleted(result.CallID)
+	displayResult = appendBackupPathsToDisplay(displayResult, result.BackupPaths)
 	s.parent.emitToTUI(ToolResultEvent{
 		CallID:        result.CallID,
 		Name:          result.Name,

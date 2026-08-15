@@ -228,12 +228,19 @@ func TestSpeculativeApplyPatchBacksUpEveryStaleFile(t *testing.T) {
 	}
 	a.commitPromotedToolSideEffects(call, payload)
 
-	if got := strings.Count(payload.Result, "Backup saved to:"); got != len(files) {
-		t.Fatalf("result has %d backups, want %d:\n%s", got, len(files), payload.Result)
+	if got := len(payload.BackupPaths); got != len(files) {
+		t.Fatalf("payload has %d backup paths, want %d:\n%v", got, len(files), payload.BackupPaths)
 	}
 	for _, name := range files {
-		if !strings.Contains(payload.Result, strings.TrimSuffix(name, ".txt")) {
-			t.Fatalf("result missing backup for %s:\n%s", name, payload.Result)
+		found := false
+		for _, p := range payload.BackupPaths {
+			if strings.Contains(p, strings.TrimSuffix(name, ".txt")) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("payload missing backup for %s:\n%v", name, payload.BackupPaths)
 		}
 	}
 }

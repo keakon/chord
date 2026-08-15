@@ -105,3 +105,23 @@ func TestFileBackupManagerRejectsSessionByteLimit(t *testing.T) {
 		t.Fatalf("Backup huge error = %v, want single-file size-limit error", err)
 	}
 }
+
+func TestBackupPathsStayOutOfModelResult(t *testing.T) {
+	backupPath := filepath.Join(t.TempDir(), "backups", "before.txt")
+	modelResult, paths := appendBackupNotes("updated", true, 1, fileBackupOutcome{
+		Records: []fileBackupRecord{{Path: backupPath}},
+	})
+	if strings.Contains(modelResult, backupPath) || strings.Contains(modelResult, "Backup saved to:") {
+		t.Fatalf("model result leaked backup path: %q", modelResult)
+	}
+	if !strings.Contains(modelResult, "Backup created") {
+		t.Fatalf("model result missing backup signal: %q", modelResult)
+	}
+	if len(paths) != 1 || paths[0] != backupPath {
+		t.Fatalf("backup paths = %#v, want [%q]", paths, backupPath)
+	}
+	displayResult := appendBackupPathsToDisplay(modelResult, paths)
+	if !strings.Contains(displayResult, "Backup saved to: "+backupPath) {
+		t.Fatalf("display result missing backup path: %q", displayResult)
+	}
+}
