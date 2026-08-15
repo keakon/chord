@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -580,7 +581,7 @@ func TestHandleForkSessionCommandSeedsPrefixAndRestoresDerivedState(t *testing.T
 	a.ctxMgr.SetLastTotalContextTokens(999)
 	a.usageTracker.RestoreStats(analytics.SessionStats{InputTokens: 42, LLMCalls: 1})
 	oldSessionDir := a.sessionDir
-	if err := recovery.SaveSessionMeta(oldSessionDir, recovery.SessionMeta{Title: "Old custom title"}); err != nil {
+	if err := recovery.SaveSessionMeta(oldSessionDir, recovery.SessionMeta{Title: "Old custom title", MCPEnabledServers: []string{" manual-search ", "manual-files", "manual-search"}}); err != nil {
 		t.Fatalf("SaveSessionMeta(old): %v", err)
 	}
 	a.refreshSessionSummary()
@@ -627,6 +628,10 @@ func TestHandleForkSessionCommandSeedsPrefixAndRestoresDerivedState(t *testing.T
 	}
 	if summary := a.GetSessionSummary(); summary == nil || summary.ForkedFrom != filepath.Base(oldSessionDir) {
 		t.Fatalf("GetSessionSummary() = %+v, want ForkedFrom %q", summary, filepath.Base(oldSessionDir))
+	}
+	if forkMeta, err := recovery.LoadSessionMeta(a.sessionDir); err != nil || forkMeta == nil ||
+		!slices.Equal(forkMeta.MCPEnabledServers, []string{"manual-files", "manual-search"}) {
+		t.Fatalf("fork MCP intent = %#v, %v; want [manual-files manual-search]", forkMeta, err)
 	}
 
 	evt := <-a.Events()

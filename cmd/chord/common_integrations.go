@@ -31,7 +31,7 @@ func lspServerDisplayList(mgr *lsp.Manager, runtimeCtrl *runtimeResourceControll
 	return out
 }
 
-func mcpServerDisplayList(mgr *mcp.Manager, runtimeCtrl *runtimeResourceController) []agent.MCPServerDisplay {
+func mcpServerDisplayList(mgr *mcp.Manager, catalog *mcp.Catalog, runtimeCtrl *runtimeResourceController) []agent.MCPServerDisplay {
 	if mgr == nil {
 		return nil
 	}
@@ -50,6 +50,7 @@ func mcpServerDisplayList(mgr *mcp.Manager, runtimeCtrl *runtimeResourceControll
 			Idle:        idle,
 			Disabled:    st.Disabled,
 			Manual:      st.Manual,
+			Enabled:     catalog != nil && catalog.DesiredEnabled(st.Name),
 			Retrying:    st.Retrying,
 			Attempt:     st.Attempt,
 			MaxAttempts: st.MaxAttempts,

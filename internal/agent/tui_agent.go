@@ -291,6 +291,7 @@ type MCPServerDisplay struct {
 	Idle        bool // auto-unloaded while runtime is idle; will be restored on demand
 	Disabled    bool // explicitly disabled (manual /mcp disable)
 	Manual      bool // configured as manual/on-demand; only manual servers can be changed with /mcp
+	Enabled     bool // desired-enabled intent (manual servers): should be on, even if not connected yet
 	Retrying    bool // transient failure, retry still in progress
 	Attempt     int
 	MaxAttempts int

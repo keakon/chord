@@ -714,7 +714,9 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	}
 	a.sessionEpoch++
 	a.resetThinkingTranslationSeen()
+	a.stateMu.Lock()
 	a.sessionDir = loaded.SessionPath
+	a.stateMu.Unlock()
 	cleanupStalePendingCompactions(a.sessionDir, 5*time.Minute)
 	a.recovery = recovery.NewRecoveryManager(loaded.SessionPath)
 	a.usageLedger = analytics.NewUsageLedger(loaded.SessionPath, a.projectRoot)
@@ -724,6 +726,9 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	}
 	a.setSessionSummary(summary)
 	a.resetSessionBuildState()
+	// The restored session carries history: dynamic MCP mounts could be
+	// mis-anchored against it, so this run stays on top-level injection.
+	a.forceFullMCPToolInjection()
 	a.setTaskRecords(loaded.TaskRecords)
 	a.resetTaskCoordination(a.sessionEpoch, loaded.TaskSettlements)
 	a.resetTaskGroups(loaded.TaskGroups)

@@ -218,6 +218,7 @@ func (a *MainAgent) SwapLLMClient(newClient *llm.Client, modelName string, conte
 func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string, contextLimit int, providerModelRef string) {
 	a.llmMu.Lock()
 	oldClient := a.llmClient
+	oldRunningRef := a.runningModelRef
 	a.llmClient = newClient
 	a.modelName = modelName
 	if providerModelRef != "" {
@@ -226,13 +227,21 @@ func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string
 	} else if a.providerModelRef != "" {
 		a.runningModelRef = a.providerModelRef
 	}
+	newRunningRef := a.runningModelRef
 	a.installedSysPrompt = ""
 	a.llmMu.Unlock()
 	if oldClient != nil && oldClient != newClient {
 		oldClient.Close()
 	}
-	a.clearFrozenToolSurface()
-	a.markRuntimeSurfaceDirty()
+	if oldRunningRef != "" && oldRunningRef != newRunningRef {
+		// A real model switch invalidates prompt-cache reuse, so cache-friendly
+		// dynamic MCP mounts cannot carry over to the new model's request surface.
+		a.forceFullMCPToolInjection()
+	} else {
+		a.resetMCPToolMountState()
+		a.clearFrozenToolSurface()
+		a.markRuntimeSurfaceDirty()
+	}
 	a.noteContextSurfaceIdentityChanged()
 	if newClient != nil {
 		a.ctxMgr.SetTokenBudgets(contextLimit, newClient.InputLimitForModelRef(providerModelRef), a.effectiveCompactionReservedInput())

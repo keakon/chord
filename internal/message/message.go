@@ -202,6 +202,9 @@ type Message struct {
 	Kind         string           `json:"kind,omitempty"`    // control/display subtype, e.g. "loop_notice"
 	Mailbox      *MailboxMetadata `json:"mailbox,omitempty"` // durable metadata for a mailbox message actually sent to an agent
 	MailboxAckID string           `json:"-"`                 // transient runtime-only mailbox ack marker; never persisted
+	// MCPTools carries a request-only provider mount. It never enters ctxmgr or
+	// session JSONL; MainAgent reconstructs it at a fixed conversation anchor.
+	MCPTools []ToolDefinition `json:"-"`
 	// ToolRecoveryState classifies synthetic tool results synthesized during
 	// session restore (not_started / outcome_unknown). Ordinary runtime tool
 	// results leave it empty.
@@ -259,6 +262,12 @@ type ToolDefinition struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"input_schema"`
+}
+
+// NewSystemToolsMessage builds a request-only dynamic tool declaration. Wire
+// adapters encode it using their provider-specific late-loading item shape.
+func NewSystemToolsMessage(tools []ToolDefinition) Message {
+	return Message{Role: RoleSystem, MCPTools: append([]ToolDefinition(nil), tools...)}
 }
 
 // StreamDelta represents an incremental piece of a streaming LLM response.

@@ -24,19 +24,32 @@ const (
 type MCPControlRequest struct {
 	Action  MCPControlAction
 	Servers []string
+	// SessionDir is captured on the agent event loop when the request is
+	// dispatched. The runtime persists the resulting intent into this session
+	// even if the agent switches sessions while the control is in flight; the
+	// intent belongs to the session that issued /mcp.
+	SessionDir string
 }
 
-// MCPControlResult carries the post-operation MCP tool set and the prompt block
-// describing connected servers.
+// MCPControlResult carries the post-operation MCP tool set, the prompt block
+// describing connected servers, and the manual server names whose enable/disable
+// transition actually succeeded (partial-success reporting).
 type MCPControlResult struct {
 	Tools       []tools.Tool
 	PromptBlock string
+	Enabled     []string
+	Disabled    []string
 }
 
 type mcpControlDonePayload struct {
 	req    MCPControlRequest
 	result MCPControlResult
 	err    error
+	// readyGen is the readiness generation created when the control was
+	// dispatched. A session switch or MCP startup that begins afterwards
+	// replaces the barrier; the stale result must then not be staged onto the
+	// new session's surface nor release the new barrier.
+	readyGen MCPReadyGeneration
 }
 
 // SetMCPControlFunc installs the runtime callback used to connect/disconnect MCP servers.
@@ -45,13 +58,21 @@ func (a *MainAgent) SetMCPControlFunc(fn func(context.Context, MCPControlRequest
 	a.mcpControlFn = fn
 }
 
-// ResetMCPReady creates a new MCP readiness channel.
-// It is used when MCP startup or runtime control begins so the next request
-// blocks until the new tool surface is ready.
-func (a *MainAgent) ResetMCPReady() {
+// MCPReadyGeneration is an opaque readiness barrier token for one background
+// MCP catalog build. It is created when MCP startup or runtime control begins
+// so the next request blocks until the new tool surface is ready.
+type MCPReadyGeneration struct {
+	id    uint64
+	ready chan struct{}
+}
+
+// ResetMCPReady starts a new MCP readiness generation.
+func (a *MainAgent) ResetMCPReady() MCPReadyGeneration {
 	a.mcpReadyMu.Lock()
+	defer a.mcpReadyMu.Unlock()
+	a.mcpReadyGeneration++
 	a.mcpReady = make(chan struct{})
-	a.mcpReadyMu.Unlock()
+	return MCPReadyGeneration{id: a.mcpReadyGeneration, ready: a.mcpReady}
 }
 
 // SetMCPServerEnabled requests enabling/disabling an MCP server.
@@ -96,12 +117,14 @@ func (a *MainAgent) handleMCPControlEvent(evt Event) {
 	// Begin transition: block new LLM requests at ensureSessionBuilt until the
 	// runtime control result is ready to be applied to the next request surface.
 	a.mcpTransitionActive.Store(true)
-	a.ResetMCPReady()
+	a.markRuntimeSurfaceDirty()
+	gen := a.ResetMCPReady()
 	a.NotifyEnvStatusUpdated()
 
+	req.SessionDir = a.SessionDir()
 	go func() {
 		res, err := a.mcpControlFn(a.parentCtx, req)
-		a.sendEvent(Event{Type: EventMCPControlDone, Payload: mcpControlDonePayload{req: req, result: res, err: err}})
+		a.sendEvent(Event{Type: EventMCPControlDone, Payload: mcpControlDonePayload{req: req, result: res, err: err, readyGen: gen}})
 	}()
 }
 
@@ -176,12 +199,24 @@ func (a *MainAgent) handleMCPControlDoneEvent(evt Event) {
 		return
 	}
 
-	if payload.err == nil {
+	changed := len(payload.result.Enabled) > 0 || len(payload.result.Disabled) > 0
+	applied := a.applyMCPControlSurfaceForGeneration(payload.readyGen, func() {
+		if payload.err != nil && !changed {
+			return
+		}
 		// Defer MCP tool registration until ensureSessionBuilt, so any in-flight turn
 		// continues with the tool surface it was started with and the next request
 		// (including an automatic retry) sees matching tools + system prompt.
+		fullInjectionSurface := a.effectiveMCPMountIsFullInjection()
 		a.mcpServersPromptMu.Lock()
-		a.mcpServersPrompt = payload.result.PromptBlock
+		a.mcpRuntimePrompt = payload.result.PromptBlock
+		// Cache-friendly mounts keep the discoverability prompt stable; the
+		// provider-specific declaration is request-only and is replayed at its
+		// anchor. Full injection — including a cache-friendly mount that has
+		// fallen back — still updates the prompt with the catalog.
+		if fullInjectionSurface {
+			a.mcpServersPrompt = payload.result.PromptBlock
+		}
 		a.pendingMCPTools = append([]tools.Tool(nil), payload.result.Tools...)
 		a.pendingMCPReplace = true
 		a.mcpServersPromptMu.Unlock()
@@ -190,16 +225,30 @@ func (a *MainAgent) handleMCPControlDoneEvent(evt Event) {
 		// frozen request surface. If toggles return to the same prompt/tools, the
 		// existing context surface is reused to preserve provider cache stability.
 		a.markRuntimeSurfaceDirty()
-	}
-	a.markMCPReady()
+	})
 	a.mcpTransitionActive.Store(false)
 	a.NotifyEnvStatusUpdated()
+	if !applied {
+		log.Warnf("MCP control finished after a session switch; result not applied to the new session action=%v enabled=%v disabled=%v", payload.req.Action, payload.result.Enabled, payload.result.Disabled)
+	}
 
-	if payload.err != nil {
-		msg := summarizeMCPControlError(payload.err)
-		if msg != "" {
-			a.emitToTUI(ToastEvent{Message: msg, Level: "error"})
-		}
+	scope := ""
+	if !applied {
+		scope = " for the previous session"
+	}
+	switch {
+	case len(payload.result.Enabled) > 0 && len(payload.result.Disabled) == 0:
+		a.emitToTUI(ToastEvent{Message: "MCP enabled" + scope + ": " + strings.Join(payload.result.Enabled, ", "), Level: "info"})
+	case len(payload.result.Disabled) > 0 && len(payload.result.Enabled) == 0:
+		a.emitToTUI(ToastEvent{Message: "MCP disabled" + scope + ": " + strings.Join(payload.result.Disabled, ", "), Level: "info"})
+	case len(payload.result.Enabled) > 0 && len(payload.result.Disabled) > 0:
+		a.emitToTUI(ToastEvent{Message: "MCP changed" + scope + " (enabled: " + strings.Join(payload.result.Enabled, ", ") + "; disabled: " + strings.Join(payload.result.Disabled, ", ") + ")", Level: "info"})
+	}
+	if applied && changed {
+		a.emitMCPSurfaceChangeToast(payload.result)
+	}
+	if msg := summarizeMCPControlError(payload.err); msg != "" {
+		a.emitToTUI(ToastEvent{Message: msg, Level: "error"})
 	}
 
 	// Resume queued input only when no turn is active. Busy MCP changes are
@@ -207,4 +256,41 @@ func (a *MainAgent) handleMCPControlDoneEvent(evt Event) {
 	if a.turn == nil {
 		a.setIdleAndDrainPending()
 	}
+}
+
+// emitMCPSurfaceChangeToast surfaces the cache cost of changing the complete
+// top-level MCP tool surface.
+func (a *MainAgent) emitMCPSurfaceChangeToast(result MCPControlResult) {
+	if !a.mcpControlChangesTopLevelSurface(result) {
+		return
+	}
+	a.emitToTUI(ToastEvent{
+		Message: "MCP tool surface changed; the next request may miss the prompt cache",
+		Level:   "warn",
+	})
+}
+
+func (a *MainAgent) mcpControlChangesTopLevelSurface(result MCPControlResult) bool {
+	if a.effectiveMCPMountIsFullInjection() {
+		return true
+	}
+	changedServers := append(append([]string(nil), result.Enabled...), result.Disabled...)
+	visibility := a.mcpVisibilitySnapshot(changedServers)
+	a.mcpMountState.mu.Lock()
+	defer a.mcpMountState.mu.Unlock()
+	for _, server := range changedServers {
+		for _, name := range visibility.visibleToolNames(server) {
+			if _, ok := a.mcpMountState.topLevelManual[name]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (a *MainAgent) activateMCPMountFallback() {
+	a.mcpServersPromptMu.Lock()
+	a.mcpServersPrompt = a.mcpRuntimePrompt
+	a.mcpServersPromptMu.Unlock()
+	a.markRuntimeSurfaceDirty()
 }

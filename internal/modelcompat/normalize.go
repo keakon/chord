@@ -319,6 +319,9 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 				}
 			}
 		}
+		if len(msg.MCPTools) > 0 {
+			out[i].MCPTools = append([]message.ToolDefinition(nil), msg.MCPTools...)
+		}
 
 		if !allowsGeminiThoughtSignatureReplay(*msg, target) {
 			hasSignatures := len(msg.GeminiParts) > 0

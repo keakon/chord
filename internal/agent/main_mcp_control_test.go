@@ -186,7 +186,8 @@ func TestMCPControlWhileBusyDefersToolsAndPromptUntilNextRequest(t *testing.T) {
 	}
 
 	a.handleMCPControlDoneEvent(Event{Payload: mcpControlDonePayload{
-		req: MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}},
+		readyGen: a.ResetMCPReady(),
+		req:      MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}},
 		result: MCPControlResult{
 			Tools:       []tools.Tool{tools.ReadTool{}},
 			PromptBlock: "MCP updated prompt",
@@ -243,7 +244,8 @@ func TestMCPControlReturningToSameSurfaceKeepsFrozenContext(t *testing.T) {
 	}
 
 	a.handleMCPControlDoneEvent(Event{Payload: mcpControlDonePayload{
-		req: MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}},
+		readyGen: a.ResetMCPReady(),
+		req:      MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}},
 		result: MCPControlResult{
 			Tools:       []tools.Tool{tools.ReadTool{}},
 			PromptBlock: "MCP original prompt",
@@ -281,8 +283,9 @@ func TestMCPControlErrorKeepsExistingSurface(t *testing.T) {
 	beforePrompt := a.installedSysPrompt
 
 	a.handleMCPControlDoneEvent(Event{Payload: mcpControlDonePayload{
-		req: MCPControlRequest{Action: MCPControlDisable, Servers: []string{"manual"}},
-		err: errors.New("control failed"),
+		readyGen: a.ResetMCPReady(),
+		req:      MCPControlRequest{Action: MCPControlDisable, Servers: []string{"manual"}},
+		err:      errors.New("control failed"),
 	}})
 	if _, ok := a.tools.Get(tools.NameRead); !ok {
 		t.Fatal("existing MCP tool should remain registered after failed runtime control")
@@ -302,6 +305,97 @@ func TestMCPControlErrorKeepsExistingSurface(t *testing.T) {
 	toast := waitForToastEvent(t, a.Events(), "control failed")
 	if toast.Level != "error" {
 		t.Fatalf("toast level = %q, want error", toast.Level)
+	}
+}
+
+func TestMCPControlPartialSuccessAppliesSurfaceAndReportsError(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.tools.Register(tools.GlobTool{})
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("initial ensureSessionBuilt: %v", err)
+	}
+
+	a.handleMCPControlDoneEvent(Event{Payload: mcpControlDonePayload{
+		readyGen: a.ResetMCPReady(),
+		req:      MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual", "missing"}},
+		result: MCPControlResult{
+			Tools:       []tools.Tool{tools.ReadTool{}},
+			PromptBlock: "MCP updated prompt",
+			Enabled:     []string{"manual"},
+		},
+		err: fmt.Errorf("unknown MCP server %q", "missing"),
+	}})
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("ensureSessionBuilt after partial success: %v", err)
+	}
+	if _, ok := a.tools.Get(tools.NameRead); !ok {
+		t.Fatal("successful MCP subset was not applied")
+	}
+	if got := a.mcpServersPrompt; got != "MCP updated prompt" {
+		t.Fatalf("MCP prompt = %q, want updated prompt", got)
+	}
+	waitForToastEvent(t, a.Events(), "MCP enabled: manual")
+	waitForToastEvent(t, a.Events(), "unknown MCP server")
+}
+
+func TestMCPControlStaleGenerationReportsPreviousSession(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	stale := a.ResetMCPReady()
+	_ = a.ResetMCPReady()
+	a.mcpTransitionActive.Store(true)
+
+	a.handleMCPControlDoneEvent(Event{Payload: mcpControlDonePayload{
+		readyGen: stale,
+		req:      MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual-search"}},
+		result:   MCPControlResult{Enabled: []string{"manual-search"}},
+	}})
+
+	toast := waitForToastEvent(t, a.Events(), "previous session")
+	if toast.Message != "MCP enabled for the previous session: manual-search" {
+		t.Fatalf("toast = %q", toast.Message)
+	}
+}
+
+func TestMCPControlDetectsTopLevelBaselineChangesInDynamicMode(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools = tools.NewRegistry()
+	a.llmClient = newResponsesAdditionalToolsClient("model-1")
+	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
+	_ = a.stableVisibleLLMTools()
+
+	if !a.mcpControlChangesTopLevelSurface(MCPControlResult{Disabled: []string{"sample"}}) {
+		t.Fatal("disabling a server represented in the top-level baseline must report a cache-affecting change")
+	}
+	if a.mcpControlChangesTopLevelSurface(MCPControlResult{Enabled: []string{"late-server"}}) {
+		t.Fatal("enabling a server outside the top-level baseline should stay on the dynamic mount")
+	}
+
+	a.forceFullMCPToolInjection()
+	if !a.mcpControlChangesTopLevelSurface(MCPControlResult{Enabled: []string{"late-server"}}) {
+		t.Fatal("forced full injection must report every MCP control change as cache-affecting")
+	}
+}
+
+func TestRuntimeMCPDiscoveryGenerationCannotOverwriteNewerRestore(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	stale := a.ResetMCPReady()
+	current := a.ResetMCPReady()
+	if a.SetRuntimeMCPDiscoveryForGeneration(stale, []tools.Tool{tools.ReadTool{}}, "stale") {
+		t.Fatal("stale MCP discovery unexpectedly applied")
+	}
+	select {
+	case <-stale.ready:
+	default:
+		t.Fatal("stale readiness waiter was not released")
+	}
+	if !a.SetRuntimeMCPDiscoveryForGeneration(current, []tools.Tool{tools.GlobTool{}}, "current") {
+		t.Fatal("current MCP discovery was rejected")
+	}
+	if got := a.mcpServersPrompt; got != "current" {
+		t.Fatalf("MCP prompt = %q, want current", got)
 	}
 }
 
@@ -326,7 +420,8 @@ func TestMCPLowQuotaCodexKeepsPromptAndToolSurfaceFrozen(t *testing.T) {
 	beforePrompt := a.installedSysPrompt
 
 	a.handleMCPControlDoneEvent(Event{Payload: mcpControlDonePayload{
-		req: MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}},
+		readyGen: a.ResetMCPReady(),
+		req:      MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}},
 		result: MCPControlResult{
 			Tools:       []tools.Tool{tools.ReadTool{}},
 			PromptBlock: "MCP updated prompt",
@@ -344,5 +439,97 @@ func TestMCPLowQuotaCodexKeepsPromptAndToolSurfaceFrozen(t *testing.T) {
 	defs := a.mainLLMToolDefinitions()
 	if got := len(defs); got != 1 || defs[0].Name != tools.NameGlob {
 		t.Fatalf("tool surface changed under low-quota codex loop: %#v", defs)
+	}
+}
+
+func TestMCPStatusTextKeepsAutomaticServerStates(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.mcpServerListFn = func() []MCPServerDisplay {
+		return []MCPServerDisplay{
+			// Automatic servers have no manual intent: Enabled is always true
+			// for them, which must not suppress pending/error display.
+			{Name: "auto-pending", Pending: true, Enabled: true},
+			{Name: "auto-error", Enabled: true, Err: "connect refused"},
+			{Name: "manual-wanted", Manual: true, Enabled: true},
+			{Name: "manual-off", Manual: true, Disabled: true},
+			{Name: "auto-ok", OK: true, Enabled: true},
+		}
+	}
+
+	got := a.mcpStatusText()
+	for _, want := range []string{
+		"- auto-pending: pending",
+		"- auto-error: error (connect refused)",
+		"- manual-wanted: enabled (unavailable)",
+		"- manual-off: disabled",
+		"- auto-ok: enabled",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status text missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestMCPControlDoneAfterSessionSwitchDoesNotTouchNewBarrier(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	controlGen := a.ResetMCPReady()
+	// A session switch (or MCP startup) replaces the readiness barrier while
+	// the control is still running.
+	newGen := a.ResetMCPReady()
+	a.mcpTransitionActive.Store(true)
+
+	a.handleMCPControlDoneEvent(Event{Type: EventMCPControlDone, Payload: mcpControlDonePayload{
+		req:      MCPControlRequest{Action: MCPControlEnable, Servers: []string{"srv"}},
+		result:   MCPControlResult{PromptBlock: "stale block", Enabled: []string{"srv"}},
+		readyGen: controlGen,
+	}})
+
+	if a.mcpTransitionActive.Load() {
+		t.Fatal("stale control done must clear the transition flag")
+	}
+	select {
+	case <-controlGen.ready:
+	default:
+		t.Fatal("superseded generation channel must be closed so its waiters cannot leak")
+	}
+	select {
+	case <-newGen.ready:
+		t.Fatal("stale control done must not release the new session's barrier")
+	default:
+	}
+	a.mcpServersPromptMu.Lock()
+	pendingReplace := a.pendingMCPReplace
+	runtimePrompt := a.mcpRuntimePrompt
+	a.mcpServersPromptMu.Unlock()
+	if pendingReplace {
+		t.Fatal("stale control done must not stage tools onto the new session's surface")
+	}
+	if runtimePrompt == "stale block" {
+		t.Fatal("stale control done must not overwrite the runtime MCP prompt")
+	}
+}
+
+func TestMCPControlDoneCurrentGenerationAppliesAndReleasesBarrier(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	controlGen := a.ResetMCPReady()
+	a.mcpTransitionActive.Store(true)
+
+	a.handleMCPControlDoneEvent(Event{Type: EventMCPControlDone, Payload: mcpControlDonePayload{
+		req:      MCPControlRequest{Action: MCPControlEnable, Servers: []string{"srv"}},
+		result:   MCPControlResult{PromptBlock: "fresh block", Enabled: []string{"srv"}},
+		readyGen: controlGen,
+	}})
+
+	select {
+	case <-controlGen.ready:
+	default:
+		t.Fatal("current-generation control done must release its barrier")
+	}
+	a.mcpServersPromptMu.Lock()
+	pendingReplace := a.pendingMCPReplace
+	runtimePrompt := a.mcpRuntimePrompt
+	a.mcpServersPromptMu.Unlock()
+	if !pendingReplace || runtimePrompt != "fresh block" {
+		t.Fatalf("current-generation control not staged: replace=%v prompt=%q", pendingReplace, runtimePrompt)
 	}
 }

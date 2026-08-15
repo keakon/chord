@@ -180,7 +180,7 @@ func TestRuntimeMCPReconnectConfigsKeepsAutoAndLoadedManualServers(t *testing.T)
 }
 
 func TestLoadMCPStateNilManager(t *testing.T) {
-	result, err := loadMCPState(context.Background(), nil)
+	result, err := loadMCPState(context.Background(), nil, nil)
 	if err != nil {
 		t.Fatalf("loadMCPState nil manager error = %v", err)
 	}

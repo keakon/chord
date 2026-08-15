@@ -237,24 +237,17 @@ func (a *MainAgent) tryHandleSlashCommand(content string) bool {
 
 func (a *MainAgent) handleRenameCommand(arg string) {
 	sessionDir := a.SessionDir()
-	meta, err := recovery.LoadSessionMeta(sessionDir)
-	if err != nil {
-		a.emitToTUI(ToastEvent{Message: "Failed to load session title: " + err.Error(), Level: "error"})
-		return
-	}
-	if meta == nil {
-		meta = &recovery.SessionMeta{}
-	}
-	meta.Title = arg
-	if err := recovery.SaveSessionMeta(sessionDir, *meta); err != nil {
+	if err := recovery.UpdateSessionMeta(sessionDir, func(meta *recovery.SessionMeta) {
+		meta.Title = arg
+	}); err != nil {
 		a.emitToTUI(ToastEvent{Message: "Failed to save session title: " + err.Error(), Level: "error"})
 		return
 	}
 	a.refreshSessionSummary()
-	a.emitToTUI(SessionTitleChangedEvent{Title: meta.Title})
-	if meta.Title == "" {
+	a.emitToTUI(SessionTitleChangedEvent{Title: arg})
+	if arg == "" {
 		a.emitToTUI(ToastEvent{Message: "Session title cleared", Level: "info"})
 	} else {
-		a.emitToTUI(ToastEvent{Message: "Session title set to: " + meta.Title, Level: "info"})
+		a.emitToTUI(ToastEvent{Message: "Session title set to: " + arg, Level: "info"})
 	}
 }

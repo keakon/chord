@@ -647,20 +647,33 @@ type MainAgent struct {
 	agentRequestSeq atomic.Uint64
 
 	// Optional MCP summary injected into the system prompt (set after MCP init).
-	mcpServersPromptMu    sync.RWMutex
-	mcpServersPrompt      string
-	pendingMCPTools       []tools.Tool
-	pendingMCPReplace     bool
-	agentsMDReady         chan struct{}
-	agentsMDReadyOnce     sync.Once
-	skillsReady           chan struct{}
-	skillsReadyOnce       sync.Once
-	mcpReadyMu            sync.Mutex
-	mcpReady              chan struct{}
-	mcpTransitionActive   atomic.Bool
-	mcpControlFn          func(context.Context, MCPControlRequest) (MCPControlResult, error)
-	sessionBuilt          atomic.Bool
-	bugTriagePromptActive atomic.Bool
+	mcpServersPromptMu  sync.RWMutex
+	mcpServersPrompt    string
+	mcpRuntimePrompt    string
+	pendingMCPTools     []tools.Tool
+	pendingMCPReplace   bool
+	agentsMDReady       chan struct{}
+	agentsMDReadyOnce   sync.Once
+	skillsReady         chan struct{}
+	skillsReadyOnce     sync.Once
+	mcpReadyMu          sync.Mutex
+	mcpReady            chan struct{}
+	mcpReadyGeneration  uint64
+	mcpTransitionActive atomic.Bool
+	mcpControlFn        func(context.Context, MCPControlRequest) (MCPControlResult, error)
+	mcpMountState       mcpToolMountState
+	// mcpMountFullInjectionOnly is sticky for the current session run. Once
+	// set, cache-friendly dynamic MCP mounts (Responses additional_tools and
+	// Kimi mcp_system_tools_message) are disabled and every MCP tool is
+	// injected in the top-level tools array. It is set on boundaries where
+	// prompt-cache reuse no longer applies — model switch, session resume,
+	// forked history, and durable compaction — so dynamic mounts cannot be
+	// mis-anchored or misread as the complete tool surface. The next
+	// session-head event (resetSessionBuildState) clears it: a fresh, empty
+	// session run may mount dynamically again.
+	mcpMountFullInjectionOnly atomic.Bool
+	sessionBuilt              atomic.Bool
+	bugTriagePromptActive     atomic.Bool
 
 	// shuttingDown is set to true when Shutdown begins. UpdateTodos checks
 	// this flag to avoid overwriting the final snapshot.
@@ -907,11 +920,15 @@ func (a *MainAgent) SetMCPServersPromptBlock(block string) {
 	current := a.mcpServersPrompt
 	a.mcpServersPromptMu.RUnlock()
 	if current == block {
+		a.mcpServersPromptMu.Lock()
+		a.mcpRuntimePrompt = block
+		a.mcpServersPromptMu.Unlock()
 		a.markMCPReady()
 		return
 	}
 	a.mcpServersPromptMu.Lock()
 	a.mcpServersPrompt = block
+	a.mcpRuntimePrompt = block
 	a.mcpServersPromptMu.Unlock()
 	a.markMCPReady()
 	// Pre-first-turn: refresh the stable system prompt so the MCP
@@ -926,6 +943,7 @@ func (a *MainAgent) SetMCPServersPromptBlock(block string) {
 func (a *MainAgent) SetPendingMCPDiscovery(mcpTools []tools.Tool, block string) {
 	a.mcpServersPromptMu.Lock()
 	a.mcpServersPrompt = block
+	a.mcpRuntimePrompt = block
 	a.pendingMCPReplace = false
 	if len(mcpTools) == 0 {
 		a.pendingMCPTools = nil
@@ -936,11 +954,43 @@ func (a *MainAgent) SetPendingMCPDiscovery(mcpTools []tools.Tool, block string) 
 	a.markMCPReady()
 }
 
-// SetRuntimeMCPDiscovery stages a full runtime MCP surface replacement for the
-// next request and marks the frozen LLM-facing surface for re-evaluation.
-func (a *MainAgent) SetRuntimeMCPDiscovery(mcpTools []tools.Tool, block string) {
+// SetRuntimeMCPDiscoveryForGeneration applies a background MCP restore only
+// when no newer restore has replaced its readiness barrier. The generation's
+// own wait channel is always closed so a superseded waiter cannot leak.
+func (a *MainAgent) SetRuntimeMCPDiscoveryForGeneration(generation MCPReadyGeneration, mcpTools []tools.Tool, block string) bool {
+	a.mcpReadyMu.Lock()
+	defer a.mcpReadyMu.Unlock()
+	if generation.id != a.mcpReadyGeneration || generation.ready != a.mcpReady {
+		closeReadyChannel(generation.ready)
+		return false
+	}
+	a.stageRuntimeMCPDiscovery(mcpTools, block)
+	a.markRuntimeSurfaceDirty()
+	a.closeMCPReadyLocked()
+	return true
+}
+
+// applyMCPControlSurfaceForGeneration applies a completed runtime MCP control
+// result only when no newer restore has replaced its readiness barrier,
+// mirroring SetRuntimeMCPDiscoveryForGeneration. apply runs and the current
+// barrier is released only for the owning generation; a superseded request has
+// its own wait channel closed so a waiter that grabbed it cannot leak.
+func (a *MainAgent) applyMCPControlSurfaceForGeneration(generation MCPReadyGeneration, apply func()) bool {
+	a.mcpReadyMu.Lock()
+	defer a.mcpReadyMu.Unlock()
+	if generation.id != a.mcpReadyGeneration || generation.ready != a.mcpReady {
+		closeReadyChannel(generation.ready)
+		return false
+	}
+	apply()
+	a.closeMCPReadyLocked()
+	return true
+}
+
+func (a *MainAgent) stageRuntimeMCPDiscovery(mcpTools []tools.Tool, block string) {
 	a.mcpServersPromptMu.Lock()
 	a.mcpServersPrompt = block
+	a.mcpRuntimePrompt = block
 	a.pendingMCPReplace = true
 	if len(mcpTools) == 0 {
 		a.pendingMCPTools = nil
@@ -948,8 +998,6 @@ func (a *MainAgent) SetRuntimeMCPDiscovery(mcpTools []tools.Tool, block string) 
 		a.pendingMCPTools = append([]tools.Tool(nil), mcpTools...)
 	}
 	a.mcpServersPromptMu.Unlock()
-	a.markRuntimeSurfaceDirty()
-	a.markMCPReady()
 }
 
 // RegisterMainMCPServers registers the main-agent's MCP server names as
@@ -986,8 +1034,15 @@ func (a *MainAgent) MarkSkillsReady() {
 
 func (a *MainAgent) markMCPReady() {
 	a.mcpReadyMu.Lock()
-	ch := a.mcpReady
-	a.mcpReadyMu.Unlock()
+	defer a.mcpReadyMu.Unlock()
+	a.closeMCPReadyLocked()
+}
+
+func (a *MainAgent) closeMCPReadyLocked() {
+	closeReadyChannel(a.mcpReady)
+}
+
+func closeReadyChannel(ch chan struct{}) {
 	if ch == nil {
 		return
 	}

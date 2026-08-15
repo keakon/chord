@@ -273,7 +273,9 @@ func (a *MainAgent) resetSessionRuntimeState() {
 func (a *MainAgent) installSessionTarget(sessionDir string) {
 	a.sessionEpoch++
 	a.resetThinkingTranslationSeen()
+	a.stateMu.Lock()
 	a.sessionDir = sessionDir
+	a.stateMu.Unlock()
 	if a.fileBackups != nil {
 		a.fileBackups.SetSessionDir(sessionDir)
 	}
@@ -439,7 +441,15 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 		}
 		seededMessages++
 	}
-	if err := recovery.SaveSessionMeta(newSessionDir, recovery.SessionMeta{ForkedFrom: forkedFrom}); err != nil {
+	// Fork copies the source session's persisted manual-MCP enabled intent so the
+	// forked session reconnects the same servers (connections are rebuilt fresh).
+	forkMeta := recovery.SessionMeta{ForkedFrom: forkedFrom}
+	if sourceMeta, loadErr := recovery.LoadSessionMeta(a.sessionDir); loadErr == nil && sourceMeta != nil {
+		forkMeta.MCPEnabledServers = recovery.NormalizeMCPEnabledServers(sourceMeta.MCPEnabledServers)
+	} else if loadErr != nil {
+		log.Warnf("fork session: failed to load source metadata for MCP intent error=%v", loadErr)
+	}
+	if err := recovery.SaveSessionMeta(newSessionDir, forkMeta); err != nil {
 		seedRecovery.Close()
 		_ = newLock.Release()
 		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("fork session: save metadata: %w", err)})
@@ -462,6 +472,10 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
 
 	a.ctxMgr.RestoreMessages(prefix)
+	// The forked session carries the copied history prefix: dynamic MCP
+	// mounts could be mis-anchored against it, so this run stays on
+	// top-level injection.
+	a.forceFullMCPToolInjection()
 	a.restoreMainTrackedFileState(prefix)
 	a.resetRuntimeEvidenceFromMessages(prefix)
 	todos := rebuildTodosFromMessages(prefix)

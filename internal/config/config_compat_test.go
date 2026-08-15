@@ -408,17 +408,24 @@ providers:
         send_prompt_cache_key: false
         send_reasoning_include: false
         send_max_output_tokens: true
+        mcp_additional_tools: true
       chat_completions:
         send_stream_options: false
         infer_finish_reason: true
         requires_tool_result_name: true
         requires_assistant_after_tool_result: true
+        mcp_system_tools_message: true
       usage:
         input_includes_cache_read: false
         input_includes_cache_write: false
     models:
       gpt-5.5:
         limit: {context: 400000, output: 128000}
+        compat:
+          responses:
+            mcp_additional_tools: false
+          chat_completions:
+            mcp_system_tools_message: false
 `
 	var cfg Config
 	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
@@ -450,6 +457,9 @@ providers:
 	if r.SendMaxOutputTokens == nil || !*r.SendMaxOutputTokens {
 		t.Fatalf("send_max_output_tokens = %#v, want true", r.SendMaxOutputTokens)
 	}
+	if r.MCPAdditionalTools == nil || !*r.MCPAdditionalTools {
+		t.Fatalf("mcp_additional_tools = %#v, want true", r.MCPAdditionalTools)
+	}
 	cc := prov.Compat.ChatCompletions
 	if cc.SendStreamOptions == nil || *cc.SendStreamOptions {
 		t.Fatalf("send_stream_options = %#v, want false", cc.SendStreamOptions)
@@ -462,5 +472,15 @@ providers:
 	}
 	if cc.RequiresAssistantAfterToolResult == nil || !*cc.RequiresAssistantAfterToolResult {
 		t.Fatalf("requires_assistant_after_tool_result = %#v, want true", cc.RequiresAssistantAfterToolResult)
+	}
+	if cc.MCPSystemToolsMessage == nil || !*cc.MCPSystemToolsMessage {
+		t.Fatalf("mcp_system_tools_message = %#v, want true", cc.MCPSystemToolsMessage)
+	}
+	model := prov.Models["gpt-5.5"]
+	if model.Compat == nil || model.Compat.Responses == nil || model.Compat.Responses.MCPAdditionalTools == nil || *model.Compat.Responses.MCPAdditionalTools {
+		t.Fatalf("model responses compat = %#v, want explicit false", model.Compat)
+	}
+	if model.Compat.ChatCompletions == nil || model.Compat.ChatCompletions.MCPSystemToolsMessage == nil || *model.Compat.ChatCompletions.MCPSystemToolsMessage {
+		t.Fatalf("model chat compat = %#v, want explicit false", model.Compat)
 	}
 }

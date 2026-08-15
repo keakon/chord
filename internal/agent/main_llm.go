@@ -144,7 +144,7 @@ func (a *MainAgent) ensureSessionBuilt(ctx context.Context) error {
 	}
 
 	candidatePrompt := a.currentSystemPromptCandidate()
-	candidateTools := llmToolDefinitionsFromVisibleTools(a.mainVisibleLLMTools())
+	candidateTools := llmToolDefinitionsFromVisibleTools(a.stableVisibleLLMTools())
 	if a.currentLLMContextSurfaceMatches(candidatePrompt, candidateTools) {
 		a.sessionBuilt.Store(true)
 		a.surfaceDirty.Store(false)
@@ -158,15 +158,16 @@ func (a *MainAgent) ensureSessionBuilt(ctx context.Context) error {
 	return nil
 }
 
+// resetSessionBuildState reinitializes the LLM surface at a session-head
+// event. The new session run starts with cache-friendly dynamic MCP mounts
+// available again — an empty session has no history to mis-anchor against.
+// Callers that install a session carrying history (resume, fork) follow up
+// with forceFullMCPToolInjection.
 func (a *MainAgent) resetSessionBuildState() {
-	a.sessionBuilt.Store(false)
-	if a.shouldFreezeLLMContextSurface() {
-		return
-	}
+	a.resetMCPMountSurface(false)
 	// The session reminder content is intentionally kept: it is injected into
 	// every request, and ensureSessionBuilt refreshes it in place, so there is
 	// no window where the prompt loses its AGENTS.md/env block.
-	a.clearFrozenToolSurface()
 }
 
 func (a *MainAgent) markRuntimeSurfaceDirty() {
@@ -522,6 +523,16 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	a.updatePreparedLLMRequestSurface(a.currentTurnID(), messages)
 	a.consumeContextSurfaceRefreshAllowance()
 
+	mountMode := a.mcpToolMountMode()
+	messages, fallbackMCPToolDefs, mountFellBack := a.mountRuntimeMCPTools(messages, mountMode)
+	if mountFellBack {
+		a.activateMCPMountFallback()
+		a.emitToTUI(ToastEvent{
+			Message: "MCP declaration anchor could not be restored; using top-level tools for this session, so prompt-cache reuse may decrease",
+			Level:   "warn",
+		})
+	}
+
 	// Reload compaction checkpoint key files as a request-local overlay, only
 	// after the prepared surface was remembered above: the overlay never enters
 	// the durable history, so recording it in the stable-prefix shapes would
@@ -576,6 +587,9 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	}
 
 	toolDefs := a.mainLLMToolDefinitions()
+	if len(fallbackMCPToolDefs) > 0 {
+		toolDefs = append(append([]message.ToolDefinition(nil), toolDefs...), sortedToolDefinitions(fallbackMCPToolDefs)...)
+	}
 
 	// The stream callback runs on the goroutine that owns the HTTP response
 	// reader, so high-volume deltas stay best-effort while durable/structural

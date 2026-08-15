@@ -753,6 +753,8 @@ model_templates:
     reasoning:
       effort: max
     compat:
+      chat_completions:
+        mcp_system_tools_message: true
       reasoning_continuity:
         mode: openai_visible
         preserve_history: true
@@ -793,6 +795,12 @@ model_pools:
   default:
     - kimi/kimi-k3
 ```
+
+`mcp_system_tools_message` is an explicit model capability, not a model-name
+guess. It lets runtime manual-MCP declarations stay at fixed conversation
+anchors instead of rewriting the top-level tool list. Keep it off for gateways
+that do not accept a `role: system` message containing `tools` without
+`content`; mixed fallback pools automatically use the common top-level shape.
 
 K2.7 Code is the 256K coding-specialized, thinking-only option; its thinking
 mode and `keep: all` behavior are fixed, so the template does not send a

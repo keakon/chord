@@ -151,21 +151,24 @@ func (r responsesRequest) MarshalJSON() ([]byte, error) {
 // responsesInputItem represents an item in the Responses API input array.
 // The API expects "arguments" to be a string (JSON-serialized object), not an object.
 type responsesInputItem struct {
-	Type      string `json:"type"` // "message", "function_call", "function_call_output", "reasoning"
-	ID        string `json:"id,omitempty"`
-	Role      string `json:"role,omitempty"`
-	Content   any    `json:"content,omitempty"`
-	Name      string `json:"name,omitempty"`
-	CallID    string `json:"call_id,omitempty"`
-	Output    any    `json:"output,omitempty"`    // string or []responsesContentBlock for function_call_output
-	Arguments string `json:"arguments,omitempty"` // JSON object as string per API spec
-	Phase     string `json:"phase,omitempty"`
+	Type      string          `json:"type"` // "message", "function_call", "function_call_output", "reasoning", "additional_tools"
+	ID        string          `json:"id,omitempty"`
+	Role      string          `json:"role,omitempty"`
+	Content   any             `json:"content,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	CallID    string          `json:"call_id,omitempty"`
+	Output    any             `json:"output,omitempty"`    // string or []responsesContentBlock for function_call_output
+	Arguments string          `json:"arguments,omitempty"` // JSON object as string per API spec
+	Phase     string          `json:"phase,omitempty"`
+	Tools     []responsesTool `json:"tools,omitempty"`
 	// Reasoning replay fields (type == "reasoning"). Summary is a pointer so a
 	// reasoning item can serialize an explicit empty [] (API rejects a missing
 	// summary field) while other item types omit it entirely.
 	Summary          *[]responsesReasoningSummaryPayload `json:"summary,omitempty"`
 	EncryptedContent string                              `json:"encrypted_content,omitempty"`
 }
+
+const responsesAdditionalToolsRole = "developer"
 
 // responsesContentBlock is a content block within a message item.
 type responsesContentBlock struct {
@@ -390,7 +393,7 @@ func (r *ResponsesProvider) CompleteStream(
 	// individual fields for gateways that reject them instead.
 	rc := (*config.ResponsesCompatConfig)(nil)
 	if r.provider != nil {
-		rc = r.provider.ResponsesCompat()
+		rc = r.provider.ResponsesCompat(model)
 	}
 	var sendStore, sendToolChoice, sendPromptCacheKey, sendReasoningInclude, sendMaxOutputTokens *bool
 	if rc != nil {

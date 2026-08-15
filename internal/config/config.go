@@ -564,11 +564,14 @@ func (m *ModelConfig) SupportedServiceTierSet(providerPreset string, providerTie
 
 // ModelCompatConfig contains provider/model-specific compatibility toggles.
 // All options are opt-in and default to disabled unless explicitly enabled.
+// Model-level wire fields override provider-level defaults when both exist.
 type ModelCompatConfig struct {
 	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
 	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitempty" yaml:"reasoning_continuity,omitempty"`
 	ForcedToolChoice    *ForcedToolChoiceCompatConfig    `json:"forced_tool_choice,omitempty" yaml:"forced_tool_choice,omitempty"`
 	RequestOverrides    *RequestOverridesConfig          `json:"request_overrides,omitempty" yaml:"request_overrides,omitempty"`
+	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitempty" yaml:"chat_completions,omitempty"`
+	Responses           *ResponsesCompatConfig           `json:"responses,omitempty" yaml:"responses,omitempty"`
 }
 
 // ProviderCompatConfig contains provider-level compatibility toggles. Model
@@ -623,6 +626,10 @@ type ResponsesCompatConfig struct {
 	// (default false, preserving the stable Codex request shape). Enable for
 	// compatible gateways whose server-side default output is unbounded.
 	SendMaxOutputTokens *bool `json:"send_max_output_tokens,omitempty" yaml:"send_max_output_tokens,omitempty"`
+	// MCPAdditionalTools mounts runtime MCP function definitions through
+	// input[type="additional_tools"] at their conversation anchor instead of
+	// the top-level tools array. Default false: compatible gateways must opt in.
+	MCPAdditionalTools *bool `json:"mcp_additional_tools,omitempty" yaml:"mcp_additional_tools,omitempty"`
 }
 
 // ChatCompletionsCompatConfig controls which optional Chat Completions request
@@ -646,6 +653,11 @@ type ChatCompletionsCompatConfig struct {
 	// compatible gateways reject a user message that directly follows tool
 	// results.
 	RequiresAssistantAfterToolResult *bool `json:"requires_assistant_after_tool_result,omitempty" yaml:"requires_assistant_after_tool_result,omitempty"`
+	// MCPSystemToolsMessage mounts runtime MCP function definitions in
+	// role:system messages at their conversation anchor instead of the
+	// top-level tools array. Default false: only enable it for models that
+	// accept the Kimi-compatible dynamic-tool shape.
+	MCPSystemToolsMessage *bool `json:"mcp_system_tools_message,omitempty" yaml:"mcp_system_tools_message,omitempty"`
 }
 
 // RequestOverridesConfig applies protocol-agnostic patches after Chord builds a

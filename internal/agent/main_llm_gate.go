@@ -168,15 +168,16 @@ func (a *MainAgent) mainLLMToolDefinitions() []message.ToolDefinition {
 	if frozen := a.frozenToolDefs.Load(); frozen != nil {
 		return *frozen
 	}
-	visibleTools := a.mainVisibleLLMTools()
+	visibleTools := a.stableVisibleLLMTools()
 	return llmToolDefinitionsFromVisibleTools(visibleTools)
 }
 
 // freezeToolSurface captures the current visible tool definitions as the
 // agent's frozen surface. Called once by ensureSessionBuilt after MCP tools
-// (if any) are registered.
+// (if any) are registered. Runtime MCP tools are excluded only while their
+// provider-specific fixed-anchor mount remains usable.
 func (a *MainAgent) freezeToolSurface() {
-	defs := llmToolDefinitionsFromVisibleTools(a.mainVisibleLLMTools())
+	defs := llmToolDefinitionsFromVisibleTools(a.stableVisibleLLMTools())
 	a.freezeToolSurfaceFromDefinitions(defs)
 }
 

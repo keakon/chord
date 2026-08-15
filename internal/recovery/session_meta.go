@@ -6,12 +6,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/keakon/chord/internal/privatefs"
 )
 
 const sessionMetaFile = "session-meta.json"
+
+var sessionMetaWriteMu sync.Mutex
 
 // SessionMeta stores lightweight per-session metadata that is not part of the
 // transcript itself.
@@ -30,6 +35,12 @@ type SessionMeta struct {
 
 	// ImportedFrom captures external import provenance (chord import).
 	ImportedFrom *ImportMeta `json:"imported_from,omitempty"`
+
+	// MCPEnabledServers records the manual MCP servers this session intends to
+	// have enabled. It is the user's durable intent, not a connection snapshot:
+	// a server listed here may still be disconnected (pending/retrying). Only
+	// manual servers are persisted; automatic servers stay config-driven.
+	MCPEnabledServers []string `json:"mcp_enabled_servers,omitempty"`
 }
 
 type ImportMeta struct {
@@ -52,7 +63,43 @@ func (m SessionMeta) IsZero() bool {
 		m.WorktreeBranch == "" &&
 		m.WorktreePath == "" &&
 		m.ImportedFrom == nil &&
+		len(m.MCPEnabledServers) == 0 &&
 		!m.IsMainWorktree
+}
+
+// NormalizeMCPEnabledServers returns a canonical, sorted, de-duplicated copy of
+// names. Empty entries are dropped. A nil input yields nil, matching the
+// omitempty persistence shape.
+func NormalizeMCPEnabledServers(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			seen[name] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// SetMCPEnabledServers replaces the session's persisted manual MCP enabled
+// intent with the given server names while preserving every other metadata
+// field. names are normalized (trimmed, de-duplicated, sorted); an empty or nil
+// slice clears the intent.
+func SetMCPEnabledServers(sessionDir string, names []string) error {
+	return UpdateSessionMeta(sessionDir, func(meta *SessionMeta) {
+		meta.MCPEnabledServers = NormalizeMCPEnabledServers(names)
+	})
 }
 
 // LoadSessionMeta reads session metadata for sessionDir. It returns (nil, nil)
@@ -79,6 +126,13 @@ func LoadSessionMeta(sessionDir string) (*SessionMeta, error) {
 
 // SaveSessionMeta atomically writes session metadata for sessionDir.
 func SaveSessionMeta(sessionDir string, meta SessionMeta) error {
+	sessionMetaWriteMu.Lock()
+	defer sessionMetaWriteMu.Unlock()
+	return saveSessionMeta(sessionDir, meta)
+}
+
+func saveSessionMeta(sessionDir string, meta SessionMeta) error {
+	meta.MCPEnabledServers = NormalizeMCPEnabledServers(meta.MCPEnabledServers)
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return fmt.Errorf("marshal session meta: %w", err)
@@ -94,4 +148,26 @@ func SaveSessionMeta(sessionDir string, meta SessionMeta) error {
 		return fmt.Errorf("install session meta: %w", err)
 	}
 	return nil
+}
+
+// UpdateSessionMeta loads the current metadata (or starts from a zero value
+// when none exists), applies mutate, and atomically saves the result. mutate
+// receives a non-nil *SessionMeta and may replace individual fields; it must
+// not hold the pointer beyond the call. This is the single merge/update entry
+// point so partial writers cannot silently clobber unrelated metadata such as
+// the MCP enabled intent.
+func UpdateSessionMeta(sessionDir string, mutate func(*SessionMeta)) error {
+	sessionMetaWriteMu.Lock()
+	defer sessionMetaWriteMu.Unlock()
+	meta, err := LoadSessionMeta(sessionDir)
+	if err != nil {
+		return err
+	}
+	if meta == nil {
+		meta = &SessionMeta{}
+	}
+	if mutate != nil {
+		mutate(meta)
+	}
+	return saveSessionMeta(sessionDir, *meta)
 }

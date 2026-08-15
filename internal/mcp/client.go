@@ -930,6 +930,51 @@ func (m *Manager) Clients() map[string]*Client {
 	return result
 }
 
+// Client returns the currently connected client for a single server, or nil
+// when the server is disconnected. Callers that execute remote tools resolve
+// this per call so a reconnect never leaves a stale, closed transport behind.
+func (m *Manager) Client(name string) *Client {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.clients[name]
+}
+
+// ToolAllowed reports whether remoteName is within the configured allowlist for
+// serverName. An empty allowlist means every tool is allowed.
+func (m *Manager) ToolAllowed(serverName, remoteName string) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	allowed := m.allowedTools[serverName]
+	if len(allowed) == 0 {
+		return true
+	}
+	_, ok := allowed[remoteName]
+	return ok
+}
+
+// IsManualServer reports whether serverName is configured as a manual server
+// (not auto-connected at startup). It derives from endpoint status so it also
+// works before any connection attempt has completed.
+func (m *Manager) IsManualServer(name string) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, s := range m.endpointStat {
+		if s.Name == name {
+			return s.Manual
+		}
+	}
+	return false
+}
+
 // CachedToolDefs returns the last discovered tool defs for a server.
 func (m *Manager) CachedToolDefs(serverName string) []MCPToolDef {
 	if m == nil {

@@ -489,6 +489,30 @@ func TestDiscoverAllToolsWithoutAllowedToolsKeepsAllTools(t *testing.T) {
 	}
 }
 
+func TestDiscoverAllToolsUsesCachedDefinitionsOnRefreshFailure(t *testing.T) {
+	ft := newFakeTransport()
+	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("tools/list", toolsListResult{Tools: []MCPToolDef{{Name: "lookup", Description: "Lookup"}}})
+
+	ctx := context.Background()
+	cfgs := []ServerConfig{{Name: "search", URL: "https://example.invalid/mcp"}}
+	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
+	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
+		client := NewClientWithInfo("search", ft, testClientInfo)
+		return client, client.Initialize(ctx)
+	}
+	mgr.ConnectAll(ctx, cfgs)
+	if tools, err := DiscoverAllTools(ctx, mgr); err != nil || len(tools) != 1 {
+		t.Fatalf("initial discovery = %#v, %v", tools, err)
+	}
+
+	ft.onSendError("tools/list", fmt.Errorf("temporary failure"))
+	tools, err := DiscoverAllTools(ctx, mgr)
+	if err != nil || len(tools) != 1 || tools[0].Name() != "mcp_search_lookup" {
+		t.Fatalf("cached discovery = %#v, %v", tools, err)
+	}
+}
+
 func TestConnectAllRefreshesAllowedTools(t *testing.T) {
 	ft := newFakeTransport()
 	ft.onMethod("initialize", initializeResult{})

@@ -390,6 +390,12 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	}
 	a.recordCompactionLifecycleEvent("applied", map[string]string{"source_ref_count": strconv.Itoa(len(d.SourceRefs)), "head_split": strconv.Itoa(headSplit), "message_count": strconv.Itoa(len(compactedMessages))})
 
+	// Durable compaction rewrites the message prefix, so any cache-friendly
+	// dynamic MCP mount anchors become invalid. Revert to top-level MCP tools
+	// instead of re-anchoring additional_tools / mcp_system_tools_message
+	// declarations against the compacted history.
+	a.forceFullMCPToolInjection()
+
 	a.resetRuntimeEvidenceFromMessages(d.NewMessages)
 	a.resetContextReductionStats()
 	a.clearLoopFrozenReductionPrefix()

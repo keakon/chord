@@ -101,6 +101,14 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 	}
 
 	for _, msg := range msgs {
+		if len(msg.MCPTools) > 0 {
+			result = append(result, responsesInputItem{
+				Type:  "additional_tools",
+				Role:  responsesAdditionalToolsRole,
+				Tools: convertToolsToResponses(msg.MCPTools),
+			})
+			continue
+		}
 		switch msg.Role {
 		case "user":
 			content := make([]responsesContentBlock, 0, max(1, len(msg.Parts)))

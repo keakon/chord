@@ -469,6 +469,86 @@ func (c *Client) SupportsAnthropicPromptCache(modelRef string) bool {
 	return tuning.Anthropic.PromptCacheMode == "explicit"
 }
 
+// SupportsKimiDynamicTools reports whether the selected Chat Completions
+// target explicitly accepts message-level dynamic tool declarations.
+func (c *Client) SupportsKimiDynamicTools(modelRef string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	target, ok := c.modelPoolTargetForRefLocked(modelRef)
+	return ok && kimiDynamicTargetSupported(target)
+}
+
+// AllPoolTargetsSupportKimiDynamicTools requires one legal request shape for
+// every target that may receive the same retry input.
+func (c *Client) AllPoolTargetsSupportKimiDynamicTools() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	pool := c.modelPoolLocked()
+	c.mu.RUnlock()
+	if len(pool) == 0 {
+		return false
+	}
+	for _, target := range pool {
+		if !kimiDynamicTargetSupported(target) {
+			return false
+		}
+	}
+	return true
+}
+
+func kimiDynamicTargetSupported(target FallbackModel) bool {
+	if target.ProviderConfig == nil || providerWireFamily(target.ProviderConfig) != modelcompat.WireFamilyOpenAIChat {
+		return false
+	}
+	cc := target.ProviderConfig.ChatCompletionsCompat(target.ModelID)
+	return cc != nil && compatBool(cc.MCPSystemToolsMessage, false)
+}
+
+// SupportsResponsesAdditionalTools reports whether the selected Responses
+// target explicitly accepts input[type="additional_tools"].
+func (c *Client) SupportsResponsesAdditionalTools(modelRef string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	target, ok := c.modelPoolTargetForRefLocked(modelRef)
+	return ok && responsesAdditionalToolsTargetSupported(target)
+}
+
+// AllPoolTargetsSupportResponsesAdditionalTools requires every retry target to
+// accept the same additional_tools request item.
+func (c *Client) AllPoolTargetsSupportResponsesAdditionalTools() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	pool := c.modelPoolLocked()
+	c.mu.RUnlock()
+	if len(pool) == 0 {
+		return false
+	}
+	for _, target := range pool {
+		if !responsesAdditionalToolsTargetSupported(target) {
+			return false
+		}
+	}
+	return true
+}
+
+func responsesAdditionalToolsTargetSupported(target FallbackModel) bool {
+	if target.ProviderConfig == nil || providerWireFamily(target.ProviderConfig) != modelcompat.WireFamilyOpenAIResponses {
+		return false
+	}
+	rc := target.ProviderConfig.ResponsesCompat(target.ModelID)
+	return rc != nil && compatBool(rc.MCPAdditionalTools, false)
+}
+
 // PrimaryModelEntry returns the current cursor-head entry as a reusable fallback-model
 // descriptor. Callers can use it to assemble a separate model pool while
 // preserving provider implementations and model limits.

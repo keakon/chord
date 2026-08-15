@@ -375,26 +375,89 @@ func (p *ProviderConfig) ParallelToolCallsConfig() *bool {
 	return p.parallelToolCalls
 }
 
-// ResponsesCompat returns the provider-level Responses wire compat toggles
-// (nil when not configured; every knob falls back to its default).
-func (p *ProviderConfig) ResponsesCompat() *config.ResponsesCompatConfig {
+// ResponsesCompat resolves provider defaults with model-level overrides.
+func (p *ProviderConfig) ResponsesCompat(modelID string) *config.ResponsesCompatConfig {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.compat == nil {
+	var providerCfg *config.ResponsesCompatConfig
+	if p.compat != nil {
+		providerCfg = p.compat.Responses
+	}
+	var modelCfg *config.ResponsesCompatConfig
+	if model, ok := p.models[modelID]; ok && model.Compat != nil {
+		modelCfg = model.Compat.Responses
+	}
+	if providerCfg == nil && modelCfg == nil {
 		return nil
 	}
-	return p.compat.Responses
+	if modelCfg == nil {
+		return providerCfg
+	}
+	if providerCfg == nil {
+		return modelCfg
+	}
+	merged := &config.ResponsesCompatConfig{}
+	*merged = *providerCfg
+	if modelCfg.SendStore != nil {
+		merged.SendStore = modelCfg.SendStore
+	}
+	if modelCfg.SendReasoningInclude != nil {
+		merged.SendReasoningInclude = modelCfg.SendReasoningInclude
+	}
+	if modelCfg.SendToolChoice != nil {
+		merged.SendToolChoice = modelCfg.SendToolChoice
+	}
+	if modelCfg.SendPromptCacheKey != nil {
+		merged.SendPromptCacheKey = modelCfg.SendPromptCacheKey
+	}
+	if modelCfg.SendMaxOutputTokens != nil {
+		merged.SendMaxOutputTokens = modelCfg.SendMaxOutputTokens
+	}
+	if modelCfg.MCPAdditionalTools != nil {
+		merged.MCPAdditionalTools = modelCfg.MCPAdditionalTools
+	}
+	return merged
 }
 
-// ChatCompletionsCompat returns the provider-level Chat Completions wire
-// compat toggles (nil when not configured).
-func (p *ProviderConfig) ChatCompletionsCompat() *config.ChatCompletionsCompatConfig {
+// ChatCompletionsCompat resolves provider defaults with model-level overrides.
+func (p *ProviderConfig) ChatCompletionsCompat(modelID string) *config.ChatCompletionsCompatConfig {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.compat == nil {
+	var providerCfg *config.ChatCompletionsCompatConfig
+	if p.compat != nil {
+		providerCfg = p.compat.ChatCompletions
+	}
+	var modelCfg *config.ChatCompletionsCompatConfig
+	if model, ok := p.models[modelID]; ok && model.Compat != nil {
+		modelCfg = model.Compat.ChatCompletions
+	}
+	if providerCfg == nil && modelCfg == nil {
 		return nil
 	}
-	return p.compat.ChatCompletions
+	if modelCfg == nil {
+		return providerCfg
+	}
+	if providerCfg == nil {
+		return modelCfg
+	}
+	merged := &config.ChatCompletionsCompatConfig{}
+	*merged = *providerCfg
+	if modelCfg.SendStreamOptions != nil {
+		merged.SendStreamOptions = modelCfg.SendStreamOptions
+	}
+	if modelCfg.InferFinishReason != nil {
+		merged.InferFinishReason = modelCfg.InferFinishReason
+	}
+	if modelCfg.RequiresToolResultName != nil {
+		merged.RequiresToolResultName = modelCfg.RequiresToolResultName
+	}
+	if modelCfg.RequiresAssistantAfterToolResult != nil {
+		merged.RequiresAssistantAfterToolResult = modelCfg.RequiresAssistantAfterToolResult
+	}
+	if modelCfg.MCPSystemToolsMessage != nil {
+		merged.MCPSystemToolsMessage = modelCfg.MCPSystemToolsMessage
+	}
+	return merged
 }
 
 // UsageCompat returns provider-specific usage-field semantic overrides.

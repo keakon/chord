@@ -920,7 +920,9 @@ mcp:
   - `/mcp enable <server>`
   - `/mcp disable <server>`
   - `/mcp status`
-- Agent 运行中也可以执行 `/mcp enable|disable`。当前正在进行的请求继续使用它启动时的工具表面；新的 MCP 工具和 MCP system-prompt block 会在下一次 LLM 请求（包括自动重试 / 恢复请求）时应用。
+- Agent 运行中也可以执行 `/mcp enable|disable`。当前正在进行的请求继续使用启动时的工具表面；下一次 LLM 请求（包括自动重试 / 恢复请求）才会应用新的执行状态。
+- 默认情况下，下一次请求会重建顶层 MCP 工具表面，因此已有提示词缓存可能无法命中。模型显式开启 `compat.chat_completions.mcp_system_tools_message` 或 `compat.responses.mcp_additional_tools` 后，Chord 会把工具声明挂在固定的对话位置，并在后续请求里原位回放。禁用 server 只会拦截执行，不删除已经发出的声明，因此前缀保持稳定。模型切换、会话恢复/切换或上下文压缩后，Chord 会退回顶层工具并提示缓存复用可能下降——这些边界会破坏提示词缓存复用，固定挂载位置也不再可信。
+- manual server 的启用 / 禁用意图会随会话保存：`/mcp enable` 写入该意图，`/mcp disable` 清除它；之后 resume 该会话（包括重启后 resume）时会重新连接上次处于启用状态的 manual server。连接失败不会清除意图，server 会保持「enabled (unavailable)」状态，方便之后重试，而不是悄悄退回禁用。
 - 在 Codex loop 模式下，如果任一受跟踪的 Codex 额度窗口剩余不到 10%，Chord 会保留现有的 LLM 可见上下文表面，不重写工具描述或 system prompt。运行时权限与 MCP 工具执行状态仍会变化，但模型继续看到之前的工具列表 / prompt，以便低额度 loop 能在同一个 Codex 会话上继续推进，避免因为上下文形态变化而无法续用。
   这是有意的取舍。在额度恢复或构建新的会话 / 上下文表面之前，模型看到的状态可能会短暂不同于运行时状态：新启用的 MCP 工具可能不会被模型发现；已禁用的 MCP 工具可能仍看起来可调用，但执行时失败；权限从 `deny` / `ask` 改为 `allow` 时，prompt / 工具描述中可能仍未体现；权限从 `allow` 改为 `deny` / `ask` 时，模型可能以为可以调用，但实际调用时会被拦截。Chord 接受这种短期不一致，以避免 Codex loop 在额度窗口末尾因上下文形态变化而耗尽或无法继续复用当前会话。
 
@@ -1120,11 +1122,13 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `stream_idle_timeout` | int | 该 provider 的流式空闲超时，单位秒。`0` / 省略表示使用内置 SSE/WebSocket idle 默认值。 |
 | `websocket_handshake_timeout` | int | Responses WebSocket 握手超时，单位秒。`0` / 省略表示使用内置默认值。 |
 | `parallel_tool_calls` | bool | `true` — provider 级 Responses / Chat Completions 工具并行默认值；模型和变体配置会覆盖它。 |
-| `compat.responses.*` | object | 协议默认值 — provider 级 Responses 可选字段开关：`send_store`、`send_reasoning_include`、`send_tool_choice`、`send_prompt_cache_key`、`send_max_output_tokens`。 |
+| `compat.responses.*` | object | 协议默认值 — provider 级 Responses 可选字段开关：`send_store`、`send_reasoning_include`、`send_tool_choice`、`send_prompt_cache_key`、`send_max_output_tokens`、`mcp_additional_tools`。 |
+| `compat.responses.mcp_additional_tools` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `input[type="additional_tools"]` item，不改写顶层 `tools`。只为已确认接受该 item 的 Responses endpoint / 模型开启。Fallback 池里每个模型都必须开启；混合池退回顶层工具。 |
 | `compat.chat_completions.send_stream_options` | bool | `true` — 对拒绝 `stream_options` 的网关设为 `false`；此时流式 token usage 不再可用。 |
 | `compat.chat_completions.infer_finish_reason` | bool | `false` — 对结束流时不发 `finish_reason` 的兼容网关，自动推断为正常的 `stop` / `tool_calls` 完成；不开启时这类流会被当成中断处理。 |
 | `compat.chat_completions.requires_tool_result_name` | bool | `false` — 对要求 tool result 消息同时携带 `name` 和 `tool_call_id` 的网关，回填配对的工具名。 |
 | `compat.chat_completions.requires_assistant_after_tool_result` | bool | `false` — 对不接受 tool result 后直接跟 user 消息的网关，在中间插入一条合成 assistant 消息。 |
+| `compat.chat_completions.mcp_system_tools_message` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `role: system` 消息，消息只带 `tools`、不带 `content`，不改写顶层 `tools`。只为已确认接受 Kimi 兼容动态工具形态的模型开启。Fallback 池里每个模型都必须开启；混合池退回顶层工具。 |
 | `compat.usage.input_includes_cache_read` | bool | 协议默认值 — 覆盖 provider 顶层 input 是否已包含 cache read。默认：Messages 为 `false`；Chat Completions / Responses / Generate Content 为 `true`。 |
 | `compat.usage.input_includes_cache_write` | bool | 协议默认值 — 覆盖 provider 顶层 input 是否已包含 cache write/cache creation。默认：Chat Completions / Responses 为 `true`；Messages / Generate Content 为 `false`。 |
 | `models`      | map    | model id → [模型配置](#模型字段参考)。                                                                                                              |
@@ -1146,6 +1150,8 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compat.request_overrides.body` | object | Chord 构造完协议请求后应用的递归 JSON patch。`null` 删除字段。 |
 | `compat.request_overrides.rename_body_fields` | map | 重命名最终 JSON 字段，同时保留 Chord 动态计算的值。目标值为 `null` 时删除源字段。 |
 | `compat.request_overrides.headers` | map | 设置最终请求 header。值为 `null` 时删除该 header。 |
+| `compat.chat_completions.mcp_system_tools_message` | bool | 模型级覆盖项；provider 默认值见上表。 |
+| `compat.responses.mcp_additional_tools` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `variants`        | map    | 命名参数预设。引用方式：`provider/model@variant`。                                                                |
 | `modalities.input`| array  | `text` / `image` / `pdf` 的子集。默认仅 `[text]`；支持时需显式声明 `image` / `pdf`。                              |
 | `supported_service_tiers` | 列表 | provider-level 默认值或 model-level 覆盖值，用于声明可接收的非 standard tier，例如 `[fast, slow]` 或 `[fast]`。省略时使用 preset 默认值。 |

@@ -3,12 +3,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/mcp"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -232,5 +237,221 @@ func TestCreateRuntimeQuestionToolRoundTripReturnsAnswers(t *testing.T) {
 	}
 	if len(answers) != 1 || len(answers[0].Selected) != 1 || answers[0].Selected[0] != "yes" {
 		t.Fatalf("answers = %#v, want yes", answers)
+	}
+}
+
+func TestRestoreMCPIntentReconcilesManualServers(t *testing.T) {
+	ac := newTestAppContext(t)
+	if err := recovery.SetMCPEnabledServers(ac.SessionDir, []string{"manual-a"}); err != nil {
+		t.Fatalf("seed meta: %v", err)
+	}
+	ac.MCPConfigs = []mcp.ServerConfig{
+		{Name: "auto"},
+		{Name: "manual-a", Manual: true},
+		{Name: "manual-b", Manual: true},
+	}
+	ac.MCPMgr = mcp.NewPendingManager(ac.MCPConfigs)
+	ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
+	// Simulate manual-b already connected/desired from a previous session.
+	ac.MCPCatalog.SetDesiredEnabled("manual-b", true)
+
+	if err := restoreMCPIntent(context.Background(), ac); err != nil {
+		t.Fatalf("restoreMCPIntent: %v", err)
+	}
+	if !ac.MCPCatalog.DesiredEnabled("manual-a") {
+		t.Error("manual-a should be desired-enabled from persisted intent")
+	}
+	if ac.MCPCatalog.DesiredEnabled("manual-b") {
+		t.Error("manual-b should be deselected (not in target intent)")
+	}
+	if !ac.MCPCatalog.DesiredEnabled("auto") {
+		t.Error("automatic server should remain enabled")
+	}
+}
+
+func TestRestoreMCPIntentKeepsIntentOnConnectFailure(t *testing.T) {
+	ac := newTestAppContext(t)
+	if err := recovery.SetMCPEnabledServers(ac.SessionDir, []string{"manual-a"}); err != nil {
+		t.Fatalf("seed meta: %v", err)
+	}
+	// No Command/URL: ConnectOne fails immediately, but the desired intent must
+	// survive so a later retry can succeed.
+	ac.MCPConfigs = []mcp.ServerConfig{{Name: "manual-a", Manual: true}}
+	ac.MCPMgr = mcp.NewPendingManager(ac.MCPConfigs)
+	ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
+
+	if err := restoreMCPIntent(context.Background(), ac); err != nil {
+		t.Fatalf("restoreMCPIntent: %v", err)
+	}
+	if !ac.MCPCatalog.DesiredEnabled("manual-a") {
+		t.Fatal("connect failure must not clear desired-enabled intent")
+	}
+	if ac.MCPMgr.Client("manual-a") != nil {
+		t.Fatal("failed server must not have a client")
+	}
+}
+
+func TestLoadSynchronousMCPStateRestoresManualIntent(t *testing.T) {
+	ac := newTestAppContext(t)
+	if err := recovery.SetMCPEnabledServers(ac.SessionDir, []string{"manual-a"}); err != nil {
+		t.Fatalf("seed meta: %v", err)
+	}
+	ac.MCPConfigs = []mcp.ServerConfig{{Name: "manual-a", Manual: true}}
+	ac.MCPMgr = mcp.NewPendingManager(ac.MCPConfigs)
+	ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
+
+	result, err := loadSynchronousMCPState(context.Background(), ac)
+	if err != nil {
+		t.Fatalf("loadSynchronousMCPState: %v", err)
+	}
+	if !ac.MCPCatalog.DesiredEnabled("manual-a") {
+		t.Fatal("synchronous startup did not restore manual MCP intent")
+	}
+	if len(result.Tools) != 0 || result.PromptBlock != "" {
+		t.Fatalf("failed manual server state = %#v, want no connected surface", result)
+	}
+}
+
+func TestRestoreMCPIntentReadFailureKeepsCurrentState(t *testing.T) {
+	ac := newTestAppContext(t)
+	if err := recovery.SaveSessionMeta(ac.SessionDir, recovery.SessionMeta{MCPEnabledServers: []string{"manual-a"}}); err != nil {
+		t.Fatalf("seed meta: %v", err)
+	}
+	ac.MCPConfigs = []mcp.ServerConfig{{Name: "manual-a", Manual: true}}
+	ac.MCPMgr = mcp.NewPendingManager(ac.MCPConfigs)
+	ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
+	ac.MCPCatalog.SetDesiredEnabled("manual-a", true)
+	if err := os.WriteFile(filepath.Join(ac.SessionDir, "session-meta.json"), []byte("{"), 0o600); err != nil {
+		t.Fatalf("corrupt meta: %v", err)
+	}
+
+	err := restoreMCPIntent(context.Background(), ac)
+	if err == nil || !strings.Contains(err.Error(), "load MCP session intent") {
+		t.Fatalf("restoreMCPIntent error = %v, want metadata read failure", err)
+	}
+	if !ac.MCPCatalog.DesiredEnabled("manual-a") {
+		t.Fatal("metadata read failure cleared current desired-enabled state")
+	}
+}
+
+func TestPersistMCPEnabledIntentWritesAndNormalizes(t *testing.T) {
+	sessionDir := t.TempDir()
+	if err := persistMCPEnabledIntent(sessionDir, []string{" b ", "a", "b"}); err != nil {
+		t.Fatalf("persistMCPEnabledIntent: %v", err)
+	}
+	meta, err := recovery.LoadSessionMeta(sessionDir)
+	if err != nil {
+		t.Fatalf("LoadSessionMeta: %v", err)
+	}
+	if meta == nil || !slices.Equal(meta.MCPEnabledServers, []string{"a", "b"}) {
+		t.Fatalf("persisted MCPEnabledServers = %v, want [a b]", meta)
+	}
+}
+
+func TestRuntimeMCPControlUsesSessionMetadataInsteadOfSharedCatalog(t *testing.T) {
+	ac := newTestAppContext(t)
+	if err := recovery.SetMCPEnabledServers(ac.SessionDir, []string{"manual-existing"}); err != nil {
+		t.Fatalf("seed session metadata: %v", err)
+	}
+	ac.MCPConfigs = []mcp.ServerConfig{
+		{Name: "manual-existing", Manual: true},
+		{Name: "manual-new", Manual: true},
+	}
+	ac.MCPMgr = mcp.NewPendingManager(ac.MCPConfigs)
+	ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
+
+	_, err := controlRuntimeMCP(context.Background(), ac, agent.MCPControlRequest{
+		Action:  agent.MCPControlEnable,
+		Servers: []string{"manual-new"},
+	})
+	if err == nil {
+		t.Fatal("expected connection failure for pending MCP server")
+	}
+	meta, err := recovery.LoadSessionMeta(ac.SessionDir)
+	if err != nil {
+		t.Fatalf("load session metadata: %v", err)
+	}
+	if meta == nil || !slices.Equal(meta.MCPEnabledServers, []string{"manual-existing", "manual-new"}) {
+		t.Fatalf("persisted MCP intent = %v, want existing and newly enabled servers", meta)
+	}
+}
+
+func TestRuntimeMCPControlForStaleSessionDoesNotMutateActiveRuntime(t *testing.T) {
+	ac := newTestAppContext(t)
+	staleSessionDir := t.TempDir()
+	if err := recovery.SetMCPEnabledServers(staleSessionDir, []string{"manual-old"}); err != nil {
+		t.Fatalf("seed stale session metadata: %v", err)
+	}
+	if err := recovery.SetMCPEnabledServers(ac.MainAgent.SessionDir(), []string{"manual-active"}); err != nil {
+		t.Fatalf("seed active session metadata: %v", err)
+	}
+	ac.MCPConfigs = []mcp.ServerConfig{
+		{Name: "manual-old", Manual: true},
+		{Name: "manual-new", Manual: true},
+		{Name: "manual-active", Manual: true},
+	}
+	ac.MCPMgr = mcp.NewPendingManager(ac.MCPConfigs)
+	ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
+
+	result, err := controlRuntimeMCP(context.Background(), ac, agent.MCPControlRequest{
+		Action:     agent.MCPControlEnable,
+		Servers:    []string{"manual-new"},
+		SessionDir: staleSessionDir,
+	})
+	if err != nil {
+		t.Fatalf("stale MCP control: %v", err)
+	}
+	if len(result.Enabled) != 0 || len(result.Tools) != 0 {
+		t.Fatalf("stale MCP control result = %#v, want no active runtime mutation", result)
+	}
+	if ac.MCPCatalog.DesiredEnabled("manual-new") {
+		t.Fatal("stale MCP control changed active catalog intent")
+	}
+	staleMeta, err := recovery.LoadSessionMeta(staleSessionDir)
+	if err != nil {
+		t.Fatalf("load stale session metadata: %v", err)
+	}
+	if staleMeta == nil || !slices.Equal(staleMeta.MCPEnabledServers, []string{"manual-new", "manual-old"}) {
+		t.Fatalf("stale session intent = %v, want old and newly enabled servers", staleMeta)
+	}
+	activeMeta, err := recovery.LoadSessionMeta(ac.MainAgent.SessionDir())
+	if err != nil {
+		t.Fatalf("load active session metadata: %v", err)
+	}
+	if activeMeta == nil || !slices.Equal(activeMeta.MCPEnabledServers, []string{"manual-active"}) {
+		t.Fatalf("active session intent = %v, want unchanged active intent", activeMeta)
+	}
+}
+
+func TestBeginMCPRestoreCancelsSupersededGeneration(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ac := &AppContext{Ctx: ctx}
+	firstGeneration, firstCtx := beginMCPRestore(ac)
+	secondGeneration, secondCtx := beginMCPRestore(ac)
+	if secondGeneration <= firstGeneration {
+		t.Fatalf("restore generations = %d then %d", firstGeneration, secondGeneration)
+	}
+	select {
+	case <-firstCtx.Done():
+	default:
+		t.Fatal("superseded restore context was not canceled")
+	}
+	select {
+	case <-secondCtx.Done():
+		t.Fatal("current restore context was canceled early")
+	default:
+	}
+	finishMCPRestore(ac, firstGeneration)
+	select {
+	case <-secondCtx.Done():
+		t.Fatal("stale finish canceled the current restore")
+	default:
+	}
+	finishMCPRestore(ac, secondGeneration)
+	select {
+	case <-secondCtx.Done():
+	default:
+		t.Fatal("current finish did not release its context")
 	}
 }

@@ -261,11 +261,19 @@ func restoreRuntimeMCP(ac *AppContext, ctrl *runtimeResourceController) func(con
 		return nil
 	}
 	return func(ctx context.Context) error {
-		ac.MainAgent.ResetMCPReady()
+		ac.mcpRestoreRunMu.Lock()
+		defer ac.mcpRestoreRunMu.Unlock()
+		readyGeneration := ac.MainAgent.ResetMCPReady()
 		ac.MainAgent.NotifyEnvStatusUpdated()
 		ac.MCPMgr.ConnectAll(ctx, runtimeMCPReconnectConfigs(ac.MCPConfigs, ctrl.MCPLoadedNames()))
-		result, err := loadMCPState(ctx, ac.MCPMgr)
-		ac.MainAgent.SetRuntimeMCPDiscovery(result.Tools, result.PromptBlock)
+		if err := restoreMCPIntent(ctx, ac); err != nil {
+			log.Warnf("MCP intent restore failed error=%v", err)
+		}
+		result, err := loadMCPState(ctx, ac.MCPCatalog, ac.MCPMgr)
+		// A session-switch restore may have replaced the readiness barrier
+		// while this reload ran; the generation guard then discards the stale
+		// surface instead of releasing the new session's barrier early.
+		ac.MainAgent.SetRuntimeMCPDiscoveryForGeneration(readyGeneration, result.Tools, result.PromptBlock)
 		ac.MainAgent.NotifyEnvStatusUpdated()
 		return err
 	}
@@ -291,11 +299,14 @@ func runtimeMCPReconnectConfigs(configs []mcp.ServerConfig, loaded map[string]st
 	return out
 }
 
-func loadMCPState(ctx context.Context, mgr *mcp.Manager) (agent.MCPControlResult, error) {
+func loadMCPState(ctx context.Context, catalog *mcp.Catalog, mgr *mcp.Manager) (agent.MCPControlResult, error) {
 	if mgr == nil {
 		return agent.MCPControlResult{}, nil
 	}
-	mcpTools, toolErr := mcp.DiscoverAllTools(ctx, mgr)
+	if catalog == nil {
+		catalog = mcp.NewCatalog(mgr)
+	}
+	mcpTools, toolErr := catalog.DiscoverAllTools(ctx)
 	block := mcp.ConnectedServersPromptBlock(ctx, mgr)
 	return agent.MCPControlResult{Tools: mcpTools, PromptBlock: block}, toolErr
 }

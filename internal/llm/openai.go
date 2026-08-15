@@ -124,7 +124,7 @@ type openAIRequest struct {
 // openAIMessage is a single message in the OpenAI API format.
 type openAIMessage struct {
 	Role    string `json:"role"`
-	Content any    `json:"content"` // string or []openAIContentBlock
+	Content any    `json:"content,omitempty"` // string or []openAIContentBlock; omitted when nil
 	// ReasoningContent is a pointer so an empty-but-present field can be
 	// serialized: thinking-mode backends (DeepSeek family) require every
 	// current-turn assistant tool-call message to carry reasoning_content,
@@ -133,6 +133,7 @@ type openAIMessage struct {
 	Name             string           `json:"name,omitempty"`
 	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string           `json:"tool_call_id,omitempty"`
+	Tools            []openAITool     `json:"tools,omitempty"`
 }
 
 // openAIContentBlock is a content block (text, image_url, or tool result).
@@ -297,7 +298,7 @@ func (o *OpenAIProvider) CompleteStream(
 	continuityMode := reasoningContinuityCompatMode(o.provider, model)
 	convertOpts := openAIConvertOptions{}
 	if o.provider != nil {
-		if cc := o.provider.ChatCompletionsCompat(); cc != nil {
+		if cc := o.provider.ChatCompletionsCompat(model); cc != nil {
 			convertOpts.requiresToolResultName = compatBool(cc.RequiresToolResultName, false)
 			convertOpts.requiresAssistantAfterToolResult = compatBool(cc.RequiresAssistantAfterToolResult, false)
 		}
@@ -359,7 +360,7 @@ func (o *OpenAIProvider) CompleteStream(
 	// (token usage then stays unreported).
 	var sendStreamOptions *bool
 	if o.provider != nil {
-		if cc := o.provider.ChatCompletionsCompat(); cc != nil {
+		if cc := o.provider.ChatCompletionsCompat(model); cc != nil {
 			sendStreamOptions = cc.SendStreamOptions
 		}
 	}
@@ -479,7 +480,7 @@ func (o *OpenAIProvider) CompleteStream(
 	defer cr.Stop()
 	inferFinishReason := false
 	if o.provider != nil {
-		if cc := o.provider.ChatCompletionsCompat(); cc != nil {
+		if cc := o.provider.ChatCompletionsCompat(model); cc != nil {
 			inferFinishReason = compatBool(cc.InferFinishReason, false)
 		}
 	}
@@ -585,6 +586,14 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 	lastWasTool := false
 
 	for _, msg := range msgs {
+		if len(msg.MCPTools) > 0 {
+			result = append(result, openAIMessage{
+				Role:  "system",
+				Tools: convertToolsToOpenAI(msg.MCPTools),
+			})
+			lastWasTool = false
+			continue
+		}
 		switch msg.Role {
 		case "user":
 			if opts.requiresAssistantAfterToolResult && lastWasTool {
@@ -645,10 +654,15 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 				omi.ReasoningContent = &rc
 			}
 			// OpenAI requires content to be null (not empty string) when
-			// tool_calls are present; set it only when there is actual text.
+			// tool_calls are present. The field carries json.RawMessage null
+			// explicitly because the struct tag is omitempty (for the MCP
+			// system-tools message); a nil Content would drop the key and
+			// change the wire shape strict gateways rely on.
 			contentText := assistantContentForReplay(msg)
 			if contentText != "" {
 				omi.Content = contentText
+			} else {
+				omi.Content = json.RawMessage("null")
 			}
 			// Convert tool calls.
 			for _, tc := range msg.ToolCalls {

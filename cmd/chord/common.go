@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -42,43 +43,49 @@ const (
 // caller must call Close() to release resources (log file, MCP connections,
 // agent).
 type AppContext struct {
-	Ctx              context.Context
-	Cancel           context.CancelFunc
-	ProjectRoot      string
-	ChordDir         string
-	ConfigHome       string
-	PathLocator      *config.PathLocator
-	ProjectLocator   *config.ProjectLocator
-	SessionDir       string
-	Cfg              *config.Config
-	GlobalCfg        *config.Config
-	ProjectCfg       *config.Config
-	Auth             config.AuthConfig
-	LLMClient        *llm.Client
-	ProviderName     string
-	ModelID          string
-	ProviderCfg      *llm.ProviderConfig // shared, safe for per-session reuse
-	LLMProvider      llm.Provider        // shared HTTP transport
-	ModelCfg         config.ModelConfig  // resolved model limits
-	ProviderCache    *providerCache      // per-provider config cache (key cooldown shared across sessions)
-	CtxMgr           *ctxmgr.Manager
-	Registry         *tools.Registry
-	HookEngine       hook.Manager
-	LSPManager       *lsp.Manager
-	MCPMgr           *mcp.Manager
-	MCPConfigs       []mcp.ServerConfig
-	RuntimeResources *runtimeResourceController
-	MainAgent        *agent.MainAgent
-	LoadedSkills     []*skill.Meta
-	LoadedCommands   []*command.Definition
-	LogWriter        *rotatingLogFile
-	StderrRedirect   *stderrRedirect
-	logCtx           logContext
-	logLevel         golog.Level
-	mcpStartOnce     sync.Once
-	skillsLoadOnce   sync.Once
-	SessionLock      *recovery.SessionLock
-	InstanceID       string
+	Ctx               context.Context
+	Cancel            context.CancelFunc
+	ProjectRoot       string
+	ChordDir          string
+	ConfigHome        string
+	PathLocator       *config.PathLocator
+	ProjectLocator    *config.ProjectLocator
+	SessionDir        string
+	Cfg               *config.Config
+	GlobalCfg         *config.Config
+	ProjectCfg        *config.Config
+	Auth              config.AuthConfig
+	LLMClient         *llm.Client
+	ProviderName      string
+	ModelID           string
+	ProviderCfg       *llm.ProviderConfig // shared, safe for per-session reuse
+	LLMProvider       llm.Provider        // shared HTTP transport
+	ModelCfg          config.ModelConfig  // resolved model limits
+	ProviderCache     *providerCache      // per-provider config cache (key cooldown shared across sessions)
+	CtxMgr            *ctxmgr.Manager
+	Registry          *tools.Registry
+	HookEngine        hook.Manager
+	LSPManager        *lsp.Manager
+	MCPMgr            *mcp.Manager
+	MCPCatalog        *mcp.Catalog
+	MCPConfigs        []mcp.ServerConfig
+	RuntimeResources  *runtimeResourceController
+	MainAgent         *agent.MainAgent
+	LoadedSkills      []*skill.Meta
+	LoadedCommands    []*command.Definition
+	LogWriter         *rotatingLogFile
+	StderrRedirect    *stderrRedirect
+	logCtx            logContext
+	logLevel          golog.Level
+	mcpStartOnce      sync.Once
+	mcpRuntimeStarted atomic.Bool
+	mcpRestoreRunMu   sync.Mutex
+	mcpRestoreStateMu sync.Mutex
+	mcpRestoreCancel  context.CancelFunc
+	mcpRestoreGen     atomic.Uint64
+	skillsLoadOnce    sync.Once
+	SessionLock       *recovery.SessionLock
+	InstanceID        string
 }
 
 // GetOrCreateProvider returns the cached ProviderConfig for provName, or creates
@@ -570,25 +577,15 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		if asyncMCP {
 			ac.MCPConfigs = mcpConfigs
 			ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(mcpConfigs, mcp.ClientInfo{Name: "chord", Version: Version})
+			ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
 		} else {
 			mgr, err := mcp.NewManagerWithClientInfo(ac.Ctx, mcpConfigs, mcp.ClientInfo{Name: "chord", Version: Version})
 			if err != nil {
 				log.Warnf("MCP initialization failed error=%v", err)
 			} else {
 				ac.MCPMgr = mgr
+				ac.MCPCatalog = mcp.NewCatalog(mgr)
 				ac.MCPConfigs = mcpConfigs
-				if len(mgr.Clients()) > 0 {
-					mcpTools, err := mcp.DiscoverAllTools(ac.Ctx, mgr)
-					if err != nil {
-						log.Warnf("MCP tool discovery failed error=%v", err)
-					} else {
-						for _, t := range mcpTools {
-							ac.Registry.Register(t)
-							log.Debugf("registered MCP tool name=%v", t.Name())
-						}
-					}
-					syncMCPPromptBlock = mcp.ConnectedServersPromptBlock(ac.Ctx, mgr)
-				}
 			}
 		}
 	}
@@ -644,6 +641,13 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		}
 		// Refresh skills metadata on session switch (non-blocking).
 		refreshSkills(ac)
+
+		// Reconcile MCP connections with the target session's persisted manual
+		// enabled intent. Skipped before runtime MCP startup (the startup path
+		// handles it) so resume-at-startup does not race startRuntimeMCP.
+		if ac.mcpRuntimeStarted.Load() {
+			restoreMCPSessionIntentAsync(ac)
+		}
 	})
 	ac.SessionLock = nil
 	ac.MainAgent.SetProviderModelRef(ac.ProviderName + "/" + modelID)
@@ -721,6 +725,21 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	// Custom command loading (synchronous — needed before first input).
 	loadCustomCommands(ac)
 
+	if !asyncMCP && len(mcpConfigs) > 0 {
+		result, err := loadSynchronousMCPState(ac.Ctx, ac)
+		if err != nil {
+			log.Warnf("MCP synchronous startup incomplete error=%v", err)
+		}
+		for _, t := range result.Tools {
+			ac.Registry.Register(t)
+			log.Debugf("registered MCP tool name=%v", t.Name())
+		}
+		syncMCPPromptBlock = result.PromptBlock
+		// Synchronous startup already connected and discovered MCP. Consume the
+		// async starter so createRuntime does not reconnect every server.
+		ac.mcpRuntimeStarted.Store(true)
+		ac.mcpStartOnce.Do(func() {})
+	}
 	applyInitialMCPPromptState(ac, asyncMCP, len(mcpConfigs) > 0, syncMCPPromptBlock)
 
 	return ac, nil

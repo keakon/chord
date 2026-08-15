@@ -98,6 +98,11 @@ func (a *MainAgent) mcpStatusText() string {
 		switch {
 		case r.OK:
 			state = "enabled"
+		case r.Manual && r.Enabled && !r.Disabled:
+			// Manual servers keep their desired-enabled intent while not
+			// connected. Automatic servers have no intent and fall through to
+			// the plain pending/error states below.
+			state = "enabled (unavailable)"
 		case r.Disabled:
 			state = "disabled"
 		case r.Pending:

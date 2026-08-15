@@ -737,6 +737,8 @@ model_templates:
     reasoning:
       effort: max
     compat:
+      chat_completions:
+        mcp_system_tools_message: true
       reasoning_continuity:
         mode: openai_visible
         preserve_history: true
@@ -777,6 +779,11 @@ model_pools:
   default:
     - kimi/kimi-k3
 ```
+
+`mcp_system_tools_message` 是显式的模型能力开关，不靠模型名猜测。开启后，
+运行时 manual MCP 声明会固定在原对话位置，不再改写顶层工具列表。不接受
+「只带 `tools`、不带 `content` 的 `role: system` 消息」的网关应保持关闭；
+fallback 池能力不一致时，Chord 会自动采用各模型都能接受的顶层工具形态。
 
 K2.7 Code 是 256K 上下文、面向编码的纯思考型号；它的 thinking 和
 `keep: all` 行为固定，因此模板不发送 `thinking` 对象。K2.6 是 256K
