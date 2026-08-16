@@ -139,10 +139,6 @@ type OAuthCredentialMetadataUpdate struct {
 	Expires       int64
 }
 
-func UpdateOAuthCredentialMetadataInFile(path, provider string, updates []OAuthCredentialMetadataUpdate) (AuthConfig, int, error) {
-	return UpdateOAuthCredentialMetadataInFileContext(context.Background(), path, provider, updates)
-}
-
 func UpdateOAuthCredentialMetadataInFileContext(ctx context.Context, path, provider string, updates []OAuthCredentialMetadataUpdate) (AuthConfig, int, error) {
 	if len(updates) == 0 {
 		auth, err := LoadAuthConfig(path)

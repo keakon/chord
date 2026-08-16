@@ -1338,15 +1338,7 @@ func stableReductionMessageShapeOf(msg *message.Message) stableReductionMessageS
 // Field equality implies hash equality, so this is strictly at least as
 // precise as comparing hashes.
 func stableReductionMessagesEquivalent(source, current []message.Message) bool {
-	if len(source) != len(current) {
-		return false
-	}
-	for i := range source {
-		if !stableReductionMessageEquivalent(&source[i], &current[i]) {
-			return false
-		}
-	}
-	return true
+	return len(source) == len(current) && reusableMessagePrefixLen(source, current) == len(source)
 }
 
 func stableReductionMessageEquivalent(a, b *message.Message) bool {
