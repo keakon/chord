@@ -1,9 +1,12 @@
 package privatefs
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 )
 
 const (
@@ -70,6 +73,40 @@ func WriteFile(root, path string, data []byte) (err error) {
 	}()
 	_, err = f.Write(data)
 	return err
+}
+
+// WriteFileSynced writes a private file and syncs its contents before close.
+func WriteFileSynced(root, path string, data []byte) (err error) {
+	f, err := OpenFile(root, path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+	}()
+	if _, err = f.Write(data); err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
+// SyncDir syncs a directory so a completed rename survives a crash. It is
+// best-effort on platforms and filesystems that reject directory fsync.
+func SyncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		if runtime.GOOS == "windows" || os.IsPermission(err) || errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func OpenFile(root, path string, flag int) (*os.File, error) {

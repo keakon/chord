@@ -78,6 +78,26 @@ func TestWriteFileRestrictsExistingFile(t *testing.T) {
 	assertMode(t, path, FileMode)
 }
 
+func TestWriteFileSyncedWritesPrivateFile(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "session")
+	path := filepath.Join(root, "state.json")
+	if err := WriteFileSynced(root, path, []byte("current")); err != nil {
+		t.Fatalf("WriteFileSynced: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "current" {
+		t.Fatalf("content = %q, want current", data)
+	}
+	assertMode(t, root, DirMode)
+	assertMode(t, path, FileMode)
+	if err := SyncDir(root); err != nil {
+		t.Fatalf("SyncDir: %v", err)
+	}
+}
+
 func TestWriteFileRejectsEscapingDirectorySymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating symbolic links requires elevated privileges on some Windows systems")

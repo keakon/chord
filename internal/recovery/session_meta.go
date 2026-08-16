@@ -140,12 +140,16 @@ func saveSessionMeta(sessionDir string, meta SessionMeta) error {
 	data = append(data, '\n')
 	path := filepath.Join(sessionDir, sessionMetaFile)
 	tmp := path + ".tmp"
-	if err := privatefs.WriteFile(sessionDir, tmp, data); err != nil {
+	if err := privatefs.WriteFileSynced(sessionDir, tmp, data); err != nil {
+		_ = os.Remove(tmp)
 		return fmt.Errorf("write session meta tmp: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("install session meta: %w", err)
+	}
+	if err := privatefs.SyncDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("sync session meta directory: %w", err)
 	}
 	return nil
 }
