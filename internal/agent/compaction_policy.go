@@ -984,10 +984,7 @@ func (a *MainAgent) incrementalMessageShapesLocked(original []message.Message) (
 	prevShape := a.lastPreparedLLMRequestShape
 	reusable := 0
 	if len(prevSource) == len(prevShape) {
-		limit := min(len(prevSource), len(original))
-		for reusable < limit && stableReductionMessageEquivalent(&prevSource[reusable], &original[reusable]) {
-			reusable++
-		}
+		reusable = reusableMessagePrefixLen(prevSource, original)
 	}
 	if reusable == len(original) && len(prevSource) == len(original) {
 		return prevShape, prevSource

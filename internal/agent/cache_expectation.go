@@ -42,10 +42,7 @@ type cacheExpectationRecord struct {
 func incrementalCacheExpectationShapes(previous *cacheExpectationRecord, messages []message.Message) (shapes []stableReductionMessageShape, tokens []int, source []message.Message) {
 	reusable := 0
 	if previous != nil && len(previous.Source) == len(previous.Shapes) && len(previous.Source) == len(previous.Tokens) {
-		limit := min(len(previous.Source), len(messages))
-		for reusable < limit && stableReductionMessageEquivalent(&previous.Source[reusable], &messages[reusable]) {
-			reusable++
-		}
+		reusable = reusableMessagePrefixLen(previous.Source, messages)
 		if reusable == len(messages) && len(previous.Source) == len(messages) {
 			return previous.Shapes, previous.Tokens, previous.Source
 		}

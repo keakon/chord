@@ -327,10 +327,7 @@ func (s *mcpToolMountState) incrementalMessageShapes(messages []message.Message,
 	messages = normalizeMCPMountMessages(messages, gitStatus)
 	reusable := 0
 	if len(s.messageSources) == len(s.messageShapes) {
-		limit := min(len(s.messageSources), len(messages))
-		for reusable < limit && stableReductionMessageEquivalent(&s.messageSources[reusable], &messages[reusable]) {
-			reusable++
-		}
+		reusable = reusableMessagePrefixLen(s.messageSources, messages)
 		if reusable == len(messages) && len(s.messageSources) == len(messages) {
 			return s.messageShapes
 		}
