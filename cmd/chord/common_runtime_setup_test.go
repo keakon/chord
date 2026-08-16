@@ -12,6 +12,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
@@ -78,6 +79,38 @@ func TestCreateRuntimeWiresConfirmAndQuestionTools(t *testing.T) {
 
 func TestRuntimeCloseIsNilSafe(t *testing.T) {
 	(&Runtime{}).Close()
+}
+
+func TestAppContextCleanupWaitsForProviderBackgroundTask(t *testing.T) {
+	provider := llm.NewProviderConfig("sample", config.ProviderConfig{}, nil)
+	releaseTask := make(chan struct{})
+	if !provider.StartBackgroundTask(func() { <-releaseTask }) {
+		t.Fatal("StartBackgroundTask returned false")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	ac := &AppContext{
+		Ctx:    ctx,
+		Cancel: cancel,
+		ProviderCache: &providerCache{m: map[string]*llm.ProviderConfig{
+			"sample": provider,
+		}},
+	}
+	cleanupDone := make(chan struct{})
+	go func() {
+		ac.cleanup()
+		close(cleanupDone)
+	}()
+	select {
+	case <-cleanupDone:
+		t.Fatal("cleanup returned before provider background task completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseTask)
+	select {
+	case <-cleanupDone:
+	case <-time.After(time.Second):
+		t.Fatal("cleanup did not return after provider background task completed")
+	}
 }
 
 func TestEnsureRuntimeLSPNoopsWithoutConfig(t *testing.T) {

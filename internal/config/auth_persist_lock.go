@@ -1,11 +1,17 @@
 package config
 
+import "context"
+
 type authFileLock struct {
 	lock *configMutationLock
 }
 
 func lockAuthFile(path string) (*authFileLock, error) {
-	lock, err := LockConfigMutation(path)
+	return lockAuthFileContext(context.Background(), path)
+}
+
+func lockAuthFileContext(ctx context.Context, path string) (*authFileLock, error) {
+	lock, err := LockConfigMutationContext(ctx, path)
 	if err != nil {
 		return nil, err
 	}

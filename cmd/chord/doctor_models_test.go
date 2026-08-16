@@ -1043,7 +1043,7 @@ func TestDoctorModelsOAuthRefresherUpdatesSharedRuntimeAuth(t *testing.T) {
 	creds := runtimeCfg.providerCredentials("openai")
 	llmProviderCfg := llm.NewProviderConfig("openai", providerCfg, config.ExtractAPIKeys(creds))
 	defer llmProviderCfg.Close()
-	if err := configureDoctorModelsOAuthRefresher(runtimeCfg, "openai", providerCfg, creds, llmProviderCfg, ""); err != nil {
+	if err := configureDoctorModelsOAuthRefresher(t.Context(), runtimeCfg, "openai", providerCfg, creds, llmProviderCfg, ""); err != nil {
 		t.Fatalf("configureDoctorModelsOAuthRefresher: %v", err)
 	}
 

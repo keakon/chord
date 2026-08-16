@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -29,8 +30,15 @@ func (l *configMutationLock) Close() error {
 }
 
 func LockConfigMutation(targetPath string) (*configMutationLock, error) {
+	return LockConfigMutationContext(context.Background(), targetPath)
+}
+
+func LockConfigMutationContext(ctx context.Context, targetPath string) (*configMutationLock, error) {
 	if targetPath == "" {
 		return nil, fmt.Errorf("config path is empty")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	lockPath := targetPath + ".lock"
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
@@ -40,7 +48,7 @@ func LockConfigMutation(targetPath string) (*configMutationLock, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open config lock file: %w", err)
 	}
-	if err := lockConfigMutationFile(f); err != nil {
+	if err := lockConfigMutationFileContext(ctx, f); err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("lock config file: %w", err)
 	}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -139,12 +140,16 @@ type OAuthCredentialMetadataUpdate struct {
 }
 
 func UpdateOAuthCredentialMetadataInFile(path, provider string, updates []OAuthCredentialMetadataUpdate) (AuthConfig, int, error) {
+	return UpdateOAuthCredentialMetadataInFileContext(context.Background(), path, provider, updates)
+}
+
+func UpdateOAuthCredentialMetadataInFileContext(ctx context.Context, path, provider string, updates []OAuthCredentialMetadataUpdate) (AuthConfig, int, error) {
 	if len(updates) == 0 {
 		auth, err := LoadAuthConfig(path)
 		return auth, 0, err
 	}
 	changedCount := 0
-	auth, err := mutateAuthYAMLFile(path, func(doc *authYAMLDocument) error {
+	auth, err := mutateAuthYAMLFileContext(ctx, path, func(doc *authYAMLDocument) error {
 		refs, _, err := doc.providerCredentialRefs(provider)
 		if err != nil {
 			return err
@@ -210,6 +215,10 @@ func RemoveOAuthCredentialsInFile(path string, remove func(provider string, cred
 }
 
 func mutateAuthYAMLFile(path string, mutate func(*authYAMLDocument) error) (AuthConfig, error) {
+	return mutateAuthYAMLFileContext(context.Background(), path, mutate)
+}
+
+func mutateAuthYAMLFileContext(ctx context.Context, path string, mutate func(*authYAMLDocument) error) (AuthConfig, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("auth config path is empty")
 	}
@@ -219,7 +228,7 @@ func mutateAuthYAMLFile(path string, mutate func(*authYAMLDocument) error) (Auth
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create auth config dir: %w", err)
 	}
-	lock, err := lockAuthFile(path)
+	lock, err := lockAuthFileContext(ctx, path)
 	if err != nil {
 		return nil, err
 	}

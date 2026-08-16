@@ -735,7 +735,7 @@ func executeDoctorModelsPlan(parentCtx context.Context, runtimeCfg *doctorModels
 	return report
 }
 
-func configureDoctorModelsOAuthRefresher(runtimeCfg *doctorModelsRuntimeConfig, providerName string, providerCfg config.ProviderConfig, creds []config.ProviderCredential, llmProviderCfg *llm.ProviderConfig, effectiveProxy string) error {
+func configureDoctorModelsOAuthRefresher(ctx context.Context, runtimeCfg *doctorModelsRuntimeConfig, providerName string, providerCfg config.ProviderConfig, creds []config.ProviderCredential, llmProviderCfg *llm.ProviderConfig, effectiveProxy string) error {
 	if runtimeCfg == nil || llmProviderCfg == nil {
 		return nil
 	}
@@ -756,7 +756,7 @@ func configureDoctorModelsOAuthRefresher(runtimeCfg *doctorModelsRuntimeConfig, 
 	}
 	llmProviderCfg.SetOAuthRefresher(tokenURL, clientID, runtimeCfg.AuthPath, authStatePath, &runtimeCfg.Auth, &runtimeCfg.AuthMu, oauthMap, effectiveProxy)
 	if len(backfills) > 0 {
-		if saveErr := persistOAuthMetadataBackfills(runtimeCfg.AuthPath, &runtimeCfg.Auth, &runtimeCfg.AuthMu, providerName, backfills); saveErr != nil {
+		if saveErr := persistOAuthMetadataBackfills(ctx, runtimeCfg.AuthPath, &runtimeCfg.Auth, &runtimeCfg.AuthMu, providerName, backfills); saveErr != nil {
 			log.Warnf("failed to persist backfilled OAuth email/account_id provider=%v error=%v", providerName, saveErr)
 		}
 	}
@@ -798,7 +798,7 @@ func executeDoctorModelTarget(parentCtx context.Context, runtimeCfg *doctorModel
 		llmProviderCfg.SetRateLimiter(normalizedCfg.RateLimit)
 	}
 	effectiveProxy := llm.ResolveEffectiveProxy(normalizedCfg.Proxy, cfg.Proxy)
-	if err := configureDoctorModelsOAuthRefresher(runtimeCfg, target.ProviderName, normalizedCfg, creds, llmProviderCfg, effectiveProxy); err != nil {
+	if err := configureDoctorModelsOAuthRefresher(parentCtx, runtimeCfg, target.ProviderName, normalizedCfg, creds, llmProviderCfg, effectiveProxy); err != nil {
 		result.Status = doctorModelResultConfigError
 		result.Error = err.Error()
 		return result

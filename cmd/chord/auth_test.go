@@ -1920,7 +1920,7 @@ func TestPersistOAuthMetadataBackfillsUpdatesAuthFileAndMemory(t *testing.T) {
 		t.Fatalf("oauthCredentialMap: %v", err)
 	}
 	var mu sync.Mutex
-	if err := persistOAuthMetadataBackfills(authPath, &auth, &mu, "codex", backfills); err != nil {
+	if err := persistOAuthMetadataBackfills(t.Context(), authPath, &auth, &mu, "codex", backfills); err != nil {
 		t.Fatalf("persistOAuthMetadataBackfills: %v", err)
 	}
 	if got := auth["codex"][0].OAuth.AccountID; got != "acct-token" {
@@ -1951,7 +1951,7 @@ func TestPersistOAuthMetadataBackfillsUpdatesAuthFileAndMemory(t *testing.T) {
 	if got := loaded["codex"][0].OAuth.Expires; got != 4102444800000 {
 		t.Fatalf("persisted expires = %d", got)
 	}
-	if err := persistOAuthMetadataBackfills(authPath, &auth, &mu, "codex", []oauthMetadataBackfill{{Email: "ignored@example.com"}}); err != nil {
+	if err := persistOAuthMetadataBackfills(t.Context(), authPath, &auth, &mu, "codex", []oauthMetadataBackfill{{Email: "ignored@example.com"}}); err != nil {
 		t.Fatalf("persistOAuthMetadataBackfills empty account id: %v", err)
 	}
 }

@@ -374,6 +374,26 @@ func (p *ProviderConfig) StartCodexRateLimitPolling(fetchFn func(string, string)
 	p.codexPollFetchFn = fetchFn
 }
 
+// StartBackgroundTask starts a task owned by the provider lifecycle. Close
+// waits for every accepted task and rejects new tasks once shutdown begins.
+func (p *ProviderConfig) StartBackgroundTask(run func()) bool {
+	if p == nil || run == nil {
+		return false
+	}
+	p.mu.Lock()
+	if p.codexPollClosed {
+		p.mu.Unlock()
+		return false
+	}
+	p.backgroundTaskWG.Add(1)
+	p.mu.Unlock()
+	go func() {
+		defer p.backgroundTaskWG.Done()
+		run()
+	}()
+	return true
+}
+
 func (p *ProviderConfig) Close() {
 	p.mu.Lock()
 	p.codexPollClosed = true
@@ -387,6 +407,7 @@ func (p *ProviderConfig) Close() {
 	}
 	monitor.wait()
 	p.codexPollWG.Wait()
+	p.backgroundTaskWG.Wait()
 	p.mu.Lock()
 	p.polledRateLimitInFlight = make(map[int]bool)
 	p.mu.Unlock()

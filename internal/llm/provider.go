@@ -220,6 +220,7 @@ type ProviderConfig struct {
 	codexPollFetchFn           func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error)
 	codexPollWG                sync.WaitGroup
 	codexPollClosed            bool
+	backgroundTaskWG           sync.WaitGroup
 	codexLifecycleCtx          context.Context
 	codexLifecycleCancel       context.CancelFunc
 	onPolledUpdate             func() // called after polled snapshot writes a new snapshot

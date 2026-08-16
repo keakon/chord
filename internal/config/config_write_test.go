@@ -1,9 +1,12 @@
 package config
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestWriteConfigFileAtomicallyCreatesFile(t *testing.T) {
@@ -18,6 +21,38 @@ func TestWriteConfigFileAtomicallyCreatesFile(t *testing.T) {
 	}
 	if string(got) != string(data) {
 		t.Fatalf("file content = %q, want %q", got, data)
+	}
+}
+
+func TestLockConfigMutationContextStopsWaiting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	first, err := LockConfigMutation(path)
+	if err != nil {
+		t.Fatalf("LockConfigMutation: %v", err)
+	}
+	defer first.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err = LockConfigMutationContext(ctx, path)
+	if err == nil {
+		t.Fatal("LockConfigMutationContext acquired a held lock")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("LockConfigMutationContext error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("context cancellation took too long: %v", elapsed)
+	}
+}
+
+func TestLockConfigMutationContextRejectsCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := LockConfigMutationContext(ctx, filepath.Join(t.TempDir(), "config.yaml"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("LockConfigMutationContext error = %v, want context canceled", err)
 	}
 }
 

@@ -757,6 +757,9 @@ func (ac *AppContext) cleanup() {
 	if ac.Cancel != nil {
 		ac.Cancel()
 	}
+	if ac.ProviderCache != nil {
+		ac.ProviderCache.close()
+	}
 	if ac.StderrRedirect != nil {
 		_ = ac.StderrRedirect.Restore()
 		ac.StderrRedirect = nil

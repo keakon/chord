@@ -98,7 +98,7 @@ func startOAuthMetadataBackfill(
 		return
 	}
 	credsSnapshot := cloneProviderCredentials(creds)
-	go func() {
+	providerCfg.StartBackgroundTask(func() {
 		select {
 		case <-ctx.Done():
 			return
@@ -114,10 +114,10 @@ func startOAuthMetadataBackfill(
 		if len(backfills) == 0 {
 			return
 		}
-		if err := persistOAuthMetadataBackfills(authPath, auth, authMu, providerName, backfills); err != nil {
+		if err := persistOAuthMetadataBackfills(ctx, authPath, auth, authMu, providerName, backfills); err != nil {
 			log.Warnf("failed to persist backfilled OAuth metadata provider=%v error=%v", providerName, err)
 		}
-	}()
+	})
 }
 
 func cloneProviderCredentials(creds []config.ProviderCredential) []config.ProviderCredential {
@@ -254,6 +254,7 @@ func oauthCredentialMapWithOptions(creds []config.ProviderCredential, strict boo
 }
 
 func persistOAuthMetadataBackfills(
+	ctx context.Context,
 	authPath string,
 	auth *config.AuthConfig,
 	authMu *sync.Mutex,
@@ -276,7 +277,7 @@ func persistOAuthMetadataBackfills(
 	if len(updates) == 0 {
 		return nil
 	}
-	updatedAuth, changed, err := config.UpdateOAuthCredentialMetadataInFile(authPath, provider, updates)
+	updatedAuth, changed, err := config.UpdateOAuthCredentialMetadataInFileContext(ctx, authPath, provider, updates)
 	if err != nil {
 		return err
 	}
