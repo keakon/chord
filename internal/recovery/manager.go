@@ -163,9 +163,11 @@ type RecoveryManager struct {
 	// The tool-activity journal is written from tool-execution goroutines, so it
 	// uses its own mutex and file handle instead of sharing r.mu with message
 	// writes; the two paths must not serialize against each other.
-	journalMu     sync.Mutex
-	journalHandle *os.File
-	journalClosed bool
+	journalMu             sync.Mutex
+	journalHandle         *os.File
+	journalClosed         bool
+	journalDirSyncPending bool
+	syncJournalDir        func() error
 }
 
 // NewRecoveryManager creates a new RecoveryManager rooted at sessionDir.
@@ -307,9 +309,9 @@ func (r *RecoveryManager) PersistMessage(agentID string, msg message.Message) er
 	return err
 }
 
-// AppendToolActivity durably appends one started record to the tool-activity
-// journal. The write is a plain file write (process-crash durable, not fsync).
-// After Close it returns an error instead of silently succeeding.
+// AppendToolActivity durably appends and syncs one started record to the
+// tool-activity journal before the tool body may produce side effects. After
+// Close it returns an error instead of silently succeeding.
 func (r *RecoveryManager) AppendToolActivity(rec ToolActivityRecord) error {
 	r.journalMu.Lock()
 	defer r.journalMu.Unlock()
@@ -317,11 +319,20 @@ func (r *RecoveryManager) AppendToolActivity(rec ToolActivityRecord) error {
 		return fmt.Errorf("tool-activity journal is closed")
 	}
 	if r.journalHandle == nil {
-		f, err := privatefs.OpenFile(r.sessionDir, r.toolActivityPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+		path := r.toolActivityPath()
+		created := false
+		if _, err := os.Stat(path); err != nil {
+			if !os.IsNotExist(err) {
+				return fmt.Errorf("stat tool-activity journal: %w", err)
+			}
+			created = true
+		}
+		f, err := privatefs.OpenFile(r.sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 		if err != nil {
 			return fmt.Errorf("open tool-activity journal: %w", err)
 		}
 		r.journalHandle = f
+		r.journalDirSyncPending = created
 	}
 	data, err := json.Marshal(rec)
 	if err != nil {
@@ -330,6 +341,19 @@ func (r *RecoveryManager) AppendToolActivity(rec ToolActivityRecord) error {
 	data = append(data, '\n')
 	if _, err := r.journalHandle.Write(data); err != nil {
 		return fmt.Errorf("append tool-activity record: %w", err)
+	}
+	if err := r.journalHandle.Sync(); err != nil {
+		return fmt.Errorf("sync tool-activity record: %w", err)
+	}
+	if r.journalDirSyncPending {
+		syncDir := r.syncJournalDir
+		if syncDir == nil {
+			syncDir = func() error { return privatefs.SyncDir(r.sessionDir) }
+		}
+		if err := syncDir(); err != nil {
+			return fmt.Errorf("sync tool-activity directory: %w", err)
+		}
+		r.journalDirSyncPending = false
 	}
 	return nil
 }

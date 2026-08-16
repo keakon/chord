@@ -167,6 +167,29 @@ func TestToolActivityAppendAfterCloseReturnsError(t *testing.T) {
 	}
 }
 
+func TestToolActivityRetriesDirectorySyncAfterFailure(t *testing.T) {
+	rm, _ := newTestManager(t)
+	defer rm.Close()
+	var syncCalls int
+	rm.syncJournalDir = func() error {
+		syncCalls++
+		if syncCalls == 1 {
+			return fmt.Errorf("temporary directory sync failure")
+		}
+		return nil
+	}
+	record := ToolActivityRecord{CallID: "call-1", AgentID: "main", Tool: "write", State: ToolActivityStateStarted}
+	if err := rm.AppendToolActivity(record); err == nil {
+		t.Fatal("first AppendToolActivity succeeded despite directory sync failure")
+	}
+	if err := rm.AppendToolActivity(record); err != nil {
+		t.Fatalf("second AppendToolActivity: %v", err)
+	}
+	if syncCalls != 2 {
+		t.Fatalf("directory sync calls = %d, want 2", syncCalls)
+	}
+}
+
 func TestToolActivityConcurrentWithMessageWrites(t *testing.T) {
 	rm, _ := newTestManager(t)
 	defer rm.Close()
