@@ -689,7 +689,7 @@ func TestApplyPatchHunkFailureLabelsTruncatedExpectedLineAsPrefix(t *testing.T) 
 	if !strings.Contains(out, "first expected line prefix: \"") {
 		t.Fatalf("output must label a truncated diagnostic as a prefix: %q", out)
 	}
-	diagnostic := strings.Split(out, "Unapplied operations")[0]
+	diagnostic, _, _ := strings.Cut(out, "Unapplied operations")
 	if strings.Contains(diagnostic, "expected complete line") || strings.Contains(diagnostic, expected) {
 		t.Fatalf("diagnostic must not claim or print the unavailable complete line: %q", diagnostic)
 	}

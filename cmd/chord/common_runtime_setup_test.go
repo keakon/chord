@@ -457,8 +457,7 @@ func TestRuntimeMCPControlForStaleSessionDoesNotMutateActiveRuntime(t *testing.T
 }
 
 func TestBeginMCPRestoreCancelsSupersededGeneration(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	ac := &AppContext{Ctx: ctx}
 	firstGeneration, firstCtx := beginMCPRestore(ac)
 	secondGeneration, secondCtx := beginMCPRestore(ac)

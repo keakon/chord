@@ -28,8 +28,8 @@ func (e *taskSettlementJournalCorruptionError) Error() string { return e.err.Err
 func (e *taskSettlementJournalCorruptionError) Unwrap() error { return e.err }
 
 func isTaskSettlementJournalCorruption(err error) bool {
-	var corruption *taskSettlementJournalCorruptionError
-	return errors.As(err, &corruption)
+	_, ok := errors.AsType[*taskSettlementJournalCorruptionError](err)
+	return ok
 }
 
 type TaskSettlement struct {

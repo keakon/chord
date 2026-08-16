@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
@@ -92,11 +93,8 @@ func effectiveRequestReasoningActive(base map[string]any, overrides config.Reque
 	reasoningFields := make(map[string]string, len(openAIChatReasoningBodyKeys))
 	for key, value := range base {
 		final[key] = cloneRequestOverrideValue(value)
-		for _, reasoningKey := range openAIChatReasoningBodyKeys {
-			if key == reasoningKey {
-				reasoningFields[key] = key
-				break
-			}
+		if slices.Contains(openAIChatReasoningBodyKeys, key) {
+			reasoningFields[key] = key
 		}
 	}
 	for source, target := range overrides.RenameBodyFields {
