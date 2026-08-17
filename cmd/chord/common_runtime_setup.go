@@ -453,47 +453,60 @@ func restoreMCPSessionIntentAsync(ac *AppContext) {
 		ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
 	}
 	sessionDir := ac.MainAgent.SessionDir()
-	readyGeneration := ac.MainAgent.ResetMCPReady()
-	restoreGeneration, restoreCtx := beginMCPRestore(ac)
+	readyGeneration, restoreGeneration, restoreCtx := beginMCPRestore(ac)
 	ac.MainAgent.NotifyEnvStatusUpdated()
-	go func() {
-		defer finishMCPRestore(ac, restoreGeneration)
-		ac.mcpRestoreRunMu.Lock()
-		defer ac.mcpRestoreRunMu.Unlock()
-		if ac.mcpRestoreGen.Load() != restoreGeneration {
-			ac.MainAgent.SetRuntimeMCPDiscoveryForGeneration(readyGeneration, nil, "")
-			return
-		}
-		if err := restoreMCPIntentForSession(restoreCtx, ac, sessionDir); err != nil {
-			log.Warnf("MCP intent restore failed error=%v", err)
-		}
-		if ac.mcpRestoreGen.Load() != restoreGeneration {
-			ac.MainAgent.SetRuntimeMCPDiscoveryForGeneration(readyGeneration, nil, "")
-			return
-		}
-		result, err := loadMCPState(restoreCtx, ac.MCPCatalog, ac.MCPMgr)
-		if err != nil {
-			log.Warnf("MCP tool discovery failed error=%v", err)
-		}
-		ac.MainAgent.SetRuntimeMCPDiscoveryForGeneration(readyGeneration, result.Tools, result.PromptBlock)
-		ac.MainAgent.NotifyEnvStatusUpdated()
-	}()
+	go runMCPRestoreFlow(ac, sessionDir, readyGeneration, restoreGeneration, restoreCtx, false)
 }
 
-func beginMCPRestore(ac *AppContext) (uint64, context.Context) {
+// runMCPRestoreFlow is the shared body of the startup and session-switch
+// restore goroutines: barrier-fenced intent restore, an optional initial
+// ConnectAll, then discovery delivery for readyGeneration. Stale generations
+// hand the current barrier an empty surface instead of leaving it blocked.
+func runMCPRestoreFlow(ac *AppContext, sessionDir string, readyGeneration agent.MCPReadyGeneration, restoreGeneration uint64, restoreCtx context.Context, connectAll bool) {
+	defer finishMCPRestore(ac, restoreGeneration)
+	ac.mcpRestoreRunMu.Lock()
+	defer ac.mcpRestoreRunMu.Unlock()
+	if ac.mcpRestoreGen.Load() != restoreGeneration {
+		ac.MainAgent.SetRuntimeMCPDiscoveryForGeneration(readyGeneration, nil, "")
+		return
+	}
+	if connectAll {
+		ac.MCPMgr.ConnectAll(restoreCtx, ac.MCPConfigs)
+	}
+	if err := restoreMCPIntentForSession(restoreCtx, ac, sessionDir); err != nil {
+		log.Warnf("MCP intent restore failed error=%v", err)
+	}
+	if ac.mcpRestoreGen.Load() != restoreGeneration {
+		ac.MainAgent.SetRuntimeMCPDiscoveryForGeneration(readyGeneration, nil, "")
+		return
+	}
+	result, err := loadMCPState(restoreCtx, ac.MCPCatalog, ac.MCPMgr)
+	if err != nil {
+		log.Warnf("MCP tool discovery failed error=%v", err)
+	}
+	ac.MainAgent.SetRuntimeMCPDiscoveryForGeneration(readyGeneration, result.Tools, result.PromptBlock)
+	ac.MainAgent.NotifyEnvStatusUpdated()
+}
+
+// beginMCPRestore takes the readiness-barrier generation and the restore
+// generation as one pair under the restore state lock, so two concurrent
+// entry points cannot interleave the two counters in opposite orders and
+// deliver an empty surface against the surviving barrier.
+func beginMCPRestore(ac *AppContext) (agent.MCPReadyGeneration, uint64, context.Context) {
 	parent := ac.Ctx
 	if parent == nil {
 		parent = context.Background()
 	}
 	ac.mcpRestoreStateMu.Lock()
 	defer ac.mcpRestoreStateMu.Unlock()
+	readyGeneration := ac.MainAgent.ResetMCPReady()
 	generation := ac.mcpRestoreGen.Add(1)
 	if ac.mcpRestoreCancel != nil {
 		ac.mcpRestoreCancel()
 	}
 	ctx, cancel := context.WithCancel(parent)
 	ac.mcpRestoreCancel = cancel
-	return generation, ctx
+	return readyGeneration, generation, ctx
 }
 
 func finishMCPRestore(ac *AppContext, generation uint64) {
@@ -525,34 +538,11 @@ func startRuntimeMCP(ac *AppContext) {
 		ac.MainAgent.RegisterMainMCPServers(mainServerNames)
 
 		// Block initial requests until MCP has either connected or failed.
-		readyGeneration := ac.MainAgent.ResetMCPReady()
-		restoreGeneration, restoreCtx := beginMCPRestore(ac)
+		readyGeneration, restoreGeneration, restoreCtx := beginMCPRestore(ac)
 		sessionDir := ac.MainAgent.SessionDir()
 		ac.MainAgent.NotifyEnvStatusUpdated()
 
-		go func() {
-			defer finishMCPRestore(ac, restoreGeneration)
-			ac.mcpRestoreRunMu.Lock()
-			defer ac.mcpRestoreRunMu.Unlock()
-			if ac.mcpRestoreGen.Load() != restoreGeneration {
-				ac.MainAgent.SetRuntimeMCPDiscoveryForGeneration(readyGeneration, nil, "")
-				return
-			}
-			ac.MCPMgr.ConnectAll(restoreCtx, ac.MCPConfigs)
-			if err := restoreMCPIntentForSession(restoreCtx, ac, sessionDir); err != nil {
-				log.Warnf("MCP intent restore failed error=%v", err)
-			}
-			if ac.mcpRestoreGen.Load() != restoreGeneration {
-				ac.MainAgent.SetRuntimeMCPDiscoveryForGeneration(readyGeneration, nil, "")
-				return
-			}
-			result, err := loadMCPState(restoreCtx, ac.MCPCatalog, ac.MCPMgr)
-			if err != nil {
-				log.Warnf("MCP tool discovery failed error=%v", err)
-			}
-			ac.MainAgent.SetRuntimeMCPDiscoveryForGeneration(readyGeneration, result.Tools, result.PromptBlock)
-			ac.MainAgent.NotifyEnvStatusUpdated()
-		}()
+		go runMCPRestoreFlow(ac, sessionDir, readyGeneration, restoreGeneration, restoreCtx, true)
 	})
 }
 

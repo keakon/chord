@@ -458,9 +458,9 @@ func TestRuntimeMCPControlForStaleSessionDoesNotMutateActiveRuntime(t *testing.T
 
 func TestBeginMCPRestoreCancelsSupersededGeneration(t *testing.T) {
 	ctx := t.Context()
-	ac := &AppContext{Ctx: ctx}
-	firstGeneration, firstCtx := beginMCPRestore(ac)
-	secondGeneration, secondCtx := beginMCPRestore(ac)
+	ac := &AppContext{Ctx: ctx, MainAgent: newTestAppContext(t).MainAgent}
+	_, firstGeneration, firstCtx := beginMCPRestore(ac)
+	_, secondGeneration, secondCtx := beginMCPRestore(ac)
 	if secondGeneration <= firstGeneration {
 		t.Fatalf("restore generations = %d then %d", firstGeneration, secondGeneration)
 	}
