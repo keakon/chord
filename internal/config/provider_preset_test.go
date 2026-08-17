@@ -36,14 +36,6 @@ func TestNormalizeProviderPreset_NormalizesPresetCase(t *testing.T) {
 			cfg:  ProviderConfig{Preset: " CODEX "},
 			want: ProviderPresetCodex,
 		},
-		{
-			name: "azure",
-			cfg: ProviderConfig{
-				Preset: " Azure ",
-				APIURL: "https://example.openai.azure.com/openai/v1/responses?api-version=preview",
-			},
-			want: ProviderPresetAzure,
-		},
 	}
 
 	for _, tc := range cases {
@@ -134,8 +126,7 @@ func TestEffectiveAuthScheme(t *testing.T) {
 		{name: "messages default", providerType: ProviderTypeMessages, apiURL: "https://example.invalid/v1/messages", want: AuthSchemeAnthropicAPIKey},
 		{name: "responses default", providerType: ProviderTypeResponses, apiURL: "https://example.invalid/v1/responses", want: AuthSchemeBearer},
 		{name: "chat completions default", providerType: ProviderTypeChatCompletions, apiURL: "https://example.invalid/v1/chat/completions", want: AuthSchemeBearer},
-		{name: "azure preset default", preset: ProviderPresetAzure, providerType: ProviderTypeResponses, apiURL: "https://example.invalid/openai/v1/responses", want: AuthSchemeAPIKey},
-		{name: "explicit override wins", preset: ProviderPresetAzure, providerType: ProviderTypeMessages, apiURL: "https://example.invalid/v1/messages", authScheme: AuthSchemeBearer, want: AuthSchemeBearer},
+		{name: "explicit override wins", preset: "", providerType: ProviderTypeMessages, apiURL: "https://example.invalid/v1/messages", authScheme: AuthSchemeBearer, want: AuthSchemeBearer},
 		{name: "infer from url messages", apiURL: "https://example.invalid/v1/messages", want: AuthSchemeAnthropicAPIKey},
 		{name: "infer from url responses", apiURL: "https://example.invalid/v1/responses", want: AuthSchemeBearer},
 	}
@@ -188,84 +179,13 @@ func TestNormalizeProviderPreset_PresetRejectsUnsupportedType(t *testing.T) {
 	}
 }
 
-func TestNormalizeProviderPreset_AzurePresetDefaults(t *testing.T) {
-	cfg := ProviderConfig{
-		Preset: ProviderPresetAzure,
+func TestNormalizeProviderPresetRejectsUnsupportedAzurePreset(t *testing.T) {
+	_, _, err := NormalizeProviderPreset(ProviderConfig{
+		Preset: "azure",
 		APIURL: "https://example.openai.azure.com/openai/v1/responses?api-version=preview",
-	}
-
-	got, meta, err := NormalizeProviderPreset(cfg)
-	if err != nil {
-		t.Fatalf("NormalizeProviderPreset returned error: %v", err)
-	}
-	if meta.Enabled || meta.Strict || meta.Source != "" {
-		t.Fatalf("azure preset should not enable Codex OAuth metadata: %#v", meta)
-	}
-	if got.Type != ProviderTypeResponses {
-		t.Fatalf("azure preset type = %q, want %q", got.Type, ProviderTypeResponses)
-	}
-	if got.Store == nil || *got.Store != true {
-		t.Fatalf("azure preset Store = %v, want true", got.Store)
-	}
-	if got.AuthScheme != "" {
-		t.Fatalf("azure preset AuthScheme = %q, want empty explicit override", got.AuthScheme)
-	}
-}
-
-func TestNormalizeProviderPreset_AzurePresetPreservesExplicitStore(t *testing.T) {
-	storeFalse := false
-	cfg := ProviderConfig{
-		Preset: ProviderPresetAzure,
-		APIURL: "https://example.openai.azure.com/openai/v1/responses?api-version=preview",
-		Store:  &storeFalse,
-	}
-
-	got, _, err := NormalizeProviderPreset(cfg)
-	if err != nil {
-		t.Fatalf("NormalizeProviderPreset returned error: %v", err)
-	}
-	if got.Store == nil || *got.Store != false {
-		t.Fatalf("azure preset explicit Store = %v, want false", got.Store)
-	}
-}
-
-func TestNormalizeProviderPreset_AzurePresetRejectsUnsupportedType(t *testing.T) {
-	cfg := ProviderConfig{
-		Type:   ProviderTypeChatCompletions,
-		Preset: ProviderPresetAzure,
-		APIURL: "https://example.openai.azure.com/openai/v1/responses?api-version=preview",
-	}
-	_, _, err := NormalizeProviderPreset(cfg)
+	})
 	if err == nil {
-		t.Fatal("expected preset azure to reject unsupported type")
-	}
-}
-
-func TestNormalizeProviderPreset_AzurePresetRequiresResponsesPath(t *testing.T) {
-	cases := []struct {
-		name   string
-		apiURL string
-	}{
-		{
-			name:   "empty",
-			apiURL: "",
-		},
-		{
-			name:   "chat completions with query",
-			apiURL: "https://example.openai.azure.com/openai/v1/chat/completions?api-version=preview",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := NormalizeProviderPreset(ProviderConfig{
-				Preset: ProviderPresetAzure,
-				APIURL: tc.apiURL,
-			})
-			if err == nil {
-				t.Fatal("expected preset azure to reject non-Responses api_url")
-			}
-		})
+		t.Fatal("expected unsupported preset azure to be rejected")
 	}
 }
 

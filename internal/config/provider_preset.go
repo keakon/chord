@@ -21,8 +21,8 @@ type CodexTransportResolution struct {
 // Codex transport metadata for a provider configuration.
 //
 // Current runtime behavior is intentionally strict: only providers with
-// preset: codex are treated as OpenAI ChatGPT/Codex OAuth transport. Azure
-// support is explicit via preset: azure; endpoint URLs are not auto-detected.
+// preset: codex are treated as OpenAI ChatGPT/Codex OAuth transport. Endpoint
+// URLs are not auto-detected.
 func NormalizeProviderPreset(cfg ProviderConfig) (ProviderConfig, CodexTransportResolution, error) {
 	normalized := cfg
 	resolution := CodexTransportResolution{}
@@ -33,26 +33,14 @@ func NormalizeProviderPreset(cfg ProviderConfig) (ProviderConfig, CodexTransport
 	}
 
 	preset := strings.TrimSpace(strings.ToLower(cfg.Preset))
-	if preset != "" && preset != ProviderPresetCodex && preset != ProviderPresetAzure {
+	if preset != "" && preset != ProviderPresetCodex {
 		return cfg, resolution, fmt.Errorf("unsupported provider preset %q", cfg.Preset)
 	}
 	if preset != "" {
 		normalized.Preset = preset
 	}
-	// Only validate type if it's explicitly set.
-	if (preset == ProviderPresetCodex || preset == ProviderPresetAzure) && cfg.Type != "" && cfg.Type != ProviderTypeResponses {
+	if preset == ProviderPresetCodex && cfg.Type != "" && cfg.Type != ProviderTypeResponses {
 		return cfg, resolution, fmt.Errorf("preset %q requires provider.type to be %q", cfg.Preset, ProviderTypeResponses)
-	}
-	if preset == ProviderPresetAzure {
-		if !APIURLPathHasSuffix(normalized.APIURL, "/responses") {
-			return cfg, resolution, fmt.Errorf("preset=%s requires api_url path ending in /responses", ProviderPresetAzure)
-		}
-		normalized.Type = ProviderTypeResponses
-		if normalized.Store == nil {
-			store := true
-			normalized.Store = &store
-		}
-		return normalized, resolution, nil
 	}
 	if preset != ProviderPresetCodex {
 		return normalized, resolution, nil

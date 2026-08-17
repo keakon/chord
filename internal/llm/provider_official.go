@@ -9,7 +9,7 @@ import (
 
 // providerTrustsHTTP400 reports whether HTTP 400 should be treated as a
 // terminal request error for this provider. The explicit trust_http_400
-// config wins when set; otherwise official presets (codex / azure) trust 400
+// config wins when set; otherwise the official preset (codex) trusts 400
 // and aggregating/proxy gateways do not, because they often collapse upstream
 // overload/rate-limit failures into 400.
 func providerTrustsHTTP400(p *ProviderConfig) bool {
@@ -24,9 +24,9 @@ func providerTrustsHTTP400(p *ProviderConfig) bool {
 
 // resolveRetryAfterMax resolves the longest Retry-After wait honored for a
 // provider. The explicit retry_after_max_s config wins when set (the loader
-// validates its 1-86400s range); otherwise official presets (codex / azure)
-// honor up to a day while third-party gateways, which can echo arbitrary
-// values, are bounded to one minute.
+// validates its 1-86400s range); otherwise the official preset (codex) honors
+// up to a day while third-party gateways, which can echo arbitrary values,
+// are bounded to one minute.
 func resolveRetryAfterMax(cfg config.ProviderConfig) time.Duration {
 	if cfg.RetryAfterMaxS != nil {
 		seconds := min(max(*cfg.RetryAfterMaxS, 1), config.MaxRetryAfterMaxS)
@@ -56,5 +56,5 @@ func providerIsOfficialPreset(p *ProviderConfig) bool {
 
 func presetIsOfficial(preset string) bool {
 	preset = strings.TrimSpace(preset)
-	return strings.EqualFold(preset, config.ProviderPresetCodex) || strings.EqualFold(preset, config.ProviderPresetAzure)
+	return strings.EqualFold(preset, config.ProviderPresetCodex)
 }

@@ -187,7 +187,7 @@ func isAccountInvalidated(apiErr *APIError) bool {
 
 // retryAfterForProvider returns the Retry-After hint bounded by the provider's
 // retry_after_max_s cap. The header always applies as the key cooldown; the
-// cap (60s by default, a day for preset codex/azure) only bounds how long a
+// cap (60s by default, a day for preset codex) only bounds how long a
 // hostile or stale hint can block a key.
 func retryAfterForProvider(provider *ProviderConfig, apiErr *APIError) time.Duration {
 	if provider == nil || apiErr == nil {

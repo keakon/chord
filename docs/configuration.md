@@ -171,7 +171,8 @@ Provider auth headers are inferred separately from `type`, but can be overridden
 - `type: messages` → default `auth_scheme: anthropic-api-key` (`x-api-key`)
 - `type: responses` → default `auth_scheme: bearer` (`Authorization: Bearer`)
 - `type: chat-completions` → default `auth_scheme: bearer`
-- `preset: azure` → default `auth_scheme: api-key` (`api-key`)
+
+For an Azure OpenAI Responses endpoint, configure a plain `type: responses` provider with `auth_scheme: api-key` and `store: true`, and remove the Codex identity headers with `compat.request_overrides.headers` set to `null` (see below).
 
 Supported `auth_scheme` values are:
 
@@ -183,7 +184,7 @@ Use an explicit override only when the endpoint's auth requirements differ from 
 
 For Anthropic's gated 1M context beta, Chord opts in only when the model declares a window of at least 1M tokens (`limit.input` when set, otherwise `limit.context`). Models with smaller declared windows do not receive the beta header. The provider may apply different access requirements and pricing above 200K tokens.
 
-`store` controls whether a Responses backend retains requests and responses server-side. It defaults to `false`, except for `preset: azure`. Enable it only when the backend explicitly requires server-side retention and you accept the data-retention trade-off. Do not enable it for `preset: codex`; the official Codex OAuth endpoint rejects `store: true`.
+`store` controls whether a Responses backend retains requests and responses server-side. It defaults to `false`. Enable it only when the backend explicitly requires server-side retention and you accept the data-retention trade-off. Do not enable it for `preset: codex`; the official Codex OAuth endpoint rejects `store: true`.
 
 ### OpenAI Codex preset
 
@@ -234,17 +235,24 @@ codex:
 
 For large account pools, Chord does not synchronously parse every OAuth JWT at startup and does not block provider initialization when one access token lacks `account_id`. Startup reads only metadata already present in `auth.yaml`; missing `account_user_id`, `account_id`, `email`, and `expires` are parsed and backfilled in the background after the provider is available. When manually converting Codex / sub2api / other login exports, keep any available `account_id`, `account_user_id`, and `email`, but they are not startup requirements.
 
-### Azure OpenAI Responses preset
+### Azure OpenAI Responses
 
-Use `preset: azure` for Azure OpenAI Responses endpoints. The preset is explicit: Chord does not auto-detect Azure from the endpoint URL. It sets `type: responses`, defaults `store: true`, treats the endpoint as an official API for 400 handling, disables Codex WebSocket/OAuth behavior, sends the configured credential as the Azure `api-key` header instead of `Authorization: Bearer`, and omits Codex compatibility headers such as `OpenAI-Beta` and `originator`.
-
-Azure's v1 Responses endpoint can use `/openai/v1/responses` directly; add `api-version` only when you need to pin or opt into a specific version such as `preview`:
+Configure an Azure OpenAI Responses endpoint as a plain `type: responses` provider with `auth_scheme: api-key` and `store: true`. Omit the Codex streaming identity headers with `compat.request_overrides.headers` set to `null`:
 
 ```yaml
 providers:
   azure:
-    preset: azure
+    type: responses
     api_url: https://YOUR-RESOURCE.openai.azure.com/openai/v1/responses
+    auth_scheme: api-key
+    store: true
+    trust_http_400: true
+    retry_after_max_s: 86400
+    compat:
+      request_overrides:
+        headers:
+          OpenAI-Beta: null
+          originator: null
     models:
       gpt-5.5:
         limit:
@@ -253,7 +261,7 @@ providers:
           output: 128000
 ```
 
-Store the Azure API key under the same provider name in `auth.yaml`:
+Azure's v1 Responses endpoint can use `/openai/v1/responses` directly; add `api-version` only when you need to pin or opt into a specific version such as `preview`. Store the Azure API key under the same provider name in `auth.yaml`:
 
 ```yaml
 azure:
@@ -320,7 +328,6 @@ providers:
 If `type` is omitted, Chord auto-detects it from provider config:
 
 - `preset: codex` → `responses`
-- `preset: azure` → `responses`
 - `api_url` path ending in `/responses` → `responses`
 - `api_url` path ending in `/chat/completions` → `chat-completions`
 - `api_url` path ending in `/messages` → `messages`
@@ -1255,9 +1262,9 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | -------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `type`         | string | `messages` / `chat-completions` / `responses` / `generate-content`. Auto-detected from `api_url` or `preset` when omitted.                              |
 | `api_url`      | string | Endpoint URL. Chord detects provider type from the URL path, ignoring query strings and fragments. For Gemini, the `/models` base path; Chord appends `/{model}:streamGenerateContent?alt=sse`. For Azure Responses, `?api-version=...` is optional and can be used to pin a specific API version. |
-| `preset`       | string | `codex` (OpenAI Codex / ChatGPT OAuth) or `azure` (Azure OpenAI Responses with `api-key` auth).                                                           |
-| `trust_http_400` | bool   | Treat HTTP 400 as a terminal request error. `preset: codex` and `preset: azure` default to `true`; aggregating/proxy gateways default to `false` because they often wrap upstream overload as 400. |
-| `retry_after_max_s` | int    | Longest `Retry-After` wait honored, in seconds (1-86400). The header always applies as the key cooldown, ahead of `retry_backoff`/`retry_delay_ms`; this only bounds how long a single hint may block a key. `preset: codex` and `preset: azure` default to `86400`; third-party gateways, which can echo arbitrary values, default to `60`. |
+| `preset`       | string | `codex` (OpenAI Codex / ChatGPT OAuth). Azure OpenAI Responses uses a plain `type: responses` provider with `auth_scheme: api-key`, `store: true`, and `compat.request_overrides.headers` set to `null` for the Codex identity headers. |
+| `trust_http_400` | bool   | Treat HTTP 400 as a terminal request error. `preset: codex` defaults to `true`; aggregating/proxy gateways default to `false` because they often wrap upstream overload as 400. |
+| `retry_after_max_s` | int    | Longest `Retry-After` wait honored, in seconds (1-86400). The header always applies as the key cooldown, ahead of `retry_backoff`/`retry_delay_ms`; this only bounds how long a single hint may block a key. `preset: codex` defaults to `86400`; third-party gateways, which can echo arbitrary values, default to `60`. |
 | `key_rotation` | string | `on_failure` (default) / `per_request`. Controls when a credential / API key is reselected.                                                            |
 | `key_order`    | string | `sequential` (non-Codex default) / `random` / `smart` (Codex only). Controls how Chord chooses among selectable keys.                                   |
 | `retry_backoff`| string | `exponential` (default) / `fixed` / `none`. Controls generated delay between complete rounds and, when explicitly set, ordinary HTTP 429 key cooldown. Explicit settings replace `Retry-After` for ordinary 429s; confirmed quota resets and hard credential states still win. |

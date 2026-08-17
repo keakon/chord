@@ -194,7 +194,7 @@ type ProviderConfig struct {
 	compat                     *config.ProviderCompatConfig // provider-level compat defaults
 	store                      *bool                        // provider-level Responses storage preference; nil defaults to false
 	parallelToolCalls          *bool                        // provider-level parallel_tool_calls default; nil = true
-	trustHTTP400               *bool                        // nil = infer from official preset (codex/azure)
+	trustHTTP400               *bool                        // nil = infer from official preset (codex)
 	retryAfterMax              time.Duration                // longest honored Retry-After wait; resolved from retry_after_max_s / preset
 	supportedServiceTiers      []config.ServiceTier         // provider-level default non-standard service tiers
 	preset                     string                       // trimmed config preset (e.g. "codex")
@@ -494,13 +494,6 @@ func (p *ProviderConfig) IsCodexOAuthTransport() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.oauthProfile == config.OAuthProfileOpenAICodex
-}
-
-// IsAzureOpenAITransport reports whether this provider uses the Azure OpenAI Responses wire profile.
-func (p *ProviderConfig) IsAzureOpenAITransport() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return strings.EqualFold(strings.TrimSpace(p.preset), config.ProviderPresetAzure)
 }
 
 // AuthScheme returns the resolved request auth scheme. The field is set once in

@@ -75,11 +75,6 @@ func applyResponsesStreamingHeaders(h http.Header, provider *ProviderConfig) {
 	h.Set("Accept", "text/event-stream")
 }
 
-func applyAzureResponsesStreamingHeaders(h http.Header, provider *ProviderConfig) {
-	setProviderLLMUserAgent(h, provider)
-	h.Set("Accept", "text/event-stream")
-}
-
 func applyProviderAuthHeader(h http.Header, scheme, apiKey string) {
 	switch scheme {
 	case config.AuthSchemeAnthropicAPIKey:

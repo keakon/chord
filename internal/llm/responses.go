@@ -682,11 +682,7 @@ func (r *ResponsesProvider) sendAndParse(
 			scheme = config.EffectiveAuthScheme("", config.ProviderTypeResponses, url, "")
 		}
 		applyProviderAuthHeader(req.Header, scheme, apiKey)
-		if r.provider != nil && r.provider.IsAzureOpenAITransport() {
-			applyAzureResponsesStreamingHeaders(req.Header, r.provider)
-		} else {
-			applyResponsesStreamingHeaders(req.Header, r.provider)
-		}
+		applyResponsesStreamingHeaders(req.Header, r.provider)
 	}
 	applySessionIDHeaders(req.Header, r.sessionID)
 	applyResponsesMetadataHeaders(req.Header, clientMetadata)

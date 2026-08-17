@@ -314,12 +314,11 @@ const (
 	// retry_after_max_s bounds. The header is always honored as the key
 	// cooldown; this only caps how long a single hint may block a key.
 	DefaultRetryAfterMaxS  = 60
-	OfficialRetryAfterMaxS = 86_400 // preset codex/azure default
+	OfficialRetryAfterMaxS = 86_400 // preset codex default
 	MaxRetryAfterMaxS      = 86_400
 
 	OAuthProfileOpenAICodex       = "openai_codex"
 	ProviderPresetCodex           = "codex"
-	ProviderPresetAzure           = "azure"
 	CompactionPresetGeneric       = "generic"
 	CompactionPresetCodex         = "codex"
 	CompactionProfileAuto         = "auto"
@@ -333,7 +332,7 @@ type ProviderConfig struct {
 	APIURL                    string                 `json:"api_url" yaml:"api_url"`                                                             // complete API URL (e.g., "https://api.openai.com/v1/chat/completions")
 	TokenURL                  string                 `json:"token_url,omitempty" yaml:"token_url,omitempty"`                                     // OAuth2 token endpoint for refresh_token grant
 	ClientID                  string                 `json:"client_id,omitempty" yaml:"client_id,omitempty"`                                     // OAuth2 client_id (required by some providers, e.g. openai: app_EMoamEEZ73f0CkXaXp7hrann)
-	Preset                    string                 `json:"preset,omitempty" yaml:"preset,omitempty"`                                           // e.g. "codex" for official ChatGPT/Codex OAuth, "azure" for Azure OpenAI Responses
+	Preset                    string                 `json:"preset,omitempty" yaml:"preset,omitempty"`                                           // e.g. "codex" for official ChatGPT/Codex OAuth
 	Store                     *bool                  `json:"store,omitempty" yaml:"store,omitempty"`                                             // provider-level Responses storage preference; nil defaults to false
 	ResponsesWebsocket        *bool                  `json:"responses_websocket,omitempty" yaml:"responses_websocket,omitempty"`                 // whether to prefer Responses WebSocket transport; nil = preset default (codex:true, others:false)
 	ResponseHeaderTimeout     int                    `json:"response_header_timeout,omitempty" yaml:"response_header_timeout,omitempty"`         // timeout from starting an HTTP request until response headers arrive, including request-body upload (seconds; 0 = built-in default)
@@ -344,8 +343,8 @@ type ProviderConfig struct {
 	AuthScheme                string                 `json:"auth_scheme,omitempty" yaml:"auth_scheme,omitempty"`                                 // optional auth scheme override for request header selection
 	Proxy                     *string                `json:"proxy,omitempty" yaml:"proxy,omitempty"`                                             // per-provider proxy URL; nil = inherit global, non-nil (incl. "") = override
 	Compat                    *ProviderCompatConfig  `json:"compat,omitempty" yaml:"compat,omitempty"`                                           // provider-level compat defaults (model-level can override model compat only)
-	TrustHTTP400              *bool                  `json:"trust_http_400,omitempty" yaml:"trust_http_400,omitempty"`                           // whether to treat HTTP 400 as a terminal request error; nil = official presets (codex/azure) true, others false
-	RetryAfterMaxS            *int                   `json:"retry_after_max_s,omitempty" yaml:"retry_after_max_s,omitempty"`                     // longest Retry-After wait honored, in seconds (1-86400); nil = official presets (codex/azure) 86400, others 60
+	TrustHTTP400              *bool                  `json:"trust_http_400,omitempty" yaml:"trust_http_400,omitempty"`                           // whether to treat HTTP 400 as a terminal request error; nil = official preset (codex) true, others false
+	RetryAfterMaxS            *int                   `json:"retry_after_max_s,omitempty" yaml:"retry_after_max_s,omitempty"`                     // longest Retry-After wait honored, in seconds (1-86400); nil = official preset (codex) 86400, others 60
 	SupportedServiceTiers     []ServiceTier          `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"`         // provider-level default non-standard tiers; model-level can override
 	ParallelToolCalls         *bool                  `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"`                 // provider-level default; nil = send parallel_tool_calls: true; model/variant can override
 	Models                    map[string]ModelConfig `json:"models" yaml:"models"`
@@ -419,9 +418,6 @@ func NormalizeAuthScheme(raw string) (string, error) {
 func EffectiveAuthScheme(preset, providerType, apiURL, authScheme string) string {
 	if normalized, err := NormalizeAuthScheme(authScheme); err == nil && normalized != "" {
 		return normalized
-	}
-	if strings.EqualFold(strings.TrimSpace(preset), ProviderPresetAzure) {
-		return AuthSchemeAPIKey
 	}
 	providerType = strings.TrimSpace(strings.ToLower(providerType))
 	switch providerType {

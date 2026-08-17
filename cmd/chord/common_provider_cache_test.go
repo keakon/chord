@@ -95,11 +95,13 @@ func TestNormalizeProviderConfigGeminiRequiresAPIURL(t *testing.T) {
 	}
 }
 
-func TestNormalizeProviderConfigAzurePresetSetsResponsesDefaults(t *testing.T) {
-	got, err := normalizeProviderConfig("azure", config.ProviderConfig{
-		Preset: config.ProviderPresetAzure,
-		APIURL: "https://example.openai.azure.com/openai/v1/responses?api-version=preview",
-		Models: map[string]config.ModelConfig{"gpt-5.5": {}},
+func TestNormalizeProviderConfigEquivalentAzureWireConfig(t *testing.T) {
+	got, err := normalizeProviderConfig("azure-equivalent", config.ProviderConfig{
+		Type:       config.ProviderTypeResponses,
+		APIURL:     "https://example.openai.azure.com/openai/v1/responses?api-version=preview",
+		AuthScheme: config.AuthSchemeAPIKey,
+		Store:      new(true),
+		Models:     map[string]config.ModelConfig{"gpt-5.5": {}},
 	}, nil)
 	if err != nil {
 		t.Fatalf("normalizeProviderConfig() error = %v", err)

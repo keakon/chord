@@ -162,7 +162,8 @@ Provider 的认证头会与 `type` 分开推断；如果某个兼容 endpoint �
 - `type: messages` → 默认 `auth_scheme: anthropic-api-key`（发送 `x-api-key`）
 - `type: responses` → 默认 `auth_scheme: bearer`（发送 `Authorization: Bearer`）
 - `type: chat-completions` → 默认 `auth_scheme: bearer`
-- `preset: azure` → 默认 `auth_scheme: api-key`（发送 `api-key`）
+
+Azure OpenAI Responses endpoint 用普通 `type: responses` provider 配置：`auth_scheme: api-key`、`store: true`，并用 `compat.request_overrides.headers` 置 `null` 移除 Codex 身份 header（见下文）。
 
 支持的 `auth_scheme` 取值有：
 
@@ -174,7 +175,7 @@ Provider 的认证头会与 `type` 分开推断；如果某个兼容 endpoint �
 
 对于 Anthropic 受限开放的 1M 上下文能力，Chord 只会在模型声明至少 1M token 窗口时启用：优先读取 `limit.input`，否则读取 `limit.context`。窗口较小的模型不会收到相应 beta header。超过 200K token 时，服务商可能采用不同的权限要求和计价方式。
 
-`store` 控制 Responses 后端是否在服务端保留请求和响应。除 `preset: azure` 外，默认值都是 `false`。只有后端明确要求服务端留存、且你接受相应数据保留影响时才启用。不要为 `preset: codex` 开启；官方 Codex OAuth 端点会拒绝 `store: true`。
+`store` 控制 Responses 后端是否在服务端保留请求和响应。默认值都是 `false`。只有后端明确要求服务端留存、且你接受相应数据保留影响时才启用。不要为 `preset: codex` 开启；官方 Codex OAuth 端点会拒绝 `store: true`。
 
 ### OpenAI Codex preset
 
@@ -225,17 +226,24 @@ codex:
 
 为支持大量账号池，Chord 启动时不会同步解析每个 OAuth JWT，也不会因为某个 access token 缺 `account_id` 阻塞 provider 初始化。启动路径只读取 `auth.yaml` 中已经显式写出的 metadata；缺失的 `account_user_id`、`account_id`、`email`、`expires` 会在 provider 建立后后台解析并尽量回填。若手动转换 Codex / sub2api / 其他登录结果，建议保留能拿到的 `account_id`、`account_user_id` 和 `email`，但它们不是启动必填项。
 
-### Azure OpenAI Responses preset
+### Azure OpenAI Responses
 
-Azure OpenAI Responses endpoint 使用 `preset: azure`。这个 preset 必须显式配置：Chord 不会根据 endpoint URL 自动识别 Azure。它会设置 `type: responses`、默认 `store: true`、把该 endpoint 视作 official API 处理 400、禁用 Codex WebSocket/OAuth 行为，把凭据作为 Azure 要求的 `api-key` 请求头发送，而不是 `Authorization: Bearer`，并省略 `OpenAI-Beta`、`originator` 等 Codex 兼容 header。
-
-Azure v1 Responses endpoint 可以直接使用 `/openai/v1/responses`；只有需要固定或启用特定版本（例如 `preview`）时，才在 `api_url` 中添加 `api-version`：
+Azure OpenAI Responses endpoint 用普通 `type: responses` provider 配置：`auth_scheme: api-key`、`store: true`。要省略 Codex 流式身份 header，可在 `compat.request_overrides.headers` 中将对应值置为 `null`：
 
 ```yaml
 providers:
   azure:
-    preset: azure
+    type: responses
     api_url: https://YOUR-RESOURCE.openai.azure.com/openai/v1/responses
+    auth_scheme: api-key
+    store: true
+    trust_http_400: true
+    retry_after_max_s: 86400
+    compat:
+      request_overrides:
+        headers:
+          OpenAI-Beta: null
+          originator: null
     models:
       gpt-5.5:
         limit:
@@ -244,7 +252,7 @@ providers:
           output: 128000
 ```
 
-Azure API key 写在 `auth.yaml` 的同名 provider 下：
+Azure v1 Responses endpoint 可以直接使用 `/openai/v1/responses`；只有需要固定或启用特定版本（例如 `preview`）时，才在 `api_url` 中添加 `api-version`。Azure API key 写在 `auth.yaml` 的同名 provider 下：
 
 ```yaml
 azure:
@@ -311,7 +319,6 @@ providers:
 省略 `type` 时，Chord 按以下规则自动推断：
 
 - `preset: codex` → `responses`
-- `preset: azure` → `responses`
 - `api_url` 的 path 以 `/responses` 结尾 → `responses`
 - `api_url` 的 path 以 `/chat/completions` 结尾 → `chat-completions`
 - `api_url` 的 path 以 `/messages` 结尾 → `messages`
@@ -1113,9 +1120,9 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | ------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `type`        | string | `messages` / `chat-completions` / `responses` / `generate-content`。省略时按 `api_url` 或 `preset` 自动推断。                                       |
 | `api_url`     | string | 接口地址。Chord 根据 URL path 自动识别 provider type，忽略 query string 和 fragment。Gemini 用 `/models` 基础路径，Chord 自动附加 `/{model}:streamGenerateContent?alt=sse`。Azure Responses 的 `?api-version=...` 是可选项，可用于固定特定 API 版本。 |
-| `preset`      | string | 可选 `codex`（OpenAI Codex / ChatGPT OAuth）或 `azure`（Azure OpenAI Responses，使用 `api-key` 认证）。                                             |
-| `trust_http_400`| bool   | 是否把 HTTP 400 视为终止性请求错误。`preset: codex` 和 `preset: azure` 默认 `true`；聚合/代理网关默认 `false`，因为常把上游过载包装成 400。 |
-| `retry_after_max_s`| int    | 采纳 `Retry-After` 头的最长等待秒数（1-86400）。该头始终作为 key 冷却时长生效，优先于 `retry_backoff`/`retry_delay_ms`；本参数只限制单次提示最长能占用 key 多久。`preset: codex` 和 `preset: azure` 默认 `86400`；第三方网关可能回显任意值，默认 `60`。 |
+| `preset`      | string | 可选 `codex`（OpenAI Codex / ChatGPT OAuth）。Azure OpenAI Responses 使用普通 `type: responses` provider，配合 `auth_scheme: api-key`、`store: true`，并在 `compat.request_overrides.headers` 中将 Codex 身份 header 置为 `null`。 |
+| `trust_http_400`| bool   | 是否把 HTTP 400 视为终止性请求错误。`preset: codex` 默认 `true`；聚合/代理网关默认 `false`，因为常把上游过载包装成 400。 |
+| `retry_after_max_s`| int    | 采纳 `Retry-After` 头的最长等待秒数（1-86400）。该头始终作为 key 冷却时长生效，优先于 `retry_backoff`/`retry_delay_ms`；本参数只限制单次提示最长能占用 key 多久。`preset: codex` 默认 `86400`；第三方网关可能回显任意值，默认 `60`。 |
 | `key_rotation`| string | `on_failure`（默认）/ `per_request`。控制何时重新选择 credential / API key。                                                                    |
 | `key_order`   | string | `sequential`（非 Codex 默认）/ `random` / `smart`（仅 Codex）。控制在候选 key 中如何选择。                                               |
 | `retry_backoff`| string | `exponential`（默认）/ `fixed` / `none`。控制完整重试轮之间由 Chord 生成的等待；显式设置后也控制普通 HTTP 429 的 key 冷却，并替换这类响应的 `Retry-After`。已确认的配额重置与凭据硬状态仍然优先。 |
