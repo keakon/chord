@@ -151,7 +151,7 @@ func (r responsesRequest) MarshalJSON() ([]byte, error) {
 // responsesInputItem represents an item in the Responses API input array.
 // The API expects "arguments" to be a string (JSON-serialized object), not an object.
 type responsesInputItem struct {
-	Type      string          `json:"type"` // "message", "function_call", "function_call_output", "reasoning", "additional_tools"
+	Type      string          `json:"type"` // "message", "function_call", "function_call_output", "reasoning", "additional_tools", "compaction_trigger"
 	ID        string          `json:"id,omitempty"`
 	Role      string          `json:"role,omitempty"`
 	Content   any             `json:"content,omitempty"`
@@ -161,9 +161,8 @@ type responsesInputItem struct {
 	Arguments string          `json:"arguments,omitempty"` // JSON object as string per API spec
 	Phase     string          `json:"phase,omitempty"`
 	Tools     []responsesTool `json:"tools,omitempty"`
-	// Reasoning replay fields (type == "reasoning"). Summary is a pointer so a
-	// reasoning item can serialize an explicit empty [] (API rejects a missing
-	// summary field) while other item types omit it entirely.
+	// Summary is a pointer so a reasoning item can serialize an explicit empty
+	// [] (API rejects a missing summary field) while other item types omit it.
 	Summary          *[]responsesReasoningSummaryPayload `json:"summary,omitempty"`
 	EncryptedContent string                              `json:"encrypted_content,omitempty"`
 }

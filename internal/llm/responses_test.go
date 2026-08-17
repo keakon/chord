@@ -1175,6 +1175,17 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 			t.Fatalf("unknown SSE provider error should remain retryable: %v", err)
 		}
 	})
+
+	t.Run("error_event_is_not_swallowed_by_later_completion", func(t *testing.T) {
+		stream := buildSSEStream([]string{
+			`{"type":"error","error":{"type":"future_gateway_error","code":"upstream_failed","message":"stream failed"}}`,
+			`{"type":"response.completed","response":{"status":"completed","output":[]}}`,
+		})
+		_, err := parseResponsesSSE(stream, nil, nil)
+		if _, ok := errors.AsType[*APIError](err); !ok {
+			t.Fatalf("parseResponsesSSE err = %T %v, want provider API error", err, err)
+		}
+	})
 }
 
 // TestParseResponsesSSE_DuplicateToolCallFromProxy verifies that when a proxy (e.g. qt)

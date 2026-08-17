@@ -455,13 +455,16 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 		if err := json.Unmarshal(data, &gotBody); err != nil {
 			t.Fatalf("unmarshal request body: %v", err)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"output":[{"type":"compaction","encrypted_content":"## Goal\n- continue\n\n## User Constraints\n- none\n\n## Progress\n- progress\n\n## Key Decisions\n- decisions\n\n## Files and Evidence\n- Archived history: history-1.md\n\n## Todo State\n- none\n\n## SubAgent State\n- none\n\n## Open Problems\n- none\n\n## Next Step\n- continue"}]}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.output_item.done","output_index":0,"item":{"type":"compaction","encrypted_content":"## Goal\n- continue\n\n## User Constraints\n- none\n\n## Progress\n- progress\n\n## Key Decisions\n- decisions\n\n## Files and Evidence\n- Archived history: history-1.md\n\n## Todo State\n- none\n\n## SubAgent State\n- none\n\n## Open Problems\n- none\n\n## Next Step\n- continue"}}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":5,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":2},"output_tokens_details":{"reasoning_tokens":0}}}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
 	defer server.Close()
 
 	provider, accessToken := newOpenAITestOAuthProvider(t, server.URL+"/v1/responses")
 	r := &ResponsesProvider{provider: provider, client: server.Client()}
+	r.SetSessionID("session-123")
 
 	resp, err := r.Compact(
 		context.Background(),
@@ -476,11 +479,20 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compact returned error: %v", err)
 	}
-	if gotPath != "/v1/responses/compact" {
-		t.Fatalf("compact request path = %q, want /v1/responses/compact", gotPath)
+	if resp == nil || !strings.Contains(resp.Content, "## Goal") {
+		t.Fatalf("compact response = %#v, want extracted summary text", resp)
 	}
-	if got := gotHeaders.Get("Accept"); got != "" {
-		t.Fatalf("compact request Accept = %q, want empty for unary JSON endpoint", got)
+	if resp.Usage == nil || resp.Usage.InputTokens != 10 {
+		t.Fatalf("compact response usage = %#v, want input tokens 10", resp.Usage)
+	}
+	if gotPath != "/v1/responses" {
+		t.Fatalf("compact request path = %q, want /v1/responses (native remote compaction v2)", gotPath)
+	}
+	if got := gotHeaders.Get("Accept"); got != "text/event-stream" {
+		t.Fatalf("compact request Accept = %q, want text/event-stream", got)
+	}
+	if got := gotHeaders.Get(headerCodexBetaFeatures); got != headerValueRemoteCompactV2 {
+		t.Fatalf("compact request %s = %q, want %s", headerCodexBetaFeatures, got, headerValueRemoteCompactV2)
 	}
 	if got := gotHeaders.Get("originator"); got != openAICodexOriginator {
 		t.Fatalf("compact request originator = %q, want %q", got, openAICodexOriginator)
@@ -491,17 +503,43 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 	if gotHeaders.Get(headerSessionID) == "" {
 		t.Fatal("expected compact request session_id header to be set")
 	}
-	if resp == nil || !strings.Contains(resp.Content, "## Goal") {
-		t.Fatalf("compact response = %#v, want extracted summary text", resp)
+	if gotBody["prompt_cache_key"] == nil || gotBody["prompt_cache_key"] == "" {
+		t.Fatalf("compact request prompt_cache_key = %#v, want set", gotBody["prompt_cache_key"])
+	}
+	// Fingerprint convergence for cache locality: compact traffic must carry
+	// the same client_metadata identity as the main Responses path (body + the
+	// echoed headers), so it does not surface as a different session upstream.
+	cm, ok := gotBody["client_metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("compact request client_metadata = %#v, want object", gotBody["client_metadata"])
+	}
+	for _, key := range []string{responsesClientMetadataInstallationID, responsesClientMetadataSessionID, responsesClientMetadataThreadID, responsesClientMetadataWindowID} {
+		if cm[key] == nil || cm[key] == "" {
+			t.Fatalf("compact request client_metadata[%s] = %#v, want set", key, cm[key])
+		}
+	}
+	if cm[responsesClientMetadataSessionID] != "session-123" || cm[responsesClientMetadataThreadID] != "session-123" {
+		t.Fatalf("compact request client_metadata session/thread = %#v/%#v, want session-123", cm[responsesClientMetadataSessionID], cm[responsesClientMetadataThreadID])
+	}
+	if cm[responsesClientMetadataInstallationID] != gotHeaders.Get(responsesClientMetadataInstallationID) {
+		t.Fatalf("compact request installation_id mismatch body=%v header=%q", cm[responsesClientMetadataInstallationID], gotHeaders.Get(responsesClientMetadataInstallationID))
+	}
+	if gotHeaders.Get("thread-id") != "session-123" || gotHeaders.Get("x-client-request-id") != "session-123" {
+		t.Fatalf("compact request thread-id/x-client-request-id = %q/%q, want session-123", gotHeaders.Get("thread-id"), gotHeaders.Get("x-client-request-id"))
 	}
 	if gotBody["instructions"] != "system prompt" {
 		t.Fatalf("expected instructions=system prompt, got %#v", gotBody["instructions"])
 	}
-	if _, ok := gotBody["input"]; !ok {
-		t.Fatalf("expected compact request to include input, got %#v", gotBody)
+	if input, ok := gotBody["input"].([]any); !ok || len(input) == 0 {
+		t.Fatalf("expected compact request input array, got %#v", gotBody["input"])
+	} else if last, ok := input[len(input)-1].(map[string]any); !ok || last["type"] != "compaction_trigger" {
+		t.Fatalf("compact request input last item = %#v, want compaction_trigger", input[len(input)-1])
 	}
 	if gotBody["parallel_tool_calls"] != false {
 		t.Fatalf("expected compact request parallel_tool_calls=false, got %#v", gotBody["parallel_tool_calls"])
+	}
+	if gotBody["stream"] != true {
+		t.Fatalf("expected compact request stream=true, got %#v", gotBody["stream"])
 	}
 	reasoning, ok := gotBody["reasoning"].(map[string]any)
 	if !ok {
@@ -513,7 +551,7 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 	if got := reasoning["summary"]; got != "auto" {
 		t.Fatalf("compact request reasoning.summary = %#v, want auto", got)
 	}
-	for _, key := range []string{"tool_choice", "stream", "include", "store", "max_output_tokens"} {
+	for _, key := range []string{"tool_choice", "max_output_tokens"} {
 		if _, ok := gotBody[key]; ok {
 			t.Fatalf("compact request unexpectedly included %s: %#v", key, gotBody[key])
 		}

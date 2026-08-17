@@ -53,11 +53,12 @@ type responseOutputItemDone struct {
 // responsesStreamItem is a lightweight union used by SSE parsing so high-frequency
 // item events avoid repeated json.Unmarshal into multiple temporary structs.
 type responsesStreamItem struct {
-	Type      string          `json:"type"`
-	ID        string          `json:"id,omitempty"`
-	CallID    string          `json:"call_id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Arguments json.RawMessage `json:"arguments,omitempty"`
+	Type             string          `json:"type"`
+	ID               string          `json:"id,omitempty"`
+	CallID           string          `json:"call_id,omitempty"`
+	Name             string          `json:"name,omitempty"`
+	Arguments        json.RawMessage `json:"arguments,omitempty"`
+	EncryptedContent string          `json:"encrypted_content,omitempty"`
 }
 
 // responsesCompletedPayload captures the subset of response.completed / response.incomplete
@@ -341,6 +342,12 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 			if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, false); ok {
 				return partialResp, partialItems, true, nil
 			}
+			// Native remote compaction: the [DONE] frame after the streamed
+			// compaction item ends the compact stream; the response carries
+			// the collected summary already.
+			if responsesOutputHasCompactionItem(resp.ResponsesOutput) {
+				return &resp, outputItems, true, nil
+			}
 			outputItems = responsesFinalizeIncrementalOutputItems(outputItems, &resp)
 			return &resp, outputItems, true, nil
 		}
@@ -571,15 +578,26 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		}
 		var added responseOutputItemAdded
 		if err := responsesSSEUnmarshal(eventData, &added); err != nil {
-			log.Debugf("responses: skip unparseable output_item.added err=%v data_len=%v", err, len(eventData))
+			log.Debugf("responses: skip unparseable output_item.added err=%v", err)
 			return nil, nil, false, nil
 		}
 		addedIdx := added.OutputIndex
 		if addedIdx == 0 {
 			addedIdx = added.Index
 		}
-		if state.partial != nil {
+		if state.partial != nil && added.Item.Type != "compaction" {
 			state.partial.markOutputItemAdded(addedIdx)
+		}
+		// Compact request: collect the streamed compaction item so the
+		// response.completed trailer (which carries usage) still ends the
+		// stream normally.
+		if added.Item.Type == "compaction" && state.resp != nil && added.Item.EncryptedContent != "" {
+			state.resp.ResponsesOutput = append(state.resp.ResponsesOutput, message.ResponsesOutputItem{
+				Type:             "compaction",
+				ID:               added.Item.ID,
+				EncryptedContent: added.Item.EncryptedContent,
+			})
+			state.resp.Content = added.Item.EncryptedContent
 		}
 		switch added.Item.Type {
 		case "function_call":
@@ -708,6 +726,25 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			log.Debugf("responses: skip unparseable output_item.done err=%v", err)
 			return nil, nil, false, nil
 		}
+		if done.Item.Type == "compaction" {
+			// Native remote compaction returns exactly one "compaction" output
+			// item whose encrypted_content is the replacement history. The v2
+			// compact request collects it from resp.ResponsesOutput; ordinary
+			// requests never see this type. The response.completed trailer
+			// carries usage and ends the stream.
+			if state.resp != nil && done.Item.EncryptedContent != "" && !responsesOutputHasCompactionItem(state.resp.ResponsesOutput) {
+				state.resp.ResponsesOutput = append(state.resp.ResponsesOutput, message.ResponsesOutputItem{
+					Type:             "compaction",
+					ID:               done.Item.ID,
+					EncryptedContent: done.Item.EncryptedContent,
+				})
+				state.resp.Content = done.Item.EncryptedContent
+			}
+			if state.cb != nil {
+				state.cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "compacting"}})
+			}
+			return nil, nil, false, nil
+		}
 		doneIdx := done.OutputIndex
 		if doneIdx == 0 {
 			doneIdx = done.Index
@@ -759,7 +796,32 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, fmt.Errorf("parse completed: %w", err)
 		}
 		respObj := completed.Response
-		applyResponsesCompletionPayload(state.resp, respObj, state.truncated)
+		// Native remote compaction collects the streamed compaction output item
+		// from the added/done events. applyResponsesCompletionPayload resets
+		// ResponsesOutput from the completed payload, so preserve the streamed
+		// compaction item and restore it afterwards. The compact callers then
+		// see the collected summary plus the trailer's usage.
+		var streamedCompaction []message.ResponsesOutputItem
+		for _, item := range state.resp.ResponsesOutput {
+			if item.Type == "compaction" {
+				streamedCompaction = append(streamedCompaction, item)
+			}
+		}
+		if len(streamedCompaction) > 0 {
+			summary := streamedCompaction[0].EncryptedContent
+			state.resp.ResponsesOutput = nil
+			applyResponsesCompletionPayload(state.resp, respObj, state.truncated)
+			state.resp.ResponsesOutput = append([]message.ResponsesOutputItem(nil), streamedCompaction...)
+			if strings.TrimSpace(state.resp.Content) == "" {
+				state.resp.Content = summary
+			}
+		} else {
+			applyResponsesCompletionPayload(state.resp, respObj, state.truncated)
+			collectResponsesOutput(state.resp, respObj.Output)
+		}
+		// applyResponsesCompletionPayload already stored the trailer's usage on
+		// state.resp.Usage when the completed payload carries it; the compact
+		// caller returns that usage alongside the collected summary.
 		*state.outputItems = responsesOutputToInputItems(respObj.Output)
 		finalizeResponsesToolCalls(state.toolCalls, state.resp, state.cb, *state.truncated, state.finalizedCalls)
 		if state.resp.StopReason == "tool_calls" && len(state.resp.ToolCalls) == 0 {
@@ -789,6 +851,21 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 	return nil, nil, false, nil
 }
 
+// responsesOutputHasCompactionItem reports whether the collected output items
+// already include a native remote compaction item (streamed via
+// output_item.done). The completed payload then keeps the streamed item
+// instead of re-applying the completed output list.
+func responsesOutputHasCompactionItem(output []message.ResponsesOutputItem) bool {
+	for _, item := range output {
+		if item.Type == "compaction" {
+			return true
+		}
+	}
+	return false
+}
+
+// responsesSSEUnmarshal is a thin wrapper around the SSE payload decoder used
+// by the Responses stream parser.
 func responsesSSEUnmarshal(data []byte, v any) error {
 	return sonicjson.ConfigDefault.Unmarshal(data, v)
 }

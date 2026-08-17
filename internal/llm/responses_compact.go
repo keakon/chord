@@ -8,88 +8,62 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/keakon/golog/log"
 
-	sonicjson "github.com/bytedance/sonic"
-
 	"github.com/keakon/chord/internal/message"
 )
 
-// maxCompactResponseBytes bounds the compaction response body read as an OOM
-// backstop. Real summaries are orders of magnitude smaller.
-const maxCompactResponseBytes = 64 << 20
-
-type responsesCompactOutputItem struct {
-	Type             string                  `json:"type"`
-	Role             string                  `json:"role,omitempty"`
-	EncryptedContent string                  `json:"encrypted_content,omitempty"`
-	Content          []responsesContentBlock `json:"content,omitempty"`
+// responsesCompactV2Request builds the wire body for a native remote
+// compaction request: the ordinary /responses payload plus a trailing
+// compaction_trigger input item. The backend rewrites history and returns the
+// compacted summary as a streamed "compaction" output item.
+func responsesCompactV2Request(req responsesRequest) responsesRequest {
+	req.Input = append(normalizeResponsesInput(req.Input), responsesInputItem{Type: "compaction_trigger"})
+	req.Tools = normalizeResponsesTools(req.Tools)
+	req.Stream = true
+	// Compact requests do not carry the include list: the backend rewrites
+	// history and returns only the compaction summary.
+	req.omitInclude = true
+	return req
 }
 
-type responsesCompactResponse struct {
-	Output []responsesCompactOutputItem `json:"output"`
-}
-
-type responsesCompactRequest struct {
-	Model             string               `json:"model"`
-	Input             []responsesInputItem `json:"input"`
-	Instructions      string               `json:"instructions,omitempty"`
-	Tools             []responsesTool      `json:"tools"`
-	ParallelToolCalls bool                 `json:"parallel_tool_calls"`
-	Reasoning         *reasoningConfig     `json:"reasoning,omitempty"`
-	ServiceTier       string               `json:"service_tier,omitempty"`
-	PromptCacheKey    string               `json:"prompt_cache_key,omitempty"`
-	Text              *textConfig          `json:"text,omitempty"`
-}
-
-func (r responsesCompactRequest) MarshalJSON() ([]byte, error) {
-	type alias responsesCompactRequest
-	r.Input = normalizeResponsesInput(r.Input)
-	r.Tools = normalizeResponsesTools(r.Tools)
-	return json.Marshal(alias(r))
-}
-
-func resolveResponsesCompactURL(apiURL string) (string, error) {
+// remoteCompactionV2URL returns the native remote-compaction endpoint URL for
+// the given Responses API base. The Codex endpoint is the same /v1/responses
+// URL with the remote_compaction_v2 beta feature header; the summary comes
+// back as a "compaction" output item in the stream.
+func remoteCompactionV2URL(apiURL string) (string, error) {
 	apiURL = strings.TrimSpace(apiURL)
 	if apiURL == "" {
 		return "", fmt.Errorf("empty responses API URL")
 	}
-	if strings.Contains(apiURL, "/responses/compact") {
-		return apiURL, nil
-	}
-	if strings.Contains(apiURL, "/responses") {
-		return strings.TrimRight(apiURL, "/") + "/compact", nil
-	}
-	return "", fmt.Errorf("responses compact requires /responses API URL")
+	return strings.TrimRight(apiURL, "/"), nil
 }
 
-func extractCompactSummary(resp responsesCompactResponse) string {
-	for _, item := range slices.Backward(resp.Output) {
-
-		if item.Type == "compaction" && strings.TrimSpace(item.EncryptedContent) != "" {
-			return strings.TrimSpace(item.EncryptedContent)
-		}
-	}
-	for _, item := range slices.Backward(resp.Output) {
-
-		if item.Type != "message" {
+func compactSummaryFromResponsesOutput(output []message.ResponsesOutputItem) (string, error) {
+	var compactionCount int
+	var summary string
+	for _, item := range output {
+		if item.Type != "compaction" {
 			continue
 		}
-		var parts []string
-		for _, block := range item.Content {
-			if (block.Type == "output_text" || block.Type == "text") && strings.TrimSpace(block.Text) != "" {
-				parts = append(parts, block.Text)
-			}
-		}
-		if len(parts) > 0 {
-			return strings.TrimSpace(strings.Join(parts, "\n"))
+		compactionCount++
+		if summary == "" {
+			summary = strings.TrimSpace(item.EncryptedContent)
 		}
 	}
-	return ""
+	if compactionCount == 0 {
+		return "", fmt.Errorf("remote compaction v2 returned no compaction output item")
+	}
+	if compactionCount > 1 {
+		return "", fmt.Errorf("remote compaction v2 returned %d compaction output items, want exactly one", compactionCount)
+	}
+	if summary == "" {
+		return "", fmt.Errorf("remote compaction v2 compaction output item is empty")
+	}
+	return summary, nil
 }
 
 func (r *ResponsesProvider) Compact(
@@ -105,26 +79,29 @@ func (r *ResponsesProvider) Compact(
 	if r.provider == nil || !r.provider.IsCodexOAuthTransport() {
 		return nil, fmt.Errorf("responses compact endpoint requires provider preset codex")
 	}
-	url, err := resolveResponsesCompactURL(r.provider.APIURL())
+	url, err := remoteCompactionV2URL(r.provider.APIURL())
 	if err != nil {
 		return nil, err
 	}
+	// Native remote compaction v2 rides the ordinary /responses streaming wire.
 	ot := tuning.OpenAI
 	apiInput := convertMessagesToResponses("", messages)
 	if len(apiInput) == 0 {
 		return nil, fmt.Errorf("responses compact requires at least one input item")
 	}
-	reqBody := responsesCompactRequest{
+	reqBody := responsesCompactV2Request(responsesRequest{
 		Model:             model,
+		Instructions:      nil,
 		Input:             apiInput,
 		Tools:             convertToolsToResponses(tools),
 		ParallelToolCalls: false,
+	})
+	reqBody.Include = nil
+	if strings.TrimSpace(systemPrompt) != "" {
+		reqBody.Instructions = &systemPrompt
 	}
 	if ot.ParallelToolCalls != nil {
 		reqBody.ParallelToolCalls = *ot.ParallelToolCalls
-	}
-	if strings.TrimSpace(systemPrompt) != "" {
-		reqBody.Instructions = systemPrompt
 	}
 	if ot.ServiceTier != "" {
 		reqBody.ServiceTier = ot.ServiceTier
@@ -132,10 +109,12 @@ func (r *ResponsesProvider) Compact(
 	if r.sessionID != "" {
 		reqBody.PromptCacheKey = r.sessionID
 	}
-	// Match the main Responses builder: emit reasoning whenever effort or summary
-	// is configured (effort may be omitted). Compact is currently restricted to
-	// the official Codex backend, but Chord should not maintain a separate local
-	// whitelist for which normalized effort values are allowed to pass through.
+	// Fingerprint convergence for cache locality: compact traffic must carry
+	// the same client_metadata identity as the main Responses path (body) so
+	// it does not surface as a different account/session upstream.
+	if r.sessionID != "" {
+		reqBody.ClientMetadata = responsesClientMetadata(r.sessionID, time.Now())
+	}
 	effectiveReasoningEffort, effectiveReasoningSummary := resolveResponsesReasoningFields(ot.EffectiveReasoningEffort(), ot.ReasoningSummary)
 	if effectiveReasoningEffort != "" || effectiveReasoningSummary != "" {
 		reqBody.Reasoning = &reasoningConfig{Effort: effectiveReasoningEffort, Summary: effectiveReasoningSummary}
@@ -152,15 +131,28 @@ func (r *ResponsesProvider) Compact(
 	}
 	dumpRequestBody := append([]byte(nil), bodyBytes...)
 	dumpWriter := r.dumpWriter.Load()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	defer streamCancel()
+	req, err := http.NewRequestWithContext(streamCtx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("create compact request: %w", err)
 	}
 	req.Header.Set(headerContentType, headerValueApplicationJSON)
-	applyOpenAIOAuthHeaders(req, r.provider, apiKey, false)
+	applyOpenAIOAuthHeaders(req, r.provider, apiKey, true)
+	// Keep the compact wire identity convergent with the main Responses path:
+	// the same installation/session/thread/window metadata is echoed into the
+	// headers (see sendAndParse) so compact traffic does not perturb the
+	// session identity or cache locality.
+	applyResponsesMetadataHeaders(req.Header, reqBody.ClientMetadata)
+	turnState := ResponsesTurnStateFromContext(ctx)
+	turnStateIdentity := responsesTurnStateIdentity(r.provider, apiKey)
+	applyResponsesTurnStateHeader(req.Header, turnState, turnStateIdentity)
 
 	// Apply request body compression if configured
 	req, _ = compressRequestBody(req, bodyBytes, r.provider.CompressEnabled())
+	// Native remote compaction v2 rides the ordinary /responses streaming wire;
+	// advertise the session-level beta feature like the real Codex client.
+	req.Header.Set(headerCodexBetaFeatures, headerValueRemoteCompactV2)
 
 	start := time.Now()
 	httpResp, err := doRequestUntilHeaders(r.client, req, providerResponseHeaderTimeout(r.provider))
@@ -199,36 +191,53 @@ func (r *ResponsesProvider) Compact(
 		}
 		return nil, apiErr
 	}
-	// Bound the success-path read as an OOM backstop against a misbehaving or
-	// compromised endpoint; a real compaction summary is far smaller.
-	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, maxCompactResponseBytes))
-	if err != nil {
-		return nil, fmt.Errorf("read compact response body: %w", err)
-	}
-	var compactResp responsesCompactResponse
-	if err := sonicjson.Unmarshal(respBody, &compactResp); err != nil {
-		return nil, fmt.Errorf("parse compact response: %w", err)
-	}
-	summary := extractCompactSummary(compactResp)
-	if summary == "" {
-		return nil, fmt.Errorf("compact response missing summary text")
-	}
+	captureResponsesTurnState(turnState, httpResp.Header, turnStateIdentity)
+
+	cr := NewProviderChunkTimeoutReader(httpResp.Body, r.provider, DefaultChunkTimeout, streamCancel)
+	defer cr.Stop()
+	collector := NewSSECollector()
+	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, nil, collector, turnState, turnStateIdentity)
 	if dumpWriter != nil {
 		go func() {
 			dump := &LLMDump{
 				Timestamp:   start.Format(time.RFC3339Nano),
-				Provider:    "responses-compact",
+				Provider:    "responses-compact-v2",
 				Model:       model,
 				RequestBody: dumpRequestBody,
-				Response: &DumpResponse{
-					Content: summary,
-				},
-				DurationMS: time.Since(start).Milliseconds(),
+				SSEChunks:   collector.Chunks(),
+				Response:    DumpResponseFromResponse(resp),
+				DurationMS:  time.Since(start).Milliseconds(),
+			}
+			if parseErr != nil {
+				dump.Error = parseErr.Error()
 			}
 			if wErr := dumpWriter.Write(dump); wErr != nil {
 				log.Warnf("failed to write LLM dump error=%v", wErr)
 			}
 		}()
 	}
-	return &message.Response{Content: summary}, nil
+	if parseErr != nil {
+		return nil, fmt.Errorf("parse compact SSE stream: %w", parseErr)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("compact SSE stream produced no response")
+	}
+	summary, err := compactSummaryFromResponsesOutput(resp.ResponsesOutput)
+	if err != nil && resp.Content != "" {
+		// The compaction summary may arrive through resp.Content when the
+		// backend streams the item with content only on the done event;
+		// fall back to it before failing.
+		summary = strings.TrimSpace(resp.Content)
+		err = nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	// The Codex backend emits the compaction output item, then the
+	// response.completed trailer with usage and ends the stream; compact
+	// callers consume the summary plus the trailer's usage.
+	if resp.Usage != nil {
+		log.Debugf("responses compact v2 usage input=%v output=%v cache_read=%v cache_write=%v", resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheReadTokens, resp.Usage.CacheWriteTokens)
+	}
+	return &message.Response{Content: summary, Usage: resp.Usage}, nil
 }
