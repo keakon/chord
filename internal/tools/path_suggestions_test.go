@@ -12,7 +12,12 @@ import (
 )
 
 func TestReadToolFileNotFoundSuggestsSiblingPath(t *testing.T) {
-	dir := t.TempDir()
+	home := t.TempDir()
+	setHomeEnvForTest(t, home)
+	dir := filepath.Join(home, "proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "responses.go"), []byte("package test\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -25,7 +30,7 @@ func TestReadToolFileNotFoundSuggestsSiblingPath(t *testing.T) {
 	for _, want := range []string{
 		"file not found:",
 		"Did you mean:",
-		filepath.Join(dir, "responses.go"),
+		filepath.Join("~", "proj", "responses.go"),
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("ReadTool.Execute err = %v, want substring %q", err, want)
@@ -161,7 +166,12 @@ func TestReadToolFileNotFoundDisplaysCurrentDirectoryRelativePaths(t *testing.T)
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
-	dir := t.TempDir()
+	home := t.TempDir()
+	setHomeEnvForTest(t, home)
+	dir := filepath.Join(home, "proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.test\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile go.mod: %v", err)
 	}
@@ -205,7 +215,12 @@ func TestReadToolFileNotFoundDisplaysCurrentDirectoryRelativePaths(t *testing.T)
 }
 
 func TestPathSuggestionsFindsDirectoryTypoWithinBoundedAncestor(t *testing.T) {
-	dir := t.TempDir()
+	home := t.TempDir()
+	setHomeEnvForTest(t, home)
+	dir := filepath.Join(home, "proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
 	goodDir := filepath.Join(dir, "internal", "llm")
 	if err := os.MkdirAll(goodDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -223,8 +238,8 @@ func TestPathSuggestionsFindsDirectoryTypoWithinBoundedAncestor(t *testing.T) {
 		MaxSuggestions: 3,
 		MinScore:       pathSuggestionMinScore,
 	})
-	if len(got) == 0 || got[0] != goodPath {
-		t.Fatalf("suggestExistingToolPathsWithOptions() = %#v, want first %q", got, goodPath)
+	if len(got) == 0 || got[0] != filepath.ToSlash(filepath.Join("~", "proj", "internal", "llm", "responses.go")) {
+		t.Fatalf("suggestExistingToolPathsWithOptions() = %#v, want first ~/proj/internal/llm/responses.go", got)
 	}
 }
 
@@ -233,7 +248,12 @@ func TestPathSuggestionsFindsTopLevelRelativeTypoFromProjectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
-	dir := t.TempDir()
+	home := t.TempDir()
+	setHomeEnvForTest(t, home)
+	dir := filepath.Join(home, "proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.test\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile go.mod: %v", err)
 	}
@@ -492,7 +512,12 @@ func TestPathSuggestionsRejectDistantSimilarBasename(t *testing.T) {
 }
 
 func TestPathSuggestionsRespectCandidateLimit(t *testing.T) {
-	dir := t.TempDir()
+	home := t.TempDir()
+	setHomeEnvForTest(t, home)
+	dir := filepath.Join(home, "proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
 	for i := range 5 {
 		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("response_%d.go", i)), []byte("package test\n"), 0o644); err != nil {
 			t.Fatalf("WriteFile: %v", err)
@@ -508,6 +533,140 @@ func TestPathSuggestionsRespectCandidateLimit(t *testing.T) {
 	})
 	if len(got) != 2 {
 		t.Fatalf("suggestExistingToolPathsWithOptions() len = %d, want 2; got %#v", len(got), got)
+	}
+}
+
+func TestPathSuggestionsDoNotScanOutsideAllowedRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// A tree that only exists outside both the session base and HOME. The
+	// nearest existing ancestor of the requested path is this very directory,
+	// and it must not be scanned as a suggestion root.
+	external := t.TempDir()
+	if err := os.WriteFile(filepath.Join(external, "responses.go"), []byte("package external\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	base := t.TempDir()
+	if err := os.WriteFile(filepath.Join(base, "format.go"), []byte("package base\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	missing := filepath.Join(external, "response.go")
+	got := suggestExistingToolPathsWithOptionsInDir(missing, base, PathTargetRegularFile, pathSuggestionOptions{
+		Timeout:        time.Second,
+		MaxVisited:     100,
+		MaxCandidates:  100,
+		MaxSuggestions: 3,
+		MinScore:       pathSuggestionMinScore,
+	})
+	if len(got) != 0 {
+		t.Fatalf("suggestExistingToolPathsWithOptionsInDir() = %#v, want no external-dir suggestions", got)
+	}
+}
+
+func TestAllowedPathSuggestionRootsUsesWorkingDirectoryWithoutBase(t *testing.T) {
+	home := t.TempDir()
+	setHomeEnvForTest(t, home)
+	workspace := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
+	if !pathWithinSuggestionRoots(filepath.Join(workspace, "missing.go"), allowedPathSuggestionRootsInDir("")) {
+		t.Fatal("working directory is not an allowed suggestion root without an explicit base")
+	}
+}
+
+func TestPathSuggestionsDoNotFollowSymlinkOutsideAllowedRoots(t *testing.T) {
+	home := t.TempDir()
+	setHomeEnvForTest(t, home)
+	base := t.TempDir()
+	external := t.TempDir()
+	if err := os.WriteFile(filepath.Join(external, "responses.go"), []byte("package external\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	link := filepath.Join(base, "external")
+	if err := os.Symlink(external, link); err != nil {
+		t.Skipf("Symlink unavailable: %v", err)
+	}
+
+	got := suggestExistingToolPathsWithOptionsInDir(filepath.Join(link, "response.go"), base, PathTargetRegularFile, pathSuggestionOptions{
+		Timeout:        time.Second,
+		MaxVisited:     100,
+		MaxCandidates:  100,
+		MaxSuggestions: 3,
+		MinScore:       pathSuggestionMinScore,
+	})
+	if len(got) != 0 {
+		t.Fatalf("suggestions through external symlink = %#v, want none", got)
+	}
+}
+
+func TestPathSuggestionsDoNotScanFilesystemRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "responses.go"), []byte("package home\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	base := t.TempDir()
+
+	// /etc/passwdd-style typo: the nearest existing ancestor is /etc, outside
+	// both allowed roots, so no suggestions may be produced even though the
+	// platform's real /etc holds passwd-like names.
+	got := suggestExistingToolPathsWithOptionsInDir("/etc/passwdd", base, PathTargetRegularFile, pathSuggestionOptions{
+		Timeout:        time.Second,
+		MaxVisited:     100,
+		MaxCandidates:  100,
+		MaxSuggestions: 3,
+		MinScore:       pathSuggestionMinScore,
+	})
+	if len(got) != 0 {
+		t.Fatalf("suggestExistingToolPathsWithOptionsInDir() = %#v, want no filesystem-root walk", got)
+	}
+}
+
+func TestPathSuggestionsDoNotRepairOutsideAllowedRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	external := t.TempDir()
+	if err := os.WriteFile(filepath.Join(external, "responses.go"), []byte("package external\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	base := t.TempDir()
+
+	got := suggestExistingToolPathsWithOptionsInDir(filepath.Join(external, "response s.go"), base, PathTargetRegularFile, pathSuggestionOptions{
+		Timeout:        time.Second,
+		MaxVisited:     100,
+		MaxCandidates:  100,
+		MaxSuggestions: 3,
+		MinScore:       pathSuggestionMinScore,
+	})
+	if len(got) != 0 {
+		t.Fatalf("outside whitespace repair suggestions = %#v, want none", got)
+	}
+}
+
+func TestReadToolDoesNotSuggestExternalPathFromBaseDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	external := t.TempDir()
+	base := t.TempDir()
+	if err := os.WriteFile(filepath.Join(external, "responses.go"), []byte("package external\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	raw := json.RawMessage(fmt.Sprintf(`{"path":%q}`, filepath.Join(external, "response.go")))
+	_, err := (ReadTool{BaseDir: base}).Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("ReadTool.Execute err = nil, want file-not-found error")
+	}
+	if strings.Contains(err.Error(), "Did you mean:") {
+		t.Fatalf("ReadTool.Execute error = %q, want no external path suggestions", err)
 	}
 }
 

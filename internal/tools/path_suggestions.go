@@ -101,8 +101,19 @@ func suggestExistingToolPathsWithOptionsInDir(path string, baseDir string, kind 
 	if err != nil {
 		return nil
 	}
+	roots := allowedPathSuggestionRootsInDir(baseDir)
 	if repaired, ok := suggestWhitespacePathRepairInDir(path, baseDir, kind); ok {
-		return []string{repaired}
+		repairedResolved, err := resolveToolPathInDir(repaired, baseDir)
+		if err == nil && pathWithinSuggestionRoots(repairedResolved, roots) {
+			return []string{repaired}
+		}
+		return nil
+	}
+	// Resolve existing ancestors through symlinks before accepting the path.
+	// A lexical /workspace/link/passwdd path must not list /etc when link points
+	// there, and an absolute typo outside every root stays silent.
+	if !pathWithinSuggestionRoots(resolved, roots) {
+		return nil
 	}
 	deadline := time.Now().Add(opts.Timeout)
 	candidateSet := make(map[string]struct{})
@@ -132,7 +143,7 @@ func suggestExistingToolPathsWithOptionsInDir(path string, baseDir string, kind 
 
 	if len(candidates) == 0 {
 		ancestor, ok := pathSuggestionSearchRoot(path, resolved, baseDir)
-		if ok && shouldWalkForPathSuggestions(ancestor) {
+		if ok && pathWithinSuggestionRoots(ancestor, roots) && shouldWalkForPathSuggestions(ancestor) {
 			matcher := newGitIgnoreMatcher(ancestor)
 			_ = filepath.WalkDir(ancestor, func(candidate string, d fs.DirEntry, err error) error {
 				if err != nil {
@@ -327,15 +338,80 @@ func nearestExistingAncestor(path string) (string, bool) {
 	}
 }
 
-func nearestExistingAncestorForPathSuggestions(requested, resolved string) (string, bool) {
-	ancestor, ok := nearestExistingAncestor(resolved)
-	if !ok || ancestor != "." {
-		return ancestor, ok
+// allowedPathSuggestionRootsInDir returns the directories whose contents may
+// ever be listed or walked for path suggestions. Without a baseDir the
+// session working directory (the process cwd) qualifies; with one, that
+// baseDir qualifies alongside the user's home directory. A typo must
+// not turn unrelated directories (/etc, /Users, ...) into suggestion material
+// that would then enter the LLM request surface. Home is listed first so
+// home-relative requests keep their natural ~/ form.
+func allowedPathSuggestionRootsInDir(baseDir string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = ""
 	}
-	if filepath.IsAbs(strings.TrimSpace(requested)) || !directoryLooksLikeProjectRoot(".") {
+	var roots []string
+	if home != "" {
+		roots = append(roots, filepath.Clean(home))
+	}
+	if strings.TrimSpace(baseDir) != "" {
+		if abs, err := resolveToolPathAbs(baseDir); err == nil {
+			roots = append(roots, filepath.Clean(abs))
+		}
+	} else if wd, err := os.Getwd(); err == nil {
+		roots = append(roots, filepath.Clean(wd))
+	}
+	return roots
+}
+
+// pathWithinSuggestionRoots reports whether path is inside one of the allowed
+// suggestion roots after resolving symlinks through its nearest existing
+// ancestor. An empty root set allows nothing.
+func pathWithinSuggestionRoots(path string, roots []string) bool {
+	cleaned, ok := canonicalPathForSuggestionBoundary(path)
+	if !ok {
+		return false
+	}
+	for _, root := range roots {
+		canonicalRoot, ok := canonicalPathForSuggestionBoundary(root)
+		if !ok {
+			continue
+		}
+		if cleaned == canonicalRoot {
+			return true
+		}
+		if rel, err := filepath.Rel(canonicalRoot, cleaned); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+func canonicalPathForSuggestionBoundary(path string) (string, bool) {
+	cleaned, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
 		return "", false
 	}
-	return ".", true
+	existing := cleaned
+	for {
+		if _, err := os.Lstat(existing); err == nil {
+			break
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return "", false
+		}
+		existing = parent
+	}
+	canonicalExisting, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return "", false
+	}
+	suffix, err := filepath.Rel(existing, cleaned)
+	if err != nil {
+		return "", false
+	}
+	return filepath.Clean(filepath.Join(canonicalExisting, suffix)), true
 }
 
 func pathSuggestionSearchRoot(requested, resolved, baseDir string) (string, bool) {
@@ -358,7 +434,27 @@ func pathSuggestionSearchRoot(requested, resolved, baseDir string) (string, bool
 		}
 	}
 
-	return nearestExistingAncestorForPathSuggestions(requested, resolved)
+	// Absolute requests: the nearest marked project ancestor is the working
+	// tree the model legitimately targets and a safe walk root; an unmarked
+	// ancestor (/etc, /Users, ...) must never be walked for suggestions. An
+	// absolute request inside the user's home directory is similarly allowed.
+	if ancestor, ok := nearestExistingAncestor(resolved); ok {
+		cur := ancestor
+		for {
+			if directoryLooksLikeProjectRoot(cur) {
+				return cur, true
+			}
+			parent := filepath.Dir(cur)
+			if parent == cur {
+				break
+			}
+			cur = parent
+		}
+		if home, err := os.UserHomeDir(); err == nil && home != "" && pathWithinSuggestionRoots(resolved, []string{filepath.Clean(home)}) {
+			return ancestor, true
+		}
+	}
+	return "", false
 }
 
 func directoryLooksLikeProjectRoot(dir string) bool {
