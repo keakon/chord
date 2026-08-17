@@ -59,6 +59,37 @@ func TestUsageDrivenBreakerSuppressesIdleAutoCompaction(t *testing.T) {
 	}
 }
 
+func TestStopResponseDoesNotStartIdleAutoCompaction(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.ctxMgr = ctxmgr.NewManager(10000, 0.8)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 9000})
+	a.autoCompactRequested.Store(true)
+	a.newTurn()
+
+	a.setIdleAndDrainPending()
+
+	if a.IsCompactionRunning() {
+		t.Fatal("stop response should not start automatic compaction while going idle")
+	}
+	if !a.autoCompactRequested.Load() {
+		t.Fatal("usage-driven compaction request should remain armed for the next LLM request")
+	}
+}
+
+func TestStopResponseKeepsExistingCompactionRunning(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeAutoContinue})
+
+	a.setIdleAndDrainPending()
+
+	if !a.IsCompactionRunning() {
+		t.Fatal("stop response should not cancel an automatic compaction already in progress")
+	}
+}
+
 func TestIdleAutoCompactionClearsStaleRequestBelowCurrentThreshold(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

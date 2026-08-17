@@ -17,7 +17,7 @@ the surrounding configuration model (files, layers, providers), see
 | What it does | Calls an LLM to generate a structured summary and replaces old history | Applies deterministic rules to trim stale tool output from the current request |
 | Writes to disk | ✅ Rewrites session files | ❌ Session files unchanged |
 | Uses an LLM | ✅ (configurable model pool) | ❌ (heuristic rules only) |
-| When it fires | Context exceeds threshold / manual `/compact` / error recovery | Before every LLM request |
+| When it fires | Threshold is reached and a main-model request is about to start / manual `/compact` / error recovery | Before every LLM request |
 | Typical latency | Seconds to tens of seconds (waits for LLM) | Milliseconds (in-memory rule matching) |
 | User visibility | TUI shows "Compacting context..." progress | Silent (invisible) |
 | Loop mode | Enabled; compaction still runs so long sessions can continue | Disabled for new messages; see [Loop mode and the Codex quota freeze](#loop-mode-and-the-codex-quota-freeze) |
@@ -37,14 +37,24 @@ usage (or reports `input_tokens: 0`), Chord can use the last trusted non-zero
 usage sample and current context-contributing message bytes as a conservative
 fallback signal for the same automatic threshold.
 
+When a normal main-model response ends with `stop`, reaching the threshold does
+not by itself start a new compaction while the agent returns to idle. Chord
+keeps the automatic request armed and starts compaction at the next
+continuation barrier while preparing the next main-model request. The request
+and compaction may run in parallel; an oversized request is suspended until
+the compaction applies. If compaction was already running before the response
+stopped, Chord does not cancel it; its ready draft is still applied at the next
+safe continuation or idle barrier.
+
 ## Context compaction
 
-When the main conversation approaches the model context limit, Chord
-automatically triggers context compaction. The compaction process calls an LLM
-to analyze the current conversation, generates a structured summary (covering
-goals, progress, key decisions, file evidence, etc.), archives old messages,
-and replaces the conversation history with the summary. The compacted session
-is persisted to disk.
+When the main conversation approaches the model context limit, Chord arms
+automatic context compaction and starts it while preparing the next main-model
+request. The compaction process calls an LLM to analyze the current
+conversation, generates a structured summary (covering goals, progress, key
+decisions, file evidence, etc.), archives old messages, and replaces the
+conversation history with the summary. The compacted session is persisted to
+disk.
 
 Continuation-oriented compaction keeps a small, safe recent tail (normally the
 latest two user turns, within a token budget) as verbatim messages after the

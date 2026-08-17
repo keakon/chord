@@ -475,9 +475,9 @@ func (a *MainAgent) setIdleAndDrainPending() {
 		a.pendingSubAgentMailboxes = nil
 		a.refreshSubAgentInboxSummary()
 	}
-	if !pausePendingDrain {
-		a.maybeRunAutoCompaction()
-	}
+	// A completed stop response must not start a new automatic compaction from
+	// idle. The usage-driven request stays armed for the next main-LLM request;
+	// an already-running compaction is still applied by the barrier below.
 	// IdleEvent triggers finalizeAssistantBlock in TUI — dropping it leaves the
 	// UI stuck in streaming state. Use blocking send (with shutdown guard) so it
 	// is never silently discarded.
