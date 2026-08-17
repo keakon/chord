@@ -542,6 +542,13 @@ agent directly with `/models --agent <name> <pool>`. For SubAgents, the default 
 is to use the first allowed pool; switching back to that pool restores the default
 behavior.
 
+User messages submitted while the main agent is busy remain queued until a safe
+request boundary. If the current provider/model attempt fails and Chord is about to
+send a request to the next fallback model, messages queued by that point are committed
+to the conversation and included in that fallback request. Chord never rewrites a
+provider request that is already in flight; messages arriving after the fallback
+request starts wait for the next request boundary.
+
 ## Reusing protocol templates with YAML anchors
 
 Chord has no `model_templates` schema field. You can still use YAML anchors and

@@ -1697,8 +1697,12 @@ func (a *MainAgent) handleLocalOnlySlashCommands(content string, parts []message
 // queue for the next idle drain. /compact is local-only and schedules background
 // compaction immediately, even while a turn is active.
 func (a *MainAgent) processPendingUserMessagesBeforeLLMInTurn() {
+	a.consumePendingUserMessagesForRequest(nil, 0)
+}
+
+func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Message, tailOverlayCount int) []message.Message {
 	if len(a.pendingUserMessages) == 0 {
-		return
+		return messages
 	}
 	pending := a.pendingUserMessages
 	a.pendingUserMessages = nil
@@ -1707,7 +1711,6 @@ func (a *MainAgent) processPendingUserMessagesBeforeLLMInTurn() {
 		draftID string
 		msg     message.Message
 	}
-	var batch []message.Message
 	var consumed []consumedPendingDraft
 	manualInputConsumed := false
 	for _, p := range pending {
@@ -1721,28 +1724,34 @@ func (a *MainAgent) processPendingUserMessagesBeforeLLMInTurn() {
 		if !ok {
 			continue
 		}
-		batch = append(batch, m)
 		consumed = append(consumed, consumedPendingDraft{draftID: p.DraftID, msg: m})
 		manualInputConsumed = manualInputConsumed || p.FromUser
 	}
 	// Re-queue /resume* and anything that arrived concurrently (should be rare).
 	a.pendingUserMessages = append(deferred, a.pendingUserMessages...)
-	if len(batch) == 0 {
-		return
+	if len(consumed) == 0 {
+		return messages
 	}
 	if manualInputConsumed {
 		a.stageNextSubAgentMailboxBatch()
 	}
-	log.Debugf("injecting pending user messages with tool results count=%v", len(batch))
+	log.Debugf("injecting pending user messages with tool results count=%v", len(consumed))
+	tailOverlayCount = min(max(tailOverlayCount, 0), len(messages))
+	insertionAt := len(messages) - tailOverlayCount
+	requestMessages := make([]message.Message, 0, len(messages)+len(consumed))
+	requestMessages = append(requestMessages, messages[:insertionAt]...)
 	for _, item := range consumed {
 		a.ctxMgr.Append(item.msg)
+		requestMessages = append(requestMessages, item.msg)
 		a.recordEvidenceFromMessage(item.msg)
 		if a.recovery != nil {
 			a.persistAsync(identity.MainAgentID, item.msg)
 		}
 		a.emitPendingDraftConsumed(item.draftID, item.msg)
 	}
+	requestMessages = append(requestMessages, messages[insertionAt:]...)
 	a.syncBugTriagePromptFromSnapshot()
+	return requestMessages
 }
 
 // ---------------------------------------------------------------------------

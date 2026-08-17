@@ -45,6 +45,7 @@ const (
 	EventSpawnFinished           = "background_object_finished" // Spawned background process finished; runtime-only notification
 	EventContinue                = "continue"                   // re-run LLM with existing context (no new user message)
 	EventLoopAssessment          = "loop_assessment"            // internal loop-controller decision point after a completed assistant round
+	EventLLMFallbackBoundary     = "llm_fallback_boundary"      // update a pending fallback request before provider dispatch
 
 	// Durable compaction (async worker); payloads are *compactionDraft / error.
 	EventCompactionReady           = "compaction_ready"

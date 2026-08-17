@@ -165,6 +165,14 @@ type CallStatus struct {
 	ServiceTier         config.ServiceTier
 }
 
+// CompleteStreamOptions controls request-boundary behavior for a streaming
+// completion. BeforeFallback, when set, is called after the current target has
+// failed and immediately before a fallback target is attempted. It may return
+// an updated message snapshot for that fallback attempt.
+type CompleteStreamOptions struct {
+	BeforeFallback func(context.Context, []message.Message) ([]message.Message, error)
+}
+
 // NewClient creates a new Client for making LLM completions.
 func NewClient(
 	providerCfg *ProviderConfig,
@@ -1021,6 +1029,18 @@ func (c *Client) CompleteStream(
 	tools []message.ToolDefinition,
 	cb StreamCallback,
 ) (*message.Response, error) {
+	return c.CompleteStreamWithOptions(ctx, messages, tools, cb, CompleteStreamOptions{})
+}
+
+// CompleteStreamWithOptions sends a streaming completion with automatic
+// retries and optional request updates at fallback boundaries.
+func (c *Client) CompleteStreamWithOptions(
+	ctx context.Context,
+	messages []message.Message,
+	tools []message.ToolDefinition,
+	cb StreamCallback,
+	options CompleteStreamOptions,
+) (*message.Response, error) {
 	if c == nil || c.closed.Load() {
 		return nil, errors.New("llm client is closed")
 	}
@@ -1081,7 +1101,7 @@ func (c *Client) CompleteStream(
 		ctx, start.ProviderConfig, start.ProviderImpl, start.ModelID,
 		start.MaxTokens, requestTuning, start.Variant,
 		wireMessages, tools, cb, true, orderedFallbacks, maxAttempts, &status,
-		routingGeneration, routingChangedCh,
+		routingGeneration, routingChangedCh, options.BeforeFallback,
 	)
 
 	c.mu.Lock()

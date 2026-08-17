@@ -32,6 +32,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Queued main-agent input no longer waits for the entire model fallback chain to finish. Before Chord dispatches the next fallback-model request, it now commits user messages queued by that point and includes them in the request; messages arriving after dispatch still wait for the next safe request boundary, and requests already in flight are never rewritten.
 - OpenAI-compatible chat streams now recognize visible reasoning returned as `reasoning` or `reasoning_text`, in addition to `reasoning_content`. When a gateway duplicates one delta under multiple aliases, Chord uses the first non-empty field in that order without showing or replaying the thinking twice.
 - Long-context pricing tiers now use the complete prompt size, including cache-read and cache-write tokens, so requests crossing a configured tier threshold use the correct input, output, and cache rates.
 - Changed-file tracking now merges workspace-relative and absolute forms of the same path, including after a restored session updates its project root, and preserves whether the latest operation deleted or restored the file.

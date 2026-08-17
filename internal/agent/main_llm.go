@@ -641,7 +641,16 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	}
 	defer releaseLLM()
 	requestStarted = true
-	resp, err := llmClient.CompleteStream(ctx, messages, toolDefs, callback)
+	requestOptions := llm.CompleteStreamOptions{
+		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message) ([]message.Message, error) {
+			updatedMessages, err := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount)
+			if err == nil && updatedMessages != nil {
+				messages = updatedMessages
+			}
+			return updatedMessages, err
+		},
+	}
+	resp, err := llmClient.CompleteStreamWithOptions(ctx, messages, toolDefs, callback, requestOptions)
 	completeStreamReturnedAt := time.Now()
 	a.recordToolTraceCallLLMReturned(turn, completeStreamReturnedAt)
 	if err == nil && turn != nil {

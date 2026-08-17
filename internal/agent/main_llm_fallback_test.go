@@ -13,6 +13,102 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+func TestFallbackRequestIncludesQueuedUserInput(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	primaryCfg := llm.NewProviderConfig("primary", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model-a": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"primary-key"})
+	fallbackCfg := llm.NewProviderConfig("fallback", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model-b": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"fallback-key"})
+	primaryImpl := &blockingStreamProvider{
+		streamedCh: make(chan struct{}),
+		releaseCh:  make(chan struct{}),
+		calls: []scriptedStreamCall{{
+			err:              &llm.APIError{StatusCode: 500, Message: "primary unavailable"},
+			holdAfterStreams: true,
+		}},
+	}
+	fallbackImpl := &blockingStreamProvider{
+		streamedCh: make(chan struct{}),
+		releaseCh:  make(chan struct{}),
+		calls: []scriptedStreamCall{{
+			resp:             &message.Response{Content: "fallback response"},
+			holdAfterStreams: true,
+		}},
+	}
+	client := llm.NewClient(primaryCfg, primaryImpl, "model-a", 4096, "sys")
+	client.SetFallbackModels([]llm.FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "model-b",
+		MaxTokens:      4096,
+		ContextLimit:   128000,
+	}})
+	a.swapLLMClientWithRef(client, "model-a", 128000, "primary/model-a")
+
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- a.Run(runCtx) }()
+
+	a.SendUserMessage("initial request")
+	select {
+	case <-primaryImpl.streamedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for primary request")
+	}
+
+	a.SendUserMessage("queued follow-up")
+	close(primaryImpl.releaseCh)
+
+	select {
+	case <-fallbackImpl.streamedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for fallback request")
+	}
+
+	primaryRequests, _ := primaryImpl.snapshot()
+	if len(primaryRequests) != 1 {
+		t.Fatalf("primary requests = %d, want 1", len(primaryRequests))
+	}
+	if requestHasUserText(primaryRequests[0], "queued follow-up") {
+		t.Fatalf("primary request unexpectedly included queued input: %#v", primaryRequests[0])
+	}
+	fallbackRequests, _ := fallbackImpl.snapshot()
+	if len(fallbackRequests) != 1 {
+		t.Fatalf("fallback requests = %d, want 1", len(fallbackRequests))
+	}
+	if !requestHasUserText(fallbackRequests[0], "queued follow-up") {
+		t.Fatalf("fallback request did not include queued input: %#v", fallbackRequests[0])
+	}
+	if !requestHasUserText(a.ctxMgr.Snapshot(), "queued follow-up") {
+		t.Fatal("queued input was not committed to conversation context")
+	}
+
+	close(fallbackImpl.releaseCh)
+	cancelRun()
+	select {
+	case <-runDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out stopping main agent")
+	}
+}
+
+func requestHasUserText(messages []message.Message, want string) bool {
+	for _, msg := range messages {
+		if msg.Role == message.RoleUser && msg.Content == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCallLLMOversizeStartsCompactionWhenNotRunning(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reserved: 16000}}}

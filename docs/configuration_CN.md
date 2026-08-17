@@ -519,6 +519,8 @@ model_pools: [thinking]
 
 运行时通过 `/models` 切换当前视图对象的池（按项目持久化，重启后仍生效）：main 视图作用于当前主角色，SubAgent 视图作用于该 agent。切换池会更新后续 LLM 调用的整条 fallback 链；即使当前选中的 `provider/model` 同时存在于两个池中，也会按新池的顺序重新构建（已发起的 in-flight 请求仍使用其开始时快照到的 client）。也可通过 `/models --agent <name> <pool>` 直接设置指定 agent 的池。SubAgent 默认使用第一个可用池；想恢复默认时切回该池即可。
 
+MainAgent 忙碌时收到的用户消息会排队，等到安全的请求边界再处理。如果当前 provider/model 尝试失败，Chord 准备向下一个 fallback 模型发请求，会先把此时已经排队的消息写入对话，并随这次 fallback 请求一并发送。已经发出的 provider 请求不会被改写；fallback 请求开始后才到达的消息继续等待下一个请求边界。
+
 ## 用 YAML anchor 复用协议模板
 
 Chord 没有 `model_templates` 配置字段，但可以在该顶层容器中使用 YAML

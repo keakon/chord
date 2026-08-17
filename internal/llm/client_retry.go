@@ -957,6 +957,7 @@ func (c *Client) completeStreamWithRetry(
 	status *CallStatus,
 	startRoutingGeneration uint64,
 	routingChangedCh <-chan struct{},
+	beforeFallback func(context.Context, []message.Message) ([]message.Message, error),
 ) (*message.Response, error) {
 	var lastErr error
 	var lastErrProvider *ProviderConfig
@@ -1087,6 +1088,15 @@ func (c *Client) completeStreamWithRetry(
 			if oversizeSeen.seen(t.provider.Name(), t.modelID, t.variant) {
 				log.Infof("skipping model: oversize already confirmed for this provider/model target in this round provider=%v model=%v variant=%v", t.provider.Name(), t.modelID, t.variant)
 				continue
+			}
+			if t.isFallback && beforeFallback != nil {
+				updatedMessages, err := beforeFallback(ctx, messages)
+				if err != nil {
+					return nil, fmt.Errorf("update request before fallback: %w", err)
+				}
+				if updatedMessages != nil {
+					messages = updatedMessages
+				}
 			}
 			if targetResult, updatedLastInputTokens, err := c.completeStreamTarget(
 				ctx,
