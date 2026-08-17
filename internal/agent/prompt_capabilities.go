@@ -79,7 +79,7 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 		lines = append(lines, "- Do not use "+toolPromptName(tools.NameWrite)+" for local edits to existing files; use "+toolPromptName(editToolName)+" instead.")
 	}
 	if hasVisibleTool(visible, tools.NameDelete) {
-		lines = append(lines, "- Use "+toolPromptName(tools.NameDelete)+" to remove files with verified paths whose current version you know in full (a complete read or your own whole-file write).")
+		lines = append(lines, "- Use "+toolPromptName(tools.NameDelete)+" to remove files whose paths you have verified exist; never guess paths for deletions.")
 	}
 	if hasVisibleTool(visible, tools.NameWrite) && hasVisibleTool(visible, tools.NameDelete) {
 		lines = append(lines, "- Choose file tools by final state: use "+toolPromptName(tools.NameWrite)+" directly when a path should still exist afterward with new full contents, and use "+toolPromptName(tools.NameDelete)+" only when the path should no longer exist.")
