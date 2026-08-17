@@ -287,6 +287,9 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	a.resetAgentRequests(nil)
 	a.setSessionSummary(buildSessionSummaryForDir(sessionDir, a.sessionLock != nil))
 	a.resetSessionBuildState()
+	// Persistence health belongs to the session directory that was diagnosed.
+	// If the target is also unwritable, its first write degrades immediately.
+	a.resetPersistenceHealthForSessionTarget()
 	if a.sessionTargetChangedFn != nil {
 		a.sessionTargetChangedFn(sessionDir)
 	}

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 // persistencePump owns the ordered async-persistence channel and its drain
@@ -210,7 +212,17 @@ const intentBarrierSlowThreshold = 20 * time.Millisecond
 // after-callbacks and the intent barrier, so it must be cheap and non-blocking
 // for the event loop; TUI notification is emitted once per degradation.
 func (a *MainAgent) notePersistenceFailure(err error) {
-	if a == nil || err == nil || !a.persistenceHealth.markDegraded(err) {
+	if a == nil || err == nil {
+		return
+	}
+	// ErrClosed only follows an intentional Close (shutdown or session
+	// switch); it never indicates a disk problem, so degrading health over a
+	// racing late write would be a false alarm against the next session.
+	if errors.Is(err, recovery.ErrClosed) {
+		log.Debugf("main persistence write after close ignored error=%v", err)
+		return
+	}
+	if !a.persistenceHealth.markDegraded(err) {
 		return
 	}
 	log.Errorf("main persistence degraded error=%v", err)
@@ -253,6 +265,20 @@ func (a *MainAgent) emitPersistenceRecovered() {
 	a.emitToTUI(PersistenceHealthEvent{Degraded: false})
 	a.emitToTUI(ToastEvent{Message: "Session persistence recovered", Level: "info", Category: "persistence_health"})
 	a.emitToTUI(InfoEvent{Message: "Session persistence recovered"})
+}
+
+// resetPersistenceHealthForSessionTarget starts the target session with fresh
+// health state. Clearing a previous target's warning is not a recovery event,
+// so only the durable TUI indicator is reset.
+func (a *MainAgent) resetPersistenceHealthForSessionTarget() {
+	if a == nil {
+		return
+	}
+	wasUnhealthy := a.persistenceHealth.snapshot().State != PersistenceHealthy
+	a.persistenceHealth.reset()
+	if wasUnhealthy {
+		a.emitToTUI(PersistenceHealthEvent{Degraded: false})
+	}
 }
 
 // tryRecoverPersistenceBeforeTurn runs once at the start of a new user turn

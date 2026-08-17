@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -264,11 +265,21 @@ func TestMainToolActivityJournalUsesStableMainScope(t *testing.T) {
 	}
 }
 
+// newBrokenPathRecoveryManager returns a manager whose session directory can
+// never be created (its parent is a regular file), so every write fails with
+// a real filesystem error rather than ErrClosed.
+func newBrokenPathRecoveryManager(t *testing.T) *recovery.RecoveryManager {
+	t.Helper()
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+	return recovery.NewRecoveryManager(filepath.Join(blocker, "session"))
+}
+
 func TestAssistantPersistenceFailureWithoutToolsDegradesMainAgent(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.sessionDir = filepath.Join(t.TempDir(), "session")
-	a.recovery = recovery.NewRecoveryManager(a.sessionDir)
-	a.recovery.Close()
+	a.recovery = newBrokenPathRecoveryManager(t)
 	a.newTurn()
 
 	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: &LLMResponsePayload{
@@ -321,9 +332,8 @@ func TestLoadTaskHistoryMessagesScopesRecoveryByInstance(t *testing.T) {
 func TestSubAgentPersistMessageBarrierDirectWriteFailClosed(t *testing.T) {
 	sub := &SubAgent{
 		instanceID: "worker-1",
-		recovery:   recovery.NewRecoveryManager(t.TempDir()),
+		recovery:   newBrokenPathRecoveryManager(t),
 	}
-	sub.recovery.Close()
 
 	barrier, enqueued := sub.persistMessageBarrier(message.Message{Role: "assistant"}, "assistant message")
 	if !enqueued {
@@ -334,6 +344,19 @@ func TestSubAgentPersistMessageBarrierDirectWriteFailClosed(t *testing.T) {
 	}
 	if state := sub.persistenceHealth.snapshot().State; state != PersistenceDegraded {
 		t.Fatalf("persistence state = %q, want degraded", state)
+	}
+}
+
+func TestNotePersistenceFailureIgnoresErrClosed(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.notePersistenceFailure(recovery.ErrClosed)
+	if a.persistenceDegraded() {
+		t.Fatal("ErrClosed after an intentional close must not degrade main persistence")
+	}
+	sub := &SubAgent{instanceID: "worker-1"}
+	sub.notePersistenceFailure(recovery.ErrClosed)
+	if sub.persistenceHealth.snapshot().State == PersistenceDegraded {
+		t.Fatal("ErrClosed must not degrade SubAgent persistence")
 	}
 }
 
@@ -423,9 +446,7 @@ func TestCrashPointClassificationFromDiskState(t *testing.T) {
 
 func TestFailIntentBarrierSynthesizesNotStartedResults(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.sessionDir = filepath.Join(t.TempDir(), "session")
-	a.recovery = recovery.NewRecoveryManager(a.sessionDir)
-	a.recovery.Close() // force the intent barrier to fail closed
+	a.recovery = newBrokenPathRecoveryManager(t) // force the intent barrier to fail closed
 	a.newTurn()
 
 	payload := &LLMResponsePayload{

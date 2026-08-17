@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -116,6 +117,18 @@ func TestResetSessionRuntimeStateClearsCacheRoutingState(t *testing.T) {
 	}
 	if snapshot := a.llmModelContinuitySnapshot(); snapshot.PreviousModel != "" || snapshot.ProjectedModelRunLength != 1 {
 		t.Fatalf("model continuity after session reset = %+v, want empty previous model and projected run length 1", snapshot)
+	}
+}
+
+func TestResetPersistenceHealthForSessionTargetStartsFresh(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.persistenceHealth.markDegraded(errors.New("disk unavailable"))
+
+	a.resetPersistenceHealthForSessionTarget()
+
+	got := a.persistenceHealth.snapshot()
+	if got.State != PersistenceHealthy || got.LastError != "" || !got.FailedAt.IsZero() || !got.RecoveredAt.IsZero() {
+		t.Fatalf("persistence health after session target reset = %+v, want fresh healthy state", got)
 	}
 }
 

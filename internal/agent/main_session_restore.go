@@ -726,6 +726,8 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	}
 	a.setSessionSummary(summary)
 	a.resetSessionBuildState()
+	// Persistence health is a per-session property; see installSessionTarget.
+	a.resetPersistenceHealthForSessionTarget()
 	// The restored session carries history: dynamic MCP mounts could be
 	// mis-anchored against it, so this run stays on top-level injection.
 	a.forceFullMCPToolInjection()

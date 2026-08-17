@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"strings"
@@ -42,7 +43,6 @@ type toolResult struct {
 	ArgsJSON         string // original args JSON string for malformed detection
 	Audit            *message.ToolArgsAudit
 	Result           string
-	ModelContextNote string                // appended only to persisted/model-visible tool context, not TUI display
 	Images           []message.ContentPart // image parts to inject into model context after the batch completes
 	Error            error
 	TurnID           uint64
@@ -52,6 +52,7 @@ type toolResult struct {
 	DiffRemoved      int                 // full removed-line count before any diff truncation
 	FileCreated      bool                // true when Write created a file that did not previously exist
 	LSPReviews       []message.LSPReview // per-file last-review snapshots for directly edited files
+	ModelContextNote string
 	FileState        *message.ToolFileState
 	BackupPaths      []string
 	// RecoveryState classifies synthetic results synthesized during session
@@ -340,7 +341,16 @@ func (s *SubAgent) PersistenceHealth() PersistenceHealth {
 }
 
 func (s *SubAgent) notePersistenceFailure(err error) {
-	if s == nil || err == nil || !s.persistenceHealth.markDegraded(err) {
+	if s == nil || err == nil {
+		return
+	}
+	// See MainAgent.notePersistenceFailure: writes racing an intentional
+	// Close are not disk failures and must not mint a degraded SubAgent.
+	if errors.Is(err, recovery.ErrClosed) {
+		log.Debugf("SubAgent persistence write after close ignored agent=%v error=%v", s.instanceID, err)
+		return
+	}
+	if !s.persistenceHealth.markDegraded(err) {
 		return
 	}
 	log.Warnf("SubAgent persistence degraded agent=%v task_id=%v error=%v", s.instanceID, s.taskID, err)

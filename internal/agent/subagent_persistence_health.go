@@ -114,3 +114,15 @@ func (h *agentPersistenceHealth) markRecovered() {
 	h.recoveredAt = time.Now()
 	h.mu.Unlock()
 }
+
+func (h *agentPersistenceHealth) reset() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.state = PersistenceHealthy
+	h.lastError = ""
+	h.failedAt = time.Time{}
+	h.recoveredAt = time.Time{}
+	h.mu.Unlock()
+}
