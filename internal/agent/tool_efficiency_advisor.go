@@ -16,7 +16,7 @@ import (
 // Static prompt guidance covers both, but long turns drift away from it; the
 // note re-surfaces the guidance at the moment the pattern is happening.
 //
-// Notes ride inside the tool result (like ModelContextNote) rather than a turn
+// Notes ride inside the tool result rather than a turn
 // overlay: appended tail content keeps provider prefix caches and Responses
 // incremental transport intact, while an overlay change would invalidate them.
 

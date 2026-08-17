@@ -360,16 +360,10 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	} else if patchMutation != nil {
 		staleWrite = patchMutation.stale
 	}
-	if tc.Name == tools.NameApplyPatch {
-		plan, err := agentdiff.CapturePatchPlan(agentCtx, tc, p.effectiveToolBaseDir())
-		if err != nil {
-			return execResult, err
-		}
-		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = plan.Path, plan.Before, plan.Existed
-		execResult.ModelContextNote = plan.ModelContextNote
-	} else {
-		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc, p.effectiveToolBaseDir())
-	}
+	// CapturePreWriteState only handles edit/write; for apply_patch the diff
+	// comes from the ApplyPatchDiffCollector and file state from the
+	// patchMutation snapshots, so the pre-write fields stay zero.
+	execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc, p.effectiveToolBaseDir())
 
 	var backupOutcome fileBackupOutcome
 	if patchMutation != nil {
@@ -488,16 +482,10 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	if tc.Name == tools.NameApplyPatch {
 		patchDiffCollector = &tools.ApplyPatchDiffCollector{}
 		agentCtx = tools.WithApplyPatchDiffCollector(agentCtx, patchDiffCollector)
-		plan, err := agentdiff.CapturePatchPlan(agentCtx, tc, p.effectiveToolBaseDir())
-		if err != nil {
-			rollbackSpeculativeToolHooks(execResult)
-			return execResult, err
-		}
-		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = plan.Path, plan.Before, plan.Existed
-		execResult.ModelContextNote = plan.ModelContextNote
-	} else {
-		execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc, p.effectiveToolBaseDir())
 	}
+	// See execute(): apply_patch keeps zero pre-write fields; its diff and
+	// backups come from the diff collector and the speculative mutation.
+	execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc, p.effectiveToolBaseDir())
 	artifactKey := toolCallArtifactKey(tc)
 	staleWrite := hooks != nil && hooks.stale
 	trackedFilePath := speculativeTrackedFilePath(tc.Name, execResult.PreFilePath, hooks)

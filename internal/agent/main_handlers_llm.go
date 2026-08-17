@@ -665,7 +665,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 							effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
 							diff = toolExecutionDiff(effectiveCall, execResult)
 						}
-						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, ModelContextNote: execResult.ModelContextNote, Images: execResult.Images, Error: err, TurnID: turnID, Duration: time.Since(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), BackupPaths: execResult.BackupPaths}})
+						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turnID, Duration: time.Since(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), BackupPaths: execResult.BackupPaths}})
 					}(effective)
 					promoted = true
 					continue
@@ -732,23 +732,22 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 				Type:   EventToolResult,
 				TurnID: turnID,
 				Payload: &ToolResultPayload{
-					CallID:           tc.ID,
-					Name:             tc.Name,
-					ArgsJSON:         execResult.EffectiveArgsJSON,
-					Audit:            execResult.Audit,
-					Result:           execResult.Result,
-					ModelContextNote: execResult.ModelContextNote,
-					Images:           execResult.Images,
-					Error:            err,
-					TurnID:           turnID,
-					Duration:         time.Since(startedAt),
-					Diff:             diff.Text,
-					DiffAdded:        diff.Added,
-					DiffRemoved:      diff.Removed,
-					FileCreated:      tc.Name == tools.NameWrite && !execResult.PreExisted,
-					LSPReviews:       append([]message.LSPReview(nil), execResult.LSPReviews...),
-					FileState:        execResult.FileState.Clone(),
-					BackupPaths:      execResult.BackupPaths,
+					CallID:      tc.ID,
+					Name:        tc.Name,
+					ArgsJSON:    execResult.EffectiveArgsJSON,
+					Audit:       execResult.Audit,
+					Result:      execResult.Result,
+					Images:      execResult.Images,
+					Error:       err,
+					TurnID:      turnID,
+					Duration:    time.Since(startedAt),
+					Diff:        diff.Text,
+					DiffAdded:   diff.Added,
+					DiffRemoved: diff.Removed,
+					FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted,
+					LSPReviews:  append([]message.LSPReview(nil), execResult.LSPReviews...),
+					FileState:   execResult.FileState.Clone(),
+					BackupPaths: execResult.BackupPaths,
 				},
 			})
 		}(tc)

@@ -1,7 +1,6 @@
 package agentdiff
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 
@@ -58,41 +57,13 @@ func CapturePreWriteState(tc message.ToolCall, baseDir string) (filePath, conten
 	return
 }
 
-type PatchPlan struct {
-	Path, Before, ModelContextNote string
-	Existed                        bool
-}
-
-func CapturePatchPlan(_ context.Context, tc message.ToolCall, baseDir string) (PatchPlan, error) {
-	// Only NameApplyPatch is supported; this function is only called from pipeline
-	// when tc.Name == tools.NameApplyPatch is already verified
-	targets, err := tools.ApplyPatchTargets(llm.UnwrapToolArgs(tc.Args), baseDir)
-	if err != nil {
-		return PatchPlan{}, err
-	}
-	if len(targets) == 0 {
-		return PatchPlan{}, nil
-	}
-	for _, target := range targets {
-		if target.Kind == tools.MutationAdd {
-			continue
-		}
-		path := target.SourcePath
-		decoded, err := tools.ReadDecodedTextFile(path)
-		if err == nil {
-			return PatchPlan{Path: path, Before: decoded.Text, Existed: true}, nil
-		}
-	}
-	return PatchPlan{Path: targets[0].TargetPath}, nil
-}
-
 // GenerateToolDiff builds a unified diff string for a completed file-editing tool call.
 // preContent/preFilePath must have been captured before execution via
 // CapturePreWriteState. preExisted indicates whether the file existed before the write.
 // Returns zero values for other tools or on any parse error.
 func GenerateToolDiff(tc message.ToolCall, preContent, preFilePath string, preExisted bool) Summary {
 	switch tc.Name {
-	case tools.NameEdit, tools.NameApplyPatch:
+	case tools.NameEdit:
 		if preFilePath == "" {
 			return Summary{}
 		}

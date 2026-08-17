@@ -38,23 +38,22 @@ type llmResult struct {
 
 // toolResult carries a single tool execution result back to the event loop.
 type toolResult struct {
-	CallID           string
-	Name             string // tool name, used for empty-args detection
-	ArgsJSON         string // original args JSON string for malformed detection
-	Audit            *message.ToolArgsAudit
-	Result           string
-	Images           []message.ContentPart // image parts to inject into model context after the batch completes
-	Error            error
-	TurnID           uint64
-	Duration         time.Duration
-	Diff             string              // unified diff for Write/Edit tools; not sent to LLM
-	DiffAdded        int                 // full added-line count before any diff truncation
-	DiffRemoved      int                 // full removed-line count before any diff truncation
-	FileCreated      bool                // true when Write created a file that did not previously exist
-	LSPReviews       []message.LSPReview // per-file last-review snapshots for directly edited files
-	ModelContextNote string
-	FileState        *message.ToolFileState
-	BackupPaths      []string
+	CallID      string
+	Name        string // tool name, used for empty-args detection
+	ArgsJSON    string // original args JSON string for malformed detection
+	Audit       *message.ToolArgsAudit
+	Result      string
+	Images      []message.ContentPart // image parts to inject into model context after the batch completes
+	Error       error
+	TurnID      uint64
+	Duration    time.Duration
+	Diff        string              // unified diff for Write/Edit tools; not sent to LLM
+	DiffAdded   int                 // full added-line count before any diff truncation
+	DiffRemoved int                 // full removed-line count before any diff truncation
+	FileCreated bool                // true when Write created a file that did not previously exist
+	LSPReviews  []message.LSPReview // per-file last-review snapshots for directly edited files
+	FileState   *message.ToolFileState
+	BackupPaths []string
 	// RecoveryState classifies synthetic results synthesized during session
 	// restore or a failed intent barrier (not_started / outcome_unknown).
 	RecoveryState    string

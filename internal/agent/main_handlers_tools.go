@@ -239,7 +239,6 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 	rawResult := payload.Result
 	displayResult, contextResult, _, isError := composeToolResultTexts(rawResult, payload.Error)
 	contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
-	contextResult = appendModelContextNote(contextResult, payload.ModelContextNote)
 	parts := a.toolResultParts(contextResult, payload.Images)
 	displayResult = appendBackupPathsToDisplay(displayResult, payload.BackupPaths)
 
@@ -385,7 +384,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	rawResult := payload.Result
 	displayResult, contextResult, errorText, isError := composeToolResultTexts(rawResult, payload.Error)
 	contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
-	contextResult = appendModelContextNote(contextResult, payload.ModelContextNote)
 	contextResult = appendModelContextNote(contextResult, a.turn.efficiencyNoteForToolResult(payload.CallID, payload.Name, payload.ArgsJSON, rawResult, isError))
 
 	hookResult, hookErr := a.fireHook(a.turn.Ctx, hook.OnBeforeToolResultAppend, a.turn.ID, buildBeforeToolResultAppendData(

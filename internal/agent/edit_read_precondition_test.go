@@ -80,8 +80,13 @@ func TestMainAgent_EditCanPatchFileWithoutPriorSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Edit without Read failed: %v", err)
 	}
-	if result.PreFilePath == "" || result.PreContent != "before" || !result.PreExisted {
-		t.Fatalf("unread Edit pre-write state = path %q existed %v content %q, want captured before content", result.PreFilePath, result.PreExisted, result.PreContent)
+	// apply_patch keeps zero pre-write fields; its diff comes from the
+	// ApplyPatchDiffCollector and file state from the mutation snapshots.
+	if result.PreFilePath != "" || result.PreContent != "" || result.PreExisted {
+		t.Fatalf("apply_patch pre-write state = path %q existed %v content %q, want zero values", result.PreFilePath, result.PreExisted, result.PreContent)
+	}
+	if result.Diff.Text == "" || result.Diff.Added != 1 || result.Diff.Removed != 1 {
+		t.Fatalf("apply_patch diff = %+v, want collector-produced one-line replacement", result.Diff)
 	}
 	got, err := os.ReadFile(path)
 	if err != nil {

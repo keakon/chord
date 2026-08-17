@@ -221,12 +221,13 @@ func TestStreamingToolExecutor_ApplyPatchToolPreWriteStateCapture(t *testing.T) 
 		t.Fatalf("executeToolCall failed: %v", err)
 	}
 
-	// Verify pre-write state was captured
-	if result.PreContent != "line1\nline2\n" {
-		t.Fatalf("PreContent = %q, want %q", result.PreContent, "line1\nline2\n")
+	// apply_patch keeps zero pre-write fields; the diff collector and the
+	// speculative mutation snapshots carry the pre-execution state instead.
+	if result.PreFilePath != "" || result.PreContent != "" || result.PreExisted {
+		t.Fatalf("apply_patch pre-write state = path %q existed %v content %q, want zero values", result.PreFilePath, result.PreExisted, result.PreContent)
 	}
-	if !result.PreExisted {
-		t.Fatal("PreExisted should be true")
+	if result.Diff.Text == "" || result.Diff.Added != 1 || result.Diff.Removed != 1 {
+		t.Fatalf("apply_patch diff = %+v, want collector-produced one-line replacement", result.Diff)
 	}
 
 	// Verify file was modified

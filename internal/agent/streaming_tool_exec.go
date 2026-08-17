@@ -333,7 +333,7 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 		effective.Args = json.RawMessage(entry.result.EffectiveArgsJSON)
 		diff = toolExecutionDiff(effective, entry.result)
 	}
-	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, ModelContextNote: entry.result.ModelContextNote, Images: entry.result.Images, Error: entry.err, TurnID: e.turnID, Duration: entry.completedAt.Sub(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...), FileState: entry.result.FileState.Clone(), BackupPaths: entry.result.BackupPaths, speculativeHooks: entry.result.speculativeHooks}, true, false
+	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Images: entry.result.Images, Error: entry.err, TurnID: e.turnID, Duration: entry.completedAt.Sub(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...), FileState: entry.result.FileState.Clone(), BackupPaths: entry.result.BackupPaths, speculativeHooks: entry.result.speculativeHooks}, true, false
 }
 
 func (e *StreamingToolExecutor) discardEntryLocked(callID string, entry *streamingToolEntry, reason string) StreamingToolDiscardInfo {
@@ -464,7 +464,6 @@ func (e *StreamingToolExecutor) DrainCompletedResults() map[string]*ToolResultPa
 			ArgsJSON:         entry.result.EffectiveArgsJSON,
 			Audit:            entry.result.Audit,
 			Result:           entry.result.Result,
-			ModelContextNote: entry.result.ModelContextNote,
 			Images:           entry.result.Images,
 			Error:            entry.err,
 			TurnID:           e.turnID,

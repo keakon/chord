@@ -155,7 +155,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 						}
 					}
 					select {
-					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, ModelContextNote: execResult.ModelContextNote, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), BackupPaths: execResult.BackupPaths, Duration: time.Since(startedAt)}:
+					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), BackupPaths: execResult.BackupPaths, Duration: time.Since(startedAt)}:
 					case <-s.parentCtx.Done():
 					}
 				}(effective)
@@ -219,7 +219,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				}
 			}
 			select {
-			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, ModelContextNote: execResult.ModelContextNote, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), BackupPaths: execResult.BackupPaths, Duration: time.Since(startedAt)}:
+			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), BackupPaths: execResult.BackupPaths, Duration: time.Since(startedAt)}:
 			case <-s.parentCtx.Done():
 			}
 		}(tc)
@@ -250,7 +250,6 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	toolChangedPaths, fileAttributionIncomplete := s.recordTaskToolChanges(result, isError)
 	s.recordVerificationToolResult(result, contextResult, isError)
 	contextResult = applyToolArgsAuditToContextResult(contextResult, result.Audit)
-	contextResult = appendModelContextNote(contextResult, result.ModelContextNote)
 	contextResult = appendModelContextNote(contextResult, s.turn.efficiencyNoteForToolResult(result.CallID, result.Name, result.ArgsJSON, rawResult, isError))
 
 	hookResult, hookErr := s.fireHook(s.turn.Ctx, hook.OnBeforeToolResultAppend, s.turn.ID, buildBeforeToolResultAppendData(

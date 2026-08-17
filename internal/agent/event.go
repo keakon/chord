@@ -79,22 +79,21 @@ type LLMResponsePayload struct {
 
 // ToolResultPayload wraps a tool execution result for the internal event bus.
 type ToolResultPayload struct {
-	CallID           string
-	Name             string
-	ArgsJSON         string
-	Audit            *message.ToolArgsAudit
-	Result           string
-	ModelContextNote string                // appended only to persisted/model-visible tool context, not TUI display
-	Images           []message.ContentPart // image parts to inject into model context after the batch completes
-	Error            error
-	TurnID           uint64
-	Duration         time.Duration
-	Diff             string              // unified diff for Write/Edit tools; not sent to LLM
-	DiffAdded        int                 // full added-line count before any diff truncation
-	DiffRemoved      int                 // full removed-line count before any diff truncation
-	FileCreated      bool                // true when Write created a file that did not previously exist
-	LSPReviews       []message.LSPReview // per-file last-review snapshots for directly edited files
-	FileState        *message.ToolFileState
+	CallID      string
+	Name        string
+	ArgsJSON    string
+	Audit       *message.ToolArgsAudit
+	Result      string
+	Images      []message.ContentPart // image parts to inject into model context after the batch completes
+	Error       error
+	TurnID      uint64
+	Duration    time.Duration
+	Diff        string              // unified diff for Write/Edit tools; not sent to LLM
+	DiffAdded   int                 // full added-line count before any diff truncation
+	DiffRemoved int                 // full removed-line count before any diff truncation
+	FileCreated bool                // true when Write created a file that did not previously exist
+	LSPReviews  []message.LSPReview // per-file last-review snapshots for directly edited files
+	FileState   *message.ToolFileState
 	// BackupPaths lists pre-write backup files created for a stale write. They
 	// are display-only (human recovery); the model context only carries the
 	// "Backup created" signal from the result text.
