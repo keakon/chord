@@ -22,18 +22,20 @@ import (
 )
 
 type speculativeToolHooks struct {
-	commit        func() error
-	rollback      func() error
-	captureAfter  func()
-	fileState     func() *message.ToolFileState
-	backupSources func() []fileBackupSource
-	stale         bool
-	paths         []string
+	commit               func() error
+	rollback             func() error
+	captureAfter         func()
+	fileState            func() *message.ToolFileState
+	backupSources        func() []fileBackupSource
+	deleteBackupRequired func() map[string]bool
+	stale                bool
+	paths                []string
 }
 
 type speculativeFileSnapshot struct {
 	Path              string
 	Existed           bool
+	BackupRequired    bool
 	Data              []byte
 	Mode              os.FileMode
 	SymlinkTarget     string
@@ -96,7 +98,7 @@ func prepareSpeculativeToolCall(tc message.ToolCall, registry *tools.Registry, t
 		if err != nil {
 			return nil, err
 		}
-		mutation, err := newSpeculativeFileMutation(track, agentID, paths, "delete")
+		mutation, err := newSpeculativeFileMutation(track, agentID, paths, "")
 		if err != nil {
 			return nil, err
 		}
@@ -195,6 +197,10 @@ func newSpeculativeFileMutation(track *filelock.FileTracker, agentID string, pat
 			} else if status.ExternalChanged {
 				mutation.stale = true
 			}
+			if snap.Existed && snap.Mode&os.ModeSymlink == 0 {
+				observation := track.Observation(path, agentID, snap.Hash)
+				snap.BackupRequired = !observation.Observed || status.ExternalChanged
+			}
 			if lease != nil {
 				locked = append(locked, lease)
 			}
@@ -289,11 +295,12 @@ func (m *speculativeFileMutation) hooks() *speculativeToolHooks {
 		rollback: func() error {
 			return m.Rollback()
 		},
-		captureAfter:  func() { m.CaptureAfter() },
-		fileState:     func() *message.ToolFileState { return m.postState() },
-		backupSources: func() []fileBackupSource { return m.backupSources() },
-		stale:         m.stale,
-		paths:         append([]string(nil), m.paths...),
+		captureAfter:         func() { m.CaptureAfter() },
+		fileState:            func() *message.ToolFileState { return m.postState() },
+		backupSources:        func() []fileBackupSource { return m.backupSources() },
+		deleteBackupRequired: func() map[string]bool { return m.deleteBackupRequired() },
+		stale:                m.stale,
+		paths:                append([]string(nil), m.paths...),
 	}
 }
 
@@ -312,6 +319,19 @@ func (m *speculativeFileMutation) backupSources() []fileBackupSource {
 		sources = append(sources, fileBackupSource{Path: snap.Path, Data: snap.Data})
 	}
 	return sources
+}
+
+func (m *speculativeFileMutation) deleteBackupRequired() map[string]bool {
+	if m == nil {
+		return nil
+	}
+	required := make(map[string]bool)
+	for _, snap := range m.files {
+		if snap.BackupRequired {
+			required[snap.Path] = true
+		}
+	}
+	return required
 }
 
 func (m *speculativeFileMutation) CaptureAfter() {

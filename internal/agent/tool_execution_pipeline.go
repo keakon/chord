@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -617,7 +618,20 @@ func speculativeDeleteLocks(toolName string, hooks *speculativeToolHooks) *delet
 	if toolName != tools.NameDelete || hooks == nil || len(hooks.paths) == 0 {
 		return nil
 	}
-	return &deleteLockSet{paths: hooks.paths}
+	required := map[string]bool(nil)
+	if hooks.deleteBackupRequired != nil {
+		required = hooks.deleteBackupRequired()
+	}
+	locked := make([]deleteLockedPath, 0, len(hooks.paths))
+	for _, path := range hooks.paths {
+		info, err := os.Lstat(path)
+		locked = append(locked, deleteLockedPath{
+			path:           path,
+			symlink:        err == nil && info.Mode()&os.ModeSymlink != 0,
+			backupRequired: required[path],
+		})
+	}
+	return &deleteLockSet{paths: hooks.paths, locked: locked}
 }
 
 func speculativeStaleWritePathCount(toolName, trackedPath string, hooks *speculativeToolHooks) int {
@@ -1020,18 +1034,19 @@ func (p toolExecutionPipeline) backupRiskyPreWriteState(tc message.ToolCall, tra
 		if deleteLocks == nil || len(deleteLocks.paths) == 0 {
 			return fileBackupOutcome{}
 		}
-		if !stale {
-			return fileBackupOutcome{}
-		}
-		backups := make([]fileBackupRecord, 0, len(deleteLocks.paths))
+		backups := make([]fileBackupRecord, 0, len(deleteLocks.locked))
 		var warnings []string
-		for _, path := range deleteLocks.paths {
+		for _, locked := range deleteLocks.locked {
+			if !locked.backupRequired || locked.symlink {
+				continue
+			}
+			path := locked.path
 			data, existed, err := readPreWriteBytes(path)
 			if err != nil {
 				warnings = append(warnings, fmt.Sprintf("%s: %v", path, err))
 				continue
 			}
-			if !existed || len(data) == 0 {
+			if !existed {
 				continue
 			}
 			backup, err := p.fileBackups.Backup(path, tc.Name, data)
@@ -1060,6 +1075,9 @@ func (p toolExecutionPipeline) backupRiskyPatchState(tc message.ToolCall, stale 
 	}
 	var warnings []backupWarning
 	for _, source := range sources {
+		if len(source.Data) == 0 {
+			continue
+		}
 		backup, err := p.fileBackups.Backup(source.Path, tc.Name, source.Data)
 		if err != nil {
 			warnings = append(warnings, backupWarning{path: source.Path, err: err})

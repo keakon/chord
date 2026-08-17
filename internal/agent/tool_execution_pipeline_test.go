@@ -270,6 +270,167 @@ func TestToolExecutionPipelineRelativeDeleteReleasesTrackedLease(t *testing.T) {
 	tracker.AbortWrite(path, "other-agent")
 }
 
+func TestToolExecutionPipelineUnobservedDeleteBacksUpRegularFile(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := filepath.Join(projectRoot, ".chord", "sessions", "test")
+	path := filepath.Join(projectRoot, "unobserved.txt")
+	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+
+	tracker := filelock.NewFileTracker()
+	registry := tools.NewRegistry()
+	registry.Register(tools.DeleteTool{BaseDir: projectRoot})
+	pipeline := toolExecutionPipeline{
+		agentID:     "agent-1",
+		registry:    registry,
+		fileTrack:   tracker,
+		fileBackups: newFileBackupManager(sessionDir),
+		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
+	}
+
+	result, err := pipeline.execute(context.Background(), message.ToolCall{
+		ID:   "delete-unobserved",
+		Name: tools.NameDelete,
+		Args: json.RawMessage(`{"paths":["unobserved.txt"],"reason":"cleanup"}`),
+	}, false)
+	if err != nil {
+		t.Fatalf("execute delete: %v", err)
+	}
+	if len(result.BackupPaths) != 1 {
+		t.Fatalf("backup paths = %#v, want one backup", result.BackupPaths)
+	}
+	if got, err := os.ReadFile(result.BackupPaths[0]); err != nil || string(got) != "before\n" {
+		t.Fatalf("backup content = %q, %v; want before\\n", got, err)
+	}
+	if !strings.Contains(result.Result, "Backup created") {
+		t.Fatalf("result = %q, want backup signal", result.Result)
+	}
+}
+
+func TestToolExecutionPipelineUnobservedDeleteBacksUpEmptyFile(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := filepath.Join(projectRoot, ".chord", "sessions", "test")
+	path := filepath.Join(projectRoot, "empty.txt")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("write empty file: %v", err)
+	}
+
+	tracker := filelock.NewFileTracker()
+	registry := tools.NewRegistry()
+	registry.Register(tools.DeleteTool{BaseDir: projectRoot})
+	pipeline := toolExecutionPipeline{
+		agentID:     "agent-1",
+		registry:    registry,
+		fileTrack:   tracker,
+		fileBackups: newFileBackupManager(sessionDir),
+		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
+	}
+
+	result, err := pipeline.execute(context.Background(), message.ToolCall{
+		ID:   "delete-empty",
+		Name: tools.NameDelete,
+		Args: json.RawMessage(`{"paths":["empty.txt"],"reason":"cleanup"}`),
+	}, false)
+	if err != nil {
+		t.Fatalf("execute delete: %v", err)
+	}
+	if len(result.BackupPaths) != 1 {
+		t.Fatalf("backup paths = %#v, want one empty-file backup", result.BackupPaths)
+	}
+	info, err := os.Stat(result.BackupPaths[0])
+	if err != nil {
+		t.Fatalf("stat empty-file backup: %v", err)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("empty-file backup size = %d, want 0", info.Size())
+	}
+}
+
+func TestToolExecutionPipelineUnobservedDeleteDoesNotFollowSymlink(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := filepath.Join(projectRoot, ".chord", "sessions", "test")
+	target := filepath.Join(projectRoot, "target.txt")
+	link := filepath.Join(projectRoot, "link.txt")
+	if err := os.WriteFile(target, []byte("target content\n"), 0o644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	tracker := filelock.NewFileTracker()
+	registry := tools.NewRegistry()
+	registry.Register(tools.DeleteTool{BaseDir: projectRoot})
+	pipeline := toolExecutionPipeline{
+		agentID:     "agent-1",
+		registry:    registry,
+		fileTrack:   tracker,
+		fileBackups: newFileBackupManager(sessionDir),
+		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
+	}
+
+	result, err := pipeline.execute(context.Background(), message.ToolCall{
+		ID:   "delete-link",
+		Name: tools.NameDelete,
+		Args: json.RawMessage(`{"paths":["link.txt"],"reason":"cleanup"}`),
+	}, false)
+	if err != nil {
+		t.Fatalf("execute delete: %v", err)
+	}
+	if len(result.BackupPaths) != 0 {
+		t.Fatalf("backup paths = %#v, want no regular-file backup for symlink", result.BackupPaths)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("symlink still exists, lstat err = %v", err)
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "target content\n" {
+		t.Fatalf("target content = %q, %v; want unchanged target", got, err)
+	}
+}
+
+func TestToolExecutionPipelineDeleteContinuesWhenBackupFails(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "unbacked.txt")
+	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+	sessionFile := filepath.Join(projectRoot, "session-file")
+	if err := os.WriteFile(sessionFile, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	tracker := filelock.NewFileTracker()
+	registry := tools.NewRegistry()
+	registry.Register(tools.DeleteTool{BaseDir: projectRoot})
+	pipeline := toolExecutionPipeline{
+		agentID:     "agent-1",
+		registry:    registry,
+		fileTrack:   tracker,
+		fileBackups: newFileBackupManager(sessionFile),
+		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
+	}
+
+	result, err := pipeline.execute(context.Background(), message.ToolCall{
+		ID:   "delete-backup-failure",
+		Name: tools.NameDelete,
+		Args: json.RawMessage(`{"paths":["unbacked.txt"],"reason":"cleanup"}`),
+	}, false)
+	if err != nil {
+		t.Fatalf("execute delete: %v", err)
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("file still exists, lstat err = %v", err)
+	}
+	if len(result.BackupPaths) != 0 || !strings.Contains(result.Result, "No backup was created") {
+		t.Fatalf("result = %#v, want backup failure warning without backup path", result)
+	}
+}
+
 func TestToolExecutionPipelineDeletePartialFailureRecordsCommittedFiles(t *testing.T) {
 	projectRoot := t.TempDir()
 	first := filepath.Join(projectRoot, "first.txt")

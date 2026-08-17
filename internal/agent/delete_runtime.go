@@ -19,10 +19,11 @@ const (
 )
 
 type deleteLockedPath struct {
-	path    string
-	lease   *filelock.WriteLease
-	symlink bool
-	stale   bool
+	path           string
+	lease          *filelock.WriteLease
+	symlink        bool
+	stale          bool
+	backupRequired bool
 }
 
 type deleteLockSet struct {
@@ -91,7 +92,14 @@ func acquireDeleteLocks(tracker *filelock.FileTracker, agentID string, args json
 		// Deletion is path-authorized, not content-authorized. The hash above
 		// verifies the current target for locking and backup; a missing or stale
 		// model observation must not turn an explicit delete into a refusal.
-		locked = append(locked, deleteLockedPath{path: path, lease: lease, symlink: isSymlink, stale: status.ExternalChanged})
+		observation := tracker.Observation(path, agentID, currentHash)
+		locked = append(locked, deleteLockedPath{
+			path:           path,
+			lease:          lease,
+			symlink:        isSymlink,
+			stale:          status.ExternalChanged,
+			backupRequired: !isSymlink && (!observation.Observed || status.ExternalChanged),
+		})
 	}
 	if len(locked) == 0 {
 		return nil, nil

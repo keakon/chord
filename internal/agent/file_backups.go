@@ -63,7 +63,7 @@ func (m *fileBackupManager) SetSessionDir(sessionDir string) {
 }
 
 func (m *fileBackupManager) Backup(path, toolName string, data []byte) (fileBackupRecord, error) {
-	if m == nil || strings.TrimSpace(path) == "" || len(data) == 0 {
+	if m == nil || strings.TrimSpace(path) == "" {
 		return fileBackupRecord{}, nil
 	}
 	if len(data) > maxSingleToolBackupBytes {
