@@ -23,11 +23,12 @@ func benchmarkRecoveryJSONL(b *testing.B, messageCount int) string {
 	enc := json.NewEncoder(f)
 	for i := range messageCount {
 		msg := message.Message{Role: message.RoleAssistant, Content: content}
-		if i%3 == 0 {
+		switch i % 3 {
+		case 0:
 			msg.Role = message.RoleUser
-		} else if i%3 == 1 {
+		case 1:
 			msg.ToolCalls = []message.ToolCall{{ID: fmt.Sprintf("call-%d", i), Name: "read", Args: json.RawMessage(fmt.Sprintf(`{"path":"file-%d.go"}`, i))}}
-		} else {
+		default:
 			msg.Role = message.RoleTool
 			msg.ToolCallID = fmt.Sprintf("call-%d", i-1)
 		}

@@ -312,10 +312,10 @@ func (t ApplyPatchTool) applyPatchPartial(ctx context.Context, result ApplyPatch
 	}
 	var b strings.Builder
 	if len(plan.Mutations) > 0 {
-		b.WriteString(fmt.Sprintf("apply_patch partially applied: %s committed; %s not applied.\n",
+		fmt.Fprintf(&b, "apply_patch partially applied: %s committed; %s not applied.\n",
 			applyPatchCount(len(plan.Mutations), "change", "changes"),
 			applyPatchCount(len(failedFiles), "file group", "file groups"),
-		))
+		)
 		b.WriteString(commitOutput)
 		b.WriteString("\n\n")
 	} else {
@@ -1088,7 +1088,9 @@ func snapshotApplyPatchStates(targets []MutationTarget) (map[string]*applyPatchV
 				return nil, fmt.Errorf("read apply_patch path %s: %w. No files were modified", path, err)
 			}
 			state.initialExists = true
-			state.initialBytes = append([]byte(nil), data...)
+			// ReadFile's buffer has no other referent: transfer ownership to
+			// the immutable initial snapshot and copy only the working bytes.
+			state.initialBytes = data
 			state.initialMode = info.Mode()
 			state.originPath = path
 			state.exists = true
@@ -1505,10 +1507,15 @@ func findUniqueApplyPatchSequence(lines, pattern []string, start int, eof bool, 
 		from = to
 	}
 	var candidates []int
+	// See findApplyPatchSequence: normalize the pattern once, not per position.
+	normalizedPattern := make([]string, len(pattern))
+	for j, line := range pattern {
+		normalizedPattern[j] = normalize(line)
+	}
 	for i := from; i <= to; i++ {
 		matched := true
-		for j := range pattern {
-			if normalize(lines[i+j]) != normalize(pattern[j]) {
+		for j := range normalizedPattern {
+			if normalize(lines[i+j]) != normalizedPattern[j] {
 				matched = false
 				break
 			}
@@ -1623,11 +1630,23 @@ func findApplyPatchSequence(lines, pattern []string, start int, eof bool) int {
 		strings.TrimSpace,
 		normalizePatchUnicodeLine,
 	}
-	for _, normalize := range normalizers {
+	for layer, normalize := range normalizers {
+		// Normalize the pattern once per layer instead of at every scan
+		// position: on a mismatch-heavy file (the common hunk-not-found
+		// path) the inner loop otherwise re-normalizes pattern lines
+		// O(positions) times, and the unicode layer allocates per call. Keep
+		// the exact-match layer allocation-free because it is the common path.
+		normalizedPattern := pattern
+		if layer > 0 {
+			normalizedPattern = make([]string, len(pattern))
+			for j, line := range pattern {
+				normalizedPattern[j] = normalize(line)
+			}
+		}
 		for i := from; i <= len(lines)-len(pattern); i++ {
 			matched := true
-			for j := range pattern {
-				if normalize(lines[i+j]) != normalize(pattern[j]) {
+			for j := range normalizedPattern {
+				if normalize(lines[i+j]) != normalizedPattern[j] {
 					matched = false
 					break
 				}

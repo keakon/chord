@@ -365,8 +365,7 @@ func (r *RecoveryManager) AppendToolActivity(rec ToolActivityRecord) error {
 // started). Any malformed record makes the journal unusable for classification:
 // skipping it could incorrectly label a tool that started as not_started.
 func (r *RecoveryManager) LoadToolActivity() (map[ToolActivityKey]struct{}, error) {
-	path := filepath.Join(r.sessionDir, ToolActivityFilename)
-	f, err := os.Open(path)
+	f, err := os.Open(r.toolActivityPath())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

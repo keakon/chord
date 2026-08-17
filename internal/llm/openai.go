@@ -20,6 +20,7 @@ import (
 
 	sonicjson "github.com/bytedance/sonic"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
 )
@@ -293,15 +294,19 @@ func (o *OpenAIProvider) CompleteStream(
 	if tuning.DisableReasoning {
 		ot.ReasoningEffort = ""
 	}
+	// Resolve the chat-completions compat once for the whole request; the
+	// resolver takes the provider lock and re-merges layers on every call.
+	var chatCompat *config.ChatCompletionsCompatConfig
+	if o.provider != nil {
+		chatCompat = o.provider.ChatCompletionsCompat(model)
+	}
 	// Convert messages to OpenAI format.
 	wireFamily := providerWireFamily(o.provider)
 	continuityMode := reasoningContinuityCompatMode(o.provider, model)
 	convertOpts := openAIConvertOptions{}
-	if o.provider != nil {
-		if cc := o.provider.ChatCompletionsCompat(model); cc != nil {
-			convertOpts.requiresToolResultName = compatBool(cc.RequiresToolResultName, false)
-			convertOpts.requiresAssistantAfterToolResult = compatBool(cc.RequiresAssistantAfterToolResult, false)
-		}
+	if chatCompat != nil {
+		convertOpts.requiresToolResultName = compatBool(chatCompat.RequiresToolResultName, false)
+		convertOpts.requiresAssistantAfterToolResult = compatBool(chatCompat.RequiresAssistantAfterToolResult, false)
 	}
 	apiMessages := convertMessagesToOpenAIWithOptions(systemPrompt, wireFamily, continuityMode, messages, convertOpts)
 	// When the wire keeps visible reasoning continuity, thinking-mode backends
@@ -359,10 +364,8 @@ func (o *OpenAIProvider) CompleteStream(
 	// disable it via compat.chat_completions.send_stream_options: false
 	// (token usage then stays unreported).
 	var sendStreamOptions *bool
-	if o.provider != nil {
-		if cc := o.provider.ChatCompletionsCompat(model); cc != nil {
-			sendStreamOptions = cc.SendStreamOptions
-		}
+	if chatCompat != nil {
+		sendStreamOptions = chatCompat.SendStreamOptions
 	}
 	if compatBool(sendStreamOptions, true) {
 		reqBody.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
@@ -479,10 +482,8 @@ func (o *OpenAIProvider) CompleteStream(
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, o.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
 	inferFinishReason := false
-	if o.provider != nil {
-		if cc := o.provider.ChatCompletionsCompat(model); cc != nil {
-			inferFinishReason = compatBool(cc.InferFinishReason, false)
-		}
+	if chatCompat != nil {
+		inferFinishReason = compatBool(chatCompat.InferFinishReason, false)
 	}
 	resp, parseErr := parseOpenAISSEStreamOptions(cr, traceCB, collector, inferFinishReason)
 

@@ -413,8 +413,9 @@ func (r *ResponsesProvider) CompleteStream(
 	// Body overrides can enable thinking server-side (e.g. a gateway-injected
 	// thinking key) even when tuning carries no explicit effort or summary.
 	continuityMode := reasoningContinuityCompatMode(r.provider, model)
+	forcedToolChoiceSuppressed := ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(r.provider, model)
 	needsReasoningState := continuityMode == modelcompat.ReasoningContinuityOpenAIVisible ||
-		(ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(r.provider, model))
+		forcedToolChoiceSuppressed
 	reasoningActive := false
 	if needsReasoningState {
 		reasoningProbe := make(map[string]any, 1)
@@ -453,8 +454,7 @@ func (r *ResponsesProvider) CompleteStream(
 	if compatBool(sendToolChoice, true) {
 		reqBody.ToolChoice = "auto"
 	}
-	if ot.ToolChoice != "" && !(ot.ToolChoice == "required" && reasoningActive &&
-		forcedToolChoiceSuppressedInThinking(r.provider, model)) {
+	if ot.ToolChoice != "" && !(ot.ToolChoice == "required" && reasoningActive && forcedToolChoiceSuppressed) {
 		reqBody.ToolChoice = ot.ToolChoice
 	}
 	reqBody.Input = fullInput
