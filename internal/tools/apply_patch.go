@@ -1929,14 +1929,14 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 		write := finalWrites[path]
 		t.LSP.MarkTouched(write.path)
 		outputs[path] = t.LSP.DiagnosticOutputConfigForPath(path)
-		result := t.LSP.AfterFileWriteToolResult(ctx, write.path, write.content, "", false, write.change)
+		result := t.LSP.AfterFileWriteToolResult(ctx, write.path, write.content, "", false, write.change, t.BaseDir)
 		if parsed := lsp.ParseToolOutputDiagnostics(result); len(parsed) > 0 {
 			extras[path] = parsed
 		}
 		reviewedPaths = append(reviewedPaths, write.path)
 	}
 	slices.Sort(reviewedPaths)
-	return t.LSP.AppendLSPDiagnosticsToToolOutputForPaths(out, reviewedPaths, true, baselines, outputs, extras)
+	return t.LSP.AppendLSPDiagnosticsToToolOutputForPaths(out, reviewedPaths, true, baselines, outputs, extras, t.BaseDir)
 }
 
 func normalizedLSPPath(path string) string {

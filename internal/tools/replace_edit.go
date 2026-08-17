@@ -186,7 +186,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			} else {
 				out = fmt.Sprintf("Replaced 1 occurrence via quote-tolerant match (%d bytes -> %d bytes)%s", oldBytes, newBytes, encSuffix)
 			}
-			out, err = writeEncodedEditedFile(ctx, resolvedPath, encodedBytes, editRead.Decoded, qc, fmt.Sprintf("writing %d bytes", newBytes), t.LSP, out)
+			out, err = writeEncodedEditedFile(ctx, resolvedPath, encodedBytes, editRead.Decoded, qc, fmt.Sprintf("writing %d bytes", newBytes), t.LSP, out, t.BaseDir)
 			if err != nil {
 				return "", err
 			}
@@ -223,7 +223,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	} else {
 		out = fmt.Sprintf("Replaced 1 occurrence (%d bytes -> %d bytes)%s", oldBytes, newBytes, encSuffix)
 	}
-	out, err = writeEncodedEditedFile(ctx, resolvedPath, encodedBytes, editRead.Decoded, newContent, fmt.Sprintf("writing %d bytes", newBytes), t.LSP, out)
+	out, err = writeEncodedEditedFile(ctx, resolvedPath, encodedBytes, editRead.Decoded, newContent, fmt.Sprintf("writing %d bytes", newBytes), t.LSP, out, t.BaseDir)
 	if err != nil {
 		return "", err
 	}

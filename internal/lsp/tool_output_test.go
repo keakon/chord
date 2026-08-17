@@ -49,9 +49,48 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsUsesSharedLimitAndFileLabels(t 
 		pathA: {{Severity: 1, Line: 0, Col: 0, Message: "a"}},
 		pathB: {{Severity: 2, Line: 1, Col: 1, Message: "b"}},
 	}
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras)
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras, "")
 	if !strings.Contains(out, pathA+":\n[E] 1:1 a") || !strings.Contains(out, pathB+":\n[W] 2:2 b") {
 		t.Fatalf("batch output = %q", out)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPathsUsesRelativeDisplayPaths(t *testing.T) {
+	baseDir := t.TempDir()
+	pathA := filepath.Join(baseDir, "pkg", "a.go")
+	pathB := filepath.Join(baseDir, "pkg", "b.go")
+	mgr := &Manager{diagByServer: map[string]map[string]diagCounts{}}
+	extras := map[string][]Diagnostic{
+		pathA: {{Severity: 1, Line: 0, Col: 0, Message: "a"}},
+		pathB: {{Severity: 2, Line: 1, Col: 1, Message: "b"}},
+	}
+
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras, baseDir)
+	if !strings.Contains(out, "pkg/a.go:\n[E] 1:1 a") || !strings.Contains(out, "pkg/b.go:\n[W] 2:2 b") {
+		t.Fatalf("batch output = %q, want paths relative to %s", out, baseDir)
+	}
+	if strings.Contains(out, filepath.ToSlash(baseDir)) {
+		t.Fatalf("batch output = %q, want no display-base prefix", out)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPathsUsesSubdirectoryDisplayBase(t *testing.T) {
+	projectRoot := t.TempDir()
+	baseDir := filepath.Join(projectRoot, "pkg")
+	inside := filepath.Join(baseDir, "internal", "inside.go")
+	outside := filepath.Join(projectRoot, "shared", "outside.go")
+	mgr := &Manager{diagByServer: map[string]map[string]diagCounts{}}
+	extras := map[string][]Diagnostic{
+		inside:  {{Severity: 1, Line: 0, Message: "inside"}},
+		outside: {{Severity: 1, Line: 0, Message: "outside"}},
+	}
+
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{inside, outside}, false, nil, nil, extras, baseDir)
+	if !strings.Contains(out, "internal/inside.go:\n[E] 1:1 inside") {
+		t.Fatalf("batch output = %q, want path relative to subdirectory base", out)
+	}
+	if !strings.Contains(out, filepath.ToSlash(outside)+":\n[E] 1:1 outside") {
+		t.Fatalf("batch output = %q, want outside path kept absolute", out)
 	}
 }
 
@@ -64,7 +103,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsUsesBatchBudget(t *testing.T) {
 			extras[path] = append(extras[path], Diagnostic{Severity: 1, Line: i, Message: path})
 		}
 	}
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", paths, false, nil, nil, extras)
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", paths, false, nil, nil, extras, "")
 	if got := countFormattedDiagnostics(out); got != ToolOutputMaxDiagnosticsPerBatch {
 		t.Fatalf("formatted diagnostics = %d, want batch budget %d\n%s", got, ToolOutputMaxDiagnosticsPerBatch, out)
 	}
@@ -79,7 +118,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsReportsChangesPerFile(t *testin
 	key := func(message string) []Diagnostic { return []Diagnostic{{Severity: 1, Line: 0, Message: message}} }
 	baselines := map[string][]Diagnostic{pathA: key("old"), pathB: key("gone")}
 	extras := map[string][]Diagnostic{pathA: key("new"), pathB: nil}
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, baselines, nil, extras)
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, baselines, nil, extras, "")
 	if !strings.Contains(out, pathA+" (1 new, 1 resolved):\n[E] 1:1 new") {
 		t.Fatalf("output = %q, want change counts in the %s block header", out, pathA)
 	}
@@ -98,7 +137,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsOmitsCountsWithoutBaselines(t *
 		pathA: {{Severity: 1, Line: 0, Message: "a"}},
 		pathB: {{Severity: 1, Line: 0, Message: "b"}},
 	}
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras)
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras, "")
 	if !strings.Contains(out, pathA+":\n[E] 1:1 a\n"+pathB+":\n[E] 1:1 b") {
 		t.Fatalf("output = %q, want compact plain path headers when no baselines are provided", out)
 	}
@@ -229,12 +268,34 @@ func TestAppendLSPDiagnosticsToToolOutput_OtherFilesWithoutPrimaryHaveNoBlankLin
 	}}
 	mgr.clientsMu.Unlock()
 
-	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10})
+	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, "")
 	if strings.Contains(out, "Diagnostics:\n\n") {
 		t.Fatalf("expected first diagnostics block to follow header without blank line, got %q", out)
 	}
 	if !strings.Contains(out, "Diagnostics:\nLSP diagnostics in other files:") {
 		t.Fatalf("expected other-file diagnostics directly after header, got %q", out)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutput_OtherFilesUseRelativeDisplayPaths(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := NewManager(&config.Config{}, tmp, nil)
+	edited := filepath.Join(tmp, "edited.py")
+	other := filepath.Join(tmp, "pkg", "other.py")
+	mgr.clientsMu.Lock()
+	mgr.clients["test"] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
+			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 1, Character: 0}}, Message: "other error"},
+		},
+	}}
+	mgr.clientsMu.Unlock()
+
+	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, tmp)
+	if !strings.Contains(out, "LSP diagnostics in other files:\npkg/other.py:\n[E] 2:1 other error") {
+		t.Fatalf("output = %q, want other-file path relative to display base", out)
+	}
+	if strings.Contains(out, filepath.ToSlash(tmp)) {
+		t.Fatalf("output = %q, want no display-base prefix", out)
 	}
 }
 
@@ -262,7 +323,7 @@ func TestAppendLSPDiagnosticsToToolOutput_LimitsDiagnosticsGlobally(t *testing.T
 	mgr.clients["test"] = &Client{diagnostics: diagnostics}
 	mgr.clientsMu.Unlock()
 
-	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10})
+	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, "")
 	if got := countFormattedDiagnostics(out); got != 10 {
 		t.Fatalf("formatted diagnostics = %d, want 10\n%s", got, out)
 	}
@@ -291,7 +352,7 @@ func TestAppendLSPDiagnosticsToToolOutput_OtherFilesIncludeInfoHintsWhenSlotsAva
 	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
 	edited := filepath.Join(t.TempDir(), "edited.py")
 	other := filepath.Join(t.TempDir(), "other.py")
-	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10})
+	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, "")
 	if out != "ok" {
 		t.Fatalf("expected unchanged output when manager empty, got %q", out)
 	}
@@ -309,7 +370,7 @@ func TestAppendLSPDiagnosticsToToolOutput_OtherFilesIncludeInfoHintsWhenSlotsAva
 	}}
 	mgr.clientsMu.Unlock()
 
-	out = mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10})
+	out = mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, "")
 	if !strings.Contains(out, "edited warning") {
 		t.Fatalf("expected edited file diagnostics kept, got %q", out)
 	}
@@ -354,7 +415,7 @@ func TestFormatDiagnosticsBlockWithoutRangesIncludesOnlyInfoHints(t *testing.T) 
 func TestAppendLSPDiagnosticsToToolOutput_OmitsCleanDiagnosticsStatus(t *testing.T) {
 	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
 	edited := filepath.Join(t.TempDir(), "edited.go")
-	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, false, nil, config.DiagnosticOutputConfig{})
+	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, false, nil, config.DiagnosticOutputConfig{}, "")
 	if out != "ok" {
 		t.Fatalf("expected unchanged output when diagnostics are clean, got %q", out)
 	}
@@ -373,7 +434,7 @@ func TestAppendLSPDiagnosticsToToolOutput_IncludesOnlyInfoHintsWhenSlotsAvailabl
 	}}
 	mgr.clientsMu.Unlock()
 
-	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, false, []EditRange{{StartLine: 0, EndLine: 0}}, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10})
+	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, false, []EditRange{{StartLine: 0, EndLine: 0}}, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, "")
 	if !strings.Contains(out, "info") || !strings.Contains(out, "hint") {
 		t.Fatalf("expected only info/hint diagnostics included when slots are available, got %q", out)
 	}
@@ -395,7 +456,7 @@ func TestAppendLSPDiagnosticsToToolOutput_CurrentFileHintsPrecedeOtherErrors(t *
 	}}
 	mgr.clientsMu.Unlock()
 
-	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 2})
+	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 2}, "")
 	if !strings.Contains(out, "edited hint") || !strings.Contains(out, "other error") {
 		t.Fatalf("expected current-file hint and other-file error included, got %q", out)
 	}
@@ -419,7 +480,7 @@ func TestAppendLSPDiagnosticsToToolOutput_LimitsOtherFilesAfterSelection(t *test
 	mgr.clients["test"] = &Client{diagnostics: diagnostics}
 	mgr.clientsMu.Unlock()
 
-	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10})
+	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, "")
 	if got := strings.Count(out, "LSP diagnostics in other files:"); got != 1 {
 		t.Fatalf("other-files header count = %d, want single shared header\n%s", got, out)
 	}

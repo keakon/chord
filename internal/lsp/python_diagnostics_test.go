@@ -274,7 +274,7 @@ func TestPythonQuickDiagnosticsNotifyReadyLSPClientWithoutSemanticSync(t *testin
 	path := filepath.Join(root, "large.py")
 	content := strings.Repeat("x = 1\n", cfg.Diagnostics.Python.LargeFile.LineThreshold+1)
 
-	out := mgr.AfterFileWriteToolResult(context.Background(), path, content, "Successfully wrote file", false, WatchedFileCreated)
+	out := mgr.AfterFileWriteToolResult(context.Background(), path, content, "Successfully wrote file", false, WatchedFileCreated, "")
 	if !strings.Contains(out, "No Ruff diagnostics found.") {
 		t.Fatalf("expected Ruff diagnostics output, got %q", out)
 	}

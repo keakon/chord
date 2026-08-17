@@ -168,7 +168,7 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 			if existed {
 				changeType = lsp.WatchedFileChanged
 			}
-			out = t.LSP.AfterFileWriteToolResult(ctx, absPath, content, out, true, changeType)
+			out = t.LSP.AfterFileWriteToolResult(ctx, absPath, content, out, true, changeType, t.BaseDir)
 		}
 	}
 	return out, nil

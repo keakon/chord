@@ -46,7 +46,7 @@ var (
 // WaitDiagnosticsNotify, logs startup/sync failures, then appends LSP error diagnostics
 // (if any). includeOtherFiles is true for Write. If no LSP is configured for this file
 // type, LSP is not invoked and base is returned as-is.
-func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, changeType WatchedFileChangeType) string {
+func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, changeType WatchedFileChangeType, displayBaseDir string) string {
 	if m == nil {
 		return base
 	}
@@ -60,7 +60,7 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 		if strings.HasPrefix(base, "Replaced ") {
 			ranges = EditRangesForReplacement(content, "", "", false)
 		}
-		return m.afterWritePythonToolResult(ctx, absPath, content, base, includeOtherFiles, ranges, changeType)
+		return m.afterWritePythonToolResult(ctx, absPath, content, base, includeOtherFiles, ranges, changeType, displayBaseDir)
 	}
 	// Unassociated file type: skip LSP entirely (no Start, no note).
 	if !m.anyServerMatchesPath(absPath) {
@@ -106,7 +106,7 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 	}
 
 	m.recordReviewSnapshot(absPath)
-	return m.AppendLSPDiagnosticsToToolOutput(base, absPath, includeOtherFiles)
+	return m.AppendLSPDiagnosticsToToolOutput(base, absPath, includeOtherFiles, displayBaseDir)
 }
 
 func (m *Manager) logLSPServiceNote(path, msg string) {

@@ -37,7 +37,7 @@ func readFileForEdit(path, displayPath, baseDir, binaryAction string) (fileEditR
 	return fileEditRead{Decoded: decodedFile, Bytes: data, Info: info}, nil
 }
 
-func writeEncodedEditedFile(ctx context.Context, path string, encodedBytes []byte, decodedFile decodedText, newContent, progressText string, lspMgr *lsp.Manager, baseResult string) (string, error) {
+func writeEncodedEditedFile(ctx context.Context, path string, encodedBytes []byte, decodedFile decodedText, newContent, progressText string, lspMgr *lsp.Manager, baseResult, displayBaseDir string) (string, error) {
 	if progressText != "" {
 		reportToolProgress(ctx, ToolProgressSnapshot{Text: progressText})
 	}
@@ -51,7 +51,7 @@ func writeEncodedEditedFile(ctx context.Context, path string, encodedBytes []byt
 		absPath, absErr := filepath.Abs(path)
 		if absErr == nil {
 			lspMgr.MarkTouched(absPath)
-			out = lspMgr.AfterFileWriteToolResult(ctx, absPath, newContent, out, false, lsp.WatchedFileChanged)
+			out = lspMgr.AfterFileWriteToolResult(ctx, absPath, newContent, out, false, lsp.WatchedFileChanged, displayBaseDir)
 		}
 	}
 	return out, nil

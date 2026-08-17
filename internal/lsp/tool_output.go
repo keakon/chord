@@ -22,8 +22,8 @@ const (
 // AppendLSPDiagnosticsToToolOutput appends all LSP diagnostics (severity 1-4)
 // to the tool result string so the model can act on them. Diagnostics for the
 // edited file are listed first; optionally include diagnostics from other files.
-func (m *Manager) AppendLSPDiagnosticsToToolOutput(base, editedPath string, includeOtherFiles bool) string {
-	return m.appendLSPDiagnosticsToToolOutput(base, editedPath, includeOtherFiles, nil, config.DiagnosticOutputConfig{})
+func (m *Manager) AppendLSPDiagnosticsToToolOutput(base, editedPath string, includeOtherFiles bool, displayBaseDir string) string {
+	return m.appendLSPDiagnosticsToToolOutput(base, editedPath, includeOtherFiles, nil, config.DiagnosticOutputConfig{}, displayBaseDir)
 }
 
 // DiagnosticOutputConfigForPath returns the configured output policy for a
@@ -42,7 +42,7 @@ func (m *Manager) DiagnosticOutputConfigForPath(path string) config.DiagnosticOu
 // than being appended once per file. baselines is keyed by normalized absolute
 // path and feeds the per-file "(N new, M resolved)" header counts; a nil map
 // means no baseline information and omits the counts entirely.
-func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPaths []string, includeOtherFiles bool, baselines map[string][]Diagnostic, outputs map[string]config.DiagnosticOutputConfig, extras map[string][]Diagnostic) string {
+func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPaths []string, includeOtherFiles bool, baselines map[string][]Diagnostic, outputs map[string]config.DiagnosticOutputConfig, extras map[string][]Diagnostic, displayBaseDir string) string {
 	if m == nil {
 		return base
 	}
@@ -143,7 +143,7 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		diags := selectedByPath[path]
 		switch {
 		case len(diags) > 0 && multi:
-			header := path
+			header := displayDiagnosticPath(path, displayBaseDir)
 			if counts != "" {
 				header += " (" + counts + ")"
 			}
@@ -151,10 +151,10 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		case len(diags) > 0:
 			writeBlock(strings.Join(formatDiagnosticLines(diags), "\n"))
 		case counts != "" && multi:
-			writeBlock(path + ": " + counts + ".")
+			writeBlock(displayDiagnosticPath(path, displayBaseDir) + ": " + counts + ".")
 		}
 	}
-	appendOtherFileDiagnosticsSection(&b, others, wroteBlock)
+	appendOtherFileDiagnosticsSection(&b, others, wroteBlock, displayBaseDir)
 	if omitted > 0 {
 		b.WriteByte('\n')
 		b.WriteString(diagnosticsOmittedLine(omitted))
@@ -250,7 +250,7 @@ func deduplicateDiagnostics(diags []Diagnostic) []Diagnostic {
 	return out
 }
 
-func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, includeOtherFiles bool, ranges []EditRange, output config.DiagnosticOutputConfig) string {
+func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, includeOtherFiles bool, ranges []EditRange, output config.DiagnosticOutputConfig, displayBaseDir string) string {
 	if m == nil {
 		return base
 	}
@@ -313,7 +313,7 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 	if len(primary) > 0 {
 		b.WriteString(strings.Join(formatDiagnosticLines(primary), "\n"))
 	}
-	appendOtherFileDiagnosticsSection(&b, others, len(primary) > 0)
+	appendOtherFileDiagnosticsSection(&b, others, len(primary) > 0, displayBaseDir)
 
 	return b.String()
 }
@@ -370,7 +370,7 @@ const otherFilesDiagnosticsHeader = "LSP diagnostics in other files:"
 // other files:" header followed by a compact path-labelled block per file.
 // afterBlock inserts a blank line so the section stays visually separate from
 // preceding primary-file blocks.
-func appendOtherFileDiagnosticsSection(b *strings.Builder, others []otherFileDiagnostics, afterBlock bool) {
+func appendOtherFileDiagnosticsSection(b *strings.Builder, others []otherFileDiagnostics, afterBlock bool, displayBaseDir string) {
 	for i, other := range others {
 		if i == 0 {
 			if afterBlock {
@@ -379,10 +379,30 @@ func appendOtherFileDiagnosticsSection(b *strings.Builder, others []otherFileDia
 			b.WriteString(otherFilesDiagnosticsHeader)
 		}
 		b.WriteByte('\n')
-		b.WriteString(other.path)
+		b.WriteString(displayDiagnosticPath(other.path, displayBaseDir))
 		b.WriteString(":\n")
 		b.WriteString(strings.Join(formatDiagnosticLines(other.diags), "\n"))
 	}
+}
+
+func displayDiagnosticPath(path, baseDir string) string {
+	path = strings.TrimSpace(path)
+	baseDir = strings.TrimSpace(baseDir)
+	if path == "" || baseDir == "" {
+		return path
+	}
+	path = filepath.Clean(path)
+	baseDir = filepath.Clean(baseDir)
+	base, baseErr := filepath.Abs(baseDir)
+	target, targetErr := filepath.Abs(path)
+	if baseErr != nil || targetErr != nil {
+		return path
+	}
+	rel, err := filepath.Rel(filepath.Clean(base), filepath.Clean(target))
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return path
+	}
+	return filepath.ToSlash(rel)
 }
 
 func formatDiagnosticsBlockWithRanges(diags []Diagnostic, output config.DiagnosticOutputConfig, ranges []EditRange) string {

@@ -12,7 +12,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 )
 
-func (m *Manager) afterWritePythonToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType) string {
+func (m *Manager) afterWritePythonToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType, displayBaseDir string) string {
 	pyCfg := m.cfg.Diagnostics.Python
 	metrics := measureContent(content)
 	availability := diagnosticBackendAvailability{
@@ -22,19 +22,19 @@ func (m *Manager) afterWritePythonToolResult(ctx context.Context, absPath, conte
 	selection := selectPythonDiagnosticBackend(pyCfg, metrics, availability)
 	switch selection.Backend {
 	case pythonDiagnosticBackendQuick:
-		return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, selection, base, ranges, changeType, true)
+		return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, selection, base, ranges, changeType, true, displayBaseDir)
 	case pythonDiagnosticBackendSemantic:
-		return m.afterWriteLSPToolResult(ctx, absPath, content, base, includeOtherFiles, ranges, changeType)
+		return m.afterWriteLSPToolResult(ctx, absPath, content, base, includeOtherFiles, ranges, changeType, displayBaseDir)
 	default:
 		return appendPythonDiagnosticsSkipped(base, selection)
 	}
 }
 
-func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType) string {
-	return m.afterWriteLSPToolResultWithWatchedNotification(ctx, absPath, content, base, includeOtherFiles, ranges, changeType, true)
+func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType, displayBaseDir string) string {
+	return m.afterWriteLSPToolResultWithWatchedNotification(ctx, absPath, content, base, includeOtherFiles, ranges, changeType, true, displayBaseDir)
 }
 
-func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool) string {
+func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool, displayBaseDir string) string {
 	// Unassociated file type: skip LSP entirely (no Start, no note).
 	if !m.anyServerMatchesPath(absPath) {
 		return base
@@ -84,18 +84,18 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 			if m.pythonQuickBackendAvailable(pyCfg) {
 				fallbackBase := base
 				selection := pythonDiagnosticSelection{Backend: pythonDiagnosticBackendQuick, Reason: "semantic-timeout", SkipFullTypeCheck: true}
-				return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, selection, fallbackBase, ranges, changeType, false)
+				return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, selection, fallbackBase, ranges, changeType, false, displayBaseDir)
 			}
 		}
 	}
 
 	m.recordReviewSnapshot(absPath)
 	current := m.currentFileDiagnostics(absPath)
-	out := m.appendLSPDiagnosticsToToolOutput(base, absPath, includeOtherFiles, ranges, diagnosticsOutputConfig(m.cfg, absPath))
+	out := m.appendLSPDiagnosticsToToolOutput(base, absPath, includeOtherFiles, ranges, diagnosticsOutputConfig(m.cfg, absPath), displayBaseDir)
 	return appendDiagnosticChangeSummary(out, baseline, current)
 }
 
-func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, content string, pyCfg config.PythonDiagnosticsConfig, selection pythonDiagnosticSelection, base string, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool) string {
+func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, content string, pyCfg config.PythonDiagnosticsConfig, selection pythonDiagnosticSelection, base string, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool, displayBaseDir string) string {
 	watchedNotified := false
 	if notifyWatched && afterWriteHasReadyClient(m, absPath) {
 		if err := afterWriteNotifyWatchedFileChanged(m, ctx, absPath, changeType); err != nil {
@@ -108,7 +108,7 @@ func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, cont
 	if err != nil {
 		if pyCfg.LargeFile.RunSemanticWhenQuickUnavailable && selection.Reason == "large-file" {
 			fallbackBase := appendRuffDiagnosticsFailure(base, selection, err) + "\nFalling back to Python semantic diagnostics."
-			return m.afterWriteLSPToolResultWithWatchedNotification(ctx, absPath, content, fallbackBase, false, ranges, changeType, !watchedNotified)
+			return m.afterWriteLSPToolResultWithWatchedNotification(ctx, absPath, content, fallbackBase, false, ranges, changeType, !watchedNotified, displayBaseDir)
 		}
 		return appendRuffDiagnosticsFailure(base, selection, err)
 	}
