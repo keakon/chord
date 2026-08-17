@@ -155,7 +155,7 @@ func TestParseGeminiSSEStream(t *testing.T) {
 	if resp.Content != "hello world" || resp.ReasoningContent != "thinking" || resp.StopReason != "STOP" {
 		t.Fatalf("response = %#v", resp)
 	}
-	if resp.Usage == nil || resp.Usage.InputTokens != 10 || resp.Usage.OutputTokens != 20 || resp.Usage.CacheReadTokens != 4 || resp.Usage.ReasoningTokens != 3 {
+	if resp.Usage == nil || resp.Usage.InputTokens != 10 || resp.Usage.OutputTokens != 23 || resp.Usage.CacheReadTokens != 4 || resp.Usage.ReasoningTokens != 3 {
 		t.Fatalf("usage = %#v", resp.Usage)
 	}
 	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "lookup" || string(resp.ToolCalls[0].Args) != `{"q":"x"}` {

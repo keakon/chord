@@ -244,6 +244,20 @@ func (l *UsageLedger) BuildSessionStatsWithAgentModelRefs() (SessionStats, int64
 	refs := make(map[string]AgentModelRefs)
 	err := scanUsageEvents(l.usagePath(), func(evt UsageEvent) {
 		eventCount++
+		agentID := normalizeAgentID(evt.AgentID)
+		ref := refs[agentID]
+		if selected := strings.TrimSpace(evt.SelectedModelRef); selected != "" {
+			ref.Selected = selected
+		}
+		if running := strings.TrimSpace(evt.RunningModelRef); running != "" {
+			ref.Running = running
+		}
+		refs[agentID] = ref
+		// Diagnostic events advance the count cursor and model refs but are
+		// not LLM calls; keep them out of the aggregated stats.
+		if IsDiagnosticUsagePurpose(evt.Purpose) {
+			return
+		}
 		raw := evt.UsageRaw
 		billing := evt.BillingUsage
 		stats.InputTokens += billing.InputTokens
@@ -268,15 +282,6 @@ func (l *UsageLedger) BuildSessionStatsWithAgentModelRefs() (SessionStats, int64
 		ms.ReasoningTokens += raw.ReasoningTokens
 		ms.EstimatedCost += evt.Cost.TotalCost
 
-		agentID := normalizeAgentID(evt.AgentID)
-		ref := refs[agentID]
-		if selected := strings.TrimSpace(evt.SelectedModelRef); selected != "" {
-			ref.Selected = selected
-		}
-		if running := strings.TrimSpace(evt.RunningModelRef); running != "" {
-			ref.Running = running
-		}
-		refs[agentID] = ref
 		as, ok := stats.ByAgent[agentID]
 		if !ok {
 			as = &AgentStats{ByModel: make(map[string]*ModelStats)}
@@ -571,6 +576,13 @@ func applyUsageEvent(summary *SessionUsageSummary, event UsageEvent) {
 	summary.LastUpdatedAt = event.OccurredAt
 	summary.LastEventID = event.EventID
 	summary.EventCount++
+
+	// Diagnostic events stay in the event log (and keep advancing the
+	// EventCount/LastEventID freshness cursor above) but are excluded from
+	// every aggregate: they are not LLM calls.
+	if IsDiagnosticUsagePurpose(event.Purpose) {
+		return
+	}
 
 	addUsageAggregate(&summary.UsageTotal, event)
 	addUsageAggregate(summaryGroup(summary.ByProvider, event.Provider), event)

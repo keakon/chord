@@ -167,6 +167,11 @@ func (t *UsageTracker) applyUsageSnapshotLocked(agentID, model string, cost *con
 
 // AddUsageEvent applies one persisted usage event to the in-memory tracker.
 func (t *UsageTracker) AddUsageEvent(event UsageEvent) {
+	// Diagnostic events are bookkeeping, not LLM calls; runtime stats skip
+	// them entirely so the TUI "Calls" count reflects real requests.
+	if IsDiagnosticUsagePurpose(event.Purpose) {
+		return
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

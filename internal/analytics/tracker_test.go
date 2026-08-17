@@ -754,3 +754,20 @@ func almostEqual(a, b, epsilon float64) bool {
 	}
 	return diff < epsilon
 }
+
+func TestAddUsageEventSkipsDiagnosticPurposes(t *testing.T) {
+	tracker := NewUsageTracker()
+	tracker.AddUsageEvent(UsageEvent{
+		AgentID:         "main",
+		Purpose:         UsagePurposeCompactionLifecycle,
+		RunningModelRef: "provider-a/model-1",
+		Diagnostic:      map[string]string{"stage": "started"},
+	})
+	stats := tracker.SessionStats()
+	if stats.LLMCalls != 0 {
+		t.Fatalf("LLMCalls = %d, want 0 after diagnostic-only events", stats.LLMCalls)
+	}
+	if len(stats.ByModel) != 0 {
+		t.Fatalf("ByModel = %#v, want empty", stats.ByModel)
+	}
+}

@@ -92,6 +92,79 @@ func TestUsageLedgerAppendEventWritesSummary(t *testing.T) {
 	}
 }
 
+func TestDiagnosticEventsAdvanceCursorWithoutCountingAsCalls(t *testing.T) {
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "/tmp/project")
+
+	raw := UsageSnapshot{InputTokens: 100, OutputTokens: 50}
+	real := UsageEvent{
+		AgentID:         "main",
+		Purpose:         "chat",
+		RunningModelRef: "provider-a/model-1",
+		UsageRaw:        raw,
+		BillingUsage:    NormalizeBillingUsage(raw),
+	}
+	diagnostic := UsageEvent{
+		AgentID:         "main",
+		Purpose:         UsagePurposeCompactionLifecycle,
+		RunningModelRef: "provider-a/model-1",
+		Diagnostic:      map[string]string{"stage": "applied"},
+	}
+	for _, evt := range []UsageEvent{real, diagnostic} {
+		if err := ledger.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent(%s): %v", evt.Purpose, err)
+		}
+	}
+
+	summary, err := ledger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if summary.EventCount != 2 {
+		t.Fatalf("EventCount = %d, want 2 (diagnostic events keep the freshness cursor moving)", summary.EventCount)
+	}
+	if summary.UsageTotal.LLMCalls != 1 {
+		t.Fatalf("UsageTotal.LLMCalls = %d, want 1 (diagnostic events are not calls)", summary.UsageTotal.LLMCalls)
+	}
+	if _, ok := summary.ByPurpose[UsagePurposeCompactionLifecycle]; ok {
+		t.Fatal("diagnostic purpose must not appear in aggregated ByPurpose buckets")
+	}
+
+	stats, eventCount, err := ledger.BuildSessionStats()
+	if err != nil {
+		t.Fatalf("BuildSessionStats: %v", err)
+	}
+	if eventCount != 2 {
+		t.Fatalf("scanned eventCount = %d, want 2", eventCount)
+	}
+	if stats.LLMCalls != 1 {
+		t.Fatalf("stats.LLMCalls = %d, want 1", stats.LLMCalls)
+	}
+	if agent := stats.ByAgent["main"]; agent == nil || agent.LLMCalls != 1 {
+		t.Fatalf("ByAgent[main] = %+v, want exactly 1 call", agent)
+	}
+}
+
+func TestIsDiagnosticUsagePurpose(t *testing.T) {
+	for _, purpose := range []string{
+		UsagePurposeCompactionPolicy,
+		UsagePurposeCompactionPolicy + "/loop_frozen",
+		UsagePurposeCompactionFailure,
+		UsagePurposeOversizeRecovery + "/retry",
+		UsagePurposeContextProvenance,
+		UsagePurposeCompactionLifecycle,
+	} {
+		if !IsDiagnosticUsagePurpose(purpose) {
+			t.Fatalf("IsDiagnosticUsagePurpose(%q) = false, want true", purpose)
+		}
+	}
+	for _, purpose := range []string{"", "chat", "compaction", "task", "context_compactionx"} {
+		if IsDiagnosticUsagePurpose(purpose) {
+			t.Fatalf("IsDiagnosticUsagePurpose(%q) = true, want false", purpose)
+		}
+	}
+}
+
 func TestLoadSessionUsageSummaryRejectsUnknownSummaryFields(t *testing.T) {
 	dir := t.TempDir()
 	original := `{"unknown_field":true,"session_id":"old","usage_total":{"llm_calls":3,"input_tokens":9}}`

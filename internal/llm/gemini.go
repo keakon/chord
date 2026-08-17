@@ -703,7 +703,11 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 				resp.Usage = &message.TokenUsage{}
 			}
 			resp.Usage.InputTokens = chunk.UsageMetadata.PromptTokenCount
-			resp.Usage.OutputTokens = chunk.UsageMetadata.CandidatesTokenCount
+			// Google reports candidatesTokenCount without thoughts, but bills
+			// thoughts at the output rate. Fold them into OutputTokens so the
+			// cross-provider "reasoning is a subset of output" convention and
+			// cost accounting both hold; ReasoningTokens stays the subset.
+			resp.Usage.OutputTokens = chunk.UsageMetadata.CandidatesTokenCount + chunk.UsageMetadata.ThoughtsTokenCount
 			resp.Usage.CacheReadTokens = chunk.UsageMetadata.CachedContentTokenCount
 			resp.Usage.ReasoningTokens = chunk.UsageMetadata.ThoughtsTokenCount
 			resp.Usage.InputSemanticsKnown = true

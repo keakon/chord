@@ -7,17 +7,18 @@ import (
 	"net"
 	"strings"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/llm"
 )
 
 const (
 	usageDrivenCompactionFailureThreshold = 2
 	usageDrivenCompactionSuppressTurns    = 3
-	compactionPolicyAnalyticsPurpose      = "compaction_policy"
-	compactionFailureAnalyticsPurpose     = "compaction_failure"
-	oversizeRecoveryAnalyticsPurpose      = "oversize_recovery"
-	compactionProvenanceAnalyticsPurpose  = "context_provenance"
-	compactionLifecycleAnalyticsPurpose   = "context_compaction"
+	compactionPolicyAnalyticsPurpose      = analytics.UsagePurposeCompactionPolicy
+	compactionFailureAnalyticsPurpose     = analytics.UsagePurposeCompactionFailure
+	oversizeRecoveryAnalyticsPurpose      = analytics.UsagePurposeOversizeRecovery
+	compactionProvenanceAnalyticsPurpose  = analytics.UsagePurposeContextProvenance
+	compactionLifecycleAnalyticsPurpose   = analytics.UsagePurposeCompactionLifecycle
 )
 
 type autoCompactionFailureState struct {

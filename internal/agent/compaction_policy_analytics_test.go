@@ -51,28 +51,25 @@ func TestCompactionPolicyAnalyticsEventsRecordedInTrackerAndLedger(t *testing.T)
 		t.Fatalf("purpose = %q, want %q", events[0].Purpose, compactionPolicyAnalyticsPurpose+"/breaker_trip")
 	}
 
+	// Diagnostic events land in the durable event log but are not LLM calls:
+	// runtime stats and summary aggregates must not count them.
 	stats := a.GetUsageStats()
-	if len(stats.ByAgent) == 0 {
-		t.Fatalf("ByAgent stats empty; stats=%+v", stats)
-	}
-	agg := stats.ByAgent["main"]
-	if agg == nil {
-		t.Fatal("expected main agent stats entry")
-	}
-	if got := agg.LLMCalls; got != 1 {
-		t.Fatalf("main agent compaction policy calls = %d, want 1", got)
+	if stats.LLMCalls != 0 || len(stats.ByAgent) != 0 {
+		t.Fatalf("runtime stats counted a diagnostic event; stats=%+v", stats)
 	}
 
 	summary, err := a.usageLedger.Summary()
 	if err != nil {
 		t.Fatalf("usageLedger.Summary(): %v", err)
 	}
-	aggByPurpose, ok := summary.ByPurpose[compactionPolicyAnalyticsPurpose+"/breaker_trip"]
-	if !ok || aggByPurpose == nil {
-		t.Fatalf("missing breaker_trip summary entry; summary=%+v", summary)
+	if summary.EventCount != 1 {
+		t.Fatalf("summary.EventCount = %d, want 1 (event persisted)", summary.EventCount)
 	}
-	if got := aggByPurpose.LLMCalls; got != 1 {
-		t.Fatalf("summary.ByPurpose[%q].LLMCalls = %d, want 1", compactionPolicyAnalyticsPurpose+"/breaker_trip", got)
+	if summary.UsageTotal.LLMCalls != 0 {
+		t.Fatalf("summary.UsageTotal.LLMCalls = %d, want 0", summary.UsageTotal.LLMCalls)
+	}
+	if _, ok := summary.ByPurpose[compactionPolicyAnalyticsPurpose+"/breaker_trip"]; ok {
+		t.Fatalf("diagnostic purpose must stay out of ByPurpose aggregates; summary=%+v", summary)
 	}
 }
 
@@ -118,12 +115,11 @@ func TestCompactionFailureAnalyticsEventRecordedInTrackerAndLedger(t *testing.T)
 	if err != nil {
 		t.Fatalf("usageLedger.Summary(): %v", err)
 	}
-	aggByPurpose, ok := summary.ByPurpose[compactionFailureAnalyticsPurpose]
-	if !ok || aggByPurpose == nil {
-		t.Fatalf("missing %q summary entry; summary=%+v", compactionFailureAnalyticsPurpose, summary)
+	if summary.EventCount != 1 {
+		t.Fatalf("summary.EventCount = %d, want 1 (event persisted)", summary.EventCount)
 	}
-	if got := aggByPurpose.LLMCalls; got != 1 {
-		t.Fatalf("summary.ByPurpose[%q].LLMCalls = %d, want 1", compactionFailureAnalyticsPurpose, got)
+	if summary.UsageTotal.LLMCalls != 0 {
+		t.Fatalf("summary.UsageTotal.LLMCalls = %d, want 0 (diagnostic events are not calls)", summary.UsageTotal.LLMCalls)
 	}
 }
 
@@ -163,12 +159,11 @@ func TestOversizeRecoveryAnalyticsEventRecordedInTrackerAndLedger(t *testing.T) 
 	if err != nil {
 		t.Fatalf("usageLedger.Summary(): %v", err)
 	}
-	aggByPurpose, ok := summary.ByPurpose[oversizeRecoveryAnalyticsPurpose+"/trigger_compaction"]
-	if !ok || aggByPurpose == nil {
-		t.Fatalf("missing oversize recovery summary entry; summary=%+v", summary)
+	if summary.EventCount != 1 {
+		t.Fatalf("summary.EventCount = %d, want 1 (event persisted)", summary.EventCount)
 	}
-	if got := aggByPurpose.LLMCalls; got != 1 {
-		t.Fatalf("summary.ByPurpose oversize recovery LLMCalls = %d, want 1", got)
+	if summary.UsageTotal.LLMCalls != 0 {
+		t.Fatalf("summary.UsageTotal.LLMCalls = %d, want 0 (diagnostic events are not calls)", summary.UsageTotal.LLMCalls)
 	}
 }
 
