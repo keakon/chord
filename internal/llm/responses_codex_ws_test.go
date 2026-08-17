@@ -663,7 +663,7 @@ func TestCodexWSExecuteRequestLocked_StatusConnectingSkippedOnReusedConn(t *test
 		Input:  []responsesInputItem{{Type: "message", Role: "user", Content: "hi"}},
 	}
 	_, _, err = r.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", env, cb1, false, time.Now(), false,
+		context.Background(), "test-key", "sample/test-model", env, cb1, false, time.Now(), false, nil, "",
 	)
 	if err != nil {
 		t.Fatalf("execute new conn: %v", err)
@@ -696,7 +696,7 @@ func TestCodexWSExecuteRequestLocked_StatusConnectingSkippedOnReusedConn(t *test
 		}
 	}
 	_, _, err = r2.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", env, cb2, false, time.Now(), true,
+		context.Background(), "test-key", "sample/test-model", env, cb2, false, time.Now(), true, nil, "",
 	)
 	if err != nil {
 		t.Fatalf("execute reused conn: %v", err)
@@ -724,7 +724,7 @@ func TestCodexWSExecuteRequestLocked_StatusConnectingSkippedOnReusedConn(t *test
 	defer wsConn3.Close()
 	r3 := &ResponsesProvider{codexWSConn: wsConn3}
 	_, _, err = r3.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", env, nil, false, time.Now(), true,
+		context.Background(), "test-key", "sample/test-model", env, nil, false, time.Now(), true, nil, "",
 	)
 	if err != nil {
 		t.Fatalf("execute reused conn nil cb: %v", err)
@@ -756,7 +756,7 @@ func TestCodexWSExecuteRequestLockedEmitsWaitingHeadersProgress(t *testing.T) {
 		}
 	}
 	_, _, err = r.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", env, cb, false, time.Now(), true,
+		context.Background(), "test-key", "sample/test-model", env, cb, false, time.Now(), true, nil, "",
 	)
 	if err != nil {
 		t.Fatalf("execute reused conn: %v", err)
@@ -820,7 +820,7 @@ func TestCodexWSExecuteRequestLockedEmitsStreamingProgressAcrossWSFrames(t *test
 	}
 
 	_, _, err = r.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", env, cb, false, time.Now(), true,
+		context.Background(), "test-key", "sample/test-model", env, cb, false, time.Now(), true, nil, "",
 	)
 	if err != nil {
 		t.Fatalf("execute reused conn: %v", err)
@@ -890,7 +890,7 @@ func TestCompleteStreamCodexWebSocket_ConnectingBeforeDial(t *testing.T) {
 		Input:  []responsesInputItem{{Type: "message", Role: "user", Content: "hi"}},
 	}
 	_, _, err = r.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", prewarmEnv, nil, false, time.Now(), false,
+		context.Background(), "test-key", "sample/test-model", prewarmEnv, nil, false, time.Now(), false, nil, "",
 	)
 	if err != nil {
 		t.Fatalf("prewarm: %v", err)
@@ -913,7 +913,7 @@ func TestCompleteStreamCodexWebSocket_ConnectingBeforeDial(t *testing.T) {
 		Input:  []responsesInputItem{{Type: "message", Role: "user", Content: "hi"}},
 	}
 	_, _, err = r.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", env, cb, false, time.Now(), true,
+		context.Background(), "test-key", "sample/test-model", env, cb, false, time.Now(), true, nil, "",
 	)
 	if err != nil {
 		t.Fatalf("real request: %v", err)

@@ -385,6 +385,8 @@ func (r *ResponsesProvider) CompleteStream(
 	// connection-scoped reuse belongs to the Codex WebSocket transport.
 	fullInput := apiInput
 	requestStartedAt := time.Now()
+	turnState := ResponsesTurnStateFromContext(ctx)
+	turnStateIdentity := responsesTurnStateIdentity(r.provider, apiKey)
 
 	// Keep the Responses HTTP request shape aligned with codex-rs for every
 	// Responses provider, not only preset:codex. Some relay endpoints validate
@@ -518,7 +520,7 @@ func (r *ResponsesProvider) CompleteStream(
 		if wsComplete == nil {
 			wsComplete = r.completeStreamCodexWebSocket
 		}
-		wsResp, wsUsedIncremental, wsErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{})
+		wsResp, wsUsedIncremental, wsErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{TurnState: turnState, TurnStateIdentity: turnStateIdentity})
 		if wsErr == nil {
 			r.lastTransportUsed.Store("websocket")
 			persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, wsResp, nil)
@@ -533,7 +535,7 @@ func (r *ResponsesProvider) CompleteStream(
 		if isCodexWSChainStateMismatch(wsErr) {
 			log.Warnf("responses: Codex WebSocket chain-state mismatch, retrying full request without previous_response_id error=%v model=%v", wsErr, model)
 			r.resetCodexWebSocketChain("ws_chain_state_mismatch")
-			retryResp, retryUsedIncremental, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true})
+			retryResp, retryUsedIncremental, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true, TurnState: turnState, TurnStateIdentity: turnStateIdentity})
 			if retryErr == nil {
 				r.lastTransportUsed.Store("websocket")
 				persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, retryResp, nil)
@@ -557,7 +559,7 @@ func (r *ResponsesProvider) CompleteStream(
 		if wsUsedIncremental {
 			log.Warnf("responses: Codex WebSocket incremental failed, retrying full request on websocket error=%v model=%v", wsErr, model)
 			r.resetCodexWebSocketChain("error_fallback")
-			wsResp, _, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true})
+			wsResp, _, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true, TurnState: turnState, TurnStateIdentity: turnStateIdentity})
 			if retryErr == nil {
 				r.lastTransportUsed.Store("websocket")
 				persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, wsResp, nil)
@@ -689,6 +691,9 @@ func (r *ResponsesProvider) sendAndParse(
 	}
 	applySessionIDHeaders(req.Header, r.sessionID)
 	applyResponsesMetadataHeaders(req.Header, clientMetadata)
+	turnState := ResponsesTurnStateFromContext(ctx)
+	turnStateIdentity := responsesTurnStateIdentity(r.provider, apiKey)
+	applyResponsesTurnStateHeader(req.Header, turnState, turnStateIdentity)
 
 	// Apply request body compression if configured
 	req, _ = compressRequestBody(req, bodyBytes, r.provider.CompressEnabled())
@@ -781,6 +786,7 @@ func (r *ResponsesProvider) sendAndParse(
 			}
 		}
 	}
+	captureResponsesTurnState(turnState, httpResp.Header, turnStateIdentity)
 
 	// Parse SSE stream.
 	var collector *SSECollector
@@ -789,7 +795,7 @@ func (r *ResponsesProvider) sendAndParse(
 	}
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, r.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
-	resp, parseErr := parseResponsesSSE(cr, cb, collector)
+	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, cb, collector, turnState, turnStateIdentity)
 	if parseErr != nil {
 		if _, ok := errors.AsType[*ChunkTimeoutError](parseErr); ok {
 			snap := cr.chunkTimeoutSnapshot()

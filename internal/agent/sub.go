@@ -834,7 +834,8 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 			return
 		}
 		defer releaseLLM()
-		resp, err := llmClient.CompleteStream(turn.Ctx, messages, toolDefs, callback)
+		requestCtx := llm.WithResponsesTurnState(turn.Ctx, turn.LLMResponsesState)
+		resp, err := llmClient.CompleteStream(requestCtx, messages, toolDefs, callback)
 		streamReducer.Finish() // final flush: emit any remaining accumulated text
 		s.parent.emitToTUI(RequestProgressEvent{AgentID: s.instanceID, Bytes: streamState.requestProgressBytes, Events: streamState.requestProgressEvents, Done: true})
 		if turn.Ctx.Err() != nil {
@@ -1051,6 +1052,7 @@ func (s *SubAgent) newTurn() *Turn {
 		ID:                    s.nextTurnID,
 		Ctx:                   ctx,
 		Cancel:                cancel,
+		LLMResponsesState:     llm.NewResponsesTurnState(),
 		PendingToolMeta:       make(map[string]PendingToolCall),
 		toolExecutionBatches:  nil,
 		nextToolBatch:         0,

@@ -8,6 +8,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -369,6 +370,7 @@ func (a *MainAgent) newTurn() {
 		Epoch:                 a.turnEpoch,
 		Ctx:                   ctx,
 		Cancel:                cancel,
+		LLMResponsesState:     llm.NewResponsesTurnState(),
 		PendingToolMeta:       make(map[string]PendingToolCall),
 		toolExecutionBatches:  nil,
 		nextToolBatch:         0,
@@ -400,6 +402,18 @@ func (a *MainAgent) currentTurnID() uint64 {
 		return 0
 	}
 	return turn.ID
+}
+
+// currentTurnResponsesState returns the turn-scoped Responses sticky-routing
+// state for the active turn, or nil when idle. The returned state is shared by
+// main-model and compaction requests in the turn so the same token is replayed
+// within the turn and never across turns.
+func (a *MainAgent) currentTurnResponsesState() *llm.ResponsesTurnState {
+	turn := a.currentTurn()
+	if turn == nil {
+		return nil
+	}
+	return turn.LLMResponsesState
 }
 
 func (a *MainAgent) rememberIdleTurn(turnID uint64) {

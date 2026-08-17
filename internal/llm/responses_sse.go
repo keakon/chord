@@ -279,7 +279,7 @@ func (s responsesPartialCompletionState) outputItemsComplete() bool {
 // Supports both combined format (data line has {"type":"...","data":...}) and
 // standard SSE (event type on "event:" line, payload on "data:" line).
 func parseResponsesSSE(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, error) {
-	resp, _, err := parseResponsesSSEWithOutputItems(reader, cb, collector)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, cb, collector, nil, "")
 	return resp, err
 }
 
@@ -287,6 +287,10 @@ func parseResponsesSSE(reader io.Reader, cb StreamCallback, collector *SSECollec
 // returns normalized output items from response.completed / response.incomplete.
 // These items are used by the WebSocket incremental baseline chain.
 func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, []responsesInputItem, error) {
+	return parseResponsesSSEWithOutputItemsAndTurnState(reader, cb, collector, nil, "")
+}
+
+func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCallback, collector *SSECollector, turnState *ResponsesTurnState, turnStateID string) (*message.Response, []responsesInputItem, error) {
 	phaser, _ := reader.(chunkPhaser)
 	br := bufio.NewReaderSize(reader, sseInitialBufferSize)
 
@@ -368,6 +372,8 @@ func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, colle
 			partial:        &partial,
 			cb:             cb,
 			phaser:         phaser,
+			turnState:      turnState,
+			turnStateID:    turnStateID,
 		}
 		outResp, outItems, done, err := processResponsesEventPayload(state, eventType, eventData, flushContent)
 		if err != nil {
@@ -548,10 +554,16 @@ type responsesEventState struct {
 	partial        *responsesPartialCompletionState
 	cb             StreamCallback
 	phaser         chunkPhaser
+	turnState      *ResponsesTurnState
+	turnStateID    string
 }
 
 func processResponsesEventPayload(state responsesEventState, eventType string, eventData []byte, flushContent func()) (*message.Response, []responsesInputItem, bool, error) {
 	switch eventType {
+	case "response.metadata":
+		captureResponsesTurnStateEvent(state.turnState, eventData, state.turnStateID)
+		return nil, nil, false, nil
+
 	case "response.output_item.added":
 		if len(eventData) == 0 {
 			log.Debug("responses: skip empty output_item.added")

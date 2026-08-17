@@ -21,12 +21,13 @@ type scriptedStreamCall struct {
 }
 
 type blockingStreamProvider struct {
-	mu           sync.Mutex
-	calls        []scriptedStreamCall
-	streamedCh   chan struct{}
-	releaseCh    chan struct{}
-	seenMessages [][]message.Message
-	seenTuning   []llm.RequestTuning
+	mu             sync.Mutex
+	calls          []scriptedStreamCall
+	streamedCh     chan struct{}
+	releaseCh      chan struct{}
+	seenMessages   [][]message.Message
+	seenTuning     []llm.RequestTuning
+	seenTurnStates []*llm.ResponsesTurnState
 }
 
 func cloneMessages(messages []message.Message) []message.Message {
@@ -39,7 +40,7 @@ func cloneMessages(messages []message.Message) []message.Message {
 }
 
 func (p *blockingStreamProvider) CompleteStream(
-	_ context.Context,
+	ctx context.Context,
 	_ string,
 	_ string,
 	_ string,
@@ -58,6 +59,7 @@ func (p *blockingStreamProvider) CompleteStream(
 	p.calls = p.calls[1:]
 	p.seenMessages = append(p.seenMessages, cloneMessages(messages))
 	p.seenTuning = append(p.seenTuning, tuning)
+	p.seenTurnStates = append(p.seenTurnStates, llm.ResponsesTurnStateFromContext(ctx))
 	p.mu.Unlock()
 
 	if cb != nil {
@@ -98,6 +100,12 @@ func (p *blockingStreamProvider) snapshot() ([][]message.Message, []llm.RequestT
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([][]message.Message(nil), p.seenMessages...), append([]llm.RequestTuning(nil), p.seenTuning...)
+}
+
+func (p *blockingStreamProvider) turnStatesSnapshot() []*llm.ResponsesTurnState {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]*llm.ResponsesTurnState(nil), p.seenTurnStates...)
 }
 
 // waitForSubAgentLLMResult waits until the SubAgent's async LLM goroutine hands

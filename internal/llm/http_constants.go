@@ -2,6 +2,7 @@ package llm
 
 const (
 	headerAcceptEncoding       = "Accept-Encoding"
+	headerCodexTurnState       = "x-codex-turn-state"
 	headerContentEncoding      = "Content-Encoding"
 	headerContentType          = "Content-Type"
 	headerOpenAIBeta           = "OpenAI-Beta"

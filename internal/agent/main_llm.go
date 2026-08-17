@@ -650,7 +650,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 			return updatedMessages, err
 		},
 	}
-	resp, err := llmClient.CompleteStreamWithOptions(ctx, messages, toolDefs, callback, requestOptions)
+	resp, err := llmClient.CompleteStreamWithOptions(llm.WithResponsesTurnState(ctx, a.currentTurnResponsesState()), messages, toolDefs, callback, requestOptions)
 	completeStreamReturnedAt := time.Now()
 	a.recordToolTraceCallLLMReturned(turn, completeStreamReturnedAt)
 	if err == nil && turn != nil {

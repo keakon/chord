@@ -365,6 +365,30 @@ func TestSubAgentRequestsRequiredToolChoiceWhenProviderSupportsIt(t *testing.T) 
 	}
 }
 
+func TestSubAgentRequestCarriesTurnResponsesState(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	sub.turn.LLMResponsesState = llm.NewResponsesTurnState()
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"key"})
+	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{Content: "done"}}}}
+	sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
+
+	sub.asyncCallLLMWithFlightMarked(sub.turn, sub.ctxMgr.Snapshot())
+	waitForSubAgentLLMResult(t, sub, time.Second)
+
+	seen := provider.turnStatesSnapshot()
+	if len(seen) != 1 {
+		t.Fatalf("provider request count = %d, want 1", len(seen))
+	}
+	if seen[0] != sub.turn.LLMResponsesState {
+		t.Fatalf("request turn state = %p, want SubAgent turn state %p", seen[0], sub.turn.LLMResponsesState)
+	}
+}
+
 func TestSubAgentInterruptedStreamGetsSingleTerminalRecoveryRequest(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{

@@ -368,6 +368,8 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 	collectDump bool,
 	start time.Time,
 	reusingConn bool,
+	turnState *ResponsesTurnState,
+	turnStateIdentity string,
 ) (*message.Response, []responsesInputItem, error) {
 	payload, err := json.Marshal(env)
 	if err != nil {
@@ -407,7 +409,7 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 		})
 	}
 
-	resp, outputItems, parseErr := r.codexWSReadResponseLocked(streamCtx, apiKey, cb, newCodexWSProgressTracker(waitingHeaderBytes))
+	resp, outputItems, parseErr := r.codexWSReadResponseLocked(streamCtx, apiKey, cb, newCodexWSProgressTracker(waitingHeaderBytes), turnState, turnStateIdentity)
 	streamCancel()
 
 	if collectDump && dumpWriter != nil {
@@ -441,6 +443,8 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 	apiKey string,
 	cb StreamCallback,
 	progress codexWSProgressTracker,
+	turnState *ResponsesTurnState,
+	turnStateIdentity string,
 ) (*message.Response, []responsesInputItem, error) {
 	var (
 		resp           message.Response
@@ -576,6 +580,8 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 			truncated:      &truncated,
 			outputItems:    &outputItems,
 			cb:             cb,
+			turnState:      turnState,
+			turnStateID:    turnStateIdentity,
 		}
 		outResp, outItems, done, err := processResponsesEventPayload(state, eventType, eventData, flushContent)
 		if err != nil {
@@ -620,7 +626,9 @@ func (r *ResponsesProvider) codexWSReadMessageWithIdleTimeoutLocked(streamCtx co
 }
 
 type codexWSCompleteOptions struct {
-	SkipPrewarm bool
+	SkipPrewarm       bool
+	TurnState         *ResponsesTurnState
+	TurnStateIdentity string
 }
 
 // completeStreamCodexWebSocket streams a turn over an existing or new Codex WebSocket.
@@ -675,9 +683,13 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		}
 		hdr := http.Header{}
 		applyCodexWebSocketHeaders(hdr, r.provider, apiKey, sess)
+		applyResponsesTurnStateHeader(hdr, opts.TurnState, opts.TurnStateIdentity)
 		conn, httpResp, dialErr := dialer.DialContext(ctx, wsURL, hdr)
 		if httpResp != nil && httpResp.Body != nil {
 			defer httpResp.Body.Close()
+		}
+		if httpResp != nil {
+			captureResponsesTurnState(opts.TurnState, httpResp.Header, opts.TurnStateIdentity)
 		}
 		if dialErr != nil {
 			if httpResp != nil && httpResp.StatusCode >= 400 {
@@ -725,7 +737,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 			ClientMetadata:    req.ClientMetadata,
 		}
 		prewarmResp, prewarmOutputItems, prewarmErr := r.codexWSExecuteRequestLocked(
-			ctx, apiKey, model, prewarmEnv, nil, false, start, false,
+			ctx, apiKey, model, prewarmEnv, nil, false, start, false, opts.TurnState, opts.TurnStateIdentity,
 		)
 		if prewarmErr != nil {
 			return nil, false, prewarmErr
@@ -773,7 +785,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 	// it was already live. Either way, "connecting" has already been emitted
 	// (either above for new connections, or was emitted on the original dial).
 	resp, outputItems, reqErr := r.codexWSExecuteRequestLocked(
-		ctx, apiKey, model, env, cb, true, start, true,
+		ctx, apiKey, model, env, cb, true, start, true, opts.TurnState, opts.TurnStateIdentity,
 	)
 	if reqErr != nil {
 		return nil, useIncremental, reqErr

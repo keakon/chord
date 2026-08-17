@@ -89,6 +89,10 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	headSplit := compactionHeadSplitForProfile(profile, snapshot, a.ctxMgr.GetMaxTokens())
 
 	ctx, cancel := context.WithTimeout(a.parentCtx, compactionDraftTimeout)
+	// The worker may outlive the turn that scheduled it because compaction runs
+	// in parallel with the main request. Capture the scheduler's turn state now
+	// instead of reading whichever turn happens to be current at HTTP dispatch.
+	ctx = llm.WithResponsesTurnState(ctx, a.currentTurnResponsesState())
 	a.beginCompactionState(planID, target, trigger, continuation, headSplit, cancel)
 
 	a.emitActivity("main", ActivityCompacting, "context")
