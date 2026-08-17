@@ -51,6 +51,8 @@ permission:
 
 这套配置的含义：默认允许大多数工具；禁用 `handoff` 与 `delegate`；删除文件、选定的 WebFetch URL pattern、以及常见高风险 shell/git 命令需要确认。权限规则按「最后匹配优先」生效，因此 `web_fetch` 和 `shell` 下更具体的规则会覆盖顶层 `"*": allow`。适合单人、可信工作区；共享仓库、团队服务或自动化 headless 部署应进一步收紧。本页以 `"*": allow` 作为可信工作区基线；若想改用最小授权基线，[配置 — Agent 配置](./configuration_CN.md#agent-配置)中的 `builder` agent 从 `"*": deny` 起步，只对角色确需的工具逐项放开。按你的信任模型选择基线即可。
 
+权限匹配只检查工具调用本身——`shell` 看命令字符串，文件类工具看路径参数——从不看 Chord 的启动目录。同一条命令在任何工作目录下都得到相同判定，`shell` 调用的 `workdir` 参数也不参与匹配。文件类工具可直接按路径前缀限权；`shell` 规则只约束提交的命令字符串，并不是文件系统沙箱。放行的命令仍可在内部 `cd` 到别处、调用其他程序或操作绝对路径。审批策略应使用尽量窄的 shell pattern；若要真正限制文件系统范围，还需使用操作系统级沙箱。
+
 ### WebFetch 目标匹配
 
 `web_fetch` 的规则 pattern 按网络语义匹配主机，形如 `host[:port]`：

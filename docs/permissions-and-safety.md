@@ -51,6 +51,8 @@ permission:
 
 This means: allow most tools by default; disable `handoff` and `delegate`; require confirmation for file deletion, selected WebFetch URL patterns, and common high-risk shell/git commands. Permission rules use “last match wins”, so the more specific `web_fetch` and `shell` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further. This page starts from `"*": allow` as a trusted-workspace baseline; for a least-privilege baseline instead, the `builder` agent in [Configuration — Agent config](./configuration.md#agent-config) starts from `"*": deny` and opts in only to the tools a role needs. Pick whichever baseline matches your trust model.
 
+Permission matching only examines the tool call itself — the command string for `shell`, the path arguments for file tools — never the directory Chord was started from. The same command gets the same verdict in any working directory, and a `workdir` argument on a `shell` call does not participate in matching. File-tool rules can restrict path prefixes directly. Shell rules only constrain the submitted command string: they do not sandbox the command's filesystem effects, and an allowed command can still `cd` elsewhere, invoke another program, or act on an absolute path. Use narrow shell patterns for approval policy and an OS-level sandbox when actual filesystem confinement is required.
+
 ### WebFetch target matching
 
 `web_fetch` rule patterns use network-aware host matching. A pattern has the
