@@ -4589,6 +4589,36 @@ func TestMessagesToBlocksSkillToolRestoresDisplaySummary(t *testing.T) {
 	}
 }
 
+func TestMessagesToBlocksSkipsInvisibleAssistantBodyButKeepsToolCall(t *testing.T) {
+	msgs := []message.Message{{
+		Role:    message.RoleAssistant,
+		Content: "\u200b\u200b",
+		ToolCalls: []message.ToolCall{{
+			ID:   "call-1",
+			Name: tools.NameGrep,
+			Args: json.RawMessage(`{"pattern":"sample"}`),
+		}},
+	}}
+
+	nextID := 1
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want only the tool call", len(blocks))
+	}
+	if blocks[0].Type != BlockToolCall || blocks[0].ToolID != "call-1" {
+		t.Fatalf("block = %#v, want grep tool call", blocks[0])
+	}
+}
+
+func TestMessagesToBlocksKeepsVisibleEmojiZWJAssistantBody(t *testing.T) {
+	const content = "Status 👩‍💻"
+	nextID := 1
+	blocks := messagesToBlocks([]message.Message{{Role: message.RoleAssistant, Content: content}}, &nextID)
+	if len(blocks) != 1 || blocks[0].Type != BlockAssistant || blocks[0].Content != content {
+		t.Fatalf("blocks = %#v, want visible assistant body unchanged", blocks)
+	}
+}
+
 func TestHandleAgentEventSkillToolCollapsedSummaryButExpandedBody(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 20)
 

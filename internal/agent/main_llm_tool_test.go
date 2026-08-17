@@ -77,6 +77,32 @@ func TestCallLLMShowsKeySwitchToastOnFirstToolCallToken(t *testing.T) {
 		t.Fatal("timed out waiting for callLLM to finish")
 	}
 }
+
+func TestHandleLLMResponseNormalizesInvisibleAssistantContent(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	a.handleLLMResponse(Event{
+		Type:   EventLLMResponse,
+		TurnID: a.turn.ID,
+		Payload: &LLMResponsePayload{
+			Content:    "\u200b\u200b",
+			ToolCalls:  []message.ToolCall{{ID: "call-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)}},
+			StopReason: "tool_calls",
+		},
+	})
+
+	msgs := a.ctxMgr.Snapshot()
+	if len(msgs) == 0 {
+		t.Fatal("expected assistant message in context")
+	}
+	last := msgs[len(msgs)-1]
+	if last.Content != "" {
+		t.Fatalf("assistant content = %q, want canonical empty string", last.Content)
+	}
+	if len(last.ToolCalls) != 1 || last.ToolCalls[0].ID != "call-1" {
+		t.Fatalf("tool calls = %+v, want call-1 preserved", last.ToolCalls)
+	}
+}
 func TestCallLLMEmitsToolArgCompletionUpdateOnToolUseEnd(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.newTurn()

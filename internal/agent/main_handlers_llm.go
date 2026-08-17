@@ -106,7 +106,8 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	// diagnostics, then clear it so later replacement/cancel paths do not persist
 	// a duplicate interrupted assistant message for a round that already reached
 	// finalize.
-	streamedText := a.turn.drainPartialText()
+	streamedText := message.NormalizeInvisibleText(a.turn.drainPartialText())
+	payload.Content = message.NormalizeInvisibleText(payload.Content)
 	if strings.TrimSpace(streamedText) != "" || strings.TrimSpace(payload.Content) != "" {
 		log.Debugf("main finalize assistant payload turn_id=%v final_content_len=%v streamed_text_len=%v tool_calls=%v thinking_blocks=%v stop_reason=%v", evt.TurnID, len(payload.Content), len(streamedText), len(payload.ToolCalls), len(payload.ThinkingBlocks), payload.StopReason)
 	}

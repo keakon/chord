@@ -688,7 +688,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				}
 			}
 			// Emit assistant body (text) as a separate block.
-			if strings.TrimSpace(msg.Content) != "" {
+			if assistantContentHasVisibleText(msg.Content) {
 				blocks = append(blocks, &Block{
 					ID:      *nextID,
 					Type:    BlockAssistant,

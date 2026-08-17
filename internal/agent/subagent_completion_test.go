@@ -24,6 +24,7 @@ func TestSubAgentPersistsThinkingBlocksWithAssistantToolCall(t *testing.T) {
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
 		resp: &message.Response{
+			Content:        "\u200b\u200b",
 			ThinkingBlocks: blocks,
 			ToolCalls: convertCalls([]messageToolCall{
 				mustJSONToolCall(t, "complete-1", "complete", map[string]any{"summary": "done"}),
@@ -44,6 +45,15 @@ func TestSubAgentPersistsThinkingBlocksWithAssistantToolCall(t *testing.T) {
 	if len(got) != 2 || got[0] != blocks[0] || got[1] != blocks[1] {
 		t.Fatalf("thinking blocks = %+v, want %+v", got, blocks)
 	}
+	for _, msg := range slices.Backward(msgs) {
+		if msg.Role == message.RoleAssistant && len(msg.ThinkingBlocks) > 0 {
+			if msg.Content != "" {
+				t.Fatalf("assistant content = %q, want canonical empty string", msg.Content)
+			}
+			return
+		}
+	}
+	t.Fatal("assistant message with thinking blocks disappeared")
 }
 
 func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {

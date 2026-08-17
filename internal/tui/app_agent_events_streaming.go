@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/recovery"
@@ -69,36 +68,6 @@ func (m *Model) flushStreamingBlock(block *Block, updateViewport bool) bool {
 		m.viewport.UpdateBlock(block.ID)
 	}
 	return true
-}
-
-func visibleAssistantStreamContent(content string) string {
-	content = removeTrailingCursorGlyph(content)
-	content = stripANSI(strings.TrimSpace(content))
-	return strings.TrimSpace(content)
-}
-
-func assistantStreamContentIsPlaceholder(content string) bool {
-	content = strings.TrimSpace(removeTrailingCursorGlyph(content))
-	if strings.ContainsRune(content, '\x1b') {
-		content = strings.TrimSpace(stripANSI(content))
-	}
-	if content == "" {
-		return true
-	}
-	dots := 0
-	hasEllipsis := false
-	for _, r := range content {
-		switch {
-		case r == '.':
-			dots++
-		case r == '…':
-			hasEllipsis = true
-		case unicode.IsSpace(r):
-		default:
-			return false
-		}
-	}
-	return hasEllipsis || dots > 0
 }
 
 func (m *Model) currentMainAssistantMsgIndex() int {

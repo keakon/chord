@@ -52,6 +52,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	s.turn.drainPartialText()
 
 	resp := result.resp
+	resp.Content = message.NormalizeInvisibleText(resp.Content)
 
 	// --- Classify tool calls as valid or malformed ---
 	var validCalls, malformedCalls []message.ToolCall

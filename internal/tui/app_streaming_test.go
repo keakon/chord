@@ -142,7 +142,7 @@ func TestStreamTextDeltasReuseCachedViewUntilFlush(t *testing.T) {
 func TestStreamTextPlaceholderDoesNotAppendAssistantBlock(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
 
-	for _, text := range []string{"", " \n\t", ".", "..", "...", " … \n", "\x1b[2m...\x1b[0m"} {
+	for _, text := range []string{"", " \n\t", "\u200b", "\u200b\u200b", "\ufeff", "\u200d", ".", "..", "...", " … \n", "\x1b[2m...\x1b[0m"} {
 		_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: text}})
 	}
 
@@ -163,7 +163,7 @@ func TestStreamTextPlaceholderDoesNotAppendAssistantBlock(t *testing.T) {
 func TestStreamTextVisibleContentReplacesBufferedPlaceholder(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
 
-	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "..."}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "\u200b\u200b"}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "Answer"}})
 
 	if m.currentAssistantBlock == nil || m.currentAssistantBlock.Content != "Answer" {
@@ -198,7 +198,7 @@ func TestStreamTextSplitDotPlaceholderDoesNotPolluteVisibleContent(t *testing.T)
 }
 
 func TestToolCallAfterStreamPlaceholderLeavesNoAssistantCard(t *testing.T) {
-	for _, deltas := range [][]string{{"..."}, {".", ".", "."}, {" … "}} {
+	for _, deltas := range [][]string{{"..."}, {".", ".", "."}, {" … "}, {"\u200b\u200b"}, {"\u200d"}} {
 		m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
 		for _, delta := range deltas {
 			_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: delta}})
@@ -336,7 +336,7 @@ func TestInterleavedAgentThinkingStreamsKeepIndependentCards(t *testing.T) {
 }
 
 func TestStreamingAssistantPlaceholderRendersNoCard(t *testing.T) {
-	for _, content := range []string{"", " \n", ".", "..", "...", " … ", "\x1b[2m...\x1b[0m"} {
+	for _, content := range []string{"", " \n", "\u200b", "\u200b\u200b", "\ufeff", "\u200d", ".", "..", "...", " … ", "\x1b[2m...\x1b[0m"} {
 		block := &Block{ID: 1, Type: BlockAssistant, Streaming: true, Content: content}
 		if lines := block.Render(120, ""); len(lines) != 0 {
 			t.Fatalf("placeholder %q rendered %d lines, want none", content, len(lines))

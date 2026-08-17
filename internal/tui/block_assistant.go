@@ -759,7 +759,7 @@ func (b *Block) renderAssistant(width int) []string {
 	}
 
 	// Assistant block body.
-	hasContent := strings.TrimSpace(bodyContent) != "" || (summary.HasMeta && !b.Streaming)
+	hasContent := assistantContentHasVisibleText(bodyContent) || (summary.HasMeta && !b.Streaming)
 	if b.Streaming && !hasThinking && assistantStreamContentIsPlaceholder(bodyContent) {
 		return nil
 	}

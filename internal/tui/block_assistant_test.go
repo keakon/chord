@@ -357,6 +357,15 @@ func TestRenderAssistantSanitizesControlCharacters(t *testing.T) {
 	}
 }
 
+func TestSettledAssistantInvisibleContentRendersNoCard(t *testing.T) {
+	for _, content := range []string{"", " \n", "\u200b\u200b", "\ufeff", "\u200d"} {
+		block := &Block{ID: 1, Type: BlockAssistant, Content: content}
+		if lines := block.Render(120, ""); len(lines) != 0 {
+			t.Fatalf("invisible content %q rendered %d lines, want none", content, len(lines))
+		}
+	}
+}
+
 func TestRenderCompactionSummaryUsesMarkdownPreviewAndBlankLine(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
