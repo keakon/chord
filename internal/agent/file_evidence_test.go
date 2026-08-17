@@ -16,12 +16,12 @@ func TestBuildFileEvidenceViewSharesReadValidity(t *testing.T) {
 		{Role: message.RoleTool, ToolCallID: "edit", Content: "updated", ToolStatus: "success", FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "a.go", SHA256: "new", Exists: true, ChangedStart: 4, ChangedEnd: 4}}}},
 	}
 
-	view := buildFileEvidenceView(messages, "session-a", "current")
+	view := buildFileEvidenceView(messages)
 	observations := view["a.go"]
 	if len(observations) != 2 {
 		t.Fatalf("observations = %#v", observations)
 	}
-	if observations[0].Validity != fileEvidenceStale || observations[0].SourceRef.LegacyOrdinal != 1 {
+	if observations[0].Validity != fileEvidenceStale || observations[0].MessageIndex != 1 {
 		t.Fatalf("read observation = %#v", observations[0])
 	}
 	if observations[1].Operation != "write" || observations[1].ObservedRevision != "new" {
@@ -40,7 +40,7 @@ func TestBuildFileEvidenceViewMarksUnknownWriteConservatively(t *testing.T) {
 		{Role: message.RoleTool, ToolCallID: "write", Content: "updated", ToolStatus: "success", FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "a.go", SHA256: "new", Exists: true}}}},
 	}
 
-	view := buildFileEvidenceView(messages, "session-a", "current")
+	view := buildFileEvidenceView(messages)
 	if got := view["a.go"][0].Validity; got != fileEvidenceStale {
 		t.Fatalf("unknown-range read validity = %q, want stale", got)
 	}
@@ -52,7 +52,7 @@ func TestBuildFileEvidenceViewIncludesCommittedFilesFromPartialError(t *testing.
 		{Role: message.RoleTool, ToolCallID: "patch", Content: "partially applied\n\nError: one file failed", ToolStatus: message.ToolStatusError, FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "a.go", SHA256: "new", Exists: true}}}},
 	}
 
-	view := buildFileEvidenceView(messages, "session-a", "current")
+	view := buildFileEvidenceView(messages)
 	observations := view["a.go"]
 	if len(observations) != 1 || observations[0].Operation != "write" || observations[0].ObservedRevision != "new" {
 		t.Fatalf("observations = %#v, want committed partial write", observations)

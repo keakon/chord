@@ -31,10 +31,6 @@ func writeStatusBarSpaces(b *strings.Builder, count int) {
 	}
 }
 
-func formatStatusBarSubAgentLabel(instanceID string) string {
-	return instanceID
-}
-
 func (m *Model) statusBarDynamicCacheKeyAt(now time.Time) string {
 	focused := m.focusedAgentIDOrMain()
 	latestStatusStart := false
@@ -199,23 +195,14 @@ func (m *Model) invalidateStatusBarAgentSnapshot() {
 	m.statusBarAgentSnapshotDirty = true
 }
 
-func (m *Model) computeStatusBarCurrentAgentLabel(currentRole string, subAgents []agent.SubAgentInfo) string {
+func (m *Model) computeStatusBarCurrentAgentLabel(currentRole string) string {
 	if m.focusedAgentID == "" {
 		if r := strings.TrimSpace(currentRole); r != "" {
 			return r
 		}
 		return "main"
 	}
-	id := m.focusedAgentID
-	for _, sub := range subAgents {
-		if sub.InstanceID == id {
-			return formatStatusBarSubAgentLabel(id)
-		}
-	}
-	if _, _, ok := m.sidebar.SubAgentLabels(id); ok {
-		return formatStatusBarSubAgentLabel(id)
-	}
-	return id
+	return m.focusedAgentID
 }
 
 func (m *Model) computeStatusBarCurrentAgentColor() string {
@@ -238,8 +225,7 @@ func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 	snap := statusBarAgentSnapshot{}
 	if m.agent != nil {
 		snap.currentRole = strings.TrimSpace(m.agent.CurrentRole())
-		subAgents := m.agent.GetSubAgents()
-		snap.viewingLabel = m.computeStatusBarCurrentAgentLabel(snap.currentRole, subAgents)
+		snap.viewingLabel = m.computeStatusBarCurrentAgentLabel(snap.currentRole)
 		snap.viewingColor = m.computeStatusBarCurrentAgentColor()
 		if summary := m.agent.GetSessionSummary(); summary != nil {
 			snap.sessionID = strings.TrimSpace(summary.ID)
@@ -267,7 +253,7 @@ func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 		snap.cost = m.agent.GetSidebarUsageStats().EstimatedCost
 		snap.contextCurrent, snap.contextLimit = m.agent.GetContextStats()
 	} else {
-		snap.viewingLabel = m.computeStatusBarCurrentAgentLabel("", nil)
+		snap.viewingLabel = m.computeStatusBarCurrentAgentLabel("")
 		snap.viewingColor = m.computeStatusBarCurrentAgentColor()
 	}
 	m.statusBarAgentSnapshot = snap

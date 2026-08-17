@@ -15,11 +15,12 @@ const (
 	fileEvidenceCurrent    fileEvidenceValidity = "current"
 	fileEvidenceStale      fileEvidenceValidity = "stale"
 	fileEvidenceSuperseded fileEvidenceValidity = "superseded"
-	fileEvidenceUnknown    fileEvidenceValidity = "unknown"
 )
 
 type fileEvidenceObservation struct {
-	SourceRef        checkpointSourceRef
+	// MessageIndex is the transcript index the observation came from; the
+	// view is in-memory only, so no richer source reference is needed.
+	MessageIndex     int
 	Operation        string
 	ObservedRevision string
 	ReadStart        int
@@ -28,7 +29,6 @@ type fileEvidenceObservation struct {
 	ChangedEnd       int
 	LineDelta        int
 	Validity         fileEvidenceValidity
-	InvalidatedBy    int
 }
 
 type fileEvidenceView map[string][]fileEvidenceObservation
@@ -40,13 +40,12 @@ type fileEvidenceStats struct {
 	Current      int
 	Stale        int
 	Superseded   int
-	Unknown      int
 }
 
 func (s *reductionHistoryScan) fileEvidence() fileEvidenceView {
 	if !s.evidenceDone {
 		started := time.Now()
-		s.evidence = buildFileEvidenceViewWithMeta(s.messages, "", "current", s.callMeta())
+		s.evidence = buildFileEvidenceViewWithMeta(s.messages, s.callMeta())
 		s.evidenceStats = s.evidence.stats(time.Since(started))
 		s.evidenceDone = true
 	}
@@ -65,8 +64,6 @@ func (v fileEvidenceView) stats(duration time.Duration) fileEvidenceStats {
 				stats.Stale++
 			case fileEvidenceSuperseded:
 				stats.Superseded++
-			case fileEvidenceUnknown:
-				stats.Unknown++
 			}
 		}
 	}
@@ -83,8 +80,8 @@ func (v fileEvidenceView) validityByMessage() map[int]readValidity {
 			if result == nil {
 				result = make(map[int]readValidity)
 			}
-			result[observation.SourceRef.LegacyOrdinal] = readValidity{
-				Invalidated: observation.Validity == fileEvidenceStale || observation.Validity == fileEvidenceUnknown,
+			result[observation.MessageIndex] = readValidity{
+				Invalidated: observation.Validity == fileEvidenceStale,
 				Superseded:  observation.Validity == fileEvidenceSuperseded,
 			}
 		}
@@ -95,11 +92,11 @@ func (v fileEvidenceView) validityByMessage() map[int]readValidity {
 // buildFileEvidenceView derives file observations from the same tool metadata
 // and read-validity analysis used by reduction. It is intentionally disposable:
 // the messages and current filesystem remain the authorities.
-func buildFileEvidenceView(messages []message.Message, sessionID, generation string) fileEvidenceView {
-	return buildFileEvidenceViewWithMeta(messages, sessionID, generation, buildToolCallMeta(messages))
+func buildFileEvidenceView(messages []message.Message) fileEvidenceView {
+	return buildFileEvidenceViewWithMeta(messages, buildToolCallMeta(messages))
 }
 
-func buildFileEvidenceViewWithMeta(messages []message.Message, sessionID, generation string, meta map[string]toolCallMeta) fileEvidenceView {
+func buildFileEvidenceViewWithMeta(messages []message.Message, meta map[string]toolCallMeta) fileEvidenceView {
 	validity := analyzeReadValidity(messages, meta)
 	view := make(fileEvidenceView)
 	for index := range messages {
@@ -112,7 +109,6 @@ func buildFileEvidenceViewWithMeta(messages []message.Message, sessionID, genera
 		if operation == "" {
 			continue
 		}
-		ref := checkpointSourceRef{SessionID: sessionID, TranscriptGeneration: generation, SegmentKind: "transcript", LegacyOrdinal: index, Role: string(msg.Role), ToolCallID: msg.ToolCallID}
 		for path, observation := range evidenceObservations(msg, &call, operation) {
 			if observation.Operation == "read" {
 				if state, ok := validity[index]; ok {
@@ -123,7 +119,7 @@ func buildFileEvidenceViewWithMeta(messages []message.Message, sessionID, genera
 					}
 				}
 			}
-			observation.SourceRef = ref
+			observation.MessageIndex = index
 			view[path] = append(view[path], observation)
 		}
 	}

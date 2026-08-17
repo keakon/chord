@@ -135,12 +135,6 @@ func requestOverrideReasoningValueEnabled(key string, value any) bool {
 		return reasoningOverrideStringEnabled(v)
 	case map[string]any:
 		return requestOverrideReasoningMapEnabled(key, v)
-	case map[string]string:
-		converted := make(map[string]any, len(v))
-		for field, fieldValue := range v {
-			converted[field] = fieldValue
-		}
-		return requestOverrideReasoningMapEnabled(key, converted)
 	default:
 		return true
 	}

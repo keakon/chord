@@ -403,18 +403,14 @@ func preserveRebuiltBlockState(src, dst *Block) {
 }
 
 func toolResultStatusFromRestoredContent(content string) agent.ToolResultStatus {
-	trimmed := strings.TrimSpace(content)
-	if trimmed == "" {
+	switch message.ClassifyToolResultContent(content) {
+	case message.ToolResultClassCancelled:
+		return agent.ToolResultStatusCancelled
+	case message.ToolResultClassError:
+		return agent.ToolResultStatusError
+	default:
 		return agent.ToolResultStatusSuccess
 	}
-	lower := strings.ToLower(trimmed)
-	if lower == "cancelled" || strings.HasPrefix(lower, "cancelled\n") {
-		return agent.ToolResultStatusCancelled
-	}
-	if strings.HasPrefix(trimmed, "Error: ") || strings.Contains(trimmed, "\n\nError: ") || strings.HasPrefix(trimmed, "Model stopped before completing this tool call") {
-		return agent.ToolResultStatusError
-	}
-	return agent.ToolResultStatusSuccess
 }
 
 func toolResultStatusFromRestoredMessage(msg message.Message) agent.ToolResultStatus {

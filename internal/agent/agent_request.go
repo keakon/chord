@@ -297,6 +297,19 @@ func (a *MainAgent) emitPeerNotifyAudit(caller delegationCaller, source, target 
 	})
 }
 
+// snapshotAgentRequests deep-clones the durable agent-request map under the
+// subs read lock. Callers holding agentRequestPersistMu may mutate entries of
+// the returned map freely before persisting it.
+func (a *MainAgent) snapshotAgentRequests() map[string]*DurableAgentRequest {
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
+	records := make(map[string]*DurableAgentRequest, len(a.subs.agentRequests))
+	for id, item := range a.subs.agentRequests {
+		records[id] = cloneDurableAgentRequest(item)
+	}
+	return records
+}
+
 func (a *MainAgent) NotifySubAgentMessage(ctx context.Context, response tools.AgentResponseRequest) (tools.TaskHandle, error) {
 	caller, err := a.delegationCallerFromContext(ctx)
 	if err != nil {
@@ -318,13 +331,8 @@ func (a *MainAgent) NotifySubAgentMessage(ctx context.Context, response tools.Ag
 		a.agentRequestPersistMu.Unlock()
 		return tools.TaskHandle{}, fmt.Errorf("agent response delivery invalidated by session change")
 	}
-	a.subs.mu.RLock()
-	request := cloneDurableAgentRequest(a.subs.agentRequests[correlationID])
-	records := make(map[string]*DurableAgentRequest, len(a.subs.agentRequests))
-	for id, item := range a.subs.agentRequests {
-		records[id] = cloneDurableAgentRequest(item)
-	}
-	a.subs.mu.RUnlock()
+	records := a.snapshotAgentRequests()
+	request := records[correlationID]
 	if request == nil || request.SourceTaskID != response.TargetTaskID {
 		a.agentRequestPersistMu.Unlock()
 		return tools.TaskHandle{}, fmt.Errorf("unknown pending request %q for task %s", correlationID, response.TargetTaskID)
@@ -436,12 +444,7 @@ func (a *MainAgent) NotifySubAgentMessage(ctx context.Context, response tools.Ag
 	}
 	currentRequest.State = "responded"
 	currentRequest.Response.DeliveredAt = time.Now()
-	a.subs.mu.RLock()
-	records = make(map[string]*DurableAgentRequest, len(a.subs.agentRequests))
-	for id, item := range a.subs.agentRequests {
-		records[id] = cloneDurableAgentRequest(item)
-	}
-	a.subs.mu.RUnlock()
+	records = a.snapshotAgentRequests()
 	records[correlationID] = currentRequest
 	err = a.persistAndPublishAgentRequests(records)
 	a.agentRequestPersistMu.Unlock()

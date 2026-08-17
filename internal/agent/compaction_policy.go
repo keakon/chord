@@ -260,7 +260,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	}
 	toolResultThresholdCrossed := incrementalEnabled && previousToolResults < policy.MinToolResultsPrune && toolResults >= policy.MinToolResultsPrune
 	evidenceStarted := time.Now()
-	evidence := buildFileEvidenceViewWithMeta(prepared, "", "current", callMeta)
+	evidence := buildFileEvidenceViewWithMeta(prepared, callMeta)
 	evidenceStats := evidence.stats(time.Since(evidenceStarted))
 	readValidityByIndex := evidence.validityByMessage()
 	if len(externalReadInvalidated) > 0 && readValidityByIndex == nil {
@@ -582,7 +582,6 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		stats.EvidenceCurrent = evidenceStats.Current
 		stats.EvidenceStale = evidenceStats.Stale
 		stats.EvidenceSuperseded = evidenceStats.Superseded
-		stats.EvidenceUnknown = evidenceStats.Unknown
 		stats.TokensAfter = ctxmgr.EstimateMessagesTokens(prepared)
 		a.setCurrentRequestSurface(&stats, prepared)
 		if stats.TokensSaved == 0 && stats.TokensBefore > stats.TokensAfter {

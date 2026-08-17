@@ -40,7 +40,6 @@ type ContextReductionStats struct {
 	EvidenceCurrent           int
 	EvidenceStale             int
 	EvidenceSuperseded        int
-	EvidenceUnknown           int
 }
 
 const (
