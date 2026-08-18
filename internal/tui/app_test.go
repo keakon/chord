@@ -886,6 +886,33 @@ func TestRequestProgressDoneImmediatelyStopsShowingPreviousRequestLength(t *test
 	}
 }
 
+func TestCompactionKeepAliveRepeatKeepsOriginalSinceAnchor(t *testing.T) {
+	m := NewModelWithSize(nil, 180, 24)
+	m.mode = ModeNormal
+	started := time.Now().Add(-2 * time.Minute)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main"}})
+	original, ok := m.workStartedAt["main"]
+	if !ok || original.IsZero() {
+		t.Fatal("compacting activity should record a work start anchor")
+	}
+	m.workStartedAt["main"] = started
+
+	// The compaction keep-alive re-emits the same activity type periodically;
+	// the repeat must not move the since anchor to the heartbeat time.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main"}})
+	if got := m.workStartedAt["main"]; !got.Equal(started) {
+		t.Fatalf("keep-alive repeat moved the since anchor: got %v, want %v", got, started)
+	}
+
+	// A real activity transition into compacting must refresh the anchor.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main"}})
+	if got := m.workStartedAt["main"]; !got.After(started) {
+		t.Fatalf("transition into compacting should refresh the since anchor, got %v", got)
+	}
+}
+
 func TestLeavingRequestActivityClearsPreviousRequestProgress(t *testing.T) {
 	m := NewModelWithSize(nil, 180, 24)
 	m.mode = ModeNormal

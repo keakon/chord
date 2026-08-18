@@ -167,7 +167,12 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			delete(m.workStartedAt, tbk)
 			delete(m.turnBusyStartedAt, tbk)
 		case agent.ActivityConnecting, agent.ActivityCompacting:
-			m.workStartedAt[tbk] = time.Now()
+			// Compacting is re-emitted periodically as a keep-alive while the
+			// compaction request runs; a same-type repeat must not move the
+			// "since" anchor, only a real activity transition may.
+			if prev.Type != evt.Type {
+				m.workStartedAt[tbk] = time.Now()
+			}
 			if prev.Type == agent.ActivityIdle || prev.Type == "" {
 				m.turnBusyStartedAt[tbk] = time.Now()
 			}

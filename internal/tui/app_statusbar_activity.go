@@ -371,8 +371,6 @@ func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
 			icon = "✓" // Checkmark for success
 		case agent.CompactionStatusFailed:
 			icon = "✗" // Cross for failure
-		case agent.CompactionStatusCancelled:
-			icon = "" // No icon for cancelled (immediate disappearance)
 		}
 	}
 
@@ -380,13 +378,8 @@ func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
 	elapsedText := strings.TrimSpace(formatStatusBarElapsed(now.Sub(m.compactionBgStatus.StartedAt)))
 
 	// Build pill content
-	pillParts := make([]string, 0, 1)
-	if icon != "" {
-		pillParts = append(pillParts, icon+" "+elapsedText)
-	} else {
-		// For cancelled state, just show elapsed time briefly
-		pillParts = append(pillParts, elapsedText)
-	}
+	pillParts := make([]string, 0, 2)
+	pillParts = append(pillParts, icon+" "+elapsedText)
 
 	// Show streaming progress as a bytes/events suffix. The compaction worker
 	// reports cumulative response progress via CompactionStatusEvent; the suffix
@@ -397,15 +390,7 @@ func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
 
 	// Handle terminal states (1-2s flush window)
 	if m.compactionBgStatus.Terminal != "" {
-		switch m.compactionBgStatus.Terminal {
-		case agent.CompactionStatusSucceeded:
-			return StatusHintStyle.Render(pillParts[0])
-		case agent.CompactionStatusFailed:
-			return StatusHintStyle.Render(pillParts[0])
-		case agent.CompactionStatusCancelled:
-			// Cancelled disappears immediately
-			return ""
-		}
+		return StatusHintStyle.Render(pillParts[0])
 	}
 
 	// Active state with breathing animation
