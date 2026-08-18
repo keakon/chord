@@ -73,6 +73,14 @@ func formatStatusBarEvents(n int64, short bool) string {
 	return fmt.Sprintf("%d %s", n, label)
 }
 
+func formatStatusBarTransportProgress(bytes, events int64) string {
+	progress := "↓ " + formatStatusBarBytes(bytes)
+	if formattedEvents := formatStatusBarEvents(events, false); formattedEvents != "" {
+		progress += " · " + formattedEvents
+	}
+	return progress
+}
+
 func (m Model) renderRequestProgressSummary(agentID string) string {
 	if agentID == "" {
 		agentID = "main"
@@ -94,10 +102,7 @@ func (m Model) renderRequestProgressSummary(agentID string) string {
 	if !hasDownloadState && (!ok || prog.VisibleBytes <= 0) {
 		return ""
 	}
-	summary := "↓ " + formatStatusBarBytes(displayBytes)
-	if events := formatStatusBarEvents(displayEvents, false); events != "" {
-		summary += " · " + events
-	}
+	summary := formatStatusBarTransportProgress(displayBytes, displayEvents)
 	if start, ok := m.activityStartTime[statusBarTimingAnchor(agentID)]; ok && !start.IsZero() {
 		summary += " · " + strings.TrimSpace(formatStatusBarElapsed(time.Since(start)))
 	}
@@ -353,8 +358,8 @@ func (m Model) isFocusedAgentBusy() bool {
 
 // renderCompactionBackgroundPill creates the compaction background status pill.
 // This renders a compact background pill with breathing animation and optional progress.
-func (m *Model) renderCompactionBackgroundPill() string {
-	if !m.compactionBgStatus.Active {
+func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
+	if !compactionBackgroundStatusVisibleAt(m.compactionBgStatus, now) {
 		return ""
 	}
 
@@ -362,18 +367,17 @@ func (m *Model) renderCompactionBackgroundPill() string {
 	icon := "■" // Solid block for active
 	if m.compactionBgStatus.Terminal != "" {
 		switch m.compactionBgStatus.Terminal {
-		case "succeeded":
+		case agent.CompactionStatusSucceeded:
 			icon = "✓" // Checkmark for success
-		case "failed":
+		case agent.CompactionStatusFailed:
 			icon = "✗" // Cross for failure
-		case "cancelled":
+		case agent.CompactionStatusCancelled:
 			icon = "" // No icon for cancelled (immediate disappearance)
 		}
 	}
 
 	// Time elapsed since start
-	elapsed := time.Since(m.compactionBgStatus.StartedAt).Round(time.Second)
-	elapsedText := fmt.Sprintf("%ds", int(elapsed.Seconds()))
+	elapsedText := strings.TrimSpace(formatStatusBarElapsed(now.Sub(m.compactionBgStatus.StartedAt)))
 
 	// Build pill content
 	pillParts := make([]string, 0, 1)
@@ -384,20 +388,21 @@ func (m *Model) renderCompactionBackgroundPill() string {
 		pillParts = append(pillParts, elapsedText)
 	}
 
-	// Dedicated compaction-progress events previously drove an optional bytes/events suffix.
-	// Status bar should now show only the compaction icon and elapsed time.
+	// Show streaming progress as a bytes/events suffix. The compaction worker
+	// reports cumulative response progress via CompactionStatusEvent; the suffix
+	// makes a long compaction visibly alive without spinners.
+	if m.compactionBgStatus.Bytes > 0 {
+		pillParts = append(pillParts, formatStatusBarTransportProgress(m.compactionBgStatus.Bytes, m.compactionBgStatus.Events))
+	}
 
 	// Handle terminal states (1-2s flush window)
 	if m.compactionBgStatus.Terminal != "" {
-		if time.Since(m.compactionBgStatus.TerminalAt) >= 2*time.Second {
-			return ""
-		}
 		switch m.compactionBgStatus.Terminal {
-		case "succeeded":
+		case agent.CompactionStatusSucceeded:
 			return StatusHintStyle.Render(pillParts[0])
-		case "failed":
+		case agent.CompactionStatusFailed:
 			return StatusHintStyle.Render(pillParts[0])
-		case "cancelled":
+		case agent.CompactionStatusCancelled:
 			// Cancelled disappears immediately
 			return ""
 		}
@@ -405,8 +410,8 @@ func (m *Model) renderCompactionBackgroundPill() string {
 
 	// Active state with breathing animation
 	if icon == "■" {
-		anim := time.Now().Truncate(300 * time.Millisecond)
-		if anim.Truncate(600 * time.Millisecond).Equal(anim) {
+		anim := now.Truncate(visualSpinnerCadence)
+		if anim.Truncate(2 * visualSpinnerCadence).Equal(anim) {
 			icon = "▪" // Dashed block for breathing state
 			if len(pillParts) > 0 {
 				pillParts[0] = strings.Replace(pillParts[0], "■ ", "▪ ", 1)
@@ -414,5 +419,5 @@ func (m *Model) renderCompactionBackgroundPill() string {
 		}
 	}
 
-	return StatusHintStyle.Render(pillParts[0])
+	return StatusHintStyle.Render(strings.Join(pillParts, " "))
 }

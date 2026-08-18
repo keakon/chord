@@ -460,6 +460,14 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 			"event_type", fmt.Sprintf("%T", evt),
 			"tool_id", e.ID,
 		}, true
+	case CompactionStatusEvent:
+		if e.Status == CompactionStatusProgress {
+			return "", nil, false
+		}
+		return "TUI output channel full, waiting to deliver compaction status event", []any{
+			"event_type", fmt.Sprintf("%T", evt),
+			"status", e.Status,
+		}, true
 	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, AgentDoneEvent, GlobalIdleEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, SpawnFinishedEvent:
 		return "TUI output channel full, waiting to deliver critical event", []any{
 			"event_type", fmt.Sprintf("%T", evt),

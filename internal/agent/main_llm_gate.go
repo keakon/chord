@@ -426,6 +426,7 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 	draft, ok := evt.Payload.(*compactionDraft)
 	if !ok || draft == nil {
 		log.Errorf("handleCompactionReady: invalid payload type=%v", fmt.Sprintf("%T", evt.Payload))
+		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusFailed})
 		a.resetCompactionState()
 		return
 	}
@@ -511,11 +512,16 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 				Message: fmt.Sprintf("Context compaction failed: %v", err),
 				Level:   "warn",
 			})
+			a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusFailed})
 		} else {
 			applySucceeded = true
+			if draft.Skip {
+				a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusSkipped})
+			}
 		}
 	} else {
 		log.Infof("discarding ready compaction draft due to higher-priority queued work turn_id=%v instance=%v plan_id=%v", evt.TurnID, a.instanceID, draft.PlanID)
+		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusCancelled})
 	}
 
 	pending, _ = a.finishCompactionState()
@@ -540,6 +546,9 @@ func (a *MainAgent) applyReadyDraft() (applySucceeded bool, handledIdleBarrier b
 	// Session switch check
 	if draft.Target.sessionEpoch != a.sessionEpoch {
 		log.Debug("compaction draft discarded due to session switch")
+		cleanupOrphanCompactionFiles(draft.AbsHistoryPath)
+		a.resetCompactionState()
+		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusCancelled})
 		return false, false
 	}
 
@@ -554,8 +563,12 @@ func (a *MainAgent) applyReadyDraft() (applySucceeded bool, handledIdleBarrier b
 			Message: fmt.Sprintf("Context compaction failed: %v", err),
 			Level:   "warn",
 		})
+		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusFailed})
 	} else {
 		applySucceeded = true
+		if draft.Skip {
+			a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusSkipped})
+		}
 	}
 
 	// Capture pending call before clearing state.
@@ -846,14 +859,14 @@ func (a *MainAgent) handleCompactionFailed(evt Event) {
 			Message: fmt.Sprintf("Context compaction failed: %v", payload.err),
 			Level:   "warn",
 		})
-		a.emitToTUI(CompactionStatusEvent{Status: "failed"})
+		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusFailed})
 	} else if isCancellation {
 		log.Info("context compaction cancelled by user")
 		a.emitToTUI(ToastEvent{
 			Message: "Context compaction cancelled",
 			Level:   "info",
 		})
-		a.emitToTUI(CompactionStatusEvent{Status: "cancelled"})
+		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusCancelled})
 		// Clean up orphan history files for cancelled compaction
 		if payload.absHistoryPath != "" {
 			cleanupOrphanCompactionFiles(payload.absHistoryPath)

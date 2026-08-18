@@ -10,7 +10,7 @@ import (
 
 type compactionBackend interface {
 	Name() string
-	ProduceSummary(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string) (string, string, error)
+	ProduceSummary(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string, progress *compactionProgressReporter) (string, string, error)
 }
 
 type genericCompactionBackend struct {
@@ -19,8 +19,8 @@ type genericCompactionBackend struct {
 
 func (b genericCompactionBackend) Name() string { return config.CompactionPresetGeneric }
 
-func (b genericCompactionBackend) ProduceSummary(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string) (string, string, error) {
-	return b.agent.callCompactionSummary(ctx, client, fallbackModelRef, prompt)
+func (b genericCompactionBackend) ProduceSummary(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string, progress *compactionProgressReporter) (string, string, error) {
+	return b.agent.callCompactionSummary(ctx, client, fallbackModelRef, prompt, progress)
 }
 
 type codexCompactionBackend struct {
@@ -29,8 +29,8 @@ type codexCompactionBackend struct {
 
 func (b codexCompactionBackend) Name() string { return config.CompactionPresetCodex }
 
-func (b codexCompactionBackend) ProduceSummary(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string) (string, string, error) {
-	return b.agent.callCompactionEndpoint(ctx, client, fallbackModelRef, prompt)
+func (b codexCompactionBackend) ProduceSummary(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string, progress *compactionProgressReporter) (string, string, error) {
+	return b.agent.callCompactionEndpoint(ctx, client, fallbackModelRef, prompt, progress)
 }
 
 func (a *MainAgent) configuredCompactionPreset() string {

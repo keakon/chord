@@ -8,6 +8,8 @@ import (
 	"github.com/keakon/chord/internal/agent"
 )
 
+const compactionStatusTerminalDuration = 2 * time.Second
+
 func statusBarTickCmd(generation uint64, delay time.Duration) tea.Cmd {
 	if delay <= 0 {
 		delay = time.Second
@@ -28,6 +30,13 @@ func nextTimeBucketTransition(now time.Time, unit time.Duration) time.Duration {
 	return next.Sub(now)
 }
 
+func compactionBackgroundStatusVisibleAt(status compactionBackgroundStatus, now time.Time) bool {
+	if status.Active {
+		return true
+	}
+	return status.Terminal != "" && !status.TerminalAt.IsZero() && now.Sub(status.TerminalAt) < compactionStatusTerminalDuration
+}
+
 func (m *Model) statusBarNextRefreshDelayAt(now time.Time) time.Duration {
 	if m == nil {
 		return 0
@@ -35,10 +44,11 @@ func (m *Model) statusBarNextRefreshDelayAt(now time.Time) time.Duration {
 	if m.viewport != nil && m.viewport.HasUserLocalShellPending() {
 		return 0
 	}
-	// When background compaction is active, tick every second so the elapsed
-	// timer and breathing icon stay live even if the foreground agent is idle.
-	if m.compactionBgStatus.Active {
-		return nextTimeBucketTransition(now, time.Second)
+	// When background compaction is active, refresh at the pill animation cadence
+	// so the elapsed timer and breathing icon stay live even if the foreground
+	// agent is idle or the provider pauses between stream events.
+	if compactionBackgroundStatusVisibleAt(m.compactionBgStatus, now) {
+		return nextTimeBucketTransition(now, visualSpinnerCadence)
 	}
 	statusActivity := m.activityForAgent(m.focusedAgentIDOrMain())
 	if statusActivity.Type == agent.ActivityCompacting {

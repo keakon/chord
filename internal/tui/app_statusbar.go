@@ -474,6 +474,12 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	b.WriteString(snap.modelVariant)
 	b.WriteByte('|')
 	b.WriteString(snap.mcpPill)
+	b.WriteByte('|')
+	b.WriteString(compactionBackgroundStatusKey(m.compactionBgStatus))
+	if compactionBackgroundStatusVisibleAt(m.compactionBgStatus, now) {
+		b.WriteByte('|')
+		b.WriteString(compactionBackgroundStatusFrameKey(now))
+	}
 	return b.String()
 }
 
@@ -559,7 +565,7 @@ func (m *Model) renderStatusBar() string {
 	pathValue := inputs.WorkingDirDisplay
 	sessionValue := sessionID
 	activityText, activityWidth := m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)
-	rightSide, rightStart, rightWidth := m.renderStatusBarRightSide(effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue)
+	rightSide, rightStart, rightWidth := m.renderStatusBarRightSide(inputs.Now, effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue)
 	if inputs.NextEscHint != "" && statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth, inputs.NextEscHint) {
 		leftSide = lipgloss.JoinHorizontal(
 			lipgloss.Center,
@@ -569,7 +575,7 @@ func (m *Model) renderStatusBar() string {
 		)
 		leftWidth = lipgloss.Width(leftSide)
 		activityText, activityWidth = m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)
-		rightSide, rightStart, rightWidth = m.renderStatusBarRightSide(effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue)
+		rightSide, rightStart, rightWidth = m.renderStatusBarRightSide(inputs.Now, effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue)
 	}
 	separatorWidth := lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
 	if activityWidth == 0 && leftWidth <= rightStart {
@@ -716,9 +722,14 @@ func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWid
 	return activityText, activityWidth
 }
 
-func (m *Model) renderStatusBarRightSide(effectiveWidth, leftWidth, activityWidth int, pathValue, sessionValue string) (string, int, int) {
+func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidth, activityWidth int, pathValue, sessionValue string) (string, int, int) {
 	separatorWidth := lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
 	rightKey := statusBarRightKey(effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue)
+	if !compactionBackgroundStatusVisibleAt(m.compactionBgStatus, now) {
+		rightKey += "|"
+	} else {
+		rightKey += "|" + compactionBackgroundStatusKey(m.compactionBgStatus) + "|" + compactionBackgroundStatusFrameKey(now)
+	}
 	if m.cachedStatusBarRightKey == rightKey {
 		m.statusPath.value = m.cachedStatusBarPathValue
 		m.statusPath.display = m.cachedStatusBarPathShown
@@ -781,7 +792,7 @@ func (m *Model) renderStatusBarRightSide(effectiveWidth, leftWidth, activityWidt
 	}
 
 	rightParts := make([]string, 0, 5)
-	if compactionPill := m.renderCompactionBackgroundPill(); compactionPill != "" {
+	if compactionPill := m.renderCompactionBackgroundPill(now); compactionPill != "" {
 		rightParts = append(rightParts, compactionPill)
 	}
 	if pathText != "" {
@@ -934,6 +945,26 @@ func statusBarRightKey(effectiveWidth, leftWidth, activityWidth int, pathValue, 
 	b.WriteByte('|')
 	b.WriteString(sessionValue)
 	return b.String()
+}
+
+// compactionBackgroundStatusKey folds the mutable compaction background state
+// into the right-side cache key so a streaming progress update (bytes/events)
+// invalidates the cached pill instead of rendering a stale suffix.
+func compactionBackgroundStatusKey(s compactionBackgroundStatus) string {
+	if !s.Active && s.Terminal == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(s.Terminal)
+	b.WriteByte('|')
+	b.WriteString(strconv.FormatInt(s.Bytes, 10))
+	b.WriteByte('|')
+	b.WriteString(strconv.FormatInt(s.Events, 10))
+	return b.String()
+}
+
+func compactionBackgroundStatusFrameKey(now time.Time) string {
+	return strconv.FormatInt(now.UnixMilli()/visualSpinnerCadence.Milliseconds(), 10)
 }
 
 // formatContextPill formats input-budget usage for the status bar: "42% (72.7K)" or "(72.7K)" when limit is 0.

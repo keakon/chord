@@ -287,21 +287,21 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 	case agent.CompactionStatusEvent:
 		now := time.Now()
 		switch evt.Status {
-		case "started":
+		case agent.CompactionStatusStarted:
 			m.compactionBgStatus = compactionBackgroundStatus{
 				Active:    true,
 				StartedAt: now,
 				Bytes:     evt.Bytes,
 				Events:    evt.Events,
 			}
-		case "progress":
+		case agent.CompactionStatusProgress:
 			if m.compactionBgStatus.StartedAt.IsZero() {
 				m.compactionBgStatus.StartedAt = now
 			}
 			m.compactionBgStatus.Active = true
 			m.compactionBgStatus.Bytes = evt.Bytes
 			m.compactionBgStatus.Events = evt.Events
-		case "succeeded", "failed":
+		case agent.CompactionStatusSucceeded, agent.CompactionStatusFailed:
 			// Terminal flush state: show ✓/✗ for ~2s, then disappear
 			if m.compactionBgStatus.StartedAt.IsZero() {
 				m.compactionBgStatus.StartedAt = now
@@ -311,7 +311,10 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			m.compactionBgStatus.TerminalAt = now
 			m.compactionBgStatus.Bytes = evt.Bytes
 			m.compactionBgStatus.Events = evt.Events
-		case "cancelled":
+		case agent.CompactionStatusSkipped:
+			// Nothing was changed, so do not show a success flush state.
+			m.compactionBgStatus = compactionBackgroundStatus{}
+		case agent.CompactionStatusCancelled:
 			// Cancel disappears immediately, no terminal flush
 			m.compactionBgStatus = compactionBackgroundStatus{}
 		}

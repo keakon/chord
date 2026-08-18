@@ -69,6 +69,12 @@ func (a *MainAgent) scheduleCompactionAsync(snapshot []message.Message, planID u
 const (
 	compactionDraftTimeout  = 12 * time.Minute
 	compactionWatchdogGrace = time.Minute
+	// compactionKeepAliveInterval is how often the keep-alive re-emits the
+	// compacting activity during a compaction LLM request. Compaction progress
+	// events only reach the TUI pill (the headless control plane drops them),
+	// so without this heartbeat a long compaction leaves gateway-side
+	// last-activity timestamps frozen until the 5-minute request timeout.
+	compactionKeepAliveInterval = 30 * time.Second
 )
 
 // errCompactionWatchdog is the synthetic failure emitted when the draft
@@ -96,7 +102,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	a.beginCompactionState(planID, target, trigger, continuation, headSplit, cancel)
 
 	a.emitActivity("main", ActivityCompacting, "context")
-	a.emitToTUI(CompactionStatusEvent{Status: "started"})
+	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted})
 	a.compactionWg.Add(1)
 	go func(ctx context.Context, snapshot []message.Message, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, manual bool) {
 		defer a.compactionWg.Done()
@@ -241,6 +247,8 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	summaryMode := "model_summary"
 	backendName := config.CompactionPresetGeneric
 	modelRef := ""
+	keepAlive := newCompactionKeepAlive(a)
+	defer keepAlive.Stop()
 	summaryText, backendUsed, usedModel, summarizeErr := a.summarizeCompactionHead(ctx, head, relHistoryPath, evidenceItems, recentTail, todos, subAgents, backgroundObjects)
 	if strings.TrimSpace(backendUsed) != "" {
 		backendName = backendUsed
@@ -471,7 +479,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		info += fmt.Sprintf(" Summary fallback reason: %v", d.SummarizeErr)
 	}
 	a.emitToTUI(ToastEvent{Message: info, Level: "info"})
-	a.emitToTUI(CompactionStatusEvent{Status: "succeeded"})
+	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusSucceeded})
 	a.emitToTUI(SessionRestoredEvent{PreserveRequestActivity: true})
 
 	log.Infof("context compacted (async) mode=%v summary_mode=%v backend=%v profile=%v model=%v history_path=%v backup_path=%v archived_messages=%v evidence_artifacts=%v head_split=%v", modeLabel, d.SummaryMode, d.Backend, d.Profile, d.ModelRef, d.AbsHistoryPath, backupPath, d.ArchivedCount, d.EvidenceArtifacts, headSplit)
@@ -522,7 +530,8 @@ func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.
 
 	backend := a.selectCompactionBackend(client)
 	backendName = backend.Name()
-	summary, modelRef, err = backend.ProduceSummary(ctx, client, modelRef, prompt)
+	progress := newCompactionProgressReporter(a)
+	summary, modelRef, err = backend.ProduceSummary(ctx, client, modelRef, prompt, progress)
 	if err == nil {
 		return summary, backendName, modelRef, nil
 	}
@@ -532,7 +541,8 @@ func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.
 	repairPrompt := buildCompactionRepairPrompt(prompt, err)
 	if repairPrompt != "" {
 		log.Debugf("compaction summary validation failed; requesting corrected summary backend=%v error=%v", backendName, err)
-		repairedSummary, repairedModelRef, repairErr := backend.ProduceSummary(ctx, client, modelRef, repairPrompt)
+		progress.startAttempt()
+		repairedSummary, repairedModelRef, repairErr := backend.ProduceSummary(ctx, client, modelRef, repairPrompt, progress)
 		if repairErr == nil {
 			return repairedSummary, backendName, repairedModelRef, nil
 		}
@@ -541,67 +551,45 @@ func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.
 	return "", backendName, modelRef, err
 }
 
-func (a *MainAgent) callCompactionEndpoint(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string) (string, string, error) {
+func (a *MainAgent) callCompactionEndpoint(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string, progress *compactionProgressReporter) (string, string, error) {
 	if client == nil {
 		return "", fallbackModelRef, fmt.Errorf("compaction client is nil")
 	}
 	client.SetSystemPrompt(compactionSystemPrompt)
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	go a.compactionKeepAlive(ctx)
 
-	// Emit initial progress so TUI shows activity before the blocking call.
-	promptBytes := int64(len(prompt))
-	a.emitToTUI(CompactionStatusEvent{Status: "progress", Bytes: 0, Events: 1})
+	releaseLLM, err := a.governor.acquireLLM(ctx, client.PrimaryModelRef())
+	if err != nil {
+		return "", fallbackModelRef, fmt.Errorf("acquire compaction LLM request capacity: %w", err)
+	}
+	defer releaseLLM()
 
 	resp, err := client.Compact(
 		ctx,
 		[]message.Message{{Role: "user", Content: prompt}},
 		nil,
+		progress.Callback(),
 	)
 	if err != nil {
 		return "", fallbackModelRef, err
 	}
-	// Emit final progress with response size so TUI updates before the
-	// succeeded/failed terminal event arrives.
-	respBytes := int64(len(resp.Content))
-	a.emitToTUI(CompactionStatusEvent{Status: "progress", Bytes: respBytes, Events: 2})
-
+	progress.EmitCurrent()
 	summary, modelRef, err := a.finishCompactionCall(client, fallbackModelRef, resp)
 	if err != nil {
 		return summary, modelRef, err
 	}
-	log.Debugf("compaction endpoint produced summary prompt_bytes=%v response_bytes=%v summary_len=%v", promptBytes, respBytes, len(summary))
+	log.Debugf("compaction endpoint produced summary prompt_bytes=%v response_bytes_total=%v summary_len=%v", len(prompt), progress.Bytes(), len(summary))
 	return summary, modelRef, nil
 }
 
-func (a *MainAgent) callCompactionSummary(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string) (string, string, error) {
+func (a *MainAgent) callCompactionSummary(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string, progress *compactionProgressReporter) (string, string, error) {
 	if client == nil {
 		return "", fallbackModelRef, fmt.Errorf("compaction client is nil")
 	}
 	client.SetSystemPrompt(compactionSystemPrompt)
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-
-	var (
-		progressBytes  int64
-		progressEvents int64
-	)
-	callback := func(delta message.StreamDelta) {
-		updated := false
-		if delta.Progress != nil {
-			progressBytes = delta.Progress.Bytes
-			progressEvents = delta.Progress.Events
-			updated = true
-		} else if delta.Type == "text" || delta.Type == "thinking" {
-			progressBytes += int64(len(delta.Text))
-			progressEvents++
-			updated = true
-		}
-		if updated {
-			a.emitToTUI(CompactionStatusEvent{Status: "progress", Bytes: progressBytes, Events: progressEvents})
-		}
-	}
 
 	releaseLLM, err := a.governor.acquireLLM(ctx, client.PrimaryModelRef())
 	if err != nil {
@@ -612,13 +600,161 @@ func (a *MainAgent) callCompactionSummary(ctx context.Context, client *llm.Clien
 		ctx,
 		[]message.Message{{Role: "user", Content: prompt}},
 		nil,
-		callback,
+		progress.Callback(),
 	)
 	if err != nil {
 		return "", fallbackModelRef, err
 	}
-	a.emitToTUI(CompactionStatusEvent{Status: "progress", Bytes: progressBytes, Events: progressEvents})
+	progress.EmitCurrent()
 	return a.finishCompactionCall(client, fallbackModelRef, resp)
+}
+
+type compactionProgressReporter struct {
+	agent *MainAgent
+
+	bytes  int64
+	events int64
+
+	attemptBytesBase     int64
+	attemptEventsBase    int64
+	hasTransportProgress bool
+	transportBytes       int64
+	transportEvents      int64
+	lastEmitAt           time.Time
+	lastEmitBytes        int64
+	lastEmitEvents       int64
+}
+
+// compactionKeepAlive re-emits the compacting activity while a compaction LLM
+// request is in flight. CompactionStatusEvent progress updates are TUI-only,
+// so this timer-driven signal is the only heartbeat external control planes
+// (headless gateways tracking last-activity for idle reaping) receive during
+// a request that streams no transport progress at all. It must live for the
+// whole summarize phase, not per backend attempt, because key/model retries
+// and summary-repair attempts replace each other back-to-back.
+type compactionKeepAlive struct {
+	agent *MainAgent
+	done  chan struct{}
+	stop  chan struct{}
+}
+
+func newCompactionKeepAlive(a *MainAgent) *compactionKeepAlive {
+	k := &compactionKeepAlive{
+		agent: a,
+		done:  make(chan struct{}),
+		stop:  make(chan struct{}),
+	}
+	go k.run()
+	return k
+}
+
+func (k *compactionKeepAlive) run() {
+	defer close(k.done)
+	ticker := time.NewTicker(compactionKeepAliveInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-k.stop:
+			return
+		case <-k.agent.stoppingCh:
+			return
+		case <-ticker.C:
+			k.tick()
+		}
+	}
+}
+
+// tick emits one heartbeat. Split out of run so tests can drive a single beat
+// without waiting a full interval.
+func (k *compactionKeepAlive) tick() {
+	k.agent.emitActivity("main", ActivityCompacting, "context")
+}
+
+func (k *compactionKeepAlive) Stop() {
+	select {
+	case <-k.stop:
+	default:
+		close(k.stop)
+	}
+	<-k.done
+}
+
+func newCompactionProgressReporter(a *MainAgent) *compactionProgressReporter {
+	return &compactionProgressReporter{agent: a}
+}
+
+func (p *compactionProgressReporter) Callback() llm.StreamCallback {
+	return func(delta message.StreamDelta) {
+		if p.update(delta) {
+			p.emitIfDue(time.Now())
+		}
+	}
+}
+
+func (p *compactionProgressReporter) update(delta message.StreamDelta) bool {
+	if delta.Status != nil && strings.HasPrefix(delta.Status.Type, "retrying") {
+		p.startAttempt()
+		return false
+	}
+
+	if delta.Progress != nil {
+		progress := delta.Progress
+		if p.hasTransportProgress && (progress.Bytes < p.transportBytes || progress.Events < p.transportEvents) {
+			p.startAttempt()
+		}
+		p.hasTransportProgress = true
+		p.transportBytes = progress.Bytes
+		p.transportEvents = progress.Events
+		nextBytes := p.attemptBytesBase + progress.Bytes
+		nextEvents := p.attemptEventsBase + progress.Events
+		if nextBytes < p.bytes {
+			nextBytes = p.bytes
+		}
+		if nextEvents < p.events {
+			nextEvents = p.events
+		}
+		updated := nextBytes != p.bytes || nextEvents != p.events
+		p.bytes = nextBytes
+		p.events = nextEvents
+		return updated
+	}
+
+	// Keep compaction progress on the same transport-only contract as the main
+	// request lane. Content deltas are not response-byte or stream-event counts.
+	return false
+}
+
+func (p *compactionProgressReporter) startAttempt() {
+	p.attemptBytesBase = p.bytes
+	p.attemptEventsBase = p.events
+	p.hasTransportProgress = false
+	p.transportBytes = 0
+	p.transportEvents = 0
+}
+
+func (p *compactionProgressReporter) EmitCurrent() {
+	if p == nil || p.agent == nil {
+		return
+	}
+	p.agent.emitToTUI(CompactionStatusEvent{Status: CompactionStatusProgress, Bytes: p.bytes, Events: p.events})
+}
+
+func (p *compactionProgressReporter) emitIfDue(now time.Time) bool {
+	if p == nil || !shouldEmitRequestProgress(now, p.lastEmitAt, p.bytes, p.events, p.lastEmitBytes, p.lastEmitEvents) {
+		return false
+	}
+	p.lastEmitAt = now
+	p.lastEmitBytes = p.bytes
+	p.lastEmitEvents = p.events
+	p.EmitCurrent()
+	return true
+}
+
+func (p *compactionProgressReporter) Bytes() int64 {
+	if p == nil {
+		return 0
+	}
+	return p.bytes
 }
 
 // finishCompactionCall settles a completed summarize response identically for
@@ -777,20 +913,4 @@ func (a *MainAgent) newCompactionClientFromMainModelPool() *llm.Client {
 		return nil
 	}
 	return newAuxClientFromPool(pool, selectedIdx, 0, a.ServiceTier())
-}
-
-// compactionKeepAlive sends periodic activity signals during long compaction
-// requests to prevent connection timeouts. It runs in a separate goroutine
-// and stops when the context is cancelled.
-func (a *MainAgent) compactionKeepAlive(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			a.emitActivity("main", ActivityCompacting, "context")
-		}
-	}
 }

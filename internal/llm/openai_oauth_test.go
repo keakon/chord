@@ -444,6 +444,7 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]any
 	var gotHeaders http.Header
+	var progress []message.StreamProgressDelta
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -456,6 +457,10 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 			t.Fatalf("unmarshal request body: %v", err)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
+		// A tiny leading event keeps the first SSE progress snapshot smaller
+		// than the response headers, asserting the compact path rebases body
+		// progress onto the header baseline instead of regressing.
+		_, _ = io.WriteString(w, `data: {"type":"response.created","response":{"id":"resp-1"}}`+"\n\n")
 		_, _ = io.WriteString(w, `data: {"type":"response.output_item.done","output_index":0,"item":{"type":"compaction","encrypted_content":"## Goal\n- continue\n\n## User Constraints\n- none\n\n## Progress\n- progress\n\n## Key Decisions\n- decisions\n\n## Files and Evidence\n- Archived history: history-1.md\n\n## Todo State\n- none\n\n## SubAgent State\n- none\n\n## Open Problems\n- none\n\n## Next Step\n- continue"}}`+"\n\n")
 		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":5,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":2},"output_tokens_details":{"reasoning_tokens":0}}}}`+"\n\n")
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
@@ -475,6 +480,11 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 		nil,
 		128,
 		RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: " HIGH ", TextVerbosity: "low"}},
+		func(delta message.StreamDelta) {
+			if delta.Progress != nil {
+				progress = append(progress, *delta.Progress)
+			}
+		},
 	)
 	if err != nil {
 		t.Fatalf("Compact returned error: %v", err)
@@ -484,6 +494,20 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 	}
 	if resp.Usage == nil || resp.Usage.InputTokens != 10 {
 		t.Fatalf("compact response usage = %#v, want input tokens 10", resp.Usage)
+	}
+	if len(progress) < 2 {
+		t.Fatalf("compact progress updates = %d, want at least 2", len(progress))
+	}
+	if progress[0].Bytes <= 0 || progress[0].Events != 0 {
+		t.Fatalf("initial compact progress = %+v, want non-zero header bytes and zero events", progress[0])
+	}
+	for i := 1; i < len(progress); i++ {
+		if progress[i].Bytes < progress[i-1].Bytes || progress[i].Events < progress[i-1].Events {
+			t.Fatalf("compact progress regressed at update %d: previous=%+v current=%+v", i, progress[i-1], progress[i])
+		}
+	}
+	if progress[1].Bytes <= progress[0].Bytes || progress[1].Events <= progress[0].Events {
+		t.Fatalf("first compact stream progress = %+v, want bytes and events beyond header baseline", progress[1])
 	}
 	if gotPath != "/v1/responses" {
 		t.Fatalf("compact request path = %q, want /v1/responses (native remote compaction v2)", gotPath)
@@ -535,11 +559,16 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 	} else if last, ok := input[len(input)-1].(map[string]any); !ok || last["type"] != "compaction_trigger" {
 		t.Fatalf("compact request input last item = %#v, want compaction_trigger", input[len(input)-1])
 	}
-	if gotBody["parallel_tool_calls"] != false {
-		t.Fatalf("expected compact request parallel_tool_calls=false, got %#v", gotBody["parallel_tool_calls"])
+	if _, ok := gotBody["parallel_tool_calls"]; ok {
+		t.Fatalf("compact request parallel_tool_calls should be omitted without tools, got %#v", gotBody["parallel_tool_calls"])
 	}
 	if gotBody["stream"] != true {
 		t.Fatalf("expected compact request stream=true, got %#v", gotBody["stream"])
+	}
+	for _, key := range []string{"store", "include"} {
+		if _, ok := gotBody[key]; ok {
+			t.Fatalf("compact request unexpectedly included %s: %#v", key, gotBody[key])
+		}
 	}
 	reasoning, ok := gotBody["reasoning"].(map[string]any)
 	if !ok {
@@ -555,6 +584,32 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 		if _, ok := gotBody[key]; ok {
 			t.Fatalf("compact request unexpectedly included %s: %#v", key, gotBody[key])
 		}
+	}
+}
+
+func TestResponsesProvider_OpenAIOAuthCompactRejectsOrdinaryResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.output_text.delta","delta":"ordinary response"}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-ordinary","status":"completed","output":[]}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider, accessToken := newOpenAITestOAuthProvider(t, server.URL+"/v1/responses")
+	r := &ResponsesProvider{provider: provider, client: server.Client()}
+	if _, err := r.Compact(
+		context.Background(),
+		accessToken,
+		"test-model",
+		"system prompt",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil,
+		128,
+		RequestTuning{},
+		nil,
+	); err == nil {
+		t.Fatal("Compact accepted an ordinary Responses message without a compaction output item")
 	}
 }
 

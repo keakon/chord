@@ -171,7 +171,7 @@ func (a *MainAgent) stopCompactionForSessionSwitch() bool {
 		cleanupOrphanCompactionFiles(readyDraft.AbsHistoryPath)
 		a.resetCompactionState()
 		a.emitActivity("main", ActivityIdle, "")
-		a.emitToTUI(CompactionStatusEvent{Status: "cancelled"})
+		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusCancelled})
 		return true
 	}
 

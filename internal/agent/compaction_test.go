@@ -29,11 +29,142 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+func TestCompactionProgressReporterUsesTransportProgressAndAccumulatesAttempts(t *testing.T) {
+	reporter := newCompactionProgressReporter(nil)
+	if reporter.update(message.StreamDelta{Type: message.StreamDeltaText, Text: "abc"}) {
+		t.Fatal("content delta should not count as transport progress")
+	}
+	if reporter.bytes != 0 || reporter.events != 0 {
+		t.Fatalf("content progress = %d/%d, want 0/0", reporter.bytes, reporter.events)
+	}
+
+	if !reporter.update(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: 12, Events: 2}}) {
+		t.Fatal("transport progress should update the reporter")
+	}
+	if reporter.bytes != 12 || reporter.events != 2 {
+		t.Fatalf("transport progress = %d/%d, want 12/2", reporter.bytes, reporter.events)
+	}
+	if reporter.update(message.StreamDelta{Type: message.StreamDeltaText, Text: "must not double count"}) {
+		t.Fatal("content delta should be ignored after transport progress starts")
+	}
+
+	reporter.update(message.StreamDelta{
+		Type:   message.StreamDeltaStatus,
+		Status: &message.StatusDelta{Type: "retrying_key"},
+	})
+	if !reporter.update(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: 4, Events: 1}}) {
+		t.Fatal("a restarted attempt should update accumulated progress")
+	}
+	if reporter.bytes != 16 || reporter.events != 3 {
+		t.Fatalf("accumulated retry progress = %d/%d, want 16/3", reporter.bytes, reporter.events)
+	}
+}
+
+func TestCompactionEndpointWaitsForLLMGovernor(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.governor = newResourceGovernor(config.OrchestrationConfig{MaxActiveLLMRequests: 1})
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	client := llm.NewClient(providerCfg, stubProvider{}, "test-model", 1024, "")
+
+	release, err := a.governor.acquireLLM(context.Background(), client.PrimaryModelRef())
+	if err != nil {
+		t.Fatalf("acquire test LLM slot: %v", err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, _, err := a.callCompactionEndpoint(context.Background(), client, "sample/test-model", "prompt", nil)
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		release()
+		t.Fatalf("compaction endpoint bypassed the LLM governor: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	release()
+
+	select {
+	case <-result:
+	case <-time.After(time.Second):
+		t.Fatal("compaction endpoint did not proceed after the LLM slot was released")
+	}
+}
+
+func TestCompactionProgressReporterUsesRequestProgressThrottle(t *testing.T) {
+	reporter := newCompactionProgressReporter(nil)
+	now := time.Unix(100, 0)
+
+	reporter.update(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: 10, Events: 1}})
+	if !reporter.emitIfDue(now) {
+		t.Fatal("first progress update should emit")
+	}
+	reporter.update(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: 20, Events: 2}})
+	if reporter.emitIfDue(now.Add(50 * time.Millisecond)) {
+		t.Fatal("progress before the shared minimum interval should not emit")
+	}
+	if !reporter.emitIfDue(now.Add(requestProgressEmitMinInterval)) {
+		t.Fatal("progress at the shared minimum interval should emit")
+	}
+}
+
+func TestCompactionKeepAliveEmitsActivityAndStops(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+
+	k := newCompactionKeepAlive(a)
+	defer k.Stop()
+
+	// A single beat must surface as a compacting activity event so external
+	// control planes observing activity envelopes keep refreshing during a
+	// silent compaction request.
+	k.tick()
+	found := false
+	for _, event := range drainAgentEvents(a.outputCh) {
+		activity, ok := event.(AgentActivityEvent)
+		if !ok {
+			continue
+		}
+		if activity.AgentID != "main" || activity.Type != ActivityCompacting || activity.Detail != "context" {
+			t.Fatalf("keep-alive activity = %+v, want main/compacting/context", activity)
+		}
+		found = true
+		break
+	}
+	if !found {
+		t.Fatal("keep-alive tick emitted no compacting activity event")
+	}
+
+	// Stop must be idempotent and release the run goroutine.
+	k.Stop()
+	select {
+	case <-k.done:
+	default:
+		t.Fatal("keep-alive run goroutine still running after Stop")
+	}
+	k.Stop()
+}
+
+func TestCompactionProgressReporterInfersAttemptFromTransportReset(t *testing.T) {
+	reporter := newCompactionProgressReporter(nil)
+	reporter.update(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: 12, Events: 2}})
+	reporter.update(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: 4, Events: 1}})
+
+	if reporter.bytes != 16 || reporter.events != 3 {
+		t.Fatalf("inferred retry progress = %d/%d, want 16/3", reporter.bytes, reporter.events)
+	}
+}
+
 type countingCompactionProvider struct {
 	calls         int
 	compactCalls  int
 	invalidations []string
 	tunings       []llm.RequestTuning
+	progress      []message.StreamProgressDelta
 	response      *message.Response
 	responses     []*message.Response
 	err           error
@@ -54,10 +185,15 @@ func (p *countingCompactionProvider) CompleteStream(
 	_ []message.ToolDefinition,
 	_ int,
 	tuning llm.RequestTuning,
-	_ llm.StreamCallback,
+	cb llm.StreamCallback,
 ) (*message.Response, error) {
 	p.calls++
 	p.tunings = append(p.tunings, tuning)
+	for _, progress := range p.progress {
+		if cb != nil {
+			cb(message.StreamDelta{Progress: &progress})
+		}
+	}
 	if p.err != nil {
 		return nil, p.err
 	}
@@ -102,8 +238,14 @@ func (p *countingCompactionProvider) Compact(
 	_ []message.ToolDefinition,
 	_ int,
 	_ llm.RequestTuning,
+	cb llm.StreamCallback,
 ) (*message.Response, error) {
 	p.compactCalls++
+	for _, progress := range p.progress {
+		if cb != nil {
+			cb(message.StreamDelta{Progress: &progress})
+		}
+	}
 	if p.err != nil {
 		return nil, p.err
 	}
@@ -3832,15 +3974,22 @@ func TestHandleCompactionReadyEmitsIdleActivityOnCompletion(t *testing.T) {
 
 	events := drainAgentEvents(a.Events())
 	foundIdle := false
+	foundSkipped := false
 	for _, evt := range events {
 		act, ok := evt.(AgentActivityEvent)
 		if ok && act.AgentID == "main" && act.Type == ActivityIdle {
 			foundIdle = true
-			break
+		}
+		status, ok := evt.(CompactionStatusEvent)
+		if ok && status.Status == CompactionStatusSkipped {
+			foundSkipped = true
 		}
 	}
 	if !foundIdle {
 		t.Fatalf("expected ActivityIdle after compaction ready, got %#v", events)
+	}
+	if !foundSkipped {
+		t.Fatalf("expected skipped compaction status after no-op compaction, got %#v", events)
 	}
 }
 
@@ -4017,10 +4166,13 @@ func TestSummarizeCompactionHeadRetriesInvalidSummaryOnce(t *testing.T) {
 			},
 		},
 	}, []string{"test-key"})
-	provider := &countingCompactionProvider{responses: []*message.Response{
-		{Content: "too short"},
-		{Content: validCompactionSummaryForTest("history-1.md")},
-	}}
+	provider := &countingCompactionProvider{
+		progress: []message.StreamProgressDelta{{Bytes: 128, Events: 2}},
+		responses: []*message.Response{
+			{Content: "too short"},
+			{Content: validCompactionSummaryForTest("history-1.md")},
+		},
+	}
 	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
 	a.llmClient = client
 
@@ -4037,6 +4189,19 @@ func TestSummarizeCompactionHeadRetriesInvalidSummaryOnce(t *testing.T) {
 	}
 	if !strings.Contains(summary, "history-1.md") {
 		t.Fatalf("summary should contain archive reference, got:\n%s", summary)
+	}
+	var progress []CompactionStatusEvent
+	for _, event := range drainAgentEvents(a.outputCh) {
+		if event, ok := event.(CompactionStatusEvent); ok && event.Status == "progress" {
+			progress = append(progress, event)
+		}
+	}
+	if len(progress) == 0 {
+		t.Fatal("repair emitted no compaction progress events")
+	}
+	last := progress[len(progress)-1]
+	if last.Bytes != 256 || last.Events != 4 {
+		t.Fatalf("repair progress = %#v, want cumulative bytes=256 events=4", last)
 	}
 }
 
@@ -4143,6 +4308,40 @@ func TestSummarizeCompactionHeadUsesGenericBackendWhenCompactionPresetIsGeneric(
 	}
 	if provider.compactCalls != 0 {
 		t.Fatalf("provider Compact calls = %d, want 0", provider.compactCalls)
+	}
+}
+
+func TestGenericCompactionEmitsTransportProgress(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeMessages,
+		Models: map[string]config.ModelConfig{
+			"compact-model": {Limit: config.ModelLimit{Context: 16384, Output: 2048}},
+		},
+	}, []string{"test-key"})
+	provider := &countingCompactionProvider{
+		progress: []message.StreamProgressDelta{{Bytes: 128, Events: 2}, {Bytes: 256, Events: 4}},
+		response: &message.Response{Content: validCompactionSummaryForTest("history-1.md")},
+	}
+	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
+
+	if _, _, err := a.callCompactionSummary(t.Context(), client, "sample/compact-model", "compact this history", newCompactionProgressReporter(a)); err != nil {
+		t.Fatalf("callCompactionSummary() error = %v", err)
+	}
+
+	var progress []CompactionStatusEvent
+	for _, event := range drainAgentEvents(a.outputCh) {
+		if event, ok := event.(CompactionStatusEvent); ok && event.Status == "progress" {
+			progress = append(progress, event)
+		}
+	}
+	if len(progress) < 2 {
+		t.Fatalf("generic compaction progress events = %#v, want at least two updates", progress)
+	}
+	last := progress[len(progress)-1]
+	if last.Bytes != 256 || last.Events != 4 {
+		t.Fatalf("last generic compaction progress = %#v, want bytes=256 events=4", last)
 	}
 }
 

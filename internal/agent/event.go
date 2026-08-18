@@ -481,9 +481,9 @@ type PersistenceHealthEvent struct {
 func (PersistenceHealthEvent) agentEvent() {}
 
 // CompactionStatusEvent drives the TUI background compaction slot precisely.
-// Status is one of: "started", "succeeded", "failed", "cancelled".
-// Bytes/Events are optional and currently reserved for future dedicated
-// compaction-progress wiring.
+// Status is one of the CompactionStatus* constants below.
+// Progress events carry response bytes and stream event counts accumulated
+// across the request attempts made by one compaction task.
 type CompactionStatusEvent struct {
 	Status string
 	Bytes  int64
@@ -491,6 +491,15 @@ type CompactionStatusEvent struct {
 }
 
 func (CompactionStatusEvent) agentEvent() {}
+
+const (
+	CompactionStatusStarted   = "started"
+	CompactionStatusProgress  = "progress"
+	CompactionStatusSucceeded = "succeeded"
+	CompactionStatusSkipped   = "skipped"
+	CompactionStatusFailed    = "failed"
+	CompactionStatusCancelled = "cancelled"
+)
 
 // AgentStartedEvent signals that a delegated SubAgent has started running.
 type AgentStartedEvent struct {

@@ -124,6 +124,17 @@ func TestEmitToTUIControlEventsWaitForSpaceInsteadOfDropping(t *testing.T) {
 			},
 		},
 		{
+			name:  "CompactionSucceeded",
+			event: CompactionStatusEvent{Status: CompactionStatusSucceeded},
+			check: func(t *testing.T, evt AgentEvent) {
+				t.Helper()
+				got, ok := evt.(CompactionStatusEvent)
+				if !ok || got.Status != "succeeded" {
+					t.Fatalf("event = %#v, want succeeded CompactionStatusEvent", evt)
+				}
+			},
+		},
+		{
 			name: "RunningModelChanged",
 			event: RunningModelChangedEvent{
 				AgentID:          "main",
@@ -352,6 +363,24 @@ func TestEmitToTUIStreamEventStillDropsWhenChannelFull(t *testing.T) {
 	case evt := <-a.outputCh:
 		t.Fatalf("unexpected extra event after dropped stream delta: %T", evt)
 	default:
+	}
+}
+
+func TestEmitToTUICompactionProgressStillDropsWhenChannelFull(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	for i := 0; i < cap(a.outputCh); i++ {
+		a.outputCh <- StreamTextEvent{Text: "busy"}
+	}
+
+	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusProgress, Bytes: 10, Events: 1})
+
+	for i := 0; i < cap(a.outputCh); i++ {
+		evt := <-a.outputCh
+		if progress, ok := evt.(CompactionStatusEvent); ok {
+			t.Fatalf("unexpected compaction progress event after full channel: %+v", progress)
+		}
 	}
 }
 

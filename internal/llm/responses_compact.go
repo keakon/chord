@@ -24,8 +24,10 @@ func responsesCompactV2Request(req responsesRequest) responsesRequest {
 	req.Input = append(normalizeResponsesInput(req.Input), responsesInputItem{Type: "compaction_trigger"})
 	req.Tools = normalizeResponsesTools(req.Tools)
 	req.Stream = true
-	// Compact requests do not carry the include list: the backend rewrites
-	// history and returns only the compaction summary.
+	// Compact requests do not retain responses server-side or carry the include
+	// list: the backend rewrites history and returns only the compaction summary.
+	// Keep both fields omitted, matching the official Codex request profile.
+	req.omitStore = true
 	req.omitInclude = true
 	return req
 }
@@ -75,6 +77,7 @@ func (r *ResponsesProvider) Compact(
 	tools []message.ToolDefinition,
 	maxTokens int,
 	tuning RequestTuning,
+	cb StreamCallback,
 ) (*message.Response, error) {
 	if r.provider == nil || !r.provider.IsCodexOAuthTransport() {
 		return nil, fmt.Errorf("responses compact endpoint requires provider preset codex")
@@ -90,18 +93,17 @@ func (r *ResponsesProvider) Compact(
 		return nil, fmt.Errorf("responses compact requires at least one input item")
 	}
 	reqBody := responsesCompactV2Request(responsesRequest{
-		Model:             model,
-		Instructions:      nil,
-		Input:             apiInput,
-		Tools:             convertToolsToResponses(tools),
-		ParallelToolCalls: false,
+		Model:        model,
+		Instructions: nil,
+		Input:        apiInput,
+		Tools:        convertToolsToResponses(tools),
 	})
 	reqBody.Include = nil
 	if strings.TrimSpace(systemPrompt) != "" {
 		reqBody.Instructions = &systemPrompt
 	}
-	if ot.ParallelToolCalls != nil {
-		reqBody.ParallelToolCalls = *ot.ParallelToolCalls
+	if len(reqBody.Tools) > 0 && ot.ParallelToolCalls != nil {
+		reqBody.ParallelToolCalls = ot.ParallelToolCalls
 	}
 	if ot.ServiceTier != "" {
 		reqBody.ServiceTier = ot.ServiceTier
@@ -170,6 +172,31 @@ func (r *ResponsesProvider) Compact(
 		httpResp.Body = gr
 	}
 
+	if cb != nil {
+		headerBytes := responseHeaderBytes(httpResp)
+		cb(message.StreamDelta{
+			Type:   message.StreamDeltaStatus,
+			Status: &message.StatusDelta{Type: message.StatusDeltaWaitingHeaders},
+			Progress: &message.StreamProgressDelta{
+				Bytes: headerBytes,
+			},
+		})
+		// The SSE parser counts body bytes from zero, so rebase each streamed
+		// progress snapshot onto the response-header baseline the first delta
+		// reported. Without this, the first small SSE event (e.g.
+		// response.created) reads as a byte regression against the headers.
+		streamCB := cb
+		cb = func(delta message.StreamDelta) {
+			if delta.Progress != nil {
+				delta.Progress = &message.StreamProgressDelta{
+					Bytes:  headerBytes + delta.Progress.Bytes,
+					Events: delta.Progress.Events,
+				}
+			}
+			streamCB(delta)
+		}
+	}
+
 	if httpResp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxHTTPErrorBodyBytes))
 		io.Copy(io.Discard, httpResp.Body) //nolint:errcheck
@@ -196,7 +223,7 @@ func (r *ResponsesProvider) Compact(
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, r.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
 	collector := NewSSECollector()
-	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, nil, collector, turnState, turnStateIdentity)
+	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, cb, collector, turnState, turnStateIdentity)
 	if dumpWriter != nil {
 		go func() {
 			dump := &LLMDump{
@@ -223,13 +250,6 @@ func (r *ResponsesProvider) Compact(
 		return nil, fmt.Errorf("compact SSE stream produced no response")
 	}
 	summary, err := compactSummaryFromResponsesOutput(resp.ResponsesOutput)
-	if err != nil && resp.Content != "" {
-		// The compaction summary may arrive through resp.Content when the
-		// backend streams the item with content only on the done event;
-		// fall back to it before failing.
-		summary = strings.TrimSpace(resp.Content)
-		err = nil
-	}
 	if err != nil {
 		return nil, err
 	}

@@ -23,6 +23,7 @@ type compactTestCall struct {
 type compactTestProvider struct {
 	mu        sync.Mutex
 	errs      []error
+	progress  []message.StreamProgressDelta
 	response  *message.Response
 	compactAt int
 	calls     []compactTestCall
@@ -67,17 +68,31 @@ func (p *compactTestProvider) Compact(
 	_ []message.ToolDefinition,
 	maxTokens int,
 	tuning RequestTuning,
+	cb StreamCallback,
 ) (*message.Response, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.calls = append(p.calls, compactTestCall{key: apiKey, model: model, maxTokens: maxTokens, tuning: tuning})
+	callIndex := p.compactAt
+	var progress message.StreamProgressDelta
+	if callIndex < len(p.progress) {
+		progress = p.progress[callIndex]
+	}
 	if p.compactAt < len(p.errs) {
 		err := p.errs[p.compactAt]
 		p.compactAt++
+		p.mu.Unlock()
+		if cb != nil && progress != (message.StreamProgressDelta{}) {
+			cb(message.StreamDelta{Progress: &progress})
+		}
 		return nil, err
 	}
 	p.compactAt++
-	return p.response, nil
+	response := p.response
+	p.mu.Unlock()
+	if cb != nil && progress != (message.StreamProgressDelta{}) {
+		cb(message.StreamDelta{Progress: &progress})
+	}
+	return response, nil
 }
 
 func (p *compactTestProvider) callsSnapshot() []compactTestCall {
@@ -111,7 +126,7 @@ func TestClientCompactTriesEveryTargetKeyBeforeFallback(t *testing.T) {
 		MaxTokens:      256,
 	}})
 
-	resp, err := client.Compact(context.Background(), []message.Message{{Role: message.RoleUser, Content: "compact"}}, nil)
+	resp, err := client.Compact(context.Background(), []message.Message{{Role: message.RoleUser, Content: "compact"}}, nil, nil)
 	if err != nil {
 		t.Fatalf("Compact() error = %v", err)
 	}
@@ -132,11 +147,37 @@ func TestClientCompactTriesEveryTargetKeyBeforeFallback(t *testing.T) {
 	if got := client.RunningModelRef(); got != "fallback/model-2" {
 		t.Fatalf("running model ref = %q, want fallback/model-2", got)
 	}
-	if _, err := client.Compact(context.Background(), []message.Message{{Role: message.RoleUser, Content: "compact again"}}, nil); err != nil {
+	if _, err := client.Compact(context.Background(), []message.Message{{Role: message.RoleUser, Content: "compact again"}}, nil, nil); err != nil {
 		t.Fatalf("second Compact() error = %v", err)
 	}
 	if got := len(primary.callsSnapshot()); got != 2 {
 		t.Fatalf("primary compact calls after fallback success = %d, want cursor pinned at fallback", got)
+	}
+}
+
+func TestClientCompactSignalsRetryBoundaryBeforeNextAttempt(t *testing.T) {
+	providerConfig := newCompactTestProviderConfig("provider", "model", []string{"key-1", "key-2"})
+	provider := &compactTestProvider{
+		errs:     []error{&APIError{StatusCode: 500, Message: "temporary failure"}},
+		progress: []message.StreamProgressDelta{{Bytes: 12, Events: 2}, {Bytes: 4, Events: 1}},
+		response: &message.Response{Content: "summary"},
+	}
+	client := NewClient(providerConfig, provider, "model", 512, "system")
+
+	var deltas []message.StreamDelta
+	if _, err := client.Compact(
+		context.Background(),
+		[]message.Message{{Role: message.RoleUser, Content: "compact"}},
+		nil,
+		func(delta message.StreamDelta) { deltas = append(deltas, delta) },
+	); err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if len(deltas) != 3 {
+		t.Fatalf("callback deltas = %#v, want progress, retrying, progress", deltas)
+	}
+	if deltas[0].Progress == nil || deltas[1].Status == nil || deltas[1].Status.Type != "retrying" || deltas[2].Progress == nil {
+		t.Fatalf("callback deltas = %#v, want progress, retrying, progress", deltas)
 	}
 }
 
@@ -152,7 +193,7 @@ func TestClientCompactSkipsUnsupportedCurrentTarget(t *testing.T) {
 		MaxTokens:      256,
 	}})
 
-	resp, err := client.Compact(context.Background(), []message.Message{{Role: message.RoleUser, Content: "compact"}}, nil)
+	resp, err := client.Compact(context.Background(), []message.Message{{Role: message.RoleUser, Content: "compact"}}, nil, nil)
 	if err != nil {
 		t.Fatalf("Compact() error = %v", err)
 	}
@@ -209,7 +250,7 @@ func TestClientCompactRetriesRefreshedOAuthKey(t *testing.T) {
 	}
 	client := NewClient(providerConfig, provider, "model", 512, "system")
 
-	if _, err := client.Compact(context.Background(), []message.Message{{Role: message.RoleUser, Content: "compact"}}, nil); err != nil {
+	if _, err := client.Compact(context.Background(), []message.Message{{Role: message.RoleUser, Content: "compact"}}, nil, nil); err != nil {
 		t.Fatalf("Compact() error = %v", err)
 	}
 	calls := provider.callsSnapshot()
@@ -226,7 +267,7 @@ func TestClientCompactCoolsRateLimitedKeyBeforeRetry(t *testing.T) {
 	}
 	client := NewClient(providerConfig, provider, "model", 512, "system")
 
-	if _, err := client.Compact(context.Background(), []message.Message{{Role: message.RoleUser, Content: "compact"}}, nil); err != nil {
+	if _, err := client.Compact(context.Background(), []message.Message{{Role: message.RoleUser, Content: "compact"}}, nil, nil); err != nil {
 		t.Fatalf("Compact() error = %v", err)
 	}
 	calls := provider.callsSnapshot()
@@ -254,7 +295,7 @@ func TestClientCompactPreservesActiveVariantTuning(t *testing.T) {
 	client := NewClient(providerConfig, provider, "model", 512, "system")
 	client.SetVariant("high")
 
-	if _, err := client.Compact(context.Background(), []message.Message{{Role: message.RoleUser, Content: "compact"}}, nil); err != nil {
+	if _, err := client.Compact(context.Background(), []message.Message{{Role: message.RoleUser, Content: "compact"}}, nil, nil); err != nil {
 		t.Fatalf("Compact() error = %v", err)
 	}
 	calls := provider.callsSnapshot()

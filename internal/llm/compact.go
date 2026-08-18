@@ -22,6 +22,7 @@ type CompactProvider interface {
 		tools []message.ToolDefinition,
 		maxTokens int,
 		tuning RequestTuning,
+		cb StreamCallback,
 	) (*message.Response, error)
 }
 
@@ -53,6 +54,7 @@ func (c *Client) Compact(
 	ctx context.Context,
 	messages []message.Message,
 	tools []message.ToolDefinition,
+	cb StreamCallback,
 ) (*message.Response, error) {
 	if c == nil {
 		return nil, fmt.Errorf("compact client is nil")
@@ -72,7 +74,7 @@ func (c *Client) Compact(
 	systemPrompt := c.systemPrompt
 	c.mu.Unlock()
 
-	resp, runningOffset, err := c.compactWithFallback(ctx, orderedPool, systemPrompt, messages, tools)
+	resp, runningOffset, err := c.compactWithFallback(ctx, orderedPool, systemPrompt, messages, tools, cb)
 	if err != nil {
 		return nil, err
 	}
@@ -105,8 +107,12 @@ func (c *Client) compactWithFallback(
 	systemPrompt string,
 	messages []message.Message,
 	tools []message.ToolDefinition,
+	cb StreamCallback,
 ) (*message.Response, int, error) {
-	var lastErr error
+	var (
+		lastErr        error
+		requestStarted bool
+	)
 	for targetIndex, target := range pool {
 		if target.ProviderConfig == nil || target.ProviderImpl == nil {
 			continue
@@ -132,7 +138,17 @@ func (c *Client) compactWithFallback(
 				}
 				break
 			}
-			resp, err := cp.Compact(ctx, key, target.ModelID, systemPrompt, messages, tools, target.MaxTokens, targetTuning)
+			if requestStarted && cb != nil {
+				cb(message.StreamDelta{
+					Type: message.StreamDeltaStatus,
+					Status: &message.StatusDelta{
+						Type:   "retrying",
+						Detail: "compact endpoint",
+					},
+				})
+			}
+			requestStarted = true
+			resp, err := cp.Compact(ctx, key, target.ModelID, systemPrompt, messages, tools, target.MaxTokens, targetTuning, cb)
 			if err == nil {
 				target.ProviderConfig.MarkKeySuccess(key)
 				target.ProviderConfig.WakeCodexRateLimitPolling()
