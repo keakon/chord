@@ -134,7 +134,8 @@ func TestOpenAIProvider_SuppressesForcedToolChoiceUnderThinking(t *testing.T) {
 			_, err := o.CompleteStream(
 				context.Background(), "test-key", "test-model", "",
 				[]message.Message{{Role: "user", Content: "hello"}},
-				nil, 128, tc.tuning,
+				[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}},
+				128, tc.tuning,
 				func(message.StreamDelta) {},
 			)
 			if err != nil {

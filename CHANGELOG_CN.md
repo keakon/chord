@@ -60,6 +60,7 @@
 - 每一种任务终态转移现在都经由同一 journal 路径结算：取消、过期与停止的任务都会留下一致的持久化 settlement，而不是仅翻转记录状态。
 - 验证声明不再因 epoch 间隙被拒绝：最新声明的命令必须覆盖当前 workspace epoch，较早声明的命令则可以来自更早的 epoch。这样既继续阻止过期验证，又不会误拒绝 lint 加 test 这类真实的多命令声明。
 - 流事件的回放拒绝现在以事件实际携带的 status 为准：没有显式 HTTP status 的 SSE 事件保持可重试而不被猜测为终态，携带真实 status 的 WebSocket 帧按其分类。
+- 不带工具标记的请求不再发送只对带工具请求有意义的字段。Chat-completions 请求在未声明工具时省略 `parallel_tool_calls` 与 `tool_choice`，Anthropic messages、Gemini generateContent 与普通 Responses 生成请求也相应省略 `tool_choice` / `toolConfig` / `parallel_tool_calls`；原生 Codex 压缩请求继续遵循专用 wire contract。OpenAI 兼容端点在未提供 `tools` 时收到 `parallel_tool_calls` 会返回 HTTP 400，导致 `chord doctor models --model ...` 这类无工具的探测请求失败。
 - 协调用 JSON（agent 请求、任务组、settlement）在 rename 前会 fsync；恢复时遇到损坏文件会隔离并重建，而不是中止恢复或向坏文件续写。
 - 用量账本扫描现在容忍其他版本写入的 `usage.jsonl` 行中的未知字段与空 event id，不再丢弃整个账本。
 - 从渲染输出重新解析的 LSP 诊断会与服务器推送的诊断去重；服务器为已 review 的文件推送更新时，review 计数也会刷新，侧栏不再显示过期或翻倍的数字。

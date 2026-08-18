@@ -509,10 +509,46 @@ func testCodexWSResponsesRequest(model string, input []responsesInputItem) *resp
 		Model:             model,
 		Input:             input,
 		ToolChoice:        "auto",
-		ParallelToolCalls: true,
+		ParallelToolCalls: new(true),
 		Store:             false,
 		Stream:            true,
 		Include:           []string{},
+	}
+}
+
+func TestCompleteStreamCodexWebSocketOmitsToolOnlyFieldsWithoutTools(t *testing.T) {
+	srv := newCodexWSCaptureServer(t, []string{"resp-1"})
+	defer srv.Close()
+
+	r := &ResponsesProvider{sessionID: "session-123"}
+	input := []responsesInputItem{{Type: "message", Role: "user", Content: "hello"}}
+	req := &responsesRequest{
+		Model:   "sample/test-model",
+		Input:   input,
+		Store:   false,
+		Stream:  true,
+		Include: []string{},
+	}
+
+	if _, _, err := r.completeStreamCodexWebSocket(
+		context.Background(), srv.ResponsesURL(), "key-1", "sample/test-model", req, input, nil, time.Now(), codexWSCompleteOptions{SkipPrewarm: true},
+	); err != nil {
+		t.Fatalf("completeStreamCodexWebSocket: %v", err)
+	}
+
+	requests := srv.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("captured %d requests, want 1", len(requests))
+	}
+	body := requests[0]
+	if _, ok := body["tool_choice"]; ok {
+		t.Fatalf("tool_choice = %#v, want omitted without tools", body["tool_choice"])
+	}
+	if _, ok := body["parallel_tool_calls"]; ok {
+		t.Fatalf("parallel_tool_calls = %#v, want omitted without tools", body["parallel_tool_calls"])
+	}
+	if tools, ok := body["tools"].([]any); !ok || len(tools) != 0 {
+		t.Fatalf("tools = %#v, want empty array", body["tools"])
 	}
 }
 

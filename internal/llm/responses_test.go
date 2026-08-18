@@ -1765,7 +1765,7 @@ func TestResponsesProvider_SendsIncludeToolChoiceAndReasoning(t *testing.T) {
 	_, err := r.CompleteStream(
 		context.Background(), "test-key", "gpt-5.5", "",
 		[]message.Message{{Role: "user", Content: "hello"}},
-		nil, 0, tuning,
+		[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}}, 0, tuning,
 		func(message.StreamDelta) {},
 	)
 	if err != nil {
@@ -1866,7 +1866,7 @@ func TestResponsesProvider_CompatTogglesDefaultsKeepStableShape(t *testing.T) {
 	_, err := r.CompleteStream(
 		context.Background(), "test-key", "gpt-5.5", "",
 		[]message.Message{{Role: "user", Content: "hello"}},
-		nil, 128, RequestTuning{},
+		[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}}, 128, RequestTuning{},
 		func(message.StreamDelta) {},
 	)
 	if err != nil {
@@ -1927,11 +1927,11 @@ func TestResponsesProvider_IncludeAlwaysSerialized(t *testing.T) {
 	if !ok || len(inc) != 1 || inc[0] != responsesEncryptedReasoningInclude {
 		t.Fatalf("include = %#v, want [%q]", gotBody["include"], responsesEncryptedReasoningInclude)
 	}
-	if got := gotBody["tool_choice"]; got != "auto" {
-		t.Fatalf("tool_choice = %#v, want auto", got)
+	if _, has := gotBody["tool_choice"]; has {
+		t.Fatalf("tool_choice should be omitted without tools, got %#v", gotBody["tool_choice"])
 	}
-	if got := gotBody["parallel_tool_calls"]; got != true {
-		t.Fatalf("parallel_tool_calls = %#v, want true", got)
+	if _, has := gotBody["parallel_tool_calls"]; has {
+		t.Fatalf("parallel_tool_calls should be omitted without tools, got %#v", gotBody["parallel_tool_calls"])
 	}
 	if got := gotBody["store"]; got != false {
 		t.Fatalf("store = %#v, want false", got)
@@ -3465,7 +3465,7 @@ func TestResponsesProvider_SuppressesForcedToolChoiceUnderThinking(t *testing.T)
 			_, err := r.CompleteStream(
 				context.Background(), "test-key", "test-model", "",
 				[]message.Message{{Role: "user", Content: "hello"}},
-				nil, 0, tc.tuning,
+				[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}}, 0, tc.tuning,
 				func(message.StreamDelta) {},
 			)
 			if err != nil {

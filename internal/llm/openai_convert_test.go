@@ -362,8 +362,8 @@ func TestOpenAICompleteStream_GLMPreservedContinuityAddsThinkingAndUsesMaxTokens
 	if first["reasoning_content"] != "preserved reasoning" {
 		t.Fatalf("reasoning_content = %#v, want preserved reasoning", first["reasoning_content"])
 	}
-	if gotBody["parallel_tool_calls"] != true {
-		t.Fatalf("parallel_tool_calls = %#v, want true", gotBody["parallel_tool_calls"])
+	if _, ok := gotBody["parallel_tool_calls"]; ok {
+		t.Fatalf("parallel_tool_calls should be omitted without tools, got %#v", gotBody["parallel_tool_calls"])
 	}
 	if gotBody["reasoning_effort"] != "max" {
 		t.Fatalf("reasoning_effort = %#v, want max", gotBody["reasoning_effort"])
@@ -666,5 +666,66 @@ func TestOpenAICompleteStream_FillsCurrentTurnEmptyReasoningEvenWhenDisabled(t *
 				t.Fatalf("reasoning_content field present = %v, want %v (body %#v)", sawField, tc.wantField, gotBody)
 			}
 		})
+	}
+}
+
+func TestOpenAICompleteStream_ToolOnlyFieldsGatedOnTools(t *testing.T) {
+	var gotBodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(data, &body); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		gotBodies = append(gotBodies, body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewProviderConfig("sample", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		APIURL: server.URL,
+	}, []string{"test-key"})
+	r, err := NewOpenAIProviderWithClient(provider, server.Client(), "")
+	if err != nil {
+		t.Fatalf("NewOpenAIProviderWithClient: %v", err)
+	}
+
+	// No tools: parallel_tool_calls and tool_choice must be omitted even when
+	// explicitly tuned, or OpenAI-compatible endpoints reject the body with 400.
+	_, err = r.CompleteStream(
+		context.Background(), "test-key", "test-model",
+		"", []message.Message{{Role: message.RoleUser, Content: "hello"}},
+		nil, 0,
+		RequestTuning{OpenAI: OpenAITuning{ParallelToolCalls: new(false), ToolChoice: "required"}},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream without tools: %v", err)
+	}
+	if _, ok := gotBodies[0]["parallel_tool_calls"]; ok {
+		t.Fatalf("parallel_tool_calls should be omitted without tools, got %#v", gotBodies[0]["parallel_tool_calls"])
+	}
+	if _, ok := gotBodies[0]["tool_choice"]; ok {
+		t.Fatalf("tool_choice should be omitted without tools, got %#v", gotBodies[0]["tool_choice"])
+	}
+
+	// With tools: default parallel_tool_calls stays true.
+	_, err = r.CompleteStream(
+		context.Background(), "test-key", "test-model",
+		"", []message.Message{{Role: message.RoleUser, Content: "hello"}},
+		[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}},
+		0, RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream with tools: %v", err)
+	}
+	if gotBodies[1]["parallel_tool_calls"] != true {
+		t.Fatalf("parallel_tool_calls = %#v, want true with tools", gotBodies[1]["parallel_tool_calls"])
 	}
 }

@@ -112,7 +112,7 @@ type openAIRequest struct {
 	Messages            []openAIMessage      `json:"messages"`
 	Tools               []openAITool         `json:"tools,omitempty"`
 	ToolChoice          string               `json:"tool_choice,omitempty"`
-	ParallelToolCalls   bool                 `json:"parallel_tool_calls"`
+	ParallelToolCalls   *bool                `json:"parallel_tool_calls,omitempty"`
 	MaxTokens           int                  `json:"max_tokens,omitempty"`
 	MaxCompletionTokens int                  `json:"max_completion_tokens,omitempty"`
 	Stream              bool                 `json:"stream"`
@@ -334,14 +334,21 @@ func (o *OpenAIProvider) CompleteStream(
 	// Build request body.
 	url := o.provider.APIURL()
 	reqBody := openAIRequest{
-		Model:             model,
-		Messages:          apiMessages,
-		Tools:             apiTools,
-		ParallelToolCalls: true,
-		Stream:            true,
+		Model:    model,
+		Messages: apiMessages,
+		Tools:    apiTools,
+		Stream:   true,
 	}
-	if ot.ParallelToolCalls != nil {
-		reqBody.ParallelToolCalls = *ot.ParallelToolCalls
+	// parallel_tool_calls and tool_choice are only valid when tools are
+	// declared (OpenAI rejects them with 400 otherwise). Probe-style requests
+	// like `chord doctor models` send no tools, so omit both. With tools
+	// present, an explicit tuning override wins, otherwise default to true.
+	if len(apiTools) > 0 {
+		if ot.ParallelToolCalls != nil {
+			reqBody.ParallelToolCalls = ot.ParallelToolCalls
+		} else {
+			reqBody.ParallelToolCalls = new(true)
+		}
 	}
 	suppressForcedToolChoice := false
 	if ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(o.provider, model) {
@@ -355,7 +362,7 @@ func (o *OpenAIProvider) CompleteStream(
 			return nil, err
 		}
 	}
-	if ot.ToolChoice != "" && !suppressForcedToolChoice {
+	if ot.ToolChoice != "" && !suppressForcedToolChoice && len(apiTools) > 0 {
 		reqBody.ToolChoice = ot.ToolChoice
 	}
 	// Request usage stats in the final streaming chunk.

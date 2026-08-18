@@ -97,8 +97,8 @@ type codexWSResponseCreate struct {
 	Instructions      *string              `json:"instructions,omitempty"`
 	Input             []responsesInputItem `json:"input"`
 	Tools             []responsesTool      `json:"tools"`
-	ToolChoice        string               `json:"tool_choice"`
-	ParallelToolCalls bool                 `json:"parallel_tool_calls"`
+	ToolChoice        string               `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool                `json:"parallel_tool_calls,omitempty"`
 	Store             bool                 `json:"store"`
 	Generate          *bool                `json:"generate,omitempty"`
 	Stream            bool                 `json:"stream"`
@@ -725,7 +725,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 			Instructions:      req.Instructions,
 			Input:             fullInput,
 			Tools:             req.Tools,
-			ToolChoice:        "auto",
+			ToolChoice:        req.ToolChoice,
 			ParallelToolCalls: req.ParallelToolCalls,
 			Store:             req.Store,
 			Generate:          &generate,

@@ -139,7 +139,7 @@ func TestResponsesProvider_OpenAIOAuthUsesCodexHeadersAndBody(t *testing.T) {
 		"gpt-5.5",
 		"system prompt",
 		[]message.Message{{Role: "user", Content: "hello"}},
-		nil,
+		[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}},
 		128,
 		RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "xhigh", TextVerbosity: "medium"}},
 		func(message.StreamDelta) {},
@@ -401,17 +401,19 @@ func TestOpenAIProvider_OpenAIOAuthDelegatesToResponses(t *testing.T) {
 	}
 }
 
-func TestResponsesProvider_OpenAIOAuthSendsParallelToolCallsWhenConfigured(t *testing.T) {
-	var gotBody map[string]any
+func TestResponsesProvider_ToolOnlyFieldsGatedOnTools(t *testing.T) {
+	var gotBodies []map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}
-		if err := json.Unmarshal(data, &gotBody); err != nil {
+		var body map[string]any
+		if err := json.Unmarshal(data, &body); err != nil {
 			t.Fatalf("unmarshal request body: %v", err)
 		}
+		gotBodies = append(gotBodies, body)
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
@@ -419,24 +421,73 @@ func TestResponsesProvider_OpenAIOAuthSendsParallelToolCallsWhenConfigured(t *te
 
 	provider, accessToken := newOpenAITestOAuthProvider(t, server.URL+"/v1/responses")
 	r := &ResponsesProvider{provider: provider, client: server.Client()}
+	tools := []message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}}
 
+	// No tools: tool-only fields must be omitted even when explicitly tuned,
+	// or OpenAI-compatible /responses endpoints reject the body.
 	_, err := r.CompleteStream(
 		context.Background(),
 		accessToken,
-		"gpt-5.5",
+		"test-model",
 		"system prompt",
 		[]message.Message{{Role: "user", Content: "hello"}},
 		nil,
+		128,
+		RequestTuning{OpenAI: OpenAITuning{ParallelToolCalls: new(false), ToolChoice: "required"}},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream without tools: %v", err)
+	}
+	if _, ok := gotBodies[0]["parallel_tool_calls"]; ok {
+		t.Fatalf("parallel_tool_calls should be omitted without tools, got %#v", gotBodies[0]["parallel_tool_calls"])
+	}
+	if _, ok := gotBodies[0]["tool_choice"]; ok {
+		t.Fatalf("tool_choice should be omitted without tools, got %#v", gotBodies[0]["tool_choice"])
+	}
+	if tools, ok := gotBodies[0]["tools"].([]any); !ok || len(tools) != 0 {
+		t.Fatalf("tools should serialize as an empty array without tools, got %#v", gotBodies[0]["tools"])
+	}
+
+	// With tools and no tuning: parallel_tool_calls defaults to true.
+	_, err = r.CompleteStream(
+		context.Background(),
+		accessToken,
+		"test-model",
+		"system prompt",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		tools,
+		128,
+		RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream with tools: %v", err)
+	}
+	if gotBodies[1]["parallel_tool_calls"] != true {
+		t.Fatalf("parallel_tool_calls = %#v, want true with tools", gotBodies[1]["parallel_tool_calls"])
+	}
+	if gotBodies[1]["tool_choice"] != "auto" {
+		t.Fatalf("tool_choice = %#v, want auto with tools", gotBodies[1]["tool_choice"])
+	}
+
+	// With tools and an explicit override: the tuning value wins.
+	_, err = r.CompleteStream(
+		context.Background(),
+		accessToken,
+		"test-model",
+		"system prompt",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		tools,
 		128,
 		RequestTuning{OpenAI: OpenAITuning{ParallelToolCalls: new(false)}},
 		func(message.StreamDelta) {},
 	)
 	if err != nil {
-		t.Fatalf("CompleteStream returned error: %v", err)
+		t.Fatalf("CompleteStream with tools and override: %v", err)
 	}
-
-	if gotBody["parallel_tool_calls"] != false {
-		t.Fatalf("expected parallel_tool_calls=false, got %#v", gotBody["parallel_tool_calls"])
+	if gotBodies[2]["parallel_tool_calls"] != false {
+		t.Fatalf("parallel_tool_calls = %#v, want false with explicit override", gotBodies[2]["parallel_tool_calls"])
 	}
 }
 

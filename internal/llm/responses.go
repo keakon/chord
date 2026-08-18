@@ -106,7 +106,7 @@ type responsesRequest struct {
 	Input              []responsesInputItem `json:"input"`
 	Tools              []responsesTool      `json:"tools"`
 	ToolChoice         string               `json:"tool_choice,omitempty"`
-	ParallelToolCalls  bool                 `json:"parallel_tool_calls"`
+	ParallelToolCalls  *bool                `json:"parallel_tool_calls,omitempty"`
 	ServiceTier        string               `json:"service_tier,omitempty"`
 	Reasoning          *reasoningConfig     `json:"reasoning,omitempty"`
 	Text               *textConfig          `json:"text,omitempty"`
@@ -443,21 +443,30 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 
 	reqBody := responsesRequest{
-		Model:             model,
-		Tools:             apiTools,
-		ParallelToolCalls: true,
-		Store:             store,
-		Stream:            true,
-		Include:           []string{},
+		Model:   model,
+		Tools:   apiTools,
+		Store:   store,
+		Stream:  true,
+		Include: []string{},
+	}
+	// Tool-only fields are rejected by some Responses-compatible relays when
+	// no tools are declared. Mirror the chat-completions gating: with tools
+	// present, an explicit tuning override wins, otherwise default to true.
+	if len(apiTools) > 0 {
+		if ot.ParallelToolCalls != nil {
+			reqBody.ParallelToolCalls = ot.ParallelToolCalls
+		} else {
+			reqBody.ParallelToolCalls = new(true)
+		}
+		if compatBool(sendToolChoice, true) {
+			reqBody.ToolChoice = "auto"
+		}
+		if ot.ToolChoice != "" && !(ot.ToolChoice == "required" && reasoningActive && forcedToolChoiceSuppressed) {
+			reqBody.ToolChoice = ot.ToolChoice
+		}
 	}
 	reqBody.omitStore = !compatBool(sendStore, true)
 	reqBody.omitInclude = !compatBool(sendReasoningInclude, true)
-	if compatBool(sendToolChoice, true) {
-		reqBody.ToolChoice = "auto"
-	}
-	if ot.ToolChoice != "" && !(ot.ToolChoice == "required" && reasoningActive && forcedToolChoiceSuppressed) {
-		reqBody.ToolChoice = ot.ToolChoice
-	}
 	reqBody.Input = fullInput
 	if r.sessionID != "" && compatBool(sendPromptCacheKey, true) {
 		reqBody.PromptCacheKey = r.sessionID
@@ -472,9 +481,6 @@ func (r *ResponsesProvider) CompleteStream(
 	if systemPrompt != "" {
 		instructions := systemPrompt
 		reqBody.Instructions = &instructions
-	}
-	if ot.ParallelToolCalls != nil {
-		reqBody.ParallelToolCalls = *ot.ParallelToolCalls
 	}
 
 	if maxTokens > 0 {

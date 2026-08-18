@@ -205,7 +205,7 @@ func (a *AnthropicProvider) CompleteStream(
 		Tools:     apiTools,
 		Stream:    true,
 	}
-	if at.ToolChoice != "" {
+	if at.ToolChoice != "" && len(apiTools) > 0 {
 		// Extended thinking is incompatible with forced tool use: Anthropic
 		// returns 400 for tool_choice "any"/"tool" when thinking is
 		// enabled/adaptive. "auto" stays valid, so only the forced choice is

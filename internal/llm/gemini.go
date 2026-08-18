@@ -195,11 +195,14 @@ func (g *GeminiProvider) CompleteStream(
 	traceCB := traceCollector.Callback
 	contents := convertMessagesToGemini(messages)
 	ensureGeminiActiveLoopSignatures(contents, model)
+	// Tool config is only valid while tools are declared (Gemini rejects
+	// toolConfig without function declarations).
+	apiTools := convertToolsToGemini(tools)
 	reqBody := geminiRequest{
 		Contents: contents,
-		Tools:    convertToolsToGemini(tools),
+		Tools:    apiTools,
 	}
-	if tuning.Gemini.ToolChoice != "" {
+	if len(apiTools) > 0 && tuning.Gemini.ToolChoice != "" {
 		reqBody.ToolConfig = geminiToolConfigFromTuning(tuning.Gemini.ToolChoice)
 	}
 	if systemPrompt != "" {
