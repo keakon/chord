@@ -30,6 +30,7 @@ func (a *MainAgent) buildSystemPrompt() string {
 	// injected via the session-context reminder before the first user message to
 	// keep the system prompt fully static and maximize prefix cache reuse.
 	parts = append(parts, sharedCodingGuidelinesPrompt)
+	parts = append(parts, sharedReasoningDisciplinePrompt)
 	if block := a.lspDiagnosticPromptBlock(); block != "" {
 		parts = append(parts, block)
 	}

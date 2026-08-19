@@ -77,6 +77,15 @@ var (
 	subAgentCodingGuidelinesPrompt = codingGuidelinesPrompt(capabilityPromptAudienceSub)
 )
 
+// sharedReasoningDisciplinePrompt governs the reasoning trace itself: what stays
+// active while working, and when a conclusion must be preceded by its evidence.
+// Verification depth, completion claims, and narration are owned by the values,
+// coding-guidelines, and communication blocks — restating them here would give
+// those rules a second source that can drift.
+const sharedReasoningDisciplinePrompt = `## Reasoning Discipline
+- Selectivity: keep only the next one or two decisions active; use existing task state or notes when they materially help, and do not create external artifacts solely for ephemeral thoughts
+- Evidence before conclusion: for multi-step or high-stakes work, state concise evidence or rationale supporting a conclusion before it; skip this for routine work`
+
 const mainAgentCommunicationPrompt = `## User Communication
 - Before substantial work, briefly tell the user what you are about to do
 - Group related upcoming actions into one short preamble instead of narrating each tool call separately

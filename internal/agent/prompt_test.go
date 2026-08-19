@@ -339,6 +339,43 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 	}
 }
 
+// The reasoning-discipline block governs the reasoning trace only. Verification
+// depth, completion claims, and narration are owned by the values and coding
+// guidelines blocks; asserting both halves keeps every rule single-sourced
+// instead of letting a second copy drift away from the original.
+func TestSharedReasoningDisciplinePrompt_ContentAndBoundary(t *testing.T) {
+	got := sharedReasoningDisciplinePrompt
+	for _, want := range []string{
+		"## Reasoning Discipline",
+		"keep only the next one or two decisions active",
+		"use existing task state or notes when they materially help",
+		"do not create external artifacts solely for ephemeral thoughts",
+		"Evidence before conclusion",
+		"state concise evidence or rationale supporting a conclusion",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("sharedReasoningDisciplinePrompt missing %q in %q", want, got)
+		}
+	}
+	for _, owned := range []struct {
+		rule  string
+		owner string
+	}{
+		{"verify claims proportionally to the task and risk", sharedAgentValuesPrompt},
+		{"Match final claims to the requested scope and the evidence actually gathered", sharedCodingGuidelinesPrompt},
+		{"state verification status explicitly", sharedCodingGuidelinesPrompt},
+		{"Do not narrate every routine action", sharedCodingGuidelinesPrompt},
+		{"Do not add a final audit loop", sharedCodingGuidelinesPrompt},
+	} {
+		if !strings.Contains(owned.owner, owned.rule) {
+			t.Fatalf("owning block lost %q, which reasoning discipline deliberately omits", owned.rule)
+		}
+		if strings.Contains(got, owned.rule) {
+			t.Fatalf("sharedReasoningDisciplinePrompt restates %q, which another block owns", owned.rule)
+		}
+	}
+}
+
 // The guidelines audience only changes who receives surfaced decisions and
 // necessary questions: main talks to the user, sub reaches the owner agent
 // through its coordination tools.
@@ -1346,6 +1383,9 @@ shell: allow
 	if !strings.Contains(got, "## Guidelines") {
 		t.Fatalf("buildSystemPrompt() missing shared guidelines: %q", got)
 	}
+	if !strings.Contains(got, "## Reasoning Discipline") {
+		t.Fatalf("buildSystemPrompt() missing shared reasoning discipline: %q", got)
+	}
 	if !strings.Contains(got, "## User Communication") {
 		t.Fatalf("buildSystemPrompt() missing main-agent communication block: %q", got)
 	}
@@ -1372,7 +1412,12 @@ shell: allow
 	if !strings.Contains(got, "## Tool Selection") {
 		t.Fatalf("buildSystemPrompt() missing dynamic capability block: %q", got)
 	}
+	guidelinesIdx := strings.Index(got, "## Guidelines")
+	reasoningIdx := strings.Index(got, "## Reasoning Discipline")
 	userCommunicationIdx := strings.Index(got, "## User Communication")
+	if guidelinesIdx == -1 || reasoningIdx == -1 || userCommunicationIdx == -1 || guidelinesIdx > reasoningIdx || reasoningIdx > userCommunicationIdx {
+		t.Fatalf("buildSystemPrompt() should keep reasoning discipline after guidelines and before communication, got %q", got)
+	}
 	customRoleIdx := strings.Index(got, "## Custom Role")
 	toolSelectionIdx := strings.Index(got, "## Tool Selection")
 	if userCommunicationIdx == -1 || customRoleIdx == -1 || toolSelectionIdx == -1 {
@@ -1408,10 +1453,16 @@ shell: allow
 	}
 
 	got := s.buildSystemPrompt()
-	for _, want := range []string{subAgentIdentityPrompt, sharedAgentValuesPrompt, "## Guidelines", "## SubAgent Coordination", "## SubAgent Task Closure", "## Custom SubAgent Role", "## Tool Selection", "Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.", "Use `read` for file contents when the target path is already known or has been verified.", "## Your Task", "surface the open product decisions to the owner agent (through the coordination tools available in this role)"} {
+	for _, want := range []string{subAgentIdentityPrompt, sharedAgentValuesPrompt, "## Guidelines", "## Reasoning Discipline", "## SubAgent Coordination", "## SubAgent Task Closure", "## Custom SubAgent Role", "## Tool Selection", "Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.", "Use `read` for file contents when the target path is already known or has been verified.", "## Your Task", "surface the open product decisions to the owner agent (through the coordination tools available in this role)"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("buildSystemPrompt() missing %q in %q", want, got)
 		}
+	}
+	guidelinesIdx := strings.Index(got, "## Guidelines")
+	reasoningIdx := strings.Index(got, "## Reasoning Discipline")
+	coordinationIdx := strings.Index(got, "## SubAgent Coordination")
+	if guidelinesIdx == -1 || reasoningIdx == -1 || coordinationIdx == -1 || guidelinesIdx > reasoningIdx || reasoningIdx > coordinationIdx {
+		t.Fatalf("buildSystemPrompt() should keep reasoning discipline after guidelines and before coordination, got %q", got)
 	}
 	for _, want := range []string{
 		"`notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent",

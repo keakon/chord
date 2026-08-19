@@ -1164,7 +1164,7 @@ func (s *SubAgent) taskCompletionInstruction() string {
 func (s *SubAgent) buildSystemPrompt() string {
 	var parts []string
 
-	parts = append(parts, subAgentIdentityPrompt, sharedAgentValuesPrompt, subAgentCodingGuidelinesPrompt, s.subAgentCoordinationPromptBlock(), subAgentResponseClosurePrompt)
+	parts = append(parts, subAgentIdentityPrompt, sharedAgentValuesPrompt, subAgentCodingGuidelinesPrompt, sharedReasoningDisciplinePrompt, s.subAgentCoordinationPromptBlock(), subAgentResponseClosurePrompt)
 	if s.customPrompt != "" {
 		parts = append(parts, s.customPrompt)
 	}
