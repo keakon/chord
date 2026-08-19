@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/identity"
@@ -117,6 +118,9 @@ func (a *MainAgent) handleCompletedInterruptedToolResult(call PendingToolCall, p
 	}
 	// Tool completed execution: persist and emit immediately so the result
 	// survives terminal turn failure/interruption and can be reused on resume.
+	if a.walltime != nil {
+		a.walltime.recordTarget(payload.walltimeTarget, analytics.WalltimePurposeTool, payload.Duration)
+	}
 	a.appendCompletedInterruptedToolResult(payload)
 	return true
 }
@@ -364,6 +368,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	if !ok {
 		log.Errorf("handleToolResult: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
+	}
+	if a.walltime != nil {
+		a.walltime.recordTarget(payload.walltimeTarget, analytics.WalltimePurposeTool, payload.Duration)
 	}
 	a.turn.markToolCallCompleted(payload.CallID)
 	a.loopState.markProgress()

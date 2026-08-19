@@ -230,34 +230,57 @@ func (l *UsageLedger) BuildSessionStats() (SessionStats, int64, error) {
 	return stats, eventCount, err
 }
 
-// BuildSessionStatsWithAgentModelRefs rebuilds runtime stats and the latest
-// selected/running model refs per agent in one ledger scan.
-func (l *UsageLedger) BuildSessionStatsWithAgentModelRefs() (SessionStats, int64, map[string]AgentModelRefs, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+// sessionScanResult holds everything rebuilt from one usage.jsonl scan. Keep
+// restore and picker paths to a single pass instead of one scan per stat type.
+type sessionScanResult struct {
+	stats    SessionStats
+	count    int64
+	refs     map[string]AgentModelRefs
+	walltime map[string]*WalltimeStats
+}
 
-	stats := SessionStats{
-		ByModel: make(map[string]*ModelStats),
-		ByAgent: make(map[string]*AgentStats),
+// scanSessionEvidence rebuilds token/cost stats, latest per-agent model refs,
+// walltime bookkeeping, and the scanned event count in one pass over the
+// ledger. Callers must hold l.mu.
+func (l *UsageLedger) scanSessionEvidence() (*sessionScanResult, error) {
+	res := &sessionScanResult{
+		stats: SessionStats{
+			ByModel: make(map[string]*ModelStats),
+			ByAgent: make(map[string]*AgentStats),
+		},
+		refs:     make(map[string]AgentModelRefs),
+		walltime: make(map[string]*WalltimeStats),
 	}
-	var eventCount int64
-	refs := make(map[string]AgentModelRefs)
 	err := scanUsageEvents(l.usagePath(), func(evt UsageEvent) {
-		eventCount++
+		res.count++
 		agentID := normalizeAgentID(evt.AgentID)
-		ref := refs[agentID]
+		ref := res.refs[agentID]
 		if selected := strings.TrimSpace(evt.SelectedModelRef); selected != "" {
 			ref.Selected = selected
 		}
 		if running := strings.TrimSpace(evt.RunningModelRef); running != "" {
 			ref.Running = running
 		}
-		refs[agentID] = ref
+		res.refs[agentID] = ref
+		// Walltime events are diagnostic bookkeeping: fold into walltime, do
+		// not count as LLM calls.
+		if IsWalltimePurpose(evt.Purpose) {
+			ws := res.walltime[agentID]
+			if ws == nil {
+				ws = &WalltimeStats{}
+				res.walltime[agentID] = ws
+			}
+			if ns, ok := parseDiagnosticNs(evt.Diagnostic); ok {
+				addWalltimeDuration(ws, evt.Purpose, time.Duration(ns))
+			}
+			return
+		}
 		// Diagnostic events advance the count cursor and model refs but are
 		// not LLM calls; keep them out of the aggregated stats.
 		if IsDiagnosticUsagePurpose(evt.Purpose) {
 			return
 		}
+		stats := &res.stats
 		raw := evt.UsageRaw
 		billing := evt.BillingUsage
 		stats.InputTokens += billing.InputTokens
@@ -308,7 +331,32 @@ func (l *UsageLedger) BuildSessionStatsWithAgentModelRefs() (SessionStats, int64
 		ams.ReasoningTokens += raw.ReasoningTokens
 		ams.EstimatedCost += evt.Cost.TotalCost
 	})
-	return stats, eventCount, refs, err
+	return res, err
+}
+
+// BuildSessionStatsWithAgentModelRefs rebuilds runtime stats and the latest
+// selected/running model refs per agent in one ledger scan.
+func (l *UsageLedger) BuildSessionStatsWithAgentModelRefs() (SessionStats, int64, map[string]AgentModelRefs, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	res, err := l.scanSessionEvidence()
+	if err != nil {
+		return SessionStats{}, 0, nil, err
+	}
+	return res.stats, res.count, res.refs, nil
+}
+
+// BuildSessionEvidence rebuilds token/cost stats, model refs, walltime, and
+// the event count in a single ledger scan. Restore uses this so it never
+// parses usage.jsonl twice.
+func (l *UsageLedger) BuildSessionEvidence() (SessionStats, int64, map[string]AgentModelRefs, map[string]*WalltimeStats, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	res, err := l.scanSessionEvidence()
+	if err != nil {
+		return SessionStats{}, 0, nil, nil, err
+	}
+	return res.stats, res.count, res.refs, res.walltime, nil
 }
 
 // AppendEvent appends one usage event and refreshes usage-summary.json.
@@ -324,18 +372,21 @@ func (l *UsageLedger) AppendEvent(event UsageEvent) error {
 	}
 	data = append(data, '\n')
 
+	// Walltime bookkeeping events never enter the token/cost summary (their
+	// applyUsageEvent pass is a no-op), so refreshing usage-summary.json for
+	// them would be a full read-rewrite per segment with zero effect. Skip the
+	// summary path entirely; the ledger line itself is still appended.
+	if IsWalltimePurpose(event.Purpose) {
+		if err := l.appendLedgerLineLocked(data); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	summary, summaryErr := l.ensureSummaryLocked()
 
-	f, err := privatefs.OpenFile(l.sessionDir, l.usagePath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
-	if err != nil {
-		return fmt.Errorf("open usage ledger: %w", err)
-	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return fmt.Errorf("append usage ledger: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close usage ledger: %w", err)
+	if err := l.appendLedgerLineLocked(data); err != nil {
+		return err
 	}
 
 	if summaryErr != nil {
@@ -358,6 +409,23 @@ func (l *UsageLedger) AppendEvent(event UsageEvent) error {
 	}
 	l.summary = summary
 	l.summaryLoaded = true
+	return nil
+}
+
+// appendLedgerLineLocked appends one marshaled event line to usage.jsonl.
+// Callers must hold l.mu.
+func (l *UsageLedger) appendLedgerLineLocked(data []byte) error {
+	f, err := privatefs.OpenFile(l.sessionDir, l.usagePath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+	if err != nil {
+		return fmt.Errorf("open usage ledger: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return fmt.Errorf("append usage ledger: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close usage ledger: %w", err)
+	}
 	return nil
 }
 
@@ -555,6 +623,13 @@ func applyUsageEvent(summary *SessionUsageSummary, event UsageEvent) {
 	if summary == nil {
 		return
 	}
+	// Walltime events are skipped by AppendEvent and by the last-complete-event
+	// scan that decides summary freshness. A rebuild replays every ledger line,
+	// so counting them here would pin LastEventID to an event the freshness scan
+	// never returns, and the summary would rebuild on every subsequent open.
+	if IsWalltimePurpose(event.Purpose) {
+		return
+	}
 	if summary.SessionID == "" {
 		summary.SessionID = event.SessionID
 	}
@@ -699,6 +774,14 @@ func readLastCompleteUsageEvent(path string) (UsageEvent, bool, error) {
 		ok   bool
 	)
 	err := scanUsageEvents(path, func(evt UsageEvent) {
+		// Walltime bookkeeping events are appended to usage.jsonl but never
+		// enter usage-summary.json. Skipping them here keeps the summary's
+		// LastEventID cursor pinned to a real aggregate event, so a tail of
+		// walltime segments does not force a full summary rebuild on every
+		// subsequent append.
+		if IsWalltimePurpose(evt.Purpose) {
+			return
+		}
 		last = evt
 		ok = true
 	})

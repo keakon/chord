@@ -641,6 +641,17 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	}
 	defer releaseLLM()
 	requestStarted = true
+	// Model/cooldown wall-clock segmentation for the TIME section: the segment
+	// spans acquireLLM success through CompleteStream return (success or
+	// error), so hook-blocked / governor-rejected / zero-delta requests still
+	// settle. Cooldown intervals are split off via the activity feed below.
+	wallReq := a.walltime.startRequestAt(identity.MainAgentID, a.currentAgentName(), turnID)
+	if wallReq != nil {
+		defer wallReq.finish()
+		wallReq.wireStreamReducer(streamReducer, func(activity ActivityType, detail string) {
+			a.emitActivity("main", activity, detail)
+		})
+	}
 	requestOptions := llm.CompleteStreamOptions{
 		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message) ([]message.Message, error) {
 			updatedMessages, err := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount)
@@ -655,6 +666,14 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	a.recordToolTraceCallLLMReturned(turn, completeStreamReturnedAt)
 	if err == nil && turn != nil {
 		a.recordTurnStreamingToolUseEnd(turn, time.Now())
+	}
+	// Settle the walltime segment before the flush events so the TUI
+	// re-render they trigger already sees the updated TIME buckets;
+	// finishing at return would leave the sidebar stale until the next
+	// unrelated event. finish() is idempotent, so the deferred call
+	// below is a no-op here.
+	if wallReq != nil {
+		wallReq.finish()
 	}
 	// Final flush: emit any text accumulated in the last batch window.
 	// This is the critical path for burst-delivery proxies that send all

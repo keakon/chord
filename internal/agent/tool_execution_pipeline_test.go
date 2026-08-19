@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/hook"
@@ -652,6 +653,63 @@ func TestMainAndSubToolExecutionPipelineConsistentValidation(t *testing.T) {
 				t.Fatalf("results = main %q sub %q, want %q", mainResult.Result, subResult.Result, tc.wantResult)
 			}
 		})
+	}
+}
+
+// TestToolDurationAnchorCoversFullExecution verifies the walltime accounting
+// contract the TIME sidebar relies on: the tool duration (ExecStartedAt ->
+// completion) covers the whole tool execution — parameter parsing, file
+// editing, formatting, LSP diagnostics, backups, locks — because the anchor is
+// set after permission/hook/argument validation and the completion timestamp
+// is taken after executeToolCall returns. The same anchor must be used by the
+// MainAgent and SubAgent pipelines.
+func TestToolDurationAnchorCoversFullExecution(t *testing.T) {
+	mainAgent, subAgent := newToolPipelineConsistencyAgents(t)
+	call := message.ToolCall{ID: "call-1", Name: "RequiredValue", Args: json.RawMessage(`{"value":"ok"}`)}
+	for _, exec := range []struct {
+		name string
+		run  func() (ToolExecutionResult, error)
+	}{
+		{name: "main", run: func() (ToolExecutionResult, error) {
+			return mainAgent.executeToolCallWithHook(context.Background(), call, false)
+		}},
+		{name: "sub", run: func() (ToolExecutionResult, error) {
+			return subAgent.executeToolCallWithHook(context.Background(), call, false)
+		}},
+	} {
+		t.Run(exec.name, func(t *testing.T) {
+			before := time.Now()
+			result, err := exec.run()
+			after := time.Now()
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			// A fast tool may finish in a few microseconds; the anchor must
+			// still be set so the duration equals the wall-clock execution
+			// span (not zero), and must lie inside the observed run window.
+			if result.ExecStartedAt.IsZero() {
+				t.Fatalf("ExecStartedAt not set; duration would be zero")
+			}
+			if result.ExecStartedAt.Before(before) || result.ExecStartedAt.After(after) {
+				t.Fatalf("ExecStartedAt=%v outside run window [%v, %v]", result.ExecStartedAt, before, after)
+			}
+		})
+	}
+}
+
+func TestToolExecDurationRequiresExecutionAnchor(t *testing.T) {
+	completed := time.Now()
+	if got := toolExecDuration("Read", ToolExecutionResult{}, completed); got != 0 {
+		t.Fatalf("unstarted tool duration = %v, want 0", got)
+	}
+
+	started := completed.Add(-250 * time.Millisecond)
+	result := ToolExecutionResult{ExecStartedAt: started}
+	if got := toolExecDuration(tools.NameQuestion, result, completed); got != 0 {
+		t.Fatalf("Question tool duration = %v, want 0 (user wait is interaction time)", got)
+	}
+	if got := toolExecDuration("Read", result, completed); got <= 0 {
+		t.Fatalf("anchored tool duration = %v, want > 0", got)
 	}
 }
 

@@ -262,7 +262,7 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 		e.onFirstVisibleResult(call.ID, call.Name, time.Now())
 	}
 	status := toolResultStatusFromError(err != nil)
-	e.emit(ToolResultEvent{CallID: call.ID, Name: call.Name, ArgsJSON: result.EffectiveArgsJSON, Audit: result.Audit.Clone(), Result: appendBackupPathsToDisplay(result.Result, result.BackupPaths), Status: status, FileState: result.FileState.Clone(), Duration: completedAt.Sub(startedAt)})
+	e.emit(ToolResultEvent{CallID: call.ID, Name: call.Name, ArgsJSON: result.EffectiveArgsJSON, Audit: result.Audit.Clone(), Result: appendBackupPathsToDisplay(result.Result, result.BackupPaths), Status: status, FileState: result.FileState.Clone(), Duration: toolExecDuration(call.Name, result, completedAt)})
 }
 
 func (e *StreamingToolExecutor) startDeferredLocked() {
@@ -323,17 +323,13 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 	entry.state = streamingToolYielded
 	delete(e.entries, call.ID)
 	e.releaseConflictKeysLocked(entry)
-	startedAt := entry.startedAt
-	if startedAt.IsZero() {
-		startedAt = entry.completedAt
-	}
 	var diff agentdiff.Summary
 	if toolExecutionCommitted(entry.err) {
 		effective := call
 		effective.Args = json.RawMessage(entry.result.EffectiveArgsJSON)
 		diff = toolExecutionDiff(effective, entry.result)
 	}
-	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Images: entry.result.Images, Error: entry.err, TurnID: e.turnID, Duration: entry.completedAt.Sub(startedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...), FileState: entry.result.FileState.Clone(), BackupPaths: entry.result.BackupPaths, speculativeHooks: entry.result.speculativeHooks}, true, false
+	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Images: entry.result.Images, Error: entry.err, TurnID: e.turnID, Duration: toolExecDuration(call.Name, entry.result, entry.completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...), FileState: entry.result.FileState.Clone(), BackupPaths: entry.result.BackupPaths, walltimeTarget: entry.result.walltimeTarget, speculativeHooks: entry.result.speculativeHooks}, true, false
 }
 
 func (e *StreamingToolExecutor) discardEntryLocked(callID string, entry *streamingToolEntry, reason string) StreamingToolDiscardInfo {
@@ -446,11 +442,6 @@ func (e *StreamingToolExecutor) DrainCompletedResults() map[string]*ToolResultPa
 			}
 		}
 
-		startedAt := entry.startedAt
-		if startedAt.IsZero() {
-			startedAt = entry.completedAt
-		}
-
 		var diff agentdiff.Summary
 		if toolExecutionCommitted(entry.err) && entry.result.EffectiveArgsJSON != "" {
 			effective := entry.call
@@ -467,7 +458,7 @@ func (e *StreamingToolExecutor) DrainCompletedResults() map[string]*ToolResultPa
 			Images:           entry.result.Images,
 			Error:            entry.err,
 			TurnID:           e.turnID,
-			Duration:         entry.completedAt.Sub(startedAt),
+			Duration:         toolExecDuration(entry.call.Name, entry.result, entry.completedAt),
 			Diff:             diff.Text,
 			DiffAdded:        diff.Added,
 			DiffRemoved:      diff.Removed,
@@ -475,6 +466,7 @@ func (e *StreamingToolExecutor) DrainCompletedResults() map[string]*ToolResultPa
 			LSPReviews:       append([]message.LSPReview(nil), entry.result.LSPReviews...),
 			FileState:        entry.result.FileState.Clone(),
 			BackupPaths:      entry.result.BackupPaths,
+			walltimeTarget:   entry.result.walltimeTarget,
 			speculativeHooks: entry.result.speculativeHooks,
 		}
 		results[callID] = payload

@@ -585,6 +585,15 @@ func newTestAppContext(t *testing.T) *AppContext {
 		mcp.ClientInfo{Name: "chord-test", Version: "test"},
 	)
 
+	// The agent persists into sessionDir from background goroutines (usage
+	// ledger, walltime segments settled when a confirm/question resolves).
+	// Drain them before t.TempDir() removal runs, or cleanup races a write.
+	t.Cleanup(func() {
+		if err := mainAgent.Shutdown(5 * time.Second); err != nil {
+			t.Logf("shutdown test main agent: %v", err)
+		}
+	})
+
 	return &AppContext{
 		Ctx:         context.Background(),
 		ProjectRoot: projectRoot,

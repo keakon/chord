@@ -81,10 +81,53 @@ func (p *persistencePump) enqueue(entry persistEntry, stopping <-chan struct{}) 
 	}
 }
 
+// flush waits until all entries queued before this call have been handled.
+func (p *persistencePump) flush() bool {
+	return p.flushUntil(nil)
+}
+
+// flushUntil applies the same ordering barrier but also bounds both admission
+// to a full queue and waiting for the barrier handler. A nil deadline channel
+// preserves the unbounded session-switch behavior.
+func (p *persistencePump) flushUntil(deadline <-chan time.Time) bool {
+	if p == nil || p.ch == nil {
+		return false
+	}
+	barrier := make(chan struct{})
+	p.mu.RLock()
+	if p.stopped {
+		p.mu.RUnlock()
+		return false
+	}
+	select {
+	case p.ch <- persistEntry{barrier: barrier}:
+	case <-deadline:
+		p.mu.RUnlock()
+		return false
+	}
+	p.mu.RUnlock()
+	if deadline == nil {
+		<-barrier
+		return true
+	}
+	select {
+	case <-barrier:
+		return true
+	case <-deadline:
+		return false
+	}
+}
+
 func (a *MainAgent) startPersistLoop() {
 	a.persist.start(func(entry persistEntry) {
 		if entry.barrier != nil {
 			close(entry.barrier)
+			return
+		}
+		if entry.walltimeLedger != nil && entry.walltimeEvent != nil {
+			if err := entry.walltimeLedger.AppendEvent(*entry.walltimeEvent); err != nil {
+				log.Warnf("failed to append walltime ledger event agent_id=%v purpose=%v error=%v", entry.walltimeEvent.AgentID, entry.walltimeEvent.Purpose, err)
+			}
 			return
 		}
 		var persistErr error

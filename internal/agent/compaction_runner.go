@@ -100,6 +100,9 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	// instead of reading whichever turn happens to be current at HTTP dispatch.
 	ctx = llm.WithResponsesTurnState(ctx, a.currentTurnResponsesState())
 	a.beginCompactionState(planID, target, trigger, continuation, headSplit, cancel)
+	if a.walltime != nil {
+		a.walltime.startCompactionAt(planID, a.currentAgentName(), target.turnID)
+	}
 
 	a.emitActivity("main", ActivityCompacting, "context")
 	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted})

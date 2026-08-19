@@ -50,10 +50,11 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 			}
 			return s.ruleset
 		},
-		isInternalTool: isSubAgentInternalTool,
-		confirm:        confirm,
-		currentTurnID:  s.currentTurnID,
-		fireHook:       s.fireHook,
+		isInternalTool:        isSubAgentInternalTool,
+		confirm:               confirm,
+		currentTurnID:         s.currentTurnID,
+		captureWalltimeTarget: s.captureWalltimeTarget,
+		fireHook:              s.fireHook,
 		updatePending: func(call PendingToolCall) {
 			if s.turn != nil {
 				s.turn.updatePendingToolCall(call)
@@ -67,4 +68,11 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 			return s.recovery.AppendToolActivity(rec)
 		},
 	}
+}
+
+func (s *SubAgent) captureWalltimeTarget() *walltimeTarget {
+	if s == nil || s.parent == nil || s.parent.walltime == nil {
+		return nil
+	}
+	return s.parent.walltime.captureAt(s.instanceID, s.agentDefName, s.currentTurnID())
 }

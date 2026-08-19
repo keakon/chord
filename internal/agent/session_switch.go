@@ -214,6 +214,9 @@ func (a *MainAgent) freezeCurrentSession(oldRecovery *recovery.RecoveryManager) 
 	if oldRecovery == nil {
 		return
 	}
+	if a.walltime != nil {
+		a.walltime.flush()
+	}
 	a.flushPersist()
 	a.saveRecoverySnapshot()
 	oldRecovery.Close()
@@ -281,6 +284,10 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	}
 	a.recovery = recovery.NewRecoveryManager(sessionDir)
 	a.usageLedger = analytics.NewUsageLedger(sessionDir, a.projectRoot)
+	if a.walltime != nil {
+		a.walltime.repointLedger(a.usageLedger)
+		a.walltime.restoreStats(nil)
+	}
 	a.setTaskRecords(nil)
 	a.resetTaskCoordination(a.sessionEpoch, nil)
 	a.resetTaskGroups(nil)

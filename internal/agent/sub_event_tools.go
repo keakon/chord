@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent/agentdiff"
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
@@ -108,6 +109,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				LSPReviews:       append([]message.LSPReview(nil), payload.LSPReviews...),
 				FileState:        payload.FileState.Clone(),
 				BackupPaths:      payload.BackupPaths,
+				walltimeTarget:   payload.walltimeTarget,
 				speculativeHooks: payload.speculativeHooks,
 			}
 			if err := s.commitPromotedToolSideEffects(effective, tr); err != nil {
@@ -138,8 +140,8 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 					}
 					defer release()
 
-					startedAt := time.Now()
 					execResult, err := s.executeToolCallWithHook(batchCtx, tc, false)
+					completedAt := time.Now()
 					if batchCtx.Err() != nil && turn.Ctx.Err() != nil {
 						return
 					}
@@ -155,7 +157,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 						}
 					}
 					select {
-					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), BackupPaths: execResult.BackupPaths, Duration: time.Since(startedAt)}:
+					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), BackupPaths: execResult.BackupPaths, Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget}:
 					case <-s.parentCtx.Done():
 					}
 				}(effective)
@@ -202,8 +204,8 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 			}
 			defer release()
 
-			startedAt := time.Now()
 			execResult, err := s.executeToolCall(batchCtx, tc)
+			completedAt := time.Now()
 			if batchCtx.Err() != nil && turn.Ctx.Err() != nil {
 				return
 			}
@@ -219,7 +221,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				}
 			}
 			select {
-			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), BackupPaths: execResult.BackupPaths, Duration: time.Since(startedAt)}:
+			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), BackupPaths: execResult.BackupPaths, Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget}:
 			case <-s.parentCtx.Done():
 			}
 		}(tc)
@@ -284,6 +286,12 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	))
 
 	parts := s.toolResultParts(contextResult, result.Images)
+
+	// Record the adopted tool walltime once per call. The speculative preview
+	// event bypasses this path, so each call settles exactly one segment.
+	if s.parent != nil && s.parent.walltime != nil {
+		s.parent.walltime.recordTarget(result.walltimeTarget, analytics.WalltimePurposeTool, result.Duration)
+	}
 
 	// Emit tool result to TUI so the tool call block shows its result.
 	s.turn.markToolCallCompleted(result.CallID)

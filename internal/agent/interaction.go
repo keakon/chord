@@ -3,11 +3,45 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/tools"
 )
+
+// agentIDForInteraction returns the walltime/ownership agent for a confirm or
+// question flow. Tool execution contexts carry the instance ID ("main-N", and
+// subinstance "worker-1"); the sidebar reads walltime under
+// identity.MainAgentID ("main"), so the MainAgent instance id is normalized.
+// SubAgent contexts keep their instance id so their waits aggregate under the
+// task's instance history. A bare turn context (loop-exit Done approval,
+// repeated tool-call interception) also falls back to the main agent.
+func (a *MainAgent) agentIDForInteraction(ctx context.Context) string {
+	id := strings.TrimSpace(tools.AgentIDFromContext(ctx))
+	if id == "" || id == a.instanceID {
+		return identity.MainAgentID
+	}
+	return id
+}
+
+func (a *MainAgent) agentNameForInteraction(agentID string) string {
+	if agentID == identity.MainAgentID || agentID == a.instanceID {
+		return a.currentAgentName()
+	}
+	if sub := a.subs.subAgent(agentID); sub != nil {
+		return sub.agentDefName
+	}
+	return ""
+}
+
+func (a *MainAgent) turnIDForInteraction(ctx context.Context) uint64 {
+	if turnID := tools.TurnIDFromContext(ctx); turnID != 0 {
+		return turnID
+	}
+	return a.currentTurnID()
+}
 
 // AwaitConfirm emits a confirmation request event, waits for the user's reply,
 // and returns the resolved response. Only one confirm flow may be active at a
@@ -31,11 +65,14 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 	a.toolWg.Add(1)
 	defer a.toolWg.Done()
 
+	ownerID := a.agentIDForInteraction(ctx)
+	agentName := a.agentNameForInteraction(ownerID)
+	turnID := a.turnIDForInteraction(ctx)
 	requestID := makeRequestID()
-	ch := a.interaction.registerConfirm(requestID)
+	ch := a.interaction.registerConfirm(requestID, a.walltime.captureAt(ownerID, agentName, turnID))
 	defer a.interaction.unregisterConfirm(requestID)
 
-	a.fireHookBackground(ctx, hook.OnWaitConfirm, a.currentTurnID(), map[string]any{
+	a.fireHookBackground(ctx, hook.OnWaitConfirm, turnID, map[string]any{
 		hook.DataKeyToolName:    toolName,
 		"args_json":             argsJSON,
 		"timeout_ms":            timeout.Milliseconds(),
@@ -78,9 +115,12 @@ func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.Question
 	defer a.toolWg.Done()
 
 	answers := make([]tools.QuestionAnswer, 0, len(questions))
+	ownerID := a.agentIDForInteraction(ctx)
+	agentName := a.agentNameForInteraction(ownerID)
+	turnID := a.turnIDForInteraction(ctx)
 	for _, q := range questions {
 		requestID := makeRequestID()
-		ch := a.interaction.registerQuestion(requestID)
+		ch := a.interaction.registerQuestion(requestID, a.walltime.captureAt(ownerID, agentName, turnID))
 
 		options := make([]string, len(q.Options))
 		optionDetails := make([]string, len(q.Options))
@@ -94,7 +134,7 @@ func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.Question
 			defaultAnswer = options[0]
 		}
 
-		a.fireHookBackground(ctx, hook.OnWaitQuestion, a.currentTurnID(), map[string]any{
+		a.fireHookBackground(ctx, hook.OnWaitQuestion, turnID, map[string]any{
 			hook.DataKeyToolName: tools.NameQuestion,
 			"header":             q.Header,
 			"question":           q.Question,

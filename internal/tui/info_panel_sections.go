@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -192,6 +193,152 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 		return ""
 	}
 	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(usageLines))
+}
+
+func (m *Model) buildInfoPanelTimeBlock(lineW int) string {
+	stats := m.agent.GetSidebarWalltimeStats()
+	if stats.IsZero() {
+		// No walltime recorded for the focused agent: hide the whole section.
+		return ""
+	}
+	lines := []string{InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("TIME"))}
+
+	// Buckets below one second are not shown: a sub-second tool call rendered
+	// as "0s (1%)" is misleading, and its share is not worth a percentage.
+	// They are excluded from the total, so the displayed buckets always sum
+	// to 100.
+	type bucketRow struct {
+		key string
+		dur time.Duration
+	}
+	rows := make([]bucketRow, 0, 4)
+	if stats.Model >= time.Second {
+		rows = append(rows, bucketRow{"Model", stats.Model})
+	}
+	if stats.Tool >= time.Second {
+		rows = append(rows, bucketRow{"Tools", stats.Tool})
+	}
+	if stats.Cooldown >= time.Second {
+		rows = append(rows, bucketRow{"Cooldown", stats.Cooldown})
+	}
+	if stats.UserWait >= time.Second {
+		rows = append(rows, bucketRow{"User wait", stats.UserWait})
+	}
+	if len(rows) == 0 {
+		// Every bucket is sub-second: nothing worth showing.
+		return ""
+	}
+	var total time.Duration
+	for _, row := range rows {
+		total += row.dur
+	}
+	// Allocate integer percentages so the buckets always sum to 100 and never
+	// go negative, even under an extreme skew (e.g. one bucket dominating
+	// while three sit at ~1s). Largest-remainder distribution: floor each
+	// share first, then hand out the leftover units to the largest fractional
+	// remainders one at a time.
+	exact := make([]float64, len(rows))
+	base := make([]int, len(rows))
+	rem := 100
+	totalF := float64(total)
+	for i, row := range rows {
+		exact[i] = float64(row.dur) / totalF * 100
+		base[i] = int(exact[i])
+		rem -= base[i]
+	}
+	for rem > 0 {
+		best := 0
+		for i := 1; i < len(rows); i++ {
+			if exact[i]-float64(base[i]) > exact[best]-float64(base[best]) {
+				best = i
+			}
+		}
+		base[best]++
+		rem--
+	}
+	for i, row := range rows {
+		value := formatWalltimeValue(lineW, row.key, row.dur, base[i])
+		lines = append(lines, renderInfoPanelKVLine(lineW, row.key, InfoPanelValue.Render(value)))
+	}
+	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
+}
+
+func formatWalltimeValue(lineW int, key string, duration time.Duration, percent int) string {
+	available := lineW - ansi.StringWidth(key+": ")
+	if available <= 0 {
+		return ""
+	}
+
+	durations := walltimeDurationVariants(duration)
+	for _, elapsed := range durations {
+		value := fmt.Sprintf("%s (%d%%)", elapsed, percent)
+		if ansi.StringWidth(value) <= available {
+			return value
+		}
+	}
+
+	// Keep the value meaningful even for a panel too narrow for the normal
+	// duration/percentage pair; never add an ellipsis to the TIME section.
+	percentText := fmt.Sprintf("%d%%", percent)
+	if ansi.StringWidth(percentText) <= available {
+		return percentText
+	}
+	shortest := durations[len(durations)-1]
+	if ansi.StringWidth(shortest) <= available {
+		return shortest
+	}
+	return ""
+}
+
+func walltimeDurationVariants(d time.Duration) []string {
+	d = d.Round(time.Second)
+	sec := int(d.Seconds())
+	variants := []string{formatWalltimeDuration(d)}
+	appendVariant := func(value string) {
+		if value != variants[len(variants)-1] {
+			variants = append(variants, value)
+		}
+	}
+	if sec >= 60 {
+		if sec >= 60*60 {
+			hours := sec / (60 * 60)
+			minutes := sec / 60 % 60
+			withoutSeconds := fmt.Sprintf("%dh", hours)
+			if minutes > 0 {
+				withoutSeconds = fmt.Sprintf("%dh%dm", hours, minutes)
+			}
+			appendVariant(withoutSeconds)
+			appendVariant(fmt.Sprintf("%dh", hours))
+		} else {
+			appendVariant(fmt.Sprintf("%dm", sec/60))
+		}
+	}
+	return variants
+}
+
+// formatWalltimeDuration renders a wall-clock duration for the TIME section:
+// "38s", "1m42s", "1h2m3s". Callers only pass buckets of at least one second
+// (sub-second buckets are hidden entirely), so the smallest output is "1s".
+func formatWalltimeDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	sec := int(d.Seconds())
+	if sec < 60 {
+		return fmt.Sprintf("%ds", sec)
+	}
+	m := sec / 60
+	s := sec % 60
+	if m >= 60 {
+		h := m / 60
+		m = m % 60
+		if s > 0 {
+			return fmt.Sprintf("%dh%dm%ds", h, m, s)
+		}
+		return fmt.Sprintf("%dh%dm", h, m)
+	}
+	if s > 0 {
+		return fmt.Sprintf("%dm%ds", m, s)
+	}
+	return fmt.Sprintf("%dm", m)
 }
 
 func (m *Model) buildInfoPanelLSPBlock(lineW int) string {

@@ -17,6 +17,24 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// GetSidebarWalltimeStats returns wall-clock time stats for the TUI-focused
+// agent only (main, live SubAgent, or parked task), mirroring
+// GetSidebarUsageStats routing. All buckets are zero when no walltime has been
+// recorded for the focused agent.
+func (a *MainAgent) GetSidebarWalltimeStats() analytics.WalltimeStats {
+	if a.walltime == nil {
+		return analytics.WalltimeStats{}
+	}
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		return a.walltime.statsForAgent(target.sub.instanceID)
+	}
+	if target.parked {
+		return a.walltime.statsForTask(target.task)
+	}
+	return a.walltime.statsForAgent(identity.MainAgentID)
+}
+
 // GetUsageStats returns session-wide usage statistics (all agents in the session).
 func (a *MainAgent) GetUsageStats() analytics.SessionStats {
 	if a.usageTracker == nil {

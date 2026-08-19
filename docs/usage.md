@@ -19,6 +19,8 @@ Tool cards show terminal-safe previews. File paths inside the session working di
 
 MCP tool calls show a compact summary of the model-generated arguments in their card header, with JSON values summarized as `{N fields}` / `[N items]` and long values truncated. MCP server startup arguments and environment variables remain separate from tool-call arguments and are not added to the card. Completed tool cards also show the call's wall-clock duration, and finished background `spawn` work renders as a dedicated `JOB RESULT` card with its command, status, and output.
 
+The right info panel's `TIME` section breaks down the focused agent's elapsed wall-clock time into `Model`, `Tools`, `Cooldown`, and `User wait` buckets with percentage shares. Buckets under one second are hidden — a sub-second bucket would read as `0s (1%)` — so the section appears once any bucket reaches one second. Compaction time is included directly in the `Model` bucket and is not shown separately.
+
 When Chord is running in the background, the terminal title shows a one-shot `✅` completion marker when the focused agent transitions from busy to idle. Focusing the terminal clears the marker; ordinary tab/window focus changes do not re-add it unless new background work later completes.
 
 Common keys:
@@ -212,6 +214,14 @@ The export includes every conversation message plus the current session usage st
 - These reductions are not persistent compaction: older tool results are usually replaced with shorter placeholder summaries for the request, while durable session history remains intact. `/compact`, automatic compaction, tool-output growth, and system prompt or tool-definition changes update the fallback durable estimate; new request preparation refreshes the actual sent request size, including while loop mode is active.
 - When `Cache R` shows a percentage, it is cache-read tokens divided by input-side prompt tokens plus separately reported cache-write tokens. Output tokens are excluded because prompt caching applies only to the input side.
 - `Think` appears only when the provider reports reasoning/thinking tokens. These tokens are already included in output-token billing; the line is a visibility breakdown, not an additional token bucket.
+
+### Reading the info panel `TIME` block
+
+`TIME` reports cumulative wall-clock durations for the focused agent: `Model` (LLM streaming), `Tools` (tool execution), `Cooldown` (key/model cooldown waits), and `User wait` (waits for your confirmations or answers). These are sums of operation intervals, not exclusive slices of elapsed session time; parallel operations can therefore contribute to more than one bucket at once. Each bucket's percentage uses the sum of the displayed buckets as its denominator.
+
+- Buckets under one second are hidden, including from the percentage split; if every bucket is sub-second the whole section is hidden.
+- `Model` includes time spent streaming compaction drafts. When a confirmation dialog or Question prompt is pending, tool cards show execution time only: confirmation and answer waits are recorded under `User wait`, never under `Tools`.
+- The section follows the focused agent (main agent, running SubAgent, or parked task) and is rebuilt from the session's usage ledger after restore or resume.
 
 ### `/stats` — usage statistics overlay
 

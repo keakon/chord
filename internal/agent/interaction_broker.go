@@ -31,17 +31,57 @@ type interactionBroker struct {
 	confirmFlowMu sync.Mutex
 	confirmMapMu  sync.Mutex
 	confirmCh     map[string]chan ConfirmResponse
+	confirmStart  map[string]time.Time
+	// confirmTargets maps requestID -> the walltime owner captured at
+	// registration (agent id + the session ledger/generation it belongs to).
+	// It lives next to confirmCh/confirmStart under confirmMapMu so a concurrent
+	// question flow (guarded by its own questionMapMu) can never race on the
+	// same map.
+	confirmTargets map[string]*walltimeTarget
 
 	questionFlowMu sync.Mutex
 	questionMapMu  sync.Mutex
 	questionCh     map[string]chan QuestionResponse
+	questionStart  map[string]time.Time
+	// questionTargets is the question-flow counterpart of confirmTargets,
+	// guarded by questionMapMu only.
+	questionTargets map[string]*walltimeTarget
+
+	// onSettled is invoked once per settled confirm/question wait (resolved,
+	// timed out, cancelled, or cleared). target is the interaction's walltime
+	// owner captured at registration; d is the wait wall clock.
+	onSettled func(target *walltimeTarget, d time.Duration)
 }
 
 func newInteractionBroker(stoppingCh <-chan struct{}) *interactionBroker {
 	return &interactionBroker{
-		stoppingCh: stoppingCh,
-		confirmCh:  make(map[string]chan ConfirmResponse),
-		questionCh: make(map[string]chan QuestionResponse),
+		stoppingCh:      stoppingCh,
+		confirmCh:       make(map[string]chan ConfirmResponse),
+		confirmStart:    make(map[string]time.Time),
+		confirmTargets:  make(map[string]*walltimeTarget),
+		questionCh:      make(map[string]chan QuestionResponse),
+		questionStart:   make(map[string]time.Time),
+		questionTargets: make(map[string]*walltimeTarget),
+	}
+}
+
+// setSettledHook installs the per-wait settlement callback (walltime recorder).
+func (b *interactionBroker) setSettledHook(fn func(target *walltimeTarget, d time.Duration)) {
+	b.confirmMapMu.Lock()
+	b.questionMapMu.Lock()
+	b.onSettled = fn
+	b.questionMapMu.Unlock()
+	b.confirmMapMu.Unlock()
+}
+
+// settleWait closes a pending wait opened at start for the pinned target and
+// invokes the settlement hook once after the wait actually started.
+func (b *interactionBroker) settleWait(target *walltimeTarget, start time.Time) {
+	if start.IsZero() {
+		return
+	}
+	if b.onSettled != nil {
+		b.onSettled(target, time.Since(start))
 	}
 }
 
@@ -55,19 +95,32 @@ func (b *interactionBroker) beginConfirmFlow() { b.confirmFlowMu.Lock() }
 func (b *interactionBroker) endConfirmFlow()   { b.confirmFlowMu.Unlock() }
 
 // registerConfirm creates and registers a buffered response channel for the
-// given requestID. The caller must unregisterConfirm when the flow ends.
-func (b *interactionBroker) registerConfirm(requestID string) chan ConfirmResponse {
+// given requestID, recording the wait start. The caller must
+// unregisterConfirm when the flow ends.
+func (b *interactionBroker) registerConfirm(requestID string, target *walltimeTarget) chan ConfirmResponse {
 	ch := make(chan ConfirmResponse, 1)
+	now := time.Now()
 	b.confirmMapMu.Lock()
 	b.confirmCh[requestID] = ch
+	b.confirmStart[requestID] = now
+	b.confirmTargets[requestID] = target
 	b.confirmMapMu.Unlock()
 	return ch
 }
 
+// unregisterConfirm removes the requestID mapping and settles any still-open
+// wait (timeout, cancellation, or shutdown path).
 func (b *interactionBroker) unregisterConfirm(requestID string) {
 	b.confirmMapMu.Lock()
+	start, ok := b.confirmStart[requestID]
 	delete(b.confirmCh, requestID)
+	delete(b.confirmStart, requestID)
+	target := b.confirmTargets[requestID]
+	delete(b.confirmTargets, requestID)
 	b.confirmMapMu.Unlock()
+	if ok {
+		b.settleWait(target, start)
+	}
 }
 
 // awaitConfirm blocks until a response arrives on ch, the timeout fires
@@ -127,18 +180,28 @@ func (b *interactionBroker) resolveConfirm(requestID string, resp ConfirmRespons
 func (b *interactionBroker) beginQuestionFlow() { b.questionFlowMu.Lock() }
 func (b *interactionBroker) endQuestionFlow()   { b.questionFlowMu.Unlock() }
 
-func (b *interactionBroker) registerQuestion(requestID string) chan QuestionResponse {
+func (b *interactionBroker) registerQuestion(requestID string, target *walltimeTarget) chan QuestionResponse {
 	ch := make(chan QuestionResponse, 1)
+	now := time.Now()
 	b.questionMapMu.Lock()
 	b.questionCh[requestID] = ch
+	b.questionStart[requestID] = now
+	b.questionTargets[requestID] = target
 	b.questionMapMu.Unlock()
 	return ch
 }
 
 func (b *interactionBroker) unregisterQuestion(requestID string) {
 	b.questionMapMu.Lock()
+	start, ok := b.questionStart[requestID]
 	delete(b.questionCh, requestID)
+	delete(b.questionStart, requestID)
+	target := b.questionTargets[requestID]
+	delete(b.questionTargets, requestID)
 	b.questionMapMu.Unlock()
+	if ok {
+		b.settleWait(target, start)
+	}
 }
 
 // awaitQuestion blocks until a response arrives on ch, the timeout fires
@@ -190,15 +253,39 @@ func (b *interactionBroker) resolveQuestion(requestID string, resp QuestionRespo
 
 // clearPending removes all in-flight confirm/question request mappings. It does
 // not close the per-request channels; waiters exit via ctx cancellation or
-// stoppingCh during shutdown.
+// stoppingCh during shutdown. Open waits are settled (counted as user wait)
+// before the mappings are dropped so a shutdown/session-switch never leaks an
+// open segment. Settlement appends to the usage ledger, which can block on the
+// persistence pump or write to disk, so it runs after the map locks are
+// released: resolveConfirm and registerConfirm contend for the same locks.
 func (b *interactionBroker) clearPending() {
+	type pendingWait struct {
+		target *walltimeTarget
+		start  time.Time
+	}
+	var pending []pendingWait
+
 	b.confirmMapMu.Lock()
+	for requestID, start := range b.confirmStart {
+		pending = append(pending, pendingWait{target: b.confirmTargets[requestID], start: start})
+	}
 	clear(b.confirmCh)
+	clear(b.confirmStart)
+	clear(b.confirmTargets)
 	b.confirmMapMu.Unlock()
 
 	b.questionMapMu.Lock()
+	for requestID, start := range b.questionStart {
+		pending = append(pending, pendingWait{target: b.questionTargets[requestID], start: start})
+	}
 	clear(b.questionCh)
+	clear(b.questionStart)
+	clear(b.questionTargets)
 	b.questionMapMu.Unlock()
+
+	for _, wait := range pending {
+		b.settleWait(wait.target, wait.start)
+	}
 }
 
 func makeRequestID() string {

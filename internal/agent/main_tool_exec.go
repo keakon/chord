@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
@@ -20,6 +21,11 @@ import (
 func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
 	if intercept, ok := a.maybeInterceptRepeatedToolCall(ctx, tc); ok {
 		execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args), Result: intercept.toolResult}
+		// No tool actually ran: anchor the (near-zero) execution duration at
+		// the intercept decision point so the repeated-call confirmation wait
+		// is never counted as tool execution time.
+		execResult.ExecStartedAt = time.Now()
+		execResult.walltimeTarget = a.captureMainWalltimeTarget()
 		return execResult, intercept.confirmErr
 	}
 	return a.toolExecutionPipeline().execute(ctx, tc, true)
@@ -30,6 +36,13 @@ func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (T
 // finalized call promotes them through the normal handleToolResult path.
 func (a *MainAgent) executeToolCallSpeculative(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
 	return a.toolExecutionPipeline().executeSpeculative(ctx, tc)
+}
+
+func (a *MainAgent) captureMainWalltimeTarget() *walltimeTarget {
+	if a == nil || a.walltime == nil {
+		return nil
+	}
+	return a.walltime.captureAt(identity.MainAgentID, a.currentAgentName(), a.currentTurnID())
 }
 
 func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
@@ -54,10 +67,11 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 			a.processRuleIntent(toolName, intent)
 			return a.effectiveRuleset()
 		},
-		isInternalTool: isInternalControlTool,
-		confirm:        a.confirmFn,
-		currentTurnID:  a.currentTurnID,
-		fireHook:       a.fireHook,
+		isInternalTool:        isInternalControlTool,
+		confirm:               a.confirmFn,
+		currentTurnID:         a.currentTurnID,
+		captureWalltimeTarget: a.captureMainWalltimeTarget,
+		fireHook:              a.fireHook,
 		updatePending: func(call PendingToolCall) {
 			if a.turn != nil {
 				a.turn.updatePendingToolCall(call)

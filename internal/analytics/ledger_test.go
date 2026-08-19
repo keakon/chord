@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
 	"time"
 
@@ -162,6 +163,116 @@ func TestIsDiagnosticUsagePurpose(t *testing.T) {
 		if IsDiagnosticUsagePurpose(purpose) {
 			t.Fatalf("IsDiagnosticUsagePurpose(%q) = true, want false", purpose)
 		}
+	}
+}
+
+func TestWalltimeTailDoesNotAdvanceSummary(t *testing.T) {
+	// Walltime bookkeeping events live in usage.jsonl but never enter
+	// usage-summary.json. Appending a tail of walltime segments must not
+	// make the cached summary look stale, which would force a full rebuild
+	// on the next real event.
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	if err := ledger.AppendEvent(UsageEvent{
+		AgentID:          "main",
+		Purpose:          "chat",
+		SelectedModelRef: "provider-a/model-1",
+		RunningModelRef:  "provider-a/model-1",
+		UsageRaw:         UsageSnapshot{InputTokens: 100, OutputTokens: 50},
+		BillingUsage:     NormalizeBillingUsage(UsageSnapshot{InputTokens: 100, OutputTokens: 50}),
+	}); err != nil {
+		t.Fatalf("AppendEvent(usage): %v", err)
+	}
+	walltime := func(purpose string, ns int64) {
+		if err := ledger.AppendEvent(UsageEvent{
+			AgentID:    "main",
+			Purpose:    purpose,
+			Diagnostic: map[string]string{"ns": strconv.FormatInt(ns, 10)},
+		}); err != nil {
+			t.Fatalf("AppendEvent(%s): %v", purpose, err)
+		}
+	}
+	walltime(WalltimePurposeTool, int64(2*time.Second))
+	walltime(WalltimePurposeUserWait, int64(1*time.Second))
+
+	loaded, err := LoadSessionUsageSummary(dir)
+	if err != nil {
+		t.Fatalf("LoadSessionUsageSummary: %v", err)
+	}
+	if loaded.EventCount != 1 {
+		t.Fatalf("EventCount = %d, want 1 (walltime events excluded from summary)", loaded.EventCount)
+	}
+	if loaded.UsageTotal.LLMCalls != 1 {
+		t.Fatalf("LLMCalls = %d, want 1", loaded.UsageTotal.LLMCalls)
+	}
+}
+
+func TestBuildSessionEvidenceFoldsWalltimeInOnePass(t *testing.T) {
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	raw := UsageSnapshot{InputTokens: 100, OutputTokens: 40}
+	if err := ledger.AppendEvent(UsageEvent{
+		AgentID:          "main",
+		Purpose:          "chat",
+		SelectedModelRef: "provider-a/model-1",
+		RunningModelRef:  "provider-a/model-1",
+		UsageRaw:         raw,
+		BillingUsage:     NormalizeBillingUsage(raw),
+	}); err != nil {
+		t.Fatalf("AppendEvent(usage): %v", err)
+	}
+	if err := ledger.AppendEvent(UsageEvent{
+		AgentID:    "main",
+		Purpose:    WalltimePurposeTool,
+		Diagnostic: map[string]string{"ns": strconv.FormatInt(int64(3*time.Second), 10)},
+	}); err != nil {
+		t.Fatalf("AppendEvent(walltime): %v", err)
+	}
+
+	stats, count, refs, walltime, err := ledger.BuildSessionEvidence()
+	if err != nil {
+		t.Fatalf("BuildSessionEvidence: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("eventCount = %d, want 2 (usage + walltime)", count)
+	}
+	if stats.LLMCalls != 1 {
+		t.Fatalf("LLMCalls = %d, want 1 (walltime is not a call)", stats.LLMCalls)
+	}
+	if refs["main"].Running != "provider-a/model-1" {
+		t.Fatalf("refs[main] = %+v", refs["main"])
+	}
+	if got := walltime["main"].Tool; got != 3*time.Second {
+		t.Fatalf("walltime[main].Tool = %v, want 3s", got)
+	}
+}
+
+// A digit string too long for the range is corruption, not a duration: it must
+// be dropped rather than folded in, and its valid siblings must still count.
+func TestBuildSessionEvidenceDropsOutOfRangeWalltimeNs(t *testing.T) {
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	if err := ledger.AppendEvent(UsageEvent{
+		AgentID:    "main",
+		Purpose:    WalltimePurposeTool,
+		Diagnostic: map[string]string{WalltimeDiagnosticNsKey: "99999999999999999999"},
+	}); err != nil {
+		t.Fatalf("AppendEvent(corrupt walltime): %v", err)
+	}
+	if err := ledger.AppendEvent(UsageEvent{
+		AgentID:    "main",
+		Purpose:    WalltimePurposeTool,
+		Diagnostic: map[string]string{WalltimeDiagnosticNsKey: strconv.FormatInt(int64(2*time.Second), 10)},
+	}); err != nil {
+		t.Fatalf("AppendEvent(walltime): %v", err)
+	}
+
+	_, _, _, walltime, err := ledger.BuildSessionEvidence()
+	if err != nil {
+		t.Fatalf("BuildSessionEvidence: %v", err)
+	}
+	if got := walltime["main"].Tool; got != 2*time.Second {
+		t.Fatalf("walltime[main].Tool = %v, want 2s (out-of-range ns dropped)", got)
 	}
 }
 
@@ -504,6 +615,80 @@ func TestLoadSessionUsageSummaryRebuildsWhenSummaryStale(t *testing.T) {
 	}
 	if rebuilt.LastEventID == staleSummary.LastEventID {
 		t.Fatalf("summary was not rebuilt; LastEventID still %q", rebuilt.LastEventID)
+	}
+}
+
+// A rebuild replays every ledger line, including walltime bookkeeping events.
+// The freshness scan that decides whether a rebuild is needed skips those
+// events, so the rebuilt cursor must skip them too; otherwise a ledger whose
+// tail is a walltime segment rebuilds and rewrites the summary on every open.
+func TestLoadSessionUsageSummaryTailWalltimeEventKeepsSummaryFresh(t *testing.T) {
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	raw := UsageSnapshot{InputTokens: 100, OutputTokens: 50}
+	if err := ledger.AppendEvent(UsageEvent{
+		AgentID:          "main",
+		Purpose:          "chat",
+		SelectedModelRef: "provider-a/model-1",
+		RunningModelRef:  "provider-a/model-1",
+		UsageRaw:         raw,
+	}); err != nil {
+		t.Fatalf("AppendEvent(chat): %v", err)
+	}
+	if err := ledger.AppendEvent(UsageEvent{
+		AgentID:    "main",
+		Purpose:    WalltimePurposeTool,
+		Diagnostic: map[string]string{WalltimeDiagnosticNsKey: "1500000000"},
+	}); err != nil {
+		t.Fatalf("AppendEvent(walltime): %v", err)
+	}
+
+	// Force a rebuild: the tail of usage.jsonl is now a walltime event.
+	if err := os.Remove(filepath.Join(dir, "usage-summary.json")); err != nil {
+		t.Fatalf("Remove(usage-summary.json): %v", err)
+	}
+	rebuilt, err := LoadSessionUsageSummary(dir)
+	if err != nil {
+		t.Fatalf("LoadSessionUsageSummary(rebuild): %v", err)
+	}
+	if rebuilt.EventCount != 1 {
+		t.Fatalf("rebuilt EventCount = %d, want 1 (walltime events are not counted)", rebuilt.EventCount)
+	}
+
+	summaryPath := filepath.Join(dir, "usage-summary.json")
+	before, err := os.ReadFile(summaryPath)
+	if err != nil {
+		t.Fatalf("ReadFile(before): %v", err)
+	}
+	if err := os.Chtimes(summaryPath, time.Now().Add(-time.Hour), time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+	stat, err := os.Stat(summaryPath)
+	if err != nil {
+		t.Fatalf("Stat(before): %v", err)
+	}
+
+	// A second open must adopt the cached summary instead of rebuilding it.
+	again, err := LoadSessionUsageSummary(dir)
+	if err != nil {
+		t.Fatalf("LoadSessionUsageSummary(second): %v", err)
+	}
+	if again.LastEventID != rebuilt.LastEventID || again.EventCount != rebuilt.EventCount {
+		t.Fatalf("second open = %+v, want same cursor as %+v", again, rebuilt)
+	}
+	after, err := os.ReadFile(summaryPath)
+	if err != nil {
+		t.Fatalf("ReadFile(after): %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("summary content changed on a read-only open")
+	}
+	stat2, err := os.Stat(summaryPath)
+	if err != nil {
+		t.Fatalf("Stat(after): %v", err)
+	}
+	if !stat2.ModTime().Equal(stat.ModTime()) {
+		t.Fatalf("summary was rewritten on a read-only open (mtime %v -> %v)", stat.ModTime(), stat2.ModTime())
 	}
 }
 

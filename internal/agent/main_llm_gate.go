@@ -430,6 +430,12 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 		a.resetCompactionState()
 		return
 	}
+	// Draft production reached its terminal event for this plan; settle the
+	// walltime segment idempotently (a watchdog failure racing this Ready is a
+	// no-op).
+	if a.walltime != nil {
+		a.walltime.finishCompaction(draft.PlanID)
+	}
 	if draft.Target.sessionEpoch != 0 && draft.Target.sessionEpoch != a.sessionEpoch {
 		log.Debugf("ignoring compaction ready event from another session draft_plan_id=%v draft_session_epoch=%v current_session_epoch=%v", draft.PlanID, draft.Target.sessionEpoch, a.sessionEpoch)
 		cleanupOrphanCompactionFiles(draft.AbsHistoryPath)
@@ -813,6 +819,11 @@ func (a *MainAgent) handleCompactionFailed(evt Event) {
 	if payload == nil {
 		log.Errorf("handleCompactionFailed: invalid payload type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
+	}
+	// Draft production failed (or the watchdog synthesized the failure);
+	// settle the walltime segment idempotently.
+	if a.walltime != nil {
+		a.walltime.finishCompaction(payload.planID)
 	}
 	if payload.target.sessionEpoch != 0 && payload.target.sessionEpoch != a.sessionEpoch {
 		log.Debugf("ignoring compaction failure event from another session failure_plan_id=%v failure_session_epoch=%v current_session_epoch=%v", payload.planID, payload.target.sessionEpoch, a.sessionEpoch)

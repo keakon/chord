@@ -173,7 +173,17 @@ type ToolExecutionResult struct {
 	PreFilePath       string
 	PreContent        string
 	PreExisted        bool
-	speculativeHooks  *speculativeToolHooks
+	// ExecStartedAt is set by the execution pipeline immediately before the
+	// tool's real action runs, after permission confirmation, hooks, and
+	// argument validation have all passed. Duration consumers (tool result
+	// events, tool card footer, persisted tool_duration_ms) compute elapsed
+	// time from this anchor so ask / question / done confirmation waits are
+	// never counted as tool execution time.
+	ExecStartedAt time.Time
+	// walltimeTarget pins tool time to the agent, turn, and session active at
+	// ExecStartedAt so delayed results cannot leak into another agent/session.
+	walltimeTarget   *walltimeTarget
+	speculativeHooks *speculativeToolHooks
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +344,7 @@ type MainAgent struct {
 	usageTracker           *analytics.UsageTracker
 	usageLedger            *analytics.UsageLedger
 	usageEventSink         func(event analytics.UsageEvent)
+	walltime               *walltimeRecorder
 	skillsMu               sync.RWMutex
 	loadedSkills           []*skill.Meta
 	invokedSkills          map[string]*skill.Meta
@@ -774,12 +785,14 @@ type MainAgent struct {
 
 // persistEntry is a queued persistence request for ordered JSONL writes.
 type persistEntry struct {
-	agentID  string
-	msg      message.Message
-	recovery *recovery.RecoveryManager // snapshot of a.recovery at enqueue time
-	after    func(error)
-	barrier  chan struct{}
-	stop     bool
+	agentID        string
+	msg            message.Message
+	recovery       *recovery.RecoveryManager // snapshot of a.recovery at enqueue time
+	after          func(error)
+	walltimeLedger *analytics.UsageLedger
+	walltimeEvent  *analytics.UsageEvent
+	barrier        chan struct{}
+	stop           bool
 }
 
 // ---------------------------------------------------------------------------
@@ -869,6 +882,12 @@ func NewMainAgent(
 		mcpReady:                make(chan struct{}),
 	}
 	a.interaction = newInteractionBroker(a.stoppingCh)
+	a.walltime = newWalltimeRecorder(a.usageLedger, a.persist, a.stoppingCh)
+	a.interaction.setSettledHook(func(target *walltimeTarget, d time.Duration) {
+		if a.walltime != nil {
+			a.walltime.recordTarget(target, analytics.WalltimePurposeUserWait, d)
+		}
+	})
 	if llmClient != nil {
 		llmClient.SetCandidateScorer(a.cacheAwareCandidateScore)
 	}
@@ -1300,7 +1319,10 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 
 	// Close the persistence channel and wait for the loop to drain.
 	// The persist loop may be started outside Run (tests), so don't gate the wait
-	// on the main event loop start flag.
+	// on the main event loop start flag. Closing the channel is itself an
+	// ordering barrier: the drain loop processes every already-enqueued entry
+	// (including walltime segments settled during cancellation) in FIFO order
+	// before it exits, so no separate pre-close flush is needed.
 	persistDrained := true
 	if a.persist.ch != nil {
 		a.closePersistLoop()

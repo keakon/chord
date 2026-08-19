@@ -157,6 +157,7 @@ const (
 	imageSinkKey
 	readObservationSinkKey
 	deleteAuditSinkKey
+	turnIDKey
 )
 
 // WithAgentID returns a new context that carries the given agent ID.
@@ -170,6 +171,23 @@ func AgentIDFromContext(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// WithTurnID returns a context carrying the logical turn that owns the work.
+// Interaction callbacks use it to pin walltime metadata before a wait starts.
+func WithTurnID(ctx context.Context, id uint64) context.Context {
+	if id == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, turnIDKey, id)
+}
+
+// TurnIDFromContext extracts the owning turn ID, or returns zero when absent.
+func TurnIDFromContext(ctx context.Context) uint64 {
+	if v, ok := ctx.Value(turnIDKey).(uint64); ok {
+		return v
+	}
+	return 0
 }
 
 // WithSessionDir returns a new context that carries the session directory path.

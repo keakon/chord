@@ -62,7 +62,7 @@ func TestRestoreUsageEvidenceReusesLedgerScanForAgentModelRefs(t *testing.T) {
 	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
 	loaded := &loadedSessionState{}
 
-	a.restoreUsageEvidence(loaded, sessionDir)
+	a.restoreSessionEvidence(loaded, sessionDir)
 
 	refs := loaded.AgentModelRefs["worker-1"]
 	if refs.Selected != "provider/selected" || refs.Running != "provider/running" {

@@ -50,6 +50,9 @@ func (loopBusyAgentStub) GetUsageStats() analytics.SessionStats                 
 func (loopBusyAgentStub) GetSidebarUsageStats() analytics.SessionStats {
 	return analytics.SessionStats{}
 }
+func (loopBusyAgentStub) GetSidebarWalltimeStats() analytics.WalltimeStats {
+	return analytics.WalltimeStats{}
+}
 func (loopBusyAgentStub) GetContextStats() (int, int) { return 0, 0 }
 func (loopBusyAgentStub) GetContextMessageCount() int { return 0 }
 func (loopBusyAgentStub) GetContextBytes() int        { return 0 }

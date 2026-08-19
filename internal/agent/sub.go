@@ -56,7 +56,10 @@ type toolResult struct {
 	BackupPaths []string
 	// RecoveryState classifies synthetic results synthesized during session
 	// restore or a failed intent barrier (not_started / outcome_unknown).
-	RecoveryState    string
+	RecoveryState string
+	// walltimeTarget preserves this SubAgent instance's session attribution
+	// until its result is processed by the independent event loop.
+	walltimeTarget   *walltimeTarget
 	speculativeHooks *speculativeToolHooks
 }
 
@@ -834,8 +837,22 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 			return
 		}
 		defer releaseLLM()
+		wallReq := s.parent.walltime.startRequestAt(s.instanceID, s.agentDefName, turn.ID)
+		if wallReq != nil {
+			defer wallReq.finish()
+			wallReq.wireStreamReducer(streamReducer, func(activity ActivityType, detail string) {
+				s.parent.emitActivity(s.instanceID, activity, detail)
+			})
+		}
 		requestCtx := llm.WithResponsesTurnState(turn.Ctx, turn.LLMResponsesState)
 		resp, err := llmClient.CompleteStream(requestCtx, messages, toolDefs, callback)
+		// Settle the walltime segment before the flush events so the TUI
+		// re-render they trigger sees the updated TIME buckets; finishing at
+		// return would leave the sidebar stale until the next unrelated
+		// event. finish() is idempotent, so the deferred call is a no-op.
+		if wallReq != nil {
+			wallReq.finish()
+		}
 		streamReducer.Finish() // final flush: emit any remaining accumulated text
 		s.parent.emitToTUI(RequestProgressEvent{AgentID: s.instanceID, Bytes: streamState.requestProgressBytes, Events: streamState.requestProgressEvents, Done: true})
 		if turn.Ctx.Err() != nil {

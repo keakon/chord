@@ -140,6 +140,19 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	appendFloat6(stats.EstimatedCost)
 	appendSep()
 
+	// Wall-clock TIME section buckets
+	walltime := m.agent.GetSidebarWalltimeStats()
+	appendInt64(int64(walltime.Model))
+	appendSep()
+	appendInt64(int64(walltime.Tool))
+	appendSep()
+	appendInt64(int64(walltime.Cooldown))
+	appendSep()
+	appendInt64(int64(walltime.UserWait))
+	appendSep()
+	appendInt64(int64(walltime.Compaction))
+	appendSep()
+
 	// LSP rows
 	if lp, ok := m.agent.(agent.LSPStateProvider); ok {
 		for _, r := range lp.LSPServerList() {
@@ -303,6 +316,7 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 		appendBlock("", m.renderRateLimitBlock(snap, lineW))
 	}
 	appendBlock("", m.buildInfoPanelUsageBlock(width, lineW))
+	appendBlock("", m.buildInfoPanelTimeBlock(lineW))
 	appendBlock(infoPanelSectionLSP, m.buildInfoPanelLSPBlock(lineW))
 	appendBlock(infoPanelSectionMCP, m.buildInfoPanelMCPBlock(lineW))
 	appendBlock(infoPanelSectionTodos, m.buildInfoPanelTodoBlock(lineW))

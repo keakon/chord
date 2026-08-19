@@ -23,6 +23,13 @@ var diagnosticUsagePurposes = []string{
 	UsagePurposeOversizeRecovery,
 	UsagePurposeContextProvenance,
 	UsagePurposeCompactionLifecycle,
+	// Wall-clock time bookkeeping events (TIME sidebar section) are zero-usage
+	// segments; they must stay out of token/cost aggregates and the Calls count.
+	WalltimePurposeModel,
+	WalltimePurposeCompaction,
+	WalltimePurposeTool,
+	WalltimePurposeCooldown,
+	WalltimePurposeUserWait,
 }
 
 // IsDiagnosticUsagePurpose reports whether purpose identifies a diagnostic

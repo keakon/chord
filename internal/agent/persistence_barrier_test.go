@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/identity"
@@ -16,6 +18,26 @@ import (
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
+
+func TestPersistencePumpFlushUntilDeadlineDoesNotWaitForBlockedHandler(t *testing.T) {
+	pump := newPersistencePump(1)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+	pump.start(func(entry persistEntry) {
+		startedOnce.Do(func() { close(started) })
+		<-release
+	})
+	pump.ch <- persistEntry{}
+	<-started
+	deadline := time.After(20 * time.Millisecond)
+	if pump.flushUntil(deadline) {
+		t.Fatal("flushUntil = true, want deadline timeout")
+	}
+	close(release)
+	pump.close()
+	<-pump.done
+}
 
 type barrierRecordingTool struct {
 	name     string

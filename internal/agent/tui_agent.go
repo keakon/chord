@@ -187,6 +187,10 @@ type UsageReporter interface {
 	// GetSidebarUsageStats returns token/cost totals for the focused agent only, aligned with
 	// GetContextStats and GetTokenUsage for the right info panel and footer pills.
 	GetSidebarUsageStats() analytics.SessionStats
+	// GetSidebarWalltimeStats returns wall-clock time distribution (model /
+	// tool / cooldown / user wait) for the focused agent only, for the TIME
+	// info panel section. All buckets are zero when nothing has been recorded.
+	GetSidebarWalltimeStats() analytics.WalltimeStats
 	// GetContextStats returns current input-context usage and usable input budget for the focused agent.
 	// current is the last input token count; limit is the usable input budget (0 if unknown).
 	GetContextStats() (current, limit int)

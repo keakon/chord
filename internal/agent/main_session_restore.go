@@ -44,6 +44,7 @@ type loadedSessionState struct {
 	ModelPoolCurrentModelPool string
 	ModelPoolAgentOverrides   map[string]string
 	UsageStats                analytics.SessionStats
+	WalltimeStats             map[string]*analytics.WalltimeStats
 	AgentModelRefs            map[string]analytics.AgentModelRefs
 	ContextUsage              message.TokenUsage
 	LastInputTokens           int
@@ -325,21 +326,26 @@ func (a *MainAgent) loadMainTranscript(tmpRecovery *recovery.RecoveryManager, se
 	return msgs, mainLoadDuration, time.Since(normalizeStarted), nil
 }
 
-func (a *MainAgent) restoreUsageEvidence(loaded *loadedSessionState, sessionPath string) (time.Duration, int64) {
+// restoreSessionEvidence rebuilds token/cost stats, model refs, and walltime
+// from the usage ledger in a single scan. It never fails the restore: a
+// corrupt or missing ledger yields empty baselines and the affected sections
+// show nothing.
+func (a *MainAgent) restoreSessionEvidence(loaded *loadedSessionState, sessionPath string) (time.Duration, int64) {
 	if loaded == nil {
 		return 0, 0
 	}
 	if ledger := analytics.NewUsageLedger(sessionPath, a.projectRoot); ledger != nil {
 		usageStarted := time.Now()
-		if ledgerStats, eventCount, modelRefs, ledgerErr := ledger.BuildSessionStatsWithAgentModelRefs(); ledgerErr != nil {
-			log.Warnf("failed to rebuild usage stats from usage ledger session=%v error=%v", sessionPath, ledgerErr)
-		} else if eventCount > 0 {
-			loaded.UsageStats = ledgerStats
-			loaded.AgentModelRefs = modelRefs
-			loaded.ContextUsage = tokenUsageFromSessionStats(ledgerStats)
-			return time.Since(usageStarted), eventCount
+		stats, eventCount, modelRefs, walltime, ledgerErr := ledger.BuildSessionEvidence()
+		if ledgerErr != nil {
+			log.Warnf("failed to rebuild session evidence from usage ledger session=%v error=%v", sessionPath, ledgerErr)
+			return time.Since(usageStarted), 0
 		}
-		return time.Since(usageStarted), 0
+		loaded.UsageStats = stats
+		loaded.AgentModelRefs = modelRefs
+		loaded.ContextUsage = tokenUsageFromSessionStats(stats)
+		loaded.WalltimeStats = walltime
+		return time.Since(usageStarted), eventCount
 	}
 	return 0, 0
 }
@@ -433,7 +439,7 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 		todoFallbackDuration    time.Duration
 	)
 
-	usageLedgerDuration, usageLedgerEventCount = a.restoreUsageEvidence(loaded, sessionPath)
+	usageLedgerDuration, usageLedgerEventCount = a.restoreSessionEvidence(loaded, sessionPath)
 	if mailboxMsgs, mailboxErr := loadSubAgentMailboxMessages(sessionPath); mailboxErr != nil {
 		log.Warnf("failed to load subagent mailbox log session=%v error=%v", sessionPath, mailboxErr)
 	} else {
@@ -710,6 +716,9 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.skillsMu.Unlock()
 
 	if a.recovery != nil {
+		if a.walltime != nil {
+			a.walltime.flush()
+		}
 		a.recovery.Close()
 	}
 	a.sessionEpoch++
@@ -720,6 +729,10 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	cleanupStalePendingCompactions(a.sessionDir, 5*time.Minute)
 	a.recovery = recovery.NewRecoveryManager(loaded.SessionPath)
 	a.usageLedger = analytics.NewUsageLedger(loaded.SessionPath, a.projectRoot)
+	if a.walltime != nil {
+		a.walltime.repointLedger(a.usageLedger)
+		a.walltime.restoreStats(loaded.WalltimeStats)
+	}
 	summary := cloneSessionSummary(loaded.Summary)
 	if summary != nil {
 		summary.Locked = a.sessionLock != nil

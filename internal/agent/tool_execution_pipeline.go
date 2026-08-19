@@ -56,6 +56,7 @@ type toolExecutionPipeline struct {
 	bypassPermission              func(string) bool
 	visibleToolNames              func() map[string]struct{}
 	appendToolActivity            func(recovery.ToolActivityRecord) error
+	captureWalltimeTarget         func() *walltimeTarget
 }
 
 func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
@@ -305,7 +306,21 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		return execResult, err
 	}
 
+	// Wall-clock execution anchor: set after permission confirmation, hooks,
+	// and argument validation all passed, before resource acquisition (file
+	// locks, workspace lease), backups, and the journal write. Everything from
+	// here to the registry Execute — including lock/lease waits — counts as
+	// tool execution time; ask / question / done confirmation waits happened
+	// before this point and are excluded.
+	execResult.ExecStartedAt = time.Now()
+	if p.captureWalltimeTarget != nil {
+		execResult.walltimeTarget = p.captureWalltimeTarget()
+	}
+
 	agentCtx := buildToolExecContext(ctx, tc, p.agentID, p.taskID, p.sessionDir, p.eventSender, p.emit)
+	if p.currentTurnID != nil {
+		agentCtx = tools.WithTurnID(agentCtx, p.currentTurnID())
+	}
 	imageSink := &tools.ImageCollector{}
 	agentCtx = tools.WithImageSink(agentCtx, imageSink)
 	readObservationSink := &tools.ReadObservationCollector{}
@@ -456,6 +471,14 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	if err := validateToolArgsAgainstSchema(p.registry, tc.Name, tc.Args); err != nil {
 		return execResult, err
 	}
+	// Wall-clock execution anchor for the speculative run: after schema
+	// validation, before workspace lease acquisition, so lease waits count as
+	// tool time. Speculative execution never includes confirmation waits
+	// (permission must already be Allow), so this anchor is exact.
+	execResult.ExecStartedAt = time.Now()
+	if p.captureWalltimeTarget != nil {
+		execResult.walltimeTarget = p.captureWalltimeTarget()
+	}
 	releaseLease, err := p.acquireWorkspaceLease(ctx, tc)
 	if err != nil {
 		return execResult, err
@@ -472,6 +495,9 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	execResult.speculativeHooks = hooks
 
 	agentCtx := buildToolExecContext(ctx, tc, p.agentID, p.taskID, p.sessionDir, p.eventSender, p.emit)
+	if p.currentTurnID != nil {
+		agentCtx = tools.WithTurnID(agentCtx, p.currentTurnID())
+	}
 	if tc.Name == tools.NameTodoWrite {
 		agentCtx = tools.WithTodoWriteSpeculativePreview(agentCtx)
 	}
@@ -593,6 +619,19 @@ func normalizeCompatibleToolCallArgs(tc *message.ToolCall, result *ToolExecution
 		result.Audit = syncAuditEffectiveArgs(result.Audit, original, normalized)
 	}
 	return nil
+}
+
+func toolExecDuration(toolName string, execResult ToolExecutionResult, completedAt time.Time) time.Duration {
+	// Question is an interaction-only tool: its Execute method blocks for the
+	// user's answers, so its wall time belongs in UserWait rather than Tools.
+	if tools.NormalizeName(toolName) == tools.NameQuestion {
+		return 0
+	}
+	start := execResult.ExecStartedAt
+	if start.IsZero() || completedAt.Before(start) {
+		return 0
+	}
+	return completedAt.Sub(start)
 }
 
 func (p toolExecutionPipeline) acquireWorkspaceLease(ctx context.Context, tc message.ToolCall) (func(), error) {
@@ -741,7 +780,14 @@ func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.
 		if p.confirm == nil {
 			return wrapToolRequiresConfirmation(tc.Name)
 		}
-		resp, err := p.confirm(ctx, tc.Name, string(tc.Args), decision.NeedsApprovalPaths, decision.AlreadyAllowedPaths, decision.NeedsApprovalRules, decision.AlreadyAllowedRules)
+		// Carry the owning agent ID into the confirmation flow so its user-wait
+		// walltime is attributed to the right agent (SubAgent confirmations
+		// resolve through the shared parent confirmFn).
+		confirmCtx := tools.WithAgentID(ctx, p.agentID)
+		if p.currentTurnID != nil {
+			confirmCtx = tools.WithTurnID(confirmCtx, p.currentTurnID())
+		}
+		resp, err := p.confirm(confirmCtx, tc.Name, string(tc.Args), decision.NeedsApprovalPaths, decision.AlreadyAllowedPaths, decision.NeedsApprovalRules, decision.AlreadyAllowedRules)
 		if err != nil {
 			return wrapToolConfirmationFailed(tc.Name, err)
 		}

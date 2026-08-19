@@ -4054,6 +4054,7 @@ type sessionControlAgent struct {
 	runningVariantByFocus   map[string]string
 	tokenUsage              message.TokenUsage
 	sidebarUsage            analytics.SessionStats
+	walltimeStats           analytics.WalltimeStats
 	contextCurrent          int
 	contextLimit            int
 	todos                   []tools.TodoItem
@@ -4255,6 +4256,9 @@ func (s *sessionControlAgent) GetTokenUsage() message.TokenUsage     { return s.
 func (s *sessionControlAgent) GetUsageStats() analytics.SessionStats { return analytics.SessionStats{} }
 func (s *sessionControlAgent) GetSidebarUsageStats() analytics.SessionStats {
 	return s.sidebarUsage
+}
+func (s *sessionControlAgent) GetSidebarWalltimeStats() analytics.WalltimeStats {
+	return s.walltimeStats
 }
 func (s *sessionControlAgent) GetContextStats() (current, limit int) {
 	return s.contextCurrent, s.contextLimit

@@ -102,7 +102,10 @@ type ToolResultPayload struct {
 	// RecoveryState classifies synthetic results synthesized during session
 	// restore or a failed intent barrier (not_started / outcome_unknown).
 	// Ordinary runtime results leave it empty.
-	RecoveryState    string
+	RecoveryState string
+	// walltimeTarget is runtime-only ownership metadata captured when the tool
+	// reached its execution anchor; it is never serialized into tool messages.
+	walltimeTarget   *walltimeTarget
 	speculativeHooks *speculativeToolHooks
 }
 
