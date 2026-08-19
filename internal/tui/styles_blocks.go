@@ -18,7 +18,6 @@ var (
 	AssistantCardStyle           lipgloss.Style
 	ThinkingCardStyle            lipgloss.Style
 	CompactionSummaryCardStyle   lipgloss.Style
-	ThinkingMarginStyle          lipgloss.Style
 	FocusedCardStyle             lipgloss.Style
 	PillStyle                    lipgloss.Style
 	ToolCallStyle                lipgloss.Style

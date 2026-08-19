@@ -35,10 +35,7 @@ func applyBlockStyles(t Theme) {
 	AssistantCardStyle = baseCardStyle.
 		Background(lipgloss.Color(t.AssistantCardBg))
 
-	// Thinking blocks use extra left padding to visually nest them as
-	// "inner dialogue" compared to primary user/assistant cards.
 	ThinkingCardStyle = baseCardStyle.
-		PaddingLeft(2).
 		Background(lipgloss.Color(t.ThinkingCardBg)).
 		Foreground(lipgloss.Color(t.ThinkingCardFg))
 
@@ -61,8 +58,6 @@ func applyBlockStyles(t Theme) {
 	ThinkingLabelStyle = LabelStyle.
 		Background(lipgloss.Color(t.ThinkingLabelBg)).
 		Foreground(lipgloss.Color(t.LabelBadgeFg))
-
-	ThinkingMarginStyle = lipgloss.NewStyle().PaddingLeft(2)
 
 	FocusedCardStyle = lipgloss.NewStyle().
 		Padding(0, 1).

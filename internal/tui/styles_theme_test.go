@@ -35,7 +35,7 @@ func TestTranscriptCardStylesShareBaseSpacing(t *testing.T) {
 		{name: "compaction summary", style: CompactionSummaryCardStyle, wantPadding: [4]int{1, 2, 1, 1}, wantLeftEdge: 2},
 		{name: "error", style: ErrorCardStyle, wantPadding: [4]int{1, 2, 1, 1}, wantLeftEdge: 2},
 		{name: "tool", style: ToolBlockStyle, wantPadding: [4]int{1, 2, 1, 1}, wantLeftEdge: 2},
-		{name: "thinking", style: ThinkingCardStyle, wantPadding: [4]int{1, 2, 1, 2}, wantLeftEdge: 3},
+		{name: "thinking", style: ThinkingCardStyle, wantPadding: [4]int{1, 2, 1, 1}, wantLeftEdge: 2},
 	}
 	for _, tt := range tests {
 		top, right, bottom, left := tt.style.GetPadding()
