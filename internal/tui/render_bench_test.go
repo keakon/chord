@@ -489,6 +489,75 @@ func BenchmarkRenderToolCallCard(b *testing.B) {
 	}
 }
 
+func BenchmarkRenderEditDiffSinglePair(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:         1,
+		Type:       BlockToolCall,
+		ToolName:   tools.NameEdit,
+		Content:    `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
+		Diff:       "--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-return 1\n+return 10\n",
+		ResultDone: true,
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		block.InvalidateCache()
+		_ = block.Render(100, "")
+	}
+}
+
+func BenchmarkRenderEditDiffUnevenBlock(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:         1,
+		Type:       BlockToolCall,
+		ToolName:   tools.NameEdit,
+		Content:    `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
+		Diff:       "--- example.go\n+++ example.go\n@@ -1,2 +1,1 @@\n-old line one\n-old line two\n+new line\n",
+		ResultDone: true,
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		block.InvalidateCache()
+		_ = block.Render(100, "")
+	}
+}
+
+func BenchmarkRenderEditDiffLargeUnevenBlock(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	const (
+		deletedLines = 140
+		addedLines   = 60
+	)
+	diffLines := []string{
+		"--- example.go",
+		"+++ example.go",
+		fmt.Sprintf("@@ -1,%d +1,%d @@", deletedLines, addedLines),
+	}
+	for i := range deletedLines {
+		diffLines = append(diffLines, fmt.Sprintf("-old line %03d", i))
+	}
+	for i := range addedLines {
+		diffLines = append(diffLines, fmt.Sprintf("+new line %03d", i))
+	}
+	block := &Block{
+		ID:         1,
+		Type:       BlockToolCall,
+		ToolName:   tools.NameEdit,
+		Content:    `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
+		Diff:       strings.Join(diffLines, "\n") + "\n",
+		ResultDone: true,
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		block.InvalidateCache()
+		_ = block.Render(100, "")
+	}
+}
+
 // BenchmarkRenderCompactToolCallCard measures the compact-toggle tool card path
 // where repeated JSON arg parsing previously happened inside a single render.
 func BenchmarkRenderCompactToolCallCard(b *testing.B) {

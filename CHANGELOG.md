@@ -36,6 +36,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Edit tool cards no longer drop or blank lines in unequal change blocks. When a hunk replaced two lines with one (or one with two), the leftover delete/add line lost its whole-line background or disappeared from the diff view entirely.
 - The status bar "Since HH:MM" anchor no longer drifts while background compaction runs: the periodic compaction keep-alive re-emits the same activity, which used to reset the timer so the displayed start time could jump forward every interval. Repeats of the same activity keep the original start; a real activity transition still refreshes it.
 - A main-model response that finishes normally with `stop` no longer starts a new automatic compaction while the agent returns to idle. Chord keeps the threshold signal armed and starts compaction while preparing the next main-model request; a compaction that was already running before `stop` is not cancelled and still applies at the next safe continuation or idle barrier.
 - Queued main-agent input no longer waits for the entire model fallback chain to finish. Before Chord dispatches the next fallback-model request, it now commits user messages queued by that point and includes them in the request; messages arriving after dispatch still wait for the next safe request boundary, and requests already in flight are never rewritten.

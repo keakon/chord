@@ -62,15 +62,28 @@ type diffOneSidedSpan struct {
 }
 
 // appendApplyPatchToolUnifiedDiffPair renders one logical (-,+) line pair from a unified diff.
-func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine string, oldLineNum, newLineNum, diffWidth int, hl *codeHighlighter) int {
+func appendTUIDiffTruncationLine(result *[]string) {
+	*result = append(*result, "  "+DimStyle.Render("... (diff truncated)"))
+}
+
+func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine string, oldLineNum, newLineNum, diffWidth int, hl *codeHighlighter, shownLines *int) bool {
 	formatLineNum := func(n int) string { return fmt.Sprintf("%4d ", n) }
+	if *shownLines >= maxTUIDiffLines {
+		appendTUIDiffTruncationLine(result)
+		return false
+	}
 	if lines := renderInlineDiffLine(oldLine, newLine, diffWidth, hl); lines != nil {
 		if strings.HasPrefix(lines[0], "+") {
 			*result = append(*result, "  "+DimStyle.Render(formatLineNum(newLineNum))+lines[0])
 		} else {
 			*result = append(*result, "  "+DimStyle.Render(formatLineNum(oldLineNum))+lines[0])
 		}
-		return 1
+		*shownLines = *shownLines + 1
+		return true
+	}
+	if *shownLines+2 > maxTUIDiffLines {
+		appendTUIDiffTruncationLine(result)
+		return false
 	}
 	oldSegs, newSegs := tools.InlineDiff(oldLine, newLine)
 	oldCode := renderHighlightedSnippetLine(oldLine, filterDiffSpansByKind(buildDiffSegmentSpans(oldSegs), "delete"), diffWidth-1, hl, diffDelBg)
@@ -79,7 +92,32 @@ func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine stri
 		"  "+DimStyle.Render(formatLineNum(oldLineNum))+DiffDelStyle.Render("-")+oldCode,
 		"  "+DimStyle.Render(formatLineNum(newLineNum))+DiffAddStyle.Render("+")+newCode,
 	)
-	return 2
+	*shownLines += 2
+	return true
+}
+
+func appendApplyPatchToolUnifiedDiffLine(result *[]string, body string, lineNum, diffWidth int, hl *codeHighlighter, added bool, shownLines *int) bool {
+	if *shownLines >= maxTUIDiffLines {
+		appendTUIDiffTruncationLine(result)
+		return false
+	}
+	bg := diffDelBg
+	marker := DiffDelStyle.Render("-")
+	if added {
+		bg = diffAddBg
+		marker = DiffAddStyle.Render("+")
+	}
+	code := renderHighlightedSnippetLine(body, []diffSegmentSpan{{StartCol: 0, EndCol: diffTextWidth(body)}}, diffWidth-1, hl, bg)
+	*result = append(*result, "  "+DimStyle.Render(fmt.Sprintf("%4d ", lineNum))+marker+code)
+	*shownLines = *shownLines + 1
+	return true
+}
+
+func nextNonEmptyUnifiedDiffLine(lines []string, index int) int {
+	for index < len(lines) && lines[index] == "" {
+		index++
+	}
+	return index
 }
 
 // renderFileDiffCall renders an Edit tool call with a unified diff view.
@@ -156,7 +194,6 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	seenHunk := false
 	renderedDiffFileCount := 0
 	var oldLineNum, newLineNum int
-	formatLineNum := func(n int) string { return fmt.Sprintf("%4d ", n) }
 	if !b.toolResultIsCancelled() {
 	diffLoop:
 		for i := 0; i < len(diffLines); i++ {
@@ -165,87 +202,112 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				continue
 			}
 			if shownLines >= maxTUIDiffLines {
-				result = append(result, "  "+DimStyle.Render("... (diff truncated)"))
+				appendTUIDiffTruncationLine(&result)
 				break
 			}
 			var rendered string
 			switch {
 			case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
-				if i+1 < len(diffLines) {
-					next := diffLines[i+1]
-					if strings.HasPrefix(next, "-") && !strings.HasPrefix(next, "---") {
-						j := i
-						var delBodies, addBodies []string
-						for j < len(diffLines) {
-							l := diffLines[j]
-							if l == "" {
-								j++
-								continue
-							}
-							if strings.HasPrefix(l, "-") && !strings.HasPrefix(l, "---") {
-								delBodies = append(delBodies, l[1:])
-								j++
-								continue
-							}
-							break
-						}
-						addJ := j
-						for addJ < len(diffLines) {
-							l := diffLines[addJ]
-							if l == "" {
-								addJ++
-								continue
-							}
-							if strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "+++") {
-								addBodies = append(addBodies, l[1:])
-								addJ++
-								continue
-							}
-							break
-						}
-						if len(delBodies) >= 2 && len(delBodies) == len(addBodies) {
-							for k := range delBodies {
-								if shownLines >= maxTUIDiffLines {
-									result = append(result, "  "+DimStyle.Render("... (diff truncated)"))
-									break diffLoop
-								}
-								shownLines += appendApplyPatchToolUnifiedDiffPair(&result, delBodies[k], addBodies[k], oldLineNum, newLineNum, diffWidth, hl)
-								oldLineNum++
-								newLineNum++
-							}
-							i = addJ - 1
-							continue
-						}
-					}
-				}
-				if i+1 < len(diffLines) {
-					next := diffLines[i+1]
-					if strings.HasPrefix(next, "+") && !strings.HasPrefix(next, "+++") {
-						if shownLines >= maxTUIDiffLines {
-							result = append(result, "  "+DimStyle.Render("... (diff truncated)"))
+				next := nextNonEmptyUnifiedDiffLine(diffLines, i+1)
+				nextIsDeletion := next < len(diffLines) && strings.HasPrefix(diffLines[next], "-") && !strings.HasPrefix(diffLines[next], "---")
+				nextIsAddition := next < len(diffLines) && strings.HasPrefix(diffLines[next], "+") && !strings.HasPrefix(diffLines[next], "+++")
+				if nextIsAddition {
+					afterAdd := nextNonEmptyUnifiedDiffLine(diffLines, next+1)
+					if afterAdd >= len(diffLines) || !strings.HasPrefix(diffLines[afterAdd], "+") || strings.HasPrefix(diffLines[afterAdd], "+++") {
+						if !appendApplyPatchToolUnifiedDiffPair(&result, line[1:], diffLines[next][1:], oldLineNum, newLineNum, diffWidth, hl, &shownLines) {
 							break diffLoop
 						}
-						shownLines += appendApplyPatchToolUnifiedDiffPair(&result, line[1:], next[1:], oldLineNum, newLineNum, diffWidth, hl)
 						oldLineNum++
 						newLineNum++
-						i++
+						i = next
 						continue
 					}
 				}
-				code := renderHighlightedSnippetLine(line[1:], []diffSegmentSpan{{StartCol: 0, EndCol: diffTextWidth(line[1:])}}, diffWidth-1, hl, diffDelBg)
-				rendered = DimStyle.Render(formatLineNum(oldLineNum)) + DiffDelStyle.Render("-") + code
-				oldLineNum++
+				if !nextIsDeletion && !nextIsAddition {
+					if !appendApplyPatchToolUnifiedDiffLine(&result, line[1:], oldLineNum, diffWidth, hl, false, &shownLines) {
+						break diffLoop
+					}
+					oldLineNum++
+					i = next - 1
+					continue
+				}
+				j := i
+				var delBodies, addBodies []string
+				for j < len(diffLines) {
+					l := diffLines[j]
+					if l == "" {
+						j++
+						continue
+					}
+					if strings.HasPrefix(l, "-") && !strings.HasPrefix(l, "---") {
+						delBodies = append(delBodies, l[1:])
+						j++
+						continue
+					}
+					break
+				}
+				addJ := j
+				for addJ < len(diffLines) {
+					l := diffLines[addJ]
+					if l == "" {
+						addJ++
+						continue
+					}
+					if strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "+++") {
+						addBodies = append(addBodies, l[1:])
+						addJ++
+						continue
+					}
+					break
+				}
+				if len(addBodies) > 0 && len(delBodies) == len(addBodies) {
+					for k := range delBodies {
+						if !appendApplyPatchToolUnifiedDiffPair(&result, delBodies[k], addBodies[k], oldLineNum, newLineNum, diffWidth, hl, &shownLines) {
+							break diffLoop
+						}
+						oldLineNum++
+						newLineNum++
+					}
+					i = addJ - 1
+					continue
+				}
+				if len(addBodies) > 0 {
+					for _, body := range delBodies {
+						if !appendApplyPatchToolUnifiedDiffLine(&result, body, oldLineNum, diffWidth, hl, false, &shownLines) {
+							break diffLoop
+						}
+						oldLineNum++
+					}
+					for _, body := range addBodies {
+						if !appendApplyPatchToolUnifiedDiffLine(&result, body, newLineNum, diffWidth, hl, true, &shownLines) {
+							break diffLoop
+						}
+						newLineNum++
+					}
+					i = addJ - 1
+					continue
+				}
+				for _, body := range delBodies {
+					if !appendApplyPatchToolUnifiedDiffLine(&result, body, oldLineNum, diffWidth, hl, false, &shownLines) {
+						break diffLoop
+					}
+					oldLineNum++
+				}
+				i = j - 1
+				continue
 			case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
-				code := renderHighlightedSnippetLine(line[1:], []diffSegmentSpan{{StartCol: 0, EndCol: diffTextWidth(line[1:])}}, diffWidth-1, hl, diffAddBg)
-				rendered = DimStyle.Render(formatLineNum(newLineNum)) + DiffAddStyle.Render("+") + code
+				if !appendApplyPatchToolUnifiedDiffLine(&result, line[1:], newLineNum, diffWidth, hl, true, &shownLines) {
+					break diffLoop
+				}
 				newLineNum++
+				continue
 			case strings.HasPrefix(line, "@@"):
 				if seenHunk {
 					sep := DimStyle.Render("  ─────────────")
 					result = append(result, "  "+sep)
 					shownLines++
 					if shownLines >= maxTUIDiffLines {
-						result = append(result, "  "+DimStyle.Render("... (diff truncated)"))
+						appendTUIDiffTruncationLine(&result)
 						break diffLoop
 					}
 				}
@@ -282,7 +344,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				}
 				code := renderHighlightedSnippetLine(content, nil, diffWidth-1, hl, "")
 				displayLineNum := max(newLineNum, oldLineNum)
-				rendered = DimStyle.Render(formatLineNum(displayLineNum)) + " " + code
+				rendered = DimStyle.Render(fmt.Sprintf("%4d ", displayLineNum)) + " " + code
 				oldLineNum++
 				newLineNum++
 			}

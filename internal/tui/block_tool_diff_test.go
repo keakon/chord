@@ -883,6 +883,95 @@ func TestRenderFileDiffCallGroupedMinusPlusBlockUsesInlineOneSidedPairs(t *testi
 	}
 }
 
+func TestRenderFileDiffCallUnequalMinusPlusBlocksUseWholeLineBackground(t *testing.T) {
+	tests := []struct {
+		name            string
+		oldLines        []string
+		newLines        []string
+		wantLineNumbers bool
+	}{
+		{
+			name:     "two deletions one addition",
+			oldLines: []string{"func demo() {", "    value := 1"},
+			newLines: []string{"func demo() {    value := 1"},
+		},
+		{
+			name:            "one deletion two additions",
+			oldLines:        []string{"old line"},
+			newLines:        []string{"new line one", "new line two"},
+			wantLineNumbers: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ApplyTheme(DefaultTheme())
+			old := strings.Join(tt.oldLines, "\n") + "\n"
+			new := strings.Join(tt.newLines, "\n") + "\n"
+			diff := tools.GenerateUnifiedDiff(old, new, "example.go")
+			if diff == "" {
+				t.Fatal("expected non-empty unified diff")
+			}
+			block := &Block{
+				ID:         1,
+				Type:       BlockToolCall,
+				ToolName:   tools.NameEdit,
+				Content:    `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
+				Diff:       diff,
+				ResultDone: true,
+			}
+
+			lines := block.Render(120, "")
+			plain := stripANSI(strings.Join(lines, "\n"))
+			for _, oldLine := range tt.oldLines {
+				deleted := renderedLineContaining(t, lines, oldLine)
+				assertRenderedTextBackground(t, deleted, oldLine, colorOfTheme(currentTheme.DiffDelLineBg))
+			}
+			for _, newLine := range tt.newLines {
+				added := renderedLineContaining(t, lines, newLine)
+				assertRenderedTextBackground(t, added, newLine, colorOfTheme(currentTheme.DiffAddLineBg))
+			}
+			if tt.wantLineNumbers {
+				for _, want := range []string{"  1 -old line", "  1 +new line one", "  2 +new line two"} {
+					if !strings.Contains(plain, want) {
+						t.Fatalf("expected line-numbered uneven diff to contain %q, got:\n%s", want, plain)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestRenderFileDiffCallDoesNotExceedLineLimitForTwoLinePair(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	diffLines := []string{
+		"--- example.go",
+		"+++ example.go",
+		fmt.Sprintf("@@ -1,%d +1,%d @@", maxTUIDiffLines, maxTUIDiffLines),
+	}
+	for i := 1; i < maxTUIDiffLines; i++ {
+		diffLines = append(diffLines, fmt.Sprintf(" context line %d", i))
+	}
+	diffLines = append(diffLines, "-old value", "+new value")
+	block := &Block{
+		ID:         1,
+		Type:       BlockToolCall,
+		ToolName:   tools.NameEdit,
+		Content:    `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
+		Diff:       strings.Join(diffLines, "\n") + "\n",
+		ResultDone: true,
+	}
+
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(plain, "... (diff truncated)") {
+		t.Fatalf("expected diff truncation marker, got:\n%s", plain)
+	}
+	for _, hidden := range []string{"old value", "new value"} {
+		if strings.Contains(plain, hidden) {
+			t.Fatalf("expected two-line pair %q to be omitted at the line limit, got:\n%s", hidden, plain)
+		}
+	}
+}
+
 func TestRenderFileDiffCallPureDeletionLongLineUsesSnippets(t *testing.T) {
 	oldLine := strings.Repeat("prefix", 7) + " github.com/org/service/internal/api " + strings.Repeat("suffix", 7)
 	newLine := strings.Repeat("prefix", 7) + " github.com/org/service/api " + strings.Repeat("suffix", 7)
