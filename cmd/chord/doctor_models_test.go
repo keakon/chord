@@ -186,7 +186,7 @@ func TestDoctorModelsPlanExplicitModelRules(t *testing.T) {
 
 func TestDoctorModelsPlanProviderAllowsSlashModelIDs(t *testing.T) {
 	cfg := &config.Config{Providers: map[string]config.ProviderConfig{
-		"openrouter": {
+		"sample": {
 			Type: config.ProviderTypeChatCompletions,
 			Models: map[string]config.ModelConfig{
 				"anthropic/claude": {
@@ -198,14 +198,14 @@ func TestDoctorModelsPlanProviderAllowsSlashModelIDs(t *testing.T) {
 			},
 		},
 	}}
-	plan, err := buildDoctorModelsPlan(cfg, nil, doctorModelsOptions{Provider: "openrouter", ModelRef: "anthropic/claude@fast"})
+	plan, err := buildDoctorModelsPlan(cfg, nil, doctorModelsOptions{Provider: "sample", ModelRef: "anthropic/claude@fast"})
 	if err != nil {
 		t.Fatalf("buildDoctorModelsPlan: %v", err)
 	}
 	if len(plan.Entries) != 1 || plan.Entries[0].Target == nil {
 		t.Fatalf("entries = %+v, want target", plan.Entries)
 	}
-	if got := plan.Entries[0].Target.CanonicalRef; got != "openrouter/anthropic/claude@fast" {
+	if got := plan.Entries[0].Target.CanonicalRef; got != "sample/anthropic/claude@fast" {
 		t.Fatalf("canonical ref = %q", got)
 	}
 }

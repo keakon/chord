@@ -625,7 +625,7 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 	})
 
 	t.Run("prefer_done_arguments_when_present", func(t *testing.T) {
-		// API sends empty or partial deltas but done event has full item.arguments (e.g. qt decoding).
+		// API sends empty or partial deltas but done event has full item.arguments (e.g. a proxy that buffers deltas).
 		// Parser should use done's arguments as final args.
 		stream := buildSSEStream([]string{
 			`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_xyz","name":"Shell"}}`,
@@ -1186,11 +1186,11 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 	})
 }
 
-// TestParseResponsesSSE_DuplicateToolCallFromProxy verifies that when a proxy (e.g. qt)
+// TestParseResponsesSSE_DuplicateToolCallFromProxy verifies that when a proxy
 // replays the same tool call events after they've already been finalized, the parser
 // deduplicates them — producing exactly 1 tool call, not 2.
 func TestParseResponsesSSE_DuplicateToolCallFromProxy(t *testing.T) {
-	// Simulate qt behavior: normal sequence, then duplicate with triple-encoded args.
+	// Simulate proxy behavior: normal sequence, then duplicate with triple-encoded args.
 	stream := buildSSEStream([]string{
 		// First (normal) sequence
 		`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"shell"}}`,
@@ -1431,7 +1431,7 @@ func TestParseResponsesSSE_ExecuteShellTool(t *testing.T) {
 }
 
 // TestParseResponsesSSE_ExecuteShellTool_DoneArgumentsAsString runs the same flow when the API
-// sends arguments only in done event as a JSON string (e.g. qt). Execute must still succeed.
+// sends arguments only in done event as a JSON string (as some proxies do). Execute must still succeed.
 func TestParseResponsesSSE_ExecuteShellTool_DoneArgumentsAsString(t *testing.T) {
 	stream := buildSSEStream([]string{
 		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_2","name":"shell"}}`,
@@ -2507,7 +2507,7 @@ func TestResponsesProvider_SendsSystemPromptAsInstructions(t *testing.T) {
 	}))
 	defer server.Close()
 
-	providerCfg := NewProviderConfig("sharedchat", config.ProviderConfig{
+	providerCfg := NewProviderConfig("sample", config.ProviderConfig{
 		Type:   config.ProviderTypeResponses,
 		APIURL: server.URL + "/v1/responses",
 	}, []string{"test-key"})

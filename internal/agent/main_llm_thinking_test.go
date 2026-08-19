@@ -68,10 +68,10 @@ func TestCallLLMPromotesStreamingActivityOnToolUseStartWithoutStatusDelta(t *tes
 
 func TestMainLLMStatusModelRefUpdatesRunningModelBeforeVisibleOutput(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.SetProviderModelRef("freemodel/gpt-5.5@xhigh")
+	a.SetProviderModelRef("sample/gpt-5.5@xhigh")
 
 	state := &mainLLMStreamState{}
-	reducer := a.newMainLLMStreamReducer(nil, "freemodel/gpt-5.5@xhigh", "freemodel/gpt-5.5@xhigh", nil, false, state)
+	reducer := a.newMainLLMStreamReducer(nil, "sample/gpt-5.5@xhigh", "sample/gpt-5.5@xhigh", nil, false, state)
 	reducer.Handle(message.StreamDelta{
 		Type: "status",
 		Status: &message.StatusDelta{
@@ -90,7 +90,7 @@ func TestMainLLMStatusModelRefUpdatesRunningModelBeforeVisibleOutput(t *testing.
 		if !ok {
 			continue
 		}
-		if changed.ProviderModelRef == "freemodel/gpt-5.5@xhigh" && changed.RunningModelRef == "codex/gpt-5.5@xhigh" {
+		if changed.ProviderModelRef == "sample/gpt-5.5@xhigh" && changed.RunningModelRef == "codex/gpt-5.5@xhigh" {
 			saw = true
 			break
 		}

@@ -76,9 +76,9 @@ func TestCompactionPolicyAnalyticsEventsRecordedInTrackerAndLedger(t *testing.T)
 func TestCompactionFailureAnalyticsEventRecordedInTrackerAndLedger(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.SetProviderModelRef("qt/gpt-5.5")
+	a.SetProviderModelRef("sample/gpt-5.5")
 	a.llmMu.Lock()
-	a.runningModelRef = "qt/gpt-5.5"
+	a.runningModelRef = "sample/gpt-5.5"
 	a.llmMu.Unlock()
 	a.compactionState.trigger = compactionTrigger{UsageDriven: true}
 
@@ -126,9 +126,9 @@ func TestCompactionFailureAnalyticsEventRecordedInTrackerAndLedger(t *testing.T)
 func TestOversizeRecoveryAnalyticsEventRecordedInTrackerAndLedger(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.SetProviderModelRef("qt/gpt-5.5")
+	a.SetProviderModelRef("sample/gpt-5.5")
 	a.llmMu.Lock()
-	a.runningModelRef = "qt/gpt-5.5"
+	a.runningModelRef = "sample/gpt-5.5"
 	a.llmMu.Unlock()
 
 	var events []analytics.UsageEvent
@@ -136,7 +136,7 @@ func TestOversizeRecoveryAnalyticsEventRecordedInTrackerAndLedger(t *testing.T) 
 		events = append(events, event)
 	})
 
-	a.recordOversizeRecoveryAnalyticsEvent("trigger_compaction", "main_llm_error", "qt/gpt-5.5", "fallback/gpt-5.5", map[string]string{"trigger": "oversize_driven"})
+	a.recordOversizeRecoveryAnalyticsEvent("trigger_compaction", "main_llm_error", "sample/gpt-5.5", "fallback/gpt-5.5", map[string]string{"trigger": "oversize_driven"})
 
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want 1", len(events))

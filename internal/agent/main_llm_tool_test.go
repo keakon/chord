@@ -252,8 +252,8 @@ func TestModelNameFromRef(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"meowoo/glm-5.1", "glm-5.1"},
-		{"qt/gpt-5.5", "gpt-5.5"},
+		{"sample/glm-5.1", "glm-5.1"},
+		{"provider/gpt-5.5", "gpt-5.5"},
 		{"a/b/c", "c"},          // nested: last segment wins
 		{"glm-5.1", "glm-5.1"},  // bare name
 		{"/glm-5.1", "glm-5.1"}, // leading slash

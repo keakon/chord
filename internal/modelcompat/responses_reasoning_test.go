@@ -522,11 +522,11 @@ func TestNormalizeAnthropicThinkingForeignReplayLadder(t *testing.T) {
 
 func TestNormalizeKeepsCrossProviderResponsesToolTrajectory(t *testing.T) {
 	msgs := []message.Message{
-		responsesOutputMsg("sharedchat", "gpt-5.6-sol"),
+		responsesOutputMsg("sample", "gpt-5.6-sol"),
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
 	}
 	target := TargetModel{
-		ProviderID: "jianzhile", WireFamily: WireFamilyOpenAIResponses, ModelID: "gpt-5.6-sol",
+		ProviderID: "provider-b", WireFamily: WireFamilyOpenAIResponses, ModelID: "gpt-5.6-sol",
 		ToolResultEncoding: ToolResultEncodingOpenAIToolRole, SupportsStructuredTools: true,
 	}
 	out, report := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true})
@@ -549,11 +549,11 @@ func TestNormalizeKeepsCrossProviderResponsesToolTrajectory(t *testing.T) {
 
 func TestNormalizeKeepsForeignNativeReplayAcrossModels(t *testing.T) {
 	msgs := []message.Message{
-		responsesOutputMsg("sharedchat", "gpt-5.6-sol"),
+		responsesOutputMsg("sample", "gpt-5.6-sol"),
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
 	}
 	target := TargetModel{
-		ProviderID: "jianzhile", WireFamily: WireFamilyOpenAIResponses, ModelID: "gpt-5.5",
+		ProviderID: "provider-b", WireFamily: WireFamilyOpenAIResponses, ModelID: "gpt-5.5",
 		ToolResultEncoding: ToolResultEncodingOpenAIToolRole, SupportsStructuredTools: true,
 	}
 	out, report := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true})
@@ -578,11 +578,11 @@ func TestNormalizeKeepsForeignNativeReplayAcrossModels(t *testing.T) {
 
 func TestNormalizeSynthesizedLevelStripsForeignNativeItems(t *testing.T) {
 	msgs := []message.Message{
-		responsesOutputMsg("sharedchat", "gpt-5.6-sol"),
+		responsesOutputMsg("sample", "gpt-5.6-sol"),
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
 	}
 	target := TargetModel{
-		ProviderID: "jianzhile", WireFamily: WireFamilyOpenAIResponses, ModelID: "gpt-5.6-sol",
+		ProviderID: "provider-b", WireFamily: WireFamilyOpenAIResponses, ModelID: "gpt-5.6-sol",
 		ToolResultEncoding: ToolResultEncodingOpenAIToolRole, SupportsStructuredTools: true,
 	}
 	out, report := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatSynthesized})
@@ -602,11 +602,11 @@ func TestNormalizeSynthesizedLevelStripsForeignNativeItems(t *testing.T) {
 
 func TestNormalizeStrictReplayTextifiesCrossProviderResponsesToolTrajectory(t *testing.T) {
 	msgs := []message.Message{
-		responsesOutputMsg("sharedchat", "gpt-5.6-sol"),
+		responsesOutputMsg("sample", "gpt-5.6-sol"),
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
 	}
 	target := TargetModel{
-		ProviderID: "jianzhile", WireFamily: WireFamilyOpenAIResponses, ModelID: "gpt-5.6-sol",
+		ProviderID: "provider-b", WireFamily: WireFamilyOpenAIResponses, ModelID: "gpt-5.6-sol",
 		ToolResultEncoding: ToolResultEncodingOpenAIToolRole, SupportsStructuredTools: true,
 	}
 	out, report := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatStrict})

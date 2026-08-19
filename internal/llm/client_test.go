@@ -835,7 +835,7 @@ func disableRetryDelayForTest(provider *ProviderConfig) {
 
 func TestClient_RetriableErrorTriesOtherKeysBeforeFallbackModel(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("codex", "gpt-5.5", []string{"key-a", "key-b"})
-	fallbackCfg := testProviderConfig("qt", "glm-5.1")
+	fallbackCfg := testProviderConfig("sample", "glm-5.1")
 
 	primaryImpl := &recordingProvider{}
 	primaryImpl.calls = []scriptedCall{
@@ -940,8 +940,8 @@ func TestClient_400ErrorTriesFallbackModel(t *testing.T) {
 }
 
 func TestClient_402QuotaErrorTriesOtherKeysBeforeFallbackModel(t *testing.T) {
-	primaryCfg := testProviderConfigWithKeys("freemodel", "gpt-5.4", []string{"key-a", "key-b", "key-c"})
-	fallbackCfg := testProviderConfig("qt", "glm-5.1")
+	primaryCfg := testProviderConfigWithKeys("sample", "gpt-5.4", []string{"key-a", "key-b", "key-c"})
+	fallbackCfg := testProviderConfig("fallback-prov", "fallback-model")
 
 	primaryImpl := &recordingProvider{}
 	primaryImpl.calls = []scriptedCall{
@@ -4140,7 +4140,7 @@ func TestSupportsAnthropicPromptCacheUsesCursorFallbackTarget(t *testing.T) {
 
 func TestModelPoolStickyCursorPreservesPinnedFallbackVariant(t *testing.T) {
 	primaryCfg := testProviderConfig("primary-prov", "primary-model")
-	fallbackCfg := NewProviderConfig("qt", config.ProviderConfig{
+	fallbackCfg := NewProviderConfig("fallback-prov", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
 		Models: map[string]config.ModelConfig{
 			"gpt-5.5": {
@@ -4172,8 +4172,8 @@ func TestModelPoolStickyCursorPreservesPinnedFallbackVariant(t *testing.T) {
 		t.Fatalf("first response = %#v, want fallback first", resp1)
 	}
 	st1 := c.LastCallStatus()
-	if st1.RunningModelRef != "qt/gpt-5.5@xhigh" {
-		t.Fatalf("first RunningModelRef = %q, want qt/gpt-5.5@xhigh", st1.RunningModelRef)
+	if st1.RunningModelRef != "fallback-prov/gpt-5.5@xhigh" {
+		t.Fatalf("first RunningModelRef = %q, want fallback-prov/gpt-5.5@xhigh", st1.RunningModelRef)
 	}
 
 	resp2, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi-2"}}, nil, nil)
@@ -4184,11 +4184,11 @@ func TestModelPoolStickyCursorPreservesPinnedFallbackVariant(t *testing.T) {
 		t.Fatalf("second response = %#v, want fallback second", resp2)
 	}
 	st2 := c.LastCallStatus()
-	if st2.SelectedModelRef != "qt/gpt-5.5@xhigh" {
-		t.Fatalf("second SelectedModelRef = %q, want qt/gpt-5.5@xhigh", st2.SelectedModelRef)
+	if st2.SelectedModelRef != "fallback-prov/gpt-5.5@xhigh" {
+		t.Fatalf("second SelectedModelRef = %q, want fallback-prov/gpt-5.5@xhigh", st2.SelectedModelRef)
 	}
-	if st2.RunningModelRef != "qt/gpt-5.5@xhigh" {
-		t.Fatalf("second RunningModelRef = %q, want qt/gpt-5.5@xhigh", st2.RunningModelRef)
+	if st2.RunningModelRef != "fallback-prov/gpt-5.5@xhigh" {
+		t.Fatalf("second RunningModelRef = %q, want fallback-prov/gpt-5.5@xhigh", st2.RunningModelRef)
 	}
 }
 

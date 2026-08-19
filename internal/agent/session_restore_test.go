@@ -684,7 +684,7 @@ func TestFocusedModelStateForParkedSubAgentUsesDurableRefsAndConfigPool(t *testi
 		"explorer": {
 			Name:    "explorer",
 			Mode:    config.AgentModeSubAgent,
-			Models:  map[string][]string{"gpt-5.6-sol": {"anyrouter/gpt-5.6-sol"}},
+			Models:  map[string][]string{"gpt-5.6-sol": {"provider-x/gpt-5.6-sol"}},
 			Variant: "high",
 		},
 	})
@@ -694,14 +694,14 @@ func TestFocusedModelStateForParkedSubAgentUsesDurableRefsAndConfigPool(t *testi
 		AgentDefName:     "explorer",
 		LatestInstanceID: "explorer-6",
 		RuntimeParked:    true,
-		SelectedModelRef: "muyuan/gpt-5.6-sol@high",
-		RunningModelRef:  "anyrouter/gpt-5.6-sol@high",
+		SelectedModelRef: "provider-y/gpt-5.6-sol@high",
+		RunningModelRef:  "provider-x/gpt-5.6-sol@high",
 	}
 	a.subs.mu.Unlock()
 	a.SwitchFocus("explorer-6")
 
 	got := a.FocusedModelState()
-	if got.SelectedRef != "muyuan/gpt-5.6-sol@high" || got.RunningRef != "anyrouter/gpt-5.6-sol@high" {
+	if got.SelectedRef != "provider-y/gpt-5.6-sol@high" || got.RunningRef != "provider-x/gpt-5.6-sol@high" {
 		t.Fatalf("focused refs = %#v", got)
 	}
 	if got.Variant != "high" {

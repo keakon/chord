@@ -55,7 +55,7 @@ func IsContextLengthExceededPendingCompaction(err error) bool {
 }
 
 // modelNameFromRef extracts the model name from a provider/model reference.
-// Examples: "meowoo/glm-5.1" → "glm-5.1", "qt/gpt-5.5" → "gpt-5.5",
+// Examples: "sample/glm-5.1" → "glm-5.1", "provider/gpt-5.5" → "gpt-5.5",
 // "glm-5.1" → "glm-5.1" (bare name returned as-is).
 func modelNameFromRef(providerModelRef string) string {
 	if idx := strings.LastIndex(providerModelRef, "/"); idx >= 0 && idx < len(providerModelRef)-1 {
