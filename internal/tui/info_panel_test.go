@@ -391,7 +391,10 @@ func TestRenderInfoPanelShowsKeyPoolConfirmedCount(t *testing.T) {
 	}
 }
 
-func TestRenderInfoPanelPoolUsesValueColor(t *testing.T) {
+// TestRenderInfoPanelPoolMatchesProviderLabelStyle verifies the Pool line uses
+// the same key/value styling as the Provider line: a dim "Pool:" label with an
+// InfoPanelValue pool name.
+func TestRenderInfoPanelPoolMatchesProviderLabelStyle(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.poolNamesByFocus = map[string][]string{"": {"thinking", "non-thinking"}}
 	backend.currentPoolByFocus = map[string]string{"": "thinking"}
@@ -400,9 +403,12 @@ func TestRenderInfoPanelPoolUsesValueColor(t *testing.T) {
 	m := NewModel(backend)
 
 	rendered := m.renderInfoPanel(40, 20)
-	want := InfoPanelValue.Render("Pool: thinking")
+	want := InfoPanelDim.Render("Pool: ") + InfoPanelValue.Render("thinking")
 	if !strings.Contains(rendered, want) {
-		t.Fatalf("Pool line should use InfoPanelValue; rendered=%q want fragment=%q", rendered, want)
+		t.Fatalf("Pool line should use dim label + InfoPanelValue name like Provider; rendered=%q want fragment=%q", rendered, want)
+	}
+	if strings.Contains(rendered, InfoPanelValue.Render("Pool: thinking")) {
+		t.Fatalf("Pool label must not be bolded like InfoPanelValue; rendered=%q", rendered)
 	}
 	warn := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelKeyWarnFg)).Render("Pool: thinking")
 	if strings.Contains(rendered, warn) {
@@ -412,7 +418,7 @@ func TestRenderInfoPanelPoolUsesValueColor(t *testing.T) {
 
 func TestRenderInfoPanelShowsSingleModelPool(t *testing.T) {
 	backend := newInfoPanelAgent()
-	backend.providerModelRef = "anyrouter/gpt-5.6-sol@high"
+	backend.providerModelRef = "sample/gpt-5.6-sol@high"
 	backend.poolNamesByFocus = map[string][]string{"": {"gpt-5.6-sol"}}
 	backend.currentPoolByFocus = map[string]string{"": "gpt-5.6-sol"}
 	m := NewModel(backend)

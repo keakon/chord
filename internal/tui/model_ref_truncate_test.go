@@ -40,20 +40,20 @@ func TestTruncateRunningModelRefUnchangedWhenFits(t *testing.T) {
 	}
 }
 
-func TestTruncateRunningModelRefOpenRouterCascade(t *testing.T) {
-	ref := "openrouter/anthropic/claude-opus-4.6@high"
+func TestTruncateRunningModelRefNestedProviderCascade(t *testing.T) {
+	ref := "sample/anthropic/claude-opus-4.6@high"
 	wFull := runewidth.StringWidth(ref)
-	wDropAnthropic := runewidth.StringWidth("openrouter/claude-opus-4.6@high")
-	wDropVariant := runewidth.StringWidth("openrouter/claude-opus-4.6")
+	wDropAnthropic := runewidth.StringWidth("sample/claude-opus-4.6@high")
+	wDropVariant := runewidth.StringWidth("sample/claude-opus-4.6")
 	wBareModel := runewidth.StringWidth("claude-opus-4.6")
 
 	if got := modelref.TruncateRunningModelRef(ref, wFull); got != ref {
 		t.Fatalf("full budget: got %q, want %q", got, ref)
 	}
-	if got := modelref.TruncateRunningModelRef(ref, wDropAnthropic); got != "openrouter/claude-opus-4.6@high" {
+	if got := modelref.TruncateRunningModelRef(ref, wDropAnthropic); got != "sample/claude-opus-4.6@high" {
 		t.Fatalf("drop anthropic segment: got %q", got)
 	}
-	if got := modelref.TruncateRunningModelRef(ref, wDropVariant); got != "openrouter/claude-opus-4.6" {
+	if got := modelref.TruncateRunningModelRef(ref, wDropVariant); got != "sample/claude-opus-4.6" {
 		t.Fatalf("drop variant: got %q", got)
 	}
 	if got := modelref.TruncateRunningModelRef(ref, wBareModel); got != "claude-opus-4.6" {

@@ -125,10 +125,10 @@ func TestBusyPoolSwitchShowsPoolTransitionOnly(t *testing.T) {
 	if !strings.Contains(plain, "Pool: slow -> fast") {
 		t.Fatalf("info panel = %q, want pool transition", plain)
 	}
-	if !strings.Contains(plain, "slow-provider/gpt-5.4") {
+	if !strings.Contains(plain, "gpt-5.4") || !strings.Contains(plain, "Provider: slow-provider") {
 		t.Fatalf("info panel = %q, want running model while busy", plain)
 	}
-	if strings.Contains(plain, "fast-provider/gpt-5.5") || strings.Contains(plain, "slow-provider/gpt-5.4 ->") {
+	if strings.Contains(plain, "gpt-5.5") || strings.Contains(plain, "fast-provider") {
 		t.Fatalf("info panel = %q, should not show model transition", plain)
 	}
 }
@@ -230,7 +230,7 @@ func TestIdlePoolSwitchDoesNotShowPoolTransition(t *testing.T) {
 	if strings.Contains(plain, "Pool: slow -> fast") || strings.Contains(plain, "->") {
 		t.Fatalf("info panel = %q, should not show transition while idle", plain)
 	}
-	if !strings.Contains(plain, "slow-provider/gpt-5.4") {
+	if !strings.Contains(plain, "gpt-5.4") || !strings.Contains(plain, "Provider: slow-provider") {
 		t.Fatalf("info panel = %q, want running model while idle", plain)
 	}
 }

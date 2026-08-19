@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/chord/internal/bytefmt"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/skill"
+	"github.com/keakon/chord/internal/tui/modelref"
 )
 
 const (
@@ -75,11 +76,16 @@ func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 			selectedRef = nextRef
 		}
 	}
-	modelDisplay := formatModelRefForRequestState(runningRef, selectedRef, modelState.Variant, lineW)
-	modelShown := modelDisplay
+	provider, model, variant := modelref.SplitRequestModelRefForDisplay(runningRef, selectedRef, modelState.Variant)
+	modelShown := modelref.FormatModelVariantForDisplay(model, variant, lineW)
 	modelLines := []string{
 		InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("MODEL")),
 		InfoPanelLineBg.Width(lineW).Render(InfoPanelValue.Render(modelShown)),
+	}
+	if provider != "" {
+		modelLines = append(modelLines,
+			renderInfoPanelKVLine(lineW, "Provider", InfoPanelValue.Render(truncateOneLine(provider, lineW-10))),
+		)
 	}
 	keysConfirmed, keysTotal := m.agent.KeyStats()
 	keysStyle := InfoPanelValue
@@ -94,7 +100,7 @@ func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 	if len(modelState.PoolNames) > 0 {
 		if pool := strings.TrimSpace(modelState.PoolName); pool != "" {
 			pool = m.pendingPoolSwitch.display(pool, m.isFocusedAgentBusy())
-			modelLines = append(modelLines, InfoPanelLineBg.Width(lineW).Render(InfoPanelValue.Render("Pool: "+pool)))
+			modelLines = append(modelLines, renderInfoPanelKVLine(lineW, "Pool", InfoPanelValue.Render(pool)))
 		}
 	}
 	if keysTotal > 1 {

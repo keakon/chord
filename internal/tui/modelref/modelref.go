@@ -56,7 +56,7 @@ func stripFirstModelPathSegment(model string) (newModel string, ok bool) {
 
 // EnsureRefShowsVariant returns ref unchanged if it already has an inline @variant;
 // otherwise appends @activeVariant when non-empty. RunningModelRef is often provider/model
-// without @ while the client holds a separate ActiveVariant (e.g. qt/gpt-5.5 + xhigh).
+// without @ while the client holds a separate ActiveVariant (e.g. sample/gpt-5.5 + xhigh).
 func EnsureRefShowsVariant(ref, activeVariant string) string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -97,7 +97,7 @@ func EnsureRefShowsMatchingVariant(runningRef, selectedRef, activeVariant string
 }
 
 // EnsureRefShowsProvider backfills provider from selectedRef when runningRef
-// temporarily loses provider prefix (e.g. "gpt-5.5@xhigh" vs "qt/gpt-5.5@xhigh").
+// temporarily loses provider prefix (e.g. "gpt-5.5@xhigh" vs "sample/gpt-5.5@xhigh").
 func EnsureRefShowsProvider(runningRef, selectedRef string) string {
 	runningRef = strings.TrimSpace(runningRef)
 	if runningRef == "" {
@@ -122,6 +122,25 @@ func FormatRunningModelRefForDisplay(runningRef, selectedRef, activeVariant stri
 		ref = TruncateRunningModelRef(ref, maxLen)
 	}
 	return ref
+}
+
+// SplitRequestModelRefForDisplay returns the provider, model id and variant for the
+// info panel MODEL display, after the same normalization as FormatRunningModelRefForDisplay:
+// the running ref wins when non-empty (provider backfilled from selectedRef, matching
+// variant from activeVariant); otherwise the selected ref is used as its own base without
+// variant backfill.
+func SplitRequestModelRefForDisplay(runningRef, selectedRef, activeVariant string) (provider, model, variant string) {
+	runningRef = strings.TrimSpace(runningRef)
+	if runningRef == "" {
+		selectedRef = strings.TrimSpace(selectedRef)
+		if selectedRef == "" {
+			return "", "", ""
+		}
+		return SplitRunningModelRef(selectedRef)
+	}
+	ref := EnsureRefShowsProvider(runningRef, selectedRef)
+	ref = EnsureRefShowsMatchingVariant(ref, selectedRef, activeVariant)
+	return SplitRunningModelRef(ref)
 }
 
 // TruncateRunningModelRef returns ref unchanged if it already fits in maxLen display columns.
@@ -184,4 +203,27 @@ func TruncateRunningModelRef(ref string, maxLen int) string {
 		return runewidth.Truncate(out, maxLen, "...")
 	}
 	return runewidth.Truncate(out, maxLen, "")
+}
+
+// FormatModelVariantForDisplay renders model@variant for the info panel MODEL line:
+// the @variant suffix is dropped first when the text exceeds maxLen display columns;
+// if the model id alone still exceeds maxLen, it is shortened like TruncateRunningModelRef
+// (leading '/' segments are stripped, then the tail is ellipsis-truncated).
+func FormatModelVariantForDisplay(model, variant string, maxLen int) string {
+	model = strings.TrimSpace(model)
+	variant = strings.TrimSpace(variant)
+	if maxLen <= 0 {
+		maxLen = 20
+	}
+	if model == "" {
+		return ""
+	}
+	out := joinRunningModelRef("", model, variant)
+	if runewidth.StringWidth(out) <= maxLen {
+		return out
+	}
+	if variant != "" {
+		return TruncateRunningModelRef(model, maxLen)
+	}
+	return TruncateRunningModelRef(out, maxLen)
 }

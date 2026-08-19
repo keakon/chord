@@ -1095,10 +1095,10 @@ func TestRenderInfoPanelShowsRunningModelWhileBusy(t *testing.T) {
 
 	out := m.renderInfoPanel(80, 20)
 	plain := stripANSI(out)
-	if !strings.Contains(plain, "openai/gpt-5.4") {
-		t.Fatalf("info panel = %q, want running model", plain)
+	if !strings.Contains(plain, "gpt-5.4") || !strings.Contains(plain, "Provider: openai") {
+		t.Fatalf("info panel = %q, want running model with provider line", plain)
 	}
-	if strings.Contains(plain, "openai/gpt-5.5") || strings.Contains(plain, "->") {
+	if strings.Contains(plain, "gpt-5.5") || strings.Contains(plain, "->") {
 		t.Fatalf("info panel = %q, should not show selected model transition while busy", plain)
 	}
 	if !strings.Contains(plain, "tier: fast") {
@@ -1116,10 +1116,10 @@ func TestRenderInfoPanelShowsRunningModelWhileIdle(t *testing.T) {
 	m := NewModelWithSize(backend, 100, 24)
 
 	plain := stripANSI(m.renderInfoPanel(80, 20))
-	if !strings.Contains(plain, "openai/gpt-5.4") {
-		t.Fatalf("info panel = %q, want running model", plain)
+	if !strings.Contains(plain, "gpt-5.4") || !strings.Contains(plain, "Provider: openai") {
+		t.Fatalf("info panel = %q, want running model with provider line", plain)
 	}
-	if strings.Contains(plain, "openai/gpt-5.5") {
+	if strings.Contains(plain, "gpt-5.5") {
 		t.Fatalf("info panel = %q, should not revert to selected model while idle", plain)
 	}
 }
@@ -5773,8 +5773,8 @@ func TestNarrowStatusBarModelUsesFocusedSubAgentSnapshot(t *testing.T) {
 func TestRunningModelChangedEventOverridesMainModelDisplayImmediately(t *testing.T) {
 	backend := &sessionControlAgent{
 		events:           make(chan agent.AgentEvent, 1),
-		providerModelRef: "sharedchat/gpt-5.5@xhigh",
-		runningModelRef:  "gancaopu/gpt-5.5@xhigh",
+		providerModelRef: "provider-a/gpt-5.5@xhigh",
+		runningModelRef:  "provider-b/gpt-5.5@xhigh",
 	}
 	m := NewModelWithSize(backend, 220, 24)
 	m.mode = ModeNormal
@@ -5783,46 +5783,46 @@ func TestRunningModelChangedEventOverridesMainModelDisplayImmediately(t *testing
 
 	m.handleAgentEvent(agentEventMsg{event: agent.RunningModelChangedEvent{
 		AgentID:          "main",
-		ProviderModelRef: "sharedchat/gpt-5.5@xhigh",
-		RunningModelRef:  "abrdns/gpt-5.5@xhigh",
+		ProviderModelRef: "provider-a/gpt-5.5@xhigh",
+		RunningModelRef:  "provider-c/gpt-5.5@xhigh",
 	}})
 
 	status := stripANSI(m.renderStatusBar())
-	if !strings.Contains(status, "abrdns/gpt-5.5@xhigh") {
+	if !strings.Contains(status, "provider-c/gpt-5.5@xhigh") {
 		t.Fatalf("status bar should show event running model immediately; got %q", status)
 	}
 
 	info := stripANSI(m.renderInfoPanel(40, 20))
-	if !strings.Contains(info, "abrdns/gpt-5.5@xhigh") {
+	if !strings.Contains(info, "gpt-5.5@xhigh") || !strings.Contains(info, "Provider: provider-c") {
 		t.Fatalf("info panel should show event running model immediately; got %q", info)
 	}
-	if strings.Contains(info, "gancaopu/gpt-5.5@xhigh") {
-		t.Fatalf("info panel should not keep stale backend running model after event; got %q", info)
+	if strings.Contains(info, "Provider: provider-b") || strings.Contains(info, "Provider: provider-a") {
+		t.Fatalf("info panel should not keep stale backend running provider after event; got %q", info)
 	}
 }
 
 func TestInfoPanelFingerprintIncludesTransientRunningModelDisplay(t *testing.T) {
 	backend := &sessionControlAgent{
 		events:           make(chan agent.AgentEvent, 1),
-		providerModelRef: "sharedchat/gpt-5.5@xhigh",
-		runningModelRef:  "gancaopu/gpt-5.5@xhigh",
+		providerModelRef: "provider-a/gpt-5.5@xhigh",
+		runningModelRef:  "provider-b/gpt-5.5@xhigh",
 	}
 	m := NewModelWithSize(backend, 220, 24)
 	m.mode = ModeNormal
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback"}
 
 	first := stripANSI(m.renderInfoPanel(40, 20))
-	if !strings.Contains(first, "gancaopu/gpt-5.5@xhigh") {
+	if !strings.Contains(first, "gpt-5.5@xhigh") || !strings.Contains(first, "Provider: provider-b") {
 		t.Fatalf("initial info panel should show backend running model; got %q", first)
 	}
 	cachedOut := m.cachedInfoPanelOut
 
-	m.noteRunningModelDisplay("main", "sharedchat/gpt-5.5@xhigh", "abrdns/gpt-5.5@xhigh")
+	m.noteRunningModelDisplay("main", "provider-a/gpt-5.5@xhigh", "provider-c/gpt-5.5@xhigh")
 	second := stripANSI(m.renderInfoPanel(40, 20))
-	if !strings.Contains(second, "abrdns/gpt-5.5@xhigh") {
+	if !strings.Contains(second, "gpt-5.5@xhigh") || !strings.Contains(second, "Provider: provider-c") {
 		t.Fatalf("info panel should include transient running model in fingerprint; got %q", second)
 	}
-	if strings.Contains(second, "gancaopu/gpt-5.5@xhigh") {
+	if strings.Contains(second, "Provider: provider-b") {
 		t.Fatalf("info panel should not reuse stale cached backend model; got %q", second)
 	}
 	if m.cachedInfoPanelOut == cachedOut {
@@ -5833,8 +5833,8 @@ func TestInfoPanelFingerprintIncludesTransientRunningModelDisplay(t *testing.T) 
 func TestRunningModelChangedEventDisplayClearsOnIdle(t *testing.T) {
 	backend := &sessionControlAgent{
 		events:           make(chan agent.AgentEvent, 1),
-		providerModelRef: "sharedchat/gpt-5.5@xhigh",
-		runningModelRef:  "gancaopu/gpt-5.5@xhigh",
+		providerModelRef: "provider-a/gpt-5.5@xhigh",
+		runningModelRef:  "provider-b/gpt-5.5@xhigh",
 	}
 	m := NewModelWithSize(backend, 220, 24)
 	m.mode = ModeNormal
@@ -5842,14 +5842,14 @@ func TestRunningModelChangedEventDisplayClearsOnIdle(t *testing.T) {
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback"}
 	m.handleAgentEvent(agentEventMsg{event: agent.RunningModelChangedEvent{
 		AgentID:          "main",
-		ProviderModelRef: "sharedchat/gpt-5.5@xhigh",
-		RunningModelRef:  "abrdns/gpt-5.5@xhigh",
+		ProviderModelRef: "provider-a/gpt-5.5@xhigh",
+		RunningModelRef:  "provider-c/gpt-5.5@xhigh",
 	}})
 
 	m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}})
 
 	status := stripANSI(m.renderStatusBar())
-	if strings.Contains(status, "abrdns/gpt-5.5@xhigh") {
+	if strings.Contains(status, "provider-c/gpt-5.5@xhigh") {
 		t.Fatalf("status bar should clear transient event running model on idle; got %q", status)
 	}
 }
@@ -5925,7 +5925,7 @@ func TestHandleSwitchAgentRefreshesInfoPanelModelWithoutEvent(t *testing.T) {
 	m.refreshSidebar()
 
 	before := stripANSI(m.renderInfoPanel(40, 20))
-	if !strings.Contains(before, "main/huge") {
+	if !strings.Contains(before, "huge") || !strings.Contains(before, "Provider: main") {
 		t.Fatalf("initial info panel = %q, want main model", before)
 	}
 
@@ -5938,10 +5938,10 @@ func TestHandleSwitchAgentRefreshesInfoPanelModelWithoutEvent(t *testing.T) {
 		t.Fatalf("backend focused = %q, want agent-1", got)
 	}
 	after := stripANSI(m.renderInfoPanel(40, 20))
-	if !strings.Contains(after, "worker/review@high") {
+	if !strings.Contains(after, "review@high") || !strings.Contains(after, "Provider: worker") {
 		t.Fatalf("info panel after agent switch = %q, want worker/review@high", after)
 	}
-	if strings.Contains(after, "main/huge") {
+	if strings.Contains(after, "huge") || strings.Contains(after, "Provider: main") {
 		t.Fatalf("info panel after agent switch should not keep stale main model: %q", after)
 	}
 }
