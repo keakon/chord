@@ -293,7 +293,9 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		state.lastError = ""
 		state.updatedAt = time.Now()
 		if state.isSubscribed("idle") {
-			out = append(out, &headlessEnvelope{Type: "idle", Payload: map[string]any{"last_outcome": outcome}})
+			out = append(out, &headlessEnvelope{Type: "idle", Payload: map[string]any{
+				"last_outcome": outcome,
+			}})
 		}
 	case agent.ErrorEvent:
 		state.pendingOutcome = "error"
@@ -634,6 +636,9 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 	// Emit a one-time ready marker so gateways can detect successful init.
 	readyPayload := map[string]any{
 		"session_id": sessionID,
+	}
+	if len(ac.StartupSkippedLockedSessions) > 0 {
+		readyPayload["skipped_locked_sessions"] = append([]string(nil), ac.StartupSkippedLockedSessions...)
 	}
 	if flagWorktreeStartupInfo != nil {
 		readyPayload["worktree"] = map[string]any{

@@ -85,7 +85,12 @@ type AppContext struct {
 	mcpRestoreGen     atomic.Uint64
 	skillsLoadOnce    sync.Once
 	SessionLock       *recovery.SessionLock
-	InstanceID        string
+	// StartupSkippedLockedSessions names the sessions --continue passed over
+	// at startup because another live process owned them. Headless surfaces
+	// them in the ready envelope; the TUI gets the same notice as a toast from
+	// the MainAgent.
+	StartupSkippedLockedSessions []string
+	InstanceID                   string
 }
 
 // GetOrCreateProvider returns the cached ProviderConfig for provName, or creates
@@ -492,6 +497,11 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		return nil, err
 	}
 	ac.SessionDir = sessionPlan.SessionDir
+	// Exclusive cross-process ownership was acquired while planning: a session
+	// that cannot be owned is never chosen, so --continue falls through to the
+	// next candidate instead of failing startup.
+	ac.SessionLock = sessionPlan.SessionLock
+	ac.StartupSkippedLockedSessions = append([]string(nil), sessionPlan.SkippedLockedIDs...)
 	ac.logCtx.SID = filepath.Base(ac.SessionDir)
 	if ac.LogWriter != nil {
 		logger := newGologLoggerWithContext(ac.LogWriter, ac.logLevel, ac.logCtx)
@@ -499,14 +509,8 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	} else {
 		setDefaultLogger(newStderrGologLoggerWithContext(ac.logLevel, ac.logCtx))
 	}
-
-	// Acquire exclusive cross-process ownership of the session directory.
-	// This prevents two Chord processes from concurrently writing the same session.
-	if sessionLock, lockErr := recovery.AcquireSessionLock(ac.SessionDir); lockErr != nil {
-		ac.cleanup()
-		return nil, fmt.Errorf("acquire session lock: %w", lockErr)
-	} else {
-		ac.SessionLock = sessionLock
+	for _, skipped := range sessionPlan.SkippedLockedIDs {
+		log.Infof("session %s is open in another Chord process; continuing with %s instead", skipped, ac.logCtx.SID)
 	}
 
 	tracePath := filepath.Join(ac.SessionDir, "traces", llm.LLMTraceFileName())
@@ -609,6 +613,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	llmClient.SetSessionID(filepath.Base(ac.SessionDir))
 	ac.MainAgent.SetInitialYoloMode(flagYolo)
 	ac.MainAgent.SetSessionLock(ac.SessionLock)
+	ac.MainAgent.SetStartupSkippedLockedSessions(ac.StartupSkippedLockedSessions)
 	ac.MainAgent.SetSessionArtifactsDirFunc(func() string {
 		if ac == nil || strings.TrimSpace(ac.SessionDir) == "" {
 			return ""

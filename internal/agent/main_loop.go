@@ -34,6 +34,9 @@ func (a *MainAgent) Run(ctx context.Context) error {
 		a.emitToTUI(SessionSwitchStartedEvent{Kind: "resume", SessionID: sessionID})
 		a.emitInteractiveToTUI(a.parentCtx, SessionRestoredEvent{})
 	}
+	if skipped := a.consumeStartupSkippedLockedSessions(); len(skipped) > 0 {
+		a.emitToTUI(ToastEvent{Message: startupSkippedSessionsNotice(skipped), Level: "info"})
+	}
 
 	// Start the async persistence loop.
 	a.startPersistLoop()

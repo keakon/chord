@@ -851,6 +851,16 @@ func TestListSessions_AndSessionInfoForDir(t *testing.T) {
 	writeMsg(s1, message.RoleUser, "First user message in session 1000")
 	writeMsg(s1, message.RoleAssistant, "Hi")
 	writeMsg(s2, message.RoleUser, "Second session first message")
+	// Make the lower-numbered session the most recently active one, so the
+	// expected order is the opposite of the removed descending-ID sort: the
+	// assertion below fails if ordering silently falls back to the ID.
+	now := time.Now()
+	if err := os.Chtimes(filepath.Join(s1, "main.jsonl"), now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(s2, "main.jsonl"), now.Add(-time.Minute), now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 	if err := SaveSessionMeta(s2, SessionMeta{ForkedFrom: "1000"}); err != nil {
 		t.Fatalf("SaveSessionMeta: %v", err)
 	}
@@ -859,27 +869,27 @@ func TestListSessions_AndSessionInfoForDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
-	// Newest first (2000 > 1000 by name)
+	// Most recently active first.
 	if len(list) != 2 {
 		t.Fatalf("expected 2 sessions, got %d", len(list))
 	}
-	if list[0].ID != "2000" || list[1].ID != "1000" {
-		t.Errorf("order: got %q, %q; want 2000, 1000", list[0].ID, list[1].ID)
-	}
-	if list[0].FirstUserMessage != "" {
-		t.Errorf("session 2000 FirstUserMessage = %q, want empty before detail load", list[0].FirstUserMessage)
-	}
-	if list[0].ForkedFrom != "1000" {
-		t.Errorf("session 2000 ForkedFrom = %q, want 1000", list[0].ForkedFrom)
+	if list[0].ID != "1000" || list[1].ID != "2000" {
+		t.Errorf("order: got %q, %q; want 1000, 2000 (most recently active first)", list[0].ID, list[1].ID)
 	}
 	if list[1].FirstUserMessage != "" {
-		t.Errorf("session 1000 FirstUserMessage = %q, want empty before detail load", list[1].FirstUserMessage)
+		t.Errorf("session 2000 FirstUserMessage = %q, want empty before detail load", list[1].FirstUserMessage)
 	}
-	if list[0].MessageCount != UnknownMessageCount {
-		t.Errorf("session 2000 MessageCount = %d, want %d before detail load", list[0].MessageCount, UnknownMessageCount)
+	if list[1].ForkedFrom != "1000" {
+		t.Errorf("session 2000 ForkedFrom = %q, want 1000", list[1].ForkedFrom)
+	}
+	if list[0].FirstUserMessage != "" {
+		t.Errorf("session 1000 FirstUserMessage = %q, want empty before detail load", list[0].FirstUserMessage)
 	}
 	if list[1].MessageCount != UnknownMessageCount {
-		t.Errorf("session 1000 MessageCount = %d, want %d before detail load", list[1].MessageCount, UnknownMessageCount)
+		t.Errorf("session 2000 MessageCount = %d, want %d before detail load", list[1].MessageCount, UnknownMessageCount)
+	}
+	if list[0].MessageCount != UnknownMessageCount {
+		t.Errorf("session 1000 MessageCount = %d, want %d before detail load", list[0].MessageCount, UnknownMessageCount)
 	}
 	if count, err := CountSessionMessages(s2); err != nil || count != 1 {
 		t.Fatalf("CountSessionMessages(2000) = %d, %v; want 1, nil", count, err)
@@ -894,6 +904,10 @@ func TestListSessions_AndSessionInfoForDir(t *testing.T) {
 	list, err = ListSessions(sessionsDir, "")
 	if err != nil {
 		t.Fatalf("ListSessions after append: %v", err)
+	}
+	// The append also makes 2000 the most recently active session again.
+	if list[0].ID != "2000" {
+		t.Fatalf("order after append: got %q first, want 2000", list[0].ID)
 	}
 	if list[0].MessageCount != UnknownMessageCount {
 		t.Errorf("session 2000 MessageCount after append = %d, want %d before detail reload", list[0].MessageCount, UnknownMessageCount)

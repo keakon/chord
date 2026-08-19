@@ -60,6 +60,19 @@ Chord writes here. Lose it and you lose history.
     └── tui-dumps/                      # `Ctrl+G` outputs
 ```
 
+`<session-id>` is a 17-digit number (`YYYYMMDDHHmmSSfff`) generated from the
+local wall clock, so it reads as local date/time and stays safe as a directory
+or file name. Session IDs created before this change were derived from UTC and
+are not rewritten, so a sessions directory can mix both: outside UTC, an older
+ID reads as a different wall time than the one it was created at. The ID is an
+identifier and a rough creation-time hint, not the session ordering key, so the
+mix does not affect which session Chord picks. Session lists use the newer of
+two modification times, `main.jsonl` and an existing `usage-summary.json`. Chord
+stats these small per-session files instead of scanning full transcripts or
+maintaining a separate project-level index. Copying or restoring files can make
+filesystem times misleading, and activity that updates neither file may not
+affect the order.
+
 ### `<project-key>` — what is it?
 
 Chord identifies a project by its canonical filesystem root, then derives a stable, sanitized key — for example `HOME-projects-chord` for `~/projects/chord`. If two projects collide on the sanitized key, Chord appends an 8-character fingerprint to disambiguate. The full canonical root is stored alongside the key in `project.json`, so the registry stays unambiguous even when paths look similar.

@@ -59,12 +59,16 @@ On the first run, if global `config.yaml` is missing and Chord can get a control
 
 | Flag                        | Description                                                                                                                                                                                  |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-c`, `--continue`          | Resume the most recent non-empty session for this project                                                                                                                                    |
+| `-c`, `--continue`          | Resume the most recent non-empty session for this project that is not already open elsewhere                                                                                                 |
 | `-r`, `--resume <id>`       | Resume a specific session ID for this project                                                                                                                                                |
 | `--yolo`                    | Start with YOLO mode enabled: temporarily bypass main-agent tool permissions except handoff, delegate, cancel, and done                                                                                 |
 | `-w`, `--worktree [name]`   | Create or enter a chord-managed git worktree by name (auto-named when no name is given). Combine with `--continue` / `--resume` to act on the worktree's own session history.                |
 
 `--continue` and `--resume` are mutually exclusive.
+
+`--continue` picks the most recently active non-empty session that this process can open. Chord orders sessions by the newer of two modification times, `main.jsonl` and an existing `usage-summary.json`; it does not scan full transcripts or build a separate project-level index. Filesystem timestamps can become misleading after copying or restoring session files, and activity that updates neither file may not affect the order.
+
+A session that another running Chord process already owns is skipped, and the next candidate is used; the skip is announced with a one-time notice (a toast in the TUI, a `skipped_locked_sessions` field in the headless ready envelope, and the log), so the switch is never silent. If every session is owned elsewhere, Chord starts a new one. `--resume <id>` names one specific session instead, so it reports an error rather than substituting another when that session is already open.
 
 ### Examples
 

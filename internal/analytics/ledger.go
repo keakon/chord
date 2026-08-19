@@ -87,6 +87,11 @@ type SessionUsageSummary struct {
 	ByDateAgent                         map[string]map[string]*UsageAggregate `json:"by_date_agent,omitempty"`
 }
 
+// SessionUsageSummaryFileName is the cached per-session usage rollup written
+// next to usage.jsonl. Its modification time doubles as a "last active" signal
+// for session ordering, so callers outside this package reference it by name.
+const SessionUsageSummaryFileName = "usage-summary.json"
+
 // UsageLedger manages append-only usage.jsonl and usage-summary.json.
 type UsageLedger struct {
 	mu                       sync.RWMutex
@@ -115,12 +120,28 @@ func LoadSessionUsageSummary(sessionDir string) (*SessionUsageSummary, error) {
 	return NewUsageLedger(sessionDir, "").Summary()
 }
 
-// LoadCachedSessionUsageSummary loads usage-summary.json without checking
-// usage.jsonl freshness or rebuilding missing/stale summaries. It is intended
-// for high-fanout read-only paths such as session pickers, where scanning every
-// session's usage ledger would make opening the UI scale with total history.
-func LoadCachedSessionUsageSummary(sessionDir string) (*SessionUsageSummary, error) {
-	return readUsageSummaryFile(filepath.Join(sessionDir, "usage-summary.json"))
+// CachedSessionUsageMetadata is the summary subset needed by high-fanout
+// session pickers. Keeping this shape small avoids decoding the full model,
+// agent, and date aggregate maps for every session directory.
+type CachedSessionUsageMetadata struct {
+	LastUpdatedAt                       time.Time `json:"last_updated_at"`
+	FirstUserMessage                    string    `json:"first_user_message,omitempty"`
+	FirstUserMessageIsCompactionSummary bool      `json:"first_user_message_is_compaction_summary,omitempty"`
+	OriginalFirstUserMessage            string    `json:"original_first_user_message,omitempty"`
+}
+
+// LoadCachedSessionUsageMetadata loads the picker metadata directly from the
+// cached summary without checking usage.jsonl freshness or rebuilding it.
+func LoadCachedSessionUsageMetadata(sessionDir string) (CachedSessionUsageMetadata, error) {
+	data, err := os.ReadFile(filepath.Join(sessionDir, SessionUsageSummaryFileName))
+	if err != nil {
+		return CachedSessionUsageMetadata{}, err
+	}
+	var metadata CachedSessionUsageMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return CachedSessionUsageMetadata{}, err
+	}
+	return metadata, nil
 }
 
 // SetFirstUserMessage records the first user message preview for future summary writes.
@@ -915,7 +936,7 @@ func (l *UsageLedger) usagePath() string {
 }
 
 func (l *UsageLedger) summaryPath() string {
-	return filepath.Join(l.sessionDir, "usage-summary.json")
+	return filepath.Join(l.sessionDir, SessionUsageSummaryFileName)
 }
 
 func (l *UsageLedger) mainPath() string {

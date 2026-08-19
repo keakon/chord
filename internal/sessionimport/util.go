@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/privatefs"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 const (
@@ -37,15 +38,15 @@ func newImportingDirName(sessionID string) string {
 	return ".importing-" + sessionID + "-" + hex.EncodeToString(suffix)
 }
 
-// allocateSessionID generates a session ID in the same timestamp+millis format
-// used by recovery.CreateNewSessionDir, without touching the filesystem.
+// allocateSessionID generates a session ID in the same local-time digits-only
+// format used by recovery.CreateNewSessionDir, without touching the filesystem.
 func allocateSessionID(last string) (id string, nextLast string) {
-	now := time.Now().UTC()
-	id = now.Format("20060102150405") + fmt.Sprintf("%03d", now.Nanosecond()/int(time.Millisecond))
+	now := time.Now()
+	id = recovery.SessionIDForTime(now)
 	if id == last {
 		time.Sleep(time.Millisecond)
-		now = time.Now().UTC()
-		id = now.Format("20060102150405") + fmt.Sprintf("%03d", now.Nanosecond()/int(time.Millisecond))
+		now = time.Now()
+		id = recovery.SessionIDForTime(now)
 	}
 	return id, id
 }

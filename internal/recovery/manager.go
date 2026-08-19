@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -179,20 +180,20 @@ func NewRecoveryManager(sessionDir string) *RecoveryManager {
 	}
 }
 
-// CreateNewSessionDir creates a new UTC timestamp session directory using
-// YYYYMMDDHHmmSSfff format with collision retries.
+// CreateNewSessionDir creates a new local wall-clock timestamp session
+// directory using YYYYMMDDHHmmSSfff format with collision retries.
 func CreateNewSessionDir(sessionsDir string) (string, error) {
 	if err := privatefs.EnsureDir(sessionsDir, sessionsDir); err != nil {
 		return "", fmt.Errorf("create sessions directory: %w", err)
 	}
 	lastID := ""
 	for range maxSessionDirRetries {
-		now := time.Now().UTC()
-		sid := now.Format("20060102150405") + fmt.Sprintf("%03d", now.Nanosecond()/int(time.Millisecond))
+		now := time.Now()
+		sid := SessionIDForTime(now)
 		if sid == lastID {
 			time.Sleep(time.Millisecond)
-			now = time.Now().UTC()
-			sid = now.Format("20060102150405") + fmt.Sprintf("%03d", now.Nanosecond()/int(time.Millisecond))
+			now = time.Now()
+			sid = SessionIDForTime(now)
 		}
 		lastID = sid
 		sessionDir := filepath.Join(sessionsDir, sid)
@@ -205,6 +206,15 @@ func CreateNewSessionDir(sessionsDir string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("create session directory: too many collisions")
+}
+
+// SessionIDForTime renders a session ID from the local wall clock:
+// YYYYMMDDHHmmSSfff. The 17 digits stay filesystem- and URL-friendly. They sort
+// lexicographically by creation time only within one timezone rule: IDs written
+// before this became local-time, across a DST shift, or on a machine that moved
+// zones interleave. Order sessions by observed activity, not by ID.
+func SessionIDForTime(t time.Time) string {
+	return t.Format("20060102150405") + fmt.Sprintf("%03d", t.Nanosecond()/int(time.Millisecond))
 }
 
 // imagesDir returns the path to the directory where image files are stored.
@@ -551,14 +561,15 @@ func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) err
 }
 
 // SessionInfo holds metadata for one session directory, for listing and
-// display (e.g. session picker). LastModTime is the mtime of main.jsonl;
-// FirstUserMessage is a short preview of the first user message.
+// display (e.g. session picker). LastModTime is the last observed activity
+// time from main.jsonl or its cached usage summary; FirstUserMessage is a short
+// preview of the first user message.
 type SessionInfo struct {
-	ID                                  string    // directory name (e.g. Unix millisecond timestamp)
+	ID                                  string    // directory name (e.g. local wall-clock timestamp)
 	Path                                string    // full path to session directory
 	Title                               string    // user-defined title, when set
 	MessageCount                        int       // total messages in main.jsonl
-	LastModTime                         time.Time // last write to main.jsonl
+	LastModTime                         time.Time // last observed session activity
 	FirstUserMessage                    string    // preview of first user message (truncated, newlines replaced)
 	FirstUserMessageIsCompactionSummary bool      // true when FirstUserMessage is the synthetic compaction summary
 	OriginalFirstUserMessage            string    // original first user message, preserved across compaction
@@ -575,9 +586,11 @@ const (
 )
 
 // ListSessions scans the sessions directory and returns SessionInfo for each
-// session that has a non-empty main.jsonl. Results are sorted by directory
-// name descending (newest first). excludeDir is the full path of a session
-// directory to omit (e.g. current session); pass "" to include all.
+// session that has a non-empty main.jsonl. Results are sorted by last observed
+// activity (newest first). The main transcript mtime is the cheap baseline;
+// an existing cached usage summary can move a session later when activity did
+// not append to main.jsonl. excludeDir is the full path of a session directory
+// to omit (e.g. current session); pass "" to include all.
 func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) {
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
@@ -585,11 +598,6 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 			return nil, nil
 		}
 		return nil, err
-	}
-
-	// Sort by name descending (newest first).
-	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
-		entries[i], entries[j] = entries[j], entries[i]
 	}
 
 	var list []SessionInfo
@@ -606,11 +614,11 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 		if err != nil || info.Size() == 0 {
 			continue
 		}
-		firstUser, firstUserIsCompactionSummary, originalFirstUser, lastUpdatedAt := cachedSessionPreview(sessionPath)
-		lastModTime := info.ModTime()
-		if !lastUpdatedAt.IsZero() && lastUpdatedAt.After(lastModTime) {
-			lastModTime = lastUpdatedAt
+		lastModTime, ok := sessionActivityTime(sessionPath)
+		if !ok {
+			continue
 		}
+		firstUser, firstUserIsCompactionSummary, originalFirstUser, _ := cachedSessionPreview(sessionPath)
 		if originalFirstUser == "" && !firstUserIsCompactionSummary {
 			originalFirstUser = firstUser
 		}
@@ -643,6 +651,12 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 			Locked:                              locked,
 		})
 	}
+	sort.SliceStable(list, func(i, j int) bool {
+		if !list[i].LastModTime.Equal(list[j].LastModTime) {
+			return list[i].LastModTime.After(list[j].LastModTime)
+		}
+		return list[i].ID > list[j].ID
+	})
 	return list, nil
 }
 
@@ -652,11 +666,11 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 const UnknownMessageCount = -1
 
 func cachedSessionPreview(sessionPath string) (firstUser string, firstUserIsCompactionSummary bool, originalFirstUser string, lastUpdatedAt time.Time) {
-	summary, err := analytics.LoadCachedSessionUsageSummary(sessionPath)
-	if err != nil || summary == nil {
+	metadata, err := analytics.LoadCachedSessionUsageMetadata(sessionPath)
+	if err != nil {
 		return "", false, "", time.Time{}
 	}
-	return summary.FirstUserMessage, summary.FirstUserMessageIsCompactionSummary, summary.OriginalFirstUserMessage, summary.LastUpdatedAt
+	return metadata.FirstUserMessage, metadata.FirstUserMessageIsCompactionSummary, metadata.OriginalFirstUserMessage, metadata.LastUpdatedAt
 }
 
 // messageCountCache memoizes per-log newline counts keyed by the file's
@@ -813,44 +827,92 @@ func SessionInfoForDir(sessionPath string) *SessionInfo {
 	}
 }
 
-// FindMostRecentSession scans the sessions directory for the most recent
-// session that has a non-empty main.jsonl, regardless of CleanExit status.
-// This is used by /resume to find any previous session to restore from.
+// sessionActivityTime reports the last observed activity for one session
+// directory, and whether the session has a non-empty transcript at all.
 //
-// excludeDir is the path of a session directory to skip (typically the
-// current session). Pass "" to not exclude any directory.
+// The main transcript's modification time is the baseline. usage-summary.json
+// is written (tmp file + rename) strictly after the event it records, so its
+// own modification time is an equally valid and slightly fresher signal — the
+// file does not need to be read or parsed to order sessions. This is the single
+// definition of "last active" shared by the session list and by --continue, so
+// the picker's first row and --continue always agree.
+func sessionActivityTime(sessionPath string) (time.Time, bool) {
+	mainInfo, err := os.Stat(filepath.Join(sessionPath, identity.MainSessionLogFilename))
+	if err != nil || mainInfo.Size() == 0 {
+		return time.Time{}, false
+	}
+	lastActive := mainInfo.ModTime()
+	if summaryInfo, err := os.Stat(filepath.Join(sessionPath, analytics.SessionUsageSummaryFileName)); err == nil {
+		if modTime := summaryInfo.ModTime(); modTime.After(lastActive) {
+			lastActive = modTime
+		}
+	}
+	return lastActive, true
+}
+
+// RecentSessionCandidates returns the paths of every session with a non-empty
+// main.jsonl, ordered by last observed activity, newest first. Equal timestamps
+// break on descending directory name, matching ListSessions.
 //
-// Sessions are sorted by directory name (newest first, since names are
-// Unix millisecond timestamps). Returns "" if no suitable session is found.
-func FindMostRecentSession(sessionsDir string, excludeDir string) string {
+// excludeDir is the path of a session directory to skip (typically the current
+// session). Pass "" to not exclude any directory.
+//
+// Ownership is deliberately not probed here: a caller that intends to open a
+// session should try to acquire its lock and fall through to the next candidate,
+// which is race-free where a separate "is it locked" check is not.
+func RecentSessionCandidates(sessionsDir string, excludeDir string) []string {
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
-		return ""
+		return nil
 	}
-
-	// Sort by name descending (newest first).
-	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
-		entries[i], entries[j] = entries[j], entries[i]
+	type candidate struct {
+		path     string
+		id       string
+		lastSeen time.Time
 	}
-
+	candidates := make([]candidate, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		sessionPath := filepath.Join(sessionsDir, entry.Name())
-
-		// Skip the excluded directory (e.g. current session).
 		if excludeDir != "" && sessionPath == excludeDir {
 			continue
 		}
-
-		// Check for main.jsonl with content.
-		mainJSONL := filepath.Join(sessionPath, identity.MainSessionLogFilename)
-		if info, err := os.Stat(mainJSONL); err == nil && info.Size() > 0 {
-			return sessionPath
+		lastActive, ok := sessionActivityTime(sessionPath)
+		if !ok {
+			continue
 		}
+		candidates = append(candidates, candidate{path: sessionPath, id: entry.Name(), lastSeen: lastActive})
 	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if !candidates[i].lastSeen.Equal(candidates[j].lastSeen) {
+			return candidates[i].lastSeen.After(candidates[j].lastSeen)
+		}
+		return candidates[i].id > candidates[j].id
+	})
+	paths := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		paths = append(paths, c.path)
+	}
+	return paths
+}
 
+// FindMostRecentSession returns the most recently active session that has a
+// non-empty main.jsonl and is not already open in another live Chord process.
+// It is used by in-app /resume, which switches into a session without going
+// through startup's lock acquisition. Returns "" if no suitable session exists.
+//
+// excludeDir is the path of a session directory to skip (typically the
+// current session). Pass "" to not exclude any directory.
+func FindMostRecentSession(sessionsDir string, excludeDir string) string {
+	for _, sessionPath := range RecentSessionCandidates(sessionsDir, excludeDir) {
+		locked, err := sessionDirLockedByLiveOwner(sessionPath)
+		if err != nil || locked {
+			continue
+		}
+		return sessionPath
+	}
 	return ""
 }
 

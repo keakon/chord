@@ -355,6 +355,11 @@ type MainAgent struct {
 	startupResumePending   bool
 	startupResumeSessionID string
 	startupResumeLoadedAt  time.Time
+	// startupSkippedLockedSessions names the sessions --continue passed over at
+	// startup because another live Chord process owned them. The agent reports
+	// them once as a toast when the event loop starts so a fallback is never
+	// silent.
+	startupSkippedLockedSessions []string
 
 	// Permission system: ruleset from active agent config with overlay support.
 	globalConfig  *config.Config

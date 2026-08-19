@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,34 @@ func (a *MainAgent) consumeStartupResumePending() bool {
 	a.startupResumePending = false
 	a.stateMu.Unlock()
 	return pending
+}
+
+// SetStartupSkippedLockedSessions records the sessions --continue passed over
+// at startup because another live Chord process owned them. The agent reports
+// them once when the event loop starts so the fallback is never silent.
+func (a *MainAgent) SetStartupSkippedLockedSessions(ids []string) {
+	a.stateMu.Lock()
+	a.startupSkippedLockedSessions = append([]string(nil), ids...)
+	a.stateMu.Unlock()
+}
+
+func (a *MainAgent) consumeStartupSkippedLockedSessions() []string {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	ids := a.startupSkippedLockedSessions
+	a.startupSkippedLockedSessions = nil
+	return ids
+}
+
+// startupSkippedSessionsNotice renders the one-time toast reporting that
+// --continue passed over sessions owned by another live Chord process.
+func startupSkippedSessionsNotice(skipped []string) string {
+	switch len(skipped) {
+	case 1:
+		return fmt.Sprintf("Session %s is open in another Chord process; continuing with this session.", skipped[0])
+	default:
+		return fmt.Sprintf("Sessions %s are open in another Chord process; continuing with this session.", strings.Join(skipped, ", "))
+	}
 }
 
 func (a *MainAgent) startupResumeSessionIDValue() string {

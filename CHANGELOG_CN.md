@@ -6,6 +6,7 @@
 
 ### 不兼容变更
 
+- 会话 ID（`SID`）改用本地墙钟时间生成，是 17 位纯数字（`YYYYMMDDHHmmSSfff`），嵌入的日期和时间即本地时间。已有会话 ID 不会被改写，因此同一个 sessions 目录可能混有本地时间派生和更早的 UTC 派生两种 ID；在非 UTC 时区下，旧 ID 显示的时间与其实际创建时间不同。会话列表和 `--continue` 现在按最近活动排序——取 `main.jsonl` 与 `usage-summary.json` 两个修改时间中较新的那个——不再按 SID 排序，SID 不再充当排序键。Chord 不会扫描完整会话，也不会额外维护项目级索引；复制或恢复文件，以及没有更新这两份 metadata 的活动，仍可能让排序只是近似值。`--continue` 现在还会跳过已被另一个 Chord 进程打开的会话、改用下一个候选（所有候选都被占用时新建会话），不再因此启动失败，并在启动时给出一条一次性提示（TUI 里是 toast，headless 的 ready 信封里有 `skipped_locked_sessions` 字段，日志里也会记录）；`--resume <id>` 指定的会话已被占用时仍然报错。
 - Provider 配置键 `official_api` 拆分为 `trust_http_400`（把 HTTP 400 视为终止性请求错误）与 `retry_after_max_s`（采纳 `Retry-After` 的最长等待秒数，1–86400）。严格解析会在启动时拒绝仍包含 `official_api` 的配置。请把 `official_api: true` 迁移为 `trust_http_400: true` 加 `retry_after_max_s: 86400`；`official_api: false` 改成 `trust_http_400: false`，也可以直接省略。第三方 Provider 现在默认只采纳最长 60 秒的 `Retry-After`；旧配置若依赖更长等待，请显式设置 `retry_after_max_s: 86400`。`preset: codex` 会自动启用可信 400 语义与一天上限。
 - `prompt_cache.ttl` 现在会在启动时校验：接受 `"5m"` 与 `"1h"`（`"5m"` 是 API 默认值，会归一化为省略该字段），其余取值报配置错误，不再被静默忽略。TTL 现在在 `explicit` 断点模式下同样生效，而不仅是 `auto` 模式。
 - `preset: azure` provider preset 已移除。Azure OpenAI Responses 现在按普通 `type: responses` provider 配置：设置 `auth_scheme: api-key`、`store: true`、`trust_http_400: true` 与 `retry_after_max_s: 86400`，并用 `compat.request_overrides.headers` 将 `OpenAI-Beta` 与 `originator` 置 `null` 移除 Codex 身份 header（这是旧 preset 唯一无法用普通配置表达的行为）。配置中仍含 `preset: azure` 的会在启动时被拒绝；迁移为等价普通 provider 后，线上请求行为与原来完全一致。

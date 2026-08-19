@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -294,24 +295,47 @@ func (a *MainAgent) projectSessionsDir() (string, error) {
 }
 
 func (a *MainAgent) resolveResumeSessionPath(sessionID string) (string, error) {
+	if sessionID == "" {
+		return "", fmt.Errorf("no session to resume")
+	}
 	sessionsDir, err := a.projectSessionsDir()
 	if err != nil {
 		return "", err
 	}
-	if sessionID != "" {
-		sessionPath := filepath.Join(sessionsDir, sessionID)
-		mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
-		info, err := os.Stat(mainPath)
-		if err != nil || info.Size() == 0 {
-			return "", fmt.Errorf("session %s not found or has no messages", sessionID)
-		}
-		return sessionPath, nil
-	}
-	sessionPath := recovery.FindMostRecentSession(sessionsDir, a.sessionDir)
-	if sessionPath == "" {
-		return "", fmt.Errorf("no previous sessions found in %s", sessionsDir)
+	sessionPath := filepath.Join(sessionsDir, sessionID)
+	mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
+	info, err := os.Stat(mainPath)
+	if err != nil || info.Size() == 0 {
+		return "", fmt.Errorf("session %s not found or has no messages", sessionID)
 	}
 	return sessionPath, nil
+}
+
+// acquireLatestResumeCandidate opens the most recent session this process can
+// actually own, matching --continue's "carry on where I left off" meaning for
+// the in-app /resume with no ID. Ownership is decided by an actual lock
+// acquisition (returned to the caller), not a probe, so two processes resuming
+// the same session race on the lock instead of both seeing the candidate as
+// free. A candidate this process cannot own (a faster contender won the lock)
+// is skipped rather than failing the whole resume; an error is only reported
+// when no candidate was openable at all.
+func (a *MainAgent) acquireLatestResumeCandidate() (string, *recovery.SessionLock, error) {
+	sessionsDir, err := a.projectSessionsDir()
+	if err != nil {
+		return "", nil, err
+	}
+	for _, sessionDir := range recovery.RecentSessionCandidates(sessionsDir, a.sessionDir) {
+		lock, err := recovery.AcquireSessionLock(sessionDir)
+		if err == nil {
+			return sessionDir, lock, nil
+		}
+		if _, ok := errors.AsType[*recovery.SessionLockedError](err); ok {
+			log.Infof("latest recent session %s became owned by another process; trying an earlier candidate", filepath.Base(sessionDir))
+			continue
+		}
+		log.Warnf("resume: checking recent session %s: %v", filepath.Base(sessionDir), err)
+	}
+	return "", nil, fmt.Errorf("no session to resume")
 }
 
 func (a *MainAgent) loadMainTranscript(tmpRecovery *recovery.RecoveryManager, sessionPath string, started map[recovery.ToolActivityKey]struct{}) ([]message.Message, time.Duration, time.Duration, error) {
@@ -1216,26 +1240,41 @@ func (a *MainAgent) RestoreSessionAtStartup() error {
 	return nil
 }
 
-// handleResumeCommand handles the /resume <sessionID> slash command.
+// handleResumeCommand handles the /resume <sessionID> slash command. With an
+// explicit ID the session must exist and be owned by this process; without one
+// the most recently active openable session is chosen, and candidates another
+// process owns are skipped.
 func (a *MainAgent) handleResumeCommand(sessionID string) {
 	defer a.finishSessionSwitch()
 	if !a.stopCompactionForSessionSwitch() {
 		return
 	}
 	targetID := strings.TrimSpace(sessionID)
-	a.emitToTUI(SessionSwitchStartedEvent{Kind: "resume", SessionID: targetID})
-	sessionPath, err := a.resolveResumeSessionPath(targetID)
-	if err != nil {
-		a.emitToTUI(ErrorEvent{Err: err})
-		return
-	}
 
-	newLock, err := recovery.AcquireSessionLock(sessionPath)
-	if err != nil {
-		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("resume: %w", err)})
-		a.setIdleAndDrainPending()
-		return
+	var (
+		sessionPath string
+		newLock     *recovery.SessionLock
+		err         error
+	)
+	if targetID != "" {
+		sessionPath, err = a.resolveResumeSessionPath(targetID)
+		if err == nil {
+			newLock, err = recovery.AcquireSessionLock(sessionPath)
+		}
+		if err != nil {
+			a.emitToTUI(ErrorEvent{Err: err})
+			a.setIdleAndDrainPending()
+			return
+		}
+	} else {
+		sessionPath, newLock, err = a.acquireLatestResumeCandidate()
+		if err != nil {
+			a.emitToTUI(ErrorEvent{Err: err})
+			a.setIdleAndDrainPending()
+			return
+		}
 	}
+	a.emitToTUI(SessionSwitchStartedEvent{Kind: "resume", SessionID: filepath.Base(sessionPath)})
 	loaded, err := a.loadSessionState(sessionPath)
 	if err != nil {
 		_ = newLock.Release()

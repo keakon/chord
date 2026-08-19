@@ -98,3 +98,30 @@ func BenchmarkLoadMessagesBySize(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkFindMostRecentSessionCachedActivity(b *testing.B) {
+	sessionsDir := b.TempDir()
+	const sessionCount = 200
+	largeAggregate := strings.Repeat(`"provider/model":{"llm_calls":1},`, 500)
+	for i := range sessionCount {
+		sessionDir := filepath.Join(sessionsDir, fmt.Sprintf("202608201200%05d", i))
+		if err := os.Mkdir(sessionDir, 0o755); err != nil {
+			b.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sessionDir, identity.MainSessionLogFilename), []byte("{}\n"), 0o600); err != nil {
+			b.Fatal(err)
+		}
+		summary := fmt.Sprintf(`{"last_updated_at":"2026-08-20T12:00:%02dZ","by_model_ref":{%s"last/model":{"llm_calls":1}}}`, i%60, largeAggregate)
+		if err := os.WriteFile(filepath.Join(sessionDir, "usage-summary.json"), []byte(summary), 0o600); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if got := FindMostRecentSession(sessionsDir, ""); got == "" {
+			b.Fatal("FindMostRecentSession returned empty path")
+		}
+	}
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,19 +100,22 @@ func TestPlanSessionStartupContinueUsesLatestNonEmptySession(t *testing.T) {
 		t.Fatalf("mkdir empty session: %v", err)
 	}
 
-	plan, err := planSessionStartup(sessionsDir, sessionStartupOptions{ContinueLatest: true})
-	if err != nil {
-		t.Fatalf("planSessionStartup: %v", err)
-	}
+	plan := planStartupForTest(t, sessionsDir, sessionStartupOptions{ContinueLatest: true})
 	if !plan.RestoreOnStartup {
 		t.Fatal("expected restore on startup for latest session")
 	}
 	if got := filepath.Base(plan.SessionDir); got != "200" {
 		t.Fatalf("SessionDir = %q, want %q", got, "200")
 	}
+	if len(plan.SkippedLockedIDs) != 0 {
+		t.Fatalf("SkippedLockedIDs = %v, want none", plan.SkippedLockedIDs)
+	}
 }
 
-func TestPlanSessionStartupContinueIncludesLatestEvenIfLocked(t *testing.T) {
+// --continue means "carry on where I left off", not "that exact session or
+// nothing": a session another live process owns cannot be opened, so the next
+// candidate is used and the skip is reported.
+func TestPlanSessionStartupContinueSkipsSessionOwnedByAnotherProcess(t *testing.T) {
 	sessionsDir := t.TempDir()
 	writeTestSessionMain(t, sessionsDir, "100", `{"role":"user","content":"first"}`+"\n")
 	writeTestSessionMain(t, sessionsDir, "200", `{"role":"user","content":"locked latest"}`+"\n")
@@ -121,25 +125,43 @@ func TestPlanSessionStartupContinueIncludesLatestEvenIfLocked(t *testing.T) {
 	}
 	defer lock.Release()
 
-	plan, err := planSessionStartup(sessionsDir, sessionStartupOptions{ContinueLatest: true})
-	if err != nil {
-		t.Fatalf("planSessionStartup: %v", err)
-	}
+	plan := planStartupForTest(t, sessionsDir, sessionStartupOptions{ContinueLatest: true})
 	if !plan.RestoreOnStartup {
-		t.Fatal("expected restore on startup for latest session")
+		t.Fatal("expected restore on startup for the next usable session")
 	}
-	if got := filepath.Base(plan.SessionDir); got != "200" {
-		t.Fatalf("SessionDir = %q, want %q", got, "200")
+	if got := filepath.Base(plan.SessionDir); got != "100" {
+		t.Fatalf("SessionDir = %q, want %q (200 is owned by another process)", got, "100")
+	}
+	if len(plan.SkippedLockedIDs) != 1 || plan.SkippedLockedIDs[0] != "200" {
+		t.Fatalf("SkippedLockedIDs = %v, want [200]", plan.SkippedLockedIDs)
+	}
+}
+
+func TestPlanSessionStartupContinueCreatesNewSessionWhenAllAreOwned(t *testing.T) {
+	sessionsDir := t.TempDir()
+	writeTestSessionMain(t, sessionsDir, "100", `{"role":"user","content":"only"}`+"\n")
+	lock, err := recovery.AcquireSessionLock(filepath.Join(sessionsDir, "100"))
+	if err != nil {
+		t.Fatalf("AcquireSessionLock: %v", err)
+	}
+	defer lock.Release()
+
+	plan := planStartupForTest(t, sessionsDir, sessionStartupOptions{ContinueLatest: true})
+	if plan.RestoreOnStartup {
+		t.Fatal("did not expect restore when every session is owned elsewhere")
+	}
+	if got := filepath.Base(plan.SessionDir); got == "100" {
+		t.Fatal("planned the session owned by another process")
+	}
+	if len(plan.SkippedLockedIDs) != 1 || plan.SkippedLockedIDs[0] != "100" {
+		t.Fatalf("SkippedLockedIDs = %v, want [100]", plan.SkippedLockedIDs)
 	}
 }
 
 func TestPlanSessionStartupContinueFallsBackToNewSession(t *testing.T) {
 	sessionsDir := t.TempDir()
 
-	plan, err := planSessionStartup(sessionsDir, sessionStartupOptions{ContinueLatest: true})
-	if err != nil {
-		t.Fatalf("planSessionStartup: %v", err)
-	}
+	plan := planStartupForTest(t, sessionsDir, sessionStartupOptions{ContinueLatest: true})
 	if plan.RestoreOnStartup {
 		t.Fatal("did not expect restore when no previous session exists")
 	}
@@ -161,6 +183,48 @@ func TestPlanSessionStartupResumeRequiresExistingMessages(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty resume session")
 	}
+}
+
+// --resume names one session, so substituting another would not honor the
+// request: a session owned elsewhere is an error that says what to do next.
+func TestPlanSessionStartupResumeFailsWhenSessionOwnedByAnotherProcess(t *testing.T) {
+	sessionsDir := t.TempDir()
+	writeTestSessionMain(t, sessionsDir, "100", `{"role":"user","content":"busy"}`+"\n")
+	lock, err := recovery.AcquireSessionLock(filepath.Join(sessionsDir, "100"))
+	if err != nil {
+		t.Fatalf("AcquireSessionLock: %v", err)
+	}
+	defer lock.Release()
+
+	_, err = planSessionStartup(sessionsDir, sessionStartupOptions{ResumeID: "100"})
+	if err == nil {
+		t.Fatal("expected an error for a session open in another process")
+	}
+	if _, ok := errors.AsType[*recovery.SessionLockedError](err); !ok {
+		t.Fatalf("error = %v, want a SessionLockedError", err)
+	}
+	if !strings.Contains(err.Error(), "--continue") {
+		t.Fatalf("error = %v, want a suggested next step", err)
+	}
+}
+
+// planStartupForTest plans a startup and releases the session lock the plan
+// acquired, so the temp sessions directory can be cleaned up.
+func planStartupForTest(t *testing.T, sessionsDir string, opts sessionStartupOptions) sessionStartupPlan {
+	t.Helper()
+	plan, err := planSessionStartup(sessionsDir, opts)
+	if err != nil {
+		t.Fatalf("planSessionStartup: %v", err)
+	}
+	if plan.SessionLock == nil {
+		t.Fatal("plan did not acquire a session lock")
+	}
+	t.Cleanup(func() {
+		if err := plan.SessionLock.Release(); err != nil {
+			t.Errorf("release session lock: %v", err)
+		}
+	})
+	return plan
 }
 
 func writeTestSessionMain(t *testing.T, sessionsDir, sessionID, content string) {
