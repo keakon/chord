@@ -181,7 +181,10 @@ for my $f (@files) {
         next unless $line =~ /^#{1,6}\s+(.*?)\s*#*\s*$/;
         my $text = $1;
         $text =~ s/\[([^\]]*)\]\([^)]*\)/$1/g;
-        $text =~ s/[*_`]//g;
+        # Code-span content is literal text and survives GitHub slugging, so
+        # underscores stay (connector punctuation); only backticks and asterisks
+        # are dropped, matching github-slugger.
+        $text =~ s/[`*]//g;
         my $slug = slugify($text);
         if (exists $seen{$slug}) { my $n = $seen{$slug}++; $slug = "$slug-$n"; }
         else { $seen{$slug} = 1; }

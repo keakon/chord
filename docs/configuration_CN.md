@@ -815,8 +815,8 @@ ime_switch_target: com.apple.keylayout.ABC
 prevent_sleep: true
 ```
 
-- `desktop_notification`：启用本地 TUI 的终端通知。Chord 会按终端自动选择通知转义序列（OSC 9 或 OSC 777），并在权限确认、等待回答、agent 回到 idle 时发送通知；是否发出提示音由终端决定。
-- `desktop_notification_foreground`：控制 TUI 聚焦时是否发送通知，默认值为 `true`；设为 `false` 后仅在终端失焦时通知。
+- `desktop_notification`：启用本地 TUI 的终端通知。每次通知都会同时发出通知转义序列（按终端自动选择 OSC 9 或 OSC 777）和一声终端铃声（BEL）——终端聚焦时多数终端会隐藏通知横幅，铃声保证此时也能听到提示。Chord 会在权限确认、等待回答、agent 回到 idle 等事件时发送通知；铃声是否出声取决于终端配置，各终端的开启方式见[平台说明](platforms_CN.md)。
+- `desktop_notification_foreground`：控制 TUI 聚焦时是否发送通知（转义序列和铃声一起），默认值为 `true`；设为 `false` 后仅在终端失焦时通知。
 - `ime_switch_target`：进入 Normal 模式时通过 `im-select`（Windows 为 `im-select.exe`）切换到指定输入法，回到 Insert 模式时恢复。常用于让快捷键在英文键盘布局下工作。
 - `prevent_sleep`：任意 agent 活跃时阻止 macOS 空闲睡眠，仅本地 TUI 模式生效。
 
@@ -1081,8 +1081,8 @@ chord doctor models --pool thinking
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
 | `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |
-| `desktop_notification`  | bool                  | `false`                         | global / project         | 启用本地 TUI 终端通知；Chord 会按终端自动选择 OSC 9 或 OSC 777（不支持的终端通常会忽略该序列）。                                            |
-| `desktop_notification_foreground` | bool | `true` | global / project | TUI 聚焦时是否发送本地终端通知；设为 `false` 后仅在终端失焦时通知。 |
+| `desktop_notification`  | bool                  | `false`                         | global / project         | 启用本地 TUI 终端通知；Chord 按终端自动选择 OSC 9 或 OSC 777，并在每次通知时附一声终端铃声（BEL）（不支持的终端通常会忽略该序列；见[平台说明](./platforms_CN.md#desktop_notification终端通知)）。 |
+| `desktop_notification_foreground` | bool | `true` | global / project | TUI 聚焦时是否发送本地终端通知（转义序列和铃声一起）；设为 `false` 后仅在终端失焦时通知。 |
 | `prevent_sleep`         | bool                  | `false`                         | global / project         | agent 活动时阻止 macOS idle sleep。仅 macOS 生效，其他平台 no-op。                                              |
 | `keymap`                | `map[action][]key`    | 见 [快捷键 — Action 名速查](./keybindings_CN.md#action-名速查) | global / project | 覆盖键位绑定。Action 名采用 lower snake_case。                                                                       |
 | `commands`              | `map[/cmd]text`       | 空                              | global / project         | 自定义 slash 命令；`"/cmd"` → 作为用户消息发送的文本。见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-commands)。 |

@@ -130,7 +130,7 @@ func (f tuiProgramFactory) build(ac *AppContext) (tuiProgramPlan, error) {
 		if ac != nil && ac.Cfg != nil && ac.Cfg.DesktopNotificationForeground != nil {
 			foreground = *ac.Cfg.DesktopNotificationForeground
 		}
-		tuiModel.SetDesktopNotification(osc9, foreground, terminalOut)
+		tuiModel.SetDesktopNotification(osc9, foreground)
 	}
 
 	opts = append(opts, tea.WithWindowSize(initialWidth, initialHeight))

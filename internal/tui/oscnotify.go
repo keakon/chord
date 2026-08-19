@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"io"
 	"slices"
 	"strings"
 	"unicode"
@@ -11,6 +9,10 @@ import (
 )
 
 const maxNotificationRunes = 256
+
+// The standalone bell follows OSC's own BEL terminator. Terminals consume the
+// first byte as part of OSC and interpret this one as an attention signal.
+const desktopNotificationBell = "\a"
 
 // sanitizeNotificationPayload strips bytes that would break terminal notification OSC
 // sequences or annoy the terminal.
@@ -42,54 +44,31 @@ func sanitizeNotificationPayload(s string) string {
 	return out
 }
 
-func emitTerminalNotificationOSC9(w io.Writer, msg string) {
-	if w == nil {
-		return
-	}
-	msg = sanitizeNotificationPayload(msg)
-	if msg == "" {
-		return
-	}
-	_, _ = fmt.Fprintf(w, "\x1b]9;%s\x07", msg)
+func terminalNotificationOSC9Sequence(msg string) string {
+	return "\x1b]9;" + sanitizeNotificationPayload(msg) + "\x07" + desktopNotificationBell
 }
 
-func emitOSC777(w io.Writer, title, body string) {
-	if w == nil {
-		return
-	}
-	title = sanitizeNotificationPayload(title)
-	body = sanitizeNotificationPayload(body)
-	if title == "" {
-		title = "Chord"
-	}
-	if body == "" {
-		body = "Chord"
-	}
-	_, _ = fmt.Fprintf(w, "\x1b]777;notify;%s;%s\x07", title, body)
+func terminalNotificationOSC777Sequence(title, body string) string {
+	return "\x1b]777;notify;" + sanitizeNotificationPayload(title) + ";" + sanitizeNotificationPayload(body) + "\x07" + desktopNotificationBell
 }
 
-func emitTerminalNotification(w io.Writer, protocol terminalNotificationProtocol, msg string) {
+func terminalNotificationSequence(protocol terminalNotificationProtocol, msg string) string {
 	switch protocol {
 	case terminalNotificationOSC777:
-		emitOSC777(w, "Chord", msg)
+		return terminalNotificationOSC777Sequence("Chord", msg)
 	default:
-		emitTerminalNotificationOSC9(w, msg)
+		return terminalNotificationOSC9Sequence(msg)
 	}
 }
 
 func (m *Model) maybeTerminalNotifyCmd(msg string) tea.Cmd {
-	if !m.desktopNotificationsEnabled || m.oscNotifyOut == nil {
+	if !m.desktopNotificationsEnabled {
 		return nil
 	}
 	if !m.desktopNotificationsForeground && m.terminalAppFocused {
 		return nil
 	}
-	w := m.oscNotifyOut
-	protocol := m.terminalNotificationProtocol
-	return func() tea.Msg {
-		emitTerminalNotification(w, protocol, msg)
-		return nil
-	}
+	return tea.Raw(terminalNotificationSequence(m.terminalNotificationProtocol, msg))
 }
 
 func (m *Model) idleNotificationText() string {

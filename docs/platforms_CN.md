@@ -68,6 +68,18 @@ ime_switch_target: com.apple.keylayout.ABC          # macOS 示例
 
 `tmux` 中可能需要 `set -g allow-passthrough on`，通知序列才可能透传到宿主终端。
 
+多数终端（包括 Ghostty 和 iTerm2）在自己处于前台时会抑制通知横幅和声音——正盯着终端看时，OSC 通知通常是无声的。因此 Chord 的每条通知都会附带一声终端铃声（BEL），终端把铃声当作注意力信号而不是通知，行为和横幅不同。想聚焦时完全静音，可设 `desktop_notification_foreground: false`。
+
+很多终端默认不响铃，开启方式也各不相同：
+
+- **Ghostty（macOS 需 ≥ 1.3，GTK 需 ≥ 1.2）**：在 Ghostty 配置里加 `bell-features = system,audio`（`system` 播系统警示音，`audio` 可用 `bell-audio-path`、`bell-audio-volume` 播自定义音频）；`attention`（Dock 跳动）和 `title`（标题加 🔔）默认开启。
+- **iTerm2**：Settings → Profiles → Terminal → Notification Center alerts，按 profile 配置；"Silence bell" 必须关闭，铃声才会到达通知中心。
+- **kitty**：`kitty.conf` 里的 `enable_audio_bell` / `visual_bell_duration`。
+- **tmux**：铃声按窗口经 `monitor-bell` / `bell-action` 路由；`set -g bell-action any` 可以在其他窗口收到提醒。
+- **Windows Terminal**：默认播系统音，可在 Terminal 设置 → Advanced → Bell notification style 里调整或静音。
+
+没列到的终端可能完全忽略 BEL，或只闪烁窗口；具体看对应终端的 bell/attention 配置文档。
+
 ### 剪贴板图片/PDF附件
 
 `Ctrl+V` 或 `Alt+V` 会从系统剪贴板读取图片或 PDF 并作为附件添加。读取及图片转换都在后台异步执行，因此 TUI 不会被阻塞；读取完成前会暂时阻止发送。普通终端 paste 事件（包括 macOS 常见的 `Cmd+V`）只粘贴文本，绝不会探测剪贴板附件。

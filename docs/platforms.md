@@ -68,6 +68,18 @@ In practice:
 
 Inside `tmux` you may need `set -g allow-passthrough on` for notifications to reach the host terminal.
 
+Most terminals (including Ghostty and iTerm2) suppress notification banners and sounds while they are the focused application, so an OSC notification sent while you are looking at the terminal is usually silent. Chord therefore pairs every notification with a terminal bell (BEL), which terminals treat as an attention signal instead of a notification. Set `desktop_notification_foreground: false` if you want everything silent while the terminal is focused.
+
+Bell sound is off by default in many terminals and how to enable it varies per terminal/system:
+
+- **Ghostty (macOS ≥ 1.3, GTK ≥ 1.2)**: add `bell-features = system,audio` to the Ghostty config (system plays the alert sound; `audio` can also play a custom file via `bell-audio-path` and `bell-audio-volume`). Other features like `attention` (Dock bounce) and `title` (🔔 prefix) are enabled by default.
+- **iTerm2**: *Settings → Profiles → Terminal → Notification Center alerts*; silence can be toggled per-profile, and "Silence bell" must be off for the bell to reach the notification center.
+- **kitty**: `enable_audio_bell` / `visual_bell_duration` in `kitty.conf`.
+- **tmux**: bells are routed through `monitor-bell`/`bell-action` per window; set `set -g bell-action any` to be alerted in other windows.
+- **Windows Terminal**: bells play the system sound by default; configure or mute it in Terminal settings → Advanced → Bell notification style.
+
+Terminals not listed here may ignore BEL entirely or only flash the window; check the terminal's own documentation for bell/attention options.
+
 ### Clipboard image/PDF attachment
 
 `Ctrl+V` or `Alt+V` reads an image or PDF from the system clipboard and adds it as an attachment. The read and any image conversion run asynchronously, so the TUI remains responsive; sending is temporarily held until the read finishes. Ordinary terminal paste events, including the usual macOS `Cmd+V`, are text-only and never probe clipboard attachments.

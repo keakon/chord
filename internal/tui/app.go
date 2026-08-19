@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"image"
-	"io"
 	"os"
 	"strings"
 	"sync"
@@ -300,11 +299,11 @@ type Model struct {
 	activeToast     *toastItem
 	toastGeneration uint64
 
-	// OSC terminal notifications (local TUI), optionally suppressed while focused.
+	// OSC terminal notifications (local TUI): OSC sequence plus a BEL; both are
+	// suppressed while focused when desktop_notification_foreground is false.
 	terminalAppFocused             bool
 	desktopNotificationsEnabled    bool
 	desktopNotificationsForeground bool
-	oscNotifyOut                   io.Writer
 	terminalNotificationProtocol   terminalNotificationProtocol
 
 	visibilityState
@@ -574,12 +573,12 @@ func (m *Model) SetInstanceID(id string) {
 	m.instanceID = strings.TrimSpace(id)
 }
 
-// SetDesktopNotification configures local TUI terminal notifications. When
-// foreground is false, notifications are suppressed while the terminal is focused.
-func (m *Model) SetDesktopNotification(enabled, foreground bool, out io.Writer) {
+// SetDesktopNotification configures local TUI terminal notifications: an OSC
+// sequence followed by a BEL on every notification. When foreground is false,
+// both are suppressed while the terminal is focused.
+func (m *Model) SetDesktopNotification(enabled, foreground bool) {
 	m.desktopNotificationsEnabled = enabled
 	m.desktopNotificationsForeground = foreground
-	m.oscNotifyOut = out
 }
 
 // SetKeyMap replaces the active key bindings. Call this after NewModel and
