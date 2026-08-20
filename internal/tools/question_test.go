@@ -17,6 +17,25 @@ func TestQuestionToolDescriptionOmitsDuplicatedLanguageRule(t *testing.T) {
 	}
 }
 
+// The Guidelines and dynamic capability/confirmation prompt blocks own the
+// decision threshold and routing for questions. Keep the tool description
+// focused on the callable tool contract so those policies have one source.
+func TestQuestionToolDescriptionKeepsPolicyInPromptBlocks(t *testing.T) {
+	desc := NewQuestionTool(nil).Description()
+	for _, unwanted := range []string{
+		"When to use:",
+		"When NOT to use:",
+		"scope, permissions, risk, or implementation choice",
+		"plain assistant text",
+		"easy for a non-implementer to answer",
+		"tradeoffs/risks",
+	} {
+		if strings.Contains(desc, unwanted) {
+			t.Fatalf("Description() should not own policy %q: %q", unwanted, desc)
+		}
+	}
+}
+
 func TestQuestionToolParametersMentionUserLanguage(t *testing.T) {
 	params := NewQuestionTool(nil).Parameters()
 
