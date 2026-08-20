@@ -670,13 +670,28 @@ func editPatchFromArgs(argsJSON string) string {
 	return strings.TrimSpace(parsed.Patch)
 }
 
-func replaceEditPreviewFromArgs(argsJSON string) string {
-	var parsed struct {
-		OldString  string `json:"old_string"`
-		NewString  string `json:"new_string"`
-		ReplaceAll *bool  `json:"replace_all,omitempty"`
-	}
+// replaceEditArgs holds the old_string/new_string replacement args of an Edit
+// tool call.
+type replaceEditArgs struct {
+	OldString  string `json:"old_string"`
+	NewString  string `json:"new_string"`
+	ReplaceAll *bool  `json:"replace_all,omitempty"`
+}
+
+// parseReplaceEditArgs extracts the text-replacement args of an Edit tool call.
+// ok is false when the args are not old_string/new_string replacements, letting
+// callers fall back to the unified-diff representation.
+func parseReplaceEditArgs(argsJSON string) (replaceEditArgs, bool) {
+	var parsed replaceEditArgs
 	if json.Unmarshal([]byte(argsJSON), &parsed) != nil || parsed.OldString == "" {
+		return replaceEditArgs{}, false
+	}
+	return parsed, true
+}
+
+func replaceEditPreviewFromArgs(argsJSON string) string {
+	parsed, ok := parseReplaceEditArgs(argsJSON)
+	if !ok {
 		return ""
 	}
 	preview := map[string]any{

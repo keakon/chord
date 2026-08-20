@@ -2505,7 +2505,7 @@ func TestApplyPatchToolCallCopyOmitsPathAndPlacesDiffBeforeResult(t *testing.T) 
 	}
 }
 
-func TestReplaceEditToolCallErrorCopyIncludesArgumentsWhenDiffMissing(t *testing.T) {
+func TestReplaceEditToolCallErrorCopyShowsOldAndNewStrings(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -2521,15 +2521,80 @@ func TestReplaceEditToolCallErrorCopyIncludesArgumentsWhenDiffMissing(t *testing
 	for _, want := range []string{
 		"# Tool call: edit",
 		"## Path\n\nfoo.txt",
+		"## old_string\n\n```\nold line\n```",
+		"## new_string\n\n```\nnew line\n```",
+		"## replace_all\n\ntrue",
 		"## Result\n\nold_string not found in file",
-		"## Arguments\n\n```json",
-		`"old_string": "old line\n"`,
-		`"new_string": "new line\n"`,
-		`"replace_all": true`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("copied replace edit block missing %q; got:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "## Arguments") || strings.Contains(got, "## Diff") {
+		t.Fatalf("copied replace edit block should use old_string/new_string sections instead of JSON Arguments or diff; got:\n%s", got)
+	}
+}
+
+func TestReplaceEditToolCallCopyOmitsFalseReplaceAll(t *testing.T) {
+	block := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: tools.NameEdit,
+		RawArgs:  `{"path":"foo.txt","old_string":"old","new_string":"new","replace_all":false}`,
+	}
+
+	got := toolCallMarkdownContent(block)
+	if strings.Contains(got, "## replace_all") {
+		t.Fatalf("copied edit block should omit false replace_all; got:\n%s", got)
+	}
+}
+
+// An edit that touches Markdown carries backticks in its payload. The fence has
+// to outgrow them, or the pasted section closes inside the code and the rest of
+// the card renders as prose.
+func TestEditToolCallCopyFencesPayloadContainingCodeFence(t *testing.T) {
+	block := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: tools.NameEdit,
+		RawArgs:  `{"path":"README.md","old_string":"` + "```" + `go\ncode\n` + "```" + `","new_string":"  indented"}`,
+	}
+
+	got := toolCallMarkdownContent(block)
+	if !strings.Contains(got, "## old_string\n\n````\n```go\ncode\n```\n````") {
+		t.Fatalf("copied edit block did not grow the fence past the payload; got:\n%s", got)
+	}
+	if !strings.Contains(got, "## new_string\n\n```\n  indented\n```") {
+		t.Fatalf("copied edit block did not fence the indented payload; got:\n%s", got)
+	}
+}
+
+func TestEditToolCallCopyShowsOldAndNewStringsInsteadOfDiff(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		Content:       `{"path":"src/demo.go","old_string":"old\n","new_string":"new\n"}`,
+		Diff:          "@@ -1 +1 @@\n-old\n+new",
+		ResultContent: "Diagnostics:\nnone",
+		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultDone:    true,
+	}
+
+	got := toolCallMarkdownContent(block)
+	for _, want := range []string{
+		"# Tool call: edit",
+		"## Path\n\nsrc/demo.go",
+		"## old_string\n\n```\nold\n```",
+		"## new_string\n\n```\nnew\n```",
+		"## Result\n\nDiagnostics:\nnone",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("copied edit block missing %q; got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "## Diff") {
+		t.Fatalf("copied edit block should show old_string/new_string instead of a unified diff; got:\n%s", got)
 	}
 }
 

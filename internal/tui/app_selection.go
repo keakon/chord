@@ -595,26 +595,63 @@ func fileDiffToolCallMarkdownContent(b *Block) string {
 			parts = append(parts, "## Path\n\n"+path)
 		}
 	}
+	argsJSON := b.editPatchArgsJSON()
+	// The edit tool changes text via exact old_string/new_string replacements,
+	// which read more clearly than a unified diff when the card is shared.
+	showReplace := false
+	if toolName == tools.NameEdit {
+		if args, ok := parseReplaceEditArgs(argsJSON); ok {
+			parts = append(parts, markdownFencedSection("old_string", args.OldString))
+			parts = append(parts, markdownFencedSection("new_string", args.NewString))
+			if args.ReplaceAll != nil && *args.ReplaceAll {
+				parts = append(parts, "## replace_all\n\ntrue")
+			}
+			showReplace = true
+		}
+	}
 	diff := strings.TrimSpace(b.Diff)
 	applyPatchNoChanges := b.ToolName == tools.NameApplyPatch && b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() && strings.Contains(b.ResultContent, "No net file changes")
-	if diff == "" && !applyPatchNoChanges {
-		diff = editPatchFromArgs(b.editPatchArgsJSON())
-	}
-	if diff == "" && applyPatchNoChanges {
-		diff = "No changes"
-	}
-	if diff != "" {
-		parts = append(parts, "## Diff\n\n```diff\n"+diff+"\n```")
+	if !showReplace {
+		if diff == "" && !applyPatchNoChanges {
+			diff = editPatchFromArgs(argsJSON)
+		}
+		if diff == "" && applyPatchNoChanges {
+			diff = "No changes"
+		}
+		if diff != "" {
+			parts = append(parts, "## Diff\n\n```diff\n"+diff+"\n```")
+		}
 	}
 	if result := strings.TrimSpace(toolExpandedResultContent(b.ToolName, b.ResultContent)); result != "" {
 		parts = append(parts, "## Result\n\n"+result)
 	}
-	if diff == "" && b.toolResultIsError() {
-		if preview := strings.TrimSpace(replaceEditPreviewFromArgs(b.editPatchArgsJSON())); preview != "" {
-			parts = append(parts, "## Arguments\n\n```json\n"+preview+"\n```")
-		}
-	}
 	return strings.Join(parts, "\n\n")
+}
+
+// markdownFencedSection fences a copied code payload. old_string and new_string
+// are matched byte for byte by the edit tool, so leading whitespace and lines
+// beginning with #, -, or > must survive a paste into a Markdown reader intact.
+// The fence grows past the longest backtick run in the payload so content that
+// itself contains a fence cannot close the section early.
+func markdownFencedSection(title, code string) string {
+	fence := strings.Repeat("`", max(3, longestBacktickRun(code)+1))
+	if !strings.HasSuffix(code, "\n") {
+		code += "\n"
+	}
+	return "## " + title + "\n\n" + fence + "\n" + code + fence
+}
+
+func longestBacktickRun(s string) int {
+	longest, current := 0, 0
+	for _, r := range s {
+		if r != '`' {
+			current = 0
+			continue
+		}
+		current++
+		longest = max(longest, current)
+	}
+	return longest
 }
 
 func (m *Model) handleSuperCopy() tea.Cmd {

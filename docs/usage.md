@@ -341,7 +341,7 @@ Common actions:
 ## Copying text
 
 - Drag in the transcript to select text inside the TUI
-- `yy` copies the focused message card; tool cards are copied as Markdown with `# Tool call`, `## Arguments`, `## Result`, and `## Diff` sections. Done rejection reasons are copied in a separate `## Rejection reason` section.
+- `yy` copies the focused message card; tool cards are copied as Markdown with `# Tool call`, `## Arguments`, `## Result`, and `## Diff` sections (`edit` cards use `## old_string` / `## new_string` for the replaced text instead, plus `## replace_all` only when it is enabled). Done rejection reasons are copied in a separate `## Rejection reason` section.
 - `Cmd+C`: copy the current transcript selection in macOS terminals that forward the key to Chord; when a confirmation dialog input is focused, copies that input instead
 - `Ctrl+C`: remains reserved for cancel / quit and is not used for transcript copy
 

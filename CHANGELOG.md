@@ -37,6 +37,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Search summaries produced by context reduction now keep the full `path:line` location list within the byte budget instead of collapsing to a generic marker, so the model can still navigate to every reported match.
 - Post-write LSP diagnostics now show paths inside the active tool working directory as relative paths, while files outside it keep absolute paths. This shortens `write`, `edit`, and `apply_patch` results and the model context without changing file identity inside the LSP runtime.
 - Tool inputs that the model re-fetched after reduction are exempt from being reduced again (`recalled_input_protect`): re-reading a pruned file or re-running a pruned lookup durably protects that evidence for the rest of the loop.
+- `yy` copying an `edit` tool card now shows the replacement as `## old_string` / `## new_string` sections instead of a unified diff, adding `## replace_all` only when enabled so default copies stay concise.
 
 ### Fixes
 
