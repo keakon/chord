@@ -12,6 +12,20 @@ This page describes every file and directory Chord reads or writes, and how to s
 
 All three can be moved by environment variable, CLI flag, or `config.yaml` `paths:` — see [Environment variables](./environment.md) and [CLI flags](./cli.md#global-flags).
 
+## Choosing a location for new data
+
+Use these rules when adding a new Chord file or directory:
+
+1. Put it in the project root or `.chord/` when users should read or edit it, repository-relative links matter, or it should move with the project. State its Git policy explicitly; a hidden path is not automatically private.
+2. Put it in the config home when it is user-owned configuration that applies across projects. Credentials belong here, never in a project directory.
+3. Put it in the state directory when Chord owns durable machine state such as history, bookkeeping, locks, checkpoints, or registries. Losing state may lose history or require recovery work.
+4. Put it in the cache directory only when deleting it cannot lose user-authored content or durable history and Chord can rebuild it from another source.
+
+Some features need a split layout. Keep portable, human-readable project
+content in the project tree, but keep high-frequency bookkeeping, locks, and
+rebuildable indexes in state or cache. Do not duplicate the same authoritative
+content across layers; each file needs one clear source of truth.
+
 ## Config home — `~/.config/chord/`
 
 You edit these files. Treat them as source.
@@ -106,12 +120,37 @@ When `chord` runs in a project for the first time, it ensures the project root h
 ├── config.yaml            # project-level overrides (merged with global ~/.config/chord/config.yaml)
 ├── agents/                # project-level agents (override or extend global agents)
 ├── commands/              # project-level custom slash commands
-└── skills/                # project-level skills
+├── skills/                # project-level skills
+└── plans/                 # user-visible planning documents
 ```
 
 Project-level files have higher priority than global ones (same-name keys override). It is normal — and useful — to commit `.chord/` into your repository so that team members share the same agent setup and slash commands.
 
 `auth.yaml` is **never** read from `.chord/`: credentials always live in `~/.config/chord/auth.yaml`.
+
+### Responsibility boundaries
+
+Use the project tree for content that describes how Chord should work in this
+project, or for user-visible artifacts that a team may review:
+
+- `AGENTS.md` contains repository instructions that applicable agents must follow.
+- `.chord/config.yaml`, `.chord/agents/`, `.chord/commands/`, and `.chord/skills/` contain explicit project configuration and shared capabilities.
+- `.chord/plans/` contains planning documents. Whether plans are committed is a project decision.
+- Project-local Chord files should use paths relative to the project root when they refer to repository files, so the project remains portable when its directory moves.
+
+Do not use `.chord/` as a general runtime-state directory. Session transcripts,
+usage ledgers, recovery snapshots, project registry data, logs, locks, and other
+opaque runtime bookkeeping belong under the state directory or cache directory
+described above. Human-readable project artifacts may live in the project tree
+when direct editing, relative references, or portability requires it, but their
+Git and ownership semantics must be explicit. In particular, `auth.yaml` and
+other credentials must not be placed under the project tree.
+
+The whole `.chord/` directory is not automatically safe to commit or ignore.
+Project configuration and shared skills are commonly committed, while plans
+and any project-local private files should follow the repository's own policy.
+Review untracked and ignored files before committing rather than assuming that
+every hidden project file is private.
 
 ## Logs
 
