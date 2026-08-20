@@ -528,7 +528,18 @@ type MainAgent struct {
 	// switch state. Pool switches requested while a main LLM request is in flight
 	// are applied at the next request boundary, so they do not invalidate the
 	// request currently producing output.
-	mainLLMRequestInFlight      atomic.Bool
+	mainLLMRequestInFlight atomic.Bool
+	// mainSlotForeground tracks whether the shared main activity slot currently
+	// shows a live foreground request/tool state. Compaction activity emissions
+	// consult it so heartbeats never clobber visible main-model progress. It is
+	// released by the event loop after the request result is handled, not by the
+	// goroutine that only finished reading the provider response.
+	mainSlotForeground atomic.Bool
+	// compactionSlotActive is the cross-goroutine display-only view of the
+	// compaction lifecycle. The detailed compaction state remains event-loop
+	// owned; activity heartbeats and IsCompactionRunning use this atomic view so
+	// they do not read that state concurrently.
+	compactionSlotActive        atomic.Bool
 	pendingMainModelPoolSwitch  bool
 	pendingAgentModelPoolSwitch map[string]struct{}
 	pendingModelPoolRollback    *modelPoolSelectionSnapshot
@@ -2064,8 +2075,11 @@ func (a *MainAgent) handleAgentError(evt Event) {
 			log.Debugf("discarding stale error event_turn=%v current_turn=%v", evt.TurnID, a.currentTurnID())
 			return
 		}
+		// Settle the request before the routing-invalidation restart:
+		// applyPendingModelPoolSwitchesAtRequestBoundary is a no-op while a main
+		// request is still marked in flight, and this is exactly the boundary a
+		// pool switch that invalidated the routing must be applied at.
 		a.mainLLMRequestInFlight.Store(false)
-
 		if llm.IsRoutingInvalidated(err) {
 			log.Infof("routing invalidated during active turn; restarting request turn_id=%v instance=%v", evt.TurnID, a.instanceID)
 			a.applyPendingModelPoolSwitchesAtRequestBoundary()

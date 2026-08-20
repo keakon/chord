@@ -428,6 +428,12 @@ func (a *MainAgent) rememberIdleTurn(turnID uint64) {
 // agent was busy and messages were queued). Call this wherever IdleEvent was previously
 // emitted so that queued input is injected after the model has finished.
 func (a *MainAgent) setIdleAndDrainPending() {
+	// This method runs on the main event loop. The provider goroutine may have
+	// returned earlier, but the foreground slot remains claimed until the
+	// corresponding response/error/cancel path reaches this point.
+	if a.mainSlotForeground.Swap(false) {
+		a.emitCompactionSlotActivity()
+	}
 	turnID := uint64(0)
 	a.turnMu.Lock()
 	if a.turn != nil {

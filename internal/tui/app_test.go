@@ -905,8 +905,11 @@ func TestCompactionKeepAliveRepeatKeepsOriginalSinceAnchor(t *testing.T) {
 		t.Fatalf("keep-alive repeat moved the since anchor: got %v, want %v", got, started)
 	}
 
-	// A real activity transition into compacting must refresh the anchor.
+	// A real activity transition into compacting must refresh the anchor. The
+	// agent only emits compacting after the foreground yields the slot via
+	// idle, so the transition arrives as executing → idle → compacting.
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main"}})
 	if got := m.workStartedAt["main"]; !got.After(started) {
 		t.Fatalf("transition into compacting should refresh the since anchor, got %v", got)
@@ -6374,6 +6377,54 @@ func TestRenderStatusBarShowsCompactionProgressInBackgroundLane(t *testing.T) {
 	}
 }
 
+func TestRenderStatusBarDoesNotShowIdleSinceDuringCompaction(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	m.workingDir = "/tmp"
+	m.updateRightPanelVisible()
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main"}
+	m.compactionBgStatus = compactionBackgroundStatus{
+		Active:    true,
+		StartedAt: time.Now().Add(-5 * time.Second),
+	}
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "previous", StartedAt: time.Now().Add(-2 * time.Minute)})
+
+	plain := stripANSI(m.renderStatusBar())
+	if strings.Contains(plain, "Since ") {
+		t.Fatalf("status bar should not show idle time during compaction; got %q", plain)
+	}
+}
+
+func TestRenderStatusBarDoesNotShowIdleSinceDuringConcurrentRequest(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	m.workingDir = "/tmp"
+	m.updateRightPanelVisible()
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+	m.compactionBgStatus = compactionBackgroundStatus{
+		Active:    true,
+		StartedAt: time.Now().Add(-5 * time.Second),
+	}
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "previous", StartedAt: time.Now().Add(-2 * time.Minute)})
+
+	plain := stripANSI(m.renderStatusBar())
+	if strings.Contains(plain, "Since ") {
+		t.Fatalf("status bar should not show idle time during a concurrent request; got %q", plain)
+	}
+}
+
+func TestRenderStatusBarDoesNotShowIdleSinceDuringPendingToolWork(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	m.workingDir = "/tmp"
+	m.updateRightPanelVisible()
+	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "previous", StartedAt: time.Now().Add(-2 * time.Minute)})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockToolCall, ToolID: "call-1", ToolName: "shell", ResultDone: false})
+
+	plain := stripANSI(m.renderStatusBar())
+	if strings.Contains(plain, "Since ") {
+		t.Fatalf("status bar should not show idle time during pending tool work; got %q", plain)
+	}
+}
+
 func TestRenderStatusBarShowsLastWhenIdleAndSettled(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	m.workingDir = "/tmp"
@@ -6667,7 +6718,7 @@ func TestStatusBarDynamicCacheKeyCompactingUsesAnimationFrames(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main", Detail: "context"}
 	t1 := time.UnixMilli(1000)
-	t2 := t1.Add(200 * time.Millisecond)
+	t2 := t1.Add(compactionPillBreathPhase)
 	if got1, got2 := m.statusBarDynamicCacheKeyAt(t1), m.statusBarDynamicCacheKeyAt(t2); got1 == got2 {
 		t.Fatalf("compacting cache key should follow animation frame cadence, got identical keys %q", got1)
 	}
@@ -6677,8 +6728,8 @@ func TestStatusBarDynamicCacheKeyCompactingUsesSecondBucket(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main"}
 	t0 := time.UnixMilli(120000)
-	t1 := t0.Add(100 * time.Millisecond)
-	t2 := t0.Add(200 * time.Millisecond)
+	t1 := t0.Add(compactionPillBreathPhase / 2)
+	t2 := t0.Add(compactionPillBreathPhase)
 	if got0, got1, got2 := m.statusBarDynamicCacheKeyAt(t0), m.statusBarDynamicCacheKeyAt(t1), m.statusBarDynamicCacheKeyAt(t2); got0 == got1 && got1 == got2 {
 		t.Fatalf("compacting cache keys should change with animation frames, got %q %q %q", got0, got1, got2)
 	}
@@ -8767,7 +8818,7 @@ func TestAgentDoneEventRefreshesTaskBlockLastTime(t *testing.T) {
 	m.updateRightPanelVisible()
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
 	old := time.Date(2024, 6, 15, 15, 4, 0, 0, time.Local)
-	task := &Block{ID: 1, Type: BlockToolCall, ToolName: "delegate", LinkedAgentID: "agent-1", StartedAt: old, SettledAt: old}
+	task := &Block{ID: 1, Type: BlockToolCall, ToolName: "delegate", LinkedAgentID: "agent-1", StartedAt: old, SettledAt: old, ResultDone: true}
 	m.viewport.AppendBlock(task)
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentDoneEvent{AgentID: "agent-1", Summary: "done"}})

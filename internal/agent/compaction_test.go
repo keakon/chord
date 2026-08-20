@@ -115,6 +115,8 @@ func TestCompactionProgressReporterUsesRequestProgressThrottle(t *testing.T) {
 
 func TestCompactionKeepAliveEmitsActivityAndStops(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 0, nil)
+	defer a.resetCompactionState()
 
 	k := newCompactionKeepAlive(a)
 	defer k.Stop()
@@ -147,6 +149,120 @@ func TestCompactionKeepAliveEmitsActivityAndStops(t *testing.T) {
 		t.Fatal("keep-alive run goroutine still running after Stop")
 	}
 	k.Stop()
+}
+
+func TestCompactionKeepAliveYieldsToForegroundActivity(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 0, nil)
+	defer a.resetCompactionState()
+
+	k := newCompactionKeepAlive(a)
+	defer k.Stop()
+
+	// A live foreground request owns the shared main activity slot: the
+	// heartbeat must not clobber it mid-stream.
+	a.emitActivity("main", ActivityStreaming, "")
+	drainAgentEvents(a.outputCh)
+	k.tick()
+	for _, event := range drainAgentEvents(a.outputCh) {
+		if activity, ok := event.(AgentActivityEvent); ok && activity.Type == ActivityCompacting {
+			t.Fatalf("keep-alive clobbered foreground activity: %+v", activity)
+		}
+	}
+
+	// Once the main LLM request settles, the slot is free again and the next
+	// heartbeat surfaces compacting.
+	a.mainSlotForeground.Store(false)
+	k.tick()
+	found := false
+	for _, event := range drainAgentEvents(a.outputCh) {
+		if activity, ok := event.(AgentActivityEvent); ok && activity.Type == ActivityCompacting {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("keep-alive tick after request settle emitted no compacting activity event")
+	}
+}
+
+func TestIdleHandsMainSlotBackToRunningCompaction(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 0, nil)
+	defer a.resetCompactionState()
+
+	// Foreground work ends while compaction is still running: the idle must be
+	// immediately followed by a compacting handback instead of flashing idle.
+	a.emitActivity("main", ActivityExecuting, "1 tools")
+	a.emitActivity("main", ActivityIdle, "")
+	var sawIdle, sawHandback bool
+	for _, event := range drainAgentEvents(a.outputCh) {
+		activity, ok := event.(AgentActivityEvent)
+		if !ok {
+			continue
+		}
+		if activity.Type == ActivityIdle {
+			sawIdle = true
+		}
+		if sawIdle && activity.Type == ActivityCompacting {
+			sawHandback = true
+		}
+	}
+	if !sawIdle || !sawHandback {
+		t.Fatalf("idle handback missing: sawIdle=%v sawHandback=%v", sawIdle, sawHandback)
+	}
+
+	// After compaction completes (running state cleared), idle stays idle.
+	a.emitActivity("main", ActivityExecuting, "1 tools")
+	a.resetCompactionState()
+	a.emitActivity("main", ActivityIdle, "")
+	for _, event := range drainAgentEvents(a.outputCh) {
+		if activity, ok := event.(AgentActivityEvent); ok && activity.Type == ActivityCompacting {
+			t.Fatalf("terminal idle must not hand the slot back to compaction: %+v", activity)
+		}
+	}
+}
+
+func TestCompactionHeartbeatWaitsForResponseHandler(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 0, nil)
+	defer a.resetCompactionState()
+	a.newTurn()
+	a.mainLLMRequestInFlight.Store(true)
+	a.emitActivity("main", ActivityStreaming, "")
+	drainAgentEvents(a.outputCh)
+	k := newCompactionKeepAlive(a)
+	defer k.Stop()
+
+	// Returning from the provider no longer releases the foreground slot. Until
+	// the event loop handles the response, a compaction heartbeat must stay out
+	// of the shared activity lane.
+	k.tick()
+	for _, event := range drainAgentEvents(a.outputCh) {
+		if activity, ok := event.(AgentActivityEvent); ok && activity.Type == ActivityCompacting {
+			t.Fatalf("heartbeat claimed slot before response handler: %+v", activity)
+		}
+	}
+
+	a.handleLLMResponse(Event{
+		Type:   EventLLMResponse,
+		TurnID: a.turn.ID,
+		Payload: &LLMResponsePayload{
+			Content:    "done",
+			StopReason: "stop",
+		},
+	})
+
+	found := false
+	for _, event := range drainAgentEvents(a.outputCh) {
+		if activity, ok := event.(AgentActivityEvent); ok && activity.Type == ActivityCompacting {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("response handler did not hand the slot back to active compaction")
+	}
 }
 
 func TestCompactionProgressReporterInfersAttemptFromTransportReset(t *testing.T) {

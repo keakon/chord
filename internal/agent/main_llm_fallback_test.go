@@ -109,7 +109,7 @@ func requestHasUserText(messages []message.Message, want string) bool {
 	return false
 }
 
-func TestCallLLMOversizeStartsCompactionWhenNotRunning(t *testing.T) {
+func TestCallLLMOversizeRequestsEventLoopCompaction(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reserved: 16000}}}
 	a.newTurn()
@@ -132,11 +132,22 @@ func TestCallLLMOversizeStartsCompactionWhenNotRunning(t *testing.T) {
 	if !IsContextLengthExceededPendingCompaction(err) {
 		t.Fatalf("err = %v, want pending compaction error", err)
 	}
-	if !a.IsCompactionRunning() {
-		t.Fatal("expected oversize-driven compaction to be running")
+	if a.IsCompactionRunning() {
+		t.Fatal("provider goroutine must not mutate compaction state")
 	}
-	if !a.compactionState.trigger.OversizeDriven {
-		t.Fatal("expected oversize-driven trigger")
+	a.handleCompactionOversizeSuspend(Event{
+		Type:   EventCompactionOversizeSuspend,
+		TurnID: a.turn.ID,
+		Payload: &pendingMainLLMCall{
+			turnID:            a.turn.ID,
+			turnEpoch:         a.turn.Epoch,
+			sessionEpoch:      a.sessionEpoch,
+			continuation:      compactionResumeMainLLM,
+			oversizeSuspended: true,
+		},
+	})
+	if !a.IsCompactionRunning() || !a.compactionState.trigger.OversizeDriven {
+		t.Fatalf("event loop did not start oversize compaction: %+v", a.compactionState)
 	}
 	if got := a.ctxMgr.GetUsableInputBudget(); got != 256000 {
 		t.Fatalf("usable input budget = %d, want 256000", got)
@@ -162,6 +173,35 @@ func TestCallLLMOversizeStartsCompactionWhenNotRunning(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for oversize compaction info event")
 		}
+	}
+}
+
+func TestOversizeCompactionRequestHonorsRetryLimitOnEventLoop(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.newTurn()
+	a.turn.OversizeRecoveryCount = maxOversizeRecoveryAttempts
+	a.mainLLMRequestInFlight.Store(true)
+
+	a.handleCompactionOversizeSuspend(Event{
+		Type:   EventCompactionOversizeSuspend,
+		TurnID: a.turn.ID,
+		Payload: &pendingMainLLMCall{
+			turnID:            a.turn.ID,
+			turnEpoch:         a.turn.Epoch,
+			sessionEpoch:      a.sessionEpoch,
+			continuation:      compactionResumeMainLLM,
+			oversizeSuspended: true,
+		},
+	})
+
+	if a.IsCompactionRunning() {
+		t.Fatal("retry-limited oversize request started compaction")
+	}
+	if a.turn != nil {
+		t.Fatal("retry-limited oversize request did not settle the turn")
+	}
+	if a.mainLLMRequestInFlight.Load() {
+		t.Fatal("retry-limited oversize request left request in flight")
 	}
 }
 

@@ -63,6 +63,8 @@ type pendingMainLLMCall struct {
 	sessionEpoch      uint64
 	continuation      compactionContinuationKind
 	oversizeSuspended bool
+	selectedModelRef  string
+	runningModelRef   string
 }
 
 func (s *compactionState) isRunning() bool {
@@ -90,6 +92,7 @@ func (a *MainAgent) currentCompactionPendingCall() *pendingMainLLMCall {
 
 func (a *MainAgent) resetCompactionState() {
 	a.compactionState = compactionState{}
+	a.compactionSlotActive.Store(false)
 }
 
 func (a *MainAgent) beginCompactionState(planID uint64, target compactionTarget, trigger compactionTrigger, continuation continuationPlan, headSplit int, cancel context.CancelFunc) {
@@ -103,6 +106,7 @@ func (a *MainAgent) beginCompactionState(planID uint64, target compactionTarget,
 		headSplit:    headSplit,
 		cancel:       cancel,
 	}
+	a.compactionSlotActive.Store(true)
 }
 
 func (a *MainAgent) finishCompactionState() (pending *pendingMainLLMCall, discard bool) {
@@ -128,26 +132,45 @@ func (a *MainAgent) markCompactionDiscard() {
 // in flight, or a draft is waiting to be applied at the continuation barrier.
 // This is the public API for TUI to query compaction state.
 func (a *MainAgent) IsCompactionRunning() bool {
-	return a.compactionState.isRunning() || a.compactionState.readyDraft != nil
+	return a.compactionSlotActive.Load()
 }
 
-// CancelCompaction cancels the in-flight compaction goroutine. Returns true
-// if there was a running compaction to cancel.
+// CancelCompaction requests cancellation on the main event loop. It returns
+// true when there was active compaction work to cancel.
 func (a *MainAgent) CancelCompaction() bool {
+	if !a.compactionSlotActive.Load() {
+		return false
+	}
+	a.queueLoopEvent(Event{Type: EventCompactionCancel})
+	return true
+}
+
+// cancelCompactionOnLoop performs compaction cancellation on the event-loop
+// goroutine. The public CancelCompaction method only queues the request so the
+// TUI never races the event-loop-owned compaction state.
+func (a *MainAgent) cancelCompactionOnLoop() bool {
 	if !a.compactionState.isRunning() && a.compactionState.readyDraft == nil {
 		return false
 	}
 	a.markCompactionDiscard()
 	// Clear the ready draft (waiting for barrier)
+	readyDraft := a.compactionState.readyDraft
 	a.compactionState.readyDraft = nil
+	if readyDraft != nil {
+		cleanupOrphanCompactionFiles(readyDraft.AbsHistoryPath)
+		a.resetCompactionState()
+		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusCancelled})
+		a.emitActivity("main", ActivityIdle, "")
+		return true
+	}
 	if a.compactionState.cancel != nil {
 		a.compactionState.cancel()
 	}
-	// If only had readyDraft (no running goroutine), clear discard state
-	if !a.compactionState.running {
-		a.compactionState.discard = false
-	}
 	return true
+}
+
+func (a *MainAgent) handleCompactionCancel() {
+	a.cancelCompactionOnLoop()
 }
 
 type compactionFailure struct {
@@ -366,25 +389,30 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnID uint64, messages []message.Message, agentErrSourceID string) {
 	a.pendingLoopContinuation = nil
 	a.mainLLMRequestInFlight.Store(true)
+	turnEpoch := a.currentTurnEpoch()
+	sessionEpoch := a.sessionEpoch
 	a.outputWg.Go(func() {
 		resp, err := a.callLLM(turnCtx, messages)
 		if err != nil {
 			if turnCtx.Err() != nil {
 				return
 			}
-			// If context length exceeded while compaction is running,
-			// suspend this LLM call until compaction completes.
+			// Context-length exhaustion either joins an active compaction or
+			// asks the event loop to start one before retrying this call.
 			if IsContextLengthExceededPendingCompaction(err) {
+				pendingErr, _ := errors.AsType[*contextLengthExceededPendingCompactionError](err)
 				a.sendEvent(Event{
 					Type:   EventCompactionOversizeSuspend,
 					TurnID: turnID,
 					Payload: &pendingMainLLMCall{
 						continuation:      compactionResumeMainLLM,
 						turnID:            turnID,
-						turnEpoch:         a.currentTurnEpoch(),
-						sessionEpoch:      a.sessionEpoch,
+						turnEpoch:         turnEpoch,
+						sessionEpoch:      sessionEpoch,
 						agentErrSourceID:  agentErrSourceID,
 						oversizeSuspended: true,
+						selectedModelRef:  pendingErr.selectedModelRef,
+						runningModelRef:   pendingErr.runningModelRef,
 					},
 				})
 				return
@@ -500,8 +528,10 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 			}
 		}
 
-		// Emit activity to show compaction is ready but waiting for barrier
-		a.emitActivity("main", ActivityCompacting, "context")
+		// Emit activity to show compaction is ready but waiting for barrier.
+		// Guarded: a live foreground request keeps the slot, the pill already
+		// carries the compaction state.
+		a.emitCompactionSlotActivity()
 		log.Infof("compaction ready, waiting for continuation barrier plan_id=%v turn_active=%v pending_llm_call=%v has_pending_user=%v", draft.PlanID, turnActive, pending != nil, len(a.pendingUserMessages) > 0)
 		return
 	}
@@ -595,14 +625,46 @@ func (a *MainAgent) applyReadyDraft() (applySucceeded bool, handledIdleBarrier b
 	return applySucceeded, handledIdleBarrier
 }
 
-// handleCompactionOversizeSuspend saves an LLM call that was suspended because
-// context length was exceeded while compaction was running. The call is resumed
-// after compaction applies.
+// handleCompactionOversizeSuspend routes an oversized LLM call behind active or
+// newly started compaction. The call resumes after the compacted context applies.
 func (a *MainAgent) handleCompactionOversizeSuspend(evt Event) {
 	pending, ok := evt.Payload.(*pendingMainLLMCall)
 	if !ok || pending == nil {
 		log.Errorf("handleCompactionOversizeSuspend: invalid payload type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
+	}
+	if a.turn == nil || pending.turnID == 0 || a.turn.ID != pending.turnID {
+		log.Debugf("discarding stale oversize compaction request turn_id=%v current_turn_id=%v", pending.turnID, a.currentTurnID())
+		return
+	}
+	if !a.IsCompactionRunning() {
+		if a.turn.OversizeRecoveryCount >= maxOversizeRecoveryAttempts {
+			a.recordOversizeRecoveryAnalyticsEvent(
+				"abort_retry_limit",
+				"main_llm_error",
+				pending.selectedModelRef,
+				pending.runningModelRef,
+				map[string]string{"trigger": "oversize_driven", "attempts": fmt.Sprintf("%d", a.turn.OversizeRecoveryCount), "action": "abort"},
+			)
+			a.mainLLMRequestInFlight.Store(false)
+			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("LLM stream failed: automatic context compaction already retried %d times and the context still exceeds all available models; try /compact or reduce the active context", a.turn.OversizeRecoveryCount)})
+			a.setIdleAndDrainPending()
+			return
+		}
+		if !a.ensureOversizeDrivenCompaction() {
+			a.mainLLMRequestInFlight.Store(false)
+			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("automatic context compaction could not start; please try /compact or reduce the active context")})
+			a.setIdleAndDrainPending()
+			return
+		}
+		a.recordOversizeRecoveryAnalyticsEvent(
+			"trigger_compaction",
+			"main_llm_error",
+			pending.selectedModelRef,
+			pending.runningModelRef,
+			map[string]string{"trigger": "oversize_driven"},
+		)
+		a.emitToTUI(InfoEvent{Message: "All attempted candidate models exceeded the current context; compacting context before retry"})
 	}
 	log.Infof("LLM call suspended due to oversize while compaction running turn_id=%v continuation=%v", evt.TurnID, pending.continuation)
 	// Store as the compaction continuation so it will be resumed after apply
@@ -613,7 +675,12 @@ func (a *MainAgent) handleCompactionOversizeSuspend(evt Event) {
 		agentErrSourceID: pending.agentErrSourceID,
 	}
 	a.compactionState.oversizeSuspended = true
+	// The provider response has reached the event loop and is now suspended;
+	// only now may the background compaction reclaim the shared activity slot.
+	a.mainSlotForeground.Store(false)
+	a.emitCompactionSlotActivity()
 }
+
 func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMCall, recheckGate bool) (handledIdleBarrier bool) {
 	if pending == nil {
 		return false

@@ -66,3 +66,35 @@ func TestFinishCompactionStateDropsDiscardedPending(t *testing.T) {
 		t.Fatalf("discarded pending = %#v, want nil", pending)
 	}
 }
+
+func TestCancelCompactionQueuesStateMutationOnEventLoop(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	a.beginCompactionState(
+		12,
+		compactionTarget{sessionEpoch: a.sessionEpoch},
+		compactionTrigger{Manual: true},
+		continuationPlan{kind: compactionResumeIdle},
+		0,
+		cancel,
+	)
+
+	if !a.CancelCompaction() {
+		t.Fatal("CancelCompaction returned false for active compaction")
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("cancel ran outside event loop: %v", ctx.Err())
+	}
+
+	evt, err := a.nextEvent(context.Background())
+	if err != nil {
+		t.Fatalf("nextEvent: %v", err)
+	}
+	if evt.Type != EventCompactionCancel {
+		t.Fatalf("event type = %q, want %q", evt.Type, EventCompactionCancel)
+	}
+	a.dispatch(evt)
+	if ctx.Err() != context.Canceled {
+		t.Fatalf("event-loop cancel did not run: %v", ctx.Err())
+	}
+}

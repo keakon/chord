@@ -216,8 +216,8 @@ type KeyHealthReporter interface {
 type CompactionController interface {
 	// IsCompactionRunning reports whether a compaction goroutine is in flight.
 	IsCompactionRunning() bool
-	// CancelCompaction cancels an in-flight compaction. Returns true if there
-	// was a running compaction to cancel.
+	// CancelCompaction requests cancellation of active compaction work. Returns
+	// true when there was work to cancel.
 	CancelCompaction() bool
 }
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
@@ -161,6 +162,15 @@ func TestInFlightModelPoolSwitchStaysDeferredAcrossOversizeSuspend(t *testing.T)
 	a.newTurn()
 	turnID := a.turn.ID
 	turnEpoch := a.turn.Epoch
+	a.beginCompactionState(
+		1,
+		compactionTarget{turnID: turnID, turnEpoch: turnEpoch, sessionEpoch: a.sessionEpoch},
+		compactionTrigger{OversizeDriven: true},
+		continuationPlan{kind: compactionResumeMainLLM, turnID: turnID, turnEpoch: turnEpoch, agentErrSourceID: "main"},
+		0,
+		nil,
+	)
+	defer a.resetCompactionState()
 	a.mainLLMRequestInFlight.Store(true)
 	a.SetCurrentModelPool("fast")
 	dispatchPendingEvents(t, a)
@@ -191,6 +201,43 @@ func TestInFlightModelPoolSwitchStaysDeferredAcrossOversizeSuspend(t *testing.T)
 	}
 	if a.pendingMainModelPoolSwitch {
 		t.Fatal("pendingMainModelPoolSwitch = true after real boundary, want false")
+	}
+}
+
+// A pool switch that lands mid-request invalidates the routing; the request the
+// agent restarts in response must already run on the new pool. That only works
+// if the in-flight marker is cleared before the boundary apply — otherwise
+// applyPendingModelPoolSwitchesAtRequestBoundary returns immediately and the
+// restart repeats the old pool.
+func TestRoutingInvalidationAppliesPendingModelPoolSwitchBeforeRestart(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	installPoolPolicyForTest(t, a)
+	if err := a.ApplyInitialModel("provider/model-a"); err != nil {
+		t.Fatalf("ApplyInitialModel: %v", err)
+	}
+	drainAgentEvents(a.Events())
+
+	a.newTurn()
+	turnID := a.turn.ID
+	a.mainLLMRequestInFlight.Store(true)
+	a.SetCurrentModelPool("fast")
+	dispatchPendingEvents(t, a)
+	if !a.pendingMainModelPoolSwitch {
+		t.Fatal("pendingMainModelPoolSwitch = false, want the switch deferred to the request boundary")
+	}
+
+	a.handleAgentError(Event{
+		Type:     EventAgentError,
+		SourceID: identity.MainAgentID,
+		TurnID:   turnID,
+		Payload:  &llm.RoutingInvalidatedError{StartedGeneration: 1, CurrentGeneration: 2},
+	})
+
+	if got := a.ProviderModelRef(); got != "provider/model-b" {
+		t.Fatalf("ProviderModelRef after routing invalidation = %q, want provider/model-b", got)
+	}
+	if a.pendingMainModelPoolSwitch {
+		t.Fatal("pendingMainModelPoolSwitch = true after routing invalidation, want applied")
 	}
 }
 

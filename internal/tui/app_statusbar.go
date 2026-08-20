@@ -33,10 +33,7 @@ func writeStatusBarSpaces(b *strings.Builder, count int) {
 
 func (m *Model) statusBarDynamicCacheKeyAt(now time.Time) string {
 	focused := m.focusedAgentIDOrMain()
-	latestStatusStart := false
-	if _, ok := m.latestStatusStartWall(focused); ok {
-		latestStatusStart = true
-	}
+	latestStatusStart := m.focusedAgentCanShowIdleSince()
 	return m.statusBarDynamicCacheKeyFromState(
 		now,
 		m.viewport != nil && m.viewport.HasUserLocalShellPending(),
@@ -54,7 +51,10 @@ func (m *Model) statusBarDynamicCacheKeyFromState(now time.Time, localShellPendi
 	if progress != "" {
 		return m.visualAnimationCacheKeyAt(now) + "|" + progress
 	}
-	if compacting || busy {
+	if compacting {
+		return compactionBackgroundStatusFrameKey(now)
+	}
+	if busy {
 		return m.visualAnimationCacheKeyAt(now)
 	}
 	if latestStatusStart {
@@ -142,10 +142,7 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		statusActiveID = "main"
 	}
 	localShellPending := m.viewport != nil && m.viewport.HasUserLocalShellPending()
-	latestStatusStart := false
-	if _, ok := m.latestStatusStartWall(statusActiveID); ok {
-		latestStatusStart = true
-	}
+	latestStatusStart := m.focusedAgentCanShowIdleSince()
 	dynamicCacheKey := m.statusBarDynamicCacheKeyFromState(
 		now,
 		localShellPending,
@@ -668,18 +665,20 @@ func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWid
 	case statusActivity.Type == agent.ActivityCompacting:
 		m.statusBarSyntheticConnectingLogKey = ""
 		cacheActivity = true
-		if ts, ok := m.latestStatusStartWall(statusActiveID); ok {
-			activityKey = statusBarActivityKey("idle", availableCenter, compactIdle, ts, agent.AgentActivityEvent{})
-		} else {
-			activityKey = statusBarActivityKey("empty", availableCenter, compactIdle, time.Time{}, agent.AgentActivityEvent{})
-		}
+		// Compaction is not idle. Its progress is rendered in the background
+		// pill; never reuse the idle "Since" lane while it runs.
+		activityKey = statusBarActivityKey("empty", availableCenter, compactIdle, time.Time{}, agent.AgentActivityEvent{})
 	case m.isFocusedAgentBusy():
 		sa := statusActivity
-		if m.inflightDraftBelongsToAgent(statusActiveID) && (sa.Type == "" || sa.Type == agent.ActivityIdle) {
-			logKey := statusActiveID + "|" + m.inflightDraft.ID
-			if m.statusBarSyntheticConnectingLogKey != logKey {
-				log.Debugf("tui status bar using synthetic connecting fallback agent_id=%v draft_id=%v draft_age=%v status_type=%v", statusActiveID, m.inflightDraft.ID, time.Since(m.inflightDraft.QueuedAt).Round(time.Millisecond), sa.Type)
-				m.statusBarSyntheticConnectingLogKey = logKey
+		if sa.Type == "" || sa.Type == agent.ActivityIdle {
+			if m.inflightDraftBelongsToAgent(statusActiveID) {
+				logKey := statusActiveID + "|" + m.inflightDraft.ID
+				if m.statusBarSyntheticConnectingLogKey != logKey {
+					log.Debugf("tui status bar using synthetic connecting fallback agent_id=%v draft_id=%v draft_age=%v status_type=%v", statusActiveID, m.inflightDraft.ID, time.Since(m.inflightDraft.QueuedAt).Round(time.Millisecond), sa.Type)
+					m.statusBarSyntheticConnectingLogKey = logKey
+				}
+			} else {
+				m.statusBarSyntheticConnectingLogKey = ""
 			}
 			sa = agent.AgentActivityEvent{AgentID: statusActiveID, Type: agent.ActivityConnecting}
 		} else {
@@ -689,7 +688,7 @@ func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWid
 	case m.viewport != nil && m.viewport.HasUserLocalShellPending():
 		m.statusBarSyntheticConnectingLogKey = ""
 		activityText = m.renderStatusBarLocalShell(availableCenter)
-	default:
+	case (statusActivity.Type == "" || statusActivity.Type == agent.ActivityIdle) && m.focusedAgentCanShowIdleSince():
 		m.statusBarSyntheticConnectingLogKey = ""
 		cacheActivity = true
 		if ts, ok := m.latestStatusStartWall(statusActiveID); ok {
@@ -697,6 +696,10 @@ func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWid
 		} else {
 			activityKey = statusBarActivityKey("empty", availableCenter, compactIdle, time.Time{}, agent.AgentActivityEvent{})
 		}
+	default:
+		m.statusBarSyntheticConnectingLogKey = ""
+		cacheActivity = true
+		activityKey = statusBarActivityKey("empty", availableCenter, compactIdle, time.Time{}, agent.AgentActivityEvent{})
 	}
 	if cacheActivity {
 		if m.cachedStatusBarActivityKey == activityKey {
@@ -715,7 +718,7 @@ func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWid
 		}
 	} else {
 		if rawActivity.Type != "" {
-			activityText = m.renderActivity(rawActivity, availableCenter)
+			activityText = m.renderActivityAt(rawActivity, availableCenter, inputs.Now)
 		}
 		activityWidth = lipgloss.Width(activityText)
 	}
@@ -964,7 +967,7 @@ func compactionBackgroundStatusKey(s compactionBackgroundStatus) string {
 }
 
 func compactionBackgroundStatusFrameKey(now time.Time) string {
-	return strconv.FormatInt(now.UnixMilli()/visualSpinnerCadence.Milliseconds(), 10)
+	return strconv.FormatInt(now.UnixMilli()/compactionPillBreathPhase.Milliseconds(), 10)
 }
 
 // formatContextPill formats input-budget usage for the status bar: "42% (72.7K)" or "(72.7K)" when limit is 0.

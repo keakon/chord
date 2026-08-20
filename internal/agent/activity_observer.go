@@ -4,6 +4,10 @@
 
 package agent
 
+import (
+	"github.com/keakon/chord/internal/identity"
+)
+
 // ActivityObserver receives notifications when agent activity changes.
 // The observer is called synchronously from the event emission path,
 // so implementations should be non-blocking or spawn their own goroutines.
@@ -35,11 +39,51 @@ func (a *MainAgent) emitActivity(agentID string, activity ActivityType, detail s
 	}
 	a.emitToTUI(evt)
 
-	// Notify observer if registered (non-blocking).
-	a.activityObserverMu.RLock()
-	obs := a.activityObserver
-	a.activityObserverMu.RUnlock()
-	if obs != nil {
-		obs.OnAgentActivity(agentID, activity)
+	notifyObserver := func() {
+		a.activityObserverMu.RLock()
+		obs := a.activityObserver
+		a.activityObserverMu.RUnlock()
+		if obs != nil {
+			obs.OnAgentActivity(agentID, activity)
+		}
 	}
+
+	// Track whether the shared main slot shows a live foreground state so
+	// compaction emissions can avoid clobbering it (see emitCompactionSlotActivity).
+	if agentID == identity.MainAgentID || agentID == "" {
+		switch activity {
+		case ActivityIdle:
+			a.mainSlotForeground.Store(false)
+			// Foreground work ended while background compaction is still
+			// running: hand the slot back to compaction immediately instead of
+			// flashing idle until the next keep-alive heartbeat. Compaction
+			// completion paths clear the running state before emitting Idle,
+			// so terminal idles stay idle.
+			if a.compactionSlotActive.Load() {
+				notifyObserver()
+				a.emitActivity(agentID, ActivityCompacting, compactionActivityDetail)
+				return
+			}
+		case ActivityCompacting:
+			// Compaction never claims the slot from a foreground state; see
+			// emitCompactionSlotActivity.
+		default:
+			a.mainSlotForeground.Store(true)
+		}
+	}
+
+	// Notify observer if registered (non-blocking).
+	notifyObserver()
+}
+
+// emitCompactionSlotActivity emits the compacting activity only while no live
+// foreground request/tool state owns the shared main activity slot. Compaction
+// start, ready-waiting, and keep-alive heartbeats all route through here so a
+// parallel main-model request keeps its visible progress instead of being
+// overwritten mid-stream.
+func (a *MainAgent) emitCompactionSlotActivity() {
+	if !a.compactionSlotActive.Load() || a.mainSlotForeground.Load() {
+		return
+	}
+	a.emitActivity(identity.MainAgentID, ActivityCompacting, compactionActivityDetail)
 }

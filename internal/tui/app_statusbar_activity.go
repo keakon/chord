@@ -247,7 +247,7 @@ func (m Model) statusBarExecutingElapsedText(agentID string) string {
 	return "0s"
 }
 
-func (m Model) buildStatusBarActivityDisplay(a agent.AgentActivityEvent) statusBarActivityDisplay {
+func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now time.Time) statusBarActivityDisplay {
 	display := statusBarActivityDisplay{}
 	agentID := strings.TrimSpace(a.AgentID)
 	if agentID == "" {
@@ -287,11 +287,7 @@ func (m Model) buildStatusBarActivityDisplay(a agent.AgentActivityEvent) statusB
 		display.Icon = "⇋"
 		display.Text = elapsedText
 	case agent.ActivityCompacting:
-		if (time.Now().UnixMilli()/300)%2 == 0 {
-			display.Icon = "■"
-		} else {
-			display.Icon = "▪"
-		}
+		display.Icon = compactionPillIconAt(now)
 		display.Text = elapsedText
 	case agent.ActivityWaitingHeaders, agent.ActivityWaitingToken, agent.ActivityRetrying, agent.ActivityRetryingKey, agent.ActivityCooling:
 		display.Icon = "↺"
@@ -310,8 +306,12 @@ func (m Model) buildStatusBarActivityDisplay(a agent.AgentActivityEvent) statusB
 	return display
 }
 
-func (m Model) renderActivityState(a agent.AgentActivityEvent, maxWidth int) string {
-	display := m.buildStatusBarActivityDisplay(a)
+func (m Model) renderActivity(a agent.AgentActivityEvent, maxWidth int) string {
+	return m.renderActivityAt(a, maxWidth, time.Now())
+}
+
+func (m Model) renderActivityAt(a agent.AgentActivityEvent, maxWidth int, now time.Time) string {
+	display := m.buildStatusBarActivityDisplayAt(a, now)
 	icon := display.Icon
 	text := display.Text
 
@@ -332,16 +332,27 @@ func (m Model) renderActivityState(a agent.AgentActivityEvent, maxWidth int) str
 	return out
 }
 
-func (m Model) renderActivity(a agent.AgentActivityEvent, maxWidth int) string {
-	return m.renderActivityState(a, maxWidth)
-}
-
 func (m Model) activityForAgent(agentID string) agent.AgentActivityEvent {
 	activity := m.activities[agentID]
 	if status, ok := m.sidebar.FindStatus(agentID); ok && subAgentStatusSuspendsActivity(status) {
 		return agent.AgentActivityEvent{AgentID: agentID, Type: agent.ActivityIdle}
 	}
 	return activity
+}
+
+func (m Model) focusedAgentCanShowIdleSince() bool {
+	focusedAgentID := m.focusedAgentIDOrMain()
+	activity := m.activityForAgent(focusedAgentID)
+	mainCompacting := focusedAgentID == "main" && m.compactionBgStatus.Active
+	if (activity.Type != "" && activity.Type != agent.ActivityIdle) ||
+		m.focusedAgentBusyForIdleSweep() || mainCompacting {
+		return false
+	}
+	if progress, ok := m.requestProgress[focusedAgentID]; ok && !progress.Done {
+		return false
+	}
+	_, ok := m.latestStatusStartWall(focusedAgentID)
+	return ok
 }
 
 func (m Model) isFocusedAgentBusy() bool {
@@ -363,8 +374,7 @@ func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
 		return ""
 	}
 
-	// Base pill style with breathing animation
-	icon := "■" // Solid block for active
+	icon := compactionPillIconAt(now)
 	if m.compactionBgStatus.Terminal != "" {
 		switch m.compactionBgStatus.Terminal {
 		case agent.CompactionStatusSucceeded:
@@ -383,25 +393,16 @@ func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
 
 	// Show streaming progress as a bytes/events suffix. The compaction worker
 	// reports cumulative response progress via CompactionStatusEvent; the suffix
-	// makes a long compaction visibly alive without spinners.
-	if m.compactionBgStatus.Bytes > 0 {
+	// makes a long compaction visibly alive without spinners. Header-only
+	// progress carries bytes without events, so either counter alone is enough
+	// to surface the suffix.
+	if m.compactionBgStatus.Bytes > 0 || m.compactionBgStatus.Events > 0 {
 		pillParts = append(pillParts, formatStatusBarTransportProgress(m.compactionBgStatus.Bytes, m.compactionBgStatus.Events))
 	}
 
 	// Handle terminal states (1-2s flush window)
 	if m.compactionBgStatus.Terminal != "" {
 		return StatusHintStyle.Render(pillParts[0])
-	}
-
-	// Active state with breathing animation
-	if icon == "■" {
-		anim := now.Truncate(visualSpinnerCadence)
-		if anim.Truncate(2 * visualSpinnerCadence).Equal(anim) {
-			icon = "▪" // Dashed block for breathing state
-			if len(pillParts) > 0 {
-				pillParts[0] = strings.Replace(pillParts[0], "■ ", "▪ ", 1)
-			}
-		}
 	}
 
 	return StatusHintStyle.Render(strings.Join(pillParts, " "))

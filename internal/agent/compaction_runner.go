@@ -82,6 +82,10 @@ const (
 // other timeouts so the failure breaker still allows a retry.
 var errCompactionWatchdog = errors.New("compaction draft production timed out (watchdog)")
 
+// compactionActivityDetail is the stable detail string carried by every
+// compaction-originated compacting activity emission.
+const compactionActivityDetail = "context"
+
 func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Message, planID uint64, target compactionTarget, trigger compactionTrigger, continuation continuationPlan, manual bool) {
 	a.recordCompactionLifecycleEvent("started", map[string]string{"trigger": trigger.analyticsName(), "message_count": strconv.Itoa(len(snapshot))})
 	todos := a.GetTodos()
@@ -104,7 +108,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 		a.walltime.startCompactionAt(planID, a.currentAgentName(), target.turnID)
 	}
 
-	a.emitActivity("main", ActivityCompacting, "context")
+	a.emitCompactionSlotActivity()
 	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted})
 	a.compactionWg.Add(1)
 	go func(ctx context.Context, snapshot []message.Message, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, manual bool) {
@@ -670,7 +674,7 @@ func (k *compactionKeepAlive) run() {
 // tick emits one heartbeat. Split out of run so tests can drive a single beat
 // without waiting a full interval.
 func (k *compactionKeepAlive) tick() {
-	k.agent.emitActivity("main", ActivityCompacting, "context")
+	k.agent.emitCompactionSlotActivity()
 }
 
 func (k *compactionKeepAlive) Stop() {

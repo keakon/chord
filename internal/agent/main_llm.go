@@ -20,17 +20,18 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// contextLengthExceededPendingCompactionError indicates an LLM request failed
-// due to context length exceeded while compaction is running. The caller
-// should suspend the LLM call and wait for compaction to complete, then retry.
+// contextLengthExceededPendingCompactionError indicates that an LLM request
+// must wait for event-loop-owned context compaction before retrying.
 type contextLengthExceededPendingCompactionError struct {
-	inner error
+	inner            error
+	selectedModelRef string
+	runningModelRef  string
 }
 
 const requestProgressEmitMinInterval = 100 * time.Millisecond
 
 func (e *contextLengthExceededPendingCompactionError) Error() string {
-	return fmt.Sprintf("context length exceeded (compaction in progress): %v", e.inner)
+	return fmt.Sprintf("context length exceeded (compaction pending): %v", e.inner)
 }
 
 func (e *contextLengthExceededPendingCompactionError) Unwrap() error {
@@ -697,29 +698,19 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		if llm.IsAllAttemptedCandidatesContextLengthExceeded(err) {
 			if a.IsCompactionRunning() {
 				log.Infof("LLM context length exceeded while compaction running; suspending LLM call error=%v", err)
-				return nil, &contextLengthExceededPendingCompactionError{inner: err}
+				return nil, &contextLengthExceededPendingCompactionError{
+					inner:            err,
+					selectedModelRef: selectedRef,
+					runningModelRef:  callStatus.RunningModelRef,
+				}
 			}
-			if a.turn != nil && a.turn.OversizeRecoveryCount >= maxOversizeRecoveryAttempts {
-				a.recordOversizeRecoveryAnalyticsEvent(
-					"abort_retry_limit",
-					"main_llm_error",
-					selectedRef,
-					callStatus.RunningModelRef,
-					map[string]string{"trigger": "oversize_driven", "attempts": fmt.Sprintf("%d", a.turn.OversizeRecoveryCount), "action": "abort"},
-				)
-				return nil, fmt.Errorf("LLM stream failed: automatic context compaction already retried %d times and the context still exceeds all available models; try /compact or reduce the active context", a.turn.OversizeRecoveryCount)
-			}
-			if a.ensureOversizeDrivenCompaction() {
-				a.recordOversizeRecoveryAnalyticsEvent(
-					"trigger_compaction",
-					"main_llm_error",
-					selectedRef,
-					callStatus.RunningModelRef,
-					map[string]string{"trigger": "oversize_driven"},
-				)
-				a.emitToTUI(InfoEvent{Message: "All attempted candidate models exceeded the current context; compacting context before retry"})
-				log.Infof("LLM context length exceeded; started oversize-driven compaction and suspending LLM call error=%v", err)
-				return nil, &contextLengthExceededPendingCompactionError{inner: err}
+			if a.ctxMgr.IsAutoCompactEnabled() {
+				log.Infof("LLM context length exceeded; requesting oversize-driven compaction on the event loop error=%v", err)
+				return nil, &contextLengthExceededPendingCompactionError{
+					inner:            err,
+					selectedModelRef: selectedRef,
+					runningModelRef:  callStatus.RunningModelRef,
+				}
 			}
 			return nil, fmt.Errorf("LLM stream failed: all attempted candidate models exceeded the current context and automatic context compaction is not enabled; run /compact, reduce the active context, or enable automatic context compaction: %w", err)
 		}

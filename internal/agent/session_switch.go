@@ -166,12 +166,8 @@ func (a *MainAgent) stopCompactionForSessionSwitch() bool {
 	}
 
 	readyDraft := a.compactionState.readyDraft
-	a.CancelCompaction()
+	a.cancelCompactionOnLoop()
 	if readyDraft != nil {
-		cleanupOrphanCompactionFiles(readyDraft.AbsHistoryPath)
-		a.resetCompactionState()
-		a.emitActivity("main", ActivityIdle, "")
-		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusCancelled})
 		return true
 	}
 

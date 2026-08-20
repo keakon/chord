@@ -50,6 +50,7 @@ const (
 	// Durable compaction (async worker); payloads are *compactionDraft / error.
 	EventCompactionReady           = "compaction_ready"
 	EventCompactionFailed          = "compaction_failed"
+	EventCompactionCancel          = "compaction_cancel"
 	EventCompactionOversizeSuspend = "compaction_oversize_suspend" // LLM call suspended due to oversize while compaction running
 )
 

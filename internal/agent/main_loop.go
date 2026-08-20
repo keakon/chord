@@ -164,6 +164,8 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleCompactionReady(evt)
 	case EventCompactionFailed:
 		a.handleCompactionFailed(evt)
+	case EventCompactionCancel:
+		a.handleCompactionCancel()
 	case EventCompactionOversizeSuspend:
 		a.handleCompactionOversizeSuspend(evt)
 	default:
