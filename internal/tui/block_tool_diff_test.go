@@ -65,7 +65,7 @@ func TestApplyPatchToolCardRendersNamePathAndHighlightedPreview(t *testing.T) {
 	if !strings.Contains(plain, "apply_patch src/demo.go") {
 		t.Fatalf("expected apply_patch header with path, got:\n%s", plain)
 	}
-	if strings.Contains(plain, "↳ Files:") || strings.Contains(plain, "M src/demo.go") {
+	if strings.Contains(plain, "↳ Targets:") || strings.Contains(plain, "M src/demo.go") {
 		t.Fatalf("expected single-file target list to be omitted as duplicate, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "+func main() {}") {
@@ -93,7 +93,7 @@ func TestApplyPatchToolCardSummarizesMultiplePaths(t *testing.T) {
 	plain := stripANSI(strings.Join(block.Render(120, "●"), "\n"))
 	for _, want := range []string{
 		"apply_patch src/old.go → src/new.go +2 files",
-		"↳ Files:",
+		"↳ Targets:",
 		"R src/old.go → src/new.go",
 		"A docs/new.md",
 		"D tmp/old.txt",
@@ -138,7 +138,7 @@ func TestApplyPatchToolCardGroupsMultiFileDiffByFile(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if strings.Contains(plain, "↳ Files:") {
+	if strings.Contains(plain, "↳ Targets:") {
 		t.Fatalf("expected per-file diff sections instead of a detached file list, got:\n%s", plain)
 	}
 	firstHeader := strings.Index(plain, "↳ M src/first.go")
@@ -220,7 +220,7 @@ func TestApplyPatchToolCardHidesSingleDeleteDiff(t *testing.T) {
 	if !strings.Contains(plain, "apply_patch D tmp/old.txt") {
 		t.Fatalf("expected delete summary in header, got:\n%s", plain)
 	}
-	for _, hidden := range []string{"obsolete", "secret", "↳ Patch:"} {
+	for _, hidden := range []string{"obsolete", "secret", "↳ Requested patch:"} {
 		if strings.Contains(plain, hidden) {
 			t.Fatalf("expected %q to be hidden for file deletion, got:\n%s", hidden, plain)
 		}
@@ -259,7 +259,7 @@ func TestApplyPatchToolCardHidesPureMoveDiff(t *testing.T) {
 	if !strings.Contains(plain, "apply_patch src/old.go → src/new.go") {
 		t.Fatalf("expected move path summary in header, got:\n%s", plain)
 	}
-	if strings.Contains(plain, "↳ Patch:") || strings.Contains(plain, "Applied patch:") {
+	if strings.Contains(plain, "↳ Requested patch:") || strings.Contains(plain, "Applied patch:") {
 		t.Fatalf("expected pure move to omit patch and generic result bodies, got:\n%s", plain)
 	}
 }
@@ -304,12 +304,107 @@ func TestApplyPatchErrorCardKeepsHighlightedPatchPreview(t *testing.T) {
 	}
 	lines := block.Render(100, "")
 	plain := stripANSI(strings.Join(lines, "\n"))
-	if !strings.Contains(plain, "apply_patch src/demo.go") || !strings.Contains(plain, "+func main() {}") || !strings.Contains(plain, "hunk not found") {
+	if !strings.Contains(plain, "apply_patch src/demo.go") || !strings.Contains(plain, "↳ Requested patch:") || !strings.Contains(plain, "+func main() {}") || !strings.Contains(plain, "hunk not found") {
 		t.Fatalf("expected error card to preserve path, patch, and error, got:\n%s", plain)
 	}
 	added := renderedLineContaining(t, lines, "func main")
 	assertRenderedTextForeground(t, added, "func", colorOfTheme(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String()))
 	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentTheme.DiffAddLineBg))
+}
+
+func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
+	args := `{"patch":"*** Begin Patch\n*** Update File: committed.go\n@@\n-old\n+new\n*** Update File: failed.go\n@@\n-missing\n+replacement\n*** End Patch"}`
+	longReasonTail := "failure-reason-tail-must-not-wrap"
+	longNextActionTail := "next-action-tail-must-not-wrap"
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		ResultDone: true, ResultStatus: agent.ToolResultStatusError,
+		ResultContent: strings.Join([]string{
+			"apply_patch partially applied: 1 change committed; 1 file group not applied.",
+			"Applied patch:",
+			"M committed.go",
+			"",
+			"Diagnostics:",
+			"committed.go (1 new, 0 resolved):",
+			"[E] 1:1 [MissingFieldOrMethod] missing field",
+			"",
+			"LSP diagnostics in other files:",
+			"other.go:",
+			"[I] 2:1 [default] informational diagnostic",
+			"",
+			"Not applied:",
+			"- failed.go: hunk not found; " + strings.Repeat("long explanation ", 8) + longReasonTail,
+			"Next action: " + strings.Repeat("revise the operation ", 8) + longNextActionTail,
+			"Unapplied operations (reference copy; do not submit unchanged):",
+			"*** Begin Patch",
+			"*** Update File: failed.go",
+			"@@",
+			"-missing",
+			"+replacement",
+			"*** End Patch",
+		}, "\n"),
+		Diff: "--- committed.go\n+++ committed.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	for _, want := range []string{"↳ Targets:", "↳ Applied changes:", "+new", "↳ Error:", "Not applied:", "↳ Diagnostics:", "missing field", "informational diagnostic"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected partially applied patch to contain %q, got:\n%s", want, plain)
+		}
+	}
+	for _, duplicate := range []string{"↳ Requested patch:", "Applied patch:", longReasonTail, longNextActionTail} {
+		if strings.Contains(plain, duplicate) {
+			t.Fatalf("expected partially applied patch to omit requested patch content %q, got:\n%s", duplicate, plain)
+		}
+	}
+	if strings.Count(plain, "M committed.go") != 1 {
+		t.Fatalf("expected committed target to appear once, got:\n%s", plain)
+	}
+	errorAt := strings.Index(plain, "↳ Error:")
+	notAppliedAt := strings.Index(plain, "Not applied:")
+	diagnosticsAt := strings.Index(plain, "↳ Diagnostics:")
+	diagnosticAt := strings.Index(plain, "missing field")
+	if errorAt < 0 || notAppliedAt < errorAt || diagnosticsAt < notAppliedAt || diagnosticAt < diagnosticsAt {
+		t.Fatalf("expected failure and diagnostics to render as separate ordered sections, got:\n%s", plain)
+	}
+	failureLine := renderedLineContaining(t, block.Render(80, ""), "- failed.go: hunk not found")
+	if !strings.Contains(stripANSI(failureLine), "…") {
+		t.Fatalf("expected long failure line to be truncated, got %q", stripANSI(failureLine))
+	}
+	copyContent := toolCallMarkdownContent(block)
+	for _, preserved := range []string{longReasonTail, longNextActionTail} {
+		if !strings.Contains(copyContent, preserved) {
+			t.Fatalf("expected copied tool content to preserve %q, got:\n%s", preserved, copyContent)
+		}
+	}
+}
+
+func TestApplyPatchPreviewTruncatesLongLinesWithoutWrapping(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	longLine := `const message = "` + strings.Repeat("x", 100) + `tail"`
+	args, _ := json.Marshal(map[string]string{"patch": strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: src/demo.go",
+		"@@",
+		"+" + longLine,
+		"*** End Patch",
+	}, "\n")})
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(string(args)), RawArgs: string(args),
+	}
+
+	lines := block.Render(60, "")
+	plain := stripANSI(strings.Join(lines, "\n"))
+	if strings.Count(plain, "const message") != 1 || strings.Contains(plain, "tail") {
+		t.Fatalf("expected long patch line to be truncated once without a continuation, got:\n%s", plain)
+	}
+	line := renderedLineContaining(t, lines, "const message")
+	if !strings.Contains(stripANSI(line), "…") {
+		t.Fatalf("expected truncated patch line to show an ellipsis, got %q", stripANSI(line))
+	}
+	assertRenderedTextBackground(t, line, "…", colorOfTheme(currentTheme.DiffAddLineBg))
 }
 
 func TestEditAndApplyPatchToolCardsKeepAddedAndDeletedLineBackgrounds(t *testing.T) {

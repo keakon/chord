@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -151,16 +152,16 @@ func renderHighlightedSnippetLine(line string, changeSpans []diffSegmentSpan, di
 	for i, win := range windows {
 		if i == 0 {
 			if win.StartCol > 0 {
-				buf.WriteString(DimStyle.Render("…"))
+				buf.WriteString(renderDiffSnippetEllipsis(bgTerm))
 			}
 		} else {
-			buf.WriteString(DimStyle.Render("…"))
+			buf.WriteString(renderDiffSnippetEllipsis(bgTerm))
 		}
 		piece := extractPlainByColumns(line, win.StartCol, win.EndCol)
 		buf.WriteString(hl.highlightLine(piece, bgTerm))
 	}
 	if windows[len(windows)-1].EndCol < lineWidth {
-		buf.WriteString(DimStyle.Render("…"))
+		buf.WriteString(renderDiffSnippetEllipsis(bgTerm))
 	}
 	if hidden > 0 {
 		summary := DimStyle.Render(fmt.Sprintf("(+%d)", hidden))
@@ -169,4 +170,12 @@ func renderHighlightedSnippetLine(line string, changeSpans []diffSegmentSpan, di
 		}
 	}
 	return buf.String()
+}
+
+func renderDiffSnippetEllipsis(bgTerm string) string {
+	style := DimStyle
+	if bgTerm != "" {
+		style = style.Background(lipgloss.Color(bgTerm))
+	}
+	return style.Render("…")
 }
