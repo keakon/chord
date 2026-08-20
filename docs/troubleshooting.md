@@ -327,7 +327,7 @@ Common causes:
 - another agent or Chord process changed the file;
 - the file changed during a formatter, generator, or build step.
 
-Re-run `read` before retrying. If Chord creates a backup, the tool result includes its path under the current session directory. See [Edit tools](./edit-tools.md) for edit and apply_patch matching behavior.
+Re-run `read` before retrying. When Chord manages to create a backup, the tool result names its path under the current session directory, and the model and the user see the same text. A backup is best effort: when it fails the edit still proceeds, nothing claims a backup exists, and only the local log records why. See [Edit tools](./edit-tools.md) for edit and apply_patch matching behavior.
 
 ## apply_patch reports `hunk not found`
 

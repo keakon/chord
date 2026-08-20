@@ -53,7 +53,6 @@ type toolResult struct {
 	FileCreated bool                // true when Write created a file that did not previously exist
 	LSPReviews  []message.LSPReview // per-file last-review snapshots for directly edited files
 	FileState   *message.ToolFileState
-	BackupPaths []string
 	// RecoveryState classifies synthetic results synthesized during session
 	// restore or a failed intent barrier (not_started / outcome_unknown).
 	RecoveryState string

@@ -187,12 +187,16 @@ func newSpeculativeFileMutation(track *filelock.FileTracker, agentID string, pat
 			}
 			snap.lease = lease
 			if observationAction != "" && snap.Existed {
-				if err := requireCurrentFileObservation(track, agentID, path, snap.Hash, observationAction, status.ExternalChanged); err != nil {
+				stale, obsErr := requireCurrentFileObservation(track, agentID, path, snap.Hash, observationAction, status.ExternalChanged)
+				if obsErr != nil {
 					lease.Abort()
 					for _, l := range slices.Backward(locked) {
 						l.Abort()
 					}
-					return nil, err
+					return nil, obsErr
+				}
+				if stale {
+					mutation.stale = true
 				}
 			} else if status.ExternalChanged {
 				mutation.stale = true

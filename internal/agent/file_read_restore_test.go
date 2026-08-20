@@ -258,8 +258,15 @@ func TestRestoreTrackedFileStateReadThenEditUsesPostWriteHash(t *testing.T) {
 
 	mustExecuteEdit(t, a, path, "after", "final")
 	writeArgs, _ := json.Marshal(map[string]any{"path": path, "content": "whole replacement"})
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: writeArgs}); err == nil || !strings.Contains(err.Error(), "changed after the last read") {
-		t.Fatalf("restored write error = %v, want reread requirement", err)
+	writeResult, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: writeArgs})
+	if err != nil {
+		t.Fatalf("restored write after stale edit should back up and continue: %v", err)
+	}
+	if !strings.Contains(writeResult.Result, "Warning: the file changed on disk") || !strings.Contains(writeResult.Result, "Backup saved to: ") || len(backupPathsFromResult(writeResult.Result)) == 0 {
+		t.Fatalf("result missing stale warning/backup: %q", writeResult.Result)
+	}
+	if got := readTestFile(t, path); got != "whole replacement" {
+		t.Fatalf("file content = %q, want whole replacement", got)
 	}
 }
 

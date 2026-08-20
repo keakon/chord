@@ -180,7 +180,7 @@ func TestMainAgent_WriteAfterOwnWholeFileWriteNeedsNoReread(t *testing.T) {
 	}
 }
 
-func TestMainAgent_WriteAfterExternallyChangedOwnWriteRequiresReread(t *testing.T) {
+func TestMainAgent_WriteAfterExternallyChangedOwnWriteBacksUpAndContinues(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 
@@ -195,11 +195,22 @@ func TestMainAgent_WriteAfterExternallyChangedOwnWriteRequiresReread(t *testing.
 		t.Fatalf("external WriteFile: %v", err)
 	}
 	secondArgs, _ := json.Marshal(map[string]any{"path": path, "content": "v2\n"})
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-2", Name: tools.NameWrite, Args: secondArgs}); err == nil || !strings.Contains(err.Error(), "changed after the last read") {
-		t.Fatalf("write over externally changed content error = %v, want reread requirement", err)
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-2", Name: tools.NameWrite, Args: secondArgs})
+	if err != nil {
+		t.Fatalf("write over externally changed content should back up and continue: %v", err)
 	}
-	if got, err := os.ReadFile(path); err != nil || string(got) != "external\n" {
-		t.Fatalf("file content = %q, %v; want external content preserved", got, err)
+	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup saved to: ") || len(backupPathsFromResult(result.Result)) == 0 {
+		t.Fatalf("result missing stale warning/backup: %q", result.Result)
+	}
+	backup, err := os.ReadFile(backupPathsFromResult(result.Result)[0])
+	if err != nil {
+		t.Fatalf("ReadFile backup: %v", err)
+	}
+	if string(backup) != "external\n" {
+		t.Fatalf("backup content = %q, want external", backup)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "v2\n" {
+		t.Fatalf("file content = %q, %v; want v2 written over stale content", got, err)
 	}
 }
 
@@ -282,8 +293,11 @@ func TestMainAgent_ReadObservationUsesSameBytesAsResult(t *testing.T) {
 		t.Fatalf("unexpected read result: %q", result.Result)
 	}
 	writeArgs, _ := json.Marshal(map[string]any{"path": "demo.txt", "content": "replacement\n"})
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write", Name: tools.NameWrite, Args: writeArgs}); err == nil || !strings.Contains(err.Error(), "changed after the last read") {
-		t.Fatalf("write error = %v, want changed-after-read rejection", err)
+	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write", Name: tools.NameWrite, Args: writeArgs}); err != nil {
+		t.Fatalf("write after mutated read should back up and continue: %v", err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "replacement\n" {
+		t.Fatalf("file content = %q, %v; want replacement written", got, err)
 	}
 }
 
@@ -340,11 +354,22 @@ func TestMainAgent_WriteAfterEditRequiresReread(t *testing.T) {
 		t.Fatalf("edit: %v", err)
 	}
 	writeArgs, _ := json.Marshal(map[string]any{"path": path, "content": "stale whole file\n"})
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: writeArgs}); err == nil || !strings.Contains(err.Error(), "changed after the last read") {
-		t.Fatalf("write after edit error = %v, want reread requirement", err)
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: writeArgs})
+	if err != nil {
+		t.Fatalf("write after edit should back up and continue: %v", err)
 	}
-	if got, err := os.ReadFile(path); err != nil || string(got) != "after\n" {
-		t.Fatalf("file content = %q, %v; want edit preserved", got, err)
+	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup saved to: ") || len(backupPathsFromResult(result.Result)) == 0 {
+		t.Fatalf("result missing stale warning/backup: %q", result.Result)
+	}
+	backup, err := os.ReadFile(backupPathsFromResult(result.Result)[0])
+	if err != nil {
+		t.Fatalf("ReadFile backup: %v", err)
+	}
+	if string(backup) != "after\n" {
+		t.Fatalf("backup content = %q, want after (post-edit content)", backup)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "stale whole file\n" {
+		t.Fatalf("file content = %q, %v; want stale whole file written", got, err)
 	}
 }
 
@@ -385,7 +410,7 @@ func TestMainAgent_EditAfterWriteTracksSnapshotForStaleBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Edit after Write failed: %v", err)
 	}
-	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup created") || len(result.BackupPaths) == 0 {
+	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup saved to: ") || len(backupPathsFromResult(result.Result)) == 0 {
 		t.Fatalf("result missing stale warning/backup: %q", result.Result)
 	}
 	got, err := os.ReadFile(path)
@@ -428,7 +453,7 @@ func TestMainAgent_FileMentionTracksSnapshotForStaleBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Edit after @file mention failed: %v", err)
 	}
-	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup created") || len(result.BackupPaths) == 0 {
+	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup saved to: ") || len(backupPathsFromResult(result.Result)) == 0 {
 		t.Fatalf("result missing stale warning/backup: %q", result.Result)
 	}
 }
@@ -483,12 +508,12 @@ func TestMainAgent_EditStaleCreatesBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Edit after stale file failed: %v", err)
 	}
-	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup created") || len(result.BackupPaths) == 0 {
+	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup saved to: ") || len(backupPathsFromResult(result.Result)) == 0 {
 		t.Fatalf("result missing stale warning/backup: %q", result.Result)
 	}
-	backup, err := os.ReadFile(result.BackupPaths[0])
+	backup, err := os.ReadFile(backupPathsFromResult(result.Result)[0])
 	if err != nil {
-		t.Fatalf("ReadFile backup %q: %v", result.BackupPaths[0], err)
+		t.Fatalf("ReadFile backup %q: %v", backupPathsFromResult(result.Result)[0], err)
 	}
 	if string(backup) != "external\n" {
 		t.Fatalf("backup content = %q, want external", backup)
@@ -536,8 +561,8 @@ func TestMainAgent_EditBackupFailureDoesNotBlockEdit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Edit with backup failure should continue: %v", err)
 	}
-	if !strings.Contains(result.Result, "No backup was created: the file exceeds the backup size limit") {
-		t.Fatalf("result missing no-backup warning: %q", result.Result)
+	if strings.Contains(result.Result, "No backup was created") || strings.Contains(result.Result, "backup size limit") {
+		t.Fatalf("backup failure should not enter model result: %q", result.Result)
 	}
 	got, err := os.ReadFile(path)
 	if err != nil {

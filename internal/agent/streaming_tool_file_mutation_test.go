@@ -228,19 +228,19 @@ func TestSpeculativeApplyPatchBacksUpEveryStaleFile(t *testing.T) {
 	}
 	a.commitPromotedToolSideEffects(call, payload)
 
-	if got := len(payload.BackupPaths); got != len(files) {
-		t.Fatalf("payload has %d backup paths, want %d:\n%v", got, len(files), payload.BackupPaths)
+	if got := len(backupPathsFromResult(payload.Result)); got != len(files) {
+		t.Fatalf("payload has %d backup paths, want %d:\n%v", got, len(files), backupPathsFromResult(payload.Result))
 	}
 	for _, name := range files {
 		found := false
-		for _, p := range payload.BackupPaths {
+		for _, p := range backupPathsFromResult(payload.Result) {
 			if strings.Contains(p, strings.TrimSuffix(name, ".txt")) {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Fatalf("payload missing backup for %s:\n%v", name, payload.BackupPaths)
+			t.Fatalf("payload missing backup for %s:\n%v", name, backupPathsFromResult(payload.Result))
 		}
 	}
 }
@@ -329,7 +329,7 @@ func TestSpeculativeApplyPatchMoveRejectsSymlinkWithoutMutation(t *testing.T) {
 	waitForMissingFile(t, target)
 }
 
-func TestSpeculativeWriteOnStaleFileIsRejected(t *testing.T) {
+func TestSpeculativeWriteOnStaleFileBacksUpAndContinues(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "stale.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
@@ -357,14 +357,14 @@ func TestSpeculativeWriteOnStaleFileIsRejected(t *testing.T) {
 	if drift {
 		t.Fatal("Promote reported drift")
 	}
-	if !ok || payload == nil || payload.Error == nil {
-		t.Fatalf("Promote payload=%#v ok=%v, want rejection", payload, ok)
+	if !ok || payload == nil || payload.Error != nil {
+		t.Fatalf("Promote payload=%#v ok=%v, want stale write to back up and continue", payload, ok)
 	}
-	if !strings.Contains(payload.Error.Error(), "complete file") {
-		t.Fatalf("error missing full-read guidance: %v", payload.Error)
+	if !strings.Contains(payload.Result, "Warning: the file changed on disk") || !strings.Contains(payload.Result, "Backup saved to: ") || len(backupPathsFromResult(payload.Result)) == 0 {
+		t.Fatalf("result missing stale warning/backup: %q", payload.Result)
 	}
-	if got, err := os.ReadFile(path); err != nil || string(got) != "external" {
-		t.Fatalf("file content = %q, %v; want unchanged external", got, err)
+	if got, err := os.ReadFile(path); err != nil || string(got) != "speculative" {
+		t.Fatalf("file content = %q, %v; want speculative written", got, err)
 	}
 }
 

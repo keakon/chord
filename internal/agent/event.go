@@ -96,10 +96,6 @@ type ToolResultPayload struct {
 	FileCreated bool                // true when Write created a file that did not previously exist
 	LSPReviews  []message.LSPReview // per-file last-review snapshots for directly edited files
 	FileState   *message.ToolFileState
-	// BackupPaths lists pre-write backup files created for a stale write. They
-	// are display-only (human recovery); the model context only carries the
-	// "Backup created" signal from the result text.
-	BackupPaths []string
 	// RecoveryState classifies synthetic results synthesized during session
 	// restore or a failed intent barrier (not_started / outcome_unknown).
 	// Ordinary runtime results leave it empty.

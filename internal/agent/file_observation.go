@@ -26,18 +26,23 @@ func verifiedCurrentFileHash(path string) (hash string, exists bool, err error) 
 	return hash, true, nil
 }
 
-func requireCurrentFileObservation(track *filelock.FileTracker, agentID, path, currentHash, action string, externalChanged bool) error {
+// requireCurrentFileObservation reports whether a destructive tool may proceed
+// against path. A file that was never observed stays a hard refusal: the caller
+// has no baseline to judge a replacement against. A file that was observed but
+// has changed since returns stale=true so the caller can back up the current
+// content and continue instead of forcing a redundant re-read round trip.
+func requireCurrentFileObservation(track *filelock.FileTracker, agentID, path, currentHash, action string, externalChanged bool) (stale bool, err error) {
 	if track == nil {
-		return nil
+		return false, nil
 	}
 	observation := track.Observation(path, agentID, currentHash)
 	if observation.Current && !externalChanged {
-		return nil
+		return false, nil
 	}
 	if !observation.Observed {
-		return fmt.Errorf("refusing to %s existing file %s without a current read; read the complete file first, then retry", action, path)
+		return false, fmt.Errorf("refusing to %s existing file %s without a current read; read the complete file first, then retry", action, path)
 	}
-	return fmt.Errorf("refusing to %s file %s because it changed after the last read; re-read the complete file before retrying", action, path)
+	return true, nil
 }
 
 func (a *MainAgent) trackObservedFileParts(parts []message.ContentPart) {

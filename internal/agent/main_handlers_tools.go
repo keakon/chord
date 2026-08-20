@@ -244,7 +244,6 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 	displayResult, contextResult, _, isError := composeToolResultTexts(rawResult, payload.Error)
 	contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
 	parts := a.toolResultParts(contextResult, payload.Images)
-	displayResult = appendBackupPathsToDisplay(displayResult, payload.BackupPaths)
 
 	a.emitToTUI(ToolResultEvent{
 		CallID:      payload.CallID,
@@ -446,7 +445,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 
 	deferToolResultEmission := payload.Name == tools.NameDone && payload.Error == nil
 	parts := a.toolResultParts(contextResult, payload.Images)
-	displayResult = appendBackupPathsToDisplay(displayResult, payload.BackupPaths)
 	if !deferToolResultEmission {
 		a.emitToTUI(ToolResultEvent{
 			CallID:        payload.CallID,

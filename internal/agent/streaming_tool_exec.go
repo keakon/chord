@@ -262,7 +262,7 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 		e.onFirstVisibleResult(call.ID, call.Name, time.Now())
 	}
 	status := toolResultStatusFromError(err != nil)
-	e.emit(ToolResultEvent{CallID: call.ID, Name: call.Name, ArgsJSON: result.EffectiveArgsJSON, Audit: result.Audit.Clone(), Result: appendBackupPathsToDisplay(result.Result, result.BackupPaths), Status: status, FileState: result.FileState.Clone(), Duration: toolExecDuration(call.Name, result, completedAt)})
+	e.emit(ToolResultEvent{CallID: call.ID, Name: call.Name, ArgsJSON: result.EffectiveArgsJSON, Audit: result.Audit.Clone(), Result: result.Result, Status: status, FileState: result.FileState.Clone(), Duration: toolExecDuration(call.Name, result, completedAt)})
 }
 
 func (e *StreamingToolExecutor) startDeferredLocked() {
@@ -329,7 +329,7 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 		effective.Args = json.RawMessage(entry.result.EffectiveArgsJSON)
 		diff = toolExecutionDiff(effective, entry.result)
 	}
-	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Images: entry.result.Images, Error: entry.err, TurnID: e.turnID, Duration: toolExecDuration(call.Name, entry.result, entry.completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...), FileState: entry.result.FileState.Clone(), BackupPaths: entry.result.BackupPaths, walltimeTarget: entry.result.walltimeTarget, speculativeHooks: entry.result.speculativeHooks}, true, false
+	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Images: entry.result.Images, Error: entry.err, TurnID: e.turnID, Duration: toolExecDuration(call.Name, entry.result, entry.completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...), FileState: entry.result.FileState.Clone(), walltimeTarget: entry.result.walltimeTarget, speculativeHooks: entry.result.speculativeHooks}, true, false
 }
 
 func (e *StreamingToolExecutor) discardEntryLocked(callID string, entry *streamingToolEntry, reason string) StreamingToolDiscardInfo {
@@ -465,7 +465,6 @@ func (e *StreamingToolExecutor) DrainCompletedResults() map[string]*ToolResultPa
 			FileCreated:      entry.call.Name == tools.NameWrite && !entry.result.PreExisted,
 			LSPReviews:       append([]message.LSPReview(nil), entry.result.LSPReviews...),
 			FileState:        entry.result.FileState.Clone(),
-			BackupPaths:      entry.result.BackupPaths,
 			walltimeTarget:   entry.result.walltimeTarget,
 			speculativeHooks: entry.result.speculativeHooks,
 		}

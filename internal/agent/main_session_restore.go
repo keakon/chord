@@ -753,6 +753,13 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	cleanupStalePendingCompactions(a.sessionDir, 5*time.Minute)
 	a.recovery = recovery.NewRecoveryManager(loaded.SessionPath)
 	a.usageLedger = analytics.NewUsageLedger(loaded.SessionPath, a.projectRoot)
+	if a.fileBackups != nil {
+		// activateLoadedSession bypasses installSessionTarget (which switches
+		// the backup directory for /new and fork); without this the resumed
+		// session would keep writing risky-write backups into the replaced
+		// session's directory.
+		a.fileBackups.SetSessionDir(loaded.SessionPath)
+	}
 	if a.walltime != nil {
 		a.walltime.repointLedger(a.usageLedger)
 		a.walltime.restoreStats(loaded.WalltimeStats)

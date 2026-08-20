@@ -299,7 +299,7 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 - 另一个 Agent 或 Chord 进程改动了文件；
 - 格式化器、代码生成器或构建步骤改动了文件。
 
-重试前请重新 `read`。如果 Chord 创建了备份，工具结果会显示其在当前会话目录下的路径。`edit` 和 `apply_patch` 的匹配行为详见[编辑工具](./edit-tools_CN.md)。
+重试前请重新 `read`。Chord 成功创建备份时，工具结果会给出它在当前会话目录下的路径，模型和用户看到的是同一段文本。备份是尽力而为：失败时编辑照常进行，不会有任何内容声称存在备份，只有本地日志记录原因。`edit` 和 `apply_patch` 的匹配行为详见[编辑工具](./edit-tools_CN.md)。
 
 ## apply_patch 报 `hunk not found`
 

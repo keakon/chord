@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/keakon/chord/internal/privatefs"
+	"github.com/keakon/chord/internal/tools"
 )
 
 const (
@@ -41,11 +44,12 @@ type fileBackupSource struct {
 
 type fileBackupOutcome struct {
 	Records []fileBackupRecord
-	Warning string
 }
 
 func newFileBackupManager(sessionDir string) *fileBackupManager {
-	return &fileBackupManager{sessionDir: strings.TrimSpace(sessionDir), byPath: make(map[string][]string)}
+	m := &fileBackupManager{sessionDir: strings.TrimSpace(sessionDir), byPath: make(map[string][]string)}
+	m.scanExistingBackupsLocked()
+	return m
 }
 
 func (m *fileBackupManager) SetSessionDir(sessionDir string) {
@@ -60,6 +64,72 @@ func (m *fileBackupManager) SetSessionDir(sessionDir string) {
 	m.sessionDir = strings.TrimSpace(sessionDir)
 	m.seq = 0
 	m.byPath = make(map[string][]string)
+	m.scanExistingBackupsLocked()
+}
+
+// scanExistingBackupsLocked rebuilds byPath, the per-path pruning order, and
+// the sequence counter from the backup files already on disk. Each hash
+// directory holds the backups of one source path and each file name carries an
+// incrementing sequence prefix, so a fresh manager (new process, resumed
+// session, or session switch) observes the same per-session quotas and pruning
+// order the previous owner enforced instead of silently starting from zero and
+// letting the backup directory grow without bound.
+func (m *fileBackupManager) scanExistingBackupsLocked() {
+	if m == nil || m.sessionDir == "" {
+		return
+	}
+	backupsRoot := filepath.Join(m.sessionDir, "backups")
+	hashDirs, err := os.ReadDir(backupsRoot)
+	if err != nil {
+		return
+	}
+	for _, dirEntry := range hashDirs {
+		if !dirEntry.IsDir() {
+			continue
+		}
+		hashDir := filepath.Join(backupsRoot, dirEntry.Name())
+		fileEntries, err := os.ReadDir(hashDir)
+		if err != nil {
+			continue
+		}
+		paths := make([]string, 0, len(fileEntries))
+		for _, fileEntry := range fileEntries {
+			if fileEntry.IsDir() {
+				continue
+			}
+			backupPath := filepath.Join(hashDir, fileEntry.Name())
+			if seq, ok := backupSequenceFromName(fileEntry.Name()); ok && seq > m.seq {
+				m.seq = seq
+			}
+			paths = append(paths, backupPath)
+		}
+		// ReadDir order is not guaranteed; sort by the sequence prefix so
+		// byPath stays in creation order and pruning removes the oldest first.
+		sort.Slice(paths, func(i, j int) bool {
+			si, _ := backupSequenceFromName(filepath.Base(paths[i]))
+			sj, _ := backupSequenceFromName(filepath.Base(paths[j]))
+			return si < sj
+		})
+		m.byPath[dirEntry.Name()] = paths
+		m.pruneLocked(dirEntry.Name())
+	}
+}
+
+// backupSequenceFromName extracts the leading sequence digits of a backup file
+// name (e.g. "000000000003-before-Edit-target.txt" -> 3).
+func backupSequenceFromName(name string) (int, bool) {
+	digits := 0
+	for digits < len(name) && name[digits] >= '0' && name[digits] <= '9' {
+		digits++
+	}
+	if digits == 0 {
+		return 0, false
+	}
+	seq, err := strconv.Atoi(name[:digits])
+	if err != nil {
+		return 0, false
+	}
+	return seq, true
 }
 
 func (m *fileBackupManager) Backup(path, toolName string, data []byte) (fileBackupRecord, error) {
@@ -74,16 +144,20 @@ func (m *fileBackupManager) Backup(path, toolName string, data []byte) (fileBack
 	if m.sessionDir == "" {
 		return fileBackupRecord{}, nil
 	}
-	key := normalizeAgentFilePath(path)
-	if key == "" {
+	rawKey := normalizeAgentFilePath(path)
+	if rawKey == "" {
 		return fileBackupRecord{}, nil
 	}
+	// byPath is keyed by the same short hash used for the on-disk directory
+	// name, so backups reindexed from disk by scanExistingBackupsLocked and
+	// new backups land in the same per-path group and prune together.
+	key := shortPathHash(rawKey)
 	if err := m.ensureSessionLimitsLocked(key, int64(len(data))); err != nil {
 		return fileBackupRecord{}, err
 	}
 	m.seq++
-	name := backupFileName(m.seq, key, toolName)
-	dir := filepath.Join(m.sessionDir, "backups", shortPathHash(key))
+	name := backupFileName(m.seq, rawKey, toolName)
+	dir := filepath.Join(m.sessionDir, "backups", key)
 	backupPath := filepath.Join(dir, name)
 	if err := privatefs.WriteFile(m.sessionDir, backupPath, data); err != nil {
 		return fileBackupRecord{}, fmt.Errorf("write backup: %w", err)
@@ -161,52 +235,32 @@ func shortPathHash(path string) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-func appendBackupNotes(result string, stale bool, stalePaths int, outcome fileBackupOutcome) (string, []string) {
+// appendBackupNotes reports what happened to a file whose on-disk contents had
+// drifted from the model's last observation. The model and the user see exactly
+// the same text: a backup is best effort, so a claim that one exists must never
+// be made to one audience and withheld from the other.
+//
+// Nothing is appended when a backup could not be created. The absence of the
+// "Backup saved to" line is the honest signal — stating a reason would still be
+// telling the reader a safety net was expected. The failure and its cause are
+// logged locally by the caller.
+func appendBackupNotes(result, toolName string, stale bool, stalePaths int, outcome fileBackupOutcome) string {
 	var notes []string
-	var backupPaths []string
 	if stale {
-		if stalePaths > 1 {
+		switch {
+		case toolName == tools.NameWrite:
+			// write replaces the whole file; unlike edit and apply_patch there
+			// are no anchors to re-validate, so do not imply anything was checked.
+			notes = append(notes, "Warning: the file changed on disk after your last read, and those contents were replaced by this write.")
+		case stalePaths > 1:
 			notes = append(notes, "Warning: one or more files changed on disk since their last tracked snapshot; the tool validated current contents before writing and continued.")
-		} else {
+		default:
 			notes = append(notes, "Warning: the file changed on disk since its last tracked snapshot; the tool validated current contents before writing and continued.")
 		}
 	}
-	if len(outcome.Records) > 0 {
-		created := 0
-		for _, backup := range outcome.Records {
-			if strings.TrimSpace(backup.Path) != "" {
-				created++
-				backupPaths = append(backupPaths, backup.Path)
-			}
-		}
-		if created > 0 {
-			notes = append(notes, "Backup created")
-		}
-	}
-	if strings.TrimSpace(outcome.Warning) != "" {
-		notes = append(notes, "No backup was created: "+outcome.Warning+".")
-	}
-	if len(notes) == 0 {
-		return result, backupPaths
-	}
-	if strings.TrimSpace(result) == "" {
-		return strings.Join(notes, "\n"), backupPaths
-	}
-	return result + "\n" + strings.Join(notes, "\n"), backupPaths
-}
-
-// appendBackupPathsToDisplay appends the concrete backup locations to the
-// TUI-visible display result only. The model-visible context keeps the compact
-// "Backup created" signal produced by appendBackupNotes, so backup paths never
-// enter the LLM request surface.
-func appendBackupPathsToDisplay(result string, backupPaths []string) string {
-	if len(backupPaths) == 0 {
-		return result
-	}
-	var notes []string
-	for _, path := range backupPaths {
-		if strings.TrimSpace(path) != "" {
-			notes = append(notes, "Backup saved to: "+path)
+	for _, backup := range outcome.Records {
+		if strings.TrimSpace(backup.Path) != "" {
+			notes = append(notes, "Backup saved to: "+backup.Path)
 		}
 	}
 	if len(notes) == 0 {
@@ -219,7 +273,24 @@ func appendBackupPathsToDisplay(result string, backupPaths []string) string {
 	return result + "\n" + strings.Join(notes, "\n")
 }
 
+// readPreWriteBytes loads the current bytes of a file about to be mutated.
+//
+// Only regular files are read. os.ReadFile follows symlinks, so a symlinked
+// path would copy its target — possibly outside the project — into the session
+// backup directory, and write refuses to follow symlinks anyway, so that copy
+// would be orphaned by a call that never mutates anything. A non-regular path
+// reports as absent, which every caller already treats as nothing to back up.
 func readPreWriteBytes(path string) ([]byte, bool, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, false, nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

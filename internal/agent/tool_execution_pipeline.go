@@ -358,7 +358,8 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	} else if releaseWrite != nil {
 		defer releaseWrite.release()
 	}
-	if err := requireObservedDestructiveWrite(p.fileTrack, p.agentID, tc.Name, trackedFilePath, writeStatus, releaseWrite); err != nil {
+	staleWrite, err := requireObservedDestructiveWrite(p.fileTrack, p.agentID, tc.Name, trackedFilePath, writeStatus, releaseWrite)
+	if err != nil {
 		return execResult, err
 	}
 	// Acquire the workspace lease after per-file tracking locks so that same-path
@@ -370,7 +371,9 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		return execResult, err
 	}
 	defer releaseLease()
-	staleWrite := writeStatus.ExternalChanged
+	if writeStatus.ExternalChanged {
+		staleWrite = true
+	}
 	if deleteLocks != nil {
 		staleWrite = deleteLocks.hasStalePath()
 	} else if patchMutation != nil {
@@ -438,8 +441,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if patchMutation != nil {
 		stalePathCount = len(patchMutation.paths)
 	}
-	result, backupPaths := appendBackupNotes(result, staleWrite, stalePathCount, backupOutcome)
-	execResult.BackupPaths = backupPaths
+	result = appendBackupNotes(result, tc.Name, staleWrite, stalePathCount, backupOutcome)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 	return execResult, err
 }
@@ -557,8 +559,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	if patchDiffCollector != nil {
 		attachApplyPatchFileChanges(execResult.FileState, patchDiffCollector.Changes())
 	}
-	result, backupPaths := appendBackupNotes(result, staleWrite, speculativeStaleWritePathCount(tc.Name, trackedFilePath, hooks), backupOutcome)
-	execResult.BackupPaths = backupPaths
+	result = appendBackupNotes(result, tc.Name, staleWrite, speculativeStaleWritePathCount(tc.Name, trackedFilePath, hooks), backupOutcome)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 	return execResult, err
 }
@@ -913,17 +914,19 @@ func (p toolExecutionPipeline) applySuccessfulFileState(execResult *ToolExecutio
 // current full observation of the file. Delete paths are gated per-path in
 // acquireDeleteLocks; this function only sees the write tool's tracked path.
 // The pre-execution state captured while acquiring the write lock is reused so
-// the same file is not read and hashed twice per call.
-func requireObservedDestructiveWrite(track *filelock.FileTracker, agentID, toolName, path string, writeStatus filelock.WriteStatus, lock *trackedWriteLock) error {
+// the same file is not read and hashed twice per call. It returns stale=true
+// when the file changed after the model's last read; the caller then backs up
+// the current content and continues the write instead of rejecting it.
+func requireObservedDestructiveWrite(track *filelock.FileTracker, agentID, toolName, path string, writeStatus filelock.WriteStatus, lock *trackedWriteLock) (bool, error) {
 	if track == nil || path == "" || toolName != tools.NameWrite || lock == nil {
-		return nil
+		return false, nil
 	}
 	action := strings.ToLower(toolName)
 	if lock.preVerifyErr != nil {
-		return fmt.Errorf("refusing to %s file %s because its current state cannot be verified: %w", action, path, lock.preVerifyErr)
+		return false, fmt.Errorf("refusing to %s file %s because its current state cannot be verified: %w", action, path, lock.preVerifyErr)
 	}
 	if !lock.preExists {
-		return nil
+		return false, nil
 	}
 	return requireCurrentFileObservation(track, agentID, path, lock.preHash, action, writeStatus.ExternalChanged)
 }
@@ -1057,7 +1060,8 @@ func (p toolExecutionPipeline) backupRiskyPreWriteState(tc message.ToolCall, tra
 		}
 		backup, err := p.fileBackups.Backup(trackedPath, tc.Name, []byte(preContent))
 		if err != nil {
-			return fileBackupOutcome{Warning: err.Error()}
+			log.Warnf("failed to create stale file backup path=%v tool=%v error=%v", trackedPath, tc.Name, err)
+			return fileBackupOutcome{}
 		}
 		return fileBackupOutcome{Records: nonEmptyBackupRecords(backup)}
 	case tools.NameWrite:
@@ -1066,14 +1070,16 @@ func (p toolExecutionPipeline) backupRiskyPreWriteState(tc message.ToolCall, tra
 		}
 		data, existed, err := readPreWriteBytes(trackedPath)
 		if err != nil {
-			return fileBackupOutcome{Warning: err.Error()}
+			log.Warnf("failed to read stale file for backup path=%v tool=%v error=%v", trackedPath, tc.Name, err)
+			return fileBackupOutcome{}
 		}
 		if !existed || len(data) == 0 {
 			return fileBackupOutcome{}
 		}
 		backup, err := p.fileBackups.Backup(trackedPath, tc.Name, data)
 		if err != nil {
-			return fileBackupOutcome{Warning: err.Error()}
+			log.Warnf("failed to create stale file backup path=%v tool=%v error=%v", trackedPath, tc.Name, err)
+			return fileBackupOutcome{}
 		}
 		return fileBackupOutcome{Records: nonEmptyBackupRecords(backup)}
 	case tools.NameDelete:
@@ -1081,7 +1087,6 @@ func (p toolExecutionPipeline) backupRiskyPreWriteState(tc message.ToolCall, tra
 			return fileBackupOutcome{}
 		}
 		backups := make([]fileBackupRecord, 0, len(deleteLocks.locked))
-		var warnings []string
 		for _, locked := range deleteLocks.locked {
 			if !locked.backupRequired || locked.symlink {
 				continue
@@ -1089,7 +1094,7 @@ func (p toolExecutionPipeline) backupRiskyPreWriteState(tc message.ToolCall, tra
 			path := locked.path
 			data, existed, err := readPreWriteBytes(path)
 			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("%s: %v", path, err))
+				log.Warnf("failed to read deleted file for backup path=%v tool=%v error=%v", path, tc.Name, err)
 				continue
 			}
 			if !existed {
@@ -1097,14 +1102,14 @@ func (p toolExecutionPipeline) backupRiskyPreWriteState(tc message.ToolCall, tra
 			}
 			backup, err := p.fileBackups.Backup(path, tc.Name, data)
 			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("%s: %v", path, err))
+				log.Warnf("failed to create deleted file backup path=%v tool=%v error=%v", path, tc.Name, err)
 				continue
 			}
 			if backup.Path != "" {
 				backups = append(backups, backup)
 			}
 		}
-		return fileBackupOutcome{Records: backups, Warning: strings.Join(warnings, "; ")}
+		return fileBackupOutcome{Records: backups}
 	default:
 		return fileBackupOutcome{}
 	}
@@ -1115,35 +1120,20 @@ func (p toolExecutionPipeline) backupRiskyPatchState(tc message.ToolCall, stale 
 		return fileBackupOutcome{}
 	}
 	var records []fileBackupRecord
-	type backupWarning struct {
-		path string
-		err  error
-	}
-	var warnings []backupWarning
 	for _, source := range sources {
 		if len(source.Data) == 0 {
 			continue
 		}
 		backup, err := p.fileBackups.Backup(source.Path, tc.Name, source.Data)
 		if err != nil {
-			warnings = append(warnings, backupWarning{path: source.Path, err: err})
+			log.Warnf("failed to create stale file backup path=%v tool=%v error=%v", source.Path, tc.Name, err)
 			continue
 		}
 		if backup.Path != "" {
 			records = append(records, backup)
 		}
 	}
-	var warning string
-	if len(warnings) == 1 {
-		warning = warnings[0].err.Error()
-	} else if len(warnings) > 1 {
-		parts := make([]string, 0, len(warnings))
-		for _, item := range warnings {
-			parts = append(parts, fmt.Sprintf("%s: %v", item.path, item.err))
-		}
-		warning = strings.Join(parts, "; ")
-	}
-	return fileBackupOutcome{Records: records, Warning: warning}
+	return fileBackupOutcome{Records: records}
 }
 
 func nonEmptyBackupRecords(backup fileBackupRecord) []fileBackupRecord {

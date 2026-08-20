@@ -38,6 +38,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Post-write LSP diagnostics now show paths inside the active tool working directory as relative paths, while files outside it keep absolute paths. This shortens `write`, `edit`, and `apply_patch` results and the model context without changing file identity inside the LSP runtime.
 - Tool inputs that the model re-fetched after reduction are exempt from being reduced again (`recalled_input_protect`): re-reading a pruned file or re-running a pruned lookup durably protects that evidence for the rest of the loop.
 - `yy` copying an `edit` tool card now shows the replacement as `## old_string` / `## new_string` sections instead of a unified diff, adding `## replace_all` only when enabled so default copies stay concise.
+- `write` no longer refuses when the target file changed on disk after it was read. It backs up the previous non-empty content under the active session directory and proceeds with the write. The tool result warns that the file changed and names the backup only when one was actually created — the model and the user see the same text, since a backup is best effort and a promise made to one audience must not be withheld from the other. A failed backup does not block the write and is recorded only in the local log. A file the model never read at all still requires a fresh complete read before overwrite.
 
 ### Fixes
 

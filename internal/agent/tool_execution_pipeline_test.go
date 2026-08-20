@@ -299,13 +299,13 @@ func TestToolExecutionPipelineUnobservedDeleteBacksUpRegularFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute delete: %v", err)
 	}
-	if len(result.BackupPaths) != 1 {
-		t.Fatalf("backup paths = %#v, want one backup", result.BackupPaths)
+	if len(backupPathsFromResult(result.Result)) != 1 {
+		t.Fatalf("backup paths = %#v, want one backup", backupPathsFromResult(result.Result))
 	}
-	if got, err := os.ReadFile(result.BackupPaths[0]); err != nil || string(got) != "before\n" {
+	if got, err := os.ReadFile(backupPathsFromResult(result.Result)[0]); err != nil || string(got) != "before\n" {
 		t.Fatalf("backup content = %q, %v; want before\\n", got, err)
 	}
-	if !strings.Contains(result.Result, "Backup created") {
+	if !strings.Contains(result.Result, "Backup saved to: ") {
 		t.Fatalf("result = %q, want backup signal", result.Result)
 	}
 }
@@ -338,10 +338,10 @@ func TestToolExecutionPipelineUnobservedDeleteBacksUpEmptyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute delete: %v", err)
 	}
-	if len(result.BackupPaths) != 1 {
-		t.Fatalf("backup paths = %#v, want one empty-file backup", result.BackupPaths)
+	if len(backupPathsFromResult(result.Result)) != 1 {
+		t.Fatalf("backup paths = %#v, want one empty-file backup", backupPathsFromResult(result.Result))
 	}
-	info, err := os.Stat(result.BackupPaths[0])
+	info, err := os.Stat(backupPathsFromResult(result.Result)[0])
 	if err != nil {
 		t.Fatalf("stat empty-file backup: %v", err)
 	}
@@ -382,8 +382,8 @@ func TestToolExecutionPipelineUnobservedDeleteDoesNotFollowSymlink(t *testing.T)
 	if err != nil {
 		t.Fatalf("execute delete: %v", err)
 	}
-	if len(result.BackupPaths) != 0 {
-		t.Fatalf("backup paths = %#v, want no regular-file backup for symlink", result.BackupPaths)
+	if len(backupPathsFromResult(result.Result)) != 0 {
+		t.Fatalf("backup paths = %#v, want no regular-file backup for symlink", backupPathsFromResult(result.Result))
 	}
 	if _, err := os.Lstat(link); !os.IsNotExist(err) {
 		t.Fatalf("symlink still exists, lstat err = %v", err)
@@ -427,8 +427,8 @@ func TestToolExecutionPipelineDeleteContinuesWhenBackupFails(t *testing.T) {
 	if _, err := os.Lstat(path); !os.IsNotExist(err) {
 		t.Fatalf("file still exists, lstat err = %v", err)
 	}
-	if len(result.BackupPaths) != 0 || !strings.Contains(result.Result, "No backup was created") {
-		t.Fatalf("result = %#v, want backup failure warning without backup path", result)
+	if len(backupPathsFromResult(result.Result)) != 0 || strings.Contains(result.Result, "No backup was created") {
+		t.Fatalf("result = %#v, want backup failure omitted from model result", result)
 	}
 }
 
@@ -477,7 +477,7 @@ func TestToolExecutionPipelineDeletePartialFailureRecordsCommittedFiles(t *testi
 	}
 }
 
-func TestToolExecutionPipelineStaleWriteIsRejected(t *testing.T) {
+func TestToolExecutionPipelineStaleWriteBacksUpAndContinues(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := filepath.Join(projectRoot, ".chord", "sessions", "test")
 	path := filepath.Join(projectRoot, "notes.txt")
@@ -506,18 +506,25 @@ func TestToolExecutionPipelineStaleWriteIsRejected(t *testing.T) {
 	}
 
 	_, err := pipeline.execute(context.Background(), call, false)
-	if err == nil || !strings.Contains(err.Error(), "changed after the last read") {
-		t.Fatalf("execute write error = %v, want stale-read rejection", err)
+	if err != nil {
+		t.Fatalf("execute write error = %v, want stale write to back up and continue", err)
 	}
 	backups, err := filepath.Glob(filepath.Join(sessionDir, "backups", "*", "*"))
 	if err != nil {
 		t.Fatalf("glob backups: %v", err)
 	}
-	if len(backups) != 0 {
-		t.Fatalf("backups = %#v, want none before rejected write", backups)
+	if len(backups) != 1 {
+		t.Fatalf("backups = %#v, want one backup of the stale write", backups)
 	}
-	if got, err := os.ReadFile(path); err != nil || string(got) != "external\n" {
-		t.Fatalf("file content = %q, %v; want unchanged external\\n", got, err)
+	backupData, err := os.ReadFile(backups[0])
+	if err != nil {
+		t.Fatalf("ReadFile backup: %v", err)
+	}
+	if string(backupData) != "external\n" {
+		t.Fatalf("backup content = %q, want external\\n", backupData)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "new\n" {
+		t.Fatalf("file content = %q, %v; want new\\n after stale write", got, err)
 	}
 }
 
