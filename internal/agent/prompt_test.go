@@ -352,6 +352,8 @@ func TestSharedReasoningDisciplinePrompt_ContentAndBoundary(t *testing.T) {
 		"do not create external artifacts solely for ephemeral thoughts",
 		"Evidence before conclusion",
 		"state concise evidence or rationale supporting a conclusion",
+		"Evidence sufficiency",
+		"do not keep expanding the search surface to feel thorough",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("sharedReasoningDisciplinePrompt missing %q in %q", want, got)

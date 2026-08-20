@@ -84,7 +84,8 @@ var (
 // those rules a second source that can drift.
 const sharedReasoningDisciplinePrompt = `## Reasoning Discipline
 - Selectivity: keep only the next one or two decisions active; use existing task state or notes when they materially help, and do not create external artifacts solely for ephemeral thoughts
-- Evidence before conclusion: for multi-step or high-stakes work, state concise evidence or rationale supporting a conclusion before it; skip this for routine work`
+- Evidence before conclusion: for multi-step or high-stakes work, state concise evidence or rationale supporting a conclusion before it; skip this for routine work
+- Evidence sufficiency: gather evidence only until it clearly supports the next action or conclusion, then act; do not keep expanding the search surface to feel thorough, and widen it only when a concrete finding invalidates the assumption behind the current direction`
 
 const mainAgentCommunicationPrompt = `## User Communication
 - Before substantial work, briefly tell the user what you are about to do
