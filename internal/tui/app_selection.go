@@ -495,8 +495,6 @@ func (m *Model) copyFocusedBlocks(count int) tea.Cmd {
 }
 func blockPlainContent(b *Block) string {
 	switch b.Type {
-	case BlockThinking:
-		return "▸ thinking\n\n" + strings.TrimSpace(b.Content)
 	case BlockCompactionSummary:
 		raw := strings.TrimSpace(b.CompactionSummaryRaw)
 		if raw != "" {
@@ -507,26 +505,7 @@ func blockPlainContent(b *Block) string {
 		if b.Type == BlockUser && b.UserLocalShellCmd != "" {
 			return userLocalShellCopyBody(b)
 		}
-		if b.Type == BlockToolCall && tools.NormalizeName(b.ToolName) == tools.NameSkill {
-			return skillToolCopyContent(b.Content, b.ResultContent)
-		}
-		content := strings.TrimSpace(b.Content)
-		if blockSupportsImagePreview(b) {
-			var imageLabels []string
-			for _, part := range b.ImageParts {
-				name := strings.TrimSpace(part.FileName)
-				if name == "" {
-					name = "image"
-				}
-				imageLabels = append(imageLabels, fmt.Sprintf("[image: %s]", name))
-			}
-			imageText := strings.Join(imageLabels, "\n")
-			if content == "" {
-				content = imageText
-			} else {
-				content += "\n\n" + imageText
-			}
-		}
+		content := appendImagePlaceholderLabels(strings.TrimSpace(b.Content), b)
 		if b.ResultContent != "" {
 			content += "\n\nResult:\n" + b.ResultContent
 		}
@@ -537,21 +516,61 @@ func blockPlainContent(b *Block) string {
 	}
 }
 
+// appendImagePlaceholderLabels keeps copied cards loss-free about attached
+// images: rendered previews cannot survive plain-text clipboard, so each image
+// part is represented by its stable [image: name] placeholder.
+func appendImagePlaceholderLabels(content string, b *Block) string {
+	if b == nil || len(b.ImageParts) == 0 || !blockSupportsImagePreview(b) {
+		return content
+	}
+	labels := make([]string, 0, len(b.ImageParts))
+	for _, part := range b.ImageParts {
+		name := strings.TrimSpace(part.FileName)
+		if name == "" {
+			name = "image"
+		}
+		labels = append(labels, fmt.Sprintf("[image: %s]", name))
+	}
+	imageText := strings.Join(labels, "\n")
+	if strings.TrimSpace(content) == "" {
+		return imageText
+	}
+	return content + "\n\n" + imageText
+}
+
 func blockCopyContent(b *Block) string {
 	if b == nil {
 		return ""
 	}
 	if b.IsUserLocalShell() {
-		return convformat.BlockString(convformat.LabelUser, userLocalShellCopyBody(b))
+		return convformat.BlockString(convformat.LabelLocalShell, userLocalShellCopyBody(b))
 	}
-	if b.Type == BlockToolCall {
-		return toolCallMarkdownContent(b)
-	}
-	if b.Type == BlockToolResult {
-		return convformat.ToolResultMarkdown(b.ToolName, toolExpandedResultContent(b.ToolName, b.toolResultContentForCopy()), b.Diff)
-	}
-	if b.Type == BlockStatus && b.BackgroundCopyContent != "" {
-		return b.BackgroundCopyContent
+	switch b.Type {
+	case BlockUser:
+		return convformat.BlockString(convformat.LabelUser, blockPlainContent(b))
+	case BlockAssistant:
+		return convformat.BlockString(convformat.LabelAssistant, blockPlainContent(b))
+	case BlockThinking:
+		return convformat.BlockString(convformat.LabelThinking, strings.TrimSpace(b.Content))
+	case BlockToolCall:
+		if tools.NormalizeName(b.ToolName) == tools.NameSkill {
+			return skillToolCopyContent(b.Content, b.ResultContent)
+		}
+		return appendImagePlaceholderLabels(toolCallMarkdownContent(b), b)
+	case BlockToolResult:
+		content := convformat.ToolResultMarkdown(b.ToolName, toolExpandedResultContent(b.ToolName, b.toolResultContentForCopy()), b.Diff)
+		return appendImagePlaceholderLabels(content, b)
+	case BlockError:
+		return convformat.BlockString(convformat.LabelError, strings.TrimSpace(b.Content))
+	case BlockBoundaryMarker:
+		return convformat.BlockString(convformat.LabelBoundary, strings.TrimSpace(b.Content))
+	case BlockStatus:
+		if b.BackgroundCopyContent != "" {
+			return b.BackgroundCopyContent
+		}
+		if title := strings.TrimSpace(b.StatusTitle); title != "" {
+			return convformat.BlockString(title+":", blockPlainContent(b))
+		}
 	}
 	return blockPlainContent(b)
 }

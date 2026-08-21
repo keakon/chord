@@ -2,8 +2,9 @@
 // TUI card copy: block labels (User:, Assistant:, etc.) and separator. One format
 // for both human and model consumption, token-efficient (no emoji/Markdown).
 //
-// Merged USER + local !shell cards use LabelUser + human-readable body for
-// copy/model context, with an appended payload when persisted for restore.
+// Merged USER + local !shell cards use LabelLocalShell when copied from the
+// TUI. Model context and persisted restore records keep the user role because
+// the command output is context supplied by the user-side terminal.
 package convformat
 
 import (
@@ -21,6 +22,8 @@ const (
 	LabelAssistant = "Assistant:"
 	LabelThinking  = "Thinking:"
 	LabelBlock     = "Block:"
+	LabelError     = "Error:"
+	LabelBoundary  = "Boundary:"
 )
 
 const (
@@ -53,7 +56,7 @@ const LabelLocalShell = "TERMINAL (!):"
 // command is the string passed to bash -c; output is combined stdout/stderr
 // (and any trailing error text the TUI appends). If failed, a final status line is added.
 func LocalShellCopyBody(command, output string, failed bool) string {
-	return localShellReadableBody(command, output, failed)
+	return localShellReadableBody(command, strings.TrimSuffix(output, "\n"), failed)
 }
 
 // LocalShellBlockString returns a full copy/export-shaped block for one !shell run.
@@ -228,7 +231,10 @@ func TryParseUserShellPersistedMessage(content string) (userLine, cmd, output st
 	if payload.Version == legacyShellPayloadVersion {
 		expectedReadable = legacyUserShellReadableBody(payload.UserLine, payload.Command, payload.Output, payload.Failed)
 	}
-	if readable != expectedReadable {
+	// Output captured from a terminal usually ends with a newline; the readable
+	// body keeps it verbatim while the reconstruction above trims trailing
+	// newlines, so compare with the same normalization instead of exactly.
+	if readable != strings.TrimRight(expectedReadable, "\n") {
 		return "", "", "", false, false
 	}
 	return payload.UserLine, payload.Command, payload.Output, payload.Failed, true

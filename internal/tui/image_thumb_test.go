@@ -173,12 +173,12 @@ func TestToolResultImagePreviewRendersAndCopiesPlaceholder(t *testing.T) {
 	if _, ok := block.imagePartAtLine(block.ImageParts[0].RenderStartLine, renderWidth); !ok {
 		t.Fatal("expected image hit on rendered tool result image line")
 	}
-	if got := blockPlainContent(block); !strings.Contains(got, "[image: sample.png]") {
-		t.Fatalf("blockPlainContent = %q, want image placeholder", got)
+	if got := blockCopyContent(block); !strings.Contains(got, "[image: sample.png]") {
+		t.Fatalf("blockCopyContent = %q, want image placeholder", got)
 	}
 }
 
-func TestBlockPlainContentSkillToolIncludesNamePathAndBody(t *testing.T) {
+func TestSkillToolCopyContentIncludesNamePathAndBody(t *testing.T) {
 	block := &Block{
 		Type:          BlockToolCall,
 		ToolName:      "skill",
@@ -186,14 +186,14 @@ func TestBlockPlainContentSkillToolIncludesNamePathAndBody(t *testing.T) {
 		ResultContent: "<skill>\n<name>skill-creator</name>\n<path>/tmp/skills/skill-creator/SKILL.md</path>\n<root>/tmp/skills/skill-creator</root>\n\n# Skill Creator\n\n- Step one\n</skill>",
 	}
 
-	got := blockPlainContent(block)
+	got := blockCopyContent(block)
 	for _, want := range []string{"Name: skill-creator", "Path: /tmp/skills/skill-creator/SKILL.md", "# Skill Creator", "Step one"} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("blockPlainContent = %q, want %q", got, want)
+			t.Fatalf("blockCopyContent = %q, want %q", got, want)
 		}
 	}
-	if strings.Contains(got, "<skill>") || strings.Contains(got, "<root>") {
-		t.Fatalf("blockPlainContent should omit wrapper tags, got %q", got)
+	if strings.Contains(got, "<skill>") || strings.Contains(got, "<root>") || strings.Contains(got, "```json") {
+		t.Fatalf("blockCopyContent should use the dedicated skill format, got %q", got)
 	}
 }
 

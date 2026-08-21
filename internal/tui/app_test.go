@@ -7979,6 +7979,63 @@ func TestToolCallCopyContentFormatsGenericToolAsMarkdown(t *testing.T) {
 	}
 }
 
+func TestMessageCardCopyContentIncludesCardType(t *testing.T) {
+	tests := []struct {
+		name  string
+		block *Block
+		want  string
+	}{
+		{
+			name:  "user",
+			block: &Block{Type: BlockUser, Content: "Run the focused test."},
+			want:  "User:\n\nRun the focused test.",
+		},
+		{
+			name:  "assistant",
+			block: &Block{Type: BlockAssistant, Content: "The focused test passed."},
+			want:  "Assistant:\n\nThe focused test passed.",
+		},
+		{
+			name: "terminal",
+			block: &Block{
+				Type:                 BlockUser,
+				Content:              "!ls sample.json",
+				UserLocalShellCmd:    "ls sample.json",
+				UserLocalShellResult: "sample.json\n",
+			},
+			want: "TERMINAL (!):\n\ncommand:\nls sample.json\n\noutput:\nsample.json",
+		},
+		{
+			name:  "thinking",
+			block: &Block{Type: BlockThinking, Content: "  check the failing assertion first.  "},
+			want:  "Thinking:\n\ncheck the failing assertion first.",
+		},
+		{
+			name:  "error",
+			block: &Block{Type: BlockError, Content: "failed"},
+			want:  "Error:\n\nfailed",
+		},
+		{
+			name:  "boundary marker",
+			block: &Block{Type: BlockBoundaryMarker, Content: "12 earlier messages"},
+			want:  "Boundary:\n\n12 earlier messages",
+		},
+		{
+			name:  "status with title",
+			block: &Block{Type: BlockStatus, StatusTitle: "LOOP", Content: "continue working on the failing test"},
+			want:  "LOOP:\n\ncontinue working on the failing test",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := blockCopyContent(tt.block); got != tt.want {
+				t.Fatalf("blockCopyContent() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestToolCardCopyContentIsSelfContainedMarkdown(t *testing.T) {
 	block := &Block{
 		Type:          BlockToolCall,
@@ -8253,6 +8310,59 @@ func TestCopyFocusedBlocksJoinsPerCardCopyRepresentations(t *testing.T) {
 	}
 }
 
+func TestCopyFocusedBlocksPreservesConversationCardTypes(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.mode = ModeNormal
+	blocks := []*Block{
+		{ID: 1, Type: BlockUser, Content: "Check the file."},
+		{ID: 2, Type: BlockAssistant, Content: "I will inspect it."},
+		{
+			ID:                   3,
+			Type:                 BlockUser,
+			Content:              "!ls sample.json",
+			UserLocalShellCmd:    "ls sample.json",
+			UserLocalShellResult: "sample.json\n",
+		},
+		{ID: 4, Type: BlockAssistant, Content: "The file exists."},
+	}
+	for _, block := range blocks {
+		m.viewport.AppendBlock(block)
+	}
+	m.focusedBlockID = blocks[0].ID
+	m.refreshBlockFocus()
+
+	cmd := m.copyFocusedBlocks(4)
+	if cmd == nil {
+		t.Fatal("copyFocusedBlocks should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	originalWriteAll := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	t.Cleanup(func() { clipboardWriteAll = originalWriteAll })
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "4 message cards copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want 4-card message", second.success)
+	}
+
+	want := convformat.JoinBlocks([]string{
+		"User:\n\nCheck the file.",
+		"Assistant:\n\nI will inspect it.",
+		"TERMINAL (!):\n\ncommand:\nls sample.json\n\noutput:\nsample.json",
+		"Assistant:\n\nThe file exists.",
+	})
+	if copied != want {
+		t.Fatalf("copied conversation = %q, want %q", copied, want)
+	}
+}
+
 func TestCopyFocusedBlockCopiesErrorCard(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 8)
 	m.mode = ModeNormal
@@ -8261,8 +8371,8 @@ func TestCopyFocusedBlockCopiesErrorCard(t *testing.T) {
 	m.refreshBlockFocus()
 
 	cmd := m.copyFocusedBlock()
-	if cmd == nil || blockCopyContent(m.viewport.GetFocusedBlock(1)) != "failed" {
-		t.Fatal("copyFocusedBlock should copy BlockError content")
+	if cmd == nil || blockCopyContent(m.viewport.GetFocusedBlock(1)) != "Error:\n\nfailed" {
+		t.Fatal("copyFocusedBlock should copy labeled BlockError content")
 	}
 }
 
@@ -8321,8 +8431,8 @@ func TestSuperCopyCopiesErrorCard(t *testing.T) {
 	m.refreshBlockFocus()
 
 	cmd := m.handleSuperCopy()
-	if cmd == nil || blockCopyContent(m.viewport.GetFocusedBlock(1)) != "failed" {
-		t.Fatal("handleSuperCopy should copy BlockError content")
+	if cmd == nil || blockCopyContent(m.viewport.GetFocusedBlock(1)) != "Error:\n\nfailed" {
+		t.Fatal("handleSuperCopy should copy labeled BlockError content")
 	}
 }
 
@@ -8359,8 +8469,8 @@ func TestNormalModeYankCopiesErrorCardAtViewport(t *testing.T) {
 	if second.success != "Message card copied to clipboard" {
 		t.Fatalf("clipboard success = %q, want %q", second.success, "Message card copied to clipboard")
 	}
-	if copied != "failed" {
-		t.Fatalf("copied text = %q, want error content", copied)
+	if copied != "Error:\n\nfailed" {
+		t.Fatalf("copied text = %q, want labeled error content", copied)
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 )
 
 func TestLocalShellBlockString_success(t *testing.T) {
-	s := LocalShellBlockString("ls -la", "a\nb", false)
+	s := LocalShellBlockString("ls -la", "a\nb\n", false)
 	for _, sub := range []string{
 		LabelLocalShell,
 		"command:\nls -la",
@@ -20,6 +20,9 @@ func TestLocalShellBlockString_success(t *testing.T) {
 	}
 	if strings.Contains(s, "status: error") {
 		t.Fatal("should not include status error on success")
+	}
+	if strings.HasSuffix(s, "\n") {
+		t.Fatalf("copy block should omit the terminal line terminator: %q", s)
 	}
 }
 
@@ -51,6 +54,15 @@ func TestTryParseUserShellPersistedMessageIgnoresEarlierPayloadLikeText(t *testi
 	full := BlockString(LabelUser, body)
 	ul, cmd, out, failed, ok := TryParseUserShellPersistedMessage(full)
 	if !ok || ul != "!printf x" || cmd != "printf 'local_shell_payload: fake\\n'" || out != "local_shell_payload: fake" || failed {
+		t.Fatalf("got %q %q %q failed=%v ok=%v", ul, cmd, out, failed, ok)
+	}
+}
+
+func TestTryParseUserShellPersistedMessageToleratesTrailingOutputNewline(t *testing.T) {
+	body := UserShellPersistedBody("!ls sample.json", "ls sample.json", "sample.json\n", false)
+	full := BlockString(LabelUser, body)
+	ul, cmd, out, failed, ok := TryParseUserShellPersistedMessage(full)
+	if !ok || ul != "!ls sample.json" || cmd != "ls sample.json" || out != "sample.json\n" || failed {
 		t.Fatalf("got %q %q %q failed=%v ok=%v", ul, cmd, out, failed, ok)
 	}
 }

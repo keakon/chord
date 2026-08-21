@@ -42,6 +42,7 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	}
 	prefix := pseudo.renderToolPrefix(spinnerFrame)
 	isActive := b.UserLocalShellPending && spinnerFrame != ""
+	displayResult := strings.TrimSuffix(sanitizeToolDisplayText(b.UserLocalShellResult), "\n")
 
 	var bashLines []string
 	addHeader := func() {
@@ -73,27 +74,31 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	switch {
 	case b.UserLocalShellPending:
 		addHeader()
-	case !b.Collapsed && strings.TrimSpace(b.UserLocalShellResult) != "":
+	case !b.Collapsed && strings.TrimSpace(displayResult) != "":
 		addHeader()
 		appendBashCommandBlock(&bashLines, b.UserLocalShellCmd, contentWidth, true, false)
 		if b.UserLocalShellFailed {
 			bashLines = append(bashLines, ErrorStyle.Render("  ↳ Error:"))
 		}
-		for _, line := range wrapText(sanitizeToolDisplayText(b.UserLocalShellResult), contentWidth) {
+		for _, line := range wrapText(displayResult, contentWidth) {
 			bashLines = append(bashLines, DimStyle.Render("    "+line))
 		}
 	default:
 		addHeader()
 		appendBashCommandBlock(&bashLines, b.UserLocalShellCmd, contentWidth, false, true)
-		if b.UserLocalShellResult != "" {
-			lineCount := strings.Count(b.UserLocalShellResult, "\n") + 1
-			summary := truncateOneLine(sanitizeToolDisplayText(b.UserLocalShellResult), innerWidth-26)
-			if b.UserLocalShellFailed {
-				bashLines = append(bashLines, ErrorStyle.Render(fmt.Sprintf("  ↳ %s (%d lines)", summary, lineCount)))
-			} else {
-				bashLines = append(bashLines, ToolResultStyle.Render(fmt.Sprintf("  ↳ %s (%d lines)", summary, lineCount)))
+		if displayResult != "" {
+			lineCount := strings.Count(displayResult, "\n") + 1
+			lineLabel := "line"
+			if lineCount != 1 {
+				lineLabel = "lines"
 			}
-			if hidden := len(wrapText(sanitizeToolDisplayText(b.UserLocalShellResult), contentWidth)) - 1; hidden > 0 {
+			summary := truncateOneLine(displayResult, innerWidth-26)
+			if b.UserLocalShellFailed {
+				bashLines = append(bashLines, ErrorStyle.Render(fmt.Sprintf("  ↳ %s (%d %s)", summary, lineCount, lineLabel)))
+			} else {
+				bashLines = append(bashLines, ToolResultStyle.Render(fmt.Sprintf("  ↳ %s (%d %s)", summary, lineCount, lineLabel)))
+			}
+			if hidden := len(wrapText(displayResult, contentWidth)) - 1; hidden > 0 {
 				bashLines = append(bashLines, renderToolExpandHint("  ", hidden))
 			}
 		}

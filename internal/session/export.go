@@ -251,9 +251,13 @@ func ExportToMarkdown(session *ExportedSession) string {
 			if needSep {
 				sb.WriteString(convformat.BlockSep)
 			}
-			sb.WriteString(convformat.LabelUser)
-			sb.WriteString("\n\n")
-			sb.WriteString(em.Content)
+			if _, cmd, output, failed, ok := convformat.TryParseUserShellPersistedMessage(em.Content); ok {
+				sb.WriteString(convformat.LocalShellBlockString(cmd, output, failed))
+			} else {
+				sb.WriteString(convformat.LabelUser)
+				sb.WriteString("\n\n")
+				sb.WriteString(em.Content)
+			}
 			sb.WriteString("\n\n")
 			needSep = true
 

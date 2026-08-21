@@ -45,6 +45,9 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Local terminal cards no longer show a phantom hidden line when command output ends with the usual newline, so `[space]` is only advertised when expanding reveals real content. Copying cards with `yy` now labels local commands as `TERMINAL (!):` rather than `User:`, and multi-card copies preserve `User:`, `Assistant:`, terminal, and tool boundaries consistently.
+- Resuming a session no longer degrades local terminal runs whose output ends with a newline into plain user messages. `/export` also writes those runs in the same clean `TERMINAL (!)` format instead of leaking the machine-readable payload record that only exists for restore.
+- Card copying now covers every card type consistently: `ERROR`, status, and boundary cards carry explicit labels instead of bare text, `skill` cards copy as name/path/body rather than raw JSON arguments, and tool results keep `[image: ...]` placeholders for attached images.
 - Manual model-pool switches no longer emit a generic model-switch toast or terminal idle notification. Runtime and headless idle events remain delivered so local and remote clients can clear their busy state, while fallback and real task-completion notifications are preserved.
 - Failed `edit` tool cards now render `old_string → new_string` as a syntax-highlighted requested replacement with deleted/added line backgrounds, instead of flattening multiline code into escaped JSON. `replace_all` and the actionable error remain separate, and copying the card still preserves the exact untruncated strings.
 - Edit tool cards no longer drop or blank lines in unequal change blocks. When a hunk replaced two lines with one (or one with two), the leftover delete/add line lost its whole-line background or disappeared from the diff view entirely.

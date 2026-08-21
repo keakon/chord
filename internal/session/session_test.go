@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/convformat"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -665,6 +666,27 @@ func TestExportToMarkdownUserMessage(t *testing.T) {
 	}
 	if !strings.Contains(md, "Hello, can you help me with Go?") {
 		t.Error("missing user message content")
+	}
+}
+
+func TestExportToMarkdownConvertsPersistedLocalShell(t *testing.T) {
+	content := convformat.BlockString(convformat.LabelUser,
+		convformat.UserShellPersistedBody("!ls sample.json", "ls sample.json", "sample.json\n", false))
+	session := &ExportedSession{
+		Version:  CurrentVersion,
+		Messages: []ExportedMessage{{Role: message.RoleUser, Content: content}},
+	}
+
+	md := ExportToMarkdown(session)
+
+	if !strings.Contains(md, convformat.LabelLocalShell) {
+		t.Errorf("missing %q heading, got:\n%s", convformat.LabelLocalShell, md)
+	}
+	if !strings.Contains(md, "command:\nls sample.json") || !strings.Contains(md, "output:\nsample.json") {
+		t.Errorf("missing terminal command/output body, got:\n%s", md)
+	}
+	if strings.Contains(md, "local_shell_payload: ") {
+		t.Errorf("export should not leak the machine-readable payload, got:\n%s", md)
 	}
 }
 

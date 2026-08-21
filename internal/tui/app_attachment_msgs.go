@@ -89,7 +89,7 @@ func userLocalShellCopyBody(b *Block) string {
 	if b.UserLocalShellPending {
 		return b.Content + "\n\n(terminal running…)"
 	}
-	return convformat.UserShellReadableBody(b.UserLocalShellCmd, b.UserLocalShellResult, b.UserLocalShellFailed)
+	return convformat.LocalShellCopyBody(b.UserLocalShellCmd, b.UserLocalShellResult, b.UserLocalShellFailed)
 }
 
 // pickImageFile reads an image file whose path is currently selected/typed in the input.
