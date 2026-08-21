@@ -111,7 +111,7 @@ func (m *Manager) pythonSemanticBackendAvailable(path string, pyCfg config.Pytho
 		srvCfg, ok := m.cfg.LSP[serverName]
 		return ok && !srvCfg.Disabled && m.handles(srvCfg, path)
 	}
-	return m.anyServerMatchesPath(path)
+	return m.HasServerForPath(path)
 }
 
 func (m *Manager) pythonQuickBackendAvailable(pyCfg config.PythonDiagnosticsConfig) bool {

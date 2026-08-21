@@ -36,7 +36,7 @@ func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content,
 
 func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool, displayBaseDir string) string {
 	// Unassociated file type: skip LSP entirely (no Start, no note).
-	if !m.anyServerMatchesPath(absPath) {
+	if !m.HasServerForPath(absPath) {
 		return base
 	}
 

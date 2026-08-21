@@ -66,6 +66,23 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		primaryPaths = append(primaryPaths, abs)
 	}
 
+	// Without LSP server coverage for any changed file (and without direct
+	// backend diagnostics such as Ruff), every cached diagnostic belongs to
+	// files edited earlier in the session. Attaching them would misattribute
+	// unrelated errors to this tool call, so keep the base output as-is.
+	if len(extras) == 0 {
+		covered := false
+		for _, path := range primaryPaths {
+			if m.HasServerForPath(path) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return base
+		}
+	}
+
 	maxTotal := ToolOutputMaxDiagnosticsPerBatch
 	remaining := maxTotal
 	selectedByPath := make(map[string][]Diagnostic)

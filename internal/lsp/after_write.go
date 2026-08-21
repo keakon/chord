@@ -63,7 +63,7 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 		return m.afterWritePythonToolResult(ctx, absPath, content, base, includeOtherFiles, ranges, changeType, displayBaseDir)
 	}
 	// Unassociated file type: skip LSP entirely (no Start, no note).
-	if !m.anyServerMatchesPath(absPath) {
+	if !m.HasServerForPath(absPath) {
 		return base
 	}
 
@@ -116,7 +116,10 @@ func (m *Manager) logLSPServiceNote(path, msg string) {
 	log.Debugf("lsp: non-actionable service note suppressed path=%v detail=%v", path, msg)
 }
 
-func (m *Manager) anyServerMatchesPath(path string) bool {
+// HasServerForPath reports whether any configured, enabled LSP server handles
+// the given path. Same matching used by AfterFileWriteToolResult and the
+// Python diagnostic backends.
+func (m *Manager) HasServerForPath(path string) bool {
 	if m.cfg == nil || len(m.cfg.LSP) == 0 {
 		return false
 	}

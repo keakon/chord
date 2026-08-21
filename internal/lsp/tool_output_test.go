@@ -502,6 +502,49 @@ func TestEditRangesForReplacement(t *testing.T) {
 	}
 }
 
+func TestAppendLSPDiagnosticsToToolOutputForPaths_SkipsCachedDiagnosticsWithoutServerCoverage(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := NewManager(&config.Config{}, tmp, nil)
+	edited := filepath.Join(tmp, "MEMORY.md")
+	other := filepath.Join(tmp, "other.go")
+	mgr.clientsMu.Lock()
+	mgr.clients["gopls"] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
+			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "cached error"},
+		},
+	}}
+	mgr.clientsMu.Unlock()
+
+	// No LSP server covers the edited .md file and no direct backend
+	// diagnostics were produced, so cached diagnostics from other files must
+	// not be attached to this tool result.
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	if out != "Applied patch" {
+		t.Fatalf("output = %q, want base unchanged", out)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPaths_KeepsCachedDiagnosticsWithServerCoverage(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := NewManager(&config.Config{LSP: config.LSPConfig{
+		"gopls": {Command: "gopls", FileTypes: []string{".go"}},
+	}}, tmp, nil)
+	edited := filepath.Join(tmp, "edited.go")
+	other := filepath.Join(tmp, "other.go")
+	mgr.clientsMu.Lock()
+	mgr.clients["gopls"] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
+			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "cached error"},
+		},
+	}}
+	mgr.clientsMu.Unlock()
+
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	if !strings.Contains(out, "LSP diagnostics in other files:") || !strings.Contains(out, "cached error") {
+		t.Fatalf("output = %q, want cached other-file diagnostics attached", out)
+	}
+}
+
 func TestDeduplicateDiagnosticsCollapsesSourcelessRoundTripCopy(t *testing.T) {
 	original := Diagnostic{Severity: 1, Line: 10, Col: 3, Code: "E100", Message: "undefined name", Source: "compiler"}
 	// apply_patch re-parses rendered manager output; the rendered line carries
