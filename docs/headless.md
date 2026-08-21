@@ -161,7 +161,7 @@ Resolve a pending `handoff_request`. Approving starts executing the saved plan w
 {"type": "handoff", "request_id": "handoff-…", "action": "deny", "deny_reason": "Please add rollout steps first."}
 ```
 
-`action` accepts `accept` / `allow` (or an empty action) to approve and `deny` / `reject` / `cancel` to reject. `agent` defaults to the request's default agent, and optional `pool` switches that agent's model pool before execution.
+`action` accepts `accept` / `allow` (or an empty action) to approve and `deny` / `reject` to reject with a reason. `cancel` closes the pending handoff without executing the plan and without appending a rejection message. `agent` defaults to the request's default agent, and optional `pool` switches that agent's model pool before execution.
 
 ### `local_shell`
 
@@ -207,7 +207,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `done_completion`      | Done tool completed with a final report outside loop mode                                         | `call_id`, `report`, `reason`, `status`, `agent_id`, `mode`                                                  |
 | `confirm_request`       | A tool needs explicit confirmation                                                                | `request_id`, `tool_name`, `args_json`, `needs_approval`, `already_allowed`, `needs_approval_rules`, `already_allowed_rules`, `timeout_ms` |
 | `question_request`      | The model asked the user a question                                                               | `request_id`, `tool_name`, `question`, `options`, `option_details`, `default_answer`, `multiple`, `timeout_ms` |
-| `handoff_request`       | A planner saved a handoff plan and needs the client to approve or reject execution                 | `request_id`, `plan_path`, `plan_text`, `plan_error`, `agents[]` with `{name, default, model_pools, current_model_pool}` |
+| `handoff_request`       | A planner saved a handoff plan and needs the client to approve or reject execution                 | `request_id`, `plan_path`, `plan_text`, `plan_error`, `agents[]` with `{name, default, model_pools, current_model_pool}`; `agents` is empty when no eligible target exists |
 | `local_shell_result`    | Result for a `local_shell` command                                                                | `command`, `output`, `failed`, `error` |
 | `agent_started`         | A delegated SubAgent runtime started, including an on-demand rehydration of a parked task           | `agent_id`, `previous_agent_id` (set for rehydration), `task_id`, `agent_type`, `description`, `parent_agent_id`, `parent_task_id` |
 | `agent_notify`          | An agent sent a non-blocking owner or targeted delegated-workstream update                         | `agent_id`, `task_id`, `agent_type`, `parent_agent_id`, `parent_task_id`, `target_agent_id`, `target_task_id`, `kind`, `message` |

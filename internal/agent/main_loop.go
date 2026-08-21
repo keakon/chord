@@ -163,6 +163,8 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleSpawnFinished(evt)
 	case EventContinue:
 		a.handleContinueFromContext(evt)
+	case EventHandoffResolve:
+		a.handleHandoffResolveEvent(evt)
 	case EventLoopAssessment:
 		a.handleLoopAssessment(evt)
 	case EventCompactionReady:

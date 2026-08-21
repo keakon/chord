@@ -234,7 +234,7 @@ The export includes every conversation message plus the current session usage st
 `TIME` reports cumulative wall-clock durations for the focused agent: `Model` (LLM streaming), `Tools` (tool execution), `Cooldown` (key/model cooldown waits), and `User wait` (waits for your confirmations or answers). These are sums of operation intervals, not exclusive slices of elapsed session time; parallel operations can therefore contribute to more than one bucket at once. Each bucket's percentage uses the sum of the displayed buckets as its denominator.
 
 - Buckets under one second are hidden, including from the percentage split; if every bucket is sub-second the whole section is hidden.
-- `Model` includes time spent streaming compaction drafts. When a confirmation dialog or Question prompt is pending, tool cards show execution time only: confirmation and answer waits are recorded under `User wait`, never under `Tools`.
+- `Model` includes time spent streaming compaction drafts. When a confirmation dialog, Question prompt, or Handoff selector is pending, tool cards show execution time only: confirmation, answer, and handoff-decision waits are recorded under `User wait`, never under `Tools`.
 - The section follows the focused agent (main agent, running SubAgent, or parked task) and is rebuilt from the session's usage ledger after restore or resume.
 
 ### `/stats` — usage statistics overlay

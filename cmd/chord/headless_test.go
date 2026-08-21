@@ -121,11 +121,22 @@ type mockBackend struct {
 	cancelCalls   int
 	executeCalls  []executePlanCall
 	continueCalls int
+	handoffCalls  []handoffCall
+
+	handoffOptions    []agent.HandoffAgentOption
+	handoffOptionsSet bool
 }
 
 type executePlanCall struct {
 	planPath  string
 	agentName string
+}
+
+type handoffCall struct {
+	requestID  string
+	action     string
+	agentName  string
+	denyReason string
 }
 
 type confirmCall struct {
@@ -205,6 +216,9 @@ func (m *mockBackend) SetAgentModelPool(agentName, pool string) error {
 }
 
 func (m *mockBackend) HandoffAgentOptions() []agent.HandoffAgentOption {
+	if m.handoffOptionsSet {
+		return m.handoffOptions
+	}
 	return []agent.HandoffAgentOption{
 		{Name: "builder", Default: true, ModelPools: []string{"fast", "smart"}, CurrentModelPool: "fast"},
 		{Name: "reviewer", ModelPools: []string{"smart"}, CurrentModelPool: "smart"},
@@ -214,6 +228,12 @@ func (m *mockBackend) HandoffAgentOptions() []agent.HandoffAgentOption {
 func (m *mockBackend) ExecutePlan(planPath, agentName string) {
 	m.mu.Lock()
 	m.executeCalls = append(m.executeCalls, executePlanCall{planPath: planPath, agentName: agentName})
+	m.mu.Unlock()
+}
+
+func (m *mockBackend) ResolveHandoff(requestID, action, agentName, denyReason string) {
+	m.mu.Lock()
+	m.handoffCalls = append(m.handoffCalls, handoffCall{requestID: requestID, action: action, agentName: agentName, denyReason: denyReason})
 	m.mu.Unlock()
 }
 
@@ -282,7 +302,7 @@ func TestHeadlessHandoffEventAndCommand(t *testing.T) {
 	state := &headlessState{subscriptions: map[string]bool{"handoff_request": true}}
 	backend := &mockBackend{}
 
-	envs := filterHeadlessEvent(agent.HandoffEvent{PlanPath: planPath}, state, backend)
+	envs := filterHeadlessEvent(agent.HandoffEvent{PlanPath: planPath, RequestID: "handoff-1"}, state, backend)
 	env := findHeadlessEnvelope(envs, "handoff_request")
 	if env == nil {
 		t.Fatalf("handoff_request envelope not emitted: %v", envs)
@@ -291,7 +311,7 @@ func TestHeadlessHandoffEventAndCommand(t *testing.T) {
 	if !ok {
 		t.Fatalf("payload type = %T", env.Payload)
 	}
-	if payload.PlanPath != planPath || payload.PlanText != "# Plan\n\nDo the work." {
+	if payload.PlanPath != planPath || payload.PlanText != "# Plan\n\nDo the work." || payload.RequestID != "handoff-1" {
 		t.Fatalf("unexpected payload: %+v", payload)
 	}
 	if len(payload.Agents) != 2 || payload.Agents[0].Name != "builder" || payload.Agents[0].CurrentModelPool != "fast" {
@@ -309,11 +329,34 @@ func TestHeadlessHandoffEventAndCommand(t *testing.T) {
 	}
 	backend.mu.Lock()
 	defer backend.mu.Unlock()
-	if len(backend.executeCalls) != 1 || backend.executeCalls[0].planPath != planPath || backend.executeCalls[0].agentName != "reviewer" {
-		t.Fatalf("execute calls = %+v", backend.executeCalls)
+	if len(backend.executeCalls) != 0 {
+		t.Fatalf("execute calls = %+v, want 0 (approval goes through ResolveHandoff)", backend.executeCalls)
+	}
+	if len(backend.handoffCalls) != 1 || backend.handoffCalls[0].action != "approve" || backend.handoffCalls[0].agentName != "reviewer" || backend.handoffCalls[0].requestID != payload.RequestID {
+		t.Fatalf("handoff calls = %+v", backend.handoffCalls)
 	}
 	if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "set-agent:reviewer:smart" {
 		t.Fatalf("sent messages = %+v", backend.sentMessages)
+	}
+}
+
+// An empty eligible-target list must reach the client verbatim: fabricating a
+// builder default would offer a target the runtime rejects on approval.
+func TestHeadlessHandoffRequestEmptyAgentsNotFabricated(t *testing.T) {
+	state := &headlessState{subscriptions: map[string]bool{"handoff_request": true}}
+	backend := &mockBackend{handoffOptionsSet: true}
+
+	envs := filterHeadlessEvent(agent.HandoffEvent{PlanPath: "/tmp/plan.md", RequestID: "hand-1"}, state, backend)
+	env := findHeadlessEnvelope(envs, "handoff_request")
+	if env == nil {
+		t.Fatalf("handoff_request envelope not emitted: %v", envs)
+	}
+	payload, ok := env.Payload.(*headlessHandoffPayload)
+	if !ok {
+		t.Fatalf("payload type = %T", env.Payload)
+	}
+	if len(payload.Agents) != 0 {
+		t.Fatalf("agents = %+v, want an empty list without fabricated defaults", payload.Agents)
 	}
 }
 
@@ -326,11 +369,11 @@ func TestHeadlessHandoffDenyContinuesFromContext(t *testing.T) {
 
 	backend.mu.Lock()
 	defer backend.mu.Unlock()
-	if backend.continueCalls != 1 {
-		t.Fatalf("continue calls = %d, want 1", backend.continueCalls)
+	if backend.continueCalls != 0 || len(backend.sentMessages) != 0 {
+		t.Fatalf("deny should only resolve handoff, continue=%d messages=%v", backend.continueCalls, backend.sentMessages)
 	}
-	if len(backend.sentMessages) != 1 || !strings.Contains(backend.sentMessages[0], "needs more detail") {
-		t.Fatalf("sent messages = %+v", backend.sentMessages)
+	if len(backend.handoffCalls) != 1 || backend.handoffCalls[0].action != "deny" || !strings.Contains(backend.handoffCalls[0].denyReason, "needs more detail") {
+		t.Fatalf("handoff calls = %+v", backend.handoffCalls)
 	}
 }
 
@@ -1794,7 +1837,9 @@ func TestDefaultHandoffAgent(t *testing.T) {
 	}{
 		{name: "default named option", options: []agent.HandoffAgentOption{{Name: " planner "}, {Name: " builder ", Default: true}}, want: "builder"},
 		{name: "first named fallback", options: []agent.HandoffAgentOption{{Name: " "}, {Name: " planner "}, {Name: "builder"}}, want: "planner"},
-		{name: "empty fallback", options: []agent.HandoffAgentOption{{Name: " "}}, want: "builder"},
+		// No eligible agent was offered: the caller must report an error
+		// instead of inventing a target.
+		{name: "empty fallback", options: []agent.HandoffAgentOption{{Name: " "}}, want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1802,6 +1847,62 @@ func TestDefaultHandoffAgent(t *testing.T) {
 				t.Fatalf("defaultHandoffAgent() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// headlessErrorMessage extracts the "message" field from an error envelope.
+// drain() re-parses envelopes from JSONL, so payloads arrive as map[string]any.
+func headlessErrorMessage(t *testing.T, env headlessEnvelope) string {
+	t.Helper()
+	payload, ok := env.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload = %#v, want a decoded map", env.Payload)
+	}
+	message, _ := payload["message"].(string)
+	return message
+}
+
+// A handoff approval may only name one of the agents the pending handoff
+// offered. Unknown roles, SubAgents, and the current active role are rejected
+// with an error envelope while the pending handoff stays open for a corrected
+// command or an explicit cancel.
+func TestHeadlessHandoffApproveRejectsUnavailableAgent(t *testing.T) {
+	state := &headlessState{pendingHandoff: &headlessHandoffPayload{
+		RequestID: "handoff-1",
+		PlanPath:  "/tmp/plan.md",
+		Agents: []agent.HandoffAgentOption{
+			{Name: "builder", Default: true},
+			{Name: "reviewer"},
+		},
+	}}
+	backend := &mockBackend{}
+	to := newTestOut()
+
+	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "accept", Agent: "ghost"}, backend, state, to.writer(), "sess")
+
+	envs := to.drain()
+	if len(envs) != 1 || envs[0].Type != "error" || !strings.Contains(headlessErrorMessage(t, envs[0]), "not available") {
+		t.Fatalf("envelopes = %+v, want a single not-available error", envs)
+	}
+	if state.pendingHandoff == nil {
+		t.Fatal("pending handoff must stay open after a rejected target")
+	}
+	if len(backend.handoffCalls) != 0 {
+		t.Fatalf("handoff calls = %+v, want none (runtime never resolves)", backend.handoffCalls)
+	}
+
+	// The current active role is never selectable either.
+	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "accept", Agent: "planner"}, backend, state, to.writer(), "sess")
+	if state.pendingHandoff == nil || len(backend.handoffCalls) != 0 {
+		t.Fatalf("current-role target must also be rejected: pending=%+v calls=%+v", state.pendingHandoff, backend.handoffCalls)
+	}
+
+	// With no eligible agents at all, a bare accept cannot invent a target.
+	state.pendingHandoff = &headlessHandoffPayload{RequestID: "handoff-2", PlanPath: "/tmp/plan.md"}
+	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-2", Action: "accept"}, backend, state, to.writer(), "sess")
+	last := to.drain()
+	if len(last) == 0 || last[len(last)-1].Type != "error" || !strings.Contains(headlessErrorMessage(t, last[len(last)-1]), "no eligible") {
+		t.Fatalf("envelopes = %+v, want no-eligible-agent error", last)
 	}
 }
 

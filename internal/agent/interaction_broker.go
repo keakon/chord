@@ -47,6 +47,15 @@ type interactionBroker struct {
 	// guarded by questionMapMu only.
 	questionTargets map[string]*walltimeTarget
 
+	// handoffMapMu guards the handoff wait bookkeeping. Unlike confirm/question
+	// there is no waiting goroutine: the handoff tool call completes before the
+	// selector opens, so only the wait start and walltime owner are tracked and
+	// settled when the user's decision arrives (approve/deny/cancel) or when the
+	// wait is abandoned (session switch / shutdown).
+	handoffMapMu   sync.Mutex
+	handoffStart   map[string]time.Time
+	handoffTargets map[string]*walltimeTarget
+
 	// onSettled is invoked once per settled confirm/question wait (resolved,
 	// timed out, cancelled, or cleared). target is the interaction's walltime
 	// owner captured at registration; d is the wait wall clock.
@@ -62,6 +71,8 @@ func newInteractionBroker(stoppingCh <-chan struct{}) *interactionBroker {
 		questionCh:      make(map[string]chan QuestionResponse),
 		questionStart:   make(map[string]time.Time),
 		questionTargets: make(map[string]*walltimeTarget),
+		handoffStart:    make(map[string]time.Time),
+		handoffTargets:  make(map[string]*walltimeTarget),
 	}
 }
 
@@ -82,6 +93,36 @@ func (b *interactionBroker) settleWait(target *walltimeTarget, start time.Time) 
 	}
 	if b.onSettled != nil {
 		b.onSettled(target, time.Since(start))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Handoff wait
+// ---------------------------------------------------------------------------
+
+// openHandoff records the wall-clock start of a user-visible handoff wait.
+// The wait is settled by settleHandoff when the user decides, or by clearPending
+// when the wait is abandoned (session switch / shutdown).
+func (b *interactionBroker) openHandoff(requestID string, target *walltimeTarget) {
+	if requestID == "" {
+		return
+	}
+	b.handoffMapMu.Lock()
+	b.handoffStart[requestID] = time.Now()
+	b.handoffTargets[requestID] = target
+	b.handoffMapMu.Unlock()
+}
+
+// settleHandoff closes a handoff wait once the user's decision arrives.
+func (b *interactionBroker) settleHandoff(requestID string) {
+	b.handoffMapMu.Lock()
+	start, ok := b.handoffStart[requestID]
+	delete(b.handoffStart, requestID)
+	target := b.handoffTargets[requestID]
+	delete(b.handoffTargets, requestID)
+	b.handoffMapMu.Unlock()
+	if ok {
+		b.settleWait(target, start)
 	}
 }
 
@@ -251,7 +292,7 @@ func (b *interactionBroker) resolveQuestion(requestID string, resp QuestionRespo
 // Shared
 // ---------------------------------------------------------------------------
 
-// clearPending removes all in-flight confirm/question request mappings. It does
+// clearPending removes all in-flight confirm/question/handoff request mappings. It does
 // not close the per-request channels; waiters exit via ctx cancellation or
 // stoppingCh during shutdown. Open waits are settled (counted as user wait)
 // before the mappings are dropped so a shutdown/session-switch never leaks an
@@ -282,6 +323,14 @@ func (b *interactionBroker) clearPending() {
 	clear(b.questionStart)
 	clear(b.questionTargets)
 	b.questionMapMu.Unlock()
+
+	b.handoffMapMu.Lock()
+	for requestID, start := range b.handoffStart {
+		pending = append(pending, pendingWait{target: b.handoffTargets[requestID], start: start})
+	}
+	clear(b.handoffStart)
+	clear(b.handoffTargets)
+	b.handoffMapMu.Unlock()
 
 	for _, wait := range pending {
 		b.settleWait(wait.target, wait.start)

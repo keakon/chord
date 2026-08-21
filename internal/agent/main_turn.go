@@ -365,7 +365,7 @@ func (a *MainAgent) newTurn() {
 	if a.turn != nil {
 		a.interruptCurrentTurnForReplacement()
 	}
-	a.pendingHandoff = nil // clear stale deferred PlanComplete from previous turn
+	a.abandonPendingHandoff() // clear stale deferred Handoff from previous turn, settling its user-wait
 	a.nextTurnID++
 	a.turnEpoch++
 	ctx, cancel := context.WithCancel(a.parentCtx)

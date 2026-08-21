@@ -143,7 +143,7 @@ func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.C
 	a.newTurn()
 	turnCtx := a.turn.Ctx
 	a.pendingUserMessages = nil
-	a.pendingHandoff = nil
+	a.abandonPendingHandoff()
 	a.clearUsageDrivenAutoCompactRequest()
 	a.resetAutoCompactionFailureState()
 

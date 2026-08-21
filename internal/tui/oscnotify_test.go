@@ -27,6 +27,7 @@ func (loopBusyAgentStub) UpdatePendingUserDraft(string, []message.ContentPart) b
 func (loopBusyAgentStub) RemovePendingUserDraft(string) bool                        { return false }
 func (loopBusyAgentStub) ResolveConfirm(string, string, string, string, string)     {}
 func (loopBusyAgentStub) ResolveQuestion([]string, bool, string)                    {}
+func (loopBusyAgentStub) ResolveHandoff(string, string, string, string)             {}
 func (loopBusyAgentStub) ProviderModelRef() string                                  { return "" }
 func (loopBusyAgentStub) RunningModelRef() string                                   { return "" }
 func (loopBusyAgentStub) RunningVariant() string                                    { return "" }

@@ -21,7 +21,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/agent"
-	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -347,15 +346,21 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}})
 		}
 	case agent.HandoffEvent:
-		payload := &headlessHandoffPayload{
-			RequestID: fmt.Sprintf("handoff-%d", time.Now().UnixNano()),
-			PlanPath:  e.PlanPath,
-			Agents:    []agent.HandoffAgentOption{{Name: "builder", Default: true}},
-		}
+		// Offer exactly the runtime's eligible targets; an empty list means no
+		// legal handoff target exists (the active role is the only main-mode
+		// agent) and must reach the client as-is instead of a fabricated
+		// default the runtime would reject on approval.
+		options := []agent.HandoffAgentOption{}
 		if hb, ok := backend.(headlessHandoffBackend); ok {
-			if options := hb.HandoffAgentOptions(); len(options) > 0 {
-				payload.Agents = options
-			}
+			options = hb.HandoffAgentOptions()
+		}
+		if options == nil {
+			options = []agent.HandoffAgentOption{}
+		}
+		payload := &headlessHandoffPayload{
+			RequestID: e.RequestID,
+			PlanPath:  e.PlanPath,
+			Agents:    options,
 		}
 		if b, err := os.ReadFile(e.PlanPath); err == nil {
 			payload.PlanText = string(b)
@@ -807,9 +812,11 @@ type headlessBackend interface {
 type headlessHandoffBackend interface {
 	HandoffAgentOptions() []agent.HandoffAgentOption
 	SetAgentModelPool(agentName, pool string) error
-	ExecutePlan(planPath, agentName string)
-	AppendContextMessage(msg message.Message)
-	ContinueFromContext()
+	// ResolveHandoff delivers the user's decision (approve/deny/cancel) for the
+	// pending handoff. The runtime settles the user-wait, emits the deferred
+	// handoff tool result, and continues the flow (execute plan / reject /
+	// cancel).
+	ResolveHandoff(requestID, action, agentName, denyReason string)
 }
 
 type headlessModelsBackend interface {
@@ -1005,6 +1012,9 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		}
 		if pendingHandoff != nil {
 			log.Infof("headless: auto-cancelling pending handoff for new user message request_id=%v plan_path=%v", pendingHandoff.RequestID, pendingHandoff.PlanPath)
+			if hb, ok := backend.(headlessHandoffBackend); ok {
+				hb.ResolveHandoff(pendingHandoff.RequestID, "cancel", "", "")
+			}
 			state.mu.Lock()
 			if state.pendingHandoff != nil && state.pendingHandoff.RequestID == pendingHandoff.RequestID {
 				state.pendingHandoff = nil
@@ -1040,6 +1050,13 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			agentName := strings.TrimSpace(cmd.Agent)
 			if agentName == "" {
 				agentName = defaultHandoffAgent(pending.Agents)
+				if agentName == "" {
+					out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": "no eligible handoff agent"}})
+					return
+				}
+			} else if !headlessHandoffAgentAvailable(pending.Agents, agentName) {
+				out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": "handoff target \"" + agentName + "\" is not available; choose one of the offered agents or cancel"}})
+				return
 			}
 			if pool := strings.TrimSpace(cmd.Pool); pool != "" {
 				if err := handoffBackend.SetAgentModelPool(agentName, pool); err != nil {
@@ -1047,14 +1064,15 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 					return
 				}
 			}
-			handoffBackend.ExecutePlan(pending.PlanPath, agentName)
-		case "deny", "reject", "cancel":
+			handoffBackend.ResolveHandoff(pending.RequestID, "approve", agentName, "")
+		case "deny", "reject":
 			reason := strings.TrimSpace(cmd.DenyReason)
 			if reason == "" {
 				reason = "Handoff rejected from headless client."
 			}
-			handoffBackend.AppendContextMessage(message.Message{Role: "user", Content: fmt.Sprintf("Handoff rejected: %s\n\nPlan path: %s", reason, pending.PlanPath)})
-			handoffBackend.ContinueFromContext()
+			handoffBackend.ResolveHandoff(pending.RequestID, "deny", "", reason)
+		case "cancel":
+			handoffBackend.ResolveHandoff(pending.RequestID, "cancel", "", "")
 		default:
 			out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": "unsupported handoff action: " + cmd.Action}})
 			return
@@ -1119,6 +1137,19 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 	}
 }
 
+// headlessHandoffAgentAvailable reports whether name is one of the agents the
+// pending handoff offered. External clients may only pick from the offered
+// list; anything else (unknown role, SubAgent, or the current active role) is
+// rejected before the runtime resolves the handoff.
+func headlessHandoffAgentAvailable(options []agent.HandoffAgentOption, name string) bool {
+	for _, opt := range options {
+		if strings.TrimSpace(opt.Name) == name {
+			return true
+		}
+	}
+	return false
+}
+
 func defaultHandoffAgent(options []agent.HandoffAgentOption) string {
 	for _, opt := range options {
 		if opt.Default && strings.TrimSpace(opt.Name) != "" {
@@ -1130,7 +1161,9 @@ func defaultHandoffAgent(options []agent.HandoffAgentOption) string {
 			return strings.TrimSpace(opt.Name)
 		}
 	}
-	return "builder"
+	// No eligible agent was offered: returning an empty name forces the caller
+	// to report an error instead of inventing a target.
+	return ""
 }
 
 func parseHeadlessRuleIntent(pattern, scope string) (*agent.ConfirmRuleIntent, error) {

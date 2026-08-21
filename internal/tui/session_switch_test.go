@@ -4094,6 +4094,14 @@ type sessionControlAgent struct {
 	executePlanCalls        int
 	executePlanPath         string
 	executePlanAgent        string
+	handoffResolutions      []handoffResolutionCall
+}
+
+type handoffResolutionCall struct {
+	RequestID  string
+	Action     string
+	AgentName  string
+	DenyReason string
 }
 
 func (s *sessionControlAgent) Events() <-chan agent.AgentEvent { return s.events }
@@ -4355,6 +4363,11 @@ func (s *sessionControlAgent) ExecutePlan(planPath, agentName string) {
 	s.executePlanCalls++
 	s.executePlanPath = planPath
 	s.executePlanAgent = agentName
+}
+func (s *sessionControlAgent) ResolveHandoff(requestID, action, agentName, denyReason string) {
+	s.handoffResolutions = append(s.handoffResolutions, handoffResolutionCall{
+		RequestID: requestID, Action: action, AgentName: agentName, DenyReason: denyReason,
+	})
 }
 func (s *sessionControlAgent) AvailableAgents() []string {
 	return append([]string(nil), s.availableAgents...)

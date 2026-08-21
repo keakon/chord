@@ -7581,7 +7581,7 @@ func TestOpenHandoffSelectClearsActiveSearchSession(t *testing.T) {
 	m.search.State.Matches = []MatchPosition{{BlockIndex: 0}}
 	m.search.State.Current = 0
 
-	m.openHandoffSelect("plan.md")
+	m.openHandoffSelect("plan.md", "req-1")
 
 	if m.mode != ModeHandoffSelect {
 		t.Fatalf("mode = %v, want ModeHandoffSelect", m.mode)

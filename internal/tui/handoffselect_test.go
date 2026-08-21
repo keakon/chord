@@ -14,7 +14,7 @@ func TestHandoffSelectOptionIndexAtUsesListBaseRow(t *testing.T) {
 		availableAgents: []string{"builder", "reviewer", "qa"},
 	}
 	m := NewModelWithSize(backend, 120, 24)
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 	if m.mode != ModeHandoffSelect {
 		t.Fatalf("mode after open = %v, want ModeHandoffSelect", m.mode)
 	}
@@ -44,7 +44,7 @@ func TestHandoffSelectOptionIndexAtAccountsForScrollWindowStart(t *testing.T) {
 
 	// Height chosen so handoffSelectMaxVisible() clamps to 3.
 	m := NewModelWithSize(backend, 120, 16)
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 	if m.handoffSelect.selector.list == nil {
 		t.Fatal("expected handoff overlay list")
 	}
@@ -74,7 +74,7 @@ func TestHandoffSelectOptionIndexAtAccountsForScrollWindowStart(t *testing.T) {
 func TestHandoffSelectModalMouseWheelScrollsPlanPreview(t *testing.T) {
 	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer", "qa"}}
 	m := NewModelWithSize(backend, 120, 24)
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 	m.handoffSelect.planErr = ""
 	m.handoffSelect.planText = strings.Repeat("This handoff plan preview should wrap into several visible lines. ", 40)
 	m.layout = m.generateLayout(m.width, m.height)
@@ -102,7 +102,7 @@ func TestHandoffSelectModalMouseWheelScrollsPlanPreview(t *testing.T) {
 func TestHandoffSelectViewOpensContentViewer(t *testing.T) {
 	backend := &sessionControlAgent{availableAgents: []string{"builder"}}
 	m := NewModelWithSize(backend, 120, 24)
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 	m.handoffSelect.planErr = ""
 	m.handoffSelect.planText = "# Plan\n\nDo the work."
 
@@ -132,7 +132,7 @@ func TestHandoffViewYankCopiesFullPlan(t *testing.T) {
 
 	backend := &sessionControlAgent{availableAgents: []string{"builder"}}
 	m := NewModelWithSize(backend, 120, 24)
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 	m.handoffSelect.planErr = ""
 	m.handoffSelect.planText = "# Plan\n\nDo the work."
 
@@ -171,7 +171,7 @@ func TestHandoffSelectEscClosesWithoutExecutingPlan(t *testing.T) {
 	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer"}}
 	m := NewModelWithSize(backend, 120, 24)
 	m.mode = ModeNormal
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 
 	cmd := m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
 	if cmd != nil {
@@ -186,13 +186,19 @@ func TestHandoffSelectEscClosesWithoutExecutingPlan(t *testing.T) {
 	if backend.continueCalls != 0 || len(backend.contextMessages) != 0 {
 		t.Fatalf("Esc should not continue or append context, continue=%d messages=%d", backend.continueCalls, len(backend.contextMessages))
 	}
+	if len(backend.handoffResolutions) != 1 {
+		t.Fatalf("handoff resolutions = %d, want 1 cancel", len(backend.handoffResolutions))
+	}
+	if r := backend.handoffResolutions[0]; r.Action != "cancel" || r.RequestID != "req-1" {
+		t.Fatalf("Esc resolution = %+v, want cancel for req-1", r)
+	}
 }
 
 func TestHandoffSelectDenyWithReasonContinuesFromContext(t *testing.T) {
 	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer"}}
 	m := NewModelWithSize(backend, 120, 24)
 	m.mode = ModeNormal
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 
 	_ = m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
 	if !m.handoffSelect.denyingWithReason {
@@ -207,40 +213,42 @@ func TestHandoffSelectDenyWithReasonContinuesFromContext(t *testing.T) {
 	if backend.executePlanCalls != 0 {
 		t.Fatalf("ExecutePlan calls = %d, want 0", backend.executePlanCalls)
 	}
-	if backend.continueCalls != 1 {
-		t.Fatalf("ContinueFromContext calls = %d, want 1", backend.continueCalls)
+	if backend.continueCalls != 0 || len(backend.contextMessages) != 0 {
+		t.Fatalf("TUI deny should only resolve handoff, continue=%d messages=%d", backend.continueCalls, len(backend.contextMessages))
 	}
-	if len(backend.contextMessages) != 1 {
-		t.Fatalf("context messages = %d, want 1", len(backend.contextMessages))
+	if len(backend.handoffResolutions) != 1 {
+		t.Fatalf("handoff resolutions = %d, want 1 deny", len(backend.handoffResolutions))
 	}
-	msg := backend.contextMessages[0]
-	if msg.Role != "user" || !strings.Contains(msg.Content, "Handoff rejected: use reviewer first") || !strings.Contains(msg.Content, "Plan path: docs/plans/example.md") {
-		t.Fatalf("unexpected context message: %+v", msg)
+	if r := backend.handoffResolutions[0]; r.Action != "deny" || r.DenyReason != "use reviewer first" || r.RequestID != "req-1" {
+		t.Fatalf("deny resolution = %+v, want deny 'use reviewer first' for req-1", r)
 	}
 }
 
 func TestHandoffSelectConfirmExecutesSelectedPlan(t *testing.T) {
 	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer", "qa"}}
 	m := NewModelWithSize(backend, 120, 24)
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 	m.handoffSelect.selector.list.SetCursor(1)
 
 	cmd := m.confirmHandoff()
 	if cmd != nil {
 		_ = cmd()
 	}
-	if backend.executePlanCalls != 1 {
-		t.Fatalf("ExecutePlan calls = %d, want 1", backend.executePlanCalls)
+	if backend.executePlanCalls != 0 {
+		t.Fatalf("ExecutePlan calls = %d, want 0 (approval goes through ResolveHandoff)", backend.executePlanCalls)
 	}
-	if backend.executePlanPath != "docs/plans/example.md" || backend.executePlanAgent != "reviewer" {
-		t.Fatalf("ExecutePlan = (%q, %q), want plan path and reviewer", backend.executePlanPath, backend.executePlanAgent)
+	if len(backend.handoffResolutions) != 1 {
+		t.Fatalf("handoff resolutions = %d, want 1 approve", len(backend.handoffResolutions))
+	}
+	if r := backend.handoffResolutions[0]; r.Action != "approve" || r.AgentName != "reviewer" || r.RequestID != "req-1" {
+		t.Fatalf("approve resolution = %+v, want approve reviewer for req-1", r)
 	}
 }
 
 func TestHandoffSelectDenyReasonMouseClickDoesNotApprove(t *testing.T) {
 	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer", "qa"}}
 	m := NewModelWithSize(backend, 120, 24)
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 	m.layout = m.generateLayout(m.width, m.height)
 	_ = m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
 	_ = m.renderHandoffSelectDialog()
@@ -266,7 +274,7 @@ func TestHandoffSelectDenyReasonMouseClickDoesNotApprove(t *testing.T) {
 func TestHandoffDenyReasonAcceptsPasteMsg(t *testing.T) {
 	backend := &sessionControlAgent{availableAgents: []string{"builder"}}
 	m := NewModelWithSize(backend, 120, 24)
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 	_ = m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
 
 	cmd := m.handleNonKeyInputMsg(tea.PasteMsg{Content: "because pasted\nwith details"})
@@ -281,7 +289,7 @@ func TestHandoffDenyReasonAcceptsPasteMsg(t *testing.T) {
 func TestHandoffSelectModalMouseClickUpdatesCursorAndReturnsCommand(t *testing.T) {
 	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer", "qa"}}
 	m := NewModelWithSize(backend, 120, 24)
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 	m.layout = m.generateLayout(m.width, m.height)
 	_ = m.renderHandoffSelectDialog()
 	dialogRect := m.overlayRect(m.renderHandoffSelectDialog())
@@ -296,15 +304,18 @@ func TestHandoffSelectModalMouseClickUpdatesCursorAndReturnsCommand(t *testing.T
 	if got := m.handoffSelect.selector.list.CursorAt(); got != 1 {
 		t.Fatalf("cursor after click = %d, want 1", got)
 	}
-	if backend.executePlanCalls != 1 {
-		t.Fatalf("ExecutePlan calls after click = %d, want 1", backend.executePlanCalls)
+	if backend.executePlanCalls != 0 {
+		t.Fatalf("ExecutePlan calls after click = %d, want 0 (approval goes through ResolveHandoff)", backend.executePlanCalls)
+	}
+	if len(backend.handoffResolutions) != 1 || backend.handoffResolutions[0].Action != "approve" {
+		t.Fatalf("handoff resolutions after click = %+v, want 1 approve", backend.handoffResolutions)
 	}
 }
 
 func TestHandoffDenyReasonTextareaWidthMatchesOverlayContentWidth(t *testing.T) {
 	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer"}}
 	m := NewModelWithSize(backend, 120, 30)
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 
 	_ = m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
 	if !m.handoffSelect.denyingWithReason {
@@ -319,7 +330,7 @@ func TestHandoffDenyReasonTextareaWidthMatchesOverlayContentWidth(t *testing.T) 
 func TestHandoffDenyReasonRenderedAtOverlayWidthWithoutRewrap(t *testing.T) {
 	backend := &sessionControlAgent{availableAgents: []string{"builder"}}
 	m := NewModelWithSize(backend, 120, 30)
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 	_ = m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
 	m.handoffSelect.denyReasonInput.SetValue(strings.Repeat("x", 400))
 
@@ -345,7 +356,7 @@ func TestHandoffDenyReasonRenderedAtOverlayWidthWithoutRewrap(t *testing.T) {
 func TestHandoffDenyReasonTextareaReconfiguredOnResize(t *testing.T) {
 	backend := &sessionControlAgent{availableAgents: []string{"builder"}}
 	m := NewModelWithSize(backend, 120, 30)
-	m.openHandoffSelect("docs/plans/example.md")
+	m.openHandoffSelect("docs/plans/example.md", "req-1")
 	_ = m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
 
 	m.applyTerminalSize(80, 30, false)

@@ -81,14 +81,27 @@ func (a *MainAgent) waitGitStatus(ctx context.Context) {
 }
 
 func (a *MainAgent) ensureSessionBuilt(ctx context.Context) error {
+	if err := a.prepareBusyResources(ctx); err != nil {
+		return err
+	}
+	return a.ensureSessionBuiltWithoutPreparation(ctx)
+}
+
+func (a *MainAgent) prepareBusyResources(ctx context.Context) error {
 	a.busyPreparationMu.RLock()
 	busyPreparationHook := a.busyPreparationHook
 	a.busyPreparationMu.RUnlock()
-	if busyPreparationHook != nil {
-		if err := busyPreparationHook(ctx); err != nil {
-			return err
-		}
+	if busyPreparationHook == nil {
+		return nil
 	}
+	return busyPreparationHook(ctx)
+}
+
+// ensureSessionBuiltWithoutPreparation rebuilds the session surface after a
+// session switch. The resource-preparation hook must only run once, before the
+// switch commits, because running it again after the old session is frozen can
+// turn a recoverable preparation error into a half-installed new session.
+func (a *MainAgent) ensureSessionBuiltWithoutPreparation(ctx context.Context) error {
 	if a.sessionBuilt.Load() {
 		// Common per-request path: the surface is already built. A background
 		// Memory commit may still have changed the cached Memory block since

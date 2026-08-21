@@ -51,9 +51,10 @@ func (a *MainAgent) AvailableRoles() []string {
 
 // AvailableAgents returns the names of agent roles available for Handoff selection.
 // Only main-mode agents are eligible, and the current
-// active role is excluded so planner cannot hand off to itself. builder remains
-// the default when available so the selector always offers an execution agent.
-// Non-builder roles are sorted alphabetically for deterministic selection order.
+// active role is excluded so planner cannot hand off to itself. The result may
+// be empty when the active role is the only configured main-mode agent: handing
+// off to the current role is never offered. Non-builder roles are sorted
+// alphabetically for deterministic selection order.
 func (a *MainAgent) AvailableAgents() []string {
 	if a.agentConfigs == nil {
 		return []string{"builder"}
@@ -80,11 +81,24 @@ func (a *MainAgent) AvailableAgents() []string {
 	}
 	sort.Strings(others)
 	names = append(names, others...)
-
-	if len(names) == 0 {
-		names = append(names, "builder")
-	}
 	return names
+}
+
+// validHandoffTarget reports whether name names an eligible plan-execution
+// role: configured, main-mode, and different from the active role. It is the
+// single gate shared by the TUI selector and external callers so an invalid or
+// self-targeted handoff can never be marked as executed.
+func (a *MainAgent) validHandoffTarget(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for _, candidate := range a.AvailableAgents() {
+		if candidate == name {
+			return true
+		}
+	}
+	return false
 }
 
 type HandoffAgentOption struct {
@@ -95,7 +109,9 @@ type HandoffAgentOption struct {
 }
 
 // HandoffAgentOptions returns the agents available for plan handoff with their
-// selectable model pools and effective current pool.
+// selectable model pools and effective current pool. The list may be empty
+// when the active role is the only main-mode agent; callers must not invent a
+// fallback target.
 func (a *MainAgent) HandoffAgentOptions() []HandoffAgentOption {
 	names := a.AvailableAgents()
 	options := make([]HandoffAgentOption, 0, len(names))
@@ -109,9 +125,6 @@ func (a *MainAgent) HandoffAgentOptions() []HandoffAgentOption {
 			}
 		}
 		options = append(options, opt)
-	}
-	if len(options) == 0 {
-		options = append(options, HandoffAgentOption{Name: "builder", Default: true})
 	}
 	return options
 }

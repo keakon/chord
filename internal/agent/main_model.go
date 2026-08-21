@@ -291,50 +291,14 @@ func (a *MainAgent) ApplyInitialModel(providerModel string) error {
 }
 
 func (a *MainAgent) switchModel(providerModel string, showToast bool) error {
-	if a.modelSwitchFactory == nil {
-		return fmt.Errorf("model switch not configured")
-	}
-
-	client, modelName, ctxLimit, err := a.modelSwitchFactory(providerModel)
+	prepared, err := a.prepareMainModel(providerModel)
 	if err != nil {
-		return fmt.Errorf("create LLM client for %q: %w", providerModel, err)
+		return err
 	}
-	a.applyServiceTierToClient(client)
-	if sid := strings.TrimSpace(filepath.Base(a.sessionDir)); sid != "" && sid != "." {
-		client.SetSessionID(sid)
-	}
+	a.installPreparedMainModel(prepared)
 
-	selectedRef := strings.TrimSpace(client.NextRequestModelRef())
-	if selectedRef == "" {
-		selectedRef = strings.TrimSpace(client.PrimaryModelRef())
-	}
-	if selectedRef == "" {
-		selectedRef = providerModel
-	}
-	a.swapLLMClientWithRef(client, modelName, ctxLimit, selectedRef)
-	a.mainModelPolicyDirty.Store(false)
-	if a.modelPoolPolicy != nil {
-		cfg := a.currentActiveConfig()
-		if cfg != nil {
-			effectivePool := a.modelPoolPolicy.EffectivePool(cfg.Name, cfg)
-			if effectivePool != "" {
-				a.modelPoolPolicy.SetLastPicked(cfg.Name, effectivePool, selectedRef)
-			}
-		}
-	}
-	effectiveRunningRef := client.RunningModelRef()
-	if effectiveRunningRef == "" {
-		effectiveRunningRef = client.PrimaryModelRef()
-	}
-	if effectiveRunningRef == "" {
-		effectiveRunningRef = selectedRef
-	}
-	a.emitToTUI(RunningModelChangedEvent{
-		AgentID:          identity.MainAgentID,
-		ProviderModelRef: selectedRef,
-		RunningModelRef:  effectiveRunningRef,
-	})
 	if showToast {
+		client := prepared.client
 		displayRef := client.PrimaryModelRef()
 		if displayRef == "" {
 			displayRef = providerModel
@@ -346,6 +310,73 @@ func (a *MainAgent) switchModel(providerModel string, showToast bool) error {
 		})
 	}
 	return nil
+}
+
+type preparedMainModel struct {
+	client       *llm.Client
+	modelName    string
+	contextLimit int
+	selectedRef  string
+	runningRef   string
+}
+
+func (a *MainAgent) prepareMainModel(providerModel string) (*preparedMainModel, error) {
+	if a.modelSwitchFactory == nil {
+		return nil, fmt.Errorf("model switch not configured")
+	}
+
+	client, modelName, ctxLimit, err := a.modelSwitchFactory(providerModel)
+	if err != nil {
+		return nil, fmt.Errorf("create LLM client for %q: %w", providerModel, err)
+	}
+	a.applyServiceTierToClient(client)
+
+	selectedRef := strings.TrimSpace(client.NextRequestModelRef())
+	if selectedRef == "" {
+		selectedRef = strings.TrimSpace(client.PrimaryModelRef())
+	}
+	if selectedRef == "" {
+		selectedRef = providerModel
+	}
+	runningRef := strings.TrimSpace(client.RunningModelRef())
+	if runningRef == "" {
+		runningRef = strings.TrimSpace(client.PrimaryModelRef())
+	}
+	if runningRef == "" {
+		runningRef = selectedRef
+	}
+	return &preparedMainModel{
+		client:       client,
+		modelName:    modelName,
+		contextLimit: ctxLimit,
+		selectedRef:  selectedRef,
+		runningRef:   runningRef,
+	}, nil
+}
+
+func (a *MainAgent) installPreparedMainModel(prepared *preparedMainModel) {
+	if prepared == nil || prepared.client == nil {
+		return
+	}
+	if sid := strings.TrimSpace(filepath.Base(a.sessionDir)); sid != "" && sid != "." {
+		prepared.client.SetSessionID(sid)
+	}
+	a.swapLLMClientWithRef(prepared.client, prepared.modelName, prepared.contextLimit, prepared.selectedRef)
+	a.mainModelPolicyDirty.Store(false)
+	if a.modelPoolPolicy != nil {
+		cfg := a.currentActiveConfig()
+		if cfg != nil {
+			effectivePool := a.modelPoolPolicy.EffectivePool(cfg.Name, cfg)
+			if effectivePool != "" {
+				a.modelPoolPolicy.SetLastPicked(cfg.Name, effectivePool, prepared.selectedRef)
+			}
+		}
+	}
+	a.emitToTUI(RunningModelChangedEvent{
+		AgentID:          identity.MainAgentID,
+		ProviderModelRef: prepared.selectedRef,
+		RunningModelRef:  prepared.runningRef,
+	})
 }
 
 // handleModelsCommand processes the /models slash command.

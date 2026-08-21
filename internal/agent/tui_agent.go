@@ -70,6 +70,14 @@ type PromptResolver interface {
 	ResolveQuestion(answers []string, cancelled bool, requestID string)
 }
 
+// HandoffResolver delivers the user's plan-execution decision back to the
+// pending handoff flow. The decision settles the handoff user-wait and emits
+// the deferred handoff tool result; the runtime then executes the plan
+// (approve), continues from context (deny), or stays idle (cancel).
+type HandoffResolver interface {
+	ResolveHandoff(requestID, action, agentName, denyReason string)
+}
+
 // ModelSelector exposes model identity for the status bar and model pool controls.
 type ModelSelector interface {
 	ProviderModelRef() string
@@ -250,6 +258,7 @@ type AgentForTUI interface {
 
 	MessageSender
 	PromptResolver
+	HandoffResolver
 	ModelSelector
 	SessionController
 	SubAgentInspector

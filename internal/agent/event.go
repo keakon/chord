@@ -44,6 +44,7 @@ const (
 	EventSubAgentRequestBoundary = "subagent_request_boundary"  // SubAgent LLM request finished; apply deferred routing changes
 	EventSpawnFinished           = "background_object_finished" // Spawned background process finished; runtime-only notification
 	EventContinue                = "continue"                   // re-run LLM with existing context (no new user message)
+	EventHandoffResolve          = "handoff_resolve"            // user decision for a pending handoff (payload: *handoffResolvePayload)
 	EventLoopAssessment          = "loop_assessment"            // internal loop-controller decision point after a completed assistant round
 	EventLLMFallbackBoundary     = "llm_fallback_boundary"      // update a pending fallback request before provider dispatch
 
@@ -128,6 +129,23 @@ type TurnCancelledPayload struct {
 // HandoffResult wraps the data from a Handoff tool invocation.
 type HandoffResult struct {
 	PlanPath string
+	// ArgsJSON is the effective handoff tool arguments (holds plan_path).
+	// Retained so the final ToolResultEvent can be emitted with the original args
+	// once the user confirms or rejects the handoff.
+	ArgsJSON string
+	// CallID is the tool call the deferred result belongs to. The success or
+	// rejection result is delivered against this ID after the user decides.
+	CallID string
+	// Result is the handoff tool's raw execution result before the user decision.
+	Result string
+	// Duration is the handoff tool's actual execution duration. It is recorded
+	// when the tool finishes and replayed with the deferred ToolResultEvent, so
+	// the card's footer shows only the tool execution, never the user wait.
+	Duration time.Duration
+	// RequestID correlates the TUI/headless decision callback back to this
+	// handoff wait. It is assigned when the handoff becomes user-visible and is
+	// used to settle the User wait and ignore stale decisions.
+	RequestID string
 }
 
 type loopExitResult struct {
@@ -410,7 +428,15 @@ func (IdleEvent) agentEvent() {}
 // GlobalIdleEvent signals that the main agent and all SubAgents have no
 // active work. Unlike IdleEvent, it is safe to use for user-facing completion
 // notifications and external idle protocols.
-type GlobalIdleEvent struct{}
+//
+// SuppressUserNotification is set when the quiescence was caused by a
+// user-initiated configuration action rather than task completion (e.g. a
+// manual model-pool switch). Consumer-side idle state (headless control plane,
+// hooks) must keep processing the event regardless; only user-facing
+// completion notifications (such as terminal OSC) should honor this flag.
+type GlobalIdleEvent struct {
+	SuppressUserNotification bool
+}
 
 func (GlobalIdleEvent) agentEvent() {}
 
@@ -442,9 +468,18 @@ type UsageUpdatedEvent struct{}
 func (UsageUpdatedEvent) agentEvent() {}
 
 // HandoffEvent signals that plan generation has finished. The TUI prompts
-// the user to select a target agent for execution (default: builder).
+// the user to select a target agent for execution (default: builder). The handoff
+// tool's terminal result is deferred until the user confirms, rejects, or cancels,
+// so this event also carries enough data to update the originating handoff tool card.
 type HandoffEvent struct {
 	PlanPath string
+	// CallID is the handoff tool call this decision updates.
+	CallID string
+	// ArgsJSON carries the original handoff tool arguments for the tool card.
+	ArgsJSON string
+	// RequestID correlates the TUI/headless decision callback back to this
+	// handoff wait (used for user-wait settlement and stale-decision guarding).
+	RequestID string
 }
 
 func (HandoffEvent) agentEvent() {}

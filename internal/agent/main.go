@@ -1443,6 +1443,10 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 		}
 	}
 
+	// The event loop has fully exited: settle any handoff the user never
+	// decided so the transcript does not end on an unresolved tool call.
+	a.settlePendingHandoffAtShutdown()
+
 	if failed := a.checkpointDegradedSubAgents(); len(failed) > 0 {
 		log.Warnf("shutdown leaving SubAgents with degraded persistence agent_ids=%v", failed)
 	}
@@ -2259,48 +2263,78 @@ func (a *MainAgent) handleAgentError(evt Event) {
 // Plan / Execute workflow
 // ---------------------------------------------------------------------------
 
-// startPlanExecution starts executing a plan document. It switches to the
-// specified agent role, loads the plan, builds an execution-oriented system
-// prompt, and starts the LLM loop. planPath may be empty, in which case
-// lastPlanPath is used. agentName defaults to "builder" if empty.
+// startPlanExecution begins executing a plan document in response to an
+// ExecutePlan event: it stages the execution session, commits the session
+// switch, and starts the LLM loop. Failures are reported to the TUI and the
+// agent returns to idle.
 func (a *MainAgent) startPlanExecution(planPath, agentName string) {
-	defer a.finishSessionSwitch()
-	if !a.stopCompactionForSessionSwitch() {
+	staging, err := a.beginPlanExecution(planPath, agentName)
+	if err != nil {
+		a.emitToTUI(ErrorEvent{Err: err})
+		a.setIdleAndDrainPending()
 		return
+	}
+	if err := a.commitPlanExecution(staging); err != nil {
+		a.emitToTUI(ErrorEvent{Err: err})
+		a.setIdleAndDrainPending()
+		return
+	}
+}
+
+// planExecutionStaging carries resources prepared before the planner session is
+// frozen. The current role, history, and recovery target remain untouched until
+// commitPlanExecution starts.
+type planExecutionStaging struct {
+	planPath      string
+	targetConfig  *config.AgentConfig
+	targetModel   *preparedMainModel
+	newSessionDir string
+	newLock       *recovery.SessionLock
+}
+
+// beginPlanExecution stages plan execution without changing the current
+// session. All work that can fail is completed before the caller settles the
+// deferred Handoff result or freezes the planner session.
+func (a *MainAgent) beginPlanExecution(planPath, agentName string) (*planExecutionStaging, error) {
+	if !a.stopCompactionForSessionSwitch() {
+		return nil, fmt.Errorf("cannot start plan execution while compaction is running")
 	}
 	if agentName == "" {
 		agentName = "builder"
 	}
-	a.clearSystemPromptOverride()
-	// Switch to the target agent role so the correct tools and permissions apply.
-	if a.activeConfig == nil || a.activeConfig.Name != agentName {
-		if err := a.switchRole(agentName, true); err != nil {
-			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("failed to switch to %s role: %w", agentName, err)})
-			a.setIdleAndDrainPending()
-			return
-		}
-	}
-
 	if planPath == "" {
 		planPath = a.lastPlanPath
 	}
 	if planPath == "" {
-		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("no plan to execute; specify a path")})
-		a.setIdleAndDrainPending()
-		return
+		return nil, fmt.Errorf("no plan to execute; specify a path")
 	}
-
-	// Read the plan content for injection into the prompt.
+	// Validate the plan document before mutating any state so a missing or
+	// empty plan leaves the active role and conversation intact.
 	planContent, err := os.ReadFile(planPath)
 	if err != nil {
-		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("failed to read plan: %w", err)})
-		a.setIdleAndDrainPending()
-		return
+		return nil, fmt.Errorf("failed to read plan: %w", err)
 	}
 	if len(strings.TrimSpace(string(planContent))) == 0 {
-		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("plan file is empty: %s", planPath)})
-		a.setIdleAndDrainPending()
-		return
+		return nil, fmt.Errorf("plan file is empty: %s", planPath)
+	}
+
+	cfg, ok := a.agentConfigs[agentName]
+	if !ok || cfg == nil {
+		return nil, fmt.Errorf("unknown role %q", agentName)
+	}
+	var targetModel *preparedMainModel
+	if nextRef := a.defaultRoleModelRef(cfg); nextRef != "" {
+		var err error
+		targetModel, err = a.prepareMainModel(nextRef)
+		if err != nil {
+			return nil, fmt.Errorf("prepare %s role model: %w", agentName, err)
+		}
+	}
+	if err := a.ensureSessionBuilt(a.parentCtx); err != nil {
+		if targetModel != nil {
+			targetModel.client.Close()
+		}
+		return nil, fmt.Errorf("prepare execution session: %w", err)
 	}
 
 	log.Infof("starting plan execution plan_path=%v", planPath)
@@ -2308,54 +2342,103 @@ func (a *MainAgent) startPlanExecution(planPath, agentName string) {
 	newSessionDir, err := a.createRuntimeSessionDir()
 	if err != nil {
 		log.Warnf("failed to create session dir for plan execution error=%v", err)
-		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("create execution session: %w", err)})
-		a.setIdleAndDrainPending()
-		return
+		if targetModel != nil {
+			targetModel.client.Close()
+		}
+		return nil, fmt.Errorf("create execution session: %w", err)
 	}
+	var newLock *recovery.SessionLock
+	staged := false
+	defer func() {
+		if staged {
+			return
+		}
+		if newLock != nil {
+			_ = newLock.Release()
+		}
+		if targetModel != nil {
+			current, _, _, _ := a.llmSnapshot()
+			if targetModel.client != current {
+				targetModel.client.Close()
+			}
+		}
+		_ = os.RemoveAll(newSessionDir)
+	}()
 
-	newLock, err := recovery.AcquireSessionLock(newSessionDir)
+	newLock, err = recovery.AcquireSessionLock(newSessionDir)
 	if err != nil {
-		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("execution session lock: %w", err)})
-		a.setIdleAndDrainPending()
-		return
+		return nil, fmt.Errorf("execution session lock: %w", err)
 	}
+	staged = true
 
+	return &planExecutionStaging{
+		planPath:      planPath,
+		targetConfig:  cfg,
+		targetModel:   targetModel,
+		newSessionDir: newSessionDir,
+		newLock:       newLock,
+	}, nil
+}
+
+// commitPlanExecution activates the staged execution session: it freezes the
+// current session, installs the new one, injects the execution prompt, and
+// starts the model loop. Call only after beginPlanExecution reported success
+// and after any deferred tool result has been persisted into the session that
+// holds its paired tool call.
+func (a *MainAgent) commitPlanExecution(staging *planExecutionStaging) error {
+	defer a.finishSessionSwitch()
+	oldSessionDir := a.SessionDir()
 	oldRecovery, turnCtx := a.prepareSessionSwitch()
 	turnID := a.turn.ID
-	if err := a.ensureSessionBuilt(turnCtx); err != nil {
-		_ = newLock.Release()
-		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("prepare execution session: %w", err)})
-		a.setIdleAndDrainPending()
-		return
-	}
 	oldLock := a.sessionLock
-	oldSessionDir := a.SessionDir()
 	a.freezeCurrentSession(oldRecovery)
 	if oldLock != nil {
 		if releaseErr := oldLock.Release(); releaseErr != nil {
 			log.Warnf("execution session: failed to release old session lock error=%v", releaseErr)
 		}
 	}
-	a.sessionLock = newLock
+	a.sessionLock = staging.newLock
 	a.resetSessionRuntimeState()
-	a.installSessionTarget(newSessionDir)
-	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
+	a.installSessionTarget(staging.newSessionDir)
+	a.llmClient.SetSessionID(filepath.Base(staging.newSessionDir))
 	a.scheduleMemoryExtraction(oldSessionDir)
 
-	// Freeze the new session's tool/system surface before installing the
-	// execution-specific prompt so the first execution request sees a stable
-	// session configuration.
-	if err := a.ensureSessionBuilt(turnCtx); err != nil {
-		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("prepare execution session: %w", err)})
-		a.setIdleAndDrainPending()
-		return
+	// The target model and resource preparation were completed before the old
+	// session was frozen. Install the target role only after the new recovery
+	// target is active so the old snapshot retains the planner role.
+	a.installPlanExecutionRole(staging.targetConfig, staging.targetModel)
+	// The session surface was preflighted before the switch. Rebuild it here
+	// without running another fallible resource-preparation hook.
+	if err := a.ensureSessionBuiltWithoutPreparation(a.parentCtx); err != nil {
+		return fmt.Errorf("prepare execution session: %w", err)
 	}
-	execPrompt := a.buildExecuteSystemPrompt(planPath)
+	execPrompt := a.buildExecuteSystemPrompt(staging.planPath)
 	a.setSystemPromptOverride(execPrompt)
 
 	// Notify TUI to wipe the viewport so planner-phase messages are cleared.
 	a.emitToTUI(SessionRestoredEvent{})
+	a.finishPlanExecution(turnCtx, turnID, staging.planPath)
+	return nil
+}
 
+func (a *MainAgent) installPlanExecutionRole(cfg *config.AgentConfig, prepared *preparedMainModel) {
+	a.stateMu.Lock()
+	a.activeConfig = cfg
+	a.stateMu.Unlock()
+	a.clearSystemPromptOverride()
+	a.rebuildRuleset()
+	a.markRuntimeSurfaceDirty()
+	a.NotifyEnvStatusUpdated()
+	if prepared != nil {
+		a.installPreparedMainModel(prepared)
+	} else {
+		a.mainModelPolicyDirty.Store(true)
+	}
+}
+
+// finishPlanExecution injects the plan bootstrap message and starts the model
+// loop. Call only after beginPlanExecution reported success.
+func (a *MainAgent) finishPlanExecution(turnCtx context.Context, turnID uint64, planPath string) {
 	// Add initial execution instruction that drives LLM-based dispatch.
 	executionMsg := a.buildPlanExecutionBootstrapMessage(planPath)
 	a.ctxMgr.Append(executionMsg)

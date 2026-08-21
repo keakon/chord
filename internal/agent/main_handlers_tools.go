@@ -432,7 +432,13 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			log.Errorf("handleToolResult: failed to parse Handoff result error=%v", err)
 		} else {
 			log.Infof("Handoff result received; deferring until sibling tools complete plan_path=%v pending=%v", pcData.PlanPath, a.turn.PendingToolCalls.Load()-1)
-			a.pendingHandoff = &HandoffResult{PlanPath: pcData.PlanPath}
+			a.pendingHandoff = &HandoffResult{
+				PlanPath: pcData.PlanPath,
+				ArgsJSON: payload.ArgsJSON,
+				CallID:   payload.CallID,
+				Result:   contextResult,
+				Duration: payload.Duration,
+			}
 		}
 	}
 	if payload.Name == tools.NameDone && payload.Error == nil {
@@ -444,7 +450,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		a.pendingLoopExitResults = append(a.pendingLoopExitResults, &loopExitResult{CallID: payload.CallID, Reason: strings.TrimSpace(contextResult), AssistantContent: assistantContent, TurnID: a.turn.ID, ArgsJSON: payload.ArgsJSON})
 	}
 
-	deferToolResultEmission := payload.Name == tools.NameDone && payload.Error == nil
+	deferToolResultEmission := payload.Error == nil && (payload.Name == tools.NameDone || payload.Name == tools.NameHandoff)
 	parts := a.toolResultParts(contextResult, payload.Images)
 	if !deferToolResultEmission {
 		a.emitToTUI(ToolResultEvent{
@@ -575,10 +581,11 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		a.turn.ChangedFiles = nil
 		if a.pendingHandoff != nil {
 			pc := a.pendingHandoff
-			a.pendingHandoff = nil
-			log.Infof("all sibling tools complete; finalizing Handoff plan_path=%v", pc.PlanPath)
 			a.lastPlanPath = pc.PlanPath
-			a.emitToTUI(HandoffEvent{PlanPath: pc.PlanPath})
+			pc.RequestID = makeRequestID()
+			a.interaction.openHandoff(pc.RequestID, a.walltime.captureAt(identity.MainAgentID, a.agentNameForInteraction(identity.MainAgentID), a.currentTurnID()))
+			log.Infof("all sibling tools complete; finalizing Handoff plan_path=%v request_id=%v", pc.PlanPath, pc.RequestID)
+			a.emitToTUI(HandoffEvent{PlanPath: pc.PlanPath, CallID: pc.CallID, ArgsJSON: pc.ArgsJSON, RequestID: pc.RequestID})
 			a.emitActivity("main", ActivityIdle, "")
 			a.pausePendingUserDrainOnce = true
 			a.setIdleAndDrainPending()

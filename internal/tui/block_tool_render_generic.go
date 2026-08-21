@@ -240,6 +240,9 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	if b.ToolName == tools.NameRead {
 		return b.renderReadCall(width, spinnerFrame)
 	}
+	if b.ToolName == tools.NameHandoff {
+		return b.renderHandoffCall(width, spinnerFrame)
+	}
 	if b.ToolName == tools.NameQuestion {
 		return b.renderQuestionCall(width, spinnerFrame)
 	}
@@ -893,6 +896,9 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 			return "✗"
 		}
 		if b.ToolName == tools.NameDone && doneResultIsRejected(b.ResultContent) {
+			return "✗"
+		}
+		if b.ToolName == tools.NameHandoff && handoffRejectedReason(b.ResultContent) != "" {
 			return "✗"
 		}
 		if b.toolResultIsCancelled() {

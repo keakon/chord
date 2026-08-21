@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -64,11 +63,10 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		return true, effects
 	case agent.HandoffEvent:
 		m.finalizeTurn()
-		block := &Block{ID: m.nextBlockID, Type: BlockAssistant, Content: fmt.Sprintf("Plan saved to: %s", evt.PlanPath)}
-		m.nextBlockID++
-		m.appendViewportBlock(block)
-		m.markBlockSettled(block)
-		m.openHandoffSelect(evt.PlanPath)
+		// The handoff tool card itself shows the plan path and stays
+		// non-terminal until the user confirms, rejects, or cancels, so no
+		// separate "Plan saved to:" assistant block is inserted here.
+		m.openHandoffSelect(evt.PlanPath, evt.RequestID)
 		return true, effects
 	case agent.InfoEvent:
 		if isLoopInfoMessage(evt.Message) {
