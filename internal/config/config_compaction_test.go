@@ -159,7 +159,7 @@ func TestLoadConfigFromPathContextReductionFalseDisables(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFromPathContextReductionInvalidScalarIsError(t *testing.T) {
+func TestLoadConfigFromPathContextReductionInvalidScalarIsIgnored(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	content := []byte("context:\n  reduction: sometimes\n")
@@ -167,16 +167,42 @@ func TestLoadConfigFromPathContextReductionInvalidScalarIsError(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	_, err := LoadConfigFromPath(path)
-	if err == nil {
-		t.Fatal("LoadConfigFromPath succeeded, want parse error for context.reduction: sometimes")
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
 	}
-	if got := err.Error(); !strings.Contains(got, "expected a mapping or boolean") {
-		t.Fatalf("LoadConfigFromPath error = %q, want mapping-or-boolean parse error", got)
+	defaults := DefaultConfig().Context.Reduction
+	if cfg.Context.Reduction != defaults {
+		t.Fatalf("context.reduction = %+v, want defaults %+v", cfg.Context.Reduction, defaults)
 	}
 }
 
-func TestLoadConfigFromPathRejectsRemovedContextReductionUsageKeys(t *testing.T) {
+// A removed key must report what replaced it: tolerating it silently is the
+// same as a typo from the user's side, and the migration hint is the only thing
+// that makes the tolerance more useful than a rejection.
+func TestRemovedContextReductionKeysReportTheirMigration(t *testing.T) {
+	for _, key := range []string{"high_pressure_usage", "force_prune_usage"} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "config.yaml")
+		content := []byte("context:\n  reduction:\n    " + key + ": 0.8\n")
+		if err := os.WriteFile(path, content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		issues, err := CollectConfigFileIssues(path, true)
+		if err != nil {
+			t.Fatalf("CollectConfigFileIssues: %v", err)
+		}
+		if len(issues) != 1 {
+			t.Fatalf("issues = %v, want exactly one", issues)
+		}
+		if !strings.Contains(issues[0], "was removed from context.reduction") ||
+			!strings.Contains(issues[0], "request-batch age thresholds") {
+			t.Fatalf("issue = %q, want the removal reported with its migration", issues[0])
+		}
+	}
+}
+
+func TestLoadConfigFromPathToleratesRemovedContextReductionUsageKeys(t *testing.T) {
 	for _, key := range []string{"high_pressure_usage", "force_prune_usage"} {
 		t.Run(key, func(t *testing.T) {
 			dir := t.TempDir()
@@ -185,9 +211,13 @@ func TestLoadConfigFromPathRejectsRemovedContextReductionUsageKeys(t *testing.T)
 			if err := os.WriteFile(path, content, 0o644); err != nil {
 				t.Fatal(err)
 			}
-			_, err := LoadConfigFromPath(path)
-			if err == nil || !strings.Contains(err.Error(), key+" was removed") {
-				t.Fatalf("LoadConfigFromPath error = %v, want removed-key guidance", err)
+			cfg, err := LoadConfigFromPath(path)
+			if err != nil {
+				t.Fatalf("LoadConfigFromPath: %v", err)
+			}
+			defaults := DefaultConfig().Context.Reduction
+			if cfg.Context.Reduction != defaults {
+				t.Fatalf("context.reduction = %+v, want defaults %+v", cfg.Context.Reduction, defaults)
 			}
 		})
 	}
@@ -210,7 +240,7 @@ func TestLoadConfigFromPathParsesMaxOutputTokens(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFromPathRejectsUnknownOutputTokenMax(t *testing.T) {
+func TestLoadConfigFromPathIgnoresUnknownOutputTokenMax(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	content := []byte("output_token_max: 8192\n")
@@ -218,8 +248,12 @@ func TestLoadConfigFromPathRejectsUnknownOutputTokenMax(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	if _, err := LoadConfigFromPath(path); err == nil {
-		t.Fatalf("LoadConfigFromPath: expected error for unknown output_token_max, got nil")
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if cfg.MaxOutputTokens != 0 {
+		t.Fatalf("max_output_tokens = %d, want 0 (unknown key ignored)", cfg.MaxOutputTokens)
 	}
 }
 

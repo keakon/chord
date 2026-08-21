@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
+	"github.com/keakon/golog/log"
 	"gopkg.in/yaml.v3"
 )
 
@@ -267,7 +269,7 @@ func (c *HookCommand) UnmarshalYAML(value *yaml.Node) error {
 		c.Args = args
 		return nil
 	default:
-		return fmt.Errorf("hook command must be a string or string array")
+		return typeErrorAt(value, "hook command (string or string array)")
 	}
 }
 
@@ -1157,8 +1159,9 @@ var contextReductionKnownKeys = map[string]bool{
 // reduction, `reduction: true` keeps the current tuning) or the usual field
 // mapping. Mapping fields overlay the receiver's current values, matching the
 // load path that unmarshals into a defaults-initialised config. A non-boolean
-// scalar or an unknown field is a configuration error and is reported instead
-// of being silently ignored.
+// scalar or an unknown field is reported as a TypeError so the loader logs it
+// and treats that value as not configured; the recognized fields of the same
+// mapping are still applied.
 func (c *ContextReductionConfig) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind == yaml.ScalarNode {
 		if value.Tag == "!!null" {
@@ -1166,7 +1169,7 @@ func (c *ContextReductionConfig) UnmarshalYAML(value *yaml.Node) error {
 		}
 		var enabled bool
 		if err := value.Decode(&enabled); err != nil {
-			return fmt.Errorf("context.reduction: expected a mapping or boolean, got %q", value.Value)
+			return typeErrorAt(value, "context.reduction (mapping or boolean)")
 		}
 		if enabled {
 			c.mode = contextReductionEnabled
@@ -1177,19 +1180,84 @@ func (c *ContextReductionConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	if value.Kind == yaml.MappingNode {
 		c.mode = contextReductionEnabled
+		var unknown []string
+		known := make([]*yaml.Node, 0, len(value.Content))
 		for i := 0; i+1 < len(value.Content); i += 2 {
-			if key := value.Content[i].Value; !contextReductionKnownKeys[key] {
-				return fmt.Errorf("context.reduction: unknown field %q", key)
+			keyNode := value.Content[i]
+			if !contextReductionKnownKeys[keyNode.Value] {
+				unknown = append(unknown, contextReductionFieldError(keyNode))
+				continue
 			}
+			known = append(known, keyNode, value.Content[i+1])
+		}
+		if len(unknown) > 0 {
+			// Decode the recognized siblings before reporting: one unknown key
+			// must be treated as not configured, not take the whole mapping
+			// (and every valid tuning value in it) down with it.
+			filtered := *value
+			filtered.Content = known
+			if err := c.decodeFields(&filtered); err != nil {
+				return err
+			}
+			return &yaml.TypeError{Errors: unknown}
 		}
 	}
+	return c.decodeFields(value)
+}
+
+// decodeFields decodes node into the receiver without re-entering
+// UnmarshalYAML.
+func (c *ContextReductionConfig) decodeFields(node *yaml.Node) error {
 	type plain ContextReductionConfig
 	p := plain(*c)
-	if err := value.Decode(&p); err != nil {
+	if err := node.Decode(&p); err != nil {
 		return err
 	}
 	*c = ContextReductionConfig(p)
 	return nil
+}
+
+// removedContextReductionKeys names tuning keys earlier versions accepted, with
+// what replaced them. An upgrading config still carries these, and reporting one
+// as a bare unknown field tells the user nothing about what to do instead —
+// which is the only reason tolerating them is better than rejecting them.
+var removedContextReductionKeys = map[string]string{
+	"high_pressure_usage": "request-batch age thresholds now control reduction without usage-pressure tuning",
+	"force_prune_usage":   "request-batch age thresholds now control reduction without usage-pressure tuning",
+}
+
+// contextReductionFieldError describes one unrecognized context.reduction key,
+// naming the migration when the key is a removed setting rather than a typo.
+// Both spellings keep the "line N: field ..." shape so the override sanitizer
+// still pins the failure to the key node (see parseTypeErrorFailures).
+func contextReductionFieldError(keyNode *yaml.Node) string {
+	if why, removed := removedContextReductionKeys[keyNode.Value]; removed {
+		return fmt.Sprintf("line %d: field %s was removed from context.reduction; %s", keyNode.Line, keyNode.Value, why)
+	}
+	return unknownFieldErrorAt(keyNode, "context.reduction")
+}
+
+// typeErrorAt renders a wrong-typed value the way go-yaml's own decoder does
+// ("line 4: cannot unmarshal !!map into ..."), so custom unmarshaler errors read
+// the same as built-in ones and stripTypeInvalidOverride can still find the
+// offending node from the message alone.
+func typeErrorAt(node *yaml.Node, target string) *yaml.TypeError {
+	tag := node.ShortTag()
+	described := tag
+	if tag != "!!map" && tag != "!!seq" {
+		value := node.Value
+		if len(value) > 10 {
+			value = value[:7] + "..."
+		}
+		described = tag + " `" + value + "`"
+	}
+	return &yaml.TypeError{Errors: []string{fmt.Sprintf("line %d: cannot unmarshal %s into %s", node.Line, described, target)}}
+}
+
+// unknownFieldErrorAt renders an unknown mapping key the way go-yaml reports
+// one, pinned to the key's own line (see typeErrorAt).
+func unknownFieldErrorAt(keyNode *yaml.Node, target string) string {
+	return fmt.Sprintf("line %d: field %s not found in type %s", keyNode.Line, keyNode.Value, target)
 }
 
 // CompactionConfig controls durable compaction backend, output profile, and
@@ -1270,9 +1338,12 @@ func LoadConfigOverrideFromPath(path string) (*Config, error) {
 }
 
 // MergeProjectConfig overlays a project-level .chord/config.yaml onto an
-// already-loaded global config. Missing project configs are ignored. Only keys
-// documented as project-scoped participate in the merge; global-only keys such
-// as paths.* and maintenance.* are intentionally ignored here.
+// already-loaded global config. Missing configs are ignored. Malformed YAML is
+// a fatal error: it prevents startup rather than silently dropping the file.
+// Invalid field-level values are stripped before the merge so they fall back to
+// the inherited global/default value instead of clobbering it; only keys
+// documented as project-scoped participate. Global-only keys such as paths.*
+// and maintenance.* are intentionally ignored here.
 func MergeProjectConfig(base *Config, path string) (projectCfg *Config, merged *Config, err error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, base, nil
@@ -1284,77 +1355,369 @@ func MergeProjectConfig(base *Config, path string) (projectCfg *Config, merged *
 		}
 		return nil, nil, fmt.Errorf("read config %s: %w", path, readErr)
 	}
-	projectCfg, err = loadConfigData(path, data, false)
+	cleanedData, drops, err := stripTypeInvalidOverride(path, data)
 	if err != nil {
 		return nil, nil, err
 	}
-	merged, err = mergeConfigOverrideData(base, data, path)
+	for _, drop := range drops {
+		log.Warnf("config %s: ignoring invalid value: %s", path, drop)
+	}
+	projectCfg, err = loadConfigData(path, cleanedData, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	merged, err = mergeConfigOverrideData(base, cleanedData, path)
 	if err != nil {
 		return nil, nil, err
 	}
 	return projectCfg, merged, nil
 }
 
+// decodeStrict decodes data into cfg with strict rules (unknown fields are
+// rejected). It returns the accumulated field-level type errors, or a fatal
+// error when the YAML itself is malformed and cannot be partially decoded. A
+// fatal error must prevent startup; field-level errors are logged and the
+// affected fields keep their defaults.
+func decodeStrict(data []byte, cfg *Config) ([]string, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	err := dec.Decode(cfg)
+	if err == nil || errors.Is(err, io.EOF) {
+		// An empty or fully commented-out file has no YAML document; Decode
+		// reports io.EOF where Unmarshal used to be a no-op. Not an issue.
+		return nil, nil
+	}
+	if typeErr, ok := errors.AsType[*yaml.TypeError](err); ok {
+		return typeErr.Errors, nil
+	}
+	return nil, err
+}
+
+// collectSemanticIssues validates constraints YAML decoding cannot express and
+// resets offending values to their unset state, so an invalid value behaves as
+// not configured instead of riding through to the runtime.
+func collectSemanticIssues(cfg *Config) []string {
+	var issues []string
+	for providerName, providerCfg := range cfg.Providers {
+		issues = append(issues, collectProviderIssues(providerName, &providerCfg)...)
+		cfg.Providers[providerName] = resetInvalidProviderFields(providerCfg)
+	}
+	issues = append(issues, collectDiagnosticsConfigIssues(cfg)...)
+	resetInvalidDiagnosticsFields(&cfg.Diagnostics)
+	return issues
+}
+
+// loadConfigData loads configuration from raw YAML bytes. Malformed YAML is a
+// fatal error; unknown keys, wrong types, and semantically invalid values are
+// logged and treated as not configured while valid siblings still apply.
 func loadConfigData(path string, data []byte, withDefaults bool) (*Config, error) {
-	data, err := normalizeConfigShorthands(path, data)
+	cfg := &Config{}
+	if withDefaults {
+		cfg = DefaultConfig()
+	}
+	terrors, err := decodeStrict(data, cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	for _, issue := range terrors {
+		log.Warnf("config %s: ignoring invalid value: %s", path, issue)
+	}
+	for _, issue := range collectSemanticIssues(cfg) {
+		log.Warnf("config %s: ignoring invalid value(s): %s", path, issue)
+	}
+	normalizeModelLimits(cfg)
+	return cfg, nil
+}
+
+// collectConfigIssues decodes data into cfg with the loader's strict rules and
+// returns a human-readable list of every problem found: malformed YAML,
+// unknown keys, wrongly typed values, and semantic validation failures.
+// Decoding still populates cfg with everything valid, matching what
+// loadConfigData would accept, so callers can use the partial config for
+// reporting surfaces such as `chord doctor config`.
+func collectConfigIssues(data []byte, cfg *Config) []string {
+	terrors, err := decodeStrict(data, cfg)
+	if err != nil {
+		return []string{err.Error()}
+	}
+	issues := append([]string(nil), terrors...)
+	return append(issues, collectSemanticIssues(cfg)...)
+}
+
+// collectProviderIssues returns the retry and key-selection problems for one
+// provider config.
+func collectProviderIssues(providerName string, cfg *ProviderConfig) []string {
+	var issues []string
+	if err := ValidateProviderRetry(providerName, *cfg); err != nil {
+		issues = append(issues, err.Error())
+	}
+	if err := ValidateProviderKeySelection(providerName, *cfg); err != nil {
+		issues = append(issues, err.Error())
+	}
+	return issues
+}
+
+// resetInvalidProviderFields clears provider fields that failed semantic
+// validation, restoring their unset (default) state so the rest of the config
+// still applies.
+func resetInvalidProviderFields(cfg ProviderConfig) ProviderConfig {
+	if !validRetryBackoff(cfg.RetryBackoff) {
+		cfg.RetryBackoff = ""
+	}
+	if cfg.RetryDelayMS != nil && !validRetryDelayMS(*cfg.RetryDelayMS) {
+		cfg.RetryDelayMS = nil
+	}
+	if cfg.RetryAfterMaxS != nil && !validRetryAfterMaxS(*cfg.RetryAfterMaxS) {
+		cfg.RetryAfterMaxS = nil
+	}
+	if !validKeyRotation(cfg.KeyRotation) {
+		cfg.KeyRotation = ""
+	}
+	if !validKeyOrder(cfg.KeyOrder, cfg.Preset) {
+		cfg.KeyOrder = ""
+	}
+	return cfg
+}
+
+// stripTypeInvalidOverride removes override leaves whose values cannot be
+// decoded into the config schema (unknown fields, wrong types). Removing them
+// before the map merge keeps every global value intact — an undecodable
+// project value must fall back to the inherited value, never clobber it with a
+// zero value. Returns the cleaned YAML bytes plus one dotted path per removed
+// leaf. Malformed YAML (syntax errors) is returned as a fatal error.
+func stripTypeInvalidOverride(path string, data []byte) ([]byte, []string, error) {
+	current := data
+	var dropped []string
+	for round := 0; round < maxOverrideSanitizeRounds; round++ {
+		// Re-parse every round instead of carrying the first tree forward:
+		// Marshal drops blank lines, so a node's Line only matches the lines
+		// the decoder reports for the bytes it was parsed from.
+		var root yaml.Node
+		if err := yaml.Unmarshal(current, &root); err != nil {
+			return nil, nil, fmt.Errorf("parse config %s: %w", path, err)
+		}
+		if len(root.Content) == 0 {
+			return current, dropped, nil
+		}
+		var probe Config
+		terrors, derr := decodeStrict(current, &probe)
+		if derr != nil {
+			return nil, nil, fmt.Errorf("parse config %s: %w", path, derr)
+		}
+		if len(terrors) == 0 {
+			return current, dropped, nil
+		}
+		removed := removeFailingNodes(root.Content[0], nil, parseTypeErrorFailures(terrors))
+		if len(removed) == 0 {
+			return nil, nil, fmt.Errorf("config %s: unable to isolate invalid values: %s", path, strings.Join(terrors, "; "))
+		}
+		dropped = append(dropped, removed...)
+		next, err := yaml.Marshal(&root)
+		if err != nil {
+			return nil, nil, fmt.Errorf("rebuild sanitized config %s: %w", path, err)
+		}
+		current = next
+	}
+	return nil, nil, fmt.Errorf("config %s: too many invalid values to sanitize", path)
+}
+
+// yamlFailures locates the nodes a batch of go-yaml TypeErrors blames. The line
+// number alone is not enough: go-yaml reports unknown or duplicate fields at the
+// key node's line and type mismatches at the value node's line, and a block
+// container's Line is its first child's line. Reading "line 3" as "the mapping
+// starting on line 3" when it meant "the key on line 3" deletes that key's valid
+// siblings, so the two sides are tracked apart, with the source tag recorded for
+// type mismatches.
+type yamlFailures struct {
+	keys   map[int]bool            // "field X not found" / duplicate key: a key node
+	values map[int]map[string]bool // "cannot unmarshal !!tag": a value node with that tag
+	either map[int]bool            // unrecognized message shape: either side
+}
+
+// parseTypeErrorFailures classifies go-yaml TypeError messages by the node they
+// point at. Messages without a "line N:" prefix carry no location and are
+// skipped; custom unmarshalers in this package emit the same shapes so their
+// errors stay locatable too (see HookCommand/ContextReductionConfig).
+func parseTypeErrorFailures(terrors []string) yamlFailures {
+	f := yamlFailures{
+		keys:   make(map[int]bool),
+		values: make(map[int]map[string]bool),
+		either: make(map[int]bool),
+	}
+	for _, msg := range terrors {
+		line, rest, ok := cutTypeErrorLine(msg)
+		if !ok {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(rest, "cannot unmarshal "):
+			tag, _, _ := strings.Cut(strings.TrimPrefix(rest, "cannot unmarshal "), " ")
+			if f.values[line] == nil {
+				f.values[line] = make(map[string]bool)
+			}
+			f.values[line][tag] = true
+		case strings.HasPrefix(rest, "field ") || strings.HasPrefix(rest, "mapping key "):
+			f.keys[line] = true
+		default:
+			f.either[line] = true
+		}
+	}
+	return f
+}
+
+// cutTypeErrorLine splits a "line N: rest" TypeError message.
+func cutTypeErrorLine(msg string) (int, string, bool) {
+	rest, ok := strings.CutPrefix(msg, "line ")
+	if !ok {
+		return 0, "", false
+	}
+	num, after, ok := strings.Cut(rest, ":")
+	if !ok {
+		return 0, "", false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(num))
+	if err != nil {
+		return 0, "", false
+	}
+	return n, strings.TrimSpace(after), true
+}
+
+func (f yamlFailures) empty() bool {
+	return len(f.keys) == 0 && len(f.values) == 0 && len(f.either) == 0
+}
+
+// matchesKey reports whether a mapping key node is the blamed node.
+func (f yamlFailures) matchesKey(n *yaml.Node) bool {
+	return n != nil && (f.keys[n.Line] || f.either[n.Line])
+}
+
+// matchesValue reports whether a value node is the blamed node. A container
+// claims the failure only when nothing below it can: go-yaml blames the deepest
+// node, while every enclosing block container repeats that node's line.
+func (f yamlFailures) matchesValue(n *yaml.Node) bool {
+	return n != nil && f.ownsValueLine(n) && !f.descendantMatches(n)
+}
+
+func (f yamlFailures) ownsValueLine(n *yaml.Node) bool {
+	if f.values[n.Line][n.ShortTag()] {
+		return true
+	}
+	// An unclassified message carries no tag to check, so trust it only on a
+	// node that cannot be standing in for a child sharing its line.
+	return f.either[n.Line] && len(n.Content) == 0
+}
+
+// descendantMatches reports whether removeFailingNodes could pin the failure on
+// something below n. It mirrors that function's rules exactly, which is what
+// guarantees the recursion always finds a node to remove.
+func (f yamlFailures) descendantMatches(n *yaml.Node) bool {
+	if f.empty() {
+		return false
+	}
+	switch n.Kind {
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			keyNode, valNode := n.Content[i], n.Content[i+1]
+			if f.matchesKey(keyNode) || f.ownsValueLine(valNode) || f.descendantMatches(valNode) {
+				return true
+			}
+		}
+	case yaml.SequenceNode:
+		for _, item := range n.Content {
+			if f.ownsValueLine(item) || f.descendantMatches(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// removeFailingNodes prunes mapping pairs and sequence items the failures blame.
+// The most specific node is removed first so sibling fields survive; a container
+// is dropped whole only when the failure is about the container itself or its
+// children could not absorb it. Returns dotted paths of everything removed.
+func removeFailingNodes(node *yaml.Node, prefix []string, failures yamlFailures) []string {
+	switch node.Kind {
+	case yaml.MappingNode:
+		kept := make([]*yaml.Node, 0, len(node.Content))
+		var removed []string
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			keyNode, valNode := node.Content[i], node.Content[i+1]
+			path := append(prefix[:len(prefix):len(prefix)], keyNode.Value)
+			if failures.matchesKey(keyNode) || failures.matchesValue(valNode) {
+				removed = append(removed, strings.Join(path, "."))
+				continue
+			}
+			childRemoved := removeFailingNodes(valNode, path, failures)
+			if failures.descendantMatches(valNode) {
+				// Deeper nesting still failing after child cleanup: drop the
+				// pair rather than loop forever. Its path supersedes the child
+				// paths already collected under it.
+				removed = append(removed, strings.Join(path, "."))
+				continue
+			}
+			removed = append(removed, childRemoved...)
+			kept = append(kept, keyNode, valNode)
+		}
+		node.Content = kept
+		return removed
+	case yaml.SequenceNode:
+		kept := make([]*yaml.Node, 0, len(node.Content))
+		var removed []string
+		for _, item := range node.Content {
+			if failures.matchesValue(item) {
+				removed = append(removed, strings.Join(prefix, "."))
+				continue
+			}
+			childRemoved := removeFailingNodes(item, prefix, failures)
+			if failures.descendantMatches(item) {
+				removed = append(removed, strings.Join(prefix, "."))
+				continue
+			}
+			removed = append(removed, childRemoved...)
+			kept = append(kept, item)
+		}
+		node.Content = kept
+		return removed
+	default:
+		return nil
+	}
+}
+
+func CollectConfigFileIssues(path string, withDefaults bool) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 	cfg := &Config{}
 	if withDefaults {
 		cfg = DefaultConfig()
 	}
-	// Unknown keys are rejected instead of silently ignored: a misplaced field
-	// (e.g. include_thoughts at model root instead of under thinking) otherwise
-	// looks configured while never reaching the runtime.
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(cfg); err != nil {
-		// An empty or fully commented-out file has no YAML document; Decode
-		// reports io.EOF where Unmarshal used to be a no-op. Keep loading it
-		// as an empty config instead of refusing to start.
-		if !errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("parse config %s: %w", path, err)
-		}
-	}
-	normalizeModelLimits(cfg)
-	for providerName, providerCfg := range cfg.Providers {
-		if err := ValidateProviderRetry(providerName, providerCfg); err != nil {
-			return nil, fmt.Errorf("validate config %s: %w", path, err)
-		}
-	}
-	if err := ValidateDiagnosticsConfig(cfg); err != nil {
-		return nil, fmt.Errorf("validate config %s: %w", path, err)
-	}
-	return cfg, nil
+	return collectConfigIssues(data, cfg), nil
 }
 
-func normalizeConfigShorthands(path string, data []byte) ([]byte, error) {
-	var raw map[string]any
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parse config %s: %w", path, err)
-	}
-	if err := validateRemovedContextReductionKeys(raw); err != nil {
-		return nil, fmt.Errorf("validate config %s: %w", path, err)
-	}
-	return data, nil
-}
-
-func validateRemovedContextReductionKeys(raw map[string]any) error {
-	contextRaw, ok := raw["context"].(map[string]any)
-	if !ok {
-		return nil
-	}
-	reductionRaw, ok := contextRaw["reduction"].(map[string]any)
-	if !ok {
-		return nil
-	}
-	for _, key := range []string{"high_pressure_usage", "force_prune_usage"} {
-		if _, exists := reductionRaw[key]; exists {
-			return fmt.Errorf("context.reduction.%s was removed; request-batch age thresholds now control reduction without usage-pressure tuning", key)
+// CollectProjectConfigIssues returns every problem in a project-level config:
+// strict parse issues plus top-level fields that are not recognized at the
+// project layer (which the loader logs and drops). A missing file is not an
+// error and yields nil issues.
+func CollectProjectConfigIssues(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
 		}
+		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
-	return nil
+	var issues []string
+	issues = append(issues, collectConfigIssues(data, &Config{})...)
+	var overrideMap map[string]any
+	if err := yaml.Unmarshal(data, &overrideMap); err != nil {
+		return issues, nil // malformed YAML is already reported above
+	}
+	for _, key := range unsupportedProjectTopLevelKeys(overrideMap) {
+		issues = append(issues, fmt.Sprintf("field %q is not supported in project config", key))
+	}
+	return issues, nil
 }
 
 var projectScopedTopLevelKeys = map[string]bool{
@@ -1386,8 +1749,7 @@ var projectScopedTopLevelKeys = map[string]bool{
 
 // projectIgnoredTopLevelKeys are valid global config keys that are
 // deliberately ignored in project config (documented in docs/configuration.md);
-// anything outside this set and projectScopedTopLevelKeys is a typo and must
-// fail startup, matching the strict single-file loader.
+// anything else outside projectScopedTopLevelKeys is logged and dropped.
 var projectIgnoredTopLevelKeys = map[string]bool{
 	"paths":           true,
 	"maintenance":     true,
@@ -1395,35 +1757,156 @@ var projectIgnoredTopLevelKeys = map[string]bool{
 	"diagnostics":     true,
 }
 
+// unsupportedProjectTopLevelKeys returns the top-level override keys that are
+// neither project-scoped nor deliberately ignored at the project layer. The
+// loader logs and drops them; `chord doctor config` reports them.
+func unsupportedProjectTopLevelKeys(overrideMap map[string]any) []string {
+	var keys []string
+	for key := range overrideMap {
+		if !projectScopedTopLevelKeys[key] && !projectIgnoredTopLevelKeys[key] {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+	return keys
+}
+
 func mergeConfigOverrideData(base *Config, overrideData []byte, overridePath string) (*Config, error) {
 	baseMap, err := configToYAMLMap(base)
 	if err != nil {
 		return nil, err
 	}
-	overrideData, err = normalizeConfigShorthands(overridePath, overrideData)
+	var overrideMap map[string]any
+	if err := yaml.Unmarshal(overrideData, &overrideMap); err != nil {
+		log.Warnf("config %s: ignoring invalid project config: %v", overridePath, err)
+		return base, nil
+	}
+	// Keys outside both sets are not recognized at the project layer; log and
+	// drop them so the rest of the override still applies.
+	for _, key := range unsupportedProjectTopLevelKeys(overrideMap) {
+		log.Warnf("config %s: ignoring unsupported project field %q", overridePath, key)
+		delete(overrideMap, key)
+	}
+	normalizeContextReductionOverride(baseMap, overrideMap)
+	// Semantically invalid leaves must not clobber the global value they
+	// overlay. Evaluate the merged candidate, strip exactly those leaves from
+	// the override, and re-merge until nothing invalid remains.
+	mergedData, err := marshalSanitizedMerge(baseMap, overrideMap, overridePath)
 	if err != nil {
 		return nil, err
 	}
-	var overrideMap map[string]any
-	if err := yaml.Unmarshal(overrideData, &overrideMap); err != nil {
-		return nil, fmt.Errorf("parse config %s: %w", overridePath, err)
-	}
-	// The strict parse in MergeProjectConfig already rejected fields unknown to
-	// Config, so anything left outside both sets is a known global field that
-	// was never classified for the project layer — fail loudly instead of
-	// silently dropping it when the whitelist drifts behind the struct.
-	for key := range overrideMap {
-		if !projectScopedTopLevelKeys[key] && !projectIgnoredTopLevelKeys[key] {
-			return nil, fmt.Errorf("parse config %s: field %q is not supported in project config", overridePath, key)
+	return loadConfigData(overridePath, mergedData, false)
+}
+
+// maxOverrideSanitizeRounds bounds how often invalid leaves can be stripped
+// before giving up; each round removes at least one leaf, so real configs
+// converge in one or two.
+const maxOverrideSanitizeRounds = 4
+
+func marshalSanitizedMerge(baseMap, overrideMap map[string]any, path string) ([]byte, error) {
+	for round := 0; round < maxOverrideSanitizeRounds; round++ {
+		trial := cloneYAMLValue(baseMap).(map[string]any)
+		mergeProjectConfigMap(trial, overrideMap, nil)
+		trialData, err := yaml.Marshal(trial)
+		if err != nil {
+			return nil, fmt.Errorf("marshal merged config %s: %w", path, err)
+		}
+		badPaths, ferr := semanticInvalidOverridePaths(trialData)
+		if ferr != nil {
+			return nil, fmt.Errorf("evaluate merged config %s: %w", path, ferr)
+		}
+		var removable [][]string
+		for _, p := range badPaths {
+			if mapHasPath(overrideMap, p) {
+				removable = append(removable, p)
+			}
+		}
+		if len(removable) == 0 {
+			return trialData, nil
+		}
+		for _, p := range removable {
+			removeMapPath(overrideMap, p)
+			log.Warnf("config %s: ignoring semantically invalid override value: %s", path, strings.Join(p, "."))
 		}
 	}
-	normalizeContextReductionOverride(baseMap, overrideMap)
-	mergeProjectConfigMap(baseMap, overrideMap, nil)
-	mergedData, err := yaml.Marshal(baseMap)
-	if err != nil {
-		return nil, fmt.Errorf("marshal merged config %s: %w", overridePath, err)
+	return nil, fmt.Errorf("config %s: too many invalid project values to sanitize", path)
+}
+
+// semanticInvalidOverridePaths evaluates a merged candidate config and returns
+// the paths of leaves that violate semantic validation (invalid retry/key
+// settings, out-of-range diagnostics values). Values that only fail because of
+// cross-layer inheritance (for example key_order=smart without a codex preset
+// in the same override) are intentionally left in place: the final decode
+// resets them against the fully merged preset instead of guessing here.
+func semanticInvalidOverridePaths(data []byte) ([][]string, error) {
+	cfg := &Config{}
+	if _, err := decodeStrict(data, cfg); err != nil {
+		return nil, err
 	}
-	return loadConfigData(overridePath, mergedData, false)
+	var paths [][]string
+	for name, p := range cfg.Providers {
+		base := []string{"providers", name}
+		v := strings.TrimSpace(p.RetryBackoff)
+		if v != "" && !validRetryBackoff(v) {
+			paths = append(paths, append(base[:len(base):len(base)], "retry_backoff"))
+		}
+		if p.RetryDelayMS != nil && !validRetryDelayMS(*p.RetryDelayMS) {
+			paths = append(paths, append(base[:len(base):len(base)], "retry_delay_ms"))
+		}
+		if p.RetryAfterMaxS != nil && !validRetryAfterMaxS(*p.RetryAfterMaxS) {
+			paths = append(paths, append(base[:len(base):len(base)], "retry_after_max_s"))
+		}
+		v = strings.TrimSpace(p.KeyRotation)
+		if v != "" && !validKeyRotation(v) {
+			paths = append(paths, append(base[:len(base):len(base)], "key_rotation"))
+		}
+		v = strings.TrimSpace(p.KeyOrder)
+		if v != "" && v != KeyOrderSequential && v != KeyOrderRandom && v != KeyOrderSmart {
+			paths = append(paths, append(base[:len(base):len(base)], "key_order"))
+		}
+	}
+	for _, issue := range collectDiagnosticIssues(cfg) {
+		paths = append(paths, strings.Split(issue.Path, "."))
+	}
+	return paths, nil
+}
+
+func mapHasPath(m map[string]any, path []string) bool {
+	cur := m
+	for i, seg := range path {
+		child, ok := cur[seg]
+		if !ok {
+			return false
+		}
+		if i == len(path)-1 {
+			return true
+		}
+		next, ok := child.(map[string]any)
+		if !ok {
+			return false
+		}
+		cur = next
+	}
+	return false
+}
+
+func removeMapPath(m map[string]any, path []string) {
+	cur := m
+	for i, seg := range path {
+		child, ok := cur[seg]
+		if !ok {
+			return
+		}
+		if i == len(path)-1 {
+			delete(cur, seg)
+			return
+		}
+		next, ok := child.(map[string]any)
+		if !ok {
+			return
+		}
+		cur = next
+	}
 }
 
 // normalizeContextReductionOverride resolves the context.reduction boolean

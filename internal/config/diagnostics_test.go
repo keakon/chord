@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -78,36 +77,30 @@ func TestLoadConfigFromPathParsesDiagnosticsOverride(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFromPathRejectsInvalidDiagnosticsConfig(t *testing.T) {
+func TestLoadConfigFromPathToleratesInvalidDiagnosticsConfig(t *testing.T) {
 	cases := []struct {
 		name string
 		yaml string
-		want string
 	}{
 		{
 			name: "semantic backend type",
 			yaml: "diagnostics:\n  python:\n    semantic_backend:\n      type: command\n",
-			want: "semantic_backend.type",
 		},
 		{
 			name: "quick backend type",
 			yaml: "diagnostics:\n  python:\n    quick_backend:\n      type: lsp\n",
-			want: "quick_backend.type",
 		},
 		{
 			name: "large strategy",
 			yaml: "diagnostics:\n  python:\n    large_file:\n      strategy: semantic\n",
-			want: "large_file.strategy",
 		},
 		{
 			name: "negative line threshold",
 			yaml: "diagnostics:\n  python:\n    large_file:\n      line_threshold: -1\n",
-			want: "line_threshold",
 		},
 		{
 			name: "negative output limit",
 			yaml: "diagnostics:\n  python:\n    output:\n      max_total_diagnostics: -1\n",
-			want: "max_total_diagnostics",
 		},
 	}
 	for _, tc := range cases {
@@ -116,9 +109,8 @@ func TestLoadConfigFromPathRejectsInvalidDiagnosticsConfig(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tc.yaml), 0o644); err != nil {
 				t.Fatalf("WriteFile: %v", err)
 			}
-			_, err := LoadConfigFromPath(path)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("LoadConfigFromPath err = %v, want containing %q", err, tc.want)
+			if _, err := LoadConfigFromPath(path); err != nil {
+				t.Fatalf("LoadConfigFromPath: %v", err)
 			}
 		})
 	}

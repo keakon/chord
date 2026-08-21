@@ -361,6 +361,11 @@ type MainAgent struct {
 	// reports them once as a toast when the event loop starts so a fallback is
 	// never silent.
 	startupSkippedLockedSessions []string
+	// startupConfigIssues names the config-file problems the tolerant loader
+	// logged and treated as not configured at startup. The agent reports them
+	// once as a toast when the event loop starts so silently dropped values
+	// stay visible, pointing at `chord doctor config` for the full report.
+	startupConfigIssues []string
 
 	// Permission system: ruleset from active agent config with overlay support.
 	globalConfig  *config.Config

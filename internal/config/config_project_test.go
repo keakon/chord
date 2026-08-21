@@ -433,16 +433,199 @@ func TestMergeProjectConfigReplacesSameNameMCPServerAtomically(t *testing.T) {
 	}
 }
 
-func TestMergeProjectConfigReturnsParseError(t *testing.T) {
+func TestMergeProjectConfigMalformedProjectConfigFails(t *testing.T) {
 	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
 	writeTestFile(t, projectPath, "hooks: [\n")
 
-	_, _, err := MergeProjectConfig(DefaultConfig(), projectPath)
-	if err == nil {
-		t.Fatal("expected parse error for malformed project config")
+	// Malformed YAML cannot be partially decoded: startup must fail instead of
+	// silently applying only the global config.
+	base := DefaultConfig()
+	if _, _, err := MergeProjectConfig(base, projectPath); err == nil {
+		t.Fatal("malformed project config should fail the merge")
 	}
-	if got := err.Error(); got == "" || !containsAll(got, "parse config", projectPath) {
-		t.Fatalf("unexpected error: %v", err)
+}
+
+func TestMergeProjectConfigPreservesGlobalOnInvalidTypedLeaf(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	writeTestFile(t, globalPath, "providers:\n  sample:\n    type: responses\n    retry_delay_ms: 2000\n")
+	globalCfg, err := LoadConfigFromPath(globalPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath(global): %v", err)
+	}
+
+	// The project value has the wrong type: it must be dropped so the global
+	// 2000ms survives instead of being clobbered by a zero value.
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "providers:\n  sample:\n    retry_delay_ms: bogus\n")
+
+	_, merged, err := MergeProjectConfig(globalCfg, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	p := merged.Providers["sample"]
+	if p.RetryDelayMS == nil || *p.RetryDelayMS != 2000 {
+		t.Fatalf("merged retry_delay_ms = %v, want global 2000 preserved", p.RetryDelayMS)
+	}
+}
+
+func TestMergeProjectConfigDropsSemanticInvalidLeafKeepsSibling(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	writeTestFile(t, globalPath, "providers:\n  sample:\n    type: responses\n")
+	globalCfg, err := LoadConfigFromPath(globalPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath(global): %v", err)
+	}
+	// retry_backoff is semantically invalid and must fall back to unset;
+	// the sibling retry_delay_ms stays applied.
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "providers:\n  sample:\n    retry_backoff: linear\n    retry_delay_ms: 1500\n")
+
+	_, merged, err := MergeProjectConfig(globalCfg, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	p := merged.Providers["sample"]
+	if p.RetryBackoff != "" {
+		t.Fatalf("merged retry_backoff = %q, want unset default", p.RetryBackoff)
+	}
+	if p.RetryDelayMS == nil || *p.RetryDelayMS != 1500 {
+		t.Fatalf("merged retry_delay_ms = %v, want 1500 kept", p.RetryDelayMS)
+	}
+}
+
+// An unknown key sitting on the first line of a nested mapping used to take the
+// whole mapping with it: go-yaml reports a block container's Line as its first
+// child's line, so the container looked like the offender.
+func TestMergeProjectConfigDropsLeadingUnknownKeyKeepsSiblings(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	writeTestFile(t, globalPath, "providers:\n  sample:\n    type: responses\n")
+	globalCfg, err := LoadConfigFromPath(globalPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath(global): %v", err)
+	}
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "providers:\n  sample:\n    bogus_field: 1\n    retry_delay_ms: 3000\n")
+
+	cleaned, drops, err := stripTypeInvalidOverride(projectPath, []byte("providers:\n  sample:\n    bogus_field: 1\n    retry_delay_ms: 3000\n"))
+	if err != nil {
+		t.Fatalf("stripTypeInvalidOverride: %v", err)
+	}
+	if len(drops) != 1 || drops[0] != "providers.sample.bogus_field" {
+		t.Fatalf("drops = %v, want only providers.sample.bogus_field", drops)
+	}
+	if !strings.Contains(string(cleaned), "retry_delay_ms") {
+		t.Fatalf("cleaned config lost the valid sibling:\n%s", cleaned)
+	}
+
+	_, merged, err := MergeProjectConfig(globalCfg, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	p := merged.Providers["sample"]
+	if p.RetryDelayMS == nil || *p.RetryDelayMS != 3000 {
+		t.Fatalf("merged retry_delay_ms = %v, want 3000 kept", p.RetryDelayMS)
+	}
+	if p.Type != ProviderTypeResponses {
+		t.Fatalf("merged provider type = %q, want the global responses preserved", p.Type)
+	}
+}
+
+// A wrongly typed mapping value must still be dropped whole in one pass — the
+// fix for leading unknown keys must not turn this into a per-child crawl.
+func TestStripTypeInvalidOverrideDropsWronglyTypedContainerWhole(t *testing.T) {
+	data := []byte("log_level: \n  a: 1\n  b: 2\n  c: 3\n  d: 4\n")
+	cleaned, drops, err := stripTypeInvalidOverride("test.yaml", data)
+	if err != nil {
+		t.Fatalf("stripTypeInvalidOverride: %v", err)
+	}
+	if len(drops) != 1 || drops[0] != "log_level" {
+		t.Fatalf("drops = %v, want only log_level", drops)
+	}
+	if strings.Contains(string(cleaned), "log_level") {
+		t.Fatalf("cleaned config still carries log_level:\n%s", cleaned)
+	}
+}
+
+// The sanitizer locates failing nodes by parsing go-yaml's error text, so it
+// has to fail loudly whenever a message pins to nothing removable — a
+// whole-document type error as here, or a future go-yaml wording change. The
+// sanitized bytes in that case are an empty config, which would silently drop
+// every project setting instead of just the invalid one, so the isolation
+// failure must surface as an error rather than an emptied override.
+func TestMergeProjectConfigFailsLoudWhenFailureCannotBeIsolated(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	writeTestFile(t, globalPath, "log_level: info\n")
+	globalCfg, err := LoadConfigFromPath(globalPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath(global): %v", err)
+	}
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "- not\n- a mapping\n")
+
+	_, merged, err := MergeProjectConfig(globalCfg, projectPath)
+	if err == nil {
+		t.Fatalf("MergeProjectConfig = %+v, want an error rather than an emptied override", merged)
+	}
+	if !strings.Contains(err.Error(), "unable to isolate invalid values") {
+		t.Fatalf("err = %v, want the unresolvable-failure error", err)
+	}
+}
+
+// A hook command with an undecodable value must be dropped like any other bad
+// leaf. Its custom unmarshaler has to report a locatable TypeError, or the
+// sanitizer cannot isolate anything and the whole project config aborts startup.
+func TestMergeProjectConfigDropsInvalidHookCommandKeepsRest(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	writeTestFile(t, globalPath, "log_level: info\n")
+	globalCfg, err := LoadConfigFromPath(globalPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath(global): %v", err)
+	}
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "hooks:\n  on_idle:\n    - name: bad\n      command:\n        shell: true\nconfirm_timeout: 42\n")
+
+	_, merged, err := MergeProjectConfig(globalCfg, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	if merged.ConfirmTimeout != 42 {
+		t.Fatalf("merged confirm_timeout = %d, want 42 from the same project file", merged.ConfirmTimeout)
+	}
+}
+
+// One unrecognized context.reduction key must not discard the valid tuning
+// values sitting beside it in the same mapping.
+func TestLoadConfigContextReductionUnknownKeyKeepsValidSiblings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeTestFile(t, path, "context:\n  reduction:\n    high_pressure_usage: 0.8\n    shell_read_only_age_turns: 5\n")
+
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if cfg.Context.Reduction.ShellReadOnlyAgeTurns != 5 {
+		t.Fatalf("shell_read_only_age_turns = %d, want 5 applied despite the unknown sibling", cfg.Context.Reduction.ShellReadOnlyAgeTurns)
+	}
+}
+
+// The same tolerance has to survive the project-override sanitizer, which
+// strips the unknown key by line before merging.
+func TestMergeProjectConfigContextReductionUnknownKeyKeepsValidSiblings(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	writeTestFile(t, globalPath, "log_level: info\n")
+	globalCfg, err := LoadConfigFromPath(globalPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath(global): %v", err)
+	}
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "context:\n  reduction:\n    high_pressure_usage: 0.8\n    shell_read_only_age_turns: 5\n")
+
+	_, merged, err := MergeProjectConfig(globalCfg, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	if merged.Context.Reduction.ShellReadOnlyAgeTurns != 5 {
+		t.Fatalf("merged shell_read_only_age_turns = %d, want 5", merged.Context.Reduction.ShellReadOnlyAgeTurns)
 	}
 }
 
@@ -454,15 +637,6 @@ func writeTestFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q): %v", path, err)
 	}
-}
-
-func containsAll(s string, subs ...string) bool {
-	for _, sub := range subs {
-		if !strings.Contains(s, sub) {
-			return false
-		}
-	}
-	return true
 }
 
 // TestMergeProjectConfigRederivesContextAfterOutputOverride pins the derived
@@ -518,18 +692,25 @@ func TestMergeProjectConfigKeepsExplicitContextAcrossOutputOverride(t *testing.T
 	}
 }
 
-func TestMergeProjectConfigIgnoresGlobalOnlyKeysButRejectsUnknown(t *testing.T) {
+func TestMergeProjectConfigIgnoresGlobalOnlyKeysAndUnknown(t *testing.T) {
 	ignored := filepath.Join(t.TempDir(), ".chord", "config.yaml")
 	writeTestFile(t, ignored, "diagnostics:\n  enabled: true\nlog_level: debug\n")
 	if _, _, err := MergeProjectConfig(DefaultConfig(), ignored); err != nil {
 		t.Fatalf("global-only keys should be ignored, got %v", err)
 	}
 
+	base := DefaultConfig()
+	base.Providers = map[string]ProviderConfig{
+		"inner": {Type: ProviderTypeMessages},
+	}
 	typo := filepath.Join(t.TempDir(), ".chord", "config.yaml")
-	writeTestFile(t, typo, "provder:\n  x: 1\n")
-	_, _, err := MergeProjectConfig(DefaultConfig(), typo)
-	if err == nil || !strings.Contains(err.Error(), "provder") {
-		t.Fatalf("unknown top-level project key should fail startup, got %v", err)
+	writeTestFile(t, typo, "provder:\n  x: 1\nproviders:\n  inner:\n    type: messages\n")
+	_, merged, err := MergeProjectConfig(base, typo)
+	if err != nil {
+		t.Fatalf("unknown top-level project key should be logged and dropped, got %v", err)
+	}
+	if got := merged.Providers["inner"].Type; got != ProviderTypeMessages {
+		t.Fatalf("merged provider inner.type = %q, want messages (base preserved)", got)
 	}
 }
 

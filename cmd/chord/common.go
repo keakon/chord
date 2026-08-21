@@ -99,6 +99,29 @@ func (ac *AppContext) GetOrCreateProvider(provName string, cfg config.ProviderCo
 	return ac.ProviderCache.getOrCreate(provName, cfg, apiKeys)
 }
 
+// collectStartupConfigIssues re-runs the loader's strict checks over the
+// global and project config files so startup can surface (as a one-time toast)
+// the problems the tolerant loader logged and treated as not configured.
+// Errors resolving or reading a file are ignored: they are already logged by
+// the load path, and the toast should only report values that were dropped.
+func collectStartupConfigIssues(plan *initAppStartupPlan) []string {
+	if plan == nil {
+		return nil
+	}
+	var issues []string
+	if globalPath, err := config.ConfigPath(); err == nil {
+		if list, err := config.CollectConfigFileIssues(globalPath, true); err == nil {
+			issues = append(issues, list...)
+		}
+	}
+	if plan.ProjectConfigPath != "" {
+		if list, err := config.CollectProjectConfigIssues(plan.ProjectConfigPath); err == nil {
+			issues = append(issues, list...)
+		}
+	}
+	return issues
+}
+
 // GetOrCreateProviderImpl returns the cached Provider implementation for
 // provName, or creates one using the already-normalized ProviderConfig.
 func (ac *AppContext) GetOrCreateProviderImpl(provName string, cfg config.ProviderConfig, providerCfg *llm.ProviderConfig, modelID string) (llm.Provider, error) {
@@ -615,6 +638,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.MainAgent.SetInitialYoloMode(flagYolo)
 	ac.MainAgent.SetSessionLock(ac.SessionLock)
 	ac.MainAgent.SetStartupSkippedLockedSessions(ac.StartupSkippedLockedSessions)
+	ac.MainAgent.SetStartupConfigIssues(collectStartupConfigIssues(startupPlan))
 	ac.MainAgent.SetSessionArtifactsDirFunc(func() string {
 		if ac == nil || strings.TrimSpace(ac.SessionDir) == "" {
 			return ""

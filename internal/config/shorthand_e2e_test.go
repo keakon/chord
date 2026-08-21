@@ -18,7 +18,7 @@ func TestLoadConfigContextReductionShorthandEndToEnd(t *testing.T) {
 		{"true keeps defaults", "context:\n  reduction: true\n", false, false},
 		{"false disables", "context:\n  reduction: false\n", true, false},
 		{"null keeps defaults", "context:\n  reduction: null\n", false, false},
-		{"unknown fields rejected", "context:\n  reduction:\n    valid_read_age_turns: 12\n", false, true},
+		{"unknown fields ignored", "context:\n  reduction:\n    valid_read_age_turns: 12\n", false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

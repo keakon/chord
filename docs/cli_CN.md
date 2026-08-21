@@ -19,6 +19,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord`                           | 启动本地 TUI                                                      |
 | `chord auth [provider]`           | 用 `preset: codex` provider 登录 OAuth                            |
 | `chord headless`                  | 无 TUI 启动，stdio JSON 控制面                                    |
+| `chord doctor config`             | 校验全局 / 项目配置文件                                            |
 | `chord doctor models`             | 诊断已配置的 provider/model 调用链                                |
 | `chord cleanup status`            | 查看路径定位器管理的 state/cache/logs 体积                        |
 | `chord cleanup <kind>`            | 清理 `sessions` / `cache` / `logs` / `project`（默认 dry-run）    |
@@ -165,6 +166,30 @@ chord auth state clean
 chord headless
 chord headless -d /path/to/repo --continue
 chord headless -d /path/to/repo --worktree feat-auth
+```
+
+## `chord doctor config`
+
+检查全局与项目 `config.yaml` 里的未知字段、类型不对的值、YAML 语法错误，以及不合理的配置值（比如非法的 `retry_backoff`、负数 diagnostics 阈值）。命令会一次性列出所有问题，而不是遇到第一个就停。
+
+Chord 的配置加载器遇到这些问题只会写日志并照常启动，把出错的值当作未配置处理。这个命令把它们显式列出来，方便你在不翻日志的情况下校验配置文件。
+
+### Flag
+
+| Flag      | 说明                          |
+| --------- | ----------------------------- |
+| `--json`  | 输出机器可读的 JSON 报告      |
+
+全局配置始终会检查；当前工作目录下的项目配置（`.chord/config.yaml`）存在时也会检查。只要有问题，命令就以状态码 2 退出，方便脚本和 CI 使用。
+
+### 示例
+
+```bash
+# 校验全局 + 项目配置
+chord doctor config
+
+# 脚本用的机器可读报告
+chord doctor config --json
 ```
 
 ## `chord doctor models`

@@ -37,13 +37,17 @@ func (a *MainAgent) Run(ctx context.Context) error {
 	if skipped := a.consumeStartupSkippedLockedSessions(); len(skipped) > 0 {
 		a.emitToTUI(ToastEvent{Message: startupSkippedSessionsNotice(skipped), Level: "info"})
 	}
+	if issues := a.consumeStartupConfigIssues(); len(issues) > 0 {
+		a.emitToTUI(ToastEvent{Message: startupConfigIssuesNotice(len(issues)), Level: "warn"})
+	}
 
 	// Start the async persistence loop.
 	a.startPersistLoop()
 
-	// Startup backfill: queue extraction for at most two recent, uncovered,
-	// non-active sessions (excludes the active session and imports). Runs once;
-	// the worker only dispatches when auto-extraction is enabled and idle.
+	// Startup backfill: queue extraction for at most two recent, non-active
+	// sessions (excludes the active session and imports). Runs once; the
+	// worker only dispatches when auto-extraction is enabled and idle, and
+	// skips sessions whose fingerprint is already covered without an LLM call.
 	a.maybeScheduleStartupBackfill()
 
 	defer func() {

@@ -956,7 +956,7 @@ func TestRunDoctorModelsUsesOnlyCurrentWorkingDirectoryProjectConfig(t *testing.
 	}
 }
 
-func TestRunDoctorModelsInvalidProjectConfigReturnsError(t *testing.T) {
+func TestRunDoctorModelsToleratesMalformedProjectConfig(t *testing.T) {
 	setupDoctorModelsConfigHome(t, "providers:\n"+
 		"  local:\n"+
 		"    type: chat-completions\n"+
@@ -970,18 +970,19 @@ func TestRunDoctorModelsInvalidProjectConfigReturnsError(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(projectRoot, ".chord"), 0o755); err != nil {
 		t.Fatalf("mkdir .chord: %v", err)
 	}
+	// A malformed project config is logged and treated as not configured;
+	// the doctor run proceeds with the global config instead of failing.
 	if err := os.WriteFile(filepath.Join(projectRoot, ".chord", "config.yaml"), []byte("providers:\n  local: [\n"), 0o600); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
 	t.Chdir(projectRoot)
 
-	var out bytes.Buffer
-	err := runDoctorModels(t.Context(), doctorModelsOptions{ModelRef: "local/gpt", Timeout: time.Second, JSON: true, Out: &out})
-	if err == nil {
-		t.Fatal("runDoctorModels err = nil, want invalid project config error")
+	pools, err := orderedModelPoolsFromPath(filepath.Join(projectRoot, ".chord", "config.yaml"))
+	if err != nil {
+		t.Fatalf("orderedModelPoolsFromPath failed for malformed config: %v", err)
 	}
-	if !strings.Contains(err.Error(), "load project config") || !strings.Contains(err.Error(), "parse config") {
-		t.Fatalf("runDoctorModels err = %v, want project parse error", err)
+	if len(pools) != 0 {
+		t.Fatalf("pools = %#v, want empty for malformed config", pools)
 	}
 }
 

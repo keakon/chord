@@ -46,7 +46,7 @@ func TestValidateProviderRetryRejectsInvalidValues(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFromPathRejectsInvalidProviderRetry(t *testing.T) {
+func TestLoadConfigFromPathToleratesInvalidProviderRetry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte(`providers:
   sample:
@@ -56,8 +56,14 @@ func TestLoadConfigFromPathRejectsInvalidProviderRetry(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	_, err := LoadConfigFromPath(path)
-	if err == nil || !strings.Contains(err.Error(), `invalid retry_backoff "linear" for provider "sample"`) {
-		t.Fatalf("LoadConfigFromPath() error = %v, want invalid retry_backoff", err)
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if got := cfg.Providers["sample"].RetryBackoff; got != "" {
+		t.Fatalf("retry_backoff = %q, want it reset to the default (not configured) so the invalid value cannot fail startup", got)
+	}
+	if got := cfg.Providers["sample"].Type; got != "responses" {
+		t.Fatalf("type = %q, want valid sibling fields preserved", got)
 	}
 }

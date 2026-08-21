@@ -36,7 +36,7 @@ project-layer config is read from `./.chord/config.yaml` under the startup cwd
 rather than by searching parent directories. That means:
 
 - omitted project fields stay truly unset instead of silently shadowing global defaults;
-- malformed project config is treated as a startup error, not ignored;
+- unrecognized keys, wrongly typed values, and out-of-range settings in any config file are logged to `chord.log` and treated as not configured while the rest of the file still applies; in a project config an invalid leaf falls back to the inherited global value. Malformed YAML (a syntax error) prevents startup; run `chord doctor config` for the full problem list;
 - global-only keys such as `paths.*` and `maintenance.*` (also `model_templates` and `diagnostics`) are ignored in project config;
 - most scalar and object values override the global value at the same key;
 - `model_pools` merge by pool name, with same-name project pools overriding the global definition;
@@ -1289,7 +1289,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `key_rotation` | string | `on_failure` (default) / `per_request`. Controls when a credential / API key is reselected.                                                            |
 | `key_order`    | string | `sequential` (non-Codex default) / `random` / `smart` (Codex only). Controls how Chord chooses among selectable keys.                                   |
 | `retry_backoff`| string | `exponential` (default) / `fixed` / `none`. Controls generated delay between complete rounds and, when explicitly set, ordinary HTTP 429 key cooldown. Explicit settings replace `Retry-After` for ordinary 429s; confirmed quota resets and hard credential states still win. |
-| `retry_delay_ms`| int   | Base/fixed round and ordinary-429 delay in milliseconds, from `0` through `60000`; `0` / omitted defaults to 1000ms. Setting the field—including explicit `0`—is an override even when `retry_backoff` is omitted. Ignored for `none`. Invalid values fail configuration loading. |
+| `retry_delay_ms`| int   | Base/fixed round and ordinary-429 delay in milliseconds, from `0` through `60000`; `0` / omitted defaults to 1000ms. Setting the field—including explicit `0`—is an override even when `retry_backoff` is omitted. Ignored for `none`. Out-of-range values are logged and fall back to the default instead of failing startup. |
 | `compress`     | bool   | gzip request bodies when compression saves bytes. Off by default.                                                                                       |
 | `response_header_timeout` | int | Timeout in seconds from starting a streaming HTTP request until response headers arrive, including connection setup and request-body upload. `0` / omitted uses the built-in default; healthy streams are bounded by `stream_idle_timeout`, not a total request timer. |
 | `stream_idle_timeout` | int | Stream idle timeout in seconds for this provider. `0` / omitted uses built-in SSE/WebSocket idle defaults. |

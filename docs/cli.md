@@ -19,6 +19,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord`                          | Run the local TUI                                                |
 | `chord auth [provider]`          | Sign in with a `preset: codex` OAuth provider                    |
 | `chord headless`                 | Run without TUI; stdio JSON control plane                        |
+| `chord doctor config`            | Validate global/project config files                            |
 | `chord doctor models`            | Diagnose configured provider/model calls                         |
 | `chord cleanup status`           | Inspect state/cache/log sizes managed by the path locator        |
 | `chord cleanup <kind>`           | Clean `sessions` / `cache` / `logs` / `project` (dry-run by default) |
@@ -165,6 +166,30 @@ Run Chord without a TUI. Input is JSON commands on stdin, output is JSON envelop
 chord headless
 chord headless -d /path/to/repo --continue
 chord headless -d /path/to/repo --worktree feat-auth
+```
+
+## `chord doctor config`
+
+Check the global and project `config.yaml` files for unrecognized keys, wrongly typed values, malformed YAML, and invalid setting values (such as an unknown `retry_backoff` or a negative diagnostics threshold). The command reports every problem it finds in one pass instead of stopping at the first one.
+
+Chord's config loader logs these problems and starts anyway, treating the offending value as not configured. This command surfaces them explicitly so you can validate a config file without reading the log.
+
+### Flags
+
+| Flag      | Description                            |
+| --------- | -------------------------------------- |
+| `--json`  | Emit a machine-readable JSON report    |
+
+The global config is always checked; the project config (`.chord/config.yaml`) under the current working directory is checked when present. Any problem makes the command exit with status 2, which is convenient for scripts and CI.
+
+### Examples
+
+```bash
+# Validate global + project config
+chord doctor config
+
+# Machine-readable report for scripts
+chord doctor config --json
 ```
 
 ## `chord doctor models`

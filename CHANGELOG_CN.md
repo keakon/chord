@@ -7,12 +7,13 @@
 ### 不兼容变更
 
 - 会话 ID（`SID`）改用本地墙钟时间生成，是 17 位纯数字（`YYYYMMDDHHmmSSfff`），嵌入的日期和时间即本地时间。已有会话 ID 不会被改写，因此同一个 sessions 目录可能混有本地时间派生和更早的 UTC 派生两种 ID；在非 UTC 时区下，旧 ID 显示的时间与其实际创建时间不同。会话列表和 `--continue` 现在按最近活动排序——取 `main.jsonl` 与 `usage-summary.json` 两个修改时间中较新的那个——不再按 SID 排序，SID 不再充当排序键。Chord 不会扫描完整会话，也不会额外维护项目级索引；复制或恢复文件，以及没有更新这两份 metadata 的活动，仍可能让排序只是近似值。`--continue` 现在还会跳过已被另一个 Chord 进程打开的会话、改用下一个候选（所有候选都被占用时新建会话），不再因此启动失败，并在启动时给出一条一次性提示（TUI 里是 toast，headless 的 ready 信封里有 `skipped_locked_sessions` 字段，日志里也会记录）；`--resume <id>` 指定的会话已被占用时仍然报错。
-- Provider 配置键 `official_api` 拆分为 `trust_http_400`（把 HTTP 400 视为终止性请求错误）与 `retry_after_max_s`（采纳 `Retry-After` 的最长等待秒数，1–86400）。严格解析会在启动时拒绝仍包含 `official_api` 的配置。请把 `official_api: true` 迁移为 `trust_http_400: true` 加 `retry_after_max_s: 86400`；`official_api: false` 改成 `trust_http_400: false`，也可以直接省略。第三方 Provider 现在默认只采纳最长 60 秒的 `Retry-After`；旧配置若依赖更长等待，请显式设置 `retry_after_max_s: 86400`。`preset: codex` 会自动启用可信 400 语义与一天上限。
+- Provider 配置键 `official_api` 拆分为 `trust_http_400`（把 HTTP 400 视为终止性请求错误）与 `retry_after_max_s`（采纳 `Retry-After` 的最长等待秒数，1–86400）。仍包含 `official_api` 的配置不再导致启动失败：该键会被记录日志并忽略。请把 `official_api: true` 迁移为 `trust_http_400: true` 加 `retry_after_max_s: 86400`；`official_api: false` 改成 `trust_http_400: false`，也可以直接省略。第三方 Provider 现在默认只采纳最长 60 秒的 `Retry-After`；旧配置若依赖更长等待，请显式设置 `retry_after_max_s: 86400`。`preset: codex` 会自动启用可信 400 语义与一天上限。
 - `prompt_cache.ttl` 现在会在启动时校验：接受 `"5m"` 与 `"1h"`（`"5m"` 是 API 默认值，会归一化为省略该字段），其余取值报配置错误，不再被静默忽略。TTL 现在在 `explicit` 断点模式下同样生效，而不仅是 `auto` 模式。
 - `preset: azure` provider preset 已移除。Azure OpenAI Responses 现在按普通 `type: responses` provider 配置：设置 `auth_scheme: api-key`、`store: true`、`trust_http_400: true` 与 `retry_after_max_s: 86400`，并用 `compat.request_overrides.headers` 将 `OpenAI-Beta` 与 `originator` 置 `null` 移除 Codex 身份 header（这是旧 preset 唯一无法用普通配置表达的行为）。配置中仍含 `preset: azure` 的会在启动时被拒绝；迁移为等价普通 provider 后，线上请求行为与原来完全一致。
 
 ### 新功能
 
+- 新增 `chord doctor config` 命令，一次性校验全局与项目 `config.yaml` 并列出所有问题：YAML 语法错误、未知字段、类型不对的值，以及不合理的配置值（如非法的 `retry_backoff`、负数 diagnostics 阈值）。取值层面的问题只记日志、照常启动，这个命令把它们显式列出来；只要有问题就以状态码 2 退出，`--json` 输出机器可读报告，方便脚本和 CI 使用。
 - 通知现在会附带一声终端铃声（BEL）。终端聚焦时多数终端（Ghostty、iTerm2 等）会隐藏通知横幅、只静默进通知中心，铃声是此时可靠的提示音渠道；`desktop_notification_foreground: false` 可在聚焦时同时静音通知序列和铃声。是否出声取决于终端配置，文档列出了各终端的开启方式（如 Ghostty 的 `bell-features = system,audio`）。
 - Manual MCP 的启用状态现在按会话持久化：`/mcp enable|disable` 会保存期望启用的 server 集合，resume 会话时会在第一次模型请求前恢复；连接失败也会保留意图，显示为已启用但暂不可用，方便重试。模型可通过 `compat.chat_completions.mcp_system_tools_message` 或 `compat.responses.mcp_additional_tools` 显式开启缓存友好挂载；首次模型请求之前启用的 server 直接进入顶层 tools 数组（此时还没有需要保护的缓存），之后启用的才以声明形式追加在固定对话位置，Chord 会原样回放这些声明，禁用时只拦截执行、不改写前缀；模型切换、恢复或 fork 出的历史、持久压缩之后，本次会话运行的余下部分退回顶层工具，全新的空会话则重新可用动态挂载。
 - 中断后的会话现在能更准确地恢复未完成的工具结果。结果没来得及保存的工具会标记为**未启动**（工具还没有开始执行，重新核对前置条件后可重试）或**结果未知**（工具已经开始执行，副作用可能部分或全部发生，先核对当前状态再重试）。Chord 会在运行工具前先把工具调用消息写盘，并在执行会改变状态的工具前同步落盘「已开始」标记，因此中断后不会留下「不知道当时想执行这个工具」的副作用；会话目录写不进去时，Chord 会暂停工具执行、避免无法恢复的重复副作用，写入恢复后自动继续。
@@ -22,6 +23,7 @@
 
 ### 改进
 
+- 配置加载现在区分「文件坏了」和「值不对」。YAML 语法错误会阻止启动，并由 `chord doctor config` 明确报告。`config.yaml` 中的未知字段、类型不符与超出范围的取值只记录日志、按未配置处理，其余字段照常生效；项目配置里的非法字段回退到被覆盖的全局值，不会用零值把全局配置冲掉。
 - THINKING 卡片现在与 USER / ASSISTANT 卡片对齐：THINKING 卡片及其角色标签与 USER、ASSISTANT 处于同一左列，不再作为单独的嵌套层级缩进到右侧。
 - 信息面板新增 `TIME` 板块，展示当前聚焦 agent 的墙钟时间去向：模型流式输出、工具执行、上下文压缩、key/模型冷却，以及等待用户确认或回答的时间。不足 1 秒的桶不显示，短调用不会刷屏；会话恢复后该板块会从 usage ledger 重建。
 - 信息面板的 `MODEL` 板块改为两行显示：provider 单独一行，模型 ID 带 `@variant` 后缀放在下一行，不再把 `provider/model@variant` 挤在一行里截断。
@@ -71,7 +73,7 @@
 - 当输出上限在模型产出任何内容之前就被触及时，回合不再静默结束。推理可能耗尽整个输出预算，使响应既没有工具调用也没有可见文本；而既有的截断恢复机制只在存在畸形工具调用时才会介入，因此这种形态会落到普通的"无工具调用，转入空闲"路径——没有警告、没有错误、界面上也没有任何内容，整段记录在一张 thinking 卡片之后就停住了。现在 Chord 会用一条引导模型立即行动（而非继续推理）的恢复提示重试这种响应，重试次数受既有的两次上限约束；若反复触及上限则报告明确的错误。这种形态不会尝试自动压缩，因为原因是输出预算而非输入过大。若被截断的响应确实带有文本，则保留这段部分回复，并提示它并不完整。
 - 空闲终端通知不再播报用户已经读过的内容。此前通知文案会向前查找最近的 assistant 或 error 卡片，因此当某个回合的回复始终没有出现时（例如上述输出上限截断），播报的是同一回合中更早的过程叙述——往往是一句以冒号结尾的话，读起来像"仍在进行"，而不是"已停下，等你"。现在查找会在工具卡片和用户卡片处停止，当回合没有产生属于自己的回复时退回到中性的就绪文案。
 - 当 Anthropic 兼容网关把一个完整的 `tool_use` 块插入某个 thinking 块中间时，该 thinking 块不再被拆成两张 TUI 卡片。这类网关会交错发送 content block——先是 thinking delta，然后是一整个工具调用，再是*同一个* thinking 块的剩余部分——而此前开始工具卡片会顺带定型并摘除正在流式输出的 thinking 卡片，导致剩余 delta 另起一张卡片，且通常断在词中间。现在 thinking 卡片会保持挂载直到它自己的 `thinking_end` 到达，因此显示的思考耗时也覆盖整个块，而不只是续写的尾段。真正的终结点（回合结束、取消、错误、idle）仍会定型未收到 `thinking_end` 的 thinking 卡片并计算兜底耗时，行为不变。
-- Handoff 现在与其它控制流确认保持一致，不再看起来立即成功。选择器打开期间，handoff 工具卡只显示计划路径、不带成功对勾；确认目标后才显示 `✓`；拒绝时把理由直接显示在卡片上（`✗ handoff: 计划 … rejected reason: …`），而不是只作为后续消息出现。单独的「Plan saved to:」assistant 卡片已移除——路径由 handoff 卡本身承载。按 Esc 退出选择器现在会明确取消 handoff，而不是静默悬空。阅读计划与选择目标所花的时间计入 TIME 面板的 `User wait`（不会计入 `Tools`）；headless 的 `handoff` 命令在 `accept`/`deny` 之外新增独立的 `cancel` action。
+- Handoff 现在与其它控制流确认保持一致，不再看起来立即成功。选择器打开期间，handoff 工具卡只显示计划路径、不带成功对勾；确认目标后才显示 `✓`；拒绝时把理由直接显示在卡片上（`✗ handoff: 计划 … rejected reason: …`），而不是只作为后续消息出现。单独的「Plan saved to:」assistant 卡片已移除——路径由 handoff 卡本身承载。按 Esc 退出选择器现在会明确取消 handoff，而不是静默悬空。候选列表只包含当前角色之外的主 agent 角色；无论是 headless 客户端还是本地选择，只要指定的目标不可用、或执行准备失败，工具卡都会记为错误而不是成功。阅读计划与选择目标所花的时间计入 TIME 面板的 `User wait`（不会计入 `Tools`）；headless 的 `handoff` 命令在 `accept`/`deny` 之外新增独立的 `cancel` action。
 - 上下文剪裁生成的搜索摘要不再静默丢失省略元数据。此前当所有文件分组都放进了渲染列表、但末尾的"其余行已省略"标记超出字节预算时，该标记会直接消失，摘要看起来像是完整的；现在会回收已渲染的分组为标记腾出空间，摘要始终报告省略了多少文件、匹配和其余行。
 - 上下文剪裁的重复调用匹配现在只信任明确成功的结果：失败的尝试不再掩盖同一调用此前的成功运行，大整数参数在归一化过程中保持精确身份。
 - 每一种任务终态转移现在都经由同一 journal 路径结算：取消、过期与停止的任务都会留下一致的持久化 settlement，而不是仅翻转记录状态。

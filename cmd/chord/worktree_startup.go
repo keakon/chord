@@ -44,8 +44,8 @@ func startupPathLocator() (*config.PathLocator, error) {
 
 // startupBranchPrefix returns the normalized worktree branch prefix from
 // config.yaml (`worktree.branch_prefix`), falling back to the default
-// "chord/" when unset. Errors propagate so a bad config value surfaces at
-// startup instead of silently falling back to the default.
+// "chord/" when unset. Invalid config values are logged by the loader and
+// treated as unset.
 func startupBranchPrefix() (string, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {

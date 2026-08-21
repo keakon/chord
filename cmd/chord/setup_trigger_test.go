@@ -315,7 +315,7 @@ func TestRootPersistentPreRunSetsConfigHome(t *testing.T) {
 	}
 }
 
-func TestRunRootDoesNotTriggerWizardWhenConfigIsMalformed(t *testing.T) {
+func TestRunRootFailsOnMalformedConfigWithoutWizard(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("CHORD_CONFIG_HOME", configHome)
 	if err := os.MkdirAll(configHome, 0o700); err != nil {
@@ -336,7 +336,7 @@ func TestRunRootDoesNotTriggerWizardWhenConfigIsMalformed(t *testing.T) {
 
 	err := runRoot(newRootCmd(), nil)
 	if err == nil {
-		t.Fatal("expected malformed config to fail")
+		t.Fatal("expected runRoot to fail")
 	}
 	if called {
 		t.Fatal("expected wizard to be skipped for malformed config")
@@ -344,7 +344,9 @@ func TestRunRootDoesNotTriggerWizardWhenConfigIsMalformed(t *testing.T) {
 	if err.Error() == initialSetupRequiredMessage {
 		t.Fatalf("expected malformed config error, got initial setup error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "yaml") {
-		t.Fatalf("expected yaml error, got %v", err)
+	// Malformed YAML prevents startup: the failure is the parse error itself,
+	// not a tolerated fallback to defaults.
+	if !strings.Contains(err.Error(), "yaml") && !strings.Contains(err.Error(), "parse config") {
+		t.Fatalf("expected yaml parse error, got: %v", err)
 	}
 }

@@ -1,6 +1,10 @@
 package config
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
 const (
 	DiagnosticBackendTypeLSP     = "lsp"
@@ -82,49 +86,112 @@ func DiagnosticsEnabled(cfg *Config) bool {
 	return *cfg.Diagnostics.Enabled
 }
 
-func ValidateDiagnosticsConfig(cfg *Config) error {
+// diagnosticIssue pairs a canonical config path with its human-readable
+// problem description.
+type diagnosticIssue struct {
+	Path    string
+	Message string
+}
+
+// collectDiagnosticIssues returns every diagnostics-config problem with its
+// canonical path, so callers can either render messages (`chord doctor
+// config`) or locate and drop exactly the offending override leaves.
+func collectDiagnosticIssues(cfg *Config) []diagnosticIssue {
 	if cfg == nil {
 		return nil
 	}
+	var issues []diagnosticIssue
 	py := cfg.Diagnostics.Python
-	if err := validateDiagnosticBackend("diagnostics.python.semantic_backend", py.SemanticBackend, DiagnosticBackendTypeLSP); err != nil {
-		return err
-	}
-	if err := validateDiagnosticBackend("diagnostics.python.quick_backend", py.QuickBackend, DiagnosticBackendTypeCommand); err != nil {
-		return err
-	}
+	issues = append(issues, diagnosticBackendIssues("diagnostics.python.semantic_backend", py.SemanticBackend, DiagnosticBackendTypeLSP)...)
+	issues = append(issues, diagnosticBackendIssues("diagnostics.python.quick_backend", py.QuickBackend, DiagnosticBackendTypeCommand)...)
 	lf := py.LargeFile
 	if lf.LineThreshold < 0 {
-		return fmt.Errorf("diagnostics.python.large_file.line_threshold must be >= 0")
+		issues = append(issues, diagnosticIssue{Path: "diagnostics.python.large_file.line_threshold", Message: "diagnostics.python.large_file.line_threshold must be >= 0"})
 	}
 	if lf.ByteThreshold < 0 {
-		return fmt.Errorf("diagnostics.python.large_file.byte_threshold must be >= 0")
+		issues = append(issues, diagnosticIssue{Path: "diagnostics.python.large_file.byte_threshold", Message: "diagnostics.python.large_file.byte_threshold must be >= 0"})
 	}
 	if lf.Strategy != "" && lf.Strategy != DiagnosticLargeFileStrategyQuick {
-		return fmt.Errorf("diagnostics.python.large_file.strategy must be %q", DiagnosticLargeFileStrategyQuick)
+		issues = append(issues, diagnosticIssue{Path: "diagnostics.python.large_file.strategy", Message: fmt.Sprintf("diagnostics.python.large_file.strategy must be %q", DiagnosticLargeFileStrategyQuick)})
 	}
 	out := py.Output
-	if out.MaxNearDiagnostics < 0 {
-		return fmt.Errorf("diagnostics.python.output.max_near_diagnostics must be >= 0")
+	for _, field := range []struct {
+		path  string
+		value int
+	}{
+		{"diagnostics.python.output.max_near_diagnostics", out.MaxNearDiagnostics},
+		{"diagnostics.python.output.max_outside_diagnostics", out.MaxOutsideDiagnostics},
+		{"diagnostics.python.output.max_total_diagnostics", out.MaxTotalDiagnostics},
+		{"diagnostics.python.output.near_range_before_lines", out.NearRangeBeforeLines},
+		{"diagnostics.python.output.near_range_after_lines", out.NearRangeAfterLines},
+	} {
+		if field.value < 0 {
+			issues = append(issues, diagnosticIssue{Path: field.path, Message: field.path + " must be >= 0"})
+		}
 	}
-	if out.MaxOutsideDiagnostics < 0 {
-		return fmt.Errorf("diagnostics.python.output.max_outside_diagnostics must be >= 0")
-	}
-	if out.MaxTotalDiagnostics < 0 {
-		return fmt.Errorf("diagnostics.python.output.max_total_diagnostics must be >= 0")
-	}
-	if out.NearRangeBeforeLines < 0 {
-		return fmt.Errorf("diagnostics.python.output.near_range_before_lines must be >= 0")
-	}
-	if out.NearRangeAfterLines < 0 {
-		return fmt.Errorf("diagnostics.python.output.near_range_after_lines must be >= 0")
+	return issues
+}
+
+func diagnosticBackendIssues(path string, backend DiagnosticBackendConfig, allowedType string) []diagnosticIssue {
+	if backend.Type != "" && backend.Type != allowedType {
+		return []diagnosticIssue{{Path: path + ".type", Message: fmt.Sprintf("%s.type must be %q", path, allowedType)}}
 	}
 	return nil
 }
 
-func validateDiagnosticBackend(path string, backend DiagnosticBackendConfig, allowedType string) error {
-	if backend.Type != "" && backend.Type != allowedType {
-		return fmt.Errorf("%s.type must be %q", path, allowedType)
+// collectDiagnosticsConfigIssues returns human-readable descriptions of every
+// invalid diagnostics setting.
+func collectDiagnosticsConfigIssues(cfg *Config) []string {
+	issues := collectDiagnosticIssues(cfg)
+	messages := make([]string, len(issues))
+	for i, issue := range issues {
+		messages[i] = issue.Message
 	}
-	return nil
+	return messages
+}
+
+// resetInvalidDiagnosticsFields clears diagnostics fields that failed semantic
+// validation, restoring their unset state so the runtime falls back to the
+// built-in defaults instead of riding an invalid value through.
+func resetInvalidDiagnosticsFields(d *DiagnosticsConfig) {
+	if d == nil {
+		return
+	}
+	py := &d.Python
+	if t := strings.TrimSpace(py.SemanticBackend.Type); t != "" && t != DiagnosticBackendTypeLSP {
+		py.SemanticBackend.Type = ""
+	}
+	if t := strings.TrimSpace(py.QuickBackend.Type); t != "" && t != DiagnosticBackendTypeCommand {
+		py.QuickBackend.Type = ""
+	}
+	lf := &py.LargeFile
+	if s := strings.TrimSpace(lf.Strategy); s != "" && s != DiagnosticLargeFileStrategyQuick {
+		lf.Strategy = ""
+	}
+	if lf.LineThreshold < 0 {
+		lf.LineThreshold = 0
+	}
+	if lf.ByteThreshold < 0 {
+		lf.ByteThreshold = 0
+	}
+	o := &py.Output
+	for _, field := range []*int{
+		&o.MaxNearDiagnostics,
+		&o.MaxOutsideDiagnostics,
+		&o.MaxTotalDiagnostics,
+		&o.NearRangeBeforeLines,
+		&o.NearRangeAfterLines,
+	} {
+		if *field < 0 {
+			*field = 0
+		}
+	}
+}
+
+func ValidateDiagnosticsConfig(cfg *Config) error {
+	issues := collectDiagnosticsConfigIssues(cfg)
+	if len(issues) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(issues, "; "))
 }

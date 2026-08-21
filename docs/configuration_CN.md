@@ -31,7 +31,7 @@ Chord 将行为配置与凭据配置分开管理。
 项目配置 `.chord/config.yaml` 会先按“无内置默认值注入”的方式加载，再覆盖到已加载的全局配置上。运行时命令把当前工作目录视为项目根，因此项目层配置读取的是启动 cwd 下的 `./.chord/config.yaml`，不会自动向父目录继续查找。因此：
 
 - 项目里没写的字段会保持真正的未设置状态，不会意外遮蔽全局默认值；
-- 项目配置写坏了会直接作为启动错误暴露，而不是被静默忽略；
+- 任何配置文件里无法识别的键、类型不对的值、或超出范围的取值，都会记录到 `chord.log` 并按未配置处理，文件其余部分照常生效；项目配置里的非法字段回退到被覆盖的全局值。YAML 语法错误（文件无法解析）会阻止启动，可用 `chord doctor config` 查看完整问题列表；
 - `paths.*`、`maintenance.*`（以及 `model_templates`、`diagnostics`）这类仅全局生效的字段，即使写进项目配置也会被忽略；
 - 大多数标量值和对象值会按同一路径直接覆盖全局值；
 - `model_pools` 按 pool 名称合并：项目里同名 pool 会覆盖全局定义；
@@ -1145,7 +1145,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `key_rotation`| string | `on_failure`（默认）/ `per_request`。控制何时重新选择 credential / API key。                                                                    |
 | `key_order`   | string | `sequential`（非 Codex 默认）/ `random` / `smart`（仅 Codex）。控制在候选 key 中如何选择。                                               |
 | `retry_backoff`| string | `exponential`（默认）/ `fixed` / `none`。控制完整重试轮之间由 Chord 生成的等待；显式设置后也控制普通 HTTP 429 的 key 冷却，并替换这类响应的 `Retry-After`。已确认的配额重置与凭据硬状态仍然优先。 |
-| `retry_delay_ms`| int   | 轮间退避和普通 429 冷却的基准值或固定值，单位毫秒，可取 `0` 到 `60000`；`0` / 省略默认 1000ms。即使省略 `retry_backoff`，只要写出该字段（包括显式 `0`）就算覆盖。`none` 模式下忽略。非法值会使配置加载失败。 |
+| `retry_delay_ms`| int   | 轮间退避和普通 429 冷却的基准值或固定值，单位毫秒，可取 `0` 到 `60000`；`0` / 省略默认 1000ms。即使省略 `retry_backoff`，只要写出该字段（包括显式 `0`）就算覆盖。`none` 模式下忽略。超出范围的值会记录日志并回退默认值，不会中断启动。 |
 | `compress`    | bool   | gzip 能减小体积时启用请求体压缩。默认关闭。                                                                                                      |
 | `response_header_timeout` | int | 从开始该 provider 的流式 HTTP 请求到收到响应头的超时，单位秒，包括连接建立与请求体上传。`0` / 省略表示使用内置默认值；健康流由 `stream_idle_timeout` 约束，而不是总请求计时器。 |
 | `stream_idle_timeout` | int | 该 provider 的流式空闲超时，单位秒。`0` / 省略表示使用内置 SSE/WebSocket idle 默认值。 |

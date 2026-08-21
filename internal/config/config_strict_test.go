@@ -1,58 +1,94 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/keakon/golog"
+
+	"github.com/keakon/chord/internal/logtest"
 )
 
-// TestLoadConfigFromPathRejectsUnknownTopLevelField confirms strict decoding
-// surfaces misplaced top-level keys instead of silently dropping them.
-func TestLoadConfigFromPathRejectsUnknownTopLevelField(t *testing.T) {
+// loadConfigFromPathAndCaptureLog loads content through LoadConfigFromPath with
+// a capturing default logger so tests can assert both that loading succeeds
+// and that the offending value was reported as a warning.
+func loadConfigFromPathAndCaptureLog(t *testing.T, content string) (*Config, string) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("bogus_top_level: true\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if _, err := LoadConfigFromPath(path); err == nil {
-		t.Fatalf("LoadConfigFromPath: expected error for unknown top-level key, got nil")
+	var buf bytes.Buffer
+	var cfg *Config
+	logtest.WithDefault(logtest.NewLogger(&buf, golog.InfoLevel), func() {
+		var err error
+		cfg, err = LoadConfigFromPath(path)
+		if err != nil {
+			t.Fatalf("LoadConfigFromPath: %v", err)
+		}
+	})
+	return cfg, buf.String()
+}
+
+// TestLoadConfigFromPathIgnoresUnknownTopLevelField confirms an unrecognized
+// top-level key is logged and treated as not configured instead of blocking
+// startup.
+func TestLoadConfigFromPathIgnoresUnknownTopLevelField(t *testing.T) {
+	cfg, logs := loadConfigFromPathAndCaptureLog(t, "bogus_top_level: true\n")
+	if cfg == nil {
+		t.Fatal("LoadConfigFromPath returned nil config")
+	}
+	if !strings.Contains(logs, "bogus_top_level") {
+		t.Fatalf("logs = %q, want warning mentioning bogus_top_level", logs)
 	}
 }
 
-// TestLoadConfigFromPathRejectsUnknownProviderField guards against typos at the
-// provider level (e.g. api_key in config.yaml instead of auth.yaml).
-func TestLoadConfigFromPathRejectsUnknownProviderField(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	content := []byte("providers:\n  gateway:\n    api_key: $X\n")
-	if err := os.WriteFile(path, content, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
+// TestLoadConfigFromPathIgnoresUnknownProviderField confirms a typo at the
+// provider level (e.g. api_key in config.yaml instead of auth.yaml) is logged
+// and dropped while the provider itself still loads.
+func TestLoadConfigFromPathIgnoresUnknownProviderField(t *testing.T) {
+	cfg, logs := loadConfigFromPathAndCaptureLog(t, "providers:\n  gateway:\n    api_key: $X\n")
+	if cfg == nil {
+		t.Fatal("LoadConfigFromPath returned nil config")
 	}
-	if _, err := LoadConfigFromPath(path); err == nil {
-		t.Fatalf("LoadConfigFromPath: expected error for unknown provider key, got nil")
+	if _, ok := cfg.Providers["gateway"]; !ok {
+		t.Fatal("LoadConfigFromPath: gateway provider missing")
 	}
-}
-
-func TestLoadConfigFromPathRejectsRemovedOfficialAPIField(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	content := []byte("providers:\n  sample:\n    type: responses\n    official_api: true\n")
-	if err := os.WriteFile(path, content, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if _, err := LoadConfigFromPath(path); err == nil {
-		t.Fatal("LoadConfigFromPath: expected error for removed official_api key, got nil")
+	if !strings.Contains(logs, "api_key") {
+		t.Fatalf("logs = %q, want warning mentioning api_key", logs)
 	}
 }
 
-// TestLoadConfigFromPathRejectsUnknownModelField guards against fields placed
-// at the model root that only take effect under a nested object, such as
-// include_thoughts (valid only under thinking).
-func TestLoadConfigFromPathRejectsUnknownModelField(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	content := []byte("providers:\n  gemini:\n    models:\n      gemini-3.5-flash:\n        include_thoughts: true\n")
-	if err := os.WriteFile(path, content, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
+func TestLoadConfigFromPathIgnoresRemovedOfficialAPIField(t *testing.T) {
+	cfg, logs := loadConfigFromPathAndCaptureLog(t, "providers:\n  sample:\n    type: responses\n    official_api: true\n")
+	if cfg == nil || cfg.Providers["sample"].Type == "" {
+		t.Fatal("LoadConfigFromPath: sample provider missing")
 	}
-	if _, err := LoadConfigFromPath(path); err == nil {
-		t.Fatalf("LoadConfigFromPath: expected error for model-root include_thoughts, got nil")
+	if got := cfg.Providers["sample"].Type; got != ProviderTypeResponses {
+		t.Fatalf("provider type = %q, want responses", got)
+	}
+	if !strings.Contains(logs, "official_api") {
+		t.Fatalf("logs = %q, want warning mentioning official_api", logs)
+	}
+}
+
+// TestLoadConfigFromPathIgnoresUnknownModelField confirms a field placed at
+// the model root that only takes effect under a nested object (such as
+// include_thoughts under thinking) is logged and dropped while the model still
+// loads.
+func TestLoadConfigFromPathIgnoresUnknownModelField(t *testing.T) {
+	cfg, logs := loadConfigFromPathAndCaptureLog(t, "providers:\n  gemini:\n    models:\n      gemini-3.5-flash:\n        include_thoughts: true\n")
+	if cfg == nil {
+		t.Fatal("LoadConfigFromPath returned nil config")
+	}
+	if _, ok := cfg.Providers["gemini"].Models["gemini-3.5-flash"]; !ok {
+		t.Fatal("LoadConfigFromPath: gemini model missing")
+	}
+	if !strings.Contains(logs, "include_thoughts") {
+		t.Fatalf("logs = %q, want warning mentioning include_thoughts", logs)
 	}
 }
 

@@ -141,6 +141,7 @@ func newDoctorCmd() *cobra.Command {
 		Short: "Run configuration and runtime diagnostics",
 	}
 	cmd.AddCommand(newDoctorModelsCmd())
+	cmd.AddCommand(newDoctorConfigCmd())
 	return cmd
 }
 
@@ -356,7 +357,8 @@ func orderedModelPoolsFromPath(path string) ([]orderedModelPool, error) {
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, err
+		log.Warnf("config %s: ignoring invalid model_pools: %v", path, err)
+		return nil, nil
 	}
 	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
 		return nil, nil
@@ -369,14 +371,16 @@ func orderedModelPoolsFromPath(path string) ([]orderedModelPool, error) {
 			continue
 		}
 		if value.Kind != yaml.MappingNode {
-			return nil, fmt.Errorf("%s: model_pools must be a mapping", path)
+			log.Warnf("config %s: ignoring invalid model_pools (must be a mapping)", path)
+			return nil, nil
 		}
 		pools := make([]orderedModelPool, 0, len(value.Content)/2)
 		for j := 0; j+1 < len(value.Content); j += 2 {
 			poolName := strings.TrimSpace(value.Content[j].Value)
 			var refs []string
 			if err := value.Content[j+1].Decode(&refs); err != nil {
-				return nil, fmt.Errorf("%s: decode model_pools.%s: %w", path, poolName, err)
+				log.Warnf("config %s: ignoring invalid model_pools.%s: %v", path, poolName, err)
+				return nil, nil
 			}
 			pools = append(pools, orderedModelPool{Name: poolName, Refs: refs})
 		}

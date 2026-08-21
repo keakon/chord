@@ -272,8 +272,11 @@ func TestHookCommandYAMLBranches(t *testing.T) {
 	}
 
 	var invalid HookCommand
-	if err := yaml.Unmarshal([]byte("{bad: value}"), &invalid); err == nil || !strings.Contains(err.Error(), "hook command must be") {
-		t.Fatalf("unmarshal mapping err = %v, want hook command error", err)
+	err = yaml.Unmarshal([]byte("{bad: value}"), &invalid)
+	// The message must stay locatable ("line N:") or the project-config
+	// sanitizer cannot isolate the bad value and aborts startup instead.
+	if err == nil || !strings.Contains(err.Error(), "line 1: cannot unmarshal !!map into hook command (string or string array)") {
+		t.Fatalf("unmarshal mapping err = %v, want located hook command error", err)
 	}
 	if !(HookCommand{}).IsZero() {
 		t.Fatal("zero HookCommand should be zero")
