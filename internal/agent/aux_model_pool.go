@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 )
@@ -60,10 +62,12 @@ func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, 
 		}
 		client, _, _, err := a.modelSwitchFactory(selectedRef)
 		if err != nil {
+			log.Warnf("failed to resolve aux model pool entry, skipping model_ref=%v error=%v", selectedRef, err)
 			constructionErrs = append(constructionErrs, fmt.Errorf("%s: %w", selectedRef, err))
 			continue
 		}
 		if client == nil {
+			log.Warnf("failed to resolve aux model pool entry, skipping model_ref=%v error=produced nil client", selectedRef)
 			constructionErrs = append(constructionErrs, fmt.Errorf("%s: produced nil client", selectedRef))
 			continue
 		}
@@ -74,6 +78,7 @@ func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, 
 		}
 		entry := client.PrimaryModelEntry()
 		if entry.ProviderConfig == nil || entry.ProviderImpl == nil || strings.TrimSpace(entry.ModelID) == "" {
+			log.Warnf("failed to resolve aux model pool entry, skipping model_ref=%v error=produced unusable client", selectedRef)
 			constructionErrs = append(constructionErrs, fmt.Errorf("%s: produced unusable client", selectedRef))
 			continue
 		}
