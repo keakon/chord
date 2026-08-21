@@ -317,9 +317,10 @@ func rawToolResultForVerification(payload *ToolResultPayload) string {
 func (a *MainAgent) toolResultParts(text string, images []message.ContentPart) []message.ContentPart {
 	a.llmMu.RLock()
 	client := a.llmClient
+	modelName := a.modelName
 	a.llmMu.RUnlock()
 	parts, dropped := toolResultPartsForCapability(text, images, client)
-	if dropped.any() {
+	if dropped.any() && a.unsupportedPartToast.first(modelName, toastCategoryToolResult, dropped.summary()) {
 		a.emitToTUI(ToastEvent{Message: "The current model does not support " + dropped.summary() + " tool-result attachments; attachments were ignored", Level: "warn"})
 	}
 	return parts

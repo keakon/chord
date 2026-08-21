@@ -345,6 +345,7 @@ type MainAgent struct {
 	usageLedger            *analytics.UsageLedger
 	usageEventSink         func(event analytics.UsageEvent)
 	walltime               *walltimeRecorder
+	unsupportedPartToast   toastGate
 	skillsMu               sync.RWMutex
 	loadedSkills           []*skill.Meta
 	invokedSkills          map[string]*skill.Meta
@@ -1719,6 +1720,7 @@ func (a *MainAgent) filterUnsupportedParts(content string, parts []message.Conte
 
 	a.llmMu.RLock()
 	client := a.llmClient
+	modelName := a.modelName
 	a.llmMu.RUnlock()
 	if client == nil {
 		return content, parts
@@ -1755,10 +1757,12 @@ func (a *MainAgent) filterUnsupportedParts(content string, parts []message.Conte
 			unique = append(unique, d)
 		}
 	}
-	a.emitToTUI(ToastEvent{
-		Message: "The current model does not support " + strings.Join(unique, "/") + " input; attachments were ignored",
-		Level:   "warn",
-	})
+	if a.unsupportedPartToast.first(modelName, toastCategoryInput, droppedSummary(unique)) {
+		a.emitToTUI(ToastEvent{
+			Message: "The current model does not support " + strings.Join(unique, "/") + " input; attachments were ignored",
+			Level:   "warn",
+		})
+	}
 
 	// If only text parts remain, collapse to plain content.
 	if len(filtered) == 0 {

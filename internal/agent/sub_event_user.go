@@ -188,7 +188,7 @@ func (s *SubAgent) filterUnsupportedParts(content string, parts []message.Conten
 	if len(parts) == 0 {
 		return content, parts
 	}
-	llmClient, _ := s.llmSnapshot()
+	llmClient, modelName := s.llmSnapshot()
 	if llmClient == nil {
 		return content, parts
 	}
@@ -210,7 +210,7 @@ func (s *SubAgent) filterUnsupportedParts(content string, parts []message.Conten
 		}
 		filtered = append(filtered, p)
 	}
-	if len(dropped) > 0 {
+	if len(dropped) > 0 && s.unsupportedPartToast.first(modelName, toastCategoryInput, droppedSummary(dropped)) {
 		s.parent.emitToTUI(ToastEvent{
 			Level:   "warn",
 			Message: "Input dropped (unsupported): " + strings.Join(dropped, ", "),
@@ -224,9 +224,9 @@ func (s *SubAgent) filterUnsupportedParts(content string, parts []message.Conten
 }
 
 func (s *SubAgent) toolResultParts(text string, images []message.ContentPart) []message.ContentPart {
-	llmClient, _ := s.llmSnapshot()
+	llmClient, modelName := s.llmSnapshot()
 	parts, dropped := toolResultPartsForCapability(text, images, llmClient)
-	if dropped.any() {
+	if dropped.any() && s.unsupportedPartToast.first(modelName, toastCategoryToolResult, dropped.summary()) {
 		s.parent.emitToTUI(ToastEvent{
 			Level:   "warn",
 			Message: "Tool-result attachments dropped (unsupported): " + dropped.summary(),

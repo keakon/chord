@@ -522,7 +522,9 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	llmClient, modelName, selectedRef, prevRunningRef := a.llmSnapshot()
 	if filtered, dropped := filterUnsupportedBinaryPartsForModel(messages, llmClient); dropped.any() {
 		log.Warnf("dropping unsupported binary parts before LLM request kinds=%s", dropped.summary())
-		a.emitToTUI(ToastEvent{Level: "warn", Message: "The current model does not support " + dropped.summary() + " input; attachments were ignored", AgentID: a.instanceID})
+		if a.unsupportedPartToast.first(modelName, toastCategoryInput, dropped.summary()) {
+			a.emitToTUI(ToastEvent{Level: "warn", Message: "The current model does not support " + dropped.summary() + " input; attachments were ignored", AgentID: a.instanceID})
+		}
 		messages = filtered
 	}
 

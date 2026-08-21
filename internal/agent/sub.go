@@ -98,35 +98,36 @@ const inputChanCap = 64
 // external user input is enqueued via InjectUserMessage / InjectUserMessageWithParts.
 // Cross-goroutine lifecycle flags use atomics.
 type SubAgent struct {
-	instanceID         string // immutable, from NextInstanceID()
-	taskID             string // plan task ID or "adhoc-N"
-	agentDefName       string // agent definition name (e.g. "backend-coder")
-	taskDesc           string // task description (from Plan or ad-hoc)
-	planTaskRef        string
-	semanticTaskKey    string
-	writeScope         tools.WriteScope
-	ownerMu            sync.RWMutex
-	ownerAgentID       string
-	ownerTaskID        string
-	depth              int
-	joinToOwner        bool
-	delegation         config.DelegationConfig
-	color              string // optional ANSI color code from agent config for TUI display
-	llmMu              sync.RWMutex
-	llmClient          *llm.Client
-	llmRequestInFlight atomic.Bool
-	persistenceHealth  agentPersistenceHealth
-	startupWatchdogSeq atomic.Uint64
-	done               chan struct{}
-	doneOnce           sync.Once
-	started            atomic.Bool
-	lifecycleMu        sync.Mutex      // coordinates parking with external wake-and-deliver operations
-	ctxMgr             *ctxmgr.Manager // own context; automatic compaction disabled
-	tools              *tools.Registry // shared base + SubAgent-specific tools
-	parent             *MainAgent      // reference to parent for event forwarding
-	parentCtx          context.Context
-	cancel             context.CancelFunc
-	recovery           *recovery.RecoveryManager // shared with MainAgent, thread-safe
+	instanceID           string // immutable, from NextInstanceID()
+	taskID               string // plan task ID or "adhoc-N"
+	agentDefName         string // agent definition name (e.g. "backend-coder")
+	taskDesc             string // task description (from Plan or ad-hoc)
+	planTaskRef          string
+	semanticTaskKey      string
+	writeScope           tools.WriteScope
+	ownerMu              sync.RWMutex
+	ownerAgentID         string
+	ownerTaskID          string
+	depth                int
+	joinToOwner          bool
+	delegation           config.DelegationConfig
+	color                string // optional ANSI color code from agent config for TUI display
+	llmMu                sync.RWMutex
+	llmClient            *llm.Client
+	llmRequestInFlight   atomic.Bool
+	unsupportedPartToast toastGate
+	persistenceHealth    agentPersistenceHealth
+	startupWatchdogSeq   atomic.Uint64
+	done                 chan struct{}
+	doneOnce             sync.Once
+	started              atomic.Bool
+	lifecycleMu          sync.Mutex      // coordinates parking with external wake-and-deliver operations
+	ctxMgr               *ctxmgr.Manager // own context; automatic compaction disabled
+	tools                *tools.Registry // shared base + SubAgent-specific tools
+	parent               *MainAgent      // reference to parent for event forwarding
+	parentCtx            context.Context
+	cancel               context.CancelFunc
+	recovery             *recovery.RecoveryManager // shared with MainAgent, thread-safe
 
 	// turnMu guards concurrent CancelSubAgent vs runLoop turn creation.
 	turnMu sync.Mutex
@@ -763,7 +764,9 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 	}
 	if filtered, dropped := filterUnsupportedBinaryPartsForModel(messages, llmClient); dropped.any() {
 		log.Warnf("SubAgent dropping unsupported binary parts before LLM request agent=%v kinds=%s", s.instanceID, dropped.summary())
-		s.parent.emitToTUI(ToastEvent{Level: "warn", Message: "Input dropped (unsupported): " + dropped.summary(), AgentID: s.instanceID})
+		if s.unsupportedPartToast.first(modelName, toastCategoryInput, dropped.summary()) {
+			s.parent.emitToTUI(ToastEvent{Level: "warn", Message: "Input dropped (unsupported): " + dropped.summary(), AgentID: s.instanceID})
+		}
 		messages = filtered
 	}
 	compatCfg := llmClient.ThinkingToolcallCompat()
