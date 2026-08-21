@@ -315,7 +315,6 @@ func TestApplyPatchErrorCardKeepsHighlightedPatchPreview(t *testing.T) {
 func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
 	args := `{"patch":"*** Begin Patch\n*** Update File: committed.go\n@@\n-old\n+new\n*** Update File: failed.go\n@@\n-missing\n+replacement\n*** End Patch"}`
 	longReasonTail := "failure-reason-tail-must-not-wrap"
-	longNextActionTail := "next-action-tail-must-not-wrap"
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
 		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
@@ -335,14 +334,7 @@ func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
 			"",
 			"Not applied:",
 			"- failed.go: hunk not found; " + strings.Repeat("long explanation ", 8) + longReasonTail,
-			"Next action: " + strings.Repeat("revise the operation ", 8) + longNextActionTail,
-			"Unapplied operations (reference copy; do not submit unchanged):",
-			"*** Begin Patch",
-			"*** Update File: failed.go",
-			"@@",
-			"-missing",
-			"+replacement",
-			"*** End Patch",
+			"Changes under \"Applied patch\" are already on disk; resolve each cause above and resubmit only the failed file groups rebuilt from current file contents.",
 		}, "\n"),
 		Diff: "--- committed.go\n+++ committed.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 	}
@@ -353,7 +345,7 @@ func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
 			t.Fatalf("expected partially applied patch to contain %q, got:\n%s", want, plain)
 		}
 	}
-	for _, duplicate := range []string{"↳ Requested patch:", "Applied patch:", longReasonTail, longNextActionTail} {
+	for _, duplicate := range []string{"↳ Requested patch:", "Applied patch:", longReasonTail, "*** Begin Patch"} {
 		if strings.Contains(plain, duplicate) {
 			t.Fatalf("expected partially applied patch to omit requested patch content %q, got:\n%s", duplicate, plain)
 		}
@@ -373,7 +365,7 @@ func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
 		t.Fatalf("expected long failure line to be truncated, got %q", stripANSI(failureLine))
 	}
 	copyContent := toolCallMarkdownContent(block)
-	for _, preserved := range []string{longReasonTail, longNextActionTail} {
+	for _, preserved := range []string{longReasonTail} {
 		if !strings.Contains(copyContent, preserved) {
 			t.Fatalf("expected copied tool content to preserve %q, got:\n%s", preserved, copyContent)
 		}

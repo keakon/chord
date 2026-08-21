@@ -631,12 +631,15 @@ func TestComposeToolResultTextsDoesNotAppendErrorAlreadyDescribedByTool(t *testi
 	for _, want := range []string{
 		"1 change committed; 1 file group not applied.",
 		"Not applied:",
-		"Next action: resolve each failure above",
-		"Unapplied operations (reference copy; do not submit unchanged):",
+		"- missing.txt:",
+		"resolve each cause above and resubmit only the failed file groups rebuilt from current file contents",
 	} {
 		if !strings.Contains(display, want) {
 			t.Fatalf("display missing %q: %q", want, display)
 		}
+	}
+	if strings.Contains(display, "*** Update File: missing.txt") {
+		t.Fatalf("display must not echo the submitted patch back: %q", display)
 	}
 	if strings.Contains(display, "\n\nError:") {
 		t.Fatalf("display must not append a duplicate error summary: %q", display)

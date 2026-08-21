@@ -253,9 +253,8 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 // applyPatchPartial commits the successfully-planned operations, wires LSP
 // diagnostics and diff/changed-files for them, then returns an error whose
 // message tells the model exactly which changes committed, which operation
-// groups did not, and why. It also preserves the unapplied operations as a
-// patch template to revise against the current workspace; failed operation
-// groups are not written to disk.
+// groups did not, and why each failed; failed operation groups are not
+// written to disk.
 func (t ApplyPatchTool) applyPatchPartial(ctx context.Context, result ApplyPatchPlanResult) (string, error) {
 	plan := result.Plan
 	if err := CommitMutationPlan(plan); err != nil {
@@ -304,9 +303,15 @@ func (t ApplyPatchTool) applyPatchPartial(ctx context.Context, result ApplyPatch
 	}
 	failed := make([]string, 0, len(failedFiles))
 	for _, file := range failedFiles {
-		reasons := make([]string, len(file.reasons))
-		for i, reason := range file.reasons {
-			reasons[i] = trimApplyPatchFailurePathPrefix(file.path, reason)
+		var reasons []string
+		for _, reason := range file.reasons {
+			trimmed := trimApplyPatchFailurePathPrefix(file.path, reason)
+			// Several ops in one group can fail for the same cause; repeating
+			// it adds nothing the model can act on.
+			if len(reasons) > 0 && reasons[len(reasons)-1] == trimmed {
+				continue
+			}
+			reasons = append(reasons, trimmed)
 		}
 		failed = append(failed, fmt.Sprintf("- %s: %s", file.path, strings.Join(reasons, "; ")))
 	}
@@ -324,12 +329,8 @@ func (t ApplyPatchTool) applyPatchPartial(ctx context.Context, result ApplyPatch
 	b.WriteString("Not applied:\n")
 	b.WriteString(strings.Join(failed, "\n"))
 	if len(plan.Mutations) > 0 {
-		b.WriteString("\nNext action: resolve each failure above, re-read targets when instructed, and revise the operations below against the current workspace. Submit only the revised operations; do not include changes already listed under Applied patch.\n")
-	} else {
-		b.WriteString("\nNext action: resolve each failure above, re-read targets when instructed, and revise the operations below against the current workspace. Submit the revised operations only.\n")
+		b.WriteString("\n\nChanges under \"Applied patch\" are already on disk; resolve each cause above and resubmit only the failed file groups rebuilt from current file contents.")
 	}
-	b.WriteString("Unapplied operations (reference copy; do not submit unchanged):\n")
-	b.WriteString(result.UnappliedPatch())
 	if firstFailedErr == nil {
 		firstFailedErr = fmt.Errorf("apply_patch failed")
 	}
@@ -510,57 +511,6 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 		return applyPatchDocument{}, fmt.Errorf("no files were modified")
 	}
 	return doc, nil
-}
-
-// renderApplyPatchOperations renders a set of operations back into the Codex
-// apply_patch wire format, preserving the original path spellings, hunk
-// headers, end-of-file markers, and context/+/- line prefixes. The partial-
-// failure path uses it to preserve unapplied operations as an editable
-// reference without asking the model to reconstruct already-committed files.
-func renderApplyPatchOperations(ops []applyPatchOperation) string {
-	if len(ops) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("*** Begin Patch\n")
-	for _, op := range ops {
-		switch op.Kind {
-		case MutationAdd:
-			b.WriteString("*** Add File: " + op.Path + "\n")
-			// Parsed add content always ends with exactly one final newline per
-			// line, so strip only that terminator: trimming every trailing
-			// newline would silently drop intentional blank lines at EOF.
-			for line := range strings.SplitSeq(strings.TrimSuffix(op.Content, "\n"), "\n") {
-				b.WriteByte('+')
-				b.WriteString(line)
-				b.WriteByte('\n')
-			}
-		case MutationDelete:
-			b.WriteString("*** Delete File: " + op.Path + "\n")
-		case MutationUpdate:
-			b.WriteString("*** Update File: " + op.Path + "\n")
-			if op.MovePath != "" {
-				b.WriteString("*** Move to: " + op.MovePath + "\n")
-			}
-			for _, hunk := range op.Hunks {
-				// Always emit the @@ marker, even for a bare header: it is the
-				// only hunk boundary, and omitting it merges adjacent hunks
-				// into one contiguous pattern on re-parse, which can never
-				// match the file again.
-				b.WriteString("@@" + hunk.Header + "\n")
-				for _, line := range hunk.Lines {
-					b.WriteByte(line.Kind)
-					b.WriteString(line.Text)
-					b.WriteByte('\n')
-				}
-				if hunk.EndOfFile {
-					b.WriteString("*** End of File\n")
-				}
-			}
-		}
-	}
-	b.WriteString("*** End Patch")
-	return b.String()
 }
 
 func ApplyPatchTargets(raw json.RawMessage, baseDir string) ([]MutationTarget, error) {
@@ -764,19 +714,12 @@ func BuildApplyPatchPlan(ctx context.Context, patch, baseDir string) (MutationPl
 }
 
 // applyPatchOpResult describes one patch operation's application outcome.
-// needsRetry marks operations omitted from the final plan: any op in a file
-// group whose group was discarded (whether it individually matched or not),
-// because file-level atomicity committed nothing from that group. The name is
-// internal bookkeeping; the model-facing result presents these as operations
-// to revise, not as a patch that is safe to submit unchanged. succeeded +
-// rolledBack marks an op that matched in memory but was reverted when a later
-// op in the same group failed; its err is descriptive only and does not
-// contribute to the wrapped root-cause error. Succeeded operations in
-// committed groups have needsRetry=false.
+// succeeded + rolledBack marks an op that matched in memory but was reverted
+// when a later op in the same group failed; its err is descriptive only and
+// does not contribute to the wrapped root-cause error.
 type applyPatchOpResult struct {
 	op         applyPatchOperation
 	succeeded  bool
-	needsRetry bool
 	rolledBack bool
 	err        error
 	reason     string
@@ -801,25 +744,6 @@ func (r ApplyPatchPlanResult) HasFailures() bool {
 		}
 	}
 	return false
-}
-
-// UnappliedPatch renders a Codex apply_patch document containing every
-// operation omitted from the final plan. File-level atomicity discards every
-// op in a discarded file group (even ops that individually matched in memory),
-// so this reference copy carries the complete failed dependency chain, not
-// just the operation whose hunk failed. The root failure must be resolved and
-// stale operations revised before this patch is submitted again.
-func (r ApplyPatchPlanResult) UnappliedPatch() string {
-	var ops []applyPatchOperation
-	for _, o := range r.Outcomes {
-		if o.needsRetry {
-			ops = append(ops, o.op)
-		}
-	}
-	if len(ops) == 0 {
-		return ""
-	}
-	return renderApplyPatchOperations(ops)
 }
 
 // buildApplyPatchPlanWithOutcomes keeps BuildApplyPatchPlan as the successful
@@ -858,7 +782,7 @@ func buildApplyPatchPlanWithOutcomes(ctx context.Context, patch, baseDir string)
 	// independent operation committed to its destination in the meantime.
 	failedPaths := make(map[string]struct{})
 	// groupOpIndices tracks outcome indices by source so that when a file group
-	// fails we can retroactively mark every op in the group as needsRetry.
+	// fails we can retroactively roll back every op in the group.
 	groupOpIndices := make(map[string][]int)
 	groupPathsBySource := make(map[string]map[string]struct{})
 	// latestGroupByPath and dependentGroups capture ordering dependencies
@@ -917,7 +841,6 @@ func buildApplyPatchPlanWithOutcomes(ctx context.Context, patch, baseDir string)
 					continue
 				}
 				outcomes[idx].succeeded = false
-				outcomes[idx].needsRetry = true
 				outcomes[idx].rolledBack = true
 				rolledBackErr := fmt.Errorf("rolled back: %s", groupReason)
 				outcomes[idx].err = rolledBackErr
@@ -945,9 +868,7 @@ func buildApplyPatchPlanWithOutcomes(ctx context.Context, patch, baseDir string)
 					failedPaths[path] = struct{}{}
 				}
 			}
-			idx := len(outcomes)
 			outcomes = append(outcomes, failedApplyPatchOpResult(op, resolveErr))
-			outcomes[idx].needsRetry = true
 			continue
 		}
 		if groupPathsBySource[source] == nil {
@@ -969,7 +890,6 @@ func buildApplyPatchPlanWithOutcomes(ctx context.Context, patch, baseDir string)
 			}
 			idx := len(outcomes)
 			outcomes = append(outcomes, failedApplyPatchOpResult(op, fmt.Errorf("skipped: a prior operation touching %s failed, so this operation was not applied and must remain with that dependency when revised", dependencyPath)))
-			outcomes[idx].needsRetry = true
 			outcomes[idx].rolledBack = true
 			continue
 		}
@@ -984,9 +904,7 @@ func buildApplyPatchPlanWithOutcomes(ctx context.Context, patch, baseDir string)
 			if replayErr := rollbackGroup(source, fmt.Sprintf("a later operation that modified %s failed, so this matched operation was not written to disk; keep it with the failed operation when revising the group", source)); replayErr != nil {
 				return ApplyPatchPlanResult{}, replayErr
 			}
-			idx := len(outcomes)
 			outcomes = append(outcomes, failedApplyPatchOpResult(op, err))
-			outcomes[idx].needsRetry = true
 			continue
 		}
 		idx := len(outcomes)
@@ -1114,7 +1032,7 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 	switch op.Kind {
 	case MutationAdd:
 		if state.exists {
-			return fmt.Errorf("cannot add file that already exists: %s. This operation was not applied", op.Path)
+			return fmt.Errorf("cannot add file that already exists: %s", op.Path)
 		}
 		state.mode = 0o644
 		state.exists = true
@@ -1136,7 +1054,7 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 		if len(op.Hunks) > 0 {
 			decoded, err := decodeTextBytes(state.bytes, source)
 			if err != nil {
-				return fmt.Errorf("read update source %s: %w. This operation was not applied", op.Path, err)
+				return fmt.Errorf("read update source %s: %w", op.Path, err)
 			}
 			after, punctuationHunks, err := applyApplyPatchHunks(ctx, decoded.Text, op.Hunks)
 			if err != nil {
@@ -1145,7 +1063,7 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 			state.punctuationHunks += punctuationHunks
 			state.bytes, err = encodeString(after, decoded.Encoding)
 			if err != nil {
-				return fmt.Errorf("encode update %s: %w. This operation was not applied", op.Path, err)
+				return fmt.Errorf("encode update %s: %w", op.Path, err)
 			}
 		}
 		if op.MovePath == "" {
@@ -1178,7 +1096,7 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 
 func applyPatchMissingSourceError(displayPath, baseDir string) error {
 	return withPathSuggestionsInDir(
-		fmt.Sprintf("read apply_patch source %s: file not found: %s. This operation was not applied", displayPath, displayPath),
+		fmt.Sprintf("read apply_patch source %s: file not found: %s", displayPath, displayPath),
 		displayPath, baseDir, PathTargetRegularFile,
 	)
 }
@@ -1543,7 +1461,7 @@ func applyPatchHunkNotFoundError(fileLines, oldSeq []string, searchStart, index,
 	} else if line := findApplyPatchSubstringLine(fileLines, oldSeq); line >= 0 {
 		parts = append(parts, fmt.Sprintf("the expected text is only part of current line %d; include that complete line in the hunk", line+1))
 	}
-	parts = append(parts, "re-read the current target range and rebuild this hunk from current complete lines; do not retry the same hunk unchanged. This operation was not applied")
+	parts = append(parts, "re-read the current target range and rebuild this hunk from current complete lines; do not retry the same hunk unchanged")
 	return fmt.Errorf("%s", strings.Join(parts, "; "))
 }
 
@@ -1566,7 +1484,7 @@ func applyPatchUnsafePunctuationMatchError(oldSeq []string, index, total, match 
 	if expected := applyPatchExpectedLineDescription(oldSeq); expected != "" {
 		parts = append(parts, expected)
 	}
-	parts = append(parts, "re-read the current target range and use exact complete lines. This operation was not applied")
+	parts = append(parts, "re-read the current target range and use exact complete lines")
 	return fmt.Errorf("%s", strings.Join(parts, "; "))
 }
 
