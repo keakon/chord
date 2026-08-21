@@ -725,12 +725,12 @@ func TestMainAgentRolePromptBlock_UsesPlannerPromptOnlyForPlannerRole(t *testing
 	a := &MainAgent{}
 	a.activeConfig = &config.AgentConfig{Name: "planner"}
 	got := a.mainAgentRolePromptBlock()
-	for _, want := range []string{"Save the plan document under .chord/plans/ as plan-<NNN>.md, using the next unused three-digit number", "Explore the codebase using the tools and permissions available in this role."} {
+	for _, want := range []string{"Save the plan document under .chord/plans/ as plan-<NNN>.md, using the next unused three-digit number", "Explore the codebase using the tools and permissions available in this role.", "Answer directly and stop (no plan file, no Handoff) when the user asks for any", "When the user rejects Handoff"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("planner prompt missing %q in %q", want, got)
 		}
 	}
-	for _, unwanted := range []string{"Use Read, Grep, Glob to explore the codebase", "Write the plan document using the Write tool", "Call Handoff with the plan file path.", "## Guidelines"} {
+	for _, unwanted := range []string{"Use Read, Grep, Glob to explore the codebase", "Write the plan document using the Write tool", "Call Handoff with the plan file path.", "## Guidelines", "just do the task directly"} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("planner prompt should avoid static tool references %q in %q", unwanted, got)
 		}
@@ -773,6 +773,15 @@ handoff: allow
 	}
 	if !strings.Contains(got, "If this role supports handoff to execution, do it only after the plan file exists.") {
 		t.Fatalf("planner prompt with Handoff should include handoff path, got %q", got)
+	}
+	for _, want := range []string{
+		"never hand off a direct answer or a plan the user only asked to review",
+		"A request you can answer directly does not need a plan document",
+		"Revise the existing plan file referenced by that message",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("planner prompt with Handoff missing %q in %q", want, got)
+		}
 	}
 }
 

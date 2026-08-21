@@ -273,24 +273,38 @@ func (a *MainAgent) plannerModePromptBlock() string {
 		hasFileWrite = hasWrite || hasPatch
 		_, hasHandoff = visible[tools.NameHandoff]
 	}
-	step4 := "4. Save the plan document under .chord/plans/ as plan-<NNN>.md, using the next unused three-digit number (for example .chord/plans/plan-001.md), before handing it off or finishing the planning turn."
+	fileWriteStep := "5. Save the plan document under .chord/plans/ as plan-<NNN>.md, using the next unused three-digit number (for example .chord/plans/plan-001.md), before handing it off or finishing the planning turn."
 	if hasFileWrite {
-		step4 += " Write the plan document with the visible file tools available in this role."
+		fileWriteStep += " Write the plan document with the visible file tools available in this role."
 	} else {
-		step4 += " If this role cannot write the plan file, explain the limitation and " + a.plannerPermissionAdjustmentInstruction() + "."
+		fileWriteStep += " If this role cannot write the plan file, explain the limitation and " + a.plannerPermissionAdjustmentInstruction() + "."
 	}
-	step5 := "5. "
+	handoffStep := "6. "
 	if hasHandoff {
-		step5 += "If this role supports handoff to execution, do it only after the plan file exists. Do not stop with only a text response when handoff is available."
+		handoffStep += "If this role supports handoff to execution, do it only after the plan file exists. Hand off only when the request actually needs execution: never hand off a direct answer or a plan the user only asked to review."
 	} else {
-		step5 += "Handoff is unavailable in this role. Return the saved plan path or the plan content needed for the next step, and explain the limitation clearly."
+		handoffStep += "Handoff is unavailable in this role. Return the saved plan path or the plan content needed for the next step, and explain the limitation clearly."
 	}
 	return strings.TrimSpace(`
 
 ## Planning Mode
 
 You are now in planning mode. Your goal is to analyse the user's request, explore
-the codebase as needed, and produce a concrete execution plan.
+the codebase as needed, and produce a concrete execution plan — or to answer
+directly when the request does not call for one.
+
+### Decide what to deliver first
+Answer directly and stop (no plan file, no Handoff) when the user asks for any
+of the following:
+- An explanation, recommendation, comparison, or diagnosis
+- A read-only review or analysis — including verification of a report or existing
+  plan — whose deliverable is the conclusion itself
+- A change small enough to describe without a task breakdown
+
+Create a plan document only when the request needs concrete implementation work
+for an execution role, or when the user explicitly asks for a plan. If the user
+asked only for the plan, save the document and return a summary without calling
+Handoff.
 
 ### Workflow
 1. If the user has not yet described what they want to accomplish (their message
@@ -300,8 +314,17 @@ the codebase as needed, and produce a concrete execution plan.
 2. Explore the codebase using the tools and permissions available in this role.
 3. Analyse the requirements and decompose them into concrete, independently-
    executable tasks.
-` + step4 + `
-` + step5 + `
+4. For direct-answer requests, stop after the answer — do not create a plan file
+   and do not call Handoff.
+` + fileWriteStep + `
+` + handoffStep + `
+
+### When the user rejects Handoff
+The rejection is appended to the conversation as a user message ("Handoff
+rejected: <reason>") and becomes the latest request driving this turn:
+- Revise the existing plan file referenced by that message; do not create a new
+  plan-<NNN>.md number for the same plan.
+- Call Handoff again only after addressing the rejection reason.
 
 ### Plan Document Format
 Write a Markdown document with this structure:
@@ -329,7 +352,8 @@ Rules:
 - Do NOT include status markers — they are added during execution
 
 ### Plan quality requirements
-- A plan with only 1 step is not a plan — just do the task directly
+- A request you can answer directly does not need a plan document — answer it and stop
+- A plan with only 1 step is not a plan: describe the single change directly instead of writing a document, unless the user explicitly asked for a plan
 - Each step must name the specific file(s) to modify
 - Avoid vague verbs: "handle", "improve", "update" — use "add", "remove", "rename", "extract"
 - Include a verification step: how will you know each step succeeded?
