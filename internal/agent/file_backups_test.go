@@ -16,7 +16,7 @@ func TestFileBackupManagerPrunesPerPathInCreationOrder(t *testing.T) {
 	mgr := newFileBackupManager(dir)
 	path := filepath.Join(dir, "target.txt")
 	for i := range maxToolBackupsPerPath + 2 {
-		if _, err := mgr.Backup(path, "Edit", []byte(fmt.Sprintf("backup-%02d", i))); err != nil {
+		if _, err := mgr.Backup(path, "Edit", fmt.Appendf(nil, "backup-%02d", i)); err != nil {
 			t.Fatalf("Backup %d: %v", i, err)
 		}
 	}
@@ -201,7 +201,7 @@ func TestFileBackupManagerReindexesExistingBackups(t *testing.T) {
 
 	first := newFileBackupManager(dir)
 	for i := range 3 {
-		if _, err := first.Backup(path, "Edit", []byte(fmt.Sprintf("backup-%02d", i))); err != nil {
+		if _, err := first.Backup(path, "Edit", fmt.Appendf(nil, "backup-%02d", i)); err != nil {
 			t.Fatalf("Backup %d: %v", i, err)
 		}
 	}
@@ -223,7 +223,7 @@ func TestFileBackupManagerReindexesExistingBackups(t *testing.T) {
 	// The reindexed manager enforces the per-path cap across the boundary:
 	// 3 existing + 9 new = 12, so the 2 oldest are pruned and 10 remain.
 	for i := range 8 {
-		if _, err := second.Backup(path, "Edit", []byte(fmt.Sprintf("more-%02d", i))); err != nil {
+		if _, err := second.Backup(path, "Edit", fmt.Appendf(nil, "more-%02d", i)); err != nil {
 			t.Fatalf("Backup %d: %v", i, err)
 		}
 	}

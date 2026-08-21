@@ -31,7 +31,9 @@ func TestFreshToolOutputsAreNeverSummarizedAtFirstSight(t *testing.T) {
 	bigSearch := func() string {
 		var b strings.Builder
 		for i := range 200 {
-			b.WriteString("internal/agent/file" + strconv.Itoa(i) + ".go:12: match line\n")
+			b.WriteString("internal/agent/file")
+			b.WriteString(strconv.Itoa(i))
+			b.WriteString(".go:12: match line\n")
 		}
 		return b.String()
 	}()
@@ -165,10 +167,18 @@ func TestDiffSummarySupportsPlainUnifiedDiff(t *testing.T) {
 func TestDiffSummaryDoesNotDuplicateStandardGitFiles(t *testing.T) {
 	var content strings.Builder
 	for i := 1; i <= 13; i++ {
-		content.WriteString("diff --git a/f" + strconv.Itoa(i) + ".txt b/f" + strconv.Itoa(i) + ".txt\n")
+		content.WriteString("diff --git a/f")
+		content.WriteString(strconv.Itoa(i))
+		content.WriteString(".txt b/f")
+		content.WriteString(strconv.Itoa(i))
+		content.WriteString(".txt\n")
 		content.WriteString("index 3367afd..3e75765 100644\n")
-		content.WriteString("--- a/f" + strconv.Itoa(i) + ".txt\n")
-		content.WriteString("+++ b/f" + strconv.Itoa(i) + ".txt\n")
+		content.WriteString("--- a/f")
+		content.WriteString(strconv.Itoa(i))
+		content.WriteString(".txt\n")
+		content.WriteString("+++ b/f")
+		content.WriteString(strconv.Itoa(i))
+		content.WriteString(".txt\n")
 		content.WriteString("@@ -1 +1 @@\n-old\n+new\n")
 	}
 

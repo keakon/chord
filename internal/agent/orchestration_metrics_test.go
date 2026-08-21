@@ -99,8 +99,9 @@ func BenchmarkOrchestrationMailboxTrackingAtCapacity(b *testing.B) {
 		metrics.recordMailboxCreated(fmt.Sprintf("seed-%d", i), now)
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		metrics.recordMailboxCreated(fmt.Sprintf("msg-%d", i), now)
+	var sent int
+	for b.Loop() {
+		sent++
+		metrics.recordMailboxCreated(fmt.Sprintf("msg-%d", sent), now)
 	}
 }

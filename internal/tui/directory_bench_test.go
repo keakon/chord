@@ -24,7 +24,7 @@ func BenchmarkRenderDirectoryOpen(b *testing.B) {
 	m := benchmarkModelForDirectoryView()
 	_ = m.renderDirectory()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = m.renderDirectory()
 	}
 }

@@ -93,7 +93,7 @@ func TestWaitForAgentEventDoesNotDelayNonStreamingEvent(t *testing.T) {
 }
 
 func BenchmarkWaitForAgentEventStreamTextMicroBatch(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		ch := make(chan agent.AgentEvent, agentEventBatchMax)
 		for range agentEventBatchMax {
 			ch <- agent.StreamTextEvent{Text: "x"}
@@ -110,8 +110,8 @@ func BenchmarkWaitForAgentEventPacedStreamTextMicroBatch(b *testing.B) {
 	const events = 5
 	var totalBatches int
 	var totalEvents int
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
+		completed := totalEvents
 		ch := make(chan agent.AgentEvent, events)
 		ch <- agent.StreamTextEvent{Text: "0"}
 		go func() {
@@ -124,14 +124,13 @@ func BenchmarkWaitForAgentEventPacedStreamTextMicroBatch(b *testing.B) {
 		batch := msg.(agentEventBatchMsg)
 		totalBatches++
 		totalEvents += len(batch)
-		for totalEvents < (i+1)*events {
+		for totalEvents < completed+events {
 			msg := waitForAgentEvent(ch)()
 			batch := msg.(agentEventBatchMsg)
 			totalBatches++
 			totalEvents += len(batch)
 		}
 	}
-	b.StopTimer()
 	b.ReportMetric(float64(totalEvents)/float64(totalBatches), "events/batch")
 	b.ReportMetric(float64(totalBatches)/float64(totalEvents), "batches/event")
 }

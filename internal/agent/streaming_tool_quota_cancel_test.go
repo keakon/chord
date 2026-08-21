@@ -227,7 +227,7 @@ func TestSubAgentPromotedBatchLargerThanToolChannelDoesNotBlockScheduler(t *test
 		call := message.ToolCall{
 			ID:   fmt.Sprintf("read-%d", i),
 			Name: "read",
-			Args: []byte(fmt.Sprintf(`{"path":"file-%d"}`, i)),
+			Args: fmt.Appendf(nil, `{"path":"file-%d"}`, i),
 		}
 		calls = append(calls, call)
 		turn.recordPendingToolCall(PendingToolCall{CallID: call.ID, Name: call.Name, ArgsJSON: string(call.Args), AgentID: s.instanceID})

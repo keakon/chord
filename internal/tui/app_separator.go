@@ -129,11 +129,7 @@ func renderAnimatedSeparatorVariant(width int, theme Theme, variant string, busy
 
 	var b strings.Builder
 	for i, r := range plain {
-		style := styles[i]
-		if style.GetForeground() == nil {
-			style = baseStyle
-		}
-		b.WriteString(style.Render(string(r)))
+		b.WriteString(styles[i].Render(string(r)))
 	}
 	return b.String()
 }

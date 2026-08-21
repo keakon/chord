@@ -27,7 +27,7 @@ func BenchmarkRenderHandoffSelectDialogOpen(b *testing.B) {
 	m := benchmarkModelForHandoffDialog()
 	_ = m.renderHandoffSelectDialog()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = m.renderHandoffSelectDialog()
 	}
 }
