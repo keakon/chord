@@ -501,15 +501,23 @@ type MainAgent struct {
 	thinkingTranslateSvc  *thinkingtranslate.Service
 	thinkingTranslateSeen map[string]struct{}
 
-	sessionDir          string
-	modelName           string
-	providerModelRef    string // "provider/model" for unique identification
-	runningModelRef     string // actual model used in latest LLM call
-	previousLLMModelRef string
-	instanceID          string
-	mcpClientInfo       mcp.ClientInfo
-	globalIdle          atomic.Bool
-	lastIdleTurnID      atomic.Uint64
+	sessionDir                  string
+	modelName                   string
+	providerModelRef            string // "provider/model" for unique identification
+	runningModelRef             string // actual model used in latest LLM call
+	previousLLMModelRef         string
+	instanceID                  string
+	mcpClientInfo               mcp.ClientInfo
+	globalIdle                  atomic.Bool
+	globalActivityEpoch         atomic.Uint64
+	lastIdleTurnID              atomic.Uint64
+	lastGlobalIdleActivityEpoch uint64
+	// suppressNextGlobalIdleNotification is a one-shot, event-loop-only flag set
+	// when a user-initiated model-pool switch applies immediately. The next
+	// global-idle broadcast consumes it so the resulting notification does not
+	// surface as a task-completion alert. It is only touched on the event-loop
+	// goroutine.
+	suppressNextGlobalIdleNotification bool
 
 	// turnMu protects the turn pointer for cross-goroutine access.
 	// The event-loop goroutine writes turn in newTurn(); external goroutines

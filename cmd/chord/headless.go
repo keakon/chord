@@ -293,7 +293,8 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		state.updatedAt = time.Now()
 		if state.isSubscribed("idle") {
 			out = append(out, &headlessEnvelope{Type: "idle", Payload: map[string]any{
-				"last_outcome": outcome,
+				"last_outcome":               outcome,
+				"suppress_user_notification": e.SuppressUserNotification,
 			}})
 		}
 	case agent.ErrorEvent:

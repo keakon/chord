@@ -355,6 +355,7 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 
 // newTurn cancels any in-flight work and creates a fresh Turn.
 func (a *MainAgent) newTurn() {
+	a.globalActivityEpoch.Add(1)
 	a.globalIdle.Store(false)
 	a.clearContextReductionWrapUpGrace()
 	// Foreground priority: a new user turn cancels any in-flight background

@@ -118,6 +118,115 @@ func TestNonIdleActivityRearmsGlobalIdle(t *testing.T) {
 	}
 }
 
+func TestModelPoolSwitchIdleSuppressionIsOneShot(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected initial global idle")
+	}
+	<-a.Events()
+
+	a.globalIdle.Store(false)
+	a.suppressNextGlobalIdleNotification = true
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected suppressed global idle")
+	}
+	evt := <-a.Events()
+	if !evt.(GlobalIdleEvent).SuppressUserNotification {
+		t.Fatal("global idle was not marked to suppress user notification")
+	}
+
+	a.globalIdle.Store(false)
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected second global idle")
+	}
+	if evt := <-a.Events(); evt.(GlobalIdleEvent).SuppressUserNotification {
+		t.Fatal("suppression flag leaked into a later global idle")
+	}
+}
+
+func TestModelPoolSwitchDoesNotSuppressPriorActivityIdle(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	installPoolPolicyForTest(t, a)
+	if err := a.ApplyInitialModel("provider/model-a"); err != nil {
+		t.Fatalf("ApplyInitialModel: %v", err)
+	}
+	drainAgentEvents(a.Events())
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected initial global idle")
+	}
+	drainAgentEvents(a.Events())
+
+	// The real activity happened before the queued pool-switch event. The
+	// switch may be the last event processed before idle is emitted, but it must
+	// not claim the preceding task's completion notification.
+	a.emitActivity("main", ActivityExecuting, "working")
+	a.SetCurrentModelPool("fast")
+	dispatchPendingEvents(t, a)
+
+	var idle *GlobalIdleEvent
+	for _, evt := range drainAgentEvents(a.Events()) {
+		if e, ok := evt.(GlobalIdleEvent); ok {
+			idle = &e
+		}
+	}
+	if idle == nil {
+		t.Fatal("model-pool switch did not emit global idle")
+	}
+	if idle.SuppressUserNotification {
+		t.Fatal("model-pool switch suppressed a prior real activity completion")
+	}
+}
+
+func TestModelPoolSwitchIsSilent(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	installPoolPolicyForTest(t, a)
+	if err := a.ApplyInitialModel("provider/model-a"); err != nil {
+		t.Fatalf("ApplyInitialModel: %v", err)
+	}
+	drainAgentEvents(a.Events())
+
+	a.SetCurrentModelPool("fast")
+	dispatchPendingEvents(t, a)
+
+	if got := a.ModelPoolPolicy().CurrentModelPool(); got != "fast" {
+		t.Fatalf("CurrentModelPool after switch = %q, want fast", got)
+	}
+	sawSuppressedIdle := false
+	for _, evt := range drainAgentEvents(a.Events()) {
+		switch e := evt.(type) {
+		case ToastEvent:
+			t.Fatalf("model-pool switch must not show a toast: %#v", e)
+		case GlobalIdleEvent:
+			sawSuppressedIdle = true
+			if !e.SuppressUserNotification {
+				t.Fatalf("model-pool switch idle must suppress user notification: %#v", e)
+			}
+		}
+	}
+	if !sawSuppressedIdle {
+		t.Fatal("model-pool switch did not emit a suppressed global idle")
+	}
+}
+
+func TestModelPoolSwitchSuppressionConsumedWhileBusy(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.suppressNextGlobalIdleNotification = true
+	a.pendingUserMessages = []pendingUserMessage{{Content: "queued task", FromUser: true}}
+	if a.emitGlobalIdleIfReady() {
+		t.Fatal("global idle emitted while work was queued")
+	}
+	if a.suppressNextGlobalIdleNotification {
+		t.Fatal("suppression flag survived a busy idle probe")
+	}
+	a.pendingUserMessages = nil
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected global idle after work drained")
+	}
+	if evt := <-a.Events(); evt.(GlobalIdleEvent).SuppressUserNotification {
+		t.Fatal("suppression flag leaked into the real task-completion idle")
+	}
+}
+
 func TestGlobalIdleHookKeepsLastMainTurnID(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	hooks := &recordingBackgroundHookManager{}

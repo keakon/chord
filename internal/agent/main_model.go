@@ -509,12 +509,12 @@ func (a *MainAgent) handleModelsStatus() {
 
 func (a *MainAgent) handleModelsSetCurrentView(pool string) {
 	if sub := a.validFocusedSubAgent(); sub != nil {
-		if err := a.setAgentModelPool(sub.agentDefName, pool, false); err != nil {
+		if err := a.setAgentModelPool(sub.agentDefName, pool); err != nil {
 			a.emitToTUI(ErrorEvent{Err: err})
 		}
 		return
 	}
-	if err := a.setCurrentModelPool(pool, true); err != nil {
+	if err := a.setCurrentModelPool(pool); err != nil {
 		a.emitToTUI(ErrorEvent{Err: err})
 	}
 }
@@ -525,7 +525,7 @@ func (a *MainAgent) handleModelsSetAgent(rest string) {
 		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/models --agent: usage: /models --agent <name> <pool>")})
 		return
 	}
-	if err := a.setAgentModelPool(parts[0], parts[1], true); err != nil {
+	if err := a.setAgentModelPool(parts[0], parts[1]); err != nil {
 		a.emitToTUI(ErrorEvent{Err: err})
 	}
 }
@@ -584,13 +584,15 @@ func (a *MainAgent) switchMainModelForPoolIfNeeded(cfg *config.AgentConfig, pool
 	if ref == "" {
 		return nil
 	}
-	if err := a.switchModel(ref, true); err != nil {
+	// Pool switches are configuration changes, not manual model picks: skip the
+	// generic "Switched model" toast.
+	if err := a.switchModel(ref, false); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (a *MainAgent) setCurrentModelPool(pool string, emitToast bool) error {
+func (a *MainAgent) setCurrentModelPool(pool string) error {
 	if a.modelPoolPolicy == nil {
 		return fmt.Errorf("/models: model pool policy not configured")
 	}
@@ -624,12 +626,12 @@ func (a *MainAgent) setCurrentModelPool(pool string, emitToast bool) error {
 			return fmt.Errorf("/models: switch model: %w", err)
 		}
 		a.notifyMainRoutingChanged("model_pool_changed")
+		// The immediate switch may settle the runtime into quiescence; keep that
+		// moment from surfacing as a task-completion notification.
+		a.suppressNextGlobalIdleNotification = true
 	}
 	a.saveModelPoolState()
 
-	if emitToast {
-		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Model pool set to %q", pool), Level: "info"})
-	}
 	return nil
 }
 
@@ -677,7 +679,7 @@ func (a *MainAgent) switchActiveSubAgentsForPoolIfNeeded(agentName string, cfg *
 	return nil
 }
 
-func (a *MainAgent) setAgentModelPool(agentName, pool string, emitToast bool) error {
+func (a *MainAgent) setAgentModelPool(agentName, pool string) error {
 	if a.modelPoolPolicy == nil {
 		return fmt.Errorf("/models: model pool policy not configured")
 	}
@@ -714,6 +716,9 @@ func (a *MainAgent) setAgentModelPool(agentName, pool string, emitToast bool) er
 			return fmt.Errorf("/models: switch model: %w", err)
 		}
 		a.notifyMainRoutingChanged("agent_model_pool_changed")
+		// The immediate switch may settle the runtime into quiescence; keep that
+		// moment from surfacing as a task-completion notification.
+		a.suppressNextGlobalIdleNotification = true
 	} else if a.mainLLMRequestInFlight.Load() || agentInFlight {
 		a.markAgentModelPoolSwitchPending(agentName)
 		a.notifySubAgentRoutingChanged(agentName, "agent_model_pool_changed")
@@ -726,11 +731,11 @@ func (a *MainAgent) setAgentModelPool(agentName, pool string, emitToast bool) er
 		return fmt.Errorf("/models: switch model: %w", err)
 	} else {
 		a.notifySubAgentRoutingChanged(agentName, "agent_model_pool_changed")
+		// The immediate switch may settle the runtime into quiescence; keep that
+		// moment from surfacing as a task-completion notification.
+		a.suppressNextGlobalIdleNotification = true
 	}
 	a.saveModelPoolState()
 
-	if emitToast {
-		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Agent %q pool set to %q", agentName, pool), Level: "info"})
-	}
 	return nil
 }

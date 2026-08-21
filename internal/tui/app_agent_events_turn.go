@@ -48,7 +48,7 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		m.markAgentIdle("main")
 		m.stopActiveAnimationIfIdle()
 		pendingAutoContinue := m.queuedDraftsAutoContinue() || (!m.queueSyncEnabled && len(m.visibleQueuedDrafts()) > 0)
-		if !pendingAutoContinue {
+		if !evt.SuppressUserNotification && !pendingAutoContinue {
 			effects.addFollowup(m.maybeTerminalNotifyCmd(m.idleNotificationText()))
 		}
 		return true, effects

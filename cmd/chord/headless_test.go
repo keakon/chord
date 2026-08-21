@@ -965,6 +965,38 @@ func TestHeadlessGlobalIdleEventLastOutcome(t *testing.T) {
 	}
 }
 
+func TestHeadlessSuppressedGlobalIdleStillClearsBusyState(t *testing.T) {
+	state := &headlessState{
+		busy:           true,
+		phase:          string(agent.ActivityStreaming),
+		phaseDetail:    "working",
+		pendingOutcome: "completed",
+	}
+
+	envs := filterHeadlessEvent(agent.GlobalIdleEvent{SuppressUserNotification: true}, state)
+	env := findHeadlessEnvelope(envs, "idle")
+	if env == nil {
+		t.Fatalf("idle envelope missing from %#v", envs)
+	}
+	payload, ok := env.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload type = %T, want map[string]any", env.Payload)
+	}
+	if got := payload["suppress_user_notification"]; got != true {
+		t.Fatalf("suppress_user_notification = %v, want true", got)
+	}
+
+	state.mu.Lock()
+	busy := state.busy
+	phase := state.phase
+	detail := state.phaseDetail
+	lastOutcome := state.lastOutcome
+	state.mu.Unlock()
+	if busy || phase != "" || detail != "" || lastOutcome != "completed" {
+		t.Fatalf("state after suppressed idle = busy=%v phase=%q detail=%q outcome=%q", busy, phase, detail, lastOutcome)
+	}
+}
+
 func TestHeadlessActivityIdleFiltered(t *testing.T) {
 	state := &headlessState{}
 

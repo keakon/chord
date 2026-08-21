@@ -375,13 +375,22 @@ func (a *MainAgent) emitGlobalIdleIfReady() bool {
 	a.drainRunnableMailboxWork()
 	if a.currentTurn() != nil || a.loopKeepsMainBusy() || a.hasActiveSubAgentWork() || a.hasQueuedAutomaticWork() {
 		a.globalIdle.Store(false)
+		// The one-shot suppression is consumed here even though no idle fires:
+		// it must not bleed into a later real task-completion notification.
+		a.suppressNextGlobalIdleNotification = false
 		return false
 	}
 	a.parkQuiescentSubAgents()
 	if !a.globalIdle.CompareAndSwap(false, true) {
+		a.suppressNextGlobalIdleNotification = false
 		return false
 	}
-	a.emitInteractiveToTUI(a.parentCtx, GlobalIdleEvent{})
+	activityEpoch := a.globalActivityEpoch.Load()
+	suppress := a.suppressNextGlobalIdleNotification &&
+		activityEpoch == a.lastGlobalIdleActivityEpoch
+	a.lastGlobalIdleActivityEpoch = activityEpoch
+	a.suppressNextGlobalIdleNotification = false
+	a.emitInteractiveToTUI(a.parentCtx, GlobalIdleEvent{SuppressUserNotification: suppress})
 	a.fireHookBackground(a.parentCtx, hook.OnIdle, a.lastIdleTurnID.Load(), map[string]any{})
 	return true
 }

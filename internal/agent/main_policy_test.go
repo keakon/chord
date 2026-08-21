@@ -1034,7 +1034,7 @@ func TestSetCurrentModelPoolRebuildsClientWhenSelectedVariantNotInNewPool(t *tes
 		return client, "model-x", 8192, nil
 	})
 
-	if err := a.setCurrentModelPool("alt", false); err != nil {
+	if err := a.setCurrentModelPool("alt"); err != nil {
 		t.Fatalf("setCurrentModelPool: %v", err)
 	}
 	if len(factoryCalls) != 1 {
@@ -1136,7 +1136,7 @@ func TestSetCurrentModelPoolRebuildsClientWhenSelectedModelExistsInNewPool(t *te
 		t.Fatalf("factory calls after initial model = %d, want 1", got)
 	}
 
-	if err := a.setCurrentModelPool("multi", false); err != nil {
+	if err := a.setCurrentModelPool("multi"); err != nil {
 		t.Fatalf("setCurrentModelPool: %v", err)
 	}
 	if got := len(factoryCalls); got != 2 {

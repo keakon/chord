@@ -306,12 +306,12 @@ func (a *MainAgent) handleModelPoolSwitchEvent(evt Event) {
 		return
 	}
 	if strings.TrimSpace(req.AgentName) != "" {
-		if err := a.setAgentModelPool(req.AgentName, req.Pool, true); err != nil {
+		if err := a.setAgentModelPool(req.AgentName, req.Pool); err != nil {
 			a.emitToTUI(ErrorEvent{Err: err})
 		}
 		return
 	}
-	if err := a.setCurrentModelPool(req.Pool, true); err != nil {
+	if err := a.setCurrentModelPool(req.Pool); err != nil {
 		a.emitToTUI(ErrorEvent{Err: err})
 	}
 }

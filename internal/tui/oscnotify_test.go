@@ -323,6 +323,21 @@ func TestGlobalIdleEventDoesNotNotifyWithQueuedDraft(t *testing.T) {
 	}
 }
 
+func TestGlobalIdleEventSuppressedDoesNotNotify(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.desktopNotificationsEnabled = true
+	m.terminalAppFocused = false
+	m.activities["main"] = agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityStreaming}
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "model reply content"})
+
+	if cmd := m.handleAgentEvent(agentEventMsg{event: agent.GlobalIdleEvent{SuppressUserNotification: true}}); cmd != nil {
+		t.Fatalf("global idle command = %#v, want nil when user notification is suppressed", cmd)
+	}
+	if got := m.activities["main"].Type; got != agent.ActivityIdle {
+		t.Fatalf("main activity after suppressed global idle = %q, want idle", got)
+	}
+}
+
 func TestConfirmRequestNotifiesWhileLoopStillBusy(t *testing.T) {
 	m := NewModelWithSize(loopBusyAgentStub{}, 80, 24)
 	m.desktopNotificationsEnabled = true
