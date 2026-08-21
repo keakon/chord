@@ -41,6 +41,11 @@ func (a *MainAgent) Run(ctx context.Context) error {
 	// Start the async persistence loop.
 	a.startPersistLoop()
 
+	// Startup backfill: queue extraction for at most two recent, uncovered,
+	// non-active sessions (excludes the active session and imports). Runs once;
+	// the worker only dispatches when auto-extraction is enabled and idle.
+	a.maybeScheduleStartupBackfill()
+
 	defer func() {
 		log.Debugf("agent event loop stopped instance=%v", a.instanceID)
 		// 1. Signal interactive senders to stop.

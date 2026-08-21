@@ -607,8 +607,9 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.MainAgent = agent.NewMainAgent(
 		ac.Ctx, llmClient, ac.CtxMgr, ac.Registry, ac.HookEngine,
 		ac.SessionDir, modelID, projectRoot,
-		cfg, nil,
+		cfg, ac.ProjectCfg,
 		mcp.ClientInfo{Name: "chord", Version: Version},
+		ac.PathLocator,
 	)
 	llmClient.SetSessionID(filepath.Base(ac.SessionDir))
 	ac.MainAgent.SetInitialYoloMode(flagYolo)

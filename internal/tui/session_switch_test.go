@@ -4076,6 +4076,7 @@ type sessionControlAgent struct {
 	cancelResult            bool
 	cancelCalls             int
 	continueCalls           int
+	memoryEnabled           bool
 	loopState               agent.LoopState
 	loopTarget              string
 	loopEnableCalls         int
@@ -4275,6 +4276,7 @@ func (s *sessionControlAgent) ProjectRoot() string                              
 func (s *sessionControlAgent) CurrentRole() string                                       { return s.currentRole }
 func (s *sessionControlAgent) LoopKeepsMainBusy() bool                                   { return false }
 func (s *sessionControlAgent) CurrentLoopState() agent.LoopState                         { return s.loopState }
+func (s *sessionControlAgent) MemoryEnabled() bool                                       { return s.memoryEnabled }
 func (s *sessionControlAgent) CurrentLoopTarget() string                                 { return s.loopTarget }
 func (s *sessionControlAgent) CurrentLoopIteration() int {
 	if s.loopIteration == 0 {

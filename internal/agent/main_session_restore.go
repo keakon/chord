@@ -283,9 +283,16 @@ func (r sessionRestoreResult) infoMessage() string {
 }
 
 func (a *MainAgent) projectSessionsDir() (string, error) {
-	locator, err := config.DefaultPathLocator()
-	if err != nil {
-		return "", err
+	// Prefer the startup-resolved locator (custom paths.state_dir /
+	// paths.sessions_dir); fall back to the default only when it was not
+	// installed (e.g. tests constructing the agent directly).
+	locator := a.pathLocator
+	if locator == nil {
+		var err error
+		locator, err = config.DefaultPathLocator()
+		if err != nil {
+			return "", err
+		}
 	}
 	pl, err := locator.EnsureProject(a.projectRoot)
 	if err != nil {
@@ -1292,6 +1299,7 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 
 	oldRecovery, _ := a.prepareSessionSwitch()
 	oldLock := a.sessionLock
+	oldSessionDir := a.SessionDir()
 	a.freezeCurrentSession(oldRecovery)
 	if oldLock != nil {
 		if releaseErr := oldLock.Release(); releaseErr != nil {
@@ -1300,6 +1308,8 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 	}
 	a.sessionLock = newLock
 	result := a.activateLoadedSession(loaded)
+	// Freeze is complete: queue extraction for the frozen (replaced) session.
+	a.scheduleMemoryExtraction(oldSessionDir)
 
 	log.Infof("session resumed via /resume source_session=%v message_count=%v todo_count=%v", result.SessionPath, result.MessageCount, result.TodoCount)
 

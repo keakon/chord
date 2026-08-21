@@ -31,6 +31,7 @@ Start with what works out of the box; move on to customization and advanced work
 - [Model configuration recipes](./model-configs.md) — copy-paste snippets for common provider/model families
 - [Built-in tools](./tools.md) — every tool name, for permission rules and hook filters
 - [Edit tools](./edit-tools.md) — choose between `edit`, `apply_patch`, and `write`; formats, examples, and safety behavior
+- [Project Memory](./usage.md#project-memory) — cross-session memory: `MEMORY.md`, auto-extraction, trust boundary, and git semantics
 - [Keybindings](./keybindings.md) — complete key map and how to customize it
 - [Paths](./paths.md) — config / state / cache / project layout, what is safe to delete
 - [Environment variables](./environment.md) — every `CHORD_*` / `XDG_*` / proxy variable Chord reads

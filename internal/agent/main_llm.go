@@ -90,6 +90,11 @@ func (a *MainAgent) ensureSessionBuilt(ctx context.Context) error {
 		}
 	}
 	if a.sessionBuilt.Load() {
+		// Common per-request path: the surface is already built. A background
+		// Memory commit may still have changed the cached Memory block since
+		// the reminder was built; rebuild it (cheap, cached snapshots) so the
+		// update lands on this request.
+		a.refreshSessionReminderIfMemoryChanged()
 		return nil
 	}
 
@@ -97,6 +102,7 @@ func (a *MainAgent) ensureSessionBuilt(ctx context.Context) error {
 	defer a.sessionInitMu.Unlock()
 
 	if a.sessionBuilt.Load() {
+		a.refreshSessionReminderIfMemoryChanged()
 		return nil
 	}
 
@@ -132,6 +138,7 @@ func (a *MainAgent) ensureSessionBuilt(ctx context.Context) error {
 	}
 
 	if a.shouldFreezeLLMContextSurface() {
+		a.refreshSessionReminderIfMemoryChanged()
 		a.sessionBuilt.Store(true)
 		return nil
 	}
@@ -147,6 +154,7 @@ func (a *MainAgent) ensureSessionBuilt(ctx context.Context) error {
 	candidatePrompt := a.currentSystemPromptCandidate()
 	candidateTools := llmToolDefinitionsFromVisibleTools(a.stableVisibleLLMTools())
 	if a.currentLLMContextSurfaceMatches(candidatePrompt, candidateTools) {
+		a.refreshSessionReminderIfMemoryChanged()
 		a.sessionBuilt.Store(true)
 		a.surfaceDirty.Store(false)
 		return nil

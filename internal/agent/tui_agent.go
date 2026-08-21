@@ -158,6 +158,12 @@ type YoloController interface {
 	YoloEnabled() bool
 }
 
+// MemoryStatusReporter exposes the effective automatic memory-extraction
+// setting for the main agent (status bar MEMORY pill).
+type MemoryStatusReporter interface {
+	MemoryEnabled() bool
+}
+
 // ServiceTierReporter exposes effective runtime service-tier state for command completion and status UI.
 type ServiceTierReporter interface {
 	ServiceTier() config.ServiceTier
@@ -248,6 +254,7 @@ type AgentForTUI interface {
 	SessionController
 	SubAgentInspector
 	LoopController
+	MemoryStatusReporter
 	RoleController
 	UsageReporter
 	KeyHealthReporter

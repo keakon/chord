@@ -64,6 +64,10 @@ Chord writes here. Lose it and you lose history.
 │   └── <project-key>.json              # registry pointer for cross-project lookup
 ├── exports/
 │   └── <project-key>/                  # `/export` output (markdown / JSON)
+├── memory/
+│   └── <project-key>/                  # per-project memory machine state (see [Usage — Project Memory](./usage.md#project-memory))
+│       ├── extraction-checkpoints.json # per-session extraction coverage (rebuildable)
+│       └── memory.lock                 # cross-process commit lock
 ├── worktrees/
 │   └── <repo-id>/
 │       └── <slug>/                     # chord-managed git worktree (outside the repo)
@@ -121,10 +125,12 @@ When `chord` runs in a project for the first time, it ensures the project root h
 ├── agents/                # project-level agents (override or extend global agents)
 ├── commands/              # project-level custom slash commands
 ├── skills/                # project-level skills
-└── plans/                 # user-visible planning documents
+├── plans/                 # user-visible planning documents
+└── memory/                # detailed Memory records (see [Usage — Project Memory](./usage.md#project-memory))
+    └── records/           # one immutable file per auto-extracted record
 ```
 
-Project-level files have higher priority than global ones (same-name keys override). It is normal — and useful — to commit `.chord/` into your repository so that team members share the same agent setup and slash commands.
+Project-level files have higher priority than global ones (same-name keys override). It is normal — and useful — to commit `.chord/` into your repository so that team members share the same agent setup and slash commands. Memory records are ordinary project files: Chord does not stage or commit them, and you can keep them local via `.gitignore` or `.git/info/exclude`.
 
 `auth.yaml` is **never** read from `.chord/`: credentials always live in `~/.config/chord/auth.yaml`.
 

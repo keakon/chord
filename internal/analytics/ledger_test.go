@@ -316,7 +316,7 @@ func TestLoadSessionUsageSummaryKeepsCurrentSummaryWhenLedgerIsMissing(t *testin
 	}
 }
 
-func TestUsageLedgerRestrictsExistingSessionFiles(t *testing.T) {
+func TestUsageLedgerPreservesExistingSessionFileModes(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permission bits are not enforced on Windows")
 	}
@@ -335,8 +335,13 @@ func TestUsageLedgerRestrictsExistingSessionFiles(t *testing.T) {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
-	assertAnalyticsMode(t, dir, 0o700)
-	assertAnalyticsMode(t, filepath.Join(dir, "usage.jsonl"), 0o600)
+	// The pre-existing session dir keeps its permissions and the append-only
+	// usage.jsonl is opened in place, so both keep their modes. The summary is
+	// rewritten via a freshly created temp file + rename, so it carries the
+	// private file mode (session-scoped runtime data, unchanged from the
+	// previous behavior).
+	assertAnalyticsMode(t, dir, 0o755)
+	assertAnalyticsMode(t, filepath.Join(dir, "usage.jsonl"), 0o644)
 	assertAnalyticsMode(t, filepath.Join(dir, "usage-summary.json"), 0o600)
 }
 

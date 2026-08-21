@@ -103,7 +103,7 @@ func TestAcquireSessionLock_FirstAcquire(t *testing.T) {
 	}
 }
 
-func TestAcquireSessionLockRestrictsExistingFiles(t *testing.T) {
+func TestAcquireSessionLockPreservesExistingModes(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permission bits are not enforced on Windows")
 	}
@@ -121,8 +121,10 @@ func TestAcquireSessionLockRestrictsExistingFiles(t *testing.T) {
 	}
 	defer func() { _ = lock.Release() }()
 
-	assertMode(t, dir, 0o700)
-	assertMode(t, guardFilePath(dir), 0o600)
+	// Pre-existing session dir and guard file keep their modes; the lock file
+	// is created by Chord and gets the private mode.
+	assertMode(t, dir, 0o755)
+	assertMode(t, guardFilePath(dir), 0o644)
 	assertMode(t, lockFilePath(dir), 0o600)
 }
 

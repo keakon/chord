@@ -39,7 +39,7 @@ func TestFileBackupManagerPrunesPerPathInCreationOrder(t *testing.T) {
 	}
 }
 
-func TestFileBackupManagerRestrictsExistingSessionHierarchy(t *testing.T) {
+func TestFileBackupManagerRestrictsNewDirectoriesOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permission bits are not enforced on Windows")
 	}
@@ -55,9 +55,11 @@ func TestFileBackupManagerRestrictsExistingSessionHierarchy(t *testing.T) {
 		t.Fatalf("Backup: %v", err)
 	}
 
-	for _, path := range []string{dir, backupsDir, filepath.Dir(record.Path)} {
-		assertAgentMode(t, path, 0o700)
-	}
+	// Pre-existing session dirs keep their permissions; only the newly created
+	// sequence directory and backup file get the private modes.
+	assertAgentMode(t, dir, 0o755)
+	assertAgentMode(t, backupsDir, 0o755)
+	assertAgentMode(t, filepath.Dir(record.Path), 0o700)
 	assertAgentMode(t, record.Path, 0o600)
 }
 

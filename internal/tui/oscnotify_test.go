@@ -66,6 +66,7 @@ func (loopBusyAgentStub) ProjectRoot() string                                   
 func (loopBusyAgentStub) CurrentRole() string                                       { return "builder" }
 func (loopBusyAgentStub) LoopKeepsMainBusy() bool                                   { return true }
 func (loopBusyAgentStub) CurrentLoopState() agent.LoopState                         { return agent.LoopStateExecuting }
+func (loopBusyAgentStub) MemoryEnabled() bool                                       { return false }
 func (loopBusyAgentStub) CurrentLoopTarget() string                                 { return "current task" }
 func (loopBusyAgentStub) CurrentLoopIteration() int                                 { return 1 }
 func (loopBusyAgentStub) CurrentLoopMaxIterations() int                             { return 10 }

@@ -357,6 +357,10 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 func (a *MainAgent) newTurn() {
 	a.globalIdle.Store(false)
 	a.clearContextReductionWrapUpGrace()
+	// Foreground priority: a new user turn cancels any in-flight background
+	// memory extraction so it never competes for LLM capacity. The job stays
+	// pending for a later idle pass.
+	a.cancelInFlightMemoryExtraction()
 	a.turnMu.Lock()
 	if a.turn != nil {
 		a.interruptCurrentTurnForReplacement()
@@ -535,6 +539,10 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	if !pausePendingDrain && !startedPendingUserTurn && a.turn == nil && !skipMailboxDrain {
 		a.drainSubAgentInbox()
 	}
+	// Foreground is idle again: wake the memory worker so extraction jobs that
+	// were deferred while a turn was active (or requeued after preemption) get
+	// a chance to run.
+	a.memoryWakeIdle()
 }
 
 // setIdleForComposerEdit establishes a user-input barrier after a session fork
@@ -554,6 +562,8 @@ func (a *MainAgent) setIdleForComposerEdit() {
 	a.clearLoopReductionCache(false)
 	a.setBugTriagePromptActive(false)
 	a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
+	// Foreground is idle again: wake the memory worker (see setIdleAndDrainPending).
+	a.memoryWakeIdle()
 }
 
 func latestAssistantReplySummary(msgs []message.Message) string {

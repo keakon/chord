@@ -7,13 +7,17 @@ import (
 	"testing"
 )
 
-func TestEnsureDirRestrictsExistingHierarchy(t *testing.T) {
+func TestEnsureDirRestrictsOnlyNewDirectories(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permission bits are not enforced on Windows")
 	}
 	root := filepath.Join(t.TempDir(), "session")
 	target := filepath.Join(root, "artifacts", "subagents", "agent-1")
-	if err := os.MkdirAll(target, 0o755); err != nil {
+	// Everything except the final component pre-exists with a broader mode.
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -21,9 +25,21 @@ func TestEnsureDirRestrictsExistingHierarchy(t *testing.T) {
 		t.Fatalf("EnsureDir: %v", err)
 	}
 
-	for _, path := range []string{root, filepath.Join(root, "artifacts"), filepath.Join(root, "artifacts", "subagents"), target} {
-		assertMode(t, path, DirMode)
+	// Pre-existing directories keep their permissions.
+	assertMode(t, root, 0o755)
+	assertMode(t, filepath.Join(root, "artifacts"), 0o755)
+	assertMode(t, filepath.Join(root, "artifacts", "subagents"), 0o755)
+	// Only the newly created component is restricted.
+	assertMode(t, target, DirMode)
+
+	// A second call must not touch any permissions, including the new one.
+	if err := os.Chmod(target, 0o755); err != nil {
+		t.Fatal(err)
 	}
+	if err := EnsureDir(root, target); err != nil {
+		t.Fatalf("EnsureDir second call: %v", err)
+	}
+	assertMode(t, target, 0o755)
 }
 
 func TestEnsureDirRejectsPathOutsideRoot(t *testing.T) {
@@ -58,7 +74,7 @@ func TestEnsureDirRejectsRootSymlink(t *testing.T) {
 	assertMode(t, target, 0o755)
 }
 
-func TestWriteFileRestrictsExistingFile(t *testing.T) {
+func TestWriteFilePreservesExistingFileAndDirModes(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permission bits are not enforced on Windows")
 	}
@@ -74,8 +90,17 @@ func TestWriteFileRestrictsExistingFile(t *testing.T) {
 	if err := WriteFile(root, path, []byte("new")); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	assertMode(t, root, DirMode)
-	assertMode(t, path, FileMode)
+	// A pre-existing root and file keep their permissions; WriteFile only
+	// restricts the directories and files it actually creates.
+	assertMode(t, root, 0o755)
+	assertMode(t, path, 0o644)
+
+	// A newly created file under the same root gets the private mode.
+	other := filepath.Join(root, "new.json")
+	if err := WriteFile(root, other, []byte("x")); err != nil {
+		t.Fatalf("WriteFile new: %v", err)
+	}
+	assertMode(t, other, FileMode)
 }
 
 func TestWriteFileSyncedWritesPrivateFile(t *testing.T) {

@@ -123,6 +123,7 @@ type statusBarInputs struct {
 	NextEscHint         string
 	LoopState           agent.LoopState
 	YoloEnabled         bool
+	MemoryEnabled       bool
 	PersistenceDegraded bool
 	LoopIteration       int
 	LoopMaxIterations   int
@@ -154,10 +155,12 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 	loopState := agent.LoopState("")
 	loopIteration := 0
 	loopMaxIterations := 0
+	memoryEnabled := false
 	if m.agent != nil {
 		loopState = m.agent.CurrentLoopState()
 		loopIteration = m.agent.CurrentLoopIteration()
 		loopMaxIterations = m.agent.CurrentLoopMaxIterations()
+		memoryEnabled = m.agent.MemoryEnabled()
 	}
 	return statusBarInputs{
 		Now:                 now,
@@ -175,6 +178,7 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		NextEscHint:         m.nextEscHint(),
 		LoopState:           loopState,
 		YoloEnabled:         m.yoloEnabled(),
+		MemoryEnabled:       memoryEnabled,
 		PersistenceDegraded: m.persistenceDegraded,
 		LoopIteration:       loopIteration,
 		LoopMaxIterations:   loopMaxIterations,
@@ -325,6 +329,13 @@ func (m *Model) appendStatusBarYoloPill(pills []string, inputs statusBarInputs) 
 	return append(pills, StatusHintStyle.Render("YOLO"))
 }
 
+func (m *Model) appendStatusBarMemoryPill(pills []string, inputs statusBarInputs) []string {
+	if !inputs.MemoryEnabled {
+		return pills
+	}
+	return append(pills, StatusHintStyle.Render("MEMORY"))
+}
+
 func (m *Model) appendStatusBarPersistencePill(pills []string, inputs statusBarInputs) []string {
 	if !inputs.PersistenceDegraded {
 		return pills
@@ -338,7 +349,7 @@ func (m *Model) buildStatusBarLeadingPills(inputs statusBarInputs) []string {
 		m.statusBarModePill(inputs.ModeText),
 		m.statusBarViewingPill(snap.viewingLabel, snap.viewingColor),
 	}
-	return m.appendStatusBarPersistencePill(m.appendStatusBarYoloPill(m.appendStatusBarLoopPill(pills, inputs), inputs), inputs)
+	return m.appendStatusBarPersistencePill(m.appendStatusBarMemoryPill(m.appendStatusBarYoloPill(m.appendStatusBarLoopPill(pills, inputs), inputs), inputs), inputs)
 }
 
 func (m *Model) statusBarSearchPill() string {

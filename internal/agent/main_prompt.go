@@ -55,6 +55,17 @@ func (a *MainAgent) buildSystemPrompt() string {
 	// "# AGENTS.md instructions" / <INSTRUCTIONS> self-identifying block) via
 	// injectSessionContextReminder to keep the stable system prompt
 	// small and cacheable.
+	if a.memoryIsActive() {
+		// Only the fixed discipline lives in the stable prompt; the actual
+		// memory data is injected under an untrusted wrapper in the reminder so
+		// a stale/poisoned MEMORY.md can never escalate into instructions. The
+		// extraction note is appended only when auto-extraction is on.
+		block := memoryStableGuidancePrompt
+		if a.memoryExtractEnabled.Load() {
+			block += "\n" + memoryExtractionGuidancePrompt
+		}
+		parts = append(parts, block)
+	}
 	if block := a.availableSkillsPromptBlock(); block != "" {
 		parts = append(parts, block)
 	}

@@ -106,6 +106,7 @@ func (a *MainAgent) handleNewSessionCommand() {
 	}
 
 	oldLock := a.sessionLock
+	oldSessionDir := a.SessionDir()
 	a.freezeCurrentSession(oldRecovery)
 	if oldLock != nil {
 		if releaseErr := oldLock.Release(); releaseErr != nil {
@@ -116,6 +117,9 @@ func (a *MainAgent) handleNewSessionCommand() {
 	a.resetSessionRuntimeState()
 	a.installSessionTarget(newSessionDir)
 	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
+	// Freeze is complete (persist flushed, recovery closed): queue extraction
+	// for the frozen session against its captured directory.
+	a.scheduleMemoryExtraction(oldSessionDir)
 
 	a.emitToTUI(SessionRestoredEvent{})
 	a.emitToTUI(ToastEvent{
@@ -466,6 +470,7 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 
 	oldRecovery, _ := a.prepareSessionSwitch()
 	oldLock := a.sessionLock
+	oldSessionDir := a.SessionDir()
 	a.freezeCurrentSession(oldRecovery)
 	if oldLock != nil {
 		if releaseErr := oldLock.Release(); releaseErr != nil {
@@ -476,6 +481,7 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	a.resetSessionRuntimeState()
 	a.installSessionTarget(newSessionDir)
 	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
+	a.scheduleMemoryExtraction(oldSessionDir)
 
 	a.ctxMgr.RestoreMessages(prefix)
 	// The forked session carries the copied history prefix: dynamic MCP

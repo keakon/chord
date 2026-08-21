@@ -962,6 +962,25 @@ web_fetch:
 
 `web_fetch` intentionally remains a lightweight static HTTP reader. It does not run a local browser; JS-heavy pages may be marked as `Content-Quality: suspect-shell` when the returned HTML looks like an application shell rather than readable content.
 
+## Project memory (automatic extraction)
+
+The top-level `memory` section controls automatic cross-session memory extraction. Reading an existing project `MEMORY.md` is always automatic and needs no config; this key only decides whether Chord sends frozen history sessions to the model to grow memory records and writes project files.
+
+```yaml
+memory:
+  enabled: true
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `enabled` | `false` | Enable automatic memory extraction for this machine + project. When on, frozen sessions may be sent to the model and auto-written into `MEMORY.md` / `.chord/memory/records/` as ordinary project files. When off (or unset), Chord never sends history to the model and never writes memory files, but still loads an existing `MEMORY.md`. |
+
+### Precedence
+
+- May appear in the global config and in project `.chord/config.yaml`; project values override the user-level value like every other setting.
+- Because a project can enable extraction for itself, opening a project with `memory.enabled: true` may start uploading that project's history sessions to the model. When enabled, the status bar shows a `MEMORY` indicator so the state is visible.
+- The value is read at startup; changing the config file requires a restart of the running process.
+
 ## Multi-agent orchestration resource limits
 
 The top-level `orchestration` section bounds process-local resources used by MainAgent/SubAgent workflows. It does not grant tool permissions or change per-agent delegation limits such as `delegation.max_children`; it limits how many admitted runtimes and LLM requests can run at once, how much SubAgent input can queue, and how much mailbox data remains in memory.

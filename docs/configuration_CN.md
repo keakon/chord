@@ -844,6 +844,25 @@ web_fetch:
 
 `web_fetch` 保持轻量级静态 HTTP 读取，不运行本地浏览器。对 JS-heavy 页面，若返回的 HTML 只有应用空壳而非可读正文，结果会标记为 `Content-Quality: suspect-shell`。
 
+## 项目记忆（自动抽取）
+
+顶层 `memory` 配置控制自动跨会话记忆抽取。读取项目中已有的 `MEMORY.md` 始终自动进行，不需要任何配置；这个键只决定 Chord 是否把冻结的历史会话发送给模型以生成记忆记录，并写入项目文件。
+
+```yaml
+memory:
+  enabled: true
+```
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `enabled` | `false` | 为本机 + 当前项目开启自动记忆抽取。开启后，冻结的会话可能被发送给模型，并自动写入 `MEMORY.md` / `.chord/memory/records/`，这些都是普通项目文件。关闭或未设置时，Chord 不会把历史发送给模型、不写记忆文件，但仍会加载已有的 `MEMORY.md`。 |
+
+### 优先级
+
+- 可写在全局配置，也可写在项目 `.chord/config.yaml`；项目值按与其他配置一致的规则覆盖用户级值。
+- 因为项目可以为自己开启抽取，打开一个 `memory.enabled: true` 的项目可能开始把该项目的历史会话上传给模型。开启时状态栏会显示 `MEMORY` 标识，便于看到当前状态。
+- 该值在启动时读取；修改配置文件需要重启正在运行的进程。
+
 ## 多 Agent 编排资源限制
 
 顶层 `orchestration` 配置用于限制单个 Chord 进程内 MainAgent/SubAgent 工作流占用的资源。它不授予工具权限，也不改变 `delegation.max_children` 等单个 Agent 委派限制；它控制已准入 runtime 和 LLM 请求的并发量、SubAgent 输入队列容量，以及 mailbox 在内存中的保留量。

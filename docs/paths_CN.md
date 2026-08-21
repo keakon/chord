@@ -61,6 +61,10 @@ Chord 写在这里。删了就丢历史。
 │   └── <project-key>.json              # 注册表指针，用于跨项目查找
 ├── exports/
 │   └── <project-key>/                  # `/export` 输出（markdown / JSON）
+├── memory/
+│   └── <project-key>/                  # 每项目 memory 机器状态（见 [使用指南 — 项目记忆](./usage_CN.md#项目记忆memory)）
+│       ├── extraction-checkpoints.json # 按会话记录的抽取覆盖状态（可重建）
+│       └── memory.lock                 # 跨进程提交锁
 ├── worktrees/
 │   └── <repo-id>/
 │       └── <slug>/                     # chord 管理的 git worktree（位于仓库之外）
@@ -107,10 +111,12 @@ Sessions、运行时缓存、exports 都以这个 key 为索引——在 `~/proj
 ├── agents/                # 项目级 agent（覆盖或扩展全局 agent）
 ├── commands/              # 项目级自定义 slash 命令
 ├── skills/                # 项目级 skill
-└── plans/                 # 用户可见的计划文档
+├── plans/                 # 用户可见的计划文档
+└── memory/                # Memory 详细记录（见 [使用指南 — 项目记忆](./usage_CN.md#项目记忆memory)）
+    └── records/           # 每条自动记录一个不可变文件
 ```
 
-项目级文件优先级高于全局（同名 key 覆盖）。把 `.chord/` 提交到仓库通常是好事——团队成员可以共享同一套 agent 与 slash 命令。
+项目级文件优先级高于全局（同名 key 覆盖）。把 `.chord/` 提交到仓库通常是好事——团队成员可以共享同一套 agent 与 slash 命令。Memory 记录是普通项目文件：Chord 不会暂存或提交它们，你也可以通过 `.gitignore` 或 `.git/info/exclude` 保持本地私有。
 
 `auth.yaml` **永远不会**从 `.chord/` 读取：凭据必须在 `~/.config/chord/auth.yaml`。
 

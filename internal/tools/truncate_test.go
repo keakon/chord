@@ -84,8 +84,10 @@ func TestTruncateOutputCreatesPrivateArtifact(t *testing.T) {
 	if result.SavedPath == "" {
 		t.Fatal("SavedPath is empty")
 	}
+	// The pre-existing session dir keeps its permissions; only the newly
+	// created artifact directory and file get the private modes.
 	for path, want := range map[string]os.FileMode{
-		sessionDir:                     0o700,
+		sessionDir:                     0o755,
 		filepath.Dir(result.SavedPath): 0o700,
 		result.SavedPath:               0o600,
 	} {

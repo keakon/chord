@@ -64,6 +64,7 @@ type Config struct {
 	MaxOutputTokens     int                        `json:"max_output_tokens" yaml:"max_output_tokens"`                           // global output token cap (0 = use DefaultOutputTokenMax)
 	StreamRetryRounds   int                        `json:"stream_retry_rounds" yaml:"stream_retry_rounds"`                       // hard cap on public LLM retry rounds (0 = keep retrying until success/cancel)
 	Proxy               string                     `json:"proxy,omitempty" yaml:"proxy,omitempty"`                               // global proxy URL (http/https/socks5), empty = no proxy
+	Memory              MemoryConfig               `json:"memory,omitempty" yaml:"memory,omitempty"`                             // project memory auto-extraction
 	WebFetch            WebFetchConfig             `json:"web_fetch" yaml:"web_fetch,omitempty"`                                 // WebFetch-specific options
 	Worktree            WorktreeConfig             `json:"worktree" yaml:"worktree,omitempty"`                                   // git worktree integration options
 	ThinkingTranslation *ThinkingTranslationConfig `json:"thinking_translation,omitempty" yaml:"thinking_translation,omitempty"` // optional thinking translation enhancement
@@ -161,6 +162,17 @@ type WebFetchConfig struct {
 	// non-nil empty string = "direct" (explicitly disable proxy); non-empty = use that proxy.
 	// Supported schemes: http, https, socks5.
 	Proxy *string `json:"proxy,omitempty" yaml:"proxy,omitempty"`
+}
+
+// MemoryConfig controls automatic project memory extraction. Reading an
+// existing MEMORY.md is always automatic and does not require this setting;
+// the key only gates whether Chord sends frozen history sessions to the model
+// to grow memory records. Project .chord/config.yaml can override the
+// user-level value like other config.
+type MemoryConfig struct {
+	// Enabled enables automatic extraction for this machine + project.
+	// Nil means unset (defaults to false).
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
 type MaintenanceConfig struct {
@@ -1369,6 +1381,7 @@ var projectScopedTopLevelKeys = map[string]bool{
 	"proxy":                           true,
 	"web_fetch":                       true,
 	"worktree":                        true,
+	"memory":                          true,
 }
 
 // projectIgnoredTopLevelKeys are valid global config keys that are

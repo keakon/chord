@@ -225,7 +225,7 @@ func TestPersistMessageCreatesPrivateSessionFiles(t *testing.T) {
 	}
 }
 
-func TestPersistMessageRestrictsExistingSessionFiles(t *testing.T) {
+func TestPersistMessageRestrictsNewSessionFilesOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permission bits are not enforced on Windows")
 	}
@@ -245,10 +245,19 @@ func TestPersistMessageRestrictsExistingSessionFiles(t *testing.T) {
 		t.Fatalf("PersistMessage: %v", err)
 	}
 
+	// Pre-existing directories and files keep their permissions; only newly
+	// created paths get the private modes.
 	for _, path := range []string{sessionDir, agentsDir} {
-		assertMode(t, path, 0o700)
+		assertMode(t, path, 0o755)
 	}
-	assertMode(t, logPath, 0o600)
+	assertMode(t, logPath, 0o644)
+
+	// A new log file is created with the private mode.
+	newPath := filepath.Join(agentsDir, "subagent-2.jsonl")
+	if err := rm.PersistMessage("subagent-2", message.Message{Role: "user", Content: "secret"}); err != nil {
+		t.Fatalf("PersistMessage new agent: %v", err)
+	}
+	assertMode(t, newPath, 0o600)
 }
 
 func TestPersistMessageAfterCloseReturnsErrorWithoutCreatingSessionDir(t *testing.T) {
@@ -303,7 +312,7 @@ func TestRewriteLogCreatesPrivateSessionFile(t *testing.T) {
 	}
 }
 
-func TestRewriteLogRestrictsExistingSessionFile(t *testing.T) {
+func TestRewriteLogPreservesExistingSessionFileMode(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permission bits are not enforced on Windows")
 	}
@@ -318,7 +327,9 @@ func TestRewriteLogRestrictsExistingSessionFile(t *testing.T) {
 	if err := rm.RewriteLog("main", []message.Message{{Role: "user", Content: "secret"}}); err != nil {
 		t.Fatalf("RewriteLog: %v", err)
 	}
-	assertMode(t, logPath, 0o600)
+	// Rewriting truncates and rewrites content but must not change the
+	// existing file's permissions.
+	assertMode(t, logPath, 0o644)
 }
 
 func assertMode(t *testing.T, path string, want os.FileMode) {

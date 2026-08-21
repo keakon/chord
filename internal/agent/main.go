@@ -24,6 +24,7 @@ import (
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/mcp"
+	"github.com/keakon/chord/internal/memory"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/ratelimit"
@@ -354,10 +355,10 @@ type MainAgent struct {
 	startupResumePending   bool
 	startupResumeSessionID string
 	startupResumeLoadedAt  time.Time
-	// startupSkippedLockedSessions names the sessions --continue passed over at
-	// startup because another live Chord process owned them. The agent reports
-	// them once as a toast when the event loop starts so a fallback is never
-	// silent.
+	// startupSkippedLockedSessions names the sessions --continue passed over
+	// at startup because another live Chord process owned them. The agent
+	// reports them once as a toast when the event loop starts so a fallback is
+	// never silent.
 	startupSkippedLockedSessions []string
 
 	// Permission system: ruleset from active agent config with overlay support.
@@ -568,6 +569,7 @@ type MainAgent struct {
 
 	// Plan execution workflow state.
 	projectRoot            string
+	pathLocator            *config.PathLocator // resolved startup paths; nil falls back to DefaultPathLocator
 	lastPlanPath           string
 	pendingHandoff         *HandoffResult // deferred Handoff action; processed after all sibling tools finish
 	pendingLoopExitResults []*loopExitResult
@@ -776,6 +778,31 @@ type MainAgent struct {
 	// prompt prefix keeps one stable shape. Not persisted to ctxMgr or jsonl.
 	cachedSessionReminderContent atomic.Pointer[string]
 
+	// Memory (cross-session project memory). See memory_runtime.go. The memory
+	// block is appended to the session-context reminder under an untrusted
+	// wrapper, and the fixed load discipline is added to the stable system
+	// prompt only when a MEMORY.md is present.
+	memoryMu       sync.Mutex
+	memoryMgr      *memory.Manager
+	memoryErr      error
+	memoryPending  []memoryJob // frozen session dirs awaiting extraction
+	memoryInflight *memoryInflight
+	memoryWake     chan struct{}
+	// memoryWorkerDone closes when the background extraction worker returns, so
+	// Shutdown can confirm it stopped touching project files.
+	memoryWorkerDone     chan struct{}
+	memoryExtractEnabled atomic.Bool // effective memory.enabled (project overrides user)
+	memoryActive         atomic.Bool
+	// memoryReminderVersion is bumped whenever the cached Memory block changes
+	// (init, background extraction commit). ensureSessionBuilt rebuilds the
+	// per-request session reminder when it moves, so a background commit lands
+	// on the next request even when the load activation state did not flip.
+	memoryReminderVersion atomic.Int64
+	// memoryReminderBuilt records the version captured when
+	// cachedSessionReminderContent was last rebuilt from the memory block.
+	memoryReminderBuilt  atomic.Int64
+	cachedMemoryReminder atomic.Pointer[string]
+
 	// frozenToolDefs is the LLM tool surface snapshot captured at
 	// ensureSessionBuilt time. Kept stable for the life of the agent instance
 	// so the provider request prefix (system prompt + tools[]) does not drift
@@ -826,6 +853,11 @@ type persistEntry struct {
 //
 // globalCfg is the user-level config (~/.config/chord/config.yaml). projectCfg is the
 // project-level config (.chord/config.yaml); either may be nil.
+//
+// pathLocators optionally carries the startup-resolved config.PathLocator so
+// Memory state files and session scanning honor custom paths.state_dir /
+// paths.sessions_dir settings. When omitted the default path locator is used
+// (tests construct the agent directly and rely on that).
 func NewMainAgent(
 	ctx context.Context,
 	llmClient *llm.Client,
@@ -838,7 +870,12 @@ func NewMainAgent(
 	globalCfg *config.Config,
 	projectCfg *config.Config,
 	mcpClientInfo mcp.ClientInfo,
+	pathLocators ...*config.PathLocator,
 ) *MainAgent {
+	var pathLocator *config.PathLocator
+	if len(pathLocators) > 0 {
+		pathLocator = pathLocators[0]
+	}
 	parentCtx, cancel := context.WithCancel(ctx)
 
 	workDir, _ := os.Getwd()
@@ -876,6 +913,7 @@ func NewMainAgent(
 		evidence:                evidenceCandidateTracker{seen: make(map[string]struct{})},
 		cacheHitTracker:         newCacheHitTracker(),
 		projectRoot:             projectRoot,
+		pathLocator:             pathLocator,
 		subs:                    newSubAgentRegistry(),
 		governor:                governor,
 		sem:                     governor.runtimeSlots,
@@ -918,6 +956,13 @@ func NewMainAgent(
 
 	// Detect Python virtual environment synchronously (just os.Stat, cheap).
 	a.cachedVenvPath = detectVenvPath(workDir, projectRoot)
+
+	// Wire Memory before building the system prompt so the stable prompt can
+	// include the fixed Memory discipline when a MEMORY.md is present. The
+	// background extraction worker starts here (project/process lifetime).
+	if a.memoryMgr == nil {
+		a.initMemory(projectRoot)
+	}
 
 	// Build and install the system prompt (git status may still be in flight;
 	// it will be refreshed once ready via waitGitStatus before the first call).
@@ -1286,6 +1331,9 @@ const sessionEndHookGrace = 300 * time.Millisecond
 // Run as well.
 func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	log.Infof("agent shutting down instance=%v timeout=%v", a.instanceID, timeout)
+	// Cancel in-flight memory extraction and flush the usage ledger. Shutdown
+	// never starts new extraction and never waits on an in-flight one.
+	a.shutdownMemoryWorker()
 	deadline := time.Now().Add(timeout)
 	remaining := func() time.Duration {
 		left := time.Until(deadline)
@@ -1371,6 +1419,12 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 		compactionDrained = false
 	}
 	if !compactionDrained {
+		return a.shutdownTimeoutError(timeout)
+	}
+
+	// The extraction worker was cancelled at the top of Shutdown; confirm it
+	// actually returned before the session files are closed below.
+	if !a.waitMemoryWorkerStopped(remaining()) {
 		return a.shutdownTimeoutError(timeout)
 	}
 
@@ -2271,6 +2325,7 @@ func (a *MainAgent) startPlanExecution(planPath, agentName string) {
 		return
 	}
 	oldLock := a.sessionLock
+	oldSessionDir := a.SessionDir()
 	a.freezeCurrentSession(oldRecovery)
 	if oldLock != nil {
 		if releaseErr := oldLock.Release(); releaseErr != nil {
@@ -2281,6 +2336,7 @@ func (a *MainAgent) startPlanExecution(planPath, agentName string) {
 	a.resetSessionRuntimeState()
 	a.installSessionTarget(newSessionDir)
 	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
+	a.scheduleMemoryExtraction(oldSessionDir)
 
 	// Freeze the new session's tool/system surface before installing the
 	// execution-specific prompt so the first execution request sees a stable
