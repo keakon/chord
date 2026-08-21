@@ -918,6 +918,21 @@ orchestration:
 
 ## MCP
 
+MCP server 有两种接入方式：本地命令（stdio）或远程 HTTP 地址（url）。
+
+### 本地命令（stdio）
+
+```yaml
+mcp:
+  chrome-devtools:
+    command: "npx"
+    args: ["-y", "chrome-devtools-mcp@latest"]
+```
+
+`command` 是要启动的可执行文件，`args` 是传给它的参数，`env` 可追加环境变量（可选）。Chord 启动该进程后，通过 stdin/stdout 用换行分隔的 JSON-RPC 通信。
+
+### HTTP server
+
 MCP server 可能暴露大量工具。通过 `allowed_tools` 只允许部分远端工具进入 Chord，避免把不必要的 tool schema 发送给模型：
 
 ```yaml

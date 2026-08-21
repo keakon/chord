@@ -1036,6 +1036,21 @@ orchestration:
 
 ## MCP
 
+MCP servers connect in two ways: Chord launches a local command and exchanges JSON-RPC over stdio, or it connects to a remote HTTP endpoint.
+
+### Local command (stdio)
+
+```yaml
+mcp:
+  chrome-devtools:
+    command: "npx"
+    args: ["-y", "chrome-devtools-mcp@latest"]
+```
+
+`command` is the executable to launch, `args` are its arguments, and optional `env` entries are appended to the inherited environment. Chord starts the process and talks to it over stdin/stdout using newline-delimited JSON-RPC.
+
+### HTTP server
+
 MCP servers can expose many tools. Use `allowed_tools` to expose only selected remote tool names and avoid sending unused tool schemas to the model:
 
 ```yaml
