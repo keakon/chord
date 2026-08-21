@@ -300,3 +300,57 @@ func TestHandoffSelectModalMouseClickUpdatesCursorAndReturnsCommand(t *testing.T
 		t.Fatalf("ExecutePlan calls after click = %d, want 1", backend.executePlanCalls)
 	}
 }
+
+func TestHandoffDenyReasonTextareaWidthMatchesOverlayContentWidth(t *testing.T) {
+	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer"}}
+	m := NewModelWithSize(backend, 120, 30)
+	m.openHandoffSelect("docs/plans/example.md")
+
+	_ = m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
+	if !m.handoffSelect.denyingWithReason {
+		t.Fatal("expected handoff deny reason mode")
+	}
+	want := handoffOverlayContentWidth(m.width)
+	if got := m.handoffSelect.denyReasonInput.Width(); got != want {
+		t.Fatalf("deny-reason textarea width = %d, want %d", got, want)
+	}
+}
+
+func TestHandoffDenyReasonRenderedAtOverlayWidthWithoutRewrap(t *testing.T) {
+	backend := &sessionControlAgent{availableAgents: []string{"builder"}}
+	m := NewModelWithSize(backend, 120, 30)
+	m.openHandoffSelect("docs/plans/example.md")
+	_ = m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
+	m.handoffSelect.denyReasonInput.SetValue(strings.Repeat("x", 400))
+
+	// The textarea wraps at the Handoff overlay content width. Every row of
+	// the textarea output must survive the overlay render verbatim: if the
+	// overlay wrapped at a different width, long rows would be re-wrapped and
+	// no longer appear as-is in the rendered dialog.
+	plain := stripANSI(m.renderHandoffSelectDialog())
+	for _, row := range strings.Split(stripANSI(m.handoffSelect.denyReasonInput.View()), "\n") {
+		row = strings.TrimRight(row, " ")
+		if row == "" {
+			continue
+		}
+		if !strings.Contains(plain, row) {
+			t.Fatalf("rendered dialog re-wrapped textarea row %q (textarea width %d vs overlay content width %d)", row, m.handoffSelect.denyReasonInput.Width(), handoffOverlayContentWidth(m.width))
+		}
+	}
+	if got := m.handoffSelect.denyReasonInput.Width(); got != handoffOverlayContentWidth(m.width) {
+		t.Fatalf("deny-reason textarea width = %d, want %d", got, handoffOverlayContentWidth(m.width))
+	}
+}
+
+func TestHandoffDenyReasonTextareaReconfiguredOnResize(t *testing.T) {
+	backend := &sessionControlAgent{availableAgents: []string{"builder"}}
+	m := NewModelWithSize(backend, 120, 30)
+	m.openHandoffSelect("docs/plans/example.md")
+	_ = m.handleHandoffSelectKey(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
+
+	m.applyTerminalSize(80, 30, false)
+
+	if got := m.handoffSelect.denyReasonInput.Width(); got != handoffOverlayContentWidth(m.width) {
+		t.Fatalf("deny-reason textarea width after resize = %d, want %d", got, handoffOverlayContentWidth(m.width))
+	}
+}

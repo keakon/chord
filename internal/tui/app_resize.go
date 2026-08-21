@@ -21,6 +21,11 @@ func (m *Model) applyTerminalSize(width, height int, refreshKitty bool) {
 		configureDialogTextarea(&dri, confirmDialogInnerWidth(m.width), confirmEditMinHeight, confirmEditHeight(m.height))
 		m.confirm.denyReasonInput = dri
 	}
+	if m.mode == ModeHandoffSelect && m.handoffSelect.denyingWithReason {
+		dri := m.handoffSelect.denyReasonInput
+		configureDialogTextarea(&dri, handoffOverlayContentWidth(m.width), confirmEditMinHeight, confirmEditHeight(m.height))
+		m.handoffSelect.denyReasonInput = dri
+	}
 	if m.mode == ModeQuestion {
 		qin := m.question.input
 		configureDialogTextarea(&qin, questionInputWidth(m.width), 1, questionInputHeight)

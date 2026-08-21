@@ -17,6 +17,18 @@ import (
 // Handoff agent selector state
 // ---------------------------------------------------------------------------
 
+const handoffOverlayMaxWidth = 70
+
+// handoffOverlayContentWidth returns the content width inside the Handoff
+// overlay frame. renderHandoffSelectDialog renders through RenderOverlay with
+// MaxWidth handoffOverlayMaxWidth (clamped to the terminal width), whose inner
+// content width is MaxWidth-4. The deny-reason textarea must be sized with
+// this same width so its already wrapped lines are not re-wrapped (and
+// possibly split mid-character) by the overlay border render.
+func handoffOverlayContentWidth(width int) int {
+	return max(min(handoffOverlayMaxWidth, width)-4, 1)
+}
+
 // handoffOption describes a single agent entry in the Handoff selector.
 type handoffOption struct {
 	Name        string // agent name (e.g. "builder")
@@ -136,7 +148,7 @@ func (m *Model) handleHandoffSelectKey(msg tea.KeyMsg) tea.Cmd {
 		return m.confirmHandoff()
 	case "r", "R":
 		m.handoffSelect.denyingWithReason = true
-		m.handoffSelect.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
+		m.handoffSelect.denyReasonInput = newDialogTextarea(handoffOverlayContentWidth(m.width), confirmEditMinHeight, confirmEditHeight(m.height), "")
 		m.handoffSelect.error = ""
 		m.recalcViewportSize()
 	}
@@ -301,11 +313,11 @@ func (m *Model) renderHandoffSelectDialog() string {
 		Title:    "Handoff To Agent",
 		Hint:     "j/k move  g/G jump  v view plan  enter/a approve  r deny reason  esc close",
 		MinWidth: 30,
-		MaxWidth: 70,
+		MaxWidth: handoffOverlayMaxWidth,
 	}
 	area := image.Rect(0, 0, m.width, m.height)
 	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
-	contentWidth := overlayCfg.MaxWidth - 4
+	contentWidth := handoffOverlayContentWidth(m.width)
 	planLine := DimStyle.Render(ansi.Truncate(fmt.Sprintf("Plan: %s", m.handoffSelect.planPath), contentWidth, "…"))
 
 	planLines, planStart, planTotal := m.handoffPlanWindow(contentWidth)
