@@ -2598,28 +2598,108 @@ func TestEditToolCallCopyShowsOldAndNewStringsInsteadOfDiff(t *testing.T) {
 	}
 }
 
-func TestReplaceEditToolCallErrorRenderIncludesArgumentsWhenDiffMissing(t *testing.T) {
+func TestReplaceEditToolCallErrorRenderShowsOldAndNewLines(t *testing.T) {
+	ApplyTheme(DefaultTheme())
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
 		ToolName:      tools.NameEdit,
 		Content:       `{"path":"foo.txt"}`,
-		RawArgs:       `{"path":"foo.txt","old_string":"old line\n","new_string":"new line\n"}`,
+		RawArgs:       `{"path":"foo.txt","old_string":"func old() {\n\treturn 1\n}\n","new_string":"func current() {\n\treturn 2\n}\n","replace_all":true}`,
 		ResultContent: "old_string not found in file",
 		ResultStatus:  agent.ToolResultStatusError,
 		ResultDone:    true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	lines := block.Render(100, "")
+	plain := stripANSI(strings.Join(lines, "\n"))
 	for _, want := range []string{
-		"↳ Arguments:",
-		`"old_string": "old line\n"`,
-		`"new_string": "new line\n"`,
+		"edit foo.txt (replace_all=true)",
+		"- func old() {",
+		"+ func current() {",
+		"-     return 1",
+		"+     return 2",
 		"↳ Error:",
 		"old_string not found in file",
 	} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("rendered replace edit block missing %q; got:\n%s", want, plain)
+		}
+	}
+	for _, unwanted := range []string{`"old_string"`, `"new_string"`, `\n`, "Requested replacement:", "@@ ", "--- foo.txt", "+++ foo.txt", "replace_all: true"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("rendered replace edit block should not show %q; got:\n%s", unwanted, plain)
+		}
+	}
+	assertRenderedTextBackground(t, renderedLineContaining(t, lines, "func old"), "func", colorOfTheme(currentTheme.DiffDelLineBg))
+	assertRenderedTextBackground(t, renderedLineContaining(t, lines, "func current"), "func", colorOfTheme(currentTheme.DiffAddLineBg))
+}
+
+func TestReplaceEditToolCallErrorRenderTruncatesLongLines(t *testing.T) {
+	oldText := "old-prefix-" + strings.Repeat("a", 100) + "-old-suffix"
+	newText := "new-prefix-" + strings.Repeat("b", 100) + "-new-suffix"
+	args, err := json.Marshal(map[string]any{
+		"path":       "foo.txt",
+		"old_string": oldText,
+		"new_string": newText,
+	})
+	if err != nil {
+		t.Fatalf("marshal edit args: %v", err)
+	}
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		RawArgs:       string(args),
+		ResultContent: "old_string not found in file",
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultDone:    true,
+	}
+
+	const width = 48
+	lines := block.Render(width, "")
+	plain := stripANSI(strings.Join(lines, "\n"))
+	for _, want := range []string{"- old-prefix-", "+ new-prefix-", "…"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered long replace edit line missing %q; got:\n%s", want, plain)
+		}
+	}
+	for _, hidden := range []string{"old-suffix", "new-suffix"} {
+		if strings.Contains(plain, hidden) {
+			t.Fatalf("rendered long replace edit line should truncate %q; got:\n%s", hidden, plain)
+		}
+	}
+	metrics := newToolCardMetrics(width)
+	style := metrics.blockStyle
+	maxLineWidth := style.GetMarginLeft() + style.GetPaddingLeft() + metrics.cardWidth + style.GetPaddingRight() + style.GetMarginRight()
+	if railANSISeq("tool", false) != "" {
+		maxLineWidth++
+	}
+	for i, line := range lines {
+		if got := tuiStringWidth(line); got > maxLineWidth {
+			t.Fatalf("rendered line %d width = %d, want <= %d: %q", i, got, maxLineWidth, line)
+		}
+	}
+}
+
+func TestReplaceEditToolCallHeaderOmitsDisabledReplaceAll(t *testing.T) {
+	for _, rawArgs := range []string{
+		`{"path":"foo.txt","old_string":"old","new_string":"new"}`,
+		`{"path":"foo.txt","old_string":"old","new_string":"new","replace_all":false}`,
+	} {
+		block := &Block{
+			ID:            1,
+			Type:          BlockToolCall,
+			ToolName:      tools.NameEdit,
+			RawArgs:       rawArgs,
+			ResultContent: "old_string not found in file",
+			ResultStatus:  agent.ToolResultStatusError,
+			ResultDone:    true,
+		}
+
+		plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+		if strings.Contains(plain, "replace_all") {
+			t.Fatalf("disabled replace_all should be omitted from Edit card; got:\n%s", plain)
 		}
 	}
 }

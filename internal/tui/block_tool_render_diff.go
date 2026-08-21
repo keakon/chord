@@ -120,7 +120,7 @@ func nextNonEmptyUnifiedDiffLine(lines []string, index int) int {
 	return index
 }
 
-// renderFileDiffCall renders an Edit tool call with a unified diff view.
+// renderFileDiffCall renders content-changing tool calls with a diff-style view.
 func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	metrics := newToolCardMetrics(width)
 	blockStyle := metrics.blockStyle
@@ -145,6 +145,13 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	if filePath != "" {
 		headerLine += " " + DimStyle.Render(filePath)
+	}
+	replaceArgs, hasReplaceArgs := replaceEditArgs{}, false
+	if b.ToolName == tools.NameEdit {
+		replaceArgs, hasReplaceArgs = parseReplaceEditArgs(b.editPatchArgsJSON())
+		if hasReplaceArgs && replaceArgs.ReplaceAll != nil && *replaceArgs.ReplaceAll {
+			headerLine += " " + DimStyle.Render("(replace_all=true)")
+		}
 	}
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
@@ -379,10 +386,12 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				result = append(result, renderLSPDiagnosticsLines(sections.diagnostics, "    ", cardWidth-4)...)
 			}
 		case tools.NameEdit:
-			before := len(result)
-			result = appendEditPatchPreview(result, b.editPatchArgsJSON(), cardWidth-4)
-			if len(result) == before {
-				result = appendReplaceEditPreview(result, b.editPatchArgsJSON(), cardWidth-4)
+			if strings.TrimSpace(displayDiff) == "" {
+				if hasReplaceArgs {
+					result = appendReplaceEditPreview(result, replaceArgs, filePath, cardWidth-4)
+				} else {
+					result = appendEditPatchPreview(result, b.editPatchArgsJSON(), cardWidth-4)
+				}
 			}
 			result = append(result, ErrorStyle.Render("  ↳ Error:"))
 			result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.ResultContent), "    ", cardWidth-4)...)
@@ -692,18 +701,23 @@ func (b *Block) applyPatchTargets() []tools.ApplyPatchDisplayTarget {
 	return targets
 }
 
-func appendReplaceEditPreview(result []string, argsJSON string, width int) []string {
-	preview := replaceEditPreviewFromArgs(argsJSON)
-	if preview == "" {
-		return result
+func appendReplaceEditPreview(result []string, args replaceEditArgs, filePath string, width int) []string {
+	hl := newCodeHighlighterWithLanguage(filePath, args.OldString+"\n"+args.NewString, "")
+	for _, line := range replaceEditPreviewLines(args.OldString) {
+		result = append(result, "    "+DiffDelStyle.Render("- ")+renderHighlightedSnippetLine(line, nil, max(width-2, 1), hl, diffDelBg))
 	}
-	result = append(result, ToolResultExpandedStyle.Render("  ↳ Arguments:"))
-	for _, line := range editPatchPreviewLines(preview) {
-		for _, wrapped := range wrapIndentedText(line, width) {
-			result = append(result, "    "+DimStyle.Render(wrapped))
-		}
+	for _, line := range replaceEditPreviewLines(args.NewString) {
+		result = append(result, "    "+DiffAddStyle.Render("+ ")+renderHighlightedSnippetLine(line, nil, max(width-2, 1), hl, diffAddBg))
 	}
 	return result
+}
+
+func replaceEditPreviewLines(text string) []string {
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	if len(lines) > 20 {
+		lines = append(lines[:20], "... (text truncated)")
+	}
+	return lines
 }
 
 func (b *Block) editPatchArgsJSON() string {
@@ -758,25 +772,6 @@ func parseReplaceEditArgs(argsJSON string) (replaceEditArgs, bool) {
 		return replaceEditArgs{}, false
 	}
 	return parsed, true
-}
-
-func replaceEditPreviewFromArgs(argsJSON string) string {
-	parsed, ok := parseReplaceEditArgs(argsJSON)
-	if !ok {
-		return ""
-	}
-	preview := map[string]any{
-		"old_string": parsed.OldString,
-		"new_string": parsed.NewString,
-	}
-	if parsed.ReplaceAll != nil {
-		preview["replace_all"] = *parsed.ReplaceAll
-	}
-	formatted, err := json.MarshalIndent(preview, "", "  ")
-	if err != nil {
-		return ""
-	}
-	return string(formatted)
 }
 
 func editPatchPreviewLines(patch string) []string {
