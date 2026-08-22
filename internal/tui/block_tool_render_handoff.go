@@ -65,13 +65,14 @@ func (b *Block) renderHandoffCall(width int, spinnerFrame string) []string {
 }
 
 // handoffPlanPathFromArgs extracts the plan_path argument from the handoff
-// tool call's arguments JSON.
+// tool call's arguments JSON, falling back to tolerant parsing when the args
+// object does not decode cleanly.
 func handoffPlanPathFromArgs(argsJSON string) string {
 	var args struct {
 		PlanPath string `json:"plan_path"`
 	}
 	if json.Unmarshal([]byte(argsJSON), &args) != nil {
-		return ""
+		args.PlanPath = tolerantToolArgValue(argsJSON, "plan_path")
 	}
 	return strings.TrimSpace(args.PlanPath)
 }

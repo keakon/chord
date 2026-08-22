@@ -37,7 +37,11 @@ func parseTaskToolArgs(argsJSON string) taskToolArgs {
 		return taskToolArgs{}
 	}
 	var parsed taskToolArgs
-	_ = json.Unmarshal([]byte(argsJSON), &parsed)
+	if json.Unmarshal([]byte(argsJSON), &parsed) != nil {
+		_, vals := parseToolArgs(argsJSON)
+		parsed.Description = vals["description"]
+		parsed.AgentType = vals["agent_type"]
+	}
 	parsed.Description = sanitizeToolDisplayText(strings.TrimSpace(parsed.Description))
 	parsed.AgentType = sanitizeToolDisplayText(strings.TrimSpace(parsed.AgentType))
 	return parsed
@@ -161,7 +165,11 @@ func parseCancelToolArgs(argsJSON string) cancelToolArgs {
 		return cancelToolArgs{}
 	}
 	var parsed cancelToolArgs
-	_ = json.Unmarshal([]byte(argsJSON), &parsed)
+	if json.Unmarshal([]byte(argsJSON), &parsed) != nil {
+		_, vals := parseToolArgs(argsJSON)
+		parsed.TargetTaskID = vals["target_task_id"]
+		parsed.Reason = vals["reason"]
+	}
 	parsed.TargetTaskID = sanitizeToolDisplayText(strings.TrimSpace(parsed.TargetTaskID))
 	parsed.Reason = sanitizeToolDisplayText(strings.TrimSpace(parsed.Reason))
 	return parsed
@@ -172,7 +180,12 @@ func parseNotifyToolArgs(argsJSON string) notifyToolArgs {
 		return notifyToolArgs{}
 	}
 	var parsed notifyToolArgs
-	_ = json.Unmarshal([]byte(argsJSON), &parsed)
+	if json.Unmarshal([]byte(argsJSON), &parsed) != nil {
+		_, vals := parseToolArgs(argsJSON)
+		parsed.TargetTaskID = vals["target_task_id"]
+		parsed.Message = vals["message"]
+		parsed.Kind = vals["kind"]
+	}
 	parsed.TargetTaskID = sanitizeToolDisplayText(strings.TrimSpace(parsed.TargetTaskID))
 	parsed.Message = sanitizeToolDisplayText(strings.TrimSpace(parsed.Message))
 	parsed.Kind = sanitizeToolDisplayText(strings.TrimSpace(parsed.Kind))

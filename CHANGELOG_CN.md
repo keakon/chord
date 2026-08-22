@@ -23,6 +23,7 @@
 
 ### 改进
 
+- 工具调用参数校验失败时，界面上能直接看出实际传参：卡片不再因为单个字段类型不对而整体丢参数。文件类工具（read/write/edit/apply_patch）都保留路径，read/write 的标题行还会列出其余带值的参数，包括类型错误的字段和意外的键；取默认值的参数（空字符串、`false`、`null`）不展示，以免标题行被无意义的内容占满；TodoWrite 与 Question 在数组某一项格式错误时仍渲染其余合法项；Done/Escalate/Task/Cancel/Notify/Handoff 逐字段恢复摘要内容；过长值自动截断。校验错误信息同时会带上出错字段的实际值和类型（例如 `args.offset must be an integer, got string "1.0"`），模型拿到同样的信息后能更快自行纠正。
 - 配置加载现在区分「文件坏了」和「值不对」。YAML 语法错误会阻止启动，并由 `chord doctor config` 明确报告。`config.yaml` 中的未知字段、类型不符与超出范围的取值只记录日志、按未配置处理，其余字段照常生效；项目配置里的非法字段回退到被覆盖的全局值，不会用零值把全局配置冲掉。
 - THINKING 卡片现在与 USER / ASSISTANT 卡片对齐：THINKING 卡片及其角色标签与 USER、ASSISTANT 处于同一左列，不再作为单独的嵌套层级缩进到右侧。
 - 信息面板新增 `TIME` 板块，展示当前聚焦 agent 的墙钟时间去向：模型流式输出、工具执行、上下文压缩、key/模型冷却，以及等待用户确认或回答的时间。不足 1 秒的桶不显示，短调用不会刷屏；会话恢复后该板块会从 usage ledger 重建。

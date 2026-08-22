@@ -15,6 +15,21 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+func TestEditDiffHeaderRecoversPathFromInvalidArgs(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		Content:       `{"path":"src/app.go","old_string":123,"new_string":"b"}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match edit schema: args.old_string must be a string, got number 123",
+	}
+	if got := block.diffToolFilePath(); got != "src/app.go" {
+		t.Fatalf("diffToolFilePath with invalid sibling arg = %q, want %q", got, "src/app.go")
+	}
+}
+
 func TestEditToolCardRendersHighlightedDiffWithPath(t *testing.T) {
 	patch := "@@\n-old\n+new\n"
 	args, _ := json.Marshal(map[string]string{"path": "src/demo.go", "patch": patch})

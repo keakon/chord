@@ -430,6 +430,34 @@ type proseControlArgs struct {
 	Artifacts            []tools.ArtifactRef `json:"artifacts"`
 }
 
+// decodeProseControlArgsTolerant recovers prose-control fields individually
+// when one wrongly typed field makes the whole args object fail to decode, so
+// the Done/Escalate card keeps showing what the caller actually passed.
+func decodeProseControlArgsTolerant(argsJSON string) proseControlArgs {
+	_, vals := parseToolArgs(argsJSON)
+	return proseControlArgs{
+		Summary:              vals["summary"],
+		Reason:               vals["reason"],
+		FilesChanged:         paramStringList(vals["files_changed"]),
+		VerificationRun:      paramStringList(vals["verification_run"]),
+		RemainingLimitations: paramStringList(vals["remaining_limitations"]),
+		KnownRisks:           paramStringList(vals["known_risks"]),
+		FollowUpRecommended:  paramStringList(vals["follow_up_recommended"]),
+		Artifacts:            artifactsFromDisplayValue(vals["artifacts"]),
+	}
+}
+
+func artifactsFromDisplayValue(raw string) []tools.ArtifactRef {
+	if raw == "" {
+		return nil
+	}
+	var artifacts []tools.ArtifactRef
+	if json.Unmarshal([]byte(raw), &artifacts) != nil {
+		return nil
+	}
+	return artifacts
+}
+
 func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string {
 	metrics := newDoneToolCardMetrics(width)
 	blockStyle := metrics.blockStyle
@@ -447,7 +475,9 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 	if strings.TrimSpace(argsJSON) == "" {
 		argsJSON = b.Content
 	}
-	_ = json.Unmarshal([]byte(argsJSON), &args)
+	if json.Unmarshal([]byte(argsJSON), &args) != nil {
+		args = decodeProseControlArgsTolerant(argsJSON)
+	}
 	prose := strings.TrimSpace(args.Summary)
 	if b.ToolName == tools.NameEscalate {
 		prose = strings.TrimSpace(args.Reason)

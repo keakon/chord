@@ -3,6 +3,16 @@ package tui
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/mattn/go-runewidth"
+)
+
+// Width budget for the extra arguments appended to a Write header: the card
+// width minus the room taken by the prefix, tool name and file path, floored
+// so a narrow card still shows something.
+const (
+	writeHeaderExtrasReservedWidth = 24
+	writeHeaderExtrasMinWidth      = 20
 )
 
 // renderWriteCall renders a Write tool call result with a syntax-highlighted
@@ -14,13 +24,32 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	cardWidth := metrics.cardWidth
 	contentWidth := numberedToolPreviewWidth(cardWidth)
 
-	var filePath string
+	var fileContent string
 	var parsed struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
 	}
-	if json.Unmarshal([]byte(b.Content), &parsed) == nil {
-		filePath = b.displayToolPath(parsed.Path)
+	argsWellTyped := json.Unmarshal([]byte(b.Content), &parsed) == nil
+	if argsWellTyped {
+		fileContent = parsed.Content
+	}
+
+	// Schema-invalid args must still surface what the caller actually passed,
+	// so derive the visible path and any unexpected keys tolerantly.
+	keys, vals := parseToolArgs(b.Content)
+	filePath := ""
+	var extras []string
+	for _, k := range keys {
+		switch {
+		case k == "path":
+			// The header is width-clipped anyway; do not pre-truncate the path.
+			filePath = b.displayToolPath(vals[k])
+			continue
+		case k == "content" && argsWellTyped:
+			// The content is already rendered by the preview below.
+			continue
+		}
+		extras = append(extras, k+"="+truncateToolParamValue(vals[k]))
 	}
 
 	prefix := b.renderToolPrefix(spinnerFrame)
@@ -28,6 +57,12 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	if filePath != "" {
 		headerLine += " " + DimStyle.Render(filePath)
+	}
+	if extraText := strings.Join(extras, ", "); extraText != "" {
+		if budget := max(cardWidth-writeHeaderExtrasReservedWidth, writeHeaderExtrasMinWidth); runewidth.StringWidth(extraText) > budget {
+			extraText = runewidth.Truncate(extraText, budget, "…")
+		}
+		headerLine += " " + DimStyle.Render(extraText)
 	}
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
@@ -49,7 +84,7 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	}
 
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
-		rows, sourceSample := parsePlainContentPreviewLines(parsed.Content)
+		rows, sourceSample := parsePlainContentPreviewLines(fileContent)
 		if len(rows) > 0 {
 			result = append(result, renderNumberedToolPreview(numberedToolPreviewOptions{
 				filePath:            filePath,

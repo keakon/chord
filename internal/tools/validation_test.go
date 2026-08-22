@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -88,6 +89,58 @@ func TestValidateToolArgsRejectsEnumMismatch(t *testing.T) {
 	err := ValidateToolArgs(tool, json.RawMessage(`{"operation":"hover"}`))
 	if err == nil || !strings.Contains(err.Error(), "must be one of definition, references") {
 		t.Fatalf("err = %v, want enum error", err)
+	}
+}
+
+func TestValidateToolArgsTypeErrorsIncludeActualValue(t *testing.T) {
+	tool := validationStubTool{
+		name: "Read",
+		schema: map[string]any{
+			"type":     "object",
+			"required": []string{"path"},
+			"properties": map[string]any{
+				"path":   map[string]any{"type": "string"},
+				"offset": map[string]any{"type": "integer"},
+				"mode":   map[string]any{"type": "string", "enum": []any{"line", "byte"}},
+			},
+		},
+	}
+	cases := []struct {
+		name string
+		args string
+		want string
+	}{
+		{name: "quoted number for integer field", args: `{"path":"sample.go","offset":"1.0"}`, want: `args.offset must be an integer, got string "1.0"`},
+		{name: "null for string field", args: `{"path":null}`, want: `args.path must be a string, got null`},
+		{name: "number for string field", args: `{"path":7}`, want: `args.path must be a string, got number 7`},
+		{name: "enum mismatch shows value", args: `{"path":"sample.go","mode":"hover"}`, want: `args.mode must be one of line, byte, got string "hover"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateToolArgs(tool, json.RawMessage(tc.args))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateToolArgsTypeErrorsTruncateLongValues(t *testing.T) {
+	tool := validationStubTool{
+		name: "Shell",
+		schema: map[string]any{
+			"type":     "object",
+			"required": []string{"command"},
+			"properties": map[string]any{
+				"command": map[string]any{"type": "string"},
+				"timeout": map[string]any{"type": "integer"},
+			},
+		},
+	}
+	long := strings.Repeat("x", 200)
+	err := ValidateToolArgs(tool, json.RawMessage(fmt.Sprintf(`{"command":"echo ok","timeout":%q}`, long)))
+	if err == nil || !strings.Contains(err.Error(), `args.timeout must be an integer, got string "`+strings.Repeat("x", maxArgValueDisplayRunes)+`…"`) {
+		t.Fatalf("err = %v, want truncated long value preview", err)
 	}
 }
 

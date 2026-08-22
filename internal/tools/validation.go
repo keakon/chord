@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // ValidateToolArgs checks whether raw JSON arguments conform to a tool's
@@ -74,7 +76,7 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string) e
 	if enum, ok := schema["enum"]; ok {
 		values := schemaToSlice(enum)
 		if len(values) > 0 && !valueInEnum(value, values) {
-			return fmt.Errorf("%s must be one of %s", path, formatEnum(values))
+			return fmt.Errorf("%s must be one of %s, got %s", path, formatEnum(values), describeJSONValue(value))
 		}
 	}
 
@@ -91,7 +93,7 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string) e
 	case "object":
 		obj, ok := value.(map[string]any)
 		if !ok {
-			return fmt.Errorf("%s must be an object", path)
+			return fmt.Errorf("%s must be an object, got %s", path, describeJSONValue(value))
 		}
 		for _, key := range requiredFields(schema["required"]) {
 			if _, ok := obj[key]; !ok {
@@ -121,7 +123,7 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string) e
 			// hard failures when models supply a bare string by habit.
 			// "coerceFromObject": true does the same for a single object item.
 			if !schemaCoercesFromScalar(schema, value) && !schemaCoercesFromObject(schema, value) {
-				return fmt.Errorf("%s must be an array", path)
+				return fmt.Errorf("%s must be an array, got %s", path, describeJSONValue(value))
 			}
 			items = []any{value}
 		}
@@ -137,22 +139,22 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string) e
 		return nil
 	case "string":
 		if _, ok := value.(string); !ok {
-			return fmt.Errorf("%s must be a string", path)
+			return fmt.Errorf("%s must be a string, got %s", path, describeJSONValue(value))
 		}
 		return nil
 	case "boolean":
 		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("%s must be a boolean", path)
+			return fmt.Errorf("%s must be a boolean, got %s", path, describeJSONValue(value))
 		}
 		return nil
 	case "integer":
 		if !isIntegerJSONValue(value) {
-			return fmt.Errorf("%s must be an integer", path)
+			return fmt.Errorf("%s must be an integer, got %s", path, describeJSONValue(value))
 		}
 		return nil
 	case "number":
 		if !isNumberJSONValue(value) {
-			return fmt.Errorf("%s must be a number", path)
+			return fmt.Errorf("%s must be a number, got %s", path, describeJSONValue(value))
 		}
 		return nil
 	default:
@@ -292,6 +294,40 @@ func isIntegerJSONValue(value any) bool {
 func isNumberJSONValue(value any) bool {
 	_, ok := toFloat64(value)
 	return ok
+}
+
+// maxArgValueDisplayRunes caps how much of an offending scalar value is quoted
+// in a validation error, so huge string arguments cannot flood tool results.
+const maxArgValueDisplayRunes = 80
+
+// describeJSONValue renders the JSON type plus a truncated scalar preview of
+// an offending value, e.g. `string "1.0"`, so schema errors show what was
+// actually passed instead of only the expected type.
+func describeJSONValue(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return "null"
+	case string:
+		return "string " + strconv.Quote(truncateDisplayRunes(v, maxArgValueDisplayRunes))
+	case json.Number:
+		return "number " + truncateDisplayRunes(v.String(), maxArgValueDisplayRunes)
+	case bool:
+		return "boolean " + strconv.FormatBool(v)
+	case []any:
+		return fmt.Sprintf("array with %d item(s)", len(v))
+	case map[string]any:
+		return fmt.Sprintf("object with %d key(s)", len(v))
+	default:
+		return fmt.Sprintf("%T", value)
+	}
+}
+
+func truncateDisplayRunes(s string, limit int) string {
+	if limit <= 0 || utf8.RuneCountInString(s) <= limit {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:limit]) + "…"
 }
 
 func toFloat64(value any) (float64, bool) {

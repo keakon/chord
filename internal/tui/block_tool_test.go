@@ -3302,13 +3302,248 @@ func TestReadCallWideHeaderPreservesOffsetWithLongPath(t *testing.T) {
 
 func TestReadHeaderUsesEllipsisWhenPathDoesNotFit(t *testing.T) {
 	longPath := "/fictional/workspace/generated/reports/very/deeply/nested/directories/synthetic-review-fixture-00000000000000000001.txt"
-	header := stripANSI(renderReadHeaderLine("✓", "read", longPath, 160, 430, 80))
+	header := stripANSI(renderReadHeaderLine("✓", "read", longPath, "limit=160, offset=430", 80))
 
 	if !strings.Contains(header, "…") {
 		t.Fatalf("expected read header to use ellipsis for long path, got %q", header)
 	}
 	if !strings.Contains(header, "(limit=160, offset=430)") {
 		t.Fatalf("expected read header to preserve params while truncating path, got %q", header)
+	}
+}
+
+func TestReadCallErrorKeepsInvalidArgsVisible(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "read",
+		Content:       `{"path":"internal/config/config.go","offset":"1.0"}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match read schema: args.offset must be an integer, got string \"1.0\"",
+	}
+
+	plain := stripANSI(strings.Join(block.renderReadCall(120, ""), "\n"))
+	if !strings.Contains(plain, "internal/config/config.go") {
+		t.Fatalf("expected invalid-args Read header to keep the path, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "offset=1.0") {
+		t.Fatalf("expected Read header to show the offending offset value, got:\n%s", plain)
+	}
+}
+
+func TestReadCallErrorShowsUnexpectedArgKeys(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "read",
+		Content:       `{"pat":"sample.go","limit":5}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match read schema: args.path is required",
+	}
+
+	plain := stripANSI(strings.Join(block.renderReadCall(120, ""), "\n"))
+	if !strings.Contains(plain, "pat=sample.go") {
+		t.Fatalf("expected Read header to surface the unexpected key, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "limit=5") {
+		t.Fatalf("expected Read header to keep valid params alongside the bad one, got:\n%s", plain)
+	}
+}
+
+func TestReadCallErrorTruncatesLongArgValues(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "read",
+		Content:       fmt.Sprintf(`{"path":"a.go","offset":%q}`, strings.Repeat("x", 200)),
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match read schema: args.offset must be an integer",
+	}
+
+	plain := stripANSI(strings.Join(block.renderReadCall(160, ""), "\n"))
+	if strings.Contains(plain, strings.Repeat("x", 150)) {
+		t.Fatalf("expected long arg value to be truncated, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "offset="+strings.Repeat("x", 50)) {
+		t.Fatalf("expected truncated offset prefix to stay visible, got:\n%s", plain)
+	}
+}
+
+func TestWriteCallErrorKeepsInvalidArgsVisible(t *testing.T) {
+	block := &Block{
+		ID:            2,
+		Type:          BlockToolCall,
+		ToolName:      "write",
+		Content:       `{"path":"docs/notes.md","content":123}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match write schema: args.content must be a string, got number 123",
+	}
+
+	plain := stripANSI(strings.Join(block.renderWriteCall(120, ""), "\n"))
+	if !strings.Contains(plain, "docs/notes.md") {
+		t.Fatalf("expected invalid-args Write header to keep the path, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "content=123") {
+		t.Fatalf("expected Write header to show the offending content value, got:\n%s", plain)
+	}
+}
+
+func TestWriteCallSuccessHeaderOmitsContent(t *testing.T) {
+	block := &Block{
+		ID:       3,
+		Type:     BlockToolCall,
+		ToolName: "write",
+		Content:  `{"path":"docs/notes.md","content":"hello world"}`,
+	}
+
+	lines := block.renderWriteCall(120, "")
+	header := ""
+	for _, line := range lines {
+		if plain := stripANSI(line); strings.Contains(plain, "docs/notes.md") {
+			header = plain
+			break
+		}
+	}
+	if header == "" {
+		t.Fatalf("expected Write header to keep the path, got:\n%s", stripANSI(strings.Join(lines, "\n")))
+	}
+	if strings.Contains(header, "content=") {
+		t.Fatalf("valid Write args should not repeat the content in the header, got:\n%s", header)
+	}
+	if plain := stripANSI(strings.Join(lines, "\n")); !strings.Contains(plain, "hello world") {
+		t.Fatalf("expected the content preview to render the written text, got:\n%s", plain)
+	}
+}
+
+func TestTodoCallErrorKeepsValidEntriesVisible(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameTodoWrite,
+		Content:       `{"todos":[{"id":"1","content":"first task","status":"pending"},{"id":2,"content":"second task","status":"pending"}]}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match todo_write schema: args.todos[1].id must be a string, got number 2",
+	}
+
+	plain := stripANSI(strings.Join(block.renderTodoCall(120, ""), "\n"))
+	if !strings.Contains(plain, "first task") {
+		t.Fatalf("expected valid todo entry to stay visible next to a malformed one, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "arguments do not match todo_write schema") {
+		t.Fatalf("expected the validation error to stay visible, got:\n%s", plain)
+	}
+}
+
+func TestQuestionCallErrorKeepsValidEntriesVisible(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameQuestion,
+		Content:       `{"questions":[{"header":"Scope","question":"Which package should own the helper?","options":[{"label":"internal/tools"},{"label":"internal/tui"}]},{"header":7,"question":"broken"}]}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match question schema: args.questions[1].header must be a string, got number 7",
+	}
+
+	plain := stripANSI(strings.Join(block.renderQuestionCall(120, ""), "\n"))
+	if !strings.Contains(plain, "Which package should own the helper?") {
+		t.Fatalf("expected valid question to stay visible next to a malformed one, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "internal/tools") {
+		t.Fatalf("expected valid question options to stay visible, got:\n%s", plain)
+	}
+}
+
+func TestEscalateCallKeepsInvalidArgsVisible(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEscalate,
+		Content:       `{"reason":"Need approval to rotate credentials","files_changed":"src/auth.go"}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match escalate schema: args.files_changed must be an array, got string \"src/auth.go\"",
+	}
+
+	plain := stripANSI(strings.Join(block.renderProseControlCall(140, ""), "\n"))
+	if !strings.Contains(plain, "Need approval to rotate credentials") {
+		t.Fatalf("expected escalate reason to survive a wrongly typed sibling field, got:\n%s", plain)
+	}
+}
+
+func TestTaskCallKeepsInvalidArgsVisible(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameDelegate,
+		Content:       `{"description":"Explore the repo layout","agent_type":42}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match task schema: args.agent_type must be a string, got number 42",
+	}
+
+	plain := stripANSI(strings.Join(block.renderTaskCall(140, ""), "\n"))
+	if !strings.Contains(plain, "Explore the repo layout") {
+		t.Fatalf("expected delegate description to survive a wrongly typed sibling field, got:\n%s", plain)
+	}
+}
+
+func TestCancelCallKeepsInvalidArgsVisible(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameCancel,
+		Content:       `{"target_task_id":"task-42","reason":{"because":"stale"}}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match cancel schema: args.reason must be a string, got object",
+	}
+
+	plain := stripANSI(strings.Join(block.renderCancelCall(140, ""), "\n"))
+	if !strings.Contains(plain, "task-42") {
+		t.Fatalf("expected cancel target to survive a wrongly typed sibling field, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "stale") {
+		t.Fatalf("expected cancel reason value to stay visible, got:\n%s", plain)
+	}
+}
+
+func TestNotifyCallKeepsInvalidArgsVisible(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameNotify,
+		Content:       `{"message":"ping the worker","kind":9}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match notify schema: args.kind must be a string, got number 9",
+	}
+
+	plain := stripANSI(strings.Join(block.renderNotifyCall(140, ""), "\n"))
+	if !strings.Contains(plain, "ping the worker") {
+		t.Fatalf("expected notify message to survive a wrongly typed sibling field, got:\n%s", plain)
+	}
+}
+
+func TestHandoffHeaderRecoversInvalidPlanPath(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameHandoff,
+		Content:       `{"plan_path":42}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match handoff schema: args.plan_path must be a string, got number 42",
+	}
+
+	plain := stripANSI(strings.Join(block.renderHandoffCall(140, ""), "\n"))
+	if !strings.Contains(plain, "42") {
+		t.Fatalf("expected handoff header to show the offending plan_path value, got:\n%s", plain)
 	}
 }
 

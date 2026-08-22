@@ -795,10 +795,17 @@ func (b *Block) diffToolFilePathWithTargets(targets []tools.ApplyPatchDisplayTar
 			var parsed struct {
 				Paths []string `json:"paths"`
 			}
-			if json.Unmarshal([]byte(b.Content), &parsed) != nil || len(parsed.Paths) == 0 {
+			var paths []string
+			if json.Unmarshal([]byte(b.Content), &parsed) == nil {
+				paths = parsed.Paths
+			}
+			if len(paths) == 0 {
+				paths = paramStringList(tolerantToolArgValue(b.Content, "paths"))
+			}
+			if len(paths) == 0 {
 				return ""
 			}
-			return applyPatchPathSummary(parsed.Paths[0], len(parsed.Paths))
+			return applyPatchPathSummary(paths[0], len(paths))
 		}
 		marker, path := applyPatchTargetDisplay(targets[0])
 		if marker == "D" {
@@ -809,12 +816,7 @@ func (b *Block) diffToolFilePathWithTargets(targets []tools.ApplyPatchDisplayTar
 	if b.ToolName == tools.NameEdit {
 		path := tools.ExtractEditPathFromArgs(json.RawMessage(b.Content))
 		if path == "" {
-			var parsed struct {
-				Path string `json:"path"`
-			}
-			if json.Unmarshal([]byte(b.Content), &parsed) == nil {
-				path = strings.TrimSpace(parsed.Path)
-			}
+			path = strings.TrimSpace(tolerantToolArgValue(b.Content, "path"))
 		}
 		if path == "" {
 			return ""
@@ -828,13 +830,7 @@ func (b *Block) diffToolFilePathWithTargets(targets []tools.ApplyPatchDisplayTar
 		}
 		return path
 	}
-	var parsed struct {
-		Path string `json:"path"`
-	}
-	if json.Unmarshal([]byte(b.Content), &parsed) != nil {
-		return ""
-	}
-	return strings.TrimSpace(parsed.Path)
+	return strings.TrimSpace(tolerantToolArgValue(b.Content, "path"))
 }
 
 func applyPatchPathSummary(path string, count int) string {

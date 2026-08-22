@@ -139,6 +139,14 @@ func parseToolArgs(argsJSON string) (keys []string, vals map[string]string) {
 	return
 }
 
+// tolerantToolArgValue returns a single argument value from tolerantly parsed
+// args, so display code can still recover a field when other fields in the
+// same JSON fail schema validation.
+func tolerantToolArgValue(argsJSON, key string) string {
+	_, vals := parseToolArgs(argsJSON)
+	return vals[key]
+}
+
 func streamedFileToolPath(argsJSON string) string {
 	_, vals := parseToolArgs(argsJSON)
 	path := strings.TrimSpace(vals["path"])
@@ -148,6 +156,11 @@ func streamedFileToolPath(argsJSON string) string {
 	return path
 }
 
+// formatParamValue renders an argument value for a tool card. An empty result
+// means "do not display this key": values that carry no information for the
+// reader (null, false, empty string, empty object/array) are deliberately
+// omitted so headers and parameter lines stay readable, even when the args
+// failed schema validation. See the argument-validation entry in CHANGELOG.md.
 func formatParamValue(v any) string {
 	if v == nil {
 		return ""

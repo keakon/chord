@@ -100,11 +100,9 @@ func (b *Block) renderTodoCall(width int, spinnerFrame string) []string {
 	cardWidth := metrics.cardWidth
 	contentWidth := max(cardWidth-6, 10)
 
-	type todoArgs struct {
-		Todos []todoCallArgItem `json:"todos"`
-	}
-	var args todoArgs
-	_ = json.Unmarshal([]byte(b.Content), &args)
+	// Schema-invalid args must still surface what the caller actually passed,
+	// so decode the list item by item and keep every well-formed entry.
+	todos := decodeTodoCallItems(b.Content)
 
 	prefix := b.renderToolPrefix(spinnerFrame)
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
@@ -113,22 +111,74 @@ func (b *Block) renderTodoCall(width int, spinnerFrame string) []string {
 	var result []string
 	result = append(result, headerLine)
 
+	// Even when schema validation failed, keep every well-formed entry visible
+	// so the card shows what the caller actually passed.
+	if len(todos) > 0 && !b.toolResultIsCancelled() {
+		if len(todos) > 1 {
+			result = append(result, QuestionSeparatorStyle.Render(fmt.Sprintf("  ▸ %d tasks", len(todos))))
+		}
+		for _, item := range todos {
+			appendTodoCallItemLines(&result, item, contentWidth)
+		}
+	}
+
 	if b.toolResultIsError() && b.ResultContent != "" {
 		result = appendErrorResultLines(result, b.ResultContent, contentWidth)
 	} else if b.toolResultIsCancelled() && b.ResultContent != "" {
 		result = appendCancelledResultLines(result, b.ResultContent, contentWidth)
-	} else if len(args.Todos) > 0 {
-		if len(args.Todos) > 1 {
-			result = append(result, QuestionSeparatorStyle.Render(fmt.Sprintf("  ▸ %d tasks", len(args.Todos))))
-		}
-		for _, item := range args.Todos {
-			appendTodoCallItemLines(&result, item, contentWidth)
-		}
 	}
 	// Empty list: don't show "(no items)" prominently; just omit the list body
 
 	result = appendToolElapsedFooter(result, b)
 	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+}
+
+// decodeTodoCallItems decodes the todos array item by item so one malformed
+// entry cannot hide the remaining well-formed entries on the card.
+func decodeTodoCallItems(argsJSON string) []todoCallArgItem {
+	var envelope struct {
+		Todos []json.RawMessage `json:"todos"`
+	}
+	if json.Unmarshal([]byte(argsJSON), &envelope) != nil {
+		return nil
+	}
+	items := make([]todoCallArgItem, 0, len(envelope.Todos))
+	for _, raw := range envelope.Todos {
+		var item todoCallArgItem
+		if json.Unmarshal(raw, &item) != nil {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+// decodeQuestionItemsForDisplay mirrors tools.DecodeQuestionItems but salvages
+// every well-formed entry of a partially malformed questions array. The shared
+// decoder doubles as the Question tool's execution parser and must stay strict,
+// so display gets its own tolerant variant instead.
+func decodeQuestionItemsForDisplay(argsJSON string) []tools.QuestionItem {
+	var envelope struct {
+		Questions []json.RawMessage `json:"questions"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &envelope); err != nil {
+		var single struct {
+			Questions tools.QuestionItem `json:"questions"`
+		}
+		if err2 := json.Unmarshal([]byte(argsJSON), &single); err2 == nil && (single.Questions.Question != "" || single.Questions.Header != "") {
+			return []tools.QuestionItem{single.Questions}
+		}
+		return nil
+	}
+	items := make([]tools.QuestionItem, 0, len(envelope.Questions))
+	for _, raw := range envelope.Questions {
+		var item tools.QuestionItem
+		if json.Unmarshal(raw, &item) != nil {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 // renderQuestionCall renders a Question tool call showing the question text and options.
@@ -139,7 +189,7 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 	cardWidth := metrics.cardWidth
 	contentWidth := max(cardWidth-6, 10)
 
-	questions, _ := tools.DecodeQuestionItems(json.RawMessage(b.Content))
+	questions := decodeQuestionItemsForDisplay(b.Content)
 
 	var answers []tools.QuestionAnswer
 	hasStructuredAnswers := false
