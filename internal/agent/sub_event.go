@@ -15,6 +15,15 @@ import (
 func (s *SubAgent) runLoop() {
 	log.Debugf("SubAgent event loop started instance=%v task_id=%v agent_def=%v", s.instanceID, s.taskID, s.agentDefName)
 	defer func() {
+		// Join any in-flight LLM-request goroutine before signalling done. The
+		// loop below returns as soon as parentCtx is cancelled, but a request
+		// goroutine unblocking concurrently still performs post-call synchronous
+		// writes (usage ledger, hooks) into the session directory. Closing done
+		// first would let shutdown return while those writes are in progress,
+		// racing session-directory removal. Every Add originates from this
+		// goroutine, whose body has returned by the time this defer runs, so no
+		// Add can race this Wait.
+		s.llmWG.Wait()
 		s.doneOnce.Do(func() { close(s.done) })
 		log.Debugf("SubAgent event loop stopped instance=%v", s.instanceID)
 	}()

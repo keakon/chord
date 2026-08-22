@@ -120,14 +120,20 @@ type SubAgent struct {
 	startupWatchdogSeq   atomic.Uint64
 	done                 chan struct{}
 	doneOnce             sync.Once
-	started              atomic.Bool
-	lifecycleMu          sync.Mutex      // coordinates parking with external wake-and-deliver operations
-	ctxMgr               *ctxmgr.Manager // own context; automatic compaction disabled
-	tools                *tools.Registry // shared base + SubAgent-specific tools
-	parent               *MainAgent      // reference to parent for event forwarding
-	parentCtx            context.Context
-	cancel               context.CancelFunc
-	recovery             *recovery.RecoveryManager // shared with MainAgent, thread-safe
+	// llmWG tracks in-flight LLM-request goroutines. runLoop exits as soon as
+	// parentCtx is cancelled, but an LLM goroutine finishing concurrently still
+	// performs post-call synchronous writes (usage ledger, hooks); runLoop joins
+	// this group before closing done so shutdown never returns while a SubAgent
+	// is mid-write.
+	llmWG       sync.WaitGroup
+	started     atomic.Bool
+	lifecycleMu sync.Mutex      // coordinates parking with external wake-and-deliver operations
+	ctxMgr      *ctxmgr.Manager // own context; automatic compaction disabled
+	tools       *tools.Registry // shared base + SubAgent-specific tools
+	parent      *MainAgent      // reference to parent for event forwarding
+	parentCtx   context.Context
+	cancel      context.CancelFunc
+	recovery    *recovery.RecoveryManager // shared with MainAgent, thread-safe
 
 	// turnMu guards concurrent CancelSubAgent vs runLoop turn creation.
 	turnMu sync.Mutex
@@ -772,7 +778,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 	compatCfg := llmClient.ThinkingToolcallCompat()
 	scrubThinkingMarkers := compatCfg != nil && compatCfg.EnabledValue()
 
-	go func() {
+	s.llmWG.Go(func() {
 		resultQueued := false
 		defer func() {
 			// A queued result still belongs to the active request until runLoop
@@ -916,7 +922,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 			resultQueued = true
 		case <-s.parentCtx.Done():
 		}
-	}()
+	})
 }
 
 type subLLMStreamState struct {

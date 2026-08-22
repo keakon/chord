@@ -254,6 +254,94 @@ func TestShutdownWaitsForStartedSubAgentRunLoop(t *testing.T) {
 	}
 }
 
+// uncancellableBlockingProvider parks in CompleteStream until release is closed
+// and ignores context cancellation, reproducing an LLM request goroutine that is
+// still blocked when the parent shuts down and only runs its post-call writes
+// (usage ledger, hooks) once unblocked.
+type uncancellableBlockingProvider struct {
+	started   chan struct{}
+	release   chan struct{}
+	startOnce sync.Once
+}
+
+func (p *uncancellableBlockingProvider) CompleteStream(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ string,
+	_ []message.Message,
+	_ []message.ToolDefinition,
+	_ int,
+	_ llm.RequestTuning,
+	_ llm.StreamCallback,
+) (*message.Response, error) {
+	p.startOnce.Do(func() { close(p.started) })
+	<-p.release
+	return &message.Response{}, nil
+}
+
+func (p *uncancellableBlockingProvider) Complete(
+	ctx context.Context,
+	apiKey string,
+	model string,
+	systemPrompt string,
+	messages []message.Message,
+	tools []message.ToolDefinition,
+	maxTokens int,
+	tuning llm.RequestTuning,
+) (*message.Response, error) {
+	return p.CompleteStream(ctx, apiKey, model, systemPrompt, messages, tools, maxTokens, tuning, nil)
+}
+
+func TestSubAgentDoneWaitsForInFlightLLMRequest(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-inflight-llm")
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	provider := &uncancellableBlockingProvider{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	sub.llmClient = llm.NewClient(providerCfg, provider, "test-model", 1024, "sys")
+
+	release := sync.OnceFunc(func() { close(provider.release) })
+	sub.startRunLoop()
+	t.Cleanup(func() {
+		sub.cancel()
+		release()
+		_ = sub.waitDone(context.Background())
+	})
+
+	if !sub.InjectUserMessage("start work") {
+		t.Fatal("InjectUserMessage() rejected input")
+	}
+	select {
+	case <-provider.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the SubAgent LLM request to start")
+	}
+
+	// Cancelling the parent makes runLoop return immediately while the request
+	// goroutine stays parked in the provider.
+	sub.cancel()
+	select {
+	case <-sub.done:
+		t.Fatal("SubAgent signalled done while an LLM request goroutine was still in flight")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	release()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := sub.waitDone(ctx); err != nil {
+		t.Fatalf("waitDone() after the LLM request finished error = %v", err)
+	}
+}
+
 func TestShutdownClosesMainLLMClient(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	client := newTestLLMClient()
