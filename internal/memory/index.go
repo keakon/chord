@@ -129,13 +129,11 @@ func parseManagedEntries(text string) ([]ManagedEntry, error) {
 		if !strings.HasPrefix(ln, "- [") {
 			return nil, fmt.Errorf("%w: unexpected managed line %q", ErrManagedMarkers, ln)
 		}
-		rest := ln[len("- ["):]
-		closeBracket := strings.Index(rest, "]")
-		if closeBracket < 0 {
-			return nil, fmt.Errorf("%w: malformed entry %q", ErrManagedMarkers, rest)
+		entryText := ln[len("- ["):]
+		id, after, ok := strings.Cut(entryText, "]")
+		if !ok {
+			return nil, fmt.Errorf("%w: malformed entry %q", ErrManagedMarkers, entryText)
 		}
-		id := rest[:closeBracket]
-		after := rest[closeBracket+1:]
 		if !strings.HasPrefix(after, "(") || !strings.HasSuffix(after, ")") {
 			return nil, fmt.Errorf("%w: malformed entry link %q", ErrManagedMarkers, after)
 		}

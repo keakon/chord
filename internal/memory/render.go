@@ -55,10 +55,7 @@ func BoundedSummary(idx *MemoryIndex) (string, bool) {
 		}
 	} else {
 		// Index present: Notes get only the budget left after the managed lines.
-		remaining := maxSummaryTokens - managedUsed
-		if remaining < 0 {
-			remaining = 0
-		}
+		remaining := max(maxSummaryTokens-managedUsed, 0)
 		if sessionview.EstimatedTokens(notes) > remaining {
 			notesLimited = boundedPrefixUTF8(notes, remaining*4)
 		}

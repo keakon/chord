@@ -3,6 +3,7 @@ package lsp
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,13 +72,7 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 	// files edited earlier in the session. Attaching them would misattribute
 	// unrelated errors to this tool call, so keep the base output as-is.
 	if len(extras) == 0 {
-		covered := false
-		for _, path := range primaryPaths {
-			if m.HasServerForPath(path) {
-				covered = true
-				break
-			}
-		}
+		covered := slices.ContainsFunc(primaryPaths, m.HasServerForPath)
 		if !covered {
 			return base
 		}

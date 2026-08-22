@@ -8,6 +8,7 @@ package sessionview
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -150,14 +151,14 @@ func Retain(items []Projected, maxTokens, maxItemBytes int) (kept []Projected, p
 	// Locate the newest user item and the newest compaction checkpoint.
 	newestUser := -1
 	newestSummary := -1
-	for i := len(items) - 1; i >= 0; i-- {
-		if items[i].Text == "" {
+	for i, item := range slices.Backward(items) {
+		if item.Text == "" {
 			continue
 		}
-		if newestSummary < 0 && items[i].Kind == KindSummary {
+		if newestSummary < 0 && item.Kind == KindSummary {
 			newestSummary = i
 		}
-		if newestUser < 0 && items[i].Kind == KindUser {
+		if newestUser < 0 && item.Kind == KindUser {
 			newestUser = i
 		}
 		if newestSummary >= 0 && newestUser >= 0 {

@@ -153,7 +153,7 @@ func TestInteractionBrokerConcurrentConfirmAndQuestionFlows(t *testing.T) {
 
 	var wg sync.WaitGroup
 	const perFlow = 200
-	for i := 0; i < perFlow; i++ {
+	for i := range perFlow {
 		wg.Add(2)
 		go func(n int) {
 			defer wg.Done()

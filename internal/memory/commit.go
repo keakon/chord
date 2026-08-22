@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -299,12 +300,7 @@ func uniqueStrings(values []string) []string {
 }
 
 func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func matchingActiveConclusion(records []*Record, activeIDs map[string]bool, candidate Candidate, excluded []string) (string, bool) {
@@ -431,7 +427,7 @@ func writeMemoryFileIfChanged(l *Layout, idx *MemoryIndex, merged string, entrie
 		return false, nil
 	}
 	const maxAttempts = 3
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for attempt := range maxAttempts {
 		// Re-read the file we merged from. If it no longer matches the index we
 		// derived `merged` from, refresh and re-merge before writing.
 		current, err := os.ReadFile(l.IndexPath)

@@ -314,10 +314,7 @@ func memoryRetryBackoff(attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1
 	}
-	shift := attempt - 1
-	if shift > 4 {
-		shift = 4
-	}
+	shift := min(attempt-1, 4)
 	d := memoryJobRetainBackoff * time.Duration(1<<shift)
 	if d > memoryMaxRetryBackoff {
 		return memoryMaxRetryBackoff

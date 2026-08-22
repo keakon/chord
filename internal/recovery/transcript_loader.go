@@ -115,7 +115,7 @@ func (l *ReadOnlyTranscriptLoader) LoadDir(sessionDir string) ([]message.Message
 func readTranscriptFile(path string) ([]message.Message, error) {
 	const maxAttempts = 3
 	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for range maxAttempts {
 		msgs, err := readTranscriptOnce(path)
 		if err == nil {
 			return msgs, nil

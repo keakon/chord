@@ -153,7 +153,7 @@ func TestWriteBackupNoteDoesNotClaimValidation(t *testing.T) {
 // backupPathsFromResult extracts the backup locations a tool result reports.
 func backupPathsFromResult(result string) []string {
 	var paths []string
-	for _, line := range strings.Split(result, "\n") {
+	for line := range strings.SplitSeq(result, "\n") {
 		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "Backup saved to: "); ok {
 			paths = append(paths, rest)
 		}

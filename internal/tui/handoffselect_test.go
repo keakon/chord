@@ -339,7 +339,7 @@ func TestHandoffDenyReasonRenderedAtOverlayWidthWithoutRewrap(t *testing.T) {
 	// overlay wrapped at a different width, long rows would be re-wrapped and
 	// no longer appear as-is in the rendered dialog.
 	plain := stripANSI(m.renderHandoffSelectDialog())
-	for _, row := range strings.Split(stripANSI(m.handoffSelect.denyReasonInput.View()), "\n") {
+	for row := range strings.SplitSeq(stripANSI(m.handoffSelect.denyReasonInput.View()), "\n") {
 		row = strings.TrimRight(row, " ")
 		if row == "" {
 			continue

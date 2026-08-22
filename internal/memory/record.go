@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -281,10 +282,8 @@ func validateProjectPathString(p string) error {
 	if filepath.IsAbs(p) {
 		return fmt.Errorf("project path must be relative, got %q", p)
 	}
-	for _, part := range strings.Split(filepath.Clean(filepath.FromSlash(p)), string(filepath.Separator)) {
-		if part == ".." {
-			return fmt.Errorf("project path %q escapes the project root", p)
-		}
+	if slices.Contains(strings.Split(filepath.Clean(filepath.FromSlash(p)), string(filepath.Separator)), "..") {
+		return fmt.Errorf("project path %q escapes the project root", p)
 	}
 	return nil
 }
@@ -355,15 +354,15 @@ func ParseRecord(data []byte) (*Record, error) {
 		return nil, errors.New("record missing frontmatter")
 	}
 	rest := text[len("---\n"):]
-	end := strings.Index(rest, "\n---\n")
-	if end < 0 {
+	before, after, ok := strings.Cut(rest, "\n---\n")
+	if !ok {
 		return nil, errors.New("record missing frontmatter terminator")
 	}
 	var fm recordFrontmatter
-	if err := yaml.Unmarshal([]byte(rest[:end]), &fm); err != nil {
+	if err := yaml.Unmarshal([]byte(before), &fm); err != nil {
 		return nil, fmt.Errorf("parse record frontmatter: %w", err)
 	}
-	body := strings.TrimSpace(rest[end+len("\n---\n"):])
+	body := strings.TrimSpace(after)
 	r := &Record{
 		ID:                fm.ID,
 		Type:              fm.Type,
@@ -380,29 +379,27 @@ func ParseRecord(data []byte) (*Record, error) {
 		applicationHeading = "\n\n## How to apply\n\n"
 		pathsHeading       = "\n\n## Relevant project paths\n\n"
 	)
-	whyIdx := strings.Index(body, whyHeading)
-	if whyIdx < 0 {
+	statementPart, rest, ok := strings.Cut(body, whyHeading)
+	if !ok {
 		return nil, errors.New("record missing why-it-matters section")
 	}
-	afterWhy := body[whyIdx+len(whyHeading):]
-	applicationIdx := strings.Index(afterWhy, applicationHeading)
-	if applicationIdx < 0 {
+	r.Statement = strings.TrimSpace(statementPart)
+	rationalePart, rest, ok := strings.Cut(rest, applicationHeading)
+	if !ok {
 		return nil, errors.New("record missing how-to-apply section")
 	}
-	r.Statement = strings.TrimSpace(body[:whyIdx])
-	r.Rationale = strings.TrimSpace(afterWhy[:applicationIdx])
-	applicationAndPaths := afterWhy[applicationIdx+len(applicationHeading):]
-	if pathsIdx := strings.Index(applicationAndPaths, pathsHeading); pathsIdx >= 0 {
-		r.Application = strings.TrimSpace(applicationAndPaths[:pathsIdx])
-		pathsSection := applicationAndPaths[pathsIdx+len(pathsHeading):]
-		for _, ln := range strings.Split(strings.TrimSpace(pathsSection), "\n") {
+	r.Rationale = strings.TrimSpace(rationalePart)
+	applicationText := rest
+	if pathsPart, rest, ok := strings.Cut(rest, pathsHeading); ok {
+		r.Application = strings.TrimSpace(pathsPart)
+		for ln := range strings.SplitSeq(strings.TrimSpace(rest), "\n") {
 			ln = strings.TrimSpace(ln)
 			if strings.HasPrefix(ln, "- `") && strings.HasSuffix(ln, "`") {
 				r.ProjectPaths = append(r.ProjectPaths, strings.TrimSuffix(strings.TrimPrefix(ln, "- `"), "`"))
 			}
 		}
 	} else {
-		r.Application = strings.TrimSpace(applicationAndPaths)
+		r.Application = strings.TrimSpace(applicationText)
 	}
 	if err := validateRecordBounds(r); err != nil {
 		return nil, err

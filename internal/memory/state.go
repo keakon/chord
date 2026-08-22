@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -102,9 +103,7 @@ func SaveCheckpoint(l *Layout, cp *ExtractionCheckpoint) error {
 	if existing.Sessions == nil {
 		existing.Sessions = make(map[string]SessionCoverage)
 	}
-	for sid, sc := range cp.Sessions {
-		existing.Sessions[sid] = sc
-	}
+	maps.Copy(existing.Sessions, cp.Sessions)
 	data, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal extraction checkpoint: %w", err)

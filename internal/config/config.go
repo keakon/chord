@@ -66,7 +66,7 @@ type Config struct {
 	MaxOutputTokens     int                        `json:"max_output_tokens" yaml:"max_output_tokens"`                           // global output token cap (0 = use DefaultOutputTokenMax)
 	StreamRetryRounds   int                        `json:"stream_retry_rounds" yaml:"stream_retry_rounds"`                       // hard cap on public LLM retry rounds (0 = keep retrying until success/cancel)
 	Proxy               string                     `json:"proxy,omitempty" yaml:"proxy,omitempty"`                               // global proxy URL (http/https/socks5), empty = no proxy
-	Memory              MemoryConfig               `json:"memory,omitempty" yaml:"memory,omitempty"`                             // project memory auto-extraction
+	Memory              MemoryConfig               `json:"memory" yaml:"memory,omitempty"`                                       // project memory auto-extraction
 	WebFetch            WebFetchConfig             `json:"web_fetch" yaml:"web_fetch,omitempty"`                                 // WebFetch-specific options
 	Worktree            WorktreeConfig             `json:"worktree" yaml:"worktree,omitempty"`                                   // git worktree integration options
 	ThinkingTranslation *ThinkingTranslationConfig `json:"thinking_translation,omitempty" yaml:"thinking_translation,omitempty"` // optional thinking translation enhancement
@@ -1488,7 +1488,7 @@ func resetInvalidProviderFields(cfg ProviderConfig) ProviderConfig {
 func stripTypeInvalidOverride(path string, data []byte) ([]byte, []string, error) {
 	current := data
 	var dropped []string
-	for round := 0; round < maxOverrideSanitizeRounds; round++ {
+	for range maxOverrideSanitizeRounds {
 		// Re-parse every round instead of carrying the first tree forward:
 		// Marshal drops blank lines, so a node's Line only matches the lines
 		// the decoder reports for the bytes it was parsed from.
@@ -1804,7 +1804,7 @@ func mergeConfigOverrideData(base *Config, overrideData []byte, overridePath str
 const maxOverrideSanitizeRounds = 4
 
 func marshalSanitizedMerge(baseMap, overrideMap map[string]any, path string) ([]byte, error) {
-	for round := 0; round < maxOverrideSanitizeRounds; round++ {
+	for range maxOverrideSanitizeRounds {
 		trial := cloneYAMLValue(baseMap).(map[string]any)
 		mergeProjectConfigMap(trial, overrideMap, nil)
 		trialData, err := yaml.Marshal(trial)

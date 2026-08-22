@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -93,12 +94,7 @@ func (a *MainAgent) validHandoffTarget(name string) bool {
 	if name == "" {
 		return false
 	}
-	for _, candidate := range a.AvailableAgents() {
-		if candidate == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(a.AvailableAgents(), name)
 }
 
 type HandoffAgentOption struct {

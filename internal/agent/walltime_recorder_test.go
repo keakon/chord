@@ -170,10 +170,8 @@ func TestWalltimeRecorderConcurrentRecordAndRepoint(t *testing.T) {
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -182,16 +180,14 @@ func TestWalltimeRecorderConcurrentRecordAndRepoint(t *testing.T) {
 					rec.recordTarget(rec.captureAt(identity.MainAgentID, "", 0), analytics.WalltimePurposeTool, time.Millisecond)
 				}
 			}
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 200; i++ {
+	wg.Go(func() {
+		for range 200 {
 			rec.repointLedger(ledgerB)
 			rec.repointLedger(ledgerA)
 		}
-	}()
+	})
 	time.Sleep(50 * time.Millisecond)
 	close(stop)
 	wg.Wait()
