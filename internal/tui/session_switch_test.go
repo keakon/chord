@@ -2530,10 +2530,8 @@ func TestFocusedContinueActionsKeepCapturedTarget(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			backend := &targetedConversationAgent{
-				sessionControlAgent: sessionControlAgent{
-					focused:   "agent-1",
-					subAgents: []agent.SubAgentInfo{{InstanceID: "agent-1", TaskID: "task-1"}},
-				},
+				focused:        "agent-1",
+				subAgents:      []agent.SubAgentInfo{{InstanceID: "agent-1", TaskID: "task-1"}},
 				messagesByTask: map[string][]message.Message{"task-1": {tt.last}},
 			}
 			m := NewModelWithSize(backend, 120, 24)

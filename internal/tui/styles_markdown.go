@@ -41,19 +41,19 @@ func contentMarkdownStyleConfig() ansi.StyleConfig {
 	fgH6 := new(currentTheme.DimFg)
 	fgStrong := new(currentTheme.HeaderFg)
 	block := func() ansi.StyleBlock {
-		return ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{BackgroundColor: nil, Color: fg}}
+		return ansi.StyleBlock{BackgroundColor: nil, Color: fg}
 	}
 	prim := func() ansi.StylePrimitive {
 		return ansi.StylePrimitive{BackgroundColor: nil, Color: fg}
 	}
 	headingBlock := func(color *string, underline bool) ansi.StyleBlock {
-		return ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{
+		return ansi.StyleBlock{
 			BackgroundColor: nil,
 			Color:           color,
 			Bold:            new(true),
 			Underline:       new(underline),
 			BlockSuffix:     "\n",
-		}}
+		}
 	}
 	strongPrim := ansi.StylePrimitive{BackgroundColor: nil, Color: fgStrong, Bold: new(true)}
 	codePrim := ansi.StylePrimitive{BackgroundColor: bgCode, Color: fgCode}

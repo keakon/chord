@@ -169,7 +169,7 @@ func encodeKittyTransmit(part BlockImagePart, imageID int) (string, error) {
 	}
 	opts := (&xkitty.Options{
 		Action: xkitty.Transmit,
-		Quite:  2,
+		Quiet:  2,
 		ID:     imageID,
 		Format: xkitty.PNG,
 		Chunk:  true,
@@ -199,7 +199,7 @@ func encodeKittyTransmit(part BlockImagePart, imageID int) (string, error) {
 func encodeKittyVirtualPlacement(imageID, cols, rows int) string {
 	return xansi.KittyGraphics(nil, (&xkitty.Options{
 		Action:           xkitty.Put,
-		Quite:            2,
+		Quiet:            2,
 		ID:               imageID,
 		Columns:          cols,
 		Rows:             rows,
@@ -232,7 +232,7 @@ func encodeKittyDisplayPlacement(imageID, placementID, cols, rows, zIndex, offse
 func encodeKittyDeletePlacement(imageID, placementID int) string {
 	return xansi.KittyGraphics(nil, (&xkitty.Options{
 		Action:          xkitty.Delete,
-		Quite:           2,
+		Quiet:           2,
 		ID:              imageID,
 		PlacementID:     placementID,
 		Delete:          xkitty.DeleteID,
@@ -243,7 +243,7 @@ func encodeKittyDeletePlacement(imageID, placementID int) string {
 func encodeKittyDeleteImage(imageID int) string {
 	return xansi.KittyGraphics(nil, (&xkitty.Options{
 		Action:          xkitty.Delete,
-		Quite:           2,
+		Quiet:           2,
 		ID:              imageID,
 		Delete:          xkitty.DeleteID,
 		DeleteResources: true,

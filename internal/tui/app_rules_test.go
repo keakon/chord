@@ -44,10 +44,8 @@ func (s *rulesAgentStub) RemoveOverlayAddedRule(index int) error {
 
 func TestOpenRulesLoadsFromAgentOverlay(t *testing.T) {
 	ag := &rulesAgentStub{
-		sessionControlAgent: sessionControlAgent{
-			events:      make(chan agent.AgentEvent),
-			currentRole: "builder",
-		},
+		events:      make(chan agent.AgentEvent),
+		currentRole: "builder",
 		added: []permission.AddedRule{
 			{Role: "builder", Rule: permission.Rule{Permission: "shell", Pattern: "git *", Action: permission.ActionAllow}, Scope: permission.ScopeSession},
 			{Role: "builder", Rule: permission.Rule{Permission: "write", Pattern: "docs/*", Action: permission.ActionAllow}, Scope: permission.ScopeProject, Path: "/tmp/project/.chord/agents/builder.yaml"},
@@ -77,10 +75,8 @@ func TestOpenRulesLoadsFromAgentOverlay(t *testing.T) {
 
 func TestOpenRulesWithNoRulesOpensEmptyOverlay(t *testing.T) {
 	ag := &rulesAgentStub{
-		sessionControlAgent: sessionControlAgent{
-			events:      make(chan agent.AgentEvent),
-			currentRole: "builder",
-		},
+		events:      make(chan agent.AgentEvent),
+		currentRole: "builder",
 	}
 	m := NewModel(ag)
 	m.mode = ModeNormal
@@ -100,10 +96,8 @@ func TestOpenRulesWithNoRulesOpensEmptyOverlay(t *testing.T) {
 
 func TestRulesAddManualRuleUsesAgentBackend(t *testing.T) {
 	ag := &rulesAgentStub{
-		sessionControlAgent: sessionControlAgent{
-			events:      make(chan agent.AgentEvent),
-			currentRole: "builder",
-		},
+		events:      make(chan agent.AgentEvent),
+		currentRole: "builder",
 	}
 	m := NewModel(ag)
 	_ = m.openRules()

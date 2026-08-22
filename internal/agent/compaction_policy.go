@@ -588,8 +588,12 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			stats.TokensSaved = stats.TokensBefore - stats.TokensAfter
 		}
 		if !semanticRefresh && wrapUpGraceActive && stats.TokensSaved < policy.MinIncrementalTokens {
-			preserved := ContextReductionStats{TokensBefore: stats.TokensBefore, TokensAfter: stats.TokensBefore, Protected: true}
-			preserved.ProtectReason = contextProtectReasonWrapUpGrace
+			preserved := ContextReductionStats{
+				TokensBefore:  stats.TokensBefore,
+				TokensAfter:   stats.TokensBefore,
+				Protected:     true,
+				ProtectReason: contextProtectReasonWrapUpGrace,
+			}
 			preserved.fillModelContinuity(modelSnapshot)
 			a.setCurrentRequestSurface(&preserved, messages)
 			a.setContextReductionStats(preserved)

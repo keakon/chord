@@ -114,7 +114,7 @@ func TestLazyMCPServerVisibilityRespectsExactAllow(t *testing.T) {
 
 func TestMCPVisibilityHandlesUnderscoreServerNames(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.tools.Register(dummyMCPTool{dummyTool: dummyTool{name: "mcp_search_api_query"}, server: "search_api"})
+	a.tools.Register(dummyMCPTool{name: "mcp_search_api_query", server: "search_api"})
 	a.globalConfig = &config.Config{MCP: config.MCPConfig{"search": {AllowedTools: []string{"admin"}}}}
 	a.SetMCPStatusFunc(func() []MCPServerDisplay {
 		return []MCPServerDisplay{{Name: "search_api"}, {Name: "search"}}
@@ -151,7 +151,7 @@ func BenchmarkMCPServerListPermissionFiltering(b *testing.B) {
 		rows[i] = MCPServerDisplay{Name: server}
 		for j := range 8 {
 			name := fmt.Sprintf("mcp_%s_tool_%02d", server, j)
-			a.tools.Register(dummyMCPTool{dummyTool: dummyTool{name: name}, server: server})
+			a.tools.Register(dummyMCPTool{name: name, server: server})
 		}
 	}
 	a.SetMCPStatusFunc(func() []MCPServerDisplay { return rows })

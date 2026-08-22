@@ -20,12 +20,15 @@ import (
 // output truncation.
 func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
 	if intercept, ok := a.maybeInterceptRepeatedToolCall(ctx, tc); ok {
-		execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args), Result: intercept.toolResult}
-		// No tool actually ran: anchor the (near-zero) execution duration at
-		// the intercept decision point so the repeated-call confirmation wait
-		// is never counted as tool execution time.
-		execResult.ExecStartedAt = time.Now()
-		execResult.walltimeTarget = a.captureMainWalltimeTarget()
+		execResult := ToolExecutionResult{
+			EffectiveArgsJSON: string(tc.Args),
+			Result:            intercept.toolResult,
+			// No tool actually ran: anchor the (near-zero) execution duration at
+			// the intercept decision point so the repeated-call confirmation wait
+			// is never counted as tool execution time.
+			ExecStartedAt:  time.Now(),
+			walltimeTarget: a.captureMainWalltimeTarget(),
+		}
 		return execResult, intercept.confirmErr
 	}
 	return a.toolExecutionPipeline().execute(ctx, tc, true)

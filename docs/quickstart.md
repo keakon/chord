@@ -4,7 +4,7 @@ This page is for first-time Chord users. The goal is to complete a minimal worki
 
 ## 1. Install
 
-Prebuilt binaries do not require Go. Installing with `go install` or building from source requires Go 1.26.3+.
+Prebuilt binaries do not require Go. Installing with `go install` or building from source requires Go 1.27.0+.
 
 ```bash
 # Install from source with Go

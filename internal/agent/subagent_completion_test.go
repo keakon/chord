@@ -209,7 +209,7 @@ func TestSubAgentCompletionMergesObservedFileState(t *testing.T) {
 
 func TestSubAgentCompletionMarksUnobservableMutationIncomplete(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
-	sub.tools.Register(dummyMutatingTool{dummyTool: dummyTool{name: "OpaqueMutation"}})
+	sub.tools.Register(dummyMutatingTool{name: "OpaqueMutation"})
 	sub.recordTaskToolChanges(&toolResult{Name: "OpaqueMutation", ArgsJSON: `{}`}, false)
 
 	result := sub.enrichCompletionResult(&AgentResult{Summary: "done"})

@@ -72,9 +72,9 @@ if replace_or_exclude:
         errors.append(f"go.mod:{lineno}: replace/exclude directives require explicit dependency-audit review: {text}")
 
 allowed_pseudo = {
+    "github.com/bytedance/sonic": "Pinned to main until a tagged release supports Go 1.27: v1.15.2 excludes go1.27 in its build constraints, so a tagged version silently falls back to the encoding/json compat decoder on the LLM streaming hot path. Drop this entry once upstream tags a release whose constraints admit the go directive in go.mod.",
     "github.com/charmbracelet/ultraviolet": "Charm TUI syntax highlighter API currently pinned before a stable tag.",
     "github.com/charmbracelet/x/exp/slice": "Transitive Charm experimental helper pinned by the current TUI stack.",
-    "github.com/xo/terminfo": "Terminal database dependency currently publishes pseudo-version releases.",
     "golang.org/x/exp/shiny": "Transitive desktop dependency of the native clipboard backend; upstream currently publishes pseudo-version releases.",
     "golang.org/x/mobile": "Transitive platform dependency of the native clipboard backend; upstream currently publishes pseudo-version releases.",
 }
@@ -84,10 +84,15 @@ allowed_forks = {
     "github.com/keakon/ultraviolet": "Ultraviolet fork used for lower-cost cached screen rendering after disabling scroll optimization.",
     "github.com/keakon/x/powernap": "LSP integration fork used until the required protocol/transport changes are available upstream.",
 }
-# Matches all Go pseudo-version forms by their trailing `-<14-digit timestamp>-<commit hash>`
-# segment: the no-base-version form (vX.0.0-<ts>-<hash>) as well as the
-# base-version forms (vX.Y.Z-pre.0.<ts>-<hash> and vX.Y.Z-0.<ts>-<hash>).
-pseudo_re = re.compile(r"-\d{14}-[0-9a-f]{12,}$")
+# Matches all Go pseudo-version forms by their trailing `<14-digit timestamp>-<commit hash>`
+# segment: the no-base-version form (vX.0.0-<ts>-<hash>) separates the timestamp
+# with a dash, while the base-version forms (vX.Y.Z-pre.0.<ts>-<hash> and
+# vX.Y.Z-0.<ts>-<hash>) separate it with a dot.
+pseudo_re = re.compile(r"[-.]\d{14}-[0-9a-f]{12,}$")
+# Fork versions use `-fork` as a prerelease segment, optionally numbered
+# (v2.1.0-fork.1). Matching only an exact `-fork` suffix would accept a new
+# unlisted fork silently.
+fork_re = re.compile(r"-fork(\.\d+)?$")
 
 pseudo = []
 forks = []
@@ -98,7 +103,7 @@ for req in requirements:
         pseudo.append(req)
         if mod not in allowed_pseudo:
             errors.append(f"go.mod:{req['line']}: pseudo-version dependency {mod} {version} is not allowlisted")
-    if version.endswith("-fork") or "/fork/" in mod or mod in allowed_forks:
+    if fork_re.search(version) or "/fork/" in mod or mod in allowed_forks:
         forks.append(req)
         if mod not in allowed_forks:
             errors.append(f"go.mod:{req['line']}: fork dependency {mod} {version} is not allowlisted")

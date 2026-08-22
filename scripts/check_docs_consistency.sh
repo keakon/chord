@@ -7,7 +7,9 @@ cd "$repo_root"
 docs=(README.md README_CN.md)
 required_links=(docs/index.md docs/index_CN.md docs/headless.md docs/headless_CN.md)
 public_docs=(README.md README_CN.md docs website/src/content/docs)
-version_docs=(README.md README_CN.md docs/quickstart.md docs/quickstart_CN.md CONTRIBUTING.md)
+# The two website index pages are hand-maintained (sync-docs.mjs skips them), so
+# they need the same Go version enforcement as the Markdown docs.
+version_docs=(README.md README_CN.md docs/quickstart.md docs/quickstart_CN.md CONTRIBUTING.md website/src/content/docs/index.mdx website/src/content/docs/zh/index.mdx)
 forbidden_patterns=(
  '\bserve\b'
  'HTTP/SSE'
@@ -51,12 +53,20 @@ for link in "${required_links[@]}"; do
  fi
 done
 
+go_mod_version=$(sed -nE 's/^go ([0-9]+(\.[0-9]+)+)$/\1/p' go.mod)
+[[ -n "$go_mod_version" ]] || fail "cannot read the go directive from go.mod"
+
 for doc in "${version_docs[@]}"; do
  [[ -f "$doc" ]] || fail "missing Go version doc $doc"
- grep -n 'Go 1\.26\.3' "$doc" >/dev/null || fail "$doc must mention Go 1.26.3"
+ grep -nF "Go $go_mod_version" "$doc" >/dev/null || fail "$doc must mention Go $go_mod_version"
 done
-if grep -RInE 'Go 1\.26\+|Go 1\.26 or later|Go 1\.26 或更高版本|需要 Go 1\.26( |$)|Requires Go 1\.26\.$' README*.md docs/quickstart*.md CONTRIBUTING.md >/dev/null; then
- fail "public Go version docs contain stale Go 1.26 wording; use Go 1.26.3+"
+# Every minimum-version phrasing must name the go.mod version. Matching the
+# requirement phrasings instead of every "Go x.y" mention keeps a deliberate
+# historical reference legal, and deriving the expected version from go.mod means
+# this gate needs no edit on the next toolchain bump.
+version_requirement='Go [0-9]+(\.[0-9]+)+(\+| or newer| or later| 或更新版本)|需要 Go [0-9]+(\.[0-9]+)+'
+if stale=$(grep -REIn "$version_requirement" "${version_docs[@]}" | grep -vF "Go $go_mod_version"); then
+ fail "public Go version docs state a minimum other than Go $go_mod_version: $stale"
 fi
 
 default_output_cap=$(sed -nE 's/^const DefaultOutputTokenMax = ([0-9]+)$/\1/p' internal/llm/client.go)

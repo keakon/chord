@@ -893,7 +893,7 @@ func (s *confirmRuleIntentAgentStub) ResolveConfirmWithRuleIntent(action, finalA
 
 func TestResolveConfirmRemoteWithRuleIntentUsesExtendedResolver(t *testing.T) {
 	backend := &confirmRuleIntentAgentStub{
-		sessionControlAgent: sessionControlAgent{events: make(chan agent.AgentEvent)},
+		events: make(chan agent.AgentEvent),
 	}
 	m := NewModelWithSize(backend, 100, 30)
 	m.confirm.request = &ConfirmRequest{

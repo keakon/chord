@@ -52,11 +52,14 @@ func appendPromotedTodoActivity(rm *recovery.RecoveryManager, agentID string, tu
 // ourselves (e.g. hook-induced args drift) and must avoid firing the hook twice.
 func (a *MainAgent) executeToolCallWithHook(ctx context.Context, tc message.ToolCall, fireHook bool) (ToolExecutionResult, error) {
 	if intercept, ok := a.maybeInterceptRepeatedToolCall(ctx, tc); ok {
-		execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args), Result: intercept.toolResult}
-		// See executeToolCall: intercepted calls never execute a tool body, so
-		// their duration must not include the confirmation wait.
-		execResult.ExecStartedAt = time.Now()
-		execResult.walltimeTarget = a.captureMainWalltimeTarget()
+		execResult := ToolExecutionResult{
+			EffectiveArgsJSON: string(tc.Args),
+			Result:            intercept.toolResult,
+			// See executeToolCall: intercepted calls never execute a tool body, so
+			// their duration must not include the confirmation wait.
+			ExecStartedAt:  time.Now(),
+			walltimeTarget: a.captureMainWalltimeTarget(),
+		}
 		return execResult, intercept.confirmErr
 	}
 	return a.toolExecutionPipeline().execute(ctx, tc, fireHook)

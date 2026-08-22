@@ -24,7 +24,7 @@ func usageModelItems(models map[string]*analytics.ModelStats) []OverlayTableItem
 			continue
 		}
 		items = append(items, OverlayTableItem{
-			OverlayListItem: OverlayListItem{ID: name, Label: name},
+			ID: name, Label: name,
 			Cells: []string{
 				name,
 				fmt.Sprintf("%d", stats.Calls),
@@ -56,7 +56,7 @@ func usageAgentItems(agents map[string]*analytics.AgentStats) []OverlayTableItem
 			label = "main"
 		}
 		items = append(items, OverlayTableItem{
-			OverlayListItem: OverlayListItem{ID: name, Label: label},
+			ID: name, Label: label,
 			Cells: []string{
 				label,
 				fmt.Sprintf("%d", stats.LLMCalls),
@@ -166,7 +166,7 @@ func usageRefAggregateItemsByUsage(groups map[string]*analytics.UsageAggregate, 
 			label = labelFn(key)
 		}
 		items = append(items, OverlayTableItem{
-			OverlayListItem: OverlayListItem{ID: key, Label: label},
+			ID: key, Label: label,
 			Cells: []string{
 				label,
 				fmt.Sprintf("%d", agg.LLMCalls),
@@ -225,7 +225,7 @@ func usageDateAggregateItems(groups map[string]*analytics.UsageAggregate, labelF
 			label = labelFn(key)
 		}
 		items = append(items, OverlayTableItem{
-			OverlayListItem: OverlayListItem{ID: key, Label: label},
+			ID: key, Label: label,
 			Cells: []string{
 				label,
 				fmt.Sprintf("%d", agg.LLMCalls),

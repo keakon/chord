@@ -351,10 +351,10 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		StopReason:       payload.StopReason,
 		RequestBatch:     payload.RequestBatch,
 		Provenance:       mainAssistantProvenance(a),
+		// Usage is retained on the in-memory message for external-session export;
+		// session restore reads usage.jsonl as the sole analytics source.
+		Usage: payload.Usage,
 	}
-	// Usage is retained on the in-memory message for external-session export;
-	// session restore reads usage.jsonl as the sole analytics source.
-	assistantMsg.Usage = payload.Usage
 	a.ctxMgr.Append(assistantMsg)
 
 	// Emit finalized assistant message event for control-plane consumers.

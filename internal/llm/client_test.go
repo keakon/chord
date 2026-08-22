@@ -1574,12 +1574,12 @@ func TestCompleteStreamApplies429PacingAfterVisibleOutput(t *testing.T) {
 			"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 		},
 	}, []string{"k1"})
-	impl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{
+	impl := &recordingProvider{calls: []scriptedCall{
 		{
 			streams: []message.StreamDelta{{Type: message.StreamDeltaText, Text: "partial"}},
 			err:     &APIError{StatusCode: 429, Message: "rate limited"},
 		},
-	}}}
+	}}
 	c := NewClient(cfg, impl, "test-model", 4096, "sys")
 	c.SetStreamRetryRounds(1)
 
@@ -1605,12 +1605,12 @@ func TestCompleteStreamThirdParty429PacingAfterVisibleOutputCapsRetryAfter(t *te
 			"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 		},
 	}, []string{"k1"})
-	impl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{
+	impl := &recordingProvider{calls: []scriptedCall{
 		{
 			streams: []message.StreamDelta{{Type: message.StreamDeltaText, Text: "partial"}},
 			err:     &APIError{StatusCode: 429, Message: "rate limited", RetryAfter: 5 * time.Minute},
 		},
-	}}}
+	}}
 	c := NewClient(cfg, impl, "test-model", 4096, "sys")
 	c.SetStreamRetryRounds(1)
 
@@ -3142,13 +3142,13 @@ func TestCompleteStreamRetryRoundUsesCursorProviderBackoff(t *testing.T) {
 			"fallback-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 		},
 	}, []string{"k2"})
-	primaryImpl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{
+	primaryImpl := &recordingProvider{calls: []scriptedCall{
 		{err: &APIError{StatusCode: 503, Message: "temporary primary failure"}},
 		{resp: &message.Response{Content: "should wait before this call"}},
-	}}}
-	fallbackImpl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{
+	}}
+	fallbackImpl := &recordingProvider{calls: []scriptedCall{
 		{err: &APIError{StatusCode: 503, Message: "temporary fallback failure"}},
-	}}}
+	}}
 	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
 	c.SetModelPool([]FallbackModel{
 		{ProviderConfig: primaryCfg, ProviderImpl: primaryImpl, ModelID: "primary-model", MaxTokens: 4096, ContextLimit: 128000},
@@ -3185,15 +3185,15 @@ func TestCompleteStreamRetryBackoffFollowsPinnedCursor(t *testing.T) {
 			"fallback-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
 		},
 	}, []string{"k2"})
-	primaryImpl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{
+	primaryImpl := &recordingProvider{calls: []scriptedCall{
 		{err: &APIError{StatusCode: 503, Message: "use fallback"}},
 		{err: &APIError{StatusCode: 503, Message: "primary still unavailable"}},
-	}}}
-	fallbackImpl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{
+	}}
+	fallbackImpl := &recordingProvider{calls: []scriptedCall{
 		{resp: &message.Response{Content: "pin fallback"}},
 		{err: &APIError{StatusCode: 503, Message: "retry fallback"}},
 		{resp: &message.Response{Content: "fallback recovered"}},
-	}}}
+	}}
 	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
 	c.SetModelPool([]FallbackModel{
 		{ProviderConfig: primaryCfg, ProviderImpl: primaryImpl, ModelID: "primary-model", MaxTokens: 4096, ContextLimit: 128000},

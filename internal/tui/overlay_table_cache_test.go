@@ -6,8 +6,8 @@ func benchmarkOverlayTable() *OverlayTable {
 	items := make([]OverlayTableItem, 16)
 	for i := range items {
 		items[i] = OverlayTableItem{
-			OverlayListItem: OverlayListItem{ID: string(rune('a' + i%26)), Label: "row"},
-			Cells:           []string{"name", "value", "detail"},
+			ID: string(rune('a' + i%26)), Label: "row",
+			Cells: []string{"name", "value", "detail"},
 		}
 	}
 	return NewOverlayTable([]TableColumn{{Title: "Name"}, {Title: "Value", Align: 1}, {Title: "Detail"}}, items, 8)
@@ -26,7 +26,7 @@ func TestOverlayTableRenderCacheInvalidatesOnCursorChange(t *testing.T) {
 func TestOverlayTableRenderCacheInvalidatesOnSetItems(t *testing.T) {
 	tbl := benchmarkOverlayTable()
 	first := tbl.Render(48)
-	tbl.SetItems([]OverlayTableItem{{OverlayListItem: OverlayListItem{Label: "beta"}, Cells: []string{"beta", "2", "changed"}}})
+	tbl.SetItems([]OverlayTableItem{{Label: "beta", Cells: []string{"beta", "2", "changed"}}})
 	second := tbl.Render(48)
 	if first == second {
 		t.Fatal("Render() did not change after items changed")

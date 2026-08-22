@@ -62,9 +62,7 @@ func (b *poolSwitchBackend) SetAgentModelPool(agentName, pool string) error {
 
 func newPoolSwitchModel() (*Model, *poolSwitchBackend) {
 	backend := &poolSwitchBackend{
-		sessionControlAgent: sessionControlAgent{
-			events: make(chan agent.AgentEvent, 16),
-		},
+		events: make(chan agent.AgentEvent, 16),
 	}
 	m := NewModel(backend)
 	m.mode = ModeNormal

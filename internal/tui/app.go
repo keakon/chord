@@ -467,27 +467,29 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		confirmResultCh: make(chan ConfirmResult, 1),
 		questionCh:      make(chan QuestionRequest, 1),
 		sidebar:         NewSidebar(theme),
-		composerRuntimeState: composerRuntimeState{
-			agentComposerStates: make(map[string]agentComposerState),
-		},
-		activityRuntimeState: activityRuntimeState{
-			activities:          make(map[string]agent.AgentActivityEvent),
-			activityStartTime:   make(map[string]time.Time),
-			activityLastChanged: make(map[string]time.Time),
-			requestProgress:     make(map[string]requestProgressState),
-			workStartedAt:       make(map[string]time.Time),
-			turnBusyStartedAt:   make(map[string]time.Time),
-			streamLastDeltaAt:   make(map[string]time.Time),
-		},
+
+		// composerRuntimeState
+		agentComposerStates: make(map[string]agentComposerState),
+
+		// activityRuntimeState
+		activities:          make(map[string]agent.AgentActivityEvent),
+		activityStartTime:   make(map[string]time.Time),
+		activityLastChanged: make(map[string]time.Time),
+		requestProgress:     make(map[string]requestProgressState),
+		workStartedAt:       make(map[string]time.Time),
+		turnBusyStartedAt:   make(map[string]time.Time),
+		streamLastDeltaAt:   make(map[string]time.Time),
+
 		toolArgRenderState:  make(map[string]toolArgRenderState),
 		lastDisplaySequence: make(map[string]int),
-		selectionState: selectionState{
-			focusedBlockID:  -1,
-			zone:            z,
-			selStartBlockID: -1,
-			selEndBlockID:   -1,
-			statusSession:   statusBarCopyRegionState{},
-		},
+
+		// selectionState
+		focusedBlockID:  -1,
+		zone:            z,
+		selStartBlockID: -1,
+		selEndBlockID:   -1,
+		statusSession:   statusBarCopyRegionState{},
+
 		workingDir:                   wd,
 		homeDir:                      homeDir,
 		imageCaps:                    caps,
@@ -496,14 +498,17 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		statusPath:                   statusPathState{},
 		terminalAppFocused:           true,
 		terminalNotificationProtocol: detectTerminalNotificationProtocolFromProcessEnv(),
-		visibilityState: visibilityState{
-			displayState:     stateForeground,
-			lastForegroundAt: time.Now(),
-		},
+
+		// visibilityState
+		displayState:     stateForeground,
+		lastForegroundAt: time.Now(),
+
 		cadenceProfiles:            defaultCadenceProfiles(),
 		infoPanelCollapsedSections: make(map[infoPanelSectionID]bool),
 		runtimeCacheMgr:            newRuntimeCacheManager(),
-		renderCacheState:           renderCacheState{statusBarAgentSnapshotDirty: true},
+
+		// renderCacheState
+		statusBarAgentSnapshotDirty: true,
 	}
 	m.viewport.SetWorkingDir(wd)
 	m.sidebar.SetWorkingDir(wd)

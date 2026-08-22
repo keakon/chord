@@ -6,7 +6,7 @@ This repository is intended for open-source contributors. Development can be don
 
 ## Prerequisites
 
-- Go 1.26.3+
+- Go 1.27.0+
 - Go quality tools:
 
 ```bash

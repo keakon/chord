@@ -208,8 +208,8 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		ToolCalls:        sanitizedCalls,
 		StopReason:       resp.StopReason,
 		Provenance:       subAssistantProvenance(s),
+		Usage:            resp.Usage,
 	}
-	persistMsg.Usage = resp.Usage
 	persistBarrier, persistPending := s.persistMessageBarrier(persistMsg, "assistant message")
 
 	// Update token usage (does not auto-compact, but tracks stats).
