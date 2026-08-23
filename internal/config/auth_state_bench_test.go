@@ -11,7 +11,7 @@ import (
 var authStateBenchBytes = buildAuthStateBenchBytes(64)
 
 func BenchmarkParseAuthStateStdlib(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var raw AuthStateFile
 		if err := json.Unmarshal(authStateBenchBytes, &raw); err != nil {
 			b.Fatal(err)
@@ -21,7 +21,7 @@ func BenchmarkParseAuthStateStdlib(b *testing.B) {
 }
 
 func BenchmarkParseAuthStateSonic(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var raw AuthStateFile
 		if err := sonicjson.ConfigDefault.Unmarshal(authStateBenchBytes, &raw); err != nil {
 			b.Fatal(err)
@@ -31,7 +31,7 @@ func BenchmarkParseAuthStateSonic(b *testing.B) {
 }
 
 func BenchmarkParseAuthStateSonicStd(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var raw AuthStateFile
 		if err := sonicjson.ConfigStd.Unmarshal(authStateBenchBytes, &raw); err != nil {
 			b.Fatal(err)

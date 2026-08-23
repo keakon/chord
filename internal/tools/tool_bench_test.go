@@ -47,7 +47,7 @@ func BenchmarkRegistryGetParallel(b *testing.B) {
 func BenchmarkRegistryListDefinitions(b *testing.B) {
 	r, _ := benchmarkRegistry(128)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = r.ListDefinitions()
 	}
 }

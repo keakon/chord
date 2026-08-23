@@ -1421,14 +1421,14 @@ func TestAuthStateCleanMatchesAccessTokenAccountUserID(t *testing.T) {
 	}
 	staleAccess := testCodexAccessToken("acc-1", "user-1", "stale@example.com")
 	goodAccess := testCodexAccessToken("acc-2", "user-2", "good@example.com")
-	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - access: %q
     account_id: acc-1
     email: stale@example.com
   - access: %q
     account_id: acc-2
     email: good@example.com
-`, staleAccess, goodAccess)), 0o600); err != nil {
+`, staleAccess, goodAccess), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
 	}
 	statePath, err := config.AuthStatePath()
@@ -1479,14 +1479,14 @@ func TestAuthStateCleanMatchesAccessTokenUserIDWithConfiguredAccountID(t *testin
 	}
 	staleAccess := testUnsignedJWT(`{"https://api.openai.com/auth":{"user_id":"user-1"},"email":"stale@example.com"}`)
 	goodAccess := testUnsignedJWT(`{"https://api.openai.com/auth":{"user_id":"user-2"},"email":"good@example.com"}`)
-	if err := os.WriteFile(authPath, []byte(fmt.Sprintf(`openai:
+	if err := os.WriteFile(authPath, fmt.Appendf(nil, `openai:
   - access: %q
     account_id: acc-1
     email: stale@example.com
   - access: %q
     account_id: acc-2
     email: good@example.com
-`, staleAccess, goodAccess)), 0o600); err != nil {
+`, staleAccess, goodAccess), 0o600); err != nil {
 		t.Fatalf("WriteFile(auth): %v", err)
 	}
 	statePath, err := config.AuthStatePath()

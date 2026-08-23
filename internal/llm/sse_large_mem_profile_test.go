@@ -21,7 +21,7 @@ func BenchmarkResponsesLargeSSEMemory(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.SetBytes(int64(len(fixture.BodyBytes)))
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		resp, err := parseSSEBenchFixture(fixture)
 		if err != nil {
 			b.Fatalf("parse fixture %s: %v", fixture.Path, err)

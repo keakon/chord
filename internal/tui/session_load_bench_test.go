@@ -22,7 +22,7 @@ func benchmarkLargeSessionMessages(messageCount int) []message.Message {
 				Role:    message.RoleAssistant,
 				Content: content,
 				ToolCalls: []message.ToolCall{{
-					ID: id, Name: tools.NameRead, Args: []byte(fmt.Sprintf(`{"path":"file-%d.go"}`, i)),
+					ID: id, Name: tools.NameRead, Args: fmt.Appendf(nil, `{"path":"file-%d.go"}`, i),
 				}},
 			})
 		case 2:

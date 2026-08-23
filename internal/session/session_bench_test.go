@@ -23,13 +23,14 @@ func benchmarkExportedSession(messageCount int) *ExportedSession {
 			Content:   content,
 			Timestamp: s.CreatedAt.Add(time.Duration(i) * time.Microsecond),
 		}
-		if i%3 == 0 {
+		switch i % 3 {
+		case 0:
 			msg.Role = message.RoleUser
-		} else if i%3 == 1 {
+		case 1:
 			msg.ToolCalls = []ExportedToolCall{{
 				ID: fmt.Sprintf("call-%d", i), Name: "read", Args: fmt.Sprintf(`{"path":"file-%d.go"}`, i),
 			}}
-		} else {
+		default:
 			msg.Role = message.RoleTool
 			msg.ToolCallID = fmt.Sprintf("call-%d", i-1)
 		}

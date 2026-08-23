@@ -82,7 +82,8 @@ func generateMultiFileUnifiedDiffSummary(files []unifiedFileDiff) DiffSummary {
 					truncated = true
 					break
 				}
-				sb.WriteString(l + "\n")
+				sb.WriteString(l)
+				sb.WriteString("\n")
 				lineCount++
 			}
 			if truncated {
@@ -360,11 +361,17 @@ func buildHunks(ops []editOp, old, new []string, ctx int) []string {
 		for _, op := range slice {
 			switch op.kind {
 			case opEqual:
-				sb.WriteString(" " + old[op.oldIdx] + "\n")
+				sb.WriteString(" ")
+				sb.WriteString(old[op.oldIdx])
+				sb.WriteString("\n")
 			case opDelete:
-				sb.WriteString("-" + old[op.oldIdx] + "\n")
+				sb.WriteString("-")
+				sb.WriteString(old[op.oldIdx])
+				sb.WriteString("\n")
 			case opInsert:
-				sb.WriteString("+" + new[op.newIdx] + "\n")
+				sb.WriteString("+")
+				sb.WriteString(new[op.newIdx])
+				sb.WriteString("\n")
 			}
 		}
 		hunks = append(hunks, sb.String())

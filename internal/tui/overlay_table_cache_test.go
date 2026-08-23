@@ -37,7 +37,7 @@ func BenchmarkOverlayTableRenderCacheHit(b *testing.B) {
 	tbl := benchmarkOverlayTable()
 	_ = tbl.Render(48)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = tbl.Render(48)
 	}
 }
@@ -45,7 +45,7 @@ func BenchmarkOverlayTableRenderCacheHit(b *testing.B) {
 func BenchmarkOverlayTableRenderCacheMiss(b *testing.B) {
 	tbl := benchmarkOverlayTable()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		tbl.CursorDown()
 		_ = tbl.Render(48)
 	}

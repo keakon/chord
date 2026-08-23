@@ -56,8 +56,14 @@ func managedSectionContent(entries []ManagedEntry) string {
 	sorted := append([]ManagedEntry(nil), entries...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 	for _, e := range sorted {
-		sb.WriteString("- [" + e.ID + "](" + e.Link + ")\n")
-		sb.WriteString("  — " + e.Summary + "\n")
+		sb.WriteString("- [")
+		sb.WriteString(e.ID)
+		sb.WriteString("](")
+		sb.WriteString(e.Link)
+		sb.WriteString(")\n")
+		sb.WriteString("  — ")
+		sb.WriteString(e.Summary)
+		sb.WriteString("\n")
 	}
 	sb.WriteString(managedEndMarker)
 	return sb.String()

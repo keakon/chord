@@ -255,7 +255,7 @@ func BenchmarkNormalize(b *testing.B) {
 	names := []string{"edit", "EDIT", "Edit", "patch", "PATCH", "Patch", "read", "Write", "SHELL"}
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		_ = toolname.Normalize(names[i%len(names)])
 	}
 }

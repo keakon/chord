@@ -116,7 +116,7 @@ func TestChunkTimeoutReaderInterEventNotTotalTime(t *testing.T) {
 		err  error
 	}, numChunks)
 	for i := range chunks {
-		chunks[i].data = []byte(fmt.Sprintf("data: chunk%d\n\n", i))
+		chunks[i].data = fmt.Appendf(nil, "data: chunk%d\n\n", i)
 	}
 	chunks[numChunks-1].err = io.EOF
 

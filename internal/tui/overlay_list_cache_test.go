@@ -34,7 +34,7 @@ func BenchmarkOverlayListRenderCacheHit(b *testing.B) {
 	l := benchmarkOverlayList()
 	_ = l.Render(32)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = l.Render(32)
 	}
 }
@@ -42,7 +42,7 @@ func BenchmarkOverlayListRenderCacheHit(b *testing.B) {
 func BenchmarkOverlayListRenderCacheMiss(b *testing.B) {
 	l := benchmarkOverlayList()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		l.SetCursor(i % l.Len())
 		_ = l.Render(32)
 	}

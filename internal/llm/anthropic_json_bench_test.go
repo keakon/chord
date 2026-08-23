@@ -17,19 +17,19 @@ var anthropicSSEBenchPayloads = []string{
 }
 
 func BenchmarkAnthropicSSEEventDecodeStdlib(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		decodeAnthropicSSEBenchPayloadStdlib(anthropicSSEBenchPayloads[i%len(anthropicSSEBenchPayloads)])
 	}
 }
 
 func BenchmarkAnthropicSSEEventDecodeSonic(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		decodeAnthropicSSEBenchPayloadSonicDefault(anthropicSSEBenchPayloads[i%len(anthropicSSEBenchPayloads)])
 	}
 }
 
 func BenchmarkAnthropicSSEEventDecodeSonicStd(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		decodeAnthropicSSEBenchPayloadSonicStd(anthropicSSEBenchPayloads[i%len(anthropicSSEBenchPayloads)])
 	}
 }

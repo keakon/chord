@@ -12,7 +12,7 @@ import (
 var codexJSONLBenchLines = buildCodexJSONLBenchLines(256)
 
 func BenchmarkCodexJSONLLineDecodeStdlib(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		line := codexJSONLBenchLines[i%len(codexJSONLBenchLines)]
 		var lineObj map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(line), &lineObj); err != nil {
@@ -26,7 +26,7 @@ func BenchmarkCodexJSONLLineDecodeStdlib(b *testing.B) {
 }
 
 func BenchmarkCodexJSONLLineDecodeSonic(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		line := codexJSONLBenchLines[i%len(codexJSONLBenchLines)]
 		var lineObj map[string]json.RawMessage
 		if err := importJSONUnmarshalString(line, &lineObj); err != nil {
@@ -40,7 +40,7 @@ func BenchmarkCodexJSONLLineDecodeSonic(b *testing.B) {
 }
 
 func BenchmarkCodexJSONLLineDecodeSonicStd(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		line := codexJSONLBenchLines[i%len(codexJSONLBenchLines)]
 		var lineObj map[string]json.RawMessage
 		if err := sonicjson.ConfigStd.UnmarshalFromString(line, &lineObj); err != nil {

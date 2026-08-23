@@ -591,7 +591,8 @@ func nodeToMarkdown(n *html.Node, sb *strings.Builder, depth int, baseURL string
 		case "h1", "h2", "h3", "h4", "h5", "h6":
 			level := int(n.Data[1] - '0')
 			sb.WriteString("\n")
-			sb.WriteString(strings.Repeat("#", level) + " ")
+			sb.WriteString(strings.Repeat("#", level))
+			sb.WriteString(" ")
 			childrenToMarkdown(n, sb, depth, baseURL)
 			sb.WriteString("\n")
 			return
@@ -631,7 +632,9 @@ func nodeToMarkdown(n *html.Node, sb *strings.Builder, depth int, baseURL string
 			sb.WriteString("[")
 			childrenToMarkdown(n, sb, depth, baseURL)
 			if href != "" {
-				sb.WriteString("](" + href + ")")
+				sb.WriteString("](")
+				sb.WriteString(href)
+				sb.WriteString(")")
 			} else {
 				sb.WriteString("]")
 			}
@@ -649,7 +652,9 @@ func nodeToMarkdown(n *html.Node, sb *strings.Builder, depth int, baseURL string
 			sb.WriteString("\n")
 			return
 		case "li":
-			sb.WriteString("\n" + listIndent(depth) + "- ")
+			sb.WriteString("\n")
+			sb.WriteString(listIndent(depth))
+			sb.WriteString("- ")
 			childrenToMarkdown(n, sb, depth, baseURL)
 			return
 		case "blockquote":

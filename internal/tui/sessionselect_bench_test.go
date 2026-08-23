@@ -37,7 +37,7 @@ func BenchmarkRenderSessionSelectDialogOpen(b *testing.B) {
 	m := benchmarkModelForSessionSelectDialog()
 	_ = m.renderSessionSelectDialog()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = m.renderSessionSelectDialog()
 	}
 }

@@ -24,7 +24,7 @@ func BenchmarkRenderPoolSelectDialogOpen(b *testing.B) {
 	m := benchmarkModelForPoolSelectDialog()
 	_ = m.renderModelSelectDialog()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = m.renderModelSelectDialog()
 	}
 }

@@ -484,7 +484,8 @@ func writeSkillMDWithFM(t *testing.T, path string, fm map[string]any, body strin
 		case string:
 			data.WriteString(fmt.Sprintf("%s: %q\n", k, val))
 		case []string:
-			data.WriteString(k + ":\n")
+			data.WriteString(k)
+			data.WriteString(":\n")
 			for _, item := range val {
 				data.WriteString(fmt.Sprintf("  - %q\n", item))
 			}

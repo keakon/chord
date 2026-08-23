@@ -910,7 +910,7 @@ func BenchmarkGlobMatch(b *testing.B) {
 	globMatch("git push --force", "git *")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		globMatch("git push --force", "git *")
 	}
 }
@@ -934,7 +934,7 @@ task: allow
 	rs := ParsePermission(doc.Content[0])
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		rs.Evaluate("shell", "git push --force")
 	}
 }

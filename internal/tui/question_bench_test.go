@@ -31,7 +31,7 @@ func BenchmarkRenderQuestionDialogOpen(b *testing.B) {
 	m := benchmarkModelForQuestionDialog()
 	_ = m.renderQuestionDialog()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = m.renderQuestionDialog()
 	}
 }

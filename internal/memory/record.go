@@ -115,12 +115,22 @@ func (r *Record) canonicalHashPayload() []byte {
 	fmt.Fprintf(&b, "type=%s\n", r.Type)
 	fmt.Fprintf(&b, "confidence=%s\n", r.Confidence)
 	fmt.Fprintf(&b, "outcome=%s\n", r.Outcome)
-	b.WriteString("statement=" + r.Statement + "\n")
-	b.WriteString("rationale=" + r.Rationale + "\n")
-	b.WriteString("application=" + r.Application + "\n")
-	b.WriteString("summary=" + r.Summary + "\n")
+	b.WriteString("statement=")
+	b.WriteString(r.Statement)
+	b.WriteString("\n")
+	b.WriteString("rationale=")
+	b.WriteString(r.Rationale)
+	b.WriteString("\n")
+	b.WriteString("application=")
+	b.WriteString(r.Application)
+	b.WriteString("\n")
+	b.WriteString("summary=")
+	b.WriteString(r.Summary)
+	b.WriteString("\n")
 	for _, p := range paths {
-		b.WriteString("path=" + p + "\n")
+		b.WriteString("path=")
+		b.WriteString(p)
+		b.WriteString("\n")
 	}
 	return []byte(b.String())
 }
@@ -332,15 +342,20 @@ func MarshalRecord(r *Record) ([]byte, error) {
 	sb.WriteString("---\n")
 	sb.Write(yamlData)
 	sb.WriteString("---\n\n")
-	sb.WriteString(strings.TrimSpace(r.Statement) + "\n\n")
+	sb.WriteString(strings.TrimSpace(r.Statement))
+	sb.WriteString("\n\n")
 	sb.WriteString("## Why it matters\n\n")
-	sb.WriteString(strings.TrimSpace(r.Rationale) + "\n\n")
+	sb.WriteString(strings.TrimSpace(r.Rationale))
+	sb.WriteString("\n\n")
 	sb.WriteString("## How to apply\n\n")
-	sb.WriteString(strings.TrimSpace(r.Application) + "\n\n")
+	sb.WriteString(strings.TrimSpace(r.Application))
+	sb.WriteString("\n\n")
 	if len(parts) > 0 {
 		sb.WriteString("## Relevant project paths\n\n")
 		for _, p := range parts {
-			sb.WriteString("- `" + p + "`\n")
+			sb.WriteString("- `")
+			sb.WriteString(p)
+			sb.WriteString("`\n")
 		}
 	}
 	return []byte(sb.String()), nil

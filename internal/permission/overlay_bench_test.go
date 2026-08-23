@@ -35,7 +35,7 @@ func BenchmarkOverlayEvaluate(b *testing.B) {
 		{"Shell", "unknown command"},
 	}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		q := queries[i&3]
 		_ = o.Evaluate(q.permission, q.pattern)
 	}
@@ -66,7 +66,7 @@ func BenchmarkOverlayEvaluateParallel(b *testing.B) {
 func BenchmarkOverlayIsDisabled(b *testing.B) {
 	o := benchmarkOverlay()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = o.IsDisabled("Shell")
 	}
 }

@@ -26,7 +26,7 @@ var mcpJSONRPCBenchRequest = JSONRPCRequest{
 var mcpJSONRPCBenchResponseBytes = []byte(`{"jsonrpc":"2.0","id":42,"result":{"content":[{"type":"text","text":"` + strings.Repeat("x", 4096) + `"}],"isError":false}}`)
 
 func BenchmarkJSONRPCMarshalStdlib(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := json.Marshal(mcpJSONRPCBenchRequest); err != nil {
 			b.Fatal(err)
 		}
@@ -34,7 +34,7 @@ func BenchmarkJSONRPCMarshalStdlib(b *testing.B) {
 }
 
 func BenchmarkJSONRPCMarshalSonic(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := sonicjson.ConfigDefault.Marshal(mcpJSONRPCBenchRequest); err != nil {
 			b.Fatal(err)
 		}
@@ -42,7 +42,7 @@ func BenchmarkJSONRPCMarshalSonic(b *testing.B) {
 }
 
 func BenchmarkJSONRPCMarshalSonicStd(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := sonicjson.ConfigStd.Marshal(mcpJSONRPCBenchRequest); err != nil {
 			b.Fatal(err)
 		}
@@ -50,7 +50,7 @@ func BenchmarkJSONRPCMarshalSonicStd(b *testing.B) {
 }
 
 func BenchmarkJSONRPCResponseDecodeStdlib(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var resp JSONRPCResponse
 		if err := json.Unmarshal(mcpJSONRPCBenchResponseBytes, &resp); err != nil {
 			b.Fatal(err)
@@ -59,7 +59,7 @@ func BenchmarkJSONRPCResponseDecodeStdlib(b *testing.B) {
 }
 
 func BenchmarkJSONRPCResponseDecodeSonic(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var resp JSONRPCResponse
 		if err := sonicjson.ConfigDefault.Unmarshal(mcpJSONRPCBenchResponseBytes, &resp); err != nil {
 			b.Fatal(err)
@@ -68,7 +68,7 @@ func BenchmarkJSONRPCResponseDecodeSonic(b *testing.B) {
 }
 
 func BenchmarkJSONRPCResponseDecodeSonicStream(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var resp JSONRPCResponse
 		if err := mcpWireJSON.NewDecoder(bytes.NewReader(mcpJSONRPCBenchResponseBytes)).Decode(&resp); err != nil {
 			b.Fatal(err)
@@ -77,7 +77,7 @@ func BenchmarkJSONRPCResponseDecodeSonicStream(b *testing.B) {
 }
 
 func BenchmarkJSONRPCResponseDecodeSonicStd(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var resp JSONRPCResponse
 		if err := sonicjson.ConfigStd.Unmarshal(mcpJSONRPCBenchResponseBytes, &resp); err != nil {
 			b.Fatal(err)
@@ -91,7 +91,7 @@ func BenchmarkJSONRPCToolCallResultDecodeSonic(b *testing.B) {
 		b.Fatal(err)
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var result toolCallResult
 		if err := sonicjson.ConfigDefault.Unmarshal(resp.Result, &result); err != nil {
 			b.Fatal(err)
@@ -105,7 +105,7 @@ func BenchmarkJSONRPCToolCallResultDecodeSonicCopyString(b *testing.B) {
 		b.Fatal(err)
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var result toolCallResult
 		if err := mcpLongLivedJSON.Unmarshal(resp.Result, &result); err != nil {
 			b.Fatal(err)

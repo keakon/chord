@@ -14,7 +14,7 @@ func BenchmarkRenderSlashCompletionDropdownOpen(b *testing.B) {
 	value := "/"
 	_ = m.renderSlashCompletionDropdown(value)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = m.renderSlashCompletionDropdown(value)
 	}
 }
