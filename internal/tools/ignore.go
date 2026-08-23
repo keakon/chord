@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/keakon/golog/log"
 )
 
 // skipDirNames lists directory names that are always excluded from Grep/Glob
@@ -102,6 +104,13 @@ func newGitIgnoreMatcher(dir string) *gitIgnoreMatcher {
 		}
 		p := parseGitIgnorePattern(line)
 		m.patterns = append(m.patterns, p)
+	}
+	if err := scanner.Err(); err != nil {
+		// A line longer than bufio.MaxScanTokenSize aborts the scan, but every
+		// rule parsed before it is still valid. Dropping them all would silently
+		// un-ignore the whole directory for Grep/Glob, so keep what we have and
+		// leave a trace explaining why the tail of the file was not applied.
+		log.Warnf("gitignore scan aborted dir=%v error=%v; keeping %d parsed pattern(s)", dir, err, len(m.patterns))
 	}
 	if len(m.patterns) == 0 {
 		return nil

@@ -1,8 +1,10 @@
 package tools
 
 import (
+	"bufio"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -162,6 +164,31 @@ func TestGitIgnoreMatcherNoFile(t *testing.T) {
 	m := newGitIgnoreMatcher(dir)
 	if m != nil {
 		t.Error("expected nil matcher when no .gitignore exists")
+	}
+}
+
+// TestGitIgnoreMatcherKeepsParsedRulesOnScanError guards against a .gitignore
+// line longer than bufio.MaxScanTokenSize aborting the read: the rules parsed
+// before the oversized line must stay effective instead of the whole matcher
+// being dropped (which silently exposed ignored files to Grep/Glob).
+func TestGitIgnoreMatcherKeepsParsedRulesOnScanError(t *testing.T) {
+	dir := t.TempDir()
+	longLine := "# " + strings.Repeat("x", bufio.MaxScanTokenSize+1)
+	gitignore := "node_modules/\n" + longLine + "\n*.log\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newGitIgnoreMatcher(dir)
+	if m == nil {
+		t.Fatal("expected non-nil matcher despite oversized line")
+	}
+	if !m.Match("node_modules/react/index.js", false) {
+		t.Error("rule parsed before the oversized line was dropped")
+	}
+	// The rule after the oversized line must be absent: scanning stopped.
+	if m.Match("app.log", false) {
+		t.Error("rule after the oversized line unexpectedly applied")
 	}
 }
 
