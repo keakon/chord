@@ -110,6 +110,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - The deny-with-reason field in the Handoff dialog no longer re-wraps typed lines. The field used the Confirm dialog's width while the Handoff overlay renders at its own narrower width, so a row the textarea had already wrapped could be wrapped a second time inside the overlay — with the second wrap cutting mid-word or mid-CJK-character instead of at a word boundary. The field now uses the Handoff overlay's content width in the dialog, on terminal resize, and during paste, so Shift+Enter/Ctrl+J newlines and wrapped rows stay exactly as typed.
 - A tool call whose JSON arguments repeat a key no longer renders the argument name twice on its card: the earlier occurrence is dropped, matching JSON's last-value-wins semantics, so the card always shows exactly the arguments that participated in execution.
 - The "other files" LSP diagnostics section in tool results now sorts by worst severity first and then by path, so the most actionable file leads and the same set of files is ordered reproducibly instead of varying with map iteration order.
+- A provider response interrupted by a chunk timeout is no longer mistaken for real output when its only content is a zero-width space (U+200B). Such responses are now treated as empty, so the standard empty-response retry path records the error and rotates keys instead of letting the agent silently go idle after a partial stream.
 
 ## 0.7.3 - 2026-08-08
 

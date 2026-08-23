@@ -52,6 +52,57 @@ func TestResponseHasUsableOutputRequiresReplayableThinking(t *testing.T) {
 	}
 }
 
+func TestResponseHasUsableOutputIgnoresZeroWidthPlaceholder(t *testing.T) {
+	// Some gateways return a zero-width space as the only "content" of an
+	// interrupted/empty response (e.g. after a 60s chunk timeout). Treating it
+	// as usable output bypasses retry and idles the agent without an error.
+	if responseHasUsableOutput(&message.Response{Content: "\u200b"}) {
+		t.Fatal("zero-width placeholder content should not be usable output")
+	}
+	if responseHasUsableOutput(&message.Response{Content: "\u200b \u200b\t\u200e\n"}) {
+		t.Fatal("whitespace/zero-width-only content should not be usable output")
+	}
+	if !responseHasUsableOutput(&message.Response{Content: "\u200bvisible"}) {
+		t.Fatal("content with visible characters should be usable output")
+	}
+}
+
+func TestCompleteStreamZeroWidthInterruptedRetriesNextKey(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1", "k2"})
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{
+		// First key returns an empty interrupted response whose only "content"
+		// is a zero-width space (seen from real gateways after a chunk timeout).
+		{resp: &message.Response{Content: "\u200b", StopReason: "interrupted"}},
+		// Second key succeeds with visible content.
+		{resp: &message.Response{Content: "ok from k2"}},
+	}
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+
+	var deltas []message.StreamDelta
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		deltas = append(deltas, delta)
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.Content != "ok from k2" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if len(primaryImpl.apiKeys) != 2 || primaryImpl.apiKeys[0] != "k1" || primaryImpl.apiKeys[1] != "k2" {
+		t.Fatalf("attempted keys = %#v, want [k1 k2]", primaryImpl.apiKeys)
+	}
+	hadRetry := false
+	for _, d := range deltas {
+		if d.Type == message.StreamDeltaRetryError {
+			hadRetry = true
+		}
+	}
+	if !hadRetry {
+		t.Fatal("expected StreamDeltaRetryError for the empty interrupted response")
+	}
+}
+
 type scriptedCall struct {
 	resp         *message.Response
 	err          error

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/keakon/golog/log"
 
@@ -144,11 +145,21 @@ func nextRetryCount(current int, roundHadRequestAttempt, roundHadUsableReply boo
 	return current + 1
 }
 
+// hasVisibleContent reports whether content contains any user-visible
+// printable rune. Zero-width format characters (e.g. \u200b) that some gateways
+// emit as a placeholder before a connection timeout are not visible output and
+// must not make an empty interrupted response look usable.
+func hasVisibleContent(s string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool {
+		return unicode.IsPrint(r) && !unicode.IsSpace(r)
+	})
+}
+
 func responseHasUsableOutput(resp *message.Response) bool {
 	if resp == nil {
 		return false
 	}
-	if strings.TrimSpace(resp.Content) != "" || len(resp.ToolCalls) > 0 {
+	if hasVisibleContent(resp.Content) || len(resp.ToolCalls) > 0 {
 		return true
 	}
 	return message.HasReplayableThinkingBlocks(resp.ThinkingBlocks)
