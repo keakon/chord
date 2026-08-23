@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,68 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 )
+
+// TestStartFailuresForPathSkipsServersForOtherFileTypes guards the multi-server
+// contract: a start-failure note for a path must only name servers that handle
+// that path's file type, not every server configured under the same root.
+func TestStartFailuresForPathSkipsServersForOtherFileTypes(t *testing.T) {
+	root := t.TempDir()
+	mgr := NewManager(&config.Config{
+		LSP: map[string]config.LSPServerConfig{
+			"gopls":      {FileTypes: []string{".go"}},
+			"typescript": {FileTypes: []string{".ts", ".js"}},
+		},
+	}, root, nil)
+
+	mgr.startFailMu.Lock()
+	mgr.startFail[testKey(mgr, "gopls")] = "init timeout"
+	mgr.startFailMu.Unlock()
+
+	got := mgr.startFailuresForPath(filepath.Join(root, "main.go"))
+	want := []string{"gopls: init timeout"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("startFailuresForPath(.go) = %#v, want %#v", got, want)
+	}
+}
+
+// TestStartFailuresForPathUsesMatchingRootRecord guards the per-root contract:
+// with multiple roots for the same server, the start-failure note must reflect
+// the record for this path's root, not an arbitrary same-named server.
+func TestStartFailuresForPathUsesMatchingRootRecord(t *testing.T) {
+	root := t.TempDir()
+	otherRoot := t.TempDir()
+	mgr := NewManager(&config.Config{
+		LSP: map[string]config.LSPServerConfig{
+			"gopls": {FileTypes: []string{".go"}},
+		},
+	}, root, nil)
+
+	mgr.clientsMu.Lock()
+	// gopls is running under otherRoot; from this path's root it is missing.
+	mgr.clients[clientKey{name: "gopls", root: otherRoot}] = &Client{cwd: otherRoot, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
+	mgr.clientsMu.Unlock()
+
+	// Init failure is recorded only for otherRoot's run, not this path's.
+	mgr.startFailMu.Lock()
+	mgr.startFail[clientKey{name: "gopls", root: otherRoot}] = "other root failure"
+	mgr.startFailMu.Unlock()
+
+	got := mgr.startFailuresForPath(filepath.Join(root, "main.go"))
+	want := []string{"gopls: not started"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("startFailuresForPath = %#v, want %#v", got, want)
+	}
+
+	// Same path's root failed to start this time: the matching record wins.
+	mgr.startFailMu.Lock()
+	mgr.startFail[clientKey{name: "gopls", root: root}] = "init timeout"
+	mgr.startFailMu.Unlock()
+	got = mgr.startFailuresForPath(filepath.Join(root, "main.go"))
+	want = []string{"gopls: init timeout"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("startFailuresForPath = %#v, want %#v", got, want)
+	}
+}
 
 func TestAfterFileWriteToolResultCancelledWaitDoesNotAppendWaitNote(t *testing.T) {
 	mgr, path, client := newAfterWriteTestManager(t)
@@ -275,6 +338,6 @@ func newAfterWriteTestManager(t *testing.T) (*Manager, string, *Client) {
 		openFiles:   make(map[string]int32),
 		diagnostics: make(map[protocol.DocumentURI][]protocol.Diagnostic),
 	}
-	mgr.clients["gopls"] = client
+	mgr.clients[testKey(mgr, "gopls")] = client
 	return mgr, path, client
 }

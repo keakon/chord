@@ -109,7 +109,11 @@ func (m *Manager) pythonSemanticBackendAvailable(path string, pyCfg config.Pytho
 	serverName := strings.TrimSpace(backend.Server)
 	if serverName != "" {
 		srvCfg, ok := m.cfg.LSP[serverName]
-		return ok && !srvCfg.Disabled && m.handles(srvCfg, path)
+		if !ok || srvCfg.Disabled {
+			return false
+		}
+		_, covered := m.serverRootForPath(srvCfg, path)
+		return covered
 	}
 	return m.HasServerForPath(path)
 }

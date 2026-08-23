@@ -26,6 +26,8 @@ type fakePowernapClient struct {
 	exits                int
 	kills                int
 	didCloseURIs         []string
+	didChangeURIs        []string
+	didOpenURIs          []string
 	watchedFileEvents    []protocol.FileEvent
 	registeredHandlers   map[string]powertransport.Handler
 	registeredNotifies   map[string]powertransport.NotificationHandler
@@ -55,10 +57,18 @@ func (f *fakePowernapClient) RegisterHandler(method string, handler powertranspo
 	}
 	f.registeredHandlers[method] = handler
 }
-func (f *fakePowernapClient) NotifyDidOpenTextDocument(context.Context, string, string, int, string) error {
+func (f *fakePowernapClient) NotifyDidOpenTextDocument(_ context.Context, uri string, _ string, _ int, _ string) error {
+	f.didOpenURIs = append(f.didOpenURIs, uri)
 	return nil
 }
-func (f *fakePowernapClient) NotifyDidChangeTextDocument(context.Context, string, int, []protocol.TextDocumentContentChangeEvent) error {
+
+// syncedURIs are the documents this server was told about, whether the client
+// sent didOpen or didChange for them.
+func (f *fakePowernapClient) syncedURIs() []string {
+	return append(append([]string(nil), f.didOpenURIs...), f.didChangeURIs...)
+}
+func (f *fakePowernapClient) NotifyDidChangeTextDocument(_ context.Context, uri string, _ int, _ []protocol.TextDocumentContentChangeEvent) error {
+	f.didChangeURIs = append(f.didChangeURIs, uri)
 	return nil
 }
 func (f *fakePowernapClient) NotifyDidCloseTextDocument(_ context.Context, uri string) error {
@@ -291,10 +301,10 @@ func TestManagerDidCloseErrClearsDiagnosticsAndNotifiesClients(t *testing.T) {
 	uri := protocol.DocumentURI(client.pathToURI(path))
 	client.diagnostics[uri] = []protocol.Diagnostic{{Message: "boom"}}
 	mgr := &Manager{
-		clients: map[string]*Client{"gopls": client},
+		clients: map[clientKey]*Client{{name: "gopls"}: client},
 		waiters: map[string][]chan diagnosticsEvent{normalizeWaiterPath(path): {make(chan diagnosticsEvent, 1)}},
-		diagByServer: map[string]map[string]diagCounts{
-			"gopls": {string(uri): {errors: 1}},
+		diagByServer: map[clientKey]map[string]diagCounts{
+			{name: "gopls"}: {string(uri): {errors: 1}},
 		},
 		touchedPaths: map[string]struct{}{
 			normalizeWaiterPath(path): {},
@@ -312,8 +322,59 @@ func TestManagerDidCloseErrClearsDiagnosticsAndNotifiesClients(t *testing.T) {
 	if _, ok := mgr.waiters[normalizeWaiterPath(path)]; ok {
 		t.Fatal("expected waiters for path removed")
 	}
-	if _, ok := mgr.diagByServer["gopls"]; ok {
+	if _, ok := mgr.diagByServer[clientKey{name: "gopls"}]; ok {
 		t.Fatalf("diagByServer = %#v, want gopls entry removed", mgr.diagByServer)
+	}
+}
+
+func TestClientDidOpenAlreadyOpenSendsDidChangeWithBumpedVersion(t *testing.T) {
+	fake := &fakePowernapClient{}
+	c := &Client{client: fake, openFiles: make(map[string]int32)}
+	path := "/tmp/a.go"
+
+	v1, err := c.DidOpen(context.Background(), path, "one")
+	if err != nil {
+		t.Fatalf("first DidOpen() error = %v", err)
+	}
+	if v1 != 1 {
+		t.Fatalf("first DidOpen() version = %d, want 1", v1)
+	}
+
+	// The already-open branch used to double-unlock openFilesMu and read the
+	// map without the lock (panic + data race); it must send didChange with the
+	// bumped version instead.
+	v2, err := c.DidOpen(context.Background(), path, "two")
+	if err != nil {
+		t.Fatalf("second DidOpen() error = %v", err)
+	}
+	if v2 != 2 {
+		t.Fatalf("second DidOpen() version = %d, want 2", v2)
+	}
+	if len(fake.didOpenURIs) != 1 {
+		t.Fatalf("didOpen count = %d, want 1", len(fake.didOpenURIs))
+	}
+	if len(fake.didChangeURIs) != 1 {
+		t.Fatalf("didChange count = %d, want 1", len(fake.didChangeURIs))
+	}
+}
+
+func TestClientDidChangeUnopenedSendsDidOpenWithVersionOne(t *testing.T) {
+	fake := &fakePowernapClient{}
+	c := &Client{client: fake, openFiles: make(map[string]int32)}
+	path := "/tmp/a.go"
+
+	v, err := c.DidChange(context.Background(), path, "one")
+	if err != nil {
+		t.Fatalf("DidChange() error = %v", err)
+	}
+	if v != 1 {
+		t.Fatalf("DidChange() version = %d, want 1", v)
+	}
+	if len(fake.didOpenURIs) != 1 {
+		t.Fatalf("didOpen count = %d, want 1", len(fake.didOpenURIs))
+	}
+	if len(fake.didChangeURIs) != 0 {
+		t.Fatalf("didChange count = %d, want 0", len(fake.didChangeURIs))
 	}
 }
 

@@ -120,9 +120,11 @@ lsp:
 
 需要先在本机安装对应语言服务器才能使用。对于 Pyright，未配置 Python 解释器时，Chord 会自动使用 LSP root 下的项目本地虚拟环境，并按当前运行平台探测对应布局：类 Unix（含 WSL）查找 `.venv/bin/python`、`venv/bin/python` 和 `env/bin/python`；Windows 查找 `.venv\Scripts\python.exe`、`venv\Scripts\python.exe` 和 `env\Scripts\python.exe`。WSL 自动发现有意识避开 Windows 虚拟环境中的 `Scripts\python.exe`；建议在 WSL 内创建 Linux venv，确需自定义解释器时再显式配置 `python.pythonPath`。
 
-需要限制语言服务器的生效范围时，可配置 `root_markers`；省略时仅由 `file_types` 决定是否处理某文件。
+需要语言服务器跨特定项目目录运行时，可配置 `root_markers`；省略时仅由 `file_types` 决定是否处理某文件。
 
-对 Python 来说，通常不建议默认配置 `root_markers`。在 Chord 当前的 LSP 模型中，`root_markers` 只决定 Pyright 是否为某个文件启动，而不会将工作区根目录重定向到最近的 `pyproject.toml` 或 `pyrightconfig.json`。默认配置 Python root markers 往往只会让合法的独立脚本或轻量项目无法启用 Pyright，却不能改善 workspace root 的选择。需要更严格的项目范围控制时，再按仓库实际情况显式添加 `root_markers`。
+对匹配的文件，Chord 会按以下规则确定该语言服务器的 workspace root：从文件所在目录向上，取最近一个包含任一 `root_markers` 的目录（不越过项目根）；没有匹配则回退到项目根。发现是按文件进行的，所以不同文件可能落在不同的根上，同一个服务器名也能按根各起一个实例。这样嵌套前端工程（例如仓库根本身是后端项目、前端在 `frontend/` 子目录）就能得到 root 定位到该子包的语言服务器，直接在包内找它的 `node_modules`、`tsconfig.json` 等包级配置。单个服务器名最多保留 8 个存活实例；monorepo 中标记目录超出这个数量时，最久未使用的实例会被关闭，下次读取其根下的文件时再重启。
+
+对 Python 来说，通常不建议默认配置 `root_markers`。开启后会把 Pyright 限定到含 marker 的目录，往往会让合法的独立脚本或轻量项目无法启用 Pyright。确实需要更严格的项目范围控制时，再按仓库实际情况显式添加 `root_markers`，此时 workspace root 会如上所述重定向到最近的 `pyproject.toml`/`pyrightconfig.json` 所在目录。
 
 通常无需手动设置 `python.pythonPath`。未显式配置解释器时，Chord 已在 LSP root 下自动发现项目本地的 `.venv`、`venv` 或 `env`。仅当需覆盖自动发现逻辑、改用自定义解释器路径时，才需设置 `python.pythonPath`。`python.analysis` 也是按需启用的 Pyright 行为调优项，如调整类型检查严格度。这类配置请使用嵌套 `options`：
 

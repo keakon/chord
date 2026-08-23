@@ -70,9 +70,18 @@ type SidebarServerEntry struct {
 
 type diagnosticsEvent struct {
 	diagnostics []Diagnostic
+	clientKey   clientKey
 	serverID    string
 	version     int32
 	receivedAt  time.Time
+}
+
+// clientKey identifies a language-server client by server name and workspace
+// root. The same server can run once per discovered root, e.g. one
+// typescript-language-server per nested frontend package of a monorepo.
+type clientKey struct {
+	name string
+	root string
 }
 
 // Manager manages multiple LSP clients and aggregates diagnostics.
@@ -80,20 +89,20 @@ type Manager struct {
 	projectRoot string
 	cfg         *config.Config
 	broadcast   BroadcastFunc
-	clients     map[string]*Client
+	clients     map[clientKey]*Client
 	clientsMu   sync.RWMutex
-	starting    map[string]bool // servers currently being initialized (guarded by clientsMu)
+	starting    map[clientKey]bool // servers currently being initialized (guarded by clientsMu)
 
 	waiters   map[string][]chan diagnosticsEvent
 	waitersMu sync.Mutex
 
 	startFailMu sync.Mutex
-	startFail   map[string]string // server name -> last start/init error
+	startFail   map[clientKey]string // client -> last start/init error
 
-	// diagByServer tracks the latest diagnostics per server+URI for tool output,
+	// diagByServer tracks the latest diagnostics per client+URI for tool output,
 	// broadcasts, and file-scoped review snapshots.
 	diagMu         sync.RWMutex
-	diagByServer   map[string]map[string]diagCounts
+	diagByServer   map[clientKey]map[string]diagCounts
 	reviewByServer map[string]map[string]reviewCounts
 
 	// touchedPaths tracks files modified by successful Write/Edit calls in the current
@@ -118,24 +127,24 @@ func NewManager(cfg *config.Config, projectRoot string, broadcast BroadcastFunc)
 		projectRoot:    projectRoot,
 		cfg:            cfg,
 		broadcast:      broadcast,
-		clients:        make(map[string]*Client),
-		starting:       make(map[string]bool),
+		clients:        make(map[clientKey]*Client),
+		starting:       make(map[clientKey]bool),
 		waiters:        make(map[string][]chan diagnosticsEvent),
-		startFail:      make(map[string]string),
-		diagByServer:   make(map[string]map[string]diagCounts),
+		startFail:      make(map[clientKey]string),
+		diagByServer:   make(map[clientKey]map[string]diagCounts),
 		reviewByServer: make(map[string]map[string]reviewCounts),
 		touchedPaths:   make(map[string]struct{}),
 	}
 }
 
-func (m *Manager) onDiagnostics(serverID string) func(uri string, _ string, diags []pnprotocol.Diagnostic, version int32) {
+func (m *Manager) onDiagnostics(key clientKey) func(uri string, _ string, diags []pnprotocol.Diagnostic, version int32) {
 	return func(uri string, _ string, diags []pnprotocol.Diagnostic, version int32) {
 		receivedAt := time.Now()
 		chordDiags := convertDiagnostics(diags)
 		path := normalizeWaiterPath(uriToPath(uri))
 		payload := DiagnosticsPayload{
 			URI:         uri,
-			ServerID:    serverID,
+			ServerID:    key.name,
 			Diagnostics: chordDiags,
 		}
 		m.broadcast(TypeLSPDiagnostics, payload)
@@ -155,26 +164,26 @@ func (m *Manager) onDiagnostics(serverID string) func(uri string, _ string, diag
 		}
 		m.diagMu.Lock()
 		if m.diagByServer == nil {
-			m.diagByServer = make(map[string]map[string]diagCounts)
+			m.diagByServer = make(map[clientKey]map[string]diagCounts)
 		}
 		if errs == 0 && warns == 0 {
-			if byURI, ok := m.diagByServer[serverID]; ok {
+			if byURI, ok := m.diagByServer[key]; ok {
 				delete(byURI, uri)
 				if len(byURI) == 0 {
-					delete(m.diagByServer, serverID)
+					delete(m.diagByServer, key)
 				}
 			}
 		} else {
-			byURI := m.diagByServer[serverID]
+			byURI := m.diagByServer[key]
 			if byURI == nil {
 				byURI = make(map[string]diagCounts)
-				m.diagByServer[serverID] = byURI
+				m.diagByServer[key] = byURI
 			}
 			byURI[uri] = diagCounts{errors: errs, warnings: warns}
 		}
-		if byPath := m.reviewByServer[serverID]; byPath != nil {
+		if byPath := m.reviewByServer[key.name]; byPath != nil {
 			if reviewed, ok := byPath[path]; ok {
-				latest := m.reviewCountsForPathLocked(serverID, path)
+				latest := m.reviewCountsForPathLocked(key.name, path)
 				reviewed.errors = latest.errors
 				reviewed.warnings = latest.warnings
 				byPath[path] = reviewed
@@ -186,7 +195,7 @@ func (m *Manager) onDiagnostics(serverID string) func(uri string, _ string, diag
 		m.waitersMu.Lock()
 		for _, ch := range m.waiters[path] {
 			select {
-			case ch <- diagnosticsEvent{diagnostics: chordDiags, serverID: serverID, version: version, receivedAt: receivedAt}:
+			case ch <- diagnosticsEvent{diagnostics: chordDiags, clientKey: key, serverID: key.name, version: version, receivedAt: receivedAt}:
 			default:
 			}
 		}
@@ -237,8 +246,11 @@ func uriToPath(uri string) string {
 }
 
 // Start starts LSP servers that can handle the given file path.
-// Each server is initialized in its own goroutine so the write lock is not held
-// during the potentially slow subprocess launch + LSP handshake.
+// Each client is initialized in its own goroutine so the write lock is not held
+// during the potentially slow subprocess launch + LSP handshake. The workspace
+// root is discovered per file: the nearest ancestor directory holding any
+// configured root marker, falling back to the project root, so nested frontend
+// packages get their own language-server instance rooted at the package.
 func (m *Manager) Start(ctx context.Context, path string) {
 	if m.cfg == nil || len(m.cfg.LSP) == 0 {
 		return
@@ -248,65 +260,67 @@ func (m *Manager) Start(ctx context.Context, path string) {
 	}
 	m.clientsMu.Lock()
 	var toStart []struct {
-		name string
-		cfg  config.LSPServerConfig
+		key clientKey
+		cfg config.LSPServerConfig
 	}
 	for name, srvCfg := range m.cfg.LSP {
 		if srvCfg.Disabled {
 			continue
 		}
-		if !m.handles(srvCfg, path) {
+		root, ok := m.serverRootForPath(srvCfg, path)
+		if !ok {
 			continue
 		}
-		if _, ok := m.clients[name]; ok {
+		key := clientKey{name: name, root: root}
+		if _, ok := m.clients[key]; ok {
 			continue
 		}
-		if m.starting[name] {
+		if m.starting[key] {
 			continue
 		}
-		m.starting[name] = true
+		m.starting[key] = true
 		toStart = append(toStart, struct {
-			name string
-			cfg  config.LSPServerConfig
-		}{name, srvCfg})
+			key clientKey
+			cfg config.LSPServerConfig
+		}{key, srvCfg})
 	}
 	m.clientsMu.Unlock()
 
 	for _, s := range toStart {
-		name, srvCfg := s.name, s.cfg
-		go m.startServer(ctx, name, srvCfg)
+		key, srvCfg := s.key, s.cfg
+		go m.startServer(ctx, key, srvCfg)
 	}
 }
 
-func (m *Manager) startServer(ctx context.Context, name string, srvCfg config.LSPServerConfig) {
+func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.LSPServerConfig) {
 	m.startFailMu.Lock()
 	if m.startFail == nil {
-		m.startFail = make(map[string]string)
+		m.startFail = make(map[clientKey]string)
 	}
-	delete(m.startFail, name)
+	delete(m.startFail, key)
 	m.startFailMu.Unlock()
 
-	client, err := NewClient(ctx, name, srvCfg, m.projectRoot, false)
+	client, err := NewClient(ctx, key.name, srvCfg, key.root, false)
 	if err != nil {
-		log.Errorf("lsp: create client name=%v error=%v", name, err)
+		log.Errorf("lsp: create client name=%v root=%v error=%v", key.name, key.root, err)
 		m.startFailMu.Lock()
-		m.startFail[name] = err.Error()
+		m.startFail[key] = err.Error()
 		m.startFailMu.Unlock()
 		m.clientsMu.Lock()
-		delete(m.starting, name)
+		delete(m.starting, key)
 		m.clientsMu.Unlock()
 		m.notifySidebarChanged()
 		return
 	}
-	client.SetOnDiagnostics(m.onDiagnostics(name))
+	client.SetOnDiagnostics(m.onDiagnostics(key))
 	if err := client.Initialize(ctx); err != nil {
-		log.Errorf("lsp: initialize client name=%v error=%v", name, err)
+		log.Errorf("lsp: initialize client name=%v root=%v error=%v", key.name, key.root, err)
 		_ = client.Close(ctx)
 		m.startFailMu.Lock()
-		m.startFail[name] = err.Error()
+		m.startFail[key] = err.Error()
 		m.startFailMu.Unlock()
 		m.clientsMu.Lock()
-		delete(m.starting, name)
+		delete(m.starting, key)
 		m.clientsMu.Unlock()
 		m.notifySidebarChanged()
 		return
@@ -315,14 +329,97 @@ func (m *Manager) startServer(ctx context.Context, name string, srvCfg config.LS
 	// Avoids "gopls: not started" when the first call happens before init completes (see crush).
 	const serverReadyTimeout = 15 * time.Second
 	if err := client.WaitForServerReady(ctx, serverReadyTimeout); err != nil {
-		log.Warnf("lsp: server not fully ready, continuing anyway name=%v error=%v", name, err)
+		log.Warnf("lsp: server not fully ready, continuing anyway name=%v root=%v error=%v", key.name, key.root, err)
 		// Still add the client so later calls can succeed; first request may still fail briefly.
 	}
+	// Mark the newcomer as most-recently-used before it can be considered for
+	// eviction: it was started to serve a file the caller is reading right now,
+	// and an untouched client sorts as the least-recently-used one, so without
+	// this the instance for the ninth root would be closed the instant it came
+	// up and restarted on the next read.
+	client.touch(time.Now().UnixNano())
 	m.clientsMu.Lock()
-	m.clients[name] = client
-	delete(m.starting, name)
+	m.clients[key] = client
+	delete(m.starting, key)
+	closeMe, survivors := m.evictExcessClientsLocked()
 	m.clientsMu.Unlock()
+	for _, victim := range closeMe {
+		if err := victim.Close(ctx); err != nil {
+			log.Warnf("lsp: close evicted client error=%v", err)
+		}
+	}
+	if cleared := m.dropOrphanedDiagnostics(survivors); m.broadcast != nil {
+		for _, c := range cleared {
+			m.broadcast(TypeLSPDiagnostics, DiagnosticsPayload{URI: c.uri, ServerID: c.server, Diagnostics: nil})
+		}
+	}
 	m.notifySidebarChanged()
+}
+
+// discoverWorkspaceRoot walks from path's directory up to the project root and
+// returns the nearest ancestor containing any of the server's root markers.
+// markerMatched is false when no marker was found or none is configured, in
+// which case root falls back to the project root. ok is false when path lies
+// outside the project root.
+//
+// This is the single ancestor walk behind both "does this server cover the
+// file" and "where must its client be rooted"; the two questions used to be
+// answered by separate functions that stat'ed the same chain twice per call.
+func (m *Manager) discoverWorkspaceRoot(srvCfg config.LSPServerConfig, path string) (root string, markerMatched, ok bool) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", false, false
+	}
+	projectRoot, err := filepath.Abs(m.projectRoot)
+	if err != nil {
+		return "", false, false
+	}
+	rel, err := filepath.Rel(projectRoot, absPath)
+	if err != nil || relPathEscapesDir(rel) {
+		return "", false, false
+	}
+	if len(srvCfg.RootMarkers) == 0 {
+		return projectRoot, false, true
+	}
+	// absPath and projectRoot are both absolute and cleaned, so walking parents
+	// from the file's directory always reaches projectRoot; the parent == dir
+	// check is the filesystem-root backstop for a malformed project root.
+	dir := filepath.Dir(absPath)
+	// rel == "." means path is the project root itself, whose parent already
+	// lies outside the project. Start at the root so it is the first candidate
+	// and the dir == projectRoot backstop can stop the walk there.
+	if rel == "." {
+		dir = absPath
+	}
+	for {
+		for _, marker := range srvCfg.RootMarkers {
+			if pathExists(filepath.Join(dir, marker)) {
+				return dir, true, true
+			}
+		}
+		parent := filepath.Dir(dir)
+		if dir == projectRoot || parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return projectRoot, false, true
+}
+
+// serverRootForPath reports whether the server covers path and, if so, the
+// workspace root its client must be rooted at. A server that declares
+// root_markers roots at the nearest ancestor directory containing a marker,
+// falling back to the project root when none matches, so the server still
+// serves files outside any marker directory.
+func (m *Manager) serverRootForPath(srvCfg config.LSPServerConfig, path string) (string, bool) {
+	if !matchesFileType(srvCfg, path) {
+		return "", false
+	}
+	root, _, ok := m.discoverWorkspaceRoot(srvCfg, path)
+	if !ok {
+		return "", false
+	}
+	return root, true
 }
 
 // SidebarEntries returns enabled LSP servers and whether each is connected, failed, or not started yet.
@@ -347,13 +444,13 @@ func (m *Manager) SidebarEntries() []SidebarServerEntry {
 	// in the opposite order would deadlock).
 	m.clientsMu.RLock()
 	connected := make(map[string]bool, len(m.clients))
-	for n := range m.clients {
-		connected[n] = true
+	for k := range m.clients {
+		connected[k.name] = true
 	}
 	m.clientsMu.RUnlock()
 
 	m.startFailMu.Lock()
-	failMap := make(map[string]string, len(m.startFail))
+	failMap := make(map[clientKey]string, len(m.startFail))
 	maps.Copy(failMap, m.startFail)
 	m.startFailMu.Unlock()
 
@@ -371,18 +468,37 @@ func (m *Manager) SidebarEntries() []SidebarServerEntry {
 				}
 			}
 			m.diagMu.RUnlock()
-		} else if msg := failMap[name]; msg != "" {
-			e := msg
-			if len(e) > 120 {
-				e = e[:117] + "..."
+		} else if msg := failMessage(failMap, name); msg != "" {
+			if len(msg) > 120 {
+				msg = msg[:117] + "..."
 			}
-			entry.Error = e
+			entry.Error = msg
 		} else {
 			entry.Pending = true
 		}
 		out = append(out, entry)
 	}
 	return out
+}
+
+// failMessage returns the recorded start error for the named server, choosing
+// the lexicographically first workspace root so the sidebar does not flip
+// between roots on every refresh. The chosen root itself doubles as the
+// "no entry at all" sentinel, since a workspace root is never the empty
+// string.
+func failMessage(failMap map[clientKey]string, name string) string {
+	var chosenRoot, chosen string
+	chosenSet := false
+	for k, msg := range failMap {
+		if k.name != name {
+			continue
+		}
+		if !chosenSet || k.root < chosenRoot {
+			chosenRoot, chosen = k.root, msg
+			chosenSet = true
+		}
+	}
+	return chosen
 }
 
 // LoadedServerNames returns the names of currently connected LSP servers.
@@ -395,8 +511,12 @@ func (m *Manager) LoadedServerNames() []string {
 	if len(m.clients) == 0 {
 		return nil
 	}
-	names := make([]string, 0, len(m.clients))
-	for name := range m.clients {
+	seen := make(map[string]struct{}, len(m.clients))
+	for k := range m.clients {
+		seen[k.name] = struct{}{}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -416,41 +536,137 @@ func (m *Manager) notifySidebarChanged() {
 	}()
 }
 
-func (m *Manager) handles(srvCfg config.LSPServerConfig, path string) bool {
-	if len(srvCfg.FileTypes) > 0 {
-		ext := strings.ToLower(filepath.Ext(path))
-		matched := false
-		for _, ft := range srvCfg.FileTypes {
-			e := strings.ToLower(ft)
-			if e != "" && e[0] != '.' {
-				e = "." + e
-			}
-			if ext == e {
-				matched = true
-				break
-			}
+// maxClientsPerServer caps how many live instances a single server name may
+// hold at once. Without a bound, browsing each nested package of a monorepo
+// spawns its own language-server process that never gets reclaimed until
+// Stop. When the cap is exceeded the least-recently-used instance is evicted.
+const maxClientsPerServer = 8
+
+// clearedDiag names a diagnostic entry dropped because the instance that
+// published it is gone.
+type clearedDiag struct {
+	server string
+	uri    string
+}
+
+// evictExcessClientsLocked finds the least-recently-used clients of any server
+// whose live instance count exceeds maxClientsPerServer, removes them from
+// m.clients, and returns them so the caller can Close them outside the lock.
+// survivors maps each affected server name to the instances that stayed, which
+// the caller feeds to dropOrphanedDiagnostics: diagByServer is keyed by server
+// name, so an entry published by an evicted instance would otherwise sit in the
+// sidebar and in tool output forever with no client left to ever clear it.
+// startFail is intentionally untouched: an evicted instance is one that started
+// successfully, so it has no start-fail entry to remove.
+//
+// Caller must hold clientsMu (write lock).
+func (m *Manager) evictExcessClientsLocked() (closeMe []*Client, survivors map[string][]*Client) {
+	byServer := make(map[string][]clientKey)
+	for key := range m.clients {
+		byServer[key.name] = append(byServer[key.name], key)
+	}
+	for name, keys := range byServer {
+		if len(keys) <= maxClientsPerServer {
+			continue
 		}
-		if !matched {
-			return false
+		// Root breaks ties so eviction stays deterministic when two instances
+		// were last used within the same nanosecond (or never used at all).
+		sort.Slice(keys, func(i, j int) bool {
+			li, lj := m.clients[keys[i]].lastUsed.Load(), m.clients[keys[j]].lastUsed.Load()
+			if li != lj {
+				return li < lj
+			}
+			return keys[i].root < keys[j].root
+		})
+		cut := len(keys) - maxClientsPerServer
+		for _, key := range keys[:cut] {
+			closeMe = append(closeMe, m.clients[key])
+			delete(m.clients, key)
+		}
+		if survivors == nil {
+			survivors = make(map[string][]*Client, 1)
+		}
+		for _, key := range keys[cut:] {
+			survivors[name] = append(survivors[name], m.clients[key])
 		}
 	}
-	if len(srvCfg.RootMarkers) > 0 {
-		// Check if path is under a directory containing any root marker
-		dir := filepath.Dir(path)
-		for {
-			for _, marker := range srvCfg.RootMarkers {
-				if pathExists(filepath.Join(dir, marker)) {
-					return true
+	return closeMe, survivors
+}
+
+// dropOrphanedDiagnostics removes every diagnostic recorded under a server name
+// whose file none of that server's surviving instances handles, and returns the
+// dropped entries so the caller can broadcast the clear.
+//
+// Caller must hold neither clientsMu nor diagMu. Client.HandlesFile only reads
+// fields fixed at construction, so the surviving instances can be inspected
+// without clientsMu — which matters because recordReviewSnapshot takes
+// clientsMu while holding diagMu, so grabbing the two in the other order here
+// would invert the lock order.
+func (m *Manager) dropOrphanedDiagnostics(survivors map[string][]*Client) (cleared []clearedDiag) {
+	if len(survivors) == 0 {
+		return nil
+	}
+	m.diagMu.Lock()
+	defer m.diagMu.Unlock()
+	for name, live := range survivors {
+		for key := range m.diagByServer {
+			if key.name != name {
+				continue
+			}
+			byURI := m.diagByServer[key]
+			for uri := range byURI {
+				path := uriToPath(uri)
+				served := false
+				for _, c := range live {
+					if c.HandlesFile(path) {
+						served = true
+						break
+					}
+				}
+				if served {
+					continue
+				}
+				delete(byURI, uri)
+				cleared = append(cleared, clearedDiag{server: name, uri: uri})
+				if byPath := m.reviewByServer[name]; byPath != nil {
+					delete(byPath, normalizeWaiterPath(path))
 				}
 			}
-			if dir == m.projectRoot || len(dir) <= len(m.projectRoot) {
-				break
+			if len(byURI) == 0 {
+				delete(m.diagByServer, key)
 			}
-			dir = filepath.Dir(dir)
 		}
-		return false // loop above already checked projectRoot
+		// A server whose review entries were all dropped must not leave an empty
+		// map behind: ResetReviews decides whether anything needs clearing from
+		// len(m.reviewByServer), so a leftover empty entry makes it report a
+		// change and refresh the sidebar for nothing. This deliberately sits
+		// outside the diagByServer cleanup above — reviews and diagnostics empty
+		// out independently, and the common case is one orphaned file among
+		// several the server still has diagnostics for.
+		if byPath, ok := m.reviewByServer[name]; ok && len(byPath) == 0 {
+			delete(m.reviewByServer, name)
+		}
 	}
-	return true
+	return cleared
+}
+
+// matchesFileType reports whether the server's file_types cover path. A server
+// without file_types accepts every extension.
+func matchesFileType(srvCfg config.LSPServerConfig, path string) bool {
+	if len(srvCfg.FileTypes) == 0 {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, ft := range srvCfg.FileTypes {
+		e := strings.ToLower(ft)
+		if e != "" && e[0] != '.' {
+			e = "." + e
+		}
+		if ext == e {
+			return true
+		}
+	}
+	return false
 }
 
 func pathExists(p string) bool {
@@ -478,28 +694,83 @@ func pathUnderDir(path, dir string) bool {
 	return !relPathEscapesDir(rel)
 }
 
-// clientForPathLocked returns a client that handles path; caller must hold at least RLock.
-func (m *Manager) clientForPathLocked(path string) (*Client, bool) {
-	for _, c := range m.clients {
-		if c.HandlesFile(path) {
-			return c, true
+// forEachClientForPathLocked calls fn for every client that owns path: at most
+// one instance per server name, the one whose workspace root is nearest to the
+// file.
+//
+// Nearest-root ownership is what keeps one URI published by one instance.
+// Client.HandlesFile only rejects files outside the client's own root, so an
+// instance rooted at the repository root also accepts files inside a nested
+// package that has its own instance. Notifying both would make two clients of
+// the same server publish diagnostics for the same URI under the same server
+// name, and the second publish would overwrite — or, when it is empty, clear —
+// the first in diagByServer. Both roots contain the file, so they lie on one
+// ancestor chain and the longer root is the deeper one.
+//
+// Ownership is derived from the running clients rather than re-derived from the
+// config, so a client stays reachable for didClose and diagnostics cleanup even
+// if its server entry is later disabled.
+//
+// Caller must hold at least clientsMu.RLock().
+func (m *Manager) forEachClientForPathLocked(path string, fn func(clientKey, *Client)) {
+	if len(m.clients) == 0 {
+		return
+	}
+	var owners []clientKey
+	for key, c := range m.clients {
+		if !c.HandlesFile(path) {
+			continue
+		}
+		seen := false
+		for i, existing := range owners {
+			if existing.name != key.name {
+				continue
+			}
+			if len(key.root) > len(existing.root) {
+				owners[i] = key
+			}
+			seen = true
+			break
+		}
+		if !seen {
+			owners = append(owners, key)
 		}
 	}
-	return nil, false
+	for _, key := range owners {
+		c := m.clients[key]
+		c.touch(time.Now().UnixNano())
+		fn(key, c)
+	}
 }
 
-// hasPendingStartForPathLocked reports whether any matching server is still starting.
-// Caller must hold at least clientsMu.RLock().
+// clientForPathLocked returns the client that owns path, preferring the
+// instance rooted nearest to it so nested packages route to their own server.
+// Caller must hold at least RLock.
+func (m *Manager) clientForPathLocked(path string) (*Client, bool) {
+	var found *Client
+	m.forEachClientForPathLocked(path, func(_ clientKey, c *Client) {
+		if found == nil {
+			found = c
+		}
+	})
+	return found, found != nil
+}
+
+// hasPendingStartForPathLocked reports whether a matching server instance for
+// the given path is still starting. Caller must hold at least clientsMu.RLock().
 func (m *Manager) hasPendingStartForPathLocked(path string) bool {
 	if m.cfg == nil || len(m.cfg.LSP) == 0 {
 		return false
 	}
-	for name := range m.starting {
-		srvCfg, ok := m.cfg.LSP[name]
+	for key := range m.starting {
+		srvCfg, ok := m.cfg.LSP[key.name]
 		if !ok || srvCfg.Disabled {
 			continue
 		}
-		if m.handles(srvCfg, path) {
+		// Only a server whose configured file types and root markers cover the
+		// path can be "starting for" it; otherwise a Go read would count a
+		// TypeScript startup as pending for that path.
+		if root, ok := m.serverRootForPath(srvCfg, path); ok && root == key.root {
 			return true
 		}
 	}
@@ -560,18 +831,16 @@ func (m *Manager) ClientForPath(ctx context.Context, path string) (*Client, bool
 	return m.waitForClientForPath(ctx, path, clientWaitTimeout)
 }
 
-// DidOpen sends didOpen to all clients that handle path; maintains version per client.
+// DidOpen sends didOpen to the clients that own path; maintains version per client.
 func (m *Manager) DidOpen(ctx context.Context, path string, content string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
-	for _, c := range m.clients {
-		if c.HandlesFile(path) {
-			_, _ = c.DidOpen(ctx, path, content)
-		}
-	}
+	m.forEachClientForPathLocked(path, func(_ clientKey, c *Client) {
+		_, _ = c.DidOpen(ctx, path, content)
+	})
 }
 
 // DidChange sends didChange to all clients that handle path.
@@ -585,8 +854,8 @@ func (m *Manager) DidChangeErr(ctx context.Context, path string, content string)
 	return err
 }
 
-// NotifyWatchedFileChanged sends workspace/didChangeWatchedFiles to all clients
-// that handle path. This keeps language-server project graphs in sync
+// NotifyWatchedFileChanged sends workspace/didChangeWatchedFiles to the clients
+// that own path. This keeps language-server project graphs in sync
 // for file create/change/delete events, including newly created modules that are
 // imported by other files.
 func (m *Manager) NotifyWatchedFileChanged(ctx context.Context, path string, changeType pnprotocol.FileChangeType) error {
@@ -597,21 +866,19 @@ func (m *Manager) NotifyWatchedFileChanged(ctx context.Context, path string, cha
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 	var first error
-	for _, c := range m.clients {
-		if !c.HandlesFile(path) {
-			continue
-		}
+	m.forEachClientForPathLocked(path, func(_ clientKey, c *Client) {
 		if err := c.NotifyWatchedFileChange(ctx, path, changeType); err != nil && first == nil {
 			first = err
 		}
-	}
+	})
 	return first
 }
 
-// DidChangeVersions sends didChange to all matching clients and returns the
+// DidChangeVersions sends didChange to the clients that own path and returns the
 // document versions used by each server notification. The versions are used to
 // ignore stale publishDiagnostics snapshots when servers include diagnostic
-// versions.
+// versions. Keying by server name is safe because forEachClientForPathLocked
+// yields at most one instance per server for a given path.
 func (m *Manager) DidChangeVersions(ctx context.Context, path string, content string) (map[string]int32, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -620,16 +887,14 @@ func (m *Manager) DidChangeVersions(ctx context.Context, path string, content st
 	defer m.clientsMu.RUnlock()
 	versions := make(map[string]int32)
 	var first error
-	for name, c := range m.clients {
-		if c.HandlesFile(path) {
-			version, err := c.DidChange(ctx, path, content)
-			if err == nil {
-				versions[name] = version
-			} else if first == nil {
-				first = err
-			}
+	m.forEachClientForPathLocked(path, func(key clientKey, c *Client) {
+		version, err := c.DidChange(ctx, path, content)
+		if err == nil {
+			versions[key.name] = version
+		} else if first == nil {
+			first = err
 		}
-	}
+	})
 	return versions, first
 }
 
@@ -640,37 +905,49 @@ func (m *Manager) DidClose(ctx context.Context, path string) {
 }
 
 // DidCloseErr is like DidClose but returns the first notify error from any client.
+//
+// The clientsMu and diagMu sections run separately: forEachClientForPathLocked
+// requires clientsMu, while the diagnostics cleanup needs diagMu. Taking diagMu
+// while still holding clientsMu would invert the lock order against
+// onDiagnostics / recordReviewSnapshot (diagMu -> clientsMu), so the client
+// handles are collected under clientsMu and released before diagMu is touched.
 func (m *Manager) DidCloseErr(ctx context.Context, path string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	path = normalizeWaiterPath(path)
 	m.clientsMu.RLock()
-	defer m.clientsMu.RUnlock()
+	type closeEntry struct {
+		key clientKey
+		c   *Client
+	}
+	entries := make([]closeEntry, 0, 2)
+	m.forEachClientForPathLocked(path, func(key clientKey, c *Client) {
+		entries = append(entries, closeEntry{key: key, c: c})
+	})
+	m.clientsMu.RUnlock()
+
 	var first error
 	var changed bool
-	for name, c := range m.clients {
-		if !c.HandlesFile(path) {
-			continue
-		}
-		if err := c.DidClose(ctx, path); err != nil && first == nil {
+	for _, e := range entries {
+		if err := e.c.DidClose(ctx, path); err != nil && first == nil {
 			first = err
 		}
-		c.clearDiagnosticsForPath(path)
+		e.c.clearDiagnosticsForPath(path)
 		uri := string(pnprotocol.URIFromPath(path))
 		m.diagMu.Lock()
-		if byURI, ok := m.diagByServer[name]; ok {
+		if byURI, ok := m.diagByServer[e.key]; ok {
 			if _, exists := byURI[uri]; exists {
 				delete(byURI, uri)
 				changed = true
 				if len(byURI) == 0 {
-					delete(m.diagByServer, name)
+					delete(m.diagByServer, e.key)
 				}
 			}
 		}
 		m.diagMu.Unlock()
 		if m.broadcast != nil {
-			m.broadcast(TypeLSPDiagnostics, DiagnosticsPayload{URI: uri, ServerID: name, Diagnostics: nil})
+			m.broadcast(TypeLSPDiagnostics, DiagnosticsPayload{URI: uri, ServerID: e.key.name, Diagnostics: nil})
 		}
 	}
 	m.waitersMu.Lock()
@@ -808,11 +1085,11 @@ func normalizeWaiterPath(p string) string {
 func (m *Manager) Stop(ctx context.Context) {
 	m.clientsMu.Lock()
 	defer m.clientsMu.Unlock()
-	for name, c := range m.clients {
+	for key, c := range m.clients {
 		if err := c.Close(ctx); err != nil {
-			log.Warnf("lsp: stop client name=%v error=%v", name, err)
+			log.Warnf("lsp: stop client name=%v root=%v error=%v", key.name, key.root, err)
 		}
-		delete(m.clients, name)
+		delete(m.clients, key)
 	}
 }
 

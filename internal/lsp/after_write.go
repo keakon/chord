@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 
@@ -123,14 +124,11 @@ func (m *Manager) HasServerForPath(path string) bool {
 	if m.cfg == nil || len(m.cfg.LSP) == 0 {
 		return false
 	}
-	if !pathUnderDir(path, m.projectRoot) {
-		return false
-	}
 	for _, srvCfg := range m.cfg.LSP {
 		if srvCfg.Disabled {
 			continue
 		}
-		if m.handles(srvCfg, path) {
+		if _, ok := m.serverRootForPath(srvCfg, path); ok {
 			return true
 		}
 	}
@@ -141,27 +139,50 @@ func (m *Manager) startFailuresForPath(path string) []string {
 	if m.cfg == nil || len(m.cfg.LSP) == 0 {
 		return nil
 	}
-	var missing []string
-	m.clientsMu.RLock()
+	// serverRootForPath walks the ancestor chain stat'ing root markers; resolve
+	// all (name, root) candidates before taking the clients lock so no
+	// filesystem work happens under it.
+	matches := make([]clientKey, 0, len(m.cfg.LSP))
 	for name, srvCfg := range m.cfg.LSP {
-		if srvCfg.Disabled || !m.handles(srvCfg, path) {
+		if srvCfg.Disabled {
 			continue
 		}
-		if _, ok := m.clients[name]; !ok {
-			missing = append(missing, name)
+		if root, ok := m.serverRootForPath(srvCfg, path); ok {
+			matches = append(matches, clientKey{name: name, root: root})
+		}
+	}
+	var missing []clientKey
+	m.clientsMu.RLock()
+	for _, key := range matches {
+		if _, ok := m.clients[key]; !ok {
+			missing = append(missing, key)
 		}
 	}
 	m.clientsMu.RUnlock()
+	// Root is part of the ordering so two instances of the same server report in
+	// a stable order instead of whatever the map iteration produced.
+	sort.Slice(missing, func(i, j int) bool {
+		if missing[i].name != missing[j].name {
+			return missing[i].name < missing[j].name
+		}
+		return missing[i].root < missing[j].root
+	})
 
 	m.startFailMu.Lock()
 	defer m.startFailMu.Unlock()
-	var out []string
-	for _, name := range missing {
-		if msg, ok := m.startFail[name]; ok {
-			out = append(out, name+": "+msg)
-		} else {
-			out = append(out, name+": not started")
+	out := make([]string, 0, len(missing))
+	for _, key := range missing {
+		msg, ok := m.startFail[key]
+		if !ok {
+			msg = "not started"
 		}
+		line := key.name + ": " + msg
+		// Two roots of the same server usually fail identically (missing
+		// binary); reporting the same sentence twice tells the model nothing.
+		if len(out) > 0 && out[len(out)-1] == line {
+			continue
+		}
+		out = append(out, line)
 	}
 	return out
 }

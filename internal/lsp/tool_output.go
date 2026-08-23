@@ -361,7 +361,8 @@ func (m *Manager) allDiagnosticsByAbsPath() map[string][]Diagnostic {
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 	merged := make(map[string][]Diagnostic)
-	for _, c := range m.clients {
+	ownersByPath := make(map[string]map[string]struct{})
+	for key, c := range m.clients {
 		c.diagnosticsMu.RLock()
 		for uri, diags := range c.diagnostics {
 			p, err := protocol.DocumentURI(uri).Path()
@@ -373,6 +374,21 @@ func (m *Manager) allDiagnosticsByAbsPath() map[string][]Diagnostic {
 				absP = filepath.Clean(p)
 			} else {
 				absP = filepath.Clean(absP)
+			}
+			owners := ownersByPath[absP]
+			if owners == nil {
+				owners = make(map[string]struct{})
+				m.forEachClientForPathLocked(absP, func(ownerKey clientKey, _ *Client) {
+					if ownerKey.name == key.name {
+						owners[ownerKey.root] = struct{}{}
+					}
+				})
+				ownersByPath[absP] = owners
+			}
+			if len(owners) > 0 {
+				if _, ok := owners[key.root]; !ok {
+					continue
+				}
 			}
 			for _, d := range diags {
 				merged[absP] = append(merged[absP], Diagnostic{

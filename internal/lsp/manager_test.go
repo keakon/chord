@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,15 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 )
+
+// testKey builds a clientKey for a test manager, using the manager's project
+// root as the workspace root so it matches clients that use the same root.
+func testKey(m *Manager, name string) clientKey {
+	if m == nil {
+		return clientKey{name: name}
+	}
+	return clientKey{name: name, root: m.projectRoot}
+}
 
 func TestRelPathEscapesDir(t *testing.T) {
 	if !relPathEscapesDir("..") {
@@ -51,8 +61,8 @@ func TestNotifyWatchedFileChangedRoutesByFileTypeAcrossLanguages(t *testing.T) {
 	mgr := NewManager(&config.Config{}, root, nil)
 	goFake := &fakePowernapClient{}
 	tsFake := &fakePowernapClient{}
-	mgr.clients["gopls"] = &Client{client: goFake, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
-	mgr.clients["typescript"] = &Client{client: tsFake, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".ts", ".js"}}}
+	mgr.clients[testKey(mgr, "gopls")] = &Client{client: goFake, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
+	mgr.clients[testKey(mgr, "typescript")] = &Client{client: tsFake, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".ts", ".js"}}}
 
 	goPath := filepath.Join(root, "main.go")
 	jsPath := filepath.Join(root, "src", "main.js")
@@ -81,7 +91,7 @@ func TestNotifyWatchedFileChangedSendsDeletedEvent(t *testing.T) {
 	root := t.TempDir()
 	mgr := NewManager(&config.Config{}, root, nil)
 	fake := &fakePowernapClient{}
-	mgr.clients["rust-analyzer"] = &Client{client: fake, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".rs"}}}
+	mgr.clients[testKey(mgr, "rust-analyzer")] = &Client{client: fake, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".rs"}}}
 
 	path := filepath.Join(root, "src", "lib.rs")
 	if err := mgr.NotifyWatchedFileChanged(context.Background(), path, WatchedFileDeleted); err != nil {
@@ -165,17 +175,17 @@ func TestWaitForClientForPathWaitsForAsyncStartup(t *testing.T) {
 	path := filepath.Join(root, "main.go")
 
 	mgr.clientsMu.Lock()
-	mgr.starting["gopls"] = true
+	mgr.starting[testKey(mgr, "gopls")] = true
 	mgr.clientsMu.Unlock()
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		mgr.clientsMu.Lock()
-		mgr.clients["gopls"] = &Client{
+		mgr.clients[testKey(mgr, "gopls")] = &Client{
 			cwd: root,
 			cfg: config.LSPServerConfig{FileTypes: []string{".go"}},
 		}
-		delete(mgr.starting, "gopls")
+		delete(mgr.starting, testKey(mgr, "gopls"))
 		mgr.clientsMu.Unlock()
 	}()
 
@@ -202,7 +212,7 @@ func TestWaitForClientForPathReturnsImmediatelyWhenMatchingServerDisabled(t *tes
 
 	path := filepath.Join(root, "main.go")
 	mgr.clientsMu.Lock()
-	mgr.starting["gopls"] = true
+	mgr.starting[testKey(mgr, "gopls")] = true
 	mgr.clientsMu.Unlock()
 
 	start := time.Now()
@@ -228,13 +238,13 @@ func TestWaitForClientForPathReturnsWhenStartupSettles(t *testing.T) {
 	path := filepath.Join(root, "main.go")
 
 	mgr.clientsMu.Lock()
-	mgr.starting["gopls"] = true
+	mgr.starting[testKey(mgr, "gopls")] = true
 	mgr.clientsMu.Unlock()
 
 	go func() {
 		time.Sleep(40 * time.Millisecond)
 		mgr.clientsMu.Lock()
-		delete(mgr.starting, "gopls")
+		delete(mgr.starting, testKey(mgr, "gopls"))
 		mgr.clientsMu.Unlock()
 	}()
 
@@ -260,7 +270,7 @@ func TestSidebarEntriesIncludePerServerReviewedSnapshotsForTouchedFiles(t *testi
 			},
 		},
 	}, t.TempDir(), nil)
-	mgr.clients["gopls"] = &Client{}
+	mgr.clients[testKey(mgr, "gopls")] = &Client{}
 	mgr.reviewByServer = map[string]map[string]reviewCounts{
 		"gopls": {
 			normalizeWaiterPath("/a.go"):         {errors: 1, warnings: 2},
@@ -285,8 +295,8 @@ func TestSidebarEntriesIncludePerServerReviewedSnapshotsForTouchedFiles(t *testi
 
 func TestRecordReviewSnapshotDoesNotOverwriteOtherTouchedFiles(t *testing.T) {
 	mgr := &Manager{
-		diagByServer: map[string]map[string]diagCounts{
-			"gopls": {
+		diagByServer: map[clientKey]map[string]diagCounts{
+			testKey(nil, "gopls"): {
 				"file:///a.go": {errors: 1, warnings: 0},
 				"file:///b.go": {errors: 0, warnings: 3},
 			},
@@ -322,7 +332,7 @@ func TestRecordReviewSnapshotClearsStaleDiagnosticsForCleanTouchedFile(t *testin
 		},
 	}, t.TempDir(), nil)
 	path := normalizeWaiterPath(filepath.Join(mgr.projectRoot, "a.go"))
-	mgr.clients["gopls"] = &Client{}
+	mgr.clients[testKey(mgr, "gopls")] = &Client{}
 	mgr.reviewByServer = map[string]map[string]reviewCounts{
 		"gopls": {
 			path: {errors: 1, warnings: 0},
@@ -358,14 +368,14 @@ func TestPublishedDiagnosticsRefreshExistingReviewedSnapshot(t *testing.T) {
 	}, t.TempDir(), nil)
 	path := normalizeWaiterPath("/a.go")
 	reviewedAt := time.Now().Add(-time.Minute)
-	mgr.clients["gopls"] = &Client{}
+	mgr.clients[testKey(mgr, "gopls")] = &Client{}
 	mgr.reviewByServer = map[string]map[string]reviewCounts{
 		"gopls": {
 			path: {errors: 1, reviewedAt: reviewedAt},
 		},
 	}
 	mgr.touchedPaths = map[string]struct{}{path: {}}
-	publish := mgr.onDiagnostics("gopls")
+	publish := mgr.onDiagnostics(testKey(nil, "gopls"))
 
 	publish("file:///a.go", "", []protocol.Diagnostic{{Severity: protocol.SeverityWarning, Message: "warning"}}, 1)
 	got := mgr.reviewByServer["gopls"][path]
@@ -397,10 +407,10 @@ func TestPublishedDiagnosticsDoNotAdmitUnreviewedPathToSidebar(t *testing.T) {
 		},
 	}, t.TempDir(), nil)
 	path := normalizeWaiterPath("/a.go")
-	mgr.clients["gopls"] = &Client{}
+	mgr.clients[testKey(mgr, "gopls")] = &Client{}
 	mgr.touchedPaths = map[string]struct{}{path: {}}
 
-	mgr.onDiagnostics("gopls")("file:///a.go", "", []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: "existing project error"}}, 1)
+	mgr.onDiagnostics(testKey(nil, "gopls"))("file:///a.go", "", []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: "existing project error"}}, 1)
 
 	if byPath := mgr.reviewByServer["gopls"]; len(byPath) != 0 {
 		t.Fatalf("unreviewed publish created sidebar snapshots: %+v", byPath)
@@ -421,12 +431,54 @@ func TestCurrentReviewSnapshotsIncludesCleanConnectedServer(t *testing.T) {
 		},
 	}, t.TempDir(), nil)
 	path := filepath.Join(mgr.projectRoot, "a.go")
-	mgr.clients["gopls"] = &Client{}
+	mgr.clients[testKey(mgr, "gopls")] = &Client{cwd: mgr.projectRoot, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
 
 	got := mgr.CurrentReviewSnapshots(path)
 	want := []message.LSPReview{{Path: path, ServerID: "gopls", Errors: 0, Warnings: 0}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("CurrentReviewSnapshots() = %#v, want %#v", got, want)
+	}
+}
+
+func TestRecordReviewSnapshotIgnoresDiagnosticsFromNonOwnerRoot(t *testing.T) {
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"gopls": {Command: "gopls", FileTypes: []string{".go"}},
+		},
+	}, t.TempDir(), nil)
+	path := normalizeWaiterPath(filepath.Join(mgr.projectRoot, "nested", "a.go"))
+	mgr.clients[clientKey{name: "gopls", root: mgr.projectRoot}] = &Client{cwd: mgr.projectRoot, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
+	mgr.clients[clientKey{name: "gopls", root: filepath.Join(mgr.projectRoot, "nested")}] = &Client{cwd: filepath.Join(mgr.projectRoot, "nested"), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
+	mgr.diagByServer = map[clientKey]map[string]diagCounts{
+		{name: "gopls", root: mgr.projectRoot}:                          {string(protocol.URIFromPath(path)): {errors: 2}},
+		{name: "gopls", root: filepath.Join(mgr.projectRoot, "nested")}: {string(protocol.URIFromPath(path)): {warnings: 1}},
+	}
+
+	mgr.recordReviewSnapshot(path)
+	got := mgr.reviewByServer["gopls"][path]
+	if got.errors != 0 || got.warnings != 1 {
+		t.Fatalf("review snapshot = %+v, want only owner-root 0E/1W", got)
+	}
+}
+
+func TestAllDiagnosticsByAbsPathIgnoresDiagnosticsFromNonOwnerRoot(t *testing.T) {
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"gopls": {Command: "gopls", FileTypes: []string{".go"}},
+		},
+	}, t.TempDir(), nil)
+	path := normalizeWaiterPath(filepath.Join(mgr.projectRoot, "nested", "a.go"))
+	outer := &Client{cwd: mgr.projectRoot, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
+	inner := &Client{cwd: filepath.Join(mgr.projectRoot, "nested"), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
+	uri := protocol.DocumentURI(protocol.URIFromPath(path))
+	outer.diagnostics[uri] = []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: "stale outer"}}
+	inner.diagnostics[uri] = []protocol.Diagnostic{{Severity: protocol.SeverityWarning, Message: "fresh inner"}}
+	mgr.clients[clientKey{name: "gopls", root: mgr.projectRoot}] = outer
+	mgr.clients[clientKey{name: "gopls", root: filepath.Join(mgr.projectRoot, "nested")}] = inner
+
+	got := mgr.allDiagnosticsByAbsPath()[path]
+	if len(got) != 1 || got[0].Severity != int(protocol.SeverityWarning) || got[0].Message != "fresh inner" {
+		t.Fatalf("diagnostics = %+v, want only owner-root warning", got)
 	}
 }
 
@@ -475,5 +527,75 @@ func TestConfiguredServersSortsNamesAndFileTypesAndReturnsCopies(t *testing.T) {
 	got[0].FileTypes[0] = "*.mutated"
 	if again := mgr.ConfiguredServers(); !reflect.DeepEqual(again, want) {
 		t.Fatalf("ConfiguredServers() should return copies, got %#v after mutation, want %#v", again, want)
+	}
+}
+
+// TestConcurrentDiagnosticsAndCloseDoNotDeadlock exercises the two lock
+// directions at once: review snapshotting and diagnostics publishing take
+// diagMu and then clientsMu (reviewCountsForPathLocked / reviewServerIDsForPathLocked),
+// while DidCloseErr touches clientsMu and diagMu. A pending clientsMu writer
+// between the two forces readers to wait, which is exactly the window in which
+// an inverted nested order would deadlock. Regression guard for DidCloseErr
+// taking diagMu while still holding clientsMu.
+func TestConcurrentDiagnosticsAndCloseDoNotDeadlock(t *testing.T) {
+	root := t.TempDir()
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"gopls": {Command: "gopls", FileTypes: []string{".go"}},
+		},
+	}, root, nil)
+	path := filepath.Join(root, "a.go")
+	uri := string(protocol.URIFromPath(path))
+	key := clientKey{name: "gopls", root: root}
+	mgr.clients[key] = &Client{cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
+	mgr.diagByServer = map[clientKey]map[string]diagCounts{
+		key: {uri: {errors: 1}},
+	}
+	mgr.reviewByServer = map[string]map[string]reviewCounts{
+		"gopls": {normalizeWaiterPath(path): {errors: 1}},
+	}
+	mgr.touchedPaths = map[string]struct{}{normalizeWaiterPath(path): {}}
+
+	start := make(chan struct{})
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 200 {
+			mgr.recordReviewSnapshot(path)
+			mgr.CurrentReviewSnapshots(path)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 200 {
+			_ = mgr.DidCloseErr(context.Background(), path)
+			mgr.diagMu.Lock()
+			mgr.diagByServer[key] = map[string]diagCounts{uri: {errors: 1}}
+			mgr.diagMu.Unlock()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 200 {
+			mgr.clientsMu.Lock()
+			_ = mgr.clients[key]
+			mgr.clientsMu.Unlock()
+		}
+	}()
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	close(start)
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("concurrent review snapshotting and DidCloseErr deadlocked")
 	}
 }

@@ -211,10 +211,10 @@ func (m *Manager) recordReviewSnapshot(path string) {
 // empty, so a clean follow-up edit overwrites stale non-zero sidebar counts.
 func (m *Manager) reviewServerIDsForPathLocked(path string) []string {
 	seen := make(map[string]struct{})
-	for serverID, byURI := range m.diagByServer {
+	for key, byURI := range m.diagByServer {
 		for uri := range byURI {
 			if normalizeWaiterPath(uriToPath(uri)) == path {
-				seen[serverID] = struct{}{}
+				seen[key.name] = struct{}{}
 				break
 			}
 		}
@@ -225,15 +225,9 @@ func (m *Manager) reviewServerIDsForPathLocked(path string) []string {
 		}
 	}
 	m.clientsMu.RLock()
-	for serverID := range m.clients {
-		if m.cfg == nil {
-			seen[serverID] = struct{}{}
-			continue
-		}
-		if srvCfg, ok := m.cfg.LSP[serverID]; ok && !srvCfg.Disabled && m.handles(srvCfg, path) {
-			seen[serverID] = struct{}{}
-		}
-	}
+	m.forEachClientForPathLocked(path, func(key clientKey, _ *Client) {
+		seen[key.name] = struct{}{}
+	})
 	m.clientsMu.RUnlock()
 	if len(seen) == 0 {
 		return nil
@@ -251,12 +245,30 @@ func (m *Manager) reviewServerIDsForPathLocked(path string) []string {
 // file, not "unknown", once reviewServerIDsForPathLocked selected the server.
 func (m *Manager) reviewCountsForPathLocked(serverID, path string) reviewCounts {
 	var total reviewCounts
-	for uri, counts := range m.diagByServer[serverID] {
-		if normalizeWaiterPath(uriToPath(uri)) != path {
+	owners := make(map[string]struct{})
+	m.clientsMu.RLock()
+	m.forEachClientForPathLocked(path, func(key clientKey, _ *Client) {
+		if key.name == serverID {
+			owners[key.root] = struct{}{}
+		}
+	})
+	m.clientsMu.RUnlock()
+	for key, byURI := range m.diagByServer {
+		if key.name != serverID {
 			continue
 		}
-		total.errors += counts.errors
-		total.warnings += counts.warnings
+		if len(owners) > 0 {
+			if _, ok := owners[key.root]; !ok {
+				continue
+			}
+		}
+		for uri, counts := range byURI {
+			if normalizeWaiterPath(uriToPath(uri)) != path {
+				continue
+			}
+			total.errors += counts.errors
+			total.warnings += counts.warnings
+		}
 	}
 	return total
 }

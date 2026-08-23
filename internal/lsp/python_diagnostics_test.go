@@ -270,7 +270,7 @@ func TestPythonQuickDiagnosticsNotifyReadyLSPClientWithoutSemanticSync(t *testin
 	}
 	mgr := NewManager(cfg, root, nil)
 	fake := &fakePowernapClient{}
-	mgr.clients["pyright"] = &Client{client: fake, cwd: root, cfg: cfg.LSP["pyright"]}
+	mgr.clients[testKey(mgr, "pyright")] = &Client{client: fake, cwd: root, cfg: cfg.LSP["pyright"]}
 	path := filepath.Join(root, "large.py")
 	content := strings.Repeat("x = 1\n", cfg.Diagnostics.Python.LargeFile.LineThreshold+1)
 

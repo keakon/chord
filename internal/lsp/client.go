@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -46,6 +47,18 @@ type Client struct {
 	cwd    string
 	cfg    config.LSPServerConfig
 	debug  bool
+
+	// lifecycleMu serializes protocol notifications against shutdown/exit. The
+	// manager may drop its map lock before using a collected *Client to avoid a
+	// cross-manager deadlock, so the client itself must reject or serialize
+	// concurrent DidOpen/DidChange/DidClose/Close calls against the same process.
+	lifecycleMu sync.Mutex
+	closed      bool
+
+	// lastUsed is the unix-nano timestamp of the most recent access, used to
+	// evict the least-recently-used instance when a server exceeds its
+	// per-root client cap.
+	lastUsed atomic.Int64
 
 	// openFiles: path (normalized) -> version for didOpen/didChange
 	openFiles   map[string]int32
@@ -311,10 +324,16 @@ func (c *Client) Kill() { c.client.Kill() }
 // auxiliary, per-session processes and there is no value in blocking process
 // exit on them.
 func (c *Client) Close(ctx context.Context) error {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.closed {
+		return nil
+	}
 	if err := c.client.Shutdown(ctx); err != nil {
 		log.Warnf("lsp: shutdown client error=%v", err)
 		if ctx != nil && ctx.Err() != nil {
 			c.client.Kill()
+			c.closed = true
 			return ctx.Err()
 		}
 	}
@@ -322,16 +341,24 @@ func (c *Client) Close(ctx context.Context) error {
 		log.Warnf("lsp: exit client error=%v", err)
 		if ctx != nil && ctx.Err() != nil {
 			c.client.Kill()
+			c.closed = true
 			return ctx.Err()
 		}
 		return err
 	}
+	c.closed = true
 	return nil
 }
 
 // IsRunning returns whether the connection is still active.
 func (c *Client) IsRunning() bool {
 	return c.client != nil && c.client.IsRunning()
+}
+
+// touch records that this client was used at time now (unix nano), feeding the
+// LRU eviction that bounds per-server instances.
+func (c *Client) touch(now int64) {
+	c.lastUsed.Store(now)
 }
 
 // HandlesFile returns true if this client handles the given path by file type and cwd.
@@ -370,15 +397,23 @@ func (c *Client) pathToURI(path string) string {
 // Version is maintained by client. The returned version is the document version
 // used for the LSP notification.
 func (c *Client) DidOpen(ctx context.Context, path string, content string) (int32, error) {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.closed {
+		return 0, nil
+	}
+	uri := c.pathToURI(path)
 	c.openFilesMu.Lock()
-	if _, ok := c.openFiles[path]; ok {
+	if v, ok := c.openFiles[path]; ok {
+		v++
+		c.openFiles[path] = v
 		c.openFilesMu.Unlock()
-		return c.DidChange(ctx, path, content)
+		changes := []protocol.TextDocumentContentChangeEvent{{Value: protocol.TextDocumentContentChangeWholeDocument{Text: content}}}
+		return v, c.client.NotifyDidChangeTextDocument(ctx, uri, int(v), changes)
 	}
 	c.openFiles[path] = 1
 	c.openFilesMu.Unlock()
 
-	uri := c.pathToURI(path)
 	lang := string(powernap.DetectLanguage(path))
 	if lang == "" {
 		lang = "plaintext"
@@ -392,12 +427,25 @@ func (c *Client) DidOpen(ctx context.Context, path string, content string) (int3
 // DidChange sends didChange for the file. The returned version is the document
 // version used for the LSP notification.
 func (c *Client) DidChange(ctx context.Context, path string, content string) (int32, error) {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.closed {
+		return 0, nil
+	}
 	uri := c.pathToURI(path)
 	c.openFilesMu.Lock()
 	v, ok := c.openFiles[path]
 	if !ok {
+		c.openFiles[path] = 1
 		c.openFilesMu.Unlock()
-		return c.DidOpen(ctx, path, content)
+		lang := string(powernap.DetectLanguage(path))
+		if lang == "" {
+			lang = "plaintext"
+		}
+		if err := c.client.NotifyDidOpenTextDocument(ctx, uri, lang, 1, content); err != nil {
+			return 1, err
+		}
+		return 1, nil
 	}
 	v++
 	c.openFiles[path] = v
@@ -410,6 +458,11 @@ func (c *Client) DidChange(ctx context.Context, path string, content string) (in
 }
 
 func (c *Client) NotifyWatchedFileChange(ctx context.Context, path string, changeType protocol.FileChangeType) error {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.closed {
+		return nil
+	}
 	return c.client.NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
 		{URI: protocol.DocumentURI(c.pathToURI(path)), Type: changeType},
 	})
@@ -417,6 +470,11 @@ func (c *Client) NotifyWatchedFileChange(ctx context.Context, path string, chang
 
 // DidClose sends didClose for the file if it is open, then forgets the local open-file version.
 func (c *Client) DidClose(ctx context.Context, path string) error {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.closed {
+		return nil
+	}
 	c.openFilesMu.Lock()
 	_, ok := c.openFiles[path]
 	if ok {
