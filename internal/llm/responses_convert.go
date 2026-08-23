@@ -83,6 +83,37 @@ func convertMessagesToResponses(systemPrompt string, msgs []message.Message) []r
 	return convertMessagesToResponsesWithItemIDs(systemPrompt, msgs, false)
 }
 
+// appendResponsesTextBlock folds a text part into the trailing input_text block
+// when there is one, otherwise starts a new one. Blank parts never create a
+// block of their own. Adjacent pure-text parts are merged so a message that is
+// only text takes the canonical single-block shape instead of emitting one
+// block per part; a newline is inserted between parts only when neither side
+// already provides one, keeping separately-authored segments (git status, user
+// input, pasted content, <file> refs) from being glued together. image/pdf
+// parts are never merged into a text block.
+func appendResponsesTextBlock(content *[]responsesContentBlock, text string) {
+	if text == "" {
+		return
+	}
+	if last := len(*content) - 1; last >= 0 && (*content)[last].Type == "input_text" {
+		prev := &(*content)[last]
+		prev.Text = joinAdjacentPartText(prev.Text, text)
+		return
+	}
+	*content = append(*content, responsesContentBlock{Type: "input_text", Text: text})
+}
+
+// findResponsesCallIndex returns the index of the tool call with the given ID
+// in calls, or -1 when absent.
+func findResponsesCallIndex(calls []message.ToolCall, id string) int {
+	for i, tc := range calls {
+		if tc.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
 func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.Message, includeItemIDs bool) []responsesInputItem {
 	// Always return a non-nil slice to ensure JSON marshaling produces [] instead of null.
 	result := make([]responsesInputItem, 0)
@@ -100,7 +131,8 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 		})
 	}
 
-	for _, msg := range msgs {
+	for i := 0; i < len(msgs); i++ {
+		msg := msgs[i]
 		if len(msg.MCPTools) > 0 {
 			result = append(result, responsesInputItem{
 				Type:  "additional_tools",
@@ -128,8 +160,11 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 							FileData: "data:" + defaultPDFMediaType(p.MimeType) + ";base64," + encodeBase64Cached(p.Data),
 						})
 					default:
-						content = append(content, responsesContentBlock{Type: "input_text", Text: p.Text})
+						appendResponsesTextBlock(&content, p.Text)
 					}
+				}
+				if len(content) == 0 {
+					content = append(content, responsesContentBlock{Type: "input_text", Text: ""})
 				}
 			} else {
 				content = append(content, responsesContentBlock{Type: "input_text", Text: msg.Content})
@@ -142,12 +177,37 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 
 		case "assistant":
 			if len(msg.ResponsesOutput) > 0 {
-				for _, item := range msg.ResponsesOutput {
-					converted, ok := convertResponsesOutputItem(item, includeItemIDs)
-					if ok {
-						result = append(result, converted)
+				// Native ResponsesOutput replays provider-ordered items; tool
+				// results are separate messages that follow. A trailing run of
+				// function_calls (no interleaved reasoning after the last
+				// non-call item) can each be followed immediately by its
+				// adjacent tool result to keep call-then-output wire order,
+				// which Chat-Completions-converting gateways require. When the
+				// provider interleaved reasoning between calls, earlier calls
+				// keep their provider position and their tool results append
+				// after the sequence via the "tool" case below.
+				lastNonCall := -1
+				for j, item := range msg.ResponsesOutput {
+					if item.Type != "function_call" {
+						lastNonCall = j
 					}
 				}
+				adjacent := msgs[i+1:]
+				outputs, consumed := collectAdjacentResponsesToolOutputs(adjacent, trailingResponsesCallIDs(msg.ResponsesOutput, lastNonCall))
+				for idx, item := range msg.ResponsesOutput {
+					converted, ok := convertResponsesOutputItem(item, includeItemIDs)
+					if !ok {
+						continue
+					}
+					result = append(result, converted)
+					if idx <= lastNonCall || converted.Type != "function_call" {
+						continue
+					}
+					if output, ok := outputs[item.CallID]; ok {
+						result = append(result, output)
+					}
+				}
+				i += consumed
 				continue
 			}
 			contentText := assistantContentForReplay(msg)
@@ -173,6 +233,35 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 					},
 				})
 			}
+			if len(validToolCalls) == 0 {
+				continue
+			}
+			// Interleave each function_call with its matching tool result so
+			// every call is immediately followed by its function_call_output.
+			// This is the canonical Responses input shape for parallel tool
+			// calls and is required by Chat-Completions-converting gateways
+			// (grouped calls first then outputs get rejected with "assistant
+			// message with 'tool_calls' must be followed by tool messages").
+			// Only consume adjacent tool results that match one of these
+			// calls; the first unmatched/blank one (and everything after) is
+			// left for the "tool" case below to keep orphan results intact.
+			outputs := make(map[string]responsesInputItem, len(validToolCalls))
+			matched := 0
+			for i+1 < len(msgs) && msgs[i+1].Role == "tool" && matched < len(validToolCalls) {
+				tm := msgs[i+1]
+				if tm.ToolCallID == "" || findResponsesCallIndex(validToolCalls, tm.ToolCallID) < 0 {
+					break
+				}
+				i++
+				matched++
+				if _, ok := outputs[tm.ToolCallID]; !ok {
+					outputs[tm.ToolCallID] = responsesInputItem{
+						Type:   "function_call_output",
+						CallID: tm.ToolCallID,
+						Output: responsesToolOutput(tm),
+					}
+				}
+			}
 			// Tool calls become function_call items. API expects arguments as a string.
 			for _, tc := range validToolCalls {
 				result = append(result, responsesInputItem{
@@ -181,11 +270,16 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 					CallID:    tc.ID,
 					Arguments: string(tc.Args),
 				})
+				if out, ok := outputs[tc.ID]; ok {
+					result = append(result, out)
+				}
 			}
 
 		case "tool":
-			// Skip tool results with empty call id — they correspond to malformed
-			// tool calls (e.g. from GLM) that were also skipped above.
+			// Tool results not consumed by the interleave above (orphan or
+			// blank-call results) keep the plain function_call_output shape.
+			// Skip tool results with empty call id — they correspond to
+			// malformed tool calls (e.g. from GLM) that were also skipped.
 			if msg.ToolCallID == "" {
 				log.Warn("skipping function_call_output with empty call_id in history")
 				continue
@@ -202,6 +296,46 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 	}
 
 	return result
+}
+
+func trailingResponsesCallIDs(output []message.ResponsesOutputItem, lastNonCall int) map[string]struct{} {
+	if len(output) == 0 {
+		return nil
+	}
+	callIDs := make(map[string]struct{})
+	for idx, item := range output {
+		if idx <= lastNonCall || item.Type != "function_call" || strings.TrimSpace(item.CallID) == "" || strings.TrimSpace(item.Name) == "" {
+			continue
+		}
+		callIDs[item.CallID] = struct{}{}
+	}
+	return callIDs
+}
+
+func collectAdjacentResponsesToolOutputs(msgs []message.Message, allowed map[string]struct{}) (map[string]responsesInputItem, int) {
+	if len(msgs) == 0 || len(allowed) == 0 {
+		return nil, 0
+	}
+	outputs := make(map[string]responsesInputItem)
+	consumed := 0
+	for _, tm := range msgs {
+		if tm.Role != "tool" || tm.ToolCallID == "" {
+			break
+		}
+		if _, ok := allowed[tm.ToolCallID]; !ok {
+			break
+		}
+		consumed++
+		if _, ok := outputs[tm.ToolCallID]; ok {
+			continue
+		}
+		outputs[tm.ToolCallID] = responsesInputItem{
+			Type:   "function_call_output",
+			CallID: tm.ToolCallID,
+			Output: responsesToolOutput(tm),
+		}
+	}
+	return outputs, consumed
 }
 
 func convertResponsesOutputItem(item message.ResponsesOutputItem, includeItemID bool) (responsesInputItem, bool) {

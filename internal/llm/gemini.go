@@ -524,8 +524,23 @@ func geminiUserParts(msg message.Message) []geminiPart {
 		case "pdf":
 			parts = append(parts, geminiPart{InlineData: &geminiInlineData{MimeType: defaultPDFMediaType(p.MimeType), Data: encodeBase64Cached(p.Data)}})
 		default:
-			parts = append(parts, geminiPart{Text: p.Text})
+			// Fold adjacent pure-text parts into a single text part so a
+			// text-only message takes one part. Insert a newline only when
+			// neither side already provides one, keeping separately-authored
+			// segments (git status, user input, pasted content, <file> refs)
+			// from being glued together. image/pdf parts are never folded.
+			if p.Text == "" {
+				continue
+			}
+			if last := len(parts) - 1; last >= 0 && parts[last].InlineData == nil {
+				parts[last].Text = joinAdjacentPartText(parts[last].Text, p.Text)
+			} else {
+				parts = append(parts, geminiPart{Text: p.Text})
+			}
 		}
+	}
+	if len(parts) == 0 {
+		return []geminiPart{{Text: ""}}
 	}
 	return parts
 }

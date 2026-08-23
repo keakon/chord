@@ -439,3 +439,47 @@ func TestGeminiCompleteStreamOmitsToolConfigWithoutTools(t *testing.T) {
 		t.Fatalf("toolConfig = %#v, want omitted without tools", captured.ToolConfig)
 	}
 }
+
+func TestGeminiUserParts_MergesAdjacentTextParts(t *testing.T) {
+	got := geminiUserParts(message.Message{Parts: []message.ContentPart{
+		{Type: "text", Text: "Is directory a git repo: yes\n\nGit branch: main"},
+		{Type: "text", Text: "fix the test"},
+		{Type: "text", Text: "verify"},
+	}})
+	if len(got) != 1 {
+		t.Fatalf("parts = %#v, want one merged text part", got)
+	}
+	want := "Is directory a git repo: yes\n\nGit branch: main\nfix the test\nverify"
+	if got[0].Text != want {
+		t.Fatalf("merged text = %q, want %q", got[0].Text, want)
+	}
+}
+
+func TestGeminiUserParts_MergeKeepsImagePart(t *testing.T) {
+	got := geminiUserParts(message.Message{Parts: []message.ContentPart{
+		{Type: "text", Text: "before"},
+		{Type: "text", Text: "and after"},
+		{Type: "image", MimeType: "image/png", Data: []byte("png")},
+		{Type: "text", Text: "see this"},
+		{Type: "text", Text: "then fix"},
+	}})
+	if len(got) != 3 {
+		t.Fatalf("parts = %d, want 3 (merged text + image + merged text)", len(got))
+	}
+	if got[0].Text != "before\nand after" {
+		t.Fatalf("leading part = %#v", got[0])
+	}
+	if got[1].InlineData == nil || got[1].InlineData.MimeType != "image/png" {
+		t.Fatalf("image part = %#v", got[1])
+	}
+	if got[2].Text != "see this\nthen fix" {
+		t.Fatalf("trailing part = %#v", got[2])
+	}
+}
+
+func TestGeminiUserParts_AddsEmptyTextPartForEmptyTextOnlyMessage(t *testing.T) {
+	got := geminiUserParts(message.Message{Parts: []message.ContentPart{{Type: "text", Text: ""}, {Type: "text", Text: ""}}})
+	if len(got) != 1 || got[0].Text != "" || got[0].InlineData != nil {
+		t.Fatalf("parts = %#v, want one empty text part", got)
+	}
+}

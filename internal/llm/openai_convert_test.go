@@ -729,3 +729,62 @@ func TestOpenAICompleteStream_ToolOnlyFieldsGatedOnTools(t *testing.T) {
 		t.Fatalf("parallel_tool_calls = %#v, want true with tools", gotBodies[1]["parallel_tool_calls"])
 	}
 }
+
+func TestConvertMessagesToOpenAI_MergesAdjacentTextParts(t *testing.T) {
+	msgs := []message.Message{{
+		Role: "user",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "Is directory a git repo: yes\n\nGit branch: main"},
+			{Type: "text", Text: "fix the test"},
+			{Type: "text", Text: "verify"},
+		},
+	}}
+	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
+	if len(out) != 1 || out[0].Role != "user" {
+		t.Fatalf("out = %#v, want single user message", out)
+	}
+	blocks, ok := out[0].Content.([]openAIContentBlock)
+	if !ok {
+		t.Fatalf("user content type = %T, want []openAIContentBlock", out[0].Content)
+	}
+	if len(blocks) != 1 || blocks[0].Type != "text" {
+		t.Fatalf("user content blocks = %#v, want one merged text block", blocks)
+	}
+	want := "Is directory a git repo: yes\n\nGit branch: main\nfix the test\nverify"
+	if blocks[0].Text != want {
+		t.Fatalf("merged text = %q, want %q", blocks[0].Text, want)
+	}
+}
+
+func TestConvertMessagesToOpenAI_MergeKeepsImageBlock(t *testing.T) {
+	msgs := []message.Message{{
+		Role: "user",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "before"},
+			{Type: "text", Text: "and after"},
+			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "text", Text: "see this"},
+			{Type: "text", Text: "then fix"},
+		},
+	}}
+	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
+	if len(out) != 1 {
+		t.Fatalf("out len = %d, want 1", len(out))
+	}
+	blocks, ok := out[0].Content.([]openAIContentBlock)
+	if !ok {
+		t.Fatalf("user content type = %T, want []openAIContentBlock", out[0].Content)
+	}
+	if len(blocks) != 3 {
+		t.Fatalf("content blocks = %d, want 3 (merged text + image + merged text)", len(blocks))
+	}
+	if blocks[0].Type != "text" || blocks[0].Text != "before\nand after" {
+		t.Fatalf("leading block = %#v", blocks[0])
+	}
+	if blocks[1].Type != "image_url" {
+		t.Fatalf("middle block = %#v, want image_url", blocks[1])
+	}
+	if blocks[2].Type != "text" || blocks[2].Text != "see this\nthen fix" {
+		t.Fatalf("trailing block = %#v", blocks[2])
+	}
+}

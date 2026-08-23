@@ -632,8 +632,23 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 							},
 						})
 					default: // "text"
-						blocks = append(blocks, openAIContentBlock{Type: "text", Text: p.Text})
+						// Fold adjacent pure-text parts into a single text block
+						// so a text-only message takes one block. Insert a
+						// newline only when neither side provides one, keeping
+						// separately-authored segments from being glued
+						// together. image/file blocks are never folded.
+						if p.Text == "" {
+							continue
+						}
+						if last := len(blocks) - 1; last >= 0 && blocks[last].Type == "text" {
+							blocks[last].Text = joinAdjacentPartText(blocks[last].Text, p.Text)
+						} else {
+							blocks = append(blocks, openAIContentBlock{Type: "text", Text: p.Text})
+						}
 					}
+				}
+				if len(blocks) == 0 {
+					blocks = append(blocks, openAIContentBlock{Type: "text", Text: ""})
 				}
 				result = append(result, openAIMessage{Role: "user", Content: blocks})
 			} else {

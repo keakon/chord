@@ -126,6 +126,107 @@ func TestConvertMessagesToResponses_WithImageParts(t *testing.T) {
 	}
 }
 
+// TestConvertMessagesToResponses_MergesAdjacentTextParts verifies that a user
+// message carrying multiple pure-text parts collapses to the canonical single
+// input_text block instead of emitting one block per part. This matches the
+// Responses API shape (and avoids third-party gateways that 400 on multi-block
+// text content).
+func TestConvertMessagesToResponses_MergesAdjacentTextParts(t *testing.T) {
+	items := convertMessagesToResponses("", []message.Message{{
+		Role: "user",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "Is directory a git repo: yes\n\nGit branch: main"},
+			{Type: "text", Text: "fix the failing test"},
+			{Type: "text", Text: "verify with go test"},
+		},
+	}})
+	if len(items) != 1 {
+		t.Fatalf("convertMessagesToResponses() returned %d items, want 1", len(items))
+	}
+	blocks, ok := items[0].Content.([]responsesContentBlock)
+	if !ok {
+		t.Fatalf("content type = %T, want []responsesContentBlock", items[0].Content)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("content blocks = %d, want 1 (text parts merged)", len(blocks))
+	}
+	if blocks[0].Type != "input_text" {
+		t.Fatalf("block type = %q, want input_text", blocks[0].Type)
+	}
+	want := "Is directory a git repo: yes\n\nGit branch: main\nfix the failing test\nverify with go test"
+	if blocks[0].Text != want {
+		t.Fatalf("merged text = %q, want %q", blocks[0].Text, want)
+	}
+}
+
+// TestConvertMessagesToResponses_MergesTextAcrossNonTextBlocks verifies that
+// pure-text parts around an image each fold into a single input_text block,
+// while the image stays its own block.
+func TestConvertMessagesToResponses_MergesTextAcrossNonTextBlocks(t *testing.T) {
+	items := convertMessagesToResponses("", []message.Message{{
+		Role: "user",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "before"},
+			{Type: "text", Text: "and after"},
+			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "text", Text: "see this chart"},
+			{Type: "text", Text: "then fix"},
+		},
+	}})
+	blocks, ok := items[0].Content.([]responsesContentBlock)
+	if !ok {
+		t.Fatalf("content type = %T, want []responsesContentBlock", items[0].Content)
+	}
+	if len(blocks) != 3 {
+		t.Fatalf("content blocks = %d, want 3 (merged text + image + merged text)", len(blocks))
+	}
+	if blocks[0].Type != "input_text" || blocks[0].Text != "before\nand after" {
+		t.Fatalf("leading text block = %#v", blocks[0])
+	}
+	if blocks[1].Type != "input_image" || blocks[1].ImageURL != "data:image/png;base64,cG5n" {
+		t.Fatalf("image block = %#v", blocks[1])
+	}
+	if blocks[2].Type != "input_text" || blocks[2].Text != "see this chart\nthen fix" {
+		t.Fatalf("trailing text block = %#v", blocks[2])
+	}
+}
+
+// TestConvertMessagesToResponses_MergesWithoutDoubleNewline verifies a part
+// that already ends in a newline does not get an extra one inserted.
+func TestConvertMessagesToResponses_MergesWithoutDoubleNewline(t *testing.T) {
+	items := convertMessagesToResponses("", []message.Message{{
+		Role: "user",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "header\n"},
+			{Type: "text", Text: "body"},
+		},
+	}})
+	blocks, _ := items[0].Content.([]responsesContentBlock)
+	if len(blocks) != 1 || blocks[0].Text != "header\nbody" {
+		t.Fatalf("merged text = %#v, want %q without extra newline", blocks, "header\nbody")
+	}
+}
+
+// TestConvertMessagesToResponses_BlankTextPartSkipped verifies an empty user
+// text part produces no block on its own and does not force a stray
+// input_text for a text-only request.
+func TestConvertMessagesToResponses_BlankTextPartSkipped(t *testing.T) {
+	items := convertMessagesToResponses("", []message.Message{{
+		Role: "user",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "hello"},
+			{Type: "text", Text: ""},
+		},
+	}})
+	blocks, ok := items[0].Content.([]responsesContentBlock)
+	if !ok {
+		t.Fatalf("content type = %T, want []responsesContentBlock", items[0].Content)
+	}
+	if len(blocks) != 1 || blocks[0].Type != "input_text" || blocks[0].Text != "hello" {
+		t.Fatalf("content blocks = %#v, want only the non-blank text", blocks)
+	}
+}
+
 func TestConvertMessagesToResponsesMarksInterruptedAssistant(t *testing.T) {
 	items := convertMessagesToResponses("", []message.Message{{Role: "assistant", Content: "partial", StopReason: "interrupted"}})
 	if len(items) != 1 || items[0].Type != "message" || items[0].Role != "assistant" {
@@ -171,6 +272,32 @@ func TestConvertMessagesToResponses_DoesNotReplayReasoningContent(t *testing.T) 
 	}
 	if items[2].Type != "function_call" || items[2].CallID != "c1" || items[2].Name != "Shell" {
 		t.Fatalf("unexpected function_call: %#v", items[2])
+	}
+}
+
+func TestConvertMessagesToResponses_KeepsToolOutputWhenNativeResponsesCallNameMissing(t *testing.T) {
+	items := convertMessagesToResponses("", []message.Message{
+		{
+			Role: "assistant",
+			ResponsesOutput: []message.ResponsesOutputItem{{
+				Type:      "function_call",
+				CallID:    "call_1",
+				Name:      "",
+				Arguments: `{"path":"sample.txt"}`,
+			}},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: "call_1",
+			Content:    "IMPORTANT TOOL RESULT",
+		},
+	})
+
+	if len(items) != 1 {
+		t.Fatalf("convertMessagesToResponses() returned %d items, want 1", len(items))
+	}
+	if items[0].Type != "function_call_output" || items[0].CallID != "call_1" || items[0].Output != "IMPORTANT TOOL RESULT" {
+		t.Fatalf("items[0] = %#v, want orphan tool result preserved", items[0])
 	}
 }
 
@@ -3531,5 +3658,127 @@ func TestResponsesProvider_SynthesizesReasoningTextForReplay(t *testing.T) {
 	want := "message,reasoning,message,function_call,function_call_output"
 	if got := strings.Join(kinds, ","); got != want {
 		t.Fatalf("input item types = %v, want %v", kinds, want)
+	}
+}
+
+// TestConvertMessagesToResponses_InterleavesToolCallsAndOutputs verifies that
+// parallel tool calls are serialized in call-then-output order (each call
+// immediately followed by its result) rather than grouped with all calls first.
+// This is the canonical Responses input shape and is required by
+// Chat-Completions-converting gateways, which reject grouped calls with
+// "assistant message with 'tool_calls' must be followed by tool messages".
+func TestConvertMessagesToResponses_InterleavesToolCallsAndOutputs(t *testing.T) {
+	items := convertMessagesToResponses("", []message.Message{
+		{Role: "user", Content: "do it"},
+		{Role: "assistant", Content: "calling", ToolCalls: []message.ToolCall{
+			{ID: "call_AAA", Name: "Shell", Args: json.RawMessage(`{"cmd":"a"}`)},
+			{ID: "call_BBB", Name: "Grep", Args: json.RawMessage(`{"p":"b"}`)},
+			{ID: "call_CCC", Name: "Read", Args: json.RawMessage(`{"f":"c"}`)},
+		}},
+		{Role: "tool", ToolCallID: "call_AAA", Content: "out-a"},
+		{Role: "tool", ToolCallID: "call_BBB", Content: "out-b"},
+		{Role: "tool", ToolCallID: "call_CCC", Content: "out-c"},
+	})
+
+	// Expect: user, assistant, then call_AAA→out, call_BBB→out, call_CCC→out.
+	if len(items) != 8 {
+		t.Fatalf("got %d items, want 8: %#v", len(items), items)
+	}
+	var kinds []string
+	for _, it := range items[2:] {
+		kinds = append(kinds, it.Type+"("+it.CallID+")")
+	}
+	want := []string{
+		"function_call(call_AAA)", "function_call_output(call_AAA)",
+		"function_call(call_BBB)", "function_call_output(call_BBB)",
+		"function_call(call_CCC)", "function_call_output(call_CCC)",
+	}
+	if strings.Join(kinds[:6], ",") != strings.Join(want, ",") {
+		t.Fatalf("call/output order = %v, want %v", kinds[:6], want)
+	}
+	for _, it := range items[2:] {
+		if it.Type == "function_call_output" {
+			wantOuts := map[string]string{"call_AAA": "out-a", "call_BBB": "out-b", "call_CCC": "out-c"}[it.CallID]
+			out, _ := it.Output.(string)
+			if out != wantOuts {
+				t.Fatalf("output for %s = %q, want %q", it.CallID, out, wantOuts)
+			}
+		}
+	}
+	// Verify user+assistant items precede the interleaved calls.
+	if items[0].Type != "message" || items[1].Type != "message" {
+		t.Fatalf("first two items = %v, want user + assistant messages", items[:2])
+	}
+}
+
+// TestConvertMessagesToResponses_InterleaveLeavesOrphanResults verifies that a
+// tool result not matching any surviving call (or appearing after a gap) is
+// still emitted as a plain function_call_output, keeping history self-consistent.
+func TestConvertMessagesToResponses_InterleaveLeavesOrphanResults(t *testing.T) {
+	items := convertMessagesToResponses("", []message.Message{
+		{Role: "assistant", Content: "calling", ToolCalls: []message.ToolCall{
+			{ID: "call_A", Name: "Shell", Args: json.RawMessage(`{}`)},
+		}},
+		{Role: "tool", ToolCallID: "call_X", Content: "orphan"},
+		{Role: "assistant", Content: "again", ToolCalls: []message.ToolCall{
+			{ID: "call_B", Name: "Grep", Args: json.RawMessage(`{}`)},
+		}},
+		{Role: "tool", ToolCallID: "call_B", Content: "out-b"},
+	})
+	// Expect: assistant(A), function_call(A), function_call_output(X),
+	// assistant(again), function_call(B), function_call_output(B).
+	var kinds []string
+	for _, it := range items {
+		kinds = append(kinds, it.Type+"("+it.CallID+")")
+	}
+	want := []string{
+		"message()", "function_call(call_A)", "function_call_output(call_X)",
+		"message()", "function_call(call_B)", "function_call_output(call_B)",
+	}
+	if strings.Join(kinds, ",") != strings.Join(want, ",") {
+		t.Fatalf("item order = %v, want %v", kinds, want)
+	}
+}
+
+// TestConvertMessagesToResponses_InterleavesNativeResponsesOutput verifies that
+// parallel tool calls carried as native ResponsesOutput items (the stateless
+// replay path) are still interleaved with their tool results, instead of
+// emitting all function_calls grouped before all outputs. The tool results are
+// adjacent tool messages consumed per call.
+func TestConvertMessagesToResponses_InterleavesNativeResponsesOutput(t *testing.T) {
+	items := convertMessagesToResponses("", []message.Message{
+		{Role: "user", Content: "do it"},
+		{
+			Role: "assistant",
+			ResponsesOutput: []message.ResponsesOutputItem{
+				{Type: "message", Role: "assistant", Content: []message.ResponsesOutputContent{{Type: "output_text", Text: "calling"}}},
+				{Type: "function_call", CallID: "call_1", Name: "Shell", Arguments: `{"cmd":"a"}`},
+				{Type: "function_call", CallID: "call_2", Name: "Grep", Arguments: `{"p":"b"}`},
+			},
+		},
+		{Role: "tool", ToolCallID: "call_1", Content: "out-1"},
+		{Role: "tool", ToolCallID: "call_2", Content: "out-2"},
+	})
+	var kinds []string
+	for _, it := range items {
+		kinds = append(kinds, it.Type+"("+it.CallID+")")
+	}
+	// Expect: user message, assistant message, call_1→out_1, call_2→out_2.
+	want := []string{
+		"message()", "message()",
+		"function_call(call_1)", "function_call_output(call_1)",
+		"function_call(call_2)", "function_call_output(call_2)",
+	}
+	if strings.Join(kinds, ",") != strings.Join(want, ",") {
+		t.Fatalf("item order = %v, want %v", kinds, want)
+	}
+	for _, it := range items {
+		if it.Type == "function_call_output" {
+			wantOuts := map[string]string{"call_1": "out-1", "call_2": "out-2"}[it.CallID]
+			out, _ := it.Output.(string)
+			if out != wantOuts {
+				t.Fatalf("output for %s = %q, want %q", it.CallID, out, wantOuts)
+			}
+		}
 	}
 }

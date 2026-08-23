@@ -256,3 +256,69 @@ func TestConvertMessages_ImageAndPDFCoexist(t *testing.T) {
 		t.Fatalf("pdf block = %#v", blocks[1])
 	}
 }
+
+// TestConvertMessages_MergesAdjacentTextParts verifies that adjacent pure-text
+// user parts collapse to one anthropic text block.
+func TestConvertMessages_MergesAdjacentTextParts(t *testing.T) {
+	msgs := []message.Message{{
+		Role: "user",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "Is directory a git repo: yes\n\nGit branch: main"},
+			{Type: "text", Text: "fix the test"},
+			{Type: "text", Text: "verify"},
+		},
+	}}
+	got := convertMessages(msgs)
+	blocks, ok := got[0].Content.([]anthropicContent)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("anthropic blocks = %#v, want one merged text block", got[0].Content)
+	}
+	if blocks[0].Type != "text" {
+		t.Fatalf("block type = %q, want text", blocks[0].Type)
+	}
+	want := "Is directory a git repo: yes\n\nGit branch: main\nfix the test\nverify"
+	if blocks[0].Text != want {
+		t.Fatalf("merged text = %q, want %q", blocks[0].Text, want)
+	}
+}
+
+// TestConvertMessages_MergeKeepsImageBlock verifies text parts around an image
+// fold separately while the image stays its own block.
+func TestConvertMessages_MergeKeepsImageBlock(t *testing.T) {
+	msgs := []message.Message{{
+		Role: "user",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "before"},
+			{Type: "text", Text: "and after"},
+			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "text", Text: "see this"},
+			{Type: "text", Text: "then fix"},
+		},
+	}}
+	got := convertMessages(msgs)
+	blocks, ok := got[0].Content.([]anthropicContent)
+	if !ok || len(blocks) != 3 {
+		t.Fatalf("anthropic blocks = %#v, want 3 (merged text + image + merged text)", got[0].Content)
+	}
+	if blocks[0].Type != "text" || blocks[0].Text != "before\nand after" {
+		t.Fatalf("leading block = %#v", blocks[0])
+	}
+	if blocks[1].Type != "image" || blocks[1].Source == nil || blocks[1].Source.MediaType != "image/png" {
+		t.Fatalf("image block = %#v", blocks[1])
+	}
+	if blocks[2].Type != "text" || blocks[2].Text != "see this\nthen fix" {
+		t.Fatalf("trailing block = %#v", blocks[2])
+	}
+}
+
+func TestConvertMessages_AddsEmptyTextBlockForEmptyTextOnlyParts(t *testing.T) {
+	msgs := []message.Message{{
+		Role:  "user",
+		Parts: []message.ContentPart{{Type: "text", Text: ""}, {Type: "text", Text: ""}},
+	}}
+	got := convertMessages(msgs)
+	blocks, ok := got[0].Content.([]anthropicContent)
+	if !ok || len(blocks) != 1 || blocks[0].Type != "text" || blocks[0].Text != "" {
+		t.Fatalf("anthropic blocks = %#v, want one empty text block", got[0].Content)
+	}
+}

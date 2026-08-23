@@ -107,6 +107,130 @@ func TestConvertMessagesReplaysResponsesOutputInProviderOrder(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesReplaysResponsesOutputWithOutOfOrderToolResults(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "do the thing"},
+		{
+			Role: message.RoleAssistant,
+			ResponsesOutput: []message.ResponsesOutputItem{
+				{Type: "function_call", ID: "fc_1", CallID: "call_1", Name: "read", Arguments: `{}`},
+				{Type: "function_call", ID: "fc_2", CallID: "call_2", Name: "grep", Arguments: `{}`},
+			},
+			ToolCalls: []message.ToolCall{
+				{ID: "call_1", Name: "read", Args: json.RawMessage(`{}`)},
+				{ID: "call_2", Name: "grep", Args: json.RawMessage(`{}`)},
+			},
+		},
+		{Role: message.RoleTool, ToolCallID: "call_2", Content: "grep result"},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "read result"},
+	}
+
+	items := convertMessagesToResponses("sys", msgs)
+	if len(items) != 6 {
+		t.Fatalf("unexpected item count: got %d want 6 (%+v)", len(items), items)
+	}
+	want := []struct {
+		typ    string
+		callID string
+		output string
+	}{
+		{typ: "message"},
+		{typ: "message"},
+		{typ: "function_call", callID: "call_1"},
+		{typ: "function_call_output", callID: "call_1", output: "read result"},
+		{typ: "function_call", callID: "call_2"},
+		{typ: "function_call_output", callID: "call_2", output: "grep result"},
+	}
+	for i, item := range items {
+		if item.Type != want[i].typ || item.CallID != want[i].callID {
+			t.Fatalf("item[%d] = %+v, want type=%q call_id=%q", i, item, want[i].typ, want[i].callID)
+		}
+		if want[i].output != "" && item.Output != want[i].output {
+			t.Fatalf("item[%d] output = %q, want %q", i, item.Output, want[i].output)
+		}
+	}
+}
+
+func TestConvertMessagesReplaysResponsesOutputWithInterleavedReasoningAndAdjacentOutputs(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "do the thing"},
+		{
+			Role: message.RoleAssistant,
+			ResponsesOutput: []message.ResponsesOutputItem{
+				{Type: "function_call", ID: "fc_1", CallID: "call_A", Name: "read", Arguments: `{}`},
+				{Type: "reasoning", ID: "rs_1", Content: []message.ResponsesOutputContent{{Type: "reasoning_text", Text: "thinking"}}},
+				{Type: "function_call", ID: "fc_2", CallID: "call_B", Name: "grep", Arguments: `{}`},
+			},
+		},
+		{Role: message.RoleTool, ToolCallID: "call_A", Content: "read result"},
+		{Role: message.RoleTool, ToolCallID: "call_B", Content: "grep result"},
+	}
+
+	items := convertMessagesToResponses("sys", msgs)
+	var outputs []responsesInputItem
+	for _, item := range items {
+		if item.Type == "function_call_output" {
+			outputs = append(outputs, item)
+		}
+	}
+	if len(outputs) != 2 {
+		t.Fatalf("function_call_output count = %d, want 2 (%+v)", len(outputs), items)
+	}
+	if outputs[0].CallID != "call_A" || outputs[0].Output != "read result" {
+		t.Fatalf("first output = %+v, want call_A/read result", outputs[0])
+	}
+	if outputs[1].CallID != "call_B" || outputs[1].Output != "grep result" {
+		t.Fatalf("second output = %+v, want call_B/grep result", outputs[1])
+	}
+}
+
+func TestConvertMessagesLeavesOrphanToolResultForToolBranchAfterNativeReplay(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "do the thing"},
+		{
+			Role:            message.RoleAssistant,
+			ResponsesOutput: []message.ResponsesOutputItem{{Type: "function_call", ID: "fc_1", CallID: "call_A", Name: "read", Arguments: `{}`}},
+		},
+		{Role: message.RoleTool, ToolCallID: "orphan", Content: "orphan result"},
+		{Role: message.RoleTool, ToolCallID: "call_A", Content: "read result"},
+	}
+
+	items := convertMessagesToResponses("sys", msgs)
+	var outputs []responsesInputItem
+	for _, item := range items {
+		if item.Type == "function_call_output" {
+			outputs = append(outputs, item)
+		}
+	}
+	if len(outputs) != 2 {
+		t.Fatalf("function_call_output count = %d, want 2 (%+v)", len(outputs), items)
+	}
+	if outputs[0].CallID != "orphan" || outputs[0].Output != "orphan result" {
+		t.Fatalf("first output = %+v, want orphan/orphan result", outputs[0])
+	}
+	if outputs[1].CallID != "call_A" || outputs[1].Output != "read result" {
+		t.Fatalf("second output = %+v, want call_A/read result", outputs[1])
+	}
+}
+
+func TestConvertMessagesToResponsesAddsEmptyTextBlockForEmptyUserParts(t *testing.T) {
+	msgs := []message.Message{{
+		Role: message.RoleUser,
+		Parts: []message.ContentPart{
+			{Type: "text", Text: ""},
+			{Type: "text", Text: ""},
+		},
+	}}
+	items := convertMessagesToResponses("", msgs)
+	if len(items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(items))
+	}
+	content, ok := items[0].Content.([]responsesContentBlock)
+	if !ok || len(content) != 1 || content[0].Type != "input_text" || content[0].Text != "" {
+		t.Fatalf("responses content = %#v, want one empty input_text block", items[0].Content)
+	}
+}
+
 func TestResponsesOutputConversionPreservesIncrementalState(t *testing.T) {
 	resp := &message.Response{ResponsesOutput: []message.ResponsesOutputItem{
 		{Type: "reasoning", ID: "rs-1", EncryptedContent: "enc", Summary: []message.ResponsesReasoningSummary{}},
