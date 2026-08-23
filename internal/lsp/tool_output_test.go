@@ -465,6 +465,34 @@ func TestAppendLSPDiagnosticsToToolOutput_CurrentFileHintsPrecedeOtherErrors(t *
 	}
 }
 
+func TestAppendLSPDiagnosticsToToolOutput_OtherFilesSortedBySeverity(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := NewManager(&config.Config{}, tmp, nil)
+	edited := filepath.Join(tmp, "edited.py")
+	// a_hint.py sorts before z_error.py alphabetically, but the error file must
+	// appear first because E/W diagnostics take priority over I/H ones.
+	hintFile := filepath.Join(tmp, "a_hint.py")
+	errorFile := filepath.Join(tmp, "z_error.py")
+	mgr.clientsMu.Lock()
+	mgr.clients["test"] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+		protocol.DocumentURI("file://" + filepath.ToSlash(hintFile)): {
+			{Severity: protocol.SeverityHint, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "hint only"},
+		},
+		protocol.DocumentURI("file://" + filepath.ToSlash(errorFile)): {
+			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "error only"},
+		},
+	}}
+	mgr.clientsMu.Unlock()
+
+	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, "")
+	if !strings.Contains(out, "hint only") || !strings.Contains(out, "error only") {
+		t.Fatalf("expected both other-file diagnostics included, got %q", out)
+	}
+	if strings.Index(out, "error only") > strings.Index(out, "hint only") {
+		t.Fatalf("expected error file before hint file despite alphabetical order, got %q", out)
+	}
+}
+
 func TestAppendLSPDiagnosticsToToolOutput_LimitsOtherFilesAfterSelection(t *testing.T) {
 	tmp := t.TempDir()
 	mgr := NewManager(&config.Config{}, tmp, nil)

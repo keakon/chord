@@ -110,7 +110,7 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 				paths = append(paths, path)
 			}
 		}
-		sort.Strings(paths)
+		sortOtherFilePaths(paths, byPath)
 		for _, path := range paths {
 			if remaining <= 0 || len(others) >= ToolOutputMaxOtherErrorFiles {
 				break
@@ -178,6 +178,33 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		}
 	}
 	return b.String()
+}
+
+func sortOtherFilePaths(paths []string, byPath map[string][]Diagnostic) {
+	// Severity is precomputed because the sort comparator runs O(n log n) times
+	// and worstSeverity would otherwise rescan the diagnostics per comparison.
+	worst := make(map[string]int, len(paths))
+	for _, path := range paths {
+		worst[path] = worstSeverity(byPath[path])
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		if worst[paths[i]] != worst[paths[j]] {
+			return worst[paths[i]] < worst[paths[j]]
+		}
+		return paths[i] < paths[j]
+	})
+}
+
+// worstSeverity returns the smallest (most severe) level present in diags
+// (1=Error, 2=Warning, 3=Info, 4=Hint). An empty slice has no diagnostic.
+func worstSeverity(diags []Diagnostic) int {
+	worst := 4
+	for _, d := range diags {
+		if d.Severity < worst {
+			worst = d.Severity
+		}
+	}
+	return worst
 }
 
 // ParseToolOutputDiagnostics extracts diagnostics produced by a non-LSP
@@ -302,7 +329,7 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 			}
 			otherPaths = append(otherPaths, p)
 		}
-		sort.Strings(otherPaths)
+		sortOtherFilePaths(otherPaths, byPath)
 		for _, p := range otherPaths {
 			if remaining <= 0 || len(others) >= ToolOutputMaxOtherErrorFiles {
 				break
