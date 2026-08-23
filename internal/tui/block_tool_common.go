@@ -463,6 +463,21 @@ func bashFirstNonEmptyLine(content string) string {
 	return ""
 }
 
+// toolSummarySuppressesErrors reports whether the tool's one-line result summary
+// is suppressed for error results because the ↳ Error block already carries the
+// detail.
+func toolSummarySuppressesErrors(name string) bool {
+	switch name {
+	case tools.NameSpawn, tools.NameSpawnStop, tools.NameDelegate, tools.NameGrep,
+		tools.NameGlob, tools.NameLsp, tools.NameCancel, tools.NameNotify:
+		return true
+	}
+	return false
+}
+
+// formatToolResultSummaryLine returns the one-line state summary under the
+// tool header. Error results render their detail in the ↳ Error block, so
+// error states return "" instead of a redundant label like "Search failed".
 func formatToolResultSummaryLine(b *Block) string {
 	if b == nil {
 		return ""
@@ -475,32 +490,22 @@ func formatToolResultSummaryLine(b *Block) string {
 		return ""
 	}
 	trimmed := strings.TrimSpace(b.ResultContent)
+	// Unlisted tools fall through to the default branch, whose audit note stays
+	// meaningful on error results too.
+	if b.toolResultIsError() && toolSummarySuppressesErrors(b.ToolName) {
+		return ""
+	}
 	switch b.ToolName {
 	case tools.NameShell:
 		// Shell expands with explicit exit-code detail, so avoid a redundant summary like "Passed".
-		if b.toolResultIsError() {
-			return ""
-		}
-		if trimmed == "" {
-			return ""
-		}
 		return ""
 	case tools.NameSpawn:
-		if b.toolResultIsError() {
-			return "Failed"
-		}
 		return "Started"
 	case tools.NameSpawnStop:
-		if b.toolResultIsError() {
-			return "Failed"
-		}
 		return "Stopped"
 	case tools.NameDelegate:
 		if b.DoneSummary != "" {
 			return "Done"
-		}
-		if b.toolResultIsError() {
-			return "Error"
 		}
 		if id := parseTaskResultInstanceID(trimmed); id != "" {
 			return fmt.Sprintf("Spawned · %s", id)
@@ -510,9 +515,6 @@ func formatToolResultSummaryLine(b *Block) string {
 		}
 		return "Running"
 	case tools.NameGrep:
-		if b.toolResultIsError() {
-			return "Search failed"
-		}
 		if trimmed == "No matches found." {
 			return ""
 		}
@@ -529,9 +531,6 @@ func formatToolResultSummaryLine(b *Block) string {
 		}
 		return fmt.Sprintf("%d matches", count)
 	case tools.NameGlob:
-		if b.toolResultIsError() {
-			return "Search failed"
-		}
 		if trimmed == "No files matched the pattern." {
 			return ""
 		}
@@ -548,14 +547,8 @@ func formatToolResultSummaryLine(b *Block) string {
 		}
 		return fmt.Sprintf("%d files", count)
 	case tools.NameLsp:
-		if b.toolResultIsError() {
-			return "LSP query failed"
-		}
 		return lspResultSummary(b.Content, trimmed)
 	case tools.NameCancel:
-		if b.toolResultIsError() {
-			return "Failed"
-		}
 		handle, ok := parseTaskToolHandle(trimmed)
 		if ok && handle.Status != "" {
 			switch handle.Status {
@@ -569,9 +562,6 @@ func formatToolResultSummaryLine(b *Block) string {
 		}
 		return "Stopped"
 	case tools.NameNotify:
-		if b.toolResultIsError() {
-			return "Failed"
-		}
 		handle, ok := parseTaskToolHandle(trimmed)
 		if ok && handle.Status != "" {
 			switch handle.Status {

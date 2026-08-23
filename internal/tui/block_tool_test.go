@@ -1456,6 +1456,19 @@ func TestCollapsedBashDoesNotDuplicateDescriptionInSummary(t *testing.T) {
 	}
 }
 
+func TestDelegateErrorDoesNotShowDoneSummaryLabel(t *testing.T) {
+	block := &Block{
+		Type:         BlockToolCall,
+		ToolName:     tools.NameDelegate,
+		ResultDone:   true,
+		ResultStatus: agent.ToolResultStatusError,
+		DoneSummary:  "done summary",
+	}
+	if got := formatToolResultSummaryLine(block); got != "" {
+		t.Fatalf("summary = %q, want empty summary for errored delegate", got)
+	}
+}
+
 func TestCollapsedBashLongOutputStillFolds(t *testing.T) {
 	// 8 lines of output exceeds bashCollapsedResultMinVisibleLines (5),
 	// so collapsed mode should show a single-line summary with an expand hint.
