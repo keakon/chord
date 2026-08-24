@@ -543,7 +543,7 @@ func (m *Model) renderStatusBar() string {
 		leftSide = m.cachedStatusBarLeftSide
 		leftWidth = m.cachedStatusBarLeftW
 	} else {
-		leftSide = lipgloss.JoinHorizontal(lipgloss.Center, pills...)
+		leftSide = strings.Join(pills, " ")
 		leftWidth = lipgloss.Width(leftSide)
 		m.cachedStatusBarPillsKey = leftPillsKey
 		m.cachedStatusBarLeftSide = leftSide
