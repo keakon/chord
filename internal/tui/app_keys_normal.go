@@ -72,7 +72,11 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 			}
 		case chordY:
 			if key == "y" {
+				m.clearMouseSelection()
 				m.clearChordState()
+				if m.focusedBlockID < 0 {
+					m.setCopyFocusedBlockFromViewport()
+				}
 				if count > 1 {
 					return m.copyFocusedBlocks(count)
 				}

@@ -8275,6 +8275,9 @@ func TestHandleNormalKeyYyIgnoresMouseSelectionAndCopiesFocusedImageCard(t *test
 	if copied != want {
 		t.Fatalf("yy copied = %q, want %q", copied, want)
 	}
+	if m.hasMouseSelection() {
+		t.Fatal("second y of yy must clear the pending mouse selection so a text selection cannot divert a later copy")
+	}
 }
 
 func TestCopyFocusedBlocksToolCallMatchesSingleBlockFormat(t *testing.T) {
