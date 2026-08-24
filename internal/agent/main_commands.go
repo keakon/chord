@@ -171,6 +171,7 @@ func (a *MainAgent) tryHandleLoopSlashCommand(content string, busy bool) bool {
 		a.EnableLoopMode(target)
 		if busy {
 			a.freezeLoopReductionPrefixForCurrentTurn()
+			a.armLoopDoneLateMount()
 		}
 		if maxSet || busy {
 			a.loopReductionMu.Lock()

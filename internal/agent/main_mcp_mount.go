@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	toolpkg "github.com/keakon/chord/internal/tools"
 )
 
@@ -38,6 +39,77 @@ func (a *MainAgent) mcpToolMountMode() mcpToolMountMode {
 		return mcpMountResponsesAdditionalTools
 	}
 	return mcpMountFullInjection
+}
+
+func (a *MainAgent) doneToolPermitted() bool {
+	if a.tools == nil {
+		return false
+	}
+	if _, ok := a.tools.Get(toolpkg.NameDone); !ok {
+		return false
+	}
+	ruleset := a.effectiveRuleset()
+	if len(ruleset) > 0 && normalizeToolPermissionAction(toolpkg.NameDone, ruleset.Evaluate(toolpkg.NameDone, "*")) == permission.ActionDeny {
+		return false
+	}
+	return true
+}
+
+func (a *MainAgent) armLoopDoneLateMount() {
+	if a == nil || !a.doneToolPermitted() {
+		return
+	}
+	mode := a.mcpToolMountMode()
+	if !mode.cacheFriendly() {
+		return
+	}
+	if defs := a.mainLLMToolDefinitions(); len(defs) > 0 {
+		for _, def := range defs {
+			if def.Name == toolpkg.NameDone {
+				return
+			}
+		}
+	}
+	a.loopDoneLateMount.Store(true)
+}
+
+func (a *MainAgent) loopDoneLateMountDefinition() []message.ToolDefinition {
+	if a == nil || !a.loopDoneLateMount.Load() {
+		return nil
+	}
+	a.loopReductionMu.Lock()
+	loopEnabled := a.loopState.Enabled
+	a.loopReductionMu.Unlock()
+	if !loopEnabled || !a.doneToolPermitted() {
+		a.clearLoopDoneLateMount()
+		return nil
+	}
+	if defs := a.mainLLMToolDefinitions(); len(defs) > 0 {
+		for _, def := range defs {
+			if def.Name == toolpkg.NameDone {
+				a.clearLoopDoneLateMount()
+				return nil
+			}
+		}
+	}
+	tool, ok := a.tools.Get(toolpkg.NameDone)
+	if !ok {
+		a.clearLoopDoneLateMount()
+		return nil
+	}
+	return llmToolDefinitionsFromVisibleTools([]toolpkg.Tool{tool})
+}
+
+func (a *MainAgent) mountLoopDoneLateTool(messages []message.Message, mode mcpToolMountMode) []message.Message {
+	if !mode.cacheFriendly() {
+		a.clearLoopDoneLateMount()
+		return messages
+	}
+	defs := a.loopDoneLateMountDefinition()
+	if len(defs) == 0 {
+		return messages
+	}
+	return append(messages, message.NewSystemToolsMessage(defs))
 }
 
 type manualMCPTool interface {

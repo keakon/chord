@@ -11,6 +11,125 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+func TestLoopDoneLateMountAppendsDynamicToolWhenMissingFromFrozenSurface(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools = tools.NewRegistry()
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": deny
+done: allow
+`)}
+	a.rebuildRuleset()
+	a.loopState.enableWithTarget("finish current task")
+	a.loopDoneLateMount.Store(true)
+	a.freezeToolSurfaceFromDefinitions(nil)
+
+	msgs := []message.Message{{Role: message.RoleUser, Content: "continue"}}
+	mounted := a.mountLoopDoneLateTool(msgs, mcpMountKimiDynamic)
+	if len(mounted) != 2 {
+		t.Fatalf("mounted len = %d, want 2", len(mounted))
+	}
+	last := mounted[1]
+	if len(last.MCPTools) != 1 || last.MCPTools[0].Name != tools.NameDone {
+		t.Fatalf("late mounted tools = %#v", last.MCPTools)
+	}
+	if defs := a.mainLLMToolDefinitions(); len(defs) != 0 {
+		t.Fatalf("frozen tool defs changed: %#v", defs)
+	}
+}
+
+func TestLoopDoneLateMountSkipsWhenDoneAlreadyInFrozenSurface(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools = tools.NewRegistry()
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": deny
+done: allow
+`)}
+	a.rebuildRuleset()
+	a.loopState.enableWithTarget("finish current task")
+	a.loopDoneLateMount.Store(true)
+	a.freezeToolSurfaceFromDefinitions(llmToolDefinitionsFromVisibleTools([]tools.Tool{tools.NewDoneTool()}))
+
+	msgs := []message.Message{{Role: message.RoleUser, Content: "continue"}}
+	mounted := a.mountLoopDoneLateTool(msgs, mcpMountKimiDynamic)
+	if len(mounted) != 1 {
+		t.Fatalf("mounted len = %d, want 1", len(mounted))
+	}
+	if a.loopDoneLateMount.Load() {
+		t.Fatal("late mount flag should clear when Done already exists")
+	}
+}
+
+func TestArmLoopDoneLateMountRequiresDynamicCapability(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools = tools.NewRegistry()
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": deny
+done: allow
+`)}
+	a.rebuildRuleset()
+	a.freezeToolSurfaceFromDefinitions(nil)
+	a.armLoopDoneLateMount()
+	if a.loopDoneLateMount.Load() {
+		t.Fatal("late mount should stay disabled without dynamic capability")
+	}
+
+	provider := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		APIURL: "https://example.invalid/v1",
+		Compat: &config.ProviderCompatConfig{ChatCompletions: &config.ChatCompletionsCompatConfig{MCPSystemToolsMessage: new(true)}},
+		Models: map[string]config.ModelConfig{"model-1": {Limit: config.ModelLimit{Context: 128000, Output: 4096}}},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(provider, nil, "model-1", 512, "")
+	a.armLoopDoneLateMount()
+	if !a.loopDoneLateMount.Load() {
+		t.Fatal("late mount should enable with dynamic capability")
+	}
+}
+
+func TestArmLoopDoneLateMountSkipsWhenRealFrozenSurfaceAlreadyContainsDone(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools = tools.NewRegistry()
+	a.tools.Register(tools.NewDoneTool())
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": deny
+done: allow
+`)}
+	a.rebuildRuleset()
+
+	provider := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		APIURL: "https://example.invalid/v1",
+		Compat: &config.ProviderCompatConfig{ChatCompletions: &config.ChatCompletionsCompatConfig{MCPSystemToolsMessage: new(true)}},
+		Models: map[string]config.ModelConfig{"model-1": {Limit: config.ModelLimit{Context: 128000, Output: 4096}}},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(provider, nil, "model-1", 512, "")
+
+	a.freezeToolSurface()
+	a.armLoopDoneLateMount()
+	if a.loopDoneLateMount.Load() {
+		t.Fatal("late mount should stay disabled when frozen surface already contains done")
+	}
+	if !a.doneToolAvailable() {
+		t.Fatal("done should remain available from the frozen visible surface")
+	}
+}
+
+func TestMountLoopDoneLateToolClearsFlagWhenModeIsNotCacheFriendly(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopDoneLateMount.Store(true)
+
+	mounted := a.mountLoopDoneLateTool([]message.Message{{Role: message.RoleUser, Content: "continue"}}, mcpMountFullInjection)
+	if len(mounted) != 1 {
+		t.Fatalf("mounted len = %d, want 1", len(mounted))
+	}
+	if a.loopDoneLateMount.Load() {
+		t.Fatal("late mount flag should clear when mode is not cache friendly")
+	}
+}
+
 type anchoredManualMCPTool struct {
 	name        string
 	description string

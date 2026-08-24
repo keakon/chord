@@ -319,6 +319,7 @@ func (a *MainAgent) EnableLoopMode(target string) {
 }
 
 func (a *MainAgent) DisableLoopMode() {
+	a.clearLoopDoneLateMount()
 	a.loopReductionMu.Lock()
 	a.loopState.disable()
 	a.pendingLoopContinuation = nil

@@ -265,6 +265,19 @@ remove, or rewrite stable system-prompt text. Changing the system prompt on a
 loop toggle would invalidate prompt-cache reuse even when the underlying task
 context did not otherwise change.
 
+On models that explicitly support Chord's request-only dynamic tool mounts
+(`compat.chat_completions.mcp_system_tools_message` or
+`compat.responses.mcp_additional_tools`), enabling `/loop on` during an in-flight
+request may late-mount the `done` tool on the next loop request when the current
+frozen top-level tool surface does not already include it. The late mount is
+request-local and does not rewrite the frozen top-level tool definitions, so
+turning loop mode on can preserve the existing prompt-cache boundary. If the
+frozen tool surface already contains `done`, Chord does not inject a duplicate.
+Models that do not support these request-only dynamic tool mounts keep the
+existing behavior: if enabling loop mode requires a tool-surface change, the
+next request may still lose prompt-cache reuse because the top-level tool
+definitions changed.
+
 When the active main-agent provider uses the Codex rate-limit surface and a 5h
 or 7d quota window has less than 10% remaining, Chord temporarily freezes the
 LLM-facing request surface for continuous automatic continuations. The frozen

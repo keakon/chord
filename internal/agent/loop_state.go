@@ -138,6 +138,13 @@ func (s *loopRuntimeState) disable() {
 	s.Enabled = false
 }
 
+func (a *MainAgent) clearLoopDoneLateMount() {
+	if a == nil {
+		return
+	}
+	a.loopDoneLateMount.Store(false)
+}
+
 func (s *loopRuntimeState) markProgress() {
 	s.ProgressVersion++
 }

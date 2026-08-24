@@ -159,17 +159,12 @@ func (a *MainAgent) questionToolAvailable() bool {
 
 func (a *MainAgent) doneToolAvailable() bool {
 	visible := a.mainLLMVisibleToolNames()
-	if len(visible) == 0 {
-		return false
+	if len(visible) > 0 {
+		if _, ok := visible[tools.NameDone]; ok {
+			return a.doneToolPermitted()
+		}
 	}
-	if _, ok := visible[tools.NameDone]; !ok {
-		return false
-	}
-	ruleset := a.effectiveRuleset()
-	if len(ruleset) > 0 && normalizeToolPermissionAction(tools.NameDone, ruleset.Evaluate(tools.NameDone, "*")) == permission.ActionDeny {
-		return false
-	}
-	return true
+	return a.loopDoneLateMount.Load() && a.doneToolPermitted()
 }
 
 // responseClosurePromptBlock renders the Response Closure section with the

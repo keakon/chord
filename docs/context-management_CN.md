@@ -155,6 +155,9 @@ context:
 
 在 loop 模式下，新增消息不会再应用剪裁。如果你在某个 LLM 请求仍在进行时启用 `/loop on`，Chord 会冻结并复用该请求已经准备好的前缀，避免旧历史从“已剪裁形态”翻回完整原始工具输出，从而保持 prompt cache 前缀稳定；loop 期间产生的新消息会保持未剪裁，直到退出 loop 后再恢复普通剪裁策略。切换 loop 模式本身不会新增、删除或重写稳定的 system prompt 文本；否则即使任务上下文没有变化，也会导致 prompt cache 失效。
 
+如果模型显式支持 Chord 的 request-only 动态工具挂载（`compat.chat_completions.mcp_system_tools_message` 或 `compat.responses.mcp_additional_tools`），那么在请求进行中执行 `/loop on` 时，只要当前冻结的顶层工具表面里还没有 `done`，Chord 就可以在下一次 loop 请求里把 `done` 作为一次性的动态工具声明补进去。这个挂载只作用于当前请求，不会改写冻结的顶层工具定义，因此开启 loop 时更容易保住现有 prompt cache 边界；如果冻结工具表面本来已经有 `done`，Chord 不会重复注入。
+不支持这两类 request-only 动态工具挂载的模型仍沿用原来的行为：如果启用 loop 需要改动工具表面，后续请求依然可能因为顶层工具定义变化而打断 prompt cache 复用。
+
 当当前主 Agent provider 使用 Codex rate-limit surface，且 5h 或 7d 额度窗口剩余不足 10% 时，Chord 会在连续自动 continuation 中临时冻结完整的 LLM-facing request surface。冻结范围包括请求级剪裁结果、已安装的系统提示词和可见工具定义。这样做是有意的：接近额度耗尽时，Codex 只有在上下文表面不变的情况下，才可能沿着 `stop_reason=tool_call` 链继续执行直到 `end_turn`；如果此时上下文形态变化，可能导致 Codex 在额度用尽后无法继续复用当前会话。冻结会在交互边界解除——例如 Agent 回到 idle，或用户发送真实的新消息——因此 MCP / YOLO 等显式用户切换可以在下一次请求重新构建 surface。如果 key 或运行模型发生变化，Chord 也会允许下一次请求重建 surface，因为之前冻结的 surface 已不再匹配当前 Codex 身份。
 
 ### 剪裁规则

@@ -549,6 +549,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 
 	mountMode := a.mcpToolMountMode()
 	messages, fallbackMCPToolDefs, mountFellBack := a.mountRuntimeMCPTools(messages, mountMode)
+	messages = a.mountLoopDoneLateTool(messages, mountMode)
 	if mountFellBack {
 		a.activateMCPMountFallback()
 		a.emitToTUI(ToastEvent{
