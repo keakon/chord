@@ -345,7 +345,7 @@ func TestConfirmRequestNotifiesWhileLoopStillBusy(t *testing.T) {
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.ConfirmRequestEvent{
 		ToolName:  tools.NameEdit,
-		ArgsJSON:  `{"patch":"*** Begin Patch\n*** Update File: internal/tui/app.go\n@@\n-old\n+new\n*** End Patch\n"}`,
+		ArgsJSON:  `{"path":"internal/tui/app.go","patch":"@@\n-old\n+new\n"}`,
 		RequestID: "req-1",
 	}})
 	if got := rawTerminalOutputFromBatch(t, cmd); got == "" {

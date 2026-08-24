@@ -121,12 +121,19 @@ func toolArgsAuditHookData(audit *message.ToolArgsAudit) map[string]any {
 	if audit == nil {
 		return nil
 	}
-	return map[string]any{
+	data := map[string]any{
 		"original_args_json":  audit.OriginalArgsJSON,
 		"effective_args_json": audit.EffectiveArgsJSON,
 		"user_modified":       audit.UserModified,
 		"edit_summary":        audit.EditSummary,
 	}
+	if len(audit.IgnoredArgs) > 0 {
+		data["ignored_args"] = append([]message.IgnoredToolArg(nil), audit.IgnoredArgs...)
+	}
+	if len(audit.InvalidArgs) > 0 {
+		data["invalid_args"] = append([]message.InvalidToolArg(nil), audit.InvalidArgs...)
+	}
+	return data
 }
 
 func buildBeforeToolResultAppendData(tcName string, argsJSON string, rawResult string, displayResult string, contextResult string, err error, audit *message.ToolArgsAudit, fileState *message.ToolFileState) map[string]any {

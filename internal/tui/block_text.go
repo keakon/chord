@@ -319,6 +319,66 @@ func displayControlLiteral(c byte) string {
 	}
 }
 
+// sanitizeDisplayTextKeepingSGR behaves like sanitizeDisplayText but keeps
+// well-formed SGR sequences (ESC [ ... m) intact, so styled header fragments
+// such as struck-through ignored arguments survive header sanitization. Any
+// other escape sequence is still neutralized to its control literal.
+func sanitizeDisplayTextKeepingSGR(s string) string {
+	if s == "" {
+		return ""
+	}
+	if !displayNeedsSGRAwareSanitize(s) {
+		return s
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		if s[i] == '\x1b' {
+			if j := skipANSISequence(s, i); j > i+1 && s[j-1] == 'm' && s[i+1] == '[' {
+				b.WriteString(s[i:j])
+				i = j
+				continue
+			}
+		}
+		c := s[i]
+		switch {
+		case c == '\r':
+			if i+1 < len(s) && s[i+1] == '\n' {
+				i += 2
+				continue
+			}
+			b.WriteString(`\r`)
+		case c == '\t' || c == '\n':
+			b.WriteByte(c)
+		case c < 0x20 || c == 0x7f:
+			b.WriteString(displayControlLiteral(c))
+		default:
+			b.WriteByte(c)
+		}
+		i++
+	}
+	return b.String()
+}
+
+func displayNeedsSGRAwareSanitize(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c != '\x1b' {
+			if c == '\r' || ((c < 0x20 && c != '\t' && c != '\n') || c == 0x7f) {
+				return true
+			}
+			continue
+		}
+		j := skipANSISequence(s, i)
+		if j <= i+1 || s[j-1] != 'm' || (i+1 < len(s) && s[i+1] != '[') {
+			return true
+		}
+		i = j - 1
+	}
+	return false
+}
+
 // hasExplicitStyleColor reports whether a lipgloss getter returned a real
 // configured color rather than the package's NoColor sentinel.
 func hasExplicitStyleColor(c color.Color) bool {

@@ -130,6 +130,30 @@ func TestApplyConfirmedArgsEditsRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestApplyConfirmedArgsEditsToleratesUnknownFields(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(agentValidationTool{
+		name: "read",
+		schema: map[string]any{
+			"type":     "object",
+			"required": []string{"path"},
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string"},
+			},
+			"additionalProperties": false,
+		},
+	})
+
+	ruleset := permission.Ruleset{{Permission: "read", Pattern: "*", Action: permission.ActionAllow}}
+	edited, err := applyConfirmedArgsEdits(registry, ruleset, "read", json.RawMessage(`{"path":"notes.txt"}`), `{"path":"other.txt","extra":1}`)
+	if err != nil {
+		t.Fatalf("applyConfirmedArgsEdits: %v", err)
+	}
+	if !strings.Contains(string(edited), `"other.txt"`) {
+		t.Fatalf("edited = %s, want user edit preserved", edited)
+	}
+}
+
 func TestExecuteToolCallAskRequiresConfirmFunc(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
@@ -210,7 +234,7 @@ func TestApplyConfirmedArgsEditsBashDeniedBySubcommandPermission(t *testing.T) {
 	}
 }
 
-func TestValidateToolArgsAgainstSchemaRejectsWrongType(t *testing.T) {
+func TestValidateToolCallArgsRejectsWrongType(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(agentValidationTool{
 		name: "shell",
@@ -223,7 +247,9 @@ func TestValidateToolArgsAgainstSchemaRejectsWrongType(t *testing.T) {
 		},
 	})
 
-	err := validateToolArgsAgainstSchema(registry, "shell", json.RawMessage(`{"timeout":"fast"}`))
+	pipeline := toolExecutionPipeline{registry: registry}
+	tc := message.ToolCall{Name: "shell", Args: json.RawMessage(`{"timeout":"fast"}`)}
+	_, _, err := pipeline.validateToolCallArgs(&tc, nil)
 	if err == nil || !strings.Contains(err.Error(), "args.timeout must be an integer") {
 		t.Fatalf("err = %v, want schema type error", err)
 	}
@@ -271,5 +297,56 @@ func TestModelRequestedToolArgsJSONUsesOriginalAuditArguments(t *testing.T) {
 	}
 	if got := modelRequestedToolArgsJSON(effective, nil); got != effective {
 		t.Fatalf("modelRequestedToolArgsJSON() without audit = %q, want %q", got, effective)
+	}
+}
+
+// TestPromotedToolAuditKeepsExecutionTruth verifies that layering an
+// on_tool_call hook's audit over a promoted speculative execution keeps the
+// hook's provenance while reporting what actually ran: the sanitized arguments
+// and the fields the schema check stripped. Promote only succeeds on
+// canonically identical arguments, so the hook's own copy is the one that never
+// executed, and taking it wholesale used to erase the IgnoredArgs record that
+// the tool card renders struck through.
+func TestPromotedToolAuditKeepsExecutionTruth(t *testing.T) {
+	hookAudit := &message.ToolArgsAudit{
+		OriginalArgsJSON:  `{"path":"a.go","bogus":1}`,
+		EffectiveArgsJSON: `{"bogus":1,"path":"a.go"}`,
+		UserModified:      true,
+		EditSummary:       "hook rewrote args",
+	}
+	executed := &message.ToolArgsAudit{
+		EffectiveArgsJSON: `{"path":"a.go"}`,
+		IgnoredArgs: []message.IgnoredToolArg{
+			{Path: "args.bogus", ValueJSON: "1", Reason: message.IgnoredToolArgReasonUnrecognized},
+		},
+		InvalidArgs: []message.InvalidToolArg{
+			{Path: "args.path", ValueJSON: "1", Reason: message.InvalidToolArgReasonInvalid},
+		},
+	}
+
+	merged := promotedToolAudit(hookAudit, executed, `{"path":"a.go"}`)
+	if merged.EffectiveArgsJSON != `{"path":"a.go"}` {
+		t.Fatalf("EffectiveArgsJSON = %q, want the arguments that actually ran", merged.EffectiveArgsJSON)
+	}
+	if len(merged.IgnoredArgs) != 1 || merged.IgnoredArgs[0].Path != "args.bogus" {
+		t.Fatalf("IgnoredArgs = %#v, want the record from the promoted execution", merged.IgnoredArgs)
+	}
+	if len(merged.InvalidArgs) != 1 || merged.InvalidArgs[0].Path != "args.path" {
+		t.Fatalf("InvalidArgs = %#v, want the record from the promoted execution", merged.InvalidArgs)
+	}
+	if merged.OriginalArgsJSON != hookAudit.OriginalArgsJSON || !merged.UserModified || merged.EditSummary != "hook rewrote args" {
+		t.Fatalf("hook provenance was lost: %#v", merged)
+	}
+
+	merged.IgnoredArgs[0].Path = "changed"
+	if executed.IgnoredArgs[0].Path != "args.bogus" {
+		t.Fatal("promotedToolAudit aliased the promoted execution's IgnoredArgs")
+	}
+	if hookAudit.EffectiveArgsJSON != `{"bogus":1,"path":"a.go"}` {
+		t.Fatal("promotedToolAudit mutated the hook audit in place")
+	}
+
+	if got := promotedToolAudit(nil, executed, `{"path":"a.go"}`); got != executed {
+		t.Fatal("without a hook audit the promoted execution's audit must pass through untouched")
 	}
 }

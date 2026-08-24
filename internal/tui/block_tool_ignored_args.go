@@ -1,0 +1,490 @@
+package tui
+
+import (
+	"encoding/json"
+	"fmt"
+	"slices"
+	"strings"
+
+	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
+
+	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
+)
+
+func (b *Block) renderToolCardWithIgnoredArgs(style lipgloss.Style, cardWidth int, title string, body []string, bgColorNum string, railSeq string) []string {
+	body = b.appendToolArgDiagnostics(body, max(cardWidth-4, 10))
+	return renderPrewrappedToolCard(style, cardWidth, title, body, bgColorNum, railSeq)
+}
+
+type toolArgDiagnostic struct {
+	path    string
+	value   string
+	ignored bool
+	missing bool
+}
+
+func (b *Block) toolArgDiagnostics() []toolArgDiagnostic {
+	if b == nil || b.Audit == nil {
+		return nil
+	}
+	var diagnostics []toolArgDiagnostic
+	for _, item := range b.Audit.IgnoredArgs {
+		path := strings.TrimPrefix(strings.TrimSpace(item.Path), "args.")
+		if path == "" {
+			continue
+		}
+		diagnostics = append(diagnostics, toolArgDiagnostic{
+			path:    sanitizeToolDisplayText(path),
+			value:   b.toolArgDiagnosticValue(path, item.ValueJSON),
+			ignored: true,
+		})
+	}
+	for _, item := range b.Audit.InvalidArgs {
+		path := strings.TrimPrefix(strings.TrimSpace(item.Path), "args.")
+		if path == "" {
+			continue
+		}
+		diagnostics = append(diagnostics, toolArgDiagnostic{
+			path:    sanitizeToolDisplayText(path),
+			value:   b.toolArgDiagnosticValue(path, item.ValueJSON),
+			missing: item.Reason == message.InvalidToolArgReasonMissing,
+		})
+	}
+	return diagnostics
+}
+
+func (b *Block) toolArgDiagnosticValue(path, valueJSON string) string {
+	canonical := strings.TrimLeft(strings.TrimSpace(path), ".")
+	switch b.ToolName {
+	case "glob":
+		if canonical == "patterns" {
+			if values := paramStringList(valueJSON); len(values) > 0 {
+				return truncateToolParamValue(sanitizeToolDisplayText(formatStringListParam(values)))
+			}
+		}
+	case "grep":
+		if canonical == "paths" || canonical == "includes" {
+			if values := paramStringList(valueJSON); len(values) > 0 {
+				if canonical == "paths" {
+					for i, value := range values {
+						values[i] = b.displayToolDir(value)
+					}
+				}
+				return truncateToolParamValue(sanitizeToolDisplayText(formatStringListParam(values)))
+			}
+		}
+	case "delete":
+		if canonical == "paths" {
+			if values := paramStringList(valueJSON); len(values) > 0 {
+				for i, value := range values {
+					values[i] = b.displayToolPath(value)
+				}
+				return truncateToolParamValue(sanitizeToolDisplayText(formatStringListParam(values)))
+			}
+		}
+	}
+	return ignoredToolArgValue(valueJSON)
+}
+
+func ignoredToolArgValue(valueJSON string) string {
+	value := strings.TrimSpace(valueJSON)
+	if value == "" {
+		return ""
+	}
+	dec := json.NewDecoder(strings.NewReader(value))
+	dec.UseNumber()
+	var parsed any
+	if err := dec.Decode(&parsed); err == nil {
+		if formatted := formatParamValue(parsed); formatted != "" {
+			value = formatted
+		}
+	}
+	return truncateToolParamValue(sanitizeToolDisplayText(value))
+}
+
+// diagnosticArgHeaderOption renders the diagnostic option for canonical with
+// the same styling contract as formatDiagnosticOption: struck-through for
+// ignored values, error-styled for missing ones, plain otherwise.
+func (b *Block) diagnosticArgHeaderOption(canonical string) string {
+	text, ignored, missing := b.diagnosticArgHeaderItem(canonical)
+	if text == "" {
+		return ""
+	}
+	if ignored {
+		return DimStyle.Strikethrough(true).Render(text)
+	}
+	if missing {
+		return ErrorStyle.Render(text)
+	}
+	return text
+}
+
+func (b *Block) diagnosticArgHeaderItem(canonical string) (text string, ignored, missing bool) {
+	if b == nil || b.Audit == nil {
+		return "", false, false
+	}
+	for _, item := range b.Audit.InvalidArgs {
+		if canonicalDiagnosticPath(item.Path) != canonical || item.Reason != message.InvalidToolArgReasonMissing {
+			continue
+		}
+		if text := b.diagnosticArgText(item.Path, item.ValueJSON, canonical); text != "" {
+			return text, false, true
+		}
+	}
+	for _, item := range b.Audit.InvalidArgs {
+		if canonicalDiagnosticPath(item.Path) != canonical || item.Reason == message.InvalidToolArgReasonMissing {
+			continue
+		}
+		if text := b.diagnosticArgText(item.Path, item.ValueJSON, canonical); text != "" {
+			return text, false, false
+		}
+	}
+	for _, item := range b.Audit.IgnoredArgs {
+		if text := b.diagnosticArgText(item.Path, item.ValueJSON, canonical); text != "" {
+			return text, true, false
+		}
+	}
+	return "", false, false
+}
+
+func canonicalDiagnosticPath(rawPath string) string {
+	path := sanitizeToolDisplayText(strings.TrimPrefix(strings.TrimSpace(rawPath), "args."))
+	for strings.HasPrefix(path, ".") {
+		path = strings.TrimPrefix(path, ".")
+	}
+	return path
+}
+
+func (b *Block) diagnosticArgText(rawPath, valueJSON, canonical string) string {
+	path := sanitizeToolDisplayText(strings.TrimPrefix(strings.TrimSpace(rawPath), "args."))
+	if path == "" || canonicalDiagnosticPath(rawPath) != canonical {
+		return ""
+	}
+	value := b.toolArgDiagnosticValue(path, valueJSON)
+	if value == "" && !b.diagnosticArgIsMissing(path) {
+		return ""
+	}
+	if b.diagnosticArgUsesValueOnly(path) {
+		return value
+	}
+	if b.diagnosticArgIsMissing(path) {
+		return "<missing>"
+	}
+	return path + "=" + value
+}
+
+func (b *Block) diagnosticArgIsMissing(path string) bool {
+	if b == nil || b.Audit == nil {
+		return false
+	}
+	canonical := strings.TrimLeft(strings.TrimSpace(path), ".")
+	for _, item := range b.Audit.InvalidArgs {
+		if canonicalDiagnosticPath(item.Path) != canonical {
+			continue
+		}
+		return item.Reason == message.InvalidToolArgReasonMissing
+	}
+	return false
+}
+
+func (b *Block) diagnosticArgUsesValueOnly(path string) bool {
+	canonical := strings.TrimLeft(strings.TrimSpace(path), ".")
+	switch b.ToolName {
+	case "glob":
+		return canonical == "patterns"
+	case "grep":
+		return canonical == "pattern"
+	default:
+		return false
+	}
+}
+
+// globDiagnosticHeaderParts keeps schema-broken glob calls on the same header
+// shape as successful ones: the ignored or invalid patterns value takes the
+// pattern slot and path stays relativized, so only the diagnostic styling
+// differs from a valid call.
+func (b *Block) globDiagnosticHeaderParts(vals map[string]string) (mainPart, grayPart string) {
+	mainPart = b.diagnosticPrimaryText("patterns")
+	if mainPart == "" {
+		return "", ""
+	}
+	var opts []string
+	if dir := b.displayToolDir(vals["path"]); dir != "" && dir != "." {
+		opts = append(opts, "path="+dir)
+	}
+	if ignored := b.firstIgnoredDiagnostic("patterns"); ignored != nil && ignored.value != "" {
+		opts = append(opts, b.formatDiagnosticOption(ignored))
+	}
+	if len(opts) == 0 {
+		return mainPart, ""
+	}
+	return mainPart, "(" + strings.Join(opts, ", ") + ")"
+}
+
+func (b *Block) grepDiagnosticHeaderParts(vals map[string]string) (mainPart, grayPart string) {
+	pattern := b.diagnosticPrimaryText("pattern")
+	if pattern == "" {
+		pattern = strings.TrimSpace(vals["pattern"])
+	}
+	if pattern == "" {
+		return "", ""
+	}
+	var opts []string
+	if paths := nonCurrentDirToolPaths(vals["paths"]); len(paths) > 0 {
+		opts = append(opts, "paths="+formatStringListParam(paths))
+	}
+	if paths := b.diagnosticArgHeaderOption("paths"); paths != "" {
+		opts = append(opts, paths)
+	}
+	if includes := paramStringList(vals["includes"]); len(includes) > 0 {
+		opts = append(opts, "includes="+formatStringListParam(includes))
+	}
+	if includes := b.diagnosticArgHeaderOption("includes"); includes != "" {
+		opts = append(opts, includes)
+	}
+	if path := strings.TrimSpace(vals["path"]); path != "" && path != "." {
+		opts = append(opts, "path="+b.displayToolDir(path))
+	}
+	if ignored := b.firstIgnoredDiagnostic("pattern"); ignored != nil && ignored.value != "" {
+		opts = append(opts, b.formatDiagnosticOption(ignored))
+	}
+	if len(opts) == 0 {
+		return pattern, ""
+	}
+	return pattern, "(" + strings.Join(opts, ", ") + ")"
+}
+
+func (b *Block) diagnosticPrimaryText(canonical string) string {
+	if b == nil || b.Audit == nil {
+		return ""
+	}
+	for _, item := range b.Audit.InvalidArgs {
+		if canonicalDiagnosticPath(item.Path) != canonical || item.Reason != message.InvalidToolArgReasonMissing {
+			continue
+		}
+		return "<missing>"
+	}
+	return ""
+}
+
+func (b *Block) firstIgnoredDiagnostic(canonical string) *toolArgDiagnostic {
+	if b == nil || b.Audit == nil {
+		return nil
+	}
+	for _, item := range b.Audit.IgnoredArgs {
+		if canonicalDiagnosticPath(item.Path) != canonical {
+			continue
+		}
+		path := sanitizeToolDisplayText(strings.TrimPrefix(strings.TrimSpace(item.Path), "args."))
+		if path == "" {
+			continue
+		}
+		return &toolArgDiagnostic{path: path, value: b.toolArgDiagnosticValue(path, item.ValueJSON), ignored: true}
+	}
+	return nil
+}
+
+func (b *Block) formatDiagnosticOption(diagnostic *toolArgDiagnostic) string {
+	if diagnostic == nil {
+		return ""
+	}
+	plain := diagnostic.path
+	if diagnostic.missing {
+		plain += "=<missing>"
+	} else if diagnostic.value != "" {
+		plain += "=" + diagnostic.value
+	}
+	if plain == "" {
+		return ""
+	}
+	if diagnostic.ignored {
+		return DimStyle.Strikethrough(true).Render(plain)
+	}
+	if diagnostic.missing {
+		return ErrorStyle.Render(plain)
+	}
+	return plain
+}
+
+// deleteDiagnosticHeaderParts keeps schema-broken Delete calls on the same
+// header shape as successful ones: the missing-paths marker takes the path
+// slot while every ignored or invalid argument joins the reason in the
+// parenthesized option group, so no diagnostic is silently dropped.
+func (b *Block) deleteDiagnosticHeaderParts(vals map[string]string) (mainPart, grayPart string) {
+	missing := b.diagnosticPrimaryText("paths")
+	diagnostics := b.diagnosticHeaderOptions("paths")
+	if missing == "" && len(diagnostics) == 0 {
+		return "", ""
+	}
+	if missing != "" {
+		mainPart = missing
+	} else if filePaths := parseDeleteHeaderPaths(vals); len(filePaths) == 1 {
+		mainPart = filePaths[0]
+	} else if len(filePaths) > 1 {
+		mainPart = fmt.Sprintf("%d files", len(filePaths))
+	} else {
+		return "", ""
+	}
+	return mainPart, mergeHeaderOptions(deleteReasonHeaderGray(vals), diagnostics)
+}
+
+// bashDiagnosticHeaderParts keeps schema-broken Shell calls on the same header
+// shape as successful ones: ignored or invalid extra arguments join the same
+// parenthesized option group as timeout, the way glob/grep keep diagnostic
+// options beside the normal ones.
+func (b *Block) bashDiagnosticHeaderParts(vals map[string]string) (mainPart, grayPart string) {
+	if b == nil || b.Audit == nil {
+		return "", ""
+	}
+	if len(b.toolArgDiagnostics()) == 0 {
+		return "", ""
+	}
+	mainPart = bashDescriptionSummary(vals)
+	if mainPart == "" {
+		mainPart = firstDisplayLine(vals["command"])
+	}
+	return mainPart, mergeHeaderOptions(bashHeaderGrayPart(vals), b.diagnosticHeaderOptions())
+}
+
+// diagnosticHeaderOptions renders every ignored or invalid argument as a
+// styled name=value option so tools can fold diagnostics into their header
+// option group instead of appending them after the header line. Skip lists
+// canonical names whose missing marker the tool already shows in the main
+// header slot.
+func (b *Block) diagnosticHeaderOptions(skip ...string) []string {
+	diagnostics := b.toolArgDiagnostics()
+	if len(diagnostics) == 0 {
+		return nil
+	}
+	opts := make([]string, 0, len(diagnostics))
+	for i := range diagnostics {
+		if slices.Contains(skip, diagnostics[i].path) {
+			continue
+		}
+		if option := b.formatDiagnosticOption(&diagnostics[i]); option != "" {
+			opts = append(opts, option)
+		}
+	}
+	return opts
+}
+
+// mergeHeaderOptions folds extra styled options into an existing
+// parenthesized option group, creating the group when grayPart has none.
+func mergeHeaderOptions(grayPart string, extra []string) string {
+	if len(extra) == 0 {
+		return grayPart
+	}
+	inner := strings.TrimSuffix(strings.TrimPrefix(grayPart, "("), ")")
+	opts := make([]string, 0, len(extra)+1)
+	if inner != "" {
+		opts = append(opts, inner)
+	}
+	opts = append(opts, extra...)
+	return "(" + strings.Join(opts, ", ") + ")"
+}
+
+// headerParamSummaryKeys drops generic-summary keys already covered by an arg
+// diagnostic, unless the summary text matches the diagnostic text verbatim
+// and will be restyled in place; compacted forms like "[2 items]" never match,
+// so without this the full value would render a second time.
+func (b *Block) headerParamSummaryKeys(keys []string, vals map[string]string) []string {
+	diagnostics := b.toolArgDiagnostics()
+	if len(diagnostics) == 0 {
+		return keys
+	}
+	plainByKey := make(map[string]string, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		if b.diagnosticArgOccupiesHeader(diagnostic.path) {
+			continue
+		}
+		plain := diagnostic.path
+		if diagnostic.missing {
+			plain += "=<missing>"
+		} else if diagnostic.value != "" {
+			plain += "=" + diagnostic.value
+		}
+		plainByKey[diagnostic.path] = plain
+	}
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if plain, covered := plainByKey[key]; covered && key+"="+genericToolParamValue(vals[key]) != plain {
+			continue
+		}
+		out = append(out, key)
+	}
+	return out
+}
+
+func (b *Block) appendToolArgDiagnostics(body []string, contentWidth int) []string {
+	if len(body) == 0 {
+		return body
+	}
+	diagnostics := b.toolArgDiagnostics()
+	if len(diagnostics) == 0 {
+		return body
+	}
+	header := body[0]
+	baseWidth := tuiStringWidth(stripANSI(header))
+	remaining := max(contentWidth-baseWidth-1, 0)
+	appended := 0
+	for _, diagnostic := range diagnostics {
+		if b.diagnosticArgOccupiesHeader(diagnostic.path) {
+			continue
+		}
+		plain := diagnostic.path
+		if diagnostic.missing {
+			plain += "=<missing>"
+		} else if diagnostic.value != "" {
+			plain += "=" + diagnostic.value
+		}
+		if !diagnostic.missing && strings.Contains(stripANSI(header), plain) {
+			style := DimStyle.Strikethrough(true)
+			if !diagnostic.ignored {
+				style = ErrorStyle
+			}
+			header = strings.Replace(header, plain, style.Render(plain), 1)
+			continue
+		}
+		separator := " · "
+		partWidth := runewidth.StringWidth(separator + plain)
+		if partWidth > remaining {
+			if appended == 0 && remaining > runewidth.StringWidth(separator)+1 {
+				plain = runewidth.Truncate(plain, remaining-runewidth.StringWidth(separator), "…")
+			} else {
+				break
+			}
+		}
+		style := DimStyle.Strikethrough(true)
+		if !diagnostic.ignored {
+			style = ErrorStyle
+		}
+		if appended == 0 && remaining <= 0 {
+			break
+		}
+		header += separator + style.Render(plain)
+		remaining -= runewidth.StringWidth(separator + plain)
+		appended++
+		if remaining <= 0 {
+			break
+		}
+	}
+	body[0] = header
+	return body
+}
+
+func (b *Block) diagnosticArgOccupiesHeader(path string) bool {
+	canonical := strings.TrimLeft(strings.TrimSpace(path), ".")
+	switch b.ToolName {
+	case tools.NameGlob:
+		return canonical == "patterns"
+	case tools.NameGrep:
+		return canonical == "pattern" || canonical == "paths" || canonical == "includes"
+	case tools.NameDelete, tools.NameRead, tools.NameWrite, tools.NameEdit, tools.NameApplyPatch,
+		tools.NameTodoWrite, tools.NameShell, tools.NameSpawn, tools.NameWebFetch, tools.NameSkill:
+		return true
+	default:
+		return false
+	}
+}

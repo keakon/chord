@@ -506,7 +506,17 @@ func applyStableToolResultToBlock(block *Block, result transcriptToolResult) {
 	}
 	applyDoneReportFromArgs(block, block.RawArgs, result.doneReport)
 	if result.displayArgs != nil {
-		if displayArgs := result.displayArgs(block.ToolName, block.RawArgs, block.ResultContent); displayArgs != "" {
+		displayArgsJSON := block.RawArgs
+		// RawArgs holds the model's original request doc (captured at start or
+		// restored from the session). The card body must show the arguments
+		// that actually ran — after user edits, hooks, or automatic sanitizing
+		// — while ignored fields are rendered as struck-through callouts from
+		// Audit.IgnoredArgs. EffectiveArgsJSON is always that executed
+		// document, so prefer it whenever present.
+		if block.Audit != nil && strings.TrimSpace(block.Audit.EffectiveArgsJSON) != "" {
+			displayArgsJSON = block.Audit.EffectiveArgsJSON
+		}
+		if displayArgs := result.displayArgs(block.ToolName, displayArgsJSON, block.ResultContent); displayArgs != "" {
 			block.Content = displayArgs
 		}
 	}

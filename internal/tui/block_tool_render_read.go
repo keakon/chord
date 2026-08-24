@@ -50,6 +50,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 			opts = append(opts, k+"="+v)
 		}
 	}
+	opts = append(opts, b.diagnosticHeaderOptions()...)
 
 	prefix := b.renderToolPrefix(spinnerFrame)
 	var result []string
@@ -74,7 +75,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 		})...)
 	}
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 func renderReadHeaderLine(prefix, toolName, filePath, optText string, maxWidth int) string {
@@ -92,15 +93,15 @@ func renderReadHeaderLine(prefix, toolName, filePath, optText string, maxWidth i
 		return truncateToolHeaderTail(headerLine, maxWidth)
 	}
 	if filePath == "" {
-		return headerLine + " " + DimStyle.Render(truncateToolHeaderMiddle(optText, budget))
+		return headerLine + " " + DimStyle.Render(truncateToolHeaderGray(optText, budget))
 	}
 	if optText == "" {
 		return headerLine + " " + truncateToolHeaderMiddle(filePath, budget)
 	}
 
-	optWidth := runewidth.StringWidth(optText)
+	optWidth := runewidth.StringWidth(stripANSI(optText))
 	if optWidth+1 >= budget {
-		return headerLine + " " + DimStyle.Render(truncateToolHeaderMiddle(optText, budget))
+		return headerLine + " " + DimStyle.Render(truncateToolHeaderGray(optText, budget))
 	}
 	pathBudget := budget - optWidth - 1
 	return headerLine + " " + truncateToolHeaderMiddle(filePath, pathBudget) + " " + DimStyle.Render(optText)

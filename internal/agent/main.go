@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -163,16 +164,17 @@ type toolCallStageTrace struct {
 }
 
 type ToolExecutionResult struct {
-	Result            string
-	Images            []message.ContentPart // image/binary parts produced by the tool (ViewImage, MCP image results)
-	EffectiveArgsJSON string
-	Audit             *message.ToolArgsAudit
-	LSPReviews        []message.LSPReview
-	FileState         *message.ToolFileState
-	Diff              tools.DiffSummary
-	PreFilePath       string
-	PreContent        string
-	PreExisted        bool
+	Result                    string
+	Images                    []message.ContentPart // image/binary parts produced by the tool (ViewImage, MCP image results)
+	EffectiveArgsJSON         string
+	originalArgsForValidation json.RawMessage
+	Audit                     *message.ToolArgsAudit
+	LSPReviews                []message.LSPReview
+	FileState                 *message.ToolFileState
+	Diff                      tools.DiffSummary
+	PreFilePath               string
+	PreContent                string
+	PreExisted                bool
 	// ExecStartedAt is set by the execution pipeline immediately before the
 	// tool's real action runs, after permission confirmation, hooks, and
 	// argument validation have all passed. Duration consumers (tool result
@@ -709,6 +711,7 @@ type MainAgent struct {
 	mcpTransitionActive atomic.Bool
 	mcpControlFn        func(context.Context, MCPControlRequest) (MCPControlResult, error)
 	mcpMountState       mcpToolMountState
+	loopDoneLateMount   atomic.Bool
 	// mcpMountFullInjectionOnly is sticky for the current session run. Once
 	// set, cache-friendly dynamic MCP mounts (Responses additional_tools and
 	// Kimi mcp_system_tools_message) are disabled and every MCP tool is

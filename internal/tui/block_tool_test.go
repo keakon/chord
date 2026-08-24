@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -77,6 +78,26 @@ func TestParseToolArgsPreservesExactJSONNumbers(t *testing.T) {
 	}
 }
 
+func TestParseToolArgsKeepsOnlyLastDuplicateOccurrence(t *testing.T) {
+	keys, vals := parseToolArgs(`{"limit":75,"path":"first.go","limit":40,"path":"second.go"}`)
+	if !slices.Equal(keys, []string{"limit", "path"}) {
+		t.Fatalf("keys = %v", keys)
+	}
+	if vals["limit"] != "40" || vals["path"] != "second.go" {
+		t.Fatalf("vals = %#v", vals)
+	}
+}
+
+func TestParseToolArgsLastHiddenDuplicateRemovesEarlierValue(t *testing.T) {
+	keys, vals := parseToolArgs(`{"enabled":true,"path":"sample.go","enabled":false}`)
+	if !slices.Equal(keys, []string{"path"}) {
+		t.Fatalf("keys = %v", keys)
+	}
+	if _, exists := vals["enabled"]; exists {
+		t.Fatalf("vals = %#v, hidden final duplicate must replace earlier value", vals)
+	}
+}
+
 func TestGenericToolParamSummaryShowsModelArguments(t *testing.T) {
 	keys, vals := parseToolArgs(`{"query":"search","apiKey":"model-supplied-value","filters":{"language":"go"},"urls":["a","b"]}`)
 	got := formatToolHeaderParamsWithParsed("mcp_any_tool", keys, vals)
@@ -84,6 +105,27 @@ func TestGenericToolParamSummaryShowsModelArguments(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("summary = %q, want %q", got, want)
 		}
+	}
+}
+
+func TestHeaderParamSummaryKeysSkipsDuplicatedDiagnosticSummary(t *testing.T) {
+	block := &Block{
+		Audit: &message.ToolArgsAudit{
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.urls",
+				ValueJSON: `["a","b"]`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	keys := []string{"query", "urls"}
+	vals := map[string]string{
+		"query": `"search"`,
+		"urls":  `["a","b"]`,
+	}
+	got := block.headerParamSummaryKeys(keys, vals)
+	if !slices.Equal(got, []string{"query"}) {
+		t.Fatalf("headerParamSummaryKeys = %v", got)
 	}
 }
 
@@ -356,6 +398,537 @@ func TestReadHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 	}
 	if strings.Contains(joined, abs) {
 		t.Fatalf("did not expect Read header to show absolute path; got:\n%s", joined)
+	}
+}
+
+func TestSpawnCardMovesIgnoredArgumentIntoOptionGroup(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameSpawn,
+		Content:       `{"prompt":"do things"}`,
+		ResultDone:    true,
+		ResultContent: "ok",
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"prompt":"do things","path":"sub"}`,
+			EffectiveArgsJSON: `{"prompt":"do things"}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.path",
+				ValueJSON: `"sub"`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	plain := stripANSI(rendered)
+	if !strings.Contains(plain, "(path=sub)") {
+		t.Fatalf("ignored argument should join the spawn option group:\n%s", plain)
+	}
+	if strings.Contains(plain, " · path=") {
+		t.Fatalf("ignored argument must not be appended after the header:\n%s", plain)
+	}
+	if !strings.Contains(rendered, ";9m") {
+		t.Fatalf("ignored argument is not struck through: %q", rendered)
+	}
+}
+
+func TestWebFetchCardMovesIgnoredArgumentIntoOptionGroup(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameWebFetch,
+		Content:       `{"url":"https://example.invalid/notes"}`,
+		ResultDone:    true,
+		ResultContent: "ok",
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"url":"https://example.invalid/notes","raw":true}`,
+			EffectiveArgsJSON: `{"url":"https://example.invalid/notes"}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.raw",
+				ValueJSON: `true`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	plain := stripANSI(rendered)
+	if !strings.Contains(plain, "https://example.invalid/notes (raw=true)") {
+		t.Fatalf("ignored argument should join the webfetch option group:\n%s", plain)
+	}
+	if !strings.Contains(rendered, ";9m") {
+		t.Fatalf("ignored argument is not struck through: %q", rendered)
+	}
+}
+
+func TestWriteCardJoinsIgnoredArgumentToExtras(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameWrite,
+		Content:       `{"path":"notes.md","content":"hello"}`,
+		ResultDone:    true,
+		ResultContent: "ok",
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"path":"notes.md","content":"hello","append":true}`,
+			EffectiveArgsJSON: `{"path":"notes.md","content":"hello"}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.append",
+				ValueJSON: `true`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	plain := stripANSI(rendered)
+	if !strings.Contains(plain, "append=true") {
+		t.Fatalf("ignored argument should join the write extras chain:\n%s", plain)
+	}
+	if strings.Contains(plain, " · append=") {
+		t.Fatalf("ignored argument must not be appended after the header:\n%s", plain)
+	}
+	if !strings.Contains(rendered, ";9m") {
+		t.Fatalf("ignored argument is not struck through: %q", rendered)
+	}
+}
+
+func TestEditCardJoinsIgnoredArgumentToHeaderOptions(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		Content:       `{"path":"config.toml","old_string":"alpha","new_string":"beta"}`,
+		ResultDone:    true,
+		ResultContent: "ok",
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"path":"config.toml","old_string":"alpha","new_string":"beta","create_dirs":true}`,
+			EffectiveArgsJSON: `{"path":"config.toml","old_string":"alpha","new_string":"beta"}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.create_dirs",
+				ValueJSON: `true`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	plain := stripANSI(rendered)
+	if !strings.Contains(plain, "(create_dirs=true)") {
+		t.Fatalf("ignored argument should join the edit option group:\n%s", plain)
+	}
+	if strings.Contains(plain, " · create_dirs=") {
+		t.Fatalf("ignored argument must not be appended after the header:\n%s", plain)
+	}
+	if !strings.Contains(rendered, ";9m") {
+		t.Fatalf("ignored argument is not struck through: %q", rendered)
+	}
+}
+
+func TestTodoCardShowsIgnoredArgumentInOptionGroup(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameTodoWrite,
+		Content:       `{"todos":[{"id":"1","content":"write docs","status":"pending"}]}`,
+		ResultDone:    true,
+		ResultContent: "ok",
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"todos":[{"id":"1","content":"write docs","status":"pending"}],"priority":"high"}`,
+			EffectiveArgsJSON: `{"todos":[{"id":"1","content":"write docs","status":"pending"}]}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.priority",
+				ValueJSON: `"high"`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	plain := stripANSI(rendered)
+	if !strings.Contains(plain, "(priority=high)") {
+		t.Fatalf("ignored argument should form its own option group:\n%s", plain)
+	}
+	if strings.Contains(plain, " · priority=") {
+		t.Fatalf("ignored argument must not be appended after the header:\n%s", plain)
+	}
+	if !strings.Contains(rendered, ";9m") {
+		t.Fatalf("ignored argument is not struck through: %q", rendered)
+	}
+}
+
+func shellIgnoredPathAudit() *message.ToolArgsAudit {
+	return &message.ToolArgsAudit{
+		OriginalArgsJSON:  `{"command":"git status --short --branch","description":"Check git status and unpushed commits","path":".chord/memory/records/x.md","timeout":120}`,
+		EffectiveArgsJSON: `{"command":"git status --short --branch","description":"Check git status and unpushed commits","timeout":120}`,
+		IgnoredArgs: []message.IgnoredToolArg{{
+			Path:      "args.path",
+			ValueJSON: `".chord/memory/records/x.md"`,
+			Reason:    message.IgnoredToolArgReasonUnrecognized,
+		}},
+	}
+}
+
+func TestShellCardMovesIgnoredArgumentIntoOptionGroup(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameShell,
+		Content:       `{"command":"git status --short --branch","description":"Check git status and unpushed commits","timeout":120}`,
+		ResultDone:    true,
+		ResultContent: "ok",
+		Audit:         shellIgnoredPathAudit(),
+	}
+	rendered := strings.Join(block.Render(160, ""), "\n")
+	plain := stripANSI(rendered)
+	want := "Check git status and unpushed commits (timeout=120, path=.chord/memory/records/x.md)"
+	if !strings.Contains(plain, want) {
+		t.Fatalf("ignored argument should join the timeout option group, want %q:\n%s", want, plain)
+	}
+	if strings.Contains(plain, " · path=") {
+		t.Fatalf("ignored argument must not be appended after the header:\n%s", plain)
+	}
+	if !strings.Contains(rendered, ";9m") {
+		t.Fatalf("ignored argument is not struck through: %q", rendered)
+	}
+	if strings.Contains(rendered, `\x1b`) {
+		t.Fatalf("escape sequence was neutralized to a literal: %q", rendered)
+	}
+}
+
+func TestShellCardShowsIgnoredArgumentWithoutTimeout(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameShell,
+		Content:       `{"command":"git status --short --branch","description":"Check git status and unpushed commits"}`,
+		ResultDone:    true,
+		ResultContent: "ok",
+		Audit:         shellIgnoredPathAudit(),
+	}
+	rendered := strings.Join(block.Render(160, ""), "\n")
+	plain := stripANSI(rendered)
+	want := "Check git status and unpushed commits (path=.chord/memory/records/x.md)"
+	if !strings.Contains(plain, want) {
+		t.Fatalf("ignored argument should form its own option group, want %q:\n%s", want, plain)
+	}
+	if strings.Contains(plain, "timeout=") {
+		t.Fatalf("timeout should not be invented when the call has none:\n%s", plain)
+	}
+}
+
+func TestShellCollapsedCardKeepsIgnoredArgumentInOptionGroup(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameShell,
+		Content:       `{"command":"git status --short --branch","description":"Check git status and unpushed commits","timeout":120}`,
+		ResultDone:    true,
+		ResultContent: "ok",
+		Collapsed:     true,
+		Audit:         shellIgnoredPathAudit(),
+	}
+	rendered := strings.Join(block.Render(160, ""), "\n")
+	plain := stripANSI(rendered)
+	want := "Check git status and unpushed commits (timeout=120, path=.chord/memory/records/x.md)"
+	if !strings.Contains(plain, want) {
+		t.Fatalf("collapsed header should keep the ignored option group, want %q:\n%s", want, plain)
+	}
+	if strings.Contains(plain, " · path=") {
+		t.Fatalf("collapsed header must not append the ignored argument:\n%s", plain)
+	}
+}
+
+func TestShellCardTruncatesStruckThroughOptionWithoutStyleLeak(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameShell,
+		Content:       `{"command":"git status --short --branch","description":"Check git status and unpushed commits","timeout":120}`,
+		ResultDone:    true,
+		ResultContent: "ok",
+		Audit:         shellIgnoredPathAudit(),
+	}
+	lines := block.Render(80, "")
+	var header string
+	for _, line := range lines {
+		if strings.Contains(stripANSI(line), "path=") {
+			header = line
+			break
+		}
+	}
+	if header == "" {
+		t.Fatalf("header with ignored argument missing:\n%s", stripANSI(strings.Join(lines, "\n")))
+	}
+	if strings.Contains(header, `\x1b`) {
+		t.Fatalf("escape sequence was neutralized to a literal: %q", header)
+	}
+	plainWidth := runewidth.StringWidth(stripANSI(header))
+	// 83 matches the pre-existing width of a header whose mainPart alone fills
+	// the appendToolHeaderSummary budget (long description, no diagnostics), so
+	// the struck-through option group must not exceed that baseline.
+	if plainWidth > 83 {
+		t.Fatalf("header width = %d, want <= 83: %q", plainWidth, stripANSI(header))
+	}
+	if strings.Count(stripANSI(header), "…") == 0 {
+		t.Fatalf("expected the option group to be truncated on a narrow card: %q", stripANSI(header))
+	}
+}
+
+func TestReadCardStrikesThroughIgnoredUnrecognizedArgument(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameRead,
+		Content:       `{"limit":40,"path":"sample.go"}`,
+		ResultDone:    true,
+		ResultContent: "READ_RESULT lines=1-1 total=1\npackage sample",
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"path":"sample.go","limit":40,"format":"json"}`,
+			EffectiveArgsJSON: `{"limit":40,"path":"sample.go"}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.format",
+				ValueJSON: `"json"`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	plain := strings.ReplaceAll(stripANSI(rendered), "…", "")
+	plain = strings.ReplaceAll(plain, "\x1b", "")
+	if !strings.Contains(plain, "sample.go (limit=40, format=json)") {
+		t.Fatalf("ignored argument should join the read option group:\n%s", plain)
+	}
+	if !strings.Contains(rendered, ";9m") {
+		t.Fatalf("ignored argument is not struck through: %q", rendered)
+	}
+}
+
+func TestGlobCardShowsIgnoredAndMissingArgumentsInline(t *testing.T) {
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          tools.NameGlob,
+		Content:           `{"path":"/tmp/workspace",".patterns":["MEMORY.md",".chord/memory/records/*.md"]}`,
+		ResultDone:        true,
+		ResultStatus:      agent.ToolResultStatusError,
+		ResultContent:     "arguments do not match glob schema: args.patterns is required",
+		displayWorkingDir: filepath.Join(string(os.PathSeparator), "tmp", "workspace"),
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"path":"/tmp/workspace",".patterns":["MEMORY.md",".chord/memory/records/*.md"]}`,
+			EffectiveArgsJSON: `{"path":"/tmp/workspace"}`,
+			InvalidArgs: []message.InvalidToolArg{{
+				Path:   "args.patterns",
+				Reason: message.InvalidToolArgReasonMissing,
+			}},
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args..patterns",
+				ValueJSON: `["MEMORY.md",".chord/memory/records/*.md"]`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	plain := strings.ReplaceAll(stripANSI(rendered), "…", "")
+	plain = strings.ReplaceAll(plain, "\x1b", "")
+	if !strings.Contains(plain, `glob <missing>`) {
+		t.Fatalf("missing required argument should occupy the main parameter slot:\n%s", plain)
+	}
+	if strings.Contains(plain, "path=/tmp/workspace") || strings.Contains(plain, "(path=.)") {
+		t.Fatalf("glob header should keep normal path elision rules:\n%s", plain)
+	}
+	if !strings.Contains(plain, `.p`) {
+		t.Fatalf("unrecognized argument missing:\n%s", plain)
+	}
+	if strings.Contains(plain, "patterns=<missing>") {
+		t.Fatalf("missing primary glob argument should render as value-only placeholder:\n%s", plain)
+	}
+	if !strings.Contains(plain, `(<missing>`) && strings.Contains(plain, `.patterns=MEMORY.md,.chord/memory/records/*.md ·`) {
+		t.Fatalf("glob diagnostics should move ignored values into the option group:\n%s", plain)
+	}
+	if !strings.Contains(plain, `.p`) {
+		t.Fatalf("glob option group should contain path and ignored patterns:\n%s", plain)
+	}
+	if strings.Contains(plain, `[1 items]`) {
+		t.Fatalf("compacted generic summary should not duplicate diagnostic values:\n%s", plain)
+	}
+	if !strings.Contains(rendered, `;9m`) {
+		t.Fatalf("unrecognized argument is not struck through: %q", rendered)
+	}
+	if !strings.Contains(rendered, "38;5;196m") {
+		t.Fatalf("missing required argument is not red: %q", rendered)
+	}
+}
+
+func TestGrepCardShowsDiagnosticListsLikeNormalHeader(t *testing.T) {
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          tools.NameGrep,
+		Content:           `{"pattern":"TODO",".paths":["/tmp/workspace/internal","/tmp/workspace/cmd"],".includes":["**/*.go","**/*.md"]}`,
+		ResultDone:        true,
+		ResultStatus:      agent.ToolResultStatusError,
+		ResultContent:     "arguments do not match grep schema: args.paths is invalid",
+		displayWorkingDir: filepath.Join(string(os.PathSeparator), "tmp", "workspace"),
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON: `{"pattern":"TODO",".paths":["/tmp/workspace/internal","/tmp/workspace/cmd"],".includes":["**/*.go","**/*.md"]}`,
+			IgnoredArgs: []message.IgnoredToolArg{
+				{
+					Path:      "args..paths",
+					ValueJSON: `["/tmp/workspace/internal","/tmp/workspace/cmd"]`,
+					Reason:    message.IgnoredToolArgReasonUnrecognized,
+				},
+				{
+					Path:      "args..includes",
+					ValueJSON: `["**/*.go","**/*.md"]`,
+					Reason:    message.IgnoredToolArgReasonUnrecognized,
+				},
+			},
+		},
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	plain := strings.ReplaceAll(stripANSI(rendered), "…", "")
+	plain = strings.ReplaceAll(plain, "\x1b", "")
+	for _, want := range []string{
+		"grep TODO (.paths=internal,cmd, .includes=**/*.go,**/*.md)",
+		".paths=internal,cmd",
+		".includes=**/*.go,**/*.md",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("grep diagnostic list formatting mismatch, want %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, `["/tmp/workspace/internal","/tmp/workspace/cmd"]`) || strings.Contains(plain, `["**/*.go","**/*.md"]`) {
+		t.Fatalf("grep diagnostic lists should follow normal header formatting:\n%s", plain)
+	}
+	if !strings.Contains(rendered, ";9m") {
+		t.Fatalf("ignored options are not struck through: %q", rendered)
+	}
+	if strings.Contains(rendered, `\x1b`) {
+		t.Fatalf("escape sequences were neutralized to literals: %q", rendered)
+	}
+}
+
+func TestGrepCardShowsMissingPatternInMainSlot(t *testing.T) {
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          tools.NameGrep,
+		Content:           `{"path":"/tmp/workspace","includes":["**/*.go"],".pattern":"TODO"}`,
+		ResultDone:        true,
+		ResultStatus:      agent.ToolResultStatusError,
+		ResultContent:     "arguments do not match grep schema: args.pattern is required",
+		displayWorkingDir: filepath.Join(string(os.PathSeparator), "tmp", "workspace"),
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"path":"/tmp/workspace","includes":["**/*.go"],".pattern":"TODO"}`,
+			EffectiveArgsJSON: `{"path":"/tmp/workspace","includes":["**/*.go"]}`,
+			InvalidArgs: []message.InvalidToolArg{{
+				Path:   "args.pattern",
+				Reason: message.InvalidToolArgReasonMissing,
+			}},
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args..pattern",
+				ValueJSON: `"TODO"`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	plain := stripANSI(rendered)
+	if !strings.Contains(plain, `grep <missing>`) {
+		t.Fatalf("missing grep pattern should occupy the main parameter slot:\n%s", plain)
+	}
+	if strings.Contains(plain, "pattern=<missing>") {
+		t.Fatalf("missing grep pattern should render as value-only placeholder:\n%s", plain)
+	}
+	if !strings.Contains(plain, `.p`) {
+		t.Fatalf("ignored grep pattern should stay in the option list:\n%s", plain)
+	}
+	if !strings.Contains(plain, `includes=**/*.go`) {
+		t.Fatalf("grep should keep valid options in the option list:\n%s", plain)
+	}
+	if strings.Contains(plain, "path=/tmp/workspace") {
+		t.Fatalf("grep should keep normal path elision rules:\n%s", plain)
+	}
+	if !strings.Contains(rendered, `;9m`) {
+		t.Fatalf("ignored grep pattern is not struck through: %q", rendered)
+	}
+	if !strings.Contains(rendered, "38;5;196m") {
+		t.Fatalf("missing grep pattern is not red: %q", rendered)
+	}
+}
+
+func TestReadCardShowsInvalidArgumentInRed(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameRead,
+		Content:       `{"path":"sample.go","limit":"forty"}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match Read schema: args.limit must be an integer",
+		Audit: &message.ToolArgsAudit{
+			InvalidArgs: []message.InvalidToolArg{{
+				Path:      "args.limit",
+				ValueJSON: `"forty"`,
+				Reason:    message.InvalidToolArgReasonInvalid,
+			}},
+		},
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	plain := stripANSI(rendered)
+	if !strings.Contains(plain, "limit=forty") {
+		t.Fatalf("invalid argument missing:\n%s", plain)
+	}
+	if !strings.Contains(rendered, "38;5;196m") {
+		t.Fatalf("invalid argument is not red: %q", rendered)
+	}
+}
+
+func TestExecutionFailureKeepsValidArgumentsNormal(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameGlob,
+		Content:       `{"patterns":["**/*.go"],"path":"restricted"}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "permission denied",
+	}
+	lines := block.Render(120, "")
+	header := renderedLineContaining(t, lines, "**/*.go")
+	for _, cell := range renderedCellsForText(t, header, "**/*.go") {
+		if colorsEqual(cell.Style.Fg, colorOfTheme(currentTheme.ErrorFg)) {
+			t.Fatalf("valid argument cell %q unexpectedly uses error color", cell.Content)
+		}
+	}
+}
+
+func TestReadCardStrikesThroughShadowedDuplicateValues(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameRead,
+		Content:       `{"limit":40,"offset":300,"path":"second.go"}`,
+		ResultDone:    true,
+		ResultContent: "READ_RESULT lines=301-301 total=301\npackage sample",
+		Audit: &message.ToolArgsAudit{
+			EffectiveArgsJSON: `{"limit":40,"offset":300,"path":"second.go"}`,
+			IgnoredArgs: []message.IgnoredToolArg{
+				{Path: "args.limit", ValueJSON: "75", Reason: message.IgnoredToolArgReasonShadowed},
+				{Path: "args.offset", ValueJSON: "664", Reason: message.IgnoredToolArgReasonShadowed},
+				{Path: "args.path", ValueJSON: `"first.go"`, Reason: message.IgnoredToolArgReasonShadowed},
+			},
+		},
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	plain := stripANSI(rendered)
+	for _, want := range []string{"second.go (limit=40, offset=300, ", "limit=75", "offset=664", "path=first.go"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered card missing %q:\n%s", want, plain)
+		}
+	}
+	if strings.Count(plain, "limit=40") != 1 || strings.Count(plain, "offset=300") != 1 {
+		t.Fatalf("effective duplicate values rendered more than once:\n%s", plain)
+	}
+	if strings.Count(rendered, ";9m") < 3 {
+		t.Fatalf("shadowed values are not all struck through: %q", rendered)
 	}
 }
 
@@ -1934,6 +2507,43 @@ func TestDeleteHeaderShowsFilePath(t *testing.T) {
 	}
 	if !strings.Contains(joined, "remove obsolete file") {
 		t.Fatalf("expected delete header to show reason; got:\n%s", joined)
+	}
+}
+
+func TestDeleteCardShowsDiagnosticPathsLikeNormalHeader(t *testing.T) {
+	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          tools.NameDelete,
+		Content:           `{".paths":["/tmp/workspace/internal/tui/obsolete.go","/tmp/workspace/cmd/old.go"],"reason":"cleanup generated files"}`,
+		ResultDone:        true,
+		ResultStatus:      agent.ToolResultStatusError,
+		ResultContent:     "arguments do not match delete schema: args.paths is required",
+		displayWorkingDir: wd,
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON: `{".paths":["/tmp/workspace/internal/tui/obsolete.go","/tmp/workspace/cmd/old.go"],"reason":"cleanup generated files"}`,
+			InvalidArgs: []message.InvalidToolArg{{
+				Path:   "args.paths",
+				Reason: message.InvalidToolArgReasonMissing,
+			}},
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args..paths",
+				ValueJSON: `["/tmp/workspace/internal/tui/obsolete.go","/tmp/workspace/cmd/old.go"]`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	joined := stripANSI(rendered)
+	if !strings.Contains(joined, "delete <missing> (cleanup generated files, .paths=internal/tui/obsolete.go,cmd/old.go)") {
+		t.Fatalf("expected delete diagnostic header to keep the ignored paths beside the reason; got:\n%s", joined)
+	}
+	if !strings.Contains(rendered, ";9m") {
+		t.Fatalf("ignored delete paths are not struck through: %q", rendered)
+	}
+	if strings.Contains(joined, `["/tmp/workspace/internal/tui/obsolete.go","/tmp/workspace/cmd/old.go"]`) {
+		t.Fatalf("did not expect delete diagnostic header to keep JSON array formatting; got:\n%s", joined)
 	}
 }
 

@@ -78,14 +78,15 @@ func (t DeleteTool) Parameters() map[string]any {
 func (t DeleteTool) IsReadOnly() bool { return false }
 
 // DecodeDeleteRequest parses, validates, cleans, de-duplicates, and sorts the
-// Delete tool arguments. Unknown fields are rejected.
+// Delete tool arguments. Unknown fields are ignored (the agent pipeline strips
+// them before execution and surfaces them to the model), so only the declared
+// fields are decoded here.
 func DecodeDeleteRequest(raw json.RawMessage) (DeleteRequest, error) {
 	return DecodeDeleteRequestInDir(raw, "")
 }
 
 func DecodeDeleteRequestInDir(raw json.RawMessage, baseDir string) (DeleteRequest, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
 
 	var req DeleteRequest
 	if err := dec.Decode(&req); err != nil {

@@ -89,14 +89,11 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 		// repetition removed
 
 		if payload, ok, drift := turn.streamingToolExec.Promote(effective); ok {
-			audit := payload.Audit
-			if execResult.Audit != nil {
-				audit = execResult.Audit
-			}
+			audit := promotedToolAudit(execResult.Audit, payload.Audit, payload.ArgsJSON)
 			tr := &toolResult{
 				CallID:           payload.CallID,
 				Name:             payload.Name,
-				ArgsJSON:         execResult.EffectiveArgsJSON,
+				ArgsJSON:         payload.ArgsJSON,
 				Audit:            audit,
 				Result:           payload.Result,
 				Error:            payload.Error,

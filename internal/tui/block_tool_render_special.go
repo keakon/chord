@@ -89,7 +89,7 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 		}
 	}
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 // renderTodoCall renders a TodoWrite tool call as a todo list with status markers.
@@ -106,6 +106,7 @@ func (b *Block) renderTodoCall(width int, spinnerFrame string) []string {
 
 	prefix := b.renderToolPrefix(spinnerFrame)
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
+	headerLine = appendToolHeaderSummary(headerLine, "", mergeHeaderOptions("", b.diagnosticHeaderOptions()), "", cardWidth-4)
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
 
 	var result []string
@@ -130,7 +131,7 @@ func (b *Block) renderTodoCall(width int, spinnerFrame string) []string {
 	// Empty list: don't show "(no items)" prominently; just omit the list body
 
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 // decodeTodoCallItems decodes the todos array item by item so one malformed
@@ -272,7 +273,7 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 		}
 	}
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 func questionAnswerForRender(answers []tools.QuestionAnswer, index int, header string) (tools.QuestionAnswer, bool) {
@@ -400,7 +401,7 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 		}
 	}
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 // renderNotifyCall renders a Notify tool call with semantic display.
@@ -509,5 +510,5 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 		}
 	}
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }

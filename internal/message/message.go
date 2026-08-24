@@ -64,13 +64,48 @@ func (p ContentPart) IsBinary() bool {
 	return p.Type == ContentPartImage || p.Type == ContentPartPDF
 }
 
-// ToolArgsAudit records how a tool call's effective execution arguments differ
-// from the model's original request after user confirmation.
+type IgnoredToolArgReason string
+
+const (
+	IgnoredToolArgReasonUnrecognized IgnoredToolArgReason = "unrecognized"
+	IgnoredToolArgReasonShadowed     IgnoredToolArgReason = "shadowed"
+)
+
+// IgnoredToolArg records one argument value that was present in the requested
+// JSON but did not participate in execution. ValueJSON preserves the original
+// JSON value for user-visible tool-card rendering.
+type IgnoredToolArg struct {
+	Path      string               `json:"path"`
+	ValueJSON string               `json:"value_json,omitempty"`
+	Reason    IgnoredToolArgReason `json:"reason"`
+}
+
+type InvalidToolArgReason string
+
+const (
+	InvalidToolArgReasonMissing InvalidToolArgReason = "missing"
+	InvalidToolArgReasonInvalid InvalidToolArgReason = "invalid"
+)
+
+// InvalidToolArg records an argument that prevented a tool call from passing
+// schema validation. Missing arguments have no ValueJSON; invalid arguments
+// retain the value supplied by the caller for inline TUI highlighting.
+type InvalidToolArg struct {
+	Path      string               `json:"path"`
+	ValueJSON string               `json:"value_json,omitempty"`
+	Reason    InvalidToolArgReason `json:"reason"`
+}
+
+// ToolArgsAudit records how a tool call's requested arguments differ from the
+// effective execution arguments after confirmation, hooks, and automatic
+// argument sanitization.
 type ToolArgsAudit struct {
-	OriginalArgsJSON  string `json:"original_args_json,omitempty"`
-	EffectiveArgsJSON string `json:"effective_args_json,omitempty"`
-	UserModified      bool   `json:"user_modified,omitempty"`
-	EditSummary       string `json:"edit_summary,omitempty"`
+	OriginalArgsJSON  string           `json:"original_args_json,omitempty"`
+	EffectiveArgsJSON string           `json:"effective_args_json,omitempty"`
+	UserModified      bool             `json:"user_modified,omitempty"`
+	EditSummary       string           `json:"edit_summary,omitempty"`
+	IgnoredArgs       []IgnoredToolArg `json:"ignored_args,omitempty"`
+	InvalidArgs       []InvalidToolArg `json:"invalid_args,omitempty"`
 }
 
 // ToolFileState records durable file-state metadata emitted by file tools.
@@ -145,6 +180,8 @@ func (a *ToolArgsAudit) Clone() *ToolArgsAudit {
 		return nil
 	}
 	cloned := *a
+	cloned.IgnoredArgs = append([]IgnoredToolArg(nil), a.IgnoredArgs...)
+	cloned.InvalidArgs = append([]InvalidToolArg(nil), a.InvalidArgs...)
 	return &cloned
 }
 

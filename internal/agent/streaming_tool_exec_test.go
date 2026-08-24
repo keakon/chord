@@ -48,12 +48,16 @@ func TestSpeculativeExecutionJournalsStartedBeforeMutation(t *testing.T) {
 		},
 	}
 
-	call := message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: json.RawMessage(`{"path":"` + targetPath + `","content":"data"}`)}
-	if _, err := pipeline.executeSpeculative(t.Context(), call); err != nil {
+	call := message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: json.RawMessage(`{"path":"` + targetPath + `","content":"data","extra":1}`)}
+	execResult, err := pipeline.executeSpeculative(t.Context(), call)
+	if err != nil {
 		t.Fatalf("executeSpeculative: %v", err)
 	}
 	if len(recs) != 1 || recs[0].CallID != "write-1" || recs[0].State != recovery.ToolActivityStateStarted {
 		t.Fatalf("journal records = %#v, want one started record for write-1", recs)
+	}
+	if !strings.Contains(execResult.Result, "args.extra") {
+		t.Fatalf("result = %q, want ignored-args note on speculative execution", execResult.Result)
 	}
 }
 
@@ -97,7 +101,7 @@ func TestSpeculativeExecutionRejectsInvisibleEditFamilyToolBeforeFileMutation(t 
 		},
 	}
 
-	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"` + targetPath + `","patch":"@@\n-old line\n+new line\n"}`)}
+	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: ` + targetPath + `\n@@\n-old line\n+new line\n*** End Patch"}`)}
 	_, err := pipeline.executeSpeculative(t.Context(), call)
 	if err == nil {
 		t.Fatal("executeSpeculative patch on edit-only surface succeeded; want rejection")
@@ -137,6 +141,38 @@ func TestStreamingToolExecutorPromotesCompletedResult(t *testing.T) {
 	}
 	if payload.Result != "ok" || payload.TurnID != 7 {
 		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func TestStreamingToolExecutorPromotesSanitizedArguments(t *testing.T) {
+	exec := NewStreamingToolExecutor(7, t.Context(), nil, func(context.Context, message.ToolCall) (ToolExecutionResult, error) {
+		return ToolExecutionResult{
+			EffectiveArgsJSON: `{"path":"README.md"}`,
+			Audit: &message.ToolArgsAudit{
+				OriginalArgsJSON:  `{"path":"README.md","format":"json"}`,
+				EffectiveArgsJSON: `{"path":"README.md"}`,
+				IgnoredArgs: []message.IgnoredToolArg{{
+					Path:      "args.format",
+					ValueJSON: `"json"`,
+					Reason:    message.IgnoredToolArgReasonUnrecognized,
+				}},
+			},
+			Result: "ok",
+		}, nil
+	})
+	call := message.ToolCall{ID: "call-sanitized", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md","format":"json"}`)}
+	if !exec.Start(call) {
+		t.Fatal("Start returned false")
+	}
+	payload, ok, drift := exec.Promote(call)
+	if drift || !ok || payload == nil {
+		t.Fatalf("Promote = payload:%#v ok:%t drift:%t", payload, ok, drift)
+	}
+	if payload.ArgsJSON != `{"path":"README.md"}` {
+		t.Fatalf("ArgsJSON = %q, want sanitized arguments", payload.ArgsJSON)
+	}
+	if payload.Audit == nil || len(payload.Audit.IgnoredArgs) != 1 {
+		t.Fatalf("Audit = %#v, want ignored argument metadata", payload.Audit)
 	}
 }
 
@@ -188,7 +224,7 @@ func TestStreamingToolExecutorArgsDriftWaitsForCompletedRollback(t *testing.T) {
 		}, nil
 	})
 	exec.SetTraceCallbacks(nil, func(_, _ string, _ time.Time) { close(completed) }, nil)
-	if !exec.Start(message.ToolCall{ID: "call-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"demo.txt","patch":"@@\n-before\n+after\n"}`)}) {
+	if !exec.Start(message.ToolCall{ID: "call-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+after\n*** End Patch"}`)}) {
 		t.Fatal("Start returned false")
 	}
 	select {
@@ -201,7 +237,7 @@ func TestStreamingToolExecutorArgsDriftWaitsForCompletedRollback(t *testing.T) {
 	var payload *ToolResultPayload
 	var ok, drift bool
 	go func() {
-		payload, ok, drift = exec.Promote(message.ToolCall{ID: "call-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"demo.txt","patch":"@@\n-before\n+final\n"}`)})
+		payload, ok, drift = exec.Promote(message.ToolCall{ID: "call-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+final\n*** End Patch"}`)})
 		close(promoteReturned)
 	}()
 

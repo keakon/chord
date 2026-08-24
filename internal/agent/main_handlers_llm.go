@@ -621,12 +621,9 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 
 			if payload, ok, drift := turn.streamingToolExec.Promote(effective); ok {
 				promoted = true
-				turn.recordPendingToolCall(PendingToolCall{CallID: effective.ID, Name: effective.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit})
 				payload.TurnID = turnID
-				payload.ArgsJSON = execResult.EffectiveArgsJSON
-				if execResult.Audit != nil {
-					payload.Audit = execResult.Audit
-				}
+				payload.Audit = promotedToolAudit(execResult.Audit, payload.Audit, payload.ArgsJSON)
+				turn.recordPendingToolCall(PendingToolCall{CallID: effective.ID, Name: effective.Name, ArgsJSON: payload.ArgsJSON, Audit: payload.Audit})
 				// Commit missing post-exec side effects for reused speculative results before persisting.
 				if err := a.commitPromotedToolSideEffects(effective, payload); err != nil {
 					payload.Error = fmt.Errorf("commit promoted tool side effects: %w", err)

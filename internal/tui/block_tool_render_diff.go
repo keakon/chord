@@ -147,12 +147,15 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		headerLine += " " + DimStyle.Render(filePath)
 	}
 	replaceArgs, hasReplaceArgs := replaceEditArgs{}, false
+	var headerOpts []string
 	if b.ToolName == tools.NameEdit {
 		replaceArgs, hasReplaceArgs = parseReplaceEditArgs(b.editPatchArgsJSON())
 		if hasReplaceArgs && replaceArgs.ReplaceAll != nil && *replaceArgs.ReplaceAll {
-			headerLine += " " + DimStyle.Render("(replace_all=true)")
+			headerOpts = append(headerOpts, "replace_all=true")
 		}
 	}
+	headerOpts = append(headerOpts, b.diagnosticHeaderOptions()...)
+	headerLine = appendToolHeaderSummary(headerLine, "", mergeHeaderOptions("", headerOpts), "", cardWidth-4)
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
 	if b.Collapsed {
@@ -172,7 +175,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ %s (%d lines)", summary, lineCount)))
 			}
 		}
-		return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 	diffLines := strings.Split(displayDiff, "\n")
 	diffFileCount := unifiedDiffFileCount(diffLines)
@@ -190,7 +193,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		if applyPatchNoChanges {
 			result = append(result, DimStyle.Render("  ↳ No changes"))
 		}
-		if strings.TrimSpace(displayDiff) != "" && !b.toolResultIsCancelled() {
+		if strings.TrimSpace(displayDiff) != "" && b.toolResultIsError() {
 			result = append(result, ToolResultExpandedStyle.Render("  ↳ Applied changes:"))
 		}
 	}
@@ -403,7 +406,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		}
 	}
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 type applyPatchErrorSections struct {

@@ -46,6 +46,11 @@ func sampleMessages() []message.Message {
 				EffectiveArgsJSON: `{"path":"/tmp/test.go"}`,
 				UserModified:      true,
 				EditSummary:       "adjusted target path",
+				IgnoredArgs: []message.IgnoredToolArg{{
+					Path:      "args.format",
+					ValueJSON: `"json"`,
+					Reason:    message.IgnoredToolArgReasonUnrecognized,
+				}},
 			},
 		},
 		{
@@ -268,6 +273,11 @@ func TestToMessagesPreservesAudit(t *testing.T) {
 				OriginalArgsJSON:  `{"command":"pwd"}`,
 				EffectiveArgsJSON: `{"command":"ls"}`,
 				UserModified:      true,
+				IgnoredArgs: []message.IgnoredToolArg{{
+					Path:      "args.format",
+					ValueJSON: `"json"`,
+					Reason:    message.IgnoredToolArgReasonUnrecognized,
+				}},
 			},
 		}},
 	}
@@ -277,6 +287,9 @@ func TestToMessagesPreservesAudit(t *testing.T) {
 	}
 	if msgs[0].Audit == nil || !msgs[0].Audit.UserModified || msgs[0].Audit.EffectiveArgsJSON != `{"command":"ls"}` {
 		t.Fatalf("msgs[0].Audit = %#v", msgs[0].Audit)
+	}
+	if len(msgs[0].Audit.IgnoredArgs) != 1 || msgs[0].Audit.IgnoredArgs[0].ValueJSON != `"json"` {
+		t.Fatalf("msgs[0].Audit.IgnoredArgs = %#v", msgs[0].Audit.IgnoredArgs)
 	}
 }
 

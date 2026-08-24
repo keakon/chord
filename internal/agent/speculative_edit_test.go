@@ -211,8 +211,7 @@ func TestStreamingToolExecutor_ApplyPatchToolPreWriteStateCapture(t *testing.T) 
 
 	// Execute ApplyPatchTool
 	patchArgs, _ := json.Marshal(map[string]any{
-		"path":  "patch.txt",
-		"patch": "@@\n line1\n-line2\n+LINE2\n",
+		"patch": "*** Begin Patch\n*** Update File: patch.txt\n@@\n line1\n-line2\n+LINE2\n*** End Patch",
 	})
 	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: patchArgs}
 

@@ -194,7 +194,7 @@ func TestPartiallyAppliedPatchRestoresCommittedFileState(t *testing.T) {
 func TestLegacyPatchChangedFilesRestoreFromTranscript(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.sidebar.Update(nil, "main", "builder")
-	args := []byte(`{"path":"src/demo.go","patch":"@@\n-old\n+new"}`)
+	args := []byte(`{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`)
 	m.rebuildSidebarFileEditsFromMessages([]message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "call-1", Name: "patch", Args: args}}},
 		{Role: "tool", ToolCallID: "call-1", ToolStatus: string(agent.ToolResultStatusSuccess), ToolDiff: "diff", ToolDiffAdded: 1, ToolDiffRemoved: 1},

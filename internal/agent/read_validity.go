@@ -331,6 +331,14 @@ func editTargetRecords(index int, argsJSON string, state *message.ToolFileState)
 			keys.add(path)
 		}
 	}
+	if keys.len() == 0 {
+		if targets, err := tools.ApplyPatchDisplayTargets(json.RawMessage(argsJSON)); err == nil {
+			for _, target := range targets {
+				keys.add(target.SourcePath)
+				keys.add(target.TargetPath)
+			}
+		}
+	}
 	records := make(map[string]editValidityRecord)
 	localized := editValidityRecord{index: index}
 	if state != nil {

@@ -30,10 +30,15 @@ func TestNotifyPeerValidatesAndRoutesNotice(t *testing.T) {
 	}
 }
 
-func TestNotifyPeerRejectsRequestResponseFields(t *testing.T) {
-	tool := NewNotifyPeerTool(&peerMessengerStub{})
-	if _, err := tool.Execute(context.Background(), json.RawMessage(`{"target_task_id":"task-b","message":"answer","message_type":"response","correlation_id":"corr-1"}`)); err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("structured peer fields error = %v", err)
+func TestNotifyPeerIgnoresUnknownFields(t *testing.T) {
+	messenger := &peerMessengerStub{}
+	tool := NewNotifyPeerTool(messenger)
+	result, err := tool.Execute(context.Background(), json.RawMessage(`{"target_task_id":"task-b","message":"answer","message_type":"response","correlation_id":"corr-1"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(result, `"task_id":"task-b"`) || messenger.request.Message != "answer" {
+		t.Fatalf("result=%q request=%#v", result, messenger.request)
 	}
 }
 

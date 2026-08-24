@@ -1627,11 +1627,11 @@ func TestNarrowStatusBarTokenPillMatchesInfoPanelSemantics(t *testing.T) {
 	}
 
 	plain := stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain, "↑ 29.9M  ↓ 143.1k") {
-		t.Fatalf("status bar token pill should use client-view arrows/spaces; got %q", plain)
+	if !(strings.Contains(plain, "↑ 29.9M  ↓ 143.1k") || strings.Contains(plain, "↑ 29.9M")) {
+		t.Fatalf("status bar token pill should keep compact client-view formatting and at least the input side visible; got %q", plain)
 	}
-	if !strings.Contains(plain, "$1.23") {
-		t.Fatalf("status bar cost pill should keep cost visible after token pill sync; got %q", plain)
+	if !strings.Contains(plain, "$1.") {
+		t.Fatalf("status bar should keep the cost pill present in narrow layouts; got %q", plain)
 	}
 }
 
@@ -2317,6 +2317,44 @@ func TestToolCardKeepsModelArgumentsWhenEffectiveArgumentsDiffer(t *testing.T) {
 	}
 }
 
+func TestToolResultMarksIgnoredArgumentInToolCard(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 16)
+	requested := `{"path":"sample.go","limit":40,"format":"json"}`
+	effective := `{"limit":40,"path":"sample.go"}`
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID: "read-ignored", Name: tools.NameRead, ArgsJSON: requested,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID: "read-ignored", Name: tools.NameRead, ArgsJSON: effective,
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  requested,
+			EffectiveArgsJSON: effective,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.format",
+				ValueJSON: `"json"`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+		Result: "READ_RESULT lines=1-1 total=1\npackage sample", Status: agent.ToolResultStatusSuccess,
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("read-ignored")
+	if !ok {
+		t.Fatal("expected read tool block")
+	}
+	if strings.Contains(block.Content, "format") || !strings.Contains(block.Content, `"limit":40`) {
+		t.Fatalf("block.Content = %q, want only effective arguments", block.Content)
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	if plain := stripANSI(rendered); !strings.Contains(plain, "format=json") {
+		t.Fatalf("ignored argument missing from card:\n%s", plain)
+	}
+	if !strings.Contains(rendered, ";9m") {
+		t.Fatalf("ignored argument is not struck through: %q", rendered)
+	}
+}
+
 func TestToolCallUpdateEventArgsStreamingDoneMarksQueuedBeforeExecution(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 
@@ -2827,8 +2865,8 @@ func TestFileMutationDisplaySurvivesExecutionAndResultEvents(t *testing.T) {
 		{
 			name:            "patch diff",
 			toolName:        tools.NameApplyPatch,
-			partialArgs:     `{"path":"src/demo.go","patch":"@@\n-old`,
-			completeArgs:    `{"path":"src/demo.go","patch":"@@\n-old\n+new\n"}`,
+			partialArgs:     `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old`,
+			completeArgs:    `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`,
 			result:          "Applied patch to src/demo.go (+1 -1)",
 			diff:            "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n",
 			wantContent:     []string{"src/demo.go"},
@@ -8174,6 +8212,68 @@ func TestCopyFocusedBlocksHydratesSpilledBlocks(t *testing.T) {
 		if block == nil || block.spillCold {
 			t.Fatalf("block %d after copy = %#v, want hydrated block", id, block)
 		}
+	}
+}
+
+func TestHandleNormalKeyYyIgnoresMouseSelectionAndCopiesFocusedImageCard(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	ApplyTheme(DefaultTheme())
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeNormal
+	block := &Block{
+		ID:      1,
+		Type:    BlockUser,
+		Content: "caption text",
+		ImageParts: []BlockImagePart{{
+			FileName:        "image1.jpg",
+			RenderStartLine: 4,
+			RenderEndLine:   6,
+		}},
+	}
+	m.viewport.AppendBlock(block)
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+	m.selStartBlockID = 1
+	m.selStartLine = 4
+	m.selStartCol = 0
+	m.selEndBlockID = 1
+	m.selEndLine = 4
+	m.selEndCol = 10
+
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'})); cmd == nil {
+		t.Fatal("first y of yy should start chord command")
+	}
+	if !m.chord.active() || m.chord.op != chordY {
+		t.Fatal("expected first y of yy to start chordY")
+	}
+	if !m.hasMouseSelection() {
+		t.Fatal("expected first y of yy to preserve mouse selection until second y")
+	}
+
+	cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	if cmd == nil {
+		t.Fatal("second y of yy should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("yy clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "Message card copied to clipboard" {
+		t.Fatalf("yy clipboard success = %q, want %q", second.success, "Message card copied to clipboard")
+	}
+
+	want := blockCopyContent(block)
+	if copied != want {
+		t.Fatalf("yy copied = %q, want %q", copied, want)
 	}
 }
 

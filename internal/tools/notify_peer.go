@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -58,9 +57,9 @@ func (t *NotifyPeerTool) VisibleWithRuleset(ruleset permission.Ruleset) bool {
 
 func (t *NotifyPeerTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var request AgentPeerNoticeRequest
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
+	// Unknown fields are ignored: the agent pipeline strips them before
+	// execution and surfaces them to the model, mirroring every other tool.
+	if err := json.Unmarshal(raw, &request); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 	request.TargetTaskID = strings.TrimSpace(request.TargetTaskID)

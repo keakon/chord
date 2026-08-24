@@ -119,6 +119,9 @@ func (r streamToolDeltaReducer) maybeStartEarlySpeculativeTool(callID string) {
 	if !ok || !early.CanRenderBeforeToolUseEnd(json.RawMessage(call.ArgsJSON)) {
 		return
 	}
+	// Unknown fields follow the execution-time contract: the pipeline strips
+	// them before running the tool, so they must not disqualify speculative
+	// execution either.
 	if err := tools.ValidateToolArgs(tool, llm.UnwrapToolArgs(json.RawMessage(call.ArgsJSON))); err != nil {
 		return
 	}

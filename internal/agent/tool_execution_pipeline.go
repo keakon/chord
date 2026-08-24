@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/keakon/golog/log"
 
@@ -258,6 +260,134 @@ func pathWithinScope(base, target string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+// validateToolCallArgs runs every argument check a tool call must pass before
+// it executes. Malformed or empty arguments get their own truncation guidance;
+// otherwise the schema check strips fields the tool does not recognize instead
+// of rejecting the call, so a call whose required and known parameters are
+// correct still runs when the model hallucinates an extra field. Duplicate
+// object keys use JSON's last-value-wins semantics, with every shadowed value
+// recorded alongside stripped fields for model and UI feedback.
+//
+// This runs after permission edits and hooks so arguments introduced by the
+// user or a hook are held to the same contract as the model's, and it updates
+// the effective arguments so downstream consumers see the parameters that
+// actually ran. OriginalArgsJSON keeps meaning "what the model asked for before
+// an upstream edit": sanitization never touches it and never flips
+// UserModified. Values removed from a successful call are recorded in
+// IgnoredArgs; fields that prevent validation are recorded in InvalidArgs.
+func (p toolExecutionPipeline) validateToolCallArgs(tc *message.ToolCall, execResult *ToolExecutionResult) ([]message.IgnoredToolArg, []message.InvalidToolArg, error) {
+	if err := guardAbnormalToolArgs(p.registry, *tc, p.logPrefix, p.agentID); err != nil {
+		return nil, nil, err
+	}
+	if p.registry == nil {
+		return nil, nil, nil
+	}
+	tool, ok := p.registry.Get(tc.Name)
+	if !ok {
+		return nil, nil, nil
+	}
+	original := tc.Args
+	if execResult != nil && len(execResult.originalArgsForValidation) > 0 {
+		original = execResult.originalArgsForValidation
+	}
+	sanitized, ignored, invalid, err := tools.SanitizeUnknownArgsWithDiagnostics(tool, llm.UnwrapToolArgs(original))
+	if err != nil {
+		if execResult != nil && (len(ignored) > 0 || len(invalid) > 0) {
+			if execResult.Audit == nil {
+				execResult.Audit = &message.ToolArgsAudit{}
+			}
+			execResult.Audit.IgnoredArgs = slices.Clone(ignored)
+			execResult.Audit.InvalidArgs = slices.Clone(invalid)
+		}
+		return ignored, invalid, err
+	}
+	if len(ignored) == 0 && len(invalid) == 0 {
+		return nil, nil, nil
+	}
+	if execResult != nil {
+		if execResult.Audit == nil {
+			execResult.Audit = &message.ToolArgsAudit{}
+		}
+		if len(ignored) > 0 {
+			tc.Args = sanitized
+			execResult.EffectiveArgsJSON = string(sanitized)
+			execResult.Audit.EffectiveArgsJSON = string(sanitized)
+		}
+		if len(execResult.originalArgsForValidation) > 0 {
+			execResult.Audit = syncAuditEffectiveArgs(execResult.Audit, execResult.originalArgsForValidation, tc.Args)
+			execResult.originalArgsForValidation = nil
+		}
+		execResult.Audit.IgnoredArgs = slices.Clone(ignored)
+		execResult.Audit.InvalidArgs = slices.Clone(invalid)
+	}
+	return ignored, invalid, nil
+}
+
+// maxIgnoredArgNotePathRunes caps how much of an ignored argument path is
+// surfaced in a tool result, so a pathological parameter name cannot inflate
+// the model context; it mirrors the 80-rune preview limit used by
+// describeJSONValue in validation errors.
+const maxIgnoredArgNotePathRunes = 80
+
+func truncateIgnoredArgPath(path string) string {
+	if utf8.RuneCountInString(path) <= maxIgnoredArgNotePathRunes {
+		return path
+	}
+	runes := []rune(path)
+	return string(runes[:maxIgnoredArgNotePathRunes]) + "…"
+}
+
+// maxIgnoredArgNotePaths caps how many paths one note lists. The note exists so
+// the model can correct its next call, and a model that invented dozens of
+// fields learns that from the first handful; listing every one would echo an
+// entire hallucinated argument object back into the context.
+const maxIgnoredArgNotePaths = 20
+
+func joinIgnoredArgPaths(paths []string) string {
+	if len(paths) <= maxIgnoredArgNotePaths {
+		return strings.Join(paths, ", ")
+	}
+	return fmt.Sprintf("%s, and %d more", strings.Join(paths[:maxIgnoredArgNotePaths], ", "), len(paths)-maxIgnoredArgNotePaths)
+}
+
+// appendIgnoredArgsNote surfaces every value that did not participate in
+// execution. Unrecognized fields and shadowed duplicate occurrences are kept
+// separate so the model knows whether to remove a field or split a call.
+func appendIgnoredArgsNote(result string, ignored []message.IgnoredToolArg) string {
+	if len(ignored) == 0 {
+		return result
+	}
+	var unrecognized, shadowed []string
+	for _, item := range ignored {
+		path := truncateIgnoredArgPath(item.Path)
+		switch item.Reason {
+		case message.IgnoredToolArgReasonShadowed:
+			shadowed = appendUniqueString(shadowed, path)
+		default:
+			unrecognized = appendUniqueString(unrecognized, path)
+		}
+	}
+	notes := make([]string, 0, 2)
+	if len(unrecognized) > 0 {
+		notes = append(notes, "Note: ignored unrecognized parameter(s): "+joinIgnoredArgPaths(unrecognized))
+	}
+	if len(shadowed) > 0 {
+		notes = append(notes, "Note: ignored earlier duplicate parameter value(s): "+joinIgnoredArgPaths(shadowed)+"; the last values were used")
+	}
+	result = strings.TrimRight(result, "\n")
+	if result == "" {
+		return strings.Join(notes, "\n")
+	}
+	return result + "\n" + strings.Join(notes, "\n")
+}
+
+func appendUniqueString(values []string, value string) []string {
+	if slices.Contains(values, value) {
+		return values
+	}
+	return append(values, value)
+}
+
 func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall, fireHook bool) (ToolExecutionResult, error) {
 	tc.Name = tools.NormalizeName(tc.Name)
 	execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
@@ -299,7 +429,8 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 			}
 		}
 	}
-	if err := validateToolCallArguments(p.registry, tc, p.logPrefix, p.agentID); err != nil {
+	ignored, _, err := p.validateToolCallArgs(&tc, &execResult)
+	if err != nil {
 		return execResult, err
 	}
 	if err := p.validateWriteScope(tc); err != nil {
@@ -406,12 +537,15 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		err = wrapStaleEditError(err)
 	}
 	if !toolExecutionCommitted(err) {
+		if result != "" && staleWrite && tools.ErrorDescribedInResult(err) {
+			// Described-in-result errors are not appended to the model-visible
+			// text, so surface the stale-read root cause in the result itself.
+			result += "\nWarning: the target changed on disk since it was last read; failed hunks may be based on stale content. Re-read the failed targets and revise against current contents."
+		}
+		// The model must learn about stripped fields even when the call
+		// went on to fail, or it cannot tell which parameters took effect.
+		result = appendIgnoredArgsNote(result, ignored)
 		if result != "" {
-			if staleWrite && tools.ErrorDescribedInResult(err) {
-				// Described-in-result errors are not appended to the model-visible
-				// text, so surface the stale-read root cause in the result itself.
-				result += "\nWarning: the target changed on disk since it was last read; failed hunks may be based on stale content. Re-read the failed targets and revise against current contents."
-			}
 			execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 		}
 		return execResult, err
@@ -442,6 +576,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		stalePathCount = len(patchMutation.paths)
 	}
 	result = appendBackupNotes(result, tc.Name, staleWrite, stalePathCount, backupOutcome)
+	result = appendIgnoredArgsNote(result, ignored)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 	return execResult, err
 }
@@ -470,7 +605,11 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	if err := p.validateKnownTool(tc.Name); err != nil {
 		return execResult, err
 	}
-	if err := validateToolArgsAgainstSchema(p.registry, tc.Name, tc.Args); err != nil {
+	// Mirror execute(): the speculative run has no permission edits or hooks to
+	// wait for, but it owes the model the same argument contract — truncation
+	// guidance for malformed/empty args, unknown fields stripped and reported.
+	ignored, _, err := p.validateToolCallArgs(&tc, &execResult)
+	if err != nil {
 		return execResult, err
 	}
 	// Wall-clock execution anchor for the speculative run: after schema
@@ -560,6 +699,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 		attachApplyPatchFileChanges(execResult.FileState, patchDiffCollector.Changes())
 	}
 	result = appendBackupNotes(result, tc.Name, staleWrite, speculativeStaleWritePathCount(tc.Name, trackedFilePath, hooks), backupOutcome)
+	result = appendIgnoredArgsNote(result, ignored)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 	return execResult, err
 }
@@ -606,6 +746,7 @@ func normalizeCompatibleToolCallArgs(tc *message.ToolCall, result *ToolExecution
 	if tc == nil || tc.Name != tools.NameApplyPatch {
 		return nil
 	}
+	original := append(json.RawMessage(nil), tc.Args...)
 	normalized, err := tools.NormalizeApplyPatchArgs(tc.Args)
 	if err != nil {
 		return err
@@ -613,11 +754,9 @@ func normalizeCompatibleToolCallArgs(tc *message.ToolCall, result *ToolExecution
 	if string(normalized) == string(tc.Args) {
 		return nil
 	}
-	original := append(json.RawMessage(nil), tc.Args...)
 	tc.Args = normalized
 	if result != nil {
-		result.EffectiveArgsJSON = string(normalized)
-		result.Audit = syncAuditEffectiveArgs(result.Audit, original, normalized)
+		result.originalArgsForValidation = original
 	}
 	return nil
 }
@@ -931,7 +1070,11 @@ func requireObservedDestructiveWrite(track *filelock.FileTracker, agentID, toolN
 	return requireCurrentFileObservation(track, agentID, path, lock.preHash, action, writeStatus.ExternalChanged)
 }
 
-func validateToolCallArguments(registry *tools.Registry, tc message.ToolCall, logPrefix, agentID string) error {
+// guardAbnormalToolArgs turns the two truncation signatures — the malformed-args
+// sentinel and empty args for a tool that declares required fields — into
+// guidance the model can act on, instead of letting them reach schema checking
+// as ordinary shape errors.
+func guardAbnormalToolArgs(registry *tools.Registry, tc message.ToolCall, logPrefix, agentID string) error {
 	abnormality := classifyToolArgsAbnormality(registry, tc.Name, tc.Args)
 	if abnormality.Malformed {
 		if logPrefix != "" {
@@ -961,7 +1104,7 @@ func validateToolCallArguments(registry *tools.Registry, tc message.ToolCall, lo
 			tc.Name, abnormality.RequiredFields,
 		)
 	}
-	return validateToolArgsAgainstSchema(registry, tc.Name, tc.Args)
+	return nil
 }
 
 func (p toolExecutionPipeline) prepareTrackedToolFileAccess(tc message.ToolCall) (string, *deleteLockSet, error) {

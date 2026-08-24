@@ -87,6 +87,11 @@ func (b *Block) toolHeaderMeta() (paramSummary, mainPart, grayPart, collapsedMai
 	}
 	if !b.toolHeaderCacheCollapsedReady {
 		b.toolHeaderCacheCollapsedMain, b.toolHeaderCacheCollapsedGray, b.toolHeaderCacheCollapsedOK = formatCollapsedBashHeaderPartsWithParsed(keys, vals)
+		if b.ToolName == tools.NameShell {
+			if _, diagGray := b.bashDiagnosticHeaderParts(vals); diagGray != "" {
+				b.toolHeaderCacheCollapsedGray = diagGray
+			}
+		}
 		b.toolHeaderCacheCollapsedReady = true
 	}
 	if !b.toolHeaderCacheParamLinesOK {
@@ -110,6 +115,7 @@ func (b *Block) toolHeaderMeta() (paramSummary, mainPart, grayPart, collapsedMai
 // parseToolArgs parses the JSON args into an ordered list of key-value pairs.
 func parseToolArgs(argsJSON string) (keys []string, vals map[string]string) {
 	vals = map[string]string{}
+	positions := map[string]int{}
 	if argsJSON == "" {
 		return
 	}
@@ -131,11 +137,27 @@ func parseToolArgs(argsJSON string) (keys []string, vals map[string]string) {
 		if err := dec.Decode(&v); err != nil {
 			break
 		}
+		if pos, exists := positions[k]; exists {
+			keys[pos] = ""
+			delete(positions, k)
+			delete(vals, k)
+		}
 		if s := formatParamValue(v); s != "" {
+			positions[k] = len(keys)
 			keys = append(keys, k)
 			vals[k] = s
 		}
 	}
+	if len(positions) == len(keys) {
+		return
+	}
+	out := keys[:0]
+	for _, k := range keys {
+		if k != "" {
+			out = append(out, k)
+		}
+	}
+	keys = out
 	return
 }
 
@@ -478,6 +500,10 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 	case tools.NameLsp:
 		return b.lspToolHeaderParts()
 	case tools.NameDelete:
+		mainPart, grayPart := b.deleteDiagnosticHeaderParts(vals)
+		if mainPart != "" {
+			return mainPart, grayPart
+		}
 		filePaths := parseDeleteHeaderPaths(vals)
 		if len(filePaths) == 0 {
 			return "", ""
@@ -487,8 +513,37 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 			return b.displayToolPath(filePaths[0]), gray
 		}
 		return fmt.Sprintf("%d files", len(filePaths)), gray
-	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn:
-		return formatToolHeaderPartsWithParsed(b.ToolName, keys, cloneToolValsWithDisplayDirs(b, vals))
+	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn, tools.NameWebFetch, tools.NameSkill:
+		mainPart, grayPart := formatToolHeaderPartsWithParsed(b.ToolName, keys, cloneToolValsWithDisplayDirs(b, vals))
+		if b.ToolName == tools.NameGrep {
+			if diagMain, diagGray := b.grepDiagnosticHeaderParts(vals); diagMain != "" || diagGray != "" {
+				if mainPart == "" {
+					mainPart = diagMain
+				}
+				if grayPart == "" {
+					grayPart = diagGray
+				}
+			}
+		}
+		if b.ToolName == tools.NameShell {
+			if _, diagGray := b.bashDiagnosticHeaderParts(vals); diagGray != "" {
+				grayPart = diagGray
+			}
+		}
+		if b.ToolName != tools.NameGrep && b.ToolName != tools.NameShell {
+			// Tools without a dedicated diagnostic builder fold every ignored
+			// or invalid argument into their normal option group here.
+			grayPart = mergeHeaderOptions(grayPart, b.diagnosticHeaderOptions())
+		}
+		if mainPart == "" {
+			switch b.ToolName {
+			case tools.NameGlob:
+				mainPart, grayPart = b.globDiagnosticHeaderParts(vals)
+			case tools.NameGrep:
+				mainPart, grayPart = b.grepDiagnosticHeaderParts(vals)
+			}
+		}
+		return mainPart, grayPart
 	default:
 		return formatToolHeaderPartsWithParsed(b.ToolName, keys, vals)
 	}
@@ -539,7 +594,7 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn, tools.NameLsp:
 		return b.toolHeaderParamsWithDisplayDirs(vals)
 	default:
-		return formatToolHeaderParamsWithParsed(b.ToolName, keys, vals)
+		return formatToolHeaderParamsWithParsed(b.ToolName, b.headerParamSummaryKeys(keys, vals), vals)
 	}
 }
 

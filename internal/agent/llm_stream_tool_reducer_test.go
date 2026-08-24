@@ -265,6 +265,72 @@ func TestStreamToolDeltaReducerEarlyStartDoesNotRequireEmit(t *testing.T) {
 	}
 }
 
+func TestStreamToolDeltaReducerEarlyStartsWithUnknownFieldArgs(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	registry := tools.NewRegistry()
+	registry.Register(tools.ReadTool{})
+	started := make(chan message.ToolCall, 1)
+	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, context.Background(), nil, func(_ context.Context, call message.ToolCall) (ToolExecutionResult, error) {
+		started <- call
+		return ToolExecutionResult{EffectiveArgsJSON: string(call.Args), Result: "ok"}, nil
+	})
+	reducer := streamToolDeltaReducer{turn: turn, registry: registry, emit: func(AgentEvent) {}}
+
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{
+		ID:    "call",
+		Name:  tools.NameRead,
+		Input: `{"path":"README.md","extra":1}`,
+	}})
+
+	select {
+	case got := <-started:
+		if got.ID != "call" || got.Name != tools.NameRead {
+			t.Fatalf("started call = %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("read with an unrecognized field did not early start")
+	}
+}
+
+// readOnlyStrictArgsTool opts into per-invocation read-only batching so the
+// speculative allowlist admits it; strictArgsTool alone classifies exclusive.
+type readOnlyStrictArgsTool struct{ strictArgsTool }
+
+func (readOnlyStrictArgsTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
+
+func TestStreamToolDeltaReducerStartsSpeculativeWithUnknownFieldArgsAtEnd(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	registry := tools.NewRegistry()
+	registry.Register(readOnlyStrictArgsTool{})
+	started := make(chan message.ToolCall, 1)
+	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, context.Background(), nil, func(_ context.Context, call message.ToolCall) (ToolExecutionResult, error) {
+		started <- call
+		return ToolExecutionResult{EffectiveArgsJSON: string(call.Args), Result: "ok"}, nil
+	})
+	reducer := streamToolDeltaReducer{turn: turn, registry: registry, emit: func(AgentEvent) {}}
+
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{
+		ID:    "call",
+		Name:  "StrictArgs",
+		Input: `{"value":"ok","extra":1}`,
+	}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call"}})
+
+	select {
+	case got := <-started:
+		if got.Name != "StrictArgs" {
+			t.Fatalf("started call = %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("call with an unrecognized field did not start speculatively at tool_use_end")
+	}
+	select {
+	case got := <-started:
+		t.Fatalf("unexpected duplicate speculative start: %+v", got)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
 func TestStreamToolDeltaReducerDoesNotEarlyStartIncompleteArgs(t *testing.T) {
 	turn := newStreamToolReducerTestTurn()
 	registry := tools.NewRegistry()

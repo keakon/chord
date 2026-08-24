@@ -232,7 +232,7 @@ func TestExtractSelectionTextEditToolKeepsRenderedColumnsAligned(t *testing.T) {
 		ID:       1,
 		Type:     BlockToolCall,
 		ToolName: tools.NameEdit,
-		Content:  `{"patch":"*** Begin Patch\n*** Update File: internal/tui/block_tool_render_write.go\n@@\n-old\n+new\n*** End Patch\n"}`,
+		Content:  `{"path":"internal/tui/block_tool_render_write.go","patch":"@@\n-old\n+new\n"}`,
 		Diff: strings.Join([]string{
 			"@@ -1,4 +1,4 @@",
 			"-\t\tblockStyle2 := ToolBlockStyle",

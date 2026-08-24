@@ -61,7 +61,7 @@ func (b *Block) renderHandoffCall(width int, spinnerFrame string) []string {
 		}
 	}
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 // handoffPlanPathFromArgs extracts the plan_path argument from the handoff

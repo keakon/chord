@@ -27,7 +27,7 @@ func readValidityMessages() ([]message.Message, map[string]toolCallMeta) {
 		{Role: message.RoleTool, ToolCallID: "r1", Content: readBody(10, 20, 100, "alpha")},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "r2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "r2", Content: readBody(1, 50, 50, "beta")},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "p1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"b.go","patch":"@@\n-beta\n+gamma"}`)}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "p1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: b.go\n@@\n-beta\n+gamma\n*** End Patch"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "p1", Content: "Applied patch to b.go (+1 -1)", ToolStatus: "success"},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "r3", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go","offset":0,"limit":100}`)}}},
 		{Role: message.RoleTool, ToolCallID: "r3", Content: readBody(1, 100, 100, "alpha")},
@@ -184,7 +184,7 @@ func TestAnalyzeReadValidityMatchesPathSuffix(t *testing.T) {
 		{Role: message.RoleUser, Content: "u1"},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "r1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"/tmp/worktree/internal/agent/main.go"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "r1", Content: content},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "p1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"internal/agent/main.go","patch":"@@\n-a\n+b"}`)}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "p1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: internal/agent/main.go\n@@\n-a\n+b\n*** End Patch"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "p1", Content: "Applied patch to internal/agent/main.go (+1 -1)", ToolStatus: "success"},
 	}
 	validity := analyzeReadValidity(msgs, buildToolCallMeta(msgs))
@@ -200,7 +200,7 @@ func TestAnalyzeReadValidityDoesNotSuffixMatchDistinctCanonicalPaths(t *testing.
 	msgs := []message.Message{
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "r1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"` + readPath + `"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "r1", Content: content, FileState: &message.ToolFileState{Reads: []message.TrackedFileState{{Path: readPath, SHA256: "read", Exists: true}}}},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "p1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"path":"` + editPath + `","patch":"@@\n-a\n+b"}`)}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "p1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: ` + editPath + `\n@@\n-a\n+b\n*** End Patch"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "p1", Content: "Applied patch", ToolStatus: "success", FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: editPath, SHA256: "write", Exists: true}}}},
 	}
 	validity := analyzeReadValidity(msgs, buildToolCallMeta(msgs))

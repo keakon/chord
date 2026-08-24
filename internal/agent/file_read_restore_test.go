@@ -279,7 +279,7 @@ func TestRestoreTrackedFileStateReadThenPatchUsesPostWriteHash(t *testing.T) {
 
 	a := newRestoreEditTestAgent(t, projectRoot)
 	msgs := append(restoreReadMessages(t, "read-1", path, readHash, nil),
-		restoreAssistantCall(t, "patch-1", tools.NameApplyPatch, map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"}, nil),
+		restoreAssistantCall(t, "patch-1", tools.NameApplyPatch, map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+after\n*** End Patch"}, nil),
 		message.Message{
 			Role:       "tool",
 			ToolCallID: "patch-1",
@@ -569,7 +569,7 @@ func restoreAssistantCall(t *testing.T, callID, name string, args map[string]any
 
 func executeEdit(t *testing.T, a *MainAgent, path, oldString, newString string) error {
 	t.Helper()
-	args := mustJSONRaw(t, map[string]any{"path": filepath.Base(path), "patch": "@@\n-" + oldString + "\n+" + newString + "\n"})
+	args := mustJSONRaw(t, map[string]any{"patch": "*** Begin Patch\n*** Update File: " + filepath.Base(path) + "\n@@\n-" + oldString + "\n+" + newString + "\n*** End Patch"})
 	_, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "patch-test", Name: tools.NameApplyPatch, Args: args})
 	return err
 }

@@ -128,7 +128,7 @@ func TestRenderConfirmSummaryShowsWriteFilePathAndPreview(t *testing.T) {
 }
 
 func TestBuildConfirmSummaryShowsStructuredPatchFields(t *testing.T) {
-	summary := buildConfirmSummary(tools.NameApplyPatch, `{"path":"docs/README.md","patch":"@@\n-old\n+new\n"}`, nil, nil)
+	summary := buildConfirmSummary(tools.NameApplyPatch, `{"patch":"*** Begin Patch\n*** Update File: docs/README.md\n@@\n-old\n+new\n*** End Patch"}`, nil, nil)
 
 	if summary.Action != "Patch file" {
 		t.Fatalf("patch action = %q, want structured Patch action", summary.Action)
@@ -379,7 +379,7 @@ func TestRenderConfirmOptionsIncludesAddRuleForDelete(t *testing.T) {
 func TestRenderConfirmDialogAddRuleKeyShowsRulePickerAfterCachedSummary(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.workingDir = "/tmp/project"
-	m.confirm.request = &ConfirmRequest{ToolName: tools.NameEdit, ArgsJSON: `{"patch":"*** Begin Patch\n*** Update File: internal/tui/confirm_render.go\n@@\n-old\n+new\n*** End Patch\n"}`}
+	m.confirm.request = &ConfirmRequest{ToolName: tools.NameEdit, ArgsJSON: `{"path":"internal/tui/confirm_render.go","patch":"@@\n-old\n+new\n"}`}
 
 	summary := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(summary, "[M] Add rule…") {

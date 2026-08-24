@@ -520,7 +520,7 @@ func TestExecuteToolCall_RejectsInvisibleEditFamilyTool(t *testing.T) {
 	patchCall := message.ToolCall{
 		ID:   "patch-1",
 		Name: tools.NameApplyPatch,
-		Args: json.RawMessage(`{"path":"` + targetPath + `","patch":"@@\n-old line\n+new line\n"}`),
+		Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: ` + targetPath + `\n@@\n-old line\n+new line\n*** End Patch"}`),
 	}
 	_, err := a.executeToolCallWithHook(context.Background(), patchCall, false)
 	if err == nil {

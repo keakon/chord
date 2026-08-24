@@ -42,7 +42,7 @@ func TestSubAgent_ConsecutiveEditesWithWrappedArgsDoNotTriggerStaleReadInFinaliz
 	}
 
 	// Two consecutive Edites whose args are JSON-string-wrapped.
-	patch1Obj := map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"}
+	patch1Obj := map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+after\n*** End Patch"}
 	patch1Raw, err := json.Marshal(patch1Obj)
 	if err != nil {
 		t.Fatalf("Marshal patch1 args: %v", err)
@@ -55,7 +55,7 @@ func TestSubAgent_ConsecutiveEditesWithWrappedArgsDoNotTriggerStaleReadInFinaliz
 		t.Fatalf("Edit-1 failed: %v", err)
 	}
 
-	patch2Obj := map[string]any{"path": "demo.txt", "patch": "@@\n-after\n+final\n"}
+	patch2Obj := map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-after\n+final\n*** End Patch"}
 	patch2Raw, err := json.Marshal(patch2Obj)
 	if err != nil {
 		t.Fatalf("Marshal patch2 args: %v", err)
@@ -106,7 +106,7 @@ func TestSubAgent_ConsecutiveEditsTreatEquivalentRelativeAndAbsolutePathsAsSameF
 		t.Fatalf("Read failed: %v", err)
 	}
 
-	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
+	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+after\n*** End Patch"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}

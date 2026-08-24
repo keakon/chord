@@ -51,6 +51,7 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 		}
 		extras = append(extras, k+"="+truncateToolParamValue(vals[k]))
 	}
+	extras = append(extras, b.diagnosticHeaderOptions()...)
 
 	prefix := b.renderToolPrefix(spinnerFrame)
 	var result []string
@@ -59,8 +60,8 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 		headerLine += " " + DimStyle.Render(filePath)
 	}
 	if extraText := strings.Join(extras, ", "); extraText != "" {
-		if budget := max(cardWidth-writeHeaderExtrasReservedWidth, writeHeaderExtrasMinWidth); runewidth.StringWidth(extraText) > budget {
-			extraText = runewidth.Truncate(extraText, budget, "…")
+		if budget := max(cardWidth-writeHeaderExtrasReservedWidth, writeHeaderExtrasMinWidth); runewidth.StringWidth(stripANSI(extraText)) > budget {
+			extraText = truncateToolHeaderGray(extraText, budget)
 		}
 		headerLine += " " + DimStyle.Render(extraText)
 	}
@@ -68,7 +69,7 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	result = append(result, headerLine)
 
 	if b.Collapsed {
-		return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 
 	if !b.toolResultIsCancelled() && b.ResultContent != "" {
@@ -112,5 +113,5 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 		}
 	}
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }

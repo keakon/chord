@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/message"
@@ -360,7 +361,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	}
 
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
@@ -416,7 +417,7 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 		}
 	}
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 type proseControlArgs struct {
@@ -557,7 +558,7 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 	}
 
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 func doneResultIsRejected(result string) bool {
@@ -751,7 +752,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		} else {
 			appendBashCollapsedSummary(&result, b, vals, contentWidth, !collapsedOK)
 		}
-	} else if mainPart == "" && paramSummary == "" && len(keys) > 0 {
+	} else if mainPart == "" && paramSummary == "" && len(keys) > 0 && len(b.toolArgDiagnostics()) == 0 {
 		if expanded {
 			for _, k := range keys {
 				line := fmt.Sprintf("%s: %s", k, vals[k])
@@ -767,6 +768,12 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 				result = append(result, DimStyle.Render("    "+w))
 			}
 		}
+	} else if mainPart == "" && paramSummary == "" && len(keys) > 0 {
+		// Keep schema-invalid generic calls on the same inline parameter surface
+		// as successful calls. The diagnostic pass below applies the per-field
+		// style without hiding valid fields from the original request.
+		paramSummary = genericToolParamSummary(b.headerParamSummaryKeys(keys, vals), vals)
+		result[0] = appendToolHeaderSummary(toolHeaderLine, mainPart, grayPart, paramSummary, cardWidth-4)
 	}
 
 	if b.ResultContent != "" || b.DoneSummary != "" || b.toolExecutionIsQueued() {
@@ -845,7 +852,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		expandHintAdded = true
 	}
 	result = appendToolElapsedFooter(result, b)
-	return renderPrewrappedToolCard(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
 // renderToolPrefix returns a concise status indicator.
@@ -965,7 +972,7 @@ func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string
 	}
 
 	mainPart = sanitizeToolDisplayText(mainPart)
-	grayPart = sanitizeToolDisplayText(grayPart)
+	grayPart = sanitizeDisplayTextKeepingSGR(grayPart)
 	paramSummary = sanitizeToolDisplayText(paramSummary)
 	if mainPart == "" && grayPart == "" {
 		if paramSummary == "" {
@@ -974,11 +981,11 @@ func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string
 		return headerLine + " " + DimStyle.Render(truncateToolHeaderTail(paramSummary, budget))
 	}
 	if mainPart == "" {
-		return headerLine + " " + DimStyle.Render(truncateToolHeaderMiddle(grayPart, budget))
+		return headerLine + " " + DimStyle.Render(truncateToolHeaderGray(grayPart, budget))
 	}
 
 	mainWidth := runewidth.StringWidth(mainPart)
-	grayWidth := runewidth.StringWidth(grayPart)
+	grayWidth := runewidth.StringWidth(stripANSI(grayPart))
 	if grayPart == "" || mainWidth >= budget {
 		return headerLine + " " + truncateToolHeaderTail(mainPart, budget)
 	}
@@ -988,9 +995,22 @@ func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string
 		return headerLine + " " + mainPart
 	}
 	if grayWidth > remaining {
-		grayPart = truncateToolHeaderMiddle(grayPart, remaining)
+		grayPart = truncateToolHeaderGray(grayPart, remaining)
 	}
 	return headerLine + " " + mainPart + " " + DimStyle.Render(grayPart)
+}
+
+// truncateToolHeaderGray shortens a gray header tail that may embed ANSI
+// styled diagnostic options; rune-level middle cuts would split escape
+// sequences and leak their styles into the rest of the header line.
+func truncateToolHeaderGray(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if strings.Contains(s, "\x1b") {
+		return ansi.Truncate(s, maxWidth, "…")
+	}
+	return truncateToolHeaderMiddle(s, maxWidth)
 }
 
 func truncateToolHeaderTail(s string, maxWidth int) string {
@@ -1081,7 +1101,7 @@ func (b *Block) renderToolResult(width int) []string {
 			body = append(body, renderToolExpandHint(toolHintIndent, more))
 		}
 		b.appendImagePreviewLines(&body, contentWidth, toolCardBg, style.GetPaddingTop(), len(body) > 0)
-		return renderPrewrappedToolCard(style, cardWidth, toolCardTitle("TOOL RESULT", b.displayLabelID()), body, toolCardBg, railANSISeq("tool", b.Focused))
+		return b.renderToolCardWithIgnoredArgs(style, cardWidth, toolCardTitle("TOOL RESULT", b.displayLabelID()), body, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 	renderHeader := func(s string) string { return ToolResultExpandedStyle.Render(s) }
 	renderBody := func(s string) string { return s }
@@ -1105,5 +1125,5 @@ func (b *Block) renderToolResult(width int) []string {
 		result = append(result, "    "+renderBody(line))
 	}
 	b.appendImagePreviewLines(&result, contentWidth, toolCardBg, style.GetPaddingTop(), len(result) > 0)
-	return renderPrewrappedToolCard(style, cardWidth, toolCardTitle("TOOL RESULT", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(style, cardWidth, toolCardTitle("TOOL RESULT", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }

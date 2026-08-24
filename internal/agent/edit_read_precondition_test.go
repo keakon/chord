@@ -72,7 +72,7 @@ func TestMainAgent_EditCanPatchFileWithoutPriorSnapshot(t *testing.T) {
 	a.tools.Register(tools.ReadTool{})
 	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
 
-	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-before\n+after\n"})
+	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-before\n+after\n*** End Patch"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestMainAgent_EditAfterWriteTracksSnapshotForStaleBackup(t *testing.T) {
 		t.Fatalf("external WriteFile: %v", err)
 	}
 
-	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-external\n+after\n"})
+	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-external\n+after\n*** End Patch"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestMainAgent_FileMentionTracksSnapshotForStaleBackup(t *testing.T) {
 		t.Fatalf("external WriteFile: %v", err)
 	}
 
-	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-external\n+after\n"})
+	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-external\n+after\n*** End Patch"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
@@ -500,7 +500,7 @@ func TestMainAgent_EditStaleCreatesBackup(t *testing.T) {
 		t.Fatalf("external WriteFile: %v", err)
 	}
 
-	patchArgs, err := json.Marshal(map[string]any{"path": "demo.txt", "patch": "@@\n-external\n+after\n"})
+	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-external\n+after\n*** End Patch"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}
@@ -553,7 +553,7 @@ func TestMainAgent_EditBackupFailureDoesNotBlockEdit(t *testing.T) {
 		t.Fatalf("external WriteFile: %v", err)
 	}
 
-	patchArgs, err := json.Marshal(map[string]any{"path": "large.txt", "patch": "@@\n-external\n+patched\n"})
+	patchArgs, err := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Update File: large.txt\n@@\n-external\n+patched\n*** End Patch"})
 	if err != nil {
 		t.Fatalf("Marshal patch args: %v", err)
 	}

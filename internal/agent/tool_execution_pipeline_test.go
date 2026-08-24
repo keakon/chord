@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -585,6 +586,230 @@ func (requiredValueTool) Execute(_ context.Context, args json.RawMessage) (strin
 }
 func (requiredValueTool) IsReadOnly() bool { return true }
 
+type strictArgsTool struct{}
+
+func (strictArgsTool) Name() string        { return "StrictArgs" }
+func (strictArgsTool) Description() string { return "declares additionalProperties false" }
+func (strictArgsTool) Parameters() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []any{"value"},
+		"properties": map[string]any{
+			"value": map[string]any{"type": "string"},
+		},
+		"additionalProperties": false,
+	}
+}
+func (strictArgsTool) Execute(_ context.Context, args json.RawMessage) (string, error) {
+	var req struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(args, &req); err != nil {
+		return "", err
+	}
+	return "value=" + req.Value, nil
+}
+func (strictArgsTool) IsReadOnly() bool { return true }
+
+func newToolPipelineRegistry() *tools.Registry {
+	reg := tools.NewRegistry()
+	reg.Register(strictArgsTool{})
+	return reg
+}
+
+func TestToolExecutionPipelineStripsUnknownArgs(t *testing.T) {
+	pipeline := toolExecutionPipeline{registry: newToolPipelineRegistry()}
+	execResult, err := pipeline.execute(context.Background(), message.ToolCall{
+		ID:   "call-1",
+		Name: "StrictArgs",
+		Args: json.RawMessage(`{"value":"ok","extra":1,"noise":"x"}`),
+	}, false)
+	if err != nil {
+		t.Fatalf("execute returned error instead of stripping unknowns: %v", err)
+	}
+	if !strings.Contains(execResult.Result, "value=ok") {
+		t.Fatalf("result = %q, want executed known value", execResult.Result)
+	}
+	if !strings.Contains(execResult.Result, "args.extra") || !strings.Contains(execResult.Result, "args.noise") {
+		t.Fatalf("result = %q, want ignored-args note listing stripped fields", execResult.Result)
+	}
+	if strings.Contains(execResult.EffectiveArgsJSON, `"extra"`) || strings.Contains(execResult.EffectiveArgsJSON, `"noise"`) {
+		t.Fatalf("EffectiveArgsJSON = %s, want stripped arguments", execResult.EffectiveArgsJSON)
+	}
+	if strings.Contains(execResult.Result, `"extra":1`) {
+		t.Fatalf("result = %q, unknown field must not reach execution", execResult.Result)
+	}
+}
+
+type failingStrictArgsTool struct{ strictArgsTool }
+
+func (failingStrictArgsTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
+	return "", errors.New("boom")
+}
+
+func TestToolExecutionPipelineStripsUnknownArgsOnFailedExecution(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(failingStrictArgsTool{})
+	pipeline := toolExecutionPipeline{registry: registry}
+	execResult, err := pipeline.execute(context.Background(), message.ToolCall{
+		ID:   "call-2",
+		Name: "StrictArgs",
+		Args: json.RawMessage(`{"value":"ok","extra":1}`),
+	}, false)
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("execute err = %v, want boom failure", err)
+	}
+	if !strings.Contains(execResult.Result, "ignored unrecognized parameter(s)") || !strings.Contains(execResult.Result, "args.extra") {
+		t.Fatalf("result = %q, want ignored-args note on failed execution", execResult.Result)
+	}
+}
+
+func TestToolExecutionPipelineAuditsIgnoredArgumentValues(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(strictArgsTool{})
+	pipeline := toolExecutionPipeline{registry: registry}
+	execResult, err := pipeline.execute(context.Background(), message.ToolCall{
+		ID:   "call-audit",
+		Name: "StrictArgs",
+		Args: json.RawMessage(`{"value":"ok","format":"json"}`),
+	}, false)
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if execResult.Audit == nil || len(execResult.Audit.IgnoredArgs) != 1 {
+		t.Fatalf("audit = %#v, want one ignored argument", execResult.Audit)
+	}
+	ignored := execResult.Audit.IgnoredArgs[0]
+	if ignored.Path != "args.format" || ignored.ValueJSON != `"json"` || ignored.Reason != message.IgnoredToolArgReasonUnrecognized {
+		t.Fatalf("ignored = %#v", ignored)
+	}
+	if execResult.Audit.UserModified {
+		t.Fatal("automatic sanitization must not mark the arguments as user-modified")
+	}
+}
+
+func TestToolExecutionPipelineAuditsSchemaFailureArguments(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(strictArgsTool{})
+	pipeline := toolExecutionPipeline{registry: registry}
+	execResult, err := pipeline.execute(context.Background(), message.ToolCall{
+		ID:   "call-invalid-audit",
+		Name: "StrictArgs",
+		Args: json.RawMessage(`{".value":"ok"}`),
+	}, false)
+	if err == nil || !strings.Contains(err.Error(), "args.value is required") {
+		t.Fatalf("execute err = %v, want missing required value", err)
+	}
+	if execResult.Audit == nil {
+		t.Fatal("schema failure audit is nil")
+	}
+	if len(execResult.Audit.IgnoredArgs) != 1 || execResult.Audit.IgnoredArgs[0].Path != "args..value" {
+		t.Fatalf("ignored args = %#v, want .value", execResult.Audit.IgnoredArgs)
+	}
+	if len(execResult.Audit.InvalidArgs) != 1 || execResult.Audit.InvalidArgs[0].Path != "args.value" || execResult.Audit.InvalidArgs[0].Reason != message.InvalidToolArgReasonMissing {
+		t.Fatalf("invalid args = %#v, want missing value", execResult.Audit.InvalidArgs)
+	}
+}
+
+func TestToolExecutionPipelineUsesLastDuplicateArgumentValue(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(strictArgsTool{})
+	pipeline := toolExecutionPipeline{registry: registry}
+	execResult, err := pipeline.execute(context.Background(), message.ToolCall{
+		ID:   "call-duplicate",
+		Name: "StrictArgs",
+		Args: json.RawMessage(`{"value":"first","value":"last"}`),
+	}, false)
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if !strings.Contains(execResult.Result, "value=last") {
+		t.Fatalf("result = %q, want last duplicate value executed", execResult.Result)
+	}
+	if !strings.Contains(execResult.Result, "ignored earlier duplicate parameter value(s): args.value") {
+		t.Fatalf("result = %q, want duplicate-value note", execResult.Result)
+	}
+	if execResult.EffectiveArgsJSON != `{"value":"last"}` {
+		t.Fatalf("effective args = %q", execResult.EffectiveArgsJSON)
+	}
+	if execResult.Audit == nil || len(execResult.Audit.IgnoredArgs) != 1 || execResult.Audit.IgnoredArgs[0].ValueJSON != `"first"` {
+		t.Fatalf("audit = %#v, want shadowed first value", execResult.Audit)
+	}
+}
+
+func TestToolExecutionPipelineAuditsLegacyApplyPatchPathField(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.ApplyPatchTool{BaseDir: t.TempDir()})
+	pipeline := toolExecutionPipeline{registry: registry}
+	call := &message.ToolCall{
+		ID:   "call-patch-audit",
+		Name: tools.NameApplyPatch,
+		Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: demo.txt\n@@\n-old\n+new\n*** End Patch","path":"demo.txt"}`),
+	}
+	execResult := &ToolExecutionResult{originalArgsForValidation: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: demo.txt\n@@\n-old\n+new\n*** End Patch","path":"demo.txt"}`)}
+	ignored, invalid, err := pipeline.validateToolCallArgs(call, execResult)
+	if err != nil {
+		t.Fatalf("validateToolCallArgs returned error: %v", err)
+	}
+	if len(invalid) != 0 {
+		t.Fatalf("invalid = %#v, want none", invalid)
+	}
+	if len(ignored) != 1 || ignored[0].Path != "args.path" || ignored[0].Reason != message.IgnoredToolArgReasonUnrecognized {
+		t.Fatalf("ignored = %#v, want stripped legacy path field", ignored)
+	}
+	if execResult.Audit == nil || len(execResult.Audit.IgnoredArgs) != 1 || execResult.Audit.IgnoredArgs[0].Path != "args.path" {
+		t.Fatalf("audit = %#v, want ignored path field", execResult.Audit)
+	}
+	if execResult.EffectiveArgsJSON != `{"patch":"*** Begin Patch\n*** Update File: demo.txt\n@@\n-old\n+new\n*** End Patch"}` {
+		t.Fatalf("effective args = %q", execResult.EffectiveArgsJSON)
+	}
+}
+
+// Stripping runs after the confirmation edit, so a field the user typed is held
+// to the same contract as one the model hallucinated.
+func TestToolExecutionPipelineStripsUnknownArgsAddedByUserEdit(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(strictArgsTool{})
+	ruleset := permission.Ruleset{{Permission: "StrictArgs", Pattern: "*", Action: permission.ActionAsk}}
+	pipeline := toolExecutionPipeline{
+		registry:       registry,
+		currentRuleset: func() permission.Ruleset { return ruleset },
+		confirm: func(context.Context, string, string, []string, []string, []string, []string) (ConfirmResponse, error) {
+			return ConfirmResponse{Approved: true, FinalArgsJSON: `{"value":"edited","userExtra":1}`}, nil
+		},
+	}
+	execResult, err := pipeline.execute(context.Background(), message.ToolCall{
+		ID:   "call-edit",
+		Name: "StrictArgs",
+		Args: json.RawMessage(`{"value":"ok"}`),
+	}, false)
+	if err != nil {
+		t.Fatalf("execute rejected a user-edited unknown field instead of stripping it: %v", err)
+	}
+	if !strings.Contains(execResult.Result, "value=edited") {
+		t.Fatalf("result = %q, want the edited value executed", execResult.Result)
+	}
+	if !strings.Contains(execResult.Result, "args.userExtra") {
+		t.Fatalf("result = %q, want ignored-args note for the user-added field", execResult.Result)
+	}
+}
+
+// The speculative path has no hooks or permission edits, but it owes the model
+// the same truncation guidance the normal path gives.
+func TestSpeculativeExecutionRejectsEmptyArgsForRequiredParams(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(strictArgsTool{})
+	pipeline := toolExecutionPipeline{registry: registry}
+	_, err := pipeline.executeSpeculative(context.Background(), message.ToolCall{
+		ID:   "spec-empty",
+		Name: "StrictArgs",
+		Args: json.RawMessage(`{}`),
+	})
+	if err == nil || !strings.Contains(err.Error(), "empty arguments") {
+		t.Fatalf("err = %v, want max_tokens truncation guidance", err)
+	}
+}
+
 func newToolPipelineConsistencyAgents(t *testing.T) (*MainAgent, *SubAgent) {
 	t.Helper()
 	parent := newTestMainAgent(t, t.TempDir())
@@ -946,5 +1171,46 @@ func TestToolExecutionPipelineRechecksPermissionAfterHookModification(t *testing
 	}, true)
 	if err == nil || !errors.Is(err, errToolPermissionDenied) {
 		t.Fatalf("execute() err = %v, want permission deny for hook-modified args", err)
+	}
+}
+
+// TestTruncateIgnoredArgPath verifies ignored-argument paths are capped at
+// 80 runes so a pathological parameter name cannot inflate the tool result.
+func TestTruncateIgnoredArgPath(t *testing.T) {
+	short := "args.offset"
+	if got := truncateIgnoredArgPath(short); got != short {
+		t.Fatalf("truncateIgnoredArgPath(%q) = %q, want unchanged", short, got)
+	}
+	long := "args.root_value.deeply_nested." + strings.Repeat("子", maxIgnoredArgNotePathRunes)
+	got := truncateIgnoredArgPath(long)
+	if got != string([]rune(long)[:maxIgnoredArgNotePathRunes])+"…" {
+		t.Fatalf("truncateIgnoredArgPath should cut at %d runes and add an ellipsis, got %q (len %d)", maxIgnoredArgNotePathRunes, got, len([]rune(got)))
+	}
+	if !strings.Contains(appendIgnoredArgsNote("ok", []message.IgnoredToolArg{{Path: long, Reason: message.IgnoredToolArgReasonShadowed}}), "…") {
+		t.Fatal("appendIgnoredArgsNote should surface the truncated path")
+	}
+}
+
+// TestAppendIgnoredArgsNoteCapsPathCount verifies a call that invented far more
+// unrecognized fields than a model could act on gets a bounded note instead of
+// its whole hallucinated argument object echoed back into the context.
+func TestAppendIgnoredArgsNoteCapsPathCount(t *testing.T) {
+	const extra = 5
+	ignored := make([]message.IgnoredToolArg, 0, maxIgnoredArgNotePaths+extra)
+	for i := range maxIgnoredArgNotePaths + extra {
+		ignored = append(ignored, message.IgnoredToolArg{
+			Path:   fmt.Sprintf("args.f%02d", i),
+			Reason: message.IgnoredToolArgReasonUnrecognized,
+		})
+	}
+	note := appendIgnoredArgsNote("ok", ignored)
+	if !strings.Contains(note, "args.f00") || !strings.Contains(note, fmt.Sprintf("args.f%02d", maxIgnoredArgNotePaths-1)) {
+		t.Fatalf("note should list the first %d paths, got %q", maxIgnoredArgNotePaths, note)
+	}
+	if strings.Contains(note, fmt.Sprintf("args.f%02d", maxIgnoredArgNotePaths)) {
+		t.Fatalf("note listed a path beyond the cap: %q", note)
+	}
+	if !strings.Contains(note, fmt.Sprintf("and %d more", extra)) {
+		t.Fatalf("note should report how many paths were elided, got %q", note)
 	}
 }
