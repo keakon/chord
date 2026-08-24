@@ -30,7 +30,7 @@ When a patch-native (GPT/o-series) model keeps `apply_patch`, Chord also hides `
 
 ### Format
 
-The single `patch` argument carries a complete Codex envelope. It can contain any number of file operations:
+The single `patch` argument carries the Codex patch body. Chord accepts the normal complete envelope and also repairs a missing `*** Begin Patch` and/or `*** End Patch` wrapper before parsing. Inside the body, you can include any number of file operations:
 
 ```text
 *** Begin Patch
@@ -70,8 +70,6 @@ Hunks apply in order; each hunk is matched at the first position after the previ
   "patch": "*** Begin Patch\n*** Update File: main.go\n@@\n func main() {\n-\tfmt.Println(\"hello\")\n+\tfmt.Println(\"hello, world\")\n }\n*** End Patch"
 }
 ```
-
-Legacy single-file arguments (`{"path": ..., "patch": "@@\n..."}`) are still accepted and normalized into an Update envelope for that path.
 
 ### Optional Header Anchors
 

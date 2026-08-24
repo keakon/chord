@@ -70,6 +70,13 @@ func TestApplyPatchDisplayTargetsAggregateRepeatedUpdates(t *testing.T) {
 	}
 }
 
+func TestApplyPatchDisplayTargetsRejectsNonCanonicalArgs(t *testing.T) {
+	raw := json.RawMessage(`{"path":"src/demo.go","patch":"@@\n-old\n+new\n"}`)
+	if _, err := ApplyPatchDisplayTargets(raw); err == nil {
+		t.Fatal("ApplyPatchDisplayTargets unexpectedly accepted non-canonical args")
+	}
+}
+
 func TestApplyPatchCodexMultiFileOperations(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, content string) {
@@ -929,6 +936,64 @@ func TestParseApplyPatchRejectsNonCodexEnvelope(t *testing.T) {
 	}
 }
 
+func TestNormalizeApplyPatchArgsRejectsLegacyPathWrapping(t *testing.T) {
+	raw := json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: file.txt\n@@\n-old\n+new\n*** End Patch"}`)
+	normalized, err := NormalizeApplyPatchArgs(raw)
+	if err != nil {
+		t.Fatalf("NormalizeApplyPatchArgs error = %v", err)
+	}
+	if string(normalized) != `{"patch":"*** Begin Patch\n*** Update File: file.txt\n@@\n-old\n+new\n*** End Patch"}` {
+		t.Fatalf("normalized = %s, want envelope canonical args", normalized)
+	}
+}
+
+func TestParseApplyPatchRecoversMissingBeginMarker(t *testing.T) {
+	doc, err := ParseApplyPatch("*** Update File: file.txt\n@@\n-old\n+new\n*** End Patch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Operations) != 1 || doc.Operations[0].Kind != MutationUpdate || doc.Operations[0].Path != "file.txt" {
+		t.Fatalf("doc = %#v, want single update op", doc)
+	}
+}
+
+func TestParseApplyPatchRecoversMissingEndMarker(t *testing.T) {
+	doc, err := ParseApplyPatch("*** Begin Patch\n*** Update File: file.txt\n@@\n-old\n+new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Operations) != 1 || len(doc.Operations[0].Hunks) != 1 {
+		t.Fatalf("doc = %#v, want single update hunk", doc)
+	}
+}
+
+func TestParseApplyPatchRecoversMissingEndMarkerForDelete(t *testing.T) {
+	doc, err := ParseApplyPatch("*** Begin Patch\n*** Delete File: file.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Operations) != 1 || doc.Operations[0].Kind != MutationDelete || doc.Operations[0].Path != "file.txt" {
+		t.Fatalf("doc = %#v, want single delete op", doc)
+	}
+}
+
+func TestParseApplyPatchRecoversMissingEndMarkerForMoveOnlyUpdate(t *testing.T) {
+	doc, err := ParseApplyPatch("*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Operations) != 1 || doc.Operations[0].Kind != MutationUpdate || doc.Operations[0].Path != "old.txt" || doc.Operations[0].MovePath != "new.txt" {
+		t.Fatalf("doc = %#v, want single move-only update op", doc)
+	}
+}
+
+func TestParseApplyPatchRejectsLeadingProseBeforeOperation(t *testing.T) {
+	_, err := ParseApplyPatch("Applying patch now\n*** Update File: file.txt\n@@\n-old\n+new\n*** End Patch")
+	if err == nil || !strings.Contains(err.Error(), "Begin Patch") {
+		t.Fatalf("err = %v, want begin-marker validation", err)
+	}
+}
+
 func TestApplyPatchKeepsStarContextLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "notes.md")
@@ -1054,55 +1119,25 @@ func TestApplyPatchLiteralEndOfFileContextLine(t *testing.T) {
 	}
 }
 
-func TestApplyPatchLegacySingleFileArgsAreNormalized(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "legacy.txt")
-	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := json.Marshal(map[string]any{"path": "legacy.txt", "patch": "@@\n-before\n+after\n"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), raw); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil || string(got) != "after\n" {
-		t.Fatalf("legacy result = %q, %v; want after", got, err)
-	}
-}
-
-// A valid envelope with leading whitespace must not be misrouted through the
-// legacy single-file wrapping: ParseApplyPatch trims the text, so the prefix
-// sniff in NormalizeApplyPatchArgs must trim too.
-func TestApplyPatchEnvelopeWithLeadingWhitespaceIsNotTreatedAsLegacy(t *testing.T) {
+// A valid envelope with leading whitespace must be preserved as the current
+// patch argument.
+func TestApplyPatchEnvelopeWithLeadingWhitespacePreservesCurrentArgs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "lead.txt")
 	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	patch := "\n  \n*** Begin Patch\n*** Update File: lead.txt\n@@\n-before\n+after\n*** End Patch\n"
-	for name, args := range map[string]map[string]any{
-		"without path": {"patch": patch},
-		"with path":    {"path": "lead.txt", "patch": patch},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			raw, err := json.Marshal(args)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), raw); err != nil {
-				t.Fatalf("Execute error: %v", err)
-			}
-			got, err := os.ReadFile(path)
-			if err != nil || string(got) != "after\n" {
-				t.Fatalf("result = %q, %v; want after", got, err)
-			}
-		})
+	raw, err := json.Marshal(map[string]any{"patch": patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), raw); err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "after\n" {
+		t.Fatalf("result = %q, %v; want after", got, err)
 	}
 }
 

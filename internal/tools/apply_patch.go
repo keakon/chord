@@ -28,32 +28,17 @@ type ApplyPatchArgs struct {
 	Patch string `json:"patch"`
 }
 
-// NormalizeApplyPatchArgs converts the legacy single-file {path, patch}
-// arguments into the current Codex apply_patch envelope. Current envelope
-// arguments are returned in canonical {patch} form unchanged.
+// NormalizeApplyPatchArgs validates the current {patch} arguments and returns
+// them in canonical form.
 func NormalizeApplyPatchArgs(raw json.RawMessage) (json.RawMessage, error) {
-	var args struct {
-		Path  string `json:"path"`
-		Patch string `json:"patch"`
-	}
+	var args ApplyPatchArgs
 	if err := json.Unmarshal(unwrapToolArgs(raw), &args); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %w", err)
 	}
-	args.Path = strings.TrimSpace(args.Path)
 	if strings.TrimSpace(args.Patch) == "" {
 		return nil, fmt.Errorf("patch is required")
 	}
-	patch := args.Patch
-	// ParseApplyPatch trims surrounding whitespace, so an envelope with a
-	// leading newline is still valid; trim before sniffing the prefix so such
-	// a patch is not misrouted through the legacy single-file wrapping.
-	if !strings.HasPrefix(strings.TrimSpace(patch), "*** Begin Patch") {
-		if args.Path == "" {
-			return nil, fmt.Errorf("legacy apply_patch arguments require path")
-		}
-		patch = "*** Begin Patch\n*** Update File: " + args.Path + "\n" + strings.TrimRight(patch, "\r\n") + "\n*** End Patch"
-	}
-	return json.Marshal(ApplyPatchArgs{Patch: patch})
+	return json.Marshal(ApplyPatchArgs{Patch: args.Patch})
 }
 
 type MutationKind string
@@ -401,12 +386,9 @@ func skipApplyPatchSeparatorRun(lines []string, i int, allowHunk bool) (int, boo
 
 func ParseApplyPatch(text string) (applyPatchDocument, error) {
 	text = strings.ReplaceAll(strings.TrimSpace(text), "\r\n", "\n")
-	lines := strings.Split(text, "\n")
-	if len(lines) < 2 || strings.TrimSpace(lines[0]) != "*** Begin Patch" {
-		return applyPatchDocument{}, fmt.Errorf("invalid apply_patch: first line must be `*** Begin Patch`")
-	}
-	if strings.TrimSpace(lines[len(lines)-1]) != "*** End Patch" {
-		return applyPatchDocument{}, fmt.Errorf("invalid apply_patch: last line must be `*** End Patch`")
+	lines, err := normalizeApplyPatchEnvelope(text)
+	if err != nil {
+		return applyPatchDocument{}, err
 	}
 
 	var doc applyPatchDocument
@@ -511,6 +493,61 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 		return applyPatchDocument{}, fmt.Errorf("no files were modified")
 	}
 	return doc, nil
+}
+
+func normalizeApplyPatchEnvelope(text string) ([]string, error) {
+	lines := strings.Split(text, "\n")
+	strictBegin := strings.TrimSpace(lines[0]) == "*** Begin Patch"
+	strictEnd := strings.TrimSpace(lines[len(lines)-1]) == "*** End Patch"
+	if strictBegin && strictEnd {
+		return lines, nil
+	}
+
+	normalized := append([]string(nil), lines...)
+	if !strictBegin {
+		first := strings.TrimSpace(normalized[0])
+		switch {
+		case strings.HasPrefix(first, "*** Begin Patch"):
+			normalized[0] = "*** Begin Patch"
+		case isApplyPatchTopLevelOperation(first):
+			normalized = append([]string{"*** Begin Patch"}, normalized...)
+		default:
+			return nil, fmt.Errorf("invalid apply_patch: first line must be `*** Begin Patch`")
+		}
+	}
+	if strings.TrimSpace(normalized[len(normalized)-1]) != "*** End Patch" {
+		last := strings.TrimSpace(normalized[len(normalized)-1])
+		switch {
+		case strings.HasPrefix(last, "*** End Patch"):
+			normalized[len(normalized)-1] = "*** End Patch"
+		case isApplyPatchImplicitEOF(normalized[len(normalized)-1]):
+			normalized = append(normalized, "*** End Patch")
+		default:
+			return nil, fmt.Errorf("invalid apply_patch: last line must be `*** End Patch`")
+		}
+	}
+	return normalized, nil
+}
+
+func isApplyPatchTopLevelOperation(line string) bool {
+	return strings.HasPrefix(line, "*** Add File: ") ||
+		strings.HasPrefix(line, "*** Delete File: ") ||
+		strings.HasPrefix(line, "*** Update File: ")
+}
+
+func isApplyPatchImplicitEOF(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || trimmed == "*** End of File" {
+		return true
+	}
+	if strings.HasPrefix(trimmed, "*** Delete File: ") || strings.HasPrefix(trimmed, "*** Move to: ") {
+		return true
+	}
+	if strings.HasPrefix(line, "@@") {
+		return true
+	}
+	kind := line[0]
+	return kind == ' ' || kind == '+' || kind == '-'
 }
 
 func ApplyPatchTargets(raw json.RawMessage, baseDir string) ([]MutationTarget, error) {

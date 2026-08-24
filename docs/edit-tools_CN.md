@@ -30,7 +30,7 @@ Chord **自动根据当前模型选择**合适的工具：
 
 ### 格式
 
-单个 `patch` 参数携带完整的 Codex 信封，可以包含任意数量的文件操作：
+单个 `patch` 参数携带 Codex 补丁正文。Chord 接受完整信封；若缺少 `*** Begin Patch` 和/或 `*** End Patch` 外壳，也会在解析前补齐。正文里可以包含任意数量的文件操作：
 
 ```text
 *** Begin Patch
@@ -70,8 +70,6 @@ Chord **自动根据当前模型选择**合适的工具：
   "patch": "*** Begin Patch\n*** Update File: main.go\n@@\n func main() {\n-\tfmt.Println(\"hello\")\n+\tfmt.Println(\"hello, world\")\n }\n*** End Patch"
 }
 ```
-
-旧的单文件参数（`{"path": ..., "patch": "@@\n..."}`）仍然被接受，会被规范化为针对该路径的 Update 信封。
 
 ### 可选的头部锚点
 
