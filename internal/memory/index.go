@@ -3,7 +3,6 @@ package memory
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -48,14 +47,14 @@ func (i *MemoryIndex) UserNotes() string {
 }
 
 // managedSectionContent renders the managed section (markers + content). It
-// does not include surrounding user notes.
+// does not include surrounding user notes. Entries render in the given order:
+// BuildManagedIndexReplacing owns ordering so a manual reorder of MEMORY.md is
+// preserved across automatic writes.
 func managedSectionContent(entries []ManagedEntry) string {
 	var sb strings.Builder
 	sb.WriteString(managedStartMarker)
 	sb.WriteString("\n\n## Managed Records\n\n")
-	sorted := append([]ManagedEntry(nil), entries...)
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
-	for _, e := range sorted {
+	for _, e := range entries {
 		sb.WriteString("- [")
 		sb.WriteString(e.ID)
 		sb.WriteString("](")
@@ -189,32 +188,62 @@ func renderManagedMarkdown(idx *MemoryIndex) string {
 // BuildManagedIndexReplacing applies additions and removals to the active
 // managed view. Record files remain immutable; removing an entry only makes
 // the old record an orphan so provenance is retained without continuing to
-// inject a superseded conclusion.
+// inject a retired or superseded conclusion.
+//
+// Ordering is meaningful because the reminder budget truncates the tail: existing
+// entries keep their position (so a manual reorder of MEMORY.md survives) and
+// genuinely new entries are prepended, which keeps the most recent learning
+// inside the injected prefix. An entry restated in this batch is updated in
+// place rather than moved to the front.
 func BuildManagedIndexReplacing(existing *MemoryIndex, entries []ManagedEntry, removeIDs []string) (string, error) {
-	byID := make(map[string]ManagedEntry, len(existing.Managed)+len(entries))
-	for _, e := range existing.Managed {
-		byID[e.ID] = e
-	}
+	removed := make(map[string]bool, len(removeIDs))
 	for _, id := range removeIDs {
 		if !ValidateRecordID(id) {
 			return "", fmt.Errorf("invalid managed removal id=%q", id)
 		}
-		delete(byID, id)
+		removed[id] = true
 	}
+	incoming := make(map[string]ManagedEntry, len(entries))
+	incomingOrder := make([]string, 0, len(entries))
 	for _, e := range entries {
 		if e.ID == "" || !ValidateRecordID(e.ID) || e.Link == "" {
 			return "", fmt.Errorf("invalid managed entry id=%q link=%q", e.ID, e.Link)
 		}
-		byID[e.ID] = e
+		if _, dup := incoming[e.ID]; !dup {
+			incomingOrder = append(incomingOrder, e.ID)
+		}
+		incoming[e.ID] = e
 	}
-	merged := make([]ManagedEntry, 0, len(byID))
-	for _, e := range byID {
-		merged = append(merged, e)
+	placed := make(map[string]bool, len(existing.Managed)+len(entries))
+	kept := make([]ManagedEntry, 0, len(existing.Managed))
+	for _, e := range existing.Managed {
+		if placed[e.ID] {
+			continue
+		}
+		placed[e.ID] = true
+		if replacement, ok := incoming[e.ID]; ok {
+			// Restated in this batch: update in place. An addition wins over a
+			// removal of the same ID.
+			kept = append(kept, replacement)
+			continue
+		}
+		if removed[e.ID] {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	fresh := make([]ManagedEntry, 0, len(incomingOrder))
+	for _, id := range incomingOrder {
+		if placed[id] {
+			continue
+		}
+		placed[id] = true
+		fresh = append(fresh, incoming[id])
 	}
 	idx := &MemoryIndex{
 		Head:             existing.Head,
 		Tail:             existing.Tail,
-		Managed:          merged,
+		Managed:          append(fresh, kept...),
 		HasManagedMarker: true,
 	}
 	return renderManagedMarkdown(idx), nil

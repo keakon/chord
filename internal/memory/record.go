@@ -76,6 +76,15 @@ const (
 	maxProjectPaths   = 8
 	maxSupersedes     = 8
 	hashHexLen        = 16
+
+	// maxRetireReasonLen bounds the single-line justification a retirement or
+	// promotion carries into the log and the pending review file.
+	maxRetireReasonLen = 500
+	// maxPromotionDraftLen bounds proposed guidance text. It is a draft for a
+	// human to review, not a document.
+	maxPromotionDraftLen = 2000
+	// maxPromotionsPerRun bounds promotion suggestions per extraction run.
+	maxPromotionsPerRun = 8
 )
 
 // Record is the immutable content of one detailed memory file

@@ -3,6 +3,8 @@ package memory
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -29,9 +31,15 @@ type Manager struct {
 type CommitResult struct {
 	Added        []string // record IDs newly written and indexed
 	AlreadyKnown []string // record IDs already present (idempotent re-run)
-	Superseded   []string // old active IDs removed from the managed view
+	Superseded   []string // old active IDs removed by a replacing conclusion
+	Retired      []string // active IDs removed with no replacement
+	Promoted     int      // promotion suggestions written for human review
 	Noop         bool     // true when nothing needed to be written
 	Warnings     []string // recovered machine-state problems worth logging
+	// ActiveEntries is the active index size after this commit, or -1 when
+	// the commit could not have changed it (covered fingerprint or empty
+	// input), so callers can skip scheduling an index review.
+	ActiveEntries int
 }
 
 // NewManager creates a Manager for projectRoot. Commit paths create the
@@ -116,7 +124,7 @@ type extractionFlight struct {
 // before the lock, after the lock, before each record write, and before the
 // checkpoint: a cancelled job never advances the checkpoint, and any record
 // already written before cancellation is idempotent on the next retry.
-func (m *Manager) CommitExtractionCtx(ctx context.Context, sessionID, fingerprint string, projectedCount int, generation uint64, candidates []Candidate) (*CommitResult, error) {
+func (m *Manager) CommitExtractionCtx(ctx context.Context, sessionID, fingerprint string, projectedCount int, generation uint64, out *ExtractionOutput) (*CommitResult, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(fingerprint) == "" {
 		return nil, errors.New("commit extraction: session id and fingerprint are required")
 	}
@@ -136,7 +144,7 @@ func (m *Manager) CommitExtractionCtx(ctx context.Context, sessionID, fingerprin
 	m.inflight[key] = flight
 	m.mu.Unlock()
 
-	result, err := m.commitExtraction(ctx, sessionID, fingerprint, projectedCount, generation, candidates)
+	result, err := m.commitExtraction(ctx, sessionID, fingerprint, projectedCount, generation, out)
 	// Publish the outcome before closing done so waiting goroutines observe a
 	// consistent flight (the channel close happens-after the field writes).
 	flight.result, flight.err = result, err
@@ -147,10 +155,13 @@ func (m *Manager) CommitExtractionCtx(ctx context.Context, sessionID, fingerprin
 	return result, err
 }
 
-func (m *Manager) commitExtraction(ctx context.Context, sessionID, fingerprint string, projectedCount int, generation uint64, candidates []Candidate) (*CommitResult, error) {
+func (m *Manager) commitExtraction(ctx context.Context, sessionID, fingerprint string, projectedCount int, generation uint64, out *ExtractionOutput) (*CommitResult, error) {
 
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if out == nil {
+		out = &ExtractionOutput{}
 	}
 	// Cross-process lock serializes the whole read-merge-write commit,
 	// including the checkpoint (a no-op commit must not clobber another
@@ -168,7 +179,7 @@ func (m *Manager) commitExtraction(ctx context.Context, sessionID, fingerprint s
 	// committed last, so a stale read here is harmless.
 	existing, loadErr := LoadCheckpoint(m.layout)
 	if existing != nil && existing.Covered(sessionID, fingerprint) {
-		return &CommitResult{Noop: true, AlreadyKnown: []string{}}, nil
+		return &CommitResult{Noop: true, AlreadyKnown: []string{}, ActiveEntries: -1}, nil
 	}
 	var commitWarnings []string
 	if errors.Is(loadErr, ErrCorruptCheckpoint) {
@@ -180,15 +191,16 @@ func (m *Manager) commitExtraction(ctx context.Context, sessionID, fingerprint s
 	cp := &ExtractionCheckpoint{}
 	cp.SetCovered(sessionID, fingerprint, projectedCount, generation)
 
-	// No candidates is a legal no-op that still advances the checkpoint.
-	if len(candidates) == 0 {
+	// Nothing to add, retire, or promote is a legal no-op that still advances the
+	// checkpoint.
+	if out.Empty() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		if err := SaveCheckpoint(m.layout, cp); err != nil {
 			return nil, err
 		}
-		return &CommitResult{Noop: true, Warnings: commitWarnings}, nil
+		return &CommitResult{Noop: true, Warnings: commitWarnings, ActiveEntries: -1}, nil
 	}
 
 	// Re-read under the lock: another process may have committed since we last
@@ -215,7 +227,7 @@ func (m *Manager) commitExtraction(ctx context.Context, sessionID, fingerprint s
 		activeIDs[entry.ID] = true
 	}
 	supersededByBatch := make(map[string]bool)
-	for _, c := range candidates {
+	for _, c := range out.Candidates {
 		for _, id := range uniqueStrings(c.Supersedes) {
 			if !activeIDs[id] {
 				return nil, fmt.Errorf("candidate supersedes inactive record %q", id)
@@ -226,7 +238,7 @@ func (m *Manager) commitExtraction(ctx context.Context, sessionID, fingerprint s
 			supersededByBatch[id] = true
 		}
 	}
-	for _, c := range candidates {
+	for _, c := range out.Candidates {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -264,12 +276,78 @@ func (m *Manager) commitExtraction(ctx context.Context, sessionID, fingerprint s
 		active.Records = append(active.Records, rec)
 	}
 
-	if len(entries) > 0 {
-		merged, err := BuildManagedIndexReplacing(idx, entries, result.Superseded)
+	// Retirements run after the candidate pass so a record already replaced by a
+	// superseding conclusion is simply skipped. Unlike supersedes — where a
+	// dangling target would leave a duplicate conclusion indexed — a retirement
+	// is a removal with no replacement, so an ineligible or already-gone target
+	// is a warning rather than a failed batch: failing here would also discard
+	// the valid additions, and the retry would hit the same bad item.
+	recordsByID := make(map[string]*Record, len(active.Records))
+	for _, rec := range active.Records {
+		if rec != nil {
+			recordsByID[rec.ID] = rec
+		}
+	}
+	var retired []string
+	for _, r := range out.Retire {
+		if !activeIDs[r.ID] {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("skipped retiring %q: no longer active", r.ID))
+			continue
+		}
+		rec := recordsByID[r.ID]
+		if rec == nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("skipped retiring %q: record details unavailable", r.ID))
+			continue
+		}
+		// What the user stated is not the model's to forget. A preference that has
+		// gone stale is for the user to drop, or for a promotion to move into
+		// project instructions — not for an extraction pass to delete silently.
+		if rec.Confidence == ConfidenceUserStated {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("refused to retire user-stated record %q", r.ID))
+			continue
+		}
+		delete(activeIDs, r.ID)
+		retired = append(retired, r.ID)
+	}
+
+	// Promotions are written before the index so a failure here can never drop a
+	// conclusion out of the index without its content landing somewhere: the
+	// pending files are where it survives until a human reviews it.
+	if len(out.Promotions) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := writePromotionFiles(m.layout, sessionID, out.Promotions); err != nil {
+			return nil, fmt.Errorf("write promotions: %w", err)
+		}
+		result.Promoted = len(out.Promotions)
+		for _, p := range out.Promotions {
+			if p.SourceID == "" || !activeIDs[p.SourceID] {
+				continue
+			}
+			// What the user stated is not the model's to unindex, even into a
+			// pending review file: until a human acts on the suggestion, the
+			// indexed entry is what every future session sees. The suggestion
+			// itself is still written above; refusing here only keeps the
+			// source injected in the meantime.
+			if rec := recordsByID[p.SourceID]; rec != nil && rec.Confidence == ConfidenceUserStated {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("kept user-stated record %q indexed despite promotion", p.SourceID))
+				continue
+			}
+			delete(activeIDs, p.SourceID)
+			retired = append(retired, p.SourceID)
+		}
+	}
+	result.Retired = retired
+	result.ActiveEntries = len(activeIDs)
+
+	removeIDs := append(append([]string(nil), result.Superseded...), retired...)
+	if len(entries) > 0 || len(removeIDs) > 0 {
+		merged, err := BuildManagedIndexReplacing(idx, entries, removeIDs)
 		if err != nil {
 			return nil, fmt.Errorf("merge managed index: %w", err)
 		}
-		if _, err := writeMemoryFileIfChanged(m.layout, idx, merged, entries, result.Superseded); err != nil {
+		if _, err := writeMemoryFileIfChanged(m.layout, idx, merged, entries, removeIDs); err != nil {
 			return nil, err
 		}
 	} else {
@@ -527,4 +605,108 @@ func writeMemoryFileAtomic(l *Layout, content string) error {
 		return fmt.Errorf("install MEMORY.md: %w", err)
 	}
 	return privatefs.SyncDir(dir)
+}
+
+// writePromotionFiles writes each promotion suggestion as one immutable,
+// content-addressed file under .chord/memory/promotions/. Exclusive-create
+// semantics make retries after a failed or cancelled commit idempotent: the
+// same suggestion always maps to the same file name, so a re-run can never
+// duplicate an entry. An existing file is left untouched, including when the
+// user edited it after creation.
+//
+// Chord never edits AGENTS.md or project docs itself: those are human-owned,
+// and a wrong automatic edit to a file that steers every future session is far
+// more costly than a suggestion the user ignores.
+func writePromotionFiles(l *Layout, sessionID string, promotions []Promotion) error {
+	if err := os.MkdirAll(l.PromotionsDir, 0o755); err != nil {
+		return fmt.Errorf("create promotions dir: %w", err)
+	}
+	created := false
+	for _, p := range promotions {
+		path := filepath.Join(l.PromotionsDir, promotionFileName(p))
+		if _, err := os.Stat(path); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("stat promotion: %w", err)
+		}
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
+			return fmt.Errorf("create promotion file: %w", err)
+		}
+		if _, err := f.Write(promotionFileBody(sessionID, p)); err != nil {
+			_ = f.Close()
+			_ = os.Remove(path)
+			return fmt.Errorf("write promotion file: %w", err)
+		}
+		if err := f.Sync(); err != nil {
+			_ = f.Close()
+			_ = os.Remove(path)
+			return fmt.Errorf("sync promotion file: %w", err)
+		}
+		if err := f.Close(); err != nil {
+			_ = os.Remove(path)
+			return fmt.Errorf("close promotion file: %w", err)
+		}
+		created = true
+	}
+	if created {
+		if err := privatefs.SyncDir(l.PromotionsDir); err != nil {
+			return fmt.Errorf("sync promotions dir: %w", err)
+		}
+	}
+	return nil
+}
+
+// promotionFileName derives the stable, human-readable file name for a
+// promotion suggestion: a slug of the summary plus the content hash that makes
+// identical suggestions collide onto the same idempotent file.
+func promotionFileName(p Promotion) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "target=%s\n", p.Target)
+	b.WriteString("summary=")
+	b.WriteString(p.Summary)
+	b.WriteString("\nlocation=")
+	b.WriteString(p.SuggestedLocation)
+	b.WriteString("\nsource=")
+	b.WriteString(p.SourceID)
+	b.WriteString("\nreason=")
+	b.WriteString(p.Reason)
+	b.WriteString("\ndraft=")
+	b.WriteString(strings.TrimSpace(p.DraftText))
+	b.WriteString("\n")
+	sum := sha256.Sum256([]byte(b.String()))
+	return RecordID(p.Summary, hex.EncodeToString(sum[:])[:hashHexLen]) + ".md"
+}
+
+// promotionFileBody renders one pending promotion suggestion as standalone
+// Markdown a user can review without any surrounding index.
+func promotionFileBody(sessionID string, p Promotion) []byte {
+	var b strings.Builder
+	b.WriteString("# Pending promotion: ")
+	b.WriteString(p.Summary)
+	b.WriteString("\n\n")
+	b.WriteString("Chord judged this conclusion to belong in project instructions or project docs\n")
+	b.WriteString("rather than in per-turn memory. Chord only writes suggestions here; move what\n")
+	b.WriteString("you agree with into the authoritative file yourself, then delete this one.\n\n")
+	b.WriteString("- Target: ")
+	b.WriteString(string(p.Target))
+	if p.SuggestedLocation != "" {
+		b.WriteString("\n- Suggested location: ")
+		b.WriteString(p.SuggestedLocation)
+	}
+	if p.SourceID != "" {
+		b.WriteString("\n- Source record: ")
+		b.WriteString(p.SourceID)
+	}
+	b.WriteString("\n- Session: ")
+	b.WriteString(sessionID)
+	b.WriteString("\n- Reason: ")
+	b.WriteString(p.Reason)
+	b.WriteString("\n\n")
+	b.WriteString(p.DraftText)
+	b.WriteString("\n")
+	return []byte(b.String())
 }

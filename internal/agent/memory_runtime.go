@@ -38,8 +38,13 @@ const (
 // memoryJob is one queued extraction attempt. retryAt gates the next attempt
 // after a transient failure; attempts bounds retries so a persistently failing
 // job stops burning model tokens.
+//
+// A job with review set and no sessionDir audits the whole active index instead
+// of one transcript: that is the only view from which memory written by an
+// earlier, weaker pass can be judged and removed.
 type memoryJob struct {
 	sessionDir string
+	review     bool
 	attempts   int
 	retryAt    time.Time
 }
@@ -191,6 +196,33 @@ func memoryQueueHasSession(queue []memoryJob, sessionDir string) bool {
 	return false
 }
 
+// scheduleMemoryIndexReview queues a whole-index audit. It is triggered when the
+// active index has reached its soft limit, which is where consolidation stops
+// being optional: past that point the reminder budget truncates the tail, so
+// anything not consolidated is simply never injected.
+//
+// Only one review is queued at a time. The commit's own checkpoint keeps a
+// review whose index state has not changed from running again, so a pass that
+// decides nothing needs to go does not re-run on every later extraction.
+func (a *MainAgent) scheduleMemoryIndexReview() {
+	if a.memoryMgr == nil || a.memoryErr != nil {
+		return
+	}
+	a.memoryMu.Lock()
+	queued := false
+	for _, job := range a.memoryPending {
+		if job.review {
+			queued = true
+			break
+		}
+	}
+	if !queued && len(a.memoryPending) < memoryJobQueueLimit {
+		a.memoryPending = append(a.memoryPending, memoryJob{review: true})
+	}
+	a.memoryMu.Unlock()
+	a.signalMemoryWake()
+}
+
 // signalMemoryWake pokes the worker without blocking (coalescing).
 func (a *MainAgent) signalMemoryWake() {
 	select {
@@ -259,7 +291,12 @@ func (a *MainAgent) drainMemoryQueue() {
 		a.memoryMu.Lock()
 		a.memoryInflight = &memoryInflight{sessionDir: job.sessionDir, cancel: cancel}
 		a.memoryMu.Unlock()
-		err := a.runMemoryExtraction(ctx, job.sessionDir)
+		var err error
+		if job.review {
+			err = a.runMemoryIndexReview(ctx)
+		} else {
+			err = a.runMemoryExtraction(ctx, job.sessionDir)
+		}
 		// Read the cancellation state before releasing the context: cancel()
 		// sets ctx.Err() itself, so checking it afterwards would classify every
 		// outcome — success included — as a foreground preemption.
@@ -280,9 +317,10 @@ func (a *MainAgent) drainMemoryQueue() {
 			a.memoryMu.Unlock()
 			return
 		case err != nil:
-			log.Warnf("memory: extraction failed session=%v error=%v", filepath.Base(job.sessionDir), err)
+			sessionID := memoryJobSessionID(job)
+			log.Warnf("memory: extraction failed session=%v error=%v", sessionID, err)
 			if m := a.memoryMgr; m != nil {
-				memory.SaveFailure(m.Layout(), filepath.Base(job.sessionDir), err)
+				memory.SaveFailure(m.Layout(), sessionID, err)
 			}
 			if memoryPermanentFailure(err) || job.attempts >= memoryMaxExtractionAttempts {
 				// Permanent or repeatedly failing job: stop retrying so the
@@ -320,6 +358,18 @@ func memoryRetryBackoff(attempt int) time.Duration {
 		return memoryMaxRetryBackoff
 	}
 	return d
+}
+
+// memoryJobSessionID returns the stable identifier a failed extraction is
+// recorded under. A session job keeps its session dir basename; an index review
+// (which has no session) is recorded under the constant synthetic key used for
+// its commits, so the failure surfaces against the review rather than a
+// meaningless "." (filepath.Base of an empty string).
+func memoryJobSessionID(job memoryJob) string {
+	if job.review {
+		return memory.ReviewSessionID
+	}
+	return filepath.Base(job.sessionDir)
 }
 
 // memorySleepUntil blocks until retryAt or shutdown, whichever comes first.
@@ -470,25 +520,114 @@ func (a *MainAgent) runMemoryExtraction(ctx context.Context, sessionDir string) 
 	if len(warnings) > 0 {
 		log.Warnf("memory: active snapshot warnings=%v", warnings)
 	}
-	agentsMD := a.cachedAgentsMDSnapshot()
-	if len(agentsMD) > memoryExtractionAgentsBytes {
-		agentsMD = agentsMD[:memoryExtractionAgentsBytes]
-		for len(agentsMD) > 0 && !utf8.ValidString(agentsMD) {
-			agentsMD = agentsMD[:len(agentsMD)-1]
-		}
-	}
+	agentsMD := a.boundedAgentsMDSnapshot()
 	prompt := buildMemoryExtractionPrompt(kept, agentsMD, active)
-	candidates, dropped, err := a.callMemoryExtraction(ctx, prompt)
+	out, err := a.callMemoryExtraction(ctx, prompt, memory.MaxRetirePerSessionRun)
 	if err != nil {
 		return err
 	}
-	if len(dropped) > 0 {
-		log.Warnf("memory: dropped %d candidate(s) from extraction session=%v reasons=%v", len(dropped), sessionID, dropped)
+	if len(out.Dropped) > 0 {
+		log.Warnf("memory: dropped %d item(s) from extraction session=%v reasons=%v", len(out.Dropped), sessionID, out.Dropped)
 	}
 	generation := a.memoryCompactionGeneration(sessionDir)
-	res, err := a.memoryMgr.CommitExtractionCtx(ctx, sessionID, fingerprint, len(kept), generation, candidates)
+	res, err := a.memoryMgr.CommitExtractionCtx(ctx, sessionID, fingerprint, len(kept), generation, out)
 	logMemoryCommitWarnings(sessionID, res)
+	logMemoryCommitGovernance(sessionID, res)
+	if err == nil {
+		a.maybeScheduleMemoryIndexReview(res)
+	}
 	return err
+}
+
+// boundedAgentsMDSnapshot returns the cached AGENTS.md snapshot truncated to
+// the extraction budget without splitting a UTF-8 rune at the cut point.
+func (a *MainAgent) boundedAgentsMDSnapshot() string {
+	agentsMD := a.cachedAgentsMDSnapshot()
+	if len(agentsMD) <= memoryExtractionAgentsBytes {
+		return agentsMD
+	}
+	agentsMD = agentsMD[:memoryExtractionAgentsBytes]
+	for len(agentsMD) > 0 && !utf8.ValidString(agentsMD) {
+		agentsMD = agentsMD[:len(agentsMD)-1]
+	}
+	return agentsMD
+}
+
+// maybeScheduleMemoryIndexReview queues an index audit once the active index
+// has reached its soft limit. Checked after a commit because that is the only
+// place the index changes size; commits that could not have changed the index
+// report -1 and are skipped, since only an entry-writing commit can cross the
+// threshold.
+func (a *MainAgent) maybeScheduleMemoryIndexReview(res *memory.CommitResult) {
+	if res == nil || res.ActiveEntries < memory.ActiveIndexSoftLimit {
+		return
+	}
+	a.scheduleMemoryIndexReview()
+}
+
+// runMemoryIndexReview audits the whole active index instead of one transcript.
+//
+// A session-scoped pass only sees the memory adjacent to the session it came
+// from, so index-wide problems — near-duplicates across subsystems, entries that
+// never belonged, material that outgrew memory and belongs in project docs —
+// are invisible to it. This pass sees only the index and the repository
+// instructions, so it judges the collection on its own terms.
+//
+// It commits under a synthetic session key whose fingerprint is the index state,
+// so an unchanged index is already covered and the review does not repeat.
+func (a *MainAgent) runMemoryIndexReview(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case <-a.agentsMDReady:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	active, warnings, err := a.memoryMgr.ActiveSnapshot()
+	if err != nil {
+		return fmt.Errorf("%w: load active memory for review: %w", errMemorySetupFailed, err)
+	}
+	if len(warnings) > 0 {
+		log.Warnf("memory: active snapshot warnings=%v", warnings)
+	}
+	if len(active.Entries) == 0 {
+		return nil
+	}
+	fingerprint := active.IndexFingerprint()
+	if a.memoryCheckpointCovers(memory.ReviewSessionID, fingerprint) {
+		// This exact index was already reviewed; re-running would spend tokens to
+		// reach the same conclusion.
+		return nil
+	}
+	agentsMD := a.boundedAgentsMDSnapshot()
+	prompt := buildMemoryIndexReviewPrompt(agentsMD, active)
+	out, err := a.callMemoryExtraction(ctx, prompt, memory.MaxRetirePerReviewRun)
+	if err != nil {
+		return err
+	}
+	if len(out.Dropped) > 0 {
+		log.Warnf("memory: dropped %d item(s) from index review reasons=%v", len(out.Dropped), out.Dropped)
+	}
+	res, err := a.memoryMgr.CommitExtractionCtx(ctx, memory.ReviewSessionID, fingerprint, len(active.Entries), 0, out)
+	logMemoryCommitWarnings(memory.ReviewSessionID, res)
+	logMemoryCommitGovernance(memory.ReviewSessionID, res)
+	return err
+}
+
+// logMemoryCommitGovernance reports index shrinkage and pending promotions.
+// Retirements and promotions remove entries from the injected index, so they
+// must be visible in the log even though they are not failures.
+func logMemoryCommitGovernance(sessionID string, res *memory.CommitResult) {
+	if res == nil {
+		return
+	}
+	if len(res.Retired) > 0 {
+		log.Infof("memory: retired %d record(s) from the active index session=%v ids=%v", len(res.Retired), sessionID, res.Retired)
+	}
+	if res.Promoted > 0 {
+		log.Infof("memory: wrote %d promotion suggestion(s) to %v for review session=%v", res.Promoted, memory.ProjectPromotionsDir, sessionID)
+	}
 }
 
 // logMemoryCommitWarnings surfaces machine-state problems the commit recovered
@@ -531,13 +670,14 @@ func sanitizeProjected(projected []sessionview.Projected) []sessionview.Projecte
 }
 
 // callMemoryExtraction runs the structured extraction request under the
-// governor and parses the candidate list. Malformed or unknown output is a
-// failure (does not advance the checkpoint); per-candidate drops are returned
-// separately and never block the surviving candidates from being committed.
-func (a *MainAgent) callMemoryExtraction(ctx context.Context, prompt string) ([]memory.Candidate, []string, error) {
+// governor and parses the response. Malformed or unknown output is a failure
+// (does not advance the checkpoint); per-item drops are returned inside the
+// output and never block the surviving items from being committed. maxRetire
+// bounds how many active records this run may retire.
+func (a *MainAgent) callMemoryExtraction(ctx context.Context, prompt string, maxRetire int) (*memory.ExtractionOutput, error) {
 	client := a.newMemoryExtractionClient()
 	if client == nil {
-		return nil, nil, fmt.Errorf("%w: no model pool available for memory extraction", errMemorySetupFailed)
+		return nil, fmt.Errorf("%w: no model pool available for memory extraction", errMemorySetupFailed)
 	}
 	client.SetSystemPrompt(memoryExtractionSystemPrompt)
 	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -545,15 +685,15 @@ func (a *MainAgent) callMemoryExtraction(ctx context.Context, prompt string) ([]
 
 	release, err := a.governor.acquireLLM(reqCtx, client.PrimaryModelRef())
 	if err != nil {
-		return nil, nil, fmt.Errorf("acquire memory extraction LLM capacity: %w", err)
+		return nil, fmt.Errorf("acquire memory extraction LLM capacity: %w", err)
 	}
 	defer release()
 
 	resp, err := client.CompleteStream(reqCtx, []message.Message{{Role: "user", Content: prompt}}, nil, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return memory.ParseExtractionOutput(extractionJSONBytes(resp.Content))
+	return memory.ParseExtractionOutput(extractionJSONBytes(resp.Content), maxRetire)
 }
 
 // newMemoryExtractionClient builds the extraction client from the main model

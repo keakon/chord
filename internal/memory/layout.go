@@ -11,6 +11,11 @@ const (
 	// ProjectLayoutDir is the project-local directory holding detailed memory
 	// records. It lives next to MEMORY.md so both move with the project.
 	ProjectLayoutDir = ".chord/memory/records"
+	// ProjectPromotionsDir is the project-local pending review directory for
+	// conclusions that belong in project instructions or project docs rather
+	// than in memory. Each suggestion is one content-addressed file; Chord only
+	// writes suggestions here and never edits the authoritative files itself.
+	ProjectPromotionsDir = ".chord/memory/promotions"
 	// ProjectIndexName is the user-visible memory entry point and bounded index
 	// at the project root.
 	ProjectIndexName = "MEMORY.md"
@@ -35,6 +40,10 @@ type Layout struct {
 	// StateDir is the ordered per-project machine state directory
 	// (<state>/memory/<project-key>/). It holds checkpoints and locks.
 	StateDir string
+
+	// PromotionsDir is the absolute path to the project-local pending review
+	// directory for AGENTS.md / project-docs promotion suggestions.
+	PromotionsDir string
 
 	// CheckpointPath / LockPath are machine-owned files under StateDir. They
 	// are not content authority: deleting them only resets
@@ -69,6 +78,7 @@ func resolveLayout(projectRoot string, locator *config.PathLocator) (*Layout, er
 		ProjectRoot:    pl.CanonicalRoot,
 		RecordsDir:     records,
 		IndexPath:      filepath.Join(pl.CanonicalRoot, ProjectIndexName),
+		PromotionsDir:  filepath.Join(pl.CanonicalRoot, filepath.FromSlash(ProjectPromotionsDir)),
 		StateDir:       stateDir,
 		CheckpointPath: filepath.Join(stateDir, "extraction-checkpoints.json"),
 		LockPath:       filepath.Join(stateDir, "memory.lock"),

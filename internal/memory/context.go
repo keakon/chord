@@ -1,8 +1,12 @@
 package memory
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 )
 
 // ActiveSnapshot is the current managed memory view used to consolidate a new
@@ -11,6 +15,31 @@ import (
 type ActiveSnapshot struct {
 	Entries []ManagedEntry
 	Records []*Record
+}
+
+// ReviewSessionID is the synthetic session key an index review commits under.
+// Real session IDs are 17-digit timestamps, so this cannot collide with one.
+//
+// Reusing the per-session checkpoint for reviews is what keeps them from
+// repeating: the "fingerprint" is the index state itself, so an unchanged index
+// is already covered and a review that changed nothing will not run again until
+// the index moves.
+const ReviewSessionID = "index-review"
+
+// IndexFingerprint is a deterministic digest of the active index identity. It
+// changes when an entry is added, retired, or has its summary rewritten, which
+// is exactly when another review pass could reach a different conclusion.
+func (s *ActiveSnapshot) IndexFingerprint() string {
+	if s == nil {
+		return "empty"
+	}
+	ids := make([]string, 0, len(s.Entries))
+	for _, e := range s.Entries {
+		ids = append(ids, e.ID+"\x00"+e.Summary)
+	}
+	sort.Strings(ids)
+	sum := sha256.Sum256([]byte(strings.Join(ids, "\x1e")))
+	return hex.EncodeToString(sum[:])[:hashHexLen]
 }
 
 // ActiveSnapshot loads the current managed index and its record details.

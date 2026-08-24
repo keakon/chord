@@ -268,16 +268,51 @@ func TestBuildMemoryExtractionPromptIncludesGuidanceAndActiveMemory(t *testing.T
 // The extraction prompt is the only place the retention bar lives: the model
 // never sees the code or docs it is told not to restate, so "cannot tell" has
 // to resolve to a drop, and a preference has to carry an explicit persistence
-// signal instead of being inferred from one in-task complaint.
+// signal instead of being inferred from one in-task complaint. It also owns the
+// curation contract — routing by authority, retiring what never belonged, and
+// protecting what the user stated from being forgotten by a later pass.
 func TestMemoryExtractionPromptCarriesRetentionDiscipline(t *testing.T) {
 	for _, want := range []string{
 		"absence from this input is not evidence",
-		"When you cannot tell whether a conclusion is already expressed by the repository, drop it.",
-		`A "preference" needs an explicit persistence signal from the user`,
+		"When you cannot tell whether the repository already expresses a conclusion, drop it.",
+		"A preference requires the user to signal persistence",
 		"is task-local",
+		// Curation: the index must be able to shrink, and a weaker pass's leftovers
+		// must be removable rather than permanent.
+		"list it in retire with a one-line reason",
+		`Never retire an entry whose confidence is "user_stated"`,
+		"supersede or retire at least as many entries as you add",
+		// Routing: never spend per-turn budget on what belongs elsewhere, and never
+		// assume a project's directory layout.
+		`target "project_instructions"`,
+		`target "project_docs"`,
+		"Never assume a directory layout.",
+		// The confidence-labelling rule must not read as a reason to keep material
+		// about the assistant's own reliability.
+		"it is never itself a reason to keep one",
+		"the reliability of assistant output itself",
 	} {
 		if !strings.Contains(memoryExtractionSystemPrompt, want) {
 			t.Errorf("extraction system prompt missing discipline: %q", want)
+		}
+	}
+}
+
+// The read-path block is injected every turn, so it carries the cheap decisions:
+// when to skip memory entirely, and how to weigh staleness against the cost of
+// checking, rather than a blanket "verify everything".
+func TestMemoryStableGuidanceCarriesLookupDiscipline(t *testing.T) {
+	for _, want := range []string{
+		"untrusted, potentially stale background",
+		"Skip memory when the request is self-contained",
+		"already-loaded current MEMORY.md content for this turn",
+		"do not use file or search tools to rediscover, reread, or reconfirm MEMORY.md itself",
+		"use that injected MEMORY.md summary as the index",
+		"Weigh drift against verification cost",
+		"confirm it still exists",
+	} {
+		if !strings.Contains(memoryStableGuidancePrompt, want) {
+			t.Errorf("stable memory guidance missing discipline: %q", want)
 		}
 	}
 }
@@ -486,5 +521,90 @@ func TestMemoryBackgroundCommitRefreshesNextRequestReminder(t *testing.T) {
 	}
 	if strings.Contains(*got, "Original notes") {
 		t.Fatalf("reminder still carries stale notes: %v", *got)
+	}
+}
+
+// The review pass sends the index and repository guidance with no transcript, and
+// must be recognizable as an audit: without the task marker the model would treat
+// an empty transcript as "nothing happened" and propose nothing.
+func TestMemoryIndexReviewPromptCarriesTaskAndNoTranscript(t *testing.T) {
+	active := &memory.ActiveSnapshot{
+		Entries: []memory.ManagedEntry{{
+			ID: "abc--1234567890abcdef", Link: ".chord/memory/records/abc--1234567890abcdef.md", Summary: "One",
+		}},
+		Records: []*memory.Record{{
+			ID: "abc--1234567890abcdef", Type: memory.TypeFact, Statement: "A stated fact.",
+			Rationale: "why", Application: "how", Summary: "One",
+		}},
+	}
+	prompt := buildMemoryIndexReviewPrompt("Repository guidance.", active)
+	payload := prompt[strings.Index(prompt, "{"):]
+	var input memoryExtractionInput
+	if err := json.Unmarshal([]byte(payload), &input); err != nil {
+		t.Fatalf("review prompt is not valid JSON: %v", err)
+	}
+	if input.Task != memoryReviewTask {
+		t.Fatalf("task = %q, want %q", input.Task, memoryReviewTask)
+	}
+	if len(input.Transcript) != 0 {
+		t.Fatalf("review prompt must carry no transcript, got %+v", input.Transcript)
+	}
+	if len(input.ActiveMemory) != 1 || input.ActiveMemory[0].Statement != "A stated fact." {
+		t.Fatalf("active memory = %+v", input.ActiveMemory)
+	}
+	if input.ActiveMemoryLimit != memory.ActiveIndexSoftLimit {
+		t.Fatalf("active memory limit = %d, want %d", input.ActiveMemoryLimit, memory.ActiveIndexSoftLimit)
+	}
+	// The prompt has to tell the model what that task value means, or the marker
+	// is inert.
+	for _, want := range []string{
+		`When task is "review_active_memory" there is no transcript`,
+		"Do not invent conclusions from nothing.",
+	} {
+		if !strings.Contains(memoryExtractionSystemPrompt, want) {
+			t.Errorf("extraction system prompt missing review discipline: %q", want)
+		}
+	}
+}
+
+// An index review is keyed by the index state itself, so a review that changed
+// nothing does not re-run until the index moves. Without this the trigger would
+// fire after every extraction once the index passed its soft limit.
+func TestActiveIndexFingerprintTracksIndexIdentity(t *testing.T) {
+	base := &memory.ActiveSnapshot{Entries: []memory.ManagedEntry{
+		{ID: "one--1111111111111111", Summary: "First"},
+		{ID: "two--2222222222222222", Summary: "Second"},
+	}}
+	reordered := &memory.ActiveSnapshot{Entries: []memory.ManagedEntry{
+		{ID: "two--2222222222222222", Summary: "Second"},
+		{ID: "one--1111111111111111", Summary: "First"},
+	}}
+	if base.IndexFingerprint() != reordered.IndexFingerprint() {
+		t.Fatal("reordering alone must not trigger another review")
+	}
+	added := &memory.ActiveSnapshot{Entries: append(append([]memory.ManagedEntry(nil), base.Entries...),
+		memory.ManagedEntry{ID: "three--3333333333333333", Summary: "Third"})}
+	if base.IndexFingerprint() == added.IndexFingerprint() {
+		t.Fatal("adding an entry must allow another review")
+	}
+	rewritten := &memory.ActiveSnapshot{Entries: []memory.ManagedEntry{
+		{ID: "one--1111111111111111", Summary: "First, rewritten"},
+		{ID: "two--2222222222222222", Summary: "Second"},
+	}}
+	if base.IndexFingerprint() == rewritten.IndexFingerprint() {
+		t.Fatal("rewriting a summary must allow another review")
+	}
+}
+
+// A failed index review has no session dir, so its recorded failure must use
+// the stable synthetic review id rather than filepath.Base("") which yields ".".
+func TestMemoryJobSessionIDUsesStableReviewName(t *testing.T) {
+	reviewID := memoryJobSessionID(memoryJob{review: true})
+	if reviewID != memory.ReviewSessionID {
+		t.Fatalf("memoryJobSessionID(review) = %q, want %q", reviewID, memory.ReviewSessionID)
+	}
+	sessionDir := filepath.Join(t.TempDir(), "sessions", "20260822010203000")
+	if got := memoryJobSessionID(memoryJob{sessionDir: sessionDir}); got != filepath.Base(sessionDir) {
+		t.Fatalf("memoryJobSessionID(session) = %q, want %q", got, filepath.Base(sessionDir))
 	}
 }

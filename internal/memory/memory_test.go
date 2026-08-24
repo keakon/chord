@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -36,6 +37,12 @@ func testCandidate(kind Type, statement, summary string) Candidate {
 		Confidence:  ConfidenceUserStated,
 		Outcome:     OutcomeSuccess,
 	}
+}
+
+// extractionOf wraps candidates as a commit payload for tests that only exercise
+// the addition path.
+func extractionOf(candidates ...Candidate) *ExtractionOutput {
+	return &ExtractionOutput{Candidates: candidates}
 }
 
 func assertMode(t *testing.T, path string, want os.FileMode) {
@@ -101,7 +108,7 @@ func TestCommitExtractionPreservesProjectFileModes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, []Candidate{testCandidate(TypeFact, "Facts stay fresh.", "Facts stay fresh.")}); err != nil {
+	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(testCandidate(TypeFact, "Facts stay fresh.", "Facts stay fresh."))); err != nil {
 		t.Fatalf("CommitExtraction: %v", err)
 	}
 
@@ -115,7 +122,7 @@ func TestCommitExtractionPreservesProjectFileModes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	if _, err := m2.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, []Candidate{testCandidate(TypeFact, "New facts.", "New facts.")}); err != nil {
+	if _, err := m2.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(testCandidate(TypeFact, "New facts.", "New facts."))); err != nil {
 		t.Fatalf("CommitExtraction 2: %v", err)
 	}
 	assertMode(t, filepath.Join(root2, "MEMORY.md"), 0o644)
@@ -134,7 +141,7 @@ func TestCommitExtractionCtxCancellationDoesNotAdvanceCheckpoint(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already cancelled before the commit starts
 
-	if _, err := m.CommitExtractionCtx(ctx, "s1", "fp1", 1, 0, []Candidate{testCandidate(TypeFact, "Facts stay fresh.", "Facts stay fresh.")}); err == nil {
+	if _, err := m.CommitExtractionCtx(ctx, "s1", "fp1", 1, 0, extractionOf(testCandidate(TypeFact, "Facts stay fresh.", "Facts stay fresh."))); err == nil {
 		t.Fatal("expected cancellation error")
 	}
 	cp, _ := LoadCheckpoint(m.layout)
@@ -163,7 +170,7 @@ func TestCommitExtractionSingleFlightWaiterInheritsFailure(t *testing.T) {
 	}
 	outCh := make(chan commitOutcome, 1)
 	go func() {
-		res, cerr := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, []Candidate{testCandidate(TypeFact, "Fact", "Fact")})
+		res, cerr := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(testCandidate(TypeFact, "Fact", "Fact")))
 		outCh <- commitOutcome{res: res, err: cerr}
 	}()
 
@@ -522,7 +529,7 @@ func TestCommitExtractionWritesRecordIndexCheckpoint(t *testing.T) {
 			ProjectPaths: []string{"internal/agent/session_switch.go"},
 		},
 	}
-	res, err := m.CommitExtractionCtx(context.Background(), "20260821153000123", "fp-abcdef", 42, 3, candidates)
+	res, err := m.CommitExtractionCtx(context.Background(), "20260821153000123", "fp-abcdef", 42, 3, extractionOf(candidates...))
 	if err != nil {
 		t.Fatalf("CommitExtraction: %v", err)
 	}
@@ -565,10 +572,10 @@ func TestCommitExtractionIdempotentSameFingerprint(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 	candidates := []Candidate{testCandidate(TypeFact, "A fact.", "Fact.")}
-	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, candidates); err != nil {
+	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(candidates...)); err != nil {
 		t.Fatalf("first commit: %v", err)
 	}
-	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, candidates)
+	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(candidates...))
 	if err != nil {
 		t.Fatalf("second commit: %v", err)
 	}
@@ -589,12 +596,12 @@ func TestCommitExtractionAppendAfterSessionGrows(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 	c1 := []Candidate{testCandidate(TypeFact, "Fact A", "A")}
-	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp-old", 5, 0, c1); err != nil {
+	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp-old", 5, 0, extractionOf(c1...)); err != nil {
 		t.Fatalf("commit 1: %v", err)
 	}
 	// New fingerprint (session grew) must be allowed to extract again.
 	c2 := []Candidate{testCandidate(TypeFact, "Fact B", "B")}
-	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp-new", 9, 1, c2)
+	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp-new", 9, 1, extractionOf(c2...))
 	if err != nil {
 		t.Fatalf("commit 2: %v", err)
 	}
@@ -614,13 +621,13 @@ func TestCommitExtractionDeduplicatesConclusionAcrossSessions(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 	first := testCandidate(TypeWorkflow, "Run focused tests before broad checks.", "Focused tests first.")
-	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, []Candidate{first})
+	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(first))
 	if err != nil {
 		t.Fatalf("first commit: %v", err)
 	}
 	second := first
 	second.Rationale = "A differently worded explanation from another session."
-	res2, err := m.CommitExtractionCtx(context.Background(), "s2", "fp2", 1, 0, []Candidate{second})
+	res2, err := m.CommitExtractionCtx(context.Background(), "s2", "fp2", 1, 0, extractionOf(second))
 	if err != nil {
 		t.Fatalf("duplicate commit: %v", err)
 	}
@@ -647,14 +654,14 @@ func TestCommitExtractionSupersedesActiveRecord(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 	old := testCandidate(TypePreference, "Prefer the compact display.", "Prefer compact display.")
-	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, []Candidate{old})
+	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(old))
 	if err != nil {
 		t.Fatalf("old commit: %v", err)
 	}
 	oldID := res.Added[0]
 	replacement := testCandidate(TypePreference, "Prefer the expanded display for diagnostics.", "Prefer expanded diagnostics.")
 	replacement.Supersedes = []string{oldID}
-	res2, err := m.CommitExtractionCtx(context.Background(), "s2", "fp2", 1, 0, []Candidate{replacement})
+	res2, err := m.CommitExtractionCtx(context.Background(), "s2", "fp2", 1, 0, extractionOf(replacement))
 	if err != nil {
 		t.Fatalf("replacement commit: %v", err)
 	}
@@ -685,7 +692,7 @@ func TestCommitExtractionRejectsInactiveSupersedes(t *testing.T) {
 	}
 	candidate := testCandidate(TypeFact, "A durable fact.", "Durable fact.")
 	candidate.Supersedes = []string{"missing--1234567890abcdef"}
-	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, []Candidate{candidate}); err == nil {
+	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(candidate)); err == nil {
 		t.Fatal("expected inactive supersedes to fail")
 	}
 	cp, err := LoadCheckpoint(m.layout)
@@ -733,7 +740,7 @@ func TestCommitExtractionKeepsUserNotes(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 	candidates := []Candidate{testCandidate(TypeWorkflow, "Run focused tests first.", "Focused tests first.")}
-	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, candidates); err != nil {
+	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(candidates...)); err != nil {
 		t.Fatalf("CommitExtraction: %v", err)
 	}
 	data, err := os.ReadFile(m.layout.IndexPath)
@@ -759,7 +766,7 @@ func TestCommitExtractionStopsOnMalformedMarkers(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 	candidates := []Candidate{testCandidate(TypeFact, "Fact", "Fact")}
-	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, candidates); err == nil {
+	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(candidates...)); err == nil {
 		t.Fatal("expected error for malformed markers")
 	}
 	// Checkpoint must not have advanced.
@@ -778,14 +785,14 @@ func TestCommitExtractionDoesNotOverwriteConcurrentUserEdit(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 	candidates := []Candidate{testCandidate(TypeFact, "Fact", "Fact")}
-	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, candidates); err != nil {
+	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(candidates...)); err != nil {
 		t.Fatalf("first commit: %v", err)
 	}
 	// User edits the file externally (no lock) with new notes.
 	writeProjectFile(t, root, "MEMORY.md", "# Project Memory\n\nBrand new user edit.\n")
 	// A second extraction must re-merge against the new content, not clobber it.
 	c2 := []Candidate{testCandidate(TypeFact, "Fact 2", "Fact 2")}
-	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp2", 1, 0, c2); err != nil {
+	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp2", 1, 0, extractionOf(c2...)); err != nil {
 		t.Fatalf("second commit: %v", err)
 	}
 	data, _ := os.ReadFile(m.layout.IndexPath)
@@ -810,7 +817,7 @@ func TestManualIndexEditNotAutoRevived(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 	candidates := []Candidate{testCandidate(TypeFact, "Fact", "Fact")}
-	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, candidates)
+	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(candidates...))
 	if err != nil {
 		t.Fatalf("CommitExtraction: %v", err)
 	}
@@ -836,7 +843,7 @@ func TestManualIndexEditNotAutoRevived(t *testing.T) {
 		t.Fatalf("manual edit: %v", err)
 	}
 	// A new extraction with a different candidate must not revive the old entry.
-	res2, err := m.CommitExtractionCtx(context.Background(), "s2", "fp2", 1, 0, []Candidate{testCandidate(TypeFact, "Another", "Another")})
+	res2, err := m.CommitExtractionCtx(context.Background(), "s2", "fp2", 1, 0, extractionOf(testCandidate(TypeFact, "Another", "Another")))
 	if err != nil {
 		t.Fatalf("commit 2: %v", err)
 	}
@@ -867,7 +874,7 @@ func TestCommitPreservesUserNotesVerbatim(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 	candidates := []Candidate{testCandidate(TypeFact, "Fact", "Fact")}
-	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, candidates); err != nil {
+	if _, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(candidates...)); err != nil {
 		t.Fatalf("CommitExtraction: %v", err)
 	}
 	data, err := os.ReadFile(m.layout.IndexPath)
@@ -928,7 +935,8 @@ func TestCheckpointRoundTrip(t *testing.T) {
 
 func TestExtractionOutputParsing(t *testing.T) {
 	valid := `{"candidates":[{"type":"preference","statement":"Prefer focused verification before broad test suites.","rationale":"Focused checks provide faster and clearer feedback.","application":"Run changed-package checks before broader suites.","summary":"Prefer focused verification.","source_role":"user","confidence":"user_stated","outcome":"success","project_paths":["a.go"]}]}`
-	cands, dropped, err := ParseExtractionOutput([]byte(valid))
+	out, err := ParseExtractionOutput([]byte(valid), MaxRetirePerSessionRun)
+	cands, dropped := outParts(out)
 	if err != nil {
 		t.Fatalf("ParseExtractionOutput: %v", err)
 	}
@@ -940,28 +948,30 @@ func TestExtractionOutputParsing(t *testing.T) {
 	}
 	// Empty candidates is a legal no-op.
 	empty := `{"candidates":[]}`
-	cands, dropped, err = ParseExtractionOutput([]byte(empty))
+	out, err = ParseExtractionOutput([]byte(empty), MaxRetirePerSessionRun)
+	cands, dropped = outParts(out)
 	if err != nil || len(cands) != 0 || len(dropped) != 0 {
 		t.Fatalf("empty candidates: %v %v %v", cands, dropped, err)
 	}
 	// Malformed JSON is a failure.
-	if _, _, err := ParseExtractionOutput([]byte("{not json")); err == nil {
+	if _, err := ParseExtractionOutput([]byte("{not json"), MaxRetirePerSessionRun); err == nil {
 		t.Fatal("expected failure for malformed JSON")
 	}
 	// Unknown enum is a failure.
 	badEnum := `{"candidates":[{"type":"bogus","statement":"x","rationale":"why","application":"how","summary":"x","source_role":"user","confidence":"user_stated","outcome":"success"}]}`
-	if _, _, err := ParseExtractionOutput([]byte(badEnum)); err == nil {
+	if _, err := ParseExtractionOutput([]byte(badEnum), MaxRetirePerSessionRun); err == nil {
 		t.Fatal("expected failure for unknown enum")
 	}
 	// user_stated requires source_role user.
 	mismatch := `{"candidates":[{"type":"fact","statement":"x","rationale":"why","application":"how","summary":"x","source_role":"assistant","confidence":"user_stated","outcome":"success"}]}`
-	if _, _, err := ParseExtractionOutput([]byte(mismatch)); err == nil {
+	if _, err := ParseExtractionOutput([]byte(mismatch), MaxRetirePerSessionRun); err == nil {
 		t.Fatal("expected failure for user_stated with assistant source")
 	}
 	// Path escaping is rejected by dropping the offending candidate; the rest
 	// of the output still commits.
 	badPath := `{"candidates":[{"type":"fact","statement":"x","rationale":"why","application":"how","summary":"x","source_role":"user","confidence":"user_stated","outcome":"success","project_paths":["../escape"]}]}`
-	cands, dropped, err = ParseExtractionOutput([]byte(badPath))
+	out, err = ParseExtractionOutput([]byte(badPath), MaxRetirePerSessionRun)
+	cands, dropped = outParts(out)
 	if err != nil {
 		t.Fatalf("escaping path must drop the candidate, not fail the run: %v", err)
 	}
@@ -970,7 +980,8 @@ func TestExtractionOutputParsing(t *testing.T) {
 	}
 	// A summary that would corrupt the managed index is dropped per-candidate.
 	badSummary := `{"candidates":[{"type":"fact","statement":"x","rationale":"why","application":"how","summary":"line one\n<!-- chord:managed:start -->","source_role":"user","confidence":"user_stated","outcome":"success"}]}`
-	cands, dropped, err = ParseExtractionOutput([]byte(badSummary))
+	out, err = ParseExtractionOutput([]byte(badSummary), MaxRetirePerSessionRun)
+	cands, dropped = outParts(out)
 	if err != nil {
 		t.Fatalf("broken summary must drop the candidate, not fail the run: %v", err)
 	}
@@ -982,7 +993,8 @@ func TestExtractionOutputParsing(t *testing.T) {
 	mixed := `{"candidates":[
 		{"type":"fact","statement":"good one","rationale":"why it matters","application":"how to apply it","summary":"good","source_role":"user","confidence":"user_stated","outcome":"success"},
 		{"type":"fact","statement":"the key is sk-abcdefghijklmnopqrstuvwx","rationale":"why it matters","application":"how to apply it","summary":"fine","source_role":"user","confidence":"user_stated","outcome":"success"}]}`
-	cands, dropped, err = ParseExtractionOutput([]byte(mixed))
+	out, err = ParseExtractionOutput([]byte(mixed), MaxRetirePerSessionRun)
+	cands, dropped = outParts(out)
 	if err != nil {
 		t.Fatalf("mixed output must not fail the whole run: %v", err)
 	}
@@ -994,7 +1006,8 @@ func TestExtractionOutputParsing(t *testing.T) {
 	}
 	// An all-secret output drops everything without failing the run.
 	secret := `{"candidates":[{"type":"fact","statement":"the key is sk-abcdefghijklmnopqrstuvwx and the rest is fine","rationale":"why it matters","application":"how to apply it","summary":"fine","source_role":"user","confidence":"user_stated","outcome":"success"}]}`
-	cands, dropped, err = ParseExtractionOutput([]byte(secret))
+	out, err = ParseExtractionOutput([]byte(secret), MaxRetirePerSessionRun)
+	cands, dropped = outParts(out)
 	if err != nil {
 		t.Fatalf("secret-only output must not fail the run: %v", err)
 	}
@@ -1124,5 +1137,542 @@ func TestCommitExtractionReportsDiscardedCheckpoint(t *testing.T) {
 	cp, err := LoadCheckpoint(m.layout)
 	if err != nil || cp == nil || !cp.Covered("s1", "fp1") {
 		t.Fatalf("checkpoint = %+v (err %v), want s1 covered after recovery", cp, err)
+	}
+}
+
+// outParts unpacks the addition-path fields most parser assertions care about,
+// tolerating the nil output a failed parse returns.
+func outParts(out *ExtractionOutput) ([]Candidate, []string) {
+	if out == nil {
+		return nil, nil
+	}
+	return out.Candidates, out.Dropped
+}
+
+// The reminder budget truncates the tail of the index, so ordering decides what
+// a session actually sees. Entries must render in MEMORY.md's own order: sorting
+// by ID would rank by slug spelling, and multi-byte IDs sort last, so they could
+// never be injected at all.
+func TestBoundedSummaryRendersFileOrderNotIDOrder(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	root := t.TempDir()
+	writeProjectFile(t, root, "MEMORY.md", `<!-- chord:managed:start -->
+
+## Managed Records
+
+- [zebra-last-alphabetically--1111111111111111](.chord/memory/records/zebra-last-alphabetically--1111111111111111.md)
+  — Written most recently.
+- [alpha-first-alphabetically--2222222222222222](.chord/memory/records/alpha-first-alphabetically--2222222222222222.md)
+  — Written earlier.
+<!-- chord:managed:end -->
+`)
+	m, err := NewManager(root)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	summary, active, err := m.BoundedSummary()
+	if err != nil {
+		t.Fatalf("BoundedSummary: %v", err)
+	}
+	if !active {
+		t.Fatal("expected active summary")
+	}
+	zebra := strings.Index(summary, "zebra-last-alphabetically")
+	alpha := strings.Index(summary, "alpha-first-alphabetically")
+	if zebra < 0 || alpha < 0 {
+		t.Fatalf("both entries should render: %q", summary)
+	}
+	if zebra > alpha {
+		t.Fatalf("entries were reordered by ID instead of file order: %q", summary)
+	}
+}
+
+// managedSectionMinTokens is a floor, not a cap. With no User Notes the index
+// must be free to use the whole reminder budget; capping it at the floor silently
+// hid most of the index from every session.
+func TestBoundedSummaryIndexUsesBudgetBeyondFloor(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	root := t.TempDir()
+	var sb strings.Builder
+	sb.WriteString("<!-- chord:managed:start -->\n\n## Managed Records\n\n")
+	const total = 24
+	for i := range total {
+		id := fmt.Sprintf("record-number-%02d--aaaaaaaaaaaaaa%02d", i, i)
+		fmt.Fprintf(&sb, "- [%s](.chord/memory/records/%s.md)\n  — Summary for entry number %02d.\n", id, id, i)
+	}
+	sb.WriteString("<!-- chord:managed:end -->\n")
+	writeProjectFile(t, root, "MEMORY.md", sb.String())
+	m, err := NewManager(root)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	summary, _, err := m.BoundedSummary()
+	if err != nil {
+		t.Fatalf("BoundedSummary: %v", err)
+	}
+	rendered := strings.Count(summary, "- [record-number-")
+	if rendered <= managedSectionMinTokens/25 {
+		t.Fatalf("index rendered only %d/%d entries; the floor is being used as a cap", rendered, total)
+	}
+	if rendered != total {
+		t.Fatalf("index rendered %d/%d entries at the soft limit; the budget should hold a full index", rendered, total)
+	}
+	// The whole point of the floor is that it bounds nothing when notes are absent,
+	// but the total still respects the summary budget.
+	if got := (len(summary) + 3) / 4; got > maxSummaryTokens {
+		t.Fatalf("summary is %d tokens, over the %d budget", got, maxSummaryTokens)
+	}
+}
+
+// A long hand-written preamble must not squeeze the index out entirely: notes are
+// bounded first and the index keeps at least its floor.
+func TestBoundedSummaryLongNotesStillLeaveIndexFloor(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	root := t.TempDir()
+	var sb strings.Builder
+	sb.WriteString("# Project Memory\n\n")
+	for i := range 400 {
+		fmt.Fprintf(&sb, "- Hand-written navigation line number %d that goes on at length.\n", i)
+	}
+	sb.WriteString("\n<!-- chord:managed:start -->\n\n## Managed Records\n\n")
+	for i := range 10 {
+		id := fmt.Sprintf("record-number-%02d--bbbbbbbbbbbbbb%02d", i, i)
+		fmt.Fprintf(&sb, "- [%s](.chord/memory/records/%s.md)\n  — Summary for entry number %02d.\n", id, id, i)
+	}
+	sb.WriteString("<!-- chord:managed:end -->\n")
+	writeProjectFile(t, root, "MEMORY.md", sb.String())
+	m, err := NewManager(root)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	summary, _, err := m.BoundedSummary()
+	if err != nil {
+		t.Fatalf("BoundedSummary: %v", err)
+	}
+	if !strings.Contains(summary, "Hand-written navigation line number 0") {
+		t.Fatalf("notes prefix missing: %q", summary)
+	}
+	if got := strings.Count(summary, "- [record-number-"); got == 0 {
+		t.Fatalf("long notes squeezed the index out entirely: %q", summary)
+	}
+}
+
+// A pitfall claims something about this codebase, so it has to be able to point
+// at the code. Without a path it is generic advice or a note about the
+// assistant's own output — the shape that filled the index with material already
+// covered by project instructions. Other types legitimately carry no path.
+func TestPitfallWithoutProjectPathsIsDropped(t *testing.T) {
+	pitfall := `{"candidates":[{"type":"pitfall","statement":"Do not trust unsupported review summaries.","rationale":"why it matters","application":"how to apply it","summary":"Distrust unsupported summaries.","source_role":"assistant","confidence":"reported","outcome":"uncertain"}]}`
+	out, err := ParseExtractionOutput([]byte(pitfall), MaxRetirePerSessionRun)
+	if err != nil {
+		t.Fatalf("a pathless pitfall must drop, not fail the run: %v", err)
+	}
+	if len(out.Candidates) != 0 || len(out.Dropped) != 1 {
+		t.Fatalf("pathless pitfall: candidates=%+v dropped=%v", out.Candidates, out.Dropped)
+	}
+	// An environment fact has no code to point at and must still be accepted.
+	fact := `{"candidates":[{"type":"fact","statement":"Reference checkouts live under the workspace directory.","rationale":"why it matters","application":"how to apply it","summary":"Reference checkout locations.","source_role":"user","confidence":"user_stated","outcome":"success"}]}`
+	out, err = ParseExtractionOutput([]byte(fact), MaxRetirePerSessionRun)
+	if err != nil {
+		t.Fatalf("ParseExtractionOutput: %v", err)
+	}
+	if len(out.Candidates) != 1 || len(out.Dropped) != 0 {
+		t.Fatalf("pathless fact should survive: candidates=%+v dropped=%v", out.Candidates, out.Dropped)
+	}
+}
+
+func TestParseExtractionRetireAndPromotionBounds(t *testing.T) {
+	over := `{"candidates":[],"retire":[
+		{"id":"one--1111111111111111","reason":"already covered by project instructions"},
+		{"id":"two--2222222222222222","reason":"no longer true"},
+		{"id":"three--3333333333333333","reason":"never belonged"},
+		{"id":"four--4444444444444444","reason":"over the limit"}]}`
+	out, err := ParseExtractionOutput([]byte(over), MaxRetirePerSessionRun)
+	if err != nil {
+		t.Fatalf("ParseExtractionOutput: %v", err)
+	}
+	if len(out.Retire) != MaxRetirePerSessionRun || len(out.Dropped) != 1 {
+		t.Fatalf("retire = %+v dropped = %v, want %d kept and 1 dropped", out.Retire, out.Dropped, MaxRetirePerSessionRun)
+	}
+	// A review run consolidates harder, so the same payload fits.
+	out, err = ParseExtractionOutput([]byte(over), MaxRetirePerReviewRun)
+	if err != nil {
+		t.Fatalf("ParseExtractionOutput review: %v", err)
+	}
+	if len(out.Retire) != 4 || len(out.Dropped) != 0 {
+		t.Fatalf("review retire = %+v dropped = %v", out.Retire, out.Dropped)
+	}
+	// Shape problems drop the single item; they never fail a batch that also
+	// carries valid additions.
+	bad := `{"candidates":[],"retire":[{"id":"not a record id","reason":"x"},{"id":"dup--1111111111111111","reason":""}]}`
+	out, err = ParseExtractionOutput([]byte(bad), MaxRetirePerSessionRun)
+	if err != nil {
+		t.Fatalf("malformed retire must drop, not fail: %v", err)
+	}
+	if len(out.Retire) != 0 || len(out.Dropped) != 2 {
+		t.Fatalf("retire = %+v dropped = %v", out.Retire, out.Dropped)
+	}
+	// An unknown promotion target is an enum violation: a whole-batch failure,
+	// consistent with the other enums.
+	badTarget := `{"candidates":[],"promotions":[{"target":"somewhere_else","summary":"s","draft_text":"d","reason":"r"}]}`
+	if _, err := ParseExtractionOutput([]byte(badTarget), MaxRetirePerSessionRun); err == nil {
+		t.Fatal("expected failure for unknown promotion target")
+	}
+	ok := `{"candidates":[],"promotions":[{"target":"project_docs","summary":"Rarely triggered LSP detail","draft_text":"Root discovery and file-type gating are orthogonal.","reason":"useful but rarely triggered"}]}`
+	out, err = ParseExtractionOutput([]byte(ok), MaxRetirePerSessionRun)
+	if err != nil {
+		t.Fatalf("ParseExtractionOutput promotion: %v", err)
+	}
+	if len(out.Promotions) != 1 || out.Promotions[0].Target != PromotionProjectDocs {
+		t.Fatalf("promotions = %+v", out.Promotions)
+	}
+	if out.Empty() {
+		t.Fatal("a promotion-only run is not empty")
+	}
+}
+
+// Retiring with no addition still has to rewrite the index: treating it as a
+// no-op would make the correction channel silently do nothing.
+func TestCommitRetireOnlyRewritesIndexAndKeepsRecordFile(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	root := t.TempDir()
+	m, err := NewManager(root)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	seed := testCandidate(TypeFact, "A conclusion that will be retired.", "Retire me.")
+	seed.SourceRole = SourceRoleAssistant
+	seed.Confidence = ConfidenceReported
+	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(seed))
+	if err != nil {
+		t.Fatalf("seed commit: %v", err)
+	}
+	if len(res.Added) != 1 {
+		t.Fatalf("seed added = %v", res.Added)
+	}
+	id := res.Added[0]
+	recordPath := filepath.Join(root, ".chord/memory/records", id+".md")
+	if _, err := os.Stat(recordPath); err != nil {
+		t.Fatalf("seed record missing: %v", err)
+	}
+
+	res, err = m.CommitExtractionCtx(context.Background(), "s2", "fp2", 1, 0, &ExtractionOutput{
+		Retire: []RetireRequest{{ID: id, Reason: "already covered by project instructions"}},
+	})
+	if err != nil {
+		t.Fatalf("retire commit: %v", err)
+	}
+	if res.Noop {
+		t.Fatal("a retire-only commit must not report a no-op")
+	}
+	if len(res.Retired) != 1 || res.Retired[0] != id {
+		t.Fatalf("retired = %v, want %q", res.Retired, id)
+	}
+	idx, err := m.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex: %v", err)
+	}
+	if len(idx.Managed) != 0 {
+		t.Fatalf("retired entry still indexed: %+v", idx.Managed)
+	}
+	// Provenance survives: only the index entry goes away, exactly as for a
+	// superseded record.
+	if _, err := os.Stat(recordPath); err != nil {
+		t.Fatalf("retire must keep the record file as an orphan: %v", err)
+	}
+}
+
+// What the user stated is not the model's to forget. A stale preference is for
+// the user to drop or for a promotion to relocate, never for an extraction pass
+// to delete on its own.
+func TestCommitRefusesToRetireUserStatedRecord(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	root := t.TempDir()
+	m, err := NewManager(root)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	// testCandidate is user_stated by construction.
+	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0,
+		extractionOf(testCandidate(TypePreference, "Always fix mechanical lint directly.", "Fix lint directly.")))
+	if err != nil {
+		t.Fatalf("seed commit: %v", err)
+	}
+	id := res.Added[0]
+
+	res, err = m.CommitExtractionCtx(context.Background(), "s2", "fp2", 1, 0, &ExtractionOutput{
+		Retire: []RetireRequest{{ID: id, Reason: "looks stale to me"}},
+	})
+	if err != nil {
+		t.Fatalf("refusing a retirement must not fail the commit: %v", err)
+	}
+	if len(res.Retired) != 0 {
+		t.Fatalf("retired = %v, want the user-stated record kept", res.Retired)
+	}
+	if len(res.Warnings) == 0 {
+		t.Fatal("refusal must be surfaced as a warning, not silently dropped")
+	}
+	idx, err := m.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex: %v", err)
+	}
+	if len(idx.Managed) != 1 || idx.Managed[0].ID != id {
+		t.Fatalf("user-stated entry should stay indexed: %+v", idx.Managed)
+	}
+}
+
+// A promotion writes a pending suggestion file and unindexes its active source,
+// so the conclusion leaves every future turn's context until a human accepts
+// it. Chord must never touch the authoritative files itself.
+func TestCommitPromotionWritesSuggestionAndUnindexes(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	root := t.TempDir()
+	m, err := NewManager(root)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	reported := testCandidate(TypePreference, "Commits must be authored by the project owner.", "Commit author rule.")
+	reported.Confidence = ConfidenceReported
+	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(reported))
+	if err != nil {
+		t.Fatalf("seed commit: %v", err)
+	}
+	id := res.Added[0]
+
+	res, err = m.CommitExtractionCtx(context.Background(), "s2", "fp2", 1, 0, &ExtractionOutput{
+		Promotions: []Promotion{{
+			SourceID:          id,
+			Target:            PromotionProjectInstructions,
+			Summary:           "Commit author rule belongs in project instructions",
+			SuggestedLocation: "Commit rules",
+			DraftText:         "Commits must be authored by the project owner.",
+			Reason:            "mandatory and repo-wide",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("promotion commit: %v", err)
+	}
+	if res.Promoted != 1 {
+		t.Fatalf("promoted = %d, want 1", res.Promoted)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".chord/memory/promotions"))
+	if err != nil {
+		t.Fatalf("promotions dir missing: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("promotions dir has %d entries, want exactly one suggestion", len(entries))
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".chord/memory/promotions", entries[0].Name()))
+	if err != nil {
+		t.Fatalf("suggestion file unreadable: %v", err)
+	}
+	for _, want := range []string{"project_instructions", "Commit rules", id, "authored by the project owner"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("suggestion file missing %q: %s", want, data)
+		}
+	}
+	idx, err := m.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex: %v", err)
+	}
+	if len(idx.Managed) != 0 {
+		t.Fatalf("promoted entry still indexed: %+v", idx.Managed)
+	}
+	// Chord proposes; it never edits the authoritative file itself.
+	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("promotion must not create or edit AGENTS.md, stat err = %v", err)
+	}
+}
+
+// A promotion never unindexes a user-stated record on its own: until a human
+// accepts the suggestion, the indexed entry is what every future session sees.
+// The suggestion file itself is still written for review.
+func TestCommitPromotionKeepsUserStatedSourceIndexed(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	root := t.TempDir()
+	m, err := NewManager(root)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0,
+		extractionOf(testCandidate(TypePreference, "Always answer in the reviewer's language.", "Answer language rule.")))
+	if err != nil {
+		t.Fatalf("seed commit: %v", err)
+	}
+	id := res.Added[0]
+
+	res, err = m.CommitExtractionCtx(context.Background(), "s2", "fp2", 1, 0, &ExtractionOutput{
+		Promotions: []Promotion{{
+			SourceID:  id,
+			Target:    PromotionProjectInstructions,
+			Summary:   "Answer language rule belongs in project instructions",
+			DraftText: "Always answer in the reviewer's language.",
+			Reason:    "stated as a lasting preference",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("promotion commit: %v", err)
+	}
+	if res.Promoted != 1 {
+		t.Fatalf("promoted = %d, want 1", res.Promoted)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".chord/memory/promotions"))
+	if err != nil {
+		t.Fatalf("promotions dir missing: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("promotions dir has %d entries, want exactly one suggestion", len(entries))
+	}
+	idx, err := m.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex: %v", err)
+	}
+	if len(idx.Managed) != 1 || idx.Managed[0].ID != id {
+		t.Fatalf("user-stated source should stay indexed: %+v", idx.Managed)
+	}
+	found := false
+	for _, w := range res.Warnings {
+		if strings.Contains(w, id) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("keeping the entry must be surfaced as a warning, got %v", res.Warnings)
+	}
+}
+
+// Re-running a commit after a late failure or cancellation rewrites the same
+// suggestions; content-addressed exclusive-create must keep them deduplicated.
+func TestWritePromotionFilesIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	l := &Layout{PromotionsDir: filepath.Join(dir, ".chord/memory/promotions")}
+	promos := []Promotion{{
+		Target:    PromotionProjectInstructions,
+		Summary:   "Keep localized docs in sync",
+		DraftText: "Apply wording changes to every language variant at once.",
+		Reason:    "docs drift when only one is edited",
+	}}
+	if err := writePromotionFiles(l, "s1", promos); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	// A retry from a different attempt (even a different session key) writes the
+	// identical canonical content and must land on the same file.
+	if err := writePromotionFiles(l, "s2", promos); err != nil {
+		t.Fatalf("retry write: %v", err)
+	}
+	entries, err := os.ReadDir(l.PromotionsDir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(entries) != 1 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("got %d files %v, want the single idempotent suggestion", len(entries), names)
+	}
+	data, err := os.ReadFile(filepath.Join(l.PromotionsDir, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("read suggestion: %v", err)
+	}
+	if !strings.Contains(string(data), "- Session: s1") {
+		t.Fatalf("suggestion should carry the first writing session: %s", data)
+	}
+}
+
+// Ordering is load-bearing because the reminder truncates the tail: new entries
+// go first so recent learning stays inside the injected prefix, and existing
+// order (including a manual reorder) is preserved instead of being reshuffled.
+func TestBuildManagedIndexPrependsNewAndPreservesOrder(t *testing.T) {
+	existing := &MemoryIndex{
+		Managed: []ManagedEntry{
+			{ID: "first--1111111111111111", Link: ".chord/memory/records/first--1111111111111111.md", Summary: "First"},
+			{ID: "second--2222222222222222", Link: ".chord/memory/records/second--2222222222222222.md", Summary: "Second"},
+			{ID: "third--3333333333333333", Link: ".chord/memory/records/third--3333333333333333.md", Summary: "Third"},
+		},
+		HasManagedMarker: true,
+	}
+	merged, err := BuildManagedIndexReplacing(existing,
+		[]ManagedEntry{
+			{ID: "fresh--4444444444444444", Link: ".chord/memory/records/fresh--4444444444444444.md", Summary: "Fresh"},
+			{ID: "second--2222222222222222", Link: ".chord/memory/records/second--2222222222222222.md", Summary: "Second, restated"},
+		},
+		[]string{"third--3333333333333333"})
+	if err != nil {
+		t.Fatalf("BuildManagedIndexReplacing: %v", err)
+	}
+	idx, err := parseMemoryFile(merged)
+	if err != nil {
+		t.Fatalf("parseMemoryFile: %v", err)
+	}
+	var ids []string
+	for _, e := range idx.Managed {
+		ids = append(ids, e.ID)
+	}
+	want := []string{"fresh--4444444444444444", "first--1111111111111111", "second--2222222222222222"}
+	if len(ids) != len(want) {
+		t.Fatalf("ids = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("ids = %v, want %v", ids, want)
+		}
+	}
+	// A restated entry is updated in place, not moved to the front.
+	if idx.Managed[2].Summary != "Second, restated" {
+		t.Fatalf("restated summary = %q", idx.Managed[2].Summary)
+	}
+}
+
+// Repeated commits must not reshuffle the file. The previous map-iteration merge
+// only looked stable because rendering re-sorted by ID; with order now meaningful,
+// churn would rewrite MEMORY.md and change what gets injected every time.
+func TestCommitPreservesExistingRowOrderAcrossRuns(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	root := t.TempDir()
+	m, err := NewManager(root)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	var seeded []string
+	for i := range 4 {
+		res, err := m.CommitExtractionCtx(context.Background(), fmt.Sprintf("s%d", i), fmt.Sprintf("fp%d", i), 1, 0,
+			extractionOf(testCandidate(TypeFact, fmt.Sprintf("Conclusion number %d.", i), fmt.Sprintf("Summary %d.", i))))
+		if err != nil {
+			t.Fatalf("commit %d: %v", i, err)
+		}
+		if len(res.Added) != 1 {
+			t.Fatalf("commit %d added = %v", i, res.Added)
+		}
+		seeded = append(seeded, res.Added[0])
+	}
+	idx, err := m.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex: %v", err)
+	}
+	// Newest first, so the seeded order is reversed.
+	if len(idx.Managed) != len(seeded) {
+		t.Fatalf("index = %+v, want %d entries", idx.Managed, len(seeded))
+	}
+	for i, e := range idx.Managed {
+		want := seeded[len(seeded)-1-i]
+		if e.ID != want {
+			t.Fatalf("index[%d] = %q, want %q (newest first)", i, e.ID, want)
+		}
+	}
+	before, err := os.ReadFile(m.layout.IndexPath)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	// A no-op commit must not rewrite the file at all.
+	if _, err := m.CommitExtractionCtx(context.Background(), "s-noop", "fp-noop", 0, 0, nil); err != nil {
+		t.Fatalf("noop commit: %v", err)
+	}
+	after, err := os.ReadFile(m.layout.IndexPath)
+	if err != nil {
+		t.Fatalf("re-read index: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("no-op commit rewrote MEMORY.md:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
