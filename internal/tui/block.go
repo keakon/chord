@@ -217,9 +217,6 @@ type Block struct {
 	// richMarkdownHL caches lexer detection and rendered snippets for Chord-owned
 	// markdown cards that share assistant fenced-code rendering.
 	richMarkdownHL *codeHighlighter
-	// CompactionPreviewLines is the number of rendered markdown lines shown by
-	// default when the compaction summary card is collapsed.
-	CompactionPreviewLines int
 
 	// Render caches - invalidated when content or width changes
 	mdCache                      []string

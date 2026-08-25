@@ -92,18 +92,16 @@ func (b *Block) renderCompactionSummary(width int) []string {
 	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := min(innerWidth, maxProseWidth)
 	label := ThinkingLabelStyle.Render(blockLabelWithID("CONTEXT SUMMARY", b.displayLabelID()))
+	// Compaction summaries are always fully expanded (see Block.Toggle); the
+	// complete raw content including any [Context compressed] archive section
+	// stays visible, so no [space] hints are rendered.
 	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), contentWidth, &b.richMarkdownHL)
 	if len(bodyLines) == 0 {
 		bodyLines = []string{""}
 	}
-	lines := make([]string, 0, len(bodyLines)+4)
+	lines := make([]string, 0, len(bodyLines)+2)
 	lines = append(lines, label, "")
 	lines = append(lines, bodyLines...)
-	if b.Collapsed {
-		lines = append(lines, "", DimStyle.Render("[space] toggle expand/collapse"))
-	} else {
-		lines = append(lines, "", DimStyle.Render("[space] collapse to preview"))
-	}
 	cardBg := currentTheme.CompactionSummaryBg
 	lines = preserveCardBg(lines, cardBg)
 	return renderPrewrappedCard(style, innerWidth, lines, cardBg, railANSISeq("assistant", b.Focused))

@@ -166,10 +166,8 @@ func TestRenderAssistantMarkdownContentKeepsNestedFenceInsideOuterMarkdownExampl
 func TestRenderCompactionSummaryKeepsNestedFenceInsideMarkdownExample(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
-		Type:                   BlockCompactionSummary,
-		Collapsed:              false,
-		CompactionPreviewLines: 10,
-		Content:                "~~~md\nouter\n```go\nfunc main() {}\n```\nafter inner\n~~~",
+		Type:    BlockCompactionSummary,
+		Content: "~~~md\nouter\n```go\nfunc main() {}\n```\nafter inner\n~~~",
 	}
 	lines := block.Render(60, "")
 	joinedPlain := stripANSI(strings.Join(lines, "\n"))

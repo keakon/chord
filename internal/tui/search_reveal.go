@@ -66,13 +66,8 @@ func revealSearchMatchedBlock(block *Block) bool {
 			changed = true
 		}
 	case BlockCompactionSummary:
-		if block.Collapsed {
-			block.Collapsed = false
-			if raw := strings.TrimSpace(block.CompactionSummaryRaw); raw != "" {
-				block.Content = formatCompactionSummaryDisplay(raw, false, block.CompactionPreviewLines)
-			}
-			changed = true
-		}
+		// Compaction summary cards are always fully expanded (see Block.Toggle),
+		// so search reveal has nothing to expand.
 	}
 	if changed {
 		block.InvalidateCache()

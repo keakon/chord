@@ -369,10 +369,8 @@ func TestSettledAssistantInvisibleContentRendersNoCard(t *testing.T) {
 func TestRenderCompactionSummaryUsesMarkdownPreviewAndBlankLine(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
-		Type:                   BlockCompactionSummary,
-		Collapsed:              true,
-		CompactionPreviewLines: 10,
-		Content:                "## Goal\n- keep markdown\n- show preview\n\n## Progress\n- render markdown",
+		Type:    BlockCompactionSummary,
+		Content: "## Goal\n- keep markdown\n- show preview\n\n## Progress\n- render markdown",
 	}
 	lines := block.Render(60, "")
 	plain := make([]string, len(lines))
@@ -402,18 +400,17 @@ func TestRenderCompactionSummaryUsesMarkdownPreviewAndBlankLine(t *testing.T) {
 	if !strings.Contains(joined, "• keep markdown") {
 		t.Fatalf("expected markdown bullet rendering, got %q", joined)
 	}
-	if !strings.Contains(joined, "[space] toggle expand/collapse") {
-		t.Fatalf("expected collapsed hint, got %q", joined)
+	// Compaction cards are fully expanded and never show a toggle hint.
+	if strings.Contains(joined, "[space]") {
+		t.Fatalf("expanded compaction summary should not show a toggle hint, got %q", joined)
 	}
 }
 
 func TestRenderCompactionSummaryHighlightsFencedCode(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
-		Type:                   BlockCompactionSummary,
-		Collapsed:              false,
-		CompactionPreviewLines: 10,
-		Content:                "## Files\n```go\nfmt.Println(1)\n```",
+		Type:    BlockCompactionSummary,
+		Content: "## Files\n```go\nfmt.Println(1)\n```",
 	}
 	lines := block.Render(60, "")
 	joinedPlain := stripANSI(strings.Join(lines, "\n"))

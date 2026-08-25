@@ -306,11 +306,9 @@ func (b *Block) ToggleAtWidth(width int) bool {
 			return true
 		}
 	case BlockCompactionSummary:
-		b.Collapsed = !b.Collapsed
-		if raw := strings.TrimSpace(b.CompactionSummaryRaw); raw != "" {
-			b.Content = formatCompactionSummaryDisplay(raw, b.Collapsed, b.CompactionPreviewLines)
-		}
-		b.InvalidateCache()
+		// Compaction summary cards are always fully expanded: the archived
+		// context (and any storage facts) must stay visible, matching the
+		// non-collapsible treatment of Delete cards. Toggle is a no-op.
 	}
 	return false
 }

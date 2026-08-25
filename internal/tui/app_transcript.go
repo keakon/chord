@@ -385,8 +385,7 @@ func preserveRebuiltBlockState(src, dst *Block) {
 		if strings.TrimSpace(src.CompactionSummaryRaw) != strings.TrimSpace(dst.CompactionSummaryRaw) {
 			return
 		}
-		dst.Collapsed = src.Collapsed
-		dst.CompactionPreviewLines = src.CompactionPreviewLines
+		// Compaction cards are always fully expanded; only timing is preserved.
 		dst.StartedAt = src.StartedAt
 		dst.SettledAt = src.SettledAt
 	default:
@@ -647,13 +646,11 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 			if userBlock == nil {
 				if msg.IsCompactionSummary {
 					userBlock = &Block{
-						ID:                     *nextID,
-						Type:                   BlockCompactionSummary,
-						CompactionSummaryRaw:   content,
-						CompactionPreviewLines: maxCompactionSummaryPreviewLines,
-						Content:                formatCompactionSummaryDisplay(content, true, maxCompactionSummaryPreviewLines),
-						Collapsed:              true,
-						MsgIndex:               -1,
+						ID:                   *nextID,
+						Type:                 BlockCompactionSummary,
+						CompactionSummaryRaw: content,
+						Content:              content,
+						MsgIndex:             -1,
 					}
 				} else {
 					userBlock = &Block{
@@ -727,51 +724,6 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 		}
 	}
 	return blocks
-}
-
-func formatCompactionSummaryDisplay(content string, collapsed bool, previewLines int) string {
-	const header = "[Context Summary]\n"
-	const footer = "\n\n[Context compressed]"
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return ""
-	}
-	start := strings.Index(content, header)
-	if start == -1 {
-		if !collapsed {
-			return content
-		}
-		return compactionSummaryPreview(content, previewLines)
-	}
-	start += len(header)
-	end := strings.Index(content[start:], footer)
-	summary := ""
-	full := content
-	if end == -1 {
-		summary = strings.TrimSpace(content[start:])
-	} else {
-		summary = strings.TrimSpace(content[start : start+end])
-	}
-	if !collapsed {
-		return full
-	}
-	return compactionSummaryPreview(summary, previewLines)
-}
-
-func compactionSummaryPreview(summary string, previewLines int) string {
-	summary = strings.TrimSpace(summary)
-	if summary == "" {
-		return ""
-	}
-	if previewLines <= 0 {
-		previewLines = maxCompactionSummaryPreviewLines
-	}
-	lines := strings.Split(summary, "\n")
-	if len(lines) <= previewLines {
-		return summary
-	}
-	preview := strings.Join(lines[:previewLines], "\n")
-	return strings.TrimRight(preview, "\n") + "\n…"
 }
 
 // parseTaskResultInstanceID extracts the SubAgent instance ID from the Task

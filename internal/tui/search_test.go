@@ -248,18 +248,14 @@ func TestRevealSearchMatchedBlockExpandsToolContent(t *testing.T) {
 
 	summary := &Block{
 		Type:                 BlockCompactionSummary,
-		Collapsed:            true,
-		Content:              "## Goal\n- preview only",
+		Content:              "[Context Summary]\n## Goal\n- preview only\n\n## Files and Evidence\n- docs/architecture/context-management.md\n\n[Context compressed]\nArchived history files:\n- history-1.md",
 		CompactionSummaryRaw: "[Context Summary]\n## Goal\n- preview only\n\n## Files and Evidence\n- docs/architecture/context-management.md\n\n[Context compressed]\nArchived history files:\n- history-1.md",
 	}
-	if !revealSearchMatchedBlock(summary) {
-		t.Fatal("compaction summary reveal should report changed state")
-	}
-	if summary.Collapsed {
-		t.Fatal("compaction summary should expand when revealed by search")
+	if revealSearchMatchedBlock(summary) {
+		t.Fatal("compaction summary reveal should report no change: it is always fully expanded")
 	}
 	if !strings.Contains(summary.Content, "docs/architecture/context-management.md") {
-		t.Fatalf("expanded compaction summary content = %q, want full raw content", summary.Content)
+		t.Fatalf("compaction summary content = %q, want full raw content", summary.Content)
 	}
 }
 
@@ -451,7 +447,7 @@ func TestStructuredDisplaySearchMatchesAreRenderedAndHighlightable(t *testing.T)
 		{
 			name:  "compaction raw content",
 			query: "archive needle",
-			block: &Block{ID: 1, Type: BlockCompactionSummary, Collapsed: true, Content: "preview", CompactionSummaryRaw: "[Context Summary]\npreview\n\narchive needle\n\n[Context compressed]"},
+			block: &Block{ID: 1, Type: BlockCompactionSummary, Content: "[Context Summary]\npreview\n\narchive needle\n\n[Context compressed]", CompactionSummaryRaw: "[Context Summary]\npreview\n\narchive needle\n\n[Context compressed]"},
 		},
 	}
 

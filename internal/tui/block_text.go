@@ -13,8 +13,6 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-const maxCompactionSummaryPreviewLines = 10
-
 const (
 	// maxTextWidth is the maximum width for text content to prevent unreadable
 	// wide text on large terminals.

@@ -4899,7 +4899,7 @@ func TestMessagesToBlocksUserPartsUseRawTextNotDisplayText(t *testing.T) {
 	}
 }
 
-func TestMessagesToBlocksCompactionSummaryCollapsedByDefaultAndExpandable(t *testing.T) {
+func TestMessagesToBlocksCompactionSummaryFullyExpandedAndNotCollapsible(t *testing.T) {
 	msgs := []message.Message{{
 		Role:                "user",
 		IsCompactionSummary: true,
@@ -4914,29 +4914,20 @@ func TestMessagesToBlocksCompactionSummaryCollapsedByDefaultAndExpandable(t *tes
 	if b.Type != BlockCompactionSummary {
 		t.Fatalf("block type = %v, want BlockCompactionSummary", b.Type)
 	}
-	if !b.Collapsed {
-		t.Fatal("compaction summary block should be collapsed by default")
-	}
-	if strings.Contains(b.Content, "history-1.md") {
-		t.Fatalf("collapsed content should hide full preserved context, got %q", b.Content)
-	}
-	// Preview should be truncated (we used more than 10 lines of summary above).
-	if !strings.Contains(b.Content, "…") {
-		t.Fatalf("collapsed content should show truncated preview marker, got %q", b.Content)
-	}
-	b.Toggle()
+	// Compaction cards are always fully expanded: the archived context (and
+	// the compaction facts) stay visible.
 	if b.Collapsed {
-		t.Fatal("compaction summary block should expand after toggle")
+		t.Fatal("compaction summary block should be fully expanded by default")
 	}
 	if !strings.Contains(b.Content, "history-1.md") {
 		t.Fatalf("expanded content should show archived history path, got %q", b.Content)
 	}
 	b.Toggle()
-	if !b.Collapsed {
-		t.Fatal("compaction summary block should collapse after second toggle")
+	if b.Collapsed {
+		t.Fatal("compaction summary block should not collapse on toggle")
 	}
-	if strings.Contains(b.Content, "history-1.md") {
-		t.Fatalf("collapsed content should again hide full preserved context, got %q", b.Content)
+	if !strings.Contains(b.Content, "history-1.md") {
+		t.Fatalf("content should remain fully expanded after toggle, got %q", b.Content)
 	}
 }
 
@@ -5261,12 +5252,10 @@ func TestToggleCollapseFallsBackToBlockAtOffsetWhenFocusedBlockIsStale(t *testin
 	m := NewModelWithSize(nil, 100, 24)
 	m.mode = ModeNormal
 	block := &Block{
-		ID:                     1,
-		Type:                   BlockCompactionSummary,
-		CompactionSummaryRaw:   "[Context Summary]\nsummary\n\n[Context compressed]\nArchived history files:\n- history-1.md",
-		CompactionPreviewLines: maxCompactionSummaryPreviewLines,
-		Content:                formatCompactionSummaryDisplay("[Context Summary]\nsummary\n\n[Context compressed]\nArchived history files:\n- history-1.md", true, maxCompactionSummaryPreviewLines),
-		Collapsed:              true,
+		ID:                   1,
+		Type:                 BlockCompactionSummary,
+		CompactionSummaryRaw: "[Context Summary]\nsummary\n\n[Context compressed]\nArchived history files:\n- history-1.md",
+		Content:              "[Context Summary]\nsummary\n\n[Context compressed]\nArchived history files:\n- history-1.md",
 	}
 	m.viewport.AppendBlock(block)
 	m.recalcViewportSize()
@@ -5281,11 +5270,12 @@ func TestToggleCollapseFallsBackToBlockAtOffsetWhenFocusedBlockIsStale(t *testin
 	if got == nil {
 		t.Fatal("expected compaction summary block to remain present")
 	}
+	// Compaction cards are always fully expanded; toggle is a no-op.
 	if got.Collapsed {
-		t.Fatal("compaction summary should expand when stale focus falls back to block at offset")
+		t.Fatal("compaction summary should never collapse")
 	}
 	if !strings.Contains(got.Content, "history-1.md") {
-		t.Fatalf("expanded compaction summary = %q, want archived history path", got.Content)
+		t.Fatalf("compaction summary content = %q, want archived history path", got.Content)
 	}
 }
 
@@ -5601,12 +5591,10 @@ func TestSessionRestoredRebuildDoesNotReuseOldCompactionRawForNewSummary(t *test
 	m := NewModelWithSize(backend, 100, 24)
 	m.mode = ModeNormal
 	old := &Block{
-		ID:                     7,
-		Type:                   BlockCompactionSummary,
-		CompactionSummaryRaw:   "[Context Summary]\nsummary 1\n\n[Context compressed]\nArchived history files:\n- history-1.md",
-		CompactionPreviewLines: maxCompactionSummaryPreviewLines,
-		Content:                formatCompactionSummaryDisplay("[Context Summary]\nsummary 1\n\n[Context compressed]\nArchived history files:\n- history-1.md", false, maxCompactionSummaryPreviewLines),
-		Collapsed:              false,
+		ID:                   7,
+		Type:                 BlockCompactionSummary,
+		CompactionSummaryRaw: "[Context Summary]\nsummary 1\n\n[Context compressed]\nArchived history files:\n- history-1.md",
+		Content:              "[Context Summary]\nsummary 1\n\n[Context compressed]\nArchived history files:\n- history-1.md",
 	}
 	m.viewport.AppendBlock(old)
 	m.focusedBlockID = old.ID
@@ -5619,8 +5607,9 @@ func TestSessionRestoredRebuildDoesNotReuseOldCompactionRawForNewSummary(t *test
 		t.Fatalf("visible blocks after rebuild = %#v, want single compaction summary", blocks)
 	}
 	got := blocks[0]
-	if !got.Collapsed {
-		t.Fatal("new compaction summary should not inherit expanded state from previous summary with different raw content")
+	// Compaction cards are always fully expanded regardless of prior state.
+	if got.Collapsed {
+		t.Fatal("new compaction summary should be fully expanded")
 	}
 	if !strings.Contains(got.CompactionSummaryRaw, "history-2.md") {
 		t.Fatalf("CompactionSummaryRaw = %q, want history-2.md", got.CompactionSummaryRaw)
@@ -5628,9 +5617,8 @@ func TestSessionRestoredRebuildDoesNotReuseOldCompactionRawForNewSummary(t *test
 	if strings.Contains(got.CompactionSummaryRaw, "history-1.md") {
 		t.Fatalf("CompactionSummaryRaw = %q, should not retain old history-1.md", got.CompactionSummaryRaw)
 	}
-	got.Toggle()
 	if !strings.Contains(got.Content, "history-2.md") {
-		t.Fatalf("expanded content = %q, want history-2.md", got.Content)
+		t.Fatalf("content = %q, want history-2.md", got.Content)
 	}
 }
 
