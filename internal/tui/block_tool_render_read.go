@@ -2,14 +2,14 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/mattn/go-runewidth"
-)
 
-// maxReadDefaultLines is the number of lines shown by default for Read tool results.
-// When there are more lines, user can press space to expand (ReadContentExpanded).
-const maxReadDefaultLines = 10
+	"github.com/keakon/chord/internal/tools"
+)
 
 // renderReadCall renders a Read tool call with syntax-highlighted file content.
 func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
@@ -63,16 +63,44 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 	} else if b.toolResultIsCancelled() && b.ResultContent != "" {
 		result = appendCancelledResultLines(result, b.ResultContent, contentWidth)
 	} else if b.ResultContent != "" {
-		rows, sourceSample := parseReadDisplayLines(b.ResultContent, resultOffset+1)
-		result = append(result, renderNumberedToolPreview(numberedToolPreviewOptions{
-			filePath:            filePath,
-			rows:                rows,
-			sourceSample:        sourceSample,
-			contentWidth:        contentWidth,
-			defaultVisibleLines: maxReadDefaultLines,
-			expanded:            b.ReadContentExpanded,
-			highlighter:         &b.codeHL,
-		})...)
+		if meta, ok := parseReadResultMeta(b.ResultContent); ok {
+			parts := make([]string, 0, 3)
+			if meta.RangeField != "" {
+				parts = append(parts, "lines "+meta.RangeField+" of "+strconv.Itoa(meta.Total))
+			} else if meta.StartLine > 0 && meta.EndLine >= meta.StartLine && meta.Total > 0 {
+				parts = append(parts, fmt.Sprintf("lines %d–%d of %d", meta.StartLine, meta.EndLine, meta.Total))
+			}
+			if meta.Truncated {
+				truncLabel := "output truncated"
+				switch meta.TruncatedKind {
+				case tools.ReadTruncatedStale:
+					truncLabel = "stale result"
+				case tools.ReadTruncatedSuperseded:
+					truncLabel = "superseded result"
+				}
+				parts = append(parts, truncLabel)
+			}
+			if meta.ArtifactPath != "" {
+				parts = append(parts, "full output saved to "+meta.ArtifactPath)
+			}
+			if len(parts) > 0 {
+				line := "  ↳ " + strings.Join(parts, " · ")
+				if b.Collapsed {
+					line += " · [space] expand"
+				}
+				result = append(result, ToolResultStyle.Render(line))
+			}
+		}
+		if !b.Collapsed {
+			rows, sourceSample := parseReadDisplayLines(b.ResultContent, resultOffset+1)
+			result = append(result, renderNumberedToolPreview(numberedToolPreviewOptions{
+				filePath:     filePath,
+				rows:         rows,
+				sourceSample: sourceSample,
+				contentWidth: contentWidth,
+				highlighter:  &b.codeHL,
+			})...)
+		}
 	}
 	result = appendToolElapsedFooter(result, b)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))

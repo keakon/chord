@@ -119,10 +119,6 @@ type Block struct {
 	// Not sent to the LLM; used only for TUI display.
 	Diff string
 
-	// ReadContentExpanded is true when the user has pressed space to show all Read result lines.
-	// When false, Read shows at most maxReadDefaultLines (10) with a "[space to expand]" hint.
-	ReadContentExpanded bool
-
 	// ToolCallDetailExpanded: for generic tools (not Write/Edit/Read/Todo/Question), space toggles
 	// between compact (first param + 10 result lines) and full (all params + full output).
 	ToolCallDetailExpanded bool

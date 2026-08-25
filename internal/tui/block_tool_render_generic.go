@@ -241,6 +241,9 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	if b.ToolName == tools.NameRead {
 		return b.renderReadCall(width, spinnerFrame)
 	}
+	if b.ToolName == tools.NameGrep || b.ToolName == tools.NameGlob {
+		return b.renderSearchResultToolCall(width, spinnerFrame)
+	}
 	if b.ToolName == tools.NameHandoff {
 		return b.renderHandoffCall(width, spinnerFrame)
 	}
@@ -694,6 +697,13 @@ func compactToolHiddenDetailLines(b *Block, keys []string, vals map[string]strin
 
 func (b *Block) compactToolResultForceExpanded(contentWidth int) bool {
 	if b == nil {
+		return false
+	}
+	switch b.ToolName {
+	case tools.NameGrep, tools.NameGlob:
+		// Search cards have their own count-based summaries; the generic
+		// "only one hidden line" heuristic must not force them expanded, or
+		// Space could never collapse them again (the toggle guard below).
 		return false
 	}
 	keys, vals := b.toolArgsParsed()

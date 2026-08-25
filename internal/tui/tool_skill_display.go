@@ -222,6 +222,21 @@ func toolResultContainsLSPDiagnostics(result string) bool {
 	return false
 }
 
+// countLSPDiagnosticLines counts severity-prefixed diagnostic lines ("[E]",
+// "[W]", "[I]", "[H]") in a tool result. Diagnostics blocks always use that
+// prefix format, so the count is a stable UI-only summary number; callers
+// should fall back to a bare "diagnostics" label when the block is detected
+// but no prefix lines match (e.g. a "Python diagnostics skipped" note).
+func countLSPDiagnosticLines(result string) int {
+	count := 0
+	for line := range strings.SplitSeq(result, "\n") {
+		if lspSeverityRe.MatchString(line) {
+			count++
+		}
+	}
+	return count
+}
+
 func editSuccessDiagnosticsContent(result string) string {
 	lines := strings.Split(strings.ReplaceAll(result, "\r\n", "\n"), "\n")
 	for i, line := range lines {

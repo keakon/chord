@@ -157,7 +157,6 @@ func mergeFocusedToolBlockRuntimeState(dst, src *Block) {
 	if !src.StartedAt.IsZero() {
 		dst.StartedAt = src.StartedAt
 	}
-	dst.ReadContentExpanded = src.ReadContentExpanded
 	dst.ToolCallDetailExpanded = src.ToolCallDetailExpanded
 	dst.Collapsed = src.Collapsed
 	dst.InvalidateCache()

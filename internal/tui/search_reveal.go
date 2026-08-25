@@ -30,10 +30,6 @@ func revealSearchMatchedBlock(block *Block) bool {
 				block.Collapsed = false
 				changed = true
 			}
-			if block.ToolName == tools.NameRead && !block.ReadContentExpanded {
-				block.ReadContentExpanded = true
-				changed = true
-			}
 		case tools.NameDelegate:
 			if block.Collapsed {
 				block.Collapsed = false

@@ -12,9 +12,6 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// maxTUIDiffLines is the maximum number of diff lines rendered in the TUI.
-const maxTUIDiffLines = 200
-
 const (
 	diffSnippetMergeGapCols       = 6
 	diffSnippetContextCols        = 12
@@ -61,29 +58,15 @@ type diffOneSidedSpan struct {
 	LineWidth int
 }
 
-// appendApplyPatchToolUnifiedDiffPair renders one logical (-,+) line pair from a unified diff.
-func appendTUIDiffTruncationLine(result *[]string) {
-	*result = append(*result, "  "+DimStyle.Render("... (diff truncated)"))
-}
-
-func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine string, oldLineNum, newLineNum, diffWidth int, hl *codeHighlighter, shownLines *int) bool {
+func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine string, oldLineNum, newLineNum, diffWidth int, hl *codeHighlighter) {
 	formatLineNum := func(n int) string { return fmt.Sprintf("%4d ", n) }
-	if *shownLines >= maxTUIDiffLines {
-		appendTUIDiffTruncationLine(result)
-		return false
-	}
 	if lines := renderInlineDiffLine(oldLine, newLine, diffWidth, hl); lines != nil {
 		if strings.HasPrefix(lines[0], "+") {
 			*result = append(*result, "  "+DimStyle.Render(formatLineNum(newLineNum))+lines[0])
 		} else {
 			*result = append(*result, "  "+DimStyle.Render(formatLineNum(oldLineNum))+lines[0])
 		}
-		*shownLines = *shownLines + 1
-		return true
-	}
-	if *shownLines+2 > maxTUIDiffLines {
-		appendTUIDiffTruncationLine(result)
-		return false
+		return
 	}
 	oldSegs, newSegs := tools.InlineDiff(oldLine, newLine)
 	oldCode := renderHighlightedSnippetLine(oldLine, filterDiffSpansByKind(buildDiffSegmentSpans(oldSegs), "delete"), diffWidth-1, hl, diffDelBg)
@@ -92,15 +75,9 @@ func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine stri
 		"  "+DimStyle.Render(formatLineNum(oldLineNum))+DiffDelStyle.Render("-")+oldCode,
 		"  "+DimStyle.Render(formatLineNum(newLineNum))+DiffAddStyle.Render("+")+newCode,
 	)
-	*shownLines += 2
-	return true
 }
 
-func appendApplyPatchToolUnifiedDiffLine(result *[]string, body string, lineNum, diffWidth int, hl *codeHighlighter, added bool, shownLines *int) bool {
-	if *shownLines >= maxTUIDiffLines {
-		appendTUIDiffTruncationLine(result)
-		return false
-	}
+func appendApplyPatchToolUnifiedDiffLine(result *[]string, body string, lineNum, diffWidth int, hl *codeHighlighter, added bool) {
 	bg := diffDelBg
 	marker := DiffDelStyle.Render("-")
 	if added {
@@ -109,8 +86,6 @@ func appendApplyPatchToolUnifiedDiffLine(result *[]string, body string, lineNum,
 	}
 	code := renderHighlightedSnippetLine(body, []diffSegmentSpan{{StartCol: 0, EndCol: diffTextWidth(body)}}, diffWidth-1, hl, bg)
 	*result = append(*result, "  "+DimStyle.Render(fmt.Sprintf("%4d ", lineNum))+marker+code)
-	*shownLines = *shownLines + 1
-	return true
 }
 
 func nextNonEmptyUnifiedDiffLine(lines []string, index int) int {
@@ -159,21 +134,30 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
 	if b.Collapsed {
+		if summary := b.fileDiffSummaryLine(applyPatchTargets, displayDiff); summary != "" {
+			result = append(result, ToolResultStyle.Render("  ↳ "+summary+" · [space] expand"))
+		}
 		if applyPatchNoChanges {
 			result = append(result, DimStyle.Render("  ▸ ↳ No changes"))
 		}
-		if strings.TrimSpace(displayDiff) == "" && strings.TrimSpace(b.ResultContent) != "" &&
+		if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
+			result = append(result, ErrorStyle.Render("  ↳ Error:"))
+			for _, line := range wrapText(sanitizeToolDisplayText(toolDisplayResultContent(b)), cardWidth-8) {
+				result = append(result, ErrorStyle.Render("    "+line))
+			}
+		} else if b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "" {
+			result = append(result, DimStyle.Render("  ↳ Cancelled"))
+			if detail := toolCancelledDetailText(b.ResultContent); detail != "" {
+				for _, line := range wrapText(sanitizeToolDisplayText(detail), cardWidth-8) {
+					result = append(result, DimStyle.Render("    "+line))
+				}
+			}
+		} else if strings.TrimSpace(displayDiff) == "" && strings.TrimSpace(b.ResultContent) != "" &&
 			!(b.ToolName == tools.NameApplyPatch && b.ResultDone && hasOperationSummaries && !b.toolResultIsError() && !b.toolResultIsCancelled()) {
 			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, toolDisplayResultContent(b)))
 			lineCount := len(strings.Split(displayResult, "\n"))
 			summary := truncateOneLine(displayResult, cardWidth-26)
-			if b.toolResultIsError() {
-				result = append(result, ErrorStyle.Render(fmt.Sprintf("  ▸ ↳ %s (%d lines)", summary, lineCount)))
-			} else if b.toolResultIsCancelled() {
-				result = append(result, DimStyle.Render(fmt.Sprintf("  ▸ ↳ cancelled (%d lines)", lineCount)))
-			} else {
-				result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ %s (%d lines)", summary, lineCount)))
-			}
+			result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ %s (%d lines)", summary, lineCount)))
 		}
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
@@ -203,20 +187,14 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	// section highlighter of a multi-file patch share the same sample.
 	diffSample := diffContentSample(displayDiff)
 	hl := ensureCodeHighlighter(&b.codeHL, filePath, diffSample)
-	shownLines := 0
 	seenHunk := false
 	renderedDiffFileCount := 0
 	var oldLineNum, newLineNum int
 	if !b.toolResultIsCancelled() {
-	diffLoop:
 		for i := 0; i < len(diffLines); i++ {
 			line := diffLines[i]
 			if line == "" {
 				continue
-			}
-			if shownLines >= maxTUIDiffLines {
-				appendTUIDiffTruncationLine(&result)
-				break
 			}
 			var rendered string
 			switch {
@@ -227,9 +205,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				if nextIsAddition {
 					afterAdd := nextNonEmptyUnifiedDiffLine(diffLines, next+1)
 					if afterAdd >= len(diffLines) || !strings.HasPrefix(diffLines[afterAdd], "+") || strings.HasPrefix(diffLines[afterAdd], "+++") {
-						if !appendApplyPatchToolUnifiedDiffPair(&result, line[1:], diffLines[next][1:], oldLineNum, newLineNum, diffWidth, hl, &shownLines) {
-							break diffLoop
-						}
+						appendApplyPatchToolUnifiedDiffPair(&result, line[1:], diffLines[next][1:], oldLineNum, newLineNum, diffWidth, hl)
 						oldLineNum++
 						newLineNum++
 						i = next
@@ -237,9 +213,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 					}
 				}
 				if !nextIsDeletion && !nextIsAddition {
-					if !appendApplyPatchToolUnifiedDiffLine(&result, line[1:], oldLineNum, diffWidth, hl, false, &shownLines) {
-						break diffLoop
-					}
+					appendApplyPatchToolUnifiedDiffLine(&result, line[1:], oldLineNum, diffWidth, hl, false)
 					oldLineNum++
 					i = next - 1
 					continue
@@ -275,9 +249,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				}
 				if len(addBodies) > 0 && len(delBodies) == len(addBodies) {
 					for k := range delBodies {
-						if !appendApplyPatchToolUnifiedDiffPair(&result, delBodies[k], addBodies[k], oldLineNum, newLineNum, diffWidth, hl, &shownLines) {
-							break diffLoop
-						}
+						appendApplyPatchToolUnifiedDiffPair(&result, delBodies[k], addBodies[k], oldLineNum, newLineNum, diffWidth, hl)
 						oldLineNum++
 						newLineNum++
 					}
@@ -286,43 +258,30 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				}
 				if len(addBodies) > 0 {
 					for _, body := range delBodies {
-						if !appendApplyPatchToolUnifiedDiffLine(&result, body, oldLineNum, diffWidth, hl, false, &shownLines) {
-							break diffLoop
-						}
+						appendApplyPatchToolUnifiedDiffLine(&result, body, oldLineNum, diffWidth, hl, false)
 						oldLineNum++
 					}
 					for _, body := range addBodies {
-						if !appendApplyPatchToolUnifiedDiffLine(&result, body, newLineNum, diffWidth, hl, true, &shownLines) {
-							break diffLoop
-						}
+						appendApplyPatchToolUnifiedDiffLine(&result, body, newLineNum, diffWidth, hl, true)
 						newLineNum++
 					}
 					i = addJ - 1
 					continue
 				}
 				for _, body := range delBodies {
-					if !appendApplyPatchToolUnifiedDiffLine(&result, body, oldLineNum, diffWidth, hl, false, &shownLines) {
-						break diffLoop
-					}
+					appendApplyPatchToolUnifiedDiffLine(&result, body, oldLineNum, diffWidth, hl, false)
 					oldLineNum++
 				}
 				i = j - 1
 				continue
 			case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
-				if !appendApplyPatchToolUnifiedDiffLine(&result, line[1:], newLineNum, diffWidth, hl, true, &shownLines) {
-					break diffLoop
-				}
+				appendApplyPatchToolUnifiedDiffLine(&result, line[1:], newLineNum, diffWidth, hl, true)
 				newLineNum++
 				continue
 			case strings.HasPrefix(line, "@@"):
 				if seenHunk {
 					sep := DimStyle.Render("  ─────────────")
 					result = append(result, "  "+sep)
-					shownLines++
-					if shownLines >= maxTUIDiffLines {
-						appendTUIDiffTruncationLine(&result)
-						break diffLoop
-					}
 				}
 				seenHunk = true
 				hunkLine, _, _ := strings.Cut(line, "\n")
@@ -337,12 +296,10 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 					marker, path, syntaxPath := b.applyPatchDiffSectionDisplay(applyPatchTargets, line, diffLines[i+1])
 					if renderedDiffFileCount > 0 {
 						result = append(result, "  "+DimStyle.Render("─────────────"))
-						shownLines++
 					}
 					filePrefix := "  ↳ " + marker + " "
 					fileLine := truncateApplyPatchDisplayLine(filePrefix+path, cardWidth)
 					result = append(result, ToolResultExpandedStyle.Render(filePrefix)+DimStyle.Render(strings.TrimPrefix(fileLine, filePrefix)))
-					shownLines++
 					seenHunk = false
 					oldLineNum, newLineNum = 0, 0
 					hl = newCodeHighlighterWithLanguage(syntaxPath, diffSample, "")
@@ -364,8 +321,10 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				newLineNum++
 			}
 			result = append(result, "  "+rendered)
-			shownLines++
 		}
+	}
+	if !b.Collapsed {
+		result = append(result, renderToolCollapseHint(toolHintIndent))
 	}
 	if (b.ToolName == tools.NameEdit || b.ToolName == tools.NameApplyPatch) && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() && !toolShouldHideSuccessfulFileOpResult(b) {
 		result = append(result, ToolResultExpandedStyle.Render("  ↳ Diagnostics:"))

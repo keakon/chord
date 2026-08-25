@@ -422,14 +422,13 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 				}
 			}
 			fmt.Fprintf(&sb,
-				"idx=%d id=%d type=%s agent=%q focused=%t collapsed=%t read_expanded=%t detail_expanded=%t streaming=%t spill_cold=%t result_done=%t start=%d span=%d line_count=%d summary=%q\n",
+				"idx=%d id=%d type=%s agent=%q focused=%t collapsed=%t detail_expanded=%t streaming=%t spill_cold=%t result_done=%t start=%d span=%d line_count=%d summary=%q\n",
 				i,
 				block.ID,
 				debugBlockTypeString(block.Type),
 				block.AgentID,
 				block.Focused,
 				block.Collapsed,
-				block.ReadContentExpanded,
 				block.ToolCallDetailExpanded,
 				block.Streaming,
 				block.spillCold,

@@ -513,9 +513,6 @@ func TestDeferredStartupTranscriptSearchRevealExpandsToolCallContent(t *testing.
 	if toolBlock.Collapsed {
 		t.Fatal("search should reveal collapsed Read tool content")
 	}
-	if !toolBlock.ReadContentExpanded {
-		t.Fatal("search should fully expand Read content")
-	}
 	plain := stripANSI(strings.Join(toolBlock.Render(m.viewport.width, ""), "\n"))
 	if !strings.Contains(plain, "needle line") {
 		t.Fatalf("rendered search match = %q, want visible needle line", plain)
@@ -3680,7 +3677,7 @@ func TestRebuildViewportFromMessagesClearsBlocksForEmptySession(t *testing.T) {
 	}
 }
 
-func TestRebuildViewportFromMessagesRestoresReadBlankLineResult(t *testing.T) {
+func TestRebuildViewportFromMessagesRestoresReadCollapsedSummary(t *testing.T) {
 	backend := &sessionControlAgent{messages: []message.Message{
 		{
 			Role: "assistant",
@@ -3705,12 +3702,15 @@ func TestRebuildViewportFromMessagesRestoresReadBlankLineResult(t *testing.T) {
 	if !block.SettledAt.IsZero() {
 		t.Fatalf("restored block SettledAt = %v, want zero", block.SettledAt)
 	}
+	if !block.Collapsed {
+		t.Fatalf("restored Read block should stay collapsed (summary state), got %#v", block)
+	}
 	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(plain, "read internal/tui/input.go") {
 		t.Fatalf("expected restored Read header, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "359") {
-		t.Fatalf("expected restored blank numbered line, got:\n%s", plain)
+	if strings.Contains(plain, "359") {
+		t.Fatalf("collapsed restored Read should not render body lines, got:\n%s", plain)
 	}
 }
 

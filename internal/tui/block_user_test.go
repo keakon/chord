@@ -47,7 +47,7 @@ func TestRenderUserTerminalShowsExpandHintForCollapsedOutput(t *testing.T) {
 	if !strings.Contains(joined, "TERMINAL") {
 		t.Fatalf("expected TERMINAL badge, got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "[space] toggle expand/collapse") {
+	if !strings.Contains(joined, "[space] expand") {
 		t.Fatalf("expected collapsed terminal output to show expand hint, got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "2 more lines") {

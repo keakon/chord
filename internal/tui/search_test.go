@@ -217,8 +217,8 @@ func TestRevealSearchMatchedBlockExpandsToolContent(t *testing.T) {
 	if tool.Collapsed {
 		t.Fatal("read tool should expand when revealed by search")
 	}
-	if !tool.ReadContentExpanded {
-		t.Fatal("read tool should show full content when revealed by search")
+	if tool.Collapsed {
+		t.Fatal("read tool should be fully shown when revealed by search")
 	}
 
 	generic := &Block{Type: BlockToolCall, ToolName: "shell", ToolCallDetailExpanded: false, ResultContent: "needle from result", ResultDone: false, Collapsed: true}
@@ -272,7 +272,7 @@ func TestFindMatchesAtWidthRevealsWarmCollapsedToolCache(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("FindMatchesAtWidth() returned %d matches for warm collapsed tool cache, want 1", len(matches))
 	}
-	if block.ReadContentExpanded || !block.Collapsed {
+	if !block.Collapsed {
 		t.Fatal("search matching should not mutate the original collapsed tool block")
 	}
 }
@@ -326,13 +326,12 @@ func TestWrappedSearchMatchLineOffsetMatchesFullWrapping(t *testing.T) {
 
 func TestRenderedSearchMatchInnerOffsetUsesRenderedToolLayout(t *testing.T) {
 	block := &Block{
-		Type:                BlockToolCall,
-		ToolName:            "read",
-		Content:             `{"path":"internal/tui/app.go","limit":20,"offset":0}`,
-		ResultContent:       "1\talpha\n2\tbeta\n3\tgamma\n4\tdelta\n5\tepsilon\n6\tzeta\n7\teta\n8\ttheta\n9\tiota\n10\tkappa\n11\tneedle line\n12\tomega",
-		ResultDone:          true,
-		Collapsed:           false,
-		ReadContentExpanded: true,
+		Type:          BlockToolCall,
+		ToolName:      "read",
+		Content:       `{"path":"internal/tui/app.go","limit":20,"offset":0}`,
+		ResultContent: "1\talpha\n2\tbeta\n3\tgamma\n4\tdelta\n5\tepsilon\n6\tzeta\n7\teta\n8\ttheta\n9\tiota\n10\tkappa\n11\tneedle line\n12\tomega",
+		ResultDone:    true,
+		Collapsed:     false,
 	}
 	if got := renderedSearchMatchInnerOffset(block, "needle line", 80); got < 10 {
 		t.Fatalf("renderedSearchMatchInnerOffset() = %d, want >= 10 for deep rendered line", got)

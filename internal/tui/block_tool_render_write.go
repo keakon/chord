@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/mattn/go-runewidth"
@@ -69,6 +70,31 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	result = append(result, headerLine)
 
 	if b.Collapsed {
+		if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
+			result = append(result, ErrorStyle.Render("  ↳ Error:"))
+			for _, line := range wrapText(sanitizeToolDisplayText(toolDisplayResultContent(b)), contentWidth) {
+				result = append(result, ErrorStyle.Render("    "+line))
+			}
+		} else if b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "" {
+			result = append(result, DimStyle.Render("  ↳ Cancelled"))
+			if detail := toolCancelledDetailText(b.ResultContent); detail != "" {
+				for _, line := range wrapText(sanitizeToolDisplayText(detail), contentWidth) {
+					result = append(result, DimStyle.Render("    "+line))
+				}
+			}
+		} else {
+			summary := strings.TrimSpace(toolDisplayResultContent(b))
+			if summary == "" {
+				if rows, _ := parsePlainContentPreviewLines(fileContent); len(rows) > 0 {
+					summary = fmt.Sprintf("%d lines written", len(rows))
+				} else {
+					summary = strings.TrimSpace(toolSuccessfulFileOpSummary(b))
+				}
+			}
+			if summary != "" {
+				result = append(result, ToolResultStyle.Render("  ↳ "+summary+" · [space] expand"))
+			}
+		}
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 
@@ -85,16 +111,25 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	}
 
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
+		summary := strings.TrimSpace(toolDisplayResultContent(b))
+		if summary == "" {
+			if rows, _ := parsePlainContentPreviewLines(fileContent); len(rows) > 0 {
+				summary = fmt.Sprintf("%d lines written", len(rows))
+			} else {
+				summary = strings.TrimSpace(toolSuccessfulFileOpSummary(b))
+			}
+		}
+		if summary != "" {
+			result = append(result, "  "+DimStyle.Render(summary))
+		}
 		rows, sourceSample := parsePlainContentPreviewLines(fileContent)
 		if len(rows) > 0 {
 			result = append(result, renderNumberedToolPreview(numberedToolPreviewOptions{
-				filePath:            filePath,
-				rows:                rows,
-				sourceSample:        sourceSample,
-				contentWidth:        contentWidth,
-				defaultVisibleLines: maxReadDefaultLines,
-				expanded:            b.ReadContentExpanded,
-				highlighter:         &b.codeHL,
+				filePath:     filePath,
+				rows:         rows,
+				sourceSample: sourceSample,
+				contentWidth: contentWidth,
+				highlighter:  &b.codeHL,
 			})...)
 		}
 	}

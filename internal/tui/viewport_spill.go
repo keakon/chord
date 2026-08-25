@@ -231,7 +231,6 @@ func (b *Block) tryRecoverFromSpillFailure() bool {
 func preserveMutableBlockState(src, dst *Block) {
 	dst.Focused = src.Focused
 	dst.Collapsed = src.Collapsed
-	dst.ReadContentExpanded = src.ReadContentExpanded
 	dst.ToolCallDetailExpanded = src.ToolCallDetailExpanded
 	dst.ThinkingCollapsed = src.ThinkingCollapsed
 	dst.Streaming = src.Streaming

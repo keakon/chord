@@ -1043,14 +1043,14 @@ func TestRenderFileDiffCallUnequalMinusPlusBlocksUseWholeLineBackground(t *testi
 	}
 }
 
-func TestRenderFileDiffCallDoesNotExceedLineLimitForTwoLinePair(t *testing.T) {
+func TestRenderFileDiffCallExpandedShowsAllLinesPastFormerLimit(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	diffLines := []string{
 		"--- example.go",
 		"+++ example.go",
-		fmt.Sprintf("@@ -1,%d +1,%d @@", maxTUIDiffLines, maxTUIDiffLines),
+		fmt.Sprintf("@@ -1,%d +1,%d @@", 250, 250),
 	}
-	for i := 1; i < maxTUIDiffLines; i++ {
+	for i := 1; i < 250; i++ {
 		diffLines = append(diffLines, fmt.Sprintf(" context line %d", i))
 	}
 	diffLines = append(diffLines, "-old value", "+new value")
@@ -1064,13 +1064,13 @@ func TestRenderFileDiffCallDoesNotExceedLineLimitForTwoLinePair(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(plain, "... (diff truncated)") {
-		t.Fatalf("expected diff truncation marker, got:\n%s", plain)
-	}
-	for _, hidden := range []string{"old value", "new value"} {
-		if strings.Contains(plain, hidden) {
-			t.Fatalf("expected two-line pair %q to be omitted at the line limit, got:\n%s", hidden, plain)
+	for _, want := range []string{"old value", "new value", "[space] collapse"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected expanded diff to contain %q, got:\n%s", want, plain)
 		}
+	}
+	if strings.Contains(plain, "... (diff truncated)") {
+		t.Fatalf("did not expect expanded diff truncation marker, got:\n%s", plain)
 	}
 }
 

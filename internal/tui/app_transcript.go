@@ -391,7 +391,6 @@ func preserveRebuiltBlockState(src, dst *Block) {
 		dst.SettledAt = src.SettledAt
 	default:
 		dst.Collapsed = src.Collapsed
-		dst.ReadContentExpanded = src.ReadContentExpanded
 		dst.ToolCallDetailExpanded = src.ToolCallDetailExpanded
 		dst.ThinkingCollapsed = src.ThinkingCollapsed
 		dst.Streaming = src.Streaming

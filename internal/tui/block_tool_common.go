@@ -33,7 +33,9 @@ var (
 	readResultLineRe = regexp.MustCompile(`^READ_RESULT\b.*\blines=(?:\d+-\d+|none)\b`)
 	// readResultRangeRe extracts the 1-based start line when a concrete range
 	// is present; lines=none carries no start line.
-	readResultRangeRe = regexp.MustCompile(`\blines=(\d+)-(\d+)\b`)
+	readResultRangeRe         = regexp.MustCompile(`\blines=(\d+)-(\d+)\b`)
+	readResultTotalRe         = regexp.MustCompile(`\btotal=(\d+)\b`)
+	readResultTruncatedKindRe = regexp.MustCompile(`\btruncated=(\w+)\b`)
 )
 
 // maxToolCallCompactResultLines is the default visible height for generic tool output until space expands.
@@ -616,7 +618,11 @@ func renderToolExpandHint(indent string, hidden int) string {
 	if hidden <= 0 {
 		return ""
 	}
-	return DimStyle.Render(fmt.Sprintf("%s── %d more lines · [space] toggle expand/collapse ──", indent, hidden))
+	return DimStyle.Render(fmt.Sprintf("%s── %d more lines · [space] expand ──", indent, hidden))
+}
+
+func renderToolCollapseHint(indent string) string {
+	return DimStyle.Render(fmt.Sprintf("%s── [space] collapse ──", indent))
 }
 
 func ensureCodeHighlighter(slot **codeHighlighter, filePath, sample string) *codeHighlighter {
@@ -705,6 +711,197 @@ func parseReadDisplayLines(result string, startLine int) ([]readDisplayLine, str
 	}
 
 	return rows, strings.Join(codeLines, "\n")
+}
+
+type readResultMeta struct {
+	StartLine     int
+	EndLine       int
+	Total         int
+	Truncated     bool
+	TruncatedKind string // "budget", "stale" or "superseded"; empty when only legacy text hints at truncation
+	RangeField    string // raw lines= field, set when it carries multiple segments
+	ArtifactPath  string // from a trailing "Full output saved to ..." line
+}
+
+type grepResultMeta struct {
+	Matches     int
+	Files       int
+	Skipped     int
+	Fallback    bool
+	Truncated   bool
+	HasDetails  bool
+	EmptyResult bool
+	NoMatches   bool
+}
+
+type globResultMeta struct {
+	Files      int
+	Truncated  bool
+	Artifact   string
+	HasDetails bool
+}
+
+type diffResultMeta struct {
+	Files   int
+	Added   int
+	Removed int
+}
+
+func parseReadResultMeta(result string) (readResultMeta, bool) {
+	trimmed := strings.TrimSpace(result)
+	if trimmed == "" {
+		return readResultMeta{}, false
+	}
+	first := trimmed
+	if i := strings.IndexByte(first, '\n'); i >= 0 {
+		first = first[:i]
+	}
+	first = sanitizeToolDisplayText(strings.TrimSpace(first))
+	if !readResultLineRe.MatchString(first) {
+		return readResultMeta{}, false
+	}
+	meta := readResultMeta{}
+	if m := readResultRangeRe.FindStringSubmatch(first); len(m) == 3 {
+		meta.StartLine, _ = strconv.Atoi(m[1])
+		meta.EndLine, _ = strconv.Atoi(m[2])
+	}
+	if field := readResultLinesField(first); field != "" && strings.Contains(field, ",") {
+		meta.RangeField = field
+	}
+	if m := readResultTotalRe.FindStringSubmatch(first); len(m) == 2 {
+		meta.Total, _ = strconv.Atoi(m[1])
+	}
+	if strings.Contains(first, "truncated=") || strings.Contains(strings.ToLower(first), "output truncated") {
+		meta.Truncated = true
+		if m := readResultTruncatedKindRe.FindStringSubmatch(first); len(m) == 2 {
+			meta.TruncatedKind = m[1]
+		}
+	}
+	if idx := strings.LastIndex(trimmed, "Full output saved to "); idx >= 0 {
+		rest := strings.TrimSpace(trimmed[idx+len("Full output saved to "):])
+		if end := strings.IndexAny(rest, "\n"); end >= 0 {
+			rest = rest[:end]
+		}
+		if path := strings.TrimSuffix(strings.TrimSpace(rest), "."); path != "" {
+			meta.ArtifactPath = path
+		}
+	}
+	return meta, true
+}
+
+// readResultLinesField extracts the raw lines= value ("a-b", "a-b,c-d" or
+// "none") from a READ_RESULT header line.
+func readResultLinesField(first string) string {
+	for field := range strings.FieldsSeq(first) {
+		if value, ok := strings.CutPrefix(field, "lines="); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+func parseGrepResultMeta(result string) grepResultMeta {
+	meta := grepResultMeta{}
+	seenFiles := map[string]struct{}{}
+	trimmed := strings.TrimSpace(result)
+	if trimmed == "" {
+		meta.EmptyResult = true
+		return meta
+	}
+	for line := range strings.SplitSeq(strings.ReplaceAll(trimmed, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		switch {
+		case strings.HasPrefix(line, "Note:"):
+			meta.HasDetails = true
+			if strings.Contains(lower, "literal") && (strings.Contains(lower, "fallback") || strings.Contains(lower, "searched as literal")) {
+				meta.Fallback = true
+			}
+		case strings.HasPrefix(line, "grep: skipped path:"):
+			meta.HasDetails = true
+			meta.Skipped++
+		case strings.HasPrefix(line, "(showing first "):
+			meta.HasDetails = true
+			meta.Truncated = true
+		case line == "No matches found." || strings.HasPrefix(line, "No matches found."):
+			// The zero-match message may carry a parenthetical about literal
+			// fallback on the same line, so match the prefix conservatively.
+			meta.HasDetails = true
+			meta.NoMatches = true
+		default:
+			meta.HasDetails = true
+			meta.Matches++
+			if idx := strings.Index(line, ":"); idx > 0 {
+				path := line[:idx]
+				if _, ok := seenFiles[path]; !ok {
+					seenFiles[path] = struct{}{}
+					meta.Files++
+				}
+			}
+		}
+	}
+	return meta
+}
+
+func parseGlobResultMeta(result string) globResultMeta {
+	meta := globResultMeta{}
+	trimmed := strings.TrimSpace(result)
+	if trimmed == "" {
+		return meta
+	}
+	for line := range strings.SplitSeq(strings.ReplaceAll(trimmed, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		meta.HasDetails = true
+		switch {
+		case strings.HasPrefix(line, "Note:"):
+			// Coercion notes are metadata, not result entries.
+		case strings.HasPrefix(line, "(showing first "):
+			meta.Truncated = true
+			if idx := strings.LastIndex(line, "full results saved to "); idx >= 0 {
+				rest := line[idx+len("full results saved to "):]
+				if end := strings.Index(rest, ";"); end >= 0 {
+					rest = rest[:end]
+				}
+				meta.Artifact = strings.TrimSpace(rest)
+			}
+		case strings.HasPrefix(line, "No files matched the pattern."):
+			// The empty result message is not a path entry.
+		default:
+			meta.Files++
+		}
+	}
+	return meta
+}
+
+func parseDiffResultMeta(diff string) diffResultMeta {
+	meta := diffResultMeta{}
+	if strings.TrimSpace(diff) == "" {
+		return meta
+	}
+	seenFiles := map[string]struct{}{}
+	for line := range strings.SplitSeq(strings.ReplaceAll(diff, "\r\n", "\n"), "\n") {
+		switch {
+		case strings.HasPrefix(line, "--- "):
+			path := strings.TrimSpace(strings.TrimPrefix(line, "--- "))
+			if path != "" && path != "/dev/null" {
+				if _, ok := seenFiles[path]; !ok {
+					seenFiles[path] = struct{}{}
+					meta.Files++
+				}
+			}
+		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+			meta.Added++
+		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+			meta.Removed++
+		}
+	}
+	return meta
 }
 
 func diffContentSample(diff string) string {

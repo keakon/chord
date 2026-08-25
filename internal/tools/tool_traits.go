@@ -73,5 +73,5 @@ func IsFileStateTool(name string) bool {
 // ShouldExpandResult reports whether TUI should expand the tool result by default.
 func ShouldExpandResult(name string) bool {
 	name = NormalizeName(name)
-	return name == NameRead || IsFileMutation(name)
+	return name == NameWrite || name == NameEdit || name == NameApplyPatch
 }

@@ -104,7 +104,6 @@ func (m *Model) rehydrateStartupDeferredViewportBlock(blockID int) *Block {
 	block.ToolName = source.ToolName
 	block.ToolID = source.ToolID
 	block.IsError = source.IsError
-	block.ReadContentExpanded = source.ReadContentExpanded
 	block.ToolCallDetailExpanded = source.ToolCallDetailExpanded
 	block.Collapsed = source.Collapsed
 	block.InvalidateCache()

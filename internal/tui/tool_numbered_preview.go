@@ -8,13 +8,11 @@ import (
 )
 
 type numberedToolPreviewOptions struct {
-	filePath            string
-	rows                []readDisplayLine
-	sourceSample        string
-	contentWidth        int
-	defaultVisibleLines int
-	expanded            bool
-	highlighter         **codeHighlighter
+	filePath     string
+	rows         []readDisplayLine
+	sourceSample string
+	contentWidth int
+	highlighter  **codeHighlighter
 }
 
 func numberedToolPreviewWidth(cardWidth int) int {
@@ -27,15 +25,7 @@ func renderNumberedToolPreview(opts numberedToolPreviewOptions) []string {
 		return nil
 	}
 
-	cap := maxTUIDiffLines
-	if !opts.expanded && opts.defaultVisibleLines > 0 && len(opts.rows) > opts.defaultVisibleLines {
-		cap = opts.defaultVisibleLines
-	}
-	if cap > len(opts.rows) {
-		cap = len(opts.rows)
-	}
-	visibleRows := opts.rows[:cap]
-	hidden := len(opts.rows) - cap
+	visibleRows := opts.rows
 	gutterWidth := 0
 	for _, row := range visibleRows {
 		if row.IsCode {
@@ -73,9 +63,7 @@ func renderNumberedToolPreview(opts numberedToolPreviewOptions) []string {
 			result = append(result, "  "+DimStyle.Render(wrapped))
 		}
 	}
-	if hidden > 0 {
-		result = append(result, renderToolExpandHint(toolHintIndent, hidden))
-	}
+	result = append(result, renderToolCollapseHint(toolHintIndent))
 	return result
 }
 

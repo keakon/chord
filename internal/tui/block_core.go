@@ -275,23 +275,7 @@ func (b *Block) ToggleAtWidth(width int) {
 		}
 	case BlockToolCall, BlockToolResult:
 		if b.Type == BlockToolCall && (b.ToolName == tools.NameWrite || b.ToolName == tools.NameRead) {
-			if b.Collapsed {
-				b.Collapsed = false
-				b.InvalidateCache()
-				return
-			}
-			rowCount := len(strings.Split(b.ResultContent, "\n"))
-			if b.ToolName == tools.NameWrite {
-				_, vals := b.toolArgsParsed()
-				if vals != nil {
-					rows, _ := parsePlainContentPreviewLines(vals["content"])
-					rowCount = len(rows)
-				}
-			}
-			if rowCount <= maxReadDefaultLines {
-				return
-			}
-			b.ReadContentExpanded = !b.ReadContentExpanded
+			b.Collapsed = !b.Collapsed
 			b.InvalidateCache()
 			return
 		}

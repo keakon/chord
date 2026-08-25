@@ -3476,7 +3476,10 @@ func TestDuplicateToolResultEventIsIgnoredAfterCompletion(t *testing.T) {
 	}
 }
 
-func TestSingleHiddenLineCompactToolCannotBeCollapsedByToggleAtWidth(t *testing.T) {
+func TestSingleHiddenLineGenericCompactToolCannotBeCollapsedByToggleAtWidth(t *testing.T) {
+	// Grep/glob are intentionally not part of this heuristic: their count-based
+	// summaries must stay collapsible (see TestGrepGlobForceExpandedHeuristic-
+	// DoesNotBlockCollapse).
 	tests := []struct {
 		name     string
 		toolName string
@@ -3488,18 +3491,6 @@ func TestSingleHiddenLineCompactToolCannotBeCollapsedByToggleAtWidth(t *testing.
 			toolName: "delete",
 			content:  `{"paths":["examples/compression-config.yaml"],"reason":"remove obsolete example"}`,
 			result:   "delete completed.\n\nDeleted (1):\n- examples/compression-config.yaml",
-		},
-		{
-			name:     "grep",
-			toolName: "grep",
-			content:  `{"pattern":"TODO"}`,
-			result:   strings.Join([]string{"a.go:1:TODO", "b.go:2:TODO", "c.go:3:TODO", "d.go:4:TODO", "e.go:5:TODO", "f.go:6:TODO", "g.go:7:TODO", "h.go:8:TODO", "i.go:9:TODO", "j.go:10:TODO", "k.go:11:TODO"}, "\n"),
-		},
-		{
-			name:     "glob",
-			toolName: "glob",
-			content:  `{"patterns":["**/*.go"]}`,
-			result:   strings.Join([]string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go", "g.go", "h.go", "i.go", "j.go", "k.go"}, "\n"),
 		},
 	}
 
@@ -5108,7 +5099,8 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 				t.Fatalf("len(blocks) = %d, want 1", len(blocks))
 			}
 			block := blocks[0]
-			if block.Collapsed {
+			wantCollapsed := tt.toolName == tools.NameDelete
+			if block.Collapsed != wantCollapsed {
 				t.Fatalf("restored %s should use live expanded terminal state", tt.toolName)
 			}
 			plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
@@ -8094,6 +8086,68 @@ func TestToolCardCopyContentIsSelfContainedMarkdown(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("blockCopyContent(tool) = %q, want %q", got, want)
 		}
+	}
+}
+
+func TestToolCopyContentIsIndependentOfCollapsedStateForReadWriteAndApplyPatch(t *testing.T) {
+	tests := []struct {
+		name  string
+		block *Block
+	}{
+		{
+			name: "read",
+			block: &Block{
+				Type:          BlockToolCall,
+				ToolName:      tools.NameRead,
+				Content:       `{"path":"sample.go"}`,
+				ResultContent: "READ_RESULT lines=1-2 total=2\nfirst\nsecond",
+				ResultDone:    true,
+			},
+		},
+		{
+			name: "write",
+			block: &Block{
+				Type:          BlockToolCall,
+				ToolName:      tools.NameWrite,
+				Content:       `{"path":"sample.go","content":"first\nsecond\n"}`,
+				ResultContent: "Successfully wrote 2 lines, 13 bytes",
+				ResultDone:    true,
+			},
+		},
+		{
+			name: "apply_patch",
+			block: &Block{
+				Type:          BlockToolCall,
+				ToolName:      tools.NameApplyPatch,
+				Content:       `{"patch":"*** Begin Patch\n*** Update File: sample.go\n@@\n-old\n+new\n*** End Patch"}`,
+				ResultContent: "Applied patch to sample.go (+1 -1)",
+				Diff:          "--- sample.go\n+++ sample.go\n@@ -1 +1 @@\n-old\n+new\n",
+				ResultDone:    true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			collapsed := *tt.block
+			collapsed.Collapsed = true
+			collapsed.ToolCallDetailExpanded = false
+
+			expanded := *tt.block
+			expanded.Collapsed = false
+			expanded.ToolCallDetailExpanded = true
+
+			gotCollapsed := blockCopyContent(&collapsed)
+			gotExpanded := blockCopyContent(&expanded)
+			if gotCollapsed != gotExpanded {
+				t.Fatalf("copy content mismatch\ncollapsed:\n%s\n\nexpanded:\n%s", gotCollapsed, gotExpanded)
+			}
+			for _, forbidden := range []string{"[space] expand", "[space] collapse", "more lines"} {
+				if strings.Contains(gotCollapsed, forbidden) {
+					t.Fatalf("copy content should not include UI hint %q: %s", forbidden, gotCollapsed)
+				}
+			}
+		})
 	}
 }
 

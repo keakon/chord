@@ -1222,15 +1222,20 @@ func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
 		Type:          BlockToolCall,
 		ToolName:      "write",
 		Content:       string(args),
-		Collapsed:     false,
+		Collapsed:     true,
 		ResultDone:    true,
-		ResultContent: "Successfully wrote 12 lines, 157 bytes",
+		ResultContent: "Successfully wrote 260 lines, 157 bytes",
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"write cmd/demo/main.go", "1  package main", "10  \\tfmt.Println", "2 more lines", "[space] toggle expand/collapse"} {
+	for _, want := range []string{"write cmd/demo/main.go", "12 lines written · [space] expand"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected collapsed Write preview to contain %q; got:\n%s", want, plain)
+		}
+	}
+	for _, hidden := range []string{"1  package main", "10  \\tfmt.Println", "2 more lines"} {
+		if strings.Contains(plain, hidden) {
+			t.Fatalf("expected collapsed Write preview to hide %q; got:\n%s", hidden, plain)
 		}
 	}
 	// The "Successfully wrote X lines" message should be hidden as the content preview is sufficient
@@ -1242,7 +1247,7 @@ func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
 	}
 
 	block.ToggleAtWidth(120)
-	if !block.ReadContentExpanded {
+	if block.Collapsed {
 		t.Fatal("expected space toggle to expand Write preview")
 	}
 	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
@@ -1251,8 +1256,8 @@ func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
 			t.Fatalf("expected expanded Write preview to contain %q; got:\n%s", want, expanded)
 		}
 	}
-	if strings.Contains(expanded, "[space] toggle expand/collapse") {
-		t.Fatalf("expanded Write preview should not show expand hint; got:\n%s", expanded)
+	if !strings.Contains(expanded, "[space] collapse") {
+		t.Fatalf("expanded Write preview should show collapse hint; got:\n%s", expanded)
 	}
 }
 
@@ -1281,6 +1286,103 @@ func TestWriteCallSanitizesPreviewControlCharacters(t *testing.T) {
 	}
 	if !strings.Contains(plain, `safe\x1b[31m literal`) || !strings.Contains(plain, "next") {
 		t.Fatalf("expected sanitized Write preview content, got:\n%s", plain)
+	}
+}
+
+func TestReadCollapsedShowsSummaryAndExpandedShowsAllReturnedLines(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	lines := make([]string, 0, 260)
+	for i := 1; i <= 260; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameRead,
+		Content:       `{"path":"sample.go","limit":260}`,
+		Collapsed:     true,
+		ResultDone:    true,
+		ResultContent: "READ_RESULT lines=1-260 total=343\n" + strings.Join(lines, "\n"),
+	}
+
+	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(collapsed, "lines 1–260 of 343 · [space] expand") {
+		t.Fatalf("expected collapsed read summary, got:\n%s", collapsed)
+	}
+	if strings.Contains(collapsed, "line 1") {
+		t.Fatalf("collapsed read should hide body, got:\n%s", collapsed)
+	}
+
+	block.ToggleAtWidth(120)
+	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{"1  line 1", "260  line 260", "[space] collapse"} {
+		if !strings.Contains(expanded, want) {
+			t.Fatalf("expected expanded read to contain %q, got:\n%s", want, expanded)
+		}
+	}
+}
+
+func TestGrepCollapsedSummaryCountsOnlyMatchesAndExpandedShowsAllDetails(t *testing.T) {
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameGrep,
+		Content:                `{"pattern":"TODO"}`,
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+		ResultContent: strings.Join([]string{
+			"a.go:1:TODO one",
+			"b.go:2:TODO two",
+			"Note: pattern was invalid regex; searched as literal text.",
+			"grep: skipped path: vendor/blocked: no such file or directory",
+			"(showing first 2 matches within 4096 KiB; narrow paths/includes/pattern for more precise results)",
+		}, "\n"),
+	}
+
+	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(collapsed, "2 matches shown · 2 files · 1 paths skipped · literal fallback · truncated · [space] expand") {
+		t.Fatalf("expected grep collapsed summary, got:\n%s", collapsed)
+	}
+	if strings.Contains(collapsed, "grep: skipped path: vendor/blocked") || strings.Contains(collapsed, "searched as literal text") {
+		t.Fatalf("collapsed grep should hide full detail lines, got:\n%s", collapsed)
+	}
+
+	block.ToggleAtWidth(120)
+	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{"a.go:1:TODO one", "Note: pattern was invalid regex; searched as literal text.", "grep: skipped path: vendor/blocked", "[space] collapse"} {
+		if !strings.Contains(expanded, want) {
+			t.Fatalf("expected expanded grep to contain %q, got:\n%s", want, expanded)
+		}
+	}
+}
+
+func TestGlobCollapsedSummaryShowsFilesAndArtifact(t *testing.T) {
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameGlob,
+		Content:                `{"patterns":["**/*.go"]}`,
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+		ResultContent: strings.Join([]string{
+			"a.go",
+			"b.go",
+			"",
+			"(showing first 2 results within 4096 KiB; full results saved to /tmp/ws/artifacts/glob-results.log; refine pattern/path to narrow results)",
+		}, "\n"),
+	}
+
+	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(collapsed, "2 files · truncated · /tmp/ws/artifacts/glob-results.log · [space] expand") {
+		t.Fatalf("expected glob collapsed summary, got:\n%s", collapsed)
+	}
+
+	block.ToggleAtWidth(120)
+	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{"a.go", "(showing first 2 results", "[space] collapse"} {
+		if !strings.Contains(expanded, want) {
+			t.Fatalf("expected expanded glob to contain %q, got:\n%s", want, expanded)
+		}
 	}
 }
 
@@ -1423,7 +1525,7 @@ func TestCollapsedShellToolShowsExpandHintForHiddenOutput(t *testing.T) {
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	// Short output: stdout is already shown inline, but expanded mode still adds
 	// exit status + stream headers, so we should still show an expand hint.
-	if !strings.Contains(joined, "[space] toggle expand/collapse") {
+	if !strings.Contains(joined, "[space] expand") {
 		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "one") || !strings.Contains(joined, "two") || !strings.Contains(joined, "three") {
@@ -1487,7 +1589,7 @@ func TestCollapsedBashLongOutputStillFolds(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "[space] toggle expand/collapse") {
+	if !strings.Contains(joined, "[space] expand") {
 		t.Fatalf("expected collapsed Shell with long output to show expand hint; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "line 8") {
@@ -1760,7 +1862,7 @@ func TestCollapsedBashShowsCommandPreviewAndExpandHint(t *testing.T) {
 	}
 	// Even when stdout/stderr are fully visible inline, expanded mode still adds
 	// exit status + stream headers, so we should show an expand hint.
-	if !strings.Contains(joined, "[space] toggle expand/collapse") {
+	if !strings.Contains(joined, "[space] expand") {
 		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "echo third") {
@@ -1804,7 +1906,7 @@ func TestCollapsedBashLongCommandWithNoOutputKeepsCommandPreviewCollapsed(t *tes
 	if !strings.Contains(joined, "(Shell completed with no output)") {
 		t.Fatalf("expected collapsed Shell to show no-output result inline; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "[space] toggle expand/collapse") {
+	if !strings.Contains(joined, "[space] expand") {
 		t.Fatalf("expected collapsed Shell to show expand hint for hidden command lines; got:\n%s", joined)
 	}
 }
@@ -1824,7 +1926,7 @@ func TestCollapsedBashShowsSingleExpandHintWhenCommandAndOutputBothHidden(t *tes
 	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
 	// Short output: all stdout/stderr are shown inline, but expanded mode still
 	// adds exit status + stream headers, so we should show an expand hint.
-	if !strings.Contains(joined, "[space] toggle expand/collapse") {
+	if !strings.Contains(joined, "[space] expand") {
 		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "echo third") {
@@ -1881,7 +1983,7 @@ func TestCollapsedCompleteShowsSummaryPreviewInsteadOfFullBody(t *testing.T) {
 	if !strings.Contains(joined, "Status: success · Changes: line one") {
 		t.Fatalf("expected collapsed Complete to show summary preview; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "more lines · [space] toggle expand/collapse") {
+	if !strings.Contains(joined, "more lines · [space] expand") {
 		t.Fatalf("expected collapsed Complete to show expand hint; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "line twelve") {
@@ -2039,7 +2141,7 @@ func TestQueuedToolHeaderShowsQueuedLabelWithoutSpinner(t *testing.T) {
 	}
 }
 
-func TestGenericToolHeaderAndCollapsedResultEscapesANSIRichText(t *testing.T) {
+func TestGenericToolHeaderAndExpandedResultEscapesANSIRichText(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -2050,14 +2152,19 @@ func TestGenericToolHeaderAndCollapsedResultEscapesANSIRichText(t *testing.T) {
 		ResultDone:    true,
 	}
 
+	block.ToggleAtWidth(100)
+
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
 		t.Fatalf("expected generic tool card to not contain raw ESC: %q", joined)
 	}
-	for _, want := range []string{`\x1b[33m*.go\x1b[0m`, `\x1b[35m/tmp/repo\x1b[0m`, "2 files"} {
+	for _, want := range []string{"2 files", `\x1b[31minternal/tui/app.go\x1b[0m`} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected generic tool card to contain %q, got:\n%s", want, joined)
 		}
+	}
+	if !strings.Contains(joined, "[space] collapse") {
+		t.Fatalf("expected expanded glob card to show collapse hint, got:\n%s", joined)
 	}
 }
 
@@ -2112,7 +2219,7 @@ func TestCollapsedLargeBashResultDoesNotRenderEntireHiddenOutput(t *testing.T) {
 	if strings.Contains(joined, "line-49999") {
 		t.Fatalf("collapsed Shell preview should not render the hidden tail, got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "49999 more lines · [space] toggle expand/collapse") {
+	if !strings.Contains(joined, "49999 more lines · [space] expand") {
 		t.Fatalf("expected cheap hidden-line hint for large output, got:\n%s", joined)
 	}
 }
@@ -2408,7 +2515,7 @@ func TestCollapsedBashRejectedShowsExpandHintBeforeRejection(t *testing.T) {
 	hintIdx := -1
 	rejectedIdx := -1
 	for i, line := range lines {
-		if strings.Contains(line, "more lines · [space] toggle expand/collapse") {
+		if strings.Contains(line, "more lines · [space] expand") {
 			hintIdx = i
 		}
 		if strings.Contains(line, `tool "shell" rejected by user: sample rejection reason`) {
@@ -2561,6 +2668,9 @@ func TestDeleteCardShowsDiagnosticPathsLikeNormalHeader(t *testing.T) {
 }
 
 func TestCompactToolWithOneHiddenLineForcesExpandedResult(t *testing.T) {
+	// Grep/glob are intentionally not part of this heuristic: their count-based
+	// summaries must stay collapsible (see TestGrepGlobForceExpandedHeuristic-
+	// DoesNotBlockCollapse).
 	tests := []struct {
 		name        string
 		toolName    string
@@ -2577,22 +2687,6 @@ func TestCompactToolWithOneHiddenLineForcesExpandedResult(t *testing.T) {
 			wantPrefix:  "✓ delete",
 			wantVisible: "- examples/compression-config.yaml",
 		},
-		{
-			name:        "grep",
-			toolName:    "grep",
-			content:     `{"pattern":"TODO"}`,
-			result:      strings.Join([]string{"a.go:1:TODO", "b.go:2:TODO", "c.go:3:TODO", "d.go:4:TODO", "e.go:5:TODO", "f.go:6:TODO", "g.go:7:TODO", "h.go:8:TODO", "i.go:9:TODO", "j.go:10:TODO", "k.go:11:TODO"}, "\n"),
-			wantPrefix:  "✓ grep",
-			wantVisible: "k.go:11:TODO",
-		},
-		{
-			name:        "glob",
-			toolName:    "glob",
-			content:     `{"patterns":["**/*.go"]}`,
-			result:      strings.Join([]string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go", "g.go", "h.go", "i.go", "j.go", "k.go"}, "\n"),
-			wantPrefix:  "✓ glob",
-			wantVisible: "k.go",
-		},
 	}
 
 	for _, tt := range tests {
@@ -2608,7 +2702,7 @@ func TestCompactToolWithOneHiddenLineForcesExpandedResult(t *testing.T) {
 			}
 
 			joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-			if strings.Contains(joined, "[space] toggle expand/collapse") || strings.Contains(joined, "1 more lines") {
+			if strings.Contains(joined, "[space] expand") || strings.Contains(joined, "1 more lines") {
 				t.Fatalf("single hidden line should be shown inline without expand hint; got:\n%s", joined)
 			}
 			if !strings.Contains(joined, tt.wantPrefix) {
@@ -2690,7 +2784,7 @@ func TestCollapsedTaskShowsMultilineDescription(t *testing.T) {
 	if strings.Contains(joined, "update docs") {
 		t.Fatalf("expected collapsed Delegate preview to hide later description lines; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "1 more lines · [space] toggle expand/collapse") {
+	if !strings.Contains(joined, "1 more lines · [space] expand") {
 		t.Fatalf("expected collapsed Delegate preview to show expand hint; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "(reviewer)") {
@@ -2717,7 +2811,7 @@ func TestCollapsedGenericToolDeduplicatesMatchingParamAndResultPreview(t *testin
 	if strings.Count(joined, "[Image #1]") != 1 {
 		t.Fatalf("expected duplicated result first line to be suppressed, got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "[space] toggle expand/collapse") {
+	if !strings.Contains(joined, "[space] expand") {
 		t.Fatalf("expected expand hint to remain after deduplication, got:\n%s", joined)
 	}
 }
@@ -2845,7 +2939,7 @@ func TestGenericToolCardHeaderCanUseWideViewport(t *testing.T) {
 		ResultDone: true,
 	}
 	joined := stripANSI(strings.Join(block.Render(maxTextWidth+100, ""), "\n"))
-	if !strings.Contains(joined, strings.Repeat("a", maxTextWidth+20)) {
+	if !strings.Contains(joined, strings.Repeat("a", 80)) {
 		t.Fatalf("expected grep header to use wide viewport beyond text cap; got:\n%s", joined)
 	}
 }
@@ -2997,6 +3091,244 @@ func TestCollapsedGrepOmitsLowCountSummary(t *testing.T) {
 			}
 			if tt.wantAbsent != "" && strings.Contains(joined, tt.wantAbsent) {
 				t.Fatalf("expected output to omit %q; got:\n%s", tt.wantAbsent, joined)
+			}
+		})
+	}
+}
+
+func TestExpandedShortGrepAndGlobResultsDoNotDuplicateContent(t *testing.T) {
+	tests := []struct {
+		name          string
+		toolName      string
+		resultContent string
+		wantCounted   string
+	}{
+		{
+			name:          "grep single match",
+			toolName:      "grep",
+			resultContent: "a.go:1:TODO",
+			wantCounted:   "a.go:1:TODO",
+		},
+		{
+			name:          "grep no matches",
+			toolName:      "grep",
+			resultContent: "No matches found.",
+			wantCounted:   "No matches found.",
+		},
+		{
+			name:          "glob single file",
+			toolName:      "glob",
+			resultContent: "a.go",
+			wantCounted:   "a.go",
+		},
+		{
+			name:          "glob no files",
+			toolName:      "glob",
+			resultContent: "No files matched the pattern.",
+			wantCounted:   "No files matched the pattern.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			block := &Block{
+				ID:                     1,
+				Type:                   BlockToolCall,
+				ToolName:               tt.toolName,
+				Content:                `{"pattern":"TODO"}`,
+				ResultContent:          tt.resultContent,
+				ResultDone:             true,
+				ToolCallDetailExpanded: true,
+			}
+
+			joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+			if got := strings.Count(joined, tt.wantCounted); got != 1 {
+				t.Fatalf("expected %q exactly once in expanded card, got %d occurrences:\n%s", tt.wantCounted, got, joined)
+			}
+			if !strings.Contains(joined, "[space] collapse") {
+				t.Fatalf("expected expanded card to show collapse hint, got:\n%s", joined)
+			}
+		})
+	}
+}
+
+func TestExpandedGrepCountSummaryStillShowsAllMatches(t *testing.T) {
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "grep",
+		Content:                `{"pattern":"TODO"}`,
+		ResultContent:          "a.go:1:TODO\nb.go:2:TODO",
+		ResultDone:             true,
+		ToolCallDetailExpanded: true,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	if !strings.Contains(joined, "2 matches") {
+		t.Fatalf("expected expanded Grep card to keep the count summary, got:\n%s", joined)
+	}
+	for _, want := range []string{"a.go:1:TODO", "b.go:2:TODO"} {
+		if strings.Count(joined, want) != 1 {
+			t.Fatalf("expected %q exactly once in expanded card, got:\n%s", want, joined)
+		}
+	}
+	if !strings.Contains(joined, "[space] collapse") {
+		t.Fatalf("expected expanded card to show collapse hint, got:\n%s", joined)
+	}
+}
+
+func TestGrepGlobForceExpandedHeuristicDoesNotBlockCollapse(t *testing.T) {
+	// 11 result lines is exactly the case where the generic "one hidden line"
+	// heuristic used to force the card expanded, which also made Space unable
+	// to collapse it again (the toggle guard treats force-expanded as pinned).
+	tests := []struct {
+		name     string
+		toolName string
+		matches  []string
+	}{
+		{"grep", "grep", []string{"a.go:1:l0", "a.go:2:l1", "a.go:3:l2", "a.go:4:l3", "a.go:5:l4", "a.go:6:l5", "a.go:7:l6", "a.go:8:l7", "a.go:9:l8", "a.go:10:l9", "a.go:11:l10"}},
+		{"glob", "glob", []string{"a0.go", "a1.go", "a2.go", "a3.go", "a4.go", "a5.go", "a6.go", "a7.go", "a8.go", "a9.go", "a10.go"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			block := &Block{
+				ID:                     1,
+				Type:                   BlockToolCall,
+				ToolName:               tt.toolName,
+				Content:                `{"pattern":"TODO"}`,
+				ResultContent:          strings.Join(tt.matches, "\n"),
+				ResultDone:             true,
+				ToolCallDetailExpanded: false,
+			}
+
+			// Collapsed: the count summary must win over any force-expand.
+			collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			if !strings.Contains(collapsed, "· [space] expand") {
+				t.Fatalf("expected collapsed card to offer expansion, got:\n%s", collapsed)
+			}
+			for _, m := range tt.matches {
+				if strings.Contains(collapsed, m) {
+					t.Fatalf("expected collapsed card to hide match line %q, got:\n%s", m, collapsed)
+				}
+			}
+
+			// Space expands...
+			block.ToggleAtWidth(120)
+			expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			if !strings.Contains(expanded, "[space] collapse") {
+				t.Fatalf("expected expanded card to show collapse hint, got:\n%s", expanded)
+			}
+			if !strings.Contains(expanded, tt.matches[0]) || !strings.Contains(expanded, tt.matches[len(tt.matches)-1]) {
+				t.Fatalf("expected expanded card to show all matches, got:\n%s", expanded)
+			}
+
+			// ...and a second Space collapses again.
+			block.ToggleAtWidth(120)
+			recollapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			if !strings.Contains(recollapsed, "· [space] expand") {
+				t.Fatalf("expected second toggle to collapse again, got:\n%s", recollapsed)
+			}
+		})
+	}
+}
+
+func TestCollapsedEditAndApplyPatchSummaryShowsDiagnosticsCount(t *testing.T) {
+	tests := []struct {
+		name          string
+		toolName      string
+		resultContent string
+		wantSummary   string
+	}{
+		{
+			name:          "edit with LSP diagnostics",
+			toolName:      "edit",
+			resultContent: "Successfully edited internal/tui/example.go\n\nDiagnostics:\n[E] 3:4 [E1] undefined name\n[W] 5:1 [W1] unused variable",
+			wantSummary:   "2 diagnostics",
+		},
+		{
+			name:          "edit diagnostics block without severity lines",
+			toolName:      "edit",
+			resultContent: "Successfully edited internal/tui/example.go\n\nDiagnostics:\nPython diagnostics skipped: no configured checker available.",
+			wantSummary:   "diagnostics",
+		},
+		{
+			name:          "apply_patch with LSP diagnostics",
+			toolName:      "apply_patch",
+			resultContent: "Applied patch:\ninternal/tui/example.go: +2 -1 lines\n\nDiagnostics:\n[E] 3:4 [E1] undefined name",
+			wantSummary:   "1 diagnostics",
+		},
+		{
+			name:          "edit without diagnostics",
+			toolName:      "edit",
+			resultContent: "Successfully edited internal/tui/example.go",
+			wantSummary:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			block := &Block{
+				ID:            1,
+				Type:          BlockToolCall,
+				ToolName:      tt.toolName,
+				Content:       `{"path":"internal/tui/example.go","old_string":"a","new_string":"b"}`,
+				Diff:          "--- internal/tui/example.go\n+++ internal/tui/example.go\n@@ -1,2 +1,2 @@\n-a\n+b",
+				ResultContent: tt.resultContent,
+				ResultDone:    true,
+				Collapsed:     true,
+			}
+
+			joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			if tt.wantSummary != "" {
+				if !strings.Contains(joined, tt.wantSummary) {
+					t.Fatalf("expected collapsed %s summary to show %q, got:\n%s", tt.toolName, tt.wantSummary, joined)
+				}
+				// The summary is a single line; diagnostics must not leak the
+				// raw diagnostic text into the collapsed card.
+				if strings.Contains(joined, "[E]") || strings.Contains(joined, "undefined name") {
+					t.Fatalf("expected collapsed %s card to hide diagnostic detail, got:\n%s", tt.toolName, joined)
+				}
+			} else if strings.Contains(joined, "diagnostics") {
+				t.Fatalf("expected collapsed %s summary without diagnostics, got:\n%s", tt.toolName, joined)
+			}
+		})
+	}
+}
+
+func TestReadCollapsedSummaryDistinguishesTruncationKinds(t *testing.T) {
+	tests := []struct {
+		name       string
+		header     string
+		wantLabel  string
+		notWantAbs string
+	}{
+		{"budget", "READ_RESULT lines=1-487 total=2000 truncated=budget requested_lines=1-900", "output truncated", ""},
+		{"stale", "READ_RESULT lines=41-103 total=200 truncated=stale", "stale result", "output truncated"},
+		{"superseded", "READ_RESULT lines=10-12 total=80 truncated=superseded", "superseded result", "output truncated"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			block := &Block{
+				ID:            1,
+				Type:          BlockToolCall,
+				ToolName:      "read",
+				Content:       `{"path":"internal/tui/example.go"}`,
+				ResultContent: tt.header + "\nline one\nline two",
+				ResultDone:    true,
+				Collapsed:     true,
+			}
+
+			joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			if !strings.Contains(joined, tt.wantLabel) {
+				t.Fatalf("expected collapsed read summary to show %q, got:\n%s", tt.wantLabel, joined)
+			}
+			if tt.notWantAbs != "" && strings.Contains(joined, tt.notWantAbs) {
+				t.Fatalf("expected collapsed read summary not to show %q, got:\n%s", tt.notWantAbs, joined)
+			}
+			if !strings.Contains(joined, "[space] expand") {
+				t.Fatalf("expected collapsed read card to offer expansion, got:\n%s", joined)
 			}
 		})
 	}
@@ -4357,13 +4689,13 @@ func TestReadCallLineNumberGutterIgnoresRowsBeyondRenderLimit(t *testing.T) {
 		lines[i] = fmt.Sprintf("line %d", i+1)
 	}
 	block := &Block{
-		ID:                  1,
-		Type:                BlockToolCall,
-		ToolName:            "read",
-		Content:             `{"path":"sample.go"}`,
-		ResultDone:          true,
-		ReadContentExpanded: true,
-		ResultContent:       strings.Join(lines, "\n"),
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "read",
+		Content:       `{"path":"sample.go"}`,
+		ResultDone:    true,
+		Collapsed:     false,
+		ResultContent: strings.Join(lines, "\n"),
 	}
 
 	plainLines := strings.Split(stripANSI(strings.Join(block.renderReadCall(100, ""), "\n")), "\n")
@@ -4375,11 +4707,11 @@ func TestReadCallLineNumberGutterIgnoresRowsBeyondRenderLimit(t *testing.T) {
 	if line1Col != line200Col {
 		t.Fatalf("visible rows should align, got line 1 column %d and line 200 column %d in:\n%s", line1Col, line200Col, strings.Join(plainLines, "\n"))
 	}
-	if line1000Col := renderedMarkerColumn(plainLines, "line 1000"); line1000Col >= 0 {
-		t.Fatalf("line 1000 should be beyond the render limit, got column %d in:\n%s", line1000Col, strings.Join(plainLines, "\n"))
+	if line1000Col := renderedMarkerColumn(plainLines, "line 1000"); line1000Col < 0 {
+		t.Fatalf("line 1000 should render in expanded full view, got:\n%s", strings.Join(plainLines, "\n"))
 	}
 	if got, want := line1Col-renderedMarkerColumn(plainLines, "1  line 1"), len("1  "); got != want {
-		t.Fatalf("gutter should be based on visible max line 200, not hidden line 1000; got separator offset %d want %d in:\n%s", got, want, strings.Join(plainLines, "\n"))
+		t.Fatalf("gutter should stay aligned in expanded full view; got separator offset %d want %d in:\n%s", got, want, strings.Join(plainLines, "\n"))
 	}
 }
 
