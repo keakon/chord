@@ -927,23 +927,6 @@ func diffContentSample(diff string) string {
 	return strings.Join(sample, "\n")
 }
 
-func writeToolResultExtraVisible(b *Block) bool {
-	if b.ToolName != tools.NameWrite && b.ToolName != tools.NameDelete {
-		return false
-	}
-	if b.toolResultIsError() || b.toolResultIsCancelled() || !b.ResultDone || strings.TrimSpace(b.ResultContent) == "" {
-		return false
-	}
-	s := strings.TrimSpace(b.ResultContent)
-	if strings.Contains(s, "LSP:") || strings.Contains(s, "LSP errors detected") || strings.Contains(s, "<diagnostics") {
-		return true
-	}
-	if lspDiagLineRe.MatchString(s) {
-		return true
-	}
-	return strings.Contains(s, "\n")
-}
-
 func renderLSPDiagnosticsLines(content, indent string, width int) []string {
 	var out []string
 	for line := range strings.SplitSeq(strings.TrimRight(content, "\n"), "\n") {

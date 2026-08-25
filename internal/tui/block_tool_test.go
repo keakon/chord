@@ -1159,6 +1159,72 @@ func TestWriteCardMultilineResultDoesNotBypassCardWrapper(t *testing.T) {
 	}
 }
 
+func TestWriteCardDiagnosticsSplitBetweenSummaryAndColoredDetails(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	result := strings.Join([]string{
+		"Successfully wrote 71 lines, 2113 bytes",
+		"",
+		"Diagnostics:",
+		"LSP diagnostics in other files:",
+		"internal/tui/block_tool_render_delete.go:",
+		`[E] 9:2 [UnusedImport] "github.com/keakon/chord/internal/tools" imported and not used`,
+		`[E] 24:2 [UnusedVar] declared and not used: keys`,
+	}, "\n")
+	block := &Block{
+		ID:            821,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameWrite,
+		Content:       `{"path":"internal/tui/zz_review_current_head_test.go","content":"package tui\n"}`,
+		Collapsed:     true,
+		ResultDone:    true,
+		ResultContent: result,
+	}
+
+	collapsedRaw := strings.Join(block.Render(120, ""), "\n")
+	collapsed := stripANSI(collapsedRaw)
+	if got := strings.Count(collapsed, "Successfully wrote 71 lines, 2113 bytes"); got != 1 {
+		t.Fatalf("collapsed Write summary count = %d, want 1; got:\n%s", got, collapsed)
+	}
+	if got := strings.Count(collapsed, "Diagnostics:"); got != 1 {
+		t.Fatalf("collapsed diagnostics heading count = %d, want 1; got:\n%s", got, collapsed)
+	}
+	if !strings.Contains(collapsed, "[E] 9:2 [UnusedImport]") {
+		t.Fatalf("collapsed Write should show LSP error details; got:\n%s", collapsed)
+	}
+	redError := "\x1b[38;5;196m    [E] 9:2 [UnusedImport]"
+	if !strings.Contains(collapsedRaw, redError) {
+		t.Fatalf("collapsed LSP error should use the red error style; got:\n%s", collapsedRaw)
+	}
+
+	block.ToggleAtWidth(120)
+	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if got := strings.Count(expanded, "Successfully wrote 71 lines, 2113 bytes"); got != 1 {
+		t.Fatalf("expanded Write summary count = %d, want 1; got:\n%s", got, expanded)
+	}
+	if got := strings.Count(expanded, "Diagnostics:"); got != 1 {
+		t.Fatalf("expanded diagnostics heading count = %d, want 1; got:\n%s", got, expanded)
+	}
+	if strings.Contains(expanded, "↳ Result:") {
+		t.Fatalf("expanded Write should not render a duplicate generic result section; got:\n%s", expanded)
+	}
+}
+
+func TestSplitWriteResultRecognizesDiagnosticsWithoutSectionHeading(t *testing.T) {
+	for _, result := range []string{
+		"Successfully wrote 3 lines, 42 bytes\nLSP errors detected\n[E] 2:1 [TypeError] invalid assignment",
+		"Successfully wrote 3 lines, 42 bytes\n[E] 2:1 [TypeError] invalid assignment",
+		"Successfully wrote 3 lines, 42 bytes\n2:1 invalid assignment",
+	} {
+		sections := splitWriteResult(result)
+		if sections.summary != "Successfully wrote 3 lines, 42 bytes" {
+			t.Fatalf("splitWriteResult(%q) summary = %q", result, sections.summary)
+		}
+		if !strings.Contains(sections.diagnostics, "invalid assignment") {
+			t.Fatalf("splitWriteResult(%q) diagnostics = %q", result, sections.diagnostics)
+		}
+	}
+}
+
 func TestEditSuccessWithLSPDiagnosticsRendersDiagnostics(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	for _, header := range []string{"Diagnostics:", "Diagnostics summary:"} {

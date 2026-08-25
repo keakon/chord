@@ -16,6 +16,62 @@ const (
 	writeHeaderExtrasMinWidth      = 20
 )
 
+type writeResultSections struct {
+	summary     string
+	diagnostics string
+}
+
+func splitWriteResult(result string) writeResultSections {
+	result = strings.ReplaceAll(result, "\r\n", "\n")
+	lines := strings.Split(result, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch trimmed {
+		case "Diagnostics:", "Diagnostics summary:":
+			return writeResultSections{
+				summary:     strings.TrimSpace(strings.Join(lines[:i], "\n")),
+				diagnostics: strings.TrimSpace(strings.Join(lines[i+1:], "\n")),
+			}
+		}
+		if strings.Contains(line, "LSP:") || strings.Contains(line, "LSP errors detected") || strings.Contains(line, "<diagnostics") || lspSeverityRe.MatchString(line) || lspDiagLineRe.MatchString(trimmed) {
+			return writeResultSections{
+				summary:     strings.TrimSpace(strings.Join(lines[:i], "\n")),
+				diagnostics: strings.TrimSpace(strings.Join(lines[i:], "\n")),
+			}
+		}
+	}
+	return writeResultSections{summary: strings.TrimSpace(result)}
+}
+
+func writeOperationSummary(b *Block, fileContent string, sections writeResultSections) string {
+	summary := sections.summary
+	if sections.diagnostics == "" {
+		summary = strings.TrimSpace(toolDisplayResultContent(b))
+	}
+	if sections.diagnostics == "" {
+		lines := strings.Split(summary, "\n")
+		if len(lines) == 1 && strings.HasPrefix(lines[0], "Successfully wrote ") {
+			summary = ""
+		}
+	}
+	if summary == "" {
+		if rows, _ := parsePlainContentPreviewLines(fileContent); len(rows) > 0 {
+			summary = fmt.Sprintf("%d lines written", len(rows))
+		} else {
+			summary = strings.TrimSpace(toolSuccessfulFileOpSummary(b))
+		}
+	}
+	return summary
+}
+
+func appendWriteDiagnostics(result []string, diagnostics string, width int) []string {
+	if strings.TrimSpace(diagnostics) == "" {
+		return result
+	}
+	result = append(result, ToolResultExpandedStyle.Render("  ↳ Diagnostics:"))
+	return append(result, renderLSPDiagnosticsLines(diagnostics, "    ", width)...)
+}
+
 // renderWriteCall renders a Write tool call result with a syntax-highlighted
 // preview of the written file content.
 func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
@@ -71,6 +127,10 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	}
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
+	sections := writeResultSections{}
+	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
+		sections = splitWriteResult(b.ResultContent)
+	}
 
 	if b.Collapsed {
 		if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
@@ -86,42 +146,17 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 				}
 			}
 		} else {
-			summary := strings.TrimSpace(toolDisplayResultContent(b))
-			if summary == "" {
-				if rows, _ := parsePlainContentPreviewLines(fileContent); len(rows) > 0 {
-					summary = fmt.Sprintf("%d lines written", len(rows))
-				} else {
-					summary = strings.TrimSpace(toolSuccessfulFileOpSummary(b))
-				}
-			}
+			summary := writeOperationSummary(b, fileContent, sections)
 			if summary != "" {
 				result = append(result, ToolResultStyle.Render("  ↳ "+summary))
 			}
+			result = appendWriteDiagnostics(result, sections.diagnostics, cardWidth-4)
 		}
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 
-	if !b.toolResultIsCancelled() && b.ResultContent != "" {
-		// Keep the compact header summary to a single line; detailed multi-line
-		// diagnostics are rendered below via renderLSPDiagnosticsLines.
-		summary := strings.TrimSpace(toolDisplayResultContent(b))
-		if i := strings.IndexByte(summary, '\n'); i >= 0 {
-			summary = strings.TrimSpace(summary[:i])
-		}
-		if summary != "" {
-			result = append(result, "  "+DimStyle.Render(summary))
-		}
-	}
-
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
-		summary := strings.TrimSpace(toolDisplayResultContent(b))
-		if summary == "" {
-			if rows, _ := parsePlainContentPreviewLines(fileContent); len(rows) > 0 {
-				summary = fmt.Sprintf("%d lines written", len(rows))
-			} else {
-				summary = strings.TrimSpace(toolSuccessfulFileOpSummary(b))
-			}
-		}
+		summary := writeOperationSummary(b, fileContent, sections)
 		if summary != "" {
 			result = append(result, "  "+DimStyle.Render(summary))
 		}
@@ -135,12 +170,9 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 				highlighter:  &b.codeHL,
 			})...)
 		}
+		result = appendWriteDiagnostics(result, sections.diagnostics, cardWidth-4)
 	}
 
-	if writeToolResultExtraVisible(b) {
-		result = append(result, ToolResultExpandedStyle.Render("  ↳ Result:"))
-		result = append(result, renderLSPDiagnosticsLines(b.ResultContent, "    ", cardWidth-4)...)
-	}
 	if b.toolResultIsError() && b.ResultContent != "" {
 		result = append(result, ErrorStyle.Render("  ↳ Error:"))
 		result = append(result, renderLSPDiagnosticsLines(b.ResultContent, "    ", cardWidth-4)...)
