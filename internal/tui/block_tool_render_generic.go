@@ -890,6 +890,74 @@ func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string
 	return headerLine + " " + mainPart + " " + DimStyle.Render(grayPart)
 }
 
+// appendSearchHeaderSummary appends the pattern, optional search parameters and
+// the result summary to a search tool header as a single line. Priority goes
+// to the summary (match/file counts, truncation facts) and to the pattern's
+// head and tail (middle-truncated); the parameters are dropped first when the
+// header runs out of width.
+func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, maxWidth int) string {
+	baseWidth := runewidth.StringWidth(stripANSI(headerLine))
+	if baseWidth >= maxWidth {
+		return runewidth.Truncate(headerLine, maxWidth, "…")
+	}
+	budget := maxWidth - baseWidth - 1
+	if budget <= 0 {
+		return headerLine
+	}
+	mainPart = sanitizeToolDisplayText(mainPart)
+	summary = sanitizeToolDisplayText(summary)
+	grayPart = sanitizeDisplayTextKeepingSGR(grayPart)
+
+	// Parameters are command invocation: when the budget allows they stay
+	// glued to the pattern with a space, and only the result summary is
+	// separated with " · ".
+	hasRealSummary := summary != ""
+	sep := " "
+	if hasRealSummary {
+		sep = " · "
+	}
+	if summary == "" {
+		summary = grayPart
+		grayPart = ""
+	} else if grayPart != "" && budget >= runewidth.StringWidth(stripANSI(grayPart))+runewidth.StringWidth(summary)+2 {
+		summary = grayPart + " · " + summary
+		sep = " "
+	}
+	if mainPart == "" {
+		if summary == "" {
+			return headerLine
+		}
+		return headerLine + " " + DimStyle.Render(truncateToolHeaderGray(summary, budget))
+	}
+
+	// The summary keeps a minimum share of the line; the pattern is
+	// middle-truncated and the parameters are dropped first.
+	const minPatternCols = 8
+	suffixW := runewidth.StringWidth(stripANSI(summary))
+	patternBudget := budget - suffixW - runewidth.StringWidth(sep)
+	if patternBudget < minPatternCols {
+		patternBudget = minPatternCols
+		if avail := budget - patternBudget - runewidth.StringWidth(sep); avail > 0 {
+			summary = truncateToolHeaderGray(summary, avail)
+		} else {
+			summary = ""
+		}
+		suffixW = runewidth.StringWidth(stripANSI(summary))
+		patternBudget = budget - suffixW - runewidth.StringWidth(sep)
+	}
+	pattern := truncateToolHeaderMiddle(mainPart, patternBudget)
+	if pattern == "" {
+		if summary == "" {
+			return headerLine
+		}
+		return headerLine + " " + DimStyle.Render(summary)
+	}
+	if summary == "" {
+		return headerLine + " " + pattern
+	}
+	return headerLine + " " + pattern + sep + DimStyle.Render(summary)
+}
+
 // truncateToolHeaderGray shortens a gray header tail that may embed ANSI
 // styled diagnostic options; rune-level middle cuts would split escape
 // sequences and leak their styles into the rest of the header line.

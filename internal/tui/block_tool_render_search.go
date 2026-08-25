@@ -23,11 +23,22 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	keys, vals := parseToolArgs(b.Content)
 	mainPart, grayPart := b.formatToolHeaderPartsWithParsed(keys, vals)
+	// The count summary (matches/files, truncation facts) is merged into the
+	// header so a collapsed search card is a single line like Read. Short
+	// results without a summary keep their inline body below.
+	summary, showInline := "", false
+	if !b.toolResultIsError() && !b.toolResultIsCancelled() && !b.toolExecutionIsQueued() {
+		summary, showInline = b.searchResultSummaryLine()
+	}
+	headerSummary := ""
+	if showInline {
+		headerSummary = summary
+	}
 	if strings.TrimSpace(b.ResultContent) == "" {
 		paramSummary := extractToolParamsWithParsed(keys, vals, cardWidth-16)
 		headerLine = appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary, cardWidth-4)
 	} else {
-		headerLine = appendToolHeaderSummary(headerLine, mainPart, grayPart, "", cardWidth-4)
+		headerLine = appendSearchHeaderSummary(headerLine, mainPart, grayPart, headerSummary, cardWidth-4)
 	}
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
 	result := []string{headerLine}
@@ -51,25 +62,15 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 
-	if summary, showInline := b.searchResultSummaryLine(); summary != "" && !b.toolExecutionIsQueued() {
-		if !showInline && !expanded {
-			for line := range strings.SplitSeq(strings.TrimRight(sanitizeToolDisplayText(summary), "\n"), "\n") {
-				for _, wrapped := range wrapText(line, contentWidth) {
-					result = append(result, DimStyle.Render("    "+wrapped))
-				}
-			}
-			result = appendToolElapsedFooter(result, b)
-			return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
-		}
-		showExpandedSummary := true
-		if tools.NormalizeName(b.ToolName) == tools.NameGrep && parseGrepResultMeta(b.ResultContent).NoMatches {
-			showExpandedSummary = false
-		}
-		if showInline && (!expanded || showExpandedSummary) {
-			for _, wrapped := range wrapText(summary, contentWidth) {
-				result = append(result, ToolResultStyle.Render("  ↳ "+wrapped))
+	if !showInline && !expanded && strings.TrimSpace(summary) != "" {
+		// Short result without a count summary: show the raw lines directly.
+		for line := range strings.SplitSeq(strings.TrimRight(sanitizeToolDisplayText(summary), "\n"), "\n") {
+			for _, wrapped := range wrapText(line, contentWidth) {
+				result = append(result, DimStyle.Render("    "+wrapped))
 			}
 		}
+		result = appendToolElapsedFooter(result, b)
+		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 
 	if expanded && strings.TrimSpace(b.ResultContent) != "" {
