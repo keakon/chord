@@ -2,9 +2,11 @@ package lsp
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/x/powernap/pkg/lsp/protocol"
 
@@ -280,7 +282,7 @@ func TestAppendLSPDiagnosticsToToolOutput_OtherFilesWithoutPrimaryHaveNoBlankLin
 func TestAppendLSPDiagnosticsToToolOutput_OtherFilesUseRelativeDisplayPaths(t *testing.T) {
 	tmp := t.TempDir()
 	mgr := NewManager(&config.Config{}, tmp, nil)
-	edited := filepath.Join(tmp, "edited.py")
+	edited := filepath.Join(tmp, "pkg", "edited.py")
 	other := filepath.Join(tmp, "pkg", "other.py")
 	mgr.clientsMu.Lock()
 	mgr.clients[testKey(mgr, "test")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
@@ -349,9 +351,10 @@ func countFormattedDiagnostics(s string) int {
 }
 
 func TestAppendLSPDiagnosticsToToolOutput_OtherFilesIncludeInfoHintsWhenSlotsAvailable(t *testing.T) {
-	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
-	edited := filepath.Join(t.TempDir(), "edited.py")
-	other := filepath.Join(t.TempDir(), "other.py")
+	tmp := t.TempDir()
+	mgr := NewManager(&config.Config{}, tmp, nil)
+	edited := filepath.Join(tmp, "edited.py")
+	other := filepath.Join(tmp, "other.py")
 	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, "")
 	if out != "ok" {
 		t.Fatalf("expected unchanged output when manager empty, got %q", out)
@@ -589,5 +592,126 @@ func TestDeduplicateDiagnosticsCollapsesSourcelessRoundTripCopy(t *testing.T) {
 	}
 	if diagnosticIdentityKey(original) != diagnosticIdentityKey(roundTripped) {
 		t.Fatal("comparison keys differ; unchanged diagnostics would be reported as new")
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPaths_OtherFileOutsidePrimaryDirAndUntouchedIsSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := NewManager(&config.Config{LSP: config.LSPConfig{
+		"gopls": {Command: "gopls", FileTypes: []string{".go"}},
+	}}, tmp, nil)
+	edited := filepath.Join(tmp, "pkg_a", "edited.go")
+	other := filepath.Join(tmp, "pkg_b", "other.go")
+	mgr.clientsMu.Lock()
+	mgr.clients[testKey(mgr, "gopls")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
+			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "unrelated package error"},
+		},
+	}}
+	mgr.clientsMu.Unlock()
+
+	// pkg_b/other.go is neither in the edited file's directory nor touched
+	// this session, so its cached diagnostic must not be attached: editing
+	// internal/agent must not surface diagnostics from internal/tui.
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	if strings.Contains(out, "unrelated package error") {
+		t.Fatalf("output = %q, want unrelated other-file diagnostic skipped", out)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPaths_ReportsEachDiagnosticOnce(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := NewManager(&config.Config{LSP: config.LSPConfig{
+		"gopls": {Command: "gopls", FileTypes: []string{".go"}},
+	}}, tmp, nil)
+	edited := filepath.Join(tmp, "edited.go")
+	other := filepath.Join(tmp, "other.go")
+	mgr.clientsMu.Lock()
+	mgr.clients[testKey(mgr, "gopls")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
+			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "cached error"},
+		},
+	}}
+	mgr.clientsMu.Unlock()
+
+	first := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	if !strings.Contains(first, "cached error") {
+		t.Fatalf("first output = %q, want cached other-file diagnostic attached", first)
+	}
+	second := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	if strings.Contains(second, "cached error") {
+		t.Fatalf("second output = %q, want repeated diagnostic suppressed", second)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPaths_ReportsAgainAfterCleanRepublish(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := NewManager(&config.Config{LSP: config.LSPConfig{
+		"gopls": {Command: "gopls", FileTypes: []string{".go"}},
+	}}, tmp, nil)
+	edited := filepath.Join(tmp, "edited.go")
+	other := filepath.Join(tmp, "other.go")
+	if err := os.WriteFile(other, []byte("package other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uri := protocol.DocumentURI("file://" + filepath.ToSlash(other))
+	mgr.clientsMu.Lock()
+	mgr.clients[testKey(mgr, "gopls")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+		uri: {
+			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "cached error"},
+		},
+	}}
+	mgr.clientsMu.Unlock()
+
+	first := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	if !strings.Contains(first, "cached error") {
+		t.Fatalf("first output = %q, want cached other-file diagnostic attached", first)
+	}
+	// The server republishes the file clean and later reports the same problem
+	// again. The client updates its cache before invoking the manager callback.
+	mgr.clientsMu.Lock()
+	client := mgr.clients[testKey(mgr, "gopls")]
+	mgr.clientsMu.Unlock()
+	client.diagnosticsMu.Lock()
+	client.diagnostics[uri] = nil
+	client.diagnosticsMu.Unlock()
+	publish := mgr.onDiagnostics(testKey(mgr, "gopls"))
+	publish("file://"+filepath.ToSlash(other), "", nil, 2)
+	reappeared := []protocol.Diagnostic{{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "cached error"}}
+	client.diagnosticsMu.Lock()
+	client.diagnostics[uri] = reappeared
+	client.diagnosticsMu.Unlock()
+	publish("file://"+filepath.ToSlash(other), "", reappeared, 3)
+	second := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	if !strings.Contains(second, "cached error") {
+		t.Fatalf("second output = %q, want diagnostic reported again after clean republish", second)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPaths_SkipsDiagnosticsForFileChangedOnDisk(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := NewManager(&config.Config{LSP: config.LSPConfig{
+		"gopls": {Command: "gopls", FileTypes: []string{".go"}},
+	}}, tmp, nil)
+	edited := filepath.Join(tmp, "edited.go")
+	other := filepath.Join(tmp, "other.go")
+	// Create the file and seed a different recorded mtime.
+	if err := os.WriteFile(other, []byte("package other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mgr.diagMu.Lock()
+	mgr.diagState[other] = diagnosticPathState{mtime: time.Now().Add(-time.Hour)}
+	mgr.diagMu.Unlock()
+	mgr.clientsMu.Lock()
+	mgr.clients[testKey(mgr, "gopls")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
+			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "cached error"},
+		},
+	}}
+	mgr.clientsMu.Unlock()
+
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	if strings.Contains(out, "cached error") {
+		t.Fatalf("output = %q, want stale diagnostic skipped for file changed on disk", out)
 	}
 }

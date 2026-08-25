@@ -146,12 +146,14 @@ func configureRuntimeStateProviders(ac *AppContext) {
 			}
 			ac.LSPManager.ResetTouched()
 			ac.LSPManager.ResetReviews()
+			ac.LSPManager.ResetReportedDiagnostics()
 			ac.MainAgent.NotifyEnvStatusUpdated()
 		},
 		func(msgs []message.Message) {
 			if ac.LSPManager == nil {
 				return
 			}
+			ac.LSPManager.RestoreReportedDiagnostics(lsp.RebuildReportedDiagnosticsFromMessages(msgs, ac.ProjectRoot))
 			ac.LSPManager.RebuildTouchedPaths(agent.RebuildTouchedPathsFromMessages(msgs, ac.ProjectRoot))
 			ac.LSPManager.RebuildReviewSnapshots(lsp.RebuildReviewSnapshotsFromMessages(msgs))
 			ac.MainAgent.NotifyEnvStatusUpdated()

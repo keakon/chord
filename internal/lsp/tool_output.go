@@ -101,8 +101,10 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 	var others []otherFileDiagnostics
 	if includeOtherFiles && remaining > 0 {
 		primary := make(map[string]struct{}, len(primaryPaths))
+		primaryDirs := make(map[string]struct{}, len(primaryPaths))
 		for _, path := range primaryPaths {
 			primary[path] = struct{}{}
+			primaryDirs[filepath.Dir(path)] = struct{}{}
 		}
 		paths := make([]string, 0, len(byPath))
 		for path := range byPath {
@@ -111,17 +113,9 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 			}
 		}
 		sortOtherFilePaths(paths, byPath)
-		for _, path := range paths {
-			if remaining <= 0 || len(others) >= ToolOutputMaxOtherErrorFiles {
-				break
-			}
-			selected, count := selectWithinRemaining(path, deduplicateDiagnostics(byPath[path]))
-			if len(selected) == 0 {
-				continue
-			}
-			others = append(others, otherFileDiagnostics{path: path, diags: selected})
-			omitted += count
-		}
+		var otherOmitted int
+		others, otherOmitted = m.reserveOtherFileDiagnostics(paths, byPath, primaryDirs, remaining)
+		omitted += otherOmitted
 	}
 
 	hasBlocks := len(others) > 0
@@ -330,16 +324,8 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 			otherPaths = append(otherPaths, p)
 		}
 		sortOtherFilePaths(otherPaths, byPath)
-		for _, p := range otherPaths {
-			if remaining <= 0 || len(others) >= ToolOutputMaxOtherErrorFiles {
-				break
-			}
-			selected := selectWithinRemaining(byPath[p], nil)
-			if len(selected) == 0 {
-				continue
-			}
-			others = append(others, otherFileDiagnostics{path: p, diags: selected})
-		}
+		primaryDirs := map[string]struct{}{filepath.Dir(edited): {}}
+		others, _ = m.reserveOtherFileDiagnostics(otherPaths, byPath, primaryDirs, remaining)
 	}
 	if len(primary) == 0 && len(others) == 0 {
 		return base
@@ -415,6 +401,24 @@ func diagnosticsOmittedLine(count int) string {
 type otherFileDiagnostics struct {
 	path  string
 	diags []Diagnostic
+}
+
+// remainBudgetLimited orders other-file diagnostics the same way primary-file
+// blocks are ordered (severity first, then position) and truncates them to the
+// remaining shared batch budget. Sorting unconditionally matters even when
+// everything fits: primary files always go through selectDiagnosticsByLimit,
+// so returning raw LSP publish order here would render the two sections of one
+// tool result under different orderings.
+func remainBudgetLimited(diags []Diagnostic, remaining int) []Diagnostic {
+	if remaining <= 0 {
+		return nil
+	}
+	sorted := append([]Diagnostic(nil), diags...)
+	sort.SliceStable(sorted, func(i, j int) bool { return diagnosticLess(sorted[i], sorted[j]) })
+	if len(sorted) <= remaining {
+		return sorted
+	}
+	return appendLimitedDiagnosticsByPriority(nil, sorted, remaining)
 }
 
 // otherFilesDiagnosticsHeader labels the non-primary-file section; the

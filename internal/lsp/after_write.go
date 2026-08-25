@@ -85,10 +85,11 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 
 	// Register the waiter BEFORE sending didChange so we cannot miss a fast response.
 	waiterCh := m.PrepareWaiter(absPath)
-	after := time.Now()
 	if err := afterWriteNotifyWatchedFileChanged(m, ctx, absPath, changeType); err != nil {
 		m.logLSPServiceNote(absPath, "Failed to notify language server about workspace file change: "+err.Error())
 	}
+	after := time.Now()
+	syncToken := m.beginDiagnosticsSync(absPath)
 	serverVersions, err := afterWriteDidChange(m, ctx, absPath, content)
 	if err != nil {
 		m.logLSPServiceNote(absPath, "Failed to sync buffer to language server: "+err.Error())
@@ -100,6 +101,9 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 	}
 
 	_, notified := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, diagnosticsWaitRequest{serverVersions: serverVersions, after: after}, waitTimeout)
+	if err == nil && notified {
+		m.confirmDiagnosticsSync(syncToken)
+	}
 	if !notified && ctx.Err() == nil {
 		// Keep diagnostics wait timeouts out of the tool output so the model only sees
 		// actionable diagnostics; log the timeout for troubleshooting instead.

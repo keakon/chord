@@ -105,6 +105,22 @@ type Manager struct {
 	diagByServer   map[clientKey]map[string]diagCounts
 	reviewByServer map[string]map[string]reviewCounts
 
+	// diagState records the on-disk freshness state for each path's published
+	// diagnostics. A stale path remains suppressed until Chord synchronizes it
+	// or all language servers publish it clean.
+	diagState map[string]diagnosticPathState
+
+	// publishedDiagByServer tracks the latest diagnostic identities for each
+	// server and path. It lets a clean publish from one server avoid clearing
+	// suppression while another server still reports the path.
+	publishedDiagByServer map[clientKey]map[string]map[diagnosticIdentity]struct{}
+
+	// reportedByPath tracks other-file diagnostics already appended to tool
+	// output this session, keyed by diagnostic identity. Only unreported
+	// diagnostics are attached again. An identity is removed after it disappears
+	// from every server's published set, so a real regression is reported again.
+	reportedByPath map[string]map[diagnosticIdentity]struct{}
+
 	// touchedPaths tracks files modified by successful Write/Edit calls in the current
 	// session. Successful Delete removes a file from this set.
 	touchedMu    sync.RWMutex
@@ -117,6 +133,12 @@ type diagCounts struct {
 	warnings int
 }
 
+type diagnosticPathState struct {
+	mtime      time.Time
+	stale      bool
+	generation uint64
+}
+
 // NewManager creates a manager. broadcast is called when diagnostics are received.
 // If cfg.LSP is nil or empty, no LSPs are started.
 func NewManager(cfg *config.Config, projectRoot string, broadcast BroadcastFunc) *Manager {
@@ -124,16 +146,19 @@ func NewManager(cfg *config.Config, projectRoot string, broadcast BroadcastFunc)
 		broadcast = func(string, any) {}
 	}
 	return &Manager{
-		projectRoot:    projectRoot,
-		cfg:            cfg,
-		broadcast:      broadcast,
-		clients:        make(map[clientKey]*Client),
-		starting:       make(map[clientKey]bool),
-		waiters:        make(map[string][]chan diagnosticsEvent),
-		startFail:      make(map[clientKey]string),
-		diagByServer:   make(map[clientKey]map[string]diagCounts),
-		reviewByServer: make(map[string]map[string]reviewCounts),
-		touchedPaths:   make(map[string]struct{}),
+		projectRoot:           projectRoot,
+		cfg:                   cfg,
+		broadcast:             broadcast,
+		clients:               make(map[clientKey]*Client),
+		starting:              make(map[clientKey]bool),
+		waiters:               make(map[string][]chan diagnosticsEvent),
+		startFail:             make(map[clientKey]string),
+		diagByServer:          make(map[clientKey]map[string]diagCounts),
+		reviewByServer:        make(map[string]map[string]reviewCounts),
+		diagState:             make(map[string]diagnosticPathState),
+		publishedDiagByServer: make(map[clientKey]map[string]map[diagnosticIdentity]struct{}),
+		reportedByPath:        make(map[string]map[diagnosticIdentity]struct{}),
+		touchedPaths:          make(map[string]struct{}),
 	}
 }
 
@@ -181,6 +206,7 @@ func (m *Manager) onDiagnostics(key clientKey) func(uri string, _ string, diags 
 			}
 			byURI[uri] = diagCounts{errors: errs, warnings: warns}
 		}
+		m.updateDiagnosticOutputStateLocked(key, path, chordDiags)
 		if byPath := m.reviewByServer[key.name]; byPath != nil {
 			if reviewed, ok := byPath[path]; ok {
 				latest := m.reviewCountsForPathLocked(key.name, path)
@@ -627,6 +653,7 @@ func (m *Manager) dropOrphanedDiagnostics(survivors map[string][]*Client) (clear
 					continue
 				}
 				delete(byURI, uri)
+				m.updateDiagnosticOutputStateLocked(key, normalizeWaiterPath(path), nil)
 				cleared = append(cleared, clearedDiag{server: name, uri: uri})
 				if byPath := m.reviewByServer[name]; byPath != nil {
 					delete(byPath, normalizeWaiterPath(path))
@@ -945,6 +972,7 @@ func (m *Manager) DidCloseErr(ctx context.Context, path string) error {
 				}
 			}
 		}
+		m.updateDiagnosticOutputStateLocked(e.key, path, nil)
 		m.diagMu.Unlock()
 		if m.broadcast != nil {
 			m.broadcast(TypeLSPDiagnostics, DiagnosticsPayload{URI: uri, ServerID: e.key.name, Diagnostics: nil})
