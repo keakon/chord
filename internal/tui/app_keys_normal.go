@@ -232,7 +232,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 			m.viewport.ToggleBlockAtOffset()
 		}
 		if m.focusedBlockID >= 0 {
-			if block := m.viewport.GetFocusedBlock(m.focusedBlockID); block != nil {
+			if block := m.viewport.GetFocusedBlock(m.focusedBlockID); block != nil && m.viewport.FocusedBlockIsVisible(m.focusedBlockID) {
 				m.recordTUIDiagnostic("toggle-block", "block=%d type=%s collapsed=%t detail_expanded=%t linked_agent=%q", block.ID, debugBlockTypeString(block.Type), block.Collapsed, block.ToolCallDetailExpanded, block.LinkedAgentID)
 				// For linked Delegate blocks, Enter jumps to the worker view while space/o
 				// keep the normal expand/collapse behavior.

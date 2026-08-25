@@ -169,6 +169,67 @@ func TestViewportRenderIgnoresStaleBlockPositionCacheVersion(t *testing.T) {
 	}
 }
 
+func TestToggleBlockBumpsRenderVersion(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	v := NewViewport(80, 12)
+	block := &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameShell, Content: `{"command":"echo first"}`, ResultContent: "first", ResultDone: true, Collapsed: true}
+	v.AppendBlock(block)
+
+	// The model-level main-area cache key includes RenderVersion; a toggle that
+	// invalidates block caches and changes the line count must advance it, or
+	// the collapsed/expanded switch is not picked up until the next scroll.
+	before := v.RenderVersion()
+	v.ToggleBlockAtOffset()
+	if got := v.RenderVersion(); got != before+1 {
+		t.Fatalf("ToggleBlockAtOffset render version = %d, want %d", got, before+1)
+	}
+	before = v.RenderVersion()
+	v.ToggleBlockByID(block.ID)
+	if got := v.RenderVersion(); got != before+1 {
+		t.Fatalf("ToggleBlockByID render version = %d, want %d", got, before+1)
+	}
+}
+
+func TestToggleNoOpDoesNotBumpRenderVersion(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	tests := []struct {
+		name  string
+		block *Block
+	}{
+		{
+			name:  "delete",
+			block: &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameDelete, ResultDone: true},
+		},
+		{
+			name:  "question",
+			block: &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameQuestion, ResultDone: true},
+		},
+		{
+			name:  "compaction summary",
+			block: &Block{ID: 1, Type: BlockCompactionSummary, Content: "summary"},
+		},
+		{
+			name:  "grep without expandable result",
+			block: &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameGrep, ResultDone: true, ResultContent: "No matches found."},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := NewViewport(80, 12)
+			v.AppendBlock(tt.block)
+			before := v.RenderVersion()
+			v.ToggleBlockAtOffset()
+			if got := v.RenderVersion(); got != before {
+				t.Fatalf("ToggleBlockAtOffset render version = %d, want unchanged %d", got, before)
+			}
+			v.ToggleBlockByID(tt.block.ID)
+			if got := v.RenderVersion(); got != before {
+				t.Fatalf("ToggleBlockByID render version = %d, want unchanged %d", got, before)
+			}
+		})
+	}
+}
+
 func TestVisibleBlocksCacheInvalidatesOnMutationAndFilterChange(t *testing.T) {
 	v := NewViewport(80, 12)
 	mainBlock := &Block{ID: 1, Type: BlockAssistant, Content: "main"}

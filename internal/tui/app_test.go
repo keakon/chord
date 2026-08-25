@@ -5289,6 +5289,128 @@ func TestToggleCollapseFallsBackToBlockAtOffsetWhenFocusedBlockIsStale(t *testin
 	}
 }
 
+func TestToggleCollapseFallsBackToBlockAtOffsetWhenFocusedBlockScrolledOutOfView(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 12)
+	m.mode = ModeNormal
+
+	focused := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "shell",
+		Content:       `{"command":"echo first"}`,
+		ResultContent: "first",
+		ResultDone:    true,
+		Collapsed:     true,
+	}
+	visible := &Block{
+		ID:            2,
+		Type:          BlockToolCall,
+		ToolName:      "shell",
+		Content:       `{"command":"echo second"}`,
+		ResultContent: "second",
+		ResultDone:    true,
+		Collapsed:     true,
+	}
+	m.viewport.AppendBlock(focused)
+	m.viewport.AppendBlock(visible)
+	m.recalcViewportSize()
+	m.viewport.recalcTotalLines()
+
+	// Simulate mouse-wheel scroll: offset moves past the focused block while
+	// the focused block stays focused (mouse wheel does not clear focus).
+	m.focusedBlockID = focused.ID
+	focused.Focused = true
+	if start, ok := m.viewport.LineOffsetForBlockID(focused.ID); !ok {
+		t.Fatal("expected line offset for focused block")
+	} else {
+		// Scroll past the focused block so it leaves the window entirely.
+		m.viewport.offset = start + m.viewport.blockSpanLines(m.viewport.GetFocusedBlock(focused.ID))
+		m.viewport.clampOffset()
+	}
+
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace}))
+
+	// The focused block scrolled out of view: Space must fall back to the
+	// visible block at the current offset instead of folding an off-screen one.
+	if m.focusedBlockID != -1 {
+		t.Fatalf("focusedBlockID after out-of-view toggle fallback = %d, want -1", m.focusedBlockID)
+	}
+	if focused.ToolCallDetailExpanded {
+		t.Fatal("off-screen focused block must not be toggled")
+	}
+	if !visible.ToolCallDetailExpanded {
+		t.Fatal("visible block at offset should be toggled by the Space fallback")
+	}
+}
+
+func TestToggleCollapseActsOnFocusedBlockWhenStillVisible(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 12)
+	m.mode = ModeNormal
+
+	focused := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "shell",
+		Content:                `{"command":"echo first"}`,
+		ResultContent:          "first",
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+	}
+	m.viewport.AppendBlock(focused)
+	m.recalcViewportSize()
+	m.viewport.recalcTotalLines()
+	m.focusedBlockID = focused.ID
+	focused.Focused = true
+
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace}))
+
+	if m.focusedBlockID != focused.ID {
+		t.Fatalf("focusedBlockID = %d, want %d", m.focusedBlockID, focused.ID)
+	}
+	if !focused.ToolCallDetailExpanded {
+		t.Fatal("focused visible block should be expanded by Space")
+	}
+}
+
+func TestSpaceToggleInvalidatesMainRenderCache(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 24)
+	m.mode = ModeNormal
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "shell",
+		Content:       `{"command":"echo first"}`,
+		ResultContent: "first",
+		ResultDone:    true,
+		Collapsed:     true,
+	}
+	m.viewport.AppendBlock(block)
+	m.recalcViewportSize()
+
+	// Space without a focused block toggles the card under the current offset.
+	// The main-area draw cache is keyed on mainRenderKey (which includes the
+	// viewport render version); without a version bump after the toggle the
+	// cached frame is reused and the change only becomes visible after a scroll.
+	keyBefore := m.mainRenderKey(ModeNormal, 100)
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace}))
+	keyAfter := m.mainRenderKey(ModeNormal, 100)
+	if keyBefore == keyAfter {
+		t.Fatal("Space toggle left mainRenderKey unchanged; cached main frame would be reused until a scroll changes the offset")
+	}
+	if !block.ToolCallDetailExpanded {
+		t.Fatal("Space should expand the shell card (ToolCallDetailExpanded)")
+	}
+	// Toggling again must advance the render version once more (two-way switch).
+	keyAfterFirst := keyAfter
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace}))
+	if got := m.mainRenderKey(ModeNormal, 100); got == keyAfterFirst {
+		t.Fatal("second Space toggle left mainRenderKey unchanged")
+	}
+	if block.ToolCallDetailExpanded {
+		t.Fatal("second Space should collapse the shell card again")
+	}
+}
+
 func TestHandleNormalKeySpaceTogglesLinkedTaskCardWithoutSwitchingFocus(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 100, 24)

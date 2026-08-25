@@ -170,9 +170,14 @@ func (b *Block) searchResultCanExpand() bool {
 	}
 	switch tools.NormalizeName(b.ToolName) {
 	case tools.NameGrep:
-		return parseGrepResultMeta(b.ResultContent).HasDetails
+		meta := parseGrepResultMeta(b.ResultContent)
+		if meta.NoMatches {
+			return false
+		}
+		return meta.Matches > 1 || meta.Fallback || meta.Truncated || meta.Skipped > 0
 	case tools.NameGlob:
-		return parseGlobResultMeta(b.ResultContent).HasDetails
+		meta := parseGlobResultMeta(b.ResultContent)
+		return meta.Files > 1 || meta.Truncated || meta.Artifact != ""
 	default:
 		return false
 	}

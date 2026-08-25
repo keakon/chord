@@ -266,38 +266,44 @@ func (b *Block) Toggle() {
 	b.ToggleAtWidth(0)
 }
 
-func (b *Block) ToggleAtWidth(width int) {
+func (b *Block) ToggleAtWidth(width int) bool {
 	switch b.Type {
 	case BlockUser:
 		if b.UserLocalShellCmd != "" && !b.UserLocalShellPending && strings.TrimSpace(b.UserLocalShellResult) != "" {
 			b.Collapsed = !b.Collapsed
 			b.InvalidateCache()
+			return true
 		}
 	case BlockToolCall, BlockToolResult:
+		// Delete and Question cards keep their full content visible; the
+		// disclosure hint only means the card can be expanded or collapsed.
+		if b.Type == BlockToolCall && (b.ToolName == tools.NameDelete || b.ToolName == tools.NameQuestion) {
+			return false
+		}
 		if b.Type == BlockToolCall && (b.ToolName == tools.NameWrite || b.ToolName == tools.NameRead) {
 			b.Collapsed = !b.Collapsed
 			b.InvalidateCache()
-			return
+			return true
 		}
 		if b.Type == BlockToolCall && toolUsesCompactDetailToggle(b.ToolName) {
+			if (b.ToolName == tools.NameGrep || b.ToolName == tools.NameGlob) && !b.searchResultCanExpand() {
+				return false
+			}
 			if b.ToolCallDetailExpanded && width > 0 && b.compactToolResultForceExpandedForRenderWidth(width) {
-				return
+				return false
 			}
 			b.ToolCallDetailExpanded = !b.ToolCallDetailExpanded
 			b.InvalidateCache()
-			return
-		}
-		if b.Type == BlockToolResult {
-			b.Collapsed = !b.Collapsed
-			b.InvalidateCache()
-			return
+			return true
 		}
 		b.Collapsed = !b.Collapsed
 		b.InvalidateCache()
+		return true
 	case BlockAssistant:
 		if len(b.ThinkingParts) > 0 {
 			b.ThinkingCollapsed = !b.ThinkingCollapsed
 			b.InvalidateCache()
+			return true
 		}
 	case BlockCompactionSummary:
 		b.Collapsed = !b.Collapsed
@@ -306,6 +312,7 @@ func (b *Block) ToggleAtWidth(width int) {
 		}
 		b.InvalidateCache()
 	}
+	return false
 }
 
 // InvalidateCache clears render caches that must be recomputed after content

@@ -73,7 +73,14 @@ func (v *Viewport) PrevMessageBoundary() {
 func (v *Viewport) ToggleBlockAtOffset() {
 	block := v.GetBlockAtOffset()
 	if block != nil {
-		block.ToggleAtWidth(v.width)
+		if !block.ToggleAtWidth(v.width) {
+			return
+		}
+		// Toggling changes the block's rendered line count and invalidates its
+		// line/viewport caches. renderVersion must advance so the model-level
+		// main-area cache key changes; otherwise the collapsed/expanded switch
+		// is only picked up on the next scroll that changes the offset.
+		v.bumpRenderVersion()
 		v.markHotBudgetDirty()
 		v.recalcTotalLines()
 		v.clampOffset()
@@ -85,7 +92,10 @@ func (v *Viewport) ToggleBlockByID(id int) {
 	for _, block := range v.blocks {
 		if block.ID == id {
 			block = v.materialize(block)
-			block.ToggleAtWidth(v.width)
+			if !block.ToggleAtWidth(v.width) {
+				return
+			}
+			v.bumpRenderVersion()
 			v.markHotBudgetDirty()
 			v.recalcTotalLines()
 			v.clampOffset()
@@ -93,6 +103,36 @@ func (v *Viewport) ToggleBlockByID(id int) {
 			return
 		}
 	}
+}
+
+// FocusedBlockIsVisible reports whether the block with the given ID falls
+// inside the current scroll window. After a mouse-wheel scroll the focused
+// block may still exist in the transcript while having scrolled out of view;
+// key handlers that act on the focused block should fall back to the block at
+// the current offset in that case instead of acting on an off-screen card.
+func (v *Viewport) FocusedBlockIsVisible(id int) bool {
+	if id < 0 || v == nil {
+		return false
+	}
+	start, ok := v.LineOffsetForBlockID(id)
+	if !ok {
+		return false
+	}
+	block := v.blockForID(id)
+	if block == nil {
+		return false
+	}
+	end := start + v.blockSpanLines(v.materialize(block))
+	return start < v.offset+v.height && end > v.offset
+}
+
+func (v *Viewport) blockForID(id int) *Block {
+	for _, block := range v.blocks {
+		if block != nil && block.ID == id {
+			return block
+		}
+	}
+	return nil
 }
 
 // GetBlockAtOffset returns the block that contains the current scroll offset line, or nil.
