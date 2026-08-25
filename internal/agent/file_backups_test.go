@@ -124,6 +124,9 @@ func TestBackupNotesAreIdenticalForModelAndUser(t *testing.T) {
 	if got := backupPathsFromResult(created); len(got) != 1 || got[0] != backupPath {
 		t.Fatalf("backupPathsFromResult = %#v, want [%q]", got, backupPath)
 	}
+	if strings.Contains(created, "Backup saved for:") {
+		t.Fatalf("a record without a source path must not claim one: %q", created)
+	}
 
 	failed := appendBackupNotes("updated", tools.NameEdit, true, 1, fileBackupOutcome{})
 	if strings.Contains(failed, "Backup") {
@@ -136,6 +139,48 @@ func TestBackupNotesAreIdenticalForModelAndUser(t *testing.T) {
 
 // write replaces the whole file with no anchors to re-check, so its warning
 // must not borrow edit/apply_patch's "validated current contents" wording.
+// A multi-file tool call backs up one snapshot per touched file. The result
+// must state each source file explicitly so the reader is not left to infer
+// the mapping from output order or the backup filename.
+func TestBackupNotesForMultiFileMutationStatePerSourcePerPath(t *testing.T) {
+	sources := []string{
+		filepath.Join("workspace", "src", "a.go"),
+		filepath.Join("workspace", "tests", "a.go"),
+	}
+	// Deliberately reversed vs. the sources slice to prove the two lists are
+	// not correlated by position alone.
+	backups := []string{
+		filepath.Join("session", "backups", "111", "000000000001-before-apply_patch-a.go"),
+		filepath.Join("session", "backups", "222", "000000000002-before-apply_patch-a.go"),
+	}
+	notes := appendBackupNotes("updated", tools.NameApplyPatch, true, 2, fileBackupOutcome{
+		Records: []fileBackupRecord{
+			{SourcePath: sources[0], Path: backups[0]},
+			{SourcePath: sources[1], Path: backups[1]},
+		},
+	})
+
+	gotSources := backupSourcesFromResult(notes)
+	gotPaths := backupPathsFromResult(notes)
+	if len(gotSources) != 2 || len(gotPaths) != 2 {
+		t.Fatalf("backup notes partition = sources %#v paths %#v", gotSources, gotPaths)
+	}
+	for i, source := range sources {
+		if !strings.Contains(notes, "Backup saved for: "+source) {
+			t.Fatalf("notes missing source %q:\n%s", source, notes)
+		}
+		if !strings.Contains(notes, "Backup saved to: "+backups[i]) {
+			t.Fatalf("notes missing backup %q:\n%s", backups[i], notes)
+		}
+	}
+	// The mapping must be one-to-one per record, not a header followed by a
+	// concatenated list: the two source lines precede the two backup lines.
+	if gotSources[0] != sources[0] || gotSources[1] != sources[1] ||
+		gotPaths[0] != backups[0] || gotPaths[1] != backups[1] {
+		t.Fatalf("backup notes order wrong: sources %#v paths %#v", gotSources, gotPaths)
+	}
+}
+
 func TestWriteBackupNoteDoesNotClaimValidation(t *testing.T) {
 	note := appendBackupNotes("wrote 1 line", tools.NameWrite, true, 1, fileBackupOutcome{})
 	if strings.Contains(note, "validated") {
@@ -159,6 +204,20 @@ func backupPathsFromResult(result string) []string {
 		}
 	}
 	return paths
+}
+
+// backupSourcesFromResult extracts the workspace files a tool result's backup
+// notes attribute to each backup, in emission order. Stale snapshots are
+// backed up one record per touched file, so the mapping source->backup is
+// explicit rather than inferred from order or filename.
+func backupSourcesFromResult(result string) []string {
+	var sources []string
+	for line := range strings.SplitSeq(result, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "Backup saved for: "); ok {
+			sources = append(sources, rest)
+		}
+	}
+	return sources
 }
 
 // A stale write whose path is a symlink must not copy the link target into the

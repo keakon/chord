@@ -30,8 +30,13 @@ type fileBackupManager struct {
 }
 
 type fileBackupRecord struct {
-	Path string
-	Size int64
+	// SourcePath is the workspace file the backup snapshot belongs to. A
+	// multi-file tool call (apply_patch) produces one record per stale file,
+	// so the result text must state the mapping instead of leaving users to
+	// infer it from output order or the backup filename.
+	SourcePath string
+	Path       string
+	Size       int64
 }
 
 // fileBackupSource is one pre-execution file snapshot eligible for backup.
@@ -164,7 +169,7 @@ func (m *fileBackupManager) Backup(path, toolName string, data []byte) (fileBack
 	}
 	m.byPath[key] = append(m.byPath[key], backupPath)
 	m.pruneLocked(key)
-	return fileBackupRecord{Path: backupPath, Size: int64(len(data))}, nil
+	return fileBackupRecord{SourcePath: rawKey, Path: backupPath, Size: int64(len(data))}, nil
 }
 
 func (m *fileBackupManager) pruneLocked(key string) {
@@ -259,9 +264,13 @@ func appendBackupNotes(result, toolName string, stale bool, stalePaths int, outc
 		}
 	}
 	for _, backup := range outcome.Records {
-		if strings.TrimSpace(backup.Path) != "" {
-			notes = append(notes, "Backup saved to: "+backup.Path)
+		if strings.TrimSpace(backup.Path) == "" {
+			continue
 		}
+		if source := strings.TrimSpace(backup.SourcePath); source != "" {
+			notes = append(notes, "Backup saved for: "+source)
+		}
+		notes = append(notes, "Backup saved to: "+backup.Path)
 	}
 	if len(notes) == 0 {
 		return result
