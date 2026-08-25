@@ -563,11 +563,11 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 			return ""
 		}
 		var opts []string
-		if v := vals["limit"]; v != "" && v != "0" {
-			opts = append(opts, "limit="+v)
-		}
 		if v := vals["offset"]; v != "" && v != "0" {
 			opts = append(opts, "offset="+v)
+		}
+		if v := vals["limit"]; v != "" && v != "0" {
+			opts = append(opts, "limit="+v)
 		}
 		if len(opts) == 0 {
 			return path
@@ -617,11 +617,11 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 			return ""
 		}
 		var opts []string
-		if v := vals["limit"]; v != "" && v != "0" {
-			opts = append(opts, "limit="+v)
-		}
 		if v := vals["offset"]; v != "" && v != "0" {
 			opts = append(opts, "offset="+v)
+		}
+		if v := vals["limit"]; v != "" && v != "0" {
+			opts = append(opts, "limit="+v)
 		}
 		if len(opts) == 0 {
 			return path
