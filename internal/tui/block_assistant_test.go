@@ -357,6 +357,74 @@ func TestRenderAssistantSanitizesControlCharacters(t *testing.T) {
 	}
 }
 
+// TestRenderStreamingAssistantSanitizesControlCharacters covers the streaming
+// tail path, which wraps unsettled content directly instead of routing it
+// through the markdown renderer. Provider output can carry real terminal
+// control sequences (cursor moves like ESC [ 1 ; 1 H, BEL, NUL) that must be
+// escaped to literals before they reach the card ANSI surface; the settled
+// prefix above the frontier is already sanitized by renderAssistantMarkdownContent.
+func TestRenderStreamingAssistantSanitizesControlCharacters(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	content := "first paragraph\n\nsecond \x00\x17\x07NWNW\x1b[1;1H tail"
+	block := &Block{Type: BlockAssistant, Content: content, Streaming: true}
+	raw := strings.Join(block.Render(120, ""), "\n")
+	if strings.Contains(raw, "\x1b[1;1H") {
+		t.Fatalf("streaming assistant render leaked raw CSI sequence: %q", raw)
+	}
+	plain := strings.Join(stripANSILines(block.Render(120, "")), "\n")
+	if !strings.Contains(plain, `\x00\x17\aNWNW`) {
+		t.Fatalf("streaming assistant should escape control characters as literals, got %q", plain)
+	}
+	if !strings.Contains(plain, `\x1b[1;1H`) {
+		t.Fatalf("streaming assistant should show CSI sequences as literal text, got %q", plain)
+	}
+}
+
+// TestRenderStreamingThinkingSanitizesControlCharacters covers the streaming
+// thinking tail, which has no settled frontier until a blank line arrives, so
+// the whole part goes through the raw tail path.
+func TestRenderStreamingThinkingSanitizesControlCharacters(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	content := "thinking \x00\x17\x07\x1b[1;1H tail"
+	block := &Block{Type: BlockThinking, Content: content, Streaming: true}
+	raw := strings.Join(block.Render(120, ""), "\n")
+	if strings.Contains(raw, "\x1b[1;1H") {
+		t.Fatalf("streaming thinking render leaked raw CSI sequence: %q", raw)
+	}
+	plain := strings.Join(stripANSILines(block.Render(120, "")), "\n")
+	if !strings.Contains(plain, `\x00\x17\a`) {
+		t.Fatalf("streaming thinking should escape control characters as literals, got %q", plain)
+	}
+	if !strings.Contains(plain, `\x1b[1;1H`) {
+		t.Fatalf("streaming thinking should show CSI sequences as literal text, got %q", plain)
+	}
+}
+
+func TestRenderStreamingAssistantScreenBufferHasNoControlCells(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		Type:      BlockAssistant,
+		Streaming: true,
+		Content:   "reply \x1b[1;1H\x00\x9b31m",
+	}
+	lines := block.Render(80, "")
+	width := 0
+	for _, line := range lines {
+		width = max(width, ansi.StringWidth(line))
+	}
+	buf := newScreenBuffer(width, len(lines))
+	for y, line := range lines {
+		uv.NewStyledString(line).Draw(buf, uv.Rect(0, y, width, y+1))
+	}
+	for y, line := range buf.Lines {
+		for x, cell := range line {
+			if strings.ContainsRune(cell.Content, '\x1b') || strings.ContainsRune(cell.Content, '\x00') || strings.ContainsRune(cell.Content, rune(0x9b)) {
+				t.Fatalf("screen cell[%d,%d] retained control content %q", x, y, cell.Content)
+			}
+		}
+	}
+}
+
 func TestSettledAssistantInvisibleContentRendersNoCard(t *testing.T) {
 	for _, content := range []string{"", " \n", "\u200b\u200b", "\ufeff", "\u200d"} {
 		block := &Block{ID: 1, Type: BlockAssistant, Content: content}

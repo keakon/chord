@@ -237,7 +237,7 @@ func backgroundResultErrorDetail(status string) string {
 func (b *Block) renderBackgroundResult(width int) []string {
 	metrics := newToolCardMetrics(width)
 	body := make([]string, 0, 8)
-	contentLines := strings.Split(strings.TrimSpace(b.Content), "\n")
+	contentLines := strings.Split(strings.TrimSpace(sanitizeDisplayText(b.Content)), "\n")
 	for i := range len(contentLines) {
 		line := contentLines[i]
 		trimmed := strings.TrimSpace(line)

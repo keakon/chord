@@ -9,7 +9,7 @@ func (b *Block) renderError(width int) []string {
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	lines := []string{ErrorStyle.Render(blockLabelWithID("ERROR", b.displayLabelID())), ""}
-	wrapped := wrapText(b.Content, innerWidth)
+	wrapped := wrapText(sanitizeDisplayText(b.Content), innerWidth)
 	for i, line := range wrapped {
 		if i == 0 {
 			lines = append(lines, ErrorStyle.Render("✗ "+line))
@@ -23,7 +23,7 @@ func (b *Block) renderError(width int) []string {
 	if b.errorHint != "" {
 		// The error panel holds the structured details (provider, model, masked
 		// key, status code, retry history) this card intentionally omits.
-		lines = append(lines, "", DimStyle.Render(b.errorHint))
+		lines = append(lines, "", DimStyle.Render(sanitizeDisplayText(b.errorHint)))
 	}
 
 	cardBg := currentTheme.ErrorCardBg
@@ -41,11 +41,11 @@ func (b *Block) renderStatus(width int) []string {
 	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := min(innerWidth-2, maxProseWidth)
 
-	title := b.StatusTitle
+	title := sanitizeDisplayText(b.StatusTitle)
 	if title == "" {
 		// Fallback: extract title from first line of Content (session restore).
 		if idx := strings.Index(b.Content, "\n"); idx >= 0 {
-			title = strings.TrimSpace(b.Content[:idx])
+			title = strings.TrimSpace(sanitizeDisplayText(b.Content[:idx]))
 		}
 	}
 	label := ThinkingLabelStyle.Render(blockLabelWithID(title, b.displayLabelID()))
@@ -73,7 +73,7 @@ func (b *Block) renderBoundaryMarker(width int) []string {
 	if content == "" {
 		content = "History truncated"
 	}
-	marker := "··· " + content + " ···"
+	marker := "··· " + sanitizeDisplayText(content) + " ···"
 	lines := wrapText(marker, width)
 	for i, line := range lines {
 		styled := DimStyle.Render(line)

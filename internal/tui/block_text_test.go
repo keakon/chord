@@ -169,6 +169,17 @@ func TestSanitizeDisplayTextEscapesRawControlCharacters(t *testing.T) {
 	}
 }
 
+func TestSanitizeDisplayTextEscapesC1ControlCharacters(t *testing.T) {
+	input := "raw " + string([]byte{0x9b}) + " and utf8 " + string(rune(0x9b))
+	got := sanitizeDisplayText(input)
+	if strings.ContainsRune(got, rune(0x9b)) {
+		t.Fatalf("sanitized text leaked C1 control character: %q", got)
+	}
+	if strings.Count(got, `\x9b`) != 2 {
+		t.Fatalf("sanitized text should contain two escaped C1 controls, got %q", got)
+	}
+}
+
 func TestRenderUserPlainSanitizesControlCharacters(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{ID: 1, Type: BlockUser, Content: "default <nil> map[s:a\x01b]"}

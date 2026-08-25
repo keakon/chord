@@ -270,12 +270,25 @@ func sanitizeDisplayText(s string) string {
 		return ""
 	}
 	needsSanitization := false
-	for i := 0; i < len(s); i++ {
+	for i := 0; i < len(s); {
 		c := s[i]
 		if c == '\r' || ((c < 0x20 && c != '\t' && c != '\n') || c == 0x7f) {
 			needsSanitization = true
 			break
 		}
+		if c < utf8.RuneSelf {
+			i++
+			continue
+		}
+		if _, _, ok := c1ControlLiteral(s[i:]); ok {
+			needsSanitization = true
+			break
+		}
+		_, size := utf8.DecodeRuneInString(s[i:])
+		if size <= 0 {
+			size = 1
+		}
+		i += size
 	}
 	if !needsSanitization {
 		return s
@@ -283,23 +296,64 @@ func sanitizeDisplayText(s string) string {
 
 	var b strings.Builder
 	b.Grow(len(s))
-	for i := 0; i < len(s); i++ {
+	for i := 0; i < len(s); {
 		c := s[i]
 		switch {
 		case c == '\r':
 			if i+1 < len(s) && s[i+1] == '\n' {
+				i++
 				continue
 			}
 			b.WriteString(`\r`)
+			i++
 		case c == '\t' || c == '\n':
 			b.WriteByte(c)
+			i++
 		case c < 0x20 || c == 0x7f:
 			b.WriteString(displayControlLiteral(c))
+			i++
 		default:
-			b.WriteByte(c)
+			if c == '\x1b' {
+				b.WriteString(displayControlLiteral(c))
+				i++
+				continue
+			}
+			if c < utf8.RuneSelf {
+				b.WriteByte(c)
+				i++
+				continue
+			}
+			if literal, size, ok := c1ControlLiteral(s[i:]); ok {
+				b.WriteString(literal)
+				i += size
+				continue
+			}
+			_, size := utf8.DecodeRuneInString(s[i:])
+			if size <= 0 {
+				size = 1
+			}
+			b.WriteString(s[i : i+size])
+			i += size
 		}
 	}
 	return b.String()
+}
+
+// c1ControlLiteral recognizes both UTF-8 encoded C1 controls and raw C1
+// bytes in otherwise invalid input. Valid UTF-8 continuation bytes must not be
+// treated as controls individually, so callers invoke this at rune boundaries.
+func c1ControlLiteral(s string) (literal string, size int, ok bool) {
+	if s == "" {
+		return "", 0, false
+	}
+	r, size := utf8.DecodeRuneInString(s)
+	if r == utf8.RuneError && size == 1 && s[0] >= 0x80 && s[0] <= 0x9f {
+		return fmt.Sprintf(`\x%02x`, s[0]), 1, true
+	}
+	if r < 0x80 || r > 0x9f {
+		return "", 0, false
+	}
+	return fmt.Sprintf(`\x%02x`, r), size, true
 }
 
 func displayControlLiteral(c byte) string {
@@ -343,36 +397,70 @@ func sanitizeDisplayTextKeepingSGR(s string) string {
 		switch {
 		case c == '\r':
 			if i+1 < len(s) && s[i+1] == '\n' {
-				i += 2
+				i++
 				continue
 			}
 			b.WriteString(`\r`)
+			i++
 		case c == '\t' || c == '\n':
 			b.WriteByte(c)
+			i++
 		case c < 0x20 || c == 0x7f:
 			b.WriteString(displayControlLiteral(c))
+			i++
 		default:
-			b.WriteByte(c)
+			if c == '\x1b' {
+				b.WriteString(displayControlLiteral(c))
+				i++
+				continue
+			}
+			if c < utf8.RuneSelf {
+				b.WriteByte(c)
+				i++
+				continue
+			}
+			if literal, size, ok := c1ControlLiteral(s[i:]); ok {
+				b.WriteString(literal)
+				i += size
+				continue
+			}
+			_, size := utf8.DecodeRuneInString(s[i:])
+			if size <= 0 {
+				size = 1
+			}
+			b.WriteString(s[i : i+size])
+			i += size
 		}
-		i++
 	}
 	return b.String()
 }
 
 func displayNeedsSGRAwareSanitize(s string) bool {
-	for i := 0; i < len(s); i++ {
+	for i := 0; i < len(s); {
 		c := s[i]
 		if c != '\x1b' {
 			if c == '\r' || ((c < 0x20 && c != '\t' && c != '\n') || c == 0x7f) {
 				return true
 			}
+			if c < utf8.RuneSelf {
+				i++
+				continue
+			}
+			if _, _, ok := c1ControlLiteral(s[i:]); ok {
+				return true
+			}
+			_, size := utf8.DecodeRuneInString(s[i:])
+			if size <= 0 {
+				size = 1
+			}
+			i += size
 			continue
 		}
 		j := skipANSISequence(s, i)
 		if j <= i+1 || s[j-1] != 'm' || (i+1 < len(s) && s[i+1] != '[') {
 			return true
 		}
-		i = j - 1
+		i = j
 	}
 	return false
 }

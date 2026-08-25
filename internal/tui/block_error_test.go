@@ -88,6 +88,44 @@ func TestRenderErrorCardMessageLineKeepsBackgroundOnTrailingPadding(t *testing.T
 	}
 }
 
+func TestRenderErrorCardSanitizesControlSequences(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		Type:      BlockError,
+		Content:   "provider error \x1b[1;1H\x00",
+		errorHint: "details \x9b31m",
+	}
+	raw := strings.Join(block.Render(100, ""), "\n")
+	if strings.Contains(raw, "\x1b[1;1H") || strings.ContainsRune(raw, '\x00') || strings.ContainsRune(raw, '\x9b') {
+		t.Fatalf("error card leaked raw control sequence: %q", raw)
+	}
+	plain := stripANSI(raw)
+	for _, want := range []string{`\x1b[1;1H`, `\x00`, `\x9b31m`} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("error card missing escaped %s in %q", want, plain)
+		}
+	}
+}
+
+func TestRenderStatusCardSanitizesControlSequences(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		Type:        BlockStatus,
+		StatusTitle: "STATUS \x1b[1;1H",
+		Content:     "body \x00\x9b31m",
+	}
+	raw := strings.Join(block.Render(100, ""), "\n")
+	if strings.Contains(raw, "\x1b[1;1H") || strings.ContainsRune(raw, '\x00') || strings.ContainsRune(raw, '\x9b') {
+		t.Fatalf("status card leaked raw control sequence: %q", raw)
+	}
+	plain := stripANSI(raw)
+	for _, want := range []string{`\x1b[1;1H`, `\x00`, `\x9b31m`} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("status card missing escaped %s in %q", want, plain)
+		}
+	}
+}
+
 func TestErrorCardUsesConfiguredNormalModeBinding(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	block := &Block{ID: 1, Type: BlockError, Content: "boom"}

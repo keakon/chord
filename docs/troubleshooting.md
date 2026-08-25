@@ -257,7 +257,7 @@ If a tool card, local shell result, question dialog, or confirmation summary sho
 - retry the same `read`, `shell`, `web_fetch`, or local shell action
 - if you still see corruption, save the original file/output and a screenshot together
 
-Chord displays external tool output as terminal-safe plain text. If the same content consistently breaks layout, attach the original text and a screenshot so the rendering case can be reproduced.
+Chord sanitizes assistant/thinking streaming replies, tool results, local shell output, and status/error cards before rendering them as terminal-safe plain text. Control characters and ANSI escapes such as `\x1b[1;1H` (a cursor-position command) render as literals instead of corrupting the card layout or its background. If the same content consistently breaks layout, attach the original text and a screenshot so the rendering case can be reproduced.
 
 ## Output-triggered TUI render panic / process killed
 

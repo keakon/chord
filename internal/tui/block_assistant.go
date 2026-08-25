@@ -815,10 +815,14 @@ func (b *Block) renderAssistant(width int) []string {
 				}
 
 				// tail: content after the settled frontier, always cheap path.
+				// Sanitize like the settled path does (renderAssistantMarkdownContent
+				// runs sanitizeDisplayText): the unsettled tail must not carry
+				// provider-returned control sequences (cursor moves, BEL, NUL) into
+				// the card ANSI surface, which would corrupt the screen layout.
 				tailRaw := rawContent[frontier:]
 				if tailRaw != "" {
 					if b.streamTailRaw != tailRaw || b.streamTailWidth != contentWidth {
-						b.streamTailLines = wrapText(tailRaw, contentWidth)
+						b.streamTailLines = wrapText(sanitizeDisplayText(tailRaw), contentWidth)
 						b.streamTailSyntheticPrefixWidths = make([]int, len(b.streamTailLines))
 						b.streamTailSoftWrapContinuations = make([]bool, len(b.streamTailLines))
 						b.streamTailRaw = tailRaw
@@ -1035,7 +1039,10 @@ func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth 
 			out = append(out, cache.tailLines...)
 			settledLineCount = len(out) - len(cache.tailLines)
 		} else {
-			tailLines := wrapText(tail, contentWidth)
+			// Sanitize control sequences like the settled prefix (renderMarkdownContent
+			// runs sanitizeDisplayText) so the streaming tail cannot inject cursor
+			// moves or other ANSI commands into the thinking card.
+			tailLines := wrapText(sanitizeDisplayText(tail), contentWidth)
 			out = append(out, tailLines...)
 			cache.tailRaw = tail
 			cache.tailWidth = contentWidth
