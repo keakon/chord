@@ -105,8 +105,24 @@ CHORD_RUN_REAL_PYRIGHT_TESTS=1 go test ./internal/tools -run Pyright
 For a quick focused loop while iterating on streaming or rendering, run the benchmarks closest to the path you are changing, for example:
 
 ```bash
-go test ./internal/tui -run '^$' -bench 'BenchmarkStream.*|BenchmarkRender.*|BenchmarkModelViewCached' -benchmem
+go test ./internal/tui -run '^$' -bench 'BenchmarkStream.*|BenchmarkRender.*|BenchmarkModelViewCached' -benchmem -benchtime=1x
 ```
+
+To make sure every TUI benchmark case completes without turning the check into a multi-minute stability run, use a single-iteration scan:
+
+```bash
+go test ./internal/tui -run '^$' -bench=Benchmark -benchmem -benchtime=1x -count=1
+```
+
+Do not use bare `go test ./internal/tui -bench=Benchmark -benchmem` as a routine check. Go will run the package tests first and then adapt every benchmark case toward roughly one second. This package also contains cold-render, spill-I/O, paced/sleep, and end-to-end benchmarks, so the unbounded command can take several minutes even when nothing is stuck.
+
+For a broader but bounded comparison, start with:
+
+```bash
+CHORD_BENCH_FULL=1 CHORD_BENCH_TIME=100ms ./scripts/bench_tui_regression.sh
+```
+
+Raise `CHORD_BENCH_TIME` to `1s` or more only for release checks, benchstat-quality comparisons, or when the shorter run is too noisy. Keep benchmarks with real sleeps, I/O, large fixture construction, or expensive setup outside the default stable micro-benchmark set; the default smoke path should remain comfortably below one minute.
 
 When benchmark results do not explain real CPU usage, collect a profile during the problematic interaction:
 

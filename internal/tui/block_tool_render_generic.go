@@ -103,6 +103,41 @@ func appendBashCollapsedSummary(result *[]string, b *Block, vals map[string]stri
 	}
 }
 
+// splitStyleRender splits style.Render around a single-line probe so repeated
+// per-line styling can reuse the SGR prefix/suffix instead of invoking lipgloss
+// once per line (which re-scans the line, re-checks border/align props and
+// rebuilds the style sequence each time). It is only valid for foreground-only
+// styles (no width/padding/margin/border/background or whitespace styling) and
+// tab-free input; appendStyledWrappedBody falls back to Style.Render for lines
+// containing tabs so lipgloss's tab-width normalization remains intact.
+func splitStyleRender(style lipgloss.Style) (prefix, suffix string) {
+	const probe = "X"
+	rendered := style.Render(probe)
+	if prefix, suffix, ok := strings.Cut(rendered, probe); ok {
+		return prefix, suffix
+	}
+	return "", ""
+}
+
+// appendStyledWrappedBody wraps body to the given width and appends each line
+// styled with the given foreground style. The SGR prefix/suffix is computed
+// once and reused for every line: for wrapped plain-text lines
+// prefix+indent+line+suffix is byte-identical to style.Render(indent+line).
+func appendStyledWrappedBody(result *[]string, style lipgloss.Style, indent string, body string, width int) {
+	lines := toolExpandedTextLines(body, width)
+	if len(lines) == 0 {
+		return
+	}
+	prefix, suffix := splitStyleRender(style)
+	for _, line := range lines {
+		if strings.ContainsRune(indent, '\t') || strings.ContainsRune(line, '\t') {
+			*result = append(*result, style.Render(indent+line))
+			continue
+		}
+		*result = append(*result, prefix+indent+line+suffix)
+	}
+}
+
 func appendBashExpandedResult(result *[]string, b *Block, contentWidth int) {
 	if b == nil {
 		return
@@ -116,15 +151,11 @@ func appendBashExpandedResult(result *[]string, b *Block, contentWidth int) {
 	}
 	if stderr != "" {
 		*result = append(*result, ErrorStyle.Render("  Stderr:"))
-		for _, line := range toolExpandedTextLines(stderr, contentWidth) {
-			*result = append(*result, ErrorStyle.Render("    "+line))
-		}
+		appendStyledWrappedBody(result, ErrorStyle, "    ", stderr, contentWidth)
 	}
 	if stdout != "" {
 		*result = append(*result, ToolResultExpandedStyle.Render("  Stdout:"))
-		for _, line := range toolExpandedTextLines(stdout, contentWidth) {
-			*result = append(*result, ToolResultExpandedStyle.Render("    "+line))
-		}
+		appendStyledWrappedBody(result, ToolResultExpandedStyle, "    ", stdout, contentWidth)
 	}
 }
 
