@@ -54,7 +54,7 @@ func TestToolParameterDescriptionsMentionDefaults(t *testing.T) {
 		{name: "grep paths", tool: GrepTool{}, path: []string{"paths"}, want: "Defaults to the session working directory when omitted."},
 		{name: "lsp include declaration", tool: LspTool{}, path: []string{"include_declaration"}, want: "Default true."},
 		{name: "edit replace all", tool: EditTool{}, path: []string{"replace_all"}, want: "Default is false."},
-		{name: "shell workdir", tool: NewShellTool(""), path: []string{"workdir"}, want: "Defaults to the session working directory."},
+		{name: "shell workdir", tool: NewShellTool(""), path: []string{"workdir"}, want: "run in the current Working directory"},
 		{name: "shell timeout", tool: NewShellTool(""), path: []string{"timeout"}, want: "default 30 seconds"},
 		{name: "spawn timeout", tool: NewSpawnTool(""), path: []string{"timeout"}, want: "Defaults to no timeout"},
 		{name: "spawn workdir", tool: NewSpawnTool(""), path: []string{"workdir"}, want: "Defaults to the session working directory."},

@@ -294,7 +294,7 @@ func (ShellTool) Parameters() map[string]any {
 			},
 			"workdir": map[string]any{
 				"type":        "string",
-				"description": "Working directory for the command. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Defaults to the session working directory.",
+				"description": "Working directory the command runs in. Omit it to run in the current Working directory — do not prefix the command with `cd`; set workdir only when the command must run somewhere else. Relative paths resolve from it, except `~` for the current user's home directory.",
 			},
 			"timeout": map[string]any{
 				"type":        "integer",
