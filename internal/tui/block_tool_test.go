@@ -4418,7 +4418,8 @@ func TestReadCallRendersSingleBlankLineWithoutPanic(t *testing.T) {
 	if !strings.Contains(plain, "read internal/tui/input.go") {
 		t.Fatalf("expected Read header to remain visible, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "359") {
+	// offset is a 1-based start line, so the single blank line is line 358.
+	if !strings.Contains(plain, "358") {
 		t.Fatalf("expected blank numbered line to render safely, got:\n%s", plain)
 	}
 	if strings.Contains(plain, "panic") {
@@ -4847,11 +4848,13 @@ func TestReadCallUsesCompactLineNumberGutterForSameDigitWidth(t *testing.T) {
 			"beta",
 		}, "\n"),
 	}
+	// offset 99 yields lines 99-100: one row past the two-digit boundary, so
+	// the gutter reserves three digits while the 9..10 case reserves two.
 	threeDigitBlock := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
 		ToolName:   "read",
-		Content:    `{"path":"sample.go","limit":2,"offset":98}`,
+		Content:    `{"path":"sample.go","limit":2,"offset":99}`,
 		ResultDone: true,
 		ResultContent: strings.Join([]string{
 			"alpha",

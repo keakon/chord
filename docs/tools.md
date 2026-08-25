@@ -8,7 +8,7 @@ For how `allow` / `ask` / `deny` are evaluated — including the special couplin
 
 | Tool | What it does |
 | --- | --- |
-| `read` | Read a local file into context. |
+| `read` | Read a local file into context, with optional 1-based `offset` / `limit` line paging. |
 | `write` | Create a file or intentionally replace a whole file. |
 | `edit` | Replace exact text in one existing file. |
 | `apply_patch` | Apply a Codex-style patch envelope (`*** Begin Patch`): add, update, delete, or move one or more files in a single transactional call. `patch` is accepted as a legacy alias in rules and filters. |

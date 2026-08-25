@@ -308,8 +308,9 @@ func buildReadValidityRecord(index int, meta *toolCallMeta, msg *message.Message
 		record.end = displayed.End
 		return record, true
 	}
-	// Fallback to the requested window when the header is unparseable.
-	start := request.Offset + 1
+	// Fallback to the requested window when the header is unparseable. The
+	// public offset is already 1-based; 0 (or absent) means the first line.
+	start := max(request.Offset, 1)
 	limit := request.Limit
 	if limit <= 0 {
 		limit = tools.MaxOutputLines

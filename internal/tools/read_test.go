@@ -53,6 +53,7 @@ func TestReadToolDescriptionExplainsRawOutputForEdits(t *testing.T) {
 	for _, want := range []string{
 		"Read file contents by line for code inspection and edits",
 		"optional offset/limit line paging",
+		"offset is a 1-based line number (1 = the first line); omit it to start from the beginning",
 		"Prefer grep or lsp to locate symbols before reading a small nearby block",
 		"For a file you will edit or consult repeatedly, prefer reading it in full once",
 		"Normal output starts with one READ_RESULT metadata line",
@@ -91,6 +92,13 @@ func TestReadToolParametersKeepLinePagingFocused(t *testing.T) {
 		if strings.Contains(desc, "char_offset") || strings.Contains(desc, "char_limit") {
 			t.Fatalf("%s description should not mention removed char paging: %q", name, desc)
 		}
+	}
+	offsetDesc := props["offset"].(map[string]any)["description"].(string)
+	if !strings.Contains(offsetDesc, "1-based") {
+		t.Fatalf("offset description should teach 1-based line numbers, got %q", offsetDesc)
+	}
+	if _, ok := props["offset"].(map[string]any)["minimum"]; !ok {
+		t.Fatal("offset should declare a minimum")
 	}
 }
 
@@ -138,6 +146,46 @@ func TestSplitReadToolLinesNormalizesLineEndings(t *testing.T) {
 	}
 }
 
+func TestReadToolExecuteOffsetIsOneBasedStartLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	if err := os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		offset    any
+		wantLines string
+		wantBody  string
+	}{
+		{name: "omitted", offset: nil, wantLines: "lines=1-2", wantBody: "a\nb\n"},
+		{name: "one", offset: 1, wantLines: "lines=1-2", wantBody: "a\nb\n"},
+		// 0 was the 0-based offset for the first line; keep it accepted so a
+		// model that reasons in 0-based offsets cannot silently off-by-one.
+		{name: "zero treated as first line", offset: 0, wantLines: "lines=1-2", wantBody: "a\nb\n"},
+		{name: "two", offset: 2, wantLines: "lines=2-3", wantBody: "b\nc\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := fmt.Sprintf(`{"path":%q,"limit":2}`, path)
+			if tc.offset != nil {
+				raw = fmt.Sprintf(`{"path":%q,"offset":%d,"limit":2}`, path, tc.offset)
+			}
+			got, err := (ReadTool{}).Execute(context.Background(), json.RawMessage(raw))
+			if err != nil {
+				t.Fatalf("ReadTool.Execute: %v", err)
+			}
+			header, body := readTestHeaderAndBody(t, got)
+			if !strings.Contains(header, tc.wantLines) {
+				t.Fatalf("ReadTool.Execute header = %q, want %q", header, tc.wantLines)
+			}
+			if body != tc.wantBody {
+				t.Fatalf("ReadTool.Execute body = %q, want %q", body, tc.wantBody)
+			}
+		})
+	}
+}
+
 func TestReadToolExecuteReportsEmptyContentForEmptyRange(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sample.txt")
@@ -145,7 +193,9 @@ func TestReadToolExecuteReportsEmptyContentForEmptyRange(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	raw := json.RawMessage(fmt.Sprintf(`{"path":%q,"offset":1,"limit":10}`, path))
+	// offset past the last line (2 on a 1-line file, since offsets are 1-based)
+	// is the natural EOF paging position: valid but returns no lines.
+	raw := json.RawMessage(fmt.Sprintf(`{"path":%q,"offset":2,"limit":10}`, path))
 	got, err := (ReadTool{}).Execute(context.Background(), raw)
 	if err != nil {
 		t.Fatalf("ReadTool.Execute: %v", err)
@@ -169,9 +219,9 @@ func TestReadToolExecuteClampsOffsetPlusLimitToEndOfFile(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	// offset is valid but offset+limit runs past EOF: return through the last
-	// line without error or truncation marker.
-	raw := json.RawMessage(fmt.Sprintf(`{"path":%q,"offset":3,"limit":50}`, path))
+	// offset is valid (4 starts at line 4, 1-based) but offset+limit runs past
+	// EOF: return through the last line without error or truncation marker.
+	raw := json.RawMessage(fmt.Sprintf(`{"path":%q,"offset":4,"limit":50}`, path))
 	got, err := (ReadTool{}).Execute(context.Background(), raw)
 	if err != nil {
 		t.Fatalf("ReadTool.Execute: %v", err)
@@ -196,16 +246,17 @@ func TestReadToolExecuteErrorsWhenOffsetPastEndOfFile(t *testing.T) {
 	}
 
 	// offset strictly past the last line is an error (caller's file-size
-	// expectation is wrong); offset == totalLines is covered elsewhere as valid.
+	// expectation is wrong); the natural EOF paging position (offset ==
+	// totalLines+1) is covered elsewhere as valid and returns no lines.
 	raw := json.RawMessage(fmt.Sprintf(`{"path":%q,"offset":10,"limit":5}`, path))
 	_, err := (ReadTool{}).Execute(context.Background(), raw)
 	if err == nil {
 		t.Fatal("ReadTool.Execute err = nil, want offset-exceeds-length error")
 	}
 	for _, want := range []string{
-		"offset 10 exceeds file length (3 lines)",
-		"suggested_offset=0 reads the last 3 lines with limit=5",
-		"eof_offset=3 is valid but returns no lines",
+		"offset 10 exceeds this file length (3 lines)",
+		"suggested_offset=1 reads the last 3 lines with limit=5",
+		"eof_offset=4 is valid but returns no lines",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("ReadTool.Execute err = %v, want substring %q", err, want)
@@ -230,9 +281,9 @@ func TestReadToolExecuteOffsetPastEndSuggestionUsesDefaultLimit(t *testing.T) {
 		t.Fatal("ReadTool.Execute err = nil, want offset-exceeds-length error")
 	}
 	for _, want := range []string{
-		fmt.Sprintf("offset 99999 exceeds file length (%d lines)", MaxOutputLines+3),
-		"suggested_offset=3 reads the last 2000 lines with limit=2000",
-		fmt.Sprintf("eof_offset=%d is valid but returns no lines", MaxOutputLines+3),
+		fmt.Sprintf("offset 99999 exceeds this file length (%d lines)", MaxOutputLines+3),
+		"suggested_offset=4 reads the last 2000 lines with limit=2000",
+		fmt.Sprintf("eof_offset=%d is valid but returns no lines", MaxOutputLines+4),
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("ReadTool.Execute err = %v, want substring %q", err, want)

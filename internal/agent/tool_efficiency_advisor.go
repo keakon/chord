@@ -31,8 +31,9 @@ const (
 	// touches the same file twice; a third window signals paging.
 	partialReadNoteThreshold = 3
 	// partialReadMinRemainderLines keeps reads that stopped just short of the
-	// end (for example offset=1 skipping the package line) from counting as
-	// partial: below this remainder another targeted read is not worth advising.
+	// end (for example offset=2 skipping the package line; offsets are 1-based)
+	// from counting as partial: below this remainder another targeted read is
+	// not worth advising.
 	partialReadMinRemainderLines = 40
 	maxEfficiencyNotesPerTurn    = 4
 )

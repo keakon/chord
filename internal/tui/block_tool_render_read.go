@@ -43,13 +43,15 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 		}
 		v := truncateToolParamValue(vals[k])
 		switch k {
-		case "limit", "offset":
+		case "limit":
 			if v != "" && v != "0" {
-				if k == "offset" {
-					offsetOpt = k + "=" + v
-				} else {
-					limitOpt = k + "=" + v
-				}
+				limitOpt = k + "=" + v
+			}
+		case "offset":
+			// offset is a 1-based start line; 1 (and 0) mean the default first
+			// line and add no information to the header.
+			if v != "" && v != "0" && v != "1" {
+				offsetOpt = k + "=" + v
 			}
 		default:
 			opts = append(opts, k+"="+v)
@@ -86,7 +88,11 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 		result = appendCancelledResultLines(result, b.ResultContent, contentWidth)
 	} else if b.ResultContent != "" {
 		if !b.Collapsed {
-			rows, sourceSample := parseReadDisplayLines(b.ResultContent, resultOffset+1)
+			// The model-facing offset is already a 1-based start line; when the
+			// result lacks a READ_RESULT header (legacy/restored output) the
+			// gutter starts there, and 0 (absent) clamps to line 1 inside
+			// parseReadDisplayLines.
+			rows, sourceSample := parseReadDisplayLines(b.ResultContent, resultOffset)
 			result = append(result, renderNumberedToolPreview(numberedToolPreviewOptions{
 				filePath:     filePath,
 				rows:         rows,

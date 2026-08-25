@@ -53,6 +53,7 @@
 - 工具卡错误态不再重复提示失败：去掉与 `Error:` 详情块冗余的状态标签（如 `Search failed`、`Failed`、`LSP query failed`），错误卡现在只保留 ✗ 标记和 `Error:` 详情；成功和取消态仍显示各自的摘要（`2 matches`、`Done`、`Stopped`、`Cancelled`）。
 - `apply_patch` 现在会在调用方漏掉外层信封、但其余内容已经是合法当前格式时，自动补上 Codex 风格的 `*** Begin Patch` 信封；这样 provider 或 gateway 只剥掉最外层标记时，不会再把模型本来已经格式正确的补丁直接判失败。
 - 对支持仅请求期动态挂载工具的模型，如果在请求进行中开启 loop mode，而冻结后的顶层工具面里原本没有 `done`，Chord 现在会在下一次 loop 请求里晚挂载 `done`。若冻结面本来就已有 `done`，则不会再重复挂载，避免同一请求里出现两份 `done` 定义。
+- `read` 与 `read_artifact` 的 `offset` 参数现在按 1-based 起始行号解释（1 = 第一行），不再是 0-based 的跳过行数；传 `0` 或缺省都从第一行开始，因此把 `offset` 设成 `1` 想读文件开头时，不会再静默跳过第一行。工具卡标题与确认摘要会隐藏默认 offset（0 或 1），越界错误提示改为 1-based 建议值；结果没有行范围头时，read 卡正文行号从请求行开始。
 
 ### 修复
 

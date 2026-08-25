@@ -26,7 +26,7 @@ func TestReadArtifactPagesAndReportsDigest(t *testing.T) {
 	sum := sha256.Sum256([]byte(content))
 	digest := hex.EncodeToString(sum[:])
 	out, err := (ReadArtifactTool{}).Execute(WithSessionDir(context.Background(), dir), mustMarshal(t, map[string]any{
-		"path": rel, "offset": 1, "limit": 2, "expected_sha256": digest,
+		"path": rel, "offset": 2, "limit": 2, "expected_sha256": digest,
 	}))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -100,7 +100,8 @@ func TestReadArtifactKeepsOversizedRequestedLineBeforeLaterLines(t *testing.T) {
 		t.Fatalf("returned body does not contain only the first-line prefix: %q", body)
 	}
 
-	offset, limit := 1, 1
+	// Offset is 1-based: page 2 starts at line 2, the second line.
+	offset, limit := 2, 1
 	page, err := readArtifactPage(abs, &offset, &limit)
 	if err != nil {
 		t.Fatal(err)

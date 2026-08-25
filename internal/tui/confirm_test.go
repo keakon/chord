@@ -175,6 +175,33 @@ func confirmSummaryHasField(summary confirmSummary, label string) bool {
 	return false
 }
 
+func TestBuildConfirmSummaryReadHidesDefaultOffset(t *testing.T) {
+	for _, argsJSON := range []string{
+		`{"path":"main.go"}`,
+		`{"path":"main.go","offset":1}`,
+		`{"path":"main.go","offset":0}`,
+	} {
+		summary := buildConfirmSummary(tools.NameRead, argsJSON, nil, nil)
+		if confirmSummaryHasField(summary, "offset") {
+			t.Fatalf("read summary args=%s should hide default offset, fields=%+v", argsJSON, summary.Fields)
+		}
+		if !confirmSummaryHasField(summary, "File") {
+			t.Fatalf("read summary args=%s should keep File field, fields=%+v", argsJSON, summary.Fields)
+		}
+	}
+	for _, argsJSON := range []string{
+		`{"path":"main.go","offset":12}`,
+		// Schema-invalid values must stay visible so the passed argument surfaces.
+		`{"path":"main.go","offset":"1.0"}`,
+		`{"path":"main.go","offset":-1}`,
+	} {
+		summary := buildConfirmSummary(tools.NameRead, argsJSON, nil, nil)
+		if !confirmSummaryHasField(summary, "offset") {
+			t.Fatalf("read summary args=%s should keep offset field, fields=%+v", argsJSON, summary.Fields)
+		}
+	}
+}
+
 func TestRenderConfirmSummaryShowsDeleteFilePathAndReason(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100

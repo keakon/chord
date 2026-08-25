@@ -183,7 +183,7 @@ func evidenceReadRange(msg *message.Message, call *toolCallMeta) (int, int) {
 		return parsed.Start, parsed.End
 	}
 	request := call.parsedReadRequest()
-	start := request.Offset + 1
+	start := max(request.Offset, 1)
 	limit := request.Limit
 	if limit <= 0 {
 		limit = tools.MaxOutputLines

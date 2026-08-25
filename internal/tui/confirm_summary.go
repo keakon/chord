@@ -118,6 +118,8 @@ func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowe
 		buildDeleteConfirmSummary(&summary, parsed, needsApproval, alreadyAllowed)
 	case tools.NameWebFetch:
 		buildWebFetchConfirmSummary(&summary, parsed)
+	case tools.NameRead, tools.NameReadArtifact:
+		buildReadConfirmSummary(&summary, parsed)
 	case tools.NameDone:
 		buildDoneConfirmSummary(&summary, parsed, summary.DoneReport)
 	default:
@@ -401,6 +403,20 @@ func buildGenericConfirmSummary(summary *confirmSummary, parsed map[string]any) 
 	for _, key := range keys {
 		appendConfirmField(&summary.Fields, confirmFieldForKey(key, parsed[key], false))
 	}
+}
+
+// buildReadConfirmSummary renders read / read_artifact confirmation fields.
+// offset is a 1-based start line; its numeric default (0 or 1) adds no
+// decision-relevant information and is hidden, matching the tool card header.
+// Non-numeric values (schema-invalid) stay visible so every passed argument
+// still surfaces.
+func buildReadConfirmSummary(summary *confirmSummary, parsed map[string]any) {
+	if v, ok := parsed["offset"]; ok {
+		if n, isNum := v.(float64); isNum && (n == 0 || n == 1) {
+			delete(parsed, "offset")
+		}
+	}
+	buildGenericConfirmSummary(summary, parsed)
 }
 
 func ensureConfirmImportantFields(summary *confirmSummary) {

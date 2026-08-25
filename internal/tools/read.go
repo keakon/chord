@@ -24,7 +24,7 @@ type lspStarter interface {
 
 type readArgs struct {
 	Path   string `json:"path"`
-	Offset *int   `json:"offset,omitempty"` // 0-based line offset
+	Offset *int   `json:"offset,omitempty"` // 1-based start line; 0 or absent means the first line
 	Limit  *int   `json:"limit,omitempty"`  // number of lines; defaults to 2000
 }
 
@@ -39,9 +39,10 @@ func (ReadTool) Description() string {
 		"Usage:\n" +
 		"- Prefer grep or lsp to locate symbols before reading a small nearby block.\n" +
 		"- For a file you will edit or consult repeatedly, prefer reading it in full once (a single read covers up to 2000 lines by default) over paging it in many small windows; each extra window costs a full model round trip.\n" +
+		"- offset is a 1-based line number (1 = the first line); omit it to start from the beginning.\n" +
 		"- If a file or saved output is a huge single line that cannot fit in read output, use grep to locate patterns or a script/parser via shell for structured processing instead of character-range reads.\n" +
 		"Output format:\n" +
-		"- Normal output starts with one READ_RESULT metadata line of the form `READ_RESULT lines=a-b total=N` (1-based inclusive returned range and total file line count), or `READ_RESULT lines=none total=N` when no line was returned (empty file, or an offset exactly at end of file which is the normal end of paging; an offset strictly past the last line is an error); everything after that first line is exact file text without line-number gutters or extra indentation, so copy only the text after READ_RESULT into edit hunks.\n" +
+		"- Normal output starts with one READ_RESULT metadata line of the form `READ_RESULT lines=a-b total=N` (1-based inclusive returned range and total file line count), or `READ_RESULT lines=none total=N` when no line was returned (an empty file, or offset=N+1 — the one-past-the-last-line value that is the normal end of paging; an offset larger than N+1 is an error); everything after that first line is exact file text without line-number gutters or extra indentation, so copy only the text after READ_RESULT into edit hunks.\n" +
 		"- The header omits encoding for UTF-8 files and reports it only for other encodings.\n" +
 		"- read output normalizes line endings to LF; edit preserves the file's existing line-ending style when writing.\n" +
 		"Truncation semantics (a read that simply did not reach the end of the file is not truncation):\n" +
@@ -62,7 +63,8 @@ func (ReadTool) Parameters() map[string]any {
 			},
 			"offset": map[string]any{
 				"type":        "integer",
-				"description": "0-based line offset to start reading from. Defaults to 0.",
+				"minimum":     0,
+				"description": "1-based line number to start reading from (1 = the first line); 0 or omitted means the first line. Defaults to 1.",
 			},
 			"limit": map[string]any{
 				"type":        "integer",
@@ -248,17 +250,18 @@ func truncateReadContentToBudget(contentLines []string, startLine, totalLines in
 	return buildReadContent(header, nil)
 }
 
-func readOffsetPastEndError(offset, totalLines int, limit *int) error {
+func readOffsetPastEndError(startLine, totalLines int, limit *int) error {
 	effectiveLimit := MaxOutputLines
 	if limit != nil && *limit > 0 {
 		effectiveLimit = *limit
 	}
 	if totalLines == 0 {
-		return fmt.Errorf("offset %d exceeds file length (0 lines); suggested_offset=0 (EOF; file is empty)", offset)
+		return fmt.Errorf("offset %d exceeds this file length (0 lines); the file is empty, so read from offset 1 (or omit it) to get an empty result", startLine)
 	}
-	tailOffset := max(totalLines-effectiveLimit, 0)
-	lastLines := totalLines - tailOffset
-	return fmt.Errorf("offset %d exceeds file length (%d lines); suggested_offset=%d reads the last %d lines with limit=%d; eof_offset=%d is valid but returns no lines", offset, totalLines, tailOffset, lastLines, effectiveLimit, totalLines)
+	// tailStart is the 1-based first line of the last effectiveLimit lines.
+	tailStart := max(totalLines-effectiveLimit+1, 1)
+	lastLines := totalLines - tailStart + 1
+	return fmt.Errorf("offset %d exceeds this file length (%d lines); suggested_offset=%d reads the last %d lines with limit=%d; eof_offset=%d is valid but returns no lines", startLine, totalLines, tailStart, lastLines, effectiveLimit, totalLines+1)
 }
 
 func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -308,16 +311,22 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	lines := splitReadToolLines(decoded.Text)
 	totalLines := len(lines)
 
-	// Determine offset.
-	offset := 0
-	if a.Offset != nil {
-		offset = max(*a.Offset, 0)
-		// offset == totalLines is the natural end of paging (nothing left to
-		// read) and stays valid; offset strictly past the last line means the
-		// caller has the wrong idea of the file size, so surface it as an error.
-		if offset > totalLines {
-			return "", readOffsetPastEndError(offset, totalLines, a.Limit)
-		}
+	// Determine start line. The public offset is a 1-based line number
+	// (1 = the first line), matching the READ_RESULT range the tool reports
+	// and the CLI conventions of the major read tools. 0 or absent both mean
+	// the first line, so models that reason in 0-based offsets cannot silently
+	// off-by-one when they pass 0 for the top of a file. Internally this maps
+	// back to a 0-based slice index.
+	sliceOffset := 0
+	if a.Offset != nil && *a.Offset > 0 {
+		sliceOffset = *a.Offset - 1
+	}
+	// First requested line (1-based) == sliceOffset+1 == natural end of paging
+	// when it is totalLines+1 (nothing left to read) and stays valid; startLine
+	// strictly past the last line means the caller has the wrong idea of the
+	// file size, so surface it as an error.
+	if sliceOffset > totalLines {
+		return "", readOffsetPastEndError(sliceOffset+1, totalLines, a.Limit)
 	}
 
 	// Determine limit.
@@ -326,23 +335,23 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		limit = *a.Limit
 	}
 
-	end := min(offset+limit, totalLines)
+	end := min(sliceOffset+limit, totalLines)
 
-	selected := lines[offset:end]
+	selected := lines[sliceOffset:end]
 	contentLines := selected
 
 	startLine := 0
 	endLine := 0
 	if len(contentLines) > 0 {
-		startLine = offset + 1
-		endLine = offset + len(contentLines)
+		startLine = sliceOffset + 1
+		endLine = sliceOffset + len(contentLines)
 	} else if totalLines > 0 {
-		startLine = offset + 1
-		endLine = offset
+		startLine = sliceOffset + 1
+		endLine = sliceOffset
 	}
 	content := buildReadContent(readResultHeader(startLine, endLine, totalLines, 0, decoded.Encoding.Name, false), contentLines)
 	if !readOutputFitsBudget(content) {
-		content = truncateReadContentToBudget(contentLines, offset+1, totalLines, decoded.Encoding.Name)
+		content = truncateReadContentToBudget(contentLines, sliceOffset+1, totalLines, decoded.Encoding.Name)
 	}
 
 	if t.LSP != nil {

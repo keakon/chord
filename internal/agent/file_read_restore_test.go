@@ -97,7 +97,7 @@ func TestRestoreTrackedFileStatePartialReadDoesNotAuthorizeDestructiveWrites(t *
 	a := newRestoreEditTestAgent(t, projectRoot)
 	a.tools.Register(tools.WriteTool{BaseDir: projectRoot})
 	msgs := []message.Message{
-		restoreAssistantCall(t, "read-1", tools.NameRead, map[string]any{"path": path, "offset": 1, "limit": 1}, nil),
+		restoreAssistantCall(t, "read-1", tools.NameRead, map[string]any{"path": path, "offset": 2, "limit": 1}, nil),
 		{
 			Role:       message.RoleTool,
 			ToolCallID: "read-1",
@@ -135,7 +135,7 @@ func TestRestoreTrackedFileStatePartialReadPreservesEarlierWholeObservation(t *t
 
 	a := newRestoreEditTestAgent(t, projectRoot)
 	msgs := append(restoreReadMessages(t, "read-full", path, hash, nil),
-		restoreAssistantCall(t, "read-partial", tools.NameRead, map[string]any{"path": path, "offset": 1, "limit": 1}, nil),
+		restoreAssistantCall(t, "read-partial", tools.NameRead, map[string]any{"path": path, "offset": 2, "limit": 1}, nil),
 		message.Message{
 			Role:       message.RoleTool,
 			ToolCallID: "read-partial",

@@ -338,7 +338,7 @@ type readArtifactArgs struct {
 func (ReadArtifactTool) Name() string { return NameReadArtifact }
 
 func (ReadArtifactTool) Description() string {
-	return "Read a runtime artifact by session-relative path with bounded line paging. offset is a 0-based line offset and limit defaults to 2000 lines. The result reports the returned range, total lines, and SHA-256. Supply expected_sha256 to reject content changed since an ArtifactRef snapshot was created."
+	return "Read a runtime artifact by session-relative path with bounded line paging. offset is a 1-based line number (1 = the first line) and limit defaults to 2000 lines. The result reports the returned range, total lines, and SHA-256. Supply expected_sha256 to reject content changed since an ArtifactRef snapshot was created."
 }
 
 func (ReadArtifactTool) Parameters() map[string]any {
@@ -357,7 +357,7 @@ func (ReadArtifactTool) Parameters() map[string]any {
 				"type":        "string",
 				"description": "Optional artifact id for logs; path or rel_path is still required.",
 			},
-			"offset":          map[string]any{"type": "integer", "minimum": 0, "description": "0-based line offset. Defaults to 0."},
+			"offset":          map[string]any{"type": "integer", "minimum": 0, "description": "1-based line number to start reading from (1 = the first line); 0 or omitted means the first line. Defaults to 1."},
 			"limit":           map[string]any{"type": "integer", "minimum": 1, "maximum": MaxOutputLines, "description": "Maximum lines to return. Defaults to 2000."},
 			"expected_sha256": map[string]any{"type": "string", "description": "Optional lowercase SHA-256 digest expected for the complete artifact."},
 		},
@@ -433,13 +433,19 @@ func (r artifactReadResult) render() string {
 }
 
 func readArtifactPage(path string, offsetArg, limitArg *int) (artifactReadResult, error) {
-	offset := 0
+	// The public offset is a 1-based start line (1 = the first line); 0 or
+	// absent also mean the first line, matching Read. Internally this maps back
+	// to a 0-based slice index.
+	startLine := 1
 	if offsetArg != nil {
 		if *offsetArg < 0 {
 			return artifactReadResult{}, fmt.Errorf("offset must be non-negative")
 		}
-		offset = *offsetArg
+		if *offsetArg > 0 {
+			startLine = *offsetArg
+		}
 	}
+	offset := startLine - 1
 	limit := MaxOutputLines
 	if limitArg != nil {
 		if *limitArg <= 0 || *limitArg > MaxOutputLines {
@@ -511,7 +517,7 @@ func readArtifactPage(path string, offsetArg, limitArg *int) (artifactReadResult
 	}
 	result.SHA256 = hex.EncodeToString(h.Sum(nil))
 	if offset > result.TotalLines {
-		return artifactReadResult{}, readOffsetPastEndError(offset, result.TotalLines, limitArg)
+		return artifactReadResult{}, readOffsetPastEndError(startLine, result.TotalLines, limitArg)
 	}
 	return result, nil
 }

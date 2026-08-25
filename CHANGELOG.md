@@ -53,6 +53,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Tool cards in an error state no longer show a redundant failure label (`Search failed`, `Failed`, `LSP query failed`, …) next to the error detail: error cards keep only the ✗ mark and the `Error:` block, while success and cancelled states still get their summary line (`2 matches`, `Done`, `Stopped`, `Cancelled`).
 - `apply_patch` now auto-wraps a bare patch body into the Codex `*** Begin Patch` envelope when the caller omitted it but otherwise sent a valid current-format payload, so providers and gateways that strip only the outer marker no longer fail a call the model already formatted correctly.
 - On models that support request-only dynamic tool mounts, enabling loop mode during an in-flight request may now late-mount `done` on the next loop request when the frozen top-level tool surface does not already contain it. Chord skips the late mount when `done` is already present, so the follow-up request keeps one `done` definition instead of duplicating it.
+- `read` and `read_artifact` now treat `offset` as a 1-based start line (1 = the first line) instead of a 0-based skip count; passing `0` or omitting it both mean the first line, so a call that passes `1` for the top of a file no longer silently skips the first line. The tool card header and the confirmation summary hide the default offset (0 or 1), out-of-range errors suggest 1-based offsets, and the read card gutter starts at the requested line when the result lacks a range header.
 
 ### Fixes
 

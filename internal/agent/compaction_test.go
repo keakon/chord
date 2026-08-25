@@ -2740,7 +2740,7 @@ func TestPrepareMessagesForLLM_EnhancedReadSummaryIncludesRangeDetails(t *testin
 	content := "READ_RESULT lines=41-103 total=200\n" + strings.Join(bodyLines, "\n") + "\n"
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"internal/agent/compaction_policy.go","offset":40,"limit":63}`)}}},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"internal/agent/compaction_policy.go","offset":41,"limit":63}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: content},
 		{Role: "user", Content: "u2"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"internal/agent/compaction_policy.go","old_string":"x","new_string":"y"}`)}}},

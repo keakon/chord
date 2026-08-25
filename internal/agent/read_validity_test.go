@@ -23,7 +23,7 @@ func readValidityMessages() ([]message.Message, map[string]toolCallMeta) {
 	}
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "u1"},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "r1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go","offset":9,"limit":11}`)}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "r1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go","offset":10,"limit":11}`)}}},
 		{Role: message.RoleTool, ToolCallID: "r1", Content: readBody(10, 20, 100, "alpha")},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "r2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "r2", Content: readBody(1, 50, 50, "beta")},
@@ -55,7 +55,7 @@ func TestAnalyzeReadValidity(t *testing.T) {
 
 func TestAnalyzeReadValidityRequiresSingleCoveringRead(t *testing.T) {
 	read := func(id string, start, end int) []message.Message {
-		args := `{"path":"a.go","offset":` + strconv.Itoa(start-1) + `,"limit":` + strconv.Itoa(end-start+1) + `}`
+		args := `{"path":"a.go","offset":` + strconv.Itoa(start) + `,"limit":` + strconv.Itoa(end-start+1) + `}`
 		content := tools.FormatReadResultHeader(strconv.Itoa(start)+"-"+strconv.Itoa(end), 100, "", "", "") + "\nbody"
 		return []message.Message{
 			{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(args)}}},

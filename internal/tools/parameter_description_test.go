@@ -48,7 +48,7 @@ func TestToolParameterDescriptionsMentionDefaults(t *testing.T) {
 		path []string
 		want string
 	}{
-		{name: "read offset", tool: ReadTool{}, path: []string{"offset"}, want: "Defaults to 0."},
+		{name: "read offset", tool: ReadTool{}, path: []string{"offset"}, want: "Defaults to 1."},
 		{name: "read limit", tool: ReadTool{}, path: []string{"limit"}, want: "Defaults to 2000."},
 		{name: "glob path", tool: GlobTool{}, path: []string{"path"}, want: "Defaults to the session working directory."},
 		{name: "grep paths", tool: GrepTool{}, path: []string{"paths"}, want: "Defaults to the session working directory when omitted."},
