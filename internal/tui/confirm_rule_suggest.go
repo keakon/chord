@@ -37,7 +37,7 @@ func suggestRulePatternsWithContext(toolName, argsJSON string, needsApproval []s
 	case tools.NameWebFetch:
 		return suggestWebFetchPatterns(argsJSON)
 	case tools.NameDelete:
-		return suggestDeletePatterns(argsJSON, needsApproval)
+		return suggestDeletePatterns(argsJSON, needsApproval, cwd)
 	case tools.NameRead, tools.NameViewImage, tools.NameGrep, tools.NameGlob, tools.NameLsp, tools.NameSkill:
 		return normalizePatternCandidates([]PatternCandidate{
 			{Pattern: "*", Summary: "any " + toolName + " call", Broad: true, Default: true},
@@ -292,7 +292,12 @@ func isPathWithinCWD(filePath, cwd string) bool {
 }
 
 // suggestDeletePatterns generates conservative path-specific candidates for Delete.
-func suggestDeletePatterns(argsJSON string, needsApproval []string) []PatternCandidate {
+// cwd is the session working directory: when a target lives inside it, a
+// cwd-scoped recursive candidate is offered (not pre-selected) so the user can
+// opt into allowing follow-up deletes in nested subfolders. A global "*"
+// catch-all is always present so an allow rule can be added at the broadest
+// scope.
+func suggestDeletePatterns(argsJSON string, needsApproval []string, cwd string) []PatternCandidate {
 	paths := append([]string(nil), needsApproval...)
 	if len(paths) == 0 {
 		var req struct {
@@ -316,7 +321,44 @@ func suggestDeletePatterns(argsJSON string, needsApproval []string) []PatternCan
 			candidates = append(candidates, PatternCandidate{Pattern: filepath.Join(dir, "*"), Summary: "any path in " + dir + "/", Broad: true})
 		}
 	}
+
+	if len(paths) > 0 && cwd != "" && anyTargetWithinCWD(paths, cwd) {
+		cwdPattern := filepath.Join(cwd, "**")
+		if !hasPatternCandidate(candidates, cwdPattern) {
+			candidates = append(candidates, PatternCandidate{
+				Pattern: cwdPattern,
+				Summary: "any path under current directory",
+				Broad:   true,
+			})
+		}
+	}
+
+	if !hasPatternCandidate(candidates, "*") {
+		candidates = append(candidates, PatternCandidate{Pattern: "*", Summary: "any Delete call", Broad: true})
+	}
 	return normalizePatternCandidates(candidates)
+}
+
+func anyTargetWithinCWD(paths []string, cwd string) bool {
+	for _, raw := range paths {
+		p := strings.TrimSpace(raw)
+		if p == "" {
+			continue
+		}
+		if isPathWithinCWD(p, cwd) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPatternCandidate(candidates []PatternCandidate, pattern string) bool {
+	for _, c := range candidates {
+		if c.Pattern == pattern {
+			return true
+		}
+	}
+	return false
 }
 
 // suggestWebFetchPatterns generates pattern candidates for WebFetch tool.

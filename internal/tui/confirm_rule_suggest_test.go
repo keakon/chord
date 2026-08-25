@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/keakon/chord/internal/tools"
@@ -170,9 +171,42 @@ func TestSuggestRulePatterns_Delete(t *testing.T) {
 	if candidates[0].Pattern != "tmp/foo.log" || !candidates[0].Default {
 		t.Fatalf("first candidate = %+v, want exact default path", candidates[0])
 	}
+	// A global wildcard must always be available so the user can add a broad
+	// allow rule instead of re-confirming per subfolder.
+	foundWildcard := false
 	for _, c := range candidates {
 		if c.Pattern == "*" {
-			t.Fatalf("delete candidates should not include global wildcard: %+v", candidates)
+			foundWildcard = true
+			break
+		}
+	}
+	if !foundWildcard {
+		t.Fatalf("delete candidates must include a global '*' catch-all: %+v", candidates)
+	}
+}
+
+func TestSuggestRulePatterns_DeleteWithinCWDOffersCurDirCandidateNotDefault(t *testing.T) {
+	candidates := suggestRulePatterns("delete", `{"paths":["nested/deep/tmp.go"]}`, []string{"nested/deep/tmp.go"}, "/home/user/project")
+	foundCwd := false
+	for _, c := range candidates {
+		if c.Pattern == filepath.Join("/home/user/project", "**") {
+			if c.Default {
+				t.Fatalf("cwd-scoped candidate must not be pre-selected by default: %+v", c)
+			}
+			foundCwd = true
+			break
+		}
+	}
+	if !foundCwd {
+		t.Fatalf("expected cwd-scoped candidate for in-cwd delete: %+v", candidates)
+	}
+}
+
+func TestSuggestRulePatterns_DeleteOutsideCWDNoCurDirCandidate(t *testing.T) {
+	candidates := suggestRulePatterns("delete", `{"paths":["../shared/tmp.go"]}`, []string{"../shared/tmp.go"}, "/home/user/project")
+	for _, c := range candidates {
+		if c.Pattern == filepath.Join("/home/user/project", "**") {
+			t.Fatalf("unexpected cwd-scoped candidate for outside-cwd delete: %+v", candidates)
 		}
 	}
 }
