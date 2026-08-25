@@ -72,6 +72,16 @@ func appendWriteDiagnostics(result []string, diagnostics string, width int) []st
 	return append(result, renderLSPDiagnosticsLines(diagnostics, "    ", width)...)
 }
 
+func writeDiagnosticsSummary(diagnostics string) string {
+	if strings.TrimSpace(diagnostics) == "" {
+		return ""
+	}
+	if count := countLSPDiagnosticLines(diagnostics); count > 0 {
+		return fmt.Sprintf("%d diagnostics", count)
+	}
+	return "diagnostics"
+}
+
 // renderWriteCall renders a Write tool call result with a syntax-highlighted
 // preview of the written file content.
 func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
@@ -150,7 +160,9 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 			if summary != "" {
 				result = append(result, ToolResultStyle.Render("  ↳ "+summary))
 			}
-			result = appendWriteDiagnostics(result, sections.diagnostics, cardWidth-4)
+			if diagnosticSummary := writeDiagnosticsSummary(sections.diagnostics); diagnosticSummary != "" {
+				result = append(result, ToolResultStyle.Render("  ↳ "+diagnosticSummary))
+			}
 		}
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}

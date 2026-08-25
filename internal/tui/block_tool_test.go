@@ -1180,20 +1180,15 @@ func TestWriteCardDiagnosticsSplitBetweenSummaryAndColoredDetails(t *testing.T) 
 		ResultContent: result,
 	}
 
-	collapsedRaw := strings.Join(block.Render(120, ""), "\n")
-	collapsed := stripANSI(collapsedRaw)
+	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if got := strings.Count(collapsed, "Successfully wrote 71 lines, 2113 bytes"); got != 1 {
 		t.Fatalf("collapsed Write summary count = %d, want 1; got:\n%s", got, collapsed)
 	}
-	if got := strings.Count(collapsed, "Diagnostics:"); got != 1 {
-		t.Fatalf("collapsed diagnostics heading count = %d, want 1; got:\n%s", got, collapsed)
+	if got := strings.Count(collapsed, "2 diagnostics"); got != 1 {
+		t.Fatalf("collapsed diagnostics summary count = %d, want 1; got:\n%s", got, collapsed)
 	}
-	if !strings.Contains(collapsed, "[E] 9:2 [UnusedImport]") {
-		t.Fatalf("collapsed Write should show LSP error details; got:\n%s", collapsed)
-	}
-	redError := "\x1b[38;5;196m    [E] 9:2 [UnusedImport]"
-	if !strings.Contains(collapsedRaw, redError) {
-		t.Fatalf("collapsed LSP error should use the red error style; got:\n%s", collapsedRaw)
+	if strings.Contains(collapsed, "Diagnostics:") || strings.Contains(collapsed, "[E] 9:2 [UnusedImport]") {
+		t.Fatalf("collapsed Write should hide LSP diagnostic details; got:\n%s", collapsed)
 	}
 
 	block.ToggleAtWidth(120)
@@ -1203,6 +1198,9 @@ func TestWriteCardDiagnosticsSplitBetweenSummaryAndColoredDetails(t *testing.T) 
 	}
 	if got := strings.Count(expanded, "Diagnostics:"); got != 1 {
 		t.Fatalf("expanded diagnostics heading count = %d, want 1; got:\n%s", got, expanded)
+	}
+	if !strings.Contains(expanded, "[E] 9:2 [UnusedImport]") {
+		t.Fatalf("expanded Write should show LSP diagnostic details; got:\n%s", expanded)
 	}
 	if strings.Contains(expanded, "↳ Result:") {
 		t.Fatalf("expanded Write should not render a duplicate generic result section; got:\n%s", expanded)
@@ -1388,6 +1386,59 @@ func TestReadCollapsedShowsSummaryAndExpandedShowsAllReturnedLines(t *testing.T)
 	}
 }
 
+func TestReadCardDoesNotTreatSourceAsArtifactMetadata(t *testing.T) {
+	block := &Block{
+		ID:         1,
+		Type:       BlockToolCall,
+		ToolName:   tools.NameRead,
+		Content:    `{"path":"internal/tui/block_tool_common.go","offset":620,"limit":160}`,
+		Collapsed:  true,
+		ResultDone: true,
+		ResultContent: "READ_RESULT lines=621-622 total=982 truncated=budget requested_lines=621-780\n" +
+			`if idx := strings.LastIndex(trimmed, "Full output saved to "); idx >= 0 {` + "\n" +
+			`rest := strings.TrimSpace(trimmed[idx+len("Full output saved to "):])` + "\n\n" +
+			"Full output saved to /session/tool-outputs/read-result.log. Use read with offset/limit for line ranges, or shell with a script/parser for huge single-line structured output.",
+	}
+
+	collapsed := stripANSI(strings.Join(block.Render(320, ""), "\n"))
+	if !strings.Contains(collapsed, "lines 621–622 of 982") {
+		t.Fatalf("expected collapsed read summary to keep the returned line range, got:\n%s", collapsed)
+	}
+	for _, hidden := range []string{"output truncated", "stale result", "superseded result", "full output saved to", `"):]`} {
+		if strings.Contains(collapsed, hidden) {
+			t.Fatalf("collapsed read summary should not contain %q, got:\n%s", hidden, collapsed)
+		}
+	}
+
+	block.ToggleAtWidth(320)
+	expandedLines := stripANSILines(block.Render(320, ""))
+	expanded := strings.Join(expandedLines, "\n")
+	if !strings.Contains(expanded, "output truncated") {
+		t.Fatalf("expanded read result should preserve the truncation state, got:\n%s", expanded)
+	}
+	header := ""
+	for _, line := range expandedLines {
+		if strings.Contains(line, "▾ read ") {
+			header = line
+			break
+		}
+	}
+	if header == "" {
+		t.Fatalf("expanded read card is missing its header:\n%s", strings.Join(expandedLines, "\n"))
+	}
+	if strings.Contains(strings.ToLower(header), "full output saved to") || strings.Contains(header, `"):]`) {
+		t.Fatalf("expanded read header should not contain source text, got %q", header)
+	}
+	for _, want := range []string{`621  if idx := strings.LastIndex(trimmed, "Full output saved to "); idx >= 0 {`, `622  rest := strings.TrimSpace(trimmed[idx+len("Full output saved to "):])`} {
+		if !strings.Contains(expanded, want) {
+			t.Fatalf("expanded read result should preserve source line %q, got:\n%s", want, expanded)
+		}
+	}
+	if strings.Contains(expanded, "Full output saved to /session/tool-outputs/read-result.log.") {
+		t.Fatalf("expanded read result should hide the historical artifact footer, got:\n%s", expanded)
+	}
+}
+
 func TestGrepCollapsedSummaryCountsOnlyMatchesAndExpandedShowsAllDetails(t *testing.T) {
 	block := &Block{
 		ID:                     1,
@@ -1406,7 +1457,7 @@ func TestGrepCollapsedSummaryCountsOnlyMatchesAndExpandedShowsAllDetails(t *test
 	}
 
 	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(collapsed, "✓ ▸ grep TODO") || !strings.Contains(collapsed, "2 matches shown · 2 files · 1 paths skipped · literal fallback · truncated") {
+	if !strings.Contains(collapsed, "✓ ▸ grep TODO") || !strings.Contains(collapsed, "2 matches · 2 files") {
 		t.Fatalf("expected grep collapsed summary, got:\n%s", collapsed)
 	}
 	if strings.Contains(collapsed, "grep: skipped path: vendor/blocked") || strings.Contains(collapsed, "searched as literal text") {
@@ -1439,7 +1490,7 @@ func TestGlobCollapsedSummaryShowsFilesAndArtifact(t *testing.T) {
 	}
 
 	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(collapsed, "✓ ▸ glob **/*.go") || !strings.Contains(collapsed, "2 files · truncated · /tmp/ws/artifacts/glob-results.log") {
+	if !strings.Contains(collapsed, "✓ ▸ glob **/*.go") || !strings.Contains(collapsed, "2 files") {
 		t.Fatalf("expected glob collapsed summary, got:\n%s", collapsed)
 	}
 
@@ -2571,6 +2622,69 @@ func TestCollapsedBashRejectedShowsExpandHintBeforeRejection(t *testing.T) {
 	}
 }
 
+func TestCollapsedBashMultiLineErrorShowsOnlyExitCode(t *testing.T) {
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "shell",
+		Content:                `{"command":"go test ./internal/tui"}`,
+		ResultContent:          "--- FAIL: TestFoo (0.00s)\n    app_test.go:12: boom\n\nError: exit code 1. Test or verification command failed. Inspect the first relevant failure; before rerunning a broad test, prefer a focused reproduction for the affected package/test",
+		ResultStatus:           agent.ToolResultStatusError,
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "exit code 1") {
+		t.Fatalf("expected collapsed multi-line Shell error to keep the exit code; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "TestFoo") || strings.Contains(joined, "app_test.go:12") {
+		t.Fatalf("collapsed multi-line Shell error must not guess a failure detail line; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "Inspect the first relevant failure") {
+		t.Fatalf("collapsed multi-line Shell error must not surface the guidance tail; got:\n%s", joined)
+	}
+}
+
+func TestCollapsedBashSingleLineErrorShowsVerbatimLine(t *testing.T) {
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "shell",
+		Content:                `{"command":"go build ./..."}`,
+		ResultContent:          "Error: exit code 127: command not found: sample-tool",
+		ResultStatus:           agent.ToolResultStatusError,
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "exit code 127: command not found: sample-tool") {
+		t.Fatalf("expected collapsed single-line Shell error to show the whole line; got:\n%s", joined)
+	}
+}
+
+func TestCollapsedBashTimeoutShowsTimeoutStatus(t *testing.T) {
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "shell",
+		Content:                `{"command":"go test ./internal/tui"}`,
+		ResultContent:          "some output line\n\ncommand timed out after 600s after output:\nmore output",
+		ResultStatus:           agent.ToolResultStatusError,
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "timed out after 600s") {
+		t.Fatalf("expected collapsed Shell timeout to show the timeout status; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "more output") {
+		t.Fatalf("collapsed Shell timeout must not show the output tail; got:\n%s", joined)
+	}
+}
+
 func TestExpandedBashErrorKeepsToolCardBackgroundAcrossWrappedErrorBody(t *testing.T) {
 	block := &Block{
 		ID:                     1,
@@ -3079,7 +3193,7 @@ func TestCollapsedGrepShowsMatchCountSummary(t *testing.T) {
 	}
 }
 
-func TestCollapsedGrepOmitsLowCountSummary(t *testing.T) {
+func TestCollapsedGrepUsesKeySummaryForLowCounts(t *testing.T) {
 	tests := []struct {
 		name          string
 		resultContent string
@@ -3095,8 +3209,8 @@ func TestCollapsedGrepOmitsLowCountSummary(t *testing.T) {
 		{
 			name:          "one match",
 			resultContent: "a.go:1:TODO",
-			wantPresent:   "a.go:1:TODO",
-			wantAbsent:    "1 matches",
+			wantPresent:   "1 match",
+			wantAbsent:    "a.go:1:TODO",
 		},
 	}
 
@@ -3330,9 +3444,9 @@ func TestReadCollapsedSummaryDistinguishesTruncationKinds(t *testing.T) {
 		wantLabel  string
 		notWantAbs string
 	}{
-		{"budget", "READ_RESULT lines=1-487 total=2000 truncated=budget requested_lines=1-900", "output truncated", ""},
-		{"stale", "READ_RESULT lines=41-103 total=200 truncated=stale", "stale result", "output truncated"},
-		{"superseded", "READ_RESULT lines=10-12 total=80 truncated=superseded", "superseded result", "output truncated"},
+		{"budget", "READ_RESULT lines=1-487 total=2000 truncated=budget requested_lines=1-900", "lines 1–487 of 2000", "output truncated"},
+		{"stale", "READ_RESULT lines=41-103 total=200 truncated=stale", "lines 41–103 of 200", "stale result"},
+		{"superseded", "READ_RESULT lines=10-12 total=80 truncated=superseded", "lines 10–12 of 80", "superseded result"},
 	}
 
 	for _, tt := range tests {
@@ -3832,7 +3946,7 @@ func TestCollapsedGlobShowsFileCountSummary(t *testing.T) {
 	}
 }
 
-func TestCollapsedGlobOmitsLowCountSummary(t *testing.T) {
+func TestCollapsedGlobUsesKeySummaryForLowCounts(t *testing.T) {
 	tests := []struct {
 		name          string
 		resultContent string
@@ -3842,14 +3956,14 @@ func TestCollapsedGlobOmitsLowCountSummary(t *testing.T) {
 		{
 			name:          "zero files",
 			resultContent: "No files matched the pattern.",
-			wantPresent:   "No files matched the pattern.",
-			wantAbsent:    "0 files",
+			wantPresent:   "No files",
+			wantAbsent:    "No files matched the pattern.",
 		},
 		{
 			name:          "one file",
 			resultContent: "a.go",
-			wantPresent:   "a.go",
-			wantAbsent:    "1 files",
+			wantPresent:   "1 file",
+			wantAbsent:    "a.go",
 		},
 	}
 

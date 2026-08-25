@@ -7,10 +7,9 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// The grep/glob collapsed state is a single header line like Read: the count
-// summary is merged into the header and no separate body summary line is
-// rendered. The expanded state keeps the summary in the header and renders
-// every returned match below.
+// The grep/glob collapsed state is a single header line like Read: only the
+// key match/file counts are merged into the header. Expanded state renders
+// every returned match and diagnostic below.
 
 func TestGrepCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
 	ApplyTheme(DefaultTheme())
@@ -31,7 +30,7 @@ func TestGrepCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
 	}
 
 	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(collapsed, "✓ ▸ grep TODO · 2 matches shown · 2 files · 1 paths skipped · literal fallback · truncated") {
+	if !strings.Contains(collapsed, "✓ ▸ grep TODO · 2 matches · 2 files") {
 		t.Fatalf("expected collapsed grep summary in header, got:\n%s", collapsed)
 	}
 	if strings.Contains(collapsed, "grep: skipped path: vendor/blocked") || strings.Contains(collapsed, "searched as literal text") {
@@ -43,7 +42,7 @@ func TestGrepCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
 
 	block.ToggleAtWidth(120)
 	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"✓ ▾ grep TODO · 2 matches shown · 2 files · 1 paths skipped · literal fallback · truncated", "a.go:1:TODO one", "Note: pattern was invalid regex; searched as literal text.", "grep: skipped path: vendor/blocked"} {
+	for _, want := range []string{"✓ ▾ grep TODO · 2 matches · 2 files", "a.go:1:TODO one", "Note: pattern was invalid regex; searched as literal text.", "grep: skipped path: vendor/blocked"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expected expanded grep to contain %q, got:\n%s", want, expanded)
 		}
@@ -67,7 +66,7 @@ func TestGlobCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
 	}
 
 	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(collapsed, "✓ ▸ glob **/*.go · 2 files · truncated · /tmp/ws/artifacts/glob-results.log") {
+	if !strings.Contains(collapsed, "✓ ▸ glob **/*.go · 2 files") {
 		t.Fatalf("expected collapsed glob summary in header, got:\n%s", collapsed)
 	}
 	if strings.Contains(collapsed, "↳") {
@@ -76,7 +75,7 @@ func TestGlobCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
 
 	block.ToggleAtWidth(120)
 	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"✓ ▾ glob **/*.go · 2 files · truncated · /tmp/ws/artifacts/glob-results.log", "a.go", "b.go", "full results saved to /tmp/ws/artifacts/glob-results.log"} {
+	for _, want := range []string{"✓ ▾ glob **/*.go · 2 files", "a.go", "b.go", "full results saved to /tmp/ws/artifacts/glob-results.log"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expected expanded glob to contain %q, got:\n%s", want, expanded)
 		}

@@ -1341,7 +1341,7 @@ func trackedEditPathFromArgs(raw json.RawMessage, baseDir string) string {
 }
 
 func formatToolExecutionOutput(result, sessionDir, artifactKey, toolName string, execErr error, guidance string) string {
-	if toolName == tools.NameQuestion {
+	if toolName == tools.NameQuestion || toolName == tools.NameRead {
 		return tools.NormalizeEmptySuccessOutput(toolName, result, execErr)
 	}
 	truncated := tools.TruncateOutputWithOptions(result, sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})

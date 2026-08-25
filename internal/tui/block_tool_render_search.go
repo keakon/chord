@@ -23,7 +23,7 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	keys, vals := parseToolArgs(b.Content)
 	mainPart, grayPart := b.formatToolHeaderPartsWithParsed(keys, vals)
-	// The count summary (matches/files, truncation facts) is merged into the
+	// The key count summary (matches/files) is merged into the
 	// header so a collapsed search card is a single line like Read. Short
 	// results without a summary keep their inline body below.
 	summary, showInline := "", false
@@ -96,69 +96,25 @@ func (b *Block) searchResultSummaryLine() (string, bool) {
 	case tools.NameGrep:
 		meta := parseGrepResultMeta(b.ResultContent)
 		if meta.NoMatches {
-			parts := []string{"No matches"}
-			if meta.Skipped > 0 {
-				parts = append(parts, fmt.Sprintf("%d paths skipped", meta.Skipped))
-			}
-			if meta.Fallback {
-				parts = append(parts, "literal fallback")
-			}
-			return strings.Join(parts, " · "), true
+			return "No matches", true
 		}
-		if meta.Matches <= 1 && meta.Notes == 0 && !meta.Fallback && !meta.Truncated && meta.Skipped == 0 {
-			return strings.TrimSpace(b.ResultContent), false
+		if meta.Matches == 0 {
+			return "", false
 		}
-		parts := make([]string, 0, 4)
-		if meta.Matches > 0 {
-			label := "matches"
-			if meta.Matches == 1 {
-				label = "match"
-			}
-			if meta.Truncated {
-				label = "matches shown"
-			}
-			parts = append(parts, fmt.Sprintf("%d %s", meta.Matches, label))
-		} else if meta.EmptyResult || meta.Matches == 0 {
-			return strings.TrimSpace(b.ResultContent), false
-		}
+		parts := []string{fmt.Sprintf("%d %s", meta.Matches, pluralizeToolCount("match", meta.Matches))}
 		if meta.Files > 0 {
-			filesLabel := "files"
-			if meta.Files == 1 {
-				filesLabel = "file"
-			}
-			parts = append(parts, fmt.Sprintf("%d %s", meta.Files, filesLabel))
-		}
-		if meta.Skipped > 0 {
-			parts = append(parts, fmt.Sprintf("%d paths skipped", meta.Skipped))
-		}
-		if meta.Fallback {
-			parts = append(parts, "literal fallback")
-		}
-		if meta.Truncated {
-			parts = append(parts, "truncated")
+			parts = append(parts, fmt.Sprintf("%d %s", meta.Files, pluralizeToolCount("file", meta.Files)))
 		}
 		return strings.Join(parts, " · "), true
 	case tools.NameGlob:
 		meta := parseGlobResultMeta(b.ResultContent)
-		if meta.Files == 0 && !meta.Truncated && meta.Artifact == "" {
-			return strings.TrimSpace(b.ResultContent), false
+		if meta.Files == 0 {
+			if strings.HasPrefix(strings.TrimSpace(b.ResultContent), "No files matched") {
+				return "No files", true
+			}
+			return "", false
 		}
-		if meta.Files <= 1 && !meta.Truncated && meta.Artifact == "" {
-			return strings.TrimSpace(b.ResultContent), false
-		}
-		parts := make([]string, 0, 3)
-		filesLabel := "files"
-		if meta.Files == 1 {
-			filesLabel = "file"
-		}
-		parts = append(parts, fmt.Sprintf("%d %s", meta.Files, filesLabel))
-		if meta.Truncated {
-			parts = append(parts, "truncated")
-		}
-		if meta.Artifact != "" {
-			parts = append(parts, meta.Artifact)
-		}
-		return strings.Join(parts, " · "), true
+		return fmt.Sprintf("%d %s", meta.Files, pluralizeToolCount("file", meta.Files)), true
 	default:
 		return "", false
 	}
@@ -174,13 +130,23 @@ func (b *Block) searchResultCanExpand() bool {
 		if meta.NoMatches {
 			return meta.Notes > 0 || meta.Fallback || meta.Truncated || meta.Skipped > 0
 		}
-		return meta.Matches > 1 || meta.Notes > 0 || meta.Fallback || meta.Truncated || meta.Skipped > 0
+		return meta.Matches > 0 || meta.Notes > 0 || meta.Fallback || meta.Truncated || meta.Skipped > 0
 	case tools.NameGlob:
 		meta := parseGlobResultMeta(b.ResultContent)
-		return meta.Files > 1 || meta.Truncated || meta.Artifact != ""
+		return meta.Files > 0 || meta.Truncated || meta.Artifact != ""
 	default:
 		return false
 	}
+}
+
+func pluralizeToolCount(noun string, count int) string {
+	if count == 1 {
+		return noun
+	}
+	if noun == "match" {
+		return "matches"
+	}
+	return noun + "s"
 }
 
 func (b *Block) fileDiffSummaryLine(applyPatchTargets []tools.ApplyPatchDisplayTarget, displayDiff string) string {

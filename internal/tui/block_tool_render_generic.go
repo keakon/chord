@@ -646,7 +646,6 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	toolCardBg := metrics.toolCardBg
 	cardWidth := metrics.cardWidth
 	contentWidth := compactToolContentWidthForRenderWidth(width)
-	collapsedPreviewLine := ""
 	expandHintAdded := false
 
 	expanded := b.ToolCallDetailExpanded || b.compactToolResultForceExpanded(contentWidth)
@@ -689,7 +688,6 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		} else {
 			k0 := keys[0]
 			line := fmt.Sprintf("%s: %s", k0, vals[k0])
-			collapsedPreviewLine = line
 			for _, w := range wrapIndentedText(line, contentWidth) {
 				result = append(result, DimStyle.Render("    "+w))
 			}
@@ -711,46 +709,43 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 				appendBashExpandedResult(&result, b, contentWidth)
 			}
 		} else {
-			if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
-				result = append(result, ErrorStyle.Render("  ↳ Error:"))
-			} else if b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "" {
-				if detail := toolCancelledDetailText(b.ResultContent); detail != "" {
+			displayResult := strings.TrimSpace(toolDisplayResultContent(b))
+			if !expanded {
+				switch {
+				case b.toolResultIsError() && displayResult != "":
+					detail := truncateOneLine(sanitizeToolDisplayText(toolErrorDisplayContent(displayResult)), contentWidth-len("  ↳ Error: "))
+					result = append(result, ErrorStyle.Render("  ↳ Error: "+detail))
+				case b.toolResultIsCancelled():
+					line := "  ↳ Cancelled"
+					if detail := toolCancelledDetailText(displayResult); detail != "" {
+						line += ": " + truncateOneLine(sanitizeToolDisplayText(detail), contentWidth-len("  ↳ Cancelled: "))
+					}
+					result = append(result, DimStyle.Render(line))
+				}
+			} else if displayResult != "" && !(b.toolResultIsCancelled() && toolCancelledDetailText(displayResult) == "") {
+				if b.toolResultIsError() {
+					result = append(result, ErrorStyle.Render("  ↳ Error:"))
+					displayResult = toolErrorDisplayContent(displayResult)
+				} else if b.toolResultIsCancelled() {
 					result = append(result, DimStyle.Render("  ↳ Cancelled:"))
 				}
-			}
-			if strings.TrimSpace(b.ResultContent) != "" && !(b.toolResultIsCancelled() && toolCancelledDetailText(b.ResultContent) == "") {
-				if !expanded && tools.NormalizeName(b.ToolName) == tools.NameSkill && !b.toolResultIsError() && !b.toolResultIsCancelled() {
-					// collapsed Skill cards intentionally show only header summary
-				} else if !expanded && tools.NormalizeName(b.ToolName) == tools.NameComplete && !b.toolResultIsError() && !b.toolResultIsCancelled() {
-					appendCollapsedSummaryLines(&result, b.ResultContent, cardWidth-10, ToolResultStyle)
-					if hidden := toolCollapsedVisibleLineCount(b.ResultContent, contentWidth) - 2; hidden > 0 {
-						result = append(result, renderToolExpandHint(toolHintIndent, hidden))
-						expandHintAdded = true
-					}
-				} else {
-					displayResult := sanitizeToolDisplayText(toolDisplayResultContent(b))
-					lines, hidden := toolExpandedResultLines(displayResult, contentWidth, expanded)
-					if !expanded && collapsedPreviewLine != "" && compactToolPreviewDuplicatesResult(collapsedPreviewLine, lines) {
-						lines = nil
-					}
-					lineStyle := DimStyle
-					if b.toolResultIsError() {
-						lineStyle = ErrorStyle
-					}
-					for _, line := range lines {
-						result = append(result, lineStyle.Render(toolResultIndent+line))
-					}
-					if !expanded && hidden > 0 {
-						result = append(result, renderToolExpandHint(toolHintIndent, hidden))
-						expandHintAdded = true
-					}
+				lineStyle := DimStyle
+				if b.toolResultIsError() {
+					lineStyle = ErrorStyle
+				}
+				for _, line := range toolExpandedTextLines(displayResult, contentWidth) {
+					result = append(result, lineStyle.Render(toolResultIndent+line))
 				}
 			}
 		}
 		if strings.TrimSpace(b.DoneSummary) != "" {
-			result = append(result, ToolResultExpandedStyle.Render("  ↳ Completed:"))
-			for _, line := range toolExpandedTextLines(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {
-				result = append(result, "    "+line)
+			if expanded {
+				result = append(result, ToolResultExpandedStyle.Render("  ↳ Completed:"))
+				for _, line := range toolExpandedTextLines(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {
+					result = append(result, "    "+line)
+				}
+			} else {
+				appendCollapsedSummaryLines(&result, b.DoneSummary, cardWidth-10, ToolResultStyle)
 			}
 		}
 	}

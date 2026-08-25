@@ -166,40 +166,8 @@ func toolExpandedTextLines(s string, width int) []string {
 	return wrapText(trimmed, width)
 }
 
-func normalizedCompactToolPreviewText(s string) string {
-	trimmed := strings.TrimSpace(sanitizeToolDisplayText(s))
-	if trimmed == "" {
-		return ""
-	}
-	trimmed = strings.ReplaceAll(trimmed, "\r\n", "\n")
-	trimmed = strings.ReplaceAll(trimmed, "\r", "\n")
-	for strings.Contains(trimmed, "\n\n") {
-		trimmed = strings.ReplaceAll(trimmed, "\n\n", "\n")
-	}
-	return strings.Join(strings.Fields(trimmed), " ")
-}
-
 func toolCardTitle(label string, id int) string {
 	return ToolLabelStyle.Render(blockLabelWithID(label, id))
-}
-
-func compactToolPreviewDuplicatesResult(previewLine string, resultLines []string) bool {
-	previewNorm := normalizedCompactToolPreviewText(previewLine)
-	if previewNorm == "" || len(resultLines) == 0 {
-		return false
-	}
-	previewValueNorm := ""
-	if _, after, ok := strings.Cut(previewLine, ":"); ok {
-		previewValueNorm = normalizedCompactToolPreviewText(after)
-	}
-	for _, line := range resultLines {
-		lineNorm := normalizedCompactToolPreviewText(line)
-		if lineNorm == "" {
-			continue
-		}
-		return lineNorm == previewNorm || (previewValueNorm != "" && lineNorm == previewValueNorm)
-	}
-	return false
 }
 
 func toolCollapsedVisibleLineCount(s string, width int) int {
@@ -338,25 +306,26 @@ func bashCollapsedOutcomeSummary(b *Block) (string, bool) {
 		return "cancelled", false
 	}
 	if b.toolResultIsError() {
-		if before, after, ok := strings.Cut(b.ResultContent, "Error:"); ok {
-			if line := bashFirstNonEmptyLine(strings.TrimSpace(after)); line != "" {
-				return truncateOneLine(line, 120), true
-			}
-			if line := bashFirstNonEmptyLine(strings.TrimSpace(before)); line != "" {
+		// A single-line error result is the whole cause (for example a
+		// rejection reason or a short permission denial), so show the line
+		// verbatim instead of a lossy status the user would have to expand to
+		// recover. Multi-line errors are too ambiguous to guess which line is
+		// the real cause, so keep only a concise status (exit code / timeout)
+		// and leave the detail to the expanded card.
+		content := strings.TrimSpace(b.ResultContent)
+		if bashNonEmptyLineCount(content) == 1 {
+			if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(bashErrorText(content))); line != "" {
 				return truncateOneLine(line, 120), true
 			}
 		}
-		if timedOut := sanitizeToolDisplayText(bashTimeoutSummary(b.ResultContent)); timedOut != "" {
+		if timedOut := sanitizeToolDisplayText(bashTimeoutSummary(content)); timedOut != "" {
 			return timedOut, true
 		}
-		if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(bashErrorBody(b.ResultContent))); line != "" {
-			return truncateOneLine(line, 120), true
-		}
-		if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(b.ResultContent)); line != "" {
-			return truncateOneLine(line, 120), true
-		}
-		if exit := sanitizeToolDisplayText(bashExitCodeFromError(b.ResultContent)); exit != "" {
+		if exit := bashExitCodeAnywhere(content); exit != "" {
 			return exit, true
+		}
+		if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(bashErrorText(content))); line != "" {
+			return truncateOneLine(line, 120), true
 		}
 		return "failed", true
 	}
@@ -452,6 +421,52 @@ func bashExitCodeFromError(content string) string {
 		line = line[:i]
 	}
 	return strings.TrimSpace(strings.TrimPrefix(line, "exit code "))
+}
+
+// bashErrorText returns the error explanation for a shell error result: the text
+// after a trailing "Error:" marker when present, otherwise the whole content.
+func bashErrorText(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if _, after, ok := strings.Cut(trimmed, "Error:"); ok {
+		if body := strings.TrimSpace(after); body != "" {
+			return body
+		}
+	}
+	return trimmed
+}
+
+// bashNonEmptyLineCount counts the non-whitespace lines in content, ignoring
+// blank separator lines, so a "single-line" error is judged on real content.
+func bashNonEmptyLineCount(content string) int {
+	count := 0
+	for line := range strings.SplitSeq(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+// bashExitCodeAnywhere reports an "exit code N" status found on any line of an
+// error result, trimming any colon/period/dot-prefixed explanation that follows
+// (for example "exit code 1: non-interactive shell failure: ..."). Lines that
+// carry the trailing "Error: " marker prefix are stripped first so the exit
+// code inside them is still found.
+func bashExitCodeAnywhere(content string) string {
+	for line := range strings.SplitSeq(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "Error: "))
+		if !strings.HasPrefix(line, "exit code ") {
+			continue
+		}
+		body := strings.TrimSpace(strings.TrimPrefix(line, "exit code "))
+		if i := strings.IndexAny(body, ": ."); i >= 0 {
+			body = body[:i]
+		}
+		if _, err := strconv.Atoi(body); err == nil {
+			return "exit code " + body
+		}
+	}
+	return ""
 }
 
 func bashFirstNonEmptyLine(content string) string {
@@ -679,6 +694,12 @@ func parseReadDisplayLines(result string, startLine int) ([]readDisplayLine, str
 		startLine = 1
 	}
 	rawLines := strings.Split(strings.TrimRight(result, "\n"), "\n")
+	if len(rawLines) >= 3 {
+		last := len(rawLines) - 1
+		if rawLines[last-1] == "" && isReadArtifactFooter(rawLines[last]) {
+			rawLines = rawLines[:last-1]
+		}
+	}
 	rows := make([]readDisplayLine, 0, len(rawLines))
 	codeLines := make([]string, 0, len(rawLines))
 	sourceLineNo := startLine
@@ -708,6 +729,11 @@ func parseReadDisplayLines(result string, startLine int) ([]readDisplayLine, str
 	return rows, strings.Join(codeLines, "\n")
 }
 
+func isReadArtifactFooter(line string) bool {
+	const guidance = "Use read with offset/limit for line ranges, or shell with a script/parser for huge single-line structured output."
+	return strings.HasPrefix(line, "Full output saved to ") && strings.HasSuffix(line, guidance)
+}
+
 type readResultMeta struct {
 	StartLine     int
 	EndLine       int
@@ -715,7 +741,6 @@ type readResultMeta struct {
 	Truncated     bool
 	TruncatedKind string // "budget", "stale" or "superseded"; empty when only legacy text hints at truncation
 	RangeField    string // raw lines= field, set when it carries multiple segments
-	ArtifactPath  string // from a trailing "Full output saved to ..." line
 }
 
 type grepResultMeta struct {
@@ -771,15 +796,6 @@ func parseReadResultMeta(result string) (readResultMeta, bool) {
 		meta.Truncated = true
 		if m := readResultTruncatedKindRe.FindStringSubmatch(first); len(m) == 2 {
 			meta.TruncatedKind = m[1]
-		}
-	}
-	if idx := strings.LastIndex(trimmed, "Full output saved to "); idx >= 0 {
-		rest := strings.TrimSpace(trimmed[idx+len("Full output saved to "):])
-		if end := strings.IndexAny(rest, "\n"); end >= 0 {
-			rest = rest[:end]
-		}
-		if path := strings.TrimSuffix(strings.TrimSpace(rest), "."); path != "" {
-			meta.ArtifactPath = path
 		}
 	}
 	return meta, true

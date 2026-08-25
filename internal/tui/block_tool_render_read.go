@@ -67,7 +67,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 	hasDisclosure := false
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 		if meta, ok := parseReadResultMeta(b.ResultContent); ok {
-			readSummary = readResultSummary(meta)
+			readSummary = readResultSummary(meta, !b.Collapsed)
 			hasDisclosure = meta.StartLine > 0 && meta.EndLine >= meta.StartLine
 		}
 	}
@@ -100,7 +100,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
-func readResultSummary(meta readResultMeta) string {
+func readResultSummary(meta readResultMeta, includeDetails bool) string {
 	parts := make([]string, 0, 3)
 	if meta.RangeField != "" {
 		parts = append(parts, "lines "+meta.RangeField+" of "+strconv.Itoa(meta.Total))
@@ -111,7 +111,7 @@ func readResultSummary(meta readResultMeta) string {
 	} else {
 		parts = append(parts, fmt.Sprintf("no lines · %d total", meta.Total))
 	}
-	if meta.Truncated {
+	if includeDetails && meta.Truncated {
 		truncLabel := "output truncated"
 		switch meta.TruncatedKind {
 		case tools.ReadTruncatedStale:
@@ -120,9 +120,6 @@ func readResultSummary(meta readResultMeta) string {
 			truncLabel = "superseded result"
 		}
 		parts = append(parts, truncLabel)
-	}
-	if meta.ArtifactPath != "" {
-		parts = append(parts, "full output saved to "+meta.ArtifactPath)
 	}
 	return strings.Join(parts, " · ")
 }

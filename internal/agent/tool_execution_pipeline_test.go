@@ -62,6 +62,22 @@ func TestFormatToolExecutionOutputStillTruncatesOtherToolLongLines(t *testing.T)
 	}
 }
 
+func TestFormatToolExecutionOutputKeepsReadResultWithoutArtifact(t *testing.T) {
+	result := "READ_RESULT lines=1-1 total=1\n" + strings.Repeat("a", tools.MaxLineLength+100) + "\n"
+	sessionDir := t.TempDir()
+
+	got := formatToolExecutionOutput(result, sessionDir, "call-read", tools.NameRead, nil, "unused guidance")
+
+	if got != result {
+		t.Fatalf("read result was changed: got len=%d want len=%d", len(got), len(result))
+	}
+	if files, err := tools.ListArtifactFiles(sessionDir); err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	} else if len(files) != 0 {
+		t.Fatalf("read result should not create artifacts, got %v", files)
+	}
+}
+
 func TestToolExecutionPipelineWriteUpdatesFileStateAndTracker(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "notes.txt")

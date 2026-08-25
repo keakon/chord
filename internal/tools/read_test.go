@@ -350,19 +350,11 @@ func TestReadToolExecuteTruncatesOversizedFormattedOutputByTokenBudget(t *testin
 		t.Fatalf("truncated read output should fit inline budget: bytes=%d tokens=%d", len(got), estimateReadOutputTokens(got))
 	}
 	artifactPath := filepath.Join(sessionDir, sessionToolOutputsDirName, "read-result.log")
-	if !strings.Contains(got, "Full output saved to "+artifactPath+".") {
-		t.Fatalf("read output should mention full artifact %q, got %q", artifactPath, got)
+	if strings.Contains(got, "Full output saved to ") {
+		t.Fatalf("read output should direct callers to page the original file instead of an artifact, got %q", got)
 	}
-	data, err := os.ReadFile(artifactPath)
-	if err != nil {
-		t.Fatalf("read artifact: %v", err)
-	}
-	artifactHeader, artifactBody := readTestHeaderAndBody(t, string(data))
-	if strings.Contains(artifactHeader, "truncated") || !strings.Contains(artifactHeader, "lines=1-1200 total=1200") {
-		t.Fatalf("artifact header = %q, want full requested range without truncation", artifactHeader)
-	}
-	if strings.Count(artifactBody, "\n") != 1200 {
-		t.Fatalf("artifact body line count = %d, want 1200", strings.Count(artifactBody, "\n"))
+	if _, err := os.Stat(artifactPath); !os.IsNotExist(err) {
+		t.Fatalf("read should not create artifact %q, stat error = %v", artifactPath, err)
 	}
 }
 

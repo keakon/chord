@@ -212,13 +212,13 @@ func buildReadContent(header string, contentLines []string) string {
 	return b.String()
 }
 
-func truncateReadContentToBudget(contentLines []string, startLine, totalLines int, encoding, suffix string) (string, bool) {
+func truncateReadContentToBudget(contentLines []string, startLine, totalLines int, encoding string) string {
 	if len(contentLines) == 0 {
 		line := 0
 		if totalLines > 0 {
 			line = startLine
 		}
-		return buildReadContent(readResultHeader(line, max(line-1, 0), totalLines, 0, encoding, false), nil) + suffix, false
+		return buildReadContent(readResultHeader(line, max(line-1, 0), totalLines, 0, encoding, false), nil)
 	}
 
 	// The caller already narrowed contentLines to the requested offset/limit
@@ -234,7 +234,7 @@ func truncateReadContentToBudget(contentLines []string, startLine, totalLines in
 			header,
 			contentLines[:mid],
 		)
-		if readOutputFitsBudget(candidate + suffix) {
+		if readOutputFitsBudget(candidate) {
 			best = candidate
 			lo = mid + 1
 			continue
@@ -242,22 +242,10 @@ func truncateReadContentToBudget(contentLines []string, startLine, totalLines in
 		hi = mid - 1
 	}
 	if best != "" {
-		return best + suffix, true
+		return best
 	}
 	header := readResultHeader(startLine, max(startLine-1, 0), totalLines, requestedEndLine, encoding, true)
-	return buildReadContent(header, nil) + suffix, true
-}
-
-func readArtifactReference(contentLines []string, startLine, endLine, totalLines int, encoding, sessionDir string) string {
-	if strings.TrimSpace(sessionDir) == "" {
-		return ""
-	}
-	fullOutput := buildReadContent(readResultHeader(startLine, endLine, totalLines, 0, encoding, false), contentLines)
-	savedPath := saveFullOutput(fullOutput, sessionDir, "read-result")
-	if savedPath == "" {
-		return ""
-	}
-	return "Full output saved to " + savedPath + "."
+	return buildReadContent(header, nil)
 }
 
 func readOffsetPastEndError(offset, totalLines int, limit *int) error {
@@ -354,15 +342,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 	content := buildReadContent(readResultHeader(startLine, endLine, totalLines, 0, decoded.Encoding.Name, false), contentLines)
 	if !readOutputFitsBudget(content) {
-		suffix := ""
-		if ref := readArtifactReference(contentLines, startLine, endLine, totalLines, decoded.Encoding.Name, SessionDirFromContext(ctx)); ref != "" {
-			suffix = "\n" + ref + "\n"
-		}
-		var budgetTruncated bool
-		content, budgetTruncated = truncateReadContentToBudget(contentLines, offset+1, totalLines, decoded.Encoding.Name, suffix)
-		if !budgetTruncated {
-			content = strings.TrimSuffix(content, suffix)
-		}
+		content = truncateReadContentToBudget(contentLines, offset+1, totalLines, decoded.Encoding.Name)
 	}
 
 	if t.LSP != nil {
