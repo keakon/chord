@@ -203,10 +203,11 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | -------------------- | -------------------------------------------- | ----------------- |
 | `activity`           | Agent 进入新阶段                             | `agent_id`、`type`（如 `connecting`、`streaming`、`compacting`） 、`detail` |
 | `assistant_message`  | 一条完整 assistant 消息可供消费              | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`text`、`tool_calls`；main agent 的委托字段为空 |
-| `idle`               | 主 agent 与所有 SubAgent 均已全局静默，可再次接收输入 | `last_outcome`（`completed` / `cancelled` / `error`）、`suppress_user_notification`（仅配置操作导致的静默状态为 `true`） |
+| `idle`               | 主 agent 与所有 SubAgent 均已全局静默，可再次接收输入 | `last_outcome`（`completed` / `cancelled` / `error`）、`suppress_user_notification`（除非 agent 在上一次 idle 事件后运行过，否则为 `true`） |
 | `done_completion`   | 非 loop 模式下 Done 工具完成并给出最终报告 | `call_id`、`report`、`reason`、`status`、`agent_id`、`mode` |
 | `confirm_request`    | 某个工具需要显式确认                         | `request_id`、`tool_name`、`args_json`、`needs_approval`、`already_allowed`、`needs_approval_rules`、`already_allowed_rules`、`timeout_ms` |
 | `question_request`   | 模型向用户提问                               | `request_id`、`tool_name`、`question`、`options`、`option_details`、`default_answer`、`multiple`、`timeout_ms` |
+| `notification`       | agent 需要用户注意，但等待点不是标准 modal 请求 | `reason`、`message` |
 | `handoff_request`    | planner 已保存 handoff plan，需要 client 批准或拒绝执行 | `request_id`、`plan_path`、`plan_text`、`plan_error`、`agents[]`，元素包含 `{name, default, model_pools, current_model_pool}`；没有合法目标时 `agents` 为空列表 |
 | `local_shell_result` | `local_shell` 命令的执行结果                 | `command`、`output`、`failed`、`error` |
 | `agent_started`      | 某个委托的 SubAgent runtime 开始运行（包括 parked task 的按需 rehydrate） | `agent_id`、`previous_agent_id`（rehydrate 时存在）、`task_id`、`agent_type`、`description`、`parent_agent_id`、`parent_task_id` |
@@ -224,7 +225,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 进入静止状态的 SubAgent 可能释放 live runtime，但 task 与 transcript 会持久保留。后续获授权的定向通知可用新的 `agent_id` rehydrate 该任务；集成方应使用稳定的 `task_id` 路由，并根据 `agent_started.previous_agent_id` 替换 runtime 级标签。
 
-`idle` 是全局静默信号，不是单次请求完成信号。只要任一 agent 仍在运行、内部事件或需要处理的 mailbox 消息仍在排队，或某个 SubAgent 还有等待下一请求消费的输入，Chord 就不会发出 `idle`。目标 busy 时，排队消息会在下一个请求边界处理；可恢复但未运行的目标会先被唤醒。纯 progress mailbox 只表达信息，本身不会阻止全局 idle。`suppress_user_notification` 不改变 idle 状态收口，只告诉面向用户的集成不要为配置操作（例如手动切换 model pool）发出通用完成提醒。
+`idle` 是全局静默信号，不是单次请求完成信号。只要任一 agent 仍在运行、内部事件或需要处理的 mailbox 消息仍在排队、Handoff 决策还没完成，或某个 SubAgent 还有等待下一请求消费的输入，Chord 就不会发出 `idle`。目标 busy 时，排队消息会在下一个请求边界处理；可恢复但未运行的目标会先被唤醒。纯 progress mailbox 只表达信息，本身不会阻止全局 idle。`suppress_user_notification` 不改变 idle 状态收口，只告诉面向用户的集成：当这次静默之前并没有真实的 agent 工作（例如启动、会话 / model pool / MCP 切换或其它用户主动导航）时，不要发出通用完成提醒。除非 agent 在上一次 idle 事件之后确实运行过（主回合、loop 执行或活跃的 SubAgent 工作），否则该字段为 `true`。`notification` 则用于 runtime 明确等待用户输入的提醒；当前 `reason="user_input_required"` 覆盖权限、Question、Handoff 和 loop 决策。
 
 ## 通过 `send` 兼容 slash 命令
 

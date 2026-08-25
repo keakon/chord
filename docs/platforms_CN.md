@@ -56,7 +56,7 @@ ime_switch_target: com.apple.keylayout.ABC          # macOS 示例
 
 ### `desktop_notification`（终端通知）
 
-启用后，Chord 会在权限确认、问题待回答、agent 回到 idle 等事件时发出终端通知转义序列。Chord 不负责通知守护进程；具体显示依赖终端。
+启用后，Chord 只在 agent 真正运行过然后停下（回合完成、被取消、loop 结束，或所有 SubAgent 都完成）以及权限、Question、Handoff、loop 决策等待用户输入时发出终端通知转义序列；会话 / model pool / MCP 切换、空闲型斜杠命令这类用户主动操作导致回到 idle 时保持静默。Chord 不负责通知守护进程；具体显示依赖终端。
 
 当前实现会按终端自动选择协议；不支持的终端通常会忽略该序列。
 

@@ -116,35 +116,90 @@ func TestNonIdleActivityRearmsGlobalIdle(t *testing.T) {
 	if !a.emitGlobalIdleIfReady() {
 		t.Fatal("expected a new GlobalIdleEvent after intervening SubAgent activity")
 	}
+	var idle *GlobalIdleEvent
+	for _, evt := range drainAgentEvents(a.Events()) {
+		if candidate, ok := evt.(GlobalIdleEvent); ok {
+			idle = &candidate
+		}
+	}
+	if idle == nil || idle.SuppressUserNotification {
+		t.Fatalf("activity completion idle = %#v, want an unsuppressed GlobalIdleEvent", idle)
+	}
 }
 
-func TestModelPoolSwitchIdleSuppressionIsOneShot(t *testing.T) {
+func TestSilentBaselineSuppressesPendingCompletion(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	a.setIdleAndDrainPending()
+	a.markControlAction()
+
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected global idle after silent control flow")
+	}
+	var idle *GlobalIdleEvent
+	for _, event := range drainAgentEvents(a.Events()) {
+		if candidate, ok := event.(GlobalIdleEvent); ok {
+			idle = &candidate
+		}
+	}
+	if idle == nil || !idle.SuppressUserNotification {
+		t.Fatalf("silent control idle = %#v, want suppressed GlobalIdleEvent", idle)
+	}
+}
+
+func TestGlobalIdleSuppressionFollowsActivitySinceLastIdle(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+
+	// An agent that never ran must not surface an idle as a completion
+	// notification (startup, navigation, or configuration quiescence).
 	if !a.emitGlobalIdleIfReady() {
 		t.Fatal("expected initial global idle")
 	}
-	<-a.Events()
-
-	a.globalIdle.Store(false)
-	a.suppressNextGlobalIdleNotification = true
-	if !a.emitGlobalIdleIfReady() {
-		t.Fatal("expected suppressed global idle")
+	var idle *GlobalIdleEvent
+	for _, evt := range drainAgentEvents(a.Events()) {
+		if e, ok := evt.(GlobalIdleEvent); ok {
+			idle = &e
+		}
 	}
-	evt := <-a.Events()
-	if !evt.(GlobalIdleEvent).SuppressUserNotification {
-		t.Fatal("global idle was not marked to suppress user notification")
+	if idle == nil || !idle.SuppressUserNotification {
+		t.Fatal("idle without prior work must suppress user notification")
 	}
 
+	// A real task runs to completion: the following idle must notify.
+	a.newTurn()
+	a.emitGlobalIdleIfReady() // busy probe arms the saw-busy state
+	a.setIdleAndDrainPending()
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected global idle after a completed task")
+	}
+	idle = nil
+	for _, evt := range drainAgentEvents(a.Events()) {
+		if e, ok := evt.(GlobalIdleEvent); ok {
+			idle = &e
+		}
+	}
+	if idle == nil || idle.SuppressUserNotification {
+		t.Fatal("idle after a real task must surface a completion notification")
+	}
+
+	// The armed state is one-shot: a later idle without intervening work
+	// suppresses again.
 	a.globalIdle.Store(false)
 	if !a.emitGlobalIdleIfReady() {
-		t.Fatal("expected second global idle")
+		t.Fatal("expected a second global idle")
 	}
-	if evt := <-a.Events(); evt.(GlobalIdleEvent).SuppressUserNotification {
-		t.Fatal("suppression flag leaked into a later global idle")
+	idle = nil
+	for _, evt := range drainAgentEvents(a.Events()) {
+		if e, ok := evt.(GlobalIdleEvent); ok {
+			idle = &e
+		}
+	}
+	if idle == nil || !idle.SuppressUserNotification {
+		t.Fatal("idle after no intervening work must suppress again")
 	}
 }
 
-func TestModelPoolSwitchDoesNotSuppressPriorActivityIdle(t *testing.T) {
+func TestModelPoolSwitchAfterCompletedIdleStaysSilent(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 	if err := a.ApplyInitialModel("provider/model-a"); err != nil {
@@ -156,10 +211,23 @@ func TestModelPoolSwitchDoesNotSuppressPriorActivityIdle(t *testing.T) {
 	}
 	drainAgentEvents(a.Events())
 
-	// The real activity happened before the queued pool-switch event. The
-	// switch may be the last event processed before idle is emitted, but it must
-	// not claim the preceding task's completion notification.
-	a.emitActivity("main", ActivityExecuting, "working")
+	// A completed task is announced before a later model-pool switch. The
+	// switch itself must remain silent.
+	a.newTurn()
+	a.emitGlobalIdleIfReady() // busy probe arms the saw-busy state
+	a.setIdleAndDrainPending()
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected completed task idle")
+	}
+	var completedIdle bool
+	for _, evt := range drainAgentEvents(a.Events()) {
+		if idle, ok := evt.(GlobalIdleEvent); ok && !idle.SuppressUserNotification {
+			completedIdle = true
+		}
+	}
+	if !completedIdle {
+		t.Fatal("completed task idle was not user-visible")
+	}
 	a.SetCurrentModelPool("fast")
 	dispatchPendingEvents(t, a)
 
@@ -172,8 +240,8 @@ func TestModelPoolSwitchDoesNotSuppressPriorActivityIdle(t *testing.T) {
 	if idle == nil {
 		t.Fatal("model-pool switch did not emit global idle")
 	}
-	if idle.SuppressUserNotification {
-		t.Fatal("model-pool switch suppressed a prior real activity completion")
+	if !idle.SuppressUserNotification {
+		t.Fatal("model-pool switch emitted a task-completion notification")
 	}
 }
 
@@ -208,22 +276,47 @@ func TestModelPoolSwitchIsSilent(t *testing.T) {
 	}
 }
 
-func TestModelPoolSwitchSuppressionConsumedWhileBusy(t *testing.T) {
+func TestQueuedAutomaticWorkDoesNotArmCompletionNotification(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.suppressNextGlobalIdleNotification = true
+
+	// Queued automatic work (for example a pending user message the agent is
+	// about to drain into a new turn) keeps the agent from going idle. The
+	// probe that finds it must not arm the completion notification: the user
+	// is not waiting on anything yet.
 	a.pendingUserMessages = []pendingUserMessage{{Content: "queued task", FromUser: true}}
 	if a.emitGlobalIdleIfReady() {
 		t.Fatal("global idle emitted while work was queued")
-	}
-	if a.suppressNextGlobalIdleNotification {
-		t.Fatal("suppression flag survived a busy idle probe")
 	}
 	a.pendingUserMessages = nil
 	if !a.emitGlobalIdleIfReady() {
 		t.Fatal("expected global idle after work drained")
 	}
-	if evt := <-a.Events(); evt.(GlobalIdleEvent).SuppressUserNotification {
-		t.Fatal("suppression flag leaked into the real task-completion idle")
+	var idle *GlobalIdleEvent
+	for _, evt := range drainAgentEvents(a.Events()) {
+		if e, ok := evt.(GlobalIdleEvent); ok {
+			idle = &e
+		}
+	}
+	if idle == nil || !idle.SuppressUserNotification {
+		t.Fatal("idle after only queued automatic work must stay silent")
+	}
+
+	// A queued task that actually runs arms the notification for its own
+	// completion (the drain starts a real turn, which is real work).
+	a.newTurn()
+	a.emitGlobalIdleIfReady() // busy probe arms the saw-busy state
+	a.setIdleAndDrainPending()
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected global idle after the queued task ran")
+	}
+	idle = nil
+	for _, evt := range drainAgentEvents(a.Events()) {
+		if e, ok := evt.(GlobalIdleEvent); ok {
+			idle = &e
+		}
+	}
+	if idle == nil || idle.SuppressUserNotification {
+		t.Fatal("completion of a real queued task must surface a notification")
 	}
 }
 

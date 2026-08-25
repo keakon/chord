@@ -126,6 +126,13 @@ func (m *Model) handleAgentEvent(msg agentEventMsg) tea.Cmd {
 		m.clearRunningModelDisplay(evt.AgentID)
 	}
 	effects := agentEventEffects{}
+	switch evt := msg.event.(type) {
+	case agent.NotificationEvent:
+		if evt.Reason == agent.NotificationReasonUserInputRequired {
+			effects.addFollowup(m.maybeTerminalNotifyCmd(evt.Message))
+		}
+		return m.applyUIEffects(effects)
+	}
 
 	if handled, sub := m.handleStreamingAgentEvent(msg.event); handled {
 		effects.merge(sub)

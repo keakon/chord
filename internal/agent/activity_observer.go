@@ -29,9 +29,8 @@ func (a *MainAgent) SetActivityObserver(obs ActivityObserver) {
 // emitActivity sends an AgentActivityEvent to the TUI and notifies
 // the activity observer if one is registered.
 func (a *MainAgent) emitActivity(agentID string, activity ActivityType, detail string) {
-	if activity != ActivityIdle {
-		a.globalActivityEpoch.Add(1)
-		a.globalIdle.Store(false)
+	if activity != ActivityIdle && activity != ActivityCompacting {
+		a.markRealWorkStarted()
 	}
 	evt := AgentActivityEvent{
 		AgentID: agentID,

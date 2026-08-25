@@ -377,23 +377,24 @@ func (a *MainAgent) EventQueueStats() EventQueueStats {
 
 func (a *MainAgent) emitGlobalIdleIfReady() bool {
 	a.drainRunnableMailboxWork()
-	if a.currentTurn() != nil || a.loopKeepsMainBusy() || a.hasActiveSubAgentWork() || a.hasQueuedAutomaticWork() {
+	// Real work is marked when a MainAgent or SubAgent turn starts. Queued
+	// automatic work keeps the agent from going idle but cannot create a
+	// completion notification on its own.
+	if a.currentTurn() != nil || a.loopKeepsMainBusy() || a.hasActiveSubAgentWork() {
 		a.globalIdle.Store(false)
-		// The one-shot suppression is consumed here even though no idle fires:
-		// it must not bleed into a later real task-completion notification.
-		a.suppressNextGlobalIdleNotification = false
+		return false
+	}
+	if a.hasQueuedAutomaticWork() {
+		a.globalIdle.Store(false)
 		return false
 	}
 	a.parkQuiescentSubAgents()
 	if !a.globalIdle.CompareAndSwap(false, true) {
-		a.suppressNextGlobalIdleNotification = false
 		return false
 	}
-	activityEpoch := a.globalActivityEpoch.Load()
-	suppress := a.suppressNextGlobalIdleNotification &&
-		activityEpoch == a.lastGlobalIdleActivityEpoch
-	a.lastGlobalIdleActivityEpoch = activityEpoch
-	a.suppressNextGlobalIdleNotification = false
+	workEpoch := a.realWorkEpoch.Load()
+	suppress := workEpoch == a.lastIdleWorkEpoch
+	a.lastIdleWorkEpoch = workEpoch
 	a.emitInteractiveToTUI(a.parentCtx, GlobalIdleEvent{SuppressUserNotification: suppress})
 	a.fireHookBackground(a.parentCtx, hook.OnIdle, a.lastIdleTurnID.Load(), map[string]any{})
 	return true
@@ -439,6 +440,7 @@ func (a *MainAgent) hasQueuedAutomaticWork() bool {
 		strings.TrimSpace(a.pendingAutoContinuePrompt) != "" ||
 		strings.TrimSpace(a.pendingAutoContinueReplayPrompt) != "" ||
 		a.pendingCompactionResume != nil ||
+		a.pendingHandoff != nil ||
 		a.IsCompactionRunning() ||
 		a.mcpTransitionActive.Load()
 }
@@ -493,7 +495,7 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 			"event_type", fmt.Sprintf("%T", evt),
 			"status", e.Status,
 		}, true
-	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, AgentDoneEvent, GlobalIdleEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, SpawnFinishedEvent:
+	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, SpawnFinishedEvent:
 		return "TUI output channel full, waiting to deliver critical event", []any{
 			"event_type", fmt.Sprintf("%T", evt),
 		}, true

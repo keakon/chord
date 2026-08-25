@@ -108,37 +108,6 @@ func rawTerminalOutput(t *testing.T, cmd tea.Cmd) string {
 	return out
 }
 
-func rawTerminalOutputFromBatch(t *testing.T, cmd tea.Cmd) string {
-	t.Helper()
-	if cmd == nil {
-		t.Fatal("expected batch command")
-	}
-	msg := cmd()
-	batch, ok := msg.(tea.BatchMsg)
-	if !ok {
-		t.Fatalf("command message = %T, want tea.BatchMsg", msg)
-	}
-	var output strings.Builder
-	for _, sub := range batch {
-		if sub == nil {
-			continue
-		}
-		raw, ok := sub().(tea.RawMsg)
-		if !ok {
-			continue
-		}
-		text, ok := raw.Msg.(string)
-		if !ok {
-			t.Fatalf("raw terminal output = %T, want string", raw.Msg)
-		}
-		output.WriteString(text)
-	}
-	if output.Len() == 0 {
-		t.Fatal("batch did not contain raw terminal output")
-	}
-	return output.String()
-}
-
 func TestSanitizeNotificationPayload(t *testing.T) {
 	if g := sanitizeNotificationPayload("hello"); g != "hello" {
 		t.Fatalf("got %q", g)
@@ -338,17 +307,34 @@ func TestGlobalIdleEventSuppressedDoesNotNotify(t *testing.T) {
 	}
 }
 
+func TestNotificationEventNotifiesWhileLoopWaitsForUser(t *testing.T) {
+	m := NewModelWithSize(loopBusyAgentStub{}, 80, 24)
+	m.desktopNotificationsEnabled = true
+	m.terminalAppFocused = false
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.NotificationEvent{
+		Reason:  agent.NotificationReasonUserInputRequired,
+		Message: "Chord: Loop requires your decision",
+	}})
+	if got := rawTerminalOutput(t, cmd); got == "" {
+		t.Fatal("notification event produced no terminal notification")
+	}
+}
+
 func TestConfirmRequestNotifiesWhileLoopStillBusy(t *testing.T) {
 	m := NewModelWithSize(loopBusyAgentStub{}, 80, 24)
 	m.desktopNotificationsEnabled = true
 	m.terminalAppFocused = false
 
-	cmd := m.handleAgentEvent(agentEventMsg{event: agent.ConfirmRequestEvent{
+	if cmd := m.handleAgentEvent(agentEventMsg{event: agent.ConfirmRequestEvent{
 		ToolName:  tools.NameEdit,
 		ArgsJSON:  `{"path":"internal/tui/app.go","patch":"@@\n-old\n+new\n"}`,
 		RequestID: "req-1",
-	}})
-	if got := rawTerminalOutputFromBatch(t, cmd); got == "" {
+	}}); cmd == nil {
+		t.Fatal("confirm request did not open the interaction overlay")
+	}
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.NotificationEvent{Reason: agent.NotificationReasonUserInputRequired, Message: "Chord: Permission confirmation required"}})
+	if got := rawTerminalOutput(t, cmd); got == "" {
 		t.Fatalf("osc sequence = %q, want confirm notification while loop is busy", got)
 	}
 }
@@ -358,12 +344,15 @@ func TestQuestionRequestNotifiesWhileLoopStillBusy(t *testing.T) {
 	m.desktopNotificationsEnabled = true
 	m.terminalAppFocused = false
 
-	cmd := m.handleAgentEvent(agentEventMsg{event: agent.QuestionRequestEvent{
+	if cmd := m.handleAgentEvent(agentEventMsg{event: agent.QuestionRequestEvent{
 		RequestID: "q-1",
 		Question:  "Continue?",
 		Options:   []string{"Yes", "No"},
-	}})
-	if got := rawTerminalOutputFromBatch(t, cmd); got == "" {
+	}}); cmd == nil {
+		t.Fatal("question request did not open the interaction overlay")
+	}
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.NotificationEvent{Reason: agent.NotificationReasonUserInputRequired, Message: "Chord: Question requires your input"}})
+	if got := rawTerminalOutput(t, cmd); got == "" {
 		t.Fatalf("osc sequence = %q, want question notification while loop is busy", got)
 	}
 }

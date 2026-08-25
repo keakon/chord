@@ -56,6 +56,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Terminal notifications now follow runtime lifecycle boundaries: a completion reminder fires only after real agent work fully stops across the main agent and all SubAgents, queued input keeps the runtime silent while work continues, and explicit user-input waits (permissions, questions, Handoff, and loop decisions) notify immediately. Session, model-pool, MCP, and other control actions that settle into idle no longer announce "Ready for input". Idle still reaches runtime and headless consumers; user-input waits also use an explicit `notification` event.
 - Local terminal cards no longer show a phantom hidden line when command output ends with the usual newline, so `[space]` is only advertised when expanding reveals real content. Copying cards with `yy` now labels local commands as `TERMINAL (!):` rather than `User:`, and multi-card copies preserve `User:`, `Assistant:`, terminal, and tool boundaries consistently.
 - Resuming a session no longer degrades local terminal runs whose output ends with a newline into plain user messages. `/export` also writes those runs in the same clean `TERMINAL (!)` format instead of leaking the machine-readable payload record that only exists for restore.
 - Card copying now covers every card type consistently: `ERROR`, status, and boundary cards carry explicit labels instead of bare text, `skill` cards copy as name/path/body rather than raw JSON arguments, and tool results keep `[image: ...]` placeholders for attached images.

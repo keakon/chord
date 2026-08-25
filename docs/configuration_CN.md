@@ -815,7 +815,7 @@ ime_switch_target: com.apple.keylayout.ABC
 prevent_sleep: true
 ```
 
-- `desktop_notification`：启用本地 TUI 的终端通知。每次通知都会同时发出通知转义序列（按终端自动选择 OSC 9 或 OSC 777）和一声终端铃声（BEL）——终端聚焦时多数终端会隐藏通知横幅，铃声保证此时也能听到提示。Chord 会在权限确认、等待回答、agent 回到 idle 等事件时发送通知；铃声是否出声取决于终端配置，各终端的开启方式见[平台说明](platforms_CN.md)。
+- `desktop_notification`：启用本地 TUI 的终端通知。每次通知都会同时发出通知转义序列（按终端自动选择 OSC 9 或 OSC 777）和一声终端铃声（BEL）——终端聚焦时多数终端会隐藏通知横幅，铃声保证此时也能听到提示。Chord 只在 agent 真正运行过然后停下（回合完成、被取消、loop 结束，或所有 SubAgent 都完成）以及权限、Question、Handoff、loop 决策等待用户输入时通知；会话 / model pool / MCP 切换、空闲型斜杠命令这类用户主动操作导致回到空闲时保持静默。铃声是否出声取决于终端配置，各终端的开启方式见[平台说明](platforms_CN.md)。
 - `desktop_notification_foreground`：控制 TUI 聚焦时是否发送通知（转义序列和铃声一起），默认值为 `true`；设为 `false` 后仅在终端失焦时通知。
 - `ime_switch_target`：进入 Normal 模式时通过 `im-select`（Windows 为 `im-select.exe`）切换到指定输入法，回到 Insert 模式时恢复。常用于让快捷键在英文键盘布局下工作。
 - `prevent_sleep`：任意 agent 活跃时阻止 macOS 空闲睡眠，仅本地 TUI 模式生效。

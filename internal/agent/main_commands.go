@@ -132,6 +132,10 @@ func parseLoopOnCommand(content string) (target string, maxIterations int, maxSe
 
 func (a *MainAgent) tryHandleLoopSlashCommand(content string, busy bool) bool {
 	c := strings.TrimSpace(content)
+	controlOnly := !busy && (c == "/loop" || c == "/loop off")
+	if controlOnly {
+		a.markControlAction()
+	}
 	switch {
 	case c == "/loop off":
 		a.DisableLoopMode()
@@ -162,6 +166,9 @@ func (a *MainAgent) tryHandleLoopSlashCommand(content string, busy bool) bool {
 		}
 		target, maxIterations, maxSet, err := parseLoopOnCommand(c)
 		if err != nil {
+			if !busy {
+				a.markControlAction()
+			}
 			a.emitToTUI(ToastEvent{Message: "Usage: /loop on [target] [--max-iterations N] | /loop off", Level: "error"})
 			if !busy {
 				a.setIdleAndDrainPending()
@@ -204,6 +211,10 @@ func (a *MainAgent) tryHandleBusySlashCommand(content string) bool {
 }
 
 func (a *MainAgent) tryHandleSlashCommand(content string) bool {
+	// This helper is called only after the main turn has reached an input
+	// boundary. Any command it handles is a control action unless it starts a
+	// new turn itself; the latter advances the work epoch after this baseline.
+	a.markControlAction()
 	if a.tryHandleLoopSlashCommand(content, false) {
 		return true
 	}
@@ -215,6 +226,7 @@ func (a *MainAgent) tryHandleSlashCommand(content string) bool {
 		return true
 	case c == "/resume":
 		list, _ := a.ListSessionSummaries()
+		a.markControlAction()
 		a.emitToTUI(SessionSelectEvent{Sessions: list})
 		a.setIdleAndDrainPending()
 		return true

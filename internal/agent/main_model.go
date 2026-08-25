@@ -626,9 +626,6 @@ func (a *MainAgent) setCurrentModelPool(pool string) error {
 			return fmt.Errorf("/models: switch model: %w", err)
 		}
 		a.notifyMainRoutingChanged("model_pool_changed")
-		// The immediate switch may settle the runtime into quiescence; keep that
-		// moment from surfacing as a task-completion notification.
-		a.suppressNextGlobalIdleNotification = true
 	}
 	a.saveModelPoolState()
 
@@ -716,9 +713,6 @@ func (a *MainAgent) setAgentModelPool(agentName, pool string) error {
 			return fmt.Errorf("/models: switch model: %w", err)
 		}
 		a.notifyMainRoutingChanged("agent_model_pool_changed")
-		// The immediate switch may settle the runtime into quiescence; keep that
-		// moment from surfacing as a task-completion notification.
-		a.suppressNextGlobalIdleNotification = true
 	} else if a.mainLLMRequestInFlight.Load() || agentInFlight {
 		a.markAgentModelPoolSwitchPending(agentName)
 		a.notifySubAgentRoutingChanged(agentName, "agent_model_pool_changed")
@@ -731,9 +725,6 @@ func (a *MainAgent) setAgentModelPool(agentName, pool string) error {
 		return fmt.Errorf("/models: switch model: %w", err)
 	} else {
 		a.notifySubAgentRoutingChanged(agentName, "agent_model_pool_changed")
-		// The immediate switch may settle the runtime into quiescence; keep that
-		// moment from surfacing as a task-completion notification.
-		a.suppressNextGlobalIdleNotification = true
 	}
 	a.saveModelPoolState()
 

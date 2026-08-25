@@ -997,6 +997,22 @@ func TestHeadlessSuppressedGlobalIdleStillClearsBusyState(t *testing.T) {
 	}
 }
 
+func TestHeadlessNotificationEvent(t *testing.T) {
+	state := &headlessState{subscriptions: map[string]bool{"notification": true}}
+	envs := filterHeadlessEvent(agent.NotificationEvent{
+		Reason:  agent.NotificationReasonUserInputRequired,
+		Message: "Chord: Loop requires your decision",
+	}, state)
+	env := findHeadlessEnvelope(envs, "notification")
+	if env == nil {
+		t.Fatalf("notification envelope missing from %#v", envs)
+	}
+	payload, ok := env.Payload.(map[string]string)
+	if !ok || payload["reason"] != agent.NotificationReasonUserInputRequired || payload["message"] == "" {
+		t.Fatalf("notification payload = %#v", env.Payload)
+	}
+}
+
 func TestHeadlessActivityIdleFiltered(t *testing.T) {
 	state := &headlessState{}
 

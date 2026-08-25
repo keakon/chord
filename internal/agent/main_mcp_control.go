@@ -96,6 +96,9 @@ func (a *MainAgent) handleMCPControlEvent(evt Event) {
 		log.Errorf("handleMCPControlEvent: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
+	if a.currentTurn() == nil && !a.loopKeepsMainBusy() && !a.hasActiveSubAgentWork() {
+		a.markControlAction()
+	}
 	if req.Action == MCPControlEnable {
 		if len(req.Servers) == 0 {
 			req.Servers = a.visibleManualMCPServerNames()

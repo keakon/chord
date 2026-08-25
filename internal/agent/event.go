@@ -429,16 +429,30 @@ func (IdleEvent) agentEvent() {}
 // active work. Unlike IdleEvent, it is safe to use for user-facing completion
 // notifications and external idle protocols.
 //
-// SuppressUserNotification is set when the quiescence was caused by a
-// user-initiated configuration action rather than task completion (e.g. a
-// manual model-pool switch). Consumer-side idle state (headless control plane,
-// hooks) must keep processing the event regardless; only user-facing
-// completion notifications (such as terminal OSC) should honor this flag.
+// SuppressUserNotification is set when the agent reaches global quiescence
+// without a real work cycle since the previous GlobalIdleEvent. This includes
+// startup, session/navigation, and configuration actions. Consumer-side idle
+// state (headless control plane, hooks) must keep processing the event
+// regardless; only user-facing completion notifications (such as terminal OSC)
+// should honor this flag.
 type GlobalIdleEvent struct {
 	SuppressUserNotification bool
 }
 
 func (GlobalIdleEvent) agentEvent() {}
+
+// NotificationEvent requests a user-facing notification for a condition that
+// is not global idle. Confirm and Question keep their structured interaction
+// events; this event covers explicit waits that do not have a modal response
+// channel, such as a loop decision after the automatic Done limit is reached.
+type NotificationEvent struct {
+	Reason  string
+	Message string
+}
+
+func (NotificationEvent) agentEvent() {}
+
+const NotificationReasonUserInputRequired = "user_input_required"
 
 // PendingDraftConsumedEvent signals that a queued draft was actually appended
 // to the conversation context and is now part of the transcript.

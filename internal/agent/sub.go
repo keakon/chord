@@ -1047,6 +1047,9 @@ func isSubAgentInternalTool(toolName string) bool {
 
 // newTurn cancels any in-flight work and creates a fresh Turn.
 func (s *SubAgent) newTurn() *Turn {
+	if s.parent != nil {
+		s.parent.markRealWorkStarted()
+	}
 	s.turnMu.Lock()
 	defer s.turnMu.Unlock()
 	if s.turn != nil {

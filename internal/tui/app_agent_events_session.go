@@ -91,11 +91,9 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 			ForceDenyReason:     evt.ForceDenyReason,
 		}
 		effects.addFollowup(func() tea.Msg { return confirmRequestMsg{request: req} })
-		effects.addFollowup(m.maybeTerminalNotifyCmd("Chord: Permission confirmation required"))
 		return true, effects
 	case agent.QuestionRequestEvent:
 		effects.addFollowup(injectQuestionRequestFromEvent(evt))
-		effects.addFollowup(m.maybeTerminalNotifyCmd("Chord: Question requires your input"))
 		return true, effects
 	default:
 		return false, effects

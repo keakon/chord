@@ -155,7 +155,12 @@ func (s *loopRuntimeState) recordAutoExitIntercept() int {
 }
 
 func (a *MainAgent) markLoopExitDecisionRequired() {
-	a.emitToTUI(InfoEvent{Message: fmt.Sprintf("Loop requires user decision: automatic Done interception limit reached (%d). Approve exit or deny to continue.", a.loopState.MaxIterations)})
+	message := fmt.Sprintf("Loop requires user decision: automatic Done interception limit reached (%d). Approve exit or deny to continue.", a.loopState.MaxIterations)
+	a.emitToTUI(InfoEvent{Message: message})
+	a.emitToTUI(NotificationEvent{
+		Reason:  NotificationReasonUserInputRequired,
+		Message: "Chord: Loop requires your decision",
+	})
 	a.clearCurrentTurnKeepLoopState()
 }
 

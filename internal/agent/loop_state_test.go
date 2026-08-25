@@ -1969,6 +1969,22 @@ done: allow
 	}
 }
 
+func TestLoopExitDecisionRequiredEmitsUserInputNotification(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.MaxIterations = 1
+	a.markLoopExitDecisionRequired()
+
+	var notified bool
+	for len(a.outputCh) > 0 {
+		if evt, ok := (<-a.outputCh).(NotificationEvent); ok && evt.Reason == NotificationReasonUserInputRequired {
+			notified = true
+		}
+	}
+	if !notified {
+		t.Fatal("expected user-input notification while loop waits for Done decision")
+	}
+}
+
 func TestHandleUserMessageBusyLoopOnUpdatesTargetAndMaxIterations(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())

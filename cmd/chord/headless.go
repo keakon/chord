@@ -187,6 +187,7 @@ var headlessEventTypes = map[string]bool{
 	"idle":               true,
 	"confirm_request":    true,
 	"question_request":   true,
+	"notification":       true,
 	"handoff_request":    true,
 	"error":              true,
 	"agent_started":      true,
@@ -295,6 +296,14 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			out = append(out, &headlessEnvelope{Type: "idle", Payload: map[string]any{
 				"last_outcome":               outcome,
 				"suppress_user_notification": e.SuppressUserNotification,
+			}})
+		}
+	case agent.NotificationEvent:
+		state.updatedAt = time.Now()
+		if state.isSubscribed("notification") {
+			out = append(out, &headlessEnvelope{Type: "notification", Payload: map[string]string{
+				"reason":  e.Reason,
+				"message": e.Message,
 			}})
 		}
 	case agent.ErrorEvent:

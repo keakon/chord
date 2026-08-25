@@ -141,6 +141,9 @@ func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.C
 	a.setFocusedTaskID("")
 	a.clearSystemPromptOverride()
 	a.newTurn()
+	// A session switch is user-initiated navigation, not task completion:
+	// reset the notification baseline after cancelling the old turn.
+	a.markControlAction()
 	turnCtx := a.turn.Ctx
 	a.pendingUserMessages = nil
 	a.abandonPendingHandoff()

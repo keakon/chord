@@ -101,7 +101,7 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 	}); err != nil {
 		return ConfirmResponse{}, err
 	}
-
+	a.emitToTUI(NotificationEvent{Reason: NotificationReasonUserInputRequired, Message: "Chord: Permission confirmation required"})
 	return a.interaction.awaitConfirm(ctx, ch, timeout, toolName)
 }
 
@@ -158,7 +158,7 @@ func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.Question
 			a.interaction.unregisterQuestion(requestID)
 			return nil, err
 		}
-
+		a.emitToTUI(NotificationEvent{Reason: NotificationReasonUserInputRequired, Message: "Chord: Question requires your input"})
 		resp, err := a.interaction.awaitQuestion(ctx, ch, timeout)
 		a.interaction.unregisterQuestion(requestID)
 		if err != nil {
