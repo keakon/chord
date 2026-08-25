@@ -1230,3 +1230,90 @@ func TestRelToProcessWorkingDir(t *testing.T) {
 		t.Fatalf("parent of cwd = %q, want \"\" (escapes upward)", got)
 	}
 }
+
+// Collapsed edit/apply_patch success is a single header line like
+// read/grep/glob/write: path, parameters and the +/- line count summary merge
+// into the header instead of a second "↳" body line.
+
+func TestEditCollapsedSingleHeaderLineMergesDiffSummary(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		Content:       `{"path":"src/demo.go","patch":"@@\n-old\n+new\n"}`,
+		Collapsed:     true,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultContent: "Applied patch to src/demo.go (+1 -1)",
+		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(plain, "✓ ▸ edit src/demo.go · +1 -1 lines") {
+		t.Fatalf("collapsed edit must be a single header line with the diff summary; got:\n%s", plain)
+	}
+	if strings.Contains(plain, "↳") || strings.Contains(plain, "Applied patch") {
+		t.Fatalf("collapsed edit must not keep a second body line or the verbatim result; got:\n%s", plain)
+	}
+
+	block.ToggleAtWidth(120)
+	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(expanded, "✓ ▾ edit src/demo.go · +1 -1 lines") || !strings.Contains(expanded, "-old") || !strings.Contains(expanded, "+new") {
+		t.Fatalf("expanded edit should show the expanded disclosure and the diff; got:\n%s", expanded)
+	}
+}
+
+func TestApplyPatchCollapsedSingleHeaderLineMergesFileAndDiffSummary(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	args := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameApplyPatch,
+		Content:       applyPatchToolDisplayArgs(args),
+		RawArgs:       args,
+		Collapsed:     true,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultContent: "Applied patch to src/demo.go (+1 -1)",
+		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(plain, "✓ ▸ apply_patch src/demo.go · 1 file · +1 -1 lines") {
+		t.Fatalf("collapsed apply_patch must merge file/diff counts into the header; got:\n%s", plain)
+	}
+	if strings.Contains(plain, "↳") || strings.Contains(plain, "Applied patch") {
+		t.Fatalf("collapsed apply_patch must not keep a second body line or the verbatim result; got:\n%s", plain)
+	}
+
+	block.ToggleAtWidth(120)
+	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(expanded, "✓ ▾ apply_patch src/demo.go · 1 file · +1 -1 lines") || !strings.Contains(expanded, "-old") || !strings.Contains(expanded, "+new") {
+		t.Fatalf("expanded apply_patch should keep the diff summary inline and show the diff; got:\n%s", expanded)
+	}
+}
+
+func TestEditCollapsedErrorKeepsErrorBlockWithoutHeaderSummary(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		Content:       `{"path":"src/demo.go","patch":"@@\n-old\n+new\n"}`,
+		Collapsed:     true,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "hunk not found",
+		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(plain, "↳ Error:") || !strings.Contains(plain, "hunk not found") {
+		t.Fatalf("expected the error block to render; got:\n%s", plain)
+	}
+	if strings.Contains(plain, "· error") {
+		t.Fatalf("collapsed error header must not repeat an error summary; got:\n%s", plain)
+	}
+}

@@ -3,18 +3,22 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
-
-	"github.com/mattn/go-runewidth"
 )
 
-// Width budget for the extra arguments appended to a Write header: the card
-// width minus the room taken by the prefix, tool name and file path, floored
-// so a narrow card still shows something.
-const (
-	writeHeaderExtrasReservedWidth = 24
-	writeHeaderExtrasMinWidth      = 20
-)
+// writeSuccessResultRe parses the canonical write result line
+// "Successfully wrote 71 lines, 2113 bytes" so the collapsed card can carry
+// the counts as header facts instead of a second "↳" body line.
+var writeSuccessResultRe = regexp.MustCompile(`^Successfully wrote (\d+) (line|lines), (\d+) (byte|bytes)$`)
+
+func writeSuccessCountSummary(s string) string {
+	m := writeSuccessResultRe.FindStringSubmatch(strings.TrimSpace(s))
+	if len(m) != 5 {
+		return ""
+	}
+	return m[1] + " " + m[2] + " · " + m[3] + " " + m[4]
+}
 
 type writeResultSections struct {
 	summary     string
@@ -82,6 +86,29 @@ func writeDiagnosticsSummary(diagnostics string) string {
 	return "diagnostics"
 }
 
+// writeCollapsedHeaderSummary builds the single-line collapsed header fact for
+// a successful write: the canonical "Successfully wrote N lines, M bytes"
+// result becomes "N lines · M bytes" (mirroring the grep/glob count summary),
+// followed by " · N diagnostics" when LSP diagnostics were produced. Non
+// canonical results fall back to the content-derived summary.
+func writeCollapsedHeaderSummary(b *Block, fileContent string, sections writeResultSections) string {
+	summary := writeSuccessCountSummary(sections.summary)
+	if summary == "" {
+		summary = writeOperationSummary(b, fileContent, sections)
+		if parsed := writeSuccessCountSummary(summary); parsed != "" {
+			summary = parsed
+		}
+	}
+	if diagnosticSummary := writeDiagnosticsSummary(sections.diagnostics); diagnosticSummary != "" {
+		if summary != "" {
+			summary += " · " + diagnosticSummary
+		} else {
+			summary = diagnosticSummary
+		}
+	}
+	return summary
+}
+
 // renderWriteCall renders a Write tool call result with a syntax-highlighted
 // preview of the written file content.
 func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
@@ -124,23 +151,21 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	if b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() && fileContent != "" {
 		prefix = renderToolDisclosurePrefix(prefix, !b.Collapsed)
 	}
-	var result []string
-	headerLine := renderToolHeaderLine(prefix, b.ToolName)
-	if filePath != "" {
-		headerLine += " " + DimStyle.Render(filePath)
-	}
-	if extraText := strings.Join(extras, ", "); extraText != "" {
-		if budget := max(cardWidth-writeHeaderExtrasReservedWidth, writeHeaderExtrasMinWidth); runewidth.StringWidth(stripANSI(extraText)) > budget {
-			extraText = truncateToolHeaderGray(extraText, budget)
-		}
-		headerLine += " " + DimStyle.Render(extraText)
-	}
-	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
-	result = append(result, headerLine)
+	// The result summary has to be known before the header is built, because a
+	// write that reports line/byte counts merges them into the header line.
+	// Building the header once keeps one truncation policy per card: the path
+	// and parameters were previously appended by hand and then re-budgeted by
+	// appendSearchHeaderSummary only on the counted path, so the same long path
+	// could be shortened two different ways depending on the result text.
 	sections := writeResultSections{}
+	headerSummary := ""
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 		sections = splitWriteResult(b.ResultContent)
+		headerSummary = writeSuccessCountSummary(sections.summary)
 	}
+	headerLine := appendSearchHeaderSummary(renderToolHeaderLine(prefix, b.ToolName), filePath, strings.Join(extras, ", "), headerSummary, cardWidth-4)
+	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
+	result := []string{headerLine}
 
 	if b.Collapsed {
 		if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
@@ -156,22 +181,24 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 				}
 			}
 		} else {
-			summary := writeOperationSummary(b, fileContent, sections)
-			if summary != "" {
-				result = append(result, ToolResultStyle.Render("  ↳ "+summary))
-			}
-			if diagnosticSummary := writeDiagnosticsSummary(sections.diagnostics); diagnosticSummary != "" {
-				result = append(result, ToolResultStyle.Render("  ↳ "+diagnosticSummary))
-			}
+			// Collapsed success is a single header line like read/grep/glob:
+			// path, parameters and the line/byte counts merge into the header
+			// (parameters drop first when narrow), and the diagnostics count
+			// rides along as a header fact.
+			headerLine = appendSearchHeaderSummary(
+				renderToolHeaderLine(prefix, b.ToolName),
+				filePath,
+				strings.Join(extras, ", "),
+				writeCollapsedHeaderSummary(b, fileContent, sections),
+				cardWidth-4,
+			)
+			headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
+			result = []string{headerLine}
 		}
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
-		summary := writeOperationSummary(b, fileContent, sections)
-		if summary != "" {
-			result = append(result, "  "+DimStyle.Render(summary))
-		}
 		rows, sourceSample := parsePlainContentPreviewLines(fileContent)
 		if len(rows) > 0 {
 			result = append(result, renderNumberedToolPreview(numberedToolPreviewOptions{

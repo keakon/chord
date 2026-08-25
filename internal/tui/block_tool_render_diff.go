@@ -121,10 +121,6 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		prefix = renderToolDisclosurePrefix(prefix, !b.Collapsed)
 	}
 	var result []string
-	headerLine := renderToolHeaderLine(prefix, b.ToolName)
-	if filePath != "" {
-		headerLine += " " + DimStyle.Render(filePath)
-	}
 	replaceArgs, hasReplaceArgs := replaceEditArgs{}, false
 	var headerOpts []string
 	if b.ToolName == tools.NameEdit {
@@ -134,16 +130,28 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		}
 	}
 	headerOpts = append(headerOpts, b.diagnosticHeaderOptions()...)
-	headerLine = appendToolHeaderSummary(headerLine, "", mergeHeaderOptions("", headerOpts), "", cardWidth-4)
+	// Success renders as a single header line like read/grep/glob/write in
+	// both fold states: path, parameters and the +/- line count summary merge
+	// into the header (parameters drop first when narrow); error and cancelled
+	// details stay in the body below.
+	headerSummary := ""
+	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
+		headerSummary = b.fileDiffSummaryLine(applyPatchTargets, displayDiff)
+		if applyPatchNoChanges {
+			if headerSummary != "" {
+				headerSummary += " · "
+			}
+			headerSummary += "No changes"
+		}
+		if headerSummary == "" && strings.TrimSpace(b.ResultContent) != "" {
+			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, toolDisplayResultContent(b)))
+			headerSummary = truncateOneLine(displayResult, cardWidth-26)
+		}
+	}
+	headerLine := appendSearchHeaderSummary(renderToolHeaderLine(prefix, b.ToolName), filePath, mergeHeaderOptions("", headerOpts), headerSummary, cardWidth-4)
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
 	if b.Collapsed {
-		if summary := b.fileDiffSummaryLine(applyPatchTargets, displayDiff); summary != "" {
-			result = append(result, ToolResultStyle.Render("  ↳ "+summary))
-		}
-		if applyPatchNoChanges {
-			result = append(result, DimStyle.Render("  ▸ ↳ No changes"))
-		}
 		if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
 			result = append(result, ErrorStyle.Render("  ↳ Error:"))
 			for _, line := range wrapText(sanitizeToolDisplayText(toolDisplayResultContent(b)), cardWidth-8) {
@@ -156,12 +164,6 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 					result = append(result, DimStyle.Render("    "+line))
 				}
 			}
-		} else if strings.TrimSpace(displayDiff) == "" && strings.TrimSpace(b.ResultContent) != "" &&
-			!(b.ToolName == tools.NameApplyPatch && b.ResultDone && hasOperationSummaries && !b.toolResultIsError() && !b.toolResultIsCancelled()) {
-			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, toolDisplayResultContent(b)))
-			lineCount := len(strings.Split(displayResult, "\n"))
-			summary := truncateOneLine(displayResult, cardWidth-26)
-			result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ %s (%d lines)", summary, lineCount)))
 		}
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}

@@ -161,7 +161,7 @@ func (b *Block) fileDiffSummaryLine(applyPatchTargets []tools.ApplyPatchDisplayT
 			files = len(applyPatchTargets)
 		}
 		if files > 0 {
-			parts = append(parts, fmt.Sprintf("%d files", files))
+			parts = append(parts, fmt.Sprintf("%d %s", files, pluralizeToolCount("file", files)))
 		}
 	}
 	if meta.Added > 0 || meta.Removed > 0 {
@@ -174,8 +174,7 @@ func (b *Block) fileDiffSummaryLine(applyPatchTargets []tools.ApplyPatchDisplayT
 			parts = append(parts, "diagnostics")
 		}
 	}
-	if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
-		parts = append(parts, "error")
-	}
+	// Error results return no summary: the collapsed card renders the ↳ Error
+	// block instead, and the header must not repeat "· error".
 	return strings.Join(parts, " · ")
 }
