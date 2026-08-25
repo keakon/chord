@@ -143,9 +143,10 @@ func kittyPlaceholderRow(row, cols int) string {
 	var sb strings.Builder
 	for col := range cols {
 		sb.WriteRune(xkitty.Placeholder)
-		if col == 0 {
+		switch col {
+		case 0:
 			sb.WriteRune(xkitty.Diacritic(row))
-		} else if col == 1 {
+		case 1:
 			sb.WriteRune(xkitty.Diacritic(row))
 			sb.WriteRune(xkitty.Diacritic(col))
 		}

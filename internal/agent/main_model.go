@@ -421,7 +421,7 @@ func (a *MainAgent) ModelsStatusText() string {
 	if a.modelPoolPolicy == nil {
 		return "Model pool policy not configured"
 	}
-	var sb strings.Builder
+	sb := new(strings.Builder)
 	currentModelPool := a.modelPoolPolicy.CurrentModelPool()
 	currentModelPoolStatus := ""
 	if currentModelPool != "" {
@@ -437,7 +437,7 @@ func (a *MainAgent) ModelsStatusText() string {
 			currentModelPoolStatus = " (missing)"
 		}
 	}
-	sb.WriteString(fmt.Sprintf("Model pool: %s%s\n", currentModelPool, currentModelPoolStatus))
+	fmt.Fprintf(sb, "Model pool: %s%s\n", currentModelPool, currentModelPoolStatus)
 	overrides := a.modelPoolPolicy.Overrides()
 	if len(overrides) > 0 {
 		sb.WriteString("Fixed agent pools:\n")
@@ -453,7 +453,7 @@ func (a *MainAgent) ModelsStatusText() string {
 			if cfg != nil && !cfg.HasPool(pool) {
 				status = " (missing)"
 			}
-			sb.WriteString(fmt.Sprintf("  %s: %s%s\n", name, pool, status))
+			fmt.Fprintf(sb, "  %s: %s%s\n", name, pool, status)
 		}
 	}
 	sb.WriteString("\nAgent effective pools:\n")
@@ -467,9 +467,9 @@ func (a *MainAgent) ModelsStatusText() string {
 		pool := a.modelPoolPolicy.EffectivePool(name, cfg)
 		models := a.modelPoolPolicy.EffectiveModels(name, cfg)
 		if pool == "" {
-			sb.WriteString(fmt.Sprintf("  %s: (no pool)\n", name))
+			fmt.Fprintf(sb, "  %s: (no pool)\n", name)
 		} else {
-			sb.WriteString(fmt.Sprintf("  %s: %s (%d model(s))\n", name, pool, len(models)))
+			fmt.Fprintf(sb, "  %s: %s (%d model(s))\n", name, pool, len(models))
 		}
 	}
 	return sb.String()
