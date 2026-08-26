@@ -241,7 +241,11 @@ func appendCancelledResultLines(result []string, content string, width int) []st
 	return result
 }
 
-func appendToolElapsedFooter(result []string, b *Block) []string {
+// appendToolElapsedToHeader appends the tool elapsed label to the header line
+// (result[0]) so the time stays in place whether the card is collapsed or
+// expanded, instead of moving to the end of the body. cardWidth bounds the
+// header so a near-full header is truncated rather than overflowing the card.
+func appendToolElapsedToHeader(result []string, b *Block, cardWidth int) []string {
 	if b == nil || !b.ResultDone {
 		return result
 	}
@@ -249,17 +253,47 @@ func appendToolElapsedFooter(result []string, b *Block) []string {
 	if elapsed == "" && tools.NormalizeName(b.ToolName) == tools.NameShell {
 		elapsed = shellDurationNoteLabel(b.ResultContent)
 	}
-	if elapsed != "" {
-		result = append(result, "")
-		result = append(result, "  "+DimStyle.Render(fmt.Sprintf("⏱ %s", elapsed)))
+	if elapsed != "" && len(result) > 0 {
+		result[0] = appendToolElapsedSuffix(result[0], elapsed, cardWidth-4)
 	}
 	return result
+}
+
+// appendToolElapsedSuffix appends " · ⏱ <elapsed>" to a header line, truncating
+// the header with "…" when needed so the elapsed stays visible within maxWidth.
+// Mirrors appendToolProgressSuffix so the header never overflows the card.
+func appendToolElapsedSuffix(headerLine, elapsed string, maxWidth int) string {
+	suffix := DimStyle.Render(" · ⏱ " + elapsed)
+	if maxWidth <= 0 {
+		return headerLine + suffix
+	}
+	if runewidth.StringWidth(stripANSI(headerLine+suffix)) <= maxWidth {
+		return headerLine + suffix
+	}
+	suffixWidth := runewidth.StringWidth(stripANSI(suffix))
+	if suffixWidth >= maxWidth {
+		return headerLine
+	}
+	headerBudget := maxWidth - suffixWidth
+	if headerBudget < 1 {
+		return headerLine
+	}
+	truncatedHeader := ansi.Truncate(headerLine, headerBudget, "…")
+	if runewidth.StringWidth(stripANSI(truncatedHeader+suffix)) <= maxWidth {
+		return truncatedHeader + suffix
+	}
+	plainHeader := runewidth.Truncate(stripANSI(headerLine), headerBudget, "…")
+	return plainHeader + suffix
 }
 
 func shellDurationNoteLabel(result string) string {
 	matches := shellDurationNoteRE.FindStringSubmatch(result)
 	if len(matches) == 2 {
-		return matches[1] + "s"
+		seconds, err := strconv.ParseFloat(matches[1], 64)
+		if err != nil || seconds < 1 {
+			return ""
+		}
+		return fmt.Sprintf("%ds", int(seconds))
 	}
 	return ""
 }

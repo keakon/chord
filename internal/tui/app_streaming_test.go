@@ -327,12 +327,6 @@ func TestInterleavedAgentThinkingStreamsKeepIndependentCards(t *testing.T) {
 	if subBlock.Streaming || m.streamState("agent-1").thinking != nil {
 		t.Fatal("subagent thinking completion did not settle its own block")
 	}
-	if mainBlock.ThinkingDuration != 0 {
-		t.Fatalf("main thinking duration = %v before main completion, want 0", mainBlock.ThinkingDuration)
-	}
-	if subBlock.ThinkingDuration == 0 {
-		t.Fatal("subagent thinking duration was not recorded")
-	}
 }
 
 func TestStreamingAssistantPlaceholderRendersNoCard(t *testing.T) {
@@ -592,9 +586,6 @@ func TestToolCallInsideThinkingBlockKeepsOneThinkingCard(t *testing.T) {
 	if thinkingBlock == nil {
 		t.Fatal("expected an active thinking block")
 	}
-	// Backdate the clock so the recorded duration must span the whole block.
-	m.thinkingStartTime = time.Now().Add(-3 * time.Second)
-
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-1",
 		Name:     tools.NameShell,
@@ -606,9 +597,6 @@ func TestToolCallInsideThinkingBlockKeepsOneThinkingCard(t *testing.T) {
 	}
 	if !thinkingBlock.Streaming {
 		t.Fatal("tool call settled a thinking block whose wire block is still open")
-	}
-	if thinkingBlock.ThinkingDuration != 0 {
-		t.Fatalf("thinking duration = %v, want it frozen only on thinking_end", thinkingBlock.ThinkingDuration)
 	}
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "e."}})
@@ -622,9 +610,6 @@ func TestToolCallInsideThinkingBlockKeepsOneThinkingCard(t *testing.T) {
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{}})
 	if thinkingBlock.Streaming || m.currentThinkingBlock != nil {
 		t.Fatal("thinking_end did not settle the thinking block")
-	}
-	if thinkingBlock.ThinkingDuration < 3*time.Second {
-		t.Fatalf("thinking duration = %v, want the full block span", thinkingBlock.ThinkingDuration)
 	}
 
 	var thinkingCards, toolCards int

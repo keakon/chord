@@ -9325,43 +9325,30 @@ func TestAgentNotifyCreatesCardInTargetView(t *testing.T) {
 	}
 }
 
-func TestThinkingDurationFrozenOnStreamThinkingEvent(t *testing.T) {
-	// When StreamThinkingEvent (thinking_end) arrives, ThinkingDuration
-	// should be frozen immediately rather than waiting for
-	// finalizeAssistantBlock(). This prevents tool call execution time
-	// from being incorrectly included in the thinking duration.
+func TestThinkingStreamEndsOnStreamThinkingEvent(t *testing.T) {
+	// When StreamThinkingEvent (thinking_end) arrives, the current thinking
+	// card is settled and detached so the next round starts a fresh card.
 	m := NewModelWithSize(nil, 80, 12)
 
 	// Start thinking.
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "I need to analyze this carefully.", AgentID: ""}})
 
-	// thinking_end — duration should be frozen now and the block detached.
+	// thinking_end settles the block and detaches it.
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{AgentID: ""}})
 
 	if m.currentThinkingBlock != nil {
 		t.Fatal("expected currentThinkingBlock to be detached after StreamThinkingEvent so the next round starts a fresh card")
 	}
-	if !m.thinkingStartTime.IsZero() {
-		t.Fatal("expected thinkingStartTime to be cleared after StreamThinkingEvent froze the duration")
-	}
-
 	thinkingBlock := findThinkingBlockInViewport(m.viewport)
 	if thinkingBlock == nil {
 		t.Fatal("expected a thinking block in viewport after thinking_end")
-	}
-	if thinkingBlock.ThinkingDuration == 0 {
-		t.Fatal("expected ThinkingDuration to be frozen after StreamThinkingEvent, got 0")
 	}
 	if thinkingBlock.Streaming {
 		t.Fatal("expected settled thinking block to have Streaming=false")
 	}
 
-	// Record the frozen duration.
-	frozenDuration := thinkingBlock.ThinkingDuration
-
-	// A subsequent tool call (which triggers finalizeAssistantBlock) must
-	// not recompute the duration on the already-settled block.
+	// A subsequent tool call must not alter the already-settled block.
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:   "call-1",
 		Name: "read",
@@ -9370,9 +9357,6 @@ func TestThinkingDurationFrozenOnStreamThinkingEvent(t *testing.T) {
 	thinkingBlock = findThinkingBlockInViewport(m.viewport)
 	if thinkingBlock == nil {
 		t.Fatal("expected a thinking block in viewport")
-	}
-	if thinkingBlock.ThinkingDuration != frozenDuration {
-		t.Fatalf("ThinkingDuration changed after finalize: was %v, now %v", frozenDuration, thinkingBlock.ThinkingDuration)
 	}
 }
 
@@ -9383,6 +9367,35 @@ func findThinkingBlockInViewport(v *Viewport) *Block {
 		}
 	}
 	return nil
+}
+
+func TestSubAgentThinkingStreamEndsOnStreamThinkingEvent(t *testing.T) {
+	// SubAgent reducers commit the full thinking block at thinking_end.
+	m := NewModelWithSize(nil, 80, 12)
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "Planning safe branch update preserving changes", AgentID: "sub-1"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingEvent{Text: "Planning safe branch update preserving changes", AgentID: "sub-1"}})
+
+	thinkingBlock := findThinkingBlockInViewport(m.viewport)
+	if thinkingBlock == nil {
+		// SubAgent blocks are filtered out of visibleBlocks() by the default
+		// main-agent filter, so fall back to the raw block list.
+		for _, b := range m.viewport.blocks {
+			if b.Type == BlockThinking && b.AgentID == "sub-1" {
+				thinkingBlock = b
+				break
+			}
+		}
+	}
+	if thinkingBlock == nil {
+		t.Fatal("expected a sub-agent thinking block after thinking_end")
+	}
+	if thinkingBlock.Streaming {
+		t.Fatal("expected settled sub-agent thinking block to have Streaming=false")
+	}
+	rendered := stripANSI(strings.Join(thinkingBlock.Render(80, ""), "\n"))
+	if !strings.Contains(rendered, "Planning safe branch update preserving changes") {
+		t.Fatalf("expected rendered sub-agent thinking to keep content; got:\n%s", rendered)
+	}
 }
 
 func TestThinkingTranslatedEventTargetsExactThinkingBlock(t *testing.T) {
@@ -9572,13 +9585,13 @@ func TestStreamingThinkingBlocksIncrementThinkingBlockIndex(t *testing.T) {
 	}
 }
 
-func TestThinkingDurationFallbackInFinalizeWhenNoThinkingEnd(t *testing.T) {
+func TestThinkingFinalizeWithoutThinkingEnd(t *testing.T) {
 	// When thinking_end is never received (e.g. cancellation), finalizing the
-	// turn should still compute ThinkingDuration as a fallback.
+	// turn should still settle the thinking block.
 	//
 	// A tool call is deliberately not such a terminal point: gateways may
 	// splice a tool_use block into the middle of one thinking block, so the
-	// duration stays owned by thinking_end there. See
+	// completion stays owned by thinking_end there. See
 	// TestToolCallInsideThinkingBlockKeepsOneThinkingCard.
 	m := NewModelWithSize(nil, 80, 12)
 
@@ -9586,13 +9599,9 @@ func TestThinkingDurationFallbackInFinalizeWhenNoThinkingEnd(t *testing.T) {
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: "Analyzing...", AgentID: ""}})
 
-	if m.thinkingStartTime.IsZero() {
-		t.Fatal("expected thinkingStartTime to be set after ThinkingStartedEvent")
-	}
-
 	m.finalizeTurn()
 
-	// The thinking block should have a duration computed by the fallback.
+	// The thinking block should be settled by the fallback.
 	blocks := m.viewport.visibleBlocks()
 	var thinkingBlock *Block
 	for _, b := range blocks {
@@ -9604,16 +9613,14 @@ func TestThinkingDurationFallbackInFinalizeWhenNoThinkingEnd(t *testing.T) {
 	if thinkingBlock == nil {
 		t.Fatal("expected a thinking block in viewport")
 	}
-	if thinkingBlock.ThinkingDuration == 0 {
-		t.Fatal("expected ThinkingDuration > 0 when finalizeAssistantBlock computed fallback duration")
+	if thinkingBlock.Streaming {
+		t.Fatal("expected thinking block to be settled by finalizeAssistantBlock")
 	}
 }
 
 func TestMultipleThinkingRoundsProduceIndependentCards(t *testing.T) {
 	// After thinking_end, subsequent thinking deltas must start a fresh
-	// card instead of appending to the already-settled block. Otherwise
-	// the new round would render its streaming content alongside the
-	// previous round's frozen duration footer.
+	// card instead of appending to the already-settled block.
 	m := NewModelWithSize(nil, 80, 12)
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{}})
@@ -9632,14 +9639,11 @@ func TestMultipleThinkingRoundsProduceIndependentCards(t *testing.T) {
 	if len(thinkingBlocks) != 2 {
 		t.Fatalf("expected 2 thinking blocks after a second round started, got %d", len(thinkingBlocks))
 	}
-	if thinkingBlocks[0].Streaming || thinkingBlocks[0].ThinkingDuration == 0 {
-		t.Fatalf("first thinking block should be settled with frozen duration; streaming=%v duration=%v", thinkingBlocks[0].Streaming, thinkingBlocks[0].ThinkingDuration)
+	if thinkingBlocks[0].Streaming {
+		t.Fatal("first thinking block should be settled")
 	}
 	if !thinkingBlocks[1].Streaming {
 		t.Fatal("second thinking block should still be streaming")
-	}
-	if thinkingBlocks[1].ThinkingDuration != 0 {
-		t.Fatalf("second thinking block should not carry a duration while streaming; got %v", thinkingBlocks[1].ThinkingDuration)
 	}
 	if !strings.Contains(thinkingBlocks[1].Content, "second round") {
 		t.Fatalf("second thinking block content = %q, want to include 'second round'", thinkingBlocks[1].Content)

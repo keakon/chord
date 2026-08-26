@@ -29,7 +29,6 @@ type agentStreamState struct {
 	assistantAppended bool
 	thinking          *Block
 	thinkingAppended  bool
-	thinkingStartedAt time.Time
 }
 
 func (m *Model) streamState(agentID string) agentStreamState {
@@ -39,7 +38,6 @@ func (m *Model) streamState(agentID string) agentStreamState {
 			assistantAppended: m.assistantBlockAppended,
 			thinking:          m.currentThinkingBlock,
 			thinkingAppended:  m.thinkingBlockAppended,
-			thinkingStartedAt: m.thinkingStartTime,
 		}
 	}
 	if m.subAgentStreamStates == nil {
@@ -66,7 +64,6 @@ func (m *Model) storeStreamState(agentID string, state agentStreamState) {
 		m.assistantBlockAppended = state.assistantAppended
 		m.currentThinkingBlock = state.thinking
 		m.thinkingBlockAppended = state.thinkingAppended
-		m.thinkingStartTime = state.thinkingStartedAt
 		return
 	}
 	if state.assistant == nil && state.thinking == nil {
@@ -103,21 +100,14 @@ func (m *Model) finalizeAgentStream(agentID string) {
 func (m *Model) finalizeAgentStreamForCard(agentID string, keepUnendedThinking bool) {
 	state := m.streamState(agentID)
 	if state.thinking != nil && keepUnendedThinking {
-		// Only bring the rendered content up to date. Streaming, the duration
-		// clock and thinkingStreamBlockIndex stay owned by StreamThinkingEvent.
+		// Only bring the rendered content up to date. Streaming and
+		// thinkingStreamBlockIndex stay owned by StreamThinkingEvent.
 		if m.flushStreamingBlock(state.thinking, state.thinkingAppended) && m.hasDeferredStartupTranscript() {
 			m.syncStartupDeferredTranscriptBlock(state.thinking)
 		}
 	} else if state.thinking != nil {
 		state.thinking.finishStreamingContent()
 		state.thinking.Streaming = false
-		// Only set ThinkingDuration here if it wasn't already frozen by
-		// StreamThinkingEvent (e.g. when thinking_end was never received
-		// due to cancellation or provider interleaving).
-		if !state.thinkingStartedAt.IsZero() {
-			state.thinking.ThinkingDuration = time.Since(state.thinkingStartedAt)
-			state.thinkingStartedAt = time.Time{}
-		}
 		if state.thinkingAppended {
 			if state.thinking.SettledAt.IsZero() {
 				m.markBlockSettled(state.thinking)

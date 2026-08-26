@@ -48,7 +48,7 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 		for _, line := range wrapText(sanitizeToolDisplayText(toolDisplayResultContent(b)), contentWidth) {
 			result = append(result, ErrorStyle.Render("    "+line))
 		}
-		result = appendToolElapsedFooter(result, b)
+		result = appendToolElapsedToHeader(result, b, cardWidth)
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 	if b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "" {
@@ -58,7 +58,7 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 				result = append(result, DimStyle.Render("    "+line))
 			}
 		}
-		result = appendToolElapsedFooter(result, b)
+		result = appendToolElapsedToHeader(result, b, cardWidth)
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 
@@ -69,7 +69,7 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 				result = append(result, DimStyle.Render("    "+wrapped))
 			}
 		}
-		result = appendToolElapsedFooter(result, b)
+		result = appendToolElapsedToHeader(result, b, cardWidth)
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 
@@ -84,7 +84,7 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 		}
 	}
 
-	result = appendToolElapsedFooter(result, b)
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 

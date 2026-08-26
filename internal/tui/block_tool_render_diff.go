@@ -381,7 +381,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			result = append(result, renderLSPDiagnosticsLines(detail, "    ", cardWidth-4)...)
 		}
 	}
-	result = appendToolElapsedFooter(result, b)
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 

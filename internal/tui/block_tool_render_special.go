@@ -88,7 +88,7 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 			}
 		}
 	}
-	result = appendToolElapsedFooter(result, b)
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
@@ -130,7 +130,7 @@ func (b *Block) renderTodoCall(width int, spinnerFrame string) []string {
 	}
 	// Empty list: don't show "(no items)" prominently; just omit the list body
 
-	result = appendToolElapsedFooter(result, b)
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
@@ -272,7 +272,7 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 			}
 		}
 	}
-	result = appendToolElapsedFooter(result, b)
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
@@ -400,7 +400,7 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 			}
 		}
 	}
-	result = appendToolElapsedFooter(result, b)
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
@@ -509,6 +509,6 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 			}
 		}
 	}
-	result = appendToolElapsedFooter(result, b)
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }

@@ -152,18 +152,12 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		return true, effects
 	case agent.ThinkingStartedEvent:
 		state := m.streamState(evt.AgentID)
-		if state.thinkingStartedAt.IsZero() {
-			state.thinkingStartedAt = time.Now()
-		}
 		m.ensureStreamingThinkingBlock(evt.AgentID, &state)
 		m.storeStreamState(evt.AgentID, state)
 		return true, effects
 	case agent.StreamThinkingDeltaEvent:
 		m.touchStreamDelta(evt.AgentID)
 		state := m.streamState(evt.AgentID)
-		if state.thinkingStartedAt.IsZero() {
-			state.thinkingStartedAt = time.Now()
-		}
 		m.ensureStreamingThinkingBlock(evt.AgentID, &state)
 		state.thinking.appendStreamingContent(evt.Text)
 		firstVisibleThinkingDelta := !state.thinkingAppended && state.thinking.syncStreamingContent()
@@ -216,10 +210,6 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 				}
 			}
 			state.thinking.Streaming = false
-			if !state.thinkingStartedAt.IsZero() {
-				state.thinking.ThinkingDuration = time.Since(state.thinkingStartedAt)
-				state.thinkingStartedAt = time.Time{}
-			}
 			state.thinking.InvalidateCache()
 			if state.thinkingAppended {
 				if flushedThinking {
@@ -233,9 +223,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			}
 			m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 			// Detach the settled block so the next round of thinking starts
-			// a fresh card. Without this, subsequent thinking deltas would
-			// be appended to an already-frozen block and the footer would
-			// render alongside still-streaming content.
+			// a fresh card instead of appending to an already-settled block.
 			if evt.AgentID == "" {
 				m.thinkingStreamBlockIndex++
 			}
@@ -253,7 +241,6 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			}
 			state.thinking = nil
 			state.thinkingAppended = false
-			state.thinkingStartedAt = time.Time{}
 		}
 		m.removeRolledBackThinkingBlocks(evt.AgentID)
 		if state.assistant != nil {

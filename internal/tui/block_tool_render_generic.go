@@ -304,7 +304,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 		}
 	}
 
-	result = appendToolElapsedFooter(result, b)
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
@@ -360,7 +360,7 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 			}
 		}
 	}
-	result = appendToolElapsedFooter(result, b)
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
@@ -501,7 +501,7 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 		}
 	}
 
-	result = appendToolElapsedFooter(result, b)
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
@@ -767,7 +767,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		result = append(result, renderToolExpandHint(toolHintIndent, hiddenDetail))
 		expandHintAdded = true
 	}
-	result = appendToolElapsedFooter(result, b)
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 

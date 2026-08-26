@@ -109,10 +109,10 @@ func (b *Block) toolElapsed() time.Duration {
 
 func (b *Block) toolElapsedLabel() string {
 	elapsed := b.toolElapsed()
-	if elapsed < 5*time.Second {
+	if elapsed < time.Second {
 		return ""
 	}
-	return elapsed.Round(time.Second).String()
+	return elapsed.Truncate(time.Second).String()
 }
 
 // IsUserLocalShell reports a merged USER + local !shell block.

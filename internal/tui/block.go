@@ -207,10 +207,6 @@ type Block struct {
 	// to maxCollapsedThinkingLines or shown in full.
 	ThinkingCollapsed bool
 
-	// ThinkingDuration records the elapsed time of the thinking phase,
-	// displayed as a footer below thinking content.
-	ThinkingDuration time.Duration
-
 	// CompactionSummaryRaw stores the full persisted compaction message so the
 	// TUI can switch between preview and full preserved-context views without
 	// losing the expanded content.

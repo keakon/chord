@@ -1,10 +1,8 @@
 package tui
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -1194,13 +1192,6 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 
 	// Thinking is always shown in full (no collapse) so the THINKING label and all content are visible.
 
-	// Thinking duration footer: show on its own line so it's distinct from thinking content.
-	if b.ThinkingDuration >= time.Second && !b.Streaming {
-		rawLines = append(rawLines, "") // blank line separator
-		footer := ThinkingContentStyle.Render(fmt.Sprintf("⏱ %s", b.ThinkingDuration.Round(time.Second)))
-		rawLines = append(rawLines, "  "+footer)
-	}
-
 	// Padding to innerWidth is done in renderAssistant with card bg style for uniform alignment.
 	return rawLines
 }
@@ -1231,13 +1222,6 @@ func (b *Block) renderThinking(width int) []string {
 	} else {
 		rawLines = append(rawLines, styleRenderedThinkingLines(mdLines)...)
 		rawLines = append(rawLines, renderThinkingTranslationSections(b.ThinkingTranslations, contentWidth)...)
-	}
-
-	// Thinking duration footer
-	if b.ThinkingDuration >= time.Second && !b.Streaming {
-		rawLines = append(rawLines, "")
-		footer := ThinkingContentStyle.Render(fmt.Sprintf("⏱ %s", b.ThinkingDuration.Round(time.Second)))
-		rawLines = append(rawLines, "  "+footer)
 	}
 
 	// Re-insert card background after inner ANSI resets.

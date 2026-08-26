@@ -102,7 +102,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 			})...)
 		}
 	}
-	result = appendToolElapsedFooter(result, b)
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 

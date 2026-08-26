@@ -72,7 +72,7 @@ func (b *Block) renderDeleteCall(width int, spinnerFrame string) []string {
 			result = append(result, style.Render("  ↳ "+line))
 		}
 	}
-	result = appendToolElapsedFooter(result, b)
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 

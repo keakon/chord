@@ -192,7 +192,6 @@ type Model struct {
 	thinkingStreamBlockIndex int
 	nextBlockID              int
 	lastDisplaySequence      map[string]int
-	thinkingStartTime        time.Time // when the current thinking started
 	streamFlushGeneration    uint64
 	streamFlushScheduled     bool
 	streamFlushDelay         time.Duration

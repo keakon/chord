@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
@@ -1060,8 +1061,11 @@ func TestToolDisplayResultHidesModelFacingShellDurationNote(t *testing.T) {
 		t.Fatalf("toolDisplayResultContent() = %q, want %q", got, "done")
 	}
 	rendered := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(rendered, "⏱ 12.3s") {
+	if !strings.Contains(rendered, "✓ ▸ shell · ⏱ 12s") {
 		t.Fatalf("expected rendered shell card to show duration clock; got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "\n⏱") || strings.Contains(rendered, "\n  ⏱") {
+		t.Fatalf("expected rendered shell card to append duration inline; got:\n%s", rendered)
 	}
 	if strings.Contains(rendered, "command took") {
 		t.Fatalf("did not expect model-facing duration note in rendered card; got:\n%s", rendered)
@@ -1081,11 +1085,63 @@ func TestRestoredShellToolCardShowsPersistedDuration(t *testing.T) {
 		t.Fatalf("messagesToBlocks() returned %d blocks, want 1", len(blocks))
 	}
 	rendered := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
-	if !strings.Contains(rendered, "⏱ 9s") {
+	if !strings.Contains(rendered, "⏱ 8s") {
 		t.Fatalf("expected restored shell card to show duration clock; got:\n%s", rendered)
 	}
 	if strings.Contains(rendered, "command took") {
 		t.Fatalf("did not expect raw duration note in restored card; got:\n%s", rendered)
+	}
+}
+
+func TestToolElapsedHiddenBelowOneSecond(t *testing.T) {
+	block := &Block{
+		Type:       BlockToolCall,
+		ToolName:   tools.NameShell,
+		ResultDone: true,
+		StartedAt:  time.Unix(0, 0),
+		SettledAt:  time.Unix(0, int64(900*time.Millisecond)),
+	}
+	rendered := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	if strings.Contains(rendered, "⏱") {
+		t.Fatalf("expected sub-second tool elapsed to stay hidden; got:\n%s", rendered)
+	}
+}
+
+func TestExpandedShellToolCardKeepsElapsedOnHeader(t *testing.T) {
+	// Expanding a shell card must not move the elapsed label to the end of the
+	// stdout body: it stays on the header line regardless of collapse state.
+	block := &Block{
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameShell,
+		Content:                `{"command":"grep -n 'context' internal/agent/sub_routing_invalidated_test.go","timeout":120}`,
+		ResultContent:          "---\n internal/agent/sub_routing_invalidated_test.go | 9 ++++++---\n1\tfile changed, 6 insertions(+), 3 deletions(-)\n---\n(command took 1.3s)",
+		ResultDone:             true,
+		ToolCallDetailExpanded: true,
+	}
+	lines := strings.Split(stripANSI(strings.Join(block.Render(80, ""), "\n")), "\n")
+	header := ""
+	for _, line := range lines {
+		if strings.Contains(line, "shell") {
+			header = line
+			break
+		}
+	}
+	if header == "" {
+		t.Fatal("expected rendered shell card to contain a header line")
+	}
+	if !strings.Contains(header, "· ⏱ 1s") {
+		t.Fatalf("expected header to carry the elapsed label; header:\n%s\nfull:\n%s", header, strings.Join(lines, "\n"))
+	}
+	for _, line := range lines {
+		if line == header {
+			continue
+		}
+		if strings.Contains(line, "⏱") {
+			t.Fatalf("expected elapsed only on the header, but found it on a body line:\n%s", line)
+		}
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "Stdout:") || !strings.Contains(strings.Join(lines, "\n"), "file changed, 6 insertions") {
+		t.Fatalf("expected expanded stdout body; got:\n%s", strings.Join(lines, "\n"))
 	}
 }
 

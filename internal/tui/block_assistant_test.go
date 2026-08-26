@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -189,34 +188,6 @@ func TestStyleRenderedThinkingLinesPreservesTitleBoldAcrossInlineMarkdownResets(
 	}
 	if !sawTail {
 		t.Fatal("expected to inspect title cells")
-	}
-}
-
-func TestRenderThinkingHidesElapsedWhileStreaming(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	b := &Block{
-		Type:             BlockThinking,
-		Content:          "Analyzing the problem carefully.",
-		Streaming:        true,
-		ThinkingDuration: 9 * time.Second,
-	}
-	joined := stripANSI(strings.Join(b.renderThinking(80), "\n"))
-	if strings.Contains(joined, "⏱") {
-		t.Fatalf("streaming thinking should not show elapsed footer; got:\n%s", joined)
-	}
-}
-
-func TestRenderThinkingShowsFinalElapsedAfterStreamingEnds(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	b := &Block{
-		Type:             BlockThinking,
-		Content:          "Analyzing the problem carefully.",
-		Streaming:        false,
-		ThinkingDuration: 9 * time.Second,
-	}
-	joined := stripANSI(strings.Join(b.renderThinking(80), "\n"))
-	if !strings.Contains(joined, "⏱ 9s") {
-		t.Fatalf("settled thinking should show final elapsed footer; got:\n%s", joined)
 	}
 }
 
