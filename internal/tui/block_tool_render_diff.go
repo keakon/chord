@@ -291,10 +291,16 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				}
 				seenHunk = true
 				hunkLine, _, _ := strings.Cut(line, "\n")
-				if m := diffHunkHeaderRe.FindStringSubmatch(hunkLine); len(m) == 5 {
+				if m := diffHunkHeaderRe.FindStringSubmatch(hunkLine); len(m) == 3 {
 					oldStart, _ := strconv.Atoi(m[1])
-					newStart, _ := strconv.Atoi(m[3])
+					newStart, _ := strconv.Atoi(m[2])
 					oldLineNum, newLineNum = oldStart, newStart
+				} else {
+					// An unparsable header must not leave the previous hunk's
+					// counters in place: every following line would then get a
+					// confidently wrong gutter number. Drop to 0 so the gutter
+					// reads as unknown instead of misleading.
+					oldLineNum, newLineNum = 0, 0
 				}
 				continue
 			case strings.HasPrefix(line, "--- "):
@@ -314,6 +320,14 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				}
 				continue
 			case strings.HasPrefix(line, "+++ "):
+				continue
+			case line == tools.DiffTruncationMarker:
+				// The diff producer appends this sentinel when it dropped
+				// lines. It is not source text: rendering it through the
+				// default branch would syntax-highlight it, give it a
+				// fabricated gutter number, and advance both counters so
+				// every later line is numbered wrong.
+				result = append(result, "  "+DimStyle.Render(line))
 				continue
 			default:
 				content := line

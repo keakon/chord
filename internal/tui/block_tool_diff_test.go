@@ -1317,3 +1317,61 @@ func TestEditCollapsedErrorKeepsErrorBlockWithoutHeaderSummary(t *testing.T) {
 		t.Fatalf("collapsed error header must not repeat an error summary; got:\n%s", plain)
 	}
 }
+
+// TestDiffGutterNumbersCountlessHunkHeader pins the gutter numbers for the
+// `@@ -1 +1 @@` form: unified diff omits `,count` when the count is 1, and a
+// header the regexp cannot parse used to leave the previous hunk's counters in
+// place, numbering every following line confidently wrong.
+func TestDiffGutterNumbersCountlessHunkHeader(t *testing.T) {
+	args, _ := json.Marshal(map[string]string{"path": "src/demo.go", "patch": "@@\n-old\n+new\n"})
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		Content:       string(args),
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultContent: "Applied patch to src/demo.go (+1 -1)",
+		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -12 +12 @@\n-old\n+new\n",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	for _, want := range []string{"12 -old", "12 +new"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected gutter %q from a countless hunk header, got:\n%s", want, plain)
+		}
+	}
+}
+
+// TestDiffTruncationSentinelIsNotRenderedAsSource covers the producer sentinel
+// arriving in Diff: it is not diff content, so it must not take a gutter number
+// or advance the counters for the lines after it.
+func TestDiffTruncationSentinelIsNotRenderedAsSource(t *testing.T) {
+	args, _ := json.Marshal(map[string]string{"path": "src/demo.go", "patch": "@@\n-old\n+new\n"})
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		Content:       string(args),
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultContent: "Applied patch to src/demo.go (+1 -1)",
+		Diff: "--- src/demo.go\n+++ src/demo.go\n@@ -5 +5 @@\n-old\n+new\n" +
+			tools.DiffTruncationMarker + "\n context after\n",
+	}
+
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, tools.DiffTruncationMarker) {
+		t.Fatalf("expected the truncation marker to stay visible, got:\n%s", plain)
+	}
+	for _, unwanted := range []string{"5 " + tools.DiffTruncationMarker, "6 " + tools.DiffTruncationMarker} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("truncation marker took a gutter number (%q), got:\n%s", unwanted, plain)
+		}
+	}
+	// The sentinel must not consume a line number, so the following context
+	// line keeps the number it would have had without it.
+	if !strings.Contains(plain, "6  context after") {
+		t.Fatalf("expected context after the marker to keep gutter 6, got:\n%s", plain)
+	}
+}

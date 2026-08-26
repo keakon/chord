@@ -13,6 +13,11 @@ import (
 // Diffs longer than this are truncated with a notice.
 const maxDiffOutputLines = 200
 
+// DiffTruncationMarker is the sentinel line appended to a truncated diff. It is
+// not diff content: renderers must special-case it instead of treating it as a
+// context line, so it is exported to keep producer and renderer from drifting.
+const DiffTruncationMarker = "... (diff truncated)"
+
 // DiffSummary carries both the rendered unified diff (possibly truncated) and
 // the exact total add/remove counts computed from the full edit script.
 type DiffSummary struct {
@@ -92,7 +97,8 @@ func generateMultiFileUnifiedDiffSummary(files []unifiedFileDiff) DiffSummary {
 		}
 	}
 	if truncated {
-		sb.WriteString("... (diff truncated)\n")
+		sb.WriteString(DiffTruncationMarker)
+		sb.WriteString("\n")
 	}
 	return DiffSummary{Text: sb.String(), Added: added, Removed: removed}
 }

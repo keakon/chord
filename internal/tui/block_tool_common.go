@@ -14,8 +14,10 @@ import (
 )
 
 var (
-	// diffHunkHeaderRe parses unified diff hunk header: @@ -oldStart,oldCount +newStart,newCount @@
-	diffHunkHeaderRe = regexp.MustCompile(`^@@ -(\d+),(\d+) \+(\d+),(\d+) @@`)
+	// diffHunkHeaderRe parses unified diff hunk header: @@ -oldStart,oldCount +newStart,newCount @@.
+	// The ,count part is omitted by unified diff when the count is 1 (@@ -1 +1 @@),
+	// so both counts are optional and only the start line numbers are captured.
+	diffHunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
 
 	// diffAddBg / diffDelBg: subtle line backgrounds (opencode-style) so syntax highlighting stays readable.
 	diffAddBg = currentTheme.DiffAddLineBg
