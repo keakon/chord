@@ -230,6 +230,111 @@ func TestToggleNoOpDoesNotBumpRenderVersion(t *testing.T) {
 	}
 }
 
+// TestToggleAnchorsOffset verifies that collapse/expand keeps the viewport
+// anchored to the toggled card. The offset is an absolute line index, so a
+// span change in a block above the window would otherwise shift the visible
+// content and make the user lose the card they were reading.
+func TestToggleAnchorsOffset(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	bigResult := strings.Repeat("line of content\n", 80)
+	readBlock := func(id int) *Block {
+		return &Block{ID: id, Type: BlockToolCall, ToolName: tools.NameRead, Content: `{"path":"a.txt"}`, ResultContent: bigResult, ResultDone: true}
+	}
+	shellBlock := func(id int, lines int) *Block {
+		return &Block{ID: id, Type: BlockToolCall, ToolName: tools.NameShell, Content: `{"command":"echo ok"}`, ResultContent: strings.Repeat("out\n", lines), ResultDone: true}
+	}
+
+	t.Run("block starting inside window keeps offset", func(t *testing.T) {
+		v := NewViewport(80, 12)
+		v.sticky = false
+		v.AppendBlock(readBlock(1))
+		v.AppendBlock(shellBlock(2, 4))
+		v.offset = 0
+		v.ToggleBlockByID(1) // collapse
+		if v.offset != 0 {
+			t.Fatalf("collapse block starting at window top: offset = %d, want 0", v.offset)
+		}
+		v.ToggleBlockByID(1) // expand again
+		if v.offset != 0 {
+			t.Fatalf("expand block starting at window top: offset = %d, want 0", v.offset)
+		}
+	})
+
+	t.Run("block extending from above window scrolls back on collapse", func(t *testing.T) {
+		v := NewViewport(80, 12)
+		v.sticky = false
+		v.AppendBlock(readBlock(1))
+		v.AppendBlock(shellBlock(2, 4))
+		v.offset = 60 // window shows the middle of the big card whose top is far above
+		v.ToggleBlockByID(1)
+		if v.offset != 0 {
+			t.Fatalf("collapse card that left the window: offset = %d, want 0 (card top)", v.offset)
+		}
+	})
+
+	t.Run("block entirely below window keeps offset", func(t *testing.T) {
+		v := NewViewport(80, 12)
+		v.sticky = false
+		v.AppendBlock(shellBlock(1, 60))
+		v.AppendBlock(readBlock(2))
+		v.offset = 0 // window sits inside the first block; the read card is far below
+		v.ToggleBlockByID(2)
+		if v.offset != 0 {
+			t.Fatalf("toggle block below window: offset = %d, want 0", v.offset)
+		}
+	})
+
+	t.Run("block entirely above window shifts offset by span delta", func(t *testing.T) {
+		v := NewViewport(80, 12)
+		v.sticky = false
+		v.AppendBlock(readBlock(1))
+		v.AppendBlock(shellBlock(2, 60))
+		oldSpan := v.blockSpanLines(v.blocks[0])
+		v.offset = 120 // window is well below the big read card
+		v.ToggleBlockByID(1)
+		newSpan := v.blockSpanLines(v.blocks[0])
+		want := 120 + (newSpan - oldSpan)
+		if maxOffset := v.totalLines - v.height; want > maxOffset {
+			want = maxOffset
+		}
+		if want < 0 {
+			want = 0
+		}
+		if v.offset != want {
+			t.Fatalf("toggle block above window: offset = %d, want %d (shifted by span delta, clamped)", v.offset, want)
+		}
+	})
+
+	t.Run("sticky keeps tail follow when card stays visible", func(t *testing.T) {
+		v := NewViewport(80, 12)
+		v.AppendBlock(readBlock(1))
+		if !v.sticky {
+			t.Fatal("NewViewport should start sticky")
+		}
+		v.ToggleBlockByID(1) // collapse shrinks the card but keeps it in the window
+		if !v.sticky {
+			t.Fatal("collapse of card still inside the window should keep sticky tail follow")
+		}
+	})
+
+	t.Run("sticky drops and scrolls back when collapsed card leaves window", func(t *testing.T) {
+		v := NewViewport(80, 12)
+		v.AppendBlock(readBlock(1))
+		v.AppendBlock(shellBlock(2, 60))
+		v.AppendBlock(shellBlock(3, 60))
+		if !v.sticky {
+			t.Fatal("NewViewport should start sticky")
+		}
+		v.ToggleBlockByID(1) // collapsed card no longer fits in the window
+		if v.sticky {
+			t.Fatal("collapse of card that left the window should drop sticky")
+		}
+		if v.offset != 0 {
+			t.Fatalf("sticky drop should scroll back to the collapsed card top: offset = %d, want 0", v.offset)
+		}
+	})
+}
+
 func TestVisibleBlocksCacheInvalidatesOnMutationAndFilterChange(t *testing.T) {
 	v := NewViewport(80, 12)
 	mainBlock := &Block{ID: 1, Type: BlockAssistant, Content: "main"}

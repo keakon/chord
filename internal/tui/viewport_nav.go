@@ -72,19 +72,14 @@ func (v *Viewport) PrevMessageBoundary() {
 // ToggleBlockAtOffset toggles the collapsed state of the block under the current scroll position.
 func (v *Viewport) ToggleBlockAtOffset() {
 	block := v.GetBlockAtOffset()
-	if block != nil {
-		if !block.ToggleAtWidth(v.width) {
-			return
-		}
-		// Toggling changes the block's rendered line count and invalidates its
-		// line/viewport caches. renderVersion must advance so the model-level
-		// main-area cache key changes; otherwise the collapsed/expanded switch
-		// is only picked up on the next scroll that changes the offset.
-		v.bumpRenderVersion()
-		v.markHotBudgetDirty()
-		v.recalcTotalLines()
-		v.clampOffset()
+	if block == nil {
+		return
 	}
+	oldStart, oldSpan, found := v.toggleAnchorPosition(block)
+	if !block.ToggleAtWidth(v.width) {
+		return
+	}
+	v.applyToggleOffsetAnchor(block, oldStart, oldSpan, found)
 }
 
 // ToggleBlockByID finds a block by its ID and toggles its collapsed state.
@@ -92,16 +87,106 @@ func (v *Viewport) ToggleBlockByID(id int) {
 	for _, block := range v.blocks {
 		if block.ID == id {
 			block = v.materialize(block)
+			oldStart, oldSpan, found := v.toggleAnchorPosition(block)
 			if !block.ToggleAtWidth(v.width) {
 				return
 			}
-			v.bumpRenderVersion()
-			v.markHotBudgetDirty()
-			v.recalcTotalLines()
-			v.clampOffset()
+			v.applyToggleOffsetAnchor(block, oldStart, oldSpan, found)
 			v.enforceHotBudget()
 			return
 		}
+	}
+}
+
+// toggleAnchorPosition captures the block's start line and rendered span while
+// the block-position cache is still valid, i.e. before the toggle flips the
+// collapsed state and invalidates it. found reports whether the block is part
+// of the current visible (unfiltered) transcript.
+func (v *Viewport) toggleAnchorPosition(block *Block) (start, span int, found bool) {
+	start, found = v.LineOffsetForBlockID(block.ID)
+	span = v.blockSpanLines(block)
+	return start, span, found
+}
+
+// applyToggleOffsetAnchor repositions the viewport after a block has changed
+// its rendered line count (collapse/expand) so the visible content stays put.
+//
+// The viewport offset is an absolute line index, but toggling a block changes
+// only that block's span: everything after it shifts by the size delta while
+// the offset itself stays, so the window drifts away from the content the user
+// was reading and the card they were looking at seems to jump out of view. The
+// anchor rules are:
+//
+//   - block starting inside the window: keep the offset, so the block's top
+//     edge stays on the same screen row and the window grows/shrinks around it
+//   - block extending into the window from above: keep the offset while the
+//     card still occupies the window; if collapsing removes it from the window
+//     entirely, scroll back so the collapsed card is visible again
+//   - block entirely above the window: shift the offset by the span delta so
+//     the visible lines do not move at all
+//   - block entirely below the window: nothing on screen depends on its span
+//   - sticky tail-following: keep the bottom anchored, but when the collapsed
+//     card leaves the window, drop sticky and bring it back into view
+func (v *Viewport) applyToggleOffsetAnchor(block *Block, oldStart, oldSpan int, found bool) {
+	// Toggling changes the block's rendered line count and invalidates its
+	// line/viewport caches. renderVersion must advance so the model-level
+	// main-area cache key changes; otherwise the collapsed/expanded switch
+	// is only picked up on the next scroll that changes the offset.
+	v.bumpRenderVersion()
+	v.markHotBudgetDirty()
+	v.recalcTotalLines()
+
+	if !found {
+		// The block is not part of the visible transcript (e.g. hidden by an
+		// agent filter): nothing on screen depends on its span.
+		v.clampOffset()
+		return
+	}
+
+	newStart, stillVisible := v.LineOffsetForBlockID(block.ID)
+	if !stillVisible {
+		// LineOffsetForBlockID reports absence as (0, false), so the bool is the
+		// only failure signal: trusting the returned 0 would anchor the view to
+		// the top of the transcript instead of to the toggled card.
+		newStart = oldStart
+	}
+	newSpan := v.blockSpanLines(block)
+	newEnd := newStart + newSpan
+	oldEnd := oldStart + oldSpan
+	delta := newSpan - oldSpan
+
+	switch {
+	case v.sticky:
+		v.scrollToEnd()
+		if newEnd <= v.offset {
+			// The collapsed card left the window; bring it back so the user
+			// can see the result of the toggle.
+			v.sticky = false
+			v.offset = newStart
+			v.clampOffset()
+		}
+	case oldStart >= v.offset:
+		// The block starts at or after the window's first line, either inside
+		// the window or entirely below it. Its start line is unchanged by the
+		// toggle, so keeping the offset keeps everything above it — and the
+		// card's own top edge — on the same screen row.
+		v.clampOffset()
+	default:
+		// The block extends into the window from above.
+		switch {
+		case oldEnd <= v.offset:
+			// Block entirely above the window: shift the offset by the delta
+			// so the visible content does not move.
+			v.offset += delta
+		case newEnd <= v.offset:
+			// Collapsing removed the card from the window; scroll so its top
+			// edge is back at the top of the window.
+			v.offset = newStart
+		default:
+			// The card still occupies the window after the toggle; keep the
+			// offset so the visible lines stay put.
+		}
+		v.clampOffset()
 	}
 }
 
