@@ -190,6 +190,51 @@ func TestToggleBlockBumpsRenderVersion(t *testing.T) {
 	}
 }
 
+// TestToggleEnforcesHotBudgetAtBothEntryPoints verifies that expanding a large
+// card spills cold off-screen blocks regardless of which toggle entry point is
+// used. The hot budget must be enforced after the anchored offset settles, so
+// the visible-window set reflects the final position.
+func TestToggleEnforcesHotBudgetAtBothEntryPoints(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	tests := []struct {
+		name   string
+		toggle func(v *Viewport)
+	}{
+		{"offset", func(v *Viewport) { v.ToggleBlockAtOffset() }},
+		{"id", func(v *Viewport) { v.ToggleBlockByID(2) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := NewViewport(80, 12)
+			v.maxHotBytes = 1024
+			v.AppendBlock(&Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameShell, Content: `{"command":"old"}`, ResultContent: strings.Repeat("old data\n", 80), ResultDone: true})
+			v.AppendBlock(&Block{ID: 2, Type: BlockToolCall, ToolName: tools.NameShell, Content: `{"command":"expand"}`, ResultContent: strings.Repeat("expanded\n", 400), ResultDone: true, Collapsed: true})
+			// A trailing block keeps totalLines high enough that clamping cannot
+			// pull the offset back into block 1 after it scrolls above.
+			v.AppendBlock(&Block{ID: 3, Type: BlockAssistant, Content: strings.Repeat("tail\n", 30)})
+			// Anchor the window exactly on block 2's start line so the offset
+			// entry point toggles that desired card. Block 1 sits above the
+			// window: hot but not visible, so it is the only spillable
+			// candidate once block 2 expands.
+			starts := v.blockStarts()
+			if len(starts) < 2 {
+				t.Fatalf("expected at least two block starts, got %d", len(starts))
+			}
+			v.offset = starts[1]
+			v.clampOffset()
+
+			tt.toggle(v)
+
+			if v.hotBudgetDirty {
+				t.Fatalf("toggle left the hot budget dirty; enforceHotBudget did not run")
+			}
+			if !v.blocks[0].spillCold {
+				t.Fatalf("expanding the toggled card did not spill the old off-screen block")
+			}
+		})
+	}
+}
+
 func TestToggleNoOpDoesNotBumpRenderVersion(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	tests := []struct {

@@ -92,7 +92,6 @@ func (v *Viewport) ToggleBlockByID(id int) {
 				return
 			}
 			v.applyToggleOffsetAnchor(block, oldStart, oldSpan, found)
-			v.enforceHotBudget()
 			return
 		}
 	}
@@ -140,54 +139,59 @@ func (v *Viewport) applyToggleOffsetAnchor(block *Block, oldStart, oldSpan int, 
 		// The block is not part of the visible transcript (e.g. hidden by an
 		// agent filter): nothing on screen depends on its span.
 		v.clampOffset()
-		return
-	}
+	} else {
+		newStart, stillVisible := v.LineOffsetForBlockID(block.ID)
+		if !stillVisible {
+			// LineOffsetForBlockID reports absence as (0, false), so the bool is the
+			// only failure signal: trusting the returned 0 would anchor the view to
+			// the top of the transcript instead of to the toggled card.
+			newStart = oldStart
+		}
+		newSpan := v.blockSpanLines(block)
+		newEnd := newStart + newSpan
+		oldEnd := oldStart + oldSpan
+		delta := newSpan - oldSpan
 
-	newStart, stillVisible := v.LineOffsetForBlockID(block.ID)
-	if !stillVisible {
-		// LineOffsetForBlockID reports absence as (0, false), so the bool is the
-		// only failure signal: trusting the returned 0 would anchor the view to
-		// the top of the transcript instead of to the toggled card.
-		newStart = oldStart
-	}
-	newSpan := v.blockSpanLines(block)
-	newEnd := newStart + newSpan
-	oldEnd := oldStart + oldSpan
-	delta := newSpan - oldSpan
-
-	switch {
-	case v.sticky:
-		v.scrollToEnd()
-		if newEnd <= v.offset {
-			// The collapsed card left the window; bring it back so the user
-			// can see the result of the toggle.
-			v.sticky = false
-			v.offset = newStart
+		switch {
+		case v.sticky:
+			v.scrollToEnd()
+			if newEnd <= v.offset {
+				// The collapsed card left the window; bring it back so the user
+				// can see the result of the toggle.
+				v.sticky = false
+				v.offset = newStart
+				v.clampOffset()
+			}
+		case oldStart >= v.offset:
+			// The block starts at or after the window's first line, either inside
+			// the window or entirely below it. Its start line is unchanged by the
+			// toggle, so keeping the offset keeps everything above it — and the
+			// card's own top edge — on the same screen row.
+			v.clampOffset()
+		default:
+			// The block extends into the window from above.
+			switch {
+			case oldEnd <= v.offset:
+				// Block entirely above the window: shift the offset by the delta
+				// so the visible content does not move.
+				v.offset += delta
+			case newEnd <= v.offset:
+				// Collapsing removed the card from the window; scroll so its top
+				// edge is back at the top of the window.
+				v.offset = newStart
+			default:
+				// The card still occupies the window after the toggle; keep the
+				// offset so the visible lines stay put.
+			}
 			v.clampOffset()
 		}
-	case oldStart >= v.offset:
-		// The block starts at or after the window's first line, either inside
-		// the window or entirely below it. Its start line is unchanged by the
-		// toggle, so keeping the offset keeps everything above it — and the
-		// card's own top edge — on the same screen row.
-		v.clampOffset()
-	default:
-		// The block extends into the window from above.
-		switch {
-		case oldEnd <= v.offset:
-			// Block entirely above the window: shift the offset by the delta
-			// so the visible content does not move.
-			v.offset += delta
-		case newEnd <= v.offset:
-			// Collapsing removed the card from the window; scroll so its top
-			// edge is back at the top of the window.
-			v.offset = newStart
-		default:
-			// The card still occupies the window after the toggle; keep the
-			// offset so the visible lines stay put.
-		}
-		v.clampOffset()
 	}
+	// The toggle changed the block's rendered size, so the hot-bytes estimate
+	// is stale. Enforce the budget here so every toggle entry point (offset
+	// and ID) shares the same tail; doing it only in one would let expanding a
+	// large card via the other bypass the spill. Runs after clampOffset so the
+	// visible-window set reflects the final anchored position.
+	v.enforceHotBudget()
 }
 
 // FocusedBlockIsVisible reports whether the block with the given ID falls
@@ -224,8 +228,8 @@ func (v *Viewport) blockForID(id int) *Block {
 func (v *Viewport) GetBlockAtOffset() *Block {
 	blocks := v.visibleBlocks()
 	lineOffset := 0
-	for i, block := range blocks {
-		lc := v.blockSpanAt(blocks, i, block)
+	for _, block := range blocks {
+		lc := v.blockSpanLines(block)
 		if lineOffset+lc > v.offset {
 			return v.materialize(block)
 		}
@@ -250,7 +254,7 @@ func (v *Viewport) HasVisibleInlineImage() bool {
 		if i >= len(starts) {
 			break
 		}
-		blockStart := starts[i] + v.blockLeadingSpacing(blocks, i)
+		blockStart := starts[i]
 		for _, part := range block.ImageParts {
 			if part.RenderRows <= 0 || part.RenderStartLine < 0 {
 				continue
@@ -299,7 +303,7 @@ func (v *Viewport) MessageDirectory() []DirectoryEntry {
 			Summary:    block.Summary(),
 			Type:       block.Type,
 		})
-		lineOffset += v.blockSpanAt(blocks, i, block)
+		lineOffset += v.blockSpanLines(block)
 	}
 	return entries
 }
