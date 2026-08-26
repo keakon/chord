@@ -908,7 +908,7 @@ func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.
 		return nil
 	}
 
-	decision := evaluateToolPermission(ruleset, tc.Name, tc.Args)
+	decision := evaluateToolPermissionInDir(ruleset, tc.Name, tc.Args, p.effectiveToolBaseDir())
 	switch decision.Action {
 	case permission.ActionDeny:
 		logToolPermissionDenied(p.logPrefix, p.agentID, tc.Name, decision.MatchArgument)
@@ -940,7 +940,7 @@ func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.
 			ruleset = p.refreshRulesetAfterRuleIntent(tc.Name, resp.RuleIntent)
 		}
 		originalArgs := append(json.RawMessage(nil), tc.Args...)
-		editedArgs, err := applyConfirmedArgsEdits(p.registry, ruleset, tc.Name, tc.Args, resp.FinalArgsJSON)
+		editedArgs, err := applyConfirmedArgsEdits(p.registry, ruleset, tc.Name, tc.Args, resp.FinalArgsJSON, p.effectiveToolBaseDir())
 		if err != nil {
 			return err
 		}

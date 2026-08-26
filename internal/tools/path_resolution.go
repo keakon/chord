@@ -1,16 +1,15 @@
 package tools
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
-)
 
-var errHomeDirUnavailable = errors.New("home directory is unavailable")
+	"github.com/keakon/chord/internal/pathutil"
+)
 
 var blockedDevicePaths = map[string]struct{}{
 	"/dev/console": {},
@@ -36,36 +35,7 @@ const (
 )
 
 func expandTildePath(path string) (string, error) {
-	trimmed := strings.TrimSpace(path)
-	if trimmed == "" {
-		return trimmed, nil
-	}
-	if trimmed == "~" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", errHomeDirUnavailable
-		}
-		return home, nil
-	}
-	if runtime.GOOS == "windows" {
-		if strings.HasPrefix(trimmed, `~/`) || strings.HasPrefix(trimmed, `~\`) {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return "", errHomeDirUnavailable
-			}
-			rel := trimmed[2:]
-			return filepath.Join(home, rel), nil
-		}
-		return trimmed, nil
-	}
-	if strings.HasPrefix(trimmed, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", errHomeDirUnavailable
-		}
-		return filepath.Join(home, trimmed[2:]), nil
-	}
-	return trimmed, nil
+	return pathutil.ExpandTilde(path)
 }
 
 func resolveToolPath(path string) (string, error) {
@@ -77,18 +47,7 @@ func resolveToolPath(path string) (string, error) {
 }
 
 func resolveToolPathInDir(path, baseDir string) (string, error) {
-	resolved, err := resolveToolPath(path)
-	if err != nil {
-		return "", err
-	}
-	if filepath.IsAbs(resolved) || strings.TrimSpace(baseDir) == "" || strings.TrimSpace(resolved) == "" {
-		return resolved, nil
-	}
-	base, err := expandTildePath(baseDir)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Clean(filepath.Join(base, resolved)), nil
+	return pathutil.ResolveInDir(path, baseDir)
 }
 
 func resolveCommandWorkdir(workdir, baseDir string) (string, error) {

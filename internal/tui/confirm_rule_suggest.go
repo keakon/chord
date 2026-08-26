@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -213,33 +214,40 @@ func suggestFilePatterns(toolName, argsJSON, cwd string) []PatternCandidate {
 
 	// Literal
 	candidates = append(candidates, PatternCandidate{
-		Pattern: filePath,
+		Pattern: rulePatternForPath(filePath, cwd),
 		Summary: "this exact file",
 	})
 
 	// <dir>/*
 	dir := filepath.Dir(filePath)
 	if dir != "." && dir != "" {
-		dirPattern := filepath.Join(dir, "*")
-		candidates = append(candidates, PatternCandidate{
-			Pattern: dirPattern,
-			Summary: "any file in " + dir + "/",
-			Default: isPathWithinCWD(filePath, cwd),
-		})
+		dirPattern := rulePatternForPath(dir, cwd)
+		if dirPattern != "" && dirPattern != "." {
+			candidates = append(candidates, PatternCandidate{
+				Pattern: filepath.Join(dirPattern, "*"),
+				Summary: "any file in " + dir + "/",
+				Default: isPathWithinCWD(filePath, cwd),
+			})
+		}
 	}
 
 	// <dir>/** - recursive
 	if dir != "." && dir != "" {
-		dirPattern := filepath.Join(dir, "**")
-		candidates = append(candidates, PatternCandidate{
-			Pattern: dirPattern,
-			Summary: "any file under " + dir + "/ (recursive)",
-		})
+		dirPattern := rulePatternForPath(dir, cwd)
+		if dirPattern != "" && dirPattern != "." {
+			candidates = append(candidates, PatternCandidate{
+				Pattern: filepath.Join(dirPattern, "**"),
+				Summary: "any file under " + dir + "/ (recursive)",
+			})
+		}
 	}
 
 	// **/*.<ext>
+	// In cwd-scoped matching a relative "**" pattern only matches in-cwd paths,
+	// so the candidate is only useful when the file lies inside the working
+	// directory; with no cwd the pattern still matches lexically, so it stays.
 	ext := filepath.Ext(filePath)
-	if ext != "" {
+	if ext != "" && (strings.TrimSpace(cwd) == "" || isPathWithinCWD(filePath, cwd)) {
 		candidates = append(candidates, PatternCandidate{
 			Pattern: "**/*" + ext,
 			Summary: "any " + ext + " file",
@@ -247,10 +255,10 @@ func suggestFilePatterns(toolName, argsJSON, cwd string) []PatternCandidate {
 		})
 	}
 
-	// cwd/**
-	if cwd != "" {
+	// ** - any file under the current directory (cwd-scoped)
+	if cwd != "" && isPathWithinCWD(filePath, cwd) {
 		candidates = append(candidates, PatternCandidate{
-			Pattern: filepath.Join(cwd, "**"),
+			Pattern: "**",
 			Summary: "any file under current directory",
 			Broad:   true,
 		})
@@ -266,29 +274,45 @@ func suggestFilePatterns(toolName, argsJSON, cwd string) []PatternCandidate {
 	return normalizePatternCandidates(candidates)
 }
 
+// rulePatternForPath converts a tool-supplied path into the spelling a
+// permission rule must use to match it: paths inside the working directory
+// become cwd-relative, paths outside stay absolute. This mirrors how the
+// permission engine normalizes inputs, so the offered rules actually match
+// subsequent calls regardless of whether the model spells the path relative
+// or absolute.
+func rulePatternForPath(path, cwd string) string {
+	p := strings.TrimSpace(path)
+	if p == "" || strings.TrimSpace(cwd) == "" {
+		return p
+	}
+	normalized, err := pathutil.NormalizeWithinBase(p, cwd)
+	if err != nil {
+		return filepath.ToSlash(filepath.Clean(p))
+	}
+	return normalized
+}
+
 func isPathWithinCWD(filePath, cwd string) bool {
 	path := strings.TrimSpace(filePath)
 	if path == "" {
 		return false
 	}
-	path = filepath.Clean(path)
-	if !filepath.IsAbs(path) {
-		// Relative paths are treated as cwd-relative unless they explicitly escape.
-		if path == ".." {
-			return false
-		}
-		parentPrefix := ".." + string(os.PathSeparator)
-		return !strings.HasPrefix(path, parentPrefix)
-	}
 	cwd = strings.TrimSpace(cwd)
 	if cwd == "" {
+		// No session working directory: non-escaping relative paths are
+		// treated as within, absolute paths are not.
+		p := filepath.Clean(path)
+		if filepath.IsAbs(p) {
+			return false
+		}
+		return p != ".." && !strings.HasPrefix(p, ".."+string(os.PathSeparator))
+	}
+	resolved, err := pathutil.ResolveInDir(path, cwd)
+	if err != nil {
 		return false
 	}
-	cwd = filepath.Clean(cwd)
-	if path == cwd {
-		return true
-	}
-	return strings.HasPrefix(path, cwd+string(os.PathSeparator))
+	_, ok := pathutil.RelToBase(resolved, cwd)
+	return ok
 }
 
 // suggestDeletePatterns generates conservative path-specific candidates for Delete.
@@ -314,19 +338,20 @@ func suggestDeletePatterns(argsJSON string, needsApproval []string, cwd string) 
 		if p == "" {
 			continue
 		}
-		candidates = append(candidates, PatternCandidate{Pattern: p, Summary: "this exact path", Default: len(candidates) == 0})
+		rulePath := rulePatternForPath(p, cwd)
+		candidates = append(candidates, PatternCandidate{Pattern: rulePath, Summary: "this exact path", Default: len(candidates) == 0})
 		dir := filepath.Dir(p)
-		if dir != "." && dir != "" && !seenDir[dir] {
-			seenDir[dir] = true
-			candidates = append(candidates, PatternCandidate{Pattern: filepath.Join(dir, "*"), Summary: "any path in " + dir + "/", Broad: true})
+		dirPattern := rulePatternForPath(dir, cwd)
+		if dir != "." && dir != "" && dirPattern != "" && dirPattern != "." && !seenDir[dirPattern] {
+			seenDir[dirPattern] = true
+			candidates = append(candidates, PatternCandidate{Pattern: filepath.Join(dirPattern, "*"), Summary: "any path in " + dir + "/", Broad: true})
 		}
 	}
 
 	if len(paths) > 0 && cwd != "" && anyTargetWithinCWD(paths, cwd) {
-		cwdPattern := filepath.Join(cwd, "**")
-		if !hasPatternCandidate(candidates, cwdPattern) {
+		if !hasPatternCandidate(candidates, "**") {
 			candidates = append(candidates, PatternCandidate{
-				Pattern: cwdPattern,
+				Pattern: "**",
 				Summary: "any path under current directory",
 				Broad:   true,
 			})

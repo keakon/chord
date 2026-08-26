@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/keakon/chord/internal/tools"
@@ -189,7 +188,7 @@ func TestSuggestRulePatterns_DeleteWithinCWDOffersCurDirCandidateNotDefault(t *t
 	candidates := suggestRulePatterns("delete", `{"paths":["nested/deep/tmp.go"]}`, []string{"nested/deep/tmp.go"}, "/home/user/project")
 	foundCwd := false
 	for _, c := range candidates {
-		if c.Pattern == filepath.Join("/home/user/project", "**") {
+		if c.Pattern == "**" {
 			if c.Default {
 				t.Fatalf("cwd-scoped candidate must not be pre-selected by default: %+v", c)
 			}
@@ -205,9 +204,46 @@ func TestSuggestRulePatterns_DeleteWithinCWDOffersCurDirCandidateNotDefault(t *t
 func TestSuggestRulePatterns_DeleteOutsideCWDNoCurDirCandidate(t *testing.T) {
 	candidates := suggestRulePatterns("delete", `{"paths":["../shared/tmp.go"]}`, []string{"../shared/tmp.go"}, "/home/user/project")
 	for _, c := range candidates {
-		if c.Pattern == filepath.Join("/home/user/project", "**") {
+		if c.Pattern == "**" {
 			t.Fatalf("unexpected cwd-scoped candidate for outside-cwd delete: %+v", candidates)
 		}
+	}
+}
+
+func TestSuggestRulePatterns_DeleteAbsoluteInCWDCollapsesToRelative(t *testing.T) {
+	candidates := suggestRulePatterns("delete", `{"paths":["/home/user/project/tmp/foo.log"]}`, []string{"/home/user/project/tmp/foo.log"}, "/home/user/project")
+	if len(candidates) == 0 {
+		t.Fatal("expected candidates")
+	}
+	if candidates[0].Pattern != "tmp/foo.log" || !candidates[0].Default {
+		t.Fatalf("first candidate = %+v, want cwd-relative exact path", candidates[0])
+	}
+	foundDir := false
+	for _, c := range candidates {
+		if c.Pattern == "tmp/*" {
+			foundDir = true
+			break
+		}
+	}
+	if !foundDir {
+		t.Fatalf("expected cwd-relative dir candidate, got %+v", candidates)
+	}
+}
+
+func TestSuggestRulePatterns_DeleteOutsideCWDStaysAbsolute(t *testing.T) {
+	candidates := suggestRulePatterns("delete", `{"paths":["/Users/me/shared/tmp.go"]}`, []string{"/Users/me/shared/tmp.go"}, "/home/user/project")
+	if len(candidates) == 0 || candidates[0].Pattern != "/Users/me/shared/tmp.go" {
+		t.Fatalf("first candidate = %+v, want absolute exact path", candidates)
+	}
+	foundDir := false
+	for _, c := range candidates {
+		if c.Pattern == "/Users/me/shared/*" {
+			foundDir = true
+			break
+		}
+	}
+	if !foundDir {
+		t.Fatalf("expected absolute dir candidate, got %+v", candidates)
 	}
 }
 
@@ -346,5 +382,27 @@ func TestSuggestRulePatterns_WriteParentPathDoesNotDefaultToDirScope(t *testing.
 		if c.Pattern == "../secret/*" && c.Default {
 			t.Fatalf("unexpected default dir candidate for parent path: %+v", c)
 		}
+	}
+}
+
+func TestSuggestRulePatterns_OutsideCWDHasNoRelativeExtCandidate(t *testing.T) {
+	// A relative "**/*.md" rule is scoped to the working directory and could
+	// never match this out-of-cwd absolute path; offering it would save a rule
+	// that has no effect on future calls.
+	candidates := suggestRulePatterns("write", `{"path":"/home/shared/plan.md","content":"..."}`, nil, "/home/user/project")
+	for _, c := range candidates {
+		if c.Pattern == "**/*.md" {
+			t.Fatalf("unexpected cwd-scoped ext candidate for outside-cwd path: %+v", c)
+		}
+	}
+	foundExact := false
+	for _, c := range candidates {
+		if c.Pattern == "/home/shared/plan.md" {
+			foundExact = true
+			break
+		}
+	}
+	if !foundExact {
+		t.Fatalf("expected absolute literal candidate in %#v", candidates)
 	}
 }

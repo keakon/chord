@@ -15,6 +15,7 @@ type streamToolDeltaReducer struct {
 	turn                         *Turn
 	registry                     *tools.Registry
 	ruleset                      func() permission.Ruleset
+	toolBaseDir                  string
 	visibleToolNames             func() map[string]struct{}
 	emit                         func(AgentEvent)
 	flushBeforeTool              func()
@@ -129,7 +130,7 @@ func (r streamToolDeltaReducer) maybeStartEarlySpeculativeTool(callID string) {
 	if r.ruleset != nil {
 		ruleset = r.ruleset()
 	}
-	decision := evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(call.ArgsJSON), r.turn.streamingToolCallsBefore(callID))
+	decision := evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(call.ArgsJSON), r.turn.streamingToolCallsBefore(callID), r.toolBaseDir)
 	if decision.Allowed {
 		decision = r.checkVisibleSpeculativeTool(callName)
 	}
@@ -157,7 +158,7 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 	if r.ruleset != nil {
 		ruleset = r.ruleset()
 	}
-	decision := evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(argsJSON), r.turn.streamingToolCallsBefore(callID))
+	decision := evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(argsJSON), r.turn.streamingToolCallsBefore(callID), r.toolBaseDir)
 	if decision.Allowed && r.registry != nil {
 		if tool, ok := r.registry.Get(callName); ok {
 			if err := tools.ValidateToolArgs(tool, llm.UnwrapToolArgs(json.RawMessage(argsJSON))); err != nil {

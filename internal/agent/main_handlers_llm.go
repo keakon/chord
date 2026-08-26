@@ -573,7 +573,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 		if turn.streamingToolExec != nil {
 			// Only attempt to reuse speculative results when permission is non-interactive.
 			if len(a.ruleset) > 0 && !isInternalControlTool(tc.Name) {
-				decision := evaluateToolPermission(a.effectiveRuleset(), tc.Name, tc.Args)
+				decision := evaluateToolPermissionInDir(a.effectiveRuleset(), tc.Name, tc.Args, a.projectRoot)
 				if decision.Action != permission.ActionAllow {
 					pendingCalls = append(pendingCalls, tc)
 					continue

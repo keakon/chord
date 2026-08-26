@@ -11,6 +11,7 @@
 - `prompt_cache.ttl` 现在会在启动时校验：接受 `"5m"` 与 `"1h"`（`"5m"` 是 API 默认值，会归一化为省略该字段），其余取值报配置错误，不再被静默忽略。TTL 现在在 `explicit` 断点模式下同样生效，而不仅是 `auto` 模式。
 - `preset: azure` provider preset 已移除。Azure OpenAI Responses 现在按普通 `type: responses` provider 配置：设置 `auth_scheme: api-key`、`store: true`、`trust_http_400: true` 与 `retry_after_max_s: 86400`，并用 `compat.request_overrides.headers` 将 `OpenAI-Beta` 与 `originator` 置 `null` 移除 Codex 身份 header（这是旧 preset 唯一无法用普通配置表达的行为）。配置中仍含 `preset: azure` 的会在启动时被拒绝；迁移为等价普通 provider 后，线上请求行为与原来完全一致。
 - `apply_patch` 不再接受已废弃的单文件 `{path, patch}` 参数形态：调用方必须在当前 `patch` 字段里发送 Codex `*** Begin Patch` 信封。旧的 `patch` 工具名在权限规则里仍会归一化为 `apply_patch`。
+- 文件类工具（`read`/`write`/`edit`/`apply_patch`/`delete`/`view_image`）的权限 pattern 现在以会话工作目录为作用域。工作目录内的路径在匹配前归一化为相对形式：相对规则（`**`、`src/**`）覆盖当前目录，单独的 `*` 仍是「任意路径」。绝对规则（`/Users/me/**`、`/**`）现在只匹配工作目录外的路径，不再覆盖目录内的文件——需要覆盖目录内时请改用相对写法（如 `**`）。`./**` 与 `**` 等价。
 
 ### 新功能
 
@@ -32,7 +33,7 @@
 - 信息面板的 `MODEL` 板块改为两行显示：provider 单独一行，模型 ID 带 `@variant` 后缀放在下一行，不再把 `provider/model@variant` 挤在一行里截断。
 - `apply_patch` 现在会在同一补丁里保留无关文件组的成功修改，并逐个报告未应用操作组的失败原因，不再把提交过的补丁原样回显。结果会明确区分已提交修改与未应用操作，提示模型按当前文件内容重建失败操作并只重提这些操作，同时不再在末尾用 `Error:` 重复同一项失败。移动依赖按操作顺序传播：移动失败时，后续触及源路径或目标路径的操作不会单独提交；源文件组在移动后才失败时，依赖移动目标的操作也会一起回滚。文件变更统计与会话恢复只记录真正提交成功的文件组。
 - `delete` 遵循同样的部分结果契约：失败前已删除的文件会计入已提交变更，而不是随错误一起被丢弃；会话恢复后，删除操作（包括完全成功的）现在也会重新出现在变更文件侧栏中。
-- Delete 确认的规则选择器现在始终提供全局 `*` 放行项；被删除文件位于当前工作目录内时，还会提供一个 `当前目录/**` 的递归规则选项，选了之后在嵌套子目录里的删除可以直接放行，不必逐个确认。
+- Delete 确认的规则选择器现在始终提供全局 `*` 放行项；被删除文件位于当前工作目录内时，还会提供一个 `**` 递归规则选项——相对当前目录，能命中目录内任意拼写的路径——选了之后在嵌套子目录里的删除可以直接放行，不必逐个确认。
 - 工具结果类 hook 载荷（`on_tool_result`、`on_before_tool_result_append` 以及批量 `tool_calls` 的每一项）的 `path`/`paths` 现在优先取自已提交的 FileState：路径为解析后的绝对路径，部分失败的调用只列出真正变更的文件，SubAgent 与主 agent 的载荷形态一致。`src/**/*.go` 这类相对 `path_filter` glob 现在也能匹配项目根内的绝对载荷路径。
 - 请求级上下文剪裁现在会在 JSON 对象摘要中保留标量值和精确的大整数，JSON 数组改为抽取首项、中间项与末项，带行号的源码输出则会标明原始行号范围。摘要长度有明确上限；只有 JSON 摘要比原工具结果更小时，才会替换原内容。
 - Provider 重试节奏现在可通过 `retry_backoff: exponential | fixed | none` 与 `retry_delay_ms`（0–60000ms）配置。它控制完整模型池重试轮之间由 Chord 生成的等待，以及未携带 `Retry-After` 提示的普通 HTTP 429 key 冷却；合法的 `Retry-After`（受 `retry_after_max_s` 限制）始终优先于已配置的节奏、按原值生效。已确认的配额重置窗口与凭据硬状态仍然优先。作为该变更的一部分，所有 HTTP 429 现在都走普通限流路径：既没有重试提示、也没有已耗尽额度快照的 Codex usage-limit 429 从共享的 1 秒指数默认值起步，而不再是 preset 的 1 分钟冷却（preset 分支仍处理非 429 的 usage-limit 错误）；打断可见流式输出的 429 也会应用同样的节奏并轮换到下一个 key，而不是在同一 key 上无冷却重试。

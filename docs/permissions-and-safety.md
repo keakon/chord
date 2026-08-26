@@ -51,7 +51,16 @@ permission:
 
 This means: allow most tools by default; disable `handoff` and `delegate`; require confirmation for file deletion, selected WebFetch URL patterns, and common high-risk shell/git commands. Permission rules use “last match wins”, so the more specific `web_fetch` and `shell` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further. This page starts from `"*": allow` as a trusted-workspace baseline; for a least-privilege baseline instead, the `builder` agent in [Configuration — Agent config](./configuration.md#agent-config) starts from `"*": deny` and opts in only to the tools a role needs. Pick whichever baseline matches your trust model.
 
-Permission matching only examines the tool call itself — the command string for `shell`, the path arguments for file tools — never the directory Chord was started from. The same command gets the same verdict in any working directory, and a `workdir` argument on a `shell` call does not participate in matching. File-tool rules can restrict path prefixes directly. Shell rules only constrain the submitted command string: they do not sandbox the command's filesystem effects, and an allowed command can still `cd` elsewhere, invoke another program, or act on an absolute path. Use narrow shell patterns for approval policy and an OS-level sandbox when actual filesystem confinement is required.
+Permission matching examines the tool call and the session working directory (the directory the tool executes in). For `shell`, only the command string is matched — a `workdir` argument does not participate. For file tools (`read`, `write`, `edit`, `apply_patch`, `delete`, `view_image`), the target path is normalized against the working directory before rules are matched: a path inside the working directory is matched in cwd-relative form (so `foo.go`, `./foo.go`, and an absolute spelling of the same file all hit the same rule), while a path outside the working directory stays absolute.
+
+File-tool rule patterns are scoped by their form:
+
+- `*` matches every path spelling — the same "any path" it always meant.
+- A relative pattern (`**`, `src/**`, `tmp/*`) is anchored to the working directory and only matches in-cwd paths. `**` therefore means "everything under the current directory"; `./**` is accepted as the same thing.
+- An absolute pattern (`/Users/me/other/**`, `~/other/**`, `/**`) only matches out-of-cwd absolute paths. `/**` means "every absolute path"; combining it with `**` covers the same ground as `*`. On Windows, home-relative patterns accept either separator (`~\other\**` and `~/other/**`).
+- An absolute rule no longer matches a file inside the working directory — write the in-cwd rule in relative form instead.
+
+Shell rules only constrain the submitted command string: they do not sandbox the command's filesystem effects, and an allowed command can still `cd` elsewhere, invoke another program, or act on an absolute path. Use narrow shell patterns for approval policy and an OS-level sandbox when actual filesystem confinement is required.
 
 ### WebFetch target matching
 
