@@ -918,9 +918,10 @@ func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string
 
 // appendSearchHeaderSummary appends the pattern, optional search parameters and
 // the result summary to a search tool header as a single line. Priority goes
-// to the summary (match/file counts, truncation facts) and to the pattern's
-// head and tail (middle-truncated); the parameters are dropped first when the
-// header runs out of width.
+// to the pattern (the primary argument) and to the result summary (count
+// facts): the parameters are compressed or dropped before either yields. When
+// a result summary exists, parameters only share the line with an intact
+// pattern + summary pair; otherwise they use the space left by the pattern.
 func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, maxWidth int) string {
 	baseWidth := runewidth.StringWidth(stripANSI(headerLine))
 	if baseWidth >= maxWidth {
@@ -934,31 +935,37 @@ func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, m
 	summary = sanitizeToolDisplayText(summary)
 	grayPart = sanitizeDisplayTextKeepingSGR(grayPart)
 
-	// Parameters are command invocation: when the budget allows they stay
-	// glued to the pattern with a space, and only the result summary is
-	// separated with " · ".
-	hasRealSummary := summary != ""
-	sep := " "
-	if hasRealSummary {
-		sep = " · "
-	}
+	const minGrayCols = 8
 	if summary == "" {
-		summary = grayPart
-		grayPart = ""
-	} else if grayPart != "" && budget >= runewidth.StringWidth(stripANSI(grayPart))+runewidth.StringWidth(summary)+2 {
-		summary = grayPart + " · " + summary
-		sep = " "
+		if mainPart == "" {
+			if grayPart == "" {
+				return headerLine
+			}
+			return headerLine + " " + DimStyle.Render(truncateToolHeaderGray(grayPart, budget))
+		}
+		mainWidth := runewidth.StringWidth(mainPart)
+		if grayPart == "" || mainWidth >= budget {
+			return headerLine + " " + truncateToolHeaderMiddle(mainPart, budget)
+		}
+		remaining := budget - mainWidth - 1
+		if remaining < minGrayCols {
+			return headerLine + " " + mainPart
+		}
+		if grayWidth := runewidth.StringWidth(stripANSI(grayPart)); grayWidth > remaining {
+			grayPart = truncateToolHeaderGray(grayPart, remaining)
+		}
+		return headerLine + " " + mainPart + " " + DimStyle.Render(grayPart)
 	}
 	if mainPart == "" {
-		if summary == "" {
-			return headerLine
-		}
 		return headerLine + " " + DimStyle.Render(truncateToolHeaderGray(summary, budget))
 	}
 
-	// The summary keeps a minimum share of the line; the pattern is
-	// middle-truncated and the parameters are dropped first.
+	// The pattern is the primary argument and the count summary is the
+	// result fact: they share the line first. The parameters only join an
+	// intact pattern + summary pair and are compressed or dropped before the
+	// pattern is ever middle-truncated.
 	const minPatternCols = 8
+	const sep = " · "
 	suffixW := runewidth.StringWidth(stripANSI(summary))
 	patternBudget := budget - suffixW - runewidth.StringWidth(sep)
 	if patternBudget < minPatternCols {
@@ -971,15 +978,26 @@ func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, m
 		suffixW = runewidth.StringWidth(stripANSI(summary))
 		patternBudget = budget - suffixW - runewidth.StringWidth(sep)
 	}
-	pattern := truncateToolHeaderMiddle(mainPart, patternBudget)
-	if pattern == "" {
-		if summary == "" {
-			return headerLine
-		}
-		return headerLine + " " + DimStyle.Render(summary)
+	pattern := mainPart
+	if runewidth.StringWidth(mainPart) > patternBudget {
+		pattern = truncateToolHeaderMiddle(mainPart, patternBudget)
 	}
 	if summary == "" {
 		return headerLine + " " + pattern
+	}
+	if grayPart == "" {
+		return headerLine + " " + pattern + sep + DimStyle.Render(summary)
+	}
+	// Pattern and summary are intact; the parameters follow the pattern
+	// glued with a space, compressed to the remaining width when they do not
+	// fit whole, and dropped when only a meaningless fragment would remain.
+	remaining := budget - runewidth.StringWidth(pattern) - runewidth.StringWidth(sep) - suffixW
+	if grayWidth := runewidth.StringWidth(stripANSI(grayPart)); remaining-1 >= grayWidth {
+		return headerLine + " " + pattern + " " + DimStyle.Render(grayPart) + " · " + DimStyle.Render(summary)
+	}
+	if remaining-1 >= minGrayCols {
+		grayPart = truncateToolHeaderGray(grayPart, remaining-1)
+		return headerLine + " " + pattern + " " + DimStyle.Render(grayPart) + " · " + DimStyle.Render(summary)
 	}
 	return headerLine + " " + pattern + sep + DimStyle.Render(summary)
 }

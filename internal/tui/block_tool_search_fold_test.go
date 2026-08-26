@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -125,5 +126,60 @@ func TestCollapsedSearchSummaryKeepsCountAndDropsParamsWhenNarrow(t *testing.T) 
 	}
 	if strings.Contains(joined, "paths=") && strings.Contains(joined, "includes=") {
 		t.Fatalf("expected narrow collapsed grep to drop the parameters, got:\n%s", joined)
+	}
+}
+
+func TestSearchHeaderKeepsPatternWholeAndCompressesParamsWhenNarrow(t *testing.T) {
+	// The pattern is the primary argument: when the header cannot fit the
+	// full pattern + counts + parameters, the parameters are compressed
+	// (middle-truncated) instead of stealing the pattern's width.
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameGrep,
+		Content:                `{"pattern":"Audit|EffectiveArgs|AnotherVeryLongAlternation","paths":["internal/tui/app_agent_events_tool.go"],"includes":["*.go"]}`,
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+		ResultContent:          "internal/tui/app.go:1:match one\ninternal/tui/block.go:2:match two",
+	}
+	joined := stripANSI(strings.Join(block.Render(118, ""), "\n"))
+	if !strings.Contains(joined, "Audit|EffectiveArgs|AnotherVeryLongAlternation") {
+		t.Fatalf("expected grep header to keep the full pattern before compressing params, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "2 matches · 2 files") {
+		t.Fatalf("expected grep header to keep the count summary, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "(paths=internal/tui/app_agent_events_tool.go, includes=*.go)") {
+		t.Fatalf("expected grep header to compress the parameters, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "(paths=") {
+		t.Fatalf("expected compressed grep header to keep the parameter head, got:\n%s", joined)
+	}
+}
+
+func TestSearchHeaderKeepsPatternWholeWithoutResultSummary(t *testing.T) {
+	// Error and cancelled results have no count summary. Their parameters
+	// must remain secondary instead of taking the summary's priority slot.
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameGrep,
+		Content:                `{"pattern":"Audit|EffectiveArgs|AnotherVeryLongAlternation","paths":["internal/tui/app_agent_events_tool.go"],"includes":["*.go"]}`,
+		ResultDone:             true,
+		ResultStatus:           agent.ToolResultStatusError,
+		ToolCallDetailExpanded: false,
+		ResultContent:          "search failed",
+	}
+	joined := stripANSI(strings.Join(block.Render(118, ""), "\n"))
+	if !strings.Contains(joined, "Audit|EffectiveArgs|AnotherVeryLongAlternation") {
+		t.Fatalf("expected error grep header to keep the full pattern before compressing params, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "(paths=internal/tui/app_agent_events_tool.go, includes=*.go)") {
+		t.Fatalf("expected error grep header to compress the parameters, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "(paths=") {
+		t.Fatalf("expected compressed error grep header to keep the parameter head, got:\n%s", joined)
 	}
 }
