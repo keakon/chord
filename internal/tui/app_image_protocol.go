@@ -114,7 +114,7 @@ func (m *Model) imageProtocolCmdWithReason(reason string) tea.Cmd {
 				continue
 			}
 			block = m.viewport.materialize(block)
-			blockStart := starts[i] + m.viewport.blockLeadingSpacing(blocks, i)
+			blockStart := starts[i]
 			for _, part := range block.ImageParts {
 				if part.RenderRows <= 0 || part.RenderStartLine < 0 {
 					continue
@@ -228,7 +228,7 @@ func (m *Model) iterm2InlineProtocolCmd() tea.Cmd {
 			continue
 		}
 		block = m.viewport.materialize(block)
-		blockStart := starts[i] + m.viewport.blockLeadingSpacing(blocks, i)
+		blockStart := starts[i]
 		style := UserCardStyle
 		cardInnerOffset := style.GetMarginLeft() + style.GetBorderLeftSize() + style.GetPaddingLeft()
 		imageCol := mainLeft + cardInnerOffset

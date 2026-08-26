@@ -305,7 +305,7 @@ func (v *Viewport) UpdateLastBlock() {
 	v.bumpRenderVersion()
 	lastIdx := len(blocks) - 1
 	oldSpan := v.lastBlockSpan
-	newSpan := v.measuredBlockSpanAt(blocks, lastIdx, blocks[lastIdx])
+	newSpan := v.measureSpanLines(blocks[lastIdx])
 	v.totalLines += newSpan - oldSpan
 	v.lastBlockSpan = newSpan
 	v.invalidateCachesForLineCountChange()

@@ -1,7 +1,5 @@
 package tui
 
-const viewportTurnSpacingLines = 1
-
 func (v *Viewport) SwapSpillStore(spill *ViewportSpillStore) *ViewportSpillStore {
 	if v == nil || spill == nil || v.spill == spill {
 		return nil
@@ -133,37 +131,6 @@ func (v *Viewport) blockSpanLines(block *Block) int {
 	return v.lineCount(block, v.width)
 }
 
-func (v *Viewport) isTurnBoundary(prev, curr *Block) bool {
-	if prev == nil || curr == nil {
-		return false
-	}
-	return false
-}
-
-func (v *Viewport) blockLeadingSpacing(blocks []*Block, blockIndex int) int {
-	if blockIndex <= 0 || blockIndex >= len(blocks) {
-		return 0
-	}
-	if v.isTurnBoundary(blocks[blockIndex-1], blocks[blockIndex]) {
-		return viewportTurnSpacingLines
-	}
-	return 0
-}
-
-func (v *Viewport) blockSpanAt(blocks []*Block, blockIndex int, block *Block) int {
-	if block == nil {
-		return 0
-	}
-	return v.blockLeadingSpacing(blocks, blockIndex) + v.blockSpanLines(block)
-}
-
-func (v *Viewport) measuredBlockSpanAt(blocks []*Block, blockIndex int, block *Block) int {
-	if block == nil {
-		return 0
-	}
-	return v.blockLeadingSpacing(blocks, blockIndex) + v.measureSpanLines(block)
-}
-
 func (v *Viewport) measureSpanLines(block *Block) int {
 	if block == nil {
 		return 0
@@ -200,7 +167,7 @@ func (v *Viewport) recalcTotalLines() {
 	spans := make([]int, len(blocks))
 	for i, block := range blocks {
 		starts[i] = total
-		span := v.blockSpanAt(blocks, i, block)
+		span := v.blockSpanLines(block)
 		spans[i] = span
 		total += span
 	}

@@ -239,7 +239,7 @@ func (m *Model) revealTrailingInterruptedTurnUserMessage() bool {
 			continue
 		}
 		start := starts[i]
-		end := start + m.viewport.blockSpanAt(blocks, i, block)
+		end := start + m.viewport.blockSpanLines(block)
 		viewportEnd := m.viewport.offset + m.viewport.height
 		if end > m.viewport.offset && start < viewportEnd {
 			return false

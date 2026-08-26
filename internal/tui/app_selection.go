@@ -172,7 +172,7 @@ func (m *Model) firstVisibleCompactionSummaryBlock() *Block {
 			break
 		}
 		blockStart := starts[i]
-		blockEnd := blockStart + m.viewport.blockSpanAt(blocks, i, block)
+		blockEnd := blockStart + m.viewport.blockSpanLines(block)
 		if blockEnd > windowStart && blockStart < windowEnd {
 			return block
 		}

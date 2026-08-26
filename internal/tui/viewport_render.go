@@ -46,32 +46,10 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 		if len(visible) >= v.height {
 			break
 		}
-		leadingSpacing := v.blockLeadingSpacing(blocks, blockIndex)
-		if leadingSpacing > 0 {
-			spacingStart := currentLine
-			spacingEnd := currentLine + leadingSpacing
-			if spacingEnd > windowStart && spacingStart < windowEnd {
-				lo := 0
-				if windowStart > spacingStart {
-					lo = windowStart - spacingStart
-				}
-				hi := leadingSpacing
-				if windowEnd < spacingEnd {
-					hi = windowEnd - spacingStart
-				}
-				for i := lo; i < hi && len(visible) < v.height; i++ {
-					visible = append(visible, emptyLine)
-				}
-			}
-			currentLine = spacingEnd
-			if len(visible) >= v.height || currentLine >= windowEnd {
-				break
-			}
-		}
 		if block.spillCold {
 			blockCount := 0
 			if v.blockPositionCacheValid(blocks) && blockIndex < len(v.blockSpansCache) {
-				blockCount = v.blockSpansCache[blockIndex] - leadingSpacing
+				blockCount = v.blockSpansCache[blockIndex]
 			}
 			if blockCount <= 0 {
 				blockCount = v.lineCount(block, v.width)

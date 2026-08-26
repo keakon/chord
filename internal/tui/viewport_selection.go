@@ -40,16 +40,10 @@ func (v *Viewport) GetBlockAndLineAt(globalLine int) (*Block, int) {
 			break
 		}
 		lineStart := starts[i]
-		leadingSpacing := v.blockLeadingSpacing(blocks, i)
-		// Turn spacing lines are rendered as empty viewport background and are not
-		// considered part of any block for mouse hit-testing/selection.
-		if leadingSpacing > 0 && globalLine < lineStart+leadingSpacing {
-			return nil, -1
-		}
 		lc := v.lineCount(block, v.width)
-		lineEnd := lineStart + leadingSpacing + lc
+		lineEnd := lineStart + lc
 		if globalLine < lineEnd {
-			line := globalLine - lineStart - leadingSpacing
+			line := globalLine - lineStart
 			return v.materialize(block), line
 		}
 	}

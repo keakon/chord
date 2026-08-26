@@ -71,7 +71,7 @@ func TestIdleAfterCancelRevealsPromptAboveLongInterruptedReply(t *testing.T) {
 		t.Fatal("cancelled turn user block not found")
 	}
 	blocks := m.viewport.visibleBlocks()
-	userEnd := userStart + m.viewport.blockSpanAt(blocks, 0, blocks[0])
+	userEnd := userStart + m.viewport.blockSpanLines(blocks[0])
 	if userEnd <= m.viewport.offset || userStart >= m.viewport.offset+m.viewport.height {
 		t.Fatalf("cancelled turn user block [%d,%d) is outside viewport [%d,%d)", userStart, userEnd, m.viewport.offset, m.viewport.offset+m.viewport.height)
 	}

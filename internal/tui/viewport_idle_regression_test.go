@@ -3,9 +3,12 @@ package tui
 import "testing"
 
 // Regression test for a long-session drift class:
-// DropOffScreenCaches must account for turn-spacing lines when computing
-// global line offsets, otherwise the viewport's cached block positions can
-// gradually desync from the rendered transcript and selection hit-testing.
+// DropOffScreenCaches must keep the viewport's cached block positions
+// consistent, otherwise the cached starts/spans can gradually desync from the
+// rendered transcript and selection hit-testing. The turn-spacing mechanism
+// that originally motivated this test was removed, but the invariant still
+// holds: DropOffScreenCaches must not change cached starts/spans for a fixed
+// transcript.
 func TestViewportDropOffScreenCachesKeepsBlockStartsConsistent(t *testing.T) {
 	v := NewViewport(40, 6)
 
