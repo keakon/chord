@@ -116,6 +116,10 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		filePath = b.displayToolPath(filePath)
 	}
 	prefix := b.renderToolPrefix(spinnerFrame)
+	hasDisclosure := !b.toolResultIsCancelled() && (strings.TrimSpace(displayDiff) != "" || hasOperationSummaries || len(applyPatchTargets) > 0)
+	if b.ResultDone && hasDisclosure {
+		prefix = renderToolDisclosurePrefix(prefix, !b.Collapsed)
+	}
 	var result []string
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	if filePath != "" {
@@ -135,7 +139,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	result = append(result, headerLine)
 	if b.Collapsed {
 		if summary := b.fileDiffSummaryLine(applyPatchTargets, displayDiff); summary != "" {
-			result = append(result, ToolResultStyle.Render("  ↳ "+summary+" · [space] expand"))
+			result = append(result, ToolResultStyle.Render("  ↳ "+summary))
 		}
 		if applyPatchNoChanges {
 			result = append(result, DimStyle.Render("  ▸ ↳ No changes"))
@@ -322,9 +326,6 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			}
 			result = append(result, "  "+rendered)
 		}
-	}
-	if !b.Collapsed {
-		result = append(result, renderToolCollapseHint(toolHintIndent))
 	}
 	if (b.ToolName == tools.NameEdit || b.ToolName == tools.NameApplyPatch) && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() && !toolShouldHideSuccessfulFileOpResult(b) {
 		result = append(result, ToolResultExpandedStyle.Render("  ↳ Diagnostics:"))

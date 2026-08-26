@@ -694,8 +694,11 @@ func TestGrepAcceptsScalarPathsAndIncludesWithCoerceNote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(out, "paths was a single string") || !strings.Contains(out, "includes was a single string") {
+	if !strings.Contains(out, "paths was a string and was treated as a one-item list") || !strings.Contains(out, "includes was a string and was treated as a one-item list") {
 		t.Fatalf("scalar coerce notes missing:\n%s", out)
+	}
+	if !strings.Contains(out, `paths: ["internal/tui"]`) || !strings.Contains(out, `includes: ["**/*.go"]`) {
+		t.Fatalf("scalar coerce notes should show array-form examples:\n%s", out)
 	}
 	if !strings.Contains(out, "hello") {
 		t.Fatalf("expected match line, got:\n%s", out)

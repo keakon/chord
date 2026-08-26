@@ -104,10 +104,21 @@ const pendingToolGlyph = "⧗"
 
 func toolUsesCompactDetailToggle(toolName string) bool {
 	switch toolName {
-	case tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameRead, tools.NameTodoWrite, tools.NameQuestion, tools.NameDelegate:
+	case tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameDelete, tools.NameRead, tools.NameTodoWrite, tools.NameQuestion, tools.NameDelegate:
 		return false
 	}
 	return true
+}
+
+func renderToolDisclosurePrefix(prefix string, expanded bool) string {
+	marker := "▸"
+	if expanded {
+		marker = "▾"
+	}
+	if prefix == "▸" || prefix == "▾" {
+		return marker
+	}
+	return prefix + " " + marker
 }
 
 func toolCollapsedSummaryText(s string) string {
@@ -197,26 +208,6 @@ func toolCollapsedVisibleLineCount(s string, width int) int {
 		return 0
 	}
 	return len(wrapText(trimmed, width))
-}
-
-func toolPlainTextWrappedLineCount(text string, width int, limit int) (count int, truncated bool) {
-	if width <= 0 {
-		width = 80
-	}
-	if text == "" {
-		return 0, false
-	}
-	for line := range strings.SplitSeq(strings.TrimRight(text, "\n"), "\n") {
-		lineCount := len(wrapText(line, width))
-		if lineCount == 0 {
-			lineCount = 1
-		}
-		count += lineCount
-		if limit > 0 && count > limit {
-			return count, true
-		}
-	}
-	return count, false
 }
 
 func toolExpandedResultLines(displayResult string, width int, expanded bool) ([]string, int) {
@@ -347,6 +338,14 @@ func bashCollapsedOutcomeSummary(b *Block) (string, bool) {
 		return "cancelled", false
 	}
 	if b.toolResultIsError() {
+		if before, after, ok := strings.Cut(b.ResultContent, "Error:"); ok {
+			if line := bashFirstNonEmptyLine(strings.TrimSpace(after)); line != "" {
+				return truncateOneLine(line, 120), true
+			}
+			if line := bashFirstNonEmptyLine(strings.TrimSpace(before)); line != "" {
+				return truncateOneLine(line, 120), true
+			}
+		}
 		if timedOut := sanitizeToolDisplayText(bashTimeoutSummary(b.ResultContent)); timedOut != "" {
 			return timedOut, true
 		}
@@ -621,10 +620,6 @@ func renderToolExpandHint(indent string, hidden int) string {
 	return DimStyle.Render(fmt.Sprintf("%s── %d more lines · [space] expand ──", indent, hidden))
 }
 
-func renderToolCollapseHint(indent string) string {
-	return DimStyle.Render(fmt.Sprintf("%s── [space] collapse ──", indent))
-}
-
 func ensureCodeHighlighter(slot **codeHighlighter, filePath, sample string) *codeHighlighter {
 	return ensureCodeHighlighterWithLanguage(slot, filePath, sample, "")
 }
@@ -727,6 +722,7 @@ type grepResultMeta struct {
 	Matches     int
 	Files       int
 	Skipped     int
+	Notes       int
 	Fallback    bool
 	Truncated   bool
 	HasDetails  bool
@@ -817,6 +813,7 @@ func parseGrepResultMeta(result string) grepResultMeta {
 		switch {
 		case strings.HasPrefix(line, "Note:"):
 			meta.HasDetails = true
+			meta.Notes++
 			if strings.Contains(lower, "literal") && (strings.Contains(lower, "fallback") || strings.Contains(lower, "searched as literal")) {
 				meta.Fallback = true
 			}
@@ -831,6 +828,9 @@ func parseGrepResultMeta(result string) grepResultMeta {
 			// fallback on the same line, so match the prefix conservatively.
 			meta.HasDetails = true
 			meta.NoMatches = true
+			if strings.Contains(lower, "invalid regex") && strings.Contains(lower, "literal") {
+				meta.Fallback = true
+			}
 		default:
 			meta.HasDetails = true
 			meta.Matches++

@@ -14,7 +14,12 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 	cardWidth := metrics.cardWidth
 	contentWidth := metrics.contentWidth
 
-	prefix := b.renderToolPrefixForExpanded(spinnerFrame, b.ToolCallDetailExpanded)
+	expanded := b.ToolCallDetailExpanded || b.compactToolResultForceExpanded(contentWidth)
+	canExpand := b.searchResultCanExpand()
+	prefix := b.renderToolPrefixForExpanded(spinnerFrame, expanded)
+	if b.ResultDone && canExpand {
+		prefix = renderToolDisclosurePrefix(prefix, expanded)
+	}
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	keys, vals := parseToolArgs(b.Content)
 	mainPart, grayPart := b.formatToolHeaderPartsWithParsed(keys, vals)
@@ -26,8 +31,6 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 	}
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
 	result := []string{headerLine}
-
-	expanded := b.ToolCallDetailExpanded || b.compactToolResultForceExpanded(contentWidth)
 
 	if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
 		result = append(result, ErrorStyle.Render("  ↳ Error:"))
@@ -50,14 +53,7 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 
 	if summary, showInline := b.searchResultSummaryLine(); summary != "" && !b.toolExecutionIsQueued() {
 		if !showInline && !expanded {
-			// summary is the raw result rendered verbatim (dimmed body style);
-			// in expanded mode the full result body below renders it, so skip
-			// the duplicate summary here.
-			lines := strings.Split(strings.TrimRight(sanitizeToolDisplayText(summary), "\n"), "\n")
-			for _, line := range lines {
-				if strings.TrimSpace(line) == "" {
-					continue
-				}
+			for line := range strings.SplitSeq(strings.TrimRight(sanitizeToolDisplayText(summary), "\n"), "\n") {
 				for _, wrapped := range wrapText(line, contentWidth) {
 					result = append(result, DimStyle.Render("    "+wrapped))
 				}
@@ -65,22 +61,19 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 			result = appendToolElapsedFooter(result, b)
 			return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 		}
-		if showInline || !expanded {
-			suffix := ""
-			if !expanded && strings.TrimSpace(b.ResultContent) != "" {
-				if b.searchResultCanExpand() {
-					suffix = " · [space] expand"
-				}
-			}
-			for _, wrapped := range wrapText(summary+suffix, contentWidth) {
+		showExpandedSummary := true
+		if tools.NormalizeName(b.ToolName) == tools.NameGrep && parseGrepResultMeta(b.ResultContent).NoMatches {
+			showExpandedSummary = false
+		}
+		if showInline && (!expanded || showExpandedSummary) {
+			for _, wrapped := range wrapText(summary, contentWidth) {
 				result = append(result, ToolResultStyle.Render("  ↳ "+wrapped))
 			}
 		}
 	}
 
 	if expanded && strings.TrimSpace(b.ResultContent) != "" {
-		lines := strings.Split(strings.TrimRight(sanitizeToolDisplayText(toolDisplayResultContent(b)), "\n"), "\n")
-		for _, line := range lines {
+		for line := range strings.SplitSeq(strings.TrimRight(sanitizeToolDisplayText(toolDisplayResultContent(b)), "\n"), "\n") {
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
@@ -88,7 +81,6 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 				result = append(result, DimStyle.Render("    "+wrapped))
 			}
 		}
-		result = append(result, renderToolCollapseHint(toolHintIndent))
 	}
 
 	result = appendToolElapsedFooter(result, b)
@@ -103,9 +95,16 @@ func (b *Block) searchResultSummaryLine() (string, bool) {
 	case tools.NameGrep:
 		meta := parseGrepResultMeta(b.ResultContent)
 		if meta.NoMatches {
-			return strings.TrimSpace(b.ResultContent), false
+			parts := []string{"No matches"}
+			if meta.Skipped > 0 {
+				parts = append(parts, fmt.Sprintf("%d paths skipped", meta.Skipped))
+			}
+			if meta.Fallback {
+				parts = append(parts, "literal fallback")
+			}
+			return strings.Join(parts, " · "), true
 		}
-		if meta.Matches <= 1 && !meta.Fallback && !meta.Truncated && meta.Skipped == 0 {
+		if meta.Matches <= 1 && meta.Notes == 0 && !meta.Fallback && !meta.Truncated && meta.Skipped == 0 {
 			return strings.TrimSpace(b.ResultContent), false
 		}
 		parts := make([]string, 0, 4)
@@ -172,9 +171,9 @@ func (b *Block) searchResultCanExpand() bool {
 	case tools.NameGrep:
 		meta := parseGrepResultMeta(b.ResultContent)
 		if meta.NoMatches {
-			return false
+			return meta.Notes > 0 || meta.Fallback || meta.Truncated || meta.Skipped > 0
 		}
-		return meta.Matches > 1 || meta.Fallback || meta.Truncated || meta.Skipped > 0
+		return meta.Matches > 1 || meta.Notes > 0 || meta.Fallback || meta.Truncated || meta.Skipped > 0
 	case tools.NameGlob:
 		meta := parseGlobResultMeta(b.ResultContent)
 		return meta.Files > 1 || meta.Truncated || meta.Artifact != ""
@@ -197,8 +196,6 @@ func (b *Block) fileDiffSummaryLine(applyPatchTargets []tools.ApplyPatchDisplayT
 		if files > 0 {
 			parts = append(parts, fmt.Sprintf("%d files", files))
 		}
-	} else if path := strings.TrimSpace(b.diffToolFilePathWithTargets(applyPatchTargets)); path != "" {
-		parts = append(parts, b.displayToolPath(path))
 	}
 	if meta.Added > 0 || meta.Removed > 0 {
 		parts = append(parts, fmt.Sprintf("+%d -%d lines", meta.Added, meta.Removed))

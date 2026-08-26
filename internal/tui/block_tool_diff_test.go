@@ -1064,7 +1064,7 @@ func TestRenderFileDiffCallExpandedShowsAllLinesPastFormerLimit(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"old value", "new value", "[space] collapse"} {
+	for _, want := range []string{"old value", "new value", "▾ edit example.go"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected expanded diff to contain %q, got:\n%s", want, plain)
 		}

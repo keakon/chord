@@ -55,6 +55,9 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	extras = append(extras, b.diagnosticHeaderOptions()...)
 
 	prefix := b.renderToolPrefix(spinnerFrame)
+	if b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() && fileContent != "" {
+		prefix = renderToolDisclosurePrefix(prefix, !b.Collapsed)
+	}
 	var result []string
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	if filePath != "" {
@@ -92,7 +95,7 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 				}
 			}
 			if summary != "" {
-				result = append(result, ToolResultStyle.Render("  ↳ "+summary+" · [space] expand"))
+				result = append(result, ToolResultStyle.Render("  ↳ "+summary))
 			}
 		}
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))

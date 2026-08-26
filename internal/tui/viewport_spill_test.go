@@ -247,7 +247,7 @@ func TestViewportSpillHydratePreservesToolDisplayWorkingDir(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(tool.Render(120, ""), "\n"))
-	want := filepath.Join("internal", "tui", "block_tool.go") + " (limit=20, offset=5)"
+	want := filepath.Join("internal", "tui", "block_tool.go") + " (offset=5, limit=20)"
 	if !strings.Contains(joined, want) {
 		t.Fatalf("expected hydrated tool block to keep relative path, got:\n%s", joined)
 	}

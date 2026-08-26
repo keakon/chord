@@ -392,7 +392,7 @@ func TestReadHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 		displayWorkingDir: wd,
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	want := filepath.Join("internal", "tui", "block_tool.go") + " (limit=20, offset=5)"
+	want := filepath.Join("internal", "tui", "block_tool.go") + " (offset=5, limit=20)"
 	if !strings.Contains(joined, want) {
 		t.Fatalf("expected Read header to show relative path; got:\n%s", joined)
 	}
@@ -919,7 +919,7 @@ func TestReadCardStrikesThroughShadowedDuplicateValues(t *testing.T) {
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
 	plain := stripANSI(rendered)
-	for _, want := range []string{"second.go (limit=40, offset=300, ", "limit=75", "offset=664", "path=first.go"} {
+	for _, want := range []string{"second.go (offset=300, limit=40, ", "limit=75", "offset=664", "path=first.go"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("rendered card missing %q:\n%s", want, plain)
 		}
@@ -1228,7 +1228,7 @@ func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"write cmd/demo/main.go", "12 lines written · [space] expand"} {
+	for _, want := range []string{"✓ ▸ write cmd/demo/main.go", "12 lines written"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected collapsed Write preview to contain %q; got:\n%s", want, plain)
 		}
@@ -1256,8 +1256,8 @@ func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
 			t.Fatalf("expected expanded Write preview to contain %q; got:\n%s", want, expanded)
 		}
 	}
-	if !strings.Contains(expanded, "[space] collapse") {
-		t.Fatalf("expanded Write preview should show collapse hint; got:\n%s", expanded)
+	if !strings.Contains(expanded, "✓ ▾ write cmd/demo/main.go") {
+		t.Fatalf("expanded Write preview should show the expanded disclosure glyph; got:\n%s", expanded)
 	}
 }
 
@@ -1306,7 +1306,7 @@ func TestReadCollapsedShowsSummaryAndExpandedShowsAllReturnedLines(t *testing.T)
 	}
 
 	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(collapsed, "lines 1–260 of 343 · [space] expand") {
+	if !strings.Contains(collapsed, "✓ ▸ read sample.go (limit=260) · lines 1–260 of 343") {
 		t.Fatalf("expected collapsed read summary, got:\n%s", collapsed)
 	}
 	if strings.Contains(collapsed, "line 1") {
@@ -1315,7 +1315,7 @@ func TestReadCollapsedShowsSummaryAndExpandedShowsAllReturnedLines(t *testing.T)
 
 	block.ToggleAtWidth(120)
 	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"1  line 1", "260  line 260", "[space] collapse"} {
+	for _, want := range []string{"✓ ▾ read", "1  line 1", "260  line 260"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expected expanded read to contain %q, got:\n%s", want, expanded)
 		}
@@ -1340,7 +1340,7 @@ func TestGrepCollapsedSummaryCountsOnlyMatchesAndExpandedShowsAllDetails(t *test
 	}
 
 	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(collapsed, "2 matches shown · 2 files · 1 paths skipped · literal fallback · truncated · [space] expand") {
+	if !strings.Contains(collapsed, "✓ ▸ grep TODO") || !strings.Contains(collapsed, "2 matches shown · 2 files · 1 paths skipped · literal fallback · truncated") {
 		t.Fatalf("expected grep collapsed summary, got:\n%s", collapsed)
 	}
 	if strings.Contains(collapsed, "grep: skipped path: vendor/blocked") || strings.Contains(collapsed, "searched as literal text") {
@@ -1349,7 +1349,7 @@ func TestGrepCollapsedSummaryCountsOnlyMatchesAndExpandedShowsAllDetails(t *test
 
 	block.ToggleAtWidth(120)
 	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"a.go:1:TODO one", "Note: pattern was invalid regex; searched as literal text.", "grep: skipped path: vendor/blocked", "[space] collapse"} {
+	for _, want := range []string{"✓ ▾ grep TODO", "a.go:1:TODO one", "Note: pattern was invalid regex; searched as literal text.", "grep: skipped path: vendor/blocked"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expected expanded grep to contain %q, got:\n%s", want, expanded)
 		}
@@ -1373,13 +1373,13 @@ func TestGlobCollapsedSummaryShowsFilesAndArtifact(t *testing.T) {
 	}
 
 	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(collapsed, "2 files · truncated · /tmp/ws/artifacts/glob-results.log · [space] expand") {
+	if !strings.Contains(collapsed, "✓ ▸ glob **/*.go") || !strings.Contains(collapsed, "2 files · truncated · /tmp/ws/artifacts/glob-results.log") {
 		t.Fatalf("expected glob collapsed summary, got:\n%s", collapsed)
 	}
 
 	block.ToggleAtWidth(120)
 	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"a.go", "(showing first 2 results", "[space] collapse"} {
+	for _, want := range []string{"✓ ▾ glob **/*.go", "a.go", "(showing first 2 results"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expected expanded glob to contain %q, got:\n%s", want, expanded)
 		}
@@ -1523,13 +1523,13 @@ func TestCollapsedShellToolShowsExpandHintForHiddenOutput(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	// Short output: stdout is already shown inline, but expanded mode still adds
-	// exit status + stream headers, so we should still show an expand hint.
-	if !strings.Contains(joined, "[space] expand") {
-		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
+	if !strings.Contains(joined, "✓ ▸ shell show lines") {
+		t.Fatalf("expected collapsed Shell to show its disclosure glyph and description; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "one") || !strings.Contains(joined, "two") || !strings.Contains(joined, "three") {
-		t.Fatalf("expected all output lines to be shown inline for short output; got:\n%s", joined)
+	for _, hidden := range []string{"Command:", "one", "two", "three", "more lines", "[space]"} {
+		if strings.Contains(joined, hidden) {
+			t.Fatalf("collapsed Shell should hide %q; got:\n%s", hidden, joined)
+		}
 	}
 }
 
@@ -1572,8 +1572,6 @@ func TestDelegateErrorDoesNotShowDoneSummaryLabel(t *testing.T) {
 }
 
 func TestCollapsedBashLongOutputStillFolds(t *testing.T) {
-	// 8 lines of output exceeds bashCollapsedResultMinVisibleLines (5),
-	// so collapsed mode should show a single-line summary with an expand hint.
 	var lines []string
 	for i := 1; i <= 8; i++ {
 		lines = append(lines, fmt.Sprintf("line %d", i))
@@ -1589,11 +1587,11 @@ func TestCollapsedBashLongOutputStillFolds(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "[space] expand") {
-		t.Fatalf("expected collapsed Shell with long output to show expand hint; got:\n%s", joined)
+	if !strings.Contains(joined, "✓ ▸ shell show file") {
+		t.Fatalf("expected collapsed Shell to show the disclosure glyph; got:\n%s", joined)
 	}
-	if strings.Contains(joined, "line 8") {
-		t.Fatalf("did not expect collapsed Shell with long output to reveal all lines; got:\n%s", joined)
+	if strings.Contains(joined, "line 1") || strings.Contains(joined, "line 8") {
+		t.Fatalf("did not expect collapsed Shell to reveal output lines; got:\n%s", joined)
 	}
 }
 
@@ -1730,8 +1728,8 @@ func TestCollapsedBashMultilineUsesDescriptionWhenPresent(t *testing.T) {
 	if !strings.Contains(joined, "shell Search existing permission-related tests (timeout=120)") {
 		t.Fatalf("expected collapsed multiline Shell header to use description; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Command:") || !strings.Contains(joined, "python3 - <<'PY'") {
-		t.Fatalf("expected collapsed multiline Shell to show command preview block; got:\n%s", joined)
+	if strings.Contains(joined, "Command:") || strings.Contains(joined, "python3 - <<'PY'") || strings.Contains(joined, "ok") {
+		t.Fatalf("expected collapsed multiline Shell to hide command and output bodies; got:\n%s", joined)
 	}
 }
 
@@ -1857,19 +1855,13 @@ func TestCollapsedBashShowsCommandPreviewAndExpandHint(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(joined, "Command:") || !strings.Contains(joined, "echo first") || !strings.Contains(joined, "echo second") {
-		t.Fatalf("expected collapsed Shell to show command preview lines; got:\n%s", joined)
+	if !strings.Contains(joined, "✓ ▸ shell echo first (timeout=120)") {
+		t.Fatalf("expected collapsed Shell to show its first-line command summary; got:\n%s", joined)
 	}
-	// Even when stdout/stderr are fully visible inline, expanded mode still adds
-	// exit status + stream headers, so we should show an expand hint.
-	if !strings.Contains(joined, "[space] expand") {
-		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
-	}
-	if strings.Contains(joined, "echo third") {
-		t.Fatalf("did not expect collapsed Shell with short output to show hidden command lines; got:\n%s", joined)
-	}
-	if !strings.Contains(joined, "ok") {
-		t.Fatalf("expected collapsed Shell with short output to show result inline; got:\n%s", joined)
+	for _, hidden := range []string{"Command:", "echo second", "echo third", "ok", "[space]"} {
+		if strings.Contains(joined, hidden) {
+			t.Fatalf("collapsed Shell should hide %q; got:\n%s", hidden, joined)
+		}
 	}
 }
 
@@ -1894,20 +1886,13 @@ func TestCollapsedBashLongCommandWithNoOutputKeepsCommandPreviewCollapsed(t *tes
 	}
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "Command:") || !strings.Contains(joined, "git add internal/tui/app_cached_render.go") {
-		t.Fatalf("expected collapsed Shell to show command preview; got:\n%s", joined)
+	if !strings.Contains(joined, "✓ ▸ shell 暂存滚轮修复相关改动 (timeout=30)") {
+		t.Fatalf("expected collapsed Shell to keep only the description summary; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "--- a/internal/tui/session_switch_test.go") {
-		t.Fatalf("expected collapsed Shell to show second command preview line; got:\n%s", joined)
-	}
-	if strings.Contains(joined, "+++ b/internal/tui/session_switch_test.go") || strings.Contains(joined, "TestExample") {
-		t.Fatalf("did not expect collapsed Shell to show long heredoc body; got:\n%s", joined)
-	}
-	if !strings.Contains(joined, "(Shell completed with no output)") {
-		t.Fatalf("expected collapsed Shell to show no-output result inline; got:\n%s", joined)
-	}
-	if !strings.Contains(joined, "[space] expand") {
-		t.Fatalf("expected collapsed Shell to show expand hint for hidden command lines; got:\n%s", joined)
+	for _, hidden := range []string{"Command:", "git add internal/tui/app_cached_render.go", "session_switch_test.go", "TestExample", "Shell completed", "[space]"} {
+		if strings.Contains(joined, hidden) {
+			t.Fatalf("collapsed Shell should hide %q; got:\n%s", hidden, joined)
+		}
 	}
 }
 
@@ -1924,16 +1909,13 @@ func TestCollapsedBashShowsSingleExpandHintWhenCommandAndOutputBothHidden(t *tes
 	}
 
 	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	// Short output: all stdout/stderr are shown inline, but expanded mode still
-	// adds exit status + stream headers, so we should show an expand hint.
-	if !strings.Contains(joined, "[space] expand") {
-		t.Fatalf("expected collapsed Shell with short output to show expand hint; got:\n%s", joined)
+	if !strings.Contains(joined, "✓ ▸ shell echo first (timeout=120)") {
+		t.Fatalf("expected collapsed Shell to show its disclosure glyph; got:\n%s", joined)
 	}
-	if strings.Contains(joined, "echo third") {
-		t.Fatalf("did not expect full command to be shown for short output; got:\n%s", joined)
-	}
-	if !strings.Contains(joined, "one") || !strings.Contains(joined, "two") || !strings.Contains(joined, "three") {
-		t.Fatalf("expected all output lines to be shown inline for short output; got:\n%s", joined)
+	for _, hidden := range []string{"Command:", "echo second", "echo third", "one", "two", "three", "[space]"} {
+		if strings.Contains(joined, hidden) {
+			t.Fatalf("collapsed Shell should hide %q; got:\n%s", hidden, joined)
+		}
 	}
 }
 
@@ -2163,8 +2145,8 @@ func TestGenericToolHeaderAndExpandedResultEscapesANSIRichText(t *testing.T) {
 			t.Fatalf("expected generic tool card to contain %q, got:\n%s", want, joined)
 		}
 	}
-	if !strings.Contains(joined, "[space] collapse") {
-		t.Fatalf("expected expanded glob card to show collapse hint, got:\n%s", joined)
+	if !strings.Contains(joined, "✓ ▾ glob") {
+		t.Fatalf("expected expanded glob card to show the expanded disclosure glyph, got:\n%s", joined)
 	}
 }
 
@@ -2190,7 +2172,7 @@ func TestBashCommandAndCollapsedSummaryEscapeANSIRichText(t *testing.T) {
 	if strings.ContainsRune(joined, '\x1b') {
 		t.Fatalf("expected shell card to not contain raw ESC: %q", joined)
 	}
-	for _, want := range []string{`\x1b[36mdesc\x1b[0m`, `\x1b[31mline-1\x1b[0m`} {
+	for _, want := range []string{`\x1b[36mdesc\x1b[0m`} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected shell card to contain %q, got:\n%s", want, joined)
 		}
@@ -2213,14 +2195,11 @@ func TestCollapsedLargeBashResultDoesNotRenderEntireHiddenOutput(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "line-00000") {
-		t.Fatalf("expected collapsed Shell preview to show first line, got:\n%s", joined)
+	if !strings.Contains(joined, "✓ ▸ shell show huge log") {
+		t.Fatalf("expected collapsed Shell to show only its compact header, got:\n%s", joined)
 	}
-	if strings.Contains(joined, "line-49999") {
-		t.Fatalf("collapsed Shell preview should not render the hidden tail, got:\n%s", joined)
-	}
-	if !strings.Contains(joined, "49999 more lines · [space] expand") {
-		t.Fatalf("expected cheap hidden-line hint for large output, got:\n%s", joined)
+	if strings.Contains(joined, "line-00000") || strings.Contains(joined, "line-49999") || strings.Contains(joined, "more lines") {
+		t.Fatalf("collapsed Shell should not render any output body or line-count hint, got:\n%s", joined)
 	}
 }
 
@@ -2488,11 +2467,11 @@ func TestCollapsedBashErrorShowsCrossPrefixAndRedOutput(t *testing.T) {
 	joinedANSI := strings.Join(lines, "\n")
 	joinedPlain := stripANSI(joinedANSI)
 
-	if !strings.Contains(joinedPlain, "✗ shell false") {
+	if !strings.Contains(joinedPlain, "✗ ▸ shell false") {
 		t.Fatalf("expected collapsed Shell error prefix; got:\n%s", joinedPlain)
 	}
-	if !strings.Contains(joinedPlain, "stdout") {
-		t.Fatalf("expected preserved stdout in collapsed Shell error; got:\n%s", joinedPlain)
+	if !strings.Contains(joinedPlain, "exit code 1") {
+		t.Fatalf("expected collapsed Shell error summary; got:\n%s", joinedPlain)
 	}
 	if !strings.Contains(joinedANSI, "\x1b[1;38;5;196m") && !strings.Contains(joinedANSI, "\x1b[38;5;196m") {
 		t.Fatalf("expected error styling ANSI sequence; got:\n%q", joinedANSI)
@@ -2512,24 +2491,17 @@ func TestCollapsedBashRejectedShowsExpandHintBeforeRejection(t *testing.T) {
 	}
 
 	lines := stripANSILines(block.Render(120, ""))
-	hintIdx := -1
 	rejectedIdx := -1
 	for i, line := range lines {
-		if strings.Contains(line, "more lines · [space] expand") {
-			hintIdx = i
-		}
 		if strings.Contains(line, `tool "shell" rejected by user: sample rejection reason`) {
 			rejectedIdx = i
 		}
 	}
-	if hintIdx < 0 {
-		t.Fatalf("expected collapsed Shell rejection to show expand hint; got:\n%s", strings.Join(lines, "\n"))
-	}
 	if rejectedIdx < 0 {
 		t.Fatalf("expected collapsed Shell rejection to show rejection reason; got:\n%s", strings.Join(lines, "\n"))
 	}
-	if hintIdx > rejectedIdx {
-		t.Fatalf("expand hint should render before rejection reason; got:\n%s", strings.Join(lines, "\n"))
+	if strings.Contains(strings.Join(lines, "\n"), "[space]") {
+		t.Fatalf("collapsed Shell rejection should not show an inline disclosure footer; got:\n%s", strings.Join(lines, "\n"))
 	}
 }
 
@@ -2602,8 +2574,8 @@ func TestDeleteHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 		displayWorkingDir: wd,
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "delete internal/tui/obsolete.go") {
-		t.Fatalf("expected delete header to show relative path; got:\n%s", joined)
+	if !strings.Contains(joined, "delete remove obsolete file") || !strings.Contains(joined, "Deleted internal/tui/obsolete.go") {
+		t.Fatalf("expected delete card to show reason first and relative result path below; got:\n%s", joined)
 	}
 	if strings.Contains(joined, abs) {
 		t.Fatalf("did not expect delete header to show absolute path; got:\n%s", joined)
@@ -2622,11 +2594,11 @@ func TestDeleteHeaderShowsFilePath(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "delete internal/tui/obsolete.go") {
-		t.Fatalf("expected delete header to show file path; got:\n%s", joined)
+	if !strings.Contains(joined, "delete remove obsolete file") || !strings.Contains(joined, "Deleted internal/tui/obsolete.go") {
+		t.Fatalf("expected delete card to show the reason and path once each; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "remove obsolete file") {
-		t.Fatalf("expected delete header to show reason; got:\n%s", joined)
+	if strings.Count(joined, "internal/tui/obsolete.go") != 1 {
+		t.Fatalf("expected deleted path exactly once; got:\n%s", joined)
 	}
 }
 
@@ -2656,7 +2628,7 @@ func TestDeleteCardShowsDiagnosticPathsLikeNormalHeader(t *testing.T) {
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
 	joined := stripANSI(rendered)
-	if !strings.Contains(joined, "delete <missing> (cleanup generated files, .paths=internal/tui/obsolete.go,cmd/old.go)") {
+	if !strings.Contains(joined, "delete cleanup generated files (.paths=internal/tui/obsolete.go,cmd/old.go, paths=<missing>)") {
 		t.Fatalf("expected delete diagnostic header to keep the ignored paths beside the reason; got:\n%s", joined)
 	}
 	if !strings.Contains(rendered, ";9m") {
@@ -2667,51 +2639,37 @@ func TestDeleteCardShowsDiagnosticPathsLikeNormalHeader(t *testing.T) {
 	}
 }
 
-func TestCompactToolWithOneHiddenLineForcesExpandedResult(t *testing.T) {
-	// Grep/glob are intentionally not part of this heuristic: their count-based
-	// summaries must stay collapsible (see TestGrepGlobForceExpandedHeuristic-
-	// DoesNotBlockCollapse).
-	tests := []struct {
-		name        string
-		toolName    string
-		content     string
-		result      string
-		wantPrefix  string
-		wantVisible string
-	}{
-		{
-			name:        "delete",
-			toolName:    "delete",
-			content:     `{"paths":["examples/compression-config.yaml"],"reason":"remove obsolete example"}`,
-			result:      "delete completed.\n\nDeleted (1):\n- examples/compression-config.yaml",
-			wantPrefix:  "✓ delete",
-			wantVisible: "- examples/compression-config.yaml",
-		},
+func TestDeleteAlwaysShowsAllPartialResultsAndCannotCollapse(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameDelete,
+		Content:       `{"paths":["a.go","b.go","c.go"],"reason":"remove obsolete generated files"}`,
+		ResultContent: "Delete stopped after an execution error.\n\nDeleted (1):\n- a.go\n\nFailed (1):\n- b.go — permission denied\n\nNot attempted (1):\n- c.go",
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			block := &Block{
-				ID:                     1,
-				Type:                   BlockToolCall,
-				ToolName:               tt.toolName,
-				Content:                tt.content,
-				ResultContent:          tt.result,
-				ResultDone:             true,
-				ToolCallDetailExpanded: false,
-			}
+	before := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{
+		"delete remove obsolete generated files",
+		"Stopped after an execution error",
+		"Deleted a.go",
+		"Failed b.go — permission denied",
+		"Not attempted c.go",
+	} {
+		if !strings.Contains(before, want) {
+			t.Fatalf("expected Delete card to contain %q; got:\n%s", want, before)
+		}
+	}
+	if strings.Contains(before, "[space]") || strings.Contains(before, "more lines") {
+		t.Fatalf("Delete result paths must never be folded behind a hint; got:\n%s", before)
+	}
 
-			joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-			if strings.Contains(joined, "[space] expand") || strings.Contains(joined, "1 more lines") {
-				t.Fatalf("single hidden line should be shown inline without expand hint; got:\n%s", joined)
-			}
-			if !strings.Contains(joined, tt.wantPrefix) {
-				t.Fatalf("forced-expanded compact tool should show expanded prefix %q; got:\n%s", tt.wantPrefix, joined)
-			}
-			if !strings.Contains(joined, tt.wantVisible) {
-				t.Fatalf("single hidden line should be visible; got:\n%s", joined)
-			}
-		})
+	block.ToggleAtWidth(120)
+	after := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if after != before {
+		t.Fatalf("Delete card should ignore collapse toggles\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
 
@@ -3030,8 +2988,11 @@ func TestCollapsedBashShowsResultSummary(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
-	if !strings.Contains(joined, "ok") {
-		t.Fatalf("expected shell collapsed summary to show success output summary; got:\n%s", joined)
+	if strings.Contains(joined, "ok") || strings.Contains(joined, "second line") {
+		t.Fatalf("expected shell collapsed card to hide success output body; got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "✓ ▸ shell go test ./internal/tui/...") {
+		t.Fatalf("expected shell collapsed card to retain its disclosure glyph; got:\n%s", joined)
 	}
 }
 
@@ -3062,7 +3023,7 @@ func TestCollapsedGrepOmitsLowCountSummary(t *testing.T) {
 		{
 			name:          "zero matches",
 			resultContent: "No matches found.",
-			wantPresent:   "No matches found.",
+			wantPresent:   "No matches",
 			wantAbsent:    "0 matches",
 		},
 		{
@@ -3145,8 +3106,8 @@ func TestExpandedShortGrepAndGlobResultsDoNotDuplicateContent(t *testing.T) {
 			if got := strings.Count(joined, tt.wantCounted); got != 1 {
 				t.Fatalf("expected %q exactly once in expanded card, got %d occurrences:\n%s", tt.wantCounted, got, joined)
 			}
-			if !strings.Contains(joined, "[space] collapse") {
-				t.Fatalf("expected expanded card to show collapse hint, got:\n%s", joined)
+			if strings.Contains(joined, "[space]") {
+				t.Fatalf("short search result should not show a disclosure footer, got:\n%s", joined)
 			}
 		})
 	}
@@ -3172,8 +3133,8 @@ func TestExpandedGrepCountSummaryStillShowsAllMatches(t *testing.T) {
 			t.Fatalf("expected %q exactly once in expanded card, got:\n%s", want, joined)
 		}
 	}
-	if !strings.Contains(joined, "[space] collapse") {
-		t.Fatalf("expected expanded card to show collapse hint, got:\n%s", joined)
+	if !strings.Contains(joined, "✓ ▾ grep TODO") {
+		t.Fatalf("expected expanded card to show the expanded disclosure glyph, got:\n%s", joined)
 	}
 }
 
@@ -3204,8 +3165,8 @@ func TestGrepGlobForceExpandedHeuristicDoesNotBlockCollapse(t *testing.T) {
 
 			// Collapsed: the count summary must win over any force-expand.
 			collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-			if !strings.Contains(collapsed, "· [space] expand") {
-				t.Fatalf("expected collapsed card to offer expansion, got:\n%s", collapsed)
+			if !strings.Contains(collapsed, "✓ ▸ "+tt.toolName) {
+				t.Fatalf("expected collapsed card to show the collapsed disclosure glyph, got:\n%s", collapsed)
 			}
 			for _, m := range tt.matches {
 				if strings.Contains(collapsed, m) {
@@ -3216,8 +3177,8 @@ func TestGrepGlobForceExpandedHeuristicDoesNotBlockCollapse(t *testing.T) {
 			// Space expands...
 			block.ToggleAtWidth(120)
 			expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-			if !strings.Contains(expanded, "[space] collapse") {
-				t.Fatalf("expected expanded card to show collapse hint, got:\n%s", expanded)
+			if !strings.Contains(expanded, "✓ ▾ "+tt.toolName) {
+				t.Fatalf("expected expanded card to show the expanded disclosure glyph, got:\n%s", expanded)
 			}
 			if !strings.Contains(expanded, tt.matches[0]) || !strings.Contains(expanded, tt.matches[len(tt.matches)-1]) {
 				t.Fatalf("expected expanded card to show all matches, got:\n%s", expanded)
@@ -3226,8 +3187,8 @@ func TestGrepGlobForceExpandedHeuristicDoesNotBlockCollapse(t *testing.T) {
 			// ...and a second Space collapses again.
 			block.ToggleAtWidth(120)
 			recollapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-			if !strings.Contains(recollapsed, "· [space] expand") {
-				t.Fatalf("expected second toggle to collapse again, got:\n%s", recollapsed)
+			if !strings.Contains(recollapsed, "✓ ▸ "+tt.toolName) {
+				t.Fatalf("expected second toggle to restore collapsed glyph, got:\n%s", recollapsed)
 			}
 		})
 	}
@@ -3327,8 +3288,8 @@ func TestReadCollapsedSummaryDistinguishesTruncationKinds(t *testing.T) {
 			if tt.notWantAbs != "" && strings.Contains(joined, tt.notWantAbs) {
 				t.Fatalf("expected collapsed read summary not to show %q, got:\n%s", tt.notWantAbs, joined)
 			}
-			if !strings.Contains(joined, "[space] expand") {
-				t.Fatalf("expected collapsed read card to offer expansion, got:\n%s", joined)
+			if !strings.Contains(joined, "✓ ▸ read") {
+				t.Fatalf("expected collapsed read card to show the collapsed disclosure glyph, got:\n%s", joined)
 			}
 		})
 	}
@@ -4250,19 +4211,19 @@ func TestReadCallWideHeaderPreservesOffsetWithLongPath(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.renderReadCall(180, ""), "\n"))
-	if !strings.Contains(plain, "(limit=160, offset=430)") {
-		t.Fatalf("expected read header to preserve full limit/offset params, got:\n%s", plain)
+	if !strings.Contains(plain, "(offset=430, limit=160)") {
+		t.Fatalf("expected read header to preserve full offset/limit params, got:\n%s", plain)
 	}
 }
 
 func TestReadHeaderUsesEllipsisWhenPathDoesNotFit(t *testing.T) {
 	longPath := "/fictional/workspace/generated/reports/very/deeply/nested/directories/synthetic-review-fixture-00000000000000000001.txt"
-	header := stripANSI(renderReadHeaderLine("✓", "read", longPath, "limit=160, offset=430", 80))
+	header := stripANSI(renderReadHeaderLine("✓", "read", longPath, "offset=430, limit=160", "", 80))
 
 	if !strings.Contains(header, "…") {
 		t.Fatalf("expected read header to use ellipsis for long path, got %q", header)
 	}
-	if !strings.Contains(header, "(limit=160, offset=430)") {
+	if !strings.Contains(header, "(offset=430, limit=160)") {
 		t.Fatalf("expected read header to preserve params while truncating path, got %q", header)
 	}
 }

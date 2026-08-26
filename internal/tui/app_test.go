@@ -5082,7 +5082,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 			args:     json.RawMessage(`{"paths":["/tmp/obsolete.go"],"reason":"remove obsolete file"}`),
 			content:  "Deleted (1):\n- /tmp/obsolete.go",
 			status:   agent.ToolResultStatusSuccess,
-			want:     []string{"delete /tmp/obsolete.go", "remove obsolete file", "Deleted /tmp/obsolete.go"},
+			want:     []string{"delete remove obsolete file", "Deleted /tmp/obsolete.go"},
 		},
 	}
 
@@ -5099,7 +5099,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 				t.Fatalf("len(blocks) = %d, want 1", len(blocks))
 			}
 			block := blocks[0]
-			wantCollapsed := tt.toolName == tools.NameDelete
+			wantCollapsed := false
 			if block.Collapsed != wantCollapsed {
 				t.Fatalf("restored %s should use live expanded terminal state", tt.toolName)
 			}
@@ -5198,8 +5198,8 @@ func TestSessionRestoredDeleteToolShowsReasonAndPersistedDuration(t *testing.T) 
 		t.Fatal("expected restored Delete tool block")
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "delete /tmp/obsolete.go") {
-		t.Fatalf("expected restored Delete header to show path; got:\n%s", joined)
+	if !strings.Contains(joined, "delete remove obsolete file") {
+		t.Fatalf("expected restored Delete header to show reason; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "remove obsolete file") {
 		t.Fatalf("expected restored Delete header to show reason; got:\n%s", joined)
@@ -5290,7 +5290,7 @@ func TestToggleCollapseFallsBackToBlockAtOffsetWhenFocusedBlockIsStale(t *testin
 }
 
 func TestToggleCollapseFallsBackToBlockAtOffsetWhenFocusedBlockScrolledOutOfView(t *testing.T) {
-	m := NewModelWithSize(nil, 100, 12)
+	m := NewModelWithSize(nil, 100, 8)
 	m.mode = ModeNormal
 
 	focused := &Block{
@@ -5310,6 +5310,9 @@ func TestToggleCollapseFallsBackToBlockAtOffsetWhenFocusedBlockScrolledOutOfView
 		ResultContent: "second",
 		ResultDone:    true,
 		Collapsed:     true,
+	}
+	for i := range 4 {
+		m.viewport.AppendBlock(&Block{ID: 10 + i, Type: BlockAssistant, Content: strings.Repeat("filler ", 20)})
 	}
 	m.viewport.AppendBlock(focused)
 	m.viewport.AppendBlock(visible)

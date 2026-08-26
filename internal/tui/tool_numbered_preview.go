@@ -48,7 +48,7 @@ func renderNumberedToolPreview(opts numberedToolPreviewOptions) []string {
 		highlightedCodeLines = highlightCodeLines(ensureCodeHighlighter(opts.highlighter, opts.filePath, opts.sourceSample), codeLines, "")
 	}
 
-	result := make([]string, 0, len(visibleRows)+1)
+	result := make([]string, 0, len(visibleRows))
 	for _, row := range visibleRows {
 		if row.IsCode {
 			highlighted := row.Content
@@ -63,7 +63,6 @@ func renderNumberedToolPreview(opts numberedToolPreviewOptions) []string {
 			result = append(result, "  "+DimStyle.Render(wrapped))
 		}
 	}
-	result = append(result, renderToolCollapseHint(toolHintIndent))
 	return result
 }
 

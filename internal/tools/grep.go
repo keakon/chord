@@ -254,10 +254,10 @@ func grepIncludes(a grepArgs) []string {
 func grepCoerceNotes(a grepArgs) []string {
 	var notes []string
 	if a.PathsCoerced {
-		notes = append(notes, "Note: paths was a single string; treated as one path. Prefer paths: [...] next time.")
+		notes = append(notes, `Note: paths was a string and was treated as a one-item list. Use the documented array form, for example paths: ["internal/tui"], in future calls.`)
 	}
 	if a.IncludesCoerced {
-		notes = append(notes, "Note: includes was a single string; treated as one filter. Prefer includes: [...] next time.")
+		notes = append(notes, `Note: includes was a string and was treated as a one-item list. Use the documented array form, for example includes: ["**/*.go"], in future calls.`)
 	}
 	return notes
 }

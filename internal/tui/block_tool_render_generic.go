@@ -17,12 +17,6 @@ import (
 
 const bashCommandPreviewMaxLines = 2
 
-// bashCollapsedResultMinVisibleLines is the total output line count below
-// which the collapsed Shell card shows all output inline instead of folding
-// behind an expand hint.  When total lines exceed this threshold only the
-// first line is shown as a preview with an "N more lines" expand hint.
-const bashCollapsedResultMinVisibleLines = 5
-
 // bashCommandBlockLines returns the logical command lines to render in the
 // body (full when expanded, preview when collapsed) and how many further
 // lines remain hidden under the preview.
@@ -89,12 +83,7 @@ func appendBashCollapsedSummary(result *[]string, b *Block, vals map[string]stri
 	if b == nil || !b.ResultDone {
 		return
 	}
-	stderr, stdout := bashSplitResultStreams(b)
-	content := stdout
-	if strings.TrimSpace(content) == "" {
-		content = stderr
-	}
-	if strings.TrimSpace(content) == "" {
+	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 		return
 	}
 	isError := b.toolResultIsError()
@@ -102,17 +91,6 @@ func appendBashCollapsedSummary(result *[]string, b *Block, vals map[string]stri
 	if isError {
 		style = ErrorStyle
 	}
-
-	total, truncated := toolPlainTextWrappedLineCount(content, contentWidth, bashCollapsedResultMinVisibleLines)
-	if !truncated && total <= bashCollapsedResultMinVisibleLines {
-		// Short output: show all lines inline.
-		for _, line := range toolExpandedTextLines(content, contentWidth) {
-			*result = append(*result, style.Render("  "+line))
-		}
-		return
-	}
-
-	// Longer output: show single-line summary.
 	line, lineIsError := bashCollapsedSummaryLine(b, vals, contentWidth, includeDescription)
 	if line == "" {
 		return
@@ -150,77 +128,6 @@ func appendBashExpandedResult(result *[]string, b *Block, contentWidth int) {
 	}
 }
 
-// shellCollapsedResultIsShort returns true when the Shell output is short
-// enough to display inline in a collapsed card without an expand hint.
-func shellCollapsedResultIsShort(b *Block, contentWidth int) bool {
-	if b == nil || contentWidth <= 0 || !b.ResultDone {
-		return false
-	}
-	stderr, stdout := bashSplitResultStreams(b)
-	content := stdout
-	if strings.TrimSpace(content) == "" {
-		content = stderr
-	}
-	if strings.TrimSpace(content) == "" {
-		return true
-	}
-	count, truncated := toolPlainTextWrappedLineCount(content, contentWidth, bashCollapsedResultMinVisibleLines)
-	return !truncated && count <= bashCollapsedResultMinVisibleLines
-}
-
-func bashCollapsedResultHiddenLines(b *Block, contentWidth int) int {
-	if b == nil || contentWidth <= 0 {
-		return 0
-	}
-	stderr, stdout := bashSplitResultStreams(b)
-	content := stdout
-	if strings.TrimSpace(content) == "" {
-		content = stderr
-	}
-	if strings.TrimSpace(content) == "" {
-		return 0
-	}
-	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
-	visible := 0
-	if line := bashFirstNonEmptyLine(content); line != "" {
-		visible = len(wrapText(line, contentWidth))
-	}
-	shortLimit := max(visible, bashCollapsedResultMinVisibleLines)
-	total, truncated := toolPlainTextWrappedLineCount(content, contentWidth, shortLimit)
-	if !truncated && total <= bashCollapsedResultMinVisibleLines {
-		return 0
-	}
-	if len(lines) > 1 {
-		return len(lines) - 1
-	}
-	if total > visible {
-		return total - visible
-	}
-	return 1
-}
-
-func bashCollapsedCommandHiddenLines(command string, contentWidth int) int {
-	if contentWidth <= 0 {
-		return 0
-	}
-	lines, hidden := bashCommandPreviewLines(command, bashCommandPreviewMaxLines)
-	if hidden <= 0 {
-		return 0
-	}
-	visible := 0
-	for _, line := range lines {
-		visible += len(wrapIndentedText(line, contentWidth))
-	}
-	total := 0
-	for _, line := range bashCommandLines(command) {
-		total += len(wrapIndentedText(line, contentWidth))
-	}
-	if total > visible {
-		return total - visible
-	}
-	return 0
-}
-
 func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	b.ToolName = toolNameKey(b.ToolName)
 	metrics := newToolCardMetrics(width)
@@ -240,6 +147,9 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	}
 	if b.ToolName == tools.NameRead {
 		return b.renderReadCall(width, spinnerFrame)
+	}
+	if b.ToolName == tools.NameDelete {
+		return b.renderDeleteCall(width, spinnerFrame)
 	}
 	if b.ToolName == tools.NameGrep || b.ToolName == tools.NameGlob {
 		return b.renderSearchResultToolCall(width, spinnerFrame)
@@ -634,29 +544,6 @@ func compactToolHiddenParamLines(toolName string, keys []string, vals map[string
 	return hidden
 }
 
-func bashCollapsedShortDetailHiddenLines(b *Block, vals map[string]string, contentWidth int) int {
-	if b == nil || contentWidth <= 0 || !b.ResultDone {
-		return 0
-	}
-	// Collapsed short Shell output already shows all stdout/stderr. Expanded
-	// view adds any command lines hidden by the collapsed preview, meta lines,
-	// and exit/stdout/stderr framing.
-	hidden := bashCollapsedCommandHiddenLines(vals["command"], contentWidth)
-	meta := bashMetaLines(cloneToolValsWithDisplayDirs(b, vals), contentWidth)
-	hidden += len(meta)
-	if exitLabel := bashExpandedExitLine(b); exitLabel != "" {
-		hidden += len(wrapIndentedText(exitLabel, contentWidth))
-	}
-	stderr, stdout := bashSplitResultStreams(b)
-	if stderr != "" {
-		hidden++ // "Stderr:" heading
-	}
-	if stdout != "" {
-		hidden++ // "Stdout:" heading
-	}
-	return hidden
-}
-
 func compactToolHiddenDetailLines(b *Block, keys []string, vals map[string]string, mainPart string, contentWidth int, expanded bool) int {
 	if b == nil || contentWidth <= 0 || expanded || !toolUsesCompactDetailToggle(b.ToolName) {
 		return 0
@@ -668,11 +555,10 @@ func compactToolHiddenDetailLines(b *Block, keys []string, vals map[string]strin
 	if strings.TrimSpace(b.ResultContent) != "" && !(b.toolResultIsCancelled() && toolCancelledDetailText(b.ResultContent) == "") {
 		switch b.ToolName {
 		case tools.NameShell:
-			if shellCollapsedResultIsShort(b, contentWidth) {
-				hidden += bashCollapsedShortDetailHiddenLines(b, vals, contentWidth)
-			} else {
-				hidden += compactToolHiddenResultLines(b, contentWidth)
-			}
+			// Shell collapsed mode hides the command body and all output, so the
+			// disclosure state is represented by the header glyph instead of a
+			// body-level line-count hint.
+			hidden++
 		case tools.NameSkill:
 			if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 				displayResult := sanitizeToolDisplayText(toolDisplayResultContent(b))
@@ -700,7 +586,7 @@ func (b *Block) compactToolResultForceExpanded(contentWidth int) bool {
 		return false
 	}
 	switch b.ToolName {
-	case tools.NameGrep, tools.NameGlob:
+	case tools.NameGrep, tools.NameGlob, tools.NameShell:
 		// Search cards have their own count-based summaries; the generic
 		// "only one hidden line" heuristic must not force them expanded, or
 		// Space could never collapse them again (the toggle guard below).
@@ -746,18 +632,17 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 
 	result := make([]string, 0, 16)
 	prefix := b.renderToolPrefixForExpanded(spinnerFrame, expanded)
+	if b.ToolName == tools.NameShell && b.ResultDone {
+		prefix = renderToolDisclosurePrefix(prefix, expanded)
+	}
 	toolHeaderLine := renderToolHeaderLine(prefix, b.ToolName)
 	toolHeaderLine = appendToolHeaderSummary(toolHeaderLine, mainPart, grayPart, paramSummary, cardWidth-4)
 	toolHeaderLine = buildToolHeaderLine(toolHeaderLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, isActive)
 	result = append(result, toolHeaderLine)
 
 	if b.ToolName == tools.NameShell {
-		appendBashCommandBlock(&result, vals["command"], contentWidth, expanded, expanded)
-		if !expanded && shellCollapsedResultIsShort(b, contentWidth) && hiddenDetail > 0 {
-			result = append(result, renderToolExpandHint(toolHintIndent, hiddenDetail))
-			expandHintAdded = true
-		}
 		if expanded {
+			appendBashCommandBlock(&result, vals["command"], contentWidth, true, false)
 			result = append(result, bashMetaLines(cloneToolValsWithDisplayDirs(b, vals), contentWidth)...)
 		} else {
 			appendBashCollapsedSummary(&result, b, vals, contentWidth, !collapsedOK)
@@ -793,11 +678,6 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		if b.ToolName == tools.NameShell {
 			if expanded {
 				appendBashExpandedResult(&result, b, contentWidth)
-			} else if !shellCollapsedResultIsShort(b, contentWidth) {
-				if hidden := bashCollapsedCommandHiddenLines(vals["command"], contentWidth) + bashCollapsedResultHiddenLines(b, contentWidth); hidden > 0 {
-					result = append(result, renderToolExpandHint(toolHintIndent, hidden))
-					expandHintAdded = true
-				}
 			}
 		} else {
 			if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
@@ -857,7 +737,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 
 	// If the expanded view would reveal additional lines (params or result),
 	// show a hint even when the collapsed rendering path hid all such content.
-	if !expanded && !expandHintAdded && hiddenDetail > 0 {
+	if !expanded && !expandHintAdded && hiddenDetail > 0 && b.ToolName != tools.NameShell {
 		result = append(result, renderToolExpandHint(toolHintIndent, hiddenDetail))
 		expandHintAdded = true
 	}
@@ -956,7 +836,7 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 		}
 		return "✓"
 	}
-	if b.ResultContent != "" {
+	if b.ResultDone || b.ResultContent != "" {
 		if b.toolResultIsError() {
 			return "✗"
 		}
