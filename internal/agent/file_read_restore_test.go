@@ -260,10 +260,10 @@ func TestRestoreTrackedFileStateReadThenEditUsesPostWriteHash(t *testing.T) {
 	writeArgs, _ := json.Marshal(map[string]any{"path": path, "content": "whole replacement"})
 	writeResult, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: writeArgs})
 	if err != nil {
-		t.Fatalf("restored write after stale edit should back up and continue: %v", err)
+		t.Fatalf("restored write after own edit should not warn or back up: %v", err)
 	}
-	if !strings.Contains(writeResult.Result, "Warning: the file changed on disk") || !strings.Contains(writeResult.Result, "Backup saved to: ") || len(backupPathsFromResult(writeResult.Result)) == 0 {
-		t.Fatalf("result missing stale warning/backup: %q", writeResult.Result)
+	if strings.Contains(writeResult.Result, "Warning: the file changed on disk") || strings.Contains(writeResult.Result, "Backup saved to: ") {
+		t.Fatalf("write after a restored edit the agent itself made must not warn/back up: %q", writeResult.Result)
 	}
 	if got := readTestFile(t, path); got != "whole replacement" {
 		t.Fatalf("file content = %q, want whole replacement", got)
@@ -617,4 +617,57 @@ func mustJSONText(t *testing.T, v any) string {
 func sha256String(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
+}
+
+func TestMainAgent_WriteAfterOwnEditChainDoesNotReportStale(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "demo.txt")
+
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.WriteTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
+
+	writeArgs := mustJSONRaw(t, map[string]any{"path": path, "content": "one\ntwo\n"})
+	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: writeArgs}); err != nil {
+		t.Fatalf("write-1: %v", err)
+	}
+
+	// A localized edit the agent itself produced: committed-only snapshot.
+	mustExecuteEdit(t, a, path, "two", "TWO")
+
+	// A follow-up whole-file write must not warn nor back up: nothing changed
+	// externally, and the current content is exactly what this agent committed.
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-2", Name: tools.NameWrite, Args: writeArgs})
+	if err != nil {
+		t.Fatalf("write-2: %v", err)
+	}
+	if strings.Contains(result.Result, "Warning: the file changed on disk") || strings.Contains(result.Result, "Backup saved to: ") {
+		t.Fatalf("write after own edit chain should not warn or back up:\n%s", result.Result)
+	}
+}
+
+func TestMainAgent_WriteAfterOwnApplyPatchDoesNotReportStale(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "demo.txt")
+
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.WriteTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
+
+	writeArgs := mustJSONRaw(t, map[string]any{"path": path, "content": "one\ntwo\nthree\n"})
+	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: writeArgs}); err != nil {
+		t.Fatalf("write-1: %v", err)
+	}
+
+	if err := executeEdit(t, a, path, "three", "THREE"); err != nil {
+		t.Fatalf("apply_patch: %v", err)
+	}
+
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-2", Name: tools.NameWrite, Args: writeArgs})
+	if err != nil {
+		t.Fatalf("write-2: %v", err)
+	}
+	if strings.Contains(result.Result, "Warning: the file changed on disk") || strings.Contains(result.Result, "Backup saved to: ") {
+		t.Fatalf("write after own apply_patch should not warn or back up:\n%s", result.Result)
+	}
 }

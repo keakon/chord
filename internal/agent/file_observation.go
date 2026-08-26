@@ -42,6 +42,17 @@ func requireCurrentFileObservation(track *filelock.FileTracker, agentID, path, c
 	if !observation.Observed {
 		return false, fmt.Errorf("refusing to %s existing file %s without a current read; read the complete file first, then retry", action, path)
 	}
+	// When nothing changed externally, a follow-up whole-file write is safe
+	// against the agent's own committed state (its previous write, or the state
+	// it produced with a localized edit/apply_patch). The model may not have
+	// seen the exact resulting bytes (edits stay committed-only), but there is
+	// nothing external to lose, so do not warn or back up. externalChanged is
+	// itself defined as the tracked snapshot hash disagreeing with the current
+	// one, so reaching here without it already means the on-disk content is
+	// what this agent committed.
+	if !externalChanged {
+		return false, nil
+	}
 	return true, nil
 }
 

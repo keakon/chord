@@ -334,7 +334,7 @@ func TestSubAgentRelativeWriteUsesWorkDirForObservation(t *testing.T) {
 	}
 }
 
-func TestMainAgent_WriteAfterEditRequiresReread(t *testing.T) {
+func TestMainAgent_WriteAfterOwnEditDoesNotReportStale(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
@@ -353,23 +353,16 @@ func TestMainAgent_WriteAfterEditRequiresReread(t *testing.T) {
 	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "edit-1", Name: tools.NameEdit, Args: editArgs}); err != nil {
 		t.Fatalf("edit: %v", err)
 	}
-	writeArgs, _ := json.Marshal(map[string]any{"path": path, "content": "stale whole file\n"})
+	writeArgs, _ := json.Marshal(map[string]any{"path": path, "content": "replacement\n"})
 	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: writeArgs})
 	if err != nil {
-		t.Fatalf("write after edit should back up and continue: %v", err)
+		t.Fatalf("write after own edit should not warn or back up: %v", err)
 	}
-	if !strings.Contains(result.Result, "Warning: the file changed on disk") || !strings.Contains(result.Result, "Backup saved to: ") || len(backupPathsFromResult(result.Result)) == 0 {
-		t.Fatalf("result missing stale warning/backup: %q", result.Result)
+	if strings.Contains(result.Result, "Warning: the file changed on disk") || strings.Contains(result.Result, "Backup saved to: ") {
+		t.Fatalf("write after an edit the agent itself made must not warn/back up (nothing changed externally): %q", result.Result)
 	}
-	backup, err := os.ReadFile(backupPathsFromResult(result.Result)[0])
-	if err != nil {
-		t.Fatalf("ReadFile backup: %v", err)
-	}
-	if string(backup) != "after\n" {
-		t.Fatalf("backup content = %q, want after (post-edit content)", backup)
-	}
-	if got, err := os.ReadFile(path); err != nil || string(got) != "stale whole file\n" {
-		t.Fatalf("file content = %q, %v; want stale whole file written", got, err)
+	if got, err := os.ReadFile(path); err != nil || string(got) != "replacement\n" {
+		t.Fatalf("file content = %q, %v; want replacement", got, err)
 	}
 }
 
