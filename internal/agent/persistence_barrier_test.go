@@ -466,6 +466,25 @@ func TestCrashPointClassificationFromDiskState(t *testing.T) {
 	rm4.Close()
 }
 
+// awaitSyntheticToolResult consumes the queued synthetic EventToolResult the
+// way the event loop would: the real fetch path drains eventCh first and then
+// the deferred overflow queue, because sendEvent may route the event to either
+// target depending on runtime queue state. Peeking at eventCh alone would make
+// the test depend on that internal routing decision.
+func awaitSyntheticToolResult(t *testing.T, a *MainAgent) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	evt, err := a.nextEvent(ctx)
+	if err != nil {
+		t.Fatalf("timed out waiting for queued synthetic tool result: %v", err)
+	}
+	if evt.Type != EventToolResult {
+		t.Fatalf("unexpected queued event type %q", evt.Type)
+	}
+	a.handleToolResult(evt)
+}
+
 func TestFailIntentBarrierSynthesizesNotStartedResults(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.recovery = newBrokenPathRecoveryManager(t) // force the intent barrier to fail closed
@@ -485,19 +504,7 @@ func TestFailIntentBarrierSynthesizesNotStartedResults(t *testing.T) {
 	}
 	// The synthetic not_started result is queued as an EventToolResult; process
 	// it the way the event loop would.
-	var processed int
-	select {
-	case evt := <-a.eventCh:
-		if evt.Type != EventToolResult {
-			t.Fatalf("unexpected queued event type %q", evt.Type)
-		}
-		a.handleToolResult(evt)
-		processed++
-	default:
-	}
-	if processed != 1 {
-		t.Fatalf("processed tool results = %d, want 1", processed)
-	}
+	awaitSyntheticToolResult(t, a)
 	msgs := a.ctxMgr.Snapshot()
 	if len(msgs) != 2 {
 		t.Fatalf("messages = %#v, want assistant + synthetic tool result", msgs)
@@ -533,15 +540,7 @@ func TestRepeatedIntentBarrierFailuresAbortTurn(t *testing.T) {
 		t.Fatalf("BarrierFailureRounds = %d, want %d", a.turn.BarrierFailureRounds, maxIntentBarrierFailureRounds)
 	}
 
-	select {
-	case evt := <-a.eventCh:
-		if evt.Type != EventToolResult {
-			t.Fatalf("unexpected queued event type %q", evt.Type)
-		}
-		a.handleToolResult(evt)
-	default:
-		t.Fatal("expected a queued synthetic tool result")
-	}
+	awaitSyntheticToolResult(t, a)
 
 	// Second consecutive barrier failure: the turn must end instead of firing
 	// another LLM round against the broken write path.

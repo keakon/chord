@@ -1408,7 +1408,18 @@ func newTestMainAgentForRestore(t *testing.T, projectRoot, sessionDir string) *M
 	t.Cleanup(func() {
 		a.closePersistLoop()
 		<-a.persist.done
+		// Ensure all background workers (compaction/persist/LLM) are stopped
+		// before TempDir cleanup starts, otherwise a late walltime/usage ledger
+		// write from an async LLM goroutine can race with RemoveAll and fail
+		// with "directory not empty" on macOS. Run's deferred outputWg.Wait()
+		// does this in production; tests never start Run, so join the
+		// LLM/translation goroutines here after cancelling their turn context.
+		// signalStopping must precede outputWg.Wait(): the event-loop goroutine
+		// never ran, so nothing else closes stoppingCh, and background
+		// producers blocked on a full event queue only unblock through it.
+		a.signalStopping()
 		a.cancel()
+		a.outputWg.Wait()
 		if a.recovery != nil {
 			a.recovery.Close()
 		}

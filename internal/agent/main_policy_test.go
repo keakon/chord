@@ -623,10 +623,19 @@ func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 		t.Fatal("NewMainAgent should initialize usageLedger for tests")
 	}
 	t.Cleanup(func() {
-		// Ensure all background workers (compaction/persist) are stopped before
-		// TempDir cleanup starts, otherwise compaction history exports can race with
-		// RemoveAll and cause "directory not empty" failures on macOS.
+		// Ensure all background workers (compaction/persist/LLM) are stopped
+		// before TempDir cleanup starts, otherwise compaction history exports or
+		// a late walltime/usage ledger write from an async LLM goroutine can
+		// race with RemoveAll and cause "directory not empty" failures on macOS.
+		// Run's deferred outputWg.Wait() does this in production; tests never
+		// start Run, so join the LLM/translation goroutines here after
+		// cancelling their turn context so retry backoff unblocks on ctx.Done.
+		// signalStopping must precede outputWg.Wait(): the event-loop goroutine
+		// never ran, so nothing else closes stoppingCh, and background
+		// producers blocked on a full event queue only unblock through it.
+		a.signalStopping()
 		a.cancel()
+		a.outputWg.Wait()
 		_ = a.Shutdown(2 * time.Second)
 		if a.recovery != nil {
 			a.recovery.Close()
