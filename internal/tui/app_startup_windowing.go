@@ -308,6 +308,15 @@ func (m *Model) deferredCurrentSelectableBlockIndex() int {
 }
 
 func (m *Model) deferredSeekSelectableBlock(startIndex, dir int) int {
+	return m.deferredSeekMatchingBlock(startIndex, dir, func(b *Block) bool {
+		return b != nil && isSelectableBlockType(b.Type)
+	})
+}
+
+// deferredSeekMatchingBlock returns the index in the deferred allBlocks
+// starting at startIndex and walking dir whose block satisfies match, or -1
+// when no such block exists.
+func (m *Model) deferredSeekMatchingBlock(startIndex, dir int, match func(*Block) bool) int {
 	state := m.startupDeferredTranscript
 	if state == nil || len(state.allBlocks) == 0 {
 		return -1
@@ -316,8 +325,7 @@ func (m *Model) deferredSeekSelectableBlock(startIndex, dir int) int {
 		dir = 1
 	}
 	for i := startIndex; i >= 0 && i < len(state.allBlocks); i += dir {
-		block := state.allBlocks[i]
-		if block == nil || !isSelectableBlockType(block.Type) {
+		if !match(state.allBlocks[i]) {
 			continue
 		}
 		return i
@@ -340,17 +348,12 @@ func (m *Model) deferredMoveFocusedBlock(dir int) bool {
 	}
 	targetIndex := m.deferredSeekSelectableBlock(startIndex, dir)
 	if targetIndex < 0 {
-		if dir < 0 && m.maybeHydrateStartupDeferredTranscript("count_boundary_top") {
-			firstIndex := m.deferredSeekSelectableBlock(0, 1)
-			if firstIndex >= 0 {
-				targetID := state.allBlocks[firstIndex].ID
-				m.focusedBlockID = targetID
-				m.refreshBlockFocus()
-				if lineOffset, ok := m.viewport.LineOffsetForBlockID(targetID); ok {
-					m.viewport.offset = lineOffset
-					m.viewport.clampOffset()
-				}
-			}
+		// Reached the top: hydrate so the transcript is fully navigable and
+		// keep the current card — it is already the first selectable one, so
+		// there is nowhere to move. The previous inner seek ran after hydrate
+		// had cleared the deferred state and could never match.
+		if dir < 0 {
+			m.maybeHydrateStartupDeferredTranscript("count_boundary_top")
 		}
 		return false
 	}

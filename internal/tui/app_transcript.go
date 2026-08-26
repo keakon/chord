@@ -635,6 +635,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 						Type:                  BlockUser,
 						Content:               ul,
 						Collapsed:             true,
+						UserLocalShell:        true,
 						UserLocalShellCmd:     cmd,
 						UserLocalShellPending: false,
 						UserLocalShellResult:  out,

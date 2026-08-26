@@ -549,6 +549,34 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 	}
 }
 
+// toolCallSummaryMainPart returns the primary argument to show next to the tool
+// name in directory and spill summaries, or "" when the args carry nothing
+// readable. It reuses the header main-part computation without paying for
+// toolHeaderMeta's full params/collapsed pass. File-path tools (edit,
+// apply_patch, write, read) derive their main part from the header renderers,
+// so they fall back to the path here. The result is always sanitized: header
+// rendering strips control characters at draw time, but summaries are terminal
+// output too and the formatter values (glob patterns, lsp operations) can
+// still carry raw escapes.
+func (b *Block) toolCallSummaryMainPart() string {
+	keys, vals := b.toolArgsParsed()
+	mainPart, _ := b.formatToolHeaderPartsWithParsed(keys, vals)
+	if mainPart != "" {
+		return sanitizeToolDisplayText(mainPart)
+	}
+	switch b.ToolName {
+	case tools.NameEdit, tools.NameApplyPatch:
+		if path := strings.TrimSpace(b.diffToolFilePath()); path != "" {
+			return sanitizeToolDisplayText(b.displayToolPath(path))
+		}
+	case tools.NameWrite, tools.NameRead, tools.NameViewImage:
+		if path := strings.TrimSpace(vals["path"]); path != "" && path != "." {
+			return sanitizeToolDisplayText(b.displayToolPath(path))
+		}
+	}
+	return ""
+}
+
 func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]string) string {
 	if b == nil {
 		return formatToolHeaderParamsWithParsed("", keys, vals)

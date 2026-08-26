@@ -52,10 +52,15 @@ TUI 有两种模式：
 
 | 按键                          | 动作                                                                                |
 | ----------------------------- | ----------------------------------------------------------------------------------- |
-| `j` / `}`                     | 跳到下一条消息卡片                                                                  |
-| `k` / `{`                     | 跳到上一条消息卡片                                                                  |
+| `j`                           | 跳到下一条消息卡片                                                                  |
+| `k`                           | 跳到上一条消息卡片                                                                  |
+| `}` / `{`                     | 跳到下一条 / 上一条用户消息卡片（turn 边界）                                        |
+| `)` / `(`                     | 跳到下一条 / 上一条 assistant 卡片                                                  |
+| `]` / `[`                     | 跳到与当前卡同类型的下一条 / 上一条卡片                                              |
 | `o` / `Enter` / `Space`       | 折叠/展开当前卡片；图片卡片下用此键打开图片                                          |
 | `e`                           | 编辑当前用户消息；只有它后面还有卡片时才分叉到新会话                               |
+
+结构化跳转（`}`、`)`、`]` 及对应反向键）支持 count 前缀：`3}` 前进三张用户卡，`2(` 后退两张 assistant 卡。跳转会跳过其它所有卡片类型，且永远不会落在错误卡上；方向内没有匹配卡片时视图保持不动。`]` / `[` 以当前聚焦卡的类型为模板，没有聚焦卡时以视口顶部的卡片为模板。
 
 ### Normal 模式 — 浮层
 
@@ -122,8 +127,10 @@ Handoff plan 的 viewer 顶部会显示 plan 路径，可用同样的选中/复�
 
 ```yaml
 keymap:
-  next_block: ["j"]            # 去掉 } 作为下一条卡片的备用键
-  prev_block: ["k"]            # 去掉 { 作为上一条卡片的备用键
+  next_block: ["j"]            # 下一条卡片只用 j
+  prev_block: ["k"]            # 上一条卡片只用 k
+  next_user_block: ["}"]       # } 跳到下一条用户卡（turn 边界）
+  prev_user_block: ["{"]       # { 跳到上一条用户卡
   scroll_down: ["down"]        # 仅用方向键做行滚动
   scroll_up: ["up"]
   quit: ["Q"]                  # 退出要求大写 Q（防误触）
@@ -173,8 +180,14 @@ action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/
 | `full_page_up`             | `["ctrl+b", "pgup"]`             |
 | `scroll_to_bottom`         | `["G"]`                           |
 | `scroll_to_top_seq`        | `["g"]`（`gg` 序列的首键）        |
-| `next_block`               | `["j", "}"]`                      |
-| `prev_block`               | `["k", "{"]`                      |
+| `next_block`               | `["j"]`                           |
+| `prev_block`               | `["k"]`                           |
+| `next_user_block`          | `["}"]`                           |
+| `prev_user_block`          | `["{"]`                           |
+| `next_assistant_block`     | `[")"]`                           |
+| `prev_assistant_block`     | `["("]`                           |
+| `next_same_type_block`     | `["]"]`                           |
+| `prev_same_type_block`     | `["["]`                           |
 | `toggle_collapse`          | `["o", "enter", " ", "space"]`    |
 | `fork_session`             | `["e"]`                           |
 | `directory`                | `["ctrl+t"]`                      |

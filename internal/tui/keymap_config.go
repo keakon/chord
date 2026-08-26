@@ -11,7 +11,9 @@ package tui
 //	insert_page_up, insert_page_down
 //	enter_insert, quit, help_toggle
 //	scroll_down, scroll_up, full_page_down, full_page_up, scroll_to_bottom, scroll_to_top_seq
-//	next_block, prev_block, toggle_collapse, fork_session, directory, usage_stats
+//	next_block, prev_block, next_user_block, prev_user_block, next_assistant_block,
+//	prev_assistant_block, next_same_type_block, prev_same_type_block
+//	toggle_collapse, fork_session, directory, usage_stats
 //	error_panel
 //	search_start, search_next, search_prev
 //	switch_agent, switch_role, switch_model, service_tier
@@ -57,6 +59,12 @@ func KeyMapFromConfig(m map[string][]string) KeyMap {
 	apply(&km.ScrollToTopSeq, "scroll_to_top_seq")
 	apply(&km.NextBlock, "next_block")
 	apply(&km.PrevBlock, "prev_block")
+	apply(&km.NextUserBlock, "next_user_block")
+	apply(&km.PrevUserBlock, "prev_user_block")
+	apply(&km.NextAssistantBlock, "next_assistant_block")
+	apply(&km.PrevAssistantBlock, "prev_assistant_block")
+	apply(&km.NextSameTypeBlock, "next_same_type_block")
+	apply(&km.PrevSameTypeBlock, "prev_same_type_block")
 	apply(&km.ToggleCollapse, "toggle_collapse")
 	apply(&km.ForkSession, "fork_session")
 	apply(&km.Directory, "directory")

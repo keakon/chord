@@ -52,10 +52,15 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 
 | Key                       | Action                                                                                |
 | ------------------------- | ------------------------------------------------------------------------------------- |
-| `j` / `}`                 | Move to the next message card                                                         |
-| `k` / `{`                 | Move to the previous message card                                                     |
+| `j`                       | Move to the next message card                                                         |
+| `k`                       | Move to the previous message card                                                     |
+| `}` / `{`                 | Jump to the next / previous user message card (turn boundary)                         |
+| `)` / `(`                 | Jump to the next / previous assistant message card                                    |
+| `]` / `[`                 | Jump to the next / previous message card of the same type as the current card          |
 | `o` / `Enter` / `Space`   | Toggle collapse / expand on the current card; on an image card, open the image       |
 | `e`                       | Edit the focused user message; forks only when that message is not the transcript tail |
+
+The structural jumps (`}`, `)`, `]` and their counterparts) accept a count prefix, so `3}` moves three user cards forward and `2(` moves two assistant cards backward. Each jump skips all other card types and never lands on error cards; when no matching card exists in that direction the view stays put. `]` / `[` use the focused card's type as the template, or the card at the top of the viewport when nothing is focused.
 
 ### Normal mode — overlays
 
@@ -122,8 +127,10 @@ You can override any binding in `config.yaml`:
 
 ```yaml
 keymap:
-  next_block: ["j"]            # disable the } alias for next-card
-  prev_block: ["k"]            # disable the { alias for prev-card
+  next_block: ["j"]            # next-card is j only
+  prev_block: ["k"]            # prev-card is k only
+  next_user_block: ["}"]       # } jumps to the next user card (turn boundary)
+  prev_user_block: ["{"]       # { jumps to the previous user card
   scroll_down: ["down"]        # arrow keys for line scrolling only
   scroll_up: ["up"]
   quit: ["Q"]                  # require shift for quit
@@ -173,8 +180,14 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `full_page_up`             | `["ctrl+b", "pgup"]`            |
 | `scroll_to_bottom`         | `["G"]`                          |
 | `scroll_to_top_seq`        | `["g"]` (first key of `gg`)      |
-| `next_block`               | `["j", "}"]`                     |
-| `prev_block`               | `["k", "{"]`                     |
+| `next_block`               | `["j"]`                          |
+| `prev_block`               | `["k"]`                          |
+| `next_user_block`          | `["}"]`                          |
+| `prev_user_block`          | `["{"]`                          |
+| `next_assistant_block`     | `[")"]`                          |
+| `prev_assistant_block`     | `["("]`                          |
+| `next_same_type_block`     | `["]"]`                          |
+| `prev_same_type_block`     | `["["]`                          |
 | `toggle_collapse`          | `["o", "enter", " ", "space"]`   |
 | `fork_session`             | `["e"]`                          |
 | `directory`                | `["ctrl+t"]`                     |

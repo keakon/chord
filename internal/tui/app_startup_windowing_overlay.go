@@ -115,6 +115,7 @@ func (m *Model) openDeferredStartupTranscriptDirectory() tea.Cmd {
 	entries := m.deferredStartupTranscriptDirectoryEntries()
 	m.dirEntries = entries
 	m.dirList = NewOverlayList(directoryItems(entries), m.directoryMaxVisible())
+	m.dirList.SetCursor(directoryCursorForBlockID(entries, m.currentDirectoryAnchorBlockID()))
 	cmd := m.switchModeWithIME(ModeDirectory)
 	m.recalcViewportSize()
 	return cmd
@@ -153,7 +154,7 @@ func (m *Model) executeSearchAgainstCurrentTranscript(query string) {
 
 func (m *Model) maybeRevealSearchMatchBlock(match MatchPosition) {
 	var block *Block
-	if m.viewport != nil && match.BlockID > 0 {
+	if m.viewport != nil && match.BlockID >= 0 {
 		block = m.rehydrateStartupDeferredViewportBlock(match.BlockID)
 		if block == nil {
 			block = m.viewport.MaterializeBlockByID(match.BlockID)
@@ -187,7 +188,7 @@ func (m *Model) maybeScrollToSearchMatch(match MatchPosition, trigger string) bo
 		m.viewport.clampOffset()
 		m.viewport.sticky = m.viewport.atBottom()
 	}
-	if m.hasDeferredStartupTranscript() && match.BlockID > 0 {
+	if m.hasDeferredStartupTranscript() && match.BlockID >= 0 {
 		if !m.locateDeferredStartupTranscriptBlock(match.BlockID, trigger) {
 			return false
 		}
@@ -217,7 +218,7 @@ func (m *Model) maybeScrollToSearchMatch(match MatchPosition, trigger string) bo
 	}
 	applyMatchOffset(match.LineOffset)
 	m.maybeRevealSearchMatchBlock(match)
-	if match.BlockID > 0 {
+	if match.BlockID >= 0 {
 		block := m.rehydrateStartupDeferredViewportBlock(match.BlockID)
 		if block == nil {
 			block = m.viewport.MaterializeBlockByID(match.BlockID)
@@ -240,7 +241,10 @@ func (m *Model) maybeScrollToSearchMatch(match MatchPosition, trigger string) bo
 }
 
 func (m *Model) maybeScrollToDirectoryEntry(entry DirectoryEntry, trigger string) bool {
-	if m.hasDeferredStartupTranscript() && entry.BlockID > 0 {
+	// BlockID 0 is a valid transcript block ID, so the deferred locator must
+	// run for the first entry too; otherwise its full-transcript LineOffset
+	// would be applied to the window-relative viewport.
+	if m.hasDeferredStartupTranscript() && entry.BlockID >= 0 {
 		if !m.locateDeferredStartupTranscriptBlock(entry.BlockID, trigger) {
 			return false
 		}

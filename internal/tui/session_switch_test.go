@@ -3443,6 +3443,49 @@ func TestDeferredStartupTranscriptSearchNavigatesWithoutHydrate(t *testing.T) {
 	}
 }
 
+func TestDeferredStartupTranscriptSearchNavigatesToBlockIDZero(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
+	for i := range startupTranscriptWindowMinBlocks + 200 {
+		messages = append(messages, message.Message{Role: message.RoleAssistant, Content: fmt.Sprintf("message-%03d", i)})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("startup transcript should remain deferred for first-block search")
+	}
+	if got := m.startupDeferredTranscript.allBlocks[0].ID; got != 0 {
+		t.Fatalf("first deferred block ID = %d, want 0", got)
+	}
+
+	cmd = m.handleNormalKey(modelSelectKey("/"))
+	applyTestCmd(t, &m, cmd)
+	m.search.Input.SetValue("message-000")
+	cmd = m.handleSearchKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	applyTestCmd(t, &m, cmd)
+
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("first-block search should not hydrate the deferred transcript")
+	}
+	if state := m.startupDeferredTranscript; state.windowStart != 0 {
+		t.Fatalf("deferred window after first-block search = [%d,%d), want start 0", state.windowStart, state.windowEnd)
+	}
+	if got := m.viewport.GetBlockAtOffset(); got == nil || got.ID != 0 || got.Content != "message-000" {
+		t.Fatalf("block at offset after first-block search = %#v, want block 0", got)
+	}
+	if m.focusedBlockID != 0 {
+		t.Fatalf("focusedBlockID after first-block search = %d, want 0", m.focusedBlockID)
+	}
+
+	cmd = m.handleNormalKey(modelSelectKey("n"))
+	applyTestCmd(t, &m, cmd)
+	if got := m.viewport.GetBlockAtOffset(); got == nil || got.ID != 0 {
+		t.Fatalf("block at offset after wrapped next search = %#v, want block 0", got)
+	}
+}
+
 func TestDeferredStartupTranscriptDirectoryNavigatesWithoutHydrate(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {

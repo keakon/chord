@@ -32,10 +32,16 @@ type KeyMap struct {
 	ScrollToTopSeq []string // first key of the two-key "gg" sequence
 
 	// Normal mode – block navigation
-	NextBlock      []string
-	PrevBlock      []string
-	ToggleCollapse []string
-	ForkSession    []string
+	NextBlock          []string
+	PrevBlock          []string
+	NextUserBlock      []string // }  next user card (turn boundary)
+	PrevUserBlock      []string // {  previous user card (turn boundary)
+	NextAssistantBlock []string // )  next assistant card
+	PrevAssistantBlock []string // (  previous assistant card
+	NextSameTypeBlock  []string // ]  next card of the focused card's type
+	PrevSameTypeBlock  []string // [  previous card of the focused card's type
+	ToggleCollapse     []string
+	ForkSession        []string
 
 	// Normal mode – overlays
 	Directory  []string
@@ -91,10 +97,16 @@ func DefaultKeyMap() KeyMap {
 		ScrollToTopSeq: []string{"g"},
 
 		// Normal mode – block navigation
-		NextBlock:      []string{"j", "}"},
-		PrevBlock:      []string{"k", "{"},
-		ToggleCollapse: []string{"o", "enter", " ", "space"},
-		ForkSession:    []string{"e"},
+		NextBlock:          []string{"j"},
+		PrevBlock:          []string{"k"},
+		NextUserBlock:      []string{"}"},
+		PrevUserBlock:      []string{"{"},
+		NextAssistantBlock: []string{")"},
+		PrevAssistantBlock: []string{"("},
+		NextSameTypeBlock:  []string{"]"},
+		PrevSameTypeBlock:  []string{"["},
+		ToggleCollapse:     []string{"o", "enter", " ", "space"},
+		ForkSession:        []string{"e"},
 
 		// Normal mode – overlays
 		Directory:  []string{"ctrl+t"},

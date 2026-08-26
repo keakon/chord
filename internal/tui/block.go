@@ -181,6 +181,7 @@ type Block struct {
 
 	// UserLocalShell: merged USER + Shell-style !shell card (Type must be BlockUser).
 	UserLocalShellCmd     string
+	UserLocalShell        bool
 	UserLocalShellPending bool
 	UserLocalShellResult  string
 	UserLocalShellFailed  bool

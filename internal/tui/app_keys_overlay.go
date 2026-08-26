@@ -158,7 +158,7 @@ func (m Model) searchCurrentInnerOffset() int {
 	if query == "" || m.viewport.width <= 0 {
 		return match.InnerOffset
 	}
-	if match.BlockID > 0 {
+	if match.BlockID >= 0 {
 		for _, block := range m.viewport.visibleBlocks() {
 			if block != nil && block.ID == match.BlockID {
 				return renderedSearchMatchInnerOffset(block, query, m.viewport.width)
@@ -180,15 +180,18 @@ func (m Model) searchCurrentBlockIndex() int {
 	if !ok {
 		return -1
 	}
-	if match.BlockID > 0 {
+	if match.BlockID >= 0 {
 		for i, block := range m.viewport.visibleBlocks() {
 			if block != nil && block.ID == match.BlockID {
 				return i
 			}
 		}
-		return -1
 	}
-	return match.BlockIndex
+	blocks := m.viewport.visibleBlocks()
+	if match.BlockIndex >= 0 && match.BlockIndex < len(blocks) {
+		return match.BlockIndex
+	}
+	return -1
 }
 
 func (m *Model) handleDirectoryKey(msg tea.KeyMsg) tea.Cmd {

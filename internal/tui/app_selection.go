@@ -49,7 +49,18 @@ func normalizeFocusedBlockID(blocks []*Block, currentID int) int {
 	return -1
 }
 
+// focusNextSelectableBlockID returns the next block ID in dir direction from
+// currentID that is selectable, or -1 when no such block exists.
 func focusNextSelectableBlockID(blocks []*Block, currentID, dir int) int {
+	return focusNextMatchingBlockID(blocks, currentID, dir, func(b *Block) bool {
+		return b != nil && isSelectableBlockType(b.Type)
+	})
+}
+
+// focusNextMatchingBlockID returns the next block ID in dir direction from
+// currentID whose block satisfies match, or -1 when no such block exists.
+// currentID itself is skipped, so a repeated keypress advances card by card.
+func focusNextMatchingBlockID(blocks []*Block, currentID, dir int, match func(*Block) bool) int {
 	if len(blocks) == 0 {
 		return -1
 	}
@@ -81,7 +92,7 @@ func focusNextSelectableBlockID(blocks []*Block, currentID, dir int) int {
 	}
 	for i := start; i >= 0 && i < len(blocks); i += dir {
 		b := blocks[i]
-		if b == nil || !isSelectableBlockType(b.Type) {
+		if !match(b) {
 			continue
 		}
 		return b.ID
@@ -94,6 +105,30 @@ func indexOfBlockID(blocks []*Block, id int) int {
 		if b != nil && b.ID == id {
 			return i
 		}
+	}
+	return -1
+}
+
+// currentBlockID returns the card navigation should treat as current: the
+// focused card when it still exists in the current transcript, otherwise the
+// card at the viewport offset, or -1 when neither can be resolved. A stale
+// focusedBlockID (a card that was removed or filtered out) must not poison
+// jump start points or the message-directory anchor.
+func (m *Model) currentBlockID() int {
+	if m == nil || m.viewport == nil {
+		return -1
+	}
+	if m.focusedBlockID >= 0 {
+		if m.hasDeferredStartupTranscript() {
+			if indexOfBlockID(m.startupDeferredTranscript.allBlocks, m.focusedBlockID) >= 0 {
+				return m.focusedBlockID
+			}
+		} else if indexOfBlockID(m.viewport.visibleBlocks(), m.focusedBlockID) >= 0 {
+			return m.focusedBlockID
+		}
+	}
+	if b := m.viewport.GetBlockAtOffset(); b != nil {
+		return b.ID
 	}
 	return -1
 }
@@ -111,24 +146,12 @@ func (m *Model) navigateFocusedBlock(dir int) {
 	}
 	m.focusedBlockID = nextID
 	m.refreshBlockFocus()
-	if m.hasDeferredStartupTranscript() {
-		if lineOffset, ok := m.viewport.LineOffsetForBlockID(m.focusedBlockID); ok {
-			m.viewport.offset = lineOffset
-			m.viewport.clampOffset()
-			return
-		}
-	}
-	idx := indexOfBlockID(blocks, m.focusedBlockID)
-	if idx < 0 {
-		return
-	}
-	entries := m.viewport.MessageDirectory()
-	for _, entry := range entries {
-		if entry.BlockIndex == idx {
-			m.viewport.offset = entry.LineOffset
-			m.viewport.clampOffset()
-			break
-		}
+	// Position the viewport at the card's start line via the cached block
+	// starts; building a MessageDirectory here would run a full per-block
+	// Summary() pass on every j/k.
+	if lineOffset, ok := m.viewport.LineOffsetForBlockID(m.focusedBlockID); ok {
+		m.viewport.offset = lineOffset
+		m.viewport.clampOffset()
 	}
 }
 

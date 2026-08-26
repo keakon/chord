@@ -53,3 +53,26 @@ func directoryItems(entries []DirectoryEntry) []OverlayListItem {
 	}
 	return items
 }
+
+// currentDirectoryAnchorBlockID returns the block ID the message-directory
+// cursor should start on: the focused block when one exists, otherwise the
+// block at the viewport offset.
+func (m *Model) currentDirectoryAnchorBlockID() int {
+	return m.currentBlockID()
+}
+
+// directoryCursorForBlockID returns the entry index whose BlockID matches the
+// current card, or 0 when no entry matches. Matching must go by block ID, not
+// LineOffset: in the deferred transcript path directory LineOffsets are
+// full-transcript coordinates while the viewport offset is window-relative.
+func directoryCursorForBlockID(entries []DirectoryEntry, blockID int) int {
+	if blockID < 0 {
+		return 0
+	}
+	for i, entry := range entries {
+		if entry.BlockID == blockID {
+			return i
+		}
+	}
+	return 0
+}

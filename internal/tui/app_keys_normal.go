@@ -125,6 +125,36 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 			count := m.chordCountOr(1)
 			m.clearChordState()
 			return m.repeatNormalBoundary(-1, count)
+		case keyMatches(key, m.keyMap.NextUserBlock):
+			count := m.chordCountOr(1)
+			m.clearChordState()
+			return m.jumpToMatchingBlock(1, count, userTurnBlockMatch)
+		case keyMatches(key, m.keyMap.PrevUserBlock):
+			count := m.chordCountOr(1)
+			m.clearChordState()
+			return m.jumpToMatchingBlock(-1, count, userTurnBlockMatch)
+		case keyMatches(key, m.keyMap.NextAssistantBlock):
+			count := m.chordCountOr(1)
+			m.clearChordState()
+			return m.jumpToMatchingBlock(1, count, blockTypeMatch(BlockAssistant))
+		case keyMatches(key, m.keyMap.PrevAssistantBlock):
+			count := m.chordCountOr(1)
+			m.clearChordState()
+			return m.jumpToMatchingBlock(-1, count, blockTypeMatch(BlockAssistant))
+		case keyMatches(key, m.keyMap.NextSameTypeBlock):
+			count := m.chordCountOr(1)
+			m.clearChordState()
+			if match, ok := m.sameTypeJumpMatch(); ok {
+				return m.jumpToMatchingBlock(1, count, match)
+			}
+			return nil
+		case keyMatches(key, m.keyMap.PrevSameTypeBlock):
+			count := m.chordCountOr(1)
+			m.clearChordState()
+			if match, ok := m.sameTypeJumpMatch(); ok {
+				return m.jumpToMatchingBlock(-1, count, match)
+			}
+			return nil
 		case keyMatches(key, m.keyMap.ScrollToBottom):
 			count := m.chordCountOr(1)
 			m.clearChordState()
@@ -226,6 +256,26 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 	case keyMatches(key, m.keyMap.PrevBlock):
 		return m.repeatNormalBoundary(-1, 1)
 
+	// -- structural card jumps -------------------------------------------
+	case keyMatches(key, m.keyMap.NextUserBlock):
+		return m.jumpToMatchingBlock(1, 1, userTurnBlockMatch)
+	case keyMatches(key, m.keyMap.PrevUserBlock):
+		return m.jumpToMatchingBlock(-1, 1, userTurnBlockMatch)
+	case keyMatches(key, m.keyMap.NextAssistantBlock):
+		return m.jumpToMatchingBlock(1, 1, blockTypeMatch(BlockAssistant))
+	case keyMatches(key, m.keyMap.PrevAssistantBlock):
+		return m.jumpToMatchingBlock(-1, 1, blockTypeMatch(BlockAssistant))
+	case keyMatches(key, m.keyMap.NextSameTypeBlock):
+		if match, ok := m.sameTypeJumpMatch(); ok {
+			return m.jumpToMatchingBlock(1, 1, match)
+		}
+		return nil
+	case keyMatches(key, m.keyMap.PrevSameTypeBlock):
+		if match, ok := m.sameTypeJumpMatch(); ok {
+			return m.jumpToMatchingBlock(-1, 1, match)
+		}
+		return nil
+
 	// -- toggle collapse / open image viewer ------------------------------
 	case keyMatches(key, m.keyMap.ToggleCollapse):
 		toggleAtOffset := func() {
@@ -274,6 +324,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		m.dirEntries = m.viewport.MessageDirectory()
 		m.dirList = NewOverlayList(directoryItems(m.dirEntries), m.directoryMaxVisible())
+		m.dirList.SetCursor(directoryCursorForBlockID(m.dirEntries, m.currentDirectoryAnchorBlockID()))
 		cmd := m.switchModeWithIME(ModeDirectory)
 		m.recalcViewportSize()
 		return cmd

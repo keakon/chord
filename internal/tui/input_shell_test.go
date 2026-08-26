@@ -106,6 +106,25 @@ func TestHandleInsertKeyBangLargePasteUsesRawCommand(t *testing.T) {
 	}
 }
 
+func TestHandleInsertKeyEmptyBangMarksLocalShellCard(t *testing.T) {
+	m := NewModel(nil)
+	m.mode = ModeInsert
+	m.input.SetBangMode(true)
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("viewport block count = %d, want 1", len(blocks))
+	}
+	if !blocks[0].IsUserLocalShell() {
+		t.Fatal("empty bang card should retain local-shell identity")
+	}
+	if blocks[0].UserLocalShellPending {
+		t.Fatal("empty bang card should not be pending")
+	}
+}
+
 func TestTerminalContextMessageKeepsReadablePartsAndPersistedContent(t *testing.T) {
 	msg := localShellContextMessage("!echo hi", "echo hi", "ok", nil)
 	readable := convformat.BlockString(convformat.LabelUser, convformat.UserShellReadableBody("echo hi", "ok", false))

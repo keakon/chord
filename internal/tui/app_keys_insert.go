@@ -269,7 +269,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			m.finalizeTurn()
 			shellID := m.nextBlockID
 			m.nextBlockID++
-			userBlock := &Block{ID: shellID, Type: BlockUser, Content: userLine, AgentID: m.focusedAgentID, ImageCount: 0, Collapsed: true, UserLocalShellCmd: cmdStr, UserLocalShellPending: strings.TrimSpace(cmdStr) != "", MsgIndex: -1}
+			userBlock := &Block{ID: shellID, Type: BlockUser, Content: userLine, AgentID: m.focusedAgentID, ImageCount: 0, Collapsed: true, UserLocalShell: true, UserLocalShellCmd: cmdStr, UserLocalShellPending: strings.TrimSpace(cmdStr) != "", MsgIndex: -1}
 			if userBlock.UserLocalShellPending {
 				userBlock.StartedAt = time.Now()
 			}

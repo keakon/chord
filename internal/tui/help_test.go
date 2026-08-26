@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -43,6 +44,59 @@ func TestKeyMapHelpGroupsRespectConfiguredKeys(t *testing.T) {
 	}
 	if !foundFast {
 		t.Fatal("expected fast binding to use configured key")
+	}
+}
+
+func TestKeyMapConfigOverridesStructuralJumpKeys(t *testing.T) {
+	km := KeyMapFromConfig(map[string][]string{
+		"next_user_block":      {"f1"},
+		"prev_user_block":      {"f2"},
+		"next_assistant_block": {"f3"},
+		"prev_assistant_block": {"f4"},
+		"next_same_type_block": {"f5"},
+		"prev_same_type_block": {"f6"},
+	})
+	fields := []struct {
+		name string
+		got  []string
+	}{
+		{"next_user_block", km.NextUserBlock},
+		{"prev_user_block", km.PrevUserBlock},
+		{"next_assistant_block", km.NextAssistantBlock},
+		{"prev_assistant_block", km.PrevAssistantBlock},
+		{"next_same_type_block", km.NextSameTypeBlock},
+		{"prev_same_type_block", km.PrevSameTypeBlock},
+	}
+	for i, field := range fields {
+		want := fmt.Sprintf("f%d", i+1)
+		if len(field.got) != 1 || field.got[0] != want {
+			t.Fatalf("%s = %v, want [%s]", field.name, field.got, want)
+		}
+	}
+}
+
+func TestKeyMapHelpShowsConfiguredStructuralJumpKeys(t *testing.T) {
+	km := KeyMapFromConfig(map[string][]string{
+		"next_user_block":      {"f1"},
+		"next_same_type_block": {"f2"},
+	})
+	seen := map[string]bool{}
+	for _, group := range km.HelpGroups() {
+		if group.Title != "Normal Mode" {
+			continue
+		}
+		for _, binding := range group.Bindings {
+			for _, key := range binding.Keys {
+				if key == "f1" || key == "f2" {
+					seen[key] = true
+				}
+			}
+		}
+	}
+	for _, key := range []string{"f1", "f2"} {
+		if !seen[key] {
+			t.Fatalf("help should list configured structural jump key %s", key)
+		}
 	}
 }
 

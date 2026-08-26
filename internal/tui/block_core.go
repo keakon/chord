@@ -117,7 +117,7 @@ func (b *Block) toolElapsedLabel() string {
 
 // IsUserLocalShell reports a merged USER + local !shell block.
 func (b *Block) IsUserLocalShell() bool {
-	return b != nil && b.Type == BlockUser && b.UserLocalShellCmd != ""
+	return b != nil && b.Type == BlockUser && (b.UserLocalShell || b.UserLocalShellCmd != "")
 }
 
 func blockLabelWithID(label string, id int) string {
@@ -418,7 +418,11 @@ func (b *Block) Summary() string {
 	case BlockThinking:
 		return "▸ thinking " + truncateOneLine(b.Content, 55)
 	case BlockToolCall:
-		return "Tool: " + b.ToolName
+		name := sanitizeToolDisplayText(b.ToolName)
+		if primary := b.toolCallSummaryMainPart(); primary != "" {
+			return "Tool: " + name + " " + truncateOneLine(primary, 46)
+		}
+		return "Tool: " + name
 	case BlockToolResult:
 		prefix := "Result: "
 		if b.IsError {
