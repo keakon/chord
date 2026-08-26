@@ -46,7 +46,7 @@ func isTUILocalOnlySlashCommand(content string) bool {
 // current local-only handlers operate on the text form only.
 func (a *MainAgent) executeLocalOnlySlashCommand(content string, _ []message.ContentPart, busy bool) bool {
 	c := strings.TrimSpace(content)
-	if !busy {
+	if a.controlActionCanSetBaseline() {
 		// These commands may settle the runtime without starting a real turn.
 		// Establish the silent baseline before their handler emits its own
 		// follow-up events; a queued control command must not inherit the

@@ -305,7 +305,7 @@ func (a *MainAgent) handleModelPoolSwitchEvent(evt Event) {
 		log.Errorf("handleModelPoolSwitchEvent: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
-	if a.currentTurn() == nil && !a.loopKeepsMainBusy() && !a.hasActiveSubAgentWork() {
+	if a.controlActionCanSetBaseline() {
 		a.markControlAction()
 	}
 	if strings.TrimSpace(req.AgentName) != "" {
