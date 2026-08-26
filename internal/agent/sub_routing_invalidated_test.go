@@ -49,9 +49,12 @@ func TestSubAgentRoutingInvalidatedRestartsInsteadOfError(t *testing.T) {
 	// The restarted request parks in retry backoff under the stub provider;
 	// cancel the sub-agent so its goroutine unwinds at test end.
 	t.Cleanup(func() {
-		if sub.cancel != nil {
-			sub.cancel()
-		}
+		// The restart goroutine from the routing-invalidated path is tracked on
+		// llmWG. runLoop never starts in this test, so done never closes and
+		// waitDone would return without joining it; wait here so late
+		// session-directory writes finish before TempDir cleanup.
+		sub.cancel()
+		sub.llmWG.Wait()
 	})
 	sub.newTurn()
 	drainInternalEventTypes(a)   // clear setup internal events
