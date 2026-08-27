@@ -178,7 +178,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		}
 		if strings.TrimSpace(displayDiff) == "" && !applyPatchNoChanges && !b.toolResultIsError() && !b.toolResultIsCancelled() &&
 			!applyPatchOnlyMoveOrDeleteTargets(applyPatchTargets) {
-			result = appendApplyPatchPreview(result, b.editPatchArgsJSON(), filePath, cardWidth-4)
+			result = appendApplyPatchPreview(result, b, filePath, cardWidth-4)
 		}
 		if applyPatchNoChanges {
 			result = append(result, DimStyle.Render("  ↳ No changes"))
@@ -352,7 +352,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		case tools.NameApplyPatch:
 			sections := splitApplyPatchErrorSections(b.ResultContent)
 			if strings.TrimSpace(displayDiff) == "" {
-				result = appendApplyPatchPreview(result, b.editPatchArgsJSON(), filePath, cardWidth-4)
+				result = appendApplyPatchPreview(result, b, filePath, cardWidth-4)
 				if sections.applied != "" && !hasOperationSummaries {
 					result = append(result, ToolResultExpandedStyle.Render("  ↳ Applied changes:"))
 					result = appendApplyPatchErrorTextLines(result, sections.applied, cardWidth-4)
@@ -551,12 +551,46 @@ func appendEditPatchPreview(result []string, argsJSON string, width int) []strin
 	return result
 }
 
-func appendApplyPatchPreview(result []string, argsJSON, filePath string, width int) []string {
+const patchPreviewCoalesceBytes = 256
+
+// cachedApplyPatchStreamingArgs mirrors streamingToolDisplayArgs for a live
+// apply_patch card. Extracting the streaming preview is linear in the
+// accumulated args, so re-running it per streamed fragment would be
+// quadratic; the preview refreshes at most once per
+// patchPreviewCoalesceBytes of growth instead. Complete-JSON and path-only
+// displays are stable or cheap and re-evaluate each call.
+func (b *Block) cachedApplyPatchStreamingArgs(argsJSON string) string {
+	if b.patchPreviewText != "" && len(argsJSON) >= b.patchPreviewLen && len(argsJSON)-b.patchPreviewLen < patchPreviewCoalesceBytes {
+		return b.patchPreviewText
+	}
+	display := applyPatchToolDisplayArgs(argsJSON)
+	if display == "" {
+		display = applyPatchStreamingPreview(argsJSON)
+	}
+	b.patchPreviewLen = len(argsJSON)
+	b.patchPreviewText = display
+	if display != "" {
+		return display
+	}
+	if path := tools.ExtractEditPathFromArgs([]byte(argsJSON)); path != "" {
+		return fileToolPathDisplayArgs(path)
+	}
+	return ""
+}
+
+func appendApplyPatchPreview(result []string, b *Block, filePath string, width int) []string {
+	argsJSON := b.editPatchArgsJSON()
 	patch := editPatchFromArgs(argsJSON)
+	if patch == "" {
+		// Args may still be streaming: the JSON is not parseable yet, but the
+		// patch text itself is a valid live preview (see
+		// applyPatchStreamingPreview).
+		patch = applyPatchStreamingPreview(argsJSON)
+	}
 	if patch == "" {
 		return result
 	}
-	hl := newCodeHighlighterWithLanguage(filePath, applyPatchCodeSample(patch), "")
+	hl := ensureCodeHighlighterWithLanguage(&b.previewHL, filePath, applyPatchCodeSample(patch), "")
 	result = append(result, ToolResultExpandedStyle.Render("  ↳ Requested patch:"))
 	for _, line := range editPatchPreviewLines(patch) {
 		result = append(result, renderApplyPatchPreviewLine(line, width, hl))
@@ -692,11 +726,9 @@ func appendReplaceEditPreview(result []string, args replaceEditArgs, filePath st
 }
 
 func replaceEditPreviewLines(text string) []string {
-	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	if len(lines) > 20 {
-		lines = append(lines[:20], "... (text truncated)")
-	}
-	return lines
+	// Output is intentional full content: the preview mirrors exactly what the
+	// tool applied. Do not truncate long new_string/old_string payloads.
+	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 }
 
 func (b *Block) editPatchArgsJSON() string {
@@ -734,6 +766,151 @@ func editPatchFromArgs(argsJSON string) string {
 	return strings.TrimSpace(parsed.Patch)
 }
 
+// applyPatchStreamingPreview best-effort extracts the patch text from
+// still-streaming apply_patch args. Two shapes arrive here:
+//
+//   - JSON function shape: an incrementally received `{"patch":"..."}`
+//     document that a full JSON parse cannot read until the stream closes, so
+//     this locates the patch key (the document may be pretty-printed or carry
+//     other keys first), decodes the escapes that have arrived so far, and
+//     stops at the first unescaped closing quote.
+//   - Freeform custom-tool shape: the args accumulate as bare patch text
+//     (custom_tool_call_input.delta), which is shown as-is.
+//
+// It returns "" until recognizable text has streamed in, letting callers fall
+// back to the path-only display.
+func applyPatchStreamingPreview(argsJSON string) string {
+	trimmed := strings.TrimSpace(argsJSON)
+	if strings.HasPrefix(trimmed, "{") {
+		seg, ok := streamingPatchValueSegment(trimmed)
+		if !ok {
+			return ""
+		}
+		return decodeStreamingPatchString(seg)
+	}
+	// Freeform custom-tool shape: bare patch text, no JSON envelope. Any
+	// other payload (e.g. a gateway-lowered {"input":...} object) does not
+	// start like a patch and stays hidden until args complete.
+	if strings.HasPrefix(trimmed, "*** ") {
+		if patch := sanitizeToolDisplayText(trimmed); patch != "" {
+			return patch
+		}
+	}
+	return ""
+}
+
+// streamingPatchValueSegment locates the value of the "patch" key in a
+// still-streaming JSON object and returns the interior of its string value
+// (after the opening quote). ok is false while the value has not started
+// streaming yet or is not a string.
+func streamingPatchValueSegment(argsJSON string) (string, bool) {
+	for from := 0; ; {
+		key := strings.Index(argsJSON[from:], `"patch"`)
+		if key < 0 {
+			return "", false
+		}
+		from += key + len(`"patch"`)
+		seg := strings.TrimLeft(argsJSON[from:], " \t\r\n")
+		if seg == "" {
+			return "", false
+		}
+		if seg[0] != ':' {
+			// The "patch" text appeared inside another string value; keep
+			// scanning for the actual key.
+			continue
+		}
+		seg = strings.TrimLeft(seg[1:], " \t\r\n")
+		if seg == "" || seg[0] != '"' {
+			// Not a string value (e.g. {"patch":123}); keep the caller's fallback.
+			return "", false
+		}
+		return seg[1:], true
+	}
+}
+
+// decodeStreamingPatchString decodes a still-streaming JSON string interior
+// into patch text.
+func decodeStreamingPatchString(seg string) string {
+	var b strings.Builder
+	b.Grow(len(seg))
+	// JSON string escaping: \n / \t / \r / \" / \\ / \/ / \b / \f decode to
+	// their literals and \uXXXX to the rune (surrogate pairs combine). A
+	// trailing lone backslash is an incomplete escape.
+	for i := 0; i < len(seg); i++ {
+		c := seg[i]
+		switch {
+		case c == '"':
+			// An unescaped quote closes the patch value (or an unterminated
+			// tail); everything after it is not part of the patch.
+			i = len(seg)
+		case c == '\\':
+			if i+1 >= len(seg) {
+				i = len(seg)
+				continue
+			}
+			i++
+			switch seg[i] {
+			case 'n':
+				b.WriteByte('\n')
+			case 't':
+				b.WriteByte('\t')
+			case 'r':
+				b.WriteByte('\r')
+			case '"':
+				b.WriteByte('"')
+			case '\\':
+				b.WriteByte('\\')
+			case '/':
+				b.WriteByte('/')
+			case 'b':
+				b.WriteByte('\b')
+			case 'f':
+				b.WriteByte('\f')
+			case 'u':
+				if n, ok := decodeJSONUnicodeEscape(seg, i); ok {
+					if n >= 0xD800 && n <= 0xDBFF && i+11 <= len(seg) && seg[i+5] == '\\' && seg[i+6] == 'u' {
+						if lo, loOK := decodeJSONUnicodeEscape(seg, i+6); loOK && lo >= 0xDC00 && lo <= 0xDFFF {
+							b.WriteRune(rune(0x10000 + (n-0xD800)<<10 + (lo - 0xDC00)))
+							i += 10
+							continue
+						}
+					}
+					if n < 0xD800 || n > 0xDFFF {
+						b.WriteRune(rune(n))
+						i += 4
+						continue
+					}
+				}
+				b.WriteString(`\u`)
+			default:
+				b.WriteByte('\\')
+				b.WriteByte(seg[i])
+			}
+		default:
+			b.WriteByte(c)
+		}
+	}
+	patch := strings.TrimSpace(b.String())
+	if patch == "" {
+		return ""
+	}
+	return sanitizeToolDisplayText(patch)
+}
+
+// decodeJSONUnicodeEscape decodes the 4 hex digits of the `\uXXXX` escape
+// whose backslash sits at seg[i]. ok is false when fewer than 4 characters
+// have streamed in or they are not hex.
+func decodeJSONUnicodeEscape(seg string, i int) (rune, bool) {
+	if i+5 > len(seg) {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(seg[i+1:i+5], 16, 32)
+	if err != nil {
+		return 0, false
+	}
+	return rune(n), true
+}
+
 // replaceEditArgs holds the old_string/new_string replacement args of an Edit
 // tool call.
 type replaceEditArgs struct {
@@ -754,11 +931,10 @@ func parseReplaceEditArgs(argsJSON string) (replaceEditArgs, bool) {
 }
 
 func editPatchPreviewLines(patch string) []string {
-	lines := strings.Split(strings.TrimSpace(patch), "\n")
-	if len(lines) > 20 {
-		lines = append(lines[:20], "... (patch truncated)")
-	}
-	return lines
+	// Output is intentional full content: the request patch mirrors the diff
+	// body the tool applies verbatim, so it must never be line-clipped. Long
+	// lines are still width-wrapped at render time.
+	return strings.Split(strings.TrimSpace(patch), "\n")
 }
 
 func (b *Block) diffToolFilePath() string {
@@ -780,6 +956,15 @@ func (b *Block) diffToolFilePathWithTargets(targets []tools.ApplyPatchDisplayTar
 			}
 			if len(paths) == 0 {
 				paths = paramStringList(tolerantToolArgValue(b.Content, "paths"))
+			}
+			if len(paths) == 0 {
+				// The card body may still carry the raw streamed patch (freeform
+				// custom-tool input, or a JSON document that has not finished).
+				// Derive the header target from the patch markers directly, so
+				// the header shows a real path while the patch is still arriving.
+				if patch := applyPatchStreamingPreview(b.Content); patch != "" {
+					paths = streamingApplyPatchFilePaths(patch)
+				}
 			}
 			if len(paths) == 0 {
 				return ""
@@ -810,6 +995,24 @@ func (b *Block) diffToolFilePathWithTargets(targets []tools.ApplyPatchDisplayTar
 		return path
 	}
 	return strings.TrimSpace(tolerantToolArgValue(b.Content, "path"))
+}
+
+// streamingApplyPatchFilePaths returns the model-facing file paths mentioned in
+// still-streaming apply_patch text (freeform custom-tool input or an
+// in-progress JSON document). It scans begin markers so a live patch card keeps
+// a readable header target even when the strict ParseApplyPatch parser cannot
+// yet read an incomplete document.
+func streamingApplyPatchFilePaths(text string) []string {
+	var paths []string
+	for line := range strings.SplitSeq(text, "\n") {
+		line = strings.TrimSpace(line)
+		for _, prefix := range []string{"*** Update File: ", "*** Add File: ", "*** Delete File: ", "*** Move to: "} {
+			if rest, ok := strings.CutPrefix(line, prefix); ok {
+				paths = append(paths, strings.TrimSpace(rest))
+			}
+		}
+	}
+	return paths
 }
 
 func applyPatchPathSummary(path string, count int) string {

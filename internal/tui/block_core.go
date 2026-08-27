@@ -17,6 +17,9 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	clone := *src
 	clone.Audit = src.Audit.Clone()
 	clone.codeHL = nil
+	clone.previewHL = nil
+	clone.patchPreviewLen = 0
+	clone.patchPreviewText = ""
 	clone.richMarkdownHL = nil
 	clone.thinkingStreamSettled = nil
 	clone.toolArgsCacheKeys = append([]string(nil), src.toolArgsCacheKeys...)

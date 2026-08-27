@@ -9,6 +9,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func toolProgressLabelForCount(label string, count int64) string {
@@ -77,7 +78,11 @@ func buildToolHeaderLine(headerLine string, progress *agent.ToolProgressSnapshot
 }
 
 func inferToolArgProgress(toolName, argsJSON string) *agent.ToolProgressSnapshot {
-	_ = toolName
+	if toolNameKey(toolName) == tools.NameApplyPatch {
+		// apply_patch streams a live patch-text preview (see
+		// applyPatchStreamingPreview) instead of a generic char count.
+		return nil
+	}
 	count := utf8.RuneCountInString(strings.TrimSpace(argsJSON))
 	if count > 0 {
 		return &agent.ToolProgressSnapshot{Text: fmt.Sprintf("%d chars received", count)}

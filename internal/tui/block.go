@@ -128,6 +128,18 @@ type Block struct {
 	// caches lexer detection and rendered snippets across renders of the same block.
 	codeHL *codeHighlighter
 
+	// previewHL is the syntax highlighter for the live apply_patch patch
+	// preview. It is separate from codeHL because the two render different
+	// samples of the same block during streaming.
+	previewHL *codeHighlighter
+
+	// patchPreview caches the live apply_patch streaming preview keyed by the
+	// streamed args length (see cachedApplyPatchStreamingArgs): extracting the
+	// preview is linear in the args, so refreshing it per streamed fragment
+	// would be quadratic.
+	patchPreviewLen  int
+	patchPreviewText string
+
 	// toolArgsCache memoizes parsed JSON arguments for tool-call rendering.
 	// It must be invalidated whenever ToolName or Content changes.
 	toolArgsCacheToolName string

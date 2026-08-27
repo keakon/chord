@@ -32,10 +32,13 @@ func streamingToolDisplayArgs(toolName, argsJSON, result string) string {
 		if display := applyPatchToolDisplayArgs(argsJSON); display != "" {
 			return display
 		}
+		if preview := applyPatchStreamingPreview(argsJSON); preview != "" {
+			return preview
+		}
 		if path := tools.ExtractEditPathFromArgs([]byte(argsJSON)); path != "" {
 			return fileToolPathDisplayArgs(path)
 		}
-		return argsJSON
+		return ""
 	case tools.NameEdit:
 		path := tools.ExtractEditPathFromArgs([]byte(argsJSON))
 		if path == "" {
@@ -96,6 +99,12 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 	if includeArgProgress {
 		displayArgs = streamingToolDisplayArgs(name, argsJSON, "")
 	}
+	collapsed := !toolDefaultsExpanded(name)
+	if includeArgProgress && name == tools.NameApplyPatch {
+		// The streaming patch preview is the card's primary content while the
+		// arguments are still arriving, so keep the body visible from the start.
+		collapsed = false
+	}
 	block := &Block{
 		ID:                 m.nextBlockID,
 		Type:               BlockToolCall,
@@ -103,7 +112,7 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 		RawArgs:            argsJSON,
 		ToolName:           name,
 		ToolID:             id,
-		Collapsed:          !toolDefaultsExpanded(name),
+		Collapsed:          collapsed,
 		AgentID:            agentID,
 		ToolExecutionState: state,
 		StartedAt:          time.Now(),
@@ -405,7 +414,14 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			}
 			return true, effects
 		}
-		allowArgRenderUpdate := evt.ArgsStreamingDone || m.shouldRefreshToolArgRender(evt.ID, evt.ArgsJSON, now)
+		// Live apply_patch preview: a growing patch is the card's primary content
+		// while the model streams it. The arg-render cadence exists to throttle
+		// transient char-count updates for other tools, and dropping deltas that
+		// way would drop patch text; the preview is throttled by content instead,
+		// refreshing once the patch grows past the coalesce window rather than on
+		// a timer.
+		livePatchPreview := !evt.ArgsStreamingDone && block != nil && toolNameKey(block.ToolName) == tools.NameApplyPatch
+		allowArgRenderUpdate := evt.ArgsStreamingDone || livePatchPreview || m.shouldRefreshToolArgRender(evt.ID, evt.ArgsJSON, now)
 		if !allowArgRenderUpdate {
 			m.markStreamRenderDirty()
 			effects.addFollowup(m.scheduleStreamFlush(0))
@@ -413,13 +429,38 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		updated := false
 		argsStreamingDone := evt.ArgsStreamingDone || (block != nil && !block.StartedAt.IsZero())
-		displayArgs := streamingToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
+		var displayArgs string
+		if !argsStreamingDone && evt.InputText != "" {
+			// Freeform custom-tool input (Responses apply_patch): the raw text
+			// arrives through the InputText channel; render it verbatim instead
+			// of re-deriving it from the canonical ArgsJSON envelope.
+			displayArgs = sanitizeToolDisplayText(evt.InputText)
+		} else if livePatchPreview {
+			// The growing patch is the card's primary content. The cached
+			// variant keeps the per-delta extraction off the quadratic path,
+			// and its coalesce window doubles as the preview's refresh gate.
+			displayArgs = block.cachedApplyPatchStreamingArgs(evt.ArgsJSON)
+		} else {
+			displayArgs = streamingToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
+		}
 		if argsStreamingDone {
 			displayArgs = stableToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
 		}
 		if evt.ArgsJSON != "" && evt.ArgsJSON != block.RawArgs {
 			block.RawArgs = evt.ArgsJSON
-			updated = true
+			// A live patch preview must not count the raw args as a visible
+			// change. RawArgs grows with every delta, and marking the block
+			// updated re-measures the card — measureSpanLines renders it in
+			// full, highlighting included, just to count lines — so a per-delta
+			// update is linear in the patch and the stream as a whole is
+			// quadratic. cachedApplyPatchStreamingArgs already coalesces the
+			// preview text, so let that coalesced text below decide when the
+			// card really changed; the card then re-renders from the newest
+			// RawArgs at that point, and between those points it keeps showing
+			// the preview it last measured.
+			if !livePatchPreview {
+				updated = true
+			}
 		}
 		if displayArgs != "" && displayArgs != block.Content {
 			m.recordTUIDiagnostic("tool-call-update", "tool=%s id=%s block=%d len=%d->%d", evt.Name, evt.ID, block.ID, len(block.Content), len(displayArgs))
@@ -459,6 +500,11 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			}
 			block.InvalidateCache()
 			m.updateViewportBlock(block)
+			if livePatchPreview {
+				// Ensure the growing preview is redrawn promptly, not only on the
+				// next unrelated frame.
+				effects.addFollowup(m.scheduleStreamFlush(0))
+			}
 		}
 		return true, effects
 	case agent.ToolCallDiscardEvent:
@@ -513,7 +559,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			block.ToolProgress = nil
 			updated = true
 		}
-		if evt.State == agent.ToolCallExecutionStateQueued && !toolDefaultsExpanded(block.ToolName) {
+		if evt.State == agent.ToolCallExecutionStateQueued && !toolDefaultsExpanded(block.ToolName) && block.ToolName != tools.NameApplyPatch {
 			block.Collapsed = true
 		}
 		if updated {

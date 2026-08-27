@@ -2985,6 +2985,18 @@ func TestToolCharCountProgressUsesExactDigits(t *testing.T) {
 	}
 }
 
+func TestApplyPatchToolHasNoInferredArgCharCount(t *testing.T) {
+	for _, name := range []string{tools.NameApplyPatch, "patch"} {
+		if progress := inferToolArgProgress(name, `{"patch":"*** Begin Patch"}`); progress != nil {
+			t.Fatalf("inferToolArgProgress(%q) = %+v, want nil (patch text preview replaces char count)", name, progress)
+		}
+	}
+	// Other tools keep the generic char count.
+	if progress := inferToolArgProgress("shell", `{"command":"echo hi"}`); progress == nil {
+		t.Fatal("expected generic char count for shell")
+	}
+}
+
 func TestToolArgStreamingDoneClearsReceivedCharCountImmediately(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	argsJSON := `{"command":"echo hello world"}`

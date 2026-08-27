@@ -387,6 +387,30 @@ func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
 	}
 }
 
+// TestEditPatchPreviewLinesFullContent guards the "never line-clip patch
+// previews" decision: apply_patch and edit previews must show all lines, not a
+// 20-line window with a truncation marker.
+func TestEditPatchPreviewLinesFullContent(t *testing.T) {
+	longPatch := make([]string, 0, 60)
+	for i := range 60 {
+		longPatch = append(longPatch, fmt.Sprintf(" line %d", i))
+	}
+	lines := editPatchPreviewLines(strings.Join(longPatch, "\n"))
+	if len(lines) != 60 {
+		t.Fatalf("editPatchPreviewLines returned %d lines, want all 60", len(lines))
+	}
+	for _, truncated := range []string{"... (patch truncated)", "... (text truncated)"} {
+		if strings.Contains(strings.Join(lines, "\n"), truncated) {
+			t.Fatalf("preview unexpectedly truncated with %q", truncated)
+		}
+	}
+
+	replaceLines := replaceEditPreviewLines(strings.Join(longPatch, "\n"))
+	if len(replaceLines) != 60 {
+		t.Fatalf("replaceEditPreviewLines returned %d lines, want all 60", len(replaceLines))
+	}
+}
+
 func TestApplyPatchPreviewTruncatesLongLinesWithoutWrapping(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	longLine := `const message = "` + strings.Repeat("x", 100) + `tail"`
@@ -1374,4 +1398,111 @@ func TestDiffTruncationSentinelIsNotRenderedAsSource(t *testing.T) {
 	if !strings.Contains(plain, "6  context after") {
 		t.Fatalf("expected context after the marker to keep gutter 6, got:\n%s", plain)
 	}
+}
+
+func TestApplyPatchStreamingPreviewExtractsTextFromPartialArgs(t *testing.T) {
+	complete := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`
+	if got := applyPatchStreamingPreview(complete); got != "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch" {
+		t.Fatalf("applyPatchStreamingPreview(complete) = %q", got)
+	}
+	// Mid-stream fragment without the closing quote/brace returns the text so far.
+	fragment := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old`
+	if got := applyPatchStreamingPreview(fragment); got != "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old" {
+		t.Fatalf("applyPatchStreamingPreview(fragment) = %q", got)
+	}
+	// Freeform custom-tool shape: bare patch text (no JSON envelope) is shown
+	// as-is, including mid-stream fragments.
+	bare := "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old"
+	if got := applyPatchStreamingPreview(bare); got != bare {
+		t.Fatalf("applyPatchStreamingPreview(bare freeform) = %q", got)
+	}
+	if got := applyPatchStreamingPreview("*** Begin Patch\n*** End Patch"); got != "*** Begin Patch\n*** End Patch" {
+		t.Fatalf("applyPatchStreamingPreview(bare complete) = %q", got)
+	}
+	// A payload that is neither JSON-apply_patch nor bare patch text (e.g. a
+	// gateway-lowered {"input":...} object) stays hidden.
+	if got := applyPatchStreamingPreview(`{"input":"*** Begin Patch\n*** End Patch"}`); got != "" {
+		t.Fatalf("applyPatchStreamingPreview(gateway-lowered) = %q, want empty", got)
+	}
+	// A trailing lone backslash is an incomplete escape and is dropped.
+	if got := applyPatchStreamingPreview(`{"patch":"*** Begin Patch\`); got != "*** Begin Patch" {
+		t.Fatalf("applyPatchStreamingPreview(trailing escape) = %q", got)
+	}
+	// Escaped quotes and backslashes decode to their literals; the escaped
+	// quote must not be mistaken for the closing quote.
+	if got := applyPatchStreamingPreview(`{"patch":"say \"hi\" \\o"`); got != `say "hi" \o` {
+		t.Fatalf("applyPatchStreamingPreview(escapes) = %q", got)
+	}
+	// \uXXXX escapes decode to the rune.
+	if got := applyPatchStreamingPreview(`{"patch":"\u65e7\u6587\u672c"`); got != "旧文本" {
+		t.Fatalf("applyPatchStreamingPreview(unicode escape) = %q", got)
+	}
+	// Leading whitespace and a space after the colon are tolerated.
+	if got := applyPatchStreamingPreview("  {\"patch\": \"*** Begin Patch\""); got != "*** Begin Patch" {
+		t.Fatalf("applyPatchStreamingPreview(loose spacing) = %q", got)
+	}
+	// Control characters that survive the raw decode are sanitized for display.
+	if got := applyPatchStreamingPreview(`{"patch":"a\u0000b"`); got != "a\\x00b" {
+		t.Fatalf("applyPatchStreamingPreview(control char) = %q", got)
+	}
+}
+
+func TestApplyPatchStreamingPreviewRejectsNonPatchArgs(t *testing.T) {
+	for _, args := range []string{
+		``,
+		`{`,
+		`{"patc`,
+		`{"path":"src/demo.go"`,
+		`{"patch":`,
+		`{"patch":123}`,
+		`{"patch":""}`,
+		`{"patch":"   "}`,
+	} {
+		if got := applyPatchStreamingPreview(args); got != "" {
+			t.Fatalf("applyPatchStreamingPreview(%q) = %q, want empty", args, got)
+		}
+	}
+}
+
+func TestStreamingApplyPatchDisplayArgsPreferPatchTextOverRawJSON(t *testing.T) {
+	fragment := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go`
+	want := "*** Begin Patch\n*** Update File: src/demo.go"
+	if got := streamingToolDisplayArgs(tools.NameApplyPatch, fragment, ""); got != want {
+		t.Fatalf("streamingToolDisplayArgs = %q, want patch text %q", got, want)
+	}
+	// The legacy "patch" alias is normalized the same way.
+	if got := streamingToolDisplayArgs("patch", fragment, ""); got != want {
+		t.Fatalf("streamingToolDisplayArgs(patch) = %q, want patch text %q", got, want)
+	}
+	// With no patch text the display stays empty instead of raw JSON.
+	if got := streamingToolDisplayArgs(tools.NameApplyPatch, `{"`, ""); got != "" {
+		t.Fatalf("streamingToolDisplayArgs(partial JSON) = %q, want empty", got)
+	}
+	// Complete args still use the stable targets display.
+	complete := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`
+	if got := streamingToolDisplayArgs(tools.NameApplyPatch, complete, ""); got != `{"paths":["src/demo.go"]}` {
+		t.Fatalf("streamingToolDisplayArgs(complete) = %q, want paths display", got)
+	}
+}
+
+func TestApplyPatchStreamingPreviewRendersHighlightedWithoutFullParse(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: tools.NameApplyPatch,
+		// Content holds the best-effort preview text (not JSON) while the
+		// args are still streaming.
+		Content: "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-func old() {}\n+func main() {}",
+		RawArgs: `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-func old() {}\n+func main() {}`,
+	}
+	lines := block.Render(100, "●")
+	plain := stripANSI(strings.Join(lines, "\n"))
+	for _, want := range []string{"*** Begin Patch", "*** Update File: src/demo.go", "-func old() {}", "+func main() {}"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected streaming preview to contain %q, got:\n%s", want, plain)
+		}
+	}
+	added := renderedLineContaining(t, lines, "func main")
+	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentTheme.DiffAddLineBg))
 }

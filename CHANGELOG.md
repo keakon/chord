@@ -62,6 +62,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - `apply_patch` now auto-wraps a bare patch body into the Codex `*** Begin Patch` envelope when the caller omitted it but otherwise sent a valid current-format payload, so providers and gateways that strip only the outer marker no longer fail a call the model already formatted correctly.
 - On models that support request-only dynamic tool mounts, enabling loop mode during an in-flight request may now late-mount `done` on the next loop request when the frozen top-level tool surface does not already contain it. Chord skips the late mount when `done` is already present, so the follow-up request keeps one `done` definition instead of duplicating it.
 - `read` and `read_artifact` now treat `offset` as a 1-based start line (1 = the first line) instead of a 0-based skip count; passing `0` or omitting it both mean the first line, so a call that passes `1` for the top of a file no longer silently skips the first line. The tool card header and the confirmation summary hide the default offset (0 or 1), out-of-range errors suggest 1-based offsets, and the read card gutter starts at the requested line when the result lacks a range header.
+- apply_patch tool cards now preview the patch while the model is still writing it: the card stays expanded during argument streaming and shows the growing patch text with `+`/`-`/`@@` syntax highlighting, replacing the opaque character count; once execution completes the card switches to the final diff view.
+- `edit` and `apply_patch` requested-patch previews now render the full patch instead of stopping at 20 lines, so the model and the user see the complete planned change while arguments are still streaming.
 
 ### Fixes
 
