@@ -485,8 +485,8 @@ func validCompactionSummaryForTest(history string) string {
 
 // summarizeCompactionHeadForTest invokes summarizeCompactionHead with the
 // continuation profile defaults previously baked into the deleted 2-arg wrapper.
-func summarizeCompactionHeadForTest(a *MainAgent, head []message.Message, relHistoryPath string) (summary string, modelRef string, err error) {
-	summary, _, modelRef, err = a.summarizeCompactionHead(context.Background(), head, relHistoryPath, nil, nil, a.GetTodos(), a.taskInfosForCompaction(), spawnStatesForSnapshot())
+func summarizeCompactionHeadForTest(a *MainAgent, head []message.Message, historyPath string) (summary string, modelRef string, err error) {
+	summary, _, modelRef, err = a.summarizeCompactionHead(context.Background(), head, historyPath, nil, nil, a.GetTodos(), a.taskInfosForCompaction(), spawnStatesForSnapshot())
 	return summary, modelRef, err
 }
 
@@ -3722,7 +3722,6 @@ func TestHandleCompactionReadyRechecksGateAfterQueuedInput(t *testing.T) {
 		NewMessages:    []message.Message{{Role: "user", Content: "[Context Summary]\nsummary"}},
 		Index:          1,
 		AbsHistoryPath: "/tmp/history-1.md",
-		RelHistoryPath: "history-1.md",
 		SummaryMode:    "truncate_only",
 		ModelRef:       "fallback",
 		Manual:         false,
@@ -3872,7 +3871,6 @@ func TestHandleCompactionReadyAsyncIdleAppliesImmediately(t *testing.T) {
 		HeadSplit:      2,
 		Index:          1,
 		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
-		RelHistoryPath: "history-1.md",
 		SummaryMode:    "truncate_only",
 		PlanID:         1,
 		Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
@@ -3913,7 +3911,6 @@ func TestApplyCompactionDraftInvalidatesLLMRouting(t *testing.T) {
 		HeadSplit:      2,
 		Index:          1,
 		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
-		RelHistoryPath: "history-1.md",
 		SummaryMode:    "truncate_only",
 		PlanID:         1,
 		Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
@@ -3976,7 +3973,6 @@ func TestApplyCompactionDraftOnlyRequestsPortableReplayForNativePayload(t *testi
 				HeadSplit:      2,
 				Index:          1,
 				AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
-				RelHistoryPath: "history-1.md",
 				SummaryMode:    "truncate_only",
 				PlanID:         1,
 				Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
@@ -4027,7 +4023,6 @@ func TestHandleCompactionReadyClearsLoopReductionStats(t *testing.T) {
 		HeadSplit:      2,
 		Index:          1,
 		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
-		RelHistoryPath: "history-1.md",
 		SummaryMode:    "truncate_only",
 		PlanID:         1,
 		Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
@@ -4062,7 +4057,6 @@ func TestApplyReadyDraftClearsRunningState(t *testing.T) {
 		HeadSplit:      2,
 		Index:          1,
 		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
-		RelHistoryPath: "history-1.md",
 		SummaryMode:    "truncate_only",
 		PlanID:         1,
 		Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
@@ -4147,7 +4141,6 @@ func TestAutoCompactionDrainsPendingUserMessages(t *testing.T) {
 		NewMessages:    []message.Message{{Role: "user", Content: "[Context Summary]\n## Goal\n- continue\n\n[Context compressed]", IsCompactionSummary: true}},
 		Index:          1,
 		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
-		RelHistoryPath: "history-1.md",
 		SummaryMode:    "truncate_only",
 		PlanID:         1,
 		Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
@@ -5096,7 +5089,6 @@ func TestHandleCompactionReadyIgnoresStaleSessionDraft(t *testing.T) {
 		NewMessages:    []message.Message{{Role: "user", Content: "[Context Summary]\nsummary"}},
 		Index:          1,
 		AbsHistoryPath: "/tmp/history-1.md",
-		RelHistoryPath: "history-1.md",
 		SummaryMode:    "truncate_only",
 		ModelRef:       "fallback",
 	}
@@ -5208,7 +5200,7 @@ func TestExportCompactionHistoryMetaPendingThenApplied(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	msgs := []message.Message{{Role: "user", Content: "hello"}}
 
-	absPath, relPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(msgs, 1)
+	absPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(msgs, 1)
 	if err != nil {
 		t.Fatalf("exportCompactionHistory: %v", err)
 	}
@@ -5238,7 +5230,6 @@ func TestExportCompactionHistoryMetaPendingThenApplied(t *testing.T) {
 		Index:              1,
 		AbsHistoryPath:     absPath,
 		AbsHistoryMetaPath: metaPath,
-		RelHistoryPath:     relPath,
 		SourceRefs:         sourceRefs,
 		SourceFingerprint:  sourceFingerprint,
 		SummaryMode:        "structured_fallback",
@@ -5832,7 +5823,6 @@ func TestApplyReadyDraftAutoContinueFailureEmitsSingleIdleEvent(t *testing.T) {
 		HeadSplit:      1,
 		Index:          1,
 		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
-		RelHistoryPath: "history-1.md",
 		SummaryMode:    "truncate_only",
 		PlanID:         1,
 		Target:         compactionTarget{sessionEpoch: a.sessionEpoch},

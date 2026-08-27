@@ -51,6 +51,73 @@ func expandHome(rel string) (string, error) {
 	return filepath.Join(home, rel), nil
 }
 
+// AbbreviateHome returns path with a leading home-directory prefix replaced
+// by "~" and "/" separators throughout (for example "/Users/me/a/b" becomes
+// "~/a/b", "C:\Users\me\a\b" becomes "~/a/b"). Paths not under the home
+// directory are returned with separators normalized but otherwise unchanged.
+// The result is the portable spelling also understood by ExpandTilde, so
+// paths embedded in prompts or pipes round-trip through tools that expand
+// "~" back to the home directory.
+func AbbreviateHome(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.ToSlash(AbbreviateHomeIn(path, home))
+}
+
+// AbbreviateHomeIn abbreviates path when it lies under home, keeping the
+// platform separator: "~" plus the remaining path. Matching follows the
+// platform spelling rules: when home is a Windows volume path (for example
+// "C:\Users\me") the prefix comparison is case-insensitive and accepts either
+// separator, so "C:/Users/me/x" and "c:\users\me\y" both abbreviate.
+func AbbreviateHomeIn(path, home string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	home = strings.TrimSpace(home)
+	if home == "" {
+		return path
+	}
+	if isWindowsVolumePath(home) {
+		return abbreviateHomeInWindows(path, home)
+	}
+	if path == home {
+		return "~"
+	}
+	if strings.HasPrefix(path, home+string(os.PathSeparator)) {
+		return "~" + strings.TrimPrefix(path, home)
+	}
+	return path
+}
+
+// isWindowsVolumePath reports whether p uses Windows volume syntax such as
+// "C:\..." or "C:/...".
+func isWindowsVolumePath(p string) bool {
+	return len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/')
+}
+
+func abbreviateHomeInWindows(path, home string) string {
+	home = strings.TrimRight(home, `/\`)
+	homeNorm := strings.ReplaceAll(home, "/", `\`)
+	if len(path) < len(homeNorm) {
+		return path
+	}
+	prefixNorm := strings.ReplaceAll(path[:len(homeNorm)], "/", `\`)
+	if !strings.EqualFold(prefixNorm, homeNorm) {
+		return path
+	}
+	rest := path[len(homeNorm):]
+	if rest == "" {
+		return "~"
+	}
+	if rest[0] == '\\' || rest[0] == '/' {
+		return "~" + rest
+	}
+	return path
+}
+
 // ResolveInDir cleans path and, when baseDir is non-empty and path is
 // relative, resolves it against baseDir. Absolute paths are returned as-is;
 // an empty baseDir keeps relative paths relative. The result is lexically

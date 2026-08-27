@@ -84,7 +84,6 @@ type compactionDraft struct {
 	Index              int
 	AbsHistoryPath     string
 	AbsHistoryMetaPath string
-	RelHistoryPath     string
 	SourceRefs         []checkpointSourceRef
 	SourceFingerprint  string
 	SummaryMode        string

@@ -155,12 +155,12 @@ func trimMessagesToBudgetWithReservedTail(messages []message.Message, targetToke
 	return trimMessagesToBudget(messages, targetTokens)
 }
 
-func compactionPromptTokenEstimate(input *compactionInput, relHistoryPath string, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) int {
-	prompt := buildCompactionPromptWithKeyFiles(input, relHistoryPath, keyFiles, todos, subAgents, backgroundObjects)
+func compactionPromptTokenEstimate(input *compactionInput, historyPath string, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) int {
+	prompt := buildCompactionPromptWithKeyFiles(input, historyPath, keyFiles, todos, subAgents, backgroundObjects)
 	return max(1, len(prompt)/3)
 }
 
-func fitCompactionInputToContextLimit(head []message.Message, input *compactionInput, contextLimit int, relHistoryPath string, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState, maxOutputTokens int) (*compactionInput, error) {
+func fitCompactionInputToContextLimit(head []message.Message, input *compactionInput, contextLimit int, historyPath string, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState, maxOutputTokens int) (*compactionInput, error) {
 	if input == nil {
 		return nil, fmt.Errorf("compaction input is nil")
 	}
@@ -172,7 +172,7 @@ func fitCompactionInputToContextLimit(head []message.Message, input *compactionI
 	if allowedInput <= 0 {
 		return nil, fmt.Errorf("compaction context limit too small after reserving output (%d)", contextLimit)
 	}
-	if compactionPromptTokenEstimate(input, relHistoryPath, keyFiles, todos, subAgents, backgroundObjects) <= allowedInput {
+	if compactionPromptTokenEstimate(input, historyPath, keyFiles, todos, subAgents, backgroundObjects) <= allowedInput {
 		return input, nil
 	}
 	pruned := (&MainAgent{}).prepareMessagesForLLM(head)
@@ -190,7 +190,7 @@ func fitCompactionInputToContextLimit(head []message.Message, input *compactionI
 		candidate := *input
 		candidate.Transcript = session.ExportToMarkdown(exported)
 		candidate.OmittedMessages = omittedMessages
-		if compactionPromptTokenEstimate(&candidate, relHistoryPath, keyFiles, todos, subAgents, backgroundObjects) <= allowedInput {
+		if compactionPromptTokenEstimate(&candidate, historyPath, keyFiles, todos, subAgents, backgroundObjects) <= allowedInput {
 			return &candidate, nil
 		}
 		budget -= max(512, budget/8)
@@ -600,7 +600,7 @@ func renderFallbackSummarySections(sections []fallbackSummarySection, background
 	return strings.TrimSpace(sb.String())
 }
 
-func buildStructuredFallbackSummary(relHistoryPath string, input *compactionInput, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
+func buildStructuredFallbackSummary(historyPath string, input *compactionInput, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
 	anchor := fallbackContinuationAnchorForInput(input)
 	return renderFallbackSummarySections([]fallbackSummarySection{
 		{"## Current User Request", fallbackCurrentUserRequestSection(input)},
@@ -609,7 +609,7 @@ func buildStructuredFallbackSummary(relHistoryPath string, input *compactionInpu
 		{"## User Constraints", renderEvidenceKindForFallback(input, evidenceUserCorrection, "- No preserved user constraints.")},
 		{"## Progress", fallbackProgressSection(input)},
 		{"## Key Decisions", "- Earlier durable decisions should be read from the archived history file if needed.\n- Preserve the recent continuation direction and evidence below."},
-		{"## Files and Evidence", fallbackFilesAndEvidenceSection(relHistoryPath, input, keyFiles)},
+		{"## Files and Evidence", fallbackFilesAndEvidenceSection(historyPath, input, keyFiles)},
 		{"## Todo State", formatTodosAsRelevanceBullets(todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
 		{"## Open Problems", fallbackOpenProblemsSection(input, summarizeErr)},
@@ -724,9 +724,9 @@ func fallbackProgressSection(input *compactionInput) string {
 	return strings.Join(lines, "\n")
 }
 
-func fallbackFilesAndEvidenceSection(relHistoryPath string, input *compactionInput, keyFiles []string) string {
+func fallbackFilesAndEvidenceSection(historyPath string, input *compactionInput, keyFiles []string) string {
 	lines := []string{
-		"- Archived history for this compaction: " + relHistoryPath,
+		"- Archived history for this compaction: " + historyPath,
 		"- Checkpoint wrapper may list additional archived history files for the full session history chain.",
 	}
 	for _, path := range keyFiles {
@@ -899,12 +899,12 @@ func backgroundObjectPromptDescription(description, fallbackCommand string) stri
 	return fallbackCommand
 }
 
-func buildCompactionPromptWithKeyFiles(input *compactionInput, relHistoryPath string, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
+func buildCompactionPromptWithKeyFiles(input *compactionInput, historyPath string, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
 	var sb strings.Builder
 	sb.WriteString("Summarize the earlier conversation transcript below so the main coding agent can continue work.\n")
 	sb.WriteString("Treat this as a durable checkpoint for the next coding turn, not as a narrative recap. Focus on current objective, constraints, decisions, progress, blockers, and concrete next steps.\n")
 	sb.WriteString("A small raw evidence pack and recent raw tail may be kept after this summary, so focus on durable context from the archived head rather than duplicating those verbatim excerpts.\n\n")
-	fmt.Fprintf(&sb, "Full archived history file for this compaction: %s\n", relHistoryPath)
+	fmt.Fprintf(&sb, "Full archived history file for this compaction: %s\n", historyPath)
 	sb.WriteString("If this is not the first compaction, the checkpoint wrapper also lists all archived history files for the full session history chain.\n")
 	if input != nil && input.OmittedMessages > 0 {
 		fmt.Fprintf(&sb, "Compression note: the earliest %d archived message(s) were omitted from the summary input to fit the utility model budget. The archived history file is authoritative for those details.\n", input.OmittedMessages)
@@ -989,7 +989,7 @@ func blankToDefault(value, fallback string) string {
 	return value
 }
 
-func buildTruncateOnlySummary(relHistoryPath string, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
+func buildTruncateOnlySummary(historyPath string, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
 	return renderFallbackSummarySections([]fallbackSummarySection{
 		{"## Current User Request", "- Latest request was not relevance-filtered because model summarization was unavailable; read the preserved recent context and archived history before acting."},
 		{"## Active Objective", "- Continue from the latest preserved user request; do not assume older todos remain active without checking relevance."},
@@ -997,7 +997,7 @@ func buildTruncateOnlySummary(relHistoryPath string, summarizeErr error, keyFile
 		{"## User Constraints", "- Constraints may be incomplete because truncate-only fallback skipped model-generated summarization."},
 		{"## Progress", "- Earlier history was compacted in truncate-only mode.\n- Use the archived history and key files below as the durable checkpoint."},
 		{"## Key Decisions", "- Model-based context summarization was unavailable.\n- Continue from the archived history, key files, and preserved recent context instead of inventing missing decisions."},
-		{"## Files and Evidence", fallbackFilesAndEvidenceSection(relHistoryPath, nil, keyFiles)},
+		{"## Files and Evidence", fallbackFilesAndEvidenceSection(historyPath, nil, keyFiles)},
 		{"## Todo State", formatTodosAsRelevanceBullets(todos, fallbackAnchor{})},
 		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
 		{"## Open Problems", fallbackOpenProblemsSection(nil, summarizeErr)},

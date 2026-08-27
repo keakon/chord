@@ -20,7 +20,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func (a *MainAgent) exportCompactionHistory(messages []message.Message, index int) (absPath string, relPath string, sourceRefs []checkpointSourceRef, sourceFingerprint string, err error) {
+func (a *MainAgent) exportCompactionHistory(messages []message.Message, index int) (absPath string, sourceRefs []checkpointSourceRef, sourceFingerprint string, err error) {
 	absPath = filepath.Join(a.sessionDir, fmt.Sprintf("history-%d.md", index))
 	metadata := map[string]string{
 		session.MetadataKeyModel:       a.ModelName(),
@@ -30,15 +30,15 @@ func (a *MainAgent) exportCompactionHistory(messages []message.Message, index in
 	}
 	exported, err := session.Export(messages, nil, metadata)
 	if err != nil {
-		return "", "", nil, "", err
+		return "", nil, "", err
 	}
 	if err := privatefs.WriteFile(a.sessionDir, absPath, []byte(session.ExportToMarkdown(exported))); err != nil {
-		return "", "", nil, "", err
+		return "", nil, "", err
 	}
 	generation := fmt.Sprintf("compaction-%d", index)
 	sourceRefs, err = buildCheckpointSourceRefs(a.exportPersistentSessionID(), generation, filepath.Base(absPath), messages)
 	if err != nil {
-		return "", "", nil, "", err
+		return "", nil, "", err
 	}
 	sourceFingerprint = checkpointSourceFingerprint(sourceRefs)
 	if err := writeCompactionHistoryMeta(a.sessionDir, compactionHistoryMetaPath(absPath), compactionHistoryMeta{
@@ -50,13 +50,9 @@ func (a *MainAgent) exportCompactionHistory(messages []message.Message, index in
 		SourceRefs:        sourceRefs,
 		SourceFingerprint: sourceFingerprint,
 	}); err != nil {
-		return "", "", nil, "", err
+		return "", nil, "", err
 	}
-	relPath, err = filepath.Rel(a.projectRoot, absPath)
-	if err != nil {
-		relPath = absPath
-	}
-	return absPath, relPath, sourceRefs, sourceFingerprint, nil
+	return absPath, sourceRefs, sourceFingerprint, nil
 }
 
 func compactionHistoryMetaPath(absHistoryPath string) string {
@@ -166,14 +162,14 @@ func cleanupStalePendingCompactions(sessionDir string, maxAge time.Duration) {
 	}
 }
 
-func listHistoryReferences(projectRoot, sessionDir string) ([]string, error) {
+func listHistoryReferences(sessionDir string) ([]string, error) {
 	entries, err := os.ReadDir(sessionDir)
 	if err != nil {
 		return nil, err
 	}
 	type historyEntry struct {
 		n   int
-		rel string
+		abs string
 	}
 	var histories []historyEntry
 	for _, entry := range entries {
@@ -188,17 +184,12 @@ func listHistoryReferences(projectRoot, sessionDir string) ([]string, error) {
 		if err != nil {
 			continue
 		}
-		abs := filepath.Join(sessionDir, name)
-		rel, err := filepath.Rel(projectRoot, abs)
-		if err != nil {
-			rel = abs
-		}
-		histories = append(histories, historyEntry{n: n, rel: rel})
+		histories = append(histories, historyEntry{n: n, abs: filepath.Join(sessionDir, name)})
 	}
 	sort.Slice(histories, func(i, j int) bool { return histories[i].n < histories[j].n })
 	refs := make([]string, 0, len(histories))
 	for _, item := range histories {
-		refs = append(refs, item.rel)
+		refs = append(refs, item.abs)
 	}
 	return refs, nil
 }

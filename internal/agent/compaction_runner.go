@@ -18,6 +18,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
+	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -241,7 +242,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, fmt.Errorf("determine compaction index: %w", err)
 	}
 
-	absHistoryPath, relHistoryPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(head, index)
+	absHistoryPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(head, index)
 	if err != nil {
 		return nil, fmt.Errorf("export compacted history: %w", err)
 	}
@@ -256,7 +257,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	modelRef := ""
 	keepAlive := newCompactionKeepAlive(a)
 	defer keepAlive.Stop()
-	summaryText, backendUsed, usedModel, summarizeErr := a.summarizeCompactionHead(ctx, head, relHistoryPath, evidenceItems, recentTail, todos, subAgents, backgroundObjects)
+	summaryText, backendUsed, usedModel, summarizeErr := a.summarizeCompactionHead(ctx, head, pathutil.AbbreviateHome(absHistoryPath), evidenceItems, recentTail, todos, subAgents, backgroundObjects)
 	if strings.TrimSpace(backendUsed) != "" {
 		backendName = backendUsed
 	}
@@ -266,10 +267,10 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		input, inputErr := buildCompactionInputWithOptions(head, a.ctxMgr.GetMaxTokens(), evidenceItems, recentTail, false)
 		if inputErr == nil {
 			input.EvidenceItems = evidenceItems
-			summaryText = buildStructuredFallbackSummary(relHistoryPath, input, summarizeErr, keyFiles, todos, subAgents, backgroundObjects)
+			summaryText = buildStructuredFallbackSummary(pathutil.AbbreviateHome(absHistoryPath), input, summarizeErr, keyFiles, todos, subAgents, backgroundObjects)
 		} else {
 			summaryMode = "truncate_only"
-			summaryText = buildTruncateOnlySummary(relHistoryPath, summarizeErr, keyFiles, todos, subAgents, backgroundObjects)
+			summaryText = buildTruncateOnlySummary(pathutil.AbbreviateHome(absHistoryPath), summarizeErr, keyFiles, todos, subAgents, backgroundObjects)
 		}
 	} else {
 		modelRef = usedModel
@@ -279,9 +280,12 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, ctx.Err()
 	}
 
-	historyRefs, err := listHistoryReferences(a.projectRoot, a.sessionDir)
+	historyRefs, err := listHistoryReferences(a.sessionDir)
 	if err != nil {
 		return nil, fmt.Errorf("list history references: %w", err)
+	}
+	for i, ref := range historyRefs {
+		historyRefs[i] = pathutil.AbbreviateHome(ref)
 	}
 	summaryText = ensureCompactionSummaryKeyFiles(strings.TrimSpace(summaryText), keyFiles)
 	checkpointContent := buildCompactionCheckpointMessage(summaryText, historyRefs, summaryMode, evidenceItems)
@@ -305,7 +309,6 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		Index:              index,
 		AbsHistoryPath:     absHistoryPath,
 		AbsHistoryMetaPath: absHistoryMetaPath,
-		RelHistoryPath:     relHistoryPath,
 		SourceRefs:         sourceRefs,
 		SourceFingerprint:  sourceFingerprint,
 		SummaryMode:        summaryMode,
@@ -475,12 +478,12 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		"Context compacted %s: archived %d messages into %s, preserved %d evidence item(s) (%s via %s, profile=%s). Backup: %s",
 		modeLabel,
 		d.ArchivedCount,
-		d.RelHistoryPath,
+		pathutil.AbbreviateHome(d.AbsHistoryPath),
 		d.EvidenceCount,
 		d.SummaryMode,
 		blankToDefault(d.Backend, d.ModelRef),
 		blankToDefault(d.Profile, string(compactionProfileContinuation)),
-		backupPath,
+		pathutil.AbbreviateHome(backupPath),
 	)
 	if d.SummarizeErr != nil {
 		info += fmt.Sprintf(" Summary fallback reason: %v", d.SummarizeErr)
@@ -500,7 +503,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		"model":              d.ModelRef,
 		"archived_messages":  d.ArchivedCount,
 		"evidence_artifacts": d.EvidenceArtifacts,
-		"history_path":       d.RelHistoryPath,
+		"history_path":       d.AbsHistoryPath,
 		"backup_path":        backupPath,
 	}); err != nil {
 		log.Warnf("on_after_compress hook error error=%v", err)
@@ -508,7 +511,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	return nil
 }
 
-func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.Message, relHistoryPath string, evidenceItems []evidenceItem, recentTail []message.Message, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) (summary string, backendName string, modelRef string, err error) {
+func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.Message, historyPath string, evidenceItems []evidenceItem, recentTail []message.Message, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) (summary string, backendName string, modelRef string, err error) {
 	modelRef = a.compactionModelRef()
 	client, utilityContextLimit, err := a.newCompactionClient(modelRef)
 	if err != nil {
@@ -521,14 +524,14 @@ func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.
 	if err != nil {
 		return "", "", modelRef, err
 	}
-	input, err = fitCompactionInputToContextLimit(head, input, utilityContextLimit, relHistoryPath, keyFiles, todos, subAgents, backgroundObjects, compactReservedOutput)
+	input, err = fitCompactionInputToContextLimit(head, input, utilityContextLimit, historyPath, keyFiles, todos, subAgents, backgroundObjects, compactReservedOutput)
 	if err != nil {
 		return "", "", modelRef, err
 	}
 
 	prompt := buildCompactionPromptWithKeyFiles(
 		input,
-		relHistoryPath,
+		historyPath,
 		keyFiles,
 		todos,
 		subAgents,

@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/pathutil"
 )
 
 func TestCheckpointSourceRefsValidateGenerationScopedOrdinals(t *testing.T) {
@@ -42,10 +44,47 @@ func TestCheckpointSourceRefsValidateGenerationScopedOrdinals(t *testing.T) {
 	}
 }
 
+func TestCompactionHistoryReferencesAreAbsolute(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	absPath, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "request"}}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(a.sessionDir, "history-2.md"); absPath != want {
+		t.Fatalf("exportCompactionHistory path = %q, want %q", absPath, want)
+	}
+	if !filepath.IsAbs(absPath) {
+		t.Fatalf("exportCompactionHistory path is not absolute: %q", absPath)
+	}
+	if err := os.WriteFile(filepath.Join(a.sessionDir, "history-3.md"), []byte("Session Export\n"), 0o644); err != nil {
+		t.Fatalf("write history-3: %v", err)
+	}
+	refs, err := listHistoryReferences(a.sessionDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{absPath, filepath.Join(a.sessionDir, "history-3.md")}
+	if len(refs) != len(want) {
+		t.Fatalf("listHistoryReferences = %#v, want %#v", refs, want)
+	}
+	for i := range want {
+		if refs[i] != want[i] {
+			t.Fatalf("listHistoryReferences = %#v, want %#v", refs, want)
+		}
+		if !filepath.IsAbs(refs[i]) {
+			t.Fatalf("history reference is not absolute: %q", refs[i])
+		}
+		abbrev := pathutil.AbbreviateHome(refs[i])
+		if !strings.HasPrefix(abbrev, "~") && !filepath.IsAbs(abbrev) {
+			t.Fatalf("display form of history reference is neither home-abbreviated nor absolute: %q", abbrev)
+		}
+	}
+}
+
 func TestExportCompactionHistoryWritesSourceProvenance(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	messages := []message.Message{{Role: message.RoleUser, Content: "request"}}
-	_, _, refs, fingerprint, err := a.exportCompactionHistory(messages, 4)
+	_, refs, fingerprint, err := a.exportCompactionHistory(messages, 4)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -40,7 +40,7 @@ stdout 不是合法 JSON 时记录为解析失败；非零退出码记录为执�
 | `on_before_tool_result_append`    | sync        | 工具结果即将被追加到上下文（最后一个改/脱敏机会）                                     | `tool_name`、`output`、`error`                              |
 | `on_tool_batch_complete`          | automation  | 一轮中多个工具批量完成时（典型场景：编辑批量）                                        | `changed_files`、`tool_calls`                               |
 | `on_before_compress`              | observer    | 上下文压缩开始前                                                                      | `reason`、当前 `usage`                                      |
-| `on_after_compress`               | observer    | 上下文压缩完成后                                                                      | `reason`、压缩前后的 `usage`                                |
+| `on_after_compress`               | observer    | 上下文压缩完成后                                                      | `reason`、压缩前后的 `usage`、`history_path`、`backup_path` |
 | `on_idle`                         | observer    | Agent 切到 idle（一轮结束，等待用户输入）                                             | `agent_id`                                                  |
 | `on_wait_confirm`                 | observer    | 工具需要用户确认（permission 为 `ask`）                                               | `tool_name`、`args`                                         |
 | `on_wait_question`                | observer    | 模型反问，等待回答                                                                    | `question`                                                  |

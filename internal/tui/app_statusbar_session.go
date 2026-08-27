@@ -6,23 +6,12 @@ import (
 	"strings"
 
 	"github.com/mattn/go-runewidth"
+
+	"github.com/keakon/chord/internal/pathutil"
 )
 
 func displayWorkingDirForHome(path, home string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	home = strings.TrimSpace(home)
-	if home != "" {
-		if path == home {
-			return "~"
-		}
-		if strings.HasPrefix(path, home+string(os.PathSeparator)) {
-			return "~" + strings.TrimPrefix(path, home)
-		}
-	}
-	return path
+	return pathutil.AbbreviateHomeIn(path, home)
 }
 
 func displayWorkingDir(path string) string {
