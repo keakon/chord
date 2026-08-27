@@ -68,6 +68,24 @@ func compactSummaryFromResponsesOutput(output []message.ResponsesOutputItem) (st
 	return summary, nil
 }
 
+// compactParallelToolCalls mirrors the main Responses request's parallel
+// tool-call policy for compact traffic: an explicit tuning value wins; a
+// custom (freeform) tool forces serial (false) because custom tools do not
+// reliably support parallel execution across gateways; otherwise nil keeps the
+// existing omit-when-unset behavior (server default).
+func compactParallelToolCalls(tools []responsesTool, explicit *bool) *bool {
+	if len(tools) == 0 {
+		return nil
+	}
+	if explicit != nil {
+		return explicit
+	}
+	if responsesToolsHasCustom(tools) {
+		return new(false)
+	}
+	return nil
+}
+
 func (r *ResponsesProvider) Compact(
 	ctx context.Context,
 	apiKey string,
@@ -88,7 +106,7 @@ func (r *ResponsesProvider) Compact(
 	}
 	// Native remote compaction v2 rides the ordinary /responses streaming wire.
 	ot := tuning.OpenAI
-	apiInput := convertMessagesToResponses("", messages)
+	apiInput := convertMessagesToResponsesWithItemIDs("", messages, false, shouldEmitFreeformApplyPatch(r.provider, model))
 	if len(apiInput) == 0 {
 		return nil, fmt.Errorf("responses compact requires at least one input item")
 	}
@@ -96,15 +114,13 @@ func (r *ResponsesProvider) Compact(
 		Model:        model,
 		Instructions: nil,
 		Input:        apiInput,
-		Tools:        convertToolsToResponses(tools),
+		Tools:        convertToolsToResponsesForTarget(r.provider, model, tools),
 	})
 	reqBody.Include = nil
 	if strings.TrimSpace(systemPrompt) != "" {
 		reqBody.Instructions = &systemPrompt
 	}
-	if len(reqBody.Tools) > 0 && ot.ParallelToolCalls != nil {
-		reqBody.ParallelToolCalls = ot.ParallelToolCalls
-	}
+	reqBody.ParallelToolCalls = compactParallelToolCalls(reqBody.Tools, ot.ParallelToolCalls)
 	if ot.ServiceTier != "" {
 		reqBody.ServiceTier = ot.ServiceTier
 	}
@@ -223,7 +239,7 @@ func (r *ResponsesProvider) Compact(
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, r.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
 	collector := NewSSECollector()
-	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, cb, collector, turnState, turnStateIdentity)
+	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, cb, collector, turnState, turnStateIdentity, shouldEmitFreeformApplyPatch(r.provider, model))
 	if dumpWriter != nil {
 		go func() {
 			dump := &LLMDump{

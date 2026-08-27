@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,78 @@ import (
 
 func newStreamToolReducerTestTurn() *Turn {
 	return &Turn{ID: 1, Epoch: 1, Ctx: context.Background()}
+}
+
+func TestStreamToolDeltaReducerFreeformInputTextAccumulatesCanonicalArgs(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	var events []AgentEvent
+	reducer := streamToolDeltaReducer{turn: turn, emit: func(evt AgentEvent) { events = append(events, evt) }}
+
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call-p", Name: tools.NameApplyPatch}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "call-p", Name: tools.NameApplyPatch, InputText: "*** Begin Patch\n"}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "call-p", Name: tools.NameApplyPatch, InputText: "*** Update File: src/demo.go\n"}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call-p"}})
+
+	// Streaming updates carry the growing raw text but not the canonical
+	// envelope: the envelope is a full copy of the patch, so rebuilding it per
+	// fragment is quadratic in the patch size, and nothing reads it before the
+	// arguments complete.
+	var texts []string
+	for _, evt := range events {
+		update, ok := evt.(ToolCallUpdateEvent)
+		if !ok || update.ArgsStreamingDone {
+			continue
+		}
+		texts = append(texts, update.InputText)
+		if strings.Contains(update.ArgsJSON, `"patch"`) {
+			t.Fatalf("streaming update ArgsJSON = %q, want no per-fragment envelope", update.ArgsJSON)
+		}
+	}
+	if len(texts) != 2 || texts[0] != "*** Begin Patch\n" || texts[1] != "*** Begin Patch\n*** Update File: src/demo.go\n" {
+		t.Fatalf("InputText accumulation = %#v, want incremental raw text", texts)
+	}
+	// The completion event is where the envelope has to be exact: speculative
+	// validation, tool execution and finalize all read it from there.
+	var doneArgs string
+	for _, evt := range events {
+		update, ok := evt.(ToolCallUpdateEvent)
+		if ok && update.ArgsStreamingDone {
+			doneArgs = update.ArgsJSON
+		}
+	}
+	if doneArgs != `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n"}` {
+		t.Fatalf("args-end ArgsJSON = %q, want canonical {patch} envelope", doneArgs)
+	}
+
+	call, ok := turn.getStreamingToolCall("call-p")
+	if !ok {
+		t.Fatal("streaming tool call not recorded")
+	}
+	if call.InputText != "*** Begin Patch\n*** Update File: src/demo.go\n" {
+		t.Fatalf("stored InputText = %q", call.InputText)
+	}
+	if call.ArgsJSON != `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n"}` {
+		t.Fatalf("stored ArgsJSON = %q, want canonical", call.ArgsJSON)
+	}
+}
+
+func TestStreamToolDeltaReducerFreeformInputTextSkipsJSONBranch(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	reducer := streamToolDeltaReducer{turn: turn, emit: func(AgentEvent) {}}
+
+	// A mixed provider sending both JSON fragments and freeform text for the
+	// same call must not corrupt the canonical args: InputText deltas re-derive
+	// the envelope from raw text, ignoring the JSON fragment channel.
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call-q", Name: tools.NameApplyPatch}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "call-q", Name: tools.NameApplyPatch, Input: `{"patch":"*** Begin`}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "call-q", Name: tools.NameApplyPatch, InputText: "*** Begin Patch\n"}})
+	call, _ := turn.getStreamingToolCall("call-q")
+	if call.ArgsJSON != `{"patch":"*** Begin Patch\n"}` {
+		t.Fatalf("mixed-channel ArgsJSON = %q, want text-derived canonical", call.ArgsJSON)
+	}
+	if call.InputText != "*** Begin Patch\n" {
+		t.Fatalf("mixed-channel InputText = %q", call.InputText)
+	}
 }
 
 func TestStreamToolDeltaReducerReconcilesToolUseAndStartsSpeculativeExecution(t *testing.T) {

@@ -75,13 +75,39 @@ func (r streamToolDeltaReducer) handleToolUseStart(delta message.StreamDelta) {
 }
 
 func (r streamToolDeltaReducer) handleToolUseDelta(delta message.StreamDelta) {
-	if delta.ToolCall == nil || r.turn == nil || delta.ToolCall.ID == "" || delta.ToolCall.Input == "" {
+	if delta.ToolCall == nil || r.turn == nil || delta.ToolCall.ID == "" {
 		return
 	}
 	if r.promoteStreamingActivity != nil {
 		r.promoteStreamingActivity("tool_use_delta")
 	}
 	name := tools.NormalizeName(delta.ToolCall.Name)
+	if delta.ToolCall.InputText != "" {
+		// Freeform input (Responses custom apply_patch deltas): accumulate the
+		// raw text and hand it to the TUI as the growing patch preview. The
+		// canonical {patch} args object is deliberately not carried here — it
+		// is a full copy of the patch, so emitting it per fragment is
+		// quadratic in the patch size — and nothing reads it before the
+		// arguments complete: the TUI renders InputText, and speculative
+		// validation and finalize both run off the stored call at args-end,
+		// where the envelope is materialized.
+		accumulated := r.turn.appendStreamingToolCallInputText(delta.ToolCall.ID, name, delta.ToolCall.InputText, r.agentID)
+		if accumulated == "" {
+			return
+		}
+		if r.emit != nil {
+			r.emit(ToolCallUpdateEvent{
+				ID:        delta.ToolCall.ID,
+				Name:      name,
+				InputText: accumulated,
+				AgentID:   r.agentID,
+			})
+		}
+		return
+	}
+	if delta.ToolCall.Input == "" {
+		return
+	}
 	accumulated := r.turn.appendStreamingToolCallInput(delta.ToolCall.ID, name, delta.ToolCall.Input, r.agentID)
 	if accumulated == "" {
 		return

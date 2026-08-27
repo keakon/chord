@@ -274,8 +274,8 @@ func TestCodexWSBaselineSignatureMatchesNextTurnConversion(t *testing.T) {
 	userTurn := []message.Message{{Role: message.RoleUser, Content: "hello"}}
 
 	for _, store := range []bool{false, true} {
-		fullInput := convertMessagesToResponsesWithItemIDs("", userTurn, store)
-		_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, responsesOutputToInputItems(output), store)
+		fullInput := convertMessagesToResponsesWithItemIDs("", userTurn, store, false)
+		_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, responsesOutputToInputItems(output, store), store)
 
 		resp := &message.Response{}
 		collectResponsesOutput(resp, output)
@@ -283,7 +283,7 @@ func TestCodexWSBaselineSignatureMatchesNextTurnConversion(t *testing.T) {
 			message.Message{Role: message.RoleAssistant, ResponsesOutput: resp.ResponsesOutput},
 			message.Message{Role: message.RoleUser, Content: "next"},
 		)
-		nextInput := convertMessagesToResponsesWithItemIDs("", next, store)
+		nextInput := convertMessagesToResponsesWithItemIDs("", next, store, false)
 		if len(nextInput) <= baselineLen {
 			t.Fatalf("store=%v next input must extend the baseline: len=%d baseline=%d", store, len(nextInput), baselineLen)
 		}
@@ -699,7 +699,7 @@ func TestCodexWSExecuteRequestLocked_StatusConnectingSkippedOnReusedConn(t *test
 		Input:  []responsesInputItem{{Type: "message", Role: "user", Content: "hi"}},
 	}
 	_, _, err = r.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", env, cb1, false, time.Now(), false, nil, "",
+		context.Background(), "test-key", "sample/test-model", env, cb1, false, time.Now(), false, nil, "", false,
 	)
 	if err != nil {
 		t.Fatalf("execute new conn: %v", err)
@@ -732,7 +732,7 @@ func TestCodexWSExecuteRequestLocked_StatusConnectingSkippedOnReusedConn(t *test
 		}
 	}
 	_, _, err = r2.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", env, cb2, false, time.Now(), true, nil, "",
+		context.Background(), "test-key", "sample/test-model", env, cb2, false, time.Now(), true, nil, "", false,
 	)
 	if err != nil {
 		t.Fatalf("execute reused conn: %v", err)
@@ -760,7 +760,7 @@ func TestCodexWSExecuteRequestLocked_StatusConnectingSkippedOnReusedConn(t *test
 	defer wsConn3.Close()
 	r3 := &ResponsesProvider{codexWSConn: wsConn3}
 	_, _, err = r3.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", env, nil, false, time.Now(), true, nil, "",
+		context.Background(), "test-key", "sample/test-model", env, nil, false, time.Now(), true, nil, "", false,
 	)
 	if err != nil {
 		t.Fatalf("execute reused conn nil cb: %v", err)
@@ -792,7 +792,7 @@ func TestCodexWSExecuteRequestLockedEmitsWaitingHeadersProgress(t *testing.T) {
 		}
 	}
 	_, _, err = r.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", env, cb, false, time.Now(), true, nil, "",
+		context.Background(), "test-key", "sample/test-model", env, cb, false, time.Now(), true, nil, "", false,
 	)
 	if err != nil {
 		t.Fatalf("execute reused conn: %v", err)
@@ -856,7 +856,7 @@ func TestCodexWSExecuteRequestLockedEmitsStreamingProgressAcrossWSFrames(t *test
 	}
 
 	_, _, err = r.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", env, cb, false, time.Now(), true, nil, "",
+		context.Background(), "test-key", "sample/test-model", env, cb, false, time.Now(), true, nil, "", false,
 	)
 	if err != nil {
 		t.Fatalf("execute reused conn: %v", err)
@@ -926,7 +926,7 @@ func TestCompleteStreamCodexWebSocket_ConnectingBeforeDial(t *testing.T) {
 		Input:  []responsesInputItem{{Type: "message", Role: "user", Content: "hi"}},
 	}
 	_, _, err = r.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", prewarmEnv, nil, false, time.Now(), false, nil, "",
+		context.Background(), "test-key", "sample/test-model", prewarmEnv, nil, false, time.Now(), false, nil, "", false,
 	)
 	if err != nil {
 		t.Fatalf("prewarm: %v", err)
@@ -949,7 +949,7 @@ func TestCompleteStreamCodexWebSocket_ConnectingBeforeDial(t *testing.T) {
 		Input:  []responsesInputItem{{Type: "message", Role: "user", Content: "hi"}},
 	}
 	_, _, err = r.codexWSExecuteRequestLocked(
-		context.Background(), "test-key", "sample/test-model", env, cb, false, time.Now(), true, nil, "",
+		context.Background(), "test-key", "sample/test-model", env, cb, false, time.Now(), true, nil, "", false,
 	)
 	if err != nil {
 		t.Fatalf("real request: %v", err)

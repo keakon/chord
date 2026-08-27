@@ -1184,6 +1184,8 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `parallel_tool_calls` | bool | `true` — provider 级 Responses / Chat Completions 工具并行默认值；模型和变体配置会覆盖它。 |
 | `compat.responses.*` | object | 协议默认值 — provider 级 Responses 可选字段开关：`send_store`、`send_reasoning_include`、`send_tool_choice`、`send_prompt_cache_key`、`send_max_output_tokens`、`mcp_additional_tools`。 |
 | `compat.responses.mcp_additional_tools` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `input[type="additional_tools"]` item，不改写顶层 `tools`。只为已确认接受该 item 的 Responses endpoint / 模型开启。Fallback 池里每个模型都必须开启；混合池退回顶层工具。 |
+| `compat.apply_patch.enabled` | bool | 三态 — 省略时按模型名推断。`true` 保留 `apply_patch`（同时隐藏 `edit`、`write`、`delete`）；`false` 退回 `edit`，`write`/`delete` 重新可见。gpt-5 及之后家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及未来的 `gpt-6` 等）和 `codex-auto-review` 默认 `true`；`gpt-oss-*`、gpt-3.5、gpt-4/4o、o 系列及非 OpenAI 模型默认 `false`。 |
+| `compat.apply_patch.freeform` | bool | 三态 — 省略时按模型名和 wire 类型推断。`true` 把 `apply_patch` 发射成 freeform custom tool（`type: "custom"` 携带 grammar）；`false` 发射成 JSON function tool。gpt-5 及之后家族名称和 `codex-auto-review` 在 Responses 端点上默认 `true`；非 Responses wire 一律默认 `false`（没有 custom tool 类型）。接受 Responses 但拒绝 custom tool 的主机没有内置例外：请在那里设置 `false`；只有确实支持 custom tool 的网关才设 `true`。 |
 | `compat.chat_completions.send_stream_options` | bool | `true` — 对拒绝 `stream_options` 的网关设为 `false`；此时流式 token usage 不再可用。 |
 | `compat.chat_completions.infer_finish_reason` | bool | `false` — 对结束流时不发 `finish_reason` 的兼容网关，自动推断为正常的 `stop` / `tool_calls` 完成；不开启时这类流会被当成中断处理。 |
 | `compat.chat_completions.requires_tool_result_name` | bool | `false` — 对要求 tool result 消息同时携带 `name` 和 `tool_call_id` 的网关，回填配对的工具名。 |
@@ -1212,6 +1214,8 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compat.request_overrides.headers` | map | 设置最终请求 header。值为 `null` 时删除该 header。 |
 | `compat.chat_completions.mcp_system_tools_message` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.responses.mcp_additional_tools` | bool | 模型级覆盖项；provider 默认值见上表。 |
+| `compat.apply_patch.enabled` | bool | 模型级覆盖项；provider 默认值见上表。 |
+| `compat.apply_patch.freeform` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `variants`        | map    | 命名参数预设。引用方式：`provider/model@variant`。                                                                |
 | `modalities.input`| array  | `text` / `image` / `pdf` 的子集。默认仅 `[text]`；支持时需显式声明 `image` / `pdf`。                              |
 | `supported_service_tiers` | 列表 | provider-level 默认值或 model-level 覆盖值，用于声明可接收的非 standard tier，例如 `[fast, slow]` 或 `[fast]`。省略时使用 preset 默认值。 |

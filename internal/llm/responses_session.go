@@ -122,6 +122,6 @@ func responsesMergeOutputItems(primary, fallback []responsesInputItem) []respons
 	return out
 }
 
-func responsesFinalizeIncrementalOutputItems(payloadItems []responsesInputItem, resp *message.Response) []responsesInputItem {
-	return responsesMergeOutputItems(payloadItems, responsesResponseToInputItems(resp))
+func responsesFinalizeIncrementalOutputItems(payloadItems []responsesInputItem, resp *message.Response, freeform bool) []responsesInputItem {
+	return responsesMergeOutputItems(payloadItems, responsesResponseToInputItems(resp, freeform))
 }

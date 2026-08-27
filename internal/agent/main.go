@@ -139,8 +139,21 @@ type PendingToolCall struct {
 	CallID   string
 	Name     string
 	ArgsJSON string
-	AgentID  string
-	Audit    *message.ToolArgsAudit
+	// InputText accumulates a freeform tool input verbatim (Responses custom
+	// apply_patch deltas). ArgsJSON holds the canonical {patch} object built
+	// from it; InputText is kept for raw-text TUI preview rendering.
+	InputText string
+	AgentID   string
+	Audit     *message.ToolArgsAudit
+
+	// inputArgsStale marks ArgsJSON as older than InputText: another freeform
+	// fragment arrived since the canonical {patch} envelope was last built.
+	// The envelope is only consumed once the arguments are complete
+	// (speculative validation, finalize, execution), so streaming marks it
+	// stale instead of re-serializing the whole patch on every fragment —
+	// that is O(patch²) over a streamed patch. Readers call
+	// materializeStreamingToolCallArgsLocked to rebuild it.
+	inputArgsStale bool
 }
 
 // toolCallStageTrace tracks per-call timing markers from streaming args-end to

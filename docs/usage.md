@@ -379,6 +379,12 @@ It uses:
 
 See [Headless](./headless.md) for details.
 
+## Model editing tools
+
+Chord picks the file-editing tool per active model: gpt-5-and-later family names (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, and future majors like gpt-6) and `codex-auto-review` use `apply_patch`, everything else defaults to `edit` — see [Edit tools](./edit-tools.md) for the full matrix and the rationale. On compatible Responses endpoints, patch-native models additionally receive `apply_patch` as a freeform custom tool instead of a JSON function tool.
+
+When a model name or gateway behaves differently from the inference, override it per provider or model with `compat.apply_patch.enabled` (tool surface) and `compat.apply_patch.freeform` (wire shape). Both keys are three-state: omitted means infer from the model name and endpoint, so you only set the knob you need to change. The authoritative field reference is in [Configuration & Auth](./configuration.md).
+
 ## Daily usage tips
 
 - Start with a minimal provider config to confirm requests work

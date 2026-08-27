@@ -936,14 +936,88 @@ func TestParseApplyPatchRejectsNonCodexEnvelope(t *testing.T) {
 	}
 }
 
-func TestNormalizeApplyPatchArgsRejectsLegacyPathWrapping(t *testing.T) {
-	raw := json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: file.txt\n@@\n-old\n+new\n*** End Patch"}`)
+func TestNormalizeApplyPatchArgsIgnoresLegacyPathField(t *testing.T) {
+	// The legacy single-file {path, patch} wrapper is tolerated by ignoring
+	// the `path` field: only `patch` participates, matching the generic
+	// sanitization applied to tool arguments before Execute. The patch must
+	// still satisfy the constraints (non-empty; the envelope is enforced by
+	// ParseApplyPatch at execution time).
+	raw := json.RawMessage(`{"path":"file.txt","patch":"*** Begin Patch\n*** Update File: file.txt\n@@\n-old\n+new\n*** End Patch"}`)
 	normalized, err := NormalizeApplyPatchArgs(raw)
 	if err != nil {
 		t.Fatalf("NormalizeApplyPatchArgs error = %v", err)
 	}
 	if string(normalized) != `{"patch":"*** Begin Patch\n*** Update File: file.txt\n@@\n-old\n+new\n*** End Patch"}` {
-		t.Fatalf("normalized = %s, want envelope canonical args", normalized)
+		t.Fatalf("normalized = %s, want patch-only canonical args with path ignored", normalized)
+	}
+}
+
+func TestNormalizeApplyPatchArgsLegacyPathWithoutPatchRejected(t *testing.T) {
+	// A {path, patch} wrapper with an empty or missing patch is rejected even
+	// though `path` is ignored: patch is the required field.
+	for _, raw := range []json.RawMessage{
+		json.RawMessage(`{"path":"file.txt"}`),
+		json.RawMessage(`{"path":"file.txt","patch":""}`),
+		json.RawMessage(`{"path":"file.txt","patch":"   "}`),
+	} {
+		if _, err := NormalizeApplyPatchArgs(raw); err == nil {
+			t.Fatalf("NormalizeApplyPatchArgs(%s) succeeded, want patch-required error", raw)
+		}
+	}
+}
+
+func TestNormalizeApplyPatchArgsBareFreeformText(t *testing.T) {
+	raw := json.RawMessage(`*** Begin Patch
+*** Update File: file.txt
+@@
+-old
++new
+*** End Patch`)
+	normalized, err := NormalizeApplyPatchArgs(raw)
+	if err != nil {
+		t.Fatalf("NormalizeApplyPatchArgs error = %v", err)
+	}
+	var args ApplyPatchArgs
+	if err := json.Unmarshal(normalized, &args); err != nil {
+		t.Fatalf("normalized = %s, want canonical object: %v", normalized, err)
+	}
+	if !strings.Contains(args.Patch, "*** Update File: file.txt") {
+		t.Fatalf("patch = %q, want the bare freeform text preserved", args.Patch)
+	}
+}
+
+func TestNormalizeApplyPatchArgsJSONStringWrapped(t *testing.T) {
+	raw := json.RawMessage(`"*** Begin Patch\n*** Delete File: gone.txt\n*** End Patch"`)
+	normalized, err := NormalizeApplyPatchArgs(raw)
+	if err != nil {
+		t.Fatalf("NormalizeApplyPatchArgs error = %v", err)
+	}
+	var args ApplyPatchArgs
+	if err := json.Unmarshal(normalized, &args); err != nil {
+		t.Fatalf("normalized = %s, want canonical object: %v", normalized, err)
+	}
+	if !strings.Contains(args.Patch, "*** Delete File: gone.txt") {
+		t.Fatalf("patch = %q, want the unwrapped text", args.Patch)
+	}
+}
+
+func TestNormalizeApplyPatchArgsGatewayLoweringDiagnostic(t *testing.T) {
+	// A gateway that received a custom tool but lowered it to a function call
+	// emits {"input": "..."} instead of {"patch": "..."}. The error must name
+	// the actionable compat knob.
+	raw := json.RawMessage(`{"input":"*** Begin Patch\n*** End Patch"}`)
+	_, err := NormalizeApplyPatchArgs(raw)
+	if err == nil {
+		t.Fatal("NormalizeApplyPatchArgs error = nil, want lowering diagnostic")
+	}
+	if !strings.Contains(err.Error(), "freeform: false") {
+		t.Fatalf("error = %q, want hint to set compat.apply_patch.freeform: false", err)
+	}
+}
+
+func TestNormalizeApplyPatchArgsEmptyObjectStillRequiresPatch(t *testing.T) {
+	if _, err := NormalizeApplyPatchArgs(json.RawMessage(`{}`)); err == nil {
+		t.Fatal("NormalizeApplyPatchArgs({}) error = nil, want patch is required")
 	}
 }
 

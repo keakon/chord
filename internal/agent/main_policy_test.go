@@ -802,7 +802,7 @@ func TestSwitchModelRefreshesMainEditApplyPatchToolDefinitions(t *testing.T) {
 	}{
 		{
 			name:            "gpt to claude",
-			initialModel:    "gpt-4",
+			initialModel:    "gpt-5.5",
 			initialWantTool: tools.NameApplyPatch,
 			targetRef:       "sample/claude-sonnet-4",
 			targetModel:     "claude-sonnet-4",
@@ -812,8 +812,8 @@ func TestSwitchModelRefreshesMainEditApplyPatchToolDefinitions(t *testing.T) {
 			name:            "claude to gpt",
 			initialModel:    "claude-sonnet-4",
 			initialWantTool: tools.NameEdit,
-			targetRef:       "sample/gpt-4",
-			targetModel:     "gpt-4",
+			targetRef:       "sample/gpt-5.5",
+			targetModel:     "gpt-5.5",
 			targetWantTool:  tools.NameApplyPatch,
 		},
 	}
@@ -834,6 +834,13 @@ func TestSwitchModelRefreshesMainEditApplyPatchToolDefinitions(t *testing.T) {
 			a.llmMu.Lock()
 			a.modelName = tt.initialModel
 			a.llmMu.Unlock()
+			// The tool surface is resolved from the client-bound primary model
+			// (compat + inference); mirror production by binding a client whose
+			// primary model matches the initial model.
+			a.llmClient = llm.NewClient(
+				llm.NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"test-key"}),
+				stubProvider{}, tt.initialModel, 2048, "",
+			)
 
 			if err := a.ensureSessionBuilt(context.Background()); err != nil {
 				t.Fatalf("initial ensureSessionBuilt: %v", err)
@@ -877,10 +884,16 @@ func TestLazyMainModelPolicyRefreshesEditApplyPatchToolsBeforeRequest(t *testing
 		{Permission: tools.NameEdit, Pattern: "*", Action: permission.ActionAllow},
 	}
 	a.llmMu.Lock()
-	a.modelName = "gpt-4"
-	a.providerModelRef = "sample/gpt-4"
-	a.runningModelRef = "sample/gpt-4"
+	a.modelName = "gpt-5.5"
+	a.providerModelRef = "sample/gpt-5.5"
+	a.runningModelRef = "sample/gpt-5.5"
 	a.llmMu.Unlock()
+	// The tool surface resolves from the client-bound primary model; bind a
+	// gpt-5.5 client so inference matches the modelName set above.
+	a.llmClient = llm.NewClient(
+		llm.NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"test-key"}),
+		stubProvider{}, "gpt-5.5", 2048, "",
+	)
 
 	if err := a.ensureSessionBuilt(context.Background()); err != nil {
 		t.Fatalf("initial ensureSessionBuilt: %v", err)

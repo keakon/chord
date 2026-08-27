@@ -43,6 +43,15 @@ type responseFunctionCallArgumentsDelta struct {
 	Delta       string `json:"delta"`
 }
 
+// responseCustomToolCallInputDelta is the payload of the
+// response.custom_tool_call_input.delta event. Custom tool input deltas carry
+// item_id instead of output_index, so the streaming accumulator must locate the
+// tool call by item id, unlike function_call arguments deltas.
+type responseCustomToolCallInputDelta struct {
+	ItemID string `json:"item_id"`
+	Delta  string `json:"delta"`
+}
+
 type responseOutputItemDone struct {
 	Type        string              `json:"type"`
 	Index       int                 `json:"index"`
@@ -58,6 +67,7 @@ type responsesStreamItem struct {
 	CallID           string          `json:"call_id,omitempty"`
 	Name             string          `json:"name,omitempty"`
 	Arguments        json.RawMessage `json:"arguments,omitempty"`
+	Input            string          `json:"input,omitempty"` // custom_tool_call freeform text
 	EncryptedContent string          `json:"encrypted_content,omitempty"`
 }
 
@@ -74,14 +84,16 @@ type responsesCompletedPayload struct {
 }
 
 type responsesOutputEntry struct {
-	Type      string                  `json:"type"`
-	ID        string                  `json:"id"`
-	CallID    string                  `json:"call_id"`
-	Role      string                  `json:"role"`
-	Name      string                  `json:"name"`
-	Arguments string                  `json:"arguments"`
-	Phase     string                  `json:"phase,omitempty"`
-	Content   []responsesContentBlock `json:"content,omitempty"`
+	Type      string `json:"type"`
+	ID        string `json:"id"`
+	CallID    string `json:"call_id"`
+	Role      string `json:"role"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+	// Input carries the freeform text of a custom_tool_call output item.
+	Input   string                  `json:"input,omitempty"`
+	Phase   string                  `json:"phase,omitempty"`
+	Content []responsesContentBlock `json:"content,omitempty"`
 	// Reasoning item fields (type == "reasoning").
 	EncryptedContent string                             `json:"encrypted_content,omitempty"`
 	Summary          []responsesReasoningSummaryPayload `json:"summary,omitempty"`
@@ -157,6 +169,7 @@ type responsesToolAccumulator struct {
 	itemID             string
 	streamID           string
 	name               string
+	custom             bool // freeform custom_tool_call: args accumulate raw text
 	args               strings.Builder
 	streamStartEmitted bool
 }
@@ -280,7 +293,7 @@ func (s responsesPartialCompletionState) outputItemsComplete() bool {
 // Supports both combined format (data line has {"type":"...","data":...}) and
 // standard SSE (event type on "event:" line, payload on "data:" line).
 func parseResponsesSSE(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, error) {
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, cb, collector, nil, "")
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, cb, collector, nil, "", false)
 	return resp, err
 }
 
@@ -288,29 +301,30 @@ func parseResponsesSSE(reader io.Reader, cb StreamCallback, collector *SSECollec
 // returns normalized output items from response.completed / response.incomplete.
 // These items are used by the WebSocket incremental baseline chain.
 func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, []responsesInputItem, error) {
-	return parseResponsesSSEWithOutputItemsAndTurnState(reader, cb, collector, nil, "")
+	return parseResponsesSSEWithOutputItemsAndTurnState(reader, cb, collector, nil, "", false)
 }
 
-func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCallback, collector *SSECollector, turnState *ResponsesTurnState, turnStateID string) (*message.Response, []responsesInputItem, error) {
+func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCallback, collector *SSECollector, turnState *ResponsesTurnState, turnStateID string, freeform bool) (*message.Response, []responsesInputItem, error) {
 	phaser, _ := reader.(chunkPhaser)
 	br := bufio.NewReaderSize(reader, sseInitialBufferSize)
 
 	var (
-		resp           message.Response
-		content        strings.Builder
-		toolCalls      = make(map[int]*responsesToolAccumulator) // index → accumulator
-		finalizedCalls = make(map[string]bool)                   // call_id → true; dedup against proxy replays
-		truncated      bool
-		gotData        bool
-		sawDataLine    bool
-		lastEventType  string // for standard SSE: event type from preceding "event:" line
-		outputItems    []responsesInputItem
-		partial        responsesPartialCompletionState
-		dataChunkIndex int
-		eventDataParts [][]byte
-		progressBytes  int64
-		progressEvents int64
-		providerErr    error
+		resp            message.Response
+		content         strings.Builder
+		toolCalls       = make(map[int]*responsesToolAccumulator) // index → accumulator
+		customItemToIdx = make(map[string]int)                    // custom tool item_id → index
+		finalizedCalls  = make(map[string]bool)                   // call_id → true; dedup against proxy replays
+		truncated       bool
+		gotData         bool
+		sawDataLine     bool
+		lastEventType   string // for standard SSE: event type from preceding "event:" line
+		outputItems     []responsesInputItem
+		partial         responsesPartialCompletionState
+		dataChunkIndex  int
+		eventDataParts  [][]byte
+		progressBytes   int64
+		progressEvents  int64
+		providerErr     error
 	)
 	partial.openOutputItems = make(map[int]struct{})
 	dataChunkIndex = -1
@@ -339,7 +353,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 			if resp.Content != "" {
 				partial.textDone = true
 			}
-			if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, false); ok {
+			if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, false, freeform); ok {
 				return partialResp, partialItems, true, nil
 			}
 			// Native remote compaction: the [DONE] frame after the streamed
@@ -348,7 +362,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 			if responsesOutputHasCompactionItem(resp.ResponsesOutput) {
 				return &resp, outputItems, true, nil
 			}
-			outputItems = responsesFinalizeIncrementalOutputItems(outputItems, &resp)
+			outputItems = responsesFinalizeIncrementalOutputItems(outputItems, &resp, freeform)
 			return &resp, outputItems, true, nil
 		}
 		if len(data) == 0 {
@@ -370,17 +384,19 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 		}
 
 		state := responsesEventState{
-			resp:           &resp,
-			content:        &content,
-			toolCalls:      toolCalls,
-			finalizedCalls: finalizedCalls,
-			truncated:      &truncated,
-			outputItems:    &outputItems,
-			partial:        &partial,
-			cb:             cb,
-			phaser:         phaser,
-			turnState:      turnState,
-			turnStateID:    turnStateID,
+			resp:              &resp,
+			content:           &content,
+			toolCalls:         toolCalls,
+			customItemToIndex: customItemToIdx,
+			finalizedCalls:    finalizedCalls,
+			truncated:         &truncated,
+			outputItems:       &outputItems,
+			partial:           &partial,
+			cb:                cb,
+			phaser:            phaser,
+			turnState:         turnState,
+			turnStateID:       turnStateID,
+			freeform:          freeform,
 		}
 		outResp, outItems, done, err := processResponsesEventPayload(state, eventType, eventData, flushContent)
 		if err != nil {
@@ -444,7 +460,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 				if err != nil {
 					flushContent()
 					if canRecoverPartialResponsesAfterReadError(err, &resp) {
-						if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, true); ok {
+						if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, true, freeform); ok {
 							return partialResp, partialItems, nil
 						}
 					}
@@ -459,7 +475,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 			}
 			flushContent()
 			if canRecoverPartialResponsesAfterReadError(readErr, &resp) {
-				if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, true); ok {
+				if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, true, freeform); ok {
 					return partialResp, partialItems, nil
 				}
 			}
@@ -474,7 +490,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 		return nil, nil, providerErr
 	}
 	flushContent()
-	if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, false); ok {
+	if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, false, freeform); ok {
 		return partialResp, partialItems, nil
 	}
 
@@ -501,14 +517,14 @@ func canRecoverPartialResponsesAfterReadError(err error, resp *message.Response)
 	return true
 }
 
-func finishPartialResponsesResponse(resp *message.Response, outputItems *[]responsesInputItem, partial responsesPartialCompletionState, requireCompleteOutput bool) (*message.Response, []responsesInputItem, bool) {
+func finishPartialResponsesResponse(resp *message.Response, outputItems *[]responsesInputItem, partial responsesPartialCompletionState, requireCompleteOutput bool, freeform bool) (*message.Response, []responsesInputItem, bool) {
 	if resp == nil {
 		return nil, nil, false
 	}
 	hasToolCalls := len(resp.ToolCalls) > 0
 	if requireCompleteOutput && !hasToolCalls && !partial.textDone {
 		if partialResp := markInterruptedTextResponse(resp); partialResp != nil {
-			items := responsesFinalizeIncrementalOutputItems(*outputItems, partialResp)
+			items := responsesFinalizeIncrementalOutputItems(*outputItems, partialResp, freeform)
 			*outputItems = items
 			return partialResp, items, true
 		}
@@ -526,7 +542,7 @@ func finishPartialResponsesResponse(resp *message.Response, outputItems *[]respo
 			resp.StopReason = "interrupted"
 		}
 	}
-	items := responsesFinalizeIncrementalOutputItems(*outputItems, resp)
+	items := responsesFinalizeIncrementalOutputItems(*outputItems, resp, freeform)
 	*outputItems = items
 	return resp, items, true
 }
@@ -552,17 +568,21 @@ func finishPartialResponsesResponseWouldSucceed(resp *message.Response, partial 
 }
 
 type responsesEventState struct {
-	resp           *message.Response
-	content        *strings.Builder
-	toolCalls      map[int]*responsesToolAccumulator
-	finalizedCalls map[string]bool
-	truncated      *bool
-	outputItems    *[]responsesInputItem
-	partial        *responsesPartialCompletionState
-	cb             StreamCallback
-	phaser         chunkPhaser
-	turnState      *ResponsesTurnState
-	turnStateID    string
+	resp              *message.Response
+	content           *strings.Builder
+	toolCalls         map[int]*responsesToolAccumulator
+	customItemToIndex map[string]int // custom tool item_id → output index
+	finalizedCalls    map[string]bool
+	truncated         *bool
+	outputItems       *[]responsesInputItem
+	partial           *responsesPartialCompletionState
+	cb                StreamCallback
+	phaser            chunkPhaser
+	turnState         *ResponsesTurnState
+	turnStateID       string
+	// freeform replays apply_patch output items in the custom_tool_call shape
+	// (raw patch text) so incremental baselines match the main history replay.
+	freeform bool
 }
 
 func processResponsesEventPayload(state responsesEventState, eventType string, eventData []byte, flushContent func()) (*message.Response, []responsesInputItem, bool, error) {
@@ -616,6 +636,40 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			}
 			acc.mergeMetadata(added.Item)
 			maybeEmitResponsesToolStart(acc, state.cb)
+		case "custom_tool_call":
+			if state.phaser != nil {
+				state.phaser.SetChunkTimeout(SlowPhaseChunkTimeout)
+			}
+			toolCallID := responsesToolCallID(added.Item)
+			if responsesToolCallAlreadyFinalized(state.finalizedCalls, added.Item) {
+				log.Debugf("responses: skip duplicate custom_tool_call (already finalized) tool=%v call_id=%v output_index=%v", added.Item.Name, toolCallID, addedIdx)
+				return nil, nil, false, nil
+			}
+			acc, exists := state.toolCalls[addedIdx]
+			if !exists {
+				// Deltas may have arrived before this added event, leaving a
+				// synthetic accumulator under a negative index (see the
+				// custom_tool_call_input.delta handler). Migrate it to the real
+				// output index so the accumulated text is preserved.
+				if state.customItemToIndex != nil {
+					if syntheticIdx, ok := state.customItemToIndex[added.Item.ID]; ok && syntheticIdx < 0 {
+						if synthetic, ok := state.toolCalls[syntheticIdx]; ok {
+							acc = synthetic
+							delete(state.toolCalls, syntheticIdx)
+						}
+					}
+				}
+				if acc == nil {
+					acc = &responsesToolAccumulator{}
+				}
+				state.toolCalls[addedIdx] = acc
+			}
+			acc.mergeMetadata(added.Item)
+			acc.custom = true
+			if added.Item.ID != "" && state.customItemToIndex != nil {
+				state.customItemToIndex[added.Item.ID] = addedIdx
+			}
+			maybeEmitResponsesToolStart(acc, state.cb)
 		case "reasoning":
 			if state.phaser != nil {
 				state.phaser.SetChunkTimeout(SlowPhaseChunkTimeout)
@@ -660,6 +714,44 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 				if argsStr != "{}" {
 					state.cb(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: responsesToolStreamID(acc), Name: acc.name, Input: argsStr}})
 				}
+			}
+		}
+		return nil, nil, false, nil
+
+	case "response.custom_tool_call_input.delta":
+		var delta responseCustomToolCallInputDelta
+		if err := responsesSSEUnmarshal(eventData, &delta); err != nil {
+			return nil, nil, false, fmt.Errorf("parse custom_tool_call_input.delta: %w", err)
+		}
+		if delta.Delta == "" {
+			return nil, nil, false, nil
+		}
+		// Custom deltas carry item_id (no output_index), so locate the
+		// accumulator by the mapping registered at output_item.added.
+		idx, ok := -1, false
+		if state.customItemToIndex != nil {
+			idx, ok = state.customItemToIndex[delta.ItemID]
+		}
+		if !ok {
+			// Delta arrived before the added event (defensive): allocate a
+			// synthetic negative index that cannot collide with real output
+			// indexes, create the accumulator so the text is not dropped, and
+			// register the mapping so later deltas and the done event find the
+			// same accumulator. The added event migrates it to the real index.
+			idx = -1 - len(state.toolCalls)
+			if state.customItemToIndex != nil && delta.ItemID != "" {
+				state.customItemToIndex[delta.ItemID] = idx
+			}
+			if _, exists := state.toolCalls[idx]; !exists {
+				state.toolCalls[idx] = &responsesToolAccumulator{}
+			}
+		}
+		if acc, exists := state.toolCalls[idx]; exists {
+			acc.args.WriteString(delta.Delta)
+			if state.cb != nil && acc.streamStartEmitted && acc.args.Len() > 0 {
+				// Keep the full input in the accumulator for finalization, but
+				// emit only this fragment because the agent accumulates callbacks.
+				state.cb(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: responsesToolStreamID(acc), Name: acc.name, InputText: delta.Delta}})
 			}
 		}
 		return nil, nil, false, nil
@@ -759,6 +851,32 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 				maybeEmitResponsesToolStart(acc, state.cb)
 			}
 			finalizeOneResponsesToolCall(state.toolCalls, doneIdx, state.resp, state.cb, *state.truncated, done.Item.Arguments, state.finalizedCalls)
+		case "custom_tool_call":
+			if state.phaser != nil {
+				state.phaser.SetChunkTimeout(DefaultChunkTimeout)
+			}
+			acc, exists := state.toolCalls[doneIdx]
+			if !exists && state.customItemToIndex != nil {
+				// Added event was missed: locate by item id.
+				if altIdx, ok := state.customItemToIndex[done.Item.ID]; ok {
+					doneIdx = altIdx
+					acc, exists = state.toolCalls[doneIdx]
+				}
+			}
+			if !exists {
+				// The added event was missed entirely (truncated stream): the
+				// done payload carries the complete input, so create the
+				// accumulator from it instead of dropping the call.
+				acc = &responsesToolAccumulator{}
+				state.toolCalls[doneIdx] = acc
+			}
+			acc.mergeMetadata(done.Item)
+			acc.custom = true
+			maybeEmitResponsesToolStart(acc, state.cb)
+			// done.Item.Input carries the complete freeform text; the
+			// accumulator wraps it into the canonical {patch} object at
+			// finalize (see canonicalApplyPatchArgs).
+			finalizeOneResponsesToolCall(state.toolCalls, doneIdx, state.resp, state.cb, *state.truncated, json.RawMessage(done.Item.Input), state.finalizedCalls)
 		case "message":
 			if state.partial != nil {
 				state.partial.textDone = true
@@ -822,13 +940,13 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		// applyResponsesCompletionPayload already stored the trailer's usage on
 		// state.resp.Usage when the completed payload carries it; the compact
 		// caller returns that usage alongside the collected summary.
-		*state.outputItems = responsesOutputToInputItems(respObj.Output)
+		*state.outputItems = responsesOutputToInputItems(respObj.Output, state.freeform)
 		finalizeResponsesToolCalls(state.toolCalls, state.resp, state.cb, *state.truncated, state.finalizedCalls)
 		if state.resp.StopReason == "tool_calls" && len(state.resp.ToolCalls) == 0 {
 			recoverResponsesToolCallsFromOutput(state.resp, respObj.Output, state.cb)
 		}
 		flushContent()
-		*state.outputItems = responsesFinalizeIncrementalOutputItems(*state.outputItems, state.resp)
+		*state.outputItems = responsesFinalizeIncrementalOutputItems(*state.outputItems, state.resp, state.freeform)
 		return state.resp, *state.outputItems, true, nil
 
 	case "response.incomplete":
@@ -838,14 +956,14 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		}
 		respObj := incomplete.Response
 		applyResponsesCompletionPayload(state.resp, respObj, state.truncated)
-		*state.outputItems = responsesOutputToInputItems(respObj.Output)
+		*state.outputItems = responsesOutputToInputItems(respObj.Output, state.freeform)
 		if respObj.IncompleteDetails != nil {
 			state.resp.StopReason = "length"
 			*state.truncated = true
 		}
 		finalizeResponsesToolCalls(state.toolCalls, state.resp, state.cb, *state.truncated, state.finalizedCalls)
 		flushContent()
-		*state.outputItems = responsesFinalizeIncrementalOutputItems(*state.outputItems, state.resp)
+		*state.outputItems = responsesFinalizeIncrementalOutputItems(*state.outputItems, state.resp, state.freeform)
 		return state.resp, *state.outputItems, true, nil
 	}
 	return nil, nil, false, nil

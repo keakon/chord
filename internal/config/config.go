@@ -590,6 +590,7 @@ type ModelCompatConfig struct {
 	RequestOverrides    *RequestOverridesConfig          `json:"request_overrides,omitempty" yaml:"request_overrides,omitempty"`
 	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitempty" yaml:"chat_completions,omitempty"`
 	Responses           *ResponsesCompatConfig           `json:"responses,omitempty" yaml:"responses,omitempty"`
+	ApplyPatch          *ApplyPatchCompatConfig          `json:"apply_patch,omitempty" yaml:"apply_patch,omitempty"`
 }
 
 // ProviderCompatConfig contains provider-level compatibility toggles. Model
@@ -603,6 +604,25 @@ type ProviderCompatConfig struct {
 	Usage               *UsageCompatConfig               `json:"usage,omitempty" yaml:"usage,omitempty"`
 	Responses           *ResponsesCompatConfig           `json:"responses,omitempty" yaml:"responses,omitempty"`
 	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitempty" yaml:"chat_completions,omitempty"`
+	ApplyPatch          *ApplyPatchCompatConfig          `json:"apply_patch,omitempty" yaml:"apply_patch,omitempty"`
+}
+
+// ApplyPatchCompatConfig controls the apply_patch tool surface and wire shape.
+// Both knobs are three-state: nil falls back to model-name inference (and, for
+// freeform, the wire type — only Responses endpoints have a custom tool type),
+// so an unconfigured model keeps the conservative inferred behavior and a user
+// only sets a knob to override the inference.
+type ApplyPatchCompatConfig struct {
+	// Enabled controls the tool surface: true keeps apply_patch (hiding edit
+	// and the write/delete tools), false falls back to edit. Nil infers from
+	// the model name.
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	// Freeform controls the Responses wire shape: true emits apply_patch as a
+	// custom tool with a grammar, false emits a JSON function tool. Nil infers
+	// from the model name and the wire type (non-Responses endpoints default to
+	// false); hosts that reject custom tools on the Responses wire — Azure
+	// OpenAI, GPT-OSS endpoints and friends — should set Freeform to false.
+	Freeform *bool `json:"freeform,omitempty" yaml:"freeform,omitempty"`
 }
 
 // ForcedToolChoiceCompatConfig controls whether request-level forced tool

@@ -101,7 +101,7 @@ func TestConvertMessagesReplaysResponsesOutputInProviderOrder(t *testing.T) {
 	if strings.Contains(string(raw3), "summary") {
 		t.Fatalf("function_call must not carry summary field: %s", raw3)
 	}
-	withIDs := convertMessagesToResponsesWithItemIDs("", msgs[1:2], true)
+	withIDs := convertMessagesToResponsesWithItemIDs("", msgs[1:2], true, false)
 	if len(withIDs) != 3 || withIDs[0].ID != "rs_1" || withIDs[1].ID != "fc_1" {
 		t.Fatalf("stored replay must preserve item ids: %+v", withIDs)
 	}
@@ -237,7 +237,7 @@ func TestResponsesOutputConversionPreservesIncrementalState(t *testing.T) {
 		{Type: "message", ID: "msg-1", Role: "assistant", Phase: "commentary", Content: []message.ResponsesOutputContent{{Type: "refusal", Refusal: "not allowed"}}},
 		{Type: "function_call", ID: "fc-1", CallID: "call-1", Name: "read", Arguments: `{}`},
 	}}
-	items := responsesResponseToInputItems(resp)
+	items := responsesResponseToInputItems(resp, false)
 	if len(items) != 3 || items[0].Type != "reasoning" || items[1].Phase != "commentary" || items[2].Type != "function_call" {
 		t.Fatalf("incremental output state was not preserved: %+v", items)
 	}
@@ -252,19 +252,19 @@ func TestResponsesOutputConversionPreservesIncrementalState(t *testing.T) {
 
 func TestConvertResponsesOutputItemDropsEmptyStatelessReasoning(t *testing.T) {
 	item := message.ResponsesOutputItem{Type: "reasoning", ID: "rs-1"}
-	if converted, ok := convertResponsesOutputItem(item, false); ok {
+	if converted, ok := convertResponsesOutputItem(item, false, false); ok {
 		t.Fatalf("empty stateless reasoning must be dropped: %+v", converted)
 	}
-	if converted, ok := convertResponsesOutputItem(item, true); !ok || converted.ID != "rs-1" {
+	if converted, ok := convertResponsesOutputItem(item, true, false); !ok || converted.ID != "rs-1" {
 		t.Fatalf("stored reasoning reference must be kept: %+v ok=%v", converted, ok)
 	}
 	item.EncryptedContent = "enc"
-	if converted, ok := convertResponsesOutputItem(item, false); !ok || converted.ID != "" || converted.EncryptedContent != "enc" {
+	if converted, ok := convertResponsesOutputItem(item, false, false); !ok || converted.ID != "" || converted.EncryptedContent != "enc" {
 		t.Fatalf("encrypted stateless reasoning must be kept without id: %+v ok=%v", converted, ok)
 	}
 	item.EncryptedContent = ""
 	item.Content = []message.ResponsesOutputContent{{Type: "reasoning_text", Text: "visible reasoning"}}
-	if converted, ok := convertResponsesOutputItem(item, false); !ok {
+	if converted, ok := convertResponsesOutputItem(item, false, false); !ok {
 		t.Fatalf("plaintext stateless reasoning must be kept: %+v ok=%v", converted, ok)
 	}
 }
@@ -330,6 +330,19 @@ func TestFillResponsesReasoningForReplay(t *testing.T) {
 			name: "consecutive function calls share one turn",
 			in:   []responsesInputItem{user, call, call},
 			want: []string{"message", "reasoning", "function_call", "function_call"},
+		},
+		{
+			// Freeform targets replay apply_patch as custom_tool_call; the
+			// turn-start detection must treat it like function_call so the
+			// backend's required empty reasoning_text is synthesized before
+			// the custom call too.
+			name: "custom tool call turn gets synthesized item",
+			in: []responsesInputItem{
+				user,
+				{Type: "custom_tool_call", Name: "apply_patch", CallID: "call_2", Input: "*** Begin Patch\n"},
+				{Type: "custom_tool_call_output", CallID: "call_2", Output: "ok"},
+			},
+			want: []string{"message", "reasoning", "custom_tool_call", "custom_tool_call_output"},
 		},
 		{
 			name: "empty input stays empty",

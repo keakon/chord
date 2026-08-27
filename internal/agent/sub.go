@@ -628,7 +628,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	s.cachedSessionReminderContent = buildSessionContextReminder(env, s.agentsMD)
 	s.frozenToolDefs = append(
 		[]message.ToolDefinition(nil),
-		llmToolDefinitionsFromVisibleTools(s.filteredVisibleToolsForModel(s.modelName))...,
+		llmToolDefinitionsFromVisibleTools(s.filteredVisibleToolsForModel(s.modelName, s.llmClient))...,
 	)
 
 	return s
@@ -672,7 +672,7 @@ func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimi
 	if s == nil || client == nil {
 		return
 	}
-	toolDefs := llmToolDefinitionsFromVisibleTools(s.filteredVisibleToolsForModel(modelName))
+	toolDefs := llmToolDefinitionsFromVisibleTools(s.filteredVisibleToolsForModel(modelName, client))
 	s.llmMu.Lock()
 	oldClient := s.llmClient
 	s.llmClient = client
@@ -1137,13 +1137,19 @@ func (s *SubAgent) visibleToolNames() map[string]struct{} {
 }
 
 func (s *SubAgent) filteredVisibleTools() []tools.Tool {
-	_, modelName := s.llmSnapshot()
-	return s.filteredVisibleToolsForModel(modelName)
+	client, modelName := s.llmSnapshot()
+	return s.filteredVisibleToolsForModel(modelName, client)
 }
 
-func (s *SubAgent) filteredVisibleToolsForModel(modelName string) []tools.Tool {
+func (s *SubAgent) filteredVisibleToolsForModel(modelName string, client *llm.Client) []tools.Tool {
 	visibleTools := visibleLLMTools(s.tools, s.ruleset, isSubAgentInternalTool)
-	return filterEditToolsByModel(visibleTools, modelName, s.ruleset)
+	var patchSurfaceDecision *bool
+	if client != nil {
+		// The client resolves compat + primary model inference (stable tool
+		// surface); name-based inference stays the fallback when unbound.
+		patchSurfaceDecision = new(client.UsesApplyPatchSurface())
+	}
+	return filterEditToolsByModel(visibleTools, modelName, s.ruleset, patchSurfaceDecision)
 }
 
 func (s *SubAgent) hasVisibleTool(name string) bool {

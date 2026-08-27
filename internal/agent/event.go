@@ -297,10 +297,14 @@ func (YoloModeChangedEvent) agentEvent() {}
 // When ArgsStreamingDone is true, ArgsJSON is the final accumulated argument JSON
 // for this speculative card and the temporary "chars received" indicator should
 // be cleared immediately even before execution-state/result events arrive.
+// InputText carries the accumulated raw text of a freeform tool input (Responses
+// custom apply_patch deltas); TUI previews render it verbatim instead of
+// re-deriving the text from ArgsJSON.
 type ToolCallUpdateEvent struct {
 	ID                string
 	Name              string
 	ArgsJSON          string
+	InputText         string
 	ArgsStreamingDone bool
 	AgentID           string // originating agent ("" = main agent)
 }

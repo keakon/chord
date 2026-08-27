@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -18,31 +20,62 @@ func TestFilterEditToolsByModel_GPTModels(t *testing.T) {
 		wantPatch bool
 		wantEdit  bool
 	}{
-		// GPT models should only see patch tool
-		{"gpt-4", true, false},
-		{"gpt-4-turbo", true, false},
-		{"gpt-4o", true, false},
-		{"gpt-3.5-turbo", true, false},
-		{"GPT-4", true, false}, // case insensitive
+		// gpt-3.5/gpt-4 families have no apply_patch training signal and should
+		// see the edit tool; write/delete stay visible for them.
+		{"gpt-4", false, true},
+		{"gpt-4-turbo", false, true},
+		{"gpt-4o", false, true},
+		{"gpt-3.5-turbo", false, true},
+		{"GPT-4", false, true}, // case insensitive
 
-		// o-series OpenAI reasoning models should use patch, including bare IDs.
-		{"o1-preview", true, false},
-		{"o1-mini", true, false},
-		{"o1", true, false},
-		{"o3-mini", true, false},
-		{"o3", true, false},
-		{"o4-mini", true, false},
-		{"o4", true, false},
-		{"o5", true, false},
-		{"o10", false, true},
-
-		// Codex-family names should also use patch.
+		// The whole gpt-5 family is patch-native: dotted subfamily names
+		// (gpt-5.1-mini, gpt-5.1-codex, ...), the bare base name, and undotted
+		// subfamily names (gpt-5-mini, gpt-5-nano, gpt-5-codex). Later majors
+		// (gpt-6, ...) inherit the same signal. Lookalike names (gpt-5x) stay
+		// on edit.
+		{"gpt-5.5", true, false},
 		{"gpt-5.3-codex", true, false},
+		{"gpt-5.11", true, false},
+		{"gpt-5.1-mini", true, false},
+		{"gpt-5.1-codex", true, false},
+		{"gpt-5", true, false},
+		{"gpt-5-mini", true, false},
+		{"gpt-5-nano", true, false},
+		{"gpt-5-codex", true, false},
+		{"gpt-6", true, false},
+		{"gpt-6.1", true, false},
+		{"gpt-50", true, false},
+		{"gpt-5x", false, true},
+
+		// o-series reasoning models default to edit: they have no apply_patch
+		// training signal (the tool was introduced with GPT-5 in August 2025).
+		// All o-series names share the same negative path, so two representative
+		// IDs suffice.
+		{"o1", false, true},
+		{"o4-mini", false, true},
+
+		// Patch-native names: the gpt-5-and-later family and the explicit
+		// codex-auto-review alias. A *-codex suffix alone (daybreak-codex,
+		// foo-codex-bar) carries no signal; gpt-daybreak-blue defaults to
+		// edit.
+		{"codex-auto-review", true, false},
 		{"codex/gpt-5.3-codex", true, false},
+		{"daybreak-codex", false, true},
+		{"foo-codex-bar", false, true},
+		{"gpt-daybreak-blue", false, true},
+
+		// The whitelist is by name pattern: gpt-5-and-later names match
+		// regardless of suffixes; the separate gpt-oss-* product naming never
+		// matches.
+		{"gpt-oss-120b", false, true},
+		{"gpt-oss-4", false, true},
+		{"gpt-5.1-oss", true, false},
+		{"gpt-5.5-oss-codex", true, false},
 
 		// Edge cases: similar-looking non-OpenAI names still use edit tool.
-		{"gpt", false, true},  // bare gpt doesn't match gpt-*
-		{"gptx", false, true}, // gptx doesn't match gpt-*
+		{"gpt", false, true},               // bare gpt doesn't match gpt-*
+		{"gptx", false, true},              // gptx doesn't match gpt-*
+		{"gpt-daybreak-blue", false, true}, // daybreak names need compat, no codex signal
 		{"octo-model", false, true},
 		{"oracle-1", false, true},
 
@@ -81,7 +114,7 @@ func TestFilterEditToolsByModel_GPTModels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.modelID, func(t *testing.T) {
-			filtered := filterEditToolsByModel(allTools, tt.modelID, ruleset)
+			filtered := filterEditToolsByModel(allTools, tt.modelID, ruleset, nil)
 
 			hasPatch := false
 			hasEdit := false
@@ -153,7 +186,7 @@ func TestFilterEditToolsByModel_OnlyOneEditToolExposed(t *testing.T) {
 	}
 
 	for _, model := range models {
-		filtered := filterEditToolsByModel(allTools, model, ruleset)
+		filtered := filterEditToolsByModel(allTools, model, ruleset, nil)
 		if len(filtered) != 1 {
 			t.Errorf("model %q: filtered count=%d, want exactly 1 edit tool", model, len(filtered))
 		}
@@ -172,7 +205,7 @@ func TestFilterEditToolsByModel_NoEditTools(t *testing.T) {
 		{Permission: "*", Pattern: "*", Action: permission.ActionAllow},
 	}
 
-	filtered := filterEditToolsByModel(allTools, "gpt-4", ruleset)
+	filtered := filterEditToolsByModel(allTools, "gpt-4", ruleset, nil)
 	if len(filtered) != len(allTools) {
 		t.Errorf("filtered count=%d, want %d (no edit tools to filter)", len(filtered), len(allTools))
 	}
@@ -189,14 +222,14 @@ func TestFilterEditToolsByModel_EditFamilyRuleOverridesWildcardDeny(t *testing.T
 		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
 	}
 
-	filtered := filterEditToolsByModel(allTools, "gpt-4", ruleset)
+	filtered := filterEditToolsByModel(allTools, "gpt-5.5", ruleset, nil)
 	hasPatch := false
 	for _, tool := range filtered {
 		if tool.Name() == tools.NameApplyPatch {
 			hasPatch = true
 		}
 		if tool.Name() == tools.NameEdit {
-			t.Fatalf("edit tool remained visible for GPT model")
+			t.Fatalf("edit tool remained visible for patch-native model")
 		}
 	}
 	if !hasPatch {
@@ -214,7 +247,7 @@ func TestFilterEditToolsByModel_OnlyApplyPatchTool(t *testing.T) {
 		{Permission: "patch", Pattern: "*", Action: permission.ActionAllow},
 	}
 
-	filtered := filterEditToolsByModel(allTools, "gpt-5.5", rulesetEditFamilyAllowed)
+	filtered := filterEditToolsByModel(allTools, "gpt-5.5", rulesetEditFamilyAllowed, nil)
 	hasPatch := false
 	for _, tool := range filtered {
 		if _, ok := tool.(tools.ApplyPatchTool); ok {
@@ -225,7 +258,7 @@ func TestFilterEditToolsByModel_OnlyApplyPatchTool(t *testing.T) {
 		t.Errorf("gpt-5.5 should keep ApplyPatchTool when it is the only registered edit-family tool")
 	}
 
-	filtered = filterEditToolsByModel(allTools, "claude-opus-4", rulesetEditFamilyAllowed)
+	filtered = filterEditToolsByModel(allTools, "claude-opus-4", rulesetEditFamilyAllowed, nil)
 	hasPatch = false
 	for _, tool := range filtered {
 		if _, ok := tool.(tools.ApplyPatchTool); ok {
@@ -247,7 +280,7 @@ func TestFilterEditToolsByModel_OnlyEditTool(t *testing.T) {
 		{Permission: "edit", Pattern: "*", Action: permission.ActionAllow},
 	}
 
-	filtered := filterEditToolsByModel(allTools, "gpt-5.5", rulesetEditFamilyAllowed)
+	filtered := filterEditToolsByModel(allTools, "gpt-5.5", rulesetEditFamilyAllowed, nil)
 	hasEdit := false
 	for _, tool := range filtered {
 		if _, ok := tool.(tools.EditTool); ok {
@@ -258,7 +291,7 @@ func TestFilterEditToolsByModel_OnlyEditTool(t *testing.T) {
 		t.Errorf("gpt-5.5 should keep EditTool when it is the only registered edit-family tool")
 	}
 
-	filtered = filterEditToolsByModel(allTools, "claude-opus-4", rulesetEditFamilyAllowed)
+	filtered = filterEditToolsByModel(allTools, "claude-opus-4", rulesetEditFamilyAllowed, nil)
 	hasEdit = false
 	for _, tool := range filtered {
 		if _, ok := tool.(tools.EditTool); ok {
@@ -282,7 +315,7 @@ func TestFilterEditToolsByModel_ScopedPatchRuleKeepsPatchVisible(t *testing.T) {
 		{Permission: "patch", Pattern: "src/**", Action: permission.ActionAllow},
 	}
 
-	filtered := filterEditToolsByModel(allTools, "gpt-5.5", ruleset)
+	filtered := filterEditToolsByModel(allTools, "gpt-5.5", ruleset, nil)
 	hasPatch := false
 	hasEdit := false
 	for _, tool := range filtered {
@@ -316,7 +349,7 @@ func TestFilterEditToolsByModel_ScopedEditRuleKeepsEditVisible(t *testing.T) {
 		{Permission: "edit", Pattern: "docs/**", Action: permission.ActionAsk},
 	}
 
-	filtered := filterEditToolsByModel(allTools, "claude-opus-4", ruleset)
+	filtered := filterEditToolsByModel(allTools, "claude-opus-4", ruleset, nil)
 	hasPatch := false
 	hasEdit := false
 	for _, tool := range filtered {
@@ -350,7 +383,7 @@ func TestFilterEditToolsByModel_PatchDenyHidesEditUnlessEditExplicitlyAllowed(t 
 		{Permission: "patch", Pattern: "*", Action: permission.ActionDeny},
 	}
 
-	filtered := filterEditToolsByModel(allTools, "gpt-5.5", ruleset)
+	filtered := filterEditToolsByModel(allTools, "gpt-5.5", ruleset, nil)
 	for _, tool := range filtered {
 		switch tool.Name() {
 		case tools.NameApplyPatch:
@@ -379,7 +412,7 @@ func TestFilterEditToolsByModel_EditDenyHidesPatchUnlessPatchExplicitlyAllowed(t
 		{Permission: "edit", Pattern: "*", Action: permission.ActionDeny},
 	}
 
-	filtered := filterEditToolsByModel(allTools, "claude-opus-4", ruleset)
+	filtered := filterEditToolsByModel(allTools, "claude-opus-4", ruleset, nil)
 	for _, tool := range filtered {
 		switch tool.Name() {
 		case tools.NameEdit:
@@ -408,7 +441,7 @@ func TestFilterEditToolsByModel_EditAllowPatchDenyFallsBackToEditForGPT(t *testi
 		{Permission: "patch", Pattern: "*", Action: permission.ActionDeny},
 	}
 
-	filtered := filterEditToolsByModel(allTools, "gpt-5.5", ruleset)
+	filtered := filterEditToolsByModel(allTools, "gpt-5.5", ruleset, nil)
 	hasEdit := false
 	for _, tool := range filtered {
 		switch tool.Name() {
@@ -435,7 +468,7 @@ func TestFilterEditToolsByModel_PatchAllowEditDenyFallsBackToPatchForClaude(t *t
 		{Permission: "edit", Pattern: "*", Action: permission.ActionDeny},
 	}
 
-	filtered := filterEditToolsByModel(allTools, "claude-opus-4", ruleset)
+	filtered := filterEditToolsByModel(allTools, "claude-opus-4", ruleset, nil)
 	hasPatch := false
 	for _, tool := range filtered {
 		switch tool.Name() {
@@ -463,7 +496,7 @@ func TestFilterEditToolsByModel_ExplicitPatchAllowBeatsEditDeny(t *testing.T) {
 		{Permission: "edit", Pattern: "*", Action: permission.ActionDeny},
 	}
 
-	filtered := filterEditToolsByModel(allTools, "claude-opus-4", ruleset)
+	filtered := filterEditToolsByModel(allTools, "claude-opus-4", ruleset, nil)
 	hasPatch := false
 	hasEdit := false
 	for _, tool := range filtered {
@@ -494,6 +527,57 @@ func TestFilterEditToolsByModel_ExplicitPatchAllowBeatsEditDeny(t *testing.T) {
 // consulted the global registry instead of the model-appropriate visible set.
 // The invisible sibling must be rejected with a hint pointing to the visible
 // counterpart. The visible tool must still execute normally.
+func TestFilterEditToolsByModel_CompatOverride(t *testing.T) {
+	allTools := []tools.Tool{tools.ApplyPatchTool{}, tools.EditTool{}, tools.WriteTool{}, tools.DeleteTool{}, tools.ReadTool{}}
+	ruleset := permission.Ruleset{} // all allowed
+	names := func(filtered []tools.Tool) map[string]bool {
+		m := make(map[string]bool, len(filtered))
+		for _, tool := range filtered {
+			m[tool.Name()] = true
+		}
+		return m
+	}
+
+	t.Run("enabled_true_forces_patch_for_non_patch_native", func(t *testing.T) {
+		// deepseek would normally get edit; enabled:true adopts the full
+		// patch-native semantics (patch kept, edit/write/delete hidden).
+		filtered := filterEditToolsByModel(allTools, "deepseek-v4-flash", ruleset, new(true))
+		got := names(filtered)
+		if !got[tools.NameApplyPatch] {
+			t.Error("apply_patch not visible with enabled:true override")
+		}
+		if got[tools.NameEdit] || got[tools.NameWrite] || got[tools.NameDelete] {
+			t.Errorf("edit/write/delete must be hidden with enabled:true, got %#v", got)
+		}
+	})
+
+	t.Run("enabled_false_forces_edit_for_patch_native", func(t *testing.T) {
+		filtered := filterEditToolsByModel(allTools, "gpt-5.5", ruleset, new(false))
+		got := names(filtered)
+		if !got[tools.NameEdit] {
+			t.Error("edit not visible with enabled:false override")
+		}
+		if got[tools.NameApplyPatch] {
+			t.Error("apply_patch must be hidden with enabled:false override")
+		}
+		// write/delete stay visible for the edit surface.
+		if !got[tools.NameWrite] || !got[tools.NameDelete] {
+			t.Errorf("write/delete must stay visible on the edit surface, got %#v", got)
+		}
+	})
+
+	t.Run("nil_keeps_name_inference", func(t *testing.T) {
+		got := names(filterEditToolsByModel(allTools, "gpt-5.5", ruleset, nil))
+		if !got[tools.NameApplyPatch] || got[tools.NameEdit] {
+			t.Errorf("nil override must use name inference (patch for gpt-5.5), got %#v", got)
+		}
+		got = names(filterEditToolsByModel(allTools, "claude-opus-4", ruleset, nil))
+		if !got[tools.NameEdit] || got[tools.NameApplyPatch] {
+			t.Errorf("nil override must use name inference (edit for claude), got %#v", got)
+		}
+	})
+}
+
 func TestExecuteToolCall_RejectsInvisibleEditFamilyTool(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
@@ -575,7 +659,7 @@ func TestFilterEditToolsByModel_FallbacksKeepWriteDelete(t *testing.T) {
 		{Permission: "patch", Pattern: "*", Action: permission.ActionAllow},
 		{Permission: "edit", Pattern: "*", Action: permission.ActionDeny},
 	}
-	hasWrite, hasDelete := countKinds(filterEditToolsByModel(allTools, "claude-opus-4", claudePatchFallback))
+	hasWrite, hasDelete := countKinds(filterEditToolsByModel(allTools, "claude-opus-4", claudePatchFallback, nil))
 	if !hasWrite || !hasDelete {
 		t.Fatalf("claude patch fallback: hasWrite=%v hasDelete=%v, want both kept", hasWrite, hasDelete)
 	}
@@ -586,7 +670,7 @@ func TestFilterEditToolsByModel_FallbacksKeepWriteDelete(t *testing.T) {
 		{Permission: "edit", Pattern: "*", Action: permission.ActionAllow},
 		{Permission: "patch", Pattern: "*", Action: permission.ActionDeny},
 	}
-	hasWrite, hasDelete = countKinds(filterEditToolsByModel(allTools, "gpt-5.5", gptEditFallback))
+	hasWrite, hasDelete = countKinds(filterEditToolsByModel(allTools, "gpt-5.5", gptEditFallback, nil))
 	if !hasWrite || !hasDelete {
 		t.Fatalf("gpt edit fallback: hasWrite=%v hasDelete=%v, want both kept", hasWrite, hasDelete)
 	}
@@ -595,7 +679,7 @@ func TestFilterEditToolsByModel_FallbacksKeepWriteDelete(t *testing.T) {
 	bothAllowed := permission.Ruleset{
 		{Permission: "*", Pattern: "*", Action: permission.ActionAllow},
 	}
-	hasWrite, hasDelete = countKinds(filterEditToolsByModel(allTools, "gpt-5.5", bothAllowed))
+	hasWrite, hasDelete = countKinds(filterEditToolsByModel(allTools, "gpt-5.5", bothAllowed, nil))
 	if hasWrite || hasDelete {
 		t.Fatalf("gpt patch-native: hasWrite=%v hasDelete=%v, want both hidden", hasWrite, hasDelete)
 	}
@@ -622,6 +706,12 @@ func TestExecuteToolCall_RejectsHiddenWriteDeleteWithPatchGuidance(t *testing.T)
 	a.llmMu.Lock()
 	a.modelName = "gpt-5.5"
 	a.llmMu.Unlock()
+	// The tool surface resolves from the client-bound primary model; bind a
+	// gpt-5.5 client so the patch-native surface hides write/delete.
+	a.llmClient = llm.NewClient(
+		llm.NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"test-key"}),
+		stubProvider{}, "gpt-5.5", 2048, "",
+	)
 
 	writeCall := message.ToolCall{
 		ID:   "write-1",

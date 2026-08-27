@@ -11,18 +11,51 @@ Chord 提供两种互补的文件编辑工具，针对不同模型的训练背�
 | **作用范围** | 单次调用多个文件：新增、更新、删除、移动 | 单次调用一个已有文件 |
 | **位置控制** | 上下文行 + 可选的头部锚点 | 精确字符串匹配 |
 | **多次出现** | 不适用（基于上下文） | `replace_all` 参数 |
-| **典型模型** | gpt-5.5, gpt-5.3-codex, o3, o4 | Claude, Qwen, GLM, MiniMax, DeepSeek, Gemini |
+| **典型模型** | gpt-5.5, gpt-5.3-codex, codex-auto-review | Claude, Qwen, GLM, MiniMax, DeepSeek, Gemini |
 
 ## 工具选择
 
 Chord **自动根据当前模型选择**合适的工具：
 
-- **GPT/o 系列模型** → `apply_patch`（Codex 信封）
-- **所有其他模型** → `edit`（old_string/new_string）
+- **gpt-5 及之后主版本家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及未来的 `gpt-6` 等）及 `codex-auto-review`** → `apply_patch`（Codex 信封）
+- **其他所有模型**（gpt-3.5、gpt-4/4o、`gpt-oss-*`、o 系列、Claude、Qwen、GLM、DeepSeek、Gemini 等）→ `edit`（old_string/new_string）
 
-你无需手动选择——系统只会向每个模型暴露合适的工具。
+gpt-4/4o、gpt-3.5 和 o 系列家族**不是**补丁原生：`apply_patch` 工具诞生时（2025 年 8 月，与 GPT-5 同期）它们早已训练完毕，实测对它们也是负收益或无训练信号。gpt-5 起的每个主版本家族默认使用补丁工具面，与 Codex 的模型目录一致；未来的 `gpt-6` 等主版本也会继承——`apply_patch` 是 OpenAI 第一方 Codex 训练数据，会跨代际保留在训练集里。若未来某个家族真的去掉了补丁信号，用 `compat.apply_patch.enabled: false` 单独关掉即可。
 
-当补丁原生（GPT/o 系列）模型保留 `apply_patch` 时，Chord 还会隐藏 `write` 和 `delete`：信封本身已覆盖它们（`*** Add File:` 创建、`*** Delete File:` 删除），与这些模型训练时熟悉的原生 Codex CLI 工具面一致。回退组合会保留 `write`/`delete`：非 GPT 模型仅因 `edit` 被禁用才拿到 `apply_patch` 时仍能看到它们；补丁原生模型被降级到 `edit` 时也需要 `write` 才能创建文件。
+当补丁原生模型保留 `apply_patch` 时，Chord 还会隐藏 `write` 和 `delete`：信封本身已覆盖它们（`*** Add File:` 创建、`*** Delete File:` 删除），与这些模型训练时熟悉的原生 Codex CLI 工具面一致。回退组合会保留 `write`/`delete`：非补丁原生模型仅因 `edit` 被禁用才拿到 `apply_patch` 时仍能看到它们；补丁原生模型被降级到 `edit` 时也需要 `write` 才能创建文件。
+
+### Freeform（custom tool）发射
+
+在 OpenAI 兼容的 **Responses** 端点上，gpt-5 及之后家族或 `codex-auto-review` 模型还会把 `apply_patch` 作为 **freeform custom tool**（`type: "custom"` 携带 Lark grammar）发射，而不是 JSON function tool。freeform 带语法约束解码——模型产不出语法非法的补丁——也省掉了 JSON 转义开销。其他模型一律收到 JSON function 形态；非 Responses 端点没有 custom tool 类型，一律使用 function 形态。
+
+接受 Responses 请求但拒绝 custom tool 的主机没有内置例外：那里的补丁原生模型默认会发射 freeform 形态，网关会报出带操作指引的错误。这类主机请设置 `compat.apply_patch.freeform: false` 强制使用 JSON function 形态。
+
+### 覆盖默认值
+
+上面所有默认值都可以在 `compat.apply_patch` 下按 provider 或按模型覆盖（三态：省略 = 保持推断）：
+
+```yaml
+providers:
+  my-relay:
+    type: responses
+    compat:
+      apply_patch:
+        enabled: true   # 工具面：保留 apply_patch（隐藏 edit + write/delete）
+        freeform: false # 发射形态：JSON function tool，不用 custom
+  openai:
+    type: responses
+    models:
+      gpt-5.5:
+        compat:
+          apply_patch:
+            freeform: false # 模型级覆盖：名字像但网关不支持
+```
+
+- `enabled: true` 对任意模型采用完整补丁原生语义（保留 patch、隐藏 `edit`/`write`/`delete`、prompt 改用 patch-only 指引）。
+- `enabled: false` 强制 edit 工具面，即使对补丁原生模型也生效。
+- `freeform: true` 强制 custom tool 形态；`freeform: false` 强制 JSON function 形态。
+
+如果网关把 custom tool 错误降级成 `{"input": "..."}`（而不是 `{"patch": "..."}`），Chord 会返回指向 `compat.apply_patch.freeform: false` 的可操作错误；设置后请求会以 function tool 发送。
 
 ---
 
@@ -222,7 +255,7 @@ permission:
 ```yaml
 permission:
   edit: allow
-  apply_patch: deny  # GPT/o 系列模型会退回使用 edit
+  apply_patch: deny  # 补丁原生模型（gpt-5 家族/codex-auto-review）会退回使用 edit
 ```
 
 **权限回退规则**：
@@ -235,8 +268,8 @@ permission:
 
 **示例**：
 
-- `edit: allow` → 两个工具都允许；GPT/o 系列模型通常看到 `apply_patch`，其他模型通常看到 `edit`
-- `edit: allow, apply_patch: deny` → apply_patch 拒绝，edit 允许；GPT/o 系列模型退回使用 `edit`
+- `edit: allow` → 两个工具都允许；补丁原生模型（gpt-5 家族/codex-auto-review）通常看到 `apply_patch`，其他模型通常看到 `edit`
+- `edit: allow, apply_patch: deny` → apply_patch 拒绝，edit 允许；补丁原生模型退回使用 `edit`
 - `apply_patch: allow, edit: deny` → apply_patch 允许，edit 拒绝；非 GPT 模型退回使用 `apply_patch`
 - `*: deny, apply_patch: allow` → 两个工具都允许（edit 继承 apply_patch 规则）
 - `*: allow, apply_patch: deny` → 两个工具都拒绝（edit 继承 apply_patch 拒绝）
@@ -295,7 +328,7 @@ permission:
 A：工具选择是自动的且特定于模型。覆盖它可能会降低成功率。
 
 **Q：如果我的模型未被识别怎么办？**
-A：默认情况下，未识别的模型使用 `edit`（替换）工具。GPT/o 系列模型使用 `apply_patch`。
+A：默认情况下，未识别的模型使用 `edit`（替换）工具。gpt-5 及之后家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及未来的 `gpt-6` 等）和 `codex-auto-review` 使用 `apply_patch`；任意模型都可以用 `compat.apply_patch.enabled` 覆盖。
 
 **Q：两个工具支持相同的文件类型吗？**
 A：是的。两者都适用于任何文本文件（检测到的编码：UTF-8、UTF-16、GB18030 等）。二进制文件会被拒绝。

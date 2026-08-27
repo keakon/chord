@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -151,6 +152,64 @@ func (t *Turn) appendStreamingToolCallInput(callID, name, fragment, agentID stri
 	return call.ArgsJSON
 }
 
+// canonicalApplyPatchArgsJSON builds the canonical {"patch": ...} args object
+// for raw freeform patch text, so a custom-tool call is indistinguishable from
+// a JSON function call to tool execution, hooks, permissions and audits.
+func canonicalApplyPatchArgsJSON(text string) string {
+	canonical, err := json.Marshal(map[string]string{"patch": text})
+	if err != nil {
+		return `{"patch":""}`
+	}
+	return string(canonical)
+}
+
+// materializeStreamingToolCallArgsLocked rebuilds the canonical {patch}
+// envelope from InputText when a freeform fragment has invalidated it. Callers
+// must hold streamingToolMu.
+//
+// This is the deferred half of appendStreamingToolCallInputText: rebuilding per
+// fragment costs O(len(patch)) each time, which is O(patch²) across a streamed
+// patch, and no consumer reads the envelope until the arguments are complete.
+func materializeStreamingToolCallArgsLocked(call *PendingToolCall) {
+	if !call.inputArgsStale {
+		return
+	}
+	call.ArgsJSON = canonicalApplyPatchArgsJSON(call.InputText)
+	call.inputArgsStale = false
+}
+
+// appendStreamingToolCallInputText appends one freeform text fragment
+// (ToolCallDelta.InputText, e.g. Responses custom apply_patch deltas) and
+// returns the accumulated raw text. The accumulated text is kept on the call so
+// TUI consumers can render the growing patch; the canonical {patch} args object
+// is rebuilt lazily (see materializeStreamingToolCallArgsLocked) because
+// re-serializing the whole patch on every fragment is quadratic in the patch
+// size. Every reader of the stored call observes a materialized, valid JSON
+// ArgsJSON, so speculative validation and finalize are unaffected.
+func (t *Turn) appendStreamingToolCallInputText(callID, name, fragment, agentID string) string {
+	if t == nil || callID == "" || fragment == "" {
+		return ""
+	}
+	t.streamingToolMu.Lock()
+	defer t.streamingToolMu.Unlock()
+	if t.streamingToolCalls == nil {
+		t.streamingToolCalls = make(map[string]PendingToolCall)
+	}
+	t.recordStreamingToolCallLocked(callID)
+	call := t.streamingToolCalls[callID]
+	call.CallID = callID
+	if call.Name == "" {
+		call.Name = name
+	}
+	if call.AgentID == "" {
+		call.AgentID = agentID
+	}
+	call.InputText += fragment
+	call.inputArgsStale = true
+	t.streamingToolCalls[callID] = call
+	return call.InputText
+}
+
 // drainStreamingToolCalls removes and returns all speculative streaming tool
 // metadata. Safe to call when the LLM round is finalized or abandoned.
 func (t *Turn) drainStreamingToolCalls() []PendingToolCall {
@@ -165,6 +224,7 @@ func (t *Turn) drainStreamingToolCalls() []PendingToolCall {
 	out := make([]PendingToolCall, 0, len(t.streamingToolCalls))
 	for _, callID := range t.streamingToolOrder {
 		if c, ok := t.streamingToolCalls[callID]; ok {
+			materializeStreamingToolCallArgsLocked(&c)
 			out = append(out, c)
 		}
 	}
@@ -207,6 +267,8 @@ func (t *Turn) getStreamingToolCall(callID string) (PendingToolCall, bool) {
 	if !ok {
 		return PendingToolCall{}, false
 	}
+	materializeStreamingToolCallArgsLocked(&call)
+	t.streamingToolCalls[callID] = call
 	return call, true
 }
 
@@ -222,6 +284,8 @@ func (t *Turn) snapshotStreamingToolCalls() []PendingToolCall {
 	out := make([]PendingToolCall, 0, len(t.streamingToolCalls))
 	for _, callID := range t.streamingToolOrder {
 		if c, ok := t.streamingToolCalls[callID]; ok {
+			materializeStreamingToolCallArgsLocked(&c)
+			t.streamingToolCalls[callID] = c
 			out = append(out, c)
 		}
 	}
@@ -243,6 +307,8 @@ func (t *Turn) streamingToolCallsBefore(callID string) []PendingToolCall {
 			break
 		}
 		if c, ok := t.streamingToolCalls[id]; ok {
+			materializeStreamingToolCallArgsLocked(&c)
+			t.streamingToolCalls[id] = c
 			out = append(out, c)
 		}
 	}

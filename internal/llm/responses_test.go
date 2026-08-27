@@ -27,6 +27,12 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// convertMessagesToResponses is the test-default constructor most conversion
+// assertions use: no item ids, function-shape replay.
+func convertMessagesToResponses(systemPrompt string, msgs []message.Message) []responsesInputItem {
+	return convertMessagesToResponsesWithItemIDs(systemPrompt, msgs, false, false)
+}
+
 func TestConvertMessagesToResponses(t *testing.T) {
 	tests := []struct {
 		name         string

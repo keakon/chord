@@ -1,11 +1,13 @@
 package llm
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/toolname"
 )
 
 // responsesReasoningContentBlock is a reasoning item content part carrying
@@ -46,16 +48,23 @@ func fillResponsesReasoningForReplay(items []responsesInputItem) []responsesInpu
 // synthesized reasoning item must be inserted: the start of every assistant
 // turn that opens without one. Returning positions instead of a rebuilt slice
 // keeps the no-op case allocation-free on long replayed conversations.
+//
+// Turn-start detection covers both call-item shapes: replayed apply_patch is a
+// custom_tool_call under a freeform target (see toCustomApplyPatchCallItem)
+// and a function_call otherwise, so reasoning continuity must recognize both —
+// a freeform target with reasoning active otherwise omits the empty
+// reasoning_text the backend requires for turns that open with a custom tool
+// call.
 func responsesReplayTurnsMissingReasoning(items []responsesInputItem) []int {
 	var insertAt []int
 	inTurn := false
 	for i, item := range items {
-		startsTurn := (item.Type == "message" && item.Role == "assistant") || item.Type == "function_call"
+		startsTurn := (item.Type == "message" && item.Role == "assistant") || isResponsesCallItemType(item.Type)
 		if startsTurn && !inTurn {
 			insertAt = append(insertAt, i)
 		}
 		switch item.Type {
-		case "reasoning", "function_call":
+		case "reasoning", "function_call", "custom_tool_call":
 			inTurn = true
 		case "message":
 			inTurn = item.Role == "assistant"
@@ -78,9 +87,30 @@ func emptyResponsesReasoningItem() responsesInputItem {
 	}
 }
 
-// convertMessagesToResponses converts internal messages to Responses API input format.
-func convertMessagesToResponses(systemPrompt string, msgs []message.Message) []responsesInputItem {
-	return convertMessagesToResponsesWithItemIDs(systemPrompt, msgs, false)
+// isResponsesCallItemType reports whether t is a call item that pairs with an
+// immediately following output item in the Responses wire. Replayed apply_patch
+// alternates between function_call (JSON shape) and custom_tool_call (freeform)
+// depending on the request target, so call-shape logic must recognize both.
+func isResponsesCallItemType(t string) bool {
+	return t == "function_call" || t == "custom_tool_call"
+}
+
+// applyPatchFreeformInput extracts the raw Codex patch text from stored
+// apply_patch arguments. Stored args are either the canonical {"patch": ...}
+// object, a JSON string wrapping it, or bare patch text (legacy freeform
+// history); the returned text is what a freeform custom_tool_call must carry in
+// its input field.
+func applyPatchFreeformInput(raw json.RawMessage) string {
+	text := unwrapJSONString(raw)
+	if json.Valid(text) {
+		var obj struct {
+			Patch string `json:"patch"`
+		}
+		if err := json.Unmarshal(text, &obj); err == nil && obj.Patch != "" {
+			return obj.Patch
+		}
+	}
+	return string(text)
 }
 
 // appendResponsesTextBlock folds a text part into the trailing input_text block
@@ -114,7 +144,53 @@ func findResponsesCallIndex(calls []message.ToolCall, id string) int {
 	return -1
 }
 
-func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.Message, includeItemIDs bool) []responsesInputItem {
+// responsesApplyPatchCallIDs returns the set of apply_patch call IDs anywhere
+// in history (both legacy ToolCalls and native ResponsesOutput). The tool-result
+// replay shape must follow the call it pairs with, even for orphan outputs that
+// are handled outside the interleaving assistant blocks.
+func responsesApplyPatchCallIDs(msgs []message.Message) map[string]struct{} {
+	ids := make(map[string]struct{})
+	for _, m := range msgs {
+		for _, tc := range m.ToolCalls {
+			if tc.Name == toolname.ApplyPatch && tc.ID != "" {
+				ids[tc.ID] = struct{}{}
+			}
+		}
+		for _, item := range m.ResponsesOutput {
+			if item.Name == toolname.ApplyPatch && item.CallID != "" {
+				ids[item.CallID] = struct{}{}
+			}
+		}
+	}
+	return ids
+}
+
+// toCustomApplyPatchCallItem rewrites a replayed apply_patch function_call item
+// into the freeform custom_tool_call shape (raw patch text in input) when the
+// current request target emits apply_patch freeform.
+func toCustomApplyPatchCallItem(item responsesInputItem, freeform bool) responsesInputItem {
+	if !freeform || item.Name != toolname.ApplyPatch {
+		return item
+	}
+	item.Type = "custom_tool_call"
+	item.Status = "completed"
+	item.Input = applyPatchFreeformInput(json.RawMessage(item.Arguments))
+	item.Arguments = ""
+	return item
+}
+
+// toMatchingResponsesToolOutput types a replayed tool result to pair with the
+// call it belongs to: apply_patch replays as custom_tool_call_output under a
+// freeform target, everything else stays function_call_output. isApplyPatch is
+// true when the paired call was an apply_patch call.
+func toMatchingResponsesToolOutput(item responsesInputItem, isApplyPatch, freeform bool) responsesInputItem {
+	if freeform && isApplyPatch {
+		item.Type = "custom_tool_call_output"
+	}
+	return item
+}
+
+func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.Message, includeItemIDs bool, freeform bool) []responsesInputItem {
 	// Always return a non-nil slice to ensure JSON marshaling produces [] instead of null.
 	result := make([]responsesInputItem, 0)
 
@@ -131,6 +207,7 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 		})
 	}
 
+	applyPatchCallIDs := responsesApplyPatchCallIDs(msgs)
 	for i := 0; i < len(msgs); i++ {
 		msg := msgs[i]
 		if len(msg.MCPTools) > 0 {
@@ -195,16 +272,17 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 				adjacent := msgs[i+1:]
 				outputs, consumed := collectAdjacentResponsesToolOutputs(adjacent, trailingResponsesCallIDs(msg.ResponsesOutput, lastNonCall))
 				for idx, item := range msg.ResponsesOutput {
-					converted, ok := convertResponsesOutputItem(item, includeItemIDs)
+					converted, ok := convertResponsesOutputItem(item, includeItemIDs, freeform)
 					if !ok {
 						continue
 					}
 					result = append(result, converted)
-					if idx <= lastNonCall || converted.Type != "function_call" {
+					if idx <= lastNonCall || !isResponsesCallItemType(converted.Type) {
 						continue
 					}
 					if output, ok := outputs[item.CallID]; ok {
-						result = append(result, output)
+						_, isApplyPatch := applyPatchCallIDs[item.CallID]
+						result = append(result, toMatchingResponsesToolOutput(output, isApplyPatch, freeform))
 					}
 				}
 				i += consumed
@@ -262,16 +340,19 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 					}
 				}
 			}
-			// Tool calls become function_call items. API expects arguments as a string.
+			// Tool calls become call items replayed in the shape the current
+			// request declares for the tool — apply_patch as custom_tool_call
+			// under a freeform target, function_call otherwise — each followed
+			// by its matching output. API expects arguments as a string.
 			for _, tc := range validToolCalls {
-				result = append(result, responsesInputItem{
+				result = append(result, toCustomApplyPatchCallItem(responsesInputItem{
 					Type:      "function_call",
 					Name:      tc.Name,
 					CallID:    tc.ID,
 					Arguments: string(tc.Args),
-				})
+				}, freeform))
 				if out, ok := outputs[tc.ID]; ok {
-					result = append(result, out)
+					result = append(result, toMatchingResponsesToolOutput(out, tc.Name == toolname.ApplyPatch, freeform))
 				}
 			}
 
@@ -284,14 +365,17 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 				log.Warn("skipping function_call_output with empty call_id in history")
 				continue
 			}
-			// Tool results become function_call_output items. When the tool result
+			// Tool results become output items typed to pair with the call they
+			// answer: an apply_patch call replayed as custom_tool_call under a
+			// freeform target must be answered by a custom_tool_call_output, or
+			// the server rejects the mismatched pair. When the tool result
 			// carries image/file parts, Responses accepts output content blocks.
-			output := responsesToolOutput(msg)
-			result = append(result, responsesInputItem{
+			_, isApplyPatch := applyPatchCallIDs[msg.ToolCallID]
+			result = append(result, toMatchingResponsesToolOutput(responsesInputItem{
 				Type:   "function_call_output",
 				CallID: msg.ToolCallID,
-				Output: output,
-			})
+				Output: responsesToolOutput(msg),
+			}, isApplyPatch, freeform))
 		}
 	}
 
@@ -338,7 +422,7 @@ func collectAdjacentResponsesToolOutputs(msgs []message.Message, allowed map[str
 	return outputs, consumed
 }
 
-func convertResponsesOutputItem(item message.ResponsesOutputItem, includeItemID bool) (responsesInputItem, bool) {
+func convertResponsesOutputItem(item message.ResponsesOutputItem, includeItemID bool, freeform bool) (responsesInputItem, bool) {
 	converted := responsesInputItem{
 		Type:             item.Type,
 		Role:             item.Role,
@@ -383,6 +467,20 @@ func convertResponsesOutputItem(item message.ResponsesOutputItem, includeItemID 
 		if strings.TrimSpace(item.CallID) == "" || strings.TrimSpace(item.Name) == "" {
 			return responsesInputItem{}, false
 		}
+		converted.Arguments = string(toolArgumentsFallback(item.Name, json.RawMessage(item.Arguments)))
+		// Freeform-targeted requests replay apply_patch history in the custom
+		// tool shape so the model sees the same wire form it is asked to emit.
+		converted = toCustomApplyPatchCallItem(converted, freeform)
+	case "custom_tool_call":
+		// Normalized to function_call at the wire boundary; this case is only
+		// reachable from hand-constructed or legacy data. Canonicalize the args
+		// so replay and tool execution still see the {patch} object.
+		converted.Type = "function_call"
+		converted.Arguments = string(canonicalApplyPatchArgs(json.RawMessage(item.Arguments)))
+		if strings.TrimSpace(item.CallID) == "" || strings.TrimSpace(item.Name) == "" {
+			return responsesInputItem{}, false
+		}
+		converted = toCustomApplyPatchCallItem(converted, freeform)
 	default:
 		return responsesInputItem{}, false
 	}
@@ -441,13 +539,13 @@ func convertToolsToResponses(tools []message.ToolDefinition) []responsesTool {
 
 // responsesOutputToInputItems always retains item IDs; the incremental
 // baseline is normalized for the store mode in one place, codexWSBuildBaseline.
-func responsesOutputToInputItems(output []responsesOutputEntry) []responsesInputItem {
+func responsesOutputToInputItems(output []responsesOutputEntry, freeform bool) []responsesInputItem {
 	if len(output) == 0 {
 		return nil
 	}
 	items := make([]responsesInputItem, 0, len(output))
 	for _, out := range output {
-		converted, ok := convertResponsesOutputItem(responsesOutputEntryToMessageItem(out), true)
+		converted, ok := convertResponsesOutputItem(responsesOutputEntryToMessageItem(out), true, freeform)
 		if ok {
 			items = append(items, converted)
 		}
@@ -456,6 +554,7 @@ func responsesOutputToInputItems(output []responsesOutputEntry) []responsesInput
 }
 
 func responsesOutputEntryToMessageItem(out responsesOutputEntry) message.ResponsesOutputItem {
+	out = normalizeResponsesOutputEntry(out)
 	role := out.Role
 	if strings.TrimSpace(role) == "" && out.Type == "message" {
 		role = "assistant"
@@ -483,7 +582,7 @@ func responsesOutputEntryToMessageItem(out responsesOutputEntry) message.Respons
 	return item
 }
 
-func responsesToolCallsToInputItems(calls []message.ToolCall) []responsesInputItem {
+func responsesToolCallsToInputItems(calls []message.ToolCall, freeform bool) []responsesInputItem {
 	if len(calls) == 0 {
 		return nil
 	}
@@ -492,24 +591,25 @@ func responsesToolCallsToInputItems(calls []message.ToolCall) []responsesInputIt
 		if strings.TrimSpace(tc.ID) == "" || strings.TrimSpace(tc.Name) == "" {
 			continue
 		}
-		items = append(items, responsesInputItem{
+		converted := responsesInputItem{
 			Type:      "function_call",
 			Name:      tc.Name,
 			CallID:    tc.ID,
 			Arguments: string(tc.Args),
-		})
+		}
+		items = append(items, toCustomApplyPatchCallItem(converted, freeform))
 	}
 	return items
 }
 
-func responsesResponseToInputItems(resp *message.Response) []responsesInputItem {
+func responsesResponseToInputItems(resp *message.Response, freeform bool) []responsesInputItem {
 	if resp == nil {
 		return nil
 	}
 	if len(resp.ResponsesOutput) > 0 {
 		items := make([]responsesInputItem, 0, len(resp.ResponsesOutput))
 		for _, output := range resp.ResponsesOutput {
-			converted, ok := convertResponsesOutputItem(output, true)
+			converted, ok := convertResponsesOutputItem(output, true, freeform)
 			if ok {
 				items = append(items, converted)
 			}
@@ -526,6 +626,6 @@ func responsesResponseToInputItems(resp *message.Response) []responsesInputItem 
 			},
 		})
 	}
-	items = append(items, responsesToolCallsToInputItems(resp.ToolCalls)...)
+	items = append(items, responsesToolCallsToInputItems(resp.ToolCalls, freeform)...)
 	return items
 }

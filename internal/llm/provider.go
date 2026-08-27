@@ -422,6 +422,41 @@ func (p *ProviderConfig) ResponsesCompat(modelID string) *config.ResponsesCompat
 	return merged
 }
 
+// ApplyPatchCompat resolves provider defaults with model-level overrides for
+// the apply_patch tool surface (enabled) and wire shape (freeform). Both knobs
+// are three-state: nil means "not configured", leaving the caller's
+// model-name inference as the fallback.
+func (p *ProviderConfig) ApplyPatchCompat(modelID string) *config.ApplyPatchCompatConfig {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var providerCfg *config.ApplyPatchCompatConfig
+	if p.compat != nil {
+		providerCfg = p.compat.ApplyPatch
+	}
+	var modelCfg *config.ApplyPatchCompatConfig
+	if model, ok := p.models[modelID]; ok && model.Compat != nil {
+		modelCfg = model.Compat.ApplyPatch
+	}
+	if providerCfg == nil && modelCfg == nil {
+		return nil
+	}
+	if modelCfg == nil {
+		return providerCfg
+	}
+	if providerCfg == nil {
+		return modelCfg
+	}
+	merged := &config.ApplyPatchCompatConfig{}
+	*merged = *providerCfg
+	if modelCfg.Enabled != nil {
+		merged.Enabled = modelCfg.Enabled
+	}
+	if modelCfg.Freeform != nil {
+		merged.Freeform = modelCfg.Freeform
+	}
+	return merged
+}
+
 // ChatCompletionsCompat resolves provider defaults with model-level overrides.
 func (p *ProviderConfig) ChatCompletionsCompat(modelID string) *config.ChatCompletionsCompatConfig {
 	p.mu.Lock()

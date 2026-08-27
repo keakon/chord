@@ -75,7 +75,12 @@ func (t EditTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (t EditTool) Description() string {
-	return `Perform exact string replacement in an existing file. Prefer this tool for localized changes instead of rewriting the whole file with Write. Reading the target area first is recommended when you have not already verified the exact current text, but not required; Edit reads current on-disk content at execution time. Re-read before retrying after any mismatch or other change. old_string must match the file's raw text exactly, including indentation, tabs, spaces, newlines (including CRLF vs LF), and quote characters. If the text came from Read output, do not include the displayed line-number gutter or separator tab. Prefer the smallest unique 2-4 line block instead of a large stale context block. Replaces one occurrence by default; set replace_all to replace every occurrence.` + lspMutationFollowUp(t.LSP)
+	// LSP diagnostic follow-up guidance lives in the system prompt
+	// (## LSP diagnostic follow-up), not per-tool descriptions; see
+	// lspDiagnosticPromptBlock.
+	return "Perform exact string replacement in an existing file. Prefer this tool for localized changes instead of rewriting the whole file with Write. " +
+		"old_string must match the file's raw text exactly, including indentation, tabs, spaces, newlines (including CRLF vs LF), and quote characters; if the text came from Read output, do not include the displayed line-number gutter or separator tab. " +
+		"Prefer the smallest unique 2-4 line block instead of a large stale context block; re-read before retrying after any mismatch. Replaces one occurrence by default; set replace_all to replace every occurrence."
 }
 
 func (EditTool) Parameters() map[string]any {
@@ -92,7 +97,7 @@ func (EditTool) Parameters() map[string]any {
 			},
 			"new_string": map[string]any{
 				"type":        "string",
-				"description": "The text to replace old_string with. Ensure new_string preserves required indentation/newlines when needed.",
+				"description": "The text to replace old_string with (must be different from old_string). Ensure new_string preserves required indentation/newlines when needed.",
 			},
 			"replace_all": map[string]any{
 				"type":        "boolean",

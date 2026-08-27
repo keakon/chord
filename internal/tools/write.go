@@ -30,7 +30,12 @@ func (t WriteTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (t WriteTool) Description() string {
-	return "Write the full contents of a file, creating parent directories as needed. This replaces the entire file rather than appending to it. Overwriting an existing file requires that you know its current version in full: a successful complete read, or the file's current content being your own previous whole-file write; partial reads do not authorize whole-file replacement. Prefer edit for localized changes to existing files. If the path should still exist afterward with new full contents, use write directly rather than deleting it first. Empty content truncates the file to zero bytes but does not delete it; use delete only when the file should no longer exist." + lspMutationFollowUp(t.LSP)
+	// LSP diagnostic follow-up guidance lives in the system prompt
+	// (## LSP diagnostic follow-up), not per-tool descriptions; see
+	// lspDiagnosticPromptBlock. "Replaces the entire file" stays in the
+	// content parameter description rather than duplicated here.
+	return "Write the full contents of a file, creating parent directories as needed. This is for whole-file writes; to modify an existing snippet prefer Edit instead of rewriting the whole file with Write. " +
+		"When the target file already exists and you have not read it (or it changed on disk after you read it), its previous contents are backed up to the session directory before being replaced, when they can be read, and the result names that backup. Empty content truncates the file to zero bytes but does not delete it; use Delete only when the file should no longer exist."
 }
 
 func (t WriteTool) Parameters() map[string]any {

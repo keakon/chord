@@ -11,18 +11,51 @@ Chord provides two complementary tools for editing files, optimized for differen
 | **Scope** | Multiple files per call: add, update, delete, move | One existing file per call |
 | **Position control** | Context lines + optional header anchors | Exact string matching |
 | **Multi-occurrence** | N/A (context-driven) | `replace_all` parameter |
-| **Typical models** | gpt-5.5, gpt-5.3-codex, o3, o4 | Claude, Qwen, GLM, MiniMax, DeepSeek, Gemini |
+| **Typical models** | gpt-5.5, gpt-5.3-codex, codex-auto-review | Claude, Qwen, GLM, MiniMax, DeepSeek, Gemini |
 
 ## Tool Selection
 
 Chord **automatically selects** the appropriate tool based on the active model:
 
-- **GPT/o-series models** → `apply_patch` (Codex envelope)
-- **All other models** → `edit` (old_string/new_string)
+- **gpt-5 and later gpt major families (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, and future majors like gpt-6) and `codex-auto-review`** → `apply_patch` (Codex envelope)
+- **All other models** (gpt-3.5, gpt-4/4o, gpt-oss-*, o-series, Claude, Qwen, GLM, DeepSeek, Gemini, …) → `edit` (old_string/new_string)
 
-You don't need to choose manually—the system exposes only the appropriate tool to each model.
+The gpt-4/4o, gpt-3.5, and o-series families are **not** patch-native: the `apply_patch` tool did not exist when they were trained (it was introduced with GPT-5 in August 2025), and measured results are negative or untrained. Every gpt family from gpt-5 onward defaults to the patch tool surface, matching the Codex model catalog; this includes future majors (gpt-6, ...) since `apply_patch` is first-party Codex training data that stays in OpenAI training across generations. If a future family ever drops the patch signal, `compat.apply_patch.enabled: false` opts it out.
 
-When a patch-native (GPT/o-series) model keeps `apply_patch`, Chord also hides `write` and `delete`: the envelope subsumes them (`*** Add File:` creates, `*** Delete File:` removes), matching the native Codex CLI surface those models are trained on. Fallback pairings keep `write`/`delete`: a non-GPT model that only got `apply_patch` because `edit` is disabled still sees them, and a patch-native model downgraded to `edit` needs `write` to create files at all.
+When a patch-native model keeps `apply_patch`, Chord also hides `write` and `delete`: the envelope subsumes them (`*** Add File:` creates, `*** Delete File:` removes), matching the native Codex CLI surface those models are trained on. Fallback pairings keep `write`/`delete`: a non-patch-native model that only got `apply_patch` because `edit` is disabled still sees them, and a patch-native model downgraded to `edit` needs `write` to create files at all.
+
+### Freeform (custom tool) emission
+
+On OpenAI-compatible **Responses** endpoints, a gpt-5-and-later family model or `codex-auto-review` additionally receives `apply_patch` as a **freeform custom tool** (`type: "custom"` with a Lark grammar), instead of a JSON function tool. Freeform gives the model grammar-constrained decoding — it cannot produce a syntax-invalid patch — and avoids JSON escaping overhead. All other models receive the JSON function shape, and non-Responses endpoints always use the function shape (they have no custom tool type).
+
+Hosts that accept Responses requests but reject custom tools do not get a built-in exception: a patch-native model there will emit the freeform shape by default, and the gateway rejects it with an actionable error. Set `compat.apply_patch.freeform: false` for such hosts to force the JSON function shape.
+
+### Overriding the defaults
+
+Every default above can be overridden per provider or per model under `compat.apply_patch` (three-state: omit to keep the inference):
+
+```yaml
+providers:
+  my-relay:
+    type: responses
+    compat:
+      apply_patch:
+        enabled: true   # tool surface: keep apply_patch (hide edit + write/delete)
+        freeform: false # wire shape: JSON function tool, not custom
+  openai:
+    type: responses
+    models:
+      gpt-5.5:
+        compat:
+          apply_patch:
+            freeform: false # model-level override: name looks freeform but the gateway is not
+```
+
+- `enabled: true` adopts the full patch-native semantics for any model (patch kept, `edit`/`write`/`delete` hidden, patch-only prompt guidance).
+- `enabled: false` forces the edit surface even for patch-native models.
+- `freeform: true` forces the custom tool shape; `freeform: false` forces the JSON function shape.
+
+If a gateway lowers a custom tool into `{"input": "..."}` instead of `{"patch": "..."}`, Chord reports an actionable error pointing at `compat.apply_patch.freeform: false`; set it and the request will be sent as a function tool.
 
 ---
 
@@ -222,7 +255,7 @@ permission:
 ```yaml
 permission:
   edit: allow
-  apply_patch: deny  # GPT/o-series models fall back to edit
+  apply_patch: deny  # patch-native models (gpt-5 family/codex-auto-review) fall back to edit
 ```
 
 **Permission Fallback Rules**:
@@ -235,8 +268,8 @@ permission:
 
 **Examples**:
 
-- `edit: allow` → both tools allowed; GPT/o-series models normally see `apply_patch`, other models normally see `edit`
-- `edit: allow, apply_patch: deny` → apply_patch denied, edit allowed; GPT/o-series models fall back to `edit`
+- `edit: allow` → both tools allowed; patch-native models (gpt-5 family/codex-auto-review) normally see `apply_patch`, other models normally see `edit`
+- `edit: allow, apply_patch: deny` → apply_patch denied, edit allowed; patch-native models fall back to `edit`
 - `apply_patch: allow, edit: deny` → apply_patch allowed, edit denied; non-GPT models fall back to `apply_patch`
 - `*: deny, apply_patch: allow` → both tools allowed (apply_patch rule is inherited by edit)
 - `*: allow, apply_patch: deny` → both tools denied (edit inherits the apply_patch deny)
@@ -295,7 +328,7 @@ If you're upgrading from a system with only one edit tool:
 A: The tool selection is automatic and model-specific. Overriding it may reduce success rates.
 
 **Q: What if my model isn't recognized?**
-A: By default, unrecognized models use the `edit` (replace) tool. GPT/o-series models use `apply_patch`.
+A: By default, unrecognized models use the `edit` (replace) tool. gpt-5-and-later family names (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, future majors like gpt-6) and `codex-auto-review` use `apply_patch`; you can override any model via `compat.apply_patch.enabled`.
 
 **Q: Do both tools support the same file types?**
 A: Yes. Both work with any text file (detected encoding: UTF-8, UTF-16, GB18030, etc.). Binary files are rejected.

@@ -21,16 +21,16 @@ func TestSubAgent_AppliesModelEditToolFilter(t *testing.T) {
 		wantEditVisible  bool
 	}{
 		{
-			name:             "GPT model should see only patch tool",
-			modelName:        "gpt-4",
+			name:             "gpt-5.5 model should see only patch tool",
+			modelName:        "gpt-5.5",
 			wantPatchVisible: true,
 			wantEditVisible:  false,
 		},
 		{
-			name:             "o1 model should see only patch tool",
+			name:             "o1 model should see only edit tool",
 			modelName:        "o1-preview",
-			wantPatchVisible: true,
-			wantEditVisible:  false,
+			wantPatchVisible: false,
+			wantEditVisible:  true,
 		},
 		{
 			name:             "Claude model should see only edit tool",
@@ -64,7 +64,7 @@ func TestSubAgent_AppliesModelEditToolFilter(t *testing.T) {
 
 			// Get visible tools through the filtering logic
 			visibleTools := visibleLLMTools(s.tools, s.ruleset, isSubAgentInternalTool)
-			filteredTools := filterEditToolsByModel(visibleTools, s.modelName, s.ruleset)
+			filteredTools := filterEditToolsByModel(visibleTools, s.modelName, s.ruleset, nil)
 
 			// Check which tools are visible
 			hasPatch := false
@@ -97,11 +97,11 @@ func TestSubAgent_ToolFilteringInAllVisibilityPaths(t *testing.T) {
 	baseTools.Register(tools.EditTool{})
 
 	ruleset := permission.Ruleset{} // empty = all allowed
-	modelName := "gpt-4"            // GPT model should see patch tool
+	modelName := "gpt-5.5"          // gpt-5 family model should see patch tool
 
 	// Simulate what SubAgent does: apply model filter
 	visibleTools := visibleLLMTools(baseTools, ruleset, isSubAgentInternalTool)
-	filteredTools := filterEditToolsByModel(visibleTools, modelName, ruleset)
+	filteredTools := filterEditToolsByModel(visibleTools, modelName, ruleset, nil)
 
 	// Convert to tool names map (simulates visibleToolNames)
 	visibleNames := make(map[string]struct{})
@@ -110,15 +110,15 @@ func TestSubAgent_ToolFilteringInAllVisibilityPaths(t *testing.T) {
 	}
 
 	if _, ok := visibleNames[tools.NameApplyPatch]; !ok {
-		t.Error("patch tool not visible for GPT model")
+		t.Error("patch tool not visible for gpt-5 family model")
 	}
 	if _, ok := visibleNames[tools.NameEdit]; ok {
-		t.Error("edit tool incorrectly visible for GPT model")
+		t.Error("edit tool incorrectly visible for gpt-5 family model")
 	}
 
 	// Test with Claude model (should see edit tool)
 	modelName = "claude-opus-4"
-	filteredTools = filterEditToolsByModel(visibleTools, modelName, ruleset)
+	filteredTools = filterEditToolsByModel(visibleTools, modelName, ruleset, nil)
 	visibleNames = make(map[string]struct{})
 	for _, tool := range filteredTools {
 		visibleNames[tool.Name()] = struct{}{}
@@ -143,7 +143,7 @@ func TestSubAgentSwitchModelRefreshesFrozenToolDefinitions(t *testing.T) {
 		ctxMgr:     ctxmgr.NewManager(4096, 0),
 		tools:      registry,
 		ruleset:    permission.Ruleset{},
-		modelName:  "gpt-4",
+		modelName:  "gpt-5.5",
 	}
 	s.frozenToolDefs = llmToolDefinitionsFromVisibleTools(s.filteredVisibleTools())
 	if !hasToolDefinition(s.frozenToolDefs, tools.NameApplyPatch) || hasToolDefinition(s.frozenToolDefs, tools.NameEdit) {
@@ -247,7 +247,7 @@ func TestSubAgent_EditPatchPermissionFallback(t *testing.T) {
 
 			// Test the filtering logic directly
 			visibleTools := visibleLLMTools(baseTools, tt.ruleset, isSubAgentInternalTool)
-			filteredTools := filterEditToolsByModel(visibleTools, tt.modelName, tt.ruleset)
+			filteredTools := filterEditToolsByModel(visibleTools, tt.modelName, tt.ruleset, nil)
 
 			visibleNames := make(map[string]struct{})
 			for _, tool := range filteredTools {

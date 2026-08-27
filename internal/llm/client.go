@@ -982,6 +982,29 @@ func (c *Client) PrimarySupportsViewImageTool() bool {
 	return fallbackModelCanReplayImageToolResults(c.toolSurfacePrimary)
 }
 
+// UsesApplyPatchSurface reports the resolved apply_patch tool-surface decision
+// for the stable primary model-pool entry. An explicit compat.apply_patch.
+// enabled value wins; otherwise the primary model ID is inferred with
+// IsApplyPatchModel. The policy is derived from the client-bound provider
+// compat (not global config) so the agent never re-implements the inference,
+// and it never reflects the sticky fallback cursor — the tool surface stays
+// stable for the session.
+func (c *Client) UsesApplyPatchSurface() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	primary := c.toolSurfacePrimary
+	if primary.ProviderConfig == nil {
+		return IsApplyPatchModel(primary.ModelID)
+	}
+	if ap := primary.ProviderConfig.ApplyPatchCompat(primary.ModelID); ap != nil && ap.Enabled != nil {
+		return *ap.Enabled
+	}
+	return IsApplyPatchModel(primary.ModelID)
+}
+
 func fallbackModelCanReplayImageToolResults(model FallbackModel) bool {
 	return fallbackModelCanReplayToolResultModalities(model, []string{"image"})
 }

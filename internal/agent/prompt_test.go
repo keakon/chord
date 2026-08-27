@@ -1170,7 +1170,7 @@ lsp: allow
 }
 
 func TestMainAgentCapabilityPromptBlock_OmitsPathDiscoveryGuidanceWithoutDiscoveryTools(t *testing.T) {
-	a := &MainAgent{tools: tools.NewRegistry(), modelName: "gpt-4"} // Set GPT model to use patch tool
+	a := &MainAgent{tools: tools.NewRegistry(), modelName: "gpt-5.5"} // Set GPT model to use patch tool
 	a.tools.Register(tools.ReadTool{})
 	a.tools.Register(tools.ApplyPatchTool{})
 	a.tools.Register(tools.DeleteTool{})
@@ -1183,7 +1183,7 @@ delete: allow
 	a.rebuildRuleset()
 
 	got := a.mainAgentCapabilityPromptBlock()
-	// gpt-4 is patch-native, so delete is hidden and its careful-deletion
+	// gpt-5 family is patch-native, so delete is hidden and its careful-deletion
 	// guidance is carried by the `*** Delete File:` line instead.
 	for _, want := range []string{
 		"Use `read` for file contents when the target path is already known or has been verified.",

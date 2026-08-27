@@ -29,10 +29,37 @@ type ApplyPatchArgs struct {
 }
 
 // NormalizeApplyPatchArgs validates the current {patch} arguments and returns
-// them in canonical form.
+// them in canonical form. It tolerates three input shapes: the canonical
+// {patch} object, a JSON string wrapping it (legacy function-call history), and
+// bare freeform text (custom_tool_call history or anomalous gateways). A
+// gateway-lowered {"input": ...} payload without a patch field is reported as a
+// distinct misconfiguration with an actionable hint.
+//
+// Unknown top-level fields — including the legacy single-file `path` wrapper —
+// are deliberately ignored rather than rejected, matching the generic
+// sanitization applied to tool arguments before Execute (see
+// SanitizeUnknownArgsWithDiagnostics): only `patch` participates, and it must
+// satisfy the apply_patch constraints (non-empty, and the Codex `*** Begin
+// Patch` envelope enforced by ParseApplyPatch).
 func NormalizeApplyPatchArgs(raw json.RawMessage) (json.RawMessage, error) {
+	unwrapped := unwrapToolArgs(raw)
+	if len(unwrapped) == 0 || unwrapped[0] != '{' {
+		// Bare freeform text (custom_tool_call wire input or anomalous
+		// gateway): treat the entire payload as the patch.
+		return json.Marshal(ApplyPatchArgs{Patch: string(unwrapped)})
+	}
+	if json.Valid(unwrapped) {
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(unwrapped, &obj); err == nil {
+			if _, hasPatch := obj["patch"]; !hasPatch {
+				if _, hasInput := obj["input"]; hasInput {
+					return nil, fmt.Errorf("gateway appears to have lowered custom apply_patch incorrectly; set compat.apply_patch.freeform: false")
+				}
+			}
+		}
+	}
 	var args ApplyPatchArgs
-	if err := json.Unmarshal(unwrapToolArgs(raw), &args); err != nil {
+	if err := json.Unmarshal(unwrapped, &args); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %w", err)
 	}
 	if strings.TrimSpace(args.Patch) == "" {
@@ -190,8 +217,22 @@ func (ApplyPatchTool) IsReadOnly() bool { return false }
 func (t ApplyPatchTool) ConcurrencyPolicy(json.RawMessage) ConcurrencyPolicy {
 	return ConcurrencyPolicy{Resource: "workspace", Mode: ConcurrencyModeExclusive}
 }
-func (t ApplyPatchTool) Description() string {
-	return "Apply a Codex-compatible patch to one or more files. The patch must begin with `*** Begin Patch` and end with `*** End Patch`. Supported operations are `*** Add File:`, `*** Delete File:`, `*** Update File:`, and `*** Move to:`. Operations are planned before files are modified; each file commits atomically, so independent files can still succeed when another file fails." + lspMutationFollowUp(t.LSP)
+func (ApplyPatchTool) Description() string {
+	// Opens with the Codex apply_patch description for gpt-5-and-later models,
+	// but omits its FREEFORM sentence: Chord emits apply_patch as either a
+	// freeform custom tool or a JSON function tool, and "do not wrap the patch
+	// in JSON" is only valid for the former. Format guidance follows because
+	// this description also serves non-freeform models (JSON function shape on
+	// non-Responses endpoints and hosts that reject custom tools) that have no
+	// patch training signal; the wire description is overridden with the exact
+	// Codex text in the freeform custom-tool shape (see
+	// convertToolsToResponsesForTarget). Path semantics (relative to the
+	// session working directory, or absolute) live in the patch parameter
+	// description instead, which JSON function models always see.
+	return "The `apply_patch` tool can be used to edit files. " +
+		"Your patch is a unified diff wrapped in a `*** Begin Patch` / `*** End Patch` envelope. " +
+		"Each operation starts with one of `*** Add File: <path>`, `*** Delete File: <path>`, `*** Update File: <path>` (optionally followed by `*** Move to: <new path>`). " +
+		"Hunks are introduced by `@@` and each line starts with `+` (added), `-` (removed), or a space (context); new file contents are `+` lines."
 }
 func (ApplyPatchTool) Parameters() map[string]any {
 	return map[string]any{
@@ -199,7 +240,7 @@ func (ApplyPatchTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Complete Codex apply_patch text including Begin Patch and End Patch markers.",
+				"description": "Complete Codex apply_patch text: a `*** Begin Patch` / `*** End Patch` envelope wrapping Add/Delete/Update operations with `@@` hunks; new file contents are `+` lines. Paths are relative to the session working directory, or absolute.",
 			},
 		},
 		"required":             []string{"patch"},

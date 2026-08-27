@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	toolpkg "github.com/keakon/chord/internal/tools"
@@ -69,7 +70,24 @@ func (a *MainAgent) mainVisibleLLMTools() []toolpkg.Tool {
 	visible := visibleLLMTools(a.tools, a.effectiveRuleset(), isInternalControlTool)
 	filtered := filterVisibleTools(visible, isMainAgentReservedTool)
 	// Apply per-model edit tool selection
-	return filterEditToolsByModel(filtered, a.modelName, a.effectiveRuleset())
+	return filterEditToolsByModel(filtered, a.modelName, a.effectiveRuleset(), a.applyPatchSurfacePolicy())
+}
+
+// applyPatchSurfacePolicy resolves the apply_patch tool-surface decision from
+// the bound LLM client's stable primary model-pool entry. The agent layer
+// consumes the resolved policy instead of reading global configuration or
+// re-running model-name inference against the current fallback cursor.
+func (a *MainAgent) applyPatchSurfacePolicy() *bool {
+	if a == nil {
+		return nil
+	}
+	a.llmMu.RLock()
+	client := a.llmClient
+	a.llmMu.RUnlock()
+	if client == nil {
+		return nil
+	}
+	return new(client.UsesApplyPatchSurface())
 }
 
 // filterEditToolsByModel applies per-model file tool selection to visible tools.
@@ -88,7 +106,11 @@ func (a *MainAgent) mainVisibleLLMTools() []toolpkg.Tool {
 // apply_patch because edit is disabled is not trained to route everything
 // through the envelope, and a patch-native model downgraded to edit needs write
 // to create files at all (edit cannot).
-func filterEditToolsByModel(tools []toolpkg.Tool, modelName string, ruleset permission.Ruleset) []toolpkg.Tool {
+//
+// patchSurfaceDecision carries the client-resolved apply_patch tool-surface
+// decision (compat override or primary-model inference); nil falls back to
+// name-based inference via shouldUsePatchForModel.
+func filterEditToolsByModel(tools []toolpkg.Tool, modelName string, ruleset permission.Ruleset, patchSurfaceDecision *bool) []toolpkg.Tool {
 	// Check which edit tools are available. Path-scoped allow/ask rules still make
 	// the tool usable, so visibility should only collapse when the whole tool is
 	// disabled. Actual path authorization still happens at execution time.
@@ -108,6 +130,9 @@ func filterEditToolsByModel(tools []toolpkg.Tool, modelName string, ruleset perm
 	// Determine which tool to keep
 	var keepPatch bool
 	patchNativeModel := shouldUsePatchForModel(modelName)
+	if patchSurfaceDecision != nil {
+		patchNativeModel = *patchSurfaceDecision
+	}
 	if patchAllowed && editAllowed {
 		// Both allowed: use model preference
 		keepPatch = patchNativeModel
@@ -163,17 +188,11 @@ func shouldUsePatchForModel(modelName string) bool {
 	}
 
 	modelID = strings.ToLower(modelID)
-	return isOpenAIApplyPatchModel(modelID)
-}
-
-func isOpenAIApplyPatchModel(modelID string) bool {
-	if strings.HasPrefix(modelID, "gpt-") || strings.Contains(modelID, "-codex") {
-		return true
-	}
-	if len(modelID) < 2 || modelID[0] != 'o' || modelID[1] < '0' || modelID[1] > '9' {
-		return false
-	}
-	return len(modelID) == 2 || modelID[2] == '-'
+	// The patch tool surface is a separate dimension from the freeform wire
+	// shape: a gpt-5 family model keeps the patch tool surface even when
+	// compat.apply_patch.freeform forces the JSON function wire shape (e.g. on
+	// a non-Responses endpoint or a host that rejects custom tools).
+	return llm.IsApplyPatchModel(modelID)
 }
 
 func toolNamesFromVisibleTools(visibleTools []toolpkg.Tool) map[string]struct{} {

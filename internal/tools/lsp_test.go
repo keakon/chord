@@ -53,42 +53,40 @@ func TestLspToolDescriptionGuidesRoutingWithoutHover(t *testing.T) {
 }
 
 func TestFileMutationDescriptionsConditionallyExplainLSPFollowUp(t *testing.T) {
+	// LSP diagnostic follow-up guidance lives in the system prompt
+	// (## LSP diagnostic follow-up, lspDiagnosticPromptBlock), not in per-tool
+	// descriptions — edit/write/apply_patch tool results carry diagnostics
+	// regardless, and the prompt block is injected exactly when LSP is
+	// enabled and edit/write are visible.
 	disabledLSP := lsp.NewManager(&config.Config{LSP: config.LSPConfig{
 		"disabled": {Command: "gopls", Disabled: true, FileTypes: []string{".go"}},
 	}}, "", nil)
 	enabledLSP := lsp.NewManager(&config.Config{LSP: config.LSPConfig{
 		"go": {Command: "gopls", FileTypes: []string{".go"}},
 	}}, "", nil)
-	withoutLSP := []Tool{
+	for _, tool := range []Tool{
 		EditTool{},
 		WriteTool{},
-		ApplyPatchTool{},
 		EditTool{LSP: lsp.NewManager(nil, "", nil)},
 		WriteTool{LSP: disabledLSP},
-		ApplyPatchTool{LSP: disabledLSP},
-	}
-	withLSP := []Tool{
 		EditTool{LSP: enabledLSP},
 		WriteTool{LSP: enabledLSP},
-		ApplyPatchTool{LSP: enabledLSP},
-	}
-	for _, tool := range withoutLSP {
+	} {
 		if strings.Contains(tool.Description(), "When LSP is configured") {
-			t.Fatalf("%s description unexpectedly contains LSP guidance when disabled: %q", tool.Name(), tool.Description())
+			t.Fatalf("%s description unexpectedly contains LSP guidance: %q", tool.Name(), tool.Description())
 		}
 	}
-	for _, tool := range withLSP {
-		desc := tool.Description()
-		for _, want := range []string{
-			"When LSP is configured",
-			"inspect any diagnostics included in this tool result",
-			"newly introduced blocking diagnostics",
-			"fix them before finishing",
-			"unrelated untouched files",
-		} {
-			if !strings.Contains(desc, want) {
-				t.Fatalf("%s description missing %q: %q", tool.Name(), want, desc)
-			}
+	// apply_patch is only exposed to patch-native models already trained on the
+	// Codex patch format; it gets the Codex-style short description (no format
+	// teaching beyond the essentials for non-freeform shapes) and no upfront
+	// LSP guidance (diagnostics still arrive in the tool result).
+	for _, tool := range []Tool{
+		ApplyPatchTool{},
+		ApplyPatchTool{LSP: disabledLSP},
+		ApplyPatchTool{LSP: enabledLSP},
+	} {
+		if got := tool.Description(); !strings.HasPrefix(got, "The `apply_patch` tool can be used to edit files.") {
+			t.Fatalf("apply_patch description = %q, want Codex-style opening sentence", got)
 		}
 	}
 }

@@ -10,9 +10,10 @@
 - Provider 配置键 `official_api` 拆分为 `trust_http_400`（把 HTTP 400 视为终止性请求错误）与 `retry_after_max_s`（采纳 `Retry-After` 的最长等待秒数，1–86400）。仍包含 `official_api` 的配置不再导致启动失败：该键会被记录日志并忽略。请把 `official_api: true` 迁移为 `trust_http_400: true` 加 `retry_after_max_s: 86400`；`official_api: false` 改成 `trust_http_400: false`，也可以直接省略。第三方 Provider 现在默认只采纳最长 60 秒的 `Retry-After`；旧配置若依赖更长等待，请显式设置 `retry_after_max_s: 86400`。`preset: codex` 会自动启用可信 400 语义与一天上限。
 - `prompt_cache.ttl` 现在会在启动时校验：接受 `"5m"` 与 `"1h"`（`"5m"` 是 API 默认值，会归一化为省略该字段），其余取值报配置错误，不再被静默忽略。TTL 现在在 `explicit` 断点模式下同样生效，而不仅是 `auto` 模式。
 - `preset: azure` provider preset 已移除。Azure OpenAI Responses 现在按普通 `type: responses` provider 配置：设置 `auth_scheme: api-key`、`store: true`、`trust_http_400: true` 与 `retry_after_max_s: 86400`，并用 `compat.request_overrides.headers` 将 `OpenAI-Beta` 与 `originator` 置 `null` 移除 Codex 身份 header（这是旧 preset 唯一无法用普通配置表达的行为）。配置中仍含 `preset: azure` 的会在启动时被拒绝；迁移为等价普通 provider 后，线上请求行为与原来完全一致。
-- `apply_patch` 不再接受已废弃的单文件 `{path, patch}` 参数形态：调用方必须在当前 `patch` 字段里发送 Codex `*** Begin Patch` 信封。旧的 `patch` 工具名在权限规则里仍会归一化为 `apply_patch`。
+- `apply_patch` 已废弃的单文件 `{path, patch}` 参数形态不再使用 `path` 字段：为兼容仍可接受该包装，但 `path` 会被忽略，只使用 `patch` 字段，且必须携带 Codex `*** Begin Patch` 信封。旧的 `patch` 工具名在权限规则里仍会归一化为 `apply_patch`。
 - 文件类工具（`read`/`write`/`edit`/`apply_patch`/`delete`/`view_image`）的权限 pattern 现在以会话工作目录为作用域。工作目录内的路径在匹配前归一化为相对形式：相对规则（`**`、`src/**`）覆盖当前目录，单独的 `*` 仍是「任意路径」。绝对规则（`/Users/me/**`、`/**`）现在只匹配工作目录外的路径，不再覆盖目录内的文件——需要覆盖目录内时请改用相对写法（如 `**`）。`./**` 与 `**` 等价。
 - `{` / `}` 不再与 `j` / `k` 等价，改为在用户消息卡（turn 边界）之间跳转；`j` / `k` 成为唯一的上一条 / 下一条卡片键。想恢复旧行为，可在 `config.yaml` 里把 `}` 绑回 `next_block`、`{` 绑回 `prev_block`。
+- gpt-4/4o、gpt-3.5、gpt-oss 和 o 系列模型现在默认改用 `edit` 工具，不再默认 `apply_patch`：`apply_patch` 工具 2025 年 8 月随 GPT-5 才引入，这些家族没有训练信号，实测效果也是负收益或未训练。它们的工具面从「只有 patch」变为 edit，`write`/`delete` 重新可见。gpt-5 起的每个主版本家族保留 `apply_patch`——裸 `gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及未来的 `gpt-6` 等主版本（`apply_patch` 是 OpenAI 第一方 Codex 训练数据，会跨代际保留在训练集里）——`codex-auto-review` 同样保留。所有默认值都可以用 `compat.apply_patch.enabled` 按 provider 或模型覆盖。
 
 ### 新功能
 
@@ -28,6 +29,7 @@
 - 消息目录（`Ctrl+T`）打开时，游标现在落在当前卡片上，而不是固定在第一条；按 `Enter` 会直接回到刚才正在看的位置。
 - 消息目录里的工具卡条目现在在工具名旁附带首要参数（如 `Tool: shell go test ./...`、`Tool: edit internal/tui/app.go`），同一工具的多张调用卡一眼就能区分开。
 - HTTP MCP server 现在可以通过 `headers` 配置项给每个请求附加自定义请求头，例如 Exa 这类服务要求的 `x-api-key`。以 `$` 开头的值会从环境变量展开，密钥不用写进配置文件；`Content-Type`、`Accept`、`Mcp-Session-Id` 等协议管理的请求头仍由 Chord 控制，不受影响。
+- 在 OpenAI 兼容的 Responses 端点上，gpt-5 及之后家族模型现在把 `apply_patch` 作为 freeform custom tool（`type: "custom"` 携带 Lark grammar）发射，不再使用 JSON function tool，获得语法约束解码——模型产不出语法非法的补丁。其他模型与非 Responses wire 一律保持 JSON function 形态；发射形态可以用 `compat.apply_patch.freeform` 按 provider/模型配置。custom 工具调用会在 wire 边界归一化为 canonical `{"patch": ...}` function-call 形态，因此历史回放、hook、权限与审计在两种发射形态下行为完全一致；网关把 custom 工具降级错了时会返回指向 `compat.apply_patch.freeform: false` 的可操作错误。接受 Responses 但拒绝 custom tool 的主机不再有内置例外：请在那里配置 `compat.apply_patch.freeform: false`。
 
 ### 改进
 
@@ -63,6 +65,7 @@
 
 ### 修复
 
+- 流式接收 freeform `apply_patch` 调用时不再对每个参数分片重新序列化整个 patch。规范的 `{"patch": ...}` 参数对象只在参数接收完成时构建一次——那也是唯一会读取它的时机——消除了随 patch 体积平方增长的开销（60 KB 左右的 patch 从数十毫秒的序列化开销降到约十分之一）。TUI 中逐步增长的 patch 预览不受影响。
 - 非本次编辑文件的缓存 LSP 诊断，只在相关、新增且 fresh 时才会附加：必须与编辑文件同目录，每个问题每个会话只报告一次而不是在后续每个工具结果里重复，并且自诊断发布以来磁盘已变化的文件会先被跳过，直到 Chord 同步该文件并确认收到新诊断。后续编辑不会重复复述模型已经拿到的问题，只报告发生变化的部分；而被其他 agent、文件复制或 `git checkout` 还原修复掉的问题会停止报告，不再从缓存里继续报出来。恢复会话时从恢复的对话记录里还原抑制状态，而不是重复播报其中已经可见的诊断。
 - 工具卡片改用 `▸`/`▾` 折叠标记替代文字展开提示，折叠卡片不再显示行数摘要（`N more lines`）：标记是 `Space`/`Enter`/`o` 可切换卡片的唯一指示。卡片默认状态有变化：完成汇报（`complete`/`escalate`）与委托任务卡默认展开，本地 `!` shell 卡在输出到达后展开，其余工具卡默认折叠（`write`/`edit`/`apply_patch` 结果到达后仍会展开）。
 - 终端通知现在按 runtime 生命周期统一触发：只有 main agent 与所有 SubAgent 的真实工作都完全停止时才发完成提醒；有排队输入、仍会继续运行时保持静默；权限、Question、Handoff 和 loop 决策这类明确等待用户输入的状态会立即提醒。会话、model pool、MCP 等控制操作回到 idle 时不再播报「Ready for input」。idle 仍会送达 runtime 与 headless 消费方，等待用户输入则另有明确的 `notification` 事件。

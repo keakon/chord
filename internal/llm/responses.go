@@ -151,16 +151,19 @@ func (r responsesRequest) MarshalJSON() ([]byte, error) {
 // responsesInputItem represents an item in the Responses API input array.
 // The API expects "arguments" to be a string (JSON-serialized object), not an object.
 type responsesInputItem struct {
-	Type      string          `json:"type"` // "message", "function_call", "function_call_output", "reasoning", "additional_tools", "compaction_trigger"
-	ID        string          `json:"id,omitempty"`
-	Role      string          `json:"role,omitempty"`
-	Content   any             `json:"content,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	CallID    string          `json:"call_id,omitempty"`
-	Output    any             `json:"output,omitempty"`    // string or []responsesContentBlock for function_call_output
-	Arguments string          `json:"arguments,omitempty"` // JSON object as string per API spec
-	Phase     string          `json:"phase,omitempty"`
-	Tools     []responsesTool `json:"tools,omitempty"`
+	Type      string `json:"type"` // "message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "reasoning", "additional_tools", "compaction_trigger"
+	ID        string `json:"id,omitempty"`
+	Role      string `json:"role,omitempty"`
+	Content   any    `json:"content,omitempty"`
+	Name      string `json:"name,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
+	Output    any    `json:"output,omitempty"`    // string or []responsesContentBlock for *_call_output items
+	Arguments string `json:"arguments,omitempty"` // JSON object as string per API spec
+	// Input carries the freeform text of a custom_tool_call input item.
+	Input  string          `json:"input,omitempty"`
+	Status string          `json:"status,omitempty"` // custom_tool_call replay status, e.g. "completed"
+	Phase  string          `json:"phase,omitempty"`
+	Tools  []responsesTool `json:"tools,omitempty"`
 	// Summary is a pointer so a reasoning item can serialize an explicit empty
 	// [] (API rejects a missing summary field) while other item types omit it.
 	Summary          *[]responsesReasoningSummaryPayload `json:"summary,omitempty"`
@@ -183,9 +186,13 @@ type responsesContentBlock struct {
 // responsesTool is a tool definition for the Responses API.
 // The Responses API expects "parameters" (not "params") for tool schemas.
 type responsesTool struct {
-	Type       string         `json:"type"`
-	Name       string         `json:"name"`
-	Parameters map[string]any `json:"parameters,omitempty"`
+	Type        string         `json:"type"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+	// Format carries the constraint-decoding block for custom (freeform)
+	// tools. Custom tools must not send "parameters".
+	Format *responsesToolFormat `json:"format,omitempty"`
 }
 
 // reasoningConfig configures reasoning models.
@@ -366,8 +373,11 @@ func (r *ResponsesProvider) CompleteStream(
 	// Convert messages to Responses API format. System/developer instructions are
 	// sent through the top-level instructions field (matching Codex) instead of as
 	// a system-role input message; some Responses-compatible backends reject typed
-	// system messages in input.
-	apiInput := convertMessagesToResponsesWithItemIDs("", messages, store)
+	// system messages in input. apply_patch history replays in the shape matching
+	// this request's tool declarations (freeform custom_tool_call or JSON
+	// function_call), so the model sees the same wire form it is asked to emit.
+	freeform := shouldEmitFreeformApplyPatch(r.provider, model)
+	apiInput := convertMessagesToResponsesWithItemIDs("", messages, store, freeform)
 
 	// Validate that we have at least one input item.
 	if len(apiInput) == 0 {
@@ -377,8 +387,9 @@ func (r *ResponsesProvider) CompleteStream(
 	// Debug: log input length
 	log.Debugf("responses input system_prompt_len=%v messages_len=%v api_input_len=%v", len(systemPrompt), len(messages), len(apiInput))
 
-	// Convert tools.
-	apiTools := convertToolsToResponses(tools)
+	// Convert tools. apply_patch may be emitted as a freeform custom tool for
+	// targets that support it (see convertToolsToResponsesForTarget).
+	apiTools := convertToolsToResponsesForTarget(r.provider, model, tools)
 
 	// HTTP path is full-input only. We do not send previous_response_id here;
 	// connection-scoped reuse belongs to the Codex WebSocket transport.
@@ -451,10 +462,15 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 	// Tool-only fields are rejected by some Responses-compatible relays when
 	// no tools are declared. Mirror the chat-completions gating: with tools
-	// present, an explicit tuning override wins, otherwise default to true.
+	// present, an explicit tuning override wins. Custom (freeform) tools do
+	// not reliably support parallel execution across gateways, so a custom
+	// apply_patch forces parallel_tool_calls: false unless the user configured
+	// an explicit value; plain function tools keep the current true default.
 	if len(apiTools) > 0 {
 		if ot.ParallelToolCalls != nil {
 			reqBody.ParallelToolCalls = ot.ParallelToolCalls
+		} else if responsesToolsHasCustom(apiTools) {
+			reqBody.ParallelToolCalls = new(false)
 		} else {
 			reqBody.ParallelToolCalls = new(true)
 		}
@@ -669,6 +685,9 @@ func (r *ResponsesProvider) sendAndParse(
 	if err := ctx.Err(); err != nil {
 		return nil, 0, fmt.Errorf("responses request aborted: %w", err)
 	}
+	// Match the freeform replay shape used to build the request body so the
+	// incremental output items parsed from the stream agree with history.
+	freeform := shouldEmitFreeformApplyPatch(r.provider, model)
 	// Build HTTP request with a derived context for per-chunk timeout enforcement.
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	defer streamCancel()
@@ -796,7 +815,7 @@ func (r *ResponsesProvider) sendAndParse(
 	}
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, r.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
-	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, cb, collector, turnState, turnStateIdentity)
+	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, cb, collector, turnState, turnStateIdentity, freeform)
 	if parseErr != nil {
 		if _, ok := errors.AsType[*ChunkTimeoutError](parseErr); ok {
 			snap := cr.chunkTimeoutSnapshot()

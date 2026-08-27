@@ -370,6 +370,7 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 	reusingConn bool,
 	turnState *ResponsesTurnState,
 	turnStateIdentity string,
+	freeform bool,
 ) (*message.Response, []responsesInputItem, error) {
 	payload, err := json.Marshal(env)
 	if err != nil {
@@ -409,7 +410,7 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 		})
 	}
 
-	resp, outputItems, parseErr := r.codexWSReadResponseLocked(streamCtx, apiKey, cb, newCodexWSProgressTracker(waitingHeaderBytes), turnState, turnStateIdentity)
+	resp, outputItems, parseErr := r.codexWSReadResponseLocked(streamCtx, apiKey, cb, newCodexWSProgressTracker(waitingHeaderBytes), turnState, turnStateIdentity, freeform)
 	streamCancel()
 
 	if collectDump && dumpWriter != nil {
@@ -445,15 +446,17 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 	progress codexWSProgressTracker,
 	turnState *ResponsesTurnState,
 	turnStateIdentity string,
+	freeform bool,
 ) (*message.Response, []responsesInputItem, error) {
 	var (
-		resp           message.Response
-		content        strings.Builder
-		toolCalls      = make(map[int]*responsesToolAccumulator)
-		finalizedCalls = make(map[string]bool)
-		truncated      bool
-		outputItems    []responsesInputItem
-		gotData        bool
+		resp            message.Response
+		content         strings.Builder
+		toolCalls       = make(map[int]*responsesToolAccumulator)
+		customItemToIdx = make(map[string]int) // custom tool item_id → index
+		finalizedCalls  = make(map[string]bool)
+		truncated       bool
+		outputItems     []responsesInputItem
+		gotData         bool
 	)
 
 	// Codex WS streams do not reliably emit codex.rate_limits frames for long periods.
@@ -573,15 +576,17 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 			return nil, nil, fmt.Errorf("parse event: %w", err)
 		}
 		state := responsesEventState{
-			resp:           &resp,
-			content:        &content,
-			toolCalls:      toolCalls,
-			finalizedCalls: finalizedCalls,
-			truncated:      &truncated,
-			outputItems:    &outputItems,
-			cb:             cb,
-			turnState:      turnState,
-			turnStateID:    turnStateIdentity,
+			resp:              &resp,
+			content:           &content,
+			toolCalls:         toolCalls,
+			customItemToIndex: customItemToIdx,
+			finalizedCalls:    finalizedCalls,
+			truncated:         &truncated,
+			outputItems:       &outputItems,
+			cb:                cb,
+			turnState:         turnState,
+			turnStateID:       turnStateIdentity,
+			freeform:          freeform,
 		}
 		outResp, outItems, done, err := processResponsesEventPayload(state, eventType, eventData, flushContent)
 		if err != nil {
@@ -666,6 +671,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 	}
 
 	reqSig := responsesRequestSignature(req)
+	freeform := shouldEmitFreeformApplyPatch(r.provider, model)
 
 	newConnection := false
 	if r.codexWSConn == nil {
@@ -737,7 +743,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 			ClientMetadata:    req.ClientMetadata,
 		}
 		prewarmResp, prewarmOutputItems, prewarmErr := r.codexWSExecuteRequestLocked(
-			ctx, apiKey, model, prewarmEnv, nil, false, start, false, opts.TurnState, opts.TurnStateIdentity,
+			ctx, apiKey, model, prewarmEnv, nil, false, start, false, opts.TurnState, opts.TurnStateIdentity, freeform,
 		)
 		if prewarmErr != nil {
 			return nil, false, prewarmErr
@@ -785,7 +791,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 	// it was already live. Either way, "connecting" has already been emitted
 	// (either above for new connections, or was emitted on the original dial).
 	resp, outputItems, reqErr := r.codexWSExecuteRequestLocked(
-		ctx, apiKey, model, env, cb, true, start, true, opts.TurnState, opts.TurnStateIdentity,
+		ctx, apiKey, model, env, cb, true, start, true, opts.TurnState, opts.TurnStateIdentity, freeform,
 	)
 	if reqErr != nil {
 		return nil, useIncremental, reqErr

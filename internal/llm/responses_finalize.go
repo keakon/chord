@@ -2,13 +2,68 @@ package llm
 
 import (
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/toolname"
 )
+
+// toolArgumentsFallback ensures a replayed or recovered tool call always
+// carries the required "arguments" field. A spelled-out `arguments: ""` would
+// be dropped during serialization by omitempty, and the Responses API rejects
+// a function_call item missing the field with a 400 "input[N].arguments"
+// error. apply_patch keeps its canonical {patch} object shape; every other
+// tool gets an empty object.
+func toolArgumentsFallback(toolName string, raw json.RawMessage) json.RawMessage {
+	if len(raw) > 0 {
+		return raw
+	}
+	if toolName == toolname.ApplyPatch {
+		return json.RawMessage(`{"patch":""}`)
+	}
+	return json.RawMessage(`{}`)
+}
+
+// canonicalApplyPatchArgs converts freeform custom_tool_call input into the
+// canonical {"patch": "..."} arguments object every downstream consumer sees
+// (finalize, replay, audit, execution). A payload that already carries a patch
+// field passes through unchanged (gateway-lowered objects); everything else —
+// bare patch text or a JSON string wrapping it — is treated as patch text.
+func canonicalApplyPatchArgs(raw json.RawMessage) json.RawMessage {
+	text := unwrapJSONString(raw)
+	if json.Valid(text) {
+		var obj struct {
+			Patch *string `json:"patch"`
+		}
+		if err := json.Unmarshal(text, &obj); err == nil && obj.Patch != nil {
+			return text
+		}
+	}
+	out, err := json.Marshal(map[string]string{"patch": string(text)})
+	if err != nil {
+		return json.RawMessage(`{"patch":""}`)
+	}
+	return out
+}
+
+// normalizeResponsesOutputEntry maps a raw wire output entry to its canonical
+// function_call representation. custom_tool_call entries (freeform text in
+// input) become function_call entries with canonical {"patch": "..."}
+// arguments, so every consumer — collectResponsesOutput, StopReason detection,
+// recovery, and ResponsesOutput replay — reuses the existing function_call
+// logic and never sees a raw custom item.
+func normalizeResponsesOutputEntry(out responsesOutputEntry) responsesOutputEntry {
+	if out.Type != "custom_tool_call" {
+		return out
+	}
+	out.Type = "function_call"
+	out.Arguments = string(canonicalApplyPatchArgs(json.RawMessage(out.Input)))
+	return out
+}
 
 func applyResponsesCompletionPayload(resp *message.Response, payload responsesCompletedPayload, truncated *bool) {
 	resp.ProviderResponseID = payload.ID
@@ -47,7 +102,7 @@ func applyResponsesCompletionPayload(resp *message.Response, payload responsesCo
 		resp.Content = responsesOutputRefusalText(payload.Output)
 	}
 	for _, out := range payload.Output {
-		if out.Type == "function_call" {
+		if out.Type == "function_call" || out.Type == "custom_tool_call" {
 			resp.StopReason = "tool_calls"
 			return
 		}
@@ -76,10 +131,29 @@ func responsesOutputRefusalText(output []responsesOutputEntry) string {
 // incremental baseline (responsesOutputEntryToMessageItem) so replayed
 // function_call items keep the call_id→id fallback the streaming tool-call
 // accumulator applies, and their outputs never end up orphaned.
+//
+// Streaming streams may produce a response.completed payload whose custom
+// tool-call items carry no input (the full text only flows through the
+// incremental accumulator, which lands in resp.ToolCalls). To avoid replayed
+// function_call items missing the required arguments field, the canonical
+// apply_patch args are back-filled from the accumulated tool call.
 func collectResponsesOutput(resp *message.Response, output []responsesOutputEntry) {
 	resp.ResponsesOutput = nil
 	for _, out := range output {
-		item := responsesOutputEntryToMessageItem(out)
+		var item message.ResponsesOutputItem
+		if out.Type == "custom_tool_call" {
+			// normalizeResponsesOutputEntry already maps the entry to
+			// function_call with canonical arguments, but a completed payload
+			// may carry no input at all (the full text only reached the
+			// accumulator), which would emit `arguments:""` and get dropped by
+			// serialization. Prefer the accumulated tool call's exact arguments
+			// so replay (and tool execution from ResponsesOutput) sees the full
+			// patch rather than an empty object.
+			item = responsesOutputEntryToMessageItem(out)
+			item.Arguments = string(canonicalApplyPatchArgsFromToolCalls(resp.ToolCalls, out))
+		} else {
+			item = responsesOutputEntryToMessageItem(out)
+		}
 		switch item.Type {
 		case "reasoning":
 		case "message":
@@ -87,6 +161,7 @@ func collectResponsesOutput(resp *message.Response, output []responsesOutputEntr
 				continue
 			}
 		case "function_call":
+			item.Arguments = string(toolArgumentsFallback(item.Name, json.RawMessage(item.Arguments)))
 			if strings.TrimSpace(item.CallID) == "" || strings.TrimSpace(item.Name) == "" {
 				continue
 			}
@@ -97,8 +172,28 @@ func collectResponsesOutput(resp *message.Response, output []responsesOutputEntr
 	}
 }
 
+// canonicalApplyPatchArgsFromToolCalls returns the full accumulated apply_patch
+// args for a custom_tool_call output entry. Streaming responses stop
+// accumulating the freeform text in the wire input only when the accumulator is
+// finalized into resp.ToolCalls, so this is the source for the canonical object.
+// It falls back to the done-payload input when available, else the {patch:""}
+// placeholder so the arguments field is never missing on replay.
+func canonicalApplyPatchArgsFromToolCalls(calls []message.ToolCall, out responsesOutputEntry) json.RawMessage {
+	id := out.CallID
+	if id == "" {
+		id = out.ID
+	}
+	for _, call := range slices.Backward(calls) {
+		if call.ID == id {
+			return canonicalApplyPatchArgs(call.Args)
+		}
+	}
+	return canonicalApplyPatchArgs(json.RawMessage(out.Input))
+}
+
 func recoverResponsesToolCallsFromOutput(resp *message.Response, output []responsesOutputEntry, cb StreamCallback) {
 	for _, out := range output {
+		out = normalizeResponsesOutputEntry(out)
 		if out.Type != "function_call" {
 			continue
 		}
@@ -171,9 +266,20 @@ func finalizeOneResponsesToolCall(
 	if len(doneArguments) > 0 {
 		args = doneArguments
 	} else if len(args) == 0 {
-		args = json.RawMessage("{}")
+		// An accumulator that saw no input must not inherit the generic {}
+		// placeholder: a freeform custom call would replay the literal text
+		// "{}" as the patch. The canonical empty object parses downstream as
+		// the regular empty-patch error instead.
+		if acc.custom {
+			args = json.RawMessage(`{"patch":""}`)
+		} else {
+			args = json.RawMessage("{}")
+		}
 	}
 	args = unwrapJSONString(args)
+	if acc.custom {
+		args = canonicalApplyPatchArgs(args)
+	}
 	if !json.Valid(args) {
 		log.Warnf("tool call has invalid JSON args in responses API tool=%v id=%v raw_args=%v", acc.name, acc.id, string(args))
 		args = json.RawMessage(MalformedArgsSentinel)
@@ -234,9 +340,18 @@ func finalizeResponsesToolCalls(
 		}
 		args := json.RawMessage(acc.args.String())
 		if len(args) == 0 {
-			args = json.RawMessage("{}")
+			// See finalizeOneResponsesToolCall: a custom accumulator with no
+			// input must not become the literal patch "{}".
+			if acc.custom {
+				args = json.RawMessage(`{"patch":""}`)
+			} else {
+				args = json.RawMessage("{}")
+			}
 		}
 		args = unwrapJSONString(args)
+		if acc.custom {
+			args = canonicalApplyPatchArgs(args)
+		}
 		// If stream ended without response.incomplete but args are invalid JSON (e.g. truncated
 		// mid-tool-call), treat as truncation: do not append malformed, set StopReason so agent
 		// does not count as malformed and can suggest new conversation / max_output_tokens.

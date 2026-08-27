@@ -380,6 +380,10 @@ type ToolCallDelta struct {
 	ID    string
 	Name  string
 	Input string // partial JSON
+	// InputText carries a freeform tool input as bare text (Responses custom
+	// tool deltas, e.g. apply_patch patch text). It is mutually exclusive with
+	// Input: consumers accumulate it verbatim instead of treating it as JSON.
+	InputText string
 }
 
 // RollbackDelta indicates that the current streamed assistant output should be

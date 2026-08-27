@@ -377,6 +377,12 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 
 详细说明见 [Headless 集成](./headless_CN.md)。
 
+## 模型编辑工具
+
+Chord 会根据当前模型选择文件编辑工具：gpt-5 及之后主版本家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及未来的 `gpt-6` 等）和 `codex-auto-review` 使用 `apply_patch`，其余模型默认 `edit`——完整矩阵和依据见 [编辑工具](./edit-tools_CN.md)。在兼容的 Responses 端点上，补丁原生模型还会把 `apply_patch` 以 freeform custom tool 形态发射，而不是 JSON function tool。
+
+当模型名或网关的实际表现与推断不符时，可以用 `compat.apply_patch.enabled`（工具面）和 `compat.apply_patch.freeform`（发射形态）按 provider 或模型覆盖。两个键都是三态：省略表示按模型名和端点推断，只需设置要改的那个。字段权威说明见 [配置与认证](./configuration_CN.md)。
+
 ## 日常使用建议
 
 - 首次接入时，先用最小 provider 配置确认请求能跑通

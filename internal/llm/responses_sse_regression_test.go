@@ -75,3 +75,40 @@ func TestParseResponsesSSEOutOfOrderItemDoneKeepsTerminalOrder(t *testing.T) {
 		t.Fatalf("ToolCalls = %+v", resp.ToolCalls)
 	}
 }
+
+func TestParseResponsesSSECustomToolCallEmitsInputDeltas(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"custom_tool_call","id":"item_1","name":"apply_patch"}}`,
+		`{"type":"response.custom_tool_call_input.delta","item_id":"item_1","delta":"*** Begin Patch\n"}`,
+		`{"type":"response.custom_tool_call_input.delta","item_id":"item_1","delta":"*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch"}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"custom_tool_call","id":"item_1","name":"apply_patch","input":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch"}}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"custom_tool_call","id":"item_1","name":"apply_patch","input":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch"}]}}`,
+	})
+	var got []string
+	resp, err := parseResponsesSSE(stream, func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaToolUseDelta && delta.ToolCall != nil {
+			got = append(got, delta.ToolCall.InputText)
+		}
+	}, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	want := []string{
+		"*** Begin Patch\n",
+		"*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("input delta count = %d, want %d (%#v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("input delta %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("got %d tool calls, want 1", len(resp.ToolCalls))
+	}
+	if string(resp.ToolCalls[0].Args) != `{"patch":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch"}` {
+		t.Fatalf("final tool args = %q, want complete canonical patch", resp.ToolCalls[0].Args)
+	}
+}
