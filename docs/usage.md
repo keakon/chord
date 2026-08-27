@@ -233,6 +233,7 @@ The export includes every conversation message plus the current session usage st
 - These reductions are not persistent compaction: older tool results are usually replaced with shorter placeholder summaries for the request, while durable session history remains intact. `/compact`, automatic compaction, tool-output growth, and system prompt or tool-definition changes update the fallback durable estimate; new request preparation refreshes the actual sent request size, including while loop mode is active.
 - When `Cache R` shows a percentage, it is cache-read tokens divided by input-side prompt tokens plus separately reported cache-write tokens. Output tokens are excluded because prompt caching applies only to the input side.
 - `Think` appears only when the provider reports reasoning/thinking tokens. These tokens are already included in output-token billing; the line is a visibility breakdown, not an additional token bucket.
+- `Calls` counts the real LLM requests issued by the focused agent (main agent, running SubAgent, or parked task). It comes from the persisted usage ledger, so it survives session restore and is not reset by context compaction.
 
 ### Reading the info panel `TIME` block
 

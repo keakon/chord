@@ -231,6 +231,7 @@ Agent 运行中也可以打开选择器查看 MCP 状态，不需要等待当前
 - 这些剪裁不是持久化压缩：较旧的工具结果通常会在请求中替换成更短的占位摘要，而持久化会话历史保持不变。`/compact`、自动压缩、工具输出增长以及系统提示词或工具定义变化会更新回退用的持久估算；新的请求准备会刷新实际发送请求大小，loop 模式运行中也会同步更新。
 - `↑` 显示完整 prompt input,即未缓存输入、cache-read 和 cache-write token 的总和。存在缓存桶时,下面会分别显示 `Uncached`、`Cache R` 和 `Cache W`; `Cache R` 的百分比分母是完整输入侧 prompt tokens。输出 token 不参与计算，因为 prompt cache 只作用于输入侧。
 - `Think` 行只在 provider 上报 reasoning/thinking tokens 时显示。这些 token 已包含在输出 token 计费中；该行只是可见性拆解，不是额外的 token 计费桶。
+- `Calls` 显示当前聚焦 agent（主 agent、运行中的 SubAgent 或挂起的 task）发起的真实 LLM 请求次数。该数字来自持久化的 usage 账本，会话恢复后依然保留，上下文压缩不会清零。
 
 ### 看懂信息面板 `TIME` 区
 

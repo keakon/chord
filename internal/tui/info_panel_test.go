@@ -673,7 +673,7 @@ func TestRenderInfoPanelUsageShowsReasoningTokens(t *testing.T) {
 	want := []string{
 		"TOKENS",
 		"↑ 10.0k  ↓ 20.0k",
-		"Think    5.6k",
+		"Think     5.6k",
 	}
 	for _, expected := range want {
 		found := slices.Contains(usageLines, expected)
@@ -1099,7 +1099,7 @@ func TestRenderInfoPanelUsageShowsReasoningTokensSeparately(t *testing.T) {
 
 	// Should have: TOKENS, summary line, Think line, cost line
 	wantSummary := "↑ 1.2M  ↓ 45.0k"
-	wantThinking := "Think    350.0k"
+	wantThinking := "Think     350.0k"
 	wantCost := "$ 0.8765"
 
 	summaryIdx := -1

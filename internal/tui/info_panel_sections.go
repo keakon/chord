@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -190,6 +191,9 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 		}
 		if cacheLine := renderUsageCacheLine(lineW, stats); cacheLine != "" {
 			usageLines = append(usageLines, cacheLine)
+		}
+		if callsLine := renderUsageCallsLine(lineW, stats); callsLine != "" {
+			usageLines = append(usageLines, callsLine)
 		}
 		if costLine := renderUsageCostLine(lineW, stats); costLine != "" {
 			usageLines = append(usageLines, costLine)
@@ -788,6 +792,17 @@ func renderUsageSummaryLine(lineW int, stats analytics.SessionStats) string {
 	return InfoPanelLineBg.Width(lineW).Render(strings.Join(parts, InfoPanelDim.Render("  ")))
 }
 
+// usageDetailLabelWidth aligns the label column of the usage detail lines:
+// every detail line donates its width from the widest fixed label.
+const usageDetailLabelWidth = "Uncached"
+
+func renderUsageCallsLine(lineW int, stats analytics.SessionStats) string {
+	if stats.LLMCalls <= 0 {
+		return ""
+	}
+	return renderUsageCacheDetailLine(lineW, "Calls", ansi.StringWidth(usageDetailLabelWidth), InfoPanelValue.Render(strconv.FormatInt(stats.LLMCalls, 10)))
+}
+
 func renderUsageCostLine(lineW int, stats analytics.SessionStats) string {
 	if stats.EstimatedCost <= 0 {
 		return ""
@@ -800,12 +815,12 @@ func renderUsageReasoningLine(lineW int, stats analytics.SessionStats) string {
 	if stats.ReasoningTokens <= 0 {
 		return ""
 	}
-	return renderUsageCacheDetailLine(lineW, "Think", ansi.StringWidth("Cache W"), InfoPanelValue.Render(formatUsageTokens(stats.ReasoningTokens)))
+	return renderUsageCacheDetailLine(lineW, "Think", ansi.StringWidth(usageDetailLabelWidth), InfoPanelValue.Render(formatUsageTokens(stats.ReasoningTokens)))
 }
 
 func renderUsageCacheLine(lineW int, stats analytics.SessionStats) string {
 	rows := make([]string, 0, 3)
-	labelWidth := ansi.StringWidth("Uncached")
+	labelWidth := ansi.StringWidth(usageDetailLabelWidth)
 	if stats.CacheReadTokens > 0 {
 		rows = append(rows, renderUsageCacheDetailLine(lineW, "Cache R", labelWidth,
 			formatUsageCacheValue(stats.CacheReadTokens, analytics.FullInputTokens(stats.InputTokens, stats.CacheReadTokens, stats.CacheWriteTokens))))
