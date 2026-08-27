@@ -946,6 +946,20 @@ mcp:
 
 被过滤的工具不会注册，也不会进入 LLM 工具列表。上例中 `search` 是用户自定义的 MCP server 名；Chord 只会注册 `mcp_search_web_search_exa` 和 `mcp_search_web_fetch_exa`。
 
+### HTTP 请求头
+
+对需要认证的远端 MCP server，可用 `headers` 指定随每个请求发送的额外请求头。像 Exa 这样的服务要求 `x-api-key`：
+
+```yaml
+mcp:
+  exa:
+    url: https://mcp.exa.ai/mcp
+    headers:
+      x-api-key: "$EXA_API_KEY"
+```
+
+以 `$` 开头的 header 值会从环境变量展开（此处即 `EXA_API_KEY`），避免把密钥写进配置文件；`$` 值展开后为空字符串属于配置错误——那等于用空凭据认证。header 名必须是合法的 HTTP header 名，值中不能包含 CR 或 LF。`headers` 只对远程（`url`）server 生效；stdio server 不发起 HTTP 请求，为它配置 `headers` 会被拒绝。协议管理的请求头（`Content-Type`、`Accept`、`Mcp-Session-Id`）由 Chord 覆盖，不会受 `headers` 影响。
+
 ### 手动（按需）启用 MCP
 
 默认情况下，已配置的 MCP server 会自动启动，并成为默认 LLM 工具上下文的一部分。对于不是每轮对话都需要的 MCP，可设置 `manual: true`：启动时保持禁用，平时不连接该 server，也不把它的工具描述加入默认上下文，从而降低上下文开销；需要用到时再手动启用。

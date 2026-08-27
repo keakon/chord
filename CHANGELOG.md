@@ -27,6 +27,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Card navigation now covers types with three bracket pairs: `}` / `{` jump to the next / previous user message card (turn boundary), `)` / `(` jump between assistant cards, and `]` / `[` jump to the next / previous card of the same type as the current one. All accept a `[count]` prefix, never land on error cards, and leave the viewport put when no matching card exists; `]` / `[` use the focused card's type, or the topmost card when nothing is focused.
 - The message directory (`Ctrl+T`) opens with the cursor on the current card instead of always at the top, so Enter immediately jumps to where you were looking.
 - Message-directory entries for tool cards now show the primary argument next to the tool name (`Tool: shell go test ./...`, `Tool: edit internal/tui/app.go`), so repeated calls to the same tool can be told apart at a glance.
+- HTTP MCP servers can now send extra headers with every request via the `headers` config key — for example `x-api-key` for a service like Exa. A header value starting with `$` is expanded from the environment, so API keys do not have to be written into the config file; protocol-managed headers (`Content-Type`, `Accept`, `Mcp-Session-Id`) still take precedence.
 
 ### Improvements
 

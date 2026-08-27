@@ -16,6 +16,7 @@ func ServerConfigsFromConfig(mc config.MCPConfig) []ServerConfig {
 			Args:         sc.Args,
 			Env:          sc.Env,
 			URL:          sc.URL,
+			Headers:      sc.Headers,
 			AllowedTools: sc.AllowedTools,
 			Manual:       sc.Manual,
 		})

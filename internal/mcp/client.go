@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -306,13 +307,14 @@ func (c *Client) ServerName() string {
 //	    api-server:
 //	      url: "http://localhost:8080/mcp"
 type ServerConfig struct {
-	Name         string   // server identifier
-	Command      string   // executable path (for stdio transport)
-	Args         []string // command arguments (for stdio transport)
-	Env          []string // optional environment variables (for stdio transport)
-	URL          string   // HTTP URL (for HTTP transport)
-	AllowedTools []string // optional allowlist of remote MCP tool names
-	Manual       bool     // when true, do not auto-connect on startup
+	Name         string            // server identifier
+	Command      string            // executable path (for stdio transport)
+	Args         []string          // command arguments (for stdio transport)
+	Env          []string          // optional environment variables (for stdio transport)
+	URL          string            // HTTP URL (for HTTP transport)
+	Headers      map[string]string // extra HTTP headers (for HTTP transport); values starting with $ are expanded from the environment
+	AllowedTools []string          // optional allowlist of remote MCP tool names
+	Manual       bool              // when true, do not auto-connect on startup
 }
 
 // ---------------------------------------------------------------------------
@@ -902,6 +904,9 @@ func (m *Manager) setEndpointStatus(status ServerEndpointStatus) {
 // createClient builds a Client with the appropriate transport based on config.
 func createClient(ctx context.Context, cfg ServerConfig, info ClientInfo) (*Client, error) {
 	if cfg.Command != "" {
+		if len(cfg.Headers) > 0 {
+			return nil, fmt.Errorf("mcp server %q: headers apply only to remote (url) servers; stdio servers receive no HTTP requests", strings.TrimSpace(cfg.Name))
+		}
 		transport, err := NewStdioTransport(ctx, cfg.Command, cfg.Args, cfg.Env)
 		if err != nil {
 			return nil, err
@@ -910,11 +915,58 @@ func createClient(ctx context.Context, cfg ServerConfig, info ClientInfo) (*Clie
 	}
 
 	if cfg.URL != "" {
-		transport := NewHTTPTransport(cfg.URL)
+		headers, err := expandHeaders(cfg.Name, cfg.Headers)
+		if err != nil {
+			return nil, err
+		}
+		transport := NewHTTPTransport(cfg.URL, headers)
 		return NewClientWithInfo(cfg.Name, transport, info), nil
 	}
 
 	return nil, fmt.Errorf("mcp server %q: must specify either command or url", strings.TrimSpace(cfg.Name))
+}
+
+// expandHeaders validates the configured headers and resolves values that
+// start with "$" from the environment, mirroring the auth config convention so
+// API keys do not need to be written into config files. A "$"-prefixed value
+// whose environment variables are all unset expands to an empty string, which
+// would silently authenticate with a blank credential, so that is an error.
+func expandHeaders(server string, headers map[string]string) (map[string]string, error) {
+	if len(headers) == 0 {
+		return nil, nil
+	}
+	server = strings.TrimSpace(server)
+	expanded := make(map[string]string, len(headers))
+	for k, v := range headers {
+		if !validHeaderName(k) {
+			return nil, fmt.Errorf("mcp server %q: header name %q is not a valid HTTP header name", server, k)
+		}
+		if strings.ContainsAny(v, "\r\n") {
+			return nil, fmt.Errorf("mcp server %q: header %q value must not contain CR or LF", server, k)
+		}
+		if strings.HasPrefix(v, "$") {
+			v = os.ExpandEnv(v)
+			if v == "" {
+				return nil, fmt.Errorf("mcp server %q: header %q expands from the environment to an empty value; check that the referenced variable is set", server, k)
+			}
+		}
+		expanded[k] = v
+	}
+	return expanded, nil
+}
+
+// validHeaderName reports whether name is a valid HTTP field name (an RFC 7230
+// token): non-empty and free of separators and control characters.
+func validHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if r <= ' ' || r >= 0x7F || strings.ContainsRune(`"(),/:;<=>?@[\]{}`, r) {
+			return false
+		}
+	}
+	return true
 }
 
 // Clients returns all successfully initialized clients.

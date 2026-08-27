@@ -213,12 +213,13 @@ type LSPServerConfig struct {
 // MCPServerConfig defines an MCP server connection.
 // Either Command (stdio transport) or URL (HTTP transport) must be set.
 type MCPServerConfig struct {
-	Command      string   `json:"command,omitempty" yaml:"command,omitempty"`             // executable (for stdio transport)
-	Args         []string `json:"args,omitempty" yaml:"args,omitempty"`                   // command arguments
-	Env          []string `json:"env,omitempty" yaml:"env,omitempty"`                     // optional environment variables
-	URL          string   `json:"url,omitempty" yaml:"url,omitempty"`                     // HTTP URL (for HTTP transport)
-	AllowedTools []string `json:"allowed_tools,omitempty" yaml:"allowed_tools,omitempty"` // optional remote MCP tool allowlist
-	Manual       bool     `json:"manual,omitempty" yaml:"manual,omitempty"`               // when true, do not auto-start; must be enabled via /mcp or shortcut
+	Command      string            `json:"command,omitempty" yaml:"command,omitempty"`             // executable (for stdio transport)
+	Args         []string          `json:"args,omitempty" yaml:"args,omitempty"`                   // command arguments
+	Env          []string          `json:"env,omitempty" yaml:"env,omitempty"`                     // optional environment variables
+	URL          string            `json:"url,omitempty" yaml:"url,omitempty"`                     // HTTP URL (for HTTP transport)
+	Headers      map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`             // extra HTTP headers (for HTTP transport); values starting with $ are expanded from the environment
+	AllowedTools []string          `json:"allowed_tools,omitempty" yaml:"allowed_tools,omitempty"` // optional remote MCP tool allowlist
+	Manual       bool              `json:"manual,omitempty" yaml:"manual,omitempty"`               // when true, do not auto-start; must be enabled via /mcp or shortcut
 }
 
 // MCPConfig holds MCP server configurations keyed by server name.

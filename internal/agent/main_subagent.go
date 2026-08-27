@@ -713,7 +713,7 @@ func (a *MainAgent) getOrCreateAgentMCP(agentName string, mcpCfg config.MCPConfi
 			extra = append(extra, entry.Tools...)
 			continue
 		}
-		cfg := mcp.ServerConfig{Name: name, Command: sc.Command, Args: sc.Args, Env: sc.Env, URL: sc.URL, AllowedTools: sc.AllowedTools}
+		cfg := mcp.ServerConfig{Name: name, Command: sc.Command, Args: sc.Args, Env: sc.Env, URL: sc.URL, Headers: sc.Headers, AllowedTools: sc.AllowedTools}
 		mgr, err := mcp.NewManagerWithClientInfo(connectCtx, []mcp.ServerConfig{cfg}, a.mcpClientInfo)
 		if err != nil {
 			log.Warnf("failed to create MCP manager for server server=%v error=%v", name, err)

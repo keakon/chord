@@ -1068,6 +1068,20 @@ mcp:
 
 The server name (`search` above) is user-defined. With this example, Chord registers only `mcp_search_web_search_exa` and `mcp_search_web_fetch_exa`. Filtered tools are not registered and do not enter the LLM tool surface.
 
+### HTTP request headers
+
+For remote MCP servers that require authentication, use `headers` to send extra headers with every request. A service like Exa requires an `x-api-key`:
+
+```yaml
+mcp:
+  exa:
+    url: https://mcp.exa.ai/mcp
+    headers:
+      x-api-key: "$EXA_API_KEY"
+```
+
+A header value starting with `$` is expanded from the environment (here `EXA_API_KEY`), so secrets do not have to be written into the config file; a `$` value that expands to an empty string is a configuration error, since it would authenticate with a blank credential. Header names must be valid HTTP header names, and values must not contain CR or LF. `headers` applies only to remote (`url`) servers; stdio servers do not carry HTTP requests, and configuring `headers` for one is rejected. Protocol-managed headers (`Content-Type`, `Accept`, `Mcp-Session-Id`) are set by Chord and are not affected by `headers`.
+
 ### Manual (on-demand) MCP servers
 
 By default, configured MCP servers auto-start and become part of the default LLM tool context. For an MCP server you do not need in every conversation, set `manual: true`: it stays disabled at startup, Chord normally does not connect to it, and its tool descriptions are not added to the default context, reducing context overhead. Enable it manually only when you need it:

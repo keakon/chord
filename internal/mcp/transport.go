@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -312,27 +313,100 @@ func (t *StdioTransport) removePending(id int) {
 //   - application/json single JSON-RPC response (simple HTTP MCP)
 //   - text/event-stream SSE with "data: {jsonrpc...}" lines (Exa, Streamable HTTP)
 //   - Mcp-Session-Id response header stored and sent on subsequent requests
+//   - extra configured headers (for example x-api-key) sent with every request
 // ---------------------------------------------------------------------------
 
 const mcpSessionHeader = "Mcp-Session-Id"
 
+// mcpMaxRedirects bounds a redirect chain. Go's default is 10; a JSON-RPC
+// endpoint that needs more than a couple of hops is misconfigured, not slow.
+const mcpMaxRedirects = 5
+
 // HTTPTransport communicates with an MCP server over HTTP.
 type HTTPTransport struct {
-	url    string
-	client *http.Client
+	url     string
+	headers map[string]string // extra headers sent with every request
+	client  *http.Client
 
 	mu        sync.Mutex
 	sessionID string
 }
 
 // NewHTTPTransport creates an HTTP-based transport for the given URL.
-func NewHTTPTransport(url string) *HTTPTransport {
-	return &HTTPTransport{
-		url: url,
+// headers are sent with every request; protocol-managed headers
+// (Content-Type, Accept, Mcp-Session-Id) always take precedence.
+func NewHTTPTransport(endpoint string, headers map[string]string) *HTTPTransport {
+	t := &HTTPTransport{
+		url:     endpoint,
+		headers: headers,
 		client: &http.Client{
 			Timeout: 120 * time.Second,
 		},
 	}
+	t.client.CheckRedirect = t.checkRedirect
+	return t
+}
+
+// checkRedirect bounds redirect chains and keeps the configured credentials
+// from following one off-origin. Go copies request headers across redirects and
+// only strips the ones it knows are sensitive (Authorization, Cookie); a
+// configured MCP header is typically an API key under a name Go cannot
+// recognize, such as x-api-key, so a 3xx from the configured server to a third
+// party would otherwise hand that key over. Same-origin and subdomain hops keep
+// the headers, matching how Go itself scopes Authorization, and a stripped hop
+// fails loudly with the server's own auth error rather than silently.
+func (t *HTTPTransport) checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= mcpMaxRedirects {
+		return fmt.Errorf("mcp http: stopped after %d redirects", mcpMaxRedirects)
+	}
+	if scheme := req.URL.Scheme; scheme != "http" && scheme != "https" {
+		return fmt.Errorf("mcp http: redirect to non-http scheme %q not allowed", scheme)
+	}
+	if len(via) == 0 || sameHTTPOrigin(via[0].URL, req.URL) {
+		return nil
+	}
+	for k := range t.headers {
+		req.Header.Del(k)
+	}
+	return nil
+}
+
+// sameHTTPOrigin reports whether to is the origin from or one of its
+// subdomains, without a transport downgrade. A plain https->http hop is not
+// same-origin even on the same host, because it would put the header on the
+// wire in clear text.
+func sameHTTPOrigin(from, to *url.URL) bool {
+	if from == nil || to == nil {
+		return false
+	}
+	if from.Scheme == "https" && to.Scheme != "https" {
+		return false
+	}
+	fromHost := strings.ToLower(from.Hostname())
+	toHost := strings.ToLower(to.Hostname())
+	if fromHost == "" || toHost == "" {
+		return false
+	}
+	return toHost == fromHost || strings.HasSuffix(toHost, "."+fromHost)
+}
+
+func (t *HTTPTransport) applyHeaders(h http.Header) {
+	for k, v := range t.headers {
+		h.Set(k, v)
+	}
+}
+
+// applyProtocolHeaders strips any user-configured values for the protocol-managed
+// headers, then sets the protocol values. Content-Type and Accept are always
+// set by the wire protocol, and Mcp-Session-Id is set by applySession when a
+// session exists; without this strip a user-configured Mcp-Session-Id would be
+// sent on the initial request before the server has assigned a session.
+func (t *HTTPTransport) applyProtocolHeaders(h http.Header) {
+	for _, k := range []string{"Content-Type", "Accept", mcpSessionHeader} {
+		h.Del(k)
+	}
+	h.Set("Content-Type", "application/json")
+	h.Set("Accept", "application/json, text/event-stream")
 }
 
 func (t *HTTPTransport) applySession(h http.Header) {
@@ -428,8 +502,8 @@ func (t *HTTPTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCRe
 	if err != nil {
 		return JSONRPCResponse{}, fmt.Errorf("mcp http: create request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json, text/event-stream")
+	t.applyHeaders(httpReq.Header)
+	t.applyProtocolHeaders(httpReq.Header)
 	t.applySession(httpReq.Header)
 
 	httpResp, err := t.client.Do(httpReq)
@@ -459,8 +533,8 @@ func (t *HTTPTransport) Notify(ctx context.Context, notif JSONRPCNotification) e
 	if err != nil {
 		return fmt.Errorf("mcp http: create notification request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json, text/event-stream")
+	t.applyHeaders(httpReq.Header)
+	t.applyProtocolHeaders(httpReq.Header)
 	t.applySession(httpReq.Header)
 
 	httpResp, err := t.client.Do(httpReq)

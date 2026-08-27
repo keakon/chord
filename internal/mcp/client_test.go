@@ -597,7 +597,7 @@ func TestHTTPTransport_Send(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	transport := NewHTTPTransport(server.URL)
+	transport := NewHTTPTransport(server.URL, nil)
 	client := NewClientWithInfo("http-test", transport, testClientInfo)
 	ctx := context.Background()
 
@@ -621,7 +621,7 @@ func TestHTTPTransportRejectsInvalidStringInResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	transport := NewHTTPTransport(server.URL)
+	transport := NewHTTPTransport(server.URL, nil)
 	_, err := transport.Send(context.Background(), JSONRPCRequest{JSONRPC: "2.0", ID: 1, Method: "test"})
 	if err == nil || !strings.Contains(err.Error(), "decode response") {
 		t.Fatalf("Send error = %v, want decode response error", err)
@@ -661,7 +661,7 @@ func TestHTTPTransport_SSE_Stream(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	transport := NewHTTPTransport(server.URL)
+	transport := NewHTTPTransport(server.URL, nil)
 	client := NewClientWithInfo("sse-test", transport, testClientInfo)
 	ctx := context.Background()
 
@@ -698,7 +698,7 @@ func TestHTTPTransport_ContextCancellation(t *testing.T) {
 		server.Close()
 	}()
 
-	transport := NewHTTPTransport(server.URL)
+	transport := NewHTTPTransport(server.URL, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -721,7 +721,7 @@ func TestHTTPTransport_ServerError(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	transport := NewHTTPTransport(server.URL)
+	transport := NewHTTPTransport(server.URL, nil)
 	ctx := context.Background()
 
 	_, err := transport.Send(ctx, JSONRPCRequest{
@@ -1038,4 +1038,104 @@ func TestFullWorkflow_FakeTransport(t *testing.T) {
 	}
 
 	t.Log("Full MCP workflow test passed")
+}
+
+func TestHTTPTransport_SendsCustomHeaders(t *testing.T) {
+	got := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- r.Header.Get("x-api-key")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}))
+	defer server.Close()
+
+	transport := NewHTTPTransport(server.URL, map[string]string{"x-api-key": "test-key"})
+	if _, err := transport.Send(context.Background(), JSONRPCRequest{JSONRPC: "2.0", ID: 1, Method: "test"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if got := <-got; got != "test-key" {
+		t.Fatalf("x-api-key header = %q, want %q", got, "test-key")
+	}
+}
+
+func TestHTTPTransport_ProtocolHeadersOverrideUserConfig(t *testing.T) {
+	got := make(chan map[string]string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- map[string]string{
+			"Content-Type":   r.Header.Get("Content-Type"),
+			"Accept":         r.Header.Get("Accept"),
+			"Mcp-Session-Id": r.Header.Get("Mcp-Session-Id"),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}))
+	defer server.Close()
+
+	// A user-configured protocol-managed header must never leak onto the wire:
+	// before the server assigns a session there is no session id, so a stale
+	// user value would otherwise be sent on the initial request.
+	transport := NewHTTPTransport(server.URL, map[string]string{
+		"Mcp-Session-Id": "stale-value",
+		"Content-Type":   "text/plain",
+		"Accept":         "text/html",
+	})
+	if _, err := transport.Send(context.Background(), JSONRPCRequest{JSONRPC: "2.0", ID: 1, Method: "test"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	headers := <-got
+	if headers["Content-Type"] != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", headers["Content-Type"], "application/json")
+	}
+	if headers["Accept"] != "application/json, text/event-stream" {
+		t.Errorf("Accept = %q, want %q", headers["Accept"], "application/json, text/event-stream")
+	}
+	if headers["Mcp-Session-Id"] != "" {
+		t.Errorf("Mcp-Session-Id = %q, want empty (no session assigned yet)", headers["Mcp-Session-Id"])
+	}
+}
+
+func TestExpandHeaders(t *testing.T) {
+	t.Setenv("MCP_API_KEY", "secret-value")
+	got, err := expandHeaders("remote", map[string]string{
+		"x-api-key": "$MCP_API_KEY",
+		"x-static":  "plain",
+	})
+	if err != nil {
+		t.Fatalf("expandHeaders: %v", err)
+	}
+	want := map[string]string{"x-api-key": "secret-value", "x-static": "plain"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expandHeaders = %v, want %v", got, want)
+	}
+	if got, err := expandHeaders("remote", nil); got != nil || err != nil {
+		t.Fatalf("expandHeaders(nil) = %v, %v; want nil, nil", got, err)
+	}
+}
+
+func TestExpandHeadersRejectsInvalidConfiguration(t *testing.T) {
+	t.Run("unset_env_expands_to_empty", func(t *testing.T) {
+		_, err := expandHeaders("remote", map[string]string{"x-api-key": "$MCP_DEFINITELY_UNSET_VAR"})
+		if err == nil || !strings.Contains(err.Error(), "expands from the environment to an empty value") {
+			t.Fatalf("err = %v, want empty-expansion error", err)
+		}
+	})
+	t.Run("invalid_header_name", func(t *testing.T) {
+		_, err := expandHeaders("remote", map[string]string{"bad header": "v"})
+		if err == nil || !strings.Contains(err.Error(), "not a valid HTTP header name") {
+			t.Fatalf("err = %v, want invalid header name error", err)
+		}
+	})
+	t.Run("header_value_injection", func(t *testing.T) {
+		_, err := expandHeaders("remote", map[string]string{"x-a": "v1\r\nX-Evil: v2"})
+		if err == nil || !strings.Contains(err.Error(), "must not contain CR or LF") {
+			t.Fatalf("err = %v, want CR/LF rejection", err)
+		}
+	})
+}
+
+func TestCreateClientRejectsHeadersOnStdioServer(t *testing.T) {
+	_, err := createClient(context.Background(), ServerConfig{Name: "local", Command: "true", Headers: map[string]string{"x-api-key": "v"}}, ClientInfo{})
+	if err == nil || !strings.Contains(err.Error(), "headers apply only to remote (url) servers") {
+		t.Fatalf("err = %v, want stdio headers rejection", err)
+	}
 }
