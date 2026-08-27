@@ -2185,8 +2185,8 @@ func TestCollapsedCompleteShowsSummaryPreviewInsteadOfFullBody(t *testing.T) {
 	if !strings.Contains(joined, "Status: success · Changes: line one") {
 		t.Fatalf("expected collapsed Complete to show summary preview; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "more lines · [space] expand") {
-		t.Fatalf("expected collapsed Complete to show expand hint; got:\n%s", joined)
+	if !strings.Contains(joined, "✓ ▸ complete") {
+		t.Fatalf("expected collapsed Complete header to show ▸ disclosure marker; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "line twelve") {
 		t.Fatalf("did not expect collapsed Complete to render full body; got:\n%s", joined)
@@ -3025,8 +3025,8 @@ func TestCollapsedTaskShowsMultilineDescription(t *testing.T) {
 	if strings.Contains(joined, "update docs") {
 		t.Fatalf("expected collapsed Delegate preview to hide later description lines; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "1 more lines · [space] expand") {
-		t.Fatalf("expected collapsed Delegate preview to show expand hint; got:\n%s", joined)
+	if !strings.Contains(joined, "✓ ▸ delegate (reviewer)") {
+		t.Fatalf("expected collapsed Delegate header to show ▸ disclosure marker and agent type; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "(reviewer)") {
 		t.Fatalf("expected Delegate header to show agent type; got:\n%s", joined)
@@ -3052,8 +3052,42 @@ func TestCollapsedGenericToolDeduplicatesMatchingParamAndResultPreview(t *testin
 	if strings.Count(joined, "[Image #1]") != 1 {
 		t.Fatalf("expected duplicated result first line to be suppressed, got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "[space] expand") {
-		t.Fatalf("expected expand hint to remain after deduplication, got:\n%s", joined)
+	if !strings.Contains(joined, "✓ ▸ Task") {
+		t.Fatalf("expected collapsed generic card to show ▸ disclosure marker in the header, got:\n%s", joined)
+	}
+}
+
+func TestCollapsedMCPToolUsesHeaderDisclosureMarker(t *testing.T) {
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "mcp_exa_web_search_exa",
+		Content:                `{"query":"OpenAI Responses API","numResults":6}`,
+		ResultContent:          "title one\nhttps://example.com/one\ntitle two\nhttps://example.com/two\ntitle three\nhttps://example.com/three\ntitle four\nhttps://example.com/four\ntitle five\nhttps://example.com/five\ntitle six\nhttps://example.com/six",
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+	}
+
+	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(collapsed, "✓ ▸ mcp_exa_web_search_exa") {
+		t.Fatalf("expected collapsed MCP card to show header disclosure glyph; got:\n%s", collapsed)
+	}
+	if !strings.Contains(collapsed, "numResults=6") {
+		t.Fatalf("expected collapsed MCP card to keep the param summary; got:\n%s", collapsed)
+	}
+	for _, forbidden := range []string{"more lines", "[space] expand", "[space] collapse"} {
+		if strings.Contains(collapsed, forbidden) {
+			t.Fatalf("expected collapsed MCP card to drop the footer expand hint (%q); got:\n%s", forbidden, collapsed)
+		}
+	}
+
+	block.ToggleAtWidth(120)
+	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(expanded, "✓ ▾ mcp_exa_web_search_exa") {
+		t.Fatalf("expected expanded MCP card to show the expanded disclosure glyph; got:\n%s", expanded)
+	}
+	if !strings.Contains(expanded, "https://example.com/six") {
+		t.Fatalf("expected expanded MCP card to reveal the full result; got:\n%s", expanded)
 	}
 }
 

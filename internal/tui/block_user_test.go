@@ -47,11 +47,11 @@ func TestRenderUserTerminalShowsExpandHintForCollapsedOutput(t *testing.T) {
 	if !strings.Contains(joined, "TERMINAL") {
 		t.Fatalf("expected TERMINAL badge, got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "[space] expand") {
-		t.Fatalf("expected collapsed terminal output to show expand hint, got:\n%s", joined)
+	if !strings.Contains(joined, "✓ ▸ shell printf 'a\\nb\\nc\\n'") {
+		t.Fatalf("expected collapsed terminal header to show ▸ disclosure marker, got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "2 more lines") {
-		t.Fatalf("expected collapsed terminal output to report hidden lines, got:\n%s", joined)
+	if !strings.Contains(joined, "↳ a") {
+		t.Fatalf("expected collapsed terminal output to show first line summary, got:\n%s", joined)
 	}
 }
 
@@ -66,10 +66,10 @@ func TestRenderUserTerminalIgnoresFinalOutputLineTerminator(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(joined, "1.json (1 line)") {
-		t.Fatalf("expected terminal output to contain one logical line, got:\n%s", joined)
+	if !strings.Contains(joined, "✓ ▸ shell ls 1.json") {
+		t.Fatalf("expected terminal header to show ▸ disclosure marker, got:\n%s", joined)
 	}
-	if strings.Contains(joined, "more lines") || strings.Contains(joined, "toggle expand/collapse") {
-		t.Fatalf("did not expect an expand hint for a final line terminator, got:\n%s", joined)
+	if !strings.Contains(joined, "↳ 1.json") {
+		t.Fatalf("expected terminal output to show first line summary, got:\n%s", joined)
 	}
 }

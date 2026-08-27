@@ -40,15 +40,15 @@ func bashCommandLines(command string) []string {
 	return strings.Split(command, "\n")
 }
 
-func bashCommandPreviewLines(command string, maxLines int) (lines []string, hidden int) {
+func bashCommandPreviewLines(command string, maxLines int) []string {
 	all := bashCommandLines(command)
 	if len(all) == 0 {
-		return nil, 0
+		return nil
 	}
 	if maxLines <= 0 || len(all) <= maxLines {
-		return all, 0
+		return all
 	}
-	return all[:maxLines], len(all) - maxLines
+	return all[:maxLines]
 }
 
 func formatCollapsedBashHeaderPartsWithParsed(keys []string, vals map[string]string) (mainPart, grayPart string, ok bool) {

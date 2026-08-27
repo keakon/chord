@@ -471,7 +471,10 @@ func newTranscriptToolCallBlock(nextID int, tc message.ToolCall) *Block {
 		RawArgs:   argsStr,
 		ToolName:  toolName,
 		ToolID:    tc.ID,
-		Collapsed: true,
+		Collapsed: !toolDefaultsExpanded(toolName),
+	}
+	if toolDefaultsExpanded(toolName) && toolName != tools.NameDelegate {
+		b.ToolCallDetailExpanded = true
 	}
 	applyDoneReportFromArgs(b, argsStr, "")
 	return b

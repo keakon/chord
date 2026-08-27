@@ -23,6 +23,9 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 	subType := strings.TrimSpace(args.AgentType)
 	isActive := b.toolExecutionIsRunning() && spinnerFrame != ""
 	prefix := b.renderToolPrefix(spinnerFrame)
+	if b.ResultDone {
+		prefix = renderToolDisclosurePrefix(prefix, !b.Collapsed)
+	}
 
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	if subType != "" {
@@ -32,14 +35,11 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 
 	result := []string{headerLine}
 	if b.Collapsed {
-		descLines, hiddenDesc := taskToolCollapsedDescriptionLines(b.Content, contentWidth-4)
+		descLines := taskToolCollapsedDescriptionLines(b.Content, contentWidth-4)
 		if len(descLines) > 0 {
 			for _, line := range descLines {
 				result = append(result, "    "+line)
 			}
-		}
-		if hiddenDesc > 0 {
-			result = append(result, renderToolExpandHint(toolHintIndent, hiddenDesc))
 		}
 		switch {
 		case strings.TrimSpace(b.DoneSummary) != "":

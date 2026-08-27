@@ -41,6 +41,11 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 		pseudo.ResultStatus = agent.ToolResultStatusError
 	}
 	prefix := pseudo.renderToolPrefix(spinnerFrame)
+	// The disclosure marker advertises toggling; only show it when the card
+	// can actually toggle (ToggleAtWidth requires a non-empty result).
+	if !b.UserLocalShellPending && strings.TrimSpace(b.UserLocalShellResult) != "" {
+		prefix = renderToolDisclosurePrefix(prefix, !b.Collapsed)
+	}
 	isActive := b.UserLocalShellPending && spinnerFrame != ""
 	displayResult := strings.TrimSuffix(sanitizeToolDisplayText(b.UserLocalShellResult), "\n")
 
@@ -76,7 +81,7 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 		addHeader()
 	case !b.Collapsed && strings.TrimSpace(displayResult) != "":
 		addHeader()
-		appendBashCommandBlock(&bashLines, b.UserLocalShellCmd, contentWidth, true, false)
+		appendBashCommandBlock(&bashLines, b.UserLocalShellCmd, contentWidth, true)
 		if b.UserLocalShellFailed {
 			bashLines = append(bashLines, ErrorStyle.Render("  ↳ Error:"))
 		}
@@ -85,21 +90,13 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 		}
 	default:
 		addHeader()
-		appendBashCommandBlock(&bashLines, b.UserLocalShellCmd, contentWidth, false, true)
+		appendBashCommandBlock(&bashLines, b.UserLocalShellCmd, contentWidth, false)
 		if displayResult != "" {
-			lineCount := strings.Count(displayResult, "\n") + 1
-			lineLabel := "line"
-			if lineCount != 1 {
-				lineLabel = "lines"
-			}
 			summary := truncateOneLine(displayResult, innerWidth-26)
 			if b.UserLocalShellFailed {
-				bashLines = append(bashLines, ErrorStyle.Render(fmt.Sprintf("  ↳ %s (%d %s)", summary, lineCount, lineLabel)))
+				bashLines = append(bashLines, ErrorStyle.Render(fmt.Sprintf("  ↳ %s", summary)))
 			} else {
-				bashLines = append(bashLines, ToolResultStyle.Render(fmt.Sprintf("  ↳ %s (%d %s)", summary, lineCount, lineLabel)))
-			}
-			if hidden := len(wrapText(displayResult, contentWidth)) - 1; hidden > 0 {
-				bashLines = append(bashLines, renderToolExpandHint("  ", hidden))
+				bashLines = append(bashLines, ToolResultStyle.Render(fmt.Sprintf("  ↳ %s", summary)))
 			}
 		}
 	}

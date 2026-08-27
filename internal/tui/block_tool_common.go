@@ -43,10 +43,7 @@ var (
 // maxToolCallCompactResultLines is the default visible height for generic tool output until space expands.
 const maxToolCallCompactResultLines = 10
 
-const (
-	toolResultIndent = "    "
-	toolHintIndent   = "    "
-)
+const toolResultIndent = "    "
 
 var activeToolSpinnerSegments = [...]string{"▖", "▘", "▝", "▗"}
 
@@ -112,12 +109,30 @@ func toolUsesCompactDetailToggle(toolName string) bool {
 	return true
 }
 
-func renderToolDisclosurePrefix(prefix string, expanded bool) string {
-	marker := "▸"
-	if expanded {
-		marker = "▾"
+func toolDefaultsExpanded(toolName string) bool {
+	// Completion reports (complete/escalate) and delegated task cards render
+	// their full content by default; the user collapses them explicitly with
+	// space. Every other card starts collapsed.
+	switch toolName {
+	case tools.NameComplete, tools.NameEscalate, tools.NameDelegate:
+		return true
 	}
-	if prefix == "▸" || prefix == "▾" {
+	return false
+}
+
+// Disclosure markers for collapsible cards. renderToolDisclosurePrefix and
+// renderToolPrefixForExpanded must stay in sync through these constants.
+const (
+	toolDisclosureCollapsed = "▸"
+	toolDisclosureExpanded  = "▾"
+)
+
+func renderToolDisclosurePrefix(prefix string, expanded bool) string {
+	marker := toolDisclosureCollapsed
+	if expanded {
+		marker = toolDisclosureExpanded
+	}
+	if prefix == toolDisclosureCollapsed || prefix == toolDisclosureExpanded {
 		return marker
 	}
 	return prefix + " " + marker
@@ -662,13 +677,6 @@ func renderQueuedToolHeaderBadge(line string, width int) string {
 		return trimmed
 	}
 	return trimmed + strings.Repeat(" ", availableGap) + badge + strings.Repeat(" ", rightPadding)
-}
-
-func renderToolExpandHint(indent string, hidden int) string {
-	if hidden <= 0 {
-		return ""
-	}
-	return DimStyle.Render(fmt.Sprintf("%s── %d more lines · [space] expand ──", indent, hidden))
 }
 
 func ensureCodeHighlighter(slot **codeHighlighter, filePath, sample string) *codeHighlighter {

@@ -149,7 +149,7 @@ func (m *Model) handleShellBangResult(msg shellBangResultMsg) tea.Cmd {
 		blk.UserLocalShellPending = false
 		blk.UserLocalShellResult = resultText
 		blk.UserLocalShellFailed = msg.err != nil
-		blk.Collapsed = true
+		blk.Collapsed = false
 		blk.InvalidateCache()
 		m.updateViewportBlock(blk)
 		m.markBlockSettled(blk)

@@ -17,12 +17,11 @@ import (
 
 const bashCommandPreviewMaxLines = 2
 
-// bashCommandBlockLines returns the logical command lines to render in the
-// body (full when expanded, preview when collapsed) and how many further
-// lines remain hidden under the preview.
-func bashCommandBlockLines(command string, expanded bool) (lines []string, hidden int) {
+// bashCommandBlockLines renders the command lines to show in the body (full
+// when expanded, preview when collapsed).
+func bashCommandBlockLines(command string, expanded bool) []string {
 	if expanded {
-		return bashCommandLines(command), 0
+		return bashCommandLines(command)
 	}
 	return bashCommandPreviewLines(command, bashCommandPreviewMaxLines)
 }
@@ -46,12 +45,9 @@ func renderCommandBlock(title string, lines []string, contentWidth int) []string
 	return out
 }
 
-func appendBashCommandBlock(result *[]string, command string, contentWidth int, expanded bool, showExpandHint bool) {
-	lines, hidden := bashCommandBlockLines(command, expanded)
+func appendBashCommandBlock(result *[]string, command string, contentWidth int, expanded bool) {
+	lines := bashCommandBlockLines(command, expanded)
 	*result = append(*result, renderCommandBlock("Command", lines, contentWidth)...)
-	if showExpandHint && hidden > 0 {
-		*result = append(*result, renderToolExpandHint(toolHintIndent, hidden))
-	}
 }
 
 // bashMetaLines returns the wrapped, styled meta lines (description, Workdir,
@@ -241,14 +237,13 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 				displayContent = toolErrorDisplayContent(displayContent)
 			}
 			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, displayContent))
-			lineCount := len(strings.Split(displayResult, "\n"))
 			summary := truncateOneLine(displayResult, cardWidth-26)
 			if b.toolResultIsError() {
-				result = append(result, ErrorStyle.Render(fmt.Sprintf("  ▸ ↳ Error: %s (%d lines)", summary, lineCount)))
+				result = append(result, ErrorStyle.Render(fmt.Sprintf("  ▸ ↳ Error: %s", summary)))
 			} else if b.toolResultIsCancelled() {
-				result = append(result, DimStyle.Render(fmt.Sprintf("  ▸ ↳ cancelled (%d lines)", lineCount)))
+				result = append(result, DimStyle.Render("  ▸ ↳ cancelled"))
 			} else {
-				result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ %s (%d lines)", summary, lineCount)))
+				result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ %s", summary)))
 			}
 		}
 	} else {
@@ -411,6 +406,9 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 	contentWidth := metrics.contentWidth
 
 	prefix := b.renderToolPrefixForExpanded(spinnerFrame, b.ToolCallDetailExpanded)
+	if b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+		prefix = renderToolDisclosurePrefix(prefix, b.ToolCallDetailExpanded)
+	}
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
 	result := []string{headerLine}
@@ -431,10 +429,6 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 
 	if argsReady && !b.ToolCallDetailExpanded && b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() {
 		appendCollapsedSummaryLines(&result, prose, cardWidth-10, ToolResultStyle)
-		hidden := max(len(renderRichMarkdownContent(prose, contentWidth, &b.richMarkdownHL)), toolCollapsedVisibleLineCount(prose, contentWidth)) - 2
-		if hidden > 0 {
-			result = append(result, renderToolExpandHint(toolHintIndent, hidden))
-		}
 	} else if argsReady && prose != "" {
 		result = append(result, "")
 		for _, line := range renderRichMarkdownContent(prose, contentWidth, &b.richMarkdownHL) {
@@ -646,24 +640,34 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	toolCardBg := metrics.toolCardBg
 	cardWidth := metrics.cardWidth
 	contentWidth := compactToolContentWidthForRenderWidth(width)
-	expandHintAdded := false
 
 	expanded := b.ToolCallDetailExpanded || b.compactToolResultForceExpanded(contentWidth)
 	keys, vals := b.toolArgsParsed()
 	paramSummary, mainPart, grayPart, collapsedMain, collapsedGray, collapsedOK, _ := b.toolHeaderMeta()
-	hiddenDetail := 0
-	if !expanded {
-		hiddenDetail = compactToolHiddenDetailLines(b, keys, vals, mainPart, contentWidth, false)
-	}
 	isActive := b.toolExecutionIsRunning() && spinnerFrame != ""
 	if b.ToolName == tools.NameShell && !expanded && collapsedOK {
 		mainPart, grayPart = collapsedMain, collapsedGray
 	}
+	hiddenDetail := 0
+	if !expanded {
+		hiddenDetail = compactToolHiddenDetailLines(b, keys, vals, mainPart, contentWidth, false)
+	}
 
 	result := make([]string, 0, 16)
 	prefix := b.renderToolPrefixForExpanded(spinnerFrame, expanded)
-	if b.ToolName == tools.NameShell && b.ResultDone {
-		prefix = renderToolDisclosurePrefix(prefix, expanded)
+	if b.ResultDone {
+		switch {
+		case b.ToolName == tools.NameShell:
+			prefix = renderToolDisclosurePrefix(prefix, expanded)
+		case expanded:
+			// Only expanded cards the toggle can collapse again get a ▾;
+			// force-expanded cards are stuck and must not claim one.
+			if b.ToolCallDetailExpanded && !b.compactToolResultForceExpanded(contentWidth) {
+				prefix = renderToolDisclosurePrefix(prefix, expanded)
+			}
+		case hiddenDetail > 0:
+			prefix = renderToolDisclosurePrefix(prefix, expanded)
+		}
 	}
 	toolHeaderLine := renderToolHeaderLine(prefix, b.ToolName)
 	toolHeaderLine = appendToolHeaderSummary(toolHeaderLine, mainPart, grayPart, paramSummary, cardWidth-4)
@@ -672,7 +676,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 
 	if b.ToolName == tools.NameShell {
 		if expanded {
-			appendBashCommandBlock(&result, vals["command"], contentWidth, true, false)
+			appendBashCommandBlock(&result, vals["command"], contentWidth, true)
 			result = append(result, bashMetaLines(cloneToolValsWithDisplayDirs(b, vals), contentWidth)...)
 		} else {
 			appendBashCollapsedSummary(&result, b, vals, contentWidth, !collapsedOK)
@@ -761,12 +765,6 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		}
 	}
 
-	// If the expanded view would reveal additional lines (params or result),
-	// show a hint even when the collapsed rendering path hid all such content.
-	if !expanded && !expandHintAdded && hiddenDetail > 0 && b.ToolName != tools.NameShell {
-		result = append(result, renderToolExpandHint(toolHintIndent, hiddenDetail))
-		expandHintAdded = true
-	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
@@ -834,16 +832,16 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 			return "✓"
 		}
 		if b.Collapsed {
-			return "▸"
+			return toolDisclosureCollapsed
 		}
-		return "▾"
+		return toolDisclosureExpanded
 	}
 	if toolUsesCompactDetailToggle(b.ToolName) {
 		if !b.ResultDone {
 			if compactExpanded {
-				return "▾"
+				return toolDisclosureExpanded
 			}
-			return "▸"
+			return toolDisclosureCollapsed
 		}
 		if b.toolResultIsError() {
 			return "✗"
@@ -872,9 +870,9 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 		return "✓"
 	}
 	if b.Collapsed {
-		return "▸"
+		return toolDisclosureCollapsed
 	}
-	return "▾"
+	return toolDisclosureExpanded
 }
 
 func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string, maxWidth int) string {
@@ -1090,6 +1088,9 @@ func (b *Block) renderToolResult(width int) []string {
 		if b.RecoveryState == message.ToolRecoveryStateOutcomeUnknown {
 			prefix = "!"
 		}
+		if lineCount > maxToolCallCompactResultLines {
+			prefix = renderToolDisclosurePrefix(prefix, !b.Collapsed)
+		}
 		var body []string
 		body = append(body, renderToolHeaderLine(prefix, b.ToolName))
 		lim := min(lineCount, maxToolCallCompactResultLines)
@@ -1097,10 +1098,6 @@ func (b *Block) renderToolResult(width int) []string {
 			for _, w := range wrapText(sanitizeToolDisplayText(contentLines[i]), contentWidth) {
 				body = append(body, DimStyle.Render(toolResultIndent+w))
 			}
-		}
-		if lineCount > maxToolCallCompactResultLines {
-			more := lineCount - maxToolCallCompactResultLines
-			body = append(body, renderToolExpandHint(toolHintIndent, more))
 		}
 		b.appendImagePreviewLines(&body, contentWidth, toolCardBg, style.GetPaddingTop(), len(body) > 0)
 		return b.renderToolCardWithIgnoredArgs(style, cardWidth, toolCardTitle("TOOL RESULT", b.displayLabelID()), body, toolCardBg, railANSISeq("tool", b.Focused))

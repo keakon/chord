@@ -103,10 +103,13 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 		RawArgs:            argsJSON,
 		ToolName:           name,
 		ToolID:             id,
-		Collapsed:          true,
+		Collapsed:          !toolDefaultsExpanded(name),
 		AgentID:            agentID,
 		ToolExecutionState: state,
 		StartedAt:          time.Now(),
+	}
+	if toolDefaultsExpanded(name) && name != tools.NameDelegate {
+		block.ToolCallDetailExpanded = true
 	}
 	if includeArgProgress {
 		if progress := inferToolArgProgress(name, argsJSON); progress != nil {
@@ -510,7 +513,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			block.ToolProgress = nil
 			updated = true
 		}
-		if evt.State == agent.ToolCallExecutionStateQueued {
+		if evt.State == agent.ToolCallExecutionStateQueued && !toolDefaultsExpanded(block.ToolName) {
 			block.Collapsed = true
 		}
 		if updated {

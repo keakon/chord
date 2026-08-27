@@ -76,14 +76,13 @@ func taskToolDescriptionContent(argsJSON string) string {
 	return strings.TrimSpace(desc)
 }
 
-func taskToolCollapsedDescriptionLines(argsJSON string, width int) ([]string, int) {
+func taskToolCollapsedDescriptionLines(argsJSON string, width int) []string {
 	desc := taskToolDescriptionContent(argsJSON)
 	if desc == "" {
-		return nil, 0
+		return nil
 	}
 	rawLines := strings.Split(desc, "\n")
 	previewLines := make([]string, 0, maxTaskCollapsedPreviewLogicalLines)
-	hidden := 0
 	for _, line := range rawLines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -91,14 +90,12 @@ func taskToolCollapsedDescriptionLines(argsJSON string, width int) ([]string, in
 		}
 		if len(previewLines) < maxTaskCollapsedPreviewLogicalLines {
 			previewLines = append(previewLines, trimmed)
-			continue
 		}
-		hidden++
 	}
 	if len(previewLines) == 0 {
-		return nil, 0
+		return nil
 	}
-	return wrapText(strings.Join(previewLines, "\n"), width), hidden
+	return wrapText(strings.Join(previewLines, "\n"), width)
 }
 
 func taskToolExpandedDescriptionLines(argsJSON string, width int) []string {
