@@ -6,6 +6,7 @@ import (
 	"os"
 	pathpkg "path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/keakon/chord/internal/pathutil"
@@ -19,6 +20,8 @@ type PatternCandidate struct {
 	Broad   bool   // true if pattern is very broad (e.g. "*", "git *")
 	Default bool   // true if this is the recommended default candidate
 }
+
+const maxPatternCandidates = 6
 
 // suggestRulePatterns generates pattern candidates for a tool invocation.
 // toolName: the tool name (e.g. "Shell", "Write")
@@ -315,75 +318,123 @@ func isPathWithinCWD(filePath, cwd string) bool {
 	return ok
 }
 
-// suggestDeletePatterns generates conservative path-specific candidates for Delete.
-// cwd is the session working directory: when a target lives inside it, a
-// cwd-scoped recursive candidate is offered (not pre-selected) so the user can
-// opt into allowing follow-up deletes in nested subfolders. A global "*"
-// catch-all is always present so an allow rule can be added at the broadest
-// scope.
+// suggestDeletePatterns generates reusable directory-scoped candidates for
+// Delete. Exact-file rules are omitted because a successfully deleted path is
+// unlikely to be useful again. Directory candidates are ranked by how many
+// requested paths they cover, while cwd-wide "**" and global "*" candidates
+// have reserved slots so a large batch cannot crowd them out.
 func suggestDeletePatterns(argsJSON string, needsApproval []string, cwd string) []PatternCandidate {
 	paths := append([]string(nil), needsApproval...)
-	if len(paths) == 0 {
-		var req struct {
-			Paths []string `json:"paths"`
-		}
-		if err := json.Unmarshal([]byte(argsJSON), &req); err == nil {
+	var req struct {
+		Paths []string `json:"paths"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &req); err == nil {
+		if len(paths) == 0 {
 			paths = append(paths, req.Paths...)
 		}
 	}
-	candidates := make([]PatternCandidate, 0, min(len(paths)*2, 6))
-	seenDir := make(map[string]bool)
+	requestedPaths := req.Paths
+	if len(requestedPaths) == 0 {
+		requestedPaths = paths
+	}
+	// Candidate directories are the parents of the requested paths.
+	dirs := make([]string, 0, len(paths))
+	seenDirs := make(map[string]struct{}, len(paths))
 	for _, raw := range paths {
 		p := strings.TrimSpace(raw)
 		if p == "" {
 			continue
 		}
-		rulePath := rulePatternForPath(p, cwd)
-		candidates = append(candidates, PatternCandidate{Pattern: rulePath, Summary: "this exact path", Default: len(candidates) == 0})
 		dir := filepath.Dir(p)
+		if dir == "." || dir == "" {
+			continue
+		}
+		if _, seen := seenDirs[dir]; seen {
+			continue
+		}
+		seenDirs[dir] = struct{}{}
+		dirs = append(dirs, dir)
+	}
+	// The rule engine's "*" crosses separators, so a "dir/*" rule matches
+	// every path under dir at any depth — rank candidates by that coverage,
+	// not by direct children, so a common ancestor is not crowded out of the
+	// ranking by its own subdirectories.
+	type directoryCandidate struct {
+		pattern string
+		summary string
+		count   int
+	}
+	directories := make([]*directoryCandidate, 0, len(dirs))
+	for _, dir := range dirs {
 		dirPattern := rulePatternForPath(dir, cwd)
-		if dir != "." && dir != "" && dirPattern != "" && dirPattern != "." && !seenDir[dirPattern] {
-			seenDir[dirPattern] = true
-			candidates = append(candidates, PatternCandidate{Pattern: filepath.Join(dirPattern, "*"), Summary: "any path in " + dir + "/", Broad: true})
+		if dirPattern == "" || dirPattern == "." {
+			continue
 		}
+		prefix := filepath.ToSlash(dir) + "/"
+		count := 0
+		for _, raw := range paths {
+			if p := filepath.ToSlash(strings.TrimSpace(raw)); strings.HasPrefix(p, prefix) {
+				count++
+			}
+		}
+		if count == 0 {
+			continue
+		}
+		directories = append(directories, &directoryCandidate{
+			pattern: filepath.ToSlash(filepath.Join(dirPattern, "*")),
+			summary: "any path under " + strings.TrimSuffix(filepath.ToSlash(dirPattern), "/") + "/",
+			count:   count,
+		})
 	}
 
-	if len(paths) > 0 && cwd != "" && anyTargetWithinCWD(paths, cwd) {
-		if !hasPatternCandidate(candidates, "**") {
-			candidates = append(candidates, PatternCandidate{
-				Pattern: "**",
-				Summary: "any path under current directory",
-				Broad:   true,
-			})
+	sort.Slice(directories, func(i, j int) bool {
+		if directories[i].count != directories[j].count {
+			return directories[i].count > directories[j].count
 		}
-	}
+		return directories[i].pattern < directories[j].pattern
+	})
 
-	if !hasPatternCandidate(candidates, "*") {
-		candidates = append(candidates, PatternCandidate{Pattern: "*", Summary: "any Delete call", Broad: true})
+	includeCWD := allTargetsWithinCWD(requestedPaths, cwd)
+	reserved := 1 // The global "*" catch-all is always present.
+	if includeCWD {
+		reserved++
 	}
-	return normalizePatternCandidates(candidates)
+	directoryLimit := maxPatternCandidates - reserved
+	candidates := make([]PatternCandidate, 0, maxPatternCandidates)
+	for i, candidate := range directories[:min(len(directories), directoryLimit)] {
+		candidates = append(candidates, PatternCandidate{
+			Pattern: candidate.pattern,
+			Summary: candidate.summary,
+			Default: i == 0,
+		})
+	}
+	if includeCWD {
+		candidates = append(candidates, PatternCandidate{
+			Pattern: "**",
+			Summary: "any path under current directory",
+			Broad:   true,
+		})
+	}
+	candidates = append(candidates, PatternCandidate{Pattern: "*", Summary: "any Delete call", Broad: true})
+	return candidates
 }
 
-func anyTargetWithinCWD(paths []string, cwd string) bool {
+func allTargetsWithinCWD(paths []string, cwd string) bool {
+	if strings.TrimSpace(cwd) == "" {
+		return false
+	}
+	found := false
 	for _, raw := range paths {
 		p := strings.TrimSpace(raw)
 		if p == "" {
 			continue
 		}
-		if isPathWithinCWD(p, cwd) {
-			return true
+		found = true
+		if !isPathWithinCWD(p, cwd) {
+			return false
 		}
 	}
-	return false
-}
-
-func hasPatternCandidate(candidates []PatternCandidate, pattern string) bool {
-	for _, c := range candidates {
-		if c.Pattern == pattern {
-			return true
-		}
-	}
-	return false
+	return found
 }
 
 // suggestWebFetchPatterns generates pattern candidates for WebFetch tool.
@@ -451,7 +502,6 @@ func suggestWebFetchPatterns(argsJSON string) []PatternCandidate {
 }
 
 func normalizePatternCandidates(candidates []PatternCandidate) []PatternCandidate {
-	const maxPatternCandidates = 6
 	out := make([]PatternCandidate, 0, len(candidates))
 	seen := make(map[string]struct{}, len(candidates))
 	defaultSet := false

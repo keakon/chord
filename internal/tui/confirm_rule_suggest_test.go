@@ -165,10 +165,15 @@ func TestSuggestRulePatterns_WebFetchWithPortAndQuery(t *testing.T) {
 func TestSuggestRulePatterns_Delete(t *testing.T) {
 	candidates := suggestRulePatterns("delete", `{"paths":["tmp/foo.log"]}`, []string{"tmp/foo.log"}, "")
 	if len(candidates) == 0 {
-		t.Fatal("expected conservative candidates for Delete tool")
+		t.Fatal("expected directory candidates for Delete tool")
 	}
-	if candidates[0].Pattern != "tmp/foo.log" || !candidates[0].Default {
-		t.Fatalf("first candidate = %+v, want exact default path", candidates[0])
+	if candidates[0].Pattern != "tmp/*" || !candidates[0].Default {
+		t.Fatalf("first candidate = %+v, want parent directory default", candidates[0])
+	}
+	for _, candidate := range candidates {
+		if candidate.Pattern == "tmp/foo.log" {
+			t.Fatalf("delete candidates should omit exact paths: %+v", candidates)
+		}
 	}
 	// A global wildcard must always be available so the user can add a broad
 	// allow rule instead of re-confirming per subfolder.
@@ -215,35 +220,111 @@ func TestSuggestRulePatterns_DeleteAbsoluteInCWDCollapsesToRelative(t *testing.T
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates")
 	}
-	if candidates[0].Pattern != "tmp/foo.log" || !candidates[0].Default {
-		t.Fatalf("first candidate = %+v, want cwd-relative exact path", candidates[0])
-	}
-	foundDir := false
-	for _, c := range candidates {
-		if c.Pattern == "tmp/*" {
-			foundDir = true
-			break
-		}
-	}
-	if !foundDir {
-		t.Fatalf("expected cwd-relative dir candidate, got %+v", candidates)
+	if candidates[0].Pattern != "tmp/*" || !candidates[0].Default {
+		t.Fatalf("first candidate = %+v, want cwd-relative parent directory", candidates[0])
 	}
 }
 
 func TestSuggestRulePatterns_DeleteOutsideCWDStaysAbsolute(t *testing.T) {
 	candidates := suggestRulePatterns("delete", `{"paths":["/Users/me/shared/tmp.go"]}`, []string{"/Users/me/shared/tmp.go"}, "/home/user/project")
-	if len(candidates) == 0 || candidates[0].Pattern != "/Users/me/shared/tmp.go" {
-		t.Fatalf("first candidate = %+v, want absolute exact path", candidates)
+	if len(candidates) == 0 || candidates[0].Pattern != "/Users/me/shared/*" {
+		t.Fatalf("first candidate = %+v, want absolute parent directory", candidates)
 	}
-	foundDir := false
-	for _, c := range candidates {
-		if c.Pattern == "/Users/me/shared/*" {
-			foundDir = true
-			break
+}
+
+func TestSuggestRulePatterns_DeleteRanksDirectoriesByPathCount(t *testing.T) {
+	candidates := suggestRulePatterns(
+		"delete",
+		`{"paths":["artifacts/report-1.json","artifacts/report-2.json","artifacts/report-3.json","/tmp/old-report.json"]}`,
+		[]string{"/tmp/old-report.json", "artifacts/report-1.json", "artifacts/report-2.json", "artifacts/report-3.json"},
+		"/home/user/project",
+	)
+	want := []string{"artifacts/*", "/tmp/*", "*"}
+	if len(candidates) != len(want) {
+		t.Fatalf("candidate count = %d, want %d: %+v", len(candidates), len(want), candidates)
+	}
+	for i, pattern := range want {
+		if candidates[i].Pattern != pattern {
+			t.Fatalf("candidate[%d] = %q, want %q: %+v", i, candidates[i].Pattern, pattern, candidates)
 		}
 	}
-	if !foundDir {
-		t.Fatalf("expected absolute dir candidate, got %+v", candidates)
+	if !candidates[0].Default {
+		t.Fatalf("most common directory should be the default: %+v", candidates)
+	}
+}
+
+func TestSuggestRulePatterns_DeleteReservesCWDAndGlobalCandidates(t *testing.T) {
+	paths := []string{
+		"alpha/one.txt",
+		"bravo/two.txt",
+		"charlie/three.txt",
+		"delta/four.txt",
+		"echo/five.txt",
+		"foxtrot/six.txt",
+	}
+	candidates := suggestRulePatterns("delete", `{"paths":["fallback.txt"]}`, paths, "/home/user/project")
+	if len(candidates) != maxPatternCandidates {
+		t.Fatalf("candidate count = %d, want %d: %+v", len(candidates), maxPatternCandidates, candidates)
+	}
+	if got := candidates[len(candidates)-2].Pattern; got != "**" {
+		t.Fatalf("penultimate candidate = %q, want cwd-wide '**': %+v", got, candidates)
+	}
+	if got := candidates[len(candidates)-1].Pattern; got != "*" {
+		t.Fatalf("last candidate = %q, want global '*': %+v", got, candidates)
+	}
+	for _, candidate := range candidates[len(candidates)-2:] {
+		if candidate.Default {
+			t.Fatalf("reserved broad candidate should not be the default: %+v", candidates)
+		}
+	}
+}
+
+func TestSuggestRulePatterns_DeleteMixedCWDTargetsOmitsCWDWildcard(t *testing.T) {
+	candidates := suggestRulePatterns(
+		"delete",
+		`{"paths":["artifacts/report.json","/tmp/old-report.json"]}`,
+		[]string{"artifacts/report.json", "/tmp/old-report.json"},
+		"/home/user/project",
+	)
+	for _, candidate := range candidates {
+		if candidate.Pattern == "**" {
+			t.Fatalf("mixed in-cwd and out-of-cwd targets should omit '**': %+v", candidates)
+		}
+	}
+}
+
+func TestSuggestRulePatterns_DeleteAllowedOutsideTargetStillOmitsCWDWildcard(t *testing.T) {
+	candidates := suggestRulePatterns(
+		"delete",
+		`{"paths":["artifacts/report.json","/tmp/already-allowed.json"]}`,
+		[]string{"artifacts/report.json"},
+		"/home/user/project",
+	)
+	for _, candidate := range candidates {
+		if candidate.Pattern == "**" {
+			t.Fatalf("an out-of-cwd requested target should omit '**' even when already allowed: %+v", candidates)
+		}
+	}
+}
+
+func TestSuggestRulePatterns_DeleteCWDRootFileDoesNotPreselectBroadRule(t *testing.T) {
+	candidates := suggestRulePatterns(
+		"delete",
+		`{"paths":["obsolete.txt"]}`,
+		[]string{"obsolete.txt"},
+		"/home/user/project",
+	)
+	want := []string{"**", "*"}
+	if len(candidates) != len(want) {
+		t.Fatalf("candidate count = %d, want %d: %+v", len(candidates), len(want), candidates)
+	}
+	for i, pattern := range want {
+		if candidates[i].Pattern != pattern {
+			t.Fatalf("candidate[%d] = %q, want %q: %+v", i, candidates[i].Pattern, pattern, candidates)
+		}
+		if candidates[i].Default {
+			t.Fatalf("broad candidate should not be preselected: %+v", candidates)
+		}
 	}
 }
 
@@ -404,5 +485,28 @@ func TestSuggestRulePatterns_OutsideCWDHasNoRelativeExtCandidate(t *testing.T) {
 	}
 	if !foundExact {
 		t.Fatalf("expected absolute literal candidate in %#v", candidates)
+	}
+}
+
+// TestSuggestRulePatterns_DeleteRanksByRecursiveCoverage guards that a
+// directory candidate ranks by how many pending paths it covers under the
+// rule engine's semantics (a "dir/*" rule matches any depth), so a common
+// ancestor is not crowded out by its own subdirectory.
+func TestSuggestRulePatterns_DeleteRanksByRecursiveCoverage(t *testing.T) {
+	candidates := suggestRulePatterns(
+		"delete",
+		`{"paths":["artifacts/2024/q1.log","artifacts/2024/q2.log","artifacts/root.log"]}`,
+		[]string{"artifacts/2024/q1.log", "artifacts/2024/q2.log", "artifacts/root.log"},
+		"/home/user/project",
+	)
+	if len(candidates) == 0 || candidates[0].Pattern != "artifacts/*" {
+		t.Fatalf("first candidate = %+v, want the common ancestor covering all three paths", candidates)
+	}
+	for _, candidate := range candidates {
+		if candidate.Pattern == "artifacts/*" || candidate.Pattern == "artifacts/2024/*" {
+			if candidate.Broad {
+				t.Fatalf("scoped directory candidate %q must not be marked broad: %+v", candidate.Pattern, candidates)
+			}
+		}
 	}
 }

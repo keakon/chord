@@ -269,7 +269,7 @@ When adding a rule manually, enter the tool name and pattern, then use `Ctrl+S` 
 
 Each rule shows its scope (`session` / `project` / `global`) and on-disk file path. `session` rules apply only to the current session; `project` rules are written to the current project's `.chord/agents/<role>.yaml`; `global` rules are written to the user config directory's `agents/<role>.yaml` (default: `~/.config/chord/agents/<role>.yaml`). These rules directly update the target agent's `permission` config, and deleting a rule removes it from the same agent config file.
 
-The confirmation popup also supports adding a remembered rule with `M`. In the rule picker, press `E` to edit the suggested pattern before saving. Delete confirmations list conservative path-specific suggestions first (the exact path and files in the same directory) and always include a global `*` catch-all; when the file is inside the current working directory, a `**` recursive rule (cwd-relative) is offered as an option, so you can allow follow-up deletes in nested subfolders without re-confirming each one.
+The confirmation popup also supports adding a remembered rule with `M`. In the rule picker, press `E` to edit the suggested pattern before saving. Delete confirmations suggest reusable parent-directory rules rather than exact-file rules, ranking directories that cover more paths still needing approval first. A global `*` catch-all is always available. When every requested path is inside the current working directory, the picker also keeps a cwd-relative `**` option for follow-up deletes anywhere under that directory. The broad `**` and `*` options are never preselected.
 
 ### `/loop` — continuous execution mode
 
