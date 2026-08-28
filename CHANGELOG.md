@@ -66,6 +66,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - `read` and `read_artifact` now treat `offset` as a 1-based start line (1 = the first line) instead of a 0-based skip count; passing `0` or omitting it both mean the first line, so a call that passes `1` for the top of a file no longer silently skips the first line. The tool card header and the confirmation summary hide the default offset (0 or 1), out-of-range errors suggest 1-based offsets, and the read card gutter starts at the requested line when the result lacks a range header.
 - apply_patch tool cards now preview the patch while the model is still writing it: the card stays expanded during argument streaming and shows the growing patch text with `+`/`-`/`@@` syntax highlighting, replacing the opaque character count; once execution completes the card switches to the final diff view.
 - `edit` and `apply_patch` requested-patch previews now render the full patch instead of stopping at 20 lines, so the model and the user see the complete planned change while arguments are still streaming.
+- `edit` and `apply_patch` result diffs now render in full instead of stopping at 200 lines; very large diffs are handled by the TUI viewport's fold/spill machinery, so the model and the user see the complete committed change.
 
 ### Fixes
 

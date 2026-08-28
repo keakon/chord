@@ -9,17 +9,8 @@ import (
 	"github.com/rivo/uniseg"
 )
 
-// maxDiffOutputLines is the maximum number of diff output lines rendered.
-// Diffs longer than this are truncated with a notice.
-const maxDiffOutputLines = 200
-
-// DiffTruncationMarker is the sentinel line appended to a truncated diff. It is
-// not diff content: renderers must special-case it instead of treating it as a
-// context line, so it is exported to keep producer and renderer from drifting.
-const DiffTruncationMarker = "... (diff truncated)"
-
-// DiffSummary carries both the rendered unified diff (possibly truncated) and
-// the exact total add/remove counts computed from the full edit script.
+// DiffSummary carries both the rendered unified diff and the exact total
+// add/remove counts computed from the full edit script.
 type DiffSummary struct {
 	Text    string
 	Added   int
@@ -31,13 +22,14 @@ type DiffSummary struct {
 // string when there are no differences. The edit script is computed on the
 // middle region after stripping common prefix/suffix lines so typical small
 // edits in large files avoid a full-file LCS. Very long diff output is
-// truncated after maxDiffOutputLines with a trailing notice.
+// rendered in full: consumers rely on the TUI viewport spill/fold machinery
+// rather than content loss for very large diffs. Diff output is never truncated.
 func GenerateUnifiedDiff(oldContent, newContent, filename string) string {
 	return GenerateUnifiedDiffSummary(oldContent, newContent, filename).Text
 }
 
 // GenerateUnifiedDiffSummary returns the rendered unified diff plus the exact
-// full add/remove counts before any maxDiffOutputLines truncation is applied.
+// full add/remove counts computed from the full edit script.
 func GenerateUnifiedDiffSummary(oldContent, newContent, filename string) DiffSummary {
 	return generateMultiFileUnifiedDiffSummary([]unifiedFileDiff{{
 		OldContent:  oldContent,
@@ -58,8 +50,6 @@ func generateMultiFileUnifiedDiffSummary(files []unifiedFileDiff) DiffSummary {
 	var sb strings.Builder
 	added := 0
 	removed := 0
-	lineCount := 0
-	truncated := false
 	for _, file := range files {
 		if file.OldContent == file.NewContent {
 			continue
@@ -74,31 +64,11 @@ func generateMultiFileUnifiedDiffSummary(files []unifiedFileDiff) DiffSummary {
 		fileAdded, fileRemoved := diffOpStats(ops)
 		added += fileAdded
 		removed += fileRemoved
-		if truncated || lineCount >= maxDiffOutputLines {
-			// Emitting the file header here would leave a section with no body.
-			truncated = true
-			continue
-		}
 		sb.WriteString(fmt.Sprintf("--- %s\n", file.OldFilename))
 		sb.WriteString(fmt.Sprintf("+++ %s\n", file.NewFilename))
 		for _, h := range hunks {
-			for l := range strings.SplitSeq(h, "\n") {
-				if lineCount >= maxDiffOutputLines {
-					truncated = true
-					break
-				}
-				sb.WriteString(l)
-				sb.WriteString("\n")
-				lineCount++
-			}
-			if truncated {
-				break
-			}
+			sb.WriteString(h)
 		}
-	}
-	if truncated {
-		sb.WriteString(DiffTruncationMarker)
-		sb.WriteString("\n")
 	}
 	return DiffSummary{Text: sb.String(), Added: added, Removed: removed}
 }

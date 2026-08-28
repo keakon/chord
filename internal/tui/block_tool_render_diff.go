@@ -321,14 +321,6 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				continue
 			case strings.HasPrefix(line, "+++ "):
 				continue
-			case line == tools.DiffTruncationMarker:
-				// The diff producer appends this sentinel when it dropped
-				// lines. It is not source text: rendering it through the
-				// default branch would syntax-highlight it, give it a
-				// fabricated gutter number, and advance both counters so
-				// every later line is numbered wrong.
-				result = append(result, "  "+DimStyle.Render(line))
-				continue
 			default:
 				content := line
 				if len(content) > 0 && content[0] == ' ' {

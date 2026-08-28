@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestGenerateUnifiedDiffSummaryCountsFullChangesBeforeTruncation(t *testing.T) {
+func TestGenerateUnifiedDiffSummaryRendersFullDiffWithoutTruncation(t *testing.T) {
 	var oldBuilder strings.Builder
 	for range 427 {
 		oldBuilder.WriteString("line old\n")
@@ -14,8 +14,13 @@ func TestGenerateUnifiedDiffSummaryCountsFullChangesBeforeTruncation(t *testing.
 	if summary.Removed < 400 {
 		t.Fatalf("Removed = %d, want >= 400", summary.Removed)
 	}
-	if !strings.Contains(summary.Text, "... (diff truncated)") {
-		t.Fatalf("expected truncated diff text, got:\n%s", summary.Text)
+	if strings.Contains(summary.Text, "... (diff truncated)") {
+		t.Fatalf("diff output must never be truncated, got:\n%s", summary.Text)
+	}
+	// The full change is rendered: the new-content lines appear and the diff
+	// still covers the whole replaced range (no trailing truncation notice).
+	if !strings.Contains(summary.Text, "package tui") || !strings.Contains(summary.Text, "// split") {
+		t.Fatalf("expected full new content in diff, got:\n%s", summary.Text)
 	}
 }
 

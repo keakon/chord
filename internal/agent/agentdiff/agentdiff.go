@@ -9,8 +9,8 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// Summary carries both the display diff text and the exact full change counts
-// computed before any truncation is applied.
+// Summary carries both the display diff text and the exact full change counts,
+// computed from the complete diff output (diffs are never truncated).
 type Summary struct {
 	Text    string
 	Added   int
