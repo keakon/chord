@@ -579,3 +579,105 @@ func TestDirectoryCursorFallsBackToViewportTopWhenFocusStale(t *testing.T) {
 		t.Fatalf("directory cursor block = %d, want viewport-top block %d", m.dirEntries[idx].BlockID, wantID)
 	}
 }
+
+// TestNormalModeTypeJumpClearsStickyWhenLeavingBottom pins that a structural
+// jump away from the tail must drop the sticky tail-follow flag, so streaming
+// content appended afterwards does not yank the viewport back to the bottom.
+func TestNormalModeTypeJumpClearsStickyWhenLeavingBottom(t *testing.T) {
+	m := jumpTypeTestModel()
+	m.viewport.ScrollToBottom()
+	m.focusedBlockID = 5
+	m.refreshBlockFocus()
+	if !m.viewport.sticky {
+		t.Fatal("setup: expected sticky at the bottom")
+	}
+	// ( from the assistant card at the bottom jumps back to the previous
+	// assistant card, far above the bottom edge.
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "(", Code: '('})); cmd != nil {
+		t.Fatalf("( should move synchronously, got %#v", cmd)
+	}
+	if m.focusedBlockID != 2 {
+		t.Fatalf("focusedBlockID after ( = %d want 2", m.focusedBlockID)
+	}
+	if m.viewport.sticky {
+		t.Fatal("structural jump away from the bottom must clear sticky")
+	}
+	if m.viewport.atBottom() {
+		t.Fatal("jump target should be above the bottom")
+	}
+	// Streaming content appended while off-the-bottom must leave the offset alone.
+	offsetAfterJump := m.viewport.offset
+	m.viewport.AppendBlock(&Block{ID: 9, Type: BlockAssistant, Content: "d1"})
+	if m.viewport.offset != offsetAfterJump {
+		t.Fatalf("append while off-the-bottom moved the offset: %d -> %d", offsetAfterJump, m.viewport.offset)
+	}
+	if m.viewport.sticky {
+		t.Fatal("append must not re-enable sticky while off-the-bottom")
+	}
+}
+
+// TestNormalModeTypeJumpKeepsStickyWhenTranscriptFits pins the short-transcript
+// case: a jump whose target clamps to the bottom (the whole transcript is
+// shorter than the viewport) must keep sticky, so new content keeps flowing
+// down and follows the tail once it fills the viewport.
+func TestNormalModeTypeJumpKeepsStickyWhenTranscriptFits(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 10)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, Content: "u1"})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockUser, Content: "u2"})
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "}", Code: '}'})); cmd != nil {
+		t.Fatalf("} should move synchronously, got %#v", cmd)
+	}
+	if m.focusedBlockID != 2 {
+		t.Fatalf("focusedBlockID after } = %d want 2", m.focusedBlockID)
+	}
+	if !m.viewport.sticky {
+		t.Fatal("jump that stays at the bottom (transcript fits the viewport) must keep sticky")
+	}
+	if !m.viewport.atBottom() {
+		t.Fatal("expected the viewport at the bottom after the fitted-transcript jump")
+	}
+	// Content beyond the viewport height must keep auto-scrolling to the tail.
+	m.viewport.AppendBlock(&Block{ID: 3, Type: BlockAssistant, Content: strings.Repeat("d\n", 20)})
+	if !m.viewport.sticky {
+		t.Fatal("sticky must survive appends once at the bottom")
+	}
+	if !m.viewport.atBottom() {
+		t.Fatalf("viewport should keep following the tail: offset=%d total=%d height=%d", m.viewport.offset,
+			m.viewport.TotalLines(), m.viewport.height)
+	}
+}
+
+// TestNormalModeJKClearsStickyWhenLeavingBottom pins that j/k navigation away
+// from the tail follows the same sticky discipline as structural jumps.
+func TestNormalModeJKClearsStickyWhenLeavingBottom(t *testing.T) {
+	m := jumpTypeTestModel()
+	m.viewport.ScrollToBottom()
+	if !m.viewport.sticky {
+		t.Fatal("setup: expected sticky at the bottom")
+	}
+	m.focusedBlockID = 5
+	m.refreshBlockFocus()
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "k", Code: 'k'})); cmd != nil {
+		t.Fatalf("k should move synchronously, got %#v", cmd)
+	}
+	if m.focusedBlockID != 4 {
+		t.Fatalf("focusedBlockID after k = %d want 4", m.focusedBlockID)
+	}
+	if m.viewport.sticky {
+		t.Fatal("k away from the bottom must clear sticky")
+	}
+	if m.viewport.atBottom() {
+		t.Fatal("k target should be above the bottom")
+	}
+	offsetAfterK := m.viewport.offset
+	m.viewport.AppendBlock(&Block{ID: 9, Type: BlockAssistant, Content: "d1"})
+	if m.viewport.offset != offsetAfterK {
+		t.Fatalf("append while off-the-bottom moved the offset: %d -> %d", offsetAfterK, m.viewport.offset)
+	}
+	if m.viewport.sticky {
+		t.Fatal("append must not re-enable sticky while off-the-bottom")
+	}
+}

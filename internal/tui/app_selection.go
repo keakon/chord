@@ -152,6 +152,7 @@ func (m *Model) navigateFocusedBlock(dir int) {
 	if lineOffset, ok := m.viewport.LineOffsetForBlockID(m.focusedBlockID); ok {
 		m.viewport.offset = lineOffset
 		m.viewport.clampOffset()
+		m.viewport.sticky = m.viewport.atBottom()
 	}
 }
 

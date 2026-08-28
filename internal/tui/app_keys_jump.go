@@ -106,6 +106,7 @@ func (m *Model) jumpToMatchingBlock(dir, count int, match func(*Block) bool) tea
 	if lineOffset, ok := m.viewport.LineOffsetForBlockID(targetID); ok {
 		m.viewport.offset = lineOffset
 		m.viewport.clampOffset()
+		m.viewport.sticky = m.viewport.atBottom()
 	}
 	return m.refreshInlineImagesIfViewportMoved(prevOffset)
 }
