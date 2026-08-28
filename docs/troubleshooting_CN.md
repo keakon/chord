@@ -303,7 +303,7 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 
 ## apply_patch 报 `hunk not found`
 
-`apply_patch` 按行匹配 hunk，并应用当前搜索位置之后的第一个匹配。它可以容忍常见空白和 Unicode 标点差异，但重复块仍需要足够的邻近上下文，让目标位置明确。
+`apply_patch` 按行匹配 hunk：先做精确上下文匹配，随后是一个独立的标点/空白容错步骤，且只有当容错匹配恰好落在一个位置时才应用——命中多个位置时会被拒绝并列出歧义行号，而不是静默取第一个。重复块仍需要足够的邻近上下文，让目标位置明确。
 
 看到这个错误时：
 

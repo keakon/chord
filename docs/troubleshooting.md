@@ -331,7 +331,7 @@ Re-run `read` before retrying. When Chord manages to create a backup, the tool r
 
 ## apply_patch reports `hunk not found`
 
-`apply_patch` matches hunks line-by-line and applies the first match after the current search position. It can tolerate common whitespace and Unicode punctuation differences, but repeated blocks still need enough nearby context to make the intended location clear.
+`apply_patch` matches hunks line-by-line: exact context passes first, then a separate punctuation/whitespace-tolerant step that is applied only when it lands in exactly one place — a tolerant match hitting several positions is rejected with the ambiguous lines named rather than silently taking the first one. Repeated blocks still need enough nearby context to make the intended location clear.
 
 If you see this:
 

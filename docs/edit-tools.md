@@ -159,7 +159,7 @@ A move binds both its source and destination into the same dependency boundary. 
 
 ### Parameters
 
-- **`old_string`** (required): Exact text to find. Must match indentation, whitespace, and newlines exactly.
+- **`old_string`** (required): Exact text to find. Must match indentation, whitespace, and newlines exactly. As a last-resort fallback, punctuation variants are tolerated (see [Punctuation Tolerance](#punctuation-tolerance) below).
 - **`new_string`** (required): Replacement text.
 - **`replace_all`** (optional): `true` to replace all occurrences, `false` (default) to replace only the first.
 
@@ -186,7 +186,7 @@ A move binds both its source and destination into the same dependency boundary. 
 
 ### Error Messages
 
-- **"old_string not found in file"**: The exact text doesn't exist. Check whitespace, indentation, and newlines.
+- **"old_string not found in file"**: The exact text doesn't exist even under punctuation tolerance. Check whitespace, indentation, and newlines.
 - **"old_string found N times"**: Multiple matches found. Either:
   - Add more context to make it unique
   - Set `replace_all: true` if you want to replace all occurrences
@@ -198,6 +198,18 @@ The tool automatically handles minor trailing newline differences:
 
 - If `old_string` has a final `\n` but the match doesn't (or vice versa), and the match is unique, the edit proceeds.
 - This reduces retries caused by newline mismatches.
+
+### Punctuation Tolerance
+
+When exact matching and trailing-newline matching both fail, the tool retries with common punctuation variants treated as equivalent — the same 1:1 normalization surface `apply_patch` uses:
+
+- Curly vs straight quotes (`“ ”` ↔ `" "`, `‘ ’` ↔ `' '`)
+- Dashes (`–`, `—`, `−` ↔ `-`)
+- Full-width vs half-width CJK punctuation (`,` `;` `:` `.` `!` `?` `(` `)`)
+
+The fallback applies only when the normalized `old_string` has one unique match, reports its use in the tool result, and preserves the file's original punctuation for unchanged context. Multiple normalized matches error with the "found N times" message.
+
+A single space directly adjacent to a separator punctuation mark is also treated as optional — `：` and `:` with a trailing space (and `:the` when the space is dropped) match the same text, as does an inter-word space (`diff and` and `diffand`). This covers models that tokenize `": "` as one token and re-emit it as `：`, or drop/insert a word-boundary space. The folding is deliberately narrow: only one space right after `,` `;` `:` `.` `!` `?` `(` (or right before `)`) or between two word characters is optional. Double spaces, spaces after quotes or dashes, indentation, and newlines stay significant, so a genuine layout mismatch still fails with "old_string not found" instead of silently applying a wrong edit. The result text reports when the tolerance was used; the tool description deliberately does not advertise it, so models still aim for exact matches.
 
 ---
 
@@ -292,9 +304,9 @@ Empirical testing (Aider's edit-bench, internal chord metrics) shows:
 
 ### Matching Tolerance
 
-`apply_patch` matches hunk context in passes: exact match first, then ignoring trailing whitespace, then ignoring surrounding whitespace, then normalizing common Unicode quote, dash, and whitespace variants. Repeated blocks still need enough nearby context (or an `*** End of File` marker) to make the intended location clear.
+`apply_patch` matches hunk context in three exact passes: exact match first, then ignoring trailing whitespace, then ignoring surrounding whitespace. Punctuation/whitespace tolerance (quotes, dashes, full-width CJK punctuation, and the optional space after separator punctuation) is deliberately **not** a fourth pass: it is a single separate step that must land in exactly one place, and an ambiguous tolerant match is rejected with the candidate lines named instead of silently taking the first one. Repeated blocks still need enough nearby context (or an `*** End of File` marker) to make the intended location clear.
 
-For any file that can be decoded as text, a final fallback also treats common Chinese and ASCII punctuation as equivalent. This includes source files, dotenv files such as `.env.example`, and extensionless text files. The fallback applies only when the complete hunk has one unique match. It preserves punctuation from the current file in unchanged parts of replacement lines and reports its use in the tool result. Ambiguous matches are rejected, and a fragment occurring inside a longer line is diagnostic only—not an automatic substring edit. Binary or otherwise undecodable files do not enter this fallback because text decoding fails before hunk matching.
+For any file that can be decoded as text, a final fallback also treats common Chinese and ASCII punctuation as equivalent, and — like the `edit` tool — treats a single space adjacent to a separator punctuation mark as optional (`：`, `:` followed by a space, and `:the` match the same line). Both tools share the same normalization and the same preservation rules. This includes source files, dotenv files such as `.env.example`, and extensionless text files. The fallback applies only when the complete hunk has one unique match. It preserves punctuation from the current file in unchanged parts of replacement lines and reports its use in the tool result. Ambiguous matches are rejected, and a fragment occurring inside a longer line is diagnostic only—not an automatic substring edit. Binary or otherwise undecodable files do not enter this fallback because text decoding fails before hunk matching.
 
 ### Token Efficiency
 

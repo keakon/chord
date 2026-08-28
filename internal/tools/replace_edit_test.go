@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,9 +30,9 @@ func runEdit(t *testing.T, dir string, args map[string]any) (string, error) {
 }
 
 // A1: when the model emits straight quotes but the file uses curly quotes
-// (the dominant failure mode observed in real sessions), the quote-tolerant
-// fallback should still apply the edit instead of erroring.
-func TestEditToolQuoteTolerantMatchAppliesInsert(t *testing.T) {
+// (the dominant failure mode observed in real sessions), the punctuation-
+// tolerant fallback should still apply the edit instead of erroring.
+func TestEditToolPunctuationTolerantMatchAppliesInsert(t *testing.T) {
 	dir := t.TempDir()
 	// File uses curly quotes around the phrase, as the real docs did.
 	file := "RULE: 不得缺少“具体成员—候选—来源主张”映射。\n"
@@ -45,10 +46,10 @@ func TestEditToolQuoteTolerantMatchAppliesInsert(t *testing.T) {
 		"path": path, "old_string": oldText, "new_string": newText,
 	})
 	if err != nil {
-		t.Fatalf("Execute err = %v, want quote-tolerant success", err)
+		t.Fatalf("Execute err = %v, want punctuation/whitespace-tolerant success", err)
 	}
-	if !strings.Contains(out, "quote-tolerant") {
-		t.Fatalf("output = %q, want quote-tolerant marker", out)
+	if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+		t.Fatalf("output = %q, want punctuation/whitespace-tolerant marker", out)
 	}
 	got, _ := os.ReadFile(path)
 	want := "RULE: 不得缺少“具体成员—候选—来源主张”映射。\n门禁：覆盖率不足时返回 Medical。\n"
@@ -65,7 +66,7 @@ func TestEditToolQuoteTolerantMatchAppliesInsert(t *testing.T) {
 // A1: rewording where old/new share a quoted context. The shared context's
 // curly quotes must be preserved from the file; only the small delta from
 // new_string is inserted verbatim with the model's quote style.
-func TestEditToolQuoteTolerantMatchPreservesUnchangedContext(t *testing.T) {
+func TestEditToolPunctuationTolerantMatchPreservesUnchangedContext(t *testing.T) {
 	dir := t.TempDir()
 	// File uses curly quotes around q, in both a prefix and suffix context.
 	file := "HEAD “q” TAIL\n"
@@ -79,10 +80,10 @@ func TestEditToolQuoteTolerantMatchPreservesUnchangedContext(t *testing.T) {
 		"path": path, "old_string": oldText, "new_string": newText,
 	})
 	if err != nil {
-		t.Fatalf("Execute err = %v, want quote-tolerant success", err)
+		t.Fatalf("Execute err = %v, want punctuation/whitespace-tolerant success", err)
 	}
-	if !strings.Contains(out, "quote-tolerant") {
-		t.Fatalf("output = %q, want quote-tolerant marker", out)
+	if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+		t.Fatalf("output = %q, want punctuation/whitespace-tolerant marker", out)
 	}
 	got, _ := os.ReadFile(path)
 	// The shared context "HEAD "q" TAIL" keeps the file's curly quotes; only
@@ -99,7 +100,7 @@ func TestEditToolQuoteTolerantMatchPreservesUnchangedContext(t *testing.T) {
 // A1: quote tolerance must NOT mask a genuine mismatch. When old_string
 // differs by more than quotes (extra word), it must still error with the
 // fresh-read hint so the model does not get a silent wrong edit.
-func TestEditToolQuoteTolerantMatchDoesNotMaskRealMismatch(t *testing.T) {
+func TestEditToolPunctuationTolerantMatchDoesNotMaskRealMismatch(t *testing.T) {
 	dir := t.TempDir()
 	file := "line with “quotes” here\n"
 	path := writeEditFixture(t, dir, "demo.md", file)
@@ -119,7 +120,7 @@ func TestEditToolQuoteTolerantMatchDoesNotMaskRealMismatch(t *testing.T) {
 
 // A1: ambiguous normalized match (the same normalized old_string matches
 // twice) must error asking for more context, mirroring exact-match semantics.
-func TestEditToolQuoteTolerantMatchAmbiguousErrors(t *testing.T) {
+func TestEditToolPunctuationTolerantMatchAmbiguousErrors(t *testing.T) {
 	dir := t.TempDir()
 	file := "first “x” line\nsecond “x” line\n"
 	path := writeEditFixture(t, dir, "demo.md", file)
@@ -135,11 +136,99 @@ func TestEditToolQuoteTolerantMatchAmbiguousErrors(t *testing.T) {
 	}
 }
 
-// A1: replace_all under quote tolerance replaces every normalized occurrence.
-func TestEditToolQuoteTolerantMatchReplaceAll(t *testing.T) {
+// Tier 2: when exact/trailing-newline/punctuation tolerance all fail and the
+// mismatch is a character-level difference (dropped rune, extra word), the
+// error locates the closest matching block with the exact file line and the
+// difference, so the model can rebuild old_string without a re-read.
+func TestEditToolClosestMatchPinpointsDifference(t *testing.T) {
+	dir := t.TempDir()
+	// The model's old_string drops the ")" — a missing character, which is
+	// beyond 1:1 punctuation tolerance.
+	file := "const scheduler = new DailyScheduler(async (day) => {\n    await stats.rebuildDay(day);\n    // recompute only this day's statistics.\n  });\n"
+	path := writeEditFixture(t, dir, "main.ts", file)
+	oldText := "const scheduler = new DailyScheduler(async (day) => {\n    await stats.rebuildDay(day;\n    // recompute only this day's statistics.\n  });\n"
+	newText := "const scheduler = new DailyScheduler(async (day) => {\n    await stats.rebuildDay(day);\n  });\n"
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": newText,
+	})
+	if err == nil {
+		t.Fatal("Execute err = nil, want closest-match error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "Closest match is at line 1") {
+		t.Fatalf("err = %q, want closest-match location", msg)
+	}
+	// The file's actual line 2 (rebuildDay with ")") must be shown so the
+	// model can copy it exactly.
+	if !strings.Contains(msg, "file line 2:") || !strings.Contains(msg, "rebuildDay(day);") {
+		t.Fatalf("err = %q, want the exact file line 2 content", msg)
+	}
+	if !strings.Contains(msg, "your line 2:") || !strings.Contains(msg, "rebuildDay(day;") {
+		t.Fatalf("err = %q, want the model's differing line 2", msg)
+	}
+}
+
+// TestEditToolClosestMatchRelativeLineNumber guards the "your line" semantics:
+// with a multi-line old_string whose window starts deep in the file, the
+// differing line must be reported relative to the block ("your line 2"),
+// not as an absolute file line number that would mislead the model.
+func TestEditToolClosestMatchRelativeLineNumber(t *testing.T) {
+	dir := t.TempDir()
+	// Window starts at file line 11; the divergence sits at the window's
+	// second line (file line 12).
+	var b strings.Builder
+	for i := 1; i <= 10; i++ {
+		fmt.Fprintf(&b, "padding line %d\n", i)
+	}
+	b.WriteString("alpha beta\n")
+	b.WriteString("gamma delta\n")
+	file := b.String()
+	path := writeEditFixture(t, dir, "demo.md", file)
+	oldText := "alpha beta\ngammax delta\n"
+	newText := "alpha beta\ngamma delta\n"
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": newText,
+	})
+	if err == nil {
+		t.Fatal("Execute err = nil, want closest-match error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "file line 12: \"gamma delta\"") {
+		t.Fatalf("err = %q, want absolute file line 12", msg)
+	}
+	if !strings.Contains(msg, "your line 2: \"gammax delta\"") {
+		t.Fatalf("err = %q, want block-relative 'your line 2' (not 12)", msg)
+	}
+}
+
+// Tier 3: when no window is close enough (the old_string targets something
+// fundamentally different), the generic re-read hint still applies.
+func TestEditToolClosestMatchFallsBackToGenericHint(t *testing.T) {
+	dir := t.TempDir()
+	file := "completely unrelated content here\nsecond line\nthird line\n"
+	path := writeEditFixture(t, dir, "demo.md", file)
+	oldText := "the quick brown fox jumps over the lazy dog\nand then some more text that is nowhere\nin this file at all\n"
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": "replacement\n",
+	})
+	if err == nil {
+		t.Fatal("Execute err = nil, want generic error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "old_string not found in file, even after punctuation/whitespace tolerance") {
+		t.Fatalf("err = %q, want generic old_string not found", msg)
+	}
+	if strings.Contains(msg, "Closest match") {
+		t.Fatalf("err = %q, must not claim a closest match for unrelated content", msg)
+	}
+}
+
+// A1: replace_all under punctuation tolerance replaces every normalized
+// occurrence.
+func TestEditToolPunctuationTolerantMatchReplaceAll(t *testing.T) {
 	dir := t.TempDir()
 	// File uses curly quotes; old_string below uses straight quotes so exact
-	// matching fails and the quote-tolerant fallback handles replace_all.
+	// matching fails and the punctuation/whitespace-tolerant fallback handles replace_all.
 	file := "a “term” b\na “term” b\n"
 	path := writeEditFixture(t, dir, "demo.md", file)
 	oldText := "\"term\""
@@ -151,8 +240,8 @@ func TestEditToolQuoteTolerantMatchReplaceAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute err = %v", err)
 	}
-	if !strings.Contains(out, "quote-tolerant") {
-		t.Fatalf("output = %q, want quote-tolerant marker", out)
+	if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+		t.Fatalf("output = %q, want punctuation/whitespace-tolerant marker", out)
 	}
 	got, _ := os.ReadFile(path)
 	// Intent preservation: only the inner word changed (term -> TERM), so the
@@ -164,11 +253,11 @@ func TestEditToolQuoteTolerantMatchReplaceAll(t *testing.T) {
 	}
 }
 
-// A1: replace_all under quote tolerance collects non-overlapping matches
-// left-to-right, mirroring strings.ReplaceAll. Overlapping normalized
+// A1: replace_all under punctuation tolerance collects non-overlapping
+// matches left-to-right, mirroring strings.ReplaceAll. Overlapping normalized
 // matches (curly “““ matching straight "") must not panic on slice bounds
 // and must consume only the leftmost non-overlapping occurrence.
-func TestEditToolQuoteTolerantMatchReplaceAllNonOverlapping(t *testing.T) {
+func TestEditToolPunctuationTolerantMatchReplaceAllNonOverlapping(t *testing.T) {
 	dir := t.TempDir()
 	// Three curly quotes; straight old_string normalizes to a two-rune
 	// window that overlaps itself at adjacent positions.
@@ -181,10 +270,10 @@ func TestEditToolQuoteTolerantMatchReplaceAllNonOverlapping(t *testing.T) {
 		"path": path, "old_string": oldText, "new_string": newText, "replace_all": all,
 	})
 	if err != nil {
-		t.Fatalf("Execute err = %v, want quote-tolerant success", err)
+		t.Fatalf("Execute err = %v, want punctuation/whitespace-tolerant success", err)
 	}
-	if !strings.Contains(out, "quote-tolerant") {
-		t.Fatalf("output = %q, want quote-tolerant marker", out)
+	if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+		t.Fatalf("output = %q, want punctuation/whitespace-tolerant marker", out)
 	}
 	got, _ := os.ReadFile(path)
 	// Leftmost non-overlapping match consumes the first two curly quotes
@@ -193,6 +282,376 @@ func TestEditToolQuoteTolerantMatchReplaceAllNonOverlapping(t *testing.T) {
 	want := "“x“\n"
 	if string(got) != want {
 		t.Fatalf("file = %q, want %q (non-overlapping leftmost replacement)", string(got), want)
+	}
+}
+
+// A1: full-width CJK punctuation (e.g. "," vs ",") is tolerated the same way
+// as curly quotes. The shared prefix/suffix keep the file's original full-
+// width bytes; only the model's delta is written verbatim.
+func TestEditToolPunctuationTolerantFullWidthPunct(t *testing.T) {
+	dir := t.TempDir()
+	// File uses a full-width comma; the model's old/new both use half-width.
+	file := "keep，this\n"
+	path := writeEditFixture(t, dir, "proposal.md", file)
+	oldText := "keep,this\n"
+	newText := "keep,that\n"
+	out, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": newText,
+	})
+	if err != nil {
+		t.Fatalf("Execute err = %v, want punctuation/whitespace-tolerant success", err)
+	}
+	if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+		t.Fatalf("output = %q, want punctuation/whitespace-tolerant marker", out)
+	}
+	got, _ := os.ReadFile(path)
+	// The comma is shared context, so the file's full-width "," survives;
+	// only the delta "that" replaces "this".
+	want := "keep，that\n"
+	if string(got) != want {
+		t.Fatalf("file = %q, want %q (full-width comma preserved)", string(got), want)
+	}
+	if strings.Contains(string(got), "keep,") {
+		t.Fatalf("context comma drifted to half-width: %q", string(got))
+	}
+}
+
+// U+FF0E FULLWIDTH FULL STOP (the CJK-IME period) folds to "." just like the
+// ideographic full stop "。". A model that re-emits ". " as "．" must still
+// match.
+func TestEditToolPunctuationTolerantFullwidthFullStop(t *testing.T) {
+	dir := t.TempDir()
+	file := "完成。继续。\n"
+	path := writeEditFixture(t, dir, "proposal.md", file)
+	// Model re-emits the sentence period as U+FF0E.
+	oldText := "完成．继续．\n"
+	newText := "完成．继续下一项．\n"
+	out, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": newText,
+	})
+	if err != nil {
+		t.Fatalf("Execute err = %v, want punctuation/whitespace-tolerant success", err)
+	}
+	if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+		t.Fatalf("output = %q, want punctuation/whitespace-tolerant marker", out)
+	}
+	got, _ := os.ReadFile(path)
+	// The file's original "。" survives as unchanged context.
+	if want := "完成。继续下一项。\n"; string(got) != want {
+		t.Fatalf("file = %q, want %q", string(got), want)
+	}
+}
+
+// A1: whitespace stays significant. A space/newline difference must NOT be
+// masked by punctuation tolerance, otherwise indentation or line-structure
+// changes would silently apply wrong edits.
+func TestEditToolPunctuationTolerantKeepsWhitespaceSignificant(t *testing.T) {
+	dir := t.TempDir()
+	file := "line one\n  line two\n"
+	path := writeEditFixture(t, dir, "demo.md", file)
+	// old_string collapses the indentation of the second line.
+	oldText := "line one\nline two\n"
+	newText := "line one\nline three\n"
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": newText,
+	})
+	if err == nil {
+		t.Fatal("Execute err = nil, want mismatch error (whitespace must stay significant)")
+	}
+	if !strings.Contains(err.Error(), "old_string not found") {
+		t.Fatalf("err = %q, want old_string not found", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != file {
+		t.Fatalf("file = %q, want unchanged %q", string(got), file)
+	}
+}
+
+// A1: unrelated punctuation classes are NOT equivalent. A half-width
+// semicolon must not match a full-width period (which normalizes to ".").
+func TestEditToolPunctuationTolerantDoesNotMergeUnrelatedPunct(t *testing.T) {
+	dir := t.TempDir()
+	file := "alpha。beta\n"
+	path := writeEditFixture(t, dir, "demo.md", file)
+	oldText := "alpha;beta\n" // ";" vs normalized "." must not match
+	newText := "alpha;gamma\n"
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": newText,
+	})
+	if err == nil {
+		t.Fatal("Execute err = nil, want mismatch error (unrelated punctuation)")
+	}
+	if !strings.Contains(err.Error(), "old_string not found") {
+		t.Fatalf("err = %q, want old_string not found", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != file {
+		t.Fatalf("file = %q, want unchanged %q", string(got), file)
+	}
+}
+
+// A1: "：" and ": " are equivalent. Models often tokenize ": " as a single
+// token and re-emit it as "：" or drop the space (e.g. "refusal:the caller"
+// in real sessions). The file's own punctuation survives unchanged context.
+func TestEditToolPunctuationTolerantColonSpace(t *testing.T) {
+	t.Run("file full-width colon, model half-width colon plus space", func(t *testing.T) {
+		dir := t.TempDir()
+		file := "说明：这是标题\n"
+		path := writeEditFixture(t, dir, "note.md", file)
+		oldText := "说明: 这是标题\n"
+		newText := "说明: 新标题\n"
+		out, err := runEdit(t, dir, map[string]any{
+			"path": path, "old_string": oldText, "new_string": newText,
+		})
+		if err != nil {
+			t.Fatalf("Execute err = %v, want punctuation/whitespace-tolerant success", err)
+		}
+		if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+			t.Fatalf("output = %q, want punctuation/whitespace-tolerant marker", out)
+		}
+		got, _ := os.ReadFile(path)
+		// The colon is shared context, so the file's full-width "：" survives;
+		// only the delta "新" replaces "这".
+		want := "说明：新标题\n"
+		if string(got) != want {
+			t.Fatalf("file = %q, want %q (full-width colon preserved)", string(got), want)
+		}
+		if strings.Contains(string(got), "说明:") {
+			t.Fatalf("context colon drifted to half-width: %q", string(got))
+		}
+	})
+
+	t.Run("file half-width colon plus space, model full-width colon", func(t *testing.T) {
+		dir := t.TempDir()
+		file := "说明: 这是标题\n"
+		path := writeEditFixture(t, dir, "note.md", file)
+		oldText := "说明：这是标题\n"
+		newText := "说明：新标题\n"
+		_, err := runEdit(t, dir, map[string]any{
+			"path": path, "old_string": oldText, "new_string": newText,
+		})
+		if err != nil {
+			t.Fatalf("Execute err = %v, want punctuation/whitespace-tolerant success", err)
+		}
+		got, _ := os.ReadFile(path)
+		want := "说明: 新标题\n"
+		if string(got) != want {
+			t.Fatalf("file = %q, want %q (half-width colon plus space preserved)", string(got), want)
+		}
+	})
+
+	t.Run("model intends to normalize the colon itself", func(t *testing.T) {
+		dir := t.TempDir()
+		file := "说明：这是标题\n"
+		path := writeEditFixture(t, dir, "note.md", file)
+		// old/new differ in original bytes at the colon (full-width vs
+		// half-width+space); that difference is the model's intended delta
+		// and must come from newText verbatim.
+		oldText := "说明：这是标题\n"
+		newText := "说明: 这是标题\n"
+		_, err := runEdit(t, dir, map[string]any{
+			"path": path, "old_string": oldText, "new_string": newText,
+		})
+		if err != nil {
+			t.Fatalf("Execute err = %v, want punctuation/whitespace-tolerant success", err)
+		}
+		got, _ := os.ReadFile(path)
+		want := "说明: 这是标题\n"
+		if string(got) != want {
+			t.Fatalf("file = %q, want %q (model's colon delta applied)", string(got), want)
+		}
+	})
+}
+
+// A1: comma and paren spaces follow the same separator rule, so the
+// normalized space folding applies consistently.
+func TestEditToolPunctuationTolerantSeparatorSpace(t *testing.T) {
+	t.Run("comma", func(t *testing.T) {
+		dir := t.TempDir()
+		file := "列表,项目\n"
+		path := writeEditFixture(t, dir, "list.md", file)
+		oldText := "列表, 项目\n"
+		newText := "列表, 事项\n"
+		if _, err := runEdit(t, dir, map[string]any{"path": path, "old_string": oldText, "new_string": newText}); err != nil {
+			t.Fatalf("Execute err = %v, want punctuation/whitespace-tolerant success", err)
+		}
+		got, _ := os.ReadFile(path)
+		if string(got) != "列表,事项\n" {
+			t.Fatalf("file = %q, want %q (full-width comma preserved)", string(got), "列表,事项\n")
+		}
+	})
+	t.Run("parens", func(t *testing.T) {
+		dir := t.TempDir()
+		file := "(内容)\n"
+		path := writeEditFixture(t, dir, "paren.md", file)
+		oldText := "( 内容 )\n"
+		newText := "( 新内容 )\n"
+		if _, err := runEdit(t, dir, map[string]any{"path": path, "old_string": oldText, "new_string": newText}); err != nil {
+			t.Fatalf("Execute err = %v, want punctuation/whitespace-tolerant success", err)
+		}
+		got, _ := os.ReadFile(path)
+		// Both parens plus their absorbed spaces come from the file; only
+		// "新" is the delta.
+		if string(got) != "(新内容)\n" {
+			t.Fatalf("file = %q, want %q (full-width parens preserved)", string(got), "(新内容)\n")
+		}
+	})
+}
+
+// A1: the normalized match must stay unique. When a file mixes "：" and ": "
+// variants of the same text, the same old_string matches both and must error
+// like the exact path instead of silently picking one.
+func TestEditToolPunctuationTolerantColonSpaceAmbiguous(t *testing.T) {
+	dir := t.TempDir()
+	file := "a：b\na: b\n"
+	path := writeEditFixture(t, dir, "mixed.md", file)
+	// "a:b" (no space) matches neither line exactly, but normalizes to the
+	// same "a:b" as both "a：b" and "a: b" — that must error as ambiguous.
+	oldText := "a:b\n"
+	newText := "a:x\n"
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": newText,
+	})
+	if err == nil || !strings.Contains(err.Error(), "found 2 times") {
+		t.Fatalf("err = %v, want found-2-times ambiguity error", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != file {
+		t.Fatalf("file = %q, want unchanged %q", string(got), file)
+	}
+}
+
+// A1: the space folding is deliberately narrow. Double spaces, spaces after
+// quotes/dashes, word-boundary spaces, and spaces on the non-absorbing side
+// of a paren all stay significant, so a real mismatch still fails with the
+// fresh-read hint instead of a wrong edit.
+func TestEditToolPunctuationTolerantSpaceFoldingIsNarrow(t *testing.T) {
+	cases := []struct {
+		name string
+		file string
+		old  string
+		new  string
+	}{
+		{"double space after separator", "a:  b\n", "a：b\n", "a：x\n"},   // only one space is optional
+		{"space inside quotes", "\" foo\"\n", "\"foo\"\n", "\"fox\"\n"}, // quote space is content
+		{"space after dash", "- foo\n", "-foo\n", "-fox\n"},             // list-item space is syntax
+		{"extra space before opening paren", "(x\n", " (x\n", " (y\n"},  // model's leading space is not in the file
+		{"extra space after closing paren", "x)\n", "x) \n", "y) \n"},   // ")" only absorbs a leading space
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeEditFixture(t, dir, "demo.md", tc.file)
+			_, err := runEdit(t, dir, map[string]any{
+				"path": path, "old_string": tc.old, "new_string": tc.new,
+			})
+			if err == nil {
+				t.Fatalf("Execute err = nil, want mismatch error (old=%q file=%q)", tc.old, tc.file)
+			}
+			if !strings.Contains(err.Error(), "old_string not found") {
+				t.Fatalf("err = %q, want old_string not found", err)
+			}
+			got, _ := os.ReadFile(path)
+			if string(got) != tc.file {
+				t.Fatalf("file = %q, want unchanged %q", string(got), tc.file)
+			}
+		})
+	}
+}
+
+// A1: an inter-word space (exactly one space between two word characters) is
+// treated as optional, covering models that drop or insert a word-boundary
+// space. The file's own bytes survive unchanged context; only the delta from
+// new_string is applied.
+func TestEditToolPunctuationTolerantInterWordSpace(t *testing.T) {
+	t.Run("file has space, old drops it", func(t *testing.T) {
+		dir := t.TempDir()
+		file := "content and\n"
+		path := writeEditFixture(t, dir, "demo.md", file)
+		oldText := "contentand\n"
+		newText := "contentax\n"
+		out, err := runEdit(t, dir, map[string]any{
+			"path": path, "old_string": oldText, "new_string": newText,
+		})
+		if err != nil {
+			t.Fatalf("Execute err = %v, want tolerant success", err)
+		}
+		if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+			t.Fatalf("output = %q, want tolerant marker", out)
+		}
+		got, _ := os.ReadFile(path)
+		// The space is shared context, so the file's "and" space survives.
+		if string(got) != "content ax\n" {
+			t.Fatalf("file = %q, want %q", string(got), "content ax\n")
+		}
+	})
+	t.Run("file has no space, old inserts one", func(t *testing.T) {
+		dir := t.TempDir()
+		file := "contentand\n"
+		path := writeEditFixture(t, dir, "demo.md", file)
+		// old/new differ at the inter-word space AND at the word ("and" vs
+		// "ax"), so the delta covers both; the file's own bytes (no space)
+		// are preserved outside the delta.
+		oldText := "content and\n"
+		newText := "content ax\n"
+		_, err := runEdit(t, dir, map[string]any{
+			"path": path, "old_string": oldText, "new_string": newText,
+		})
+		if err != nil {
+			t.Fatalf("Execute err = %v, want tolerant success", err)
+		}
+		got, _ := os.ReadFile(path)
+		if string(got) != "contentax\n" {
+			t.Fatalf("file = %q, want %q", string(got), "contentax\n")
+		}
+	})
+	t.Run("model intends to add the space", func(t *testing.T) {
+		dir := t.TempDir()
+		file := "contentand\n"
+		path := writeEditFixture(t, dir, "demo.md", file)
+		oldText := "contentand\n"
+		newText := "content and\n"
+		_, err := runEdit(t, dir, map[string]any{
+			"path": path, "old_string": oldText, "new_string": newText,
+		})
+		if err != nil {
+			t.Fatalf("Execute err = %v, want tolerant success", err)
+		}
+		got, _ := os.ReadFile(path)
+		if string(got) != "content and\n" {
+			t.Fatalf("file = %q, want %q (model's space delta applied)", string(got), "content and\n")
+		}
+	})
+}
+
+// A1: the space folding is deliberately narrow. Double spaces, spaces after
+// quotes/dashes, spaces next to punctuation, and spaces on the non-absorbing
+// side of a paren all stay significant, so a real mismatch still fails with
+// the fresh-read hint instead of a wrong edit.
+func TestEditToolNotFoundSaysToleranceAlreadyTried(t *testing.T) {
+	dir := t.TempDir()
+	path := writeEditFixture(t, dir, "demo.md", "real content line\n")
+	// A content-level mismatch: the tolerance fallback (punctuation, inter-
+	// word space) has already been tried and cannot bridge it. The error
+	// must say so, and the Tier-2 closest-match path pinpoints the exact
+	// file line so the model can rebuild old_string without a full re-read.
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": "real contant line\n", "new_string": "replacement\n",
+	})
+	if err == nil {
+		t.Fatal("Execute error = nil, want old_string not found")
+	}
+	if !strings.Contains(err.Error(), "even after punctuation/whitespace tolerance") {
+		t.Fatalf("err = %q, want tolerance-already-tried note", err)
+	}
+	if !strings.Contains(err.Error(), "Closest match is at line 1") {
+		t.Fatalf("err = %q, want Tier-2 closest-match location", err)
+	}
+	if !strings.Contains(err.Error(), "file line 1: \"real content line\"") {
+		t.Fatalf("err = %q, want the exact file line verbatim (not normalized): %q", err, "file line 1: \"real content line\"")
+	}
+	if !strings.Contains(err.Error(), "your line 1: \"real contant line\"") {
+		t.Fatalf("err = %q, want the model's differing line verbatim (not normalized): %q", err, "your line 1: \"real contant line\"")
 	}
 }
 
@@ -248,5 +707,178 @@ func TestEditToolPathWinsOverFilePathAlias(t *testing.T) {
 	other, _ := os.ReadFile(filepath.Join(dir, "other.txt"))
 	if string(other) != "hello\n" {
 		t.Fatalf("other.txt = %q, want unchanged hello\\n (filePath must lose)", string(other))
+	}
+}
+
+// TestEditToolClosestMatchSkipsOversizedWindows guards the budget semantics: a
+// single window whose work exceeds the per-window cap must be skipped, not
+// abort the scan — a cheap near-match later in the file must still be found.
+func TestEditToolClosestMatchSkipsOversizedWindows(t *testing.T) {
+	dir := t.TempDir()
+	content := strings.Repeat("x", 10_000) + "\nalpha beta\ngamma delta\n"
+	path := writeEditFixture(t, dir, "demo.md", content)
+	// The 2-line window covering the 10k-char line busts the per-window work
+	// cap; the later 2-line window is cheap and one character away.
+	oldText := "alpha betax\ngamma delta\n"
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": "alpha beta\ngamma delta\n",
+	})
+	if err == nil {
+		t.Fatal("Execute err = nil, want closest-match error")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "Closest match is at line 2") {
+		t.Fatalf("err = %q, want closest match at line 2 after skipping the oversized window", msg)
+	}
+}
+
+// TestEditToolClosestMatchLargeOldStringDegradesToGenericHint guards the
+// uniform-file dead zone: when the old_string itself is large enough that every
+// window (including the closest one) exceeds the per-window work cap, no
+// closest-match suggestion is produced and the failure degrades to the generic
+// re-read hint instead. This pins the current budget semantics so a future
+// change in the budget formula cannot silently alter the user-visible error.
+
+func TestEditToolClosestMatchLargeOldStringDegradesToGenericHint(t *testing.T) {
+	dir := t.TempDir()
+	var b strings.Builder
+	// 80 lines of the same scale as old_string (600 runes each); line
+	// 40 differs from old_string by two characters, so without the budget
+	// cap it would be reported as the closest match (≈99% similar).
+	for i := range 80 {
+		if i == 40 {
+			b.WriteString(strings.Repeat("a", 600))
+		} else {
+			b.WriteString(strings.Repeat("z", 600))
+		}
+		b.WriteString("\n")
+	}
+	path := writeEditFixture(t, dir, "demo.md", b.String())
+	// 600 runes: every window costs 600×600≈360k rune-pairs, over the
+	// 200k budget, so the scan skips them all and falls back to the generic
+	// hint rather than reporting line 41 as the closest match.
+
+	oldText := strings.Repeat("a", 598) + "bb" // 600 runes, 2 chars from line 40
+
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": "ok",
+	})
+	if err == nil {
+		t.Fatal("Execute error = nil, want generic re-read hint")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "The target text may be stale") {
+		t.Fatalf("err = %q, want generic re-read hint in the budget dead zone", msg)
+	}
+	if strings.Contains(msg, "Closest match is at line") {
+		t.Fatalf("err = %q, want no closest-match suggestion in the budget dead zone", msg)
+	}
+}
+
+// TestEditToolTolerantMatchReportsLandingLine guards that a punctuation/
+// whitespace-tolerant match reports where the replacement landed, so the
+// model does not have to guess which candidate was rewritten.
+func TestEditToolTolerantMatchReportsLandingLine(t *testing.T) {
+	dir := t.TempDir()
+	file := "line one： quoted here\nline two plain\n"
+	path := writeEditFixture(t, dir, "demo.md", file)
+	oldText := "line one: quoted here\n"
+	newText := "line one@ quoted here\n"
+	out, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": newText,
+	})
+	if err != nil {
+		t.Fatalf("Execute err = %v, want punctuation/whitespace-tolerant success", err)
+	}
+	if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+		t.Fatalf("output = %q, want punctuation/whitespace-tolerant marker", out)
+	}
+	if !strings.Contains(out, " at line") {
+		t.Fatalf("output = %q, want the landing line report", out)
+	}
+}
+
+// TestEditToolTolerantMatchReportsLandingLinesMany guards the replace_all
+// path: multiple tolerant hits list every landing line, so the model sees
+// that each occurrence was rewritten, not just the first one.
+func TestEditToolTolerantMatchReportsLandingLinesMany(t *testing.T) {
+	dir := t.TempDir()
+	file := "line one： quoted here\nline two： quoted there\n"
+	path := writeEditFixture(t, dir, "demo.md", file)
+	oldText := ": quoted"
+	newText := "@ quoted"
+	out, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": newText, "replace_all": true,
+	})
+	if err != nil {
+		t.Fatalf("Execute err = %v, want punctuation/whitespace-tolerant success", err)
+	}
+	if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+		t.Fatalf("output = %q, want punctuation/whitespace-tolerant marker", out)
+	}
+	if !strings.Contains(out, " at lines") {
+		t.Fatalf("output = %q, want the multi-hit landing lines report", out)
+	}
+}
+
+// TestEditToolClosestMatchBeyondOldLineCap guards that raising the file-line
+// cap restores the closest-match hint for files longer than the old 2000-line cap.
+func TestEditToolClosestMatchBeyondOldLineCap(t *testing.T) {
+	dir := t.TempDir()
+	file := strings.Repeat("x\n", 1050) + "alpha beta\n" + strings.Repeat("y\n", 1448)
+	path := writeEditFixture(t, dir, "demo.md", file)
+	oldText := "alpha betax\n"
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": "alpha beta\n",
+	})
+	if err == nil {
+		t.Fatal("Execute err = nil, want closest-match error")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "Closest match is at line") {
+		t.Fatalf("err = %q, want closest match despite the old 2000-line cap", msg)
+	}
+}
+
+// TestEditToolClosestMatchStillRefusedPastCap guards the 10000-line guard: a
+// file longer than the cap still falls back to the generic re-read hint.
+func TestEditToolClosestMatchStillRefusedPastCap(t *testing.T) {
+	dir := t.TempDir()
+	file := strings.Repeat("x\n", 6000) + "alpha beta\n" + strings.Repeat("y\n", 5999)
+	path := writeEditFixture(t, dir, "demo.md", file)
+	oldText := "alpha betax\n"
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": "alpha beta\n",
+	})
+	if err == nil {
+		t.Fatal("Execute err = nil, want generic error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "old_string not found in file, even after punctuation/whitespace tolerance") {
+
+		t.Fatalf("err = %q, want generic old_string not found", msg)
+	}
+	if strings.Contains(msg, "Closest match") {
+
+		t.Fatalf("err = %q, must not claim a closest match beyond the cap", msg)
+	}
+}
+
+// TestEditToolAbsorbedInvisibleRunesHint guards that when the model's
+// old_string carries invisible format runes (variation selectors), the
+// success message explicitly says so, so the model learns to strip them
+// before the next copy.
+func TestEditToolAbsorbedInvisibleRunesHint(t *testing.T) {
+	dir := t.TempDir()
+	file := "ab,cd\n"
+	path := writeEditFixture(t, dir, "demo.md", file)
+	oldText := "ab\uFE0F,cd\n"
+	newText := "ab;cd\n"
+	out, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": newText,
+	})
+	if err != nil {
+		t.Fatalf("Execute err = %v, want tolerant success", err)
+	}
+	if !strings.Contains(out, "absorbed 1 invisible character") {
+		t.Fatalf("output = %q, want the absorbed-invisible-character hint", out)
 	}
 }

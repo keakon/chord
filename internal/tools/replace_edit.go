@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/lsp"
@@ -163,16 +165,18 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		}
 	}
 	if count == 0 {
-		// Try quote-punctuation tolerance: some models cannot reproduce the
-		// file's curly quotes ("") verbatim and emit straight ("') quotes
-		// (or vice versa). Normalize only the quote characters and re-match;
-		// when it succeeds, apply an intent-preserving replacement that keeps
-		// the file's original bytes for the unchanged prefix/suffix shared by
-		// old_string and new_string, so surrounding context does not drift to
-		// the model's quote style.
-		if altNew, altCount, ok := quoteTolerantEdit(content, decodedOld, decodedNew, replaceAll); ok {
+		// Try punctuation tolerance: some models cannot reproduce the file's
+		// punctuation verbatim — they emit straight quotes for curly ones,
+		// half-width punctuation for full-width CJK punctuation (or vice
+		// versa), or collapse a separator's trailing space ("：", ": " and
+		// ":the" are treated as the same separator). When the normalized
+		// old_string matches uniquely, an intent-preserving replacement keeps
+		// the file's original bytes for the unchanged prefix/suffix shared
+		// by old_string and new_string, so surrounding context does not drift
+		// to the model's punctuation style.
+		if altNew, altCount, matchLines, ok := punctuationTolerantEdit(content, decodedOld, decodedNew, replaceAll); ok {
 			if altCount > 1 && !replaceAll {
-				return "", fmt.Errorf("old_string found %d times under quote-tolerant matching, provide more context or set replace_all to true", altCount)
+				return "", fmt.Errorf("old_string found %d times under %s matching, provide more context or set replace_all to true", altCount, tolerantMatchNote)
 			}
 			qc := altNew
 			encodedBytes, err := encodeString(qc, editRead.Decoded.Encoding)
@@ -186,10 +190,14 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 				encSuffix = fmt.Sprintf(", encoding=%s", editRead.Decoded.Encoding.Name)
 			}
 			var out string
+			abs := ""
+			if n := countIgnorableRunes(decodedOld); n > 0 {
+				abs = fmt.Sprintf(", absorbed %d invisible character(s) from your old_string copy", n)
+			}
 			if altCount > 1 {
-				out = fmt.Sprintf("Replaced %d occurrences via quote-tolerant match (%d bytes -> %d bytes)%s", altCount, oldBytes, newBytes, encSuffix)
+				out = fmt.Sprintf("Replaced %d occurrences via %s match%s%s (%d bytes -> %d bytes)%s", altCount, tolerantMatchNote, formatTolerantMatchLines(matchLines), abs, oldBytes, newBytes, encSuffix)
 			} else {
-				out = fmt.Sprintf("Replaced 1 occurrence via quote-tolerant match (%d bytes -> %d bytes)%s", oldBytes, newBytes, encSuffix)
+				out = fmt.Sprintf("Replaced 1 occurrence via %s match%s%s (%d bytes -> %d bytes)%s", tolerantMatchNote, formatTolerantMatchLines(matchLines), abs, oldBytes, newBytes, encSuffix)
 			}
 			out, err = writeEncodedEditedFile(ctx, resolvedPath, encodedBytes, editRead.Decoded, qc, fmt.Sprintf("writing %d bytes", newBytes), t.LSP, out, t.BaseDir)
 			if err != nil {
@@ -197,7 +205,24 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			}
 			return out, nil
 		}
-		return "", fmt.Errorf("old_string not found in file. The target text may be stale or already changed. Re-read the small target range from current file contents, then rebuild old_string using exact text from that fresh read. Do not retry the same edit unchanged")
+		// Tier 2: exact, trailing-newline, and punctuation/whitespace
+		// tolerance all failed. Locate the closest matching block so the
+		// model sees the exact file lines and the precise difference, which
+		// usually lets it retry without a re-read. Only when no window is
+		// close enough does the generic re-read hint apply (Tier 3).
+		if closest, ok := editClosestMatch(content, decodedOld); ok {
+			sim := int(math.Round(closest.Similarity * 100))
+			var b strings.Builder
+			fmt.Fprintf(&b, "old_string not found in file, even after punctuation/whitespace tolerance. Closest match is at line %d (%d%% similar, %d character difference):\n", closest.StartLine, sim, closest.DiffRunes)
+			fmt.Fprintf(&b, "  file line %d: %s\n", closest.FileDiffLine, closest.Actual)
+			fmt.Fprintf(&b, "  your line %d: %s\n", closest.ExpectedDiffLine, closest.Expected)
+			for _, d := range closest.Diffs[1:] {
+				fmt.Fprintf(&b, "  differing line %d (file %d): expected %s\n    actual %s\n", d.ExpectedLine, d.FileLine, d.Expected, d.Actual)
+			}
+			b.WriteString("Rebuild old_string from the file lines above (copy them exactly), then retry; the difference is beyond punctuation/whitespace tolerance")
+			return "", fmt.Errorf("%s", b.String())
+		}
+		return "", fmt.Errorf("old_string not found in file, even after punctuation/whitespace tolerance. The target text may be stale or already changed, or differs beyond punctuation and spacing. Re-read the small target range from current file contents, then rebuild old_string using exact text from that fresh read. Do not retry the same edit unchanged")
 	}
 	if count > 1 && !replaceAll {
 		return "", fmt.Errorf("old_string found %d times, provide more context or set replace_all to true", count)
@@ -262,38 +287,41 @@ func trailingNewlineTolerantEdit(content, oldText, newText string) (altOld, altN
 	return altOld, altNew, altCount, true
 }
 
-// quoteTolerantEdit finds oldText in content after normalizing quote
-// punctuation (curly/straight quotes are treated as equivalent), and returns
-// a replacement that preserves the file's original bytes for the unchanged
-// prefix/suffix shared by oldText and newText. This is a last-resort fallback
-// for models that cannot reproduce the file's curly quotes verbatim, applied
-// only after exact and trailing-newline matching both fail.
+// punctuationTolerantEdit finds oldText in content after normalizing prose
+// punctuation (curly/straight quotes, dashes, and full-width CJK punctuation
+// are treated as their ASCII equivalents, and one typesetting space adjacent
+// to separator punctuation is optional), and returns a replacement that
+// preserves the file's original bytes for the unchanged prefix/suffix shared
+// by oldText and newText. This is a last-resort fallback for models that
+// cannot reproduce the file's punctuation verbatim, applied only after exact
+// and trailing-newline matching both fail. Indentation and word-boundary
+// whitespace stay significant, so a real layout mismatch still fails with
+// the fresh-read hint.
 //
-// The normalization is 1:1 rune-to-rune, so a rune index in the normalized
-// content maps directly to the same rune index in the original content; this
-// keeps byte-exact positions for splicing in the original bytes.
+// Matching happens in the normalized rune sequence; each normalized rune
+// carries a span back to the original runes, so spliced output keeps the
+// file's exact bytes for anything the model did not intend to change. The
+// common prefix/suffix is extended only while oldText and newText agree in
+// their original bytes too — where they differ in original bytes (e.g. "："
+// vs ": "), that difference is the model's intended delta and comes from
+// newText verbatim.
 //
 // The returned count is the number of normalized matches; ok is false when
 // normalization does not yield a match.
-func quoteTolerantEdit(content, oldText, newText string, replaceAll bool) (newContent string, count int, ok bool) {
+func punctuationTolerantEdit(content, oldText, newText string, replaceAll bool) (newContent string, count int, lines []int, ok bool) {
 	if oldText == "" {
-		return "", 0, false
+		return "", 0, nil, false
 	}
 	contentRunes := []rune(content)
 	oldRunes := []rune(oldText)
-	if len(oldRunes) == 0 || len(oldRunes) > len(contentRunes) {
-		return "", 0, false
-	}
-	normContent := make([]rune, len(contentRunes))
-	for i, r := range contentRunes {
-		normContent[i] = normalizeEditQuoteRune(r)
-	}
-	normOld := make([]rune, len(oldRunes))
-	for i, r := range oldRunes {
-		normOld[i] = normalizeEditQuoteRune(r)
+	newRunes := []rune(newText)
+	normContent, contentSpans := normalizePunctWithSpaceFolding(contentRunes)
+	normOld, oldSpans := normalizePunctWithSpaceFolding(oldRunes)
+	if len(normOld) == 0 || len(normOld) > len(normContent) {
+		return "", 0, nil, false
 	}
 
-	// Collect rune-space start indices of normalized matches. Matches never
+	// Collect normalized-space start indices of matches. Matches never
 	// overlap: after a match the scan resumes past it, mirroring
 	// strings.ReplaceAll. Overlapping matches (e.g. curly “““ matching
 	// straight "") would otherwise share rune ranges and make the splice
@@ -312,7 +340,7 @@ func quoteTolerantEdit(content, oldText, newText string, replaceAll bool) (newCo
 			if !replaceAll && len(starts) >= 2 {
 				// Report ambiguity to the caller; it surfaces the same
 				// "provide more context" error as the exact path.
-				return "", len(starts), true
+				return "", len(starts), nil, true
 			}
 			i += len(normOld)
 			continue
@@ -320,45 +348,57 @@ func quoteTolerantEdit(content, oldText, newText string, replaceAll bool) (newCo
 		i++
 	}
 	if len(starts) == 0 {
-		return "", 0, false
+		return "", 0, nil, false
 	}
 
-	prefixRunes, prefixBytes := commonPrefixLen(oldText, newText)
-	suffixRunes := commonSuffixLen(oldText, newText, prefixBytes)
-	suffixRunes = min(suffixRunes, len(oldRunes)-prefixRunes)
-	newR := []rune(newText)
-	deltaStart := prefixRunes
-	deltaEnd := max(len(newR)-suffixRunes, deltaStart)
-	delta := string(newR[deltaStart:deltaEnd])
+	normNew, newSpans := normalizePunctWithSpaceFolding(newRunes)
+
+	// Common prefix/suffix in normalized space, extended only while the
+	// original bytes also match: where old/new differ in original bytes
+	// (e.g. "：" vs ": "), the difference is the model's intended delta and
+	// must come from newText, not from the file's bytes.
+	prefixN := 0
+	for prefixN < len(normOld) && prefixN < len(normNew) &&
+		normOld[prefixN] == normNew[prefixN] &&
+		slices.Equal(oldRunes[oldSpans[prefixN].start:oldSpans[prefixN].end],
+			newRunes[newSpans[prefixN].start:newSpans[prefixN].end]) {
+		prefixN++
+	}
+	suffixN := 0
+	for suffixN < len(normOld)-prefixN && suffixN < len(normNew)-prefixN {
+		oi := len(normOld) - 1 - suffixN
+		ni := len(normNew) - 1 - suffixN
+		if normOld[oi] != normNew[ni] ||
+			!slices.Equal(oldRunes[oldSpans[oi].start:oldSpans[oi].end],
+				newRunes[newSpans[ni].start:newSpans[ni].end]) {
+			break
+		}
+		suffixN++
+	}
+
+	deltaStart := prefixN
+	deltaEnd := len(normNew) - suffixN
 
 	var b strings.Builder
 	prev := 0
-	for _, start := range starts {
-		end := start + len(oldRunes)
-		b.WriteString(string(contentRunes[prev:start]))
-		// Preserve the file's original quote bytes for the unchanged
-		// prefix/suffix; only the model's delta is inserted verbatim.
-		b.WriteString(string(contentRunes[start : start+prefixRunes]))
-		b.WriteString(delta)
-		b.WriteString(string(contentRunes[end-suffixRunes : end]))
-		prev = end
+	for _, m := range starts {
+		n := len(normOld)
+		b.WriteString(string(contentRunes[prev:contentSpans[m].start]))
+		// Preserve the file's original bytes for the unchanged prefix and
+		// suffix (including any space the punctuation absorbed); only the
+		// model's delta is inserted verbatim from newText.
+		if prefixN > 0 {
+			b.WriteString(string(contentRunes[contentSpans[m].start:contentSpans[m+prefixN-1].end]))
+		}
+		if deltaStart < deltaEnd {
+			b.WriteString(string(newRunes[newSpans[deltaStart].start:newSpans[deltaEnd-1].end]))
+		}
+		if suffixN > 0 {
+			b.WriteString(string(contentRunes[contentSpans[m+n-suffixN].start:contentSpans[m+n-1].end]))
+		}
+		prev = contentSpans[m+n-1].end
 	}
 	b.WriteString(string(contentRunes[prev:]))
-	return b.String(), len(starts), true
-}
-
-// normalizeEditQuoteRune maps curly and other quote-pair runes to their ASCII
-// equivalents for tolerance matching. It is 1:1 (one rune in, one rune out) so
-// rune offsets are preserved when mapping between normalized and original
-// text. Mirrors the shared patch Unicode quote handling but
-// intentionally omits whitespace/dash/ellipsis collapsing so that only genuine
-// quote-punctuation variance is tolerated.
-func normalizeEditQuoteRune(r rune) rune {
-	switch r {
-	case '\u201c', '\u201d', '\u201e', '\u201f': // “ ” „ ‟
-		return '"'
-	case '\u2018', '\u2019', '\u201a', '\u201b': // ‘ ’ ‚ ‛
-		return '\''
-	}
-	return r
+	lines = tolerantMatchLines(content, contentSpans, starts)
+	return b.String(), len(starts), lines, true
 }

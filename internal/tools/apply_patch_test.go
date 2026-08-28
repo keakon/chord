@@ -524,8 +524,8 @@ func TestApplyPatchProsePunctuationTolerance(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(out, "used punctuation-tolerant matching for 1 hunk") {
-			t.Fatalf("output = %q, want punctuation-tolerant note", out)
+		if !strings.Contains(out, "used punctuation/whitespace-tolerant matching for 1 hunk") {
+			t.Fatalf("output = %q, want punctuation/whitespace-tolerant note", out)
 		}
 		assertApplyPatchFile(t, path, "注册表保持配置数组顺序；新字段，结尾。\n")
 	})
@@ -545,7 +545,7 @@ func TestApplyPatchProsePunctuationTolerance(t *testing.T) {
 			"*** End Patch"
 
 		_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
-		if err == nil || !strings.Contains(err.Error(), "punctuation-tolerant matching is ambiguous at lines 1, 3") {
+		if err == nil || !strings.Contains(err.Error(), "punctuation/whitespace-tolerant matching is ambiguous at lines 1, 3") {
 			t.Fatalf("error = %v, want ambiguous punctuation candidates", err)
 		}
 		assertApplyPatchFile(t, path, content)
@@ -569,8 +569,8 @@ func TestApplyPatchProsePunctuationTolerance(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(out, "used punctuation-tolerant matching for 1 hunk") {
-			t.Fatalf("output = %q, want punctuation-tolerant note", out)
+		if !strings.Contains(out, "used punctuation/whitespace-tolerant matching for 1 hunk") {
+			t.Fatalf("output = %q, want punctuation/whitespace-tolerant note", out)
 		}
 		assertApplyPatchFile(t, path, "MESSAGE=\"new;value。\"\n")
 	})
@@ -595,6 +595,81 @@ func TestApplyPatchProsePunctuationTolerance(t *testing.T) {
 		assertApplyPatchFile(t, path, "说明:new value。\n")
 	})
 
+	// ApplyPatch shares the same separator-space folding as Edit: "：" and
+	// ": " (and ":the" when the space is dropped) are treated as equivalent,
+	// and unchanged context keeps the file's own bytes.
+	t.Run("applies separator-space folding", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "proposal.md")
+		content := "说明：旧值。\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: proposal.md\n" +
+			"@@\n" +
+			"-说明: 旧值.\n" +
+			"+说明: 新值.\n" +
+			"*** End Patch"
+
+		out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, "used punctuation/whitespace-tolerant matching for 1 hunk") {
+			t.Fatalf("output = %q, want punctuation/whitespace-tolerant note", out)
+		}
+		// The colon is unchanged context, so the file's full-width "：" and
+		// "。" survive; only the delta "新" replaces "旧".
+		assertApplyPatchFile(t, path, "说明：新值。\n")
+	})
+
+	t.Run("rejects ambiguous separator-space matches", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "proposal.md")
+		content := "a：b\na: b\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// "a:b" matches neither line exactly but normalizes to the same
+		// "a:b" as both variants, so the match must be rejected as ambiguous.
+		patch := "*** Begin Patch\n" +
+			"*** Update File: proposal.md\n" +
+			"@@\n" +
+			"-a:b\n" +
+			"+a:x\n" +
+			"*** End Patch"
+
+		_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+		if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+			t.Fatalf("error = %v, want ambiguous candidates", err)
+		}
+		assertApplyPatchFile(t, path, content)
+	})
+
+	t.Run("applies model-intended punctuation normalization", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "proposal.md")
+		content := "说明：旧值。\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// old/new differ in original bytes at the colon (full-width vs
+		// half-width+space); that difference is the model's intended delta
+		// and must come from newText verbatim.
+		patch := "*** Begin Patch\n" +
+			"*** Update File: proposal.md\n" +
+			"@@\n" +
+			"-说明：旧值。\n" +
+			"+说明: 新值.\n" +
+			"*** End Patch"
+
+		if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch)); err != nil {
+			t.Fatal(err)
+		}
+		assertApplyPatchFile(t, path, "说明: 新值.\n")
+	})
+
 	t.Run("reports text that is only part of a line", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "proposal.md")
@@ -616,7 +691,34 @@ func TestApplyPatchProsePunctuationTolerance(t *testing.T) {
 		assertApplyPatchFile(t, path, content)
 	})
 
-	t.Run("rejects unsafe replacement after tolerant match", func(t *testing.T) {
+	t.Run("applies inter-word space tolerance", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "proposal.md")
+		content := "diff and count\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// The hunk drops the inter-word space ("diffand"); the tolerance
+		// treats it as optional and preserves the file's own space in the
+		// unchanged context.
+		patch := "*** Begin Patch\n" +
+			"*** Update File: proposal.md\n" +
+			"@@\n" +
+			"-diffand count\n" +
+			"+diffand total\n" +
+			"*** End Patch"
+
+		out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+			t.Fatalf("output = %q, want tolerant note", out)
+		}
+		assertApplyPatchFile(t, path, "diff and total\n")
+	})
+
+	t.Run("replaces a fully-variant line after tolerant match", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "proposal.md")
 		content := "旧值；结尾。\n"
@@ -630,11 +732,14 @@ func TestApplyPatchProsePunctuationTolerance(t *testing.T) {
 			"+完全不同\n" +
 			"*** End Patch"
 
-		_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
-		if err == nil || !strings.Contains(err.Error(), "cannot preserve unchanged punctuation safely") {
-			t.Fatalf("error = %v, want unsafe tolerant replacement rejection", err)
+		out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+		if err != nil {
+			t.Fatalf("error = %v, want a fully-variant tolerant replacement to apply", err)
 		}
-		assertApplyPatchFile(t, path, content)
+		if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+			t.Fatalf("output = %q, want tolerant note", out)
+		}
+		assertApplyPatchFile(t, path, "完全不同\n")
 	})
 
 	t.Run("does not hide shifted surrounding whitespace", func(t *testing.T) {
@@ -675,6 +780,210 @@ func TestApplyPatchHunkFailureReportsEarlierContextOrder(t *testing.T) {
 	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
 	if err == nil || !strings.Contains(err.Error(), "hunk not found (2/2)") || !strings.Contains(err.Error(), "matching context exists earlier at line 1") || !strings.Contains(err.Error(), "hunks must follow file order") {
 		t.Fatalf("error = %v, want hunk-order guidance", err)
+	}
+	assertApplyPatchFile(t, path, content)
+}
+
+func TestApplyPatchHunkFailureSaysLineMissingFromFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "proposal.md")
+	content := "first\nmiddle\nlast\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The hunk's first expected line does not exist in the file at all
+	// (not even as a punctuation/whitespace variant): the hint must say the
+	// line is missing from the current file and ask for a re-read, rather
+	// than blaming read history.
+	patch := "*** Begin Patch\n" +
+		"*** Update File: proposal.md\n" +
+		"@@\n" +
+		"-invented content line\n" +
+		"+replacement\n" +
+		"*** End Patch"
+
+	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil {
+		t.Fatal("Execute error = nil, want hunk mismatch")
+	}
+	if !strings.Contains(err.Error(), "does not exist in the current file") {
+		t.Fatalf("error = %q, want missing-from-file guidance", err)
+	}
+	if strings.Contains(err.Error(), "read") && !strings.Contains(err.Error(), "since it was last read") {
+		t.Fatalf("error = %q, hint must not blame read history", err)
+	}
+	assertApplyPatchFile(t, path, content)
+}
+
+func TestApplyPatchHunkFailurePointsAtClosestFileLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "proposal.md")
+	content := "first line\nmiddle line\nlast line\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The hunk shares no complete line with the file, but its first line is
+	// close to "middle line" (a typo'd variant). The error must point at the
+	// closest file line with both the actual and expected text so the model
+	// can rebuild the hunk without a blind re-read.
+	patch := "*** Begin Patch\n" +
+		"*** Update File: proposal.md\n" +
+		"@@\n" +
+		"-muddle line\n" +
+		"+replacement\n" +
+		"*** End Patch"
+
+	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil {
+		t.Fatal("Execute error = nil, want hunk not found with closest-line hint")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "hunk not found (1/1)") {
+		t.Fatalf("error = %q, want hunk not found", msg)
+	}
+	if !strings.Contains(msg, "closest file line is 2") {
+		t.Fatalf("error = %q, want closest line 2 (middle line)", msg)
+	}
+	if !strings.Contains(msg, "middle line") || !strings.Contains(msg, "muddle line") {
+		t.Fatalf("error = %q, want both the file line and the expected line", msg)
+	}
+	assertApplyPatchFile(t, path, content)
+}
+
+// TestApplyPatchEOFClosestMatchOnlyScansTail guards the EOF-hunk window: when
+// the closest similar line sits at the top of the file but the hunk is
+// End-Of-File, the suggestion must not point at the unreachable top line.
+// The EOF window starts at the suffix position, so only the tail lines are
+// candidates and the generic missing-line hint applies when nothing there is
+// close enough.
+func TestApplyPatchEOFClosestMatchOnlyScansTail(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tail.md")
+	content := "similar signature\n\n\n\ntail marker line\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// An End-Of-File hunk whose expected line is typo-close to the file's
+	// FIRST line. Without the EOF window the closest scan would point at
+	// line 1, which a retry cannot use for a tail hunk.
+	patch := "*** Begin Patch\n" +
+		"*** Update File: tail.md\n" +
+		"@@\n" +
+		"-similr signature\n" +
+		"+replacement\n" +
+		"*** End of File\n" +
+		"*** End Patch"
+
+	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil {
+		t.Fatal("Execute error = nil, want hunk not found")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "closest file line is 1") {
+		t.Fatalf("error = %q, EOF hunk must not point at line 1 (outside its tail window)", msg)
+	}
+	// The tail window holds no close line (blank lines normalize to empty,
+	// "tail marker line" is unrelated), so the generic missing-line hint
+	// applies instead of a wrong suggestion.
+	if !strings.Contains(msg, "expected line does not exist") {
+		t.Fatalf("error = %q, want the generic missing-line hint for the EOF window", msg)
+	}
+	assertApplyPatchFile(t, path, content)
+}
+
+// TestApplyPatchAmbiguousCandidatesSkipClosest guards that an ambiguous
+// tolerant match (multiple equivalent normalized candidates) does not also
+// emit a single closest-match suggestion: the ambiguity note is already
+// present, and a "100% similar" line would masquerade as the unique answer.
+func TestApplyPatchAmbiguousCandidatesSkipClosest(t *testing.T) {
+	// Direct unit test of the diagnostic builder: with multiple tolerant
+	// candidates the hunk is ambiguous, so the single closest-match line must
+	// not be emitted (it would masquerade as the unique suggestion).
+	fileLines := []string{"foo bar", "foobar"}
+	err := applyPatchHunkNotFoundError(fileLines, []string{"foo bar", "unrelated"}, 0, 0, 1, false, []int{0, 1})
+	msg := err.Error()
+	if !strings.Contains(msg, "ambiguous") {
+		t.Fatalf("error = %q, want the ambiguity note", msg)
+	}
+	if strings.Contains(msg, "closest file line") {
+		t.Fatalf("error = %q, must not emit a closest match when candidates are ambiguous", msg)
+	}
+
+	// Sanity: a single candidate is unambiguous and the closest path still
+	// works when the hunk line is genuinely close to a file line.
+	err = applyPatchHunkNotFoundError(fileLines, []string{"foobqr"}, 0, 0, 1, false, []int{0})
+	msg = err.Error()
+	if !strings.Contains(msg, "closest file line") {
+		t.Fatalf("error = %q, want closest-match for a unique candidate", msg)
+	}
+}
+
+// TestApplyPatchClosestMatchBudgetDegradesToGenericHint guards the failure
+// path against pathological inputs: a large file with long lines must not
+// burn unbounded CPU in the closest-line scan. Past the work budget the
+// suggestion degrades to the generic missing-line hint instead of stalling.
+func TestApplyPatchClosestMatchBudgetDegradesToGenericHint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.md")
+	var b strings.Builder
+	long := strings.Repeat("x", 4000) // long line: 4000 runes
+	for range 500 {
+		b.WriteString(long)
+		b.WriteString("\n")
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The hunk's expected line is a typo of the long line; the closest scan
+	// would need a 4000×4000 Levenshtein per line (500 lines). The budget
+	// must stop it and fall back to the generic hint rather than hang.
+	patch := "*** Begin Patch\n" +
+		"*** Update File: big.md\n" +
+		"@@\n" +
+		"-" + strings.Repeat("y", 3990) + "\n" +
+		"+replacement\n" +
+		"*** End Patch"
+
+	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil {
+		t.Fatal("Execute error = nil, want hunk not found")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "hunk not found (1/1)") {
+		t.Fatalf("error = %q, want hunk not found", msg)
+	}
+	assertApplyPatchFile(t, path, b.String())
+}
+
+func TestApplyPatchHunkFailurePinpointsDivergingLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "proposal.md")
+	content := "first line\nmiddle line\nlast line\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The hunk's first two context lines exist, but the third expected line
+	// is wrong ("lastt line" vs "last line") — a content-level mismatch the
+	// tolerance cannot bridge. The error must pinpoint line 3 as the first
+	// diverging line with both the expected and found text.
+	patch := "*** Begin Patch\n" +
+		"*** Update File: proposal.md\n" +
+		"@@\n" +
+		" first line\n" +
+		" middle line\n" +
+		"-lastt line\n" +
+		"+new last line\n" +
+		"*** End Patch"
+
+	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil {
+		t.Fatal("Execute error = nil, want hunk mismatch")
+	}
+	if !strings.Contains(err.Error(), "the first 2 line(s) of the hunk match at line 1") {
+		t.Fatalf("error = %q, want pinpointed matching prefix", err)
+	}
+	if !strings.Contains(err.Error(), "expected \"lastt line\"") || !strings.Contains(err.Error(), "found \"last line\"") {
+		t.Fatalf("error = %q, want expected/found divergence detail", err)
 	}
 	assertApplyPatchFile(t, path, content)
 }
@@ -1953,5 +2262,115 @@ func TestApplyPatchLateSourceFailureRollsBackDependentTargetOperation(t *testing
 	}
 	if strings.Contains(out, "*** Move to:") || strings.Contains(out, "+updated") {
 		t.Fatalf("failure output must not echo patch operations: %q", out)
+	}
+}
+
+// updateHunksFor parses a single-file update patch and returns its hunks, so
+// matching behaviour can be exercised without touching the filesystem.
+func updateHunksFor(t *testing.T, patch string) []applyPatchHunk {
+	t.Helper()
+	doc, err := ParseApplyPatch(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Operations) != 1 || len(doc.Operations[0].Hunks) != 1 {
+		t.Fatalf("doc = %#v, want a single update hunk", doc)
+	}
+	return doc.Operations[0].Hunks
+}
+
+// Tolerance is one normalizer (normalizePatchTolerantLine) rather than a layer
+// of the exact cascade, so a line that differs in trailing whitespace *and*
+// punctuation still matches.
+func TestApplyPatchTolerantMatchCoversWhitespaceAndPunctuation(t *testing.T) {
+	file := "alpha\nit’s here\nbeta\n"
+	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n-alpha\n it's here  \n+new\n*** End Patch")
+	got, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
+	if err != nil {
+		t.Fatalf("applyApplyPatchHunks error = %v, want tolerance to cover trailing whitespace plus punctuation", err)
+	}
+	if !strings.Contains(got, "new") {
+		t.Fatalf("result = %q, want the replacement applied", got)
+	}
+}
+
+func TestApplyPatchTolerantMatchCoversFullWidthPunctuation(t *testing.T) {
+	file := "alpha\n注意：这里\nbeta\n"
+	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n alpha\n 注意: 这里\n-beta\n+new\n*** End Patch")
+	got, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
+	if err != nil {
+		t.Fatalf("applyApplyPatchHunks error = %v, want full-width punctuation tolerance", err)
+	}
+	if !strings.Contains(got, "注意：这里") {
+		t.Fatalf("result = %q, want the file's original full-width text preserved", got)
+	}
+}
+
+// A tolerant match that lands in several places must be rejected instead of
+// silently taking the first one: the tolerant path runs through
+// findUniqueApplyPatchSequence, which is what makes ambiguity visible.
+func TestApplyPatchTolerantMatchRejectsAmbiguousCandidates(t *testing.T) {
+	file := "it’s here\nx\nit’s here\nx\nit’s here\n"
+	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n it's here\n+y\n*** End Patch")
+	_, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
+	if err == nil {
+		t.Fatal("applyApplyPatchHunks error = nil, want the ambiguous tolerant match rejected")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "ambiguous") || !strings.Contains(msg, "1, 3, 5") {
+		t.Fatalf("err = %q, want an ambiguity notice naming all three lines", msg)
+	}
+}
+
+func TestApplyPatchHunkMismatchLineRespectsSearchStart(t *testing.T) {
+	fileLines := []string{"alpha", "beta", "gamma", "delta"}
+	// The full sequence occurs at index 0, but the hunk's legal window starts
+	// at index 1: the suggestion must not point before it.
+	if line, matched := applyPatchHunkMismatchLine(fileLines, []string{"alpha", "beta"}, 1, false); line != -1 || matched != 0 {
+		t.Fatalf("got line=%d matched=%d, want no in-window prefix match", line, matched)
+	}
+	// A partial in-window match is still pinpointed.
+	if line, matched := applyPatchHunkMismatchLine(fileLines, []string{"gamma", "deltax"}, 2, false); line != 2 || matched != 1 {
+		t.Fatalf("got line=%d matched=%d, want the in-window prefix match at index 2", line, matched)
+	}
+}
+
+func TestApplyPatchHunkMismatchLineRespectsEOFWindow(t *testing.T) {
+	fileLines := []string{"alpha", "beta", "gamma", "delta"}
+	// EOF window for a 2-line suffix starts at len(fileLines)-2 = 2. The
+	// sequence's first line "alpha" matches at index 0, outside that window,
+	// so no in-window prefix match exists and the diagnostic must stay
+	// silent — pointing at line 1 would mislead a retry that must match the
+	// file tail.
+	if line, matched := applyPatchHunkMismatchLine(fileLines, []string{"alpha", "x"}, 0, true); line != -1 || matched != 0 {
+		t.Fatalf("got line=%d matched=%d, want no in-window prefix match for EOF hunk", line, matched)
+	}
+	// A partial match inside the EOF tail window is still pinpointed.
+	if line, matched := applyPatchHunkMismatchLine(fileLines, []string{"gamma", "deltax"}, 0, true); line != 2 || matched != 1 {
+		t.Fatalf("got line=%d matched=%d, want the in-window prefix match at index 2", line, matched)
+	}
+}
+
+func TestApplyPatchSubstringLineRespectsEOFWindow(t *testing.T) {
+	fileLines := []string{"football team", "filler", "tail"}
+	// "football" is a substring of the file's first line, but the EOF window
+	// for a single-line hunk starts at the last line, so the diagnostic must
+	// stay silent — the complete line it would name is not the file tail.
+	if line := findApplyPatchSubstringLine(fileLines, []string{"football"}, 0, true); line != -1 {
+		t.Fatalf("got line=%d, want no in-window substring hit for EOF hunk", line)
+	}
+	// A substring hit inside the EOF tail window is still reported.
+	fileLines = []string{"football team", "filler", "tail football"}
+	if line := findApplyPatchSubstringLine(fileLines, []string{"football"}, 0, true); line != 2 {
+		t.Fatalf("got line=%d, want the in-window substring hit at index 2", line)
+	}
+}
+
+func TestApplyPatchHunkClosestLineRespectsSearchStartOnEOF(t *testing.T) {
+	fileLines := []string{"filler one", "filler two", "needle here", "unrelated line"}
+	// EOF window for a 2-line suffix with searchStart 3: the similar line at
+	// index 2 sits before the window and must not be suggested.
+	if line, _ := applyPatchHunkClosestLine(fileLines, []string{"needle here", "tail"}, 3, true); line < 3 {
+		t.Fatalf("got line=%d, want a suggestion at or after index 3", line)
 	}
 }

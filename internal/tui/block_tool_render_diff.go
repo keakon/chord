@@ -995,10 +995,16 @@ func (b *Block) diffToolFilePathWithTargets(targets []tools.ApplyPatchDisplayTar
 // a readable header target even when the strict ParseApplyPatch parser cannot
 // yet read an incomplete document.
 func streamingApplyPatchFilePaths(text string) []string {
+	markers := []string{
+		tools.ApplyPatchUpdateFileMarker,
+		tools.ApplyPatchAddFileMarker,
+		tools.ApplyPatchDeleteFileMarker,
+		tools.ApplyPatchMoveToMarker,
+	}
 	var paths []string
 	for line := range strings.SplitSeq(text, "\n") {
 		line = strings.TrimSpace(line)
-		for _, prefix := range []string{"*** Update File: ", "*** Add File: ", "*** Delete File: ", "*** Move to: "} {
+		for _, prefix := range markers {
 			if rest, ok := strings.CutPrefix(line, prefix); ok {
 				paths = append(paths, strings.TrimSpace(rest))
 			}

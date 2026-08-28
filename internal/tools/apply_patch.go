@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -75,6 +76,16 @@ const (
 	MutationUpdate MutationKind = "update"
 	MutationDelete MutationKind = "delete"
 	MutationMove   MutationKind = "move"
+)
+
+// ApplyPatch operation section markers. These are the Codex freeform patch
+// format's operation headers; the parser and every display that summarizes a
+// streamed patch must agree on them.
+const (
+	ApplyPatchAddFileMarker    = "*** Add File: "
+	ApplyPatchDeleteFileMarker = "*** Delete File: "
+	ApplyPatchUpdateFileMarker = "*** Update File: "
+	ApplyPatchMoveToMarker     = "*** Move to: "
 )
 
 type MutationTarget struct {
@@ -441,9 +452,9 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 		}
 		var op applyPatchOperation
 		switch {
-		case strings.HasPrefix(line, "*** Add File: "):
+		case strings.HasPrefix(line, ApplyPatchAddFileMarker):
 			op.Kind = MutationAdd
-			op.Path = strings.TrimSpace(strings.TrimPrefix(line, "*** Add File: "))
+			op.Path = strings.TrimSpace(strings.TrimPrefix(line, ApplyPatchAddFileMarker))
 			i++
 			var content strings.Builder
 			for i < len(lines)-1 && !isApplyPatchMarker(lines[i]) {
@@ -462,16 +473,16 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 			if op.Content == "" {
 				return applyPatchDocument{}, fmt.Errorf("invalid add-file operation for %s: content is required", op.Path)
 			}
-		case strings.HasPrefix(line, "*** Delete File: "):
+		case strings.HasPrefix(line, ApplyPatchDeleteFileMarker):
 			op.Kind = MutationDelete
-			op.Path = strings.TrimSpace(strings.TrimPrefix(line, "*** Delete File: "))
+			op.Path = strings.TrimSpace(strings.TrimPrefix(line, ApplyPatchDeleteFileMarker))
 			i++
-		case strings.HasPrefix(line, "*** Update File: "):
+		case strings.HasPrefix(line, ApplyPatchUpdateFileMarker):
 			op.Kind = MutationUpdate
-			op.Path = strings.TrimSpace(strings.TrimPrefix(line, "*** Update File: "))
+			op.Path = strings.TrimSpace(strings.TrimPrefix(line, ApplyPatchUpdateFileMarker))
 			i++
-			if i < len(lines)-1 && strings.HasPrefix(strings.TrimSpace(lines[i]), "*** Move to: ") {
-				op.MovePath = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i]), "*** Move to: "))
+			if i < len(lines)-1 && strings.HasPrefix(strings.TrimSpace(lines[i]), ApplyPatchMoveToMarker) {
+				op.MovePath = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i]), ApplyPatchMoveToMarker))
 				i++
 			}
 			for i < len(lines)-1 && !isApplyPatchMarker(lines[i]) {
@@ -571,9 +582,9 @@ func normalizeApplyPatchEnvelope(text string) ([]string, error) {
 }
 
 func isApplyPatchTopLevelOperation(line string) bool {
-	return strings.HasPrefix(line, "*** Add File: ") ||
-		strings.HasPrefix(line, "*** Delete File: ") ||
-		strings.HasPrefix(line, "*** Update File: ")
+	return strings.HasPrefix(line, ApplyPatchAddFileMarker) ||
+		strings.HasPrefix(line, ApplyPatchDeleteFileMarker) ||
+		strings.HasPrefix(line, ApplyPatchUpdateFileMarker)
 }
 
 func isApplyPatchImplicitEOF(line string) bool {
@@ -581,7 +592,7 @@ func isApplyPatchImplicitEOF(line string) bool {
 	if trimmed == "" || trimmed == "*** End of File" {
 		return true
 	}
-	if strings.HasPrefix(trimmed, "*** Delete File: ") || strings.HasPrefix(trimmed, "*** Move to: ") {
+	if strings.HasPrefix(trimmed, ApplyPatchDeleteFileMarker) || strings.HasPrefix(trimmed, ApplyPatchMoveToMarker) {
 		return true
 	}
 	if strings.HasPrefix(line, "@@") {
@@ -1363,14 +1374,14 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 		var punctuationCandidates []int
 		if match < 0 && len(oldSeq) > 0 {
 			match, punctuationCandidates = findUniqueApplyPatchSequence(
-				fileLines, oldSeq, searchStart, hunk.EndOfFile, normalizePatchProsePunctuationLine,
+				fileLines, oldSeq, searchStart, hunk.EndOfFile, normalizePatchTolerantLine,
 			)
 			if match >= 0 {
 				punctuationMatch = true
 			}
 		}
 		if match < 0 {
-			return "", 0, applyPatchPartialHunkError(applyPatchHunkNotFoundError(fileLines, oldSeq, searchStart, i, len(hunks), punctuationCandidates), i, len(hunks))
+			return "", 0, applyPatchPartialHunkError(applyPatchHunkNotFoundError(fileLines, oldSeq, searchStart, i, len(hunks), hunk.EndOfFile, punctuationCandidates), i, len(hunks))
 		}
 		matched := fileLines[match : match+len(oldSeq)]
 		newSeq := buildApplyPatchNewSequence(hunk, matched)
@@ -1470,27 +1481,54 @@ func punctuationTolerantReplacementLine(current, oldText, newText string) (strin
 	currentRunes := []rune(current)
 	oldRunes := []rune(oldText)
 	newRunes := []rune(newText)
-	if len(currentRunes) != len(oldRunes) || normalizePatchProsePunctuationLine(current) != normalizePatchProsePunctuationLine(oldText) {
+	normCurrent, currentSpans := normalizePunctWithSpaceFolding(currentRunes)
+	normOld, oldSpans := normalizePunctWithSpaceFolding(oldRunes)
+	if !slices.Equal(normCurrent, normOld) {
 		return "", false
 	}
+	normNew, newSpans := normalizePunctWithSpaceFolding(newRunes)
 
+	// Common prefix/suffix in normalized space, extended only while the
+	// original bytes also match: where old/new differ in original bytes
+	// (e.g. "：" vs ": "), the difference is the model's intended delta and
+	// must come from newText, not from the file's bytes. This keeps the
+	// file's own punctuation in any unchanged context.
 	prefix := 0
-	for prefix < len(oldRunes) && prefix < len(newRunes) && oldRunes[prefix] == newRunes[prefix] {
+	for prefix < len(normOld) && prefix < len(normNew) &&
+		normOld[prefix] == normNew[prefix] &&
+		slices.Equal(oldRunes[oldSpans[prefix].start:oldSpans[prefix].end],
+			newRunes[newSpans[prefix].start:newSpans[prefix].end]) {
 		prefix++
 	}
 	suffix := 0
-	for suffix < len(oldRunes)-prefix && suffix < len(newRunes)-prefix && oldRunes[len(oldRunes)-1-suffix] == newRunes[len(newRunes)-1-suffix] {
+	for suffix < len(normOld)-prefix && suffix < len(normNew)-prefix {
+		oi := len(normOld) - 1 - suffix
+		ni := len(normNew) - 1 - suffix
+		if normOld[oi] != normNew[ni] ||
+			!slices.Equal(oldRunes[oldSpans[oi].start:oldSpans[oi].end],
+				newRunes[newSpans[ni].start:newSpans[ni].end]) {
+			break
+		}
 		suffix++
 	}
-	if prefix == 0 && suffix == 0 {
-		return "", false
-	}
+	// prefix == 0 && suffix == 0 (every rune of the replacement differs from
+	// the file's bytes) needs no special refusal: there is no unchanged text
+	// to preserve, so splicing the model's new line verbatim is exactly the
+	// requested edit — the same outcome the edit tool's tolerant path allows.
 
-	result := make([]rune, 0, prefix+len(newRunes)-prefix-suffix+suffix)
-	result = append(result, currentRunes[:prefix]...)
-	result = append(result, newRunes[prefix:len(newRunes)-suffix]...)
-	result = append(result, currentRunes[len(currentRunes)-suffix:]...)
-	return string(result), true
+	var b strings.Builder
+	if prefix > 0 {
+		b.WriteString(string(currentRunes[currentSpans[0].start:currentSpans[prefix-1].end]))
+	}
+	deltaStart := prefix
+	deltaEnd := len(normNew) - suffix
+	if deltaStart < deltaEnd {
+		b.WriteString(string(newRunes[newSpans[deltaStart].start:newSpans[deltaEnd-1].end]))
+	}
+	if suffix > 0 {
+		b.WriteString(string(currentRunes[currentSpans[len(normCurrent)-suffix].start:currentSpans[len(normCurrent)-1].end]))
+	}
+	return b.String(), true
 }
 
 func findUniqueApplyPatchSequence(lines, pattern []string, start int, eof bool, normalize func(string) string) (int, []int) {
@@ -1504,14 +1542,21 @@ func findUniqueApplyPatchSequence(lines, pattern []string, start int, eof bool, 
 	}
 	var candidates []int
 	// See findApplyPatchSequence: normalize the pattern once, not per position.
+	// File lines are also normalized once (into a slice aligned with `from`)
+	// rather than once per candidate position, so a long file does not pay the
+	// per-line normalization cost once for every position it appears in.
 	normalizedPattern := make([]string, len(pattern))
 	for j, line := range pattern {
 		normalizedPattern[j] = normalize(line)
 	}
+	normalizedLines := make([]string, len(lines)-from)
+	for i := from; i < len(lines); i++ {
+		normalizedLines[i-from] = normalize(lines[i])
+	}
 	for i := from; i <= to; i++ {
 		matched := true
 		for j := range normalizedPattern {
-			if normalize(lines[i+j]) != normalizedPattern[j] {
+			if normalizedLines[i-from+j] != normalizedPattern[j] {
 				matched = false
 				break
 			}
@@ -1526,21 +1571,196 @@ func findUniqueApplyPatchSequence(lines, pattern []string, start int, eof bool, 
 	return -1, candidates
 }
 
-func applyPatchHunkNotFoundError(fileLines, oldSeq []string, searchStart, index, total int, punctuationCandidates []int) error {
+func applyPatchHunkNotFoundError(fileLines, oldSeq []string, searchStart, index, total int, hunkEndOfFile bool, punctuationCandidates []int) error {
 	parts := []string{fmt.Sprintf("hunk not found (%d/%d)", index+1, total)}
 	if expected := applyPatchExpectedLineDescription(oldSeq); expected != "" {
 		parts = append(parts, expected)
 	}
 	if len(punctuationCandidates) > 1 {
-		parts = append(parts, "punctuation-tolerant matching is ambiguous at lines "+formatApplyPatchCandidateLines(punctuationCandidates))
+		parts = append(parts, tolerantMatchNote+" matching is ambiguous at lines "+formatApplyPatchCandidateLines(punctuationCandidates))
 	}
 	if earlier := findApplyPatchSequence(fileLines, oldSeq, 0, false); earlier >= 0 && earlier < searchStart {
 		parts = append(parts, fmt.Sprintf("matching context exists earlier at line %d, but hunks must follow file order", earlier+1))
-	} else if line := findApplyPatchSubstringLine(fileLines, oldSeq); line >= 0 {
+	} else if line := findApplyPatchSubstringLine(fileLines, oldSeq, searchStart, hunkEndOfFile); line >= 0 {
 		parts = append(parts, fmt.Sprintf("the expected text is only part of current line %d; include that complete line in the hunk", line+1))
+	} else if line, matched := applyPatchHunkMismatchLine(fileLines, oldSeq, searchStart, hunkEndOfFile); matched >= 1 && matched < len(oldSeq) {
+		// The first expected line exists in the file (normalized, at or after
+		// the hunk's legal search window), but the hunk's multi-line sequence
+		// breaks somewhere. Pinpoint the first diverging line so the model can
+		// see what actually changed.
+		detail := fmt.Sprintf("the first %d line(s) of the hunk match at line %d, but the next expected line differs from the file", matched, line+1)
+		expected := truncateToolLine(oldSeq[matched])
+		if line+matched < len(fileLines) {
+			detail += fmt.Sprintf(": expected %s, found %s", expected, truncateToolLine(fileLines[line+matched]))
+		} else {
+			detail += fmt.Sprintf(": expected %s, but the file has no more lines", expected)
+		}
+		parts = append(parts, detail+"; the file may have changed — re-read the current target range and rebuild this hunk from current complete lines")
+	} else if len(punctuationCandidates) <= 1 {
+		// With multiple tolerant candidates the match is ambiguous; a single
+		// closest line would masquerade as the unique suggestion and
+		// contradict the ambiguity note above, so require more context
+		// instead of guessing.
+		if line, sim := applyPatchHunkClosestLine(fileLines, oldSeq, searchStart, hunkEndOfFile); line >= 0 && sim >= minEditSuggestionSimilarity {
+			// No line of the file matches the hunk's first expected line (even
+			// under normalization). Point at the file line most similar to it
+			// so the model sees what the file
+			// actually contains instead of guessing. Below the threshold the
+			// mismatch is too large for a helpful near-match, so fall through to
+			// the generic missing-line hint.
+			detail := fmt.Sprintf("the first line of the hunk matches no file line; the closest file line is %d (%d%% similar): found %s, expected %s", line+1, int(math.Round(sim*100)), truncateToolLine(fileLines[line]), truncateToolLine(oldSeq[0]))
+			parts = append(parts, detail+"; the file may have changed — re-read the current target range and rebuild this hunk from current complete lines")
+		} else if applyPatchExpectedLineMissing(fileLines, oldSeq) {
+			parts = append(parts, "the expected line does not exist in the current file; the file may have changed since it was last read, or the line was invented — re-read the current target range and rebuild this hunk from current complete lines")
+		}
 	}
-	parts = append(parts, "re-read the current target range and rebuild this hunk from current complete lines; do not retry the same hunk unchanged")
+	parts = append(parts, "do not retry the same hunk unchanged")
 	return fmt.Errorf("%s", strings.Join(parts, "; "))
+}
+
+// applyPatchHunkWindowStart returns the first file line index a hunk may
+// match at. Hunks must follow file order (the searchStart bound), so all
+// diagnostic scans share this lower bound; an EOF hunk's old sequence must
+// also match the file's tail, shifting the window start to the suffix
+// position. All scans must respect the same window so a suggestion never
+// points at a position a retry could not use.
+func applyPatchHunkWindowStart(fileLines, oldSeq []string, searchStart int, eof bool) int {
+	from := max(searchStart, 0)
+	if eof && len(oldSeq) > 0 {
+		// EOF hunks may only match against the tail: the whole file, since
+		// oldSeq must be a suffix. A suffix match also cannot start before
+		// searchStart (hunks must follow file order), so start at the later
+		// of the two bounds.
+		from = max(from, len(fileLines)-len(oldSeq))
+	}
+	if from < 0 {
+		return 0
+	}
+	return from
+}
+
+// applyPatchHunkClosestLine scans fileLines for the line most similar to the
+// hunk's first expected line (compared under the tolerance normalizer}, when
+// no line of the hunk matches at all. It only considers the legal match
+// window: lines at or after searchStart for ordered hunks, and the tail
+// window for EOF hunks — mirroring findUniqueApplyPatchSequence — so a
+// suggestion never points at a position a retry could not use. It returns the
+// 0-based line index and the similarity (0..1); line is -1 when the file is
+// empty or the window has no comparable lines. This is the "hunk is
+// completely unrelated" fallback: the model sees the file's actual closest
+// content instead of a bare re-read hint.
+func applyPatchHunkClosestLine(fileLines, oldSeq []string, searchStart int, eof bool) (line int, sim float64) {
+	if len(oldSeq) == 0 || len(fileLines) == 0 {
+		return -1, 0
+	}
+	needle := normalizePatchTolerantLine(oldSeq[0])
+	if needle == "" {
+		return -1, 0
+	}
+	needleRunes := len([]rune(needle))
+	from := applyPatchHunkWindowStart(fileLines, oldSeq, searchStart, eof)
+	if from >= len(fileLines) {
+		return -1, 0
+	}
+	// Guard the failure path against pathological inputs: a full Levenshtein
+	// on every file line of a large file with long lines can reach billions
+	// of rune operations. Pre-filter by rune-length delta (a candidate whose
+	// length differs from the needle by more than the current best distance
+	// can never beat it) and cap the total work; past the budget the
+	// suggestion degrades to the generic re-read hint instead of stalling.
+	const closestScanBudget = 200_000 // total (needle × line) rune-pair budget
+	bestLine, bestSim := -1, -1.0
+	bestDist := -1
+	budget := closestScanBudget
+	for i := from; i < len(fileLines); i++ {
+		norm := normalizePatchTolerantLine(fileLines[i])
+		if norm == "" {
+			continue
+		}
+		normRunes := len([]rune(norm))
+		if bestDist >= 0 && absInt(normRunes-needleRunes) >= bestDist {
+			continue // cannot beat the current best edit distance
+		}
+		work := needleRunes * normRunes
+		if budget <= 0 || work > budget {
+			// An exhausted budget stops the scan; a single oversized line must
+			// not — later lines can be far cheaper, and the budget is only
+			// spent by lines actually processed, so skipping keeps the total
+			// work bounded while letting the whole window compete.
+			if budget <= 0 {
+				break
+			}
+			continue
+		}
+		budget -= work
+		dist := levenshteinDistance(needle, norm)
+		// Similarity relative to the longer of the two lines so a short
+		// file line next to a long hunk line is not over-rated.
+		longer := max(needleRunes, normRunes)
+		s := 1.0 - float64(dist)/float64(longer)
+		if s > bestSim {
+			bestSim, bestLine, bestDist = s, i, dist
+		}
+	}
+	if bestLine < 0 {
+		return -1, 0
+	}
+	return bestLine, bestSim
+}
+
+// applyPatchHunkMismatchLine locates the longest contiguous run of oldSeq
+// (compared under the tolerance normalizer) that appears in fileLines within
+// the hunk's legal match window (see applyPatchHunkWindowStart), returning
+// the file line index where it starts and how many lines matched. The window
+// bound keeps the suggestion from pointing at a position a retry could not
+// use. It diagnoses multi-line hunks whose first expected line exists but
+// whose full sequence does not, so the error can report which line first
+// diverges.
+func applyPatchHunkMismatchLine(fileLines, oldSeq []string, searchStart int, eof bool) (line, matched int) {
+	if len(oldSeq) == 0 || len(fileLines) == 0 {
+		return -1, 0
+	}
+	normLines := make([]string, len(fileLines))
+	for i, l := range fileLines {
+		normLines[i] = normalizePatchTolerantLine(l)
+	}
+	normSeq := make([]string, len(oldSeq))
+	for i, l := range oldSeq {
+		normSeq[i] = normalizePatchTolerantLine(l)
+	}
+	bestLine, bestMatched := -1, 0
+	for i := applyPatchHunkWindowStart(fileLines, oldSeq, searchStart, eof); i < len(normLines); i++ {
+		k := 0
+		for k < len(normSeq) && i+k < len(normLines) && normLines[i+k] == normSeq[k] {
+			k++
+		}
+		if k > bestMatched {
+			bestMatched, bestLine = k, i
+		}
+	}
+	return bestLine, bestMatched
+}
+
+// applyPatchExpectedLineMissing reports whether the first expected line of
+// oldSeq exists anywhere in fileLines under the tolerance normalizer (or as a
+// substring of a longer line, which applyPatchHunkNotFoundError reports
+// separately). The tool matches the on-disk file only — read history is the
+// model's context, not a matching source — so a missing line means the patch
+// is based on stale or invented content and the model should re-read.
+func applyPatchExpectedLineMissing(fileLines, oldSeq []string) bool {
+	if len(oldSeq) == 0 {
+		return false
+	}
+	needle := normalizePatchTolerantLine(oldSeq[0])
+	if needle == "" {
+		return false
+	}
+	for _, line := range fileLines {
+		if normalizePatchTolerantLine(line) == needle {
+			return false
+		}
+	}
+	return true
 }
 
 // applyPatchPartialHunkError layers a "prior hunks matched but were not
@@ -1557,7 +1777,7 @@ func applyPatchPartialHunkError(err error, index, total int) error {
 func applyPatchUnsafePunctuationMatchError(oldSeq []string, index, total, match int) error {
 	parts := []string{
 		fmt.Sprintf("hunk not found (%d/%d)", index+1, total),
-		fmt.Sprintf("a punctuation-tolerant candidate exists at line %d, but the replacement cannot preserve unchanged punctuation safely", match+1),
+		fmt.Sprintf("a %s candidate exists at line %d, but the replacement cannot preserve unchanged text safely", tolerantMatchNote, match+1),
 	}
 	if expected := applyPatchExpectedLineDescription(oldSeq); expected != "" {
 		parts = append(parts, expected)
@@ -1578,16 +1798,16 @@ func applyPatchExpectedLineDescription(oldSeq []string) string {
 	return fmt.Sprintf("first expected complete line: %q", string(runes))
 }
 
-func findApplyPatchSubstringLine(fileLines, oldSeq []string) int {
+func findApplyPatchSubstringLine(fileLines, oldSeq []string, searchStart int, eof bool) int {
 	if len(oldSeq) != 1 {
 		return -1
 	}
-	needle := normalizePatchProsePunctuationLine(oldSeq[0])
+	needle := normalizePatchTolerantLine(oldSeq[0])
 	if needle == "" {
 		return -1
 	}
-	for i, line := range fileLines {
-		normalized := normalizePatchProsePunctuationLine(line)
+	for i := applyPatchHunkWindowStart(fileLines, oldSeq, searchStart, eof); i < len(fileLines); i++ {
+		normalized := normalizePatchTolerantLine(fileLines[i])
 		if normalized != needle && strings.Contains(normalized, needle) {
 			return i
 		}
@@ -1620,11 +1840,15 @@ func findApplyPatchSequence(lines, pattern []string, start int, eof bool) int {
 	if from < 0 {
 		from = 0
 	}
+	// Whitespace-only layers. Punctuation tolerance is deliberately NOT a layer
+	// here: it runs through findUniqueApplyPatchSequence instead, which rejects
+	// ambiguous matches and splices the replacement over the file's original
+	// bytes. Folding it into this first-match-wins cascade would silently pick
+	// one of several equally plausible positions.
 	normalizers := []func(string) string{
 		func(s string) string { return s },
 		func(s string) string { return strings.TrimRightFunc(s, unicode.IsSpace) },
 		strings.TrimSpace,
-		normalizePatchUnicodeLine,
 	}
 	for layer, normalize := range normalizers {
 		// Normalize the pattern once per layer instead of at every scan
@@ -1875,7 +2099,7 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 	}
 	sort.Strings(lines)
 	if punctuationHunks > 0 {
-		lines = append(lines, fmt.Sprintf("Note: used punctuation-tolerant matching for %d hunk(s); unchanged punctuation was preserved from the current file", punctuationHunks))
+		lines = append(lines, fmt.Sprintf("Note: used %s matching for %d hunk(s); unchanged text was preserved from the current file", tolerantMatchNote, punctuationHunks))
 	}
 	out := "Applied patch:\n" + strings.Join(lines, "\n")
 	if t.LSP == nil {
