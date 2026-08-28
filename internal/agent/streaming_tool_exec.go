@@ -116,6 +116,14 @@ func (e *StreamingToolExecutor) Start(call message.ToolCall) bool {
 		log.Debugf("speculative execution skipped call_id=%s tool=%s reason=speculative_mutation_barrier owner=%s", call.ID, call.Name, blocks)
 		return false
 	}
+	if call.Name == tools.NameWrite && speculativeWritePrestateUnreadable(call.Args, e.projectRoot) {
+		e.mu.Unlock()
+		// Discarding a speculation over an unreadable pre-state could neither
+		// restore nor back up the replaced contents, so the file would keep
+		// the new bytes silently. Finalized execution cannot be discarded.
+		log.Debugf("speculative execution skipped call_id=%s tool=%s reason=speculative_unreadable_prestate", call.ID, call.Name)
+		return false
+	}
 	for _, key := range entry.conflictKeys {
 		e.locks[key] = call.ID
 	}

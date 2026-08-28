@@ -29,12 +29,14 @@ type speculativeToolHooks struct {
 	backupSources        func() []fileBackupSource
 	deleteBackupRequired func() map[string]bool
 	stale                bool
+	unobserved           bool
 	paths                []string
 }
 
 type speculativeFileSnapshot struct {
 	Path              string
 	Existed           bool
+	Unreadable        bool // existing file that could not be read; nothing to back up or restore
 	BackupRequired    bool
 	Data              []byte
 	Mode              os.FileMode
@@ -52,7 +54,12 @@ type speculativeFileMutation struct {
 	track   *filelock.FileTracker
 	files   []speculativeFileSnapshot
 	stale   bool
-	paths   []string
+	// unobserved marks an existing file the mutation's tool had never seen
+	// (write only today). It mirrors mutation.stale for the reminder text so
+	// the tool result can say "never read" instead of borrowing the changed-
+	// after-read wording.
+	unobserved bool
+	paths      []string
 	// observedOnCommit marks whole-file writes: the committed content is
 	// exactly the bytes the model supplied, so committing records it as an
 	// observation and a follow-up write/delete needs no redundant re-read.
@@ -146,6 +153,30 @@ func singlePathToolPath(args json.RawMessage, baseDir string) (string, bool) {
 	return path, true
 }
 
+// speculativeWritePrestateUnreadable reports whether a speculative write would
+// run against an existing regular file whose current contents cannot be read.
+// Discarding such a speculation cannot restore the pre-state — there is no
+// snapshot and no backup — so the file would silently keep the model's new
+// contents. The call must not speculate: deferring it to finalized execution
+// makes discard impossible while the write itself still proceeds with a
+// warning. Mirrors the tolerance conditions of captureSpeculativeFileSnapshot.
+func speculativeWritePrestateUnreadable(args json.RawMessage, baseDir string) bool {
+	path, ok := singlePathToolPath(args, baseDir)
+	if !ok {
+		return false
+	}
+	info, err := os.Lstat(path)
+	if err != nil || (!info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0) {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return true
+	}
+	f.Close()
+	return false
+}
+
 func deleteToolPaths(args json.RawMessage, baseDir string) ([]string, error) {
 	req, err := tools.DecodeDeleteRequestInDir(llm.UnwrapToolArgs(args), baseDir)
 	if err != nil {
@@ -170,7 +201,7 @@ func newSpeculativeFileMutation(track *filelock.FileTracker, agentID string, pat
 	mutation := &speculativeFileMutation{agentID: agentID, track: track, files: make([]speculativeFileSnapshot, 0, len(paths)), observedOnCommit: observationAction == "write"}
 	locked := make([]*filelock.WriteLease, 0, len(paths))
 	for _, path := range paths {
-		snap, err := captureSpeculativeFileSnapshot(path)
+		snap, err := captureSpeculativeFileSnapshot(path, observationAction == "write")
 		if err != nil {
 			for _, l := range slices.Backward(locked) {
 				l.Abort()
@@ -187,7 +218,7 @@ func newSpeculativeFileMutation(track *filelock.FileTracker, agentID string, pat
 			}
 			snap.lease = lease
 			if observationAction != "" && snap.Existed {
-				stale, obsErr := requireCurrentFileObservation(track, agentID, path, snap.Hash, observationAction, status.ExternalChanged)
+				stale, unobserved, obsErr := requireCurrentFileObservation(track, agentID, path, snap.Hash, observationAction, status.ExternalChanged)
 				if obsErr != nil {
 					lease.Abort()
 					for _, l := range slices.Backward(locked) {
@@ -197,6 +228,9 @@ func newSpeculativeFileMutation(track *filelock.FileTracker, agentID string, pat
 				}
 				if stale {
 					mutation.stale = true
+				}
+				if unobserved {
+					mutation.unobserved = true
 				}
 			} else if status.ExternalChanged {
 				mutation.stale = true
@@ -254,7 +288,7 @@ func normalizeSpeculativeMutationPath(raw string) string {
 	return path
 }
 
-func captureSpeculativeFileSnapshot(path string) (speculativeFileSnapshot, error) {
+func captureSpeculativeFileSnapshot(path string, tolerateUnreadable bool) (speculativeFileSnapshot, error) {
 	snap := speculativeFileSnapshot{Path: path}
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -278,7 +312,17 @@ func captureSpeculativeFileSnapshot(path string) (speculativeFileSnapshot, error
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return snap, fmt.Errorf("capture speculative pre-state for %s: %w", path, err)
+		if !tolerateUnreadable {
+			return snap, fmt.Errorf("capture speculative pre-state for %s: %w", path, err)
+		}
+		// Whole-file write to an existing file that cannot be read: proceed
+		// without a backup rather than refusing. The write itself is the only
+		// baseline, and rollback cannot restore the unreadable pre-state, so
+		// restoreSpeculativeFileSnapshot refuses to truncate it on discard.
+		snap.Existed = true
+		snap.Unreadable = true
+		snap.Mode = info.Mode()
+		return snap, nil
 	}
 	snap.Existed = true
 	snap.Data = data
@@ -304,6 +348,7 @@ func (m *speculativeFileMutation) hooks() *speculativeToolHooks {
 		backupSources:        func() []fileBackupSource { return m.backupSources() },
 		deleteBackupRequired: func() map[string]bool { return m.deleteBackupRequired() },
 		stale:                m.stale,
+		unobserved:           m.unobserved,
 		paths:                append([]string(nil), m.paths...),
 	}
 }
@@ -481,6 +526,12 @@ func restoreSpeculativeFileSnapshot(snap speculativeFileSnapshot) error {
 		}
 	}
 	if snap.Existed {
+		if snap.Unreadable {
+			// The pre-state could not be read, so it cannot be restored.
+			// Refuse to truncate the file to empty bytes on discard; the
+			// speculative write stays in place and the failure is logged.
+			return fmt.Errorf("%s could not be read before the speculative write, so its previous contents cannot be restored", path)
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return fmt.Errorf("restore parent directory for %s: %w", path, err)
 		}

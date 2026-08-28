@@ -368,6 +368,40 @@ func TestSpeculativeWriteOnStaleFileBacksUpAndContinues(t *testing.T) {
 	}
 }
 
+// TestSpeculativeWriteToUnreadableFileIsDeferred guards that a write over an
+// existing regular file whose contents cannot be read does not speculate:
+// discarding such a speculation could neither restore nor back up the replaced
+// contents, so the file would silently keep the new bytes. The call falls back
+// to finalized execution, which proceeds with a warning and no backup.
+func TestSpeculativeWriteToUnreadableFileIsDeferred(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "locked.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.Chmod(path, 0o200); err != nil {
+		t.Fatalf("chmod seed file: %v", err)
+	}
+	if data, readErr := os.ReadFile(path); readErr == nil {
+		t.Skipf("environment allows reading write-only files (read %q as root?); cannot exercise the unreadable path", data)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.WriteTool{})
+
+	ctx := t.Context()
+	exec := NewStreamingToolExecutor(7, ctx, nil, a.executeToolCallSpeculative)
+	call := message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: json.RawMessage(`{"path":` + mustJSONString(t, path) + `,"content":"speculative"}`)}
+	if exec.Start(call) {
+		t.Fatal("Start returned true; an unreadable pre-state must not speculate")
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatalf("chmod result file: %v", err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "old\n" {
+		t.Fatalf("file content = %q, %v; want untouched old\\n while deferred", got, err)
+	}
+}
+
 func TestSpeculativeWriteDiscardRemovesNewFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "new.txt")

@@ -115,7 +115,7 @@ func TestFileBackupManagerRejectsSessionByteLimit(t *testing.T) {
 // in place when it was not.
 func TestBackupNotesAreIdenticalForModelAndUser(t *testing.T) {
 	backupPath := filepath.Join(t.TempDir(), "backups", "before.txt")
-	created := appendBackupNotes("updated", tools.NameEdit, true, 1, fileBackupOutcome{
+	created := appendBackupNotes("updated", tools.NameEdit, true, false, 1, fileBackupOutcome{
 		Records: []fileBackupRecord{{Path: backupPath}},
 	})
 	if !strings.Contains(created, "Backup saved to: "+backupPath) {
@@ -128,7 +128,7 @@ func TestBackupNotesAreIdenticalForModelAndUser(t *testing.T) {
 		t.Fatalf("a record without a source path must not claim one: %q", created)
 	}
 
-	failed := appendBackupNotes("updated", tools.NameEdit, true, 1, fileBackupOutcome{})
+	failed := appendBackupNotes("updated", tools.NameEdit, true, false, 1, fileBackupOutcome{})
 	if strings.Contains(failed, "Backup") {
 		t.Fatalf("a failed backup must not claim anything about a backup: %q", failed)
 	}
@@ -153,7 +153,7 @@ func TestBackupNotesForMultiFileMutationStatePerSourcePerPath(t *testing.T) {
 		filepath.Join("session", "backups", "111", "000000000001-before-apply_patch-a.go"),
 		filepath.Join("session", "backups", "222", "000000000002-before-apply_patch-a.go"),
 	}
-	notes := appendBackupNotes("updated", tools.NameApplyPatch, true, 2, fileBackupOutcome{
+	notes := appendBackupNotes("updated", tools.NameApplyPatch, true, false, 2, fileBackupOutcome{
 		Records: []fileBackupRecord{
 			{SourcePath: sources[0], Path: backups[0]},
 			{SourcePath: sources[1], Path: backups[1]},
@@ -182,14 +182,14 @@ func TestBackupNotesForMultiFileMutationStatePerSourcePerPath(t *testing.T) {
 }
 
 func TestWriteBackupNoteDoesNotClaimValidation(t *testing.T) {
-	note := appendBackupNotes("wrote 1 line", tools.NameWrite, true, 1, fileBackupOutcome{})
+	note := appendBackupNotes("wrote 1 line", tools.NameWrite, true, false, 1, fileBackupOutcome{})
 	if strings.Contains(note, "validated") {
 		t.Fatalf("write drift warning claims validation: %q", note)
 	}
 	if !strings.Contains(note, "replaced by this write") {
 		t.Fatalf("write drift warning does not say the contents were replaced: %q", note)
 	}
-	edit := appendBackupNotes("edited", tools.NameEdit, true, 1, fileBackupOutcome{})
+	edit := appendBackupNotes("edited", tools.NameEdit, true, false, 1, fileBackupOutcome{})
 	if !strings.Contains(edit, "validated current contents") {
 		t.Fatalf("edit drift warning lost its validation wording: %q", edit)
 	}

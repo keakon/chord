@@ -120,7 +120,7 @@ func TestMainAgent_FailedEditWithoutReadDoesNotModifyFile(t *testing.T) {
 	}
 }
 
-func TestMainAgent_WriteExistingFileRequiresCurrentWholeFileRead(t *testing.T) {
+func TestMainAgent_WriteAfterPartialReadBacksUpAndContinues(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o644); err != nil {
@@ -136,8 +136,19 @@ func TestMainAgent_WriteExistingFileRequiresCurrentWholeFileRead(t *testing.T) {
 		t.Fatalf("partial read: %v", err)
 	}
 	writeArgs, _ := json.Marshal(map[string]any{"path": path, "content": "replacement\n"})
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-after-partial", Name: tools.NameWrite, Args: writeArgs}); err == nil || !strings.Contains(err.Error(), "read the complete file first") {
-		t.Fatalf("write after partial read error = %v, want full-read requirement", err)
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-after-partial", Name: tools.NameWrite, Args: writeArgs})
+	if err != nil {
+		t.Fatalf("write after partial read should back up and continue: %v", err)
+	}
+	if !strings.Contains(result.Result, "you had not read this file before this write") || !strings.Contains(result.Result, "Backup saved to: ") || len(backupPathsFromResult(result.Result)) == 0 {
+		t.Fatalf("write after partial read must warn and name a backup: %q", result.Result)
+	}
+	backup, err := os.ReadFile(backupPathsFromResult(result.Result)[0])
+	if err != nil {
+		t.Fatalf("ReadFile backup: %v", err)
+	}
+	if string(backup) != "one\ntwo\n" {
+		t.Fatalf("backup content = %q, want one\\ntwo\\n", backup)
 	}
 
 	fullArgs, _ := json.Marshal(map[string]any{"path": path})
@@ -214,7 +225,7 @@ func TestMainAgent_WriteAfterExternallyChangedOwnWriteBacksUpAndContinues(t *tes
 	}
 }
 
-func TestMainAgent_PartialFileMentionDoesNotAuthorizeWholeFileWrite(t *testing.T) {
+func TestMainAgent_PartialFileMentionWriteBacksUpAndContinues(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o644); err != nil {
@@ -227,12 +238,19 @@ func TestMainAgent_PartialFileMentionDoesNotAuthorizeWholeFileWrite(t *testing.T
 		Text: `<file path="demo.txt" lines="1-1">` + "\none\n</file>",
 	}}})
 	args, _ := json.Marshal(map[string]any{"path": "demo.txt", "content": "replacement\n"})
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write", Name: tools.NameWrite, Args: args}); err == nil || !strings.Contains(err.Error(), "read the complete file first") {
-		t.Fatalf("write error = %v, want full-read requirement", err)
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write", Name: tools.NameWrite, Args: args})
+	if err != nil {
+		t.Fatalf("write after partial file mention should back up and continue: %v", err)
+	}
+	if !strings.Contains(result.Result, "you had not read this file before this write") || !strings.Contains(result.Result, "Backup saved to: ") || len(backupPathsFromResult(result.Result)) == 0 {
+		t.Fatalf("write after partial mention must warn and name a backup: %q", result.Result)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "replacement\n" {
+		t.Fatalf("file content = %q, %v; want replacement", got, err)
 	}
 }
 
-func TestMainAgent_StaleFileMentionDoesNotAuthorizeCurrentWholeFileWrite(t *testing.T) {
+func TestMainAgent_StaleFileMentionWriteBacksUpAndContinues(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("current unseen content\n"), 0o644); err != nil {
@@ -245,8 +263,22 @@ func TestMainAgent_StaleFileMentionDoesNotAuthorizeCurrentWholeFileWrite(t *test
 		Text: `<file path="demo.txt">` + "\nstale displayed content\n</file>",
 	}}})
 	args, _ := json.Marshal(map[string]any{"path": "demo.txt", "content": "replacement\n"})
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write", Name: tools.NameWrite, Args: args}); err == nil || !strings.Contains(err.Error(), "read the complete file first") {
-		t.Fatalf("write error = %v, want full-read requirement", err)
+	result, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write", Name: tools.NameWrite, Args: args})
+	if err != nil {
+		t.Fatalf("write over stale file mention should back up and continue: %v", err)
+	}
+	if !strings.Contains(result.Result, "you had not read this file before this write") || !strings.Contains(result.Result, "Backup saved to: ") || len(backupPathsFromResult(result.Result)) == 0 {
+		t.Fatalf("write over stale mention must warn and name a backup: %q", result.Result)
+	}
+	backup, err := os.ReadFile(backupPathsFromResult(result.Result)[0])
+	if err != nil {
+		t.Fatalf("ReadFile backup: %v", err)
+	}
+	if string(backup) != "current unseen content\n" {
+		t.Fatalf("backup content = %q, want current unseen content", backup)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "replacement\n" {
+		t.Fatalf("file content = %q, %v; want replacement", got, err)
 	}
 }
 
@@ -326,11 +358,15 @@ func TestSubAgentRelativeWriteUsesWorkDirForObservation(t *testing.T) {
 		t.Fatalf("read parent: %v", err)
 	}
 	writeArgs, _ := json.Marshal(map[string]any{"path": "same.txt", "content": "replacement\n"})
-	if _, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "write-child", Name: tools.NameWrite, Args: writeArgs}); err == nil || !strings.Contains(err.Error(), "read the complete file first") {
-		t.Fatalf("relative child write error = %v, want full-read requirement", err)
+	result, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "write-child", Name: tools.NameWrite, Args: writeArgs})
+	if err != nil {
+		t.Fatalf("relative child write should back up and continue: %v", err)
 	}
-	if got, err := os.ReadFile(childPath); err != nil || string(got) != "child-unread\n" {
-		t.Fatalf("child file = %q, %v; want unchanged", got, err)
+	if !strings.Contains(result.Result, "you had not read this file before this write") || !strings.Contains(result.Result, "Backup saved to: ") || len(backupPathsFromResult(result.Result)) == 0 {
+		t.Fatalf("relative child write must warn and name a backup: %q", result.Result)
+	}
+	if got, err := os.ReadFile(childPath); err != nil || string(got) != "replacement\n" {
+		t.Fatalf("child file = %q, %v; want replacement written", got, err)
 	}
 }
 

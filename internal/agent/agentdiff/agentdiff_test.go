@@ -44,6 +44,28 @@ func TestCapturePreWriteState(t *testing.T) {
 	}
 }
 
+// A write may replace a file whose contents cannot be decoded. That is an
+// overwrite, not a creation, and the caller derives "file created" from
+// existed, so the undecodable pre-state must not look like an absent file.
+func TestCapturePreWriteStateUndecodableWriteTargetExists(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "binary.bin")
+	if err := os.WriteFile(path, []byte{0x00, 0x01, 0x02, 0x00, 0xff}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	gotPath, content, existed := CapturePreWriteState(toolCall(tools.NameWrite, map[string]string{"path": path, "content": "text\n"}), "")
+	if gotPath != path || content != "" || !existed {
+		t.Fatalf("CapturePreWriteState undecodable write = (%q, %q, %v), want (%q, \"\", true)", gotPath, content, existed, path)
+	}
+
+	missing := filepath.Join(dir, "missing.bin")
+	gotPath, content, existed = CapturePreWriteState(toolCall(tools.NameWrite, map[string]string{"path": missing, "content": "text\n"}), "")
+	if gotPath != missing || content != "" || existed {
+		t.Fatalf("CapturePreWriteState absent write = (%q, %q, %v), want (%q, \"\", false)", gotPath, content, existed, missing)
+	}
+}
+
 func TestCapturePreWriteStateUsesBaseDirForReplaceEdit(t *testing.T) {
 	dir := t.TempDir()
 	otherDir := t.TempDir()

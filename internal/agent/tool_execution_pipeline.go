@@ -489,7 +489,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	} else if releaseWrite != nil {
 		defer releaseWrite.release()
 	}
-	staleWrite, err := requireObservedDestructiveWrite(p.fileTrack, p.agentID, tc.Name, trackedFilePath, writeStatus, releaseWrite)
+	staleWrite, unobservedWrite, err := requireObservedDestructiveWrite(p.fileTrack, p.agentID, tc.Name, trackedFilePath, writeStatus, releaseWrite)
 	if err != nil {
 		return execResult, err
 	}
@@ -575,7 +575,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if patchMutation != nil {
 		stalePathCount = len(patchMutation.paths)
 	}
-	result = appendBackupNotes(result, tc.Name, staleWrite, stalePathCount, backupOutcome)
+	result = appendBackupNotes(result, tc.Name, staleWrite, unobservedWrite, stalePathCount, backupOutcome)
 	result = appendIgnoredArgsNote(result, ignored)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 	return execResult, err
@@ -656,6 +656,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	execResult.PreFilePath, execResult.PreContent, execResult.PreExisted = agentdiff.CapturePreWriteState(tc, p.effectiveToolBaseDir())
 	artifactKey := toolCallArtifactKey(tc)
 	staleWrite := hooks != nil && hooks.stale
+	unobservedWrite := hooks != nil && hooks.unobserved
 	trackedFilePath := speculativeTrackedFilePath(tc.Name, execResult.PreFilePath, hooks)
 	var backupOutcome fileBackupOutcome
 	if tc.Name == tools.NameApplyPatch && hooks != nil && hooks.backupSources != nil {
@@ -698,7 +699,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	if patchDiffCollector != nil {
 		attachApplyPatchFileChanges(execResult.FileState, patchDiffCollector.Changes())
 	}
-	result = appendBackupNotes(result, tc.Name, staleWrite, speculativeStaleWritePathCount(tc.Name, trackedFilePath, hooks), backupOutcome)
+	result = appendBackupNotes(result, tc.Name, staleWrite, unobservedWrite, speculativeStaleWritePathCount(tc.Name, trackedFilePath, hooks), backupOutcome)
 	result = appendIgnoredArgsNote(result, ignored)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 	return execResult, err
@@ -1055,17 +1056,36 @@ func (p toolExecutionPipeline) applySuccessfulFileState(execResult *ToolExecutio
 // The pre-execution state captured while acquiring the write lock is reused so
 // the same file is not read and hashed twice per call. It returns stale=true
 // when the file changed after the model's last read; the caller then backs up
-// the current content and continues the write instead of rejecting it.
-func requireObservedDestructiveWrite(track *filelock.FileTracker, agentID, toolName, path string, writeStatus filelock.WriteStatus, lock *trackedWriteLock) (bool, error) {
+// the current content and continues the write instead of rejecting it. An
+// existing file the model has never seen returns unobserved=true alongside
+// stale=true so the caller backs up its current contents and continues instead
+// of refusing: write never rejects on an unobserved target. An existing
+// regular file whose contents cannot be read at all (preVerifyErr) also
+// proceeds: nothing can be backed up, so the caller only reminds. Non-regular
+// targets (directory, socket, FIFO, device) still refuse because opening them
+// for write fails or blocks.
+func requireObservedDestructiveWrite(track *filelock.FileTracker, agentID, toolName, path string, writeStatus filelock.WriteStatus, lock *trackedWriteLock) (stale, unobserved bool, err error) {
 	if track == nil || path == "" || toolName != tools.NameWrite || lock == nil {
-		return false, nil
+		return false, false, nil
 	}
 	action := strings.ToLower(toolName)
-	if lock.preVerifyErr != nil {
-		return false, fmt.Errorf("refusing to %s file %s because its current state cannot be verified: %w", action, path, lock.preVerifyErr)
-	}
 	if !lock.preExists {
-		return false, nil
+		return false, false, nil
+	}
+	if lock.preVerifyErr != nil {
+		info, statErr := os.Lstat(path)
+		if statErr != nil {
+			return false, false, nil // vanished since locking; treat as a fresh write
+		}
+		if !info.Mode().IsRegular() {
+			return false, false, fmt.Errorf("refusing to %s file %s because its current state cannot be verified: %w", action, path, lock.preVerifyErr)
+		}
+		// Regular file that cannot be read: proceed and remind instead of
+		// refusing. The backup attempt inside the caller fails the same way,
+		// so the result honestly shows no backup location. The empty hash
+		// routes through the same observed/unobserved wording as any other
+		// unread state.
+		return requireCurrentFileObservation(track, agentID, path, "", action, writeStatus.ExternalChanged)
 	}
 	return requireCurrentFileObservation(track, agentID, path, lock.preHash, action, writeStatus.ExternalChanged)
 }

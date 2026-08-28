@@ -89,7 +89,7 @@ func TestRestoreTrackedFileStateFailedReadDoesNotRestoreUsableRead(t *testing.T)
 	}
 }
 
-func TestRestoreTrackedFileStatePartialReadDoesNotAuthorizeDestructiveWrites(t *testing.T) {
+func TestRestoreTrackedFileStatePartialReadWriteBacksUpAndContinues(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	writeTestFile(t, path, "one\ntwo\n")
@@ -112,8 +112,12 @@ func TestRestoreTrackedFileStatePartialReadDoesNotAuthorizeDestructiveWrites(t *
 	}
 
 	writeArgs := mustJSONRaw(t, map[string]any{"path": path, "content": "replacement\n"})
-	if _, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: writeArgs}); err == nil || !strings.Contains(err.Error(), "read the complete file first") {
-		t.Fatalf("write after restored partial read error = %v, want full-read requirement", err)
+	writeResult, err := a.executeToolCall(context.Background(), message.ToolCall{ID: "write-1", Name: tools.NameWrite, Args: writeArgs})
+	if err != nil {
+		t.Fatalf("write after restored partial read should back up and continue: %v", err)
+	}
+	if !strings.Contains(writeResult.Result, "you had not read this file before this write") || !strings.Contains(writeResult.Result, "Backup saved to: ") || len(backupPathsFromResult(writeResult.Result)) == 0 {
+		t.Fatalf("write after restored partial read must warn and name a backup: %q", writeResult.Result)
 	}
 	locks, err := acquireDeleteLocks(a.fileTrack, a.instanceID, deleteArgs(t, path), "")
 	if locks != nil {
@@ -122,8 +126,8 @@ func TestRestoreTrackedFileStatePartialReadDoesNotAuthorizeDestructiveWrites(t *
 	if err != nil || locks == nil {
 		t.Fatalf("delete after restored partial read error = %v, want delete to proceed without read gate", err)
 	}
-	if got := readTestFile(t, path); got != "one\ntwo\n" {
-		t.Fatalf("file content = %q, want unchanged", got)
+	if got := readTestFile(t, path); got != "replacement\n" {
+		t.Fatalf("file content = %q, want replacement written", got)
 	}
 }
 

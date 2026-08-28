@@ -73,7 +73,7 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 		}
 	}
 	if hasVisibleTool(visible, tools.NameWrite) {
-		lines = append(lines, "- Use "+toolPromptName(tools.NameWrite)+" for whole-file writes. Overwriting an existing file requires knowing its current version in full — a complete read, or your own previous whole-file write of it; partial reads do not authorize whole-file replacement. If the file changed on disk after your read, write replaces those contents and continues.")
+		lines = append(lines, "- Use "+toolPromptName(tools.NameWrite)+" for whole-file writes. Overwriting an existing file replaces its contents; if the file was not read or changed on disk after your last read, the previous contents are backed up to the session directory when they can be read, and the result names that backup.")
 	}
 	if editToolName != "" && hasVisibleTool(visible, tools.NameWrite) {
 		lines = append(lines, "- Do not use "+toolPromptName(tools.NameWrite)+" for local edits to existing files; use "+toolPromptName(editToolName)+" instead.")

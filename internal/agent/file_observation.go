@@ -10,6 +10,7 @@ import (
 
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func verifiedCurrentFileHash(path string) (hash string, exists bool, err error) {
@@ -27,20 +28,31 @@ func verifiedCurrentFileHash(path string) (hash string, exists bool, err error) 
 }
 
 // requireCurrentFileObservation reports whether a destructive tool may proceed
-// against path. A file that was never observed stays a hard refusal: the caller
-// has no baseline to judge a replacement against. A file that was observed but
-// has changed since returns stale=true so the caller can back up the current
-// content and continue instead of forcing a redundant re-read round trip.
-func requireCurrentFileObservation(track *filelock.FileTracker, agentID, path, currentHash, action string, externalChanged bool) (stale bool, err error) {
+// against path. A file that was observed but has changed since returns stale=true
+// so the caller can back up the current content and continue instead of forcing a
+// redundant re-read round trip. A whole-file write treats an existing file it has
+// never observed the same way (NameWrite): write replaces everything anyway and
+// must never refuse, so the caller backs up the current contents and continues
+// instead of demanding a now-redundant full re-read. Any other tool acting on a
+// file it has never seen stays a hard refusal: the caller has no baseline to judge
+// a replacement against. unobserved is true only when the existing file was never
+// seen by this agent, so the caller can word the reminder accurately.
+func requireCurrentFileObservation(track *filelock.FileTracker, agentID, path, currentHash, action string, externalChanged bool) (stale, unobserved bool, err error) {
 	if track == nil {
-		return false, nil
+		return false, false, nil
 	}
 	observation := track.Observation(path, agentID, currentHash)
 	if observation.Current && !externalChanged {
-		return false, nil
+		return false, false, nil
 	}
 	if !observation.Observed {
-		return false, fmt.Errorf("refusing to %s existing file %s without a current read; read the complete file first, then retry", action, path)
+		if action == tools.NameWrite {
+			// Back up the unobserved current contents and continue instead of
+			// refusing: the write itself is the only baseline the model has, and
+			// replace-everything semantics make a pre-read redundant.
+			return true, true, nil
+		}
+		return false, false, fmt.Errorf("refusing to %s existing file %s without a current read; read the complete file first, then retry", action, path)
 	}
 	// When nothing changed externally, a follow-up whole-file write is safe
 	// against the agent's own committed state (its previous write, or the state
@@ -51,9 +63,9 @@ func requireCurrentFileObservation(track *filelock.FileTracker, agentID, path, c
 	// one, so reaching here without it already means the on-disk content is
 	// what this agent committed.
 	if !externalChanged {
-		return false, nil
+		return false, false, nil
 	}
-	return true, nil
+	return true, false, nil
 }
 
 func (a *MainAgent) trackObservedFileParts(parts []message.ContentPart) {

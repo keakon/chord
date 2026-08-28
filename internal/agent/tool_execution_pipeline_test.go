@@ -545,6 +545,101 @@ func TestToolExecutionPipelineStaleWriteBacksUpAndContinues(t *testing.T) {
 	}
 }
 
+func TestToolExecutionPipelineUnreadableFileWriteProceedsWithoutBackup(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := filepath.Join(projectRoot, ".chord", "sessions", "test")
+	path := filepath.Join(projectRoot, "locked.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+	if err := os.Chmod(path, 0o200); err != nil {
+		t.Fatalf("chmod seed file: %v", err)
+	}
+	if data, readErr := os.ReadFile(path); readErr == nil {
+		t.Skipf("environment allows reading write-only files (read %q as root?); cannot exercise the unreadable path", data)
+	}
+
+	tracker := filelock.NewFileTracker()
+	registry := tools.NewRegistry()
+	registry.Register(tools.WriteTool{})
+	pipeline := toolExecutionPipeline{
+		agentID:     "agent-1",
+		registry:    registry,
+		fileTrack:   tracker,
+		fileBackups: newFileBackupManager(sessionDir),
+		projectRoot: projectRoot,
+	}
+	call := message.ToolCall{
+		ID:   "write-1",
+		Name: tools.NameWrite,
+		Args: json.RawMessage(`{"path":"` + path + `","content":"new\n"}`),
+	}
+
+	result, err := pipeline.execute(context.Background(), call, false)
+	if err != nil {
+		t.Fatalf("execute write to unreadable file error = %v, want write to proceed", err)
+	}
+	if !strings.Contains(result.Result, "you had not read this file before this write") {
+		t.Fatalf("result must carry the unreaded-write reminder: %q", result.Result)
+	}
+	if len(backupPathsFromResult(result.Result)) != 0 {
+		t.Fatalf("unreadable file must produce no backup location: %q", result.Result)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatalf("chmod result file: %v", err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "new\n" {
+		t.Fatalf("file content = %q, %v; want new\\n after unreadable write", got, err)
+	}
+}
+
+func TestToolExecutionPipelineUnobservedWriteBacksUpAndContinues(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := filepath.Join(projectRoot, ".chord", "sessions", "test")
+	path := filepath.Join(projectRoot, "notes.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+
+	tracker := filelock.NewFileTracker()
+	registry := tools.NewRegistry()
+	registry.Register(tools.WriteTool{})
+	pipeline := toolExecutionPipeline{
+		agentID:     "agent-1",
+		registry:    registry,
+		fileTrack:   tracker,
+		fileBackups: newFileBackupManager(sessionDir),
+		projectRoot: projectRoot,
+	}
+	call := message.ToolCall{
+		ID:   "write-1",
+		Name: tools.NameWrite,
+		Args: json.RawMessage(`{"path":"` + path + `","content":"new\n"}`),
+	}
+
+	result, err := pipeline.execute(context.Background(), call, false)
+	if err != nil {
+		t.Fatalf("execute unobserved write error = %v, want write to back up and continue", err)
+	}
+	if !strings.Contains(result.Result, "you had not read this file before this write") {
+		t.Fatalf("result must carry the unobserved-write reminder: %q", result.Result)
+	}
+	backups := backupPathsFromResult(result.Result)
+	if len(backups) != 1 {
+		t.Fatalf("backup paths = %#v, want one backup of the unobserved write", backups)
+	}
+	backupData, err := os.ReadFile(backups[0])
+	if err != nil {
+		t.Fatalf("ReadFile backup: %v", err)
+	}
+	if string(backupData) != "old\n" {
+		t.Fatalf("backup content = %q, want old\\n", backupData)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "new\n" {
+		t.Fatalf("file content = %q, %v; want new\\n after unobserved write", got, err)
+	}
+}
+
 func TestToolExecutionPipelineWriteConflictIsWrappedAndDoesNotExecute(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "notes.txt")

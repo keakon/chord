@@ -243,20 +243,26 @@ func shortPathHash(path string) string {
 // appendBackupNotes reports what happened to a file whose on-disk contents had
 // drifted from the model's last observation. The model and the user see exactly
 // the same text: a backup is best effort, so a claim that one exists must never
-// be made to one audience and withheld from the other.
+// be made to one audience and withheld from the other. unobserved marks an
+// existing file the write had never seen, so the reminder says so instead of
+// borrowing the stale-changed wording.
 //
 // Nothing is appended when a backup could not be created. The absence of the
 // "Backup saved to" line is the honest signal — stating a reason would still be
 // telling the reader a safety net was expected. The failure and its cause are
 // logged locally by the caller.
-func appendBackupNotes(result, toolName string, stale bool, stalePaths int, outcome fileBackupOutcome) string {
+func appendBackupNotes(result, toolName string, stale, unobserved bool, stalePaths int, outcome fileBackupOutcome) string {
 	var notes []string
 	if stale {
 		switch {
 		case toolName == tools.NameWrite:
 			// write replaces the whole file; unlike edit and apply_patch there
 			// are no anchors to re-validate, so do not imply anything was checked.
-			notes = append(notes, "Warning: the file changed on disk after your last read, and those contents were replaced by this write.")
+			if unobserved {
+				notes = append(notes, "Warning: you had not read this file before this write, and its previous contents were replaced by this write.")
+			} else {
+				notes = append(notes, "Warning: the file changed on disk after your last read, and those contents were replaced by this write.")
+			}
 		case stalePaths > 1:
 			notes = append(notes, "Warning: one or more files changed on disk since their last tracked snapshot; the tool validated current contents before writing and continued.")
 		default:

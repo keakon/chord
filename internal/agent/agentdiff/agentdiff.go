@@ -2,6 +2,7 @@ package agentdiff
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 
 	"github.com/keakon/chord/internal/llm"
@@ -19,8 +20,10 @@ type Summary struct {
 
 // CapturePreWriteState reads the current file content before a tool call
 // so a before/after diff can be generated after execution.
-// Returns the file path, existing content (empty string if file does not exist),
-// and whether the file existed before execution.
+// Returns the file path, existing content, and whether the file existed before
+// execution. Content is empty both for a file that does not exist and for one
+// whose contents could not be decoded, so callers that need to tell those apart
+// must read existed rather than infer it from an empty content.
 func CapturePreWriteState(tc message.ToolCall, baseDir string) (filePath, content string, existed bool) {
 	// NameEdit and NameWrite need path extraction and reading
 	if tc.Name == tools.NameEdit || tc.Name == tools.NameWrite {
@@ -48,9 +51,15 @@ func CapturePreWriteState(tc message.ToolCall, baseDir string) (filePath, conten
 		if err == nil {
 			return path, decoded.Text, true
 		}
-		// For Write tool, return path with empty content and existed=false for new files
+		// For Write tool, report the path so the post-write diff can be built.
+		// A read failure is not proof the file is new: write is allowed to
+		// replace a file whose contents cannot be decoded (binary, or an
+		// unsupported encoding), and reporting that as a creation would make
+		// the result claim a file was created when it was overwritten. Stat
+		// separately so only a genuinely absent file reports existed=false.
 		if tc.Name == tools.NameWrite {
-			return path, "", false
+			_, statErr := os.Stat(path)
+			return path, "", statErr == nil
 		}
 	}
 	// For all other tools (Delete, Read, etc.), return empty values
