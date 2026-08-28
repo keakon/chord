@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"time"
+
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
@@ -15,31 +17,34 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		emit        func(AgentEvent)
 		confirm     ConfirmFunc
 	)
+	runtimeStartedAt := time.Time{}
 	if s.parent != nil {
 		fileTrack = s.parent.fileTrack
 		fileBackups = s.parent.fileBackups
 		eventSender = s.parent
 		emit = s.parent.emitToTUI
 		confirm = s.parent.confirmFn
+		runtimeStartedAt = s.parent.runtimeStartedAt
 	}
 	return toolExecutionPipeline{
-		agentID:        s.instanceID,
-		journalAgentID: s.instanceID,
-		eventAgentID:   s.instanceID,
-		taskID:         s.taskID,
-		sessionDir:     s.sessionDir,
-		registry:       s.tools,
-		governor:       s.parent.governor,
-		fileTrack:      fileTrack,
-		fileBackups:    fileBackups,
-		eventSender:    eventSender,
-		emit:           emit,
-		guidance:       subToolOutputGuidance,
-		logPrefix:      "SubAgent:",
-		projectRoot:    s.parent.projectRoot,
-		toolBaseDir:    s.workDir,
-		writeScope:     &s.writeScope,
-		writeScopeDir:  s.workDir,
+		agentID:          s.instanceID,
+		journalAgentID:   s.instanceID,
+		eventAgentID:     s.instanceID,
+		taskID:           s.taskID,
+		sessionDir:       s.sessionDir,
+		registry:         s.tools,
+		governor:         s.parent.governor,
+		fileTrack:        fileTrack,
+		fileBackups:      fileBackups,
+		runtimeStartedAt: runtimeStartedAt,
+		eventSender:      eventSender,
+		emit:             emit,
+		guidance:         subToolOutputGuidance,
+		logPrefix:        "SubAgent:",
+		projectRoot:      s.parent.projectRoot,
+		toolBaseDir:      s.workDir,
+		writeScope:       &s.writeScope,
+		writeScopeDir:    s.workDir,
 		currentRuleset: func() permission.Ruleset {
 			return s.ruleset
 		},

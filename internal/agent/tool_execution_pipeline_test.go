@@ -288,6 +288,52 @@ func TestToolExecutionPipelineRelativeDeleteReleasesTrackedLease(t *testing.T) {
 	tracker.AbortWrite(path, "other-agent")
 }
 
+// A drifted single-path delete must name how recently the file changed on both
+// execution paths. The speculative path reads the mutation snapshot's mtime, so
+// the finalized path has to carry the delete lock's — otherwise the same call
+// reports different text depending on whether speculation kicked in.
+func TestToolExecutionPipelineStaleDeleteNamesChangeAge(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "drifted.txt")
+	if err := os.WriteFile(path, []byte("observed\n"), 0o644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+
+	tracker := filelock.NewFileTracker()
+	tracker.TrackObservedSnapshot(path, "agent-1", computeFileHash(path))
+	// An external writer replaces the content after the model's observation.
+	if err := os.WriteFile(path, []byte("changed by someone else\n"), 0o644); err != nil {
+		t.Fatalf("simulate external write: %v", err)
+	}
+
+	registry := tools.NewRegistry()
+	registry.Register(tools.DeleteTool{BaseDir: projectRoot})
+	pipeline := toolExecutionPipeline{
+		agentID:          "agent-1",
+		registry:         registry,
+		fileTrack:        tracker,
+		fileBackups:      newFileBackupManager(filepath.Join(projectRoot, ".chord", "sessions", "test")),
+		projectRoot:      projectRoot,
+		toolBaseDir:      projectRoot,
+		runtimeStartedAt: time.Now().Add(-time.Hour),
+	}
+
+	result, err := pipeline.execute(context.Background(), message.ToolCall{
+		ID:   "delete-stale",
+		Name: tools.NameDelete,
+		Args: json.RawMessage(`{"paths":["drifted.txt"],"reason":"cleanup"}`),
+	}, false)
+	if err != nil {
+		t.Fatalf("execute delete: %v", err)
+	}
+	if !strings.Contains(result.Result, "changed on disk since its last tracked snapshot") {
+		t.Fatalf("result missing the drift warning: %q", result.Result)
+	}
+	if !strings.Contains(result.Result, "ago)") {
+		t.Fatalf("finalized delete must name the change age like the speculative path: %q", result.Result)
+	}
+}
+
 func TestToolExecutionPipelineUnobservedDeleteBacksUpRegularFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := filepath.Join(projectRoot, ".chord", "sessions", "test")
@@ -579,8 +625,8 @@ func TestToolExecutionPipelineUnreadableFileWriteProceedsWithoutBackup(t *testin
 	if err != nil {
 		t.Fatalf("execute write to unreadable file error = %v, want write to proceed", err)
 	}
-	if !strings.Contains(result.Result, "you had not read this file before this write") {
-		t.Fatalf("result must carry the unreaded-write reminder: %q", result.Result)
+	if !strings.Contains(result.Result, "could not be read before this write") {
+		t.Fatalf("result must carry the unverifiable-prestate warning: %q", result.Result)
 	}
 	if len(backupPathsFromResult(result.Result)) != 0 {
 		t.Fatalf("unreadable file must produce no backup location: %q", result.Result)

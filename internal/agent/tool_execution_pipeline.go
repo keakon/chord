@@ -29,23 +29,24 @@ const (
 )
 
 type toolExecutionPipeline struct {
-	agentID        string
-	journalAgentID string
-	eventAgentID   string
-	taskID         string
-	sessionDir     string
-	registry       *tools.Registry
-	governor       *resourceGovernor
-	fileTrack      *filelock.FileTracker
-	fileBackups    *fileBackupManager
-	eventSender    tools.EventSender
-	emit           func(AgentEvent)
-	guidance       string
-	logPrefix      string
-	projectRoot    string
-	toolBaseDir    string
-	writeScope     *tools.WriteScope
-	writeScopeDir  string
+	agentID          string
+	journalAgentID   string
+	eventAgentID     string
+	taskID           string
+	sessionDir       string
+	registry         *tools.Registry
+	governor         *resourceGovernor
+	fileTrack        *filelock.FileTracker
+	fileBackups      *fileBackupManager
+	runtimeStartedAt time.Time // runtime start; drift warnings omit mtimes predating it
+	eventSender      tools.EventSender
+	emit             func(AgentEvent)
+	guidance         string
+	logPrefix        string
+	projectRoot      string
+	toolBaseDir      string
+	writeScope       *tools.WriteScope
+	writeScopeDir    string
 
 	currentRuleset                func() permission.Ruleset
 	refreshRulesetAfterRuleIntent func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset
@@ -572,10 +573,29 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	readObservation, _ := readObservationSink.Observation()
 	p.applySuccessfulFileState(&execResult, tc, trackedFilePath, readObservation, releaseWrite)
 	stalePathCount := staleWritePathCount(trackedFilePath, deleteLocks)
+	var changeModTime time.Time
+	switch {
+	case releaseWrite != nil:
+		changeModTime = releaseWrite.preModTime
+	case patchMutation != nil:
+		changeModTime = patchMutation.staleModTime
+	case deleteLocks != nil:
+		changeModTime = deleteLocks.staleModTime()
+	}
 	if patchMutation != nil {
 		stalePathCount = len(patchMutation.paths)
 	}
-	result = appendBackupNotes(result, tc.Name, staleWrite, unobservedWrite, stalePathCount, backupOutcome)
+	result = appendBackupNotes(result, tc.Name, driftReport{
+		stale:      staleWrite,
+		unobserved: unobservedWrite,
+		// An unreadable pre-state is not a drift: the wording must not claim
+		// the file changed when only its readability did, and the mtime (the
+		// file's original one) must not feed an age.
+		unverifiable:     releaseWrite != nil && releaseWrite.preVerifyErr != nil,
+		paths:            stalePathCount,
+		modTime:          changeModTime,
+		runtimeStartedAt: p.runtimeStartedAt,
+	}, backupOutcome)
 	result = appendIgnoredArgsNote(result, ignored)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 	return execResult, err
@@ -699,7 +719,20 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	if patchDiffCollector != nil {
 		attachApplyPatchFileChanges(execResult.FileState, patchDiffCollector.Changes())
 	}
-	result = appendBackupNotes(result, tc.Name, staleWrite, unobservedWrite, speculativeStaleWritePathCount(tc.Name, trackedFilePath, hooks), backupOutcome)
+	var changeModTime time.Time
+	if hooks != nil {
+		changeModTime = hooks.staleModTime
+	}
+	result = appendBackupNotes(result, tc.Name, driftReport{
+		stale:      staleWrite,
+		unobserved: unobservedWrite,
+		// Writes with an unreadable pre-state never speculate (they are
+		// deferred at Start), so the unverifiable wording has no speculative
+		// call site.
+		paths:            speculativeStaleWritePathCount(tc.Name, trackedFilePath, hooks),
+		modTime:          changeModTime,
+		runtimeStartedAt: p.runtimeStartedAt,
+	}, backupOutcome)
 	result = appendIgnoredArgsNote(result, ignored)
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 	return execResult, err
@@ -1164,6 +1197,7 @@ type trackedWriteLock struct {
 	path         string
 	preHash      string
 	preExists    bool
+	preModTime   time.Time
 	preVerifyErr error
 	postHash     string
 }
@@ -1177,7 +1211,7 @@ func acquireTrackedWriteLock(track *filelock.FileTracker, agentID, path, toolNam
 	// An unreadable file leaves preHash empty, matching the pre-existing
 	// lease semantics for edit/patch; only the write gate turns preVerifyErr
 	// into a refusal.
-	lock.preHash, lock.preExists, lock.preVerifyErr = verifiedCurrentFileHash(path)
+	lock.preHash, lock.preExists, lock.preModTime, lock.preVerifyErr = verifiedCurrentFileHash(path)
 	var err error
 	status, err = track.AcquireWriteStatus(path, agentID, lock.preHash)
 	if err != nil {

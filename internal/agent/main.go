@@ -620,6 +620,7 @@ type MainAgent struct {
 	sem                      chan struct{}             // compatibility view of governor normal runtime slots
 	fileTrack                *filelock.FileTracker     // file write conflict detection
 	fileBackups              *fileBackupManager        // session-scoped risky write backups
+	runtimeStartedAt         time.Time                 // when this agent runtime started; drift warnings omit mtimes predating it
 	recovery                 *recovery.RecoveryManager // session persistence and crash recovery
 	sessionLock              *recovery.SessionLock     // cross-process exclusive ownership of sessionDir
 	sessionArtifactsDirFn    func() string             // active session artifacts directory for exports / dumps
@@ -943,6 +944,7 @@ func NewMainAgent(
 		sem:                     governor.runtimeSlots,
 		fileTrack:               filelock.NewFileTracker(),
 		fileBackups:             newFileBackupManager(sessionDir),
+		runtimeStartedAt:        time.Now(),
 		subAgentInbox:           newSubAgentInbox(),
 		ownedSubAgentMailboxes:  make(map[string][]SubAgentMailboxMessage),
 		ownedMailboxSpool:       make(map[string][]string),

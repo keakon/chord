@@ -7,24 +7,31 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
-func verifiedCurrentFileHash(path string) (hash string, exists bool, err error) {
-	if _, err := os.Lstat(path); err != nil {
-		if os.IsNotExist(err) {
-			return "", false, nil
+// verifiedCurrentFileHash returns the content hash of an existing regular file
+// plus its modification time captured at the same moment. modTime is non-zero
+// whenever the path exists and is stat-able, even when the contents cannot be
+// read (hash is then "" with err set), so callers can still report how recently
+// an unreadable file changed.
+func verifiedCurrentFileHash(path string) (hash string, exists bool, modTime time.Time, err error) {
+	info, lerr := os.Lstat(path)
+	if lerr != nil {
+		if os.IsNotExist(lerr) {
+			return "", false, time.Time{}, nil
 		}
-		return "", false, err
+		return "", false, time.Time{}, lerr
 	}
 	hash = computeFileHash(path)
 	if hash == "" {
-		return "", true, fmt.Errorf("current content hash cannot be verified")
+		return "", true, info.ModTime(), fmt.Errorf("current content hash cannot be verified")
 	}
-	return hash, true, nil
+	return hash, true, info.ModTime(), nil
 }
 
 // requireCurrentFileObservation reports whether a destructive tool may proceed

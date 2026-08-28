@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/tools"
@@ -240,33 +241,106 @@ func shortPathHash(path string) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
+// driftReport carries what the pipeline learned about a mutated file's
+// pre-state. The fields travel together because they are only ever read
+// together, and as positional arguments the three flags were trivial to
+// transpose without the compiler noticing.
+type driftReport struct {
+	// stale marks contents the model had not observed: the file changed on
+	// disk since its last tracked snapshot, or was never read at all.
+	stale bool
+	// unobserved marks an existing file the write had never seen, so the
+	// reminder says so instead of borrowing the stale-changed wording.
+	unobserved bool
+	// unverifiable marks a write whose pre-state could not be read at all, so
+	// the wording must not claim the file changed when only its readability
+	// did, and the mtime must not feed an age.
+	unverifiable bool
+	// paths is how many paths the call mutates. It selects the singular or
+	// plural wording, and an age is only named in the singular one — with
+	// several files any single mtime would mislead about the others.
+	paths int
+	// modTime is the mutated file's modification time, used to name how
+	// recently the drift happened. Zero when unknown or ambiguous.
+	modTime time.Time
+	// runtimeStartedAt is when this process started serving the session, not
+	// when the session began — a resumed session legitimately carries
+	// observations from before the restart, so an mtime predating this is not a
+	// trustworthy age for a change detected against an in-session snapshot.
+	runtimeStartedAt time.Time
+}
+
+// driftWarning renders a stale-change warning, appending how recently the
+// change happened when modTime is meaningful and recent. The two clauses are
+// joined with the separator the caller supplies, so each warning keeps the
+// punctuation it reads best with, and the age slots in before it.
+// The age is best-effort: mtime can predate the actual content change (copy -p,
+// git checkout), so it is only shown for the last 24 hours, and never when it
+// predates the runtime start (an untrustworthy timestamp for a change detected
+// against an in-session snapshot). A sub-minute age reads as seconds ("about
+// 45s ago") because it signals an active external writer; older ages read
+// coarsely.
+func driftWarning(prefix, separator, suffix string, drift driftReport) string {
+	age := formatChangeAge(drift.modTime, drift.runtimeStartedAt)
+	if age == "" {
+		return "Warning: " + prefix + separator + " " + suffix + "."
+	}
+	return "Warning: " + prefix + " (about " + age + ")" + separator + " " + suffix + "."
+}
+
+// formatChangeAge returns a coarse human-readable age for modTime, or "" when it
+// should not be reported: zero, in the future (clock skew), older than 24 hours,
+// or predating the runtime start (an untrustworthy mtime for a change detected
+// against an in-session snapshot).
+func formatChangeAge(modTime, runtimeStartedAt time.Time) string {
+	if modTime.IsZero() || modTime.Before(runtimeStartedAt) {
+		return ""
+	}
+	d := time.Since(modTime)
+	switch {
+	case d < 0:
+		return "" // clock skew on networked filesystems
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", max(int(d/time.Second), 1))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d/time.Minute))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d/time.Hour))
+	default:
+		return ""
+	}
+}
+
 // appendBackupNotes reports what happened to a file whose on-disk contents had
 // drifted from the model's last observation. The model and the user see exactly
 // the same text: a backup is best effort, so a claim that one exists must never
-// be made to one audience and withheld from the other. unobserved marks an
-// existing file the write had never seen, so the reminder says so instead of
-// borrowing the stale-changed wording.
+// be made to one audience and withheld from the other. drift carries which kind
+// of drift was detected and, when meaningful, how recently it happened so the
+// model can judge whether an external writer is still active.
 //
 // Nothing is appended when a backup could not be created. The absence of the
 // "Backup saved to" line is the honest signal — stating a reason would still be
 // telling the reader a safety net was expected. The failure and its cause are
 // logged locally by the caller.
-func appendBackupNotes(result, toolName string, stale, unobserved bool, stalePaths int, outcome fileBackupOutcome) string {
+func appendBackupNotes(result, toolName string, drift driftReport, outcome fileBackupOutcome) string {
 	var notes []string
-	if stale {
+	if drift.stale {
 		switch {
 		case toolName == tools.NameWrite:
 			// write replaces the whole file; unlike edit and apply_patch there
 			// are no anchors to re-validate, so do not imply anything was checked.
-			if unobserved {
+			switch {
+			case drift.unverifiable:
+				notes = append(notes, "Warning: the file's current contents could not be read before this write to verify them, and its previous contents were replaced by this write.")
+			case drift.unobserved:
 				notes = append(notes, "Warning: you had not read this file before this write, and its previous contents were replaced by this write.")
-			} else {
-				notes = append(notes, "Warning: the file changed on disk after your last read, and those contents were replaced by this write.")
+			default:
+				notes = append(notes, driftWarning("the file changed on disk after your last read", ",", "and those contents were replaced by this write", drift))
 			}
-		case stalePaths > 1:
+		case drift.paths > 1:
 			notes = append(notes, "Warning: one or more files changed on disk since their last tracked snapshot; the tool validated current contents before writing and continued.")
 		default:
-			notes = append(notes, "Warning: the file changed on disk since its last tracked snapshot; the tool validated current contents before writing and continued.")
+			notes = append(notes, driftWarning("the file changed on disk since its last tracked snapshot", ";", "the tool validated current contents before writing and continued", drift))
 		}
 	}
 	for _, backup := range outcome.Records {

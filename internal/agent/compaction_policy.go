@@ -774,7 +774,7 @@ func (a *MainAgent) externallyInvalidatedReadsAfterMutatingShell(messages []mess
 			if !cached {
 				current, checked := hashes[path]
 				if !checked {
-					hash, exists, err := verifiedCurrentFileHash(path)
+					hash, exists, _, err := verifiedCurrentFileHash(path)
 					current = currentFileRevision{hash: hash, exists: exists, valid: err == nil}
 					hashes[path] = current
 				}

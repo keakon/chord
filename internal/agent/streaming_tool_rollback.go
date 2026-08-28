@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/keakon/golog/log"
 
@@ -30,6 +31,7 @@ type speculativeToolHooks struct {
 	deleteBackupRequired func() map[string]bool
 	stale                bool
 	unobserved           bool
+	staleModTime         time.Time
 	paths                []string
 }
 
@@ -37,6 +39,7 @@ type speculativeFileSnapshot struct {
 	Path              string
 	Existed           bool
 	Unreadable        bool // existing file that could not be read; nothing to back up or restore
+	ModTime           time.Time
 	BackupRequired    bool
 	Data              []byte
 	Mode              os.FileMode
@@ -59,7 +62,13 @@ type speculativeFileMutation struct {
 	// the tool result can say "never read" instead of borrowing the changed-
 	// after-read wording.
 	unobserved bool
-	paths      []string
+	// staleModTime is the modification time of a stale file, so the drift
+	// reminder can say how recently it changed. Only the single-path wording
+	// names an age — appendBackupNotes switches on the path count and never
+	// reads this in the plural branch, where any one file's time would mislead
+	// about the others.
+	staleModTime time.Time
+	paths        []string
 	// observedOnCommit marks whole-file writes: the committed content is
 	// exactly the bytes the model supplied, so committing records it as an
 	// observation and a follow-up write/delete needs no redundant re-read.
@@ -227,13 +236,13 @@ func newSpeculativeFileMutation(track *filelock.FileTracker, agentID string, pat
 					return nil, obsErr
 				}
 				if stale {
-					mutation.stale = true
+					mutation.markStale(snap)
 				}
 				if unobserved {
 					mutation.unobserved = true
 				}
 			} else if status.ExternalChanged {
-				mutation.stale = true
+				mutation.markStale(snap)
 			}
 			if snap.Existed && snap.Mode&os.ModeSymlink == 0 {
 				observation := track.Observation(path, agentID, snap.Hash)
@@ -320,15 +329,22 @@ func captureSpeculativeFileSnapshot(path string, tolerateUnreadable bool) (specu
 		// baseline, and rollback cannot restore the unreadable pre-state, so
 		// restoreSpeculativeFileSnapshot refuses to truncate it on discard.
 		snap.Existed = true
+		snap.ModTime = info.ModTime()
 		snap.Unreadable = true
 		snap.Mode = info.Mode()
 		return snap, nil
 	}
 	snap.Existed = true
+	snap.ModTime = info.ModTime()
 	snap.Data = data
 	snap.Mode = info.Mode()
 	snap.Hash = hashBytesHex(data)
 	return snap, nil
+}
+
+func (m *speculativeFileMutation) markStale(snap speculativeFileSnapshot) {
+	m.stale = true
+	m.staleModTime = snap.ModTime
 }
 
 func (m *speculativeFileMutation) hooks() *speculativeToolHooks {
@@ -349,6 +365,7 @@ func (m *speculativeFileMutation) hooks() *speculativeToolHooks {
 		deleteBackupRequired: func() map[string]bool { return m.deleteBackupRequired() },
 		stale:                m.stale,
 		unobserved:           m.unobserved,
+		staleModTime:         m.staleModTime,
 		paths:                append([]string(nil), m.paths...),
 	}
 }

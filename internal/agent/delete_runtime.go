@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"time"
 
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/llm"
@@ -23,6 +24,7 @@ type deleteLockedPath struct {
 	lease          *filelock.WriteLease
 	symlink        bool
 	stale          bool
+	modTime        time.Time
 	backupRequired bool
 }
 
@@ -43,6 +45,17 @@ func (s *deleteLockSet) hasStalePath() bool {
 		}
 	}
 	return false
+}
+
+// staleModTime reports when the drifted file was last modified, so the drift
+// reminder can name how recently it changed. Only the single-path case answers:
+// the multi-path wording never names one file, and picking any single mtime
+// there would mislead about the others.
+func (s *deleteLockSet) staleModTime() time.Time {
+	if s == nil || len(s.locked) != 1 || !s.locked[0].stale {
+		return time.Time{}
+	}
+	return s.locked[0].modTime
 }
 
 func acquireDeleteLocks(tracker *filelock.FileTracker, agentID string, args json.RawMessage, baseDir string) (*deleteLockSet, error) {
@@ -67,11 +80,15 @@ func acquireDeleteLocks(tracker *filelock.FileTracker, agentID string, args json
 		// verification and the target-readability check.
 		var currentHash string
 		var exists bool
+		var modTime time.Time
 		var verifyErr error
 		if isSymlink {
 			currentHash, exists, verifyErr = "", true, nil
+			if statErr == nil {
+				modTime = info.ModTime()
+			}
 		} else {
-			currentHash, exists, verifyErr = verifiedCurrentFileHash(path)
+			currentHash, exists, modTime, verifyErr = verifiedCurrentFileHash(path)
 		}
 		if verifyErr != nil {
 			for _, l := range slices.Backward(locked) {
@@ -98,6 +115,7 @@ func acquireDeleteLocks(tracker *filelock.FileTracker, agentID string, args json
 			lease:          lease,
 			symlink:        isSymlink,
 			stale:          status.ExternalChanged,
+			modTime:        modTime,
 			backupRequired: !isSymlink && (!observation.Observed || status.ExternalChanged),
 		})
 	}

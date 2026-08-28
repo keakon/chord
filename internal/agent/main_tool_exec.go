@@ -50,18 +50,19 @@ func (a *MainAgent) captureMainWalltimeTarget() *walltimeTarget {
 
 func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 	return toolExecutionPipeline{
-		agentID:        a.instanceID,
-		journalAgentID: identity.MainAgentID,
-		eventAgentID:   "",
-		sessionDir:     a.sessionDir,
-		registry:       a.tools,
-		governor:       a.governor,
-		fileTrack:      a.fileTrack,
-		fileBackups:    a.fileBackups,
-		eventSender:    a,
-		emit:           a.emitToTUI,
-		projectRoot:    a.projectRoot,
-		guidance:       mainToolOutputGuidance,
+		agentID:          a.instanceID,
+		journalAgentID:   identity.MainAgentID,
+		eventAgentID:     "",
+		sessionDir:       a.sessionDir,
+		registry:         a.tools,
+		governor:         a.governor,
+		fileTrack:        a.fileTrack,
+		fileBackups:      a.fileBackups,
+		runtimeStartedAt: a.runtimeStartedAt,
+		eventSender:      a,
+		emit:             a.emitToTUI,
+		projectRoot:      a.projectRoot,
+		guidance:         mainToolOutputGuidance,
 		currentRuleset: func() permission.Ruleset {
 			return a.effectiveRuleset()
 		},
