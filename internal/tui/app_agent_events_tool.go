@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -129,6 +130,67 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 	m.nextBlockID++
 	m.appendViewportBlock(block)
 	return block, true
+}
+
+// markToolArgsComplete moves a card out of the argument-streaming state now
+// that its arguments are known to be complete: queued, with the transient
+// char-count progress dropped. ToolQueuedByExecutionEvent stays false because
+// the agent has not dispatched the call yet — only a real execution event earns
+// the queued badge.
+//
+// An already-finished call keeps its state, since a fast tool can emit its
+// result before the final args update arrives, but still loses the progress
+// text, which means nothing once a result exists. Reports whether anything
+// changed.
+func markToolArgsComplete(block *Block) bool {
+	if block == nil {
+		return false
+	}
+	changed := false
+	if !block.ResultDone && block.StartedAt.IsZero() &&
+		(block.ToolExecutionState == "" ||
+			block.ToolExecutionState == agent.ToolCallExecutionStateReceiving ||
+			block.ToolExecutionState == agent.ToolCallExecutionStateRunning) {
+		block.ToolExecutionState = agent.ToolCallExecutionStateQueued
+		block.ToolQueuedByExecutionEvent = false
+		changed = true
+	}
+	if block.ToolProgress != nil {
+		block.ToolProgress = nil
+		changed = true
+	}
+	return changed
+}
+
+// markPriorReceivingToolCallsComplete advances earlier tool cards that are
+// still streaming arguments into the queued state once a newer tool call starts
+// streaming. Chat-completions-style providers emit argument deltas in
+// generation order with no per-call end event, so the start of a later call is
+// the only reliable signal that every earlier call's arguments are fully
+// received. The transition is display-only and drops the transient char-count
+// progress; execution still waits for the finalized response, and late
+// ArgsStreamingDone / execution-state events are idempotent against Queued.
+func (m *Model) markPriorReceivingToolCallsComplete(agentID, newCallID string) {
+	if m == nil || m.viewport == nil {
+		return
+	}
+	// Candidates sit at the tail — a card is only receiving while its call is
+	// still streaming — so walk backwards to reach them first. The scan still
+	// covers the whole transcript: a card left receiving by a call that never
+	// produced an args-end (a truncated response) has no other way back, and
+	// the next tool call start is what rescues it.
+	for _, block := range slices.Backward(m.viewport.blocks) {
+		if block == nil || block.Type != BlockToolCall || block.ToolID == newCallID {
+			continue
+		}
+		if block.AgentID != agentID || !block.toolArgumentsAreReceiving() {
+			continue
+		}
+		if markToolArgsComplete(block) {
+			block.InvalidateCache()
+			m.updateViewportBlock(block)
+		}
+	}
 }
 
 func (m *Model) ensureToolResultBlock(evt agent.ToolResultEvent) *Block {
@@ -374,6 +436,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 				block.StartedAt = time.Time{}
 			}
 			m.recordToolArgRender(evt.ID, evt.ArgsJSON, time.Now())
+			m.markPriorReceivingToolCallsComplete(evt.AgentID, evt.ID)
 		}
 		if created && evt.Name == tools.NameDelegate && evt.AgentID == "" {
 			m.sidebar.AddPendingTask()
@@ -399,13 +462,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 				if block != nil {
 					block.Content = stableToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
 					block.StartedAt = time.Time{}
-					if block.ToolExecutionState == "" || block.ToolExecutionState == agent.ToolCallExecutionStateReceiving || block.ToolExecutionState == agent.ToolCallExecutionStateRunning {
-						block.ToolExecutionState = agent.ToolCallExecutionStateQueued
-						block.ToolQueuedByExecutionEvent = false
-					}
-					if block.ToolProgress != nil {
-						block.ToolProgress = nil
-					}
+					markToolArgsComplete(block)
 					block.InvalidateCache()
 					m.updateViewportBlock(block)
 				}
@@ -473,16 +530,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			// (execution-state events arrive only after the model response finalizes).
 			// Mark as queued so fully-formed cards (notably TodoWrite) stop animating
 			// while we wait for execution to begin.
-			//
-			// Do not downgrade already-finished tool calls. Fast tools can emit
-			// ToolResultEvent before the final ArgsStreamingDone update arrives.
-			if !block.ResultDone && block.StartedAt.IsZero() && (block.ToolExecutionState == "" || block.ToolExecutionState == agent.ToolCallExecutionStateReceiving || block.ToolExecutionState == agent.ToolCallExecutionStateRunning) {
-				block.ToolExecutionState = agent.ToolCallExecutionStateQueued
-				block.ToolQueuedByExecutionEvent = false
-				updated = true
-			}
-			if block.ToolProgress != nil {
-				block.ToolProgress = nil
+			if markToolArgsComplete(block) {
 				updated = true
 			}
 		} else {

@@ -43,6 +43,29 @@ type responseFunctionCallArgumentsDelta struct {
 	Delta       string `json:"delta"`
 }
 
+// responseFunctionCallArgumentsDone is the payload of the
+// response.function_call_arguments.done event. It is the provider's authoritative
+// signal that a function call's arguments are fully streamed — the parser uses it
+// to emit tool_use_end early (so the UI stops showing "receiving" and speculative
+// execution can start) without finalizing the call; response.output_item.done
+// remains the source of truth for the final arguments.
+//
+// Only the index is decoded. The event also carries the complete arguments, but
+// binding them would copy the whole payload — tens of KB for a large patch —
+// into a RawMessage nothing reads.
+type responseFunctionCallArgumentsDone struct {
+	Index       int `json:"index"`
+	OutputIndex int `json:"output_index"`
+}
+
+// responseCustomToolCallInputDone is the payload of the
+// response.custom_tool_call_input.done event, the custom-tool counterpart of
+// function_call_arguments.done. Custom input events carry item_id only, and the
+// complete input is deliberately left undecoded for the same reason.
+type responseCustomToolCallInputDone struct {
+	ItemID string `json:"item_id"`
+}
+
 // responseCustomToolCallInputDelta is the payload of the
 // response.custom_tool_call_input.delta event. Custom tool input deltas carry
 // item_id instead of output_index, so the streaming accumulator must locate the
@@ -172,6 +195,7 @@ type responsesToolAccumulator struct {
 	custom             bool // freeform custom_tool_call: args accumulate raw text
 	args               strings.Builder
 	streamStartEmitted bool
+	endEmitted         bool // tool_use_end already sent (arguments.done early signal)
 }
 
 func (a *responsesToolAccumulator) mergeMetadata(item responsesStreamItem) {
@@ -249,6 +273,28 @@ func maybeEmitResponsesToolStart(acc *responsesToolAccumulator, cb StreamCallbac
 		},
 	})
 	acc.streamStartEmitted = true
+}
+
+// emitResponsesToolArgsEnd emits the paired tool_use_end when a call's
+// arguments or freeform input finished streaming (the authoritative per-call
+// completion signals). The accumulator marks itself so the later
+// response.output_item.done does not emit a second end.
+func emitResponsesToolArgsEnd(acc *responsesToolAccumulator, cb StreamCallback) {
+	if cb == nil || acc == nil {
+		return
+	}
+	maybeEmitResponsesToolStart(acc, cb)
+	if !acc.streamStartEmitted || acc.endEmitted {
+		return
+	}
+	acc.endEmitted = true
+	cb(message.StreamDelta{
+		Type: message.StreamDeltaToolUseEnd,
+		ToolCall: &message.ToolCallDelta{
+			ID:   responsesToolStreamID(acc),
+			Name: acc.name,
+		},
+	})
 }
 
 type responsesEventEnvelope struct {
@@ -718,6 +764,27 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		}
 		return nil, nil, false, nil
 
+	case "response.function_call_arguments.done":
+		// Authoritative per-call completion signal: the call's arguments are
+		// fully streamed. Emit tool_use_end immediately so the UI leaves the
+		// receiving state and speculative execution can start without waiting
+		// for the rest of the response. The accumulator is kept: the final
+		// arguments (and the call's validity) still come from
+		// response.output_item.done, which also skips its own end emission
+		// via endEmitted.
+		var done responseFunctionCallArgumentsDone
+		if err := responsesSSEUnmarshal(eventData, &done); err != nil {
+			return nil, nil, false, fmt.Errorf("parse function_call_arguments.done: %w", err)
+		}
+		doneIdx := done.OutputIndex
+		if doneIdx == 0 && done.Index != 0 {
+			doneIdx = done.Index
+		}
+		if acc, exists := state.toolCalls[doneIdx]; exists {
+			emitResponsesToolArgsEnd(acc, state.cb)
+		}
+		return nil, nil, false, nil
+
 	case "response.custom_tool_call_input.delta":
 		var delta responseCustomToolCallInputDelta
 		if err := responsesSSEUnmarshal(eventData, &delta); err != nil {
@@ -753,6 +820,34 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 				// emit only this fragment because the agent accumulates callbacks.
 				state.cb(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: responsesToolStreamID(acc), Name: acc.name, InputText: delta.Delta}})
 			}
+		}
+		return nil, nil, false, nil
+
+	case "response.custom_tool_call_input.done":
+		// Custom-tool counterpart of function_call_arguments.done: the input is
+		// fully streamed, so emit tool_use_end early. Final arguments still come
+		// from response.output_item.done.
+		var done responseCustomToolCallInputDone
+		if err := responsesSSEUnmarshal(eventData, &done); err != nil {
+			return nil, nil, false, fmt.Errorf("parse custom_tool_call_input.done: %w", err)
+		}
+		if done.ItemID == "" {
+			return nil, nil, false, nil
+		}
+		// Look the item up only when the added event (or a delta before it)
+		// actually registered the id. Defaulting to a synthetic index here
+		// would alias the delta-before-added accumulator, which belongs to a
+		// different item. Finalization does not depend on this event:
+		// response.output_item.done carries the complete input.
+		idx, registered := 0, false
+		if state.customItemToIndex != nil {
+			idx, registered = state.customItemToIndex[done.ItemID]
+		}
+		if !registered {
+			return nil, nil, false, nil
+		}
+		if acc, exists := state.toolCalls[idx]; exists {
+			emitResponsesToolArgsEnd(acc, state.cb)
 		}
 		return nil, nil, false, nil
 

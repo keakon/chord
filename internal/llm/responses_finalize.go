@@ -290,7 +290,7 @@ func finalizeOneResponsesToolCall(
 		Name: cloneLongLivedLLMString(acc.name),
 		Args: args,
 	})
-	if cb != nil && acc.streamStartEmitted {
+	if cb != nil && acc.streamStartEmitted && !acc.endEmitted {
 		cb(message.StreamDelta{
 			Type: message.StreamDeltaToolUseEnd,
 			ToolCall: &message.ToolCallDelta{
@@ -368,7 +368,7 @@ func finalizeResponsesToolCalls(
 			Args: args,
 		})
 		markResponsesToolCallFinalized(finalizedCalls, acc)
-		if cb != nil && acc.streamStartEmitted {
+		if cb != nil && acc.streamStartEmitted && !acc.endEmitted {
 			cb(message.StreamDelta{
 				Type: message.StreamDeltaToolUseEnd,
 				ToolCall: &message.ToolCallDelta{

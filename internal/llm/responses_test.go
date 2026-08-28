@@ -1452,6 +1452,101 @@ func TestParseResponsesSSE_FirstAddedMalformedEmitsNoToolCallbacks(t *testing.T)
 	}
 }
 
+func TestParseResponsesSSE_ArgumentsDoneEmitsEarlyToolUseEnd(t *testing.T) {
+	// response.function_call_arguments.done is the authoritative per-call
+	// completion signal: tool_use_end must be emitted there, before
+	// response.output_item.done, and output_item.done must not emit a second end.
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"shell"}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"command\":\"echo "}`,
+		`{"type":"response.function_call_arguments.delta","output_index":1,"delta":"hi\"}"}`,
+		`{"type":"response.function_call_arguments.done","output_index":1,"arguments":"{\"command\":\"echo hi\"}","call_id":"call_abc","item_id":"fc_1"}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"shell","arguments":"{\"command\":\"echo hi\"}","status":"completed"}}`,
+		`{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call"}],"usage":{"input_tokens":100,"output_tokens":50}}}`,
+	})
+
+	var events []string
+	cb := func(delta message.StreamDelta) {
+		if delta.ToolCall == nil {
+			return
+		}
+		switch delta.Type {
+		case message.StreamDeltaToolUseStart:
+			events = append(events, "start")
+		case message.StreamDeltaToolUseDelta:
+			events = append(events, "delta")
+		case message.StreamDeltaToolUseEnd:
+			events = append(events, "end")
+		}
+	}
+
+	resp, err := parseResponsesSSE(stream, cb, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("got %d tool calls, want 1: %+v", len(resp.ToolCalls), resp.ToolCalls)
+	}
+	var args map[string]any
+	if err := json.Unmarshal(resp.ToolCalls[0].Args, &args); err != nil {
+		t.Fatalf("tool args not valid JSON: %v", err)
+	}
+	if args["command"] != "echo hi" {
+		t.Fatalf("args[command] = %v, want echo hi", args["command"])
+	}
+	want := []string{"start", "delta", "delta", "end"}
+	if len(events) != len(want) {
+		t.Fatalf("callback events = %v, want %v (single end emitted before output_item.done)", events, want)
+	}
+	for i := range want {
+		if events[i] != want[i] {
+			t.Fatalf("callback events = %v, want %v", events, want)
+		}
+	}
+}
+
+func TestParseResponsesSSE_CustomInputDoneEmitsEarlyToolUseEnd(t *testing.T) {
+	// Same contract for custom_tool_call: custom_tool_call_input.done ends the
+	// stream early, output_item.done must not emit a duplicate end, and the
+	// final freeform input still comes from output_item.done.
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"custom_tool_call","id":"ct_1","name":"apply_patch"}}`,
+		`{"type":"response.custom_tool_call_input.delta","item_id":"ct_1","delta":"*** Begin Patch\n*** End Patch"}`,
+		`{"type":"response.custom_tool_call_input.done","item_id":"ct_1","input":"*** Begin Patch\n*** End Patch"}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"type":"custom_tool_call","id":"ct_1","name":"apply_patch","status":"completed","input":"*** Begin Patch\n*** End Patch"}}`,
+		`{"type":"response.completed","response":{"status":"completed","output":[{"type":"custom_tool_call"}],"usage":{"input_tokens":100,"output_tokens":50}}}`,
+	})
+
+	var starts, deltas, ends int
+	var endIDs []string
+	resp, err := parseResponsesSSE(stream, func(delta message.StreamDelta) {
+		if delta.ToolCall == nil {
+			return
+		}
+		switch delta.Type {
+		case message.StreamDeltaToolUseStart:
+			starts++
+		case message.StreamDeltaToolUseDelta:
+			deltas++
+		case message.StreamDeltaToolUseEnd:
+			ends++
+			endIDs = append(endIDs, delta.ToolCall.ID)
+		}
+	}, nil)
+	if err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if starts != 1 || deltas != 1 || ends != 1 {
+		t.Fatalf("callbacks: starts=%d deltas=%d ends=%d, want 1/1/1", starts, deltas, ends)
+	}
+	if len(endIDs) != 1 || endIDs[0] != "ct_1" {
+		t.Fatalf("tool_use_end ids = %v, want single ct_1", endIDs)
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != tools.NameApplyPatch {
+		t.Fatalf("tool calls = %+v, want one apply_patch", resp.ToolCalls)
+	}
+}
+
 func TestParseResponsesSSE_LateNameEmitsPairedToolCallbacks(t *testing.T) {
 	stream := buildSSEStream([]string{
 		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","name":""}}`,
