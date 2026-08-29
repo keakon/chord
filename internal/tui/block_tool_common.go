@@ -1009,7 +1009,7 @@ func renderLSPDiagnosticsLines(content, indent string, width int) []string {
 		} else {
 			st = ToolResultExpandedStyle
 		}
-		displayLine := strings.TrimSuffix(line, "\r")
+		displayLine := sanitizeToolDisplayText(strings.TrimSuffix(line, "\r"))
 		displayLine = expandTabsForDisplay(displayLine, preformattedTabWidth)
 		for _, w := range wrapText(displayLine, width) {
 			out = append(out, st.Render(indent+w))

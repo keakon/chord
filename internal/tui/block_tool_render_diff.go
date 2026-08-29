@@ -59,6 +59,12 @@ type diffOneSidedSpan struct {
 }
 
 func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine string, oldLineNum, newLineNum, diffWidth int, hl *codeHighlighter) {
+	// Diff bodies come from file contents, which can legitimately carry
+	// orphaned variation selectors (left by editors or earlier tool runs).
+	// Strip them before inline-diff spans and width math so the spans stay
+	// aligned with what the terminal paints.
+	oldLine = tools.StripOrphanVariationSelectors(oldLine)
+	newLine = tools.StripOrphanVariationSelectors(newLine)
 	formatLineNum := func(n int) string { return fmt.Sprintf("%4d ", n) }
 	if lines := renderInlineDiffLine(oldLine, newLine, diffWidth, hl); lines != nil {
 		if strings.HasPrefix(lines[0], "+") {
@@ -78,6 +84,7 @@ func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine stri
 }
 
 func appendApplyPatchToolUnifiedDiffLine(result *[]string, body string, lineNum, diffWidth int, hl *codeHighlighter, added bool) {
+	body = tools.StripOrphanVariationSelectors(body)
 	bg := diffDelBg
 	marker := DiffDelStyle.Render("-")
 	if added {
@@ -326,6 +333,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				if len(content) > 0 && content[0] == ' ' {
 					content = content[1:]
 				}
+				content = tools.StripOrphanVariationSelectors(content)
 				code := renderHighlightedSnippetLine(content, nil, diffWidth-1, hl, "")
 				displayLineNum := max(newLineNum, oldLineNum)
 				rendered = DimStyle.Render(fmt.Sprintf("%4d ", displayLineNum)) + " " + code
@@ -530,7 +538,7 @@ func (b *Block) applyPatchDiffSectionDisplay(targets []tools.ApplyPatchDisplayTa
 }
 
 func appendEditPatchPreview(result []string, argsJSON string, width int) []string {
-	patch := editPatchFromArgs(argsJSON)
+	patch := tools.StripOrphanVariationSelectors(editPatchFromArgs(argsJSON))
 	if patch == "" {
 		return result
 	}
@@ -572,7 +580,10 @@ func (b *Block) cachedApplyPatchStreamingArgs(argsJSON string) string {
 
 func appendApplyPatchPreview(result []string, b *Block, filePath string, width int) []string {
 	argsJSON := b.editPatchArgsJSON()
-	patch := editPatchFromArgs(argsJSON)
+	// Strip orphaned variation selectors so the highlighted preview lines
+	// measure the same width the terminal paints. The streaming fallback is
+	// already sanitized; stripping again is idempotent.
+	patch := tools.StripOrphanVariationSelectors(editPatchFromArgs(argsJSON))
 	if patch == "" {
 		// Args may still be streaming: the JSON is not parseable yet, but the
 		// patch text itself is a valid live preview (see
@@ -707,11 +718,16 @@ func (b *Block) applyPatchTargets() []tools.ApplyPatchDisplayTarget {
 }
 
 func appendReplaceEditPreview(result []string, args replaceEditArgs, filePath string, width int) []string {
-	hl := newCodeHighlighterWithLanguage(filePath, args.OldString+"\n"+args.NewString, "")
-	for _, line := range replaceEditPreviewLines(args.OldString) {
+	// Strip orphaned variation selectors before rendering so that width
+	// measurement matches terminal zero-width rendering and the card
+	// background fills completely.
+	oldStr := tools.StripOrphanVariationSelectors(args.OldString)
+	newStr := tools.StripOrphanVariationSelectors(args.NewString)
+	hl := newCodeHighlighterWithLanguage(filePath, oldStr+"\n"+newStr, "")
+	for _, line := range replaceEditPreviewLines(oldStr) {
 		result = append(result, "    "+DiffDelStyle.Render("- ")+renderHighlightedSnippetLine(line, nil, max(width-2, 1), hl, diffDelBg))
 	}
-	for _, line := range replaceEditPreviewLines(args.NewString) {
+	for _, line := range replaceEditPreviewLines(newStr) {
 		result = append(result, "    "+DiffAddStyle.Render("+ ")+renderHighlightedSnippetLine(line, nil, max(width-2, 1), hl, diffAddBg))
 	}
 	return result
