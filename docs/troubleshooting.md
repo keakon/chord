@@ -259,6 +259,20 @@ If a tool card, local shell result, question dialog, or confirmation summary sho
 
 Chord sanitizes assistant/thinking streaming replies, tool results, local shell output, and status/error cards before rendering them as terminal-safe plain text. Control characters and ANSI escapes such as `\x1b[1;1H` (a cursor-position command) render as literals instead of corrupting the card layout or its background. If the same content consistently breaks layout, attach the original text and a screenshot so the rendering case can be reproduced.
 
+## Dark block at a card's right edge or text shifted after an emoji
+
+If a dark one-column block shows up at the right edge of a card, or text after an emoji sits slightly to the left of where it belongs, your terminal and Chord disagree about how many columns that emoji occupies. There is no authority for emoji cell widths: the same emoji sequence paints anywhere from one to six columns across popular terminals, and a keycap emoji such as `1️⃣` measures two columns while many terminals draw it in one.
+
+Chord measures text by the Unicode-specified widths and compensates in its renderer: any card row that contains a wide glyph is repainted through an erase-to-end-of-line sequence, so the card background always reaches the true end of the line even when the terminal advanced the glyph by fewer columns.
+
+Some residue is known and not solvable at the application level:
+
+- text after a mis-measured emoji can sit shifted within its line;
+- on terminals that paint an emoji wider than Chord measured, a column of the row can hold stale content until the next redraw of that row;
+- on terminals that fill erased regions with the default background instead of the active one, erased tails render in the default background.
+
+All of these are display-only: session content, scrollback text, and copies are unaffected. To check how closely your terminal follows the width specification, run [ucs-detect](https://ucs-detect.readthedocs.io/). When reporting such an artifact, attach a screenshot plus your terminal's name and version.
+
 ## Output-triggered TUI render panic / process killed
 
 If the outer launcher only shows:
