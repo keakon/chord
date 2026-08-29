@@ -624,6 +624,67 @@ func TestEditToolPunctuationTolerantInterWordSpace(t *testing.T) {
 	})
 }
 
+// Invisible format runes next to a word-boundary space must not keep the
+// space significant on the model side while the file's clean text folds it:
+// both sides must normalize to the same shape, and the model's leaked rune
+// must never be spliced into the file.
+func TestEditToolPunctuationTolerantInvisibleBesideInterWordSpace(t *testing.T) {
+	const file = "func foo() int {\n\treturn 0, false\n}\n"
+	const want = "func foo() int {\n\treturn 1, true\n}\n"
+	t.Run("zero-width space after the space", func(t *testing.T) {
+		dir := t.TempDir()
+		path := writeEditFixture(t, dir, "demo.go", file)
+		out, err := runEdit(t, dir, map[string]any{
+			"path": path, "old_string": "return \u200b0, false\n}\n", "new_string": "return 1, true\n}\n",
+		})
+		if err != nil {
+			t.Fatalf("Execute err = %v, want tolerant success", err)
+		}
+		if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+			t.Fatalf("output = %q, want tolerant marker", out)
+		}
+		got, _ := os.ReadFile(path)
+		if string(got) != want {
+			t.Fatalf("file = %q, want %q", string(got), want)
+		}
+	})
+	t.Run("zero-width space before the space", func(t *testing.T) {
+		dir := t.TempDir()
+		path := writeEditFixture(t, dir, "demo.go", file)
+		if _, err := runEdit(t, dir, map[string]any{
+			"path": path, "old_string": "return\u200b 0, false\n}\n", "new_string": "return 1, true\n}\n",
+		}); err != nil {
+			t.Fatalf("Execute err = %v, want tolerant success", err)
+		}
+		got, _ := os.ReadFile(path)
+		if string(got) != want {
+			t.Fatalf("file = %q, want %q", string(got), want)
+		}
+	})
+	t.Run("invisible runes on both sides of the space", func(t *testing.T) {
+		dir := t.TempDir()
+		path := writeEditFixture(t, dir, "demo.go", file)
+		if _, err := runEdit(t, dir, map[string]any{
+			"path": path, "old_string": "return\u200b \u200b0, false\n}\n", "new_string": "return 1, true\n}\n",
+		}); err != nil {
+			t.Fatalf("Execute err = %v, want tolerant success", err)
+		}
+		got, _ := os.ReadFile(path)
+		if string(got) != want {
+			t.Fatalf("file = %q, want %q", string(got), want)
+		}
+	})
+	t.Run("double spaces stay significant", func(t *testing.T) {
+		dir := t.TempDir()
+		path := writeEditFixture(t, dir, "demo.go", "alpha  beta\n")
+		if _, err := runEdit(t, dir, map[string]any{
+			"path": path, "old_string": "alpha\u200b beta\n", "new_string": "alpha gamma\n",
+		}); err == nil {
+			t.Fatalf("edit succeeded; an invisible rune must not make a double space foldable")
+		}
+	})
+}
+
 // A1: the space folding is deliberately narrow. Double spaces, spaces after
 // quotes/dashes, spaces next to punctuation, and spaces on the non-absorbing
 // side of a paren all stay significant, so a real mismatch still fails with
@@ -878,7 +939,7 @@ func TestEditToolAbsorbedInvisibleRunesHint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute err = %v, want tolerant success", err)
 	}
-	if !strings.Contains(out, "absorbed 1 invisible character") {
-		t.Fatalf("output = %q, want the absorbed-invisible-character hint", out)
+	if !strings.Contains(out, "cleaned 1 invisible character") {
+		t.Fatalf("output = %q, want the cleaned-invisible-character hint", out)
 	}
 }

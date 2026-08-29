@@ -567,3 +567,98 @@ func runeSet(chars string) map[rune]struct{} {
 	}
 	return out
 }
+
+// StripOrphanVariationSelectors drops variation selectors (U+FE0E/U+FE0F) that
+// are not preceded by a base character able to carry an emoji or text
+// presentation. Models occasionally emit these orphans (e.g. "️0" instead of
+// "0"): inside edit/apply_patch arguments they make matching fail because the
+// file content does not contain the selector, and inside rendered text they
+// are charged one display column by the width library while the terminal
+// paints them zero-width, under-filling card backgrounds by that column.
+//
+// Stripping a selector that was *not* orphaned costs a column in the other
+// direction — "1️⃣" measures 2 and paints 2, while a stripped "1⃣" measures 1
+// and still paints 2 — so canTakeVariationSelector follows Unicode's own list
+// of bases rather than a looser guess.
+func StripOrphanVariationSelectors(s string) string {
+	if !strings.ContainsRune(s, '\ufe0f') && !strings.ContainsRune(s, '\ufe0e') {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	prev := rune(-1)
+	for i, r := range s {
+		if r == '\ufe0f' || r == '\ufe0e' {
+			// Keycap bases carry a selector only as part of the full sequence,
+			// so they need the one rune of lookahead the category test cannot
+			// do: "1\ufe0f\u20e3" is an emoji, a bare "1\ufe0f" is a defective
+			// keycap and in practice an orphan.
+			keycap := r == '\ufe0f' && isKeycapBase(prev) &&
+				strings.HasPrefix(s[i+utf8.RuneLen(r):], string(combiningEnclosingKeycap))
+			if !keycap && !canTakeVariationSelector(prev) {
+				continue
+			}
+		}
+		b.WriteRune(r)
+		prev = r
+	}
+	return b.String()
+}
+
+// combiningEnclosingKeycap completes a keycap emoji: base + U+FE0F + U+20E3.
+const combiningEnclosingKeycap = '\u20e3'
+
+// validateWritableText rejects text that cannot be written to a plain text
+// file as-is: NUL and the C0 control characters other than the whitespace set
+// ordinary text files use (\t \n \f \r). Tool arguments are JSON strings, so
+// models cannot send real binary data — when they emit control characters it
+// is malfunction residue, and silently cleaning them could just as well
+// corrupt intended content. Rejecting routes the model to a shell command or
+// script, which is the correct channel for binary files.
+func validateWritableText(s string) error {
+	for _, r := range s {
+		if r < 0x20 && r != '\t' && r != '\n' && r != '\f' && r != '\r' {
+			return fmt.Errorf("contains control character %#U; binary or control-character content cannot be written with the text file tools — write it with a shell command or script instead", r)
+		}
+	}
+	return nil
+}
+
+// isKeycapBase reports whether r is one of the twelve bases of a keycap emoji
+// (# * 0-9 followed by U+FE0F U+20E3). They are the only ASCII characters
+// Unicode gives an emoji variation sequence, and canTakeVariationSelector
+// deliberately excludes them because they are valid only with the U+20E3.
+func isKeycapBase(r rune) bool {
+	return r == '#' || r == '*' || (r >= '0' && r <= '9')
+}
+
+// canTakeVariationSelector reports whether r may legitimately be followed by an
+// emoji/text presentation selector. Unicode standardizes 371 such bases in
+// emoji-variation-sequences.txt; 354 of them are symbols, so the symbol
+// categories carry the rule — So and Sk cover U+26A0 WARNING SIGN in "⚠️" and
+// the rest of the misc-symbols bases, and Sm is required too because the arrow
+// emoji are split across categories (U+2195 "↕️" is So while U+2194 "↔️" is Sm).
+// Of the seventeen non-symbol bases, twelve are the keycap ones the caller
+// handles and the five listed here are classed as punctuation, a dash, or even
+// a letter (U+2139 "ℹ️").
+//
+// ASCII is rejected outright: its only bases are the keycap ones, so a selector
+// after Sm members such as "+" or "=" is an orphan — "+ ️1", a dropped emoji
+// next to a plus, is one of the shapes actually observed.
+//
+// The rule still over-allows, since So/Sk/Sm hold far more members than the 354
+// symbol bases: a selector orphaned after "°" or "±" survives. That is the
+// deliberate direction. Both mistakes cost a column — a kept orphan is measured
+// one wider than it paints, a wrongly stripped selector one narrower — but the
+// kept orphan leaves the text intact, while an over-eager strip rewrites what
+// the model wrote.
+func canTakeVariationSelector(r rune) bool {
+	if r < 0x80 {
+		return false
+	}
+	switch r {
+	case '‼', '⁉', 'ℹ', '〰', '〽':
+		return true
+	}
+	return unicode.Is(unicode.So, r) || unicode.Is(unicode.Sk, r) || unicode.Is(unicode.Sm, r)
+}

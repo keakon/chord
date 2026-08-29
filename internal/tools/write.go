@@ -138,6 +138,26 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		return "", fmt.Errorf("content encoding unsupported: %w", err)
 	}
 
+	// Strip orphaned variation selectors the way replace_edit does: they are
+	// invisible model residue (an emoji's base character lost during
+	// generation), the user could never see them in a rendered card anyway,
+	// and writing them would plant invisible garbage in the file. Content
+	// that strips to empty had no visible content to begin with — writing it
+	// would truncate the target file on unknowable intent, so reject instead.
+	contentRunes := len([]rune(content))
+	cleaned := StripOrphanVariationSelectors(content)
+	cleanedSelectors := contentRunes - len([]rune(cleaned))
+	if cleaned == "" && content != "" {
+		return "", fmt.Errorf("content contains only invisible characters (%d orphaned variation selector(s) were stripped) and would truncate the file; rebuild content from the visible text you want in the file", cleanedSelectors)
+	}
+	content = cleaned
+	// Control characters cannot be cleaned safely (they may be intended), and
+	// models emit them only as malfunction residue — reject and route binary
+	// content to a shell command or script.
+	if err := validateWritableText(content); err != nil {
+		return "", fmt.Errorf("content %w", err)
+	}
+
 	dir := filepath.Dir(resolvedPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("creating directories: %w", err)
@@ -165,6 +185,9 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	warmDecodedFileCache(resolvedPath, data, decodedText{Text: content, Encoding: utf8Encoding})
 
 	out := fmt.Sprintf("Successfully wrote %d %s, %d %s", lineCount, lineLabel, len(data), byteLabel)
+	if cleanedSelectors > 0 {
+		out += fmt.Sprintf("\nNote: cleaned %d orphaned variation selector(s) from your content (invisible U+FE0E/U+FE0F left behind when an emoji's base character is dropped; avoid emoji presentation sequences in file content)", cleanedSelectors)
+	}
 	if t.LSP != nil {
 		absPath, absErr := resolveToolPathAbsInDir(a.Path, t.BaseDir)
 		if absErr == nil {

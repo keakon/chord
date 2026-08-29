@@ -141,6 +141,39 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("new_string encoding unsupported: %w", err)
 	}
 
+	// Strip orphaned variation selectors that models sometimes emit inside
+	// numeric literals and plain text (e.g. "️0" instead of "0").  The file
+	// content never contains them, so they cause every matching layer to fail.
+	// We count stripped selectors so the success message can report them.
+	oldLen := len([]rune(decodedOld))
+	decodedOld = StripOrphanVariationSelectors(decodedOld)
+	strippedOld := oldLen - len([]rune(decodedOld))
+	newLen := len([]rune(decodedNew))
+	decodedNew = StripOrphanVariationSelectors(decodedNew)
+	strippedNew := newLen - len([]rune(decodedNew))
+	strippedSelectors := strippedOld + strippedNew
+	// An old_string made only of orphaned selectors strips to the empty
+	// string, which matches everywhere: strings.Count(content, "") reports
+	// rune count + 1 hits and replace_all would splice new_string between
+	// every rune. Reject it with an actionable message instead.
+	if decodedOld == "" {
+		return "", fmt.Errorf("old_string contains only invisible characters (%d orphaned variation selector(s) were stripped) and cannot be matched; re-read the target range and rebuild old_string from the visible file text you want to replace", strippedOld)
+	}
+	// A new_string that strips to empty had its visible content lost before
+	// the model ever sent it; applying it would turn the replacement into a
+	// deletion on unknowable intent. A new_string that arrives empty is a
+	// legitimate deletion and stays allowed.
+	if decodedNew == "" && newLen > 0 {
+		return "", fmt.Errorf("new_string contains only invisible characters (%d orphaned variation selector(s) were stripped); rebuild new_string with the visible text the file should contain (send an empty new_string if you intend to delete the old_string text)", strippedNew)
+	}
+	// new_string is written to the file verbatim, so control characters would
+	// land in it — reject and route binary content to a shell command or
+	// script. old_string needs no such guard: control characters there simply
+	// fail to match.
+	if err := validateWritableText(decodedNew); err != nil {
+		return "", fmt.Errorf("new_string %w", err)
+	}
+
 	// Read the file.
 	editRead, err := readFileForEdit(resolvedPath, a.Path, t.BaseDir, "edit")
 	if err != nil {
@@ -163,6 +196,15 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			count = altCount
 			decodedOld, decodedNew = altOld, altNew
 		}
+	}
+	// Both success paths report every invisible character the model leaked:
+	// selectors stripped from old_string and new_string above plus the
+	// ignorable runes the tolerance layers absorb. Computed after the
+	// trailing-newline block, which is the last place decodedOld is
+	// reassigned.
+	abs := ""
+	if n := countIgnorableRunes(decodedOld) + strippedSelectors; n > 0 {
+		abs = fmt.Sprintf(", cleaned %d invisible character(s) from your arguments (orphaned variation selectors U+FE0E/U+FE0F and similar zero-width marks, left behind when an emoji's base character is dropped; avoid emoji presentation sequences in file content)", n)
 	}
 	if count == 0 {
 		// Try punctuation tolerance: some models cannot reproduce the file's
@@ -190,10 +232,6 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 				encSuffix = fmt.Sprintf(", encoding=%s", editRead.Decoded.Encoding.Name)
 			}
 			var out string
-			abs := ""
-			if n := countIgnorableRunes(decodedOld); n > 0 {
-				abs = fmt.Sprintf(", absorbed %d invisible character(s) from your old_string copy", n)
-			}
 			if altCount > 1 {
 				out = fmt.Sprintf("Replaced %d occurrences via %s match%s%s (%d bytes -> %d bytes)%s", altCount, tolerantMatchNote, formatTolerantMatchLines(matchLines), abs, oldBytes, newBytes, encSuffix)
 			} else {
@@ -249,9 +287,9 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 	var out string
 	if replaceAll && count > 1 {
-		out = fmt.Sprintf("Replaced %d occurrences (%d bytes -> %d bytes)%s", count, oldBytes, newBytes, encSuffix)
+		out = fmt.Sprintf("Replaced %d occurrences (%d bytes -> %d bytes)%s%s", count, oldBytes, newBytes, abs, encSuffix)
 	} else {
-		out = fmt.Sprintf("Replaced 1 occurrence (%d bytes -> %d bytes)%s", oldBytes, newBytes, encSuffix)
+		out = fmt.Sprintf("Replaced 1 occurrence (%d bytes -> %d bytes)%s%s", oldBytes, newBytes, abs, encSuffix)
 	}
 	out, err = writeEncodedEditedFile(ctx, resolvedPath, encodedBytes, editRead.Decoded, newContent, fmt.Sprintf("writing %d bytes", newBytes), t.LSP, out, t.BaseDir)
 	if err != nil {

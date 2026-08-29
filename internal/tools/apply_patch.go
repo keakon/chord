@@ -268,6 +268,21 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
+	// Strip orphaned variation selectors the way replace_edit does: models
+	// leak them into patch text, the tolerance matching layers already absorb
+	// them, and leaving them in added lines would write invisible garbage to
+	// the target files. A patch that strips to empty had no visible content
+	// to begin with; control characters cannot be cleaned safely — reject
+	// both and route binary content to a shell command or script.
+	patchLen := len([]rune(args.Patch))
+	args.Patch = StripOrphanVariationSelectors(args.Patch)
+	strippedSelectors := patchLen - len([]rune(args.Patch))
+	if args.Patch == "" && strippedSelectors > 0 {
+		return "", fmt.Errorf("patch contains only invisible characters (%d orphaned variation selector(s) were stripped); rebuild the patch with the visible changes you want to apply", strippedSelectors)
+	}
+	if err := validateWritableText(args.Patch); err != nil {
+		return "", fmt.Errorf("patch %w", err)
+	}
 	result, err := buildApplyPatchPlanWithOutcomes(ctx, args.Patch, t.BaseDir)
 	if err != nil {
 		// Parse or snapshot failed before any operation could commit: nothing
@@ -284,7 +299,11 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	if collector := applyPatchDiffCollectorFromContext(ctx); collector != nil {
 		collector.set(plan)
 	}
-	return t.finishApplyPatch(ctx, plan), nil
+	out := t.finishApplyPatch(ctx, plan)
+	if strippedSelectors > 0 {
+		out += fmt.Sprintf("\nNote: cleaned %d orphaned variation selector(s) from the patch text (invisible U+FE0E/U+FE0F left behind when an emoji's base character is dropped; avoid emoji presentation sequences in file content)", strippedSelectors)
+	}
+	return out, nil
 }
 
 // applyPatchPartial commits the successfully-planned operations, wires LSP

@@ -188,7 +188,10 @@ func countIgnorableRunes(s string) int {
 // significant, so indentation, alignment, and list structure still fail with
 // the fresh-read hint. Each absorbed space is merged into the previous rune's
 // span, so splicing a normalized match back into the file keeps the original
-// bytes.
+// bytes. Invisible format runes do not count as space neighbors and are looked
+// through in both directions: a copy that leaks one beside a word-boundary
+// space must normalize to the file's clean shape instead of keeping the space
+// significant on one side only.
 func normalizePunctWithSpaceFolding(rs []rune) (norm []rune, spans []punctSpan) {
 	norm = make([]rune, 0, len(rs))
 	spans = make([]punctSpan, 0, len(rs))
@@ -209,12 +212,26 @@ func normalizePunctWithSpaceFolding(rs []rune) (norm []rune, spans []punctSpan) 
 		}
 		// Fold one inter-word space: exactly one U+0020 between two word
 		// characters. Merge it into the previous rune's span so splice-back
-		// keeps the file's original bytes for it.
-		if rs[i] == ' ' && i > 0 && i+1 < len(rs) && isWordRune(rs[i-1]) && isWordRune(rs[i+1]) {
-			if len(spans) > 0 && spans[len(spans)-1].end == i {
-				spans[len(spans)-1].end = i + 1
+		// keeps the file's original bytes for it. Invisible format runes next
+		// to the space are transparent in both directions: without the skip,
+		// "return␣<FE0F>0" keeps the space significant on the model side while
+		// the file's "return␣0" folds it, and the tolerant layers reject a
+		// copy that differs only by the leaked rune.
+		if rs[i] == ' ' && i > 0 {
+			prev := i - 1
+			for prev >= 0 && isIgnorableRune(rs[prev]) {
+				prev--
 			}
-			continue
+			next := i + 1
+			for next < len(rs) && isIgnorableRune(rs[next]) {
+				next++
+			}
+			if prev >= 0 && next < len(rs) && isWordRune(rs[prev]) && isWordRune(rs[next]) {
+				if len(spans) > 0 && spans[len(spans)-1].end == i {
+					spans[len(spans)-1].end = i + 1
+				}
+				continue
+			}
 		}
 		r := normalizeProsePunctuationRune(rs[i])
 		start := i
