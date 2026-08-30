@@ -165,7 +165,14 @@ func (b *Block) fileDiffSummaryLine(applyPatchTargets []tools.ApplyPatchDisplayT
 		}
 	}
 	if meta.Added > 0 || meta.Removed > 0 {
-		parts = append(parts, fmt.Sprintf("+%d -%d lines", meta.Added, meta.Removed))
+		switch {
+		case meta.Added > 0 && meta.Removed > 0:
+			parts = append(parts, fmt.Sprintf("+%d -%d lines", meta.Added, meta.Removed))
+		case meta.Added > 0:
+			parts = append(parts, fmt.Sprintf("+%d %s", meta.Added, pluralizeToolCount("line", meta.Added)))
+		default:
+			parts = append(parts, fmt.Sprintf("-%d %s", meta.Removed, pluralizeToolCount("line", meta.Removed)))
+		}
 	}
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() && toolResultContainsLSPDiagnostics(b.ResultContent) {
 		if n := countLSPDiagnosticLines(b.ResultContent); n > 0 {

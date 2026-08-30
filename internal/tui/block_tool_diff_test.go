@@ -1319,6 +1319,50 @@ func TestApplyPatchCollapsedSingleHeaderLineMergesFileAndDiffSummary(t *testing.
 	}
 }
 
+func TestEditDiffSummaryOmitsZeroDirection(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	cases := []struct {
+		name string
+		diff string
+		want string
+	}{
+		{
+			name: "pure additions",
+			diff: "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,3 @@\n old\n+new\n+more\n",
+			want: "✓ ▸ edit src/demo.go · +2 lines",
+		},
+		{
+			name: "pure deletions",
+			diff: "--- src/demo.go\n+++ src/demo.go\n@@ -1,3 +1,1 @@\n-old\n-gone\n new\n",
+			want: "✓ ▸ edit src/demo.go · -2 lines",
+		},
+		{
+			name: "single addition",
+			diff: "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,2 @@\n old\n+new\n",
+			want: "✓ ▸ edit src/demo.go · +1 line",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			block := &Block{
+				ID:            1,
+				Type:          BlockToolCall,
+				ToolName:      tools.NameEdit,
+				Content:       `{"path":"src/demo.go","patch":"@@\n-old\n+new\n"}`,
+				Collapsed:     true,
+				ResultDone:    true,
+				ResultStatus:  agent.ToolResultStatusSuccess,
+				ResultContent: "Applied patch to src/demo.go",
+				Diff:          tc.diff,
+			}
+			plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			if !strings.Contains(plain, tc.want) {
+				t.Fatalf("diff summary must omit the zero direction, want %q; got:\n%s", tc.want, plain)
+			}
+		})
+	}
+}
+
 func TestEditCollapsedErrorKeepsErrorBlockWithoutHeaderSummary(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
