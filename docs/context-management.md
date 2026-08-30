@@ -29,6 +29,12 @@ compaction threshold, compaction steps in for a deep compression pass. Most
 users only need to care about compaction settings; reduction defaults are
 already tuned for common usage patterns.
 
+Before handing history to the summarize model, compaction applies the reduction
+rules to it to keep that call affordable, and it follows your configured
+reduction settings: a session that raised its retention thresholds also gets a
+durable summary built from the larger retained input. The `history-N.md` archive
+is unaffected and always holds the full, untrimmed original.
+
 Automatic compaction is primarily driven by provider-reported input usage.
 Request-level reduction may make the current prompt smaller, but local estimates
 from that reduced prompt do not cancel a compaction request that was already

@@ -114,8 +114,45 @@ type compactionInput struct {
 	ProgressAnchor   string
 }
 
-func buildCompactionInputWithOptions(head []message.Message, contextLimit int, evidenceItems []evidenceItem, recentTail []message.Message, autoRecentTail bool, sessionAnchors compactionAnchors) (*compactionInput, error) {
-	pruned := (&MainAgent{}).prepareMessagesForLLM(head)
+// compactionReductionScratch returns a throwaway agent carrying the reduction
+// policy semantics of the live agent: the configured policy plus the read-only
+// classification inputs — the tool registry (read-only shell verdicts), the
+// project root (read path resolution), and immutable snapshots of the
+// recall-protection sets (inputs whose outputs were already reduced and
+// re-issued by the model). The compaction input is reduced before it reaches
+// the summarizer, and it must follow the same reduction semantics as the main
+// request: a session that raised the byte thresholds — or disabled reduction
+// outright — should not have its durable summary silently built from
+// default-trimmed tool output, and a read-only shell or a recalled input must
+// not lose its protection either. Reduction cannot run on the live agent here,
+// because prepareMessagesForLLM records the prepared request surface and would
+// corrupt the incremental reduction cache of the in-flight main request; the
+// scratch never shares live mutable reduction state (stable surface, turn,
+// model run), and its own bookkeeping mutations stay on the copy.
+func (a *MainAgent) compactionReductionScratch() *MainAgent {
+	if a == nil {
+		return &MainAgent{}
+	}
+	scratch := &MainAgent{
+		globalConfig:  a.globalConfig,
+		projectConfig: a.projectConfig,
+		// The tool registry is immutable after startup, so sharing the pointer
+		// is safe; it powers the read-only shell classification (and the
+		// disk-backed read invalidation scan) during compaction-input building.
+		tools:       a.tools,
+		projectRoot: a.projectRoot,
+	}
+	if recalled := a.recalledReductionInputsSnapshot(); len(recalled) > 0 {
+		scratch.recalledReductionInputs = recalled
+	}
+	if discarded := a.lastPreparedDiscardedInputsSnapshot(); len(discarded) > 0 {
+		scratch.lastPreparedLLMDiscardedInputs = discarded
+	}
+	return scratch
+}
+
+func (a *MainAgent) buildCompactionInputWithOptions(head []message.Message, contextLimit int, evidenceItems []evidenceItem, recentTail []message.Message, sessionAnchors compactionAnchors) (*compactionInput, error) {
+	pruned := a.compactionReductionScratch().prepareMessagesForLLM(head)
 	normalized := normalizeMessagesForSummary(pruned)
 	budget := compactionInputBudget(contextLimit)
 	trimmed, omittedMessages := trimMessagesToBudget(normalized, budget)
@@ -128,9 +165,6 @@ func buildCompactionInputWithOptions(head []message.Message, contextLimit int, e
 	}
 	if len(evidenceItems) == 0 {
 		evidenceItems = selectEvidenceItems(normalized, contextLimit)
-	}
-	if autoRecentTail && len(recentTail) == 0 {
-		recentTail = selectRecentTailMessages(normalized, compactRecentTailTurns, compactRecentTailMaxTokens)
 	}
 	return &compactionInput{
 		Transcript:       session.ExportToMarkdown(exported),
@@ -162,7 +196,7 @@ func compactionPromptTokenEstimate(input *compactionInput, historyPath string, k
 	return max(1, len(prompt)/3)
 }
 
-func fitCompactionInputToContextLimit(head []message.Message, input *compactionInput, contextLimit int, historyPath string, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState, maxOutputTokens int) (*compactionInput, error) {
+func (a *MainAgent) fitCompactionInputToContextLimit(head []message.Message, input *compactionInput, contextLimit int, historyPath string, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState, maxOutputTokens int) (*compactionInput, error) {
 	if input == nil {
 		return nil, fmt.Errorf("compaction input is nil")
 	}
@@ -177,7 +211,7 @@ func fitCompactionInputToContextLimit(head []message.Message, input *compactionI
 	if compactionPromptTokenEstimate(input, historyPath, keyFiles, todos, subAgents, backgroundObjects) <= allowedInput {
 		return input, nil
 	}
-	pruned := (&MainAgent{}).prepareMessagesForLLM(head)
+	pruned := a.compactionReductionScratch().prepareMessagesForLLM(head)
 	normalized := normalizeMessagesForSummary(pruned)
 	budget := compactionInputBudget(contextLimit)
 	for attempts := range 6 {

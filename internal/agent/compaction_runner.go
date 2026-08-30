@@ -274,7 +274,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	if summarizeErr != nil {
 		summaryMode = "structured_fallback"
 		modelRef = "fallback"
-		input, inputErr := buildCompactionInputWithOptions(head, a.ctxMgr.GetMaxTokens(), evidenceItems, recentTail, false, sessionAnchors)
+		input, inputErr := a.buildCompactionInputWithOptions(head, a.ctxMgr.GetMaxTokens(), evidenceItems, recentTail, sessionAnchors)
 		if inputErr == nil {
 			input.EvidenceItems = evidenceItems
 			summaryText = buildStructuredFallbackSummary(pathutil.AbbreviateHome(absHistoryPath), input, summarizeErr, keyFiles, todos, subAgents, backgroundObjects)
@@ -546,11 +546,11 @@ func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.
 	client.SetOutputTokenMax(compactReservedOutput)
 	keyFiles := extractCompactionKeyFileCandidates(head, a.projectRoot, 8)
 
-	input, err := buildCompactionInputWithOptions(head, utilityContextLimit, evidenceItems, recentTail, false, sessionAnchors)
+	input, err := a.buildCompactionInputWithOptions(head, utilityContextLimit, evidenceItems, recentTail, sessionAnchors)
 	if err != nil {
 		return "", "", modelRef, err
 	}
-	input, err = fitCompactionInputToContextLimit(head, input, utilityContextLimit, historyPath, keyFiles, todos, subAgents, backgroundObjects, compactReservedOutput)
+	input, err = a.fitCompactionInputToContextLimit(head, input, utilityContextLimit, historyPath, keyFiles, todos, subAgents, backgroundObjects, compactReservedOutput)
 	if err != nil {
 		return "", "", modelRef, err
 	}

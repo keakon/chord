@@ -18,6 +18,8 @@ Chord 提供两层互补的上下文管理机制：**上下文压缩（Compactio
 
 **两者的关系**：Reduction 是轻量级的第一道防线——每次请求前自动裁剪过时的工具输出，减缓上下文膨胀速度。当 Reduction 仍不够、上下文持续增长到 Compaction 阈值时，Compaction 启动做深度压缩。大多数用户只需关注 Compaction 配置；Reduction 的默认值已经适配常见场景，通常无需调整。
 
+Compaction 在把历史交给摘要模型之前，会先对其应用一次 Reduction 规则以节省摘要调用的开销，并且遵循你配置的 Reduction 参数：调高了保留阈值的会话，其持久摘要也会基于保留更多的输入生成。归档到 `history-N.md` 的原文不受此影响，始终是完整无损的。
+
 自动压缩主要由 provider 返回的输入 usage 触发。请求级剪裁可能让当前 prompt 变小，但剪裁后得到的本地估算不会取消已经由 provider usage 触发的压缩请求。如果 provider 或网关后续不再返回 usage（或返回 `input_tokens: 0`），Chord 会用最近一次可信的非零 usage 样本和当前会进入上下文的消息 bytes 做保守比例估算，作为同一个自动压缩阈值的兜底信号。
 
 主模型正常以 `stop` 结束时，即使刚刚达到阈值，Chord 也不会因为回到 idle 就立刻新建一轮自动压缩。它会保留自动压缩请求，等到下一个 continuation barrier、准备发起主模型请求时再启动压缩。压缩和主模型请求可以并行；如果请求因上下文超限而挂起，Chord 会等压缩应用后再恢复。如果 stop 之前已经有压缩在后台运行，Chord 不会取消它；压缩生成的 draft 仍会在下一个安全的 continuation/idle barrier 应用。

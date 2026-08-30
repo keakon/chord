@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func anchorEvidence(excerpts ...string) []evidenceItem {
@@ -184,10 +186,38 @@ func TestCompactionPromptCarriesSessionAnchors(t *testing.T) {
 	}
 }
 
-// TestCompactionDraftEmbedsAndInheritsSessionAnchors covers the wiring end to
-// end: the draft's checkpoint must carry the anchors, and a second compaction
-// over that checkpoint must inherit them instead of re-deriving them from a
-// history that now begins with a summary.
+// TestCompactionReductionScratchCarriesReductionSemantics requires that the
+// compaction input is reduced through a scratch agent that must follow the same
+// reduction semantics as the main request — tool registry (read-only shell
+// verdicts), project root (read path resolution), and immutable snapshots of
+// the recall-protection sets — without leaking its own bookkeeping back into
+// the live agent.
+func TestCompactionReductionScratchCarriesReductionSemantics(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	projectRoot := t.TempDir()
+	a.projectRoot = projectRoot
+	a.recalledReductionInputs = map[string]struct{}{"read|/work/a.go": {}}
+	a.lastPreparedLLMDiscardedInputs = map[string]string{"shell|go test": "summarized"}
+	scratch := a.compactionReductionScratch()
+	if scratch.projectRoot != projectRoot {
+		t.Fatalf("scratch projectRoot = %q, want %q", scratch.projectRoot, projectRoot)
+	}
+	if scratch.tools != a.tools {
+		t.Fatal("scratch must carry the tool registry for read-only shell classification")
+	}
+	if _, ok := scratch.recalledReductionInputs["read|/work/a.go"]; !ok {
+		t.Fatalf("scratch missing recalled inputs: %v", scratch.recalledReductionInputs)
+	}
+	if _, ok := scratch.lastPreparedLLMDiscardedInputs["shell|go test"]; !ok {
+		t.Fatalf("scratch missing discarded inputs: %v", scratch.lastPreparedLLMDiscardedInputs)
+	}
+	// Mutations on the scratch (e.g. a recalled input registered during its
+	// pass) must not leak into the live agent's set.
+	scratch.noteRecalledReductionInput("read|/work/b.go")
+	if _, ok := a.recalledReductionInputs["read|/work/b.go"]; ok {
+		t.Fatal("scratch recall bookkeeping leaked into the live agent")
+	}
+}
 
 // TestEvidenceRebuildsFromCompactedMessagesTail requires that, after
 // compaction the runtime evidence candidates are rebuilt from the preserved
@@ -339,5 +369,65 @@ func TestCompactionDraftEmbedsAndInheritsSessionAnchors(t *testing.T) {
 	}
 	if len(secondAnchors.Constraints) == 0 || !strings.Contains(secondAnchors.Constraints[0], "不要改动公开 API") {
 		t.Fatalf("Constraints = %v, want the first-round constraint inherited", secondAnchors.Constraints)
+	}
+}
+
+// TestCompactionInputHonorsConfiguredReductionPolicy pins the fix for a silent
+// inconsistency: the summarize input is reduced before it reaches the
+// compaction model, and that reduction used to run with hardcoded defaults, so
+// a session that had deliberately raised its retention thresholds still had its
+// durable summary built from default-trimmed tool output.
+func TestCompactionInputHonorsConfiguredReductionPolicy(t *testing.T) {
+	body := strings.Repeat("build step output line\n", 400)
+	head := []message.Message{
+		{Role: message.RoleUser, Content: "run the build"},
+		{
+			Role:         message.RoleAssistant,
+			RequestBatch: 1,
+			ToolCalls:    []message.ToolCall{{ID: "sh-1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go build ./..."}`)}},
+		},
+		{Role: message.RoleTool, ToolCallID: "sh-1", Content: body},
+		{Role: message.RoleUser, Content: "keep going"},
+		{Role: message.RoleAssistant, RequestBatch: 5, Content: "continuing"},
+	}
+
+	defaults := newTestMainAgent(t, t.TempDir())
+	reduced, err := defaults.buildCompactionInputWithOptions(head, 200000, nil, nil, compactionAnchors{})
+	if err != nil {
+		t.Fatalf("buildCompactionInputWithOptions: %v", err)
+	}
+	if strings.Contains(reduced.Transcript, body) {
+		t.Fatal("default policy should still reduce a large aged shell success output")
+	}
+
+	retaining := newTestMainAgent(t, t.TempDir())
+	retaining.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+		ShellSuccessBytes: 1 << 20,
+		StaleOutputBytes:  1 << 20,
+	}}}
+	kept, err := retaining.buildCompactionInputWithOptions(head, 200000, nil, nil, compactionAnchors{})
+	if err != nil {
+		t.Fatalf("buildCompactionInputWithOptions: %v", err)
+	}
+	if !strings.Contains(kept.Transcript, body) {
+		t.Fatalf("configured retention thresholds were ignored when building the compaction input:\n%s", kept.Transcript)
+	}
+}
+
+func TestCompactionReductionScratchDoesNotShareAgentState(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.setPreparedStablePrefixLen(7)
+	scratch := a.compactionReductionScratch()
+	if scratch == a {
+		t.Fatal("compaction reduction must not run on the live agent")
+	}
+	if scratch.globalConfig != a.globalConfig || scratch.projectConfig != a.projectConfig {
+		t.Fatal("scratch agent must carry the configured reduction policy")
+	}
+	// Reducing through the scratch agent must not disturb the live agent's
+	// prepared-surface bookkeeping for the in-flight main request.
+	_ = scratch.prepareMessagesForLLM([]message.Message{{Role: message.RoleUser, Content: "hi"}})
+	if got := a.consumePreparedStablePrefixLen(); got != 7 {
+		t.Fatalf("live prepared prefix len = %d, want 7", got)
 	}
 }

@@ -4205,7 +4205,7 @@ func TestFitCompactionInputToContextLimitReturnsErrorForGrosslyOversizedPrompt(t
 		DecisionAnchor:   "- classify issues before changing implementation",
 		ProgressAnchor:   "- latest error: patch not found",
 	}
-	_, err := fitCompactionInputToContextLimit(head, input, 20000, "history-1.md", nil, nil, nil, nil, compactReservedOutput)
+	_, err := (&MainAgent{}).fitCompactionInputToContextLimit(head, input, 20000, "history-1.md", nil, nil, nil, nil, compactReservedOutput)
 	if err == nil {
 		t.Fatal("expected oversized compaction prompt to fail fitting")
 	}
@@ -4220,7 +4220,7 @@ func TestBuildCompactionInputUsesProvidedEvidenceAndTail(t *testing.T) {
 	evidence := []evidenceItem{{Kind: evidenceUserCorrection, Title: "constraint", Excerpt: "do not hardcode"}}
 	tail := []message.Message{{Role: "user", Content: "Continue and prioritize candidate containment handling."}}
 
-	input, err := buildCompactionInputWithOptions(head, 8192, evidence, tail, true, compactionAnchors{})
+	input, err := (&MainAgent{}).buildCompactionInputWithOptions(head, 8192, evidence, tail, compactionAnchors{})
 	if err != nil {
 		t.Fatalf("buildCompactionInput error: %v", err)
 	}
