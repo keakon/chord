@@ -130,6 +130,21 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	scan := newReductionHistoryScan(messages)
 	currentBatch := a.currentRequestBatch(messages)
 	externalReadInvalidated := a.externallyInvalidatedReadsAfterMutatingShell(messages, scan)
+	// Two independent read-invalidation sources merge here. The mutating-shell
+	// scan covers read results older than a mutating shell — including
+	// cancelled reads, which the lazy scan skips — and is the prompt trigger
+	// for shell-caused changes; the lazy scan covers every successful read
+	// against external edits (any non-tool process) via stat-first
+	// verification. Both produce the same stale-read index map and share no
+	// downstream distinction.
+	if lazyInvalidated := a.externalReadsInvalidatedLazy(messages, scan); len(lazyInvalidated) > 0 {
+		if externalReadInvalidated == nil {
+			externalReadInvalidated = make(map[int]bool, len(lazyInvalidated))
+		}
+		for index := range lazyInvalidated {
+			externalReadInvalidated[index] = true
+		}
+	}
 	wrapUpGraceActive := false
 	var modelSnapshot llmModelContinuitySnapshot
 	if a != nil {

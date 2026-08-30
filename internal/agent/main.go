@@ -451,6 +451,14 @@ type MainAgent struct {
 	// analyzeReadValidity and is unaffected by this memo.
 	shellReadMemo shellReadInvalidationMemo
 
+	// lazyReadMemo caches the disk-verification verdict for every historical
+	// current read (path + expected hash), regardless of whether a mutating
+	// shell triggered the check. The cached stat (mtime/size) is compared on
+	// every request, so the content hash is only recomputed when the file
+	// actually changed on disk: a lazy check that catches external edits to a
+	// file the model still trusts, with no filesystem watcher.
+	lazyReadMemo externalReadLazyMemo
+
 	// shellReadOnlyClass caches per-ToolCallID read-only classification of
 	// shell commands for the reduction pass (see shellReadOnlyClassMemo).
 	shellReadOnlyClass shellReadOnlyClassMemo
@@ -1664,13 +1672,7 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 				compactTextSnippet(text, 600),
 			))
 		case looksLikeStatedConstraint(text):
-			a.addEvidenceCandidate(buildEvidenceItem(
-				evidenceStatedConstraint,
-				"Stated constraint",
-				"This declarative compatibility / output-contract / file-scope constraint must survive compaction even though it is not phrased as an imperative correction.",
-				"runtime user message",
-				compactTextSnippet(text, 600),
-			))
+			a.addEvidenceCandidate(buildStatedConstraintEvidence("runtime user message", text))
 		case isPlainUserRequestForCompaction(text):
 			a.addEvidenceCandidate(buildLatestUserRequestEvidence("runtime user message", text))
 		}

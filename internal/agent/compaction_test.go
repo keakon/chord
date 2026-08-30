@@ -718,14 +718,15 @@ func TestPrepareMessagesForLLM_ShellInvalidationVerdictMemoizedPerShell(t *testi
 	if first[2].Content != msgs[2].Content {
 		t.Fatalf("unchanged read after harmless shell should stay full, got %q", first[2].Content)
 	}
-	// A completed shell's verdict is frozen: an external change without a new
-	// mutating shell is not re-verified against the disk.
+	// F2 lazy validation: an external edit without a new mutating shell is
+	// still detected — the read is stat-checked each request and re-hashed
+	// when the mtime/size changed, so the model stops trusting stale content.
 	if err := os.WriteFile(path, []byte("package main\n\nconst value = 2\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile changed: %v", err)
 	}
 	second := a.prepareMessagesForLLM(msgs)
-	if second[2].Content != msgs[2].Content {
-		t.Fatalf("memoized verdict should keep the read full, got %q", second[2].Content)
+	if !strings.Contains(second[2].Content, "truncated="+tools.ReadTruncatedStale) {
+		t.Fatalf("external edit without a new mutating shell must be detected by lazy validation, got %q", second[2].Content)
 	}
 	msgs = append(msgs,
 		message.Message{Role: message.RoleAssistant, RequestBatch: 3, ToolCalls: []message.ToolCall{{ID: "shell2", Name: tools.NameShell, Args: json.RawMessage(`{"command":"sed -i '' 's/1/2/' a.go"}`)}}},
@@ -2692,29 +2693,27 @@ func TestPrepareMessagesForLLM_RecordsSkipAndOverCompressionStats(t *testing.T) 
 
 func TestPrepareMessagesForLLM_ClassifiesRereadRevisionStats(t *testing.T) {
 	for _, tc := range []struct {
-		name          string
-		firstRevision string
-		lastRevision  string
-		wantKey       string
-		rejectKey     string
+		name    string
+		changed bool
+		wantKey string
+		reject  string
 	}{
 		{
-			name:          "same revision",
-			firstRevision: "hash-v1",
-			lastRevision:  "hash-v1",
-			wantKey:       contextReductionOverCompressionRereadSameRevision,
-			rejectKey:     contextReductionOverCompressionRereadChangedRevision,
+			name:    "same revision",
+			changed: false,
+			wantKey: contextReductionOverCompressionRereadSameRevision,
+			reject:  contextReductionOverCompressionRereadChangedRevision,
 		},
 		{
-			name:          "changed revision",
-			firstRevision: "hash-v1",
-			lastRevision:  "hash-v2",
-			wantKey:       contextReductionOverCompressionRereadChangedRevision,
-			rejectKey:     contextReductionOverCompressionRereadSameRevision,
+			name:    "changed revision",
+			changed: true,
+			wantKey: contextReductionOverCompressionRereadChangedRevision,
+			reject:  contextReductionOverCompressionRereadSameRevision,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newTestMainAgent(t, t.TempDir())
+			projectRoot := t.TempDir()
+			a := newTestMainAgent(t, projectRoot)
 			a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 				MinToolResultsPrune:  1,
 				ReadLikeAgeTurns:     1,
@@ -2722,15 +2721,27 @@ func TestPrepareMessagesForLLM_ClassifiesRereadRevisionStats(t *testing.T) {
 				MinIncrementalTokens: 1,
 			}}}
 			a.newTurn()
+			filePath := filepath.Join(projectRoot, "a.go")
+			writeRevision := func(content string) string {
+				if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				hash, _, _, err := verifiedCurrentFileHash(filePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return hash
+			}
+			firstHash := writeRevision("package a\n")
 			readState := func(revision string) *message.ToolFileState {
-				return &message.ToolFileState{Reads: []message.TrackedFileState{{Path: "/repo/a.go", SHA256: revision, Exists: true}}}
+				return &message.ToolFileState{Reads: []message.TrackedFileState{{Path: filePath, SHA256: revision, Exists: true}}}
 			}
 			content := "READ_RESULT lines=1-100 total=100\n" + strings.Repeat("source line\n", 100)
 			firstMessages := []message.Message{
 				{Role: message.RoleUser, Content: "u1"},
-				{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "r1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"/repo/a.go"}`)}}},
-				{Role: message.RoleTool, ToolCallID: "r1", ToolStatus: "success", Content: content, FileState: readState(tc.firstRevision)},
-				{Role: message.RoleAssistant, RequestBatch: 2, ToolCalls: []message.ToolCall{{ID: "e1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"/repo/a.go","old_string":"x","new_string":"y"}`)}}},
+				{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "r1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+				{Role: message.RoleTool, ToolCallID: "r1", ToolStatus: "success", Content: content, FileState: readState(firstHash)},
+				{Role: message.RoleAssistant, RequestBatch: 2, ToolCalls: []message.ToolCall{{ID: "e1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"a.go","old_string":"x","new_string":"y"}`)}}},
 				{Role: message.RoleTool, ToolCallID: "e1", ToolStatus: "success", Content: "edited"},
 			}
 			setTestRequestBatch(a, firstMessages, 2)
@@ -2738,9 +2749,13 @@ func TestPrepareMessagesForLLM_ClassifiesRereadRevisionStats(t *testing.T) {
 			if !strings.Contains(first[2].Content, "truncated=") {
 				t.Fatalf("first request did not reduce the read: %q", first[2].Content)
 			}
+			lastHash := firstHash
+			if tc.changed {
+				lastHash = writeRevision("package a\n\n// changed\n")
+			}
 			messages := append(append([]message.Message(nil), firstMessages...),
-				message.Message{Role: message.RoleAssistant, RequestBatch: 3, ToolCalls: []message.ToolCall{{ID: "r2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"/repo/a.go"}`)}}},
-				message.Message{Role: message.RoleTool, ToolCallID: "r2", ToolStatus: "success", Content: content, FileState: readState(tc.lastRevision)},
+				message.Message{Role: message.RoleAssistant, RequestBatch: 3, ToolCalls: []message.ToolCall{{ID: "r2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+				message.Message{Role: message.RoleTool, ToolCallID: "r2", ToolStatus: "success", Content: content, FileState: readState(lastHash)},
 			)
 			setTestRequestBatch(a, messages, 3)
 			a.prepareMessagesForLLM(messages)
@@ -2748,8 +2763,8 @@ func TestPrepareMessagesForLLM_ClassifiesRereadRevisionStats(t *testing.T) {
 			if stats.OverCompression[contextReductionOverCompressionReread] == 0 || stats.OverCompression[tc.wantKey] == 0 {
 				t.Fatalf("reread stats = %+v, want aggregate and %q", stats.OverCompression, tc.wantKey)
 			}
-			if stats.OverCompression[tc.rejectKey] != 0 {
-				t.Fatalf("reread stats = %+v, did not want %q", stats.OverCompression, tc.rejectKey)
+			if stats.OverCompression[tc.reject] != 0 {
+				t.Fatalf("reread stats = %+v, did not want %q", stats.OverCompression, tc.reject)
 			}
 		})
 	}
