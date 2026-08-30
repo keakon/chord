@@ -441,6 +441,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			ReadInvalidated:       validity.Invalidated,
 			ReadSuperseded:        validity.Superseded,
 			DiagnosticsSuperseded: diagnosticsSuperseded[i],
+			ArchiveDir:            a.sessionDir,
 		}
 		inputKey := contextReductionToolInputKey(toolName, meta.Args)
 		// Recall protection applies to content-fetch shapes only (reads, web

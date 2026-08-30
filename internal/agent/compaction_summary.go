@@ -141,6 +141,13 @@ func (a *MainAgent) compactionReductionScratch() *MainAgent {
 		// disk-backed read invalidation scan) during compaction-input building.
 		tools:       a.tools,
 		projectRoot: a.projectRoot,
+		// The session dir is the reduction archive root. Without it, a
+		// non-rebuildable output (spawn / delegate / notify / question) that the
+		// main request archives in full would silently degrade to a lossy
+		// generic marker in the durable summary input. Archive writes are
+		// content-addressed, so the main request and this pass produce identical
+		// bytes for the same payload.
+		sessionDir: a.sessionDir,
 	}
 	if recalled := a.recalledReductionInputsSnapshot(); len(recalled) > 0 {
 		scratch.recalledReductionInputs = recalled

@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -13,6 +16,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/lsp"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -332,6 +336,11 @@ type requestReductionContext struct {
 	// was followed by a newer diagnostics-bearing result; the later output
 	// carries the fresher LSP state, mirroring the read superseded semantics.
 	DiagnosticsSuperseded bool
+	// ArchiveDir is the session directory used to persist the full payload of
+	// an output that cannot be reliably rebuilt or re-fetched, so the model can
+	// read the archive back by its stable relative address instead of losing
+	// the content to a generic marker.
+	ArchiveDir string
 }
 
 // readRetentionProtects reports whether this successful read output must not
@@ -713,6 +722,14 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 	case requestReductionShellOK:
 		return reduceShellSuccessOutputSummary(ctx), "shell_success", true
 	case requestReductionGeneric:
+		// One-shot, non-rebuildable outputs are archived in full so the model
+		// can read them back by stable address instead of losing the payload
+		// to a generic marker; rebuildable outputs keep their ordinary summary.
+		if irreducibleToolOutputRequiresArchive(ctx.ToolName) {
+			if marker, ok := archiveIrreducibleToolOutput(ctx); ok {
+				return marker, "archived", true
+			}
+		}
 		return reduceGenericStaleOutputSummary(ctx), "stale", true
 	default:
 		return "", "", false
@@ -768,6 +785,41 @@ func reduceGenericStaleOutputSummary(ctx requestReductionContext) string {
 		lines = []string{"- (no preserved excerpt)"}
 	}
 	return fmt.Sprintf("[Older %s output summarized for this request to save context; bytes=%d lines=%d]\n%s", toolName, len(ctx.Content), countMeaningfulLines(ctx.Content), strings.Join(lines, "\n"))
+}
+
+// irreducibleToolOutputRequiresArchive reports whether a tool's result cannot
+// be reliably rebuilt or re-fetched after the fact — one-shot asynchronous or
+// interactive outputs (spawned jobs, delegated results, user notifications)
+// have no command to re-run and no URL to re-fetch, so their full payload must
+// survive reduction as an archived artifact instead of a generic marker.
+func irreducibleToolOutputRequiresArchive(toolName string) bool {
+	switch tools.NormalizeName(toolName) {
+	case tools.NameSpawn, tools.NameDelegate, tools.NameNotify, tools.NameNotifyPeer, tools.NameQuestion:
+		return true
+	}
+	return false
+}
+
+// archiveIrreducibleToolOutput persists the full payload of a one-shot tool
+// output to the session's reduced-artifacts directory and returns the stable
+// address marker. It reports false when there is no archive dir or the write
+// fails, letting the caller fall back to the ordinary summary instead of
+// dropping the output to a marker with no recovery path.
+func archiveIrreducibleToolOutput(ctx requestReductionContext) (string, bool) {
+	if ctx.ArchiveDir == "" || strings.TrimSpace(ctx.Content) == "" {
+		return "", false
+	}
+	sum := sha256.Sum256([]byte(ctx.Content))
+	fileName := fmt.Sprintf("%s-%s.txt", toolNameOrUnknown(ctx.ToolName), hex.EncodeToString(sum[:6]))
+	relDir := "reduced-artifacts"
+	if err := privatefs.EnsureDir(ctx.ArchiveDir, filepath.Join(ctx.ArchiveDir, relDir)); err != nil {
+		return "", false
+	}
+	absPath := filepath.Join(ctx.ArchiveDir, relDir, fileName)
+	if err := privatefs.WriteFile(ctx.ArchiveDir, absPath, []byte(ctx.Content)); err != nil {
+		return "", false
+	}
+	return fmt.Sprintf("[Older %s output archived at %s; read it back to recover the full payload (bytes=%d).]", toolNameOrUnknown(ctx.ToolName), absPath, len(ctx.Content)), true
 }
 
 func reduceNumberedSourceOutputSummary(ctx requestReductionContext) string {
@@ -2210,14 +2262,33 @@ func reduceWebFetchOutputSummary(argsJSON, content string) string {
 	if snippet == "" {
 		snippet = "(no preserved excerpt)"
 	}
+	h := contentFingerprint(content)
 	return fmt.Sprintf(
-		"[Older %s output truncated for this request to save context; url=%q raw=%t timeout=%d]\n%s",
+		"[Older %s output truncated for this request to save context; url=%q raw=%t timeout=%d content_fnv1a64=%016x]\n%s",
 		tools.NameWebFetch,
 		strings.TrimSpace(parsed.URL),
 		parsed.Raw,
 		parsed.Timeout,
+		h,
 		snippet,
 	)
+}
+
+// contentFingerprint returns a compact non-cryptographic fingerprint of an
+// output, used only to detect whether a re-fetch returns changed content.
+// It runs on the request hot path: fnv1a-64 over the raw bytes, formatted
+// inline by the caller so no intermediate string is allocated.
+func contentFingerprint(content string) uint64 {
+	const (
+		fnvOffset64 = 14695981039346656037
+		fnvPrime64  = 1099511628211
+	)
+	h := uint64(fnvOffset64)
+	for i := 0; i < len(content); i++ {
+		h ^= uint64(content[i])
+		h *= fnvPrime64
+	}
+	return h
 }
 
 func stripWebFetchResultHeaders(content string) string {
