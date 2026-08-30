@@ -160,13 +160,14 @@ Requirements:
 type evidenceKind string
 
 const (
-	evidenceUserCorrection evidenceKind = "user_correction"
-	evidenceDoneRejected   evidenceKind = "done_rejected"
-	evidenceUserRequest    evidenceKind = "user_request"
-	evidenceToolError      evidenceKind = "tool_error"
-	evidenceToolDiff       evidenceKind = "tool_diff"
-	evidenceEscalate       evidenceKind = "escalate"
-	evidenceSubAgentDone   evidenceKind = "subagent_done"
+	evidenceUserCorrection   evidenceKind = "user_correction"
+	evidenceStatedConstraint evidenceKind = "stated_constraint"
+	evidenceDoneRejected     evidenceKind = "done_rejected"
+	evidenceUserRequest      evidenceKind = "user_request"
+	evidenceToolError        evidenceKind = "tool_error"
+	evidenceToolDiff         evidenceKind = "tool_diff"
+	evidenceEscalate         evidenceKind = "escalate"
+	evidenceSubAgentDone     evidenceKind = "subagent_done"
 )
 
 type evidenceItem struct {
@@ -190,6 +191,11 @@ type compactionHistoryMeta struct {
 	SourceGeneration  string                `json:"source_generation,omitempty"`
 	SourceRefs        []checkpointSourceRef `json:"source_refs,omitempty"`
 	SourceFingerprint string                `json:"source_fingerprint,omitempty"`
+	// Topics is the bounded content map for this archive: the highest-priority
+	// evidence titles extracted at export time. It powers the "archived history
+	// map" in later checkpoints so the model knows what each archive covers
+	// without reading the file.
+	Topics []string `json:"topics,omitempty"`
 }
 
 const (
@@ -239,6 +245,12 @@ func evidencePriority(kind evidenceKind) int {
 		// message Sequence) wins as the latest request anchor, instead of
 		// always preferring an older correction.
 		return 100
+	case evidenceStatedConstraint:
+		// Declarative compatibility / output-contract / file-scope constraints
+		// are durable, so they outrank ordinary requests, tie with tool diffs
+		// (the newer Sequence wins), and stay below an imperative correction
+		// and a Done rejection.
+		return 90
 	case evidenceToolError:
 		return 95
 	case evidenceToolDiff:
@@ -320,6 +332,38 @@ func looksLikeUserCorrection(text string) bool {
 	return false
 }
 
+// statedConstraintMarkers recognize declarative compatibility / output-contract /
+// file-scope constraints ("keep the existing API behavior unchanged",
+// "输出格式保持不变") that carry no imperative correction marker and would
+// otherwise slip past the userCorrectionMarkers gate and get dropped when the
+// message is compacted away. Precision is lower than for corrections on purpose:
+// a message miscast as a stated constraint still keeps its full source reference
+// as an evidence candidate (an over-inclusive source reference beats a
+// silently lost constraint), while a
+// missed durable constraint is lost forever.
+var statedConstraintMarkers = []string{
+	"keep the existing", "keep existing", "preserve the existing", "maintain the existing",
+	"do not change", "do not modify", "must not change", "must not modify", "should not change",
+	"backward compat", "backward-compatible", "output format", "unchanged",
+	"保持现有", "保持不变", "保持兼容", "保持向后兼容", "维持现有",
+	"不能改变", "不得改变", "不要改变", "不要修改", "不改动", "不改变",
+	"输出格式", "接口不变", "行为不变", "格式不变", "兼容性",
+	"只允许修改", "仅限于", "文件范围",
+}
+
+func looksLikeStatedConstraint(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" || looksLikeUserCorrection(text) {
+		return false
+	}
+	for _, marker := range statedConstraintMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func extractDoneRejectedReason(text string) (string, bool) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
@@ -356,6 +400,16 @@ func buildDoneRejectedEvidence(source, reason string) evidenceItem {
 		"The rejection reason is recent user feedback/request and may supersede older todos.",
 		source,
 		compactTextSnippet(reason, 700),
+	)
+}
+
+func buildStatedConstraintEvidence(source, text string) evidenceItem {
+	return buildEvidenceItem(
+		evidenceStatedConstraint,
+		"Stated constraint",
+		"This declarative compatibility / output-contract / file-scope constraint must survive compaction even though it is not phrased as an imperative correction.",
+		source,
+		compactTextSnippet(text, 600),
 	)
 }
 
@@ -634,6 +688,8 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 					fmt.Sprintf("message %d (user)", i+1),
 					compactTextSnippet(text, 600),
 				)
+			case looksLikeStatedConstraint(text):
+				item = buildStatedConstraintEvidence(fmt.Sprintf("message %d (user)", i+1), text)
 			case isPlainUserRequestForCompaction(text) && !capturedLatestUserRequest:
 				item = buildLatestUserRequestEvidence(fmt.Sprintf("message %d (user)", i+1), text)
 				capturedLatestUserRequest = true

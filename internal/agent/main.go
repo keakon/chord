@@ -1663,6 +1663,14 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 				"runtime user message",
 				compactTextSnippet(text, 600),
 			))
+		case looksLikeStatedConstraint(text):
+			a.addEvidenceCandidate(buildEvidenceItem(
+				evidenceStatedConstraint,
+				"Stated constraint",
+				"This declarative compatibility / output-contract / file-scope constraint must survive compaction even though it is not phrased as an imperative correction.",
+				"runtime user message",
+				compactTextSnippet(text, 600),
+			))
 		case isPlainUserRequestForCompaction(text):
 			a.addEvidenceCandidate(buildLatestUserRequestEvidence("runtime user message", text))
 		}

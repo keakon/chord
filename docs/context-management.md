@@ -72,6 +72,17 @@ restate or contradict them. The constraint list is bounded; on overflow the
 earliest entries (usually project-wide ground rules) and the newest ones are
 kept while the middle is dropped.
 
+Constraints the session later contradicted are not silently dropped: the
+newest instruction supersedes the older constraint, and the superseded entry
+stays visible in the anchors block with a `~` prefix so the model can see the
+direction change. Declarative constraints you state in a plain message — for
+example "keep the existing API behavior" — get the same anchor authority as
+imperative corrections, because they too are standing instructions that would
+otherwise erode over repeated compactions. The checkpoint also lists every
+archived `history-N.md` file with its content topics as a **history map**, so
+the model can read the exact archive back with the read tool when it needs the
+original wording instead of guessing which file to open.
+
 Continuation-oriented compaction keeps a safe recent tail as verbatim messages
 after the checkpoint. It prefers whole user turns (normally the latest two)
 within a token budget of about 5% of the context window; when even a single user

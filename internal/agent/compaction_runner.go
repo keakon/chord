@@ -252,7 +252,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, fmt.Errorf("determine compaction index: %w", err)
 	}
 
-	absHistoryPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(head, index)
+	absHistoryPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(head, index, evidenceItemTopics(evidenceItems))
 	if err != nil {
 		return nil, fmt.Errorf("export compacted history: %w", err)
 	}
@@ -294,9 +294,10 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	if err != nil {
 		return nil, fmt.Errorf("list history references: %w", err)
 	}
-	for i, ref := range historyRefs {
-		historyRefs[i] = pathutil.AbbreviateHome(ref)
-	}
+	// The checkpoint lists the archived history files as a content map (path +
+	// topics) so the model knows what each archive covers and can read the exact
+	// archive back by its stable relative address.
+	historyRefs = formatHistoryMapLines(historyRefs, readCompactionHistoryMetas(historyRefs))
 	summaryText = ensureCompactionSummaryKeyFiles(strings.TrimSpace(summaryText), keyFiles)
 	// Anchor coherence (duplicate, co-existing, or mutually contradictory
 	// active/superseded constraints) is a diagnostic, not a gate: refusing the

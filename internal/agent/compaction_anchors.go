@@ -122,6 +122,34 @@ func parseCompactionAnchors(section string) compactionAnchors {
 	return anchors
 }
 
+// isAnchorConstraintKind reports the evidence kinds that carry anchor authority.
+// Imperative corrections ("不要改动公开 API") and declarative stated constraints
+// ("保持现有 API 行为不变") are both standing instructions that must survive
+// recursive compaction, so both are folded into the anchor block rather than
+// left for the summarizer to restate.
+func isAnchorConstraintKind(kind evidenceKind) bool {
+	return kind == evidenceUserCorrection || kind == evidenceStatedConstraint
+}
+
+// constraintEvidenceInTimeOrder returns the anchor-bearing evidence sorted
+// oldest instruction first. Evidence selection deliberately orders items newest
+// first (highest priority and most recent lead the checkpoint), but the
+// supersede fold below is a state machine over time: replaying it newest-first
+// would let an older instruction supersede the newest one and leave the stale
+// direction active, inverting "the latest user request wins".
+func constraintEvidenceInTimeOrder(items []evidenceItem) []evidenceItem {
+	ordered := make([]evidenceItem, 0, len(items))
+	for _, item := range items {
+		if isAnchorConstraintKind(item.Kind) {
+			ordered = append(ordered, item)
+		}
+	}
+	slices.SortStableFunc(ordered, func(a, b evidenceItem) int {
+		return a.Sequence - b.Sequence
+	})
+	return ordered
+}
+
 // buildCompactionAnchors carries the previous anchors forward untouched and
 // appends constraints that are new in this compaction window. The original
 // request is written once and never rewritten: a later compaction sees a
@@ -140,10 +168,7 @@ func buildCompactionAnchors(previous compactionAnchors, originalRequest string, 
 	for _, constraint := range next.Constraints {
 		seen[anchorDedupKey(constraint)] = struct{}{}
 	}
-	for _, item := range evidenceItems {
-		if item.Kind != evidenceUserCorrection {
-			continue
-		}
+	for _, item := range constraintEvidenceInTimeOrder(evidenceItems) {
 		line := anchorLine(item.Excerpt, compactAnchorsConstraintChars)
 		if line == "" {
 			continue

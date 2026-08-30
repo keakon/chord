@@ -4860,7 +4860,7 @@ func TestBuildCompactionCheckpointMessageListsAllHistoryRefs(t *testing.T) {
 		"model_summary",
 		nil,
 	)
-	for _, want := range []string{"Archived history files:", "history-1.md", "history-2.md", "history-3.md"} {
+	for _, want := range []string{"Archived history files (read the matching file with the read tool", "history-1.md", "history-2.md", "history-3.md"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("checkpoint missing %q:\n%s", want, content)
 		}
@@ -5237,7 +5237,7 @@ func TestExportCompactionHistoryMetaPendingThenApplied(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	msgs := []message.Message{{Role: "user", Content: "hello"}}
 
-	absPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(msgs, 1)
+	absPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(msgs, 1, nil)
 	if err != nil {
 		t.Fatalf("exportCompactionHistory: %v", err)
 	}
@@ -6737,5 +6737,26 @@ func TestLooksLikeUserCorrectionPrecision(t *testing.T) {
 		if !isPlainUserRequestForCompaction(text) {
 			t.Errorf("isPlainUserRequestForCompaction(%q) = false, want true", text)
 		}
+	}
+}
+
+// TestFilterCompactionEvidenceForArchivalKeepsStatedConstraints guards the
+// archival profile's evidence keep-set: the archival summary is generated once
+// and never re-scans the archived content, so a declarative constraint dropped
+// from the evidence pack would be lost for the rest of the session.
+func TestFilterCompactionEvidenceForArchivalKeepsStatedConstraints(t *testing.T) {
+	items := []evidenceItem{
+		{Kind: evidenceUserCorrection, Title: "User correction / constraint", Excerpt: "do not change the public API", Priority: 100, Sequence: 1},
+		{Kind: evidenceStatedConstraint, Title: "Stated constraint", Excerpt: "keep the existing output format", Priority: 90, Sequence: 2},
+		{Kind: evidenceToolDiff, Title: "Recent code diff in main.go", Excerpt: "diff", Priority: 90, Sequence: 3},
+		{Kind: evidenceSubAgentDone, Title: "SubAgent completion summary", Excerpt: "done", Priority: 80, Sequence: 4},
+	}
+	kept := filterCompactionEvidenceForArchival(items)
+	kinds := make([]evidenceKind, 0, len(kept))
+	for _, item := range kept {
+		kinds = append(kinds, item.Kind)
+	}
+	if len(kept) != 2 || kinds[0] != evidenceUserCorrection || kinds[1] != evidenceStatedConstraint {
+		t.Fatalf("kept kinds = %v, want the user correction and the stated constraint preserved", kinds)
 	}
 }

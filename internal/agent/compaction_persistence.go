@@ -20,7 +20,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func (a *MainAgent) exportCompactionHistory(messages []message.Message, index int) (absPath string, sourceRefs []checkpointSourceRef, sourceFingerprint string, err error) {
+func (a *MainAgent) exportCompactionHistory(messages []message.Message, index int, topics []string) (absPath string, sourceRefs []checkpointSourceRef, sourceFingerprint string, err error) {
 	absPath = filepath.Join(a.sessionDir, fmt.Sprintf("history-%d.md", index))
 	metadata := map[string]string{
 		session.MetadataKeyModel:       a.ModelName(),
@@ -49,6 +49,7 @@ func (a *MainAgent) exportCompactionHistory(messages []message.Message, index in
 		SourceGeneration:  generation,
 		SourceRefs:        sourceRefs,
 		SourceFingerprint: sourceFingerprint,
+		Topics:            append([]string(nil), topics...),
 	}); err != nil {
 		return "", nil, "", err
 	}

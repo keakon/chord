@@ -48,7 +48,7 @@ func buildCompactionCheckpointMessage(summary string, historyRefs []string, mode
 	default:
 		sb.WriteString("Earlier conversation was compacted into the summary above.\n")
 	}
-	sb.WriteString("Archived history files:\n")
+	sb.WriteString("Archived history files (read the matching file with the read tool to recover exact details; paths accept ~ shorthand):\n")
 	for _, ref := range historyRefs {
 		sb.WriteString("- ")
 		sb.WriteString(ref)

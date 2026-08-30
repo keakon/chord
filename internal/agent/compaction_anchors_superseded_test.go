@@ -169,6 +169,21 @@ func TestEvidenceTrackerRefreshesRecencyOnRestatement(t *testing.T) {
 	}
 }
 
+// A declarative stated constraint carries anchor authority: it must reach the
+// immutable anchor block instead of relying on the summarizer to restate it.
+func TestStatedConstraintBecomesAnchor(t *testing.T) {
+	items := []evidenceItem{buildStatedConstraintEvidence("msg-1", "保持现有 API 行为不变")}
+	anchors := buildCompactionAnchors(compactionAnchors{}, "req", items)
+	if len(anchors.Constraints) != 1 || !strings.Contains(anchors.Constraints[0], "保持现有 API 行为不变") {
+		t.Fatalf("Constraints = %v, want the stated constraint anchored", anchors.Constraints)
+	}
+	// It survives a checkpoint round trip like any other anchor.
+	parsed := latestCompactionAnchors([]message.Message{checkpointWithAnchors(t, anchors)})
+	if len(parsed.Constraints) != 1 || parsed.Constraints[0] != anchors.Constraints[0] {
+		t.Fatalf("parsed = %v, want the anchored stated constraint preserved", parsed.Constraints)
+	}
+}
+
 // Superseded-only anchors must round-trip: the constraints header gates parsing
 // of the "~ " lines, so omitting it would silently drop the superseded history.
 func TestSupersededOnlyAnchorsRoundTrip(t *testing.T) {

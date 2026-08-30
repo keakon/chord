@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/pathutil"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestCheckpointSourceRefsValidateGenerationScopedOrdinals(t *testing.T) {
@@ -46,7 +48,7 @@ func TestCheckpointSourceRefsValidateGenerationScopedOrdinals(t *testing.T) {
 
 func TestCompactionHistoryReferencesAreAbsolute(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	absPath, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "request"}}, 2)
+	absPath, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "request"}}, 2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,13 +85,26 @@ func TestCompactionHistoryReferencesAreAbsolute(t *testing.T) {
 
 func TestExportCompactionHistoryWritesSourceProvenance(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	messages := []message.Message{{Role: message.RoleUser, Content: "request"}}
-	_, refs, fingerprint, err := a.exportCompactionHistory(messages, 4)
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: "request"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameRead}}},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "file contents"},
+	}
+	_, refs, fingerprint, err := a.exportCompactionHistory(messages, 4, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(refs) != 1 || fingerprint == "" {
+	if len(refs) != 3 || fingerprint == "" {
 		t.Fatalf("returned provenance refs=%#v fingerprint=%q", refs, fingerprint)
+	}
+	// The tool-call identity is part of the locator, not just the role.
+	if refs[2].ToolCallID != "call-1" {
+		t.Fatalf("tool ref lost its ToolCallID: %#v", refs[2])
+	}
+	renamed := slices.Clone(messages)
+	renamed[2].ToolCallID = "call-2"
+	if err := validateCheckpointSourceRefs(refs, renamed); err == nil {
+		t.Fatal("a changed tool_call_id must invalidate the source refs")
 	}
 
 	metaPath := filepath.Join(a.sessionDir, "history-4.status.json")
@@ -101,7 +116,7 @@ func TestExportCompactionHistoryWritesSourceProvenance(t *testing.T) {
 	if err := json.Unmarshal(data, &meta); err != nil {
 		t.Fatal(err)
 	}
-	if meta.SourceGeneration != "compaction-4" || len(meta.SourceRefs) != 1 || meta.SourceFingerprint == "" {
+	if meta.SourceGeneration != "compaction-4" || len(meta.SourceRefs) != 3 || meta.SourceFingerprint == "" {
 		t.Fatalf("metadata = %#v", meta)
 	}
 	if err := validateCheckpointSourceRefs(meta.SourceRefs, messages); err != nil {
