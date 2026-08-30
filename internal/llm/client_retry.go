@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
 )
@@ -1333,23 +1334,15 @@ func (c *Client) completeStreamWithRetry(
 
 // estimateInputTokens provides a rough token estimate from messages when no
 // API-reported usage is available (e.g. the cursor-start model failed on every attempt).
-// Uses the heuristic of ~3 characters per token (conservative for English).
+// Uses the shared per-message estimator so the fallback budget follows the same
+// bytes/3 convention as every other context-budget decision in the codebase —
+// one token-accounting convention instead of a parallel implementation.
 func estimateInputTokens(messages []message.Message) int {
 	total := 0
 	for _, msg := range messages {
-		n := len(msg.Content)
-		for _, tc := range msg.ToolCalls {
-			n += len(tc.Args)
-		}
-		for _, tb := range msg.ThinkingBlocks {
-			n += len(tb.Thinking)
-		}
-		total += n
+		total += ctxmgr.EstimateMessageTokens(msg)
 	}
-	if total == 0 {
-		return 0
-	}
-	return total / 3
+	return total
 }
 
 func estimateToolDefinitionTokens(tools []message.ToolDefinition) int {
