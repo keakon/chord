@@ -59,19 +59,19 @@ func (a *MainAgent) resolveCompactionProfile(todos []tools.TodoItem, subAgents [
 	}
 }
 
-func applyCompactionProfile(profile compactionProfile, messages []message.Message, contextLimit int, evidenceItems []evidenceItem) ([]evidenceItem, []message.Message) {
+func applyCompactionProfile(mgr *ctxmgr.Manager, profile compactionProfile, messages []message.Message, contextLimit int, evidenceItems []evidenceItem) ([]evidenceItem, []message.Message) {
 	switch profile {
 	case compactionProfileArchival:
 		return filterCompactionEvidenceForArchival(evidenceItems), nil
 	default:
-		return evidenceItems, selectRecentTailMessages(messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
+		return evidenceItems, selectRecentTailMessages(mgr, messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
 	}
 }
 
-func compactionHeadSplitForProfile(profile compactionProfile, messages []message.Message, contextLimit int) int {
+func compactionHeadSplitForProfile(mgr *ctxmgr.Manager, profile compactionProfile, messages []message.Message, contextLimit int) int {
 	rawBoundary := len(messages)
 	if profile != compactionProfileArchival {
-		recentTail := selectRecentTailMessages(messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
+		recentTail := selectRecentTailMessages(mgr, messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
 		if len(recentTail) > 0 {
 			rawBoundary -= len(recentTail)
 		}

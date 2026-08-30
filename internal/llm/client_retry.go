@@ -1334,9 +1334,13 @@ func (c *Client) completeStreamWithRetry(
 
 // estimateInputTokens provides a rough token estimate from messages when no
 // API-reported usage is available (e.g. the cursor-start model failed on every attempt).
-// Uses the shared per-message estimator so the fallback budget follows the same
-// bytes/3 convention as every other context-budget decision in the codebase —
-// one token-accounting convention instead of a parallel implementation.
+// Uses the shared per-message estimator instead of a parallel implementation.
+//
+// This stays on the plain bytes/3 bound rather than the session-calibrated
+// ratio, for two reasons: this package cannot depend on session-level
+// calibration, and the caller (clampEffectiveMaxTokens) is an admission gate,
+// where bytes/3 — roughly the densest realistic token/byte ratio — is the
+// conservative direction.
 func estimateInputTokens(messages []message.Message) int {
 	total := 0
 	for _, msg := range messages {

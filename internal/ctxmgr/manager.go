@@ -4,6 +4,7 @@ package ctxmgr
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/keakon/golog/log"
@@ -25,9 +26,22 @@ type Manager struct {
 	lastTotalContextTokens   int // post-response context baseline (full prompt + output)
 	calibrationInputTokens   int
 	calibrationContextBytes  int
-	maxTokens                int
-	inputBudget              int
-	inputBudgetReserved      int
+	// usageCalibration keeps a bounded window of (full prompt tokens, prompt
+	// bytes) samples from completed LLM calls; the median tokens/bytes ratio is
+	// the usage-calibrated estimator. The window deliberately survives session
+	// switches and context rewrites — the ratio stays valid while the stale
+	// size fields above are cleared — so a model switch keeps the last valid
+	// calibration instead of cold-starting.
+	usageCalibration []calibrationSample
+	// calibratedRatioCache caches the median clamped tokens/bytes ratio of the
+	// calibration window. It is recomputed under the write lock whenever
+	// UpdateFromUsage changes the window, so the estimate read paths only read
+	// a float instead of re-sorting the window per message. 0 means no usable
+	// sample has been recorded yet.
+	calibratedRatioCache float64
+	maxTokens            int
+	inputBudget          int
+	inputBudgetReserved  int
 
 	threshold float64 // fraction of usable input budget that triggers compaction; <= 0 disables automatic compaction
 
@@ -286,6 +300,22 @@ func (m *Manager) RestoreStats(usage message.TokenUsage) {
 	m.stats = usage
 }
 
+const (
+	calibrationWindowSize = 12
+	// Sanity bounds for a tokens/bytes ratio: 0.05 (base64-heavy payloads) to
+	// 1.0 (dense CJK). A single pathological sample cannot drag the estimate
+	// outside this band.
+	calibrationRatioMin = 0.05
+	calibrationRatioMax = 1.0
+)
+
+// calibrationSample pairs the full normalized prompt tokens with the prompt
+// bytes of one completed LLM call.
+type calibrationSample struct {
+	tokens int
+	bytes  int
+}
+
 // fullPromptTokens normalizes a usage report to the full prompt size across
 // wire accounting conventions. Live responses already arrive canonicalized by
 // the LLM client (input includes cache reads and excludes cache writes — see
@@ -327,6 +357,11 @@ func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 		if contextBytes > 0 {
 			m.calibrationInputTokens = fullPrompt
 			m.calibrationContextBytes = contextBytes
+			m.usageCalibration = append(m.usageCalibration, calibrationSample{tokens: fullPrompt, bytes: contextBytes})
+			if len(m.usageCalibration) > calibrationWindowSize {
+				m.usageCalibration = m.usageCalibration[len(m.usageCalibration)-calibrationWindowSize:]
+			}
+			m.calibratedRatioCache = m.computeCalibratedRatioLocked()
 		}
 	}
 	m.mu.Unlock()
@@ -559,6 +594,96 @@ func (m *Manager) estimatedInputTokensFromPayloadBytesLocked() int {
 		return 0
 	}
 	return int((int64(m.calibrationInputTokens) * int64(contextBytes)) / int64(m.calibrationContextBytes))
+}
+
+// computeCalibratedRatioLocked recomputes the median clamped tokens-per-byte
+// ratio over the bounded usage-calibration window and stores it in
+// calibratedRatioCache. It must be called under the write lock whenever the
+// window changes (UpdateFromUsage), so the estimate read paths only read a
+// float instead of re-sorting the window per message. Returns 0 when the
+// window has no usable sample. The median is robust against a single
+// pathological request (e.g. a base64 image payload), and each sample is
+// clamped into the sanity band before the median so the estimate stays inside
+// the physical band even when the window is full of outliers. Clamping rather
+// than discarding matters: an image-heavy window whose every sample sits below
+// the lower bound would otherwise leave an empty window and fall back to
+// bytes/3, which is ~6.7x the lower bound and would over-contract every budget
+// derived from it.
+func (m *Manager) computeCalibratedRatioLocked() float64 {
+	if len(m.usageCalibration) == 0 {
+		return 0
+	}
+	ratios := make([]float64, 0, len(m.usageCalibration))
+	for _, sample := range m.usageCalibration {
+		if sample.bytes <= 0 || sample.tokens <= 0 {
+			continue
+		}
+		ratio := float64(sample.tokens) / float64(sample.bytes)
+		ratios = append(ratios, min(max(ratio, calibrationRatioMin), calibrationRatioMax))
+	}
+	if len(ratios) == 0 {
+		return 0
+	}
+	slices.Sort(ratios)
+	return ratios[len(ratios)/2]
+}
+
+// EstimateMessagesTokensCalibrated returns an input-token estimate for a
+// message slice using the usage-calibrated median ratio when the manager has
+// samples, falling back to the plain bytes/3 estimate otherwise. The estimate
+// is only used for conservative budgets (context-pressure decisions, recovery
+// thresholds); provider-reported usage remains the authority for the
+// compaction trigger. The receiver may be nil, in which case the plain
+// estimate is returned.
+func (m *Manager) EstimateMessagesTokensCalibrated(messages []message.Message) int {
+	if m == nil {
+		return EstimateMessagesTokens(messages)
+	}
+	m.mu.RLock()
+	ratio := m.calibratedRatioCache
+	m.mu.RUnlock()
+	if ratio <= 0 {
+		return EstimateMessagesTokens(messages)
+	}
+	// The calibration denominator (system prompt + context bytes) includes
+	// tool-call arguments and thinking payloads, so the estimate uses the same
+	// byte accounting — a conservative overestimate, which is the safe
+	// direction for budget decisions.
+	//
+	// The two sides are not the same surface: the denominator is the full
+	// durable history, while the numerator (provider-reported prompt tokens)
+	// comes from the request-level reduced surface plus tool definitions and
+	// overlays. Tool definitions push the ratio up, request reduction pushes it
+	// down, and under heavy reduction the net effect underestimates the ratio.
+	// Callers must therefore keep this estimator to capacity planning; request
+	// admission gates stay on the plain bytes/3 bound, which cannot be dragged
+	// below the physical token density by a low calibration sample.
+	bytes := messageContextBytes(messages)
+	tokens := max(int(float64(bytes)*ratio), 1)
+	return tokens
+}
+
+// EstimateBytesForTokensCalibrated converts a token budget back into a byte
+// allowance using the same usage-calibrated ratio as
+// EstimateMessagesTokensCalibrated, falling back to tokens*3. Used where a
+// byte budget must be derived from a remaining-token budget so both sides of
+// a decision use the same accounting convention.
+func (m *Manager) EstimateBytesForTokensCalibrated(tokens int) int {
+	if tokens <= 0 {
+		return 0
+	}
+	if m == nil {
+		return tokens * 3
+	}
+	m.mu.RLock()
+	ratio := m.calibratedRatioCache
+	m.mu.RUnlock()
+	if ratio <= 0 {
+		return tokens * 3
+	}
+	bytes := int(float64(tokens) / ratio)
+	bytes = max(bytes, 1)
+	return bytes
 }
 
 // ShouldAutoCompact reports whether the latest prompt size crossed the

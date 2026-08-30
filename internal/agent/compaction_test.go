@@ -495,7 +495,7 @@ func summarizeCompactionHeadForTest(a *MainAgent, head []message.Message, histor
 func splitMessagesForCompactionForTest(messages []message.Message, contextLimit int) (head []message.Message, evidence []message.Message) {
 	a := &MainAgent{}
 	a.resetRuntimeEvidenceFromMessages(messages)
-	recentTail := selectRecentTailMessages(messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
+	recentTail := selectRecentTailMessages(nil, messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
 	evidenceItems := a.evidenceItemsForCompaction(messages, contextLimit)
 	return splitMessagesForCompactionWithSelections(messages, recentTail, evidenceItems)
 }
@@ -503,7 +503,7 @@ func splitMessagesForCompactionForTest(messages []message.Message, contextLimit 
 // splitMessagesForCompactionForTestWithAgent uses an explicit MainAgent so tests
 // can inspect runtime evidence accumulation across calls.
 func splitMessagesForCompactionForTestWithAgent(a *MainAgent, messages []message.Message, contextLimit int) (head []message.Message, evidence []message.Message) {
-	recentTail := selectRecentTailMessages(messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
+	recentTail := selectRecentTailMessages(nil, messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
 	items := a.evidenceItemsForCompaction(messages, contextLimit)
 	return splitMessagesForCompactionWithSelections(messages, recentTail, items)
 }
@@ -1962,7 +1962,7 @@ func TestTopContextContributorsIncludesToolNames(t *testing.T) {
 		{Role: "tool", ToolCallID: "tc1", Content: strings.Repeat("match\n", 100)},
 	}
 
-	contributors := topContextContributors(msgs, 1)
+	contributors := topContextContributors(nil, msgs, 1)
 	if len(contributors) != 1 {
 		t.Fatalf("len(contributors) = %d, want 1", len(contributors))
 	}
@@ -4689,14 +4689,14 @@ func TestCompactionHeadSplitPreservesContinuationTail(t *testing.T) {
 		{Role: message.RoleUser, Content: "u4"},
 		{Role: message.RoleAssistant, Content: "a4"},
 	}
-	headSplit := compactionHeadSplitForProfile(compactionProfileContinuation, snapshot, 16384)
+	headSplit := compactionHeadSplitForProfile(nil, compactionProfileContinuation, snapshot, 16384)
 	if headSplit != 4 {
 		t.Fatalf("continuation headSplit = %d, want 4 so the latest two user turns remain raw", headSplit)
 	}
 	if got := snapshot[headSplit:]; !reflect.DeepEqual(got, snapshot[4:]) {
 		t.Fatalf("preserved tail = %+v, want %+v", got, snapshot[4:])
 	}
-	if archival := compactionHeadSplitForProfile(compactionProfileArchival, snapshot, 16384); archival != len(snapshot) {
+	if archival := compactionHeadSplitForProfile(nil, compactionProfileArchival, snapshot, 16384); archival != len(snapshot) {
 		t.Fatalf("archival headSplit = %d, want %d", archival, len(snapshot))
 	}
 }
@@ -4710,7 +4710,7 @@ func TestCompactionHeadSplitKeepsMinimumSummaryHead(t *testing.T) {
 		{Role: message.RoleUser, Content: "u3"},
 		{Role: message.RoleAssistant, Content: "a3"},
 	}
-	if got := compactionHeadSplitForProfile(compactionProfileContinuation, snapshot, 16384); got != 4 {
+	if got := compactionHeadSplitForProfile(nil, compactionProfileContinuation, snapshot, 16384); got != 4 {
 		t.Fatalf("headSplit = %d, want a four-message summary head and one raw user turn", got)
 	}
 }
@@ -4726,7 +4726,7 @@ func TestCompactionHeadSplitKeepsToolCallPairTogether(t *testing.T) {
 		{Role: message.RoleTool, ToolCallID: "read-1", Content: "result"},
 		{Role: message.RoleAssistant, Content: "done"},
 	}
-	headSplit := compactionHeadSplitForProfile(compactionProfileContinuation, snapshot, 16384)
+	headSplit := compactionHeadSplitForProfile(nil, compactionProfileContinuation, snapshot, 16384)
 	if headSplit != 4 {
 		t.Fatalf("headSplit = %d, want 4 before the preserved user/tool turn", headSplit)
 	}
@@ -4744,7 +4744,7 @@ func TestCompactionHeadSplitFallsBackToFullHeadWhenSafeTailIsTooLarge(t *testing
 		{Role: message.RoleTool, ToolCallID: "read-1", Content: "result"},
 		{Role: message.RoleAssistant, Content: "done"},
 	}
-	if got := compactionHeadSplitForProfile(compactionProfileContinuation, snapshot, 16384); got != len(snapshot) {
+	if got := compactionHeadSplitForProfile(nil, compactionProfileContinuation, snapshot, 16384); got != len(snapshot) {
 		t.Fatalf("headSplit = %d, want full head %d when preserving the tool turn leaves too little to summarize", got, len(snapshot))
 	}
 }
@@ -6652,7 +6652,7 @@ func TestSelectRecentTailDegradesInsteadOfDroppingTail(t *testing.T) {
 	// A latest user turn whose own tool loop dwarfs the tail budget: whole-turn
 	// selection cannot fit, so the suffix fallback must still preserve context.
 	messages := agenticTailHistory(12, 5, 12000)
-	tail := selectRecentTailMessages(messages, compactRecentTailTurns, budget)
+	tail := selectRecentTailMessages(nil, messages, compactRecentTailTurns, budget)
 	if len(tail) == 0 {
 		t.Fatal("large agentic turn produced no recent tail; continuation compaction would degrade to summary-only")
 	}
@@ -6667,7 +6667,7 @@ func TestSelectRecentTailDegradesInsteadOfDroppingTail(t *testing.T) {
 func TestCompactionHeadSplitPreservesTailForLargeAgenticTurn(t *testing.T) {
 	const contextLimit = 200000
 	messages := agenticTailHistory(12, 5, 12000)
-	split := compactionHeadSplitForProfile(compactionProfileContinuation, messages, contextLimit)
+	split := compactionHeadSplitForProfile(nil, compactionProfileContinuation, messages, contextLimit)
 	if split <= 0 || split >= len(messages) {
 		t.Fatalf("head split = %d with %d messages; want a split that keeps a raw tail", split, len(messages))
 	}
@@ -6681,7 +6681,7 @@ func TestCompactionHeadSplitPreservesTailForLargeAgenticTurn(t *testing.T) {
 
 func TestCompactionHeadSplitStillArchivesEverythingForArchival(t *testing.T) {
 	messages := agenticTailHistory(12, 5, 12000)
-	if got := compactionHeadSplitForProfile(compactionProfileArchival, messages, 200000); got != len(messages) {
+	if got := compactionHeadSplitForProfile(nil, compactionProfileArchival, messages, 200000); got != len(messages) {
 		t.Fatalf("archival head split = %d, want %d", got, len(messages))
 	}
 }
@@ -6694,7 +6694,7 @@ func TestLongestSafeTailWithinBudgetRejectsUnsafeStarts(t *testing.T) {
 		{Role: message.RoleTool, ToolCallID: "b", Content: "two"},
 		{Role: message.RoleAssistant, Content: "done"},
 	}
-	tail := longestSafeTailWithinBudget(messages, 100000)
+	tail := longestSafeTailWithinBudget(nil, messages, 100000)
 	if len(tail) == 0 {
 		t.Fatal("expected a tail")
 	}

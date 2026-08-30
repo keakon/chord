@@ -100,7 +100,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	if a.configuredCompactionProfile() == compactionProfileAuto && continuationRequiresRawTail(continuation.kind) {
 		profile = compactionProfileContinuation
 	}
-	headSplit := compactionHeadSplitForProfile(profile, snapshot, a.ctxMgr.GetMaxTokens())
+	headSplit := compactionHeadSplitForProfile(a.ctxMgr, profile, snapshot, a.ctxMgr.GetMaxTokens())
 	// Read the original request on the event loop: captureOriginalFirstUserHint
 	// consults the usage ledger and the pre-rewrite session log, and must not
 	// race the apply step that replaces both.
@@ -224,7 +224,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	backgroundObjects := spawnStatesForSnapshot()
 	headSnapshot := snapshot[:headSplit]
 
-	evidenceItems, _ = applyCompactionProfile(profile, headSnapshot, a.ctxMgr.GetMaxTokens(), evidenceItems)
+	evidenceItems, _ = applyCompactionProfile(a.ctxMgr, profile, headSnapshot, a.ctxMgr.GetMaxTokens(), evidenceItems)
 	// Anchors are inherited from the previous checkpoint rather than re-derived,
 	// so recursive compaction cannot erode the original request or a standing
 	// constraint one summary at a time.

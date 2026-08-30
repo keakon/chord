@@ -10,7 +10,6 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/filectx"
 	"github.com/keakon/chord/internal/message"
 )
@@ -225,12 +224,12 @@ func (a *MainAgent) compactionInjectedFileBudgets(messages []message.Message) (m
 	if budget <= 0 {
 		return maxFileBytes, maxTotalBytes
 	}
-	used := ctxmgr.EstimateMessagesTokens(messages)
+	used := estimateMessagesTokens(a.ctxMgr, messages)
 	remainingTokens := budget - used
 	if remainingTokens <= 0 {
 		return maxFileBytes, 0
 	}
-	remainingBytes := remainingTokens * 3
+	remainingBytes := estimateBytesForTokens(a.ctxMgr, remainingTokens)
 	allowed := min(remainingBytes/4, maxTotalBytes)
 	if allowed < compactionInjectedFilesMinBytes {
 		return maxFileBytes, 0

@@ -51,11 +51,11 @@ func normalizeMessagesForSummary(messages []message.Message) []message.Message {
 	return normalized
 }
 
-func trimMessagesToBudget(messages []message.Message, targetTokens int) ([]message.Message, int) {
+func trimMessagesToBudget(mgr *ctxmgr.Manager, messages []message.Message, targetTokens int) ([]message.Message, int) {
 	if len(messages) == 0 || targetTokens <= 0 {
 		return nil, len(messages)
 	}
-	if ctxmgr.EstimateMessagesTokens(messages) <= targetTokens {
+	if estimateMessagesTokens(mgr, messages) <= targetTokens {
 		out := make([]message.Message, len(messages))
 		copy(out, messages)
 		return out, 0
@@ -64,7 +64,7 @@ func trimMessagesToBudget(messages []message.Message, targetTokens int) ([]messa
 	start := len(messages)
 	remaining := targetTokens
 	for i, message := range slices.Backward(messages) {
-		cost := ctxmgr.EstimateMessageTokens(message)
+		cost := estimateMessageTokens(mgr, message)
 		if remaining-cost < 0 {
 			break
 		}
@@ -162,7 +162,7 @@ func (a *MainAgent) buildCompactionInputWithOptions(head []message.Message, cont
 	pruned := a.compactionReductionScratch().prepareMessagesForLLM(head)
 	normalized := normalizeMessagesForSummary(pruned)
 	budget := compactionInputBudget(contextLimit)
-	trimmed, omittedMessages := trimMessagesToBudget(normalized, budget)
+	trimmed, omittedMessages := trimMessagesToBudget(a.ctxMgr, normalized, budget)
 	if len(trimmed) == 0 {
 		return nil, fmt.Errorf("compaction input too large even after truncation")
 	}
@@ -187,17 +187,25 @@ func (a *MainAgent) buildCompactionInputWithOptions(head []message.Message, cont
 	}, nil
 }
 
-func trimMessagesToBudgetWithReservedTail(messages []message.Message, targetTokens int, reserveTail int) ([]message.Message, int) {
+func trimMessagesToBudgetWithReservedTail(mgr *ctxmgr.Manager, messages []message.Message, targetTokens int, reserveTail int) ([]message.Message, int) {
 	if reserveTail <= 0 {
-		return trimMessagesToBudget(messages, targetTokens)
+		return trimMessagesToBudget(mgr, messages, targetTokens)
 	}
-	trimmed, omitted := trimMessagesToBudget(messages, targetTokens-reserveTail)
+	trimmed, omitted := trimMessagesToBudget(mgr, messages, targetTokens-reserveTail)
 	if len(trimmed) > 0 {
 		return trimmed, omitted
 	}
-	return trimMessagesToBudget(messages, targetTokens)
+	return trimMessagesToBudget(mgr, messages, targetTokens)
 }
 
+// compactionPromptTokenEstimate sizes the assembled compaction prompt for
+// fitCompactionInputToContextLimit. It deliberately stays on bytes/3 instead of
+// the usage-calibrated estimator: this is the admission gate that decides
+// whether a prompt may be sent, and bytes/3 approximates the densest realistic
+// token/byte ratio, so it errs high. A calibrated ratio can read low (its
+// denominator is the full history while its numerator comes from the reduced
+// request surface), which here would admit an oversized prompt and turn a local
+// trim decision into a provider rejection plus fallback.
 func compactionPromptTokenEstimate(input *compactionInput, historyPath string, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) int {
 	prompt := buildCompactionPromptWithKeyFiles(input, historyPath, keyFiles, todos, subAgents, backgroundObjects)
 	return max(1, len(prompt)/3)
@@ -222,7 +230,7 @@ func (a *MainAgent) fitCompactionInputToContextLimit(head []message.Message, inp
 	normalized := normalizeMessagesForSummary(pruned)
 	budget := compactionInputBudget(contextLimit)
 	for attempts := range 6 {
-		trimmed, omittedMessages := trimMessagesToBudgetWithReservedTail(normalized, budget, attempts*512)
+		trimmed, omittedMessages := trimMessagesToBudgetWithReservedTail(a.ctxMgr, normalized, budget, attempts*512)
 		if len(trimmed) == 0 {
 			continue
 		}
@@ -569,7 +577,7 @@ func recentTailTokenBudget(contextLimit int) int {
 // exactly when compaction fires — it degrades to the longest safe suffix that
 // fits instead of returning nothing, because an empty tail silently turns
 // continuation compaction into summary-only compaction.
-func selectRecentTailMessages(messages []message.Message, userTurns int, maxTokens int) []message.Message {
+func selectRecentTailMessages(mgr *ctxmgr.Manager, messages []message.Message, userTurns int, maxTokens int) []message.Message {
 	if len(messages) == 0 || maxTokens <= 0 {
 		return nil
 	}
@@ -590,11 +598,11 @@ func selectRecentTailMessages(messages []message.Message, userTurns int, maxToke
 			continue
 		}
 		tail := append([]message.Message(nil), messages[start:]...)
-		if ctxmgr.EstimateMessagesTokens(tail) <= maxTokens {
+		if estimateMessagesTokens(mgr, tail) <= maxTokens {
 			return tail
 		}
 	}
-	return longestSafeTailWithinBudget(messages, maxTokens)
+	return longestSafeTailWithinBudget(mgr, messages, maxTokens)
 }
 
 // longestSafeTailWithinBudget returns the longest suffix that fits maxTokens and
@@ -602,11 +610,11 @@ func selectRecentTailMessages(messages []message.Message, userTurns int, maxToke
 // opens with an orphaned tool result and never splits a pending tool call. Only
 // self-stable indices are accepted: a boundary SafeKeepBoundary would pull
 // backwards could reintroduce messages the budget scan already rejected.
-func longestSafeTailWithinBudget(messages []message.Message, maxTokens int) []message.Message {
+func longestSafeTailWithinBudget(mgr *ctxmgr.Manager, messages []message.Message, maxTokens int) []message.Message {
 	best := -1
 	cost := 0
 	for i := len(messages) - 1; i > 0; i-- {
-		cost += ctxmgr.EstimateMessageTokens(messages[i])
+		cost += estimateMessageTokens(mgr, messages[i])
 		if cost > maxTokens {
 			break
 		}

@@ -626,7 +626,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 
 	// Request-context telemetry helps diagnose oversized prompts without changing the request surface.
 	if log.IsEnabledFor(golog.DebugLevel) {
-		contributors := topContextContributors(messages, 5)
+		contributors := topContextContributors(a.ctxMgr, messages, 5)
 		labels := make([]string, 0, len(contributors))
 		for _, c := range contributors {
 			labels = append(labels, contextContributorLabel(c))

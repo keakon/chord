@@ -120,7 +120,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	policy := a.contextReductionPolicy()
 	if policy.Disabled {
 		if a != nil {
-			stats := ContextReductionStats{TokensBefore: ctxmgr.EstimateMessagesTokens(messages)}
+			stats := ContextReductionStats{TokensBefore: estimateMessagesTokens(a.ctxMgr, messages)}
 			stats.TokensAfter = stats.TokensBefore
 			a.fillReductionModelContinuity(&stats)
 			a.setContextReductionStats(stats)
@@ -157,7 +157,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 				} else {
 					reused, compatible := reuseStableReductionPrefix(previous, messages, messages)
 					if compatible {
-						stats := highLevelContextReductionStats(messages, reused)
+						stats := highLevelContextReductionStats(a.ctxMgr, messages, reused)
 						if len(stats.ByToolAndRule) == 0 {
 							stats.ByToolAndRule = cloneContextReductionBuckets(previous.Stats.ByToolAndRule)
 						}
@@ -200,7 +200,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 	}
 	prepared := append([]message.Message(nil), messages...)
-	stats := ContextReductionStats{TokensBefore: ctxmgr.EstimateMessagesTokens(prepared)}
+	stats := ContextReductionStats{TokensBefore: estimateMessagesTokens(a.ctxMgr, prepared)}
 
 	// Incremental reduction: freeze already-reduced tool results from the
 	// previous stable surface so their marker content stays cache-stable.
@@ -221,8 +221,8 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 		stats.Messages++
 		stats.Bytes += saved
-		beforeTokens := ctxmgr.EstimateMessageTokens(message.Message{Content: original})
-		afterTokens := ctxmgr.EstimateMessageTokens(message.Message{Content: reduced})
+		beforeTokens := estimateMessageTokens(a.ctxMgr, message.Message{Content: original})
+		afterTokens := estimateMessageTokens(a.ctxMgr, message.Message{Content: reduced})
 		tokensSaved := beforeTokens - afterTokens
 		if tokensSaved > 0 {
 			stats.TokensSaved += tokensSaved
@@ -556,15 +556,15 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			if earliestBoundary < 0 {
 				earliestBoundary = p.index
 			}
-			saved := ctxmgr.EstimateMessageTokens(message.Message{Content: prepared[p.index].Content}) -
-				ctxmgr.EstimateMessageTokens(message.Message{Content: p.reduced})
+			saved := estimateMessageTokens(a.ctxMgr, message.Message{Content: prepared[p.index].Content}) -
+				estimateMessageTokens(a.ctxMgr, message.Message{Content: p.reduced})
 			if saved > 0 {
 				pendingSaved += saved
 			}
 		}
 		if earliestBoundary >= 0 {
 			cacheInvalidAnyway := modelSnapshot.ProjectedModelRunLength <= 1
-			tailTokens := ctxmgr.EstimateMessagesTokens(prepared[earliestBoundary:])
+			tailTokens := estimateMessagesTokens(a.ctxMgr, prepared[earliestBoundary:])
 			amortized := pendingSaved*reductionFlushHorizonRequests >= cacheMissPenaltyRatio*tailTokens
 			applyBoundary = cacheInvalidAnyway || amortized
 		}
@@ -597,7 +597,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		stats.EvidenceCurrent = evidenceStats.Current
 		stats.EvidenceStale = evidenceStats.Stale
 		stats.EvidenceSuperseded = evidenceStats.Superseded
-		stats.TokensAfter = ctxmgr.EstimateMessagesTokens(prepared)
+		stats.TokensAfter = estimateMessagesTokens(a.ctxMgr, prepared)
 		a.setCurrentRequestSurface(&stats, prepared)
 		if stats.TokensSaved == 0 && stats.TokensBefore > stats.TokensAfter {
 			stats.TokensSaved = stats.TokensBefore - stats.TokensAfter
@@ -631,7 +631,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					} else {
 						prepared = reused
 						a.setPreparedStablePrefixLen(len(previous.Messages))
-						reusedStats := highLevelContextReductionStats(messages, prepared)
+						reusedStats := highLevelContextReductionStats(a.ctxMgr, messages, prepared)
 						stats.Messages = reusedStats.Messages
 						stats.Bytes = reusedStats.Bytes
 						stats.TokensBefore = reusedStats.TokensBefore
@@ -1690,7 +1690,7 @@ func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []mess
 	if stableReductionSurfaceNeedsReview(previous, scan, currentBatch, externalInvalidated) {
 		return nil, ContextReductionStats{}, false
 	}
-	tailTokens := ctxmgr.EstimateMessagesTokens(messages[len(previous.Messages):])
+	tailTokens := estimateMessagesTokens(a.ctxMgr, messages[len(previous.Messages):])
 	if tailTokens >= policy.MinIncrementalTokens {
 		return nil, ContextReductionStats{}, false
 	}
@@ -1698,7 +1698,7 @@ func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []mess
 	if !compatible {
 		return nil, ContextReductionStats{}, false
 	}
-	stats := highLevelContextReductionStats(messages, reused)
+	stats := highLevelContextReductionStats(a.ctxMgr, messages, reused)
 	a.setCurrentRequestSurface(&stats, reused)
 	if len(stats.ByToolAndRule) == 0 {
 		stats.ByToolAndRule = cloneContextReductionBuckets(previous.Stats.ByToolAndRule)
@@ -1794,10 +1794,10 @@ func (a *MainAgent) recalledReductionInputsSnapshot() map[string]struct{} {
 	return out
 }
 
-func highLevelContextReductionStats(original, reduced []message.Message) ContextReductionStats {
+func highLevelContextReductionStats(mgr *ctxmgr.Manager, original, reduced []message.Message) ContextReductionStats {
 	stats := ContextReductionStats{
-		TokensBefore: ctxmgr.EstimateMessagesTokens(original),
-		TokensAfter:  ctxmgr.EstimateMessagesTokens(reduced),
+		TokensBefore: estimateMessagesTokens(mgr, original),
+		TokensAfter:  estimateMessagesTokens(mgr, reduced),
 	}
 	stats.setCurrentMessageSurface(reduced)
 	if stats.TokensBefore > stats.TokensAfter {
@@ -1919,7 +1919,7 @@ func contextContributorBytes(msg message.Message) int {
 	return n
 }
 
-func topContextContributors(messages []message.Message, limit int) []contextContributor {
+func topContextContributors(mgr *ctxmgr.Manager, messages []message.Message, limit int) []contextContributor {
 	if limit <= 0 || len(messages) == 0 {
 		return nil
 	}
@@ -1939,7 +1939,7 @@ func topContextContributors(messages []message.Message, limit int) []contextCont
 			Role:   msg.Role,
 			Tool:   toolName,
 			Bytes:  bytes,
-			Tokens: ctxmgr.EstimateMessageTokens(msg),
+			Tokens: estimateMessageTokens(mgr, msg),
 		})
 	}
 	sort.SliceStable(contributors, func(i, j int) bool {
@@ -2218,7 +2218,7 @@ func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message, f
 		return prepared
 	}
 	prepared = reused
-	updatedStats := highLevelContextReductionStats(original, prepared)
+	updatedStats := highLevelContextReductionStats(a.ctxMgr, original, prepared)
 	if len(updatedStats.ByToolAndRule) == 0 {
 		updatedStats.ByToolAndRule = cloneContextReductionBuckets(frozen.Stats.ByToolAndRule)
 	}

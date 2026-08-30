@@ -10,7 +10,6 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
-	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
@@ -59,7 +58,7 @@ func (s *SubAgent) prepareContextForLLM(messages []message.Message) []message.Me
 	if usage <= 0 || usage >= 1 {
 		usage = config.DefaultSubAgentCompactUsage
 	}
-	estimated := ctxmgr.EstimateMessagesTokens(messages)
+	estimated := estimateMessagesTokens(s.ctxMgr, messages)
 	if estimated < int(float64(budget)*usage) {
 		return messages
 	}
@@ -106,7 +105,7 @@ func (s *SubAgent) compactContextForTarget(messages []message.Message, target in
 		}
 	}
 	s.ctxMgr.RestoreMessages(compressed)
-	stats := highLevelContextReductionStats(messages, compressed)
+	stats := highLevelContextReductionStats(s.ctxMgr, messages, compressed)
 	s.reductionMu.Lock()
 	s.reductionStats = stats
 	s.reductionMu.Unlock()
