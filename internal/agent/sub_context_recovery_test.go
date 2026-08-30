@@ -131,7 +131,7 @@ func TestSubAgentProactiveContextCompressionRecordsReductionStats(t *testing.T) 
 	}
 	foundCheckpoint := false
 	for _, msg := range prepared {
-		if strings.Contains(msg.Content, "Preserve the task contract") && strings.Contains(msg.Content, "Full pre-checkpoint history") {
+		if strings.Contains(msg.Content, "Task: preserve the task contract") && strings.Contains(msg.Content, "Full pre-checkpoint history") {
 			foundCheckpoint = true
 			break
 		}

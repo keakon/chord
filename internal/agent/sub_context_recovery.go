@@ -83,9 +83,12 @@ func (s *SubAgent) compactContextForTarget(messages []message.Message, target in
 	}
 	checkpoint := message.Message{
 		Role: message.RoleUser,
-		Content: fmt.Sprintf(
-			"[system] SubAgent context checkpoint: %d earlier messages were removed for %s. Preserve the task contract, write scope, owner coordination, verification evidence, and unresolved limitations. Task: %s. Owner: %s/%s. Full pre-checkpoint history: %s.",
-			len(messages)-len(compressed), reason, strings.TrimSpace(s.taskDesc), strings.TrimSpace(s.ownerAgentID), strings.TrimSpace(s.ownerTaskID), archiveRef,
+		Content: buildSubAgentStructuredCheckpoint(
+			s,
+			messages,
+			len(messages)-len(compressed),
+			reason,
+			archiveRef,
 		),
 	}
 	if len(compressed) > 1 && strings.HasPrefix(compressed[1].Content, "[system] Context was compressed") {
