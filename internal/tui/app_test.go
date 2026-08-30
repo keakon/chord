@@ -4975,7 +4975,7 @@ func TestRebuildAfterCompactionResetsVisibleCardNumbers(t *testing.T) {
 	}
 }
 
-func TestSessionRestoreRevealsPromptAboveLongInterruptedReply(t *testing.T) {
+func TestSessionRestorePinsLongInterruptedReplyAtTail(t *testing.T) {
 	backend := &sessionControlAgent{messages: []message.Message{
 		{Role: message.RoleUser, Content: "keep this restored prompt visible"},
 		{Role: message.RoleAssistant, Content: strings.Repeat("partial reply line\n", 80), StopReason: "interrupted"},
@@ -4988,15 +4988,8 @@ func TestSessionRestoreRevealsPromptAboveLongInterruptedReply(t *testing.T) {
 	if len(blocks) != 2 || blocks[0].Type != BlockUser || blocks[1].Type != BlockAssistant {
 		t.Fatalf("restored blocks = %#v, want user then interrupted assistant", blocks)
 	}
-	userStart, ok := m.viewport.LineOffsetForBlockID(blocks[0].ID)
-	if !ok {
-		t.Fatal("restored user block not found")
-	}
-	if m.viewport.offset != userStart {
-		t.Fatalf("viewport offset after restore = %d, want user block start %d", m.viewport.offset, userStart)
-	}
-	if m.viewport.sticky {
-		t.Fatal("restored interrupted turn should not remain pinned to the reply tail")
+	if !m.viewport.sticky || !m.viewport.atBottom() {
+		t.Fatalf("restored interrupted turn should stay at tail: sticky=%v offset=%d total=%d height=%d", m.viewport.sticky, m.viewport.offset, m.viewport.totalLines, m.viewport.height)
 	}
 }
 

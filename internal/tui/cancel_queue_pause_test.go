@@ -44,7 +44,7 @@ func TestIdleAfterCancelKeepsQueuedDraftsPaused(t *testing.T) {
 	}
 }
 
-func TestIdleAfterCancelRevealsPromptAboveLongInterruptedReply(t *testing.T) {
+func TestIdleAfterCancelKeepsViewportAtReplyTail(t *testing.T) {
 	backend := &sessionControlAgent{
 		messages: []message.Message{
 			{Role: message.RoleUser, Content: "keep this prompt visible"},
@@ -66,17 +66,11 @@ func TestIdleAfterCancelRevealsPromptAboveLongInterruptedReply(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.IdleEvent{}})
 
-	userStart, ok := m.viewport.LineOffsetForBlockID(1)
-	if !ok {
-		t.Fatal("cancelled turn user block not found")
+	if !m.viewport.atBottom() {
+		t.Fatalf("cancel should keep the viewport at the reply tail: offset=%d total=%d height=%d", m.viewport.offset, m.viewport.totalLines, m.viewport.height)
 	}
-	blocks := m.viewport.visibleBlocks()
-	userEnd := userStart + m.viewport.blockSpanLines(blocks[0])
-	if userEnd <= m.viewport.offset || userStart >= m.viewport.offset+m.viewport.height {
-		t.Fatalf("cancelled turn user block [%d,%d) is outside viewport [%d,%d)", userStart, userEnd, m.viewport.offset, m.viewport.offset+m.viewport.height)
-	}
-	if m.viewport.sticky {
-		t.Fatal("viewport should stop following the reply tail after revealing the cancelled turn prompt")
+	if !m.viewport.sticky {
+		t.Fatal("viewport should remain sticky after cancel")
 	}
 }
 

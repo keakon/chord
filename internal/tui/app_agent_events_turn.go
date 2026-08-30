@@ -16,9 +16,6 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		m.clearSessionSwitch()
 		m.finalizeTurn()
 		cancelledByUser := m.pauseQueuedDraftDrainOnce
-		if cancelledByUser {
-			m.revealTrailingInterruptedTurnUserMessage()
-		}
 		prevMain := m.activities["main"].Type
 		m.markAgentIdle("main")
 		mainLoopBusy := m.agent != nil && m.agent.LoopKeepsMainBusy()

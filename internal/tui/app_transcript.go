@@ -163,9 +163,6 @@ func (m *Model) rebuildViewportFromMessagesPreservingActivity(reason string, pre
 	m.recalcViewportSize() // ensure viewport uses current layout width so background blocks align
 	forceCompactionFocus := reason == "session_restored" || reason == "startup_restored"
 	m.maybeFocusVisibleCompactionSummary(forceCompactionFocus)
-	if forceCompactionFocus {
-		m.revealTrailingInterruptedTurnUserMessage()
-	}
 	recalcDuration := time.Since(recalcStarted)
 	m.maybeEnforceStartupDeferredTranscriptRetention()
 	replaceDuration := time.Since(replaceStarted)
