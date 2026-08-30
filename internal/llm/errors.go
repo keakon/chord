@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"slices"
 	"strings"
@@ -255,6 +256,20 @@ func (e *EmptyResponseError) Error() string {
 	return "model returned empty response (stop_reason=stop with no content or tool calls)"
 }
 
+// InterruptedResponseError indicates the model streamed a partial response
+// that ended interrupted (a mid-stream provider error event or a truncated
+// transport stream with visible text already delivered). The partial text
+// stays on screen, but the response is a failed attempt: the retry layer keeps
+// retrying until the request succeeds or the user cancels (default
+// stream_retry_rounds=0 retries forever).
+type InterruptedResponseError struct {
+	StopReason string
+}
+
+func (e *InterruptedResponseError) Error() string {
+	return "model response interrupted (partial output retained, retrying)"
+}
+
 // ReplayEvidenceEchoError means the model repeated a request-only historical
 // tool envelope instead of continuing the active task.
 type ReplayEvidenceEchoError struct{}
@@ -303,6 +318,17 @@ func (e *AllAttemptedCandidatesContextLengthExceededError) Unwrap() error {
 func IsAllAttemptedCandidatesContextLengthExceeded(err error) bool {
 	_, ok := errors.AsType[*AllAttemptedCandidatesContextLengthExceededError](err)
 	return ok
+}
+
+// IsUpstreamStreamFailure reports whether err is a provider SSE error event
+// that explicitly identifies an upstream/gateway-side stream interruption (such as
+// "Upstream response stream was interrupted"). Surface it as an upstream-side
+// outage; retrying the same key or probing replay compatibility cannot fix it,
+// retry later or switch models instead.
+
+func IsUpstreamStreamFailure(err error) bool {
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && hasUpstreamFailureSignal(apiErr)
 }
 
 // isReasoningReplayRejection reports whether err is a request rejection caused
@@ -366,6 +392,9 @@ func isAmbiguousReplayRecoveryCandidate(err error, provider *ProviderConfig, rep
 	if hasTransientProviderCapacitySignal(apiErr) {
 		return false
 	}
+	if hasUpstreamFailureSignal(apiErr) {
+		return false
+	}
 	if isReasoningReplayRejection(apiErr) || hasExplicitRequestOrParamSignal(apiErr) ||
 		classifyContextLengthExceeded(apiErr) || hasTerminalNonRetriable400Signal(apiErr) {
 		return false
@@ -374,6 +403,34 @@ func isAmbiguousReplayRecoveryCandidate(err error, provider *ProviderConfig, rep
 		return true
 	}
 	return apiErr.StatusCode == 400 && provider != nil && !providerTrustsHTTP400(provider)
+}
+
+// hasUpstreamFailureSignal reports whether a provider SSE error event
+// explicitly identifies an upstream/gateway-side failure (as opposed to a
+// request-shape or per-key problem). These are deterministic: the upstream
+// already exhausted its own retries before emitting the event, so same-key
+// retries or replay-compat probes keep failing identically. Only SSE
+// stream events (Origin APIErrorOriginSSEEvent) are matched — WebSocket
+// events keep their own classification (Codex status-less WS errors stay
+// retryable), and HTTP statuses (which may also mention "upstream") keep
+// their ordinary status-driven classification, so a parameter-scoped
+// message such as "HTTP 400 - upstream failed" is never an upstream
+// outage.
+
+func hasUpstreamFailureSignal(apiErr *APIError) bool {
+	if apiErr == nil || apiErr.Origin != APIErrorOriginSSEEvent {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(apiErr.Code)) {
+	case "upstream_connection_error", "upstream_failed", "upstream_error":
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(apiErr.Message)) {
+	case "upstream", "upstream failed", "upstream error", "upstream connection error",
+		"upstream stream was interrupted", "upstream response stream was interrupted":
+		return true
+	}
+	return false
 }
 
 func hasTransientProviderCapacitySignal(apiErr *APIError) bool {
@@ -492,6 +549,12 @@ func shouldFallback(err error) bool {
 	if !ok {
 		return false
 	}
+	// A provider-stream upstream failure (upstream_connection_error /
+	// "upstream stream was interrupted") is deterministic and provider-wide:
+	// eligible to try another configured model without same-target retries.
+	if apiErr.isStreamEvent() && hasUpstreamFailureSignal(apiErr) {
+		return true
+	}
 
 	switch apiErr.StatusCode {
 	case 402:
@@ -543,6 +606,37 @@ func errorChainContainsAll(err error, parts ...string) bool {
 		}
 	}
 	return false
+}
+
+// isInterruptedStreamError reports whether err ended a stream that was already
+// producing valid output: a provider error event mid-stream, a truncated or
+// closed transport, a chunk/read timeout, or an interrupted partial response.
+// Text already streamed for these failures is genuine model output, so the
+// retry keeps it on screen instead of asking the UI to discard it. Request-shape
+// rejections (context length, bad request, replay rejections) are excluded:
+// they carry no usable partial output.
+func isInterruptedStreamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if _, ok := errors.AsType[*InterruptedResponseError](err); ok {
+		return true
+	}
+	if IsContextLengthExceeded(err) || isReasoningReplayRejection(err) {
+		return false
+	}
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
+		// Only in-band stream error events describe an interruption; HTTP
+		// status failures reject the request before it produced output.
+		return apiErr.isStreamEvent()
+	}
+	if _, ok := errors.AsType[*ChunkTimeoutError](err); ok {
+		return true
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		return true
+	}
+	return isTimeoutLikeError(err)
 }
 
 func isTimeoutLikeError(err error) bool {
@@ -644,6 +738,14 @@ func isRetriable(err error) bool {
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok {
 		return true // Unknown errors default to retriable.
+	}
+	// A status-less provider-stream error event with an explicit upstream failure
+	// signal (upstream_connection_error / "upstream stream was interrupted") is
+	// a deterministic upstream-side failure: the upstream already exhausted its
+	// own retries before emitting the event, so retrying the same key or probing
+	// replay compatibility keeps failing identically.
+	if apiErr.isStreamEvent() && hasUpstreamFailureSignal(apiErr) {
+		return false
 	}
 
 	// 401/403 are always per-key; try next key regardless of message (e.g. "plan not supported").

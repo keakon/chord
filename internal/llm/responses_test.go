@@ -1307,6 +1307,69 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 		}
 	})
 
+	t.Run("error_event_after_text_delta_keeps_visible_text_and_returns_api_error", func(t *testing.T) {
+		raw := strings.Join([]string{
+			"event: response.output_item.added",
+			`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","status":"in_progress"}}`,
+			"",
+			"event: response.output_text.delta",
+			`data: {"type":"response.output_text.delta","content_index":0,"delta":"partial","item_id":"msg_1","logprobs":[],"output_index":0}`,
+			"",
+			"event: error",
+			`data: {"type":"error","error":{"type":"upstream_error","code":"upstream_connection_error","message":"Upstream response stream was interrupted"}}`,
+			"",
+		}, "\n")
+		_, err := parseResponsesSSE(bytes.NewReader([]byte(raw)), nil, nil)
+		apiErr, ok := errors.AsType[*APIError](err)
+		if !ok || apiErr.Code != "upstream_connection_error" {
+			t.Fatalf("err = %T %v, want provider API error (partial stays on screen, no rollback)", err, err)
+		}
+	})
+
+	t.Run("error_event_after_incomplete_tool_call_remains_api_error", func(t *testing.T) {
+		raw := strings.Join([]string{
+			"event: response.output_item.added",
+			`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"shell","status":"in_progress"}}`,
+			"",
+			"event: response.function_call_arguments.delta",
+			`data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\"ech"}`,
+			"",
+			"event: error",
+			`data: {"type":"error","error":{"type":"upstream_error","code":"upstream_connection_error","message":"Upstream response stream was interrupted"}}`,
+			"",
+		}, "\n")
+		_, err := parseResponsesSSE(bytes.NewReader([]byte(raw)), nil, nil)
+		apiErr, ok := errors.AsType[*APIError](err)
+		if !ok || apiErr.Code != "upstream_connection_error" {
+			t.Fatalf("err = %T %v, want provider API error for half-built tool call", err, err)
+		}
+	})
+
+	t.Run("error_event_after_complete_tool_call_returns_api_error", func(t *testing.T) {
+		raw := strings.Join([]string{
+			"event: response.output_item.added",
+			`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"shell","status":"in_progress"}}`,
+			"",
+			"event: response.function_call_arguments.delta",
+			`data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\"git status --short\"}"}`,
+			"",
+			"event: response.function_call_arguments.done",
+			`data: {"type":"response.function_call_arguments.done","output_index":0,"item_id":"fc_1","arguments":"{\"command\":\"git status --short\"}"}`,
+			"",
+			"event: response.output_item.done",
+			`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"shell","arguments":"{\"command\":\"git status --short\"}","status":"completed"}}`,
+			"",
+			"event: error",
+			`data: {"type":"error","error":{"type":"upstream_error","code":"upstream_connection_error","message":"Upstream response stream was interrupted"}}`,
+			"",
+		}, "\n")
+		_, err := parseResponsesSSE(bytes.NewReader([]byte(raw)), nil, nil)
+		apiErr, ok := errors.AsType[*APIError](err)
+		if !ok || apiErr.Code != "upstream_connection_error" {
+			t.Fatalf("err = %T %v, want provider API error after error event", err, err)
+		}
+	})
+
 	t.Run("error_event_is_not_swallowed_by_later_completion", func(t *testing.T) {
 		stream := buildSSEStream([]string{
 			`{"type":"error","error":{"type":"future_gateway_error","code":"upstream_failed","message":"stream failed"}}`,

@@ -745,6 +745,13 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 				Level:   "error",
 			})
 		}
+		// A provider SSE error event that explicitly signals an upstream/gateway
+		// stream interruption is an upstream-side outage: same-key retries and
+		// replay-compat probes are already exhausted by the LLM layer. Surface
+		// an actionable error card instead of a bare API message.
+		if llm.IsUpstreamStreamFailure(err) {
+			return nil, fmt.Errorf("LLM stream failed: the upstream/gateway interrupted the model stream; this is an upstream-side outage, not a request issue — retry later or switch to another model: %w", err)
+		}
 		return nil, fmt.Errorf("LLM stream failed: %w", err)
 	}
 	resp.RequestBatch = requestBatch

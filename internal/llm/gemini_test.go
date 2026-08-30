@@ -51,6 +51,20 @@ func TestConvertMessagesToGemini(t *testing.T) {
 	}
 }
 
+func TestParseGeminiSSEStreamErrorEventAfterTextReturnsAPIError(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"partial "}]}}]}`,
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"text"}]}}]}`,
+		`data: {"error":{"code":503,"message":"backend failed","status":"UNAVAILABLE"}}`,
+		"",
+	}, "\n")
+	_, err := parseGeminiSSEStream(strings.NewReader(stream), nil, nil)
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Code != "503" {
+		t.Fatalf("err = %T %v, want provider API error (partial stays on screen, no rollback)", err, err)
+	}
+}
+
 func TestParseGeminiSSEStreamPreservesStatuslessErrorEnvelope(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"error":{"code":503,"message":"backend failed","status":"UNAVAILABLE"}}`,

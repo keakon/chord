@@ -292,6 +292,47 @@ func TestAmbiguousReplayRecoveryCandidateRequiresUnclassifiedReplayExposure(t *t
 	}
 }
 
+func TestUpstreamFailureSignalStreamEventIsDeterministic(t *testing.T) {
+	t.Parallel()
+	provider := NewProviderConfig("gateway", config.ProviderConfig{TrustHTTP400: new(false)}, nil)
+	report := modelcompat.NormalizeReport{ReplaySensitiveItems: 1}
+	for _, apiErr := range []*APIError{
+		{Origin: APIErrorOriginSSEEvent, Code: "upstream_connection_error", Message: "Upstream response stream was interrupted"},
+		{Origin: APIErrorOriginSSEEvent, Code: "upstream_failed", Message: "stream failed"},
+		{Origin: APIErrorOriginSSEEvent, Code: "upstream_error"},
+		{Origin: APIErrorOriginSSEEvent, Message: "upstream response stream was interrupted"},
+	} {
+		if isRetriable(apiErr) {
+			t.Fatalf("upstream stream event %#v must not be key-retriable", apiErr)
+		}
+		if !shouldFallback(apiErr) {
+			t.Fatalf("upstream stream event %#v must be fallback-eligible", apiErr)
+		}
+		if isTerminalModelPoolFailureForProvider(nil, apiErr) {
+			t.Fatalf("upstream stream event %#v must not be terminal at the pool level (the round loop bounds upstream retries)", apiErr)
+		}
+		if isAmbiguousReplayRecoveryCandidate(apiErr, provider, report) {
+			t.Fatalf("upstream stream event %#v must not enter an ambiguous replay probe", apiErr)
+		}
+	}
+	// Status-less non-upstream stream events keep the ordinary retryable path.
+
+	plain := &APIError{Origin: APIErrorOriginSSEEvent, Code: "future_unknown", Message: "failed"}
+	if !isRetriable(plain) {
+		t.Fatal("non-upstream status-less stream event should stay key-retriable")
+	}
+	if isTerminalModelPoolFailureForProvider(nil, plain) {
+		t.Fatal("non-upstream status-less stream event should not stop retry rounds")
+	}
+	// A parameter-scoped message mentioning "upstream" is not an upstream
+	// outage and must not be classified as one when an explicit HTTP status is
+	// also present.
+	paramScoped := &APIError{Origin: APIErrorOriginSSEEvent, Code: "future_unknown_v7", Message: "HTTP 400 - upstream failed"}
+	if !isRetriable(paramScoped) {
+		t.Fatalf("parameter-scoped upstream mention should stay retriable: %#v", paramScoped)
+	}
+}
+
 func TestReplayEvidenceEchoIsTerminalAfterModelPoolExhaustion(t *testing.T) {
 	t.Parallel()
 	if !isTerminalModelPoolFailureForProvider(nil, &ReplayEvidenceEchoError{}) {

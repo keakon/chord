@@ -1286,6 +1286,31 @@ func TestParseSSEStreamAggregatesAnthropicCacheUsage(t *testing.T) {
 	}
 }
 
+func TestParseSSEStreamErrorEventAfterTextReturnsAPIError(t *testing.T) {
+	stream := strings.Join([]string{
+		"event: content_block_start",
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial "}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"text"}}`,
+		"",
+		"event: content_block_stop",
+		`data: {"type":"content_block_stop","index":0}`,
+		"",
+		"event: error",
+		`data: {"type":"error","error":{"type":"upstream_error","code":"upstream_connection_error","message":"Upstream response stream was interrupted"}}`,
+		"",
+	}, "\n")
+	_, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Code != "upstream_connection_error" {
+		t.Fatalf("err = %T %v, want provider API error (partial stays on screen, no rollback)", err, err)
+	}
+}
+
 func TestParseSSEStreamPreservesStatuslessMessagesError(t *testing.T) {
 	stream := strings.Join([]string{
 		"event: error",

@@ -718,6 +718,37 @@ func TestCallLLMNoFallbackExhaustedToastOnCancel(t *testing.T) {
 	}
 }
 
+func TestCallLLMSurfacesUpstreamStreamFailureActionably(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.SetProviderModelRef("primary-prov/primary-model")
+
+	primaryCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"primary-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"primary-key"})
+	primaryImpl := &blockingStreamProvider{calls: []scriptedStreamCall{{
+		err: &llm.APIError{Origin: llm.APIErrorOriginSSEEvent, Code: "upstream_connection_error", Message: "Upstream response stream was interrupted"},
+	}}}
+
+	client := llm.NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	client.SetStreamRetryRounds(1)
+	a.swapLLMClientWithRef(client, "primary-model", 128000, "primary-prov/primary-model")
+
+	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	if err == nil {
+		t.Fatal("callLLM err = nil, want actionable upstream outage error")
+	}
+	if !strings.Contains(err.Error(), "upstream-side outage") {
+		t.Fatalf("error = %v, want actionable upstream outage message", err)
+	}
+	seen, _ := primaryImpl.snapshot()
+	if got := len(seen); got != 1 {
+		t.Fatalf("provider calls = %d, want 1 (upstream outage must not retry or probe)", got)
+	}
+}
+
 func TestCallLLMFailedFallbackPersistsLastRunningModel(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.SetProviderModelRef("primary-prov/primary-model")

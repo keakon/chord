@@ -424,6 +424,9 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse error event: %w", err)
 				}
+				// A mid-stream provider error event keeps whatever text already
+				// streamed on screen (no rollback) and flows back as the provider
+				// error so the retry layer keeps retrying until success or cancel.
 				return nil, &APIError{
 					Origin:  APIErrorOriginSSEEvent,
 					Code:    ev.Error.Code,

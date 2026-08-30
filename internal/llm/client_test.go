@@ -1037,6 +1037,146 @@ func TestClient_402QuotaErrorTriesOtherKeysBeforeFallbackModel(t *testing.T) {
 	}
 }
 
+func TestClient_InterruptedPartialRetriesUntilSuccess(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("sample", "gpt-5.4", []string{"key-a"})
+	impl := &scriptedProvider{calls: []scriptedCall{
+		{resp: &message.Response{Content: "partial ", StopReason: "interrupted"}},
+		{resp: &message.Response{Content: "text continued", StopReason: "stop"}},
+	}}
+	c := &Client{}
+	resp, err := callCompleteStreamWithRetryForTest(
+		c,
+		context.Background(),
+		primaryCfg,
+		impl,
+		"gpt-5.4",
+		4096,
+		RequestTuning{},
+		"",
+		[]message.Message{{Role: "user", Content: "hi"}},
+		nil,
+		nil,
+		true,
+		nil,
+		0, // default: retry until success
+		&CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("completeStreamWithRetry returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "text continued" || resp.StopReason != "stop" {
+		t.Fatalf("response = %#v, want eventual successful response", resp)
+	}
+	if got := impl.CallCount(); got != 2 {
+		t.Fatalf("provider calls = %d, want 2 (interrupted attempt then success)", got)
+	}
+}
+
+// TestClient_InterruptedPartialResponseRespectsExplicitRetryCap guards the
+// retry counter: an interrupted-with-text response is discarded as a failed
+// attempt and must count against an explicit cap. Counting it as a usable
+// reply would reset the counter every round and turn a bounded cap into an
+// unthrottled request loop.
+func TestClient_InterruptedPartialResponseRespectsExplicitRetryCap(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "gpt-test", []string{"k1"})
+	impl := &scriptedProvider{calls: []scriptedCall{
+		{resp: &message.Response{Content: "partial ", StopReason: "interrupted"}},
+		{resp: &message.Response{Content: "unreachable", StopReason: "interrupted"}},
+	}}
+	c := &Client{}
+	resp, err := callCompleteStreamWithRetryForTest(
+		c,
+		context.Background(),
+		primaryCfg,
+		impl,
+		"gpt-test",
+		4096,
+		RequestTuning{},
+		"",
+		[]message.Message{{Role: "user", Content: "hi"}},
+		nil,
+		nil,
+		false,
+		nil,
+		1, // explicit cap: the interrupted attempt must exhaust it
+		&CallStatus{},
+	)
+	if resp != nil {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if _, ok := errors.AsType[*InterruptedResponseError](err); !ok {
+		t.Fatalf("err = %v, want *InterruptedResponseError after the cap", err)
+	}
+	if got := impl.CallCount(); got != 1 {
+		t.Fatalf("provider calls = %d, want 1 (cap exhausted by the interrupted attempt)", got)
+	}
+}
+
+// TestClient_KeptPartialRollsBackWhenRetryRegeneratesOutput guards the
+// deferred rollback: the preserved partial of an interrupted attempt must
+// leave the screen exactly when the retry regenerates content, so the card
+// never concatenates two attempts' output. The rollback fires before the
+// retry's first visible delta, not at interruption time (which would blank
+// the card during the retry wait).
+func TestClient_KeptPartialRollsBackWhenRetryRegeneratesOutput(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "gpt-test", []string{"k1"})
+	impl := &scriptedProvider{calls: []scriptedCall{
+		{streams: []message.StreamDelta{{Type: "text", Text: "partial"}}, err: io.ErrUnexpectedEOF},
+		{streams: []message.StreamDelta{{Type: "text", Text: "regenerated"}}, resp: &message.Response{Content: "regenerated", StopReason: "stop"}},
+	}}
+	c := NewClient(primaryCfg, impl, "gpt-test", 4096, "sys")
+
+	type deltaMark struct {
+		kind string // "text" or "rollback"
+		text string
+	}
+	var marks []deltaMark
+	resp, err := callCompleteStreamWithRetryForTest(
+		c,
+		context.Background(),
+		primaryCfg,
+		impl,
+		"gpt-test",
+		4096,
+		RequestTuning{},
+		"",
+		[]message.Message{{Role: "user", Content: "hi"}},
+		nil,
+		func(delta message.StreamDelta) {
+			switch delta.Type {
+			case message.StreamDeltaText:
+				marks = append(marks, deltaMark{kind: "text", text: delta.Text})
+			case message.StreamDeltaRollback:
+				marks = append(marks, deltaMark{kind: "rollback"})
+			}
+		},
+		false,
+		nil,
+		0, // default: retry until success
+		&CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("completeStreamWithRetry returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "regenerated" {
+		t.Fatalf("response = %#v, want the regenerated response", resp)
+	}
+	rollbacks := 0
+	rollbackIdx := -1
+	for i, m := range marks {
+		if m.kind == "rollback" {
+			rollbacks++
+			rollbackIdx = i
+		}
+	}
+	if rollbacks != 1 || rollbackIdx != 1 {
+		t.Fatalf("deltas = %+v, want [text partial, rollback, text regenerated]", marks)
+	}
+	if marks[len(marks)-1].kind != "text" || marks[len(marks)-1].text != "regenerated" {
+		t.Fatalf("last delta = %+v, want the retry's regenerated text", marks[len(marks)-1])
+	}
+}
+
 func TestClient_ModelPoolNoUsableKeysDoesNotStopRetryRounds(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("linux", "gpt-5.5", []string{"key-a"})
 	fallbackCfg := testProviderConfig("codex2", "gpt-5.5")
@@ -2702,6 +2842,86 @@ func TestCompleteStreamWithRetryDoesNotResetRetryCountAfterVisibleOutputOnly(t *
 	}
 	if got := impl.CallCount(); got != 1 {
 		t.Fatalf("provider calls = %d, want 1 when visible output does not reset retry budget", got)
+	}
+}
+
+func TestCompleteStreamWithRetryKeepsVisibleTextOnInterruptedStream(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "gpt-test", []string{"k1"})
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{
+		{streams: []message.StreamDelta{{Type: "text", Text: "partial"}}, err: io.ErrUnexpectedEOF},
+		{resp: &message.Response{Content: " continued", StopReason: "stop"}},
+	}
+	c := NewClient(primaryCfg, impl, "gpt-test", 4096, "sys")
+
+	var rollbacks int
+	resp, err := callCompleteStreamWithRetryForTest(
+		c,
+		context.Background(),
+		primaryCfg,
+		impl,
+		"gpt-test",
+		4096,
+		RequestTuning{},
+		"",
+		[]message.Message{{Role: "user", Content: "hi"}},
+		nil,
+		func(delta message.StreamDelta) {
+			if delta.Type == message.StreamDeltaRollback {
+				rollbacks++
+			}
+		},
+		false,
+		nil,
+		0,
+		&CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("completeStreamWithRetry err = %v, want success after retry", err)
+	}
+	if resp == nil || resp.Content != " continued" {
+		t.Fatalf("resp = %#v, want the retried response", resp)
+	}
+	if rollbacks != 0 {
+		t.Fatalf("rollback deltas = %d, want 0 (interrupted partial stays on screen)", rollbacks)
+	}
+}
+
+func TestCompleteStreamWithRetryRollsBackVisibleTextOnRequestRejection(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "gpt-test", []string{"k1", "k2"})
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{
+		{streams: []message.StreamDelta{{Type: "text", Text: "partial"}}, err: &APIError{StatusCode: 401, Message: "invalid key"}},
+		{resp: &message.Response{Content: "recovered", StopReason: "stop"}},
+	}
+	c := NewClient(primaryCfg, impl, "gpt-test", 4096, "sys")
+
+	var rollbacks int
+	if _, err := callCompleteStreamWithRetryForTest(
+		c,
+		context.Background(),
+		primaryCfg,
+		impl,
+		"gpt-test",
+		4096,
+		RequestTuning{},
+		"",
+		[]message.Message{{Role: "user", Content: "hi"}},
+		nil,
+		func(delta message.StreamDelta) {
+			if delta.Type == message.StreamDeltaRollback {
+				rollbacks++
+			}
+		},
+		false,
+		nil,
+		0,
+		&CallStatus{},
+	); err != nil {
+		t.Fatalf("completeStreamWithRetry err = %v, want success on the second key", err)
+	}
+	if rollbacks != 1 {
+		t.Fatalf("rollback deltas = %d, want 1 (rejected request output is discarded)", rollbacks)
 	}
 }
 

@@ -19,13 +19,16 @@ import (
 )
 
 type visibleStreamTracker struct {
-	inner          StreamCallback
-	visible        bool
-	onVisibleStart func() // called each time a visible streaming attempt begins; may be nil
-	providerModel  string
-	keyLogID       string
-	keyAttempt     int
-	keyCount       int
+	inner            StreamCallback
+	visible          bool
+	toolStreamStated bool   // a tool-call delta reached the UI in the current attempt
+	pendingRollback  string // non-empty: a prior attempt's partial output is still rendered; its rollback must precede this attempt's first visible delta
+	rollbackFired    bool   // the armed pendingRollback was emitted to the UI
+	onVisibleStart   func() // called each time a visible streaming attempt begins; may be nil
+	providerModel    string
+	keyLogID         string
+	keyAttempt       int
+	keyCount         int
 }
 
 func logNormalizeReport(provider, model string, level, messagesBefore, messagesAfter int, report modelcompat.NormalizeReport) {
@@ -39,8 +42,13 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 	if t == nil {
 		return
 	}
+	t.emitPendingRollbackBefore(delta)
 	switch delta.Type {
 	case message.StreamDeltaText, message.StreamDeltaThinking, message.StreamDeltaToolUseStart, message.StreamDeltaToolUseDelta, message.StreamDeltaToolUseEnd:
+		switch delta.Type {
+		case message.StreamDeltaToolUseStart, message.StreamDeltaToolUseDelta, message.StreamDeltaToolUseEnd:
+			t.toolStreamStated = true
+		}
 		if !t.visible {
 			log.Debugf("LLM first visible stream delta delta_type=%v model=%v key_id=%v key_attempt=%v key_total=%v", delta.Type, t.providerModel, t.keyLogID, t.keyAttempt, t.keyCount)
 			t.visible = true
@@ -57,15 +65,44 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 			log.Debugf("LLM visible stream rollback model=%v key_id=%v key_attempt=%v key_total=%v reason=%v", t.providerModel, t.keyLogID, t.keyAttempt, t.keyCount, reason)
 		}
 		t.visible = false
+		t.toolStreamStated = false
 	}
 	if t.inner != nil {
 		t.inner(delta)
 	}
 }
 
-func (t *visibleStreamTracker) EmitRollback(reason string) {
-	if t == nil || !t.visible || t.inner == nil {
+// emitPendingRollbackBefore clears a prior attempt's preserved partial output
+// at the moment this attempt starts producing visible content: the retry
+// regenerates the response from the beginning, so the preserved text must
+// leave the screen (and the turn's partial-text accumulator) exactly when its
+// replacement starts arriving — otherwise the card concatenates both attempts
+// and diverges from the session record. Emitting the rollback lazily (instead
+// of at interruption time) keeps the preserved text on screen during the retry
+// wait, so there is no intermediate blank card.
+func (t *visibleStreamTracker) emitPendingRollbackBefore(delta message.StreamDelta) {
+	if t.pendingRollback == "" || t.inner == nil {
 		return
+	}
+	switch delta.Type {
+	case message.StreamDeltaText, message.StreamDeltaThinking,
+		message.StreamDeltaToolUseStart, message.StreamDeltaToolUseDelta, message.StreamDeltaToolUseEnd:
+		t.inner(message.StreamDelta{
+			Type: message.StreamDeltaRollback,
+			Rollback: &message.RollbackDelta{
+				Reason: t.pendingRollback,
+			},
+		})
+		t.pendingRollback = ""
+		t.rollbackFired = true
+	}
+}
+
+// EmitRollback tells the UI to discard what the current attempt already
+// rendered and reports whether a rollback was actually emitted.
+func (t *visibleStreamTracker) EmitRollback(reason string) bool {
+	if t == nil || !t.visible || t.inner == nil {
+		return false
 	}
 	t.inner(message.StreamDelta{
 		Type: message.StreamDeltaRollback,
@@ -74,6 +111,25 @@ func (t *visibleStreamTracker) EmitRollback(reason string) {
 		},
 	})
 	t.visible = false
+	t.pendingRollback = ""
+	return true
+}
+
+// MarkInterruptedVisibleOutput closes the current visible attempt without
+// telling the UI to discard what it already rendered. It reports false when the
+// attempt cannot be preserved — a tool-call delta already reached the UI, and a
+// retry would emit a second tool card for the same call, so the caller must roll
+// back instead.
+func (t *visibleStreamTracker) MarkInterruptedVisibleOutput() bool {
+	if t == nil || !t.visible {
+		return true
+	}
+	if t.toolStreamStated {
+		return false
+	}
+	log.Debugf("LLM visible stream interrupted; keeping partial output model=%v key_id=%v key_attempt=%v key_total=%v", t.providerModel, t.keyLogID, t.keyAttempt, t.keyCount)
+	t.visible = false
+	return true
 }
 
 const maxCoolingWait = 1 * time.Minute
@@ -82,6 +138,13 @@ func isAllKeysCoolingError(err error) bool {
 	_, ok := errors.AsType[*AllKeysCoolingError](err)
 	return ok
 }
+
+// upstreamStreamFailureRetryRounds bounds how many full retry rounds a
+// provider-stream upstream failure (upstream_connection_error / "upstream
+// stream was interrupted") is retried when the caller did not configure an
+// explicit retry cap: brief upstream blips self-heal, but the failure is
+// deterministic, so retrying forever would only burn time.
+const upstreamStreamFailureRetryRounds = 2
 
 func shouldContinueRetry(retryCount, maxAttempts int, lastErr error) bool {
 	return shouldContinueRetryMode(retryCount, maxAttempts, lastErr, false)
@@ -410,6 +473,10 @@ type streamTargetAttemptResult struct {
 	hadRequestAttempt   bool
 	roundHadUsableReply bool
 	skipProvider        bool
+	// pendingRollbackReason is non-empty when partial streamed output is still
+	// rendered and its rollback is deferred until the retry regenerates
+	// content or the attempt chain ends; the value is the rollback reason.
+	pendingRollbackReason string
 }
 
 type streamRoundAttemptSummary struct {
@@ -459,8 +526,16 @@ func (c *Client) completeStreamTarget(
 	lastInputTokens int,
 	abortIfCancelled func() error,
 	oversizeSeen *oversizeRegistry,
-) (streamTargetAttemptResult, int, error) {
-	result := streamTargetAttemptResult{}
+	pendingRollbackIn string,
+) (result streamTargetAttemptResult, finalLastInputTokens int, outErr error) {
+	result = streamTargetAttemptResult{}
+	// pendingRollback carries the rollback reason while preserved partial
+	// output from an earlier attempt is still on screen. It stays armed until
+	// a tracker actually emits the deferred rollback (or an immediate
+	// rollback clears the card); every exit reports it back so the caller can
+	// arm the next attempt or discard the preserved text on terminal failure.
+	pendingRollback := pendingRollbackIn
+	defer func() { result.pendingRollbackReason = pendingRollback }()
 	if t.isFallback {
 		log.Infof("trying fallback model in retry rotation provider=%v model=%v attempt=%v", t.provider.Name(), t.modelID, round+1)
 		if cb != nil {
@@ -581,6 +656,7 @@ func (c *Client) completeStreamTarget(
 			attemptReason = status.FallbackReason
 		}
 		tracker = newStreamAttemptTracker(cb, t, apiKey, modelRef, attemptReason, keyAttempt, keyCount)
+		tracker.pendingRollback = pendingRollback
 
 		result.hadRequestAttempt = true
 		attemptStartedAt := time.Now()
@@ -595,11 +671,18 @@ func (c *Client) completeStreamTarget(
 			requestTuning,
 			tracker.Callback,
 		)
+		if tracker.rollbackFired {
+			// The preserved partial left the screen when this attempt's first
+			// visible delta arrived; the card now shows this attempt's output.
+			pendingRollback = ""
+		}
 		normalizeResponseUsage(t.provider, resp)
 		if err == nil {
 			if resp != nil && modelcompat.IsReplayEvidenceEcho(resp.Content, targetMessages) {
 				echoErr := &ReplayEvidenceEchoError{}
-				tracker.EmitRollback(echoErr.Error())
+				if tracker.EmitRollback(echoErr.Error()) {
+					pendingRollback = ""
+				}
 				log.Warnf("model echoed request-only replay evidence provider=%v model=%v key_id=%v retry=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), !replayEchoRetried)
 				if !replayEchoRetried {
 					replayEchoRetried = true
@@ -618,7 +701,10 @@ func (c *Client) completeStreamTarget(
 				modelDone = true
 				break
 			}
-			if responseHasUsableOutput(resp) {
+			// A response discarded below as StopReason "interrupted" is a
+			// failed attempt: counting it as a usable reply would reset the
+			// retry counter every round and defeat an explicit retry cap.
+			if resp.StopReason != "interrupted" && responseHasUsableOutput(resp) {
 				result.roundHadUsableReply = true
 			}
 			t.provider.MarkKeySuccess(apiKey)
@@ -645,7 +731,20 @@ func (c *Client) completeStreamTarget(
 
 		result.setLastErr(t.provider, err)
 		visibleStarted := tracker.visible
-		tracker.EmitRollback(err.Error())
+		// A stream interrupted after visible text keeps that text on screen:
+		// the retry continues the same request (default stream_retry_rounds=0
+		// retries until success or user cancel) and the preserved partial
+		// leaves the screen only when the retry regenerates output. Attempts
+		// that already streamed a tool call, and failures that carry no usable
+		// output (bad request shape, context length, replay rejections), still
+		// roll back immediately.
+		if !isInterruptedStreamError(err) || !tracker.MarkInterruptedVisibleOutput() {
+			if tracker.EmitRollback(err.Error()) {
+				pendingRollback = ""
+			}
+		} else {
+			pendingRollback = err.Error()
+		}
 		if err := abortIfCancelled(); err != nil {
 			return result, lastInputTokens, err
 		}
@@ -836,10 +935,31 @@ func (c *Client) completeStreamTarget(
 			log.Warnf("model returned empty response, trying next key provider=%v model=%v key_id=%v stop_reason=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), resp.StopReason)
 			result.setLastErr(t.provider, emptyErr)
 			t.provider.MarkRecovering(apiKey)
-			tracker.EmitRollback(emptyErr.Error())
+			if tracker.EmitRollback(emptyErr.Error()) {
+				pendingRollback = ""
+			}
 			emitRetryErrorForKey(cb, emptyErr, t.provider, t.modelID, apiKey)
 			if cb != nil {
 				emitStreamStatus(cb, "retrying_key", "next")
+			}
+			return result, lastInputTokens, nil
+		}
+		if resp.StopReason == "interrupted" {
+			// An interrupted response is a failed attempt, not a success:
+			// the partial text already streamed stays on screen (its rollback
+			// is deferred until the retry regenerates output) while the retry
+			// layer keeps retrying the request (Chord's default
+			// stream_retry_rounds=0 retries until success or user cancel).
+			// A tool-call preview already on screen cannot be preserved: the
+			// retry would emit a second tool card for the same call.
+			interruptedErr := &InterruptedResponseError{StopReason: "interrupted"}
+			result.setLastErr(t.provider, interruptedErr)
+			if !tracker.MarkInterruptedVisibleOutput() {
+				if tracker.EmitRollback(interruptedErr.Error()) {
+					pendingRollback = ""
+				}
+			} else {
+				pendingRollback = interruptedErr.Error()
 			}
 			return result, lastInputTokens, nil
 		}
@@ -969,10 +1089,31 @@ func (c *Client) completeStreamWithRetry(
 	startRoutingGeneration uint64,
 	routingChangedCh <-chan struct{},
 	beforeFallback func(context.Context, []message.Message) ([]message.Message, error),
-) (*message.Response, error) {
+) (resp *message.Response, err error) {
 	var lastErr error
 	var lastErrProvider *ProviderConfig
 	var pendingRoundWait time.Duration
+	// pendingRollbackReason is non-empty while preserved partial output is
+	// still on screen across targets and rounds. On any non-cancel exit the
+	// preserved text must leave the screen: the turn failed, so a dangling
+	// card would diverge from the session record. User cancellation
+	// deliberately keeps the partial (the turn persists it as the interrupted
+	// assistant message).
+	var pendingRollback string
+	defer func() {
+		if pendingRollback == "" || cb == nil || err == nil || resp != nil {
+			return
+		}
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		cb(message.StreamDelta{
+			Type: message.StreamDeltaRollback,
+			Rollback: &message.RollbackDelta{
+				Reason: err.Error(),
+			},
+		})
+	}()
 	abortIfCancelled := func() error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("LLM request aborted: %w", err)
@@ -991,6 +1132,11 @@ func (c *Client) completeStreamWithRetry(
 	if maxAttempts <= 0 {
 		maxAttempts = 0
 	}
+	// The default (uncapped) path lets cooling/429 retries run indefinitely, but
+	// a deterministic upstream stream interruption must not burn time forever.
+	// When the caller set no explicit cap, stop after upstreamStreamFailureRetryRounds
+	// retry rounds once the failure is an upstream stream interruption.
+	defaultUncapped := maxAttempts == 0 && !hardCap
 
 	lastInputTokens := c.getLastInputTokens()
 	outputCapSetting := c.getOutputTokenMax()
@@ -1004,7 +1150,8 @@ func (c *Client) completeStreamWithRetry(
 	// pass a positive maxAttempts for the historical soft cap (cooling /
 	// concurrent-request 429 may continue past it), or a negative value to apply
 	// a hard cap that stops after that many rounds regardless of error class.
-	for round := 0; shouldContinueRetryMode(retryCount, maxAttempts, lastErr, hardCap); round++ {
+	for round := 0; shouldContinueRetryMode(retryCount, maxAttempts, lastErr, hardCap) &&
+		!(defaultUncapped && lastErr != nil && IsUpstreamStreamFailure(lastErr) && round > upstreamStreamFailureRetryRounds); round++ {
 		// skippedProviders only applies within the current round. Provider-level
 		// failures (including pre-visible timeouts) should skip sibling targets on
 		// the same provider for this round, but the next round must probe again.
@@ -1126,6 +1273,7 @@ func (c *Client) completeStreamWithRetry(
 				lastInputTokens,
 				abortIfCancelled,
 				oversizeSeen,
+				pendingRollback,
 			); err != nil {
 				return nil, err
 			} else {
@@ -1146,6 +1294,7 @@ func (c *Client) completeStreamWithRetry(
 				if targetResult.skipProvider {
 					skippedProviders[t.provider] = providerSkipReason(lastErr)
 				}
+				pendingRollback = targetResult.pendingRollbackReason
 				if targetResult.resp != nil {
 					return targetResult.resp, nil
 				}

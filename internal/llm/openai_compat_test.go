@@ -29,6 +29,20 @@ func TestParseOpenAISSEStreamLargeDataLine(t *testing.T) {
 	}
 }
 
+func TestParseOpenAISSEStreamErrorEventAfterTextReturnsAPIError(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"gpt-test","choices":[{"index":0,"delta":{"content":"partial "}}]}`,
+		`data: {"id":"chatcmpl-test","model":"gpt-test","choices":[{"index":0,"delta":{"content":"text"}}]}`,
+		`data: {"error":{"type":"upstream_error","code":"upstream_connection_error","message":"Upstream response stream was interrupted"}}`,
+		"",
+	}, "\n")
+	_, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Code != "upstream_connection_error" {
+		t.Fatalf("err = %T %v, want provider API error (partial stays on screen, no rollback)", err, err)
+	}
+}
+
 func TestParseOpenAISSEStreamPreservesStatuslessErrorEnvelope(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"error":{"type":"future_chat_error","code":"future_unknown_v7","message":"stream failed","param":"messages"}}`,

@@ -212,7 +212,7 @@ func TestCompleteStreamRetriesReplayEvidenceEchoWithReinforcedContinuation(t *te
 		context.Background(),
 		streamRetryTarget{provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 1024, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{ReplayCompat: &strict}},
 		0, strictCurrentTurnReplayMessages(), nil, func(delta message.StreamDelta) { deltas = append(deltas, delta) }, false, nil, 0, false,
-		&CallStatus{}, "", 0, 0, func() error { return nil }, nil,
+		&CallStatus{}, "", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil {
 		t.Fatalf("completeStreamTarget error = %v", err)
@@ -581,7 +581,7 @@ func TestCompleteStreamTargetPassesReplayCompatibleTuning(t *testing.T) {
 			},
 			{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
 		}, nil, nil, false, nil, 0, false, &CallStatus{}, "", 0, 0,
-		func() error { return nil }, nil,
+		func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v), want success", result, err)
@@ -618,7 +618,7 @@ func TestCompleteStreamStrictlyTextifiesRejectedForeignToolTrajectory(t *testing
 			},
 			{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
 		}, nil, nil, false, nil, 0, false, &CallStatus{}, "", 0, 0,
-		func() error { return nil }, nil,
+		func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v), want strict replay success", result, err)
@@ -683,7 +683,7 @@ func TestCompleteStreamCompactionReplayFloorUsesPortableShape(t *testing.T) {
 			tuning: RequestTuning{ReplayCompat: &level},
 		},
 		0, crossProviderReplayMessages(), nil, nil, false, nil, 0, false,
-		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil,
+		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v), want success", result, err)
@@ -724,7 +724,7 @@ func TestCompleteStreamAmbiguousFailureRetriesUnchangedWithoutPersistingReplayLe
 					contextLimit: 128000, inputLimit: 128000,
 				},
 				0, messages, nil, nil, false, nil, 0, false,
-				&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil,
+				&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 			)
 			if err != nil || result.resp == nil {
 				t.Fatalf("completeStreamTarget = (%+v, %v), want recovery after ambiguous failure", result, err)
@@ -763,7 +763,7 @@ func TestCompleteStreamAmbiguousFailureProbeIsRequestScoped(t *testing.T) {
 			contextLimit: 128000, inputLimit: 128000,
 		},
 		0, messages, nil, nil, false, nil, 0, false,
-		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil,
+		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v), want request-scoped probe recovery", result, err)
@@ -797,7 +797,7 @@ func TestCompleteStreamSkipsEquivalentReplayLevelBeforeStrict(t *testing.T) {
 	}
 	result, _, err := client.completeStreamTarget(
 		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "deepseek-v4-pro", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
-		0, messages, nil, nil, false, nil, 0, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil,
+		0, messages, nil, nil, false, nil, 0, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
@@ -838,7 +838,7 @@ func TestCompleteStreamDegradesConvertedUnsignedThinkingWithoutTextLeak(t *testi
 	}
 	result, _, err := client.completeStreamTarget(
 		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "glm-5.2", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
-		0, messages, nil, nil, false, nil, 0, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil,
+		0, messages, nil, nil, false, nil, 0, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
@@ -971,7 +971,7 @@ func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.
 					contextLimit: 128000, inputLimit: 128000, tuning: tc.tuning,
 				},
 				0, messages, nil, nil, false, nil, 0, false, &CallStatus{}, "sys", 0, 0,
-				func() error { return nil }, nil,
+				func() error { return nil }, nil, "",
 			)
 			if err != nil || result.resp == nil {
 				t.Fatalf("completeStreamTarget = (%+v, %v), want success after replay degradation", result, err)
