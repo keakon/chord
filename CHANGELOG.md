@@ -69,6 +69,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - apply_patch tool cards now preview the patch while the model is still writing it: the card stays expanded during argument streaming and shows the growing patch text with `+`/`-`/`@@` syntax highlighting, replacing the opaque character count; once execution completes the card switches to the final diff view.
 - `edit` and `apply_patch` requested-patch previews now render the full patch instead of stopping at 20 lines, so the model and the user see the complete planned change while arguments are still streaming.
 - `edit` and `apply_patch` result diffs now render in full instead of stopping at 200 lines; very large diffs are handled by the TUI viewport's fold/spill machinery, so the model and the user see the complete committed change.
+- Compaction now preserves the newest user request and a larger verbatim tail after the checkpoint (about 5% of the context window, whole user turns first) instead of a small fixed slice, so the model does not lose what you last asked when the summary rewrites the older history.
 
 ### Fixes
 

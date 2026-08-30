@@ -935,7 +935,7 @@ func NewMainAgent(
 		mcpClientInfo:           mcpClientInfo,
 		done:                    make(chan struct{}),
 		stoppingCh:              make(chan struct{}),
-		evidence:                evidenceCandidateTracker{seen: make(map[string]struct{})},
+		evidence:                evidenceCandidateTracker{seen: make(map[string]int)},
 		cacheHitTracker:         newCacheHitTracker(),
 		projectRoot:             projectRoot,
 		pathLocator:             pathLocator,
@@ -1620,7 +1620,6 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 		return
 	}
 	if item, ok := subAgentMailboxEvidence(msg, "runtime SubAgent mailbox"); ok {
-		item.Sequence = a.evidence.len() + 1
 		a.addEvidenceCandidate(item)
 		return
 	}
@@ -1657,29 +1656,21 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 				compactTextSnippet(text, 700),
 			))
 		case looksLikeUserCorrection(text):
-			item := buildEvidenceItem(
+			a.addEvidenceCandidate(buildEvidenceItem(
 				evidenceUserCorrection,
 				"User correction / constraint",
 				"This explicitly constrains the next code change and should be preserved verbatim.",
 				"runtime user message",
 				compactTextSnippet(text, 600),
-			)
-			item.Sequence = a.evidence.len() + 1
-			a.addEvidenceCandidate(item)
+			))
 		case isPlainUserRequestForCompaction(text):
-			item := buildLatestUserRequestEvidence("runtime user message", text)
-			item.Sequence = a.evidence.len() + 1
-			a.addEvidenceCandidate(item)
+			a.addEvidenceCandidate(buildLatestUserRequestEvidence("runtime user message", text))
 		}
 	case message.RoleTool:
 		if reason, ok := extractDoneRejectedReason(text); ok {
-			item := buildDoneRejectedEvidence("runtime tool result", reason)
-			item.Sequence = a.evidence.len() + 1
-			a.addEvidenceCandidate(item)
+			a.addEvidenceCandidate(buildDoneRejectedEvidence("runtime tool result", reason))
 		} else if reason, ok := extractToolRejectedByUserReason(text); ok && isPlainUserRequestForCompaction(reason) {
-			item := buildLatestUserRequestEvidence("runtime tool rejection reason", reason)
-			item.Sequence = a.evidence.len() + 1
-			a.addEvidenceCandidate(item)
+			a.addEvidenceCandidate(buildLatestUserRequestEvidence("runtime tool rejection reason", reason))
 		}
 		if isToolResultErrorMessage(msg) {
 			a.addEvidenceCandidate(buildEvidenceItem(

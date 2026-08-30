@@ -18,14 +18,25 @@ const (
 	compactEvidencePercentNumer = 2 // ~2% of context window
 	compactEvidencePercentDenom = 100
 	compactRecentTailMinTokens  = 768
-	compactRecentTailMaxTokens  = 3072
+	compactRecentTailMaxTokens  = 16384
 	compactRecentTailTurns      = 2
-	compactPromptOverhead       = 4096
-	compactReservedOutput       = 4096
-	compactPreflightBufferMin   = 1024
-	compactPreflightBufferRatio = 50 // reserve ~2% extra input budget for provider framing / hidden overhead
-	compactConfirmAgeTurns      = 2
-	compactErrorAgeTurns        = 3
+	// compactRecentTailBudgetRatio divides the context window to size the raw
+	// tail kept after a continuation checkpoint. The compaction threshold
+	// already leaves ~20% of the window unused, so a tail worth ~5% of it is
+	// affordable; a fixed few-thousand-token cap made the tail collapse to
+	// nothing exactly when compaction fires, because by then the newest user
+	// turn carries a full tool loop.
+	compactRecentTailBudgetRatio = 20
+	// compactRecentTailAnchorMessages bounds how many tail messages are echoed
+	// into the summarize prompt. The tail survives verbatim in the context
+	// anyway; the anchor only has to tell the summarizer what not to duplicate.
+	compactRecentTailAnchorMessages = 12
+	compactPromptOverhead           = 4096
+	compactReservedOutput           = 4096
+	compactPreflightBufferMin       = 1024
+	compactPreflightBufferRatio     = 50 // reserve ~2% extra input budget for provider framing / hidden overhead
+	compactConfirmAgeTurns          = 2
+	compactErrorAgeTurns            = 3
 	// Age is currentBatch minus producing batch, so a tool result is already
 	// age 1 at the first request whose response can react to it. Success and
 	// read-like thresholds therefore start at 2: the model must see a fresh
@@ -281,14 +292,26 @@ func subAgentMailboxEvidence(msg message.Message, source string) (evidenceItem, 
 	}
 }
 
+// userCorrectionMarkers gate the highest-priority evidence kind, so they are
+// tuned for precision over recall. Bare "别" and "只" used to be listed and
+// matched inside ordinary words (特别 / 区别 / 级别 / 只是 / 只有), which made
+// almost every Chinese message a "correction": those items are kept forever at
+// priority 100, they crowd the evidence budget, and the message can no longer
+// be captured as the latest plain user request. A missed constraint is the
+// cheaper failure — plain requests are still captured, and the goal anchor is
+// derived independently in buildGoalAnchor.
+var userCorrectionMarkers = []string{
+	"don't ", "do not ", "must not", "should not", "no need to", "instead", "rather than",
+	"不要", "别改", "别再", "别用", "别加", "别写", "不准", "禁止", "不应该", "必须",
+	"只能", "只需", "只保留", "只做", "只改",
+}
+
 func looksLikeUserCorrection(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	if lower == "" {
 		return false
 	}
-	for _, marker := range []string{
-		"don't ", "do not ", "不要", "别", "instead", "only ", "只", "不要改", "不要再", "rather than", "must ", "必须",
-	} {
+	for _, marker := range userCorrectionMarkers {
 		if strings.Contains(lower, marker) {
 			return true
 		}
@@ -396,15 +419,24 @@ const maxEvidenceCandidates = 48
 // items accumulated for durable compaction. It is owned by the event-loop
 // goroutine, so it carries no lock. Previously two loose MainAgent fields
 // (evidenceCandidates + evidenceCandidateSet).
+//
+// The tracker owns Sequence assignment. Callers must not set it: sequences must
+// keep increasing across the whole session so "latest user request" and "latest
+// Done rejection" stay resolvable, and any counter derived from the retained
+// item count saturates at maxEvidenceCandidates — every later item then shares
+// one sequence and the latest-wins comparison silently starts picking the
+// oldest survivor instead.
 type evidenceCandidateTracker struct {
-	items []evidenceItem
-	seen  map[string]struct{}
+	items   []evidenceItem
+	seen    map[string]int
+	nextSeq int
 }
 
 func (t *evidenceCandidateTracker) reset() {
 	t.items = nil
+	t.nextSeq = 0
 	if t.seen == nil {
-		t.seen = make(map[string]struct{})
+		t.seen = make(map[string]int)
 		return
 	}
 	clear(t.seen)
@@ -415,24 +447,32 @@ func (t *evidenceCandidateTracker) add(item evidenceItem) {
 		return
 	}
 	if t.seen == nil {
-		t.seen = make(map[string]struct{})
+		t.seen = make(map[string]int)
 	}
 	key := item.Key
 	if key == "" {
 		key = string(item.Kind) + "\x00" + item.Excerpt
 		item.Key = key
 	}
-	if _, ok := t.seen[key]; ok {
+	t.nextSeq++
+	// Restating something verbatim keeps one entry but refreshes its recency:
+	// the sequence is what resolves "latest user request" / "latest Done
+	// rejection" and orders the constraint fold, so a stale sequence would let
+	// an older item outrank the repeat the user just made.
+	if idx, ok := t.seen[key]; ok {
+		t.items[idx].Sequence = t.nextSeq
 		return
 	}
-	t.seen[key] = struct{}{}
+	item.Sequence = t.nextSeq
 	t.items = append(t.items, item)
+	t.seen[key] = len(t.items) - 1
 	if len(t.items) > maxEvidenceCandidates {
 		drop := len(t.items) - maxEvidenceCandidates
-		for i := range drop {
-			delete(t.seen, t.items[i].Key)
-		}
 		t.items = append([]evidenceItem(nil), t.items[drop:]...)
+		clear(t.seen)
+		for i, kept := range t.items {
+			t.seen[kept.Key] = i
+		}
 	}
 }
 

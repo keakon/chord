@@ -6522,3 +6522,183 @@ func TestStableSurfaceReviewToleratesMarkerClassDivergence(t *testing.T) {
 		t.Fatal("an unmarked reduced read with drifted validity must still trigger review")
 	}
 }
+
+// --------------------------------------------------------------------------
+// Evidence sequencing, recent-tail degradation, correction-marker precision
+// --------------------------------------------------------------------------
+
+func TestEvidenceTrackerSequenceKeepsGrowingAfterSaturation(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	total := maxEvidenceCandidates + 12
+	for i := range total {
+		a.recordEvidenceFromMessage(message.Message{
+			Role:    message.RoleUser,
+			Content: fmt.Sprintf("implement feature number %d in the parser", i),
+		})
+	}
+
+	items := a.evidence.snapshot()
+	if len(items) != maxEvidenceCandidates {
+		t.Fatalf("tracker len = %d, want %d", len(items), maxEvidenceCandidates)
+	}
+	for i := 1; i < len(items); i++ {
+		if items[i].Sequence <= items[i-1].Sequence {
+			t.Fatalf("sequence stopped increasing at %d: %d <= %d", i, items[i].Sequence, items[i-1].Sequence)
+		}
+	}
+
+	// A saturated tracker must still resolve the newest request, not the
+	// oldest survivor of the retained window.
+	want := fmt.Sprintf("implement feature number %d in the parser", total-1)
+	var picked string
+	for _, item := range evidenceItemsFromCandidates(items, 200000) {
+		if item.Kind == evidenceUserRequest {
+			picked = item.Excerpt
+		}
+	}
+	if picked != want {
+		t.Fatalf("latest user request = %q, want %q", picked, want)
+	}
+}
+
+func TestEvidenceTrackerSequenceIgnoresCallerSuppliedValue(t *testing.T) {
+	var tracker evidenceCandidateTracker
+	tracker.add(evidenceItem{Kind: evidenceToolError, Excerpt: "first", Sequence: 999})
+	tracker.add(evidenceItem{Kind: evidenceToolError, Excerpt: "second", Sequence: 1})
+	items := tracker.snapshot()
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want 2", len(items))
+	}
+	if items[0].Sequence != 1 || items[1].Sequence != 2 {
+		t.Fatalf("sequences = %d, %d; want 1, 2", items[0].Sequence, items[1].Sequence)
+	}
+}
+
+// agenticTailHistory builds userTurns turns, each with callsPerTurn tool calls
+// whose results are payload bytes long.
+func agenticTailHistory(userTurns, callsPerTurn, payload int) []message.Message {
+	body := strings.Repeat("x", payload)
+	var msgs []message.Message
+	for u := range userTurns {
+		msgs = append(msgs, message.Message{Role: message.RoleUser, Content: fmt.Sprintf("request %d", u)})
+		for c := range callsPerTurn {
+			id := fmt.Sprintf("call-%d-%d", u, c)
+			msgs = append(msgs,
+				message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: id, Name: "read"}}},
+				message.Message{Role: message.RoleTool, ToolCallID: id, Content: body},
+			)
+		}
+		msgs = append(msgs, message.Message{Role: message.RoleAssistant, Content: "turn wrap-up"})
+	}
+	return msgs
+}
+
+func TestSelectRecentTailDegradesInsteadOfDroppingTail(t *testing.T) {
+	const contextLimit = 200000
+	budget := recentTailTokenBudget(contextLimit)
+
+	// A latest user turn whose own tool loop dwarfs the tail budget: whole-turn
+	// selection cannot fit, so the suffix fallback must still preserve context.
+	messages := agenticTailHistory(12, 5, 12000)
+	tail := selectRecentTailMessages(messages, compactRecentTailTurns, budget)
+	if len(tail) == 0 {
+		t.Fatal("large agentic turn produced no recent tail; continuation compaction would degrade to summary-only")
+	}
+	if got := ctxmgr.EstimateMessagesTokens(tail); got > budget {
+		t.Fatalf("tail tokens = %d, want <= %d", got, budget)
+	}
+	if tail[0].Role == message.RoleTool {
+		t.Fatalf("tail starts with an orphan tool result: %+v", tail[0])
+	}
+}
+
+func TestCompactionHeadSplitPreservesTailForLargeAgenticTurn(t *testing.T) {
+	const contextLimit = 200000
+	messages := agenticTailHistory(12, 5, 12000)
+	split := compactionHeadSplitForProfile(compactionProfileContinuation, messages, contextLimit)
+	if split <= 0 || split >= len(messages) {
+		t.Fatalf("head split = %d with %d messages; want a split that keeps a raw tail", split, len(messages))
+	}
+	if messages[split].Role == message.RoleTool {
+		t.Fatalf("head split %d leaves an orphan tool result at the tail head", split)
+	}
+	if got := ctxmgr.EstimateMessagesTokens(messages[split:]); got > recentTailTokenBudget(contextLimit) {
+		t.Fatalf("preserved tail tokens = %d, want <= %d", got, recentTailTokenBudget(contextLimit))
+	}
+}
+
+func TestCompactionHeadSplitStillArchivesEverythingForArchival(t *testing.T) {
+	messages := agenticTailHistory(12, 5, 12000)
+	if got := compactionHeadSplitForProfile(compactionProfileArchival, messages, 200000); got != len(messages) {
+		t.Fatalf("archival head split = %d, want %d", got, len(messages))
+	}
+}
+
+func TestLongestSafeTailWithinBudgetRejectsUnsafeStarts(t *testing.T) {
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: "start"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "a"}, {ID: "b"}}},
+		{Role: message.RoleTool, ToolCallID: "a", Content: "one"},
+		{Role: message.RoleTool, ToolCallID: "b", Content: "two"},
+		{Role: message.RoleAssistant, Content: "done"},
+	}
+	tail := longestSafeTailWithinBudget(messages, 100000)
+	if len(tail) == 0 {
+		t.Fatal("expected a tail")
+	}
+	if tail[0].Role == message.RoleTool {
+		t.Fatalf("tail starts with an orphan tool result: %+v", tail[0])
+	}
+}
+
+func TestFormatRecentTailAnchorBoundsRenderedMessages(t *testing.T) {
+	var messages []message.Message
+	for i := range compactRecentTailAnchorMessages + 8 {
+		messages = append(messages, message.Message{Role: message.RoleAssistant, Content: fmt.Sprintf("line %d", i)})
+	}
+	anchor := formatRecentTailAnchor(messages)
+	if got := strings.Count(anchor, "\n") + 1; got > compactRecentTailAnchorMessages+1 {
+		t.Fatalf("anchor rendered %d lines, want at most %d", got, compactRecentTailAnchorMessages+1)
+	}
+	if !strings.Contains(anchor, "older preserved message(s) omitted here") {
+		t.Fatalf("anchor missing omission notice: %q", anchor)
+	}
+	if !strings.Contains(anchor, fmt.Sprintf("line %d", len(messages)-1)) {
+		t.Fatalf("anchor dropped the newest message: %q", anchor)
+	}
+}
+
+func TestLooksLikeUserCorrectionPrecision(t *testing.T) {
+	corrections := []string{
+		"不要再改这个文件了",
+		"别改 config.yaml",
+		"只能用标准库",
+		"必须保留原有接口",
+		"don't touch the parser",
+		"use a map instead",
+	}
+	for _, text := range corrections {
+		if !looksLikeUserCorrection(text) {
+			t.Errorf("looksLikeUserCorrection(%q) = false, want true", text)
+		}
+	}
+
+	// Ordinary requests that merely contain 别 / 只 inside common words must
+	// not be promoted to priority-100 constraints.
+	ordinary := []string{
+		"分析一下这两个实现的区别",
+		"这个功能特别慢，看看为什么",
+		"只是想确认一下当前的行为",
+		"只有一个测试失败了，帮我看看",
+		"按级别把日志分类",
+		"only 3 tests are failing now",
+	}
+	for _, text := range ordinary {
+		if looksLikeUserCorrection(text) {
+			t.Errorf("looksLikeUserCorrection(%q) = true, want false", text)
+		}
+		if !isPlainUserRequestForCompaction(text) {
+			t.Errorf("isPlainUserRequestForCompaction(%q) = false, want true", text)
+		}
+	}
+}

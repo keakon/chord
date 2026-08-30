@@ -56,9 +56,12 @@ decisions, file evidence, etc.), archives old messages, and replaces the
 conversation history with the summary. The compacted session is persisted to
 disk.
 
-Continuation-oriented compaction keeps a small, safe recent tail (normally the
-latest two user turns, within a token budget) as verbatim messages after the
-checkpoint. Tool-call/result pairs are never split, and short histories fall
+Continuation-oriented compaction keeps a safe recent tail as verbatim messages
+after the checkpoint. It prefers whole user turns (normally the latest two)
+within a token budget of about 5% of the context window; when even a single user
+turn exceeds that budget — the usual case once that turn carries a full tool loop
+— it falls back to the longest safe suffix that does fit rather than dropping the
+tail entirely. Tool-call/result pairs are never split, and short histories fall
 back to summarizing the full safe head when preserving the tail would leave too
 little material to summarize. Explicit `archival` profiles remain summary-only.
 Key files reloaded from the checkpoint are request-local overlays read from disk
@@ -81,7 +84,7 @@ context:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `threshold` | float | `0.8` | Context usage ratio that triggers automatic compaction. Range `0`–`1`, e.g. `0.8` means trigger when usage reaches 80% of the usable input budget. Set to `0` to disable automatic compaction. |
-| `model_pool` | string | clone current agent pool | Name of a dedicated model pool for compaction. Use a low-cost/fast model to minimize overhead. |
+| `model_pool` | string | clone current agent pool | Name of a dedicated model pool for compaction. Prefer a large context window over raw cost: the summarize input is trimmed to fit the compaction model's own window, dropping the **earliest** archived messages first, so a small-window model can leave the summary blind to how the session started. A fast, cheap model with a large window is the ideal choice. |
 | `reserved` | int | `0` | Fixed token headroom added on top of the proportional headroom left by `threshold`, for tokenizer drift, tool schema overhead, and compaction/recovery safety. Usually omit it (leave it at `0`); a non-zero value is subtracted from the input budget before applying `threshold`. |
 | `preset` | string | auto-detected | Force a specific compaction implementation. Usually unnecessary. |
 | `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |

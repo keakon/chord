@@ -513,14 +513,21 @@ func recentTailTokenBudget(contextLimit int) int {
 	if contextLimit <= 0 {
 		return compactRecentTailMinTokens
 	}
-	b := contextLimit / 50
+	b := contextLimit / compactRecentTailBudgetRatio
 	b = max(b, compactRecentTailMinTokens)
 	b = min(b, compactRecentTailMaxTokens)
 	return b
 }
 
+// selectRecentTailMessages picks the raw tail kept verbatim after a
+// continuation checkpoint. It prefers whole user turns (newest first) so the
+// tail reads as complete exchanges. When even a single user turn exceeds the
+// budget — the common case once that turn carries a real tool loop, which is
+// exactly when compaction fires — it degrades to the longest safe suffix that
+// fits instead of returning nothing, because an empty tail silently turns
+// continuation compaction into summary-only compaction.
 func selectRecentTailMessages(messages []message.Message, userTurns int, maxTokens int) []message.Message {
-	if len(messages) == 0 || userTurns <= 0 || maxTokens <= 0 {
+	if len(messages) == 0 || maxTokens <= 0 {
 		return nil
 	}
 	for turns := userTurns; turns >= 1; turns-- {
@@ -544,14 +551,45 @@ func selectRecentTailMessages(messages []message.Message, userTurns int, maxToke
 			return tail
 		}
 	}
-	return nil
+	return longestSafeTailWithinBudget(messages, maxTokens)
+}
+
+// longestSafeTailWithinBudget returns the longest suffix that fits maxTokens and
+// starts at an index SafeKeepBoundary already considers safe — so the tail never
+// opens with an orphaned tool result and never splits a pending tool call. Only
+// self-stable indices are accepted: a boundary SafeKeepBoundary would pull
+// backwards could reintroduce messages the budget scan already rejected.
+func longestSafeTailWithinBudget(messages []message.Message, maxTokens int) []message.Message {
+	best := -1
+	cost := 0
+	for i := len(messages) - 1; i > 0; i-- {
+		cost += ctxmgr.EstimateMessageTokens(messages[i])
+		if cost > maxTokens {
+			break
+		}
+		if ctxmgr.SafeKeepBoundary(messages, i) == i {
+			best = i
+		}
+	}
+	if best <= 0 {
+		return nil
+	}
+	return append([]message.Message(nil), messages[best:]...)
 }
 
 func formatRecentTailAnchor(messages []message.Message) string {
 	if len(messages) == 0 {
 		return "- (none)"
 	}
+	omitted := 0
+	if len(messages) > compactRecentTailAnchorMessages {
+		omitted = len(messages) - compactRecentTailAnchorMessages
+		messages = messages[omitted:]
+	}
 	var sb strings.Builder
+	if omitted > 0 {
+		fmt.Fprintf(&sb, "- (+%d older preserved message(s) omitted here; still verbatim in context)\n", omitted)
+	}
 	for _, msg := range messages {
 		text := strings.TrimSpace(msg.Content)
 		if len(msg.Parts) > 0 {
