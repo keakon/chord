@@ -92,12 +92,19 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	todos := a.GetTodos()
 	subAgents := a.taskInfosForCompaction()
 	backgroundObjects := spawnStatesForSnapshot()
+	// evidenceItemsForCompaction reads the event-loop-owned evidence tracker;
+	// capture the slice here and hand it to the worker so the draft never
+	// touches the tracker from another goroutine.
 	evidenceItems := a.evidenceItemsForCompaction(snapshot, a.ctxMgr.GetMaxTokens())
 	profile := a.resolveCompactionProfile(todos, subAgents, backgroundObjects, evidenceItems)
 	if a.configuredCompactionProfile() == compactionProfileAuto && continuationRequiresRawTail(continuation.kind) {
 		profile = compactionProfileContinuation
 	}
 	headSplit := compactionHeadSplitForProfile(profile, snapshot, a.ctxMgr.GetMaxTokens())
+	// Read the original request on the event loop: captureOriginalFirstUserHint
+	// consults the usage ledger and the pre-rewrite session log, and must not
+	// race the apply step that replaces both.
+	originalRequest := a.captureOriginalFirstUserHint()
 
 	ctx, cancel := context.WithTimeout(a.parentCtx, compactionDraftTimeout)
 	// The worker may outlive the turn that scheduled it because compaction runs
@@ -112,7 +119,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	a.emitCompactionSlotActivity()
 	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted})
 	a.compactionWg.Add(1)
-	go func(ctx context.Context, snapshot []message.Message, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, manual bool) {
+	go func(ctx context.Context, snapshot []message.Message, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, manual bool, originalRequest string, evidenceItems []evidenceItem) {
 		defer a.compactionWg.Done()
 		defer cancel()
 
@@ -133,7 +140,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 			}
 		}()
 
-		draft, err := a.produceCompactionDraftAsync(ctx, snapshot, manual, planID, target, headSplit, profile)
+		draft, err := a.produceCompactionDraftAsync(ctx, snapshot, manual, planID, target, headSplit, profile, originalRequest, evidenceItems)
 		if err != nil {
 			a.sendEvent(Event{Type: EventCompactionFailed, Payload: &compactionFailure{planID: planID, target: target, err: err, absHistoryPath: getAbsHistoryPathFromDraft(draft)}})
 			return
@@ -144,7 +151,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 			draft.HeadSplit = headSplit
 		}
 		a.sendEvent(Event{Type: EventCompactionReady, Payload: draft})
-	}(ctx, snapshot, planID, target, headSplit, profile, manual)
+	}(ctx, snapshot, planID, target, headSplit, profile, manual, originalRequest, evidenceItems)
 }
 
 func (a *MainAgent) maybeRunAutoCompaction() {
@@ -184,7 +191,7 @@ func (a *MainAgent) handleCompactCommand() {
 // new message list. Safe to call from a background goroutine (read-only use of
 // MainAgent fields + LLM / filesystem). Tail messages [headSplit:) are preserved
 // by ReplacePrefixAtomic at apply time, so the draft only carries the summary.
-func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []message.Message, manual bool, planID uint64, target compactionTarget, headSplit int, profile compactionProfile) (*compactionDraft, error) {
+func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []message.Message, manual bool, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, originalRequest string, evidenceItems []evidenceItem) (*compactionDraft, error) {
 	// Check for cancellation before starting expensive work
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -216,9 +223,12 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	subAgents := a.taskInfosForCompaction()
 	backgroundObjects := spawnStatesForSnapshot()
 	headSnapshot := snapshot[:headSplit]
-	evidenceItems := a.evidenceItemsForCompaction(headSnapshot, a.ctxMgr.GetMaxTokens())
 
 	evidenceItems, _ = applyCompactionProfile(profile, headSnapshot, a.ctxMgr.GetMaxTokens(), evidenceItems)
+	// Anchors are inherited from the previous checkpoint rather than re-derived,
+	// so recursive compaction cannot erode the original request or a standing
+	// constraint one summary at a time.
+	sessionAnchors := buildCompactionAnchors(latestCompactionAnchors(snapshot), originalRequest, evidenceItems)
 	recentTail := append([]message.Message(nil), snapshot[headSplit:]...)
 	keyFiles := extractCompactionKeyFileCandidates(snapshot, a.projectRoot, 8)
 	head, evidenceMsgs := splitMessagesForCompactionWithSelections(headSnapshot, nil, evidenceItems)
@@ -257,14 +267,14 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	modelRef := ""
 	keepAlive := newCompactionKeepAlive(a)
 	defer keepAlive.Stop()
-	summaryText, backendUsed, usedModel, summarizeErr := a.summarizeCompactionHead(ctx, head, pathutil.AbbreviateHome(absHistoryPath), evidenceItems, recentTail, todos, subAgents, backgroundObjects)
+	summaryText, backendUsed, usedModel, summarizeErr := a.summarizeCompactionHead(ctx, head, pathutil.AbbreviateHome(absHistoryPath), evidenceItems, recentTail, todos, subAgents, backgroundObjects, sessionAnchors)
 	if strings.TrimSpace(backendUsed) != "" {
 		backendName = backendUsed
 	}
 	if summarizeErr != nil {
 		summaryMode = "structured_fallback"
 		modelRef = "fallback"
-		input, inputErr := buildCompactionInputWithOptions(head, a.ctxMgr.GetMaxTokens(), evidenceItems, recentTail, false)
+		input, inputErr := buildCompactionInputWithOptions(head, a.ctxMgr.GetMaxTokens(), evidenceItems, recentTail, false, sessionAnchors)
 		if inputErr == nil {
 			input.EvidenceItems = evidenceItems
 			summaryText = buildStructuredFallbackSummary(pathutil.AbbreviateHome(absHistoryPath), input, summarizeErr, keyFiles, todos, subAgents, backgroundObjects)
@@ -288,7 +298,16 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		historyRefs[i] = pathutil.AbbreviateHome(ref)
 	}
 	summaryText = ensureCompactionSummaryKeyFiles(strings.TrimSpace(summaryText), keyFiles)
-	checkpointContent := buildCompactionCheckpointMessage(summaryText, historyRefs, summaryMode, evidenceItems)
+	// Anchor coherence (duplicate, co-existing, or mutually contradictory
+	// active/superseded constraints) is a diagnostic, not a gate: refusing the
+	// checkpoint here would leave the context that triggered compaction growing
+	// unchecked, which is worse than shipping a checkpoint with a redundant
+	// constraint line. Problems go to the log only — they are maintainer-facing
+	// and must not reach the model or the UI as conversation text.
+	if problems := verifyAnchorsCoherence(sessionAnchors); len(problems) > 0 {
+		log.Warnf("compaction checkpoint anchor coherence problems: %v", problems)
+	}
+	checkpointContent := buildCompactionCheckpointMessage(withCompactionAnchors(summaryText, sessionAnchors), historyRefs, summaryMode, evidenceItems)
 	checkpointKeyFiles := extractCompactionKeyFiles(checkpointContent, a.projectRoot)
 	keyFileRevisions := captureCompactionFileRevisions(checkpointKeyFiles, a.resolveCheckpointFilePath)
 	contextSummaryMsg := message.Message{
@@ -418,7 +437,14 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// declarations against the compacted history.
 	a.forceFullMCPToolInjection()
 
-	a.resetRuntimeEvidenceFromMessages(d.NewMessages)
+	// Rebuild the runtime evidence candidates from the complete compacted message
+	// list (checkpoint + preserved tail), not just the checkpoint. The summary
+	// itself is exempt (recordEvidenceFromMessage skips IsCompactionSummary), but
+	// the latest user request / correction / tool error in the preserved tail must
+	// re-enter the candidates so the next compaction cannot erode them away one
+	// round at a time; the archived head is replaced by the checkpoint and never
+	// re-scanned.
+	a.resetRuntimeEvidenceFromMessages(compactedMessages)
 	a.resetContextReductionStats()
 	a.clearLoopFrozenReductionPrefix()
 	if a.llmClient != nil {
@@ -511,7 +537,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	return nil
 }
 
-func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.Message, historyPath string, evidenceItems []evidenceItem, recentTail []message.Message, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) (summary string, backendName string, modelRef string, err error) {
+func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.Message, historyPath string, evidenceItems []evidenceItem, recentTail []message.Message, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState, sessionAnchors compactionAnchors) (summary string, backendName string, modelRef string, err error) {
 	modelRef = a.compactionModelRef()
 	client, utilityContextLimit, err := a.newCompactionClient(modelRef)
 	if err != nil {
@@ -520,7 +546,7 @@ func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.
 	client.SetOutputTokenMax(compactReservedOutput)
 	keyFiles := extractCompactionKeyFileCandidates(head, a.projectRoot, 8)
 
-	input, err := buildCompactionInputWithOptions(head, utilityContextLimit, evidenceItems, recentTail, false)
+	input, err := buildCompactionInputWithOptions(head, utilityContextLimit, evidenceItems, recentTail, false, sessionAnchors)
 	if err != nil {
 		return "", "", modelRef, err
 	}

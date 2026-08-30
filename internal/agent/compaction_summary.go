@@ -107,13 +107,14 @@ type compactionInput struct {
 	EvidenceItems    []evidenceItem
 	RecentTail       []message.Message
 	RecentTailAnchor string
+	SessionAnchors   compactionAnchors
 	GoalAnchor       string
 	ConstraintAnchor string
 	DecisionAnchor   string
 	ProgressAnchor   string
 }
 
-func buildCompactionInputWithOptions(head []message.Message, contextLimit int, evidenceItems []evidenceItem, recentTail []message.Message, autoRecentTail bool) (*compactionInput, error) {
+func buildCompactionInputWithOptions(head []message.Message, contextLimit int, evidenceItems []evidenceItem, recentTail []message.Message, autoRecentTail bool, sessionAnchors compactionAnchors) (*compactionInput, error) {
 	pruned := (&MainAgent{}).prepareMessagesForLLM(head)
 	normalized := normalizeMessagesForSummary(pruned)
 	budget := compactionInputBudget(contextLimit)
@@ -137,6 +138,7 @@ func buildCompactionInputWithOptions(head []message.Message, contextLimit int, e
 		EvidenceItems:    evidenceItems,
 		RecentTail:       recentTail,
 		RecentTailAnchor: formatRecentTailAnchor(recentTail),
+		SessionAnchors:   sessionAnchors,
 		GoalAnchor:       buildGoalAnchor(normalized),
 		ConstraintAnchor: buildConstraintAnchor(evidenceItems),
 		DecisionAnchor:   buildDecisionAnchor(normalized),
@@ -947,7 +949,13 @@ func buildCompactionPromptWithKeyFiles(input *compactionInput, historyPath strin
 	if input != nil && input.OmittedMessages > 0 {
 		fmt.Fprintf(&sb, "Compression note: the earliest %d archived message(s) were omitted from the summary input to fit the utility model budget. The archived history file is authoritative for those details.\n", input.OmittedMessages)
 	}
-	sb.WriteString("\nDurable anchors extracted before summarization:\n")
+	sb.WriteString("\nDurable session anchors (carried forward verbatim in the checkpoint):\n")
+	if input != nil {
+		sb.WriteString(formatCompactionAnchorsForSummarizePrompt(input.SessionAnchors))
+	} else {
+		sb.WriteString(formatCompactionAnchorsForSummarizePrompt(compactionAnchors{}))
+	}
+	sb.WriteString("\n\nDurable anchors extracted before summarization:\n")
 	sb.WriteString(formatCompactionAnchorsForPrompt(input))
 	sb.WriteString("\n\nKey file candidates:\n")
 	sb.WriteString(formatKeyFileCandidatesForPrompt(keyFiles))

@@ -486,7 +486,7 @@ func validCompactionSummaryForTest(history string) string {
 // summarizeCompactionHeadForTest invokes summarizeCompactionHead with the
 // continuation profile defaults previously baked into the deleted 2-arg wrapper.
 func summarizeCompactionHeadForTest(a *MainAgent, head []message.Message, historyPath string) (summary string, modelRef string, err error) {
-	summary, _, modelRef, err = a.summarizeCompactionHead(context.Background(), head, historyPath, nil, nil, a.GetTodos(), a.taskInfosForCompaction(), spawnStatesForSnapshot())
+	summary, _, modelRef, err = a.summarizeCompactionHead(context.Background(), head, historyPath, nil, nil, a.GetTodos(), a.taskInfosForCompaction(), spawnStatesForSnapshot(), compactionAnchors{})
 	return summary, modelRef, err
 }
 
@@ -4220,7 +4220,7 @@ func TestBuildCompactionInputUsesProvidedEvidenceAndTail(t *testing.T) {
 	evidence := []evidenceItem{{Kind: evidenceUserCorrection, Title: "constraint", Excerpt: "do not hardcode"}}
 	tail := []message.Message{{Role: "user", Content: "Continue and prioritize candidate containment handling."}}
 
-	input, err := buildCompactionInputWithOptions(head, 8192, evidence, tail, true)
+	input, err := buildCompactionInputWithOptions(head, 8192, evidence, tail, true, compactionAnchors{})
 	if err != nil {
 		t.Fatalf("buildCompactionInput error: %v", err)
 	}
@@ -4570,7 +4570,7 @@ func TestProduceCompactionDraftArchivalProfileOmitsRecentTail(t *testing.T) {
 	// Test bypasses ctxmgr so use a non-zero headSplit directly. The async path
 	// requires headSplit > 0 because tail is preserved by ReplacePrefixAtomic.
 	headSplit := len(snapshot)
-	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, headSplit, compactionProfileArchival)
+	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, headSplit, compactionProfileArchival, "", nil)
 	if err != nil {
 		t.Fatalf("produceCompactionDraftAsync error: %v", err)
 	}
@@ -4617,7 +4617,7 @@ func TestProduceCompactionDraftCapturesSummaryKeyFileRevision(t *testing.T) {
 		{Role: message.RoleTool, ToolCallID: "read-1", Content: "READ_RESULT lines=1-1 total=1\npackage current"},
 		{Role: message.RoleAssistant, Content: "continue"},
 	}
-	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival)
+	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival, "", nil)
 	if err != nil {
 		t.Fatalf("produceCompactionDraftAsync: %v", err)
 	}

@@ -154,6 +154,7 @@ Requirements:
 - Keep each file path on its own bullet line. Do not add inline explanation text on the same line as a file path.
 - Focus on durable continuation context, not narrative recap.
 - Do not duplicate long verbatim excerpts already present in the evidence pack or recent tail anchor.
+- Durable session anchors are preserved verbatim outside your summary: do not restate them, and never write anything that contradicts them. They outrank the transcript when the two disagree.
 - If details are missing because earliest messages were omitted, say so explicitly instead of inventing facts.`
 
 type evidenceKind string
@@ -703,6 +704,9 @@ func selectEvidenceItems(messages []message.Message, contextLimit int) []evidenc
 	return evidenceItemsFromCandidates(items, contextLimit)
 }
 
+// evidenceItemsForCompaction reads the event-loop-owned evidence tracker and
+// must be called on the event loop; it returns an independent slice, so the
+// result can be handed to the compaction worker without sharing tracker state.
 func (a *MainAgent) evidenceItemsForCompaction(_ []message.Message, contextLimit int) []evidenceItem {
 	return evidenceItemsFromCandidates(a.evidence.snapshot(), contextLimit)
 }

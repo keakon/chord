@@ -56,6 +56,16 @@ decisions, file evidence, etc.), archives old messages, and replaces the
 conversation history with the summary. The compacted session is persisted to
 disk.
 
+Every checkpoint opens with a **session anchors** block: the original request
+that started the session, plus the standing constraints extracted from your
+corrections. Compaction is recursive — each run re-summarizes the previous
+checkpoint — so anything left to the summarizer erodes a little every round.
+Anchors are exempt: they are copied forward verbatim from the previous
+checkpoint instead of being regenerated, and the summarizer is told not to
+restate or contradict them. The constraint list is bounded; on overflow the
+earliest entries (usually project-wide ground rules) and the newest ones are
+kept while the middle is dropped.
+
 Continuation-oriented compaction keeps a safe recent tail as verbatim messages
 after the checkpoint. It prefers whole user turns (normally the latest two)
 within a token budget of about 5% of the context window; when even a single user
