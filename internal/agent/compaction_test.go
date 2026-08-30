@@ -1982,14 +1982,18 @@ func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocks(t *testing.T) {
 		{Role: "tool", ToolCallID: "tc1", Content: content},
 		{Role: "user", Content: "u2"},
 		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
 	if !strings.Contains(prepared[2].Content, "Diagnostics summary:") {
 		t.Fatalf("expected diagnostics summary, got %q", prepared[2].Content)
 	}
-	if !strings.Contains(prepared[2].Content, "[E] 10:1 [F821] Undefined name `x`") || strings.Contains(prepared[2].Content, "another diagnostic") {
-		t.Fatalf("expected only first actionable diagnostic kept, got %q", prepared[2].Content)
+	if !strings.Contains(prepared[2].Content, "[E] 10:1 [F821] Undefined name `x`") || !strings.Contains(prepared[2].Content, "another diagnostic") {
+		t.Fatalf("expected every diagnostic location preserved, got %q", prepared[2].Content)
+	}
+	if strings.Contains(prepared[2].Content, "Used Ruff quick diagnostics") {
+		t.Fatalf("expected explanatory diagnostics prose dropped, got %q", prepared[2].Content)
 	}
 }
 
@@ -2002,6 +2006,7 @@ func TestPrepareMessagesForLLM_DiagnosticsCompactionPreservesToolDiff(t *testing
 		{Role: "tool", ToolCallID: "tc1", Content: content, ToolDiff: "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"},
 		{Role: "user", Content: "u2"},
 		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
@@ -2022,6 +2027,7 @@ func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocksPrefersActionableLi
 		{Role: "tool", ToolCallID: "tc1", Content: content},
 		{Role: "user", Content: "u2"},
 		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
 	}
 
 	prepared := a.prepareMessagesForLLM(msgs)
@@ -2029,7 +2035,38 @@ func TestPrepareMessagesForLLM_CompactsOlderDiagnosticsBlocksPrefersActionableLi
 		t.Fatalf("expected actionable diagnostic line kept, got %q", prepared[2].Content)
 	}
 	if strings.Contains(prepared[2].Content, "Diagnostics status:") {
-		t.Fatalf("expected status line not prioritized, got %q", prepared[2].Content)
+		t.Fatalf("expected status line dropped, got %q", prepared[2].Content)
+	}
+}
+
+// A newer diagnostics-bearing result supersedes the older block: the older one
+// collapses to a single representative line with an explicit note pointing at
+// the fresher output (mirroring the read superseded semantics), while the
+// newest block keeps its full location list.
+func TestPrepareMessagesForLLM_NewerDiagnosticsSupersedeOlderBlock(t *testing.T) {
+	a := &MainAgent{}
+	older := "Replaced 1 occurrence\n\nDiagnostics:\n[E] 10:1 [F821] Undefined name `x`\n[E] 11:1 another diagnostic"
+	newer := "Replaced 1 occurrence\n\nDiagnostics:\n[E] 20:1 [F822] undefined name `y`\n[E] 21:1 warning z"
+	msgs := []message.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.py\n@@\n-x\n+y\n*** End Patch"}`)}}},
+		{Role: "tool", ToolCallID: "tc1", Content: older},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.py\n@@\n-y\n+z\n*** End Patch"}`)}}},
+		{Role: "tool", ToolCallID: "tc2", Content: newer},
+		{Role: "user", Content: "u3"},
+		{Role: "user", Content: "u4"},
+	}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "a newer diagnostics output appears later") {
+		t.Fatalf("older diagnostics block should note the newer output, got %q", prepared[2].Content)
+	}
+	if strings.Contains(prepared[2].Content, "another diagnostic") {
+		t.Fatalf("superseded diagnostics block should collapse, got %q", prepared[2].Content)
+	}
+	if !strings.Contains(prepared[5].Content, "[E] 20:1 [F822] undefined name `y`") || !strings.Contains(prepared[5].Content, "warning z") {
+		t.Fatalf("newest diagnostics block must keep its full location list, got %q", prepared[5].Content)
 	}
 }
 

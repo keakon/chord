@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -39,21 +40,26 @@ func TestFreshToolOutputsAreNeverSummarizedAtFirstSight(t *testing.T) {
 	}()
 	diagnostics := "Replaced 1 occurrence\n\nDiagnostics:\n[E] 10:1 [F821] Undefined name `x`\n[E] 11:1 another diagnostic"
 	for _, tc := range []struct {
-		name string
-		ctx  requestReductionContext
+		name        string
+		ctx         requestReductionContext
+		reducibleAt int
 	}{
-		{name: "shell success", ctx: requestReductionContext{ToolName: tools.NameShell, Content: bigShellSuccess, Policy: policy}},
-		{name: "search result", ctx: requestReductionContext{ToolName: tools.NameGrep, Content: bigSearch, Policy: policy}},
-		{name: "edit diagnostics", ctx: requestReductionContext{ToolName: tools.NameEdit, Content: diagnostics, Policy: policy}},
+		{name: "shell success", ctx: requestReductionContext{ToolName: tools.NameShell, Content: bigShellSuccess, Policy: policy}, reducibleAt: policy.ShellSuccessAgeTurns},
+		{name: "search result", ctx: requestReductionContext{ToolName: tools.NameGrep, Content: bigSearch, Policy: policy}, reducibleAt: policy.ReadLikeAgeTurns},
+		{name: "edit diagnostics", ctx: requestReductionContext{ToolName: tools.NameEdit, Content: diagnostics, Policy: policy}, reducibleAt: policy.ErrorAgeTurns},
 	} {
 		tc.ctx.Age = 1
 		if got := classifyRequestReductionToolOutput(tc.ctx); got != requestReductionNone {
 			t.Fatalf("%s at first sight (age 1) classified %q, want none", tc.name, got)
 		}
-		tc.ctx.Age = 2
+		tc.ctx.Age = tc.reducibleAt
 		if got := classifyRequestReductionToolOutput(tc.ctx); got == requestReductionNone {
-			t.Fatalf("%s at age 2 should be reducible, got none", tc.name)
+			t.Fatalf("%s at age %d should be reducible, got none", tc.name, tc.reducibleAt)
 		}
+	}
+	diagCtx := requestReductionContext{ToolName: tools.NameEdit, Content: diagnostics, Age: policy.ErrorAgeTurns, Policy: policy}
+	if got := classifyRequestReductionToolOutput(diagCtx); got != requestReductionDiagnostics {
+		t.Fatalf("edit diagnostics at ErrorAgeTurns classified %q, want diagnostics", got)
 	}
 	// Validity markers are not payload thinning: a stale read renders its
 	// marker immediately instead of exposing misleading content for a round.
@@ -66,6 +72,108 @@ func TestFreshToolOutputsAreNeverSummarizedAtFirstSight(t *testing.T) {
 	}
 	if got := classifyRequestReductionToolOutput(staleRead); got != requestReductionReadLike {
 		t.Fatalf("invalidated read at age 1 classified %q, want read_like validity marker", got)
+	}
+}
+
+// A failing tool result is the strongest signal in its payload: while it is
+// younger than the error age it must stay complete (the model is about to act
+// on it), and shape-based rules (search, build-log, JSON) must never miscast a
+// failure's path:line:col lines as a search hit. Once aged, the error summary
+// still keeps the failing paths/lines and the tail.
+func TestFailedToolOutputStaysCompleteUntilErrorAge(t *testing.T) {
+	policy := defaultContextReductionPolicy()
+	content := "go build ./...\n./internal/agent/main.go:23:5: undefined: foo\n./internal/agent/main.go:24:9: undefined: bar\n" +
+		strings.Repeat("build log filler line\n", 200)
+	ctx := requestReductionContext{
+		ToolName:   tools.NameShell,
+		Content:    content,
+		ToolStatus: string(ToolResultStatusError),
+		Age:        policy.ErrorAgeTurns - 1,
+		Policy:     policy,
+	}
+	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionNone {
+		t.Fatalf("young failed output classified %q, want none (keep complete)", got)
+	}
+	ctx.Age = policy.ErrorAgeTurns
+	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionToolError {
+		t.Fatalf("aged failed output classified %q, want tool_error", got)
+	}
+	reduced, rule, ok := reduceRequestToolOutput(requestReductionToolError, ctx)
+	if !ok || rule != "error" {
+		t.Fatalf("reduction = (%q, %q, %v), want error summary", reduced, rule, ok)
+	}
+	for _, want := range []string{"undefined", "main.go:23:5", "main.go:24:9"} {
+		if !strings.Contains(reduced, want) {
+			t.Fatalf("error summary lost %q: %q", want, reduced)
+		}
+	}
+}
+
+// A cancelled result is not an error: it must not adopt the tool-error
+// semantics, even past the error age, when its payload carries no error.
+func TestCancelledToolOutputIsNotTreatedAsFailed(t *testing.T) {
+	policy := defaultContextReductionPolicy()
+	ctx := requestReductionContext{
+		ToolName:   tools.NameShell,
+		Content:    strings.Repeat("plain log line\n", 60),
+		ToolStatus: string(ToolResultStatusCancelled),
+		Age:        policy.ErrorAgeTurns + 2,
+		Policy:     policy,
+	}
+	if got := classifyRequestReductionToolOutput(ctx); got == requestReductionToolError {
+		t.Fatalf("cancelled output classified as tool_error, want a non-error class")
+	}
+}
+
+// The diagnostics summary threshold comes from the configured policy
+// (ErrorAgeTurns), not a hardcoded constant: raising it keeps edit-diagnostics
+// output complete for longer.
+func TestDiagnosticsReductionAgeComesFromPolicy(t *testing.T) {
+	policy := defaultContextReductionPolicy()
+	policy.ErrorAgeTurns = 5
+	ctx := requestReductionContext{
+		ToolName: tools.NameApplyPatch,
+		Content:  "Replaced 1 occurrence\n\nDiagnostics:\n[E] 10:1 [F821] Undefined name `x`",
+		Policy:   policy,
+		Age:      3,
+	}
+	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionNone {
+		t.Fatalf("edit diagnostics below the configured age classified %q, want none", got)
+	}
+	ctx.Age = policy.ErrorAgeTurns
+	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionDiagnostics {
+		t.Fatalf("edit diagnostics at the configured age classified %q, want diagnostics", got)
+	}
+}
+
+// A large edit-diagnostics block must not be miscast as a build log by the
+// read-like gate while it is younger than the diagnostics summary age; it
+// stays complete until the configured ErrorAgeTurns.
+func TestEditDiagnosticsLargeOutputStaysCompleteBeforeSummaryAge(t *testing.T) {
+	policy := defaultContextReductionPolicy()
+	content := "Replaced 1 occurrence\n\nDiagnostics:\n" + strings.Repeat("[E] 3:4 [E1] undefined name `x`\n", 200)
+	ctx := requestReductionContext{
+		ToolName: tools.NameApplyPatch,
+		Content:  content,
+		Age:      policy.ErrorAgeTurns - 1,
+		Policy:   policy,
+	}
+	if len(ctx.Content) <= policy.ReadLikeOutputBytes {
+		t.Fatalf("test fixture must exceed the read-like size gate (%d bytes)", policy.ReadLikeOutputBytes)
+	}
+	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionNone {
+		t.Fatalf("young large diagnostics classified %q, want none (keep complete)", got)
+	}
+	ctx.Age = policy.ErrorAgeTurns
+	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionDiagnostics {
+		t.Fatalf("large diagnostics at the summary age classified %q, want diagnostics", got)
+	}
+	reduced, rule, ok := reduceRequestToolOutput(requestReductionDiagnostics, ctx)
+	if !ok || rule != "diagnostics" {
+		t.Fatalf("reduction = (%q, %q, %v), want diagnostics summary", reduced, rule, ok)
+	}
+	if !strings.Contains(reduced, "undefined name") {
+		t.Fatalf("diagnostics summary lost the location lines: %q", reduced)
 	}
 }
 
@@ -264,6 +372,109 @@ func TestRepeatedInvalidatedReadClassifiesAsReadLikeNotRepeated(t *testing.T) {
 	second, _, _ := reduceRequestToolOutput(requestReductionReadLike, ctx)
 	if first != second {
 		t.Fatalf("read_like rendering is not deterministic:\n%q\nvs\n%q", first, second)
+	}
+}
+
+// An invalidated or superseded read renders its validity marker regardless of
+// size. The frozen incremental path force-refreshes such reads unconditionally,
+// so gating the full scan on ReadLikeOutputBytes made the two paths disagree on
+// small reads and rewrite the cached prefix on alternating requests.
+func TestInvalidatedReadRendersValidityMarkerBelowSizeGate(t *testing.T) {
+	base := requestReductionContext{
+		ToolName: tools.NameRead,
+		Content:  "READ_RESULT lines=1-2 total=2\npackage agent\n",
+		Age:      0,
+		Policy:   defaultContextReductionPolicy(),
+	}
+	if len(base.Content) > base.Policy.ReadLikeOutputBytes {
+		t.Fatalf("fixture must sit below the size gate: %d bytes", len(base.Content))
+	}
+	for _, tc := range []struct {
+		name        string
+		invalidated bool
+		superseded  bool
+		want        requestReductionClass
+	}{
+		{name: "invalidated", invalidated: true, want: requestReductionReadLike},
+		{name: "superseded", superseded: true, want: requestReductionReadLike},
+		{name: "valid", want: requestReductionNone},
+	} {
+		ctx := base
+		ctx.ReadInvalidated = tc.invalidated
+		ctx.ReadSuperseded = tc.superseded
+		if got := classifyRequestReductionToolOutput(ctx); got != tc.want {
+			t.Fatalf("%s: class = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A time-varying command (git status, go test, ls) reissued with identical
+// arguments produces a different output, so the earlier result is the "before"
+// state rather than a duplicate. It must reach the shape-based summarizers
+// instead of collapsing to a marker asserting an identical later call.
+func TestTimeVaryingShellRerunIsSummarizedNotCollapsedAsRepeated(t *testing.T) {
+	a := &MainAgent{}
+	args := json.RawMessage(`{"command":"go test ./..."}`)
+	before := "FAIL\tgithub.com/keakon/chord/internal/agent\n" + strings.Repeat("--- FAIL: TestOld (0.01s)\n", 200)
+	after := "ok\tgithub.com/keakon/chord/internal/agent\t1.2s\n"
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "u1"},
+		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: args}}},
+		{Role: message.RoleTool, ToolCallID: "tc1", ToolStatus: "success", Content: before},
+		{Role: message.RoleAssistant, RequestBatch: 2, ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameShell, Args: args}}},
+		{Role: message.RoleTool, ToolCallID: "tc2", ToolStatus: "success", Content: after},
+	}
+	setTestRequestBatch(a, msgs, 6)
+	prepared := a.prepareMessagesForLLM(msgs)
+	if strings.Contains(prepared[2].Content, "Repeated ") {
+		t.Fatalf("differing earlier output must not collapse to the repeated marker: %q", prepared[2].Content)
+	}
+	if len(prepared[2].Content) >= len(before) {
+		t.Fatalf("the earlier output should still be summarized once past its age gates: %q", prepared[2].Content)
+	}
+	if !strings.Contains(prepared[2].Content, "FAIL") {
+		t.Fatalf("the before-state summary must keep its failing evidence: %q", prepared[2].Content)
+	}
+	if prepared[4].Content != after {
+		t.Fatalf("the newest output must stay verbatim: %q", prepared[4].Content)
+	}
+
+	// A byte-identical rerun still collapses: nothing is lost because the
+	// later copy carries the same content.
+	msgs[4].Content = before
+	prepared = a.prepareMessagesForLLM(msgs)
+	if !strings.Contains(prepared[2].Content, "Repeated ") {
+		t.Fatalf("identical rerun must still collapse: %q", prepared[2].Content)
+	}
+}
+
+// Go and Rust test runners report failures as "--- FAIL: Name" and a bare
+// "FAIL\tpkg" line, which match none of the longer "failed"/"failure" markers.
+// Such output must stay protected while recent and keep its failing lines once
+// summarized, instead of collapsing to "no preserved log lines".
+func TestTestRunnerFailureLinesAreRecognizedAsFailureEvidence(t *testing.T) {
+	content := "--- FAIL: TestSomething (0.01s)\n    x_test.go:12: mismatch\nFAIL\tgithub.com/keakon/chord/internal/agent\t1.2s\n" +
+		strings.Repeat("ok      github.com/keakon/chord/internal/quiet\t0.1s\n", 200)
+	ctx := requestReductionContext{
+		ToolName:   tools.NameShell,
+		Content:    content,
+		ToolStatus: "success",
+		Age:        1,
+		Policy:     defaultContextReductionPolicy(),
+	}
+	if !isHighRiskToolOutput(ctx) {
+		t.Fatal("a failing test run must count as recent high-risk output")
+	}
+	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionNone {
+		t.Fatalf("class = %q, want the recent high-risk protection", got)
+	}
+	ctx.Age = ctx.Policy.HighRiskProtectAgeTurns
+	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionLongLog {
+		t.Fatalf("aged class = %q, want long_log", got)
+	}
+	summary := reduceLongLogOutputSummary(ctx)
+	if !strings.Contains(summary, "--- FAIL: TestSomething") {
+		t.Fatalf("summary dropped the failing case: %q", summary)
 	}
 }
 

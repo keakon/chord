@@ -260,6 +260,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	evidence := buildFileEvidenceViewWithMeta(prepared, callMeta)
 	evidenceStats := evidence.stats(time.Since(evidenceStarted))
 	readValidityByIndex := evidence.validityByMessage()
+	diagnosticsSuperseded := diagnosticsSupersededFlags(prepared, callMeta)
 	if len(externalReadInvalidated) > 0 && readValidityByIndex == nil {
 		readValidityByIndex = make(map[int]readValidity, len(externalReadInvalidated))
 	}
@@ -412,18 +413,19 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			continue
 		}
 		ctx := requestReductionContext{
-			ToolName:        toolName,
-			Meta:            meta,
-			Content:         prepared[i].Content,
-			ToolStatus:      prepared[i].ToolStatus,
-			FileState:       prepared[i].FileState,
-			Age:             age,
-			Policy:          policy,
-			Repeated:        repeated[i],
-			ToolResults:     toolResults,
-			ShellReadOnly:   toolName == tools.NameShell && a.shellCommandReadOnly(prepared[i].ToolCallID, meta.Args),
-			ReadInvalidated: validity.Invalidated,
-			ReadSuperseded:  validity.Superseded,
+			ToolName:              toolName,
+			Meta:                  meta,
+			Content:               prepared[i].Content,
+			ToolStatus:            prepared[i].ToolStatus,
+			FileState:             prepared[i].FileState,
+			Age:                   age,
+			Policy:                policy,
+			Repeated:              repeated[i],
+			ToolResults:           toolResults,
+			ShellReadOnly:         toolName == tools.NameShell && a.shellCommandReadOnly(prepared[i].ToolCallID, meta.Args),
+			ReadInvalidated:       validity.Invalidated,
+			ReadSuperseded:        validity.Superseded,
+			DiagnosticsSuperseded: diagnosticsSuperseded[i],
 		}
 		inputKey := contextReductionToolInputKey(toolName, meta.Args)
 		// Recall protection applies to content-fetch shapes only (reads, web
@@ -637,6 +639,44 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 	}
 	return prepared
+}
+
+// diagnosticsSupersededFlags reports, per tool-result index, whether a newer
+// edit-like result with a diagnostics section appears later in the
+// conversation. The later output carries the fresher LSP state, so the older
+// block collapses to a single representative line instead of a full list
+// (mirroring the read superseded semantics in readValidity).
+func diagnosticsSupersededFlags(messages []message.Message, callMeta map[string]toolCallMeta) map[int]bool {
+	latest := -1
+	for i := range messages {
+		msg := &messages[i]
+		if msg.Role != message.RoleTool {
+			continue
+		}
+		switch toolname.Normalize(callMeta[msg.ToolCallID].Name) {
+		case tools.NameEdit, tools.NameApplyPatch, tools.NameWrite:
+			if strings.Contains(msg.Content, diagnosticsSectionLabel) {
+				latest = i
+			}
+		}
+	}
+	if latest <= 0 {
+		return nil
+	}
+	out := make(map[int]bool)
+	for i := range latest {
+		msg := &messages[i]
+		if msg.Role != message.RoleTool {
+			continue
+		}
+		switch toolname.Normalize(callMeta[msg.ToolCallID].Name) {
+		case tools.NameEdit, tools.NameApplyPatch, tools.NameWrite:
+			if strings.Contains(msg.Content, diagnosticsSectionLabel) {
+				out[i] = true
+			}
+		}
+	}
+	return out
 }
 
 func (a *MainAgent) currentRequestBatch(messages []message.Message) uint64 {
@@ -2282,9 +2322,17 @@ func requestBatchesAfter(messages []message.Message, currentBatch uint64) []int 
 	return ages
 }
 
+// detectRepeatedToolOutputs marks tool results whose content survives verbatim
+// in a later call with identical arguments. Identical arguments alone are not
+// enough: a command can be deterministic (grep, cat) or time-varying (git
+// status, go test, ls), and for the latter the older output is the "before"
+// state the model may still be comparing against. Collapsing it to a marker
+// that asserts the calls are identical would delete evidence and misstate what
+// remains, so a differing older copy is left to the normal shape-based rules,
+// which summarize it without claiming a fresher copy carries it.
 func detectRepeatedToolOutputs(messages []message.Message, meta map[string]toolCallMeta) map[int]bool {
 	repeated := make(map[int]bool)
-	seen := make(map[string]bool)
+	seen := make(map[string][sha256.Size]byte)
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
 		if msg.Role != message.RoleTool {
@@ -2295,8 +2343,13 @@ func detectRepeatedToolOutputs(messages []message.Message, meta map[string]toolC
 			continue
 		}
 		key := contextReductionToolInputKey(call.Name, call.Args)
-		if seen[key] {
-			repeated[i] = true
+		if digest, established := seen[key]; established {
+			if digest == stableReductionHashString(msg.Content) {
+				repeated[i] = true
+			}
+			// The newest trustworthy copy stays the comparison base: it is the
+			// one the marker points at, and re-basing on an intermediate copy
+			// would make the assertion false for everything before it.
 			continue
 		}
 		// Only a trustworthy result establishes "a fresher identical output
@@ -2309,7 +2362,7 @@ func detectRepeatedToolOutputs(messages []message.Message, meta map[string]toolC
 		trustworthy := isToolResultSuccessStatus(msg.ToolStatus) ||
 			(strings.TrimSpace(msg.ToolStatus) == "" && !isToolErrorContent(msg.Content))
 		if trustworthy {
-			seen[key] = true
+			seen[key] = stableReductionHashString(msg.Content)
 		}
 	}
 	return repeated

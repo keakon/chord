@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/lsp"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -200,9 +201,14 @@ var (
 	diffHunkHeaderLineRe = regexp.MustCompile(`^@@@?\s+-\d+(?:,\d+)?(?:\s+-\d+(?:,\d+)?)*\s+\+\d+(?:,\d+)?\s+@@@?`)
 )
 
-func reduceDiagnosticsToolOutput(content string) (string, bool) {
-	idx := strings.Index(content, "\n\nDiagnostics:\n")
-	sepLen := len("\n\nDiagnostics:\n")
+// diagnosticsSectionLabel matches the LSP diagnostics section header anywhere
+// in a tool result. Producers emit it after a blank line, but the preceding
+// output may already end with newlines, so detection stays deliberately loose.
+const diagnosticsSectionLabel = "Diagnostics:"
+
+func reduceDiagnosticsToolOutput(content string, superseded bool) (string, bool) {
+	idx := strings.Index(content, lsp.DiagnosticsSectionMarker)
+	sepLen := len(lsp.DiagnosticsSectionMarker)
 	if idx < 0 {
 		idx = strings.Index(content, "\nDiagnostics:\n")
 		sepLen = len("\nDiagnostics:\n")
@@ -216,11 +222,44 @@ func reduceDiagnosticsToolOutput(content string) (string, bool) {
 		return content, false
 	}
 	lines := strings.Split(diagnostics, "\n")
-	summary := preferredDiagnosticsSummaryLine(lines)
-	if summary == "" {
-		summary = "diagnostics were present"
+	if superseded {
+		summary := preferredDiagnosticsSummaryLine(lines)
+		if summary == "" {
+			summary = "diagnostics were present"
+		}
+		return prefix + "\n\nDiagnostics summary:\n[Older diagnostics details omitted; a newer diagnostics output appears later in this conversation; prefer that tool result.]\n" + summary, true
 	}
-	return prefix + "\n\nDiagnostics summary:\n[Older diagnostics details omitted; latest tool results should be trusted over this stale output.]\n" + summary, true
+	return prefix + "\n\nDiagnostics summary:\n" + renderDiagnosticsSummaryLines(diagnostics), true
+}
+
+// renderDiagnosticsSummaryLines renders a bounded full location list from a
+// diagnostics block, dropping only the explanatory status/change-summary prose
+// around the locations. Diagnostics lines are short location records (severity,
+// line:col, code, message)); the list cap is a safety net well above what the
+// LSP/Ruff output configs can emit. Keeping every location (rather than one
+// preferred line) preserves the edit-diagnostics iteration feedback signal.
+func renderDiagnosticsSummaryLines(diagnostics string) string {
+	const maxLines = 40
+	lines := make([]string, 0)
+	omitted := 0
+	for line := range strings.SplitSeq(diagnostics, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || isNoisyDiagnosticsSummaryLine(trimmed) {
+			continue
+		}
+		if len(lines) >= maxLines {
+			omitted++
+			continue
+		}
+		lines = append(lines, trimmed)
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "no actionable diagnostics preserved")
+	}
+	if omitted > 0 {
+		lines = append(lines, fmt.Sprintf("- ... (%d more diagnostics omitted) ...", omitted))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func preferredDiagnosticsSummaryLine(lines []string) string {
@@ -289,6 +328,10 @@ type requestReductionContext struct {
 	// a read output (see analyzeReadValidity).
 	ReadInvalidated bool
 	ReadSuperseded  bool
+	// DiagnosticsSuperseded marks an edit-like result whose diagnostics section
+	// was followed by a newer diagnostics-bearing result; the later output
+	// carries the fresher LSP state, mirroring the read superseded semantics.
+	DiagnosticsSuperseded bool
 }
 
 // readRetentionProtects reports whether this successful read output must not
@@ -307,27 +350,21 @@ func (ctx requestReductionContext) readRetentionProtects() bool {
 }
 
 func classifyRequestReductionToolOutput(ctx requestReductionContext) requestReductionClass {
-	if ctx.Repeated && ctx.Age >= 1 {
-		// A read that is also invalidated or superseded must render as the
-		// validity-marked read summary, not the repeated marker: the frozen
-		// incremental path force-refreshes such reads to the truncated=stale/
-		// superseded shape, and stableReductionSurfaceNeedsReview only treats
-		// that shape as settled. Emitting the repeated marker here would make
-		// the two paths alternate renderings of the same message across
-		// requests, rewriting the cached prefix each time.
-		if ctx.ToolName == tools.NameRead && (ctx.ReadInvalidated || ctx.ReadSuperseded) {
-			return requestReductionReadLike
-		}
-		return requestReductionRepeated
-	}
 	// An invalidated or superseded read must render its validity marker as
-	// soon as the state is known — stale file content is misleading at any
-	// age. It bypasses first-sight retention and the protection branches
-	// below (high-risk, diff), matching the frozen incremental path, which
-	// force-refreshes such reads to the marker shape.
-	if ctx.ToolName == tools.NameRead && (ctx.ReadInvalidated || ctx.ReadSuperseded) &&
-		len(ctx.Content) > ctx.Policy.ReadLikeOutputBytes {
+	// soon as the state is known — stale file content is misleading at any age
+	// and at any size, and a superseded range is carried verbatim by the newer
+	// read. It bypasses first-sight retention, the size gate and the
+	// protection branches below (high-risk, diff), matching the frozen
+	// incremental path, which force-refreshes such reads to the marker shape
+	// unconditionally; gating it here on size would make the two paths
+	// alternate renderings of the same message and rewrite the cached prefix.
+	// It also takes precedence over the repeated marker, whose "identical call
+	// appears later" wording is weaker guidance than the validity note.
+	if ctx.ToolName == tools.NameRead && (ctx.ReadInvalidated || ctx.ReadSuperseded) {
 		return requestReductionReadLike
+	}
+	if ctx.Repeated && ctx.Age >= 1 {
+		return requestReductionRepeated
 	}
 	if ctx.Age < ctx.Policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {
 		return requestReductionNone
@@ -336,8 +373,24 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		return requestReductionNone
 	}
 	failed := isToolResultErrorStatus(ctx.ToolStatus) || isToolErrorContent(ctx.Content)
+	if failed && ctx.Age < ctx.Policy.ErrorAgeTurns {
+		// An explicit failure is stronger evidence than any shape-based rule:
+		// until it ages past the error threshold it must stay complete so the
+		// model sees the exact failure while it is about to act on it. A failing
+		// build's path:line:col lines must not be misread as a search result,
+		// and a cancelled status must not behave like an error.
+		return requestReductionNone
+	}
 	if ctx.Age >= ctx.Policy.ErrorAgeTurns && failed {
 		return requestReductionToolError
+	}
+	// Edit-like results carrying a diagnostics section stay complete until the
+	// diagnostics summary age (ErrorAgeTurns): the LSP state is the feedback
+	// the model iterates on while it is about to act, and the build-log /
+	// read-like gates must not miscast a diagnostics block as a long log.
+	if (ctx.ToolName == tools.NameEdit || ctx.ToolName == tools.NameApplyPatch || ctx.ToolName == tools.NameWrite) &&
+		strings.Contains(ctx.Content, diagnosticsSectionLabel) && ctx.Age < ctx.Policy.ErrorAgeTurns {
+		return requestReductionNone
 	}
 	// Read-only shell output (cat, ls, git log, ...) is the shell-based analogue
 	// of a read: unlike the read tool it has no validity tracking, so it relies
@@ -359,7 +412,7 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 	if ctx.Age >= ctx.Policy.ConfirmAgeTurns && isConfirmationOutput(ctx.Content) {
 		return requestReductionConfirm
 	}
-	if ctx.Age >= 2 && (ctx.ToolName == tools.NameEdit || ctx.ToolName == tools.NameApplyPatch || ctx.ToolName == tools.NameWrite) && strings.Contains(ctx.Content, "Diagnostics:") {
+	if ctx.Age >= ctx.Policy.ErrorAgeTurns && (ctx.ToolName == tools.NameEdit || ctx.ToolName == tools.NameApplyPatch || ctx.ToolName == tools.NameWrite) && strings.Contains(ctx.Content, diagnosticsSectionLabel) {
 		return requestReductionDiagnostics
 	}
 	if ctx.Age >= ctx.Policy.ShellSuccessAgeTurns && len(ctx.Content) > ctx.Policy.ShellSuccessBytes && ctx.ToolName == tools.NameShell {
@@ -434,7 +487,6 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 // caller before consulting this frontier.
 func nextContextReductionReviewAge(ctx requestReductionContext) int {
 	thresholds := []int{
-		2, // the hardcoded diagnostics-rule age in classifyRequestReductionToolOutput
 		ctx.Policy.ErrorAgeTurns,
 		ctx.Policy.ConfirmAgeTurns,
 		ctx.Policy.ShellSuccessAgeTurns,
@@ -473,6 +525,9 @@ var (
 		"actual:",
 		"assertion failed",
 		"assert failed",
+		// Go and Rust test runners report a failing case as "--- FAIL: Name",
+		// which contains neither "failed" nor any other marker above.
+		"--- fail",
 		"npm err!",
 		"fatal:",
 	}
@@ -481,8 +536,11 @@ var (
 	buildLogMarkers = []string{
 		"error",
 		"warning",
-		"failed",
-		"failure",
+		// "fail" rather than "failed"/"failure": test runners print bare
+		// "FAIL", "--- FAIL:" and "failing", none of which the longer forms
+		// match, and a log whose only failure evidence is such a line would
+		// otherwise summarize to "no preserved log lines".
+		"fail",
 		"panic:",
 		"traceback",
 		"exception",
@@ -492,7 +550,7 @@ var (
 	logLineMarkers = []string{
 		"error",
 		"warning",
-		"failed",
+		"fail",
 		"panic:",
 		"traceback",
 		"exception",
@@ -502,8 +560,7 @@ var (
 	importantLineMarkers = []string{
 		"error",
 		"warning",
-		"failed",
-		"failure",
+		"fail",
 		"panic:",
 		"traceback",
 		"exception",
@@ -630,7 +687,7 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 	case requestReductionConfirm:
 		return "[Confirmed]", "confirmation", true
 	case requestReductionDiagnostics:
-		if compacted, ok := reduceDiagnosticsToolOutput(ctx.Content); ok {
+		if compacted, ok := reduceDiagnosticsToolOutput(ctx.Content, ctx.DiagnosticsSuperseded); ok {
 			return compacted, "diagnostics", true
 		}
 		return staleOutputOmittedMarker(ctx.Meta.Name), "stale", true

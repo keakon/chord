@@ -20,6 +20,12 @@ const (
 	ToolOutputMaxOtherErrorFiles     = 5
 )
 
+// DiagnosticsSectionMarker separates an actionable tool result from the LSP
+// diagnostics block appended after it. Consumers (agent-side reduction and
+// compaction) detect diagnostics-bearing results by this marker, so the
+// producer and the detectors must agree on its exact shape.
+const DiagnosticsSectionMarker = "\n\nDiagnostics:\n"
+
 // AppendLSPDiagnosticsToToolOutput appends all LSP diagnostics (severity 1-4)
 // to the tool result string so the model can act on them. Diagnostics for the
 // edited file are listed first; optionally include diagnostics from other files.
@@ -132,7 +138,7 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 	multi := len(primaryPaths) > 1
 	var b strings.Builder
 	b.WriteString(base)
-	b.WriteString("\n\nDiagnostics:\n")
+	b.WriteString(DiagnosticsSectionMarker)
 	wroteBlock := false
 	writeBlock := func(block string) {
 		if wroteBlock {
@@ -333,7 +339,7 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 
 	var b strings.Builder
 	b.WriteString(base)
-	b.WriteString("\n\nDiagnostics:\n")
+	b.WriteString(DiagnosticsSectionMarker)
 
 	if len(primary) > 0 {
 		b.WriteString(strings.Join(formatDiagnosticLines(primary), "\n"))
