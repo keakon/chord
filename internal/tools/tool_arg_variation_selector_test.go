@@ -350,8 +350,11 @@ func TestWriteToolCleansSelectorsAndReports(t *testing.T) {
 	if err != nil {
 		t.Fatalf("write failed: %v", err)
 	}
-	if !strings.Contains(out, "cleaned 1 orphaned variation selector") {
-		t.Fatalf("output = %q, want the cleaned-selector note", out)
+	if !strings.Contains(out, "cleaned 1 invisible character") {
+		t.Fatalf("output = %q, want the cleaned-invisible-character note", out)
+	}
+	if !strings.Contains(out, "U+FE0F×1") {
+		t.Fatalf("output = %q, want the per-character type report U+FE0F×1", out)
 	}
 	if got := readFileString(t, path); got != "count is 42 done\n" {
 		t.Fatalf("file = %q, want %q", got, "count is 42 done\n")
@@ -449,7 +452,114 @@ func TestApplyPatchNotesCleanedSelectors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply_patch failed: %v", err)
 	}
-	if !strings.Contains(out, "Note: cleaned 1 orphaned variation selector") {
-		t.Fatalf("output = %q, want the cleaned-selector note", out)
+	if !strings.Contains(out, "cleaned 1 invisible character") {
+		t.Fatalf("output = %q, want the cleaned-invisible-character note", out)
+	}
+	if !strings.Contains(out, "U+FE0F×1") {
+		t.Fatalf("output = %q, want the per-character type report U+FE0F×1", out)
+	}
+}
+
+// --- StripZeroWidthFormat unit tests ---
+
+func TestStripZeroWidthFormat(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"plain ascii untouched", "hello world", "hello world"},
+		{"zwsp stripped", "a\u200bb", "ab"},
+		{"zwnj stripped", "a\u200cb", "ab"},
+		{"zwj stripped", "a\u200db", "ab"},
+		{"word joiner stripped", "a\u2060b", "ab"},
+		{"bom mid-stream stripped", "ab\ufeffcd", "abcd"},
+		{"variation selector fe00 stripped", "a\ufe00b", "ab"},
+		{"variation selector fe0d stripped", "a\ufe0db", "ab"},
+		{"soft hyphen stripped", "ab\u00adcd", "abcd"},
+		{"mixed zero-width stripped", "a\u200b\u200d\u200cb", "ab"},
+		{"narrow no-break space preserved", "a\u202fb", "a\u202fb"},
+		{"no-break space preserved", "a\u00a0b", "a\u00a0b"},
+		{"em space preserved", "a\u2003b", "a\u2003b"},
+		{"zwj emoji sequence preserved", "\U0001f468\u200d\U0001f469\u200d\U0001f467", "\U0001f468\u200d\U0001f469\u200d\U0001f467"},
+		{"zwj after variation selector preserved", "\U0001f3f3\ufe0f\u200d\U0001f308", "\U0001f3f3\ufe0f\u200d\U0001f308"},
+		{"zwj after text-style selector preserved", "\u2764\ufe0f\u200d\U0001f525", "\u2764\ufe0f\u200d\U0001f525"},
+		{"zwj after eye selector preserved", "\U0001f441\ufe0f\u200d\U0001f5e8\ufe0f", "\U0001f441\ufe0f\u200d\U0001f5e8\ufe0f"},
+		{"zwj after skin tone preserved", "\U0001f44d\U0001f3fb\u200d\U0001f527", "\U0001f44d\U0001f3fb\u200d\U0001f527"},
+		{"zwj inside sequence keeps later selectors", "\U0001f441\ufe0f\u200d\U0001f5e8\ufe0f\u200d\U0001f469", "\U0001f441\ufe0f\u200d\U0001f5e8\ufe0f\u200d\U0001f469"},
+		{"zwj between emoji and non-emoji stripped", "a\u200d\U0001f469", "a\U0001f469"},
+		{"zwj between non-emoji and emoji stripped", "\U0001f469\u200db", "\U0001f469b"},
+		{"leading zwj stripped", "\u200d\U0001f469", "\U0001f469"},
+		{"trailing zwj stripped", "\U0001f469\u200d", "\U0001f469"},
+		{"zwj after selector without trailing base stripped", "\U0001f3f3\ufe0f\u200dx", "\U0001f3f3\ufe0fx"},
+		{"zwsp inside emoji sequence stripped", "\U0001f468\u200b\u200d\U0001f469", "\U0001f468\u200d\U0001f469"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := StripZeroWidthFormat(tc.input); got != tc.want {
+				t.Fatalf("StripZeroWidthFormat(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDescribeInvisibleCountsSorted guards that the per-rune report lists
+// code points in ascending order regardless of input order, so successive
+// failures present the same stable text to the model.
+func TestDescribeInvisibleCountsSorted(t *testing.T) {
+	counts := countStrippedInvisible("\ufeffa\u200bb\ufe0f\u200b", "ab") // FE0F before 200B in input
+	want := "U+200B×2, U+FE0F×1, U+FEFF×1 (invisible formatting characters that carry no content; do not include them in tool arguments)"
+	if got := describeInvisibleCounts(counts); got != want {
+		t.Fatalf("describeInvisibleCounts = %q, want %q", got, want)
+	}
+	// A rune the strip preserves (ZWJ joining two emoji, leading BOM,
+	// base-character variation selector) is never reported as cleaned.
+	if preserved := countStrippedInvisible("\U0001f468\u200d\U0001f469", "\U0001f468\u200d\U0001f469"); len(preserved) != 0 {
+		t.Fatalf("countStrippedInvisible counted preserved runes: %v", preserved)
+	}
+}
+
+// TestStripZeroWidthFormatKeepsLeadingBOM guards that a leading BOM survives
+// as byte-order encoding (readFileForEdit detects it) rather than being
+// mistaken for model corruption.
+func TestStripZeroWidthFormatKeepsLeadingBOM(t *testing.T) {
+	if got := StripZeroWidthFormat("\ufeffhello"); got != "\ufeffhello" {
+		t.Fatalf("StripZeroWidthFormat(leading BOM) = %q, want it preserved", got)
+	}
+}
+
+// TestEditToolStripsZeroWidthInNewString guards the full Edit flow: a ZWSP
+// leaked inside new_string (an operator or identifier) must be stripped so the
+// file receives clean visible text, and the success message reports it.
+func TestEditToolStripsZeroWidthInNewString(t *testing.T) {
+	dir := t.TempDir()
+	file := "func foo() int {\n\treturn 0, false\n}\n"
+	path := writeEditFixture(t, dir, "demo.go", file)
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": "return 0, false", "new_string": "return \u200b1, true",
+	})
+	if err != nil {
+		t.Fatalf("Execute err = %v, want success with stripped ZWSP", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "func foo() int {\n\treturn 1, true\n}\n" {
+		t.Fatalf("file = %q, want ZWSP stripped from new_string", string(got))
+	}
+}
+
+// TestWriteToolStripsZeroWidthInContent guards the Write flow end to end.
+func TestWriteToolStripsZeroWidthInContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.md")
+	_, err := (&WriteTool{BaseDir: dir}).Execute(context.Background(), mustJSON(t, map[string]any{
+		"path": path, "content": "ab\u200bcd",
+	}))
+	if err != nil {
+		t.Fatalf("Write err = %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "abcd" {
+		t.Fatalf("file = %q, want ZWSP stripped from content", string(got))
 	}
 }

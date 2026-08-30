@@ -145,10 +145,11 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	// that strips to empty had no visible content to begin with — writing it
 	// would truncate the target file on unknowable intent, so reject instead.
 	contentRunes := len([]rune(content))
-	cleaned := StripOrphanVariationSelectors(content)
+	cleaned := StripZeroWidthFormat(StripOrphanVariationSelectors(content))
 	cleanedSelectors := contentRunes - len([]rune(cleaned))
+	cleanedCounts := countStrippedInvisible(content, cleaned)
 	if cleaned == "" && content != "" {
-		return "", fmt.Errorf("content contains only invisible characters (%d orphaned variation selector(s) were stripped) and would truncate the file; rebuild content from the visible text you want in the file", cleanedSelectors)
+		return "", fmt.Errorf("content contains only invisible characters (%d invisible character(s) were stripped) and would truncate the file; rebuild content from the visible text you want in the file", cleanedSelectors)
 	}
 	content = cleaned
 	// Control characters cannot be cleaned safely (they may be intended), and
@@ -186,7 +187,7 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 
 	out := fmt.Sprintf("Successfully wrote %d %s, %d %s", lineCount, lineLabel, len(data), byteLabel)
 	if cleanedSelectors > 0 {
-		out += fmt.Sprintf("\nNote: cleaned %d orphaned variation selector(s) from your content (invisible U+FE0E/U+FE0F left behind when an emoji's base character is dropped; avoid emoji presentation sequences in file content)", cleanedSelectors)
+		out += fmt.Sprintf("\nNote: cleaned %d invisible character(s) from your content: %s", cleanedSelectors, describeInvisibleCounts(cleanedCounts))
 	}
 	if t.LSP != nil {
 		absPath, absErr := resolveToolPathAbsInDir(a.Path, t.BaseDir)

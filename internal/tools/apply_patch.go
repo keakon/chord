@@ -275,10 +275,12 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	// to begin with; control characters cannot be cleaned safely — reject
 	// both and route binary content to a shell command or script.
 	patchLen := len([]rune(args.Patch))
-	args.Patch = StripOrphanVariationSelectors(args.Patch)
+	strippedPatch := StripZeroWidthFormat(StripOrphanVariationSelectors(args.Patch))
+	cleanedCounts := countStrippedInvisible(args.Patch, strippedPatch)
+	args.Patch = strippedPatch
 	strippedSelectors := patchLen - len([]rune(args.Patch))
 	if args.Patch == "" && strippedSelectors > 0 {
-		return "", fmt.Errorf("patch contains only invisible characters (%d orphaned variation selector(s) were stripped); rebuild the patch with the visible changes you want to apply", strippedSelectors)
+		return "", fmt.Errorf("patch contains only invisible characters (%d invisible character(s) were stripped); rebuild the patch with the visible changes you want to apply", strippedSelectors)
 	}
 	if err := validateWritableText(args.Patch); err != nil {
 		return "", fmt.Errorf("patch %w", err)
@@ -301,7 +303,7 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	}
 	out := t.finishApplyPatch(ctx, plan)
 	if strippedSelectors > 0 {
-		out += fmt.Sprintf("\nNote: cleaned %d orphaned variation selector(s) from the patch text (invisible U+FE0E/U+FE0F left behind when an emoji's base character is dropped; avoid emoji presentation sequences in file content)", strippedSelectors)
+		out += fmt.Sprintf("\nNote: cleaned %d invisible character(s) from the patch text: %s", strippedSelectors, describeInvisibleCounts(cleanedCounts))
 	}
 	return out, nil
 }
@@ -1611,8 +1613,40 @@ func applyPatchHunkNotFoundError(fileLines, oldSeq []string, searchStart, index,
 		expected := truncateToolLine(oldSeq[matched])
 		if line+matched < len(fileLines) {
 			detail += fmt.Sprintf(": expected %s, found %s", expected, truncateToolLine(fileLines[line+matched]))
+			// Same invisible-difference visibility as edit: name the exact
+			// first differing rune by code point, so a dropped space or an
+			// orphan variation selector shows up instead of rendering
+			// identically to the expected line.
+			if off, er, ar, ep, ap := firstRuneDiffLoc(oldSeq[matched], fileLines[line+matched]); ep || ap {
+				yourTok, fileTok := toolRuneToken(er, ep), toolRuneToken(ar, ap)
+				if !ep {
+					yourTok = "no characters (your line is empty)"
+				}
+				if !ap {
+					fileTok = "no characters (file line is empty)"
+				}
+				detail += fmt.Sprintf("; first mismatch at rune %d: your line has %s, file has %s", off, yourTok, fileTok)
+			}
 		} else {
 			detail += fmt.Sprintf(": expected %s, but the file has no more lines", expected)
+		}
+		// Same whole-line-drift visibility as edit: when the hunk and the
+		// file window differ by whole lines (extra blanks, a heading shifted
+		// by one line), the line-level alignment names the drift so the model
+		// is not left staring at two unrelated position-shifted lines.
+		window := fileLines
+		if line+len(oldSeq) <= len(fileLines) {
+			window = fileLines[line : line+len(oldSeq)]
+		} else if line < len(fileLines) {
+			window = fileLines[line:]
+		}
+		oldExtra, srcExtra, blankOnly := alignEditWindowLines(oldSeq, window, 0, normalizePatchTolerantLine)
+		if oldExtra > 0 || srcExtra > 0 {
+			blankNote := ""
+			if blankOnly {
+				blankNote = " — the extra lines are blank, so the blank-line count differs"
+			}
+			detail += fmt.Sprintf("; line-count difference: your hunk has %d extra line(s), the file has %d extra line(s)%s", oldExtra, srcExtra, blankNote)
 		}
 		parts = append(parts, detail+"; the file may have changed — re-read the current target range and rebuild this hunk from current complete lines")
 	} else if len(punctuationCandidates) <= 1 {
@@ -1812,9 +1846,9 @@ func applyPatchExpectedLineDescription(oldSeq []string) string {
 	runes := []rune(oldSeq[0])
 	const maxRunes = 120
 	if len(runes) > maxRunes {
-		return fmt.Sprintf("first expected line prefix: %q", string(runes[:maxRunes]))
+		return "first expected line prefix: " + quoteToolLine(string(runes[:maxRunes]))
 	}
-	return fmt.Sprintf("first expected complete line: %q", string(runes))
+	return "first expected complete line: " + quoteToolLine(string(runes))
 }
 
 func findApplyPatchSubstringLine(fileLines, oldSeq []string, searchStart int, eof bool) int {

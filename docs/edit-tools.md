@@ -186,11 +186,15 @@ A move binds both its source and destination into the same dependency boundary. 
 
 ### Error Messages
 
-- **"old_string not found in file"**: The exact text doesn't exist even under punctuation tolerance. Check whitespace, indentation, and newlines.
+- **"old_string not found in file"**: The exact text doesn't exist even under punctuation tolerance. Check whitespace, indentation, and newlines. When the mismatch is a character-level difference (a dropped or extra rune), the error also points at the closest matching block in the file — its line number, how similar it is, and the exact differing lines — so you can see the one-character mistake (for example a missing `)` or a doubled `,,`) without re-reading the whole file.
 - **"old_string found N times"**: Multiple matches found. Either:
   - Add more context to make it unique
   - Set `replace_all: true` if you want to replace all occurrences
 - **"old_string and new_string are identical"**: No change needed.
+
+### Invisible Character Cleaning
+
+The write paths of `edit`, `apply_patch`, and `write` strip zero-width formatting characters that models leak into tool arguments (zero-width space, zero-width non-joiner, zero-width joiner outside emoji sequences, word joiner, mid-stream BOM, soft hyphen). These runes carry no content, so stripping them cannot change what the text means; leaving them in would plant invisible bytes in the file. When any are removed, the tool result reports exactly which code points were cleaned (for example `U+200B×2, U+FE0F×1`), so the model learns to stop emitting them.
 
 ### Trailing Newline Tolerance
 

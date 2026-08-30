@@ -624,11 +624,12 @@ func TestEditToolPunctuationTolerantInterWordSpace(t *testing.T) {
 	})
 }
 
-// Invisible format runes next to a word-boundary space must not keep the
-// space significant on the model side while the file's clean text folds it:
-// both sides must normalize to the same shape, and the model's leaked rune
-// must never be spliced into the file.
-func TestEditToolPunctuationTolerantInvisibleBesideInterWordSpace(t *testing.T) {
+// Invisible format runes next to a word-boundary space are stripped before
+// matching (StripZeroWidthFormat), so the model's leaked rune never keeps a
+// space significant on the model side while the file's clean text folds it,
+// and never gets spliced into the file. The success message reports the
+// cleaned characters by code point.
+func TestEditToolStripsZeroWidthBesideInterWordSpace(t *testing.T) {
 	const file = "func foo() int {\n\treturn 0, false\n}\n"
 	const want = "func foo() int {\n\treturn 1, true\n}\n"
 	t.Run("zero-width space after the space", func(t *testing.T) {
@@ -638,10 +639,10 @@ func TestEditToolPunctuationTolerantInvisibleBesideInterWordSpace(t *testing.T) 
 			"path": path, "old_string": "return \u200b0, false\n}\n", "new_string": "return 1, true\n}\n",
 		})
 		if err != nil {
-			t.Fatalf("Execute err = %v, want tolerant success", err)
+			t.Fatalf("Execute err = %v, want success after stripping the ZWSP", err)
 		}
-		if !strings.Contains(out, "punctuation/whitespace-tolerant") {
-			t.Fatalf("output = %q, want tolerant marker", out)
+		if !strings.Contains(out, "cleaned 1 invisible character") || !strings.Contains(out, "U+200B×1") {
+			t.Fatalf("output = %q, want the cleaned-invisible-character report U+200B×1", out)
 		}
 		got, _ := os.ReadFile(path)
 		if string(got) != want {
@@ -651,10 +652,14 @@ func TestEditToolPunctuationTolerantInvisibleBesideInterWordSpace(t *testing.T) 
 	t.Run("zero-width space before the space", func(t *testing.T) {
 		dir := t.TempDir()
 		path := writeEditFixture(t, dir, "demo.go", file)
-		if _, err := runEdit(t, dir, map[string]any{
+		out, err := runEdit(t, dir, map[string]any{
 			"path": path, "old_string": "return\u200b 0, false\n}\n", "new_string": "return 1, true\n}\n",
-		}); err != nil {
-			t.Fatalf("Execute err = %v, want tolerant success", err)
+		})
+		if err != nil {
+			t.Fatalf("Execute err = %v, want success after stripping the ZWSP", err)
+		}
+		if !strings.Contains(out, "cleaned 1 invisible character") || !strings.Contains(out, "U+200B×1") {
+			t.Fatalf("output = %q, want the cleaned-invisible-character report U+200B×1", out)
 		}
 		got, _ := os.ReadFile(path)
 		if string(got) != want {
@@ -664,10 +669,14 @@ func TestEditToolPunctuationTolerantInvisibleBesideInterWordSpace(t *testing.T) 
 	t.Run("invisible runes on both sides of the space", func(t *testing.T) {
 		dir := t.TempDir()
 		path := writeEditFixture(t, dir, "demo.go", file)
-		if _, err := runEdit(t, dir, map[string]any{
+		out, err := runEdit(t, dir, map[string]any{
 			"path": path, "old_string": "return\u200b \u200b0, false\n}\n", "new_string": "return 1, true\n}\n",
-		}); err != nil {
-			t.Fatalf("Execute err = %v, want tolerant success", err)
+		})
+		if err != nil {
+			t.Fatalf("Execute err = %v, want success after stripping the ZWSPs", err)
+		}
+		if !strings.Contains(out, "cleaned 2 invisible character") || !strings.Contains(out, "U+200B×2") {
+			t.Fatalf("output = %q, want the cleaned-invisible-character report U+200B×2", out)
 		}
 		got, _ := os.ReadFile(path)
 		if string(got) != want {
@@ -941,5 +950,56 @@ func TestEditToolAbsorbedInvisibleRunesHint(t *testing.T) {
 	}
 	if !strings.Contains(out, "cleaned 1 invisible character") {
 		t.Fatalf("output = %q, want the cleaned-invisible-character hint", out)
+	}
+}
+
+// The closest-match failure hint must name the exact first differing rune:
+// a visible-space difference ("var  x" vs "var x") is otherwise invisible in
+// the two quoted lines, and the model cannot tell what to fix.
+func TestEditToolFailureNamesFirstDifferingRune(t *testing.T) {
+	dir := t.TempDir()
+	file := "var x = 1\n"
+	path := writeEditFixture(t, dir, "a.go", file)
+	_, err := runEdit(t, dir, map[string]any{
+		"path":       path,
+		"old_string": "var  x = 1",
+		"new_string": "var y = 1",
+	})
+	if err == nil {
+		t.Fatal("Execute = nil, want closest-match failure")
+	}
+	for _, want := range []string{"first mismatch at rune 4", "your line has U+0020", "file has U+0078"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want substring %q", err.Error(), want)
+		}
+	}
+}
+
+// When the model's block carries an extra whole line (here a non-blank line
+// the file lacks), the hint must say so via the line-count difference instead
+// of only showing a position-shifted content mismatch, and a missing file
+// line must read as "file line is empty", not a cryptic "<absent>".
+func TestEditToolFailureReportsLineCountDifference(t *testing.T) {
+	dir := t.TempDir()
+	file := "line1\n\nline2\n"
+	path := writeEditFixture(t, dir, "a.txt", file)
+	_, err := runEdit(t, dir, map[string]any{
+		"path":       path,
+		"old_string": "line1\nline2\nline3\n",
+		"new_string": "line1\nline2\n",
+	})
+	if err == nil {
+		t.Fatal("Execute = nil, want closest-match failure")
+	}
+	for _, want := range []string{
+		"first mismatch at rune 0: your line has U+006C, file has no characters (file line is empty)",
+		"line-count difference: your old_string has 1 extra line(s), the file has 1 extra line(s)",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want substring %q", err.Error(), want)
+		}
+	}
+	if strings.Contains(err.Error(), "<absent>") {
+		t.Fatalf("error = %q, must not contain the <absent> placeholder", err.Error())
 	}
 }

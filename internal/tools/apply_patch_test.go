@@ -2351,6 +2351,48 @@ func TestApplyPatchHunkMismatchLineRespectsEOFWindow(t *testing.T) {
 	}
 }
 
+// A multi-line hunk that breaks mid-sequence must pinpoint the first
+// diverging line by code point (same visibility as edit), and a whole-line
+// drift must be reported as a line-count difference instead of leaving the
+// model staring at two position-shifted lines.
+func TestApplyPatchHunkMismatchErrorPinpointsDivergence(t *testing.T) {
+	dir := t.TempDir()
+	path := writeEditFixture(t, dir, "demo.txt", "a\nb\n")
+	// Hunk context: the first line "a" matches at line 1, the second expected
+	// line "c" does not exist right after it — so the hunk's first line
+	// matches but the sequence breaks at the second line.
+	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(),
+		applyPatchArgs(t, "*** Begin Patch\n*** Update File: "+path+"\n@@\n a\n c\n d\n*** End Patch\n"))
+	if err == nil {
+		t.Fatal("Execute error = nil, want hunk-not-found failure")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "hunk not found (1/1)") {
+		t.Fatalf("error = %q, want hunk not found", msg)
+	}
+	// The hunk's first line matches; the divergence is reported with the
+	// exact rune and the line-count difference.
+	if !strings.Contains(msg, "first mismatch at rune") || !strings.Contains(msg, "U+0063") {
+		t.Fatalf("error = %q, want rune-level first-mismatch with U+0063", msg)
+	}
+	if !strings.Contains(msg, "line-count difference") {
+		t.Fatalf("error = %q, want a line-count difference notice", msg)
+	}
+}
+
+// Orphan variation selectors in a hunk line must be escaped in the expected
+// line description, so an invisible U+FE0F renders as \ufe0f instead of
+// appearing identical to the clean file line.
+func TestApplyPatchExpectedLineEscapesVariationSelector(t *testing.T) {
+	got := applyPatchExpectedLineDescription([]string{"\ufe0f0"})
+	if !strings.Contains(got, `\ufe0f`) {
+		t.Fatalf("description = %q, want escaped \\ufe0f", got)
+	}
+	if strings.Contains(got, "\ufe0f") {
+		t.Fatalf("description = %q, must not contain a raw variation selector", got)
+	}
+}
+
 func TestApplyPatchSubstringLineRespectsEOFWindow(t *testing.T) {
 	fileLines := []string{"football team", "filler", "tail"}
 	// "football" is a substring of the file's first line, but the EOF window

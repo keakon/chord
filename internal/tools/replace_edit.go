@@ -145,11 +145,19 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	// numeric literals and plain text (e.g. "️0" instead of "0").  The file
 	// content never contains them, so they cause every matching layer to fail.
 	// We count stripped selectors so the success message can report them.
+	// The per-rune counts come from what the strip actually removed (original
+	// minus result), so the report names exactly which invisible characters the
+	// model leaked and never counts preserved ones (emoji-joining ZWJ, leading
+	// BOM, base-character variation selectors).
 	oldLen := len([]rune(decodedOld))
-	decodedOld = StripOrphanVariationSelectors(decodedOld)
+	strippedOldText := StripZeroWidthFormat(StripOrphanVariationSelectors(decodedOld))
+	oldInvisible := countStrippedInvisible(decodedOld, strippedOldText)
+	decodedOld = strippedOldText
 	strippedOld := oldLen - len([]rune(decodedOld))
 	newLen := len([]rune(decodedNew))
-	decodedNew = StripOrphanVariationSelectors(decodedNew)
+	strippedNewText := StripZeroWidthFormat(StripOrphanVariationSelectors(decodedNew))
+	newInvisible := countStrippedInvisible(decodedNew, strippedNewText)
+	decodedNew = strippedNewText
 	strippedNew := newLen - len([]rune(decodedNew))
 	strippedSelectors := strippedOld + strippedNew
 	// An old_string made only of orphaned selectors strips to the empty
@@ -157,14 +165,14 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	// rune count + 1 hits and replace_all would splice new_string between
 	// every rune. Reject it with an actionable message instead.
 	if decodedOld == "" {
-		return "", fmt.Errorf("old_string contains only invisible characters (%d orphaned variation selector(s) were stripped) and cannot be matched; re-read the target range and rebuild old_string from the visible file text you want to replace", strippedOld)
+		return "", fmt.Errorf("old_string contains only invisible characters (%d invisible character(s) were stripped) and cannot be matched; re-read the target range and rebuild old_string from the visible file text you want to replace", strippedOld)
 	}
 	// A new_string that strips to empty had its visible content lost before
 	// the model ever sent it; applying it would turn the replacement into a
 	// deletion on unknowable intent. A new_string that arrives empty is a
 	// legitimate deletion and stays allowed.
 	if decodedNew == "" && newLen > 0 {
-		return "", fmt.Errorf("new_string contains only invisible characters (%d orphaned variation selector(s) were stripped); rebuild new_string with the visible text the file should contain (send an empty new_string if you intend to delete the old_string text)", strippedNew)
+		return "", fmt.Errorf("new_string contains only invisible characters (%d invisible character(s) were stripped); rebuild new_string with the visible text the file should contain (send an empty new_string if you intend to delete the old_string text)", strippedNew)
 	}
 	// new_string is written to the file verbatim, so control characters would
 	// land in it — reject and route binary content to a shell command or
@@ -197,14 +205,14 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			decodedOld, decodedNew = altOld, altNew
 		}
 	}
-	// Both success paths report every invisible character the model leaked:
-	// selectors stripped from old_string and new_string above plus the
-	// ignorable runes the tolerance layers absorb. Computed after the
-	// trailing-newline block, which is the last place decodedOld is
-	// reassigned.
+	// Both success paths report every invisible character the model leaked
+	// (variation selectors and zero-width format runes stripped above).
 	abs := ""
-	if n := countIgnorableRunes(decodedOld) + strippedSelectors; n > 0 {
-		abs = fmt.Sprintf(", cleaned %d invisible character(s) from your arguments (orphaned variation selectors U+FE0E/U+FE0F and similar zero-width marks, left behind when an emoji's base character is dropped; avoid emoji presentation sequences in file content)", n)
+	if strippedSelectors > 0 {
+		// Per-rune counts reflect what the strip removed (oldInvisible /
+		// newInvisible), so the report names exactly which invisible
+		// characters the model leaked.
+		abs = fmt.Sprintf(", cleaned %d invisible character(s) from your arguments: %s", strippedSelectors, describeInvisibleCounts(mergeInvisibleCounts(oldInvisible, newInvisible)))
 	}
 	if count == 0 {
 		// Try punctuation tolerance: some models cannot reproduce the file's
@@ -254,6 +262,23 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			fmt.Fprintf(&b, "old_string not found in file, even after punctuation/whitespace tolerance. Closest match is at line %d (%d%% similar, %d character difference):\n", closest.StartLine, sim, closest.DiffRunes)
 			fmt.Fprintf(&b, "  file line %d: %s\n", closest.FileDiffLine, closest.Actual)
 			fmt.Fprintf(&b, "  your line %d: %s\n", closest.ExpectedDiffLine, closest.Expected)
+			if off, er, ar, ep, ap := firstRuneDiffLoc(closest.ExpectedRaw, closest.ActualRaw); ep || ap {
+				yourTok, fileTok := toolRuneToken(er, ep), toolRuneToken(ar, ap)
+				if !ep {
+					yourTok = "no characters (your line is empty)"
+				}
+				if !ap {
+					fileTok = "no characters (file line is empty)"
+				}
+				fmt.Fprintf(&b, "  first mismatch at rune %d: your line has %s, file has %s\n", off, yourTok, fileTok)
+			}
+			if closest.LineDiffOldExtra > 0 || closest.LineDiffSrcExtra > 0 {
+				blankNote := ""
+				if closest.LineDiffBlankOnly {
+					blankNote = " — the extra lines are blank, so the blank-line count differs"
+				}
+				fmt.Fprintf(&b, "  line-count difference: your old_string has %d extra line(s), the file has %d extra line(s)%s\n", closest.LineDiffOldExtra, closest.LineDiffSrcExtra, blankNote)
+			}
 			for _, d := range closest.Diffs[1:] {
 				fmt.Fprintf(&b, "  differing line %d (file %d): expected %s\n    actual %s\n", d.ExpectedLine, d.FileLine, d.Expected, d.Actual)
 			}
