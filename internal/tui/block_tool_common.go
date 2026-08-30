@@ -297,8 +297,28 @@ func appendToolElapsedSuffix(headerLine, elapsed string, maxWidth int) string {
 	if runewidth.StringWidth(stripANSI(truncatedHeader+suffix)) <= maxWidth {
 		return truncatedHeader + suffix
 	}
-	plainHeader := runewidth.Truncate(stripANSI(headerLine), headerBudget, "…")
-	return plainHeader + suffix
+	return truncateToolHeaderForSuffix(headerLine, suffix, maxWidth, headerBudget)
+}
+
+// truncateToolHeaderForSuffix shrinks a styled tool header line until
+// line+suffix fits maxWidth, keeping the header's SGR sequences intact.
+//
+// This must stay ANSI-aware. The previous fallback stripped the sequences with
+// stripANSI and returned a plain header, which silently dropped the tool-name
+// colour: only the widest headers reach this branch, and mcp_* names are both
+// the longest and carry the longest inline parameter summary, so they lost
+// their colour while short built-in names kept it — a visible per-tool colour
+// split with no styling code behind it. ansi.Truncate and runewidth disagree
+// on the width of some glyphs, so instead of trusting one measurement we keep
+// shrinking with the ANSI-aware truncate until the runewidth check passes.
+func truncateToolHeaderForSuffix(headerLine, suffix string, maxWidth, headerBudget int) string {
+	for budget := headerBudget; budget >= 1; budget-- {
+		truncated := ansi.Truncate(headerLine, budget, "…")
+		if runewidth.StringWidth(stripANSI(truncated+suffix)) <= maxWidth {
+			return truncated + suffix
+		}
+	}
+	return ansi.Truncate(headerLine, 1, "…") + suffix
 }
 
 func shellDurationNoteLabel(result string) string {
