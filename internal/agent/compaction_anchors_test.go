@@ -327,7 +327,7 @@ func TestCompactionDraftEmbedsAndInheritsSessionAnchors(t *testing.T) {
 	}
 	a.resetRuntimeEvidenceFromMessages(snapshot)
 
-	evidenceItems := a.evidenceItemsForCompaction(snapshot, a.ctxMgr.GetMaxTokens())
+	evidenceItems := a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens())
 	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1,
 		compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival,
 		"port the config loader to the new schema", evidenceItems)
@@ -356,7 +356,7 @@ func TestCompactionDraftEmbedsAndInheritsSessionAnchors(t *testing.T) {
 		{Role: message.RoleUser, Content: "now add the migration command"},
 		{Role: message.RoleAssistant, Content: "done"},
 	}...)
-	secondEvidence := a.evidenceItemsForCompaction(next, a.ctxMgr.GetMaxTokens())
+	secondEvidence := a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens())
 	secondDraft, err := a.produceCompactionDraftAsync(t.Context(), next, false, 2,
 		compactionTarget{sessionEpoch: a.sessionEpoch}, len(next), compactionProfileArchival,
 		checkpoint.Content, secondEvidence)

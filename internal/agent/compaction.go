@@ -763,7 +763,7 @@ func selectEvidenceItems(messages []message.Message, contextLimit int) []evidenc
 // evidenceItemsForCompaction reads the event-loop-owned evidence tracker and
 // must be called on the event loop; it returns an independent slice, so the
 // result can be handed to the compaction worker without sharing tracker state.
-func (a *MainAgent) evidenceItemsForCompaction(_ []message.Message, contextLimit int) []evidenceItem {
+func (a *MainAgent) evidenceItemsForCompaction(contextLimit int) []evidenceItem {
 	return evidenceItemsFromCandidates(a.evidence.snapshot(), contextLimit)
 }
 

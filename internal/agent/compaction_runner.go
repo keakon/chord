@@ -95,7 +95,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	// evidenceItemsForCompaction reads the event-loop-owned evidence tracker;
 	// capture the slice here and hand it to the worker so the draft never
 	// touches the tracker from another goroutine.
-	evidenceItems := a.evidenceItemsForCompaction(snapshot, a.ctxMgr.GetMaxTokens())
+	evidenceItems := a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens())
 	profile := a.resolveCompactionProfile(todos, subAgents, backgroundObjects, evidenceItems)
 	if a.configuredCompactionProfile() == compactionProfileAuto && continuationRequiresRawTail(continuation.kind) {
 		profile = compactionProfileContinuation

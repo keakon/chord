@@ -496,7 +496,7 @@ func splitMessagesForCompactionForTest(messages []message.Message, contextLimit 
 	a := &MainAgent{}
 	a.resetRuntimeEvidenceFromMessages(messages)
 	recentTail := selectRecentTailMessages(nil, messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
-	evidenceItems := a.evidenceItemsForCompaction(messages, contextLimit)
+	evidenceItems := a.evidenceItemsForCompaction(contextLimit)
 	return splitMessagesForCompactionWithSelections(messages, recentTail, evidenceItems)
 }
 
@@ -504,7 +504,7 @@ func splitMessagesForCompactionForTest(messages []message.Message, contextLimit 
 // can inspect runtime evidence accumulation across calls.
 func splitMessagesForCompactionForTestWithAgent(a *MainAgent, messages []message.Message, contextLimit int) (head []message.Message, evidence []message.Message) {
 	recentTail := selectRecentTailMessages(nil, messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
-	items := a.evidenceItemsForCompaction(messages, contextLimit)
+	items := a.evidenceItemsForCompaction(contextLimit)
 	return splitMessagesForCompactionWithSelections(messages, recentTail, items)
 }
 
