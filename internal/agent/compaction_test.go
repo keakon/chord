@@ -439,7 +439,7 @@ func TestSummarizeHeadTailLinesPreservesArtifactReference(t *testing.T) {
 	// Artifact reference lines ("Full output saved to <path>") must reach the
 	// model verbatim: mid-line truncation would clip the artifact path and
 	// leave the model an unreadable path to read.
-	ref := "Full output saved to /session/tool-outputs/call_" + strings.Repeat("a", 80) + ".log. Use read with offset/limit for line ranges, or shell with a script/parser for huge single-line structured output."
+	ref := tools.ArtifactReferencePrefix + "/session/tool-outputs/call_" + strings.Repeat("a", 80) + ".log. " + tools.ArtifactReadGuidance
 	long := strings.Repeat("x", summaryLineSnippetChars+100)
 
 	got := summarizeHeadTailLines(strings.Join([]string{

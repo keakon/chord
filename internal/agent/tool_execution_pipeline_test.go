@@ -47,18 +47,19 @@ func TestFormatToolExecutionOutputKeepsQuestionResultUntruncated(t *testing.T) {
 	}
 }
 
-func TestFormatToolExecutionOutputStillTruncatesOtherToolLongLines(t *testing.T) {
+func TestFormatToolExecutionOutputKeepsLongLineWithinInlineBudget(t *testing.T) {
 	result := strings.Repeat("a", tools.MaxLineLength+100)
 	sessionDir := t.TempDir()
 
 	got := formatToolExecutionOutput(result, sessionDir, "call-other", tools.NameShell, nil, "")
 
-	want := strings.Repeat("a", tools.MaxLineLength) + "..."
-	if !strings.Contains(got, want) {
-		t.Fatalf("non-question result = %q, want truncated output containing %q", got, want)
+	if got != result {
+		t.Fatalf("non-question result changed despite fitting inline budget: got len=%d want len=%d", len(got), len(result))
 	}
-	if !strings.Contains(got, "Full output saved to ") || !strings.Contains(got, filepath.Join(sessionDir, "tool-outputs", "call-other.log")) {
-		t.Fatalf("non-question truncation should include saved artifact guidance, got %q", got)
+	if files, err := tools.ListArtifactFiles(sessionDir); err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	} else if len(files) != 0 {
+		t.Fatalf("inline result should not create an artifact, got %v", files)
 	}
 }
 

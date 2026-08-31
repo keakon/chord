@@ -218,6 +218,21 @@ prompt — it never rewrites session files on disk.** Decisions use tool type,
 actual main-model request batches, size, and local validity state. Context usage
 affects durable compaction only and cannot change the reduction surface.
 
+### First-use tool-output budget
+
+Before an ordinary tool result enters the conversation, Chord applies a separate
+inline safety budget. A result that fits within the default 50 KiB budget is
+returned verbatim on first use. A long line or more than 2,000 lines alone does
+not force the model to reopen an otherwise small result; those limits only shape
+the preview of an output that already exceeds the byte budget.
+
+When a result exceeds the byte budget, Chord saves the complete output under the
+session's `tool-outputs/` directory and returns a bounded preview with a stable
+reference. The model should search or read only the omitted range it actually
+needs. This execution-time safeguard is separate from context reduction: the
+latter may summarize old results in a later request, while the former determines
+whether the first result is inline and recoverable.
+
 Reduction is enabled by default and usually needs no per-field tuning. Either
 form keeps the built-in defaults:
 

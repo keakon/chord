@@ -14,27 +14,31 @@ import (
 )
 
 const (
-	// MaxOutputLines is the maximum number of lines kept in truncated output.
+	// MaxOutputLines is the maximum number of lines kept in an over-budget
+	// preview.
 	MaxOutputLines = 2000
-	// MaxOutputBytes is the maximum byte length before truncation is triggered.
+	// MaxOutputBytes is the maximum inline byte length before truncation is
+	// triggered.
 	MaxOutputBytes = 50 * 1024
-	// MaxLineLength is the maximum UTF-8 byte length per output line before
-	// per-line truncation (suffix aligned to a valid UTF-8 boundary).
+	// MaxLineLength is the maximum UTF-8 byte length per line in an over-budget
+	// preview (suffix aligned to a valid UTF-8 boundary).
 	MaxLineLength = 2000
 	// ArtifactReferencePrefix starts every model-facing reference to a full
 	// tool output saved outside the inline result.
 	ArtifactReferencePrefix = "Full output saved to "
 	// ArtifactReadGuidance is appended to ordinary truncated-tool references.
-	ArtifactReadGuidance = "Use read with offset/limit for line ranges, or shell with a script/parser for huge single-line structured output."
+	ArtifactReadGuidance = "Only if the preview is insufficient, use grep first or read with offset/limit for needed ranges; use a script/parser for huge single-line structured output. Do not read the entire output by default."
 
 	maxArtifactReferencePathBytes = 4096
 )
 
 // TruncateOptions controls how output truncation is performed.
 type TruncateOptions struct {
-	// MaxLines is the maximum number of lines to keep. Defaults to MaxOutputLines (2000).
+	// MaxLines is the maximum number of lines to keep in an over-budget preview.
+	// It defaults to MaxOutputLines (2000).
 	MaxLines int
-	// MaxBytes is the maximum byte length before truncation is triggered. Defaults to MaxOutputBytes (50KB).
+	// MaxBytes is the maximum inline byte length before truncation is triggered.
+	// It defaults to MaxOutputBytes (50KB).
 	MaxBytes int
 	// Direction controls which part of the output is preserved:
 	//   "head"      – keep only the first MaxLines lines
@@ -50,7 +54,8 @@ type TruncateOptions struct {
 type TruncateResult struct {
 	// Content is the (possibly truncated) output text.
 	Content string
-	// Truncated is true when the original output exceeded line, byte, or per-line limits.
+	// Truncated is true when Content is an over-budget preview rather than the
+	// exact full output.
 	Truncated bool
 	// SavedPath is the file path where the full output was saved, or "" if
 	// it was not truncated or the save failed.
@@ -76,20 +81,6 @@ func (o TruncateOptions) defaults() TruncateOptions {
 		o.Direction = "head+tail"
 	}
 	return o
-}
-
-// countLines returns the number of lines in s, matching strings.Split(s, "\n") boundaries.
-func countLines(s string) int {
-	if s == "" {
-		return 1
-	}
-	n := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			n++
-		}
-	}
-	return n + 1
 }
 
 // buildLineOffsets returns the byte offset of the first byte of each line in s
@@ -197,6 +188,18 @@ func trimLinesToByteLimitOffsets(s string, offs []int, maxBytes int, direction s
 		return trimLinesToByteLimitHeadTailOffsets(s, offs, maxBytes)
 	}
 	total := len(offs)
+	if direction == "tail" {
+		lo, hi := 0, total
+		for lo < hi {
+			mid := lo + (hi-lo+1)/2
+			if cumulativeSizeLineRange(s, offs, total-mid, total) <= maxBytes {
+				lo = mid
+			} else {
+				hi = mid - 1
+			}
+		}
+		return materializeLineRange(s, offs, total-lo, total)
+	}
 	lo, hi := 0, total
 	for lo < hi {
 		mid := lo + (hi-lo+1)/2
@@ -314,32 +317,17 @@ func truncateStringToValidUTF8Prefix(s string, n int) string {
 func TruncateOutputWithOptions(output string, sessionDir string, opts TruncateOptions) TruncateResult {
 	opts = opts.defaults()
 
-	nLines := countLines(output)
-	needsTruncation := nLines > opts.MaxLines || len(output) > opts.MaxBytes
+	// Keep every result that fits the inline byte budget verbatim. Line count and
+	// per-line limits shape only the preview of an output that already exceeds
+	// the byte budget; applying them independently forces needless artifact
+	// rereads for otherwise small results such as search responses with one long
+	// embedded snippet.
+	needsTruncation := len(output) > opts.MaxBytes
 
 	if !needsTruncation {
-		lines := strings.Split(output, "\n")
-		truncated, lineTruncated := truncateLinesWithStatus(lines)
-		content := strings.Join(truncated, "\n")
-		if lineTruncated {
-			savedPath := saveFullOutput(output, sessionDir, opts.ArtifactKey)
-			reference := artifactReference(savedPath)
-			hint := "Output truncated."
-			if reference != "" {
-				hint += " " + reference
-			}
-			return TruncateResult{
-				Content:           content,
-				Truncated:         true,
-				SavedPath:         savedPath,
-				Hint:              hint,
-				Preview:           content,
-				ArtifactReference: reference,
-			}
-		}
 		return TruncateResult{
-			Content: content,
-			Preview: content,
+			Content: output,
+			Preview: output,
 		}
 	}
 
@@ -431,7 +419,7 @@ func applyDirectionTruncation(lines []string, totalLines int, opts TruncateOptio
 func truncationMarker(omitted int, savedPath string) string {
 	if ref := artifactReference(savedPath); ref != "" {
 		return fmt.Sprintf(
-			"\n\n... [%d lines truncated. %s Use grep to search within the saved output.] ...\n",
+			"\n\n... [%d lines truncated. %s] ...\n",
 			omitted, ref,
 		)
 	}

@@ -1500,7 +1500,7 @@ func TestReadCardDoesNotTreatSourceAsArtifactMetadata(t *testing.T) {
 		ResultContent: "READ_RESULT lines=621-622 total=982 truncated=budget requested_lines=621-780\n" +
 			`if idx := strings.LastIndex(trimmed, "Full output saved to "); idx >= 0 {` + "\n" +
 			`rest := strings.TrimSpace(trimmed[idx+len("Full output saved to "):])` + "\n\n" +
-			"Full output saved to /session/tool-outputs/read-result.log. Use read with offset/limit for line ranges, or shell with a script/parser for huge single-line structured output.",
+			"Full output saved to /session/tool-outputs/read-result.log. Only if the preview is insufficient, use grep first or read with offset/limit for needed ranges; use a script/parser for huge single-line structured output. Do not read the entire output by default.",
 	}
 
 	collapsed := stripANSI(strings.Join(block.Render(320, ""), "\n"))

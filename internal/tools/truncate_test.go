@@ -42,7 +42,7 @@ func generatePaddedLines(n, lineLen int) string {
 
 func TestTruncateOutputReusesStableArtifactPathForSameKey(t *testing.T) {
 	sessionDir := t.TempDir()
-	input := generateLines(MaxOutputLines + 10)
+	input := generatePaddedLines(3000, 20)
 
 	first := TruncateOutputWithOptions(input, sessionDir, TruncateOptions{ArtifactKey: "call-123"})
 	if !first.Truncated {
@@ -58,16 +58,16 @@ func TestTruncateOutputReusesStableArtifactPathForSameKey(t *testing.T) {
 	if !strings.Contains(first.Hint, first.SavedPath) {
 		t.Fatalf("hint %q should reference saved path %q", first.Hint, first.SavedPath)
 	}
-	for _, want := range []string{"read with offset/limit for line ranges", "script/parser for huge single-line structured output"} {
+	for _, want := range []string{"read with offset/limit for needed ranges", "script/parser for huge single-line structured output"} {
 		if !strings.Contains(first.Hint, want) {
 			t.Fatalf("hint %q should contain %q", first.Hint, want)
 		}
 	}
-	if strings.Count(first.Content, "read with offset/limit for line ranges") != 1 {
+	if strings.Count(first.Content, "read with offset/limit for needed ranges") != 1 {
 		t.Fatalf("truncated content should mention read guidance once, got %q", first.Content)
 	}
-	if !strings.Contains(first.Content, "Use grep to search within the saved output") {
-		t.Fatalf("truncated content should include grep guidance, got %q", first.Content)
+	if !strings.Contains(first.Content, "Do not read the entire output by default") {
+		t.Fatalf("truncated content should include conditional artifact guidance, got %q", first.Content)
 	}
 }
 
@@ -107,7 +107,7 @@ func TestTruncateOutputCreatesPrivateArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := TruncateOutputWithOptions(generateLines(MaxOutputLines+10), sessionDir, TruncateOptions{ArtifactKey: "private"})
+	result := TruncateOutputWithOptions(generatePaddedLines(3000, 20), sessionDir, TruncateOptions{ArtifactKey: "private"})
 	if result.SavedPath == "" {
 		t.Fatal("SavedPath is empty")
 	}
@@ -130,8 +130,8 @@ func TestTruncateOutputCreatesPrivateArtifact(t *testing.T) {
 
 func TestListArtifactFilesReturnsSessionToolOutputs(t *testing.T) {
 	sessionDir := t.TempDir()
-	_ = TruncateOutputWithOptions(generateLines(MaxOutputLines+5), sessionDir, TruncateOptions{ArtifactKey: "call-a"})
-	_ = TruncateOutputWithOptions(generateLines(MaxOutputLines+6), sessionDir, TruncateOptions{ArtifactKey: "call-b"})
+	_ = TruncateOutputWithOptions(generatePaddedLines(3000, 20), sessionDir, TruncateOptions{ArtifactKey: "call-a"})
+	_ = TruncateOutputWithOptions(generatePaddedLines(3001, 20), sessionDir, TruncateOptions{ArtifactKey: "call-b"})
 
 	files, err := ListArtifactFiles(sessionDir)
 	if err != nil {
@@ -173,7 +173,7 @@ func TestTruncateOutputWithOptions(t *testing.T) {
 			},
 		},
 		{
-			name:  "line count exactly at threshold",
+			name:  "line count within byte budget",
 			input: func() string { return generateLines(MaxOutputLines) },
 			opts:  TruncateOptions{},
 			check: func(t *testing.T, input string, r TruncateResult) {
@@ -189,30 +189,42 @@ func TestTruncateOutputWithOptions(t *testing.T) {
 			},
 		},
 		{
-			name:  "lines exceed threshold head+tail default",
-			input: func() string { return generateLines(3000) },
-			opts:  TruncateOptions{}, // default direction = "head+tail"
+			name:  "line count above threshold within byte budget",
+			input: func() string { return generateLines(MaxOutputLines + 1000) },
+			opts:  TruncateOptions{},
+			check: func(t *testing.T, input string, r TruncateResult) {
+				if r.Truncated {
+					t.Fatal("line count alone should not trigger truncation")
+				}
+				if r.Content != input {
+					t.Error("output should stay intact when it fits the byte budget")
+				}
+				if r.SavedPath != "" {
+					t.Errorf("SavedPath should be empty, got %q", r.SavedPath)
+				}
+			},
+		},
+		{
+			name:  "over-budget output still applies line preview limit",
+			input: func() string { return generatePaddedLines(3000, 10) },
+			opts:  TruncateOptions{MaxBytes: 25 * 1024},
 			check: func(t *testing.T, input string, r TruncateResult) {
 				if !r.Truncated {
 					t.Fatal("Truncated should be true")
 				}
-				// Default head+tail: headCount = MaxOutputLines*2/5 = 800
-				//                     tailCount = MaxOutputLines - 800 = 1200
-				// Kept: line-0000..line-0799  and  line-1800..line-2999
-				mustContain := []string{"line-0000", "line-0799", "line-1800", "line-2999"}
+				// Once the byte budget is exceeded, the preview is also capped at
+				// MaxOutputLines and keeps both the beginning and end.
+				mustContain := []string{"line-0000", "line-2999"}
 				for _, s := range mustContain {
 					if !strings.Contains(r.Content, s) {
 						t.Errorf("Content should contain %q", s)
 					}
 				}
-				mustNotContain := []string{"line-0800", "line-1799"}
-				for _, s := range mustNotContain {
-					if strings.Contains(r.Content, s) {
-						t.Errorf("Content should NOT contain %q", s)
-					}
+				if got := strings.Count(r.Content, "line-"); got > MaxOutputLines {
+					t.Errorf("preview has too many data lines: %d", got)
 				}
-				if !strings.Contains(r.Content, "1000 lines truncated") {
-					t.Error("Content should contain truncation marker mentioning 1000 lines")
+				if !strings.Contains(r.Content, "lines truncated") {
+					t.Error("Content should contain a line truncation marker")
 				}
 				// Verify saved file contains the original output.
 				if r.SavedPath == "" {
@@ -231,14 +243,14 @@ func TestTruncateOutputWithOptions(t *testing.T) {
 			},
 		},
 		{
-			name:  "lines exceed threshold head direction",
-			input: func() string { return generateLines(3000) },
-			opts:  TruncateOptions{Direction: "head"},
+			name:  "over-budget output applies head direction",
+			input: func() string { return generatePaddedLines(3000, 10) },
+			opts:  TruncateOptions{Direction: "head", MaxBytes: 25 * 1024},
 			check: func(t *testing.T, input string, r TruncateResult) {
 				if !r.Truncated {
 					t.Fatal("Truncated should be true")
 				}
-				// Head keeps first 2000 lines: line-0000 through line-1999
+				// Head keeps the first MaxOutputLines of the over-budget preview.
 				if !strings.Contains(r.Content, "line-0000") {
 					t.Error("should contain first line")
 				}
@@ -248,7 +260,7 @@ func TestTruncateOutputWithOptions(t *testing.T) {
 				if strings.Contains(r.Content, "line-2000") {
 					t.Error("should NOT contain line-2000")
 				}
-				if !strings.Contains(r.Content, "1000 lines truncated") {
+				if !strings.Contains(r.Content, "lines truncated") {
 					t.Error("should contain truncation marker")
 				}
 				if r.SavedPath == "" {
@@ -257,14 +269,14 @@ func TestTruncateOutputWithOptions(t *testing.T) {
 			},
 		},
 		{
-			name:  "lines exceed threshold tail direction",
-			input: func() string { return generateLines(3000) },
-			opts:  TruncateOptions{Direction: "tail"},
+			name:  "over-budget output applies tail direction",
+			input: func() string { return generatePaddedLines(3000, 10) },
+			opts:  TruncateOptions{Direction: "tail", MaxBytes: 25 * 1024},
 			check: func(t *testing.T, input string, r TruncateResult) {
 				if !r.Truncated {
 					t.Fatal("Truncated should be true")
 				}
-				// Tail keeps last 2000 lines: line-1000 through line-2999
+				// Tail keeps the last MaxOutputLines of the over-budget preview.
 				if !strings.Contains(r.Content, "line-1000") {
 					t.Error("should contain line-1000")
 				}
@@ -274,7 +286,7 @@ func TestTruncateOutputWithOptions(t *testing.T) {
 				if strings.Contains(r.Content, "line-0999") {
 					t.Error("should NOT contain line-0999")
 				}
-				if !strings.Contains(r.Content, "1000 lines truncated") {
+				if !strings.Contains(r.Content, "lines truncated") {
 					t.Error("should contain truncation marker")
 				}
 				if r.SavedPath == "" {
@@ -321,33 +333,25 @@ func TestTruncateOutputWithOptions(t *testing.T) {
 			},
 		},
 		{
-			name: "single line exceeds MaxLineLength",
+			name: "long line within byte budget remains intact",
 			input: func() string {
 				return strings.Repeat("a", MaxLineLength+500)
 			},
 			opts: TruncateOptions{},
 			check: func(t *testing.T, input string, r TruncateResult) {
-				// Total bytes = 2500 < MaxOutputBytes, lines = 1 ≤ MaxOutputLines
-				// Only per-line truncation applies; the full output is still saved.
-				if !r.Truncated {
-					t.Error("Truncated should be true for per-line truncation")
+				// Total bytes stay below MaxOutputBytes, so a long line alone must
+				// not force the model to read the saved artifact.
+				if r.Truncated {
+					t.Error("per-line length alone should not trigger truncation")
 				}
-				expected := strings.Repeat("a", MaxLineLength) + "..."
-				if r.Content != expected {
-					t.Errorf("Content length = %d, want %d", len(r.Content), len(expected))
+				if r.Content != input {
+					t.Errorf("Content length = %d, want %d", len(r.Content), len(input))
 				}
-				if r.SavedPath == "" {
-					t.Fatal("SavedPath should be set")
+				if r.SavedPath != "" {
+					t.Fatalf("SavedPath should be empty, got %q", r.SavedPath)
 				}
-				data, err := os.ReadFile(r.SavedPath)
-				if err != nil {
-					t.Fatalf("failed to read saved file: %v", err)
-				}
-				if string(data) != input {
-					t.Error("saved file should contain original full output")
-				}
-				if !strings.Contains(r.Hint, r.SavedPath) || !strings.Contains(r.ArtifactReference, r.SavedPath) {
-					t.Errorf("truncation metadata should reference saved path, hint=%q ref=%q path=%q", r.Hint, r.ArtifactReference, r.SavedPath)
+				if r.Hint != "" || r.ArtifactReference != "" {
+					t.Errorf("truncation metadata should be empty, hint=%q ref=%q", r.Hint, r.ArtifactReference)
 				}
 			},
 		},
