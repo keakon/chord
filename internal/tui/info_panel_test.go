@@ -1449,30 +1449,154 @@ func TestRenderInfoPanelChangedFilesDeletedFileUsesStrikethroughWithoutStats(t *
 	}
 }
 
-func TestRenderInfoPanelEditedFilesLimitsVisibleRows(t *testing.T) {
+func TestRenderInfoPanelEditedFilesKeepsRowsScrollable(t *testing.T) {
 	backend := newInfoPanelAgent()
 	m := NewModel(backend)
 	m.sidebar.Update(nil, "main", "builder")
-	for i := 1; i <= infoPanelEditedFilesLimit+3; i++ {
+	// A sizeable but realistic turn: every file must stay rendered so the user
+	// can reach it by scrolling the panel, instead of collapsing into an
+	// "… and N more" dead end.
+	const total = 30
+	for i := 1; i <= total; i++ {
 		m.sidebar.AddFileEdit("main", fmt.Sprintf("/tmp/file-%02d.go", i), i, 0)
 	}
 
-	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 40)), "▼ CHANGED FILES")
-	if got, want := len(section), infoPanelEditedFilesLimit+1; got != want {
+	// Height is generous so panel-level clipping does not hide rows from the
+	// assertion; the point here is the section's own truncation policy.
+	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 200)), "▼ CHANGED FILES")
+	if got, want := len(section), total; got != want {
 		t.Fatalf("CHANGED FILES rows = %d, want %d; section=%#v", got, want, section)
 	}
-	if !strings.HasPrefix(section[0], "file-01.go +1") {
-		t.Fatalf("first visible edited file = %q, want file-01.go", section[0])
+	// Newest first, so the last-added file leads and the first-added trails.
+	if got, want := section[0], fmt.Sprintf("file-%02d.go +%d", total, total); !strings.HasPrefix(got, want) {
+		t.Fatalf("first row = %q, want newest file with prefix %q", got, want)
 	}
-	lastFile := fmt.Sprintf("file-%02d.go +%d", infoPanelEditedFilesLimit, infoPanelEditedFilesLimit)
-	if !strings.HasPrefix(section[infoPanelEditedFilesLimit-1], lastFile) {
-		t.Fatalf("last visible edited file = %q, want prefix %q", section[infoPanelEditedFilesLimit-1], lastFile)
+	if got, want := section[total-1], "file-01.go +1"; !strings.HasPrefix(got, want) {
+		t.Fatalf("last row = %q, want oldest file with prefix %q", got, want)
 	}
-	if got, want := section[infoPanelEditedFilesLimit], "… and 3 more"; got != want {
-		t.Fatalf("overflow row = %q, want %q", got, want)
+	if joined := strings.Join(section, "\n"); strings.Contains(joined, "more") {
+		t.Fatalf("CHANGED FILES should not add an overflow row at %d files; section=%#v", total, section)
 	}
-	if strings.Contains(strings.Join(section, "\n"), "file-21.go") {
-		t.Fatalf("CHANGED FILES should hide files beyond limit; section=%#v", section)
+}
+
+func TestRenderInfoPanelEditedFilesReeditMovesToNewestSlot(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	m.sidebar.Update(nil, "main", "builder")
+	m.sidebar.AddFileEdit("main", "/tmp/one.go", 1, 0)
+	m.sidebar.AddFileEdit("main", "/tmp/two.go", 1, 0)
+	m.sidebar.AddFileEdit("main", "/tmp/one.go", 2, 0)
+
+	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 40)), "▼ CHANGED FILES")
+	if got, want := len(section), 2; got != want {
+		t.Fatalf("CHANGED FILES rows = %d, want %d; section=%#v", got, want, section)
+	}
+	// one.go was touched last, so it leads and includes both edits.
+	if !strings.HasPrefix(section[0], "one.go +3") {
+		t.Fatalf("first row = %q, want most recently edited one.go", section[0])
+	}
+	if !strings.HasPrefix(section[1], "two.go") {
+		t.Fatalf("second row = %q, want older entry two.go", section[1])
+	}
+}
+
+func TestInfoPanelChangedFileUpdateInvalidatesCache(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	m.sidebar.Update(nil, "main", "builder")
+	m.sidebar.AddFileEdit("main", "/tmp/main.go", 1, 0)
+	first := infoPanelPlainLines(m.renderInfoPanel(48, 24))
+
+	m.sidebar.AddFileEdit("main", "/tmp/main.go", 2, 0)
+	second := infoPanelPlainLines(m.renderInfoPanel(48, 24))
+
+	firstSection := infoPanelSectionLines(first, "▼ CHANGED FILES")
+	secondSection := infoPanelSectionLines(second, "▼ CHANGED FILES")
+	if len(firstSection) != 1 || !strings.Contains(firstSection[0], "+1") {
+		t.Fatalf("initial changed-file section = %#v, want +1", firstSection)
+	}
+	if len(secondSection) != 1 || !strings.Contains(secondSection[0], "+3") {
+		t.Fatalf("updated changed-file section = %#v, want +3", secondSection)
+	}
+}
+
+func TestRenderInfoPanelEditedFilesReeditProtectsFileFromEviction(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	m.sidebar.Update(nil, "main", "builder")
+	for i := range sidebarMaxEditedFiles {
+		m.sidebar.AddFileEdit("main", fmt.Sprintf("/tmp/file-%05d.go", i), 1, 0)
+	}
+	m.sidebar.AddFileEdit("main", "/tmp/file-00000.go", 2, 0)
+	m.sidebar.AddFileEdit("main", "/tmp/newest.go", 1, 0)
+
+	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, sidebarMaxEditedFiles+50)), "▼ CHANGED FILES")
+	if got, want := len(section), sidebarMaxEditedFiles; got != want {
+		t.Fatalf("CHANGED FILES rows = %d, want %d", got, want)
+	}
+	if !strings.HasPrefix(section[0], "newest.go") || !strings.HasPrefix(section[1], "file-00000.go +3") {
+		t.Fatalf("newest rows = %#v, want newest.go then re-edited file-00000.go", section[:2])
+	}
+	if joined := strings.Join(section, "\n"); strings.Contains(joined, "file-00001.go") {
+		t.Fatalf("oldest untouched file should be evicted; section tail=%#v", section[len(section)-3:])
+	}
+}
+
+func TestInfoPanelScrollReusesCompleteRenderedContent(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	m.sidebar.Update(nil, "main", "builder")
+	for i := range 30 {
+		m.sidebar.AddFileEdit("main", fmt.Sprintf("/tmp/file-%02d.go", i), i+1, 0)
+	}
+	first := m.renderInfoPanel(48, 12)
+	cachedLines := m.cachedInfoPanelLines
+	cachedFingerprint := m.cachedInfoPanelFP
+	if !m.scrollInfoPanel(3) {
+		t.Fatal("expected overflowing info panel to scroll")
+	}
+	second := m.renderInfoPanel(48, 12)
+
+	if first == second {
+		t.Fatal("scrolling should change the visible info panel window")
+	}
+	if !slices.Equal(m.cachedInfoPanelLines, cachedLines) || m.cachedInfoPanelFP != cachedFingerprint {
+		t.Fatal("scrolling should reuse complete rendered content and its fingerprint")
+	}
+}
+
+// The sidebar cap is the only ceiling: the panel must render every file the
+// sidebar still holds, so nothing is hidden behind a second truncation.
+func TestRenderInfoPanelEditedFilesSidebarCapIsOnlyCeiling(t *testing.T) {
+	if infoPanelEditedFilesHardLimit != sidebarMaxEditedFiles {
+		t.Fatalf("infoPanelEditedFilesHardLimit = %d, want %d; the two layers must share one ceiling",
+			infoPanelEditedFilesHardLimit, sidebarMaxEditedFiles)
+	}
+
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	m.sidebar.Update(nil, "main", "builder")
+	const dropped = 50
+	total := sidebarMaxEditedFiles + dropped
+	for i := 1; i <= total; i++ {
+		m.sidebar.AddFileEdit("main", fmt.Sprintf("/tmp/file-%05d.go", i), i, 0)
+	}
+
+	// Height is generous so panel-level clipping does not hide rows here.
+	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, total+50)), "▼ CHANGED FILES")
+	if got, want := len(section), sidebarMaxEditedFiles; got != want {
+		t.Fatalf("CHANGED FILES rows = %d, want %d; section=%#v", got, want, section)
+	}
+	// The sidebar keeps the newest entries and the panel renders them first, so
+	// the evicted prefix is missing from the tail, not from the top of the list.
+	if got, want := section[0], fmt.Sprintf("file-%05d.go +%d", total, total); !strings.HasPrefix(got, want) {
+		t.Fatalf("first row = %q, want newest file with prefix %q", got, want)
+	}
+	if got, want := section[len(section)-1], fmt.Sprintf("file-%05d.go +%d", dropped+1, dropped+1); !strings.HasPrefix(got, want) {
+		t.Fatalf("last row = %q, want oldest survivor with prefix %q", got, want)
+	}
+	if joined := strings.Join(section, "\n"); strings.Contains(joined, "more") {
+		t.Fatalf("panel must not add an overflow row on top of the sidebar cap; section tail=%#v", section[len(section)-3:])
 	}
 }
 

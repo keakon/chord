@@ -10,8 +10,8 @@ import (
 	"github.com/keakon/chord/internal/agent"
 )
 
-// infoPanelFingerprint builds a cheap string key over the data that renderInfoPanel reads.
-// If this string is unchanged, the rendered output is identical — return the cached result.
+// infoPanelFingerprint builds a cheap key over the data used to build the
+// unscrolled info panel content. The scroll offset is applied separately.
 func (m *Model) infoPanelFingerprint(width, height int) string {
 	var b strings.Builder
 	appendInt := func(v int) {
@@ -19,6 +19,9 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	}
 	appendInt64 := func(v int64) {
 		b.WriteString(strconv.FormatInt(v, 10))
+	}
+	appendUint64 := func(v uint64) {
+		b.WriteString(strconv.FormatUint(v, 10))
 	}
 	appendFloat6 := func(v float64) {
 		b.WriteString(strconv.FormatFloat(v, 'f', 6, 64))
@@ -239,14 +242,8 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	appendSep()
 
 	// Changed files
-	for _, fe := range m.sidebar.CurrentAgentFiles() {
-		b.WriteByte('F')
-		b.WriteString(fe.Path)
-		appendInt(fe.Added)
-		appendInt(fe.Removed)
-		appendBool(fe.Deleted)
-		appendSep()
-	}
+	appendUint64(m.sidebar.fileEditRevision())
+	appendSep()
 	appendBool(m.isInfoPanelSectionCollapsed(infoPanelSectionFiles))
 	appendSep()
 
@@ -285,89 +282,97 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 		return ""
 	}
 
-	// Fingerprint-based cache: skip re-render when inputs are unchanged.
-	if fp := m.infoPanelFingerprint(width, height); fp == m.cachedInfoPanelFP &&
-		m.cachedInfoPanelW == width && m.cachedInfoPanelH == height {
+	// Fingerprint-based cache: skip rebuilding when inputs are unchanged.
+	// Scrolling invalidates only cachedInfoPanelOut, preserving the complete
+	// rendered content for a cheap viewport slice below.
+	fp := m.infoPanelFingerprint(width, 0)
+	contentCached := fp == m.cachedInfoPanelFP &&
+		m.cachedInfoPanelW == width
+	if contentCached && m.cachedInfoPanelOutValid && m.cachedInfoPanelH == height {
 		return m.cachedInfoPanelOut
-	} else {
+	}
+	if !contentCached {
 		m.cachedInfoPanelFP = fp
 		m.cachedInfoPanelW = width
-		m.cachedInfoPanelH = height
-		// (cachedInfoPanelOut set at the end)
+		m.cachedInfoPanelH = 0
+		m.cachedInfoPanelOutValid = false
+
+		lineW := width - 2
+		sep := "\n" + InfoPanelLineBg.Width(lineW).Render("") + "\n"
+		m.beginInfoPanelRenderPass()
+		blockParts := make([]string, 0, 7)
+		appendBlock := func(section infoPanelSectionID, block string) {
+			if block == "" {
+				return
+			}
+			if len(blockParts) > 0 {
+				blockParts = append(blockParts, sep)
+			}
+			blockParts = append(blockParts, block)
+			m.recordInfoPanelSectionHitBox(section, block)
+		}
+
+		appendBlock("", m.buildInfoPanelModelBlock(lineW))
+		if snap := m.agent.CurrentRateLimitSnapshot(); snap != nil {
+			appendBlock("", m.renderRateLimitBlock(snap, lineW))
+		}
+		appendBlock("", m.buildInfoPanelUsageBlock(width, lineW))
+		appendBlock("", m.buildInfoPanelTimeBlock(lineW))
+		appendBlock(infoPanelSectionLSP, m.buildInfoPanelLSPBlock(lineW))
+		appendBlock(infoPanelSectionMCP, m.buildInfoPanelMCPBlock(lineW))
+		appendBlock(infoPanelSectionTodos, m.buildInfoPanelTodoBlock(lineW))
+		appendBlock(infoPanelSectionSkills, m.buildInfoPanelSkillsBlock(lineW))
+		appendBlock(infoPanelSectionGit, m.buildInfoPanelGitBlock(lineW))
+		appendBlock(infoPanelSectionFiles, m.buildInfoPanelFilesBlock(lineW))
+		if agentBlock, agentRows := m.buildInfoPanelAgentListBlockWithHits(lineW); agentBlock != "" {
+			baseY := m.infoPanelRenderCursorY
+			appendBlock(infoPanelSectionAgents, agentBlock)
+			for _, hit := range agentRows {
+				m.recordInfoPanelAgentHitBox(hit.agentID, baseY+hit.startLine, baseY+hit.endLine)
+			}
+		}
+
+		var content string
+		switch len(blockParts) {
+		case 0:
+			content = ""
+		case 1:
+			content = blockParts[0]
+		default:
+			var sb strings.Builder
+			for _, part := range blockParts {
+				sb.WriteString(part)
+			}
+			content = sb.String()
+		}
+		m.cachedInfoPanelLines = strings.Split(content, "\n")
+		m.cachedInfoPanelContentHeight = lipgloss.Height(content)
 	}
 
-	lineW := width - 2
-	sep := "\n" + InfoPanelLineBg.Width(lineW).Render("") + "\n"
-	m.beginInfoPanelRenderPass()
-	blockParts := make([]string, 0, 7)
-	appendBlock := func(section infoPanelSectionID, block string) {
-		if block == "" {
-			return
-		}
-		if len(blockParts) > 0 {
-			blockParts = append(blockParts, sep)
-		}
-		blockParts = append(blockParts, block)
-		m.recordInfoPanelSectionHitBox(section, block)
-	}
-
-	appendBlock("", m.buildInfoPanelModelBlock(lineW))
-	if snap := m.agent.CurrentRateLimitSnapshot(); snap != nil {
-		appendBlock("", m.renderRateLimitBlock(snap, lineW))
-	}
-	appendBlock("", m.buildInfoPanelUsageBlock(width, lineW))
-	appendBlock("", m.buildInfoPanelTimeBlock(lineW))
-	appendBlock(infoPanelSectionLSP, m.buildInfoPanelLSPBlock(lineW))
-	appendBlock(infoPanelSectionMCP, m.buildInfoPanelMCPBlock(lineW))
-	appendBlock(infoPanelSectionTodos, m.buildInfoPanelTodoBlock(lineW))
-	appendBlock(infoPanelSectionSkills, m.buildInfoPanelSkillsBlock(lineW))
-	appendBlock(infoPanelSectionGit, m.buildInfoPanelGitBlock(lineW))
-	appendBlock(infoPanelSectionFiles, m.buildInfoPanelFilesBlock(lineW))
-	if agentBlock, agentRows := m.buildInfoPanelAgentListBlockWithHits(lineW); agentBlock != "" {
-		baseY := m.infoPanelRenderCursorY
-		appendBlock(infoPanelSectionAgents, agentBlock)
-		for _, hit := range agentRows {
-			m.recordInfoPanelAgentHitBox(hit.agentID, baseY+hit.startLine, baseY+hit.endLine)
-		}
-	}
-
-	var finalContent string
-	switch len(blockParts) {
-	case 0:
-		finalContent = ""
-	case 1:
-		finalContent = blockParts[0]
-	default:
-		var sb strings.Builder
-		for _, part := range blockParts {
-			sb.WriteString(part)
-		}
-		finalContent = sb.String()
-	}
-	finalContent = m.clampAndSliceInfoPanelContent(finalContent, height)
+	finalContent := m.clampAndSliceInfoPanelContent(m.cachedInfoPanelLines, height)
 	out := InfoPanelStyle.
 		Width(width).
 		Height(height).
 		Render(finalContent)
+	m.cachedInfoPanelH = height
 	m.cachedInfoPanelOut = out
+	m.cachedInfoPanelOutValid = true
 	return out
 }
 
-func (m *Model) clampAndSliceInfoPanelContent(content string, height int) string {
-	contentHeight := lipgloss.Height(content)
-	m.infoPanelContentHeight = contentHeight
+func (m *Model) clampAndSliceInfoPanelContent(lines []string, height int) string {
+	m.infoPanelContentHeight = m.cachedInfoPanelContentHeight
 	m.infoPanelViewportHeight = height
-	maxOffset := contentHeight - height
+	maxOffset := m.infoPanelContentHeight - height
 	if maxOffset <= 0 {
 		m.infoPanelScrollOffset = 0
-		return content
+		return strings.Join(lines, "\n")
 	}
 	if m.infoPanelScrollOffset < 0 {
 		m.infoPanelScrollOffset = 0
 	} else if m.infoPanelScrollOffset > maxOffset {
 		m.infoPanelScrollOffset = maxOffset
 	}
-	lines := strings.Split(content, "\n")
 	start := m.infoPanelScrollOffset
 	if start >= len(lines) {
 		return ""
@@ -380,7 +385,15 @@ func (m *Model) clearInfoPanelRenderCache() {
 	m.cachedInfoPanelW = 0
 	m.cachedInfoPanelH = 0
 	m.cachedInfoPanelFP = ""
+	m.cachedInfoPanelLines = nil
+	m.cachedInfoPanelContentHeight = 0
 	m.cachedInfoPanelOut = ""
+	m.cachedInfoPanelOutValid = false
+}
+
+func (m *Model) clearInfoPanelViewportCache() {
+	m.cachedInfoPanelOut = ""
+	m.cachedInfoPanelOutValid = false
 }
 
 func (m *Model) scrollInfoPanel(delta int) bool {
@@ -396,7 +409,7 @@ func (m *Model) scrollInfoPanel(delta int) bool {
 	}
 	if next != m.infoPanelScrollOffset {
 		m.infoPanelScrollOffset = next
-		m.clearInfoPanelRenderCache()
+		m.clearInfoPanelViewportCache()
 	}
 	return true
 }

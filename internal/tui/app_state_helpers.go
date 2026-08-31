@@ -215,7 +215,10 @@ type viewCacheState struct {
 	cachedInfoPanelW                   int
 	cachedInfoPanelH                   int
 	cachedInfoPanelFP                  string
+	cachedInfoPanelLines               []string
+	cachedInfoPanelContentHeight       int
 	cachedInfoPanelOut                 string
+	cachedInfoPanelOutValid            bool
 	statusBarAgentSnapshot             statusBarAgentSnapshot
 	statusBarSyntheticConnectingLogKey string
 	cachedStatusBarSessionValue        string

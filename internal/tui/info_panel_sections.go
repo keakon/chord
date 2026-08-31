@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +21,12 @@ import (
 
 const (
 	infoPanelCollapsibleContentInset = 2
-	infoPanelEditedFilesLimit        = 20
+	// infoPanelEditedFilesHardLimit is a last-resort guard, not a display
+	// budget: the info panel is scrollable, so every changed file the sidebar
+	// still holds is rendered and reachable by scrolling rather than collapsed
+	// into an overflow row. It reuses the sidebar's own cap so the two layers
+	// cannot drift apart and truncate the same list twice.
+	infoPanelEditedFilesHardLimit = sidebarMaxEditedFiles
 )
 
 func joinInfoPanelBlockLines(lines []string) string {
@@ -685,11 +691,19 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 	if !expanded {
 		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(filesLines))
 	}
+	// Newest first: the panel answers "what just changed", so the most recent
+	// edits belong at the eye's entry point rather than below the fold. Storage
+	// stays oldest-first, including when an existing file changes again, so a
+	// render-time reversal is enough here.
+	//
+	// A side effect worth keeping: the sidebar drops the oldest entries when it
+	// hits its cap, and rendering oldest-last puts that eviction at the tail,
+	// off-screen, instead of silently deleting rows from the top of the list.
 	visibleFiles := editedFiles
-	if len(visibleFiles) > infoPanelEditedFilesLimit {
-		visibleFiles = visibleFiles[:infoPanelEditedFilesLimit]
+	if len(visibleFiles) > infoPanelEditedFilesHardLimit {
+		visibleFiles = visibleFiles[len(visibleFiles)-infoPanelEditedFilesHardLimit:]
 	}
-	for _, fe := range visibleFiles {
+	for _, fe := range slices.Backward(visibleFiles) {
 		baseName := filepath.Base(fe.Path)
 		var parts string
 		if !fe.Deleted {

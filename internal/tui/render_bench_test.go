@@ -188,6 +188,45 @@ func BenchmarkRenderInfoPanelCacheMiss(b *testing.B) {
 	}
 }
 
+func benchmarkInfoPanelWithMaxFiles() *Model {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	m.sidebar.Update(nil, "main", "builder")
+	for i := range sidebarMaxEditedFiles {
+		m.sidebar.AddFileEdit("main", fmt.Sprintf("/tmp/file-%05d.go", i), i+1, 0)
+	}
+	return &m
+}
+
+// BenchmarkRenderInfoPanelMaxFilesScroll measures the common long-list path:
+// scrolling slices cached complete content without rebuilding all file rows.
+func BenchmarkRenderInfoPanelMaxFilesScroll(b *testing.B) {
+	m := benchmarkInfoPanelWithMaxFiles()
+	_ = m.renderInfoPanel(48, 40)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; b.Loop(); i++ {
+		delta := 1
+		if i&1 != 0 {
+			delta = -1
+		}
+		m.scrollInfoPanel(delta)
+		_ = m.renderInfoPanel(48, 40)
+	}
+}
+
+func BenchmarkRenderInfoPanelMaxFilesContentMiss(b *testing.B) {
+	m := benchmarkInfoPanelWithMaxFiles()
+	widths := [2]int{48, 49}
+	i := 0
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = m.renderInfoPanel(widths[i&1], 40)
+		i++
+	}
+}
+
 // BenchmarkRenderAnimatedInputSeparatorCacheHit measures the separator cache
 // hit path. Should be O(1) — just a few int comparisons and a string return.
 func BenchmarkRenderAnimatedInputSeparatorCacheHit(b *testing.B) {

@@ -10,6 +10,17 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// sidebarMaxEditedFiles is the single ceiling on how many changed files the
+// sidebar keeps per agent. It only guards against unbounded growth over a very
+// long session; it is deliberately far above any realistic turn so the panel
+// can keep every changed file reachable by scrolling. The oldest entries are
+// dropped first when it bites.
+//
+// The info panel renders whatever the sidebar still holds and reuses this value
+// as its own last-resort guard (see infoPanelEditedFilesHardLimit), so the two
+// layers cannot drift into truncating the list twice.
+const sidebarMaxEditedFiles = 500
+
 // FileEdit records a single changed-file event (Write, Edit, or Delete tool call).
 type FileEdit struct {
 	Path          string // file path
@@ -32,7 +43,7 @@ type SidebarEntry struct {
 	Color        string     // optional ANSI color code for TUI display
 	SelectedRef  string     // last known primary model ref (SubAgent only; may include @variant)
 	RunningRef   string     // last known effective running ref (SubAgent only)
-	EditedFiles  []FileEdit // recent file changes, in order
+	EditedFiles  []FileEdit // recent file changes, oldest first
 	Activity     string     // latest runtime activity/detail snapshot; AGENTS rows may choose not to render it
 	LastSummary  string
 	UrgentCount  int
@@ -72,6 +83,7 @@ func (s *Sidebar) SetWorkingDir(workingDir string) {
 	if s.workingDir == workingDir {
 		return
 	}
+	s.fileEditSeq++
 	previousWorkingDir := s.workingDir
 	s.workingDir = workingDir
 	for i := range s.agents {
@@ -416,14 +428,17 @@ func (s *Sidebar) addFileChangeWithEmpty(agentID, filePath string, added, remove
 		// Accumulate into existing entry for the same file.
 		for j := range s.agents[i].EditedFiles {
 			if s.agents[i].EditedFiles[j].Path == filePath {
-				s.agents[i].EditedFiles[j].Added += added
-				s.agents[i].EditedFiles[j].Removed += removed
 				// Only a call that carries an actual state transition restamps
 				// the sequence; a no-op re-report must not win the merge.
 				if deleted || added != 0 || removed != 0 || keepEmpty {
+					edit := s.agents[i].EditedFiles[j]
+					edit.Added += added
+					edit.Removed += removed
 					s.fileEditSeq++
-					s.agents[i].EditedFiles[j].Deleted = deleted
-					s.agents[i].EditedFiles[j].stateSequence = s.fileEditSeq
+					edit.Deleted = deleted
+					edit.stateSequence = s.fileEditSeq
+					copy(s.agents[i].EditedFiles[j:], s.agents[i].EditedFiles[j+1:])
+					s.agents[i].EditedFiles[len(s.agents[i].EditedFiles)-1] = edit
 				}
 				return
 			}
@@ -433,8 +448,7 @@ func (s *Sidebar) addFileChangeWithEmpty(agentID, filePath string, added, remove
 			return
 		}
 		s.fileEditSeq++
-		// New file entry (cap at 50 to avoid unbounded growth).
-		const maxEditedFiles = 50
+		// New file entry; oldest entries are dropped first once the cap bites.
 		s.agents[i].EditedFiles = append(s.agents[i].EditedFiles, FileEdit{
 			Path:          filePath,
 			Added:         added,
@@ -442,8 +456,8 @@ func (s *Sidebar) addFileChangeWithEmpty(agentID, filePath string, added, remove
 			Deleted:       deleted,
 			stateSequence: s.fileEditSeq,
 		})
-		if len(s.agents[i].EditedFiles) > maxEditedFiles {
-			s.agents[i].EditedFiles = s.agents[i].EditedFiles[len(s.agents[i].EditedFiles)-maxEditedFiles:]
+		if len(s.agents[i].EditedFiles) > sidebarMaxEditedFiles {
+			s.agents[i].EditedFiles = s.agents[i].EditedFiles[len(s.agents[i].EditedFiles)-sidebarMaxEditedFiles:]
 		}
 		return
 	}
@@ -493,6 +507,9 @@ func mergeSidebarFileEdits(edits []FileEdit) []FileEdit {
 		byPath[edit.Path] = len(normalized)
 		normalized = append(normalized, edit)
 	}
+	sort.SliceStable(normalized, func(i, j int) bool {
+		return normalized[i].stateSequence < normalized[j].stateSequence
+	})
 	return normalized
 }
 
@@ -508,6 +525,9 @@ func (s *Sidebar) ClearFileEdits(agentID string) {
 	agentID = normalizeSidebarAgentID(agentID)
 	for i := range s.agents {
 		if s.agents[i].ID == agentID {
+			if len(s.agents[i].EditedFiles) > 0 {
+				s.fileEditSeq++
+			}
 			s.agents[i].EditedFiles = nil
 			return
 		}
@@ -526,6 +546,14 @@ func (s *Sidebar) CurrentAgentFiles() []FileEdit {
 		}
 	}
 	return nil
+}
+
+// fileEditRevision changes whenever sidebar file tracking changes.
+func (s *Sidebar) fileEditRevision() uint64 {
+	if s == nil {
+		return 0
+	}
+	return s.fileEditSeq
 }
 
 // AddPendingTask increments the pending-task counter, causing the sidebar to

@@ -96,8 +96,8 @@ func TestSidebarAddFileMoveRevivesPreviouslyDeletedTarget(t *testing.T) {
 	if len(edits) != 2 {
 		t.Fatalf("changed files = %d, want 2: %+v", len(edits), edits)
 	}
-	if edits[0].Path != "new.go" || edits[0].Deleted {
-		t.Fatalf("move target = %+v, want revived new.go", edits[0])
+	if edits[1].Path != "new.go" || edits[1].Deleted {
+		t.Fatalf("move target = %+v, want revived new.go as newest entry", edits[1])
 	}
 }
 
