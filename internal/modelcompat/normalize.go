@@ -44,14 +44,19 @@ func HasNativeReplayPayload(msgs []message.Message) bool {
 	return false
 }
 
-// LastUserMessageIndex returns the index of the last user message, or -1.
+// LastUserMessageIndex returns the index of the last real user message, or -1.
+// Request-scoped turn overlays (KindTurnOverlay, e.g. <system-reminder> hints)
+// are appended after the conversation tail and are not real user turns, so they
+// are skipped: counting one as the last user message would extend the
+// reasoning-strip / validation window past the current turn and strip the
+// reasoning the backend actually consumes in this turn's tool chain.
 // Thinking-mode chat backends validate reasoning presence only for assistant
 // tool-call messages after this boundary; normalize and the llm retry layer
 // must agree on the same window definition.
 func LastUserMessageIndex(msgs []message.Message) int {
 	last := -1
 	for i := range msgs {
-		if msgs[i].Role == message.RoleUser {
+		if msgs[i].Role == message.RoleUser && msgs[i].Kind != message.KindTurnOverlay {
 			last = i
 		}
 	}

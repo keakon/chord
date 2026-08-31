@@ -593,6 +593,56 @@ func TestFillCurrentTurnEmptyReasoning(t *testing.T) {
 	}
 }
 
+func TestFillCurrentTurnEmptyReasoning_SkipsTurnOverlayBoundary(t *testing.T) {
+	// A request-scoped <system-reminder> overlay is appended after the tail as a
+	// user message. It is not a real user turn: counting it as the last user
+	// message would move the reasoning-presence window past the current tool
+	// chain, so tool-call messages in this turn would neither keep their replay
+	// reasoning nor gain the empty-but-present field the backend validates.
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "q1"},
+		{Role: message.RoleAssistant, Content: "prior turn", ToolCalls: []message.ToolCall{{ID: "c0", Name: "Read", Args: json.RawMessage(`{}`)}}, Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat}},
+		{Role: "tool", ToolCallID: "c0", Content: "ok"},
+		{Role: message.RoleUser, Content: "continue"},
+		{
+			Role:             "assistant",
+			ReasoningContent: "thought",
+			ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Read", Args: json.RawMessage(`{}`)}},
+			Provenance:       &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat},
+		},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+		{
+			Role:       "assistant",
+			ToolCalls:  []message.ToolCall{{ID: "c2", Name: "Shell", Args: json.RawMessage(`{}`)}},
+			Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat},
+		},
+		{Role: "tool", ToolCallID: "c2", Content: "ok"},
+		{Role: message.RoleUser, Content: "<system-reminder>\n## Bug Triage Workflow\n</system-reminder>", Kind: message.KindTurnOverlay},
+	}
+	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs)
+	fillCurrentTurnEmptyReasoning(out)
+
+	byToolID := func(id string) *openAIMessage {
+		for i := range out {
+			for _, tc := range out[i].ToolCalls {
+				if tc.ID == id {
+					return &out[i]
+				}
+			}
+		}
+		return nil
+	}
+	if m := byToolID("c0"); m == nil || m.ReasoningContent != nil {
+		t.Fatalf("prior-turn tool call must not gain a reasoning_content field: %#v", m)
+	}
+	if m := byToolID("c1"); m == nil || m.ReasoningContent == nil || *m.ReasoningContent != "thought" {
+		t.Fatalf("current-turn reasoning replay lost with overlay present: %#v", m)
+	}
+	if m := byToolID("c2"); m == nil || m.ReasoningContent == nil || *m.ReasoningContent != "" {
+		t.Fatalf("current-turn reasoningless tool call must gain an empty field with overlay present: %#v", m)
+	}
+}
+
 func TestOpenAICompleteStream_FillsCurrentTurnEmptyReasoningEvenWhenDisabled(t *testing.T) {
 	// DisableReasoning only strips request-side thinking controls; endpoints
 	// that enable thinking server-side keep validating reasoning_content

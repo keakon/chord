@@ -84,6 +84,38 @@ func TestNormalizeForTarget_StripsHistoricalPlaintextReasoning(t *testing.T) {
 	}
 }
 
+func TestNormalizeForTarget_TurnOverlayDoesNotShiftCurrentTurnBoundary(t *testing.T) {
+	// A request-scoped <system-reminder> overlay is appended after the
+	// conversation tail as a user message. It is not a real user turn: counting
+	// it as the last user message would strip the current turn's reasoning that
+	// the backend actually consumes in this turn's tool chain (regression: long
+	// agentic turns re-derived the same plan on every step).
+	deepseekProv := &message.MessageProvenance{Source: "chord", ProviderID: "deepseek", ModelID: "m", WireFamily: WireFamilyOpenAIChat}
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "q1"},
+		{Role: message.RoleAssistant, Content: "old", ReasoningContent: "old plan", Provenance: deepseekProv},
+		{Role: message.RoleUser, Content: "q2"},
+		{Role: message.RoleAssistant, Content: "t1", ReasoningContent: "turn reasoning", ToolCalls: []message.ToolCall{{ID: "c1", Name: "Read", Args: json.RawMessage(`{}`)}}, Provenance: deepseekProv},
+		{Role: message.RoleTool, ToolCallID: "c1", Content: "ok"},
+		{Role: message.RoleAssistant, Content: "new", ReasoningContent: "current plan", Provenance: deepseekProv},
+		{Role: message.RoleUser, Content: "<system-reminder>\n## Bug Triage Workflow\n</system-reminder>", Kind: message.KindTurnOverlay},
+	}
+	target := TargetModel{ProviderID: "deepseek", ModelID: "m", WireFamily: WireFamilyOpenAIChat, ReasoningContinuityMode: ReasoningContinuityOpenAIVisible, SupportsStructuredTools: true, ToolResultEncoding: ToolResultEncodingOpenAIToolRole}
+	out, rep := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true})
+	if got := out[1].ReasoningContent; got != "" {
+		t.Fatalf("historical reasoning_content survived: %q", got)
+	}
+	if got := out[3].ReasoningContent; got != "turn reasoning" {
+		t.Fatalf("current-turn tool-chain reasoning = %q, want preserved", got)
+	}
+	if got := out[5].ReasoningContent; got != "current plan" {
+		t.Fatalf("current-turn reasoning after overlay = %q, want preserved", got)
+	}
+	if rep.StrippedHistoricalReasoning != 1 {
+		t.Fatalf("StrippedHistoricalReasoning=%d, want 1", rep.StrippedHistoricalReasoning)
+	}
+}
+
 func TestNormalizeForTarget_StripsHistoricalUnsignedThinkingKeepsSigned(t *testing.T) {
 	prov := &message.MessageProvenance{Source: "chord", ProviderID: "deepseek", ModelID: "m", WireFamily: WireFamilyAnthropic}
 	msgs := []message.Message{

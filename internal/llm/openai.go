@@ -126,6 +126,11 @@ type openAIRequest struct {
 type openAIMessage struct {
 	Role    string `json:"role"`
 	Content any    `json:"content,omitempty"` // string or []openAIContentBlock; omitted when nil
+	// Transient marks a request-scoped overlay (KindTurnOverlay source) that is
+	// not a real user turn. It is omitted from the wire; fillCurrentTurnEmptyReasoning
+	// skips it when computing the current-turn boundary so an overlay at the tail
+	// cannot move the reasoning-presence window past the current tool chain.
+	Transient bool `json:"-"`
 	// ReasoningContent is a pointer so an empty-but-present field can be
 	// serialized: thinking-mode backends (DeepSeek family) require every
 	// current-turn assistant tool-call message to carry reasoning_content,
@@ -545,16 +550,18 @@ func responseHeaderBytes(resp *http.Response) int64 {
 }
 
 // fillCurrentTurnEmptyReasoning gives every assistant tool-call message after
-// the last user message an empty-but-present reasoning_content field when the
-// upstream produced none (e.g. a gateway routed the turn to a non-thinking
+// the last real user message an empty-but-present reasoning_content field when
+// the upstream produced none (e.g. a gateway routed the turn to a non-thinking
 // backend). Thinking-mode chat backends (DeepSeek family) validate the field's
 // presence on current-turn tool-call messages and reject the whole request
 // when it is absent; messages before the last user message are outside the
-// validation window and stay untouched.
+// validation window and stay untouched. Request-scoped overlays (Transient,
+// e.g. <system-reminder> hints) are not real user turns and are skipped so an
+// overlay at the tail cannot push the current-turn window past the tool chain.
 func fillCurrentTurnEmptyReasoning(apiMessages []openAIMessage) {
 	lastUserIdx := -1
 	for i := range apiMessages {
-		if apiMessages[i].Role == "user" {
+		if apiMessages[i].Role == "user" && !apiMessages[i].Transient {
 			lastUserIdx = i
 		}
 	}
@@ -650,11 +657,12 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 				if len(blocks) == 0 {
 					blocks = append(blocks, openAIContentBlock{Type: "text", Text: ""})
 				}
-				result = append(result, openAIMessage{Role: "user", Content: blocks})
+				result = append(result, openAIMessage{Role: "user", Content: blocks, Transient: msg.Kind == message.KindTurnOverlay})
 			} else {
 				result = append(result, openAIMessage{
-					Role:    "user",
-					Content: msg.Content,
+					Role:      "user",
+					Content:   msg.Content,
+					Transient: msg.Kind == message.KindTurnOverlay,
 				})
 			}
 

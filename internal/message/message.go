@@ -205,6 +205,14 @@ const KindBackgroundResult = "background_result"
 const (
 	KindReplayEvidence     = "replay_evidence"
 	KindReplayContinuation = "replay_continuation"
+	// KindTurnOverlay marks request-scoped turn overlays (runtime hints such
+	// as <system-reminder> blocks) appended after the conversation tail for a
+	// single request. They never enter ctxmgr or the session file, and they
+	// must not count as a user boundary: treating an overlay as the last user
+	// message would push the reasoning-strip / validation window past the
+	// current turn and strip the reasoning the backend actually consumes in
+	// this turn's tool chain.
+	KindTurnOverlay = "turn_overlay"
 )
 
 // Message represents a conversation message (user, assistant, or tool result).

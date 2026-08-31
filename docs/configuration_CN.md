@@ -675,8 +675,11 @@ providers:
   历史的 preserved-thinking 模型（Kimi K3 及 `keep: all` 系列、Qwen
   `preserve_thinking`、GLM `clear_thinking: false`），设置
   `preserve_history: true`，历史 reasoning 会原样回放并在每次请求中计费。
-  当前轮 reasoning 始终按上面的 mode 处理；签名或加密载荷（Claude 签名
-  thinking、Responses items、Gemini thought signature）不受此开关影响。
+  当前轮的 reasoning 始终遵循上述 mode；签名/加密载荷（Claude 签名
+  thinking、Responses items、Gemini thought 签名）不受此开关影响。
+  请求级 turn overlay（每轮注入的 `<system-reminder>` 提示）不算作用户
+  消息边界，因此追加在对话尾部的 overlay 不会把"已完成轮次"的边界推到
+  当前轮之后，也就不会剥离当前工具链中后端真正消费的 reasoning。
 - `compat.forced_tool_choice.suppress_in_thinking`：reasoning/thinking 启用
   时，把 loop 强制的 `tool_choice: required` 降级为后端默认选择。只有
   OpenAI 兼容端点明确拒绝 thinking 模式下的 forced tool choice 时才开启；

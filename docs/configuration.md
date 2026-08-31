@@ -722,6 +722,10 @@ Compatibility fields:
   and billed on every request. Current-turn reasoning always follows the mode
   above, and signed or encrypted payloads (Claude signed thinking, Responses
   items, Gemini thought signatures) are unaffected by this switch.
+  Request-scoped turn overlays (per-turn `<system-reminder>` hints) are not
+  counted as user turns, so an overlay appended at the tail cannot shift the
+  completed-turn boundary past the current turn and strip the reasoning the
+  backend consumes in this turn's tool chain.
 - `compat.forced_tool_choice.suppress_in_thinking`: downgrades loop-forced
   `tool_choice: required` to the backend default while reasoning/thinking is
   active. Enable it only for OpenAI-compatible endpoints that reject forced

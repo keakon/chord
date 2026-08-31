@@ -23,6 +23,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	if block := strings.TrimSpace(a.buildCoordinationSnapshotOverlay()); block != "" {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
+			Kind:    message.KindTurnOverlay,
 			Content: "<system-reminder>\n" + block + "\n</system-reminder>",
 		})
 	}
@@ -50,6 +51,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	if block := strings.TrimSpace(a.bugTriagePromptBlock()); block != "" {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
+			Kind:    message.KindTurnOverlay,
 			Content: "<system-reminder>\n" + block + "\n</system-reminder>",
 		})
 	}
@@ -57,6 +59,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	if block := strings.TrimSpace(a.pendingLoopContinuationPromptBlock()); block != "" {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
+			Kind:    message.KindTurnOverlay,
 			Content: "<system-reminder>\n" + block + "\n</system-reminder>",
 		})
 	}
@@ -64,6 +67,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	if block := strings.TrimSpace(a.takePendingLSPDiagnosticOverlay()); block != "" {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
+			Kind:    message.KindTurnOverlay,
 			Content: "<system-reminder>\n" + block + "\n</system-reminder>",
 		})
 	}
@@ -73,6 +77,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	if recoveryPrompt := a.takePendingRecoveryPrompt(); recoveryPrompt != "" {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
+			Kind:    message.KindTurnOverlay,
 			Content: "<system-reminder>\n" + recoveryPrompt + "\n</system-reminder>",
 		})
 	}
@@ -94,6 +99,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	if len(autoContinueParts) > 0 {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
+			Kind:    message.KindTurnOverlay,
 			Content: "<system-reminder>\n" + strings.Join(autoContinueParts, "\n") + "\n</system-reminder>",
 		})
 	}
