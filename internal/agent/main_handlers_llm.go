@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,6 +54,100 @@ func sanitizeToolCallArgs(calls []message.ToolCall) []message.ToolCall {
 		out[i] = tc
 	}
 	return out
+}
+
+// sanitizeResponseZeroWidth strips zero-width format characters (ZWSP, ZWNJ,
+// ZWJ outside emoji sequences, soft hyphen, mid-stream BOM, and variation
+// selectors U+FE00-U+FE0D) from the model-generated free text of resp - the
+// content, reasoning text, thinking-block text, and tool-call arguments -
+// before any downstream consumer (tool execution, history persistence, request
+// replay) observes it. Arguments are sanitized as raw JSON text: in valid JSON
+// these runes can appear only inside string values, so the strip cannot corrupt
+// the structure, and the existing json.Valid gates downstream still own malformed-
+// JSON detection. Thinking-block signatures and encrypted data, plus the provider-
+// native replay payloads (ResponsesOutput, GeminiParts), are preserved verbatim
+// because replay contracts require them byte-identical. The returned per-field
+// per-rune counts let callers emit a single loud diagnostic row per response.
+func sanitizeResponseZeroWidth(resp *message.Response) map[string]map[rune]int {
+	if resp == nil {
+		return nil
+	}
+	byField := make(map[string]map[rune]int)
+	strip := func(field, original string) string {
+		cleaned := tools.StripZeroWidthFormat(original)
+		if cleaned != original {
+			mergeInvisibleCounts(byField, field, tools.CountStrippedInvisible(original, cleaned))
+		}
+		return cleaned
+	}
+	resp.Content = strip("content", resp.Content)
+	resp.ReasoningContent = strip("reasoning", resp.ReasoningContent)
+
+	// Thinking text is stripped per block but reported aggregated to keep
+	// the diagnostic single-row-per-response invariant. Signatures and data
+	// are replay-contract payloads and must stay byte-identical.
+
+	for i := range resp.ThinkingBlocks {
+		block := &resp.ThinkingBlocks[i]
+		cleaned := tools.StripZeroWidthFormat(block.Thinking)
+		if cleaned != block.Thinking {
+			mergeInvisibleCounts(byField, "thinking", tools.CountStrippedInvisible(block.Thinking, cleaned))
+			block.Thinking = cleaned
+		}
+	}
+	for i := range resp.ToolCalls {
+		call := &resp.ToolCalls[i]
+		originalArgs := string(call.Args)
+		cleanedArgs := tools.StripZeroWidthFormat(originalArgs)
+		if cleanedArgs != originalArgs {
+			mergeInvisibleCounts(byField, "tool_call_args", tools.CountStrippedInvisible(originalArgs, cleanedArgs))
+			call.Args = []byte(cleanedArgs)
+		}
+	}
+	return byField
+}
+
+// mergeInvisibleCounts merges per-rune stripped counts into the by-field bucket.
+func mergeInvisibleCounts(byField map[string]map[rune]int, field string, counts map[rune]int) {
+	if len(counts) == 0 {
+		return
+	}
+	bucket := byField[field]
+	if bucket == nil {
+		bucket = make(map[rune]int, len(counts))
+		byField[field] = bucket
+	}
+	for r, n := range counts {
+		bucket[r] += n
+	}
+}
+
+// formatInvisibleCounts renders the per-field, per-rune stripped counts as a
+// stable "field:U+XXXX×n" list (field order sorted, code points ascending)
+// for the single-row diagnostic log. An untouched response renders as "none".
+func formatInvisibleCounts(byField map[string]map[rune]int) string {
+	if len(byField) == 0 {
+		return "none"
+	}
+	fields := make([]string, 0, len(byField))
+	for f := range byField {
+		fields = append(fields, f)
+	}
+	slices.Sort(fields)
+	var b strings.Builder
+	for _, f := range fields {
+		runes := make([]int, 0, len(byField[f]))
+		for r := range byField[f] {
+			runes = append(runes, int(r))
+		}
+		slices.Sort(runes)
+		parts := make([]string, 0, len(runes))
+		for _, r := range runes {
+			parts = append(parts, fmt.Sprintf("U+%04X×%d", r, byField[f][rune(r)]))
+		}
+		fmt.Fprintf(&b, "%s:%s; ", f, strings.Join(parts, ","))
+	}
+	return strings.TrimSuffix(b.String(), "; ")
 }
 
 func toolCallTrajectoriesEqual(original, accepted []message.ToolCall) bool {

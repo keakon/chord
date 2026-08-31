@@ -53,6 +53,9 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 
 	resp := result.resp
 	resp.Content = message.NormalizeInvisibleText(resp.Content)
+	if counts := sanitizeResponseZeroWidth(resp); len(counts) > 0 {
+		log.Warnf("SubAgent: sanitized zero-width format characters from response agent=%v turn_id=%v fields=%v", s.instanceID, s.turn.ID, formatInvisibleCounts(counts))
+	}
 
 	// --- Classify tool calls as valid or malformed ---
 	var validCalls, malformedCalls []message.ToolCall

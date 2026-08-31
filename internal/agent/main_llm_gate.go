@@ -428,6 +428,17 @@ func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnI
 			a.sendEvent(ev)
 			return
 		}
+		// Strip zero-width format characters from the model-generated text of the
+		// response before any downstream consumer (tool execution, history,
+		// replay) observes it, so the payload cloned below stays the single
+		// consistent form everywhere downstream.
+
+		a.llmMu.RLock()
+		modelName := a.modelName
+		a.llmMu.RUnlock()
+		if counts := sanitizeResponseZeroWidth(resp); len(counts) > 0 {
+			log.Warnf("sanitized zero-width format characters from LLM response model=%v turn=%v fields=%v", modelName, turnID, formatInvisibleCounts(counts))
+		}
 		payload := &LLMResponsePayload{
 			Content:                   resp.Content,
 			ThinkingBlocks:            resp.ThinkingBlocks,

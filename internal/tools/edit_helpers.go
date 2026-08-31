@@ -163,14 +163,14 @@ func isIgnorableRune(r rune) bool {
 	return false
 }
 
-// countStrippedInvisible reports, per rune, the invisible characters that the
+// CountStrippedInvisible reports, per rune, the invisible characters that the
 // strip step actually removed from original (occurrences in original minus
 // occurrences in stripped). Counting against the post-strip result keeps the
 // report and the write result the same source of truth as the strip itself:
 // runes the strip preserves — a ZWJ joining two emoji, a leading BOM, a
 // variation selector carried by a base character — are never reported as
 // cleaned.
-func countStrippedInvisible(original, stripped string) map[rune]int {
+func CountStrippedInvisible(original, stripped string) map[rune]int {
 	remaining := make(map[rune]int)
 	for _, r := range stripped {
 		if isZeroWidthFormatRune(r) || r == '\ufe0e' || r == '\ufe0f' {
@@ -195,7 +195,7 @@ func countStrippedInvisible(original, stripped string) map[rune]int {
 }
 
 // describeInvisibleCounts renders the per-rune counts from
-// countStrippedInvisible as a stable "U+XXXX×n" list (sorted by code point)
+// CountStrippedInvisible as a stable "U+XXXX×n" list (sorted by code point)
 // with the shared trailing explanation, so every tool reports the cleaned
 // characters identically.
 func describeInvisibleCounts(counts map[rune]int) string {

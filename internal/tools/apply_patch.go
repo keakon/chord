@@ -276,7 +276,7 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	// both and route binary content to a shell command or script.
 	patchLen := len([]rune(args.Patch))
 	strippedPatch := StripZeroWidthFormat(StripOrphanVariationSelectors(args.Patch))
-	cleanedCounts := countStrippedInvisible(args.Patch, strippedPatch)
+	cleanedCounts := CountStrippedInvisible(args.Patch, strippedPatch)
 	args.Patch = strippedPatch
 	strippedSelectors := patchLen - len([]rune(args.Patch))
 	if args.Patch == "" && strippedSelectors > 0 {

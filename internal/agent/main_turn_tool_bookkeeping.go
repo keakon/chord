@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 func (t *Turn) recordPendingToolCall(call PendingToolCall) {
@@ -100,6 +102,21 @@ func (t *Turn) cancelPendingToolCalls() []PendingToolCall {
 func (t *Turn) recordStreamingToolCall(call PendingToolCall) {
 	if t == nil || call.CallID == "" {
 		return
+	}
+	// Streaming arguments accumulate fragment-by-fragment, so hygiene must
+	// run here, on the finalized present, never on fragments: emoji ZWJ
+	// preservation is position-sensitive across fragment boundaries, and these
+	// runes could otherwise reach speculative or interrupted-turn execution.
+
+	if original := call.ArgsJSON; original != "" {
+		cleaned := tools.StripZeroWidthFormat(original)
+		if cleaned != original {
+			call.ArgsJSON = cleaned
+			byField := map[string]map[rune]int{
+				"tool_call_args": tools.CountStrippedInvisible(original, cleaned),
+			}
+			log.Warnf("sanitized zero-width format characters from streamed tool call args call_id=%v name=%v counts=%v", call.CallID, call.Name, formatInvisibleCounts(byField))
+		}
 	}
 	t.streamingToolMu.Lock()
 	defer t.streamingToolMu.Unlock()

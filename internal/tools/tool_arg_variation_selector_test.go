@@ -508,15 +508,15 @@ func TestStripZeroWidthFormat(t *testing.T) {
 // code points in ascending order regardless of input order, so successive
 // failures present the same stable text to the model.
 func TestDescribeInvisibleCountsSorted(t *testing.T) {
-	counts := countStrippedInvisible("\ufeffa\u200bb\ufe0f\u200b", "ab") // FE0F before 200B in input
+	counts := CountStrippedInvisible("\ufeffa\u200bb\ufe0f\u200b", "ab") // FE0F before 200B in input
 	want := "U+200B×2, U+FE0F×1, U+FEFF×1 (invisible formatting characters that carry no content; do not include them in tool arguments)"
 	if got := describeInvisibleCounts(counts); got != want {
 		t.Fatalf("describeInvisibleCounts = %q, want %q", got, want)
 	}
 	// A rune the strip preserves (ZWJ joining two emoji, leading BOM,
 	// base-character variation selector) is never reported as cleaned.
-	if preserved := countStrippedInvisible("\U0001f468\u200d\U0001f469", "\U0001f468\u200d\U0001f469"); len(preserved) != 0 {
-		t.Fatalf("countStrippedInvisible counted preserved runes: %v", preserved)
+	if preserved := CountStrippedInvisible("\U0001f468\u200d\U0001f469", "\U0001f468\u200d\U0001f469"); len(preserved) != 0 {
+		t.Fatalf("CountStrippedInvisible counted preserved runes: %v", preserved)
 	}
 }
 

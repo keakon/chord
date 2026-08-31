@@ -147,7 +147,7 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	contentRunes := len([]rune(content))
 	cleaned := StripZeroWidthFormat(StripOrphanVariationSelectors(content))
 	cleanedSelectors := contentRunes - len([]rune(cleaned))
-	cleanedCounts := countStrippedInvisible(content, cleaned)
+	cleanedCounts := CountStrippedInvisible(content, cleaned)
 	if cleaned == "" && content != "" {
 		return "", fmt.Errorf("content contains only invisible characters (%d invisible character(s) were stripped) and would truncate the file; rebuild content from the visible text you want in the file", cleanedSelectors)
 	}

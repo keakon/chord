@@ -151,12 +151,12 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	// BOM, base-character variation selectors).
 	oldLen := len([]rune(decodedOld))
 	strippedOldText := StripZeroWidthFormat(StripOrphanVariationSelectors(decodedOld))
-	oldInvisible := countStrippedInvisible(decodedOld, strippedOldText)
+	oldInvisible := CountStrippedInvisible(decodedOld, strippedOldText)
 	decodedOld = strippedOldText
 	strippedOld := oldLen - len([]rune(decodedOld))
 	newLen := len([]rune(decodedNew))
 	strippedNewText := StripZeroWidthFormat(StripOrphanVariationSelectors(decodedNew))
-	newInvisible := countStrippedInvisible(decodedNew, strippedNewText)
+	newInvisible := CountStrippedInvisible(decodedNew, strippedNewText)
 	decodedNew = strippedNewText
 	strippedNew := newLen - len([]rune(decodedNew))
 	strippedSelectors := strippedOld + strippedNew
