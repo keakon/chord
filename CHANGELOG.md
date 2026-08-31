@@ -77,6 +77,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Compaction now preserves the newest user request and a larger verbatim tail after the checkpoint (about 5% of the context window, whole user turns first) instead of a small fixed slice, so the model does not lose what you last asked when the summary rewrites the older history.
 - Request-level context reduction now protects failing command output that reports `FAIL` or `--- FAIL:` — the form Go and Rust test runners print — which could previously be summarized away even when it was the only failure evidence; the exact failure lines stay visible while the model works on them.
 - A failed tool result stays complete until it ages past the error threshold: request-level reduction no longer summarizes failing output the model is still acting on, and LSP diagnostics summaries keep every location while capping thresholds to the configured policy.
+- Request-level context reduction now keeps truncated-output artifact references verbatim: a `Full output saved to <path>` line reaches the model with its complete path instead of being clipped mid-string, so the model can read the saved output from the real path. Previously the path could be cut short and following the notice failed with `file not found`.
 
 ### Fixes
 

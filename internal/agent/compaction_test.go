@@ -435,6 +435,42 @@ func TestSummarizeHeadTailLinesKeepsBoundedHeadAndTail(t *testing.T) {
 	}
 }
 
+func TestSummarizeHeadTailLinesPreservesArtifactReference(t *testing.T) {
+	// Artifact reference lines ("Full output saved to <path>") must reach the
+	// model verbatim: mid-line truncation would clip the artifact path and
+	// leave the model an unreadable path to read.
+	ref := "Full output saved to /session/tool-outputs/call_" + strings.Repeat("a", 80) + ".log. Use read with offset/limit for line ranges, or shell with a script/parser for huge single-line structured output."
+	long := strings.Repeat("x", summaryLineSnippetChars+100)
+
+	got := summarizeHeadTailLines(strings.Join([]string{
+		ref,
+		long,
+		"line 3",
+		"line 4",
+		"line 5",
+	}, "\n"), 4)
+	if len(got) != 5 {
+		t.Fatalf("summarizeHeadTailLines() len = %d, want 5: %#v", len(got), got)
+	}
+	if got[0] != "- "+ref {
+		t.Fatalf("artifact reference line not preserved verbatim, got %#v", got[0])
+	}
+	if len(got[1]) >= len(long) {
+		t.Fatalf("plain long line should still be truncated, got %d bytes", len(got[1]))
+	}
+
+	got = summarizeHeadTailLines(strings.Join([]string{
+		"line 1",
+		"line 2",
+		"line 3",
+		"line 4",
+		ref,
+	}, "\n"), 4)
+	if got[len(got)-1] != "- "+ref {
+		t.Fatalf("artifact reference in tail not preserved verbatim, got %#v", got[len(got)-1])
+	}
+}
+
 func (p *countingSummaryOnlyProvider) CompleteStream(
 	_ context.Context,
 	_ string,
@@ -1417,6 +1453,28 @@ func TestPrepareMessagesForLLM_ShellSuccessSummaryPrefersSalientLines(t *testing
 	}
 }
 
+func TestPrepareMessagesForLLM_ShellSuccessPreservesArtifactReference(t *testing.T) {
+	a := &MainAgent{}
+	path := "/session/tool-outputs/call_" + strings.Repeat("a", summaryLineSnippetChars) + ".log"
+	ref := tools.ArtifactReferencePrefix + path + ". " + tools.ArtifactReadGuidance
+	largeOutput := strings.Repeat("completed work item\n", compactBashSuccessBytes) + ref
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "request"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"sample-command"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "tc1", Content: largeOutput},
+		{Role: message.RoleUser, Content: "continue"},
+		{Role: message.RoleUser, Content: "continue again"},
+	}
+
+	got := a.prepareMessagesForLLM(msgs)[2].Content
+	if !isShellSuccessSummary(got) {
+		t.Fatalf("expected shell success summary, got %q", got)
+	}
+	if !strings.Contains(got, ref) {
+		t.Fatalf("shell success summary lost artifact reference %q: %q", ref, got)
+	}
+}
+
 func TestPrepareMessagesForLLM_GoTestSummaryCountsPackagesAndCachedResults(t *testing.T) {
 	a := &MainAgent{}
 	largeOutput := strings.Repeat("compile progress line\n", compactBashSuccessBytes) +
@@ -2304,6 +2362,41 @@ func TestPrepareMessagesForLLM_SearchReducerBeatsGenericStaleFallback(t *testing
 	stats := a.GetContextReductionStats()
 	if stats.Messages == 0 || stats.Bytes == 0 {
 		t.Fatalf("expected search summary to save bytes, stats=%+v", stats)
+	}
+}
+
+func TestPrepareMessagesForLLM_SearchSummaryPreservesArtifactReference(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			MinToolResultsPrune:  1,
+			ReadLikeAgeTurns:     1,
+			ReadLikeOutputBytes:  80,
+			StaleAgeTurns:        1,
+			StaleOutputBytes:     40,
+			ShellSuccessAgeTurns: 9,
+			ShellSuccessBytes:    1 << 20,
+			MinIncrementalTokens: 1,
+		}},
+	}
+	path := "/session/tool-outputs/call_" + strings.Repeat("b", summaryLineSnippetChars) + ".log"
+	ref := tools.ArtifactReferencePrefix + path + ". " + tools.ArtifactReadGuidance
+	content := strings.Repeat("internal/agent/context_reduction.go:700:func reduceRequestToolOutput(...)\n", 40) + ref
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "request"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameGrep, Args: json.RawMessage(`{"paths":["internal/agent"],"pattern":"reduceRequestToolOutput"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "tc1", Content: content},
+		{Role: message.RoleUser, Content: "continue"},
+		{Role: message.RoleAssistant, Content: "ack"},
+		{Role: message.RoleUser, Content: "continue again"},
+	}
+
+	got := a.prepareMessagesForLLM(msgs)[2].Content
+	if !strings.Contains(got, "Older "+tools.NameGrep+" results summarized") {
+		t.Fatalf("expected search summary, got %q", got)
+	}
+	if !strings.Contains(got, ref) {
+		t.Fatalf("search summary lost artifact reference %q: %q", ref, got)
 	}
 }
 

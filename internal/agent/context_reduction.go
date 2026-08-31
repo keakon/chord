@@ -688,52 +688,74 @@ func looksLikeDiffOrPatch(content string) bool {
 }
 
 func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionContext) (string, string, bool) {
+	var reduced string
+	var rule string
 	switch class {
 	case requestReductionRepeated:
-		return fmt.Sprintf("[Repeated %s output omitted; an identical call appears later.]", toolNameOrUnknown(ctx.ToolName)), "repeated", true
+		reduced, rule = fmt.Sprintf("[Repeated %s output omitted; an identical call appears later.]", toolNameOrUnknown(ctx.ToolName)), "repeated"
 	case requestReductionToolError:
-		return reduceToolErrorOutputSummary(ctx), "error", true
+		reduced, rule = reduceToolErrorOutputSummary(ctx), "error"
 	case requestReductionConfirm:
-		return "[Confirmed]", "confirmation", true
+		reduced, rule = "[Confirmed]", "confirmation"
 	case requestReductionDiagnostics:
 		if compacted, ok := reduceDiagnosticsToolOutput(ctx.Content, ctx.DiagnosticsSuperseded); ok {
-			return compacted, "diagnostics", true
+			reduced, rule = compacted, "diagnostics"
+			break
 		}
-		return staleOutputOmittedMarker(ctx.Meta.Name), "stale", true
+		reduced, rule = staleOutputOmittedMarker(ctx.Meta.Name), "stale"
 	case requestReductionDiff:
-		return reduceDiffOutputSummary(ctx.Content), "diff", true
+		reduced, rule = reduceDiffOutputSummary(ctx.Content), "diff"
 	case requestReductionReadLike:
-		return reduceReadLikeOutputSummary(ctx), "read_like", true
+		reduced, rule = reduceReadLikeOutputSummary(ctx), "read_like"
 	case requestReductionSearch:
-		return reduceSearchLikeOutputSummary(ctx), "search_result", true
+		reduced, rule = reduceSearchLikeOutputSummary(ctx), "search_result"
 	case requestReductionNumberedSrc:
-		return reduceNumberedSourceOutputSummary(ctx), "numbered_source", true
+		reduced, rule = reduceNumberedSourceOutputSummary(ctx), "numbered_source"
 	case requestReductionJSON:
 		if compacted, ok := reduceJSONBlobSummary(ctx); ok && len(compacted) < len(ctx.Content) {
-			return compacted, "json_blob", true
+			reduced, rule = compacted, "json_blob"
+			break
 		}
 		omitted := staleOutputOmittedMarker(ctx.Meta.Name)
 		if len(omitted) < len(ctx.Content) {
-			return omitted, "stale", true
+			reduced, rule = omitted, "stale"
+			break
 		}
 		return "", "", false
 	case requestReductionLongLog:
-		return reduceLongLogOutputSummary(ctx), "long_log", true
+		reduced, rule = reduceLongLogOutputSummary(ctx), "long_log"
 	case requestReductionShellOK:
-		return reduceShellSuccessOutputSummary(ctx), "shell_success", true
+		reduced, rule = reduceShellSuccessOutputSummary(ctx), "shell_success"
 	case requestReductionGeneric:
 		// One-shot, non-rebuildable outputs are archived in full so the model
 		// can read them back by stable address instead of losing the payload
 		// to a generic marker; rebuildable outputs keep their ordinary summary.
 		if irreducibleToolOutputRequiresArchive(ctx.ToolName) {
 			if marker, ok := archiveIrreducibleToolOutput(ctx); ok {
-				return marker, "archived", true
+				reduced, rule = marker, "archived"
+				break
 			}
 		}
-		return reduceGenericStaleOutputSummary(ctx), "stale", true
+		if reduced == "" {
+			reduced, rule = reduceGenericStaleOutputSummary(ctx), "stale"
+		}
 	default:
 		return "", "", false
 	}
+	return appendPreservedArtifactReferences(reduced, ctx.Content), rule, true
+}
+
+func appendPreservedArtifactReferences(reduced, original string) string {
+	for _, ref := range tools.ExtractArtifactReferences(original) {
+		if strings.Contains(reduced, ref) {
+			continue
+		}
+		if reduced != "" {
+			reduced += "\n"
+		}
+		reduced += ref
+	}
+	return reduced
 }
 
 // staleOutputOmittedMarker is the fallback rendering for an output whose
@@ -1256,7 +1278,7 @@ func summarizeSearchResultLines(content string, limit int) []string {
 		path, lineNo, snippet, ok := parseSearchResultLine(trimmed)
 		if !ok {
 			if len(fallback) < limit {
-				fallback = append(fallback, "- "+strings.ReplaceAll(compactTextSnippet(trimmed, summaryLineSnippetChars), "\n", " "))
+				fallback = append(fallback, renderSummaryLine(trimmed))
 			}
 			return true
 		}
@@ -1948,16 +1970,16 @@ func summarizeHeadTailLines(content string, limit int) []string {
 	if meaningful <= limit {
 		out := make([]string, 0, meaningful)
 		for _, line := range headLines {
-			out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, summaryLineSnippetChars), "\n", " "))
+			out = append(out, renderSummaryLine(line))
 		}
 		for _, line := range tailLines {
-			out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, summaryLineSnippetChars), "\n", " "))
+			out = append(out, renderSummaryLine(line))
 		}
 		return out
 	}
 	out := make([]string, 0, limit+1)
 	for _, line := range headLines {
-		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, summaryLineSnippetChars), "\n", " "))
+		out = append(out, renderSummaryLine(line))
 	}
 	omitted := meaningful - limit
 	noun := "lines"
@@ -1966,9 +1988,19 @@ func summarizeHeadTailLines(content string, limit int) []string {
 	}
 	out = append(out, fmt.Sprintf("- ... (%d %s omitted) ...", omitted, noun))
 	for _, line := range tailLines {
-		out = append(out, "- "+strings.ReplaceAll(compactTextSnippet(line, summaryLineSnippetChars), "\n", " "))
+		out = append(out, renderSummaryLine(line))
 	}
 	return out
+}
+
+// renderSummaryLine renders one preserved summary line. Artifact reference
+// lines ("Full output saved to <path>") stay verbatim: mid-line truncation
+// would clip the artifact path and leave the model an unreadable path.
+func renderSummaryLine(line string) string {
+	if refs := tools.ExtractArtifactReferences(line); len(refs) > 0 {
+		return "- " + refs[0]
+	}
+	return "- " + strings.ReplaceAll(compactTextSnippet(line, summaryLineSnippetChars), "\n", " ")
 }
 
 func looksLikePathListOutput(content string) bool {

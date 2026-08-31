@@ -21,6 +21,13 @@ const (
 	// MaxLineLength is the maximum UTF-8 byte length per output line before
 	// per-line truncation (suffix aligned to a valid UTF-8 boundary).
 	MaxLineLength = 2000
+	// ArtifactReferencePrefix starts every model-facing reference to a full
+	// tool output saved outside the inline result.
+	ArtifactReferencePrefix = "Full output saved to "
+	// ArtifactReadGuidance is appended to ordinary truncated-tool references.
+	ArtifactReadGuidance = "Use read with offset/limit for line ranges, or shell with a script/parser for huge single-line structured output."
+
+	maxArtifactReferencePathBytes = 4096
 )
 
 // TruncateOptions controls how output truncation is performed.
@@ -456,7 +463,90 @@ func artifactReference(savedPath string) string {
 	if strings.TrimSpace(savedPath) == "" {
 		return ""
 	}
-	return fmt.Sprintf("Full output saved to %s. Use read with offset/limit for line ranges, or shell with a script/parser for huge single-line structured output.", savedPath)
+	return fmt.Sprintf("%s%s. %s", ArtifactReferencePrefix, savedPath, ArtifactReadGuidance)
+}
+
+func shortArtifactReference(savedPath string) string {
+	if strings.TrimSpace(savedPath) == "" {
+		return ""
+	}
+	return ArtifactReferencePrefix + savedPath + "."
+}
+
+// ExtractArtifactReferences returns canonical truncated-output references from
+// content. It returns only the bounded reference text, never the surrounding
+// line, so an ordinary long line that happens to contain the marker cannot
+// bypass a caller's summary limit.
+func ExtractArtifactReferences(content string) []string {
+	var refs []string
+	seen := make(map[string]struct{})
+	for len(content) > 0 {
+		line := content
+		if idx := strings.IndexByte(content, '\n'); idx >= 0 {
+			line = content[:idx]
+			content = content[idx+1:]
+		} else {
+			content = ""
+		}
+		ref, ok := extractArtifactReferenceLine(line)
+		if !ok {
+			continue
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		refs = append(refs, ref)
+	}
+	return refs
+}
+
+func extractArtifactReferenceLine(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	before, rest, ok := strings.Cut(trimmed, ArtifactReferencePrefix)
+	if !ok {
+		return "", false
+	}
+	guidedSuffix := ". " + ArtifactReadGuidance
+	if path, _, ok := strings.Cut(rest, guidedSuffix); ok {
+		if before != "" && !isTruncationMarkerReferencePrefix(before) {
+			return "", false
+		}
+		path = strings.TrimSpace(path)
+		if !validArtifactReferencePath(path) {
+			return "", false
+		}
+		return ArtifactReferencePrefix + path + guidedSuffix, true
+	}
+	if before != "" || !strings.HasSuffix(rest, ".") {
+		return "", false
+	}
+	path := strings.TrimSpace(strings.TrimSuffix(rest, "."))
+	if !validArtifactReferencePath(path) {
+		return "", false
+	}
+	return ArtifactReferencePrefix + path + ".", true
+}
+
+func validArtifactReferencePath(path string) bool {
+	return path != "" && len(path) <= maxArtifactReferencePathBytes && !strings.ContainsAny(path, "\r\n")
+}
+
+func isTruncationMarkerReferencePrefix(prefix string) bool {
+	prefix = strings.TrimSpace(prefix)
+	if !strings.HasPrefix(prefix, "... [") || !strings.HasSuffix(prefix, " lines truncated.") {
+		return false
+	}
+	count := strings.TrimSuffix(strings.TrimPrefix(prefix, "... ["), " lines truncated.")
+	if count == "" {
+		return false
+	}
+	for _, r := range count {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func sanitizeArtifactKey(key string) string {

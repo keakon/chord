@@ -71,6 +71,33 @@ func TestTruncateOutputReusesStableArtifactPathForSameKey(t *testing.T) {
 	}
 }
 
+func TestExtractArtifactReferencesAcceptsGeneratedFormatsOnly(t *testing.T) {
+	path := "/session/tool-outputs/call-123.log"
+	guided := artifactReference(path)
+	short := shortArtifactReference(path)
+	marker := strings.TrimSpace(truncationMarker(12, path))
+
+	got := ExtractArtifactReferences(strings.Join([]string{guided, marker, short, guided}, "\n"))
+	want := []string{guided, short}
+	if len(got) != len(want) {
+		t.Fatalf("ExtractArtifactReferences() = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ExtractArtifactReferences()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	ordinary := "tool echoed " + guided + " after user-controlled text"
+	if refs := ExtractArtifactReferences(ordinary); len(refs) != 0 {
+		t.Fatalf("ordinary line produced artifact references: %#v", refs)
+	}
+	oversized := ArtifactReferencePrefix + strings.Repeat("x", maxArtifactReferencePathBytes+1) + ". " + ArtifactReadGuidance
+	if refs := ExtractArtifactReferences(oversized); len(refs) != 0 {
+		t.Fatalf("oversized path produced artifact references: %#v", refs)
+	}
+}
+
 func TestTruncateOutputCreatesPrivateArtifact(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permission bits are not enforced on Windows")

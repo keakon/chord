@@ -1033,7 +1033,7 @@ func appendWebFetchArtifactReference(formatted string, meta webFetchResult, extr
 	if savedPath == "" {
 		return formatted
 	}
-	return formatted + "\nFull output saved to " + savedPath + "."
+	return formatted + "\n" + shortArtifactReference(savedPath)
 }
 
 func fitBodyToBudget(body string, maxBytes int) (string, bool) {

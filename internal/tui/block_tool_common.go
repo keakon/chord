@@ -794,8 +794,8 @@ func parseReadDisplayLines(result string, startLine int) ([]readDisplayLine, str
 }
 
 func isReadArtifactFooter(line string) bool {
-	const guidance = "Use read with offset/limit for line ranges, or shell with a script/parser for huge single-line structured output."
-	return strings.HasPrefix(line, "Full output saved to ") && strings.HasSuffix(line, guidance)
+	refs := tools.ExtractArtifactReferences(line)
+	return len(refs) == 1 && strings.TrimSpace(line) == refs[0]
 }
 
 type readResultMeta struct {
