@@ -213,6 +213,10 @@ const (
 	// current turn and strip the reasoning the backend actually consumes in
 	// this turn's tool chain.
 	KindTurnOverlay = "turn_overlay"
+	// KindThinkingReplayPrefix marks a request-only assistant message carrying
+	// reasoning from a truncated response. It is removed when a target rejects
+	// the gateway-specific replay shape and must never enter durable history.
+	KindThinkingReplayPrefix = "thinking_replay_prefix"
 )
 
 // Message represents a conversation message (user, assistant, or tool result).

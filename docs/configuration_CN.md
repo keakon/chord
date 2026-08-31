@@ -656,6 +656,10 @@ providers:
     `reasoning_text`；跨 provider 切换模型导致原生 reasoning 丢失时，后端
     拒绝后 Chord 会把对应工具轨迹降级为文本历史记录，续跑不再依赖缺失的
     reasoning。
+    对第三方 OpenAI 兼容网关，Chord 始终使用配置中的 endpoint，不会重定向
+    到 DeepSeek 官方 `/beta` endpoint。reasoning-only 输出截断时，Chord
+    可能在同一 endpoint 上做一次有上限的 request-only reasoning 回放；网关
+    拒绝后会退回普通恢复提示。
   - `anthropic_unsigned`：仅用于已验证的 Messages 兼容模型，例如返回无
     Claude signature 的可见 `thinking` 的 DeepSeek/GLM endpoint。无签名
     thinking 首次只对同 provider/model 原生回放；对兼容 target，其他

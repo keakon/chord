@@ -517,6 +517,28 @@ func kimiDynamicTargetSupported(target FallbackModel) bool {
 	return cc != nil && compatBool(cc.MCPSystemToolsMessage, false)
 }
 
+// SupportsThinkingReplay reports whether modelRef (or the next cursor-head
+// target when modelRef is empty) runs a thinking-mode chat backend that
+// accepts visible reasoning_content replay (DeepSeek family and other
+// OpenAI-compatible thinking models). The agent layer uses it to gate the
+// wire-only truncated-thinking prefix injected on length-recovery retries:
+// the prefix may only be replayed to the model that produced it, and only when
+// that model's wire path understands visible reasoning. The check resolves the
+// current cursor-head target on every call, so a model-pool switch is observed
+// immediately rather than through a cached capability.
+func (c *Client) SupportsThinkingReplay(modelRef string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	target, ok := c.modelPoolTargetForRefLocked(modelRef)
+	if !ok || target.ProviderConfig == nil {
+		return false
+	}
+	return reasoningContinuityCompatMode(target.ProviderConfig, target.ModelID) == modelcompat.ReasoningContinuityOpenAIVisible
+}
+
 // SupportsResponsesAdditionalTools reports whether the selected Responses
 // target explicitly accepts input[type="additional_tools"].
 func (c *Client) SupportsResponsesAdditionalTools(modelRef string) bool {

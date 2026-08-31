@@ -219,11 +219,24 @@ func hasVisibleContent(s string) bool {
 	})
 }
 
+func hasRecoverableTruncatedThinking(resp *message.Response) bool {
+	if resp == nil || (resp.StopReason != "length" && resp.StopReason != "max_tokens") {
+		return false
+	}
+	return hasVisibleContent(resp.ReasoningContent)
+}
+
 func responseHasUsableOutput(resp *message.Response) bool {
 	if resp == nil {
 		return false
 	}
 	if hasVisibleContent(resp.Content) || len(resp.ToolCalls) > 0 {
+		return true
+	}
+	// A reasoning-only length response must reach the agent's bounded recovery
+	// path. It is not a normal successful answer, but discarding it here loses
+	// the only reasoning prefix that can help a compatible gateway recover.
+	if hasRecoverableTruncatedThinking(resp) {
 		return true
 	}
 	return message.HasReplayableThinkingBlocks(resp.ThinkingBlocks)

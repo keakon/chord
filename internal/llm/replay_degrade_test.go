@@ -403,6 +403,73 @@ func TestCompleteStreamDegradesReplayCompatLadderOnRejection(t *testing.T) {
 	requireStrictReplayEvidence(t, impl.attempts[2], "read", "call_1")
 }
 
+func TestCompleteStreamDropsRejectedThinkingReplayPrefixOnSameGateway(t *testing.T) {
+	cfg := NewProviderConfig("gateway", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{"test-model": {
+			Compat: &config.ModelCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: modelcompat.ReasoningContinuityOpenAIVisible}},
+		}},
+	}, []string{"key"})
+	impl := &replayRejectingProvider{
+		scriptedErrs: []error{&APIError{StatusCode: 400, Message: "reasoning_content is invalid for this request"}},
+	}
+	client := NewClient(cfg, impl, "test-model", 1024, "")
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: "question"},
+		{
+			Role:             message.RoleAssistant,
+			ReasoningContent: "unfinished reasoning",
+			Kind:             message.KindThinkingReplayPrefix,
+			Provenance:       &message.MessageProvenance{ProviderID: "gateway", ModelID: "test-model", WireFamily: modelcompat.WireFamilyOpenAIChat},
+		},
+		{Role: message.RoleUser, Content: "continue", Kind: message.KindTurnOverlay},
+	}
+
+	resp, err := callCompleteStreamWithRetryForTest(
+		client,
+		context.Background(),
+		cfg,
+		impl,
+		"test-model",
+		1024,
+		tuningForPoolTarget(FallbackModel{ProviderConfig: cfg, ModelID: "test-model"}),
+		"",
+		messages,
+		nil,
+		nil,
+		false,
+		nil,
+		-2,
+		&CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.Content != "ok" {
+		t.Fatalf("response = %#v, want success after dropping replay prefix", resp)
+	}
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+	if len(impl.attempts) != 2 {
+		t.Fatalf("attempts = %d, want replay attempt then ordinary recovery", len(impl.attempts))
+	}
+	if !messagesContainKind(impl.attempts[0], message.KindThinkingReplayPrefix) {
+		t.Fatalf("first attempt did not contain thinking replay prefix: %#v", impl.attempts[0])
+	}
+	if messagesContainKind(impl.attempts[1], message.KindThinkingReplayPrefix) {
+		t.Fatalf("second attempt retained rejected thinking replay prefix: %#v", impl.attempts[1])
+	}
+}
+
+func messagesContainKind(messages []message.Message, kind string) bool {
+	for _, msg := range messages {
+		if msg.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
 func TestAmbiguous400AfterExplicitEscalationRetriesWithoutPersistentStrict(t *testing.T) {
 	cfg := NewProviderConfig("deepseek", config.ProviderConfig{
 		Type: config.ProviderTypeMessages,

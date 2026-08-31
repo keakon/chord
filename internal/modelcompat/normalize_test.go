@@ -84,6 +84,27 @@ func TestNormalizeForTarget_StripsHistoricalPlaintextReasoning(t *testing.T) {
 	}
 }
 
+func TestNormalizeForTargetDropsThinkingReplayPrefixAfterCompatibilityRejection(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "question"},
+		{
+			Role:             message.RoleAssistant,
+			ReasoningContent: "unfinished reasoning",
+			Kind:             message.KindThinkingReplayPrefix,
+			Provenance:       &message.MessageProvenance{ProviderID: "sample", ModelID: "test-model", WireFamily: WireFamilyOpenAIChat},
+		},
+		{Role: message.RoleUser, Content: "continue", Kind: message.KindTurnOverlay},
+	}
+	target := TargetModel{ProviderID: "sample", ModelID: "test-model", WireFamily: WireFamilyOpenAIChat, ReasoningContinuityMode: ReasoningContinuityOpenAIVisible}
+	out, report := NormalizeForTarget(msgs, target, NormalizeOptions{ReplayCompat: ReplayCompatSynthesized})
+	if len(out) != 2 || out[0].Content != "question" || out[1].Content != "continue" {
+		t.Fatalf("normalized messages = %#v, want prefix removed", out)
+	}
+	if report.DowngradedReasoning != 1 {
+		t.Fatalf("DowngradedReasoning = %d, want 1", report.DowngradedReasoning)
+	}
+}
+
 func TestNormalizeForTarget_TurnOverlayDoesNotShiftCurrentTurnBoundary(t *testing.T) {
 	// A request-scoped <system-reminder> overlay is appended after the
 	// conversation tail as a user message. It is not a real user turn: counting

@@ -35,6 +35,9 @@ func (v *Viewport) enforceHotBudget() {
 			if block.Type == BlockToolCall && !block.ResultDone {
 				continue
 			}
+			if v.blockTooLargeToSpill(block) {
+				continue
+			}
 			if candidate == nil || block.lastAccess < candidate.lastAccess {
 				candidate = block
 			}
@@ -46,6 +49,25 @@ func (v *Viewport) enforceHotBudget() {
 			return
 		}
 	}
+}
+
+// blockTooLargeToSpill reports whether a block is too large to spill to disk.
+// Materializing such a block from the spill store on scroll-back costs a full
+// disk read, JSON decode, and whole-block re-render (hundreds of ms for a
+// multi-hundred-KB card), so keeping it hot avoids a visible scroll hitch even
+// though it consumes more hot-budget memory.
+//
+// The exemption is unconditional, so hot bytes can settle above maxHotBytes:
+// enforceHotBudget stops when every remaining candidate is exempt. The excess
+// is bounded by how many such blocks a session actually produces, not by the
+// budget, and the gap is widest under the idle budget (a quarter of the
+// baseline, floor 1 MiB), where one exempt block can exceed the whole budget.
+func (v *Viewport) blockTooLargeToSpill(block *Block) bool {
+	if block == nil {
+		return false
+	}
+	const spillSkipBytes = 4 << 20 // 4 MiB
+	return block.estimatedHotBytes() > spillSkipBytes
 }
 
 func (v *Viewport) recomputeHotBytes() {
@@ -110,6 +132,9 @@ func (v *Viewport) enforceHotBudgetCachedOnly() {
 				continue
 			}
 			if _, keepVisible := visible[block.ID]; keepVisible {
+				continue
+			}
+			if v.blockTooLargeToSpill(block) {
 				continue
 			}
 			if candidate == nil || block.lastAccess < candidate.lastAccess {

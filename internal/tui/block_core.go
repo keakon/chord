@@ -52,6 +52,7 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	clone.streamTailSyntheticPrefixWidths = append([]int(nil), src.streamTailSyntheticPrefixWidths...)
 	clone.streamTailSoftWrapContinuations = append([]bool(nil), src.streamTailSoftWrapContinuations...)
 	clone.streamCardHeadLines = append([]string(nil), src.streamCardHeadLines...)
+	clone.streamCardHeadBody = append([]string(nil), src.streamCardHeadBody...)
 	clone.streamCardHeadKey = src.streamCardHeadKey
 	clone.lineCache = append([]string(nil), src.lineCache...)
 	clone.viewportCache = append([]string(nil), src.viewportCache...)
@@ -366,6 +367,7 @@ func (b *Block) InvalidateStreamingSettledCache() {
 	b.streamTailSoftWrapContinuations = nil
 	b.streamSettledLineCount = 0
 	b.streamCardHeadLines = nil
+	b.streamCardHeadBody = nil
 	b.streamCardHeadKey = streamCardHeadKey{}
 	b.streamTableCheckedLen = 0
 	b.streamTableFound = false
@@ -378,6 +380,7 @@ func (b *Block) InvalidateStreamingSettledCache() {
 func (b *Block) InvalidateThinkingStreamingSettledCache() {
 	b.thinkingStreamSettled = nil
 	b.streamCardHeadLines = nil
+	b.streamCardHeadBody = nil
 	b.streamCardHeadKey = streamCardHeadKey{}
 }
 

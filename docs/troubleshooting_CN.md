@@ -98,6 +98,14 @@ assistant `reasoning_content`，并把其他 wire family 的可移植可见 reas
 映射为 `reasoning_content`；provider 专属思考字段应通过
 `compat.request_overrides.body` 添加。
 
+第三方 OpenAI 兼容网关继续使用配置中的原 endpoint。Chord 不会把请求
+重定向到 DeepSeek 官方 `/beta` endpoint，也不会假设网关实现了 Chat Prefix
+Completion。若模型在输出可见正文前耗尽预算，且已启用
+`openai_visible`、model 没有变化，Chord 会在同一 endpoint 上用累计的
+`reasoning_content` 做一次有上限的 request-only 回放。网关拒绝这种消息形状
+时，Chord 会移除临时回放，继续使用普通恢复提示。这只是尽力而为；网关不
+消费 reasoning 回放时，应提高模型输出上限，或把任务拆成更小的请求。
+
 GLM Preserved Thinking 的 body override 需要包含 `thinking.type: enabled` 和
 `thinking.clear_thinking: false`，并设置
 `reasoning_continuity.preserve_history: true`，让 Chord 在回放历史中保留

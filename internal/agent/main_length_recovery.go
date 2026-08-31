@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/modelcompat"
 )
 
 const maxLengthRecoveryAttempts = 2
@@ -65,4 +69,115 @@ func (a *MainAgent) beginLengthRecoveryRetry(recoveryPrompt string, turnID uint6
 	a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "length_recovery")
 	a.prepareSubAgentMailboxBatchForTurnContinuation()
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
+}
+
+// stashTruncatedThinkingReplay captures the visible reasoning text of a
+// response whose whole output budget was spent on thinking before any visible
+// reply. On the next recovery request the text is replayed as a wire-only
+// assistant prefix so a thinking-mode backend (DeepSeek family) continues from
+// its truncated reasoning instead of starting over. The prefix is bound to the
+// producing model ref and never enters durable history.
+func (a *MainAgent) stashTruncatedThinkingReplay(payload *LLMResponsePayload) {
+	a.clearPendingThinkingReplay()
+	if payload == nil {
+		return
+	}
+	// Only the first no-output truncation in a turn gets a reasoning replay.
+	// Later bounded recovery rounds keep the ordinary recovery prompt instead
+	// of repeatedly resubmitting an unsupported gateway-specific message shape.
+	if a.turn == nil || a.turn.thinkingReplayAttempted {
+		return
+	}
+	reasoning := strings.TrimSpace(payload.ReasoningContent)
+	if reasoning == "" {
+		return
+	}
+	if a.llmClient == nil {
+		return
+	}
+	boundTurnID := a.currentTurnID()
+	if boundTurnID == 0 {
+		return
+	}
+	boundRef := a.llmClient.NextRequestModelRef()
+	if boundRef == "" || !a.llmClient.SupportsThinkingReplay(boundRef) {
+		return
+	}
+	providerID, modelID := splitModelRefParts(boundRef)
+	if providerID == "" {
+		return
+	}
+	log.Infof("stashing truncated thinking replay reasoning_len=%v bound_ref=%q", len(reasoning), boundRef)
+	a.turn.thinkingReplayAttempted = true
+	a.pendingThinkingReplayPrefix = &message.Message{
+		Role:             message.RoleAssistant,
+		Content:          "",
+		ReasoningContent: reasoning,
+		Kind:             message.KindThinkingReplayPrefix,
+		// The wire-only prefix must survive message normalization for the
+		// producing target: visible reasoning replay is gated on provenance
+		// matching the target provider, so bind the prefix to the model that
+		// produced it.
+		Provenance: &message.MessageProvenance{
+			ProviderID: providerID,
+			ModelID:    modelID,
+			WireFamily: modelcompat.WireFamilyOpenAIChat,
+		},
+	}
+	a.pendingThinkingReplayRef = boundRef
+	a.pendingThinkingReplayTurnID = boundTurnID
+}
+
+// splitModelRefParts splits a "provider/model" model ref into its parts,
+// dropping any inline variant suffix (e.g. "provider/model@variant").
+func splitModelRefParts(ref string) (providerID, modelID string) {
+	ref = strings.TrimSpace(ref)
+	if i := strings.Index(ref, "/"); i > 0 {
+		providerID = ref[:i]
+		modelID = ref[i+1:]
+		if j := strings.Index(modelID, "@"); j >= 0 {
+			modelID = modelID[:j]
+		}
+	}
+	return providerID, modelID
+}
+
+// takePendingThinkingReplayPrefix consumes the stashed truncated-thinking
+// prefix for a one-shot wire-only replay. It returns nil (and drops the prefix)
+// when the model pool no longer targets the model that produced it, the target
+// lost visible-reasoning replay support, or nothing was stashed. The returned
+// message must only be injected into the request wire, never appended to
+// ctxMgr.
+func (a *MainAgent) takePendingThinkingReplayPrefix() *message.Message {
+	if a.pendingThinkingReplayPrefix == nil {
+		return nil
+	}
+	prefix := a.pendingThinkingReplayPrefix
+	boundRef := a.pendingThinkingReplayRef
+	boundTurnID := a.pendingThinkingReplayTurnID
+	a.clearPendingThinkingReplay()
+	if a.llmClient == nil {
+		return nil
+	}
+	if currentTurnID := a.currentTurnID(); currentTurnID == 0 || currentTurnID != boundTurnID {
+		log.Infof("dropping truncated thinking replay prefix turn_changed bound_turn=%v current_turn=%v", boundTurnID, currentTurnID)
+		return nil
+	}
+	currentRef := a.llmClient.NextRequestModelRef()
+	if currentRef == "" || currentRef != boundRef {
+		log.Infof("dropping truncated thinking replay prefix model_changed bound_ref=%q current_ref=%q", boundRef, currentRef)
+		return nil
+	}
+	if !a.llmClient.SupportsThinkingReplay(currentRef) {
+		log.Infof("dropping truncated thinking replay prefix capability_lost ref=%q", currentRef)
+		return nil
+	}
+	return prefix
+}
+
+// clearPendingThinkingReplay discards any stashed truncated-thinking prefix.
+func (a *MainAgent) clearPendingThinkingReplay() {
+	a.pendingThinkingReplayPrefix = nil
+	a.pendingThinkingReplayRef = ""
+	a.pendingThinkingReplayTurnID = 0
 }

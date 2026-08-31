@@ -694,6 +694,11 @@ Compatibility fields:
     reasoning — for example after a cross-provider model switch — a backend
     rejection escalates the replay to plain-text historical tool records, so
     the continuation no longer needs the missing reasoning.
+    For third-party OpenAI-compatible gateways, Chord keeps the configured
+    endpoint and does not redirect to DeepSeek's official `/beta` endpoint. A
+    reasoning-only output truncation may receive one bounded request-only
+    reasoning replay on that same endpoint; if the gateway rejects it, Chord
+    falls back to the ordinary recovery prompt.
   - `anthropic_unsigned`: opt-in for Messages-compatible models such as
     DeepSeek/GLM endpoints that return visible `thinking` blocks without Claude
     signatures. Unsigned thinking is replayed natively only to the same

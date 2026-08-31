@@ -116,6 +116,7 @@ type Turn struct {
 	// every successful barrier. Event-loop-goroutine only, like MalformedCount.
 	BarrierFailureRounds               int
 	LengthRecoveryCount                int
+	thinkingReplayAttempted            bool
 	InLengthRecovery                   bool
 	LastTruncatedToolName              string
 	LengthRecoveryAutoCompactAttempted bool
@@ -685,6 +686,16 @@ type MainAgent struct {
 	// length-recovery auto compaction succeeds. It is consumed as a one-shot
 	// turn overlay and never appended to ctxMgr durable messages.
 	pendingRecoveryPrompt string
+	// pendingThinkingReplayPrefix holds the visible reasoning text of a response
+	// whose whole output budget was spent on thinking before any visible reply.
+	// It is replayed as a wire-only assistant message on the next recovery
+	// request so the model continues from its truncated reasoning instead of
+	// restarting. Bound to the producing model ref: if the model pool cursor
+	// moved before the retry, the prefix is dropped. It never enters ctxMgr or
+	// the durable history.
+	pendingThinkingReplayPrefix *message.Message
+	pendingThinkingReplayRef    string
+	pendingThinkingReplayTurnID uint64
 	// pendingAutoContinuePrompt is a request-scoped continuation hint injected
 	// after usage-driven or oversize-driven compaction succeeds, so the next
 	// automatically resumed turn continues the active task without persisting an

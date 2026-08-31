@@ -203,6 +203,13 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 				msg.ThinkingBlocks = kept
 			}
 		}
+		if msg.Kind == message.KindThinkingReplayPrefix && opts.ReplayCompat >= ReplayCompatSynthesized {
+			// The prefix is a request-only best-effort extension for compatible
+			// gateways. If the target rejected that shape, omit it and let the
+			// recovery prompt retry against the ordinary configured endpoint.
+			msg.ReasoningContent = ""
+			report.DowngradedReasoning++
+		}
 		reasoningToolTrajectoryInvalid := false
 		hadReplaySensitivePayload := strings.TrimSpace(msg.ReasoningContent) != "" ||
 			len(msg.ThinkingBlocks) > 0 || len(msg.ResponsesOutput) > 0 || len(msg.GeminiParts) > 0

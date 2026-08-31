@@ -67,6 +67,38 @@ func TestResponseHasUsableOutputIgnoresZeroWidthPlaceholder(t *testing.T) {
 	}
 }
 
+func TestResponseHasUsableOutputAcceptsTruncatedReasoning(t *testing.T) {
+	if !responseHasUsableOutput(&message.Response{
+		ReasoningContent: "unfinished reasoning",
+		StopReason:       "max_tokens",
+	}) {
+		t.Fatal("visible reasoning from a truncated response must reach agent recovery")
+	}
+	if responseHasUsableOutput(&message.Response{
+		ReasoningContent: "finished reasoning only",
+		StopReason:       "stop",
+	}) {
+		t.Fatal("reasoning-only normal stop should not bypass empty-response handling")
+	}
+}
+
+func TestCompleteStreamReturnsTruncatedReasoningToCaller(t *testing.T) {
+	cfg := testProviderConfig("sample", "test-model")
+	provider := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{
+		ReasoningContent: "unfinished reasoning",
+		StopReason:       "max_tokens",
+	}}}}
+	c := NewClient(cfg, provider, "test-model", 1024, "")
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "question"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.ReasoningContent != "unfinished reasoning" || resp.StopReason != "max_tokens" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
 func TestCompleteStreamZeroWidthInterruptedRetriesNextKey(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1", "k2"})
 	primaryImpl := &recordingProvider{}
@@ -4406,6 +4438,45 @@ func TestSupportsAnthropicPromptCacheUsesCursorFallbackTarget(t *testing.T) {
 	}
 	if c.SupportsAnthropicPromptCache("openai/gpt") {
 		t.Fatal("primary OpenAI target should not support Anthropic prompt-cache boundary hints")
+	}
+}
+
+// TestSupportsThinkingReplay verifies the visible-reasoning replay capability
+// is resolved per cursor-head target: DeepSeek-style thinking models report
+// true, plain chat models false, and the empty ref follows the current cursor.
+func TestSupportsThinkingReplay(t *testing.T) {
+	deepseekCfg := NewProviderConfig("deepseek", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"deepseek-v4-pro": {Compat: &config.ModelCompatConfig{
+				ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
+			}},
+		},
+	}, []string{"k"})
+	plainCfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"gpt-4o": {},
+		},
+	}, []string{"k"})
+
+	c := NewClient(deepseekCfg, &scriptedProvider{}, "deepseek-v4-pro", 1024, "sys")
+	if !c.SupportsThinkingReplay("deepseek/deepseek-v4-pro") {
+		t.Fatal("DeepSeek-style target should support visible reasoning replay")
+	}
+	if !c.SupportsThinkingReplay("") {
+		t.Fatal("empty ref should follow the DeepSeek cursor target")
+	}
+	if c.SupportsThinkingReplay("openai/gpt-4o") {
+		t.Fatal("plain chat target should not support visible reasoning replay")
+	}
+
+	plain := NewClient(plainCfg, &scriptedProvider{}, "gpt-4o", 1024, "sys")
+	if plain.SupportsThinkingReplay("openai/gpt-4o") {
+		t.Fatal("plain chat target should not support visible reasoning replay")
+	}
+	if plain.SupportsThinkingReplay("") {
+		t.Fatal("empty ref should follow the plain chat cursor target")
 	}
 }
 

@@ -355,6 +355,10 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 
 // newTurn cancels any in-flight work and creates a fresh Turn.
 func (a *MainAgent) newTurn() {
+	// A replay prefix belongs only to the recovery request of the turn that
+	// produced it. Clear it before replacing an idle or interrupted turn so a
+	// later user message cannot inherit stale model reasoning.
+	a.clearPendingThinkingReplay()
 	a.markRealWorkStarted()
 	a.clearContextReductionWrapUpGrace()
 	// Foreground priority: a new user turn cancels any in-flight background
@@ -438,6 +442,7 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	if a.mainSlotForeground.Swap(false) {
 		a.emitCompactionSlotActivity()
 	}
+	a.clearPendingThinkingReplay()
 	turnID := uint64(0)
 	a.turnMu.Lock()
 	if a.turn != nil {
@@ -550,6 +555,7 @@ func (a *MainAgent) setIdleAndDrainPending() {
 // mailbox results must remain queued until the user explicitly submits or
 // otherwise leaves the edit flow.
 func (a *MainAgent) setIdleForComposerEdit() {
+	a.clearPendingThinkingReplay()
 	turnID := uint64(0)
 	a.turnMu.Lock()
 	if a.turn != nil {

@@ -166,6 +166,7 @@ func (a *MainAgent) markLoopExitDecisionRequired() {
 
 func (a *MainAgent) clearCurrentTurnKeepLoopState() {
 	turnID := a.currentTurnID()
+	a.clearPendingThinkingReplay()
 	a.turnMu.Lock()
 	a.turn = nil
 	a.turnMu.Unlock()

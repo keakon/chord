@@ -580,8 +580,19 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	// runtime hints are appended after the conversation tail so they never
 	// change the cacheable prompt prefix.
 	tailOverlayCount := 0
+	// A truncated-thinking prefix replays the model's own reasoning as a
+	// wire-only assistant message immediately before the turn overlays, so the
+	// recovery prompt below continues from where reasoning stopped. It is bound
+	// to the producing model; takePendingThinkingReplayPrefix drops it when the
+	// model pool moved or the target lost visible-reasoning support.
+	if prefix := a.takePendingThinkingReplayPrefix(); prefix != nil {
+		messages = append(messages, *prefix)
+		tailOverlayCount++
+	}
 	if overlays := a.buildTurnOverlayMessages(); len(overlays) > 0 {
-		messages, tailOverlayCount = applyTurnOverlayMessages(messages, overlays)
+		applied, overlayCount := applyTurnOverlayMessages(messages, overlays)
+		messages = applied
+		tailOverlayCount += overlayCount
 	}
 
 	// Propagate prompt-cache placement as one-shot Anthropic hints. The stable

@@ -320,6 +320,11 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		if payload.Usage != nil {
 			outputTokens = payload.Usage.OutputTokens
 		}
+		// Capture the reasoning spent on this truncated attempt so the recovery
+		// request can replay it as a wire-only prefix and continue from where
+		// thinking stopped (when the same model still targets the request and
+		// its wire path supports visible reasoning replay).
+		a.stashTruncatedThinkingReplay(payload)
 		if a.turn.LengthRecoveryCount < maxLengthRecoveryAttempts {
 			a.turn.LengthRecoveryCount++
 			log.Warnf("LLM output truncated before any tool call or visible text; retrying with recovery prompt recovery_attempt=%v max_attempts=%v stop_reason=%v thinking_blocks=%v output_tokens=%v", a.turn.LengthRecoveryCount, maxLengthRecoveryAttempts, payload.StopReason, len(payload.ThinkingBlocks), outputTokens)
@@ -496,6 +501,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		}
 		if assessment := a.nextLoopAssessmentFromAssistant(assistantMsg); assessment != nil {
 			a.rememberIdleTurn(a.turn.ID)
+			a.clearPendingThinkingReplay()
 			a.turn = nil
 			a.queueLoopEvent(Event{Type: EventLoopAssessment, Payload: assessment})
 			return

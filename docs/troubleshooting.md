@@ -106,6 +106,17 @@ map portable visible reasoning from other wire families into
 `reasoning_content`; add any provider-specific thinking flags through
 `compat.request_overrides.body`.
 
+For a third-party OpenAI-compatible gateway, Chord keeps using the configured
+endpoint. It never redirects a request to DeepSeek's official `/beta` endpoint
+or assumes that the gateway implements Chat Prefix Completion. When a reasoning
+response is truncated before visible text, Chord makes one bounded,
+request-only replay attempt with the accumulated `reasoning_content` on that
+same endpoint, if `openai_visible` is enabled and the model is unchanged. If
+the gateway rejects that message shape, Chord removes the temporary replay and
+continues with the ordinary recovery prompt. This is best effort; for gateways
+that do not consume reasoning replay, raise the model's output limit or split
+the task into smaller requests.
+
 For GLM Preserved Thinking, that body override must include
 `thinking.type: enabled` and `thinking.clear_thinking: false`, plus
 `reasoning_continuity.preserve_history: true` so Chord keeps completed-turn

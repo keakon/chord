@@ -241,6 +241,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.pendingLoopContinuation = nil
 	a.pendingLSPDiagnosticOverlay = ""
 	a.pendingRecoveryPrompt = ""
+	a.clearPendingThinkingReplay()
 	a.pendingAutoContinuePrompt = ""
 	a.pendingAutoContinueReplayPrompt = ""
 	a.clearPendingCompactionResume()

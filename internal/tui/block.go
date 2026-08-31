@@ -258,8 +258,12 @@ type Block struct {
 	streamTailSoftWrapContinuations    []bool
 	// streamCardHead* caches the final card-wrapped output for the stable head
 	// of an in-flight streaming card (label + settled prefix) so each flush
-	// only re-wraps the cheap tail lines. See Block.renderStreamingCardLines.
+	// only re-wraps the cheap tail lines. streamCardHeadBody holds the raw
+	// (pre-background-preservation) head body lines so a growing head can be
+	// verified as a prefix of the previous one and extended incrementally
+	// instead of being fully re-wrapped. See Block.renderStreamingCardLines.
 	streamCardHeadLines []string
+	streamCardHeadBody  []string
 	streamCardHeadKey   streamCardHeadKey
 	// streamTableCheckedLen/streamTableFound cache the markdown-table scan over
 	// the settled portion of in-flight content so each flush only scans the

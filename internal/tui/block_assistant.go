@@ -2,6 +2,7 @@ package tui
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -32,11 +33,22 @@ func preprocessThinkingMarkdown(s string) string {
 // styleRenderedThinkingLines applies title styling to the first line of each
 // markdown paragraph (segments separated by blank lines) so multiple
 // "**Section**" blocks in one thinking round each read as a heading.
+// isBlankStyledLine reports whether a rendered markdown line is visually
+// blank. Glamour renders blank lines as ANSI-styled spaces, so a plain
+// strings.TrimSpace check cannot recognize them; strip the style first.
+// The style functions use this for paragraph-title tracking so an incremental
+// append (which inserts plain blank lines at chunk boundaries) and a one-shot
+// render (whose blank lines carry glamour styles) style blank lines
+// identically.
+func isBlankStyledLine(line string) bool {
+	return strings.TrimSpace(stripANSI(line)) == ""
+}
+
 func styleRenderedThinkingLines(mdLines []string) []string {
 	var raw []string
 	paraStart := true
 	for _, line := range mdLines {
-		if strings.TrimSpace(line) == "" {
+		if isBlankStyledLine(line) {
 			raw = append(raw, "")
 			paraStart = true
 			continue
@@ -139,17 +151,26 @@ type assistantMarkdownSegment struct {
 }
 
 type thinkingStreamSettledCache struct {
-	raw       string
-	frontier  int
-	width     int
-	lines     []string
-	tailRaw   string
-	tailWidth int
-	tailLines []string
+	raw             string
+	frontier        int
+	width           int
+	frontierScanner markdownutil.StreamingFrontierScanner
+	lines           []string
+	tailRaw         string
+	tailWidth       int
+	tailLines       []string
 	// styledLines caches the styled form of the settled lines so streaming
 	// flushes do not re-run per-line style rendering over the whole prefix.
 	styledLines        []string
 	styledThemeVersion uint64
+	// styledUpTo is the count of settled lines already reflected in
+	// styledLines, and styledParaStart is the paragraph-title state left
+	// after those lines. When the settled prefix only grows (frontier
+	// advances), styleStreamingThinkingSettledLinesIncremental appends
+	// styling for the newly settled lines starting from this saved state,
+	// instead of re-styling every settled line.
+	styledUpTo      int
+	styledParaStart bool
 }
 
 const (
@@ -172,7 +193,6 @@ type streamCardHeadKey struct {
 	blockID      int
 	width        int
 	headCount    int
-	frontier     int
 	themeVersion uint64
 	focused      bool
 	valid        bool
@@ -182,7 +202,7 @@ type streamCardHeadKey struct {
 // streaming block. The stable head (label + settled prefix) is cached across
 // flushes so only the cheap tail lines are re-wrapped per render; output is
 // identical to preserveCardBg + renderPrewrappedCard over all body lines.
-func (b *Block) renderStreamingCardLines(kind uint8, style lipgloss.Style, innerWidth int, bgColorNum, railSeq string, bodyLines []string, tailCount, frontier int) []string {
+func (b *Block) renderStreamingCardLines(kind uint8, style lipgloss.Style, innerWidth int, bgColorNum, railSeq string, bodyLines []string, tailCount int) []string {
 	if tailCount < 0 {
 		tailCount = 0
 	}
@@ -196,16 +216,38 @@ func (b *Block) renderStreamingCardLines(kind uint8, style lipgloss.Style, inner
 		blockID:      b.ID,
 		width:        innerWidth,
 		headCount:    headCount,
-		frontier:     frontier,
 		themeVersion: appliedThemeVersion,
 		focused:      b.Focused,
 		valid:        true,
 	}
 	if b.streamCardHeadKey != key {
-		// bodyLines is rebuilt by the caller on every render, so mutating it
-		// in place via preserveCardBg matches the previous non-cached path.
-		head := preserveCardBg(bodyLines[:headCount], bgColorNum)
-		b.streamCardHeadLines = frame.appendBodyLines(make([]string, 0, headCount), head)
+		old := b.streamCardHeadKey
+		// The head content depends only on bodyLines[:headCount], so two
+		// flushes with the same headCount reuse the cached head even when the
+		// settled byte frontier moved.
+		incremental := old.valid &&
+			old.kind == key.kind && old.blockID == key.blockID &&
+			old.width == key.width && old.themeVersion == key.themeVersion &&
+			old.focused == key.focused &&
+			old.headCount < key.headCount &&
+			slices.Equal(bodyLines[:old.headCount], b.streamCardHeadBody)
+		if incremental {
+			// Only the newly settled lines need card wrapping; the existing
+			// head lines stay untouched. streamCardHeadBody keeps the raw
+			// (pre-background-preservation) lines so the next prefix check
+			// compares like for like.
+			b.streamCardHeadBody = append(b.streamCardHeadBody, bodyLines[old.headCount:headCount]...)
+			newHead := preserveCardBg(bodyLines[old.headCount:headCount], bgColorNum)
+			b.streamCardHeadLines = append(b.streamCardHeadLines, frame.appendBodyLines(nil, newHead)...)
+		} else {
+			// bodyLines is rebuilt by the caller on every render, so mutating
+			// it in place via preserveCardBg matches the previous non-cached
+			// path. Capture the raw head lines before that mutation for the
+			// prefix check.
+			b.streamCardHeadBody = append([]string(nil), bodyLines[:headCount]...)
+			head := preserveCardBg(bodyLines[:headCount], bgColorNum)
+			b.streamCardHeadLines = frame.appendBodyLines(make([]string, 0, headCount), head)
+		}
 		b.streamCardHeadKey = key
 		b.hotBytesMemoValid = false
 	}
@@ -945,7 +987,7 @@ func (b *Block) renderAssistant(width int) []string {
 		railSeq := railANSISeq("assistant", b.Focused)
 		var cardLines []string
 		if b.Streaming {
-			cardLines = b.renderStreamingCardLines(streamCardKindAssistant, style, innerWidth, assBg, railSeq, assistantLines, len(b.streamTailLines), b.streamSettledFrontier)
+			cardLines = b.renderStreamingCardLines(streamCardKindAssistant, style, innerWidth, assBg, railSeq, assistantLines, len(b.streamTailLines))
 		} else {
 			assistantLines = preserveCardBg(assistantLines, assBg)
 			cardLines = renderPrewrappedCard(style, innerWidth, assistantLines, assBg, railSeq)
@@ -1008,50 +1050,100 @@ func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth 
 		return renderMarkdownContent(part, contentWidth), 0
 	}
 
-	frontier := markdownutil.FindStreamingSettledFrontier(part)
 	for len(b.thinkingStreamSettled) <= partIndex {
 		b.thinkingStreamSettled = append(b.thinkingStreamSettled, thinkingStreamSettledCache{})
 	}
 	cache := &b.thinkingStreamSettled[partIndex]
+	frontier := cache.frontierScanner.Advance(part)
 
 	var out []string
 	settledLineCount := 0
 	if frontier > 0 {
 		settledRaw := part[:frontier]
-		if cache.frontier != frontier || cache.width != contentWidth || cache.raw != settledRaw {
+		switch {
+		case cache.width != contentWidth || !strings.HasPrefix(settledRaw, cache.raw):
+			// Width change or non-monotonic content: rebuild the whole
+			// settled prefix from scratch.
 			cache.raw = settledRaw
 			cache.frontier = frontier
 			cache.width = contentWidth
 			cache.lines = renderMarkdownContent(settledRaw, contentWidth)
 			cache.styledLines = nil
+			cache.styledUpTo = 0
+			cache.styledThemeVersion = 0
+		case cache.frontier < frontier:
+			// Steady-state append: the frontier only advanced, so only the
+			// newly settled paragraphs need markdown rendering. Frontiers sit
+			// on blank-line paragraph boundaries, so each new settled chunk is
+			// self-contained and renders identically to the same chunk inside
+			// the full settled text once the boundary blanks are normalized by
+			// appendThinkingRenderedLines. The styled-lines cache is preserved
+			// and extended incrementally by styledStreamingThinkingLines.
+			cache.lines = appendThinkingRenderedLines(cache.lines, renderMarkdownContent(part[cache.frontier:frontier], contentWidth))
+			cache.raw = settledRaw
+			cache.frontier = frontier
 		}
 		out = append(out, cache.lines...)
 		settledLineCount = len(out)
 	} else if partIndex < len(b.thinkingStreamSettled) {
-		b.thinkingStreamSettled[partIndex] = thinkingStreamSettledCache{}
+		// The settled render cache may need to be discarded after a
+		// non-monotonic update, but keep the scanner state for the current
+		// content so a tail-only stream does not fall back to a full scan on
+		// every flush.
+		scanner := cache.frontierScanner
+		b.thinkingStreamSettled[partIndex] = thinkingStreamSettledCache{frontierScanner: scanner}
 		cache = &b.thinkingStreamSettled[partIndex]
 	}
 
 	if tail := part[frontier:]; tail != "" {
+		var tailLines []string
 		if cache.tailRaw == tail && cache.tailWidth == contentWidth {
-			out = append(out, cache.tailLines...)
-			settledLineCount = len(out) - len(cache.tailLines)
+			tailLines = cache.tailLines
 		} else {
 			// Sanitize control sequences like the settled prefix (renderMarkdownContent
 			// runs sanitizeDisplayText) so the streaming tail cannot inject cursor
 			// moves or other ANSI commands into the thinking card.
-			tailLines := wrapText(sanitizeDisplayText(tail), contentWidth)
-			out = append(out, tailLines...)
+			tailLines = wrapText(sanitizeDisplayText(tail), contentWidth)
 			cache.tailRaw = tail
 			cache.tailWidth = contentWidth
 			cache.tailLines = tailLines
-			settledLineCount = len(out) - len(tailLines)
 		}
+		// settledLineCount already equals len(cache.lines) from the block above;
+		// the tail is appended with the same blank-boundary normalization.
+		out = appendThinkingRenderedLines(out, tailLines)
 	}
 	if len(out) == 0 {
 		out = []string{""}
 	}
 	return out, settledLineCount
+}
+
+// appendThinkingRenderedLines appends a freshly rendered markdown chunk to
+// previously rendered settled lines, normalizing blank-line boundaries the
+// same way glamour would when both chunks are part of one document. Rendering
+// chunks independently loses or doubles the inter-block spacing (paragraphs
+// have no padding, fenced code blocks do), so the boundary rules mirror
+// renderAssistantMarkdownContent's appendSegment: collapse consecutive blank
+// lines at the seam and insert a single blank between two non-blank blocks.
+func appendThinkingRenderedLines(out []string, newLines []string) []string {
+	if len(newLines) == 0 {
+		return out
+	}
+	// glamour renders blank lines as ANSI-styled spaces, so a plain
+	// strings.TrimSpace check cannot recognize them; strip the style first.
+	isBlank := func(s string) bool { return strings.TrimSpace(stripANSI(s)) == "" }
+	start := 0
+	for len(out) > 0 && start < len(newLines) && isBlank(out[len(out)-1]) && isBlank(newLines[start]) {
+		start++
+	}
+	if start >= len(newLines) {
+		return out
+	}
+	if len(out) > 0 && !isBlank(out[len(out)-1]) && !isBlank(newLines[start]) {
+		out = append(out, "")
+	}
+	out = append(out, newLines[start:]...)
+	return out
 }
 
 // styleStreamingThinkingSettledLines applies the paragraph title/content
@@ -1060,7 +1152,7 @@ func styleStreamingThinkingSettledLines(mdLines []string) []string {
 	out := make([]string, 0, len(mdLines))
 	paraStart := true
 	for _, line := range mdLines {
-		if strings.TrimSpace(line) == "" {
+		if isBlankStyledLine(line) {
 			out = append(out, "")
 			paraStart = true
 			continue
@@ -1074,6 +1166,56 @@ func styleStreamingThinkingSettledLines(mdLines []string) []string {
 		out = append(out, "  "+style.Render(line))
 	}
 	return out
+}
+
+// styledParaStartAfter returns the paragraph-title state after styling the
+// given settled lines, mirroring the state machine in
+// styleStreamingThinkingSettledLines so an incremental append from that point
+// produces identical output to styling the full prefix in one pass.
+func styledParaStartAfter(mdLines []string) bool {
+	paraStart := true
+	for _, line := range mdLines {
+		if isBlankStyledLine(line) {
+			paraStart = true
+		} else {
+			paraStart = false
+		}
+	}
+	return paraStart
+}
+
+// styleStreamingThinkingSettledLinesIncremental styles mdLines[start:end]
+// with the paragraph title/content state machine, starting from the saved
+// paraStart state and returning the updated state. Steady-state flushes style
+// only the newly settled lines (start = styledUpTo), keeping per-flush cost
+// proportional to the delta instead of the whole settled prefix.
+func styleStreamingThinkingSettledLinesIncremental(mdLines []string, start, end int, paraStart bool, existing []string) ([]string, bool) {
+	if start < 0 {
+		start = 0
+	}
+	if end > len(mdLines) {
+		end = len(mdLines)
+	}
+	if start >= end {
+		return existing, paraStart
+	}
+	out := existing
+	for i := start; i < end; i++ {
+		line := mdLines[i]
+		if isBlankStyledLine(line) {
+			out = append(out, "")
+			paraStart = true
+			continue
+		}
+		style := ThinkingContentStyle
+		if paraStart {
+			style = ThinkingTitleStyle
+			paraStart = false
+		}
+		line = preserveStyleAfterResets(line, style)
+		out = append(out, "  "+style.Render(line))
+	}
+	return out, paraStart
 }
 
 // styledStreamingThinkingLines returns the styled lines for a streaming
@@ -1091,10 +1233,20 @@ func (b *Block) styledStreamingThinkingLines(mdLines []string, settledLineCount,
 	var settledStyled []string
 	if partIndex >= 0 && partIndex < len(b.thinkingStreamSettled) {
 		cache := &b.thinkingStreamSettled[partIndex]
-		if len(cache.styledLines) != settledLineCount || cache.styledThemeVersion != appliedThemeVersion {
+		if cache.styledThemeVersion != appliedThemeVersion || cache.styledUpTo > settledLineCount {
+			// Theme change or a non-monotonic shrink: rebuild the styled
+			// prefix from scratch.
 			cache.styledLines = styleStreamingThinkingSettledLines(mdLines[:settledLineCount])
+			cache.styledUpTo = settledLineCount
+			cache.styledParaStart = styledParaStartAfter(mdLines[:settledLineCount])
 			cache.styledThemeVersion = appliedThemeVersion
 			b.hotBytesMemoValid = false
+		} else if cache.styledUpTo < settledLineCount {
+			// Steady-state flush: only the newly settled lines need styling.
+			var paraStart bool
+			cache.styledLines, paraStart = styleStreamingThinkingSettledLinesIncremental(mdLines, cache.styledUpTo, settledLineCount, cache.styledParaStart, cache.styledLines)
+			cache.styledUpTo = settledLineCount
+			cache.styledParaStart = paraStart
 		}
 		settledStyled = cache.styledLines
 	} else {
@@ -1103,7 +1255,7 @@ func (b *Block) styledStreamingThinkingLines(mdLines []string, settledLineCount,
 	out := make([]string, 0, len(settledStyled)+len(mdLines)-settledLineCount)
 	out = append(out, settledStyled...)
 	for _, line := range mdLines[settledLineCount:] {
-		if strings.TrimSpace(line) == "" {
+		if isBlankStyledLine(line) {
 			out = append(out, "")
 			continue
 		}
@@ -1228,11 +1380,7 @@ func (b *Block) renderThinking(width int) []string {
 	thinkBg2 := currentTheme.ThinkingCardBg
 	railSeq := railANSISeq("thinking", b.Focused)
 	if b.Streaming {
-		frontier := 0
-		if len(b.thinkingStreamSettled) > 0 {
-			frontier = b.thinkingStreamSettled[0].frontier
-		}
-		return b.renderStreamingCardLines(streamCardKindThinking, style, innerWidth, thinkBg2, railSeq, rawLines, len(mdLines)-settledLineCount, frontier)
+		return b.renderStreamingCardLines(streamCardKindThinking, style, innerWidth, thinkBg2, railSeq, rawLines, len(mdLines)-settledLineCount)
 	}
 	rawLines = preserveCardBg(rawLines, thinkBg2)
 	return renderPrewrappedCard(style, innerWidth, rawLines, thinkBg2, railSeq)

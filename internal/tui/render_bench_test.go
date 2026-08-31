@@ -934,3 +934,38 @@ func TestSeparatorCacheHitReturnsSameString(t *testing.T) {
 		t.Fatal("separator cache hit returned different string")
 	}
 }
+
+// benchmarkThinkingStreamChunks builds a long streaming thinking stream in the
+// real opus-5 shape: one tiny paragraph per delta, each ending with a blank
+// line, so the markdown settled frontier advances on every flush. n is the
+// number of deltas.
+func benchmarkThinkingStreamChunks(n int) []string {
+	chunks := make([]string, 0, n)
+	for i := range n {
+		chunks = append(chunks, "word"+fmt.Sprint(i%1000)+"\n\n")
+	}
+	return chunks
+}
+
+// BenchmarkRenderThinkingStreamingIncrementalLarge measures the total cost of
+// rendering a long streaming thinking card flush-by-flush (one render per
+// delta). The incremental settled-markdown, styled-lines, and card-head caches
+// keep per-flush cost proportional to the new delta instead of the full
+// accumulated text; if any of them regresses to a full re-render, per-flush
+// cost grows with the accumulated content and this benchmark scales
+// quadratically, failing the smoke run loudly.
+func BenchmarkRenderThinkingStreamingIncrementalLarge(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	chunks := benchmarkThinkingStreamChunks(1000)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		block := &Block{Type: BlockThinking, Streaming: true}
+		var content string
+		for _, ch := range chunks {
+			content += ch
+			block.Content = content
+			_ = block.renderThinking(70)
+		}
+	}
+}

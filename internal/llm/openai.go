@@ -731,7 +731,7 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 					},
 				})
 			}
-			if contentText == "" && len(omi.ToolCalls) == 0 {
+			if contentText == "" && len(omi.ToolCalls) == 0 && omi.ReasoningContent == nil {
 				log.Warn("skipping empty/reasoning-only assistant message in OpenAI history")
 				continue
 			}
