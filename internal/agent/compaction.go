@@ -57,9 +57,15 @@ const (
 	compactMinToolResultsPrune     = 6
 	compactMinIncrementalTokens    = 2048
 	compactSummaryMinChars         = 160
-	compactPromptSubAgentLimit     = 6
-	compactPromptDescMaxChars      = 240
-	compactPromptSummaryMaxChars   = 320
+	// maxToolErrorEvidenceItems bounds how many failing tool results the
+	// evidence pack may keep. Failures outrank an ordinary user request, so an
+	// unbounded run of them (one command retried, or one error repeated across
+	// a batch) spends the whole pack on restatements of the same problem and
+	// pushes the latest request out.
+	maxToolErrorEvidenceItems    = 2
+	compactPromptSubAgentLimit   = 6
+	compactPromptDescMaxChars    = 240
+	compactPromptSummaryMaxChars = 320
 	// Budget ratio for compaction input - use 1/6 of context window
 	// to reduce transcript size and speed up model calls.
 	compactBudgetRatio = 6
@@ -590,8 +596,12 @@ func evidenceItemsFromCandidates(candidates []evidenceItem, contextLimit int) []
 	budget := evidencePackTokenBudget(contextLimit)
 	selected := make([]evidenceItem, 0, len(items))
 	used := 0
+	toolErrors := 0
 	var haveCorrection, haveDoneRejected, haveUserRequest, haveError, haveDiff bool
 	for _, item := range items {
+		if item.Kind == evidenceToolError && toolErrors >= maxToolErrorEvidenceItems {
+			continue
+		}
 		required := false
 		switch item.Kind {
 		case evidenceUserCorrection:
@@ -619,6 +629,7 @@ func evidenceItemsFromCandidates(candidates []evidenceItem, contextLimit int) []
 			haveUserRequest = true
 		case evidenceToolError:
 			haveError = true
+			toolErrors++
 		case evidenceToolDiff:
 			haveDiff = true
 		}
@@ -655,10 +666,7 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 			if !message.IsUserAuthored(msg) {
 				continue
 			}
-			text := strings.TrimSpace(msg.Content)
-			if len(msg.Parts) > 0 {
-				text = normalizeMessagesForSummary([]message.Message{msg})[0].Content
-			}
+			text := message.UserPromptInstructionText(msg)
 			if text == "" {
 				continue
 			}

@@ -381,7 +381,8 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 	if ctx.readRetentionProtects() {
 		return requestReductionNone
 	}
-	failed := isToolResultErrorStatus(ctx.ToolStatus) || isToolErrorContent(ctx.Content)
+	failed := isToolResultErrorStatus(ctx.ToolStatus) ||
+		(strings.TrimSpace(ctx.ToolStatus) == "" && isToolErrorContent(ctx.Content))
 	if failed && ctx.Age < ctx.Policy.ErrorAgeTurns {
 		// An explicit failure is stronger evidence than any shape-based rule:
 		// until it ages past the error threshold it must stay complete so the

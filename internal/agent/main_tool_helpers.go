@@ -382,7 +382,7 @@ func composeToolResultTexts(rawResult string, err error) (displayResult, context
 		return deduped, deduped, errorText, true
 	}
 
-	combined := strings.TrimRight(rawResult, "\n") + "\n\nError: " + errorText
+	combined := strings.TrimRight(rawResult, "\n") + message.ToolResultAppendedErrorSeparator + errorText
 	return combined, combined, errorText, true
 }
 

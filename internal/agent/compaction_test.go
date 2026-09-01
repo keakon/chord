@@ -5695,6 +5695,113 @@ func TestRecordEvidenceFromMessageCapturesToolStatusErrorWithoutErrorPrefix(t *t
 	}
 }
 
+func TestSuccessfulToolOutputContainingErrorIsNotFailureEvidence(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.recordEvidenceFromMessage(message.Message{
+		Role:       message.RoleTool,
+		Content:    `source contains "Error:" as a string literal`,
+		ToolStatus: string(ToolResultStatusSuccess),
+	})
+	if got := a.evidence.len(); got != 0 {
+		t.Fatalf("successful output was recorded as failure evidence: %+v", a.evidence.snapshot())
+	}
+	if isToolResultErrorMessage(message.Message{Role: message.RoleTool, Content: "Error: in documentation", ToolStatus: string(ToolResultStatusSuccess)}) {
+		t.Fatal("explicit success must override an Error: substring")
+	}
+}
+
+func TestLegacyToolErrorFallbackRequiresExplicitErrorBoundary(t *testing.T) {
+	if !isToolResultErrorMessage(message.Message{Role: message.RoleTool, Content: "command output\n\nError: exit code 1"}) {
+		t.Fatal("expected the explicit appended error boundary to be recognized")
+	}
+	if isToolResultErrorMessage(message.Message{Role: message.RoleTool, Content: "command output mentions Error: but succeeded"}) {
+		t.Fatal("an embedded Error: substring must not be treated as a failure")
+	}
+}
+
+// TestToolErrorContentDelegatesToCentralClassifier pins isToolErrorContent to
+// message.ClassifyToolResultContent. A second local copy of the phrase list
+// previously diverged on interrupted calls, classifying them as failures in one
+// package and successes in the other on status-less transcripts.
+func TestToolErrorContentDelegatesToCentralClassifier(t *testing.T) {
+	for _, content := range []string{
+		"Error: boom",
+		"command output" + message.ToolResultAppendedErrorSeparator + "exit code 1",
+		"Model stopped before completing this tool call",
+		"plain success output",
+		"output mentions Error: but succeeded",
+		"cancelled",
+		"",
+	} {
+		want := message.ClassifyToolResultContent(content) == message.ToolResultClassError
+		if got := isToolErrorContent(content); got != want {
+			t.Fatalf("isToolErrorContent(%q) = %v, central classifier says %v", content, got, want)
+		}
+	}
+}
+
+func TestUserFileContentDoesNotBecomeCompactionConstraint(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleUser, Parts: []message.ContentPart{
+			{Type: message.ContentPartText, Text: "Please inspect this plan."},
+			{Type: message.ContentPartText, Text: `<file path="plan.md">` + "\nDo not change the public API.\n" + `</file>`},
+		}},
+		{Role: message.RoleAssistant, Content: "I will inspect it."},
+		{Role: message.RoleUser, Content: "Continue with the analysis."},
+	}
+	items := collectEvidenceItems(msgs)
+	for _, item := range items {
+		if strings.Contains(item.Excerpt, "Do not change the public API") {
+			t.Fatalf("file content leaked into evidence: %+v", item)
+		}
+	}
+}
+
+func TestEvidenceSelectionLimitsRepeatedToolErrors(t *testing.T) {
+	msgs := make([]message.Message, 0, 4)
+	for i := range 4 {
+		msgs = append(msgs, message.Message{
+			Role:       message.RoleTool,
+			Content:    fmt.Sprintf("Error: failure %d", i),
+			ToolStatus: string(ToolResultStatusError),
+		})
+	}
+	items := selectEvidenceItems(msgs, 4096)
+	count := 0
+	for _, item := range items {
+		if item.Kind == evidenceToolError {
+			count++
+		}
+	}
+	if count > maxToolErrorEvidenceItems {
+		t.Fatalf("selected %d repeated tool errors, want at most %d: %+v", count, maxToolErrorEvidenceItems, items)
+	}
+}
+
+func TestEnsureCompactionTodoSnapshotPreservesEveryRuntimeTodo(t *testing.T) {
+	todos := []tools.TodoItem{
+		{ID: "1", Content: "inspect the parser", Status: "in_progress", ActiveForm: "inspecting the parser"},
+		{ID: "2", Content: "run tests\nthen report the result", Status: "pending"},
+		{ID: "3", Content: "old cleanup", Status: "completed"},
+	}
+	summary := ensureCompactionTodoSnapshot(validCompactionSummaryForTest("history-1.md"), todos)
+	for _, want := range []string{
+		"### Runtime TODO snapshot",
+		"[in_progress] 1: inspect the parser | active: inspecting the parser",
+		"[pending] 2: run tests",
+		"> then report the result",
+		"[completed] 3: old cleanup",
+	} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("snapshot missing %q:\n%s", want, summary)
+		}
+	}
+	if err := validateCompactionSummary(summary); err != nil {
+		t.Fatalf("summary with runtime todo snapshot rejected: %v", err)
+	}
+}
+
 func TestClassifyRequestReductionToolOutputUsesToolStatusError(t *testing.T) {
 	ctx := requestReductionContext{
 		Content:    "patch makes no changes. No files were modified",

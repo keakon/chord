@@ -27,6 +27,32 @@ func TestUserPromptPlainText_ContentReturnsTrimmedRawContent(t *testing.T) {
 	}
 }
 
+func TestUserPromptInstructionTextExcludesFileParts(t *testing.T) {
+	msg := Message{
+		Role: RoleUser,
+		Parts: []ContentPart{
+			{Type: ContentPartText, Text: "Please inspect the parser."},
+			{Type: ContentPartText, Text: `<file path="plan.md">` + "\nDo not change the public API.\n" + `</file>`},
+		},
+	}
+	if got := UserPromptInstructionText(msg); got != "Please inspect the parser." {
+		t.Fatalf("got %q, want only the user instruction", got)
+	}
+}
+
+func TestUserPromptInstructionTextExcludesEmbeddedFileContent(t *testing.T) {
+	msg := Message{
+		Role: RoleUser,
+		Content: "Please inspect the parser.\n" +
+			`<file path="plan.md">` + "\nDo not change the public API.\n" + `</file>` +
+			"\nKeep the output concise.",
+	}
+	want := "Please inspect the parser.\n\nKeep the output concise."
+	if got := UserPromptInstructionText(msg); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestIsUserAuthoredExcludesSyntheticUserRoleMessages(t *testing.T) {
 	tests := []struct {
 		name string

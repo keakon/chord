@@ -8,6 +8,8 @@ import (
 
 const FileRefOpenTag = "<file path="
 
+const fileRefCloseTag = "</file>"
+
 type FileRef struct {
 	Path  string
 	Lines string
@@ -73,8 +75,8 @@ func ParseSingleFileRefContent(text string) (FileRef, string, bool) {
 	if !ok {
 		return FileRef{}, "", false
 	}
-	closeIdx := strings.LastIndex(rest, "</file>")
-	if closeIdx < 0 || strings.TrimSpace(rest[closeIdx+len("</file>"):]) != "" {
+	closeIdx := strings.LastIndex(rest, fileRefCloseTag)
+	if closeIdx < 0 || strings.TrimSpace(rest[closeIdx+len(fileRefCloseTag):]) != "" {
 		return FileRef{}, "", false
 	}
 	body := rest[:closeIdx]
@@ -194,7 +196,7 @@ func fileRefAttrValue(attrs, name string) string {
 
 // IsFileRefContent reports whether text is an @-injected <file path="...">...</file> block.
 func IsFileRefContent(text string) bool {
-	return strings.HasPrefix(strings.TrimSpace(text), FileRefOpenTag) && strings.Contains(text, "</file>")
+	return strings.HasPrefix(strings.TrimSpace(text), FileRefOpenTag) && strings.Contains(text, fileRefCloseTag)
 }
 
 // UserPromptPlainText returns user-visible text for session titles and usage previews:
@@ -213,4 +215,57 @@ func UserPromptPlainText(msg Message) string {
 		}
 	}
 	return strings.TrimSpace(msg.Content)
+}
+
+// UserPromptInstructionText returns the user-authored instruction text for
+// classification. Unlike UserPromptPlainText, it also removes complete file
+// reference blocks embedded in the legacy Content field. File contents are
+// evidence, not user instructions, and must not become durable constraints
+// merely because they contain words such as "must" or "do not".
+func UserPromptInstructionText(msg Message) string {
+	if len(msg.Parts) > 0 {
+		var sb strings.Builder
+		for _, p := range msg.Parts {
+			if p.Type != ContentPartText {
+				continue
+			}
+			text := strings.TrimSpace(p.Text)
+			if text == "" || IsFileRefContent(text) {
+				continue
+			}
+			if cleaned := stripFileRefBlocks(text); cleaned != "" {
+				sb.WriteString(cleaned)
+				sb.WriteByte('\n')
+			}
+		}
+		return strings.TrimSpace(sb.String())
+	}
+	return stripFileRefBlocks(msg.Content)
+}
+
+func stripFileRefBlocks(text string) string {
+	var out strings.Builder
+	for {
+		start := strings.Index(text, FileRefOpenTag)
+		if start < 0 {
+			out.WriteString(text)
+			break
+		}
+		out.WriteString(text[:start])
+		_, afterOpen, ok := nextFileRef(text[start:])
+		if !ok {
+			out.WriteString(text[start:])
+			break
+		}
+		bodyEnd := strings.Index(afterOpen, fileRefCloseTag)
+		if bodyEnd < 0 {
+			out.WriteString(text[start:])
+			break
+		}
+		// afterOpen is the tail following the opening tag, so subtracting its
+		// length from the whole text yields the offset just past that tag.
+		consumed := len(text) - len(afterOpen) + bodyEnd + len(fileRefCloseTag)
+		text = text[consumed:]
+	}
+	return strings.TrimSpace(out.String())
 }

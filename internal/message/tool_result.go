@@ -2,6 +2,13 @@ package message
 
 import "strings"
 
+// ToolResultAppendedErrorSeparator is the exact separator tool execution writes
+// between raw output and a trailing error. It lives beside the phrase list so
+// the producing side and every classifier share one definition: if the appended
+// format changes, the classification changes with it instead of silently
+// failing to match.
+const ToolResultAppendedErrorSeparator = "\n\nError: "
+
 // ToolResultClass is the tri-state classification of persisted tool output.
 type ToolResultClass string
 
@@ -23,7 +30,7 @@ func ClassifyToolResultContent(content string) ToolResultClass {
 	if lower == "cancelled" || strings.HasPrefix(lower, "cancelled\n") {
 		return ToolResultClassCancelled
 	}
-	if strings.HasPrefix(trimmed, "Error: ") || strings.Contains(trimmed, "\n\nError: ") || strings.HasPrefix(trimmed, "Model stopped before completing this tool call") {
+	if strings.HasPrefix(trimmed, "Error: ") || strings.Contains(trimmed, ToolResultAppendedErrorSeparator) || strings.HasPrefix(trimmed, "Model stopped before completing this tool call") {
 		return ToolResultClassError
 	}
 	return ToolResultClassSuccess

@@ -171,7 +171,7 @@ func (a *MainAgent) buildCompactionInputWithOptions(head []message.Message, cont
 		return nil, fmt.Errorf("build compaction transcript: %w", err)
 	}
 	if len(evidenceItems) == 0 {
-		evidenceItems = selectEvidenceItems(normalized, contextLimit)
+		evidenceItems = selectEvidenceItems(pruned, contextLimit)
 	}
 	return &compactionInput{
 		Transcript:       session.ExportToMarkdown(exported),
@@ -180,7 +180,14 @@ func (a *MainAgent) buildCompactionInputWithOptions(head []message.Message, cont
 		RecentTail:       recentTail,
 		RecentTailAnchor: formatRecentTailAnchor(recentTail),
 		SessionAnchors:   sessionAnchors,
-		GoalAnchor:       buildGoalAnchor(normalized),
+		// Evidence selection and the goal anchor classify what the user asked
+		// for, so they read the unmerged surface: normalized folds @-injected
+		// file bodies into Content, and a document's "must"/"do not" wording
+		// would then be read as an instruction the user gave. The decision and
+		// progress anchors read only assistant/tool messages, which carry no
+		// @-injected file parts, so both surfaces are identical for them. If
+		// either is ever extended to user messages, it must switch to pruned.
+		GoalAnchor:       buildGoalAnchor(pruned),
 		ConstraintAnchor: buildConstraintAnchor(evidenceItems),
 		DecisionAnchor:   buildDecisionAnchor(normalized),
 		ProgressAnchor:   buildProgressAnchor(normalized, evidenceItems),
@@ -258,13 +265,7 @@ func buildGoalAnchor(messages []message.Message) string {
 		if !message.IsUserAuthored(msg) {
 			continue
 		}
-		text := strings.TrimSpace(msg.Content)
-		if len(msg.Parts) > 0 {
-			normalized := normalizeMessagesForSummary([]message.Message{msg})
-			if len(normalized) > 0 {
-				text = strings.TrimSpace(normalized[0].Content)
-			}
-		}
+		text := message.UserPromptInstructionText(msg)
 		if !isPlainUserRequestForCompaction(text) {
 			continue
 		}
@@ -460,17 +461,29 @@ func validateCompactionTodoState(summary string) error {
 	return nil
 }
 
-func markdownSection(summary, heading string) (string, bool) {
+// markdownSectionBounds locates a summary section's body: start is the offset
+// just past the heading, end is where the next "## " heading begins or the end
+// of the summary. Readers and writers of a section share it so there is one
+// definition of where a section stops.
+func markdownSectionBounds(summary, heading string) (start, end int, ok bool) {
 	pos := findMarkdownHeadingLine(summary, heading)
 	if pos < 0 {
+		return 0, 0, false
+	}
+	start = pos + len(heading)
+	end = len(summary)
+	if loc := compactionMarkdownHeadingLineRe.FindStringIndex(summary[start:]); loc != nil {
+		end = start + loc[0]
+	}
+	return start, end, true
+}
+
+func markdownSection(summary, heading string) (string, bool) {
+	start, end, ok := markdownSectionBounds(summary, heading)
+	if !ok {
 		return "", false
 	}
-	start := pos + len(heading)
-	rest := summary[start:]
-	if loc := compactionMarkdownHeadingLineRe.FindStringIndex(rest); loc != nil {
-		rest = rest[:loc[0]]
-	}
-	return strings.TrimSpace(rest), true
+	return strings.TrimSpace(summary[start:end]), true
 }
 
 func todoSubsectionLines(section, label string) []string {
@@ -491,6 +504,10 @@ func todoSubsectionLines(section, label string) []string {
 			continue
 		}
 		if strings.HasPrefix(bullet, "Active/relevant to latest request:") || strings.HasPrefix(bullet, "Completed/background:") || strings.HasPrefix(bullet, "Stale/superseded:") {
+			inGroup = false
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
 			inGroup = false
 			continue
 		}
@@ -890,6 +907,40 @@ func formatTodosAsRelevanceBullets(todos []tools.TodoItem, anchor fallbackAnchor
 		lines = append(lines, fmt.Sprintf("  - [%s] %s: %s", todo.Status, todo.ID, todo.Content))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// ensureCompactionTodoSnapshot keeps the runtime-owned todo list available
+// even when the summarizer classifies it as background or omits it. The model
+// still supplies the relevance classification above this snapshot, but the
+// complete pre-compaction state must not depend on model wording.
+func ensureCompactionTodoSnapshot(summary string, todos []tools.TodoItem) string {
+	if strings.TrimSpace(summary) == "" || len(todos) == 0 {
+		return summary
+	}
+	sectionStart, sectionEnd, ok := markdownSectionBounds(summary, "## Todo State")
+	if !ok || strings.Contains(summary[sectionStart:sectionEnd], "### Runtime TODO snapshot") {
+		return summary
+	}
+	var snapshot strings.Builder
+	snapshot.WriteString("### Runtime TODO snapshot\n")
+	snapshot.WriteString("- Complete pre-compaction runtime state; classify against the latest user request before acting:\n")
+	for _, todo := range todos {
+		content := strings.ReplaceAll(strings.TrimSpace(todo.Content), "\r", "")
+		content = strings.ReplaceAll(content, "\n", "\n    > ")
+		fmt.Fprintf(&snapshot, "  - [%s] %s: %s", todo.Status, todo.ID, content)
+		if activeForm := strings.TrimSpace(todo.ActiveForm); activeForm != "" {
+			activeForm = strings.ReplaceAll(strings.ReplaceAll(activeForm, "\r", ""), "\n", "\n    > ")
+			fmt.Fprintf(&snapshot, " | active: %s", activeForm)
+		}
+		snapshot.WriteByte('\n')
+	}
+	snapshotText := strings.TrimRight(snapshot.String(), "\n")
+	tail := strings.TrimLeft(summary[sectionEnd:], "\n")
+	out := strings.TrimRight(summary[:sectionEnd], "\n") + "\n" + snapshotText
+	if tail == "" {
+		return out
+	}
+	return out + "\n\n" + tail
 }
 
 func subAgentStateNeedsPromptContext(state string) bool {

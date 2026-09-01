@@ -285,6 +285,9 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	} else {
 		modelRef = usedModel
 	}
+	// The model may classify todos by relevance, but it must not be able to
+	// erase the runtime's complete todo state from the durable checkpoint.
+	summaryText = ensureCompactionTodoSnapshot(summaryText, todos)
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()

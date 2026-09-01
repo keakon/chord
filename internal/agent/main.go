@@ -1648,13 +1648,7 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 	if strings.TrimSpace(msg.Content) == "" && len(msg.Parts) == 0 && strings.TrimSpace(msg.ToolDiff) == "" {
 		return
 	}
-	text := strings.TrimSpace(msg.Content)
-	if len(msg.Parts) > 0 {
-		normalized := normalizeMessagesForSummary([]message.Message{msg})
-		if len(normalized) > 0 {
-			text = strings.TrimSpace(normalized[0].Content)
-		}
-	}
+	text := message.UserPromptInstructionText(msg)
 	switch msg.Role {
 	case message.RoleUser:
 		switch {

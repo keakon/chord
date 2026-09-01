@@ -52,11 +52,23 @@ func isToolResultSuccessStatus(status string) bool {
 }
 
 // isToolResultErrorMessage also sniffs the rendered content because imported
-// and legacy transcripts can carry a failure without a terminal status.
+// and legacy transcripts can carry a failure without a terminal status. An
+// explicit terminal status takes precedence: successful output may legitimately
+// contain the text "Error:" in source code, test data, or command output.
 func isToolResultErrorMessage(msg message.Message) bool {
-	return isToolResultErrorStatus(msg.ToolStatus) || strings.Contains(msg.Content, "Error:")
+	switch strings.ToLower(strings.TrimSpace(msg.ToolStatus)) {
+	case string(ToolResultStatusError):
+		return true
+	case string(ToolResultStatusSuccess), string(ToolResultStatusCancelled):
+		return false
+	default:
+		return isToolErrorContent(msg.Content)
+	}
 }
 
+// isToolErrorContent reports a failure recorded in the rendered content itself.
+// It delegates to the central classifier so the phrase list and the appended
+// separator have exactly one definition.
 func isToolErrorContent(content string) bool {
-	return strings.HasPrefix(strings.TrimSpace(content), "Error:")
+	return message.ClassifyToolResultContent(content) == message.ToolResultClassError
 }
