@@ -693,9 +693,77 @@ Additional notes:
   That gives pro a `max` default thinking effort while flash keeps `high`,
   and reuses everything else (limit, compat, variants).
 
-- Flash pricing is roughly 1/3 of pro (input $0.14 / output $0.28 per 1M
-  tokens), suitable for high-volume / low-cost scenarios. See
+- Flash pricing is roughly 1/3 of pro (off-peak, no cache hit: input $0.22 /
+  output $0.66 per 1M tokens; peak nearly doubles those, and cache-hit input
+  starts at $0.007), suitable for high-volume / low-cost scenarios. See
   [DeepSeek official pricing](https://api-docs.deepseek.com/quick_start/pricing/).
+
+### DeepSeek V4 Flash Vision (experimental)
+
+`deepseek-v4-flash-vision-exp` is the vision variant of Flash: identical text
+capabilities and thinking behavior, plus image input (JPEG / PNG / GIF / WebP,
+inline, URL, or the Files API). It is the only V4 model that accepts images —
+Flash and Pro reject them with a `400` ("This model does not support image"). The
+model is officially labeled experimental and priced identically to Flash: images
+count as input tokens, capped at 384 tokens per image (see the pricing table and
+[the official Vision guide](https://api-docs.deepseek.com/guides/vision/)). Images
+are accepted on all three wire families (Chat Completions `image_url`, Responses
+`input_image`, and the Anthropic-compatible endpoint), so each family reuses its
+shared V4 template, adding only `modalities`:
+
+```yaml
+model_templates:
+  deepseek-v4-vision-chat: &deepseek-v4-vision-chat
+    <<: *deepseek-v4-chat
+    modalities:
+      input: [text, image]
+
+  deepseek-v4-vision-messages: &deepseek-v4-vision-messages
+    <<: *deepseek-v4-messages
+    modalities:
+      input: [text, image]
+
+  deepseek-v4-vision-responses: &deepseek-v4-vision-responses
+    <<: *deepseek-v4-responses
+    modalities:
+      input: [text, image]
+
+providers:
+  deepseek:
+    type: chat-completions
+    api_url: https://api.deepseek.com/v1/chat/completions
+    models:
+      deepseek-v4-pro: *deepseek-v4-chat
+      deepseek-v4-flash: *deepseek-v4-chat
+      deepseek-v4-flash-vision-exp: *deepseek-v4-vision-chat
+
+  deepseek-messages:
+    type: messages
+    api_url: https://api.deepseek.com/anthropic/v1/messages
+    models:
+      deepseek-v4-pro: *deepseek-v4-messages
+      deepseek-v4-flash: *deepseek-v4-messages
+      deepseek-v4-flash-vision-exp: *deepseek-v4-vision-messages
+
+  deepseek-responses:
+    type: responses
+    api_url: https://api.deepseek.com/v1/responses
+    models:
+      deepseek-v4-pro: *deepseek-v4-responses
+      deepseek-v4-flash: *deepseek-v4-responses
+      deepseek-v4-flash-vision-exp: *deepseek-v4-vision-responses
+```
+
+The per-request `detail` field on `image_url` (or `input_image`) accepts `low`,
+`high`, `original`, or `auto` — `high` and `original` are equivalent — and tunes
+how images are processed, which changes the token cost. Chord currently sends
+`auto` for every image and does not expose per-request `detail` configuration;
+images are delivered as inline base64, so external URLs and Files API `file_id`
+inputs are not supported from within Chord. The
+[`view_image`](./tools.md) tool can load local images into context, but only
+when this model heads the active pool on the `messages` or `responses` provider:
+the `chat-completions` (`deepseek`) provider accepts images in user messages yet
+cannot carry them back in tool results.
 
 ## Qwen preserved thinking
 

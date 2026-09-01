@@ -680,8 +680,71 @@ model_pools:
   这样 pro 的默认思考强度为 `max`，flash 保持 `high`，其余字段（limit、
   compat、variants）全部复用。
 
-- flash 定价约为 pro 的 1/3（输入 $0.14 / 输出 $0.28 每百万 token），
+- flash 定价约为 pro 的 1/3（off-peak、无缓存命中时：输入 $0.22 /
+  输出 $0.66 每百万 token；peak 价约翻倍，缓存命中时输入低至 $0.007），
   适合高频 / 低成本场景。见 [DeepSeek 官方定价](https://api-docs.deepseek.com/quick_start/pricing/)。
+
+### DeepSeek V4 Flash Vision（实验版）
+
+`deepseek-v4-flash-vision-exp` 是 Flash 的视觉变体：文本能力与思考行为
+和 Flash 一致，额外支持图像输入（JPEG / PNG / GIF / WebP；内嵌、URL
+或 Files API 均可）。全站只有这个模型收图—— flash 和 pro 传图会返回
+`400`（"This model does not support image"）。官方标注为 experimental，价格
+与 flash 相同：图片按输入 token 计费，单张最多计 384 token（详见定价页与
+[官方 Vision 指南](https://api-docs.deepseek.com/guides/vision/)）。Chat Completions、
+Responses 和 Anthropic 兼容接口都支持图像输入，三条 wire
+family 各自继承对应的 V4 模板，只加 `modalities`：
+
+```yaml
+model_templates:
+  deepseek-v4-vision-chat: &deepseek-v4-vision-chat
+    <<: *deepseek-v4-chat
+    modalities:
+      input: [text, image]
+
+  deepseek-v4-vision-messages: &deepseek-v4-vision-messages
+    <<: *deepseek-v4-messages
+    modalities:
+      input: [text, image]
+
+  deepseek-v4-vision-responses: &deepseek-v4-vision-responses
+    <<: *deepseek-v4-responses
+    modalities:
+      input: [text, image]
+
+providers:
+  deepseek:
+    type: chat-completions
+    api_url: https://api.deepseek.com/v1/chat/completions
+    models:
+      deepseek-v4-pro: *deepseek-v4-chat
+      deepseek-v4-flash: *deepseek-v4-chat
+      deepseek-v4-flash-vision-exp: *deepseek-v4-vision-chat
+
+  deepseek-messages:
+    type: messages
+    api_url: https://api.deepseek.com/anthropic/v1/messages
+    models:
+      deepseek-v4-pro: *deepseek-v4-messages
+      deepseek-v4-flash: *deepseek-v4-messages
+      deepseek-v4-flash-vision-exp: *deepseek-v4-vision-messages
+
+  deepseek-responses:
+    type: responses
+    api_url: https://api.deepseek.com/v1/responses
+    models:
+      deepseek-v4-pro: *deepseek-v4-responses
+      deepseek-v4-flash: *deepseek-v4-responses
+      deepseek-v4-flash-vision-exp: *deepseek-v4-vision-responses
+```
+
+给 `image_url`（Chat）或 `input_image`（Responses）设 `detail`
+（`low` / `high` / `original` / `auto`，`high` 与 `original` 等价）可以按请求控制
+图像处理方式与 token 消耗。Chord 目前对每张图片都发送 `auto`，暂不暴露按请求
+调整 `detail` 的能力；图片以 inline base64 传入，不支持外部 URL 或 Files API
+`file_id`。[`view_image`](./tools_CN.md) 工具能把本地图片加载进上下文，但只有
+把这个模型放在 `messages` 或 `responses` provider 的池首才行：
+`chat-completions`（`deepseek`）provider 能在用户消息里收图，却无法在 tool result 里返回图片。
 
 ## Qwen 保留历史思考
 
