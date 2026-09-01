@@ -80,7 +80,7 @@ func TestCompactionFailureAnalyticsEventRecordedInTrackerAndLedger(t *testing.T)
 	a.llmMu.Lock()
 	a.runningModelRef = "sample/gpt-5.5"
 	a.llmMu.Unlock()
-	a.compactionState.trigger = compactionTrigger{UsageDriven: true}
+	a.compactionState.trigger = compactionTriggerUsageDriven
 
 	var events []analytics.UsageEvent
 	a.SetUsageEventSink(func(event analytics.UsageEvent) {
@@ -170,7 +170,7 @@ func TestOversizeRecoveryAnalyticsEventRecordedInTrackerAndLedger(t *testing.T) 
 func TestCompactionFailureAnalyticsEventMarksLengthRecoveryTrigger(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.compactionState.trigger = compactionTrigger{LengthRecovery: true}
+	a.compactionState.trigger = compactionTriggerLengthRecovery
 
 	var events []analytics.UsageEvent
 	a.SetUsageEventSink(func(event analytics.UsageEvent) {
@@ -184,7 +184,7 @@ func TestCompactionFailureAnalyticsEventMarksLengthRecoveryTrigger(t *testing.T)
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want 1", len(events))
 	}
-	if got := events[0].Diagnostic["trigger"]; got != "length_recovery_driven" {
-		t.Fatalf("diagnostic trigger = %q, want length_recovery_driven", got)
+	if got := events[0].Diagnostic["trigger"]; got != "length_recovery" {
+		t.Fatalf("diagnostic trigger = %q, want length_recovery", got)
 	}
 }

@@ -30,3 +30,15 @@ func estimateBytesForTokens(mgr *ctxmgr.Manager, tokens int) int {
 	}
 	return mgr.EstimateBytesForTokensCalibrated(tokens)
 }
+
+// EstimateTokensForText exposes the usage-calibrated estimator for plain text
+// (compact_context continuation-state budgeting). The text is wrapped in a
+// single user message so the byte accounting and calibration ratio match every
+// other message-based estimate; nil manager falls back to the plain bytes/3
+// heuristic.
+func (a *MainAgent) EstimateTokensForText(text string) int {
+	if a == nil {
+		return len(text) / 3
+	}
+	return estimateMessageTokens(a.ctxMgr, message.Message{Role: message.RoleUser, Content: text})
+}

@@ -146,7 +146,7 @@ func TestCallLLMOversizeRequestsEventLoopCompaction(t *testing.T) {
 			oversizeSuspended: true,
 		},
 	})
-	if !a.IsCompactionRunning() || !a.compactionState.trigger.OversizeDriven {
+	if !a.IsCompactionRunning() || a.compactionState.trigger != compactionTriggerOversize {
 		t.Fatalf("event loop did not start oversize compaction: %+v", a.compactionState)
 	}
 	if got := a.ctxMgr.GetUsableInputBudget(); got != 256000 {

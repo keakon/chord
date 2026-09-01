@@ -453,6 +453,7 @@ func (a *MainAgent) setIdleAndDrainPending() {
 		turnID = a.turn.ID
 	}
 	a.turn = nil
+	a.pendingModelDriven = nil
 	a.turnMu.Unlock()
 	a.rememberIdleTurn(turnID)
 	a.allowContextSurfaceRefreshAtUserBoundary()
@@ -566,6 +567,7 @@ func (a *MainAgent) setIdleForComposerEdit() {
 		turnID = a.turn.ID
 	}
 	a.turn = nil
+	a.pendingModelDriven = nil
 	a.turnMu.Unlock()
 	a.rememberIdleTurn(turnID)
 	a.allowContextSurfaceRefreshAtUserBoundary()

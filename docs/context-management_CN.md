@@ -51,6 +51,19 @@ context:
 | `reserved` | 整数 | `0` | 在 `threshold` 留出的比例余量之外，再为 tokenizer 误差、工具 schema 开销、压缩恢复安全等保留的固定 token 余量。通常建议省略（保持 `0`）；非零值会先从输入预算中扣除，再应用 `threshold`。 |
 | `preset` | 字符串 | 自动检测 | 强制指定压缩实现方式，一般无需设置。 |
 | `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
+| `model_driven` | 布尔 | `false` | 实验性开关：给主 agent 暴露 `compact_context` 工具，让模型在工作状态充分外化（写入文件或结构化参数）后主动请求 durable context checkpoint。checkpoint 不调用摘要模型，在工具批次收口后的 barrier 处原子应用并暂停下一次主模型请求，随后在同一 turn 的压缩上下文上继续。工具仅 MainAgent 可见、必须单独调用、`state_files` 只作路径引用不读取。低收益请求会被自动跳过。默认关闭。 |
+
+### 模型驱动上下文 checkpoint（实验性）
+
+设置 `context.compaction.model_driven: true` 后，主 agent 获得 `compact_context` 工具。模型在状态充分外化后单独调用它（同一响应里不能有其他工具调用）——后续需要的事实要么写在 `state_files` 指出的文件里，要么完整表达在 `active_objective` / `completed` / `decisions` / `open_issues` / `next_step` 结构化参数中。runtime 校验请求，等工具批次收口后：
+
+1. 快照对话并归档 head（不调用摘要模型，checkpoint 由确定性构造）；
+2. 当预计收益低于保守门槛（2048 tokens 且占 prepared surface 的 10%）时拒绝 reset；
+3. 原子应用 checkpoint，快照后追加的内容作为 live tail 保留，并在压缩后的上下文上继续同一 turn。
+
+`state_files` 只是路径引用：Chord 从不读取或注入这些文件，因此该工具无法绕过 Read 权限。checkpoint 的 `Current User Request` 永远来自你的真实消息，不会采用模型参数。工具 success 只表示请求被接受；之后出现的 model-driven `[Context Summary]` checkpoint 才表示 reset 已应用。请求被跳过或失败时会继续使用旧上下文，usage-driven 自动压缩兜底保持生效。
+
+可观测性：TUI 状态栏会把模型请求的 checkpoint 与 usage-driven 压缩区分开显示（「model checkpoint」），并在跳过/失败时短暂展示原因；`/stats` 新增「Context Compaction」分区，按 stage 和 trigger 统计生命周期事件（如 `applied/model_driven`、`skipped/model_driven`），方便观察模型请求重置的频率与实际应用情况。
 
 ### 触发阈值如何计算
 

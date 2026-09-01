@@ -393,7 +393,7 @@ func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliedWhenCompactionAlreadyR
 		},
 	}, []string{"test-key"})
 	a.llmClient = llm.NewClient(providerCfg, provider, "test-model", 4096, "sys")
-	a.startCompactionState(1, compactionTarget{turnID: a.turn.ID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeAutoContinue, turnID: a.turn.ID, turnEpoch: a.turn.Epoch})
+	a.startCompactionState(1, compactionTarget{turnID: a.turn.ID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue, turnID: a.turn.ID, turnEpoch: a.turn.Epoch})
 
 	a.beginMainLLMAfterPreparation(a.turn.Ctx, a.turn.ID, "")
 	deadline := time.After(2 * time.Second)
@@ -678,11 +678,8 @@ func TestScheduleCompactionForLengthRecoveryUsesLengthRecoveryTrigger(t *testing
 	if !a.IsCompactionRunning() {
 		t.Fatal("expected compaction to be running")
 	}
-	if a.compactionState.trigger.LengthRecovery != true {
-		t.Fatal("expected LengthRecovery trigger to be true")
-	}
-	if a.compactionState.trigger.UsageDriven != false {
-		t.Fatal("expected UsageDriven trigger to be false for length recovery compaction")
+	if a.compactionState.trigger != compactionTriggerLengthRecovery {
+		t.Fatal("expected LengthRecovery trigger for length recovery compaction")
 	}
 }
 
@@ -714,7 +711,7 @@ func TestRecoveryCompactionFailureDoesNotAdvanceUsageBreaker(t *testing.T) {
 
 	// Simulate starting a compaction with LengthRecovery trigger.
 	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch, turnID: turnID, turnEpoch: turnEpoch},
-		compactionTrigger{LengthRecovery: true}, continuationPlan{
+		compactionTriggerLengthRecovery, continuationPlan{
 			kind:      compactionResumeLengthRecovery,
 			turnID:    turnID,
 			turnEpoch: turnEpoch,

@@ -64,7 +64,7 @@ func TestCompactionStatusProgressEventUpdatesPill(t *testing.T) {
 	}
 }
 
-func TestCompactionSkippedStatusClearsBackgroundPill(t *testing.T) {
+func TestCompactionSkippedStatusShowsTerminalReason(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	m.compactionBgStatus = compactionBackgroundStatus{
 		Active:    true,
@@ -73,13 +73,44 @@ func TestCompactionSkippedStatusClearsBackgroundPill(t *testing.T) {
 		Events:    2,
 	}
 
-	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusSkipped}})
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{
+		Status:  agent.CompactionStatusSkipped,
+		Trigger: "model_driven",
+		Reason:  "projected savings 500 tokens is below the low-gain gate",
+	}})
 
-	if m.compactionBgStatus != (compactionBackgroundStatus{}) {
-		t.Fatalf("compaction status after skip = %+v, want zero state", m.compactionBgStatus)
+	if m.compactionBgStatus.Active {
+		t.Fatal("compaction status after skip = active, want terminal flush")
 	}
-	if got := m.renderCompactionBackgroundPill(time.Now()); got != "" {
-		t.Fatalf("compaction pill after skip = %q, want empty", stripANSI(got))
+	if m.compactionBgStatus.Terminal != agent.CompactionStatusSkipped {
+		t.Fatalf("compaction status after skip = %q, want skipped terminal", m.compactionBgStatus.Terminal)
+	}
+	if m.compactionBgStatus.Trigger != "model_driven" {
+		t.Fatalf("compaction trigger after skip = %q, want model_driven", m.compactionBgStatus.Trigger)
+	}
+	got := stripANSI(m.renderCompactionBackgroundPill(time.Now()))
+	if !strings.Contains(got, "skipped") && !strings.Contains(got, "low-gain") {
+		t.Fatalf("compaction pill after skip = %q, want terminal reason", got)
+	}
+	if m.compactionBgStatus.TerminalAt.IsZero() {
+		t.Fatal("compaction status after skip has no terminal timestamp")
+	}
+}
+
+func TestCompactionModelDrivenStartedShowsLabel(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	now := time.Now()
+
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusStarted, Trigger: "model_driven"}})
+	if !m.compactionBgStatus.Active {
+		t.Fatal("compaction pill not armed by started status")
+	}
+	if m.compactionBgStatus.Trigger != "model_driven" {
+		t.Fatalf("compaction trigger = %q, want model_driven", m.compactionBgStatus.Trigger)
+	}
+	got := stripANSI(m.renderCompactionBackgroundPill(now))
+	if !strings.Contains(got, "model checkpoint") {
+		t.Fatalf("compaction pill for model-driven = %q, want model checkpoint label", got)
 	}
 }
 

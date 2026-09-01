@@ -250,7 +250,7 @@ Opens an overlay to browse usage data along two axes:
 - **Scope**: `Session` (current session) or `Project` (aggregate project stats). Press `s` to toggle.
 - **View**: `Overview`, `Models` (per-model breakdown), `Agents` (per-agent breakdown). Project scope additionally supports `Dates` (per-day breakdown). Press `Tab` / `Shift+Tab` to switch views.
 
-Session Overview shows: LLM calls, input/output tokens, cache read/write tokens, reasoning tokens, and estimated cost. Models and Agents views display detailed per-dimension tables.
+Session Overview shows: LLM calls, input/output tokens, cache read/write tokens, reasoning tokens, estimated cost, and — once any context compaction has run — its lifecycle counts (for example `applied`, `skipped/model_driven`). Models and Agents views display detailed per-dimension tables.
 
 Project statistics are auto-aggregated from local sessions directories, with five time ranges: `today`, `7d`, `30d`, `90d`, `all`. Switching to Project may briefly show "loading" before data appears.
 

@@ -154,6 +154,56 @@ func (a *MainAgent) recordCompactionLifecycleEvent(stage string, diagnostic map[
 	a.recordContextDiagnosticEvent(compactionLifecycleAnalyticsPurpose, diagnostic)
 }
 
+// recordCompactionAppliedAnalyticsEvent records the "applied" lifecycle event
+// with trigger and plan/turn ids, plus — for model-driven checkpoints — the
+// low-gain preflight estimates, the post-apply evidence candidate count (how
+// much the archival baseline narrowed) and the message-count interval since
+// the previous compaction. The last two are the pilot metrics that decide
+// whether consecutive archival resets need a minimum spacing.
+func (a *MainAgent) recordCompactionAppliedAnalyticsEvent(d *compactionDraft, headSplit int, compactedMessages []message.Message) {
+	diagnostic := map[string]string{
+		"source_ref_count": strconv.Itoa(len(d.SourceRefs)),
+		"head_split":       strconv.Itoa(headSplit),
+		"message_count":    strconv.Itoa(len(compactedMessages)),
+		"plan_id":          strconv.FormatUint(d.PlanID, 10),
+		"turn_id":          strconv.FormatUint(d.Target.turnID, 10),
+	}
+	if a.compactionState.trigger != "" {
+		diagnostic["trigger"] = a.compactionState.trigger.analyticsName()
+	}
+	prev := a.lastCompactionMessageCount
+	a.lastCompactionMessageCount = len(compactedMessages)
+	if interval := len(compactedMessages) - prev; interval > 0 {
+		diagnostic["interval_messages"] = strconv.Itoa(interval)
+	}
+	if preflight := d.ModelDrivenPreflight; preflight != nil {
+		diagnostic["current_tokens"] = strconv.Itoa(preflight.CurrentTokens)
+		diagnostic["projected_tokens"] = strconv.Itoa(preflight.ProjectedTokens)
+		diagnostic["saved_tokens"] = strconv.Itoa(preflight.SavedTokens)
+		diagnostic["saved_ratio_pct"] = strconv.Itoa(preflight.SavedRatioPct)
+		diagnostic["current_bytes"] = strconv.Itoa(preflight.CurrentBytes)
+		diagnostic["projected_bytes"] = strconv.Itoa(preflight.ProjectedBytes)
+		diagnostic["checkpoint_bytes"] = strconv.Itoa(preflight.CheckpointBytes)
+		diagnostic["anchor_bytes"] = strconv.Itoa(preflight.AnchorBytes)
+		diagnostic["history_map_bytes"] = strconv.Itoa(preflight.HistoryMapBytes)
+		diagnostic["continuation_tokens"] = strconv.Itoa(preflight.ContinuationTokens)
+		diagnostic["post_apply_evidence_candidates"] = strconv.Itoa(a.evidence.len())
+	}
+	a.recordCompactionLifecycleEvent("applied", diagnostic)
+}
+
+// compactionStatusEvent builds a terminal CompactionStatusEvent from the
+// current compaction state's trigger so every terminal outcome carries the
+// trigger end-to-end; headless forwarding and the gateway rely on it. When the
+// state has already been cleared the trigger stays empty (pre-field events).
+func (a *MainAgent) compactionStatusEvent(status string, reason string) CompactionStatusEvent {
+	evt := CompactionStatusEvent{Status: status, Reason: reason}
+	if a.compactionState.trigger != "" {
+		evt.Trigger = a.compactionState.trigger.analyticsName()
+	}
+	return evt
+}
+
 func (a *MainAgent) recordCompactionFailureAnalyticsEvent(err error, class compactionFailureClass, stage string) {
 	if err == nil {
 		return

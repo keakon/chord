@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 const (
@@ -112,6 +113,10 @@ type compactionDraft struct {
 	ArchivedCount      int
 	EvidenceCount      int
 	EvidenceArtifacts  int
+	// ModelDrivenPreflight carries the low-gain preflight estimates produced
+	// by the model-driven worker so the event-loop settlement can record them
+	// in lifecycle analytics. Nil for generic drafts and early skips.
+	ModelDrivenPreflight *modelDrivenPreflightStats
 }
 
 const compactionSystemPrompt = `You summarize earlier coding-agent conversation history so another agent can continue work without losing important context.
@@ -380,6 +385,29 @@ func extractDoneRejectedReason(text string) (string, bool) {
 		if after, ok := strings.CutPrefix(trimmed, prefix); ok {
 			reason := strings.TrimSpace(after)
 			return reason, reason != ""
+		}
+	}
+	return "", false
+}
+
+// doneRejectedToolResult reports whether messages[i] is the result of a Done
+// tool call that carried a rejection. The message's ToolCallID must resolve to
+// a preceding Done tool call: text that merely starts with "Done rejected:" —
+// for example a shell echo — is not the user's rejection and must not become
+// the latest-request anchor of a checkpoint.
+func doneRejectedToolResult(messages []message.Message, i int) (string, bool) {
+	msg := messages[i]
+	if msg.ToolCallID == "" {
+		return "", false
+	}
+	for j := i - 1; j >= 0; j-- {
+		for _, tc := range messages[j].ToolCalls {
+			if tc.ID == msg.ToolCallID {
+				if tools.NormalizeName(tc.Name) != tools.NameDone {
+					return "", false
+				}
+				return extractDoneRejectedReason(msg.Content)
+			}
 		}
 	}
 	return "", false

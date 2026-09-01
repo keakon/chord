@@ -248,7 +248,7 @@ Agent 运行中也可以打开选择器查看 MCP 状态，不需要等待当前
 - **范围（Scope）**：`Session`（当前会话）或 `Project`（当前项目的聚合统计）。按 `s` 键切换。
 - **视图（View）**：`Overview`（总览）、`Models`（按模型细分）、`Agents`（按 agent 细分）。Project 额外支持 `Dates`（按日期细分）。按 `Tab` / `Shift+Tab` 切换视图。
 
-Session Overview 展示：LLM 调用次数、输入/输出 token、缓存读写 token、reasoning token、估算成本。Models 和 Agents 视图以表格展示各维度详细拆解。
+Session Overview 展示：LLM 调用次数、输入/输出 token、缓存读写 token、reasoning token、估算成本；发生过上下文压缩时，还会显示压缩生命周期计数（如 `applied`、`skipped/model_driven`）。Models 和 Agents 视图以表格展示各维度详细拆解。
 
 Project 统计自动从本地 sessions 目录聚合，支持 `today`、`7d`、`30d`、`90d`、`all` 五种时间范围。切换到 Project 时可能短暂显示"加载中"，稍后会展示统计数据。
 

@@ -54,7 +54,7 @@ Response:
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `handoff_request`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `handoff_request`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`.
 
 ### `status`
 
@@ -217,6 +217,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `info`                  | Informational message from the runtime                                                            | `agent_id`, `message`                                                                                        |
 | `toast`                 | Transient notification surfaced to the user in the TUI; safe to ignore in headless                | `agent_id`, `message`, `level` (`info` / `warn` / `error`)                                                   |
 | `todos`                 | Replacement todo list                                                                             | `todos[]` with `{id, content, status, active_form}`. Multiple `in_progress` items can be valid when each maps to a distinct active workstream and uses a unique `active_form`. |
+| `compaction_status`     | Compaction lifecycle events: `started` and terminal outcomes (`succeeded`, `skipped`, `failed`, `cancelled`) | `status`, `trigger` (`manual`, `usage_driven`, `length_recovery`, `oversize_driven`, `model_driven`), `reason`. Progress telemetry is not forwarded. |
 | `error`                 | Runtime error                                                                                     | `agent_id`, `message`, optional `code`                                                                         |
 
 If an input line on stdin exceeds the protocol line limit, Chord emits an `error` envelope with `code: "stdin_line_too_long"` and continues reading later lines. Integrations should use `code` for classification when present and keep `message` for human-readable diagnostics.

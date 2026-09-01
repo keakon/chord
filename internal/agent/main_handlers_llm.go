@@ -541,6 +541,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			a.rememberIdleTurn(a.turn.ID)
 			a.clearPendingThinkingReplay()
 			a.turn = nil
+			a.pendingModelDriven = nil
 			a.queueLoopEvent(Event{Type: EventLoopAssessment, Payload: assessment})
 			return
 		}

@@ -2,7 +2,10 @@ package agent
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
+
+	"github.com/keakon/chord/internal/message"
 )
 
 func TestBeginCompactionStateSeedsPendingAndFinishCancels(t *testing.T) {
@@ -11,7 +14,7 @@ func TestBeginCompactionStateSeedsPendingAndFinishCancels(t *testing.T) {
 	a.beginCompactionState(
 		42,
 		compactionTarget{turnID: 7, turnEpoch: 8, sessionEpoch: 9},
-		compactionTrigger{UsageDriven: true},
+		compactionTriggerUsageDriven,
 		continuationPlan{kind: compactionResumeMainLLM, turnID: 7, turnEpoch: 8, agentErrSourceID: "main"},
 		3,
 		cancel,
@@ -20,7 +23,7 @@ func TestBeginCompactionStateSeedsPendingAndFinishCancels(t *testing.T) {
 	if !a.IsCompactionRunning() {
 		t.Fatal("expected compaction to be running")
 	}
-	if a.compactionState.headSplit != 3 || !a.compactionState.trigger.UsageDriven {
+	if a.compactionState.headSplit != 3 || !a.compactionState.trigger.isUsageDriven() {
 		t.Fatalf("compaction state = %#v", a.compactionState)
 	}
 	pending := a.currentCompactionPendingCall()
@@ -51,7 +54,7 @@ func TestFinishCompactionStateDropsDiscardedPending(t *testing.T) {
 	a.beginCompactionState(
 		11,
 		compactionTarget{sessionEpoch: 1},
-		compactionTrigger{Manual: true},
+		compactionTriggerManual,
 		continuationPlan{kind: compactionResumeIdle},
 		0,
 		nil,
@@ -73,7 +76,7 @@ func TestCancelCompactionQueuesStateMutationOnEventLoop(t *testing.T) {
 	a.beginCompactionState(
 		12,
 		compactionTarget{sessionEpoch: a.sessionEpoch},
-		compactionTrigger{Manual: true},
+		compactionTriggerManual,
 		continuationPlan{kind: compactionResumeIdle},
 		0,
 		cancel,
@@ -96,5 +99,74 @@ func TestCancelCompactionQueuesStateMutationOnEventLoop(t *testing.T) {
 	a.dispatch(evt)
 	if ctx.Err() != context.Canceled {
 		t.Fatalf("event-loop cancel did not run: %v", ctx.Err())
+	}
+}
+
+// TestCancelCompactionOnLoopReadyDraftCarriesTrigger verifies that cancelling
+// a compaction with a parked ready draft emits the terminal cancelled event
+// with the compaction trigger, not an empty-trigger event.
+func TestCancelCompactionOnLoopReadyDraftCarriesTrigger(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.startCompactionState(
+		7,
+		compactionTarget{sessionEpoch: a.sessionEpoch},
+		compactionTriggerManual,
+		continuationPlan{kind: compactionResumeIdle},
+	)
+	a.compactionState.readyDraft = &compactionDraft{
+		PlanID:         7,
+		Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
+		AbsHistoryPath: filepath.Join(a.sessionDir, "history-7.md"),
+		NewMessages:    []message.Message{{Role: "user", Content: "[Context Summary]", IsCompactionSummary: true}},
+	}
+
+	if !a.cancelCompactionOnLoop() {
+		t.Fatal("cancelCompactionOnLoop() = false, want true")
+	}
+	evt := <-a.outputCh
+	status, ok := evt.(CompactionStatusEvent)
+	if !ok {
+		t.Fatalf("event type = %T, want CompactionStatusEvent", evt)
+	}
+	if status.Status != CompactionStatusCancelled {
+		t.Fatalf("status = %q, want %q", status.Status, CompactionStatusCancelled)
+	}
+	if status.Trigger != "manual" {
+		t.Fatalf("trigger = %q, want manual", status.Trigger)
+	}
+}
+
+// TestApplyReadyDraftSessionSwitchCarriesTrigger verifies that discarding a
+// draft on session switch emits the terminal cancelled event with the
+// compaction trigger instead of an empty-trigger event.
+func TestApplyReadyDraftSessionSwitchCarriesTrigger(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.startCompactionState(
+		8,
+		compactionTarget{sessionEpoch: a.sessionEpoch},
+		compactionTriggerUsageDriven,
+		continuationPlan{kind: compactionResumeIdle},
+	)
+	a.compactionState.readyDraft = &compactionDraft{
+		PlanID:         8,
+		Target:         compactionTarget{sessionEpoch: a.sessionEpoch + 1},
+		AbsHistoryPath: filepath.Join(a.sessionDir, "history-8.md"),
+		NewMessages:    []message.Message{{Role: "user", Content: "[Context Summary]", IsCompactionSummary: true}},
+	}
+
+	applySucceeded, _ := a.applyReadyDraft()
+	if applySucceeded {
+		t.Fatal("applyReadyDraft() succeeded on session switch, want discard")
+	}
+	evt := <-a.outputCh
+	status, ok := evt.(CompactionStatusEvent)
+	if !ok {
+		t.Fatalf("event type = %T, want CompactionStatusEvent", evt)
+	}
+	if status.Status != CompactionStatusCancelled {
+		t.Fatalf("status = %q, want %q", status.Status, CompactionStatusCancelled)
+	}
+	if status.Trigger != "usage_driven" {
+		t.Fatalf("trigger = %q, want usage_driven", status.Trigger)
 	}
 }

@@ -89,6 +89,35 @@ func TestTokenUsageFromSessionStatsIncludesCacheReads(t *testing.T) {
 	}
 }
 
+func TestFilterRestoredTodosKeepsFallbackLayoutTodos(t *testing.T) {
+	// The fallback/model-driven Todo State layout never classifies todos: the
+	// stale bucket stays empty and the complete list lives in the runtime
+	// snapshot, so restore must keep the runtime todos instead of dropping
+	// them (a stale-looking bucket is what triggers the drop).
+	todos := []tools.TodoItem{{ID: "t1", Status: "in_progress", Content: "task"}}
+	msgs := []message.Message{{Role: "user", IsCompactionSummary: true, Content: `[Context Summary]
+## Current User Request
+- Latest user request: keep going
+
+## Todo State
+- Active/relevant to latest request:
+  - Latest user request: keep going
+- Completed/background:
+  - (none classified by fallback)
+- Stale/superseded:
+  - (none classified by fallback)
+### Runtime TODO snapshot
+- Complete pre-compaction runtime state; classify against the latest user request before acting:
+  - [in_progress] t1: task
+
+## SubAgent State
+- none`}}
+
+	if got := filterRestoredTodosByLatestCompactionSummary(msgs, todos); len(got) != 1 || got[0].ID != "t1" {
+		t.Fatalf("restored todos = %#v, want runtime todos kept under the fallback layout", got)
+	}
+}
+
 func TestFilterRestoredTodosKeepsTodosAfterCompaction(t *testing.T) {
 	todos := []tools.TodoItem{{ID: "new", Status: "pending", Content: "new task"}}
 	todoArgs := mustJSONRaw(t, map[string]any{"todos": todos})

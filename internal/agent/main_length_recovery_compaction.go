@@ -18,7 +18,7 @@ func (a *MainAgent) scheduleCompactionForLengthRecovery() bool {
 	planID, target := a.nextCompactionPlan()
 	target.turnID = a.turn.ID
 	target.turnEpoch = a.turn.Epoch
-	a.startCompactionAsyncWithContinuation(snapshot, planID, target, compactionTrigger{LengthRecovery: true}, continuationPlan{
+	a.startCompactionAsyncWithContinuation(snapshot, planID, target, compactionTriggerLengthRecovery, continuationPlan{
 		kind:             compactionResumeLengthRecovery,
 		turnID:           a.turn.ID,
 		turnEpoch:        a.turn.Epoch,
@@ -45,7 +45,7 @@ func (a *MainAgent) ensureOversizeDrivenCompaction() bool {
 	planID, target := a.nextCompactionPlan()
 	target.turnID = a.turn.ID
 	target.turnEpoch = a.turn.Epoch
-	a.startCompactionAsyncWithContinuation(snapshot, planID, target, compactionTrigger{OversizeDriven: true}, continuationPlan{
+	a.startCompactionAsyncWithContinuation(snapshot, planID, target, compactionTriggerOversize, continuationPlan{
 		kind:             compactionResumeMainLLM,
 		turnID:           a.turn.ID,
 		turnEpoch:        a.turn.Epoch,

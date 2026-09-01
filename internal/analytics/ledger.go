@@ -297,8 +297,18 @@ func (l *UsageLedger) scanSessionEvidence() (*sessionScanResult, error) {
 			return
 		}
 		// Diagnostic events advance the count cursor and model refs but are
-		// not LLM calls; keep them out of the aggregated stats.
+		// not LLM calls; keep them out of the aggregated stats. The one
+		// exception is the compaction-lifecycle purpose, which folds into the
+		// dedicated bucket so restore surfaces the same compaction frequency
+		// the runtime tracker accumulates (mirrors UsageTracker.AddUsageEvent).
 		if IsDiagnosticUsagePurpose(evt.Purpose) {
+			if evt.Purpose == UsagePurposeCompactionLifecycle {
+				key := compactionLifecycleKey(evt)
+				if res.stats.CompactionLifecycle == nil {
+					res.stats.CompactionLifecycle = make(map[string]int64)
+				}
+				res.stats.CompactionLifecycle[key]++
+			}
 			return
 		}
 		stats := &res.stats

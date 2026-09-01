@@ -432,7 +432,10 @@ func (a *MainAgent) runToolBatchHooks(ctx context.Context, turn *Turn) ([]hook.A
 }
 
 func (a *MainAgent) appendHookFeedback(content string) {
-	msg := message.Message{Role: "user", Content: content}
+	// Kind marks the feedback as synthetic: it is user-role (the model must
+	// see it) but never user-authored, so it cannot hijack the latest-request
+	// anchor of a context checkpoint or a terminal title.
+	msg := message.Message{Role: "user", Content: content, Kind: message.KindHookFeedback}
 	a.ctxMgr.Append(msg)
 	if a.recovery != nil {
 		a.persistAsync(identity.MainAgentID, msg)
@@ -492,7 +495,8 @@ func (s *SubAgent) runToolBatchHooks(ctx context.Context, turn *Turn) ([]hook.Au
 }
 
 func (s *SubAgent) appendHookFeedback(content string) {
-	msg := message.Message{Role: "user", Content: content}
+	// Kind marks the feedback as synthetic (see MainAgent.appendHookFeedback).
+	msg := message.Message{Role: "user", Content: content, Kind: message.KindHookFeedback}
 	s.ctxMgr.Append(msg)
 	s.persistMessageAsync(msg, "hook feedback", nil)
 }

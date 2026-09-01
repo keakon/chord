@@ -4095,6 +4095,7 @@ type sessionControlAgent struct {
 	runningVariantByFocus   map[string]string
 	tokenUsage              message.TokenUsage
 	sidebarUsage            analytics.SessionStats
+	usageStats              analytics.SessionStats
 	walltimeStats           analytics.WalltimeStats
 	contextCurrent          int
 	contextLimit            int
@@ -4303,7 +4304,7 @@ func (s *sessionControlAgent) StartupResumeStatus() (bool, string) {
 func (s *sessionControlAgent) ContinueFromContext()                  { s.continueCalls++ }
 func (s *sessionControlAgent) RemoveLastMessage()                    {}
 func (s *sessionControlAgent) GetTokenUsage() message.TokenUsage     { return s.tokenUsage }
-func (s *sessionControlAgent) GetUsageStats() analytics.SessionStats { return analytics.SessionStats{} }
+func (s *sessionControlAgent) GetUsageStats() analytics.SessionStats { return s.usageStats }
 func (s *sessionControlAgent) GetSidebarUsageStats() analytics.SessionStats {
 	return s.sidebarUsage
 }

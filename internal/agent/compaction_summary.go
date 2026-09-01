@@ -750,8 +750,12 @@ type fallbackAnchor struct {
 }
 
 func fallbackContinuationAnchorForInput(input *compactionInput) fallbackAnchor {
-	if reason, ok := latestDoneRejectedReason(input); ok {
-		return fallbackAnchor{Kind: "done_rejected", Label: "Latest Done rejected reason", Text: reason}
+	// The latest Done-rejected reason and the latest ordinary user request are
+	// compared by evidence Sequence (higher = more recent): a user request that
+	// arrived after a Done rejection supersedes it, mirroring
+	// resolveLatestUserRequestAnchor's message-order semantics.
+	if anchor, ok := latestRequestOrDoneRejectedAnchor(input); ok {
+		return anchor
 	}
 	if input != nil {
 		if strings.TrimSpace(input.RecentTailAnchor) != "" && input.RecentTailAnchor != "- (none)" {
@@ -784,16 +788,119 @@ func usableFallbackAnchor(anchor string) bool {
 	return anchor != "" && anchor != "- (none)" && !strings.Contains(anchor, "not confidently recoverable")
 }
 
-func latestDoneRejectedReason(input *compactionInput) (string, bool) {
+// latestRequestOrDoneRejectedAnchor resolves the authoritative latest request
+// from evidence by Sequence: a plain user request and a Done-rejected reason
+// are both latest-request candidates, and whichever was recorded later wins
+// (mirroring resolveLatestUserRequestAnchor's message-order comparison). This
+// prevents an old rejection from shadowing a newer user request, and vice
+// versa. Evidence selection keeps at most one item of each kind, so the max
+// Sequence per kind is the newest of that kind.
+func latestRequestOrDoneRejectedAnchor(input *compactionInput) (fallbackAnchor, bool) {
 	if input == nil {
-		return "", false
+		return fallbackAnchor{}, false
 	}
+	doneSeq, doneText := -1, ""
+	userSeq, userText := -1, ""
 	for _, item := range input.EvidenceItems {
-		if item.Kind == evidenceDoneRejected && strings.TrimSpace(item.Excerpt) != "" {
-			return item.Excerpt, true
+		switch item.Kind {
+		case evidenceDoneRejected:
+			if text := strings.TrimSpace(item.Excerpt); text != "" && item.Sequence > doneSeq {
+				doneSeq, doneText = item.Sequence, text
+			}
+		case evidenceUserRequest:
+			if text := strings.TrimSpace(item.Excerpt); text != "" && item.Sequence > userSeq {
+				userSeq, userText = item.Sequence, text
+			}
 		}
 	}
-	return "", false
+	switch {
+	case doneText != "" && doneSeq >= userSeq:
+		return fallbackAnchor{Kind: "done_rejected", Label: "Latest Done rejected reason", Text: doneText}, true
+	case userText != "":
+		return fallbackAnchor{Kind: "user_request", Label: "Latest user request", Text: userText}, true
+	}
+	return fallbackAnchor{}, false
+}
+
+// resolveLatestUserRequestAnchor is the authoritative latest-request resolver
+// used by the deterministic model-driven checkpoint builder. It scans the
+// transcript in reverse message order, considering only messages after the
+// most recent compaction checkpoint (the raw tail): the latest ordinary
+// user-authored request and the latest Done-rejected reason are both
+// candidates, and whichever appears later in the transcript wins — a stale
+// rejection can never shadow a newer user request, and vice versa. When the
+// raw tail has no authoritative request, the `## Current User Request` section
+// of the most recent checkpoint is inherited, so consecutive archival resets
+// keep the current request alive. Returns an empty anchor when nothing
+// authoritative exists.
+func resolveLatestUserRequestAnchor(messages []message.Message) fallbackAnchor {
+	lastCheckpointIdx := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].IsCompactionSummary {
+			lastCheckpointIdx = i
+			break
+		}
+	}
+
+	userIdx, userText := -1, ""
+	doneIdx, doneText := -1, ""
+	for i := len(messages) - 1; i >= lastCheckpointIdx+1; i-- {
+		msg := messages[i]
+		if userIdx < 0 && isAuthoritativeUserRequest(msg) {
+			userIdx = i
+			userText = strings.TrimSpace(message.UserPromptInstructionText(msg))
+		}
+		if doneIdx < 0 && msg.Role == message.RoleTool {
+			if reason, ok := doneRejectedToolResult(messages, i); ok && strings.TrimSpace(reason) != "" {
+				doneIdx = i
+				doneText = strings.TrimSpace(reason)
+			}
+		}
+		if userIdx >= 0 && doneIdx >= 0 {
+			break
+		}
+	}
+	if userIdx >= 0 || doneIdx >= 0 {
+		if doneIdx > userIdx {
+			return fallbackAnchor{Kind: "done_rejected", Label: "Latest Done rejected reason", Text: doneText}
+		}
+		return fallbackAnchor{Kind: "user_request", Label: "Latest user request", Text: userText}
+	}
+	if lastCheckpointIdx >= 0 {
+		if section, ok := compactionCurrentUserRequestSection(messages[lastCheckpointIdx].Content); ok {
+			return fallbackAnchor{Kind: "inherited_checkpoint", Label: inheritedCheckpointLabel, Text: section}
+		}
+	}
+	return fallbackAnchor{}
+}
+
+// isAuthoritativeUserRequest reports whether a message is an ordinary
+// user-authored request (not a compaction summary, session reminder, system
+// overlay, or non-user mailbox message).
+func isAuthoritativeUserRequest(msg message.Message) bool {
+	if !message.IsUserAuthored(msg) {
+		return false
+	}
+	return isPlainUserRequestForCompaction(strings.TrimSpace(message.UserPromptInstructionText(msg)))
+}
+
+// compactionCurrentUserRequestSection extracts the body of the
+// `## Current User Request` section from a checkpoint message, skipping
+// "Unknown" placeholders.
+func compactionCurrentUserRequestSection(content string) (string, bool) {
+	const heading = "## Current User Request"
+	_, section, ok := strings.Cut(content, heading)
+	if !ok {
+		return "", false
+	}
+	if before, _, found := strings.Cut(section, "\n## "); found {
+		section = before
+	}
+	section = strings.TrimSpace(section)
+	if section == "" || strings.HasPrefix(section, "- Unknown:") {
+		return "", false
+	}
+	return section, true
 }
 
 func renderEvidenceKindForFallback(input *compactionInput, kind evidenceKind, empty string) string {
@@ -874,39 +981,52 @@ func fallbackNextStepSection(input *compactionInput) string {
 	return "- Before modifying files or continuing old work, recover or ask for the latest user request; do not act on completed/background or stale/superseded todos."
 }
 
+// formatTodosAsRelevanceBullets renders the Todo State section of a
+// fallback-generated checkpoint. Only a Done rejection demotes the runtime
+// todos into the stale bucket — the user refused the previous completion, so
+// the old targets are stale and restore drops them. Any other anchor (a plain
+// user request) or no anchor must not label runtime todos stale: the complete
+// list is carried by ensureCompactionTodoSnapshot as the `### Runtime TODO
+// snapshot` block, and restore only drops todos it sees in the stale bucket.
+// Line-escaping keeps a todo containing newlines or headings from escaping
+// its section or forging a top-level heading.
 func formatTodosAsRelevanceBullets(todos []tools.TodoItem, anchor fallbackAnchor) string {
-	lines := []string{
-		"- Active/relevant to latest request:",
-		"  - (none reliably classified by fallback)",
-		"- Completed/background:",
-		"  - (none classified by fallback)",
-		"- Stale/superseded:",
-		"  - (none classified by fallback)",
-	}
 	if strings.TrimSpace(anchor.Text) != "" {
-		lines = []string{
+		lines := []string{
 			"- Active/relevant to latest request:",
 			"  - " + anchor.Label + ": " + strings.ReplaceAll(anchor.Text, "\n", " "),
 			"- Completed/background:",
 			"  - (none classified by fallback)",
 			"- Stale/superseded:",
 		}
-		if len(todos) == 0 {
-			lines = append(lines, "  - (none)")
-			return strings.Join(lines, "\n")
-		}
-		for _, todo := range todos {
-			lines = append(lines, fmt.Sprintf("  - [%s] %s: %s", todo.Status, todo.ID, todo.Content))
+		if anchor.Kind == "done_rejected" {
+			if len(todos) == 0 {
+				lines = append(lines, "  - (none)")
+			}
+			for _, todo := range todos {
+				lines = append(lines, "  - ["+todo.Status+"] "+escapeTodoContentLine(todo.ID)+": "+escapeTodoContentLine(todo.Content))
+			}
+		} else {
+			lines = append(lines, "  - (none classified by fallback)")
 		}
 		return strings.Join(lines, "\n")
 	}
-	if len(todos) == 0 {
-		return strings.Join(lines, "\n")
-	}
-	for _, todo := range todos {
-		lines = append(lines, fmt.Sprintf("  - [%s] %s: %s", todo.Status, todo.ID, todo.Content))
-	}
-	return strings.Join(lines, "\n")
+	return strings.Join([]string{
+		"- Active/relevant to latest request:",
+		"  - (none reliably classified by fallback)",
+		"- Completed/background:",
+		"  - (none classified by fallback)",
+		"- Stale/superseded:",
+		"  - (none classified by fallback)",
+	}, "\n")
+}
+
+// escapeTodoContentLine flattens a model-supplied todo field onto one line:
+// newlines become the "    > " continuation used by the runtime snapshot, so
+// content can never reach column zero and cannot forge a heading like "## ".
+func escapeTodoContentLine(s string) string {
+	s = strings.ReplaceAll(strings.TrimSpace(s), "\r", "")
+	return strings.ReplaceAll(s, "\n", "\n    > ")
 }
 
 // ensureCompactionTodoSnapshot keeps the runtime-owned todo list available
@@ -925,12 +1045,10 @@ func ensureCompactionTodoSnapshot(summary string, todos []tools.TodoItem) string
 	snapshot.WriteString("### Runtime TODO snapshot\n")
 	snapshot.WriteString("- Complete pre-compaction runtime state; classify against the latest user request before acting:\n")
 	for _, todo := range todos {
-		content := strings.ReplaceAll(strings.TrimSpace(todo.Content), "\r", "")
-		content = strings.ReplaceAll(content, "\n", "\n    > ")
+		content := escapeTodoContentLine(todo.Content)
 		fmt.Fprintf(&snapshot, "  - [%s] %s: %s", todo.Status, todo.ID, content)
 		if activeForm := strings.TrimSpace(todo.ActiveForm); activeForm != "" {
-			activeForm = strings.ReplaceAll(strings.ReplaceAll(activeForm, "\r", ""), "\n", "\n    > ")
-			fmt.Fprintf(&snapshot, " | active: %s", activeForm)
+			fmt.Fprintf(&snapshot, " | active: %s", escapeTodoContentLine(activeForm))
 		}
 		snapshot.WriteByte('\n')
 	}

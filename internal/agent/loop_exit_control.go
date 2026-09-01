@@ -194,6 +194,38 @@ func (a *MainAgent) awaitDoneConfirmation(ctx context.Context, reason, argsJSON,
 	return a.AwaitConfirm(ctx, tools.NameDone, string(encoded), 0, nil, nil, report)
 }
 
+func (a *MainAgent) appendDeferredModelDrivenToolResult(payload *ToolResultPayload, contextResult string, parts []message.ContentPart, isError bool) {
+	if a == nil || a.turn == nil || payload == nil {
+		return
+	}
+	status := toolResultStatusFromError(isError)
+	toolMsg := message.Message{
+		Role:              message.RoleTool,
+		Content:           strings.TrimSpace(contextResult),
+		Parts:             parts,
+		ToolCallID:        payload.CallID,
+		ToolStatus:        string(status),
+		ToolDiff:          payload.Diff,
+		ToolDurationMs:    payload.Duration.Milliseconds(),
+		FileState:         payload.FileState.Clone(),
+		ToolRecoveryState: payload.RecoveryState,
+	}
+	a.ctxMgr.Append(toolMsg)
+	if a.recovery != nil {
+		a.persistAsync(identity.MainAgentID, toolMsg)
+	}
+	a.recordEvidenceFromMessage(toolMsg)
+	a.emitToTUI(ToolCallUpdateEvent{ID: payload.CallID, Name: payload.Name, ArgsJSON: payload.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
+	a.emitToTUI(ToolResultEvent{
+		CallID:   payload.CallID,
+		Name:     payload.Name,
+		ArgsJSON: payload.ArgsJSON,
+		Result:   payload.Result,
+		Status:   status,
+		Parts:    parts,
+	})
+}
+
 func (a *MainAgent) persistLoopDoneToolResult(callID, result string) {
 	if a == nil {
 		return

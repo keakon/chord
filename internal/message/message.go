@@ -196,6 +196,13 @@ const KindLoopNotice = "loop_notice"
 // restore it as a JOB RESULT card instead of treating it as user input.
 const KindBackgroundResult = "background_result"
 
+// KindHookFeedback identifies a synthetic user-role message appended by an
+// on_tool_batch_complete hook automation. It is persisted like a user message
+// (the model must see the feedback) but is not user-authored: it must never
+// become the latest-request anchor of a context checkpoint, a terminal title,
+// or any other "what did the user ask" surface, so IsUserAuthored excludes it.
+const KindHookFeedback = "hook_feedback"
+
 // KindReplayEvidence and KindReplayContinuation mark the pair of messages that
 // modelcompat synthesizes when a target cannot replay a native tool trajectory.
 // They exist only on the request face built for one provider call and are never
@@ -287,7 +294,7 @@ func IsUserAuthored(msg Message) bool {
 		return false
 	}
 	switch msg.Kind {
-	case KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult:
+	case KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback:
 		return false
 	default:
 		return true

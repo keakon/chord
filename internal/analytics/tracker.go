@@ -48,6 +48,11 @@ type SessionStats struct {
 	EstimatedCost    float64                `json:"estimated_cost"`
 	ByModel          map[string]*ModelStats `json:"by_model"`
 	ByAgent          map[string]*AgentStats `json:"by_agent,omitempty"`
+	// CompactionLifecycle counts context-compaction lifecycle diagnostic
+	// events keyed by "stage/trigger" (e.g. "applied/model_driven",
+	// "skipped/model_driven"). It powers the /stats compaction-frequency
+	// view without polluting the LLM-call accounting.
+	CompactionLifecycle map[string]int64 `json:"compaction_lifecycle,omitempty"`
 }
 
 // UsageTracker accumulates LLM call statistics for a session.
@@ -75,15 +80,16 @@ func (t *UsageTracker) RestoreStats(s SessionStats) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.stats = SessionStats{
-		InputTokens:      s.InputTokens,
-		OutputTokens:     s.OutputTokens,
-		CacheReadTokens:  s.CacheReadTokens,
-		CacheWriteTokens: s.CacheWriteTokens,
-		ReasoningTokens:  s.ReasoningTokens,
-		LLMCalls:         s.LLMCalls,
-		EstimatedCost:    s.EstimatedCost,
-		ByModel:          cloneModelStatsMap(s.ByModel),
-		ByAgent:          cloneAgentStatsMap(s.ByAgent),
+		InputTokens:         s.InputTokens,
+		OutputTokens:        s.OutputTokens,
+		CacheReadTokens:     s.CacheReadTokens,
+		CacheWriteTokens:    s.CacheWriteTokens,
+		ReasoningTokens:     s.ReasoningTokens,
+		LLMCalls:            s.LLMCalls,
+		EstimatedCost:       s.EstimatedCost,
+		ByModel:             cloneModelStatsMap(s.ByModel),
+		ByAgent:             cloneAgentStatsMap(s.ByAgent),
+		CompactionLifecycle: cloneStringInt64Map(s.CompactionLifecycle),
 	}
 }
 
@@ -168,8 +174,19 @@ func (t *UsageTracker) applyUsageSnapshotLocked(agentID, model string, cost *con
 // AddUsageEvent applies one persisted usage event to the in-memory tracker.
 func (t *UsageTracker) AddUsageEvent(event UsageEvent) {
 	// Diagnostic events are bookkeeping, not LLM calls; runtime stats skip
-	// them entirely so the TUI "Calls" count reflects real requests.
+	// them entirely so the TUI "Calls" count reflects real requests. The one
+	// exception is the compaction-lifecycle purpose, which accumulates in a
+	// dedicated bucket so /stats can report compaction frequency (e.g.
+	// "applied/model_driven") without touching the LLM-call accounting.
 	if IsDiagnosticUsagePurpose(event.Purpose) {
+		if event.Purpose == UsagePurposeCompactionLifecycle {
+			t.mu.Lock()
+			if t.stats.CompactionLifecycle == nil {
+				t.stats.CompactionLifecycle = make(map[string]int64)
+			}
+			t.stats.CompactionLifecycle[compactionLifecycleKey(event)]++
+			t.mu.Unlock()
+		}
 		return
 	}
 	t.mu.Lock()
@@ -234,6 +251,7 @@ func (t *UsageTracker) SessionStats() SessionStats {
 	snapshot := t.stats
 	snapshot.ByModel = cloneModelStatsMap(t.stats.ByModel)
 	snapshot.ByAgent = cloneAgentStatsMap(t.stats.ByAgent)
+	snapshot.CompactionLifecycle = cloneStringInt64Map(t.stats.CompactionLifecycle)
 	return snapshot
 }
 
@@ -288,6 +306,19 @@ func (t *UsageTracker) FormatStats() string {
 				sb.WriteString(fmt.Sprintf("    Reasoning:   %s\n", formatTokenCount(ms.ReasoningTokens)))
 			}
 			sb.WriteString(fmt.Sprintf("    Cost:        %s\n", formatUSD(ms.EstimatedCost)))
+		}
+	}
+
+	if len(stats.CompactionLifecycle) > 0 {
+		sb.WriteString("\nContext Compaction (lifecycle events)\n")
+		sb.WriteString("---------------------------------------\n")
+		keys := make([]string, 0, len(stats.CompactionLifecycle))
+		for key := range stats.CompactionLifecycle {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			sb.WriteString(fmt.Sprintf("  %-28s %d\n", key, stats.CompactionLifecycle[key]))
 		}
 	}
 
@@ -377,6 +408,37 @@ func cloneAgentStatsMap(in map[string]*AgentStats) map[string]*AgentStats {
 		out[k] = &cp
 	}
 	return out
+}
+
+// cloneStringInt64Map returns a fresh copy of a string→count map, keeping the
+// shared snapshot contract of SessionStats and RestoreStats: callers may
+// mutate the returned map without affecting the tracker's internal state.
+func cloneStringInt64Map(in map[string]int64) map[string]int64 {
+	if len(in) == 0 {
+		return make(map[string]int64)
+	}
+	out := make(map[string]int64, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// compactionLifecycleKey renders the diagnostic bucket key ("stage" or
+// "stage/trigger") for a compaction-lifecycle event. The in-memory tracker
+// (AddUsageEvent) and the ledger re-scan (UsageTrackerFromLedger) share it so
+// the two accumulation paths can never disagree about the key shape.
+func compactionLifecycleKey(event UsageEvent) string {
+	stage := strings.TrimSpace(event.Diagnostic["stage"])
+	trigger := strings.TrimSpace(event.Diagnostic["trigger"])
+	key := stage
+	if trigger != "" {
+		key = stage + "/" + trigger
+	}
+	if key == "" {
+		key = "unknown"
+	}
+	return key
 }
 
 func normalizeAgentID(agentID string) string {

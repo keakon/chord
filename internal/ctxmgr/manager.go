@@ -497,6 +497,14 @@ func messageContextBytes(messages []message.Message) int {
 	return total
 }
 
+// EstimateMessagesBytes returns the total byte size of a message slice using the
+// same accounting as the calibrated token estimator's denominator (payload bytes
+// plus tool-call, thinking, responses and gemini fields). Exposed for telemetry
+// that records the raw request surface size alongside the token estimate.
+func EstimateMessagesBytes(messages []message.Message) int {
+	return messageContextBytes(messages)
+}
+
 // EstimateMessagesTokens returns the approximate input-token count for a slice
 // of messages, including multipart text and attachment payloads.
 func EstimateMessagesTokens(messages []message.Message) int {

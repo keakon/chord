@@ -456,7 +456,29 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		a.pendingLoopExitResults = append(a.pendingLoopExitResults, &loopExitResult{CallID: payload.CallID, Reason: strings.TrimSpace(contextResult), AssistantContent: assistantContent, TurnID: a.turn.ID, ArgsJSON: payload.ArgsJSON})
 	}
 
-	deferToolResultEmission := payload.Error == nil && (payload.Name == tools.NameDone || payload.Name == tools.NameHandoff)
+	// Model-driven checkpoint: validate and arm the pending request BEFORE the
+	// tool message is appended. A validation failure becomes an ordinary error
+	// result and never arms a barrier; success writes the canonical "accepted"
+	// text so a crash between acceptance and apply cannot read as a reset.
+	modelDrivenAccepted := false
+	if payload.Name == tools.NameCompactContext && payload.Error == nil {
+		if result, err := a.tryArmModelDrivenCheckpoint(payload.CallID, payload.ArgsJSON); err != nil {
+			log.Warnf("compact_context rejected call_id=%v error=%v", payload.CallID, err)
+			rawResult = fmt.Sprintf("Context checkpoint rejected: %v", err)
+			displayResult, contextResult, errorText, isError = composeToolResultTexts(rawResult, fmt.Errorf("%v", err))
+			contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
+		} else {
+			rawResult = result
+			displayResult, contextResult, errorText, isError = composeToolResultTexts(rawResult, nil)
+			contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
+			modelDrivenAccepted = true
+		}
+	}
+
+	// A rejected compact_context result is still a real tool result the model
+	// must see; only an accepted (or errored-at-execution) call defers emission
+	// to the batch-end barrier.
+	deferToolResultEmission := payload.Error == nil && (payload.Name == tools.NameDone || payload.Name == tools.NameHandoff || (payload.Name == tools.NameCompactContext && modelDrivenAccepted))
 	parts := a.toolResultParts(contextResult, payload.Images)
 	if !deferToolResultEmission {
 		a.emitToTUI(ToolResultEvent{
@@ -585,6 +607,20 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		}
 		a.turn.CompletedToolCalls = nil
 		a.turn.ChangedFiles = nil
+		if a.pendingModelDriven != nil {
+			// Tool-batch barrier for a model-driven checkpoint: append the
+			// accepted tool result so it is part of the archived head, emit the
+			// terminal TUI event, then hand control to the compaction worker.
+			// The worker snapshot is taken after this append, so the declaring
+			// tool message and its result are always archived together.
+			if modelDrivenAccepted {
+				a.appendDeferredModelDrivenToolResult(payload, contextResult, parts, isError)
+			}
+			if a.maybeStartModelDrivenBarrier() {
+				return
+			}
+			log.Warn("model-driven checkpoint barrier did not start; continuing without reset")
+		}
 		if a.pendingHandoff != nil {
 			pc := a.pendingHandoff
 			a.lastPlanPath = pc.PlanPath

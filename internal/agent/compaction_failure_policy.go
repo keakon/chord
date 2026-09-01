@@ -45,28 +45,35 @@ const (
 	compactionFailureUnknown    compactionFailureClass = "unknown"
 )
 
-type compactionTrigger struct {
-	Manual         bool
-	UsageDriven    bool
-	LengthRecovery bool
-	OversizeDriven bool
-}
+// compactionTrigger is a single-value trigger kind for compaction scheduling.
+// A single string type (rather than parallel bools) keeps the legal state
+// space closed: exactly one trigger per compaction run, and the zero value
+// means "no trigger" only in a freshly reset compactionState.
+type compactionTrigger string
+
+const (
+	compactionTriggerManual         compactionTrigger = "manual"
+	compactionTriggerUsageDriven    compactionTrigger = "usage_driven"
+	compactionTriggerLengthRecovery compactionTrigger = "length_recovery"
+	compactionTriggerOversize       compactionTrigger = "oversize_driven"
+	compactionTriggerModelDriven    compactionTrigger = "model_driven"
+)
 
 func (t compactionTrigger) needed() bool {
-	return t.Manual || t.UsageDriven || t.LengthRecovery || t.OversizeDriven
+	return t != ""
 }
 
 func (t compactionTrigger) analyticsName() string {
-	if t.OversizeDriven {
-		return "oversize_driven"
+	if t == "" {
+		return "manual"
 	}
-	if t.LengthRecovery {
-		return "length_recovery_driven"
-	}
-	if t.UsageDriven {
-		return "usage_driven"
-	}
-	return "manual"
+	return string(t)
+}
+
+// isUsageDriven reports whether this trigger records usage-driven failure
+// breaker state (auto-compaction suppression after repeated failures).
+func (t compactionTrigger) isUsageDriven() bool {
+	return t == compactionTriggerUsageDriven
 }
 
 func (a *MainAgent) resetAutoCompactionFailureState() {
@@ -112,11 +119,10 @@ func (a *MainAgent) recordUsageDrivenCompactionFailureClassified(err error, clas
 }
 
 func (a *MainAgent) compactionTriggerForMainLLM() compactionTrigger {
-	trigger := compactionTrigger{}
 	if a.autoCompactRequested.Load() && !a.isUsageDrivenAutoCompactSuppressed() {
-		trigger.UsageDriven = true
+		return compactionTriggerUsageDriven
 	}
-	return trigger
+	return ""
 }
 
 func (a *MainAgent) noteCompactionFailure(err error) compactionFailureClass {
@@ -124,7 +130,7 @@ func (a *MainAgent) noteCompactionFailure(err error) compactionFailureClass {
 		return compactionFailureUnknown
 	}
 	class := classifyCompactionFailure(err)
-	if a.compactionState.trigger.UsageDriven {
+	if a.compactionState.trigger.isUsageDriven() {
 		a.recordUsageDrivenCompactionFailureClassified(err, class)
 	}
 	return class

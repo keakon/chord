@@ -298,6 +298,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 				StartedAt: now,
 				Bytes:     evt.Bytes,
 				Events:    evt.Events,
+				Trigger:   evt.Trigger,
 			}
 		case agent.CompactionStatusProgress:
 			if m.compactionBgStatus.StartedAt.IsZero() {
@@ -306,8 +307,11 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			m.compactionBgStatus.Active = true
 			m.compactionBgStatus.Bytes = evt.Bytes
 			m.compactionBgStatus.Events = evt.Events
-		case agent.CompactionStatusSucceeded, agent.CompactionStatusFailed:
-			// Terminal flush state: show ✓/✗ for ~2s, then disappear
+		case agent.CompactionStatusSucceeded, agent.CompactionStatusFailed, agent.CompactionStatusSkipped:
+			// Terminal flush state: show the outcome for ~2s, then disappear.
+			// Skipped is a terminal outcome too — nothing was rewritten, but
+			// the model requested a checkpoint and the runtime declined, so the
+			// reason is surfaced instead of a silent no-op.
 			if m.compactionBgStatus.StartedAt.IsZero() {
 				m.compactionBgStatus.StartedAt = now
 			}
@@ -316,9 +320,8 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			m.compactionBgStatus.TerminalAt = now
 			m.compactionBgStatus.Bytes = evt.Bytes
 			m.compactionBgStatus.Events = evt.Events
-		case agent.CompactionStatusSkipped:
-			// Nothing was changed, so do not show a success flush state.
-			m.compactionBgStatus = compactionBackgroundStatus{}
+			m.compactionBgStatus.Trigger = evt.Trigger
+			m.compactionBgStatus.Reason = evt.Reason
 		case agent.CompactionStatusCancelled:
 			// Cancel disappears immediately, no terminal flush
 			m.compactionBgStatus = compactionBackgroundStatus{}

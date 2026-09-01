@@ -17,6 +17,7 @@
 
 ### 新功能
 
+- 模型驱动上下文重置（实验性，默认关闭）：设置 `context.compaction.model_driven: true` 后，主 agent 获得 `compact_context` 工具，可在工作状态充分外化后单独调用。runtime 在工具批次收口处构造确定性 checkpoint——不调用摘要模型——归档 head、原子应用，并在压缩后的上下文上继续同一 turn。预计收益不足（低于 2048 tokens 且占 prepared surface 的 10%）的请求会被跳过；`state_files` 只是路径引用、永不读取（不会绕过 Read 权限）；checkpoint 的当前用户请求永远来自真实消息。SubAgent 永远不会看到该工具；项目级 `false` 可覆盖全局 `true`。TUI 会把模型请求的 checkpoint 与 usage-driven 压缩区分显示并展示跳过/失败原因，`/stats` 按 stage 和 trigger 统计压缩生命周期事件（如 `applied/model_driven`、`skipped/model_driven`），headless 客户端可订阅 `compaction_status` 事件观察 started 与终态。
 - 新增 `chord doctor config` 命令，一次性校验全局与项目 `config.yaml` 并列出所有问题：YAML 语法错误、未知字段、类型不对的值，以及不合理的配置值（如非法的 `retry_backoff`、负数 diagnostics 阈值）。取值层面的问题只记日志、照常启动，这个命令把它们显式列出来；只要有问题就以状态码 2 退出，`--json` 输出机器可读报告，方便脚本和 CI 使用。
 - 通知现在会附带一声终端铃声（BEL）。终端聚焦时多数终端（Ghostty、iTerm2 等）会隐藏通知横幅、只静默进通知中心，铃声是此时可靠的提示音渠道；`desktop_notification_foreground: false` 可在聚焦时同时静音通知序列和铃声。是否出声取决于终端配置，文档列出了各终端的开启方式（如 Ghostty 的 `bell-features = system,audio`）。
 - Manual MCP 的启用状态现在按会话持久化：`/mcp enable|disable` 会保存期望启用的 server 集合，resume 会话时会在第一次模型请求前恢复；连接失败也会保留意图，显示为已启用但暂不可用，方便重试。模型可通过 `compat.chat_completions.mcp_system_tools_message` 或 `compat.responses.mcp_additional_tools` 显式开启缓存友好挂载；首次模型请求之前启用的 server 直接进入顶层 tools 数组（此时还没有需要保护的缓存），之后启用的才以声明形式追加在固定对话位置，Chord 会原样回放这些声明，禁用时只拦截执行、不改写前缀；模型切换、恢复或 fork 出的历史、持久压缩之后，本次会话运行的余下部分退回顶层工具，全新的空会话则重新可用动态挂载。
@@ -156,6 +157,7 @@
 - 任务复活不再从复活侧与 WaitingMain 过期清扫竞争：attempt 决策现在读取当前任务记录而非调用方快照，最终提交时若任务已在复活期间被结算则退避。此前清扫在该窗口内胜出会被复活静默覆盖——注册表回退到存活 attempt，而该 attempt 的 cancel 结算已经存在，任务随后的真实完成从此永远无法记录。竞争落败的复活现在如实报告冲突，重试会开启全新 attempt。
 - 从损坏 journal 的有效前缀恢复出的结算现在会在隔离后重新灌入新 journal。此前它们只存在于内存与任务注册表中，restore 却将其标记为已持久化，因此永远不会再被补写——注册表随后一旦损坏，这批结算的 existing-wins 保护会静默丢失，重放的 completion mailbox 便可能改写已定的结局。
 - 终端标题的旋转动画不再在流式输出或工具执行期间突然加速。此前它除了按固定节拍推进，还会在每次活动/进度更新时额外推进一帧，繁忙的回合会让标题转得远比固定节拍快；现在只按标题 ticker 的节奏推进，前台、后台忙碌与 tmux 三档速度保持稳定。
+- 会话恢复不再因上下文压缩而清空运行时 todo 列表：fallback checkpoint 布局不再把 todo 移入 stale/superseded 区，因此 pending / in_progress 任务在自动压缩后 `/resume` 或重启时仍然保留。只有摘要显式降级 todo 的压缩——即 Done 被拒绝且目标改变——恢复时仍会清空。
 - Handoff 弹窗的拒绝原因输入框不再被二次换行：输入框原本按确认对话框的宽度排版，而 Handoff 弹窗以自己的（更窄）宽度渲染，textarea 已经折行的内容会被弹窗再折一次，硬切点可能落在单词或中文字符中间。现在输入框在弹窗展示、终端缩放与粘贴时都使用 Handoff 弹窗的实际内容宽度，Shift+Enter/Ctrl+J 插入的换行与自动折行都保持输入时的样子。
 - 工具参数 JSON 里重复出现同一个键时，工具卡不再把参数名渲染两次：较先出现的那次会被丢弃，与 JSON「后值覆盖前值」的语义一致，卡片上显示的始终是实际参与执行的参数。
 - 工具结果里「还有其他诊断的文件」一节现在先按最严重级别排序、再按路径排序，最重要的文件排在最前，同一组文件的顺序每次也稳定一致，不再随 map 遍历顺序变化。

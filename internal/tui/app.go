@@ -406,8 +406,10 @@ type compactionBackgroundStatus struct {
 	StartedAt  time.Time // When compaction started
 	Bytes      int64     // Optional dedicated compaction-progress bytes
 	Events     int64     // Optional dedicated compaction-progress events
-	Terminal   string    // Status: "" / "succeeded" / "failed" / "cancelled"
+	Terminal   string    // Status: "" / "succeeded" / "failed" / "skipped" / "cancelled"
 	TerminalAt time.Time // When status terminal was set (1-2s flush window)
+	Trigger    string    // Compaction trigger kind (manual | usage_driven | ... | model_driven)
+	Reason     string    // Optional terminal reason (e.g. low-gain skip cause)
 }
 
 // tuiLayout defines the positioning of UI elements for Draw(scr, area).

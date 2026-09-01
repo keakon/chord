@@ -541,6 +541,12 @@ type CompactionStatusEvent struct {
 	Status string
 	Bytes  int64
 	Events int64
+	// Trigger names the compaction trigger kind (manual | usage_driven |
+	// length_recovery | oversize_driven | model_driven). Empty on events that
+	// predate the field or do not carry a trigger.
+	Trigger string
+	// Reason is the optional human-readable skip/failure reason.
+	Reason string
 }
 
 func (CompactionStatusEvent) agentEvent() {}

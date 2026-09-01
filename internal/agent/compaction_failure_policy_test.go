@@ -20,7 +20,7 @@ func TestUsageDrivenAutoCompactFailureBreakerSuppressesAfterThreshold(t *testing
 	a.autoCompactRequested.Store(true)
 
 	for planID := uint64(1); planID <= usageDrivenCompactionFailureThreshold; planID++ {
-		a.startCompactionState(planID, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeIdle})
+		a.startCompactionState(planID, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeIdle})
 		a.handleCompactionFailed(Event{
 			Type:    EventCompactionFailed,
 			Payload: &compactionFailure{planID: planID, target: compactionTarget{sessionEpoch: a.sessionEpoch}, err: errors.New("compaction backend unavailable")},
@@ -81,7 +81,7 @@ func TestStopResponseKeepsExistingCompactionRunning(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn()
-	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeAutoContinue})
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue})
 
 	a.setIdleAndDrainPending()
 
@@ -302,7 +302,7 @@ func TestCompactionFailureWithDriftedContinuationStillReleasesState(t *testing.T
 	a := newTestMainAgent(t, projectRoot)
 
 	target := compactionTarget{turnID: 7, turnEpoch: 1, sessionEpoch: a.sessionEpoch}
-	a.startCompactionState(4, target, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeAutoContinue, turnID: 7, turnEpoch: 1})
+	a.startCompactionState(4, target, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue, turnID: 7, turnEpoch: 1})
 	// Simulate a later path rewriting the continuation to resume a newer turn.
 	a.compactionState.continuation.turnID = 9
 	a.compactionState.continuation.turnEpoch = 2
@@ -323,7 +323,7 @@ func TestCompactionFailureFromOlderPlanKeepsRunningState(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
-	a.startCompactionState(6, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(6, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeIdle})
 	a.handleCompactionFailed(Event{
 		Type:    EventCompactionFailed,
 		Payload: &compactionFailure{planID: 5, target: compactionTarget{sessionEpoch: a.sessionEpoch}, err: errors.New("late failure from a superseded plan")},
@@ -344,7 +344,7 @@ func TestCompactionReadyWithDriftedContinuationStillApplies(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 
 	target := compactionTarget{turnID: 7, turnEpoch: 1, sessionEpoch: a.sessionEpoch}
-	a.startCompactionState(4, target, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeAutoContinue, turnID: 7, turnEpoch: 1})
+	a.startCompactionState(4, target, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue, turnID: 7, turnEpoch: 1})
 	// Simulate a later path rewriting the continuation to resume a newer turn.
 	a.compactionState.continuation.turnID = 9
 	a.compactionState.continuation.turnEpoch = 2
@@ -379,7 +379,7 @@ func TestCompactionReadyFromOlderPlanKeepsRunningState(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
-	a.startCompactionState(6, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(6, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeIdle})
 	a.handleCompactionReady(Event{
 		Type: EventCompactionReady,
 		Payload: &compactionDraft{

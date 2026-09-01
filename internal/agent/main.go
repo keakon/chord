@@ -600,11 +600,27 @@ type MainAgent struct {
 	interaction *interactionBroker
 
 	// Plan execution workflow state.
-	projectRoot            string
-	pathLocator            *config.PathLocator // resolved startup paths; nil falls back to DefaultPathLocator
-	lastPlanPath           string
-	pendingHandoff         *HandoffResult // deferred Handoff action; processed after all sibling tools finish
-	pendingLoopExitResults []*loopExitResult
+	projectRoot    string
+	pathLocator    *config.PathLocator // resolved startup paths; nil falls back to DefaultPathLocator
+	lastPlanPath   string
+	pendingHandoff *HandoffResult // deferred Handoff action; processed after all sibling tools finish
+	// pendingModelDriven is the accepted-but-not-yet-started compact_context
+	// checkpoint request. Armed by handleToolResult after control-plane
+	// validation and consumed at the tool-batch barrier.
+	pendingModelDriven *modelDrivenCheckpointRequest
+	// modelDrivenSkipNotice carries the low-gain skip reason from the worker
+	// settle to the continuation, which surfaces it as a transient notice.
+	modelDrivenSkipNotice string
+	// pendingModelDrivenNotice is a one-shot transient turn overlay that tells
+	// the model a model-driven checkpoint did not apply (skip/failure/cancel)
+	// and why. It is consumed by buildTurnOverlayMessages and never persisted
+	// to ctxMgr.
+	pendingModelDrivenNotice string
+	// lastCompactionMessageCount is the compacted message count at the previous
+	// compaction apply, used to report the interval (in messages) since the
+	// last compaction in lifecycle analytics.
+	lastCompactionMessageCount int
+	pendingLoopExitResults     []*loopExitResult
 
 	// Role system: MainAgent operates as one of several roles (builder, planner, etc.).
 	activeConfig *config.AgentConfig            // currently active role (nil = no role set yet; defaults to builder)
@@ -2097,6 +2113,10 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	if payload.KeepPendingUserMessagesQueued {
 		a.pausePendingUserDrainOnce = true
 	}
+
+	// A model-driven checkpoint armed by this turn must not outlive it: the
+	// user just aborted exactly the work the checkpoint was meant to continue.
+	a.cancelCompactionForTurnCancellation(evt.TurnID)
 
 	// Extract completed speculative tool results before marking as failed
 	var completedResults map[string]*ToolResultPayload

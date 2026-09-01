@@ -169,6 +169,7 @@ func (a *MainAgent) clearCurrentTurnKeepLoopState() {
 	a.clearPendingThinkingReplay()
 	a.turnMu.Lock()
 	a.turn = nil
+	a.pendingModelDriven = nil
 	a.turnMu.Unlock()
 	a.rememberIdleTurn(turnID)
 	a.setBugTriagePromptActive(false)

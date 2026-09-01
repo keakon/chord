@@ -115,6 +115,40 @@ context:
 | `reserved` | int | `0` | Fixed token headroom added on top of the proportional headroom left by `threshold`, for tokenizer drift, tool schema overhead, and compaction/recovery safety. Usually omit it (leave it at `0`); a non-zero value is subtracted from the input budget before applying `threshold`. |
 | `preset` | string | auto-detected | Force a specific compaction implementation. Usually unnecessary. |
 | `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |
+| `model_driven` | bool | `false` | Experimental opt-in: expose the `compact_context` tool to the main agent so the model can request a durable context checkpoint once it has externalized its working state (written it into files or structured arguments). The checkpoint is built deterministically without a summarization model call, applies at a tool-batch barrier that pauses the next main-model request, and continues the same turn on the compacted context. The tool is MainAgent-only, must be called alone, and only references `state_files` paths without reading them. Low-gain requests are skipped automatically. Off by default; enable only for projects where long exploratory sessions benefit from explicit resets. |
+
+### Model-driven context checkpoint (experimental)
+
+When `context.compaction.model_driven: true`, the main agent gains the
+`compact_context` tool. The model calls it alone (no sibling tool calls in the
+same response) once its working state is fully externalized — the facts it
+needs later are written into files named in `state_files`, or fully expressed
+in the structured `active_objective` / `completed` / `decisions` /
+`open_issues` / `next_step` arguments. The runtime validates the request,
+waits for the tool batch to close, then:
+
+1. snapshots the conversation and archives the head (no summarization model
+   call — the checkpoint is deterministic),
+2. refuses the reset when the projected savings are below a conservative
+   low-gain gate (2048 tokens and 10% of the prepared surface),
+3. applies the checkpoint atomically, preserves anything appended after the
+   snapshot as a live tail, and continues the same turn on the compacted
+   context.
+
+`state_files` are pure path references: Chord never reads or injects them, so
+the tool cannot bypass read permissions. The checkpoint's `Current User
+Request` always comes from your real messages, never from the model's
+arguments. A success result only means the request was accepted; a later
+model-driven `[Context Summary]` checkpoint confirms the reset applied. If the
+request is skipped or fails, the session continues on the old context and the
+usage-driven automatic-compaction safety net stays armed.
+
+Observability: the TUI status bar labels a model-requested checkpoint
+distinctly from a usage-driven compaction ("model checkpoint") and briefly
+shows the skip/failure reason, and `/stats` includes a "Context Compaction"
+section that counts lifecycle events per stage and trigger (for example
+`applied/model_driven`, `skipped/model_driven`) so you can gauge how often the
+model requests resets and how many are accepted.
 
 ### How the threshold is calculated
 

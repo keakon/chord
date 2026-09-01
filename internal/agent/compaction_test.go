@@ -115,7 +115,7 @@ func TestCompactionProgressReporterUsesRequestProgressThrottle(t *testing.T) {
 
 func TestCompactionKeepAliveEmitsActivityAndStops(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 0, nil)
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 0, nil)
 	defer a.resetCompactionState()
 
 	k := newCompactionKeepAlive(a)
@@ -153,7 +153,7 @@ func TestCompactionKeepAliveEmitsActivityAndStops(t *testing.T) {
 
 func TestCompactionKeepAliveYieldsToForegroundActivity(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 0, nil)
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 0, nil)
 	defer a.resetCompactionState()
 
 	k := newCompactionKeepAlive(a)
@@ -188,7 +188,7 @@ func TestCompactionKeepAliveYieldsToForegroundActivity(t *testing.T) {
 
 func TestIdleHandsMainSlotBackToRunningCompaction(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 0, nil)
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 0, nil)
 	defer a.resetCompactionState()
 
 	// Foreground work ends while compaction is still running: the idle must be
@@ -225,7 +225,7 @@ func TestIdleHandsMainSlotBackToRunningCompaction(t *testing.T) {
 
 func TestCompactionHeartbeatWaitsForResponseHandler(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 0, nil)
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 0, nil)
 	defer a.resetCompactionState()
 	a.newTurn()
 	a.mainLLMRequestInFlight.Store(true)
@@ -3860,7 +3860,7 @@ func TestHandleCompactionReadyRechecksGateAfterQueuedInput(t *testing.T) {
 		t.Fatal("expected active turn")
 	}
 	turnID := a.turn.ID
-	a.startCompactionState(1, compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeMainLLM, turnID: turnID, turnEpoch: a.turn.Epoch, agentErrSourceID: "main"})
+	a.startCompactionState(1, compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeMainLLM, turnID: turnID, turnEpoch: a.turn.Epoch, agentErrSourceID: "main"})
 	a.pendingUserMessages = []pendingUserMessage{{Content: strings.Repeat("queued user message ", 220)}}
 
 	draft := &compactionDraft{
@@ -3961,7 +3961,7 @@ func TestHandleCompactCommandSchedulesAsyncCompactionWhileBusy(t *testing.T) {
 func TestScheduleCompactionSkipsWhenAlreadyRunning(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.startCompactionState(7, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(7, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeIdle})
 
 	if ok := a.scheduleCompaction(false); ok {
 		t.Fatal("scheduleCompaction should return false while compaction is already running")
@@ -3986,7 +3986,7 @@ func TestHistoryMutationAllowedOutsideCompaction(t *testing.T) {
 func TestHistoryMutationAllowedRejectsFrozenHead(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{Manual: true}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
 	a.compactionState.headSplit = 3
 	if err := a.historyMutationAllowed(2); err == nil {
 		t.Fatal("historyMutationAllowed on frozen head = nil, want error")
@@ -3996,7 +3996,7 @@ func TestHistoryMutationAllowedRejectsFrozenHead(t *testing.T) {
 func TestHistoryMutationAllowedAllowsTail(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{Manual: true}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
 	a.compactionState.headSplit = 3
 	if err := a.historyMutationAllowed(3); err != nil {
 		t.Fatalf("historyMutationAllowed on tail returned error: %v", err)
@@ -4008,7 +4008,7 @@ func TestHandleCompactionReadyAsyncIdleAppliesImmediately(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "one"})
 	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "two"})
-	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{Manual: true}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
 	a.compactionState.headSplit = 2
 
 	draft := &compactionDraft{
@@ -4160,7 +4160,7 @@ func TestHandleCompactionReadyClearsLoopReductionStats(t *testing.T) {
 	a.lastPreparedReductionStats = ContextReductionStats{Messages: 3, Bytes: 4096}
 	a.contextReductionStats = ContextReductionStats{Messages: 3, Bytes: 4096}
 	a.loopReductionMu.Unlock()
-	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{Manual: true}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
 	a.compactionState.headSplit = 2
 
 	draft := &compactionDraft{
@@ -4195,7 +4195,7 @@ func TestHandleCompactionReadyClearsLoopReductionStats(t *testing.T) {
 func TestApplyReadyDraftClearsRunningState(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{Manual: true}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
 	a.compactionState.headSplit = 2
 	a.compactionState.readyDraft = &compactionDraft{
 		NewMessages:    []message.Message{{Role: "user", Content: "[Context Summary]", IsCompactionSummary: true}},
@@ -4222,7 +4222,7 @@ func TestApplyReadyDraftClearsRunningState(t *testing.T) {
 func TestHandleCompactionReadyEmitsIdleActivityOnCompletion(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
 	draft := &compactionDraft{Skip: true, PlanID: 1, Target: compactionTarget{sessionEpoch: a.sessionEpoch}}
 
 	a.handleCompactionReady(Event{Type: EventCompactionReady, Payload: draft})
@@ -4251,7 +4251,7 @@ func TestHandleCompactionReadyEmitsIdleActivityOnCompletion(t *testing.T) {
 func TestHandleCompactionFailedEmitsIdleActivityOnCompletion(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
 
 	a.handleCompactionFailed(Event{Type: EventCompactionFailed, Payload: &compactionFailure{planID: 1, target: compactionTarget{sessionEpoch: a.sessionEpoch}, err: fmt.Errorf("temporary compaction failure")}})
 
@@ -4279,7 +4279,7 @@ func TestAutoCompactionDrainsPendingUserMessages(t *testing.T) {
 	a.pendingUserMessages = []pendingUserMessage{{Content: "continue the task"}}
 
 	// Start auto compaction (compactionResumeIdle means it's not during an LLM call)
-	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeIdle})
 
 	// Create a valid compaction draft
 	draft := &compactionDraft{
@@ -5224,7 +5224,7 @@ func TestBuildCompactionPromptIncludesBackgroundObjects(t *testing.T) {
 func TestHandleCompactionReadyIgnoresStaleSessionDraft(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.startCompactionState(2, compactionTarget{sessionEpoch: 2, turnEpoch: 1}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(2, compactionTarget{sessionEpoch: 2, turnEpoch: 1}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
 	a.sessionEpoch = 2
 	a.turnEpoch = 1
 
@@ -5252,7 +5252,7 @@ func TestHandleCompactionReadyIgnoresCurrentPlanFromOldSession(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.sessionEpoch = 1
 	oldSessionEpoch := a.sessionEpoch
-	a.startCompactionState(2, compactionTarget{sessionEpoch: oldSessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(2, compactionTarget{sessionEpoch: oldSessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
 	a.sessionEpoch++
 
 	a.handleCompactionReady(Event{Type: EventCompactionReady, Payload: &compactionDraft{
@@ -5274,7 +5274,7 @@ func TestHandleCompactionFailedIgnoresCurrentPlanFromOldSession(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.sessionEpoch = 1
 	oldSessionEpoch := a.sessionEpoch
-	a.startCompactionState(2, compactionTarget{sessionEpoch: oldSessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(2, compactionTarget{sessionEpoch: oldSessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
 	a.sessionEpoch++
 
 	a.handleCompactionFailed(Event{Type: EventCompactionFailed, Payload: &compactionFailure{
@@ -5294,7 +5294,7 @@ func TestHandleCompactionFailedIgnoresCurrentPlanFromOldSession(t *testing.T) {
 // watchdog's synthetic timeout.
 func TestHandleCompactionFailedKeepsParkedReadyDraft(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 1, nil)
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 1, nil)
 	a.compactionState.readyDraft = &compactionDraft{PlanID: 1, Target: compactionTarget{sessionEpoch: a.sessionEpoch}}
 
 	a.handleCompactionFailed(Event{Type: EventCompactionFailed, Payload: &compactionFailure{
@@ -5314,7 +5314,7 @@ func TestHandleCompactionFailedKeepsParkedReadyDraft(t *testing.T) {
 func TestStopCompactionForSessionSwitchCancelsWorkerWithoutBlocking(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	ctx, cancel := context.WithCancel(t.Context())
-	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 0, cancel)
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 0, cancel)
 
 	if a.stopCompactionForSessionSwitch() {
 		t.Fatal("session switch should be rejected while the compaction worker stops")
@@ -5329,7 +5329,7 @@ func TestStopCompactionForSessionSwitchCancelsWorkerWithoutBlocking(t *testing.T
 
 func TestStopCompactionForSessionSwitchDiscardsReadyDraft(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle}, 1, nil)
+	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 1, nil)
 	a.compactionState.readyDraft = &compactionDraft{PlanID: 1, Target: compactionTarget{sessionEpoch: a.sessionEpoch}}
 
 	if !a.stopCompactionForSessionSwitch() {
@@ -5459,7 +5459,7 @@ func TestCleanupStalePendingCompactions(t *testing.T) {
 func TestSpawnFinishedEventHandledImmediatelyDuringCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
 	payload := &tools.SpawnFinishedPayload{BackgroundID: "job-1", AgentID: a.instanceID, Kind: "job", Status: "finished (exit 0)", Message: "background finished"}
 	a.dispatch(Event{Type: EventSpawnFinished, SourceID: "main", Payload: payload})
 
@@ -5493,8 +5493,8 @@ func TestEnsureOversizeDrivenCompactionStartsMainResumeCompaction(t *testing.T) 
 	if !a.IsCompactionRunning() {
 		t.Fatal("expected compaction running state")
 	}
-	if !a.compactionState.trigger.OversizeDriven {
-		t.Fatal("expected OversizeDriven trigger to be true")
+	if a.compactionState.trigger != compactionTriggerOversize {
+		t.Fatal("expected oversize_driven trigger for oversize compaction")
 	}
 	if a.compactionState.continuation.kind != compactionResumeMainLLM {
 		t.Fatalf("continuation kind = %q, want %q", a.compactionState.continuation.kind, compactionResumeMainLLM)
@@ -5537,7 +5537,7 @@ func TestCompactionFailureDoesNotRetrySameGate(t *testing.T) {
 	turnID := a.turn.ID
 	turnEpoch := a.turn.Epoch
 	a.pendingUserMessages = []pendingUserMessage{{Content: "queued after failure"}}
-	a.startCompactionState(1, compactionTarget{turnID: turnID, turnEpoch: turnEpoch, sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeMainLLM, turnID: turnID, turnEpoch: turnEpoch, agentErrSourceID: "main"})
+	a.startCompactionState(1, compactionTarget{turnID: turnID, turnEpoch: turnEpoch, sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeMainLLM, turnID: turnID, turnEpoch: turnEpoch, agentErrSourceID: "main"})
 
 	a.handleCompactionFailed(Event{Type: EventCompactionFailed, TurnID: turnID, Payload: &compactionFailure{planID: 1, target: compactionTarget{turnID: turnID, turnEpoch: turnEpoch, sessionEpoch: a.sessionEpoch}, err: fmt.Errorf("temporary compaction failure")}})
 
@@ -5562,7 +5562,7 @@ func TestUsageDrivenFailureCanRetryAcrossTurnsBeforeBreakerTrips(t *testing.T) {
 	a.ctxMgr = ctxmgr.NewManager(10000, 0.9)
 	a.autoCompactRequested.Store(true)
 
-	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeIdle})
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeIdle})
 	a.handleCompactionFailed(Event{Type: EventCompactionFailed, Payload: &compactionFailure{planID: 1, target: compactionTarget{sessionEpoch: a.sessionEpoch}, err: fmt.Errorf("temporary compaction failure")}})
 
 	if a.isUsageDrivenAutoCompactSuppressed() {
@@ -5598,7 +5598,7 @@ func TestUsageDrivenFailureStopsRetriyingAfterBreakerTrips(t *testing.T) {
 	a.autoCompactRequested.Store(true)
 
 	for planID := uint64(1); planID <= usageDrivenCompactionFailureThreshold; planID++ {
-		a.startCompactionState(planID, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeIdle})
+		a.startCompactionState(planID, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeIdle})
 		a.handleCompactionFailed(Event{Type: EventCompactionFailed, Payload: &compactionFailure{planID: planID, target: compactionTarget{sessionEpoch: a.sessionEpoch}, err: fmt.Errorf("temporary compaction failure")}})
 	}
 
@@ -6068,7 +6068,7 @@ func TestCompactionInputBudgetUsesOneSixthOfContext(t *testing.T) {
 func TestApplyReadyDraftAutoContinueFailureEmitsSingleIdleEvent(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTrigger{UsageDriven: true}, continuationPlan{kind: compactionResumeAutoContinue})
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue})
 	a.compactionState.headSplit = 1
 	a.compactionState.readyDraft = &compactionDraft{
 		NewMessages:    []message.Message{{Role: "user", Content: "summary", IsCompactionSummary: true}},

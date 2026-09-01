@@ -2,6 +2,7 @@ package tui
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
@@ -93,6 +94,47 @@ func TestUsageStatsTabUsesActiveStyle(t *testing.T) {
 	}
 	if got := m.renderUsageStatsTab("Project", false); got != StatsTabStyle.Render("Project") {
 		t.Fatalf("inactive tab render = %q, want base style %q", got, StatsTabStyle.Render("Project"))
+	}
+}
+
+func TestUsageOverviewShowsCompactionLifecycle(t *testing.T) {
+	agent := &sessionControlAgent{usageStats: analytics.SessionStats{
+		LLMCalls:            5,
+		CompactionLifecycle: map[string]int64{"applied": 1, "skipped/model_driven": 2},
+	}}
+	m := NewModel(agent)
+	m.openUsageStats()
+	lines := m.sessionUsageStatsLines(80)
+	var got string
+	for _, l := range lines {
+		if strings.Contains(l, "Compaction:") {
+			got = l
+			break
+		}
+	}
+	if got == "" {
+		t.Fatalf("session overview lines = %#v, want a Compaction line when lifecycle events exist", lines)
+	}
+	if !strings.Contains(got, "applied=1") || !strings.Contains(got, "skipped/model_driven=2") {
+		t.Fatalf("compaction line = %q, want sorted stage/trigger counts", got)
+	}
+
+	empty := NewModel(&sessionControlAgent{})
+	empty.openUsageStats()
+	for _, l := range empty.sessionUsageStatsLines(80) {
+		if strings.Contains(l, "Compaction:") {
+			t.Fatalf("overview line = %q, want no Compaction line without lifecycle events", l)
+		}
+	}
+}
+
+func TestFormatCompactionLifecycleSummarySortsKeys(t *testing.T) {
+	got := formatCompactionLifecycleSummary(map[string]int64{"failed": 3, "applied/model_driven": 1})
+	if got != "applied/model_driven=1, failed=3" {
+		t.Fatalf("summary = %q, want sorted stage/trigger counts", got)
+	}
+	if formatCompactionLifecycleSummary(nil) != "" {
+		t.Fatal("empty lifecycle must render an empty summary")
 	}
 }
 

@@ -34,9 +34,9 @@ func (a *MainAgent) scheduleCompaction(manual bool) bool {
 	snapshot := a.ctxMgr.Snapshot()
 	a.fireBeforeCompressHook(snapshot, manual)
 	planID, target := a.nextCompactionPlan()
-	trigger := compactionTrigger{Manual: manual}
-	if !manual {
-		trigger.UsageDriven = true
+	trigger := compactionTriggerUsageDriven
+	if manual {
+		trigger = compactionTriggerManual
 	}
 	a.scheduleCompactionAsync(snapshot, planID, target, trigger)
 	return true
@@ -53,10 +53,10 @@ func (a *MainAgent) scheduleCompaction(manual bool) bool {
 // moment auto compaction succeeds while no fresh user input is queued.
 func (a *MainAgent) scheduleCompactionAsync(snapshot []message.Message, planID uint64, target compactionTarget, trigger compactionTrigger) {
 	resumeKind := compactionResumeAutoContinue
-	if trigger.Manual {
+	if trigger == compactionTriggerManual {
 		resumeKind = compactionResumeIdle
 	}
-	a.startCompactionAsyncWithContinuation(snapshot, planID, target, trigger, continuationPlan{kind: resumeKind, turnEpoch: target.turnEpoch}, trigger.Manual)
+	a.startCompactionAsyncWithContinuation(snapshot, planID, target, trigger, continuationPlan{kind: resumeKind, turnEpoch: target.turnEpoch}, trigger == compactionTriggerManual)
 }
 
 // Draft production must reach a terminal event within this window. The
@@ -117,7 +117,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	}
 
 	a.emitCompactionSlotActivity()
-	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted})
+	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted, Trigger: trigger.analyticsName()})
 	a.compactionWg.Add(1)
 	go func(ctx context.Context, snapshot []message.Message, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, manual bool, originalRequest string, evidenceItems []evidenceItem) {
 		defer a.compactionWg.Done()
@@ -257,6 +257,14 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, fmt.Errorf("export compacted history: %w", err)
 	}
 	absHistoryMetaPath := compactionHistoryMetaPath(absHistoryPath)
+	// Any failure after the archive is written must remove it: a cancelled
+	// worker otherwise leaves orphan history-*.md / .status.json files behind.
+	historyCommitted := false
+	defer func() {
+		if !historyCommitted {
+			cleanupOrphanCompactionFiles(absHistoryPath)
+		}
+	}()
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -324,6 +332,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	// Async mode: NewMessages only contains [summary + evidence], no recentTail
 	newMessages := []message.Message{contextSummaryMsg}
 
+	historyCommitted = true
 	return &compactionDraft{
 		PlanID:             planID,
 		Target:             target,
@@ -433,7 +442,6 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	if err != nil {
 		return err
 	}
-	a.recordCompactionLifecycleEvent("applied", map[string]string{"source_ref_count": strconv.Itoa(len(d.SourceRefs)), "head_split": strconv.Itoa(headSplit), "message_count": strconv.Itoa(len(compactedMessages))})
 
 	// Durable compaction rewrites the message prefix, so any cache-friendly
 	// dynamic MCP mount anchors become invalid. Revert to top-level MCP tools
@@ -449,6 +457,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// round at a time; the archived head is replaced by the checkpoint and never
 	// re-scanned.
 	a.resetRuntimeEvidenceFromMessages(compactedMessages)
+	a.recordCompactionAppliedAnalyticsEvent(d, headSplit, compactedMessages)
 	a.resetContextReductionStats()
 	a.clearLoopFrozenReductionPrefix()
 	if a.llmClient != nil {
@@ -519,7 +528,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		info += fmt.Sprintf(" Summary fallback reason: %v", d.SummarizeErr)
 	}
 	a.emitToTUI(ToastEvent{Message: info, Level: "info"})
-	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusSucceeded})
+	a.emitToTUI(a.compactionStatusEvent(CompactionStatusSucceeded, ""))
 	a.emitToTUI(SessionRestoredEvent{PreserveRequestActivity: true})
 
 	log.Infof("context compacted (async) mode=%v summary_mode=%v backend=%v profile=%v model=%v history_path=%v backup_path=%v archived_messages=%v evidence_artifacts=%v head_split=%v", modeLabel, d.SummaryMode, d.Backend, d.Profile, d.ModelRef, d.AbsHistoryPath, backupPath, d.ArchivedCount, d.EvidenceArtifacts, headSplit)

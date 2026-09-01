@@ -35,6 +35,7 @@ const (
 	NameReadArtifact    = toolname.ReadArtifact
 	NameSaveResult      = toolname.SaveResult
 	NameViewImage       = toolname.ViewImage
+	NameCompactContext  = toolname.CompactContext
 )
 
 var NormalizeName = toolname.Normalize

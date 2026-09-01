@@ -1027,6 +1027,73 @@ func TestHeadlessActivityIdleFiltered(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Tests for CompactionStatusEvent
+// ---------------------------------------------------------------------------
+
+func TestHeadlessCompactionStatusTerminalEnvelope(t *testing.T) {
+	state := &headlessState{}
+
+	ev := agent.CompactionStatusEvent{
+		Status:  agent.CompactionStatusSucceeded,
+		Trigger: "model_driven",
+		Reason:  "checkpoint applied",
+	}
+	envs := filterHeadlessEvent(ev, state)
+	if len(envs) != 1 {
+		t.Fatalf("terminal compaction status should produce exactly one envelope, got %d", len(envs))
+	}
+	if envs[0].Type != "compaction_status" {
+		t.Fatalf("type = %q, want compaction_status", envs[0].Type)
+	}
+	payload, ok := envs[0].Payload.(map[string]string)
+	if !ok {
+		t.Fatalf("payload type = %T, want map[string]string", envs[0].Payload)
+	}
+	if payload["status"] != agent.CompactionStatusSucceeded {
+		t.Errorf("status = %q, want %q", payload["status"], agent.CompactionStatusSucceeded)
+	}
+	if payload["trigger"] != "model_driven" {
+		t.Errorf("trigger = %q, want model_driven", payload["trigger"])
+	}
+	if payload["reason"] != "checkpoint applied" {
+		t.Errorf("reason = %q, want checkpoint applied", payload["reason"])
+	}
+}
+
+func TestHeadlessCompactionStatusSkippedCarriesTriggerAndReason(t *testing.T) {
+	state := &headlessState{}
+	envs := filterHeadlessEvent(agent.CompactionStatusEvent{
+		Status:  agent.CompactionStatusSkipped,
+		Trigger: "model_driven",
+		Reason:  "projected savings too small",
+	}, state)
+	if len(envs) != 1 {
+		t.Fatalf("envelopes = %d, want 1", len(envs))
+	}
+	payload := envs[0].Payload.(map[string]string)
+	if payload["reason"] != "projected savings too small" {
+		t.Errorf("reason = %q", payload["reason"])
+	}
+}
+
+func TestHeadlessCompactionStatusProgressFiltered(t *testing.T) {
+	state := &headlessState{}
+	if envs := filterHeadlessEvent(agent.CompactionStatusEvent{Status: agent.CompactionStatusProgress}, state); len(envs) != 0 {
+		t.Fatalf("progress events must not reach the control plane, got %d", len(envs))
+	}
+}
+
+func TestHeadlessCompactionStatusRespectsSubscription(t *testing.T) {
+	state := &headlessState{subscriptions: map[string]bool{}}
+	if envs := filterHeadlessEvent(agent.CompactionStatusEvent{Status: agent.CompactionStatusSucceeded, Trigger: "model_driven"}, state); len(envs) != 0 {
+		t.Fatalf("unsubscribed compaction_status must be filtered, got %d", len(envs))
+	}
+	state.subscriptions["compaction_status"] = true
+	if envs := filterHeadlessEvent(agent.CompactionStatusEvent{Status: agent.CompactionStatusSucceeded, Trigger: "model_driven"}, state); len(envs) != 1 {
+		t.Fatalf("subscribed compaction_status must be forwarded, got %d", len(envs))
+	}
+}
+
 // Tests for AssistantMessageEvent
 // ---------------------------------------------------------------------------
 

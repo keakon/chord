@@ -249,6 +249,40 @@ func TestBuildSessionEvidenceFoldsWalltimeInOnePass(t *testing.T) {
 
 // A digit string too long for the range is corruption, not a duration: it must
 // be dropped rather than folded in, and its valid siblings must still count.
+func TestBuildSessionEvidenceFoldsCompactionLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "/tmp/project")
+
+	if err := ledger.AppendEvent(UsageEvent{
+		AgentID:    "main",
+		Purpose:    UsagePurposeCompactionLifecycle,
+		Diagnostic: map[string]string{"stage": "applied", "trigger": "model_driven"},
+	}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	if err := ledger.AppendEvent(UsageEvent{
+		AgentID:    "main",
+		Purpose:    UsagePurposeCompactionLifecycle,
+		Diagnostic: map[string]string{"stage": "skipped"},
+	}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	stats, eventCount, _, _, err := ledger.BuildSessionEvidence()
+	if err != nil {
+		t.Fatalf("BuildSessionEvidence: %v", err)
+	}
+	if stats.LLMCalls != 0 {
+		t.Fatalf("LLMCalls = %d, want 0 (lifecycle events are not calls)", stats.LLMCalls)
+	}
+	if eventCount != 2 {
+		t.Fatalf("scanned eventCount = %d, want 2", eventCount)
+	}
+	if stats.CompactionLifecycle["applied/model_driven"] != 1 || stats.CompactionLifecycle["skipped"] != 1 {
+		t.Fatalf("CompactionLifecycle = %v, want applied/model_driven=1 skipped=1", stats.CompactionLifecycle)
+	}
+}
+
 func TestBuildSessionEvidenceDropsOutOfRangeWalltimeNs(t *testing.T) {
 	dir := t.TempDir()
 	ledger := NewUsageLedger(dir, "/tmp/project")

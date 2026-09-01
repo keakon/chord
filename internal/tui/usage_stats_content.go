@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -81,14 +82,37 @@ func (m *Model) sessionUsageStatsLines(width int) []string {
 		)...)
 		return lines
 	default:
-		return []string{
+		lines := []string{
 			DialogTitleStyle.Render(titlePrefix + "Overview"),
 			fmt.Sprintf("Calls: %d", stats.LLMCalls),
 			fmt.Sprintf("Input: %s    Output: %s", formatUsageTokens(analytics.FullInputTokens(stats.InputTokens, stats.CacheReadTokens, stats.CacheWriteTokens)), formatUsageTokens(stats.OutputTokens)),
 			fmt.Sprintf("Cache R: %s    Cache W: %s", formatUsageTokens(stats.CacheReadTokens), formatUsageTokens(stats.CacheWriteTokens)),
 			fmt.Sprintf("Reasoning: %s    Cost: %s", formatUsageTokens(stats.ReasoningTokens), formatCost(stats.EstimatedCost)),
 		}
+		if comp := formatCompactionLifecycleSummary(stats.CompactionLifecycle); comp != "" {
+			lines = append(lines, "Compaction: "+comp)
+		}
+		return lines
 	}
+}
+
+// formatCompactionLifecycleSummary renders the compaction lifecycle counts as
+// a compact "stage/trigger=N" list for the session overview line. It is empty
+// when no lifecycle events were recorded.
+func formatCompactionLifecycleSummary(lifecycle map[string]int64) string {
+	if len(lifecycle) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(lifecycle))
+	for key := range lifecycle {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", key, lifecycle[key]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (m *Model) projectUsageStatsLines(width int) []string {

@@ -105,14 +105,14 @@ func TestAppendHookFeedbackAppendsUserMessage(t *testing.T) {
 		t.Fatal("main hook feedback was not appended")
 	}
 	last := msgs[len(msgs)-1]
-	if last.Role != "user" || last.Content != "automated feedback" {
+	if last.Role != "user" || last.Content != "automated feedback" || last.Kind != message.KindHookFeedback {
 		t.Fatalf("main hook feedback message = %#v", last)
 	}
 
 	sub := &SubAgent{ctxMgr: ctxmgr.NewManager(8192, 0)}
 	sub.appendHookFeedback("sub feedback")
 	subMsgs := sub.ctxMgr.Snapshot()
-	if len(subMsgs) != 1 || subMsgs[0].Role != "user" || subMsgs[0].Content != "sub feedback" {
+	if len(subMsgs) != 1 || subMsgs[0].Role != "user" || subMsgs[0].Content != "sub feedback" || subMsgs[0].Kind != message.KindHookFeedback {
 		t.Fatalf("sub hook feedback messages = %#v", subMsgs)
 	}
 }

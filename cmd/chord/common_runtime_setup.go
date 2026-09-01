@@ -55,14 +55,14 @@ func createRuntime(ac *AppContext) (*Runtime, error) {
 	ac.MainAgent.SetBusyPreparationHook(resourceCtrl.EnsureReady)
 
 	confirmTimeout := time.Duration(ac.Cfg.ConfirmTimeout) * time.Second
-	wireMainAgentRuntime(ac.Ctx, ac.MainAgent, ac.Registry, confirmTimeout)
+	wireMainAgentRuntime(ac.Ctx, ac.MainAgent, ac.Registry, confirmTimeout, ac.Cfg.Context.Compaction.ModelDriven)
 	startRuntimeMCP(ac)
 	startRuntimeWarmups(ac)
 
 	return &Runtime{Agent: ac.MainAgent, powerMgr: powerMgr}, nil
 }
 
-func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *tools.Registry, confirmTimeout time.Duration) {
+func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *tools.Registry, confirmTimeout time.Duration, modelDrivenCompaction bool) {
 	mainAgent.SetConfirmFunc(func(ctx context.Context, toolName, args string, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules []string) (agent.ConfirmResponse, error) {
 		resp, err := mainAgent.AwaitConfirmWithRuleContext(ctx, toolName, args, confirmTimeout, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules)
 		if err != nil {
@@ -75,6 +75,18 @@ func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *
 		return mainAgent.AskQuestions(ctx, questions, confirmTimeout)
 	}))
 	reg.Register(tools.NewDoneTool())
+	if modelDrivenCompaction {
+		reg.Register(tools.NewCompactContextTool(tools.CompactContextValidator{
+			// The continuation-state budget matches the main-agent evidence tier
+			// (compactEvidenceMaxTokens = 2048); estimation is inherited from
+			// the agent's calibrated estimator at validation time and falls back to
+			// the conservative bytes/3 default here.
+			ContinuationStateMaxTokens: 2048,
+			EstimateTokens: func(text string) int {
+				return mainAgent.EstimateTokensForText(text)
+			},
+		}))
+	}
 
 	go mainAgent.Run(ctx)
 }

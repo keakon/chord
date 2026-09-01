@@ -33,6 +33,7 @@ const (
 	ReadArtifact    = "read_artifact"
 	SaveResult      = "save_result"
 	ViewImage       = "view_image"
+	CompactContext  = "compact_context"
 )
 
 // Normalize trims user-provided tool names and maps legacy aliases.

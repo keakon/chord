@@ -21,6 +21,100 @@ func TestDefaultConfigCompactionProfileDefaultsToAuto(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigCompactionModelDrivenDisabled(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Context.Compaction.ModelDriven {
+		t.Fatal("DefaultConfig().Context.Compaction.ModelDriven = true, want false (opt-in)")
+	}
+}
+
+func TestLoadConfigFromPathParsesCompactionModelDriven(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := []byte("context:\n  compaction:\n    model_driven: true\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if !cfg.Context.Compaction.ModelDriven {
+		t.Fatal("context.compaction.model_driven: true should enable model-driven reset")
+	}
+}
+
+func TestMergeProjectConfigModelDrivenCombinations(t *testing.T) {
+	writeGlobal := func(t *testing.T, enabled bool) *Config {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "global.yaml")
+		content := "context:\n  compaction:\n    model_driven: false\n"
+		if enabled {
+			content = "context:\n  compaction:\n    model_driven: true\n"
+		}
+		writeTestFile(t, path, content)
+		cfg, err := LoadConfigFromPath(path)
+		if err != nil {
+			t.Fatalf("LoadConfigFromPath(global): %v", err)
+		}
+		return cfg
+	}
+	writeProject := func(t *testing.T, dir string, content string) string {
+		t.Helper()
+		path := filepath.Join(dir, ".chord", "config.yaml")
+		writeTestFile(t, path, content)
+		return path
+	}
+
+	t.Run("global_true_project_unset_enables", func(t *testing.T) {
+		global := writeGlobal(t, true)
+		projectPath := writeProject(t, t.TempDir(), "commands:\n  /x: y\n")
+		_, merged, err := MergeProjectConfig(global, projectPath)
+		if err != nil {
+			t.Fatalf("MergeProjectConfig: %v", err)
+		}
+		if !merged.Context.Compaction.ModelDriven {
+			t.Fatal("global true + project unset should stay enabled")
+		}
+	})
+	t.Run("global_true_project_false_disables", func(t *testing.T) {
+		global := writeGlobal(t, true)
+		projectPath := writeProject(t, t.TempDir(), "context:\n  compaction:\n    model_driven: false\n")
+		_, merged, err := MergeProjectConfig(global, projectPath)
+		if err != nil {
+			t.Fatalf("MergeProjectConfig: %v", err)
+		}
+		if merged.Context.Compaction.ModelDriven {
+			t.Fatal("project explicit false should override global true")
+		}
+	})
+	t.Run("global_false_project_true_enables", func(t *testing.T) {
+		global := writeGlobal(t, false)
+		projectPath := writeProject(t, t.TempDir(), "context:\n  compaction:\n    model_driven: true\n")
+		projectCfg, merged, err := MergeProjectConfig(global, projectPath)
+		if err != nil {
+			t.Fatalf("MergeProjectConfig: %v", err)
+		}
+		if !projectCfg.Context.Compaction.ModelDriven {
+			t.Fatal("project explicit true should enable model-driven reset")
+		}
+		if !merged.Context.Compaction.ModelDriven {
+			t.Fatal("merged config should carry the project true")
+		}
+	})
+	t.Run("global_false_project_unset_stays_disabled", func(t *testing.T) {
+		global := writeGlobal(t, false)
+		projectPath := writeProject(t, t.TempDir(), "commands:\n  /x: y\n")
+		_, merged, err := MergeProjectConfig(global, projectPath)
+		if err != nil {
+			t.Fatalf("MergeProjectConfig: %v", err)
+		}
+		if merged.Context.Compaction.ModelDriven {
+			t.Fatal("global false + project unset should stay disabled")
+		}
+	})
+}
+
 func TestDefaultConfigContextReductionThresholds(t *testing.T) {
 	cfg := DefaultConfig()
 	got := cfg.Context.Reduction

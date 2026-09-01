@@ -199,6 +199,7 @@ var headlessEventTypes = map[string]bool{
 	"local_shell_result": true,
 	"assistant_rollback": true,
 	"todos":              true,
+	"compaction_status":  true,
 }
 
 // filterHeadlessEvent converts an AgentEvent to one or more headlessEnvelopes.
@@ -232,6 +233,20 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 				"agent_id": e.AgentID,
 				"type":     string(e.Type),
 				"detail":   e.Detail,
+			}})
+		}
+	case agent.CompactionStatusEvent:
+		state.updatedAt = time.Now()
+		// The control plane observes started and terminal outcomes only;
+		// internal progress telemetry stays on the TUI slot.
+		if e.Status == agent.CompactionStatusProgress {
+			return nil
+		}
+		if state.isSubscribed("compaction_status") {
+			out = append(out, &headlessEnvelope{Type: "compaction_status", Payload: map[string]string{
+				"status":  e.Status,
+				"trigger": e.Trigger,
+				"reason":  e.Reason,
 			}})
 		}
 	case agent.AssistantMessageEvent:

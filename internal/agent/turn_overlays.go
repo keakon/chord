@@ -56,6 +56,19 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		})
 	}
 
+	// Model-driven checkpoint outcome (skip/failure/cancel): request-scoped
+	// overlay so the model learns why the checkpoint did not apply without the
+	// reason becoming a durable user message that a later compaction could
+	// misread as the latest request.
+	if notice := strings.TrimSpace(a.pendingModelDrivenNotice); notice != "" {
+		a.pendingModelDrivenNotice = ""
+		overlays = append(overlays, message.Message{
+			Role:    "user",
+			Kind:    message.KindTurnOverlay,
+			Content: "<system-reminder>\n" + notice + "\n</system-reminder>",
+		})
+	}
+
 	if block := strings.TrimSpace(a.pendingLoopContinuationPromptBlock()); block != "" {
 		overlays = append(overlays, message.Message{
 			Role:    "user",

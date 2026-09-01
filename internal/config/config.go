@@ -1289,6 +1289,12 @@ type CompactionConfig struct {
 	Profile   string  `json:"profile,omitempty" yaml:"profile,omitempty"`
 	Reserved  int     `json:"reserved,omitempty" yaml:"reserved,omitempty"`
 	ModelPool string  `json:"model_pool,omitempty" yaml:"model_pool,omitempty"`
+	// ModelDriven exposes the compact_context tool so the model can request a
+	// durable context checkpoint once its working state is externalized.
+	// Defaults to false; only the merged effective value decides whether the
+	// tool is registered, so a project setting this false overrides a global
+	// true like any other scalar override.
+	ModelDriven bool `json:"model_driven,omitempty" yaml:"model_driven,omitempty"`
 }
 
 // DefaultConfig returns a Config with hardcoded defaults.

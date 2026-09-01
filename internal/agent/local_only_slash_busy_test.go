@@ -165,7 +165,7 @@ func TestInFlightModelPoolSwitchStaysDeferredAcrossOversizeSuspend(t *testing.T)
 	a.beginCompactionState(
 		1,
 		compactionTarget{turnID: turnID, turnEpoch: turnEpoch, sessionEpoch: a.sessionEpoch},
-		compactionTrigger{OversizeDriven: true},
+		compactionTriggerOversize,
 		continuationPlan{kind: compactionResumeMainLLM, turnID: turnID, turnEpoch: turnEpoch, agentErrSourceID: "main"},
 		0,
 		nil,

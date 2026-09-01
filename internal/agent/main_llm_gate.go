@@ -46,6 +46,12 @@ const (
 	compactionResumeMainLLM        compactionContinuationKind = "main_llm"
 	compactionResumeLengthRecovery compactionContinuationKind = "length_recovery"
 	compactionResumeIdle           compactionContinuationKind = "idle"
+	// compactionResumeModelDriven resumes the same turn after a model-driven
+	// checkpoint applies (or fails/skips). Unlike compactionResumeAutoContinue
+	// it never creates a new logical turn and keeps the original turn epoch:
+	// the reset was requested mid-turn by the tool batch, so the continuation
+	// belongs to that turn.
+	compactionResumeModelDriven compactionContinuationKind = "model_driven"
 	// compactionResumeAutoContinue is used by threshold-based / usage-driven
 	// auto compaction: once the durable summary is applied, the agent should
 	// proactively start a new turn with the compacted context so the model
@@ -158,8 +164,11 @@ func (a *MainAgent) cancelCompactionOnLoop() bool {
 	a.compactionState.readyDraft = nil
 	if readyDraft != nil {
 		cleanupOrphanCompactionFiles(readyDraft.AbsHistoryPath)
+		// Build the terminal event before reset: compactionStatusEvent reads
+		// the trigger from the still-live compaction state.
+		cancelled := a.compactionStatusEvent(CompactionStatusCancelled, "cancelled by the user")
 		a.resetCompactionState()
-		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusCancelled})
+		a.emitToTUI(cancelled)
 		a.emitActivity("main", ActivityIdle, "")
 		return true
 	}
@@ -167,6 +176,48 @@ func (a *MainAgent) cancelCompactionOnLoop() bool {
 		a.compactionState.cancel()
 	}
 	return true
+}
+
+// cancelCompactionForTurnCancellation cancels an in-flight model-driven
+// checkpoint whose requesting turn is being cancelled. Turn cancellation is a
+// user abort of that turn's work: the checkpoint's whole purpose was to
+// continue that turn on the compacted context, so the draft must not apply
+// later and rewrite history for abandoned work. The worker's context is
+// parented on parentCtx (not the turn context), so without this cancellation
+// the worker keeps running after ESC and a late EventCompactionReady could
+// still reach apply.
+func (a *MainAgent) cancelCompactionForTurnCancellation(turnID uint64) {
+	if !a.compactionState.isRunning() && a.compactionState.readyDraft == nil {
+		return
+	}
+	if a.compactionState.continuation.kind != compactionResumeModelDriven {
+		return
+	}
+	// Only the checkpoint armed by the cancelled turn itself. A usage-driven
+	// compaction started before this turn must survive it; a model-driven
+	// checkpoint armed by an earlier turn is already stale (the barrier guard
+	// in handleCompactionReady settles it).
+	if a.compactionState.continuation.turnID != turnID {
+		return
+	}
+	a.markCompactionDiscard()
+	readyDraft := a.compactionState.readyDraft
+	a.compactionState.readyDraft = nil
+	if readyDraft != nil {
+		// The worker already reached its terminal event for this plan; settle
+		// here (no further worker event will arrive) and clean its orphan files.
+		cleanupOrphanCompactionFiles(readyDraft.AbsHistoryPath)
+		a.resetCompactionState()
+		a.settleModelDrivenCancelled("the requesting turn was cancelled by the user")
+		return
+	}
+	// Running worker: mark discard and cancel its context; the worker's
+	// cancellation failure event performs the settlement via
+	// handleCompactionFailed's model-driven cancellation branch. Settling here
+	// as well would double-record the lifecycle event.
+	if a.compactionState.cancel != nil {
+		a.compactionState.cancel()
+	}
 }
 
 func (a *MainAgent) handleCompactionCancel() {
@@ -475,7 +526,7 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 	draft, ok := evt.Payload.(*compactionDraft)
 	if !ok || draft == nil {
 		log.Errorf("handleCompactionReady: invalid payload type=%v", fmt.Sprintf("%T", evt.Payload))
-		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusFailed})
+		a.emitToTUI(a.compactionStatusEvent(CompactionStatusFailed, "invalid compaction draft payload"))
 		a.resetCompactionState()
 		return
 	}
@@ -522,7 +573,28 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 	// suspended; otherwise defer until the active LLM/tool work reaches a barrier.
 	asyncPath := draft.HeadSplit > 0 && a.compactionState.headSplit > 0
 	turnActive := a.turn != nil
-	canApplyNow := !turnActive || a.compactionState.oversizeSuspended
+	modelDriven := a.compactionState.continuation.kind == compactionResumeModelDriven
+	// A model-driven checkpoint belongs to the turn that requested it: the
+	// barrier deferred that turn's next request. If the turn is gone or was
+	// replaced, applying would rewrite history for work the user already
+	// abandoned, and the resume guard would silently drop the continuation.
+	// Settle as cancelled instead of applying a stale draft.
+	if modelDriven && (a.turn == nil ||
+		a.compactionState.continuation.turnID != a.turn.ID ||
+		a.compactionState.continuation.turnEpoch != a.turn.Epoch) {
+		log.Infof("discarding model-driven compaction draft: requesting turn is no longer active plan_id=%v continuation_turn=%v continuation_epoch=%v",
+			draft.PlanID, a.compactionState.continuation.turnID, a.compactionState.continuation.turnEpoch)
+		a.settleModelDrivenCancelled("the requesting turn is no longer active")
+		pending, _ = a.finishCompactionState()
+		a.emitActivity("main", ActivityIdle, "")
+		if pending == nil {
+			a.drainPendingUserMessages()
+			return
+		}
+		_ = a.resumePendingMainLLMAfterCompaction(pending, false)
+		return
+	}
+	canApplyNow := !turnActive || a.compactionState.oversizeSuspended || modelDriven
 
 	if asyncPath && !canApplyNow {
 		// Case C: Turn is active and no pending call means we're mid-LLM/tool.
@@ -560,25 +632,43 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 	// Apply immediately
 	applySucceeded := false
 	if !discard {
-		if err := a.applyCompactionDraft(draft); err != nil {
+		if draft.Skip && modelDriven {
+			// Model-driven skips settle independently: unlike the generic skip
+			// branch they must NOT clear LastTokenUsage, autoCompactRequested,
+			// or the usage-driven failure state — the safety net stays armed.
+			// applySucceeded stays false so the resume path queues the notice
+			// and re-enters beginMainLLMAfterPreparation, letting the
+			// usage-driven gate run normally on the old context.
+			a.settleModelDrivenSkip(draft)
+		} else if err := a.applyCompactionDraft(draft); err != nil {
 			class := classifyCompactionFailure(err)
 			a.recordCompactionFailureAnalyticsEvent(err, class, "apply")
 			a.noteCompactionFailure(err)
 			log.Warnf("apply compaction draft failed error=%v", err)
-			a.emitToTUI(ToastEvent{
-				Message: fmt.Sprintf("Context compaction failed: %v", err),
-				Level:   "warn",
-			})
-			a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusFailed})
+			if modelDriven {
+				// Same-turn continuation with the real reason: the model must
+				// not misread an apply failure as a low-gain skip.
+				a.settleModelDrivenFailure(err)
+			} else {
+				a.emitToTUI(ToastEvent{
+					Message: fmt.Sprintf("Context compaction failed: %v", err),
+					Level:   "warn",
+				})
+				a.emitToTUI(a.compactionStatusEvent(CompactionStatusFailed, shortCompactionFailureReason(err)))
+			}
 		} else {
 			applySucceeded = true
 			if draft.Skip {
-				a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusSkipped})
+				a.emitToTUI(a.compactionStatusEvent(CompactionStatusSkipped, ""))
 			}
 		}
 	} else {
 		log.Infof("discarding ready compaction draft due to higher-priority queued work turn_id=%v instance=%v plan_id=%v", evt.TurnID, a.instanceID, draft.PlanID)
-		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusCancelled})
+		if modelDriven {
+			a.settleModelDrivenCancelled("the checkpoint draft was discarded due to higher-priority queued user input")
+		} else {
+			a.emitToTUI(a.compactionStatusEvent(CompactionStatusCancelled, ""))
+		}
 	}
 
 	pending, _ = a.finishCompactionState()
@@ -604,8 +694,11 @@ func (a *MainAgent) applyReadyDraft() (applySucceeded bool, handledIdleBarrier b
 	if draft.Target.sessionEpoch != a.sessionEpoch {
 		log.Debug("compaction draft discarded due to session switch")
 		cleanupOrphanCompactionFiles(draft.AbsHistoryPath)
+		// Build the terminal event before reset: compactionStatusEvent reads
+		// the trigger from the still-live compaction state.
+		cancelled := a.compactionStatusEvent(CompactionStatusCancelled, "session switched")
 		a.resetCompactionState()
-		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusCancelled})
+		a.emitToTUI(cancelled)
 		return false, false
 	}
 
@@ -620,11 +713,11 @@ func (a *MainAgent) applyReadyDraft() (applySucceeded bool, handledIdleBarrier b
 			Message: fmt.Sprintf("Context compaction failed: %v", err),
 			Level:   "warn",
 		})
-		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusFailed})
+		a.emitToTUI(a.compactionStatusEvent(CompactionStatusFailed, shortCompactionFailureReason(err)))
 	} else {
 		applySucceeded = true
 		if draft.Skip {
-			a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusSkipped})
+			a.emitToTUI(a.compactionStatusEvent(CompactionStatusSkipped, ""))
 		}
 	}
 
@@ -721,6 +814,36 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 		}
 		a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
 		a.drainPendingUserMessages()
+		return true
+	}
+	if pending.continuation == compactionResumeModelDriven {
+		if a.turn == nil || a.turn.ID != pending.turnID || a.turn.Epoch != pending.turnEpoch {
+			return false
+		}
+		if pending.sessionEpoch != a.sessionEpoch {
+			return false
+		}
+		if recheckGate {
+			// Apply succeeded: merge queued user input and the SubAgent mailbox
+			// (they outrank the checkpoint's older continuation state), surface a
+			// transient auto-continue overlay, and continue the same turn through
+			// the normal pre-request gate (usage-driven gate runs on the
+			// compacted context). No new logical turn is created — there was no
+			// fresh user message.
+			a.processPendingUserMessagesBeforeLLMInTurn()
+			a.prepareSubAgentMailboxBatchForTurnContinuation()
+			if a.turn == nil || a.turn.ID != pending.turnID || a.turn.Epoch != pending.turnEpoch {
+				return false
+			}
+			a.pendingModelDrivenNotice = "A model-driven context checkpoint was applied; continue the current task on the compacted context."
+			a.beginMainLLMAfterPreparation(a.turn.Ctx, pending.turnID, pending.agentErrSourceID)
+			return true
+		}
+		// Model-driven skip/failure/cancel: stay in the same turn on the old
+		// context, surface the reason, and continue — the usage-driven safety
+		// net stays armed (the settle paths never touch it).
+		a.appendModelDrivenContinuationNotice()
+		a.beginMainLLMAfterPreparation(a.turn.Ctx, a.turn.ID, pending.agentErrSourceID)
 		return true
 	}
 	if pending.continuation == compactionResumeAutoContinue {
@@ -950,22 +1073,32 @@ func (a *MainAgent) handleCompactionFailed(evt Event) {
 	isCancellation := payload.err != nil && errors.Is(payload.err, context.Canceled)
 
 	if payload.err != nil && !isCancellation {
-		class := classifyCompactionFailure(payload.err)
-		a.recordCompactionFailureAnalyticsEvent(payload.err, class, "async")
-		a.noteCompactionFailure(payload.err)
-		log.Warnf("async context compaction failed error=%v", payload.err)
-		a.emitToTUI(ToastEvent{
-			Message: fmt.Sprintf("Context compaction failed: %v", payload.err),
-			Level:   "warn",
-		})
-		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusFailed})
+		if a.compactionState.continuation.kind == compactionResumeModelDriven {
+			// Model-driven failures keep the usage-driven safety net armed and
+			// continue the same turn with the reason surfaced as a notice.
+			a.settleModelDrivenFailure(payload.err)
+		} else {
+			class := classifyCompactionFailure(payload.err)
+			a.recordCompactionFailureAnalyticsEvent(payload.err, class, "async")
+			a.noteCompactionFailure(payload.err)
+			log.Warnf("async context compaction failed error=%v", payload.err)
+			a.emitToTUI(ToastEvent{
+				Message: fmt.Sprintf("Context compaction failed: %v", payload.err),
+				Level:   "warn",
+			})
+			a.emitToTUI(a.compactionStatusEvent(CompactionStatusFailed, shortCompactionFailureReason(payload.err)))
+		}
 	} else if isCancellation {
 		log.Info("context compaction cancelled by user")
-		a.emitToTUI(ToastEvent{
-			Message: "Context compaction cancelled",
-			Level:   "info",
-		})
-		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusCancelled})
+		if a.compactionState.continuation.kind == compactionResumeModelDriven {
+			a.settleModelDrivenCancelled("the checkpoint request was cancelled by the user")
+		} else {
+			a.emitToTUI(ToastEvent{
+				Message: "Context compaction cancelled",
+				Level:   "info",
+			})
+			a.emitToTUI(a.compactionStatusEvent(CompactionStatusCancelled, "cancelled by the user"))
+		}
 		// Clean up orphan history files for cancelled compaction
 		if payload.absHistoryPath != "" {
 			cleanupOrphanCompactionFiles(payload.absHistoryPath)
