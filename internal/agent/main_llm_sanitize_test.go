@@ -87,3 +87,54 @@ func TestRecordStreamingToolCallSanitizesArgs(t *testing.T) {
 		t.Fatalf("streamed tool name = %q, want preserved", turn.streamingToolCalls["call-1"].Name)
 	}
 }
+
+func TestCountOrphanVariationSelectors(t *testing.T) {
+	resp := &message.Response{
+		// ⚠️ (U+26A0+FE0F) is a legitimate presentation sequence and must not
+		// be reported; the orphan before "42" must be.
+		Content:          "\u26a0\ufe0f warning \ufe0f42",
+		ReasoningContent: "count\ufe0ee: 5",
+		ThinkingBlocks: []message.ThinkingBlock{
+			{Thinking: "x\ufe0fy", Signature: "sig\ufe0f"},
+		},
+		ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a\ufe0fb"}`)}},
+	}
+	got := countOrphanVariationSelectors(resp)
+	if got["content"]['\ufe0f'] != 1 {
+		t.Fatalf("content orphans = %v, want 1 (the ⚠️ sequence must not count)", got["content"])
+	}
+	if got["reasoning"]['\ufe0e'] != 1 {
+		t.Fatalf("reasoning orphans = %v, want 1 FE0E", got["reasoning"])
+	}
+	if got["thinking"]['\ufe0f'] != 1 {
+		t.Fatalf("thinking orphans = %v, want 1", got["thinking"])
+	}
+	// Thinking is reported per block but aggregated into a single field, so a
+	// second block's orphans must add rather than overwrite the first's.
+	multi := &message.Response{
+		ThinkingBlocks: []message.ThinkingBlock{
+			{Thinking: "a\ufe0fb"},
+			{Thinking: "c\ufe0fd"},
+		},
+	}
+	if got := countOrphanVariationSelectors(multi)["thinking"]['\ufe0f']; got != 2 {
+		t.Fatalf("two thinking blocks with one orphan each = %d, want 2 (per-block counts must merge)", got)
+	}
+	if _, ok := got["tool_call_args"]; ok {
+		t.Fatalf("tool_call_args reported: %v (tool-boundary strip owns that field)", got["tool_call_args"])
+	}
+	// Read-only by contract: the response must survive byte-identical so the
+	// replay/thinking payloads keep their signatures and encrypted content.
+	if resp.Content != "\u26a0\ufe0f warning \ufe0f42" || resp.ReasoningContent != "count\ufe0ee: 5" {
+		t.Fatalf("response was mutated by the reporter: content=%q reasoning=%q", resp.Content, resp.ReasoningContent)
+	}
+	if resp.ThinkingBlocks[0].Signature != "sig\ufe0f" {
+		t.Fatalf("thinking signature mutated: %q", resp.ThinkingBlocks[0].Signature)
+	}
+	if got := string(resp.ToolCalls[0].Args); got != `{"path":"a\ufe0fb"}` {
+		t.Fatalf("tool args mutated: %s", got)
+	}
+	if got := countOrphanVariationSelectors(&message.Response{Content: "clean"}); got != nil {
+		t.Fatalf("clean response = %v, want nil", got)
+	}
+}

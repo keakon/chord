@@ -107,6 +107,44 @@ func sanitizeResponseZeroWidth(resp *message.Response) map[string]map[rune]int {
 	return byField
 }
 
+// countOrphanVariationSelectors reports, per model free-text field, how many
+// U+FE0E/U+FE0F variation selectors are orphaned — not preceded by a base
+// character able to carry an emoji/text presentation sequence. The sanitize
+// pass deliberately keeps every selector (a legitimate sequence is content,
+// and replay/thinking contracts require byte-identical payloads), so orphans
+// in free text are never cleaned; reporting them here turns what would
+// otherwise be silent persistence of model corruption into a loud diagnostic.
+// It reuses the tools-side orphan rule (StripOrphanVariationSelectors +
+// CountStrippedInvisible) so the count matches exactly what a tool-boundary
+// strip would have removed, and is read-only: the response is never mutated.
+func countOrphanVariationSelectors(resp *message.Response) map[string]map[rune]int {
+	if resp == nil {
+		return nil
+	}
+	byField := make(map[string]map[rune]int)
+	report := func(field, s string) {
+		if !strings.ContainsAny(s, "\ufe0e\ufe0f") {
+			return
+		}
+		// Merge, never assign: thinking is reported per block but aggregated
+		// into one field, so a second block's orphans must add to the first
+		// rather than replace them (same invariant sanitizeResponseZeroWidth
+		// keeps for its strip counts).
+		if c := tools.CountStrippedInvisible(s, tools.StripOrphanVariationSelectors(s)); len(c) > 0 {
+			mergeInvisibleCounts(byField, field, c)
+		}
+	}
+	report("content", resp.Content)
+	report("reasoning", resp.ReasoningContent)
+	for i := range resp.ThinkingBlocks {
+		report("thinking", resp.ThinkingBlocks[i].Thinking)
+	}
+	if len(byField) == 0 {
+		return nil
+	}
+	return byField
+}
+
 // mergeInvisibleCounts merges per-rune stripped counts into the by-field bucket.
 func mergeInvisibleCounts(byField map[string]map[rune]int, field string, counts map[rune]int) {
 	if len(counts) == 0 {

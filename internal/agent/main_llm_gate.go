@@ -434,10 +434,20 @@ func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnI
 		// consistent form everywhere downstream.
 
 		a.llmMu.RLock()
-		modelName := a.modelName
+		// callLLM already updated runningModelRef to the model that actually
+		// produced this response (selected or a fallback it switched to);
+		// modelName still reflects the selected model and would misattribute
+		// orphan/zero-width diagnostics when a fallback produced the response.
+		modelRef := a.runningModelRef
+		if modelRef == "" {
+			modelRef = a.modelName
+		}
 		a.llmMu.RUnlock()
 		if counts := sanitizeResponseZeroWidth(resp); len(counts) > 0 {
-			log.Warnf("sanitized zero-width format characters from LLM response model=%v turn=%v fields=%v", modelName, turnID, formatInvisibleCounts(counts))
+			log.Warnf("sanitized zero-width format characters from LLM response model=%v turn=%v fields=%v", modelRef, turnID, formatInvisibleCounts(counts))
+		}
+		if orphans := countOrphanVariationSelectors(resp); len(orphans) > 0 {
+			log.Warnf("orphan variation selectors in LLM response (kept verbatim, report-only): model=%v turn=%v fields=%v", modelRef, turnID, formatInvisibleCounts(orphans))
 		}
 		payload := &LLMResponsePayload{
 			Content:                   resp.Content,
