@@ -372,6 +372,10 @@ func (a *MainAgent) newTurn() {
 	a.abandonPendingHandoff() // clear stale deferred Handoff from previous turn, settling its user-wait
 	a.nextTurnID++
 	a.turnEpoch++
+	// A fresh turn must not inherit the previous turn's edit-match failure
+	// history: a new user message targets new work, so stale streaks would
+	// mis-advise the model.
+	a.editMatchFailStreak = nil
 	ctx, cancel := context.WithCancel(a.parentCtx)
 	a.turn = &Turn{
 		ID:                    a.nextTurnID,

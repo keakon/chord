@@ -150,12 +150,15 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	// model leaked and never counts preserved ones (emoji-joining ZWJ, leading
 	// BOM, base-character variation selectors).
 	oldLen := len([]rune(decodedOld))
+	// The search text keeps only the zero-width/variation-selector cleaning it
+	// already had: orphaned combining marks are left for the tolerance matcher
+	// to fold, which is what fires the "punctuation/whitespace-tolerant" note.
 	strippedOldText := StripZeroWidthFormat(StripOrphanVariationSelectors(decodedOld))
 	oldInvisible := CountStrippedInvisible(decodedOld, strippedOldText)
 	decodedOld = strippedOldText
 	strippedOld := oldLen - len([]rune(decodedOld))
 	newLen := len([]rune(decodedNew))
-	strippedNewText := StripZeroWidthFormat(StripOrphanVariationSelectors(decodedNew))
+	strippedNewText := stripEditInvisible(decodedNew)
 	newInvisible := CountStrippedInvisible(decodedNew, strippedNewText)
 	decodedNew = strippedNewText
 	strippedNew := newLen - len([]rune(decodedNew))
@@ -251,11 +254,12 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			}
 			return out, nil
 		}
-		// Tier 2: exact, trailing-newline, and punctuation/whitespace
-		// tolerance all failed. Locate the closest matching block so the
-		// model sees the exact file lines and the precise difference, which
-		// usually lets it retry without a re-read. Only when no window is
-		// close enough does the generic re-read hint apply (Tier 3).
+		// All matching has failed (exact, trailing-newline, and
+		// punctuation/whitespace tolerance). Locate the closest matching
+		// block so the model sees the exact file lines and the precise
+		// difference, which usually lets it retry without a re-read. When
+		// no window is close enough, the generic re-read hint below
+		// applies.
 		if closest, ok := editClosestMatch(content, decodedOld); ok {
 			sim := int(math.Round(closest.Similarity * 100))
 			var b strings.Builder
@@ -282,7 +286,19 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			for _, d := range closest.Diffs[1:] {
 				fmt.Fprintf(&b, "  differing line %d (file %d): expected %s\n    actual %s\n", d.ExpectedLine, d.FileLine, d.Expected, d.Actual)
 			}
-			b.WriteString("Rebuild old_string from the file lines above (copy them exactly), then retry; the difference is beyond punctuation/whitespace tolerance")
+			// When whole lines drifted, the few differing lines shown above
+			// cannot reconstruct the target block: the model would have to
+			// retype the lines between them from memory, which is exactly
+			// how drift compounds. Send it to a fresh bounded read of the
+			// target range instead.
+			drifted := closest.LineDiffOldExtra + closest.LineDiffSrcExtra
+			oldLineCount := strings.Count(strings.TrimSuffix(decodedOld, "\n"), "\n") + 1
+			if drifted > maxDiffLinesShown || len(closest.Diffs) >= maxDiffLinesShown {
+				fmt.Fprintf(&b, "Whole lines drifted (%d vs %d extra line(s) between you and the file), so the lines above are not enough to rebuild old_string: read the file with offset=%d limit=%d (the closest match range), rebuild old_string from that fresh output, or use a smaller 2-4 line anchor; do not retype the block from memory",
+					closest.LineDiffOldExtra, closest.LineDiffSrcExtra, closest.StartLine, oldLineCount)
+			} else {
+				b.WriteString("Rebuild old_string from the file lines above (copy them exactly), then retry; the difference is beyond punctuation/whitespace tolerance")
+			}
 			return "", fmt.Errorf("%s", b.String())
 		}
 		return "", fmt.Errorf("old_string not found in file, even after punctuation/whitespace tolerance. The target text may be stale or already changed, or differs beyond punctuation and spacing. Re-read the small target range from current file contents, then rebuild old_string using exact text from that fresh read. Do not retry the same edit unchanged")

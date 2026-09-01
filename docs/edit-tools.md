@@ -186,15 +186,17 @@ A move binds both its source and destination into the same dependency boundary. 
 
 ### Error Messages
 
-- **"old_string not found in file"**: The exact text doesn't exist even under punctuation tolerance. Check whitespace, indentation, and newlines. When the mismatch is a character-level difference (a dropped or extra rune), the error also points at the closest matching block in the file — its line number, how similar it is, and the exact differing lines — so you can see the one-character mistake (for example a missing `)` or a doubled `,,`) without re-reading the whole file.
+- **"old_string not found in file"**: The exact text doesn't exist even under punctuation tolerance. Check whitespace, indentation, and newlines. When the mismatch is a character-level difference (a dropped or extra rune), the error also points at the closest matching block in the file — its line number, how similar it is, and the exact differing lines — so you can see the one-character mistake (for example a missing `)` or a doubled `,,`) without re-reading the whole file. When whole lines have drifted so far that the shown lines cannot rebuild the target, the error instead names the drift and hands over `read` coordinates (offset/limit) for the closest-match range, or suggests a smaller 2-4 line anchor.
 - **"old_string found N times"**: Multiple matches found. Either:
   - Add more context to make it unique
   - Set `replace_all: true` if you want to replace all occurrences
 - **"old_string and new_string are identical"**: No change needed.
 
+When the same target file repeatedly fails approximate matching on `edit`/`apply_patch`, the agent appends a note to the model-visible result (from the second failure on) telling it to read the target range fresh — or switch to `write` for a whole-block replacement — instead of retyping the same old text from memory. The note does not appear in the UI, and any successful result or a new turn resets the count.
+
 ### Invisible Character Cleaning
 
-The write paths of `edit`, `apply_patch`, and `write` strip zero-width formatting characters that models leak into tool arguments (zero-width space, zero-width non-joiner, zero-width joiner outside emoji sequences, word joiner, mid-stream BOM, soft hyphen). These runes carry no content, so stripping them cannot change what the text means; leaving them in would plant invisible bytes in the file. When any are removed, the tool result reports exactly which code points were cleaned (for example `U+200B×2, U+FE0F×1`), so the model learns to stop emitting them.
+The write paths of `edit`, `apply_patch`, and `write` strip zero-width formatting characters and orphaned combining marks that models leak into tool arguments (zero-width space, zero-width non-joiner, zero-width joiner outside emoji sequences, word joiner, mid-stream BOM, soft hyphen; and a diacritic with no base character to attach to, such as a stray macron). These runes carry no content — a mark with no base cannot change what a character means — so stripping them cannot change what the text means; leaving them in would plant invisible bytes in the file. When any are removed, the tool result reports exactly which code points were cleaned (for example `U+200B×2, U+FE0F×1, U+0304×1`), so the model learns to stop emitting them. A combining mark that follows a letter is kept, including stacked diacritics, so legitimate Vietnamese/Arabic/Devanagari text is untouched.
 
 ### Trailing Newline Tolerance
 
@@ -214,6 +216,8 @@ When exact matching and trailing-newline matching both fail, the tool retries wi
 The fallback applies only when the normalized `old_string` has one unique match, reports its use in the tool result, and preserves the file's original punctuation for unchanged context. Multiple normalized matches error with the "found N times" message.
 
 A single space directly adjacent to a separator punctuation mark is also treated as optional — `：` and `:` with a trailing space (and `:the` when the space is dropped) match the same text, as does an inter-word space (`diff and` and `diffand`). This covers models that tokenize `": "` as one token and re-emit it as `：`, or drop/insert a word-boundary space. The folding is deliberately narrow: only one space right after `,` `;` `:` `.` `!` `?` `(` (or right before `)`) or between two word characters is optional. Double spaces, spaces after quotes or dashes, indentation, and newlines stay significant, so a genuine layout mismatch still fails with "old_string not found" instead of silently applying a wrong edit. The result text reports when the tolerance was used; the tool description deliberately does not advertise it, so models still aim for exact matches.
+
+An orphaned combining mark (a diacritic with no base character to attach to) is folded out during this normalization: a mark at the start of a line or right after a space, punctuation mark, or digit never exists in real file content at that position, but does leak into copied text when a tokenizer splits a heading like `### ̄.2.1`. A mark that follows a letter is kept untouched — it may be a legitimate diacritic (Arabic, Devanagari, Vietnamese), including stacked sequences where one letter carries two or more marks.
 
 ---
 

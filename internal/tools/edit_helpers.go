@@ -163,23 +163,157 @@ func isIgnorableRune(r rune) bool {
 	return false
 }
 
+// isMarkRune reports whether r is a combining mark (Unicode category Mn or
+// Mc): a rune that renders attached to a preceding base character instead of
+// occupying a cell of its own. Shared by the match-path fold and the
+// write-path strip so the two can never disagree about what a mark is.
+func isMarkRune(r rune) bool {
+	return unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Mc, r)
+}
+
+// isVariationSelectorMark reports whether r is one of the combining marks that
+// belong to the variation-selector machinery instead of the orphan-mark fold:
+// the text/emoji presentation selectors U+FE0E/U+FE0F and the enclosing
+// keycap U+20E3 that completes a keycap sequence. They are Unicode combining
+// marks, but StripOrphanVariationSelectors owns them, and its rules differ —
+// a keycap's base is a digit, not a letter, so the orphan-mark rule would
+// strip the selector out of "1\ufe0f\u20e3" and break the emoji.
+func isVariationSelectorMark(r rune) bool {
+	return r == '\ufe0e' || r == '\ufe0f' || r == combiningEnclosingKeycap
+}
+
+// isOrphanCombiningMark reports whether rs[i] is a combining mark (Unicode
+// category Mn or Mc) sitting in an orphaned position where it cannot combine
+// with a legitimate base: at the start of the string, or right after a rune
+// that is not a letter. Models leak these as tokenizer artifacts — U+0304
+// COMBINING MACRON turning "### 3.2.1" into "### ̄.2.1", or a stray tone mark
+// after a digit — and they block every matching layer because the file never
+// contains them there. A mark after a letter is left alone: it may be a
+// legitimate combining sequence (Arabic shadda, Devanagari nukta, Vietnamese
+// tone marks), and folding it would corrupt those scripts.
+//
+// Unlike isIgnorableRune this is context-sensitive, so it is checked inside
+// the normalization loop rather than in the inter-word-space neighbor lookup,
+// which must stay context-free to treat both sides of a word-boundary space
+// symmetrically.
+func isOrphanCombiningMark(rs []rune, i int) bool {
+	if !isMarkRune(rs[i]) {
+		return false
+	}
+	// Walk back over ignorable format runes and earlier combining marks to
+	// find the preceding base rune, mirroring the inter-word-space lookup.
+	// Skipping earlier marks keeps legitimate stacked diacritics intact
+	// (Vietnamese ấ in NFD is a + U+0302 + U+0301: the acute mark's base is
+	// the letter under the circumflex, not the circumflex itself). A mark is
+	// orphaned when its base is absent or not a letter.
+	for j := i - 1; j >= 0; j-- {
+		if isIgnorableRune(rs[j]) || isMarkRune(rs[j]) {
+			continue
+		}
+		return !unicode.IsLetter(rs[j])
+	}
+	return true
+}
+
+// StripOrphanCombiningMarks drops the combining marks that have no base
+// character to attach to — the tokenizer artifact the shared tolerance
+// normalizer already folds out of edit/apply_patch matching. Folding during
+// matching alone was only half the job: the mark still rode along in the text
+// that gets written, so a leaked U+0304 in the changed part of new_string, in
+// an apply_patch `+` line, or in write content landed in the file as a
+// floating diacritic. This is the write-path half of the same rule, and it
+// asks the same question as the match path: a mark is dropped only when its
+// nearest preceding base — skipping ignorable format runes and earlier marks
+// — is absent or not a letter. Anything sitting on a letter is kept, so
+// stacked diacritics survive intact.
+//
+// An orphaned mark carries no content in the same sense a zero-width space
+// does: with no base to modify it cannot change what any character means, it
+// only plants an invisible floating glyph in the file. That is why it can be
+// stripped rather than rejected, and why the removal is reported through the
+// same invisible-character diagnostics as the zero-width set.
+func StripOrphanCombiningMarks(s string) string {
+	if !hasOrphanMarkCandidate(s) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	// base tracks the nearest preceding rune that is neither an ignorable
+	// format rune nor a mark — the same base the match path's backward walk
+	// finds. -1 means no such rune has been seen yet.
+	base := rune(-1)
+	dropped := false
+	for _, r := range s {
+		if isIgnorableRune(r) {
+			b.WriteRune(r)
+			continue
+		}
+		if isMarkRune(r) && !isVariationSelectorMark(r) {
+			if base < 0 || !unicode.IsLetter(base) {
+				dropped = true
+				continue
+			}
+			// Kept: a mark never becomes the next mark's base, so stacked
+			// marks all resolve against the same letter.
+			b.WriteRune(r)
+			continue
+		}
+		base = r
+		b.WriteRune(r)
+	}
+	if !dropped {
+		return s
+	}
+	return b.String()
+}
+
+// hasOrphanMarkCandidate is the allocation-free guard for
+// StripOrphanCombiningMarks: tool arguments and file content are overwhelmingly
+// mark-free, while the strip needs a rune slice for its base lookup, so that
+// slice is only built once a mark is known to be present.
+func hasOrphanMarkCandidate(s string) bool {
+	for _, r := range s {
+		if isMarkRune(r) && !isVariationSelectorMark(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// stripEditInvisible removes the invisible characters that models leak into
+// tool arguments as output corruption — zero-width formatting runes, orphaned
+// variation selectors, and orphaned combining marks (see
+// StripOrphanCombiningMarks). All three are content-free: they carry no
+// meaning on their own, they break string matching when they sit in copied
+// text, and planting them in a written file leaves invisible bytes behind. The
+// composition keeps the order the match path and the reporting assume: the
+// zero-width pass first, then the variation-selector pass, then the orphan
+// combining-mark pass.
+func stripEditInvisible(s string) string {
+	return StripOrphanCombiningMarks(StripZeroWidthFormat(StripOrphanVariationSelectors(s)))
+}
+
 // CountStrippedInvisible reports, per rune, the invisible characters that the
 // strip step actually removed from original (occurrences in original minus
 // occurrences in stripped). Counting against the post-strip result keeps the
 // report and the write result the same source of truth as the strip itself:
 // runes the strip preserves — a ZWJ joining two emoji, a leading BOM, a
-// variation selector carried by a base character — are never reported as
-// cleaned.
+// variation selector carried by a base character, a combining mark sitting on
+// its letter — are never reported as cleaned.
+//
+// Orphaned combining marks belong to this set too: they are removed by
+// StripOrphanCombiningMarks on the write path, and reporting them teaches the
+// model to stop leaking them, the same way the zero-width set is reported.
 func CountStrippedInvisible(original, stripped string) map[rune]int {
 	remaining := make(map[rune]int)
 	for _, r := range stripped {
-		if isZeroWidthFormatRune(r) || r == '\ufe0e' || r == '\ufe0f' {
+		if isReportedInvisibleRune(r) {
 			remaining[r]++
 		}
 	}
 	var counts map[rune]int
 	for _, r := range original {
-		if !isZeroWidthFormatRune(r) && r != '\ufe0e' && r != '\ufe0f' {
+		if !isReportedInvisibleRune(r) {
 			continue
 		}
 		if remaining[r] > 0 {
@@ -192,6 +326,16 @@ func CountStrippedInvisible(original, stripped string) map[rune]int {
 		counts[r]++
 	}
 	return counts
+}
+
+// isReportedInvisibleRune reports whether r belongs to the set
+// CountStrippedInvisible reports on: the zero-width formatting runes and
+// variation selectors the strip functions remove, plus combining marks. The
+// variation-selector marks are covered by their own branch and excluded here
+// so a keycap or emoji-presentation sequence never shows up as cleaned.
+func isReportedInvisibleRune(r rune) bool {
+	return isZeroWidthFormatRune(r) || r == '\ufe0e' || r == '\ufe0f' ||
+		(isMarkRune(r) && !isVariationSelectorMark(r))
 }
 
 // describeInvisibleCounts renders the per-rune counts from
@@ -262,6 +406,18 @@ func normalizePunctWithSpaceFolding(rs []rune) (norm []rune, spans []punctSpan) 
 			}
 			continue
 
+		}
+		// Fold orphaned combining marks: a mark at the start of the string or
+		// after a non-letter rune is a tokenizer artifact (e.g. U+0304 in
+		// "### ̄.2.1"), never a legitimate combining sequence. A mark after
+		// a letter is kept — it may be real Arabic/Devanagari/Vietnamese
+		// diacritics. Merge it into the previous rune's span, matching the
+		// invisible-format handling, so splice-back keeps the file's bytes.
+		if isOrphanCombiningMark(rs, i) {
+			if len(spans) > 0 && spans[len(spans)-1].end == i {
+				spans[len(spans)-1].end = i + 1
+			}
+			continue
 		}
 		// Fold one inter-word space: exactly one U+0020 between two word
 		// characters. Merge it into the previous rune's span so splice-back
@@ -427,8 +583,8 @@ const minEditSuggestionSimilarity = 0.6
 
 // editClosestMatch scans content in line windows of the same height as
 // oldText and returns the most similar window after punctuation/whitespace
-// normalization. It is the Tier-2 failure path: Tier 1 (exact, trailing
-// newline, punctuation tolerance) already failed, so the remaining mismatch
+// normalization. It runs once every matching attempt (exact, trailing
+// newline, punctuation tolerance) has failed, so the remaining mismatch
 // is a character-level difference (dropped/inserted rune, extra line, real
 // stale content). A window whose similarity clears the threshold gives the
 // model the exact file lines to copy, avoiding a re-read; otherwise ok is
@@ -967,4 +1123,27 @@ func toolRuneToken(r rune, present bool) string {
 		return "<absent>"
 	}
 	return fmt.Sprintf("%U", r)
+}
+
+// IsApproximateMatchFailure reports whether a failed edit/apply_patch call
+// failed to find its target text even after punctuation/whitespace tolerance
+// — the drift or stale-read failure that a fresh bounded read of the target
+// usually fixes. Edit's tolerant-match failures carry the "even after
+// punctuation/whitespace tolerance" marker (the closest-match hint and the
+// generic re-read hint both do); ApplyPatch's are the "hunk not found"
+// family, including the per-hunk partial wrapper and the unsafe-tolerance
+// variant. Other failures are excluded: ambiguous multi-match needs more
+// context, not a re-read, and validation errors need different arguments.
+func IsApproximateMatchFailure(name string, err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	switch strings.TrimSpace(name) {
+	case NameEdit:
+		return strings.Contains(msg, "even after punctuation/whitespace tolerance")
+	case NameApplyPatch:
+		return strings.Contains(msg, "hunk not found")
+	}
+	return false
 }

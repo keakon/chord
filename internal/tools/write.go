@@ -138,14 +138,15 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		return "", fmt.Errorf("content encoding unsupported: %w", err)
 	}
 
-	// Strip orphaned variation selectors the way replace_edit does: they are
-	// invisible model residue (an emoji's base character lost during
-	// generation), the user could never see them in a rendered card anyway,
-	// and writing them would plant invisible garbage in the file. Content
-	// that strips to empty had no visible content to begin with — writing it
-	// would truncate the target file on unknowable intent, so reject instead.
+	// Strip orphaned variation selectors and orphaned combining marks the way
+	// replace_edit does: they are invisible model residue (an emoji's base
+	// character or a heading's diacritic lost during generation), the user
+	// could never see them in a rendered card anyway, and writing them would
+	// plant invisible garbage in the file. Content that strips to empty had no
+	// visible content to begin with — writing it would truncate the target
+	// file on unknowable intent, so reject instead.
 	contentRunes := len([]rune(content))
-	cleaned := StripZeroWidthFormat(StripOrphanVariationSelectors(content))
+	cleaned := stripEditInvisible(content)
 	cleanedSelectors := contentRunes - len([]rune(cleaned))
 	cleanedCounts := CountStrippedInvisible(content, cleaned)
 	if cleaned == "" && content != "" {

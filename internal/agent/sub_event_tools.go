@@ -271,6 +271,14 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		}
 	}
 
+	// Model-facing advisory for repeated approximate-match failures. It is
+	// appended after the result hooks (matching MainAgent) so a user-configured
+	// on_before_tool_result_append transformation can never overwrite it. Only
+	// contextResult changes; the display result (and the TUI) stays untouched.
+	// Runs behind the efficiency note so it lands last among the agent-appended
+	// notes.
+	contextResult = appendEditRetryAdvice(&s.editMatchFailStreak, contextResult, result.Name, result.ArgsJSON, s.toolExecutionPipeline().effectiveToolBaseDir(), result.Error, isError)
+
 	s.fireHookBackground(s.turn.Ctx, hook.OnToolResult, s.turn.ID, buildToolResultHookData(
 		result.Name,
 		result.ArgsJSON,

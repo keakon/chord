@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -48,6 +49,115 @@ func TestNormalizePunctWithSpaceFoldingIgnoresLeadingInvisibleRune(t *testing.T)
 	}
 	if len(spans) != 2 || spans[0] != (punctSpan{start: 1, end: 2}) {
 		t.Fatalf("spans = %+v, want [{1,2} {2,3}]", spans)
+	}
+}
+
+// TestNormalizePunctWithSpaceFoldingFoldsOrphanCombiningMark guards the
+// tokenizer-artifact path: a combining mark (U+0304) at the start of the
+// string or after a non-letter rune is folded out, while the same mark
+// after a letter is preserved as a potential legitimate diacritic.
+
+func TestNormalizePunctWithSpaceFoldingFoldsOrphanCombiningMark(t *testing.T) {
+	// U+0304 after a space (the "### ̄.2.1" shape) is orphaned and folded.
+	norm, spans := normalizePunctWithSpaceFolding([]rune("### \u0304.2.1"))
+	if got := string(norm); got != "### .2.1" {
+		t.Fatalf("norm = %q, want %q (orphan U+0304 folded)", got, "### .2.1")
+	}
+	// The orphan mark merges into the preceding visible rune's span so
+	// splice-back keeps the file's bytes — the space at raw index 3
+	// absorbs it (span {3 5} covers ' ' + U+0304); normalized index 3 is
+	// that space in "### .2.1".
+	if len(spans) < 4 || spans[3] != (punctSpan{start: 3, end: 5}) {
+		t.Fatalf("space span = %+v, want {3 5} (' ' absorbs the orphan mark)", spans)
+	}
+
+	// Same mark after a letter is preserved (Arabic/Devanagari/Vietnamese).
+	norm2, _ := normalizePunctWithSpaceFolding([]rune("a\u0304b"))
+	if got := string(norm2); got != "a\u0304b" {
+		t.Fatalf("norm = %q, want %q (letter-combining mark preserved)", got, "a\u0304b")
+	}
+
+	// Orphan mark at the very start is folded (no preceding rune at all).
+	norm3, _ := normalizePunctWithSpaceFolding([]rune("\u0304ab"))
+	if got := string(norm3); got != "ab" {
+		t.Fatalf("norm = %q, want %q (leading orphan mark folded)", got, "ab")
+	}
+}
+
+// TestNormalizePunctWithSpaceFoldingPreservesStackedCombiningMarks guards
+// legitimate multi-mark diacritics: a base letter carrying two combining
+// marks (Vietnamese ấ in NFD is a + U+0302 circumflex + U+0301 acute) must
+// keep both marks, because the second mark's base is the letter under the
+// earlier mark, not the mark itself. Folding it would corrupt the script.
+
+func TestNormalizePunctWithSpaceFoldingPreservesStackedCombiningMarks(t *testing.T) {
+	// a + U+0302 + U+0301 = ấ (NFD); both marks sit on the letter a.
+	norm, _ := normalizePunctWithSpaceFolding([]rune("a\u0302\u0301b"))
+	if got := string(norm); got != "a\u0302\u0301b" {
+		t.Fatalf("norm = %q, want %q (stacked combining marks preserved)", got, "a\u0302\u0301b")
+	}
+
+	// Three marks on one base stay intact as well.
+	norm2, _ := normalizePunctWithSpaceFolding([]rune("e\u0301\u0302\u0303"))
+	if got := string(norm2); got != "e\u0301\u0302\u0303" {
+		t.Fatalf("norm = %q, want %q (three stacked marks preserved)", got, "e\u0301\u0302\u0303")
+	}
+
+	// A mark after a digit is still orphaned and folded — the stacked-mark
+	// fix must not swallow marks whose base is not a letter.
+	norm3, _ := normalizePunctWithSpaceFolding([]rune("1\u03042"))
+	if got := string(norm3); got != "12" {
+		t.Fatalf("norm = %q, want %q (mark after digit still folded)", got, "12")
+	}
+}
+
+// TestEditToolTolerantMatchFoldsOrphanCombiningMark guards the full Edit
+// flow: a model copy of a heading that leaked an orphan U+0304 still
+// replaces the file's clean text through the tolerant fallback.
+
+func TestEditToolTolerantMatchFoldsOrphanCombiningMark(t *testing.T) {
+	dir := t.TempDir()
+	file := "## 3.2.1 Heading\nbody\n"
+	path := writeEditFixture(t, dir, "demo.md", file)
+	oldText := "## \u03043.2.1 Heading\n"
+	newText := "## 3.2.1 Renamed\n"
+	out, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": oldText, "new_string": newText,
+	})
+	if err != nil {
+		t.Fatalf("Execute err = %v, want tolerant success", err)
+	}
+	if !strings.Contains(out, "punctuation/whitespace-tolerant") {
+		t.Fatalf("output = %q, want punctuation/whitespace-tolerant marker", out)
+	}
+	got, _ := os.ReadFile(path)
+	if want := "## 3.2.1 Renamed\nbody\n"; string(got) != want {
+		t.Fatalf("file = %q, want %q (orphan U+0304 folded during match)", string(got), want)
+	}
+}
+
+// TestEditToolStripsOrphanCombiningMarkFromNewString guards the write path:
+// a model that leaks an orphan U+0304 into new_string must not have it written
+// to the file. The old_string matches the file cleanly (no tolerance needed),
+// but the orphan mark in the replacement is dropped from the bytes that land in
+// the file and reported in the cleaned-invisible note.
+func TestEditToolStripsOrphanCombiningMarkFromNewString(t *testing.T) {
+	dir := t.TempDir()
+	path := writeEditFixture(t, dir, "demo.md", "## 3.2.1 Heading\nbody\n")
+	out, err := runEdit(t, dir, map[string]any{
+		"path":       path,
+		"old_string": "## 3.2.1 Heading\n",
+		"new_string": "## \u03043.2.1 Renamed\n",
+	})
+	if err != nil {
+		t.Fatalf("Execute err = %v, want success", err)
+	}
+	if !strings.Contains(out, "cleaned 1 invisible character") {
+		t.Fatalf("output = %q, want cleaned-invisible note", out)
+	}
+	got, _ := os.ReadFile(path)
+	if want := "## 3.2.1 Renamed\nbody\n"; string(got) != want {
+		t.Fatalf("file = %q, want %q (orphan U+0304 dropped from new_string)", string(got), want)
 	}
 }
 
@@ -328,5 +438,96 @@ func TestAlignEditWindowLines(t *testing.T) {
 					tc.old, tc.src, oldExtra, srcExtra, blankOnly, tc.wantOld, tc.wantSrc, tc.wantBlankOnly)
 			}
 		})
+	}
+}
+
+// IsApproximateMatchFailure classifies the drift/stale-read failure that a
+// fresh bounded read fixes, and excludes failures that need different
+// arguments (ambiguous multi-match) or more context instead.
+
+func TestIsApproximateMatchFailure(t *testing.T) {
+	editNotFound := errors.New("old_string not found in file, even after punctuation/whitespace tolerance. Closest match is at line 3 (96% similar, 5 character difference)")
+	editNotFoundLargeDrift := errors.New("old_string not found in file, even after punctuation/whitespace tolerance. Whole lines drifted (4 vs 4 extra line(s)); read the file with offset=3 limit=9")
+	editAmbiguous := errors.New("old_string found 2 times, provide more context or set replace_all to true")
+	patchNotFound := errors.New("hunk not found (1/1); the expected text is only part of current line 3; the file may have changed")
+	patchUnsafe := errors.New("hunk not found (1/1); a punctuation/whitespace-tolerant candidate exists at line 5, but the replacement cannot preserve unchanged text safely")
+	validation := errors.New("args.path must be a string")
+
+	cases := []struct {
+		tool string
+		name string
+		err  error
+		want bool
+	}{
+		{NameEdit, "edit not found", editNotFound, true},
+		{NameEdit, "edit large drift", editNotFoundLargeDrift, true},
+		{NameEdit, "edit ambiguous", editAmbiguous, false},
+		{NameApplyPatch, "patch not found", patchNotFound, true},
+		{NameApplyPatch, "patch unsafe", patchUnsafe, true},
+		{NameEdit, "validation", validation, false},
+	}
+	for _, tc := range cases {
+		if got := IsApproximateMatchFailure(tc.tool, tc.err); got != tc.want {
+			t.Errorf("IsApproximateMatchFailure(%s, %s) = %v, want %v", tc.tool, tc.name, got, tc.want)
+		}
+	}
+	if IsApproximateMatchFailure(NameApplyPatch, editNotFound) {
+		t.Error("edit failure classified as apply_patch failure")
+	}
+	if IsApproximateMatchFailure(NameEdit, patchNotFound) {
+		t.Error("apply_patch failure classified as edit failure")
+	}
+	if IsApproximateMatchFailure(NameEdit, nil) {
+		t.Error("nil error classified as a match failure")
+	}
+}
+
+// TestStripOrphanCombiningMarks guards the write-path half of the orphan-mark
+// fold: the matching normalizer folds orphan combining marks during comparison,
+// but a leaked mark in the text that actually gets written used to survive into
+// the file. StripOrphanCombiningMarks removes it without touching marks that
+// legitimately sit on a base character.
+func TestStripOrphanCombiningMarks(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		// Tokenizer artifact on a copied heading: orphaned mark is dropped.
+		{"### \u03043.2.1 Heading", "### 3.2.1 Heading"},
+		// Orphan mark after a digit.
+		{"1\u03042", "12"},
+		// Leading orphan mark.
+		{"\u0304ab", "ab"},
+		// Mark after a letter is preserved (legitimate single diacritic).
+		{"a\u0304b", "a\u0304b"},
+		// Stacked marks on one letter survive intact (Vietnamese, Arabic).
+		{"e\u0302\u0301", "e\u0302\u0301"},
+		{"\u0645\u0651\u064E", "\u0645\u0651\u064E"},
+		// A keycap emoji ("1\ufe0f\u20e3"): the variation selector and
+		// enclosing keycap are combining marks but owned by
+		// StripOrphanVariationSelectors and must NOT be stripped here.
+		{"1\ufe0f\u20e3", "1\ufe0f\u20e3"},
+		// Plain ASCII is untouched.
+		{"package main", "package main"},
+	}
+	for _, tc := range cases {
+		if got := StripOrphanCombiningMarks(tc.in); got != tc.want {
+			t.Errorf("StripOrphanCombiningMarks(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestCountStrippedInvisibleReportsCombiningMarks checks that an orphaned
+// combining mark removed by the write-path strip is counted and reported the
+// same way the zero-width set is, while a mark that is kept (sitting on a
+// letter) never shows up.
+func TestCountStrippedInvisibleReportsCombiningMarks(t *testing.T) {
+	// Orphan mark removed: reported as one cleaned rune.
+	if got := CountStrippedInvisible("1\u03042", "12"); got['\u0304'] != 1 {
+		t.Errorf("orphan mark not counted: %v", got)
+	}
+	// Kept mark (on a letter): nothing to report.
+	if got := CountStrippedInvisible("a\u0304b", "a\u0304b"); len(got) != 0 {
+		t.Errorf("kept mark should not be counted: %v", got)
 	}
 }

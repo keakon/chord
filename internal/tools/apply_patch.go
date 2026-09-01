@@ -268,12 +268,15 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-	// Strip orphaned variation selectors the way replace_edit does: models
-	// leak them into patch text, the tolerance matching layers already absorb
-	// them, and leaving them in added lines would write invisible garbage to
-	// the target files. A patch that strips to empty had no visible content
-	// to begin with; control characters cannot be cleaned safely — reject
-	// both and route binary content to a shell command or script.
+	// Strip orphaned variation selectors the way replace_edit does: models leak
+	// them into patch text and the tolerance matching layers already absorb
+	// them. Orphaned combining marks are handled separately — they stay in the
+	// patch so the tolerance matcher can fold them (which is what fires the
+	// "punctuation/whitespace-tolerant" note for headings like "### ̄.2.1"),
+	// and are cleaned off the bytes actually written below. A patch that strips
+	// to empty had no visible content to begin with; control characters cannot
+	// be cleaned safely — reject both and route binary content to a shell
+	// command or script.
 	patchLen := len([]rune(args.Patch))
 	strippedPatch := StripZeroWidthFormat(StripOrphanVariationSelectors(args.Patch))
 	cleanedCounts := CountStrippedInvisible(args.Patch, strippedPatch)
@@ -286,6 +289,54 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 		return "", fmt.Errorf("patch %w", err)
 	}
 	result, err := buildApplyPatchPlanWithOutcomes(ctx, args.Patch, t.BaseDir)
+	// Clean orphaned combining marks from the bytes that will actually be
+	// written. The tolerance matcher already folded them out of the context
+	// lines (and emitted its note), but a mark the model leaked into an added
+	// (+) line would otherwise land in the file as a floating diacritic.
+	// AfterBytes is what commitMutation writes; AfterText mirrors it for LSP
+	// diagnostics, so both are kept in sync, and the removed runes are merged
+	// into cleanedCounts so the result note reports them.
+	// AfterBytes carries the target file's own encoding — Update mutations
+	// are re-encoded into it (UTF-16/GB18030 included) — so the clean runs on
+	// decoded text and re-encodes with that same encoding; running the UTF-8
+	// strip over raw non-UTF-8 bytes would decode byte pairs as phantom marks
+	// and rewrite every undecodable byte as U+FFFD, destroying the file.
+	// Mutations whose bytes do not decode and re-encode byte-identically
+	// (binary content, or an encoding the decoder cannot vouch for) are left
+	// untouched.
+	if cleanedCounts == nil {
+		cleanedCounts = map[rune]int{}
+	}
+	var strippedCombining int
+	for i := range result.Plan.Mutations {
+		m := &result.Plan.Mutations[i]
+		if len(m.AfterBytes) == 0 {
+			continue
+		}
+		decoded, derr := decodeTextBytes(m.AfterBytes, m.TargetPath)
+		if derr != nil {
+			continue
+		}
+		if roundTrip, rerr := encodeString(decoded.Text, decoded.Encoding); rerr != nil || !bytes.Equal(roundTrip, m.AfterBytes) {
+			continue
+		}
+		text := decoded.Text
+		cleaned := stripEditInvisible(text)
+		if cleaned == text {
+			continue
+		}
+		encoded, encErr := encodeString(cleaned, decoded.Encoding)
+		if encErr != nil {
+			continue
+		}
+		m.AfterBytes = encoded
+		m.AfterText = cleaned
+		for r, c := range CountStrippedInvisible(text, cleaned) {
+			cleanedCounts[r] += c
+			strippedCombining += c
+		}
+	}
+	strippedSelectors += strippedCombining
 	if err != nil {
 		// Parse or snapshot failed before any operation could commit: nothing
 		// was modified, so the atomic error contract is preserved.

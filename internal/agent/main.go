@@ -681,6 +681,12 @@ type MainAgent struct {
 	// LSPReviews; this overlay only reminds the model to check them. It is
 	// request-scoped and never persisted to durable context.
 	pendingLSPDiagnosticOverlay string
+	// editMatchFailStreak counts repeated approximate-match failures per
+	// target path for edit/apply_patch within the current turn, so the agent
+	// can advise a fresh bounded read once the model has burned retries on
+	// drifted target text. Reset at every new turn; the event loop is the
+	// only reader/writer.
+	editMatchFailStreak map[string]int
 
 	// pendingRecoveryPrompt is a request-scoped recovery prompt injected after
 	// length-recovery auto compaction succeeds. It is consumed as a one-shot

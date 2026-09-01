@@ -164,6 +164,12 @@ type SubAgent struct {
 	promotedToolQueue          []*toolResult // event-loop-owned FIFO; avoids sending results back into the active loop
 	pendingContinue            *continueMsg  // event-loop-owned restart deferred until the current LLM request exits
 
+	// editMatchFailStreak counts repeated approximate-match failures per
+	// target path for edit/apply_patch within the current turn, mirroring
+	// MainAgent, so repeated drift failures also steer SubAgent retries
+	// toward a fresh bounded read. Event-loop-owned; no locking needed.
+	editMatchFailStreak map[string]int
+
 	// Idle timeout: starts when LLM returns pure text (no tool_calls).
 	// MainAgent auto-intervenes on timeout.
 	idleTimer      *time.Timer
@@ -1075,6 +1081,10 @@ func (s *SubAgent) newTurn() *Turn {
 		}
 		s.turn.Cancel()
 	}
+	// A fresh turn must not inherit the previous turn's edit-match failure
+	// history: a new mailbox delivery targets new work, so stale streaks
+	// would mis-advise the model.
+	s.editMatchFailStreak = nil
 	s.nextTurnID++
 	ctx, cancel := context.WithCancel(s.parentCtx)
 	s.turn = &Turn{

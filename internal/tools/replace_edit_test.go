@@ -136,10 +136,11 @@ func TestEditToolPunctuationTolerantMatchAmbiguousErrors(t *testing.T) {
 	}
 }
 
-// Tier 2: when exact/trailing-newline/punctuation tolerance all fail and the
-// mismatch is a character-level difference (dropped rune, extra word), the
-// error locates the closest matching block with the exact file line and the
-// difference, so the model can rebuild old_string without a re-read.
+// When every matching attempt (exact, trailing-newline, punctuation
+// tolerance) fails on a character-level difference (dropped rune, extra
+// word), the error locates the closest matching block with the exact file
+// line and the difference, so the model can rebuild old_string without a
+// re-read.
 func TestEditToolClosestMatchPinpointsDifference(t *testing.T) {
 	dir := t.TempDir()
 	// The model's old_string drops the ")" — a missing character, which is
@@ -185,7 +186,7 @@ func TestEditToolClosestMatchRelativeLineNumber(t *testing.T) {
 	file := b.String()
 	path := writeEditFixture(t, dir, "demo.md", file)
 	oldText := "alpha beta\ngammax delta\n"
-	newText := "alpha beta\ngamma delta\n"
+	newText := "alpha beta\ngamma epsilon\n"
 	_, err := runEdit(t, dir, map[string]any{
 		"path": path, "old_string": oldText, "new_string": newText,
 	})
@@ -201,7 +202,7 @@ func TestEditToolClosestMatchRelativeLineNumber(t *testing.T) {
 	}
 }
 
-// Tier 3: when no window is close enough (the old_string targets something
+// When no window is close enough (the old_string targets something
 // fundamentally different), the generic re-read hint still applies.
 func TestEditToolClosestMatchFallsBackToGenericHint(t *testing.T) {
 	dir := t.TempDir()
@@ -703,8 +704,8 @@ func TestEditToolNotFoundSaysToleranceAlreadyTried(t *testing.T) {
 	path := writeEditFixture(t, dir, "demo.md", "real content line\n")
 	// A content-level mismatch: the tolerance fallback (punctuation, inter-
 	// word space) has already been tried and cannot bridge it. The error
-	// must say so, and the Tier-2 closest-match path pinpoints the exact
-	// file line so the model can rebuild old_string without a full re-read.
+	// must say so, and the closest-match path pinpoints the exact file
+	// line so the model can rebuild old_string without a full re-read.
 	_, err := runEdit(t, dir, map[string]any{
 		"path": path, "old_string": "real contant line\n", "new_string": "replacement\n",
 	})
@@ -715,13 +716,72 @@ func TestEditToolNotFoundSaysToleranceAlreadyTried(t *testing.T) {
 		t.Fatalf("err = %q, want tolerance-already-tried note", err)
 	}
 	if !strings.Contains(err.Error(), "Closest match is at line 1") {
-		t.Fatalf("err = %q, want Tier-2 closest-match location", err)
+		t.Fatalf("err = %q, want closest-match location", err)
 	}
 	if !strings.Contains(err.Error(), "file line 1: \"real content line\"") {
 		t.Fatalf("err = %q, want the exact file line verbatim (not normalized): %q", err, "file line 1: \"real content line\"")
 	}
 	if !strings.Contains(err.Error(), "your line 1: \"real contant line\"") {
 		t.Fatalf("err = %q, want the model's differing line verbatim (not normalized): %q", err, "your line 1: \"real contant line\"")
+	}
+}
+
+// When whole lines drifted past what the differing-lines display can
+// reconstruct, the error must not send the model back to its (stale) memory:
+// it names the drift and hands over executable read coordinates for the
+// closest-match range, plus the small-anchor alternative.
+func TestEditToolClosestMatchLargeDriftDirectsFreshRead(t *testing.T) {
+	dir := t.TempDir()
+	var file strings.Builder
+	for i := 1; i <= 20; i++ {
+		fmt.Fprintf(&file, "context line %d\n", i)
+	}
+	path := writeEditFixture(t, dir, "demo.md", file.String())
+	// An 8-line block anchored at file line 3 with typos on four of its
+	// lines: more differing lines than the error display can show, so the
+	// shown lines cannot reconstruct the block. The error must hand over
+	// read coordinates for the closest-match range instead of telling the
+	// model to copy from the truncated display (or from stale memory).
+	var old strings.Builder
+	for i := 3; i <= 10; i++ {
+		if i == 4 || i == 6 || i == 8 || i == 10 {
+			fmt.Fprintf(&old, "context line %d typox\n", i)
+		} else {
+			fmt.Fprintf(&old, "context line %d\n", i)
+		}
+	}
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": old.String(), "new_string": "replaced block\n",
+	})
+	if err == nil {
+		t.Fatal("Execute err = nil, want closest-match error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "offset=3 limit=8") {
+		t.Fatalf("err = %q, want read offset=3 limit=8 for the closest-match range", msg)
+	}
+	if !strings.Contains(msg, "2-4 line anchor") {
+		t.Fatalf("err = %q, want small-anchor alternative", msg)
+	}
+	if strings.Contains(msg, "copy them exactly") {
+		t.Fatalf("err = %q, memory-rebuild hint must not appear under large drift", msg)
+	}
+}
+
+// A character-level difference with no line drift keeps the original
+// rebuild-from-displayed-lines hint; read coordinates are only for drift.
+func TestEditToolClosestMatchSmallDiffKeepsCopyHint(t *testing.T) {
+	dir := t.TempDir()
+	path := writeEditFixture(t, dir, "demo.md", "alpha beta\ngamma delta\n")
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": "alpha betax\ngamma delta\n", "new_string": "alpha tau\ngamma delta\n",
+	})
+	if err == nil {
+		t.Fatal("Execute err = nil, want closest-match error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "copy them exactly") {
+		t.Fatalf("err = %q, want copy-them-exactly hint", msg)
 	}
 }
 
@@ -791,7 +851,7 @@ func TestEditToolClosestMatchSkipsOversizedWindows(t *testing.T) {
 	// cap; the later 2-line window is cheap and one character away.
 	oldText := "alpha betax\ngamma delta\n"
 	_, err := runEdit(t, dir, map[string]any{
-		"path": path, "old_string": oldText, "new_string": "alpha beta\ngamma delta\n",
+		"path": path, "old_string": oldText, "new_string": "alpha beta\ngamma zeta\n",
 	})
 	if err == nil {
 		t.Fatal("Execute err = nil, want closest-match error")
@@ -898,7 +958,7 @@ func TestEditToolClosestMatchBeyondOldLineCap(t *testing.T) {
 	path := writeEditFixture(t, dir, "demo.md", file)
 	oldText := "alpha betax\n"
 	_, err := runEdit(t, dir, map[string]any{
-		"path": path, "old_string": oldText, "new_string": "alpha beta\n",
+		"path": path, "old_string": oldText, "new_string": "alpha tau\n",
 	})
 	if err == nil {
 		t.Fatal("Execute err = nil, want closest-match error")
@@ -916,7 +976,7 @@ func TestEditToolClosestMatchStillRefusedPastCap(t *testing.T) {
 	path := writeEditFixture(t, dir, "demo.md", file)
 	oldText := "alpha betax\n"
 	_, err := runEdit(t, dir, map[string]any{
-		"path": path, "old_string": oldText, "new_string": "alpha beta\n",
+		"path": path, "old_string": oldText, "new_string": "alpha tau\n",
 	})
 	if err == nil {
 		t.Fatal("Execute err = nil, want generic error")
