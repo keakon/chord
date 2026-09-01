@@ -58,6 +58,11 @@ func applyBlockStyles(t Theme) {
 	ThinkingLabelStyle = LabelStyle.
 		Background(lipgloss.Color(t.ThinkingLabelBg)).
 		Foreground(lipgloss.Color(t.LabelBadgeFg))
+	// Section labels sit inside the checkpoint card, so they are plain emphasis
+	// rather than a badge: a second badge style would read as a nested card.
+	CompactionSectionLabelStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(t.DimFg))
 
 	FocusedCardStyle = lipgloss.NewStyle().
 		Padding(0, 1).

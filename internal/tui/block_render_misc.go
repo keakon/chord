@@ -95,7 +95,25 @@ func (b *Block) renderCompactionSummary(width int) []string {
 	// Compaction summaries are always fully expanded (see Block.Toggle); the
 	// complete raw content including any [Context compressed] archive section
 	// stays visible, so no [space] hints are rendered.
-	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), contentWidth, &b.richMarkdownHL)
+	//
+	// Each protocol region renders as its own Markdown document: a bare
+	// "[Session Anchors]" line has no block-level Markdown meaning, so rendering
+	// the checkpoint as one document would merge every marker into the paragraph
+	// that follows it.
+	var bodyLines []string
+	sections := splitCompactionSections(b.Content)
+	for len(b.compactionSectionHL) < len(sections) {
+		b.compactionSectionHL = append(b.compactionSectionHL, nil)
+	}
+	for i, section := range sections {
+		if len(bodyLines) > 0 {
+			bodyLines = append(bodyLines, "")
+		}
+		if section.label != "" {
+			bodyLines = append(bodyLines, CompactionSectionLabelStyle.Render(section.label))
+		}
+		bodyLines = append(bodyLines, renderRichMarkdownContent(section.body, contentWidth, &b.compactionSectionHL[i])...)
+	}
 	if len(bodyLines) == 0 {
 		bodyLines = []string{""}
 	}

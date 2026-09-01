@@ -21,6 +21,7 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	clone.patchPreviewLen = 0
 	clone.patchPreviewText = ""
 	clone.richMarkdownHL = nil
+	clone.compactionSectionHL = nil
 	clone.thinkingStreamSettled = nil
 	clone.toolArgsCacheKeys = append([]string(nil), src.toolArgsCacheKeys...)
 	if len(src.toolArgsCacheVals) > 0 {

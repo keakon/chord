@@ -226,6 +226,11 @@ type Block struct {
 	// richMarkdownHL caches lexer detection and rendered snippets for Chord-owned
 	// markdown cards that share assistant fenced-code rendering.
 	richMarkdownHL *codeHighlighter
+	// compactionSectionHL holds one highlighter slot per checkpoint section. The
+	// section split is deterministic for a given card content, so a slot's
+	// sample stays stable across re-renders; sharing one slot across sections would
+	// reset the lexer cache once per section on every render.
+	compactionSectionHL []*codeHighlighter
 
 	// Render caches - invalidated when content or width changes
 	mdCache                      []string
