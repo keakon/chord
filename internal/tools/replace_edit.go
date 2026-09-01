@@ -293,9 +293,18 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			// target range instead.
 			drifted := closest.LineDiffOldExtra + closest.LineDiffSrcExtra
 			oldLineCount := strings.Count(strings.TrimSuffix(decodedOld, "\n"), "\n") + 1
-			if drifted > maxDiffLinesShown || len(closest.Diffs) >= maxDiffLinesShown {
-				fmt.Fprintf(&b, "Whole lines drifted (%d vs %d extra line(s) between you and the file), so the lines above are not enough to rebuild old_string: read the file with offset=%d limit=%d (the closest match range), rebuild old_string from that fresh output, or use a smaller 2-4 line anchor; do not retype the block from memory",
-					closest.LineDiffOldExtra, closest.LineDiffSrcExtra, closest.StartLine, oldLineCount)
+			if drifted > maxDiffLinesShown || closest.DiffLines > maxDiffLinesShown {
+				var reason string
+				if drifted > 0 {
+					reason = fmt.Sprintf("Whole lines drifted (%d vs %d extra line(s) between you and the file)", closest.LineDiffOldExtra, closest.LineDiffSrcExtra)
+					if closest.DiffLines > maxDiffLinesShown {
+						reason += fmt.Sprintf(" and %d+ lines differ in place", maxDiffLinesShown)
+					}
+				} else {
+					reason = fmt.Sprintf("More than %d lines differ in place", maxDiffLinesShown)
+				}
+				fmt.Fprintf(&b, "%s, so the lines above are not enough to rebuild old_string: read the file with offset=%d limit=%d (the closest match range), rebuild old_string from that fresh output, or use a smaller 2-4 line anchor; do not retype the block from memory",
+					reason, closest.StartLine, oldLineCount)
 			} else {
 				b.WriteString("Rebuild old_string from the file lines above (copy them exactly), then retry; the difference is beyond punctuation/whitespace tolerance")
 			}

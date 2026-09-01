@@ -768,6 +768,73 @@ func TestEditToolClosestMatchLargeDriftDirectsFreshRead(t *testing.T) {
 	}
 }
 
+// In-place replacements (a retyped line between two intact lines) are
+// substitutions, not drift: the error shows the differing lines without
+// claiming a line-count difference, and four or fewer differing lines stay
+// copyable from the display instead of forcing a fresh read.
+func TestEditToolClosestMatchInPlaceReplacementIsNotDrift(t *testing.T) {
+	dir := t.TempDir()
+	file := "func a() {\n\tcallOne()\n}\n\nfunc b() {\n\tcallTwo()\n}\n"
+	path := writeEditFixture(t, dir, "a.go", file)
+	_, err := runEdit(t, dir, map[string]any{
+		"path":       path,
+		"old_string": "func a() {\n\tcallOneX()\n}\n\nfunc b() {\n\tcallTwo()\n}\n",
+		"new_string": "func a() {\n\tcallOne()\n}\n\nfunc b() {\n\tcallTwo()\n}\n",
+	})
+	if err == nil {
+		t.Fatal("Execute err = nil, want closest-match error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "line-count difference") {
+		t.Fatalf("err = %q, an in-place replacement must not report a line-count difference", msg)
+	}
+	if !strings.Contains(msg, "your line 2") || !strings.Contains(msg, "callOneX()") {
+		t.Fatalf("err = %q, want the differing line shown", msg)
+	}
+	if !strings.Contains(msg, "copy them exactly") {
+		t.Fatalf("err = %q, a single retyped line stays copyable from the display", msg)
+	}
+	if strings.Contains(msg, "read the file with offset=") {
+		t.Fatalf("err = %q, a single retyped line must not force a fresh read", msg)
+	}
+}
+
+// Once more lines differ in place than the display can show, the copyable
+// hint would send the model back to stale memory; the error must switch to
+// read coordinates without inventing a line-count difference.
+func TestEditToolClosestMatchManyInPlaceReplacementsDirectsFreshRead(t *testing.T) {
+	dir := t.TempDir()
+	var file strings.Builder
+	for i := 1; i <= 10; i++ {
+		fmt.Fprintf(&file, "value %d\n", i)
+	}
+	path := writeEditFixture(t, dir, "values.txt", file.String())
+	var old strings.Builder
+	for i := 1; i <= 10; i++ {
+		if i == 2 || i == 4 || i == 6 || i == 8 {
+			fmt.Fprintf(&old, "value %dx\n", i)
+		} else {
+			fmt.Fprintf(&old, "value %d\n", i)
+		}
+	}
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": old.String(), "new_string": "rewritten\n",
+	})
+	if err == nil {
+		t.Fatal("Execute err = nil, want closest-match error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "line-count difference") {
+		t.Fatalf("err = %q, in-place replacements must not report a line-count difference", msg)
+	}
+	if !strings.Contains(msg, "read the file with offset=1 limit=10") {
+		t.Fatalf("err = %q, want read coordinates once the display cannot show every differing line", msg)
+	}
+	if strings.Contains(msg, "copy them exactly") {
+		t.Fatalf("err = %q, the copyable hint must not appear once the display truncates", msg)
+	}
+}
+
 // A character-level difference with no line drift keeps the original
 // rebuild-from-displayed-lines hint; read coordinates are only for drift.
 func TestEditToolClosestMatchSmallDiffKeepsCopyHint(t *testing.T) {

@@ -559,10 +559,16 @@ type editClosestMatchResult struct {
 	// LineDiffBlankOnly reports that every unpaired line in the alignment is
 	// blank, so the drift is a blank-line count mismatch.
 	LineDiffBlankOnly bool
-	// Diffs lists the first few differing lines inside the window (see
-	// editDiffLine), for multi-line drifts. The first entry duplicates
-	// FileDiffLine/Expected/Actual for single-line cases.
+	// Diffs lists the first maxDiffLinesShown differing lines inside the
+	// window (see editDiffLine), for multi-line drifts. The first entry
+	// duplicates FileDiffLine/Expected/Actual for single-line cases.
 	Diffs []editDiffLine
+	// DiffLines is the uncapped total of differing lines inside the window,
+	// so the caller can tell a display that showed every differing line
+	// (copyable) from one that truncated at maxDiffLinesShown (needs a
+	// fresh read). It is the position-wise count, independent of the
+	// line-level alignment that pairs same-height replacements.
+	DiffLines int
 }
 
 // maxEditSuggestionLines caps the fuzzy window scan so a failed edit on a
@@ -778,33 +784,6 @@ func editClosestMatch(content, oldText string) (editClosestMatchResult, bool) {
 			DiffRunes:  dist,
 			Similarity: sim,
 		}
-		// First differing line within the window. FileDiffLine is the
-		// absolute file position; ExpectedDiffLine is the line inside the
-		// model's block (relative), so "your line N" never shows a file
-		// offset. Expected/Actual carry the original lines verbatim — the
-		// model must copy the file text exactly, and a normalized variant
-		// (spaces collapsed, punctuation folded) is not copyable.
-		for k := range n {
-			if normOld[k] != normSrc[start+k] {
-				if len(best.Diffs) == 0 {
-					best.FileDiffLine = start + k + 1
-					best.ExpectedDiffLine = k + 1
-					best.Expected = oldLines[k]
-					best.Actual = srcLines[start+k]
-					best.ExpectedRaw = oldLines[k]
-					best.ActualRaw = srcLines[start+k]
-				}
-				best.Diffs = append(best.Diffs, editDiffLine{
-					FileLine:     start + k + 1,
-					ExpectedLine: k + 1,
-					Expected:     truncateToolLine(oldLines[k]),
-					Actual:       truncateToolLine(srcLines[start+k]),
-				})
-				if len(best.Diffs) >= maxDiffLinesShown {
-					break
-				}
-			}
-		}
 		if sim == 1.0 {
 			break // identical window cannot be beaten
 		}
@@ -827,6 +806,7 @@ func editClosestMatch(content, oldText string) (editClosestMatchResult, bool) {
 	// folded) is not copyable.
 	for k := range n {
 		if normOld[k] != normSrc[start+k] {
+			best.DiffLines++
 			if len(best.Diffs) == 0 {
 				best.FileDiffLine = start + k + 1
 				best.ExpectedDiffLine = k + 1
@@ -835,14 +815,13 @@ func editClosestMatch(content, oldText string) (editClosestMatchResult, bool) {
 				best.ExpectedRaw = oldLines[k]
 				best.ActualRaw = srcLines[start+k]
 			}
-			best.Diffs = append(best.Diffs, editDiffLine{
-				FileLine:     start + k + 1,
-				ExpectedLine: k + 1,
-				Expected:     truncateToolLine(oldLines[k]),
-				Actual:       truncateToolLine(srcLines[start+k]),
-			})
-			if len(best.Diffs) >= maxDiffLinesShown {
-				break
+			if len(best.Diffs) < maxDiffLinesShown {
+				best.Diffs = append(best.Diffs, editDiffLine{
+					FileLine:     start + k + 1,
+					ExpectedLine: k + 1,
+					Expected:     truncateToolLine(oldLines[k]),
+					Actual:       truncateToolLine(srcLines[start+k]),
+				})
 			}
 		}
 	}
@@ -860,20 +839,35 @@ func editClosestMatch(content, oldText string) (editClosestMatchResult, bool) {
 // comparison cannot: with one blank line too many in the model's block, every
 // following line compares against its neighbor and the real difference is
 // masked by a wall of phantom mismatches.
+//
+// Leftover lines that sit between the same two matches on both sides are a
+// same-height replacement — the i-th leftover line on one side stands for the
+// i-th on the other — so they pair up as substitutions and only each side's
+// surplus beyond that pairing counts as extra. Reporting a 1:1 replacement as
+// "one extra line on each side" would tell the model its block grew and
+// shrank at once when its height simply matches the window's.
 func alignEditWindowLines(oldLines, srcLines []string, srcStart int, norm func(string) string) (oldExtra, srcExtra int, blankOnly bool) {
 	n := len(oldLines)
 	// The window is the block height when the caller passes a full-height
 	// window (edit), but apply_patch can pass a shorter tail window when the
 	// file runs out of lines — clamp so the shorter side wins.
 	m := min(n, len(srcLines)-srcStart)
+	normOld := make([]string, n)
+	for i, l := range oldLines {
+		normOld[i] = norm(l)
+	}
+	normSrc := make([]string, m)
+	for j := range m {
+		normSrc[j] = norm(srcLines[srcStart+j])
+	}
 	dp := make([][]int, n+1)
 	for i := range dp {
 		dp[i] = make([]int, m+1)
 	}
 	for i := 1; i <= n; i++ {
-		o := norm(oldLines[i-1])
+		o := normOld[i-1]
 		for j := 1; j <= m; j++ {
-			if o == norm(srcLines[srcStart+j-1]) {
+			if o == normSrc[j-1] {
 				dp[i][j] = dp[i-1][j-1] + 1
 			} else {
 				dp[i][j] = max(dp[i-1][j], dp[i][j-1])
@@ -883,6 +877,31 @@ func alignEditWindowLines(oldLines, srcLines []string, srcStart int, norm func(s
 	lcs := dp[n][m]
 	oldExtra = n - lcs
 	srcExtra = m - lcs
+	// Backtrack one optimal alignment (ties consume old lines first, so the
+	// path is deterministic), then pair each run of unmatched lines between
+	// two matches position-wise as substitutions.
+	var matches [][2]int
+	for i, j := n, m; i > 0 && j > 0; {
+		switch {
+		case normOld[i-1] == normSrc[j-1]:
+			matches = append(matches, [2]int{i, j})
+			i, j = i-1, j-1
+		case dp[i-1][j] >= dp[i][j-1]:
+			i--
+		default:
+			j--
+		}
+	}
+	substitutions := 0
+	prevOld, prevSrc := 0, 0
+	for k := len(matches) - 1; k >= 0; k-- {
+		i, j := matches[k][0], matches[k][1]
+		substitutions += min(i-1-prevOld, j-1-prevSrc)
+		prevOld, prevSrc = i, j
+	}
+	substitutions += min(n-prevOld, m-prevSrc)
+	oldExtra -= substitutions
+	srcExtra -= substitutions
 	if oldExtra+srcExtra == 0 {
 		return 0, 0, false
 	}

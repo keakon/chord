@@ -429,6 +429,17 @@ func TestAlignEditWindowLines(t *testing.T) {
 		{"replacement stays paired", []string{"a", "b", "c"}, []string{"a", "", "b"}, 1, 1, false},
 		{"blank shift", []string{"a", "", "b"}, []string{"a", "b", ""}, 1, 1, true},
 		{"old has one extra blank", []string{"a", "", "", "b"}, []string{"a", "", "b", ""}, 1, 1, true},
+		// Same-height, same-position replacements pair up as substitutions,
+		// not drift: a retyped line is one line, not "one extra line each
+		// side" that would misreport a line-count difference.
+		{"single in-place replacement", []string{"a", "b", "c"}, []string{"a", "x", "c"}, 0, 0, false},
+		{"two in-place replacements", []string{"a", "b1", "b2", "c"}, []string{"a", "x", "y", "c"}, 0, 0, false},
+		// Surplus lines beyond the pairing are still counted as drift.
+		{"replacement plus old surplus", []string{"a", "b", "c", "d"}, []string{"a", "x", "y"}, 1, 0, false},
+		// Unmatched lines that do NOT sit in the same run (each side's
+		// leftover falls on opposite sides of the shared anchor) are real
+		// drift, not a substitution pair.
+		{"displaced mismatch stays drift", []string{"a", "b", "c"}, []string{"a", "x", "b"}, 1, 1, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
