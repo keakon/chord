@@ -192,12 +192,20 @@ func isVariationSelectorMark(r rune) bool {
 // legitimate combining sequence (Arabic shadda, Devanagari nukta, Vietnamese
 // tone marks), and folding it would corrupt those scripts.
 //
+// Variation selectors are excluded for the same reason the write path
+// excludes them (see isVariationSelectorMark): StripOrphanVariationSelectors
+// owns them and has already removed the orphaned ones by the time this rule
+// runs, so a selector still present belongs to a real emoji presentation or
+// keycap sequence. Folding it here would let the match path accept a bare base
+// character for an emoji the write path preserves verbatim — the two paths
+// disagreeing about the same rune.
+//
 // Unlike isIgnorableRune this is context-sensitive, so it is checked inside
 // the normalization loop rather than in the inter-word-space neighbor lookup,
 // which must stay context-free to treat both sides of a word-boundary space
 // symmetrically.
 func isOrphanCombiningMark(rs []rune, i int) bool {
-	if !isMarkRune(rs[i]) {
+	if !isMarkRune(rs[i]) || isVariationSelectorMark(rs[i]) {
 		return false
 	}
 	// Walk back over ignorable format runes and earlier combining marks to
@@ -267,10 +275,12 @@ func StripOrphanCombiningMarks(s string) string {
 	return b.String()
 }
 
-// hasOrphanMarkCandidate is the allocation-free guard for
-// StripOrphanCombiningMarks: tool arguments and file content are overwhelmingly
-// mark-free, while the strip needs a rune slice for its base lookup, so that
-// slice is only built once a mark is known to be present.
+// hasOrphanMarkCandidate is the fast-path guard for StripOrphanCombiningMarks:
+// tool arguments and file content are overwhelmingly mark-free, so the common
+// case skips the strings.Builder and the copy that any real strip would need.
+// The strip itself ranges rune by rune and carries the base as it goes, so it
+// never builds a rune slice — this guard only decides whether the copy is
+// worth starting at all.
 func hasOrphanMarkCandidate(s string) bool {
 	for _, r := range s {
 		if isMarkRune(r) && !isVariationSelectorMark(r) {

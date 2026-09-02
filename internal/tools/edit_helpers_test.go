@@ -84,6 +84,40 @@ func TestNormalizePunctWithSpaceFoldingFoldsOrphanCombiningMark(t *testing.T) {
 	}
 }
 
+// TestIsOrphanCombiningMarkLeavesVariationSelectorsAlone guards the split the
+// two paths agreed on: variation selectors are Unicode combining marks, but
+// StripOrphanVariationSelectors owns them, so the orphan-mark rule must not
+// claim them.
+//
+// The rule keys on the base being a letter, and a selector's base is routinely
+// a digit (keycap "1\ufe0f\u20e3") or a symbol (heart "❤️"), so without the
+// exclusion the match path folded the enclosing keycap U+20E3 away and let a
+// bare "1" match a keycap emoji that the write path preserves verbatim. The
+// presentation selectors U+FE0E/U+FE0F are additionally covered by
+// isIgnorableRune, which folds them earlier in the loop by design — that is a
+// separate tolerance rule, not the orphan-mark verdict under test here.
+func TestIsOrphanCombiningMarkLeavesVariationSelectorsAlone(t *testing.T) {
+	// Sanity: the fold still owns a genuine tokenizer artifact.
+	if !isOrphanCombiningMark([]rune("### \u0304.2.1"), 4) {
+		t.Fatal("isOrphanCombiningMark(U+0304 after a space) = false, want true")
+	}
+	cases := []struct {
+		name string
+		s    string
+		i    int
+	}{
+		{"presentation selector on a digit", "1\ufe0f\u20e3", 1},
+		{"enclosing keycap", "1\ufe0f\u20e3", 2},
+		{"presentation selector on a symbol", "\u2764\ufe0f", 1},
+	}
+	for _, tc := range cases {
+		rs := []rune(tc.s)
+		if isOrphanCombiningMark(rs, tc.i) {
+			t.Fatalf("%s: isOrphanCombiningMark(%q, %d) = true, want false (U+%04X belongs to StripOrphanVariationSelectors)", tc.name, tc.s, tc.i, rs[tc.i])
+		}
+	}
+}
+
 // TestNormalizePunctWithSpaceFoldingPreservesStackedCombiningMarks guards
 // legitimate multi-mark diacritics: a base letter carrying two combining
 // marks (Vietnamese ấ in NFD is a + U+0302 circumflex + U+0301 acute) must
