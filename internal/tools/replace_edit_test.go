@@ -286,6 +286,61 @@ func TestEditToolPunctuationTolerantMatchReplaceAllNonOverlapping(t *testing.T) 
 	}
 }
 
+// replace_all on the exact-match path reports the actual replacement count,
+// so the model can sanity-check the blast radius of a global rename; a
+// single hit still reports the singular form, which tells the model the
+// string occurs once and the flag was a no-op.
+func TestEditToolReplaceAllReportsOccurrenceCount(t *testing.T) {
+	dir := t.TempDir()
+	path := writeEditFixture(t, dir, "demo.md", "foo bar\nfoo baz\nfoo qux\n")
+	out, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": "foo", "new_string": "FOO", "replace_all": true,
+	})
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if !strings.Contains(out, "Replaced 3 occurrences") {
+		t.Fatalf("output = %q, want the replaced-occurrence count", out)
+	}
+	got, _ := os.ReadFile(path)
+	if want := "FOO bar\nFOO baz\nFOO qux\n"; string(got) != want {
+		t.Fatalf("file = %q, want %q", string(got), want)
+	}
+
+	path = writeEditFixture(t, dir, "single.md", "foo bar\n")
+	out, err = runEdit(t, dir, map[string]any{
+		"path": path, "old_string": "foo", "new_string": "FOO", "replace_all": true,
+	})
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if !strings.Contains(out, "Replaced 1 occurrence") {
+		t.Fatalf("output = %q, want the singular replaced-occurrence form", out)
+	}
+}
+
+// When old_string differs from the file only by a trailing newline, the
+// trailing-newline tolerance applies the edit and names the tolerance in the
+// result, so the model learns it must copy blocks without the extra newline.
+func TestEditToolTrailingNewlineTolerantMatchReportsTolerance(t *testing.T) {
+	dir := t.TempDir()
+	// File has no trailing newline; the model copied the block with one.
+	path := writeEditFixture(t, dir, "demo.md", "alpha beta")
+	out, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": "alpha beta\n", "new_string": "alpha gamma\n",
+	})
+	if err != nil {
+		t.Fatalf("Execute err = %v, want trailing-newline tolerance success", err)
+	}
+	if !strings.Contains(out, "via trailing-newline-tolerant match") {
+		t.Fatalf("output = %q, want the trailing-newline-tolerant match marker", out)
+	}
+	got, _ := os.ReadFile(path)
+	if want := "alpha gamma"; string(got) != want {
+		t.Fatalf("file = %q, want %q", string(got), want)
+	}
+}
+
 // A1: full-width CJK punctuation (e.g. "," vs ",") is tolerated the same way
 // as curly quotes. The shared prefix/suffix keep the file's original full-
 // width bytes; only the model's delta is written verbatim.

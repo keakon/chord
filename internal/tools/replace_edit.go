@@ -201,11 +201,13 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 
 	// Count occurrences with exact matching.
 	count := strings.Count(content, decodedOld)
+	newlineTolerant := false
 	if count == 0 {
 		// Try trailing-newline tolerance.
 		if altOld, altNew, altCount, ok := trailingNewlineTolerantEdit(content, decodedOld, decodedNew); ok {
 			count = altCount
 			decodedOld, decodedNew = altOld, altNew
+			newlineTolerant = true
 		}
 	}
 	// Both success paths report every invisible character the model leaked
@@ -338,6 +340,8 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	var out string
 	if replaceAll && count > 1 {
 		out = fmt.Sprintf("Replaced %d occurrences (%d bytes -> %d bytes)%s%s", count, oldBytes, newBytes, abs, encSuffix)
+	} else if newlineTolerant {
+		out = fmt.Sprintf("Replaced 1 occurrence via trailing-newline-tolerant match (%d bytes -> %d bytes)%s%s", oldBytes, newBytes, abs, encSuffix)
 	} else {
 		out = fmt.Sprintf("Replaced 1 occurrence (%d bytes -> %d bytes)%s%s", oldBytes, newBytes, abs, encSuffix)
 	}
