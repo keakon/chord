@@ -270,7 +270,7 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 		e.onFirstVisibleResult(call.ID, call.Name, time.Now())
 	}
 	status := toolResultStatusFromError(err != nil)
-	e.emit(ToolResultEvent{CallID: call.ID, Name: call.Name, ArgsJSON: result.EffectiveArgsJSON, Audit: result.Audit.Clone(), Result: result.Result, Status: status, FileState: result.FileState.Clone(), Duration: toolExecDuration(call.Name, result, completedAt)})
+	e.emit(ToolResultEvent{CallID: call.ID, Name: call.Name, ArgsJSON: result.EffectiveArgsJSON, Audit: result.Audit.Clone(), Result: result.Result, Payload: result.Payload, Notes: append([]string(nil), result.Notes...), Status: status, FileState: result.FileState.Clone(), Duration: toolExecDuration(call.Name, result, completedAt)})
 }
 
 func (e *StreamingToolExecutor) startDeferredLocked() {

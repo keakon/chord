@@ -855,6 +855,67 @@ func TestGrepCardShowsMissingPatternInMainSlot(t *testing.T) {
 	}
 }
 
+// A model that reaches for the glob spelling of the argument sends the plural
+// "patterns" instead of the singular "pattern" the grep schema requires. The
+// discarded plural belongs in the parenthesized option group, struck through
+// the way glob renders its own discarded patterns — not trailing the header
+// behind a " · " separator, which no longer looks like a valid grep call.
+func TestGrepCardFoldsPluralPatternsIntoOptionGroup(t *testing.T) {
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          tools.NameGrep,
+		Content:           `{"includes":["**/*.go"],"patterns":["ExportToMarkdown\\(","ExportMarkdownToFile\\(","Export\\(messages"]}`,
+		ResultDone:        true,
+		ResultStatus:      agent.ToolResultStatusError,
+		ResultContent:     "arguments do not match grep schema: args.pattern is required",
+		displayWorkingDir: filepath.Join(string(os.PathSeparator), "tmp", "workspace"),
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"includes":["**/*.go"],"patterns":["ExportToMarkdown\\(","ExportMarkdownToFile\\(","Export\\(messages"]}`,
+			EffectiveArgsJSON: `{"includes":["**/*.go"]}`,
+			InvalidArgs: []message.InvalidToolArg{{
+				Path:   "args.pattern",
+				Reason: message.InvalidToolArgReasonMissing,
+			}},
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.patterns",
+				ValueJSON: `["ExportToMarkdown\\(","ExportMarkdownToFile\\(","Export\\(messages"]`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := strings.Join(block.Render(160, ""), "\n")
+	plain := strings.ReplaceAll(stripANSI(rendered), "…", "")
+	plain = strings.ReplaceAll(plain, "\x1b", "")
+	if !strings.Contains(plain, `grep <missing>`) {
+		t.Fatalf("missing grep pattern should occupy the main parameter slot:\n%s", plain)
+	}
+	if strings.Contains(plain, "pattern=<missing>") {
+		t.Fatalf("missing grep pattern should render as value-only placeholder:\n%s", plain)
+	}
+	// The plural must sit inside the option group beside the valid includes,
+	// not after it behind the " · " separator.
+	if !strings.Contains(plain, `(includes=**/*.go, patterns=`) {
+		t.Fatalf("discarded plural patterns should join the option group:\n%s", plain)
+	}
+	if strings.Contains(plain, `· patterns=`) {
+		t.Fatalf("discarded plural patterns should not trail the header:\n%s", plain)
+	}
+	// List formatting follows paths=/includes= rather than raw JSON.
+	if strings.Contains(plain, `patterns=[`) {
+		t.Fatalf("plural patterns should render like other grep list arguments:\n%s", plain)
+	}
+	if !strings.Contains(plain, `ExportToMarkdown`) {
+		t.Fatalf("discarded pattern values missing:\n%s", plain)
+	}
+	if !strings.Contains(rendered, `;9m`) {
+		t.Fatalf("discarded plural patterns are not struck through: %q", rendered)
+	}
+	if !strings.Contains(rendered, "38;5;196m") {
+		t.Fatalf("missing grep pattern is not red: %q", rendered)
+	}
+}
+
 func TestReadCardShowsInvalidArgumentInRed(t *testing.T) {
 	block := &Block{
 		ID:            1,
@@ -4173,6 +4234,147 @@ func TestQuestionCallMarksSelectedOptionInline(t *testing.T) {
 	}
 	if strings.Contains(plain, "Custom: Enabled") {
 		t.Fatalf("expected custom capability line to be replaced/omitted after inline result, got:\n%s", plain)
+	}
+}
+
+// The runtime records the payload and its notes apart, so the card parses the
+// tool's own output instead of the combined model-visible text, and shows the
+// notes from their own field.
+func TestQuestionCallParsesCleanPayloadAndShowsNotesApart(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	answers := `[{"header":"document layout","selected":["Match the reference layout (recommended)"]}]`
+	note := `Note: ignored earlier duplicate parameter value(s): args.questions[0].header; the last values were used`
+
+	block := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: "question",
+		Content: `{"questions":[{"header":"document layout","question":"How should the target document be organized?","options":[` +
+			`{"label":"Match the reference layout (recommended)","description":"Mimic the reference formatting"},` +
+			`{"label":"Keep the markdown order","description":"Align each item with its model answer"}` +
+			`]}]}`,
+		ResultContent: answers + "\n" + note,
+		ResultPayload: answers,
+		ResultNotes:   []string{note},
+		ResultDone:    true,
+	}
+
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, "✓ 1. Match the reference layout (recommended)") {
+		t.Fatalf("expected the selection to be marked inline, got:\n%s", plain)
+	}
+	if strings.Contains(plain, `[{"header"`) {
+		t.Fatalf("expected no raw answers JSON once the selection renders inline, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Note: ignored earlier duplicate") {
+		t.Fatalf("expected the diagnostic note to stay visible, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "Custom: Enabled") {
+		t.Fatalf("expected no custom-answer hint once answers resolved, got:\n%s", plain)
+	}
+}
+
+// Transcripts written before the payload/notes split keep only the combined
+// model-visible text. The card must still recover the selection from it rather
+// than dropping the user's answers.
+func TestQuestionCallFallsBackToCombinedResultForLegacyTranscript(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	block := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: "question",
+		Content: `{"questions":[{"header":"document layout","question":"How should the target document be organized?","options":[` +
+			`{"label":"Match the reference layout (recommended)","description":"Mimic the reference formatting"},` +
+			`{"label":"Keep the markdown order","description":"Align each item with its model answer"}` +
+			`]}]}`,
+		ResultContent: `[{"header":"document layout","selected":["Match the reference layout (recommended)"]}]` + "\n" +
+			`Note: ignored earlier duplicate parameter value(s): args.questions[0].header; the last values were used`,
+		ResultDone: true,
+	}
+
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, "✓ 1. Match the reference layout (recommended)") {
+		t.Fatalf("expected the selection to be marked inline despite the trailing note, got:\n%s", plain)
+	}
+	if strings.Contains(plain, `[{"header"`) {
+		t.Fatalf("expected no raw answers JSON once the selection renders inline, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Note: ignored earlier duplicate") {
+		t.Fatalf("expected the diagnostic note to stay visible, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "Custom: Enabled") {
+		t.Fatalf("expected no custom-answer hint once answers resolved, got:\n%s", plain)
+	}
+}
+
+// A Question card shows every parameter in its body and carries a rejected
+// call's schema message in the ↳ Error block, which already names the
+// offending field and the value it rejected. Repeating the argument on the
+// header line adds nothing and puts a second, competing "header" on screen.
+func TestQuestionCallKeepsArgDiagnosticsOffTheHeader(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	ignored := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "question",
+		Content:       `{"questions":[{"header":"document layout","question":"Q","options":[{"label":"A"},{"label":"B"}]}]}`,
+		ResultContent: `[{"header":"document layout","selected":["A"]}]`,
+		ResultDone:    true,
+		Audit: &message.ToolArgsAudit{
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.questions[0].header",
+				ValueJSON: `"document structure"`,
+				Reason:    message.IgnoredToolArgReasonShadowed,
+			}},
+		},
+	}
+	ignoredLines := ignored.Render(100, "")
+	if plain := stripANSI(strings.Join(ignoredLines, "\n")); strings.Contains(plain, "questions[0].header=document structure") {
+		t.Fatalf("expected the shadowed header value to stay off the header line, got:\n%s", plain)
+	}
+	if header := stripANSI(renderedLineContaining(t, ignoredLines, "question")); strings.Contains(header, "document structure") {
+		t.Fatalf("expected the question header line to stay clean, got:\n%s", header)
+	}
+
+	invalid := &Block{
+		ID:            2,
+		Type:          BlockToolCall,
+		ToolName:      "question",
+		Content:       `{"questions":[{"header":"H","question":"Q"}]}`,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match question schema: args.questions[0].header must be a string, got number 7",
+		ResultDone:    true,
+		Audit: &message.ToolArgsAudit{
+			InvalidArgs: []message.InvalidToolArg{{
+				Path:      "args.questions[0].header",
+				ValueJSON: `7`,
+				Reason:    message.InvalidToolArgReasonInvalid,
+			}},
+		},
+	}
+	invalidLines := invalid.Render(100, "")
+	header := stripANSI(renderedLineContaining(t, invalidLines, "question"))
+	if strings.Contains(header, "questions[0].header") {
+		t.Fatalf("expected an invalid arg to stay off the question header line, got:\n%s", header)
+	}
+	if strings.Contains(header, "·") {
+		t.Fatalf("expected the question header line to carry no diagnostic suffix, got:\n%s", header)
+	}
+	// Nothing is lost: the parameters render in the body and the schema
+	// message — which names the field and the rejected value — renders below.
+	plain := stripANSI(strings.Join(invalidLines, "\n"))
+	if !strings.Contains(plain, "  ▸ H") {
+		t.Fatalf("expected the question to keep rendering its parameters below the header, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "↳ Error:") {
+		t.Fatalf("expected the schema failure to render as an error section, got:\n%s", plain)
+	}
+	// The error text wraps at this card width, so match within one line.
+	if !strings.Contains(plain, "args.questions[0].header must be a string") {
+		t.Fatalf("expected the schema message naming the invalid argument, got:\n%s", plain)
 	}
 }
 

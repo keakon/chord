@@ -803,7 +803,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 							effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
 							diff = toolExecutionDiff(effectiveCall, execResult)
 						}
-						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turnID, Duration: toolExecDuration(tc.Name, execResult, completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), walltimeTarget: execResult.walltimeTarget}})
+						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, Error: err, TurnID: turnID, Duration: toolExecDuration(tc.Name, execResult, completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), walltimeTarget: execResult.walltimeTarget}})
 					}(effective)
 					promoted = true
 					continue
@@ -875,6 +875,8 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 					ArgsJSON:       execResult.EffectiveArgsJSON,
 					Audit:          execResult.Audit,
 					Result:         execResult.Result,
+					Payload:        execResult.Payload,
+					Notes:          append([]string(nil), execResult.Notes...),
 					Images:         execResult.Images,
 					Error:          err,
 					TurnID:         turnID,

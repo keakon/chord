@@ -323,6 +323,14 @@ func formatChangeAge(modTime, runtimeStartedAt time.Time) string {
 // telling the reader a safety net was expected. The failure and its cause are
 // logged locally by the caller.
 func appendBackupNotes(result, toolName string, drift driftReport, outcome fileBackupOutcome) string {
+	return appendNotes(result, backupNotes(toolName, drift, outcome))
+}
+
+// backupNotes renders the drift and backup warnings that follow a tool's
+// payload. They are discrete lines rather than one joined string so the runtime
+// can record them beside the clean payload; the UI then never has to split them
+// back out of the combined model-visible text.
+func backupNotes(toolName string, drift driftReport, outcome fileBackupOutcome) []string {
 	var notes []string
 	if drift.stale {
 		switch {
@@ -352,14 +360,7 @@ func appendBackupNotes(result, toolName string, drift driftReport, outcome fileB
 		}
 		notes = append(notes, "Backup saved to: "+backup.Path)
 	}
-	if len(notes) == 0 {
-		return result
-	}
-	result = strings.TrimRight(result, "\n")
-	if result == "" {
-		return strings.Join(notes, "\n")
-	}
-	return result + "\n" + strings.Join(notes, "\n")
+	return notes
 }
 
 // readPreWriteBytes loads the current bytes of a file about to be mutated.

@@ -251,6 +251,8 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 		ArgsJSON:    payload.ArgsJSON,
 		Audit:       payload.Audit.Clone(),
 		Result:      displayResult,
+		Payload:     payload.Payload,
+		Notes:       append([]string(nil), payload.Notes...),
 		Status:      toolResultStatusFromError(isError),
 		Parts:       parts,
 		Diff:        payload.Diff,
@@ -264,10 +266,15 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 	snapshot := a.ctxMgr.Snapshot()
 	a.queueLSPDiagnosticOverlay(snapshot, payload)
 	toolMsg := message.Message{
-		Role:            "tool",
-		Content:         contextResult,
-		Parts:           parts,
-		ToolCallID:      payload.CallID,
+		Role:       "tool",
+		Content:    contextResult,
+		Parts:      parts,
+		ToolCallID: payload.CallID,
+		// Content is the model-visible combination of payload and notes; both
+		// are also stored apart so a restored transcript can show the tool's own
+		// output without splitting the notes back out.
+		ToolPayload:     payload.Payload,
+		ToolNotes:       append([]string(nil), payload.Notes...),
 		ToolDiff:        payload.Diff,
 		ToolDiffAdded:   payload.DiffAdded,
 		ToolDiffRemoved: payload.DiffRemoved,
@@ -487,6 +494,8 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			ArgsJSON:      payload.ArgsJSON,
 			Audit:         payload.Audit.Clone(),
 			Result:        displayResult,
+			Payload:       payload.Payload,
+			Notes:         append([]string(nil), payload.Notes...),
 			Status:        toolResultStatusFromError(isError),
 			Parts:         parts,
 			Diff:          payload.Diff,
@@ -506,6 +515,8 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			Content:           contextResult,
 			Parts:             parts,
 			ToolCallID:        payload.CallID,
+			ToolPayload:       payload.Payload,
+			ToolNotes:         append([]string(nil), payload.Notes...),
 			ToolDiff:          payload.Diff,
 			ToolDiffAdded:     payload.DiffAdded,
 			ToolDiffRemoved:   payload.DiffRemoved,

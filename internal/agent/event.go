@@ -82,11 +82,17 @@ type LLMResponsePayload struct {
 
 // ToolResultPayload wraps a tool execution result for the internal event bus.
 type ToolResultPayload struct {
-	CallID      string
-	Name        string
-	ArgsJSON    string
-	Audit       *message.ToolArgsAudit
-	Result      string
+	CallID   string
+	Name     string
+	ArgsJSON string
+	Audit    *message.ToolArgsAudit
+	Result   string
+	// Payload is Result before diagnostic notes were appended, and Notes are
+	// those notes. Result stays the model-visible combination; carrying the two
+	// apart lets the UI parse the tool's actual output instead of a string the
+	// runtime decorated for the model.
+	Payload     string
+	Notes       []string
 	Images      []message.ContentPart // image parts to inject into model context after the batch completes
 	Error       error
 	TurnID      uint64
@@ -369,11 +375,16 @@ func (ToolProgressEvent) agentEvent() {}
 
 // ToolResultEvent is emitted after a tool execution completes.
 type ToolResultEvent struct {
-	CallID              string
-	Name                string
-	ArgsJSON            string // full tool arguments (available after streaming completes)
-	Audit               *message.ToolArgsAudit
-	Result              string
+	CallID   string
+	Name     string
+	ArgsJSON string // full tool arguments (available after streaming completes)
+	Audit    *message.ToolArgsAudit
+	Result   string
+	// Payload is Result before diagnostic notes were appended, Notes are those
+	// notes. They travel separately so the card can parse the tool's own output
+	// instead of a string the runtime decorated for the model.
+	Payload             string
+	Notes               []string
 	DoneReport          string
 	Status              ToolResultStatus
 	AgentID             string // originating agent ("" = main agent)

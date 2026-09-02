@@ -178,7 +178,17 @@ type toolCallStageTrace struct {
 }
 
 type ToolExecutionResult struct {
-	Result                    string
+	Result string
+	// Payload is the tool's raw output before any diagnostic note is appended.
+	// Only set when toolPayloadIsStructured(toolName): for ordinary free-text
+	// output Content already holds everything, so a second copy would just
+	// double large results. Keeping it clean is what lets the UI parse the
+	// user's actual answer instead of the answer-with-notes the model is shown.
+	Payload string
+	// Notes are the diagnostic lines appended after the payload for the model,
+	// in order. They describe the call, never its output, so they are recorded
+	// beside the payload rather than inside it.
+	Notes                     []string
 	Images                    []message.ContentPart // image/binary parts produced by the tool (ViewImage, MCP image results)
 	EffectiveArgsJSON         string
 	originalArgsForValidation json.RawMessage

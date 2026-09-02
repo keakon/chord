@@ -93,6 +93,16 @@ func applyBlockStyles(t Theme) {
 	ToolResultExpandedStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.ToolResultExpandedFg))
 
+	// Emphasises the option the user picked inside a Question tool card. Reuses
+	// the theme's "selected" foreground but deliberately not SelectedStyle:
+	// that carries a background fill, and a card row must not gain a surface of
+	// its own or the background recovery around it starts to leak. Bold plus the
+	// brighter foreground is what separates the pick from the dimmed
+	// alternatives, since DimFg and ToolResultFg are the same index here.
+	questionSelectedOptionStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(t.SelectedFg))
+
 	ToolStatusSuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.InfoPanelSuccessFg))
 	ToolStatusErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.ErrorFg))
 	ToolStatusNeutralStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.DimFg))

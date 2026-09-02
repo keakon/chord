@@ -355,8 +355,15 @@ func joinIgnoredArgPaths(paths []string) string {
 // execution. Unrecognized fields and shadowed duplicate occurrences are kept
 // separate so the model knows whether to remove a field or split a call.
 func appendIgnoredArgsNote(result string, ignored []message.IgnoredToolArg) string {
+	return appendNotes(result, ignoredArgsNotes(ignored))
+}
+
+// ignoredArgsNotes renders the diagnostics appendIgnoredArgsNote appends after
+// the payload, as discrete lines so they can also be recorded beside the clean
+// payload instead of being recovered by parsing the combined text.
+func ignoredArgsNotes(ignored []message.IgnoredToolArg) []string {
 	if len(ignored) == 0 {
-		return result
+		return nil
 	}
 	var unrecognized, shadowed []string
 	for _, item := range ignored {
@@ -375,11 +382,29 @@ func appendIgnoredArgsNote(result string, ignored []message.IgnoredToolArg) stri
 	if len(shadowed) > 0 {
 		notes = append(notes, "Note: ignored earlier duplicate parameter value(s): "+joinIgnoredArgPaths(shadowed)+"; the last values were used")
 	}
+	return notes
+}
+
+// appendNotes appends diagnostic lines after a tool's payload for the model.
+// The same lines are recorded on ToolExecutionResult.Notes, so the UI reads the
+// payload and the notes separately instead of splitting one combined string.
+func appendNotes(result string, notes []string) string {
+	if len(notes) == 0 {
+		return result
+	}
 	result = strings.TrimRight(result, "\n")
 	if result == "" {
 		return strings.Join(notes, "\n")
 	}
 	return result + "\n" + strings.Join(notes, "\n")
+}
+
+// toolPayloadIsStructured reports whether a tool's raw output is a structured
+// payload the UI parses back, rather than free text shown verbatim. Only those
+// tools keep a clean pre-note copy: everything else is truncated or artifacted
+// into Content already, so a second copy would double large results for nothing.
+func toolPayloadIsStructured(toolName string) bool {
+	return toolName == tools.NameQuestion
 }
 
 func appendUniqueString(values []string, value string) []string {
@@ -545,6 +570,10 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		}
 		// The model must learn about stripped fields even when the call
 		// went on to fail, or it cannot tell which parameters took effect.
+		if toolPayloadIsStructured(tc.Name) {
+			execResult.Payload = result
+		}
+		execResult.Notes = ignoredArgsNotes(ignored)
 		result = appendIgnoredArgsNote(result, ignored)
 		if result != "" {
 			execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
@@ -585,7 +614,12 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if patchMutation != nil {
 		stalePathCount = len(patchMutation.paths)
 	}
-	result = appendBackupNotes(result, tc.Name, driftReport{
+	// Payload is captured before anything is appended: what follows describes
+	// the call, not the tool's output, and the two must stay separable.
+	if toolPayloadIsStructured(tc.Name) {
+		execResult.Payload = result
+	}
+	backup := backupNotes(tc.Name, driftReport{
 		stale:      staleWrite,
 		unobserved: unobservedWrite,
 		// An unreadable pre-state is not a drift: the wording must not claim
@@ -596,7 +630,10 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		modTime:          changeModTime,
 		runtimeStartedAt: p.runtimeStartedAt,
 	}, backupOutcome)
-	result = appendIgnoredArgsNote(result, ignored)
+	execResult.Notes = append(execResult.Notes, backup...)
+	execResult.Notes = append(execResult.Notes, ignoredArgsNotes(ignored)...)
+	result = appendNotes(result, backup)
+	result = appendNotes(result, ignoredArgsNotes(ignored))
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 	return execResult, err
 }
@@ -723,7 +760,10 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	if hooks != nil {
 		changeModTime = hooks.staleModTime
 	}
-	result = appendBackupNotes(result, tc.Name, driftReport{
+	if toolPayloadIsStructured(tc.Name) {
+		execResult.Payload = result
+	}
+	backup := backupNotes(tc.Name, driftReport{
 		stale:      staleWrite,
 		unobserved: unobservedWrite,
 		// Writes with an unreadable pre-state never speculate (they are
@@ -733,7 +773,10 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 		modTime:          changeModTime,
 		runtimeStartedAt: p.runtimeStartedAt,
 	}, backupOutcome)
-	result = appendIgnoredArgsNote(result, ignored)
+	execResult.Notes = append(execResult.Notes, backup...)
+	execResult.Notes = append(execResult.Notes, ignoredArgsNotes(ignored)...)
+	result = appendNotes(result, backup)
+	result = appendNotes(result, ignoredArgsNotes(ignored))
 	execResult.Result = formatToolExecutionOutput(result, p.sessionDir, artifactKey, tc.Name, err, p.guidance)
 	return execResult, err
 }

@@ -228,30 +228,38 @@ const (
 
 // Message represents a conversation message (user, assistant, or tool result).
 type Message struct {
-	Role                      Role                  `json:"role"` // "user", "assistant", "tool"
-	Content                   string                `json:"content"`
-	Parts                     []ContentPart         `json:"parts,omitempty"`                       // multi-part content (text + images); when set, supersedes Content
-	ThinkingBlocks            []ThinkingBlock       `json:"thinking_blocks,omitempty"`             // assistant only; must be replayed verbatim
-	ResponsesOutput           []ResponsesOutputItem `json:"responses_output,omitempty"`            // assistant only; ordered native Responses API output items
-	GeminiParts               []GeminiReplayPart    `json:"gemini_parts,omitempty"`                // assistant only; ordered native Gemini parts with positional signatures
-	ReasoningContent          string                `json:"reasoning_content,omitempty"`           // assistant only; OpenAI-compatible reasoning/thinking text for chain replay
-	ToolCalls                 []ToolCall            `json:"tool_calls,omitempty"`                  // non-nil for assistant tool_use
-	ToolCallID                string                `json:"tool_call_id,omitempty"`                // non-empty for tool results
-	RequestBatch              uint64                `json:"request_batch,omitempty"`               // main-model request sequence that produced this assistant message
-	ToolDiff                  string                `json:"tool_diff,omitempty"`                   // unified diff for Write/Edit tool results
-	ToolDiffAdded             int                   `json:"tool_diff_added,omitempty"`             // total added lines for Write/Edit; computed before diff truncation
-	ToolDiffRemoved           int                   `json:"tool_diff_removed,omitempty"`           // total removed lines for Write/Edit; computed before diff truncation
-	ToolDurationMs            int64                 `json:"tool_duration_ms,omitempty"`            // final tool elapsed time in milliseconds for restored footer display
-	ToolStatus                string                `json:"tool_status,omitempty"`                 // terminal tool status: success|error|cancelled
-	FileState                 *ToolFileState        `json:"file_state,omitempty"`                  // durable file-state metadata for restore-time safety sentinels
-	ToolChangedPaths          []string              `json:"tool_changed_paths,omitempty"`          // runtime-observed workspace paths attributed to this tool result
-	FileAttributionIncomplete bool                  `json:"file_attribution_incomplete,omitempty"` // successful mutation could not be mapped to exact workspace paths
-	LSPReviews                []LSPReview           `json:"lsp_reviews,omitempty"`                 // per-file, per-server last-review snapshots for directly edited files
-	Audit                     *ToolArgsAudit        `json:"audit,omitempty"`                       // tool-call audit metadata when effective args differ after confirmation
-	IsCompactionSummary       bool                  `json:"is_compaction_summary,omitempty"`       // first user message after compaction (summary of archived history)
-	CompactionFileRevisions   map[string]string     `json:"compaction_file_revisions,omitempty"`   // key-file revisions captured when this checkpoint was created
-	StopReason                string                `json:"stop_reason,omitempty"`                 // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
-	Provenance                *MessageProvenance    `json:"provenance,omitempty"`                  // optional producer/source metadata for model-compat replay decisions
+	Role             Role                  `json:"role"` // "user", "assistant", "tool"
+	Content          string                `json:"content"`
+	Parts            []ContentPart         `json:"parts,omitempty"`             // multi-part content (text + images); when set, supersedes Content
+	ThinkingBlocks   []ThinkingBlock       `json:"thinking_blocks,omitempty"`   // assistant only; must be replayed verbatim
+	ResponsesOutput  []ResponsesOutputItem `json:"responses_output,omitempty"`  // assistant only; ordered native Responses API output items
+	GeminiParts      []GeminiReplayPart    `json:"gemini_parts,omitempty"`      // assistant only; ordered native Gemini parts with positional signatures
+	ReasoningContent string                `json:"reasoning_content,omitempty"` // assistant only; OpenAI-compatible reasoning/thinking text for chain replay
+	ToolCalls        []ToolCall            `json:"tool_calls,omitempty"`        // non-nil for assistant tool_use
+	ToolCallID       string                `json:"tool_call_id,omitempty"`      // non-empty for tool results
+	RequestBatch     uint64                `json:"request_batch,omitempty"`     // main-model request sequence that produced this assistant message
+	ToolDiff         string                `json:"tool_diff,omitempty"`         // unified diff for Write/Edit tool results
+	ToolDiffAdded    int                   `json:"tool_diff_added,omitempty"`   // total added lines for Write/Edit; computed before diff truncation
+	ToolDiffRemoved  int                   `json:"tool_diff_removed,omitempty"` // total removed lines for Write/Edit; computed before diff truncation
+	ToolDurationMs   int64                 `json:"tool_duration_ms,omitempty"`  // final tool elapsed time in milliseconds for restored footer display
+	ToolStatus       string                `json:"tool_status,omitempty"`       // terminal tool status: success|error|cancelled
+	// ToolPayload is the tool's raw output before diagnostic notes were
+	// appended, and ToolNotes are those notes. Content stays the model-visible
+	// combination of both, so the UI can read the payload cleanly instead of
+	// splitting the notes back out of it. Empty for tools whose output is free
+	// text (see agent.toolPayloadIsStructured) and for transcripts written
+	// before the split, where Content is the only copy.
+	ToolPayload               string             `json:"tool_payload,omitempty"`
+	ToolNotes                 []string           `json:"tool_notes,omitempty"`
+	FileState                 *ToolFileState     `json:"file_state,omitempty"`                  // durable file-state metadata for restore-time safety sentinels
+	ToolChangedPaths          []string           `json:"tool_changed_paths,omitempty"`          // runtime-observed workspace paths attributed to this tool result
+	FileAttributionIncomplete bool               `json:"file_attribution_incomplete,omitempty"` // successful mutation could not be mapped to exact workspace paths
+	LSPReviews                []LSPReview        `json:"lsp_reviews,omitempty"`                 // per-file, per-server last-review snapshots for directly edited files
+	Audit                     *ToolArgsAudit     `json:"audit,omitempty"`                       // tool-call audit metadata when effective args differ after confirmation
+	IsCompactionSummary       bool               `json:"is_compaction_summary,omitempty"`       // first user message after compaction (summary of archived history)
+	CompactionFileRevisions   map[string]string  `json:"compaction_file_revisions,omitempty"`   // key-file revisions captured when this checkpoint was created
+	StopReason                string             `json:"stop_reason,omitempty"`                 // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
+	Provenance                *MessageProvenance `json:"provenance,omitempty"`                  // optional producer/source metadata for model-compat replay decisions
 	// Usage carries provider usage on imported messages; runtime session totals
 	// are restored from the usage ledger, not by re-aggregating this field.
 	Usage        *TokenUsage      `json:"usage,omitempty"`

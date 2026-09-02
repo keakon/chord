@@ -65,7 +65,10 @@ func (b *Block) toolArgDiagnosticValue(path, valueJSON string) string {
 			}
 		}
 	case "grep":
-		if canonical == "paths" || canonical == "includes" {
+		// "patterns" is the plural a model reaches for by analogy with glob.
+		// Render it like the other list-valued grep arguments rather than as raw
+		// JSON, so the discarded value reads the same as paths=/includes=.
+		if canonical == "paths" || canonical == "includes" || canonical == "patterns" {
 			if values := paramStringList(valueJSON); len(values) > 0 {
 				if canonical == "paths" {
 					for i, value := range values {
@@ -223,6 +226,10 @@ func (b *Block) globDiagnosticHeaderParts(vals map[string]string) (mainPart, gra
 	return mainPart, "(" + strings.Join(opts, ", ") + ")"
 }
 
+// grepDiagnosticHeaderParts keeps schema-broken grep calls on the same header
+// shape as successful ones: the pattern slot shows the missing marker or the
+// effective pattern, while every ignored or invalid argument joins the
+// parenthesized option group instead of trailing the header line.
 func (b *Block) grepDiagnosticHeaderParts(vals map[string]string) (mainPart, grayPart string) {
 	pattern := b.diagnosticPrimaryText("pattern")
 	if pattern == "" {
@@ -248,6 +255,12 @@ func (b *Block) grepDiagnosticHeaderParts(vals map[string]string) (mainPart, gra
 		opts = append(opts, "path="+b.displayToolDir(path))
 	}
 	if ignored := b.firstIgnoredDiagnostic("pattern"); ignored != nil && ignored.value != "" {
+		opts = append(opts, b.formatDiagnosticOption(ignored))
+	}
+	// Models routinely pluralize the singular "pattern" schema field the way
+	// glob spells it. Without this the discarded value trails the header behind
+	// a " · " separator, so a broken call no longer looks like a valid one.
+	if ignored := b.firstIgnoredDiagnostic("patterns"); ignored != nil && ignored.value != "" {
 		opts = append(opts, b.formatDiagnosticOption(ignored))
 	}
 	if len(opts) == 0 {
@@ -396,7 +409,7 @@ func (b *Block) headerParamSummaryKeys(keys []string, vals map[string]string) []
 	}
 	plainByKey := make(map[string]string, len(diagnostics))
 	for _, diagnostic := range diagnostics {
-		if b.diagnosticArgOccupiesHeader(diagnostic.path) {
+		if b.diagnosticArgOccupiesHeader(diagnostic) {
 			continue
 		}
 		plain := diagnostic.path
@@ -430,7 +443,7 @@ func (b *Block) appendToolArgDiagnostics(body []string, contentWidth int) []stri
 	remaining := max(contentWidth-baseWidth-1, 0)
 	appended := 0
 	for _, diagnostic := range diagnostics {
-		if b.diagnosticArgOccupiesHeader(diagnostic.path) {
+		if b.diagnosticArgOccupiesHeader(diagnostic) {
 			continue
 		}
 		plain := diagnostic.path
@@ -474,13 +487,32 @@ func (b *Block) appendToolArgDiagnostics(body []string, contentWidth int) []stri
 	return body
 }
 
-func (b *Block) diagnosticArgOccupiesHeader(path string) bool {
+// diagnosticArgOccupiesHeader reports whether the tool already accounts for
+// this diagnostic somewhere other than the shared header-suffix slot, so
+// appendToolArgDiagnostics must not append it a second time.
+func (b *Block) diagnosticArgOccupiesHeader(diagnostic toolArgDiagnostic) bool {
+	path := diagnostic.path
 	canonical := strings.TrimLeft(strings.TrimSpace(path), ".")
 	switch b.ToolName {
 	case tools.NameGlob:
 		return canonical == "patterns"
 	case tools.NameGrep:
-		return canonical == "pattern" || canonical == "paths" || canonical == "includes"
+		// "patterns" is the plural a model reaches for by analogy with glob;
+		// grepDiagnosticHeaderParts folds it into the option group, so the
+		// shared header-suffix slot must not repeat it.
+		return canonical == "pattern" || canonical == "patterns" ||
+			canonical == "paths" || canonical == "includes"
+	case tools.NameQuestion:
+		// A Question card is all body: it renders every parameter it was given
+		// below the header ("▸ <header>", the question text, the option list),
+		// and a rejected call carries the runtime's schema message in the
+		// ↳ Error block, which already names the offending field and the value
+		// it rejected ("args.questions[0].header must be a string, got number
+		// 7"). Echoing the argument onto the header line therefore adds nothing
+		// while putting a second, competing "header" on screen with no way to
+		// tell it apart from the body's. Keep both ignored and invalid args
+		// below, where the note or error section explains them.
+		return true
 	case tools.NameDelete, tools.NameRead, tools.NameWrite, tools.NameEdit, tools.NameApplyPatch,
 		tools.NameTodoWrite, tools.NameShell, tools.NameSpawn, tools.NameWebFetch, tools.NameSkill:
 		return true

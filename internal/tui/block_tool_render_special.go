@@ -182,6 +182,27 @@ func decodeQuestionItemsForDisplay(argsJSON string) []tools.QuestionItem {
 	return items
 }
 
+// decodeQuestionAnswers parses the answers array from a Question tool's own
+// output. It must be given the clean payload, never the model-visible result:
+// the runtime appends diagnostic notes after the payload, and a parser that
+// tolerates them has to guess where the JSON ends. Transcripts written before
+// the payload/notes split have no clean copy, so tolerate trailing prose there
+// rather than dropping the user's answers.
+func decodeQuestionAnswers(payload string) (answers []tools.QuestionAnswer, rest string, ok bool) {
+	trimmed := strings.TrimSpace(payload)
+	if trimmed == "" || (trimmed[0] != '[' && trimmed[0] != '{') {
+		return nil, trimmed, false
+	}
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	if err := dec.Decode(&answers); err != nil || len(answers) == 0 {
+		return nil, trimmed, false
+	}
+	if offset := dec.InputOffset(); offset >= 0 && offset < int64(len(trimmed)) {
+		rest = strings.TrimSpace(trimmed[offset:])
+	}
+	return answers, rest, true
+}
+
 // renderQuestionCall renders a Question tool call showing the question text and options.
 func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 	metrics := newToolCardMetrics(width)
@@ -194,8 +215,21 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 
 	var answers []tools.QuestionAnswer
 	hasStructuredAnswers := false
-	if !b.toolResultIsError() && !b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "" {
-		if err := json.Unmarshal([]byte(b.ResultContent), &answers); err == nil && len(answers) > 0 {
+	resultNotes := append([]string(nil), b.ResultNotes...)
+	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
+		// Parse the tool's own output, not the model-visible result: the result
+		// has diagnostic notes appended and parsing it means guessing where the
+		// payload ended. Transcripts predating the split keep only the combined
+		// text, so fall back to it and recover the notes from the tail.
+		payload := b.ResultPayload
+		if strings.TrimSpace(payload) == "" {
+			payload = b.ResultContent
+		}
+		if parsed, rest, ok := decodeQuestionAnswers(payload); ok {
+			answers = parsed
+			if rest != "" && len(resultNotes) == 0 {
+				resultNotes = []string{rest}
+			}
 			hasStructuredAnswers = len(questions) > 0
 		}
 	}
@@ -230,15 +264,24 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 			result = append(result, DimStyle.Render("    Options:"))
 			for i, opt := range q.Options {
 				displayLabel := sanitizeToolDisplayText(opt.Label)
+				_, isSelected := selectedOptions[displayLabel]
 				marker := " "
-				if _, ok := selectedOptions[displayLabel]; ok {
+				if isSelected {
 					marker = "✓"
 				}
 				optPrefix := fmt.Sprintf("      %s %d. %s", marker, i+1, displayLabel)
 				optLine := optPrefix
 				if opt.Description != "" {
 					descWidth := max(contentWidth-runewidth.StringWidth(optPrefix), 0)
-					optLine += DimStyle.Render(" — " + truncateOneLine(sanitizeToolDisplayText(opt.Description), descWidth))
+					optLine += " — " + truncateOneLine(sanitizeToolDisplayText(opt.Description), descWidth)
+				}
+				// A bare check mark is easy to miss in a long list whose
+				// descriptions wrap, so the picked option is emphasised and the
+				// alternatives dim into the background.
+				if isSelected {
+					optLine = questionSelectedOptionStyle.Render(optLine)
+				} else {
+					optLine = DimStyle.Render(optLine)
 				}
 				result = append(result, optLine)
 			}
@@ -260,16 +303,27 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 		}
 	}
 
-	if b.toolResultIsError() && b.ResultContent != "" {
+	switch {
+	case b.toolResultIsError() && b.ResultContent != "":
 		result = appendErrorResultLines(result, b.ResultContent, contentWidth)
-	} else if b.toolResultIsCancelled() && b.ResultContent != "" {
+	case b.toolResultIsCancelled() && b.ResultContent != "":
 		result = appendCancelledResultLines(result, b.ResultContent, contentWidth)
-	} else if strings.TrimSpace(b.ResultContent) != "" && !hasStructuredAnswers {
-		if b.ResultContent != "" {
+	case hasStructuredAnswers:
+		// The option list already carries the selection inline, so the answers
+		// payload itself must not be echoed back. What is left is the runtime's
+		// own commentary about the call, which is worth showing.
+		if len(resultNotes) > 0 {
 			result = append(result, ToolResultStyle.Render("  ↳ ✓"))
-			for _, line := range wrapText(sanitizeToolDisplayText(b.ResultContent), contentWidth) {
-				result = append(result, ToolResultStyle.Render("    "+line))
+			for _, note := range resultNotes {
+				for _, line := range wrapText(sanitizeToolDisplayText(note), contentWidth) {
+					result = append(result, ToolResultStyle.Render("    "+line))
+				}
 			}
+		}
+	case strings.TrimSpace(b.ResultContent) != "":
+		result = append(result, ToolResultStyle.Render("  ↳ ✓"))
+		for _, line := range wrapText(sanitizeToolDisplayText(b.ResultContent), contentWidth) {
+			result = append(result, ToolResultStyle.Render("    "+line))
 		}
 	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)

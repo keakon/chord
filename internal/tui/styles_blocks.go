@@ -31,6 +31,7 @@ var (
 	ToolStatusNeutralStyle       lipgloss.Style
 	paramKeyStyle                lipgloss.Style
 	paramValStyle                lipgloss.Style
+	questionSelectedOptionStyle  lipgloss.Style
 	DiffAddStyle                 lipgloss.Style
 	DiffDelStyle                 lipgloss.Style
 	DiffAddInlineStyle           lipgloss.Style

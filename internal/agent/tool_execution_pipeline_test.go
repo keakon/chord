@@ -869,6 +869,35 @@ func TestToolExecutionPipelineAuditsSchemaFailureArguments(t *testing.T) {
 	}
 }
 
+// A tool whose output the UI parses back must keep that output free of the
+// runtime's own commentary: the notes travel beside it, and only the
+// model-visible Result carries the combination. Appending them into the payload
+// is what once made the card guess where the answers ended.
+func TestToolExecutionKeepsStructuredPayloadFreeOfNotes(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewQuestionTool(func(_ context.Context, _ []tools.QuestionItem) ([]tools.QuestionAnswer, error) {
+		return []tools.QuestionAnswer{{Header: "mode", Selected: []string{"fast"}}}, nil
+	}))
+	pipeline := toolExecutionPipeline{registry: registry}
+	execResult, err := pipeline.execute(context.Background(), message.ToolCall{
+		ID:   "call-question",
+		Name: tools.NameQuestion,
+		Args: json.RawMessage(`{"questions":[{"header":"first","header":"mode","question":"Which mode?","options":[{"label":"fast","description":"go fast"}]}]}`),
+	}, false)
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if execResult.Payload != `[{"header":"mode","selected":["fast"]}]` {
+		t.Fatalf("payload = %q, want the clean answers JSON", execResult.Payload)
+	}
+	if len(execResult.Notes) == 0 || !strings.Contains(execResult.Notes[0], "ignored earlier duplicate parameter value(s)") {
+		t.Fatalf("notes = %#v, want the duplicate-value note", execResult.Notes)
+	}
+	if !strings.Contains(execResult.Result, `"selected":["fast"]`) || !strings.Contains(execResult.Result, "ignored earlier duplicate") {
+		t.Fatalf("result = %q, want payload and notes combined for the model", execResult.Result)
+	}
+}
+
 func TestToolExecutionPipelineUsesLastDuplicateArgumentValue(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(strictArgsTool{})

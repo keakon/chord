@@ -441,8 +441,13 @@ func assistantThinkingBlocksForTranscript(msg message.Message) []message.Thinkin
 }
 
 type transcriptToolResult struct {
-	argsJSON            string
-	result              string
+	argsJSON string
+	result   string
+	// payload is the tool's own output before notes; notes are the diagnostic
+	// lines the runtime appended. Both are empty in transcripts written before
+	// the split, where result holds the combination.
+	payload             string
+	notes               []string
 	status              agent.ToolResultStatus
 	audit               *message.ToolArgsAudit
 	diff                string
@@ -495,6 +500,11 @@ func applyStableToolResultToBlock(block *Block, result transcriptToolResult) {
 		return
 	}
 	block.ResultContent = result.result
+	// A restored transcript carries the payload and notes separately when they
+	// were recorded; older sessions only have the combined text, and the card
+	// falls back to it.
+	block.ResultPayload = result.payload
+	block.ResultNotes = append([]string(nil), result.notes...)
 	if result.argsJSON != "" {
 		block.RawArgs = result.argsJSON
 	}
@@ -713,6 +723,8 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 			if b, ok := toolIDToBlock[msg.ToolCallID]; ok {
 				applyStableToolResultToBlock(b, transcriptToolResult{
 					result:         msg.Content,
+					payload:        msg.ToolPayload,
+					notes:          msg.ToolNotes,
 					status:         toolResultStatusFromRestoredMessage(msg),
 					audit:          msg.Audit,
 					diff:           msg.ToolDiff,

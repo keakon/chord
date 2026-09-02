@@ -76,7 +76,13 @@ type Block struct {
 
 	// Tool result fields — set when the tool execution completes.
 	// Stored on the same Block as the tool call so call+result render together.
-	ResultContent      string                       // tool execution result text
+	ResultContent string // tool execution result text
+	// ResultPayload is ResultContent before the runtime appended diagnostic
+	// notes, and ResultNotes are those notes. Empty for tools whose output is
+	// free text and for results restored from a transcript written before the
+	// split, where ResultContent is the only copy.
+	ResultPayload      string
+	ResultNotes        []string
 	ResultStatus       agent.ToolResultStatus       // success, error, or cancelled
 	ResultDone         bool                         // true once a terminal tool event has been received (even if result is empty)
 	RecoveryState      string                       // tool_recovery_state for synthetic restore / barrier-failure results
