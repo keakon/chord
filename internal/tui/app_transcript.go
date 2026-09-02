@@ -610,7 +610,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				blocks = append(blocks, block)
 				continue
 			}
-			if msg.Kind == "loop_notice" {
+			if msg.Kind == message.KindLoopNotice {
 				raw := contentOrPartsText(msg)
 				title, body := "", raw
 				if t, b, ok := strings.Cut(raw, "\n"); ok {
@@ -622,6 +622,19 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					Type:        BlockStatus,
 					StatusTitle: title,
 					Content:     body,
+				})
+				*nextID++
+				continue
+			}
+			// A durable stream-continuation message is rendered as a status card
+			// with the same chrome the live StreamContinueEvent uses, so a
+			// restored session shows the card exactly as it appeared live.
+			if msg.Kind == message.KindStreamContinue {
+				blocks = append(blocks, &Block{
+					ID:          *nextID,
+					Type:        BlockStatus,
+					StatusTitle: streamContinueCardTitle,
+					Content:     msg.Content,
 				})
 				*nextID++
 				continue

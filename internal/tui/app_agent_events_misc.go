@@ -10,9 +10,11 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// streamContinueCardTitle labels the status card left behind by a preserved
-// stream interruption. It is UI chrome, matching the other status cards, not a
-// message in the transcript.
+// streamContinueCardTitle labels the status card rendered for a durable
+// KindStreamContinue user message: the real continuation instruction that was
+// appended after a preserved stream interruption and sent to the model. Live
+// handling of StreamContinueEvent and restore-time rendering of the message
+// share this chrome so the card looks identical before and after a restore.
 const streamContinueCardTitle = "REPLY RESUMED"
 
 func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
@@ -37,11 +39,13 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		return true, effects
 	case agent.StreamContinueEvent:
-		// A preserved stream interruption saved the partial reply and is
-		// resuming it. Settle the interrupted assistant card first, then leave a
-		// status card explaining the resume. The continuation itself is a
-		// request-scoped overlay, so rendering it as a user message would put a
-		// message the user never wrote into the transcript.
+		// A preserved stream interruption is being resumed. Settle the
+		// interrupted assistant card first. Text mirrors the durable
+		// KindStreamContinue message that was just appended (empty when the
+		// pool resumes from the trailing interrupted assistant turn without
+		// extra input), so a non-empty Text is rendered as the status card for
+		// that message — what the user sees is exactly what the model was sent,
+		// never a display-only notice.
 		m.invalidateStatusBarAgentSnapshot()
 		m.invalidateDrawCaches()
 		m.finalizeAgentStream(evt.AgentID)

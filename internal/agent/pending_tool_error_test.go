@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -282,9 +283,10 @@ func TestHandleAgentErrorPersistsFailedPendingToolCalls(t *testing.T) {
 
 // TestHandleAgentErrorPreservesPartialAssistantTextAndResumes covers a pool
 // whose models cannot resume from a trailing assistant turn (the Anthropic wire
-// family): the partial reply is saved as durable history, and the instruction to
-// continue it is queued as a request-scoped overlay rather than appended to the
-// conversation.
+// family): the partial reply is saved as durable history and a durable
+// KindStreamContinue continuation message is appended right after it, so the
+// transcript — and every later request — carries exactly the text the model is
+// told to continue with.
 func TestHandleAgentErrorPreservesPartialAssistantTextAndResumes(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
@@ -293,41 +295,38 @@ func TestHandleAgentErrorPreservesPartialAssistantTextAndResumes(t *testing.T) {
 	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
 	a.flushPersist()
 
-	// The partial reply is saved as an interrupted assistant message instead of
-	// being discarded. The continuation instruction must NOT join it: it is a
-	// synthetic message the user never wrote, and it would outlive the
-	// interruption it describes in the session record.
+	// The partial reply is saved as an interrupted assistant message and the
+	// continuation instruction follows it as a real user-role message with the
+	// stream-continue kind: same text the model receives, same text the UI
+	// shows, and it survives into the session record.
 	msgs := a.GetMessages()
-	if len(msgs) != 1 {
-		t.Fatalf("len(GetMessages()) = %d, want 1 (interrupted partial only)", len(msgs))
+	if len(msgs) != 2 {
+		t.Fatalf("len(GetMessages()) = %d, want 2 (interrupted partial + continuation message)", len(msgs))
 	}
 	if msgs[0].Role != "assistant" || !strings.Contains(msgs[0].Content, "the second conflict") || msgs[0].StopReason != "interrupted" {
 		t.Fatalf("saved message = %#v, want interrupted assistant partial", msgs[0])
 	}
-	if a.turn.AutoContinueCount != 1 {
-		t.Fatalf("turn.AutoContinueCount = %d, want 1", a.turn.AutoContinueCount)
-	}
-	if a.pendingStreamContinuePrompt == "" {
-		t.Fatal("expected a request-scoped continuation prompt for a pool that cannot prefill-continue")
+	if msgs[1].Role != "user" || msgs[1].Kind != message.KindStreamContinue || msgs[1].Content != streamContinueMessageText {
+		t.Fatalf("continuation message = %#v, want durable KindStreamContinue with %q", msgs[1], streamContinueMessageText)
 	}
 
 	restored, err := a.recovery.LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}
-	if len(restored) != 1 {
-		t.Fatalf("len(restored main messages) = %d, want 1 (no synthetic continuation persisted)", len(restored))
+	if len(restored) != 2 {
+		t.Fatalf("len(restored main messages) = %d, want 2 (partial + continuation persisted)", len(restored))
 	}
-	if restored[0].Role != "assistant" || !strings.Contains(restored[0].Content, "the second conflict") {
-		t.Fatalf("restored partial = %#v, want preserved interrupted assistant", restored[0])
+	if restored[1].Role != "user" || restored[1].Kind != message.KindStreamContinue || restored[1].Content != streamContinueMessageText {
+		t.Fatalf("restored continuation = %#v, want persisted KindStreamContinue", restored[1])
 	}
 }
 
-// TestHandleAgentErrorPrefillCapablePoolSkipsContinuationPrompt covers a pool
-// whose models can resume from a trailing assistant turn: nothing is appended
-// and no overlay is queued, so the next request simply ends with the preserved
-// reply and the model picks it up where it stopped.
-func TestHandleAgentErrorPrefillCapablePoolSkipsContinuationPrompt(t *testing.T) {
+// TestHandleAgentErrorPrefillCapablePoolSkipsContinuationMessage covers a pool
+// whose models can resume from a trailing assistant turn: nothing is appended,
+// so the next request simply ends with the preserved reply and the model picks
+// it up where it stopped.
+func TestHandleAgentErrorPrefillCapablePoolSkipsContinuationMessage(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.llmClient = newChatCompletionsTestClient()
 	a.newTurn()
@@ -343,76 +342,35 @@ func TestHandleAgentErrorPrefillCapablePoolSkipsContinuationPrompt(t *testing.T)
 	if msgs[0].Role != "assistant" || msgs[0].StopReason != "interrupted" {
 		t.Fatalf("saved message = %#v, want interrupted assistant partial", msgs[0])
 	}
-	if a.turn.AutoContinueCount != 1 {
-		t.Fatalf("turn.AutoContinueCount = %d, want 1", a.turn.AutoContinueCount)
+	restored, err := a.recovery.LoadMessages("main")
+	if err != nil {
+		t.Fatalf("LoadMessages(main): %v", err)
 	}
-	if a.pendingStreamContinuePrompt != "" {
-		t.Fatalf("pendingStreamContinuePrompt = %q, want empty for a prefill-capable pool", a.pendingStreamContinuePrompt)
-	}
-}
-
-// TestStreamContinueOverlayIsRequestScoped guards the one-shot contract: the
-// continuation prompt reaches the request overlay exactly once and is cleared,
-// so it cannot leak into a later request or survive a compaction.
-func TestStreamContinueOverlayIsRequestScoped(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.pendingStreamContinuePrompt = streamContinuePrompt()
-
-	var seen []message.Message
-	for i := 0; i < 2; i++ {
-		seen = a.buildTurnOverlayMessages()
-		if i == 0 {
-			if len(seen) != 1 {
-				t.Fatalf("first build produced %d overlays, want 1: %+v", len(seen), seen)
-			}
-			ov := seen[0]
-			if ov.Role != "user" || ov.Kind != message.KindTurnOverlay {
-				t.Fatalf("overlay = %#v, want user-role KindTurnOverlay", ov)
-			}
-			if !strings.Contains(ov.Content, "<system-reminder>") || !strings.Contains(ov.Content, "interrupted by a transport error") {
-				t.Fatalf("overlay content = %q, want the wrapped continuation instruction", ov.Content)
-			}
-			continue
-		}
-		if len(seen) != 0 {
-			t.Fatalf("second build produced %d overlays, want 0 (one-shot): %+v", len(seen), seen)
-		}
-	}
-	if a.pendingStreamContinuePrompt != "" {
-		t.Fatalf("pendingStreamContinuePrompt = %q, want empty after consumption", a.pendingStreamContinuePrompt)
+	if len(restored) != 1 {
+		t.Fatalf("len(restored main messages) = %d, want 1 (no continuation message)", len(restored))
 	}
 }
 
-func TestHandleAgentErrorAutoContinueCapKeepsPartialTextAndStops(t *testing.T) {
+// TestHandleAgentErrorAutoContinueIsUnbounded verifies that preserved stream
+// interruptions keep resuming across consecutive rounds instead of stopping at
+// a round cap: every round saves its partial text and appends another durable
+// continuation message, and no explanatory terminal error is emitted.
+func TestHandleAgentErrorAutoContinueIsUnbounded(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
-	a.turn.AutoContinueCount = maxAutoContinueStreamRounds
-	a.turn.appendPartialText("partial reply saved before the cap")
 
-	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
-	a.flushPersist()
+	for round := 1; round <= 4; round++ {
+		a.turn.appendPartialText(fmt.Sprintf("round %d partial reply", round))
+		a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
+		a.flushPersist()
 
-	// The cap stops the automatic loop, but the partial text just streamed is
-	// still saved; no further continuation prompt is injected.
-	msgs := a.GetMessages()
-	if len(msgs) != 1 {
-		t.Fatalf("len(GetMessages()) = %d, want 1 (preserved partial only)", len(msgs))
-	}
-	if msgs[0].Role != "assistant" || !strings.Contains(msgs[0].Content, "partial reply saved") || msgs[0].StopReason != "interrupted" {
-		t.Fatalf("saved message = %#v, want interrupted assistant partial", msgs[0])
-	}
-
-	// An explanatory error event is emitted so the UI tells the user the reply
-	// was preserved and how to resume it manually.
-	var sawError bool
-	for len(a.outputCh) > 0 {
-		evt := <-a.outputCh
-		if _, ok := evt.(ErrorEvent); ok {
-			sawError = true
+		msgs := a.GetMessages()
+		if len(msgs) != round*2 {
+			t.Fatalf("round %d: len(GetMessages()) = %d, want %d (partial + continuation per round)", round, len(msgs), round*2)
 		}
-	}
-	if !sawError {
-		t.Fatal("expected ErrorEvent after auto-continue cap was hit")
+		if msgs[len(msgs)-1].Role != "user" || msgs[len(msgs)-1].Kind != message.KindStreamContinue {
+			t.Fatalf("round %d: trailing message = %#v, want durable KindStreamContinue", round, msgs[len(msgs)-1])
+		}
 	}
 }
 

@@ -439,7 +439,6 @@ func (a *MainAgent) hasQueuedAutomaticWork() bool {
 		len(a.pendingUserMessages) > 0 ||
 		a.hasRunnableMailboxWork() ||
 		strings.TrimSpace(a.pendingRecoveryPrompt) != "" ||
-		strings.TrimSpace(a.pendingStreamContinuePrompt) != "" ||
 		strings.TrimSpace(a.pendingAutoContinuePrompt) != "" ||
 		strings.TrimSpace(a.pendingAutoContinueReplayPrompt) != "" ||
 		a.pendingCompactionResume != nil ||

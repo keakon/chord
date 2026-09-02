@@ -287,10 +287,12 @@ type LoopNoticeEvent struct {
 func (LoopNoticeEvent) agentEvent() {}
 
 // StreamContinueEvent notifies the TUI that a preserved stream interruption is
-// being resumed. Text is a status notice, not conversation content: the reply
-// is continued by a request-scoped overlay, so nothing is appended to the
-// transcript and the UI must render this as a productized status card rather
-// than as a user message the user never wrote.
+// being resumed. Text mirrors the durable KindStreamContinue user message that
+// was just appended for this pool — empty when the pool resumes from the
+// trailing interrupted assistant turn without extra input. The TUI settles the
+// interrupted assistant card, and when Text is non-empty renders it as the
+// status card for that message: Text is never display-only copy, so what the
+// user sees is exactly what the model was sent.
 type StreamContinueEvent struct {
 	Text    string
 	AgentID string // originating agent ("" = main agent)

@@ -114,14 +114,8 @@ type Turn struct {
 	// it reaches maxIntentBarrierFailureRounds the turn is aborted instead of
 	// burning further LLM rounds against a broken write path. Reset to zero by
 	// every successful barrier. Event-loop-goroutine only, like MalformedCount.
-	BarrierFailureRounds int
-	LengthRecoveryCount  int
-	// AutoContinueCount tracks how many consecutive LLM rounds in this turn
-	// were resumed with an injected continuation prompt after a preserved
-	// stream interruption. When it reaches maxAutoContinueStreamRounds the
-	// automatic resumption stops — partial text is never discarded, see
-	// resumeAfterPreservedStreamInterruption. Event-loop-goroutine only.
-	AutoContinueCount                  int
+	BarrierFailureRounds               int
+	LengthRecoveryCount                int
 	thinkingReplayAttempted            bool
 	InLengthRecovery                   bool
 	LastTruncatedToolName              string
@@ -765,13 +759,6 @@ type MainAgent struct {
 	// length-recovery auto compaction succeeds. It is consumed as a one-shot
 	// turn overlay and never appended to ctxMgr durable messages.
 	pendingRecoveryPrompt string
-	// pendingStreamContinuePrompt is the request-scoped continuation prompt for
-	// a preserved stream interruption. It exists only for pools that cannot
-	// resume from a trailing assistant turn, and like pendingRecoveryPrompt it
-	// is a one-shot overlay: the preserved partial reply is durable history,
-	// but the instruction to continue it is a runtime hint that must not
-	// survive into the session record or into a later compaction.
-	pendingStreamContinuePrompt string
 	// pendingThinkingReplayPrefix holds the visible reasoning text of a response
 	// whose whole output budget was spent on thinking before any visible reply.
 	// It is replayed as a wire-only assistant message on the next recovery
@@ -2236,38 +2223,26 @@ func (a *MainAgent) resumeTurnAfterRoutingInvalidation(turnID uint64) bool {
 	return true
 }
 
-// maxAutoContinueStreamRounds bounds how many consecutive times one turn
-// auto-injects a continuation prompt after preserved stream interruptions.
-// Every round persists the partial text it saved, so reaching the cap never
-// discards work: the automatic loop stops with the preserved partial replies
-// kept in history, where the user can type "继续" to resume writing or switch
-// model. Event-loop-goroutine only, like LengthRecoveryCount.
-const maxAutoContinueStreamRounds = 3
-
-// streamContinueNoticeText is the status line shown after a preserved stream
-// interruption. It is productized UI, not conversation content: the reply is
-// resumed by a request-scoped overlay, so nothing is appended to the
-// transcript for it to describe.
-const streamContinueNoticeText = "回复被中断，已保留已输出的内容并从断开处继续。"
-
-// streamContinuePrompt is the instruction that resumes a preserved reply for
-// pools whose models cannot continue from a trailing assistant turn. The
-// preserved partial reply sits directly above it as an interrupted assistant
-// message, so it names what to continue instead of restating the task.
-func streamContinuePrompt() string {
-	return "System note: the previous response was interrupted by a transport error, and the part it had already produced is preserved above as an interrupted assistant message. Continue that response directly from where it stopped, without apology or recap and without repeating any of the preserved text. If the reply was mid-sentence or mid-code-block, resume exactly at the break."
-}
+// streamContinueMessageText is the durable user-role continuation message
+// appended after a preserved stream interruption for pools whose models cannot
+// resume from a trailing assistant turn. It is real transcript content: the
+// same text is sent to the model in this and every later request and rendered
+// as the card the user sees, so what the UI shows always equals what the model
+// was told. The preserved partial reply sits directly above it in history, so
+// it names what to continue instead of restating the task.
+const streamContinueMessageText = "Your previous reply was interrupted before it completed. The text already written is preserved above; continue directly from the interruption point without apologizing or restating what was written."
 
 // resumeAfterPreservedStreamInterruption saves the turn's streamed partial
 // text as an interrupted assistant message and restarts the main LLM request so
 // the model continues from where it stopped. The restart runs the full retry
 // rotation (key switch, fallback models, cooling waits), so a persistently
 // failing transport behaves like any other error — while the partial reply is
-// never discarded. It reports false when the turn is stale or no body text was
-// streamed, letting the caller fall through to ordinary error handling. When
-// the auto-continuation cap is hit, the partial reply just saved stays in
-// history and the turn is closed with an explanatory error instead of an
-// endless automatic loop. Event-loop-goroutine only.
+// never discarded. Continuation is not capped: the restart repeats until the
+// reply completes, an interruption carries no new visible text, the turn is
+// cancelled or goes stale, or a non-resumable error ends the turn normally. It
+// reports false when the turn is stale or no body text was streamed, letting
+// the caller fall through to ordinary error handling. Event-loop-goroutine
+// only.
 func (a *MainAgent) resumeAfterPreservedStreamInterruption(turnID uint64, cause error) bool {
 	if a.turn == nil || turnID == 0 || a.turn.ID != turnID {
 		return false
@@ -2277,41 +2252,34 @@ func (a *MainAgent) resumeAfterPreservedStreamInterruption(turnID uint64, cause 
 		// partial reply to resume; fall through to ordinary error handling.
 		return false
 	}
-	if a.turn.AutoContinueCount >= maxAutoContinueStreamRounds {
-		log.Warnf("preserved stream interruption exceeded auto-continue cap turn_id=%v auto_continue_count=%v error=%v", turnID, a.turn.AutoContinueCount, cause)
-		wrapErr := fmt.Errorf("模型回复多次被网络中断（已自动续写 %d 次），已输出的正文均已保留在对话中。输入“继续”可让它接着写，或切换模型。最后错误：%v", a.turn.AutoContinueCount, cause)
-		a.failPendingToolCalls(a.turn, wrapErr)
-		a.applyPendingModelPoolSwitchesAtRequestBoundary()
-		a.fireHookBackground(a.parentCtx, hook.OnAgentError, turnID, map[string]any{"message": wrapErr.Error(), "error_kind": classifyAgentError(cause), "source_agent_id": a.instanceID})
-		a.emitToTUI(ErrorEvent{Err: wrapErr})
-		a.stopLoopAsBlocked(wrapErr.Error())
-		a.markActiveSubAgentMailboxAck(false)
-		a.setIdleAndDrainPending()
-		return true
-	}
-	a.turn.AutoContinueCount++
-	log.Infof("resuming turn after preserved stream interruption turn_id=%v auto_continue_count=%v error=%v", turnID, a.turn.AutoContinueCount, cause)
+	log.Infof("resuming turn after preserved stream interruption turn_id=%v error=%v", turnID, cause)
 	a.prepareStreamContinuation()
 	a.resumeTurnAfterRoutingInvalidation(turnID)
 	return true
 }
 
-// prepareStreamContinuation arms the restart of a preserved interruption. The
-// saved partial reply is already the last durable message, so a model pool that
-// can resume from a trailing assistant turn needs nothing else: the next
-// request simply ends with the interrupted reply and the model picks it up.
-// Other pools get a request-scoped continuation overlay instead — a durable
-// user-role prompt would be a synthetic message the user never wrote, and it
-// would outlive the interruption it describes in the session record.
+// prepareStreamContinuation readies the restart of a preserved interruption.
+// The saved partial reply is already the last durable message, so a model pool
+// that can resume from a trailing assistant turn needs nothing else: the next
+// request simply ends with the interrupted reply and the model picks it up. A
+// pool that needs a user turn instead gets a durable KindStreamContinue
+// message appended right after the partial, so the transcript and every later
+// request carry exactly what the model was sent. The StreamContinueEvent
+// mirrors that appended message (empty when nothing was appended) so the TUI
+// settles the interrupted card and, when a message exists, renders it.
 func (a *MainAgent) prepareStreamContinuation() {
 	if a.llmClient != nil && a.llmClient.AllPoolTargetsSupportAssistantPrefillContinuation() {
 		log.Debugf("resuming preserved stream via trailing assistant turn turn_id=%v", a.turn.ID)
-	} else {
-		a.pendingStreamContinuePrompt = streamContinuePrompt()
+		a.emitToTUI(StreamContinueEvent{Text: ""})
+		return
 	}
-	// The notice is productized UI, not transcript content: it settles the
-	// interrupted card and tells the user the reply is being resumed.
-	a.emitToTUI(StreamContinueEvent{Text: streamContinueNoticeText})
+	msg := message.Message{Role: message.RoleUser, Content: streamContinueMessageText, Kind: message.KindStreamContinue}
+	a.ctxMgr.Append(msg)
+	if a.recovery != nil {
+		a.persistAsync(identity.MainAgentID, msg)
+	}
+	log.Debugf("persisted stream continuation message turn_id=%v", a.turn.ID)
+	a.emitToTUI(StreamContinueEvent{Text: streamContinueMessageText})
 }
 
 // handleAgentError emits the error to the TUI and logs it. An IdleEvent is
@@ -2349,15 +2317,16 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		}
 
 		// A stream interruption that carried already-streamed assistant text is
-		// resumable: the partial reply is saved to history (never discarded), a
-		// visible continuation prompt is injected, and the turn restarts the
-		// request so the model continues from where it stopped. The restart
-		// runs the full retry rotation (key switch, fallback models, cooling
-		// waits), so a persistently failing transport behaves like any other
-		// error without ever throwing away produced text. When nothing visible
-		// was streamed, or the auto-continuation cap is hit, this falls through
-		// to ordinary error handling below — which then discards nothing, since
-		// the partial text has already been drained and saved.
+		// resumable: the partial reply is saved to history (never discarded),
+		// followed by a durable continuation message for pools that need one,
+		// and the turn restarts the request so the model continues from where
+		// it stopped. The restart runs the full retry rotation (key switch,
+		// fallback models, cooling waits) without a round cap, so a
+		// persistently failing transport behaves like any other error without
+		// ever throwing away produced text. When nothing visible was streamed,
+		// this falls through to ordinary error handling below — which then
+		// discards nothing, since the partial text has already been drained
+		// and saved.
 		if a.turn != nil && llm.IsPreservableStreamInterruption(err) {
 			if a.resumeAfterPreservedStreamInterruption(evt.TurnID, err) {
 				return
