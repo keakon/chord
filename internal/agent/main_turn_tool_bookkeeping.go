@@ -342,6 +342,18 @@ func (t *Turn) appendPartialText(s string) {
 	t.partialText.WriteString(s)
 }
 
+// peekPartialText returns the accumulated partial assistant text without
+// clearing it. Callers use it to decide how to recover from a failed request
+// before the recovery path drains the same text.
+func (t *Turn) peekPartialText() string {
+	if t == nil {
+		return ""
+	}
+	t.partialTextMu.Lock()
+	defer t.partialTextMu.Unlock()
+	return t.partialText.String()
+}
+
 // drainPartialText returns and clears the accumulated partial assistant text.
 func (t *Turn) drainPartialText() string {
 	if t == nil {

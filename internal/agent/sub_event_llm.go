@@ -38,7 +38,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			s.continueLLMWithPendingUserMessages()
 			return
 		}
-		if !llm.IsContextLengthExceeded(result.err) && s.recoverTerminalResponse("The previous model request was interrupted by a transient transport error. Re-check the task state and finish coordination now. If the task is complete, call Complete with a concise summary. If blocked or parent input is required, call Escalate or Notify instead of stopping after plain text.", result.err) {
+		if !llm.IsContextLengthExceeded(result.err) && s.recoverTerminalResponse(s.interruptedRequestRecoveryInstruction(), result.err) {
 			return
 		}
 		s.sendEvent(Event{
@@ -496,6 +496,20 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	}
 }
 
+// interruptedRequestRecoveryInstruction picks the recovery instruction for a
+// transient transport failure. When the interrupted request had already
+// streamed body text, that text is saved as an interrupted assistant message
+// directly above this instruction, so the sub-agent should pick the work back
+// up rather than wrap up — telling it to finish coordination there would throw
+// away the reply it just produced. With nothing streamed there is no work in
+// flight to resume, so the bounded wrap-up instruction stays correct.
+func (s *SubAgent) interruptedRequestRecoveryInstruction() string {
+	if s != nil && s.turn != nil && strings.TrimSpace(s.turn.peekPartialText()) != "" {
+		return "System note: the previous model request was interrupted by a transient transport error, and the reply it had already produced is preserved above as an interrupted assistant message. Continue that reply directly from where it stopped without apology or recap, then finish the delegated task. Do not restart the analysis and do not repeat text that is already preserved."
+	}
+	return "The previous model request was interrupted by a transient transport error. Re-check the task state and finish coordination now. If the task is complete, call Complete with a concise summary. If blocked or parent input is required, call Escalate or Notify instead of stopping after plain text."
+}
+
 func (s *SubAgent) recoverTerminalResponse(instruction string, cause error) bool {
 	if s == nil || s.turn == nil || s.turn.SubAgentTerminalRecoveryCount >= 1 {
 		return false
@@ -519,6 +533,16 @@ func isTransientSubAgentTransportError(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
+	// The client escalates preservable stream interruptions instead of retrying
+	// them internally, so the caller now owns their recovery. They must be
+	// matched before the status-code branch: an in-band stream error event
+	// carries no HTTP status, and neither InterruptedResponseError nor
+	// ChunkTimeoutError is an *APIError. Without this an interrupted SubAgent
+	// reply fails the turn outright and the text it already streamed is lost,
+	// because only this path drains and saves the partial reply.
+	if llm.IsPreservableStreamInterruption(err) {
+		return true
+	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
@@ -526,7 +550,9 @@ func isTransientSubAgentTransportError(err error) bool {
 		return true
 	}
 	if apiErr, ok := errors.AsType[*llm.APIError](err); ok && apiErr != nil {
-		return apiErr.StatusCode == 408 || apiErr.StatusCode == 429 || apiErr.StatusCode >= 500
+		if apiErr.StatusCode == 408 || apiErr.StatusCode == 429 || apiErr.StatusCode >= 500 {
+			return true
+		}
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "connection reset") || strings.Contains(msg, "broken pipe") ||
