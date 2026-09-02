@@ -142,7 +142,9 @@ project, or for user-visible artifacts that a team may review:
 - `AGENTS.md` contains repository instructions that applicable agents must follow.
 - `.chord/config.yaml`, `.chord/agents/`, `.chord/commands/`, and `.chord/skills/` contain explicit project configuration and shared capabilities.
 - `.chord/plans/` contains planning documents. Whether plans are committed is a project decision.
-- `.chord/notes/` holds human-readable working notes a session keeps for itself (findings, open-thread state) so long read-mostly sessions have a legal write target outside the tracked tree; whether notes are committed is a project decision.
+  - Planning documents for the planner → handoff workflow and topic/design documents both use the same naming convention: `YYYYMMDD-<slug>.md` (for example `20260903-session-key-isolation.md`), where `YYYYMMDD` is the creation date and `<slug>` is a short descriptive name derived from the title. If a file with the same date and slug already exists (a later revision of the same topic), append `-2`, `-3`, and so on. Task-list plans are recognised by their `## Tasks` body of `### N.` items (a machine-readable format consumed by the execution handoff), not by their filename.
+  - A document that replaces an earlier one declares it with a `supersedes: <file>` line near the top; move finished or superseded documents to `plans/archive/` (archive files keep their original names).
+- `.chord/notes/` holds human-readable working notes a session keeps for itself (findings, open-thread state) so long read-mostly sessions have a legal write target outside the tracked tree; whether notes are committed is a project decision. Name notes `YYYYMMDD-<slug>.md` so they sort and age visibly; keep them free-form and maintain no index — when a note's conclusions are captured elsewhere, delete it or mark it superseded.
 - Project-local Chord files should use paths relative to the project root when they refer to repository files, so the project remains portable when its directory moves.
 
 Do not use `.chord/` as a general runtime-state directory. Session transcripts,

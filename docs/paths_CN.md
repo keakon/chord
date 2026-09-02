@@ -127,7 +127,9 @@ Sessions、运行时缓存、exports 都以这个 key 为索引——在 `~/proj
 - `AGENTS.md` 放仓库级指令，适用的 agent 必须遵守。
 - `.chord/config.yaml`、`.chord/agents/`、`.chord/commands/` 和 `.chord/skills/` 放项目显式配置与共享能力。
 - `.chord/plans/` 放计划文档，是否提交由项目自行决定。
-- `.chord/notes/` 放会话为自己保留的可读工作笔记（发现、未收口线索），让长只读会话在被跟踪的树外有一个合法写盘目标；是否提交由项目自行决定。
+  - planner → handoff 工作流的任务清单计划与主题/设计文档统一用同一命名：`YYYYMMDD-<slug>.md`（如 `20260903-session-key-isolation.md`），`YYYYMMDD` 为创建日期、`<slug>` 为由标题派生的短描述名。若同日期同 slug 的文件已存在（同主题的后续修订），追加 `-2`、`-3`。任务清单通过 `## Tasks` 的 `### N.` 条目（供执行 handoff 消费的机器可读格式）识别，不依赖文件名。
+  - 取代旧文档时在开头声明一行 `supersedes: <file>`；完成或已取代的文档移入 `plans/archive/`（archive 文件保留原文件名）。
+- `.chord/notes/` 放会话为自己保留的可读工作笔记（发现、未收口线索），让长只读会话在被跟踪的树外有一个合法写盘目标；是否提交由项目自行决定。笔记命名用 `YYYYMMDD-<slug>.md`，方便按时间排序与判断时效；正文保持自由格式，不维护索引——结论已落入其它载体时，删除或标记 superseded 即可。
 - 项目内 Chord 文件引用仓库文件时，应使用相对项目根的路径，这样移动整个项目目录后仍然有效。
 
 不要把 `.chord/` 当成通用运行时状态目录。会话 transcript、usage ledger、恢复快照、项目注册表、日志、锁和其他不透明的运行时记账数据，应放在上面的 state 目录或 cache 目录中。用户需要直接编辑、使用相对路径引用或随项目移动的人类可读产物，可以放在项目目录，但必须明确 Git 和所有权语义。尤其不要把 `auth.yaml` 或其他凭据放进项目目录。
