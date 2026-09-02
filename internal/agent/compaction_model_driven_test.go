@@ -90,6 +90,25 @@ func TestTryArmModelDrivenCheckpointRejectsBadArgs(t *testing.T) {
 	if _, err := a.tryArmModelDrivenCheckpoint("cc-1", `{}`); err == nil {
 		t.Fatal("expected rejection for missing required fields")
 	}
+
+	// A compaction already owning the slot rejects the request before
+	// argument parsing, and the error must tell the model that the running
+	// compaction settles on its own at the barrier (so it does not read the
+	// rejection as a request failure or burn retries in the same window).
+	a.beginCompactionState(9, compactionTarget{turnID: 1, turnEpoch: 1, sessionEpoch: a.sessionEpoch}, compactionTriggerModelDriven, continuationPlan{kind: compactionResumeModelDriven, turnID: 1}, 0, nil)
+	defer a.resetCompactionState()
+	_, err := a.tryArmModelDrivenCheckpoint("cc-1", `{"active_objective":"a","next_step":"b"}`)
+	if err == nil {
+		t.Fatal("expected rejection while a compaction is running")
+	}
+	for _, want := range []string{"next continuation barrier", "No manual checkpoint is needed now"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("rejection error %q is missing guidance %q", err.Error(), want)
+		}
+	}
+	if a.pendingModelDriven != nil {
+		t.Fatal("pendingModelDriven must not be armed while a compaction is running")
+	}
 }
 
 func TestMaybeStartModelDrivenBarrierSkipsWithoutPending(t *testing.T) {

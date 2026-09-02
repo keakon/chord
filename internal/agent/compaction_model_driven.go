@@ -194,7 +194,13 @@ func (a *MainAgent) validateCompactContextResult(callID string, rawArgs string) 
 		return "", tools.CompactContextArgs{}, fmt.Errorf("compact_context requires an active turn")
 	}
 	if a.IsCompactionRunning() {
-		return "", tools.CompactContextArgs{}, fmt.Errorf("a context compaction is already running or waiting; retry compact_context after it settles")
+		// The model cannot act on this rejection beyond waiting: whichever
+		// compaction owns the slot (automatic usage-driven, oversize, or an
+		// earlier accepted model-driven request) settles at the next
+		// continuation barrier and resets the history on its own. Say that
+		// explicitly so the model does not read this as a request failure and
+		// does not burn retries while the barrier is pending.
+		return "", tools.CompactContextArgs{}, fmt.Errorf("a context compaction is already running or waiting to apply; it will settle automatically at the next continuation barrier and reset the conversation history. No manual checkpoint is needed now; retry compact_context after it settles only if your continuation still needs one")
 	}
 	if a.persistenceDegraded() {
 		return "", tools.CompactContextArgs{}, fmt.Errorf("session persistence is degraded; compact_context cannot rewrite session history safely")

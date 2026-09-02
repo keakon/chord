@@ -32,7 +32,7 @@ const (
 	// compaction, call compact_context (the compaction is already running by
 	// the time the model sees it), or guarantee a write; it only preserves an
 	// externalization opportunity while an auto-compact request is armed.
-	compactionWarningText = "The runtime has scheduled automatic context compaction for the current context.\nIf critical findings or state are not yet externalized, write them when appropriate.\nCompaction may continue independently of this message."
+	compactionWarningText = "The runtime has scheduled automatic context compaction for the current context.\nIf critical findings or state are not yet externalized, write them when appropriate.\ncompact_context is rejected while automatic compaction is scheduled or running, and the reset needs no manual checkpoint; retry it after the compaction settles only if your continuation still needs one.\nCompaction may continue independently of this message."
 )
 
 // reminderOverlayClaim is the per-window claim for the context-pressure
