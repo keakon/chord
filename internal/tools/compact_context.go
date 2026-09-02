@@ -162,11 +162,13 @@ func validateStateFiles(paths []string, maxItems int, maxRunes int) ([]string, e
 		if strings.Contains(p, `\`) {
 			return nil, fmt.Errorf("state_files path %q must use '/' separators", p)
 		}
-		if strings.HasPrefix(p, "/") {
-			return nil, fmt.Errorf("state_files path %q must be workspace-relative, not absolute", p)
-		}
-		if strings.HasPrefix(p, "~") {
-			return nil, fmt.Errorf("state_files path %q must be workspace-relative, not home-relative", p)
+		if strings.HasPrefix(p, "/") || strings.HasPrefix(p, "~") {
+			// Absolute and home-relative paths may or may not point inside the
+			// project, and the validator never stats the filesystem, so the
+			// model must resolve the location itself: rewrite to a relative
+			// path when the file is in-project, otherwise external state has
+			// no valid reference and must be folded into the text fields.
+			return nil, fmt.Errorf("state_files path %q must be workspace-relative (relative to the project root), not absolute or home-relative; if the file lives inside the project, pass its relative path (e.g. \"docs/usage.md\"), otherwise remove the entry and capture the state in completed/decisions/open_issues text instead", p)
 		}
 		rawSegments := strings.Split(p, "/")
 		for _, seg := range rawSegments {
@@ -229,8 +231,10 @@ func (CompactContextTool) Description() string {
 		"The runtime may also skip the checkpoint when the minimum apply interval has not elapsed or projected savings are too small; that is a normal policy result, not an error, and retrying the same request repeatedly will not change the outcome.\n" +
 		"Prefer Delegate (SubAgent) for separable sub-tasks whose results the main thread can consume; use compact_context only when the main thread itself must keep reasoning across the phase boundary.\n" +
 		"A success result only means the request was accepted; a later model-driven [Context Summary] checkpoint confirms the reset was applied.\n" +
-		"state_files entries are workspace-relative path references only: neither read nor injected automatically.\n" +
-		"If the arguments are rejected, shorten them and retry; never work around the limits by splitting the checkpoint."
+		"state_files entries must be workspace-relative paths (relative to the project root, e.g. \"docs/usage.md\"); absolute (\"/tmp/...\") and home-relative (\"~/...\") paths are rejected.\n" +
+		"Entries are pure references: never read, injected, or existence-verified, so only list project files you intend to re-read with the read tool.\n" +
+		"State outside the project (temp dirs, logs, session files, other checkouts) cannot be referenced here; capture it in completed/decisions/open_issues text instead.\n" +
+		"If the arguments are rejected, fix the reported problem (shorten over-budget text, or drop non-workspace paths from state_files) and retry; never work around the limits by splitting the checkpoint."
 }
 
 func (CompactContextTool) Parameters() map[string]any {
@@ -271,7 +275,7 @@ func (CompactContextTool) Parameters() map[string]any {
 				"type":        "array",
 				"maxItems":    16,
 				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": 512},
-				"description": "Workspace-relative paths of files carrying externalized state. References only, never read nor injected automatically.",
+				"description": "Workspace-relative paths (relative to the project root, e.g. docs/usage.md) of files carrying externalized state; absolute and ~-prefixed paths are rejected, and out-of-project state must be captured in completed/decisions/open_issues text instead. References only: never read, injected, or existence-verified.",
 			},
 		},
 		"required":             []string{"active_objective", "next_step"},

@@ -87,6 +87,30 @@ func TestCompactContextStateFilesLexicalValidation(t *testing.T) {
 	}
 }
 
+func TestCompactContextStateFilesRejectionGuidesRemediation(t *testing.T) {
+	// Absolute and home-relative paths have no guaranteed workspace-relative
+	// spelling, so the rejection must tell the model what to do instead
+	// (rewrite when in-project, otherwise fold the state into text fields).
+	v := testCompactValidator()
+	for name, raw := range map[string]string{
+		"absolute": `{"active_objective":"a","next_step":"b","state_files":["/tmp/scratch"]}`,
+		"tilde":    `{"active_objective":"a","next_step":"b","state_files":["~/scratch"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := v.ParseCompactContextArgs(json.RawMessage(raw))
+			if err == nil {
+				t.Fatal("expected rejection")
+			}
+			msg := err.Error()
+			for _, want := range []string{"workspace-relative", "docs/usage.md", "completed/decisions/open_issues text"} {
+				if !strings.Contains(msg, want) {
+					t.Fatalf("error %q is missing remediation guidance %q", msg, want)
+				}
+			}
+		})
+	}
+}
+
 func TestCompactContextStateFilesDedupedAndNormalized(t *testing.T) {
 	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(`{
 		"active_objective":"a","next_step":"b",
