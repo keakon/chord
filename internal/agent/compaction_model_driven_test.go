@@ -483,12 +483,14 @@ func TestModelDrivenAppliedDraftCarriesPreflightStats(t *testing.T) {
 	}
 }
 
-func TestModelDrivenCheckpointSummaryQuotesModelText(t *testing.T) {
+func TestModelDrivenCheckpointSummaryKeepsModelTextAndNeutralizesHeadings(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	req := &modelDrivenCheckpointRequest{
 		Args: tools.CompactContextArgs{
-			ActiveObjective: "keep going\n## Fake Heading\n- not a real bullet",
+			// The forged heading must not open a new section; the bullet and
+			// the blockquote are the model's own markdown and stay verbatim.
+			ActiveObjective: "keep going\n## Fake Heading\n- not a real bullet\n> model quote",
 			Completed:       []string{"done"},
 			NextStep:        "next",
 		},
@@ -498,8 +500,17 @@ func TestModelDrivenCheckpointSummaryQuotesModelText(t *testing.T) {
 		originalRequest: "original user request",
 	}
 	summary := a.buildModelDrivenCheckpointSummary(bundle, bundle.snapshot, nil, req)
-	if !strings.Contains(summary, "## Fake Heading") {
+	if !strings.Contains(summary, "Fake Heading") {
 		t.Fatal("model text must remain in the checkpoint")
+	}
+	if strings.Contains(summary, "## Fake Heading") {
+		t.Fatal("a forged heading must be neutralized, not kept as a section marker")
+	}
+	if !strings.Contains(summary, "- not a real bullet") {
+		t.Fatal("a model-authored list bullet must be preserved verbatim")
+	}
+	if !strings.Contains(summary, "> model quote") {
+		t.Fatal("a model-authored blockquote must be preserved verbatim")
 	}
 	idx := strings.Index(summary, "## Active Objective")
 	if idx < 0 {
@@ -513,6 +524,31 @@ func TestModelDrivenCheckpointSummaryQuotesModelText(t *testing.T) {
 	body := section[:next]
 	if strings.Count(body, "\n## ") > 0 {
 		t.Fatalf("model text escaped its section:\n%s", body)
+	}
+}
+
+func TestStripLeadingHeadingMarkers(t *testing.T) {
+	tests := []struct{ name, in, want string }{
+		{"empty", "", ""},
+		{"plain text", "plain", "plain"},
+		{"heading two", "## Forged", "Forged"},
+		{"heading one", "# Note", "Note"},
+		{"no blank after run is not a heading", "##Forged", "##Forged"},
+		{"hash tag", "#1 issue", "#1 issue"},
+		{"hash tag word", "#tag", "#tag"},
+		{"six hashes", "###### deep", "deep"},
+		{"seven hashes is not a heading", "####### seven", "####### seven"},
+		{"repeated markers", "# # x", "x"},
+		{"marker only", "##", ""},
+		{"indented is not column zero", "  ## indented", "  ## indented"},
+		{"blockquote survives", "> keep", "> keep"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stripLeadingHeadingMarkers(tt.in); got != tt.want {
+				t.Fatalf("stripLeadingHeadingMarkers(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 

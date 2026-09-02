@@ -820,21 +820,22 @@ func (a *MainAgent) buildModelDrivenCheckpointContent(bundle modelDrivenBarrierS
 // sections. Current User Request comes from the authoritative runtime
 // resolver (real user messages / Done-rejected reasons in message order, with
 // inheritance from the previous checkpoint when the tail has nothing new),
-// never from the model-authored args. Every model-authored field is quoted
-// line by line so headings, markers, or wrapper shapes cannot escape their
-// section; state_files are labeled as model-declared references.
+// never from the model-authored args. Every model-authored field is rendered
+// verbatim except that column-zero ATX heading markers are stripped, so the
+// model cannot open a new section from inside one; state_files are labeled as
+// model-declared references.
 func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierSnapshot, headSnapshot []message.Message, recentTail []message.Message, req *modelDrivenCheckpointRequest) string {
 	snapshot := append(append([]message.Message(nil), headSnapshot...), recentTail...)
 	anchor := resolveLatestUserRequestAnchor(snapshot)
 	constraints := renderEvidenceKindForFallback(&compactionInput{EvidenceItems: bundle.evidenceItems}, evidenceUserCorrection, "- No preserved user constraints.")
-	openIssues := quoteModelStateList(req.Args.OpenIssues, "(none reported by the model)")
-	decisions := quoteModelStateList(req.Args.Decisions, "(none reported by the model)")
-	completed := quoteModelStateList(req.Args.Completed, "(none reported by the model)")
-	stateFiles := quoteStateFilesSection(req.Args.StateFiles)
+	openIssues := renderModelStateList(req.Args.OpenIssues, "(none reported by the model)")
+	decisions := renderModelStateList(req.Args.Decisions, "(none reported by the model)")
+	completed := renderModelStateList(req.Args.Completed, "(none reported by the model)")
+	stateFiles := renderStateFilesSection(req.Args.StateFiles)
 
 	sections := []fallbackSummarySection{
 		{"## Current User Request", modelDrivenCurrentUserRequestSection(anchor)},
-		{"## Active Objective", quoteModelState(req.Args.ActiveObjective)},
+		{"## Active Objective", renderModelState(req.Args.ActiveObjective)},
 		{"## Background Goals", "- Earlier goals are background; follow only the Current User Request and Active Objective above."},
 		{"## User Constraints", constraints},
 		{"## Progress", completed},
@@ -844,7 +845,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Todo State", formatTodosAsRelevanceBullets(bundle.todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(bundle.subAgents)},
 		{"## Open Problems", openIssues},
-		{"## Next Step", quoteModelState(req.Args.NextStep)},
+		{"## Next Step", renderModelState(req.Args.NextStep)},
 	}
 	summary := renderFallbackSummarySections(sections, bundle.backgroundObjects)
 	// The model-driven checkpoint has no model classification to fill the
@@ -890,10 +891,13 @@ func modelDrivenCurrentUserRequestSection(anchor fallbackAnchor) string {
 	return "- Unknown: no reliable latest user request was preserved; do not infer the active task from stale context."
 }
 
-// quoteModelState renders a model-authored line as a quoted bullet so `##`
-// headings, compaction markers, or wrapper shapes in the model text cannot
-// escape the section they belong to.
-func quoteModelState(text string) string {
+// renderModelState renders a model-authored field into a checkpoint section.
+// The text is trusted verbatim except for column-zero ATX heading markers,
+// which are stripped: the checkpoint readers locate sections by "^## " lines,
+// and a heading is the only line-level structure that would let the text
+// escape its section. Quoted lines ("> ...") and every other markdown
+// construct are preserved, so a blockquote the model wrote renders as one.
+func renderModelState(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return "- (none)"
@@ -901,15 +905,15 @@ func quoteModelState(text string) string {
 	lines := strings.Split(text, "\n")
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
-		out = append(out, "> "+line)
+		out = append(out, stripLeadingHeadingMarkers(line))
 	}
 	return strings.Join(out, "\n")
 }
 
-// quoteModelStateList renders model-authored list items as quoted bullets
-// ("- item" -> "> - item" per line), preventing embedded headings/markers
-// from escaping the section. The fallback text is used when the list is empty.
-func quoteModelStateList(items []string, empty string) string {
+// renderModelStateList renders model-authored list items as bullets
+// ("- item" per line), stripping only column-zero heading markers the same
+// way renderModelState does. The fallback text is used when the list is empty.
+func renderModelStateList(items []string, empty string) string {
 	if len(items) == 0 {
 		return "- " + empty
 	}
@@ -919,19 +923,44 @@ func quoteModelStateList(items []string, empty string) string {
 			sb.WriteByte('\n')
 		}
 		for _, line := range strings.Split(item, "\n") {
-			sb.WriteString("> - ")
-			sb.WriteString(line)
+			sb.WriteString("- ")
+			sb.WriteString(stripLeadingHeadingMarkers(line))
 			sb.WriteByte('\n')
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// quoteStateFilesSection renders the Externalized State section: every path is
-// a model-declared reference quoted line by line, explicitly labeled as
-// existence-unverified so the checkpoint cannot be read as a file-existence
-// probe nor smuggle formatting out of its section.
-func quoteStateFilesSection(paths []string) string {
+// stripLeadingHeadingMarkers removes an ATX heading marker ("# ".."###### ")
+// from the start of a line. A run longer than six hashes is not a heading and
+// stays untouched; "#tag" / "#1" (no blank after the run) are plain text and
+// survive. The strip loops so a line like "# # x" cannot re-render as a
+// heading after one pass.
+func stripLeadingHeadingMarkers(line string) string {
+	for {
+		n := 0
+		for n < len(line) && line[n] == '#' {
+			n++
+		}
+		if n == 0 || n > 6 {
+			return line
+		}
+		if n < len(line) && line[n] != ' ' && line[n] != '\t' {
+			return line
+		}
+		j := n
+		for j < len(line) && (line[j] == ' ' || line[j] == '\t') {
+			j++
+		}
+		line = line[j:]
+	}
+}
+
+// renderStateFilesSection renders the Externalized State section: every path
+// is a model-declared reference rendered as its own bullet, explicitly
+// labeled as existence-unverified so the checkpoint cannot be read as a
+// file-existence probe.
+func renderStateFilesSection(paths []string) string {
 	if len(paths) == 0 {
 		return "- (none reported by the model)\n- Model-declared references only; existence is not verified at checkpoint time."
 	}
@@ -939,7 +968,7 @@ func quoteStateFilesSection(paths []string) string {
 	sb.WriteString("- Model-declared references only; existence is not verified at checkpoint time. Use the read tool to load any path before relying on it:\n")
 	for _, p := range paths {
 		for _, line := range strings.Split(p, "\n") {
-			sb.WriteString("> - ")
+			sb.WriteString("- ")
 			sb.WriteString(line)
 			sb.WriteByte('\n')
 		}
