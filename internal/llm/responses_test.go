@@ -2106,12 +2106,11 @@ func TestResponsesProvider_CompatTogglesOmitOptionalFields(t *testing.T) {
 		},
 	}, []string{"test-key"})
 	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
-	r.SetSessionID("session-123")
 
 	_, err := r.CompleteStream(
 		context.Background(), "test-key", "gpt-5.5", "",
 		[]message.Message{{Role: "user", Content: "hello"}},
-		nil, 128, RequestTuning{},
+		nil, 128, RequestTuning{SessionKey: "session-123"},
 		func(message.StreamDelta) {},
 	)
 	if err != nil {
@@ -2152,12 +2151,11 @@ func TestResponsesProvider_CompatTogglesDefaultsKeepStableShape(t *testing.T) {
 		APIURL: server.URL + "/v1/responses",
 	}, []string{"test-key"})
 	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
-	r.SetSessionID("session-123")
 
 	_, err := r.CompleteStream(
 		context.Background(), "test-key", "gpt-5.5", "",
 		[]message.Message{{Role: "user", Content: "hello"}},
-		[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}}, 128, RequestTuning{},
+		[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}}, 128, RequestTuning{SessionKey: "session-123"},
 		func(message.StreamDelta) {},
 	)
 	if err != nil {
@@ -2635,12 +2633,11 @@ func TestResponsesProvider_SendsSessionHeadersAndPromptCacheKey(t *testing.T) {
 		APIURL: server.URL + "/v1/responses",
 	}, []string{"test-key"})
 	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
-	r.SetSessionID("session-123")
 
 	_, err := r.CompleteStream(
 		context.Background(), "test-key", "gpt-5", "",
 		[]message.Message{{Role: "user", Content: "hello"}},
-		nil, 128, RequestTuning{},
+		nil, 128, RequestTuning{SessionKey: "session-123"},
 		func(message.StreamDelta) {},
 	)
 	if err != nil {
@@ -2728,12 +2725,11 @@ func TestOpenAIProvider_SendsSessionHeadersOnChatCompletions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewOpenAIProviderWithClient: %v", err)
 	}
-	o.SetSessionID("session-456")
 
 	_, err = o.CompleteStream(
 		context.Background(), "test-key", "gpt-4", "",
 		[]message.Message{{Role: "user", Content: "hello"}},
-		nil, 128, RequestTuning{},
+		nil, 128, RequestTuning{SessionKey: "session-456"},
 		func(message.StreamDelta) {},
 	)
 	if err != nil {

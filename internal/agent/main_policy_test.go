@@ -99,15 +99,6 @@ func (p stubProvider) Complete(
 	return &message.Response{}, nil
 }
 
-type sessionAwareStubProvider struct {
-	stubProvider
-	sessionID string
-}
-
-func (p *sessionAwareStubProvider) SetSessionID(sid string) {
-	p.sessionID = sid
-}
-
 func TestStartPlanExecutionKeepsExecutionPromptAcrossRefresh(t *testing.T) {
 	projectRoot := t.TempDir()
 	planPath := filepath.Join(projectRoot, "plan.md")
@@ -169,12 +160,12 @@ func TestStartPlanExecutionPropagatesNewSessionIDToProvider(t *testing.T) {
 			"test-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
 		},
 	}, []string{"test-key"})
-	providerImpl := &sessionAwareStubProvider{}
+	providerImpl := &stubProvider{}
 	a.llmClient = llm.NewClient(providerCfg, providerImpl, "test-model", 1024, "")
 
 	a.startPlanExecution(planPath, "builder")
-	if got, want := providerImpl.sessionID, filepath.Base(a.sessionDir); got != want {
-		t.Fatalf("provider sessionID = %q, want %q", got, want)
+	if got, want := a.llmClient.SessionKey(), filepath.Base(a.sessionDir); got != want {
+		t.Fatalf("client sessionID = %q, want %q", got, want)
 	}
 }
 
@@ -773,7 +764,7 @@ func TestSwitchModelPropagatesCurrentSessionIDToNewClient(t *testing.T) {
 			},
 		},
 	}, []string{"test-key"})
-	providerImpl := &sessionAwareStubProvider{}
+	providerImpl := &stubProvider{}
 	client := llm.NewClient(providerCfg, providerImpl, "model-b", 2048, "")
 
 	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
@@ -786,8 +777,8 @@ func TestSwitchModelPropagatesCurrentSessionIDToNewClient(t *testing.T) {
 	if err := a.SwitchModel("sample/model-b"); err != nil {
 		t.Fatalf("SwitchModel: %v", err)
 	}
-	if got := providerImpl.sessionID; got != "test" {
-		t.Fatalf("provider sessionID = %q, want test", got)
+	if got := client.SessionKey(); got != "test" {
+		t.Fatalf("client sessionID = %q, want test", got)
 	}
 }
 

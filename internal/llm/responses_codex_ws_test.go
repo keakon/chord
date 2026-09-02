@@ -91,11 +91,10 @@ func TestResetCodexWebSocketChainClearsState(t *testing.T) {
 	r.codexWSLastInpLen = 3
 	r.codexWSLastInpSig = "sig"
 	r.codexWSLastReqSig = "reqsig"
-	r.codexWSPromptCacheKey = "prompt"
 
 	r.resetCodexWebSocketChain("test")
 
-	if r.codexWSLastKey != "" || r.codexWSLastAPIURL != "" || r.codexWSLastModel != "" || r.codexWSLastRespID != "" || r.codexWSLastInpLen != 0 || r.codexWSLastInpSig != "" || r.codexWSLastReqSig != "" || r.codexWSPromptCacheKey != "" {
+	if r.codexWSLastKey != "" || r.codexWSLastAPIURL != "" || r.codexWSLastModel != "" || r.codexWSLastRespID != "" || r.codexWSLastInpLen != 0 || r.codexWSLastInpSig != "" || r.codexWSLastReqSig != "" {
 		t.Fatalf("chain state not fully cleared: %+v", r)
 	}
 }
@@ -176,11 +175,10 @@ func TestInvalidateRoutingResetsCodexWebSocketChain(t *testing.T) {
 	r.codexWSLastInpLen = 3
 	r.codexWSLastInpSig = "sig"
 	r.codexWSLastReqSig = "reqsig"
-	r.codexWSPromptCacheKey = "prompt"
 
 	r.InvalidateRouting("model_pool_changed")
 
-	if r.codexWSLastKey != "" || r.codexWSLastAPIURL != "" || r.codexWSLastModel != "" || r.codexWSLastRespID != "" || r.codexWSLastInpLen != 0 || r.codexWSLastInpSig != "" || r.codexWSLastReqSig != "" || r.codexWSPromptCacheKey != "" {
+	if r.codexWSLastKey != "" || r.codexWSLastAPIURL != "" || r.codexWSLastModel != "" || r.codexWSLastRespID != "" || r.codexWSLastInpLen != 0 || r.codexWSLastInpSig != "" || r.codexWSLastReqSig != "" {
 		t.Fatalf("routing invalidation did not fully clear websocket chain: %+v", r)
 	}
 }
@@ -520,7 +518,7 @@ func TestCompleteStreamCodexWebSocketOmitsToolOnlyFieldsWithoutTools(t *testing.
 	srv := newCodexWSCaptureServer(t, []string{"resp-1"})
 	defer srv.Close()
 
-	r := &ResponsesProvider{sessionID: "session-123"}
+	r := &ResponsesProvider{}
 	input := []responsesInputItem{{Type: "message", Role: "user", Content: "hello"}}
 	req := &responsesRequest{
 		Model:   "sample/test-model",
@@ -570,7 +568,7 @@ func TestCompleteStreamCodexWebSocketMissingResponseIDRequiresFullFollowUp(t *te
 	srv := newCodexWSCaptureServer(t, []string{"", "resp-2"})
 	defer srv.Close()
 
-	r := &ResponsesProvider{sessionID: "session-123"}
+	r := &ResponsesProvider{}
 	input1 := []responsesInputItem{{Type: "message", Role: "user", Content: "hello"}}
 	input2 := []responsesInputItem{
 		{Type: "message", Role: "user", Content: "hello"},
@@ -606,7 +604,7 @@ func TestCompleteStreamCodexWebSocketKeyOrModelChangeRequiresFullRequest(t *test
 			srv := newCodexWSCaptureServer(t, []string{"resp-1", "resp-2"})
 			defer srv.Close()
 
-			r := &ResponsesProvider{sessionID: "session-123"}
+			r := &ResponsesProvider{}
 			input1 := []responsesInputItem{{Type: "message", Role: "user", Content: "hello"}}
 			input2 := []responsesInputItem{
 				{Type: "message", Role: "user", Content: "hello"},
@@ -885,10 +883,7 @@ func TestCompleteStreamCodexWebSocket_ConnectingBeforeDial(t *testing.T) {
 	defer srv.Close()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 
-	r := &ResponsesProvider{
-		sessionID:             "test-session",
-		codexWSPromptCacheKey: "test-prompt-cache",
-	}
+	r := &ResponsesProvider{}
 
 	// Track status events and whether "connecting" was emitted before dial.
 	var statuses []string

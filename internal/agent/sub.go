@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -614,6 +615,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	// Build and install the system prompt.
 	prompt := s.buildSystemPrompt()
 	cfg.LLMClient.SetSystemPrompt(prompt)
+	s.setSessionID(cfg.LLMClient)
 	ctxMgr.SetSystemPrompt(message.Message{
 		Role:    "system",
 		Content: prompt,
@@ -687,6 +689,7 @@ func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimi
 	s.llmMu.Unlock()
 	prompt := s.buildSystemPrompt()
 	client.SetSystemPrompt(prompt)
+	s.setSessionID(client)
 	if oldClient != nil && oldClient != client {
 		oldClient.Close()
 	}
@@ -709,6 +712,34 @@ func (s *SubAgent) closeLLMClient() {
 	s.llmMu.RUnlock()
 	if client != nil {
 		client.Close()
+	}
+}
+
+// sessionCacheKey returns the stable per-instance session identity used for
+// provider-side prompt-cache routing. It extends the MainAgent's key (the
+// session directory base name) with ":sub:" + the instance id, so SubAgent
+// requests never collide with MainAgent requests or with a sibling SubAgent
+// instance that shares the same provider impl. The model name is deliberately
+// excluded: the key must stay stable across model switches to keep cache
+// affinity, and the model already participates in the request signature.
+func (s *SubAgent) sessionCacheKey() string {
+	base := strings.TrimSpace(filepath.Base(s.sessionDir))
+	if base == "" || base == "." || base == "/" || base == string(filepath.Separator) {
+		return ""
+	}
+	return base + ":sub:" + s.instanceID
+}
+
+// setSessionID applies the SubAgent's cache identity to an LLM client. It must
+// be called on every client the SubAgent installs (construction and model
+// switches), because the identity lives on the Client, not on the shared
+// provider impl.
+func (s *SubAgent) setSessionID(client *llm.Client) {
+	if client == nil {
+		return
+	}
+	if key := s.sessionCacheKey(); key != "" {
+		client.SetSessionID(key)
 	}
 }
 

@@ -207,7 +207,6 @@ func (r *ResponsesProvider) codexWSCloseConnUnlocked(reason string) bool {
 		r.codexWSConn = nil
 		log.Debugf("responses codex ws: connection closed reason=%v", reason)
 	}
-	r.codexWSPromptCacheKey = ""
 	return hadConn
 }
 
@@ -632,6 +631,7 @@ func (r *ResponsesProvider) codexWSReadMessageWithIdleTimeoutLocked(streamCtx co
 
 type codexWSCompleteOptions struct {
 	SkipPrewarm       bool
+	SessionKey        string // per-request prompt-cache identity (RequestTuning.SessionKey)
 	TurnState         *ResponsesTurnState
 	TurnStateIdentity string
 }
@@ -683,7 +683,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		if cb != nil {
 			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
 		}
-		sess := r.sessionID
+		sess := strings.TrimSpace(opts.SessionKey)
 		if sess == "" {
 			sess = newOpenAIOAuthSessionID()
 		}
@@ -717,7 +717,6 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 			}
 		}
 		r.codexWSConn = conn
-		r.codexWSPromptCacheKey = sess
 		newConnection = true
 	}
 
@@ -737,7 +736,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 			Generate:          &generate,
 			Stream:            true,
 			Include:           req.Include,
-			PromptCacheKey:    r.codexWSPromptCacheKey,
+			PromptCacheKey:    strings.TrimSpace(opts.SessionKey),
 			Reasoning:         req.Reasoning,
 			Text:              req.Text,
 			ClientMetadata:    req.ClientMetadata,
@@ -780,7 +779,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		Store:              req.Store,
 		Stream:             true,
 		Include:            req.Include,
-		PromptCacheKey:     r.codexWSPromptCacheKey,
+		PromptCacheKey:     strings.TrimSpace(opts.SessionKey),
 		PreviousResponseID: prevID,
 		Reasoning:          req.Reasoning,
 		Text:               req.Text,

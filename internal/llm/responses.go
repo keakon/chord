@@ -41,18 +41,16 @@ type ResponsesProvider struct {
 	// uses completeStreamCodexWebSocket directly.
 	codexWSCompleteFn func(context.Context, string, string, string, *responsesRequest, []responsesInputItem, StreamCallback, time.Time, codexWSCompleteOptions) (*message.Response, bool, error)
 
-	codexWSMu             sync.Mutex
-	codexWSConn           *websocket.Conn
-	codexWSLastKey        string
-	codexWSLastAPIURL     string
-	codexWSLastModel      string
-	codexWSLastRespID     string
-	codexWSLastInpLen     int
-	codexWSLastInpSig     string
-	codexWSLastReqSig     string
-	codexWSPromptCacheKey string
-	sessionID             string
-	lastTransportUsed     atomic.Value // string: "websocket" | "http"
+	codexWSMu         sync.Mutex
+	codexWSConn       *websocket.Conn
+	codexWSLastKey    string
+	codexWSLastAPIURL string
+	codexWSLastModel  string
+	codexWSLastRespID string
+	codexWSLastInpLen int
+	codexWSLastInpSig string
+	codexWSLastReqSig string
+	lastTransportUsed atomic.Value // string: "websocket" | "http"
 }
 
 // NewResponsesProviderWithClient creates a new ResponsesProvider using a caller-supplied HTTP client.
@@ -484,9 +482,10 @@ func (r *ResponsesProvider) CompleteStream(
 	reqBody.omitStore = !compatBool(sendStore, true)
 	reqBody.omitInclude = !compatBool(sendReasoningInclude, true)
 	reqBody.Input = fullInput
-	if r.sessionID != "" && compatBool(sendPromptCacheKey, true) {
-		reqBody.PromptCacheKey = r.sessionID
-		reqBody.ClientMetadata = responsesClientMetadata(r.sessionID, requestStartedAt)
+	sessionKey := strings.TrimSpace(tuning.SessionKey)
+	if sessionKey != "" && compatBool(sendPromptCacheKey, true) {
+		reqBody.PromptCacheKey = sessionKey
+		reqBody.ClientMetadata = responsesClientMetadata(sessionKey, requestStartedAt)
 	}
 	if ot.ServiceTier != "" {
 		reqBody.ServiceTier = ot.ServiceTier
@@ -541,7 +540,7 @@ func (r *ResponsesProvider) CompleteStream(
 		if wsComplete == nil {
 			wsComplete = r.completeStreamCodexWebSocket
 		}
-		wsResp, wsUsedIncremental, wsErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{TurnState: turnState, TurnStateIdentity: turnStateIdentity})
+		wsResp, wsUsedIncremental, wsErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SessionKey: sessionKey, TurnState: turnState, TurnStateIdentity: turnStateIdentity})
 		if wsErr == nil {
 			r.lastTransportUsed.Store("websocket")
 			persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, wsResp, nil)
@@ -556,7 +555,7 @@ func (r *ResponsesProvider) CompleteStream(
 		if isCodexWSChainStateMismatch(wsErr) {
 			log.Warnf("responses: Codex WebSocket chain-state mismatch, retrying full request without previous_response_id error=%v model=%v", wsErr, model)
 			r.resetCodexWebSocketChain("ws_chain_state_mismatch")
-			retryResp, retryUsedIncremental, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true, TurnState: turnState, TurnStateIdentity: turnStateIdentity})
+			retryResp, retryUsedIncremental, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true, SessionKey: sessionKey, TurnState: turnState, TurnStateIdentity: turnStateIdentity})
 			if retryErr == nil {
 				r.lastTransportUsed.Store("websocket")
 				persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, retryResp, nil)
@@ -580,7 +579,7 @@ func (r *ResponsesProvider) CompleteStream(
 		if wsUsedIncremental {
 			log.Warnf("responses: Codex WebSocket incremental failed, retrying full request on websocket error=%v model=%v", wsErr, model)
 			r.resetCodexWebSocketChain("error_fallback")
-			wsResp, _, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true, TurnState: turnState, TurnStateIdentity: turnStateIdentity})
+			wsResp, _, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true, SessionKey: sessionKey, TurnState: turnState, TurnStateIdentity: turnStateIdentity})
 			if retryErr == nil {
 				r.lastTransportUsed.Store("websocket")
 				persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, wsResp, nil)
@@ -611,7 +610,7 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 
 	r.lastTransportUsed.Store("http")
-	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, dumpWriter, model, apiKey, useOpenAIOAuth, reqBody.ClientMetadata, overrides, traceCB)
+	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, dumpWriter, model, apiKey, useOpenAIOAuth, sessionKey, reqBody.ClientMetadata, overrides, traceCB)
 
 	// HTTP full-input path: no previous_response_id retry/rollback handling required.
 
@@ -678,6 +677,7 @@ func (r *ResponsesProvider) sendAndParse(
 	model string,
 	apiKey string,
 	useOpenAIOAuth bool,
+	sessionKey string,
 	clientMetadata map[string]string,
 	overrides config.RequestOverridesConfig,
 	cb StreamCallback,
@@ -709,7 +709,7 @@ func (r *ResponsesProvider) sendAndParse(
 		applyProviderAuthHeader(req.Header, scheme, apiKey)
 		applyResponsesStreamingHeaders(req.Header, r.provider)
 	}
-	applySessionIDHeaders(req.Header, r.sessionID)
+	applySessionIDHeaders(req.Header, sessionKey)
 	applyResponsesMetadataHeaders(req.Header, clientMetadata)
 	turnState := ResponsesTurnStateFromContext(ctx)
 	turnStateIdentity := responsesTurnStateIdentity(r.provider, apiKey)

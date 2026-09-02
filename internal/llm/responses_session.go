@@ -22,23 +22,6 @@ func (r *ResponsesProvider) InvalidateRouting(reason string) {
 	r.resetCodexWebSocketChain(reason)
 }
 
-// SetSessionID sets the persistent session identifier used as prompt_cache_key
-// for OpenAI's prompt caching. When the session changes, any existing Codex
-// WebSocket chain is dropped so incremental reuse cannot cross session bounds.
-func (r *ResponsesProvider) SetSessionID(sid string) {
-	if r == nil {
-		return
-	}
-	sid = strings.TrimSpace(sid)
-	if r.sessionID == sid {
-		return
-	}
-	if r.sessionID != "" || sid != "" {
-		r.resetCodexWebSocketChain("session_id_changed")
-	}
-	r.sessionID = sid
-}
-
 // responsesInputSignature returns a SHA-256 hash of the serialized input items.
 func responsesInputSignature(items []responsesInputItem) string {
 	b, err := json.Marshal(items)

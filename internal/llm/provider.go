@@ -99,6 +99,13 @@ type RequestTuning struct {
 	// Compaction continuations use this to avoid replaying provider-native
 	// reasoning items across a rewritten checkpoint boundary.
 	ReplayCompat *int
+	// SessionKey carries the per-Client session identity for provider-side
+	// prompt-cache routing (e.g. OpenAI prompt_cache_key and the Codex
+	// WebSocket session headers). It is owned by the Client, not the shared
+	// provider impl, so MainAgent and SubAgent clients that share one
+	// ResponsesProvider keep distinct cache namespaces. Empty means no
+	// session routing identity is attached.
+	SessionKey string
 }
 
 // Provider is the interface that all LLM provider implementations must satisfy.

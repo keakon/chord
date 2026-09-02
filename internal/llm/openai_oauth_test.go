@@ -520,7 +520,6 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 
 	provider, accessToken := newOpenAITestOAuthProvider(t, server.URL+"/v1/responses")
 	r := &ResponsesProvider{provider: provider, client: server.Client()}
-	r.SetSessionID("session-123")
 
 	resp, err := r.Compact(
 		context.Background(),
@@ -530,7 +529,7 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 		[]message.Message{{Role: "user", Content: "hello"}},
 		nil,
 		128,
-		RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: " HIGH ", TextVerbosity: "low"}},
+		RequestTuning{SessionKey: "session-123", OpenAI: OpenAITuning{ReasoningEffort: " HIGH ", TextVerbosity: "low"}},
 		func(delta message.StreamDelta) {
 			if delta.Progress != nil {
 				progress = append(progress, *delta.Progress)

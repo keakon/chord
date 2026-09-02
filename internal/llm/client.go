@@ -54,11 +54,14 @@ type Client struct {
 	nextTuning             *RequestTuning
 	activeVariant          string // name of the currently applied variant (empty = none)
 	systemPrompt           string
-	lastInputTokens        int             // tracks last known input token count for context size checks
-	fallbackModels         []FallbackModel // ordered list of remaining model-pool entries after the current cursor head
-	poolCursor             int             // sticky cursor over the effective model pool; success pins, failure advances
-	toolSurfacePrimary     FallbackModel   // first entry of the effective model pool; defines stable modality-dependent tool visibility
-	lastCallStatus         CallStatus
+	// sessionKey is the per-Client session identity for provider-side
+	// prompt-cache routing; see SetSessionID.
+	sessionKey         string
+	lastInputTokens    int             // tracks last known input token count for context size checks
+	fallbackModels     []FallbackModel // ordered list of remaining model-pool entries after the current cursor head
+	poolCursor         int             // sticky cursor over the effective model pool; success pins, failure advances
+	toolSurfacePrimary FallbackModel   // first entry of the effective model pool; defines stable modality-dependent tool visibility
+	lastCallStatus     CallStatus
 	// candidateScorer, when set, ranks interchangeable fallback providers
 	// (same model served by different providers) by preference; higher is
 	// better. Used for cache-aware routing: a provider whose prompt cache is
@@ -1162,6 +1165,7 @@ func (c *Client) CompleteStreamWithOptions(
 	if override, ok := c.consumeRequestTuningOverrideLocked(); ok {
 		requestTuning = mergeRequestTuning(requestTuning, override)
 	}
+	requestTuning.SessionKey = c.sessionKey
 	startRef := modelRefWithVariant(start)
 	startLimit := start.ContextLimit
 	startInputLimit := resolveFallbackInputLimit(start, c.outputTokenMax)

@@ -360,6 +360,11 @@ func (c *Client) buildStreamRetryTargets(
 			level := *startTuning.ReplayCompat
 			fbTuning.ReplayCompat = &level
 		}
+		// Session identity likewise rides on the start target: fallback
+		// tunings are rebuilt from model config and must still carry the
+		// Client's prompt-cache key so every pool entry stays in the same
+		// cache namespace.
+		fbTuning.SessionKey = startTuning.SessionKey
 		fbServiceTier := effectiveServiceTierForTuning(fbTuning, tier)
 		if tier != config.ServiceTierStandard {
 			fbTuning = serviceTierTuning(fbTuning, tier)

@@ -33,7 +33,6 @@ type OpenAIProvider struct {
 	traceWriter       atomic.Pointer[TraceWriter]
 	proxyScheme       string // "http"/"https"/"socks5" when using proxy, "" otherwise (for request logging)
 	responsesProvider *ResponsesProvider
-	sessionID         string
 }
 
 // NewOpenAIProviderWithClient creates an OpenAI provider using a caller-supplied HTTP client.
@@ -89,15 +88,6 @@ func (o *OpenAIProvider) SetTraceWriter(w *TraceWriter) {
 func (o *OpenAIProvider) InvalidateRouting(reason string) {
 	if o.responsesProvider != nil {
 		o.responsesProvider.InvalidateRouting(reason)
-	}
-}
-
-// SetSessionID sets the persistent session identifier for prompt caching.
-func (o *OpenAIProvider) SetSessionID(sid string) {
-	sid = strings.TrimSpace(sid)
-	o.sessionID = sid
-	if o.responsesProvider != nil {
-		o.responsesProvider.SetSessionID(sid)
 	}
 }
 
@@ -420,7 +410,7 @@ func (o *OpenAIProvider) CompleteStream(
 	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	applyProviderAuthHeader(req.Header, o.provider.AuthScheme(), apiKey)
 	setProviderLLMUserAgent(req.Header, o.provider)
-	applySessionIDHeaders(req.Header, o.sessionID)
+	applySessionIDHeaders(req.Header, tuning.SessionKey)
 
 	// Apply request body compression if configured
 	req, _ = compressRequestBody(req, bodyBytes, o.provider.CompressEnabled())

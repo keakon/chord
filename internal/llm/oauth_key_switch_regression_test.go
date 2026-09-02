@@ -52,44 +52,69 @@ func TestResponsesProvider_OpenAIOAuthHTTPSendsConfiguredStoreTrue(t *testing.T)
 	}
 }
 
-func TestResponsesProvider_SetSessionIDClearsCodexChainState(t *testing.T) {
+// TestClient_SetSessionIDIsPerClientIsolated verifies the cache-isolation
+// contract: session identity lives on the Client (threaded per-request through
+// RequestTuning.SessionKey), never on the shared provider impl. Two clients
+// that resolve to the same provider impl must be able to set different session
+// keys without one clobbering the other.
+func TestClient_SetSessionIDIsPerClientIsolated(t *testing.T) {
 	providerCfg := NewProviderConfig("openai", config.ProviderConfig{
-		Type:   config.ProviderTypeChatCompletions,
+		Type:   config.ProviderTypeResponses,
 		Preset: config.ProviderPresetCodex,
 		APIURL: "https://example.com/v1/responses",
 	}, []string{"k1", "k2"})
-	o, err := NewOpenAIProvider(providerCfg, "")
+	impl, err := NewResponsesProvider(providerCfg, "")
 	if err != nil {
-		t.Fatalf("NewOpenAIProvider: %v", err)
+		t.Fatalf("NewResponsesProvider: %v", err)
 	}
-	o.responsesProvider.codexWSLastKey = "k1"
-	o.responsesProvider.codexWSLastAPIURL = "https://example.com/v1/responses"
-	o.responsesProvider.codexWSLastModel = "gpt-5.5"
-	o.responsesProvider.codexWSLastRespID = "resp-123"
-	o.responsesProvider.codexWSLastInpLen = 2
-	o.responsesProvider.codexWSLastInpSig = "sig-123"
-	o.responsesProvider.codexWSPromptCacheKey = "prompt-123"
-	o.responsesProvider.sessionID = "old-session"
+	// Both clients share the same provider impl (providerCache.getOrCreateImpl
+	// keys impls by provider name), exactly like MainAgent and a SubAgent.
+	mainClient := &Client{provider: providerCfg, providerImpl: impl, modelID: "gpt-5.5"}
+	subClient := &Client{provider: providerCfg, providerImpl: impl, modelID: "gpt-5.5"}
 
-	client := &Client{provider: providerCfg, providerImpl: o}
-	client.SetSessionID("new-session")
+	mainClient.SetSessionID("session-20260903")
+	subClient.SetSessionID("session-20260903:sub:builder-3")
 
-	if o.responsesProvider.codexWSLastKey != "" {
-		t.Fatalf("expected codexWSLastKey reset, got %q", o.responsesProvider.codexWSLastKey)
+	if mainClient.sessionKey != "session-20260903" {
+		t.Fatalf("main client sessionKey = %q, want session-20260903", mainClient.sessionKey)
 	}
-	if o.responsesProvider.codexWSLastAPIURL != "" {
-		t.Fatalf("expected codexWSLastAPIURL reset, got %q", o.responsesProvider.codexWSLastAPIURL)
+	if subClient.sessionKey != "session-20260903:sub:builder-3" {
+		t.Fatalf("sub client sessionKey = %q, want session-20260903:sub:builder-3", subClient.sessionKey)
 	}
-	if o.responsesProvider.codexWSLastModel != "" {
-		t.Fatalf("expected codexWSLastModel reset, got %q", o.responsesProvider.codexWSLastModel)
+	// The second SetSessionID must not have overwritten the first: identity is
+	// per-Client, so MainAgent and SubAgent caches stay distinguishable even
+	// while sharing one ResponsesProvider.
+	if mainClient.sessionKey != "session-20260903" {
+		t.Fatalf("main client sessionKey changed after sub client set its own: %q", mainClient.sessionKey)
 	}
-	if o.responsesProvider.codexWSLastRespID != "" {
-		t.Fatalf("expected codexWSLastRespID reset, got %q", o.responsesProvider.codexWSLastRespID)
+}
+
+// TestResponsesRequestSignatureIncludesPromptCacheKey verifies that the Codex
+// WebSocket incremental-chain signature carries the session key. When a
+// MainAgent and a SubAgent alternate requests over a shared WebSocket, their
+// differing prompt_cache_key values force a full-input request instead of
+// reusing the other agent's previous_response_id chain.
+func TestResponsesRequestSignatureIncludesPromptCacheKey(t *testing.T) {
+	base := responsesRequest{
+		Model:  "gpt-5.5",
+		Input:  []responsesInputItem{{Type: "message", Role: "user", Content: "hello"}},
+		Stream: true,
 	}
-	if o.responsesProvider.codexWSPromptCacheKey != "" {
-		t.Fatalf("expected prompt cache key reset, got %q", o.responsesProvider.codexWSPromptCacheKey)
+	mainReq := base
+	mainReq.PromptCacheKey = "session-20260903"
+	subReq := base
+	subReq.PromptCacheKey = "session-20260903:sub:builder-3"
+
+	mainSig := responsesRequestSignature(&mainReq)
+	subSig := responsesRequestSignature(&subReq)
+	if mainSig == "" || mainSig == subSig {
+		t.Fatalf("signatures must differ by prompt_cache_key: main=%q sub=%q", mainSig, subSig)
 	}
-	if o.responsesProvider.sessionID != "new-session" {
-		t.Fatalf("expected sessionID updated, got %q", o.responsesProvider.sessionID)
+	// Same session key on identical requests must produce the same signature so
+	// an agent's own incremental chain still reuses previous_response_id.
+	again := base
+	again.PromptCacheKey = "session-20260903"
+	if got := responsesRequestSignature(&again); got != mainSig {
+		t.Fatalf("signature changed for identical session key: got=%q want=%q", got, mainSig)
 	}
 }

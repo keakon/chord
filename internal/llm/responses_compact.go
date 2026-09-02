@@ -124,14 +124,14 @@ func (r *ResponsesProvider) Compact(
 	if ot.ServiceTier != "" {
 		reqBody.ServiceTier = ot.ServiceTier
 	}
-	if r.sessionID != "" {
-		reqBody.PromptCacheKey = r.sessionID
+	if tuning.SessionKey != "" {
+		reqBody.PromptCacheKey = tuning.SessionKey
 	}
 	// Fingerprint convergence for cache locality: compact traffic must carry
 	// the same client_metadata identity as the main Responses path (body) so
 	// it does not surface as a different account/session upstream.
-	if r.sessionID != "" {
-		reqBody.ClientMetadata = responsesClientMetadata(r.sessionID, time.Now())
+	if tuning.SessionKey != "" {
+		reqBody.ClientMetadata = responsesClientMetadata(tuning.SessionKey, time.Now())
 	}
 	effectiveReasoningEffort, effectiveReasoningSummary := resolveResponsesReasoningFields(ot.EffectiveReasoningEffort(), ot.ReasoningSummary)
 	if effectiveReasoningEffort != "" || effectiveReasoningSummary != "" {
