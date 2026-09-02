@@ -1011,6 +1011,14 @@ func TestRunDoctorModelsUnsupportedProviderTypeIsConfigError(t *testing.T) {
 }
 
 func TestDoctorModelsOAuthRefresherUpdatesSharedRuntimeAuth(t *testing.T) {
+	// configureDoctorModelsOAuthRefresher derives the OAuth state file path from
+	// the config home, so without this the test shares the real auth.state.json
+	// with every other test in the run — and arms a background state monitor on
+	// it. Under parallel package load a foreign write to that file makes the
+	// status update fail or gets reloaded over it, which showed up as a flake
+	// (runtime auth status left empty). Give the test a private config home like
+	// the rest of the package does.
+	t.Setenv("CHORD_CONFIG_HOME", t.TempDir())
 	authPath := filepath.Join(t.TempDir(), "auth.yaml")
 	accessA := testUnsignedJWT(`{"chatgpt_account_id":"acc-a","chatgpt_user_id":"user-a"}`)
 	accessB := testUnsignedJWT(`{"chatgpt_account_id":"acc-b","chatgpt_user_id":"user-b"}`)
