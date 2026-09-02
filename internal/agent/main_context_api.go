@@ -94,8 +94,15 @@ func (a *MainAgent) usageStatsForTask(rec *DurableTaskRecord) analytics.SessionS
 	return out
 }
 
-// GetContextStats returns the post-response context baseline and usable input budget.
-// current is the full normalized input plus output from the most recent API call.
+// GetContextStats returns the context-usage level shown for the focused agent
+// and its usable input budget. current is the same effective reading the
+// automatic-compaction decision compares against its threshold: the last
+// post-response context baseline (full prompt including cache tokens plus
+// generated output) or the calibrated estimate once the context has grown past
+// it since that provider sample — so the sidebar Context value/gauge and the
+// auto-compaction trigger always observe one value. limit is the usable input
+// budget (the input limit minus reserved headroom). Focused SubAgents report
+// the same frame from their own context manager; parked targets report zero.
 func (a *MainAgent) GetContextStats() (current, limit int) {
 	target := a.focusedAgentSnapshot()
 	if target.sub != nil {
@@ -104,7 +111,7 @@ func (a *MainAgent) GetContextStats() (current, limit int) {
 	if target.parked {
 		return 0, 0
 	}
-	return a.ctxMgr.LastTotalContextTokens(), a.ctxMgr.GetUsableInputBudget()
+	return a.ctxMgr.EffectiveContextTokens(), a.ctxMgr.GetUsableInputBudget()
 }
 
 // ContextPressureLinesForModelRef returns the reminder and auto-compaction

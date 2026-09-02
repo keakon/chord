@@ -386,6 +386,30 @@ func TestShouldAutoCompactUsesPayloadByteCalibrationWhenUsageMissing(t *testing.
 	}
 }
 
+func TestEffectiveContextTokensMatchesAutoCompactDecision(t *testing.T) {
+	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 100)}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
+
+	// Before post-response growth the effective reading is the provider
+	// baseline, identical to the decision's effective input.
+	if got, want := m.EffectiveContextTokens(), m.AutoCompactDecision().EffectiveInputTokens; got != want {
+		t.Fatalf("EffectiveContextTokens() = %d, want decision EffectiveInputTokens %d", got, want)
+	}
+	// Growth past the last provider sample raises the shared reading through
+	// the calibrated estimate, so a context gauge fed by this getter cannot
+	// lag the auto-compaction trigger.
+	m.Append(message.Message{Role: "tool", Content: strings.Repeat("b", 150)})
+	m.UpdateFromUsage(message.TokenUsage{})
+
+	if got, want := m.EffectiveContextTokens(), m.AutoCompactDecision().EffectiveInputTokens; got != want {
+		t.Fatalf("EffectiveContextTokens() after growth = %d, want decision value %d", got, want)
+	}
+	if got := m.EffectiveContextTokens(); got != 1000 {
+		t.Fatalf("EffectiveContextTokens() = %d, want the calibrated estimate 1000", got)
+	}
+}
+
 func TestShouldAutoCompactUsesContextByteCalibrationForToolCalls(t *testing.T) {
 	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 100)}})

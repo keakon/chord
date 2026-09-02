@@ -144,7 +144,11 @@ func keyPoolHealthSeverity(healthy, total int) keyPoolSeverity {
 }
 
 func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
-	// current = last request input tokens; percent = current / usable input budget.
+	// current is the agent's effective context usage — the same reading the
+	// auto-compaction decision compares against its threshold (the last
+	// post-response baseline, or the calibrated estimate once the context has
+	// grown past it) — so the gauge shows exactly the pressure that triggers
+	// compaction. percent = current / usable input budget.
 	// Color the Context value and its gauge from the focused agent's pressure
 	// lines: orange once usage reaches the reminder line, red once it reaches
 	// the auto-compaction threshold. Agents without usage-driven lines (focused

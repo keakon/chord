@@ -425,6 +425,10 @@ func (m *Manager) LastInputTokens() int {
 
 // LastTotalContextTokens returns the post-response context baseline from the
 // most recent API call: the full normalized prompt plus generated output.
+// Persistence, recovery, and diagnostics read this raw baseline; sidebar and
+// trigger consumers that must stay aligned with auto-compaction should read
+// EffectiveContextTokens instead, which extends it with post-response growth
+// estimates.
 func (m *Manager) LastTotalContextTokens() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -602,6 +606,30 @@ type AutoCompactDecision struct {
 	ShouldCompact        bool
 }
 
+// effectiveContextTokensLocked returns the context-usage level usage decisions
+// compare against the threshold: the largest of the last post-response
+// baseline (full prompt plus generated output), the last prompt alone, and the
+// calibrated estimate for context growth after that provider sample. The next
+// request replays the last full prompt plus the generated output, so the
+// post-response baseline — not the last prompt alone — is what the threshold
+// must catch; comparing the prompt alone would start compaction one request
+// later, past the configured margin. Must hold at least an RLock.
+func (m *Manager) effectiveContextTokensLocked(estimatedInputTokens int) int {
+	return max(m.lastTotalContextTokens, m.lastInputTokens, estimatedInputTokens)
+}
+
+// EffectiveContextTokens returns the context-usage level in the same frame as
+// AutoCompactDecision: the value the auto-compaction trigger and the reminder
+// lines derived from it compare against the threshold. Sidebar context gauges
+// read this getter so the displayed usage and the trigger decision observe one
+// value, including the calibrated estimate once the context has grown past the
+// last provider-reported sample.
+func (m *Manager) EffectiveContextTokens() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.effectiveContextTokensLocked(m.estimatedInputTokensFromPayloadBytesLocked())
+}
+
 // AutoCompactDecision returns the current automatic compaction threshold inputs.
 func (m *Manager) AutoCompactDecision() AutoCompactDecision {
 	m.mu.RLock()
@@ -616,11 +644,7 @@ func (m *Manager) AutoCompactDecision() AutoCompactDecision {
 		thresholdTokens = int(m.threshold * float64(usable))
 	}
 	estimatedInputTokens := m.estimatedInputTokensFromPayloadBytesLocked()
-	// The next request replays the last full prompt plus the generated
-	// output, so the post-response context baseline — not the last prompt
-	// alone — is what the threshold must catch. Comparing the prompt alone
-	// would start compaction one request later, past the configured margin.
-	effectiveInputTokens := max(m.lastTotalContextTokens, m.lastInputTokens, estimatedInputTokens)
+	effectiveInputTokens := m.effectiveContextTokensLocked(estimatedInputTokens)
 	shouldCompact := m.threshold > 0 && usable > 0 && float64(effectiveInputTokens) >= m.threshold*float64(usable)
 	return AutoCompactDecision{
 		LastInputTokens:      m.lastInputTokens,

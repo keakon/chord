@@ -529,10 +529,12 @@ func (s *SubAgent) drainQueuedContextAppendsForContinue() {
 	}
 }
 
-// GetContextStats returns current input-context usage and usable input budget for this SubAgent.
-// current is the full prompt-side burden from the most recent API call: input tokens plus cache-write tokens.
+// GetContextStats returns the context-usage level shown for this SubAgent and
+// its usable input budget, mirroring the main agent's frame: the post-response
+// context baseline (full prompt plus generated output) or the calibrated
+// estimate once the context has grown past it since the last provider sample.
 func (s *SubAgent) GetContextStats() (current, limit int) {
-	return s.ctxMgr.LastTotalContextTokens(), s.ctxMgr.GetUsableInputBudget()
+	return s.ctxMgr.EffectiveContextTokens(), s.ctxMgr.GetUsableInputBudget()
 }
 
 // GetContextMessageCount returns the number of messages in this agent's context (for sidebar).
