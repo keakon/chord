@@ -121,8 +121,14 @@ type PlannedMutation struct {
 	Added              int
 	Removed            int
 	PunctuationHunks   int
-	diffInput          unifiedFileDiff
-	diffable           bool
+	// StrippedInvisible reports the invisible runes cleaned from the
+	// model-added text of this mutation while the plan was built — the
+	// floating-mark strip runs on added (+) lines and add-file content,
+	// never on the file's untouched bytes (see cleanApplyPatchAddedLines).
+	// The Execute result note sums these per-mutation counts.
+	StrippedInvisible map[rune]int
+	diffInput         unifiedFileDiff
+	diffable          bool
 }
 
 type MutationPlan struct {
@@ -273,8 +279,9 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	// them. Orphaned combining marks are handled separately — they stay in the
 	// patch so the tolerance matcher can fold them (which is what fires the
 	// "punctuation/whitespace-tolerant" note for headings like "### ̄.2.1"),
-	// and are cleaned off the bytes actually written below. A patch that strips
-	// to empty had no visible content to begin with; control characters cannot
+	// and are cleaned off the model-added lines while the plan is built
+	// below. A patch that strips to empty had no visible content to begin
+	// with; control characters cannot
 	// be cleaned safely — reject both and route binary content to a shell
 	// command or script.
 	patchLen := len([]rune(args.Patch))
@@ -289,49 +296,18 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 		return "", fmt.Errorf("patch %w", err)
 	}
 	result, err := buildApplyPatchPlanWithOutcomes(ctx, args.Patch, t.BaseDir)
-	// Clean orphaned combining marks from the bytes that will actually be
-	// written. The tolerance matcher already folded them out of the context
-	// lines (and emitted its note), but a mark the model leaked into an added
-	// (+) line would otherwise land in the file as a floating diacritic.
-	// AfterBytes is what commitMutation writes; AfterText mirrors it for LSP
-	// diagnostics, so both are kept in sync, and the removed runes are merged
-	// into cleanedCounts so the result note reports them.
-	// AfterBytes carries the target file's own encoding — Update mutations
-	// are re-encoded into it (UTF-16/GB18030 included) — so the clean runs on
-	// decoded text and re-encodes with that same encoding; running the UTF-8
-	// strip over raw non-UTF-8 bytes would decode byte pairs as phantom marks
-	// and rewrite every undecodable byte as U+FFFD, destroying the file.
-	// Mutations whose bytes do not decode and re-encode byte-identically
-	// (binary content, or an encoding the decoder cannot vouch for) are left
-	// untouched.
+	// Floating combining marks are cleaned from model-added text while the
+	// plan is built — add-file content and the added (+) lines of update
+	// hunks (see cleanApplyPatchAddedLines) — never from a mutation's whole
+	// AfterBytes, which would rewrite file content the patch never touched.
+	// Sum the per-mutation counts here so the result note reports exactly
+	// what the write removed.
 	if cleanedCounts == nil {
 		cleanedCounts = map[rune]int{}
 	}
 	var strippedCombining int
 	for i := range result.Plan.Mutations {
-		m := &result.Plan.Mutations[i]
-		if len(m.AfterBytes) == 0 {
-			continue
-		}
-		decoded, derr := decodeTextBytes(m.AfterBytes, m.TargetPath)
-		if derr != nil {
-			continue
-		}
-		if roundTrip, rerr := encodeString(decoded.Text, decoded.Encoding); rerr != nil || !bytes.Equal(roundTrip, m.AfterBytes) {
-			continue
-		}
-		text := decoded.Text
-		cleaned := stripEditInvisible(text)
-		if cleaned == text {
-			continue
-		}
-		encoded, encErr := encodeString(cleaned, decoded.Encoding)
-		if encErr != nil {
-			continue
-		}
-		m.AfterBytes = encoded
-		m.AfterText = cleaned
-		for r, c := range CountStrippedInvisible(text, cleaned) {
+		for r, c := range result.Plan.Mutations[i].StrippedInvisible {
 			cleanedCounts[r] += c
 			strippedCombining += c
 		}
@@ -1090,6 +1066,7 @@ func replaySuccessfulApplyPatchOperations(ctx context.Context, states map[string
 		state.mode = state.initialMode
 		state.touched = false
 		state.punctuationHunks = 0
+		state.cleanedInvisible = nil
 		if state.initialExists {
 			state.originPath = path
 		}
@@ -1128,6 +1105,11 @@ type applyPatchVirtualFile struct {
 	mode             os.FileMode
 	touched          bool
 	punctuationHunks int
+	// cleanedInvisible accumulates the runes stripped from this file's
+	// model-added text while the plan is built (see cleanApplyPatchAddedLines)
+	// and is copied onto the committed mutation so the result note can
+	// report them.
+	cleanedInvisible map[rune]int
 }
 
 func snapshotApplyPatchStates(targets []MutationTarget) (map[string]*applyPatchVirtualFile, error) {
@@ -1197,7 +1179,14 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 		}
 		state.mode = 0o644
 		state.exists = true
-		state.bytes = []byte(op.Content)
+		// Add-file content is entirely model text: strip floating combining
+		// marks here, the same rule the update path applies to its + lines.
+		content := op.Content
+		if cleaned := StripOrphanCombiningMarks(content); cleaned != content {
+			state.cleanedInvisible = CountStrippedInvisible(content, cleaned)
+			content = cleaned
+		}
+		state.bytes = []byte(content)
 		state.originPath = ""
 		return nil
 	case MutationDelete:
@@ -1207,21 +1196,36 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 		state.exists = false
 		state.bytes = nil
 		state.originPath = ""
+		state.cleanedInvisible = nil
 		return nil
 	case MutationUpdate:
 		if !state.exists {
 			return applyPatchMissingSourceError(op.Path, baseDir)
 		}
 		if len(op.Hunks) > 0 {
+			// Only the model's added (+) lines carry model text into the
+			// file — context and removed lines mirror the file's own bytes —
+			// so floating combining marks are stripped from those lines
+			// before the hunks apply. Untouched file content is never
+			// rewritten by the invisible-character clean.
+			hunks, stripped := cleanApplyPatchAddedLines(op.Hunks)
 			decoded, err := decodeTextBytes(state.bytes, source)
 			if err != nil {
 				return fmt.Errorf("read update source %s: %w", op.Path, err)
 			}
-			after, punctuationHunks, err := applyApplyPatchHunks(ctx, decoded.Text, op.Hunks)
+			after, punctuationHunks, err := applyApplyPatchHunks(ctx, decoded.Text, hunks)
 			if err != nil {
 				return fmt.Errorf("update %s: %w", op.Path, err)
 			}
 			state.punctuationHunks += punctuationHunks
+			if len(stripped) > 0 {
+				if state.cleanedInvisible == nil {
+					state.cleanedInvisible = map[rune]int{}
+				}
+				for r, n := range stripped {
+					state.cleanedInvisible[r] += n
+				}
+			}
 			state.bytes, err = encodeString(after, decoded.Encoding)
 			if err != nil {
 				return fmt.Errorf("encode update %s: %w", op.Path, err)
@@ -1245,6 +1249,15 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 		target.mode = state.mode
 		target.originPath = state.originPath
 		target.punctuationHunks += state.punctuationHunks
+		if len(state.cleanedInvisible) > 0 {
+			if target.cleanedInvisible == nil {
+				target.cleanedInvisible = map[rune]int{}
+			}
+			for r, n := range state.cleanedInvisible {
+				target.cleanedInvisible[r] += n
+			}
+			state.cleanedInvisible = nil
+		}
 		state.exists = false
 		state.bytes = nil
 		state.originPath = ""
@@ -1295,6 +1308,7 @@ func buildApplyPatchMutationPlan(states map[string]*applyPatchVirtualFile) Mutat
 				AfterBytes:         append([]byte(nil), target.bytes...),
 				AfterMode:          target.mode,
 				PunctuationHunks:   target.punctuationHunks,
+				StrippedInvisible:  target.cleanedInvisible,
 			}
 			populateApplyPatchMutationDiff(&mutation, source.displayPath, target.displayPath)
 			plan.Mutations = append(plan.Mutations, mutation)
@@ -1331,6 +1345,12 @@ func buildApplyPatchMutationPlan(states map[string]*applyPatchVirtualFile) Mutat
 			mutation.Kind = MutationDelete
 		default:
 			mutation.Kind = MutationUpdate
+		}
+		if mutation.Kind != MutationDelete {
+			// A delete writes no bytes, so nothing stripped for it is
+			// reported; add/update mutations carry their planned clean
+			// counts for the Execute result note.
+			mutation.StrippedInvisible = state.cleanedInvisible
 		}
 		populateApplyPatchMutationDiff(&mutation, state.displayPath, state.displayPath)
 		plan.Mutations = append(plan.Mutations, mutation)
@@ -1399,6 +1419,53 @@ func applyPatchMutationDiffSummary(plan MutationPlan) DiffSummary {
 	summary.Added = added
 	summary.Removed = removed
 	return summary
+}
+
+// cleanApplyPatchAddedLines strips floating combining marks (see
+// StripOrphanCombiningMarks) from the model-added (+) lines of the hunks and
+// returns the cleaned copy together with what was removed. Only + lines carry
+// model text into the file — context and removed lines mirror the file's own
+// bytes — so the invisible-character clean never rewrites file content the
+// patch left alone. Returns the original hunks and a nil count map when
+// nothing was stripped.
+func cleanApplyPatchAddedLines(hunks []applyPatchHunk) ([]applyPatchHunk, map[rune]int) {
+	needClean := false
+	for _, h := range hunks {
+		for _, l := range h.Lines {
+			if l.Kind == '+' && hasOrphanMarkCandidate(l.Text) {
+				needClean = true
+				break
+			}
+		}
+		if needClean {
+			break
+		}
+	}
+	if !needClean {
+		return hunks, nil
+	}
+	cleaned := make([]applyPatchHunk, len(hunks))
+	var counts map[rune]int
+	for i, h := range hunks {
+		lines := make([]applyPatchLine, len(h.Lines))
+		for j, l := range h.Lines {
+			if l.Kind == '+' {
+				if text := StripOrphanCombiningMarks(l.Text); text != l.Text {
+					for r, n := range CountStrippedInvisible(l.Text, text) {
+						if counts == nil {
+							counts = map[rune]int{}
+						}
+						counts[r] += n
+					}
+					l.Text = text
+				}
+			}
+			lines[j] = l
+		}
+		h.Lines = lines
+		cleaned[i] = h
+	}
+	return cleaned, counts
 }
 
 func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatchHunk) (string, int, error) {

@@ -54,8 +54,9 @@ func TestNormalizePunctWithSpaceFoldingIgnoresLeadingInvisibleRune(t *testing.T)
 
 // TestNormalizePunctWithSpaceFoldingFoldsOrphanCombiningMark guards the
 // tokenizer-artifact path: a combining mark (U+0304) at the start of the
-// string or after a non-letter rune is folded out, while the same mark
-// after a letter is preserved as a potential legitimate diacritic.
+// string or after only whitespace is folded out, while the same mark over a
+// visible base (letter, digit, symbol, punctuation) is preserved as
+// potentially legitimate content.
 
 func TestNormalizePunctWithSpaceFoldingFoldsOrphanCombiningMark(t *testing.T) {
 	// U+0304 after a space (the "### ̄.2.1" shape) is orphaned and folded.
@@ -89,13 +90,13 @@ func TestNormalizePunctWithSpaceFoldingFoldsOrphanCombiningMark(t *testing.T) {
 // StripOrphanVariationSelectors owns them, so the orphan-mark rule must not
 // claim them.
 //
-// The rule keys on the base being a letter, and a selector's base is routinely
-// a digit (keycap "1\ufe0f\u20e3") or a symbol (heart "❤️"), so without the
-// exclusion the match path folded the enclosing keycap U+20E3 away and let a
-// bare "1" match a keycap emoji that the write path preserves verbatim. The
-// presentation selectors U+FE0E/U+FE0F are additionally covered by
-// isIgnorableRune, which folds them earlier in the loop by design — that is a
-// separate tolerance rule, not the orphan-mark verdict under test here.
+// Selectors belong to the variation-selector machinery whose bases Unicode
+// defines (keycap "1\ufe0f\u20e3", symbol "❤️"); the orphan-mark rule's own
+// whitespace/absent-base verdict must not reach them, or the two paths could
+// disagree about the same rune. The presentation selectors U+FE0E/U+FE0F are
+// additionally covered by isIgnorableRune, which folds them earlier in the
+// loop by design — that is a separate tolerance rule, not the orphan-mark
+// verdict under test here.
 func TestIsOrphanCombiningMarkLeavesVariationSelectorsAlone(t *testing.T) {
 	// Sanity: the fold still owns a genuine tokenizer artifact.
 	if !isOrphanCombiningMark([]rune("### \u0304.2.1"), 4) {
@@ -114,6 +115,51 @@ func TestIsOrphanCombiningMarkLeavesVariationSelectorsAlone(t *testing.T) {
 		rs := []rune(tc.s)
 		if isOrphanCombiningMark(rs, tc.i) {
 			t.Fatalf("%s: isOrphanCombiningMark(%q, %d) = true, want false (U+%04X belongs to StripOrphanVariationSelectors)", tc.name, tc.s, tc.i, rs[tc.i])
+		}
+	}
+}
+
+// TestOrphanCombiningMarkRuleKeepsVisibleBases guards the boundary the rule
+// must not cross. Any visible base keeps its mark: a combining mark over a
+// digit, symbol, or punctuation rune is indistinguishable from legitimate
+// content (a U+0305 overline over a digit, a U+0338 overlay after a
+// relation), so only a mark with whitespace — or nothing — before it is a
+// provably floating tokenizer artifact. Enclosing marks (category Me) never
+// enter the rule.
+func TestOrphanCombiningMarkRuleKeepsVisibleBases(t *testing.T) {
+	kept := []struct {
+		name string
+		s    string
+		i    int
+	}{
+		{"mark over a letter", "a\u0304b", 1},
+		{"mark over a digit", "1\u03042", 1},
+		{"stacked marks over a digit", "1\u0304\u03052", 1},
+		{"overline over a decimal digit", "0.3\u0305", 3},
+		{"mark over a math symbol", "\u2192\u0305", 1},
+		{"enclosing circle over a digit (Me)", "1\u20dd", 1},
+		{"enclosing keycap (Me)", "1\ufe0f\u20e3", 2},
+	}
+	for _, tc := range kept {
+		rs := []rune(tc.s)
+		if isOrphanCombiningMark(rs, tc.i) {
+			t.Fatalf("%s: isOrphanCombiningMark(%q, %d) = true, want false", tc.name, tc.s, tc.i)
+		}
+	}
+	floating := []struct {
+		name string
+		s    string
+		i    int
+	}{
+		{"leading mark", "\u0304ab", 0},
+		{"mark after a space", "### \u0304.2.1", 4},
+		{"mark after a newline", "\n\u0304a", 1},
+		{"stacked marks on whitespace", " \u0302\u0301a", 2},
+	}
+	for _, tc := range floating {
+		rs := []rune(tc.s)
+		if !isOrphanCombiningMark(rs, tc.i) {
+			t.Fatalf("%s: isOrphanCombiningMark(%q, %d) = false, want true", tc.name, tc.s, tc.i)
 		}
 	}
 }
@@ -137,11 +183,13 @@ func TestNormalizePunctWithSpaceFoldingPreservesStackedCombiningMarks(t *testing
 		t.Fatalf("norm = %q, want %q (three stacked marks preserved)", got, "e\u0301\u0302\u0303")
 	}
 
-	// A mark after a digit is still orphaned and folded — the stacked-mark
-	// fix must not swallow marks whose base is not a letter.
+	// A mark after a digit is preserved: Unicode allows combining marks on
+	// any visible base, and digits carry legitimate sequences (U+0305
+	// overlines in math), so only a mark with whitespace or no base at all
+	// is provably a floating artifact.
 	norm3, _ := normalizePunctWithSpaceFolding([]rune("1\u03042"))
-	if got := string(norm3); got != "12" {
-		t.Fatalf("norm = %q, want %q (mark after digit still folded)", got, "12")
+	if got := string(norm3); got != "1\u03042" {
+		t.Fatalf("norm = %q, want %q (mark after digit preserved)", got, "1\u03042")
 	}
 }
 
@@ -192,6 +240,31 @@ func TestEditToolStripsOrphanCombiningMarkFromNewString(t *testing.T) {
 	got, _ := os.ReadFile(path)
 	if want := "## 3.2.1 Renamed\nbody\n"; string(got) != want {
 		t.Fatalf("file = %q, want %q (orphan U+0304 dropped from new_string)", string(got), want)
+	}
+}
+
+// TestEditToolKeepsCombiningMarkOnDigitInNewString guards the corrected
+// write-path boundary: a combining mark over a digit in new_string is
+// legitimate content (a U+0305 overline, for example) and must be written
+// verbatim — the write-path strip only drops marks with whitespace or no
+// base at all, never marks over a visible base.
+func TestEditToolKeepsCombiningMarkOnDigitInNewString(t *testing.T) {
+	dir := t.TempDir()
+	path := writeEditFixture(t, dir, "demo.md", "## 3.2.1 Heading\nbody\n")
+	out, err := runEdit(t, dir, map[string]any{
+		"path":       path,
+		"old_string": "## 3.2.1 Heading\n",
+		"new_string": "## 3\u03052.1 Renamed\n",
+	})
+	if err != nil {
+		t.Fatalf("Execute err = %v, want success", err)
+	}
+	if strings.Contains(out, "cleaned") {
+		t.Fatalf("output = %q, want no cleaned-invisible note (digit mark kept)", out)
+	}
+	got, _ := os.ReadFile(path)
+	if want := "## 3\u03052.1 Renamed\nbody\n"; string(got) != want {
+		t.Fatalf("file = %q, want %q (digit mark kept in new_string)", string(got), want)
 	}
 }
 
@@ -539,8 +612,19 @@ func TestStripOrphanCombiningMarks(t *testing.T) {
 	}{
 		// Tokenizer artifact on a copied heading: orphaned mark is dropped.
 		{"### \u03043.2.1 Heading", "### 3.2.1 Heading"},
-		// Orphan mark after a digit.
-		{"1\u03042", "12"},
+		// A mark after a digit is preserved: digits can carry legitimate
+		// combining sequences (a U+0305 overline over a digit in math
+		// notation), so a visible base is never proof of a model artifact.
+		{"1\u03042", "1\u03042"},
+		{"0.3\u0305", "0.3\u0305"},
+		// A mark whose only base is whitespace is dropped — it is provably
+		// floating (the "### [U+0304].2.1" heading artifact).
+		{"a \u0304b", "a b"},
+		{"a\u00a0\u0304b", "a\u00a0b"}, // NBSP is whitespace too
+		// Enclosing marks (category Me) never enter the rule, even over
+		// digits and symbols: U+20DD circle and U+20E3 keycap stay.
+		{"1\u20dd2", "1\u20dd2"},
+		{"x\u20dd", "x\u20dd"},
 		// Leading orphan mark.
 		{"\u0304ab", "ab"},
 		// Mark after a letter is preserved (legitimate single diacritic).
@@ -562,14 +646,18 @@ func TestStripOrphanCombiningMarks(t *testing.T) {
 	}
 }
 
-// TestCountStrippedInvisibleReportsCombiningMarks checks that an orphaned
+// TestCountStrippedInvisibleReportsCombiningMarks checks that a floating
 // combining mark removed by the write-path strip is counted and reported the
-// same way the zero-width set is, while a mark that is kept (sitting on a
-// letter) never shows up.
+// same way the zero-width set is, while a mark that is kept (over a visible
+// base) never shows up.
 func TestCountStrippedInvisibleReportsCombiningMarks(t *testing.T) {
-	// Orphan mark removed: reported as one cleaned rune.
-	if got := CountStrippedInvisible("1\u03042", "12"); got['\u0304'] != 1 {
-		t.Errorf("orphan mark not counted: %v", got)
+	// Floating mark (only whitespace before it) removed: reported.
+	if got := CountStrippedInvisible("### \u0304.2.1", "### .2.1"); got['\u0304'] != 1 {
+		t.Errorf("floating mark not counted: %v", got)
+	}
+	// Kept mark (over a digit): nothing to report.
+	if got := CountStrippedInvisible("1\u03042", "1\u03042"); len(got) != 0 {
+		t.Errorf("kept mark over a digit should not be counted: %v", got)
 	}
 	// Kept mark (on a letter): nothing to report.
 	if got := CountStrippedInvisible("a\u0304b", "a\u0304b"); len(got) != 0 {

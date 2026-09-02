@@ -887,6 +887,65 @@ func TestApplyPatchCleansInvisibleOnlyInDecodableText(t *testing.T) {
 	})
 }
 
+// TestApplyPatchKeepsCombiningMarkOnVisibleBaseInAddedLine guards the
+// corrected orphan-mark boundary on the write path: a combining mark over a
+// visible base (here a digit) in an added (+) line is legitimate content —
+// Unicode lets marks attach to digits and symbols, e.g. a U+0305 overline —
+// and must land in the file verbatim, not be dropped like a floating heading
+// artifact (U+0304 after a space).
+func TestApplyPatchKeepsCombiningMarkOnVisibleBaseInAddedLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "proposal.md")
+	content := "### 3.2.1 Heading\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: proposal.md\n" +
+		"@@\n" +
+		"-### 3.2.1 Heading\n" +
+		"+### 3.2.1 Heading\n" +
+		"+value 3\u0305 stays\n" +
+		"*** End Patch"
+
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want success", err)
+	}
+	if strings.Contains(out, "cleaned") {
+		t.Fatalf("output = %q, want no cleaned-invisible note (digit mark is kept)", out)
+	}
+	want := "### 3.2.1 Heading\nvalue 3\u0305 stays\n"
+	assertApplyPatchFile(t, path, want)
+}
+
+// TestApplyPatchLeavesUntouchedRegionRunesIntact guards the minimal-change
+// boundary of the invisible-character clean: the clean runs only on the
+// model-added (+) lines and add-file content, never on a mutation's whole
+// after-bytes. File content the patch does not touch must survive byte for
+// byte, including zero-width runes, orphan variation selectors, and
+// combining marks the write-path strip would remove if they were model text.
+func TestApplyPatchLeavesUntouchedRegionRunesIntact(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "proposal.md")
+	content := "keep \u200bzero-width here\nkeep \ufe0f selector here\nkeep 1\u0304 digit mark here\n### 3.2.1 Heading\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: proposal.md\n" +
+		"@@\n" +
+		"-### 3.2.1 Heading\n" +
+		"+### 3.2.1 Renamed\n" +
+		"*** End Patch"
+
+	if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch)); err != nil {
+		t.Fatalf("Execute err = %v, want success", err)
+	}
+	want := "keep \u200bzero-width here\nkeep \ufe0f selector here\nkeep 1\u0304 digit mark here\n### 3.2.1 Renamed\n"
+	assertApplyPatchFile(t, path, want)
+}
+
 func TestApplyPatchHunkFailureReportsEarlierContextOrder(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "proposal.md")

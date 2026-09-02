@@ -167,6 +167,9 @@ func isIgnorableRune(r rune) bool {
 // Mc): a rune that renders attached to a preceding base character instead of
 // occupying a cell of its own. Shared by the match-path fold and the
 // write-path strip so the two can never disagree about what a mark is.
+// Enclosing marks (category Me, e.g. the combining circle U+20DD and the
+// keycap U+20E3) are deliberately outside the set: they render around their
+// base — routinely a digit or symbol — and no path strips them.
 func isMarkRune(r rune) bool {
 	return unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Mc, r)
 }
@@ -175,22 +178,30 @@ func isMarkRune(r rune) bool {
 // belong to the variation-selector machinery instead of the orphan-mark fold:
 // the text/emoji presentation selectors U+FE0E/U+FE0F and the enclosing
 // keycap U+20E3 that completes a keycap sequence. They are Unicode combining
-// marks, but StripOrphanVariationSelectors owns them, and its rules differ —
-// a keycap's base is a digit, not a letter, so the orphan-mark rule would
-// strip the selector out of "1\ufe0f\u20e3" and break the emoji.
+// marks, but StripOrphanVariationSelectors owns them and decides their fate
+// (keeping the full "1\ufe0f\u20e3" keycap emoji, dropping a defective "1"
+// plus bare selector), so the orphan-mark rule — whose verdicts are about
+// diacritics over whitespace or a visible base — must never claim them.
 func isVariationSelectorMark(r rune) bool {
 	return r == '\ufe0e' || r == '\ufe0f' || r == combiningEnclosingKeycap
 }
 
 // isOrphanCombiningMark reports whether rs[i] is a combining mark (Unicode
-// category Mn or Mc) sitting in an orphaned position where it cannot combine
-// with a legitimate base: at the start of the string, or right after a rune
-// that is not a letter. Models leak these as tokenizer artifacts — U+0304
-// COMBINING MACRON turning "### 3.2.1" into "### ̄.2.1", or a stray tone mark
-// after a digit — and they block every matching layer because the file never
-// contains them there. A mark after a letter is left alone: it may be a
-// legitimate combining sequence (Arabic shadda, Devanagari nukta, Vietnamese
-// tone marks), and folding it would corrupt those scripts.
+// category Mn or Mc) floating in a position that provably cannot be a
+// deliberate character: at the start of the string, or with only whitespace
+// before it (walking back over ignorable format runes and earlier marks).
+// Models leak these as tokenizer artifacts — U+0304 COMBINING MACRON turning
+// "### 3.2.1" into "### [U+0304].2.1" — and they block every matching layer
+// because the file never contains them there.
+//
+// Any visible base keeps its mark, letter or not. Unicode allows combining
+// marks after digits and symbols (a combining overline U+0305 over a digit in
+// math notation, U+0338-style overlays), so with a visible base the sequence
+// renders as a real character and there is no evidence of a model artifact;
+// only a mark whose nearest visible base is whitespace or absent floats
+// without a base and can be folded safely. Mark stacks resolve against the
+// same base (Vietnamese ấ in NFD is a + U+0302 + U+0301), so stacked marks
+// after whitespace are folded as a group.
 //
 // Variation selectors are excluded for the same reason the write path
 // excludes them (see isVariationSelectorMark): StripOrphanVariationSelectors
@@ -210,36 +221,36 @@ func isOrphanCombiningMark(rs []rune, i int) bool {
 	}
 	// Walk back over ignorable format runes and earlier combining marks to
 	// find the preceding base rune, mirroring the inter-word-space lookup.
-	// Skipping earlier marks keeps legitimate stacked diacritics intact
-	// (Vietnamese ấ in NFD is a + U+0302 + U+0301: the acute mark's base is
-	// the letter under the circumflex, not the circumflex itself). A mark is
-	// orphaned when its base is absent or not a letter.
+	// A mark is orphaned when its base is absent or whitespace — only then is
+	// it provably floating rather than a legitimate combining sequence.
 	for j := i - 1; j >= 0; j-- {
 		if isIgnorableRune(rs[j]) || isMarkRune(rs[j]) {
 			continue
 		}
-		return !unicode.IsLetter(rs[j])
+		return unicode.IsSpace(rs[j])
 	}
 	return true
 }
 
-// StripOrphanCombiningMarks drops the combining marks that have no base
-// character to attach to — the tokenizer artifact the shared tolerance
-// normalizer already folds out of edit/apply_patch matching. Folding during
-// matching alone was only half the job: the mark still rode along in the text
-// that gets written, so a leaked U+0304 in the changed part of new_string, in
-// an apply_patch `+` line, or in write content landed in the file as a
-// floating diacritic. This is the write-path half of the same rule, and it
-// asks the same question as the match path: a mark is dropped only when its
-// nearest preceding base — skipping ignorable format runes and earlier marks
-// — is absent or not a letter. Anything sitting on a letter is kept, so
-// stacked diacritics survive intact.
+// StripOrphanCombiningMarks drops the combining marks that have nothing to
+// attach to — the tokenizer artifact the shared tolerance normalizer already
+// folds out of edit/apply_patch matching. Folding during matching alone was
+// only half the job: the mark still rode along in the text that gets written,
+// so a leaked U+0304 in the changed part of new_string, in an apply_patch `+`
+// line, or in write content landed in the file as a floating diacritic. This
+// is the write-path half of the same rule, and it asks the same question as
+// the match path: a mark is dropped only when its nearest preceding visible
+// base — skipping ignorable format runes and earlier marks — is absent or
+// whitespace. Any visible base keeps its mark: digits and symbols carry
+// legitimate combining sequences (a U+0305 overline over a digit, U+0338
+// overlays), so only a truly floating mark is provably a model artifact, and
+// stacked diacritics on one base survive intact.
 //
 // An orphaned mark carries no content in the same sense a zero-width space
-// does: with no base to modify it cannot change what any character means, it
-// only plants an invisible floating glyph in the file. That is why it can be
-// stripped rather than rejected, and why the removal is reported through the
-// same invisible-character diagnostics as the zero-width set.
+// does: with no visible base to modify it cannot change what any character
+// means, it only plants an invisible floating glyph in the file. That is why
+// it can be stripped rather than rejected, and why the removal is reported
+// through the same invisible-character diagnostics as the zero-width set.
 func StripOrphanCombiningMarks(s string) string {
 	if !hasOrphanMarkCandidate(s) {
 		return s
@@ -257,7 +268,7 @@ func StripOrphanCombiningMarks(s string) string {
 			continue
 		}
 		if isMarkRune(r) && !isVariationSelectorMark(r) {
-			if base < 0 || !unicode.IsLetter(base) {
+			if base < 0 || unicode.IsSpace(base) {
 				dropped = true
 				continue
 			}
@@ -418,10 +429,11 @@ func normalizePunctWithSpaceFolding(rs []rune) (norm []rune, spans []punctSpan) 
 
 		}
 		// Fold orphaned combining marks: a mark at the start of the string or
-		// after a non-letter rune is a tokenizer artifact (e.g. U+0304 in
-		// "### ̄.2.1"), never a legitimate combining sequence. A mark after
-		// a letter is kept — it may be real Arabic/Devanagari/Vietnamese
-		// diacritics. Merge it into the previous rune's span, matching the
+		// after only whitespace is a provably floating tokenizer artifact
+		// (the "### [U+0304].2.1" heading shape), never a legitimate
+		// combining sequence. A mark over any visible base — letter, digit,
+		// symbol, punctuation — is kept: it may be real diacritics or math
+		// notation. Merge it into the previous rune's span, matching the
 		// invisible-format handling, so splice-back keeps the file's bytes.
 		if isOrphanCombiningMark(rs, i) {
 			if len(spans) > 0 && spans[len(spans)-1].end == i {
