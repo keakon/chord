@@ -49,10 +49,11 @@ const (
 	EventLLMFallbackBoundary     = "llm_fallback_boundary"      // update a pending fallback request before provider dispatch
 
 	// Durable compaction (async worker); payloads are *compactionDraft / error.
-	EventCompactionReady           = "compaction_ready"
-	EventCompactionFailed          = "compaction_failed"
-	EventCompactionCancel          = "compaction_cancel"
-	EventCompactionOversizeSuspend = "compaction_oversize_suspend" // LLM call suspended due to oversize while compaction running
+	EventCompactionReady            = "compaction_ready"
+	EventCompactionFailed           = "compaction_failed"
+	EventCompactionCancel           = "compaction_cancel"
+	EventCompactionOversizeSuspend  = "compaction_oversize_suspend"  // LLM call suspended due to oversize while compaction running
+	EventCompactionDownshiftSuspend = "compaction_downshift_suspend" // fallback call suspended before a smaller model window request
 )
 
 // Event is an internal event in the MainAgent event loop.
@@ -565,7 +566,8 @@ type CompactionStatusEvent struct {
 	Bytes  int64
 	Events int64
 	// Trigger names the compaction trigger kind (manual | usage_driven |
-	// length_recovery | oversize_driven | model_driven). Empty on events that
+	// length_recovery | oversize_driven | model_driven | model_downshift).
+	// Empty on events that
 	// predate the field or do not carry a trigger.
 	Trigger string
 	// Reason is the optional human-readable skip/failure reason.

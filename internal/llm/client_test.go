@@ -1022,6 +1022,76 @@ func TestClient_400ErrorTriesFallbackModel(t *testing.T) {
 	}
 }
 
+// TestClientBeforeFallbackReceivesResolvedFallbackTarget verifies that the
+// BeforeFallback hook receives the resolved fallback entry — provider/model
+// plus the derived context and input budgets the client would dispatch with —
+// so the agent boundary can detect a move to a smaller window before the
+// fallback request is sent.
+func TestClientBeforeFallbackReceivesResolvedFallbackTarget(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("strict", "strict-model", []string{"key-a"})
+	fallbackCfg := testProviderConfig("fallback-prov", "fallback-model")
+
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 503, Message: "upstream unavailable"}},
+	}
+	fallbackImpl := &recordingProvider{}
+	fallbackImpl.calls = []scriptedCall{{resp: &message.Response{Content: "ok from fallback"}}}
+
+	client := NewClient(primaryCfg, primaryImpl, "strict-model", 512, "")
+	client.SetModelPool([]FallbackModel{{
+		ProviderConfig: primaryCfg,
+		ProviderImpl:   primaryImpl,
+		ModelID:        "strict-model",
+		MaxTokens:      512,
+		ContextLimit:   128000,
+		InputLimit:     96000,
+	}, {
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "fallback-model",
+		MaxTokens:      512,
+		ContextLimit:   128000,
+		InputLimit:     32000,
+	}}, 0)
+
+	var sawFallback []FallbackModel
+	resp, err := client.CompleteStreamWithOptions(
+		context.Background(),
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil,
+		nil,
+		CompleteStreamOptions{
+			BeforeFallback: func(_ context.Context, _ []message.Message, target FallbackModel) ([]message.Message, error) {
+				sawFallback = append(sawFallback, target)
+				return nil, nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStreamWithOptions returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "ok from fallback" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if len(sawFallback) != 1 {
+		t.Fatalf("BeforeFallback calls = %d, want 1", len(sawFallback))
+	}
+	target := sawFallback[0]
+	if target.ProviderConfig == nil || target.ProviderConfig.Name() != "fallback-prov" || target.ModelID != "fallback-model" {
+		t.Fatalf("BeforeFallback target = %#v, want fallback-prov/fallback-model", target)
+	}
+	if target.ContextLimit != 128000 {
+		t.Fatalf("BeforeFallback ContextLimit = %d, want 128000", target.ContextLimit)
+	}
+	if target.InputLimit != 32000 {
+		t.Fatalf("BeforeFallback InputLimit = %d, want 32000", target.InputLimit)
+	}
+	if got := len(fallbackImpl.apiKeys); got != 1 {
+		t.Fatalf("fallback call count = %d, want 1 (callback must not suppress the fallback)", got)
+	}
+}
+
 func TestClient_402QuotaErrorTriesOtherKeysBeforeFallbackModel(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("sample", "gpt-5.4", []string{"key-a", "key-b", "key-c"})
 	fallbackCfg := testProviderConfig("fallback-prov", "fallback-model")

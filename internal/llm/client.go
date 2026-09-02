@@ -167,10 +167,11 @@ type CallStatus struct {
 
 // CompleteStreamOptions controls request-boundary behavior for a streaming
 // completion. BeforeFallback, when set, is called after the current target has
-// failed and immediately before a fallback target is attempted. It may return
-// an updated message snapshot for that fallback attempt.
+// failed and immediately before a fallback target is attempted. It receives
+// the target's model and context budgets and may return an updated message
+// snapshot for that fallback attempt.
 type CompleteStreamOptions struct {
-	BeforeFallback func(context.Context, []message.Message) ([]message.Message, error)
+	BeforeFallback func(context.Context, []message.Message, FallbackModel) ([]message.Message, error)
 }
 
 // NewClient creates a new Client for making LLM completions.

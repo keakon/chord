@@ -35,6 +35,11 @@ type compactionState struct {
 	discard           bool
 	continuation      continuationPlan
 	oversizeSuspended bool // main LLM call hit oversize while compaction running
+	// downshiftSuspended marks a round deferred by the model-downshift gate:
+	// like oversizeSuspended it makes handleCompactionReady apply the draft the
+	// moment it is ready, but a failed compaction resumes the round on the old
+	// context instead of aborting with the oversize guidance.
+	downshiftSuspended bool
 
 	// Async compaction fields
 	headSplit  int                // Snapshot boundary: len(messages) at compaction start
@@ -62,15 +67,16 @@ const (
 
 // pendingMainLLMCall remembers which continuation should resume after async compaction.
 type pendingMainLLMCall struct {
-	turnID            uint64
-	turnEpoch         uint64
-	agentErrSourceID  string
-	planID            uint64
-	sessionEpoch      uint64
-	continuation      compactionContinuationKind
-	oversizeSuspended bool
-	selectedModelRef  string
-	runningModelRef   string
+	turnID             uint64
+	turnEpoch          uint64
+	agentErrSourceID   string
+	planID             uint64
+	sessionEpoch       uint64
+	continuation       compactionContinuationKind
+	oversizeSuspended  bool
+	downshiftSuspended bool
+	selectedModelRef   string
+	runningModelRef    string
 }
 
 func (s *compactionState) isRunning() bool {
@@ -82,13 +88,14 @@ func (s *compactionState) pendingCall() *pendingMainLLMCall {
 		return nil
 	}
 	return &pendingMainLLMCall{
-		turnID:            s.continuation.turnID,
-		turnEpoch:         s.continuation.turnEpoch,
-		agentErrSourceID:  s.continuation.agentErrSourceID,
-		planID:            s.planID,
-		sessionEpoch:      s.target.sessionEpoch,
-		continuation:      s.continuation.kind,
-		oversizeSuspended: s.oversizeSuspended,
+		turnID:             s.continuation.turnID,
+		turnEpoch:          s.continuation.turnEpoch,
+		agentErrSourceID:   s.continuation.agentErrSourceID,
+		planID:             s.planID,
+		sessionEpoch:       s.target.sessionEpoch,
+		continuation:       s.continuation.kind,
+		oversizeSuspended:  s.oversizeSuspended,
+		downshiftSuspended: s.downshiftSuspended,
 	}
 }
 
@@ -378,8 +385,10 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// reference. This runs after pending model-pool switches are applied so a
 	// fallback or explicit switch re-derives the threshold immediately; a
 	// model change also clears the grace period (the new model re-evaluates
-	// usage against its own threshold).
-	a.applyModelCompactionConfig()
+	// usage against its own threshold). The returned flag feeds the
+	// model-downshift gate below: when the running model just changed and the
+	// new line is crossed, the round is deferred until a compaction applies.
+	modelChanged := a.applyModelCompactionConfig()
 	// Arm the one-shot context-pressure reminder before the compaction gate
 	// decision: the gate may start a parallel usage-driven compaction, and the
 	// reminder's usage baseline is the post-response AutoCompactDecision — not
@@ -406,6 +415,16 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	}
 
 	snapshot := a.ctxMgr.Snapshot()
+	// Model downshift: the running model changed to a smaller window since the
+	// last gate (pool switch or fallback) and the current context already
+	// crosses its line. Compact before sending this round — the request would
+	// otherwise go out over the line and could hit the new model's hard limit.
+	// deferModelDownshiftCompactionAtGate starts the compaction and defers the
+	// LLM call until the draft applies (compactionResumeMainLLM), so the first
+	// request under the smaller window runs on the compacted context.
+	if modelChanged && a.deferModelDownshiftCompactionAtGate(turnID, agentErrSourceID, snapshot) {
+		return
+	}
 	trigger := a.compactionTriggerForMainLLM()
 	if !trigger.needed() {
 		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
@@ -474,6 +493,25 @@ func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnI
 			}
 			// Context-length exhaustion either joins an active compaction or
 			// asks the event loop to start one before retrying this call.
+			if isFallbackModelDownshiftCompactionPending(err) {
+				pendingErr, _ := errors.AsType[*fallbackModelDownshiftCompactionPendingError](err)
+				a.sendEvent(Event{
+					Type:   EventCompactionDownshiftSuspend,
+					TurnID: turnID,
+					Payload: &pendingMainLLMCall{
+						continuation:       compactionResumeMainLLM,
+						turnID:             turnID,
+						turnEpoch:          turnEpoch,
+						sessionEpoch:       sessionEpoch,
+						agentErrSourceID:   agentErrSourceID,
+						downshiftSuspended: true,
+						planID:             pendingErr.planID,
+						selectedModelRef:   pendingErr.selectedModelRef,
+						runningModelRef:    pendingErr.runningModelRef,
+					},
+				})
+				return
+			}
 			if IsContextLengthExceededPendingCompaction(err) {
 				pendingErr, _ := errors.AsType[*contextLengthExceededPendingCompactionError](err)
 				a.sendEvent(Event{
@@ -618,7 +656,7 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 		_ = a.resumePendingMainLLMAfterCompaction(pending, false)
 		return
 	}
-	canApplyNow := !turnActive || a.compactionState.oversizeSuspended || modelDriven
+	canApplyNow := !turnActive || a.compactionState.oversizeSuspended || a.compactionState.downshiftSuspended || modelDriven
 
 	if asyncPath && !canApplyNow {
 		// Case C: Turn is active and no pending call means we're mid-LLM/tool.
@@ -1008,6 +1046,17 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 			a.saveRecoverySnapshot()
 		}
 		a.beginMainLLMAfterPreparation(a.turn.Ctx, pending.turnID, pending.agentErrSourceID)
+		return true
+	}
+	if pending.downshiftSuspended {
+		log.Warnf("model-downshift compaction failed; retrying one main LLM request with the downshift gate bypassed turn_id=%v plan_id=%v", pending.turnID, pending.planID)
+		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
+		a.spawnMainLLMResponseGoroutine(
+			withFallbackDownshiftCompactionBypass(a.turn.Ctx),
+			pending.turnID,
+			a.ctxMgr.Snapshot(),
+			pending.agentErrSourceID,
+		)
 		return true
 	}
 	// If compaction itself failed for an oversize-suspended main request, retrying

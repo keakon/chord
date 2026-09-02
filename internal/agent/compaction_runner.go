@@ -558,6 +558,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	}
 	a.emitToTUI(ToastEvent{Message: info, Level: "info"})
 	a.emitToTUI(a.compactionStatusEvent(CompactionStatusSucceeded, ""))
+	a.emitModelDownshiftAppliedNotice()
 	a.emitToTUI(SessionRestoredEvent{PreserveRequestActivity: true})
 
 	log.Infof("context compacted (async) mode=%v summary_mode=%v backend=%v profile=%v model=%v history_path=%v backup_path=%v archived_messages=%v evidence_artifacts=%v head_split=%v", modeLabel, d.SummaryMode, d.Backend, d.Profile, d.ModelRef, d.AbsHistoryPath, backupPath, d.ArchivedCount, d.EvidenceArtifacts, headSplit)

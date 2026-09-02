@@ -388,6 +388,18 @@ func (t streamRetryTarget) displayRef() string {
 	return displayRef
 }
 
+func (t streamRetryTarget) fallbackModel() FallbackModel {
+	return FallbackModel{
+		ProviderConfig: t.provider,
+		ProviderImpl:   t.impl,
+		ModelID:        t.modelID,
+		MaxTokens:      t.maxTokens,
+		ContextLimit:   t.contextLimit,
+		InputLimit:     t.inputLimit,
+		Variant:        t.variant,
+	}
+}
+
 func emitStreamStatus(cb StreamCallback, typ, detail string) {
 	if cb == nil {
 		return
@@ -1160,7 +1172,7 @@ func (c *Client) completeStreamWithRetry(
 	status *CallStatus,
 	startRoutingGeneration uint64,
 	routingChangedCh <-chan struct{},
-	beforeFallback func(context.Context, []message.Message) ([]message.Message, error),
+	beforeFallback func(context.Context, []message.Message, FallbackModel) ([]message.Message, error),
 ) (resp *message.Response, err error) {
 	var lastErr error
 	var lastErrProvider *ProviderConfig
@@ -1320,7 +1332,7 @@ func (c *Client) completeStreamWithRetry(
 				continue
 			}
 			if t.isFallback && beforeFallback != nil {
-				updatedMessages, err := beforeFallback(ctx, messages)
+				updatedMessages, err := beforeFallback(ctx, messages, t.fallbackModel())
 				if err != nil {
 					return nil, fmt.Errorf("update request before fallback: %w", err)
 				}

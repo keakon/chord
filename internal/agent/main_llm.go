@@ -697,8 +697,8 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		})
 	}
 	requestOptions := llm.CompleteStreamOptions{
-		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message) ([]message.Message, error) {
-			updatedMessages, err := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount)
+		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message, fallback llm.FallbackModel) ([]message.Message, error) {
+			updatedMessages, err := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount, fallback, fallbackDownshiftCompactionBypass(fallbackCtx))
 			if err == nil && updatedMessages != nil {
 				messages = updatedMessages
 			}

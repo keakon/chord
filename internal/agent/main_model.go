@@ -629,6 +629,16 @@ func (a *MainAgent) setCurrentModelPool(pool string) error {
 	}
 	a.saveModelPoolState()
 
+	// Model-downshift compaction: the not-in-flight branch above switched the
+	// running model immediately (ctxmgr budgets already reflect the new model's
+	// limits). When the agent is idle, apply the new model's threshold right
+	// away and start the compaction on the spot, so it runs while the user
+	// composes the next message. A busy or deferred switch is handled at the
+	// next pre-request gate instead (beginMainLLMAfterPreparation / deferModelDownshiftCompactionAtGate).
+	if a.turn == nil && !a.mainLLMRequestInFlight.Load() && a.applyModelCompactionConfig() {
+		a.maybeRunModelDownshiftCompaction()
+	}
+
 	return nil
 }
 

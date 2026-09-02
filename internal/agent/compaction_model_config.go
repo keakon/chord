@@ -98,10 +98,12 @@ func (a *MainAgent) effectiveReminderPctForModelRef(modelRef string, threshold f
 // current model reference to ctxmgr. Called at request boundaries after
 // pending model-pool switches are applied; a model change bumps the budget
 // epoch through SetThreshold, which re-arms the one-shot overlay claims for
-// the new window.
-func (a *MainAgent) applyModelCompactionConfig() {
+// the new window. It returns whether the running model changed since the last
+// application — the caller (the pre-request gate or the idle switch path) uses
+// that to start the model-downshift compaction when the new line is crossed.
+func (a *MainAgent) applyModelCompactionConfig() bool {
 	if a == nil || a.ctxMgr == nil {
-		return
+		return false
 	}
 	modelRef := a.runningModelRef
 	if modelRef == "" {
@@ -129,4 +131,5 @@ func (a *MainAgent) applyModelCompactionConfig() {
 	if modelChanged && a.autoCompactRequested.Load() && !a.ctxMgr.AutoCompactDecision().ShouldCompact {
 		a.clearUsageDrivenAutoCompactRequest()
 	}
+	return modelChanged
 }
